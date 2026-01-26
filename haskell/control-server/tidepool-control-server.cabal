@@ -30,7 +30,6 @@ library
         Tidepool.Control.Server
         Tidepool.Control.Handler
         Tidepool.Control.Logging
-        Tidepool.Control.TUIState
         Tidepool.Control.TUIInterpreter
         Tidepool.Control.Runtime.Paths
         Tidepool.Control.Runtime.ProcessCompose
@@ -111,8 +110,6 @@ library
         -- Servant / HTTP
         servant,
         servant-server,
-        servant-websockets,
-        websockets,
         warp,
         wai,
         wai-extra,

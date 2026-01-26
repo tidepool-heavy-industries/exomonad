@@ -4,69 +4,63 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeOperators #-}
 
--- | TUI effect interpreter using Zellij panes + WebSocket communication.
+-- | TUI effect interpreter using FIFO-based popup spawning.
 --
--- This interpreter combines Zellij for display/lifecycle with WebSocket for
--- bidirectional communication:
--- 1. Spawns Zellij floating pane with tui-popup binary
--- 2. tui-popup connects to WebSocket automatically
--- 3. Sends PopupDefinition over WebSocket
--- 4. Blocks waiting for response via correlation ID
+-- This interpreter shells out to tui-spawner, which handles:
+-- 1. Writing PopupDefinition to input file
+-- 2. Creating FIFO for result
+-- 3. Spawning Zellij floating pane with tui-popup
+-- 4. Blocking read from FIFO
+-- 5. Cleanup
+--
+-- The result is returned via stdout (JSON).
 module Tidepool.Control.TUIInterpreter
-  ( runTUIWebSocket
+  ( runTUIFifo
   ) where
 
-import Control.Concurrent.STM (atomically, newEmptyTMVarIO, readTMVar)
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
-import Data.Aeson (object, (.=))
+import Data.Aeson (eitherDecode, encode, object, (.=))
+import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import System.Exit (ExitCode(..))
 import System.Process (readProcessWithExitCode)
 
-import Tidepool.Control.TUIState
 import Tidepool.Effect.TUI
 
--- | Interpret TUI effect using Zellij panes + WebSocket communication.
+-- | Interpret TUI effect using FIFO-based popup spawning.
 --
--- This blocks until the popup is dismissed or times out (5 minutes).
-runTUIWebSocket :: LastMember IO effs => TUIState -> Eff (TUI ': effs) a -> Eff effs a
-runTUIWebSocket tuiState = interpret $ \case
-  ShowUI definition -> sendM $ spawnPopupWithWebSocket tuiState definition
+-- Shells out to tui-spawner binary, which handles the cross-container
+-- coordination via FIFOs.
+runTUIFifo :: LastMember IO effs => Eff (TUI ': effs) a -> Eff effs a
+runTUIFifo = interpret $ \case
+  ShowUI definition -> sendM $ spawnPopupFifo definition
 
--- | Spawn Zellij pane and coordinate WebSocket communication.
-spawnPopupWithWebSocket :: TUIState -> PopupDefinition -> IO PopupResult
-spawnPopupWithWebSocket tuiState definition = do
-  -- Generate request ID for correlation
-  reqId <- generateRequestID
+-- | Spawn popup via tui-spawner and wait for result.
+spawnPopupFifo :: PopupDefinition -> IO PopupResult
+spawnPopupFifo definition = do
+  -- Encode definition as JSON for stdin
+  let definitionJson = LBS.toStrict $ encode definition
 
-  -- Create response variable
-  responseVar <- newEmptyTMVarIO
-
-  -- Register pending request (will be matched when WebSocket connects)
-  registerPendingPopup tuiState reqId definition responseVar
-
-  -- Spawn Zellij floating pane (tui-popup will connect to WebSocket)
-  let zellijArgs =
-        [ "action"
-        , "new-pane"
-        , "--floating"
-        , "--name"
-        , "tidepool-popup"
-        , "--"
-        , "tui-popup"
-        ]
-
-  -- Spawn pane (non-blocking - tui-popup will connect separately)
-  (exitCode, stdout, stderr) <- readProcessWithExitCode "zellij" zellijArgs ""
+  -- Call tui-spawner with definition via --definition flag
+  -- Output is PopupResult JSON on stdout
+  (exitCode, stdout, stderr) <- readProcessWithExitCode
+    "tui-spawner"
+    ["--definition", T.unpack $ TE.decodeUtf8 definitionJson]
+    ""
 
   case exitCode of
     ExitFailure code -> do
-      -- Zellij spawn failed
+      -- tui-spawner failed
       pure $ PopupResult "error" $ object
-        [ "message" .= T.pack ("Zellij spawn failed with exit code " <> show code)
-        , "stdout" .= T.pack stdout
+        [ "message" .= T.pack ("tui-spawner failed with exit code " <> show code)
         , "stderr" .= T.pack stderr
         ]
     ExitSuccess -> do
-      -- Pane spawned successfully - now block waiting for WebSocket response
-      atomically $ readTMVar responseVar
+      -- Parse stdout as PopupResult JSON
+      case eitherDecode (LBS.fromStrict $ TE.encodeUtf8 $ T.pack stdout) of
+        Left err -> pure $ PopupResult "error" $ object
+          [ "message" .= T.pack ("Failed to parse popup result: " <> err)
+          , "stdout" .= T.pack stdout
+          ]
+        Right result -> pure result

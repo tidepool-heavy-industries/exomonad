@@ -83,8 +83,7 @@ import Tidepool.Gemini.Interpreter (runGeminiIO)
 import Tidepool.Effect.TUI (TUI(..))
 import Tidepool.Effect.Types (runLog, LogLevel(Debug), runReturn, runTime)
 import Tidepool.Graph.Goto (unwrapSingleChoice)
-import Tidepool.Control.TUIState (TUIState)
-import Tidepool.Control.TUIInterpreter (runTUIWebSocket)
+import Tidepool.Control.TUIInterpreter (runTUIFifo)
 import Tidepool.Control.Runtime.Paths as Paths
 -- import Tidepool.Teaching.LLM (TeachingConfig, loadTeachingConfig, withTeaching, runLLMWithTeaching)
 -- import Tidepool.Teaching.Teacher (teacherGuidance)
@@ -93,12 +92,12 @@ import Tidepool.Observability.Interpreter (runObservabilityWithContext)
 import Tidepool.Observability.Types (TraceContext, ObservabilityConfig(..), defaultLokiConfig)
 import Network.HTTP.Client (newManager, defaultManagerSettings)
 
--- | Run TUI interpreter using WebSocket communication.
+-- | Run TUI interpreter using FIFO-based communication.
 --
--- This uses the WebSocket-based approach: control-server spawns a Zellij pane,
--- tui-popup connects via WebSocket, and communication happens bidirectionally.
-runTUIInterpreter :: LastMember IO effs => TUIState -> Eff (TUI ': effs) a -> Eff effs a
-runTUIInterpreter = runTUIWebSocket
+-- This shells out to tui-spawner, which handles cross-container coordination
+-- via named pipes (FIFOs). No WebSocket complexity needed.
+runTUIInterpreter :: LastMember IO effs => Eff (TUI ': effs) a -> Eff effs a
+runTUIInterpreter = runTUIFifo
 
 -- | Wrap MCP tool call with tracing if enabled.
 withMcpTracing 
@@ -171,8 +170,8 @@ withMcpTracing logger config traceCtx reqId toolName args action = do
 --
 -- == Tier 3: External Orchestration Tools (Exo)
 --   - "exo_status": Get current bead context, git status, and PR info
-handleMcpTool :: Logger -> ServerConfig -> TraceContext -> TUIState -> Text -> Text -> Value -> IO ControlResponse
-handleMcpTool logger config traceCtx tuiState reqId toolName args = 
+handleMcpTool :: Logger -> ServerConfig -> TraceContext -> Text -> Text -> Value -> IO ControlResponse
+handleMcpTool logger config traceCtx reqId toolName args =
   withMcpTracing logger config traceCtx reqId toolName args $ do
     let effectiveRole = fromMaybe config.defaultRole (config.role >>= roleFromText)
     
@@ -195,9 +194,9 @@ handleMcpTool logger config traceCtx tuiState reqId toolName args =
           --       the generic "unknown tool" handler below.
 
           -- TUI-interactive tools
-          "confirm_action" -> handleConfirmActionTool logger tuiState reqId args
-          "select_option" -> handleSelectOptionTool logger tuiState reqId args
-          "request_guidance" -> handleRequestGuidanceTool logger tuiState reqId args
+          "confirm_action" -> handleConfirmActionTool logger reqId args
+          "select_option" -> handleSelectOptionTool logger reqId args
+          "request_guidance" -> handleRequestGuidanceTool logger reqId args
           "register_feedback" -> handleRegisterFeedbackTool logger reqId args
 
           -- Tier 2: LLM-enhanced tools (graph-based)
@@ -579,8 +578,8 @@ handlePmReviewDagTool logger reqId args = do
 
 
 -- | Handle the confirm_action tool.
-handleConfirmActionTool :: Logger -> TUIState -> Text -> Value -> IO ControlResponse
-handleConfirmActionTool logger tuiState reqId args = do
+handleConfirmActionTool :: Logger -> Text -> Value -> IO ControlResponse
+handleConfirmActionTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -591,7 +590,7 @@ handleConfirmActionTool logger tuiState reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runTUIInterpreter tuiState
+        $ runTUIInterpreter
         $ runReturn (confirmActionLogic caArgs)
 
       case resultOrErr of
@@ -630,8 +629,8 @@ handleRegisterFeedbackTool logger reqId args = do
 
 
 -- | Handle the select_option tool.
-handleSelectOptionTool :: Logger -> TUIState -> Text -> Value -> IO ControlResponse
-handleSelectOptionTool logger tuiState reqId args = do
+handleSelectOptionTool :: Logger -> Text -> Value -> IO ControlResponse
+handleSelectOptionTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -642,7 +641,7 @@ handleSelectOptionTool logger tuiState reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runTUIInterpreter tuiState
+        $ runTUIInterpreter
         $ runReturn (selectOptionLogic soArgs)
 
       case resultOrErr of
@@ -656,8 +655,8 @@ handleSelectOptionTool logger tuiState reqId args = do
 
 
 -- | Handle the request_guidance tool.
-handleRequestGuidanceTool :: Logger -> TUIState -> Text -> Value -> IO ControlResponse
-handleRequestGuidanceTool logger tuiState reqId args = do
+handleRequestGuidanceTool :: Logger -> Text -> Value -> IO ControlResponse
+handleRequestGuidanceTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -668,7 +667,7 @@ handleRequestGuidanceTool logger tuiState reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runTUIInterpreter tuiState
+        $ runTUIInterpreter
         $ runReturn (requestGuidanceLogic rgArgs)
 
       case resultOrErr of

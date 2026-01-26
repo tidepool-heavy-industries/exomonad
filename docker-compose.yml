@@ -64,6 +64,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - tidepool-zellij:/run/user/1000
+      - tidepool-sockets:/sockets
     restart: unless-stopped
     networks:
       - tidepool-internal

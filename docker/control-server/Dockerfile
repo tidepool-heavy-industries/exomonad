@@ -2,12 +2,22 @@
 # MCP server (TCP 7432) + Zellij tab creation + docker-spawner integration
 
 # =============================================================================
-# Stage 1: Rust Builder (for bd CLI)
+# Stage 1: Rust Builder (for bd CLI and tui-spawner)
 # =============================================================================
 FROM rust:bookworm AS rust-builder
 
 # Build bd CLI from source to match container's glibc
 RUN cargo install beads-rs --locked
+
+# Build tui-spawner
+WORKDIR /build
+COPY rust/Cargo.toml rust/Cargo.lock ./
+COPY rust/tui-spawner ./tui-spawner
+COPY rust/tui-sidebar ./tui-sidebar
+COPY rust/tui-popup ./tui-popup
+COPY rust/mantle-shared ./mantle-shared
+COPY rust/hangar-config ./hangar-config
+RUN cargo build --release -p tui-spawner
 
 # =============================================================================
 # Stage 2: Haskell Builder
@@ -71,6 +81,9 @@ RUN cargo-binstall --no-confirm zellij && \
 
 # Copy bd CLI from rust-builder (built from source for glibc compatibility)
 COPY --from=rust-builder /usr/local/cargo/bin/bd /usr/local/bin/bd
+
+# Copy tui-spawner binary (for FIFO-based popup spawning)
+COPY --from=rust-builder /build/target/release/tui-spawner /usr/local/bin/tui-spawner
 
 # Copy control-server binary
 COPY --from=builder /usr/local/bin/tidepool-control-server /usr/local/bin/tidepool-control-server

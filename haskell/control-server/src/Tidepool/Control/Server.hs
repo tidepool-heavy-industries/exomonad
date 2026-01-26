@@ -14,21 +14,18 @@ import Tidepool.Control.Hook.CircuitBreaker (initCircuitBreaker, CircuitBreakerM
 import Tidepool.Control.Logging (Logger, logInfo, logDebug, logError)
 import Tidepool.Control.Protocol hiding (role)
 import Tidepool.Control.RoleConfig
-import Tidepool.Control.TUIState
 import Tidepool.Control.Types (ServerConfig(..))
-import Tidepool.Effect.TUI (PopupResult(..))
 import Tidepool.Observability.Types (newTraceContext, ObservabilityConfig(..), LokiConfig(..), OTLPConfig(..))
 import Tidepool.Observability.Interpreter (flushTraces)
 import Tidepool.Control.Export (exportMCPTools)
 import OpenTelemetry.Trace (Tracer)
 
 import Control.Concurrent.Async (race_)
-import Control.Concurrent.STM (atomically)
-import Control.Exception (catch, bracket, finally)
+import Control.Exception (catch, bracket)
 import qualified Control.Exception as E
-import Control.Monad (when, forever)
+import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (decode, object, (.=), FromJSON, ToJSON)
+import Data.Aeson (object, (.=))
 import qualified Data.Aeson as Aeson
 import Data.Aeson.Types (parseMaybe)
 import qualified Data.Aeson.Text as AesonText
@@ -36,11 +33,8 @@ import qualified Data.Text.Lazy as TL
 import Data.Function ((&))
 import Data.Maybe (isJust, fromMaybe)
 import qualified Data.Text as T
-import qualified Data.UUID as UUID
-import GHC.Generics (Generic)
 import Network.Socket
 import Network.Wai.Handler.Warp
-import Network.WebSockets (Connection, receiveData, forkPingThread)
 import Servant
 import System.Directory (createDirectoryIfMissing, removeFile)
 import System.Environment (lookupEnv)
@@ -52,7 +46,7 @@ loadObservabilityConfig :: IO (Maybe ObservabilityConfig)
 loadObservabilityConfig = do
   lokiUrl <- lookupEnv "LOKI_URL"
   otlpEndpoint <- lookupEnv "OTLP_ENDPOINT"
-  
+
   case (lokiUrl, otlpEndpoint) of
     (Nothing, Nothing) -> pure Nothing
     _ -> do
@@ -60,10 +54,10 @@ loadObservabilityConfig = do
       lokiToken <- lookupEnv "LOKI_TOKEN"
       otlpUser <- lookupEnv "OTLP_USER"
       otlpToken <- lookupEnv "OTLP_TOKEN"
-      
+
       let loki = fmap (\url -> LokiConfig (T.pack url) (fmap T.pack lokiUser) (fmap T.pack lokiToken) "tidepool-control-server") lokiUrl
           otlp = fmap (\end -> OTLPConfig (T.pack end) (fmap T.pack otlpUser) (fmap T.pack otlpToken)) otlpEndpoint
-          
+
       pure $ Just $ ObservabilityConfig loki otlp "tidepool-control-server"
 
 -- | Run the control server. Blocks forever.
@@ -85,8 +79,6 @@ runServer logger config tracer = do
   when (isJust obsConfig) $
     logInfo logger "Observability enabled (Loki/OTLP)"
 
-  -- Create TUI state for WebSocket connections
-  tuiState <- newTUIState
   cbMap <- initCircuitBreaker
 
   let settings = defaultSettings
@@ -100,10 +92,10 @@ runServer logger config tracer = do
       (cleanupUnixSocket controlSocket)
       $ \sock -> do
         logInfo logger $ "Listening on (Unix): " <> T.pack controlSocket
-        runSettingsSocket settings sock (app logger configWithObs tracer tuiState cbMap))
+        runSettingsSocket settings sock (app logger configWithObs tracer cbMap))
     (do
         logInfo logger "Listening on (TCP): 0.0.0.0:7432"
-        runSettings (setPort 7432 settings) (app logger configWithObs tracer tuiState cbMap))
+        runSettings (setPort 7432 settings) (app logger configWithObs tracer cbMap))
 
 -- | Setup Unix socket at given path.
 setupUnixSocket :: FilePath -> IO Socket
@@ -127,23 +119,22 @@ cleanupUnixSocket path sock = do
 
 -- | Cleanup just the socket file
 cleanupSocketFile :: FilePath -> IO ()
-cleanupSocketFile path = 
+cleanupSocketFile path =
   catch (removeFile path) $ \e ->
     if isDoesNotExistError e
       then pure ()
       else E.throwIO e
 
 -- | Servant application
-app :: Logger -> ServerConfig -> Tracer -> TUIState -> CircuitBreakerMap -> Application
-app logger config tracer tuiState cbMap = serve (Proxy @TidepoolControlAPI) (server logger config tracer tuiState cbMap)
+app :: Logger -> ServerConfig -> Tracer -> CircuitBreakerMap -> Application
+app logger config tracer cbMap = serve (Proxy @TidepoolControlAPI) (server logger config tracer cbMap)
 
 -- | Servant server implementation
-server :: Logger -> ServerConfig -> Tracer -> TUIState -> CircuitBreakerMap -> Server TidepoolControlAPI
-server logger config tracer tuiState cbMap =
+server :: Logger -> ServerConfig -> Tracer -> CircuitBreakerMap -> Server TidepoolControlAPI
+server logger config tracer cbMap =
        handleHook
   :<|> handleMcpCall
   :<|> handleMcpTools
-  :<|> handleTuiWs
   :<|> handlePing
   :<|> handleRoleMcpTools
   :<|> handleRoleMcpCall
@@ -153,9 +144,9 @@ server logger config tracer tuiState cbMap =
       res <- liftIO $ do
         logDebug logger $ "[HOOK] " <> input.hookEventName <> " runtime=" <> T.pack (show runtime) <> " role=" <> T.pack (show agentRole)
         traceCtx <- newTraceContext
-        handleMessage logger config tracer traceCtx tuiState cbMap (HookEvent input runtime agentRole)
-        
-        -- Note: We do NOT flushTraces here because we use hs-opentelemetry (via Tracer) 
+        handleMessage logger config tracer traceCtx cbMap (HookEvent input runtime agentRole)
+
+        -- Note: We do NOT flushTraces here because we use hs-opentelemetry (via Tracer)
         -- which handles export automatically via BatchSpanProcessor.
         -- Legacy ObservabilityConfig is skipped for Hooks.
 
@@ -166,7 +157,7 @@ server logger config tracer tuiState cbMap =
     handleMcpCall req = liftIO $ do
       logInfo logger $ "[MCP:" <> req.mcpId <> "] tool=" <> req.toolName
       traceCtx <- newTraceContext
-      res <- handleMessage logger config tracer traceCtx tuiState cbMap
+      res <- handleMessage logger config tracer traceCtx cbMap
         (McpToolCall req.mcpId req.toolName req.arguments)
 
       -- Flush traces (legacy support for MCP tools)
@@ -180,40 +171,6 @@ server logger config tracer tuiState cbMap =
     handleMcpTools = liftIO $ do
       logDebug logger "[MCP] tools/list request"
       exportMCPTools logger
-
-    handleTuiWs :: Connection -> Handler ()
-    handleTuiWs conn = liftIO $ do
-      -- Register connection and get ID
-      connId <- registerConnection tuiState conn
-      logInfo logger $ "[TUI:WS] Connection registered: " <> T.pack (UUID.toString connId)
-
-      -- CRITICAL: Fork ping thread to detect half-open connections
-      forkPingThread conn 30
-
-      -- Main WebSocket loop with cleanup
-      flip finally (cleanup connId) $ do
-        -- Get next pending popup from queue (blocks until available)
-        pending <- atomically $ getNextPendingPopup tuiState
-        logInfo logger $ "[TUI:WS] Sending popup to connection: " <> T.pack (UUID.toString (ppRequestId pending))
-
-        -- Send PopupDefinition to this connection
-        _ <- sendPopupRequest conn (ppDefinition pending)
-
-        -- Wait for response in the main loop
-        forever $ do
-          -- receiveData throws ConnectionException on disconnect
-          msg <- receiveData conn
-          case decode msg of
-            Just response -> do
-              logDebug logger $ "[TUI:WS] Received response for: " <> T.pack (UUID.toString (responseId response))
-              atomically $ dispatchPopupResponse tuiState (responseId response) (responseResult response)
-            Nothing -> do
-              logError logger $ "[TUI:WS] Invalid JSON received"
-
-      where
-        cleanup cId = do
-          logInfo logger $ "[TUI:WS] Connection closed: " <> T.pack (UUID.toString cId)
-          unregisterConnection tuiState cId
 
     handlePing :: Handler T.Text
     handlePing = pure "pong"
@@ -236,11 +193,11 @@ server logger config tracer tuiState cbMap =
               let sessId = fromMaybe req.mcpId mSessionId
               logInfo logger $ "[MCP:" <> slug <> ":" <> sessId <> "] tool=" <> req.toolName
               traceCtx <- newTraceContext
-              
+
               -- Update config with the role from the slug for handlers that need it
               let configWithRole = config { role = Just slug }
-              
-              res <- handleMessage logger configWithRole tracer traceCtx tuiState cbMap
+
+              res <- handleMessage logger configWithRole tracer traceCtx cbMap
                 (McpToolCall sessId req.toolName req.arguments)
 
               -- Flush traces (legacy)
@@ -314,7 +271,7 @@ server logger config tracer tuiState cbMap =
                       liftIO $ logInfo logger $ "[MCP-RPC:" <> slug <> ":" <> sessId <> "] tool=" <> params.mtcpName
                       traceCtx <- liftIO newTraceContext
                       let configWithRole = config { role = Just slug }
-                      res <- liftIO $ handleMessage logger configWithRole tracer traceCtx tuiState cbMap
+                      res <- liftIO $ handleMessage logger configWithRole tracer traceCtx cbMap
                         (McpToolCall sessId params.mtcpName params.mtcpArguments)
 
                       -- Convert ControlResponse to MCP tool call result
@@ -373,21 +330,3 @@ server logger config tracer tuiState cbMap =
                     , jrpcErrData = Nothing
                     }
                 }
-
--- | WebSocket response message from tui-popup.
-data PopupResponse = PopupResponse
-  { responseId :: RequestID
-  , responseResult :: PopupResult
-  }
-  deriving stock (Generic)
-
-instance FromJSON PopupResponse where
-  parseJSON = Aeson.withObject "PopupResponse" $ \o -> PopupResponse
-    <$> o Aeson..: "request_id"
-    <*> o Aeson..: "result"
-
-instance ToJSON PopupResponse where
-  toJSON r = object
-    [ "request_id" .= r.responseId
-    , "result" .= r.responseResult
-    ]

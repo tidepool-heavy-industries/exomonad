@@ -3,7 +3,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use std::io;
+use std::fs::File;
 use tuirealm::command::{Cmd, Direction};
 use tuirealm::ratatui::backend::CrosstermBackend;
 use tuirealm::ratatui::layout::Rect;
@@ -15,14 +15,17 @@ use crate::realm::PopupComponent;
 
 /// Run a single popup (blocking, synchronous).
 ///
-/// This is the popup-tui event loop pattern:
-/// 1. Setup terminal (raw mode, alternate screen, mouse capture)
+/// Renders to /dev/tty, allowing the TUI to work even when stdout is
+/// redirected to a file for capturing the result.
+///
+/// The popup-tui event loop pattern:
+/// 1. Setup terminal on /dev/tty (raw mode, alternate screen, mouse capture)
 /// 2. Create PopupComponent from definition
 /// 3. Event loop: render + handle keyboard/mouse
 /// 4. Return PopupResult when user submits or cancels
 /// 5. Cleanup terminal
-pub fn run_popup(definition: PopupDefinition) -> anyhow::Result<PopupResult> {
-    // Setup terminal
+pub fn run_popup_with_tty(definition: PopupDefinition) -> anyhow::Result<PopupResult> {
+    // Setup terminal on /dev/tty
     let mut terminal = setup_terminal()?;
 
     // Create popup component
@@ -155,20 +158,27 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
-/// Setup terminal (raw mode, alternate screen, mouse capture).
-fn setup_terminal() -> anyhow::Result<Terminal<CrosstermBackend<io::Stdout>>> {
+/// Setup terminal on /dev/tty (raw mode, alternate screen, mouse capture).
+fn setup_terminal() -> anyhow::Result<Terminal<CrosstermBackend<File>>> {
     enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
 
-    let backend = CrosstermBackend::new(stdout);
+    // Open /dev/tty directly - works even with stdout redirected
+    let mut tty = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .map_err(|e| anyhow::anyhow!("Failed to open /dev/tty: {}", e))?;
+
+    execute!(tty, EnterAlternateScreen, EnableMouseCapture)?;
+
+    let backend = CrosstermBackend::new(tty);
     let terminal = Terminal::new(backend)?;
 
     Ok(terminal)
 }
 
 /// Cleanup terminal (leave alternate screen, disable raw mode, disable mouse).
-fn cleanup_terminal(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> anyhow::Result<()> {
+fn cleanup_terminal(mut terminal: Terminal<CrosstermBackend<File>>) -> anyhow::Result<()> {
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
