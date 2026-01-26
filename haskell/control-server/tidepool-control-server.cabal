@@ -61,6 +61,7 @@ library
         Tidepool.Control.RoleConfig
         Tidepool.Control.GHTools
         Tidepool.Control.Export
+        Tidepool.Control.CodeExtraction
         -- StopHook (workflow stages)
         Tidepool.Control.StopHook.Types
         Tidepool.Control.StopHook.Graph
