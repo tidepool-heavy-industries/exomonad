@@ -84,11 +84,14 @@ checkZellijEnvIO = do
 -- Uses: zellij action new-tab --layout <layout> --cwd <cwd> --name <name>
 -- For cross-container: zellij --session <name> action new-tab ...
 --
+-- When tcCommand is set (without layout), uses new-pane instead since
+-- new-tab doesn't support running commands directly.
+--
 -- Environment variables are passed via shell wrapper since zellij action
 -- doesn't support direct environment variable passing.
 newTabIO :: TabConfig -> IO (Either ZellijError TabId)
 newTabIO config = do
-  -- Check if layout file exists (only if no command is provided)
+  -- Check if layout file exists (only if layout is specified)
   layoutExists <- if null config.tcLayout
                     then pure True
                     else doesFileExist config.tcLayout
@@ -100,22 +103,36 @@ newTabIO config = do
         -- Check if we need cross-container session targeting
         sessionPrefix <- getSessionPrefix
 
-        -- Build the command
-        -- zellij action new-tab with layout and cwd
-        -- The --name argument sets the tab name
-        let baseArgs =
-              [ "action", "new-tab"
-              , "--cwd", config.tcCwd
-              , "--name", T.unpack config.tcName
-              ]
-            layoutArgs = if null config.tcLayout
-                           then []
-                           else ["--layout", config.tcLayout]
-            cmdArgs = case config.tcCommand of
-                        Just cmd -> ["--", "bash", "-c", T.unpack cmd]
-                        Nothing -> []
-            
-            args = sessionPrefix ++ baseArgs ++ layoutArgs ++ cmdArgs
+        -- Build the command based on whether we have a layout or command
+        -- - With layout: use action new-tab --layout ...
+        -- - With command (no layout): use action new-pane -- <cmd>
+        --   (new-tab doesn't support -- <cmd>, but new-pane does)
+        let args = case (null config.tcLayout, config.tcCommand) of
+              -- Has layout: use new-tab with layout
+              (False, _) ->
+                sessionPrefix ++
+                [ "action", "new-tab"
+                , "--cwd", config.tcCwd
+                , "--name", T.unpack config.tcName
+                , "--layout", config.tcLayout
+                ]
+
+              -- Has command, no layout: use new-pane with command
+              (True, Just cmd) ->
+                sessionPrefix ++
+                [ "action", "new-pane"
+                , "--cwd", config.tcCwd
+                , "--name", T.unpack config.tcName
+                , "--", "bash", "-c", T.unpack cmd
+                ]
+
+              -- No layout, no command: simple new-tab
+              (True, Nothing) ->
+                sessionPrefix ++
+                [ "action", "new-tab"
+                , "--cwd", config.tcCwd
+                , "--name", T.unpack config.tcName
+                ]
 
         -- If we have environment variables, we need to set them
         -- We do this by using env -S for the current process
@@ -129,7 +146,7 @@ newTabIO config = do
 
       case result of
         Left e -> pure $ Left ZellijCommandFailed
-          { zceCommand = "new-tab"
+          { zceCommand = "new-tab/new-pane"
           , zceExitCode = -1
           , zceStderr = T.pack (show e)
           }
@@ -137,7 +154,7 @@ newTabIO config = do
           case exitCode of
             ExitSuccess -> pure $ Right $ TabId config.tcName
             ExitFailure code -> pure $ Left ZellijCommandFailed
-              { zceCommand = "new-tab"
+              { zceCommand = "new-tab/new-pane"
               , zceExitCode = code
               , zceStderr = T.pack stderr
               }
