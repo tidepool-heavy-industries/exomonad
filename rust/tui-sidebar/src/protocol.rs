@@ -87,41 +87,6 @@ impl Component {
     }
 }
 
-// Legacy ComponentSpec kept for reference but not used
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "tag", content = "contents")]
-pub enum ComponentSpec {
-    Text {
-        content: String,
-    },
-    Slider {
-        label: String,
-        min: f32,
-        max: f32,
-        default: f32,
-    },
-    Checkbox {
-        label: String,
-        default: bool,
-    },
-    Textbox {
-        label: String,
-        placeholder: Option<String>,
-        rows: Option<u32>,
-    },
-    Choice {
-        label: String,
-        options: Vec<String>,
-        default: Option<usize>,
-    },
-    Multiselect {
-        label: String,
-        options: Vec<String>,
-    },
-    Group {
-        label: String,
-    },
-}
 
 /// Visibility rules from Haskell TUI.hs.
 /// Uses serde untagged since Haskell encodes these as simple objects.
@@ -245,8 +210,6 @@ pub struct PopupResult {
     pub values: Value,
 }
 
-impl PopupResult {
-}
 
 #[cfg(test)]
 mod tests {
