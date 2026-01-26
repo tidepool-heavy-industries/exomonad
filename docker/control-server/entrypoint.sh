@@ -39,6 +39,11 @@ if [ -S /var/run/docker.sock ]; then
     fi
 fi
 
+# --- Fix gh CLI auth directory ownership ---
+# Volume may have been created by root; ensure user can write to it
+mkdir -p /home/user/.config/gh
+chown -R 1000:1000 /home/user/.config/gh 2>/dev/null || true
+
 # --- Environment for user ---
 export HOME=/home/user
 export USER=user
