@@ -20,8 +20,6 @@ module Tidepool.Control.Runtime.Paths
   , dockerWorktreesPath
   , dockerSocketsPath
   , dockerSpawnerUrl
-    -- * Beads (BD) Paths
-  , beadsDir
   ) where
 
 import Data.Text (Text)
@@ -90,8 +88,3 @@ dockerSocketsPath = fromMaybe "/sockets" <$> lookupEnv "TIDEPOOL_SOCKETS_PATH"
 -- | URL for the Docker Spawner service.
 dockerSpawnerUrl :: IO String
 dockerSpawnerUrl = fromMaybe "http://docker-spawner:7435" <$> lookupEnv "DOCKER_SPAWNER_URL"
-
--- | Directory for beads database.
--- Uses BEADS_DIR environment variable if set, otherwise Nothing (auto-discovery).
-beadsDir :: IO (Maybe FilePath)
-beadsDir = lookupEnv "BEADS_DIR"

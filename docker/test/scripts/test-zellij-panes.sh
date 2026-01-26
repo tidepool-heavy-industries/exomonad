@@ -10,15 +10,8 @@ CONTROL_SOCKET="/sockets/control.sock"
 echo "Waiting for control server to be ready..."
 ./docker/test/scripts/wait-for-socket.sh "./sockets/control.sock"
 
-# We need a dummy bead to spawn
-# Since we are in a test environment, we might need to mock the BD (Beads) database
-# or just ensure one exists.
-# For now, let's assume 'exo_status' or similar can be used to check what's available.
-
-# Trigger spawn_agents via mantle-agent
-# We'll use a known short ID if possible, or just try to spawn one.
-# Note: spawn_agents expects real beads in the .beads/ directory of the repo.
-# In the container, the repo is mounted at /worktrees (mapped from HANGAR_ROOT).
+# Test Zellij pane spawning by creating a new pane with a recognizable command.
+# This verifies the Zellij environment inside the container is functional.
 
 echo "Triggering Zellij pane spawn..."
 # Directly use Zellij action to spawn a pane with a recognizable name/command
