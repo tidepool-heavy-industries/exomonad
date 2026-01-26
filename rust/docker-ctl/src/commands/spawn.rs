@@ -79,21 +79,34 @@ pub async fn run(
     // The working directory inside the container
     let working_dir = format!("/worktrees/{}", worktree_dir);
 
-    // Use VOLUME mount for the shared worktrees volume (not BIND mount)
-    // This works with remote Docker hosts where local paths don't exist
+    // Get repo volume name - needed for git worktree linkage
+    // Worktrees' .git files point to /repo/.git/worktrees/...
+    let repo_volume = std::env::var("TIDEPOOL_REPO_VOLUME")
+        .unwrap_or_else(|_| "tidepool-repo".to_string());
+
+    // Use VOLUME mounts (not BIND mounts) for remote Docker hosts
     let mounts = vec![
+        // Main repo - required for git worktree linkage
+        Mount {
+            target: Some("/repo".to_string()),
+            source: Some(repo_volume),
+            typ: Some(MountTypeEnum::VOLUME),
+            ..Default::default()
+        },
+        // Worktrees directory
         Mount {
             target: Some("/worktrees".to_string()),
             source: Some(worktrees_volume),
             typ: Some(MountTypeEnum::VOLUME),
             ..Default::default()
         },
+        // GitHub auth
         Mount {
             target: Some("/home/agent/.config/gh".to_string()),
             source: Some("tidepool-gh-auth".to_string()),
             typ: Some(MountTypeEnum::VOLUME),
             ..Default::default()
-        }
+        },
     ];
 
     let user_uid = uid.unwrap_or(host_uid);
