@@ -24,7 +24,7 @@ roleTools TL = Just $ Set.fromList
   -- Messaging with agents
   , "send_message", "check_inbox", "read_message", "mark_read"
   -- Interactive (TUI-backed)
-  , "confirm_action", "select_option", "request_guidance"
+  , "popup"
   -- GitHub tools
   , "gh_issue_list", "gh_issue_show"
   , "gh_issue_create", "gh_issue_update", "gh_issue_close", "gh_issue_reopen"
@@ -36,7 +36,7 @@ roleTools Dev = Just $ Set.fromList
   -- Code intelligence (LSP-backed)
   , "find_callers", "show_fields", "show_constructors", "teach-graph"
   -- Interactive (TUI-backed)
-  , "confirm_action", "select_option", "request_guidance"
+  , "popup"
   -- GitHub tools
   , "gh_issue_list", "gh_issue_show"
   , "gh_issue_update"
@@ -49,6 +49,8 @@ roleTools PM = Just $ Set.fromList
   -- Messaging
   , "send_message", "check_inbox", "read_message", "mark_read"
   , "exo_status"  -- Can view but not spawn
+  -- Interactive (TUI-backed)
+  , "popup"
   -- GitHub tools
   , "gh_issue_list", "gh_issue_show"
   , "gh_issue_create", "gh_issue_update", "gh_issue_close", "gh_issue_reopen"
