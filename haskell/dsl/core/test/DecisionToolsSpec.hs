@@ -21,8 +21,8 @@ import qualified Data.Vector as V
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
-import Tidepool.StructuredOutput ()  -- Bring instances into scope
-import Tidepool.StructuredOutput.DecisionTools
+import ExoMonad.StructuredOutput ()  -- Bring instances into scope
+import ExoMonad.StructuredOutput.DecisionTools
 
 
 -- ════════════════════════════════════════════════════════════════════════════

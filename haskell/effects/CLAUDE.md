@@ -53,7 +53,7 @@ effects/
   habitica/                    # Exception: standalone effect types package
 ```
 
-Most effect types live in `dsl/core/src/Tidepool/Effect/Types.hs` or `Effects/*.hs`.
+Most effect types live in `dsl/core/src/ExoMonad/Effect/Types.hs` or `Effects/*.hs`.
 
 ## Interpreter Listing
 
@@ -78,12 +78,12 @@ Most effect types live in `dsl/core/src/Tidepool/Effect/Types.hs` or `Effects/*.
 
 ## Adding a New Effect Interpreter
 
-1. Define effect type in `dsl/core/src/Tidepool/Effect/Types.hs` (or Effects/*.hs)
+1. Define effect type in `dsl/core/src/ExoMonad/Effect/Types.hs` (or Effects/*.hs)
 2. Create interpreter package:
    ```bash
    mkdir -p effects/{name}-interpreter
    cd effects/{name}-interpreter
-   cabal init -n --lib tidepool-{name}-interpreter
+   cabal init -n --lib exomonad-{name}-interpreter
    ```
 3. Implement interpreter (see existing for patterns)
 4. Add to `cabal.project`: `haskell/effects/{name}-interpreter`
@@ -100,6 +100,6 @@ Most effect types live in `dsl/core/src/Tidepool/Effect/Types.hs` or `Effects/*.
 ## Claude Code Integration
 
 For Claude Code integration, see `rust/CLAUDE.md`. The Rust workspace provides:
-- **mantle-agent hook** - Forwards hooks to Haskell via HTTP over Unix socket
+- **exomonad hook** - Forwards hooks to Haskell via HTTP over Unix socket
 
 MCP tools are served directly by control-server via HTTP MCP transport. This replaces the removed `session-interpreter` which was used for headless orchestration.

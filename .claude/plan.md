@@ -14,7 +14,7 @@ macOS HOST
 └── docker run -it --detach-keys="ctrl-e,e" \
       -v /var/run/docker.sock:/var/run/docker.sock \
       -v $(pwd)/worktrees:/worktrees \
-      tidepool/orchestrator
+      exomonad/orchestrator
     │
     └── tini (PID 1) → zellij attach --create orchestrator
         │
@@ -24,7 +24,7 @@ macOS HOST
         │
         ├── Pane: agent-1 (docker run -it via DooD)
         │   ├── tini → claude --permission-mode bypassPermissions
-        │   ├── mantle-agent → /sockets/control.sock
+        │   ├── exomonad → /sockets/control.sock
         │   └── /workspace (bind-mount to /worktrees/agent-1)
         │
         ├── Pane: agent-2 (same, sibling container)
@@ -32,7 +32,7 @@ macOS HOST
         └── Pane: TUI popup (spawned by Zellij on demand)
 
 Shared volumes (Docker volumes, not host mounts):
-├── tidepool-sockets  → /sockets/
+├── exomonad-sockets  → /sockets/
 ├── git-cache         → /git-cache
 ├── cargo-cache       → /cargo-cache
 └── cabal-cache       → /cabal-cache
@@ -64,7 +64,7 @@ Agent containers are siblings (spawned via DooD), not children of tini. tini can
 
 cleanup() {
     echo "Stopping sibling agents..."
-    docker ps -q --filter "label=tidepool.orchestrator=$HOSTNAME" | xargs -r docker kill
+    docker ps -q --filter "label=exomonad.orchestrator=$HOSTNAME" | xargs -r docker kill
 }
 trap cleanup EXIT
 
@@ -84,7 +84,7 @@ exec zellij attach --create orchestrator
 | Architecture | Single orchestrator container | Eliminates host-side components, everything in Docker |
 | Orchestrator PID 1 | tini → wrapper → Zellij | tini handles signals/zombies, wrapper handles sibling cleanup |
 | Sibling cleanup | Wrapper script with EXIT trap | Agents are siblings (DooD), tini can't signal them |
-| Agent labeling | `--label tidepool.orchestrator=$HOSTNAME` | Enables targeted cleanup of sibling containers |
+| Agent labeling | `--label exomonad.orchestrator=$HOSTNAME` | Enables targeted cleanup of sibling containers |
 | Agent spawning | Docker-outside-of-Docker (DooD) | Mount docker.sock, spawn siblings via Zellij panes |
 | Detach keys | `--detach-keys="ctrl-e,e"` | **Critical**: Avoid Ctrl+P conflict with Zellij/Claude |
 | Zellij startup | `zellij attach --create orchestrator` | Resilient reattachment if accidentally detached |
@@ -93,7 +93,7 @@ exec zellij attach --create orchestrator
 | Docker CLI | Static binary from `docker:cli` | Minimal size, API backward compatible |
 | Git sharing | alternates mechanism + `preciousObjects` | Safe for concurrent access, prevents gc corruption |
 | MCP transport | HTTP over Unix socket (`http+unix://`) | Claude Code supports this natively |
-| Hooks | mantle-agent → Unix socket | Ephemeral process, 5m timeout |
+| Hooks | exomonad → Unix socket | Ephemeral process, 5m timeout |
 | Protocol | Servant HTTP over Unix socket | Agents connect via shared volume |
 | TUI popups | Zellij pane spawned by control-server | Direct IPC, no TCP needed |
 | TUI communication | WebSocket with correlation IDs | Bidirectional, supports concurrent popups |
@@ -111,14 +111,14 @@ exec zellij attach --create orchestrator
 
 1. **Add Servant HTTP to control-server**
    - Add warp, servant-server, warp-unix dependencies
-   - Define API types in new module `Tidepool.Control.API`
+   - Define API types in new module `ExoMonad.Control.API`
    - Implement endpoints:
      - `POST /hook` - receives hook event, returns allow/deny
      - `POST /mcp/call` - receives tool call, returns result
      - `POST /tui/spawn` - spawns popup, blocks until user responds, returns result
    - Listen on Unix socket via warp-unix
 
-2. **Migrate mantle-agent to HTTP client**
+2. **Migrate exomonad to HTTP client**
    - Add hyper-unix or reqwest with unix socket support
    - Hook subcommand: POST to `/hook`
    - Remove MCP proxy code (Claude talks HTTP MCP directly)
@@ -179,7 +179,7 @@ exec zellij attach --create orchestrator
    - Pane 3: Logs/monitoring
 
 3. **Update agent Dockerfile** (from PR #313)
-   - Already has tini, Claude Code, mantle-agent
+   - Already has tini, Claude Code, exomonad
    - Ensure socket path matches orchestrator's shared volume
 
 4. **Test orchestrator manually**
@@ -189,7 +189,7 @@ exec zellij attach --create orchestrator
      -v /var/run/docker.sock:/var/run/docker.sock \
      -v $(pwd)/worktrees:/worktrees \
      -v ~/.claude.json:/root/.claude.json:ro \
-     tidepool/orchestrator
+     exomonad/orchestrator
    ```
 
 ### Phase 3: Agent Spawning via Zellij
@@ -207,12 +207,12 @@ exec zellij attach --create orchestrator
    ```bash
    docker run -it --rm \
      --detach-keys="ctrl-e,e" \
-     -v tidepool-sockets:/sockets \
+     -v exomonad-sockets:/sockets \
      -v /worktrees/agent-1:/workspace \
-     -v tidepool-git-cache:/git-cache:ro \
-     -v tidepool-cargo-cache:/cargo-cache \
+     -v exomonad-git-cache:/git-cache:ro \
+     -v exomonad-cargo-cache:/cargo-cache \
      -e GIT_ALTERNATES_OBJECT_DIR=/git-cache/objects \
-     tidepool/claude-agent
+     exomonad/claude-agent
    ```
 
 3. **Agent lifecycle**
@@ -312,7 +312,7 @@ handlePopup conn state = do
 - LSP code from control-server
 - LSP-dependent MCP tools (commented out, not deleted)
 - NDJSON protocol code (replaced by Servant HTTP)
-- MCP proxy in mantle-agent (Claude uses HTTP MCP directly)
+- MCP proxy in exomonad (Claude uses HTTP MCP directly)
 - process-compose per-worktree setup
 - Host-side tui-sidebar (replaced by Zellij panes)
 - Host-side Zellij session (now inside orchestrator container)
@@ -322,7 +322,7 @@ handlePopup conn state = do
 - Orchestrator Dockerfile (tini + wrapper + Zellij + control-server + docker CLI)
 - Orchestrator entrypoint script (sibling cleanup via EXIT trap)
 - Zellij config with `session_serialization true`
-- Agent Dockerfile (tini + Claude + mantle-agent) [PR #313]
+- Agent Dockerfile (tini + Claude + exomonad) [PR #313]
 - Zellij layout for orchestrator
 - tui-popup binary (WebSocket client, ratatui renderer)
 - Servant API definitions [PR #312]
@@ -342,7 +342,7 @@ handlePopup conn state = do
 2. **How to handle sibling container cleanup?** ✅ RESOLVED
    - **Answer:** Wrapper script with EXIT trap
    - tini can't signal siblings (they're spawned by host daemon)
-   - Label agents with `--label tidepool.orchestrator=$HOSTNAME`
+   - Label agents with `--label exomonad.orchestrator=$HOSTNAME`
    - Trap kills labeled containers on orchestrator exit
 
 3. **Docker CLI in orchestrator?** ✅ RESOLVED
@@ -354,7 +354,7 @@ handlePopup conn state = do
 
 1. **Where does spawn_agents live?** Options:
    - Haskell (in control-server, exposed as CLI or MCP tool)
-   - Rust (new binary, or extend mantle-agent)
+   - Rust (new binary, or extend exomonad)
    - Shell script (simplest, might be enough)
 
 2. **Agent identification:** How does control-server know which container is calling?
@@ -365,7 +365,7 @@ handlePopup conn state = do
 ## Success Criteria
 
 - [ ] Single containerized Claude can complete a coding task
-- [ ] Hooks work (mantle-agent → HTTP → control-server)
+- [ ] Hooks work (exomonad → HTTP → control-server)
 - [ ] MCP tools work (Claude → HTTP MCP → control-server)
 - [ ] TUI popups work (popup appears on host, result flows back)
 - [ ] 3 concurrent agents can work without interference

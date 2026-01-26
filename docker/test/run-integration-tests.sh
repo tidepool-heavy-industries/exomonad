@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# Main Integration Test Runner for Tidepool Docker Stack
+# Main Integration Test Runner for ExoMonad Docker Stack
 
 # Ensure we are in the repo root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,9 +27,9 @@ if [ ! -d "$RUNTIME_BIN" ]; then
 fi
 
 echo "Copying binaries from $RUNTIME_BIN..."
-cp "$RUNTIME_BIN/tidepool-control-server" docker/orchestrator/bin/
+cp "$RUNTIME_BIN/exomonad-control-server" docker/orchestrator/bin/
 cp "$RUNTIME_BIN/tui-sidebar" docker/orchestrator/bin/
-cp "$RUNTIME_BIN/mantle-agent" docker/claude-agent/bin/
+cp "$RUNTIME_BIN/exomonad" docker/claude-agent/bin/
 
 # 2. Build images
 echo "Building test images..."
@@ -44,7 +44,7 @@ cleanup() {
     echo "Cleaning up..."
     docker-compose -f docker/test/docker-compose.test.yml down -v
     # Clean up any leftover test containers from sibling-cleanup test
-    docker ps -aq --filter "label=tidepool.test.cleanup=true" | xargs -r docker rm -f
+    docker ps -aq --filter "label=exomonad.test.cleanup=true" | xargs -r docker rm -f
 }
 
 trap cleanup EXIT

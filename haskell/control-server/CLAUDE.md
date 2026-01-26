@@ -1,6 +1,6 @@
-# Tidepool Control Server
+# ExoMonad Control Server
 
-HTTP server for Claude Code++ integration. Receives hook events from mantle-agent and MCP requests from Claude Code.
+HTTP server for Claude Code++ integration. Receives hook events from exomonad and MCP requests from Claude Code.
 
 **Transport:**
 - **Docker:** TCP on port 7432 (recommended)
@@ -30,15 +30,15 @@ Read this if you're:
                 │ Hooks/MCP                          │ Logs
                 ▼                                    │
 ┌────────────────────────────────────────────────────────────────────┐
-│ mantle-agent (Rust)                                                │
+│ exomonad (Rust)                                                │
 │  • hook subcommand: forwards CC hooks → Unix Socket                │
 └────────────────────────────────┬───────────────────────────────────┘
                                  │ HTTP over Unix Socket
-                                 │ .tidepool/sockets/control.sock
+                                 │ .exomonad/sockets/control.sock
                                  ▼
 ┌────────────────────────────────────────────────────────────────────┐
 │ control-server (Haskell)                                           │
-│  • Unix socket: $TIDEPOOL_CONTROL_SOCKET                         │
+│  • Unix socket: $EXOMONAD_CONTROL_SOCKET                         │
 │  • Protocol: ControlMessage/ControlResponse                        │
 │  • Long-lived LSP session (HLS)                                    │
 │  • Routes:                                                         │
@@ -92,7 +92,7 @@ MCP is accessed via HTTP transport (TCP port 7432). Role-based endpoints filter 
 ```json
 {
   "mcpServers": {
-    "tidepool": {
+    "exomonad": {
       "type": "http",
       "url": "http://localhost:7432/role/tl/mcp"
     }
@@ -104,9 +104,9 @@ MCP is accessed via HTTP transport (TCP port 7432). Role-based endpoints filter 
 ```json
 {
   "mcpServers": {
-    "tidepool": {
+    "exomonad": {
       "type": "http",
-      "url": "http://tidepool-control-server:7432/role/tl/mcp"
+      "url": "http://exomonad-control-server:7432/role/tl/mcp"
     }
   }
 }
@@ -122,7 +122,7 @@ In Docker deployments, the `control-server` container can create Zellij tabs in 
 |-----------|-----------|------|
 | Zellij session | `orchestrator` | Runs the actual Zellij process |
 | control-server | `control-server` | Calls `zellij --session orchestrator action new-tab ...` |
-| Socket | Shared via `tidepool-zellij` volume | `/run/user/1000/zellij/...` |
+| Socket | Shared via `exomonad-zellij` volume | `/run/user/1000/zellij/...` |
 
 **Environment variables in control-server:**
 - `XDG_RUNTIME_DIR=/run/user/1000` - Socket directory
@@ -144,22 +144,22 @@ data SpawnAgentsGraph mode = SpawnAgentsGraph
   ...
 ```
 
-## .tidepool Directory Convention
+## .exomonad Directory Convention
 
-Project-local configuration in `.tidepool/` (gitignored):
+Project-local configuration in `.exomonad/` (gitignored):
 
 ```
 <project-root>/
-├── .tidepool/              ← gitignored
+├── .exomonad/              ← gitignored
 │   ├── control.sock        ← Unix socket for IPC
 │   └── config.json         ← Optional: project-specific config (future)
-├── .gitignore              ← Contains: .tidepool/
+├── .gitignore              ← Contains: .exomonad/
 └── ...
 ```
 
 ## Complete Data Flow
 
-### Hybrid Tidepool Architecture
+### Hybrid ExoMonad Architecture
 
 The system uses `process-compose` to orchestrate multiple services. Subagents (parallel worktrees) run a minimal `control-server` in LSP-only mode. Configuration is generated programmatically to ensure type safety and consistency.
 
@@ -178,11 +178,11 @@ Subagents spawned by `spawn_agents` receive a **custom-generated environment and
 - **Container Isolation:** Each subagent runs in a named container. Remote execution uses `docker-ctl exec {id}`.
 
 **How it works (SpawnAgents.hs):**
-1. **Paths:** Canonical paths for sockets (`/tmp/tidepool-...`) and binaries are constructed via `Tidepool.Control.Runtime.Paths`.
-2. **Orchestration:** A `ProcessComposeConfig` Haskell value is constructed and serialized to YAML via `Tidepool.Control.Runtime.ProcessCompose`.
+1. **Paths:** Canonical paths for sockets (`/tmp/exomonad-...`) and binaries are constructed via `ExoMonad.Control.Runtime.Paths`.
+2. **Orchestration:** A `ProcessComposeConfig` Haskell value is constructed and serialized to YAML via `ExoMonad.Control.Runtime.ProcessCompose`.
 3. **Source of Truth:** The running Haskell process defines canonical environment variables (socket paths, binary paths, roles).
 4. **Environment:** Subagent-specific overrides (like `SUBAGENT_CMD`) are merged with canonical paths.
-5. **Container Name:** Subagent containers are named `tidepool-agent-<shortId>` for `docker-ctl exec` calls.
+5. **Container Name:** Subagent containers are named `exomonad-agent-<shortId>` for `docker-ctl exec` calls.
 6. **Deployment:** Programmatically generated `process-compose.yaml` is written directly to the subagent worktree. Environment variables are passed directly to the container via the `docker-ctl` API.
 7. **Execution:** `process-compose` simply loads the generated config, ensuring an isolated and correctly configured environment.
 
@@ -215,7 +215,7 @@ The control server executes commands inside agent containers via the `docker-ctl
    └─────────────────┬────────────────────────────┘
                      │ stdin JSON
                      ▼
-2. mantle-agent hook pre-tool-use
+2. exomonad hook pre-tool-use
    ┌──────────────────────────────────────────────┐
    │ Read HookInput from stdin                    │
    │ Connect to control server (Unix socket)      │
@@ -233,7 +233,7 @@ The control server executes commands inside agent containers via the `docker-ctl
    └─────────────────┬────────────────────────────┘
                      │ HTTP response
                      ▼
-4. mantle-agent returns
+4. exomonad returns
    ┌──────────────────────────────────────────────┐
    │ Receive HookResponse                         │
    │ Print HookOutput JSON to stdout              │
@@ -388,7 +388,7 @@ Tools are **automatically discovered** from graph definitions at startup via `ex
 - **Tier 4 (TUI-interactive)**: Dialog boxes, option selection, guidance requests
 - **Tier 5 (Mailbox)**: Agent-to-agent messaging
 
-**Role-based filtering:** See "Role-Based Tool Filtering" section below for `--tools` flag usage in mantle-agent.
+**Role-based filtering:** See "Role-Based Tool Filtering" section below for `--tools` flag usage in exomonad.
 
 ### Tier 1: Deterministic LSP Tools
 
@@ -483,7 +483,7 @@ control-server (Haskell)
 tui-spawner (Rust)
     ├─ 1. Write popup definition to /sockets/popup-{uuid}-in.json
     ├─ 2. mkfifo /sockets/popup-{uuid}.fifo
-    ├─ 3. docker exec tidepool-zellij zellij action new-pane --floating -- \
+    ├─ 3. docker exec exomonad-zellij zellij action new-pane --floating -- \
     │      tui-popup --input /sockets/popup-{uuid}-in.json \
     │                --output /sockets/popup-{uuid}.fifo
     ├─ 4. Block reading from FIFO (kernel handles sync)
@@ -648,20 +648,20 @@ exportMCPTools logger = do
 1. **Simplified pattern**: `GraphEntries` type family declares entry points, `reifyGraphEntries` extracts metadata
 2. **Legacy pattern**: `MCPExport` annotation marks entry node, `reifyMCPTools` extracts metadata
 3. `exportMCPTools` called on control-server startup
-4. mantle-agent queries at connection, caches tools
-5. **Role-based filtering:** mantle-agent uses `--tools` flag to restrict which tools are exposed to Claude
+4. exomonad queries at connection, caches tools
+5. **Role-based filtering:** exomonad uses `--tools` flag to restrict which tools are exposed to Claude
 
 ## Hook Handlers
 
 Hook events are processed by `Handler/Hook.hs`.
 
 **PreToolUse Policy:**
-- `PreToolUse` hooks are evaluated against a policy defined in `.tidepool/hook-policy.json`.
+- `PreToolUse` hooks are evaluated against a policy defined in `.exomonad/hook-policy.json`.
 - Policy supports `PolicyAllow`, `PolicyDeny`, and `PolicyAsk` decisions.
 - Rules are evaluated in order; the first match wins.
 - Supports literal tool name matches or `*` wildcard.
 
-**Example Policy (.tidepool/hook-policy.json):**
+**Example Policy (.exomonad/hook-policy.json):**
 ```json
 {
   "rules": [
@@ -739,7 +739,7 @@ data ControlResponse
   | McpToolResponse { mcpId :: Text, result :: Maybe Value, mcpError :: Maybe McpError }
 ```
 
-**IMPORTANT:** Types must serialize identically to Rust `mantle_shared::protocol` types.
+**IMPORTANT:** Types must serialize identically to Rust `exomonad_shared::protocol` types.
 
 ## LSP Session Management
 
@@ -788,16 +788,16 @@ curl http://localhost:11434/api/tags
 
 ## Running
 
-### Hybrid Tidepool (Recommended)
+### Hybrid ExoMonad (Recommended)
 ```bash
-cd /path/to/tidepool
+cd /path/to/exomonad
 ./start-augmented.sh
 ```
 
 Launches control-server via process-compose with:
 - Unix socket health check for robust readiness
 - Automatic dependency management (tui-sidebar waits for health)
-- Centralized logging to `.tidepool/logs/`
+- Centralized logging to `.exomonad/logs/`
 - Automatic restart on failure
 
 ### Standalone (Development)
@@ -806,21 +806,21 @@ Launches control-server via process-compose with:
 cd /path/to/your/project
 
 # GEMMA_ENDPOINT is REQUIRED (no heuristic fallback)
-GEMMA_ENDPOINT=http://localhost:11434 cabal run tidepool-control-server
+GEMMA_ENDPOINT=http://localhost:11434 cabal run exomonad-control-server
 
 # Or set project directory via environment
-TIDEPOOL_PROJECT_DIR=/path/to/project GEMMA_ENDPOINT=http://localhost:11434 cabal run tidepool-control-server
+EXOMONAD_PROJECT_DIR=/path/to/project GEMMA_ENDPOINT=http://localhost:11434 cabal run exomonad-control-server
 ```
 
 ### Health Check
 The server supports a ping-pong protocol over Unix socket for health checks:
 ```bash
-# Check if control-server is ready using mantle-agent
+# Check if control-server is ready using exomonad
 ./scripts/health-check.sh
 ```
 
 **Used by process-compose:**
-The `control-server` readiness probe executes `mantle-agent health`, which sends a `Ping` message to `$TIDEPOOL_CONTROL_SOCKET` and waits for a `Pong`.
+The `control-server` readiness probe executes `exomonad health`, which sends a `Ping` message to `$EXOMONAD_CONTROL_SOCKET` and waits for a `Pong`.
 
 ```bash
 # Verify server is listening
@@ -830,11 +830,11 @@ Control server listening on Unix socket: /path/to/control.sock
 
 **Server logs to stdout:**
 ```
-Created .tidepool directory at ./.tidepool
+Created .exomonad directory at ./.exomonad
 Starting LSP session for project: .
 [LSP] Session started, HLS initialized
 LSP session initialized
-Control server listening on Unix socket: .tidepool/sockets/control.sock
+Control server listening on Unix socket: .exomonad/sockets/control.sock
 Connection received
 [MCP] tool=teach-graph
   topic=how Memory effect works
@@ -861,10 +861,10 @@ echo '{"type":"MCPToolCall","id":"1","tool_name":"exo_status","arguments":{}}' |
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `TIDEPOOL_PROJECT_DIR` | Current directory | Project root (where .tidepool/ lives) |
+| `EXOMONAD_PROJECT_DIR` | Current directory | Project root (where .exomonad/ lives) |
 | `GEMMA_ENDPOINT` | **Required** | Ollama endpoint (e.g., `http://localhost:11434`) |
-| `MANTLE_CONTROL_HOST` | (set by mantle-agent) | TCP host (unused by server, only client) |
-| `MANTLE_CONTROL_PORT` | (set by mantle-agent) | TCP port (unused by server, only client) |
+| `EXOMONAD_CONTROL_HOST` | (set by exomonad) | TCP host (unused by server, only client) |
+| `EXOMONAD_CONTROL_PORT` | (set by exomonad) | TCP port (unused by server, only client) |
 
 **Note:** `GEMMA_ENDPOINT` must be set. The scout tool will fail with an error if not configured. No heuristic fallback.
 
@@ -875,15 +875,15 @@ echo '{"type":"MCPToolCall","id":"1","tool_name":"exo_status","arguments":{}}' |
 ```json
 {
   "hooks": {
-    "PreToolUse": "mantle-agent hook pre-tool-use"
+    "PreToolUse": "exomonad hook pre-tool-use"
   },
   "mcpServers": {
-    "tidepool": {
-      "command": "mantle-agent",
+    "exomonad": {
+      "command": "exomonad",
       "args": ["mcp"],
       "env": {
-        "MANTLE_CONTROL_HOST": "127.0.0.1",
-        "MANTLE_CONTROL_PORT": "7432"
+        "EXOMONAD_CONTROL_HOST": "127.0.0.1",
+        "EXOMONAD_CONTROL_PORT": "7432"
       }
     }
   }
@@ -901,7 +901,7 @@ The control server now includes support for Gemini CLI config generation via `wr
 - Path variable: `$GEMINI_PROJECT_DIR` (not `$CLAUDE_PROJECT_DIR`)
 - API key: `GEMINI_API_KEY` (not `ANTHROPIC_API_KEY`)
 - CLI command: Just `gemini` (no `--debug --verbose` flags)
-- MCP command: Uses full path `$GEMINI_PROJECT_DIR/../runtime/bin/mantle-agent` for consistency with hooks
+- MCP command: Uses full path `$GEMINI_PROJECT_DIR/../runtime/bin/exomonad` for consistency with hooks
 
 **Status:** Implemented and wired into spawn_agents backend selection (pass `backend: "gemini"` parameter).
 
@@ -912,7 +912,7 @@ The control server now includes support for Gemini CLI config generation via `wr
 1. **Start control-server** in project directory (pane 2)
 2. **Start Claude Code** in same directory (pane 1)
 3. **Claude calls MCP tool** (teach-graph, find_callers, etc.)
-4. **mantle-agent forwards** via TCP to control-server
+4. **exomonad forwards** via TCP to control-server
 5. **control-server executes** tool logic (LSP queries, graph execution)
 6. **Returns result** → Claude uses in response
 
@@ -937,7 +937,7 @@ All MCP tools return structured errors instead of plain text strings. This allow
   "code": -32001,
   "message": "Issue #123 not found",
   "details": {
-    "repo": "tidepool/tidepool",
+    "repo": "exomonad/exomonad",
     "issue_number": 123
   },
   "suggestion": "Use 'gh_issue_list' to find available issues"
@@ -979,8 +979,8 @@ pure $ mcpToolErrorWithDetails reqId NotFound
 ## Related Documentation
 
 - **[ADR-003: MCP Tool Design Patterns](../../docs/architecture/ADR-003-MCP-Tool-Design-Patterns.md)** ⭐ - Tool tier architecture, role-based filtering design decisions
-- **[rust/mantle-agent/CLAUDE.md](../../rust/mantle-agent/CLAUDE.md)** - Hook/MCP forwarding, `--tools` flag usage
-- **[rust/mantle-shared/CLAUDE.md](../../rust/mantle-shared/CLAUDE.md)** - Protocol types (Rust side)
+- **[rust/exomonad/CLAUDE.md](../../rust/exomonad/CLAUDE.md)** - Hook/MCP forwarding, `--tools` flag usage
+- **[rust/exomonad-shared/CLAUDE.md](../../rust/exomonad-shared/CLAUDE.md)** - Protocol types (Rust side)
 - **[haskell/effects/lsp-interpreter/CLAUDE.md](../effects/lsp-interpreter/CLAUDE.md)** - LSP integration
 - **[haskell/tools/training-generator/CLAUDE.md](../tools/training-generator/CLAUDE.md)** - Training data format
 - **[haskell/agents/semantic-scout/CLAUDE.md](../agents/semantic-scout/CLAUDE.md)** - Scout implementation details
@@ -990,7 +990,7 @@ pure $ mcpToolErrorWithDetails reqId NotFound
 
 1. Wire real hook logic (currently passthrough)
 2. Add more MCP tools via Graph DSL (git operations, etc.)
-3. Add metrics collection to mantle-hub
+3. Add metrics collection to exomonad-hub
 4. Test teach-graph end-to-end with Claude inside Claude Code
 5. Generate training data for FunctionGemma fine-tuning via teaching mode
 
@@ -1000,7 +1000,7 @@ pure $ mcpToolErrorWithDetails reqId NotFound
 - Automatic tool discovery via `MCPExport` + `reifyMCPTools` + `GraphEntries`
 - 23+ tools across 5 tiers: LSP, LLM-enhanced, external orchestration, TUI-interactive, mailbox
 - Type-safe schema generation from `HasJSONSchema` instances
-- Role-based filtering via mantle-agent `--tools` flag
+- Role-based filtering via exomonad `--tools` flag
 
 ✅ **Tier 1 Tools (Logic-only)**
 - FindCallersGraph, ShowFieldsGraph, ShowConstructorsGraph
@@ -1015,7 +1015,7 @@ pure $ mcpToolErrorWithDetails reqId NotFound
 ✅ **Infrastructure**
 - FunctionGemma HTTP interpreter via Ollama (`Scout/DocGen/Gemma.hs`)
 - Long-lived LSP session management
-- TCP protocol (NDJSON) between mantle-agent ↔ control-server
+- TCP protocol (NDJSON) between exomonad ↔ control-server
 
 ✅ **Error Handling**
 - Structured error responses with error codes (NotFound, InvalidInput, ExternalFailure, StateError, EnvironmentError)

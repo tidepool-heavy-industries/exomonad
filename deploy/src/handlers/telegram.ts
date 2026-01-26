@@ -15,13 +15,13 @@ import type {
   TelegramIncomingMessage,
   TelegramInlineButton,
   EffectResult,
-} from "tidepool-generated-ts";
+} from "exomonad-generated-ts";
 import {
   successResult,
   errorResult,
   telegramUnitResult,
   telegramMessagesResult,
-} from "tidepool-generated-ts";
+} from "exomonad-generated-ts";
 import {
   sendMessage,
   sendMessageWithButtons,

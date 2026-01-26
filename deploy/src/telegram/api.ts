@@ -160,7 +160,7 @@ export async function answerCallbackQuery(
 // Inline Keyboard Support
 // =============================================================================
 
-import type { TelegramInlineButton } from "tidepool-generated-ts";
+import type { TelegramInlineButton } from "exomonad-generated-ts";
 
 /**
  * Result of sending buttons with ID mapping.

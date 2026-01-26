@@ -2,7 +2,7 @@
 set -euo pipefail
 
 OPENOBSERVE_URL="${OPENOBSERVE_URL:-http://localhost:5080}"
-AUTH_HEADER="${OPENOBSERVE_AUTH_HEADER:-$(echo -n 'admin@tidepool.local:tidepool-dev' | base64)}"
+AUTH_HEADER="${OPENOBSERVE_AUTH_HEADER:-$(echo -n 'admin@exomonad.local:exomonad-dev' | base64)}"
 
 echo "=== OpenObserve Verification ==="
 

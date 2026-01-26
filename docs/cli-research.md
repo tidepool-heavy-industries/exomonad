@@ -1,6 +1,6 @@
 # CLI Parser Research: optparse-generic vs Alternatives
 
-Research task for evaluating CLI parser derivation approaches for tidepool graph inputs.
+Research task for evaluating CLI parser derivation approaches for exomonad graph inputs.
 
 ## Executive Summary
 
@@ -11,7 +11,7 @@ optparse-generic is excellent for rapid prototyping but has critical limitations
 - Limited control over help text and short flags
 - No customization of subcommand names
 
-For tidepool's graph input types, a hybrid approach works best:
+For exomonad's graph input types, a hybrid approach works best:
 1. Define a "flat" CLI type that maps to the nested domain type
 2. Use optparse-generic for the flat type
 3. Convert to domain type in `main`
@@ -116,7 +116,7 @@ data PhotoInput = PhotoInput
 - "More evil" (uses unsafePerformIO internally)
 - Less widely used
 
-## Recommendation for Tidepool
+## Recommendation for ExoMonad
 
 ### For GraphInput CLI
 

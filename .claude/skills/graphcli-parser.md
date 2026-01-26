@@ -4,7 +4,7 @@ Use when: Deriving CLI parsers from Haddock-documented types, adding `--format` 
 
 ## Core Pattern
 
-GraphCLI enables any tidepool graph to be wrapped as a CLI tool:
+GraphCLI enables any exomonad graph to be wrapped as a CLI tool:
 - Entry type → CLI arguments (derived from Haddock via TH)
 - Exit type → formatted output (JSON or text via `--format` flag)
 

@@ -9,8 +9,8 @@ import type {
   SerializableEffect,
   EffectResult,
   StepOutput,
-} from "tidepool-generated-ts";
-import { isYieldedEffect } from "tidepool-generated-ts";
+} from "exomonad-generated-ts";
+import { isYieldedEffect } from "exomonad-generated-ts";
 
 // =============================================================================
 // Loop Event Types

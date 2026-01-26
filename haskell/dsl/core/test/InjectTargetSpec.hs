@@ -10,9 +10,9 @@
 module InjectTargetSpec (spec) where
 
 import Test.Hspec
-import Tidepool.Graph.Goto (OneOf, InjectTarget(..), To, Payloads)
-import Tidepool.Graph.Goto.Internal (OneOf(..))  -- For test assertions
-import Tidepool.Graph.Types (Exit)
+import ExoMonad.Graph.Goto (OneOf, InjectTarget(..), To, Payloads)
+import ExoMonad.Graph.Goto.Internal (OneOf(..))  -- For test assertions
+import ExoMonad.Graph.Types (Exit)
 
 -- | Test targets with different payload types.
 type SimpleTargets = '[To "nodeA" Int, To "nodeB" String, To Exit Bool]

@@ -1,6 +1,6 @@
 /**
- * Wire format types for tidepool native GUI.
- * These definitions match the Haskell types in wire-types/src/Tidepool/Wire/Types.hs.
+ * Wire format types for exomonad native GUI.
+ * These definitions match the Haskell types in wire-types/src/ExoMonad/Wire/Types.hs.
  */
 
 // ============================================================================
@@ -111,7 +111,7 @@ export function buttonAction(id: string): ChoiceAction {
 }
 
 // ============================================================================
-// DM Game Types (mirrors wire-types/src/Tidepool/Wire/Types.hs)
+// DM Game Types (mirrors wire-types/src/ExoMonad/Wire/Types.hs)
 // ============================================================================
 
 /** Precarity level - drives narrative voice intensity. */

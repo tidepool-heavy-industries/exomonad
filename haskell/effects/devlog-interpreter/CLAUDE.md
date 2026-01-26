@@ -37,9 +37,9 @@ Read this if you're:
 ## Usage
 
 ```haskell
-import Tidepool.Effect.DevLog
-import Tidepool.DevLog.Interpreter (runDevLog)
-import Tidepool.DevLog.Config
+import ExoMonad.Effect.DevLog
+import ExoMonad.DevLog.Interpreter (runDevLog)
+import ExoMonad.DevLog.Config
 
 main :: IO ()
 main = do

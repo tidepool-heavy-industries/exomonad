@@ -7,15 +7,15 @@ import Data.Aeson (decode)
 import qualified Data.ByteString.Lazy as LBS
 import Data.Time (UTCTime(..), fromGregorian)
 import System.Directory (doesFileExist, removeFile)
-import Tidepool.Effect.Runners (runDecisionLog)
-import Tidepool.Effect.Types (Decision(..), DecisionContext(..), DecisionTrace(..), recordDecision)
+import ExoMonad.Effect.Runners (runDecisionLog)
+import ExoMonad.Effect.Types (Decision(..), DecisionContext(..), DecisionTrace(..), recordDecision)
 
 main :: IO ()
 main = hspec $ do
-  describe "tidepool-platform" $ do
+  describe "exomonad-platform" $ do
     describe "Decision Logging" $ do
-      it "writes decision trace to .tidepool/decision_log.jsonl" $ do
-        let logFile = ".tidepool/decision_log.jsonl"
+      it "writes decision trace to .exomonad/decision_log.jsonl" $ do
+        let logFile = ".exomonad/decision_log.jsonl"
         -- Cleanup before test
         exists <- doesFileExist logFile
         when exists $ removeFile logFile

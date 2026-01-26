@@ -9,7 +9,7 @@ End-to-end guide for creating MCP tools that Claude can call via the control-ser
 
 ## Overview
 
-MCP tools in Tidepool are defined as Graph DSL graphs with special annotations:
+MCP tools in ExoMonad are defined as Graph DSL graphs with special annotations:
 1. **MCPExport** - Marks entry node for auto-discovery
 2. **MCPToolDef** - Provides tool name and description
 3. **HasJSONSchema** - Auto-generates input schema from types
@@ -166,7 +166,7 @@ runMyTool session logger argsValue = do
 ### Manual Testing
 ```bash
 # Start control-server (if not running via start-augmented.sh)
-GEMMA_ENDPOINT=http://localhost:11434 cabal run tidepool-control-server
+GEMMA_ENDPOINT=http://localhost:11434 cabal run exomonad-control-server
 
 # List all tools (verify my_tool appears)
 echo '{"type":"ToolsListRequest"}' | nc localhost 7432
@@ -227,12 +227,12 @@ instance HasJSONSchema MyArgs where
 
 | File | Purpose |
 |------|---------|
-| `haskell/control-server/src/Tidepool/Control/LSPTools.hs` | Graph + handler definitions |
-| `haskell/control-server/src/Tidepool/Control/Export.hs` | Tool discovery (`reifyMCPTools`) |
-| `haskell/control-server/src/Tidepool/Control/Handler/MCP.hs` | Tool dispatch |
-| `haskell/control-server/src/Tidepool/Control/Protocol.hs` | `ToolDefinition` type |
-| `haskell/dsl/core/src/Tidepool/Graph/Types.hs` | `MCPExport`, `MCPToolDef` annotations |
-| `haskell/dsl/core/src/Tidepool/Graph/MCPReify.hs` | `ReifyMCPTools` typeclass |
+| `haskell/control-server/src/ExoMonad/Control/LSPTools.hs` | Graph + handler definitions |
+| `haskell/control-server/src/ExoMonad/Control/Export.hs` | Tool discovery (`reifyMCPTools`) |
+| `haskell/control-server/src/ExoMonad/Control/Handler/MCP.hs` | Tool dispatch |
+| `haskell/control-server/src/ExoMonad/Control/Protocol.hs` | `ToolDefinition` type |
+| `haskell/dsl/core/src/ExoMonad/Graph/Types.hs` | `MCPExport`, `MCPToolDef` annotations |
+| `haskell/dsl/core/src/ExoMonad/Graph/MCPReify.hs` | `ReifyMCPTools` typeclass |
 
 ## Debugging
 
@@ -279,5 +279,5 @@ See `Scout/Graph.hs` for the `DocGenGraph` example.
 
 - **control-server docs**: `haskell/control-server/CLAUDE.md`
 - **Graph DSL**: `haskell/dsl/core/CLAUDE.md`
-- **Protocol types**: `haskell/control-server/src/Tidepool/Control/Protocol.hs`
-- **Existing tools**: `haskell/control-server/src/Tidepool/Control/LSPTools.hs`
+- **Protocol types**: `haskell/control-server/src/ExoMonad/Control/Protocol.hs`
+- **Existing tools**: `haskell/control-server/src/ExoMonad/Control/LSPTools.hs`

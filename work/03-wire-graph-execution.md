@@ -172,7 +172,7 @@ mkDocGenHandlers :: LSPSession -> DocGenGraph (AsHandler effs)
 ```
 
 **Option C: Use existing LSP effect from lsp-interpreter**
-Check what `tidepool-lsp-interpreter` provides.
+Check what `exomonad-lsp-interpreter` provides.
 
 ### 3.5 Handle Effect Stack
 
@@ -203,13 +203,13 @@ Ensure all effects have interpreters wired in `runDocGenGraph`.
 
 ```bash
 # Build succeeds
-cabal build tidepool-control-server
+cabal build exomonad-control-server
 
 # Start server
-ANTHROPIC_API_KEY=sk-ant-... cabal run tidepool-control-server
+ANTHROPIC_API_KEY=sk-ant-... cabal run exomonad-control-server
 
 # Test MCP call (via socat or Claude Code)
-echo '{"type":"McpToolCall","mcpId":"1","toolName":"teach","arguments":{"topic":"scoring","seeds":["compositeScore"],"budget":5}}' | socat - UNIX-CONNECT:.tidepool/control.sock
+echo '{"type":"McpToolCall","mcpId":"1","toolName":"teach","arguments":{"topic":"scoring","seeds":["compositeScore"],"budget":5}}' | socat - UNIX-CONNECT:.exomonad/control.sock
 
 # Should return TeachingDoc JSON
 # Logs should show node transitions: dgInit -> dgProcess -> dgSelect -> dgExpand -> ...

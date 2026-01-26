@@ -1,7 +1,7 @@
 /**
- * Wire format types for tidepool native GUI.
+ * Wire format types for exomonad native GUI.
  *
- * These TypeScript definitions match the Haskell types in src/Tidepool/Wire/Types.hs.
+ * These TypeScript definitions match the Haskell types in src/ExoMonad/Wire/Types.hs.
  * See PROTOCOL.md for WebSocket lifecycle documentation.
  */
 

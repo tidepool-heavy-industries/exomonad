@@ -12,8 +12,8 @@ import Control.Monad.IO.Class (liftIO)
 import System.Directory (getCurrentDirectory)
 import System.IO (hFlush, stdout)
 
-import Tidepool.LSP.Interpreter (withLSPSession, getSessionIndexingState, LSPSession)
-import Tidepool.Effect.LSP (IndexingState(..))
+import ExoMonad.LSP.Interpreter (withLSPSession, getSessionIndexingState, LSPSession)
+import ExoMonad.Effect.LSP (IndexingState(..))
 
 log' :: String -> IO ()
 log' s = putStrLn s >> hFlush stdout

@@ -1,0 +1,45 @@
+cabal-version:   3.0
+name:            exomonad-generated-ts
+version:         0.1.0.0
+synopsis:        FFI codegen and TypeScript package generation for ExoMonad graphs
+description:     Template Haskell splices for FFI exports and TypeScript type generation
+                 from GraphRegistry. Produces a standalone npm package with WASM loader.
+license:         BSD-3-Clause
+author:          ExoMonad Authors
+maintainer:      exomonad@example.com
+build-type:      Simple
+
+common warnings
+    ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints -Wunused-packages
+
+library
+    import:           warnings
+    exposed-modules:
+        ExoMonad.Generated.Registry
+        ExoMonad.Generated.Codegen
+        ExoMonad.Generated.GraphSpecs
+    build-depends:
+        base >= 4.17 && < 5,
+        aeson >= 2.0,
+        bytestring,
+        containers,
+        directory,
+        filepath,
+        text,
+        -- Dependencies from exomonad ecosystem (no exomonad-wasm to avoid circular dep)
+        exomonad-core
+    hs-source-dirs:   src
+    default-language: GHC2024
+    default-extensions:
+        DataKinds
+        DeriveGeneric
+        DerivingStrategies
+        DuplicateRecordFields
+        LambdaCase
+        NoFieldSelectors
+        OverloadedRecordDot
+        OverloadedStrings
+        TypeFamilies
+
+-- Note: The generate-ts-package executable needs exomonad-wasm for GraphRegistry,
+-- so it's defined in exomonad-wasm.cabal instead to avoid circular dependency.

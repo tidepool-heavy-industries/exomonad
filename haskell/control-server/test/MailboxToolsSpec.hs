@@ -14,9 +14,9 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import Data.IORef
 
-import Tidepool.Effects.GitHub
-import Tidepool.Control.MailboxTools
-import Tidepool.Graph.Goto (unwrapSingleChoice)
+import ExoMonad.Effects.GitHub
+import ExoMonad.Control.MailboxTools
+import ExoMonad.Graph.Goto (unwrapSingleChoice)
 
 main :: IO ()
 main = defaultMain tests

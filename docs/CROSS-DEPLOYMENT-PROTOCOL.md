@@ -125,7 +125,7 @@ async handleLLMNode(input: SomeInput): Promise<EffectResult> {
         testPath: "src/handlers/__tests__/llm.test.ts"
       },
       context: {
-        repoUrl: "https://github.com/user/tidepool",
+        repoUrl: "https://github.com/user/exomonad",
         branch: "feat/improve-llm-handler",
         parentBranch: "main"
       }
@@ -158,7 +158,7 @@ cat > /tmp/work-request.json <<EOF
 EOF
 
 # Execute on Docker host
-cd ~/dev/tidepool/types-first-dev
+cd ~/dev/exomonad/types-first-dev
 ./run-work-request.sh /tmp/work-request.json
 ```
 
@@ -185,7 +185,7 @@ cabal run types-first-dev-exe -- \
   --branch "$(jq -r '.context.branch' "$REQUEST_FILE")"
 
 # Parse structured output from logs
-RESULT=$(tail -1000 .mantle/logs/*.log | grep STRUCTURED_OUTPUT | tail -1)
+RESULT=$(tail -1000 .exomonad/logs/*.log | grep STRUCTURED_OUTPUT | tail -1)
 
 # Construct WorkResult
 cat > /tmp/work-result.json <<EOF
@@ -259,7 +259,7 @@ await fetch("https://your-docker-host/work-queue", {
 
 ```bash
 # Cron job on Docker host
-*/5 * * * * ~/tidepool/check-work-queue.sh
+*/5 * * * * ~/exomonad/check-work-queue.sh
 
 # check-work-queue.sh polls CF endpoint
 # Fetches pending work requests
@@ -330,7 +330,7 @@ await env.WORK_QUEUE.send(request);
 
 1. **Add WorkRequest/WorkResult to Protocol**
    ```bash
-   # Add types to tidepool-generated-ts
+   # Add types to exomonad-generated-ts
    cd haskell/protocol/wire-types
    # Define Haskell types with ToJSON/FromJSON
 

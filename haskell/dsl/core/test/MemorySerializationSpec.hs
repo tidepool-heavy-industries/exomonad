@@ -19,7 +19,7 @@ import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Control.Monad.Freer (run)
 
-import Tidepool.Graph.Memory
+import ExoMonad.Graph.Memory
 
 
 -- ════════════════════════════════════════════════════════════════════════════

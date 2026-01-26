@@ -64,8 +64,8 @@ require_expected_improvement = true
 [example]
 command = "micro-gastown refine --patterns patterns.json"
 output = """
---- a/tidepool-dm/templates/dm_scene.jinja
-+++ b/tidepool-dm/templates/dm_scene.jinja
+--- a/exomonad-dm/templates/dm_scene.jinja
++++ b/exomonad-dm/templates/dm_scene.jinja
 @@ -15,8 +15,6 @@
  ## Scene Context
 

@@ -4,8 +4,8 @@ import Test.Hspec
 import Data.Text (Text)
 import qualified Data.Text as T
 
-import Tidepool.Cabal.Interpreter
-import Tidepool.Effects.Cabal (TestFailure(..))
+import ExoMonad.Cabal.Interpreter
+import ExoMonad.Effects.Cabal (TestFailure(..))
 
 spec :: Spec
 spec = do

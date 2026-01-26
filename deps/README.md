@@ -16,7 +16,7 @@ Last upstream release (1.2.1.2) was January 2022 and doesn't support GHC 9.10+.
 **Commit**: `25af8c8e60f4afbfdb4e50e6d1d86a5e73975638`
 **Why**: Typed templates with compile-time validation + dependency tracking (tree API)
 
-Fork of the ginger templating library with tidepool-specific enhancements.
+Fork of the ginger templating library with exomonad-specific enhancements.
 
 ## Updating
 

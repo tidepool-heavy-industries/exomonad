@@ -8,7 +8,7 @@ import System.Environment (lookupEnv)
 import Data.Aeson (Value, object, (.=), encode)
 import qualified Data.ByteString.Lazy.Char8 as LBS
 
-import Tidepool.Anthropic.Client
+import ExoMonad.Anthropic.Client
 
 main :: IO ()
 main = do

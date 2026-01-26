@@ -24,16 +24,16 @@ import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Test.Hspec
 
-import Tidepool.Graph.Goto
+import ExoMonad.Graph.Goto
   ( To, GotoChoice, gotoChoice, gotoExit, Goto )
-import Tidepool.Graph.Generic
+import ExoMonad.Graph.Generic
   ( GraphMode(..), type (:-), AsHandler )
-import Tidepool.Graph.Types
+import ExoMonad.Graph.Types
   ( Input, UsesEffects, type (:@) )
-import Tidepool.Effect.NodeMeta (NodeMeta, GraphMeta, runNodeMeta, runGraphMeta, defaultNodeMeta, defaultGraphMeta)
-import qualified Tidepool.Graph.Types as Types (Exit)
-import qualified Tidepool.Graph.Generic as G
-import Tidepool.Graph.Interpret (DispatchGoto(..))
+import ExoMonad.Effect.NodeMeta (NodeMeta, GraphMeta, runNodeMeta, runGraphMeta, defaultNodeMeta, defaultGraphMeta)
+import qualified ExoMonad.Graph.Types as Types (Exit)
+import qualified ExoMonad.Graph.Generic as G
+import ExoMonad.Graph.Interpret (DispatchGoto(..))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TEST GRAPH: Simple tool transition

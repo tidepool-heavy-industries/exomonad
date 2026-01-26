@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use tracing::{error, info, Level};
 use tracing_subscriber::FmtSubscriber;
 
-/// TUI sidebar for Tidepool graph handlers.
+/// TUI sidebar for ExoMonad graph handlers.
 ///
 /// Connects to control-server via Unix socket and renders interactive UIs
 /// based on UISpec messages from Haskell tui-interpreter.
@@ -26,7 +26,7 @@ struct Args {
     #[arg(
         short = 'H',
         long,
-        default_value = ".tidepool/sockets/tui-sidebar.sock"
+        default_value = ".exomonad/sockets/tui-sidebar.sock"
     )]
     health_socket: PathBuf,
 
@@ -47,12 +47,12 @@ async fn main() -> Result<()> {
 
     // Connection Priority:
     // 1. --port arg
-    // 2. TIDEPOOL_TUI_PORT env
+    // 2. EXOMONAD_TUI_PORT env
     // 3. --socket arg
-    // 4. TIDEPOOL_TUI_SOCKET env
+    // 4. EXOMONAD_TUI_SOCKET env
 
     let tui_port = args.port.or_else(|| {
-        std::env::var("TIDEPOOL_TUI_PORT")
+        std::env::var("EXOMONAD_TUI_PORT")
             .ok()
             .and_then(|s| s.parse().ok())
     });
@@ -61,8 +61,8 @@ async fn main() -> Result<()> {
         let path = match args.socket {
             Some(s) => s,
             None => {
-                let env_val = std::env::var("TIDEPOOL_TUI_SOCKET")
-                    .context("TIDEPOOL_TUI_SOCKET/TIDEPOOL_TUI_PORT environment variable not set and --socket/--port not provided")?;
+                let env_val = std::env::var("EXOMONAD_TUI_SOCKET")
+                    .context("EXOMONAD_TUI_SOCKET/EXOMONAD_TUI_PORT environment variable not set and --socket/--port not provided")?;
                 PathBuf::from(env_val)
             }
         };
@@ -84,7 +84,7 @@ async fn main() -> Result<()> {
     let _health_handle = server::start_health_listener(&health_socket_path).await?;
 
     // Resolve control socket path if available for TUI-disabled detection
-    let control_socket_path = std::env::var("TIDEPOOL_CONTROL_SOCKET")
+    let control_socket_path = std::env::var("EXOMONAD_CONTROL_SOCKET")
         .ok()
         .map(|s| resolve_socket_path(PathBuf::from(s)));
 
@@ -184,7 +184,7 @@ async fn main() -> Result<()> {
 /// Helper to resolve socket path relative to project dir if needed
 fn resolve_socket_path(path: PathBuf) -> PathBuf {
     if path.is_relative() {
-        if let Ok(project_dir) = std::env::var("TIDEPOOL_PROJECT_DIR") {
+        if let Ok(project_dir) = std::env::var("EXOMONAD_PROJECT_DIR") {
             PathBuf::from(project_dir).join(&path)
         } else {
             path

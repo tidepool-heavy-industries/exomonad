@@ -15,7 +15,7 @@ Bridges the gap between the Haskell control-server and the Zellij container for 
 ## Architecture
 
 ```
-control-server (in tidepool-control-server container)
+control-server (in exomonad-control-server container)
     │
     │ subprocess: tui-spawner --definition '{"title":"..."}'
     ▼
@@ -24,7 +24,7 @@ tui-spawner
     ├─ 1. Generate UUID for this popup
     ├─ 2. Write definition to /sockets/popup-{uuid}-in.json
     ├─ 3. mkfifo /sockets/popup-{uuid}.fifo
-    ├─ 4. docker exec -u 1000 tidepool-zellij zellij action new-pane \
+    ├─ 4. docker exec -u 1000 exomonad-zellij zellij action new-pane \
     │      --floating --close-on-exit -- \
     │      tui-popup --input /sockets/popup-{uuid}-in.json \
     │                --output /sockets/popup-{uuid}.fifo
@@ -93,12 +93,12 @@ tui-spawner runs in the `control-server` container and needs:
 # docker-compose.yml
 control-server:
   volumes:
-    - tidepool-sockets:/sockets
+    - exomonad-sockets:/sockets
     - /var/run/docker.sock:/var/run/docker.sock
 
 zellij:
   volumes:
-    - tidepool-sockets:/sockets
+    - exomonad-sockets:/sockets
 ```
 
 ## Building
@@ -111,7 +111,7 @@ Binary output: `target/release/tui-spawner`
 
 ## Docker Installation
 
-The binary is installed in the `tidepool-control-server` container:
+The binary is installed in the `exomonad-control-server` container:
 
 ```dockerfile
 # docker/control-server/Dockerfile
@@ -145,7 +145,7 @@ spawnPopupFifo definition = do
 tui-spawner can't reach the zellij container.
 
 **Check:**
-- Is `tidepool-zellij` running? (`docker ps`)
+- Is `exomonad-zellij` running? (`docker ps`)
 - Does control-server have `/var/run/docker.sock` mounted?
 
 ### "Timeout waiting for TUI"
@@ -154,7 +154,7 @@ FIFO open timed out - tui-popup never started or crashed immediately.
 
 **Check:**
 - Is `tui-popup` installed in zellij container?
-- Check zellij container logs: `docker logs tidepool-zellij`
+- Check zellij container logs: `docker logs exomonad-zellij`
 
 ### "Empty result"
 

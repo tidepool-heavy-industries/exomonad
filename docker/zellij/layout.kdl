@@ -16,13 +16,13 @@ layout {
             // Wrap in loop for auto-reconnect if container restarts
             pane name="TL" focus=true size="50%" {
                 command "bash"
-                args "-c" "while true; do docker attach --detach-keys 'ctrl-],]' tidepool-tl; echo '[TL disconnected - reconnecting in 2s]'; sleep 2; done"
+                args "-c" "while true; do docker attach --detach-keys 'ctrl-],]' exomonad-tl; echo '[TL disconnected - reconnecting in 2s]'; sleep 2; done"
             }
 
             // PM (Project Manager) agent - planning and coordination
             pane name="PM" size="50%" {
                 command "bash"
-                args "-c" "while true; do docker attach --detach-keys 'ctrl-],]' tidepool-pm; echo '[PM disconnected - reconnecting in 2s]'; sleep 2; done"
+                args "-c" "while true; do docker attach --detach-keys 'ctrl-],]' exomonad-pm; echo '[PM disconnected - reconnecting in 2s]'; sleep 2; done"
             }
         }
     }
@@ -32,14 +32,14 @@ layout {
             // Control server logs
             pane name="Control Server" size="60%" {
                 command "docker"
-                args "logs" "-f" "tidepool-control-server"
+                args "logs" "-f" "exomonad-control-server"
             }
 
             pane split_direction="vertical" {
                 // Container status
                 pane name="Status" {
                     command "bash"
-                    args "-c" "watch -c -n5 'docker ps --format \"table {{.Names}}\\t{{.Status}}\\t{{.Ports}}\" --filter name=tidepool'"
+                    args "-c" "watch -c -n5 'docker ps --format \"table {{.Names}}\\t{{.Status}}\\t{{.Ports}}\" --filter name=exomonad'"
                 }
             }
         }

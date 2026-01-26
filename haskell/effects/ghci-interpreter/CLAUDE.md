@@ -5,8 +5,8 @@ Interprets the `GHCi` effect by connecting to a `ghci-oracle` server via TCP soc
 ## Usage
 
 ```haskell
-import Tidepool.Effect.GHCi (queryType, GHCiError)
-import Tidepool.GHCi.Interpreter (runGHCiIO, withGHCiConnection)
+import ExoMonad.Effect.GHCi (queryType, GHCiError)
+import ExoMonad.GHCi.Interpreter (runGHCiIO, withGHCiConnection)
 
 -- Connect and run queries
 main :: IO ()
@@ -67,12 +67,12 @@ runGHCiIO :: LastMember IO effs => GHCiConnection -> Eff (GHCi ': effs) a -> Eff
 
 ## Wire Protocol
 
-Uses length-prefixed JSON (4-byte big-endian length + JSON payload). Types defined in `tidepool-core/src/Tidepool/Effect/GHCi.hs`.
+Uses length-prefixed JSON (4-byte big-endian length + JSON payload). Types defined in `exomonad-core/src/ExoMonad/Effect/GHCi.hs`.
 
 ## Tests
 
 ```bash
-cabal test tidepool-ghci-interpreter
+cabal test exomonad-ghci-interpreter
 ```
 
 Tests cover:
@@ -82,5 +82,5 @@ Tests cover:
 
 ## Related
 
-- [tidepool-core/src/Tidepool/Effect/GHCi.hs](../../tidepool-core/src/Tidepool/Effect/GHCi.hs) - Effect type definition
+- [exomonad-core/src/ExoMonad/Effect/GHCi.hs](../../exomonad-core/src/ExoMonad/Effect/GHCi.hs) - Effect type definition
 - [tools/ghci-oracle/](../../tools/ghci-oracle/) - Server this client connects to

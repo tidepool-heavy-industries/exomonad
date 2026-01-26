@@ -82,7 +82,7 @@ Pre-commit:    `just pre-commit`
 
 ## Adding New Effects
 
-1. Define effect type in `dsl/core/src/Tidepool/Effect/Types.hs` (or Effects/*.hs)
+1. Define effect type in `dsl/core/src/ExoMonad/Effect/Types.hs` (or Effects/*.hs)
 2. Create interpreter package at `effects/{name}-interpreter/`
 3. Add to `cabal.project`
 4. Wire into `native-server/` (see native-server/CLAUDE.md)

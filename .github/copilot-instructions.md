@@ -1,14 +1,14 @@
-# Tidepool - Copilot Instructions
+# ExoMonad - Copilot Instructions
 
 ## Project Overview
 
-Tidepool is a type-safe LLM agent framework library written in Haskell. It provides:
+ExoMonad is a type-safe LLM agent framework library written in Haskell. It provides:
 - **Typed state** that LLMs read via templates
 - **Typed mutations** that LLMs express via structured output
 - **Typed tools** for mid-turn capabilities
 - **IO-blind architecture** enabling deterministic testing and WASM compilation
 
-Agents are built in separate repos (e.g., `~/tidepool-labs/anemone`) using this library.
+Agents are built in separate repos () using this library.
 
 ## Architecture
 
@@ -40,15 +40,15 @@ Agents are built in separate repos (e.g., `~/tidepool-labs/anemone`) using this 
 ## Project Structure
 
 ```
-tidepool-core/              # Core library (Graph DSL, effects, templates)
-├── src/Tidepool/
+exomonad-core/              # Core library (Graph DSL, effects, templates)
+├── src/ExoMonad/
 │   ├── Effect.hs           # Core effects
 │   ├── Template.hs         # TypedTemplate
 │   ├── Tool.hs             # Tool typeclass, ToolList GADT
 │   ├── Schema.hs           # JSON Schema derivation
 │   └── Graph/              # Type-level DSL for agent graphs
 
-tidepool-native-gui/        # Native execution layer
+exomonad-native-gui/        # Native execution layer
 ├── server/                 # Servant + WebSocket server
 ├── llm-executor/           # Anthropic API interpreter
 ├── ui-executor/            # UI effect interpreter

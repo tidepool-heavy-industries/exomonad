@@ -7,7 +7,7 @@ set -euo pipefail
 ORCHESTRATOR_CONTAINER="test-orchestrator"
 AGENT_CONTAINER="test-agent"
 SOCKET_PATH="/sockets/control.sock"
-AGENT_SOCKET_PATH="/home/agent/.tidepool/sockets/control.sock"
+AGENT_SOCKET_PATH="/home/agent/.exomonad/sockets/control.sock"
 
 echo "Checking socket existence and permissions in orchestrator..."
 docker exec "$ORCHESTRATOR_CONTAINER" ls -l "$SOCKET_PATH"

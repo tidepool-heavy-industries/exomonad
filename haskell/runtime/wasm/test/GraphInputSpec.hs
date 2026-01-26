@@ -12,8 +12,8 @@ import Test.Hspec
 import Data.Aeson (encode, decode, Value(..))
 import Data.Aeson.KeyMap qualified as KM
 
-import Tidepool.Wasm.GraphInput
-import Tidepool.Anthropic.Types (ImageSource(..))
+import ExoMonad.Wasm.GraphInput
+import ExoMonad.Anthropic.Types (ImageSource(..))
 
 
 spec :: Spec

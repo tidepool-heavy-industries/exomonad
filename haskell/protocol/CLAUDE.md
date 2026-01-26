@@ -1,6 +1,6 @@
 # Protocol Packages
 
-Serialization formats for Tidepool's wire protocols.
+Serialization formats for ExoMonad's wire protocols.
 
 ## Structure
 
@@ -11,7 +11,7 @@ Serialization formats for Tidepool's wire protocols.
 
 ## Protocol Overview
 
-Tidepool has two wire protocols:
+ExoMonad has two wire protocols:
 
 ### Native Protocol (wire-types)
 
@@ -72,7 +72,7 @@ The `generated-ts` package generates TypeScript from Haskell metadata:
 
 **To regenerate:**
 ```bash
-cd tidepool-wasm && cabal run generate-ts-package -- ../deploy/tidepool-generated-ts
+cd exomonad-wasm && cabal run generate-ts-package -- ../deploy/exomonad-generated-ts
 ```
 
 ## Related Documentation

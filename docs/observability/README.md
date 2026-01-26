@@ -1,10 +1,10 @@
-# Tidepool Observability
+# ExoMonad Observability
 
-This directory documents the observability infrastructure for Tidepool, powered by OpenObserve.
+This directory documents the observability infrastructure for ExoMonad, powered by OpenObserve.
 
 ## Architecture
 
-Tidepool uses a dual-storage approach for observability:
+ExoMonad uses a dual-storage approach for observability:
 1.  **OpenTelemetry Traces (OpenObserve):** Used as a queryable index to find sessions of interest (e.g., "show me all sessions that errored").
 2.  **JSONL Transcripts (Filesystem):** The authoritative source of truth for full session history, referenced by traces.
 
@@ -24,8 +24,8 @@ The OpenObserve service is defined in `docker-compose.yml`.
 
 3.  Access the Web UI:
     - URL: http://localhost:5080
-    - Email: `admin@tidepool.local`
-    - Password: `tidepool-dev`
+    - Email: `admin@exomonad.local`
+    - Password: `exomonad-dev`
 
 ## Querying
 

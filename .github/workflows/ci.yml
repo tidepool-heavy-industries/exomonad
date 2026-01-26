@@ -33,4 +33,4 @@ jobs:
         run: just lint-hs
 
       - name: Build and Test
-        run: cabal build tidepool-core --enable-tests -j && cabal test graph-validation-tests
+        run: cabal build exomonad-core --enable-tests -j && cabal test graph-validation-tests

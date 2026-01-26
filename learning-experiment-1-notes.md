@@ -1,4 +1,4 @@
-# Learning Experiment 1: Teaching Tidepool via Real Use Case
+# Learning Experiment 1: Teaching ExoMonad via Real Use Case
 
 **Date:** 2026-01-13
 **User:** Inanna (library author, approaching as learner)
@@ -10,7 +10,7 @@
 
 ## Experiment Setup
 
-**Goal:** Test if teaching Tidepool by building a real agent is more effective than reading docs.
+**Goal:** Test if teaching ExoMonad by building a real agent is more effective than reading docs.
 
 **Approach:**
 1. Started with empty template repo (`human-driven-dev`)
@@ -19,7 +19,7 @@
 4. User writes code, I course-correct and explain
 
 **Why this matters:**
-- Tidepool has complex type-level machinery
+- ExoMonad has complex type-level machinery
 - Docs exist but are reference-heavy
 - Need to validate if library is actually learnable
 
@@ -118,7 +118,7 @@ deriving anyclass (FromJSON, ToJSON)
 
 Multiple compile errors from forgetting instances.
 
-**Learning:** `deriving Tidepool` is NECESSARY, not nice-to-have.
+**Learning:** `deriving ExoMonad` is NECESSARY, not nice-to-have.
 
 ### 5. UsesEffects Redundancy
 User defined graph with `UsesEffects '[Goto ...]` then wrote handler using those same effects.
@@ -236,7 +236,7 @@ User asked for "long lists of small granular improvements" → Generated 9.
 
 **Top 3 by user interest:**
 1. Effect inference from handlers
-2. `deriving Tidepool` single clause
+2. `deriving ExoMonad` single clause
 3. Memory as StateT
 
 These map to pain points encountered:
@@ -330,7 +330,7 @@ Everything flows from exit types. Get this right, rest is mechanical.
 4. Create gallery of exit type examples
 
 ### For Library UX
-1. Implement `deriving Tidepool` (high priority)
+1. Implement `deriving ExoMonad` (high priority)
 2. Add Memory StateT API (high priority)
 3. Improve graph visualization
 4. Add handler testing utilities

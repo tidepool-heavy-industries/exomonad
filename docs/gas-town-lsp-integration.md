@@ -185,7 +185,7 @@ gt lsp references file.hs:10:5
 gt lsp diagnostics file.hs
 ```
 
-This would use the Tidepool LSP interpreter to spawn HLS and query it.
+This would use the ExoMonad LSP interpreter to spawn HLS and query it.
 ...
-- [Tidepool LSP Effect](../tidepool-native-gui/lsp-interpreter/src/Tidepool/LSP/)
+- [ExoMonad LSP Effect](../exomonad-native-gui/lsp-interpreter/src/ExoMonad/LSP/)
 - [Gas Town Architecture](https://github.com/steveyegge/gastown)

@@ -14,7 +14,7 @@ import Data.Aeson.Encode.Pretty (encodePretty)
 import Data.ByteString.Lazy qualified as BL
 import Data.Text (Text)
 
-import Tidepool.Wasm.WireTypes
+import ExoMonad.Wasm.WireTypes
 
 
 -- | Build the golden samples as a JSON Value directly
@@ -26,7 +26,7 @@ buildGoldenSamples effects results phases states outputs = object
   , "graphStates" .= map toJSON states
   , "stepOutputs" .= map toJSON outputs
   , "_metadata" .= object
-      [ "generatedBy" .= ("tidepool-wasm/golden/GenerateGoldenSamples.hs" :: Text)
+      [ "generatedBy" .= ("exomonad-wasm/golden/GenerateGoldenSamples.hs" :: Text)
       , "purpose" .= ("Cross-language protocol verification" :: Text)
       , "usage" .= ("Run verify-protocol.ts to validate TypeScript can parse these" :: Text)
       ]

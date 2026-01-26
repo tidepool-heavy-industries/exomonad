@@ -12,14 +12,14 @@ WORKDIR /build
 COPY rust/Cargo.lock ./
 COPY rust/tui-popup ./tui-popup
 COPY rust/tui-sidebar ./tui-sidebar
-COPY rust/mantle-shared ./mantle-shared
+COPY rust/exomonad-shared ./exomonad-shared
 COPY rust/hangar-config ./hangar-config
 
 # Create minimal workspace Cargo.toml with required dependencies
 RUN cat > Cargo.toml <<'EOF'
 [workspace]
 resolver = "2"
-members = ["tui-popup", "tui-sidebar", "mantle-shared", "hangar-config"]
+members = ["tui-popup", "tui-sidebar", "exomonad-shared", "hangar-config"]
 
 [workspace.dependencies]
 anyhow = "1"

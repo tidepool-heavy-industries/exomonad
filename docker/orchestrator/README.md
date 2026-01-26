@@ -1,12 +1,12 @@
-# Tidepool Orchestrator Container (Legacy)
+# ExoMonad Orchestrator Container (Legacy)
 
 > **DEPRECATED:** This monolithic orchestrator has been replaced by the Container Separation Architecture.
 >
 > **Use instead:** `docker compose up` which starts dedicated containers:
-> - `tidepool-zellij` - Minimal visual multiplexer
-> - `tidepool-control-server` - Haskell MCP server
-> - `tidepool-tl` / `tidepool-pm` - Named agent containers
-> - `tidepool-control-server` - Haskell MCP server (with `docker-ctl`)
+> - `exomonad-zellij` - Minimal visual multiplexer
+> - `exomonad-control-server` - Haskell MCP server
+> - `exomonad-tl` / `exomonad-pm` - Named agent containers
+> - `exomonad-control-server` - Haskell MCP server (with `docker-ctl`)
 >
 > See root `CLAUDE.md` for the new architecture.
 
@@ -28,7 +28,7 @@ If you need the old behavior:
 ```bash
 # Start with legacy profile
 docker compose --profile legacy up orchestrator
-docker attach tidepool-orchestrator
+docker attach exomonad-orchestrator
 ```
 
 ## Historical Documentation
@@ -36,7 +36,7 @@ docker attach tidepool-orchestrator
 The orchestrator provided:
 
 - **Zellij IDE**: Multi-pane terminal interface
-- **Control Server**: `tidepool-control-server` in dedicated pane
+- **Control Server**: `exomonad-control-server` in dedicated pane
 - **Docker-out-of-Docker**: Sibling container management
 - **Zombie Reaping**: tini as PID 1
 
@@ -56,9 +56,9 @@ docker run -it --rm \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v $(pwd)/worktrees:/worktrees \
   -v ~/.claude.json:/root/.claude.json:ro \
-  -v tidepool-sockets:/sockets \
-  -v tidepool-zellij-cache:/root/.cache/zellij \
-  tidepool/orchestrator
+  -v exomonad-sockets:/sockets \
+  -v exomonad-zellij-cache:/root/.cache/zellij \
+  exomonad/orchestrator
 ```
 
 ## Files

@@ -38,9 +38,9 @@ Read this if you're:
 ## Usage
 
 ```haskell
-import Tidepool.UI.Interpreter (runUI, UICallback, newUIContext)
-import Tidepool.Effects.UI (showText, requestTextInput, requestChoice)
-import Tidepool.Wire.Types (UIState, UserAction(..))
+import ExoMonad.UI.Interpreter (runUI, UICallback, newUIContext)
+import ExoMonad.Effects.UI (showText, requestTextInput, requestChoice)
+import ExoMonad.Wire.Types (UIState, UserAction(..))
 
 -- Callback bridges to your transport (WebSocket, HTTP, etc.)
 myCallback :: UICallback
@@ -53,7 +53,7 @@ main :: IO ()
 main = do
   ctx <- newUIContext "entry"  -- Start at "entry" node
   result <- runM $ runUI ctx myCallback $ do
-    showText "Welcome to Tidepool!"
+    showText "Welcome to ExoMonad!"
     name <- requestTextInput "What's your name?"
     showText ("Hello, " <> name <> "!")
 

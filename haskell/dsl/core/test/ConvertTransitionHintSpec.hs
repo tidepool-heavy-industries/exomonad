@@ -16,10 +16,10 @@ import Data.Aeson (toJSON, object, (.=), Value)
 import Data.Text (Text)
 import qualified Data.Text as T
 
-import Tidepool.Graph.Interpret (ConvertTransitionHint(..))
-import Tidepool.Graph.Goto (To, GotoChoice)
-import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
-import Tidepool.Graph.Types (Exit, Self)
+import ExoMonad.Graph.Interpret (ConvertTransitionHint(..))
+import ExoMonad.Graph.Goto (To, GotoChoice)
+import ExoMonad.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
+import ExoMonad.Graph.Types (Exit, Self)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TEST TARGET LISTS

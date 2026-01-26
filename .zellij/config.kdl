@@ -1,8 +1,8 @@
-// Project-local Zellij configuration for Tidepool
+// Project-local Zellij configuration for ExoMonad
 // Ensures proper lifecycle management when Zellij exits
 
 // Ensure Zellij quits instead of detaching when window closes
-// This guarantees trap handlers fire in tidepool-runner.sh
+// This guarantees trap handlers fire in exomonad-runner.sh
 on_force_close "quit"
 
 // Optional: Disable mouse mode for better terminal compatibility

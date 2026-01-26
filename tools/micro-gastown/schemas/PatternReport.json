@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://tidepool.dev/schemas/PatternReport.json",
+  "$id": "https://exomonad.dev/schemas/PatternReport.json",
   "title": "PatternReport",
   "description": "Report of patterns identified from production log analysis",
   "type": "object",

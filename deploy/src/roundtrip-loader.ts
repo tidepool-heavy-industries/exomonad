@@ -1,11 +1,11 @@
 /**
  * Minimal WASM loader for roundtrip serialization testing.
  *
- * Loads the roundtrip functions exported by tidepool-wasm for property testing.
+ * Loads the roundtrip functions exported by exomonad-wasm for property testing.
  */
 
 import { WASI, File, OpenFile, ConsoleStdout } from "@bjorn3/browser_wasi_shim";
-import { createJsFFI, type WasmExports } from "tidepool-generated-ts";
+import { createJsFFI, type WasmExports } from "exomonad-generated-ts";
 import { setupPolyfills } from "./polyfills";
 
 // =============================================================================

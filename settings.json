@@ -1,9 +1,9 @@
 {
   "mcpServers": {
-    "tidepool": {
+    "exomonad": {
       "transport": {
         "type": "http",
-        "url": "http+unix://.tidepool/sockets/control.sock"
+        "url": "http+unix://.exomonad/sockets/control.sock"
       }
     }
   }

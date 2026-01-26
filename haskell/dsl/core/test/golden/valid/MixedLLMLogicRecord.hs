@@ -10,10 +10,10 @@ module MixedLLMLogicRecord where
 
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Input, Schema, UsesEffects, Exit, LLMKind(..))
-import Tidepool.Graph.Generic (GraphMode(..))
-import qualified Tidepool.Graph.Generic as G
-import Tidepool.Graph.Goto (Goto)
+import ExoMonad.Graph.Types (type (:@), Input, Schema, UsesEffects, Exit, LLMKind(..))
+import ExoMonad.Graph.Generic (GraphMode(..))
+import qualified ExoMonad.Graph.Generic as G
+import ExoMonad.Graph.Goto (Goto)
 
 data Query
 data Intent

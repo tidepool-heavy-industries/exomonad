@@ -1,4 +1,4 @@
-# Single-stage Dockerfile for Tidepool CI
+# Single-stage Dockerfile for ExoMonad CI
 # Pre-builds all Haskell dependencies
 FROM haskell:9.10
 

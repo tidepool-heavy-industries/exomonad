@@ -6,8 +6,8 @@ import qualified Data.ByteString.Lazy as LBS
 import qualified Network.WebSockets as WS
 import Test.Hspec
 
-import Tidepool.Wire.Types
-import Tidepool.Server.WebSocket
+import ExoMonad.Wire.Types
+import ExoMonad.Server.WebSocket
 
 spec :: Spec
 spec = do

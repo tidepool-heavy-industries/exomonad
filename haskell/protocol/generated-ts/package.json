@@ -1,7 +1,7 @@
 {
-  "name": "tidepool-generated-ts",
+  "name": "exomonad-generated-ts",
   "version": "0.1.0",
-  "description": "Generated TypeScript bindings for Tidepool WASM graphs",
+  "description": "Generated TypeScript bindings for ExoMonad WASM graphs",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -28,6 +28,6 @@
     "@cloudflare/workers-types": "^4.20241230.0",
     "typescript": "^5.0.0"
   },
-  "keywords": ["tidepool", "wasm", "llm", "agents"],
+  "keywords": ["exomonad", "wasm", "llm", "agents"],
   "license": "MIT"
 }

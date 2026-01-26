@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # =============================================================================
-# Tidepool IDE - Idempotent Session Management
+# ExoMonad IDE - Idempotent Session Management
 # =============================================================================
 # Single command to enter the development environment.
 #
@@ -33,7 +33,7 @@ echo "Waiting for Zellij container..."
 TIMEOUT=30
 ELAPSED=0
 while [ $ELAPSED -lt $TIMEOUT ]; do
-    if docker exec tidepool-zellij test -S /var/run/docker.sock 2>/dev/null; then
+    if docker exec exomonad-zellij test -S /var/run/docker.sock 2>/dev/null; then
         break
     fi
     sleep 1
@@ -50,6 +50,6 @@ fi
 #    gosu user: Run zellij as UID 1000 so session socket is user-owned
 #               This enables cross-container control via tui-spawner
 echo "Connecting to Zellij session..."
-exec docker exec -it tidepool-zellij \
+exec docker exec -it exomonad-zellij \
     gosu user zellij --layout /etc/zellij/layouts/main.kdl \
     attach --create main

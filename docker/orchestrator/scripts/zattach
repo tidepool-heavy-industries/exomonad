@@ -2,7 +2,7 @@
 # Shim script for attaching to Zellij sessions
 # Handles root→user context switch automatically
 #
-# Usage: docker exec -it tidepool-orchestrator zattach [session-name]
+# Usage: docker exec -it exomonad-orchestrator zattach [session-name]
 # Default session: orchestrator
 
 TARGET_USER="user"

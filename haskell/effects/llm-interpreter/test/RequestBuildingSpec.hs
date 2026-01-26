@@ -8,8 +8,8 @@ import Data.Aeson.KeyMap qualified as KM
 import Data.Vector qualified as V
 import Test.Hspec
 
-import Tidepool.LLM.Interpreter (buildAnthropicRequest, buildOpenAIRequest, AnthropicTool(..))
-import Tidepool.Effects.LLMProvider (AnthropicConfig(..), OpenAIConfig(..), ThinkingBudget(..))
+import ExoMonad.LLM.Interpreter (buildAnthropicRequest, buildOpenAIRequest, AnthropicTool(..))
+import ExoMonad.Effects.LLMProvider (AnthropicConfig(..), OpenAIConfig(..), ThinkingBudget(..))
 
 
 spec :: Spec

@@ -35,7 +35,7 @@ if [ ! -f "$CONFIG_DIR/settings.json" ]; then
         "hooks": [
           {
             "type": "command",
-            "command": "mantle-agent hook pre-tool-use",
+            "command": "exomonad hook pre-tool-use",
             "timeout": 300
           }
         ]
@@ -49,7 +49,7 @@ else
 fi
 
 # 3. Configure MCP
-ROLE="${TIDEPOOL_ROLE:-agent}"
+ROLE="${EXOMONAD_ROLE:-agent}"
 # Subagents might already have .mcp.json written by SpawnAgents to their worktree root.
 # Root agents might need it in their specific workspace.
 AGENT_WORKSPACE="/workspace/${ROLE}"
@@ -76,7 +76,7 @@ if [ -n "${CONTROL_SERVER_URL:-}" ]; then
     echo "Configuring MCP via TCP: ${CONTROL_SERVER_URL}/role/${ROLE}/mcp"
     write_mcp_config '{
   "mcpServers": {
-    "tidepool": {
+    "exomonad": {
       "type": "http",
       "url": "'"${CONTROL_SERVER_URL}/role/${ROLE}/mcp"'"
     }

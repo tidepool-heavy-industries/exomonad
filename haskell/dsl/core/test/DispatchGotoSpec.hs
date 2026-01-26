@@ -21,20 +21,20 @@ import Control.Monad.Freer (run)
 import GHC.Generics (Generic)
 import Test.Hspec
 
-import Tidepool.Graph.Goto
+import ExoMonad.Graph.Goto
   ( To
   , GotoChoice
   , gotoChoice
   , gotoExit
   , Goto
   )
-import Tidepool.Graph.Goto.Internal (GotoChoice(..))  -- For test assertions
-import Tidepool.Graph.Interpret (DispatchGoto(..))
-import Tidepool.Graph.Generic (GraphMode(..), type (:-), AsHandler)
-import Tidepool.Graph.Types (Input, UsesEffects, type (:@))
-import Tidepool.Effect.NodeMeta (NodeMeta, GraphMeta, runNodeMeta, runGraphMeta, defaultNodeMeta, defaultGraphMeta)
-import qualified Tidepool.Graph.Types as Types (Exit)
-import qualified Tidepool.Graph.Generic as G
+import ExoMonad.Graph.Goto.Internal (GotoChoice(..))  -- For test assertions
+import ExoMonad.Graph.Interpret (DispatchGoto(..))
+import ExoMonad.Graph.Generic (GraphMode(..), type (:-), AsHandler)
+import ExoMonad.Graph.Types (Input, UsesEffects, type (:@))
+import ExoMonad.Effect.NodeMeta (NodeMeta, GraphMeta, runNodeMeta, runGraphMeta, defaultNodeMeta, defaultGraphMeta)
+import qualified ExoMonad.Graph.Types as Types (Exit)
+import qualified ExoMonad.Graph.Generic as G
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TEST GRAPHS

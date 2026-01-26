@@ -1,5 +1,5 @@
 /**
- * Telegram effect types for Tidepool agents.
+ * Telegram effect types for ExoMonad agents.
  *
  * This package provides TypeScript types that mirror the Haskell
  * Telegram effect DSL, enabling type-safe communication between
@@ -15,7 +15,7 @@
  *   unitResult,
  *   messagesResult,
  *   firstText
- * } from 'tidepool-telegram';
+ * } from 'exomonad-telegram';
  *
  * async function handleEffect(effect: TelegramEffect): Promise<TelegramEffectResult> {
  *   if (isSendEffect(effect)) {

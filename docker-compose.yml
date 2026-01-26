@@ -16,7 +16,7 @@ services:
     build:
       context: .
       dockerfile: docker/control-server/Dockerfile
-    container_name: tidepool-control-server
+    container_name: exomonad-control-server
     platform: linux/amd64
     deploy:
       resources:
@@ -27,29 +27,29 @@ services:
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - GH_TOKEN=${GH_TOKEN}
-      - GITHUB_REPO=${GITHUB_REPO:-tidepool-heavy-industries/tidepool}
-      - TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
-      - TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
-      - TIDEPOOL_WORKTREES_PATH=/worktrees
-      - TIDEPOOL_WORKTREES_VOLUME=tidepool-worktrees
-      - TIDEPOOL_SOCKETS_PATH=/sockets
-      - TIDEPOOL_PROJECT_DIR=/repo
+      - GITHUB_REPO=${GITHUB_REPO:-exomonad-ai/exomonad}
+      - EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
+      - EXOMONAD_TUI_SOCKET=/sockets/tui.sock
+      - EXOMONAD_WORKTREES_PATH=/worktrees
+      - EXOMONAD_WORKTREES_VOLUME=exomonad-worktrees
+      - EXOMONAD_SOCKETS_PATH=/sockets
+      - EXOMONAD_PROJECT_DIR=/repo
       - GEMMA_ENDPOINT=${GEMMA_ENDPOINT:-http://host.docker.internal:11434}
       - HOST_UID=${HOST_UID:-1000}
       - HOST_GID=${HOST_GID:-1000}
-      - TIDEPOOL_AGENT_IMAGE=${TIDEPOOL_AGENT_IMAGE:-tidepool-agent:latest}
-      - TIDEPOOL_NETWORK=tidepool-internal
+      - EXOMONAD_AGENT_IMAGE=${EXOMONAD_AGENT_IMAGE:-exomonad-agent:latest}
+      - EXOMONAD_NETWORK=exomonad-internal
       - RUST_LOG=info
       - XDG_RUNTIME_DIR=/run/user/1000
       - ZELLIJ_SESSION_NAME=main
     volumes:
-      - tidepool-sockets:/sockets
-      - tidepool-zellij:/run/user/1000
-      - tidepool-gh-auth:/home/user/.config/gh
-      - tidepool-worktrees:/worktrees:rw
+      - exomonad-sockets:/sockets
+      - exomonad-zellij:/run/user/1000
+      - exomonad-gh-auth:/home/user/.config/gh
+      - exomonad-worktrees:/worktrees:rw
       # Named volume for repo (cloned on first start via entrypoint)
       # Cannot use bind mounts - Docker runs on remote NixOS, not local macOS
-      - tidepool-repo:/repo:rw
+      - exomonad-repo:/repo:rw
     working_dir: /repo
     healthcheck:
       test: ["CMD-SHELL", "socat -u OPEN:/dev/null UNIX-CONNECT:/sockets/control.sock || exit 1"]
@@ -59,7 +59,7 @@ services:
       start_period: 10s
     restart: on-failure:5
     networks:
-      - tidepool-internal
+      - exomonad-internal
 
   # ===========================================================================
   # Zellij: Visual multiplexer (human attaches here)
@@ -72,7 +72,7 @@ services:
     build:
       context: .
       dockerfile: docker/zellij/Dockerfile
-    container_name: tidepool-zellij
+    container_name: exomonad-zellij
     platform: linux/amd64
     tty: true
     stdin_open: true
@@ -82,12 +82,12 @@ services:
       pm:
         condition: service_healthy
     volumes:
-      - tidepool-zellij:/run/user/1000
-      - tidepool-sockets:/sockets
-      - tidepool-worktrees:/worktrees
+      - exomonad-zellij:/run/user/1000
+      - exomonad-sockets:/sockets
+      - exomonad-worktrees:/worktrees
     restart: "no"
     networks:
-      - tidepool-internal
+      - exomonad-internal
 
   # ===========================================================================
   # TL (Tech Lead): Main coding agent
@@ -100,23 +100,23 @@ services:
     build:
       context: .
       dockerfile: docker/claude-agent/Dockerfile
-    container_name: tidepool-tl
+    container_name: exomonad-tl
     platform: linux/amd64
     tty: true
     stdin_open: true
     environment:
-      - TIDEPOOL_ROLE=tl
+      - EXOMONAD_ROLE=tl
       - CONTROL_SERVER_URL=http://control-server:7432
-      - MANTLE_CONTROL_SOCKET=/sockets/control.sock
+      - EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
     volumes:
       # Named volume for repo (cloned on first start)
       # Cannot use bind mounts - Docker runs on remote NixOS, not local macOS
-      - tidepool-repo:/workspace/tl
+      - exomonad-repo:/workspace/tl
       # Worktrees volume for spawned agents
-      - tidepool-worktrees:/worktrees
-      - tidepool-sockets:/sockets
-      - tidepool-claude-tl:/home/agent/.claude
-      - tidepool-gh-auth:/home/agent/.config/gh
+      - exomonad-worktrees:/worktrees
+      - exomonad-sockets:/sockets
+      - exomonad-claude-tl:/home/agent/.claude
+      - exomonad-gh-auth:/home/agent/.config/gh
     depends_on:
       control-server:
         condition: service_healthy
@@ -128,7 +128,7 @@ services:
       start_period: 30s
     restart: on-failure:5
     networks:
-      - tidepool-internal
+      - exomonad-internal
 
   # ===========================================================================
   # PM (Project Manager): Planning and coordination agent
@@ -141,19 +141,19 @@ services:
     build:
       context: .
       dockerfile: docker/claude-agent/Dockerfile
-    container_name: tidepool-pm
+    container_name: exomonad-pm
     platform: linux/amd64
     tty: true
     stdin_open: true
     environment:
-      - TIDEPOOL_ROLE=pm
+      - EXOMONAD_ROLE=pm
       - CONTROL_SERVER_URL=http://control-server:7432
-      - MANTLE_CONTROL_SOCKET=/sockets/control.sock
+      - EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
     volumes:
-      - tidepool-worktrees:/workspace
-      - tidepool-sockets:/sockets
-      - tidepool-claude-pm:/home/agent/.claude
-      - tidepool-gh-auth:/home/agent/.config/gh
+      - exomonad-worktrees:/workspace
+      - exomonad-sockets:/sockets
+      - exomonad-claude-pm:/home/agent/.claude
+      - exomonad-gh-auth:/home/agent/.config/gh
     depends_on:
       control-server:
         condition: service_healthy
@@ -165,7 +165,7 @@ services:
       start_period: 30s
     restart: on-failure:5
     networks:
-      - tidepool-internal
+      - exomonad-internal
 
   # ===========================================================================
   # OpenObserve: Observability backend (optional)
@@ -174,22 +174,22 @@ services:
     profiles: ["monitoring"]
     init: true
     image: public.ecr.aws/zinclabs/openobserve:latest
-    container_name: tidepool-openobserve
+    container_name: exomonad-openobserve
     restart: on-failure:5
     ports:
       - "5080:5080"
       - "5081:5081"
     environment:
       - ZO_DATA_DIR=/data
-      - ZO_ROOT_USER_EMAIL=${OPENOBSERVE_EMAIL:-admin@tidepool.local}
-      - ZO_ROOT_USER_PASSWORD=${OPENOBSERVE_PASSWORD:-tidepool-dev}
+      - ZO_ROOT_USER_EMAIL=${OPENOBSERVE_EMAIL:-admin@exomonad.local}
+      - ZO_ROOT_USER_PASSWORD=${OPENOBSERVE_PASSWORD:-exomonad-dev}
       - ZO_MAX_FILE_SIZE_IN_MEMORY=128
       - ZO_MEMORY_CACHE_MAX_SIZE=256
       - ZO_FILE_MOVE_THREAD_NUM=1
     volumes:
-      - tidepool-openobserve:/data
+      - exomonad-openobserve:/data
     networks:
-      - tidepool-internal
+      - exomonad-internal
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5080/healthz"]
       interval: 10s
@@ -210,7 +210,7 @@ services:
       context: .
       dockerfile: docker/orchestrator/Dockerfile
       target: orchestrator
-    container_name: tidepool-orchestrator
+    container_name: exomonad-orchestrator
     deploy:
       resources:
         limits:
@@ -226,50 +226,50 @@ services:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
       - HANGAR_ROOT=/worktrees
-      - TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
-      - TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
+      - EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
+      - EXOMONAD_TUI_SOCKET=/sockets/tui.sock
       - CLAUDE_CONFIG_DIR=/home/user/.claude
       - RUST_BACKTRACE=full
-      - TIDEPOOL_REPO_URL=${TIDEPOOL_REPO_URL:-git@github.com:tidepool-heavy-industries/tidepool.git}
-      - TIDEPOOL_REPO_BRANCH=${TIDEPOOL_REPO_BRANCH:-main}
+      - EXOMONAD_REPO_URL=${EXOMONAD_REPO_URL:-git@github.com:exomonad-ai/exomonad.git}
+      - EXOMONAD_REPO_BRANCH=${EXOMONAD_REPO_BRANCH:-main}
       - CLAUDE_CODE_DISABLE_INSTALLATION_CHECKS=1
       - DISABLE_AUTOUPDATER=1
       - DISABLE_TELEMETRY=1
     volumes:
-      - tidepool-repo:/worktrees
-      - tidepool-sockets:/sockets
-      - tidepool-claude-auth:/home/user/.claude
-      - tidepool-gh-auth:/home/user/.config/gh
-      - tidepool-ssh-keys:/home/user/.ssh
-      - tidepool-zellij:/run/user/1000
+      - exomonad-repo:/worktrees
+      - exomonad-sockets:/sockets
+      - exomonad-claude-auth:/home/user/.claude
+      - exomonad-gh-auth:/home/user/.config/gh
+      - exomonad-ssh-keys:/home/user/.ssh
+      - exomonad-zellij:/run/user/1000
     restart: on-failure:5
     networks:
-      - tidepool-internal
+      - exomonad-internal
     command: ["orchestrator"]
 
 volumes:
-  tidepool-sockets:
-    name: tidepool-sockets
-  tidepool-claude-tl:
-    name: tidepool-claude-tl
-  tidepool-claude-pm:
-    name: tidepool-claude-pm
-  tidepool-claude-auth:
-    name: tidepool-claude-auth
-  tidepool-gh-auth:
-    name: tidepool-gh-auth
-  tidepool-repo:
-    name: tidepool-repo
-  tidepool-ssh-keys:
-    name: tidepool-ssh-keys
-  tidepool-zellij:
-    name: tidepool-zellij
-  tidepool-openobserve:
-    name: tidepool-openobserve
-  tidepool-worktrees:
-    name: tidepool-worktrees
+  exomonad-sockets:
+    name: exomonad-sockets
+  exomonad-claude-tl:
+    name: exomonad-claude-tl
+  exomonad-claude-pm:
+    name: exomonad-claude-pm
+  exomonad-claude-auth:
+    name: exomonad-claude-auth
+  exomonad-gh-auth:
+    name: exomonad-gh-auth
+  exomonad-repo:
+    name: exomonad-repo
+  exomonad-ssh-keys:
+    name: exomonad-ssh-keys
+  exomonad-zellij:
+    name: exomonad-zellij
+  exomonad-openobserve:
+    name: exomonad-openobserve
+  exomonad-worktrees:
+    name: exomonad-worktrees
 
 networks:
-  tidepool-internal:
-    name: tidepool-internal
+  exomonad-internal:
+    name: exomonad-internal
     driver: bridge

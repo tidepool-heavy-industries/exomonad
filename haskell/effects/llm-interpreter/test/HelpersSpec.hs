@@ -6,7 +6,7 @@ module HelpersSpec (spec) where
 import Test.Hspec
 import Servant.Client (BaseUrl(..), Scheme(..))
 
-import Tidepool.LLM.Interpreter (parseBaseUrl)
+import ExoMonad.LLM.Interpreter (parseBaseUrl)
 
 
 spec :: Spec

@@ -15,15 +15,15 @@ module CallHandlerSpec (spec) where
 import Control.Monad.Freer (Eff, run)
 import Test.Hspec
 
-import Tidepool.Graph.Goto
+import ExoMonad.Graph.Goto
   ( To
   , GotoChoice
   , gotoChoice
   , gotoExit
   )
-import Tidepool.Graph.Interpret (CallHandler(..))
-import Tidepool.Graph.Goto.Internal (OneOf(..), GotoChoice(..))  -- For test assertions
-import Tidepool.Graph.Types (Exit)
+import ExoMonad.Graph.Interpret (CallHandler(..))
+import ExoMonad.Graph.Goto.Internal (OneOf(..), GotoChoice(..))  -- For test assertions
+import ExoMonad.Graph.Types (Exit)
 
 -- | Simple target list.
 type SimpleTargets = '[To "next" String, To Exit Int]

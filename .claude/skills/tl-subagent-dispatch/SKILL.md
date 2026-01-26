@@ -31,7 +31,7 @@ description: Use when spawning subagents, monitoring their progress, or interven
 spawn_agents(["123", "456", "789"])
 
 # Returns worktree paths
-# /Users/.../dev/.worktrees/tidepool/gh-123-description
+# /Users/.../dev/.worktrees/exomonad/gh-123-description
 ```
 
 ### 2. Human Launches Agents (Manual)

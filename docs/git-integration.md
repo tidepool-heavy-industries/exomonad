@@ -1,6 +1,6 @@
 # Git Integration Research
 
-> Research findings for the Git effect in tidepool.
+> Research findings for the Git effect in exomonad.
 
 ## Recommendation: Use Git CLI
 
@@ -190,7 +190,7 @@ feat(github-effect): Add GitHub effect for reading issue info
 Add effect for querying GitHub API...
 
  cabal.project | 1 +
- haskell/dsl/core/src/Tidepool/Effects/GitHub.hs | 268 ++++++++++++++++++
+ haskell/dsl/core/src/ExoMonad/Effects/GitHub.hs | 268 ++++++++++++++++++
  5 files changed, 530 insertions(+)
 ```
 
@@ -203,7 +203,7 @@ git show --numstat --format="" HEAD
 Output:
 ```
 1	0	cabal.project
-268	0	haskell/dsl/core/src/Tidepool/Effects/GitHub.hs
+268	0	haskell/dsl/core/src/ExoMonad/Effects/GitHub.hs
 ```
 
 Format: `<additions>\t<deletions>\t<path>`

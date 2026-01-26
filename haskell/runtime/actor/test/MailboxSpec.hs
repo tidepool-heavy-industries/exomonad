@@ -8,7 +8,7 @@ import Data.Aeson (Value(..), object, (.=))
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Vector as V
 
-import Tidepool.Actor.Mailbox
+import ExoMonad.Actor.Mailbox
 
 
 spec :: Spec

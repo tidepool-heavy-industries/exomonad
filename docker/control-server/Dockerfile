@@ -15,14 +15,14 @@ COPY rust/tui-spawner ./tui-spawner
 COPY rust/tui-sidebar ./tui-sidebar
 COPY rust/tui-popup ./tui-popup
 COPY rust/docker-ctl ./docker-ctl
-COPY rust/mantle-shared ./mantle-shared
+COPY rust/exomonad-shared ./exomonad-shared
 COPY rust/hangar-config ./hangar-config
 
 # Create minimal workspace Cargo.toml with required dependencies
 RUN cat > Cargo.toml <<'EOF'
 [workspace]
 resolver = "2"
-members = ["tui-spawner", "tui-sidebar", "tui-popup", "docker-ctl", "mantle-shared", "hangar-config"]
+members = ["tui-spawner", "tui-sidebar", "tui-popup", "docker-ctl", "exomonad-shared", "hangar-config"]
 
 [workspace.dependencies]
 anyhow = "1"
@@ -73,8 +73,8 @@ RUN sed -i '/package zlib/,+2d' cabal.project
 RUN --mount=type=cache,id=control-server-store,target=/root/.cabal/store \
     --mount=type=cache,id=control-server-dist,target=/build/dist-newstyle \
     cabal update && \
-    cabal build tidepool-control-server -j --ghc-options=-O1 && \
-    cp $(cabal list-bin tidepool-control-server) /usr/local/bin/tidepool-control-server
+    cabal build exomonad-control-server -j --ghc-options=-O1 && \
+    cp $(cabal list-bin exomonad-control-server) /usr/local/bin/exomonad-control-server
 
 # =============================================================================
 # Stage 2: Runtime
@@ -121,15 +121,15 @@ COPY --from=rust-builder /build/target/release/tui-spawner /usr/local/bin/tui-sp
 COPY --from=rust-builder /build/target/release/docker-ctl /usr/local/bin/docker-ctl
 
 # Copy control-server binary
-COPY --from=builder /usr/local/bin/tidepool-control-server /usr/local/bin/tidepool-control-server
+COPY --from=builder /usr/local/bin/exomonad-control-server /usr/local/bin/exomonad-control-server
 
 # Copy entrypoint
 COPY docker/control-server/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Environment
-ENV TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
-ENV TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
+ENV EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
+ENV EXOMONAD_TUI_SOCKET=/sockets/tui.sock
 ENV XDG_RUNTIME_DIR=/run/user/1000
 ENV ZELLIJ_SESSION_NAME=main
 

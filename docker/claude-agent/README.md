@@ -1,6 +1,6 @@
 # Claude Code Agent Container
 
-Docker container for running Claude Code agents in the Tidepool container separation architecture.
+Docker container for running Claude Code agents in the ExoMonad container separation architecture.
 
 ## Architecture
 
@@ -10,7 +10,7 @@ Agent containers run Claude Code CLI and connect to the control-server via TCP M
 ┌──────────────────────────────────────┐
 │ claude-agent container               │
 │  • Claude Code CLI                   │
-│  • mantle-agent (hook forwarding)    │
+│  • exomonad (hook forwarding)    │
 │  • Haskell/Rust toolchains           │
 │  • No SSH (uses docker exec)         │
 └──────────────┬───────────────────────┘
@@ -27,7 +27,7 @@ Agent containers run Claude Code CLI and connect to the control-server via TCP M
 
 | Variable | Purpose |
 |----------|---------|
-| `TIDEPOOL_ROLE` | Agent role: `tl` (Tech Lead) or `pm` (Project Manager) |
+| `EXOMONAD_ROLE` | Agent role: `tl` (Tech Lead) or `pm` (Project Manager) |
 | `CONTROL_SERVER_URL` | TCP URL for MCP (e.g., `http://control-server:7432`) |
 | `ANTHROPIC_API_KEY` | Claude API key |
 | `GIT_ALTERNATES_OBJECT_DIR` | Optional: shared git objects directory |
@@ -40,7 +40,7 @@ The entrypoint automatically configures MCP based on environment:
 ```json
 {
   "mcpServers": {
-    "tidepool": {
+    "exomonad": {
       "type": "http",
       "url": "http://control-server:7432/role/tl/mcp"
     }
@@ -54,7 +54,7 @@ The entrypoint automatically configures MCP based on environment:
   "mcpServers": {
     "control": {
       "type": "http",
-      "url": "http+unix://%2Fhome%2Fagent%2F.tidepool%2Fsockets%2Fcontrol.sock/mcp"
+      "url": "http+unix://%2Fhome%2Fagent%2F.exomonad%2Fsockets%2Fcontrol.sock/mcp"
     }
   }
 }
@@ -66,7 +66,7 @@ Remote command execution uses the `docker-ctl exec` CLI tool instead of SSH:
 
 ```bash
 # Execute command in this container
-docker-ctl exec tidepool-tl -- echo hello
+docker-ctl exec exomonad-tl -- echo hello
 ```
 
 This approach eliminates the need for:
@@ -85,7 +85,7 @@ docker compose build tl pm
 Or standalone:
 
 ```bash
-docker build -t tidepool/claude-agent -f docker/claude-agent/Dockerfile .
+docker build -t exomonad/claude-agent -f docker/claude-agent/Dockerfile .
 ```
 
 ## Usage via Docker Compose
@@ -95,11 +95,11 @@ services:
   tl:
     build:
       dockerfile: docker/claude-agent/Dockerfile
-    container_name: tidepool-tl
+    container_name: exomonad-tl
     tty: true
     stdin_open: true
     environment:
-      - TIDEPOOL_ROLE=tl
+      - EXOMONAD_ROLE=tl
       - CONTROL_SERVER_URL=http://control-server:7432
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
 ```
@@ -107,7 +107,7 @@ services:
 Attach via Zellij panes or directly:
 
 ```bash
-docker attach tidepool-tl
+docker attach exomonad-tl
 # Detach: Ctrl+p, Ctrl+q
 ```
 
@@ -119,13 +119,13 @@ Share git objects between containers to save disk space:
 
 ```bash
 # Host: create shared object store
-git clone --bare https://github.com/org/repo.git ~/.cache/tidepool/git/repo.git
+git clone --bare https://github.com/org/repo.git ~/.cache/exomonad/git/repo.git
 ```
 
 Mount and set environment:
 ```yaml
 volumes:
-  - ~/.cache/tidepool/git:/cache/git:ro
+  - ~/.cache/exomonad/git:/cache/git:ro
 environment:
   - GIT_ALTERNATES_OBJECT_DIR=/cache/git/repo.git/objects
 ```
@@ -136,7 +136,7 @@ Mount Claude credentials (read-only recommended):
 
 ```yaml
 volumes:
-  - tidepool-claude-auth:/mnt/secrets:ro
+  - exomonad-claude-auth:/mnt/secrets:ro
 ```
 
 The entrypoint links credentials from `/mnt/secrets/` into the config directory.
@@ -147,8 +147,8 @@ The `entrypoint.sh` script:
 
 1. **Git alternates**: Links worktree to shared object store if `GIT_ALTERNATES_OBJECT_DIR` set
 2. **Auth isolation**: Links credentials from `/mnt/secrets/` if mounted
-3. **Claude hooks**: Creates `settings.json` with mantle-agent hooks (if not already linked)
-4. **MCP config**: Generates `.mcp.json` based on `CONTROL_SERVER_URL` or `MANTLE_CONTROL_SOCKET`
+3. **Claude hooks**: Creates `settings.json` with exomonad hooks (if not already linked)
+4. **MCP config**: Generates `.mcp.json` based on `CONTROL_SERVER_URL` or `EXOMONAD_CONTROL_SOCKET`
 5. **Exec via tini**: Launches CMD with proper signal handling
 
 ## Installed Toolchains

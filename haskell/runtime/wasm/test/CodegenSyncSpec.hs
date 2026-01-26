@@ -21,13 +21,13 @@ import Data.Text.Encoding (encodeUtf8)
 import Data.List (sort)
 import qualified Data.Map.Strict as Map
 
-import Tidepool.Wasm.Registry
+import ExoMonad.Wasm.Registry
   ( getRegistry
   , getGraphInfo
   , registryGraphSpecs
   )
-import Tidepool.Wasm.Registry.Default (setupDefaultRegistry)
-import Tidepool.Generated.GraphSpecs (GraphSpec(..))
+import ExoMonad.Wasm.Registry.Default (setupDefaultRegistry)
+import ExoMonad.Generated.GraphSpecs (GraphSpec(..))
 
 
 spec :: Spec

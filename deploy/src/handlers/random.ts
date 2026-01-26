@@ -9,8 +9,8 @@ import { randomInt } from "node:crypto";
 import type {
   RandomIntEffect,
   EffectResult,
-} from "tidepool-generated-ts";
-import { successResult, errorResult } from "tidepool-generated-ts";
+} from "exomonad-generated-ts";
+import { successResult, errorResult } from "exomonad-generated-ts";
 
 /**
  * Handle RandomInt effect - get random integer in range [min, max] (inclusive).

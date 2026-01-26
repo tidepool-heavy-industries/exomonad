@@ -6,8 +6,8 @@ module Main (main) where
 import Test.Hspec
 import Data.Aeson (Value(..), object, (.=))
 import qualified Data.Text as T
-import Tidepool.Gemini.Interpreter
-import Tidepool.Effect.Gemini (GeminiResult(..))
+import ExoMonad.Gemini.Interpreter
+import ExoMonad.Effect.Gemini (GeminiResult(..))
 
 main :: IO ()
 main = hspec spec

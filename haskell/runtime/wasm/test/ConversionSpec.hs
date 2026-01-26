@@ -8,7 +8,7 @@ import Test.Hspec
 import Data.Aeson (toJSON, Value(..), object, (.=))
 import qualified Data.Text as T
 
-import Tidepool.Anthropic.Types
+import ExoMonad.Anthropic.Types
   ( ContentBlock(..)
   , ImageSource(..)
   , Message(..)
@@ -18,16 +18,16 @@ import Tidepool.Anthropic.Types
   , ThinkingContent(..)
   , RedactedThinking(..)
   )
-import Tidepool.Wasm.WireTypes
+import ExoMonad.Wasm.WireTypes
   ( WireMessage(..)
   , WireContentBlock(..)
   )
-import Tidepool.Effect.Types (TurnResult(..))
-import Tidepool.Wasm.Conversion
+import ExoMonad.Effect.Types (TurnResult(..))
+import ExoMonad.Wasm.Conversion
 
 
 spec :: Spec
-spec = describe "Tidepool.Wasm.Conversion" $ do
+spec = describe "ExoMonad.Wasm.Conversion" $ do
   describe "contentBlockToWire" $ do
     it "converts TextBlock" $ do
       contentBlockToWire (TextBlock "hello") `shouldBe` Just (WCBText "hello")

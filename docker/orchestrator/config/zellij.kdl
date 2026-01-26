@@ -1,7 +1,7 @@
-// Zellij configuration for Tidepool Orchestrator
+// Zellij configuration for ExoMonad Orchestrator
 
 // Tell Zellij where to find custom layouts
-layout_dir "/etc/tidepool/zellij/layouts"
+layout_dir "/etc/exomonad/zellij/layouts"
 
 // Memory optimization settings to prevent OOM in Docker
 // Default scrollback is 10000 lines per pane - reduces RAM during resize/scroll

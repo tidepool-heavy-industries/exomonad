@@ -14,9 +14,9 @@ importers:
       '@cloudflare/ai-utils':
         specifier: ^1.0.1
         version: 1.0.1
-      tidepool-generated-ts:
+      exomonad-generated-ts:
         specifier: workspace:*
-        version: link:tidepool-generated-ts
+        version: link:exomonad-generated-ts
       zod:
         specifier: ^4.3.4
         version: 4.3.4
@@ -58,7 +58,7 @@ importers:
         specifier: ^8.18.3
         version: 8.18.3
 
-  tidepool-generated-ts:
+  exomonad-generated-ts:
     dependencies:
       '@anthropic-ai/sdk':
         specifier: ^0.39.0

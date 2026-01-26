@@ -9,7 +9,7 @@ import { describe, it, expect } from "vitest";
 
 /**
  * ToolResultOutcome - wire format for tool dispatcher results.
- * Matches Haskell ToolResultOutcome type from tidepool-wasm/src/Tidepool/Wasm/WireTypes.hs
+ * Matches Haskell ToolResultOutcome type from exomonad-wasm/src/ExoMonad/Wasm/WireTypes.hs
  */
 type ToolResultOutcome =
   | { tag: "success"; value: unknown }

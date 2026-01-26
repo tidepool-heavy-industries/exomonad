@@ -29,14 +29,14 @@ import Control.Monad.Freer (Eff, run)
 import GHC.Generics (Generic)
 import Test.Hspec
 
-import Test.Tidepool.MockLLM (runMockLLM)
-import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit)
-import Tidepool.Graph.Generic (GraphMode(..), AsHandler)
-import qualified Tidepool.Graph.Generic as G
-import Tidepool.Graph.Goto (Goto, To, GotoChoice, gotoExit)
-import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
-import Tidepool.Graph.Interpret (CallHandler(..))
-import Tidepool.Schema (HasJSONSchema(..), SchemaType(..), objectSchema, describeField, emptySchema)
+import Test.ExoMonad.MockLLM (runMockLLM)
+import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit)
+import ExoMonad.Graph.Generic (GraphMode(..), AsHandler)
+import qualified ExoMonad.Graph.Generic as G
+import ExoMonad.Graph.Goto (Goto, To, GotoChoice, gotoExit)
+import ExoMonad.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
+import ExoMonad.Graph.Interpret (CallHandler(..))
+import ExoMonad.Schema (HasJSONSchema(..), SchemaType(..), objectSchema, describeField, emptySchema)
 
 
 -- ════════════════════════════════════════════════════════════════════════════

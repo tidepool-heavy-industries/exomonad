@@ -11,8 +11,8 @@ import type {
   EffectResult,
   WireContentBlock,
   LlmCallResult,
-} from "tidepool-generated-ts";
-import { successResult, errorResult } from "tidepool-generated-ts";
+} from "exomonad-generated-ts";
+import { successResult, errorResult } from "exomonad-generated-ts";
 
 /**
  * Rate limit configuration.

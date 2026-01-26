@@ -1,11 +1,11 @@
 /**
- * Tidepool WASM Loader for Cloudflare Workers
+ * ExoMonad WASM Loader for Cloudflare Workers
  *
- * Uses generated dispatcher from tidepool-generated package.
+ * Uses generated dispatcher from exomonad-generated package.
  */
 
 import { WASI, File, OpenFile, ConsoleStdout } from "@bjorn3/browser_wasi_shim";
-import { createJsFFI, type WasmExports } from "tidepool-generated-ts";
+import { createJsFFI, type WasmExports } from "exomonad-generated-ts";
 import { setupPolyfills } from "./polyfills";
 import type {
   StepOutput,
@@ -14,8 +14,8 @@ import type {
   GraphState,
   GraphId,
   GraphWasmExports,
-} from "tidepool-generated-ts";
-import { getGraphFns } from "tidepool-generated-ts";
+} from "exomonad-generated-ts";
+import { getGraphFns } from "exomonad-generated-ts";
 
 // =============================================================================
 // GraphMachine Interface
@@ -94,7 +94,7 @@ export async function loadMachine(options: LoaderOptions): Promise<GraphMachine>
   exports.initRegistry();  // Populate graph registry
 
   if (debug) {
-    console.log("[Tidepool] WASM module loaded");
+    console.log("[ExoMonad] WASM module loaded");
   }
 
   // Cast WASM exports to generated interface
@@ -112,7 +112,7 @@ export async function loadMachine(options: LoaderOptions): Promise<GraphMachine>
     async initialize(graphId: GraphId, input: unknown): Promise<StepOutput> {
       const fns = getGraphFns(graphId, graphExports);
       const inputJson = JSON.stringify(input);
-      if (debug) console.log(`[Tidepool] initialize ${graphId}:`, inputJson);
+      if (debug) console.log(`[ExoMonad] initialize ${graphId}:`, inputJson);
 
       // Handle both sync and async returns from WASM
       const resultStr = await Promise.resolve(fns.initialize(inputJson));
@@ -121,14 +121,14 @@ export async function loadMachine(options: LoaderOptions): Promise<GraphMachine>
         ? JSON.parse(resultStr)
         : defaultStepOutput;
 
-      if (debug) console.log(`[Tidepool] initialize ${graphId} result:`, JSON.stringify(result, null, 2));
+      if (debug) console.log(`[ExoMonad] initialize ${graphId} result:`, JSON.stringify(result, null, 2));
       return result;
     },
 
     async step(graphId: GraphId, result: EffectResult): Promise<StepOutput> {
       const fns = getGraphFns(graphId, graphExports);
       const resultJson = JSON.stringify(result);
-      if (debug) console.log(`[Tidepool] step ${graphId}:`, resultJson);
+      if (debug) console.log(`[ExoMonad] step ${graphId}:`, resultJson);
 
       // Handle both sync and async returns from WASM
       const outputStr = await Promise.resolve(fns.step(resultJson));
@@ -137,7 +137,7 @@ export async function loadMachine(options: LoaderOptions): Promise<GraphMachine>
         ? JSON.parse(outputStr)
         : defaultStepOutput;
 
-      if (debug) console.log(`[Tidepool] step ${graphId} result:`, JSON.stringify(output, null, 2));
+      if (debug) console.log(`[ExoMonad] step ${graphId} result:`, JSON.stringify(output, null, 2));
       return output;
     },
 

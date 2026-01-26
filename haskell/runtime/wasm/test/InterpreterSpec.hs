@@ -31,15 +31,15 @@ import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Test.Hspec
 
-import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, Self)
-import Tidepool.Graph.Generic (GraphMode(..), type (:-))
-import qualified Tidepool.Graph.Generic as G (EntryNode, ExitNode, LogicNode)
-import Tidepool.Graph.Goto (Goto, GotoChoice, To, OneOf, gotoChoice, gotoExit, gotoSelf)
-import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
+import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit, Self)
+import ExoMonad.Graph.Generic (GraphMode(..), type (:-))
+import qualified ExoMonad.Graph.Generic as G (EntryNode, ExitNode, LogicNode)
+import ExoMonad.Graph.Goto (Goto, GotoChoice, To, OneOf, gotoChoice, gotoExit, gotoSelf)
+import ExoMonad.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
 
-import Tidepool.Wasm.Effect (WasmM, logInfo)
-import Tidepool.Wasm.Runner (initializeWasm, WasmResult(..))
-import Tidepool.Wasm.WireTypes (EffectResult(..))
+import ExoMonad.Wasm.Effect (WasmM, logInfo)
+import ExoMonad.Wasm.Runner (initializeWasm, WasmResult(..))
+import ExoMonad.Wasm.WireTypes (EffectResult(..))
 
 
 -- ════════════════════════════════════════════════════════════════════════════

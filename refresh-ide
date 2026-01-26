@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # =============================================================================
-# Tidepool IDE - Hard Refresh
+# ExoMonad IDE - Hard Refresh
 # =============================================================================
 # Use this when you've:
 #   - Updated a Dockerfile
@@ -22,8 +22,8 @@ echo "Rebuilding and refreshing IDE environment..."
 export DOCKER_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null || stat -f '%g' /var/run/docker.sock 2>/dev/null || echo 999)
 
 # 2. Build the reusable agent image (needed by spawn_agents for subagents)
-echo "Building tidepool-agent image..."
-docker build -t tidepool-agent:latest -f docker/claude-agent/Dockerfile .
+echo "Building exomonad-agent image..."
+docker build -t exomonad-agent:latest -f docker/claude-agent/Dockerfile .
 
 # 3. Force recreation of containers
 #    --build: Rebuilds images if Dockerfile changed
@@ -39,6 +39,6 @@ sleep 3
 #    gosu user: Run zellij as UID 1000 so session socket is user-owned
 #               This enables cross-container control via tui-spawner
 echo "Connecting to fresh Zellij session..."
-exec docker exec -it tidepool-zellij \
+exec docker exec -it exomonad-zellij \
     gosu user zellij --layout /etc/zellij/layouts/main.kdl \
     attach --create main

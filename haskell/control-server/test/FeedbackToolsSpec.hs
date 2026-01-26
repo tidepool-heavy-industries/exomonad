@@ -12,9 +12,9 @@ import qualified Data.Text as T
 import System.Directory (doesFileExist, removeFile, createDirectoryIfMissing)
 import Test.Tasty
 import Test.Tasty.HUnit
-import Tidepool.Control.FeedbackTools
-import Tidepool.Graph.Goto (unwrapSingleChoice)
-import Tidepool.Graph.MCPReify (reifyMCPTools, MCPToolInfo(..))
+import ExoMonad.Control.FeedbackTools
+import ExoMonad.Graph.Goto (unwrapSingleChoice)
+import ExoMonad.Graph.MCPReify (reifyMCPTools, MCPToolInfo(..))
 
 main :: IO ()
 main = defaultMain tests
@@ -63,7 +63,7 @@ test_args_serialization = do
 test_integration_write :: Assertion
 test_integration_write = do
   let issueId = "test-issue-integration"
-  let filePath = ".tidepool/feedback/" <> T.unpack issueId <> ".json"
+  let filePath = ".exomonad/feedback/" <> T.unpack issueId <> ".json"
   
   -- Ensure clean state
   exists <- doesFileExist filePath
@@ -98,13 +98,13 @@ test_integration_error :: Assertion
 test_integration_error = do
   -- To trigger an error, we can try to write to a path where a directory is a file.
   -- We'll use an issue ID that requires a directory structure that conflicts with an existing file.
-  -- e.g. .tidepool/feedback/conflict/issue.json, but .tidepool/feedback/conflict is a file.
+  -- e.g. .exomonad/feedback/conflict/issue.json, but .exomonad/feedback/conflict is a file.
   
-  let conflictDir = ".tidepool/feedback/conflict"
+  let conflictDir = ".exomonad/feedback/conflict"
   let issueId = "conflict/issue"
   
   -- Setup: create conflict file
-  createDirectoryIfMissing True ".tidepool/feedback"
+  createDirectoryIfMissing True ".exomonad/feedback"
   writeFile conflictDir "I am a file"
   
   let args = RegisterFeedbackArgs

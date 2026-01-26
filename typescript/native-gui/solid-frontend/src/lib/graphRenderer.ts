@@ -1,5 +1,5 @@
 /**
- * D3 + dagre graph renderer for Tidepool graph visualization.
+ * D3 + dagre graph renderer for ExoMonad graph visualization.
  */
 import * as d3 from "d3";
 import * as dagre from "dagre";

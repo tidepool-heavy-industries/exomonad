@@ -15,7 +15,7 @@ control-server (Haskell)
 tui-spawner (Rust)
     ├─ 1. Write popup definition to /sockets/popup-{uuid}-in.json
     ├─ 2. mkfifo /sockets/popup-{uuid}.fifo
-    ├─ 3. docker exec tidepool-zellij zellij action new-pane --floating -- \
+    ├─ 3. docker exec exomonad-zellij zellij action new-pane --floating -- \
     │      tui-popup --input /sockets/popup-{uuid}-in.json \
     │                --output /sockets/popup-{uuid}.fifo
     ├─ 4. Block reading from FIFO (kernel handles sync)
@@ -126,7 +126,7 @@ Binary output: `target/release/tui-popup`
 
 ## Docker Installation
 
-The binary is installed in the `tidepool-zellij` container via Dockerfile:
+The binary is installed in the `exomonad-zellij` container via Dockerfile:
 
 ```dockerfile
 # docker/zellij/Dockerfile

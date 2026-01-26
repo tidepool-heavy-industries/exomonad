@@ -4,7 +4,7 @@ module ProtocolSpec (spec) where
 import qualified Data.ByteString as BS
 import Test.Hspec
 
-import Tidepool.GHCi.Protocol (encodeLen, decodeLen)
+import ExoMonad.GHCi.Protocol (encodeLen, decodeLen)
 
 
 spec :: Spec

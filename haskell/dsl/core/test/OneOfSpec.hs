@@ -13,8 +13,8 @@
 module OneOfSpec (spec) where
 
 import Test.Hspec
-import Tidepool.Graph.Goto (OneOf)
-import Tidepool.Graph.Goto.Internal (OneOf(..))  -- For test assertions
+import ExoMonad.Graph.Goto (OneOf)
+import ExoMonad.Graph.Goto.Internal (OneOf(..))  -- For test assertions
 
 spec :: Spec
 spec = do

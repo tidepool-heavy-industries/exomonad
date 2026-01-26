@@ -1,4 +1,4 @@
-# Tidepool
+# ExoMonad
 
 > Type-safe LLM agent framework with structured state and templates
 
@@ -79,9 +79,9 @@ just native  # Starts at localhost:8080
 ## Project Structure
 
 ```
-tidepool-core/           # Core library (Graph DSL, effects, templates)
-tidepool-native-gui/     # Native execution layer (server + effect interpreters)
-tidepool-wasm/           # WASM compilation target
+exomonad-core/           # Core library (Graph DSL, effects, templates)
+exomonad-native-gui/     # Native execution layer (server + effect interpreters)
+exomonad-wasm/           # WASM compilation target
 deploy/                  # Cloudflare Worker harness
 tools/                   # Agent evolution tooling (sleeptime)
 ```
@@ -91,7 +91,7 @@ For detailed documentation, see `CLAUDE.md`.
 ## Example Agents
 
 Agents live in separate repos to keep the library clean:
-- `~/tidepool-labs/anemone` - DM agent, Tidying agent, etc.
+- `~/exomonad-labs/anemone` - DM agent, Tidying agent, etc.
 
 ## See Also
 

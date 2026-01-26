@@ -1,6 +1,6 @@
 # TypeScript Packages
 
-Frontend and bot implementations consuming Tidepool backends.
+Frontend and bot implementations consuming ExoMonad backends.
 
 ## When to Read Which CLAUDE.md
 

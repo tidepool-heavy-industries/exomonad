@@ -8,7 +8,7 @@ packages:
     -- Runtime
     haskell/runtime/wasm
     haskell/runtime/actor
-    -- NOTE: tidepool-parallel merged into tidepool-actor
+    -- NOTE: exomonad-parallel merged into exomonad-actor
     haskell/platform
 
     -- Effect interpreters

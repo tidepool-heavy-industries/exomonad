@@ -37,8 +37,8 @@ Read this if you're:
 ## Usage
 
 ```haskell
-import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
-import Tidepool.Effects.GitHub
+import ExoMonad.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
+import ExoMonad.Effects.GitHub
 
 main :: IO ()
 main = runM $ runGitHubIO defaultGitHubConfig $ do

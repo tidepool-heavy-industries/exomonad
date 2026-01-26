@@ -10,9 +10,9 @@ import Data.Proxy (Proxy(..))
 import Data.Time.Clock (getCurrentTime)
 import Test.Tasty
 import Test.Tasty.HUnit
-import Tidepool.Control.ExoTools
-import Tidepool.Effects.GitHub (ReviewComment(..), ReviewState(..))
-import Tidepool.Graph.MCPReify (reifyMCPTools, MCPToolInfo(..))
+import ExoMonad.Control.ExoTools
+import ExoMonad.Effects.GitHub (ReviewComment(..), ReviewState(..))
+import ExoMonad.Graph.MCPReify (reifyMCPTools, MCPToolInfo(..))
 
 main :: IO ()
 main = defaultMain tests
@@ -57,7 +57,7 @@ test_discovery_fpr = do
 test_serialization_fpr :: Assertion
 test_serialization_fpr = do
   -- Test created success case
-  let info = PRInfo 42 "http://pr.url" "OPEN" "[tidepool-xyz] Fix bug"
+  let info = PRInfo 42 "http://pr.url" "OPEN" "[exomonad-xyz] Fix bug"
   let resCreated = FilePRResult (Just info) True Nothing
   let jsonCreated = toJSON resCreated
   case fromJSON @FilePRResult jsonCreated of

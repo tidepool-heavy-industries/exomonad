@@ -1,5 +1,5 @@
 /**
- * Tidepool Cloudflare Worker - Durable Object Harness
+ * ExoMonad Cloudflare Worker - Durable Object Harness
  *
  * Hosts GHC WASM state machines with WebSocket communication.
  * See docs/PROTOCOL.md for the WebSocket protocol specification.
@@ -12,8 +12,8 @@ import type {
   ClientMessage,
   ServerMessage,
   SessionState,
-} from "tidepool-generated-ts";
-import { SESSION_TIMEOUT_MS } from "tidepool-generated-ts";
+} from "exomonad-generated-ts";
+import { SESSION_TIMEOUT_MS } from "exomonad-generated-ts";
 import { executeEffect, type Env as HandlersEnv, type LogContext } from "./handlers/index.js";
 import { runLoop } from "./loop.js";
 import { logGraphEvent } from "./structured-log.js";
@@ -27,7 +27,7 @@ export { TelegramDO } from "./telegram/do.js";
 export { AlertDO } from "./alert/do.js";
 
 // Import WASM module at build time
-import wasmModule from "./tidepool.wasm";
+import wasmModule from "./exomonad.wasm";
 
 // =============================================================================
 // Environment Types
@@ -578,7 +578,7 @@ export default {
 
     // Health check
     if (url.pathname === "/" || url.pathname === "/health") {
-      return new Response(JSON.stringify({ status: "ok", service: "tidepool" }), {
+      return new Response(JSON.stringify({ status: "ok", service: "exomonad" }), {
         headers: { "Content-Type": "application/json" },
       });
     }
@@ -642,7 +642,7 @@ export default {
           headers: {
             "x-api-user": env.HABITICA_USER_ID,
             "x-api-key": env.HABITICA_API_TOKEN,
-            "x-client": `${env.HABITICA_USER_ID}-tidepool`,
+            "x-client": `${env.HABITICA_USER_ID}-exomonad`,
           },
         });
 

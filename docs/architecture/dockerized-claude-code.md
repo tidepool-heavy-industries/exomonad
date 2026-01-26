@@ -2,11 +2,11 @@
 
 ## Problem Statement
 
-Git worktrees change directory names (`tidepool-worktree-1/`, `tidepool-worktree-2/`), which breaks Claude Code history threading. The AI sees each worktree as a completely different project, losing conversational context.
+Git worktrees change directory names (`exomonad-worktree-1/`, `exomonad-worktree-2/`), which breaks Claude Code history threading. The AI sees each worktree as a completely different project, losing conversational context.
 
 ## Solution
 
-Dockerize Claude Code sessions. Each container sees `/workspace/tidepool` regardless of which "fork" it is, enabling:
+Dockerize Claude Code sessions. Each container sees `/workspace/exomonad` regardless of which "fork" it is, enabling:
 
 1. **Consistent paths** → proper history threading via `--continue`
 2. **True isolation** → no permission prompts needed (container IS the sandbox)
@@ -19,7 +19,7 @@ Dockerize Claude Code sessions. Each container sees `/workspace/tidepool` regard
 │                         HOST MACHINE                             │
 ├─────────────────────────────────────────────────────────────────┤
 │  Shared Resources:                                               │
-│  ├── /repo/tidepool.git/        (bare repo)                     │
+│  ├── /repo/exomonad.git/        (bare repo)                     │
 │  ├── /worktrees/                (managed by host)               │
 │  │   ├── main/                                                  │
 │  │   ├── feat-x/                                                │
@@ -30,9 +30,9 @@ Dockerize Claude Code sessions. Each container sees `/workspace/tidepool` regard
 │  └── CLAUDE_CODE_OAUTH_TOKEN    (passed as env var)             │
 │                                                                  │
 │  ┌─────────────────────────────────────────────────────────────┐│
-│  │              MANTLE (host mode - orchestrator)               ││
+│  │              EXOMONAD (host mode - orchestrator)               ││
 │  │                                                              ││
-│  │  New subcommand: `mantle container`                          ││
+│  │  New subcommand: `exomonad container`                          ││
 │  │  • spawn: Create container with worktree mount               ││
 │  │  • pause: docker pause (freeze processes)                    ││
 │  │  • resume: docker unpause + inject message                   ││
@@ -53,8 +53,8 @@ Dockerize Claude Code sessions. Each container sees `/workspace/tidepool` regard
 │  │             │ │             │ │             │                │
 │  │ /workspace ─┼─┼─► worktree  │ │ forked from │                │
 │  │             │ │   main      │ │ B           │                │
-│  │ mantle wrap │ │             │ │             │                │
-│  │ claude -p   │ │             │ │ mantle wrap │                │
+│  │ exomonad wrap │ │             │ │             │                │
+│  │ claude -p   │ │             │ │ exomonad wrap │                │
 │  │             │ │             │ │ claude      │                │
 │  │             │ │             │ │ --continue  │                │
 │  └─────────────┘ └─────────────┘ └─────────────┘                │
@@ -63,30 +63,30 @@ Dockerize Claude Code sessions. Each container sees `/workspace/tidepool` regard
 
 ## Component Design
 
-### 1. Base Docker Image (`tidepool-dev`)
+### 1. Base Docker Image (`exomonad-dev`)
 
-Extends CI image with Claude Code and mantle:
+Extends CI image with Claude Code and exomonad:
 
 ```dockerfile
-FROM tidepool-ci:latest
+FROM exomonad-ci:latest
 
 # Install Claude Code CLI
 RUN npm install -g @anthropic/claude-code
 
-# Install Rust toolchain (for mantle)
+# Install Rust toolchain (for exomonad)
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Build and install mantle
-COPY rust/mantle /build/mantle
-RUN cd /build/mantle && cargo build --release \
-    && cp target/release/mantle /usr/local/bin/
+# Build and install exomonad
+COPY rust/exomonad /build/exomonad
+RUN cd /build/exomonad && cargo build --release \
+    && cp target/release/exomonad /usr/local/bin/
 
 # Working directory (will be mounted)
 WORKDIR /workspace
 
-# Entry point runs mantle wrap
-ENTRYPOINT ["mantle", "wrap", "--no-tui"]
+# Entry point runs exomonad wrap
+ENTRYPOINT ["exomonad", "wrap", "--no-tui"]
 ```
 
 ### 2. Volume Mount Strategy
@@ -94,7 +94,7 @@ ENTRYPOINT ["mantle", "wrap", "--no-tui"]
 ```yaml
 volumes:
   # Shared (efficiency, not coordination)
-  - /repo/tidepool.git:/repo.git:ro           # Bare repo
+  - /repo/exomonad.git:/repo.git:ro           # Bare repo
   - ~/.cache/cabal:/root/.cache/cabal         # Build cache
 
   # Per-container (isolated)
@@ -104,12 +104,12 @@ volumes:
   # ~/.claude/ lives inside container
 ```
 
-### 3. Mantle Container Orchestrator (Rust)
+### 3. ExoMonad Container Orchestrator (Rust)
 
-New subcommand in mantle: `mantle container <action>`
+New subcommand in exomonad: `exomonad container <action>`
 
 ```rust
-// rust/mantle/src/container.rs
+// rust/exomonad/src/container.rs
 
 pub struct ContainerOrchestrator {
     /// Active containers by ID
@@ -159,42 +159,42 @@ CLI interface:
 
 ```bash
 # Spawn new container
-mantle container spawn --branch main --prompt "Implement feature X"
+exomonad container spawn --branch main --prompt "Implement feature X"
 
 # Pause container
-mantle container pause <container-id>
+exomonad container pause <container-id>
 
 # Fork from paused container
-mantle container fork <parent-id> --branch feat-x-sub --task "Handle edge case"
+exomonad container fork <parent-id> --branch feat-x-sub --task "Handle edge case"
 
 # Resume with message
-mantle container resume <container-id> --message "Child completed, review changes"
+exomonad container resume <container-id> --message "Child completed, review changes"
 
 # Check status
-mantle container status <container-id>
+exomonad container status <container-id>
 
 # Terminate
-mantle container terminate <container-id>
+exomonad container terminate <container-id>
 ```
 
 ### 4. The Fork Operation (Detailed)
 
 ```
 1. Parent container doing work
-   └── mantle wrap supervising claude -p
+   └── exomonad wrap supervising claude -p
 
 2. Type-driven-dev harness decides to fork
-   └── Calls: mantle container fork parent-123 --branch feat-sub --task "..."
+   └── Calls: exomonad container fork parent-123 --branch feat-sub --task "..."
 
 3. Fork operation:
    a. docker pause parent-123
-   b. docker commit parent-123 → tidepool-dev:parent-123-checkpoint
+   b. docker commit parent-123 → exomonad-dev:parent-123-checkpoint
    c. git worktree add /worktrees/feat-sub origin/parent-branch
    d. docker run \
         -e CLAUDE_CODE_OAUTH_TOKEN="..." \
         -v /worktrees/feat-sub:/workspace \
         -v ~/.cache/cabal:/root/.cache/cabal \
-        tidepool-dev:parent-123-checkpoint \
+        exomonad-dev:parent-123-checkpoint \
         --result-fifo /tmp/fifo-child \
         -- --continue --model sonnet -p "TASK: ..."
    e. Return child container ID
@@ -215,10 +215,10 @@ Two options for Haskell side:
 #### Option A: Extend ClaudeCodeConfig
 
 ```haskell
--- tidepool-native-gui/claude-code-interpreter/src/Tidepool/ClaudeCode/Config.hs
+-- exomonad-native-gui/claude-code-interpreter/src/ExoMonad/ClaudeCode/Config.hs
 
 data ExecutionMode
-  = DirectMode          -- Current: shell out to mantle run
+  = DirectMode          -- Current: shell out to exomonad run
   | ContainerMode       -- New: use container orchestrator
       { containerImage :: Text
       , parentContainer :: Maybe Text  -- For forks
@@ -230,14 +230,14 @@ data ClaudeCodeConfig = ClaudeCodeConfig
   , ccZellijSession :: Text      -- Only for DirectMode
   , ccDefaultTimeout :: Int
   , ccTempDir :: FilePath
-  , ccMantlePath :: FilePath
+  , ccExoMonadPath :: FilePath
   }
 ```
 
 #### Option B: New Effect Type
 
 ```haskell
--- tidepool-core/src/Tidepool/Effects/Container.hs
+-- exomonad-core/src/ExoMonad/Effects/Container.hs
 
 data Container r where
   -- Spawn new container
@@ -258,13 +258,13 @@ data Container r where
   -- Terminate
   TerminateContainer :: ContainerId -> Container ()
 
--- Interpreter in tidepool-native-gui/container-interpreter/
+-- Interpreter in exomonad-native-gui/container-interpreter/
 runContainer :: Container a -> IO a
 runContainer = \case
   SpawnContainer branch prompt ->
-    -- Shell out to: mantle container spawn ...
+    -- Shell out to: exomonad container spawn ...
   ForkContainer parent branch task ->
-    -- Shell out to: mantle container fork ...
+    -- Shell out to: exomonad container fork ...
   ...
 ```
 
@@ -272,7 +272,7 @@ runContainer = \case
 
 ### 6. Type-Driven-Dev Harness Integration
 
-The harness (in consuming repo, e.g., anemone) would use the new effects:
+The harness (in consuming repo, e.g.) would use the new effects:
 
 ```haskell
 -- In consuming repo's type-driven-dev implementation
@@ -313,21 +313,21 @@ typeDrivenDev task = do
 ## Implementation Plan
 
 ### Phase 1: Docker Infrastructure
-- [ ] Create `Dockerfile.dev` based on CI image + Claude Code + mantle
+- [ ] Create `Dockerfile.dev` based on CI image + Claude Code + exomonad
 - [ ] Test basic lifecycle: run, pause, commit, resume
 - [ ] Verify `CLAUDE_CODE_OAUTH_TOKEN` works in container
 - [ ] Set up worktree mount strategy
 
-### Phase 2: Mantle Container Orchestrator
-- [ ] Add `container` subcommand to mantle
+### Phase 2: ExoMonad Container Orchestrator
+- [ ] Add `container` subcommand to exomonad
 - [ ] Implement spawn operation
 - [ ] Implement pause/resume operations
 - [ ] Implement fork operation (commit + spawn)
 - [ ] State tracking (container tree, branch mapping)
-- [ ] Persistent state (survive mantle restart)
+- [ ] Persistent state (survive exomonad restart)
 
 ### Phase 3: Haskell Integration
-- [ ] Create `Container` effect type in tidepool-core
+- [ ] Create `Container` effect type in exomonad-core
 - [ ] Create `container-interpreter` package
 - [ ] Wire into native server EffectRunner
 - [ ] Integration tests
@@ -344,8 +344,8 @@ typeDrivenDev task = do
 
 ## Open Questions
 
-1. **Mantle state persistence**: Where does orchestrator state live?
-   - Option: JSON file in `~/.mantle/containers.json`
+1. **ExoMonad state persistence**: Where does orchestrator state live?
+   - Option: JSON file in `~/.exomonad/containers.json`
    - Option: SQLite database
    - Option: In-memory only (containers are ephemeral anyway)
 

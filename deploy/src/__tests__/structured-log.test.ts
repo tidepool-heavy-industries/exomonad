@@ -12,7 +12,7 @@ import {
   type EffectLogEntry,
   type LogContext,
 } from "../structured-log.js";
-import type { SerializableEffect, EffectResult } from "tidepool-generated-ts";
+import type { SerializableEffect, EffectResult } from "exomonad-generated-ts";
 
 describe("logEffectExecution", () => {
   const originalLog = console.log;

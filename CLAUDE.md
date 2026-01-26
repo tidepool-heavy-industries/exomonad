@@ -1,4 +1,4 @@
-# Tidepool - Type-Safe LLM Agent Framework
+# ExoMonad - Type-Safe LLM Agent Framework
 
 A Haskell library for building LLM agents as typed state machines. Agents are IO-blind - they yield typed effects that runners interpret.
 
@@ -6,8 +6,8 @@ A Haskell library for building LLM agents as typed state machines. Agents are IO
 
 This doc serves two audiences:
 
-1. **Using Tidepool** - Building agents in consuming repos (anemone, urchin)
-2. **Developing Tidepool** - Working on the framework itself
+1. **Using ExoMonad** - Building agents in consuming repos (urchin)
+2. **Developing ExoMonad** - Working on the framework itself
 
 ### HUMAN STYLE OVERRIDES
 
@@ -90,17 +90,16 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 │   ├── protocol/CLAUDE.md      ← Wire formats
 │   └── tools/CLAUDE.md         ← Dev tools (ghci-oracle, sleeptime, training-generator)
 ├── rust/CLAUDE.md             ← Claude Code++ (hook handler + MCP forwarding + TUI)
-├── mantle-agent/CLAUDE.md  ← Hook handler (HTTP over Unix socket) (IMPLEMENTED)
+├── exomonad/CLAUDE.md  ← Hook handler (HTTP over Unix socket) (IMPLEMENTED)
 ├── docker-ctl/CLAUDE.md    ← Container lifecycle + remote exec (IMPLEMENTED)
-├── mantle-hub/CLAUDE.md    ← Metrics hub (LEGACY, needs repurposing)
-├── mantle-shared/CLAUDE.md ← Protocol types, Unix socket client
+├── exomonad-hub/CLAUDE.md    ← Metrics hub (LEGACY, needs repurposing)
+├── exomonad-shared/CLAUDE.md ← Protocol types, Unix socket client
 ├── ssh-proxy/CLAUDE.md     ← DEPRECATED (replaced by docker-ctl)
 │   ├── tui-sidebar/CLAUDE.md   ← TUI sidebar: ratatui rendering for graph UIs (IMPLEMENTED)
 │   ├── tui-popup/CLAUDE.md     ← TUI popup: floating pane UI for user interaction
 │   └── tui-spawner/CLAUDE.md   ← FIFO-based popup spawning for cross-container TUI
 ├── types-first-dev/CLAUDE.md   ← V3 TDD protocol project
 ├── deploy/CLAUDE.md            ← Cloudflare deployment
-├── anemone/CLAUDE.md           ← Debug/diagnostic Solid.js UI (in-repo, not ~/tidepool-labs)
 ├── tools/CLAUDE.md             ← Root-level tools (micro-gastown, blast-radius)
 └── typescript/
     ├── native-gui/CLAUDE.md    ← Solid.js frontend (alternative UI)
@@ -113,7 +112,7 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 |--------------|-----------|
 | Work on Claude Code++ (hooks/MCP/scout) ⭐ | `haskell/control-server/CLAUDE.md` |
 | Understand MCP tool architecture/tiers | `docs/architecture/ADR-003-MCP-Tool-Design-Patterns.md` |
-| Understand hook/MCP forwarding (Rust side) | `rust/mantle-agent/CLAUDE.md` |
+| Understand hook/MCP forwarding (Rust side) | `rust/exomonad/CLAUDE.md` |
 | Define a graph, handlers, annotations | `haskell/dsl/core/CLAUDE.md` |
 | Work on LLM-level teaching infrastructure | `haskell/dsl/teaching/CLAUDE.md` |
 | Add or modify an effect interpreter | `haskell/effects/CLAUDE.md` |
@@ -124,14 +123,13 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 | Work on types-first-dev V3 protocol | `types-first-dev/CLAUDE.md` |
 | Deploy to Cloudflare Workers | `deploy/CLAUDE.md` |
 | Work on the native server | `haskell/native-server/CLAUDE.md` |
-| Work on debug UI frontend | `anemone/CLAUDE.md` or `typescript/native-gui/CLAUDE.md` |
 | Work on TUI sidebar (terminal UI rendering) | `rust/tui-sidebar/CLAUDE.md` |
 | Work on container spawning/exec | `rust/docker-ctl/CLAUDE.md` |
-| Understand control protocol types | `rust/mantle-shared/CLAUDE.md` |
+| Understand control protocol types | `rust/exomonad-shared/CLAUDE.md` |
 
 ---
 
-# Part 1: Using Tidepool
+# Part 1: Using ExoMonad
 
 ## Core Concepts
 
@@ -192,15 +190,14 @@ cd deploy && pnpm dev  # Local CF worker
 
 ## Consuming Repos
 
-Tidepool is a library. Agents live in separate repos:
+ExoMonad is a library. Agents live in separate repos:
 
-### anemone (`~/tidepool-labs/anemone`)
 Example consuming repo with working agents:
 - Native and Cloudflare WIPs (both work e2e)
 - Agent definitions using Graph DSL
 - Templates and schemas
 
-### urchin (`~/tidepool-labs/urchin`)
+### urchin (`~/exomonad-labs/urchin`)
 Context generation tooling for coding agents:
 - `urchin prime` - Generate context from git/GitHub/LSP for agent bootstrap
 - `urchin lsp` - LSP impact analysis for Haskell code
@@ -214,11 +211,11 @@ Context generation tooling for coding agents:
 3. Cron jobs file issues and PRs to improve the agent
 4. Changes: state fields, output schemas, templates, tools
 
-The cron jobs live in the consuming repo (anemone, urchin), not in tidepool itself. Tidepool provides the infrastructure; consuming repos implement the evolution loop.
+The cron jobs live in the consuming repo (urchin), not in exomonad itself. ExoMonad provides the infrastructure; consuming repos implement the evolution loop.
 
 ## Claude Code++ Integration
 
-Human-driven Claude Code sessions augmented with Tidepool. **Not headless automation** - humans interact via TTY; we add superpowers.
+Human-driven Claude Code sessions augmented with ExoMonad. **Not headless automation** - humans interact via TTY; we add superpowers.
 
 ### Architecture
 
@@ -230,11 +227,11 @@ Human-driven Claude Code sessions augmented with Tidepool. **Not headless automa
             │ Hooks/MCP                        │
             ▼                                  │
 ┌─────────────────────────────────────────┐    │
-│ mantle-agent (Rust)                     │    │
+│ exomonad (Rust)                     │    │
 │  • hook: CC hooks → Unix Socket         │    │
 └───────────┬─────────────────────────────┘    │
             │ Unix Socket NDJSON               │
-            │ .tidepool/sockets/control.sock   │
+            │ .exomonad/sockets/control.sock   │
             ▼                                  │
 ┌─────────────────────────────────────────┐    │
 │ control-server (Haskell)                │    │
@@ -244,7 +241,7 @@ Human-driven Claude Code sessions augmented with Tidepool. **Not headless automa
 │  • TUI Handler: Listens for Sidebar     │◄───┘
 └─────────────────────────────────────────┘    │
                                                │ Unix Socket NDJSON
-                                               │ .tidepool/sockets/tui.sock
+                                               │ .exomonad/sockets/tui.sock
                                                │
 ┌──────────────────────────────────────────────┘
 │
@@ -262,10 +259,10 @@ Human-driven Claude Code sessions augmented with Tidepool. **Not headless automa
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| **mantle-agent** | `rust/mantle-agent/` | Hook forwarding to control server (HTTP over Unix socket) |
+| **exomonad** | `rust/exomonad/` | Hook forwarding to control server (HTTP over Unix socket) |
 | **control-server** | `haskell/control-server/` | Haskell server with LSP + MCP tools + TUI handler |
 | **tui-sidebar** | `rust/tui-sidebar/` | Rust TUI: renders UISpec, captures Interaction |
-| **Protocol types** | `rust/mantle-shared/protocol.rs` + `haskell/control-server/Protocol.hs` | Bidirectional message types (must match exactly) |
+| **Protocol types** | `rust/exomonad-shared/protocol.rs` + `haskell/control-server/Protocol.hs` | Bidirectional message types (must match exactly) |
 
 ### Data Flow
 
@@ -273,11 +270,11 @@ Human-driven Claude Code sessions augmented with Tidepool. **Not headless automa
 ```
 1. Claude Code wants to call Write tool
 2. Generates hook JSON on stdin
-3. mantle-agent hook pre-tool-use reads stdin
+3. exomonad hook pre-tool-use reads stdin
 4. Forwards ControlMessage::HookEvent via Unix Socket
 5. control-server receives, routes to handleHook
 6. Returns HookResponse (allow/deny)
-7. mantle-agent prints to stdout
+7. exomonad prints to stdout
 8. Claude Code proceeds or blocks
 ```
 
@@ -317,7 +314,7 @@ In `.claude/settings.local.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "mantle-agent hook pre-tool-use"
+            "command": "exomonad hook pre-tool-use"
           }
         ]
       }
@@ -328,7 +325,7 @@ In `.claude/settings.local.json`:
 
 **Note:** MCP server configuration uses `.mcp.json`. Claude Code connects directly to control-server via HTTP (TCP port 7432):
 ```json
-{"mcpServers": {"tidepool": {"type": "http", "url": "http://localhost:7432/role/tl/mcp"}}}
+{"mcpServers": {"exomonad": {"type": "http", "url": "http://localhost:7432/role/tl/mcp"}}}
 ```
 
 ### Running
@@ -370,16 +367,16 @@ The Docker Compose setup uses a separated container architecture:
 **Manual (if scripts don't work):**
 ```bash
 docker compose up -d
-docker attach tidepool-zellij
+docker attach exomonad-zellij
 ```
 
 **Services:**
 | Container | Purpose |
 |-----------|---------|
-| `tidepool-zellij` | Minimal Zellij multiplexer (human attaches here) |
-| `tidepool-control-server` | Haskell MCP server (TCP 7432) |
-| `tidepool-tl` | Tech Lead agent (coding) |
-| `tidepool-pm` | Project Manager agent (planning) |
+| `exomonad-zellij` | Minimal Zellij multiplexer (human attaches here) |
+| `exomonad-control-server` | Haskell MCP server (TCP 7432) |
+| `exomonad-tl` | Tech Lead agent (coding) |
+| `exomonad-pm` | Project Manager agent (planning) |
 | `docker-ctl` | Container lifecycle CLI (inside control-server) |
 
 **Features:**
@@ -394,7 +391,7 @@ docker attach tidepool-zellij
 ```
 # In TL or PM pane
 /mcp
-Expected: Shows "tidepool" server connected
+Expected: Shows "exomonad" server connected
 
 /tools
 Expected: Lists MCP tools
@@ -402,36 +399,36 @@ Expected: Lists MCP tools
 
 **Testing docker-ctl exec:**
 ```bash
-docker exec tidepool-control-server docker-ctl exec tidepool-tl -- echo hello
+docker exec exomonad-control-server docker-ctl exec exomonad-tl -- echo hello
 ```
 
 **Rollback to Legacy Orchestrator:**
 ```bash
 # Use the legacy profile
 docker compose --profile legacy up orchestrator
-docker attach tidepool-orchestrator
+docker attach exomonad-orchestrator
 ```
 
 **Troubleshooting:**
 - **MCP shows "failed" on startup**: control-server still initializing. Use `/mcp` → `Reconnect` after 10 seconds.
-- **Agent not responding**: Check `docker logs tidepool-tl` or `docker logs tidepool-pm`.
-- **Authentication errors**: Verify credentials in `tidepool-claude-auth` volume.
+- **Agent not responding**: Check `docker logs exomonad-tl` or `docker logs exomonad-pm`.
+- **Authentication errors**: Verify credentials in `exomonad-claude-auth` volume.
 
-**Hybrid Tidepool Architecture (process-compose + Zellij - Local Development)**
+**Hybrid ExoMonad Architecture (process-compose + Zellij - Local Development)**
 
 **Recommended: start-augmented.sh**
 ```bash
 ./start-augmented.sh
 ```
 
-This launches the Hybrid Tidepool setup as a **TUI IDE** wrapping Claude Code:
+This launches the Hybrid ExoMonad setup as a **TUI IDE** wrapping Claude Code:
 - **process-compose**: Orchestrates services (control-server, tui-sidebar)
 - **Zellij**: 3-pane TUI IDE layout
   - Pane 1 (left): **Claude Code** (auto-launches, main interface)
   - Pane 2 (top-right): process-compose dashboard (infrastructure monitoring)
   - Pane 3 (bottom-right): control-server logs (backend telemetry)
 
-Claude Code starts automatically in the tidepool directory. MCP tools connect directly to control-server via HTTP MCP transport.
+Claude Code starts automatically in the exomonad directory. MCP tools connect directly to control-server via HTTP MCP transport.
 
 **Note:** If MCP shows "failed" on startup (control-server not yet ready), use `/mcp` → `Reconnect` once services are healthy.
 
@@ -439,13 +436,13 @@ Claude Code starts automatically in the tidepool directory. MCP tools connect di
 - Socket existence checks (test -S) for zero-overhead health probes
 - Dependency DAG: tui-sidebar waits for control-server health
 - Automatic restart on failure with exponential backoff
-- Centralized logging to `.tidepool/logs/`
+- Centralized logging to `.exomonad/logs/`
 - Service readiness probes
 
 **Manual process-compose (without Zellij):**
 ```bash
 # Create runtime directories
-mkdir -p .tidepool/{sockets,logs}
+mkdir -p .exomonad/{sockets,logs}
 
 # Start all services
 ~/.local/bin/process-compose up --tui
@@ -458,11 +455,11 @@ claude-code
 **Manual startup (3 terminals - NOT recommended):**
 ```bash
 # Terminal 1: Start control server
-GEMMA_ENDPOINT=http://localhost:11434 cabal run tidepool-control-server
+GEMMA_ENDPOINT=http://localhost:11434 cabal run exomonad-control-server
 
 # Terminal 2: Wait for TUI socket, then start tui-sidebar
-./scripts/wait-for-socket.sh .tidepool/sockets/tui.sock 60 TUIServer
-cargo run -p tui-sidebar -- --socket .tidepool/sockets/tui.sock
+./scripts/wait-for-socket.sh .exomonad/sockets/tui.sock 60 TUIServer
+cargo run -p tui-sidebar -- --socket .exomonad/sockets/tui.sock
 
 # Terminal 3: Start Claude Code
 cd /path/to/project
@@ -478,21 +475,21 @@ Understanding the runtime stack for debugging and extension.
 #### Troubleshooting
 
 **`start-augmented.sh` Hangs on Startup**
-- **Symptom**: The script hangs indefinitely at "Starting Hybrid Tidepool...".
+- **Symptom**: The script hangs indefinitely at "Starting Hybrid ExoMonad...".
 - **Cause**: A stale `process-compose` session (often headless) is holding the socket and refusing to terminate.
 - **Fix**: The script now includes robust cleanup logic (timeout + force kill). If it still hangs, manually run:
   ```bash
   pkill -9 process-compose
-  rm -f .tidepool/sockets/process-compose.sock
+  rm -f .exomonad/sockets/process-compose.sock
   ```
 
 **`Killed: 9` on macOS (Apple Silicon)**
-- **Symptom**: `control-server` or `mantle-agent` exits immediately with `Killed: 9` (SIGKILL).
+- **Symptom**: `control-server` or `exomonad` exits immediately with `Killed: 9` (SIGKILL).
 - **Cause**: The binaries in `../runtime/bin` are unsigned or have invalid signatures. macOS arm64 requires all native executables to be signed.
 - **Fix**: Ad-hoc sign the binaries:
   ```bash
-  codesign -s - --force ../runtime/bin/tidepool-control-server
-  codesign -s - --force ../runtime/bin/mantle-agent
+  codesign -s - --force ../runtime/bin/exomonad-control-server
+  codesign -s - --force ../runtime/bin/exomonad
   codesign -s - --force ../runtime/bin/tui-sidebar
   ```
 
@@ -500,16 +497,16 @@ Understanding the runtime stack for debugging and extension.
 - **Symptom**: Subagent Zellij tabs show a blank log pane or "No such file" error.
 - **Cause**: Mismatch between Zellij layout expecting `pc.log` and process-compose writing `process-compose.log`.
 - **Fix**: The hangar-root `.zellij/worktree.kdl` must:
-  1. Create directories: `mkdir -p .tidepool/logs .tidepool/sockets`
-  2. Force log filename: `process-compose up -L .tidepool/logs/process-compose.log`
-  3. Use robust tail: `tail -F .tidepool/logs/process-compose.log` (capital F waits for file creation)
+  1. Create directories: `mkdir -p .exomonad/logs .exomonad/sockets`
+  2. Force log filename: `process-compose up -L .exomonad/logs/process-compose.log`
+  3. Use robust tail: `tail -F .exomonad/logs/process-compose.log` (capital F waits for file creation)
 - **Note**: Fixed in hangar root as of 2026-01-21. New spawned subagents should work correctly.
 
 #### Socket Lifecycle
 
 Sockets are managed to ensure clean transitions between sessions and prevent stale connections:
 
-1. **Bootstrap (`start-augmented.sh`)**: Canonical cleanup occurs here. It detects stale `process-compose` sessions via UDS and shuts them down, then deletes all remaining `.sock` files in `.tidepool/sockets/`.
+1. **Bootstrap (`start-augmented.sh`)**: Canonical cleanup occurs here. It detects stale `process-compose` sessions via UDS and shuts them down, then deletes all remaining `.sock` files in `.exomonad/sockets/`.
 2. **Runtime**: Services like `control-server` create their own sockets upon startup.
 3. **Shutdown (`process-compose.yaml`)**: The `shutdown` command for `control-server` removes its specific sockets. This is a best-effort cleanup for graceful shutdown; the bootstrap cleanup is the source of truth for clearing stale state.
 
@@ -520,13 +517,13 @@ Sockets are managed to ensure clean transitions between sessions and prevent sta
 | (none) | process-compose | UDS | API (stale session detection) |
 
 **Sockets (Environment Driven):**
-- `$TIDEPOOL_CONTROL_SOCKET` (default: `.tidepool/sockets/control.sock`): Main protocol (mantle-agent connects)
-- `$TIDEPOOL_TUI_SOCKET` (default: `.tidepool/sockets/tui.sock`): TUI sidebar (control-server listens, tui-sidebar connects)
-- `.tidepool/sockets/process-compose.sock`: process-compose API (eliminates port 8080 conflicts)
+- `$EXOMONAD_CONTROL_SOCKET` (default: `.exomonad/sockets/control.sock`): Main protocol (exomonad connects)
+- `$EXOMONAD_TUI_SOCKET` (default: `.exomonad/sockets/tui.sock`): TUI sidebar (control-server listens, tui-sidebar connects)
+- `.exomonad/sockets/process-compose.sock`: process-compose API (eliminates port 8080 conflicts)
 
 **Docker Volumes (Cross-Container):**
-- `tidepool-sockets`: Shared volume for control.sock and tui.sock
-- `tidepool-zellij`: Shared XDG_RUNTIME_DIR (`/run/user/1000`) for cross-container Zellij access. Enables control-server to create Zellij tabs in orchestrator's session via `zellij --session orchestrator action new-tab`.
+- `exomonad-sockets`: Shared volume for control.sock and tui.sock
+- `exomonad-zellij`: Shared XDG_RUNTIME_DIR (`/run/user/1000`) for cross-container Zellij access. Enables control-server to create Zellij tabs in orchestrator's session via `zellij --session orchestrator action new-tab`.
 
 Canonical values are defined in `start-augmented.sh` and can be overridden in `.env`.
 
@@ -535,21 +532,21 @@ Canonical values are defined in `start-augmented.sh` and can be overridden in `.
 | File | Format | Purpose |
 |------|--------|---------|
 | `process-compose.yaml` | YAML | Service definitions, health probes, dependencies |
-| `.zellij/tidepool.kdl` | KDL | 3-pane TUI layout |
+| `.zellij/exomonad.kdl` | KDL | 3-pane TUI layout |
 | `.zellij/config.kdl` | KDL | Zellij behavior (force_close, mouse) |
-| `scripts/tidepool-runner.sh` | Bash | Trap handlers for cleanup |
+| `scripts/exomonad-runner.sh` | Bash | Trap handlers for cleanup |
 | `.env` | Shell | Environment (ANTHROPIC_API_KEY required) |
 
 #### Lifecycle Scripts
 
 **`start-augmented.sh`** - Entry point:
 1. Validates `.env` contains `ANTHROPIC_API_KEY`
-2. Creates `.tidepool/{sockets,logs}` directories
+2. Creates `.exomonad/{sockets,logs}` directories
 3. Checks process-compose installed
 4. Detects/cleans stale sessions via Unix socket
 5. Launches Zellij with layout
 
-**`scripts/tidepool-runner.sh`** - Cleanup wrapper:
+**`scripts/exomonad-runner.sh`** - Cleanup wrapper:
 ```bash
 trap cleanup EXIT SIGINT SIGTERM SIGHUP
 
@@ -569,7 +566,7 @@ on_force_close "quit"
 ```
 
 **Why this matters:** Without this, Zellij detaches instead of exiting when closed. Detaching means:
-- Trap handlers in `tidepool-runner.sh` never fire
+- Trap handlers in `exomonad-runner.sh` never fire
 - Services continue running in background (orphaned)
 - Next `start-augmented.sh` detects stale session
 
@@ -582,7 +579,7 @@ Zellij quit (Ctrl+P → q)
     ↓
 on_force_close "quit" (doesn't detach)
     ↓
-tidepool-runner.sh EXIT trap fires
+exomonad-runner.sh EXIT trap fires
     ↓
 process-compose down --ordered-shutdown
     ├─ tui-sidebar stops (no dependents)
@@ -597,7 +594,7 @@ All services terminated
 ```yaml
 readiness_probe:
   exec:
-    command: "test -S $TIDEPOOL_CONTROL_SOCKET"
+    command: "test -S $EXOMONAD_CONTROL_SOCKET"
   initial_delay_seconds: 2
   period_seconds: 3
   failure_threshold: 10
@@ -607,7 +604,7 @@ readiness_probe:
 ```yaml
 readiness_probe:
   exec:
-    command: "test -S $TIDEPOOL_TUI_SOCKET"
+    command: "test -S $EXOMONAD_TUI_SOCKET"
 ```
 
 #### Dependency DAG
@@ -623,22 +620,22 @@ tui-sidebar blocks until control-server's HTTP health probe succeeds.
 The orchestration stack relies on pre-built binaries for Haskell and Rust components. `start-augmented.sh` attempts to build these if missing or stale, but manual builds may be required for troubleshooting.
 
 **Required Binaries & Paths:**
-- `tidepool-control-server`: `dist-newstyle/build/.../tidepool-control-server`
-- `mantle-agent`: `rust/target/debug/mantle-agent`
+- `exomonad-control-server`: `dist-newstyle/build/.../exomonad-control-server`
+- `exomonad`: `rust/target/debug/exomonad`
 - `tui-sidebar`: `rust/target/debug/tui-sidebar`
 
 **When are they built?**
-`start-augmented.sh` runs `cabal build tidepool-control-server` and `cargo build -p mantle-agent -p tui-sidebar` on startup.
+`start-augmented.sh` runs `cabal build exomonad-control-server` and `cargo build -p exomonad -p tui-sidebar` on startup.
 
 **Recovery:**
 If binaries are missing or the "command not found" error occurs within `process-compose`:
-1. Run `cabal build tidepool-control-server` manually.
-2. Run `cargo build -p mantle-agent -p tui-sidebar` manually.
+1. Run `cabal build exomonad-control-server` manually.
+2. Run `cargo build -p exomonad -p tui-sidebar` manually.
 3. Restart `./start-augmented.sh`.
 
 #### process-compose Setup
 
-`process-compose` is the primary orchestrator for the Tidepool development environment.
+`process-compose` is the primary orchestrator for the ExoMonad development environment.
 
 **Installation:**
 - **Nix (Recommended):** Included in `shell.nix` / `flake.nix`.
@@ -650,7 +647,7 @@ Ensure `process-compose` is in your `PATH`. The scripts do not use hardcoded pat
 
 **Troubleshooting:**
 - **"command not found: process-compose"**: Verify installation and that `$(go env GOPATH)/bin` or your brew/nix bin directory is in your `PATH`.
-- **Stale session**: `process-compose` uses a Unix socket at `.tidepool/sockets/process-compose.sock` for its API, eliminating port 8080 conflicts. `start-augmented.sh` will attempt to detect and kill stale sessions via this socket.
+- **Stale session**: `process-compose` uses a Unix socket at `.exomonad/sockets/process-compose.sock` for its API, eliminating port 8080 conflicts. `start-augmented.sh` will attempt to detect and kill stale sessions via this socket.
 
 ### Status
 
@@ -662,11 +659,11 @@ Ensure `process-compose` is in your `PATH`. The scripts do not use hardcoded pat
 - ✅ Hybrid orchestration (process-compose + Zellij)
 - ✅ Unix socket health checks for robust readiness checks
 - ✅ Declarative service dependencies and restart policies
-- ✅ MCP direct execution via .mcp.json (mantle-agent spawned per-call by Claude)
+- ✅ MCP direct execution via .mcp.json (exomonad spawned per-call by Claude)
 - ✅ Unix socket communication for all local components
 - 🔄 Training data generation (types ready, CLI pending)
 - ❌ Daemon mode (not implemented, uses per-call connection)
-- ❌ Metrics hub (mantle-hub needs repurposing)
+- ❌ Metrics hub (exomonad-hub needs repurposing)
 - ❌ Real hook logic (currently allow-all passthrough)
 
 ### Stopping
@@ -693,12 +690,12 @@ Running `./start-augmented.sh` automatically detects and cleans up any existing 
 
 - **[haskell/control-server/CLAUDE.md](haskell/control-server/CLAUDE.md)** - Complete data flow + implementation
 - **[rust/CLAUDE.md](rust/CLAUDE.md)** - Rust workspace overview
-- **[rust/mantle-agent/CLAUDE.md](rust/mantle-agent/CLAUDE.md)** - Hook/MCP implementation
+- **[rust/exomonad/CLAUDE.md](rust/exomonad/CLAUDE.md)** - Hook/MCP implementation
 - **[haskell/agents/semantic-scout/CLAUDE.md](haskell/agents/semantic-scout/CLAUDE.md)** - Scout exploration algorithm
 
 ---
 
-# Part 2: Developing Tidepool
+# Part 2: Developing ExoMonad
 
 ## Package Inventory
 
@@ -765,17 +762,17 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 
 | Thing | Location |
 |-------|----------|
-| New effect type | `haskell/dsl/core/src/Tidepool/Effect/Types.hs` |
-| New integration | `haskell/dsl/core/src/Tidepool/Effects/` (plural) |
-| New graph annotation | `haskell/dsl/core/src/Tidepool/Graph/Types.hs` |
+| New effect type | `haskell/dsl/core/src/ExoMonad/Effect/Types.hs` |
+| New integration | `haskell/dsl/core/src/ExoMonad/Effects/` (plural) |
+| New graph annotation | `haskell/dsl/core/src/ExoMonad/Graph/Types.hs` |
 | New interpreter | `haskell/effects/<name>-interpreter/` |
 | New MCP tool/agent | `haskell/agents/<name>/` |
 | TypeScript frontend/bot | `typescript/<name>/` |
-| Agents (consuming repos) | Separate repo (anemone, urchin, etc.) |
+| Agents (consuming repos) | Separate repo (urchin, etc.) |
 
 ### Naming Conventions
-- **Effect** (singular) = core infrastructure (`Tidepool.Effect.*`)
-- **Effects** (plural) = integrations/contrib (`Tidepool.Effects.*`)
+- **Effect** (singular) = core infrastructure (`ExoMonad.Effect.*`)
+- **Effects** (plural) = integrations/contrib (`ExoMonad.Effects.*`)
 - **Interpreter** = effect implementation (replaces "executor" terminology)
 
 ## Task Tracking (GitHub)
@@ -849,11 +846,11 @@ The fix is usually: thread the data forward (via input fields, memory, or contex
 
 ## LSP Integration
 
-The `tidepool-lsp-interpreter` provides LSP for code intelligence:
+The `exomonad-lsp-interpreter` provides LSP for code intelligence:
 
 ```haskell
-import Tidepool.Effects.LSP
-import Tidepool.LSP.Interpreter (withLSPSession, runLSP)
+import ExoMonad.Effects.LSP
+import ExoMonad.LSP.Interpreter (withLSPSession, runLSP)
 
 withLSPSession "/path/to/project" $ \session -> do
   info <- runLSP session $ hover doc pos

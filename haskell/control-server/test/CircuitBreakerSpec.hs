@@ -11,7 +11,7 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock
-import Tidepool.Control.Hook.CircuitBreaker
+import ExoMonad.Control.Hook.CircuitBreaker
 
 main :: IO ()
 main = defaultMain spec

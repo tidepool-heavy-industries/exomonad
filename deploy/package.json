@@ -1,5 +1,5 @@
 {
-  "name": "tidepool-worker",
+  "name": "exomonad-worker",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -30,7 +30,7 @@
   "dependencies": {
     "@bjorn3/browser_wasi_shim": "^0.3.0",
     "@cloudflare/ai-utils": "^1.0.1",
-    "tidepool-generated-ts": "workspace:*",
+    "exomonad-generated-ts": "workspace:*",
     "zod": "^4.3.4"
   }
 }

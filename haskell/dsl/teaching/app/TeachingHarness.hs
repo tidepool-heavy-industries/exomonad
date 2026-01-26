@@ -39,14 +39,14 @@ import qualified Data.Text as T
 import System.Directory (doesFileExist)
 import System.Exit (exitFailure)
 
-import Tidepool.Effect.Types
+import ExoMonad.Effect.Types
   ( LLM(..)
   , ContentBlock(..)
   , TurnOutcome(..)
   , TurnResult(..)
   )
-import Tidepool.Effect.NodeMeta (NodeMetadata(..))
-import Tidepool.Teaching.LLM
+import ExoMonad.Effect.NodeMeta (NodeMetadata(..))
+import ExoMonad.Teaching.LLM
   ( loadTeachingConfig
   , withTeaching
   , runLLMWithTeaching

@@ -26,8 +26,8 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Vector qualified as V
 
-import Tidepool.Wasm.WireTypes
-import Tidepool.Anthropic.Types (ImageSource(..))
+import ExoMonad.Wasm.WireTypes
+import ExoMonad.Anthropic.Types (ImageSource(..))
 
 
 spec :: Spec

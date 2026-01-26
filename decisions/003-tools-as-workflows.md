@@ -2,7 +2,7 @@
 
 **Date:** 2026-01-21
 **Status:** Accepted
-**Context:** Designing MCP tool philosophy for Tidepool
+**Context:** Designing MCP tool philosophy for ExoMonad
 
 ## Decision
 
@@ -74,7 +74,7 @@ Traditional approach: Prompt agents with instructions
 - No error handling
 - Inconsistent execution
 
-### The Tidepool Solution
+### The ExoMonad Solution
 
 Encode instructions as deterministic code:
 ```haskell
@@ -96,7 +96,7 @@ filePRWorkflow issueNum = do
 - Consistent execution
 - Testable workflows
 
-## This Is Why Tidepool DSL Exists
+## This Is Why ExoMonad DSL Exists
 
 The DSL supports:
 - **Arbitrary Haskell effects** - Compose Git, GitHub, LSP, TUI operations

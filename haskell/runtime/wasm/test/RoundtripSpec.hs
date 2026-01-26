@@ -15,8 +15,8 @@ import Data.Aeson.KeyMap qualified as KM
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TLE
 
-import Tidepool.Wasm.Roundtrip
-import Tidepool.Wasm.WireTypes
+import ExoMonad.Wasm.Roundtrip
+import ExoMonad.Wasm.WireTypes
 import ProtocolPropertySpec ()  -- Import orphan Arbitrary instances
 
 

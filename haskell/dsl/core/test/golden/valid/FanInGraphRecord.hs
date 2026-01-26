@@ -10,8 +10,8 @@ module FanInGraphRecord where
 
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Input, Schema, LLMKind(..))
-import Tidepool.Graph.Generic (GraphMode(..), Entry, Exit, LLMNode, ValidGraphRecord)
+import ExoMonad.Graph.Types (type (:@), Input, Schema, LLMKind(..))
+import ExoMonad.Graph.Generic (GraphMode(..), Entry, Exit, LLMNode, ValidGraphRecord)
 
 data InputData
 data Analysis

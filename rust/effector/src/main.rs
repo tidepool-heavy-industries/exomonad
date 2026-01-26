@@ -8,7 +8,7 @@ mod gh;
 
 #[derive(Parser)]
 #[command(name = "effector")]
-#[command(about = "Stateless IO executor for Tidepool agents")]
+#[command(about = "Stateless IO executor for ExoMonad agents")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

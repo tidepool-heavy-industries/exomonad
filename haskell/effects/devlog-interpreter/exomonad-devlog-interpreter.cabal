@@ -1,0 +1,27 @@
+cabal-version:      3.0
+name:               exomonad-devlog-interpreter
+version:            0.1.0.0
+synopsis:           DEPRECATED - Use exomonad-log-interpreter instead
+description:        This package is deprecated. The DevLog effect has been consolidated
+                    into the Log effect in exomonad-core. Use exomonad-log-interpreter
+                    for the fast-logger backed implementation.
+license:            MIT
+author:             Inanna
+build-type:         Simple
+
+common warnings
+    ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints -Wunused-packages
+
+library
+    import:           warnings
+    exposed-modules:
+        ExoMonad.DevLog.Interpreter
+        ExoMonad.DevLog.Config
+        ExoMonad.DevLog.Formatter
+    build-depends:
+        base >= 4.17 && < 5,
+        exomonad-core
+    hs-source-dirs:   src
+    default-language: GHC2024
+    default-extensions:
+        OverloadedStrings

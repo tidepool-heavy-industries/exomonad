@@ -6,8 +6,8 @@ import Data.Text (Text)
 import qualified Data.Set as Set
 import Data.Maybe (fromMaybe)
 
-import Tidepool.Role (Role(..))
-import Tidepool.Control.RoleConfig
+import ExoMonad.Role (Role(..))
+import ExoMonad.Control.RoleConfig
 
 main :: IO ()
 main = defaultMain spec

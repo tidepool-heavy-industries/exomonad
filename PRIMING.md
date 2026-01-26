@@ -1,4 +1,4 @@
-# Tidepool System Priming
+# ExoMonad System Priming
 
 Current state of the deployed Docker-based development environment.
 
@@ -13,16 +13,16 @@ Current state of the deployed Docker-based development environment.
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                        RUNNING CONTAINERS                                    │
 │                                                                             │
-│  tidepool-zellij ─────────────── Terminal multiplexer (user attaches here) │
+│  exomonad-zellij ─────────────── Terminal multiplexer (user attaches here) │
 │       │                          Runs: zellij attach --create               │
 │       │ docker attach                                                       │
 │       ▼                                                                     │
-│  tidepool-tl ────────────────── Claude Code agent (Tech Lead role)         │
-│  tidepool-pm ────────────────── Claude Code agent (PM role)                │
+│  exomonad-tl ────────────────── Claude Code agent (Tech Lead role)         │
+│  exomonad-pm ────────────────── Claude Code agent (PM role)                │
 │       │                                                                     │
 │       │ MCP (TCP 7432)                                                      │
 │       ▼                                                                     │
-│  tidepool-control-server ────── Haskell MCP server (20+ tools)             │
+│  exomonad-control-server ────── Haskell MCP server (20+ tools)             │
 │       │                         - GH tools (gh_issue_list, gh_issue_create) │
 │       │                         - PM tools (pm_status, pm_prioritize, ...)  │
 │       │                         - Exo tools (spawn_agents, exo_status)      │
@@ -48,11 +48,11 @@ Each container is built from a Dockerfile in `docker/`:
 │     │  Purpose: Visual multiplexer, panes attach to agent containers        │
 │     │                                                                        │
 │  repo-claude-agent ◄────────── docker/claude-agent/Dockerfile              │
-│     │  Contains: claude-code, mantle-agent, effector, git, gh CLI          │
+│     │  Contains: claude-code, exomonad, effector, git, gh CLI          │
 │     │  Purpose: Agent runtime (TL, PM, and spawned subagents)               │
 │     │                                                                        │
 │  repo-control-server ◄──────── docker/control-server/Dockerfile            │
-│     │  Contains: tidepool-control-server (Haskell), gh CLI, zellij,       │
+│     │  Contains: exomonad-control-server (Haskell), gh CLI, zellij,       │
 │     │            docker-ctl (Rust)                                        │
 │     │  Purpose: MCP server, tool execution, cross-container orchestration   │
 │     │                                                                        │
@@ -73,11 +73,11 @@ Binaries that must be built and available:
 │     │  CLI for container lifecycle (spawn, stop, exec)                      │
 │     │  Depends: bollard (Docker API)                                        │
 │     │                                                                        │
-│  mantle-agent ◄────────────── rust/mantle-agent/                           │
+│  exomonad ◄────────────── rust/exomonad/                           │
 │     │  Hook forwarding (spawned per-hook by Claude Code)                    │
-│     │  Depends: mantle-shared (protocol types)                              │
+│     │  Depends: exomonad-shared (protocol types)                              │
 │     │                                                                        │
-│  mantle-shared ◄───────────── rust/mantle-shared/                          │
+│  exomonad-shared ◄───────────── rust/exomonad-shared/                          │
 │     │  Protocol types (ControlMessage, HookInput, etc.)                     │
 │     │  Must match: haskell/control-server/Protocol.hs                       │
 │     │                                                                        │
@@ -96,7 +96,7 @@ Binaries that must be built and available:
 │  tui-popup ◄─────────────────  rust/tui-popup/                             │
 │     │  Generic TUI popup (depends on tui-sidebar)                           │
 │     │                                                                        │
-│  mantle-hub ◄────────────────  rust/mantle-hub/                            │
+│  exomonad-hub ◄────────────────  rust/exomonad-hub/                            │
 │     │  Telemetry/metrics hub (WIP, needs repurposing)                       │
 │     │                                                                        │
 │  ssh-proxy ◄─────────────────  rust/ssh-proxy/                             │
@@ -105,9 +105,9 @@ Binaries that must be built and available:
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                        HASKELL BINARY                                        │
-│  Built with: cabal build tidepool-control-server                            │
+│  Built with: cabal build exomonad-control-server                            │
 │                                                                             │
-│  tidepool-control-server ◄─── haskell/control-server/                      │
+│  exomonad-control-server ◄─── haskell/control-server/                      │
 │        MCP server, tool dispatch, effect interpretation                     │
 │        TCP listener on port 7432                                            │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -184,7 +184,7 @@ The control-server binary depends on these packages:
 │     │  runGitHubIO :: GitHubConfig -> Eff (GitHub ': es) a -> Eff es a     │
 │     │                                                                        │
 │  DockerCtl (in control-server) ◄── Subprocess calls to docker-ctl          │
-│     │  Tidepool.Control.Effects.DockerCtl                                  │
+│     │  ExoMonad.Control.Effects.DockerCtl                                  │
 │     │                                                                        │
 │  zellij-interpreter ◄── Shells out to zellij CLI                           │
 │     │  runZellijIO :: Eff (Zellij ': es) a -> Eff es a                      │
@@ -214,7 +214,7 @@ The control-server binary depends on these packages:
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                       DSL CORE (haskell/dsl/)                                │
 │                                                                             │
-│  tidepool-core (dsl/core/) ◄── Main DSL package                            │
+│  exomonad-core (dsl/core/) ◄── Main DSL package                            │
 │     Graph DSL ─────── Type-safe state machine definitions                   │
 │        EntryNode, LogicNode, ExitNode                                       │
 │        MCPExport annotation → auto-discovery                                │
@@ -230,7 +230,7 @@ The control-server binary depends on these packages:
 │     Schema ────────── JSON Schema generation                                │
 │        HasJSONSchema typeclass → tool input schemas                         │
 │                                                                             │
-│  tidepool-teaching (dsl/teaching/) ◄── LLM teaching infrastructure         │
+│  exomonad-teaching (dsl/teaching/) ◄── LLM teaching infrastructure         │
 │     Teaching mode for FunctionGemma training data capture                   │
 │     FineTrainingTeacher typeclass for structured examples                   │
 └───────────────────────────────────┬─────────────────────────────────────────┘
@@ -254,11 +254,11 @@ The control-server binary depends on these packages:
 ### Agent → MCP Tool → Effect → External System
 
 ```
-Claude Code (in tidepool-tl)
+Claude Code (in exomonad-tl)
     │
     │ MCP request: {"tool": "gh_issue_create", "arguments": {"title": "..."}}
     ▼
-HTTP POST to tidepool-control-server:7432/role/tl/mcp
+HTTP POST to exomonad-control-server:7432/role/tl/mcp
     │
     │ Handler/MCP.hs dispatches to GHTools.ghIssueCreateLogic
     ▼
@@ -286,7 +286,7 @@ TL calls spawn_agents with issue numbers
 SpawnAgents.hs:
     1. Fetch issue info (GitHub effect → gh CLI)
     2. Create worktree (Worktree effect → git)
-    3. Bootstrap .tidepool/ config
+    3. Bootstrap .exomonad/ config
     4. Spawn container (DockerSpawner effect → docker-ctl spawn)
     5. Create Zellij tab with "docker attach <container>"
     │
@@ -300,22 +300,22 @@ New agent container running, attached to Zellij
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           DOCKER VOLUMES                                     │
 │                                                                             │
-│  tidepool-worktrees ── /worktrees in tl, pm, control-server                │
+│  exomonad-worktrees ── /worktrees in tl, pm, control-server                │
 │     │  Shared worktree storage for subagent spawning                        │
 │     │  Persists across container restarts                                   │
 │     │                                                                        │
-│  tidepool-sockets ──── /sockets in control-server, tl, pm, zellij          │
+│  exomonad-sockets ──── /sockets in control-server, tl, pm, zellij          │
 │     │  Unix sockets for IPC (control.sock, tui.sock)                        │
 │     │                                                                        │
-│  tidepool-zellij ───── /run/user/1000 shared across containers             │
+│  exomonad-zellij ───── /run/user/1000 shared across containers             │
 │     │  Zellij session socket for cross-container tab creation               │
 │     │                                                                        │
-│  tidepool-gh-auth ──── /home/user/.config/gh in control-server             │
+│  exomonad-gh-auth ──── /home/user/.config/gh in control-server             │
 │     │                  /home/agent/.config/gh in tl, pm                     │
 │     │  GitHub CLI authentication (persists across restarts)                 │
 │     │                                                                        │
-│  tidepool-claude-tl ── /home/agent/.claude in tl                           │
-│  tidepool-claude-pm ── /home/agent/.claude in pm                           │
+│  exomonad-claude-tl ── /home/agent/.claude in tl                           │
+│  exomonad-claude-pm ── /home/agent/.claude in pm                           │
 │     │  Claude Code session state (separate per agent)                       │
 │     │                                                                        │
 │  /var/run/docker.sock ── Docker socket (mounted in zellij,                 │
@@ -376,11 +376,11 @@ New agent container running, attached to Zellij
 │  GITHUB (one of):                                                           │
 │  GH_TOKEN ───────────── GitHub personal access token (recommended)         │
 │    OR                                                                       │
-│  Run `docker exec -u user -it tidepool-control-server gh auth login`       │
+│  Run `docker exec -u user -it exomonad-control-server gh auth login`       │
 │                                                                             │
 │  OPTIONAL:                                                                  │
-│  GITHUB_REPO ────────── Default repo (default: tidepool-heavy-industries/  │
-│                         tidepool)                                           │
+│  GITHUB_REPO ────────── Default repo (default: exomonad-heavy-industries/  │
+│                         exomonad)                                           │
 │  GEMMA_ENDPOINT ────── Ollama URL for teach-graph scoring                  │
 │  ZELLIJ_SESSION_NAME ── Target session for cross-container tabs            │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -401,7 +401,7 @@ GH_TOKEN=ghp_your_personal_access_token
 **Option 2: Interactive Login (recommended for humans)**
 ```bash
 # After containers are running
-docker exec -u user -it tidepool-control-server gh auth login
+docker exec -u user -it exomonad-control-server gh auth login
 
 # Follow prompts, select:
 # - GitHub.com
@@ -446,15 +446,15 @@ Either:
 Fix:
 ```bash
 # Fix permissions if needed
-docker exec tidepool-control-server chown -R 1000:1000 /home/user/.config/gh
+docker exec exomonad-control-server chown -R 1000:1000 /home/user/.config/gh
 
 # Re-authenticate as user
-docker exec -u user -it tidepool-control-server gh auth login
+docker exec -u user -it exomonad-control-server gh auth login
 ```
 
 **"Issue not found" from spawn_agents**
 
-Check that `GITHUB_REPO` is set correctly. Default is `tidepool-heavy-industries/tidepool`.
+Check that `GITHUB_REPO` is set correctly. Default is `exomonad-ai/exomonad`.
 
 ### Container Issues
 
@@ -466,8 +466,8 @@ Control-server takes ~10 seconds to initialize. Use `/mcp` → `Reconnect` in Cl
 
 Volume ownership mismatch. The entrypoint fixes common cases, but for manual fixes:
 ```bash
-docker exec tidepool-control-server chown -R 1000:1000 /home/user/.config/gh
-docker exec tidepool-control-server chown -R 1000:1000 /sockets
+docker exec exomonad-control-server chown -R 1000:1000 /home/user/.config/gh
+docker exec exomonad-control-server chown -R 1000:1000 /sockets
 ```
 
 ## Docker Orchestration Layer (Review Focus)
@@ -499,15 +499,15 @@ docker-ctl stop {id}      Stop + remove container
 **Spawn creates containers with:**
 ```rust
 Config {
-    image: "tidepool-agent:latest",
-    labels: { "com.tidepool.issue_number": "...", "com.tidepool.role": "agent" },
+    image: "exomonad-agent:latest",
+    labels: { "com.exomonad.issue_number": "...", "com.exomonad.role": "agent" },
     mounts: [
         bind: worktree_path → /worktrees/{id},
-        volume: tidepool-gh-auth → /home/agent/.config/gh
+        volume: exomonad-gh-auth → /home/agent/.config/gh
     ],
-    network: "tidepool-internal",
+    network: "exomonad-internal",
     user: "1000:1000",
-    env: ["TIDEPOOL_ISSUE_NUMBER=...", "TIDEPOOL_BACKEND=claude|gemini"]
+    env: ["EXOMONAD_ISSUE_NUMBER=...", "EXOMONAD_BACKEND=claude|gemini"]
 }
 ```
 
@@ -563,17 +563,17 @@ Config {
 │           │ creates/calls        │ attaches                            │  │
 │           ▼                      ▼                                     │  │
 │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐     │  │
-│  │ tidepool-tl     │    │ tidepool-pm     │    │ subagent-1      │     │  │
+│  │ exomonad-tl     │    │ exomonad-pm     │    │ subagent-1      │     │  │
 │  │ Claude Code     │    │ Claude Code     │    │ Claude Code     │◄────┘  │
 │  │ (Tech Lead)     │    │ (PM)            │    │ (spawned)       │        │
 │  └─────────────────┘    └─────────────────┘    └─────────────────┘        │
 │                                                                             │
 │  SHARED VOLUMES:                                                           │
-│  ├── tidepool-worktrees    (git worktrees, /worktrees in containers)       │
-│  ├── tidepool-sockets      (Unix sockets, /sockets in containers)          │
-│  ├── tidepool-gh-auth      (GitHub CLI auth, ~/.config/gh)                 │
-│  ├── tidepool-zellij       (Zellij session socket, /run/user/1000)         │
-│  └── tidepool-claude-{tl,pm} (Claude Code state, separate per agent)       │
+│  ├── exomonad-worktrees    (git worktrees, /worktrees in containers)       │
+│  ├── exomonad-sockets      (Unix sockets, /sockets in containers)          │
+│  ├── exomonad-gh-auth      (GitHub CLI auth, ~/.config/gh)                 │
+│  ├── exomonad-zellij       (Zellij session socket, /run/user/1000)         │
+│  └── exomonad-claude-{tl,pm} (Claude Code state, separate per agent)       │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -640,7 +640,6 @@ These exist in the repo but are not part of the current Docker deployment:
 **Alternative Servers/UIs:**
 - `haskell/native-server/` - WebSocket server (replaced by control-server)
 - `typescript/native-gui/` - Solid.js frontend
-- `anemone/` - Debug UI (Solid.js)
 
 **Integrations (not wired up):**
 - `typescript/telegram-bot/` - Telegram integration
@@ -676,7 +675,7 @@ Ctrl+q
 docker compose ps
 
 # View control-server logs
-docker logs -f tidepool-control-server
+docker logs -f exomonad-control-server
 
 # Rebuild and restart a service
 docker compose build control-server && docker compose up -d control-server
@@ -685,8 +684,8 @@ docker compose build control-server && docker compose up -d control-server
 docker buildx prune --all -f
 
 # GitHub auth (must use -u user)
-docker exec -u user -it tidepool-control-server gh auth login
+docker exec -u user -it exomonad-control-server gh auth login
 
 # Check GitHub auth status
-docker exec tidepool-control-server gh auth status
+docker exec exomonad-control-server gh auth status
 ```

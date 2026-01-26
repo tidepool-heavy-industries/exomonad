@@ -59,7 +59,7 @@ const ChatView: Component = () => {
     <div class="h-screen flex flex-col bg-gray-900 text-gray-100">
       {/* Header */}
       <header class="flex items-center justify-between px-4 py-3 bg-gray-800 border-b border-gray-700">
-        <h1 class="text-lg font-semibold">Tidepool</h1>
+        <h1 class="text-lg font-semibold">ExoMonad</h1>
         <div class="flex items-center gap-3">
           {/* View Graph link */}
           <A

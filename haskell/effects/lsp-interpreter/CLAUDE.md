@@ -34,8 +34,8 @@ Read this if you're:
 ## Usage
 
 ```haskell
-import Tidepool.Effects.LSP
-import Tidepool.LSP.Interpreter (withLSPSession, runLSP)
+import ExoMonad.Effects.LSP
+import ExoMonad.LSP.Interpreter (withLSPSession, runLSP)
 
 main :: IO ()
 main = withLSPSession "/path/to/project" $ \session -> do
@@ -114,7 +114,7 @@ The interpreter uses a **worker thread pattern** for concurrent LSP requests:
 ```
 
 **Why this pattern?**
-- **Thread safety**: Multiple Tidepool agents can query LSP concurrently
+- **Thread safety**: Multiple ExoMonad agents can query LSP concurrently
 - **Session reuse**: One HLS process serves many queries (semantic-scout)
 - **Blocking I/O**: LSP operations block, but don't block caller threads
 

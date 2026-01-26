@@ -17,13 +17,13 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Input, Schema, UsesEffects, LLMKind(..))
-import Tidepool.Graph.Generic (GraphMode(..), Entry, Exit, LLMNode, LogicNode)
-import Tidepool.Graph.Goto (Goto)
-import Tidepool.Graph.Mermaid (graphToMermaid)
-import Tidepool.Schema (HasJSONSchema(..), JSONSchema(..), SchemaType(..))
+import ExoMonad.Graph.Types (type (:@), Input, Schema, UsesEffects, LLMKind(..))
+import ExoMonad.Graph.Generic (GraphMode(..), Entry, Exit, LLMNode, LogicNode)
+import ExoMonad.Graph.Goto (Goto)
+import ExoMonad.Graph.Mermaid (graphToMermaid)
+import ExoMonad.Schema (HasJSONSchema(..), JSONSchema(..), SchemaType(..))
 import qualified Data.Map.Strict as Map
-import Tidepool.Template.DependencyTree
+import ExoMonad.Template.DependencyTree
   ( parseTemplateIncludes
   , parseTemplateExtends
   , parseAllDependencies

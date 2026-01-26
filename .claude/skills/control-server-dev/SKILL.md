@@ -5,23 +5,23 @@ description: Use when working on the Haskell control-server: adding MCP tools, i
 
 # Control Server Development
 
-The control-server is the Haskell backend for Claude Code++. It receives messages from mantle-agent via TCP and executes MCP tools, hook handlers, and LSP queries.
+The control-server is the Haskell backend for Claude Code++. It receives messages from exomonad via TCP and executes MCP tools, hook handlers, and LSP queries.
 
 ## Quick Reference
 
 | Action | Location |
 |--------|----------|
-| Add MCP tool | `haskell/control-server/src/Tidepool/Control/LSPTools.hs` or new graph |
-| Add hook logic | `haskell/control-server/src/Tidepool/Control/Handler/Hook.hs` |
-| Add protocol type | `haskell/control-server/src/Tidepool/Control/Protocol.hs` |
-| Register tool for export | `haskell/control-server/src/Tidepool/Control/Export.hs` |
-| LSP session management | `haskell/control-server/src/Tidepool/Control/Server.hs` |
-| MCP routing | `haskell/control-server/src/Tidepool/Control/Handler/MCP.hs` |
+| Add MCP tool | `haskell/control-server/src/ExoMonad/Control/LSPTools.hs` or new graph |
+| Add hook logic | `haskell/control-server/src/ExoMonad/Control/Handler/Hook.hs` |
+| Add protocol type | `haskell/control-server/src/ExoMonad/Control/Protocol.hs` |
+| Register tool for export | `haskell/control-server/src/ExoMonad/Control/Export.hs` |
+| LSP session management | `haskell/control-server/src/ExoMonad/Control/Server.hs` |
+| MCP routing | `haskell/control-server/src/ExoMonad/Control/Handler/MCP.hs` |
 
 ## Architecture
 
 ```
-mantle-agent (Rust, spawned per-call)
+exomonad (Rust, spawned per-call)
     │
     │ TCP NDJSON (port 7432)
     ▼
@@ -204,7 +204,7 @@ Logs appear in the process-compose TUI (pane 2) or stdout if running standalone.
 
 ## Protocol Types (Must Match Rust)
 
-The `Protocol.hs` types must serialize identically to `rust/mantle-shared/src/protocol.rs`.
+The `Protocol.hs` types must serialize identically to `rust/exomonad-shared/src/protocol.rs`.
 
 ### ControlMessage (Incoming)
 ```haskell
@@ -255,7 +255,7 @@ liftIO $ putStrLn $ "  args=" <> show args
 
 | Variable | Purpose |
 |----------|---------|
-| `TIDEPOOL_PROJECT_DIR` | Project root (where .tidepool/ lives) |
+| `EXOMONAD_PROJECT_DIR` | Project root (where .exomonad/ lives) |
 | `GEMMA_ENDPOINT` | Ollama endpoint (required for Tier 2 tools) |
 
 ## File Locations
@@ -263,7 +263,7 @@ liftIO $ putStrLn $ "  args=" <> show args
 ```
 haskell/control-server/
 ├── app/Main.hs                  ← Entry point
-├── src/Tidepool/Control/
+├── src/ExoMonad/Control/
 │   ├── Server.hs                ← TCP listener + LSP session
 │   ├── Protocol.hs              ← Message types (MUST MATCH RUST)
 │   ├── Handler.hs               ← Message routing
@@ -271,12 +271,12 @@ haskell/control-server/
 │   ├── Handler/MCP.hs           ← MCP tool dispatch
 │   ├── Export.hs                ← Tool discovery + registration
 │   └── LSPTools.hs              ← Tier 1 tool graphs
-└── tidepool-control-server.cabal
+└── exomonad-control-server.cabal
 ```
 
 ## See Also
 
 - **Full docs**: `haskell/control-server/CLAUDE.md`
-- **Protocol types (Rust)**: `rust/mantle-shared/src/protocol.rs`
-- **mantle-agent**: `rust/mantle-agent/CLAUDE.md`
+- **Protocol types (Rust)**: `rust/exomonad-shared/src/protocol.rs`
+- **exomonad**: `rust/exomonad/CLAUDE.md`
 - **Graph DSL**: `haskell/dsl/core/CLAUDE.md`

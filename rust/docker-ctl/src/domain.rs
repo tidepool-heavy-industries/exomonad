@@ -1,4 +1,4 @@
-//! Domain model for Tidepool agent containers.
+//! Domain model for ExoMonad agent containers.
 //!
 //! Haskell owns "what" (DockerSpawner effect, SpawnConfig).
 //! Rust owns "how" (volume mounting, TTY allocation, network config).
@@ -9,7 +9,7 @@ use bollard::models::{Mount, MountTypeEnum};
 // Volume Configuration
 // =============================================================================
 
-/// Standard volume set for Tidepool agent containers.
+/// Standard volume set for ExoMonad agent containers.
 ///
 /// **SYNC POINT:** Keep in sync with `docker-compose.yml` volumes section.
 /// When adding a volume here, also add it to:
@@ -75,38 +75,38 @@ impl VolumeMount {
     // -------------------------------------------------------------------------
 
     /// Main repository volume.
-    /// **docker-compose.yml:** `tidepool-repo:/workspace/tl` (for tl service)
+    /// **docker-compose.yml:** `exomonad-repo:/workspace/tl` (for tl service)
     pub const REPO: Self = Self {
-        volume: "tidepool-repo",
+        volume: "exomonad-repo",
         path: "/repo",
     };
 
     /// Worktrees volume - spawned agents work here.
-    /// **docker-compose.yml:** `tidepool-worktrees:/worktrees`
+    /// **docker-compose.yml:** `exomonad-worktrees:/worktrees`
     pub const WORKTREES: Self = Self {
-        volume: "tidepool-worktrees",
+        volume: "exomonad-worktrees",
         path: "/worktrees",
     };
 
     /// Sockets volume - IPC between agents and control-server.
-    /// **docker-compose.yml:** `tidepool-sockets:/sockets`
+    /// **docker-compose.yml:** `exomonad-sockets:/sockets`
     pub const SOCKETS: Self = Self {
-        volume: "tidepool-sockets",
+        volume: "exomonad-sockets",
         path: "/sockets",
     };
 
     /// GitHub auth volume - shared credentials.
-    /// **docker-compose.yml:** `tidepool-gh-auth:/home/agent/.config/gh`
+    /// **docker-compose.yml:** `exomonad-gh-auth:/home/agent/.config/gh`
     pub const GH_AUTH: Self = Self {
-        volume: "tidepool-gh-auth",
+        volume: "exomonad-gh-auth",
         path: "/home/agent/.config/gh",
     };
 
     /// Claude Code auth volume - API keys/OAuth tokens.
-    /// **docker-compose.yml:** `tidepool-claude-auth:/home/user/.claude` (orchestrator)
+    /// **docker-compose.yml:** `exomonad-claude-auth:/home/user/.claude` (orchestrator)
     /// Subagents share this volume for consistent auth.
     pub const CLAUDE_AUTH: Self = Self {
-        volume: "tidepool-claude-auth",
+        volume: "exomonad-claude-auth",
         path: "/home/agent/.claude",
     };
 
@@ -138,10 +138,10 @@ mod tests {
     #[test]
     fn volume_names_match_docker_compose() {
         // These names must match docker-compose.yml volume definitions
-        assert_eq!(VolumeMount::REPO.volume, "tidepool-repo");
-        assert_eq!(VolumeMount::WORKTREES.volume, "tidepool-worktrees");
-        assert_eq!(VolumeMount::SOCKETS.volume, "tidepool-sockets");
-        assert_eq!(VolumeMount::GH_AUTH.volume, "tidepool-gh-auth");
-        assert_eq!(VolumeMount::CLAUDE_AUTH.volume, "tidepool-claude-auth");
+        assert_eq!(VolumeMount::REPO.volume, "exomonad-repo");
+        assert_eq!(VolumeMount::WORKTREES.volume, "exomonad-worktrees");
+        assert_eq!(VolumeMount::SOCKETS.volume, "exomonad-sockets");
+        assert_eq!(VolumeMount::GH_AUTH.volume, "exomonad-gh-auth");
+        assert_eq!(VolumeMount::CLAUDE_AUTH.volume, "exomonad-claude-auth");
     }
 }

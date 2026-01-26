@@ -11,7 +11,7 @@ mkdir -p "$KEY_DIR"
 # Generate keypair if it doesn't exist
 if [ ! -f "$PRIVATE_KEY" ]; then
     echo "Generating SSH keypair for orchestrator..."
-    ssh-keygen -t ed25519 -f "$PRIVATE_KEY" -N "" -C "orchestrator@tidepool" || { echo "Failed to generate SSH keypair"; exit 1; }
+    ssh-keygen -t ed25519 -f "$PRIVATE_KEY" -N "" -C "orchestrator@exomonad" || { echo "Failed to generate SSH keypair"; exit 1; }
     echo "✓ Keypair generated at $PRIVATE_KEY"
 else
     echo "SSH keypair already exists at $PRIVATE_KEY"

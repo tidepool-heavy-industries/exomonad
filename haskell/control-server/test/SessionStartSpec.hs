@@ -6,12 +6,12 @@ import Data.Maybe (isJust)
 import qualified Data.Text as T
 import Control.Monad.Freer (Eff, runM, interpret)
 
-import Tidepool.Control.Hook.SessionStart
-import Tidepool.Control.RoleConfig (Role(..))
-import Tidepool.Effect.Types (runLog, LogLevel(..))
-import Tidepool.Effects.Git (Git(..))
-import Tidepool.Effects.GitHub (GitHub(..), Repo(..), Issue(..), IssueState(..), Author(..))
-import Tidepool.Git.Interpreter (runGitIO)
+import ExoMonad.Control.Hook.SessionStart
+import ExoMonad.Control.RoleConfig (Role(..))
+import ExoMonad.Effect.Types (runLog, LogLevel(..))
+import ExoMonad.Effects.Git (Git(..))
+import ExoMonad.Effects.GitHub (GitHub(..), Repo(..), Issue(..), IssueState(..), Author(..))
+import ExoMonad.Git.Interpreter (runGitIO)
 
 main :: IO ()
 main = defaultMain spec

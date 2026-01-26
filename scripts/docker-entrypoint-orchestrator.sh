@@ -1,13 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
-# Claude auth is persisted via named volume (tidepool-claude-auth → /home/user/.claude)
+# Claude auth is persisted via named volume (exomonad-claude-auth → /home/user/.claude)
 echo "🔐 Setting up Claude config directory..."
 mkdir -p "$CLAUDE_CONFIG_DIR"
 chown -R user:user "$CLAUDE_CONFIG_DIR"
 echo "✓ Config dir ready: $CLAUDE_CONFIG_DIR"
 
-# SSH keys are in named volume (tidepool-ssh-keys → /home/user/.ssh)
+# SSH keys are in named volume (exomonad-ssh-keys → /home/user/.ssh)
 # Populated once via: ./scripts/setup-docker-ssh.sh
 echo "🔑 Checking SSH keys..."
 if [ -f /home/user/.ssh/id_ed25519 ]; then
@@ -16,7 +16,7 @@ if [ -f /home/user/.ssh/id_ed25519 ]; then
     chown -R user:user /home/user/.ssh
     echo "✓ SSH key ready"
 else
-    echo "❌ No SSH key found in tidepool-ssh-keys volume"
+    echo "❌ No SSH key found in exomonad-ssh-keys volume"
     echo ""
     echo "   Run the setup script to copy your SSH key:"
     echo "   ./scripts/setup-docker-ssh.sh"
@@ -25,8 +25,8 @@ else
 fi
 
 # Clone or update repo
-REPO_URL="${TIDEPOOL_REPO_URL:-git@github.com:tidepool-heavy-industries/tidepool.git}"
-REPO_BRANCH="${TIDEPOOL_REPO_BRANCH:-main}"
+REPO_URL="${EXOMONAD_REPO_URL:-git@github.com:exomonad-ai/exomonad.git}"
+REPO_BRANCH="${EXOMONAD_REPO_BRANCH:-main}"
 WORKTREES_DIR="/worktrees"
 
 echo "📦 Setting up repository..."

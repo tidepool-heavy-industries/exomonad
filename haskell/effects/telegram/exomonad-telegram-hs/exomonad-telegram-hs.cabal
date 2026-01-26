@@ -1,0 +1,40 @@
+cabal-version:      3.0
+name:               exomonad-telegram-hs
+version:            0.1.0.0
+synopsis:           Telegram effect types for ExoMonad agents
+license:            MIT
+author:             Inanna
+build-type:         Simple
+
+common warnings
+    ghc-options: -Wall -Wno-missing-export-lists -Wincomplete-patterns
+
+library
+    import:           warnings
+    exposed-modules:
+        ExoMonad.Telegram
+        ExoMonad.Telegram.Types
+        ExoMonad.Telegram.Effect
+        ExoMonad.Telegram.Example
+    build-depends:
+        base >= 4.17 && < 5,
+        effectful-core >= 2.3 && < 3,
+        text >= 2.0 && < 3,
+        aeson >= 2.1 && < 3,
+        exomonad-core >= 0.1 && < 0.2
+    hs-source-dirs:   src
+    default-language: GHC2024
+    default-extensions:
+        DataKinds
+        DeriveAnyClass
+        DeriveGeneric
+        DerivingStrategies
+        DerivingVia
+        DuplicateRecordFields
+        GADTs
+        LambdaCase
+        NoFieldSelectors
+        OverloadedRecordDot
+        OverloadedStrings
+        TypeFamilies
+        TypeOperators

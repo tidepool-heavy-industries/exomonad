@@ -6,11 +6,11 @@
 
 ## Goal
 
-Wire `tidepool-teaching` into the graph execution so every Haiku call during DocGen exploration is captured to JSONL training data.
+Wire `exomonad-teaching` into the graph execution so every Haiku call during DocGen exploration is captured to JSONL training data.
 
 ## Context
 
-### tidepool-teaching Architecture
+### exomonad-teaching Architecture
 
 ```
 runLLMWithTeaching env
@@ -177,12 +177,12 @@ shutdownServer config = do
 | `Scout/Graph/Runner.hs` | Modify | Conditional teaching interpreter |
 | `Server.hs` | Modify | Load teaching config, pass to handlers |
 | `Handler/MCP.hs` | Modify | Accept ServerConfig with teaching env |
-| `tidepool-control-server.cabal` | Modify | Add tidepool-teaching dependency |
+| `exomonad-control-server.cabal` | Modify | Add exomonad-teaching dependency |
 
 ## JSONL Output Location
 
 ```
-.tidepool/training/
+.exomonad/training/
 └── session-{uuid}/
     ├── anthropic.jsonl   # TeachingTurn records
     ├── gemma.jsonl       # Reserved for FunctionGemma format
@@ -195,27 +195,27 @@ shutdownServer config = do
 # Enable teaching mode
 export TEACHING_ENABLED=true
 export ANTHROPIC_API_KEY=sk-ant-...
-export TEACHING_OUTPUT_DIR=.tidepool/training
+export TEACHING_OUTPUT_DIR=.exomonad/training
 
 # Start server
-cabal run tidepool-control-server
+cabal run exomonad-control-server
 
 # Make MCP call (creates training data)
 # ... (via Claude Code or socat)
 
 # Check output
-ls .tidepool/training/session-*/
+ls .exomonad/training/session-*/
 # Should see: anthropic.jsonl, metadata.json
 
 # Verify content
-cat .tidepool/training/session-*/anthropic.jsonl | jq .
+cat .exomonad/training/session-*/anthropic.jsonl | jq .
 # Should see TeachingTurn with:
 #   ttNodeName: "dgSelect"
 #   ttGraphName: "DocGenGraph"
 #   ttThinking: (non-empty if Haiku used thinking)
 
 # Verify thinking captured
-cat .tidepool/training/session-*/anthropic.jsonl | jq '.ttResponse.content[] | select(.type=="thinking")'
+cat .exomonad/training/session-*/anthropic.jsonl | jq '.ttResponse.content[] | select(.type=="thinking")'
 ```
 
 ## Notes

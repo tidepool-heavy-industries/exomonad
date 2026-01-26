@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$TIDEPOOL_BIN_DIR/mantle-agent hook session-start --role=tl"
+            "command": "$EXOMONAD_BIN_DIR/exomonad hook session-start --role=tl"
           }
         ]
       },
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$TIDEPOOL_BIN_DIR/mantle-agent hook session-start --role=tl"
+            "command": "$EXOMONAD_BIN_DIR/exomonad hook session-start --role=tl"
           }
         ]
       }

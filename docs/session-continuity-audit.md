@@ -119,8 +119,8 @@ Since `--resume` preserves internal memory, use `--inject-context` for **externa
 
 **Implementation options:**
 - `urchin prime` - context generator for coding agents (like `gt prime` for hooks)
-- Graph DSL template - Tidepool orchestration renders context before ClaudeCode node
-- Shell function - mantle wrapper that gathers context before resume
+- Graph DSL template - ExoMonad orchestration renders context before ClaudeCode node
+- Shell function - exomonad wrapper that gathers context before resume
 
 **Example usage:**
 
@@ -146,7 +146,7 @@ EOF
 }
 
 # Resume with built context
-mantle run \
+exomonad run \
   --resume $SESSION_ID \
   --inject-context "$(build_context)" \
   --prompt "Continue with the task"

@@ -34,11 +34,11 @@ RUN sed -i '/package zlib/,+2d' cabal.project
 RUN --mount=type=cache,target=/root/.cabal/store \
     --mount=type=cache,target=/build/dist-newstyle \
     cabal update && \
-    cabal build tidepool-control-server -j --ghc-options=-O1 && \
-    cp $(cabal list-bin tidepool-control-server) /usr/local/bin/tidepool-control-server
+    cabal build exomonad-control-server -j --ghc-options=-O1 && \
+    cp $(cabal list-bin exomonad-control-server) /usr/local/bin/exomonad-control-server
 
 # Stage 2: Rust Builder
-# Build mantle-agent for hook handling
+# Build exomonad for hook handling
 # Using latest stable Rust for edition2024 support (required by hangar-config)
 FROM rust:slim-bookworm AS rust-builder
 
@@ -63,9 +63,9 @@ RUN apt-get update && apt-get install -y \
 COPY rust/Cargo.toml rust/Cargo.lock ./rust/
 
 # 2. Copy all workspace member Cargo.tomls
-COPY rust/mantle-agent/Cargo.toml ./rust/mantle-agent/
-COPY rust/mantle-shared/Cargo.toml ./rust/mantle-shared/
-COPY rust/mantle-hub/Cargo.toml ./rust/mantle-hub/
+COPY rust/exomonad/Cargo.toml ./rust/exomonad/
+COPY rust/exomonad-shared/Cargo.toml ./rust/exomonad-shared/
+COPY rust/exomonad-hub/Cargo.toml ./rust/exomonad-hub/
 COPY rust/hangar-config/Cargo.toml ./rust/hangar-config/
 COPY rust/tui-sidebar/Cargo.toml ./rust/tui-sidebar/
 COPY rust/tui-popup/Cargo.toml ./rust/tui-popup/
@@ -74,12 +74,12 @@ COPY rust/effector/Cargo.toml ./rust/effector/
 
 # 3. Create stub source files for dependency resolution
 # Cargo needs these to compute the dependency graph
-RUN mkdir -p rust/mantle-agent/src rust/mantle-shared/src rust/mantle-hub/src \
+RUN mkdir -p rust/exomonad/src rust/exomonad-shared/src rust/exomonad-hub/src \
              rust/hangar-config/src rust/tui-sidebar/src rust/tui-popup/src \
              rust/ssh-proxy/src rust/effector/src && \
-    echo "fn main() {}" > rust/mantle-agent/src/main.rs && \
-    echo "" > rust/mantle-shared/src/lib.rs && \
-    echo "fn main() {}" > rust/mantle-hub/src/main.rs && \
+    echo "fn main() {}" > rust/exomonad/src/main.rs && \
+    echo "" > rust/exomonad-shared/src/lib.rs && \
+    echo "fn main() {}" > rust/exomonad-hub/src/main.rs && \
     echo "" > rust/hangar-config/src/lib.rs && \
     echo "fn main() {}" > rust/tui-sidebar/src/main.rs && \
     echo "fn main() {}" > rust/tui-popup/src/main.rs && \
@@ -91,7 +91,7 @@ RUN mkdir -p rust/mantle-agent/src rust/mantle-shared/src rust/mantle-hub/src \
 RUN --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/build/rust/target \
-    cd rust && cargo build --release -p mantle-agent 2>/dev/null || true
+    cd rust && cargo build --release -p exomonad 2>/dev/null || true
 
 # 5. Copy real source code
 COPY rust/ ./rust/
@@ -100,8 +100,8 @@ COPY rust/ ./rust/
 RUN --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/build/rust/target \
-    cd rust && cargo build --release -p mantle-agent && \
-    cp target/release/mantle-agent /usr/local/bin/mantle-agent
+    cd rust && cargo build --release -p exomonad && \
+    cp target/release/exomonad /usr/local/bin/exomonad
 
 # Stage 3: Runtime
 # Debian bookworm-slim provides a small, stable base for the runtime
@@ -149,16 +149,16 @@ RUN curl -fsSL https://claude.ai/install.sh | bash && \
 ENV PATH="/root/.local/bin:${PATH}"
 
 # 6. Copy binaries from builders (change with code, but less often than configs)
-COPY --from=builder /usr/local/bin/tidepool-control-server /usr/local/bin/tidepool-control-server
-COPY --from=rust-builder /usr/local/bin/mantle-agent /usr/local/bin/mantle-agent
+COPY --from=builder /usr/local/bin/exomonad-control-server /usr/local/bin/exomonad-control-server
+COPY --from=rust-builder /usr/local/bin/exomonad /usr/local/bin/exomonad
 
 # 7. Create non-root user for running Claude Code (stable)
 RUN useradd -m -u 1000 -s /bin/bash user
 
 # 8. Create necessary directories with proper ownership (stable)
-RUN mkdir -p /sockets /worktrees /var/log/tidepool /home/user/.claude /home/user/.claude-orchestrator && \
-    chown -R user:user /sockets /worktrees /var/log/tidepool /home/user && \
-    chmod 775 /sockets /worktrees /var/log/tidepool
+RUN mkdir -p /sockets /worktrees /var/log/exomonad /home/user/.claude /home/user/.claude-orchestrator && \
+    chown -R user:user /sockets /worktrees /var/log/exomonad /home/user && \
+    chmod 775 /sockets /worktrees /var/log/exomonad
 
 # 9. Ensure Claude binary is accessible to non-root user (stable)
 RUN chmod 755 /root/.local/bin/claude && \
@@ -166,20 +166,20 @@ RUN chmod 755 /root/.local/bin/claude && \
     chmod 755 /usr/local/bin/claude
 
 # 10. Environment variables (stable)
-ENV TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
-ENV TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
+ENV EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
+ENV EXOMONAD_TUI_SOCKET=/sockets/tui.sock
 ENV HANGAR_ROOT=/worktrees
 ENV TERM=xterm-256color
 ENV SHELL=/bin/bash
-ENV ZELLIJ_CONFIG_DIR=/etc/tidepool/zellij
+ENV ZELLIJ_CONFIG_DIR=/etc/exomonad/zellij
 
 # ============================================================================
 # FREQUENTLY CHANGING CONFIGS LAST (maximizes cache reuse)
 # ============================================================================
 
 # 11. Copy configurations (changes more often than code)
-COPY docker/orchestrator/config/exomonad.kdl /etc/tidepool/zellij/layouts/exomonad.kdl
-COPY docker/orchestrator/config/zellij.kdl /etc/tidepool/zellij/config.kdl
+COPY docker/orchestrator/config/exomonad.kdl /etc/exomonad/zellij/layouts/exomonad.kdl
+COPY docker/orchestrator/config/zellij.kdl /etc/exomonad/zellij/config.kdl
 
 # 12. Copy scripts (changes more often than configs)
 COPY docker/orchestrator/scripts/orchestrator-entrypoint.sh /usr/local/bin/orchestrator-entrypoint.sh
@@ -218,11 +218,11 @@ RUN cargo-binstall --no-confirm zellij && \
     chmod 755 /usr/local/bin/zellij
 
 # Copy only the control-server binary
-COPY --from=builder /usr/local/bin/tidepool-control-server /usr/local/bin/tidepool-control-server
+COPY --from=builder /usr/local/bin/exomonad-control-server /usr/local/bin/exomonad-control-server
 
 # Environment variables
-ENV TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
-ENV TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
+ENV EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
+ENV EXOMONAD_TUI_SOCKET=/sockets/tui.sock
 # Zellij cross-container access (shared socket volume with orchestrator)
 ENV XDG_RUNTIME_DIR=/run/user/1000
 ENV ZELLIJ_SESSION_NAME=orchestrator
@@ -249,23 +249,23 @@ chmod 755 /run/user/1000
 rm -f /sockets/control.sock /sockets/tui.sock
 
 # Start server as user:1000
-# control-server uses TIDEPOOL_CONTROL_SOCKET env var for socket path
-exec gosu 1000:1000 tidepool-control-server
+# control-server uses EXOMONAD_CONTROL_SOCKET env var for socket path
+exec gosu 1000:1000 exomonad-control-server
 EOF
 
 RUN chmod +x /usr/local/bin/control-server-entrypoint.sh
 
 EXPOSE 7432
 
-# Set working directory to user's home (control-server creates .tidepool/ here)
-# Socket path comes from TIDEPOOL_CONTROL_SOCKET env var (absolute path to shared volume)
+# Set working directory to user's home (control-server creates .exomonad/ here)
+# Socket path comes from EXOMONAD_CONTROL_SOCKET env var (absolute path to shared volume)
 WORKDIR /home/user
 
 # Run as root initially to fix permissions, entrypoint drops to user
 ENTRYPOINT ["/usr/local/bin/control-server-entrypoint.sh"]
 
 # Stage 5: Orchestrator (Zellij + Claude Code, mounts control-server socket)
-# Attach via: docker exec -it tidepool-orchestrator zellij attach orchestrator
+# Attach via: docker exec -it exomonad-orchestrator zellij attach orchestrator
 FROM runtime AS orchestrator
 
 WORKDIR /worktrees
@@ -277,4 +277,4 @@ CMD ["orchestrator"]
 # Stage 6: Dev Target
 FROM --platform=linux/amd64 builder AS dev
 RUN cabal install haskell-language-server -j
-CMD ["cabal", "repl", "tidepool-control-server"]
+CMD ["cabal", "repl", "exomonad-control-server"]

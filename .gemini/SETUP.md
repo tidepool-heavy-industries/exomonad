@@ -2,13 +2,13 @@
 
 ## Overview
 
-This directory contains Gemini CLI configuration for Tidepool SessionStart hook support, equivalent to `.claude/settings.json` for Claude Code.
+This directory contains Gemini CLI configuration for ExoMonad SessionStart hook support, equivalent to `.claude/settings.json` for Claude Code.
 
 ## Configuration
 
 The `settings.json` file configures the `startup` hook (Gemini's hook name) to invoke:
 ```bash
-mantle-agent hook session-start --runtime=gemini
+exomonad-agent hook session-start --runtime=gemini
 ```
 
 ## Key Differences from Claude Code
@@ -17,14 +17,14 @@ mantle-agent hook session-start --runtime=gemini
 |--------|-------------|-----------|
 | Settings directory | `.claude/` | `.gemini/` |
 | Hook name | `SessionStart` | `startup` |
-| Hook command | `mantle-agent hook session-start` | `mantle-agent hook session-start --runtime=gemini` |
+| Hook command | `exomonad-agent hook session-start` | `exomonad-agent hook session-start --runtime=gemini` |
 | On error exit code | 1 | 2 |
 
 ## How It Works
 
 1. Gemini CLI starts a session and fires the `startup` hook
-2. Hook calls `mantle-agent hook session-start --runtime=gemini`
-3. mantle-agent forwards to control-server via Unix socket with `runtime=Gemini`
+2. Hook calls `exomonad-agent hook session-start --runtime=gemini`
+3. exomonad-agent forwards to control-server via Unix socket with `runtime=Gemini`
 4. control-server:
    - Detects current git branch (should be `gh-{number}/*` for active issue)
    - Fetches issue details from GitHub

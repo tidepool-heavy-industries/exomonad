@@ -5,7 +5,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import Data.Aeson (object, (.=), eitherDecode)
 import qualified Data.ByteString.Lazy.Char8 as BL
-import Tidepool.Control.Hook.Policy
+import ExoMonad.Control.Hook.Policy
 
 main :: IO ()
 main = defaultMain spec

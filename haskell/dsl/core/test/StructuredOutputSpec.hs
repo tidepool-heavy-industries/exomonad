@@ -28,9 +28,9 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import GHC.Generics (Generic)
 
-import Tidepool.StructuredOutput
-import Tidepool.StructuredOutput.Error (ParseDiagnostic(..))
-import Tidepool.Schema (JSONSchema(..), SchemaType(..), enumSchema, schemaToValue)
+import ExoMonad.StructuredOutput
+import ExoMonad.StructuredOutput.Error (ParseDiagnostic(..))
+import ExoMonad.Schema (JSONSchema(..), SchemaType(..), enumSchema, schemaToValue)
 
 
 -- ════════════════════════════════════════════════════════════════════════════

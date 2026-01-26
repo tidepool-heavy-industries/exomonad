@@ -1,0 +1,210 @@
+cabal-version:      3.0
+name:               exomonad-core
+version:            0.1.0.0
+synopsis:           Type-safe LLM agent loops with structured state and templates
+license:            MIT
+author:             Inanna
+build-type:         Simple
+
+common warnings
+    ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints -Wunused-packages -haddock -fwrite-interface
+
+library
+    import:           warnings
+    exposed-modules:
+        ExoMonad.Prelude
+        Data.Stack
+        ExoMonad
+        ExoMonad.WASM
+        ExoMonad.Platform
+        ExoMonad.Effect
+        ExoMonad.Effect.GraphContext
+        ExoMonad.Effect.Session
+        ExoMonad.Effect.Subgraph
+        ExoMonad.Effect.DevLog
+        ExoMonad.Effect.Log
+        ExoMonad.Effect.Metadata
+        ExoMonad.Effect.NodeMeta
+        ExoMonad.Effect.Types
+        ExoMonad.Effect.Decision
+        ExoMonad.Effect.Decision.Types
+        ExoMonad.Effect.TUI
+        ExoMonad.Graph
+        ExoMonad.Graph.Types
+        ExoMonad.Graph.Generic
+        ExoMonad.Graph.Generic.Core
+        ExoMonad.Graph.Goto
+        ExoMonad.Graph.Goto.Internal
+        ExoMonad.Graph.Errors
+        ExoMonad.Graph.Interpret
+        ExoMonad.Graph.Edges
+        ExoMonad.Graph.Validate
+        ExoMonad.Graph.Validate.RecordStructure
+        ExoMonad.Graph.Validate.ForkBarrier
+        ExoMonad.Graph.Reify
+        ExoMonad.Graph.MCPReify
+        ExoMonad.Graph.Export
+        ExoMonad.Graph.Memory
+        ExoMonad.Role
+        -- Types needed by WASM (no native dependencies)
+        ExoMonad.Anthropic.Types
+        ExoMonad.Tool.Wire
+        ExoMonad.StructuredOutput
+        ExoMonad.StructuredOutput.Class
+    -- Development/tooling modules (excluded from WASM builds)
+    if !os(wasi)
+      exposed-modules:
+        -- Unified re-export module
+        ExoMonad.Effects
+        -- Native-only effects (require subprocesses)
+        ExoMonad.Effect.LSP
+        ExoMonad.Effect.GHCi
+        ExoMonad.Effect.Gemini
+        -- Native-only tooling
+        ExoMonad.Schema
+        ExoMonad.StructuredOutput.ClaudeCodeSchema
+        ExoMonad.StructuredOutput.DecisionTools
+        ExoMonad.StructuredOutput.Error
+        ExoMonad.StructuredOutput.Generic
+        ExoMonad.StructuredOutput.Instances
+        ExoMonad.StructuredOutput.Prefix
+        ExoMonad.Tool.Convert
+        ExoMonad.Graph.CLI
+        ExoMonad.Graph.Tool
+        ExoMonad.Graph.Template
+        ExoMonad.Effects.Habitica
+        ExoMonad.Effects.GitHub
+        ExoMonad.Effects.Observability
+        ExoMonad.Effects.UI
+        ExoMonad.Effects.LLMProvider
+        ExoMonad.Effects.Env
+        ExoMonad.Effects.Git
+        ExoMonad.Effects.Worktree
+        ExoMonad.Effects.Cabal
+        ExoMonad.Effects.Effector
+        ExoMonad.Effects.Justfile
+        ExoMonad.Effects.DockerSpawner
+        ExoMonad.Effects.FileSystem
+        ExoMonad.Effects.Zellij
+        ExoMonad.Graph.Mermaid
+        ExoMonad.Graph.Example
+        ExoMonad.Graph.Example.Context
+        ExoMonad.Graph.Docs
+        ExoMonad.Graph.Interpret.Instrumented
+        ExoMonad.Question
+        ExoMonad.Template.DependencyTree
+      build-depends:
+        exomonad-habitica,
+        optparse-applicative >= 0.17 && < 1
+    build-depends:
+        base >= 4.17 && < 5,
+        freer-simple >= 1.2 && < 2,
+        ginger >= 0.10,
+        aeson >= 2.1 && < 3,
+        aeson-casing >= 0.2,
+        text >= 2.0 && < 3,
+        containers >= 0.6 && < 1,
+        vector >= 0.13 && < 1,
+        unordered-containers >= 0.2 && < 0.3,
+        template-haskell >= 2.19 && < 3,
+        mtl >= 2.3 && < 3,
+        optics >= 0.4 && < 1,
+        random >= 1.2 && < 2,
+        bytestring >= 0.11 && < 1,
+        parsec >= 3.1 && < 4,
+        scientific >= 0.3 && < 1,
+        time >= 1.12 && < 2,
+        directory >= 1.3 && < 2,
+        filepath >= 1.4 && < 2,
+        uuid >= 1.3 && < 2
+    hs-source-dirs:   src
+    -- Platform-specific source directories for NativeOnly constraint
+    if os(wasi)
+      hs-source-dirs: src-platform-wasm
+    else
+      hs-source-dirs: src-platform-native
+    default-language: GHC2024
+    default-extensions:
+        DataKinds
+        DeriveAnyClass
+        DeriveGeneric
+        DerivingStrategies
+        DerivingVia
+        DuplicateRecordFields
+        GADTs
+        LambdaCase
+        MultiParamTypeClasses
+        NoFieldSelectors
+        OverloadedRecordDot
+        OverloadedStrings
+        TypeFamilies
+        TypeOperators
+        QuasiQuotes
+        TemplateHaskell
+        -- Graph DSL type-level programming extensions
+        AllowAmbiguousTypes
+        FlexibleContexts
+        FlexibleInstances
+        PolyKinds
+        RankNTypes
+        ScopedTypeVariables
+        StandaloneKindSignatures
+        TypeApplications
+        UndecidableInstances
+
+-- test-llm executable moved to exomonad-platform (requires HTTP client)
+
+test-suite graph-validation-tests
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          Spec.hs
+    other-modules:
+        CLISpec
+        CLITestTypes
+        CLIGraphSpec
+        CLIGraphTypes
+        GraphValidationSpec
+        LLMNodeInterpretSpec
+        MemorySerializationSpec
+        MermaidSpec
+        StructuredOutputSpec
+        OneOfSpec
+        InjectTargetSpec
+        GotoChoiceSpec
+        CallHandlerSpec
+        DispatchGotoSpec
+        ConvertTransitionHintSpec
+        ToolTransitionIntegrationSpec
+        DecisionToolsSpec
+        DecisionSpec
+        TUIWireFormatSpec
+        Test.ExoMonad.MockLLM
+        -- Golden test files (compile-only validation)
+        BranchingLogicRecord
+        ConfigRecordGraph
+        FanInGraphRecord
+        MixedLLMLogicRecord
+        SelfLoopRecord
+        SimpleLinearRecord
+    build-depends:
+        base >= 4.17 && < 5,
+        hspec >= 2.10 && < 3,
+        process >= 1.6 && < 2,
+        aeson >= 2.1 && < 3,
+        bytestring >= 0.11 && < 1,
+        containers >= 0.6 && < 1,
+        optparse-applicative >= 0.18 && < 1,
+        text >= 2.0 && < 3,
+        vector >= 0.13 && < 1,
+        freer-simple >= 1.2 && < 2,
+        time,
+        exomonad-core
+    hs-source-dirs:   test, test/golden/valid
+    default-language: GHC2024
+    default-extensions:
+        DeriveAnyClass
+        DeriveGeneric
+        DerivingStrategies
+        OverloadedStrings
+        OverloadedRecordDot
+        TypeApplications

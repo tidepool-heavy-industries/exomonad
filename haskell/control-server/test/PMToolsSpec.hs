@@ -14,10 +14,10 @@ import qualified Data.Text as T
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import Tidepool.Effects.GitHub
-import Tidepool.Graph.Goto (unwrapSingleChoice)
-import Tidepool.Graph.MCPReify (reifyMCPTools, MCPToolInfo(..))
-import Tidepool.Control.PMTools
+import ExoMonad.Effects.GitHub
+import ExoMonad.Graph.Goto (unwrapSingleChoice)
+import ExoMonad.Graph.MCPReify (reifyMCPTools, MCPToolInfo(..))
+import ExoMonad.Control.PMTools
 
 main :: IO ()
 main = defaultMain tests

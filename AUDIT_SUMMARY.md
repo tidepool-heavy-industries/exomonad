@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-Audited all documentation files and identified stale references to deleted packages, commands, and outdated architecture descriptions. All critical routing docs and core component docs have been updated. Configuration files (.mcp.json, settings.json) have been migrated from deleted `mantle-agent mcp` subcommand to HTTP MCP transport.
+Audited all documentation files and identified stale references to deleted packages, commands, and outdated architecture descriptions. All critical routing docs and core component docs have been updated. Configuration files (.mcp.json, settings.json) have been migrated from deleted `exomonad mcp` subcommand to HTTP MCP transport.
 
 ## Dead Code Identified
 
@@ -22,7 +22,7 @@ Audited all documentation files and identified stale references to deleted packa
   - No references found in docs
 
 ### 3. Deleted Subcommands (Confirmed)
-- **`mantle-agent mcp`** - Subcommand removed, replaced by HTTP MCP transport
+- **`exomonad mcp`** - Subcommand removed, replaced by HTTP MCP transport
   - Updated files:
     - `.mcp.json` - Now uses `http+unix://` transport
     - `settings.json` - Now uses `http+unix://` transport
@@ -32,7 +32,7 @@ Audited all documentation files and identified stale references to deleted packa
 ## Architecture Updates
 
 ### MCP Transport Migration
-**Old:** `mantle-agent mcp` stdio proxy → TCP → control-server
+**Old:** `exomonad mcp` stdio proxy → TCP → control-server
 **New:** Claude Code HTTP MCP → Unix socket → control-server (direct)
 
 **Files Updated:**
@@ -40,7 +40,7 @@ Audited all documentation files and identified stale references to deleted packa
 - `settings.json` - Changed from command-based to HTTP transport
 - CLAUDE.md (root) - Updated architecture diagram
 - haskell/control-server/CLAUDE.md - Updated data flow diagrams
-- rust/mantle-agent/CLAUDE.md - Documented removal of mcp subcommand
+- rust/exomonad/CLAUDE.md - Documented removal of mcp subcommand
 
 ### Tool Count Correction
 **Old:** "4 tools" or "23+ tools"
@@ -51,7 +51,7 @@ Audited all documentation files and identified stale references to deleted packa
 
 ### TCP → Unix Socket
 **Old:** References to TCP sockets (127.0.0.1:7432)
-**New:** Unix Domain Sockets (.tidepool/sockets/control.sock)
+**New:** Unix Domain Sockets (.exomonad/sockets/control.sock)
 
 **Files Updated:**
 - haskell/control-server/CLAUDE.md - Hook flow and MCP flow
@@ -64,10 +64,10 @@ All broken doc paths have been fixed:
 
 | Old Path | New Path | Files Fixed |
 |----------|----------|-------------|
-| `tidepool-core/CLAUDE.md` | `haskell/dsl/core/CLAUDE.md` | CLAUDE.md, deploy/CLAUDE.md, typescript/native-gui/CLAUDE.md |
-| `tidepool-native-gui/server/CLAUDE.md` | `haskell/native-server/CLAUDE.md` | CLAUDE.md |
-| `tidepool-wasm/CLAUDE.md` | `haskell/runtime/wasm/CLAUDE.md` | deploy/CLAUDE.md |
-| `tidepool-generated-ts/CLAUDE.md` | `haskell/protocol/generated-ts/CLAUDE.md` | deploy/CLAUDE.md |
+| `exomonad-core/CLAUDE.md` | `haskell/dsl/core/CLAUDE.md` | CLAUDE.md, deploy/CLAUDE.md, typescript/native-gui/CLAUDE.md |
+| `exomonad-native-gui/server/CLAUDE.md` | `haskell/native-server/CLAUDE.md` | CLAUDE.md |
+| `exomonad-wasm/CLAUDE.md` | `haskell/runtime/wasm/CLAUDE.md` | deploy/CLAUDE.md |
+| `exomonad-generated-ts/CLAUDE.md` | `haskell/protocol/generated-ts/CLAUDE.md` | deploy/CLAUDE.md |
 
 ### Deleted Package References
 All references to `haskell/effects/mcp-server/CLAUDE.md` removed from:
@@ -80,14 +80,13 @@ All references to `haskell/effects/mcp-server/CLAUDE.md` removed from:
 These files exist but need content expansion:
 
 ### Minimal/Stub Files (<10 lines)
-1. **anemone/GEMINI.md** - 1 line (empty placeholder)
    - Action: Either populate or delete
 2. **haskell/effects/justfile-interpreter/CLAUDE.md** - 7 lines
    - Action: Add usage examples, effect type definition
 
 ### Small Files (<30 lines)
 These are functional but could use expansion:
-- haskell/effects/telegram/tidepool-telegram-hs/CLAUDE.md (15 lines)
+- haskell/effects/telegram/exomonad-telegram-hs/CLAUDE.md (15 lines)
 - typescript/telegram-bot/CLAUDE.md (26 lines)
 - tools/CLAUDE.md (33 lines)
 
@@ -141,7 +140,6 @@ Most files were updated in the last 3 days and assumed to be current. Spot-check
 ## Recommendations
 
 ### Immediate Actions
-1. **Delete or populate** `anemone/GEMINI.md` (empty placeholder)
 2. **Run build tests** to verify no broken imports after doc updates
 3. **Test MCP tools** after configuration migration
 
@@ -181,7 +179,7 @@ Most files were updated in the last 3 days and assumed to be current. Spot-check
 4. haskell/effects/CLAUDE.md
 5. haskell/control-server/CLAUDE.md
 6. rust/CLAUDE.md
-7. rust/mantle-agent/CLAUDE.md (read-only, no changes needed)
+7. rust/exomonad/CLAUDE.md (read-only, no changes needed)
 8. deploy/CLAUDE.md
 9. typescript/native-gui/CLAUDE.md
 
@@ -191,7 +189,6 @@ Most files were updated in the last 3 days and assumed to be current. Spot-check
 2. **Run build verification** (cabal build all, cargo build)
 3. **Test runtime** (start-augmented.sh, verify MCP tools)
 4. **Create issues** for:
-   - Stub file expansion (anemone/GEMINI.md, justfile-interpreter/CLAUDE.md)
    - Automated doc consistency checks
    - dsl/core/CLAUDE.md full audit (large file)
 

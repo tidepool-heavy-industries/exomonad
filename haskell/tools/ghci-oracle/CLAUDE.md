@@ -5,7 +5,7 @@ Standalone server that maintains a persistent GHCi session, exposing it via sock
 ## Why Standalone?
 
 GHCi dependencies (process management, GHC internals) are heavy. Keeping this as a separate binary:
-- Avoids polluting main tidepool build with heavy deps
+- Avoids polluting main exomonad build with heavy deps
 - Enables independent versioning and deployment
 - Isolates GHCi subprocess crashes from the main application
 
@@ -13,7 +13,7 @@ GHCi dependencies (process management, GHC internals) are heavy. Keeping this as
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ Client (tidepool-ghci-interpreter)                                 │
+│ Client (exomonad-ghci-interpreter)                                 │
 │   runGHCiIO conn $ queryType "fmap"                            │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -113,9 +113,9 @@ cd tools/ghci-oracle
 cabal build
 ```
 
-Note: This package has its own `cabal.project` and is NOT part of the main tidepool build. This is intentional to avoid dependency pollution.
+Note: This package has its own `cabal.project` and is NOT part of the main exomonad build. This is intentional to avoid dependency pollution.
 
 ## Related
 
-- [tidepool-core/src/Tidepool/Effect/GHCi.hs](../../tidepool-core/src/Tidepool/Effect/GHCi.hs) - Effect type and wire protocol types
-- [tidepool-native-gui/ghci-interpreter/](../../tidepool-native-gui/ghci-interpreter/) - Thin client that connects to this server
+- [exomonad-core/src/ExoMonad/Effect/GHCi.hs](../../exomonad-core/src/ExoMonad/Effect/GHCi.hs) - Effect type and wire protocol types
+- [exomonad-native-gui/ghci-interpreter/](../../exomonad-native-gui/ghci-interpreter/) - Thin client that connects to this server

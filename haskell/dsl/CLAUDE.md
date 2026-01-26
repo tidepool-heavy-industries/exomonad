@@ -1,4 +1,4 @@
-# Tidepool DSL
+# ExoMonad DSL
 
 Core graph DSL implementation and teaching infrastructure.
 
@@ -11,7 +11,7 @@ Core graph DSL implementation and teaching infrastructure.
 
 ## Package: core/
 
-**tidepool-core** (~7000 LOC, 53 modules)
+**exomonad-core** (~7000 LOC, 53 modules)
 
 ### Key Modules
 
@@ -31,11 +31,11 @@ Edit `Graph/Types.hs` and add to the annotation type families.
 ### Native-Only Effects
 
 Some effects are excluded from WASM builds (LSP, GHCi, ClaudeCode, DevLog).
-See tidepool-core.cabal `if !os(wasi)` blocks.
+See exomonad-core.cabal `if !os(wasi)` blocks.
 
 ## Package: teaching/
 
-**tidepool-teaching** - LLM-level teaching for FunctionGemma training data
+**exomonad-teaching** - LLM-level teaching for FunctionGemma training data
 
 See `teaching/CLAUDE.md` for details.
 
@@ -48,5 +48,5 @@ Implemented but **not wired into any server**. Provides:
 
 ### Dependencies
 
-- `tidepool-core` - Effect types, NodeMeta
-- `tidepool-llm-interpreter` - Anthropic API client
+- `exomonad-core` - Effect types, NodeMeta
+- `exomonad-llm-interpreter` - Anthropic API client

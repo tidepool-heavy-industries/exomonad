@@ -2,12 +2,12 @@
 
 **Status:** Accepted
 **Date:** 2026-01-22
-**Deciders:** Tidepool Core Team
-**Affected:** control-server, mantle-agent, Schema-shaped cognition
+**Deciders:** ExoMonad Core Team
+**Affected:** control-server, exomonad, Schema-shaped cognition
 
 ## Context
 
-Tidepool exposes 23+ MCP tools to Claude Code++. As the tool count grows (LSP utilities, LLM-enhanced exploration, project management, agent mailbox), we need:
+ExoMonad exposes 23+ MCP tools to Claude Code++. As the tool count grows (LSP utilities, LLM-enhanced exploration, project management, agent mailbox), we need:
 
 1. **Scalable patterns** for adding new tools without boilerplate
 2. **Type safety** at compile time (invalid schemas caught early)
@@ -114,22 +114,22 @@ data TeachGraphGraph mode = TeachGraphGraph
 
 ### Role-Based Tool Filtering
 
-The `--tools` flag in mantle-agent enables different roles:
+The `--tools` flag in exomonad enables different roles:
 
 ```bash
 # PM role: project management + status only
-mantle-agent mcp --tools pm_propose,pm_approve_expansion,pm_prioritize,pm_status,pm_review_dag,exo_status
+exomonad mcp --tools pm_propose,pm_approve_expansion,pm_prioritize,pm_status,pm_review_dag,exo_status
 
 # TL role: dev tools + orchestration (or omit --tools for all)
-mantle-agent mcp --tools find_callers,show_type,teach-graph,spawn_agents,exo_*,file_pr
+exomonad mcp --tools find_callers,show_type,teach-graph,spawn_agents,exo_*,file_pr
 
 # Developer: all tools (default)
-mantle-agent mcp  # No --tools flag
+exomonad mcp  # No --tools flag
 ```
 
 **Implementation:**
 - **Control server:** `exportMCPTools` returns all 23+ tools
-- **mantle-agent:** `mcp.rs:handle_tools_list()` filters by allowlist
+- **exomonad:** `mcp.rs:handle_tools_list()` filters by allowlist
 - **Error handling:** `tools/call` rejects non-allowlisted tools with clear error code
 
 **Backward compatibility:** If `--tools` is omitted, all tools are exposed.
@@ -235,7 +235,7 @@ Both patterns coexist: use GraphEntries for simple tools, MCPExport for complex 
 
 **Problem:** PMs don't need `find_callers` or `teach-graph`. Giving them all tools creates cognitive load and accidents (e.g., accidentally calling a dev tool).
 
-**Solution:** `--tools` flag at mantle-agent level provides clean role separation:
+**Solution:** `--tools` flag at exomonad level provides clean role separation:
 - Filtering is **stateless** (no database, just string matching)
 - Backward compatible (omitting `--tools` exposes all tools)
 - Easy to extend: add new role by passing new `--tools` list
@@ -288,13 +288,13 @@ Both patterns coexist: use GraphEntries for simple tools, MCPExport for complex 
 - [x] Tier 3: `spawn_agents`, `exo_*`, `file_pr`, PM workflow tools via MCPExport
 - [x] Tier 4: `confirm_action`, `select_option`, `request_guidance` via GraphEntries; PM dashboard tools via MCPExport
 - [x] Tier 5: `send_message`, `check_inbox`, etc. via MCPExport
-- [x] Role-based filtering via `--tools` flag in mantle-agent
+- [x] Role-based filtering via `--tools` flag in exomonad
 - [x] Auto-discovery via `exportMCPTools` with logging
 
 ## References
 
 - `haskell/control-server/CLAUDE.md` - Tool implementation details
 - `haskell/dsl/core/CLAUDE.md` - Graph DSL reference
-- `rust/mantle-agent/CLAUDE.md` - Role-based filtering
-- `haskell/control-server/src/Tidepool/Control/Export.hs:940-990` - Tool discovery code
-- `haskell/control-server/src/Tidepool/Control/Protocol.hs` - Error codes + structured responses
+- `rust/exomonad/CLAUDE.md` - Role-based filtering
+- `haskell/control-server/src/ExoMonad/Control/Export.hs:940-990` - Tool discovery code
+- `haskell/control-server/src/ExoMonad/Control/Protocol.hs` - Error codes + structured responses

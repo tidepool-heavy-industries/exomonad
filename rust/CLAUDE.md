@@ -1,6 +1,6 @@
 # Claude Code++: Human-Augmented Sessions
 
-Rust workspace for augmenting human-driven Claude Code sessions with Tidepool integrations.
+Rust workspace for augmenting human-driven Claude Code sessions with ExoMonad integrations.
 
 **This is NOT a headless orchestration system.** Humans interact with Claude Code directly via TTY; this infrastructure adds superpowers.
 
@@ -15,7 +15,7 @@ Rust workspace for augmenting human-driven Claude Code sessions with Tidepool in
 
 ```
 rust/CLAUDE.md  ← YOU ARE HERE (router)
-├── mantle-agent/CLAUDE.md  ← Hook handler (IMPLEMENTED)
+├── exomonad/CLAUDE.md  ← Hook handler (IMPLEMENTED)
 │   • hook subcommand: forwards CC hooks to control server
 │   • health subcommand: check control server connectivity
 │   • Fail-closed: errors if control server unavailable
@@ -26,11 +26,11 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 │   • status {id} - Container status
 │   • stop {id} - Stop containers
 │
-├── mantle-hub/CLAUDE.md  ← Session hub (LEGACY, needs repurposing)
+├── exomonad-hub/CLAUDE.md  ← Session hub (LEGACY, needs repurposing)
 │   • Currently: session/node tracking for headless mode
 │   • Planned: metrics collection, Grafana export
 │
-├── mantle-shared/CLAUDE.md  ← Shared types and utilities
+├── exomonad-shared/CLAUDE.md  ← Shared types and utilities
 │   • protocol.rs: HookInput, HookOutput, ControlMessage, ControlResponse
 │   • socket.rs: TCP client (ControlSocket), NDJSON protocol
 │   • commands/hook.rs: handle_hook() implementation
@@ -87,12 +87,12 @@ Human TTY ──▶ Claude Code (in nix shell or direct)
                │
                ├─ MCP tools ──────▶ HTTP (localhost:7432) ──▶ control-server
                │                                                    │
-               └─ Hooks ──────────▶ mantle-agent hook ──────────────┘
+               └─ Hooks ──────────▶ exomonad hook ──────────────┘
                                    (Unix socket or TCP)
 ```
 
 **Current state:**
-- `mantle-agent hook` - Forwards Claude Code hooks to control server ✓
+- `exomonad hook` - Forwards Claude Code hooks to control server ✓
 - `docker-ctl` - CLI for container lifecycle + remote exec ✓
 - `haskell/control-server` - Haskell MCP server (hooks, tools, LSP) ✓
 - **MCP:** HTTP transport (TCP 7432 in Docker, Unix socket locally) ✓
@@ -103,10 +103,10 @@ Human TTY ──▶ Claude Code (in nix shell or direct)
 
 | Crate | Type | Purpose |
 |-------|------|---------|
-| [mantle-agent](mantle-agent/CLAUDE.md) | Binary | Hook handler (HTTP over Unix socket) |
+| [exomonad](exomonad/CLAUDE.md) | Binary | Hook handler (HTTP over Unix socket) |
 | [docker-ctl](docker-ctl/CLAUDE.md) | Binary | CLI for container lifecycle + remote exec (replaces SSH) |
-| [mantle-hub](mantle-hub/CLAUDE.md) | Binary | Metrics/telemetry hub (WIP) |
-| [mantle-shared](mantle-shared/CLAUDE.md) | Library | Shared types, protocols, HTTP socket client (curl-based) |
+| [exomonad-hub](exomonad-hub/CLAUDE.md) | Binary | Metrics/telemetry hub (WIP) |
+| [exomonad-shared](exomonad-shared/CLAUDE.md) | Library | Shared types, protocols, HTTP socket client (curl-based) |
 | [tui-sidebar](tui-sidebar/CLAUDE.md) | Binary + Lib | TUI sidebar: Unix socket server for interactive UIs |
 | [tui-popup](tui-popup/CLAUDE.md) | Binary | Floating pane UI renderer (uses /dev/tty) |
 | [tui-spawner](tui-spawner/CLAUDE.md) | Binary | FIFO-based popup spawning for cross-container TUI |
@@ -117,30 +117,30 @@ Human TTY ──▶ Claude Code (in nix shell or direct)
 ### Building
 ```bash
 cargo build --release           # Build all crates
-cargo build -p mantle-agent     # Build just agent
+cargo build -p exomonad     # Build just agent
 cargo test                      # Run all tests
 ```
 
 ### Current Subcommands
 ```bash
 # Handle Claude Code hook (reads JSON stdin, outputs JSON stdout)
-mantle-agent hook pre-tool-use
+exomonad hook pre-tool-use
 
 # Check control server health
-mantle-agent health
+exomonad health
 ```
 
 ### Environment Variables
 | Variable | Used By | Purpose |
 |----------|---------|---------|
-| `TIDEPOOL_CONTROL_SOCKET` | mantle-agent | Unix socket path for control server (required; e.g., `.tidepool/sockets/control.sock`) |
+| `EXOMONAD_CONTROL_SOCKET` | exomonad | Unix socket path for control server (required; e.g., `.exomonad/sockets/control.sock`) |
 | `RUST_LOG` | all | Tracing log level |
 
 ## What Works Today
 
 ### 1. Hook Handler
 ```bash
-mantle-agent hook pre-tool-use  # Reads JSON from stdin
+exomonad hook pre-tool-use  # Reads JSON from stdin
 ```
 - Called by `.claude/settings.local.json` hooks
 - Parses Claude Code's hook JSON from stdin
@@ -150,19 +150,19 @@ mantle-agent hook pre-tool-use  # Reads JSON from stdin
 
 ### 2. MCP Tools (Direct HTTP)
 Claude Code now connects directly to control-server's HTTP MCP endpoint:
-- Transport: `http+unix://.tidepool/sockets/control.sock`
+- Transport: `http+unix://.exomonad/sockets/control.sock`
 - Protocol: MCP over HTTP (no proxy needed)
 - Configuration: `.mcp.json` in project root
 - Tools: Discovered automatically from control-server's `/mcp/tools` endpoint
 
-**The `mantle-agent mcp` subcommand has been removed.** Claude Code's built-in HTTP MCP support eliminates the need for a stdio proxy.
+**The `exomonad mcp` subcommand has been removed.** Claude Code's built-in HTTP MCP support eliminates the need for a stdio proxy.
 
 ## Control Server Protocol
 
 **Hooks** use HTTP over Unix Domain Socket:
 
 ```
-mantle-agent hook               Control Server (Haskell)
+exomonad hook               Control Server (Haskell)
      │                                    │
      │  POST /hook                        │
      │  Body: [HookInput, Runtime]        │
@@ -191,7 +191,7 @@ Claude Code                     Control Server (Haskell)
 ```
 
 **Implementation:**
-- Hooks: `mantle_shared::socket` uses `curl` subprocess for HTTP-over-Unix-socket requests
+- Hooks: `exomonad_shared::socket` uses `curl` subprocess for HTTP-over-Unix-socket requests
 - MCP: Claude Code connects directly to control-server TCP port 7432
 
 ## What's Missing (TODO)
@@ -201,7 +201,7 @@ Goal: Long-lived process that collects metrics + forwards to Haskell
 
 ```bash
 # Planned:
-mantle-agent daemon start  # Connection pooling, metrics collection
+exomonad daemon start  # Connection pooling, metrics collection
 ```
 
 Status: Not implemented. Current architecture uses per-hook process spawning with `curl` subprocess.
@@ -209,15 +209,15 @@ Status: Not implemented. Current architecture uses per-hook process spawning wit
 ### Metrics Hub
 Goal: Store tool call traces, export to Grafana
 
-Status: mantle-hub needs repurposing from session tracking to metrics collection.
+Status: exomonad-hub needs repurposing from session tracking to metrics collection.
 
 ### Real Hook Logic in Haskell
-Goal: Wire control-server handlers to Tidepool effect stack
+Goal: Wire control-server handlers to ExoMonad effect stack
 
 Status: Current implementation is passthrough (logs and allows all hooks).
 
 ### MCP Tool Implementation
-Goal: Expose more Tidepool agents as MCP tools via control-server
+Goal: Expose more ExoMonad agents as MCP tools via control-server
 
 Status: Basic tools implemented (find_callers, teach-graph, etc.). More agents coming.
 
@@ -225,18 +225,18 @@ Status: Basic tools implemented (find_callers, teach-graph, etc.). More agents c
 Goal: Add configurable fail-open mode so Claude Code works even if control server is down
 
 Status: Not implemented. Currently always fails closed (errors if server unavailable). For production deployments, need:
-- `MANTLE_FAIL_MODE` environment variable
+- `EXOMONAD_FAIL_MODE` environment variable
 - Monitoring/alerting when falling back to fail-open
 - Graceful degradation logic
 
-See TODO comment in `rust/mantle-shared/src/commands/hook.rs`
+See TODO comment in `rust/exomonad-shared/src/commands/hook.rs`
 
 ## Testing
 
 ```bash
 cargo test                              # All tests
-cargo test -p mantle-agent              # Agent tests only
-cargo test -p mantle-shared             # Shared library tests
+cargo test -p exomonad              # Agent tests only
+cargo test -p exomonad-shared             # Shared library tests
 ```
 
 ## Design Decisions
@@ -261,6 +261,6 @@ The previous headless Docker orchestration is archived. Key differences:
 
 To resurrect old code:
 ```bash
-git show headless-mantle-archive:rust/mantle/src/session/start.rs
-git checkout headless-mantle-archive -- rust/mantle/
+git show headless-exomonad-archive:rust/exomonad/src/session/start.rs
+git checkout headless-exomonad-archive -- rust/exomonad/
 ```

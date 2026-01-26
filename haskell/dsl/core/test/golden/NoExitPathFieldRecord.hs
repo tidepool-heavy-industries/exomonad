@@ -15,9 +15,9 @@ module NoExitPathFieldRecord where
 
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Input, UsesEffects, LLMKind(..))
-import Tidepool.Graph.Generic (GraphMode(..), Entry, Exit, LogicNode, ValidGraphRecord)
-import Tidepool.Graph.Goto (Goto)
+import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, LLMKind(..))
+import ExoMonad.Graph.Generic (GraphMode(..), Entry, Exit, LogicNode, ValidGraphRecord)
+import ExoMonad.Graph.Goto (Goto)
 
 data A
 data B

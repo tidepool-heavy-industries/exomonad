@@ -1,4 +1,4 @@
-# Grafana Cloud Setup for Tidepool
+# Grafana Cloud Setup for ExoMonad
 
 This guide configures Cloudflare Workers to export OpenTelemetry traces and logs to Grafana Cloud for historical query and analysis.
 
@@ -98,7 +98,7 @@ Telemetry will start flowing immediately. **Note**: It may take 2-5 minutes for 
 2. Select **Loki** data source
 3. Run a query:
    ```logql
-   {service_name="tidepool"} | json
+   {service_name="exomonad"} | json
    ```
 4. You should see structured logs from `console.log(JSON.stringify(...))` in your Worker
 
@@ -157,7 +157,7 @@ See [GRAFANA_QUERIES.md](GRAFANA_QUERIES.md) for LogQL query examples.
 ### Traces but no logs
 
 - Verify you're using `console.log(JSON.stringify({...}))` format
-- Check Loki query syntax: `{service_name="tidepool"}` should show all logs
+- Check Loki query syntax: `{service_name="exomonad"}` should show all logs
 
 ### Logs but no traces
 

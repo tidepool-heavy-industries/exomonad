@@ -130,9 +130,9 @@ When Gas Town needs a session ID, it checks in order:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Implications for Tidepool Seance Integration
+## Implications for ExoMonad Seance Integration
 
-To implement seance-style session resumption in Tidepool:
+To implement seance-style session resumption in ExoMonad:
 
 1. **Capture session ID at startup** - Read from `CLAUDE_SESSION_ID` env or stdin hook JSON
 2. **Persist session ID** - Store in a known location (`.runtime/session_id` pattern)
