@@ -180,11 +180,11 @@ Subagents spawned by `spawn_agents` receive a **custom-generated environment and
 **How it works (SpawnAgents.hs):**
 1. **Paths:** Canonical paths for sockets (`/tmp/tidepool-...`) and binaries are constructed via `Tidepool.Control.Runtime.Paths`.
 2. **Orchestration:** A `ProcessComposeConfig` Haskell value is constructed and serialized to YAML via `Tidepool.Control.Runtime.ProcessCompose`.
-3. **Source of Truth:** The running Haskell process captures its full environment (`getEnvironment`).
-4. **Filtering & Merging:** Conflicting keys (socket paths) are filtered from the captured environment, and subagent-specific overrides are merged in.
+3. **Source of Truth:** The running Haskell process defines canonical environment variables (socket paths, binary paths, roles).
+4. **Environment:** Subagent-specific overrides (like `SUBAGENT_CMD`) are merged with canonical paths.
 5. **Container Name:** Subagent containers are named `tidepool-agent-<shortId>` for `docker-ctl exec` calls.
-6. **Deployment:** Self-contained `.env` and `process-compose.yaml` files are written directly to the subagent worktree.
-7. **Execution:** `process-compose` simply loads the generated files, ensuring an isolated and correctly configured environment.
+6. **Deployment:** Programmatically generated `process-compose.yaml` is written directly to the subagent worktree. Environment variables are passed directly to the container via the `docker-ctl` API.
+7. **Execution:** `process-compose` simply loads the generated config, ensuring an isolated and correctly configured environment.
 
 ### Remote Execution via Docker Control
 

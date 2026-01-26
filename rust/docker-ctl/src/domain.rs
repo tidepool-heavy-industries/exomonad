@@ -14,7 +14,7 @@ use bollard::models::{Mount, MountTypeEnum};
 /// **SYNC POINT:** Keep in sync with `docker-compose.yml` volumes section.
 /// When adding a volume here, also add it to:
 /// - `docker-compose.yml` (volumes: section + service mounts)
-/// - Control-server's SpawnAgents tool (if it generates .env paths)
+/// - Control-server's SpawnAgents tool (passes env vars via Docker API)
 ///
 /// Reference: `/docker-compose.yml:250-270` (volume definitions)
 #[derive(Debug, Clone)]

@@ -61,7 +61,7 @@ The template (`subagent-pc.yaml`) is critical for bootstrapping the subagent env
 - **Sockets**: Explicitly manages `.tidepool/sockets/control.sock` and `.tidepool/sockets/tui.sock` via environment variables and cleanup scripts.
 
 ### Subagent Hardening
-- **Environment Isolation**: `SpawnAgents.hs` explicitly sets `TIDEPOOL_CONTROL_SOCKET` and `TIDEPOOL_TUI_SOCKET` to relative paths in the subagent's `.env.subagent` file. This prevents accidental connection to the root control server (isolation breach) even if the parent environment uses absolute paths.
+- **Environment Isolation**: `SpawnAgents.hs` explicitly sets `TIDEPOOL_CONTROL_SOCKET` and `TIDEPOOL_TUI_SOCKET` to relative paths and passes them directly to the Docker container via the `docker-ctl` API. This prevents accidental connection to the root control server (isolation breach) even if the parent environment uses absolute paths.
 - **Log Consistency**: The system uses a hybrid approach for robustness:
     1. **Config (`subagent-pc.yaml`)**: Sets `log_location: .tidepool/logs` (directory). This satisfies `process-compose` requirements for rotation/existence checks.
     2. **Runtime (`worktree.kdl`)**: Passes `-L .tidepool/logs/process-compose.log` (explicit file). This forces the output to a known location that the Zellij `tail` pane can reliably consume.
@@ -85,7 +85,7 @@ The `spawn_agents` tool includes several safety checks to prevent common failure
 1.  **Template Validation**: Fails fast if the `subagent-pc.yaml` template is missing.
 2.  **Binary Check**: Verifies `tidepool-control-server` exists in the runtime path before creating a worktree.
 3.  **Path Traversal**: Rejects bead IDs containing `/` or `..` to prevent arbitrary file system writes.
-4.  **Env Var Validation**: Ensures critical environment variables (like `HANGAR_ROOT`) are not empty before writing the subagent configuration.
+4.  **Env Var Validation**: Ensures critical environment variables (like `HANGAR_ROOT`) are not empty before spawning the agent.
 
 
 ## Architectural Pillars of Tidepool Idiomatic Haskell
@@ -102,4 +102,4 @@ The Haskell codebase adheres to a set of core principles designed for maximum sa
 - Implemented TUI-interactive MCP tools (confirm_action, select_option, request_guidance) in haskell/control-server. Verified via mock TUI logic. Committed changes.
 - Fixed `start-augmented.sh` hanging on stale `process-compose` sessions by adding a timeout and robust force-kill cleanup logic.
 - Documented macOS arm64 requirement: binaries in `runtime/bin` (`tidepool-control-server`, `mantle-agent`, `tui-sidebar`) must be ad-hoc signed (`codesign -s -`) to avoid `Killed: 9` errors.
-- Refactored subagent spawning to generate isolated `.env` files using Haskell as the source of truth, resolving variable shadowing issues that caused startup hangs.
+- Refactored subagent spawning to pass environment variables directly through the Docker API instead of writing `.env` files, resolving environment contamination and shadowing issues.
