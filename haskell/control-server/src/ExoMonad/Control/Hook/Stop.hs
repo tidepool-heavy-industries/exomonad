@@ -51,7 +51,7 @@ reviewToComment (Review author body state) =
   let Author login _ = author
       -- Intentionally normalize review timestamps to the Unix epoch.
       createdAt = UTCTime (ModifiedJulianDay 0) 0
-  in ReviewComment login body Nothing Nothing state createdAt
+  in ReviewComment login body Nothing Nothing state createdAt False
 
 -- | Core Stop hook logic.
 --
