@@ -3,6 +3,7 @@ use serde::Serialize;
 use std::process;
 
 mod commands;
+mod domain;
 
 #[derive(Parser)]
 #[command(name = "docker-ctl")]
@@ -41,26 +42,30 @@ enum Commands {
         /// Issue ID for the container
         #[arg(long)]
         issue_id: String,
-        
+
         /// Path to the worktree to mount
         #[arg(long)]
         worktree_path: String,
-        
+
         /// Backend to use (claude or gemini)
         #[arg(long)]
         backend: String,
-        
+
         /// User ID for the container
         #[arg(long)]
         uid: Option<u32>,
-        
+
         /// Group ID for the container
         #[arg(long)]
         gid: Option<u32>,
-        
+
         /// Expiration time (ISO 8601)
         #[arg(long)]
         expires_at: Option<String>,
+
+        /// Environment variables (KEY=VALUE)
+        #[arg(short = 'e', long = "env")]
+        env: Vec<String>,
     },
     
     /// Stop and remove a container
@@ -93,8 +98,8 @@ async fn main() {
         Commands::Exec { container, workdir, user, env, cmd } => {
             commands::exec::run(container, workdir, user, env, cmd).await
         }
-        Commands::Spawn { issue_id, worktree_path, backend, uid, gid, expires_at } => {
-            commands::spawn::run(issue_id, worktree_path, backend, uid, gid, expires_at).await
+        Commands::Spawn { issue_id, worktree_path, backend, uid, gid, expires_at, env } => {
+            commands::spawn::run(issue_id, worktree_path, backend, uid, gid, expires_at, env).await
         }
         Commands::Stop { container, timeout } => {
             commands::stop::run(container, timeout).await

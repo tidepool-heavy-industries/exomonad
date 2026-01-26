@@ -1,9 +1,11 @@
 use bollard::container::{Config, CreateContainerOptions, StartContainerOptions, RemoveContainerOptions, InspectContainerOptions};
-use bollard::models::{HostConfig, Mount, MountTypeEnum};
+use bollard::models::HostConfig;
 use bollard::Docker;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
+
+use crate::domain::AgentVolumes;
 
 #[derive(Serialize)]
 pub struct SpawnResponse {
@@ -19,6 +21,7 @@ pub async fn run(
     uid: Option<u32>,
     gid: Option<u32>,
     expires_at: Option<String>,
+    env_vars: Vec<String>,
 ) -> anyhow::Result<String> {
     let docker = Docker::connect_with_local_defaults()?;
     let container_name = format!("tidepool-agent-{}", issue_id);
@@ -57,11 +60,6 @@ pub async fn run(
     let host_gid: u32 = std::env::var("HOST_GID").unwrap_or_else(|_| "1000".to_string()).parse()?;
     let network_name = std::env::var("TIDEPOOL_NETWORK").unwrap_or_else(|_| "tidepool".to_string());
 
-    // Get volume name from environment - in Docker, we use a shared volume instead of bind mounts
-    // because Docker runs on a remote host where the local paths don't exist
-    let worktrees_volume = std::env::var("TIDEPOOL_WORKTREES_VOLUME")
-        .unwrap_or_else(|_| "tidepool-worktrees".to_string());
-
     let mut labels = HashMap::new();
     labels.insert("com.tidepool.issue_id".to_string(), issue_id.clone());
     labels.insert("com.tidepool.role".to_string(), "agent".to_string());
@@ -79,46 +77,9 @@ pub async fn run(
     // The working directory inside the container
     let working_dir = format!("/worktrees/{}", worktree_dir);
 
-    // Get repo volume name - needed for git worktree linkage
-    // Worktrees' .git files point to /repo/.git/worktrees/...
-    let repo_volume = std::env::var("TIDEPOOL_REPO_VOLUME")
-        .unwrap_or_else(|_| "tidepool-repo".to_string());
-
-    // Get sockets volume name - subagents create sockets at /sockets/{issue_id}/
-    let sockets_volume = std::env::var("TIDEPOOL_SOCKETS_VOLUME")
-        .unwrap_or_else(|_| "tidepool-sockets".to_string());
-
-    // Use VOLUME mounts (not BIND mounts) for remote Docker hosts
-    let mounts = vec![
-        // Main repo - required for git worktree linkage
-        Mount {
-            target: Some("/repo".to_string()),
-            source: Some(repo_volume),
-            typ: Some(MountTypeEnum::VOLUME),
-            ..Default::default()
-        },
-        // Worktrees directory
-        Mount {
-            target: Some("/worktrees".to_string()),
-            source: Some(worktrees_volume),
-            typ: Some(MountTypeEnum::VOLUME),
-            ..Default::default()
-        },
-        // Sockets directory - for control-server sockets
-        Mount {
-            target: Some("/sockets".to_string()),
-            source: Some(sockets_volume),
-            typ: Some(MountTypeEnum::VOLUME),
-            ..Default::default()
-        },
-        // GitHub auth
-        Mount {
-            target: Some("/home/agent/.config/gh".to_string()),
-            source: Some("tidepool-gh-auth".to_string()),
-            typ: Some(MountTypeEnum::VOLUME),
-            ..Default::default()
-        },
-    ];
+    // Volume mounts from domain model (source of truth for spawned agents)
+    let volumes = AgentVolumes::default();
+    let mounts = volumes.to_mounts();
 
     let user_uid = uid.unwrap_or(host_uid);
     let user_gid = gid.unwrap_or(host_gid);
@@ -143,10 +104,15 @@ pub async fn run(
             ..Default::default()
         }),
         user: Some(user),
-        env: Some(vec![
-            format!("TIDEPOOL_ISSUE_ID={}", issue_id),
-            format!("TIDEPOOL_BACKEND={}", backend),
-        ]),
+        env: Some({
+            let mut all_env = vec![
+                format!("TIDEPOOL_ISSUE_ID={}", issue_id),
+                format!("TIDEPOOL_BACKEND={}", backend),
+            ];
+            // Add user-provided env vars (already in KEY=VALUE format)
+            all_env.extend(env_vars);
+            all_env
+        }),
         ..Default::default()
     };
 
