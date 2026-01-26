@@ -22,7 +22,6 @@ tidepool-native-gui/
 ├── llm-interpreter/             # Anthropic/OpenAI native HTTP client
 ├── habitica-interpreter/        # Native Habitica HTTP client
 ├── observability-interpreter/   # OpenTelemetry/Loki push
-├── bd-interpreter/              # Beads integration + urchin CLI
 ├── lsp-interpreter/             # LSP via lsp-client
 ├── claude-code-interpreter/     # Claude Code subprocess (WIP)
 ├── worktree-interpreter/        # Git worktree management
@@ -40,7 +39,6 @@ tidepool-native-gui/
 | `ui-interpreter` | `ShowText`, `RequestChoice`, etc. | WebSocket → frontend |
 | `habitica-interpreter` | `Habitica` | Habitica HTTP API |
 | `observability-interpreter` | `PublishEvent`, `WithSpan` | Grafana Cloud Loki |
-| `bd-interpreter` | `BD` | Beads database operations |
 | `lsp-interpreter` | `LSP` | lsp-client subprocess |
 | `claude-code-interpreter` | `ClaudeCodeExec` | claude CLI subprocess |
 | `worktree-interpreter` | `Worktree` | Git worktree via subprocess |
@@ -62,7 +60,6 @@ wire-types ──────► ui-interpreter
 habitica-interpreter ───► server
 observability-interpreter ───► server
 llm-interpreter ───► server
-bd-interpreter ───► server
 lsp-interpreter ───► server
 ```
 

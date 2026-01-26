@@ -47,7 +47,7 @@ test_serialization_rf = do
 test_args_serialization :: Assertion
 test_args_serialization = do
   let args = RegisterFeedbackArgs
-        { rfaBeadId = "tidepool-123"
+        { rfaIssueId = "gh-123"
         , rfaSuggestions = ["Make it faster"]
         , rfaIdeas = ["New tool"]
         , rfaNits = ["Typo"]
@@ -62,15 +62,15 @@ test_args_serialization = do
 
 test_integration_write :: Assertion
 test_integration_write = do
-  let beadId = "test-bead-integration"
-  let filePath = ".tidepool/feedback/" <> T.unpack beadId <> ".json"
+  let issueId = "test-issue-integration"
+  let filePath = ".tidepool/feedback/" <> T.unpack issueId <> ".json"
   
   -- Ensure clean state
   exists <- doesFileExist filePath
   if exists then removeFile filePath else pure ()
   
   let args = RegisterFeedbackArgs
-        { rfaBeadId = beadId
+        { rfaIssueId = issueId
         , rfaSuggestions = []
         , rfaIdeas = []
         , rfaNits = []
@@ -97,18 +97,18 @@ test_integration_write = do
 test_integration_error :: Assertion
 test_integration_error = do
   -- To trigger an error, we can try to write to a path where a directory is a file.
-  -- We'll use a bead ID that requires a directory structure that conflicts with an existing file.
-  -- e.g. .tidepool/feedback/conflict/bead.json, but .tidepool/feedback/conflict is a file.
+  -- We'll use an issue ID that requires a directory structure that conflicts with an existing file.
+  -- e.g. .tidepool/feedback/conflict/issue.json, but .tidepool/feedback/conflict is a file.
   
   let conflictDir = ".tidepool/feedback/conflict"
-  let beadId = "conflict/bead"
+  let issueId = "conflict/issue"
   
   -- Setup: create conflict file
   createDirectoryIfMissing True ".tidepool/feedback"
   writeFile conflictDir "I am a file"
   
   let args = RegisterFeedbackArgs
-        { rfaBeadId = beadId
+        { rfaIssueId = issueId
         , rfaSuggestions = []
         , rfaIdeas = []
         , rfaNits = []

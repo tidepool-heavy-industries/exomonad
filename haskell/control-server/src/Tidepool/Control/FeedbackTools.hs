@@ -56,7 +56,7 @@ instance HasJSONSchema TokenCategoryEstimate where
 
 -- | Arguments for register_feedback tool.
 data RegisterFeedbackArgs = RegisterFeedbackArgs
-  { rfaBeadId :: Text            -- ^ The ID of the bead being worked on (e.g. tidepool-xyz)
+  { rfaIssueId :: Text            -- ^ The ID of the issue being worked on (e.g. gh-123)
   , rfaSuggestions :: [Text]     -- ^ Suggestions for making the task easier
   , rfaIdeas :: [Text]           -- ^ Ideas for new tools that should exist
   , rfaNits :: [Text]            -- ^ Small annoyances or points of confusion
@@ -71,7 +71,7 @@ instance ToJSON RegisterFeedbackArgs
 
 instance HasJSONSchema RegisterFeedbackArgs where
   jsonSchema = objectSchema
-    [ ("bead_id", describeField "bead_id" "The ID of the bead being worked on (e.g. tidepool-xyz)" (emptySchema TString))
+    [ ("issue_id", describeField "issue_id" "The ID of the issue being worked on (e.g. gh-123)" (emptySchema TString))
     , ("suggestions", describeField "suggestions" "Suggestions for making the task easier" (arraySchema $ emptySchema TString))
     , ("ideas", describeField "ideas" "Ideas for new tools that should exist" (arraySchema $ emptySchema TString))
     , ("nits", describeField "nits" "Small annoyances or points of confusion" (arraySchema $ emptySchema TString))
@@ -79,7 +79,7 @@ instance HasJSONSchema RegisterFeedbackArgs where
     , ("overall_experience", describeField "overall_experience" "Overall experience: smooth, bumpy, blocked" (emptySchema TString))
     , ("notes", describeField "notes" "Free-form notes and reflections" (emptySchema TString))
     ]
-    ["bead_id", "suggestions", "ideas", "nits", "token_categories", "overall_experience"]
+    ["issue_id", "suggestions", "ideas", "nits", "token_categories", "overall_experience"]
 
 -- | Result of register_feedback tool.
 data RegisterFeedbackResult = RegisterFeedbackResult
@@ -116,13 +116,13 @@ data RegisterFeedbackGraph mode = RegisterFeedbackGraph
 
 -- | Core logic for register_feedback.
 --
--- Saves the feedback to .tidepool/feedback/<bead_id>.json.
+-- Saves the feedback to .tidepool/feedback/<issue_id>.json.
 registerFeedbackLogic
   :: LastMember IO es
   => RegisterFeedbackArgs
   -> Eff es (GotoChoice '[To Exit RegisterFeedbackResult])
 registerFeedbackLogic args = do
-  let relativePath = ".tidepool" </> "feedback" </> T.unpack args.rfaBeadId <> ".json"
+  let relativePath = ".tidepool" </> "feedback" </> T.unpack args.rfaIssueId <> ".json"
   
   -- Perform IO to write the file
   result <- sendM $ try $ do

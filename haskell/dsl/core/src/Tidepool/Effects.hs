@@ -11,14 +11,13 @@
 -- @
 -- import Tidepool.Effects
 --
--- myHandler :: (Member State effs, Member BD effs) => ...
+-- myHandler :: (Member State effs, Member GitHub effs) => ...
 -- @
 module Tidepool.Effects
   ( -- * Core Effects
     module Tidepool.Effect.Types
 
     -- * Integration Effects
-  , module Tidepool.Effects.BD
   , module Tidepool.Effects.Cabal
   , module Tidepool.Effects.Effector
   , module Tidepool.Effects.Env
@@ -32,7 +31,6 @@ module Tidepool.Effects
   ) where
 
 import Tidepool.Effect.Types
-import Tidepool.Effects.BD
 import Tidepool.Effects.Cabal
 import Tidepool.Effects.Effector
 import Tidepool.Effects.Env

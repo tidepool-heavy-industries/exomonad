@@ -377,7 +377,7 @@ processIssue spawnMode mHangarRoot repoRoot wtBaseDir backend shortId = do
                                         
                                         SpawnDocker -> do
                                           let config = SpawnConfig
-                                                { scBeadId = shortId
+                                                { scIssueId = shortId
                                                 , scWorktreePath = path
                                                 , scBackend = backend
                                                 , scUid = Nothing

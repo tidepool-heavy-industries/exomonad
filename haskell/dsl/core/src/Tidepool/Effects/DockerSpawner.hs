@@ -32,7 +32,7 @@ data ContainerStatus
   deriving anyclass (ToJSON, FromJSON)
 
 data SpawnConfig = SpawnConfig
-  { scBeadId :: Text
+  { scIssueId :: Text
   , scWorktreePath :: FilePath
   , scBackend :: Text  -- "claude" | "gemini"
   , scUid :: Maybe Int

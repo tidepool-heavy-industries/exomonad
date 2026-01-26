@@ -21,8 +21,8 @@ main = hspec $ do
         when exists $ removeFile logFile
 
         let trace = DecisionTrace
-              { dtContext = DecisionContext "Test prompt" ["bead-1"]
-              , dtOptionsPresented = ["Select Bead: bead-1", "Continue", "Abort", "Provide Guidance"]
+              { dtContext = DecisionContext "Test prompt" ["issue-1"]
+              , dtOptionsPresented = ["Select Issue: issue-1", "Continue", "Abort", "Provide Guidance"]
               , dtDecision = Continue
               , dtLatencyMs = 500
               , dtTimestamp = UTCTime (fromGregorian 2026 1 19) 0

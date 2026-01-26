@@ -76,7 +76,6 @@ library
         Tidepool.Effects.Observability
         Tidepool.Effects.UI
         Tidepool.Effects.LLMProvider
-        Tidepool.Effects.BD
         Tidepool.Effects.Env
         Tidepool.Effects.Git
         Tidepool.Effects.Worktree

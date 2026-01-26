@@ -24,7 +24,7 @@ Current state of the deployed Docker-based development environment.
 │       ▼                                                                     │
 │  tidepool-control-server ────── Haskell MCP server (20+ tools)             │
 │       │                         - GH tools (gh_issue_list, gh_issue_create) │
-│       │                         - PM tools (pm_status, pm_review_dag, ...)  │
+│       │                         - PM tools (pm_status, pm_prioritize, ...)  │
 │       │                         - Exo tools (spawn_agents, exo_status)      │
 │       │                         - LSP tools (find_callers, teach-graph)     │
 │       │                                                                     │
@@ -147,7 +147,7 @@ The control-server binary depends on these packages:
 │  Tool Definitions (by tier):                                                │
 │                                                                             │
 │  TIER 1 - LSP-only:                                                         │
-│    LSPTools.hs ─────── find_callers, show_fields, show_constructors         │
+│    LSPTools.hs ─────── find_callers, show_type                              │
 │                                                                             │
 │  TIER 2 - LLM-enhanced:                                                     │
 │    Scout/Graph.hs ──── teach-graph (LSP + Haiku selection)                  │
@@ -504,14 +504,14 @@ GET  /health         Liveness check
 ```rust
 Config {
     image: "tidepool-agent:latest",
-    labels: { "com.tidepool.bead_id": "...", "com.tidepool.role": "agent" },
+    labels: { "com.tidepool.issue_number": "...", "com.tidepool.role": "agent" },
     mounts: [
         bind: worktree_path → /worktrees/{id},
         volume: tidepool-gh-auth → /home/agent/.config/gh
     ],
     network: "tidepool-internal",
     user: "1000:1000",
-    env: ["TIDEPOOL_BEAD_ID=...", "TIDEPOOL_BACKEND=claude|gemini"]
+    env: ["TIDEPOOL_ISSUE_NUMBER=...", "TIDEPOOL_BACKEND=claude|gemini"]
 }
 ```
 
@@ -653,14 +653,6 @@ These exist in the repo but are not part of the current Docker deployment:
 **Integrations (not wired up):**
 - `typescript/telegram-bot/` - Telegram integration
 - `haskell/effects/habitica-interpreter/` - Habitica integration
-
-**Legacy Code (exists but not deployed):**
-- `haskell/effects/bd-interpreter/` - Beads CLI integration (volume removed)
-- `haskell/control-server/src/Tidepool/Control/BDTools.hs` - BD MCP tools (not exposed)
-
-**Tools (cron/offline):**
-- `haskell/tools/training-generator/` - FunctionGemma training data generation
-- `haskell/tools/ghci-oracle/` - Persistent GHCi session server
 
 **Experimental/Prototypes:**
 - `tools/micro-gastown/` - Code intelligence research sandbox

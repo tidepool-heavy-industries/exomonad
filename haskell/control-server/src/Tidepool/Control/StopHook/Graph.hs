@@ -23,12 +23,12 @@ data StopHookGraph mode = StopHookGraph
   , globalLoopCheck :: mode :- LogicNode
       :@ Input AgentState
       :@ UsesEffects '[ State WorkflowState
-                      , Goto "globalMaxReached" ()
+                      , Goto "globalMaxReached" AgentState
                       , Goto "checkBuild" AgentState
                       ]
 
   , globalMaxReached :: mode :- LogicNode
-      :@ Input ()
+      :@ Input AgentState
       :@ UsesEffects '[Goto Exit (TemplateName, StopHookContext)]
 
   -- Build stage
@@ -42,20 +42,20 @@ data StopHookGraph mode = StopHookGraph
   , routeBuild :: mode :- LogicNode
       :@ Input (AgentState, BuildResult)
       :@ UsesEffects '[ State WorkflowState
-                      , Goto "buildContext" TemplateName
+                      , Goto "buildContext" (AgentState, TemplateName)
                       , Goto "buildLoopCheck" AgentState
                       ]
 
   , buildLoopCheck :: mode :- LogicNode
       :@ Input AgentState
       :@ UsesEffects '[ State WorkflowState
-                      , Goto "buildMaxReached" ()
+                      , Goto "buildMaxReached" AgentState
                       , Goto "checkTest" AgentState
                       ]
 
   , buildMaxReached :: mode :- LogicNode
-      :@ Input ()
-      :@ UsesEffects '[Goto "buildContext" TemplateName]
+      :@ Input AgentState
+      :@ UsesEffects '[Goto "buildContext" (AgentState, TemplateName)]
 
   -- Test stage
   , checkTest :: mode :- LogicNode
@@ -68,24 +68,24 @@ data StopHookGraph mode = StopHookGraph
   , routeTest :: mode :- LogicNode
       :@ Input (AgentState, TestResult)
       :@ UsesEffects '[ State WorkflowState
-                      , Goto "buildContext" TemplateName
+                      , Goto "buildContext" (AgentState, TemplateName)
                       , Goto "testLoopCheck" AgentState
                       ]
 
   , testLoopCheck :: mode :- LogicNode
       :@ Input AgentState
       :@ UsesEffects '[ State WorkflowState
-                      , Goto "testMaxReached" ()
+                      , Goto "testMaxReached" AgentState
                       , Goto "checkDocs" AgentState
                       ]
 
   , testMaxReached :: mode :- LogicNode
-      :@ Input ()
-      :@ UsesEffects '[Goto "buildContext" TemplateName]
+      :@ Input AgentState
+      :@ UsesEffects '[Goto "buildContext" (AgentState, TemplateName)]
 
   -- Template rendering (shared by all stages)
   , buildContext :: mode :- LogicNode
-      :@ Input TemplateName
+      :@ Input (AgentState, TemplateName)
       :@ UsesEffects '[ State WorkflowState
                       , Goto Exit (TemplateName, StopHookContext)
                       ]
@@ -110,20 +110,20 @@ data StopHookGraph mode = StopHookGraph
   , routePR :: mode :- LogicNode
       :@ Input (AgentState, GhPrStatusResult)
       :@ UsesEffects '[ State WorkflowState
-                      , Goto "buildContext" TemplateName
+                      , Goto "buildContext" (AgentState, TemplateName)
                       , Goto "prLoopCheck" AgentState
                       ]
 
   , prLoopCheck :: mode :- LogicNode
       :@ Input AgentState
       :@ UsesEffects '[ State WorkflowState
-                      , Goto "prMaxReached" ()
+                      , Goto "prMaxReached" AgentState
                       , Goto Exit (TemplateName, StopHookContext) -- Complete for now
                       ]
 
   , prMaxReached :: mode :- LogicNode
-      :@ Input ()
-      :@ UsesEffects '[Goto "buildContext" TemplateName]
+      :@ Input AgentState
+      :@ UsesEffects '[Goto "buildContext" (AgentState, TemplateName)]
 
   , exit :: mode :- ExitNode (TemplateName, StopHookContext)
   }

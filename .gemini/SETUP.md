@@ -26,17 +26,17 @@ mantle-agent hook session-start --runtime=gemini
 2. Hook calls `mantle-agent hook session-start --runtime=gemini`
 3. mantle-agent forwards to control-server via Unix socket with `runtime=Gemini`
 4. control-server:
-   - Detects current git branch (should be `bd-{id}/*` for active bead)
-   - Fetches bead details from `.beads/` database
-   - Renders SessionStart context template with bead info
+   - Detects current git branch (should be `gh-{number}/*` for active issue)
+   - Fetches issue details from GitHub
+   - Renders SessionStart context template with issue info
    - Returns markdown as `additionalContext`
 5. Gemini CLI injects the context into the session automatically
 
 ## SessionStart Behavior
 
 The SessionStart handler is **identical for both Claude and Gemini**:
-- Parses branch name to extract bead ID
-- Fetches bead info if on a `bd-*` branch
+- Parses branch name to extract issue number
+- Fetches issue info if on a `gh-*` branch
 - Renders Jinja template with context
 - Returns rendered markdown to inject into session
 
@@ -47,13 +47,13 @@ The only difference is exit code behavior on errors (1 vs 2), but the SessionSta
 To test Gemini SessionStart hook:
 
 1. Ensure you have Gemini CLI installed and in PATH
-2. Ensure you're on a `bd-{id}/*` branch with an active bead
+2. Ensure you're on a `gh-{number}/*` branch with an active issue
 3. Start a Gemini session:
    ```bash
    gemini
    ```
-4. Verify bead context appears at the top of the session
-5. Commands for workflow should be visible (git status, bd sync, commit, push)
+4. Verify issue context appears at the top of the session
+5. Commands for workflow should be visible (git status, commit, push)
 
 ## Session Close Protocol
 
@@ -62,10 +62,8 @@ When ending a Gemini session, follow the session close protocol from the injecte
 ```
 [ ] 1. git status              (check what changed)
 [ ] 2. git add <files>         (stage code changes)
-[ ] 3. bd sync                 (commit beads changes)
-[ ] 4. git commit -m "..."     (commit code)
-[ ] 5. bd sync                 (commit any new beads changes)
-[ ] 6. git push                (push to remote)
+[ ] 3. git commit -m "..."     (commit code)
+[ ] 4. git push                (push to remote)
 ```
 
-This ensures all work is properly tracked in git and the Beads database before the session ends.
+This ensures all work is properly tracked in git before the session ends.

@@ -576,7 +576,7 @@ handleRegisterFeedbackTool logger reqId args = do
       pure $ mcpToolError reqId InvalidInput $ "Invalid register_feedback arguments: " <> T.pack err
 
     Success rfArgs -> do
-      logDebug logger $ "  bead_id=" <> rfArgs.rfaBeadId
+      logDebug logger $ "  issue_id=" <> rfArgs.rfaIssueId
 
       resultOrErr <- try $ runM
         $ runLog Debug
@@ -588,7 +588,7 @@ handleRegisterFeedbackTool logger reqId args = do
           pure $ mcpToolError reqId ExternalFailure $ "register_feedback failed: " <> T.pack (displayException e)
 
         Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Feedback registered for " <> rfArgs.rfaBeadId
+          logInfo logger $ "[MCP:" <> reqId <> "] Feedback registered for " <> rfArgs.rfaIssueId
           pure $ mcpToolSuccess reqId (toJSON result)
 
 

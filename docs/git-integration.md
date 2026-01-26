@@ -15,7 +15,6 @@
 **Benefits of CLI approach**:
 - No native dependencies
 - Works in WASM (via effect yield to TypeScript)
-- Matches BD interpreter pattern
 - Easy to test with mock outputs
 
 ## Command Output Formats
@@ -30,7 +29,7 @@ git log --format="%H|%an|%ae|%at|%s" -n 10
 
 Output:
 ```
-292faaa2904cd5dc915a78ca478b3edd8e5af406|toast|inanna@recursion.wtf|1767520887|feat(bd-effect): Add BD effect
+292faaa2904cd5dc915a78ca478b3edd8e5af406|toast|inanna@recursion.wtf|1767520887|feat(github-effect): Add GitHub effect
 c6514f5af16fa1cc610389eaada619cec0d3fa94|toast|inanna@recursion.wtf|1767520058|docs: Add Gas Town LSP integration
 ```
 
@@ -52,11 +51,16 @@ parseLogLine :: Text -> Maybe CommitInfo
 parseLogLine line = case T.splitOn "|" line of
   [hash, author, email, timestamp, subject] ->
     Just CommitInfo
-      { ciHash = hash
-      , ciAuthor = author
-      , ciEmail = email
-      , ciTimestamp = read (T.unpack timestamp)
-      , ciSubject = subject
+      {
+        ciHash = hash
+      ,
+        ciAuthor = author
+      ,
+        ciEmail = email
+      ,
+        ciTimestamp = read (T.unpack timestamp)
+      ,
+        ciSubject = subject
       }
   _ -> Nothing
 ```
@@ -105,15 +109,19 @@ Status codes:
 **Parsing approach**:
 ```haskell
 data FileChange = FileChange
-  { fcStatus :: ChangeStatus
-  , fcPath :: FilePath
+  {
+    fcStatus :: ChangeStatus
+  ,
+    fcPath :: FilePath
   }
 
 parseNameStatus :: Text -> Maybe FileChange
 parseNameStatus line = case T.splitOn "\t" line of
   [status, path] -> Just FileChange
-    { fcStatus = parseStatus status
-    , fcPath = T.unpack path
+    {
+      fcStatus = parseStatus status
+    ,
+      fcPath = T.unpack path
     }
   _ -> Nothing
 ```
@@ -140,7 +148,7 @@ summary <commit message>
 [previous <sha> <filename>]
 [boundary]
 filename <filename>
-\t<line-content>
+	<line-content>
 ```
 
 **Parsing approach**: State machine parsing
@@ -151,11 +159,16 @@ filename <filename>
 
 ```haskell
 data BlameLine = BlameLine
-  { blCommit :: Text
-  , blAuthor :: Text
-  , blAuthorTime :: Int
-  , blLineNum :: Int
-  , blContent :: Text
+  {
+    blCommit :: Text
+  ,
+    blAuthor :: Text
+  ,
+    blAuthorTime :: Int
+  ,
+    blLineNum :: Int
+  ,
+    blContent :: Text
   }
 ```
 
@@ -169,15 +182,15 @@ git show --stat --format="%H%n%an%n%ae%n%at%n%s%n%b" HEAD
 Output:
 ```
 292faaa2904cd5dc915a78ca478b3edd8e5af406
-toast
+theast
 inanna@recursion.wtf
 1767520887
-feat(bd-effect): Add BD effect for reading bead info
+feat(github-effect): Add GitHub effect for reading issue info
 
-Add effect for querying beads database...
+Add effect for querying GitHub API...
 
  cabal.project | 1 +
- tidepool-core/src/Tidepool/Effects/BD.hs | 268 ++++++++++++++++++
+ haskell/dsl/core/src/Tidepool/Effects/GitHub.hs | 268 ++++++++++++++++++
  5 files changed, 530 insertions(+)
 ```
 
@@ -190,7 +203,7 @@ git show --numstat --format="" HEAD
 Output:
 ```
 1	0	cabal.project
-268	0	tidepool-core/src/Tidepool/Effects/BD.hs
+268	0	haskell/dsl/core/src/Tidepool/Effects/GitHub.hs
 ```
 
 Format: `<additions>\t<deletions>\t<path>`
@@ -216,41 +229,62 @@ data Git :: Effect where
 
 -- | Commit summary info (from git log)
 data CommitInfo = CommitInfo
-  { ciHash :: Text
-  , ciAuthor :: Text
-  , ciEmail :: Text
-  , ciTimestamp :: Int
-  , ciSubject :: Text
+  {
+    ciHash :: Text
+  ,
+    ciAuthor :: Text
+  ,
+    ciEmail :: Text
+  ,
+    ciTimestamp :: Int
+  ,
+    ciSubject :: Text
   }
 
 -- | File change info (from git diff)
 data FileChange = FileChange
-  { fcStatus :: ChangeStatus
-  , fcPath :: FilePath
-  , fcAdditions :: Maybe Int  -- from --numstat
-  , fcDeletions :: Maybe Int
+  {
+    fcStatus :: ChangeStatus
+  ,
+    fcPath :: FilePath
+  ,
+    fcAdditions :: Maybe Int  -- from --numstat
+  ,
+    fcDeletions :: Maybe Int
   }
 
 data ChangeStatus = Added | Modified | Deleted | Renamed | Copied
 
 -- | Blame line info (from git blame --porcelain)
 data BlameLine = BlameLine
-  { blCommit :: Text
-  , blAuthor :: Text
-  , blAuthorTime :: Int
-  , blLineNum :: Int
-  , blContent :: Text
+  {
+    blCommit :: Text
+  ,
+    blAuthor :: Text
+  ,
+    blAuthorTime :: Int
+  ,
+    blLineNum :: Int
+  ,
+    blContent :: Text
   }
 
 -- | Full commit details (from git show)
 data CommitDetails = CommitDetails
-  { cdHash :: Text
-  , cdAuthor :: Text
-  , cdEmail :: Text
-  , cdTimestamp :: Int
-  , cdSubject :: Text
-  , cdBody :: Text
-  , cdFiles :: [FileChange]
+  {
+    cdHash :: Text
+  ,
+    cdAuthor :: Text
+  ,
+    cdEmail :: Text
+  ,
+    cdTimestamp :: Int
+  ,
+    cdSubject :: Text
+  ,
+    cdBody :: Text
+  ,
+    cdFiles :: [FileChange]
   }
 ```
 
@@ -269,8 +303,10 @@ runGitIO config = interpret $ \case
 
 -- | Configuration for Git interpreter.
 data GitConfig = GitConfig
-  { gcRepoPath :: Maybe FilePath  -- If Nothing, use cwd
-  , gcQuiet :: Bool               -- Suppress stderr
+  {
+    gcRepoPath :: Maybe FilePath  -- If Nothing, use cwd
+  ,
+    gcQuiet :: Bool               -- Suppress stderr
   }
 ```
 

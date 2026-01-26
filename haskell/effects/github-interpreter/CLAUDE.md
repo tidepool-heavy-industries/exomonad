@@ -133,4 +133,3 @@ case result of
 ## Related Documentation
 
 - [effects/CLAUDE.md](../CLAUDE.md) - Effect interpreter pattern
-- [effects/bd-interpreter/CLAUDE.md](../bd-interpreter/CLAUDE.md) - Beads task tracking (local)

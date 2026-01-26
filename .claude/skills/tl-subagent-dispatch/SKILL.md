@@ -28,27 +28,20 @@ description: Use when spawning subagents, monitoring their progress, or interven
 
 ```bash
 # Via MCP tool (creates git worktrees only)
-spawn_agents(["bead-id-1", "bead-id-2", "bead-id-3"])
+spawn_agents(["123", "456", "789"])
 
 # Returns worktree paths
-# /Users/.../dev/.worktrees/tidepool/bd-xxx-description
+# /Users/.../dev/.worktrees/tidepool/gh-123-description
 ```
 
-### 2. Mark Work In Progress
-
-```bash
-bd update tidepool-xxx --status=in_progress
-bd update tidepool-yyy --status=in_progress
-```
-
-### 3. Human Launches Agents (Manual)
+### 2. Human Launches Agents (Manual)
 
 TL opens Zellij tabs and starts agents based on classification:
 
 **Tactical agent (haiku):**
 ```bash
 cd /path/to/worktree
-./scripts/bead-context    # Bootstrap context
+# Context is automatically loaded from .claude/context/issue.md
 claude                    # Uses default model (haiku)
 ```
 
@@ -57,16 +50,7 @@ claude                    # Uses default model (haiku)
 cd /path/to/worktree
 ./start-augmented.sh      # Full harness with MCP tools
 # Or if harness not needed:
-ANTHROPIC_MODEL=claude-opus-4 claude
-```
-
-### 4. Agent Bootstrap
-
-Each agent should read bead context:
-```bash
-./scripts/bead-context    # Injects bead details into session
-# Or manually:
-bd show tidepool-xxx      # Read acceptance criteria
+ANTHROPIC_MODEL=claude-3-5-sonnet-latest claude
 ```
 
 ## Monitoring Patterns
@@ -84,7 +68,7 @@ bd show tidepool-xxx      # Read acceptance criteria
 
 ### Check-in Commands
 ```bash
-bd list --status=in_progress   # Who's working on what
+gh issue list --assignee @me   # Who's working on what
 gh pr list                     # PR status
 git worktree list              # Active worktrees
 ```
@@ -129,15 +113,14 @@ Agents should follow this sequence:
 ```
 1. Implementation complete
 2. cabal build / cargo build (verify compiles)
-3. Commit with [bead-id] prefix
+3. Commit with [#issue-num] prefix
 4. git push -u origin <branch>
 5. gh pr create
 6. (TL merges after review)
-7. bd close <bead-id> --reason="Merged: <PR URL>"
 ```
 
 **For strategic agents, also:**
-- Capture UX feedback as new beads
+- Capture UX feedback as new issues
 - Document architectural decisions made
 
 ## Anti-Patterns
@@ -153,16 +136,16 @@ Problems:
 - No human review before actions
 
 ### ❌ Treating strategic work as tactical
-Complex/ambiguous beads need opus + full harness + heavy oversight.
+Complex/ambiguous issues need opus + full harness + heavy oversight.
 Haiku on a refactor = wasted tokens and poor results.
 
 ### ❌ Treating tactical work as strategic
-Simple/formulaic beads don't need opus or heavy oversight.
+Simple/formulaic issues don't need opus or heavy oversight.
 Opus on a docs update = wasted money.
 
 ### ✅ Correct Pattern
 ```
-1. Classify beads (tactical vs strategic)
+1. Classify issues (tactical vs strategic)
 2. Create worktrees via spawn_agents
 3. Launch agents with appropriate model/harness
 4. Monitor with appropriate intensity
@@ -175,7 +158,6 @@ Opus on a docs update = wasted money.
 ### Listing
 ```bash
 git worktree list
-ls ~/dev/.worktrees/tidepool/
 ```
 
 ### Cleanup (after merge)
@@ -186,4 +168,4 @@ git worktree prune
 ```
 
 ### Reuse
-If worktree exists for a bead, cd into it rather than creating new.
+If worktree exists for an issue, cd into it rather than creating new.

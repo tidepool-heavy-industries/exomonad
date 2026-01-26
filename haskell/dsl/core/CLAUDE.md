@@ -258,7 +258,7 @@ Marks an LLM node as executed via Claude Code subprocess instead of the standard
 
 ```haskell
 gWork :: mode :- G.LLMNode
-    :@ Input BeadInfo
+    :@ Input IssueInfo
     :@ Template WorkTpl
     :@ Schema WorkResult
     :@ ClaudeCode 'Sonnet ('Just "/path/to/worktree")
@@ -1338,7 +1338,7 @@ All paths relative to `tidepool-core/src/Tidepool/Graph/`.
 | `Effect/Types.hs` | `State`, `LLM`, `Log`, `Emit`, `RequestInput`, `Time`, `Random`, `Return`, `returnValue`, `runReturn` | Core effect definitions |
 | `Effect/Session.hs` | `Session`, `SessionOutput`, `startSession`, `continueSession` | Dockerized Claude Code sessions via mantle |
 | `Schema.hs` | `HasJSONSchema`, `JSONSchema`, `schemaToValue` | JSON Schema for structured output |
-| `Effects/*.hs` | `BD`, `GitHub`, `Habitica`, `Telegram`, `Git`, etc. | Integration effects |
+| `Effects/*.hs` | `GitHub`, `Habitica`, `Telegram`, `Git`, etc. | Integration effects |
 
 ## Related Documentation
 

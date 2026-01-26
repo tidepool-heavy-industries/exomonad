@@ -136,7 +136,8 @@ Graphs can document their intended role using the `MCPRoleHint` annotation in th
 
 ```haskell
 data SpawnAgentsGraph mode = SpawnAgentsGraph
-  { saEntry :: mode :- EntryNode SpawnAgentsArgs
+  {
+      saEntry :: mode :- EntryNode SpawnAgentsArgs
       :@ MCPExport
       :@ MCPToolDef '("spawn_agents", "...")
       :@ MCPRoleHint 'TL
@@ -280,7 +281,7 @@ The control server executes commands inside agent containers via the `docker-spa
    ┌──────────────────────────────────────────────┐
    │ Parse ScoutQuery arguments                   │
    │ Require GEMMA_ENDPOINT env var (no fallback) │
-   │ Run: runM $ runGemmaHTTP endpoint $          │
+   │ Run: runM $ runGemmaHTTP endpoint $
    │      runLSP session $ exploreEff query       │
    │                                              │
    │ Exploration steps:                           │
@@ -385,7 +386,7 @@ The control server executes commands inside agent containers via the `docker-spa
 Tools are **automatically discovered** from graph definitions at startup via `exportMCPTools`:
 - **Tier 1 (LSP-only)**: Use `GraphEntries` type family + `Return` effect, discovered via `reifyGraphEntries`
 - **Tier 2 (LLM-enhanced)**: Use `MCPExport` annotation on entry node, discovered via `reifyMCPTools`
-- **Tier 3 (External orchestration)**: Beads (BD), git, subprocess operations
+- **Tier 3 (External orchestration)**: GitHub issues, git, subprocess operations
 - **Tier 4 (TUI-interactive)**: Dialog boxes, option selection, guidance requests
 - **Tier 5 (Mailbox)**: Agent-to-agent messaging
 
@@ -461,11 +462,11 @@ Explores codebase concepts via BFS, using Haiku to select relevant type dependen
 
 ### Tier 3: External Orchestration Tools (Exo)
 
-Integration with beads (BD) and git for development workflow automation.
+Integration with GitHub and git for development workflow automation.
 
 #### `exo_status` - Get Development Context
 
-Gets current bead details, git status, and PR info.
+Gets current issue details, git status, and PR info.
 
 **Implementation:** `ExoTools.hs:92-114` (ExoStatusGraph)
 
@@ -527,7 +528,7 @@ Asks the user to select from a list of predefined options, or provide a custom r
 ```json
 {
   "prompt": "Select the next step",     // required
-  "options": [["1", "Fix bug"], ["2", "Add test"]] // required: [[id, label], ...]
+  "options": [["1", "Fix bug"], ["2", "Add test"]] // required: [[id, label], ...] 
 }
 ```
 
@@ -549,7 +550,7 @@ Asks the user for free-form guidance or to select from suggestions when the agen
 
 ### Tier 4 (continued): Project Management Dashboard Tools
 
-Tools for sprint planning, issue triage, and team coordination via Beads (BD) and GitHub APIs. These are PM-specific tools that use `MCPExport` annotation pattern (unlike the TUI tools above which use `GraphEntries`).
+Tools for sprint planning, issue triage, and team coordination via GitHub APIs. These are PM-specific tools that use `MCPExport` annotation pattern (unlike the TUI tools above which use `GraphEntries`).
 
 #### `pm_status` - Sprint Health Dashboard
 
@@ -591,47 +592,6 @@ Provides PM observability: velocity, cycle time, PR lag, and current state distr
 
 **Implementation:** `PMStatus.hs:169-223` (pmStatusLogic)
 
-#### `pm_review_dag` - DAG Analysis for Strategic Planning
-
-Analyzes the bead dependency graph to identify critical paths, priority gaps, and blocking cascades.
-
-**Request Schema:**
-```json
-{
-  "include_closed": false,           // optional, include closed beads
-  "aging_threshold_hours": 24,       // optional, default 24h
-  "focus_track": "backend"           // optional, focus on a track label
-}
-```
-
-**Response Schema:**
-```json
-{
-  "ready": ["tidepool-abc", "tidepool-def"],
-  "blocked": [
-    {
-      "bead_id": "tidepool-xyz",
-      "depth": 2,
-      "blockers": ["tidepool-123", "tidepool-456"]
-    }
-  ],
-  "critical_path": ["tidepool-end", "tidepool-mid", "tidepool-start"],
-  "priority_gaps": [
-    {
-      "blocked_id": "tidepool-low",
-      "blocked_priority": 4,
-      "blocker_id": "tidepool-high",
-      "blocker_priority": 0
-    }
-  ],
-  "aging": ["tidepool-stale"],
-  "needs_tl_review": ["tidepool-123"],
-  "needs_pm_approval": ["tidepool-456"]
-}
-```
-
-**Implementation:** `PMReviewDAG.hs:135-246` (pmReviewDagLogic)
-
 ### Tool Registration
 
 **Automatic discovery (23+ tools):**
@@ -647,7 +607,7 @@ exportMCPTools logger = do
   -- Tier 2: LLM-enhanced graphs
   let dgTools = reifyMCPTools (Proxy @DocGenGraph)  -- teach-graph
 
-  -- Tier 3: External orchestration (Beads + Git)
+  -- Tier 3: External orchestration (GitHub + Git)
   let esTools = reifyMCPTools (Proxy @ExoStatusGraph)
       ecTools = reifyMCPTools (Proxy @ExoCompleteGraph)
       saTools = reifyMCPTools (Proxy @SpawnAgentsGraph)
@@ -660,7 +620,6 @@ exportMCPTools logger = do
       soTools = reifyGraphEntries (Proxy @SelectOptionGraph)
       rgTools = reifyGraphEntries (Proxy @RequestGuidanceGraph)
       pmStatTools = reifyMCPTools (Proxy @PmStatusGraph)
-      pmRevTools = reifyMCPTools (Proxy @PmReviewDagGraph)
       pmProTools = reifyMCPTools (Proxy @PMProposeGraph)
 
   -- Tier 5: Mailbox communication + Feedback
@@ -673,7 +632,7 @@ exportMCPTools logger = do
 
   let allTools = concat [fcTools, sfTools, scTools, caTools, soTools, rgTools,
                          dgTools, esTools, ecTools, erTools, saTools, fpTools,
-                         paeTools, pmPriTools, pmStatTools, pmRevTools, pmProTools,
+                         paeTools, pmPriTools, pmStatTools, pmProTools,
                          smTools, ciTools, rmTools, mrTools, rfTools, prTools]
   pure $ map reifyToToolDef allTools
 ```
@@ -706,7 +665,7 @@ Hook events are processed by `Handler/Hook.hs`.
 ```
 
 **Other Hooks:**
-- `SessionStart` → Injects bead context into the conversation.
+- `SessionStart` → Injects issue context into the conversation.
 **Stop** → Enforces PR filing and pre-commit checks with templated guidance. Uses Circuit Breaker to prevent infinite loops.
 - Other hooks → continue with default response.
 
@@ -736,11 +695,10 @@ The control server provides role-based endpoints that filter available tools.
 3. Tool calls to non-allowed tools return `PermissionDenied` error
 
 **PM Role Tools:**
-- `pm_propose` - Propose new beads
+- `pm_propose` - Propose new issues
 - `pm_approve_expansion` - Approve/reject expansion plans
-- `pm_prioritize` - Batch prioritize beads
+- `pm_prioritize` - Batch prioritize issues
 - `pm_status` - Sprint health dashboard
-- `pm_review_dag` - DAG analysis for strategic planning
 - `exo_status` - Get development context
 
 **TL Role Tools:**
@@ -959,10 +917,10 @@ All MCP tools return structured errors instead of plain text strings. This allow
 
 | Code | Name | Meaning | Example |
 |------|------|---------|---------|
-| -32001 | NotFound | Resource does not exist | Bead not found, binary missing, symbol not found |
-| -32002 | InvalidInput | Arguments failed validation | Invalid bead ID, empty env vars, malformed JSON |
+| -32001 | NotFound | Resource does not exist | Issue not found, binary missing, symbol not found |
+| -32002 | InvalidInput | Arguments failed validation | Invalid issue number, empty env vars, malformed JSON |
 | -32003 | ExternalFailure | Subprocess or I/O error | File system error, git command failure |
-| -32004 | StateError | Invalid operation state | Bead is blocked, worktree already exists |
+| -32004 | StateError | Invalid operation state | Issue is closed, worktree already exists |
 | -32005 | EnvironmentError | Missing configuration | Not in Zellij, missing API key |
 
 ### Error Response Format
@@ -970,12 +928,12 @@ All MCP tools return structured errors instead of plain text strings. This allow
 ```json
 {
   "code": -32001,
-  "message": "Bead tidepool-xyz not found",
+  "message": "Issue #123 not found",
   "details": {
-    "searched_in": ".beads/beads.jsonl",
-    "available_beads": ["tidepool-m1j", "tidepool-abc"]
+    "repo": "tidepool/tidepool",
+    "issue_number": 123
   },
-  "suggestion": "Use 'bd list' to see all available beads"
+  "suggestion": "Use 'gh_issue_list' to find available issues"
 }
 ```
 
@@ -1002,13 +960,13 @@ Error responses are built using helper functions:
 Example from spawn_agents tool:
 ```haskell
 -- Validation error
-pure $ mcpToolError reqId InvalidInput $ "Invalid bead ID: contains path separators"
+pure $ mcpToolError reqId InvalidInput $ "Invalid issue number: contains path separators"
 
 -- Not found error with suggestion
 pure $ mcpToolErrorWithDetails reqId NotFound
-  "Bead not found"
-  (Just (object ["bead_id" .= beadId]))
-  (Just "Use 'bd list' to find available beads")
+  "Issue not found"
+  (Just (object ["issue_number" .= issueNum]))
+  (Just "Use 'gh_issue_list' to find available issues")
 ```
 
 ## Related Documentation
@@ -1024,7 +982,7 @@ pure $ mcpToolErrorWithDetails reqId NotFound
 ## Next Steps
 
 1. Wire real hook logic (currently passthrough)
-2. Add more MCP tools via Graph DSL (beads task tracking, git operations, etc.)
+2. Add more MCP tools via Graph DSL (git operations, etc.)
 3. Add metrics collection to mantle-hub
 4. Test teach-graph end-to-end with Claude inside Claude Code
 5. Generate training data for FunctionGemma fine-tuning via teaching mode

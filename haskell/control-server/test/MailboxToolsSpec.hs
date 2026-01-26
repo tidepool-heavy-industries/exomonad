@@ -2,6 +2,8 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE GADTs #-}
 
 module Main where
 
@@ -12,7 +14,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import Data.IORef
 
-import Tidepool.Effects.BD
+import Tidepool.Effects.GitHub
 import Tidepool.Control.MailboxTools
 import Tidepool.Graph.Goto (unwrapSingleChoice)
 
@@ -21,44 +23,37 @@ main = defaultMain tests
 
 tests :: TestTree
 tests = testGroup "MailboxTools Logic"
-  [ testCase "sendMessageLogic creates bead with correct labels" test_sendMessage
+  [ testCase "sendMessageLogic creates issue with correct labels" test_sendMessage
   , testCase "checkInboxLogic filters by role and status" test_checkInbox
-  , testCase "markReadLogic closes bead with reason" test_markRead
+  , testCase "markReadLogic closes issue" test_markRead
   ]
 
--- | Mock BD state
+-- | Mock GitHub state
 data MockState = MockState
-  { createdBeads :: [CreateBeadInput]
-  , closedBeads  :: [(Text, Maybe Text)]
+  { createdIssues :: [CreateIssueInput]
+  , closedIssues  :: [Int]
   }
 
 emptyMockState :: MockState
 emptyMockState = MockState [] []
 
--- | Run with mock BD
-runMockBD :: IORef MockState -> [BeadInfo] -> Eff '[BD, IO] a -> IO a
-runMockBD stateRef inboxBeads = runM . interpret (\case
-  CreateBead input -> do
-    sendM $ modifyIORef stateRef (\s -> s { createdBeads = input : createdBeads s })
-    pure "msg-123"
-  ListBeads input -> do
-    -- Simple filtering for mock
-    let filtered = filter (matches input) inboxBeads
-    pure filtered
-  CloseBead bid reason -> do
-    sendM $ modifyIORef stateRef (\s -> s { closedBeads = (bid, reason) : closedBeads s })
-    pure ()
-  GetBead bid -> do
-    pure $ findById bid inboxBeads
-  AddDep _ _ _ -> pure ()
+-- | Run with mock GitHub
+runMockGitHub :: IORef MockState -> [Issue] -> Eff '[GitHub, IO] a -> IO a
+runMockGitHub stateRef inboxIssues = runM . interpret (\case
+  CreateIssue input -> do
+    sendM $ modifyIORef stateRef (\s -> s { createdIssues = input : createdIssues s })
+    pure 123
+  ListIssues _ _ -> do
+    pure inboxIssues
+  GetIssue _ num _ -> do
+    pure $ findByNum num inboxIssues
+  CloseIssue _ num -> do
+    sendM $ modifyIORef stateRef (\s -> s { closedIssues = num : closedIssues s })
+    pure num
   _ -> error "Not implemented in mock"
   )
   where
-    findById bid = foldr (\b acc -> if b.biId == bid then Just b else acc) Nothing
-    matches input b = 
-      let statusMatch = maybe True (== b.biStatus) input.lbiStatus
-          labelMatch = all (`elem` b.biLabels) input.lbiLabels
-      in statusMatch && labelMatch
+    findByNum num = foldr (\i acc -> if i.issueNumber == num then Just i else acc) Nothing
 
 test_sendMessage :: Assertion
 test_sendMessage = do
@@ -70,69 +65,60 @@ test_sendMessage = do
         , body = "World"
         , blockWork = Nothing
         }
-  _ <- runMockBD stateRef [] $ unwrapSingleChoice <$> sendMessageLogic "pm" req
+  _ <- runMockGitHub stateRef [] $ unwrapSingleChoice <$> sendMessageLogic "pm" req
   
   state <- readIORef stateRef
-  assertEqual "Should have created one bead" 1 (length $ createdBeads state)
-  case createdBeads state of
+  assertEqual "Should have created one issue" 1 (length $ createdIssues state)
+  case createdIssues state of
     [created] -> do
-      assertEqual "Title should match subject" "Hello" created.cbiTitle
-      assertBool "Should have mailbox label" ("mailbox" `elem` created.cbiLabels)
-      assertBool "Should have from:pm label" ("from:pm" `elem` created.cbiLabels)
-      assertBool "Should have to:tl label" ("to:tl" `elem` created.cbiLabels)
-      assertBool "Should have msgtype:proposal label" ("msgtype:proposal" `elem` created.cbiLabels)
-      assertEqual "Assignee should be recipient" (Just "tl") created.cbiAssignee
-    _ -> assertFailure "Expected exactly one created bead"
+      assertEqual "Title should match subject" "Hello" created.ciiTitle
+      assertBool "Should have mailbox label" ("mailbox" `elem` created.ciiLabels)
+      assertBool "Should have from:pm label" ("from:pm" `elem` created.ciiLabels)
+      assertBool "Should have to:tl label" ("to:tl" `elem` created.ciiLabels)
+      assertBool "Should have msgtype:proposal label" ("msgtype:proposal" `elem` created.ciiLabels)
+      assertEqual "Assignee should be recipient" ["tl"] created.ciiAssignees
+    _ -> assertFailure "Expected exactly one created issue"
 
 test_checkInbox :: Assertion
 test_checkInbox = do
   stateRef <- newIORef emptyMockState
-  let msg1 = (defaultBead "msg-1") { biLabels = ["mailbox", "to:tl", "from:pm"], biStatus = StatusOpen }
-  let msg2 = (defaultBead "msg-2") { biLabels = ["mailbox", "to:pm", "from:tl"], biStatus = StatusOpen }
+  let msg1 = (defaultIssue 1) { issueLabels = ["mailbox", "to:tl", "from:pm"], issueState = IssueOpen, issueTitle = "Msg 1" }
+  let msg2 = (defaultIssue 2) { issueLabels = ["mailbox", "to:pm", "from:tl"], issueState = IssueOpen, issueTitle = "Msg 2" }
   
   -- Check TL inbox
-  results <- runMockBD stateRef [msg1, msg2] $ unwrapSingleChoice <$> checkInboxLogic "tl" (CheckInboxArgs)
+  results <- runMockGitHub stateRef [msg1] $ unwrapSingleChoice <$> checkInboxLogic "tl" (CheckInboxArgs)
   assertEqual "TL should see 1 message" 1 (length results)
   case results of
-    (msg:_) -> assertEqual "TL should see msg-1" "msg-1" msg.msId
+    (msg:_) -> assertEqual "TL should see msg-1" 1 msg.msId
     [] -> assertFailure "Expected TL to see at least one message"
   
   -- Check PM inbox
-  results2 <- runMockBD stateRef [msg1, msg2] $ unwrapSingleChoice <$> checkInboxLogic "pm" (CheckInboxArgs)
+  results2 <- runMockGitHub stateRef [msg2] $ unwrapSingleChoice <$> checkInboxLogic "pm" (CheckInboxArgs)
   assertEqual "PM should see 1 message" 1 (length results2)
   case results2 of
-    (msg:_) -> assertEqual "PM should see msg-2" "msg-2" msg.msId
+    (msg:_) -> assertEqual "PM should see msg-2" 2 msg.msId
     [] -> assertFailure "Expected PM to see at least one message"
 
 test_markRead :: Assertion
 test_markRead = do
   stateRef <- newIORef emptyMockState
-  _ <- runMockBD stateRef [] $ unwrapSingleChoice <$> markReadLogic (MarkReadArgs "msg-1" (Just "acknowledged"))
+  _ <- runMockGitHub stateRef [] $ unwrapSingleChoice <$> markReadLogic (MarkReadArgs 123 (Just "acknowledged"))
   
   state <- readIORef stateRef
-  assertEqual "Should have closed one bead" 1 (length $ closedBeads state)
-  case closedBeads state of
-    [(bid, reason)] -> do
-      assertEqual "Should close correct ID" "msg-1" bid
-      assertEqual "Should have correct reason" (Just "acknowledged") reason
-    _ -> assertFailure "Expected exactly one closed bead"
+  assertEqual "Should have closed one issue" 1 (length $ closedIssues state)
+  case closedIssues state of
+    [num] -> do
+      assertEqual "Should close correct number" 123 num
+    _ -> assertFailure "Expected exactly one closed issue"
 
--- Helper to create dummy bead
-defaultBead :: Text -> BeadInfo
-defaultBead bid = BeadInfo
-  { biId = bid
-  , biTitle = ""
-  , biDescription = Nothing
-  , biStatus = StatusOpen
-  , biPriority = 2
-  , biType = TypeTask
-  , biAssignee = Nothing
-  , biCreatedAt = Nothing
-  , biCreatedBy = Nothing
-  , biUpdatedAt = Nothing
-  , biClosedAt = Nothing
-  , biParent = Nothing
-  , biLabels = []
-  , biDependencies = []
-  , biDependents = []
+-- Helper to create dummy issue
+defaultIssue :: Int -> Issue
+defaultIssue num = Issue
+  { issueNumber = num
+  , issueTitle = ""
+  , issueBody = ""
+  , issueState = IssueOpen
+  , issueLabels = []
+  , issueAuthor = Author "ghost" ""
+  , issueUrl = ""
   }

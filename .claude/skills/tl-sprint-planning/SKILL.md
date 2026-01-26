@@ -16,14 +16,13 @@ description: Use when planning sprints, organizing parallel work, or dispatching
 ### 1. Identify Ready Work
 
 ```bash
-bd ready                    # Show unblocked items
-bd blocked                  # Identify bottlenecks
-bd show <epic>              # Check epic children
+gh issue list --label "ready" # Show unblocked items
+gh issue list                 # Identify bottlenecks
 ```
 
-### 2. Classify Beads (Tactical vs Strategic)
+### 2. Classify Issues (Tactical vs Strategic)
 
-Before dispatch, classify each bead:
+Before dispatch, classify each issue:
 
 | Classification | Model | Harness | Oversight | Examples |
 |----------------|-------|---------|-----------|----------|
@@ -34,15 +33,15 @@ Before dispatch, classify each bead:
 
 ### 3. Collision Check (CRITICAL)
 
-Map files each bead will touch across ALL agents (tactical + strategic):
+Map files each issue will touch across ALL agents (tactical + strategic):
 
 ```
-| Bead | Type | Subsystem | Files | Collision Risk |
-|------|------|-----------|-------|----------------|
-| abc  | tactical | PMTools | PMTools.hs, Export.hs | Group A |
-| def  | tactical | PMTools | PMTools.hs, Export.hs | Group A ⚠️ |
-| ghi  | tactical | LSPTools | LSPTools.hs | Group B |
-| jkl  | strategic | Effects | Effect/Types.hs | Group C |
+| Issue | Type | Subsystem | Files | Collision Risk |
+|-------|------|-----------|-------|----------------|
+| 123   | tactical | PMTools | PMTools.hs, Export.hs | Group A |
+| 456   | tactical | PMTools | PMTools.hs, Export.hs | Group A ⚠️ |
+| 789   | tactical | LSPTools | LSPTools.hs | Group B |
+| 101   | strategic | Effects | Effect/Types.hs | Group C |
 ```
 
 **Rules:**
@@ -55,13 +54,13 @@ Map files each bead will touch across ALL agents (tactical + strategic):
 ```
 Wave N:
 ├── Tactical agents (haiku, 5-6x)
-│   ├── bead-a: docs update (CLAUDE.md)
-│   ├── bead-b: add test (tests/)
-│   ├── bead-c: simple tool (LSPTools.hs)
+│   ├── issue-123: docs update (CLAUDE.md)
+│   ├── issue-456: add test (tests/)
+│   ├── issue-789: simple tool (LSPTools.hs)
 │   └── ... all disjoint files
 │
 └── Strategic agent (opus, 1x)
-    └── bead-z: effects refactor (Effect/*.hs)
+    └── issue-101: effects refactor (Effect/*.hs)
         └── Uses full harness, provides UX feedback
 ```
 
@@ -69,15 +68,12 @@ Wave N:
 
 ```bash
 # Create worktrees
-spawn_agents(["bead1", "bead2", "bead3"])
-
-# Mark as in_progress
-bd update <id> --status=in_progress
+spawn_agents(["123", "456", "789"])
 
 # Human opens Zellij tabs manually
 # In each tab:
 cd /path/to/worktree
-./scripts/bead-context        # Bootstrap bead context
+# Context is automatically loaded from .claude/context/issue.md
 claude                        # Or: gemini, or ./start-augmented.sh for opus
 ```
 
@@ -114,40 +110,16 @@ When parallel PRs exist with potential conflicts:
 
 Or use integration branch if conflicts are mechanical.
 
-## Epic Management
-
-Epics often block children unnecessarily. Two patterns:
-
-### Scope Epic (close early)
-Epic defines scope only, children can proceed independently.
-```bash
-bd close <epic> --reason="Scope complete - children can proceed"
-```
-
-### Tracking Epic (keep open)
-Epic tracks completion of all children.
-```bash
-# Keep open until all children done
-bd show <epic>  # Check child status
-```
-
 ## Commands Reference
 
 ```bash
 # Planning
-bd ready                     # Available work
-bd blocked                   # Bottleneck analysis
-bd stats                     # Project health
+gh issue list                # Available work
+gh issue status              # Project health
 
 # Dispatch
-spawn_agents(["id1", "id2"]) # Create worktrees (MCP tool)
-bd update <id> --status=in_progress
-
-# Unblocking
-bd close <epic> --reason="..." # Close scope epics
-bd dep add <a> <b>            # Add dependency
+spawn_agents(["123", "456"]) # Create worktrees (MCP tool)
 
 # Monitoring
-bd list --status=in_progress  # Active work
-gh pr list                    # Open PRs
+gh pr list                   # Open PRs
 ```

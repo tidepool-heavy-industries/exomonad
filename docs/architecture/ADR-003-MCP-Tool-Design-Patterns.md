@@ -25,7 +25,7 @@ Organize tools into 5 tiers based on dependencies and interaction model:
 - **Dependencies:** LSP session only
 - **Pattern:** `GraphEntries` type family + `Return` effect
 - **Discovery:** `reifyGraphEntries` at startup
-- **Tools:** `find_callers`, `show_fields`, `show_constructors`
+- **Tools:** `find_callers`, `show_type`
 - **Rationale:** Fast, no LLM calls, pure data queries via LSP hover/references
 
 #### Tier 2: LLM-Enhanced (Semantic)
@@ -35,15 +35,15 @@ Organize tools into 5 tiers based on dependencies and interaction model:
 - **Tools:** `teach-graph`
 - **Rationale:** BFS exploration with intelligent symbol selection, produce teaching docs
 
-#### Tier 3: External Orchestration (Beads + Git)
-- **Dependencies:** Beads (BD), git, subprocess
+#### Tier 3: External Orchestration (GitHub + Git)
+- **Dependencies:** GitHub, git, subprocess
 - **Pattern:** `MCPExport` annotation
 - **Discovery:** `reifyMCPTools` at startup
-- **Tools:** `spawn_agents`, `exo_status`, `exo_complete`, `exo_reconstitute`, `file_pr`, `pm_prioritize`, `pm_approve_expansion`
+- **Tools:** `spawn_agents`, `exo_status`, `exo_complete`, `file_pr`, `pm_prioritize`, `pm_approve_expansion`
 - **Rationale:** Workflow automation, cross-worktree coordination
 
 #### Tier 4: TUI-Interactive + PM Dashboard (User Decision)
-- **Dependencies:** Beads + TUI sidebar (interactive) + PM dashboard
+- **Dependencies:** TUI sidebar (interactive) + PM dashboard
 - **Pattern:**
   - TUI tools (`confirm_action`, `select_option`, `request_guidance`): `GraphEntries` type family + TUI effect
   - PM dashboard tools (`pm_status`, `pm_review_dag`, `pm_propose`): `MCPExport` annotation
@@ -56,7 +56,7 @@ Organize tools into 5 tiers based on dependencies and interaction model:
 - **Rationale:** User provides input via sidebar or dashboard (blocking call), tools render dialog boxes or status views
 
 #### Tier 5: Mailbox (Agent-to-Agent)
-- **Dependencies:** Beads + mailbox effects
+- **Dependencies:** GitHub mailbox effects
 - **Pattern:** `MCPExport` annotation
 - **Discovery:** `reifyMCPTools` at startup
 - **Tools:** `send_message`, `check_inbox`, `read_message`, `mark_read`
@@ -121,7 +121,7 @@ The `--tools` flag in mantle-agent enables different roles:
 mantle-agent mcp --tools pm_propose,pm_approve_expansion,pm_prioritize,pm_status,pm_review_dag,exo_status
 
 # TL role: dev tools + orchestration (or omit --tools for all)
-mantle-agent mcp --tools find_callers,show_fields,show_constructors,teach-graph,spawn_agents,exo_*,file_pr
+mantle-agent mcp --tools find_callers,show_type,teach-graph,spawn_agents,exo_*,file_pr
 
 # Developer: all tools (default)
 mantle-agent mcp  # No --tools flag
@@ -215,7 +215,7 @@ Different tools have different trade-offs:
 - **Tier 4 (TUI-interactive):** Blocking user interaction, modal dialogs
 - **Tier 5 (Mailbox):** Async, agent-to-agent coordination
 
-Tiers clarify **dependency boundaries** and help PMs choose tools for their role.
+Tiers clarify **dependency boundaries** and help agents choose tools for their role.
 
 ### Why GraphEntries vs MCPExport?
 
@@ -283,7 +283,7 @@ Both patterns coexist: use GraphEntries for simple tools, MCPExport for complex 
 
 ## Implementation Checklist
 
-- [x] Tier 1: `find_callers`, `show_fields`, `show_constructors` via GraphEntries
+- [x] Tier 1: `find_callers`, `show_type` via GraphEntries
 - [x] Tier 2: `teach-graph` via MCPExport
 - [x] Tier 3: `spawn_agents`, `exo_*`, `file_pr`, PM workflow tools via MCPExport
 - [x] Tier 4: `confirm_action`, `select_option`, `request_guidance` via GraphEntries; PM dashboard tools via MCPExport

@@ -25,35 +25,34 @@ description: Use when designing orchestration logic, MCP tools, or any code that
 
 ```haskell
 spawnAgentLogic
-  :: (Member BD es, Member Git es, Member FileSystem es, Member Zellij es)
-  => [BeadId]
+  :: (Member GitHub es, Member Git es, Member FileSystem es, Member Zellij es)
+  => [IssueNum]
   -> Eff es SpawnResult
-spawnAgentLogic beadIds = do
-  forM beadIds $ \beadId -> do
+spawnAgentLogic issueNums = do
+  forM issueNums $ \issueNum -> do
     -- Typed effects, testable, traceable
-    beadInfo <- getBead beadId                    -- BD effect
-    worktree <- createWorktree (branchName beadId) -- Git effect
+    issueInfo <- getIssue repo issueNum False    -- GitHub effect
+    worktree <- createWorktree (branchName issueNum) -- Git effect
 
     -- Context injection via effects
-    let contextPath = worktree </> ".claude/context/bead.md"
-    writeFile contextPath (renderBead beadInfo)   -- FileSystem effect
+    let contextPath = worktree </> ".claude/context/issue.md"
+    writeFile contextPath (renderIssue issueInfo) -- FileSystem effect
 
     -- Launch via effect (not shell)
-    tabId <- newTab (TabConfig worktree beadId)   -- Zellij effect
+    tabId <- newTab (TabConfig worktree issueNum) -- Zellij effect
 
-    pure (beadId, worktree, tabId)
+    pure (issueNum, worktree, tabId)
 ```
 
 ### ❌ Anti-Pattern
 
 ```haskell
-spawnAgentLogic :: [BeadId] -> IO SpawnResult
-spawnAgentLogic beadIds = do
-  forM beadIds $ \beadId -> do
+spawnAgentLogic :: [IssueNum] -> IO SpawnResult
+spawnAgentLogic issueNums = do
+  forM issueNums $ \issueNum -> do
     -- Shelling out - untestable, unobservable, not portable
-    callProcess "bd" ["show", beadId]
+    callProcess "gh" ["issue", "view", show issueNum]
     callProcess "git" ["worktree", "add", path]
-    callProcess "./scripts/bead-context" []  -- NO!
     callProcess "zellij" ["action", "new-tab", ...]
 ```
 
@@ -96,7 +95,7 @@ Effects compose naturally:
 
 ```haskell
 fullSpawnLogic
-  :: (Member BD es, Member Git es, Member FileSystem es, Member Zellij es, Member Observability es)
+  :: (Member GitHub es, Member Git es, Member FileSystem es, Member Zellij es, Member Observability es)
   => ...
 
 -- In production
@@ -105,23 +104,23 @@ runM
   $ runZellijIO
   $ runFileSystemIO
   $ runGitIO
-  $ runBDIO
-  $ fullSpawnLogic beadIds
+  $ runGitHubIO config
+  $ fullSpawnLogic issueNums
 
 -- In tests
 runIdentity
   $ runZellijPure
   $ runFileSystemPure
   $ runGitPure
-  $ runBDPure
-  $ fullSpawnLogic beadIds
+  $ runGitHubPure
+  $ fullSpawnLogic issueNums
 ```
 
 ## Common Effects Needed
 
 | Effect | Operations | Interpreter |
 |--------|------------|-------------|
-| `BD` | getBead, listBeads, updateBead | bd CLI or direct DB |
+| `GitHub` | getIssue, listIssues, createIssue | gh CLI or direct API |
 | `Git` | createWorktree, checkout, commit | git CLI |
 | `FileSystem` | writeFile, mkdir, symlink | System.Directory |
 | `Zellij` | newTab, goToTab, closeTab | zellij CLI |
@@ -151,4 +150,3 @@ Watch for these anti-patterns in code review:
 
 - `haskell/dsl/core/CLAUDE.md` - Effect system fundamentals
 - `haskell/effects/CLAUDE.md` - Interpreter patterns
-- `tidepool-koo` - Canonical example of this refactor

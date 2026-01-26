@@ -10,7 +10,7 @@ use tracing::{info, warn};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SpawnRequest {
-    pub bead_id: String,
+    pub issue_id: String,
     pub worktree_path: PathBuf,
     pub backend: String,  // "claude" | "gemini"
     pub uid: Option<u32>,
@@ -73,7 +73,7 @@ impl Spawner {
     }
 
     pub async fn spawn(&self, req: SpawnRequest) -> anyhow::Result<SpawnResponse> {
-        let container_name = format!("tidepool-agent-{}", req.bead_id);
+        let container_name = format!("tidepool-agent-{}", req.issue_id);
         let config = self.build_container_config(&req);
 
         info!("Creating container {} with image {}", container_name, self.agent_image);
@@ -96,14 +96,14 @@ impl Spawner {
 
     fn build_container_config(&self, req: &SpawnRequest) -> Config<String> {
         let mut labels = HashMap::new();
-        labels.insert("com.tidepool.bead_id".to_string(), req.bead_id.clone());
+        labels.insert("com.tidepool.issue_id".to_string(), req.issue_id.clone());
         labels.insert("com.tidepool.role".to_string(), "agent".to_string());
         labels.insert(
             "com.tidepool.expires_at".to_string(), 
             req.expires_at.clone().unwrap_or_else(|| "never".to_string())
         ); 
 
-        let worktree_mount_target = format!("/worktrees/{}", req.bead_id);
+        let worktree_mount_target = format!("/worktrees/{}", req.issue_id);
         
         let mut mounts = vec![
             Mount {
@@ -134,7 +134,7 @@ impl Spawner {
             }),
             user: Some(user),
             env: Some(vec![
-                format!("TIDEPOOL_BEAD_ID={}", req.bead_id),
+                format!("TIDEPOOL_BEAD_ID={}", req.issue_id),
                 format!("TIDEPOOL_BACKEND={}", req.backend),
             ]),
             ..Default::default()
@@ -246,7 +246,7 @@ mod tests {
         };
 
         let req = SpawnRequest {
-            bead_id: "test-bead".to_string(),
+            issue_id: "test-bead".to_string(),
             worktree_path: PathBuf::from("/tmp/worktree"),
             backend: "claude".to_string(),
             uid: Some(2000),
@@ -260,7 +260,7 @@ mod tests {
         assert_eq!(config.user, Some("2000:2000".to_string()));
         
         let labels = config.labels.unwrap();
-        assert_eq!(labels.get("com.tidepool.bead_id").unwrap(), "test-bead");
+        assert_eq!(labels.get("com.tidepool.issue_id").unwrap(), "test-bead");
         assert_eq!(labels.get("com.tidepool.role").unwrap(), "agent");
         assert_eq!(labels.get("com.tidepool.expires_at").unwrap(), "2026-01-26T00:00:00Z");
 

@@ -1036,7 +1036,7 @@ type Opus = 'Opus
 --
 -- @
 -- gWork :: mode :- G.LLMNode
---     :@ Input BeadInfo
+--     :@ Input IssueInfo
 --     :@ Template WorkTpl
 --     :@ Schema WorkResult
 --     :@ ClaudeCode 'Sonnet

@@ -282,13 +282,12 @@ getAgentState input = do
   mWt <- getWorktreeInfo
   let branch = (.wiBranch) <$> mWt
       issueNum = branch >>= parseIssueNumber
-      beadId = T.pack . show <$> issueNum
   pure $ AgentState
     {
       asSessionId = input.sessionId
     , asCwd = T.unpack input.cwd
     , asBranch = branch
-    , asBeadId = beadId
+    , asIssueNum = issueNum
     }
 
 -- | Auto-focus on subagent tab when Stop hook fires.
