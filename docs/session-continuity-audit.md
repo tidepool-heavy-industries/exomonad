@@ -1,7 +1,7 @@
 # Session Continuity Audit Results
 
 **Date**: 2026-01-07
-**Bead**: WT-3
+**Issue**: GH-123
 **Session ID**: `d9598136-a96c-4edd-91f1-aec18e241e0f`
 
 ## Summary
@@ -101,8 +101,8 @@ Since `--resume` preserves internal memory, use `--inject-context` for **externa
 ┌─────────────────────────────────────────────────────────┐
 │                   Context Sources                        │
 ├─────────────┬─────────────┬─────────────┬───────────────┤
-│ git status  │ bd show     │ CI results  │ error logs    │
-│ git diff    │ bd blocked  │ PR comments │ runtime state │
+│ git status  │ gh issue    │ CI results  │ error logs    │
+│ git diff    │ gh status   │ PR comments │ runtime state │
 └──────┬──────┴──────┬──────┴──────┬──────┴───────┬───────┘
        │             │             │              │
        └─────────────┴─────────────┴──────────────┘
@@ -130,13 +130,12 @@ build_context() {
   cat <<EOF
 ## Current State
 - Branch: $(git branch --show-current)
-- Bead: $(bd show --format=oneline 2>/dev/null || echo "none")
-- Blockers: $(bd blocked --count 2>/dev/null || echo "unknown")
+- Issue: $(gh issue view --json number,title --template '#{{.number}}: {{.title}}' 2>/dev/null || echo "none")
 
 ## Recent Changes (since last session)
-\`\`\`diff
+````diff
 $(git diff HEAD~1 --stat)
-\`\`\`
+````
 
 ## CI Status
 $(gh run list --limit 1 --json conclusion -q '.[0].conclusion' 2>/dev/null || echo "unknown")
@@ -164,12 +163,3 @@ mantle run \
 2. **CLAUDE.md on resume**: Is CLAUDE.md re-read on resume or baked in from first session? (Out of scope for this audit)
 
 3. **Tool output truncation**: Are large tool outputs (e.g., long file reads) fully preserved or summarized?
-
----
-
-## Artifacts
-
-- Test script: `rust/mantle/tests/session_continuity_audit.sh`
-- Session 1 result: `/tmp/session-continuity-audit/session1_result.json`
-- Session 2 result: `/tmp/session-continuity-audit/session2_result.json`
-- Session JSONL: `~/.claude/projects/-tmp-session-continuity-audit-probe-54cpR/d9598136-a96c-4edd-91f1-aec18e241e0f.jsonl`

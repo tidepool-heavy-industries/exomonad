@@ -3,7 +3,7 @@
 module Main where
 
 import Control.Applicative ((<|>))
-import Control.Monad.Freer (Eff, run, reinterpret)
+import Control.Monad.Freer (Eff, run, reinterpret, send)
 import Control.Monad.Freer.State (gets, modify, runState)
 import Data.Aeson (toJSON, fromJSON, Result(..))
 import Data.List (find)
@@ -14,7 +14,7 @@ import qualified Data.Text as T
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import Tidepool.Effects.BD (BD(..), BeadInfo(..), BeadStatus(..), BeadType(..), UpdateBeadInput(..))
+import Tidepool.Effects.GitHub
 import Tidepool.Graph.Goto (unwrapSingleChoice)
 import Tidepool.Graph.MCPReify (reifyMCPTools, MCPToolInfo(..))
 import Tidepool.Control.PMTools
@@ -31,7 +31,7 @@ tests = testGroup "PMTools"
       ]
   , testGroup "Prioritize"
       [ testCase "pmPrioritizeLogic updates priority and description" test_prioritize
-      , testCase "pmPrioritizeLogic handles multiple beads" test_prioritizeMultiple
+      , testCase "pmPrioritizeLogic handles multiple issues" test_prioritizeMultiple
       , testCase "pmPrioritizeLogic validates priority range" test_prioritizeValidation
       ]
   , testGroup "Rationale Appending"
@@ -47,150 +47,140 @@ tests = testGroup "PMTools"
       ]
   ]
 
--- | State for mock BD
+-- | State for mock GitHub
 data MockState = MockState
-  { msLabels :: [Text]
-  , msBeads  :: [(Text, BeadInfo)]
+  { msIssues :: [(Int, Issue)]
   }
 
--- | Mock BD interpreter that uses State to track labels and beads
-runMockBD :: MockState -> Eff '[BD] a -> (a, MockState)
-runMockBD initial eff = run $ runState initial $ reinterpret (\case
-  GetLabels _ -> gets msLabels
-  AddLabel _ label -> modify (\s -> s { msLabels = label : s.msLabels })
-  RemoveLabel _ label -> modify (\s -> s { msLabels = filter (/= label) s.msLabels })
-  GetBead bid -> gets (lookup bid . msBeads)
-  UpdateBead bid input -> modify $ \s ->
-    let newBeads = map (\(bid', info) ->
-          if bid' == bid
-          then (bid', applyUpdate input info)
-          else (bid', info)) s.msBeads
-    in s { msBeads = newBeads }
-  ListByStatus _ -> pure []
-  ListByType _ -> pure []
-  GetDeps _ -> pure []
-  GetBlocking _ -> pure []
-  GetChildren _ -> pure []
-  CreateBead _ -> pure "new-bead"
-  CloseBead _ _ -> pure ()
-  ReopenBead _ -> pure ()
-  AddDep _ _ _ -> pure ()
-  RemoveDep _ _ -> pure ()
-  Sync -> pure ()
+-- | Mock GitHub interpreter that uses State to track issues
+runMockGitHub :: MockState -> Eff '[GitHub] a -> (a, MockState)
+runMockGitHub initial eff = run $ runState initial $ reinterpret (\case
+  GetIssue _ num _ -> gets (lookup num . msIssues)
+  AddIssueLabel _ num label -> modify $ \s ->
+    let newIssues = map (\(n, i) ->
+          if n == num
+          then (n, i { issueLabels = label : i.issueLabels })
+          else (n, i)) s.msIssues
+    in s { msIssues = newIssues }
+  RemoveIssueLabel _ num label -> modify $ \s ->
+    let newIssues = map (\(n, i) ->
+          if n == num
+          then (n, i { issueLabels = filter (/= label) i.issueLabels })
+          else (n, i)) s.msIssues
+    in s { msIssues = newIssues }
+  UpdateIssue _ num input -> modify $ \s ->
+    let newIssues = map (\(n, i) ->
+          if n == num
+          then (n, applyUpdate input i)
+          else (n, i)) s.msIssues
+    in s { msIssues = newIssues }
+  ListIssues _ _ -> pure []
+  CreateIssue _ -> pure 123
+  CloseIssue _ num -> pure num
+  ReopenIssue _ num -> pure num
+  GetRepo _ -> pure $ Repo "tidepool/tidepool"
   ) eff
 
-applyUpdate :: UpdateBeadInput -> BeadInfo -> BeadInfo
-applyUpdate input info = info
-  { biTitle = fromMaybe info.biTitle input.ubiTitle
-  , biDescription = input.ubiDescription <|> info.biDescription
-  , biStatus = fromMaybe info.biStatus input.ubiStatus
-  , biPriority = fromMaybe info.biPriority input.ubiPriority
-  , biAssignee = input.ubiAssignee <|> info.biAssignee
+applyUpdate :: UpdateIssueInput -> Issue -> Issue
+applyUpdate input i = i
+  { issueTitle = fromMaybe i.issueTitle input.uiiTitle
+  , issueBody = fromMaybe i.issueBody input.uiiBody
+  , issueState = fromMaybe i.issueState input.uiiState
   }
 
 test_getNoLabels :: Assertion
 test_getNoLabels = do
-  let (res, _) = runMockBD (MockState [] []) (getWorkflowState "test-bead")
+  let issue = (defaultIssue 123) { issueLabels = [] }
+  let (res, _) = runMockGitHub (MockState [(123, issue)]) (getWorkflowState (Repo "t/t") 123)
   assertEqual "Should be Nothing" Nothing res
 
 test_getTLReview :: Assertion
 test_getTLReview = do
-  let (res, _) = runMockBD (MockState [labelNeedsTLReview, "other-label"] []) (getWorkflowState "test-bead")
+  let issue = (defaultIssue 123) { issueLabels = [labelNeedsTLReview, "other-label"] }
+  let (res, _) = runMockGitHub (MockState [(123, issue)]) (getWorkflowState (Repo "t/t") 123)
   assertEqual "Should be NeedsTLReview" (Just NeedsTLReview) res
 
 test_setWorkflow :: Assertion
 test_setWorkflow = do
   -- Start with PM Approval, set to Ready
-  let initialLabels = [labelNeedsPMApproval, "some-tag"]
-  let (res, finalState) = runMockBD (MockState initialLabels []) $ do
-        setWorkflowState "test-bead" Ready
-        getWorkflowState "test-bead"
+  let initialIssue = (defaultIssue 123) { issueLabels = [labelNeedsPMApproval, "some-tag"] }
+  let (res, finalState) = runMockGitHub (MockState [(123, initialIssue)]) $ do
+        setWorkflowState (Repo "t/t") 123 Ready
+        getWorkflowState (Repo "t/t") 123
   
   assertEqual "Should now be Ready" (Just Ready) res
-  let finalLabels = finalState.msLabels
+  let finalLabels = (snd $ head finalState.msIssues).issueLabels
   assertBool "Old label should be removed" (labelNeedsPMApproval `notElem` finalLabels)
   assertBool "New label should be added" (labelReady `elem` finalLabels)
   assertBool "Other labels should be preserved" ("some-tag" `elem` finalLabels)
 
 test_prioritize :: Assertion
 test_prioritize = do
-  let initialBead = BeadInfo
-        { biId = "tidepool-123"
-        , biTitle = "Test Bead"
-        , biDescription = Just "Original description"
-        , biStatus = StatusOpen
-        , biPriority = 2
-        , biType = TypeTask
-        , biAssignee = Nothing
-        , biCreatedAt = Nothing
-        , biCreatedBy = Nothing
-        , biUpdatedAt = Nothing
-        , biClosedAt = Nothing
-        , biParent = Nothing
-        , biLabels = []
-        , biDependencies = []
-        , biDependents = []
+  let initialIssue = (defaultIssue 123) 
+        { issueTitle = "Test Issue"
+        , issueBody = "Original description"
+        , issueLabels = ["P2"]
         }
-  let initialState = MockState [] [("tidepool-123", initialBead)]
-  let (resChoice, finalState) = runMockBD initialState $ do
+  let initialState = MockState [(123, initialIssue)]
+  let (resChoice, finalState) = runMockGitHub initialState $ do
         pmPrioritizeLogic $ PmPrioritizeArgs
-          [ PrioritizeItem "tidepool-123" 4 "Urgent fix needed" ]
+          [ PrioritizeItem 123 4 "Urgent fix needed" ]
   let res = unwrapSingleChoice resChoice
 
   assertEqual "Should have 1 result" 1 (length res.pprResults)
   let resultItem = head res.pprResults
   assertEqual "Should be success" True resultItem.priSuccess
 
-  let finalBead = snd $ head finalState.msBeads
-  assertEqual "Priority should be 4" 4 finalBead.biPriority
-  let desc = fromMaybe "" finalBead.biDescription
+  let finalIssue = snd $ head finalState.msIssues
+  assertBool "Priority label P4 should be added" ("P4" `elem` finalIssue.issueLabels)
+  assertBool "Priority label P2 should be removed" ("P2" `notElem` finalIssue.issueLabels)
+  let desc = finalIssue.issueBody
   assertBool "Description should contain rationale" ("Urgent fix needed" `T.isInfixOf` desc)
   assertBool "Description should contain header" ("## Priority History" `T.isInfixOf` desc)
 
 test_prioritizeMultiple :: Assertion
 test_prioritizeMultiple = do
-  let bead1 = BeadInfo "b1" "T1" (Just "D1") StatusOpen 2 TypeTask Nothing Nothing Nothing Nothing Nothing Nothing [] [] []
-  let bead2 = BeadInfo "b2" "T2" (Just "D2") StatusOpen 2 TypeTask Nothing Nothing Nothing Nothing Nothing Nothing [] [] []
-      let initialState = MockState [] [("b1", bead1), ("b2", bead2)]
-      let (resChoice, finalState) = runMockBD initialState $ do
+  let i1 = (defaultIssue 1) { issueBody = "D1", issueLabels = ["P2"] }
+  let i2 = (defaultIssue 2) { issueBody = "D2", issueLabels = ["P2"] }
+  let initialState = MockState [(1, i1), (2, i2)]
+  let (resChoice, finalState) = runMockGitHub initialState $ do
         pmPrioritizeLogic $ PmPrioritizeArgs
-          [ PrioritizeItem "b1" 1 "Lowering"
-    
-          , PrioritizeItem "b2" 3 "Raising"
-          , PrioritizeItem "b3" 0 "Missing"
+          [ PrioritizeItem 1 1 "Lowering"
+          , PrioritizeItem 2 3 "Raising"
+          , PrioritizeItem 3 0 "Missing"
           ]
   let res = unwrapSingleChoice resChoice
 
   assertEqual "Should have 3 results" 3 (length res.pprResults)
 
-  let r1 = findResult "b1" res.pprResults
-  let r2 = findResult "b2" res.pprResults
-  let r3 = findResult "b3" res.pprResults
+  let r1 = findResult 1 res.pprResults
+  let r2 = findResult 2 res.pprResults
+  let r3 = findResult 3 res.pprResults
 
-  assertEqual "b1 success" (Just True) ((\r -> r.priSuccess) <$> r1)
-  assertEqual "b2 success" (Just True) ((\r -> r.priSuccess) <$> r2)
-  assertEqual "b3 success" (Just False) ((\r -> r.priSuccess) <$> r3)
+  assertEqual "1 success" (Just True) ((\r -> r.priSuccess) <$> r1)
+  assertEqual "2 success" (Just True) ((\r -> r.priSuccess) <$> r2)
+  assertEqual "3 success" (Just False) ((\r -> r.priSuccess) <$> r3)
 
-  let b1Final = lookup "b1" finalState.msBeads
-  let b2Final = lookup "b2" finalState.msBeads
+  let i1Final = lookup 1 finalState.msIssues
+  let i2Final = lookup 2 finalState.msIssues
 
-  assertEqual "b1 priority" (Just 1) ((\b -> b.biPriority) <$> b1Final)
-  assertEqual "b2 priority" (Just 3) ((\b -> b.biPriority) <$> b2Final)
+  assertBool "1 should have P1" (maybe False (\i -> "P1" `elem` i.issueLabels) i1Final)
+  assertBool "2 should have P3" (maybe False (\i -> "P3" `elem` i.issueLabels) i2Final)
   where
-    findResult bid = find (\r -> r.priBeadId == bid)
+    findResult num = find (\r -> r.priIssueNum == num)
 
 test_prioritizeValidation :: Assertion
 test_prioritizeValidation = do
-  let initialState = MockState [] []
-  let (resChoice, _) = runMockBD initialState $ do
+  let initialState = MockState []
+  let (resChoice, _) = runMockGitHub initialState $ do
         pmPrioritizeLogic $ PmPrioritizeArgs
-          [ PrioritizeItem "b1" 5 "Too high"
-          , PrioritizeItem "b2" (-1) "Too low"
+          [ PrioritizeItem 1 5 "Too high"
+          , PrioritizeItem 2 (-1) "Too low"
           ]
   let res = unwrapSingleChoice resChoice
   assertEqual "Should have 2 results" 2 (length res.pprResults)
-  assertBool "b1 should fail" (not (head res.pprResults).priSuccess)
-  assertBool "b2 should fail" (not (res.pprResults !! 1).priSuccess)
+  assertBool "1 should fail" (not (head res.pprResults).priSuccess)
+  assertBool "2 should fail" (not (res.pprResults !! 1).priSuccess)
   assertEqual "Error message" (Just "Invalid priority: must be between 0 and 4") (head res.pprResults).priError
 
 test_appendNothing :: Assertion
@@ -229,9 +219,20 @@ test_discovery_pm = do
 
 test_serialization_pm :: Assertion
 test_serialization_pm = do
-  let res = PmPrioritizeResult [PrioritizeResultItem "b1" True Nothing]
+  let res = PmPrioritizeResult [PrioritizeResultItem 1 True Nothing]
   let json = toJSON res
   case fromJSON @PmPrioritizeResult json of
     Success res' -> assertEqual "Should roundtrip" res res'
     Error err -> assertFailure $ "Failed to parse: " ++ err
-  
+
+defaultIssue :: Int -> Issue
+defaultIssue num = Issue
+  {
+  issueNumber = num
+  , issueTitle = ""
+  , issueBody = ""
+  , issueState = IssueOpen
+  , issueLabels = []
+  , issueAuthor = Author "ghost" ""
+  , issueUrl = ""
+  }

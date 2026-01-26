@@ -63,11 +63,11 @@ stopHookHandlers = StopHookGraph
 handleGlobalLoopCheck
   :: (Member (State WorkflowState) es)
   => AgentState
-  -> Eff es (GotoChoice '[To "globalMaxReached" (), To "checkBuild" AgentState])
+  -> Eff es (GotoChoice '[To "globalMaxReached" AgentState, To "checkBuild" AgentState])
 handleGlobalLoopCheck state = do
   ws <- get
   if wsGlobalStops ws >= 15
-    then pure $ gotoChoice @"globalMaxReached" ()
+    then pure $ gotoChoice @"globalMaxReached" state
     else do
       modify $ \s -> s { wsGlobalStops = wsGlobalStops s + 1 }
       pure $ gotoChoice @"checkBuild" state
@@ -75,11 +75,11 @@ handleGlobalLoopCheck state = do
 -- | Global max reached: exit with max-loops template
 handleGlobalMaxReached
   :: (Member (State WorkflowState) es)
-  => ()
+  => AgentState
   -> Eff es (GotoChoice '[To Exit (TemplateName, StopHookContext)])
-handleGlobalMaxReached () = do
+handleGlobalMaxReached state = do
   ws <- get
-  let context = buildTemplateContext ws "max-loops"
+  let context = buildTemplateContext state ws "max-loops"
   pure $ gotoExit ("max-loops" :: Text, context)
 
 -- | Check build status
@@ -127,23 +127,23 @@ translateRawError rce = GHCError
 handleRouteBuild
   :: (Member (State WorkflowState) es)
   => (AgentState, BuildResult)
-  -> Eff es (GotoChoice '[To "buildContext" TemplateName, To "buildLoopCheck" AgentState])
+  -> Eff es (GotoChoice '[To "buildContext" (AgentState, TemplateName), To "buildLoopCheck" AgentState])
 handleRouteBuild (state, result) = case result of
   BuildSuccess -> do
     pure $ gotoChoice @"buildLoopCheck" state
   BuildFailure _info -> do
-    pure $ gotoChoice @"buildContext" ("fix-build-errors" :: Text)
+    pure $ gotoChoice @"buildContext" (state, "fix-build-errors" :: Text)
 
 -- | Check build-specific loop count
 handleBuildLoopCheck
   :: (Member (State WorkflowState) es)
   => AgentState
-  -> Eff es (GotoChoice '[To "buildMaxReached" (), To "checkTest" AgentState])
+  -> Eff es (GotoChoice '[To "buildMaxReached" AgentState, To "checkTest" AgentState])
 handleBuildLoopCheck state = do
   ws <- get
   let buildRetries = fromMaybe 0 $ Map.lookup StageBuild (wsStageRetries ws)
   if buildRetries >= 5
-    then pure $ gotoChoice @"buildMaxReached" ()
+    then pure $ gotoChoice @"buildMaxReached" state
     else do
       modify $ \s -> s
         { wsStageRetries = Map.insertWith (+) StageBuild 1 (wsStageRetries s)
@@ -153,10 +153,10 @@ handleBuildLoopCheck state = do
 -- | Build max reached: go to buildContext with build-stuck template
 handleBuildMaxReached
   :: (Member (State WorkflowState) es)
-  => ()
-  -> Eff es (GotoChoice '[To "buildContext" TemplateName])
-handleBuildMaxReached () = do
-  pure $ gotoChoice @"buildContext" ("build-stuck" :: Text)
+  => AgentState
+  -> Eff es (GotoChoice '[To "buildContext" (AgentState, TemplateName)])
+handleBuildMaxReached state = do
+  pure $ gotoChoice @"buildContext" (state, "build-stuck" :: Text)
 
 -- | Check test status
 handleCheckTest
@@ -202,23 +202,23 @@ translateTestFailure ctf = TestFailureInfo
 handleRouteTest
   :: (Member (State WorkflowState) es)
   => (AgentState, TestResult)
-  -> Eff es (GotoChoice '[To "buildContext" TemplateName, To "testLoopCheck" AgentState])
+  -> Eff es (GotoChoice '[To "buildContext" (AgentState, TemplateName), To "testLoopCheck" AgentState])
 handleRouteTest (state, result) = case result.trFailed of
   0 -> do
     pure $ gotoChoice @"testLoopCheck" state
   _ -> do
-    pure $ gotoChoice @"buildContext" ("fix-test-failures" :: Text)
+    pure $ gotoChoice @"buildContext" (state, "fix-test-failures" :: Text)
 
 -- | Check test-specific loop count
 handleTestLoopCheck
   :: (Member (State WorkflowState) es)
   => AgentState
-  -> Eff es (GotoChoice '[To "testMaxReached" (), To "checkDocs" AgentState])
+  -> Eff es (GotoChoice '[To "testMaxReached" AgentState, To "checkDocs" AgentState])
 handleTestLoopCheck state = do
   ws <- get
   let testRetries = fromMaybe 0 $ Map.lookup StageTest (wsStageRetries ws)
   if testRetries >= 3
-    then pure $ gotoChoice @"testMaxReached" ()
+    then pure $ gotoChoice @"testMaxReached" state
     else do
       modify $ \s -> s
         { wsStageRetries = Map.insertWith (+) StageTest 1 (wsStageRetries s)
@@ -228,10 +228,10 @@ handleTestLoopCheck state = do
 -- | Test max reached
 handleTestMaxReached
   :: (Member (State WorkflowState) es)
-  => ()
-  -> Eff es (GotoChoice '[To "buildContext" TemplateName])
-handleTestMaxReached () = do
-  pure $ gotoChoice @"buildContext" ("test-stuck" :: Text)
+  => AgentState
+  -> Eff es (GotoChoice '[To "buildContext" (AgentState, TemplateName)])
+handleTestMaxReached state = do
+  pure $ gotoChoice @"buildContext" (state, "test-stuck" :: Text)
 
 -- | Check documentation freshness
 handleCheckDocs
@@ -255,7 +255,7 @@ handleCheckDocs state = do
   if docsStale
     then do
       ws <- get
-      let ctx = (buildTemplateContext ws "update-docs")
+      let ctx = (buildTemplateContext state ws "update-docs")
                   { git_dirty_files = status.gsrDirty
                   , stale_docs = claudeFiles
                   }
@@ -285,51 +285,51 @@ handleCheckPR state = do
 handleRoutePR
   :: (Member (State WorkflowState) es)
   => (AgentState, GhPrStatusResult)
-  -> Eff es (GotoChoice '[To "buildContext" TemplateName, To "prLoopCheck" AgentState])
+  -> Eff es (GotoChoice '[To "buildContext" (AgentState, TemplateName), To "prLoopCheck" AgentState])
 handleRoutePR (state, result) = do
   if not (result.exists)
-    then pure $ gotoChoice @"buildContext" ("file-pr" :: Text)
+    then pure $ gotoChoice @"buildContext" (state, "file-pr" :: Text)
     else if not (null (result.comments))
-      then pure $ gotoChoice @"buildContext" ("address-review" :: Text)
+      then pure $ gotoChoice @"buildContext" (state, "address-review" :: Text)
       else pure $ gotoChoice @"prLoopCheck" state
 
 -- | Check PR-specific loop count
 handlePrLoopCheck
   :: (Member (State WorkflowState) es)
   => AgentState
-  -> Eff es (GotoChoice '[To "prMaxReached" (), To Exit (TemplateName, StopHookContext)])
+  -> Eff es (GotoChoice '[To "prMaxReached" AgentState, To Exit (TemplateName, StopHookContext)])
 handlePrLoopCheck state = do
   ws <- get
   let prRetries = fromMaybe 0 $ Map.lookup (wsCurrentStage ws) (wsStageRetries ws)
   if prRetries >= 3
-    then pure $ gotoChoice @"prMaxReached" ()
+    then pure $ gotoChoice @"prMaxReached" state
     else do
       modify $ \s -> s
         { wsStageRetries = Map.insertWith (+) (wsCurrentStage ws) 1 (wsStageRetries s)
         }
-      let context = buildTemplateContext ws "complete"
+      let context = buildTemplateContext state ws "complete"
       pure $ gotoExit ("complete" :: Text, context)
 
 -- | PR max reached
 handlePrMaxReached
   :: (Member (State WorkflowState) es)
-  => ()
-  -> Eff es (GotoChoice '[To "buildContext" TemplateName])
-handlePrMaxReached () = do
-  pure $ gotoChoice @"buildContext" ("pr-stuck" :: Text)
+  => AgentState
+  -> Eff es (GotoChoice '[To "buildContext" (AgentState, TemplateName)])
+handlePrMaxReached state = do
+  pure $ gotoChoice @"buildContext" (state, "pr-stuck" :: Text)
 
 -- | Build context for template rendering
 handleBuildContext
   :: (Member (State WorkflowState) es)
-  => TemplateName
+  => (AgentState, TemplateName)
   -> Eff es (GotoChoice '[To Exit (TemplateName, StopHookContext)])
-handleBuildContext templateName = do
+handleBuildContext (state, templateName) = do
   ws <- get
-  let context = buildTemplateContext ws templateName
+  let context = buildTemplateContext state ws templateName
   pure $ gotoExit (templateName, context)
 
-buildTemplateContext :: WorkflowState -> TemplateName -> StopHookContext
-buildTemplateContext ws templateName = 
+buildTemplateContext :: AgentState -> WorkflowState -> TemplateName -> StopHookContext
+buildTemplateContext as ws templateName = 
   let mRes = wsLastBuildResult ws
       (errs, warns, count, raw, failed) = case mRes of
         Just (BuildFailure info) -> 
@@ -349,6 +349,8 @@ buildTemplateContext ws templateName =
   in StopHookContext
     { template = templateName
     , stage = T.pack $ show (wsCurrentStage ws)
+    , issue_number = as.asIssueNum
+    , branch = fromMaybe "" as.asBranch
     , global_stops = wsGlobalStops ws
     , stage_retries = fromMaybe 0 (Map.lookup (wsCurrentStage ws) (wsStageRetries ws))
     , build_failed = failed

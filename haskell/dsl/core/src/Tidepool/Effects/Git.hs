@@ -1,6 +1,6 @@
 -- | Git effect for querying repository state.
 --
--- Effect type only - interpreters live in tidepool-bd-interpreter.
+-- Effect type only - interpreters live in tidepool-git-interpreter.
 -- Enables graphs to query git worktree info, dirty files, and commit history.
 --
 -- = Example Usage

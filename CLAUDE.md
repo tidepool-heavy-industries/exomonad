@@ -96,7 +96,7 @@ Agents are defined as typed state machine graphs:
 data MyAgent mode = MyAgent
   { entry    :: mode :- Entry Message
   , classify :: mode :- LLMNode :@ Input Message :@ Schema Intent
-  , route    :: mode :- LogicNode :@ Input Intent :@ UsesEffects '[Goto "handle" Message, Goto Exit Response]
+  , route    :: mode :- LogicNode :@ Input Intent :@ UsesEffects [Goto "handle" Message, Goto Exit Response]
   , handle   :: mode :- LLMNode :@ Input Message :@ Schema Response
   , exit     :: mode :- Exit Response
   }
@@ -153,7 +153,7 @@ Example consuming repo with working agents:
 
 ### urchin (`~/tidepool-labs/urchin`)
 Context generation tooling for coding agents:
-- `urchin prime` - Generate context from git/bd/LSP for agent bootstrap
+- `urchin prime` - Generate context from git/GitHub/LSP for agent bootstrap
 - `urchin lsp` - LSP impact analysis for Haskell code
 
 ## Sleeptime
@@ -683,7 +683,6 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 |---------|---------|
 | `haskell/native-server` | Servant + WebSocket server (facade) |
 | `haskell/effects/llm-interpreter` | Anthropic/OpenAI API calls |
-| `haskell/effects/bd-interpreter` | Beads integration + urchin CLI |
 | `haskell/effects/habitica-interpreter` | Habitica API |
 | `haskell/effects/ui-interpreter` | WebSocket ↔ UI bridging |
 | `haskell/effects/observability-interpreter` | OpenTelemetry traces to Grafana |
@@ -738,50 +737,16 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 - **Effects** (plural) = integrations/contrib (`Tidepool.Effects.*`)
 - **Interpreter** = effect implementation (replaces "executor" terminology)
 
-## Task Tracking (Beads)
+## Task Tracking (GitHub)
 
-Git-native task tracking via BD. Database at `.beads/` (gitignored, shared across worktrees).
+Task tracking via GitHub Issues.
 
 ### Workflow
 
-1.  **Branching**: Use the `bd-{id}/{description}` naming convention for all task-related branches.
-2.  **Bootstrap**: Run `./scripts/bead-context` after checkout to load task details into the agent/IDE context.
-3.  **In Progress**: Mark task `in_progress` when starting work.
-4.  **Commits**: Use `[tidepool-{id}]` prefix in commit messages.
-5.  **Closing**: Mark `closed` after PR is merged.
-6.  **Sync**: All worktrees share the same database; use `bd sync` if needed.
-
-### Basic Commands
-
-```bash
-bd list --all              # List tasks
-bd create -t task "..."    # Create task
-bd update ID -s in_progress # Update status
-bd show ID                 # View details
-```
-
-### Templates and Validation
-Task creation uses templates located in `.bd/templates/`.
-- **task**: Requires `## Acceptance Criteria`
-- **bug**: Requires `## Steps to Reproduce` and `## Acceptance Criteria`
-- **feature**: Requires `## Acceptance Criteria`
-- **epic**: Requires `## Success Criteria`
-
-When creating a new issue, use the `--validate` flag to ensure required sections are present:
-```bash
-bd create -t task "Implement X" --description "$(cat .bd/templates/task.md)" --validate
-```
-Or ensure your description manually includes the required headers.
-
-### Landing the Plane
-
-When ending a session:
-
-1. File issues for remaining work (`bd create`)
-2. Run quality gates (`just pre-commit`)
-3. Update issue status (`bd close <id>`)
-4. Push: `git pull --rebase && bd sync && git push`
-5. Verify: `git status` shows "up to date"
+1.  **Branching**: Use the `gh-{number}/{description}` naming convention for all task-related branches.
+2.  **Development**: Implement changes incrementally.
+3.  **Commits**: Reference issue number in commit messages (e.g. `[#123] ...`).
+4.  **Closing**: Issues are closed via PR merges ("Closes #123").
 
 ## Building & Testing
 
@@ -853,95 +818,6 @@ withLSPSession "/path/to/project" $ \session -> do
   info <- runLSP session $ hover doc pos
   ...
 ```
-
-### Using bv as an AI sidecar
-
-bv is a graph-aware triage engine for Beads projects (.beads/beads.jsonl). Instead of parsing JSONL or hallucinating graph traversal, use robot flags for deterministic, dependency-aware outputs with precomputed metrics (PageRank, betweenness, critical path, cycles, HITS, eigenvector, k-core).
-
-**Scope boundary:** bv handles *what to work on* (triage, priority, planning). For agent-to-agent coordination (messaging, work claiming, file reservations), use [MCP Agent Mail](https://github.com/Dicklesworthstone/mcp_agent_mail).
-
-**⚠️ CRITICAL: Use ONLY `--robot-*` flags. Bare `bv` launches an interactive TUI that blocks your session.**
-
-#### The Workflow: Start With Triage
-
-**`bv --robot-triage` is your single entry point.** It returns everything you need in one call:
-- `quick_ref`: at-a-glance counts + top 3 picks
-- `recommendations`: ranked actionable items with scores, reasons, unblock info
-- `quick_wins`: low-effort high-impact items
-- `blockers_to_clear`: items that unblock the most downstream work
-- `project_health`: status/type/priority distributions, graph metrics
-- `commands`: copy-paste shell commands for next steps
-
-bv --robot-triage        # THE MEGA-COMMAND: start here
-bv --robot-next          # Minimal: just the single top pick + claim command
-
-#### Other Commands
-
-**Planning:**
-| Command | Returns |
-|---------|---------|
-| `--robot-plan` | Parallel execution tracks with `unblocks` lists |
-| `--robot-priority` | Priority misalignment detection with confidence |
-
-**Graph Analysis:**
-| Command | Returns |
-|---------|---------|
-| `--robot-insights` | Full metrics: PageRank, betweenness, HITS (hubs/authorities), eigenvector, critical path, cycles, k-core, articulation points, slack |
-| `--robot-label-health` | Per-label health: `health_level` (healthy\|warning\|critical), `velocity_score`, `staleness`, `blocked_count` |
-| `--robot-label-flow` | Cross-label dependency: `flow_matrix`, `dependencies`, `bottleneck_labels` |
-| `--robot-label-attention [--attention-limit=N]` | Attention-ranked labels by: (pagerank × staleness × block_impact) / velocity |
-
-**History & Change Tracking:**
-| Command | Returns |
-|---------|---------|
-| `--robot-history` | Bead-to-commit correlations: `stats`, `histories` (per-bead events/commits/milestones), `commit_index` |
-| `--robot-diff --diff-since <ref>` | Changes since ref: new/closed/modified issues, cycles introduced/resolved |
-
-**Other Commands:**
-| Command | Returns |
-|---------|---------|
-| `--robot-burndown <sprint>` | Sprint burndown, scope changes, at-risk items |
-| `--robot-forecast <id\|all>` | ETA predictions with dependency-aware scheduling |
-| `--robot-alerts` | Stale issues, blocking cascades, priority mismatches |
-| `--robot-suggest` | Hygiene: duplicates, missing deps, label suggestions, cycle breaks |
-| `--robot-graph [--graph-format=json\|dot\|mermaid]` | Dependency graph export |
-| `--export-graph <file.html>` | Self-contained interactive HTML visualization |
-
-#### Scoping & Filtering
-
-bv --robot-plan --label backend              # Scope to label's subgraph
-bv --robot-insights --as-of HEAD~30          # Historical point-in-time
-bv --recipe actionable --robot-plan          # Pre-filter: ready to work (no blockers)
-bv --recipe high-impact --robot-triage       # Pre-filter: top PageRank scores
-bv --robot-triage --robot-triage-by-track    # Group by parallel work streams
-bv --robot-triage --robot-triage-by-label    # Group by domain
-
-#### Understanding Robot Output
-
-**All robot JSON includes:**
-- `data_hash` — Fingerprint of source beads.jsonl (verify consistency across calls)
-- `status` — Per-metric state: `computed|approx|timeout|skipped` + elapsed ms
-- `as_of` / `as_of_commit` — Present when using `--as-of`; contains ref and resolved SHA
-
-**Two-phase analysis:**
-- **Phase 1 (instant):** degree, topo sort, density — always available immediately
-- **Phase 2 (async, 500ms timeout):** PageRank, betweenness, HITS, eigenvector, cycles — check `status` flags
-
-**For large graphs (>500 nodes):** Some metrics may be approximated or skipped. Always check `status`.
-
-#### jq Quick Reference
-
-bv --robot-triage | jq '.quick_ref'                        # At-a-glance summary
-bv --robot-triage | jq '.recommendations[0]'               # Top recommendation
-bv --robot-plan | jq '.plan.summary.highest_impact'        # Best unblock target
-bv --robot-insights | jq '.status'                         # Check metric readiness
-bv --robot-insights | jq '.Cycles'                         # Circular deps (must fix!)
-bv --robot-label-health | jq '.results.labels[] | select(.health_level == "critical")'
-
-**Performance:** Phase 1 instant, Phase 2 async (500ms timeout). Prefer `--robot-plan` over `--robot-insights` when speed matters. Results cached by data hash.
-
-Use bv instead of parsing beads.jsonl—it computes PageRank, critical paths, cycles, and parallel tracks deterministically.
-
 
 ## References
 

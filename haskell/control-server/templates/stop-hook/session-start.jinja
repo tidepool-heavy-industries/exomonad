@@ -1,19 +1,28 @@
-{% if bead is defined %}
-# {{ bead.id }}: {{ bead.title }}
+{% if issue is defined %}
+# #{{ issue.number }}: {{ issue.title }}
 
-{{ bead.description }}
-{% if bead.depends_on %}
+**Status:** {{ issue.status }}
 
-## Dependencies
-{% for dep in bead.depends_on %}
-- {{ dep.dep_title }}
-{% endfor %}
+{{ issue.description }}
+
+{% if issue.labels %}
+**Labels:** {{ issue.labels | join(', ') }}
 {% endif %}
 
-## Exit
-```
-git add <files> && git commit -m "[{{ bead.id }}] <description>" && git push
+---
+
+## Workflow
+
+1. Implement changes
+2. Cabal build/test
+3. Commit with [#{{ issue.number }}] prefix
+4. File PR via `file_pr` tool
+
+```bash
+git add <files> && git commit -m "[#{{ issue.number }}] <description>" && git push
 ```
 {% else %}
-Branch: {{ branch | default("(unknown)") }}
+# Development Session
+
+No specific issue context detected.
 {% endif %}

@@ -40,7 +40,7 @@ data AgentState = AgentState
   { asSessionId :: Text
   , asCwd :: FilePath
   , asBranch :: Maybe Text
-  , asBeadId :: Maybe Text
+  , asIssueNum :: Maybe Int
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -147,6 +147,8 @@ type TemplateName = Text
 data StopHookContext = StopHookContext
   { template :: Text
   , stage :: Text
+  , issue_number :: Maybe Int
+  , branch :: Text
   , global_stops :: Int
   , stage_retries :: Int
   , build_failed :: Bool
@@ -180,6 +182,8 @@ instance ToGVal GingerRun StopHookContext where
   toGVal ctx = dict
     [ "template" ~> template ctx
     , "stage" ~> stage ctx
+    , "issue_number" ~> issue_number ctx
+    , "branch" ~> branch ctx
     , "global_stops" ~> global_stops ctx
     , "stage_retries" ~> stage_retries ctx
     , "build_failed" ~> build_failed ctx

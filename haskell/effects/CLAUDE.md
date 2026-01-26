@@ -15,7 +15,6 @@ This follows the **interpreter design pattern**: abstract syntax (effect types) 
 | Add code intelligence (LSP) | `lsp-interpreter/CLAUDE.md` |
 | Manage git worktrees | `worktree-interpreter/CLAUDE.md` |
 | Run just recipes | `justfile-interpreter/CLAUDE.md` |
-| Integrate beads task tracking | `bd-interpreter/CLAUDE.md` |
 | Add Grafana observability | `observability-interpreter/CLAUDE.md` |
 | Run cabal builds/tests | `cabal-interpreter/CLAUDE.md` |
 | Add session logging | `devlog-interpreter/CLAUDE.md` |
@@ -33,13 +32,12 @@ effects/CLAUDE.md  ← YOU ARE HERE (router)
 ├── ghci-interpreter/CLAUDE.md          ← GHCi oracle client
 ├── github-interpreter/CLAUDE.md        ← gh CLI for issues/PRs
 ├── ui-interpreter/CLAUDE.md            ← WebSocket UI bridge
-├── bd-interpreter/CLAUDE.md            ← Beads task tracking
 ├── observability-interpreter/CLAUDE.md ← Grafana Loki & Tempo
 ├── worktree-interpreter/CLAUDE.md      ← Git worktree management
 ├── justfile-interpreter/CLAUDE.md      ← Justfile recipe execution
 ├── cabal-interpreter/CLAUDE.md         ← Build & test integration
 ├── devlog-interpreter/CLAUDE.md        ← Session-scoped logging
-├── habitica-interpreter/CLAUDE.md      ← Gamification API
+├── habitica-interpreter/CLAUDE.md      .. Gamification API
 ├── env-interpreter/CLAUDE.md           ← Environment variable access
 ├── filesystem-interpreter/CLAUDE.md    ← File system operations
 ├── gemini-interpreter/CLAUDE.md        ← Gemini API integration
@@ -64,7 +62,6 @@ Most effect types live in `dsl/core/src/Tidepool/Effect/Types.hs` or `Effects/*.
 |--------|-------|-------------|----------------|
 | LLM | dsl/core | llm-interpreter | HTTP (Anthropic/OpenAI) |
 | LSP | dsl/core | lsp-interpreter | lsp-client library |
-| BD | dsl/core | bd-interpreter | Subprocess (urchin CLI) |
 | Habitica | effects/habitica | habitica-interpreter | HTTP API |
 | UI | dsl/core | ui-interpreter | WebSocket bridge |
 | Observability | dsl/core | observability-interpreter | OTLP/Loki push |
@@ -96,7 +93,7 @@ Most effect types live in `dsl/core/src/Tidepool/Effect/Types.hs` or `Effects/*.
 ## Implementation Patterns
 
 - **HTTP clients**: llm, habitica, github, observability, docker-spawner
-- **Subprocesses**: bd, worktree, cabal
+- **Subprocesses**: worktree, cabal
 - **Socket clients**: ghci, lsp
 - **WebSocket bridge**: ui
 - **File IO**: devlog

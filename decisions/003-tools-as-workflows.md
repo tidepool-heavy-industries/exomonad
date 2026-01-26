@@ -40,19 +40,19 @@ create_pull_request(title, body)
 Agent must remember to:
 - Push commits first
 - Format PR body correctly
-- Update bead status
+- Link to issue
 - Handle branch protection
 
 **Good (workflow-oriented):**
 ```
-file_pr(bead_id)
+file_pr(issue_number)
 ```
 Tool handles:
 - Validate: Check branch exists, commits present
 - Push: Auto-push with -u flag if needed
-- Format: Build PR body from bead metadata + git log
+- Format: Build PR body from issue metadata + git log
 - Create: File PR with --head and --repo flags
-- Update: Mark bead with PR link
+- Update: Link PR to issue
 - Guide: Return next steps (e.g., "PR #123 filed, awaiting review")
 
 ## Why This Matters
@@ -62,8 +62,8 @@ Tool handles:
 Traditional approach: Prompt agents with instructions
 ```
 "Remember to push before filing PR. Format the PR body with:
-- Bead ID in title
-- Closes tidepool-XXX in body
+- Issue number in title
+- Closes #XXX in body
 - Summary of changes
 ..."
 ```
@@ -78,15 +78,14 @@ Traditional approach: Prompt agents with instructions
 
 Encode instructions as deterministic code:
 ```haskell
-filePRWorkflow :: BeadId -> Eff '[Git, BD, GitHub, ...] PRResult
-filePRWorkflow beadId = do
+filePRWorkflow :: Int -> Eff '[Git, GitHub, ...] PRResult
+filePRWorkflow issueNum = do
   -- All the best practices, encoded
   validateBranch
   autoPush
-  bead <- getBead beadId
-  body <- formatPRBody bead
+  issue <- getIssue repo issueNum False
+  body <- formatPRBody issue
   pr <- createPR body
-  updateBead beadId pr.url
   pure $ PRResult pr.number pr.url
 ```
 
@@ -100,7 +99,7 @@ filePRWorkflow beadId = do
 ## This Is Why Tidepool DSL Exists
 
 The DSL supports:
-- **Arbitrary Haskell effects** - Compose Git, BD, GitHub, LSP, TUI operations
+- **Arbitrary Haskell effects** - Compose Git, GitHub, LSP, TUI operations
 - **Inline LLM calls** - Use AI where helpful (format text, analyze code, suggest fixes)
 - **Typed templates** - Generate prompts/messages with compile-time validation
 - **Error recovery** - Algebraic effects enable sophisticated retry/fallback logic
@@ -147,50 +146,10 @@ Agents can always use the **Bash** tool when:
 Existing capability-oriented tools should be redesigned as workflows, not wrapped:
 
 - `exo_status` → `get_work_context` (status + analysis + next steps)
-- `file_pr` → Enhanced with auto-push, validation, bead updates
+- `file_pr` → Enhanced with auto-push, validation, issue links
 - `exo_complete` → `complete_and_cleanup` (mark closed + sync + cleanup)
 
 Don't create hybrid systems with both capabilities and workflows exposed. Commit to the workflow model.
-
-## Examples
-
-### Good Workflow Tools
-
-**spawn_agents**: Complete parallel dispatch
-1. Validate beads, templates, binaries
-2. Create git worktrees + branches
-3. Bootstrap config (copy template, symlink .env, write context)
-4. Launch Zellij tabs with process-compose
-5. Return monitoring info (tab IDs, paths)
-
-**file_pr**: Complete PR filing
-1. Validate branch + commits
-2. Auto-push if needed
-3. Build PR body from bead metadata
-4. Create PR with proper flags
-5. Update bead with PR link
-6. Guide next steps
-
-**get_work_context** (proposed redesign of exo_status):
-1. Fetch bead details
-2. Analyze git state (commits, diff, branch status)
-3. Check dependencies (what's blocked, what's blocking)
-4. Identify next steps
-5. Return structured guidance
-
-### Bad Capability Tools
-
-**run_git_push**: Just wraps a command
-- No value over Bash tool
-- Agent must know when to call it
-- No error handling
-- No integration with bead state
-
-**update_bead_status**: Single operation
-- Building block, not destination
-- Requires agent to orchestrate other steps
-- Easy to forget or misuse
-- Should be part of larger workflow
 
 ## Guidance for Tool Design
 
@@ -200,7 +159,7 @@ Create a new MCP tool when you find yourself writing the same prompt instruction
 
 **Indicators:**
 - "Remember to push before filing PR"
-- "Don't forget to update the bead status"
+- "Don't forget to link the issue"
 - "Make sure you check for X before doing Y"
 
 These are workflows waiting to be encoded.
@@ -213,15 +172,3 @@ Use the Bash tool when:
 - Ad-hoc operations that won't be repeated
 
 Don't create capability tools just to wrap Bash commands.
-
-## Related Decisions
-
-- **tidepool-ttx**: Workflow and MCP tool philosophy (implementation)
-- **tidepool-bx7**: Role-based tool assignment (which workflows per role)
-- **tidepool-98v**: file_pr auto-push (example workflow enhancement)
-
-## References
-
-- Interview: 2026-01-21 popup survey
-- Core insight: "I don't want to provide capabilities via MCP tool, I want to provide whole workflows as MCP tools"
-- Key realization: "Takes all the best practices, all the stuff we might prompt re: how to work in this setup, and moves it to deterministic code"

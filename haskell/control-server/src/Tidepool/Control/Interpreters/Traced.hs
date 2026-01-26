@@ -8,7 +8,6 @@
 module Tidepool.Control.Interpreters.Traced
   ( traceCabal
   , traceGit
-  , traceBD
   , traceLSP
   ) where
 
@@ -23,7 +22,6 @@ import OpenTelemetry.Context.ThreadLocal (getContext)
 
 import Tidepool.Effects.Cabal (Cabal(..), CabalResult(..))
 import Tidepool.Effects.Git (Git(..), WorktreeInfo(..))
-import Tidepool.Effects.BD (BD(..), ListBeadsInput(..), CreateBeadInput(..))
 import Tidepool.Effect.LSP (LSP(..), Position(..), TextDocumentIdentifier(..))
 
 -- | Helper to wrap an action in a span.
@@ -128,39 +126,6 @@ traceGit tracer = interpose $ \case
     res <- send (GetCommitsAhead ref)
     sendM $ addAttribute span "git.ahead_count" (fromIntegral res :: Int)
     pure res
-
--- | Trace BD effects
-traceBD 
-  :: (Member BD effs, LastMember IO effs) 
-  => Tracer 
-  -> Eff effs a 
-  -> Eff effs a
-traceBD tracer = interpose $ \case
-  GetBead id' -> withSpan tracer "bd.get_bead" $ \span -> do
-    sendM $ addAttribute span "bead.id" id'
-    res <- send (GetBead id')
-    sendM $ addAttribute span "bead.found" (isJust res)
-    pure res
-
-  ListBeads input -> withSpan tracer "bd.list_beads" $ \span -> do
-    case input.lbiStatus of
-      Just s -> sendM $ addAttribute span "bd.status" (T.pack $ show s)
-      Nothing -> pure ()
-    res <- send (ListBeads input)
-    sendM $ addAttribute span "bd.count" (length res)
-    pure res
-
-  -- Pass through others with generic span or explicit handling
-  CreateBead input -> withSpan tracer "bd.create_bead" $ \span -> do
-    sendM $ addAttribute span "bead.title" input.cbiTitle
-    res <- send (CreateBead input)
-    sendM $ addAttribute span "bead.id" res
-    pure res
-  
-  -- Fallback for other constructors to just wrap in a span
-  op -> do
-    -- We can't easily get the constructor name without Show, but we can group them
-    withSpan tracer "bd.op" $ \_ -> send op
 
 -- | Trace LSP effects
 traceLSP 

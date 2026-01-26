@@ -12,7 +12,7 @@
 -- | Shared types and label constants for PM tools.
 --
 -- These tools use labels as pseudo-states to track workflow progress
--- without requiring BD schema changes.
+-- without requiring GitHub metadata changes.
 module Tidepool.Control.PMTools
   ( -- * Workflow State
     WorkflowState(..)
