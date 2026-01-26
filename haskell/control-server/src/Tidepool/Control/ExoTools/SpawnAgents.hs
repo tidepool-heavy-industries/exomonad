@@ -32,7 +32,7 @@ import System.FilePath ((</>), takeDirectory)
 
 import Tidepool.Effects.GitHub (GitHub, Issue(..), IssueState(..), Repo(..), getIssue)
 import Tidepool.Effects.DockerSpawner (DockerSpawner, SpawnConfig(..), spawnContainer, ContainerId(..))
-import Tidepool.Effects.Env (Env, getEnv, getEnvironment)
+import Tidepool.Effects.Env (Env, getEnv)
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
 import Tidepool.Effects.Worktree (Worktree, WorktreeSpec(..), WorktreePath(..), createWorktree)
 
@@ -356,7 +356,7 @@ processIssue spawnMode mHangarRoot repoRoot wtBaseDir backend shortId = do
                                 , ("TIDEPOOL_ROLE", "dev")
                                 ]
 
-                          bootstrapRes <- bootstrapTidepool mHangarRoot repoRoot path backend socketDir controlSocket envVars
+                          bootstrapRes <- bootstrapTidepool mHangarRoot repoRoot path backend socketDir controlSocket
                           case bootstrapRes of
                             Left errMsg -> pure $ Left (shortId, "Bootstrap failed: " <> errMsg)
                             Right () -> do
@@ -389,6 +389,7 @@ processIssue spawnMode mHangarRoot repoRoot wtBaseDir backend shortId = do
                                             , scBackend = backend
                                             , scUid = Nothing
                                             , scGid = Nothing
+                                            , scEnv = envVars  -- Pass env vars directly to container
                                             }
                                       containerResult <- spawnContainer config
 
@@ -412,16 +413,15 @@ processIssue spawnMode mHangarRoot repoRoot wtBaseDir backend shortId = do
 
 -- | Bootstrap .tidepool/ directory structure in a worktree.
 bootstrapTidepool
-  :: (Member FileSystem es, Member Env es)
+  :: (Member FileSystem es)
   => Maybe FilePath  -- ^ Hangar root (for templates)
   -> FilePath        -- ^ Repo root (for symlink source)
   -> FilePath        -- ^ Worktree path
   -> Text            -- ^ Backend ("claude" or "gemini")
   -> FilePath        -- ^ Socket directory (e.g., /tmp/tidepool-<id>)
   -> FilePath        -- ^ Control socket path (e.g., /tmp/tidepool-<id>/control.sock)
-  -> [(Text, Text)]  -- ^ Subagent environment variables
-  -> Eff es (Either Text ()) 
-bootstrapTidepool mHangarRoot repoRoot worktreePath backend socketDir controlSocket subagentVars = do
+  -> Eff es (Either Text ())
+bootstrapTidepool mHangarRoot repoRoot worktreePath backend socketDir controlSocket = do
   -- Create socket directory in /tmp (avoids SUN_LEN path length limits).
   -- Unix sockets have ~104 byte path limit on macOS; worktree paths can exceed this.
   res0 <- createDirectory socketDir
@@ -449,54 +449,31 @@ bootstrapTidepool mHangarRoot repoRoot worktreePath backend socketDir controlSoc
           case writePCRes of
             Left err -> pure $ Left $ "Failed to write process-compose.yaml: " <> T.pack (show err)
             Right () -> do
-              -- Write custom .env file (merging root .env and subagent config)
-              -- This replaces the symlink approach which caused variable shadowing issues.
-              -- We snapshot the current environment (Haskell as source of truth) to ensure
-              -- all secrets and config are propagated, while overriding socket paths.
-              rootEnvVars <- getEnvironment
-              
-              -- Filter out any keys from the root env that are explicitly set in subagentVars.
-              -- This ensures subagent-defined values always take precedence in the merged env.
-              let subagentKeys     = map fst subagentVars
-                  filteredRootVars = filter (\(k, _) -> k `notElem` subagentKeys) rootEnvVars
-                  
-                  -- Merge vars: subagent vars take precedence
-                  mergedVars = filteredRootVars ++ subagentVars
-                  
-                  -- Generate .env content
-                  dstEnv = worktreePath </> ".env"
-                  escapeEnvValue v = T.replace "\"" "\\\"" (T.replace "\\" "\\\\" v)
-                  envContent = T.unlines [ k <> "=\"" <> escapeEnvValue v <> "\"" | (k, v) <- mergedVars ]
-
-              writeRes <- writeFileText dstEnv envContent
-              case writeRes of
-                Left err -> pure $ Left $ "Failed to write .env: " <> T.pack (show err)
+              -- Write Claude local settings with SessionStart hooks
+              -- This bypasses FSWatcher issues with project-scope settings in worktrees
+              -- Use hangar root (or repo root fallback) to build absolute binary path
+              let hr = fromMaybe repoRoot mHangarRoot
+              settingsRes <- writeClaudeLocalSettings hr worktreePath
+              case settingsRes of
+                Left err -> pure $ Left $ "Failed to write Claude settings: " <> err
                 Right () -> do
-                  -- Write Claude local settings with SessionStart hooks
-                  -- This bypasses FSWatcher issues with project-scope settings in worktrees
-                  -- Use hangar root (or repo root fallback) to build absolute binary path
-                  let hr = fromMaybe repoRoot mHangarRoot
-                  settingsRes <- writeClaudeLocalSettings hr worktreePath
-                  case settingsRes of
-                    Left err -> pure $ Left $ "Failed to write Claude settings: " <> err
+                  -- Write .mcp.json for Claude Code
+                  mcpRes <- writeClaudeMcpConfig controlSocket worktreePath "dev"
+                  case mcpRes of
+                    Left err -> pure $ Left $ "Failed to write MCP config: " <> err
                     Right () -> do
-                      -- Write .mcp.json for Claude Code
-                      mcpRes <- writeClaudeMcpConfig controlSocket worktreePath "dev"
-                      case mcpRes of
-                        Left err -> pure $ Left $ "Failed to write MCP config: " <> err
+                      -- Write Gemini config if backend is "gemini"
+                      geminiRes <- if backend == "gemini"
+                                     then writeGeminiConfig hr worktreePath controlSocket "dev"
+                                     else pure $ Right ()
+                      case geminiRes of
+                        Left err -> pure $ Left $ "Failed to write Gemini config: " <> err
                         Right () -> do
-                          -- Write Gemini config if backend is "gemini"
-                          geminiRes <- if backend == "gemini"
-                                         then writeGeminiConfig hr worktreePath controlSocket "dev"
-                                         else pure $ Right ()
-                          case geminiRes of
-                            Left err -> pure $ Left $ "Failed to write Gemini config: " <> err
-                            Right () -> do
-                              -- Update .gitignore for both backends
-                              gitignoreRes <- appendBackendToGitignore worktreePath
-                              case gitignoreRes of
-                                Left err -> pure $ Left $ "Failed to update .gitignore: " <> err
-                                Right () -> pure $ Right ()
+                          -- Update .gitignore for both backends
+                          gitignoreRes <- appendBackendToGitignore worktreePath
+                          case gitignoreRes of
+                            Left err -> pure $ Left $ "Failed to update .gitignore: " <> err
+                            Right () -> pure $ Right ()
 
 
 -- | Write bead context to .claude/context/bead.md.

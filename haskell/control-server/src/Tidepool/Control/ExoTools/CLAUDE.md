@@ -42,10 +42,10 @@ Create git worktrees for multiple issues and launch isolated agent sessions in Z
 │     b. Create git worktree                                      │
 │     c. Bootstrap .tidepool/ directory                           │
 │     d. Generate process-compose.yaml                            │
-│     e. Write .env with merged environment                       │
-│     f. Write backend config (.claude/ or .gemini/)              │
-│     g. Write issue context to .claude/context/issue.md          │
-│     h. Launch Zellij tab with layout                            │
+│     e. Write backend config (.claude/ or .gemini/)              │
+│     f. Write issue context to .claude/context/issue.md          │
+│     g. Launch Docker container with env vars via API            │
+│     h. Create Zellij tab to attach to container                 │
 └─────────────────┬───────────────────────────────────────────────┘
                   │
                   ▼
@@ -64,7 +64,6 @@ Create git worktrees for multiple issues and launch isolated agent sessions in Z
 │        │   ├── .claude/                                          │
 │        │   │   ├── settings.local.json (hooks)                   │
 │        │   │   └── context/issue.md                              │
-│        │   ├── .env (merged environment)                         │
 │        │   └── process-compose.yaml (generated)                  │
 │        ├── gh-456-update-spawn-agents-paths/                     │
 │                                                                  │
@@ -196,21 +195,21 @@ Creates runtime directory structure:
 
 **Type-safe generation** from Haskell types (no templates).
 
-#### e. Write .env File
-
-Merges root environment with subagent-specific overrides.
-
-#### f. Write Backend Configuration
+#### e. Write Backend Configuration
 
 Writes `.claude/settings.local.json` or `.gemini/settings.json` with appropriate hooks.
 
-#### g. Write Issue Context
+#### f. Write Issue Context
 
 Creates `.claude/context/issue.md` with issue title, body, and labels.
 
-#### h. Launch Zellij Tab
+#### g. Launch Docker Container
 
-Launches a new Zellij tab with the subagent layout.
+Spawns a Docker container via `docker-ctl spawn`, passing environment variables directly through the Docker API.
+
+#### h. Create Zellij Tab
+
+Creates a Zellij tab that attaches to the spawned container.
 
 ## Error Handling and MCP Error Codes
 
