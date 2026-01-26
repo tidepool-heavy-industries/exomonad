@@ -89,6 +89,7 @@ services:
       - tidepool-sockets:/sockets
       - tidepool-claude-tl:/home/agent/.claude
       - tidepool-gh-auth:/home/agent/.config/gh
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       control-server:
         condition: service_healthy
@@ -116,6 +117,7 @@ services:
       - tidepool-sockets:/sockets
       - tidepool-claude-pm:/home/agent/.claude
       - tidepool-gh-auth:/home/agent/.config/gh
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       control-server:
         condition: service_healthy
