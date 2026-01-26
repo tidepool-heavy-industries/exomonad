@@ -62,13 +62,11 @@ The entrypoint automatically configures MCP based on environment:
 
 ## Remote Execution
 
-Remote command execution uses docker-spawner's `/exec` endpoint instead of SSH:
+Remote command execution uses the `docker-ctl exec` CLI tool instead of SSH:
 
 ```bash
 # Execute command in this container
-curl -X POST http://docker-spawner:7435/exec/tidepool-tl \
-  -H "Content-Type: application/json" \
-  -d '{"cmd": ["cabal", "build"], "workdir": "/workspace"}'
+docker-ctl exec tidepool-tl -- echo hello
 ```
 
 This approach eliminates the need for:

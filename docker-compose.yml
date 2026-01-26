@@ -1,9 +1,8 @@
 # Container Separation Architecture
 # ================================
 # - zellij: Minimal visual multiplexer (human attaches here)
-# - control-server: Dedicated Haskell MCP server
+# - control-server: Dedicated Haskell MCP server (with docker-ctl CLI)
 # - tl/pm: Named agent containers (always running)
-# - docker-spawner: Container lifecycle management
 
 services:
   # ===========================================================================
@@ -32,7 +31,11 @@ services:
       - TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
       - TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
       - GEMMA_ENDPOINT=${GEMMA_ENDPOINT:-http://host.docker.internal:11434}
-      - DOCKER_SPAWNER_URL=http://docker-spawner:7435
+      - HOST_UID=${HOST_UID:-1000}
+      - HOST_GID=${HOST_GID:-1000}
+      - TIDEPOOL_AGENT_IMAGE=${TIDEPOOL_AGENT_IMAGE:-tidepool-agent:latest}
+      - TIDEPOOL_NETWORK=tidepool-internal
+      - RUST_LOG=info
       - XDG_RUNTIME_DIR=/run/user/1000
       - ZELLIJ_SESSION_NAME=main
     volumes:
@@ -147,37 +150,6 @@ services:
       timeout: 5s
       retries: 6
       start_period: 30s
-    restart: on-failure:5
-    networks:
-      - tidepool-internal
-
-  # ===========================================================================
-  # Docker Spawner: Container lifecycle management
-  # ===========================================================================
-  docker-spawner:
-    extends:
-      file: compose.base.yml
-      service: docker-socket-access
-    init: true
-    build:
-      context: .
-      dockerfile: docker/docker-spawner/Dockerfile
-    container_name: tidepool-docker-spawner
-    volumes:
-      - tidepool-worktrees:/worktrees:rw
-    environment:
-      - RUST_LOG=info
-      - HOST_UID=${HOST_UID:-1000}
-      - HOST_GID=${HOST_GID:-1000}
-      - TIDEPOOL_AGENT_IMAGE=${TIDEPOOL_AGENT_IMAGE:-tidepool-agent:latest}
-      - TIDEPOOL_NETWORK=tidepool-internal
-    ports:
-      - "7435:7435"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:7435/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
     restart: on-failure:5
     networks:
       - tidepool-internal

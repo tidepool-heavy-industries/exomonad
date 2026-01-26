@@ -16,11 +16,14 @@ module Tidepool.Control.Effects.SshExec
 
 import Control.Exception (try)
 import Control.Monad.Freer (Eff, interpret, send, Member, LastMember, sendM)
-import Data.Aeson (FromJSON, ToJSON)
+import Data.Aeson (FromJSON, ToJSON, eitherDecode)
 import Data.Text (Text, unpack, pack)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import qualified Data.ByteString.Lazy as BL
 import GHC.Generics (Generic)
-import Network.HTTP.Client (HttpException, responseTimeoutMicro)
-import Network.HTTP.Simple (httpJSON, setRequestBodyJSON, setRequestMethod, parseRequest_, getResponseBody, setRequestResponseTimeout)
+import System.Process (readProcessWithExitCode)
+import System.Exit (ExitCode(..))
 
 -- | Low-level SSH command execution effect
 data SshExec a where
@@ -47,22 +50,26 @@ data ExecResult = ExecResult
 execCommand :: Member SshExec effs => ExecRequest -> Eff effs ExecResult
 execCommand = send . ExecCommand
 
--- | Interpreter: calls docker-spawner HTTP API
-runSshExec :: LastMember IO effs => Text -> Eff (SshExec ': effs) a -> Eff effs a
-runSshExec dockerSpawnerUrl = interpret $ \case
+-- | Interpreter: calls docker-ctl binary
+runSshExec :: LastMember IO effs => FilePath -> Eff (SshExec ': effs) a -> Eff effs a
+runSshExec binPath = interpret $ \case
   ExecCommand req -> sendM $ do
-    let url = unpack $ dockerSpawnerUrl <> "/exec/" <> req.erContainer
-    let timeoutMicros = req.erTimeout * 1000000 + 5000000 -- Command timeout + 5s buffer
-    let request = setRequestResponseTimeout (responseTimeoutMicro timeoutMicros)
-                $ setRequestMethod "POST"
-                $ setRequestBodyJSON req
-                $ parseRequest_ url
+    let args = ["exec", T.unpack req.erContainer]
+             ++ ["--workdir", req.erWorkingDir]
+             ++ concatMap (\(k, v) -> ["--env", T.unpack $ k <> "=" <> v]) req.erEnv
+             ++ ["--"] ++ T.unpack req.erCommand : map T.unpack req.erArgs
     
-    result <- try (httpJSON request)
-    case result of
-      Left (e :: HttpException) -> pure $ ExecResult
+    (code, stdout, stderr) <- readProcessWithExitCode binPath args ""
+    case code of
+      ExitSuccess -> case eitherDecode (BL.fromStrict $ TE.encodeUtf8 $ T.pack stdout) of
+        Right (res :: ExecResult) -> pure res
+        Left err -> pure $ ExecResult
+          { exExitCode = -1
+          , exStdout = ""
+          , exStderr = "JSON parse error from docker-ctl: " <> T.pack err <> "\nOutput: " <> T.pack stdout
+          }
+      ExitFailure _ -> pure $ ExecResult
         { exExitCode = -1
         , exStdout = ""
-        , exStderr = "SSH Proxy connection failed: " <> pack (show e)
+        , exStderr = "docker-ctl failed: " <> T.pack stderr
         }
-      Right response -> pure $ getResponseBody response

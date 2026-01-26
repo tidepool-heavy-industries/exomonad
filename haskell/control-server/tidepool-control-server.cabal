@@ -73,6 +73,7 @@ library
         Tidepool.Control.Effects.Cabal
         Tidepool.Control.Effects.Git
         Tidepool.Control.Effects.Justfile
+        Tidepool.Control.Effects.DockerCtl
         -- Scout (semantic code exploration)
         Tidepool.Control.Scout.Types
         Tidepool.Control.Scout.EdgeTypes
@@ -128,7 +129,6 @@ library
         tidepool-filesystem-interpreter,
         tidepool-zellij-interpreter,
         tidepool-gemini-interpreter,
-        tidepool-docker-spawner-interpreter,
         tidepool-observability-interpreter,
         -- HTTP for FunctionGemma
         http-conduit,

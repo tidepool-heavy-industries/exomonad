@@ -18,6 +18,7 @@ module Tidepool.Control.ExoTools
   , spawnAgentsLogic
   , SpawnAgentsArgs(..)
   , SpawnAgentsResult(..)
+  , findHangarRoot
 
     -- * File PR
   , FilePRGraph(..)

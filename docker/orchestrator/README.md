@@ -6,7 +6,7 @@
 > - `tidepool-zellij` - Minimal visual multiplexer
 > - `tidepool-control-server` - Haskell MCP server
 > - `tidepool-tl` / `tidepool-pm` - Named agent containers
-> - `tidepool-docker-spawner` - Container lifecycle management
+> - `tidepool-control-server` - Haskell MCP server (with `docker-ctl`)
 >
 > See root `CLAUDE.md` for the new architecture.
 
@@ -19,7 +19,7 @@ The orchestrator combined multiple concerns in one container. The new architectu
 | Zellij + control-server + shell | `zellij` container (minimal) |
 | Built-in control-server | `control-server` container |
 | Manual agent spawning | `tl` + `pm` containers (auto-start) |
-| SSH for remote exec | `docker-spawner` `/exec` endpoint |
+| SSH for remote exec | `docker-ctl` CLI tool |
 
 ## Running Legacy Orchestrator
 

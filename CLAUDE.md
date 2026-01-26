@@ -82,11 +82,11 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 │   ├── protocol/CLAUDE.md      ← Wire formats
 │   └── tools/CLAUDE.md         ← Dev tools (ghci-oracle, sleeptime, training-generator)
 ├── rust/CLAUDE.md             ← Claude Code++ (hook handler + MCP forwarding + TUI)
-│   ├── mantle-agent/CLAUDE.md  ← Hook handler (HTTP over Unix socket) (IMPLEMENTED)
-│   ├── docker-spawner/CLAUDE.md ← Container lifecycle + remote exec (IMPLEMENTED)
-│   ├── mantle-hub/CLAUDE.md    ← Metrics hub (LEGACY, needs repurposing)
-│   ├── mantle-shared/CLAUDE.md ← Protocol types, Unix socket client
-│   ├── ssh-proxy/CLAUDE.md     ← DEPRECATED (replaced by docker-spawner)
+├── mantle-agent/CLAUDE.md  ← Hook handler (HTTP over Unix socket) (IMPLEMENTED)
+├── docker-ctl/CLAUDE.md    ← Container lifecycle + remote exec (IMPLEMENTED)
+├── mantle-hub/CLAUDE.md    ← Metrics hub (LEGACY, needs repurposing)
+├── mantle-shared/CLAUDE.md ← Protocol types, Unix socket client
+├── ssh-proxy/CLAUDE.md     ← DEPRECATED (replaced by docker-ctl)
 │   ├── tui-sidebar/CLAUDE.md   ← TUI sidebar: ratatui rendering for graph UIs (IMPLEMENTED)
 │   ├── tui-popup/CLAUDE.md     ← TUI popup: floating pane UI for user interaction
 │   └── tui-spawner/CLAUDE.md   ← FIFO-based popup spawning for cross-container TUI
@@ -118,7 +118,7 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 | Work on the native server | `haskell/native-server/CLAUDE.md` |
 | Work on debug UI frontend | `anemone/CLAUDE.md` or `typescript/native-gui/CLAUDE.md` |
 | Work on TUI sidebar (terminal UI rendering) | `rust/tui-sidebar/CLAUDE.md` |
-| Work on container spawning/exec | `rust/docker-spawner/CLAUDE.md` |
+| Work on container spawning/exec | `rust/docker-ctl/CLAUDE.md` |
 | Understand control protocol types | `rust/mantle-shared/CLAUDE.md` |
 
 ---
@@ -345,15 +345,8 @@ The Docker Compose setup uses a separated container architecture:
 ┌─────────────────────────────────────────────────────────────────┐
 │ control-server container                                        │
 │  • MCP server (TCP 7432)                                        │
-│  • Calls docker-spawner for spawn + exec                        │
+│  • Calls docker-ctl (Rust binary) for spawn + exec              │
 │  • Creates Zellij tabs (shared socket)                          │
-└───────────────────────────────────┬─────────────────────────────┘
-                                    │ HTTP :7435
-                                    ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ docker-spawner container                                        │
-│  • POST /spawn, /stop/{id}, /status/{id}                        │
-│  • POST /exec/{id} (remote command execution)                   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -378,15 +371,15 @@ docker attach tidepool-zellij
 | `tidepool-control-server` | Haskell MCP server (TCP 7432) |
 | `tidepool-tl` | Tech Lead agent (coding) |
 | `tidepool-pm` | Project Manager agent (planning) |
-| `tidepool-docker-spawner` | Container lifecycle management |
+| `docker-ctl` | Container lifecycle CLI (inside control-server) |
 
 **Features:**
 - ✅ Named agent containers (TL + PM always running)
 - ✅ TCP MCP transport (no Unix socket complexity)
-- ✅ `/exec` endpoint for remote command execution
+- ✅ `docker-ctl exec` for remote command execution
 - ✅ Zellij panes connect via `docker attach`
 - ✅ Clean separation of concerns
-- ✅ Dynamic subagent spawning via docker-spawner
+- ✅ Dynamic subagent spawning via docker-ctl
 
 **Testing MCP connection:**
 ```
@@ -398,11 +391,9 @@ Expected: Shows "tidepool" server connected
 Expected: Lists MCP tools
 ```
 
-**Testing docker-spawner exec:**
+**Testing docker-ctl exec:**
 ```bash
-curl -X POST http://localhost:7435/exec/tidepool-tl \
-  -H "Content-Type: application/json" \
-  -d '{"cmd": ["echo", "hello"]}'
+docker exec tidepool-control-server docker-ctl exec tidepool-tl -- echo hello
 ```
 
 **Rollback to Legacy Orchestrator:**

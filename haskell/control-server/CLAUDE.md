@@ -163,11 +163,9 @@ Project-local configuration in `.tidepool/` (gitignored):
 
 The system uses `process-compose` to orchestrate multiple services. Subagents (parallel worktrees) run a minimal `control-server` in LSP-only mode. Configuration is generated programmatically to ensure type safety and consistency.
 
-| Component | Flag/Logic | Purpose |
-|-----------|---------------|---------|
 | **Control Server** | `--no-tui` | Disables the TUI sidebar listener (for subagents) |
 | **Subagent Config** | `Paths.hs` + `ProcessCompose.hs` | Programmatic type-safe generation of `process-compose.yaml` |
-| **Docker Spawner** | `DOCKER_SPAWNER_URL` | URL of docker-spawner service for container operations |
+| **Docker Control** | `docker-ctl` | CLI tool for container operations (spawn, exec, stop) |
 
 ### Subagent Environment & Config Handling
 
@@ -177,31 +175,31 @@ Subagents spawned by `spawn_agents` receive a **custom-generated environment and
 - Programmatic generation ensures the configuration is always valid and consistent with the current binary versions.
 - Programmatic path construction (Paths.hs) avoids "stringly-typed" errors and handles OS-specific path limits.
 - Merging environments (Haskell source of truth) prevents variable shadowing issues from root `.env` files.
-- **Container Isolation:** Each subagent runs in a named container. Remote execution uses docker-spawner's `/exec/{id}` endpoint.
+- **Container Isolation:** Each subagent runs in a named container. Remote execution uses `docker-ctl exec {id}`.
 
 **How it works (SpawnAgents.hs):**
 1. **Paths:** Canonical paths for sockets (`/tmp/tidepool-...`) and binaries are constructed via `Tidepool.Control.Runtime.Paths`.
 2. **Orchestration:** A `ProcessComposeConfig` Haskell value is constructed and serialized to YAML via `Tidepool.Control.Runtime.ProcessCompose`.
 3. **Source of Truth:** The running Haskell process captures its full environment (`getEnvironment`).
 4. **Filtering & Merging:** Conflicting keys (socket paths) are filtered from the captured environment, and subagent-specific overrides are merged in.
-5. **Container Name:** Subagent containers are named `tidepool-agent-<shortId>` for docker-spawner `/exec` calls.
+5. **Container Name:** Subagent containers are named `tidepool-agent-<shortId>` for `docker-ctl exec` calls.
 6. **Deployment:** Self-contained `.env` and `process-compose.yaml` files are written directly to the subagent worktree.
 7. **Execution:** `process-compose` simply loads the generated files, ensuring an isolated and correctly configured environment.
 
-### Remote Execution via Docker Spawner
+### Remote Execution via Docker Control
 
-The control server executes commands inside agent containers via the `docker-spawner` service's `/exec/{id}` endpoint. This replaces the previous SSH-based approach.
+The control server executes commands inside agent containers via the `docker-ctl exec {id}` command. This replaces the previous HTTP-based spawner approach.
 
-- **DockerSpawner Effect:** HTTP calls to docker-spawner for container operations.
-- **Remote Git:** Runs `git` commands in agent containers via `/exec`.
+- **DockerSpawner Effect:** Subprocess calls to `docker-ctl` for container operations.
+- **Remote Git:** Runs `git` commands in agent containers via `exec`.
 - **Remote Cabal:** Runs `cabal` commands with structured error parsing.
 - **Remote Just:** Runs `just` recipes in agent containers.
 
-**Advantages over SSH:**
-- No SSH key management required
-- No sshd process in agent containers
-- Uses Docker's native exec capability
-- Unified API for spawn + exec operations
+**Advantages over HTTP Service:**
+- No extra network hop (reduced latency/failure modes)
+- No running service to maintain (health checks, compose entry)
+- Simple subprocess lifecycle
+- Uses Docker's native exec capability via `bollard`
 
 ### Limitations (MVP)
 

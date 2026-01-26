@@ -1,5 +1,5 @@
-# Dockerfile for Claude Code Agent
-# No SSH - uses docker exec via docker-spawner for remote commands
+# Claude Code Agent Container
+# No SSH - uses docker exec via docker-ctl for remote commands
 
 # =============================================================================
 # Stage 1: Rust Builder (for mantle-agent, effector, tui-spawner)

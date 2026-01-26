@@ -10,9 +10,11 @@ module Tidepool.Effects.DockerSpawner
   , ContainerStatus(..)
   , SpawnConfig(..)
   , DockerError(..)
+  , ExecResult(..)
   , spawnContainer
   , stopContainer
   , getContainerStatus
+  , execContainer
   ) where
 
 import Data.Text (Text)
@@ -40,10 +42,18 @@ data SpawnConfig = SpawnConfig
   } deriving stock (Show, Eq, Generic)
     deriving anyclass (ToJSON, FromJSON)
 
+data ExecResult = ExecResult
+  { erExitCode :: Maybe Int
+  , erStdout :: Text
+  , erStderr :: Text
+  } deriving stock (Show, Eq, Generic)
+    deriving anyclass (ToJSON, FromJSON)
+
 data DockerError
   = DockerConnectionError Text
   | DockerApiError Int Text
   | ContainerNotFound ContainerId
+  | DockerExecError Text
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
@@ -51,6 +61,7 @@ data DockerSpawner r where
   SpawnContainer :: SpawnConfig -> DockerSpawner (Either DockerError ContainerId)
   StopContainer :: ContainerId -> DockerSpawner (Either DockerError ())
   GetContainerStatus :: ContainerId -> DockerSpawner (Either DockerError ContainerStatus)
+  ExecContainer :: ContainerId -> [Text] -> Maybe FilePath -> Maybe Text -> DockerSpawner (Either DockerError ExecResult)
 
 -- Smart constructors
 spawnContainer :: Member DockerSpawner es => SpawnConfig -> Eff es (Either DockerError ContainerId)
@@ -61,3 +72,6 @@ stopContainer = send . StopContainer
 
 getContainerStatus :: Member DockerSpawner es => ContainerId -> Eff es (Either DockerError ContainerStatus)
 getContainerStatus = send . GetContainerStatus
+
+execContainer :: Member DockerSpawner es => ContainerId -> [Text] -> Maybe FilePath -> Maybe Text -> Eff es (Either DockerError ExecResult)
+execContainer cid cmd mWorkdir mUser = send $ ExecContainer cid cmd mWorkdir mUser
