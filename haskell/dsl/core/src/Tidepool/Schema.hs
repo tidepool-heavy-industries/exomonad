@@ -178,7 +178,7 @@ deriveFieldSchema _typeName _conName _fieldIdx (fieldName, _, fieldType) = do
   mDoc <- getDoc (DeclDoc fieldName)
   desc <- case mDoc of
     Just doc -> pure (T.pack doc)
-    Nothing  -> fail $ "deriveJSONSchema: Missing documentation for field " ++ nameBase fieldName
+    Nothing  -> pure ""
   baseSchema <- typeToSchemaExp fieldType
   [| describeField (T.pack $(litE (stringL (nameBase fieldName)))) desc $(pure baseSchema) |]
 

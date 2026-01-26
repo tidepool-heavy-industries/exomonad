@@ -76,7 +76,7 @@ import Tidepool.Role (Role(..))
 import Tidepool.Graph.Generic (type (:-))
 import Tidepool.Graph.Generic.Core (LogicNode)
 import Tidepool.Graph.Types (type (:@), Input, UsesEffects, GraphEntries, GraphEntry(..))
-import Tidepool.Schema (HasJSONSchema(..), objectSchema, arraySchema, emptySchema, SchemaType(..), describeField)
+import Tidepool.Schema (HasJSONSchema(..), JSONSchema, objectSchema, arraySchema, oneOfSchema, emptySchema, SchemaType(..), describeField, enumSchema)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- POPUP ELEMENT TYPES
@@ -390,6 +390,20 @@ instance ToJSON PopupResultElement where
       , "label" .= label
       ]
 
+instance FromJSON PopupResultElement where
+  parseJSON = withObject "PopupResultElement" $ \o -> do
+    elemType <- o .: "type"
+    eid <- o .: "id"
+    case elemType :: Text of
+      "text" -> RText eid <$> o .: "content"
+      "slider" -> RSlider eid <$> o .: "label" <*> o .: "value"
+      "checkbox" -> RCheckbox eid <$> o .: "label" <*> o .: "value"
+      "textbox" -> RTextbox eid <$> o .: "label" <*> o .: "value"
+      "choice" -> RChoice eid <$> o .: "label" <*> o .: "value"
+      "multiselect" -> RMultiselect eid <$> o .: "label" <*> o .: "value"
+      "group" -> RGroup eid <$> o .: "label"
+      _ -> fail $ "Unknown result element type: " <> T.unpack elemType
+
 -- PopupArgs
 instance ToJSON PopupArgs where
   toJSON args = object $
@@ -419,10 +433,78 @@ instance FromJSON PopupResult where
 -- JSON SCHEMA
 -- ════════════════════════════════════════════════════════════════════════════
 
+-- | Schema for a single popup element (oneOf the 7 types)
+elementSchema :: JSONSchema
+elementSchema = oneOfSchema
+  [ -- text element
+    describeField "text" "Static text display" $ objectSchema
+      [ ("type", enumSchema ["text"])
+      , ("id", describeField "id" "Unique element identifier" (emptySchema TString))
+      , ("content", describeField "content" "Text content to display" (emptySchema TString))
+      ]
+      ["type", "id", "content"]
+
+  , -- slider element
+    describeField "slider" "Numeric slider input" $ objectSchema
+      [ ("type", enumSchema ["slider"])
+      , ("id", describeField "id" "Unique element identifier" (emptySchema TString))
+      , ("label", describeField "label" "Label shown above slider" (emptySchema TString))
+      , ("min", describeField "min" "Minimum value" (emptySchema TNumber))
+      , ("max", describeField "max" "Maximum value" (emptySchema TNumber))
+      , ("default", describeField "default" "Default value (optional)" (emptySchema TNumber))
+      ]
+      ["type", "id", "label", "min", "max"]
+
+  , -- checkbox element
+    describeField "checkbox" "Boolean checkbox input" $ objectSchema
+      [ ("type", enumSchema ["checkbox"])
+      , ("id", describeField "id" "Unique element identifier" (emptySchema TString))
+      , ("label", describeField "label" "Label shown next to checkbox" (emptySchema TString))
+      , ("default", describeField "default" "Default checked state (optional)" (emptySchema TBoolean))
+      ]
+      ["type", "id", "label"]
+
+  , -- textbox element
+    describeField "textbox" "Text input field" $ objectSchema
+      [ ("type", enumSchema ["textbox"])
+      , ("id", describeField "id" "Unique element identifier" (emptySchema TString))
+      , ("label", describeField "label" "Label shown above textbox" (emptySchema TString))
+      , ("placeholder", describeField "placeholder" "Placeholder text (optional)" (emptySchema TString))
+      ]
+      ["type", "id", "label"]
+
+  , -- choice element
+    describeField "choice" "Single-select dropdown" $ objectSchema
+      [ ("type", enumSchema ["choice"])
+      , ("id", describeField "id" "Unique element identifier" (emptySchema TString))
+      , ("label", describeField "label" "Label shown above dropdown" (emptySchema TString))
+      , ("options", describeField "options" "List of option strings" (arraySchema $ emptySchema TString))
+      , ("default", describeField "default" "Default selected index (optional)" (emptySchema TInteger))
+      ]
+      ["type", "id", "label", "options"]
+
+  , -- multiselect element
+    describeField "multiselect" "Multiple selection list" $ objectSchema
+      [ ("type", enumSchema ["multiselect"])
+      , ("id", describeField "id" "Unique element identifier" (emptySchema TString))
+      , ("label", describeField "label" "Label shown above list" (emptySchema TString))
+      , ("options", describeField "options" "List of option strings" (arraySchema $ emptySchema TString))
+      ]
+      ["type", "id", "label", "options"]
+
+  , -- group element
+    describeField "group" "Section header/separator" $ objectSchema
+      [ ("type", enumSchema ["group"])
+      , ("id", describeField "id" "Unique element identifier" (emptySchema TString))
+      , ("label", describeField "label" "Section header text" (emptySchema TString))
+      ]
+      ["type", "id", "label"]
+  ]
+
 instance HasJSONSchema PopupArgs where
   jsonSchema = objectSchema
     [ ("title", describeField "title" "Optional popup window title" (emptySchema TString))
-    , ("elements", describeField "elements" "Flat list of UI elements. Each element has a 'type' field (text, slider, checkbox, textbox, choice, multiselect, group) and type-specific fields." (arraySchema $ emptySchema TObject))
+    , ("elements", describeField "elements" "List of UI elements" (arraySchema elementSchema))
     ]
     ["elements"]
 
