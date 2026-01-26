@@ -61,6 +61,11 @@ RUN cargo-binstall --no-confirm zellij && \
     cp /root/.cargo/bin/zellij /usr/local/bin/zellij && \
     chmod 755 /usr/local/bin/zellij
 
+# Install bd CLI for beads task tracking
+RUN cargo-binstall --no-confirm beads-rs && \
+    cp /root/.cargo/bin/bd /usr/local/bin/bd && \
+    chmod 755 /usr/local/bin/bd
+
 # Copy control-server binary
 COPY --from=builder /usr/local/bin/tidepool-control-server /usr/local/bin/tidepool-control-server
 

@@ -61,10 +61,20 @@ import Tidepool.Control.MailboxTools
   , readMessageLogic, ReadMessageArgs(..)
   , markReadLogic, MarkReadArgs(..)
   )
-import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
+import Tidepool.Control.BDTools
+  ( bdListLogic, BDListArgs(..), BDListResult(..)
+  , bdShowLogic, BDShowArgs(..), BDShowResult(..)
+  , bdReadyLogic, BDReadyArgs(..), BDReadyResult(..)
+  , bdCreateLogic, BDCreateArgs(..), BDCreateResult(..)
+  , bdUpdateLogic, BDUpdateArgs(..), BDUpdateResult(..)
+  , bdCloseLogic, BDCloseArgs(..), BDCloseResult(..)
+  , bdAddDepLogic, BDAddDepArgs(..), BDAddDepResult(..)
+  , bdAddLabelLogic, BDAddLabelArgs(..), BDAddLabelResult(..)
+  , bdSyncLogic, BDSyncResult(..)
+  )
+import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig, BDConfig(..))
 import Tidepool.BD.GitInterpreter (runGitIO)
 import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
-import Tidepool.Justfile.Interpreter (runJustfileIO)
 import Tidepool.Worktree.Interpreter (runWorktreeIO, defaultWorktreeConfig)
 import Tidepool.FileSystem.Interpreter (runFileSystemIO)
 import Tidepool.Env.Interpreter (runEnvIO)
@@ -212,6 +222,17 @@ handleMcpTool logger config traceCtx tuiState reqId toolName args =
           "check_inbox" -> handleCheckInboxTool logger currentRole reqId args
           "read_message" -> handleReadMessageTool logger reqId args
           "mark_read" -> handleMarkReadTool logger reqId args
+
+          -- BD (Beads) tools - centralized bead operations
+          "bd_list" -> handleBDListTool logger reqId args
+          "bd_show" -> handleBDShowTool logger reqId args
+          "bd_ready" -> handleBDReadyTool logger reqId args
+          "bd_create" -> handleBDCreateTool logger reqId args
+          "bd_update" -> handleBDUpdateTool logger reqId args
+          "bd_close" -> handleBDCloseTool logger reqId args
+          "bd_add_dep" -> handleBDAddDepTool logger reqId args
+          "bd_add_label" -> handleBDAddLabelTool logger reqId args
+          "bd_sync" -> handleBDSyncTool logger reqId args
 
           _ -> do
             logError logger $ "  (unknown tool)"
@@ -770,3 +791,259 @@ handleMarkReadTool logger reqId args = do
         Right () -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Message marked as read"
           pure $ mcpToolSuccess reqId (toJSON ())
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- BD (BEADS) TOOLS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Get BD config from environment.
+-- Uses BEADS_DIR if set, otherwise uses auto-discovery.
+getBDConfig :: IO BDConfig
+getBDConfig = do
+  dir <- Paths.beadsDir
+  pure $ defaultBDConfig { bcBeadsDir = dir }
+
+-- | Handle the bd_list tool.
+handleBDListTool :: Logger -> Text -> Value -> IO ControlResponse
+handleBDListTool logger reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid bd_list arguments: " <> T.pack err
+
+    Success blArgs -> do
+      logDebug logger $ "  status=" <> T.pack (show blArgs.blaStatus)
+
+      bdConfig <- getBDConfig
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runBDIO bdConfig
+        $ fmap unwrapSingleChoice (bdListLogic blArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "bd_list failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Listed " <> T.pack (show result.blrCount) <> " beads"
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+
+-- | Handle the bd_show tool.
+handleBDShowTool :: Logger -> Text -> Value -> IO ControlResponse
+handleBDShowTool logger reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid bd_show arguments: " <> T.pack err
+
+    Success bsArgs -> do
+      logDebug logger $ "  bead_id=" <> bsArgs.bsaBeadId
+
+      bdConfig <- getBDConfig
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runBDIO bdConfig
+        $ fmap unwrapSingleChoice (bdShowLogic bsArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "bd_show failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          if result.bsrFound
+            then logInfo logger $ "[MCP:" <> reqId <> "] Bead found"
+            else logInfo logger $ "[MCP:" <> reqId <> "] Bead not found"
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+
+-- | Handle the bd_ready tool.
+handleBDReadyTool :: Logger -> Text -> Value -> IO ControlResponse
+handleBDReadyTool logger reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid bd_ready arguments: " <> T.pack err
+
+    Success brArgs -> do
+      logDebug logger $ "  assignee=" <> T.pack (show brArgs.braAssignee)
+
+      bdConfig <- getBDConfig
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runBDIO bdConfig
+        $ fmap unwrapSingleChoice (bdReadyLogic brArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "bd_ready failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Found " <> T.pack (show result.brrCount) <> " ready beads"
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+
+-- | Handle the bd_create tool.
+handleBDCreateTool :: Logger -> Text -> Value -> IO ControlResponse
+handleBDCreateTool logger reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid bd_create arguments: " <> T.pack err
+
+    Success bcArgs -> do
+      logDebug logger $ "  title=" <> bcArgs.bcaTitle
+
+      bdConfig <- getBDConfig
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runBDIO bdConfig
+        $ fmap unwrapSingleChoice (bdCreateLogic bcArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "bd_create failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Created bead: " <> result.bcrBeadId
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+
+-- | Handle the bd_update tool.
+handleBDUpdateTool :: Logger -> Text -> Value -> IO ControlResponse
+handleBDUpdateTool logger reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid bd_update arguments: " <> T.pack err
+
+    Success buArgs -> do
+      logDebug logger $ "  bead_id=" <> buArgs.buaBeadId
+
+      bdConfig <- getBDConfig
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runBDIO bdConfig
+        $ fmap unwrapSingleChoice (bdUpdateLogic buArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "bd_update failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Updated bead: " <> result.burBeadId
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+
+-- | Handle the bd_close tool.
+handleBDCloseTool :: Logger -> Text -> Value -> IO ControlResponse
+handleBDCloseTool logger reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid bd_close arguments: " <> T.pack err
+
+    Success bclArgs -> do
+      logDebug logger $ "  bead_id=" <> bclArgs.bclBeadId
+
+      bdConfig <- getBDConfig
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runBDIO bdConfig
+        $ fmap unwrapSingleChoice (bdCloseLogic bclArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "bd_close failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Closed bead: " <> result.bclrBeadId
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+
+-- | Handle the bd_add_dep tool.
+handleBDAddDepTool :: Logger -> Text -> Value -> IO ControlResponse
+handleBDAddDepTool logger reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid bd_add_dep arguments: " <> T.pack err
+
+    Success badArgs -> do
+      logDebug logger $ "  from_id=" <> badArgs.badFromId <> " to_id=" <> badArgs.badToId
+
+      bdConfig <- getBDConfig
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runBDIO bdConfig
+        $ fmap unwrapSingleChoice (bdAddDepLogic badArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "bd_add_dep failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Added dependency: " <> result.badrFromId <> " -> " <> result.badrToId
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+
+-- | Handle the bd_add_label tool.
+handleBDAddLabelTool :: Logger -> Text -> Value -> IO ControlResponse
+handleBDAddLabelTool logger reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid bd_add_label arguments: " <> T.pack err
+
+    Success balArgs -> do
+      logDebug logger $ "  bead_id=" <> balArgs.balBeadId <> " label=" <> balArgs.balLabel
+
+      bdConfig <- getBDConfig
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runBDIO bdConfig
+        $ fmap unwrapSingleChoice (bdAddLabelLogic balArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "bd_add_label failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Added label '" <> result.balrLabel <> "' to " <> result.balrBeadId
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+
+-- | Handle the bd_sync tool.
+handleBDSyncTool :: Logger -> Text -> Value -> IO ControlResponse
+handleBDSyncTool logger reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid bd_sync arguments: " <> T.pack err
+
+    Success bsyArgs -> do
+      logDebug logger "  syncing beads..."
+
+      bdConfig <- getBDConfig
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runBDIO bdConfig
+        $ fmap unwrapSingleChoice (bdSyncLogic bsyArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "bd_sync failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] " <> result.bsyrMessage
+          pure $ mcpToolSuccess reqId (toJSON result)
