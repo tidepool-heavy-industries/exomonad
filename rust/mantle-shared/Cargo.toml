@@ -5,27 +5,15 @@ edition = "2021"
 description = "Shared types and utilities for mantle and mantle-agent"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "2"
-strum = { version = "0.26", features = ["derive"] }
-nix = { version = "0.29", features = ["poll", "fs", "signal"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+strum = { workspace = true }
+nix = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 shell-escape = "0.1"
-clap = { version = "4", features = ["derive"] }
-
-# Hub client dependencies
-reqwest = { version = "0.12", features = ["json"] }
-tokio = { version = "1", features = ["net", "io-util", "rt", "sync"] }
-tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
-tungstenite = { version = "0.24", features = ["native-tls"] }  # Sync WebSocket client
-futures-util = "0.3"
-toml = "0.8"
-directories = "6"
-
-# Vendored OpenSSL to avoid system library mismatch
-openssl-sys = { version = "0.9", features = ["vendored"] }
+clap = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }

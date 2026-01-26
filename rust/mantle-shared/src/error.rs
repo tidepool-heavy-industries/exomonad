@@ -108,11 +108,6 @@ pub enum MantleError {
         source: io::Error,
     },
 
-    // ---- Hub errors ----
-    /// Hub communication error.
-    #[error("hub error: {0}")]
-    Hub(String),
-
     // ---- MCP errors ----
     /// MCP server error.
     #[error("MCP server error: {0}")]
