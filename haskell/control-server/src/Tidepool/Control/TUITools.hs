@@ -9,38 +9,68 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
--- | TUI-interactive MCP tools for human decisions.
+-- | General-purpose popup MCP tool.
 --
--- These tools use the TUI effect to show interactive popups and wait for
--- user response before returning to the LLM agent.
+-- This module provides a single 'popup' tool that replaces the previous
+-- specialized TUI tools (confirm_action, select_option, request_guidance).
+-- The popup tool accepts a flat list of UI elements and returns a flat
+-- list with values filled in.
+--
+-- == Element Types
+--
+-- | Type | Input Fields | Output Adds |
+-- |------|--------------|-------------|
+-- | text | content | (unchanged) |
+-- | slider | label, min, max, default? | value: number |
+-- | checkbox | label, default? | value: bool |
+-- | textbox | label, placeholder? | value: string |
+-- | choice | label, options, default? | value: string (selected option) |
+-- | multiselect | label, options | value: [string] (selected options) |
+-- | group | label | (unchanged, visual separator) |
+--
+-- == Example Usage
+--
+-- @
+-- result <- popup PopupArgs
+--   { paTitle = Just "Configure Exploration"
+--   , paElements =
+--       [ Slider "Budget" 10 100 (Just 50)
+--       , Checkbox "Include tests" (Just False)
+--       , Choice "Method" ["BFS", "DFS", "Random"] (Just 0)
+--       ]
+--   }
+--
+-- case prStatus result of
+--   "completed" -> ... -- user pressed submit
+--   "cancelled" -> ... -- user pressed cancel
+-- @
 module Tidepool.Control.TUITools
-  ( -- * Confirm Action
-    ConfirmActionGraph(..)
-  , confirmActionLogic
-  , ConfirmArgs(..)
-  , ConfirmResult(..)
+  ( -- * Popup Tool
+    PopupGraph(..)
+  , popupLogic
+  , PopupArgs(..)
+  , PopupResult(..)
 
-    -- * Select Option
-  , SelectOptionGraph(..)
-  , selectOptionLogic
-  , SelectArgs(..)
-  , SelectResult(..)
-
-    -- * Request Guidance
-  , RequestGuidanceGraph(..)
-  , requestGuidanceLogic
-  , GuidanceArgs(..)
-  , GuidanceResult(..)
+    -- * Element Types
+  , PopupElement(..)
+  , PopupResultElement(..)
   ) where
 
 import Control.Monad.Freer (Eff, Member)
-import Data.Aeson (FromJSON(..), ToJSON(..), Value(..), (.:), (.:?), (.=), object, withObject, (.!=))
+import Data.Aeson
+  ( FromJSON(..), ToJSON(..), Value(..), (.:), (.:?), (.=)
+  , object, withObject
+  )
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KM
 import Data.Text (Text)
+import qualified Data.Text as T
 import GHC.Generics (Generic)
 
 import Tidepool.Effect.TUI
+  ( TUI, showUI, PopupDefinition(..), Component(..), ComponentSpec(..)
+  )
+import qualified Tidepool.Effect.TUI as TUI (PopupResult(..))
 import Tidepool.Effect.Types (Return, returnValue)
 import Tidepool.Role (Role(..))
 import Tidepool.Graph.Generic (type (:-))
@@ -49,245 +79,357 @@ import Tidepool.Graph.Types (type (:@), Input, UsesEffects, GraphEntries, GraphE
 import Tidepool.Schema (HasJSONSchema(..), objectSchema, arraySchema, emptySchema, SchemaType(..), describeField)
 
 -- ════════════════════════════════════════════════════════════════════════════
--- JSON VALUE HELPERS
+-- POPUP ELEMENT TYPES
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Extract a text value from a JSON object by key, or empty string if missing.
-getText :: Text -> Value -> Text
-getText key = \case
-  Object obj -> case KM.lookup (Key.fromText key) obj of
-    Just (String t) -> t
-    _ -> ""
-  _ -> ""
+-- | Input element specification (what Claude sends).
+--
+-- Each variant has an id and type-specific fields.
+-- The JSON serialization uses a "type" tag with lowercase variant names.
+data PopupElement
+  = PText Text Text
+    -- ^ Static text display (id, content)
+  | PSlider Text Text Double Double (Maybe Double)
+    -- ^ Numeric slider (id, label, min, max, default)
+  | PCheckbox Text Text (Maybe Bool)
+    -- ^ Boolean checkbox (id, label, default)
+  | PTextbox Text Text (Maybe Text)
+    -- ^ Text input (id, label, placeholder)
+  | PChoice Text Text [Text] (Maybe Int)
+    -- ^ Single-select dropdown (id, label, options, default index)
+  | PMultiselect Text Text [Text]
+    -- ^ Multiple selection list (id, label, options)
+  | PGroup Text Text
+    -- ^ Section header (id, label)
+  deriving stock (Show, Eq, Generic)
 
--- | Extract a non-empty text value from a JSON object.
-getTextMaybe :: Text -> Value -> Maybe Text
-getTextMaybe key val =
-  case getText key val of
-    "" -> Nothing
-    t -> Just t
+-- | Output element with value (what we return).
+--
+-- Same structure as input but with value instead of default.
+data PopupResultElement
+  = RText Text Text
+    -- ^ Static text (id, content)
+  | RSlider Text Text Double
+    -- ^ Slider result (id, label, value)
+  | RCheckbox Text Text Bool
+    -- ^ Checkbox result (id, label, value)
+  | RTextbox Text Text Text
+    -- ^ Textbox result (id, label, value)
+  | RChoice Text Text Text
+    -- ^ Choice result (id, label, selected option text)
+  | RMultiselect Text Text [Text]
+    -- ^ Multiselect result (id, label, selected option texts)
+  | RGroup Text Text
+    -- ^ Group header (id, label)
+  deriving stock (Show, Eq, Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
--- CONFIRM-ACTION TOOL
+-- POPUP ARGS AND RESULT
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Arguments for confirm_action tool.
-data ConfirmArgs = ConfirmArgs
-  { caAction :: Text      -- ^ High-level description of the action
-  , caDetails :: Text     -- ^ Additional context or specific details
+-- | Arguments for the popup tool.
+data PopupArgs = PopupArgs
+  { paTitle :: Maybe Text
+    -- ^ Optional popup title
+  , paElements :: [PopupElement]
+    -- ^ Flat list of UI elements
   }
   deriving stock (Show, Eq, Generic)
 
-instance HasJSONSchema ConfirmArgs where
-  jsonSchema = objectSchema
-    [ ("action", describeField "action" "High-level description of the action (e.g. 'Delete 15 files')" (emptySchema TString))
-    , ("details", describeField "details" "Additional context or specific details to help the user decide" (emptySchema TString))
-    ]
-    ["action", "details"]
-
-instance FromJSON ConfirmArgs where
-  parseJSON = withObject "ConfirmArgs" $ \v ->
-    ConfirmArgs <$> v .: "action" <*> v .: "details"
-
-instance ToJSON ConfirmArgs where
-  toJSON args = object
-    [ "action" .= caAction args
-    , "details" .= caDetails args
-    ]
-
--- | Result of confirm_action tool.
-newtype ConfirmResult = ConfirmResult
-  { crConfirmed :: Bool
+-- | Result of the popup tool.
+data PopupResult = PopupResult
+  { prStatus :: Text
+    -- ^ "completed" or "cancelled"
+  , prButton :: Text
+    -- ^ "submit" or "cancel"
+  , prElements :: [PopupResultElement]
+    -- ^ Elements with values filled in
   }
   deriving stock (Show, Eq, Generic)
 
-instance ToJSON ConfirmResult where
-  toJSON res = object ["confirmed" .= crConfirmed res]
+-- ════════════════════════════════════════════════════════════════════════════
+-- GRAPH DEFINITION
+-- ════════════════════════════════════════════════════════════════════════════
 
--- | Graph definition for confirm_action tool.
-newtype ConfirmActionGraph mode = ConfirmActionGraph
-  { caRun :: mode :- LogicNode
-      :@ Input ConfirmArgs
-      :@ UsesEffects '[TUI, Return ConfirmResult]
+-- | Graph definition for popup tool.
+newtype PopupGraph mode = PopupGraph
+  { popupRun :: mode :- LogicNode
+      :@ Input PopupArgs
+      :@ UsesEffects '[TUI, Return PopupResult]
   }
   deriving Generic
 
--- | MCP tool entry point declaration for confirm_action.
-type instance GraphEntries ConfirmActionGraph =
-  '[ "confirm_action" ':~> '("caRun", ConfirmArgs, "Show a confirmation dialog to the user for a potentially destructive or important action", '[ 'Dev, 'TL, 'PM]) ]
-
--- | Core logic for confirm_action.
-confirmActionLogic
-  :: (Member TUI es, Member (Return ConfirmResult) es)
-  => ConfirmArgs
-  -> Eff es ConfirmResult
-confirmActionLogic args = do
-  let popup = PopupDefinition
-        { pdTitle = "Confirm Action"
-        , pdComponents =
-            [ Component "action" (Text $ "Action: " <> caAction args) Nothing
-            , Component "details" (Text $ caDetails args) Nothing
-            ]
-        }
-
-  PopupResult button _ <- showUI popup
-  returnValue $ ConfirmResult (button == "submit")
+-- | MCP tool entry point declaration for popup.
+type instance GraphEntries PopupGraph =
+  '[ "popup" ':~> '("popupRun", PopupArgs, "Show a general-purpose popup dialog with configurable UI elements. Returns user input as structured data.", '[ 'Dev, 'TL, 'PM]) ]
 
 -- ════════════════════════════════════════════════════════════════════════════
--- SELECT-OPTION TOOL
+-- POPUP LOGIC
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Arguments for select_option tool.
-data SelectArgs = SelectArgs
-  { saPrompt :: Text
-  , saOptions :: [(Text, Text)]  -- ^ (id, label) pairs
+-- | Core logic for popup tool.
+--
+-- Converts the input elements to the internal PopupDefinition format,
+-- shows the UI, and then zips values back into the result elements.
+popupLogic
+  :: (Member TUI es, Member (Return PopupResult) es)
+  => PopupArgs
+  -> Eff es PopupResult
+popupLogic args = do
+  -- Convert to internal TUI format
+  let internalDef = toPopupDefinition args
+
+  -- Show UI and get result
+  TUI.PopupResult button valuesMap <- showUI internalDef
+
+  -- Zip values back into element structure
+  let resultElements = zipWithValues (paElements args) valuesMap
+
+  returnValue $ PopupResult
+    { prStatus = if button == "submit" then "completed" else "cancelled"
+    , prButton = button
+    , prElements = resultElements
+    }
+
+-- | Convert PopupArgs to internal PopupDefinition.
+toPopupDefinition :: PopupArgs -> PopupDefinition
+toPopupDefinition args = PopupDefinition
+  { pdTitle = maybe "Popup" id (paTitle args)
+  , pdComponents = map toComponent (paElements args)
   }
-  deriving stock (Show, Eq, Generic)
+  where
+    toComponent :: PopupElement -> Component
+    toComponent = \case
+      PText eid content ->
+        Component eid (Text content) Nothing
+      PSlider eid label minV maxV defV ->
+        Component eid (Slider label minV maxV (maybe ((minV + maxV) / 2) id defV)) Nothing
+      PCheckbox eid label defV ->
+        Component eid (Checkbox label (maybe False id defV)) Nothing
+      PTextbox eid label placeholder ->
+        Component eid (Textbox label placeholder Nothing) Nothing
+      PChoice eid label opts defIdx ->
+        Component eid (Choice label opts defIdx) Nothing
+      PMultiselect eid label opts ->
+        Component eid (Multiselect label opts) Nothing
+      PGroup eid label ->
+        Component eid (Group label) Nothing
 
-instance HasJSONSchema SelectArgs where
-  jsonSchema = objectSchema
-    [ ("prompt", describeField "prompt" "Instruction for the user" (emptySchema TString))
-    , ("options", describeField "options" "List of options as [id, label] pairs"
-        (arraySchema $ arraySchema $ emptySchema TString))
-    ]
-    ["prompt", "options"]
+-- | Zip values from the result map back into elements.
+zipWithValues :: [PopupElement] -> Value -> [PopupResultElement]
+zipWithValues elements valuesObj = map zipOne elements
+  where
+    valuesMap = case valuesObj of
+      Object km -> km
+      _ -> KM.empty
 
-instance FromJSON SelectArgs where
-  parseJSON = withObject "SelectArgs" $ \v ->
-    SelectArgs <$> v .: "prompt" <*> v .: "options"
+    getValue :: Text -> Maybe Value
+    getValue eid = KM.lookup (Key.fromText eid) valuesMap
 
-instance ToJSON SelectArgs where
-  toJSON args = object
-    [ "prompt" .= saPrompt args
-    , "options" .= saOptions args
-    ]
+    getTextValue :: Text -> Text
+    getTextValue eid = case getValue eid of
+      Just (String t) -> t
+      _ -> ""
 
--- | Result of select_option tool.
-data SelectResult = SelectResult
-  { srSelected :: Text
-  , srCustom :: Maybe Text
-  }
-  deriving stock (Show, Eq, Generic)
+    getDoubleValue :: Text -> Double -> Double
+    getDoubleValue eid def = case getValue eid of
+      Just (Number n) -> realToFrac n
+      _ -> def
 
-instance ToJSON SelectResult where
+    getBoolValue :: Text -> Bool -> Bool
+    getBoolValue eid def = case getValue eid of
+      Just (Bool b) -> b
+      _ -> def
+
+    getTextArrayValue :: Text -> [Text]
+    getTextArrayValue eid = case getValue eid of
+      Just (Array arr) -> [t | String t <- toList arr]
+      _ -> []
+      where
+        toList = foldr (:) []
+
+    zipOne :: PopupElement -> PopupResultElement
+    zipOne = \case
+      PText eid content ->
+        RText eid content
+      PSlider eid label minV maxV defV ->
+        RSlider eid label (getDoubleValue eid (maybe ((minV + maxV) / 2) id defV))
+      PCheckbox eid label defV ->
+        RCheckbox eid label (getBoolValue eid (maybe False id defV))
+      PTextbox eid label _ ->
+        RTextbox eid label (getTextValue eid)
+      PChoice eid label opts defIdx ->
+        let defaultOpt = case defIdx of
+              Just idx | idx >= 0 && idx < length opts -> opts !! idx
+              _ -> ""
+            selectedText = case getTextValue eid of
+              "" -> defaultOpt
+              t -> t
+        in RChoice eid label selectedText
+      PMultiselect eid label _ ->
+        RMultiselect eid label (getTextArrayValue eid)
+      PGroup eid label ->
+        RGroup eid label
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- JSON INSTANCES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- PopupElement: TaggedObject with "type" tag, lowercase constructor names
+instance ToJSON PopupElement where
+  toJSON = \case
+    PText eid content -> object
+      [ "type" .= ("text" :: Text)
+      , "id" .= eid
+      , "content" .= content
+      ]
+    PSlider eid label minV maxV defV -> object $
+      [ "type" .= ("slider" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      , "min" .= minV
+      , "max" .= maxV
+      ] ++ maybe [] (\d -> ["default" .= d]) defV
+    PCheckbox eid label defV -> object $
+      [ "type" .= ("checkbox" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      ] ++ maybe [] (\d -> ["default" .= d]) defV
+    PTextbox eid label placeholder -> object $
+      [ "type" .= ("textbox" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      ] ++ maybe [] (\p -> ["placeholder" .= p]) placeholder
+    PChoice eid label opts defIdx -> object $
+      [ "type" .= ("choice" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      , "options" .= opts
+      ] ++ maybe [] (\i -> ["default" .= i]) defIdx
+    PMultiselect eid label opts -> object
+      [ "type" .= ("multiselect" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      , "options" .= opts
+      ]
+    PGroup eid label -> object
+      [ "type" .= ("group" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      ]
+
+instance FromJSON PopupElement where
+  parseJSON = withObject "PopupElement" $ \o -> do
+    elemType <- o .: "type"
+    eid <- o .: "id"
+    case elemType :: Text of
+      "text" -> PText eid <$> o .: "content"
+      "slider" -> PSlider eid
+        <$> o .: "label"
+        <*> o .: "min"
+        <*> o .: "max"
+        <*> o .:? "default"
+      "checkbox" -> PCheckbox eid
+        <$> o .: "label"
+        <*> o .:? "default"
+      "textbox" -> PTextbox eid
+        <$> o .: "label"
+        <*> o .:? "placeholder"
+      "choice" -> PChoice eid
+        <$> o .: "label"
+        <*> o .: "options"
+        <*> o .:? "default"
+      "multiselect" -> PMultiselect eid
+        <$> o .: "label"
+        <*> o .: "options"
+      "group" -> PGroup eid
+        <$> o .: "label"
+      _ -> fail $ "Unknown element type: " <> T.unpack elemType
+
+-- PopupResultElement
+instance ToJSON PopupResultElement where
+  toJSON = \case
+    RText eid content -> object
+      [ "type" .= ("text" :: Text)
+      , "id" .= eid
+      , "content" .= content
+      ]
+    RSlider eid label val -> object
+      [ "type" .= ("slider" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      , "value" .= val
+      ]
+    RCheckbox eid label val -> object
+      [ "type" .= ("checkbox" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      , "value" .= val
+      ]
+    RTextbox eid label val -> object
+      [ "type" .= ("textbox" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      , "value" .= val
+      ]
+    RChoice eid label val -> object
+      [ "type" .= ("choice" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      , "value" .= val
+      ]
+    RMultiselect eid label vals -> object
+      [ "type" .= ("multiselect" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      , "value" .= vals
+      ]
+    RGroup eid label -> object
+      [ "type" .= ("group" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      ]
+
+-- PopupArgs
+instance ToJSON PopupArgs where
+  toJSON args = object $
+    maybe [] (\t -> ["title" .= t]) (paTitle args)
+    ++ ["elements" .= paElements args]
+
+instance FromJSON PopupArgs where
+  parseJSON = withObject "PopupArgs" $ \o -> PopupArgs
+    <$> o .:? "title"
+    <*> o .: "elements"
+
+-- PopupResult
+instance ToJSON PopupResult where
   toJSON res = object
-    [ "selected" .= srSelected res
-    , "custom" .= srCustom res
+    [ "status" .= prStatus res
+    , "button" .= prButton res
+    , "elements" .= prElements res
     ]
 
--- | Graph definition for select_option tool.
-newtype SelectOptionGraph mode = SelectOptionGraph
-  { soRun :: mode :- LogicNode
-      :@ Input SelectArgs
-      :@ UsesEffects '[TUI, Return SelectResult]
-  }
-  deriving Generic
-
--- | MCP tool entry point declaration for select_option.
-type instance GraphEntries SelectOptionGraph =
-  '[ "select_option" ':~> '("soRun", SelectArgs, "Ask the user to select from a list of predefined options, or provide a custom response", '[ 'Dev, 'TL, 'PM]) ]
-
--- | Core logic for select_option.
-selectOptionLogic
-  :: (Member TUI es, Member (Return SelectResult) es)
-  => SelectArgs
-  -> Eff es SelectResult
-selectOptionLogic args = do
-  let labels = map snd (saOptions args)
-      popup = PopupDefinition
-        { pdTitle = "Select Option"
-        , pdComponents =
-            [ Component "prompt" (Text $ saPrompt args) Nothing
-            , Component "choice" (Choice "Choose an option" labels (Just 0)) Nothing
-            , Component "custom" (Textbox "Other / Custom Response" Nothing Nothing) Nothing
-            ]
-        }
-
-  PopupResult button values <- showUI popup
-
-  let choiceText = getText "choice" values
-      customText = getTextMaybe "custom" values
-      selected
-        | button == "decline" = "cancelled"
-        | Just _ <- customText = "custom"
-        | otherwise = choiceText
-
-  returnValue $ SelectResult selected customText
+instance FromJSON PopupResult where
+  parseJSON = withObject "PopupResult" $ \o -> PopupResult
+    <$> o .: "status"
+    <*> o .: "button"
+    <*> o .: "elements"
 
 -- ════════════════════════════════════════════════════════════════════════════
--- REQUEST-GUIDANCE TOOL
+-- JSON SCHEMA
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Arguments for request_guidance tool.
-data GuidanceArgs = GuidanceArgs
-  { gaContext :: Text        -- ^ What the agent is stuck on
-  , gaSuggestions :: [Text]  -- ^ Optional suggestions
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance HasJSONSchema GuidanceArgs where
+instance HasJSONSchema PopupArgs where
   jsonSchema = objectSchema
-    [ ("context", describeField "context" "Description of what the agent needs help with" (emptySchema TString))
-    , ("suggestions", describeField "suggestions" "Optional suggested directions for the user to choose from"
-        (arraySchema $ emptySchema TString))
+    [ ("title", describeField "title" "Optional popup window title" (emptySchema TString))
+    , ("elements", describeField "elements" "Flat list of UI elements. Each element has a 'type' field (text, slider, checkbox, textbox, choice, multiselect, group) and type-specific fields." (arraySchema $ emptySchema TObject))
     ]
-    ["context"]
+    ["elements"]
 
-instance FromJSON GuidanceArgs where
-  parseJSON = withObject "GuidanceArgs" $ \v ->
-    GuidanceArgs <$> v .: "context" <*> v .:? "suggestions" .!= []
-
-instance ToJSON GuidanceArgs where
-  toJSON args = object
-    [ "context" .= gaContext args
-    , "suggestions" .= gaSuggestions args
+instance HasJSONSchema PopupResult where
+  jsonSchema = objectSchema
+    [ ("status", describeField "status" "Result status: 'completed' or 'cancelled'" (emptySchema TString))
+    , ("button", describeField "button" "Button pressed: 'submit' or 'cancel'" (emptySchema TString))
+    , ("elements", describeField "elements" "Elements with values filled in" (arraySchema $ emptySchema TObject))
     ]
-
--- | Result of request_guidance tool.
-newtype GuidanceResult = GuidanceResult
-  { grGuidance :: Text
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON GuidanceResult where
-  toJSON res = object ["guidance" .= grGuidance res]
-
--- | Graph definition for request_guidance tool.
-newtype RequestGuidanceGraph mode = RequestGuidanceGraph
-  { rgRun :: mode :- LogicNode
-      :@ Input GuidanceArgs
-      :@ UsesEffects '[TUI, Return GuidanceResult]
-  }
-  deriving Generic
-
--- | MCP tool entry point declaration for request_guidance.
-type instance GraphEntries RequestGuidanceGraph =
-  '[ "request_guidance" ':~> '("rgRun", GuidanceArgs, "Ask the user for free-form guidance or to select from suggestions when the agent is stuck", '[ 'Dev, 'TL, 'PM]) ]
-
--- | Core logic for request_guidance.
-requestGuidanceLogic
-  :: (Member TUI es, Member (Return GuidanceResult) es)
-  => GuidanceArgs
-  -> Eff es GuidanceResult
-requestGuidanceLogic args = do
-  let suggestionComponent
-        | null (gaSuggestions args) = []
-        | otherwise = [Component "suggestions" (Choice "Suggestions" (gaSuggestions args) (Just 0)) Nothing]
-
-      popup = PopupDefinition
-        { pdTitle = "Request Guidance"
-        , pdComponents =
-            [ Component "context" (Text $ gaContext args) Nothing ]
-            <> suggestionComponent <>
-            [ Component "guidance" (Textbox "Your Guidance" Nothing Nothing) Nothing ]
-        }
-
-  PopupResult _ values <- showUI popup
-
-  let guidance = case getTextMaybe "guidance" values of
-        Just t -> t
-        Nothing -> case getTextMaybe "suggestions" values of
-          Just t -> t
-          Nothing -> "No guidance provided"
-
-  returnValue $ GuidanceResult guidance
+    ["status", "button", "elements"]

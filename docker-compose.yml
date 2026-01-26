@@ -30,6 +30,8 @@ services:
       - GITHUB_REPO=${GITHUB_REPO:-tidepool-heavy-industries/tidepool}
       - TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
       - TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
+      - TIDEPOOL_WORKTREES_PATH=/worktrees
+      - TIDEPOOL_SOCKETS_PATH=/sockets
       - GEMMA_ENDPOINT=${GEMMA_ENDPOINT:-http://host.docker.internal:11434}
       - HOST_UID=${HOST_UID:-1000}
       - HOST_GID=${HOST_GID:-1000}
@@ -42,6 +44,7 @@ services:
       - tidepool-sockets:/sockets
       - tidepool-zellij:/run/user/1000
       - tidepool-gh-auth:/home/user/.config/gh
+      - tidepool-worktrees:/worktrees:rw
     healthcheck:
       test: ["CMD-SHELL", "socat -u OPEN:/dev/null UNIX-CONNECT:/sockets/control.sock || exit 1"]
       interval: 5s

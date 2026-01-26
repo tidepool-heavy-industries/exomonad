@@ -34,9 +34,7 @@ import Tidepool.Control.Protocol
 import Tidepool.Control.RoleConfig
 import Tidepool.Control.Types (ServerConfig(..))
 import Tidepool.Control.TUITools
-  ( confirmActionLogic, ConfirmArgs(..), ConfirmResult(..),
-    selectOptionLogic, SelectArgs(..), SelectResult(..),
-    requestGuidanceLogic, GuidanceArgs(..)
+  ( popupLogic, PopupArgs(..)
   )
 import Tidepool.Control.FeedbackTools
   ( registerFeedbackLogic, RegisterFeedbackArgs(..) )
@@ -189,9 +187,7 @@ handleMcpTool logger config traceCtx reqId toolName args =
           --       the generic "unknown tool" handler below.
 
           -- TUI-interactive tools
-          "confirm_action" -> handleConfirmActionTool logger reqId args
-          "select_option" -> handleSelectOptionTool logger reqId args
-          "request_guidance" -> handleRequestGuidanceTool logger reqId args
+          "popup" -> handlePopupTool logger reqId args
           "register_feedback" -> handleRegisterFeedbackTool logger reqId args
 
           -- Tier 2: LLM-enhanced tools (graph-based)
@@ -543,29 +539,29 @@ handlePMProposeTool logger reqId args = do
           pure $ mcpToolSuccess reqId (toJSON result)
 
 
--- | Handle the confirm_action tool.
-handleConfirmActionTool :: Logger -> Text -> Value -> IO ControlResponse
-handleConfirmActionTool logger reqId args = do
+-- | Handle the popup tool.
+handlePopupTool :: Logger -> Text -> Value -> IO ControlResponse
+handlePopupTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid confirm_action arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid popup arguments: " <> T.pack err
 
-    Success caArgs -> do
-      logDebug logger $ "  action=" <> caAction caArgs
+    Success popupArgs -> do
+      logDebug logger $ "  elements=" <> T.pack (show $ length $ paElements popupArgs)
 
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runTUIInterpreter logger
-        $ runReturn (confirmActionLogic caArgs)
+        $ runReturn (popupLogic popupArgs)
 
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "confirm_action failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "popup failed: " <> T.pack (displayException e)
 
         Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Action confirmed=" <> T.pack (show $ crConfirmed result)
+          logInfo logger $ "[MCP:" <> reqId <> "] Popup completed with status=" <> T.pack (show result)
           pure $ mcpToolSuccess reqId (toJSON result)
 
 
@@ -591,58 +587,6 @@ handleRegisterFeedbackTool logger reqId args = do
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Feedback registered for " <> rfArgs.rfaIssueId
-          pure $ mcpToolSuccess reqId (toJSON result)
-
-
--- | Handle the select_option tool.
-handleSelectOptionTool :: Logger -> Text -> Value -> IO ControlResponse
-handleSelectOptionTool logger reqId args = do
-  case fromJSON args of
-    Error err -> do
-      logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid select_option arguments: " <> T.pack err
-
-    Success soArgs -> do
-      logDebug logger $ "  prompt=" <> saPrompt soArgs
-
-      resultOrErr <- try $ runM
-        $ runLog Debug
-        $ runTUIInterpreter logger
-        $ runReturn (selectOptionLogic soArgs)
-
-      case resultOrErr of
-        Left (e :: SomeException) -> do
-          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "select_option failed: " <> T.pack (displayException e)
-
-        Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Option selected=" <> srSelected result
-          pure $ mcpToolSuccess reqId (toJSON result)
-
-
--- | Handle the request_guidance tool.
-handleRequestGuidanceTool :: Logger -> Text -> Value -> IO ControlResponse
-handleRequestGuidanceTool logger reqId args = do
-  case fromJSON args of
-    Error err -> do
-      logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid request_guidance arguments: " <> T.pack err
-
-    Success rgArgs -> do
-      logDebug logger $ "  context=" <> gaContext rgArgs
-
-      resultOrErr <- try $ runM
-        $ runLog Debug
-        $ runTUIInterpreter logger
-        $ runReturn (requestGuidanceLogic rgArgs)
-
-      case resultOrErr of
-        Left (e :: SomeException) -> do
-          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "request_guidance failed: " <> T.pack (displayException e)
-
-        Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Guidance received"
           pure $ mcpToolSuccess reqId (toJSON result)
 
 

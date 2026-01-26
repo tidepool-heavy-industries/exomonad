@@ -14,8 +14,7 @@ import Tidepool.Control.Logging (Logger, logInfo, logDebug)
 import Tidepool.Control.Protocol (ToolDefinition(..))
 
 -- Tool definitions from Graph DSL
-import Tidepool.Control.TUITools
-  ( ConfirmActionGraph, SelectOptionGraph, RequestGuidanceGraph )
+import Tidepool.Control.TUITools ( PopupGraph )
 import Tidepool.Control.FeedbackTools
   ( RegisterFeedbackGraph )
 import Tidepool.Control.ExoTools ( ExoStatusGraph, SpawnAgentsGraph, FilePRGraph, PrReviewStatusGraph )
@@ -43,9 +42,7 @@ exportMCPTools logger = do
 
   -- Extract tools from simplified graphs via GraphEntries (new pattern)
   -- Note: LSP tools (FindCallersGraph etc) removed as they require LSP session
-  let caTools = reifyGraphEntries (Proxy @ConfirmActionGraph)
-  let soTools = reifyGraphEntries (Proxy @SelectOptionGraph)
-  let rgTools = reifyGraphEntries (Proxy @RequestGuidanceGraph)
+  let popupTools = reifyGraphEntries (Proxy @PopupGraph)
   let rfTools = reifyMCPTools (Proxy @RegisterFeedbackGraph)
 
   -- Extract tools from complex graphs via MCPExport (legacy pattern)
@@ -75,9 +72,7 @@ exportMCPTools logger = do
   let ghReopenTools = reifyMCPTools (Proxy @GHIssueReopenGraph)
 
   -- Log discovered tools per graph for debugging
-  logDebug logger $ "[MCP Discovery] ConfirmActionGraph: " <> T.pack (show (length caTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] SelectOptionGraph: " <> T.pack (show (length soTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] RequestGuidanceGraph: " <> T.pack (show (length rgTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] PopupGraph: " <> T.pack (show (length popupTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] RegisterFeedbackGraph: " <> T.pack (show (length rfTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] ExoStatusGraph: " <> T.pack (show (length esTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] SpawnAgentsGraph: " <> T.pack (show (length saTools)) <> " tools"
@@ -99,7 +94,7 @@ exportMCPTools logger = do
   logDebug logger $ "[MCP Discovery] GHIssueReopenGraph: " <> T.pack (show (length ghReopenTools)) <> " tools"
 
   let allTools = concat
-        [ caTools, soTools, rgTools, rfTools
+        [ popupTools, rfTools
         , esTools, saTools, fpTools, paeTools, pmPriTools, pmStatTools, pmProTools, prTools
         , smTools, ciTools, rmTools, mrTools
         , ghListTools, ghShowTools, ghCreateTools, ghUpdateTools, ghCloseTools, ghReopenTools

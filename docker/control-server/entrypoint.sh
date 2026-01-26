@@ -28,6 +28,8 @@ fi
 # --- Fix volume ownership ---
 [ -d /sockets ] && chown 1000:1000 /sockets
 chmod 755 /sockets
+[ -d /worktrees ] && chown 1000:1000 /worktrees
+chmod 755 /worktrees 2>/dev/null || true
 
 # --- XDG_RUNTIME_DIR for Zellij ---
 mkdir -p /run/user/1000
