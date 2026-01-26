@@ -124,14 +124,12 @@ async fn main() -> Result<()> {
                                 eprintln!("Control socket exists, but TUI TCP connection failed.");
                             }
                             eprintln!("This usually means --no-tui was passed to control-server (or the server crashed leaving a stale socket).\n");
-                            // Exit with 0 to indicate "Giving up as intended"
-                            std::process::exit(0);
+                            // Exit loop to cleanup and return successfully
+                            return Ok(());
                         }
 
                         // Cleanup health socket before returning
-                        if health_socket_path.exists() {
-                            let _ = std::fs::remove_file(&health_socket_path);
-                        }
+                        drop(_health_handle); // This will trigger HealthSocketGuard::drop
 
                         return Err(e).context(format!(
                             "Failed to connect to control-server after {} attempts",

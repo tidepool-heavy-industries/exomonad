@@ -12,7 +12,6 @@
 //!
 //! ### IPC
 //! - [`fifo`]: FIFO abstractions for IPC (result and signal pipes)
-//! - [`hub`]: Hub client for session coordination and visualization
 //! - [`socket`]: Unix socket client for control envelope communication
 //!
 //! ### Process Management
@@ -33,7 +32,6 @@ pub mod protocol;
 
 // IPC
 pub mod fifo;
-pub mod hub;
 pub mod socket;
 
 // Process management
@@ -58,12 +56,6 @@ pub use protocol::{ControlMessage, ControlResponse, HookInput, HookOutput, Role}
 pub use socket::control_socket_path;
 pub use socket::ControlSocket;
 pub use supervisor::Supervisor;
-
-// Re-export hub types
-pub use hub::{
-    HubClient, HubConfig, NodeInfo, NodeRegister, NodeResult, NodeState, SessionCreateResponse,
-    SessionInfo, SessionRegister, SessionState,
-};
 
 // Re-export command types
 pub use commands::{handle_hook, send_signal, HookEventType};

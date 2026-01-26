@@ -15,8 +15,8 @@
 //! {"mcpServers": {"tidepool": {"type": "http", "url": "http://localhost:7432/role/tl/mcp"}}}
 //! ```
 
+use anyhow::Result;
 use clap::{Parser, Subcommand};
-use tracing::error;
 
 use mantle_shared::commands::HookEventType;
 use mantle_shared::handle_hook;
@@ -63,19 +63,16 @@ enum Commands {
 // Main
 // ============================================================================
 
-fn main() {
+fn main() -> Result<()> {
     // Initialize tracing with env filter (RUST_LOG)
     mantle_shared::init_logging();
 
     let cli = Cli::parse();
 
-    let result = match cli.command {
-        Commands::Hook { event, runtime, role } => handle_hook(event, runtime, role),
-        Commands::Health => health::run_health_check(),
+    match cli.command {
+        Commands::Hook { event, runtime, role } => handle_hook(event, runtime, role)?,
+        Commands::Health => health::run_health_check()?,
     };
 
-    if let Err(e) = result {
-        error!(error = %e, "Command failed");
-        std::process::exit(1);
-    }
+    Ok(())
 }

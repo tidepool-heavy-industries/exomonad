@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::task::{Context as TaskContext, Poll};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, ReadBuf};
@@ -9,6 +9,21 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
 
 use tui_sidebar::protocol::{PopupDefinition, PopupResult};
+
+/// Guard that cleans up the health socket file when dropped.
+pub struct HealthSocketGuard {
+    path: PathBuf,
+    _handle: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for HealthSocketGuard {
+    fn drop(&mut self) {
+        if self.path.exists() {
+            let _ = std::fs::remove_file(&self.path);
+            debug!(path = %self.path.display(), "Removed health socket file");
+        }
+    }
+}
 
 /// Unified stream type for TUI communication (Unix or TCP).
 pub enum TuiStream {
@@ -175,7 +190,7 @@ pub fn spawn_io_tasks(
 }
 
 /// Start a simple Unix listener for health checks.
-pub async fn start_health_listener(path: &Path) -> Result<tokio::task::JoinHandle<()>> {
+pub async fn start_health_listener(path: &Path) -> Result<HealthSocketGuard> {
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).context(format!(
@@ -222,5 +237,8 @@ pub async fn start_health_listener(path: &Path) -> Result<tokio::task::JoinHandl
         }
     });
 
-    Ok(handle)
+    Ok(HealthSocketGuard {
+        path: path.to_path_buf(),
+        _handle: handle,
+    })
 }
