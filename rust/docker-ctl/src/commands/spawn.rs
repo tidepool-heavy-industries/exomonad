@@ -84,6 +84,10 @@ pub async fn run(
     let repo_volume = std::env::var("TIDEPOOL_REPO_VOLUME")
         .unwrap_or_else(|_| "tidepool-repo".to_string());
 
+    // Get sockets volume name - subagents create sockets at /sockets/{issue_id}/
+    let sockets_volume = std::env::var("TIDEPOOL_SOCKETS_VOLUME")
+        .unwrap_or_else(|_| "tidepool-sockets".to_string());
+
     // Use VOLUME mounts (not BIND mounts) for remote Docker hosts
     let mounts = vec![
         // Main repo - required for git worktree linkage
@@ -97,6 +101,13 @@ pub async fn run(
         Mount {
             target: Some("/worktrees".to_string()),
             source: Some(worktrees_volume),
+            typ: Some(MountTypeEnum::VOLUME),
+            ..Default::default()
+        },
+        // Sockets directory - for control-server sockets
+        Mount {
+            target: Some("/sockets".to_string()),
+            source: Some(sockets_volume),
             typ: Some(MountTypeEnum::VOLUME),
             ..Default::default()
         },
