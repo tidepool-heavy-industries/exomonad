@@ -1,0 +1,35 @@
+#!/bin/bash
+set -euo pipefail
+
+# =============================================================================
+# Tidepool IDE - Hard Refresh
+# =============================================================================
+# Use this when you've:
+#   - Updated a Dockerfile
+#   - Changed a layout.kdl
+#   - Installed new system dependencies
+#   - Need to clear stale session state
+#
+# This tears down containers to force a fresh state, then reconnects.
+# =============================================================================
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+echo "Rebuilding and refreshing IDE environment..."
+
+# 1. Force recreation of containers
+#    --build: Rebuilds images if Dockerfile changed
+#    --force-recreate: Kills old containers, starts fresh ones
+echo "Rebuilding containers..."
+docker compose up -d --build --force-recreate --remove-orphans
+
+# 2. Wait for services to be healthy
+echo "Waiting for services to initialize..."
+sleep 3
+
+# 3. Reconnect using the standard idempotent command
+echo "Connecting to fresh Zellij session..."
+exec docker exec -it tidepool-zellij \
+    zellij --layout /etc/zellij/layouts/main.kdl \
+    attach --create tidepool

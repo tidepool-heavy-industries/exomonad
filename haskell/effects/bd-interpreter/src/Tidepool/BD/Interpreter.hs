@@ -347,7 +347,7 @@ bdList config input = do
 -- Uses @bd create@ command. Returns the generated bead ID.
 bdCreate :: BDConfig -> CreateBeadInput -> IO Text
 bdCreate config input = do
-  let baseArgs = ["create", T.unpack input.cbiTitle, "--silent"]
+  let baseArgs = ["create", T.unpack input.cbiTitle, "--quiet"]
                 ++ maybe [] (\d -> ["--repo", d]) config.bcBeadsDir
                 ++ ["--type", beadTypeToArg input.cbiType]
                 ++ ["--priority", show input.cbiPriority]

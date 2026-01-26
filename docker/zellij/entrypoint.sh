@@ -5,6 +5,14 @@ set -euo pipefail
 # Zellij Container Entrypoint
 # =============================================================================
 # Minimal container for visual multiplexing. Panes run docker attach to agents.
+#
+# IDEMPOTENT SESSION MANAGEMENT:
+#   docker exec -it tidepool-zellij zellij --layout /etc/zellij/layouts/main.kdl attach --create tidepool
+#
+# This single command:
+#   - Creates session with layout if it doesn't exist
+#   - Attaches to existing session if it does
+#   - Resurrects session with layout if container was restarted
 # =============================================================================
 
 echo "Starting Zellij multiplexer..."
@@ -60,24 +68,17 @@ export HOME=/home/user
 export USER=user
 export TERM=xterm-256color
 export XDG_RUNTIME_DIR=/run/user/1000
+export ZELLIJ_CONFIG_DIR=/etc/zellij
 
-case "${1:-zellij}" in
-    zellij)
-        export ZELLIJ_CONFIG_DIR=/etc/zellij
+echo ""
+echo "Zellij container ready."
+echo ""
+echo "Connect with (idempotent - works for create, attach, or resurrect):"
+echo "  ./ide"
+echo ""
+echo "Or manually:"
+echo "  docker exec -it tidepool-zellij zellij --layout /etc/zellij/layouts/main.kdl attach --create tidepool"
+echo ""
 
-        echo "Zellij container ready."
-        echo ""
-        echo "First connection (creates session with layout):"
-        echo "  docker exec -it tidepool-zellij zellij -s tidepool -n /etc/zellij/layouts/main.kdl"
-        echo ""
-        echo "Subsequent connections:"
-        echo "  docker exec -it tidepool-zellij zellij attach tidepool"
-        echo ""
-
-        # Keep container alive - user creates session on first connect
-        exec tail -f /dev/null
-        ;;
-    *)
-        exec gosu user "$@"
-        ;;
-esac
+# Keep container alive - user connects via docker exec
+exec tail -f /dev/null
