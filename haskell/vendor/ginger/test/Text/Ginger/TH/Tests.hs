@@ -457,8 +457,8 @@ schemaGenerationTests = testGroup "Schema Generation"
       case schema of
         RecordSchema fields -> do
           assertEqual "should have 2 fields" 2 (length fields)
-          assertBool "should have srName" $ any ((== "srName") . fst) fields
-          assertBool "should have srAge" $ any ((== "srAge") . fst) fields
+          assertBool "should have name" $ any ((== "name") . fst) fields
+          assertBool "should have age" $ any ((== "age") . fst) fields
         _ -> assertFailure $ "expected RecordSchema, got: " ++ show schema
 
   , testCase "nested record generates nested schema" $ do
@@ -466,11 +466,11 @@ schemaGenerationTests = testGroup "Schema Generation"
       case schema of
         RecordSchema fields -> do
           assertEqual "should have 2 fields" 2 (length fields)
-          case lookup "nrUser" fields of
+          case lookup "user" fields of
             Just (RecordSchema innerFields) ->
               assertEqual "inner should have 2 fields" 2 (length innerFields)
-            Just other -> assertFailure $ "expected RecordSchema for nrUser, got: " ++ show other
-            Nothing -> assertFailure "missing nrUser field"
+            Just other -> assertFailure $ "expected RecordSchema for user, got: " ++ show other
+            Nothing -> assertFailure "missing user field"
         _ -> assertFailure $ "expected RecordSchema, got: " ++ show schema
 
   , testCase "sum type generates SumSchema" $ do
@@ -497,12 +497,12 @@ schemaGenerationTests = testGroup "Schema Generation"
           let conNames = map fst constructors
           assertBool "should have Dog" $ "Dog" `elem` conNames
           assertBool "should have Cat" $ "Cat" `elem` conNames
-          -- animalName should be in both constructors
-          let hasAnimalName = all (any ((== "animalName") . fst) . snd) constructors
-          assertBool "animalName should be in all constructors" hasAnimalName
-          -- Validate that animalName access is valid
-          let path = mkAccessPath "animalName" [] dummyPos
-          assertEqual "animalName should be accessible" Nothing $
+          -- animalName should be in both constructors (stripped to 'name')
+          let hasAnimalName = all (any ((== "name") . fst) . snd) constructors
+          assertBool "name should be in all constructors" hasAnimalName
+          -- Validate that name access is valid
+          let path = mkAccessPath "name" [] dummyPos
+          assertEqual "name should be accessible" Nothing $
             validatePath registry schema path
         _ -> assertFailure $ "expected SumSchema, got: " ++ show schema
 
@@ -510,14 +510,14 @@ schemaGenerationTests = testGroup "Schema Generation"
       let (schema, registry) = treeSchema
       case schema of
         RecordSchema fields -> do
-          assertBool "should have treeChildren" $ any ((== "treeChildren") . fst) fields
-          case lookup "treeChildren" fields of
+          assertBool "should have children" $ any ((== "children") . fst) fields
+          case lookup "children" fields of
             Just (ListSchema (RecursiveRef refName)) ->
               assertEqual "should reference Tree" "Tree" refName
             Just other -> assertFailure $ "expected ListSchema with RecursiveRef, got: " ++ show other
-            Nothing -> assertFailure "missing treeChildren field"
+            Nothing -> assertFailure "missing children field"
           -- Validate deep access works
-          let path = mkAccessPath "treeChildren" [StaticKey "0", StaticKey "treeValue"] dummyPos
+          let path = mkAccessPath "children" [StaticKey "0", StaticKey "value"] dummyPos
           assertEqual "nested access should work" Nothing $
             validatePath registry schema path
         _ -> assertFailure $ "expected RecordSchema, got: " ++ show schema
@@ -526,30 +526,30 @@ schemaGenerationTests = testGroup "Schema Generation"
       let (schema, _) = withListSchema
       case schema of
         RecordSchema fields ->
-          case lookup "wlItems" fields of
+          case lookup "items" fields of
             Just (ListSchema ScalarSchema) -> return ()
             Just other -> assertFailure $ "expected ListSchema ScalarSchema, got: " ++ show other
-            Nothing -> assertFailure "missing wlItems field"
+            Nothing -> assertFailure "missing items field"
         _ -> assertFailure $ "expected RecordSchema, got: " ++ show schema
 
   , testCase "Maybe field treated as inner type" $ do
       let (schema, _) = withMaybeSchema
       case schema of
         RecordSchema fields -> do
-          case lookup "wmOptional" fields of
+          case lookup "optional" fields of
             Just ScalarSchema -> return ()  -- Maybe Text -> Text -> ScalarSchema
             Just other -> assertFailure $ "expected ScalarSchema for Maybe, got: " ++ show other
-            Nothing -> assertFailure "missing wmOptional field"
+            Nothing -> assertFailure "missing optional field"
         _ -> assertFailure $ "expected RecordSchema, got: " ++ show schema
 
   , testCase "Vector field generates ListSchema" $ do
       let (schema, _) = withVectorSchema
       case schema of
         RecordSchema fields ->
-          case lookup "wvItems" fields of
+          case lookup "items" fields of
             Just (ListSchema ScalarSchema) -> return ()
             Just other -> assertFailure $ "expected ListSchema ScalarSchema, got: " ++ show other
-            Nothing -> assertFailure "missing wvItems field"
+            Nothing -> assertFailure "missing items field"
         _ -> assertFailure $ "expected RecordSchema, got: " ++ show schema
 
   , testCase "newtype generates schema for wrapped type" $ do
@@ -557,17 +557,17 @@ schemaGenerationTests = testGroup "Schema Generation"
       case schema of
         RecordSchema fields -> do
           assertEqual "should have 1 field" 1 (length fields)
-          assertBool "should have unUserId" $ any ((== "unUserId") . fst) fields
+          assertBool "should have userId" $ any ((== "userId") . fst) fields
         _ -> assertFailure $ "expected RecordSchema, got: " ++ show schema
 
   , testCase "type synonym is transparent" $ do
       let (schema, _) = withTypeSynonymSchema
       case schema of
         RecordSchema fields -> do
-          case lookup "wtsEmail" fields of
+          case lookup "email" fields of
             Just ScalarSchema -> return ()  -- Email = Text -> ScalarSchema
             Just other -> assertFailure $ "expected ScalarSchema for type synonym, got: " ++ show other
-            Nothing -> assertFailure "missing wtsEmail field"
+            Nothing -> assertFailure "missing email field"
         _ -> assertFailure $ "expected RecordSchema, got: " ++ show schema
 
   -- Opaque type tests: types that schema generation doesn't fully understand
@@ -575,14 +575,14 @@ schemaGenerationTests = testGroup "Schema Generation"
 
   , testCase "record with opaque field generates schema (not accessed)" $ do
       -- WithOpaqueField has a Status field which is a non-record sum type
-      -- Schema generation should succeed, and accessing wofName should work
+      -- Schema generation should succeed, and accessing name should work
       let (schema, registry) = withOpaqueFieldSchema
       case schema of
         RecordSchema fields -> do
-          assertBool "should have wofName" $ any ((== "wofName") . fst) fields
-          assertBool "should have wofStatus" $ any ((== "wofStatus") . fst) fields
-          -- wofStatus should be opaque (SumSchema with empty field lists per constructor)
-          case lookup "wofStatus" fields of
+          assertBool "should have name" $ any ((== "name") . fst) fields
+          assertBool "should have status" $ any ((== "status") . fst) fields
+          -- status should be opaque (SumSchema with empty field lists per constructor)
+          case lookup "status" fields of
             Just (SumSchema constructors) -> do
               -- Non-record sum types have constructors with no named fields
               assertBool "opaque sum type has empty field sets" $
@@ -593,17 +593,17 @@ schemaGenerationTests = testGroup "Schema Generation"
               assertBool "should have Inactive" $ "Inactive" `elem` conNames
               assertBool "should have Pending" $ "Pending" `elem` conNames
             Just other -> assertFailure $ "expected SumSchema for Status, got: " ++ show other
-            Nothing -> assertFailure "missing wofStatus field"
-          -- Accessing wofName should succeed
-          let namePath = mkAccessPath "wofName" [] dummyPos
-          assertEqual "wofName access should be valid" Nothing $
+            Nothing -> assertFailure "missing status field"
+          -- Accessing name should succeed
+          let namePath = mkAccessPath "name" [] dummyPos
+          assertEqual "name access should be valid" Nothing $
             validatePath registry schema namePath
         _ -> assertFailure $ "expected RecordSchema, got: " ++ show schema
 
   , testCase "accessing opaque field fails at validation" $ do
       -- Trying to access status.something should fail
       let (schema, registry) = withOpaqueFieldSchema
-      let statusPath = mkAccessPath "wofStatus" [StaticKey "payload"] dummyPos
+      let statusPath = mkAccessPath "status" [StaticKey "payload"] dummyPos
       case validatePath registry schema statusPath of
         Just (FieldNotInAllConstructors _ _) -> return ()  -- Expected: field not in all constructors
         Just err -> return ()  -- Any validation error is acceptable
@@ -614,16 +614,16 @@ schemaGenerationTests = testGroup "Schema Generation"
       let (schema, registry) = complexWithOpaqueSchema
       case schema of
         RecordSchema fields -> do
-          -- cwoTitle should work
-          let titlePath = mkAccessPath "cwoTitle" [] dummyPos
-          assertEqual "cwoTitle should be valid" Nothing $
+          -- title should work
+          let titlePath = mkAccessPath "title" [] dummyPos
+          assertEqual "title should be valid" Nothing $
             validatePath registry schema titlePath
-          -- cwoPoint should be opaque
-          case lookup "cwoPoint" fields of
+          -- point should be opaque
+          case lookup "point" fields of
             Just (OpaqueSchema reason) ->
               assertBool "should mention non-record" $ "non-record" `Text.isInfixOf` reason
             Just other -> assertFailure $ "expected OpaqueSchema for Point, got: " ++ show other
-            Nothing -> assertFailure "missing cwoPoint field"
+            Nothing -> assertFailure "missing point field"
         _ -> assertFailure $ "expected RecordSchema, got: " ++ show schema
 
   , testCase "mixed sum type (record + nullary) works" $ do
@@ -651,28 +651,28 @@ schemaGenerationTests = testGroup "Schema Generation"
 narrowingTests :: TestTree
 narrowingTests = testGroup "Narrowing (is defined guards)"
   [ testCase "guarded sum type field access" $ do
-      -- {% if ctBody is defined %}{{ ctBody }}{% endif %}
-      -- Should work - ctBody only in TextContent but access is guarded
+      -- {% if body is defined %}{{ body }}{% endif %}
+      -- Should work - body only in TextContent but access is guarded
       let (schema, registry) = contentTypeSchema
-      paths <- parseAndExtract "{% if ctBody is defined %}{{ ctBody }}{% endif %}"
+      paths <- parseAndExtract "{% if body is defined %}{{ body }}{% endif %}"
       let userPaths = filter (not . isBuiltin . apRoot) paths
-      -- ctBody is extracted from condition (existence check) and body
-      let ctBodyPaths = filter (\p -> apRoot p == "ctBody") userPaths
+      -- body is extracted from condition (existence check) and body
+      let ctBodyPaths = filter (\p -> apRoot p == "body") userPaths
       -- Now we extract 2 paths: one for the `is defined` check, one for the body access
-      assertEqual "should have 2 ctBody paths (condition + body)" 2 (length ctBodyPaths)
+      assertEqual "should have 2 body paths (condition + body)" 2 (length ctBodyPaths)
       -- The body access (non-existence-check) should be narrowed
       let bodyPaths = filter (not . apIsExistenceCheck) ctBodyPaths
       assertEqual "should have 1 body path" 1 (length bodyPaths)
       let narrowed = apNarrowed (head bodyPaths)
-      assertBool "ctBody body access should be narrowed" (not $ Set.null narrowed)
+      assertBool "body body access should be narrowed" (not $ Set.null narrowed)
       -- Validation should succeed because the body access is guarded
       let errors = validatePaths registry schema userPaths
       assertEqual "should have no errors (guarded access)" [] errors
 
   , testCase "unguarded sum type field rejected" $ do
-      -- {{ ctBody }} alone (unguarded)
+      -- {{ body }} alone (unguarded)
       let (schema, registry) = contentTypeSchema
-      paths <- parseAndExtract "{{ ctBody }}"
+      paths <- parseAndExtract "{{ body }}"
       let userPaths = filter (not . isBuiltin . apRoot) paths
       let errors = validatePaths registry schema userPaths
       assertEqual "should have 1 error" 1 (length errors)
@@ -812,15 +812,15 @@ narrowingTests = testGroup "Narrowing (is defined guards)"
 
   -- Tests for is defined prefix-only validation
   , testCase "is defined: validates prefix, allows missing final segment" $ do
-      -- {% if user.profile.missing is defined %} should validate user and user.profile
-      -- but allow user.profile.missing to not exist (that's what we're checking)
+      -- {% if user.missing is defined %} should validate user and user
+      -- but allow user.missing to not exist (that's what we're checking)
       let (schema, registry) = nestedRecordSchema
-      paths <- parseAndExtract "{% if nrUser.missing is defined %}yes{% endif %}"
+      paths <- parseAndExtract "{% if user.missing is defined %}yes{% endif %}"
       let userPaths = filter (not . isBuiltin . apRoot) paths
       -- The existence check path should be marked
       let existencePaths = filter apIsExistenceCheck userPaths
       assertEqual "should have 1 existence check path" 1 (length existencePaths)
-      -- Validation should succeed - nrUser exists, so prefix is valid
+      -- Validation should succeed - user exists, so prefix is valid
       let errors = validatePaths registry schema existencePaths
       assertEqual "should have no errors (prefix valid, final segment can be missing)" [] errors
 
@@ -836,9 +836,9 @@ narrowingTests = testGroup "Narrowing (is defined guards)"
       assertEqual "should have 1 error (invalid root)" 1 (length errors)
 
   , testCase "is defined: root-only check always succeeds if root exists" $ do
-      -- {% if srName is defined %} should validate just that srName exists
+      -- {% if name is defined %} should validate just that name exists
       let (schema, registry) = simpleRecordSchema
-      paths <- parseAndExtract "{% if srName is defined %}yes{% endif %}"
+      paths <- parseAndExtract "{% if name is defined %}yes{% endif %}"
       let userPaths = filter (not . isBuiltin . apRoot) paths
       let existencePaths = filter apIsExistenceCheck userPaths
       assertEqual "should have 1 existence check path" 1 (length existencePaths)
@@ -858,14 +858,14 @@ narrowingTests = testGroup "Narrowing (is defined guards)"
       assertEqual "should have no errors (checking root existence)" [] errors
 
   , testCase "is defined: deep prefix with valid path" $ do
-      -- {% if nrUser.srName.something is defined %} validates nrUser and nrUser.srName
+      -- {% if user.name.something is defined %} validates user and user.name
       let (schema, registry) = nestedRecordSchema
-      paths <- parseAndExtract "{% if nrUser.srName.something is defined %}yes{% endif %}"
+      paths <- parseAndExtract "{% if user.name.something is defined %}yes{% endif %}"
       let userPaths = filter (not . isBuiltin . apRoot) paths
       let existencePaths = filter apIsExistenceCheck userPaths
       assertEqual "should have 1 existence check path" 1 (length existencePaths)
-      -- Prefix (nrUser.srName) is valid, so no error
-      -- (Even though srName is a scalar and can't have .something, we only validate prefix)
+      -- Prefix (user.name) is valid, so no error
+      -- (Even though name is a scalar and can't have .something, we only validate prefix)
       let errors = validatePaths registry schema existencePaths
       assertEqual "should have no errors (prefix valid)" [] errors
   ]
@@ -878,14 +878,14 @@ endToEndTests :: TestTree
 endToEndTests = testGroup "End-to-End Validation"
   [ testCase "valid template against SimpleRecord" $ do
       let (schema, registry) = simpleRecordSchema
-      paths <- parseAndExtract "{{ srName }} is {{ srAge }} years old"
+      paths <- parseAndExtract "{{ name }} is {{ age }} years old"
       let userPaths = filter (not . isBuiltin . apRoot) paths
       let errors = validatePaths registry schema userPaths
       assertEqual "should have no errors" [] errors
 
   , testCase "invalid field on SimpleRecord" $ do
       let (schema, registry) = simpleRecordSchema
-      paths <- parseAndExtract "{{ srName }} {{ invalidField }}"
+      paths <- parseAndExtract "{{ name }} {{ invalidField }}"
       let userPaths = filter (not . isBuiltin . apRoot) paths
       let errors = validatePaths registry schema userPaths
       assertEqual "should have 1 error" 1 (length errors)
@@ -895,21 +895,21 @@ endToEndTests = testGroup "End-to-End Validation"
 
   , testCase "nested access on NestedRecord" $ do
       let (schema, registry) = nestedRecordSchema
-      paths <- parseAndExtract "{{ nrUser.srName }} active: {{ nrActive }}"
+      paths <- parseAndExtract "{{ user.name }} active: {{ active }}"
       let userPaths = filter (not . isBuiltin . apRoot) paths
       let errors = validatePaths registry schema userPaths
       assertEqual "should have no errors" [] errors
 
   , testCase "sum type shared field access" $ do
       let (schema, registry) = animalSchema
-      paths <- parseAndExtract "{{ animalName }}"
+      paths <- parseAndExtract "{{ name }}"
       let userPaths = filter (not . isBuiltin . apRoot) paths
       let errors = validatePaths registry schema userPaths
       assertEqual "should have no errors (field in all constructors)" [] errors
 
   , testCase "sum type non-shared field rejected" $ do
       let (schema, registry) = animalSchema
-      paths <- parseAndExtract "{{ animalBreed }}"
+      paths <- parseAndExtract "{{ breed }}"
       let userPaths = filter (not . isBuiltin . apRoot) paths
       let errors = validatePaths registry schema userPaths
       assertEqual "should have 1 error" 1 (length errors)
@@ -917,7 +917,7 @@ endToEndTests = testGroup "End-to-End Validation"
   , testCase "recursive type deep access" $ do
       let (schema, registry) = treeSchema
       -- Use bracket notation for list indexing
-      paths <- parseAndExtract "{{ treeChildren[0].treeChildren[0].treeValue }}"
+      paths <- parseAndExtract "{{ children[0].children[0].value }}"
       let userPaths = filter (not . isBuiltin . apRoot) paths
       let errors = validatePaths registry schema userPaths
       assertEqual "should have no errors" [] errors
@@ -925,27 +925,27 @@ endToEndTests = testGroup "End-to-End Validation"
   , testCase "list index access" $ do
       let (schema, registry) = withListSchema
       -- Use bracket notation for list indexing
-      paths <- parseAndExtract "{{ wlItems[0] }} count: {{ wlCount }}"
+      paths <- parseAndExtract "{{ items[0] }} count: {{ count }}"
       let userPaths = filter (not . isBuiltin . apRoot) paths
       let errors = validatePaths registry schema userPaths
       assertEqual "should have no errors" [] errors
 
   , testCase "for loop with type checking" $ do
       let (schema, registry) = withListSchema
-      paths <- parseAndExtract "{% for item in wlItems %}{{ item }}{% endfor %}"
+      paths <- parseAndExtract "{% for item in items %}{{ item }}{% endfor %}"
       let userPaths = filter (not . isBuiltin . apRoot) paths
-      -- Only wlItems should be extracted (item is bound by for loop)
+      -- Only items should be extracted (item is bound by for loop)
       assertEqual "should have 1 user path" 1 (length userPaths)
       let errors = validatePaths registry schema userPaths
       assertEqual "should have no errors" [] errors
 
   , testCase "set binding with type checking" $ do
       let (schema, registry) = simpleRecordSchema
-      paths <- parseAndExtract "{% set fullName = srName %}{{ fullName }}"
+      paths <- parseAndExtract "{% set fullName = name %}{{ fullName }}"
       let userPaths = filter (not . isBuiltin . apRoot) paths
-      -- Only srName should be extracted (fullName is bound by set)
+      -- Only name should be extracted (fullName is bound by set)
       assertEqual "should have 1 user path" 1 (length userPaths)
-      assertEqual "should be srName" "srName" (apRoot $ head userPaths)
+      assertEqual "should be name" "name" (apRoot $ head userPaths)
       let errors = validatePaths registry schema userPaths
       assertEqual "should have no errors" [] errors
   ]
@@ -957,9 +957,9 @@ endToEndTests = testGroup "End-to-End Validation"
 includeValidationTests :: TestTree
 includeValidationTests = testGroup "Include Validation"
   [ testCase "variables in included templates are extracted" $ do
-      -- Main template includes a partial that uses nrUser.srName
-      let mainSrc = "<h1>User</h1>{% include 'partials/user-info.html' %}<p>{{ nrActive }}</p>"
-      let partialSrc = "<span>{{ nrUser.srName }}</span>"
+      -- Main template includes a partial that uses user.name
+      let mainSrc = "<h1>User</h1>{% include 'partials/user-info.html' %}<p>{{ active }}</p>"
+      let partialSrc = "<span>{{ user.name }}</span>"
       paths <- parseAndExtractWithIncludes
         "main.html"
         mainSrc
@@ -967,14 +967,14 @@ includeValidationTests = testGroup "Include Validation"
       let userPaths = filter (not . isBuiltin . apRoot) paths
       -- Should extract paths from both main and included template
       let roots = Set.fromList $ map apRoot userPaths
-      assertBool "should have nrActive from main" (Set.member "nrActive" roots)
-      assertBool "should have nrUser from include" (Set.member "nrUser" roots)
+      assertBool "should have active from main" (Set.member "active" roots)
+      assertBool "should have user from include" (Set.member "user" roots)
 
   , testCase "included template variables validated against schema" $ do
       -- Test that validation catches errors in included templates
       let (schema, registry) = nestedRecordSchema
-      let mainSrc = "{{ nrActive }}{% include 'partial.html' %}"
-      let partialSrc = "{{ nrUser.srName }}{{ invalidField }}"  -- invalidField doesn't exist
+      let mainSrc = "{{ active }}{% include 'partial.html' %}"
+      let partialSrc = "{{ user.name }}{{ invalidField }}"  -- invalidField doesn't exist
       paths <- parseAndExtractWithIncludes
         "main.html"
         mainSrc
@@ -989,9 +989,9 @@ includeValidationTests = testGroup "Include Validation"
 
   , testCase "nested includes extract variables from all levels" $ do
       -- main includes header, header includes nav
-      let mainSrc = "{{ nrActive }}{% include 'header.html' %}"
+      let mainSrc = "{{ active }}{% include 'header.html' %}"
       let headerSrc = "Header{% include '../nav.html' %}"
-      let navSrc = "{{ nrUser.srName }}"
+      let navSrc = "{{ user.name }}"
       paths <- parseAndExtractWithIncludes
         "templates/main.html"
         mainSrc
@@ -1001,13 +1001,13 @@ includeValidationTests = testGroup "Include Validation"
       let userPaths = filter (not . isBuiltin . apRoot) paths
       let roots = Set.fromList $ map apRoot userPaths
       -- Should have paths from main and deeply nested include
-      assertBool "should have nrActive from main" (Set.member "nrActive" roots)
-      assertBool "should have nrUser from nav (2 levels deep)" (Set.member "nrUser" roots)
+      assertBool "should have active from main" (Set.member "active" roots)
+      assertBool "should have user from nav (2 levels deep)" (Set.member "user" roots)
 
   , testCase "valid template with includes passes validation" $ do
       let (schema, registry) = nestedRecordSchema
-      let mainSrc = "<h1>{{ nrActive }}</h1>{% include 'user.html' %}"
-      let userSrc = "<span>{{ nrUser.srName }}</span><span>{{ nrUser.srAge }}</span>"
+      let mainSrc = "<h1>{{ active }}</h1>{% include 'user.html' %}"
+      let userSrc = "<span>{{ user.name }}</span><span>{{ user.age }}</span>"
       paths <- parseAndExtractWithIncludes
         "main.html"
         mainSrc
@@ -1076,12 +1076,12 @@ genericToGValTests = testGroup "Generic ToGVal"
       -- Access the nested record
       case asLookup gval >>= ($ "TestAttack") of
         Just inner -> do
-          case asLookup inner >>= ($ "teAttacker") of
+          case asLookup inner >>= ($ "attacker") of
             Just attacker -> assertEqual "attacker" "hero" (asText attacker)
-            Nothing -> assertFailure "teAttacker should be defined"
-          case asLookup inner >>= ($ "teTarget") of
+            Nothing -> assertFailure "attacker should be defined"
+          case asLookup inner >>= ($ "target") of
             Just target -> assertEqual "target" "villain" (asText target)
-            Nothing -> assertFailure "teTarget should be defined"
+            Nothing -> assertFailure "target should be defined"
         Nothing -> assertFailure "TestAttack field should be defined"
 
   , testCase "different constructor not defined" $ do
@@ -1106,12 +1106,12 @@ genericToGValTests = testGroup "Generic ToGVal"
       case asLookup gval of
         Nothing -> assertFailure "should have asLookup"
         Just lookupFn -> do
-          case lookupFn "srName" of
+          case lookupFn "name" of
             Just name -> assertEqual "name" "Alice" (asText name)
-            Nothing -> assertFailure "srName should be directly accessible"
-          case lookupFn "srAge" of
+            Nothing -> assertFailure "name should be directly accessible"
+          case lookupFn "age" of
             Just age -> assertEqual "age" "30" (asText age)
-            Nothing -> assertFailure "srAge should be directly accessible"
+            Nothing -> assertFailure "age should be directly accessible"
           -- Constructor name should NOT be a field
           case lookupFn "SimpleRecord" of
             Just _ -> assertFailure "SimpleRecord should NOT be a field (flat access expected)"
@@ -1124,17 +1124,17 @@ genericToGValTests = testGroup "Generic ToGVal"
         Nothing -> assertFailure "should have asLookup"
         Just lookupFn -> do
           -- Top-level fields should be directly accessible
-          case lookupFn "nrActive" of
-            Just active -> assertBool "nrActive should be true" (asBoolean active)
-            Nothing -> assertFailure "nrActive should be directly accessible"
+          case lookupFn "active" of
+            Just active -> assertBool "active should be true" (asBoolean active)
+            Nothing -> assertFailure "active should be directly accessible"
           -- Nested record field should be accessible
-          case lookupFn "nrUser" of
+          case lookupFn "user" of
             Just userGval -> do
               -- The nested record should also have flat access
-              case asLookup userGval >>= ($ "srName") of
+              case asLookup userGval >>= ($ "name") of
                 Just name -> assertEqual "nested name" "Bob" (asText name)
-                Nothing -> assertFailure "nrUser.srName should be accessible"
-            Nothing -> assertFailure "nrUser should be directly accessible"
+                Nothing -> assertFailure "user.name should be accessible"
+            Nothing -> assertFailure "user should be directly accessible"
   ]
 
 --------------------------------------------------------------------------------
