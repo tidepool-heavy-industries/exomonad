@@ -26,10 +26,13 @@ module Tidepool.Server.EffectRunner
   , runEffects
   ) where
 
+import Control.Exception (bracket)
 import Control.Monad.Freer (Eff, runM)
 import Data.Text (Text)
 import qualified Data.Text as T
+import System.Directory (createDirectoryIfMissing)
 import System.Environment (lookupEnv)
+import System.FilePath ((</>))
 import Text.Read (readMaybe)
 
 -- Interpreter imports
@@ -75,7 +78,7 @@ import Tidepool.Log.Interpreter
   )
 import Tidepool.Effect.Log (Log, LogLevel(..), LogContext, emptyLogContext)
 import Control.Monad.Freer.Reader (Reader, runReader)
-import System.Log.FastLogger (newStderrLoggerSet, flushLogStr, rmLoggerSet)
+import System.Log.FastLogger (LoggerSet, newStderrLoggerSet, newFileLoggerSet, flushLogStr, rmLoggerSet)
 
 -- Effect imports
 import Tidepool.Effects.UI (UI)
@@ -263,8 +266,9 @@ mkInterpreterEnv config = do
 -- This composes the full effect stack:
 --
 -- @
--- Eff '[UI, Habitica, LLMComplete, Log, Observability, IO] a
+-- Eff '[UI, Habitica, LLMComplete, Log, Reader LogContext, Observability, IO] a
 --   → runObservabilityWithContext (interpret Observability)
+--   → runReader emptyLogContext (provide LogContext)
 --   → runLogFastLogger (interpret Log)
 --   → runLLMComplete (interpret LLMComplete)
 --   → runHabitica (interpret Habitica)
@@ -277,7 +281,8 @@ mkInterpreterEnv config = do
 -- 2. Habitica - makes Habitica API calls
 -- 3. LLMComplete - makes LLM API calls
 -- 4. Log - session-scoped logging (fast-logger backend)
--- 5. Observability (last to peel) - records events and spans
+-- 5. Reader LogContext - provides correlation context for Log
+-- 6. Observability (last to peel) - records events and spans
 --
 -- Traces are automatically flushed to OTLP (Grafana Tempo) after execution
 -- if @OTLP_ENDPOINT@ is configured.
@@ -285,7 +290,7 @@ mkInterpreterEnv config = do
 -- Example:
 --
 -- @
--- myAgent :: Eff '[UI, Habitica, LLMComplete, Log, Observability, IO] String
+-- myAgent :: Eff '[UI, Habitica, LLMComplete, Log, Reader LogContext, Observability, IO] String
 -- myAgent = do
 --   publishEvent $ GraphTransition "entry" "greeting" "start"
 --   showText "Welcome!"
@@ -304,22 +309,21 @@ runEffects env ctx callback action = do
   -- Create a fresh trace context for this request
   traceCtx <- newTraceContext
 
-  -- Create a logger set for this request
-  loggerSet <- newStderrLoggerSet 4096
+  let logConfig = ecLogConfig $ eeConfig env
 
-  -- Run the effect stack
-  result <- runM
-    . runObservabilityWithContext traceCtx (ecLokiConfig $ eeConfig env)
-    . runReader emptyLogContext
-    . runLogFastLogger (ecLogConfig $ eeConfig env) loggerSet
-    . runLLMComplete (eeLLMEnv env)
-    . runHabitica (eeHabiticaEnv env)
-    . runUI ctx callback
-    $ action
-
-  -- Flush and clean up logger
-  flushLogStr loggerSet
-  rmLoggerSet loggerSet
+  -- Create and manage logger with bracket for exception safety
+  result <- bracket
+    (mkLoggerSet logConfig)
+    (\ls -> flushLogStr ls >> rmLoggerSet ls)
+    (\loggerSet -> runM
+        . runObservabilityWithContext traceCtx (ecLokiConfig $ eeConfig env)
+        . runReader emptyLogContext
+        . runLogFastLogger logConfig loggerSet
+        . runLLMComplete (eeLLMEnv env)
+        . runHabitica (eeHabiticaEnv env)
+        . runUI ctx callback
+        $ action
+    )
 
   -- Flush traces to OTLP if configured
   case ecOTLPConfig (eeConfig env) of
@@ -329,3 +333,15 @@ runEffects env ctx callback action = do
       pure ()
 
   pure result
+
+-- | Create logger set based on config output setting.
+mkLoggerSet :: LogConfig -> IO LoggerSet
+mkLoggerSet config = case config.lcOutput of
+  LogStderr -> newStderrLoggerSet 4096
+  LogFile dir -> do
+    createDirectoryIfMissing True dir
+    newFileLoggerSet 4096 (dir </> "session.log")
+  LogBoth dir -> do
+    -- For LogBoth, we use stderr as primary; file logging handled separately
+    createDirectoryIfMissing True dir
+    newStderrLoggerSet 4096

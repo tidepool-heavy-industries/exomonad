@@ -156,22 +156,25 @@ withLogInterpreter config action = do
       createDirectoryIfMissing True logDir
       let filename = formatSessionFilename sessionId
           sessionFile = logDir </> filename
-      stderrSet <- newStderrLoggerSet defaultBufSize
-      fileSet <- newFileLoggerSet defaultBufSize sessionFile
+      -- Nested brackets ensure proper cleanup even if inner allocation fails
       bracket
-        (pure (stderrSet, fileSet))
-        (\(ss, fs) -> do
-          flushLogStr ss >> rmLoggerSet ss
-          flushLogStr fs >> rmLoggerSet fs
-          when config.lcSymlinkLatest $
-            createLatestSymlink logDir filename
-        )
-        (\(ss, fs) -> do
-          let header = formatSessionHeader sessionId config.lcSessionName now
-              headerStr = toLogStr $ TE.encodeUtf8 header
-          pushLogStrLn ss headerStr
-          pushLogStrLn fs headerStr
-          action (runLogFastLoggerDual config ss fs)
+        (newStderrLoggerSet defaultBufSize)
+        (\ss -> flushLogStr ss >> rmLoggerSet ss)
+        (\stderrSet ->
+          bracket
+            (newFileLoggerSet defaultBufSize sessionFile)
+            (\fs -> do
+              flushLogStr fs >> rmLoggerSet fs
+              when config.lcSymlinkLatest $
+                createLatestSymlink logDir filename
+            )
+            (\fileSet -> do
+              let header = formatSessionHeader sessionId config.lcSessionName now
+                  headerStr = toLogStr $ TE.encodeUtf8 header
+              pushLogStrLn stderrSet headerStr
+              pushLogStrLn fileSet headerStr
+              action (runLogFastLoggerDual config stderrSet fileSet)
+            )
         )
 
 -- | Run Log effect writing to two logger sets (stderr + file).
