@@ -473,6 +473,170 @@ docker exec tidepool-control-server chown -R 1000:1000 /home/user/.config/gh
 docker exec tidepool-control-server chown -R 1000:1000 /sockets
 ```
 
+## Docker Orchestration Layer (Review Focus)
+
+This section details the custom Docker orchestration we built. **This is the area where we may be reinventing wheels.**
+
+### The Problem We're Solving
+
+LLM agents (Claude Code sessions) need to:
+1. **Spawn parallel workers** - TL dispatches tasks to Dev agents, each in isolated worktrees
+2. **Execute commands remotely** - Control-server runs `cabal build`, `gh issue create` in agent containers
+3. **Coordinate via TUI** - Agents need to show popups/confirmations to the human in the Zellij session
+4. **Share authentication** - GitHub tokens, Claude auth must be available across containers
+
+### What We Built
+
+#### docker-spawner (Rust, ~300 LOC)
+
+A thin HTTP wrapper around Docker's API via bollard crate.
+
+**Endpoints:**
+```
+POST /spawn          Create container with mounts + labels
+POST /exec/{id}      Run command in container, return stdout/stderr/exit_code
+GET  /status/{id}    Container status
+POST /stop/{id}      Stop + remove container
+GET  /health         Liveness check
+```
+
+**Spawn creates containers with:**
+```rust
+Config {
+    image: "tidepool-agent:latest",
+    labels: { "com.tidepool.bead_id": "...", "com.tidepool.role": "agent" },
+    mounts: [
+        bind: worktree_path → /worktrees/{id},
+        volume: tidepool-gh-auth → /home/agent/.config/gh
+    ],
+    network: "tidepool-internal",
+    user: "1000:1000",
+    env: ["TIDEPOOL_BEAD_ID=...", "TIDEPOOL_BACKEND=claude|gemini"]
+}
+```
+
+**Exec returns:**
+```json
+{"exit_code": 0, "stdout": "...", "stderr": "..."}
+```
+
+#### Why Not Existing Solutions?
+
+| Alternative | Why we didn't use it |
+|-------------|---------------------|
+| **docker compose run** | No programmatic API; can't get structured stdout/stderr |
+| **Kubernetes Jobs** | Overkill for local dev; adds etcd, API server complexity |
+| **Nomad** | Good fit but another daemon to run; we already have Docker |
+| **SSH into containers** | Tried this first (ssh-proxy); key distribution, port allocation complex |
+| **docker exec CLI** | No structured output; would need to parse text |
+| **Testcontainers** | Library, not service; tied to test lifecycle |
+
+#### What docker-spawner Actually Does
+
+1. **Wraps bollard** - Rust Docker client, handles socket communication
+2. **Hardcodes our patterns** - Mounts, labels, network always the same
+3. **Provides HTTP interface** - So Haskell control-server can call it
+4. **Captures exec output** - Streams stdout/stderr, returns exit code
+
+#### Could We Replace It?
+
+**Yes, with:**
+- **Portainer API** - Has exec endpoint, but heavy (UI we don't need)
+- **Custom shell script + `docker` CLI** - Parse JSON output of `docker inspect`, `docker exec`
+- **Direct bollard from Haskell** - But we'd need Haskell Docker bindings
+
+**The 300 LOC buys:**
+- Typed request/response (SpawnRequest, ExecResponse)
+- Error handling for 404 (container not found)
+- Graceful stop (10s timeout, then remove)
+- Logging via tracing
+
+### Container Topology
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ HOST MACHINE                                                                 │
+│                                                                             │
+│  ┌─────────────────┐                                                        │
+│  │ docker.sock     │◄───────────────────────────────────────────────────┐  │
+│  └────────┬────────┘                                                    │  │
+│           │                                                             │  │
+│           ▼                                                             │  │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐     │  │
+│  │ docker-spawner  │    │ control-server  │    │ zellij          │     │  │
+│  │ :7435           │◄───│ :7432           │    │ (human here)    │     │  │
+│  │ /spawn,/exec    │    │ MCP tools       │    │                 │     │  │
+│  └────────┬────────┘    └────────┬────────┘    └────────┬────────┘     │  │
+│           │                      │                      │              │  │
+│           │ creates              │ calls                │ attaches     │  │
+│           ▼                      ▼                      ▼              │  │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐     │  │
+│  │ tidepool-tl     │    │ tidepool-pm     │    │ subagent-1      │     │  │
+│  │ Claude Code     │    │ Claude Code     │    │ Claude Code     │◄────┘  │
+│  │ (Tech Lead)     │    │ (PM)            │    │ (spawned)       │        │
+│  └─────────────────┘    └─────────────────┘    └─────────────────┘        │
+│                                                                             │
+│  SHARED VOLUMES:                                                           │
+│  ├── tidepool-worktrees    (git worktrees, /worktrees in containers)       │
+│  ├── tidepool-sockets      (Unix sockets, /sockets in containers)          │
+│  ├── tidepool-gh-auth      (GitHub CLI auth, ~/.config/gh)                 │
+│  ├── tidepool-zellij       (Zellij session socket, /run/user/1000)         │
+│  └── tidepool-claude-{tl,pm} (Claude Code state, separate per agent)       │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Haskell Effect Integration
+
+Control-server calls docker-spawner via an effect interpreter:
+
+```haskell
+-- Effect type (dsl/core)
+data DockerSpawner m a where
+  SpawnContainer :: SpawnConfig -> DockerSpawner m ContainerId
+  ExecInContainer :: ContainerId -> [Text] -> DockerSpawner m ExecResult
+  StopContainer :: ContainerId -> DockerSpawner m ()
+
+-- Interpreter (effects/docker-spawner-interpreter)
+runDockerSpawner :: Config -> Eff (DockerSpawner ': es) a -> Eff es a
+runDockerSpawner cfg = interpret $ \case
+  SpawnContainer req -> liftIO $ httpPost (cfg.url <> "/spawn") req
+  ExecInContainer id cmd -> liftIO $ httpPost (cfg.url <> "/exec/" <> id) cmd
+  StopContainer id -> liftIO $ httpPost (cfg.url <> "/stop/" <> id) ()
+```
+
+### TUI Cross-Container Communication
+
+For popups (confirm_action, select_option), we use:
+
+```
+control-server                    tui-spawner                  tui-popup
+     │                                 │                            │
+     │ subprocess spawn                │                            │
+     │────────────────────────────────▶│                            │
+     │                                 │ mkfifo /tmp/popup-xyz      │
+     │                                 │ zellij new-pane --floating │
+     │                                 │────────────────────────────▶│
+     │                                 │                            │ render to /dev/tty
+     │                                 │                            │ user clicks button
+     │                                 │◀────────────────────────────│ write result to FIFO
+     │◀────────────────────────────────│ read FIFO, return          │
+     │                                 │                            │
+```
+
+This is complex because Zellij doesn't have a native popup API. We spawn a floating pane that writes to a FIFO.
+
+### Questions for Researcher
+
+1. **docker-spawner vs alternatives**: Is there a lighter-weight solution for "spawn container, exec command, get output"?
+
+2. **Zellij limitations**: We work around Zellij's lack of popup API with FIFOs. Is there a better terminal multiplexer for this use case?
+
+3. **Volume sharing patterns**: We share 5+ volumes across containers. Is there a standard pattern for multi-container dev environments?
+
+4. **Bollard deprecation warnings**: The bollard crate has deprecated APIs we're using. Should we switch to another Docker client?
+
+5. **Single-binary alternative**: Could we collapse docker-spawner into control-server? The separation exists because Haskell Docker bindings are immature.
+
 ## What's NOT in the Deployed System
 
 These exist in the repo but are not part of the current Docker deployment:
