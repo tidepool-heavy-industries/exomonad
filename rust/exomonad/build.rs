@@ -1,29 +1,39 @@
 //! Build script for exomonad: embeds git revision info at compile time.
 //!
-//! Uses a simple approach: capture git rev-parse output directly.
-//! Falls back to "unknown" if git is not available or not in a repo.
+//! Priority:
+//!   1. VERGEN_GIT_SHA env var (set by Docker build)
+//!   2. git rev-parse (local development)
+//!   3. Build failure (no silent "unknown")
 
+use std::env;
 use std::process::Command;
 
 fn main() {
-    // Rerun if git HEAD changes
+    // Rerun if git HEAD changes (for local dev)
     println!("cargo:rerun-if-changed=.git/HEAD");
     println!("cargo:rerun-if-changed=.git/refs/heads");
+    // Rerun if env var changes (for Docker builds)
+    println!("cargo:rerun-if-env-changed=VERGEN_GIT_SHA");
 
-    // Get git SHA
-    let git_sha = Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
-        .output()
+    // Check for pre-set env var first (Docker builds set this)
+    let git_sha = env::var("VERGEN_GIT_SHA")
         .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                String::from_utf8(o.stdout).ok()
-            } else {
-                None
-            }
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            // Fall back to git command (local development)
+            Command::new("git")
+                .args(["rev-parse", "--short", "HEAD"])
+                .output()
+                .ok()
+                .and_then(|o| {
+                    if o.status.success() {
+                        String::from_utf8(o.stdout).ok().map(|s| s.trim().to_string())
+                    } else {
+                        None
+                    }
+                })
         })
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "unknown".to_string());
+        .expect("GIT_SHA required: set VERGEN_GIT_SHA env var or build from a git repo");
 
     println!("cargo:rustc-env=VERGEN_GIT_SHA={git_sha}");
 }
