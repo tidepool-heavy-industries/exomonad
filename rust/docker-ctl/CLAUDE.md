@@ -44,8 +44,21 @@ Errors are reported as JSON on `stderr` with exit code 1:
 Used by `spawn` command:
 - `TIDEPOOL_AGENT_IMAGE` - Docker image for agents (default: `tidepool-agent:latest`)
 - `TIDEPOOL_NETWORK` - Docker network for agents (default: `tidepool`)
+- `TIDEPOOL_WORKTREES_VOLUME` - Docker volume for worktrees (default: `tidepool-worktrees`)
 - `HOST_UID` - Default UID for agent user (default: `1000`)
 - `HOST_GID` - Default GID for agent user (default: `1000`)
+
+## Worktree Mounting
+
+The `spawn` command uses a **named Docker volume** (not bind mounts) to share worktrees between containers. This is required because Docker runs on a remote host where local paths don't exist.
+
+**How it works:**
+1. `--worktree-path` is passed (e.g., `/worktrees/gh-346-test-issue`)
+2. The worktree directory name is extracted (e.g., `gh-346-test-issue`)
+3. The entire `tidepool-worktrees` volume is mounted to `/worktrees` in the container
+4. The container's working directory is set to `/worktrees/{worktree_dir}`
+
+This allows both control-server and agent containers to share the same worktrees volume.
 
 ## Design
 

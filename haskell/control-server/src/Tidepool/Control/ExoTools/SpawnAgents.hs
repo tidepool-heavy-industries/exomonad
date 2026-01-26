@@ -317,91 +317,97 @@ processIssue spawnMode mHangarRoot repoRoot wtBaseDir backend shortId = do
                             Right True -> True
                             _ -> False
 
-                      if dirExists
-                        then pure $ Left (shortId, "Worktree already exists at " <> T.pack targetPath <> ". Use Zellij tabs or delete worktree first.")
+                      -- Idempotency: if worktree exists, skip creation and reuse it
+                      -- This allows re-launching a Zellij tab for an existing worktree
+                      mPath <- if dirExists
+                        then pure $ Right targetPath  -- Reuse existing worktree
                         else do
-                          -- a. Create worktree
+                          -- a. Create worktree (only if it doesn't exist)
                           wtRes <- createWorktree spec
                           case wtRes of
                             Left err -> pure $ Left (shortId, T.pack (show err))
-                            Right (WorktreePath path) -> do
-                              -- b. Bootstrap .tidepool/ directory structure
-                              mSocketsPath <- getEnv "TIDEPOOL_SOCKETS_PATH"
-                              let socketDir = case (spawnMode, mSocketsPath) of
-                                    (SpawnZellij, _) -> Paths.socketDirectoryFor shortId
-                                    (_, Just sp)  -> T.unpack sp </> T.unpack shortId
-                                    _             -> "/sockets" </> T.unpack shortId
-                                  controlSocket = Paths.controlSocketPath socketDir
-                                  tuiSocket = Paths.tuiSocketPath socketDir
-                                  
-                                  backendCmd = case backend of
-                                        "gemini" -> "gemini --debug"
-                                        "claude" -> "claude --debug --verbose"
-                                        _        -> "claude --debug --verbose"
-                                  envVars =
-                                    [
-                                      ("SUBAGENT_CMD", backendCmd)
-                                    , ("HANGAR_ROOT", T.pack hr)
-                                    , ("TIDEPOOL_BIN_DIR", T.pack binDir)
-                                    , ("TIDEPOOL_CONTAINER", "agent-" <> shortId)
-                                    , ("TIDEPOOL_SOCKET_DIR", T.pack socketDir)
-                                    , ("TIDEPOOL_CONTROL_SOCKET", T.pack controlSocket)
-                                    , ("TIDEPOOL_TUI_SOCKET", T.pack tuiSocket)
-                                    , ("TIDEPOOL_ROLE", "dev")
-                                    ]
+                            Right (WorktreePath p) -> pure $ Right p
 
-                              bootstrapRes <- bootstrapTidepool mHangarRoot repoRoot path backend socketDir controlSocket envVars
-                              case bootstrapRes of
-                                Left errMsg -> pure $ Left (shortId, "Worktree created but bootstrap failed: " <> errMsg)
+                      case mPath of
+                        Left errTuple -> pure $ Left errTuple
+                        Right path -> do
+                          -- b. Bootstrap .tidepool/ directory structure
+                          mSocketsPath <- getEnv "TIDEPOOL_SOCKETS_PATH"
+                          let socketDir = case (spawnMode, mSocketsPath) of
+                                (SpawnZellij, _) -> Paths.socketDirectoryFor shortId
+                                (_, Just sp)  -> T.unpack sp </> T.unpack shortId
+                                _             -> "/sockets" </> T.unpack shortId
+                              controlSocket = Paths.controlSocketPath socketDir
+                              tuiSocket = Paths.tuiSocketPath socketDir
+
+                              backendCmd = case backend of
+                                    "gemini" -> "gemini --debug"
+                                    "claude" -> "claude --debug --verbose"
+                                    _        -> "claude --debug --verbose"
+                              envVars =
+                                [
+                                  ("SUBAGENT_CMD", backendCmd)
+                                , ("HANGAR_ROOT", T.pack hr)
+                                , ("TIDEPOOL_BIN_DIR", T.pack binDir)
+                                , ("TIDEPOOL_CONTAINER", "agent-" <> shortId)
+                                , ("TIDEPOOL_SOCKET_DIR", T.pack socketDir)
+                                , ("TIDEPOOL_CONTROL_SOCKET", T.pack controlSocket)
+                                , ("TIDEPOOL_TUI_SOCKET", T.pack tuiSocket)
+                                , ("TIDEPOOL_ROLE", "dev")
+                                ]
+
+                          bootstrapRes <- bootstrapTidepool mHangarRoot repoRoot path backend socketDir controlSocket envVars
+                          case bootstrapRes of
+                            Left errMsg -> pure $ Left (shortId, "Bootstrap failed: " <> errMsg)
+                            Right () -> do
+                              -- c. Write issue context
+                              let context = buildIssueContext issue branchName
+                              contextRes <- writeBeadContext path context
+                              case contextRes of
+                                Left errMsg -> pure $ Left (shortId, "Context write failed: " <> errMsg)
                                 Right () -> do
-                                  -- c. Write issue context
-                                  let context = buildIssueContext issue branchName
-                                  contextRes <- writeBeadContext path context
-                                  case contextRes of
-                                    Left errMsg -> pure $ Left (shortId, "Worktree created but context write failed: " <> errMsg)
-                                    Right () -> do
-                                      -- e. Launch agent (Zellij or Docker)
-                                      case spawnMode of
-                                        SpawnZellij -> do
-                                          let tabConfig = TabConfig
-                                                {
-                                                  tcName = shortId
-                                                , tcLayout = repoRoot </> ".zellij" </> "worktree.kdl"
+                                  -- d. Launch agent (Zellij or Docker)
+                                  case spawnMode of
+                                    SpawnZellij -> do
+                                      let tabConfig = TabConfig
+                                            {
+                                              tcName = shortId
+                                            , tcLayout = repoRoot </> ".zellij" </> "worktree.kdl"
+                                            , tcCwd = path
+                                            , tcEnv = envVars
+                                            , tcCommand = Nothing
+                                            }
+                                      tabRes <- newTab tabConfig
+                                      case tabRes of
+                                        Left err -> pure $ Left (shortId, "Tab launch failed: " <> T.pack (show err))
+                                        Right tabId -> pure $ Right (shortId, path, tabId)
+
+                                    SpawnDocker -> do
+                                      let config = SpawnConfig
+                                            { scIssueId = shortId
+                                            , scWorktreePath = path
+                                            , scBackend = backend
+                                            , scUid = Nothing
+                                            , scGid = Nothing
+                                            }
+                                      containerResult <- spawnContainer config
+
+                                      case containerResult of
+                                        Left err -> pure $ Left (shortId, "Container spawn failed: " <> T.pack (show err))
+                                        Right containerId -> do
+                                          let attachCmd = "docker attach " <> containerId.unContainerId
+                                              tabConfig = TabConfig
+                                                { tcName = shortId
+                                                , tcLayout = ""
                                                 , tcCwd = path
                                                 , tcEnv = envVars
-                                                , tcCommand = Nothing
+                                                , tcCommand = Just attachCmd
                                                 }
+
                                           tabRes <- newTab tabConfig
                                           case tabRes of
-                                            Left err -> pure $ Left (shortId, "Worktree created but tab launch failed: " <> T.pack (show err))
+                                            Left err -> pure $ Left (shortId, "Container spawned (" <> containerId.unContainerId <> ") but tab launch failed: " <> T.pack (show err))
                                             Right tabId -> pure $ Right (shortId, path, tabId)
-                                        
-                                        SpawnDocker -> do
-                                          let config = SpawnConfig
-                                                { scIssueId = shortId
-                                                , scWorktreePath = path
-                                                , scBackend = backend
-                                                , scUid = Nothing
-                                                , scGid = Nothing
-                                                }
-                                          containerResult <- spawnContainer config
-                                          
-                                          case containerResult of
-                                            Left err -> pure $ Left (shortId, "Worktree created but container spawn failed: " <> T.pack (show err))
-                                            Right containerId -> do
-                                              let attachCmd = "docker attach " <> containerId.unContainerId
-                                                  tabConfig = TabConfig
-                                                    { tcName = shortId
-                                                    , tcLayout = ""
-                                                    , tcCwd = path
-                                                    , tcEnv = envVars
-                                                    , tcCommand = Just attachCmd
-                                                    }
-                                              
-                                              tabRes <- newTab tabConfig
-                                              case tabRes of
-                                                Left err -> pure $ Left (shortId, "Container spawned (" <> containerId.unContainerId <> ") but tab launch failed: " <> T.pack (show err))
-                                                Right tabId -> pure $ Right (shortId, path, tabId)
 
 
 -- | Bootstrap .tidepool/ directory structure in a worktree.

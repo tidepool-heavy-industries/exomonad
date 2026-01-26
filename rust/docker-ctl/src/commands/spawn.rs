@@ -3,6 +3,7 @@ use bollard::models::{HostConfig, Mount, MountTypeEnum};
 use bollard::Docker;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::path::Path;
 
 #[derive(Serialize)]
 pub struct SpawnResponse {
@@ -19,29 +20,43 @@ pub async fn run(
     expires_at: Option<String>,
 ) -> anyhow::Result<String> {
     let docker = Docker::connect_with_local_defaults()?;
-    
+
     let agent_image = std::env::var("TIDEPOOL_AGENT_IMAGE").unwrap_or_else(|_| "tidepool-agent:latest".to_string());
     let host_uid: u32 = std::env::var("HOST_UID").unwrap_or_else(|_| "1000".to_string()).parse()?;
     let host_gid: u32 = std::env::var("HOST_GID").unwrap_or_else(|_| "1000".to_string()).parse()?;
     let network_name = std::env::var("TIDEPOOL_NETWORK").unwrap_or_else(|_| "tidepool".to_string());
 
+    // Get volume name from environment - in Docker, we use a shared volume instead of bind mounts
+    // because Docker runs on a remote host where the local paths don't exist
+    let worktrees_volume = std::env::var("TIDEPOOL_WORKTREES_VOLUME")
+        .unwrap_or_else(|_| "tidepool-worktrees".to_string());
+
     let container_name = format!("tidepool-agent-{}", issue_id);
-    
+
     let mut labels = HashMap::new();
     labels.insert("com.tidepool.issue_id".to_string(), issue_id.clone());
     labels.insert("com.tidepool.role".to_string(), "agent".to_string());
     labels.insert(
-        "com.tidepool.expires_at".to_string(), 
+        "com.tidepool.expires_at".to_string(),
         expires_at.unwrap_or_else(|| "never".to_string())
-    ); 
+    );
 
-    let worktree_mount_target = format!("/worktrees/{}", issue_id);
-    
+    // Extract the worktree directory name from the full path (e.g., "gh-346-test-issue")
+    let worktree_dir = Path::new(&worktree_path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(&issue_id);
+
+    // The working directory inside the container
+    let working_dir = format!("/worktrees/{}", worktree_dir);
+
+    // Use VOLUME mount for the shared worktrees volume (not BIND mount)
+    // This works with remote Docker hosts where local paths don't exist
     let mounts = vec![
         Mount {
-            target: Some(worktree_mount_target.clone()),
-            source: Some(worktree_path.clone()),
-            typ: Some(MountTypeEnum::BIND),
+            target: Some("/worktrees".to_string()),
+            source: Some(worktrees_volume),
+            typ: Some(MountTypeEnum::VOLUME),
             ..Default::default()
         },
         Mount {
@@ -59,6 +74,7 @@ pub async fn run(
     let config = Config {
         image: Some(agent_image),
         labels: Some(labels),
+        working_dir: Some(working_dir),
         host_config: Some(HostConfig {
             mounts: Some(mounts),
             network_mode: Some(network_name),

@@ -116,9 +116,11 @@ Create git worktrees for multiple issues and launch isolated agent sessions in Z
 
 **Field Details:**
 
-- `worktrees`: Successfully created worktrees (id, path)
+- `worktrees`: Successfully created or reused worktrees (id, path)
 - `tabs`: Successfully launched Zellij tabs (id, tabId)
 - `failed`: Failed operations (id, reason)
+
+**Idempotency:** If a worktree already exists for an issue, it will be reused (no new worktree created, but bootstrap and tab launch still run).
 
 ## How It Works
 
@@ -228,8 +230,11 @@ Launches a new Zellij tab with the subagent layout.
 
 **Fix:** Build binaries in `runtime/tidepool` and copy to `runtime/bin/`.
 
-### "Worktree already exists"
+### Worktree Reuse (Idempotency)
 
-**Cause:** Directory already exists from previous spawn.
+`spawn_agents` is idempotent: if a worktree already exists for an issue, it will be reused instead of creating a new one. The tool will:
+1. Skip worktree creation
+2. Re-run bootstrap (updates configs if needed)
+3. Launch a new Zellij tab/Docker container for the existing worktree
 
-**Fix:** Switch to existing tab or delete worktree/branch.
+This allows re-spawning agents after a tab was closed without manually cleaning up.

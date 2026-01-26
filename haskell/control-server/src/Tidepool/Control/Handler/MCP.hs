@@ -40,7 +40,7 @@ import Tidepool.Control.FeedbackTools
   ( registerFeedbackLogic, RegisterFeedbackArgs(..) )
 import Tidepool.Control.ExoTools
   ( exoStatusLogic, ExoStatusArgs(..)
-  , spawnAgentsLogic, SpawnAgentsArgs(..), SpawnAgentsResult(..), findHangarRoot
+  , spawnAgentsLogic, SpawnAgentsArgs(..), SpawnAgentsResult(..)
   , filePRLogic, FilePRArgs(..), FilePRResult(..), PRInfo(..)
   )
 
@@ -267,13 +267,13 @@ handleSpawnAgentsTool logger reqId args = do
       logDebug logger $ "  issue_numbers=" <> T.intercalate "," saArgs.saaIssueNumbers
 
       -- Most interpreters use default configs which assume current dir is repo root.
-      let repoRoot = "." 
-      
-      -- Find hangar root to resolve runtime binaries
-      mHangarRoot <- runM $ runEnvIO $ runFileSystemIO $ runGitIO findHangarRoot
-      let hr = fromMaybe repoRoot mHangarRoot
-          binDir = Paths.runtimeBinDir hr
-          dockerCtlPath = Paths.dockerCtlBin binDir
+      let repoRoot = "."
+
+      -- Get binary directory (respects TIDEPOOL_BIN_DIR env var, defaults to /usr/local/bin)
+      -- In Docker: binaries are at /usr/local/bin
+      -- In local dev: TIDEPOOL_BIN_DIR should point to hangar runtime/bin
+      binDir <- Paths.dockerBinDir
+      let dockerCtlPath = Paths.dockerCtlBin binDir
 
       resultOrErr <- try $ runM
         $ runLog Debug

@@ -31,7 +31,9 @@ services:
       - TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
       - TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
       - TIDEPOOL_WORKTREES_PATH=/worktrees
+      - TIDEPOOL_WORKTREES_VOLUME=tidepool-worktrees
       - TIDEPOOL_SOCKETS_PATH=/sockets
+      - TIDEPOOL_PROJECT_DIR=/repo
       - GEMMA_ENDPOINT=${GEMMA_ENDPOINT:-http://host.docker.internal:11434}
       - HOST_UID=${HOST_UID:-1000}
       - HOST_GID=${HOST_GID:-1000}
@@ -45,6 +47,10 @@ services:
       - tidepool-zellij:/run/user/1000
       - tidepool-gh-auth:/home/user/.config/gh
       - tidepool-worktrees:/worktrees:rw
+      # Named volume for repo (cloned on first start via entrypoint)
+      # Cannot use bind mounts - Docker runs on remote NixOS, not local macOS
+      - tidepool-repo:/repo:rw
+    working_dir: /repo
     healthcheck:
       test: ["CMD-SHELL", "socat -u OPEN:/dev/null UNIX-CONNECT:/sockets/control.sock || exit 1"]
       interval: 5s
@@ -103,7 +109,11 @@ services:
       - CONTROL_SERVER_URL=http://control-server:7432
       - MANTLE_CONTROL_SOCKET=/sockets/control.sock
     volumes:
-      - tidepool-worktrees:/workspace
+      # Named volume for repo (cloned on first start)
+      # Cannot use bind mounts - Docker runs on remote NixOS, not local macOS
+      - tidepool-repo:/workspace/tl
+      # Worktrees volume for spawned agents
+      - tidepool-worktrees:/worktrees
       - tidepool-sockets:/sockets
       - tidepool-claude-tl:/home/agent/.claude
       - tidepool-gh-auth:/home/agent/.config/gh

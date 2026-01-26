@@ -19,6 +19,14 @@ The repository should be kept clean of dead code, placeholders, and half-done he
 
 Always prefer failure to an undocumented heuristic or fallback.
 
+### DOCKER ENVIRONMENT
+
+**CRITICAL:** Docker runs on a **remote NixOS host**, not locally on macOS. This means:
+- Host bind mounts using macOS paths (e.g., `/Users/...`) will NOT work - those paths don't exist on NixOS
+- The Docker socket is forwarded via SSH, but the filesystem is not shared
+- Containers must use named volumes or clone repos internally
+- Don't assume local filesystem access from containers
+
 ### AGGRESSIVE LOGGING
 
 Silent failures are unacceptable. When code shells out to subprocesses, calls external services, or crosses process/container boundaries, **log aggressively**:

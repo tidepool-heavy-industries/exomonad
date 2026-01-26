@@ -49,6 +49,30 @@ rm -f /sockets/control.sock /sockets/tui.sock 2>/dev/null
 mkdir -p /home/user/.config/gh
 [ -d /home/user/.config/gh ] && chown -R 1000:1000 /home/user/.config/gh
 
+# --- Fix repo bind mount access ---
+# Create .tidepool directory structure in the repo before dropping privileges.
+# This is needed because the bind mount preserves host file permissions.
+if [ -d /repo ]; then
+    echo "Creating .tidepool structure in /repo..."
+    if mkdir -p /repo/.tidepool/sockets /repo/.tidepool/logs; then
+        chown -R 1000:1000 /repo/.tidepool
+        chmod -R 755 /repo/.tidepool
+        echo "✓ .tidepool directory created"
+    else
+        echo "⚠️  Could not create .tidepool in /repo (bind mount may be read-only)"
+        echo "   Creating in /home/user instead..."
+        mkdir -p /home/user/.tidepool/sockets /home/user/.tidepool/logs
+        chown -R 1000:1000 /home/user/.tidepool
+        # Override TIDEPOOL_PROJECT_DIR to use writable location
+        export TIDEPOOL_PROJECT_DIR=/home/user
+    fi
+fi
+
+# --- Git safe.directory for shared volumes ---
+# Repo volume may be owned by root; allow git operations
+# Must set as 'user' since that's who runs the server via gosu
+gosu user git config --global --add safe.directory '*'
+
 # --- Environment for user ---
 export HOME=/home/user
 export USER=user

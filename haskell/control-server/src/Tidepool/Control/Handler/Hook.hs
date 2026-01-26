@@ -34,7 +34,7 @@ import Tidepool.Control.Protocol hiding (role)
 import Tidepool.Control.Types (ServerConfig(..))
 import Tidepool.Control.Hook.Policy (HookDecision(..), evaluatePolicy)
 import Tidepool.Control.Hook.CircuitBreaker (CircuitBreakerMap, SessionId, withCircuitBreaker, incrementStage)
-import Tidepool.Control.ExoTools (parseIssueNumber, findHangarRoot)
+import Tidepool.Control.ExoTools (parseIssueNumber)
 import Tidepool.Control.Hook.SessionStart (sessionStartLogic)
 import Tidepool.Control.Effects.SshExec (runSshExec)
 import Tidepool.Control.Effects.Git (runGitRemote)
@@ -129,12 +129,10 @@ handleSessionStart tracer role input = do
 
   -- Check if we should use SSH for execution (if TIDEPOOL_CONTAINER is set)
   mContainer <- lookupEnv "TIDEPOOL_CONTAINER"
-  
-  -- Find hangar root to resolve runtime binaries
-  mHangarRoot <- runM $ runEnvIO $ runFileSystemIO $ runGitIO findHangarRoot
-  let hr = fromMaybe "." mHangarRoot
-      binDir = Paths.runtimeBinDir hr
-      dockerCtlPath = Paths.dockerCtlBin binDir
+
+  -- Get binary directory (respects TIDEPOOL_BIN_DIR, defaults to /usr/local/bin)
+  binDir <- Paths.dockerBinDir
+  let dockerCtlPath = Paths.dockerCtlBin binDir
 
   result <- try $ runM
     $ runLog Debug
@@ -240,12 +238,10 @@ runStopHookLogic :: Tracer -> HookInput -> IO (TemplateName, StopHookContext)
 runStopHookLogic tracer input = do
   -- Check environment for container/SSH
   mContainer <- lookupEnv "TIDEPOOL_CONTAINER"
-  
-  -- Find hangar root to resolve runtime binaries
-  mHangarRoot <- runM $ runEnvIO $ runFileSystemIO $ runGitIO findHangarRoot
-  let hr = fromMaybe "." mHangarRoot
-      binDir = Paths.runtimeBinDir hr
-      dockerCtlPath = Paths.dockerCtlBin binDir
+
+  -- Get binary directory (respects TIDEPOOL_BIN_DIR, defaults to /usr/local/bin)
+  binDir <- Paths.dockerBinDir
+  let dockerCtlPath = Paths.dockerCtlBin binDir
 
   -- Initialize minimal workflow state
   let initialWorkflow = WorkflowState
@@ -313,12 +309,10 @@ autoFocusOnSubagentStop = do
     then pure ()
     else do
       mContainer <- lookupEnv "TIDEPOOL_CONTAINER"
-      
-      -- Find hangar root to resolve runtime binaries
-      mHangarRoot <- runM $ runEnvIO $ runFileSystemIO $ runGitIO findHangarRoot
-      let hr = fromMaybe "." mHangarRoot
-          binDir = Paths.runtimeBinDir hr
-          dockerCtlPath = Paths.dockerCtlBin binDir
+
+      -- Get binary directory (respects TIDEPOOL_BIN_DIR, defaults to /usr/local/bin)
+      binDir <- Paths.dockerBinDir
+      let dockerCtlPath = Paths.dockerCtlBin binDir
 
       result <- try $ runM
         $ runZellijIO
