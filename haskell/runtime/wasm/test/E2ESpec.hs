@@ -22,18 +22,18 @@ import Test.Hspec
 import Data.Aeson (encode, decode, Value(..))
 import Data.Aeson.KeyMap qualified as KM
 
-import Tidepool.Wasm.Runner (initializeWasm, WasmResult(..))
-import Tidepool.Wasm.TestGraph (computeMultiEffectWasm)
-import Tidepool.Wasm.WireTypes
+import ExoMonad.Wasm.Runner (initializeWasm, WasmResult(..))
+import ExoMonad.Wasm.TestGraph (computeMultiEffectWasm)
+import ExoMonad.Wasm.WireTypes
   ( SerializableEffect(..)
   , EffectResult(..)
   , StepOutput(..)
   , GraphState(..)
   , ExecutionPhase(..)
   )
-import Tidepool.Graph.Goto (GotoChoice, OneOf, To)
-import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
-import Tidepool.Graph.Types (Exit)
+import ExoMonad.Graph.Goto (GotoChoice, OneOf, To)
+import ExoMonad.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
+import ExoMonad.Graph.Types (Exit)
 
 
 spec :: Spec

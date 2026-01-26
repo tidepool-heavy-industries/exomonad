@@ -7,7 +7,7 @@ description:
     exposes it via a socket interface. Clients can query types, evaluate
     expressions, and check if code compiles without spawning new processes.
 
-    This package is intentionally kept separate from tidepool to avoid
+    This package is intentionally kept separate from exomonad to avoid
     pulling GHCi/process dependencies into the main build.
 
 license:            MIT

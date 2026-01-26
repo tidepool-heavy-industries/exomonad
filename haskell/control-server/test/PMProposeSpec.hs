@@ -14,10 +14,10 @@ import qualified Data.Text as T
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import Tidepool.Effects.GitHub
-import Tidepool.Effects.Env
-import Tidepool.Control.PMTools (labelNeedsTLReview)
-import Tidepool.Control.PMPropose
+import ExoMonad.Effects.GitHub
+import ExoMonad.Effects.Env
+import ExoMonad.Control.PMTools (labelNeedsTLReview)
+import ExoMonad.Control.PMPropose
 
 main :: IO ()
 main = defaultMain tests

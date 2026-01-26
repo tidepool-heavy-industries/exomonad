@@ -42,8 +42,8 @@ Read this if you're:
 ## Usage
 
 ```haskell
-import Tidepool.LLM.Interpreter (runLLMComplete, mkLLMEnv, LLMConfig(..))
-import Tidepool.Effects.LLMProvider (LLMComplete, complete, SAnthropic)
+import ExoMonad.LLM.Interpreter (runLLMComplete, mkLLMEnv, LLMConfig(..))
+import ExoMonad.Effects.LLMProvider (LLMComplete, complete, SAnthropic)
 
 config :: LLMConfig
 config = LLMConfig
@@ -141,7 +141,7 @@ The interpreter maps HTTP errors to these typed errors.
 The interpreter can be mocked for testing:
 
 ```haskell
-import Test.Tidepool.MockLLM (runMockLLM, mockResponse)
+import Test.ExoMonad.MockLLM (runMockLLM, mockResponse)
 
 -- In tests, use mock instead of real HTTP
 runMockLLM [mockResponse "Hello!"] $ do

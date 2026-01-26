@@ -7,8 +7,8 @@ import Data.IORef (newIORef, atomicModifyIORef', readIORef)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 
-import Tidepool.Actor.Runtime (withActorSystem)
-import Tidepool.Actor.Spawn (spawnActor)
+import ExoMonad.Actor.Runtime (withActorSystem)
+import ExoMonad.Actor.Spawn (spawnActor)
 
 
 spec :: Spec

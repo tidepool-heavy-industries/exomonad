@@ -27,18 +27,18 @@ import Options.Applicative
 import Test.Hspec
 
 import CLIGraphTypes (CounterInput(..), CounterOutput(..))
-import Tidepool.Graph.CLI
+import ExoMonad.Graph.CLI
   ( deriveCLIParser
   , formatOutput
   , OutputFormat(..)
   , runGraphCLIPure
   )
-import Tidepool.Graph.Interpret (runGraph)
-import Tidepool.Graph.Generic (GraphMode(..), type (:-), AsHandler)
-import Tidepool.Graph.Goto (gotoExit, Goto)
-import Tidepool.Graph.Types (Input, UsesEffects, type (:@))
-import qualified Tidepool.Graph.Generic as G
-import qualified Tidepool.Graph.Types as Types (Exit)
+import ExoMonad.Graph.Interpret (runGraph)
+import ExoMonad.Graph.Generic (GraphMode(..), type (:-), AsHandler)
+import ExoMonad.Graph.Goto (gotoExit, Goto)
+import ExoMonad.Graph.Types (Input, UsesEffects, type (:@))
+import qualified ExoMonad.Graph.Generic as G
+import qualified ExoMonad.Graph.Types as Types (Exit)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPH DEFINITION

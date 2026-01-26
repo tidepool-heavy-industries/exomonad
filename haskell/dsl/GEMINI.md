@@ -1,19 +1,19 @@
-# Tidepool DSL: Gemini Intelligence
+# ExoMonad DSL: Gemini Intelligence
 
-This directory contains the core Graph DSL and teaching infrastructure for Tidepool LLM orchestration.
+This directory contains the core Graph DSL and teaching infrastructure for ExoMonad LLM orchestration.
 
 ## Project Overview
 
-The Tidepool DSL is a Haskell-based system for building type-safe, compile-time validated state machine graphs. It allows for declarative definition of LLM agent workflows where transitions, schemas, and effects are verified at compile time.
+The ExoMonad DSL is a Haskell-based system for building type-safe, compile-time validated state machine graphs. It allows for declarative definition of LLM agent workflows where transitions, schemas, and effects are verified at compile time.
 
 ### Core Packages
 
-- **`core/` (`tidepool-core`)**: The heart of the system.
+- **`core/` (`exomonad-core`)**: The heart of the system.
     - **Graph DSL**: Type-level graph definitions using `mode :- NodeDef` pattern.
     - **Extensible Effects**: Built on `freer-simple`, enabling IO-blind business logic.
     - **Structured Output**: Robust JSON schema generation and parsing for LLM responses.
     - **Interpret**: Inductive, type-safe graph dispatch via `OneOf` sum types.
-- **`teaching/` (`tidepool-teaching`)**: Knowledge distillation infrastructure.
+- **`teaching/` (`exomonad-teaching`)**: Knowledge distillation infrastructure.
     - Intercepts LLM calls during production-like workflows.
     - Records "Teaching Turns" (Haiku tool use) to generate training data for models like FunctionGemma.
 
@@ -24,8 +24,8 @@ The project uses standard Haskell `cabal` tooling.
 ### Common Commands
 
 - **Build all**: `cabal build all`
-- **Run core tests**: `cabal test tidepool-core:graph-validation-tests`
-- **Run teaching tests**: `cabal test tidepool-teaching:tidepool-teaching-test`
+- **Run core tests**: `cabal test exomonad-core:graph-validation-tests`
+- **Run teaching tests**: `cabal test exomonad-teaching:exomonad-teaching-test`
 - **Run teaching harness**: `cabal run teaching-harness` (requires `TEACHING_ENABLED=true` and `ANTHROPIC_API_KEY`)
 
 ### Platform Targets
@@ -51,13 +51,13 @@ The project uses standard Haskell `cabal` tooling.
 
 ### Key Files
 
-- `core/src/Tidepool/Graph/Types.hs`: DSL syntax and annotations.
-- `core/src/Tidepool/Graph/Interpret.hs`: Logic for running and dispatching graphs.
-- `core/src/Tidepool/Effect/Types.hs`: Core effect definitions (LLM, Log, State, etc.).
-- `teaching/src/Tidepool/Teaching/LLM.hs`: Teaching interpreter logic.
+- `core/src/ExoMonad/Graph/Types.hs`: DSL syntax and annotations.
+- `core/src/ExoMonad/Graph/Interpret.hs`: Logic for running and dispatching graphs.
+- `core/src/ExoMonad/Effect/Types.hs`: Core effect definitions (LLM, Log, State, etc.).
+- `teaching/src/ExoMonad/Teaching/LLM.hs`: Teaching interpreter logic.
 
 ## Training Infrastructure
 
-When `TEACHING_ENABLED=true` is set, the system can record training data into `.tidepool/training/session-{uuid}/`.
+When `TEACHING_ENABLED=true` is set, the system can record training data into `.exomonad/training/session-{uuid}/`.
 - `anthropic.jsonl`: Raw captured turns.
 - `metadata.json`: Session context.

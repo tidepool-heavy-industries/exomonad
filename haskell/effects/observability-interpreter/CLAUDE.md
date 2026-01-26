@@ -37,8 +37,8 @@ Read this if you're:
 ## Usage
 
 ```haskell
-import Tidepool.Effects.Observability
-import Tidepool.Observability.Interpreter
+import ExoMonad.Effects.Observability
+import ExoMonad.Observability.Interpreter
 
 main :: IO ()
 main = do
@@ -125,7 +125,7 @@ export OTLP_TOKEN="glc_..."
 Transparently trace LLM calls without modifying effect stack:
 
 ```haskell
-import Tidepool.Observability.Interpreter (interposeWithLLMTracing)
+import ExoMonad.Observability.Interpreter (interposeWithLLMTracing)
 
 -- Wrap any LLM computation with automatic tracing
 tracedProgram = interposeWithLLMTracing myProgram
@@ -146,20 +146,20 @@ tracedProgram = interposeWithLLMTracing myProgram
 
 ```logql
 # All graph transitions
-{app="tidepool"} |= "graph_transition" | json
+{app="exomonad"} |= "graph_transition" | json
 
 # LLM calls with high latency
-{app="tidepool"} |= "llm_call" | json | latency_ms > 2000
+{app="exomonad"} |= "llm_call" | json | latency_ms > 2000
 
 # Errors in specific session
-{app="tidepool", session_id="abc123"} |= "error" | json
+{app="exomonad", session_id="abc123"} |= "error" | json
 ```
 
 ### Tempo (Traces)
 
 ```traceql
 # All spans for a session
-{ resource.service.name = "tidepool" && span.session_id = "abc123" }
+{ resource.service.name = "exomonad" && span.session_id = "abc123" }
 
 # Slow LLM calls
 { name = "llm:call" && duration > 3s }

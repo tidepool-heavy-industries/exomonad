@@ -9,10 +9,10 @@ import Data.Time.Format.ISO8601 (iso8601ParseM)
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import Tidepool.Effects.GitHub
-import Tidepool.Effect.Types (Time(..))
-import Tidepool.Graph.Goto (unwrapSingleChoice)
-import Tidepool.Control.PMStatus
+import ExoMonad.Effects.GitHub
+import ExoMonad.Effect.Types (Time(..))
+import ExoMonad.Graph.Goto (unwrapSingleChoice)
+import ExoMonad.Control.PMStatus
 
 main :: IO ()
 main = defaultMain tests

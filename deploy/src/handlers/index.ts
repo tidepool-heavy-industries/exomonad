@@ -2,15 +2,15 @@
  * Effect handler registry.
  *
  * Central dispatch for executing effects from WASM.
- * Uses generated dispatcher from tidepool-generated.
+ * Uses generated dispatcher from exomonad-generated.
  */
 
 import type {
   SerializableEffect,
   EffectResult,
   InternalEffectHandlers,
-} from "tidepool-generated-ts";
-import { dispatchInternalEffect, errorResult, isYieldedEffect } from "tidepool-generated-ts";
+} from "exomonad-generated-ts";
+import { dispatchInternalEffect, errorResult, isYieldedEffect } from "exomonad-generated-ts";
 
 import { handleLogInfo, handleLogError } from "./log.js";
 import { handleLlmComplete, handleLlmCall, type LlmEnv } from "./llm.js";

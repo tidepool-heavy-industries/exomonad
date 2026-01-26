@@ -4,7 +4,7 @@ Interprets `Worktree` effects by shelling out to `git worktree` commands.
 
 ## Effect Types
 
-Effect type defined in `tidepool-core/src/Tidepool/Effects/Worktree.hs`:
+Effect type defined in `exomonad-core/src/ExoMonad/Effects/Worktree.hs`:
 
 ```haskell
 -- Type-safe worktree path (prevents mixing with regular FilePaths)
@@ -71,7 +71,7 @@ case result of
 `runWorktreeIO` interprets `Worktree` effects:
 
 ```haskell
-import Tidepool.Worktree.Interpreter (runWorktreeIO, defaultWorktreeConfig)
+import ExoMonad.Worktree.Interpreter (runWorktreeIO, defaultWorktreeConfig)
 
 result <- runM
   . runWorktreeIO (defaultWorktreeConfig "/path/to/repo")
@@ -96,7 +96,7 @@ defaultWorktreeConfig :: FilePath -> WorktreeConfig
 
 Run tests:
 ```bash
-cabal test tidepool-worktree-interpreter-test
+cabal test exomonad-worktree-interpreter-test
 ```
 
 ## Design Notes

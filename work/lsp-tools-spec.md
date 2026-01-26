@@ -191,12 +191,12 @@ Respond with JSON:
     "change": "add-field",
     "detail": "esMaxDepth :: Int"
   },
-  "project": "/home/inanna/tidepool-heavy-industries/haiku-training-data-synthesis-woktree",
+  "project": "/home/inanna/exomonad-heavy-industries/haiku-training-data-synthesis-woktree",
   "expectedLocations": [
-    "haskell/control-server/src/Tidepool/Control/Scout/Graph/Types.hs",
-    "haskell/control-server/src/Tidepool/Control/Scout/Graph/Handlers.hs"
+    "haskell/control-server/src/ExoMonad/Control/Scout/Graph/Types.hs",
+    "haskell/control-server/src/ExoMonad/Control/Scout/Graph/Handlers.hs"
   ],
-  "setupNotes": "Requires HLS indexed on tidepool-control-server package"
+  "setupNotes": "Requires HLS indexed on exomonad-control-server package"
 }
 ```
 
@@ -320,10 +320,10 @@ Respond with JSON:
 ```json
 {
   "input": {
-    "path": "haskell/control-server/src/Tidepool/Control/Scout/Graph/",
+    "path": "haskell/control-server/src/ExoMonad/Control/Scout/Graph/",
     "filePattern": "**/*.hs"
   },
-  "project": "/home/inanna/tidepool-heavy-industries/haiku-training-data-synthesis-woktree",
+  "project": "/home/inanna/exomonad-heavy-industries/haiku-training-data-synthesis-woktree",
   "notes": "Should find _header in renderSection if that pattern exists"
 }
 ```
@@ -454,7 +454,7 @@ Respond with JSON:
     "function": "lookupSymbol",
     "newConstraint": "Member Log effs"
   },
-  "project": "/home/inanna/tidepool-heavy-industries/haiku-training-data-synthesis-woktree",
+  "project": "/home/inanna/exomonad-heavy-industries/haiku-training-data-synthesis-woktree",
   "expectedCallers": ["processHandler", "resolveSeedSymbols", "resolveTokens"]
 }
 ```
@@ -577,9 +577,9 @@ Respond with JSON:
 {
   "input": {
     "effect": "Memory",
-    "scope": "haskell/control-server/src/Tidepool/Control/Scout/Graph/"
+    "scope": "haskell/control-server/src/ExoMonad/Control/Scout/Graph/"
   },
-  "project": "/home/inanna/tidepool-heavy-industries/haiku-training-data-synthesis-woktree",
+  "project": "/home/inanna/exomonad-heavy-industries/haiku-training-data-synthesis-woktree",
   "expectedPatterns": ["initialize", "read-modify-write", "read-only"]
 }
 ```
@@ -702,7 +702,7 @@ Respond with JSON:
     "function": "getMem",
     "typeParam": "s"
   },
-  "project": "/home/inanna/tidepool-heavy-industries/haiku-training-data-synthesis-woktree",
+  "project": "/home/inanna/exomonad-heavy-industries/haiku-training-data-synthesis-woktree",
   "expectedTypes": ["ExploreState"]
 }
 ```
@@ -833,7 +833,7 @@ Respond with JSON:
     "effect": "LSP",
     "maxDepth": 3
   },
-  "project": "/home/inanna/tidepool-heavy-industries/haiku-training-data-synthesis-woktree",
+  "project": "/home/inanna/exomonad-heavy-industries/haiku-training-data-synthesis-woktree",
   "expectedOperations": ["workspaceSymbol", "hover"]
 }
 ```
@@ -953,7 +953,7 @@ Respond with JSON:
     "template": "SelectTpl",
     "context": "SelectContext"
   },
-  "project": "/home/inanna/tidepool-heavy-industries/haiku-training-data-synthesis-woktree",
+  "project": "/home/inanna/exomonad-heavy-industries/haiku-training-data-synthesis-woktree",
   "expectedFields": ["topic", "symbol_name", "signature", "candidates"]
 }
 ```
@@ -1004,7 +1004,7 @@ This format allows:
 
 ```
 haskell/control-server/
-├── src/Tidepool/Control/
+├── src/ExoMonad/Control/
 │   ├── Handler/
 │   │   ├── MCP.hs              # Existing MCP routing
 │   │   └── Tools/              # NEW: Tool implementations
@@ -1020,7 +1020,7 @@ haskell/control-server/
 │   │   ├── LSPHelpers.hs       # Common LSP patterns
 │   │   └── LLMClassifier.hs    # Shared LLM classification
 │   └── ...
-├── .tidepool/
+├── .exomonad/
 │   └── mcp-tools.json          # Tool definitions for MCP
 └── ...
 ```

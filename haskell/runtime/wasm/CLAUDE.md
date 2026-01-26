@@ -1,6 +1,6 @@
-# tidepool-wasm/ - WASM Deployment Scaffolding
+# exomonad-wasm/ - WASM Deployment Scaffolding
 
-Haskell package that wraps tidepool-core graphs for WASM cross-compilation.
+Haskell package that wraps exomonad-core graphs for WASM cross-compilation.
 
 ## What This Is
 
@@ -9,7 +9,7 @@ A library package that:
 2. Provides wire types (`WireTypes.hs`) for WASM ↔ TypeScript JSON communication
 3. Exports FFI entry points (`Ffi.hs`) that TypeScript calls
 
-The key insight: **tidepool-core stays WASM-agnostic**. This package handles all WASM-specific concerns (serialization, FFI exports, build configuration).
+The key insight: **exomonad-core stays WASM-agnostic**. This package handles all WASM-specific concerns (serialization, FFI exports, build configuration).
 
 ## Current Status
 
@@ -26,10 +26,10 @@ The key insight: **tidepool-core stays WASM-agnostic**. This package handles all
 ## Architecture
 
 ```
-tidepool-core (pure graph DSL)
+exomonad-core (pure graph DSL)
        │
        ▼
-tidepool-wasm (this package)
+exomonad-wasm (this package)
        │
        ├─→ Native build: Tests, development
        │
@@ -123,8 +123,8 @@ Native builds get the same interface without FFI exports, enabling testing.
 
 ```bash
 # From repo root
-cabal build tidepool-wasm
-cabal test tidepool-wasm  # Once tests exist
+cabal build exomonad-wasm
+cabal test exomonad-wasm  # Once tests exist
 ```
 
 ### WASM (cross-compilation)
@@ -134,10 +134,10 @@ cabal test tidepool-wasm  # Once tests exist
 nix develop .#wasm
 
 # Build WASM blob
-wasm32-wasi-cabal build tidepool-wasm
+wasm32-wasi-cabal build exomonad-wasm
 
 # Output location
-# dist-newstyle/build/wasm32-wasi/ghc-9.10.*/tidepool-wasm-*/...
+# dist-newstyle/build/wasm32-wasi/ghc-9.10.*/exomonad-wasm-*/...
 ```
 
 ## Incremental Milestones
@@ -218,7 +218,7 @@ TypeScript                              WASM (Haskell)
 
 ## Dependencies
 
-- `tidepool-core` - Graph DSL, effects, validation
+- `exomonad-core` - Graph DSL, effects, validation
 - `freer-simple` - Effect system with reified continuations
 - `aeson` - JSON encoding/decoding
 - `text` - Text type
@@ -226,7 +226,7 @@ TypeScript                              WASM (Haskell)
 
 ## Cabal Configuration
 
-Key WASM-specific options in `tidepool-wasm.cabal`:
+Key WASM-specific options in `exomonad-wasm.cabal`:
 
 ```cabal
 if os(wasi)
@@ -249,7 +249,7 @@ if os(wasi)
 
 ## Related Documentation
 
-- [tidepool-core/CLAUDE.md](../tidepool-core/CLAUDE.md) - Graph DSL, effects, validation
-- [tidepool-generated-ts/CLAUDE.md](../tidepool-generated-ts/CLAUDE.md) - Generated TypeScript types (matches WireTypes.hs)
+- [exomonad-core/CLAUDE.md](../exomonad-core/CLAUDE.md) - Graph DSL, effects, validation
+- [exomonad-generated-ts/CLAUDE.md](../exomonad-generated-ts/CLAUDE.md) - Generated TypeScript types (matches WireTypes.hs)
 - [deploy/CLAUDE.md](../deploy/CLAUDE.md) - Cloudflare Worker harness that consumes WASM blob
 - [Root CLAUDE.md](../CLAUDE.md) - Project overview and architecture

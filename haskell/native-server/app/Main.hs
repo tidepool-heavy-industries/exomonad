@@ -2,8 +2,8 @@
 module Main where
 
 import System.Environment (lookupEnv)
-import Tidepool.Server (runServer, ServerConfig(..), ServerMode(..), simpleAgent)
-import Tidepool.Server.EffectRunner (loadInterpreterConfig)
+import ExoMonad.Server (runServer, ServerConfig(..), ServerMode(..), simpleAgent)
+import ExoMonad.Server.EffectRunner (loadInterpreterConfig)
 
 main :: IO ()
 main = do
@@ -11,8 +11,8 @@ main = do
   interpreterConfig <- loadInterpreterConfig
 
   -- Check for environment variable to set mode
-  modeEnv <- lookupEnv "TIDEPOOL_MODE"
-  distEnv <- lookupEnv "TIDEPOOL_DIST"
+  modeEnv <- lookupEnv "EXOMONAD_MODE"
+  distEnv <- lookupEnv "EXOMONAD_DIST"
 
   let mode = case modeEnv of
         Just "dev" -> DevProxy 3000

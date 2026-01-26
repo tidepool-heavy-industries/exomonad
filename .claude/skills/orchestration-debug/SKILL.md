@@ -1,11 +1,11 @@
 ---
 name: orchestration-debug
-description: Use when debugging Zellij, process-compose, or Tidepool orchestration issues like port conflicts, stale sessions, services not starting, or trap handler failures.
+description: Use when debugging Zellij, process-compose, or ExoMonad orchestration issues like port conflicts, stale sessions, services not starting, or trap handler failures.
 ---
 
 # Orchestration Debugging
 
-Debug the Hybrid Tidepool stack: process-compose + Zellij + services.
+Debug the Hybrid ExoMonad stack: process-compose + Zellij + services.
 
 ## Quick Diagnostics
 
@@ -70,7 +70,7 @@ curl -sf http://localhost:7434
 echo $?  # 0 = healthy, non-zero = problem
 
 # Check control-server logs
-tail -f .tidepool/logs/control-server.log
+tail -f .exomonad/logs/control-server.log
 ```
 
 **Cause**: tui-sidebar has `depends_on: control-server: condition: process_healthy`
@@ -122,7 +122,7 @@ echo 'on_force_close "quit"' >> .zellij/config.kdl
 ps aux | grep haskell-language-server
 
 # Check control-server stderr
-cat .tidepool/logs/control-server.log | grep -i error
+cat .exomonad/logs/control-server.log | grep -i error
 ```
 
 **Cause**: HLS initialization takes longer than probe timeout (30s × 30 attempts = 15 min max)
@@ -135,7 +135,7 @@ Expected sequence when pressing `Ctrl+P → q` in Zellij:
 
 1. Zellij receives quit command
 2. `on_force_close "quit"` prevents detach
-3. Zellij exits, triggering `tidepool-runner.sh` EXIT trap
+3. Zellij exits, triggering `exomonad-runner.sh` EXIT trap
 4. Trap calls `process-compose down --ordered-shutdown`
 5. Services stop in reverse dependency order (tui-sidebar → control-server)
 
@@ -150,7 +150,7 @@ pgrep -f "control-server|tui-sidebar|process-compose"
 
 | Log | Path |
 |-----|------|
-| process-compose | `.tidepool/logs/process-compose.log` |
+| process-compose | `.exomonad/logs/process-compose.log` |
 | control-server | stdout in process-compose TUI |
 | tui-sidebar | stdout in process-compose TUI |
 
@@ -159,9 +159,9 @@ pgrep -f "control-server|tui-sidebar|process-compose"
 | File | Purpose |
 |------|---------|
 | `process-compose.yaml` | Service definitions, health probes |
-| `.zellij/tidepool.kdl` | 3-pane layout |
+| `.zellij/exomonad.kdl` | 3-pane layout |
 | `.zellij/config.kdl` | Zellij behavior (`on_force_close`) |
-| `scripts/tidepool-runner.sh` | Trap handlers |
+| `scripts/exomonad-runner.sh` | Trap handlers |
 | `start-augmented.sh` | Entry point, validation |
 
 ## Emergency Recovery
@@ -173,7 +173,7 @@ If everything is broken:
 pkill -9 -f "control-server|tui-sidebar|process-compose|zellij"
 
 # 2. Clean runtime directories
-rm -rf .tidepool/sockets/* .tidepool/logs/*
+rm -rf .exomonad/sockets/* .exomonad/logs/*
 
 # 3. Verify ports are free
 lsof -i :7432,:7433,:7434,:8080

@@ -15,8 +15,8 @@ module MissingExitRecord where
 
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Input, Schema, LLMKind(..))
-import Tidepool.Graph.Generic (GraphMode(..), Entry, LLMNode, ValidGraphRecord)
+import ExoMonad.Graph.Types (type (:@), Input, Schema, LLMKind(..))
+import ExoMonad.Graph.Generic (GraphMode(..), Entry, LLMNode, ValidGraphRecord)
 
 data A
 data B

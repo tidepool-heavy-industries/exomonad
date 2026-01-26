@@ -2,10 +2,10 @@
 cd "$(dirname "$0")/.." || exit 1
 
 cleanup() {
-    echo "🛑 Tidepool Runner: Shutting down services..."
+    echo "🛑 ExoMonad Runner: Shutting down services..."
 
     # Try graceful API shutdown first via UDS
-    PC_SOCKET=".tidepool/sockets/process-compose.sock"
+    PC_SOCKET=".exomonad/sockets/process-compose.sock"
     if process-compose down --ordered-shutdown -u "$PC_SOCKET" 2>/dev/null; then
         echo "✓ Graceful shutdown via API"
     else
@@ -21,9 +21,9 @@ trap cleanup EXIT SIGINT SIGTERM SIGHUP
 
 # NOTE: PC_NO_SERVER must NOT be true, otherwise 'process-compose down' 
 # cannot connect to the server to initiate a graceful ordered shutdown.
-export PC_USE_UDS=true PC_SOCKET_PATH=.tidepool/sockets/process-compose.sock
+export PC_USE_UDS=true PC_SOCKET_PATH=.exomonad/sockets/process-compose.sock
 
-echo "🚀 Starting Tidepool Orchestrator..."
+echo "🚀 Starting ExoMonad Orchestrator..."
 process-compose "$@" &
 PC_PID=$!
 wait $PC_PID

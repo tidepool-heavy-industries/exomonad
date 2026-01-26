@@ -18,7 +18,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import Tidepool.Actor.Graph
+import ExoMonad.Actor.Graph
 import Data.IORef (newIORef, readIORef, writeIORef, atomicModifyIORef')
 
 

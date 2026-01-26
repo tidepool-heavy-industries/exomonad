@@ -61,10 +61,10 @@ grep -r "runScoutGemmaHTTP" src/
 
 ```bash
 # Remove the file
-rm src/Tidepool/Control/Scout/DocGen/Gemma.hs
+rm src/ExoMonad/Control/Scout/DocGen/Gemma.hs
 
 # Remove from cabal file
-# Edit tidepool-control-server.cabal, remove from exposed-modules
+# Edit exomonad-control-server.cabal, remove from exposed-modules
 
 # Remove imports from other files
 # Edit files that imported Gemma.hs
@@ -76,10 +76,10 @@ If `Scout/DocGen.hs` is superseded by graph:
 
 ```bash
 # Option A: Remove entirely
-rm src/Tidepool/Control/Scout/DocGen.hs
+rm src/ExoMonad/Control/Scout/DocGen.hs
 
 # Option B: Rename to preserve as reference
-mv src/Tidepool/Control/Scout/DocGen.hs src/Tidepool/Control/Scout/DocGen.hs.bak
+mv src/ExoMonad/Control/Scout/DocGen.hs src/ExoMonad/Control/Scout/DocGen.hs.bak
 
 # Option C: Keep but mark deprecated
 # Add comment: "-- DEPRECATED: Use Scout/Graph.hs instead"
@@ -89,7 +89,7 @@ mv src/Tidepool/Control/Scout/DocGen.hs src/Tidepool/Control/Scout/DocGen.hs.bak
 
 ```bash
 # If SelectSymbolsTool is not used by graph
-rm src/Tidepool/Control/Scout/Tools.hs
+rm src/ExoMonad/Control/Scout/Tools.hs
 ```
 
 ### 6.5 Consolidate Types
@@ -104,22 +104,22 @@ Move any types from removed files that are still needed:
 ### 6.6 Update Exports
 
 ```haskell
--- In tidepool-control-server.cabal
+-- In exomonad-control-server.cabal
 exposed-modules:
   -- Remove:
-  -- Tidepool.Control.Scout.DocGen
-  -- Tidepool.Control.Scout.DocGen.Gemma
-  -- Tidepool.Control.Scout.Tools
+  -- ExoMonad.Control.Scout.DocGen
+  -- ExoMonad.Control.Scout.DocGen.Gemma
+  -- ExoMonad.Control.Scout.Tools
 
   -- Keep/Add:
-  Tidepool.Control.Scout.Graph
-  Tidepool.Control.Scout.Graph.Types
-  Tidepool.Control.Scout.Graph.Templates
-  Tidepool.Control.Scout.Graph.Handlers
-  Tidepool.Control.Scout.Graph.Runner
-  Tidepool.Control.Scout.DocGen.Types  -- Still needed
-  Tidepool.Control.Scout.DocGen.Teacher
-  Tidepool.Control.Scout.LSP
+  ExoMonad.Control.Scout.Graph
+  ExoMonad.Control.Scout.Graph.Types
+  ExoMonad.Control.Scout.Graph.Templates
+  ExoMonad.Control.Scout.Graph.Handlers
+  ExoMonad.Control.Scout.Graph.Runner
+  ExoMonad.Control.Scout.DocGen.Types  -- Still needed
+  ExoMonad.Control.Scout.DocGen.Teacher
+  ExoMonad.Control.Scout.LSP
 ```
 
 ### 6.7 Update CLAUDE.md
@@ -144,10 +144,10 @@ exposed-modules:
 ```bash
 # Clean build
 cabal clean
-cabal build tidepool-control-server
+cabal build exomonad-control-server
 
 # Run any tests
-cabal test tidepool-control-server
+cabal test exomonad-control-server
 
 # Verify E2E still works
 ./test/e2e/test-e2e.sh
@@ -167,7 +167,7 @@ cabal test tidepool-control-server
 
 | File | Changes |
 |------|---------|
-| `tidepool-control-server.cabal` | Update exposed-modules |
+| `exomonad-control-server.cabal` | Update exposed-modules |
 | `Handler/MCP.hs` | Remove old imports |
 | `CLAUDE.md` | Update module inventory |
 
@@ -180,7 +180,7 @@ grep -r "ScoutGemma" src/ && echo "FAIL" || echo "PASS"
 grep -r "exploreLoop" src/ && echo "FAIL" || echo "PASS"
 
 # Build succeeds
-cabal build tidepool-control-server
+cabal build exomonad-control-server
 
 # No unused imports (hlint)
 hlint src/

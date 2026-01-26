@@ -20,15 +20,15 @@ import Data.Text qualified as T
 import System.Environment (lookupEnv)
 import System.Exit (exitFailure, exitSuccess)
 
-import Tidepool.LLM.Interpreter
+import ExoMonad.LLM.Interpreter
   ( runLLMComplete
   , mkLLMEnv
   , LLMConfig(..)
   , AnthropicTool(..)
   , anthropicToolToJSON
   )
-import Tidepool.LLM.Types (AnthropicSecrets(..), defaultAnthropicConfig, ApiKey(..))
-import Tidepool.Effects.LLMProvider
+import ExoMonad.LLM.Types (AnthropicSecrets(..), defaultAnthropicConfig, ApiKey(..))
+import ExoMonad.Effects.LLMProvider
   ( complete
   , SProvider(..)
   , AnthropicConfig(..)

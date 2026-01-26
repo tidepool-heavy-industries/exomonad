@@ -35,7 +35,7 @@ import type {
   SerializableEffect,
   EffectResult,
   GraphInput,
-} from "tidepool-generated-ts";
+} from "exomonad-generated-ts";
 import {
   handleTelegramSend,
   handleTelegramReceive,

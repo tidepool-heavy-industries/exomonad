@@ -24,7 +24,7 @@ pub async fn run(
     env_vars: Vec<String>,
 ) -> anyhow::Result<String> {
     let docker = Docker::connect_with_local_defaults()?;
-    let container_name = format!("tidepool-agent-{}", issue_id);
+    let container_name = format!("exomonad-agent-{}", issue_id);
 
     // Idempotency: check if container already exists
     match docker.inspect_container(&container_name, None::<InspectContainerOptions>).await {
@@ -55,16 +55,16 @@ pub async fn run(
         Err(e) => return Err(e.into()),
     }
 
-    let agent_image = std::env::var("TIDEPOOL_AGENT_IMAGE").unwrap_or_else(|_| "tidepool-agent:latest".to_string());
+    let agent_image = std::env::var("EXOMONAD_AGENT_IMAGE").unwrap_or_else(|_| "exomonad-agent:latest".to_string());
     let host_uid: u32 = std::env::var("HOST_UID").unwrap_or_else(|_| "1000".to_string()).parse()?;
     let host_gid: u32 = std::env::var("HOST_GID").unwrap_or_else(|_| "1000".to_string()).parse()?;
-    let network_name = std::env::var("TIDEPOOL_NETWORK").unwrap_or_else(|_| "tidepool".to_string());
+    let network_name = std::env::var("EXOMONAD_NETWORK").unwrap_or_else(|_| "exomonad".to_string());
 
     let mut labels = HashMap::new();
-    labels.insert("com.tidepool.issue_id".to_string(), issue_id.clone());
-    labels.insert("com.tidepool.role".to_string(), "agent".to_string());
+    labels.insert("com.exomonad.issue_id".to_string(), issue_id.clone());
+    labels.insert("com.exomonad.role".to_string(), "agent".to_string());
     labels.insert(
-        "com.tidepool.expires_at".to_string(),
+        "com.exomonad.expires_at".to_string(),
         expires_at.unwrap_or_else(|| "never".to_string())
     );
 
@@ -106,8 +106,8 @@ pub async fn run(
         user: Some(user),
         env: Some({
             let mut all_env = vec![
-                format!("TIDEPOOL_ISSUE_ID={}", issue_id),
-                format!("TIDEPOOL_BACKEND={}", backend),
+                format!("EXOMONAD_ISSUE_ID={}", issue_id),
+                format!("EXOMONAD_BACKEND={}", backend),
             ];
             // Add user-provided env vars (already in KEY=VALUE format)
             all_env.extend(env_vars);

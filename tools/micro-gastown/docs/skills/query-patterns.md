@@ -6,7 +6,7 @@ Skill for querying production logs and identifying patterns for DSL evolution.
 
 The Log Analyzer polecat uses this skill to query Grafana/Loki via the
 `sleeptime-logs` CLI. It identifies patterns that suggest improvements
-to the Tidepool graph DSL.
+to the ExoMonad graph DSL.
 
 ## Usage
 
@@ -97,7 +97,7 @@ micro-gastown analyze --since 7d --min-occurrences 5
         "completion_tokens_avg": 450
       },
       "recommendation": "Consider splitting prompt or reducing context",
-      "grafana_query": "{app=\"tidepool\"} |= \"llm_call\" | json | node == \"dmScene\" | latency_ms > 3000"
+      "grafana_query": "{app=\"exomonad\"} |= \"llm_call\" | json | node == \"dmScene\" | latency_ms > 3000"
     }
   ],
   "summary": {
@@ -113,7 +113,7 @@ micro-gastown analyze --since 7d --min-occurrences 5
 
 ## Integration with Observability
 
-This skill consumes `TidepoolEvent` types published by the Observability effect:
+This skill consumes `ExoMonadEvent` types published by the Observability effect:
 
 | Event Type | Fields Used |
 |------------|-------------|
@@ -122,7 +122,7 @@ This skill consumes `TidepoolEvent` types published by the Observability effect:
 | `effect_execution` | effect_type, success, latency_ms |
 | `error` | message, context |
 
-See `Tidepool.Effects.Observability` for event definitions.
+See `ExoMonad.Effects.Observability` for event definitions.
 
 ## Example Session
 

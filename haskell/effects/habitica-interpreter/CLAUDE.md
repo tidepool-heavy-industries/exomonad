@@ -35,8 +35,8 @@ Read this if you're:
 ## Usage
 
 ```haskell
-import Tidepool.Habitica.Interpreter (runHabitica, HabiticaConfig(..))
-import Tidepool.Effects.Habitica
+import ExoMonad.Habitica.Interpreter (runHabitica, HabiticaConfig(..))
+import ExoMonad.Effects.Habitica
 
 config :: HabiticaConfig
 config = HabiticaConfig

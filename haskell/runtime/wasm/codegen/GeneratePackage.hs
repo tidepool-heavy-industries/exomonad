@@ -9,14 +9,14 @@
 -- This generates a complete npm package in ./output containing:
 --
 -- * Generated TypeScript files (graphs.ts, exports.ts, dispatcher.ts, index.ts)
--- * Static files copied from tidepool-generated-ts/static/
+-- * Static files copied from exomonad-generated-ts/static/
 -- * Package configuration (package.json, tsconfig.json)
 --
 -- The output can be consumed by deploy/ or any other TypeScript project:
 --
 -- > # In deploy/package.json
 -- > "dependencies": {
--- >   "tidepool-generated-ts": "file:../tidepool-wasm/output"
+-- >   "exomonad-generated-ts": "file:../exomonad-wasm/output"
 -- > }
 module Main where
 
@@ -28,7 +28,7 @@ import System.Environment (getArgs)
 import System.FilePath ((</>))
 import System.IO (hPutStrLn, stderr)
 
-import Tidepool.Generated.Codegen
+import ExoMonad.Generated.Codegen
   ( generateGraphsTs
   , generateExportsTs
   , generateDispatcherTs
@@ -38,9 +38,9 @@ import Tidepool.Generated.Codegen
   , generatePackageJson
   , generateTsConfig
   )
-import Tidepool.Generated.GraphSpecs (allEffectSpecs)
-import Tidepool.Wasm.Registry (registryGraphSpecs)
-import Tidepool.Wasm.Registry.Default (setupDefaultRegistry)
+import ExoMonad.Generated.GraphSpecs (allEffectSpecs)
+import ExoMonad.Wasm.Registry (registryGraphSpecs)
+import ExoMonad.Wasm.Registry.Default (setupDefaultRegistry)
 
 
 -- ============================================================================
@@ -48,7 +48,7 @@ import Tidepool.Wasm.Registry.Default (setupDefaultRegistry)
 -- ============================================================================
 
 packageName :: Text
-packageName = "tidepool-generated-ts"
+packageName = "exomonad-generated-ts"
 
 packageVersion :: Text
 packageVersion = "0.1.0"
@@ -58,7 +58,7 @@ packageVersion = "0.1.0"
 -- Static Files
 -- ============================================================================
 
--- | Static TypeScript files to copy from tidepool-generated-ts/static/
+-- | Static TypeScript files to copy from exomonad-generated-ts/static/
 staticFiles :: [String]
 staticFiles =
   [ "protocol.ts"
@@ -141,17 +141,17 @@ generatePackage outputDir = do
   putStrLn "  3. npm run build"
   putStrLn ""
   putStrLn "To use in deploy/:"
-  putStrLn "  Add to package.json: \"tidepool-generated-ts\": \"file:../path/to/output\""
+  putStrLn "  Add to package.json: \"exomonad-generated-ts\": \"file:../path/to/output\""
 
 
--- | Copy static TypeScript files from tidepool-generated-ts/static/
+-- | Copy static TypeScript files from exomonad-generated-ts/static/
 copyStaticFiles :: FilePath -> IO ()
 copyStaticFiles outputDir = do
   -- Try to find static files relative to current directory or common locations
   let staticDirs =
-        [ "tidepool-generated-ts/static"
-        , "../tidepool-generated-ts/static"
-        , "static"  -- In case running from tidepool-generated-ts
+        [ "exomonad-generated-ts/static"
+        , "../exomonad-generated-ts/static"
+        , "static"  -- In case running from exomonad-generated-ts
         ]
 
   forM_ staticFiles $ \fileName -> do

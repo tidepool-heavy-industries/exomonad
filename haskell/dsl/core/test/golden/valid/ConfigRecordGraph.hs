@@ -20,16 +20,16 @@ import Data.Text (Text)
 import Data.Aeson (ToJSON, FromJSON)
 import GHC.Generics (Generic)
 
-import Tidepool.Prelude
-import qualified Tidepool.Graph.Generic as G
-import Tidepool.Graph.Generic.Core (NodeRef(..), type (:-))
-import Tidepool.Graph.Types
+import ExoMonad.Prelude
+import qualified ExoMonad.Graph.Generic as G
+import ExoMonad.Graph.Generic.Core (NodeRef(..), type (:-))
+import ExoMonad.Graph.Types
   ( type (:@), Entries, Tools, Exits, Routes, Route(..)
   , EntryPoint, Tool, ExitTool, ToolMetadata(..)
   , LLMKind(..)
   )
-import Tidepool.Graph.Goto (GotoChoice, gotoNode, (-->), gotoExit, LLMHandler(..))
-import Tidepool.Effect.Types (State)
+import ExoMonad.Graph.Goto (GotoChoice, gotoNode, (-->), gotoExit, LLMHandler(..))
+import ExoMonad.Effect.Types (State)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- DOMAIN TYPES

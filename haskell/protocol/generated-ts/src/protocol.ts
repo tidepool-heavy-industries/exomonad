@@ -374,12 +374,12 @@ export interface GetTimeEffect {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// TELEGRAM EFFECT TYPES (from tidepool-telegram-ts)
+// TELEGRAM EFFECT TYPES (from exomonad-telegram-ts)
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
  * Outgoing messages that can be sent to the user.
- * Mirrors Haskell: Tidepool.Telegram.Types.OutgoingMessage
+ * Mirrors Haskell: ExoMonad.Telegram.Types.OutgoingMessage
  */
 export type TelegramOutgoingMessage =
   | { type: 'text'; text: string }
@@ -397,7 +397,7 @@ export interface TelegramInlineButton {
 
 /**
  * Incoming messages received from the user.
- * Mirrors Haskell: Tidepool.Telegram.Types.IncomingMessage
+ * Mirrors Haskell: ExoMonad.Telegram.Types.IncomingMessage
  */
 export type TelegramIncomingMessage =
   | { type: 'text'; text: string }

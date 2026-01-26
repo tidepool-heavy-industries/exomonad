@@ -6,8 +6,8 @@ import Control.Exception (try, ErrorCall(..))
 import Data.Aeson (Value(..), object, (.=), toJSON)
 import qualified Data.Map.Strict as Map
 
-import Tidepool.Actor.Runtime (withActorSystem)
-import Tidepool.Actor.Spawn (spawnActor)
+import ExoMonad.Actor.Runtime (withActorSystem)
+import ExoMonad.Actor.Spawn (spawnActor)
 
 
 spec :: Spec

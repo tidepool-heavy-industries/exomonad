@@ -1,16 +1,16 @@
 # LSP Client Integration Skill
 
-Use this skill when working with the `tidepool-lsp-executor` package, debugging LSP protocol issues, or extending LSP functionality.
+Use this skill when working with the `exomonad-lsp-executor` package, debugging LSP protocol issues, or extending LSP functionality.
 
 ## Package Location
 
-`tidepool-native-gui/lsp-executor/`
+`exomonad-native-gui/lsp-executor/`
 
 ## Key Files
 
-- `src/Tidepool/LSP/Executor.hs` - Main LSP effect interpreter using `lsp-client`
+- `src/ExoMonad/LSP/Executor.hs` - Main LSP effect interpreter using `lsp-client`
 - `test/SmokeTest.hs` - Smoke test against real HLS
-- `tidepool-lsp-executor.cabal` - Package definition
+- `exomonad-lsp-executor.cabal` - Package definition
 
 ## Library: lsp-client
 
@@ -97,7 +97,7 @@ executable lsp-test
     default-language: Haskell2010
 EOF
 
-# Run test (from tidepool repo root)
+# Run test (from exomonad repo root)
 cabal run lsp-smoke-test
 ```
 

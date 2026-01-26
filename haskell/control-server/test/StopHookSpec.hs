@@ -7,8 +7,8 @@ import Test.Tasty.HUnit
 import Data.Text (Text)
 import qualified Data.Text as T
 
-import Tidepool.Control.StopHook.ErrorParser (parseGHCOutput, classifyError)
-import Tidepool.Control.StopHook.Types
+import ExoMonad.Control.StopHook.ErrorParser (parseGHCOutput, classifyError)
+import ExoMonad.Control.StopHook.Types
 
 main :: IO ()
 main = defaultMain tests

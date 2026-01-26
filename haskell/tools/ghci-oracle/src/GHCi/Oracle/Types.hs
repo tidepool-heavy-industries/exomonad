@@ -1,7 +1,7 @@
 -- | Wire protocol types for GHCi Oracle.
 --
 -- These types MUST match the wire protocol types in
--- @Tidepool.Effect.GHCi@ exactly for interoperability.
+-- @ExoMonad.Effect.GHCi@ exactly for interoperability.
 module GHCi.Oracle.Types
   ( -- * Error Types
     GHCiError(..)
@@ -30,7 +30,7 @@ import GHC.Generics (Generic)
 
 -- | Errors that can occur during GHCi operations.
 --
--- MUST match Tidepool.Effect.GHCi.GHCiError exactly.
+-- MUST match ExoMonad.Effect.GHCi.GHCiError exactly.
 data GHCiError
   = GHCiSessionCrashed
       { gseCrashOutput :: Text
@@ -62,7 +62,7 @@ data GHCiError
 
 -- | Request sent from client to oracle server.
 --
--- MUST match Tidepool.Effect.GHCi.GHCiRequest exactly.
+-- MUST match ExoMonad.Effect.GHCi.GHCiRequest exactly.
 data GHCiRequest
   = ReqQueryType Text
   | ReqQueryInfo Text
@@ -78,7 +78,7 @@ data GHCiRequest
 
 -- | Response sent from oracle server to client.
 --
--- MUST match Tidepool.Effect.GHCi.GHCiResponse exactly.
+-- MUST match ExoMonad.Effect.GHCi.GHCiResponse exactly.
 data GHCiResponse
   = RespSuccess Text
   | RespBool Bool

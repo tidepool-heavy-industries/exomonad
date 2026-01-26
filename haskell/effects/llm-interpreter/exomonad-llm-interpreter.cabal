@@ -1,0 +1,85 @@
+cabal-version:      3.0
+name:               exomonad-llm-interpreter
+version:            0.1.0.0
+synopsis:           LLM effect interpreter - Anthropic/OpenAI native HTTP client
+description:        Native HTTP implementation of LLMComplete effect.
+                    Supports Anthropic and OpenAI with type-level provider switch.
+license:            MIT
+author:             Inanna
+build-type:         Simple
+
+common defaults
+    ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints -Wunused-packages
+    default-language: GHC2024
+    default-extensions:
+        DataKinds
+        DeriveAnyClass
+        DeriveGeneric
+        DerivingStrategies
+        DuplicateRecordFields
+        GADTs
+        LambdaCase
+        NoFieldSelectors
+        OverloadedRecordDot
+        OverloadedStrings
+        TypeFamilies
+        TypeOperators
+
+library
+    import:           defaults
+    exposed-modules:
+        ExoMonad.LLM.Interpreter
+        ExoMonad.LLM.Types
+        ExoMonad.LLM.API.Anthropic
+        ExoMonad.LLM.API.OpenAI
+    build-depends:
+        base >= 4.17 && < 5,
+        freer-simple >= 1.2 && < 2,
+        text >= 2.0 && < 3,
+        http-client >= 0.7 && < 1,
+        http-client-tls >= 0.3 && < 1,
+        http-types >= 0.12 && < 1,
+        aeson >= 2.1 && < 3,
+        bytestring >= 0.11 && < 1,
+        servant >= 0.20 && < 1,
+        servant-client >= 0.20 && < 1,
+        servant-client-core >= 0.20 && < 1,
+        exomonad-core
+    hs-source-dirs:   src
+
+executable test-anthropic-integration
+    import:           defaults
+    hs-source-dirs:   app
+    main-is:          TestAnthropicIntegration.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        exomonad-llm-interpreter,
+        exomonad-core,
+        freer-simple >= 1.2 && < 2,
+        text >= 2.0 && < 3,
+        aeson >= 2.1 && < 3
+    ghc-options: -threaded
+
+test-suite llm-interpreter-tests
+    import:           defaults
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test
+    main-is:          Spec.hs
+    other-modules:
+        TypesSpec
+        RequestBuildingSpec
+        HelpersSpec
+    build-depends:
+        base >= 4.17 && < 5,
+        exomonad-llm-interpreter,
+        exomonad-core,
+        aeson >= 2.1 && < 3,
+        bytestring >= 0.11 && < 1,
+        text >= 2.0 && < 3,
+        vector >= 0.13 && < 1,
+        hspec >= 2.10 && < 3,
+        aeson-pretty >= 0.8 && < 1,
+        servant-client >= 0.20 && < 1
+    build-tool-depends:
+        hspec-discover:hspec-discover >= 2.10 && < 3
+    ghc-options: -threaded -rtsopts -with-rtsopts=-N

@@ -17,15 +17,15 @@ if [ -z "$ANTHROPIC_API_KEY" ]; then
 fi
 
 # Canonical socket paths - Central source of truth
-export TIDEPOOL_CONTROL_SOCKET="${TIDEPOOL_CONTROL_SOCKET:-.tidepool/sockets/control.sock}"
-export TIDEPOOL_TUI_SOCKET="${TIDEPOOL_TUI_SOCKET:-.tidepool/sockets/tui.sock}"
+export EXOMONAD_CONTROL_SOCKET="${EXOMONAD_CONTROL_SOCKET:-.exomonad/sockets/control.sock}"
+export EXOMONAD_TUI_SOCKET="${EXOMONAD_TUI_SOCKET:-.exomonad/sockets/tui.sock}"
 
 # Create runtime directories
-mkdir -p .tidepool/{sockets,logs}
+mkdir -p .exomonad/{sockets,logs}
 
 # Detect and clean up stale process-compose sessions via UDS
 # This eliminates port 8080 conflicts in parallel worktrees
-PC_SOCKET=".tidepool/sockets/process-compose.sock"
+PC_SOCKET=".exomonad/sockets/process-compose.sock"
 if [ -S "$PC_SOCKET" ]; then
     if process-compose process list -u "$PC_SOCKET" > /dev/null 2>&1; then
         echo "⚠️  Found stale process-compose session. Shutting it down..."
@@ -63,7 +63,7 @@ fi
 # Clean up any other stale sockets from previous runs
 # We use a loop to avoid deleting the process-compose socket if it was just recreated/preserved
 shopt -s nullglob
-for sock in .tidepool/sockets/*.sock; do
+for sock in .exomonad/sockets/*.sock; do
     if [ "$sock" != "$PC_SOCKET" ]; then
         rm -f "$sock"
     fi
@@ -86,11 +86,11 @@ echo "📦 Discovered Hangar at: $HANGAR_ROOT"
 # Export HANGAR_ROOT for control-server and subagents
 export HANGAR_ROOT
 
-# Add all Hangar binaries (including mantle-agent) to PATH for Claude and related tools
+# Add all Hangar binaries (including exomonad) to PATH for Claude and related tools
 export PATH="$HANGAR_ROOT/runtime/bin:$PATH"
 
-# Export TIDEPOOL_BIN_DIR for SessionStart hooks in settings.json
-export TIDEPOOL_BIN_DIR="$HANGAR_ROOT/runtime/bin"
+# Export EXOMONAD_BIN_DIR for SessionStart hooks in settings.json
+export EXOMONAD_BIN_DIR="$HANGAR_ROOT/runtime/bin"
 
 # Check dependencies
 if ! command -v process-compose &> /dev/null; then
@@ -105,15 +105,15 @@ if ! command -v zellij &> /dev/null; then
     exit 1
 fi
 
-echo "🌊 Starting Hybrid Tidepool..."
+echo "🌊 Starting Hybrid ExoMonad..."
 echo ""
 echo "  Layout:"
 echo "    ├─ Claude Code (left)     - waits for MCP"
 echo "    ├─ TUI Sidebar (top-right) - waits for TUI socket"
 echo "    └─ Backend (bottom-right)  - process-compose dashboard"
 echo ""
-echo "  Logs: .tidepool/logs/"
+echo "  Logs: .exomonad/logs/"
 echo ""
 
 # Launch Zellij with the hybrid layout
-exec zellij --layout .zellij/tidepool.kdl
+exec zellij --layout .zellij/exomonad.kdl

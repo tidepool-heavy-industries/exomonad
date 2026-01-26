@@ -1,5 +1,5 @@
 /**
- * Simple WebSocket test client for the Tidepool worker.
+ * Simple WebSocket test client for the ExoMonad worker.
  * Usage: node test-ws.mjs
  */
 

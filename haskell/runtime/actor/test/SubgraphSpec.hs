@@ -17,7 +17,7 @@ import Data.List (sort)
 import Test.Hspec
 import qualified Ki
 
-import Tidepool.Actor.Subgraph
+import ExoMonad.Actor.Subgraph
   ( SubgraphState(..)
   , newSubgraphState
   , newSubgraphStateDeferred

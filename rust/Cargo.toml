@@ -1,8 +1,8 @@
 [workspace]
 resolver = "2"
 members = ["hangar-config",
-    "mantle-agent",
-    "mantle-shared",
+    "exomonad",
+    "exomonad-shared",
     "tui-sidebar",
     "tui-popup",
     "tui-spawner",

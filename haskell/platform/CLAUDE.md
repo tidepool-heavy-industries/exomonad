@@ -1,6 +1,6 @@
-# tidepool-platform - Runtime Platform & Effect Interpreters
+# exomonad-platform - Runtime Platform & Effect Interpreters
 
-Core runtime support for running Tidepool agents: effect interpreters and LLM integration.
+Core runtime support for running ExoMonad agents: effect interpreters and LLM integration.
 
 ## What This Is
 
@@ -12,7 +12,7 @@ Shared runtime infrastructure providing:
 
 | Module | Purpose |
 |--------|---------|
-| `Tidepool.Effect.Runners` | Effect interpreters (runLLM, runRequestInput, runLog, etc.) |
+| `ExoMonad.Effect.Runners` | Effect interpreters (runLLM, runRequestInput, runLog, etc.) |
 
 ## Effect Runners
 
@@ -29,9 +29,9 @@ runTime :: IOE :> es => Eff (Time : es) a -> Eff es a
 
 ## Dependencies
 
-Used by: agents in consuming repos (e.g., `~/tidepool-labs/anemone`) that need LLM effects.
+Used by: agents in consuming repos () that need LLM effects.
 
 ## Legacy Code (Deprecated)
 
-The `Tidepool.GUI.*` modules contain threepenny-gui infrastructure that is no longer actively used.
-New development should use the native server (`tidepool-native-gui/server`) or Cloudflare Worker (`deploy/`) instead.
+The `ExoMonad.GUI.*` modules contain threepenny-gui infrastructure that is no longer actively used.
+New development should use the native server (`exomonad-native-gui/server`) or Cloudflare Worker (`deploy/`) instead.

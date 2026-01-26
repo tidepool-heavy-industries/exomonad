@@ -1,5 +1,5 @@
 /**
- * WebSocket test client for the Tidepool graph execution protocol.
+ * WebSocket test client for the ExoMonad graph execution protocol.
  *
  * Usage:
  *   node test/client.mjs                    # Uses default URL and input

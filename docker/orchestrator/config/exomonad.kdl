@@ -9,23 +9,23 @@ layout {
     tab name="Orchestrator" focus=true {
         pane split_direction="vertical" {
             // Pane 1: Claude Code (running as non-root user)
-            // TIDEPOOL_CONTROL_SOCKET must be explicitly set for hooks to reach control-server
+            // EXOMONAD_CONTROL_SOCKET must be explicitly set for hooks to reach control-server
             pane name="Claude Code" focus=true size="70%" {
                 command "bash"
-                args "-c" "export HOME=/home/user TERM=xterm-256color SHELL=/bin/bash TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock; cd /worktrees && exec claude --dangerously-skip-permissions"
+                args "-c" "export HOME=/home/user TERM=xterm-256color SHELL=/bin/bash EXOMONAD_CONTROL_SOCKET=/sockets/control.sock; cd /worktrees && exec claude --dangerously-skip-permissions"
             }
 
             pane split_direction="horizontal" {
                 // Pane 2: Live control-server logs
                 pane name="Backend Logs" start_suspended=false {
                     command "bash"
-                    args "-c" "export TERM=xterm-256color; docker logs -f tidepool-control-server 2>&1"
+                    args "-c" "export TERM=xterm-256color; docker logs -f exomonad-control-server 2>&1"
                 }
 
                 // Pane 3: Container status
                 pane name="Status" start_suspended=false {
                     command "bash"
-                    args "-c" "export TERM=xterm-256color; watch -c -n5 'docker ps --format \"table {{.Names}}\\t{{.Status}}\" --filter name=tidepool'"
+                    args "-c" "export TERM=xterm-256color; watch -c -n5 'docker ps --format \"table {{.Names}}\\t{{.Status}}\" --filter name=exomonad'"
                 }
             }
         }

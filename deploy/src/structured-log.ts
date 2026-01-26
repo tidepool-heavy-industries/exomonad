@@ -5,7 +5,7 @@
  * Each log entry includes session context, effect type, timing, and result status.
  */
 
-import type { SerializableEffect, EffectResult } from "tidepool-generated-ts";
+import type { SerializableEffect, EffectResult } from "exomonad-generated-ts";
 
 /**
  * Structured log entry for effect execution.

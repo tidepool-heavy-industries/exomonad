@@ -11,7 +11,7 @@ import {
   type TelegramHandlerEnv,
   type TelegramHandlerContext,
 } from "../telegram.js";
-import type { TelegramSendEffect, TelegramAskEffect, TelegramIncomingMessage } from "tidepool-generated-ts";
+import type { TelegramSendEffect, TelegramAskEffect, TelegramIncomingMessage } from "exomonad-generated-ts";
 
 // Store original fetch
 const originalFetch = globalThis.fetch;

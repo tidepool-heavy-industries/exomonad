@@ -15,11 +15,11 @@ module ExampleGraphSpec (spec) where
 import Test.Hspec
 import qualified Data.Text as T
 
-import Tidepool.Graph.Goto (GotoChoice, OneOf, To)
-import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
-import Tidepool.Graph.Types (Exit, Self)
-import Tidepool.Wasm.Effect (WasmM)
-import Tidepool.Wasm.ExampleGraph
+import ExoMonad.Graph.Goto (GotoChoice, OneOf, To)
+import ExoMonad.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
+import ExoMonad.Graph.Types (Exit, Self)
+import ExoMonad.Wasm.Effect (WasmM)
+import ExoMonad.Wasm.ExampleGraph
   ( UserMessage(..)
   , Response(..)
   , classifyHandlerWasm
@@ -28,9 +28,9 @@ import Tidepool.Wasm.ExampleGraph
   , statementHandlerWasm
   , runExampleGraph
   )
-import Tidepool.Wasm.GraphInput (GraphInput(..))
-import Tidepool.Wasm.Runner (initializeWasm, WasmResult(..))
-import Tidepool.Wasm.WireTypes (SerializableEffect(..), EffectResult(..))
+import ExoMonad.Wasm.GraphInput (GraphInput(..))
+import ExoMonad.Wasm.Runner (initializeWasm, WasmResult(..))
+import ExoMonad.Wasm.WireTypes (SerializableEffect(..), EffectResult(..))
 import Data.Aeson (Value(..))
 
 

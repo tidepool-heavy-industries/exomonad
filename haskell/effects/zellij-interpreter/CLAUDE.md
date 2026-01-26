@@ -44,7 +44,7 @@ Read this if you're:
 
 In Docker deployments, the `control-server` container needs to create Zellij tabs in the `orchestrator` container. This is achieved by:
 
-1. **Shared Zellij socket volume**: Both containers mount `tidepool-zellij` at `/run/user/1000`
+1. **Shared Zellij socket volume**: Both containers mount `exomonad-zellij` at `/run/user/1000`
 2. **Session targeting**: `ZELLIJ_SESSION_NAME=orchestrator` enables `--session` flag
 3. **Zellij binary in control-server**: Installed via `cargo-binstall`
 
@@ -80,19 +80,19 @@ getSessionPrefix = do
 In `docker-compose.yml`:
 ```yaml
 volumes:
-  tidepool-zellij:
-    name: tidepool-zellij
+  exomonad-zellij:
+    name: exomonad-zellij
 
 services:
   orchestrator:
     volumes:
-      - tidepool-zellij:/run/user/1000
+      - exomonad-zellij:/run/user/1000
     environment:
       - XDG_RUNTIME_DIR=/run/user/1000
 
   control-server:
     volumes:
-      - tidepool-zellij:/run/user/1000
+      - exomonad-zellij:/run/user/1000
     environment:
       - XDG_RUNTIME_DIR=/run/user/1000
       - ZELLIJ_SESSION_NAME=orchestrator
@@ -108,8 +108,8 @@ services:
 ## Usage Example
 
 ```haskell
-import Tidepool.Zellij.Interpreter (runZellijIO)
-import Tidepool.Effects.Zellij
+import ExoMonad.Zellij.Interpreter (runZellijIO)
+import ExoMonad.Effects.Zellij
 
 main = runM $ runZellijIO $ do
   mSession <- checkZellijEnv
@@ -128,5 +128,5 @@ main = runM $ runZellijIO $ do
 ## Related Documentation
 
 - **[control-server/CLAUDE.md](../../control-server/CLAUDE.md)** - MCP tools using Zellij
-- **[ExoTools/CLAUDE.md](../../control-server/src/Tidepool/Control/ExoTools/CLAUDE.md)** - spawn_agents implementation
+- **[ExoTools/CLAUDE.md](../../control-server/src/ExoMonad/Control/ExoTools/CLAUDE.md)** - spawn_agents implementation
 - **[Root CLAUDE.md](../../../CLAUDE.md)** - Docker compose setup

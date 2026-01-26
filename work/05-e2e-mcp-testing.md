@@ -27,7 +27,7 @@ This validates the entire pipeline works end-to-end.
                             │ MCP: tools/call "teach"
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ mantle-agent mcp (JSON-RPC stdio)                           │
+│ exomonad mcp (JSON-RPC stdio)                           │
 │   Forwards to control-server via TCP                        │
 └───────────────────────────┬─────────────────────────────────┘
                             │ TCP NDJSON
@@ -44,7 +44,7 @@ This validates the entire pipeline works end-to-end.
         ┌───────────────────┴───────────────────┐
         ▼                                       ▼
 ┌───────────────────┐               ┌───────────────────────┐
-│ .tidepool/training│               │ MCP Response          │
+│ .exomonad/training│               │ MCP Response          │
 │ session-*/        │               │ TeachingDoc JSON      │
 │   anthropic.jsonl │               │ → Claude Code         │
 └───────────────────┘               └───────────────────────┘
@@ -72,7 +72,7 @@ This validates the entire pipeline works end-to-end.
 │ $ claude                    │ $ TEACHING_ENABLED=true \   │
 │                             │   ANTHROPIC_API_KEY=... \   │
 │                             │   cabal run                 │
-│                             │   tidepool-control-server   │
+│                             │   exomonad-control-server   │
 └─────────────────────────────┴─────────────────────────────┘
 ```
 
@@ -80,12 +80,12 @@ This validates the entire pipeline works end-to-end.
 ```json
 {
   "mcpServers": {
-    "tidepool": {
-      "command": "mantle-agent",
+    "exomonad": {
+      "command": "exomonad",
       "args": ["mcp"],
       "env": {
-        "MANTLE_CONTROL_HOST": "127.0.0.1",
-        "MANTLE_CONTROL_PORT": "7432"
+        "EXOMONAD_CONTROL_HOST": "127.0.0.1",
+        "EXOMONAD_CONTROL_PORT": "7432"
       }
     }
   }
@@ -99,7 +99,7 @@ In Claude Code, verify the tool is available:
 User: What MCP tools do you have access to?
 
 Claude: I have access to the following tools:
-- tidepool:teach - Explore code semantics and generate teaching documents
+- exomonad:teach - Explore code semantics and generate teaching documents
   ...
 ```
 
@@ -122,7 +122,7 @@ Response: TeachingDoc with:
 While Claude Code is running, check the output:
 ```bash
 # In another terminal
-watch -n 1 'cat .tidepool/training/session-*/anthropic.jsonl | jq -c ".ttNodeName"'
+watch -n 1 'cat .exomonad/training/session-*/anthropic.jsonl | jq -c ".ttNodeName"'
 
 # Should see "dgSelect" entries appearing as exploration runs
 ```
@@ -144,13 +144,13 @@ Verify:
 
 ```bash
 # Check all turns have node metadata
-cat .tidepool/training/session-*/anthropic.jsonl | jq -c '{node: .ttNodeName, graph: .ttGraphName}'
+cat .exomonad/training/session-*/anthropic.jsonl | jq -c '{node: .ttNodeName, graph: .ttGraphName}'
 
 # Check thinking content is captured
-cat .tidepool/training/session-*/anthropic.jsonl | jq '.ttResponse.content[] | select(.type=="thinking") | .thinking[:100]'
+cat .exomonad/training/session-*/anthropic.jsonl | jq '.ttResponse.content[] | select(.type=="thinking") | .thinking[:100]'
 
 # Check tool use (if any)
-cat .tidepool/training/session-*/anthropic.jsonl | jq '.ttResponse.content[] | select(.type=="tool_use")'
+cat .exomonad/training/session-*/anthropic.jsonl | jq '.ttResponse.content[] | select(.type=="tool_use")'
 ```
 
 ### 5.7 Test Error Handling
@@ -172,7 +172,7 @@ Create a test script for reproducibility:
 TEACHING_ENABLED=true \
 ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
 TEACHING_OUTPUT_DIR=./test-output \
-cabal run tidepool-control-server &
+cabal run exomonad-control-server &
 SERVER_PID=$!
 sleep 5  # Wait for LSP init
 
@@ -204,8 +204,8 @@ kill $SERVER_PID
 ```
 [Server] Starting LSP session...
 [LSP] HLS initialized
-[Server] Teaching mode enabled, output: .tidepool/training/session-abc123
-[Server] Listening on .tidepool/control.sock
+[Server] Teaching mode enabled, output: .exomonad/training/session-abc123
+[Server] Listening on .exomonad/control.sock
 
 [MCP] Received: teach tool call
 [Graph] Entering dgInit with TeachQuery{topic="scoring", seeds=["compositeScore"]}

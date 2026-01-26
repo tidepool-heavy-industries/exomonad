@@ -1,4 +1,4 @@
-name = "tidepool"
+name = "exomonad"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
@@ -26,13 +26,13 @@ new_classes = ["AlertDO"]
 # D1 database (optional)
 # [[d1_databases]]
 # binding = "DB"
-# database_name = "tidepool-db"
+# database_name = "exomonad-db"
 # database_id = "your-database-id"
 
 # R2 storage (optional)
 # [[r2_buckets]]
 # binding = "STORAGE"
-# bucket_name = "tidepool-storage"
+# bucket_name = "exomonad-storage"
 
 # Cloudflare AI binding
 [ai]

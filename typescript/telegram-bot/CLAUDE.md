@@ -1,10 +1,10 @@
-# tidepool-telegram-ts - TypeScript Telegram Bot Handler
+# exomonad-telegram-ts - TypeScript Telegram Bot Handler
 
 TypeScript Telegram bot integration for Cloudflare Workers deployment.
 
 ## What This Is
 
-Provides Telegram bot webhook handling for Tidepool WASM graphs running on Cloudflare Workers.
+Provides Telegram bot webhook handling for ExoMonad WASM graphs running on Cloudflare Workers.
 
 ## Purpose
 
@@ -20,7 +20,7 @@ Deployed as part of the `deploy/` Cloudflare Worker. See `deploy/src/handlers/te
 
 ## Relationship to Other Packages
 
-- **tidepool-core**: Defines `Tidepool.Effects.Telegram` effect types (Haskell)
-- **tidepool-telegram-hs**: Haskell integration (may be legacy)
-- **tidepool-telegram-ts**: TypeScript bot handler (this package)
+- **exomonad-core**: Defines `ExoMonad.Effects.Telegram` effect types (Haskell)
+- **exomonad-telegram-hs**: Haskell integration (may be legacy)
+- **exomonad-telegram-ts**: TypeScript bot handler (this package)
 - **deploy**: Cloudflare Worker that uses telegram handlers

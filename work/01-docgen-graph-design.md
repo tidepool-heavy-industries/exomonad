@@ -156,8 +156,8 @@ processHandler input = do
 
 | File | Purpose |
 |------|---------|
-| `control-server/src/Tidepool/Control/Scout/Graph/Types.hs` | Input/output types, ExploreState |
-| `control-server/src/Tidepool/Control/Scout/Graph.hs` | DocGenGraph type definition |
+| `control-server/src/ExoMonad/Control/Scout/Graph/Types.hs` | Input/output types, ExploreState |
+| `control-server/src/ExoMonad/Control/Scout/Graph.hs` | DocGenGraph type definition |
 
 ## Open Questions
 
@@ -169,9 +169,9 @@ processHandler input = do
 
 ```bash
 # Graph type compiles
-cabal build tidepool-control-server
+cabal build exomonad-control-server
 
 # Can instantiate graph (even with stub handlers)
-cabal repl tidepool-control-server
+cabal repl exomonad-control-server
 >>> :t DocGenGraph
 ```

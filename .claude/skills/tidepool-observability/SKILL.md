@@ -1,9 +1,9 @@
 ---
-name: tidepool-observability
+name: exomonad-observability
 description: Use when setting up Grafana Cloud observability for Cloudflare Workers, or debugging trace/log export issues.
 ---
 
-# Tidepool Observability
+# ExoMonad Observability
 
 Grafana Cloud integration for both Cloudflare Workers and native server.
 
@@ -44,20 +44,20 @@ Grafana Cloud integration for both Cloudflare Workers and native server.
 ## Querying Logs (LogQL)
 
 ```logql
-# All tidepool-worker logs
-{service_name="tidepool-worker"}
+# All exomonad-worker logs
+{service_name="exomonad-worker"}
 
 # Logs from a specific graph
-{service_name="tidepool-worker"} | json | graphId="example-graph"
+{service_name="exomonad-worker"} | json | graphId="example-graph"
 
 # Error logs
-{service_name="tidepool-worker"} | json | level="error"
+{service_name="exomonad-worker"} | json | level="error"
 
 # Specific effect type
-{service_name="tidepool-worker"} | json | effectType="LlmComplete"
+{service_name="exomonad-worker"} | json | effectType="LlmComplete"
 
 # Time range with count
-count_over_time({service_name="tidepool-worker"}[5m])
+count_over_time({service_name="exomonad-worker"}[5m])
 ```
 
 ## Structured Logging Pattern
@@ -81,13 +81,13 @@ logStructured(LogLevel.INFO, 'Effect executing', {
 Logs include trace context automatically:
 - `trace_id` - Links logs to traces
 - `span_id` - Links to specific span
-- `service_name` - Always "tidepool-worker"
+- `service_name` - Always "exomonad-worker"
 
 ## Common Issues
 
 1. **No logs appearing** - Check `observability.logs.enabled = true` in wrangler.toml
 2. **No traces** - Check `observability.traces.enabled = true`
-3. **Wrong service name** - Should be "tidepool-worker" (from package.json name)
+3. **Wrong service name** - Should be "exomonad-worker" (from package.json name)
 4. **Rate limits** - Grafana Cloud free tier has limits, check quota
 
 ## Grafana Stack
@@ -108,7 +108,7 @@ Query examples: `deploy/docs/GRAFANA_QUERIES.md`
 
 # Native Server Traces (OTLP)
 
-The native server (`tidepool-native`) can export OpenTelemetry traces to Grafana Tempo via OTLP HTTP.
+The native server (`exomonad-native`) can export OpenTelemetry traces to Grafana Tempo via OTLP HTTP.
 
 ## Quick Setup
 
@@ -121,26 +121,26 @@ The native server (`tidepool-native`) can export OpenTelemetry traces to Grafana
    export OTLP_USER="123456"  # Your Grafana Cloud instance ID
    export OTLP_TOKEN="glc_..."  # API token with push scope
 
-   # Optional: Service name (default: tidepool-native)
+   # Optional: Service name (default: exomonad-native)
    export SERVICE_NAME="my-agent"
    ```
 
 2. **Run the server**:
    ```bash
    just native
-   # Or: cabal run tidepool-native
+   # Or: cabal run exomonad-native
    ```
 
 3. **View traces in Grafana**:
    - Go to Explore → Tempo
-   - Search by service.name = "tidepool-native" (or your custom SERVICE_NAME)
+   - Search by service.name = "exomonad-native" (or your custom SERVICE_NAME)
 
 ## Instrumented Graph Execution
 
 Graph handlers emit spans automatically when using instrumented dispatch:
 
 ```haskell
-import Tidepool.Graph.Execute.Instrumented
+import ExoMonad.Graph.Execute.Instrumented
 
 -- Wrap graph execution with a root span
 result <- withGraphSpan "agent:my-request" $
@@ -171,7 +171,7 @@ Each node span includes attributes:
 For custom spans within handlers:
 
 ```haskell
-import Tidepool.Effects.Observability
+import ExoMonad.Effects.Observability
 
 myHandler input = do
   _ <- startSpan "custom-operation" SpanInternal
@@ -190,7 +190,7 @@ myHandler input = do
 | `OTLP_ENDPOINT` | For traces | none | OTLP HTTP traces endpoint |
 | `OTLP_USER` | For Grafana Cloud | none | Instance ID for basic auth |
 | `OTLP_TOKEN` | For Grafana Cloud | none | API token for basic auth |
-| `SERVICE_NAME` | No | tidepool-native | Service name in traces |
+| `SERVICE_NAME` | No | exomonad-native | Service name in traces |
 | `LOKI_URL` | For logs | localhost:3100 | Loki push endpoint |
 | `LOKI_USER` | For Grafana Cloud | none | Instance ID for Loki |
 | `LOKI_TOKEN` | For Grafana Cloud | none | API token for Loki |
@@ -205,11 +205,11 @@ myHandler input = do
 
 ```traceql
 # All traces from native server
-{service.name="tidepool-native"}
+{service.name="exomonad-native"}
 
 # Traces with specific node
-{service.name="tidepool-native"} | node.name="classify"
+{service.name="exomonad-native"} | node.name="classify"
 
 # Error traces
-{service.name="tidepool-native" && status=error}
+{service.name="exomonad-native" && status=error}
 ```

@@ -1,6 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 
--- | Tests for CLI derivation (Tidepool.Graph.CLI).
+-- | Tests for CLI derivation (ExoMonad.Graph.CLI).
 module CLISpec (spec) where
 
 import Data.Aeson qualified as Aeson
@@ -9,7 +9,7 @@ import Options.Applicative
 import Test.Hspec
 
 import CLITestTypes
-import Tidepool.Graph.CLI
+import ExoMonad.Graph.CLI
 
 -- Derive parsers using TH
 simpleParser :: Parser SimpleInput

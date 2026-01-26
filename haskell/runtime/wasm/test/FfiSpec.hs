@@ -19,14 +19,14 @@ import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 
-import Tidepool.Wasm.Registry
+import ExoMonad.Wasm.Registry
   ( initialize
   , step
   , getGraphInfo
   , getGraphState
   , resetSession
   )
-import Tidepool.Wasm.Registry.Default (setupDefaultRegistry)
+import ExoMonad.Wasm.Registry.Default (setupDefaultRegistry)
 
 
 spec :: Spec

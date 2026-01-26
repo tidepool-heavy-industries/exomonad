@@ -4,7 +4,7 @@ module JsonSpec (spec) where
 import Data.Aeson (encode, decode, eitherDecode)
 import Test.Hspec
 
-import Tidepool.Effect.GHCi
+import ExoMonad.Effect.GHCi
   ( GHCiRequest(..)
   , GHCiResponse(..)
   , GHCiError(..)

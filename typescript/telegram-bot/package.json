@@ -1,7 +1,7 @@
 {
-  "name": "tidepool-telegram",
+  "name": "exomonad-telegram",
   "version": "0.1.0",
-  "description": "Telegram effect types for Tidepool agents",
+  "description": "Telegram effect types for ExoMonad agents",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

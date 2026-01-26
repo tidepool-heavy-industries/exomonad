@@ -1,41 +1,41 @@
-# Tidepool Native GUI
+# ExoMonad Native GUI
 
-Native Haskell build with localhost GUI for fast iteration on tidepool graphs. Bypasses CF Workers deployment, uses Anthropic API directly. Full observability via Grafana.
+Native Haskell build with localhost GUI for fast iteration on exomonad graphs. Bypasses CF Workers deployment, uses Anthropic API directly. Full observability via Grafana.
 
 ## Structure
 
 ```
-tidepool-native-gui/
+exomonad-native-gui/
 ├── wire-types/               # Agent 3 - UIState, UserAction, protocol
-│   ├── src/Tidepool/Wire/Types.hs
-│   └── tidepool-wire-types.cabal
+│   ├── src/ExoMonad/Wire/Types.hs
+│   └── exomonad-wire-types.cabal
 ├── solid-frontend/           # Agent 2 - SolidJS frontend
 │   ├── src/App.tsx
 │   ├── src/components/
 │   ├── src/lib/socket.ts
 │   └── package.json
 ├── ui-interpreter/              # Agent 4 - interpreter for UI effects
-│   ├── src/Tidepool/UI/Interpreter.hs
-│   └── tidepool-ui-interpreter.cabal
+│   ├── src/ExoMonad/UI/Interpreter.hs
+│   └── exomonad-ui-interpreter.cabal
 ├── habitica-interpreter/        # Agent 5 - native HTTP client
-│   ├── src/Tidepool/Habitica/Interpreter.hs
-│   └── tidepool-habitica-interpreter.cabal
+│   ├── src/ExoMonad/Habitica/Interpreter.hs
+│   └── exomonad-habitica-interpreter.cabal
 ├── observability-interpreter/   # Agent 6 - Loki push
-│   ├── src/Tidepool/Observability/Interpreter.hs
-│   └── tidepool-observability-interpreter.cabal
+│   ├── src/ExoMonad/Observability/Interpreter.hs
+│   └── exomonad-observability-interpreter.cabal
 ├── llm-interpreter/             # Agent 7 - Anthropic native client
-│   ├── src/Tidepool/LLM/Interpreter.hs
-│   └── tidepool-llm-interpreter.cabal
+│   ├── src/ExoMonad/LLM/Interpreter.hs
+│   └── exomonad-llm-interpreter.cabal
 └── server/                   # Agent 1 - ties it together
     ├── app/Main.hs
-    ├── src/Tidepool/Server.hs
-    ├── src/Tidepool/Server/EffectRunner.hs
-    └── tidepool-native-server.cabal
+    ├── src/ExoMonad/Server.hs
+    ├── src/ExoMonad/Server/EffectRunner.hs
+    └── exomonad-native-server.cabal
 ```
 
 ## Key Principle
 
-Effect *types* live in `tidepool-core/src/Tidepool/Effects/`, shared by WASM and native. Effect *interpreters* are platform-specific and live here.
+Effect *types* live in `exomonad-core/src/ExoMonad/Effects/`, shared by WASM and native. Effect *interpreters* are platform-specific and live here.
 
 ## Dependencies
 
@@ -49,12 +49,12 @@ observability-interpreter (Agent 6) ───► server
 llm-interpreter (Agent 7) ───► server
 ```
 
-## Effect Types (in tidepool-core)
+## Effect Types (in exomonad-core)
 
-- `Tidepool.Effects.UI` - ShowText, RequestTextInput, RequestPhotoInput, RequestChoice, SetThinking
-- `Tidepool.Effects.Observability` - PublishEvent, WithSpan + TidepoolEvent types
-- `Tidepool.Effects.LLMProvider` - LLMComplete with type-level Anthropic/OpenAI switch
-- `Tidepool.Effects.Issue` - FileIssue for resident-initiated GitHub issues
+- `ExoMonad.Effects.UI` - ShowText, RequestTextInput, RequestPhotoInput, RequestChoice, SetThinking
+- `ExoMonad.Effects.Observability` - PublishEvent, WithSpan + ExoMonadEvent types
+- `ExoMonad.Effects.LLMProvider` - LLMComplete with type-level Anthropic/OpenAI switch
+- `ExoMonad.Effects.Issue` - FileIssue for resident-initiated GitHub issues
 
 ## Building
 
@@ -63,7 +63,7 @@ llm-interpreter (Agent 7) ───► server
 cabal build all
 
 # Solid frontend
-cd tidepool-native-gui/solid-frontend
+cd exomonad-native-gui/solid-frontend
 npm install
 npm run build     # Production build
 npm run dev       # Dev server on port 3000

@@ -1,4 +1,4 @@
-# tidepool-habitica/ - Type-Safe Habitica API Types
+# exomonad-habitica/ - Type-Safe Habitica API Types
 
 Haskell package providing type-safe Habitica API types and operations.
 
@@ -36,8 +36,8 @@ data HabiticaOp a where
 ## Usage
 
 This package defines types only. Execution happens in:
-- `tidepool-native-gui/habitica-interpreter/` - Native HTTP execution
+- `exomonad-native-gui/habitica-interpreter/` - Native HTTP execution
 ...
-- [tidepool-native-gui/CLAUDE.md](../tidepool-native-gui/CLAUDE.md) - Native interpreters including habitica-interpreter
+- [exomonad-native-gui/CLAUDE.md](../exomonad-native-gui/CLAUDE.md) - Native interpreters including habitica-interpreter
 - [deploy/CLAUDE.md](../deploy/CLAUDE.md) - Cloudflare Worker Habitica handler
-- [tidepool-core/CLAUDE.md](../tidepool-core/CLAUDE.md) - Habitica effect in `Effects/Habitica.hs`
+- [exomonad-core/CLAUDE.md](../exomonad-core/CLAUDE.md) - Habitica effect in `Effects/Habitica.hs`

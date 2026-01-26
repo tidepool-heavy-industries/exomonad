@@ -9,15 +9,15 @@
 module GotoChoiceSpec (spec) where
 
 import Test.Hspec
-import Tidepool.Graph.Goto
+import ExoMonad.Graph.Goto
   ( To
   , GotoChoice
   , gotoChoice
   , gotoExit
   , gotoSelf
   )
-import Tidepool.Graph.Goto.Internal (OneOf(..), GotoChoice(..))  -- For test assertions
-import Tidepool.Graph.Types (Exit, Self)
+import ExoMonad.Graph.Goto.Internal (OneOf(..), GotoChoice(..))  -- For test assertions
+import ExoMonad.Graph.Types (Exit, Self)
 
 -- | Simple target list for basic tests.
 type BasicTargets = '[To "nodeA" Int, To "nodeB" String, To Exit Bool]

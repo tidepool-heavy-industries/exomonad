@@ -8,9 +8,9 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Char8 as BLC
 import qualified Data.Text as T
 
-import Tidepool.Wasm.WireTypes (ToolResultOutcome(..))
-import Tidepool.Wasm.Conversion (toToolResultOutcome, fromToolResultOutcome)
-import Tidepool.Effect.Types (ToolResult(..))
+import ExoMonad.Wasm.WireTypes (ToolResultOutcome(..))
+import ExoMonad.Wasm.Conversion (toToolResultOutcome, fromToolResultOutcome)
+import ExoMonad.Effect.Types (ToolResult(..))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TESTS

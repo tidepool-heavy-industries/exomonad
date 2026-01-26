@@ -5,7 +5,7 @@ module Main where
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import Tidepool.Control.LSPTools (parseADTConstructors, Constructor(..), stripDerivingClause)
+import ExoMonad.Control.LSPTools (parseADTConstructors, Constructor(..), stripDerivingClause)
 
 main :: IO ()
 main = defaultMain tests

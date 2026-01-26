@@ -153,4 +153,4 @@ instance ToGVal (...) BeadContext where
 
 - `haskell/vendor/ginger/src/Text/Ginger/TH/Extract.hs` - Narrowing logic
 - `haskell/vendor/ginger/src/Text/Ginger/TH/Types.hs` - `NarrowedPath` types
-- `haskell/dsl/core/src/Tidepool/Graph/Template.hs` - `typedTemplateFile` export
+- `haskell/dsl/core/src/ExoMonad/Graph/Template.hs` - `typedTemplateFile` export

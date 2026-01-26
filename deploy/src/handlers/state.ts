@@ -9,8 +9,8 @@ import type {
   GetStateEffect,
   SetStateEffect,
   EffectResult,
-} from "tidepool-generated-ts";
-import { successResult, errorResult } from "tidepool-generated-ts";
+} from "exomonad-generated-ts";
+import { successResult, errorResult } from "exomonad-generated-ts";
 
 /**
  * Environment with Durable Object storage binding.

@@ -1,6 +1,6 @@
 {
     "_metadata": {
-        "generatedBy": "tidepool-wasm/golden/GenerateGoldenSamples.hs",
+        "generatedBy": "exomonad-wasm/golden/GenerateGoldenSamples.hs",
         "purpose": "Cross-language protocol verification",
         "usage": "Run verify-protocol.ts to validate TypeScript can parse these"
     },

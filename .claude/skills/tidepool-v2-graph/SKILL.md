@@ -1,5 +1,5 @@
 ---
-name: tidepool-v2-graph
+name: exomonad-v2-graph
 description: Use when working with v2 graph DSL, LLMHandler variants, or porting agents to the record-based graph system.
 ---
 
@@ -83,7 +83,7 @@ data SupportGraph mode = SupportGraph
 In LLMHandler implementations, use these via smart constructors:
 
 ```haskell
--- From Tidepool.Wasm.Effect (core effects)
+-- From ExoMonad.Wasm.Effect (core effects)
 logInfo :: Text -> Eff effs ()
 llmCall :: Text -> [WireMessage] -> Maybe Value -> [Value] -> Eff effs LlmCallResult
 

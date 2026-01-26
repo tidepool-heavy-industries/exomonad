@@ -11,12 +11,12 @@ import System.Directory (createDirectoryIfMissing, removeDirectoryRecursive)
 import System.FilePath ((</>))
 import Test.Hspec
 
-import Tidepool.Server.API (tidepoolApp)
+import ExoMonad.Server.API (exomonadApp)
 
 -- | Test with a temporary static directory
 withStaticServer :: (Int -> IO a) -> IO a
 withStaticServer action = do
-  let testDir = "/tmp/tidepool-test-static"
+  let testDir = "/tmp/exomonad-test-static"
       port = 8898
 
   -- Create test directory with files
@@ -26,7 +26,7 @@ withStaticServer action = do
   LBS.writeFile (testDir </> "app.js") "console.log('test');"
 
   -- Start server
-  serverThread <- async $ run port (tidepoolApp testDir)
+  serverThread <- async $ run port (exomonadApp testDir)
   threadDelay 100000 -- 100ms for server startup
 
   -- Run action and cleanup

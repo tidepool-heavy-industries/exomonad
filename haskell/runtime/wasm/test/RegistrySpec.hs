@@ -7,7 +7,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Test.Hspec
 
-import Tidepool.Wasm.Registry
+import ExoMonad.Wasm.Registry
   ( initialize
   , step
   , getGraphInfo
@@ -15,7 +15,7 @@ import Tidepool.Wasm.Registry
   , resetSession
   , getRegistry
   )
-import Tidepool.Wasm.Registry.Default (setupDefaultRegistry)
+import ExoMonad.Wasm.Registry.Default (setupDefaultRegistry)
 import qualified Data.Map.Strict as Map
 
 

@@ -21,7 +21,7 @@ import qualified ToolResultOutcomeSpec
 
 main :: IO ()
 main = hspec $ do
-  describe "tidepool-wasm" $ do
+  describe "exomonad-wasm" $ do
     describe "WireTypes" WireTypesSpec.spec
     describe "TestGraph" TestGraphSpec.spec
     describe "ExampleGraph" ExampleGraphSpec.spec

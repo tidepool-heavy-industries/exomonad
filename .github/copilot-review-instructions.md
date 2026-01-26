@@ -2,7 +2,7 @@
 
 ## Language-Specific Guidance
 
-### Haskell (tidepool-core/, tidepool-native-gui/)
+### Haskell (exomonad-core/, exomonad-native-gui/)
 
 **Effect System (freer-simple)**
 - Effect constraints should be ordered correctly - effects are interpreted outermost-first

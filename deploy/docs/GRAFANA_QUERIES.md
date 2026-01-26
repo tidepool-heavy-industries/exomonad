@@ -1,6 +1,6 @@
-# Grafana LogQL Query Examples for Tidepool
+# Grafana LogQL Query Examples for ExoMonad
 
-Quick reference for querying tidepool execution logs via Grafana Cloud (Loki).
+Quick reference for querying exomonad execution logs via Grafana Cloud (Loki).
 
 ## Setup Complete
 
@@ -16,14 +16,14 @@ Loki uses LogQL, which has two main parts:
 - **Log stream selector**: `{label="value"}` - Filters log streams
 - **Log pipeline**: `| json | line_format ...` - Parses and transforms logs
 
-Our logs are JSON, so we always start with `{service_name="tidepool"} | json`.
+Our logs are JSON, so we always start with `{service_name="exomonad"} | json`.
 
 ## Common Queries
 
 ### See Recent Sessions
 
 ```logql
-{service_name="tidepool"}
+{service_name="exomonad"}
 | json
 | graph_id = "habitica-helper"
 | msg = "graph:start"
@@ -33,7 +33,7 @@ Our logs are JSON, so we always start with `{service_name="tidepool"} | json`.
 ### Replay Single Session Timeline
 
 ```logql
-{service_name="tidepool"}
+{service_name="exomonad"}
 | json
 | session_id = "YOUR_SESSION_ID"
 | line_format "{{.ts}} {{.msg}} effect={{.effect_type}} node={{.node_name}} turn={{.turn_number}} latency={{.latency_ms}}ms result={{.result_type}}"
@@ -42,7 +42,7 @@ Our logs are JSON, so we always start with `{service_name="tidepool"} | json`.
 ### What LLM Calls Are Happening?
 
 ```logql
-{service_name="tidepool"}
+{service_name="exomonad"}
 | json
 | effect_type = "LlmComplete"
 | line_format "{{.ts}} node={{.node_name}} model={{.llm_model}} prompt_tokens={{.llm_prompt_tokens}} completion_tokens={{.llm_completion_tokens}} latency={{.latency_ms}}ms"
@@ -55,7 +55,7 @@ For aggregations, use LogQL metrics queries (query type: **Metrics**, not **Logs
 ```logql
 sum by (node_name) (
   sum_over_time(
-    {service_name="tidepool"}
+    {service_name="exomonad"}
     | json
     | effect_type = "LlmComplete"
     | unwrap llm_prompt_tokens [5m]
@@ -68,7 +68,7 @@ Or for total tokens (prompt + completion):
 ```logql
 sum by (node_name) (
   sum_over_time(
-    {service_name="tidepool"}
+    {service_name="exomonad"}
     | json
     | effect_type = "LlmComplete"
     | unwrap llm_prompt_tokens [5m]
@@ -77,7 +77,7 @@ sum by (node_name) (
 +
 sum by (node_name) (
   sum_over_time(
-    {service_name="tidepool"}
+    {service_name="exomonad"}
     | json
     | effect_type = "LlmComplete"
     | unwrap llm_completion_tokens [5m]
@@ -90,7 +90,7 @@ sum by (node_name) (
 ```logql
 sum by (habitica_operation) (
   count_over_time(
-    {service_name="tidepool"}
+    {service_name="exomonad"}
     | json
     | effect_type = "Habitica" [5m]
   )
@@ -103,7 +103,7 @@ sum by (habitica_operation) (
 ```logql
 sum by (effect_type, node_name) (
   count_over_time(
-    {service_name="tidepool"}
+    {service_name="exomonad"}
     | json
     | result_type = "error" [1h]
   )
@@ -112,7 +112,7 @@ sum by (effect_type, node_name) (
 
 **Sample error messages:**
 ```logql
-{service_name="tidepool"}
+{service_name="exomonad"}
 | json
 | result_type = "error"
 | line_format "{{.effect_type}} @ {{.node_name}}: {{.error}}"
@@ -121,7 +121,7 @@ sum by (effect_type, node_name) (
 ### Execution Flow by Turn
 
 ```logql
-{service_name="tidepool"}
+{service_name="exomonad"}
 | json
 | session_id = "YOUR_SESSION_ID"
 | turn_number >= 0
@@ -135,7 +135,7 @@ sum by (effect_type, node_name) (
 ```logql
 sum(
   count_over_time(
-    {service_name="tidepool"}
+    {service_name="exomonad"}
     | json
     | effect_type = "LlmComplete"
     | llm_cache_hit = "true" [1h]
@@ -144,7 +144,7 @@ sum(
 /
 sum(
   count_over_time(
-    {service_name="tidepool"}
+    {service_name="exomonad"}
     | json
     | effect_type = "LlmComplete"
     | llm_cache_hit != "" [1h]
@@ -156,7 +156,7 @@ sum(
 ### Slow Effects
 
 ```logql
-{service_name="tidepool"}
+{service_name="exomonad"}
 | json
 | unwrap latency_ms
 | latency_ms > 1000
@@ -167,7 +167,7 @@ sum(
 ```logql
 topk(20,
   max_over_time(
-    {service_name="tidepool"}
+    {service_name="exomonad"}
     | json
     | unwrap latency_ms [5m]
   ) by (effect_type, node_name, session_id)

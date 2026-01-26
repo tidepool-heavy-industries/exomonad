@@ -1,5 +1,5 @@
 ---
-name: tidepool-wasm-debug
+name: exomonad-wasm-debug
 description: Use when debugging WASM builds, effect serialization issues, or stale cabal cache problems.
 ---
 
@@ -17,15 +17,15 @@ Debug issues with WASM compilation, effect protocol, or cabal package resolution
 
 1. **Check package resolution**:
    ```bash
-   cd tidepool
-   grep -A 5 "tidepool-wasm" cabal.project
-   # Should show: packages: ../tidepool/tidepool-wasm
+   cd exomonad
+   grep -A 5 "exomonad-wasm" cabal.project
+   # Should show: packages: ../exomonad/exomonad-wasm
    ```
 
 2. **Verify source in plan.json**:
    ```bash
-   cabal build tidepool-wasm --dry-run
-   cat dist-newstyle/cache/plan.json | jq '.["install-plan"][] | select(.["pkg-name"] == "tidepool-wasm") | .["pkg-src"]'
+   cabal build exomonad-wasm --dry-run
+   cat dist-newstyle/cache/plan.json | jq '.["install-plan"][] | select(.["pkg-name"] == "exomonad-wasm") | .["pkg-src"]'
    # Should show: {"type":"local","path":"..."}
    ```
 
@@ -33,7 +33,7 @@ Debug issues with WASM compilation, effect protocol, or cabal package resolution
    ```bash
    rm -rf dist-newstyle ~/.cabal/store  # Nuclear option
    cabal update
-   cabal build tidepool-wasm
+   cabal build exomonad-wasm
    ```
 
 ## Effect Serialization Check
@@ -42,15 +42,15 @@ Verify effect types match between Haskell and TypeScript:
 
 ```bash
 # Check Haskell side
-rg "EffLlmCall" tidepool-wasm/src/Tidepool/Wasm/
+rg "EffLlmCall" exomonad-wasm/src/ExoMonad/Wasm/
 
 # Check TypeScript side
 rg "LlmCall" deploy/src/protocol.ts
 ```
 
 **Key files**:
-- `tidepool-wasm/src/Tidepool/Wasm/Effect.hs` - Smart constructors (`llmCall`, `llmComplete`)
-- `tidepool-wasm/src/Tidepool/Wasm/WireTypes.hs` - Serialization (`EffLlmCall`, `EffLlmComplete`)
+- `exomonad-wasm/src/ExoMonad/Wasm/Effect.hs` - Smart constructors (`llmCall`, `llmComplete`)
+- `exomonad-wasm/src/ExoMonad/Wasm/WireTypes.hs` - Serialization (`EffLlmCall`, `EffLlmComplete`)
 - `deploy/src/protocol.ts` - TypeScript types
 
 ## WASM Build Location
@@ -58,7 +58,7 @@ rg "LlmCall" deploy/src/protocol.ts
 After successful build:
 ```bash
 find dist-newstyle -name "*.wasm" -type f
-# Example: dist-newstyle/build/wasm32-wasi/ghc-9.10.1/tidepool-wasm-0.1.0.0/x/tidepool-wasm/build/tidepool-wasm/tidepool-wasm.wasm
+# Example: dist-newstyle/build/wasm32-wasi/ghc-9.10.1/exomonad-wasm-0.1.0.0/x/exomonad-wasm/build/exomonad-wasm/exomonad-wasm.wasm
 ```
 
 ## Common Issues

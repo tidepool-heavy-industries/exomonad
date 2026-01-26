@@ -34,8 +34,8 @@ Read this if you're:
 ## Usage
 
 ```haskell
-import Tidepool.Cabal.Interpreter (runCabalIO, defaultCabalConfig)
-import Tidepool.Effects.Cabal (cabalBuild, cabalTest, CabalResult(..))
+import ExoMonad.Cabal.Interpreter (runCabalIO, defaultCabalConfig)
+import ExoMonad.Effects.Cabal (cabalBuild, cabalTest, CabalResult(..))
 
 main :: IO ()
 main = do

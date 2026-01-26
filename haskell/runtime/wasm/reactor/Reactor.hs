@@ -19,9 +19,9 @@ import GHC.Wasm.Prim (JSString(..))
 #endif
 
 -- Import unified FFI and Roundtrip to ensure the foreign exports are linked
-import Tidepool.Wasm.Ffi.Unified ()
-import Tidepool.Wasm.Roundtrip ()
-import Tidepool.Wasm.Registry.Default (setupDefaultRegistry)
+import ExoMonad.Wasm.Ffi.Unified ()
+import ExoMonad.Wasm.Roundtrip ()
+import ExoMonad.Wasm.Registry.Default (setupDefaultRegistry)
 
 
 -- | Initialize the registry with default graphs.

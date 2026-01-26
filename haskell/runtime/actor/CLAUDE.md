@@ -2,7 +2,7 @@
 
 Concurrent graph execution via actor model with message passing.
 
-## Package: tidepool-actor
+## Package: exomonad-actor
 
 **Size**: ~76k LOC across 11 modules
 
@@ -85,7 +85,7 @@ tryReceive :: Mailbox a -> IO (Maybe a)
 ### Basic Graph Execution
 
 ```haskell
-import Tidepool.Actor.Graph (runGraphAsActors, pureHandler)
+import ExoMonad.Actor.Graph (runGraphAsActors, pureHandler)
 
 handlers :: Map ActorId NodeHandler
 handlers = Map.fromList
@@ -120,7 +120,7 @@ barrierHandler results = do
 For tree decomposition where children run full graph cycles:
 
 ```haskell
-import Tidepool.Actor.Subgraph
+import ExoMonad.Actor.Subgraph
 
 -- Handler spawns child graphs
 decomposeHandler :: Spec -> Eff (Subgraph Spec Result ': es) (GotoChoice targets)
@@ -192,7 +192,7 @@ awaitAny :: Eff (Subgraph spec result ': es) (ChildId, result)
 ## Testing
 
 ```bash
-cabal test tidepool-actor
+cabal test exomonad-actor
 ```
 
 Test modules:
@@ -209,4 +209,4 @@ Test modules:
 - `stm` - TQueue for mailboxes
 - `aeson` - JSON values
 - `freer-simple` - Effect system
-- `tidepool-core` - Graph types
+- `exomonad-core` - Graph types

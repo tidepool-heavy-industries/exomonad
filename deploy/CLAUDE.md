@@ -2,13 +2,13 @@
 
 **STATUS: FROZEN** - WASM/Cloudflare deployment is not currently maintained. The blessed development workflow is `./start-augmented.sh` for Claude Code++ integration.
 
-TypeScript harness for running Tidepool WASM graphs on Cloudflare's edge network.
+TypeScript harness for running ExoMonad WASM graphs on Cloudflare's edge network.
 
 ## What This Is
 
 A Cloudflare Worker that:
 1. Hosts a Durable Object (`StateMachineDO`)
-2. Loads a WASM module compiled from Haskell (tidepool-wasm)
+2. Loads a WASM module compiled from Haskell (exomonad-wasm)
 3. Executes the graph via WebSocket, interpreting effects
 
 The key insight: **TypeScript is a graph-aware effect interpreter**. Haskell owns the graph structure and execution logic; TypeScript handles IO (LLM calls, HTTP, logging).
@@ -23,10 +23,10 @@ The key insight: **TypeScript is a graph-aware effect interpreter**. Haskell own
 | `index.ts` | ✅ Complete | Durable Object with WebSocket handling, effect loop |
 | `loader.ts` | ✅ Complete | WASM loader with GHC RTS + JSFFI setup |
 | `jsffi.ts` | ✅ Complete | JavaScript FFI for GHC WASM |
-| `tidepool.wasm.d.ts` | ✅ Stub | TypeScript declaration for WASM exports |
+| `exomonad.wasm.d.ts` | ✅ Stub | TypeScript declaration for WASM exports |
 | `handlers/` | ✅ Complete | Effect handler registry with tests |
 
-**WASM blob: Missing** - Needs `tidepool-wasm` compiled with `wasm32-wasi-ghc`.
+**WASM blob: Missing** - Needs `exomonad-wasm` compiled with `wasm32-wasi-ghc`.
 
 ## Architecture
 
@@ -42,7 +42,7 @@ The key insight: **TypeScript is a graph-aware effect interpreter**. Haskell own
 │  └──────────────────────┬──────────────────────────────┘   │
 │                         │ FFI (JSON)                        │
 │  ┌──────────────────────▼──────────────────────────────┐   │
-│  │  WASM Module (from tidepool-wasm)                   │   │
+│  │  WASM Module (from exomonad-wasm)                   │   │
 │  │  - Graph execution (Runner.hs - TODO)               │   │
 │  │  - Effect yield/resume protocol                     │   │
 │  │  - Pure business logic, no IO                       │   │
@@ -130,7 +130,7 @@ And `EffectSemantics`:
 - **Blocking**: WASM waits for result before continuing
 - **Fire-and-forget**: WASM continues immediately (result is `null`)
 
-> **Types**: `tidepool-generated-ts/src/protocol.ts`, `tidepool-wasm/src/Tidepool/Wasm/WireTypes.hs`
+> **Types**: `exomonad-generated-ts/src/protocol.ts`, `exomonad-wasm/src/ExoMonad/Wasm/WireTypes.hs`
 
 ## Effect Handlers
 
@@ -247,14 +247,14 @@ pnpm deploy       # Deploy to Cloudflare
 
 ## What's Needed
 
-1. **WASM blob** - Build `tidepool-wasm` with:
+1. **WASM blob** - Build `exomonad-wasm` with:
    ```bash
    nix develop .#wasm
-   wasm32-wasi-cabal build tidepool-wasm
+   wasm32-wasi-cabal build exomonad-wasm
    ```
-   Copy output to `deploy/tidepool.wasm`
+   Copy output to `deploy/exomonad.wasm`
 
-2. **Runner implementation** - `tidepool-wasm/Ffi.hs` stubs need real implementations
+2. **Runner implementation** - `exomonad-wasm/Ffi.hs` stubs need real implementations
 
 ## Configuration
 

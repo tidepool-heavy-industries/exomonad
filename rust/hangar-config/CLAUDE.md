@@ -35,7 +35,7 @@ println!("Binary: {}", control_server.display());
 
 ```toml
 [hangar]
-name = "tidepool"
+name = "exomonad"
 version = "0.1"
 
 [project]
@@ -43,7 +43,7 @@ repo = "repo"
 worktrees = "worktrees"
 
 [runtime]
-tool_source = "runtime/tidepool"
+tool_source = "runtime/exomonad"
 bin = "runtime/bin"
 
 [auth]
@@ -70,7 +70,7 @@ match Hangar::discover() {
 
 Used by:
 - `tui-sidebar` - Discovers binary paths without HANGAR_ROOT
-- `mantle-agent` - (planned) MCP server binary discovery
+- `exomonad` - (planned) MCP server binary discovery
 - `process-compose.yaml` - (via bash discovery in command)
 - `start-augmented.sh` - (via bash discovery)
 

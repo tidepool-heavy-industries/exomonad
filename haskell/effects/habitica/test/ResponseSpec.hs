@@ -15,7 +15,7 @@ import Data.Aeson.QQ (aesonQQ)
 import Data.Maybe (isJust)
 import qualified Data.Text as T
 
-import Tidepool.Habitica
+import ExoMonad.Habitica
   ( UserInfo(..)
   , UserStats(..)
   , HabiticaTask(..)

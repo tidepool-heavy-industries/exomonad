@@ -164,9 +164,9 @@ dgSelect :: mode :- LLMNode
 | File | Purpose |
 |------|---------|
 | `control-server/templates/select_symbols.jinja` | Prompt template |
-| `control-server/src/Tidepool/Control/Scout/Graph/Templates.hs` | SelectContext, SelectTpl, TemplateDef |
-| `control-server/src/Tidepool/Control/Scout/Graph/Types.hs` | SelectOutput schema |
-| `control-server/tidepool-control-server.cabal` | Add templates to data-files |
+| `control-server/src/ExoMonad/Control/Scout/Graph/Templates.hs` | SelectContext, SelectTpl, TemplateDef |
+| `control-server/src/ExoMonad/Control/Scout/Graph/Types.hs` | SelectOutput schema |
+| `control-server/exomonad-control-server.cabal` | Add templates to data-files |
 
 ## Cabal Configuration
 
@@ -181,18 +181,18 @@ data-files:
 
 ```bash
 # Template compiles
-cabal build tidepool-control-server
+cabal build exomonad-control-server
 
 # Schema is valid JSON Schema
-cabal repl tidepool-control-server
->>> import Tidepool.Schema
->>> import Tidepool.Control.Scout.Graph.Types
+cabal repl exomonad-control-server
+>>> import ExoMonad.Schema
+>>> import ExoMonad.Control.Scout.Graph.Types
 >>> schemaToValue (jsonSchema @SelectOutput)
 -- Should not contain "oneOf"
 
 # Template renders
 >>> import Text.Ginger
->>> import Tidepool.Control.Scout.Graph.Templates
+>>> import ExoMonad.Control.Scout.Graph.Templates
 >>> let ctx = SelectContext "scoring" "compositeScore" "Config -> Int" Nothing ["Config", "Int"]
 >>> renderTemplate (templateCompiled @SelectTpl) ctx
 -- Should produce valid prompt text

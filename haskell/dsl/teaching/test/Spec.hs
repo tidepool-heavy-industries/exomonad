@@ -1,8 +1,8 @@
 module Main (main) where
 
 import Test.Hspec
-import qualified Tidepool.Teaching.RecordSpec
+import qualified ExoMonad.Teaching.RecordSpec
 
 main :: IO ()
 main = hspec $ do
-  describe "Tidepool.Teaching.Record" Tidepool.Teaching.RecordSpec.spec
+  describe "ExoMonad.Teaching.Record" ExoMonad.Teaching.RecordSpec.spec

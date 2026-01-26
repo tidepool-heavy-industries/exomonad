@@ -11,13 +11,13 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import Control.Monad.Freer
 
-import Tidepool.Control.Effects.SshExec (SshExec(..), ExecRequest(..), ExecResult(..))
-import Tidepool.Control.Effects.Cabal (runCabalRemote)
-import Tidepool.Control.Effects.Git (runGitRemote)
-import Tidepool.Control.Effects.Justfile (runJustfileRemote)
-import Tidepool.Effects.Cabal (CabalResult(..), RawCompileError(..), cabalBuild)
-import Tidepool.Effects.Git (WorktreeInfo(..), getWorktreeInfo)
-import Tidepool.Effects.Justfile (JustResult(..), runRecipe)
+import ExoMonad.Control.Effects.SshExec (SshExec(..), ExecRequest(..), ExecResult(..))
+import ExoMonad.Control.Effects.Cabal (runCabalRemote)
+import ExoMonad.Control.Effects.Git (runGitRemote)
+import ExoMonad.Control.Effects.Justfile (runJustfileRemote)
+import ExoMonad.Effects.Cabal (CabalResult(..), RawCompileError(..), cabalBuild)
+import ExoMonad.Effects.Git (WorktreeInfo(..), getWorktreeInfo)
+import ExoMonad.Effects.Justfile (JustResult(..), runRecipe)
 
 main :: IO ()
 main = defaultMain spec

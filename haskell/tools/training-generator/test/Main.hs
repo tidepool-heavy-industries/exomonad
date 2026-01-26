@@ -5,8 +5,8 @@ module Main (main) where
 import qualified Data.Text as T
 import Test.Hspec
 import Test.QuickCheck
-import Tidepool.Training.Arbitrary (heuristicScoreEdge)
-import Tidepool.Training.Types (ScoreEdgeOutput(..))
+import ExoMonad.Training.Arbitrary (heuristicScoreEdge)
+import ExoMonad.Training.Types (ScoreEdgeOutput(..))
 
 main :: IO ()
 main = hspec spec

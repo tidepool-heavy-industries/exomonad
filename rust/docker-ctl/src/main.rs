@@ -7,7 +7,7 @@ mod domain;
 
 #[derive(Parser)]
 #[command(name = "docker-ctl")]
-#[command(about = "Tidepool Docker Control CLI", long_about = None)]
+#[command(about = "ExoMonad Docker Control CLI", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

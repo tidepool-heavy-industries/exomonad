@@ -4,16 +4,16 @@ set -euo pipefail
 # Test: Sibling cleanup
 # Verify that the orchestrator kills sibling containers labeled with its hostname on exit.
 
-TEST_LABEL="tidepool.test.cleanup=true"
+TEST_LABEL="exomonad.test.cleanup=true"
 ORCHESTRATOR_ID="test-orch-$(date +%s)"
-AGENT_LABEL="tidepool.orchestrator=$ORCHESTRATOR_ID"
+AGENT_LABEL="exomonad.orchestrator=$ORCHESTRATOR_ID"
 
 echo "Starting orchestrator $ORCHESTRATOR_ID..."
 docker run -d --name "$ORCHESTRATOR_ID" \
     --hostname "$ORCHESTRATOR_ID" \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -l "$TEST_LABEL" \
-    tidepool-orchestrator:test
+    exomonad-orchestrator:test
 
 echo "Spawning dummy agents..."
 docker run -d --name "${ORCHESTRATOR_ID}-agent1" \

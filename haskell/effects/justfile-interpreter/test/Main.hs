@@ -6,7 +6,7 @@ module Main where
 import Data.Aeson (eitherDecode, encode)
 import Test.Hspec
 
-import Tidepool.Effects.Justfile
+import ExoMonad.Effects.Justfile
 
 main :: IO ()
 main = hspec $ do

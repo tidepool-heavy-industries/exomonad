@@ -14,7 +14,7 @@ temperature = 0.3
 
 [prompt.system]
 content = """
-You are the Log Analyzer for Tidepool's sleeptime evolution system.
+You are the Log Analyzer for ExoMonad's sleeptime evolution system.
 
 Your job is to query production logs and identify patterns that suggest
 improvements to the graph DSL. Focus on:

@@ -1,4 +1,4 @@
-# tidepool-teaching
+# exomonad-teaching
 
 LLM-level teaching infrastructure for generating FunctionGemma training data via Haiku.
 
@@ -47,7 +47,7 @@ anthropic.jsonl  (TeachingTurn records)
 
 ## Module Overview
 
-### `Tidepool.Teaching.Types`
+### `ExoMonad.Teaching.Types`
 
 Core data types:
 
@@ -93,7 +93,7 @@ Core data types:
     }
   ```
 
-### `Tidepool.Teaching.Teacher`
+### `ExoMonad.Teaching.Teacher`
 
 Minimal typeclass for effect-specific guidance:
 
@@ -105,7 +105,7 @@ class FineTrainingTeacher effect where
 baseSystemPrompt :: Text
 ```
 
-### `Tidepool.Teaching.Record`
+### `ExoMonad.Teaching.Record`
 
 File I/O for training data:
 
@@ -114,7 +114,7 @@ File I/O for training data:
 - `closeRecording` - Flush and close handles
 - `writeMetadata` - Write session metadata.json
 
-### `Tidepool.Teaching.LLM`
+### `ExoMonad.Teaching.LLM`
 
 Teaching LLM interpreter:
 
@@ -130,13 +130,13 @@ Teaching LLM interpreter:
 ```bash
 export TEACHING_ENABLED=true
 export ANTHROPIC_API_KEY=sk-ant-...
-export TEACHING_OUTPUT_DIR=.tidepool/training  # optional, default shown
+export TEACHING_OUTPUT_DIR=.exomonad/training  # optional, default shown
 ```
 
 ### Programmatic Usage
 
 ```haskell
-import Tidepool.Teaching.LLM
+import ExoMonad.Teaching.LLM
 
 main :: IO ()
 main = do
@@ -155,7 +155,7 @@ main = do
 
 Teaching sessions write to:
 ```
-.tidepool/training/
+.exomonad/training/
 └── session-{uuid}/
     ├── anthropic.jsonl   # TeachingTurn records (one JSON per line)
     ├── gemma.jsonl       # Reserved for FunctionGemma format (not yet implemented)
@@ -170,8 +170,8 @@ Teaching sessions write to:
 
 ## Dependencies
 
-- `tidepool-core` - Effect types, NodeMeta
-- `tidepool-llm-interpreter` - Anthropic API client
+- `exomonad-core` - Effect types, NodeMeta
+- `exomonad-llm-interpreter` - Anthropic API client
 
 ## Integration Points
 
@@ -179,6 +179,6 @@ Teaching sessions write to:
 - Future server wiring (would replace production LLM interpreter)
 
 **Depends on:**
-- `Tidepool.Effect.NodeMeta` - Provides node/graph context at dispatch time
-- `Tidepool.Effects.LLMProvider` - Anthropic API types
-- `Tidepool.LLM.Interpreter` - HTTP client for Haiku calls
+- `ExoMonad.Effect.NodeMeta` - Provides node/graph context at dispatch time
+- `ExoMonad.Effects.LLMProvider` - Anthropic API types
+- `ExoMonad.LLM.Interpreter` - HTTP client for Haiku calls

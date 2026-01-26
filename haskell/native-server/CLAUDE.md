@@ -1,6 +1,6 @@
-# Native Tidepool Server
+# Native ExoMonad Server
 
-Servant + WebSocket server for running tidepool agents natively (without WASM/CF Workers).
+Servant + WebSocket server for running exomonad agents natively (without WASM/CF Workers).
 
 ## Architecture
 
@@ -65,7 +65,7 @@ Effects are peeled from the outside in:
 ```bash
 just native
 # Or directly:
-TIDEPOOL_DIST=tidepool-native-gui/solid-frontend/dist cabal run tidepool-native
+EXOMONAD_DIST=exomonad-native-gui/solid-frontend/dist cabal run exomonad-native
 ```
 
 **Environment variables:**
@@ -82,7 +82,7 @@ TIDEPOOL_DIST=tidepool-native-gui/solid-frontend/dist cabal run tidepool-native
 | `OTLP_ENDPOINT` | No | OTLP traces endpoint (enables tracing) |
 | `OTLP_USER` | No | Grafana Cloud user ID for Tempo |
 | `OTLP_TOKEN` | No | Grafana Cloud API token for Tempo |
-| `SERVICE_NAME` | No | Service name for traces (default: tidepool-native) |
+| `SERVICE_NAME` | No | Service name for traces (default: exomonad-native) |
 | `DEVLOG_DIR` | No | DevLog output directory (default: disabled) |
 | `DEVLOG_VERBOSITY` | No | Verbosity: quiet, normal, verbose, trace |
 
@@ -163,10 +163,10 @@ Sessions are automatically cleaned up on disconnect.
 
 ## TODO: Claude Code++ Integration
 
-The server will need a TCP control socket endpoint to receive forwarded hooks and MCP calls from `mantle-agent`. This would enable:
+The server will need a TCP control socket endpoint to receive forwarded hooks and MCP calls from `exomonad`. This would enable:
 
 - Hook handling via Haskell effect stack
-- MCP tool calls routed to Tidepool agents
+- MCP tool calls routed to ExoMonad agents
 - Unified state sharing between hooks and MCP
 
-See `rust/CLAUDE.md` for the mantle-agent side of this integration.
+See `rust/CLAUDE.md` for the exomonad side of this integration.

@@ -10,8 +10,8 @@ import Data.Aeson (eitherDecode)
 import Data.ByteString.Lazy.Char8 qualified as LBS
 import Test.Hspec
 
-import Tidepool.Effects.GitHub
-import Tidepool.GitHub.Interpreter (GqlResult(..))
+import ExoMonad.Effects.GitHub
+import ExoMonad.GitHub.Interpreter (GqlResult(..))
 
 
 main :: IO ()

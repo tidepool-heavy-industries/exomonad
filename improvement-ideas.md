@@ -1,4 +1,4 @@
-# Tidepool DSL Improvement Ideas
+# ExoMonad DSL Improvement Ideas
 
 Context: These emerged from teaching the library to a new user building a Habitica task router. Pain points around boilerplate, type safety, and ergonomics.
 
@@ -73,7 +73,7 @@ Infer handler types FROM graph (reverse direction). Graph is source of truth, ha
 
 ---
 
-### 2. Single Deriving Clause (`deriving Tidepool`)
+### 2. Single Deriving Clause (`deriving ExoMonad`)
 
 **Current Problem:**
 ```haskell
@@ -88,7 +88,7 @@ data TaskRouterExit = ...
 **Proposed Solution:**
 ```haskell
 data TaskRouterExit = ...
-  deriving Tidepool  -- One line, all standard instances
+  deriving ExoMonad  -- One line, all standard instances
 
 -- Expands to all needed instances:
 --   deriving stock (Show, Eq, Generic)
@@ -105,9 +105,9 @@ plugin = defaultPlugin
   }
 
 installDerivingStrategy :: [DerivStrategy GhcPs] -> TcM [DerivStrategy GhcTc]
-installDerivingStrategy strats = mapM expandTidepoolDeriving strats
+installDerivingStrategy strats = mapM expandExoMonadDeriving strats
   where
-    expandTidepoolDeriving (DerivStrategy "Tidepool") =
+    expandExoMonadDeriving (DerivStrategy "ExoMonad") =
       pure [ StockStrategy [''Show, ''Eq, ''Generic]
            , AnyclassStrategy [''FromJSON, ''ToJSON, ''HasJSONSchema, ''ToDecisionTools]
            ]
@@ -116,7 +116,7 @@ installDerivingStrategy strats = mapM expandTidepoolDeriving strats
 **Option B: Template Haskell**
 ```haskell
 data TaskRouterExit = ...
-$(deriveTidepool ''TaskRouterExit)
+$(deriveExoMonad ''TaskRouterExit)
 
 -- Generates all instances via TH splice
 ```
@@ -126,9 +126,9 @@ $(deriveTidepool ''TaskRouterExit)
 data TaskRouterExit = ...
   deriving (Show, Eq, Generic)
   deriving (FromJSON, ToJSON, HasJSONSchema)
-    via TidepoolDefault TaskRouterExit
+    via ExoMonadDefault TaskRouterExit
 
-newtype TidepoolDefault a = TidepoolDefault a
+newtype ExoMonadDefault a = ExoMonadDefault a
   deriving newtype (FromJSON, ToJSON, HasJSONSchema, ToDecisionTools)
 ```
 
@@ -493,7 +493,7 @@ data Validator a = Validator
 
 **High Impact (implement first):**
 1. Memory as StateT (#6) - Immediate ergonomics win, minimal risk
-2. deriving Tidepool (#2) - Prevents common mistakes, easy with DerivingVia
+2. deriving ExoMonad (#2) - Prevents common mistakes, easy with DerivingVia
 3. Schema constraint checking (#5) - Catches runtime errors at compile time
 
 **Medium Impact (implement if time permits):**
@@ -512,7 +512,7 @@ data Validator a = Validator
 
 **Phase 1: Low-hanging fruit (COMPLETED)**
 - Memory ergonomics (`putMem`, `modifyMem` helpers)
-- `deriving via TidepoolDefault` (consolidates ToJSON, FromJSON, HasJSONSchema, StructuredOutput)
+- `deriving via ExoMonadDefault` (consolidates ToJSON, FromJSON, HasJSONSchema, StructuredOutput)
 - Schema validation at usage site (`llmCall`, `runTurn`) - catches unsupported sum types at compile time.
 
 **Phase 2: Ergonomics**

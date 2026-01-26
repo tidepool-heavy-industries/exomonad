@@ -6,5 +6,5 @@ import qualified ResponseSpec
 
 main :: IO ()
 main = hspec $ do
-  describe "tidepool-habitica" $ do
+  describe "exomonad-habitica" $ do
     describe "Response" ResponseSpec.spec

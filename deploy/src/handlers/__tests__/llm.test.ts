@@ -6,7 +6,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { handleLlmComplete, handleLlmCall, type LlmEnv } from "../llm.js";
-import type { LlmCompleteEffect, LlmCallEffect, LlmCallResult } from "tidepool-generated-ts";
+import type { LlmCompleteEffect, LlmCallEffect, LlmCallResult } from "exomonad-generated-ts";
 
 // Mock AI binding
 function createMockEnv(response: unknown): LlmEnv {

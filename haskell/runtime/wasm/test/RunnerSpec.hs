@@ -13,11 +13,11 @@ import Test.Hspec
 import Data.Aeson (Value(..))
 import qualified Data.Text as T
 
-import Tidepool.Wasm.Runner (initializeWasm, WasmResult(..))
-import Tidepool.Wasm.TestGraph (computeHandlerWasm)
-import Tidepool.Wasm.WireTypes (SerializableEffect(..), EffectResult(..))
-import Tidepool.Graph.Goto (GotoChoice, OneOf)
-import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
+import ExoMonad.Wasm.Runner (initializeWasm, WasmResult(..))
+import ExoMonad.Wasm.TestGraph (computeHandlerWasm)
+import ExoMonad.Wasm.WireTypes (SerializableEffect(..), EffectResult(..))
+import ExoMonad.Graph.Goto (GotoChoice, OneOf)
+import ExoMonad.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
 
 
 spec :: Spec

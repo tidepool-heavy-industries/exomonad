@@ -607,6 +607,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "exomonad"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "exomonad-shared",
+ "serde",
+ "serde_json",
+ "strum 0.26.3",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "exomonad-shared"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "nix",
+ "serde",
+ "serde_json",
+ "shell-escape",
+ "strum 0.26.3",
+ "tempfile",
+ "thiserror 2.0.17",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "fancy-regex"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1284,38 +1316,6 @@ checksum = "c0aeb26bf5e836cc1c341c8106051b573f1766dfa05aa87f0b98be5e51b02303"
 dependencies = [
  "nix",
  "winapi",
-]
-
-[[package]]
-name = "mantle-agent"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "mantle-shared",
- "serde",
- "serde_json",
- "strum 0.26.3",
- "tempfile",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "mantle-shared"
-version = "0.1.0"
-dependencies = [
- "clap",
- "nix",
- "serde",
- "serde_json",
- "shell-escape",
- "strum 0.26.3",
- "tempfile",
- "thiserror 2.0.17",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

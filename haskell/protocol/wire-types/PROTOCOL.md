@@ -1,4 +1,4 @@
-# Tidepool Native GUI WebSocket Protocol
+# ExoMonad Native GUI WebSocket Protocol
 
 This document describes the WebSocket protocol between the Haskell server and the Solid frontend.
 
@@ -10,7 +10,7 @@ The frontend connects to the server via WebSocket:
 ws://localhost:{PORT}
 ```
 
-Default port is `8080`. Configure via `TIDEPOOL_PORT` environment variable.
+Default port is `8080`. Configure via `EXOMONAD_PORT` environment variable.
 
 ## Message Flow
 

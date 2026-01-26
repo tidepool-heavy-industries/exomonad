@@ -25,7 +25,7 @@ compileTestFile path = do
   (exitCode, _stdout, stderr) <- readProcessWithExitCode "cabal"
     [ "exec", "ghc", "--"
     , "-fno-code"          -- don't generate code, just typecheck
-    , "-package", "tidepool-core"
+    , "-package", "exomonad-core"
     , path
     ] ""
   pure (exitCode, stderr)

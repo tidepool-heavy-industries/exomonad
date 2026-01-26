@@ -10,7 +10,7 @@ set -euo pipefail
 #   - Zellij tab creation for subagents
 # =============================================================================
 
-echo "Starting Tidepool Control Server..."
+echo "Starting ExoMonad Control Server..."
 
 # --- Docker socket access for gosu ---
 # group_add in docker-compose.yml doesn't persist through gosu (which recalculates
@@ -50,21 +50,21 @@ mkdir -p /home/user/.config/gh
 [ -d /home/user/.config/gh ] && chown -R 1000:1000 /home/user/.config/gh
 
 # --- Fix repo bind mount access ---
-# Create .tidepool directory structure in the repo before dropping privileges.
+# Create .exomonad directory structure in the repo before dropping privileges.
 # This is needed because the bind mount preserves host file permissions.
 if [ -d /repo ]; then
-    echo "Creating .tidepool structure in /repo..."
-    if mkdir -p /repo/.tidepool/sockets /repo/.tidepool/logs; then
-        chown -R 1000:1000 /repo/.tidepool
-        chmod -R 755 /repo/.tidepool
-        echo "✓ .tidepool directory created"
+    echo "Creating .exomonad structure in /repo..."
+    if mkdir -p /repo/.exomonad/sockets /repo/.exomonad/logs; then
+        chown -R 1000:1000 /repo/.exomonad
+        chmod -R 755 /repo/.exomonad
+        echo "✓ .exomonad directory created"
     else
-        echo "⚠️  Could not create .tidepool in /repo (bind mount may be read-only)"
+        echo "⚠️  Could not create .exomonad in /repo (bind mount may be read-only)"
         echo "   Creating in /home/user instead..."
-        mkdir -p /home/user/.tidepool/sockets /home/user/.tidepool/logs
-        chown -R 1000:1000 /home/user/.tidepool
-        # Override TIDEPOOL_PROJECT_DIR to use writable location
-        export TIDEPOOL_PROJECT_DIR=/home/user
+        mkdir -p /home/user/.exomonad/sockets /home/user/.exomonad/logs
+        chown -R 1000:1000 /home/user/.exomonad
+        # Override EXOMONAD_PROJECT_DIR to use writable location
+        export EXOMONAD_PROJECT_DIR=/home/user
     fi
 fi
 
@@ -84,4 +84,4 @@ export LC_ALL=C.UTF-8
 # Use username (not UID:GID) so gosu calls initgroups() and picks up
 # supplementary groups like docker-host from /etc/group
 echo "Starting control-server as user..."
-exec gosu user tidepool-control-server
+exec gosu user exomonad-control-server

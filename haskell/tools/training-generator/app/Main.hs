@@ -7,8 +7,8 @@ import qualified Data.ByteString.Lazy.Char8 as BSL
 import Options.Applicative
 import Test.QuickCheck (generate)
 
-import Tidepool.Training.Arbitrary (generateExample)
-import Tidepool.Training.Format (formatEdgeTrainingExample)
+import ExoMonad.Training.Arbitrary (generateExample)
+import ExoMonad.Training.Format (formatEdgeTrainingExample)
 
 data Options = Options
   { count :: Int

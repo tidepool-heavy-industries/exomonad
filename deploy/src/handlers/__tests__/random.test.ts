@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 import { handleRandomInt } from "../random.js";
-import type { RandomIntEffect } from "tidepool-generated-ts";
+import type { RandomIntEffect } from "exomonad-generated-ts";
 
 describe("handleRandomInt", () => {
   describe("range validation", () => {

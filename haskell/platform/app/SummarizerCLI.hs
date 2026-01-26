@@ -25,10 +25,10 @@ module Main (main) where
 import qualified Data.Text as T
 import System.Environment (getEnv)
 
-import Tidepool.Graph.CLI (deriveCLIParser)
-import Tidepool.Graph.CLI.Runner (runCLIWithLLM, makeClientConfig)
-import Tidepool.Graph.CLI.Example.Types (SummaryInput(..))
-import Tidepool.Graph.CLI.Example.Graph (summarize)
+import ExoMonad.Graph.CLI (deriveCLIParser)
+import ExoMonad.Graph.CLI.Runner (runCLIWithLLM, makeClientConfig)
+import ExoMonad.Graph.CLI.Example.Types (SummaryInput(..))
+import ExoMonad.Graph.CLI.Example.Graph (summarize)
 
 main :: IO ()
 main = do

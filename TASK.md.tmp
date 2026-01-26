@@ -36,11 +36,11 @@ Beads was a git-native issue tracking system stored in `.beads/`. It's been repl
    - Urchin CLI integration
 
 2. **Control server BD references**
-   - `haskell/control-server/src/Tidepool/Control/Effects/BD.hs` (if exists)
+   - `haskell/control-server/src/ExoMonad/Control/Effects/BD.hs` (if exists)
    - Any BD tool handlers
 
-3. **Rust mantle references**
-   - Any BD protocol types in `mantle-shared`
+3. **Rust exomonad references**
+   - Any BD protocol types in `exomonad-shared`
    - BD-related hook handling
 
 4. **Documentation**
@@ -57,7 +57,7 @@ Beads was a git-native issue tracking system stored in `.beads/`. It's been repl
 
 - `.beads/` directory itself (gitignored, user's local data)
 - `bd` CLI tool mentions in Beads Workflow Context (that's for projects using BD)
-- Any consuming repo references (anemone, urchin - separate repos)
+- Any consuming repo references (urchin - separate repos)
 
 ## Implementation Plan
 
@@ -67,12 +67,12 @@ Beads was a git-native issue tracking system stored in `.beads/`. It's been repl
    ```bash
    # Haskell imports
    grep -r "import.*BD" haskell/
-   grep -r "Tidepool.BD" haskell/
-   grep -r "Tidepool.Effects.BD" haskell/
+   grep -r "ExoMonad.BD" haskell/
+   grep -r "ExoMonad.Effects.BD" haskell/
 
    # Cabal dependencies
    grep -r "bd-interpreter" haskell/
-   grep -r "tidepool-bd" haskell/
+   grep -r "exomonad-bd" haskell/
 
    # Effect usage
    grep -r "runBD" haskell/
@@ -104,7 +104,7 @@ Beads was a git-native issue tracking system stored in `.beads/`. It's been repl
    ```
 
 3. **Remove from any package dependencies**
-   - Check `tidepool-control-server.cabal`
+   - Check `exomonad-control-server.cabal`
    - Check any other packages that depend on it
 
 4. **Fix compilation errors**
@@ -188,7 +188,7 @@ scripts/bead-context                      # Context script (if exists)
 
 ```
 cabal.project                             # Remove bd-interpreter package
-haskell/control-server/tidepool-control-server.cabal  # Remove dep
+haskell/control-server/exomonad-control-server.cabal  # Remove dep
 haskell/control-server/src/...            # Remove BD imports/usage
 haskell/CLAUDE.md                         # Update package list
 haskell/effects/CLAUDE.md                 # Remove bd-interpreter section
@@ -226,7 +226,7 @@ PRIMING.md                                # Already updated, verify
 - [x] No compilation errors (main code builds successfully)
 - [~] Tests: Core tests pass (hook-policy, parser), some test files need updates
 - [ ] Docker builds succeed (not yet tested)
-- [x] No `grep -r "bd-interpreter\|Tidepool.BD\|runBD" haskell/` matches
+- [x] No `grep -r "bd-interpreter\|ExoMonad.BD\|runBD" haskell/` matches
 - [x] CLAUDE.md files updated (already done in previous commits)
 - [x] No dead BD tools in MCP
 

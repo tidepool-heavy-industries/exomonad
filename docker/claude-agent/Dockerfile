@@ -2,7 +2,7 @@
 # No SSH - uses docker exec via docker-ctl for remote commands
 
 # =============================================================================
-# Stage 1: Rust Builder (for mantle-agent, effector, tui-spawner)
+# Stage 1: Rust Builder (for exomonad, effector, tui-spawner)
 # =============================================================================
 FROM --platform=linux/amd64 rust:bookworm AS rust-builder
 WORKDIR /build
@@ -19,18 +19,18 @@ RUN apt-get update && apt-get install -y \
 # Copy Rust workspace
 COPY rust/ ./rust/
 
-# Build mantle-agent, effector, and tui-spawner
+# Build exomonad, effector, and tui-spawner
 # Use cache mounts for cargo to speed up rebuilds
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/rust/target \
     cd rust && \
-    cargo build --release -p mantle-agent -p effector -p tui-spawner && \
-    cp target/release/mantle-agent /mantle-agent && \
+    cargo build --release -p exomonad -p effector -p tui-spawner && \
+    cp target/release/exomonad /exomonad && \
     cp target/release/effector /effector && \
     cp target/release/tui-spawner /tui-spawner
 
 # =============================================================================
-# Stage 2: Haskell Builder (for tidepool-control-server)
+# Stage 2: Haskell Builder (for exomonad-control-server)
 # =============================================================================
 FROM haskell:9.12.2-slim-bookworm AS haskell-builder
 
@@ -56,8 +56,8 @@ RUN sed -i '/package zlib/,+2d' cabal.project
 RUN --mount=type=cache,id=claude-agent-cabal,target=/root/.cabal/store \
     --mount=type=cache,id=claude-agent-dist,target=/build/dist-newstyle \
     cabal update && \
-    cabal build tidepool-control-server -j --ghc-options=-O1 && \
-    cp $(cabal list-bin tidepool-control-server) /tidepool-control-server
+    cabal build exomonad-control-server -j --ghc-options=-O1 && \
+    cp $(cabal list-bin exomonad-control-server) /exomonad-control-server
 
 # =============================================================================
 # Stage 3: Main Agent Image
@@ -137,15 +137,15 @@ ENV PATH="/home/agent/.local/bin:/home/agent/.ghcup/bin:/home/agent/.cargo/bin:$
 USER root
 
 # Copy Rust binaries
-COPY --from=rust-builder /mantle-agent /usr/local/bin/mantle-agent
+COPY --from=rust-builder /exomonad /usr/local/bin/exomonad
 COPY --from=rust-builder /effector /usr/local/bin/effector
 COPY --from=rust-builder /tui-spawner /usr/local/bin/tui-spawner
 
 # Copy Haskell binaries
-COPY --from=haskell-builder /tidepool-control-server /usr/local/bin/tidepool-control-server
+COPY --from=haskell-builder /exomonad-control-server /usr/local/bin/exomonad-control-server
 
 # Set permissions
-RUN chmod +x /usr/local/bin/mantle-agent /usr/local/bin/effector /usr/local/bin/tui-spawner /usr/local/bin/tidepool-control-server
+RUN chmod +x /usr/local/bin/exomonad /usr/local/bin/effector /usr/local/bin/tui-spawner /usr/local/bin/exomonad-control-server
 
 # Set up entrypoint script
 COPY docker/claude-agent/entrypoint.sh /usr/local/bin/entrypoint.sh
@@ -155,7 +155,7 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 RUN mkdir -p /workspace && chown agent:agent /workspace
 
 # Default environment
-ENV MANTLE_CONTROL_SOCKET=/home/agent/.tidepool/sockets/control.sock
+ENV EXOMONAD_CONTROL_SOCKET=/home/agent/.exomonad/sockets/control.sock
 ENV XDG_RUNTIME_DIR=/run/user/1000
 ENV ZELLIJ_SESSION_NAME=main
 

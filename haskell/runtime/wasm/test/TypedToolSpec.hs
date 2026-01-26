@@ -8,8 +8,8 @@ import Data.Aeson (object, (.=), Value(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 
-import Tidepool.Wasm.TypedTool
-import Tidepool.Wasm.WireTypes (WireToolCall(..))
+import ExoMonad.Wasm.TypedTool
+import ExoMonad.Wasm.WireTypes (WireToolCall(..))
 
 
 spec :: Spec

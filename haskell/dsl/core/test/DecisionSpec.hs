@@ -3,13 +3,13 @@ module DecisionSpec (spec) where
 import Test.Hspec
 import Data.Aeson (encode, decode)
 import Data.Time (UTCTime(..), fromGregorian)
-import Tidepool.Effect.Decision
+import ExoMonad.Effect.Decision
 
 spec :: Spec
 spec = do
   describe "Decision JSON roundtrip" $ do
     it "roundtrips SelectBead" $ do
-      let d = SelectBead "tidepool-123"
+      let d = SelectBead "exomonad-123"
       decode (encode d) `shouldBe` Just d
 
     it "roundtrips ProvideGuidance" $ do

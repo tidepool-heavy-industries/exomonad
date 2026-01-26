@@ -2,8 +2,8 @@ module Main where
 
 import Test.Hspec
 
-import qualified Tidepool.Worktree.ParseSpec as ParseSpec
-import qualified Tidepool.Worktree.InterpreterSpec as InterpreterSpec
+import qualified ExoMonad.Worktree.ParseSpec as ParseSpec
+import qualified ExoMonad.Worktree.InterpreterSpec as InterpreterSpec
 
 
 -- | Run all worktree interpreter tests.

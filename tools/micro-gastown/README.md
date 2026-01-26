@@ -4,7 +4,7 @@ Lightweight Haiku-only agent town for automated DSL evolution based on productio
 
 ## Overview
 
-Micro-Gas Town is a specialized multi-agent system that observes Tidepool graph execution via Grafana/Loki logs, identifies patterns (failures, slow calls, repeated errors), and proposes targeted improvements to the DSL.
+Micro-Gas Town is a specialized multi-agent system that observes ExoMonad graph execution via Grafana/Loki logs, identifies patterns (failures, slow calls, repeated errors), and proposes targeted improvements to the DSL.
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
@@ -85,7 +85,7 @@ description = "Queries Loki for execution patterns"
 
 [prompt]
 system = """
-You analyze Tidepool graph execution logs to find patterns.
+You analyze ExoMonad graph execution logs to find patterns.
 Focus on: failures, latency spikes, repeated errors.
 """
 

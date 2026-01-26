@@ -1,6 +1,6 @@
 # TUI Sidebar
 
-Unix socket client that renders interactive terminal UIs for Tidepool graph handlers using popup-tui.
+Unix socket client that renders interactive terminal UIs for ExoMonad graph handlers using popup-tui.
 
 **Purpose:** Provides a TUI effect implementation for Haskell agents. Connects to `control-server` via Unix socket, receives PopupDefinition messages, renders them using tui-realm + ratatui, captures keyboard/mouse input, and sends PopupResult back.
 
@@ -13,7 +13,7 @@ Haskell Graph Handler                    Rust TUI Sidebar
         │                                       │
         │ showUI popupDef                       │
         ▼                                       │
-tidepool-tui-interpreter ─PopupDefinition──▶ Unix Socket
+exomonad-tui-interpreter ─PopupDefinition──▶ Unix Socket
  (Part of control-server)    (NDJSON)           │
         │                                       ▼
         │                                  Blocking Event Loop
@@ -45,7 +45,7 @@ tidepool-tui-interpreter ─PopupDefinition──▶ Unix Socket
 
 ### Protocol Reference
 
-All types defined in `/Users/inannamalick/hangars/tidepool/repo/rust/tui-sidebar/src/protocol.rs`.
+All types defined in `/Users/inannamalick/hangars/exomonad/repo/rust/tui-sidebar/src/protocol.rs`.
 
 **Key differences from old protocol:**
 - **Request-response pattern:** One PopupDefinition → One PopupResult (not streaming interactions)
@@ -58,20 +58,20 @@ All types defined in `/Users/inannamalick/hangars/tidepool/repo/rust/tui-sidebar
 
 ### Standalone (testing)
 ```bash
-# Connect to control-server (uses $TIDEPOOL_TUI_SOCKET by default)
+# Connect to control-server (uses $EXOMONAD_TUI_SOCKET by default)
 cargo run -p tui-sidebar --release
 
 # Connect to specific socket
 cargo run -p tui-sidebar --release -- --socket /path/to/tui.sock
 ```
 
-### Hybrid Tidepool (recommended)
+### Hybrid ExoMonad (recommended)
 ```bash
-cd /Users/inannamalick/hangars/tidepool/repo
+cd /Users/inannamalick/hangars/exomonad/repo
 ./start-augmented.sh
 ```
 
-This launches the Hybrid Tidepool architecture:
+This launches the Hybrid ExoMonad architecture:
 - **process-compose**: Orchestrates services with dependency management
   - control-server: Starts first, supports Unix socket health check
   - tui-sidebar: Starts after control-server is healthy, connects to it
@@ -81,7 +81,7 @@ This launches the Hybrid Tidepool architecture:
 - Unix socket health checks ensure control-server is ready
 - Declarative dependency DAG
 - Automatic restart on failure with exponential backoff
-- Centralized logging to `.tidepool/logs/`
+- Centralized logging to `.exomonad/logs/`
 
 ### Environment Variables
 
@@ -172,7 +172,7 @@ cargo test -p tui-sidebar
 
 # Manual Unix Socket test (requires control-server)
 # Terminal 1:
-cabal run tidepool-control-server
+cabal run exomonad-control-server
 
 # Terminal 2:
 cargo run -p tui-sidebar
@@ -185,7 +185,7 @@ cargo run -p tui-sidebar
 Graph handlers use the TUI effect:
 
 ```haskell
-import Tidepool.Effect.TUI
+import ExoMonad.Effect.TUI
 
 showFormHandler :: Input -> Eff (TUI ': effs) (GotoChoice targets)
 showFormHandler input = do
@@ -209,11 +209,11 @@ showFormHandler input = do
 
 ### TUI Interpreter (Haskell Side)
 
-The `tidepool-control-server` package provides the Unix socket server:
+The `exomonad-control-server` package provides the Unix socket server:
 
 ```haskell
--- In Tidepool.Control.Server.hs
--- Listens on .tidepool/sockets/tui.sock
+-- In ExoMonad.Control.Server.hs
+-- Listens on .exomonad/sockets/tui.sock
 -- Accepts connections from tui-sidebar
 ```
 
@@ -242,7 +242,7 @@ The `tidepool-control-server` package provides the Unix socket server:
 
 **Problem:** control-server not running or not listening.
 
-**Fix:** Start control-server first: `cabal run tidepool-control-server`
+**Fix:** Start control-server first: `cabal run exomonad-control-server`
 
 **Or:** Use Zellij layout to start all components: `./start-augmented.sh`
 
@@ -274,8 +274,8 @@ The `tidepool-control-server` package provides the Unix socket server:
 
 ## References
 
-- **Protocol source:** `/Users/inannamalick/hangars/tidepool/repo/haskell/dsl/core/src/Tidepool/Effect/TUI.hs`
-- **TUI interpreter:** `/Users/inannamalick/hangars/tidepool/repo/haskell/effects/tui-interpreter/`
+- **Protocol source:** `/Users/inannamalick/hangars/exomonad/repo/haskell/dsl/core/src/ExoMonad/Effect/TUI.hs`
+- **TUI interpreter:** `/Users/inannamalick/hangars/exomonad/repo/haskell/effects/tui-interpreter/`
 - **popup-tui reference:** `~/dev/popup-tui` (source implementation)
 - **tuirealm docs:** https://docs.rs/tuirealm/
 - **ratatui docs:** https://docs.rs/ratatui/

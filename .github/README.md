@@ -35,7 +35,7 @@ container:
 Benefits:
 - All Haskell dependencies pre-built in container
 - System tools (just, hlint, node) already installed
-- Only needs to build your actual code (tidepool-core, tidepool-wasm)
+- Only needs to build your actual code (exomonad-core, exomonad-wasm)
 - Builds complete in ~30 seconds vs ~15+ minutes
 
 ## First-Time Setup
@@ -121,7 +121,7 @@ Actions → Build CI Container → Run workflow
 │  ↓                                                           │
 │  Pull cached container (ghcr.io/<repo>/ci-cache:latest)    │
 │  ↓                                                           │
-│  Build only tidepool code (~30s)                            │
+│  Build only exomonad code (~30s)                            │
 │  ↓                                                           │
 │  Run tests                                                  │
 └─────────────────────────────────────────────────────────────┘

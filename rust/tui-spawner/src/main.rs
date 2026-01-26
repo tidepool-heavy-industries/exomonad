@@ -48,11 +48,11 @@ struct Args {
     timeout: u64,
 
     /// Zellij container name (for docker exec)
-    #[arg(long, default_value = "tidepool-zellij")]
+    #[arg(long, default_value = "exomonad-zellij")]
     zellij_container: String,
 
     /// Zellij session name (required for targeting the correct session)
-    #[arg(long, default_value = "tidepool", env = "ZELLIJ_SESSION_NAME")]
+    #[arg(long, default_value = "exomonad", env = "ZELLIJ_SESSION_NAME")]
     zellij_session: String,
 
     /// Dry run: print commands instead of executing

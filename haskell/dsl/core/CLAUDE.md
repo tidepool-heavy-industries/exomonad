@@ -1,4 +1,4 @@
-# Tidepool Graph DSL
+# ExoMonad Graph DSL
 
 Type-safe, compile-time validated state machine graphs for LLM agent orchestration.
 
@@ -11,8 +11,8 @@ The Graph DSL enables declarative definition of LLM agent state machines where:
 - **Handlers** are generated with correct types via GHC.Generics
 
 ```haskell
-import Tidepool.Graph.Generic (GraphMode(..), AsHandler)
-import qualified Tidepool.Graph.Generic as G
+import ExoMonad.Graph.Generic (GraphMode(..), AsHandler)
+import qualified ExoMonad.Graph.Generic as G
 
 data SupportGraph mode = SupportGraph
   { sgEntry    :: mode :- G.Entry Message
@@ -228,7 +228,7 @@ data ParallelGraph mode = ParallelGraph
 - Awaits types must match worker output types
 - Workers must reach their Barrier
 
-> **Source**: `Graph/Types.hs` (annotations), `Graph/Validate/ForkBarrier.hs` (validation), `runtime/actor/src/Tidepool/Actor/Fork.hs` (execution)
+> **Source**: `Graph/Types.hs` (annotations), `Graph/Validate/ForkBarrier.hs` (validation), `runtime/actor/src/ExoMonad/Actor/Fork.hs` (execution)
 
 ## Annotations
 
@@ -271,7 +271,7 @@ gWork :: mode :- G.LLMNode
 **How it works:**
 1. Handler's `before` function builds template context from input
 2. System and user templates are rendered and concatenated
-3. Prompt is passed to `claude -p` via the mantle interpreter
+3. Prompt is passed to `claude -p` via the exomonad interpreter
 4. Claude Code spawns with file system access to `cwd`
 5. JSON output is parsed according to `Schema` type
 6. Handler's `after` function routes based on parsed output
@@ -293,8 +293,8 @@ Both have the same 4 fields (`llmSystem`, `llmUser`, `llmBefore`, `llmAfter`), b
 - Long-running operations that benefit from Claude Code's context management
 - Tasks needing Claude Code's built-in tools (file editing, bash execution)
 
-> **Source**: `tidepool-core/src/Tidepool/Graph/Types.hs` (ClaudeCode, ModelChoice),
-> `tidepool-core/src/Tidepool/Graph/Interpret.hs:264-302` (executeClaudeCodeHandler)
+> **Source**: `exomonad-core/src/ExoMonad/Graph/Types.hs` (ClaudeCode, ModelChoice),
+> `exomonad-core/src/ExoMonad/Graph/Interpret.hs:264-302` (executeClaudeCodeHandler)
 
 ### Graph-Level Annotations (`:&`)
 
@@ -469,7 +469,7 @@ class DispatchGotoWithSelf graph selfPayload allTargets targets es exitType wher
 
 **Error guidance**: If you try to use `dispatchGoto` with a handler that returns `Goto Self`, you'll get a clear `TypeError` directing you to use `dispatchGotoWithSelf`.
 
-> **Source**: `tidepool-core/src/Tidepool/Graph/Interpret.hs:599-677`
+> **Source**: `exomonad-core/src/ExoMonad/Graph/Interpret.hs:599-677`
 
 ## Return Effect
 
@@ -510,7 +510,7 @@ runReturn :: forall a effs. Eff (Return a ': effs) a -> Eff effs a
 
 **Key difference**: `Return` is an effect you use within a computation. `Goto Exit` is a transition target in a graph with Entry/Exit nodes.
 
-> **Source**: `tidepool-core/src/Tidepool/Effect/Types.hs`
+> **Source**: `exomonad-core/src/ExoMonad/Effect/Types.hs`
 
 ## Memory Effect
 
@@ -569,14 +569,14 @@ modifyMem :: forall s es. Member (Memory s) es => (s -> (a, s)) -> Eff es a
 
 **Persistence:** Memory state is serialized between graph steps. For WASM execution, it's included in the `StepOutput`'s `GraphState`. For native execution, it's held in the runner's state.
 
-> **Source**: `tidepool-core/src/Tidepool/Graph/Memory.hs`
+> **Source**: `exomonad-core/src/ExoMonad/Graph/Memory.hs`
 
 ## Subgraph Effect (Tree Recursion)
 
 Spawn child instances of the same graph for recursive tree execution:
 
 ```haskell
-import Tidepool.Effect.Subgraph
+import ExoMonad.Effect.Subgraph
 
 -- In a handler that can spawn children
 decomposeHandler :: Spec -> Eff (Subgraph Spec Result ': es) (GotoChoice targets)
@@ -609,7 +609,7 @@ collectAll handles = go handles []
 
 **Use case:** V3 TDD protocol where Scaffold spawns child graphs for decomposed specs.
 
-> **Source**: `Effect/Subgraph.hs` (types), `runtime/actor/src/Tidepool/Actor/Subgraph.hs` (interpreter)
+> **Source**: `Effect/Subgraph.hs` (types), `runtime/actor/src/ExoMonad/Actor/Subgraph.hs` (interpreter)
 
 ## Template.hs - Typed Prompt Templates
 
@@ -712,7 +712,7 @@ gClassify :: mode :- G.LLMNode
     :@ Schema Intent  -- Intent needs HasJSONSchema + FromJSON
 ```
 
-> **Source**: `tidepool-core/src/Tidepool/Schema.hs`
+> **Source**: `exomonad-core/src/ExoMonad/Schema.hs`
 
 ### Anthropic Structured Output Compatibility
 
@@ -731,7 +731,7 @@ data Choice = OptionA Text | OptionB Int
 
 #### Nullary Sum Types (Enums) - Automatic!
 
-For nullary sum types (enums with no data), Tidepool **automatically generates efficient string enums**:
+For nullary sum types (enums with no data), ExoMonad **automatically generates efficient string enums**:
 
 ```haskell
 -- ✅ Just derive - automatically optimized!
@@ -814,7 +814,7 @@ Fix options:
 > **References:**
 > - [Anthropic Structured Outputs Docs](https://docs.anthropic.com/en/docs/build-with-claude/tool-use#structured-outputs)
 > - [GitHub #4886: oneOf not supported](https://github.com/anthropics/claude-code/issues/4886)
-> - **Source**: `tidepool-core/src/Tidepool/Schema.hs`, `tidepool-core/src/Tidepool/StructuredOutput/Generic.hs`
+> - **Source**: `exomonad-core/src/ExoMonad/Schema.hs`, `exomonad-core/src/ExoMonad/StructuredOutput/Generic.hs`
 
 ## Mermaid.hs - Diagram Generation
 
@@ -881,7 +881,7 @@ work = ClaudeCodeLLMHandler @'Sonnet
 
 ### Execution Pipeline: runGraph
 
-The `runGraph` interpreter in `tidepool-core/src/Tidepool/Graph/Interpret.hs` orchestrates the full ClaudeCode execution flow:
+The `runGraph` interpreter in `exomonad-core/src/ExoMonad/Graph/Interpret.hs` orchestrates the full ClaudeCode execution flow:
 
 ```haskell
 -- Full type signature (simplified)
@@ -910,7 +910,7 @@ executeClaudeCodeHandler
 
 3. **Session dispatch**: Via Session effect interpreter
    - Calls `startSession` (fresh) or `continueSession` (existing)
-   - Session runs `claude -p` via mantle with rendered prompt
+   - Session runs `claude -p` via exomonad with rendered prompt
    - Claude Code executes in containerized environment with file access
 
 4. **Structured output parsing**:
@@ -929,7 +929,7 @@ executeClaudeCodeHandler
 - Claude Code retries response (transparent to handler)
 - Max 5 retries before surfacing error to handler
 
-> **Source**: `tidepool-core/src/Tidepool/Graph/Interpret.hs:264-442`
+> **Source**: `exomonad-core/src/ExoMonad/Graph/Interpret.hs:264-442`
 
 ### Decision Tools: Structured Output via Tool Calls
 
@@ -973,7 +973,7 @@ llmAfter (result :: ClaudeCodeResult WorkExit, sessionId) = do
 
 **Advantage over raw JSON**: Tools are self-documenting, Claude understands them as discrete choices rather than free-form JSON.
 
-> **Source**: `tidepool-core/src/Tidepool/StructuredOutput/DecisionTools.hs`
+> **Source**: `exomonad-core/src/ExoMonad/StructuredOutput/DecisionTools.hs`
 
 ### Key Differences from LLMHandler
 
@@ -982,7 +982,7 @@ llmAfter (result :: ClaudeCodeResult WorkExit, sessionId) = do
 | **Before return type** | `Eff es tpl` | `Eff es (tpl, SessionOperation)` |
 | **After input type** | `schema` | `(ClaudeCodeResult schema, SessionId)` |
 | **Session management** | N/A (implicit in LLM effect) | **Explicit** via SessionOperation enum |
-| **Execution** | Anthropic API call | Claude Code subprocess via mantle |
+| **Execution** | Anthropic API call | Claude Code subprocess via exomonad |
 | **Type parameters** | 5 (needs, schema, targets, effs, tpl) | 6 (model, needs, schema, targets, effs, tpl) |
 
 ### Before Function: SessionOperation
@@ -1096,8 +1096,8 @@ Key design:
 - After functions handle session IDs for conversation continuation
 - Session reuse enables TDD ↔ Review ↔ Impl ping-pongs
 
-> **Source**: `tidepool-core/src/Tidepool/Graph/Goto.hs:496-557` (types),
-> `tidepool-core/src/Tidepool/Graph/Interpret.hs:264-442` (execution)
+> **Source**: `exomonad-core/src/ExoMonad/Graph/Goto.hs:496-557` (types),
+> `exomonad-core/src/ExoMonad/Graph/Interpret.hs:264-442` (execution)
 
 ## Validation
 
@@ -1151,8 +1151,8 @@ HOW TO FIX
     UsesEffects '[Goto Self Payload, Goto "nextNode" Data]
 ```
 
-> **Source**: `tidepool-core/src/Tidepool/Graph/Generic.hs:1152-1165` (ValidGraphRecord),
-> `tidepool-core/src/Tidepool/Graph/Validate/RecordStructure.hs` (reachability checks)
+> **Source**: `exomonad-core/src/ExoMonad/Graph/Generic.hs:1152-1165` (ValidGraphRecord),
+> `exomonad-core/src/ExoMonad/Graph/Validate/RecordStructure.hs` (reachability checks)
 
 ## Type-Level Error Messages
 
@@ -1228,17 +1228,17 @@ HOW TO FIX
   result <- dispatchGotoWithSelf loopHandler handlers choice  -- OK
 ```
 
-> **Source**: Error formatting helpers in `tidepool-core/src/Tidepool/Graph/Errors.hs`,
+> **Source**: Error formatting helpers in `exomonad-core/src/ExoMonad/Graph/Errors.hs`,
 > `TypeError` instances throughout `Generic.hs`, `Interpret.hs`, `Goto.hs`
 
 ## Effect vs Effects
 
-- **`Tidepool.Effect.*`** (singular) - Core effect infrastructure
-- **`Tidepool.Effects.*`** (plural) - Integration/contrib effects (Habitica, Telegram, etc.)
+- **`ExoMonad.Effect.*`** (singular) - Core effect infrastructure
+- **`ExoMonad.Effects.*`** (plural) - Integration/contrib effects (Habitica, Telegram, etc.)
 
 ## WASM Execution
 
-The `tidepool-wasm` package enables yield/resume across FFI boundaries:
+The `exomonad-wasm` package enables yield/resume across FFI boundaries:
 
 ```haskell
 type WasmM a = Eff '[Yield SerializableEffect EffectResult] a
@@ -1311,7 +1311,7 @@ Use self-loops when retry attempts should be observable (telemetry, debugging). 
 
 ## File Inventory
 
-All paths relative to `tidepool-core/src/Tidepool/Graph/`.
+All paths relative to `exomonad-core/src/ExoMonad/Graph/`.
 
 | File | Key Exports | Purpose |
 |------|-------------|---------|
@@ -1336,13 +1336,13 @@ All paths relative to `tidepool-core/src/Tidepool/Graph/`.
 | Path | Key Exports | Purpose |
 |------|-------------|---------|
 | `Effect/Types.hs` | `State`, `LLM`, `Log`, `Emit`, `RequestInput`, `Time`, `Random`, `Return`, `returnValue`, `runReturn` | Core effect definitions |
-| `Effect/Session.hs` | `Session`, `SessionOutput`, `startSession`, `continueSession` | Dockerized Claude Code sessions via mantle |
+| `Effect/Session.hs` | `Session`, `SessionOutput`, `startSession`, `continueSession` | Dockerized Claude Code sessions via exomonad |
 | `Schema.hs` | `HasJSONSchema`, `JSONSchema`, `schemaToValue` | JSON Schema for structured output |
 | `Effects/*.hs` | `GitHub`, `Habitica`, `Telegram`, `Git`, etc. | Integration effects |
 
 ## Related Documentation
 
-- [tidepool-wasm/CLAUDE.md](../tidepool-wasm/CLAUDE.md) - WASM compilation, FFI, wire types
-- [tidepool-generated-ts/CLAUDE.md](../tidepool-generated-ts/CLAUDE.md) - Generated TypeScript types
+- [exomonad-wasm/CLAUDE.md](../exomonad-wasm/CLAUDE.md) - WASM compilation, FFI, wire types
+- [exomonad-generated-ts/CLAUDE.md](../exomonad-generated-ts/CLAUDE.md) - Generated TypeScript types
 - [deploy/CLAUDE.md](../deploy/CLAUDE.md) - Cloudflare Worker harness and effect handlers
 - [Root CLAUDE.md](../CLAUDE.md) - Project overview and consuming repo patterns

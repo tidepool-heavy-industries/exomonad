@@ -5,8 +5,8 @@
  * and returning results in the expected format.
  */
 
-import type { HabiticaEffect, EffectResult } from "tidepool-generated-ts";
-import { successResult, errorResult } from "tidepool-generated-ts";
+import type { HabiticaEffect, EffectResult } from "exomonad-generated-ts";
+import { successResult, errorResult } from "exomonad-generated-ts";
 
 // Habitica API base URL
 const HABITICA_API = "https://habitica.com/api/v3";
@@ -65,7 +65,7 @@ export async function handleHabitica(
     "Content-Type": "application/json",
     "x-api-user": config.userId,
     "x-api-key": config.apiToken,
-    "x-client": `${config.userId}-tidepool`,
+    "x-client": `${config.userId}-exomonad`,
   };
 
   try {

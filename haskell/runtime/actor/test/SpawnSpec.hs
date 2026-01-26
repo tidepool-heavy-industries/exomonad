@@ -6,9 +6,9 @@ import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Data.Aeson (Value(..))
 import qualified Ki
 
-import Tidepool.Actor.Mailbox (send)
-import Tidepool.Actor.Spawn (spawnActor)
-import Tidepool.Actor.Types (Actor(..))
+import ExoMonad.Actor.Mailbox (send)
+import ExoMonad.Actor.Spawn (spawnActor)
+import ExoMonad.Actor.Types (Actor(..))
 
 
 spec :: Spec

@@ -12,10 +12,10 @@ module SelfLoopRecord where
 
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, Self)
-import Tidepool.Graph.Generic (GraphMode(..))
-import qualified Tidepool.Graph.Generic as G
-import Tidepool.Graph.Goto (Goto)
+import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit, Self)
+import ExoMonad.Graph.Generic (GraphMode(..))
+import qualified ExoMonad.Graph.Generic as G
+import ExoMonad.Graph.Goto (Goto)
 
 data InputData
 data Result

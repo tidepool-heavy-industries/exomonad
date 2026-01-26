@@ -1,6 +1,6 @@
 # Runtime Backends
 
-Execution backends for Tidepool graphs. Each backend provides a different execution model.
+Execution backends for ExoMonad graphs. Each backend provides a different execution model.
 
 ## Structure
 
@@ -21,7 +21,7 @@ Execution backends for Tidepool graphs. Each backend provides a different execut
 The actor backend is the recommended choice for native execution:
 
 ```haskell
-import Tidepool.Actor (withActorSystem, spawnActor)
+import ExoMonad.Actor (withActorSystem, spawnActor)
 
 result <- withActorSystem initialPayload $ \scope router -> do
   compute <- spawnActor scope "compute" $ \msg -> do
@@ -41,7 +41,7 @@ result <- withActorSystem initialPayload $ \scope router -> do
 For edge deployment on Cloudflare Workers:
 
 ```haskell
-import Tidepool.Wasm (WasmM, stepGraph)
+import ExoMonad.Wasm (WasmM, stepGraph)
 
 -- Effects yield to TypeScript harness
 computeHandler :: Int -> WasmM (GotoChoice '[To Exit Int])

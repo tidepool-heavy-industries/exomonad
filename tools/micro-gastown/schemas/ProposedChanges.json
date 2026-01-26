@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://tidepool.dev/schemas/ProposedChanges.json",
+  "$id": "https://exomonad.dev/schemas/ProposedChanges.json",
   "title": "ProposedChanges",
   "description": "Proposed DSL changes with rationale and expected impact",
   "type": "object",

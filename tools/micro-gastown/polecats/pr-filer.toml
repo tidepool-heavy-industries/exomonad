@@ -14,7 +14,7 @@ temperature = 0.1
 
 [prompt.system]
 content = """
-You are the PR Filer for Tidepool's sleeptime evolution system.
+You are the PR Filer for ExoMonad's sleeptime evolution system.
 
 You receive proposed changes from the Conditional Refiner and:
 1. Create a descriptive branch name

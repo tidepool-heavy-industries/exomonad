@@ -2,14 +2,14 @@
 set -euo pipefail
 
 # =============================================================================
-# Tidepool Orchestrator Entrypoint
+# ExoMonad Orchestrator Entrypoint
 # =============================================================================
 # Follows "Root Setup / User Runtime" pattern:
 #   Phase 1 (root): Fix permissions, configure environment
 #   Phase 2 (user): Drop privileges, run Zellij
 # =============================================================================
 
-echo "🚀 Tidepool Orchestrator starting..."
+echo "🚀 ExoMonad Orchestrator starting..."
 
 # =============================================================================
 # PHASE 1: Root Setup
@@ -39,14 +39,14 @@ echo "🔧 Fixing volume permissions..."
 [ -d /home/user/.claude ] && chown -R user:user /home/user/.claude
 [ -d /home/user/.ssh ] && chown -R user:user /home/user/.ssh
 [ -d /sockets ] && chown -R user:user /sockets
-[ -d /var/log/tidepool ] && chown -R user:user /var/log/tidepool
+[ -d /var/log/exomonad ] && chown -R user:user /var/log/exomonad
 
 # --- 1.3 Socket Symlinks ---
 # Create symlinks so local dev paths work in Docker
-mkdir -p /worktrees/.tidepool/sockets
-ln -sf /sockets/control.sock /worktrees/.tidepool/sockets/control.sock
-ln -sf /sockets/tui.sock /worktrees/.tidepool/sockets/tui.sock
-chown -R user:user /worktrees/.tidepool
+mkdir -p /worktrees/.exomonad/sockets
+ln -sf /sockets/control.sock /worktrees/.exomonad/sockets/control.sock
+ln -sf /sockets/tui.sock /worktrees/.exomonad/sockets/tui.sock
+chown -R user:user /worktrees/.exomonad
 
 # --- 1.4 Claude Code Configuration ---
 echo "🔧 Configuring Claude Code..."
@@ -60,17 +60,17 @@ cat > /home/user/.claude.json <<'EOF'
 EOF
 
 # MCP config (HTTP transport to control-server)
-cat > /worktrees/.tidepool/mcp.json <<'EOF'
+cat > /worktrees/.exomonad/mcp.json <<'EOF'
 {
   "mcpServers": {
-    "tidepool": {
+    "exomonad": {
       "type": "http",
-      "url": "http://tidepool-control-server:7432/role/tl/mcp"
+      "url": "http://exomonad-control-server:7432/role/tl/mcp"
     }
   }
 }
 EOF
-ln -sf .tidepool/mcp.json /worktrees/.mcp.json
+ln -sf .exomonad/mcp.json /worktrees/.mcp.json
 
 # Settings with hooks
 cat > "$CLAUDE_DIR/settings.json" <<'EOF'
@@ -83,7 +83,7 @@ cat > "$CLAUDE_DIR/settings.json" <<'EOF'
       "matcher": "*",
       "hooks": [{
         "type": "command",
-        "command": "mantle-agent hook pre-tool-use",
+        "command": "exomonad hook pre-tool-use",
         "timeout": 300
       }]
     }]
@@ -105,13 +105,13 @@ rm -rf /home/user/.local/share/zellij/sessions 2>/dev/null
 
 # Ensure XDG_RUNTIME_DIR exists for user
 # Uses chmod 755 (not 700) to allow cross-container Zellij access from control-server
-# Both containers share this volume via tidepool-zellij named volume
+# Both containers share this volume via exomonad-zellij named volume
 mkdir -p /run/user/1000
 chown user:user /run/user/1000
 chmod 755 /run/user/1000
 
 # --- 1.6 Control Server Check ---
-SOCKET_PATH="${TIDEPOOL_CONTROL_SOCKET:-/sockets/control.sock}"
+SOCKET_PATH="${EXOMONAD_CONTROL_SOCKET:-/sockets/control.sock}"
 if [ -S "$SOCKET_PATH" ]; then
     echo "✓ Control server socket ready"
 else
@@ -146,8 +146,8 @@ case "${1:-orchestrator}" in
 
             create_session() {
                 zellij \
-                    --config /etc/tidepool/zellij/config.kdl \
-                    --layout /etc/tidepool/zellij/layouts/exomonad.kdl \
+                    --config /etc/exomonad/zellij/config.kdl \
+                    --layout /etc/exomonad/zellij/layouts/exomonad.kdl \
                     attach "$SESSION_NAME" --create-background
             }
 
@@ -158,7 +158,7 @@ case "${1:-orchestrator}" in
             # Create initial session
             create_session
             echo "✅ Orchestrator running. Attach via:"
-            echo "   docker exec -it tidepool-orchestrator zellij attach $SESSION_NAME"
+            echo "   docker exec -it exomonad-orchestrator zellij attach $SESSION_NAME"
 
             # Monitor and recreate if needed
             # Uses "sleep & wait" idiom for responsive signal handling during docker stop

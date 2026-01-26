@@ -1,20 +1,20 @@
-# tidepool-native-gui/ - Native Effect Interpreters
+# exomonad-native-gui/ - Native Effect Interpreters
 
 Native Haskell runtime with WebSocket GUI. Production deployment option alongside Cloudflare Workers. Uses Anthropic API directly with full observability via Grafana.
 
 ## What This Is
 
 A collection of effect interpreters and a WebSocket server that:
-1. Interprets tidepool-core effects natively (no WASM)
+1. Interprets exomonad-core effects natively (no WASM)
 2. Provides a SolidJS frontend for local development
 3. Enables full observability via Grafana Cloud
 
-The key insight: **Effect types live in tidepool-core, interpreters are platform-specific**. This package provides native interpreters; `deploy/` provides Cloudflare Worker interpreters.
+The key insight: **Effect types live in exomonad-core, interpreters are platform-specific**. This package provides native interpreters; `deploy/` provides Cloudflare Worker interpreters.
 
 ## Structure
 
 ```
-tidepool-native-gui/
+exomonad-native-gui/
 ├── server/                   # WebSocket server - ties it together
 ├── wire-types/               # UIState, UserAction, protocol types
 ├── solid-frontend/           # SolidJS frontend
@@ -48,7 +48,7 @@ tidepool-native-gui/
 
 ## Key Principle
 
-Effect *types* live in `tidepool-core/src/Tidepool/Effects/`, shared by WASM and native. Effect *interpreters* are platform-specific and live here.
+Effect *types* live in `exomonad-core/src/ExoMonad/Effects/`, shared by WASM and native. Effect *interpreters* are platform-specific and live here.
 
 ## Dependencies
 
@@ -70,7 +70,7 @@ lsp-interpreter ───► server
 cabal build all
 
 # Solid frontend
-cd tidepool-native-gui/solid-frontend
+cd exomonad-native-gui/solid-frontend
 npm install
 npm run build     # Production build
 npm run dev       # Dev server on port 3000

@@ -12,11 +12,11 @@ module TestGraphSpec (spec) where
 import Test.Hspec
 import qualified Data.Text as T
 
-import Tidepool.Graph.Goto (GotoChoice, OneOf)
-import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
-import Tidepool.Wasm.TestGraph (computeHandlerWasm)
-import Tidepool.Wasm.Runner (initializeWasm, WasmResult(..))
-import Tidepool.Wasm.WireTypes (SerializableEffect(..), EffectResult(..))
+import ExoMonad.Graph.Goto (GotoChoice, OneOf)
+import ExoMonad.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
+import ExoMonad.Wasm.TestGraph (computeHandlerWasm)
+import ExoMonad.Wasm.Runner (initializeWasm, WasmResult(..))
+import ExoMonad.Wasm.WireTypes (SerializableEffect(..), EffectResult(..))
 
 
 spec :: Spec

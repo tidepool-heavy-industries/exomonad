@@ -11,7 +11,7 @@ module TUIWireFormatSpec (spec) where
 import Test.Hspec
 import Data.Aeson (encode, eitherDecode)
 import qualified Data.ByteString.Lazy as LBS
-import Tidepool.Effect.TUI
+import ExoMonad.Effect.TUI
 
 -- | Path to golden files (relative to test execution directory)
 -- Tests run from haskell/dsl/core/, so we go up 3 levels to repo root

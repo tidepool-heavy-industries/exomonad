@@ -29,7 +29,7 @@ import type {
   NodeInfo,
   EdgeInfo,
   DetailedGraphInfo,
-} from "tidepool-generated-ts";
+} from "exomonad-generated-ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -264,7 +264,7 @@ const arbDetailedGraphInfo: fc.Arbitrary<DetailedGraphInfo> = fc.record({
 // =============================================================================
 
 let roundtrip: RoundtripExports | null = null;
-const WASM_PATH = path.join(__dirname, "../../tidepool-roundtrip.wasm");
+const WASM_PATH = path.join(__dirname, "../../exomonad-roundtrip.wasm");
 
 beforeAll(async () => {
   if (!fs.existsSync(WASM_PATH)) {

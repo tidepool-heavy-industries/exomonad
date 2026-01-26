@@ -1,5 +1,5 @@
 /**
- * Tidepool WASM Loader for Cloudflare Workers
+ * ExoMonad WASM Loader for Cloudflare Workers
  *
  * Self-contained loader for the DO harness.
  *
@@ -110,7 +110,7 @@ export async function loadMachine(options: LoaderOptions): Promise<GraphMachine>
   exports.hs_init(0, 0);
 
   if (debug) {
-    console.log(`[Tidepool] WASM module loaded for graph: ${graphId}`);
+    console.log(`[ExoMonad] WASM module loaded for graph: ${graphId}`);
   }
 
   // Get graph-specific function names
@@ -131,7 +131,7 @@ export async function loadMachine(options: LoaderOptions): Promise<GraphMachine>
   return {
     async initialize(input: unknown): Promise<StepOutput> {
       const inputJson = JSON.stringify(input);
-      if (debug) console.log(`[Tidepool:${graphId}] initialize:`, inputJson);
+      if (debug) console.log(`[ExoMonad:${graphId}] initialize:`, inputJson);
 
       const initFn = dynamicExports[initFnName] as (arg: string) => string | Promise<string>;
       const resultStr = await initFn(inputJson);
@@ -140,13 +140,13 @@ export async function loadMachine(options: LoaderOptions): Promise<GraphMachine>
         ? JSON.parse(resultStr)
         : { effect: null, done: true, stepResult: null, graphState: { phase: { type: "idle" } as const, completedNodes: [] } };
 
-      if (debug) console.log(`[Tidepool:${graphId}] initialize result:`, JSON.stringify(result, null, 2));
+      if (debug) console.log(`[ExoMonad:${graphId}] initialize result:`, JSON.stringify(result, null, 2));
       return result;
     },
 
     async step(result: EffectResult): Promise<StepOutput> {
       const resultJson = JSON.stringify(result);
-      if (debug) console.log(`[Tidepool:${graphId}] step:`, resultJson);
+      if (debug) console.log(`[ExoMonad:${graphId}] step:`, resultJson);
 
       const stepFn = dynamicExports[stepFnName] as (arg: string) => string | Promise<string>;
       const outputStr = await stepFn(resultJson);
@@ -155,7 +155,7 @@ export async function loadMachine(options: LoaderOptions): Promise<GraphMachine>
         ? JSON.parse(outputStr)
         : { effect: null, done: true, stepResult: null, graphState: { phase: { type: "idle" } as const, completedNodes: [] } };
 
-      if (debug) console.log(`[Tidepool:${graphId}] step result:`, JSON.stringify(output, null, 2));
+      if (debug) console.log(`[ExoMonad:${graphId}] step result:`, JSON.stringify(output, null, 2));
       return output;
     },
 

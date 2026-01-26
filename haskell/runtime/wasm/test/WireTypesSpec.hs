@@ -13,7 +13,7 @@ import Data.Aeson.KeyMap qualified as KM
 import Data.Map.Strict qualified as Map
 import Data.Vector qualified as V
 
-import Tidepool.Wasm.WireTypes
+import ExoMonad.Wasm.WireTypes
 
 
 spec :: Spec

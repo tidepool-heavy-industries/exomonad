@@ -18,10 +18,10 @@ module ToInUsesEffects where
 
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit)
-import Tidepool.Graph.Generic (GraphMode(..), type (:-), LogicNode, ValidGraphRecord)
-import qualified Tidepool.Graph.Generic as G (EntryNode, ExitNode)
-import Tidepool.Graph.Goto (To)  -- Imported to demonstrate incorrect usage in UsesEffects
+import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit)
+import ExoMonad.Graph.Generic (GraphMode(..), type (:-), LogicNode, ValidGraphRecord)
+import qualified ExoMonad.Graph.Generic as G (EntryNode, ExitNode)
+import ExoMonad.Graph.Goto (To)  -- Imported to demonstrate incorrect usage in UsesEffects
 
 data InputData
 data Output

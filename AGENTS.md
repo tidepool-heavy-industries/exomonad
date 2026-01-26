@@ -1,12 +1,12 @@
-# Tidepool - Agent Developer Guide
+# ExoMonad - Agent Developer Guide
 
 > Type-safe LLM agent framework with structured state and templates
 
-This document guides AI coding agents working on the Tidepool project. It supplements `README.md` and `CLAUDE.md` with agent-specific workflow information.
+This document guides AI coding agents working on the ExoMonad project. It supplements `README.md` and `CLAUDE.md` with agent-specific workflow information.
 
 ## Project Overview
 
-Tidepool is a Haskell library for building LLM agents as typed state machines. Agents are **IO-blind**: they express typed effects (LLM calls, state mutations, tool calls) that external interpreters handle, enabling sandboxed execution and WASM deployment.
+ExoMonad is a Haskell library for building LLM agents as typed state machines. Agents are **IO-blind**: they express typed effects (LLM calls, state mutations, tool calls) that external interpreters handle, enabling sandboxed execution and WASM deployment.
 
 ### Architecture
 
@@ -33,7 +33,7 @@ Tidepool is a Haskell library for building LLM agents as typed state machines. A
 ### Core Languages
 - **Haskell** - Primary language (GHC 9.10+
 - **TypeScript** - Cloudflare Worker harness, Claude Code++ MCP server
-- **Rust** - Claude Code++ hook/MCP forwarding (`mantle-agent`)
+- **Rust** - Claude Code++ hook/MCP forwarding (`exomonad`)
 
 ### Build & Development
 - **Cabal** - Haskell build system (monorepo with 30+ packages)
@@ -50,14 +50,14 @@ Tidepool is a Haskell library for building LLM agents as typed state machines. A
 ### Deployment
 - **WASM** - Cross-compilation to wasm32-wasi (Cloudflare Workers)
 - **Cloudflare** - Durable Objects + Workers
-- **Native** - Servant server via `tidepool-native-server`
+- **Native** - Servant server via `exomonad-native-server`
 
 ## Project Structure
 
 All Haskell packages live in `haskell/`. See `cabal.project` for package list.
 
 ```
-tidepool/
+exomonad/
 ├── haskell/                    # All Haskell packages
 │   ├── dsl/core/              # Graph DSL, effects, templates
 │   ├── runtime/               # Execution backends (actor, WASM)
@@ -70,13 +70,12 @@ tidepool/
 │   └── native-server/         # Native HTTP/WebSocket server
 ├── deploy/                    # Cloudflare Worker harness
 ├── rust/                      # Claude Code++ infrastructure
-│   ├── mantle-agent/          # Hook/MCP forwarding (Rust ↔ Haskell TCP)
-│   ├── mantle-shared/         # Protocol types
-│   └── mantle-hub/            # Metrics (legacy)
+│   ├── exomonad/          # Hook/MCP forwarding (Rust ↔ Haskell TCP)
+│   ├── exomonad-shared/         # Protocol types
+│   └── exomonad-hub/            # Metrics (legacy)
 ├── typescript/                # TypeScript packages
 │   ├── native-gui/            # Solid.js frontend
 │   └── telegram-bot/          # Bot implementation
-├── anemone/                   # Debug UI (Solid.js, in-repo)
 ├── tools/                     # Root-level analysis tools
 ├── docs/                      # Documentation
 └── plans/                     # Design documents
@@ -158,15 +157,15 @@ just logs-json       # JSON format
 
 ### Claude Code++ (OSCAR) - Primary Development Mode
 
-**Claude Code++** augments human-driven Claude Code sessions with Tidepool superpowers. **Not headless** - humans remain in control.
+**Claude Code++** augments human-driven Claude Code sessions with ExoMonad superpowers. **Not headless** - humans remain in control.
 
 **Architecture:**
 ```
 TTY (Zellij)
 ├── Pane 1: Claude Code
-└── Pane 2: tidepool-control-server (logs)
+└── Pane 2: exomonad-control-server (logs)
               ↓
-        mantle-agent (Rust)
+        exomonad (Rust)
               ↓ TCP (NDJSON)
         control-server (Haskell)
           • Hook passthrough
@@ -179,21 +178,21 @@ TTY (Zellij)
 nix develop .#claude-code-plus  # Auto-starts Zellij
 
 # Or manually:
-cd ~/tidepool-heavy-industries/tidepool
-cabal run tidepool-control-server  # Terminal 1
+cd ~/exomonad-ai/exomonad
+cabal run exomonad-control-server  # Terminal 1
 claude                              # Terminal 2
 ```
 
 **Key Files:**
 - `haskell/control-server/CLAUDE.md` - Full data flow + implementation
-- `rust/mantle-agent/CLAUDE.md` - Hook/MCP forwarding
+- `rust/exomonad/CLAUDE.md` - Hook/MCP forwarding
 - `haskell/agents/semantic-scout/CLAUDE.md` - Scout tool algorithm
 
 ### Effect Interpreter Development
 
 **Where to add new effects:**
-1. Type definition: `haskell/dsl/core/src/Tidepool/Effect/Types.hs`
-2. Integration: `haskell/dsl/core/src/Tidepool/Effects/` (plural namespace)
+1. Type definition: `haskell/dsl/core/src/ExoMonad/Effect/Types.hs`
+2. Integration: `haskell/dsl/core/src/ExoMonad/Effects/` (plural namespace)
 3. Interpreter: `haskell/effects/<name>-interpreter/`
 
 **Pattern:**
@@ -213,9 +212,9 @@ runMyEffect = interpret $ \case
 ### Graph DSL Development
 
 **Where to add new annotations:**
-- `haskell/dsl/core/src/Tidepool/Graph/Types.hs`
+- `haskell/dsl/core/src/ExoMonad/Graph/Types.hs`
 
-**Validation:** The DSL uses type families for compile-time validation. See `haskell/dsl/core/src/Tidepool/Graph/Validate/`.
+**Validation:** The DSL uses type families for compile-time validation. See `haskell/dsl/core/src/ExoMonad/Graph/Validate/`.
 
 **Graph structure:**
 ```haskell
@@ -257,8 +256,8 @@ just native  # Interactive UI at localhost:8080
 **Build pipeline:**
 ```bash
 nix develop .#wasm
-wasm32-wasi-cabal build tidepool-reactor
-wasm-opt -Oz <input.wasm> -o deploy/src/tidepool.wasm
+wasm32-wasi-cabal build exomonad-reactor
+wasm-opt -Oz <input.wasm> -o deploy/src/exomonad.wasm
 ```
 
 **Limitations:**
@@ -282,8 +281,8 @@ ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints -Wunused-packag
 **Documentation:** Haddock comments on all exported functions
 
 **Effect naming:**
-- `Effect` (singular) = core infrastructure (`Tidepool.Effect`)
-- `Effects` (plural) = integrations (`Tidepool.Effects`)
+- `Effect` (singular) = core infrastructure (`ExoMonad.Effect`)
+- `Effects` (plural) = integrations (`ExoMonad.Effects`)
 - `Interpreter` = effect implementation (replaces "executor")
 
 **Data flow principle:** **Never ignore captured data with `_` prefix**
@@ -363,14 +362,14 @@ just test-protocol-conformance  # Regenerate samples and verify
 ### "Claude Code++ hooks not working"
 
 **Diagnosis:**
-1. Check control server running: `cabal run tidepool-control-server`
-2. Check mantle-agent in PATH: `which mantle-agent`
+1. Check control server running: `cabal run exomonad-control-server`
+2. Check exomonad in PATH: `which exomonad`
 3. Verify `.claude/settings.local.json` has correct paths
 4. Check TCP connection: `telnet localhost 7432`
 
 **Test MCP:**
 ```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | mantle-agent mcp
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | exomonad mcp
 ```
 
 ### "Template compilation error"
@@ -391,7 +390,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | mantle-agent
 - `haskell/CLAUDE.md` - Haskell package organization
 - `haskell/dsl/core/CLAUDE.md` - Graph DSL reference
 - `haskell/control-server/CLAUDE.md` - Claude Code++ implementation
-- `rust/mantle-agent/CLAUDE.md` - Hook/MCP forwarding
+- `rust/exomonad/CLAUDE.md` - Hook/MCP forwarding
 
 **For detailed questions:** Follow the CLAUDE.md link tree based on your task (see CLAUDE.md "When to Read Which CLAUDE.md" table).
 

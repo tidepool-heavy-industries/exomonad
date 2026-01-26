@@ -5,8 +5,8 @@
  * Custom fields from the Haskell side are spread into the log entry.
  */
 
-import type { LogInfoEffect, LogErrorEffect, EffectResult } from "tidepool-generated-ts";
-import { successResult } from "tidepool-generated-ts";
+import type { LogInfoEffect, LogErrorEffect, EffectResult } from "exomonad-generated-ts";
+import { successResult } from "exomonad-generated-ts";
 
 /**
  * Handle LogInfo effect - logs message at info level with structured fields.

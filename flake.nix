@@ -1,5 +1,5 @@
 {
-  description = "Tidepool Hangar - Development environment for Tidepool LLM agent framework";
+  description = "ExoMonad Hangar - Development environment for ExoMonad LLM agent framework";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -70,10 +70,10 @@
               export PKG_CONFIG_PATH="${pkgs.zlib.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
               export NIX_GHC_LIBDIR="$(ghc --print-libdir)"
               export HANGAR_ROOT="$PWD"
-              export TIDEPOOL_REPO="$PWD/repo"
+              export EXOMONAD_REPO="$PWD/repo"
 
               echo "╔═══════════════════════════════════════════════════════════╗"
-              echo "║           Tidepool Hangar Development Shell               ║"
+              echo "║           ExoMonad Hangar Development Shell               ║"
               echo "╚═══════════════════════════════════════════════════════════╝"
               echo ""
               echo "  GHC:      $(ghc --numeric-version)"
@@ -84,7 +84,7 @@
               echo ""
               echo "Paths:"
               echo "  HANGAR_ROOT:   $HANGAR_ROOT"
-              echo "  TIDEPOOL_REPO: $TIDEPOOL_REPO"
+              echo "  EXOMONAD_REPO: $EXOMONAD_REPO"
               echo ""
               echo "Commands:"
               echo "  cd repo && cabal build all      Build Haskell packages"
@@ -134,12 +134,12 @@
               echo ""
               echo "Tools available:"
               echo "  wasm32-wasi-ghc --version"
-              echo "  wasm32-wasi-cabal build tidepool-wasm"
+              echo "  wasm32-wasi-cabal build exomonad-wasm"
               echo ""
               echo "Build pipeline:"
               echo "  cd repo"
-              echo "  wasm32-wasi-cabal build tidepool-wasm"
-              echo "  # Output: dist-newstyle/.../tidepool-wasm.wasm"
+              echo "  wasm32-wasi-cabal build exomonad-wasm"
+              echo "  # Output: dist-newstyle/.../exomonad-wasm.wasm"
               echo ""
               echo "NOTE: Using GHC 9.10 for WASM (9.12 not yet available in ghc-wasm-meta)"
               echo ""
@@ -154,7 +154,7 @@
               export PKG_CONFIG_PATH="${pkgs.zlib.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
               export NIX_GHC_LIBDIR="$(ghc --print-libdir)"
 
-              echo "Tidepool Minimal Shell (Haskell only)"
+              echo "ExoMonad Minimal Shell (Haskell only)"
               echo "  GHC: $(ghc --numeric-version)"
               echo "  HLS: available"
               echo ""
@@ -163,8 +163,8 @@
         };
 
         # Allow `nix build` to produce a simple check
-        packages.default = pkgs.writeShellScriptBin "tidepool-env-check" ''
-          echo "Tidepool environment check"
+        packages.default = pkgs.writeShellScriptBin "exomonad-env-check" ''
+          echo "ExoMonad environment check"
           echo "Run 'nix develop' to enter the development shell"
         '';
       }

@@ -13,7 +13,7 @@
  *   because alert handling is stateless - we don't need to resume or query
  *   previous alert executions, and this avoids DO state conflicts.
  * - The "alert" graph ID is used here; the graph itself will be registered
- *   in tidepool-wasm/src/Tidepool/Wasm/Registry.hs in a follow-up PR.
+ *   in exomonad-wasm/src/ExoMonad/Wasm/Registry.hs in a follow-up PR.
  */
 
 import { DurableObject } from "cloudflare:workers";

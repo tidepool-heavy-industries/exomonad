@@ -1,0 +1,93 @@
+cabal-version: 2.2
+name: exomonad-teaching
+version: 0.1.0.0
+synopsis: Haiku-driven FunctionGemma teaching infrastructure
+description:
+  Generic teaching system that records Haiku tool use during production
+  workflows, generating dual-format training data (Anthropic + FunctionGemma JSONL)
+  for fine-tuning FunctionGemma 270M.
+
+library
+  exposed-modules:
+    ExoMonad.Teaching.Types
+    ExoMonad.Teaching.Teacher
+    ExoMonad.Teaching.Record
+    ExoMonad.Teaching.LLM
+  hs-source-dirs: src
+  build-depends:
+      base >=4.14 && <5
+    , aeson >=2.0
+    , text >=1.2
+    , time >=1.9
+    , uuid >=1.3
+    , bytestring >=0.10
+    , exomonad-core
+    , exomonad-llm-interpreter
+    , directory >=1.3
+    , filepath >=1.4
+    , vector >=0.12
+    , freer-simple >=1.2
+    , servant-client >=0.20
+  default-language: Haskell2010
+  default-extensions:
+    DeriveGeneric
+    DeriveAnyClass
+    DerivingStrategies
+    GeneralizedNewtypeDeriving
+    OverloadedStrings
+    RecordWildCards
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wpartial-fields
+    -Wredundant-constraints
+
+executable teaching-harness
+  main-is: TeachingHarness.hs
+  hs-source-dirs: app
+  build-depends:
+      base >=4.14 && <5
+    , exomonad-teaching
+    , exomonad-core
+    , aeson >=2.0
+    , text >=1.2
+    , freer-simple >=1.2
+    , directory >=1.3
+  default-language: Haskell2010
+  default-extensions:
+    FlexibleContexts
+    OverloadedStrings
+  ghc-options:
+    -Wall
+    -threaded
+    -rtsopts
+    -with-rtsopts=-N
+
+test-suite exomonad-teaching-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  hs-source-dirs: test
+  other-modules:
+    ExoMonad.Teaching.RecordSpec
+  build-depends:
+      base >=4.14 && <5
+    , exomonad-teaching
+    , hspec >=2.7
+    , aeson >=2.0
+    , text >=1.2
+    , time >=1.9
+    , uuid >=1.3
+    , directory >=1.3
+    , filepath >=1.4
+    , temporary >=1.3
+  default-language: Haskell2010
+  default-extensions:
+    OverloadedStrings
+  ghc-options:
+    -Wall
+    -threaded
+    -rtsopts
+    -with-rtsopts=-N

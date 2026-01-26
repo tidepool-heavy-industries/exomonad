@@ -118,7 +118,7 @@ Claude Code returns session IDs in its output. To capture:
 
 ### Effect Integration
 
-For Tidepool's effect system, session resumption could be:
+For ExoMonad's effect system, session resumption could be:
 
 ```haskell
 data ClaudeCodeExec r where

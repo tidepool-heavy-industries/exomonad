@@ -99,9 +99,9 @@ This PR addresses {pattern_count} patterns identified in production logs:
 command = "micro-gastown file-pr --changes changes.diff --evidence patterns.json"
 output = """
 {
-  "pr_url": "https://github.com/org/tidepool/pull/123",
+  "pr_url": "https://github.com/org/exomonad/pull/123",
   "branch_name": "sleeptime/2026-01-03-slow-llm-calls",
   "commit_sha": "abc123",
-  "files_changed": ["tidepool-dm/templates/dm_scene.jinja"]
+  "files_changed": ["exomonad-dm/templates/dm_scene.jinja"]
 }
 """

@@ -1,0 +1,19 @@
+[package]
+name = "exomonad-shared"
+version = "0.1.0"
+edition = "2021"
+description = "Shared types and utilities for ExoMonad"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+strum = { workspace = true }
+nix = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+shell-escape = "0.1"
+clap = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

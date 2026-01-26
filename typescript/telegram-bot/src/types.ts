@@ -1,7 +1,7 @@
 /**
  * Core types for the Telegram effect DSL.
  *
- * These types mirror the Haskell types in Tidepool.Telegram.Types
+ * These types mirror the Haskell types in ExoMonad.Telegram.Types
  * and define the boundary between agent logic and the Telegram runtime.
  */
 

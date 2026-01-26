@@ -8,8 +8,8 @@
 import type {
   GetTimeEffect,
   EffectResult,
-} from "tidepool-generated-ts";
-import { successResult, errorResult } from "tidepool-generated-ts";
+} from "exomonad-generated-ts";
+import { successResult, errorResult } from "exomonad-generated-ts";
 
 /**
  * Handle GetTime effect - get current UTC time as ISO8601 string.

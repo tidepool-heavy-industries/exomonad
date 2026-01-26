@@ -2,7 +2,7 @@
   "annotations": {
     "list": []
   },
-  "description": "Observability dashboard for Tidepool Native (Loki-based logging)",
+  "description": "Observability dashboard for ExoMonad Native (Loki-based logging)",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
@@ -90,7 +90,7 @@
             "type": "loki",
             "uid": "${datasource}"
           },
-          "expr": "sum by (event_type) (count_over_time({job=\"tidepool-native\"} [$__interval]))",
+          "expr": "sum by (event_type) (count_over_time({job=\"exomonad-native\"} [$__interval]))",
           "legendFormat": "{{event_type}}",
           "refId": "A"
         }
@@ -183,7 +183,7 @@
             "type": "loki",
             "uid": "${datasource}"
           },
-          "expr": "count_over_time({job=\"tidepool-native\", event_type=\"error\"} [$__interval])",
+          "expr": "count_over_time({job=\"exomonad-native\", event_type=\"error\"} [$__interval])",
           "legendFormat": "Errors",
           "refId": "A"
         }
@@ -271,7 +271,7 @@
             "type": "loki",
             "uid": "${datasource}"
           },
-          "expr": "{job=\"tidepool-native\", event_type=\"llm_call\"} | json | unwrap latency_ms",
+          "expr": "{job=\"exomonad-native\", event_type=\"llm_call\"} | json | unwrap latency_ms",
           "legendFormat": "LLM Latency",
           "refId": "A"
         }
@@ -390,7 +390,7 @@
             "type": "loki",
             "uid": "${datasource}"
           },
-          "expr": "{job=\"tidepool-native\", event_type=\"llm_call\"} | json | unwrap prompt_tokens",
+          "expr": "{job=\"exomonad-native\", event_type=\"llm_call\"} | json | unwrap prompt_tokens",
           "legendFormat": "Prompt Tokens",
           "refId": "A"
         },
@@ -399,7 +399,7 @@
             "type": "loki",
             "uid": "${datasource}"
           },
-          "expr": "{job=\"tidepool-native\", event_type=\"llm_call\"} | json | unwrap completion_tokens",
+          "expr": "{job=\"exomonad-native\", event_type=\"llm_call\"} | json | unwrap completion_tokens",
           "legendFormat": "Completion Tokens",
           "refId": "B"
         }
@@ -461,7 +461,7 @@
             "type": "loki",
             "uid": "${datasource}"
           },
-          "expr": "{job=\"tidepool-native\", event_type=\"graph_transition\"} | json | line_format \"{{.from}} → {{.to}} ({{.trigger}})\"",
+          "expr": "{job=\"exomonad-native\", event_type=\"graph_transition\"} | json | line_format \"{{.from}} → {{.to}} ({{.trigger}})\"",
           "refId": "A"
         }
       ],
@@ -522,7 +522,7 @@
             "type": "loki",
             "uid": "${datasource}"
           },
-          "expr": "{job=\"tidepool-native\", event_type=\"error\"} | json | line_format \"{{.message}}\"",
+          "expr": "{job=\"exomonad-native\", event_type=\"error\"} | json | line_format \"{{.message}}\"",
           "refId": "A"
         }
       ],
@@ -609,7 +609,7 @@
             "type": "loki",
             "uid": "${datasource}"
           },
-          "expr": "{job=\"tidepool-native\", event_type=\"effect_execution\"} | json | unwrap latency_ms",
+          "expr": "{job=\"exomonad-native\", event_type=\"effect_execution\"} | json | unwrap latency_ms",
           "legendFormat": "{{effect_type}}",
           "refId": "A"
         }
@@ -621,7 +621,7 @@
   "refresh": "5s",
   "schemaVersion": 38,
   "style": "dark",
-  "tags": ["tidepool", "observability", "loki"],
+  "tags": ["exomonad", "observability", "loki"],
   "templating": {
     "list": [
       {
@@ -651,8 +651,8 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Tidepool Native Observability",
-  "uid": "tidepool-native-observability",
+  "title": "ExoMonad Native Observability",
+  "uid": "exomonad-native-observability",
   "version": 1,
   "weekStart": ""
 }

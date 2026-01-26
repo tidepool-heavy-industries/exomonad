@@ -1,4 +1,4 @@
-# Tidepool Justfile
+# ExoMonad Justfile
 # Run `just` to see available recipes
 
 set shell := ["bash", "-uc"]
@@ -58,11 +58,11 @@ test-effector:
 # build-roundtrip-wasm:
 #     @echo "── Building roundtrip WASM ──"
 #     @echo "Note: This must be run inside 'nix develop .#wasm'"
-#     wasm32-wasi-cabal build tidepool-reactor
+#     wasm32-wasi-cabal build exomonad-reactor
 #     @echo ""
 #     @echo "── Copying WASM to deploy/ ──"
-#     find dist-newstyle -name '*.wasm' -exec cp {} deploy/tidepool-roundtrip.wasm \;
-#     @echo "✓ Built: deploy/tidepool-roundtrip.wasm"
+#     find dist-newstyle -name '*.wasm' -exec cp {} deploy/exomonad-roundtrip.wasm \;
+#     @echo "✓ Built: deploy/exomonad-roundtrip.wasm"
 
 # FIXME: TypeScript/WASM not currently used - restore when needed
 # Run cross-boundary property tests (requires WASM built first)
@@ -103,18 +103,18 @@ rebuild-runtime:
     echo "── Building from current repo: $REPO_ROOT ──"
 
     echo ""
-    echo "── Building Haskell (tidepool-control-server) ──"
-    cabal build tidepool-control-server
+    echo "── Building Haskell (exomonad-control-server) ──"
+    cabal build exomonad-control-server
 
     echo ""
-    echo "── Building Rust (mantle-agent, tui-sidebar, tui-popup, ssh-proxy, effector) ──"
-    cd "$REPO_ROOT/rust" && cargo build --release -p mantle-agent -p tui-sidebar -p tui-popup -p ssh-proxy -p effector
+    echo "── Building Rust (exomonad, tui-sidebar, tui-popup, ssh-proxy, effector) ──"
+    cd "$REPO_ROOT/rust" && cargo build --release -p exomonad -p tui-sidebar -p tui-popup -p ssh-proxy -p effector
 
     echo ""
     echo "── Installing to $RUNTIME_BIN ──"
     cd "$REPO_ROOT"
-    cp "$(cabal list-bin tidepool-control-server)" "$RUNTIME_BIN/"
-    cp "$REPO_ROOT/rust/target/release/mantle-agent" "$RUNTIME_BIN/"
+    cp "$(cabal list-bin exomonad-control-server)" "$RUNTIME_BIN/"
+    cp "$REPO_ROOT/rust/target/release/exomonad" "$RUNTIME_BIN/"
     cp "$REPO_ROOT/rust/target/release/tui-sidebar" "$RUNTIME_BIN/"
     cp "$REPO_ROOT/rust/target/release/tui-popup" "$RUNTIME_BIN/"
     cp "$REPO_ROOT/rust/target/release/ssh-proxy" "$RUNTIME_BIN/"
@@ -122,8 +122,8 @@ rebuild-runtime:
 
     echo ""
     echo "── Code signing binaries (macOS) ──"
-    codesign -s - --force "$RUNTIME_BIN/tidepool-control-server" 2>/dev/null || true
-    codesign -s - --force "$RUNTIME_BIN/mantle-agent" 2>/dev/null || true
+    codesign -s - --force "$RUNTIME_BIN/exomonad-control-server" 2>/dev/null || true
+    codesign -s - --force "$RUNTIME_BIN/exomonad" 2>/dev/null || true
     codesign -s - --force "$RUNTIME_BIN/tui-sidebar" 2>/dev/null || true
     codesign -s - --force "$RUNTIME_BIN/tui-popup" 2>/dev/null || true
     codesign -s - --force "$RUNTIME_BIN/ssh-proxy" 2>/dev/null || true
@@ -142,16 +142,16 @@ rebuild-runtime:
 # build-wasm:
 #     #!/usr/bin/env bash
 #     set -euo pipefail
-#     echo "── Building tidepool-reactor with wasm32-wasi-ghc ──"
+#     echo "── Building exomonad-reactor with wasm32-wasi-ghc ──"
 #     nix develop .#wasm --command bash -c ' \
-#         wasm32-wasi-cabal build tidepool-reactor && \
+#         wasm32-wasi-cabal build exomonad-reactor && \
 #         echo "" && \
 #         echo "── Optimizing WASM with wasm-opt -Oz ──" && \
-#         WASM=$(find dist-newstyle/build/wasm32-wasi -name "tidepool-reactor.wasm" | head -1) && \
+#         WASM=$(find dist-newstyle/build/wasm32-wasi -name "exomonad-reactor.wasm" | head -1) && \
 #         ls -lh "$WASM" && \
-#         wasm-opt -Oz "$WASM" -o deploy/src/tidepool.wasm && \
+#         wasm-opt -Oz "$WASM" -o deploy/src/exomonad.wasm && \
 #         echo "  ↓ optimized to:" && \
-#         ls -lh deploy/src/tidepool.wasm \
+#         ls -lh deploy/src/exomonad.wasm \
 #     '
 #     echo "✓ WASM blob ready"
 
@@ -204,7 +204,7 @@ docker-build: docker-prebuild
 
 # Build agent image
 docker-build-agent: docker-prebuild
-    docker build -t tidepool/claude-agent:latest -f docker/claude-agent/Dockerfile .
+    docker build -t exomonad/claude-agent:latest -f docker/claude-agent/Dockerfile .
 
 # Build all docker images
 docker-build-all: docker-build docker-build-agent
@@ -224,19 +224,19 @@ docker-attach:
     if [[ "$DOCKER_HOST" == ssh://* ]]; then
         # Docker's SSH transport doesn't support TTY passthrough (dial-stdio limitation)
         # Wrap with ssh -t to allocate PTY on remote host
-        ssh -t "${DOCKER_HOST#ssh://}" "docker exec -it tidepool-orchestrator gosu user zellij attach orchestrator"
+        ssh -t "${DOCKER_HOST#ssh://}" "docker exec -it exomonad-orchestrator gosu user zellij attach orchestrator"
     else
-        docker exec -it tidepool-orchestrator gosu user zellij attach orchestrator
+        docker exec -it exomonad-orchestrator gosu user zellij attach orchestrator
     fi
 
 # Spawn agent container with shared sockets and auth isolation
 docker-agent BRANCH:
     #!/usr/bin/env bash
     docker run -it --rm \
-      -v tidepool-sockets:/home/agent/.tidepool/sockets \
+      -v exomonad-sockets:/home/agent/.exomonad/sockets \
       -v ~/.claude/.credentials.json:/mnt/secrets/.credentials.json:rw \
       -e CLAUDE_CONFIG_DIR=/home/agent/.claude-agent-{{BRANCH}} \
-      tidepool/claude-agent:latest
+      exomonad/claude-agent:latest
 
 # Clean shutdown
 docker-down:
@@ -265,11 +265,11 @@ docker-rebuild:
 
 # Exec into orchestrator container
 docker-exec-orchestrator:
-    docker exec -it tidepool-orchestrator gosu user zsh
+    docker exec -it exomonad-orchestrator gosu user zsh
 
 # Exec into control-server container
 docker-exec-control:
-    docker exec -it tidepool-control-server zsh
+    docker exec -it exomonad-control-server zsh
 
 # Test spawn_agents cross-container Zellij (requires running orchestrator + control-server)
 docker-test-zellij:
@@ -278,25 +278,25 @@ docker-test-zellij:
     echo "── Testing cross-container Zellij access ──"
     echo ""
     echo "1. Checking ZELLIJ_SESSION_NAME in control-server..."
-    docker exec tidepool-control-server bash -c 'echo "ZELLIJ_SESSION_NAME=$ZELLIJ_SESSION_NAME"'
+    docker exec exomonad-control-server bash -c 'echo "ZELLIJ_SESSION_NAME=$ZELLIJ_SESSION_NAME"'
     echo ""
     echo "2. Checking XDG_RUNTIME_DIR shared volume..."
-    docker exec tidepool-control-server ls -la /run/user/1000/zellij/ 2>/dev/null || echo "   (Zellij session may not be running yet)"
+    docker exec exomonad-control-server ls -la /run/user/1000/zellij/ 2>/dev/null || echo "   (Zellij session may not be running yet)"
     echo ""
     echo "3. Testing zellij CLI in control-server..."
-    docker exec tidepool-control-server which zellij
-    docker exec tidepool-control-server zellij --version
+    docker exec exomonad-control-server which zellij
+    docker exec exomonad-control-server zellij --version
     echo ""
     echo "4. Listing Zellij sessions from control-server..."
-    docker exec tidepool-control-server zellij list-sessions 2>/dev/null || echo "   (No sessions found or Zellij not running)"
+    docker exec exomonad-control-server zellij list-sessions 2>/dev/null || echo "   (No sessions found or Zellij not running)"
     echo ""
     echo "✓ Cross-container Zellij setup verified"
 
 # Show logs from control-server container
 docker-logs-control:
-    docker logs -f tidepool-control-server
+    docker logs -f exomonad-control-server
 
 # Show logs from orchestrator container
 docker-logs-orchestrator:
-    docker logs -f tidepool-orchestrator
+    docker logs -f exomonad-orchestrator
 
