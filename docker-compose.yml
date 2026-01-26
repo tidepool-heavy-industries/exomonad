@@ -87,7 +87,7 @@ services:
     volumes:
       - tidepool-worktrees:/workspace
       - tidepool-sockets:/sockets
-      - tidepool-claude-auth:/mnt/secrets:ro
+      - tidepool-claude-tl:/home/agent/.claude
     depends_on:
       control-server:
         condition: service_healthy
@@ -113,7 +113,7 @@ services:
     volumes:
       - tidepool-worktrees:/workspace
       - tidepool-sockets:/sockets
-      - tidepool-claude-auth:/mnt/secrets:ro
+      - tidepool-claude-pm:/home/agent/.claude
     depends_on:
       control-server:
         condition: service_healthy
@@ -227,6 +227,10 @@ services:
 volumes:
   tidepool-sockets:
     name: tidepool-sockets
+  tidepool-claude-tl:
+    name: tidepool-claude-tl
+  tidepool-claude-pm:
+    name: tidepool-claude-pm
   tidepool-claude-auth:
     name: tidepool-claude-auth
   tidepool-repo:

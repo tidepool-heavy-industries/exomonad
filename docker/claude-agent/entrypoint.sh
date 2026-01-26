@@ -10,28 +10,17 @@ if [ -n "$GIT_ALTERNATES_OBJECT_DIR" ] && [ -d "/workspace/.git" ]; then
     echo "$GIT_ALTERNATES_OBJECT_DIR" > /workspace/.git/objects/info/alternates
 fi
 
-# 1.5 Handle Auth Isolation
-# If credentials are provided via mount, link them into the per-container config dir.
-# We only link credentials and settings to avoid sharing history/db.
-echo "🔐 Setting up auth isolation..."
-CONFIG_DIR="${CLAUDE_CONFIG_DIR:-/home/agent/.claude}"
+# 1.5 Initialize .claude directory if empty (new volume)
+# The volume is mounted directly to /home/agent/.claude, persisting all state
+CONFIG_DIR="/home/agent/.claude"
 mkdir -p "$CONFIG_DIR"
-
-for f in ".credentials.json" "settings.json"; do
-    if [ -f "/mnt/secrets/$f" ]; then
-        ln -sf "/mnt/secrets/$f" "$CONFIG_DIR/$f"
-        echo "✓ Linked $f"
-    fi
-done
-echo "✓ Auth isolated in $CONFIG_DIR"
 
 # 2. Configure Claude Code hooks
 # We point hooks to mantle-agent which forwards them to the control-server
-# Only create settings.json if it wasn't linked from secrets
-mkdir -p /home/agent/.claude
-if [ ! -L /home/agent/.claude/settings.json ] && [ ! -f /home/agent/.claude/settings.json ]; then
+# Only create settings.json if it doesn't exist yet
+if [ ! -f "$CONFIG_DIR/settings.json" ]; then
     echo "Creating default Claude Code settings with hooks..."
-    cat > /home/agent/.claude/settings.json <<EOF
+    cat > "$CONFIG_DIR/settings.json" <<EOF
 {
   "hooks": {
     "PreToolUse": [
