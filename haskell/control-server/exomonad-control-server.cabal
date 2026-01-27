@@ -86,6 +86,8 @@ library
         ExoMonad.Control.CircuitBreakerAdmin
         ExoMonad.Effect.CircuitBreaker
         ExoMonad.CircuitBreaker.Interpreter
+        -- Workflow
+        ExoMonad.Control.Workflow.Store
         -- Effects
         ExoMonad.Control.Effects.SshExec
         ExoMonad.Control.Effects.Effector

@@ -63,6 +63,7 @@ import ExoMonad.Control.StopHook.Types
 import ExoMonad.Control.StopHook.Graph
 import ExoMonad.Control.StopHook.Handlers
 import ExoMonad.Control.StopHook.Templates (renderStopHookTemplate)
+import ExoMonad.Control.Workflow.Store (WorkflowStore, getWorkflowState, updateWorkflowState)
 
 -- | Handle a hook event.
 --
@@ -242,7 +243,7 @@ handleStop tracer config input runtime cbMap = do
   hFlush stdout
 
   now <- getCurrentTime
-  withCircuitBreaker cbMap config.circuitBreakerConfig now sessionId (runStopHookLogic tracer input) >>= \case
+  withCircuitBreaker cbMap config.circuitBreakerConfig now sessionId (runStopHookLogic tracer config.workflowStore input) >>= \case
     Left err -> do
       TIO.putStrLn $ "  [HOOK] Circuit breaker blocked Stop: " <> err
       hFlush stdout
@@ -303,8 +304,8 @@ getOrCreateSession input = pure input.sessionId
 
 -- | Logic to run inside circuit breaker lock.
 -- Replaces old runStopHookLogic with graph execution.
-runStopHookLogic :: Tracer -> HookInput -> IO (TemplateName, StopHookContext)
-runStopHookLogic tracer input = do
+runStopHookLogic :: Tracer -> WorkflowStore -> HookInput -> IO (TemplateName, StopHookContext)
+runStopHookLogic tracer workflowStore input = do
   -- Check environment for container/SSH
   mContainer <- lookupEnv "EXOMONAD_CONTAINER"
 
@@ -312,23 +313,15 @@ runStopHookLogic tracer input = do
   binDir <- Paths.dockerBinDir
   let dockerCtlPath = Paths.dockerCtlBin binDir
 
-  -- Initialize minimal workflow state
-  let initialWorkflow = WorkflowState
-        {
-          wsGlobalStops = 0 -- TODO: Fetch from CB map?
-        , wsStageRetries = Map.empty
-        , wsCurrentStage = StageBuild
-        , wsLastBuildResult = Nothing
-        , wsLastPRStatus = Nothing
-        , wsLastTestResult = Nothing
-        }
+  -- Fetch existing workflow state (or default if new)
+  initialWorkflow <- getWorkflowState workflowStore input.sessionId
   
   -- We need to fetch git info first to populate AgentState
   agentState <- case mContainer of
      Just container -> runM $ runSshExec dockerCtlPath $ runGitRemote (T.pack container) "." $ traceGit tracer $ getAgentState input
      Nothing -> runM $ runGitIO $ traceGit tracer $ getAgentState input
 
-  (result, _finalState) <- case mContainer of
+  (result, finalState) <- case mContainer of
         Just container ->
           runM
           $ runSshExec dockerCtlPath
@@ -352,6 +345,9 @@ runStopHookLogic tracer input = do
           $ runGraphMeta (GraphMetadata "stop-hook")
           $ runNodeMeta defaultNodeMeta
           $ runGraph stopHookHandlers agentState
+
+  -- Persist the updated workflow state
+  updateWorkflowState workflowStore input.sessionId finalState
 
   pure result
 
