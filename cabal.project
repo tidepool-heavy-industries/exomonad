@@ -8,8 +8,6 @@ packages:
     -- Runtime
     haskell/runtime/wasm
     haskell/runtime/actor
-    -- NOTE: exomonad-parallel merged into exomonad-actor
-    haskell/platform
 
     -- Effect interpreters
     haskell/effects/llm-interpreter

@@ -36,6 +36,11 @@ source-repository head
   type: git
   location: https://github.com/lexi-lambda/freer-simple
 
+flag benchmark
+  description: Build benchmark suite (pulls criterion, extensible-effects, free, mtl)
+  default: False
+  manual: True
+
 common common
   ghc-options:
     -Wall
@@ -128,9 +133,13 @@ benchmark freer-simple-bench
   main-is: Core.hs
   ghc-options: -O2
 
-  build-depends:
-    , criterion
-    , extensible-effects
-    , free
-    , freer-simple
-    , mtl
+  if flag(benchmark)
+    buildable: True
+    build-depends:
+      , criterion
+      , extensible-effects
+      , free
+      , freer-simple
+      , mtl
+  else
+    buildable: False
