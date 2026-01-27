@@ -18,6 +18,11 @@ module ExoMonad.Control.ExoTools
   , spawnAgentsLogic
   , SpawnAgentsArgs(..)
   , SpawnAgentsResult(..)
+  , CleanupAgentsGraph(..)
+  , cleanupAgentsHandlers
+  , cleanupAgentsLogic
+  , CleanupAgentsArgs(..)
+  , CleanupAgentsResult(..)
   , findHangarRoot
 
     -- * File PR
