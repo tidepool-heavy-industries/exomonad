@@ -27,10 +27,10 @@ import Control.Monad (forM_)
 import Control.Monad.Freer (Eff, Member, runM)
 import Control.Monad.Freer.State (runState)
 import Data.Time.Clock (getCurrentTime)
-import Data.Aeson (Value(..), decode, object, (.=))
+import Data.Aeson (Value(..), decode, (.=))
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString.Lazy as BL
-import Data.Maybe (mapMaybe, fromMaybe)
+import Data.Maybe (fromMaybe)
 import OpenTelemetry.Trace
 import qualified OpenTelemetry.Context.ThreadLocal as Context
 
@@ -133,8 +133,25 @@ readJsonl :: FilePath -> IO (Maybe [Value])
 readJsonl path = try @SomeException (BL.readFile path) >>= \case
   Left _ -> pure Nothing
   Right content -> do
-    let jsonLines = BL.split 10 content -- Split by newline (\n = 10)
-    pure $ Just $ mapMaybe decode (filter (not . BL.null) jsonLines)
+    let jsonLines = filter (not . BL.null) $ BL.split 10 content -- Split by newline (\n = 10)
+    pure $ decodeAllJsonLines jsonLines
+  where
+    -- Handle CRLF endings by trimming a trailing '\r' (13) if present.
+    stripTrailingCR :: BL.ByteString -> BL.ByteString
+    stripTrailingCR bs
+      | BL.null bs = bs
+      | BL.last bs == 13 = BL.init bs
+      | otherwise = bs
+
+    -- Decode all lines; fail the whole read if any line fails to parse.
+    decodeAllJsonLines :: [BL.ByteString] -> Maybe [Value]
+    decodeAllJsonLines = go []
+      where
+        go acc [] = Just (reverse acc)
+        go acc (l : ls) =
+          case decode (stripTrailingCR l) of
+            Just v  -> go (v : acc) ls
+            Nothing -> Nothing
 
 -- | Helper to enrich transcript event with session metadata.
 enrichEvent :: Role -> HookInput -> Value -> Value

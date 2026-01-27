@@ -12,6 +12,7 @@
       },
       {
         "matcher": "resume",
+        "matcher": "always",
         "hooks": [
           {
             "type": "command",
@@ -22,14 +23,24 @@
     ],
     "SessionEnd": [
       {
-        "type": "command",
-        "command": "$EXOMONAD_BIN_DIR/exomonad hook session-end"
+        "matcher": "always",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$EXOMONAD_BIN_DIR/exomonad hook session-end"
+          }
+        ]
       }
     ],
     "SubagentStop": [
       {
-        "type": "command",
-        "command": "$EXOMONAD_BIN_DIR/exomonad hook subagent-stop"
+        "matcher": "always",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$EXOMONAD_BIN_DIR/exomonad hook subagent-stop"
+          }
+        ]
       }
     ]
   }

@@ -46,7 +46,7 @@ if [ ! -d "$AGENT_WORKSPACE/.git" ]; then
         git init
         git remote add origin "$REPO_URL"
         git fetch origin "$REPO_BRANCH"
-        git checkout -f "$REPO_BRANCH"
+        git checkout -B "$REPO_BRANCH" "origin/$REPO_BRANCH"
         echo "Repository initialized from existing directory"
     else
         # Clone the repo (use HTTPS for simplicity, SSH would need key setup)

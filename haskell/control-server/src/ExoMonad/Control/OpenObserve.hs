@@ -32,26 +32,40 @@ data OpenObserveConfig = OpenObserveConfig
   , ooStream   :: Text      -- ^ e.g. "claude_sessions"
   , ooEmail    :: Text      -- ^ Ingestion user email
   , ooPassword :: Text      -- ^ Ingestion user password
-  } deriving (Show, Eq, Generic)
+  } deriving (Eq, Generic)
+
+instance Show OpenObserveConfig where
+  show OpenObserveConfig{..} =
+    "OpenObserveConfig"
+      <> " { ooBaseUrl = "  <> show ooBaseUrl
+      <> ", ooOrg = "       <> show ooOrg
+      <> ", ooStream = "    <> show ooStream
+      <> ", ooEmail = "     <> show ooEmail
+      <> ", ooPassword = "  <> "<redacted>"
+      <> " }"
 
 -- | Load OpenObserve configuration from environment variables.
 loadOpenObserveConfig :: IO (Maybe OpenObserveConfig)
 loadOpenObserveConfig = do
-  mUrl <- lookupEnv "OPENOBSERVE_URL"
-  mOrg <- lookupEnv "OPENOBSERVE_ORG"
+  mUrl    <- lookupEnv "OPENOBSERVE_URL"
+  mOrg    <- lookupEnv "OPENOBSERVE_ORG"
   mStream <- lookupEnv "OPENOBSERVE_STREAM"
-  mEmail <- lookupEnv "OPENOBSERVE_EMAIL"
-  mPass <- lookupEnv "OPENOBSERVE_PASSWORD"
-  case (mUrl, mEmail, mPass) of
-    (Just url, Just email, Just pass) ->
-      pure $ Just OpenObserveConfig
-        { ooBaseUrl = T.pack url
-        , ooOrg = T.pack $ fromMaybe "default" mOrg
-        , ooStream = T.pack $ fromMaybe "claude_sessions" mStream
-        , ooEmail = T.pack email
-        , ooPassword = T.pack pass
-        }
-    _ -> pure Nothing
+  mEmail  <- lookupEnv "OPENOBSERVE_EMAIL"
+  mPass   <- lookupEnv "OPENOBSERVE_PASSWORD"
+
+  let baseUrl  = T.pack $ fromMaybe "http://localhost:5080" mUrl
+      org      = T.pack $ fromMaybe "default" mOrg
+      stream   = T.pack $ fromMaybe "claude_sessions" mStream
+      email    = T.pack $ fromMaybe "admin@exomonad.local" mEmail
+      password = T.pack $ fromMaybe "exomonad-dev" mPass
+
+  pure $ Just OpenObserveConfig
+    { ooBaseUrl  = baseUrl
+    , ooOrg      = org
+    , ooStream   = stream
+    , ooEmail    = email
+    , ooPassword = password
+    }
 
 -- | Ship session transcript to OpenObserve.
 --
