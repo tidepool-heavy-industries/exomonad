@@ -9,18 +9,33 @@ layout {
         }
     }
 
-    tab name="Agents" focus=true {
-        pane split_direction="vertical" {
+    // Template for Agent tabs: Main interaction area + Status Dashboard (20% bottom)
+    tab_template name="agent" {
+        pane split_direction="horizontal" {
+            children
+            pane name="Agent Status" size="20%" {
+                command "bash"
+                // Ensure we point to the mounted socket
+                args "-c" "export EXOMONAD_CONTROL_SOCKET=/sockets/control.sock; while true; do agent-status; echo '⚠️ Agent Status exited. Restarting in 2s...'; sleep 2; done"
+            }
+        }
+    }
+
+    tab name="TL" focus=true {
+        agent {
             // TL (Tech Lead) agent - main coding agent
             // Use --detach-keys to avoid conflict with outer docker attach (Ctrl+p,q)
-            // Wrap in loop for auto-reconnect if container restarts
-            pane name="TL" focus=true size="50%" {
+            pane name="TL" focus=true {
                 command "bash"
                 args "-c" "while true; do docker attach --detach-keys 'ctrl-],]' exomonad-tl; echo '[TL disconnected - reconnecting in 2s]'; sleep 2; done"
             }
+        }
+    }
 
+    tab name="PM" {
+        agent {
             // PM (Project Manager) agent - planning and coordination
-            pane name="PM" size="50%" {
+            pane name="PM" {
                 command "bash"
                 args "-c" "while true; do docker attach --detach-keys 'ctrl-],]' exomonad-pm; echo '[PM disconnected - reconnecting in 2s]'; sleep 2; done"
             }
