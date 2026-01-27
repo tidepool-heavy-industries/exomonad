@@ -33,8 +33,6 @@ The project uses a multi-process architecture orchestrated via Unix Domain Socke
 ### Core Components
 - **`start-augmented.sh`**: The main entry point. Orchestrates the environment, sets canonical socket paths, and launches Zellij.
 - **`.zellij/exomonad.kdl`**: Defines the TUI layout. Each pane uses `scripts/wait-for-socket.sh` to synchronize with backend readiness.
-- **`process-compose.yaml`**: Supervises the `exomonad-control-server` (Haskell) which creates the control and TUI sockets.
-- **`scripts/exomonad-runner.sh`**: Ensures graceful shutdown of `process-compose` services when the Zellij session ends.
 
 ### Socket Paths (Single Source of Truth)
 - `EXOMONAD_CONTROL_SOCKET`: Default `.exomonad/sockets/control.sock`
@@ -45,32 +43,14 @@ The project uses a multi-process architecture orchestrated via Unix Domain Socke
 - **Readiness**: Clients do not connect blindly; they wait for the UDS file to appear via `wait-for-socket.sh`.
 - **TUI Detection**: `tui-sidebar` (Rust) checks for the existence of the control socket to determine if the TUI was explicitly disabled (e.g., via `--no-tui`) and exits gracefully if so.
 
-## Subagent Spawning & Templates
+### Subagent Spawning
 
 The `spawn_agents` tool automates the creation of isolated worktrees for parallel task execution.
 
-### Template Resolution
-The tool (`SpawnAgents.hs`) resolves the `process-compose.yaml` template for new worktrees using the following priority:
-1. **Repo Root**: `<repo_root>/.exomonad/templates/subagent-pc.yaml`
-
-### Process Compose Configuration
-The template (`subagent-pc.yaml`) is critical for bootstrapping the subagent environment.
-- **Log Location**: Must be set to `.exomonad/logs` (directory), not a specific file, to allow `process-compose` to manage log rotation and avoid "No such file" errors.
-- **Binary Discovery**: Uses `EXOMONAD_ROOT` (or repo root) to resolve binaries from `<root>/runtime/bin`. This ensures robustness against PATH variations in subagent shells.
-- **Sockets**: Explicitly manages `.exomonad/sockets/control.sock` and `.exomonad/sockets/tui.sock` via environment variables and cleanup scripts.
-
 ### Subagent Hardening
 - **Environment Isolation**: `SpawnAgents.hs` explicitly sets `EXOMONAD_CONTROL_SOCKET` and `EXOMONAD_TUI_SOCKET` to relative paths and passes them directly to the Docker container via the `docker-ctl` API. This prevents accidental connection to the root control server (isolation breach) even if the parent environment uses absolute paths.
-- **Log Consistency**: The system uses a hybrid approach for robustness:
-    1. **Config (`subagent-pc.yaml`)**: Sets `log_location: .exomonad/logs` (directory). This satisfies `process-compose` requirements for rotation/existence checks.
-    2. **Runtime (`worktree.kdl`)**: Passes `-L .exomonad/logs/process-compose.log` (explicit file). This forces the output to a known location that the Zellij `tail` pane can reliably consume.
 
 ## Operational Considerations
-
-### Log Rotation
-Subagents run `process-compose`, which aggregates logs from all services. Currently, these logs are written to `.exomonad/logs/process-compose.log` within the worktree.
-- **Risk**: Long-running agents (days/weeks) may produce large log files, potentially filling disk space.
-- **Mitigation**: The current system does **not** automatically rotate these logs. Users should manually clean up finished worktrees or monitor disk usage for long-running tasks.
 
 ### Resource Limits
 Spawning multiple subagents creates a linear increase in resource consumption.
@@ -81,8 +61,7 @@ Spawning multiple subagents creates a linear increase in resource consumption.
 ## Hardening & Edge Cases
 
 The `spawn_agents` tool includes several safety checks to prevent common failures:
-1.  **Template Validation**: Fails fast if the `subagent-pc.yaml` template is missing.
-2.  **Binary Check**: Verifies `exomonad-control-server` exists in the runtime path before creating a worktree.
+1.  **Binary Check**: Verifies `exomonad-control-server` exists in the runtime path before creating a worktree.
 3.  **Path Traversal**: Rejects bead IDs containing `/` or `..` to prevent arbitrary file system writes.
 4.  **Env Var Validation**: Ensures critical environment variables (like `EXOMONAD_ROOT`) are not empty before spawning the agent.
 
@@ -99,6 +78,5 @@ The Haskell codebase adheres to a set of core principles designed for maximum sa
 
 ## Gemini Added Memories
 - Implemented TUI-interactive MCP tools (confirm_action, select_option, request_guidance) in haskell/control-server. Verified via mock TUI logic. Committed changes.
-- Fixed `start-augmented.sh` hanging on stale `process-compose` sessions by adding a timeout and robust force-kill cleanup logic.
 - Documented macOS arm64 requirement: binaries in `runtime/bin` (`exomonad-control-server`, `exomonad`, `tui-sidebar`) must be ad-hoc signed (`codesign -s -`) to avoid `Killed: 9` errors.
 - Refactored subagent spawning to pass environment variables directly through the Docker API instead of writing `.env` files, resolving environment contamination and shadowing issues.

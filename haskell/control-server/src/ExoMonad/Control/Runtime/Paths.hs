@@ -5,11 +5,9 @@ module ExoMonad.Control.Runtime.Paths
     socketDirectoryFor
   , controlSocketName
   , tuiSocketName
-  , processComposeSocketName
     -- * Full Socket Paths
   , controlSocketPath
   , tuiSocketPath
-  , processComposeSocketPath
     -- * Binary Paths
   , runtimeBinDir
   , controlServerBin
@@ -41,9 +39,6 @@ controlSocketName = "control.sock"
 tuiSocketName :: FilePath
 tuiSocketName = "tui.sock"
 
--- | Default name for the process-compose API socket.
-processComposeSocketName :: FilePath
-processComposeSocketName = "process-compose.sock"
 
 -- | Full path to the control socket.
 controlSocketPath :: FilePath -> FilePath
@@ -53,9 +48,6 @@ controlSocketPath dir = dir </> controlSocketName
 tuiSocketPath :: FilePath -> FilePath
 tuiSocketPath dir = dir </> tuiSocketName
 
--- | Full path to the process-compose socket.
-processComposeSocketPath :: FilePath -> FilePath
-processComposeSocketPath dir = dir </> processComposeSocketName
 
 -- | Canonical bin directory within a project.
 runtimeBinDir :: FilePath -> FilePath

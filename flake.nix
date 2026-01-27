@@ -51,7 +51,6 @@
 
         # Orchestration tools
         orchestrationPkgs = with pkgs; [
-          process-compose
           zellij
         ];
 

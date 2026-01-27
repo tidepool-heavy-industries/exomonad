@@ -480,44 +480,6 @@ docker attach exomonad-orchestrator
 - **Agent not responding**: Check `docker logs exomonad-tl` or `docker logs exomonad-pm`.
 - **Authentication errors**: Verify credentials in `exomonad-claude-auth` volume.
 
-**Hybrid ExoMonad Architecture (process-compose + Zellij - Local Development)**
-
-**Recommended: start-augmented.sh**
-```bash
-./start-augmented.sh
-```
-
-This launches the Hybrid ExoMonad setup as a **TUI IDE** wrapping Claude Code:
-- **process-compose**: Orchestrates services (control-server, tui-sidebar)
-- **Zellij**: 3-pane TUI IDE layout
-  - Pane 1 (left): **Claude Code** (auto-launches, main interface)
-  - Pane 2 (top-right): process-compose dashboard (infrastructure monitoring)
-  - Pane 3 (bottom-right): control-server logs (backend telemetry)
-
-Claude Code starts automatically in the exomonad directory. MCP tools connect directly to control-server via HTTP MCP transport.
-
-**Note:** If MCP shows "failed" on startup (control-server not yet ready), use `/mcp` → `Reconnect` once services are healthy.
-
-**Orchestration features (process-compose):**
-- Socket existence checks (test -S) for zero-overhead health probes
-- Dependency DAG: tui-sidebar waits for control-server health
-- Automatic restart on failure with exponential backoff
-- Centralized logging to `.exomonad/logs/`
-- Service readiness probes
-
-**Manual process-compose (without Zellij):**
-```bash
-# Create runtime directories
-mkdir -p .exomonad/{sockets,logs}
-
-# Start all services
-~/.local/bin/process-compose up --tui
-
-# In another terminal: Start Claude Code
-cd /path/to/project
-claude-code
-```
-
 **Manual startup (3 terminals - NOT recommended):**
 ```bash
 # Terminal 1: Start control server
@@ -542,11 +504,10 @@ Understanding the runtime stack for debugging and extension.
 
 **`start-augmented.sh` Hangs on Startup**
 - **Symptom**: The script hangs indefinitely at "Starting Hybrid ExoMonad...".
-- **Cause**: A stale `process-compose` session (often headless) is holding the socket and refusing to terminate.
+- **Cause**: A stale session is holding the socket and refusing to terminate.
 - **Fix**: The script now includes robust cleanup logic (timeout + force kill). If it still hangs, manually run:
   ```bash
-  pkill -9 process-compose
-  rm -f .exomonad/sockets/process-compose.sock
+  rm -f .exomonad/sockets/*.sock
   ```
 
 **`Killed: 9` on macOS (Apple Silicon)**
@@ -559,30 +520,22 @@ Understanding the runtime stack for debugging and extension.
   codesign -s - --force ../runtime/bin/tui-sidebar
   ```
 
-**Subagent "Log File Not Found"**
-- **Symptom**: Subagent Zellij tabs show a blank log pane or "No such file" error.
-- **Cause**: Mismatch between Zellij layout expecting `pc.log` and process-compose writing `process-compose.log`.
-- **Fix**: The repo-root `.zellij/worktree.kdl` must:
-- **Note**: Fixed in repo root as of 2026-01-21. New spawned subagents should work correctly.
-
 #### Socket Lifecycle
 
 Sockets are managed to ensure clean transitions between sessions and prevent stale connections:
 
-1. **Bootstrap (`start-augmented.sh`)**: Canonical cleanup occurs here. It detects stale `process-compose` sessions via UDS and shuts them down, then deletes all remaining `.sock` files in `.exomonad/sockets/`.
+1. **Bootstrap (`start-augmented.sh`)**: Canonical cleanup occurs here. It detects stale sessions via UDS and shuts them down, then deletes all remaining `.sock` files in `.exomonad/sockets/`.
 2. **Runtime**: Services like `control-server` create their own sockets upon startup.
-3. **Shutdown (`process-compose.yaml`)**: The `shutdown` command for `control-server` removes its specific sockets. This is a best-effort cleanup for graceful shutdown; the bootstrap cleanup is the source of truth for clearing stale state.
+3. **Shutdown**: The `shutdown` command for `control-server` removes its specific sockets. This is a best-effort cleanup for graceful shutdown; the bootstrap cleanup is the source of truth for clearing stale state.
 
 #### Port Allocation
 
 | Port | Service | Protocol | Purpose |
 |------|---------|----------|---------|
-| (none) | process-compose | UDS | API (stale session detection) |
 
 **Sockets (Environment Driven):**
 - `$EXOMONAD_CONTROL_SOCKET` (default: `.exomonad/sockets/control.sock`): Main protocol (exomonad connects)
 - `$EXOMONAD_TUI_SOCKET` (default: `.exomonad/sockets/tui.sock`): TUI sidebar (control-server listens, tui-sidebar connects)
-- `.exomonad/sockets/process-compose.sock`: process-compose API (eliminates port 8080 conflicts)
 
 **Docker Volumes (Cross-Container):**
 - `exomonad-sockets`: Shared volume for control.sock and tui.sock
@@ -594,7 +547,6 @@ Canonical values are defined in `start-augmented.sh` and can be overridden in `.
 
 | File | Format | Purpose |
 |------|--------|---------|
-| `process-compose.yaml` | YAML | Service definitions, health probes, dependencies |
 | `.zellij/exomonad.kdl` | KDL | 3-pane TUI layout |
 | `.zellij/config.kdl` | KDL | Zellij behavior (force_close, mouse) |
 | `scripts/exomonad-runner.sh` | Bash | Trap handlers for cleanup |
@@ -605,21 +557,8 @@ Canonical values are defined in `start-augmented.sh` and can be overridden in `.
 **`start-augmented.sh`** - Entry point:
 1. Validates `.env` contains `ANTHROPIC_API_KEY`
 2. Creates `.exomonad/{sockets,logs}` directories
-3. Checks process-compose installed
-4. Detects/cleans stale sessions via Unix socket
-5. Launches Zellij with layout
-
-**`scripts/exomonad-runner.sh`** - Cleanup wrapper:
-```bash
-trap cleanup EXIT SIGINT SIGTERM SIGHUP
-
-cleanup() {
-    # Primary: API shutdown (respects dependency order)
-    process-compose down --ordered-shutdown
-    # Fallback: SIGTERM if API unreachable
-    kill -TERM "$PC_PID"
-}
-```
+3. Detects/cleans stale sessions via Unix socket
+4. Launches Zellij with layout
 
 #### Critical: `on_force_close "quit"`
 
@@ -641,12 +580,6 @@ With `"quit"`, Zellij actually exits → triggers EXIT trap → orderly shutdown
 Zellij quit (Ctrl+P → q)
     ↓
 on_force_close "quit" (doesn't detach)
-    ↓
-exomonad-runner.sh EXIT trap fires
-    ↓
-process-compose down --ordered-shutdown
-    ├─ tui-sidebar stops (no dependents)
-    └─ control-server stops (tui-sidebar done)
     ↓
 All services terminated
 ```
@@ -691,26 +624,10 @@ The orchestration stack relies on pre-built binaries for Haskell and Rust compon
 `start-augmented.sh` runs `cabal build exomonad-control-server` and `cargo build -p exomonad -p tui-sidebar` on startup.
 
 **Recovery:**
-If binaries are missing or the "command not found" error occurs within `process-compose`:
+If binaries are missing or the "command not found" error occurs:
 1. Run `cabal build exomonad-control-server` manually.
 2. Run `cargo build -p exomonad -p tui-sidebar` manually.
 3. Restart `./start-augmented.sh`.
-
-#### process-compose Setup
-
-`process-compose` is the primary orchestrator for the ExoMonad development environment.
-
-**Installation:**
-- **Nix (Recommended):** Included in `shell.nix` / `flake.nix`.
-- **Homebrew (macOS):** `brew install F1bonacc1/tap/process-compose`
-- **Manual:** Download from [GitHub Releases](https://github.com/F1bonacc1/process-compose/releases).
-
-**PATH Requirement:**
-Ensure `process-compose` is in your `PATH`. The scripts do not use hardcoded paths to the orchestrator to ensure compatibility across different installation methods.
-
-**Troubleshooting:**
-- **"command not found: process-compose"**: Verify installation and that `$(go env GOPATH)/bin` or your brew/nix bin directory is in your `PATH`.
-- **Stale session**: `process-compose` uses a Unix socket at `.exomonad/sockets/process-compose.sock` for its API, eliminating port 8080 conflicts. `start-augmented.sh` will attempt to detect and kill stale sessions via this socket.
 
 ### Status
 
@@ -719,7 +636,7 @@ Ensure `process-compose` is in your `PATH`. The scripts do not use hardcoded pat
 - ✅ LSP integration (HLS via lsp-test)
 - ✅ FunctionGemma scoring (HTTP interpreter via Ollama)
 - ✅ Automatic tool registration via MCPExport annotation + reifyMCPTools
-- ✅ Hybrid orchestration (process-compose + Zellij)
+- ✅ Hybrid orchestration (Zellij)
 - ✅ Unix socket health checks for robust readiness checks
 - ✅ Declarative service dependencies and restart policies
 - ✅ MCP direct execution via .mcp.json (exomonad spawned per-call by Claude)
@@ -731,19 +648,16 @@ Ensure `process-compose` is in your `PATH`. The scripts do not use hardcoded pat
 
 ### Stopping
 
-Zellij session exit automatically triggers cleanup via trap handler.
+Zellij session exit automatically triggers cleanup.
 
 **Normal exit:**
 1. Press `Ctrl+P` → `q` to quit Zellij
-2. Trap handler calls `process-compose down --ordered-shutdown`
-3. All services stop gracefully in reverse dependency order
-4. Verify: `pgrep -f control-server` returns nothing
+2. All services stop gracefully
+3. Verify: `pgrep -f control-server` returns nothing
 
 **Emergency cleanup (if session crashes):**
 ```bash
-~/.local/bin/process-compose down --ordered-shutdown
-# Verify all stopped
-pgrep -f "control-server|tui-sidebar|process-compose"
+pkill -f "control-server|tui-sidebar"
 ```
 
 **Stale session prevention:**

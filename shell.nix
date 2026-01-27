@@ -48,7 +48,6 @@ let
 
   # Orchestration
   orchestrationPkgs = with pkgs; [
-    process-compose
     zellij
   ];
 

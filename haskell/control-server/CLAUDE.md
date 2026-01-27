@@ -161,10 +161,10 @@ Project-local configuration in `.exomonad/` (gitignored):
 
 ### Hybrid ExoMonad Architecture
 
-The system uses `process-compose` to orchestrate multiple services. Subagents (parallel worktrees) run a minimal `control-server` in LSP-only mode. Configuration is generated programmatically to ensure type safety and consistency.
+The system uses `docker-ctl` to orchestrate multiple services. Subagents (parallel worktrees) run a minimal `control-server` in LSP-only mode. Configuration is generated programmatically to ensure type safety and consistency.
 
 | **Control Server** | `--no-tui` | Disables the TUI sidebar listener (for subagents) |
-| **Subagent Config** | `Paths.hs` + `ProcessCompose.hs` | Programmatic type-safe generation of `process-compose.yaml` |
+| **Subagent Config** | `Paths.hs` | Programmatic type-safe generation of configuration |
 | **Docker Control** | `docker-ctl` | CLI tool for container operations (spawn, exec, stop) |
 
 ### Subagent Environment & Config Handling
@@ -179,12 +179,12 @@ Subagents spawned by `spawn_agents` receive a **custom-generated environment and
 
 **How it works (SpawnAgents.hs):**
 1. **Paths:** Canonical paths for sockets (`/tmp/exomonad-...`) and binaries are constructed via `ExoMonad.Control.Runtime.Paths`.
-2. **Orchestration:** A `ProcessComposeConfig` Haskell value is constructed and serialized to YAML via `ExoMonad.Control.Runtime.ProcessCompose`.
+2. **Orchestration:** Configuration is managed via internal Haskell data structures.
 3. **Source of Truth:** The running Haskell process defines canonical environment variables (socket paths, binary paths, roles).
 4. **Environment:** Subagent-specific overrides (like `SUBAGENT_CMD`) are merged with canonical paths.
 5. **Container Name:** Subagent containers are named `exomonad-agent-<shortId>` for `docker-ctl exec` calls.
-6. **Deployment:** Programmatically generated `process-compose.yaml` is written directly to the subagent worktree. Environment variables are passed directly to the container via the `docker-ctl` API.
-7. **Execution:** `process-compose` simply loads the generated config, ensuring an isolated and correctly configured environment.
+6. **Deployment:** Environment variables and configuration are passed directly to the container via the `docker-ctl` API.
+7. **Execution:** `docker-ctl` spawns the agent container, ensuring an isolated and correctly configured environment.
 
 ### Remote Execution via Docker Control
 
@@ -820,7 +820,7 @@ cd /path/to/exomonad
 ./start-augmented.sh
 ```
 
-Launches control-server via process-compose with:
+Launches control-server with:
 - Unix socket health check for robust readiness
 - Automatic dependency management (tui-sidebar waits for health)
 - Centralized logging to `.exomonad/logs/`
@@ -845,7 +845,7 @@ The server supports a ping-pong protocol over Unix socket for health checks:
 ./scripts/health-check.sh
 ```
 
-**Used by process-compose:**
+**Readiness Probe:**
 The `control-server` readiness probe executes `exomonad health`, which sends a `Ping` message to `$EXOMONAD_CONTROL_SOCKET` and waits for a `Pong`.
 
 ```bash

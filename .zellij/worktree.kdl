@@ -29,18 +29,4 @@ layout {
             }
         }
     }
-
-    tab name="Backend" {
-        pane split_direction="horizontal" {
-            pane name="process-compose" {
-                command "bash"
-                // Source .env to get socket paths and configuration, then start process-compose
-                args "-c" "[ -f .env ] && source .env || { echo \"ERROR: .env not found\" >&2; exit 1; }; mkdir -p .exomonad/logs && export PC_NO_SERVER=true PC_USE_UDS=true PC_SOCKET_PATH=.exomonad/sockets/process-compose.sock && exec process-compose up -L .exomonad/logs/process-compose.log"
-            }
-            pane name="logs" {
-                command "tail"
-                args "-F" ".exomonad/logs/process-compose.log"
-            }
-        }
-    }
 }

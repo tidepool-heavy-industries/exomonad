@@ -33,7 +33,6 @@ library
         ExoMonad.Control.OpenObserve
         ExoMonad.Control.TUIInterpreter
         ExoMonad.Control.Runtime.Paths
-        ExoMonad.Control.Runtime.ProcessCompose
         ExoMonad.Control.Hook.Policy
         ExoMonad.Control.Hook.CircuitBreaker
         ExoMonad.Control.Handler.Hook

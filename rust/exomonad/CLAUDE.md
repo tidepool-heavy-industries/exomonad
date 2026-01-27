@@ -166,7 +166,7 @@ ls -la .exomonad/sockets/control.sock
 
 **Solution:**
 1. Check control server logs in `.exomonad/logs/control-server.log`
-2. Verify process-compose shows control-server as healthy
+2. Verify control-server is running and healthy
 3. Check for deadlocks or infinite loops in hook handler
 
 ### curl Not Found
