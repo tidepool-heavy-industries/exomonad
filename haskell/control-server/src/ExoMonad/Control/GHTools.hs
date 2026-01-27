@@ -7,11 +7,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 -- | GitHub MCP tools for centralized issue operations.
---
--- Exposes GitHub operations via MCP so agents can interact with the
--- task tracking system on GitHub.
 module ExoMonad.Control.GHTools
   ( -- * List Tool
     GHIssueListGraph(..)
@@ -54,10 +53,6 @@ module ExoMonad.Control.GHTools
   ) where
 
 import Control.Monad.Freer (Eff, Member)
-import Data.Aeson
-  ( FromJSON(..), ToJSON(..), (.:), (.:?), (.=)
-  , object, withObject
-  )
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -67,70 +62,64 @@ import ExoMonad.Effects.GitHub
   ( GitHub, Repo(..), Issue(..), IssueState(..), IssueFilter(..)
   , CreateIssueInput(..), UpdateIssueInput(..), defaultIssueFilter, emptyUpdateIssueInput
   , listIssues, getIssue, createIssue, updateIssue, closeIssue, reopenIssue
-  , GitHubError(..)
   )
 import ExoMonad.Effects.Env (Env, getEnv)
 import ExoMonad.Graph.Generic (AsHandler, type (:-))
 import ExoMonad.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import ExoMonad.Graph.Goto (Goto, GotoChoice, To, gotoExit)
 import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef)
-import ExoMonad.Schema
-  ( HasJSONSchema(..), objectSchema, arraySchema, emptySchema
-  , SchemaType(..), describeField
-  )
+import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(..), HasJSONSchema(..))
+
+import ExoMonad.Control.GHTools.Types
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- DERIVATIONS
+-- ════════════════════════════════════════════════════════════════════════════
+
+$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "gila" } ''GHIssueListArgs
+  [ 'gilaRepo   ?? "Repository in owner/repo format (optional, uses environment default if omitted)"
+  , 'gilaStatus ?? "Filter by status: open, closed"
+  , 'gilaLabels ?? "Filter by labels"
+  , 'gilaLimit  ?? "Max results"
+  ])
+
+$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "gisa" } ''GHIssueShowArgs
+  [ 'gisaRepo   ?? "Repository in owner/repo format"
+  , 'gisaNumber ?? "The issue number to show"
+  ])
+
+$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "gca" } ''GHIssueCreateArgs
+  [ 'gcaRepo      ?? "Repository in owner/repo format"
+  , 'gcaTitle     ?? "Title of the new issue"
+  , 'gcaBody      ?? "Body description of the issue"
+  , 'gcaLabels    ?? "Labels to attach"
+  , 'gcaAssignees ?? "Assignee usernames"
+  ])
+
+$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "gua" } ''GHIssueUpdateArgs
+  [ 'guaRepo      ?? "Repository in owner/repo format"
+  , 'guaNumber    ?? "The issue number to update"
+  , 'guaTitle     ?? "New title"
+  , 'guaBody      ?? "New body description"
+  , 'guaStatus    ?? "New status: open, closed"
+  , 'guaLabels    ?? "New set of labels (replaces existing)"
+  , 'guaAssignees ?? "New set of assignees (replaces existing)"
+  ])
+
+$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "gcla" } ''GHIssueCloseArgs
+  [ 'gclaRepo   ?? "Repository in owner/repo format"
+  , 'gclaNumber ?? "The issue number to close"
+  ])
+
+$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "gra" } ''GHIssueReopenArgs
+  [ 'graRepo   ?? "Repository in owner/repo format"
+  , 'graNumber ?? "The issue number to reopen"
+  ])
 
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GH ISSUE LIST TOOL
 -- ════════════════════════════════════════════════════════════════════════════
-
--- | Arguments for gh_issue_list tool.
-data GHIssueListArgs = GHIssueListArgs
-  { gilaRepo   :: Maybe Text   -- ^ owner/repo
-  , gilaStatus :: Maybe Text   -- ^ open, closed
-  , gilaLabels :: Maybe [Text] -- ^ Filter by labels
-  , gilaLimit  :: Maybe Int    -- ^ Max results
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance HasJSONSchema GHIssueListArgs where
-  jsonSchema = objectSchema
-    [ ("repo", describeField "repo" "Repository in owner/repo format (optional, uses environment default if omitted)" (emptySchema TString))
-    , ("status", describeField "status" "Filter by status: open, closed" (emptySchema TString))
-    , ("labels", describeField "labels" "Filter by labels" (arraySchema (emptySchema TString)))
-    , ("limit", describeField "limit" "Max results" (emptySchema TNumber))
-    ]
-    []
-
-instance FromJSON GHIssueListArgs where
-  parseJSON = withObject "GHIssueListArgs" $ \v ->
-    GHIssueListArgs
-      <$> v .:? "repo"
-      <*> v .:? "status"
-      <*> v .:? "labels"
-      <*> v .:? "limit"
-
-instance ToJSON GHIssueListArgs where
-  toJSON args = object
-    [ "repo"   .= gilaRepo args
-    , "status" .= gilaStatus args
-    , "labels" .= gilaLabels args
-    , "limit"  .= gilaLimit args
-    ]
-
--- | Result of gh_issue_list tool.
-data GHIssueListResult = GHIssueListResult
-  { gilrIssues :: [Issue]
-  , gilrCount  :: Int
-  , gilrError  :: Maybe GitHubError
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON GHIssueListResult where
-  toJSON res = object $
-    [ "issues" .= gilrIssues res
-    , "count"  .= gilrCount res
-    ] ++ maybe [] (\e -> ["error" .= e]) (gilrError res)
 
 -- | Graph definition for gh_issue_list tool.
 data GHIssueListGraph mode = GHIssueListGraph
@@ -158,63 +147,16 @@ ghIssueListLogic args = do
         , ifState  = parseIssueState =<< args.gilaStatus
         , ifLimit  = args.gilaLimit
         }
-  result <- listIssues repo filt
-  pure $ gotoExit $ case result of
-    Left err -> GHIssueListResult
-      { gilrIssues = []
-      , gilrCount  = 0
-      , gilrError  = Just err
-      }
-    Right issues -> GHIssueListResult
-      { gilrIssues = issues
-      , gilrCount  = length issues
-      , gilrError  = Nothing
-      }
+  issues <- listIssues repo filt
+  pure $ gotoExit $ GHIssueListResult
+    { gilrIssues = issues
+    , gilrCount  = length issues
+    }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GH ISSUE SHOW TOOL
 -- ════════════════════════════════════════════════════════════════════════════
-
--- | Arguments for gh_issue_show tool.
-data GHIssueShowArgs = GHIssueShowArgs
-  { gisaRepo   :: Maybe Text
-  , gisaNumber :: Int
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance HasJSONSchema GHIssueShowArgs where
-  jsonSchema = objectSchema
-    [ ("repo", describeField "repo" "Repository in owner/repo format" (emptySchema TString))
-    , ("number", describeField "number" "The issue number to show" (emptySchema TNumber))
-    ]
-    ["number"]
-
-instance FromJSON GHIssueShowArgs where
-  parseJSON = withObject "GHIssueShowArgs" $ \v ->
-    GHIssueShowArgs
-      <$> v .:? "repo"
-      <*> v .: "number"
-
-instance ToJSON GHIssueShowArgs where
-  toJSON args = object
-    [ "repo"   .= gisaRepo args
-    , "number" .= gisaNumber args
-    ]
-
--- | Result of gh_issue_show tool.
-data GHIssueShowResult = GHIssueShowResult
-  { gisrIssue :: Maybe Issue
-  , gisrFound :: Bool
-  , gisrError :: Maybe GitHubError
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON GHIssueShowResult where
-  toJSON res = object $
-    [ "issue" .= gisrIssue res
-    , "found" .= gisrFound res
-    ] ++ maybe [] (\e -> ["error" .= e]) (gisrError res)
 
 -- | Graph definition for gh_issue_show tool.
 data GHIssueShowGraph mode = GHIssueShowGraph
@@ -237,77 +179,18 @@ ghIssueShowLogic
   -> Eff es (GotoChoice '[To Exit GHIssueShowResult])
 ghIssueShowLogic args = do
   repo <- getRepo args.gisaRepo
-  result <- getIssue repo args.gisaNumber True -- Include comments
-  pure $ gotoExit $ case result of
-    Left err -> GHIssueShowResult
-      { gisrIssue = Nothing
-      , gisrFound = False
-      , gisrError = Just err
-      }
-    Right maybeIssue -> GHIssueShowResult
-      { gisrIssue = maybeIssue
-      , gisrFound = case maybeIssue of
-          Just _ -> True
-          Nothing -> False
-      , gisrError = Nothing
-      }
+  maybeIssue <- getIssue repo args.gisaNumber True -- Include comments
+  pure $ gotoExit $ GHIssueShowResult
+    { gisrIssue = maybeIssue
+    , gisrFound = case maybeIssue of
+        Just _ -> True
+        Nothing -> False
+    }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GH ISSUE CREATE TOOL
 -- ════════════════════════════════════════════════════════════════════════════
-
--- | Arguments for gh_issue_create tool.
-data GHIssueCreateArgs = GHIssueCreateArgs
-  { gcaRepo      :: Maybe Text
-  , gcaTitle     :: Text
-  , gcaBody      :: Maybe Text
-  , gcaLabels    :: Maybe [Text]
-  , gcaAssignees :: Maybe [Text]
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance HasJSONSchema GHIssueCreateArgs where
-  jsonSchema = objectSchema
-    [ ("repo", describeField "repo" "Repository in owner/repo format" (emptySchema TString))
-    , ("title", describeField "title" "Title of the new issue" (emptySchema TString))
-    , ("body", describeField "body" "Body description of the issue" (emptySchema TString))
-    , ("labels", describeField "labels" "Labels to attach" (arraySchema (emptySchema TString)))
-    , ("assignees", describeField "assignees" "Assignee usernames" (arraySchema (emptySchema TString)))
-    ]
-    ["title"]
-
-instance FromJSON GHIssueCreateArgs where
-  parseJSON = withObject "GHIssueCreateArgs" $ \v ->
-    GHIssueCreateArgs
-      <$> v .:? "repo"
-      <*> v .: "title"
-      <*> v .:? "body"
-      <*> v .:? "labels"
-      <*> v .:? "assignees"
-
-instance ToJSON GHIssueCreateArgs where
-  toJSON args = object
-    [ "repo"      .= gcaRepo args
-    , "title"     .= gcaTitle args
-    , "body"      .= gcaBody args
-    , "labels"    .= gcaLabels args
-    , "assignees" .= gcaAssignees args
-    ]
-
--- | Result of gh_issue_create tool.
-data GHIssueCreateResult = GHIssueCreateResult
-  { gcrNumber  :: Maybe Int
-  , gcrSuccess :: Bool
-  , gcrError   :: Maybe GitHubError
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON GHIssueCreateResult where
-  toJSON res = object $
-    [ "number"  .= gcrNumber res
-    , "success" .= gcrSuccess res
-    ] ++ maybe [] (\e -> ["error" .= e]) (gcrError res)
 
 -- | Graph definition for gh_issue_create tool.
 data GHIssueCreateGraph mode = GHIssueCreateGraph
@@ -337,83 +220,16 @@ ghIssueCreateLogic args = do
         , ciiLabels    = fromMaybe [] args.gcaLabels
         , ciiAssignees = fromMaybe [] args.gcaAssignees
         }
-  result <- createIssue input
-  pure $ gotoExit $ case result of
-    Left err -> GHIssueCreateResult
-      { gcrNumber  = Nothing
-      , gcrSuccess = False
-      , gcrError   = Just err
-      }
-    Right num -> GHIssueCreateResult
-      { gcrNumber  = Just num
-      , gcrSuccess = True
-      , gcrError   = Nothing
-      }
+  num <- createIssue input
+  pure $ gotoExit $ GHIssueCreateResult
+    { gcrNumber  = num
+    , gcrSuccess = True
+    }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GH ISSUE UPDATE TOOL
 -- ════════════════════════════════════════════════════════════════════════════
-
--- | Arguments for gh_issue_update tool.
-data GHIssueUpdateArgs = GHIssueUpdateArgs
-  { guaRepo      :: Maybe Text
-  , guaNumber    :: Int
-  , guaTitle     :: Maybe Text
-  , guaBody      :: Maybe Text
-  , guaStatus    :: Maybe Text     -- ^ open, closed
-  , guaLabels    :: Maybe [Text]
-  , guaAssignees :: Maybe [Text]
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance HasJSONSchema GHIssueUpdateArgs where
-  jsonSchema = objectSchema
-    [ ("repo", describeField "repo" "Repository in owner/repo format" (emptySchema TString))
-    , ("number", describeField "number" "The issue number to update" (emptySchema TNumber))
-    , ("title", describeField "title" "New title" (emptySchema TString))
-    , ("body", describeField "body" "New body description" (emptySchema TString))
-    , ("status", describeField "status" "New status: open, closed" (emptySchema TString))
-    , ("labels", describeField "labels" "New set of labels (replaces existing)" (arraySchema (emptySchema TString)))
-    , ("assignees", describeField "assignees" "New set of assignees (replaces existing)" (arraySchema (emptySchema TString)))
-    ]
-    ["number"]
-
-instance FromJSON GHIssueUpdateArgs where
-  parseJSON = withObject "GHIssueUpdateArgs" $ \v ->
-    GHIssueUpdateArgs
-      <$> v .:? "repo"
-      <*> v .: "number"
-      <*> v .:? "title"
-      <*> v .:? "body"
-      <*> v .:? "status"
-      <*> v .:? "labels"
-      <*> v .:? "assignees"
-
-instance ToJSON GHIssueUpdateArgs where
-  toJSON args = object
-    [ "repo"      .= guaRepo args
-    , "number"    .= guaNumber args
-    , "title"     .= guaTitle args
-    , "body"      .= guaBody args
-    , "status"    .= guaStatus args
-    , "labels"    .= guaLabels args
-    , "assignees" .= guaAssignees args
-    ]
-
--- | Result of gh_issue_update tool.
-data GHIssueUpdateResult = GHIssueUpdateResult
-  { gurSuccess :: Bool
-  , gurNumber  :: Int
-  , gurError   :: Maybe GitHubError
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON GHIssueUpdateResult where
-  toJSON res = object $
-    [ "success" .= gurSuccess res
-    , "number"  .= gurNumber res
-    ] ++ maybe [] (\e -> ["error" .= e]) (gurError res)
 
 -- | Graph definition for gh_issue_update tool.
 data GHIssueUpdateGraph mode = GHIssueUpdateGraph
@@ -443,63 +259,16 @@ ghIssueUpdateLogic args = do
         , uiiLabels    = args.guaLabels
         , uiiAssignees = args.guaAssignees
         }
-  result <- updateIssue repo args.guaNumber input
-  pure $ gotoExit $ case result of
-    Left err -> GHIssueUpdateResult
-      { gurSuccess = False
-      , gurNumber  = args.guaNumber
-      , gurError   = Just err
-      }
-    Right () -> GHIssueUpdateResult
-      { gurSuccess = True
-      , gurNumber  = args.guaNumber
-      , gurError   = Nothing
-      }
+  updateIssue repo args.guaNumber input
+  pure $ gotoExit $ GHIssueUpdateResult
+    { gurSuccess = True
+    , gurNumber  = args.guaNumber
+    }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GH ISSUE CLOSE TOOL
 -- ════════════════════════════════════════════════════════════════════════════
-
--- | Arguments for gh_issue_close tool.
-data GHIssueCloseArgs = GHIssueCloseArgs
-  { gclaRepo   :: Maybe Text
-  , gclaNumber :: Int
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance HasJSONSchema GHIssueCloseArgs where
-  jsonSchema = objectSchema
-    [ ("repo", describeField "repo" "Repository in owner/repo format" (emptySchema TString))
-    , ("number", describeField "number" "The issue number to close" (emptySchema TNumber))
-    ]
-    ["number"]
-
-instance FromJSON GHIssueCloseArgs where
-  parseJSON = withObject "GHIssueCloseArgs" $ \v ->
-    GHIssueCloseArgs
-      <$> v .:? "repo"
-      <*> v .: "number"
-
-instance ToJSON GHIssueCloseArgs where
-  toJSON args = object
-    [ "repo"   .= gclaRepo args
-    , "number" .= gclaNumber args
-    ]
-
--- | Result of gh_issue_close tool.
-data GHIssueCloseResult = GHIssueCloseResult
-  { gclrSuccess :: Bool
-  , gclrNumber  :: Int
-  , gclrError   :: Maybe GitHubError
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON GHIssueCloseResult where
-  toJSON res = object $
-    [ "success" .= gclrSuccess res
-    , "number"  .= gclrNumber res
-    ] ++ maybe [] (\e -> ["error" .= e]) (gclrError res)
 
 -- | Graph definition for gh_issue_close tool.
 data GHIssueCloseGraph mode = GHIssueCloseGraph
@@ -522,63 +291,16 @@ ghIssueCloseLogic
   -> Eff es (GotoChoice '[To Exit GHIssueCloseResult])
 ghIssueCloseLogic args = do
   repo <- getRepo args.gclaRepo
-  result <- closeIssue repo args.gclaNumber
-  pure $ gotoExit $ case result of
-    Left err -> GHIssueCloseResult
-      { gclrSuccess = False
-      , gclrNumber  = args.gclaNumber
-      , gclrError   = Just err
-      }
-    Right () -> GHIssueCloseResult
-      { gclrSuccess = True
-      , gclrNumber  = args.gclaNumber
-      , gclrError   = Nothing
-      }
+  closeIssue repo args.gclaNumber
+  pure $ gotoExit $ GHIssueCloseResult
+    { gclrSuccess = True
+    , gclrNumber  = args.gclaNumber
+    }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GH ISSUE REOPEN TOOL
 -- ════════════════════════════════════════════════════════════════════════════
-
--- | Arguments for gh_issue_reopen tool.
-data GHIssueReopenArgs = GHIssueReopenArgs
-  { graRepo   :: Maybe Text
-  , graNumber :: Int
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance HasJSONSchema GHIssueReopenArgs where
-  jsonSchema = objectSchema
-    [ ("repo", describeField "repo" "Repository in owner/repo format" (emptySchema TString))
-    , ("number", describeField "number" "The issue number to reopen" (emptySchema TNumber))
-    ]
-    ["number"]
-
-instance FromJSON GHIssueReopenArgs where
-  parseJSON = withObject "GHIssueReopenArgs" $ \v ->
-    GHIssueReopenArgs
-      <$> v .:? "repo"
-      <*> v .: "number"
-
-instance ToJSON GHIssueReopenArgs where
-  toJSON args = object
-    [ "repo"   .= graRepo args
-    , "number" .= graNumber args
-    ]
-
--- | Result of gh_issue_reopen tool.
-data GHIssueReopenResult = GHIssueReopenResult
-  { grrSuccess :: Bool
-  , grrNumber  :: Int
-  , grrError   :: Maybe GitHubError
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON GHIssueReopenResult where
-  toJSON res = object $
-    [ "success" .= grrSuccess res
-    , "number"  .= grrNumber res
-    ] ++ maybe [] (\e -> ["error" .= e]) (grrError res)
 
 -- | Graph definition for gh_issue_reopen tool.
 data GHIssueReopenGraph mode = GHIssueReopenGraph
@@ -601,18 +323,11 @@ ghIssueReopenLogic
   -> Eff es (GotoChoice '[To Exit GHIssueReopenResult])
 ghIssueReopenLogic args = do
   repo <- getRepo args.graRepo
-  result <- reopenIssue repo args.graNumber
-  pure $ gotoExit $ case result of
-    Left err -> GHIssueReopenResult
-      { grrSuccess = False
-      , grrNumber  = args.graNumber
-      , grrError   = Just err
-      }
-    Right () -> GHIssueReopenResult
-      { grrSuccess = True
-      , grrNumber  = args.graNumber
-      , grrError   = Nothing
-      }
+  reopenIssue repo args.graNumber
+  pure $ gotoExit $ GHIssueReopenResult
+    { grrSuccess = True
+    , grrNumber  = args.graNumber
+    }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -633,4 +348,4 @@ getRepo mRepo = do
     Just r -> pure $ Repo r
     Nothing -> do
       mEnvRepo <- getEnv "GITHUB_REPO"
-      pure $ Repo $ fromMaybe "tidepool-heavy-industries/exomonad" mEnvRepo
+      pure $ Repo $ fromMaybe "exomonad-ai/exomonad" mEnvRepo

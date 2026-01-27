@@ -1,15 +1,12 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE StrictData #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE LambdaCase #-}
 
 -- | Types for the semantic scout tool.
---
--- Design: FunctionGemma as coalgebra in an anamorphism.
--- The model handles one step at a time: (Query, Edge) → Rubric
--- The exploration loop handles the recursion.
---
--- Uses the shared Tag enum from training-generator for consistency
--- between exploration and training data generation.
 module ExoMonad.Control.Scout.Types
   ( -- * Query Input
     ScoutQuery(..)
@@ -35,17 +32,11 @@ module ExoMonad.Control.Scout.Types
   , tagToText
   ) where
 
-import Data.Aeson
-  ( FromJSON(..), ToJSON(..), Value(..)
-  , withObject, (.:), (.:?), (.!=), (.=), object, parseJSON
-  )
-import Data.Aeson.Types (Parser)
-import Data.Foldable (toList)
+import Data.Aeson (FromJSON(..), ToJSON(..), Value(..))
 import Data.Text (Text)
-import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import ExoMonad.Schema (HasJSONSchema(..), objectSchema, arraySchema, emptySchema, SchemaType(..))
+import ExoMonad.Schema (deriveMCPTypeWith, deriveHasJSONSchema, defaultMCPOptions, (??), MCPOptions(..), HasJSONSchema(..))
 
 -- Re-export training types for consistency
 import ExoMonad.Training.Types
@@ -58,15 +49,11 @@ import ExoMonad.Training.Types
   , tagToText
   )
 
-
 -- | Exploration depth controls budget.
---
--- Semantic levels that map to concrete node limits:
---   * Low: Quick scan (~10 nodes)
---   * Medium: Thorough exploration (~30 nodes)
---   * High: Exhaustive search (~100 nodes)
 data Depth = Low | Medium | High
   deriving stock (Show, Eq, Generic, Bounded, Enum)
+
+$(deriveHasJSONSchema ''Depth)
 
 instance FromJSON Depth where
   parseJSON = \case
@@ -89,16 +76,7 @@ depthToBudget Low    = 10
 depthToBudget Medium = 30
 depthToBudget High   = 100
 
-
 -- | Input query for semantic code exploration.
---
--- Caller provides:
---   * query: Natural language question (for relevance scoring only)
---   * symbols: Explicit entry point symbols (no NL parsing needed)
---   * depth: How thoroughly to explore (Low/Medium/High)
---
--- FunctionGemma scores edges for relevance to the query.
--- The exploration loop follows high-scoring edges.
 data ScoutQuery = ScoutQuery
   { sqQuery :: Text
     -- ^ Natural language question (for relevance scoring, not symbol lookup)
@@ -108,28 +86,11 @@ data ScoutQuery = ScoutQuery
     -- ^ Exploration depth: Low (~10), Medium (~30), High (~100)
   } deriving stock (Show, Eq, Generic)
 
--- | Parse ScoutQuery from JSON.
--- Symbols can be array or comma-separated string for MCP compatibility.
-instance FromJSON ScoutQuery where
-  parseJSON = withObject "ScoutQuery" $ \v -> ScoutQuery
-    <$> v .: "query"
-    <*> (parseSymbols =<< v .:? "symbols" .!= Array mempty)
-    <*> v .:? "depth" .!= Medium
-    where
-      -- Parse symbols from either comma-separated string or JSON array
-      parseSymbols :: Value -> Parser [Text]
-      parseSymbols (String t)
-        | T.null t = pure []
-        | otherwise = pure $ map T.strip (T.splitOn "," t)
-      parseSymbols (Array arr) = mapM parseJSON (toList arr)
-      parseSymbols _ = pure []
-
-instance ToJSON ScoutQuery where
-  toJSON sq = object
-    [ "query" .= sqQuery sq
-    , "symbols" .= sqSymbols sq
-    , "depth" .= sqDepth sq
-    ]
+$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "sq" } ''ScoutQuery
+  [ 'sqQuery   ?? "Natural language question (for relevance scoring)"
+  , 'sqSymbols ?? "Entry point symbols (explicit, resolved via workspaceSymbol)"
+  , 'sqDepth   ?? "Exploration depth: Low (~10), Medium (~30), High (~100)"
+  ])
 
 -- | Response from semantic scout.
 data ScoutResponse = ScoutResponse
@@ -161,7 +122,6 @@ data Pointer = Pointer
   } deriving stock (Show, Eq, Generic)
     deriving anyclass (FromJSON, ToJSON)
 
-
 -- | A visited node during exploration.
 data VisitedNode = VisitedNode
   { vnContext :: NodeContext
@@ -170,7 +130,6 @@ data VisitedNode = VisitedNode
     -- ^ The computed rubric for this node
   } deriving stock (Show, Eq, Generic)
     deriving anyclass (FromJSON, ToJSON)
-
 
 -- | State maintained during exploration.
 data ExploreState = ExploreState
@@ -196,18 +155,3 @@ initialExploreState sq = ExploreState
   , esBudget = depthToBudget (sqDepth sq)
   , esDepth = 0
   }
-
--- ════════════════════════════════════════════════════════════════════════════
--- HasJSONSchema Instance
--- ════════════════════════════════════════════════════════════════════════════
-
--- Manual instance for ScoutQuery (required by MCP server).
--- The schema defines the JSON input format for the scout tool.
--- Field names match the Aeson encoding: query, symbols, depth (no "sq" prefix)
-instance HasJSONSchema ScoutQuery where
-  jsonSchema = objectSchema
-    [ ("query", emptySchema TString)     -- NL question for relevance scoring
-    , ("symbols", arraySchema (emptySchema TString))  -- Entry point symbols
-    , ("depth", emptySchema TString)     -- "low" | "medium" | "high"
-    ]
-    ["query", "symbols"]  -- Both required; depth defaults to medium

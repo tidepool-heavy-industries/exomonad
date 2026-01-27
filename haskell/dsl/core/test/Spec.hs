@@ -20,9 +20,13 @@ import qualified ToolTransitionIntegrationSpec
 import qualified DecisionToolsSpec
 import qualified DecisionSpec
 import qualified TUIWireFormatSpec
+import qualified SchemaDerivationSpec
 
 main :: IO ()
 main = hspec $ do
+  describe "Schema Derivation" $ do
+    SchemaDerivationSpec.spec
+
   describe "CLI Derivation" $ do
     CLISpec.spec
 

@@ -10,28 +10,10 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 -- | Deterministic LSP orchestration tools (Tier 1) as Graph DSL nodes.
---
--- Each tool is expressed as a simplified single-node graph using the
--- GraphEntries type family for MCP tool discovery.
---
--- = Tier 1 Tools (Pure LSP + Basic Parsing)
---
--- - **find_callers**: Find actual call sites (filter imports/type sigs)
--- - **find_callees**: Find functions called by a given function
--- - **show_fields**: Quick record field lookup
--- - **show_constructors**: Show sum type constructors
---
--- = Design Notes
---
--- These tools use the simplified graph DSL pattern:
---
--- 1. Single LogicNode with Return effect (no Entry/Exit ceremony)
--- 2. GraphEntries type family for MCP tool discovery
--- 3. Direct function execution via the logic handler
---
--- See @pain-points/@ for workflow documentation.
 module ExoMonad.Control.LSPTools
   ( -- * Find Callers
     FindCallersGraph(..)
@@ -47,7 +29,7 @@ module ExoMonad.Control.LSPTools
   , FindCalleesResult(..)
   , CalleeInfo(..)
 
-    -- * Show Type (unified fields + constructors)
+    -- * Show Type
   , ShowTypeGraph(..)
   , showTypeLogic
   , ShowTypeArgs(..)
@@ -55,14 +37,14 @@ module ExoMonad.Control.LSPTools
   , TypeField(..)
   , TypeConstructor(..)
 
-    -- * Legacy: Show Fields (deprecated, use show_type)
+    -- * Show Fields
   , ShowFieldsGraph(..)
   , showFieldsLogic
   , ShowFieldsArgs(..)
   , ShowFieldsResult(..)
   , RecordField(..)
 
-    -- * Legacy: Show Constructors (deprecated, use show_type)
+    -- * Show Constructors
   , ShowConstructorsGraph(..)
   , showConstructorsLogic
   , ShowConstructorsArgs(..)
@@ -75,7 +57,6 @@ module ExoMonad.Control.LSPTools
 
 import Control.Monad (forM)
 import Control.Monad.Freer (Eff, Member, LastMember, sendM)
-import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.=), object, withObject)
 import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -89,90 +70,43 @@ import ExoMonad.Role (Role(..))
 import ExoMonad.Graph.Generic (type (:-))
 import ExoMonad.Graph.Generic.Core (LogicNode)
 import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, GraphEntries, GraphEntry(..))
-import ExoMonad.Schema (HasJSONSchema(..), objectSchema, emptySchema, SchemaType(..), describeField)
+import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(..), HasJSONSchema(..))
+
+import ExoMonad.Control.LSPTools.Types
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- DERIVATIONS
+-- ════════════════════════════════════════════════════════════════════════════
+
+$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "fca" } ''FindCallersArgs
+  [ 'fcaName         ?? "Function name to find callers of"
+  , 'fcaContextLines ?? "Lines of context around each call site"
+  , 'fcaMaxResults   ?? "Maximum number of results to return"
+  ])
+
+$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "fce" } ''FindCalleesArgs
+  [ 'fceName       ?? "Function name to find callees of"
+  , 'fceMaxResults ?? "Maximum number of results to return"
+  ])
+
+$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "sta" } ''ShowTypeArgs
+  [ 'staTypeName ?? "Type name to inspect (record, sum type, or GADT)"
+  ])
+
+$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "sfa" } ''ShowFieldsArgs
+  [ 'sfaTypeName ?? "Record type name to inspect"
+  ])
+
+$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "sca" } ''ShowConstructorsArgs
+  [ 'scaTypeName ?? "Sum type name to inspect"
+  ])
 
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- FIND-CALLERS GRAPH
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Arguments for find_callers tool.
-data FindCallersArgs = FindCallersArgs
-  { fcaName :: Text              -- ^ Function name to find callers of
-  , fcaContextLines :: Maybe Int -- ^ Lines of context (default: 1)
-  , fcaMaxResults :: Maybe Int   -- ^ Max results (default: 50)
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance HasJSONSchema FindCallersArgs where
-  jsonSchema = objectSchema
-    [ ("name", describeField "name" "Function name to find callers of" (emptySchema TString))
-    , ("context_lines", describeField "context_lines" "Lines of context around each call site" (emptySchema TInteger))
-    , ("max_results", describeField "max_results" "Maximum number of results to return" (emptySchema TInteger))
-    ]
-    ["name"]  -- Only name is required
-
-instance FromJSON FindCallersArgs where
-  parseJSON = withObject "FindCallersArgs" $ \v ->
-    FindCallersArgs
-      <$> v .: "name"
-      <*> v .:? "context_lines"
-      <*> v .:? "max_results"
-
-instance ToJSON FindCallersArgs where
-  toJSON args = object
-    [ "name" .= fcaName args
-    , "context_lines" .= fcaContextLines args
-    , "max_results" .= fcaMaxResults args
-    ]
-
--- | A single call site location.
-data CallSite = CallSite
-  { csFile :: Text
-  , csLine :: Int
-  , csColumn :: Int
-  , csContext :: Text            -- ^ The line containing the call
-  , csContextBefore :: [Text]    -- ^ Lines before
-  , csContextAfter :: [Text]     -- ^ Lines after
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON CallSite where
-  toJSON cs = object
-    [ "file" .= csFile cs
-    , "line" .= csLine cs
-    , "column" .= csColumn cs
-    , "context" .= csContext cs
-    , "context_before" .= csContextBefore cs
-    , "context_after" .= csContextAfter cs
-    ]
-
--- | Result of find_callers tool.
-data FindCallersResult = FindCallersResult
-  { fcrName :: Text
-  , fcrDefinitionFile :: Maybe Text
-  , fcrDefinitionLine :: Maybe Int
-  , fcrCallSites :: [CallSite]
-  , fcrFilteredCount :: Int      -- ^ How many references were filtered out
-  , fcrTruncated :: Bool
-  , fcrWarning :: Maybe Text     -- ^ Warning if HLS is still indexing
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON FindCallersResult where
-  toJSON fcr = object
-    [ "name" .= fcrName fcr
-    , "definition_file" .= fcrDefinitionFile fcr
-    , "definition_line" .= fcrDefinitionLine fcr
-    , "call_sites" .= fcrCallSites fcr
-    , "filtered_count" .= fcrFilteredCount fcr
-    , "truncated" .= fcrTruncated fcr
-    , "warning" .= fcrWarning fcr
-    ]
-
 -- | Graph definition for find_callers tool.
---
--- Single LogicNode with Return effect - no Entry/Exit ceremony needed.
 newtype FindCallersGraph mode = FindCallersGraph
   { fcRun :: mode :- LogicNode
       :@ Input FindCallersArgs
@@ -298,70 +232,6 @@ findCallersLogic args = do
 -- FIND-CALLEES GRAPH
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Arguments for find_callees tool.
-data FindCalleesArgs = FindCalleesArgs
-  { fceName :: Text              -- ^ Function name to find callees of
-  , fceMaxResults :: Maybe Int   -- ^ Max results (default: 50)
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance HasJSONSchema FindCalleesArgs where
-  jsonSchema = objectSchema
-    [ ("name", describeField "name" "Function name to find callees of" (emptySchema TString))
-    , ("max_results", describeField "max_results" "Maximum number of results to return" (emptySchema TInteger))
-    ]
-    ["name"]
-
-instance FromJSON FindCalleesArgs where
-  parseJSON = withObject "FindCalleesArgs" $ \v ->
-    FindCalleesArgs
-      <$> v .: "name"
-      <*> v .:? "max_results"
-
-instance ToJSON FindCalleesArgs where
-  toJSON args = object
-    [ "name" .= fceName args
-    , "max_results" .= fceMaxResults args
-    ]
-
--- | Information about a called function (callee).
-data CalleeInfo = CalleeInfo
-  { ciName :: Text
-  , ciFile :: Text
-  , ciLine :: Int
-  , ciCallSites :: [Position]    -- ^ Where in the source function it is called
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON CalleeInfo where
-  toJSON ci = object
-    [ "name" .= ciName ci
-    , "file" .= ciFile ci
-    , "line" .= ciLine ci
-    , "call_sites" .= ciCallSites ci
-    ]
-
--- | Result of find_callees tool.
-data FindCalleesResult = FindCalleesResult
-  { fceResultName :: Text
-  , fceDefinitionFile :: Maybe Text
-  , fceDefinitionLine :: Maybe Int
-  , fceCallees :: [CalleeInfo]
-  , fceTruncated :: Bool
-  , fceWarning :: Maybe Text
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON FindCalleesResult where
-  toJSON fce = object
-    [ "name" .= fceResultName fce
-    , "definition_file" .= fceDefinitionFile fce
-    , "definition_line" .= fceDefinitionLine fce
-    , "callees" .= fceCallees fce
-    , "truncated" .= fceTruncated fce
-    , "warning" .= fceWarning fce
-    ]
-
 -- | Graph definition for find_callees tool.
 newtype FindCalleesGraph mode = FindCalleesGraph
   { fceRun :: mode :- LogicNode
@@ -468,82 +338,8 @@ findCalleesLogic args = do
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- SHOW-TYPE GRAPH (Unified fields + constructors)
+-- SHOW-TYPE GRAPH
 -- ════════════════════════════════════════════════════════════════════════════
-
--- | Arguments for show_type tool.
-data ShowTypeArgs = ShowTypeArgs
-  { staTypeName :: Text          -- ^ Type name to inspect
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance HasJSONSchema ShowTypeArgs where
-  jsonSchema = objectSchema
-    [ ("type_name", describeField "type_name" "Type name to inspect (record, sum type, or GADT)" (emptySchema TString))
-    ]
-    ["type_name"]
-
-instance FromJSON ShowTypeArgs where
-  parseJSON = withObject "ShowTypeArgs" $ \v ->
-    ShowTypeArgs <$> v .: "type_name"
-
-instance ToJSON ShowTypeArgs where
-  toJSON args = object ["type_name" .= staTypeName args]
-
--- | A field in a type (for records).
-data TypeField = TypeField
-  { tfName :: Text
-  , tfType :: Text
-  , tfStrict :: Bool             -- ^ Has ! strictness annotation
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON TypeField where
-  toJSON tf = object
-    [ "name" .= tfName tf
-    , "type" .= tfType tf
-    , "strict" .= tfStrict tf
-    ]
-
--- | A constructor in a type.
-data TypeConstructor = TypeConstructor
-  { tcName :: Text
-  , tcFields :: [Text]           -- ^ Field types (positional or record)
-  , tcIsRecord :: Bool           -- ^ Uses record syntax
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON TypeConstructor where
-  toJSON tc = object
-    [ "name" .= tcName tc
-    , "fields" .= tcFields tc
-    , "is_record" .= tcIsRecord tc
-    ]
-
--- | Result of show_type tool.
-data ShowTypeResult = ShowTypeResult
-  { strTypeName :: Text
-  , strFile :: Maybe Text
-  , strLine :: Maybe Int
-  , strTypeKind :: Text          -- ^ "record", "sum", "gadt", or "newtype"
-  , strFields :: [TypeField]     -- ^ Non-empty for records
-  , strConstructors :: [TypeConstructor]
-  , strRawDefinition :: Text
-  , strWarning :: Maybe Text     -- ^ Warning if HLS is still indexing
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON ShowTypeResult where
-  toJSON str = object
-    [ "type_name" .= strTypeName str
-    , "file" .= strFile str
-    , "line" .= strLine str
-    , "type_kind" .= strTypeKind str
-    , "fields" .= strFields str
-    , "constructors" .= strConstructors str
-    , "raw_definition" .= strRawDefinition str
-    , "warning" .= strWarning str
-    ]
 
 -- | Graph definition for show_type tool.
 newtype ShowTypeGraph mode = ShowTypeGraph
@@ -655,69 +451,10 @@ showTypeLogic args = do
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- SHOW-FIELDS GRAPH (Legacy - use show_type instead)
+-- SHOW-FIELDS GRAPH (Legacy)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Arguments for show_fields tool.
-data ShowFieldsArgs = ShowFieldsArgs
-  { sfaTypeName :: Text          -- ^ Record type name
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance HasJSONSchema ShowFieldsArgs where
-  jsonSchema = objectSchema
-    [ ("type_name", describeField "type_name" "Record type name to inspect" (emptySchema TString))
-    ]
-    ["type_name"]
-
-instance FromJSON ShowFieldsArgs where
-  parseJSON = withObject "ShowFieldsArgs" $ \v ->
-    ShowFieldsArgs <$> v .: "type_name"
-
-instance ToJSON ShowFieldsArgs where
-  toJSON args = object ["type_name" .= sfaTypeName args]
-
--- | A single record field.
-data RecordField = RecordField
-  { rfName :: Text
-  , rfType :: Text
-  , rfStrict :: Bool             -- ^ Has ! strictness annotation
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON RecordField where
-  toJSON rf = object
-    [ "name" .= rfName rf
-    , "type" .= rfType rf
-    , "strict" .= rfStrict rf
-    ]
-
--- | Result of show_fields tool.
-data ShowFieldsResult = ShowFieldsResult
-  { sfrTypeName :: Text
-  , sfrFile :: Maybe Text
-  , sfrLine :: Maybe Int
-  , sfrIsRecord :: Bool
-  , sfrFields :: [RecordField]
-  , sfrRawDefinition :: Text     -- ^ Raw definition text for reference
-  , sfrWarning :: Maybe Text     -- ^ Warning if HLS is still indexing
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON ShowFieldsResult where
-  toJSON sfr = object
-    [ "type_name" .= sfrTypeName sfr
-    , "file" .= sfrFile sfr
-    , "line" .= sfrLine sfr
-    , "is_record" .= sfrIsRecord sfr
-    , "fields" .= sfrFields sfr
-    , "raw_definition" .= sfrRawDefinition sfr
-    , "warning" .= sfrWarning sfr
-    ]
-
 -- | Graph definition for show_fields tool.
---
--- Single LogicNode with Return effect - no Entry/Exit ceremony needed.
 newtype ShowFieldsGraph mode = ShowFieldsGraph
   { sfRun :: mode :- LogicNode
       :@ Input ShowFieldsArgs
@@ -802,66 +539,7 @@ showFieldsLogic args = do
 -- SHOW-CONSTRUCTORS GRAPH
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Arguments for show_constructors tool.
-data ShowConstructorsArgs = ShowConstructorsArgs
-  { scaTypeName :: Text          -- ^ Type name
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance HasJSONSchema ShowConstructorsArgs where
-  jsonSchema = objectSchema
-    [ ("type_name", describeField "type_name" "Sum type name to inspect" (emptySchema TString))
-    ]
-    ["type_name"]
-
-instance FromJSON ShowConstructorsArgs where
-  parseJSON = withObject "ShowConstructorsArgs" $ \v ->
-    ShowConstructorsArgs <$> v .: "type_name"
-
-instance ToJSON ShowConstructorsArgs where
-  toJSON args = object ["type_name" .= scaTypeName args]
-
--- | A single constructor.
-data Constructor = Constructor
-  { conName :: Text
-  , conFields :: [Text]          -- ^ Field types (positional or record)
-  , conIsRecord :: Bool          -- ^ Uses record syntax
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON Constructor where
-  toJSON con = object
-    [ "name" .= conName con
-    , "fields" .= conFields con
-    , "is_record" .= conIsRecord con
-    ]
-
--- | Result of show_constructors tool.
-data ShowConstructorsResult = ShowConstructorsResult
-  { scrTypeName :: Text
-  , scrFile :: Maybe Text
-  , scrLine :: Maybe Int
-  , scrConstructors :: [Constructor]
-  , scrIsGADT :: Bool
-  , scrRawDefinition :: Text
-  , scrWarning :: Maybe Text     -- ^ Warning if HLS is still indexing
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON ShowConstructorsResult where
-  toJSON scr = object
-    [ "type_name" .= scrTypeName scr
-    , "file" .= scrFile scr
-    , "line" .= scrLine scr
-    , "constructors" .= scrConstructors scr
-    , "is_gadt" .= scrIsGADT scr
-    , "raw_definition" .= scrRawDefinition scr
-    , "warning" .= scrWarning scr
-    ]
-
 -- | Graph definition for show_constructors tool.
---
--- Single LogicNode with Return effect - no Entry/Exit ceremony needed.
 newtype ShowConstructorsGraph mode = ShowConstructorsGraph
   { scRun :: mode :- LogicNode
       :@ Input ShowConstructorsArgs
@@ -967,7 +645,7 @@ stripFilePrefix uri
 
 -- | Check if a symbol is a type
 isTypeSymbol :: SymbolInformation -> Bool
-isTypeSymbol sym = sym.siKind `elem`
+isTypeSymbol sym = sym.siKind `elem` 
   [SKClass, SKStruct, SKEnum, SKInterface, SKTypeParameter]
 
 -- | Classify a line - returns filter reason or FRCallSite if it's a real call
@@ -987,7 +665,7 @@ isImport line = "import " `T.isPrefixOf` line
 isComment :: Text -> Bool
 isComment line =
   "--" `T.isPrefixOf` line ||
-  "{-" `T.isPrefixOf` line ||
+  "{- " `T.isPrefixOf` line ||
   "-- |" `T.isPrefixOf` line
 
 isTypeSignature :: Text -> Bool
@@ -1052,7 +730,7 @@ readTypeDefinition path startLine = do
          "," `T.isPrefixOf` stripped ||          -- record field continuation
          "}" `T.isPrefixOf` stripped ||          -- closing brace
          "deriving" `T.isPrefixOf` stripped ||   -- deriving clause
-         "=>" `T.isPrefixOf` stripped            -- constraint continuation
+         ">=>" `T.isPrefixOf` stripped            -- constraint continuation
 
 -- | Parse record fields from a type definition
 parseRecordFields :: Text -> [RecordField]
@@ -1072,7 +750,7 @@ parseRecordFields def =
       case T.breakOn "::" line of
         (namePart, typePart)
           | not (T.null typePart) ->
-              let rawName = T.strip $ T.takeWhileEnd (/= ',') $
+              let rawName = T.strip $ T.takeWhileEnd (/= ',') $ 
                             T.takeWhileEnd (/= '{') $ T.strip namePart
                   isStrict = "!" `T.isPrefixOf` rawName
                   name = T.strip $ if isStrict then T.drop 1 rawName else rawName

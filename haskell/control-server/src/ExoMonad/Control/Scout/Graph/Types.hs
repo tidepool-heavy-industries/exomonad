@@ -2,24 +2,11 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE StrictData #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 -- | Types for DocGen graph nodes.
---
--- This module defines the input/output types that flow between nodes in the
--- DocGen exploration graph. The graph explores code via LSP and uses an LLM
--- to select relevant type dependencies.
---
--- @
--- TeachQuery ─► dgInit ─► ProcessInput ─► dgProcess ─┬─► SelectInput ─► dgSelect
---                                                     │                    │
---                                                     │    ◄─ SelectOutput ◄┘
---                                                     │
---                                                     └─► dgExpand ─► ExpandInput
---                                                                         │
---                                                     ◄────────────────────┘
---                                                     │
---                                                     └─► FinalizeInput ─► dgFinalize ─► TeachingDoc
--- @
 module ExoMonad.Control.Scout.Graph.Types
   ( -- * Node Input Types
     ProcessInput(..)
@@ -44,7 +31,7 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
-import ExoMonad.Schema (HasJSONSchema(..), objectSchema, arraySchema, emptySchema, SchemaType(..))
+import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(..), HasJSONSchema(..))
 import ExoMonad.StructuredOutput (StructuredOutput)
 import ExoMonad.Control.Scout.DocGen.Types (SymbolKey, LSPSymbol)
 
@@ -85,6 +72,18 @@ data ExpandInput = ExpandInput
     deriving anyclass (FromJSON, ToJSON)
 
 
+-- | Why exploration ended.
+data FinalizeReason
+  = FrontierEmpty
+    -- ^ No more symbols to explore
+  | BudgetExhausted
+    -- ^ Hit the symbol exploration limit
+  | DepthLimitReached
+    -- ^ Hit maximum BFS depth
+  deriving stock (Show, Eq, Generic)
+    deriving anyclass (FromJSON, ToJSON)
+
+
 -- | Input to dgFinalize node: why exploration is ending.
 newtype FinalizeInput = FinalizeInput
   { fiReason :: FinalizeReason
@@ -98,38 +97,18 @@ newtype FinalizeInput = FinalizeInput
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Output from dgSelect node (LLM): which candidates are relevant.
---
--- This is the structured output schema for the LLM call. Haiku returns
--- this as JSON which gets parsed and flows to dgExpand.
 data SelectOutput = SelectOutput
   { soSelected :: [Text]
     -- ^ Symbol names that are relevant to the topic
   , soReasoning :: Maybe Text
     -- ^ Optional: why these were selected (useful for training data)
   } deriving stock (Show, Eq, Generic)
-    deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+    deriving anyclass (StructuredOutput)
 
--- | JSON schema for LLM structured output.
---
--- Note: No oneOf - Anthropic structured output compatible.
-instance HasJSONSchema SelectOutput where
-  jsonSchema = objectSchema
-    [ ("selected", arraySchema (emptySchema TString))
-    , ("reasoning", emptySchema TString)
-    ]
-    ["selected"]  -- selected is required; reasoning is optional
-
-
--- | Why exploration ended.
-data FinalizeReason
-  = FrontierEmpty
-    -- ^ No more symbols to explore
-  | BudgetExhausted
-    -- ^ Hit the symbol exploration limit
-  | DepthLimitReached
-    -- ^ Hit maximum BFS depth
-  deriving stock (Show, Eq, Generic)
-    deriving anyclass (FromJSON, ToJSON)
+$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "so" } ''SelectOutput
+  [ 'soSelected  ?? "Symbol names that are relevant to the topic"
+  , 'soReasoning ?? "Optional: why these were selected (useful for training data)"
+  ])
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -137,9 +116,6 @@ data FinalizeReason
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Shared memory state for the DocGen graph.
---
--- This state is accessible to all nodes via the Memory effect.
--- It tracks the exploration progress and accumulated results.
 data ExploreState = ExploreState
   { esGraph :: Map SymbolKey (Int, LSPSymbol)
     -- ^ Explored symbols: key -> (depth, symbol data)
@@ -156,8 +132,6 @@ data ExploreState = ExploreState
   } deriving stock (Show, Eq, Generic)
 
 -- | Create initial state from a query.
---
--- Seeds are resolved to SymbolKeys by the caller before graph execution.
 initialExploreState
   :: Text           -- ^ Topic
   -> [SymbolKey]    -- ^ Resolved seed symbols

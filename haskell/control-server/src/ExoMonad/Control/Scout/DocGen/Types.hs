@@ -1,31 +1,11 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE StrictData #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 -- | Types for teaching document generation via LSP + Gemma.
---
--- Core insight: Gemma extracts edges (related symbols). Haskell traverses the graph.
---
--- Key simplification: Gemma's ONLY job is to return symbol names to follow.
--- Everything else (teaching order) is derived from BFS depth.
---
--- @
--- Seeds: [compositeScore]
---          │
---          ▼
---     ┌─────────┐     ┌─────────┐     ┌──────────────────┐
---     │  LSP    │────▶│  Gemma  │────▶│  "ScoreConfig    │
---     │  hover  │     │ (simple)│     │   Rubric         │
---     └─────────┘     └─────────┘     │   EdgeContext"   │
---                                     └────────┬─────────┘
---                                              │
---          ┌───────────────────────────────────┘
---          ▼
---     Parse tokens, resolve via LSP, add to frontier
---          │
---          ▼
---     BFS depth = teaching order (closer to seeds = more foundational)
--- @
 module ExoMonad.Control.Scout.DocGen.Types
   ( -- * LSP Symbol Data
     LSPSymbol(..)
@@ -43,10 +23,7 @@ module ExoMonad.Control.Scout.DocGen.Types
   , TeachQuery(..)
   ) where
 
-import Data.Aeson
-  ( FromJSON(..), ToJSON(..), (.:), (.:?), (.!=), (.=)
-  , object, withObject
-  )
+import Data.Aeson (FromJSON(..), ToJSON(..), object, (.=), (.:), (.:?), (.!=), withObject)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
@@ -54,7 +31,7 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
-import ExoMonad.Schema (HasJSONSchema(..), objectSchema, arraySchema, emptySchema, SchemaType(..))
+import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(..), HasJSONSchema(..), arraySchema, emptySchema, SchemaType(..), describeField)
 import ExoMonad.Effect.LSP (SymbolKind, Location)
 
 
@@ -117,11 +94,6 @@ initialTeachState seeds budget = TeachState
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | A complete teaching document.
---
--- Organized by BFS depth:
---   - Depth 0: Seed symbols (core)
---   - Depth 1-2: Direct dependencies (prerequisites)
---   - Depth 3+: Transitive dependencies (support)
 data TeachingDoc = TeachingDoc
   { tdTitle     :: Text
     -- ^ Title (based on topic)
@@ -138,8 +110,6 @@ data TeachingDoc = TeachingDoc
 
 
 -- | A single teaching unit (one symbol to explain).
---
--- Simplified: just depth, no role classification.
 data TeachingUnit = TeachingUnit
   { tuSymbol    :: LSPSymbol
     -- ^ The symbol being taught
@@ -163,26 +133,8 @@ data TeachQuery = TeachQuery
     -- ^ Maximum symbols to explore (default: 20)
   } deriving stock (Show, Eq, Generic)
 
-instance FromJSON TeachQuery where
-  parseJSON = withObject "TeachQuery" $ \v -> TeachQuery
-    <$> v .: "topic"
-    <*> v .: "seeds"
-    <*> (v .:? "budget" .!= 20)
-
-instance ToJSON TeachQuery where
-  toJSON q = object
-    [ "topic"  .= tqTopic q
-    , "seeds"  .= tqSeeds q
-    , "budget" .= tqBudget q
-    ]
-
--- | JSON schema for MCP tool.
-instance HasJSONSchema TeachQuery where
-  jsonSchema = objectSchema
-    [ ("topic", emptySchema TString)
-    , ("seeds", arraySchema (emptySchema TString))
-    , ("budget", emptySchema TInteger)
-    ]
-    ["topic", "seeds"]  -- topic and seeds required; budget defaults to 20
-
-
+$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "tq" } ''TeachQuery
+  [ 'tqTopic  ?? "Topic to teach (e.g., 'the scoring system')"
+  , 'tqSeeds  ?? "Entry point symbols (e.g., ['compositeScore'])"
+  , 'tqBudget ?? "Maximum symbols to explore (default: 20)"
+  ])

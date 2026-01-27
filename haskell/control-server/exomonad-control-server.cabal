@@ -46,21 +46,31 @@ library
         ExoMonad.Control.Hook.Stop
         ExoMonad.Control.Hook.Stop.Context
         ExoMonad.Control.LSPTools
+        ExoMonad.Control.LSPTools.Types
         ExoMonad.Control.PMTools
+        ExoMonad.Control.PMTools.Types
         ExoMonad.Control.PMStatus
+        ExoMonad.Control.PMStatus.Types
         ExoMonad.Control.PMPropose
+        ExoMonad.Control.PMPropose.Types
         ExoMonad.Control.ExoTools
         ExoMonad.Control.ExoTools.Internal
         ExoMonad.Control.ExoTools.Status
+        ExoMonad.Control.ExoTools.Status.Types
         ExoMonad.Control.ExoTools.SpawnAgents
         ExoMonad.Control.ExoTools.SpawnCleanup
         ExoMonad.Control.ExoTools.FilePR
+        ExoMonad.Control.ExoTools.FilePR.Types
         ExoMonad.Control.ExoTools.FilePR.Context
         ExoMonad.Control.ExoTools.PrReviewStatus
+        ExoMonad.Control.ExoTools.PrReviewStatus.Types
         ExoMonad.Control.TUITools
+        ExoMonad.Control.TUITools.Types
         ExoMonad.Control.FeedbackTools
+        ExoMonad.Control.FeedbackTools.Types
         ExoMonad.Control.RoleConfig
         ExoMonad.Control.GHTools
+        ExoMonad.Control.GHTools.Types
         ExoMonad.Control.Export
         ExoMonad.Control.CodeExtraction
         ExoMonad.Control.Version

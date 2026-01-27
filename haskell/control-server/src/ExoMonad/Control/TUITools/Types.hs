@@ -1,0 +1,264 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE QuasiQuotes #-}
+
+module ExoMonad.Control.TUITools.Types
+  ( PopupElement(..)
+  , PopupResultElement(..)
+  , PopupArgs(..)
+  , PopupResult(..)
+  ) where
+
+import Data.Aeson (FromJSON(..), ToJSON(..), object, (.=), (.:), (.:?))
+import Data.Aeson.Types (withObject)
+import Data.Text (Text)
+import qualified Data.Text as T
+import GHC.Generics (Generic)
+import Data.Foldable (toList)
+
+import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(..), HasJSONSchema(..), objectSchema, arraySchema, oneOfSchema, emptySchema, SchemaType(..), describeField, enumSchema)
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- POPUP ELEMENT TYPES
+-- ════════════════════════════════════════════════════════════════════════════
+
+data PopupElement
+  = PText Text Text
+  | PSlider Text Text Double Double (Maybe Double)
+  | PCheckbox Text Text (Maybe Bool)
+  | PTextbox Text Text (Maybe Text)
+  | PChoice Text Text [Text] (Maybe Int)
+  | PMultiselect Text Text [Text]
+  | PGroup Text Text
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON PopupElement where
+  toJSON = \case
+    PText eid content -> object
+      [ "type" .= ("text" :: Text)
+      , "id" .= eid
+      , "content" .= content
+      ]
+    PSlider eid label minV maxV defV -> object $
+      [ "type" .= ("slider" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      , "min" .= minV
+      , "max" .= maxV
+      ] ++ maybe [] (\d -> ["default" .= d]) defV
+    PCheckbox eid label defV -> object $
+      [ "type" .= ("checkbox" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      ] ++ maybe [] (\d -> ["default" .= d]) defV
+    PTextbox eid label placeholder -> object $
+      [ "type" .= ("textbox" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      ] ++ maybe [] (\p -> ["placeholder" .= p]) placeholder
+    PChoice eid label opts defIdx -> object $
+      [ "type" .= ("choice" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      , "options" .= opts
+      ] ++ maybe [] (\i -> ["default" .= i]) defIdx
+    PMultiselect eid label opts -> object
+      [ "type" .= ("multiselect" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      , "options" .= opts
+      ]
+    PGroup eid label -> object
+      [ "type" .= ("group" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      ]
+
+instance FromJSON PopupElement where
+  parseJSON = withObject "PopupElement" $ \o -> do
+    elemType <- o .: "type"
+    eid <- o .: "id"
+    case elemType :: Text of
+      "text" -> PText eid <$> o .: "content"
+      "slider" -> PSlider eid
+        <$> o .: "label"
+        <*> o .: "min"
+        <*> o .: "max"
+        <*> o .:? "default"
+      "checkbox" -> PCheckbox eid
+        <$> o .: "label"
+        <*> o .:? "default"
+      "textbox" -> PTextbox eid
+        <$> o .: "label"
+        <*> o .:? "placeholder"
+      "choice" -> PChoice eid
+        <$> o .: "label"
+        <*> o .: "options"
+        <*> o .:? "default"
+      "multiselect" -> PMultiselect eid
+        <$> o .: "label"
+        <*> o .: "options"
+      "group" -> PGroup eid
+        <$> o .: "label"
+      _ -> fail $ "Unknown element type: " <> T.unpack elemType
+
+instance HasJSONSchema PopupElement where
+  jsonSchema = oneOfSchema
+    [ describeField "text" "Static text display" $ objectSchema
+      [ ("type", enumSchema ["text"])
+      , ("id", describeField "id" "Unique element identifier" (emptySchema TString))
+      , ("content", describeField "content" "Text content to display" (emptySchema TString))
+      ]
+      ["type", "id", "content"]
+    , describeField "slider" "Numeric slider input" $ objectSchema
+      [ ("type", enumSchema ["slider"])
+      , ("id", describeField "id" "Unique element identifier" (emptySchema TString))
+      , ("label", describeField "label" "Label shown above slider" (emptySchema TString))
+      , ("min", describeField "min" "Minimum value" (emptySchema TNumber))
+      , ("max", describeField "max" "Maximum value" (emptySchema TNumber))
+      , ("default", describeField "default" "Default value (optional)" (emptySchema TNumber))
+      ]
+      ["type", "id", "label", "min", "max"]
+    , describeField "checkbox" "Boolean checkbox input" $ objectSchema
+      [ ("type", enumSchema ["checkbox"])
+      , ("id", describeField "id" "Unique element identifier" (emptySchema TString))
+      , ("label", describeField "label" "Label shown next to checkbox" (emptySchema TString))
+      , ("default", describeField "default" "Default checked state (optional)" (emptySchema TBoolean))
+      ]
+      ["type", "id", "label"]
+    , describeField "textbox" "Text input field" $ objectSchema
+      [ ("type", enumSchema ["textbox"])
+      , ("id", describeField "id" "Unique element identifier" (emptySchema TString))
+      , ("label", describeField "label" "Label shown above textbox" (emptySchema TString))
+      , ("placeholder", describeField "placeholder" "Placeholder text (optional)" (emptySchema TString))
+      ]
+      ["type", "id", "label"]
+    , describeField "choice" "Single-select dropdown" $ objectSchema
+      [ ("type", enumSchema ["choice"])
+      , ("id", describeField "id" "Unique element identifier" (emptySchema TString))
+      , ("label", describeField "label" "Label shown above dropdown" (emptySchema TString))
+      , ("options", describeField "options" "List of option strings" (arraySchema $ emptySchema TString))
+      , ("default", describeField "default" "Default selected index (optional)" (emptySchema TInteger))
+      ]
+      ["type", "id", "label", "options"]
+    , describeField "multiselect" "Multiple selection list" $ objectSchema
+      [ ("type", enumSchema ["multiselect"])
+      , ("id", describeField "id" "Unique element identifier" (emptySchema TString))
+      , ("label", describeField "label" "Label shown above list" (emptySchema TString))
+      , ("options", describeField "options" "List of option strings" (arraySchema $ emptySchema TString))
+      ]
+      ["type", "id", "label", "options"]
+    , describeField "group" "Section header/separator" $ objectSchema
+      [ ("type", enumSchema ["group"])
+      , ("id", describeField "id" "Unique element identifier" (emptySchema TString))
+      , ("label", describeField "label" "Section header text" (emptySchema TString))
+      ]
+      ["type", "id", "label"]
+    ]
+
+data PopupResultElement
+  = RText Text Text
+  | RSlider Text Text Double
+  | RCheckbox Text Text Bool
+  | RTextbox Text Text Text
+  | RChoice Text Text Text
+  | RMultiselect Text Text [Text]
+  | RGroup Text Text
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON PopupResultElement where
+  toJSON = \case
+    RText eid content -> object
+      [ "type" .= ("text" :: Text)
+      , "id" .= eid
+      , "content" .= content
+      ]
+    RSlider eid label val -> object
+      [ "type" .= ("slider" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      , "value" .= val
+      ]
+    RCheckbox eid label val -> object
+      [ "type" .= ("checkbox" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      , "value" .= val
+      ]
+    RTextbox eid label val -> object
+      [ "type" .= ("textbox" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      , "value" .= val
+      ]
+    RChoice eid label val -> object
+      [ "type" .= ("choice" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      , "value" .= val
+      ]
+    RMultiselect eid label vals -> object
+      [ "type" .= ("multiselect" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      , "value" .= vals
+      ]
+    RGroup eid label -> object
+      [ "type" .= ("group" :: Text)
+      , "id" .= eid
+      , "label" .= label
+      ]
+
+instance FromJSON PopupResultElement where
+  parseJSON = withObject "PopupResultElement" $ \o -> do
+    elemType <- o .: "type"
+    eid <- o .: "id"
+    case elemType :: Text of
+      "text" -> RText eid <$> o .: "content"
+      "slider" -> RSlider eid <$> o .: "label" <*> o .: "value"
+      "checkbox" -> RCheckbox eid <$> o .: "label" <*> o .: "value"
+      "textbox" -> RTextbox eid <$> o .: "label" <*> o .: "value"
+      "choice" -> RChoice eid <$> o .: "label" <*> o .: "value"
+      "multiselect" -> RMultiselect eid <$> o .: "label" <*> o .: "value"
+      "group" -> RGroup eid <$> o .: "label"
+      _ -> fail $ "Unknown result element type: " <> T.unpack elemType
+
+instance HasJSONSchema PopupResultElement where
+  jsonSchema = emptySchema TObject
+
+-- | Arguments for the popup tool.
+data PopupArgs = PopupArgs
+  { paTitle :: Maybe Text
+    -- ^ Optional popup title
+  , paElements :: [PopupElement]
+    -- ^ Flat list of UI elements
+  }
+  deriving stock (Show, Eq, Generic)
+
+$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "pa" } ''PopupArgs
+  [ 'paTitle    ?? "Optional popup title"
+  , 'paElements ?? "Flat list of UI elements"
+  ])
+
+-- | Result of the popup tool.
+data PopupResult = PopupResult
+  { prStatus :: Text
+    -- ^ "completed" or "cancelled"
+  , prButton :: Text
+    -- ^ "submit" or "cancel"
+  , prElements :: [PopupResultElement]
+    -- ^ Elements with values filled in
+  }
+  deriving stock (Show, Eq, Generic)
+
+$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "pr" } ''PopupResult
+  [ 'prStatus   ?? "Result status: 'completed' or 'cancelled'"
+  , 'prButton   ?? "Button pressed: 'submit' or 'cancel'"
+  , 'prElements ?? "Elements with values filled in"
+  ])

@@ -12,6 +12,7 @@
 module ExoMonad.StructuredOutput.Class
   ( -- * The Typeclass
     StructuredOutput(..)
+  , HasJSONSchema(..)
 
     -- * JSON Schema Types
   , JSONSchema(..)
@@ -230,6 +231,10 @@ type family IsNullarySumRep (rep :: Type -> Type) :: Bool where
 -- ════════════════════════════════════════════════════════════════════════════
 -- THE TYPECLASS
 -- ════════════════════════════════════════════════════════════════════════════
+
+-- | Typeclass for types that have a JSON Schema representation.
+class HasJSONSchema a where
+  jsonSchema :: JSONSchema
 
 -- | Evidence that a type can be used as LLM structured output.
 class StructuredOutput a where

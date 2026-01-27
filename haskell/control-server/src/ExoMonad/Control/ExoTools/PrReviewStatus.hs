@@ -18,7 +18,6 @@ module ExoMonad.Control.ExoTools.PrReviewStatus
   ) where
 
 import Control.Monad.Freer (Eff, Member)
-import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.=), object, withObject)
 import Data.List (partition)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -30,96 +29,12 @@ import ExoMonad.Graph.Generic (AsHandler, type (:-))
 import ExoMonad.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import ExoMonad.Graph.Goto (Goto, GotoChoice, To, gotoExit)
 import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef)
-import ExoMonad.Schema (HasJSONSchema(..), objectSchema, emptySchema, SchemaType(..), describeField)
 
--- | Arguments for pr_review_status tool.
-data PrReviewStatusArgs = PrReviewStatusArgs
-  { prsaPrNumber :: Int
-  }
-  deriving stock (Show, Eq, Generic)
+import ExoMonad.Control.ExoTools.PrReviewStatus.Types
 
-instance HasJSONSchema PrReviewStatusArgs where
-  jsonSchema = objectSchema
-    [ ("pr_number", describeField "pr_number" "Pull Request number." (emptySchema TInteger))
-    ]
-    ["pr_number"]
-
-instance FromJSON PrReviewStatusArgs where
-  parseJSON = withObject "PrReviewStatusArgs" $ \v ->
-    PrReviewStatusArgs <$> v .: "pr_number"
-
-instance ToJSON PrReviewStatusArgs where
-  toJSON args = object ["pr_number" .= prsaPrNumber args]
-
--- | Feedback from a single author category (Copilot or human).
-data AuthorFeedback = AuthorFeedback
-  { afPending :: [ReviewComment]
-  , afResolved :: [ReviewComment]
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON AuthorFeedback where
-  toJSON af = object
-    [ "pending" .= afPending af
-    , "resolved" .= afResolved af
-    ]
-
-instance FromJSON AuthorFeedback where
-  parseJSON = withObject "AuthorFeedback" $ \v ->
-    AuthorFeedback
-      <$> v .: "pending"
-      <*> v .: "resolved"
-
--- | Summary counts for quick triage.
-data FeedbackSummary = FeedbackSummary
-  { fsCopilotPending :: Int
-  , fsCopilotResolved :: Int
-  , fsHumanPending :: Int
-  , fsHumanResolved :: Int
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON FeedbackSummary where
-  toJSON fs = object
-    [ "copilot_pending" .= fsCopilotPending fs
-    , "copilot_resolved" .= fsCopilotResolved fs
-    , "human_pending" .= fsHumanPending fs
-    , "human_resolved" .= fsHumanResolved fs
-    ]
-
-instance FromJSON FeedbackSummary where
-  parseJSON = withObject "FeedbackSummary" $ \v ->
-    FeedbackSummary
-      <$> v .: "copilot_pending"
-      <*> v .: "copilot_resolved"
-      <*> v .: "human_pending"
-      <*> v .: "human_resolved"
-
--- | Result of pr_review_status tool.
--- Returns comprehensive feedback grouped by author type and status.
-data PrReviewStatusResult = PrReviewStatusResult
-  { prsrPrNumber :: Int
-  , prsrCopilot :: AuthorFeedback
-  , prsrHumans :: AuthorFeedback
-  , prsrSummary :: FeedbackSummary
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON PrReviewStatusResult where
-  toJSON res = object
-    [ "pr_number" .= prsrPrNumber res
-    , "copilot" .= prsrCopilot res
-    , "humans" .= prsrHumans res
-    , "summary" .= prsrSummary res
-    ]
-
-instance FromJSON PrReviewStatusResult where
-  parseJSON = withObject "PrReviewStatusResult" $ \v ->
-    PrReviewStatusResult
-      <$> v .: "pr_number"
-      <*> v .: "copilot"
-      <*> v .: "humans"
-      <*> v .: "summary"
+-- ════════════════════════════════════════════════════════════════════════════
+-- GRAPH
+-- ════════════════════════════════════════════════════════════════════════════
 
 -- | Graph definition for pr_review_status tool.
 data PrReviewStatusGraph mode = PrReviewStatusGraph
@@ -144,6 +59,10 @@ prReviewStatusHandlers = PrReviewStatusGraph
   , prsRun = prReviewStatusLogic
   , prsExit = ()
   }
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- LOGIC
+-- ════════════════════════════════════════════════════════════════════════════
 
 -- | Convert a PR-level Review to a ReviewComment.
 -- PR-level reviews have no file path or line number.

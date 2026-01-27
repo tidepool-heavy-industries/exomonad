@@ -38,6 +38,16 @@ module ExoMonad.Schema
   , deriveHasJSONSchema
   , deriveUsesOneOf
   , deriveUsesEnum
+  , deriveMCPType
+  , deriveMCPTypeWith
+  , FieldMapping(..)
+  , FieldMappingPartial
+  , (~>)
+  , (?)
+  , (??)
+  , omit
+  , MCPOptions(..)
+  , defaultMCPOptions
 
     -- * Conversion
   , schemaToValue
@@ -56,6 +66,19 @@ import Data.Maybe (catMaybes)
 import Data.Aeson (Value(..), object, (.=))
 import Language.Haskell.TH
 
+import ExoMonad.Schema.TH
+  ( deriveMCPType
+  , deriveMCPTypeWith
+  , FieldMapping(..)
+  , FieldMappingPartial
+  , (~>)
+  , (?)
+  , (??)
+  , omit
+  , MCPOptions(..)
+  , defaultMCPOptions
+  )
+
 -- Import wrappers and validation from Class to avoid circularity issues
 -- and make them available for WASM.
 import ExoMonad.StructuredOutput.Class
@@ -68,6 +91,7 @@ import ExoMonad.StructuredOutput.Class
   , formatDiagnostic
   , JSONSchema(..)
   , SchemaType(..)
+  , HasJSONSchema(..)
   )
 
 -- | Empty schema of given type
@@ -209,13 +233,9 @@ typeToSchemaExp typ = case typ of
   -- Fallback: treat as string (for complex types without HasJSONSchema)
   _ -> [| emptySchema TString |]
 
--- ══════════════════════════════════════════════════════════════
+-- ════════════════════════════════════════════════════════════════════════════
 -- HAS JSON SCHEMA TYPECLASS
--- ══════════════════════════════════════════════════════════════
-
--- | Typeclass for types that have a JSON Schema representation.
-class HasJSONSchema a where
-  jsonSchema :: JSONSchema
+-- ════════════════════════════════════════════════════════════════════════════
 
 -- | Derive a 'HasJSONSchema' instance for a record type.
 deriveHasJSONSchema :: Name -> Q [Dec]

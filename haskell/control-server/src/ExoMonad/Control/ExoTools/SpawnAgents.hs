@@ -51,6 +51,7 @@ import ExoMonad.Schema (HasJSONSchema(..), objectSchema, arraySchema, emptySchem
 import ExoMonad.Control.ExoTools.Internal (slugify)
 import ExoMonad.Control.ExoTools.SpawnCleanup (SpawnCleanup, SpawnProgress(..), runSpawnCleanup, acquireWorktree, acquireContainer, emitProgress, cleanupAll)
 import ExoMonad.Control.Runtime.Paths as Paths
+import ExoMonad.Control.ExoTools.SpawnAgents.Types
 
 -- | Find the repository root by checking ENV or using Git.
 findRepoRoot
@@ -65,63 +66,6 @@ findRepoRoot = do
       -- 2. Use Git to find top level
       mWtInfo <- getWorktreeInfo
       pure $ fmap (\wi -> wi.wiRepoRoot) mWtInfo
-
--- | Arguments for spawn_agents tool.
-data SpawnAgentsArgs = SpawnAgentsArgs
-  { saaIssueNumbers :: [Text]  -- ^ List of issue numbers (e.g. "123", "456").
-  , saaBackend :: Maybe Text  -- ^ Backend to use: "claude" or "gemini" (defaults to "claude").
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance HasJSONSchema SpawnAgentsArgs where
-  jsonSchema = objectSchema
-    [
-      ("issue_numbers", describeField "issue_numbers" "List of issue numbers to spawn worktrees for." (arraySchema (emptySchema TString)))
-    , ("backend", describeField "backend" "Backend to use: 'claude' or 'gemini' (defaults to 'claude')." (emptySchema TString))
-    ]
-    ["issue_numbers"]
-
-instance FromJSON SpawnAgentsArgs where
-  parseJSON = withObject "SpawnAgentsArgs" $ \v ->
-    SpawnAgentsArgs
-      <*>
-      v .: "issue_numbers"
-      <*>
-      v .:? "backend"
-
-instance ToJSON SpawnAgentsArgs where
-  toJSON args = object
-    [
-      "issue_numbers" .= saaIssueNumbers args
-    , "backend" .= saaBackend args
-    ]
-
--- | Result of spawn_agents tool.
-data SpawnAgentsResult = SpawnAgentsResult
-  {
-    sarWorktrees :: [(Text, FilePath)]  -- ^ Successfully created worktrees: (issueNum, path)
-  , sarTabs      :: [(Text, Text)]      -- ^ Successfully launched tabs: (issueNum, tabId)
-  , sarFailed    :: [(Text, Text)]      -- ^ Failed operations: (issueNum, reason)
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance FromJSON SpawnAgentsResult where
-  parseJSON = withObject "SpawnAgentsResult" $ \v ->
-    SpawnAgentsResult
-      <*>
-      v .: "worktrees"
-      <*>
-      v .: "tabs"
-      <*>
-      v .: "failed"
-
-instance ToJSON SpawnAgentsResult where
-  toJSON res = object
-    [
-      "worktrees" .= sarWorktrees res
-    , "tabs"      .= sarTabs res
-    , "failed"    .= sarFailed res
-    ]
 
 -- | Arguments for cleanup_agents tool.
 data CleanupAgentsArgs = CleanupAgentsArgs
@@ -478,7 +422,7 @@ processIssue spawnMode repoRoot wtBaseDir backend shortId = do
                                 Right containerId -> do
                                   acquireContainer containerId
                                   emitProgress $ ContainerSpawned shortId containerId
-                                  
+
                                   -- Health Check
                                   logInfo $ "[" <> shortId <> "] Running health check for container: " <> containerId.unContainerId
                                   -- Try to run 'echo ok' in the container
@@ -490,7 +434,7 @@ processIssue spawnMode repoRoot wtBaseDir backend shortId = do
                                       emitProgress $ SpawnFailed shortId errMsg
                                       cleanupAll
                                       pure $ Left (shortId, errMsg)
-                                    Right execRes -> 
+                                    Right execRes ->
                                       if execRes.erExitCode == Just 0
                                         then do
                                           logInfo $ "[" <> shortId <> "] Health check passed"
