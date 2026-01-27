@@ -13,7 +13,8 @@ LABEL org.opencontainers.image.revision=${GIT_SHA}
 
 # Copy pre-built tui-popup binary from builder context
 COPY --from=rust-builder /app/rust/target/release/tui-popup /usr/local/bin/tui-popup
-RUN chmod +x /usr/local/bin/tui-popup
+COPY --from=rust-builder /app/rust/target/release/agent-status /usr/local/bin/agent-status
+RUN chmod +x /usr/local/bin/tui-popup /usr/local/bin/agent-status
 
 # Create config directories
 RUN mkdir -p /etc/zellij/layouts
