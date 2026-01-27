@@ -15,6 +15,7 @@ import Data.Maybe (fromMaybe)
 import ExoMonad.Control.Server (runServer)
 import ExoMonad.Control.Types (ServerConfig(..))
 import ExoMonad.Control.Hook.Policy (loadHookPolicy)
+import ExoMonad.Control.Hook.CircuitBreaker (loadCircuitBreakerConfig)
 import ExoMonad.Control.Logging (Logger, withDualLogger, logInfo, logError)
 import ExoMonad.Control.Observability (withTracerProvider, getTracer, TracingConfig(..))
 import ExoMonad.Control.RoleConfig (Role(..))
@@ -47,6 +48,14 @@ runServerMode :: Logger -> FilePath -> Bool -> IO ()
 runServerMode logger projectDir noTui = do
   roleEnv <- lookupEnv "EXOMONAD_ROLE"
   policy <- loadHookPolicy projectDir
+  
+  -- Load and validate circuit breaker config
+  cbConfigResult <- loadCircuitBreakerConfig
+  cbConfig <- case cbConfigResult of
+    Left err -> error $ "Invalid circuit breaker config: " <> T.unpack err
+    Right c -> pure c
+    
+  logInfo logger $ "Circuit breaker config loaded: " <> T.pack (show cbConfig)
 
   -- Observability config
   otelEndpoint <- fromMaybe "localhost" <$> lookupEnv "OTEL_EXPORTER_OTLP_ENDPOINT"
@@ -67,6 +76,7 @@ runServerMode logger projectDir noTui = do
         , noTui = noTui
         , observabilityConfig = Nothing
         , hookPolicy = policy
+        , circuitBreakerConfig = cbConfig
         }
 
   -- Initialize tracing and run server

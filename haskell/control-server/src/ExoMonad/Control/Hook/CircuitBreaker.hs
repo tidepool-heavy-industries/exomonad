@@ -6,16 +6,23 @@ module ExoMonad.Control.Hook.CircuitBreaker
   ( CircuitBreakerState(..)
   , SessionId
   , CircuitBreakerMap
+  , CircuitBreakerConfig(..)
+  , mkCircuitBreakerConfig
+  , loadCircuitBreakerConfig
   , initCircuitBreaker
   , withCircuitBreaker
   , incrementStage
   , getCircuitBreakerState
+  , getAllCircuitBreakerStates
+  , resetSession
+  , resetAll
   ) where
 
 import Control.Concurrent.STM
 import Control.Exception (try, SomeException)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock
@@ -36,37 +43,40 @@ data CircuitBreakerState = CircuitBreakerState
 -- | Global state in control-server
 type CircuitBreakerMap = TVar (Map SessionId CircuitBreakerState)
 
-initCircuitBreaker :: IO CircuitBreakerMap
-initCircuitBreaker = newTVarIO Map.empty
+data CircuitBreakerConfig = CircuitBreakerConfig
+  { cbcGlobalMax :: Int
+  , cbcStageMax :: Int
+  , cbcStaleTimeout :: NominalDiffTime
+  } deriving (Show, Eq)
 
--- | Get limits from environment variables
-getLimits :: IO (Int, Int, NominalDiffTime)
-getLimits = do
+mkCircuitBreakerConfig :: Int -> Int -> Int -> Either Text CircuitBreakerConfig
+mkCircuitBreakerConfig globalMax stageMax staleTimeout
+  | globalMax < 1 = Left "globalMax must be >= 1"
+  | stageMax < 1 = Left "stageMax must be >= 1"
+  | staleTimeout < 60 = Left "staleTimeout must be >= 60 seconds"
+  | otherwise = Right $ CircuitBreakerConfig globalMax stageMax (fromIntegral staleTimeout)
+
+loadCircuitBreakerConfig :: IO (Either Text CircuitBreakerConfig)
+loadCircuitBreakerConfig = do
   globalMax <- lookupEnv "CIRCUIT_BREAKER_GLOBAL_MAX"
   stageMax <- lookupEnv "CIRCUIT_BREAKER_STAGE_MAX"
   staleTimeout <- lookupEnv "CIRCUIT_BREAKER_STALE_TIMEOUT"
 
-  pure ( fromMaybe 15 (globalMax >>= readMaybe)
-       , fromMaybe 5 (stageMax >>= readMaybe)
-       , fromIntegral (fromMaybe 300 (staleTimeout >>= readMaybe :: Maybe Int))
-       )
-  where
-    fromMaybe d Nothing = d
-    fromMaybe _ (Just v) = v
+  let g = fromMaybe 15 (globalMax >>= readMaybe)
+  let s = fromMaybe 5 (stageMax >>= readMaybe)
+  let t = fromMaybe 300 (staleTimeout >>= readMaybe)
+
+  pure $ mkCircuitBreakerConfig g s t
+
+initCircuitBreaker :: IO CircuitBreakerMap
+initCircuitBreaker = newTVarIO Map.empty
 
 -- | Check if limits are exceeded
-checkLimits :: Int -> Int -> CircuitBreakerState -> Either Text ()
-checkLimits globalMax stageMax cbs
-  | cbs.cbGlobalStops >= globalMax = Left $ "Global stop limit reached (" <> T.pack (show globalMax) <> ")"
-  | any (>= stageMax) (Map.elems cbs.cbStageRetries) = Left $ "Stage limit reached (" <> T.pack (show stageMax) <> ")"
+checkLimits :: CircuitBreakerConfig -> CircuitBreakerState -> Either Text ()
+checkLimits config cbs
+  | cbs.cbGlobalStops >= config.cbcGlobalMax = Left $ "Global stop limit reached (" <> T.pack (show config.cbcGlobalMax) <> "). Wait " <> T.pack (show $ config.cbcStaleTimeout) <> "s or use cb_reset."
+  | any (>= config.cbcStageMax) (Map.elems cbs.cbStageRetries) = Left $ "Stage limit reached (" <> T.pack (show config.cbcStageMax) <> "). Fix the underlying issue or use cb_reset."
   | otherwise = Right ()
-
--- | Check if state is stale
-isStale :: NominalDiffTime -> CircuitBreakerState -> IO Bool
-isStale timeout cbs = do
-  now <- getCurrentTime
-  let elapsed = diffUTCTime now cbs.cbLastStopTime
-  pure $ elapsed > timeout
 
 -- | Acquire lock, run action, release lock (with limits check)
 --
@@ -75,14 +85,13 @@ isStale timeout cbs = do
 -- for generating or persisting a stable ID before calling this function.
 withCircuitBreaker
   :: CircuitBreakerMap
+  -> CircuitBreakerConfig
+  -> UTCTime
   -> SessionId
   -> IO a
   -> IO (Either Text a)
-withCircuitBreaker stateVar sessionId action = do
-  (globalMax, stageMax, staleTimeout) <- getLimits
-  now <- getCurrentTime
-  
-  -- 1. Try to acquire lock and check limits
+withCircuitBreaker stateVar config now sessionId action = do
+  -- 1. Try to acquire lock and check limits inside atomically
   acquireResult <- atomically $ do
     states <- readTVar stateVar
     case Map.lookup sessionId states of
@@ -99,33 +108,25 @@ withCircuitBreaker stateVar sessionId action = do
         pure $ Right ()
 
       Just cbs -> do
-        -- Check if already active
-        if cbs.cbStopHookActive
+        -- Check staleness
+        let elapsed = diffUTCTime now cbs.cbLastStopTime
+        let isStale = elapsed > config.cbcStaleTimeout
+        
+        -- Check if active and not stale
+        if cbs.cbStopHookActive && not isStale
           then pure $ Left "Stop hook already running"
           else do
-            -- Check limits
-            case checkLimits globalMax stageMax cbs of
+            -- If we are here, either it's inactive OR it was stale (so we preempt)
+            -- Check limits (unless we are just resetting a stale lock? No, limits apply always)
+            case checkLimits config cbs of
               Left err -> pure $ Left err
               Right () -> do
                 -- Acquire lock
-                let updatedState = cbs { cbStopHookActive = True }
+                let updatedState = cbs { cbStopHookActive = True, cbLastStopTime = now }
                 modifyTVar' stateVar (Map.insert sessionId updatedState)
                 pure $ Right ()
 
   case acquireResult of
-    Left "Stop hook already running" -> do
-      -- Check staleness outside STM
-      states <- readTVarIO stateVar
-      case Map.lookup sessionId states of
-        Just cbs -> do
-          stale <- isStale staleTimeout cbs
-          if stale
-            then do
-              -- Force reset if stale
-              atomically $ modifyTVar' stateVar $ Map.adjust (\s -> s { cbStopHookActive = True }) sessionId
-              runActionAndRelease stateVar sessionId action
-            else pure $ Left "Stop hook already running"
-        Nothing -> pure $ Left "Session lost during staleness check"
     Left err -> pure $ Left err
     Right () -> runActionAndRelease stateVar sessionId action
 
@@ -153,3 +154,15 @@ incrementStage stateVar sessionId stage now = do
 -- | Get current state for a session
 getCircuitBreakerState :: CircuitBreakerMap -> SessionId -> IO (Maybe CircuitBreakerState)
 getCircuitBreakerState stateVar sessionId = Map.lookup sessionId <$> readTVarIO stateVar
+
+-- | Get all circuit breaker states
+getAllCircuitBreakerStates :: CircuitBreakerMap -> IO (Map SessionId CircuitBreakerState)
+getAllCircuitBreakerStates stateVar = readTVarIO stateVar
+
+-- | Reset a specific session
+resetSession :: CircuitBreakerMap -> SessionId -> IO ()
+resetSession stateVar sessionId = atomically $ modifyTVar' stateVar (Map.delete sessionId)
+
+-- | Reset all sessions
+resetAll :: CircuitBreakerMap -> IO ()
+resetAll stateVar = atomically $ writeTVar stateVar Map.empty
