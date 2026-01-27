@@ -29,6 +29,26 @@ impl OtelService {
             headers,
         }
     }
+
+    /// Create a new Otel service from environment variables.
+    ///
+    /// Required: `OTLP_ENDPOINT`.
+    /// Optional: `OTLP_HEADERS` (format: `key=value,key2=value2`).
+    pub fn from_env() -> Result<Self, anyhow::Error> {
+        let endpoint_str = std::env::var("OTLP_ENDPOINT")?;
+        let endpoint = Url::parse(&endpoint_str)?;
+        
+        let mut headers = HashMap::new();
+        if let Ok(h_str) = std::env::var("OTLP_HEADERS") {
+            for pair in h_str.split(',') {
+                if let Some((k, v)) = pair.split_once('=') {
+                    headers.insert(k.trim().to_string(), v.trim().to_string());
+                }
+            }
+        }
+
+        Ok(Self::new(endpoint, headers))
+    }
 }
 
 // Minimal OTLP JSON structures for Traces

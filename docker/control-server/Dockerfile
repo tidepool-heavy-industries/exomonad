@@ -25,11 +25,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=haskell-builder /out/exomonad-control-server /usr/local/bin/exomonad-control-server
 COPY --from=rust-builder /app/rust/target/release/docker-ctl /usr/local/bin/docker-ctl
 COPY --from=rust-builder /app/rust/target/release/tui-spawner /usr/local/bin/tui-spawner
+COPY --from=rust-builder /app/rust/target/release/service-server /usr/local/bin/service-server
 
 # Verify binaries are executable
 RUN chmod +x /usr/local/bin/exomonad-control-server \
              /usr/local/bin/docker-ctl \
-             /usr/local/bin/tui-spawner
+             /usr/local/bin/tui-spawner \
+             /usr/local/bin/service-server
 
 # Copy service-specific entrypoint wrapper
 COPY docker/control-server/entrypoint.sh /usr/local/bin/service-entrypoint.sh
@@ -38,6 +40,7 @@ RUN chmod +x /usr/local/bin/service-entrypoint.sh
 # Environment (extends common-base)
 ENV EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
 ENV EXOMONAD_TUI_SOCKET=/sockets/tui.sock
+ENV EXOMONAD_SERVICE_SOCKET=/sockets/services.sock
 ENV ZELLIJ_SESSION_NAME=main
 # Override GIT_SAFE_DIRECTORY for repo bind mount
 ENV GIT_SAFE_DIRECTORY=/repo

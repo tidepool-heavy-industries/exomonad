@@ -31,6 +31,13 @@ pub mod anthropic;
 pub mod github;
 pub mod ollama;
 pub mod otel;
+pub mod server;
+
+pub use anthropic::AnthropicService;
+pub use github::GitHubService;
+pub use ollama::OllamaService;
+pub use otel::OtelService;
+pub use server::ServiceServer;
 
 /// A common trait for all external service clients.
 ///

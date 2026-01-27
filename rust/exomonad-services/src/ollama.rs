@@ -30,6 +30,16 @@ impl OllamaService {
             None => Self::default(),
         }
     }
+
+    /// Create a new Ollama service from environment variables.
+    ///
+    /// Optional: `OLLAMA_HOST` (e.g., `http://localhost:11434`).
+    pub fn from_env() -> Result<Self, anyhow::Error> {
+        let endpoint = std::env::var("OLLAMA_HOST")
+            .ok()
+            .and_then(|s| Url::parse(&s).ok());
+        Ok(Self::new(endpoint))
+    }
 }
 
 #[async_trait]

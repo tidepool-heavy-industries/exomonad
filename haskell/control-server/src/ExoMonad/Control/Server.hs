@@ -15,6 +15,8 @@ import ExoMonad.Control.Logging (Logger, logInfo, logDebug, logError)
 import ExoMonad.Control.Protocol hiding (role)
 import ExoMonad.Control.RoleConfig
 import ExoMonad.Control.Types (ServerConfig(..))
+import ExoMonad.LLM.Types (LLMConfig(..))
+import ExoMonad.GitHub.Interpreter (GitHubConfig(..))
 import ExoMonad.Observability.Types (newTraceContext, ObservabilityConfig(..), LokiConfig(..), OTLPConfig(..))
 import ExoMonad.Observability.Interpreter (flushTraces)
 import ExoMonad.Control.Export (exportMCPTools)
@@ -40,6 +42,24 @@ import System.Directory (createDirectoryIfMissing, removeFile)
 import System.Environment (lookupEnv)
 import System.FilePath (takeDirectory)
 import System.IO.Error (isDoesNotExistError)
+
+-- | Load LLM configuration from environment variables.
+-- REQUIRES EXOMONAD_SERVICE_SOCKET.
+loadLLMConfig :: IO (Maybe LLMConfig)
+loadLLMConfig = do
+  socketPath <- lookupEnv "EXOMONAD_SERVICE_SOCKET"
+  case socketPath of
+    Just path -> pure $ Just $ LLMSocketConfig path
+    Nothing -> error "EXOMONAD_SERVICE_SOCKET environment variable required for LLM configuration"
+
+-- | Load GitHub configuration from environment variables.
+-- REQUIRES EXOMONAD_SERVICE_SOCKET.
+loadGitHubConfig :: IO (Maybe GitHubConfig)
+loadGitHubConfig = do
+  socketPath <- lookupEnv "EXOMONAD_SERVICE_SOCKET"
+  case socketPath of
+    Just path -> pure $ Just $ GitHubSocketConfig path
+    Nothing -> error "EXOMONAD_SERVICE_SOCKET environment variable required for GitHub configuration"
 
 -- | Load observability configuration from environment variables.
 loadObservabilityConfig :: IO (Maybe ObservabilityConfig)
@@ -74,10 +94,31 @@ runServer logger config tracer = do
     Just c  -> pure (Just c)
     Nothing -> loadObservabilityConfig
 
-  let configWithObs = config { observabilityConfig = obsConfig }
+  -- Load LLM and GitHub config if not already provided
+  llmCfg <- case config.llmConfig of
+    Just c -> pure (Just c)
+    Nothing -> loadLLMConfig
+  
+  ghCfg <- case config.githubConfig of
+    Just c -> pure (Just c)
+    Nothing -> loadGitHubConfig
+
+  let configFull = config 
+        { observabilityConfig = obsConfig
+        , llmConfig = llmCfg
+        , githubConfig = ghCfg
+        }
 
   when (isJust obsConfig) $
     logInfo logger "Observability enabled (Loki/OTLP)"
+  
+  case llmCfg of
+    Just (LLMSocketConfig path) -> logInfo logger $ "LLM via Service Socket: " <> T.pack path
+    _ -> pure ()
+
+  case ghCfg of
+    Just (GitHubSocketConfig path) -> logInfo logger $ "GitHub via Service Socket: " <> T.pack path
+    _ -> pure ()
 
   cbMap <- initCircuitBreaker
 
@@ -92,10 +133,10 @@ runServer logger config tracer = do
       (cleanupUnixSocket controlSocket)
       $ \sock -> do
         logInfo logger $ "Listening on (Unix): " <> T.pack controlSocket
-        runSettingsSocket settings sock (app logger configWithObs tracer cbMap))
+        runSettingsSocket settings sock (app logger configFull tracer cbMap))
     (do
         logInfo logger "Listening on (TCP): 0.0.0.0:7432"
-        runSettings (setPort 7432 settings) (app logger configWithObs tracer cbMap))
+        runSettings (setPort 7432 settings) (app logger configFull tracer cbMap))
 
 -- | Setup Unix socket at given path.
 setupUnixSocket :: FilePath -> IO Socket

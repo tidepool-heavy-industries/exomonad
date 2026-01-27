@@ -268,50 +268,109 @@ pub enum ServiceRequest {
         model: String,
         messages: Vec<ChatMessage>,
         max_tokens: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
         tools: Option<Vec<Tool>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         system: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        thinking: Option<Value>,
     },
     OllamaGenerate {
         model: String,
         prompt: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
         system: Option<String>,
     },
 
     // GitHub
-    GitHubGetIssue { owner: String, repo: String, number: u32 },
-    GitHubCreateIssue { owner: String, repo: String, title: String, body: String, labels: Vec<String> },
-    GitHubListIssues { owner: String, repo: String, state: IssueState, labels: Vec<String> },
-    GitHubCreatePR { owner: String, repo: String, title: String, body: String, head: String, base: String },
-    GitHubGetPR { owner: String, repo: String, number: u32 },
+    GitHubGetIssue {
+        owner: String,
+        repo: String,
+        number: u32,
+    },
+    GitHubCreateIssue {
+        owner: String,
+        repo: String,
+        title: String,
+        body: String,
+        labels: Vec<String>,
+    },
+    GitHubListIssues {
+        owner: String,
+        repo: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        state: Option<IssueState>,
+        labels: Vec<String>,
+    },
+    GitHubCreatePR {
+        owner: String,
+        repo: String,
+        title: String,
+        body: String,
+        head: String,
+        base: String,
+    },
+    GitHubGetPR {
+        owner: String,
+        repo: String,
+        number: u32,
+    },
 
     // Observability
-    OtelSpan { trace_id: String, span_id: String, name: String, start_ns: u64, end_ns: u64, attributes: HashMap<String, String> },
-    OtelMetric { name: String, value: f64, labels: HashMap<String, String> },
+    OtelSpan {
+        trace_id: String,
+        span_id: String,
+        name: String,
+        start_ns: u64,
+        end_ns: u64,
+        attributes: HashMap<String, String>,
+    },
+    OtelMetric {
+        name: String,
+        value: f64,
+        labels: HashMap<String, String>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
 pub enum ServiceResponse {
     // LLM
+    #[serde(rename = "AnthropicChatResponse")]
     AnthropicChat {
         content: Vec<ContentBlock>,
+        #[serde(rename = "stop_reason")]
         stop_reason: StopReason,
         usage: Usage,
     },
-    OllamaGenerate {
-        response: String,
-        done: bool,
-    },
+    #[serde(rename = "OllamaGenerateResponse")]
+    OllamaGenerate { response: String, done: bool },
 
     // GitHub
-    GitHubIssue { number: u32, title: String, body: String, state: String, labels: Vec<String>, url: String },
+    #[serde(rename = "GitHubIssueResponse")]
+    GitHubIssue {
+        number: u32,
+        title: String,
+        body: String,
+        state: String,
+        labels: Vec<String>,
+        url: String,
+    },
+    #[serde(rename = "GitHubIssuesResponse")]
     GitHubIssues { issues: Vec<GitHubIssueRef> },
-    GitHubPR { number: u32, url: String, state: String },
+    #[serde(rename = "GitHubPRResponse")]
+    GitHubPR {
+        number: u32,
+        url: String,
+        state: String,
+    },
 
     // Observability
+    #[serde(rename = "OtelAckResponse")]
     OtelAck,
 
     // Error
+    #[serde(rename = "ErrorResponse")]
     Error { code: i32, message: String },
 }
 

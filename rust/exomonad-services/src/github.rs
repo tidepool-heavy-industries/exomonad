@@ -33,6 +33,20 @@ impl GitHubService {
             .expect("Failed to build Octocrab client");
         Self { client }
     }
+
+    /// Create a new GitHub service from environment variables.
+    ///
+    /// Required: `GITHUB_TOKEN`.
+    /// Optional: `GITHUB_API_URL`.
+    pub fn from_env() -> Result<Self, anyhow::Error> {
+        let token = std::env::var("GITHUB_TOKEN")?;
+        let base_url = std::env::var("GITHUB_API_URL")
+            .ok()
+            .and_then(|s| Url::parse(&s).ok())
+            .unwrap_or_else(|| Url::parse("https://api.github.com").unwrap());
+
+        Ok(Self::with_base_url(token, base_url))
+    }
 }
 
 fn state_to_string(state: octocrab::models::IssueState) -> String {
@@ -110,9 +124,9 @@ impl ExternalService for GitHubService {
                 labels,
             } => {
                 let state = match state {
-                    IssueState::Open => octocrab::params::State::Open,
-                    IssueState::Closed => octocrab::params::State::Closed,
-                    IssueState::All => octocrab::params::State::All,
+                    Some(IssueState::Open) => octocrab::params::State::Open,
+                    Some(IssueState::Closed) => octocrab::params::State::Closed,
+                    Some(IssueState::All) | None => octocrab::params::State::All,
                 };
 
                 let page = self

@@ -84,6 +84,8 @@ runServerMode logger projectDir noTui = do
         , hookPolicy = policy
         , circuitBreakerConfig = cbConfig
         , workflowStore = workflowStore
+        , llmConfig = Nothing
+        , githubConfig = Nothing
         }
 
   -- Initialize tracing and run server

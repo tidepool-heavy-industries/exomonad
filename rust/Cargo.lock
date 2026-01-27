@@ -699,6 +699,7 @@ dependencies = [
 name = "exomonad-services"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "exomonad-shared",
  "octocrab",
@@ -709,6 +710,7 @@ dependencies = [
  "thiserror 2.0.17",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "url",
  "wiremock",
 ]
