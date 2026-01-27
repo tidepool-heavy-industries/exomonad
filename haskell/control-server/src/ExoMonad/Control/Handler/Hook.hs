@@ -27,11 +27,16 @@ import Control.Monad (forM_)
 import Control.Monad.Freer (Eff, Member, runM)
 import Control.Monad.Freer.State (runState)
 import Data.Time.Clock (getCurrentTime)
+import Data.Aeson (Value(..), decode, (.=))
+import qualified Data.Aeson.KeyMap as KeyMap
+import qualified Data.ByteString.Lazy as BL
+import Data.Maybe (fromMaybe)
 import OpenTelemetry.Trace
 import qualified OpenTelemetry.Context.ThreadLocal as Context
 
 import ExoMonad.Control.Protocol hiding (role)
 import ExoMonad.Control.Types (ServerConfig(..))
+import ExoMonad.Control.OpenObserve (shipTranscript)
 import ExoMonad.Control.Hook.Policy (HookDecision(..), evaluatePolicy)
 import ExoMonad.Control.Hook.CircuitBreaker (CircuitBreakerMap, SessionId, withCircuitBreaker, incrementStage)
 import ExoMonad.Control.ExoTools (parseIssueNumber)
@@ -86,6 +91,8 @@ handleHook tracer config input runtime agentRole cbMap = do
       "SessionStart" -> handleSessionStart tracer agentRole input
       "Stop" -> handleStop tracer config input runtime cbMap
       "PreToolUse" -> handlePreToolUse config input
+      "SessionEnd" -> handleTranscriptHook config agentRole input
+      "SubagentStop" -> handleTranscriptHook config agentRole input
       _ -> pure $ hookSuccess $ makeResponse input.hookEventName input
 
   endSpan span Nothing
@@ -95,6 +102,67 @@ handleHook tracer config input runtime agentRole cbMap = do
       recordException span mempty Nothing e
       throwIO e
     Right r -> pure r
+
+-- | Handle transcript hooks (SessionEnd, SubagentStop) by shipping to OpenObserve.
+handleTranscriptHook :: ServerConfig -> Role -> HookInput -> IO ControlResponse
+handleTranscriptHook config role input = do
+  TIO.putStrLn $ "  [HOOK] Handling " <> input.hookEventName <> " transcript shipping..."
+  hFlush stdout
+
+  case config.openObserveConfig of
+    Nothing -> do
+      TIO.putStrLn "  [HOOK] OpenObserve not configured, skipping transcript shipping"
+      hFlush stdout
+    Just ooConfig -> do
+      let path = T.unpack input.transcriptPath
+      if null path
+        then TIO.putStrLn "  [HOOK] No transcript path provided, skipping"
+        else do
+          mEvents <- readJsonl path
+          case mEvents of
+            Nothing -> TIO.putStrLn $ "  [HOOK] Failed to read or parse transcript at " <> T.pack path
+            Just events -> do
+              let enriched = map (enrichEvent role input) events
+              shipTranscript ooConfig enriched
+          hFlush stdout
+
+  pure $ hookSuccess $ makeResponse input.hookEventName input
+
+-- | Helper to read NDJSON (JSONL) file.
+readJsonl :: FilePath -> IO (Maybe [Value])
+readJsonl path = try @SomeException (BL.readFile path) >>= \case
+  Left _ -> pure Nothing
+  Right content -> do
+    let jsonLines = filter (not . BL.null) $ BL.split 10 content -- Split by newline (\n = 10)
+    pure $ decodeAllJsonLines jsonLines
+  where
+    -- Handle CRLF endings by trimming a trailing '\r' (13) if present.
+    stripTrailingCR :: BL.ByteString -> BL.ByteString
+    stripTrailingCR bs
+      | BL.null bs = bs
+      | BL.last bs == 13 = BL.init bs
+      | otherwise = bs
+
+    -- Decode all lines; fail the whole read if any line fails to parse.
+    decodeAllJsonLines :: [BL.ByteString] -> Maybe [Value]
+    decodeAllJsonLines = go []
+      where
+        go acc [] = Just (reverse acc)
+        go acc (l : ls) =
+          case decode (stripTrailingCR l) of
+            Just v  -> go (v : acc) ls
+            Nothing -> Nothing
+
+-- | Helper to enrich transcript event with session metadata.
+enrichEvent :: Role -> HookInput -> Value -> Value
+enrichEvent role input (Object o) = Object $ o 
+  <> KeyMap.fromList 
+     [ "session_id" .= input.sessionId
+     , "agent_role" .= T.pack (show role)
+     , "cwd" .= input.cwd
+     , "hook_event" .= input.hookEventName
+     ]
+enrichEvent _ _ v = v
 
 -- | Handle PreToolUse hook using policy evaluation.
 handlePreToolUse :: ServerConfig -> HookInput -> IO ControlResponse

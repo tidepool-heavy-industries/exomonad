@@ -7,6 +7,7 @@ module ExoMonad.Control.Types
 import Data.Text (Text)
 
 import ExoMonad.Observability.Types (ObservabilityConfig)
+import ExoMonad.Control.OpenObserve (OpenObserveConfig)
 import ExoMonad.Control.Hook.Policy (HookPolicy, defaultPolicy)
 import ExoMonad.Control.RoleConfig (Role(..))
 import ExoMonad.Control.Hook.CircuitBreaker (CircuitBreakerConfig(..))
@@ -24,6 +25,8 @@ data ServerConfig = ServerConfig
     -- ^ Disable TUI sidebar listener (default: False)
   , observabilityConfig :: Maybe ObservabilityConfig
     -- ^ Optional observability configuration (Loki/OTLP)
+  , openObserveConfig :: Maybe OpenObserveConfig
+    -- ^ Optional OpenObserve configuration for transcript shipping
   , hookPolicy :: HookPolicy
     -- ^ Hook evaluation policy
   , circuitBreakerConfig :: CircuitBreakerConfig
@@ -40,6 +43,7 @@ defaultConfig = ServerConfig
   , defaultRole = Dev
   , noTui      = False
   , observabilityConfig = Nothing
+  , openObserveConfig = Nothing
   , hookPolicy = defaultPolicy
   , circuitBreakerConfig = CircuitBreakerConfig 15 5 300
   }

@@ -316,6 +316,14 @@ Human-driven Claude Code sessions augmented with ExoMonad. **Not headless automa
 8. Claude Code proceeds or blocks
 ```
 
+**Transcript Shipping (SessionEnd/SubagentStop):**
+```
+1. Claude session ends or subagent finishes
+2. exomonad hook [session-end|subagent-stop] reads transcript path from stdin
+3. control-server reads JSONL transcript, enriches with metadata (session_id, role, etc.)
+4. POSTs to OpenObserve (claude_sessions stream) in background
+```
+
 **MCP Tool Flow:**
 ```
 Tools: find_callers, show_fields, show_constructors, teach-graph, popup, spawn_agents, exo_status, file_pr, ...
@@ -353,6 +361,26 @@ In `.claude/settings.local.json`:
           {
             "type": "command",
             "command": "exomonad hook pre-tool-use"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "exomonad hook session-end"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "exomonad hook subagent-stop"
           }
         ]
       }

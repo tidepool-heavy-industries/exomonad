@@ -30,6 +30,7 @@ library
         ExoMonad.Control.Server
         ExoMonad.Control.Handler
         ExoMonad.Control.Logging
+        ExoMonad.Control.OpenObserve
         ExoMonad.Control.TUIInterpreter
         ExoMonad.Control.Runtime.Paths
         ExoMonad.Control.Runtime.ProcessCompose

@@ -14,10 +14,11 @@ import Data.Maybe (fromMaybe)
 
 import ExoMonad.Control.Server (runServer)
 import ExoMonad.Control.Types (ServerConfig(..))
+import ExoMonad.Control.OpenObserve (loadOpenObserveConfig)
 import ExoMonad.Control.Hook.Policy (loadHookPolicy)
 import ExoMonad.Control.Hook.CircuitBreaker (loadCircuitBreakerConfig)
 import ExoMonad.Control.Logging (Logger, withDualLogger, logInfo, logError)
-import ExoMonad.Control.Observability (withTracerProvider, getTracer, TracingConfig(..))
+import ExoMonad.Control.Observability (withTracerProvider, getTracer, TracingConfig(..) )
 import ExoMonad.Control.RoleConfig (Role(..))
 import ExoMonad.Control.Version (versionString)
 import ExoMonad.Training.Format (formatTrainingFromSkeleton)
@@ -56,6 +57,7 @@ runServerMode logger projectDir noTui = do
     Right c -> pure c
     
   logInfo logger $ "Circuit breaker config loaded: " <> T.pack (show cbConfig)
+  ooConfig <- loadOpenObserveConfig
 
   -- Observability config
   otelEndpoint <- fromMaybe "localhost" <$> lookupEnv "OTEL_EXPORTER_OTLP_ENDPOINT"
@@ -75,6 +77,7 @@ runServerMode logger projectDir noTui = do
         , defaultRole = Dev
         , noTui = noTui
         , observabilityConfig = Nothing
+        , openObserveConfig = ooConfig
         , hookPolicy = policy
         , circuitBreakerConfig = cbConfig
         }

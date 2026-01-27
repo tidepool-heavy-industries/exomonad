@@ -16,6 +16,11 @@ processes:
       - "EXOMONAD_BIN_DIR=${EXOMONAD_BIN_DIR}"
       - "EXOMONAD_CONTROL_SOCKET=.exomonad/sockets/control.sock"
       - "EXOMONAD_TUI_SOCKET=.exomonad/sockets/tui.sock"
+      - "OPENOBSERVE_URL=${OPENOBSERVE_URL}"
+      - "OPENOBSERVE_ORG=${OPENOBSERVE_ORG}"
+      - "OPENOBSERVE_STREAM=${OPENOBSERVE_STREAM}"
+      - "OPENOBSERVE_EMAIL=${OPENOBSERVE_EMAIL}"
+      - "OPENOBSERVE_PASSWORD=${OPENOBSERVE_PASSWORD}"
     readiness_probe:
       exec:
         # Socket existence check (no connection attempt - avoids JSON parse errors)

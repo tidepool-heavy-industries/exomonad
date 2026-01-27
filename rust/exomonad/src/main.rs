@@ -64,7 +64,7 @@ enum Commands {
         runtime: Runtime,
 
         /// The role of the agent (dev, tl, pm)
-        #[arg(long, default_value = "dev")]
+        #[arg(long, env = "EXOMONAD_ROLE", default_value = "dev")]
         role: Role,
     },
 
