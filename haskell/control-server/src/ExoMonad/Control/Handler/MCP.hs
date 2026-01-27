@@ -313,7 +313,7 @@ handleSpawnAgentsTool logger reqId args = do
 
       -- Get binary directory (respects EXOMONAD_BIN_DIR env var, defaults to /usr/local/bin)
       -- In Docker: binaries are at /usr/local/bin
-      -- In local dev: EXOMONAD_BIN_DIR should point to hangar runtime/bin
+      -- In local dev: EXOMONAD_BIN_DIR should point to project runtime/bin
       binDir <- Paths.dockerBinDir
       let dockerCtlPath = Paths.dockerCtlBin binDir
 

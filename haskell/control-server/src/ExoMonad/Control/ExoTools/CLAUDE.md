@@ -36,23 +36,19 @@ Create git worktrees for multiple issues and launch isolated agent sessions in Z
 ┌─────────────────────────────────────────────────────────────────┐
 │ spawn_agents Handler                                            │
 │  1. Validate Zellij environment                                 │
-│  2. Discover Hangar root                                        │
+│  2. Discover ExoMonad repo root                                 │
 │  3. For each issue number:                                      │
 │     a. Fetch issue from GitHub                                  │
 │     b. Create git worktree                                      │
-│     c. Bootstrap .exomonad/ directory                           │
-│     d. Generate process-compose.yaml                            │
-│     e. Write backend config (.claude/ or .gemini/)              │
-│     f. Launch Docker container with env vars via API            │
-│     h. Create Zellij tab to attach to container                 │
+│     c. Launch Docker container with env vars via API            │
+│     d. Create Zellij tab to attach to container                 │
 └─────────────────┬───────────────────────────────────────────────┘
                   │
                   ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│ Hangar Worktrees Structure                                       │
+│ Repo Worktrees Structure                                         │
 │                                                                  │
-│  ~/hangars/exomonad/                                             │
-│    ├── Hangar.toml                                               │
+│  /repo/                                                          │
 │    ├── runtime/bin/                                              │
 │    │   ├── exomonad-control-server                              │
 │    │   ├── exomonad                                          │
@@ -60,9 +56,7 @@ Create git worktrees for multiple issues and launch isolated agent sessions in Z
 │    └── worktrees/                                                │
 │        ├── gh-123-fix-socket-deadlock/                           │
 │        │   ├── .exomonad/logs/                                   │
-│        │   ├── .claude/                                          │
-│        │   │   └── settings.local.json (hooks)                   │
-│        │   └── process-compose.yaml (generated)                  │
+│        │   └── ...                                               │
 │        ├── gh-456-update-spawn-agents-paths/                     │
 │                                                                  │
 │  /tmp/exomonad-123/                                              │
@@ -117,7 +111,7 @@ Create git worktrees for multiple issues and launch isolated agent sessions in Z
 - `tabs`: Successfully launched Zellij tabs (id, tabId)
 - `failed`: Failed operations (id, reason)
 
-**Idempotency:** If a worktree already exists for an issue, it will be reused (no new worktree created, but bootstrap and tab launch still run).
+**Idempotency:** If a worktree already exists for an issue, it will be reused (no new worktree created).
 
 ## How It Works
 
@@ -132,17 +126,16 @@ case mZellijSession of
   Just _ -> proceed
 ```
 
-### 2. Hangar Root Discovery
+### 2. Repo Root Discovery
 
-Finds the hangar root directory for shared binaries:
+Finds the repository root directory for shared binaries:
 
-1. Check `HANGAR_ROOT` environment variable
-2. If not set, walk up from repo root looking for `Hangar.toml`
-3. Falls back to repo root if no hangar found
+1. Check `EXOMONAD_ROOT` environment variable
+2. If not set, use `git rev-parse --show-toplevel`
 
 **Worktree Target Directory:**
-- If hangar found: `<hangar>/worktrees/`
-- If no hangar: `<repo>/.worktrees/exomonad/`
+- `worktrees/` directory within the discovered repo root.
+- Fallback to `/worktrees` in Docker environments.
 
 ### 3. Per-Issue Processing
 
@@ -155,14 +148,14 @@ mIssue <- getIssue repo num False
 
 **Validation checks:**
 - Issue ID contains no path separators (prevent traversal)
-- Binary exists at `<hangar>/runtime/bin/exomonad-control-server`
+- Binary exists at `<root>/runtime/bin/exomonad-control-server`
 - Issue is not closed
 
 #### b. Create Git Worktree
 
 ```haskell
 let branchName = "gh-123/fix-bug"
-    targetPath = "/hangars/exomonad/worktrees/gh-123-fix-bug"
+    targetPath = "/repo/worktrees/gh-123-fix-bug"
     spec = WorktreeSpec
       { wsBaseName = "gh-123"
       , wsFromBranch = Just "origin/main"
@@ -172,36 +165,11 @@ let branchName = "gh-123/fix-bug"
 createWorktree spec
 ```
 
-#### c. Bootstrap .exomonad/ Directory
-
-Creates runtime directory structure:
-
-**Socket Directory** (in `/tmp` to avoid path length limits):
-```
-/tmp/exomonad-123/
-  ├── control.sock
-  └── tui.sock
-```
-
-**Logs Directory** (in worktree):
-```
-<worktree>/.exomonad/logs/
-  └── process-compose.log
-```
-
-#### d. Generate process-compose.yaml
-
-**Type-safe generation** from Haskell types (no templates).
-
-#### e. Write Backend Configuration
-
-Writes `.claude/settings.local.json` or `.gemini/settings.json` with appropriate hooks.
-
-#### f. Launch Docker Container
+#### c. Launch Docker Container
 
 Spawns a Docker container via `docker-ctl spawn`, passing environment variables directly through the Docker API.
 
-#### g. Create Zellij Tab
+#### d. Create Zellij Tab
 
 Creates a Zellij tab that attaches to the spawned container.
 
@@ -219,15 +187,14 @@ Creates a Zellij tab that attaches to the spawned container.
 
 ### "Binary missing: /path/to/exomonad-control-server"
 
-**Cause:** Pre-built binaries don't exist in hangar.
+**Cause:** Pre-built binaries don't exist in the project root.
 
-**Fix:** Build binaries in `runtime/exomonad` and copy to `runtime/bin/`.
+**Fix:** Build binaries and ensure they are available in `runtime/bin/`.
 
 ### Worktree Reuse (Idempotency)
 
 `spawn_agents` is idempotent: if a worktree already exists for an issue, it will be reused instead of creating a new one. The tool will:
 1. Skip worktree creation
-2. Re-run bootstrap (updates configs if needed)
-3. Launch a new Zellij tab/Docker container for the existing worktree
+2. Launch a new Zellij tab/Docker container for the existing worktree
 
-This allows re-spawning agents after a tab was closed without manually cleaning up.
+This allows re-spawning agents after a tab was closed without manually cleaning up the worktree.

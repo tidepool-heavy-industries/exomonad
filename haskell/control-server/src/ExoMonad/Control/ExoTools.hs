@@ -23,7 +23,7 @@ module ExoMonad.Control.ExoTools
   , cleanupAgentsLogic
   , CleanupAgentsArgs(..)
   , CleanupAgentsResult(..)
-  , findHangarRoot
+  , findRepoRoot
 
     -- * File PR
   , FilePRGraph(..)

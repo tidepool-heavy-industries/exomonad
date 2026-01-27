@@ -57,9 +57,9 @@ tuiSocketPath dir = dir </> tuiSocketName
 processComposeSocketPath :: FilePath -> FilePath
 processComposeSocketPath dir = dir </> processComposeSocketName
 
--- | Canonical bin directory within a hangar.
+-- | Canonical bin directory within a project.
 runtimeBinDir :: FilePath -> FilePath
-runtimeBinDir hangarRoot = hangarRoot </> "runtime" </> "bin"
+runtimeBinDir projectRoot = projectRoot </> "runtime" </> "bin"
 
 -- | Path to the control server binary.
 controlServerBin :: FilePath -> FilePath

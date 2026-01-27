@@ -1,5 +1,5 @@
 {
-  description = "ExoMonad Hangar - Development environment for ExoMonad LLM agent framework";
+  description = "ExoMonad - Development environment for ExoMonad LLM agent framework";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -69,11 +69,10 @@
             shellHook = ''
               export PKG_CONFIG_PATH="${pkgs.zlib.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
               export NIX_GHC_LIBDIR="$(ghc --print-libdir)"
-              export HANGAR_ROOT="$PWD"
-              export EXOMONAD_REPO="$PWD/repo"
+              export EXOMONAD_ROOT="$PWD"
 
               echo "╔═══════════════════════════════════════════════════════════╗"
-              echo "║           ExoMonad Hangar Development Shell               ║"
+              echo "║              ExoMonad Development Shell                   ║"
               echo "╚═══════════════════════════════════════════════════════════╝"
               echo ""
               echo "  GHC:      $(ghc --numeric-version)"
@@ -83,13 +82,11 @@
               echo "  pnpm:     $(pnpm --version)"
               echo ""
               echo "Paths:"
-              echo "  HANGAR_ROOT:   $HANGAR_ROOT"
-              echo "  EXOMONAD_REPO: $EXOMONAD_REPO"
+              echo "  EXOMONAD_ROOT: $EXOMONAD_ROOT"
               echo ""
               echo "Commands:"
-              echo "  cd repo && cabal build all      Build Haskell packages"
-              echo "  cd repo && just native          Run native server"
-              echo "  cd repo && ./start-augmented.sh Start Claude Code++ session"
+              echo "  cabal build all      Build Haskell packages"
+              echo "  ./start-augmented.sh Start Claude Code++ session"
               echo ""
               echo "Other shells:"
               echo "  nix develop .#worker            Cloudflare Worker dev"

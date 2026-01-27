@@ -1,11 +1,11 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE DataKinds #}
+{-# LANGUAGE DeriveGeneric #}
+{-# LANGUAGE DerivingStrategies #}
+{-# LANGUAGE FlexibleContexts #}
+{-# LANGUAGE OverloadedRecordDot #}
+{-# LANGUAGE OverloadedStrings #}
+{-# LANGUAGE TypeFamilies #}
+{-# LANGUAGE TypeOperators #}
 
 module ExoMonad.Control.ExoTools.SpawnAgents
   ( SpawnAgentsGraph(..)
@@ -18,7 +18,7 @@ module ExoMonad.Control.ExoTools.SpawnAgents
   , cleanupAgentsLogic
   , CleanupAgentsArgs(..)
   , CleanupAgentsResult(..)
-  , findHangarRoot
+  , findRepoRoot
   )
 where
 
@@ -30,7 +30,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
-import System.FilePath ((</>), takeDirectory)
+import System.FilePath ((</>))
 
 import ExoMonad.Effects.GitHub (GitHub, Issue(..), IssueState(..), Repo(..), getIssue)
 import ExoMonad.Effects.DockerSpawner (DockerSpawner, SpawnConfig(..), spawnContainer, ContainerId(..), stopContainer, execContainer, ExecResult(..))
@@ -52,31 +52,19 @@ import ExoMonad.Control.ExoTools.Internal (slugify)
 import ExoMonad.Control.ExoTools.SpawnCleanup (SpawnCleanup, SpawnProgress(..), runSpawnCleanup, acquireWorktree, acquireContainer, emitProgress, cleanupAll)
 import ExoMonad.Control.Runtime.Paths as Paths
 
--- | Find the hangar root by checking ENV or walking up from repo root.
-findHangarRoot
-  :: (Member Env es, Member FileSystem es, Member Git es)
+-- | Find the repository root by checking ENV or using Git.
+findRepoRoot
+  :: (Member Env es, Member Git es)
   => Eff es (Maybe FilePath)
-findHangarRoot = do
-  -- 1. Check HANGAR_ROOT environment variable
-  mEnv <- getEnv "HANGAR_ROOT"
+findRepoRoot = do
+  -- 1. Check EXOMONAD_ROOT environment variable
+  mEnv <- getEnv "EXOMONAD_ROOT"
   case mEnv of
     Just path -> pure $ Just (T.unpack path)
     Nothing -> do
-      -- 2. Walk up from current repo root
+      -- 2. Use Git to find top level
       mWtInfo <- getWorktreeInfo
-      case mWtInfo of
-        Nothing -> pure Nothing
-        Just wi -> walkUp wi.wiRepoRoot
-  where
-    walkUp path = do
-      res <- fileExists (path </> "Hangar.toml")
-      case res of
-        Right True -> pure $ Just path
-        _ ->
-          let parent = takeDirectory path
-          in if parent == path
-             then pure Nothing
-             else walkUp parent
+      pure $ fmap (\wi -> wi.wiRepoRoot) mWtInfo
 
 -- | Arguments for spawn_agents tool.
 data SpawnAgentsArgs = SpawnAgentsArgs
@@ -96,8 +84,10 @@ instance HasJSONSchema SpawnAgentsArgs where
 instance FromJSON SpawnAgentsArgs where
   parseJSON = withObject "SpawnAgentsArgs" $ \v ->
     SpawnAgentsArgs
-      <$> v .: "issue_numbers"
-      <*> v .:? "backend"
+      <*>
+      v .: "issue_numbers"
+      <*>
+      v .:? "backend"
 
 instance ToJSON SpawnAgentsArgs where
   toJSON args = object
@@ -118,9 +108,12 @@ data SpawnAgentsResult = SpawnAgentsResult
 instance FromJSON SpawnAgentsResult where
   parseJSON = withObject "SpawnAgentsResult" $ \v ->
     SpawnAgentsResult
-      <$> v .: "worktrees"
-      <*> v .: "tabs"
-      <*> v .: "failed"
+      <*>
+      v .: "worktrees"
+      <*>
+      v .: "tabs"
+      <*>
+      v .: "failed"
 
 instance ToJSON SpawnAgentsResult where
   toJSON res = object
@@ -148,8 +141,10 @@ instance HasJSONSchema CleanupAgentsArgs where
 instance FromJSON CleanupAgentsArgs where
   parseJSON = withObject "CleanupAgentsArgs" $ \v ->
     CleanupAgentsArgs
-      <$> v .: "issue_numbers"
-      <*> v .:? "force"
+      <*>
+      v .: "issue_numbers"
+      <*>
+      v .:? "force"
 
 instance ToJSON CleanupAgentsArgs where
   toJSON args = object
@@ -169,8 +164,10 @@ data CleanupAgentsResult = CleanupAgentsResult
 instance FromJSON CleanupAgentsResult where
   parseJSON = withObject "CleanupAgentsResult" $ \v ->
     CleanupAgentsResult
-      <$> v .: "cleaned"
-      <*> v .: "failed"
+      <*>
+      v .: "cleaned"
+      <*>
+      v .: "failed"
 
 instance ToJSON CleanupAgentsResult where
   toJSON res = object
@@ -207,7 +204,8 @@ data SpawnAgentsGraph mode = SpawnAgentsGraph
 
 -- | Graph definition for cleanup_agents tool.
 data CleanupAgentsGraph mode = CleanupAgentsGraph
-  { caEntry :: mode :- EntryNode CleanupAgentsArgs
+  {
+    caEntry :: mode :- EntryNode CleanupAgentsArgs
       :@ MCPExport
       :@ MCPToolDef '("cleanup_agents", "Stop containers and remove worktrees for specified issue numbers.")
       :@ MCPRoleHint 'TL
@@ -233,7 +231,7 @@ spawnAgentsHandlers = SpawnAgentsGraph
 
 -- | Handlers for cleanup_agents graph.
 cleanupAgentsHandlers
-  :: (Member Worktree es, Member DockerSpawner es, Member Log es)
+  :: (Member Git es, Member Worktree es, Member DockerSpawner es, Member Log es)
   => CleanupAgentsGraph (AsHandler es)
 cleanupAgentsHandlers = CleanupAgentsGraph
   {
@@ -259,16 +257,15 @@ spawnAgentsLogic args = do
       }
     Just _ -> do
       logInfo $ "Starting spawn_agents for issues: " <> T.intercalate ", " args.saaIssueNumbers
-      -- 2. Determine Hangar Root and Worktree Base Path
+      -- 2. Determine Repo Root and Worktree Base Path
       spawnModeEnv <- getEnv "SPAWN_MODE"
       let spawnMode = parseSpawnMode spawnModeEnv
-      mHangarRoot <- findHangarRoot
-      mWtInfo <- getWorktreeInfo
-      let repoRoot = maybe "." (\wi -> wi.wiRepoRoot) mWtInfo
+      mRepoRoot <- findRepoRoot
+      let repoRoot = fromMaybe "." mRepoRoot
       
       -- Target directory discovery
-      wtBaseDir <- case (spawnMode, mHangarRoot) of
-        (SpawnZellij, Just hr) -> pure $ hr </> "worktrees"
+      wtBaseDir <- case (spawnMode, mRepoRoot) of
+        (SpawnZellij, Just rr) -> pure $ rr </> "worktrees"
         (SpawnZellij, Nothing) -> pure $ repoRoot </> ".worktrees" </> "exomonad"
         _ -> do
           -- Docker mode: prefer EXOMONAD_WORKTREES_PATH
@@ -289,7 +286,7 @@ spawnAgentsLogic args = do
         else do
           -- 4. Process each issue
           results <- forM args.saaIssueNumbers $ \shortId -> do
-            (res, _orphans) <- runSpawnCleanup $ processIssue spawnMode mHangarRoot repoRoot wtBaseDir backendRaw shortId
+            (res, _orphans) <- runSpawnCleanup $ processIssue spawnMode repoRoot wtBaseDir backendRaw shortId
             pure res
 
           -- Partition results
@@ -309,13 +306,12 @@ spawnAgentsLogic args = do
 processIssue
   :: (Member GitHub es, Member Worktree es, Member FileSystem es, Member Zellij es, Member Env es, Member DockerSpawner es, Member Log es, Member SpawnCleanup es)
   => SpawnMode                                         -- ^ Spawn mode (Zellij or Docker)
-  -> Maybe FilePath                                    -- ^ Hangar root (for templates)
-  -> FilePath                                          -- ^ Repo root (for symlinks/templates)
+  -> FilePath                                          -- ^ Repo root
   -> FilePath                                          -- ^ Worktree base directory
   -> Text                                              -- ^ Backend ("claude" or "gemini")
   -> Text                                              -- ^ Issue number as text
   -> Eff es (Either (Text, Text) (Text, FilePath, TabId))  -- ^ Left (id, error) or Right (id, path, tabId)
-processIssue spawnMode mHangarRoot repoRoot wtBaseDir backend shortId = do
+processIssue spawnMode repoRoot wtBaseDir backend shortId = do
   emitProgress $ SpawnStarted shortId 4 -- Steps: Worktree, Container, HealthCheck, Tab
   -- Validate shortId (prevent path traversal)
   if T.any (\c -> c == '/' || c == '\\') shortId
@@ -324,8 +320,7 @@ processIssue spawnMode mHangarRoot repoRoot wtBaseDir backend shortId = do
       emitProgress $ SpawnFailed shortId err
       pure $ Left (shortId, err)
     else do
-      let hr = fromMaybe repoRoot mHangarRoot
-          issueNum = case (reads (T.unpack shortId) :: [(Int, String)]) of
+      let issueNum = case (reads (T.unpack shortId) :: [(Int, String)]) of
             [(n, "")] -> Just n
             _ -> Nothing
 
@@ -338,7 +333,7 @@ processIssue spawnMode mHangarRoot repoRoot wtBaseDir backend shortId = do
           -- Determine binary directory based on mode
           mBinDirEnv <- getEnv "EXOMONAD_BIN_DIR"
           let binDir = case (spawnMode, mBinDirEnv) of
-                (SpawnZellij, _) -> Paths.runtimeBinDir hr
+                (SpawnZellij, _) -> Paths.runtimeBinDir repoRoot
                 (_, Just bd)  -> T.unpack bd
                 _             -> "/usr/local/bin"
 
@@ -442,7 +437,8 @@ processIssue spawnMode mHangarRoot repoRoot wtBaseDir backend shortId = do
                             SpawnZellij -> do
                               logInfo $ "[" <> shortId <> "] Launching Zellij tab"
                               let tabConfig = TabConfig
-                                    { tcName = shortId
+                                    {
+                                      tcName = shortId
                                     , tcLayout = repoRoot </> ".zellij" </> "worktree.kdl"
                                     , tcCwd = path
                                     , tcEnv = envVars
@@ -463,7 +459,8 @@ processIssue spawnMode mHangarRoot repoRoot wtBaseDir backend shortId = do
                             SpawnDocker -> do
                               logInfo $ "[" <> shortId <> "] Spawning Docker container"
                               let config = SpawnConfig
-                                    { scIssueId = shortId
+                                    {
+                                      scIssueId = shortId
                                     , scWorktreePath = path
                                     , scBackend = backend
                                     , scUid = Nothing
@@ -499,7 +496,8 @@ processIssue spawnMode mHangarRoot repoRoot wtBaseDir backend shortId = do
                                           logInfo $ "[" <> shortId <> "] Health check passed"
                                           let attachCmd = "docker attach " <> containerId.unContainerId
                                               tabConfig = TabConfig
-                                                { tcName = shortId
+                                                {
+                                                  tcName = shortId
                                                 , tcLayout = ""
                                                 , tcCwd = path
                                                 , tcEnv = envVars
@@ -531,7 +529,7 @@ processIssue spawnMode mHangarRoot repoRoot wtBaseDir backend shortId = do
 
 -- | Logic for cleanup_agents.
 cleanupAgentsLogic
-  :: (Member Worktree es, Member DockerSpawner es, Member Log es)
+  :: (Member Git es, Member Worktree es, Member DockerSpawner es, Member Log es)
   => CleanupAgentsArgs
   -> Eff es (GotoChoice '[To Exit CleanupAgentsResult])
 cleanupAgentsLogic args = do
@@ -546,7 +544,8 @@ cleanupAgentsLogic args = do
           failed = [(shortId, msg) | shortId <- args.caaIssueNumbers]
       logError msg
       pure $ gotoExit $ CleanupAgentsResult
-        { carCleaned = []
+        {
+          carCleaned = []
         , carFailed = failed
         }
     Right allWorktrees -> do

@@ -13,13 +13,7 @@ echo "Preparing build contexts in $REPO_ROOT..."
 mkdir -p docker/orchestrator/bin
 mkdir -p docker/claude-agent/bin
 
-# Find hangar root
-HANGAR_ROOT="$REPO_ROOT"
-while [ ! -f "$HANGAR_ROOT/Hangar.toml" ] && [ "$HANGAR_ROOT" != "/" ] && [ "$HANGAR_ROOT" != "$HOME" ]; do
-    HANGAR_ROOT=$(dirname "$HANGAR_ROOT")
-done
-
-RUNTIME_BIN="$HANGAR_ROOT/runtime/bin"
+RUNTIME_BIN="$REPO_ROOT/runtime/bin"
 
 if [ ! -d "$RUNTIME_BIN" ]; then
     echo "ERROR: Runtime binaries not found at $RUNTIME_BIN"

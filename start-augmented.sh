@@ -70,27 +70,23 @@ for sock in .exomonad/sockets/*.sock; do
 done
 shopt -u nullglob
 
-# Discover Hangar by walking up from current directory
-HANGAR_ROOT=$(pwd)
-while [ ! -f "$HANGAR_ROOT/Hangar.toml" ] && [ "$HANGAR_ROOT" != "/" ] && [ "$HANGAR_ROOT" != "$HOME" ]; do
-    HANGAR_ROOT=$(dirname "$HANGAR_ROOT")
+# Discover repo root by walking up from current directory
+EXOMONAD_ROOT=$(pwd)
+while [ ! -d "$EXOMONAD_ROOT/.git" ] && [ "$EXOMONAD_ROOT" != "/" ] && [ "$EXOMONAD_ROOT" != "$HOME" ]; do
+    EXOMONAD_ROOT=$(dirname "$EXOMONAD_ROOT")
 done
 
-if [ ! -f "$HANGAR_ROOT/Hangar.toml" ]; then
-    echo "ERROR: Hangar.toml not found (searched up from $(pwd))"
-    exit 1
-fi
+echo "📦 Discovered ExoMonad root at: $EXOMONAD_ROOT"
 
-echo "📦 Discovered Hangar at: $HANGAR_ROOT"
+# Export EXOMONAD_ROOT for control-server and subagents
+export EXOMONAD_ROOT
 
-# Export HANGAR_ROOT for control-server and subagents
-export HANGAR_ROOT
-
-# Add all Hangar binaries (including exomonad) to PATH for Claude and related tools
-export PATH="$HANGAR_ROOT/runtime/bin:$PATH"
+# Add all binaries to PATH for Claude and related tools
+# Support both runtime/bin (legacy) and local builds if needed
+export PATH="$EXOMONAD_ROOT/runtime/bin:$PATH"
 
 # Export EXOMONAD_BIN_DIR for SessionStart hooks in settings.json
-export EXOMONAD_BIN_DIR="$HANGAR_ROOT/runtime/bin"
+export EXOMONAD_BIN_DIR="$EXOMONAD_ROOT/runtime/bin"
 
 # Check dependencies
 if ! command -v process-compose &> /dev/null; then

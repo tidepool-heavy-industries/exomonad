@@ -51,13 +51,12 @@ The `spawn_agents` tool automates the creation of isolated worktrees for paralle
 
 ### Template Resolution
 The tool (`SpawnAgents.hs`) resolves the `process-compose.yaml` template for new worktrees using the following priority:
-1. **Hangar Root**: `$HANGAR_ROOT/templates/subagent-pc.yaml` (Preferred)
-2. **Repo Fallback**: `<repo_root>/.exomonad/templates/subagent-pc.yaml`
+1. **Repo Root**: `<repo_root>/.exomonad/templates/subagent-pc.yaml`
 
 ### Process Compose Configuration
 The template (`subagent-pc.yaml`) is critical for bootstrapping the subagent environment.
 - **Log Location**: Must be set to `.exomonad/logs` (directory), not a specific file, to allow `process-compose` to manage log rotation and avoid "No such file" errors.
-- **Binary Discovery**: Uses an inline shell script to walk up and find `Hangar.toml`, then resolves binaries from `$HANGAR_ROOT/runtime/bin`. This ensures robustness against PATH variations in subagent shells.
+- **Binary Discovery**: Uses `EXOMONAD_ROOT` (or repo root) to resolve binaries from `<root>/runtime/bin`. This ensures robustness against PATH variations in subagent shells.
 - **Sockets**: Explicitly manages `.exomonad/sockets/control.sock` and `.exomonad/sockets/tui.sock` via environment variables and cleanup scripts.
 
 ### Subagent Hardening
@@ -85,7 +84,7 @@ The `spawn_agents` tool includes several safety checks to prevent common failure
 1.  **Template Validation**: Fails fast if the `subagent-pc.yaml` template is missing.
 2.  **Binary Check**: Verifies `exomonad-control-server` exists in the runtime path before creating a worktree.
 3.  **Path Traversal**: Rejects bead IDs containing `/` or `..` to prevent arbitrary file system writes.
-4.  **Env Var Validation**: Ensures critical environment variables (like `HANGAR_ROOT`) are not empty before spawning the agent.
+4.  **Env Var Validation**: Ensures critical environment variables (like `EXOMONAD_ROOT`) are not empty before spawning the agent.
 
 
 ## Architectural Pillars of ExoMonad Idiomatic Haskell
