@@ -71,6 +71,7 @@ import ExoMonad.Effects.Observability
 import ExoMonad.Effects.SocketClient
   ( SocketConfig(..)
   , ServiceRequest(..)
+  , ServiceResponse(..)
   , sendRequest
   )
 import ExoMonad.Effect.Types (LLM(..), TurnOutcome(..))
@@ -291,10 +292,10 @@ runObservabilityWithConfig ctx config = interpret $ \case
         Just err -> putStrLn $ "[Observability] " <> T.unpack err
         Nothing  -> pure ()
     ObservabilityOtelConfig Nothing _ _ -> pure () -- Logs disabled
-    ObservabilitySocketConfig path -> do
+    ObservabilitySocketConfig _path -> do
       -- TODO: Define socket protocol for logs if needed.
       -- For now we just ignore or log locally.
-      putStrLn $ "[Observability] Socket logging not yet implemented: " <> path
+      pure ()
 
   StartSpan name kind attrs -> sendM $ do
     spanId <- generateSpanId
@@ -341,7 +342,11 @@ runObservabilityWithConfig ctx config = interpret $ \case
           
           ObservabilitySocketConfig path -> do
             let serviceReq = OtelSpan (unTraceId traceId) (unSpanId activeSpan.asSpanId) activeSpan.asName
-            void $ sendRequest (SocketConfig path 10000) serviceReq
+            result <- sendRequest (SocketConfig path 10000) serviceReq
+            case result of
+              Left _ -> putStrLn "[Observability] Failed to ship span via socket"
+              Right (ErrorResponse _ msg) -> putStrLn $ "[Observability] Error shipping span via socket: " <> T.unpack msg
+              Right _ -> pure ()
 
           _ -> pure ()
 

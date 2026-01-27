@@ -64,6 +64,7 @@ import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
 import System.Timeout (timeout)
 import Data.Time.Clock (getCurrentTime, addUTCTime)
+import System.Directory (doesFileExist)
 
 import ExoMonad.Effects.GitHub
   ( GitHub(..)
@@ -175,53 +176,60 @@ runGitHubIO config = interpret $ \case
   -- Auth
   CheckAuth -> case config of
     GitHubCliConfig{} -> sendM $ ghAuthCheck
-    GitHubSocketConfig{} -> sendM $ pure True -- Assume authenticated if using socket
+    GitHubSocketConfig path -> sendM $ socketCheckAuth path
 
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SOCKET FUNCTIONS
 -- ════════════════════════════════════════════════════════════════════════════
 
+socketCheckAuth :: FilePath -> IO Bool
+socketCheckAuth path = doesFileExist path
+
 socketGetIssue :: FilePath -> Text -> Int -> Bool -> IO (Either GitHubError (Maybe Issue))
 socketGetIssue path repo num _includeComments = do
-  let (owner, repoName) = parseRepo repo
-  let req = GitHubGetIssue owner repoName num
-  result <- sendRequest (SocketConfig path 10000) req
-  case result of
-    Right (GitHubIssueResponse n t b) -> 
-      pure $ Right $ Just $ Issue
-        { issueNumber = n
-        , issueTitle = t
-        , issueBody = b
-        , issueAuthor = Author "unknown" Nothing
-        , issueLabels = []
-        , issueState = IssueOpen
-        , issueUrl = ""
-        , issueComments = []
-        }
-    Right (ErrorResponse 404 _) -> pure $ Right Nothing
-    Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
-    Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubGetIssue"
-    Left err -> pure $ Left $ socketErrorToGitHubError err
+  case parseRepo repo of
+    Left err -> pure $ Left err
+    Right (owner, repoName) -> do
+      let req = GitHubGetIssue owner repoName num
+      result <- sendRequest (SocketConfig path 10000) req
+      case result of
+        Right (GitHubIssueResponse n t b) -> 
+          pure $ Right $ Just $ Issue
+            { issueNumber = n
+            , issueTitle = t
+            , issueBody = b
+            , issueAuthor = Author "unknown" Nothing
+            , issueLabels = []
+            , issueState = IssueOpen
+            , issueUrl = ""
+            , issueComments = []
+            }
+        Right (ErrorResponse 404 _) -> pure $ Right Nothing
+        Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
+        Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubGetIssue"
+        Left err -> pure $ Left $ socketErrorToGitHubError err
 
 socketListIssues :: FilePath -> Text -> IssueFilter -> IO (Either GitHubError [Issue])
 socketListIssues path repo filt = do
-  let (owner, repoName) = parseRepo repo
-  let req = GitHubListIssues owner repoName (stateToText <$> filt.ifState) filt.ifLabels
-  result <- sendRequest (SocketConfig path 10000) req
-  case result of
-    Right (GitHubIssuesResponse issues) ->
-      case fromJSON (toJSON issues) of
-        Aeson.Success is -> pure $ Right is
-        err -> pure $ Left $ GHParseError $ T.pack $ "Failed to parse issues: " <> show err
-    Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
-    Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubListIssues"
-    Left err -> pure $ Left $ socketErrorToGitHubError err
+  case parseRepo repo of
+    Left err -> pure $ Left err
+    Right (owner, repoName) -> do
+      let req = GitHubListIssues owner repoName (stateToText <$> filt.ifState) filt.ifLabels
+      result <- sendRequest (SocketConfig path 10000) req
+      case result of
+        Right (GitHubIssuesResponse issues) ->
+          case fromJSON (toJSON issues) of
+            Aeson.Success is -> pure $ Right is
+            err -> pure $ Left $ GHParseError $ T.pack $ "Failed to parse issues: " <> show err
+        Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
+        Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubListIssues"
+        Left err -> pure $ Left $ socketErrorToGitHubError err
 
-parseRepo :: Text -> (Text, Text)
+parseRepo :: Text -> Either GitHubError (Text, Text)
 parseRepo repo = case T.splitOn "/" repo of
-  [o, r] -> (o, r)
-  _      -> (repo, "")
+  [o, r] | not (T.null o) && not (T.null r) -> Right (o, r)
+  _ -> Left $ GHParseError ("Invalid repository format (expected owner/repo): " <> repo)
 
 stateToText :: IssueState -> Text
 stateToText IssueOpen = "open"

@@ -64,10 +64,8 @@ runGeminiWithConfig config = interpret $ \case
       result <- sendRequest (SocketConfig path 30000) req
       case result of
         Right (OllamaGenerateResponse resp _done) ->
-          pure GeminiResult
-            { grOutput = Null -- Or parse if it was JSON
-            , grRawResponse = resp
-            }
+          -- Reuse the same JSON parsing logic as the CLI path
+          pure $ parseGeminiOutput (T.unpack resp)
         Right (ErrorResponse _code msg) ->
           pure GeminiResult
             { grOutput = Null

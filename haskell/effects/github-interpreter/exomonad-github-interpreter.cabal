@@ -26,6 +26,7 @@ library
         bytestring >= 0.11 && < 1,
         process >= 1.6 && < 2,
         time >= 1.12 && < 2,
+        directory >= 1.3 && < 2,
         exomonad-core,
         exomonad-socket-client
     hs-source-dirs:   src
