@@ -116,6 +116,7 @@ services:
       - EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
       - EXOMONAD_REPO_URL=${EXOMONAD_REPO_URL:-https://github.com/tidepool-heavy-industries/tidepool.git}
       - EXOMONAD_REPO_BRANCH=${EXOMONAD_REPO_BRANCH:-main}
+      - GH_TOKEN=${GH_TOKEN}
     volumes:
       # Named volume for repo (cloned on first start via entrypoint)
       # Cannot use bind mounts - Docker runs on remote NixOS, not local macOS
@@ -161,6 +162,7 @@ services:
       - EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
       - EXOMONAD_REPO_URL=${EXOMONAD_REPO_URL:-https://github.com/tidepool-heavy-industries/tidepool.git}
       - EXOMONAD_REPO_BRANCH=${EXOMONAD_REPO_BRANCH:-main}
+      - GH_TOKEN=${GH_TOKEN}
     volumes:
       - exomonad-worktrees:/workspace
       - exomonad-sockets:/sockets

@@ -12,6 +12,18 @@ export XDG_RUNTIME_DIR=/run/user/1000
 # Repo volume is owned by root but we run as agent
 git config --global --add safe.directory '*'
 
+# --- Configure git authentication ---
+# Use GH_TOKEN env var if available (preferred), otherwise try gh CLI
+if [ -n "${GH_TOKEN:-}" ]; then
+    echo "Configuring git to use GH_TOKEN..."
+    git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+elif command -v gh &> /dev/null && gh auth status &> /dev/null; then
+    echo "Configuring git to use gh CLI for authentication..."
+    gh auth setup-git
+else
+    echo "Warning: No git authentication configured, operations may fail"
+fi
+
 # --- Initialize repo if empty ---
 # Named volume may be empty on first start; clone the repo
 ROLE="${EXOMONAD_ROLE:-agent}"
