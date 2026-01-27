@@ -54,7 +54,7 @@ main = do
       exitFailure
 
     Just apiKey -> do
-      let config = LLMConfig
+      let config = LLMHttpConfig
             { lcAnthropicSecrets = Just $ defaultAnthropicConfig (ApiKey $ T.pack apiKey)
             , lcOpenAISecrets = Nothing
             }

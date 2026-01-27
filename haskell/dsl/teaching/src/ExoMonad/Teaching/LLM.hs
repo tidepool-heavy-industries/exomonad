@@ -319,8 +319,7 @@ callHaiku TeachingEnv{..} systemPrompt userText schema = do
 
   -- Create respond tool from schema
   let respondTool = schemaToRespondTool schema
-
-  let llmConfig = LLMConfig
+      llmConfig = LLMHttpConfig
         { lcAnthropicSecrets = Just $ AnthropicSecrets
             { asApiKey = ApiKey apiKey
             , asBaseUrl = BaseUrl "https://api.anthropic.com"

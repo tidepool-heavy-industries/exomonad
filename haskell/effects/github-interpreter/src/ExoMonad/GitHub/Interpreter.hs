@@ -44,9 +44,18 @@ module ExoMonad.GitHub.Interpreter
 import Control.Exception (try, SomeException)
 import Control.Monad (unless)
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
-import Data.Aeson (eitherDecode, FromJSON(..), withObject, (.:), (.:?), Value(..))
+import Data.Aeson (eitherDecode, FromJSON(..), withObject, (.:), (.:?), Value(..), toJSON, fromJSON)
+import Data.Aeson qualified as Aeson
 import Data.Aeson.Types (Parser)
 import Data.ByteString.Lazy qualified as LBS
+
+import ExoMonad.Effects.SocketClient
+  ( SocketConfig(..)
+  , ServiceRequest(..)
+  , ServiceResponse(..)
+  , ServiceError(..)
+  , sendRequest
+  )
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
@@ -55,7 +64,7 @@ import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
 import System.Timeout (timeout)
 import Data.Time.Clock (getCurrentTime, addUTCTime)
-import Text.Read (readMaybe)
+import System.Directory (doesFileExist)
 
 import ExoMonad.Effects.GitHub
   ( GitHub(..)
@@ -73,6 +82,7 @@ import ExoMonad.Effects.GitHub
   , ReviewState(..)
   , CreateIssueInput(..)
   , UpdateIssueInput(..)
+  , Author(..)
   )
 
 
@@ -81,15 +91,19 @@ import ExoMonad.Effects.GitHub
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Configuration for GitHub interpreter.
-data GitHubConfig = GitHubConfig
-  { ghcQuiet :: Bool
-    -- ^ Suppress stderr warnings from gh CLI.
-  }
+data GitHubConfig
+  = GitHubCliConfig
+      { ghcQuiet :: Bool
+        -- ^ Suppress stderr warnings from gh CLI.
+      }
+  | GitHubSocketConfig
+      { ghcSocketPath :: FilePath
+      }
   deriving (Show, Eq)
 
--- | Default configuration (suppress warnings).
+-- | Default configuration (CLI mode, suppress warnings).
 defaultGitHubConfig :: GitHubConfig
-defaultGitHubConfig = GitHubConfig
+defaultGitHubConfig = GitHubCliConfig
   { ghcQuiet = True
   }
 
@@ -98,59 +112,134 @@ defaultGitHubConfig = GitHubConfig
 -- INTERPRETER
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Run GitHub effects using the gh CLI.
---
--- This interpreter shells out to the gh command for each operation.
+-- | Run GitHub effects using the gh CLI or socket.
 runGitHubIO :: LastMember IO effs => GitHubConfig -> Eff (GitHub ': effs) a -> Eff effs a
 runGitHubIO config = interpret $ \case
   -- Issue operations
-  CreateIssue input ->
-    sendM $ ghIssueCreate config input
+  CreateIssue input -> case config of
+    GitHubCliConfig{} -> sendM $ ghIssueCreate config input
+    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for CreateIssue"
 
-  UpdateIssue (Repo repo) num input ->
-    sendM $ ghIssueEdit config repo num input
+  UpdateIssue (Repo repo) num input -> case config of
+    GitHubCliConfig{} -> sendM $ ghIssueEdit config repo num input
+    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for UpdateIssue"
 
-  CloseIssue (Repo repo) num ->
-    sendM $ ghIssueClose config repo num
+  CloseIssue (Repo repo) num -> case config of
+    GitHubCliConfig{} -> sendM $ ghIssueClose config repo num
+    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for CloseIssue"
 
-  ReopenIssue (Repo repo) num ->
-    sendM $ ghIssueReopen config repo num
+  ReopenIssue (Repo repo) num -> case config of
+    GitHubCliConfig{} -> sendM $ ghIssueReopen config repo num
+    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for ReopenIssue"
 
-  AddIssueLabel (Repo repo) num label ->
-    sendM $ ghIssueLabelAdd config repo num label
+  AddIssueLabel (Repo repo) num label -> case config of
+    GitHubCliConfig{} -> sendM $ ghIssueLabelAdd config repo num label
+    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for AddIssueLabel"
 
-  RemoveIssueLabel (Repo repo) num label ->
-    sendM $ ghIssueLabelRemove config repo num label
+  RemoveIssueLabel (Repo repo) num label -> case config of
+    GitHubCliConfig{} -> sendM $ ghIssueLabelRemove config repo num label
+    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for RemoveIssueLabel"
 
-  AddIssueAssignee (Repo repo) num assignee ->
-    sendM $ ghIssueAssigneeAdd config repo num assignee
+  AddIssueAssignee (Repo repo) num assignee -> case config of
+    GitHubCliConfig{} -> sendM $ ghIssueAssigneeAdd config repo num assignee
+    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for AddIssueAssignee"
 
-  RemoveIssueAssignee (Repo repo) num assignee ->
-    sendM $ ghIssueAssigneeRemove config repo num assignee
+  RemoveIssueAssignee (Repo repo) num assignee -> case config of
+    GitHubCliConfig{} -> sendM $ ghIssueAssigneeRemove config repo num assignee
+    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for RemoveIssueAssignee"
 
-  GetIssue (Repo repo) num includeComments ->
-    sendM $ ghIssueView config repo num includeComments
+  GetIssue (Repo repo) num includeComments -> case config of
+    GitHubCliConfig{} -> sendM $ ghIssueView config repo num includeComments
+    GitHubSocketConfig path -> sendM $ socketGetIssue path repo num includeComments
 
-  ListIssues (Repo repo) filt ->
-    sendM $ ghIssueList config repo filt
+  ListIssues (Repo repo) filt -> case config of
+    GitHubCliConfig{} -> sendM $ ghIssueList config repo filt
+    GitHubSocketConfig path -> sendM $ socketListIssues path repo filt
 
   -- PR operations
-  CreatePR spec ->
-    sendM $ ghPrCreate config spec
+  CreatePR spec -> case config of
+    GitHubCliConfig{} -> sendM $ ghPrCreate config spec
+    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for CreatePR"
 
-  GetPullRequest (Repo repo) num includeDetails ->
-    sendM $ ghPrView config repo num includeDetails
+  GetPullRequest (Repo repo) num includeDetails -> case config of
+    GitHubCliConfig{} -> sendM $ ghPrView config repo num includeDetails
+    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for GetPullRequest"
 
-  ListPullRequests (Repo repo) filt ->
-    sendM $ ghPrList config repo filt
+  ListPullRequests (Repo repo) filt -> case config of
+    GitHubCliConfig{} -> sendM $ ghPrList config repo filt
+    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for ListPullRequests"
 
-  GetPullRequestReviews (Repo repo) num ->
-    sendM $ ghPrReviews config repo num
+  GetPullRequestReviews (Repo repo) num -> case config of
+    GitHubCliConfig{} -> sendM $ ghPrReviews config repo num
+    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for GetPullRequestReviews"
 
   -- Auth
-  CheckAuth ->
-    sendM $ ghAuthCheck
+  CheckAuth -> case config of
+    GitHubCliConfig{} -> sendM $ ghAuthCheck
+    GitHubSocketConfig path -> sendM $ socketCheckAuth path
 
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- SOCKET FUNCTIONS
+-- ════════════════════════════════════════════════════════════════════════════
+
+socketCheckAuth :: FilePath -> IO Bool
+socketCheckAuth path = doesFileExist path
+
+socketGetIssue :: FilePath -> Text -> Int -> Bool -> IO (Either GitHubError (Maybe Issue))
+socketGetIssue path repo num _includeComments = do
+  case parseRepo repo of
+    Left err -> pure $ Left err
+    Right (owner, repoName) -> do
+      let req = GitHubGetIssue owner repoName num
+      result <- sendRequest (SocketConfig path 10000) req
+      case result of
+        Right (GitHubIssueResponse n t b) -> 
+          pure $ Right $ Just $ Issue
+            { issueNumber = n
+            , issueTitle = t
+            , issueBody = b
+            , issueAuthor = Author "unknown" Nothing
+            , issueLabels = []
+            , issueState = IssueOpen
+            , issueUrl = ""
+            , issueComments = []
+            }
+        Right (ErrorResponse 404 _) -> pure $ Right Nothing
+        Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
+        Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubGetIssue"
+        Left err -> pure $ Left $ socketErrorToGitHubError err
+
+socketListIssues :: FilePath -> Text -> IssueFilter -> IO (Either GitHubError [Issue])
+socketListIssues path repo filt = do
+  case parseRepo repo of
+    Left err -> pure $ Left err
+    Right (owner, repoName) -> do
+      let req = GitHubListIssues owner repoName (stateToText <$> filt.ifState) filt.ifLabels
+      result <- sendRequest (SocketConfig path 10000) req
+      case result of
+        Right (GitHubIssuesResponse issues) ->
+          case fromJSON (toJSON issues) of
+            Aeson.Success is -> pure $ Right is
+            err -> pure $ Left $ GHParseError $ T.pack $ "Failed to parse issues: " <> show err
+        Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
+        Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubListIssues"
+        Left err -> pure $ Left $ socketErrorToGitHubError err
+
+parseRepo :: Text -> Either GitHubError (Text, Text)
+parseRepo repo = case T.splitOn "/" repo of
+  [o, r] | not (T.null o) && not (T.null r) -> Right (o, r)
+  _ -> Left $ GHParseError ("Invalid repository format (expected owner/repo): " <> repo)
+
+stateToText :: IssueState -> Text
+stateToText IssueOpen = "open"
+stateToText IssueClosed = "closed"
+
+socketErrorToGitHubError :: ServiceError -> GitHubError
+socketErrorToGitHubError = \case
+  SocketError msg -> GHNetworkError msg
+  DecodeError msg -> GHParseError (T.pack msg)
+  TimeoutError -> GHTimeout
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CLI FUNCTIONS - ISSUES

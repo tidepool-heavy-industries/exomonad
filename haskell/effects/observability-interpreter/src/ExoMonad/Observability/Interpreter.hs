@@ -25,6 +25,7 @@ module ExoMonad.Observability.Interpreter
   ( -- * Interpreter
     runObservability
   , runObservabilityWithContext
+  , runObservabilityWithConfig
 
     -- * Tracing via Interposition
     -- | Use @interpose@-based tracing to transparently wrap effects without
@@ -54,19 +55,24 @@ module ExoMonad.Observability.Interpreter
 import Control.Exception (try, SomeException)
 import Control.Monad (void, when)
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM, Member, send, interpose)
-import Data.Aeson (encode, object, (.=), Value, toJSON)
+import Data.Aeson (encode, object, (.=), toJSON)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as LBS
 import Data.IORef (readIORef, writeIORef, modifyIORef)
 import Network.HTTP.Req
 import qualified Data.ByteString.Base64 as B64
 
 import ExoMonad.Effects.Observability
-  ( Observability(..), ExoMonadEvent, SpanKind(..), SpanAttribute(..)
+  ( Observability(..), SpanKind(..), SpanAttribute(..)
   , startSpan, endSpan
+  )
+import ExoMonad.Effects.SocketClient
+  ( SocketConfig(..)
+  , ServiceRequest(..)
+  , ServiceResponse(..)
+  , sendRequest
   )
 import ExoMonad.Effect.Types (LLM(..), TurnOutcome(..))
 import ExoMonad.Observability.Types
@@ -106,11 +112,11 @@ parseUrl :: Text -> Either (Url 'Http, Option 'Http) (Url 'Https, Option 'Https)
 parseUrl urlText
   | "https://" `T.isPrefixOf` urlText =
       let host = T.drop 8 urlText  -- Remove "https://"
-          (hostPart, pathPart) = T.break (== '/') host
+          (hostPart, _) = T.break (== '/') host
       in Right (https hostPart, mempty)
   | "http://" `T.isPrefixOf` urlText =
       let host = T.drop 7 urlText  -- Remove "http://"
-          (hostPart, pathPart) = T.break (== '/') host
+          (hostPart, _) = T.break (== '/') host
       in Left (http hostPart, mempty)
   | otherwise =
       -- Default to http for bare hostnames
@@ -248,45 +254,52 @@ flushTraces config serviceName ctx = do
 runObservability :: LastMember IO effs => LokiConfig -> Eff (Observability ': effs) a -> Eff effs a
 runObservability lokiConfig action = do
   ctx <- sendM newTraceContext
-  runObservabilityWithContext ctx lokiConfig action
+  let config = ObservabilityOtelConfig (Just lokiConfig) Nothing "exomonad"
+  runObservabilityWithConfig ctx config action
 
--- | Run Observability effects with explicit trace context.
---
--- This interpreter:
--- 1. Publishes events to Loki with appropriate labels
--- 2. Tracks spans in the trace context
--- 3. Handles errors gracefully (logs but doesn't throw)
---
--- Note: Traces are accumulated but not automatically flushed.
--- Call 'flushTraces' to export completed spans to OTLP.
+-- | Deprecated: Use 'runObservabilityWithConfig' instead.
 runObservabilityWithContext
   :: LastMember IO effs
   => TraceContext
   -> LokiConfig
   -> Eff (Observability ': effs) a
   -> Eff effs a
-runObservabilityWithContext ctx config = interpret $ \case
-  PublishEvent event -> sendM $ do
-    let labels = eventToLabels config.lcJobLabel event
-        line = eventToLine event
+runObservabilityWithContext ctx lokiConfig =
+  runObservabilityWithConfig ctx (ObservabilityOtelConfig (Just lokiConfig) Nothing "exomonad")
 
-    -- Build and send request
-    ts <- nowNanos
-    let stream = LokiStream labels [(ts, line)]
-        pushReq = LokiPushRequest [stream]
-
-    mErr <- pushToLoki config pushReq
-    case mErr of
-      Just err -> putStrLn $ "[Observability] " <> T.unpack err
-      Nothing  -> pure ()
+-- | Run Observability effects with explicit trace context and configuration.
+--
+-- This interpreter:
+-- 1. Publishes events to Loki (HTTP) or Socket
+-- 2. Tracks spans in the trace context
+-- 3. Handles errors gracefully (logs but doesn't throw)
+runObservabilityWithConfig
+  :: LastMember IO effs
+  => TraceContext
+  -> ObservabilityConfig
+  -> Eff (Observability ': effs) a
+  -> Eff effs a
+runObservabilityWithConfig ctx config = interpret $ \case
+  PublishEvent event -> sendM $ case config of
+    ObservabilityOtelConfig (Just loki) _ _ -> do
+      let labels = eventToLabels loki.lcJobLabel event
+          line = eventToLine event
+      ts <- nowNanos
+      let stream = LokiStream labels [(ts, line)]
+          pushReq = LokiPushRequest [stream]
+      mErr <- pushToLoki loki pushReq
+      case mErr of
+        Just err -> putStrLn $ "[Observability] " <> T.unpack err
+        Nothing  -> pure ()
+    ObservabilityOtelConfig Nothing _ _ -> pure () -- Logs disabled
+    ObservabilitySocketConfig _path -> do
+      -- TODO: Define socket protocol for logs if needed.
+      -- For now we just ignore or log locally.
+      pure ()
 
   StartSpan name kind attrs -> sendM $ do
     spanId <- generateSpanId
     startTime <- nowNanosInt
-
-    -- Get parent span ID if any
-    parentSpan <- currentActiveSpan ctx
-
     let activeSpan = ActiveSpan
           { asSpanId = spanId
           , asName = name
@@ -294,48 +307,52 @@ runObservabilityWithContext ctx config = interpret $ \case
           , asStartTime = startTime
           , asAttributes = attrs
           }
-
     pushActiveSpan ctx activeSpan
-    -- Return unwrapped Text since effect interface expects Text
     pure (unSpanId spanId)
 
   EndSpan isError extraAttrs -> sendM $ do
     mSpan <- popActiveSpan ctx
     case mSpan of
-      Nothing -> pure ()  -- No active span, ignore
+      Nothing -> pure ()
       Just activeSpan -> do
         endTime <- nowNanosInt
         traceId <- readIORef ctx.tcTraceId
-
-        -- Get parent span ID (the one now on top of stack)
         parentSpan <- currentActiveSpan ctx
         let parentSpanId = asSpanId <$> parentSpan
 
-        -- Build OTLP span
-        let allAttrs = activeSpan.asAttributes <> extraAttrs
-            attrValues = map toJSON allAttrs
-            status = if isError
-                     then OTLPStatus StatusError (Just "error")
-                     else OTLPStatus StatusOk Nothing
-            otlpSpan = OTLPSpan
-              { ospTraceId = traceId
-              , ospSpanId = activeSpan.asSpanId
-              , ospParentSpanId = parentSpanId
-              , ospName = activeSpan.asName
-              , ospKind = spanKindToInt activeSpan.asKind
-              , ospStartTimeUnixNano = activeSpan.asStartTime
-              , ospEndTimeUnixNano = endTime
-              , ospAttributes = attrValues
-              , ospStatus = status
-              }
+        case config of
+          ObservabilityOtelConfig _ (Just _otlp) _serviceName -> do
+            let allAttrs = activeSpan.asAttributes <> extraAttrs
+                attrValues = map toJSON allAttrs
+                status = if isError
+                         then OTLPStatus StatusError (Just "error")
+                         else OTLPStatus StatusOk Nothing
+                otlpSpan = OTLPSpan
+                  { ospTraceId = traceId
+                  , ospSpanId = activeSpan.asSpanId
+                  , ospParentSpanId = parentSpanId
+                  , ospName = activeSpan.asName
+                  , ospKind = spanKindToInt activeSpan.asKind
+                  , ospStartTimeUnixNano = activeSpan.asStartTime
+                  , ospEndTimeUnixNano = endTime
+                  , ospAttributes = attrValues
+                  , ospStatus = status
+                  }
+            modifyIORef ctx.tcCompletedSpans (otlpSpan :)
+          
+          ObservabilitySocketConfig path -> do
+            let serviceReq = OtelSpan (unTraceId traceId) (unSpanId activeSpan.asSpanId) activeSpan.asName
+            result <- sendRequest (SocketConfig path 10000) serviceReq
+            case result of
+              Left _ -> putStrLn "[Observability] Failed to ship span via socket"
+              Right (ErrorResponse _ msg) -> putStrLn $ "[Observability] Error shipping span via socket: " <> T.unpack msg
+              Right _ -> pure ()
 
-        -- Add to completed spans
-        modifyIORef ctx.tcCompletedSpans (otlpSpan :)
+          _ -> pure ()
 
   AddSpanAttribute attr -> sendM $ do
-    -- Modify the current span's attributes atomically
     modifyIORef ctx.tcSpanStack $ \case
-      [] -> []  -- No active span, ignore
+      [] -> []
       (s:rest) -> s { asAttributes = s.asAttributes <> [attr] } : rest
 
 
@@ -398,7 +415,7 @@ interposeWithLLMTracing
   => Eff es a
   -> Eff es a
 interposeWithLLMTracing = interpose $ \case
-  op@(RunTurnOp _meta systemPrompt userContent schema tools) -> do
+  op@(RunTurnOp _meta systemPrompt _userContent _schema tools) -> do
     -- Start span before LLM call
     _ <- startSpan "llm:turn" SpanClient
       [ AttrText "llm.system_prompt_length" (T.pack $ show $ T.length systemPrompt)
