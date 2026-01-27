@@ -36,7 +36,7 @@ import Data.Aeson (FromJSON(..), ToJSON(..), Value(..))
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
-import ExoMonad.Schema (deriveMCPTypeWith, deriveHasJSONSchema, defaultMCPOptions, (??), MCPOptions(..), HasJSONSchema(..))
+import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(..), HasJSONSchema(..), enumSchema)
 
 -- Re-export training types for consistency
 import ExoMonad.Training.Types
@@ -53,7 +53,8 @@ import ExoMonad.Training.Types
 data Depth = Low | Medium | High
   deriving stock (Show, Eq, Generic, Bounded, Enum)
 
-$(deriveHasJSONSchema ''Depth)
+instance HasJSONSchema Depth where
+  jsonSchema = enumSchema ["low", "medium", "high"]
 
 instance FromJSON Depth where
   parseJSON = \case
