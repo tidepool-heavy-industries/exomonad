@@ -40,6 +40,7 @@ module ExoMonad.Schema
   , deriveUsesEnum
   , deriveMCPType
   , deriveMCPTypeWith
+  , deriveMCPEnum
   , FieldMapping(..)
   , FieldMappingPartial
   , (~>)
@@ -69,6 +70,7 @@ import Language.Haskell.TH
 import ExoMonad.Schema.TH
   ( deriveMCPType
   , deriveMCPTypeWith
+  , deriveMCPEnum
   , FieldMapping(..)
   , FieldMappingPartial
   , (~>)

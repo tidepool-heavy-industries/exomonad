@@ -32,11 +32,11 @@ module ExoMonad.Control.Scout.Types
   , tagToText
   ) where
 
-import Data.Aeson (FromJSON(..), ToJSON(..), Value(..))
+import Data.Aeson (FromJSON(..), ToJSON(..))
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
-import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(..), HasJSONSchema(..), enumSchema)
+import ExoMonad.Schema (deriveMCPTypeWith, deriveMCPEnum, defaultMCPOptions, (??), MCPOptions(..))
 
 -- Re-export training types for consistency
 import ExoMonad.Training.Types
@@ -53,23 +53,7 @@ import ExoMonad.Training.Types
 data Depth = Low | Medium | High
   deriving stock (Show, Eq, Generic, Bounded, Enum)
 
-instance HasJSONSchema Depth where
-  jsonSchema = enumSchema ["low", "medium", "high"]
-
-instance FromJSON Depth where
-  parseJSON = \case
-    String "low"    -> pure Low
-    String "medium" -> pure Medium
-    String "high"   -> pure High
-    String "Low"    -> pure Low
-    String "Medium" -> pure Medium
-    String "High"   -> pure High
-    _               -> pure Medium  -- Default to medium
-
-instance ToJSON Depth where
-  toJSON Low    = String "low"
-  toJSON Medium = String "medium"
-  toJSON High   = String "high"
+$(deriveMCPEnum ''Depth)
 
 -- | Convert semantic depth to concrete budget.
 depthToBudget :: Depth -> Int

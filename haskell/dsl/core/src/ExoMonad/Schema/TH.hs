@@ -4,17 +4,20 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module ExoMonad.Schema.TH
-  ( -- * Main Derivation Function
+  ( -- * Main Derivation Functions
     deriveMCPType
   , deriveMCPTypeWith
-  
-    -- * Field Mapping DSL
+  , deriveMCPEnum
+
+    -- * Field Mapping DSL (Blessed Operators)
   , FieldMapping(..)
+  , (??)      -- ^ RECOMMENDED: Auto-rename + description
+  , omit      -- ^ Exclude field from JSON/Schema
+
+    -- * Field Mapping (Advanced - rarely needed)
   , FieldMappingPartial
-  , (~>)
-  , (?)
-  , (??)
-  , omit
+  , (~>)      -- ^ Explicit key rename (only for non-standard keys)
+  , (?)       -- ^ Add description to explicit mapping
 
     -- * Options
   , MCPOptions(..)
@@ -25,17 +28,18 @@ module ExoMonad.Schema.TH
   , arraySchema
   , describeField
   , emptySchema
+  , enumSchema
   ) where
 
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
-import Data.Aeson (FromJSON(..), ToJSON(..), object, (.=), (.:), (.:?), withObject, Value)
+import Data.Aeson (FromJSON(..), ToJSON(..), object, (.=), (.:), (.:?), withObject, withText, Value(..))
 import qualified Data.Aeson.Key as K
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
 import GHC.Generics (Generic)
-import Control.Monad (unless, forM)
+import Control.Monad (unless, forM, when)
 import Data.List (stripPrefix, delete)
 import Data.Maybe (fromMaybe, catMaybes)
 import Data.Char (toLower, isUpper)
@@ -67,6 +71,27 @@ camelToSnake = go
       | isUpper c = '_' : toLower c : go cs
       | otherwise = c : go cs
 
+-- ════════════════════════════════════════════════════════════════════════════
+-- FIELD MAPPING DSL
+-- ════════════════════════════════════════════════════════════════════════════
+--
+-- RECOMMENDED PATTERN (use for 95% of cases):
+--   'fieldName ?? "Description of this field"
+--
+-- This auto-derives the JSON key from the field name by:
+--   1. Stripping the configured prefix (e.g., "sq" from "sqQuery")
+--   2. Lowercasing the first character
+--   3. Converting camelCase to snake_case
+--
+-- ADVANCED PATTERN (only when auto-derived key won't work):
+--   'fieldName ~> "explicit_key" ? "Description"
+--
+-- Use (~>) only when:
+--   - The field name doesn't follow prefix conventions
+--   - You need a JSON key that differs from snake_case transformation
+--   - Backwards compatibility with existing API contracts
+-- ════════════════════════════════════════════════════════════════════════════
+
 -- | Field mapping DSL types
 data FieldMapping
   = Explicit Name String (Maybe String) -- ^ Explicit mapping: field -> key + optional description
@@ -75,7 +100,10 @@ data FieldMapping
 
 data FieldMappingPartial = FieldMappingPartial Name String
 
--- | Map a field to a JSON key
+-- | Map a field to an explicit JSON key.
+--
+-- __Prefer @(??)@ unless you need non-standard key names.__
+-- This operator should only be used when the auto-derived key won't work.
 infixl 1 ~>
 (~>) :: Name -> String -> FieldMapping
 n ~> k = Explicit n k Nothing
@@ -310,14 +338,106 @@ arraySchema items = (emptySchema TArray) { schemaItems = Just items }
 
 describeField :: Text -> JSONSchema -> JSONSchema
 describeField desc schema = schema { schemaDescription = Just desc }
--- Note: existing Schema.hs describeField takes fieldName then desc. 
--- But here in the splice `deriveFieldSchema`, I generated:
--- [| describeField $(litE (stringL d)) $(pure baseSchema) |]
--- So my local `describeField` signature should match: Text -> JSONSchema -> JSONSchema.
--- The existing `ExoMonad.Schema.describeField` is:
--- describeField :: Text -> Text -> JSONSchema -> JSONSchema
--- (fieldName -> desc -> schema)
--- The fieldName arg seems unused in `ExoMonad.Schema` implementation:
--- describeField _fieldName desc schema = schema { schemaDescription = Just desc }
--- So I can drop it in my version.
+
+enumSchema :: [Text] -> JSONSchema
+enumSchema variants = (emptySchema TString) { schemaEnum = Just variants }
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- ENUM DERIVATION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Derive HasJSONSchema, FromJSON, and ToJSON for a nullary sum type (enum).
+--
+-- The enum values are serialized as lowercase strings matching constructor names.
+-- Parsing is case-insensitive for convenience.
+--
+-- Example:
+--
+-- @
+-- data Depth = Low | Medium | High
+--   deriving stock (Show, Eq, Generic, Bounded, Enum)
+--
+-- $(deriveMCPEnum ''Depth)
+-- @
+--
+-- Generates:
+--
+-- @
+-- instance HasJSONSchema Depth where
+--   jsonSchema = enumSchema ["low", "medium", "high"]
+--
+-- instance FromJSON Depth where
+--   parseJSON = withText "Depth" $ \\t ->
+--     case T.toLower t of
+--       "low"    -> pure Low
+--       "medium" -> pure Medium
+--       "high"   -> pure High
+--       _        -> fail $ "Unknown Depth: " <> T.unpack t
+--
+-- instance ToJSON Depth where
+--   toJSON Low    = String "low"
+--   toJSON Medium = String "medium"
+--   toJSON High   = String "high"
+-- @
+deriveMCPEnum :: Name -> Q [Dec]
+deriveMCPEnum typeName = do
+  info <- reify typeName
+  case info of
+    TyConI (DataD _ _ _ _ cons _) -> do
+      -- Extract nullary constructor names
+      let conNames = [n | NormalC n [] <- cons]
+      when (length conNames /= length cons) $
+        fail $ "deriveMCPEnum: " ++ show typeName ++ " must have only nullary constructors"
+      when (null conNames) $
+        fail $ "deriveMCPEnum: " ++ show typeName ++ " must have at least one constructor"
+
+      genEnumInstances typeName conNames
+    _ -> fail $ "deriveMCPEnum: " ++ show typeName ++ " must be a data type with nullary constructors"
+
+genEnumInstances :: Name -> [Name] -> Q [Dec]
+genEnumInstances typeName conNames = do
+  let -- Convert constructor names to lowercase strings
+      conStrings = [(n, map toLower (nameBase n)) | n <- conNames]
+
+  -- Generate HasJSONSchema instance
+  hasJsonSchemaDec <- [d|
+    instance HasJSONSchema $(conT typeName) where
+      jsonSchema = enumSchema $(listE [litE (stringL s) | (_, s) <- conStrings])
+    |]
+
+  -- Generate FromJSON instance
+  fromJsonDec <- genFromJSONEnum typeName conStrings
+
+  -- Generate ToJSON instance
+  toJsonDec <- genToJSONEnum typeName conStrings
+
+  pure $ concat [hasJsonSchemaDec, fromJsonDec, toJsonDec]
+
+genFromJSONEnum :: Name -> [(Name, String)] -> Q [Dec]
+genFromJSONEnum typeName conStrings = do
+  tVar <- newName "t"
+  let matchCases =
+        [ match (litP (stringL s)) (normalB [| pure $(conE n) |]) []
+        | (n, s) <- conStrings
+        ] ++
+        [ match wildP (normalB
+            [| fail $ "Unknown " ++ $(litE (stringL (nameBase typeName))) ++ ": " ++ T.unpack $(varE tVar) |]) []
+        ]
+
+  caseExp <- caseE [| T.toLower $(varE tVar) |] matchCases
+  [d| instance FromJSON $(conT typeName) where
+        parseJSON = withText $(litE (stringL (nameBase typeName))) $ \ $(varP tVar) ->
+          $(pure caseExp)
+    |]
+
+genToJSONEnum :: Name -> [(Name, String)] -> Q [Dec]
+genToJSONEnum typeName conStrings = do
+  let matchCases =
+        [ match (conP n []) (normalB [| String (T.pack $(litE (stringL s))) |]) []
+        | (n, s) <- conStrings
+        ]
+
+  [d| instance ToJSON $(conT typeName) where
+        toJSON = $(lamCaseE matchCases)
+    |]
 
