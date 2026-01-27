@@ -31,7 +31,7 @@ fi
 # Named volume may be empty on first start; clone the repo
 ROLE="${EXOMONAD_ROLE:-agent}"
 AGENT_WORKSPACE="/workspace/${ROLE}"
-REPO_URL="${EXOMONAD_REPO_URL:-https://github.com/tidepool-heavy-industries/tidepool.git}"
+REPO_URL="${EXOMONAD_REPO_URL:-https://github.com/tidepool-heavy-industries/exomonad.git}"
 REPO_BRANCH="${EXOMONAD_REPO_BRANCH:-main}"
 
 if [ ! -d "$AGENT_WORKSPACE/.git" ]; then

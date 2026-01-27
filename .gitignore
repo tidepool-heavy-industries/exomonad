@@ -18,3 +18,4 @@ result/
 docker/orchestrator/ssh-keys/
 docker/claude-agent/orchestrator.pub
 .gemini-clipboard/
+.mcp.json

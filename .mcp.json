@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "exomonad": {
-      "type": "http",
-      "url": "http://localhost:7432/role/tl/mcp"
-    }
-  }
-}
