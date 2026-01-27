@@ -543,7 +543,22 @@ runGhCommand _config args = do
   -- Log command before execution (aggressive logging per CLAUDE.md)
   hPutStrLn stderr $ "[GitHub] Executing: gh " <> unwords args
 
-  -- 10 second timeout for all GitHub CLI calls
+  -- 10 second timeout for all GitHub CLI calls.
+  --
+  -- Rationale:
+  --   * This interpreter is only used for relatively small, read-only GitHub
+  --     operations (e.g. fetching a single issue/PR, small listings), where
+  --     normal end-to-end latency is expected to be well under a few seconds.
+  --   * We prefer failing fast with GHTimeout over letting an agent turn hang
+  --     indefinitely if the gh CLI stalls or the network misbehaves.
+  --   * If you need to support genuinely long-running gh operations (such as
+  --     listing thousands of issues), you should introduce a dedicated
+  --     interpreter/helper with a higher or configurable timeout, rather than
+  --     routing those operations through this helper.
+  --
+  -- Given those constraints, 10 seconds is chosen as a conservative upper bound
+  -- that is high enough for expected use cases but low enough to detect hung
+  -- or misbehaving gh processes.
   let timeoutUs = 10 * 1000000 
   mResult <- timeout timeoutUs $ try $ readProcessWithExitCode "gh" args ""
   
@@ -582,6 +597,10 @@ runGhCommand _config args = do
           then do
             hPutStrLn stderr "[GitHub] ERROR: Rate limit exceeded"
             now <- getCurrentTime
+            -- GitHub's HTTP API exposes an X-RateLimit-Reset header, but when using the
+            -- `gh` CLI we only see stderr, which does not reliably include that value.
+            -- We therefore use a conservative 1-hour reset window here so that callers'
+            -- retry logic waits long enough to avoid immediately hitting the limit again.
             pure $ Left $ GHRateLimit (addUTCTime 3600 now)
 
           -- "not found" for specific resources
@@ -589,8 +608,19 @@ runGhCommand _config args = do
                   "could not find" `T.isInfixOf` stderrLower
           then do
             hPutStrLn stderr $ "[GitHub] ERROR: Resource not found: " <> T.unpack stderrText
-            -- We use 404 code here. The caller can refine to GHNotFound Int if they have the ID.
-            pure $ Left $ GHUnexpected 404 stderrText
+            -- Try to parse a numeric resource ID from stderr to return GHNotFound consistently.
+            let mResourceId :: Maybe Int
+                mResourceId =
+                  let s = T.unpack stderrText
+                      dropNonDigits = dropWhile (\c -> c < '0' || c > '9') s
+                  in case dropNonDigits of
+                       [] -> Nothing
+                       cs ->
+                         let (digits, _) = span (\c -> c >= '0' && c <= '9') cs
+                         in if null digits then Nothing else Just (read digits)
+            case mResourceId of
+              Just rid -> pure $ Left $ GHNotFound rid
+              Nothing  -> pure $ Left $ GHUnexpected 404 stderrText
 
           -- Generic command failure with exit code and stderr
           else do

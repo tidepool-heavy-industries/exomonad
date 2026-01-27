@@ -1,244 +1,76 @@
-# Task: Remove Dead BD/Beads Code
+# Stream A: GitHub API Reliability
 
-## Status: COMPLETED ✓
+**Files:** `haskell/control-server/src/Handler/Hook/SessionStart.hs`, `haskell/control-server/src/ExoTools/GHTools.hs`, new `haskell/control-server/src/Handler/Hook/GitHubRetry.hs`
 
-**Summary:** All BD/Beads code successfully removed. The codebase now uses GitHub issues exclusively.
+**Issue:** GitHub API failures are silent and can hang indefinitely
 
-**What was done:**
-- Removed all BD references from Haskell code (imports, types, functions)
-- Fixed StopHook handler type mismatches introduced during BD removal
-- Updated field names: `scBeadId` → `scIssueId`, `rfaBeadId` → `rfaIssueId`, `asBeadId` → `asIssueNum`
-- Main codebase builds successfully
-- Core tests passing (hook-policy-test, parser-test)
+## Core Fixes
 
-**Remaining work:**
-- Fix test build errors in PMProposeSpec, MailboxToolsSpec, PMStatusSpec (test-only issues, not blocking)
-- Verify Docker builds (not yet tested)
+- [ ] Log errors instead of `Left _err -> Nothing` (SessionStart.hs:99-102, 150-152)
+- [ ] Add timeout to `getIssue`/`listIssues` calls (10 second default)
 
-## Original Summary
+## Do It Right: Retry with Exponential Backoff
 
-Clean up all remaining BD (Beads) code from the codebase. BD has been replaced by GitHub issues via `gh` CLI. Dead code remains in interpreters, effects, and documentation.
+- [ ] Create `GitHubRetry.hs` module with:
+  - `RetryConfig` type (maxRetries, baseDelay, maxDelay, retryableErrors)
+  - `withRetry :: RetryConfig -> Eff (GitHub ': es) a -> Eff (GitHub ': Log ': es) a`
+  - Exponential backoff: 1s -> 2s -> 4s -> 8s (capped)
+  - Only retry on transient errors (rate limit, 5xx, network timeout)
+  - Log each retry attempt with attempt number and delay
+- [ ] Apply retry wrapper to SessionStart GitHub calls
+- [ ] Apply retry wrapper to buildDashboard GitHub calls
 
-## Background
+## Do It Right: Structured Error Types
 
-Beads was a git-native issue tracking system stored in `.beads/`. It's been replaced by:
-- GitHub Issues for task tracking
-- `gh` CLI for programmatic access
-- `gh_issue_*` MCP tools in control-server
+- [ ] Create `GitHubError` ADT in `GHTools.hs`:
+  ```haskell
+  data GitHubError
+    = GHNotFound Int              -- Issue/PR doesn't exist
+    | GHRateLimit UTCTime         -- Rate limited until time
+    | GHNetworkError Text         -- Connection failed
+    | GHTimeout                   -- Request timed out
+    | GHPermissionDenied Text     -- Auth issue
+    | GHUnexpected Int Text       -- Other HTTP error
+  ```
+- [ ] Update `getIssue`, `listIssues` return types to use `GitHubError`
+- [ ] Add `isRetryable :: GitHubError -> Bool` helper
 
-## Scope
+## Do It Right: Observability
 
-### Confirmed Dead Code
+- [ ] Add OpenTelemetry span for each GitHub API call
+- [ ] Record attributes: endpoint, issue_number, retry_count, latency_ms
+- [ ] Add counter metric for GitHub errors by type
 
-1. **haskell/effects/bd-interpreter/** - Entire package
-   - `BD` effect type
-   - `runBD` interpreter
-   - Urchin CLI integration
+## Tests
 
-2. **Control server BD references**
-   - `haskell/control-server/src/ExoMonad/Control/Effects/BD.hs` (if exists)
-   - Any BD tool handlers
+- [ ] Unit test: RetryConfig validation
+- [ ] Unit test: isRetryable classification
+- [ ] Integration test: Retry on simulated 503 (mock)
 
-3. **Rust exomonad references**
-   - Any BD protocol types in `exomonad-shared`
-   - BD-related hook handling
+## Documentation
 
-4. **Documentation**
-   - CLAUDE.md references to BD/beads
-   - PRIMING.md references (should be updated already)
-   - README references
+- [ ] Update `haskell/control-server/CLAUDE.md` with GitHub reliability section
+- [ ] Document retry configuration env vars
 
-5. **Scripts and configs**
-   - `.bd/` templates directory (if exists)
-   - BD-related shell scripts
-   - `bead-context` script references
+## Verification
 
-### NOT to Remove
-
-- `.beads/` directory itself (gitignored, user's local data)
-- `bd` CLI tool mentions in Beads Workflow Context (that's for projects using BD)
-- Any consuming repo references (urchin - separate repos)
-
-## Implementation Plan
-
-### Phase 1: Audit (Day 1 AM)
-
-1. **Find all BD references**
-   ```bash
-   # Haskell imports
-   grep -r "import.*BD" haskell/
-   grep -r "ExoMonad.BD" haskell/
-   grep -r "ExoMonad.Effects.BD" haskell/
-
-   # Cabal dependencies
-   grep -r "bd-interpreter" haskell/
-   grep -r "exomonad-bd" haskell/
-
-   # Effect usage
-   grep -r "runBD" haskell/
-   grep -r "BD :" haskell/
-
-   # Documentation
-   grep -ri "beads\|\.beads\|bd create\|bd list" --include="*.md"
-
-   # Scripts
-   grep -r "bd " scripts/
-   grep -r "bead" scripts/
-   ```
-
-2. **Document what needs removal**
-   - Create checklist of files/sections
-   - Note any dependencies that might break
-
-### Phase 2: Remove bd-interpreter Package (Day 1 PM)
-
-1. **Remove package directory**
-   ```bash
-   rm -rf haskell/effects/bd-interpreter/
-   ```
-
-2. **Remove from cabal.project**
-   ```
-   # Remove line:
-   # packages: haskell/effects/bd-interpreter
-   ```
-
-3. **Remove from any package dependencies**
-   - Check `exomonad-control-server.cabal`
-   - Check any other packages that depend on it
-
-4. **Fix compilation errors**
-   - Remove imports
-   - Remove interpreter from effect stacks
-   - Remove BD tool handlers
-
-### Phase 3: Clean Control Server (Day 1 PM)
-
-1. **Remove BD effect usage**
-   ```haskell
-   -- Remove from effect stacks
-   -- Before: Eff '[BD, LSP, LLM, ...] a
-   -- After:  Eff '[LSP, LLM, ...] a
-   ```
-
-2. **Remove BD tool handlers**
-   - Any `bd_*` tools in MCP
-   - Any BD-related hook logic
-
-3. **Update handler imports**
-
-### Phase 4: Clean Documentation (Day 2 AM)
-
-1. **CLAUDE.md files**
-   - Root CLAUDE.md - update effect inventory
-   - haskell/CLAUDE.md - remove bd-interpreter from list
-   - haskell/effects/CLAUDE.md - remove bd-interpreter section
-   - control-server/CLAUDE.md - remove BD tool references
-
-2. **Other docs**
-   - Check for BD mentions in ADRs
-   - Check deployment docs
-
-### Phase 5: Clean Scripts and Configs (Day 2 AM)
-
-1. **Scripts**
-   ```bash
-   # Find and audit
-   find scripts/ -name "*bead*"
-   grep -l "bd " scripts/*.sh
-   ```
-
-2. **Config templates**
-   ```bash
-   # Remove .bd/ if exists
-   rm -rf .bd/
-   ```
-
-3. **Hook configurations**
-   - Check if any hooks reference BD
-
-### Phase 6: Verify Build (Day 2 PM)
-
-1. **Build everything**
-   ```bash
-   cabal build all
-   cargo build --workspace
-   ```
-
-2. **Run tests**
-   ```bash
-   cabal test all
-   cargo test --workspace
-   ```
-
-3. **Check Docker builds**
-   ```bash
-   docker compose build control-server
-   ```
-
-## Files to Delete
-
-```
-haskell/effects/bd-interpreter/          # Entire package
-.bd/                                      # Template directory (if exists)
-scripts/bead-context                      # Context script (if exists)
-```
-
-## Files to Modify
-
-```
-cabal.project                             # Remove bd-interpreter package
-haskell/control-server/exomonad-control-server.cabal  # Remove dep
-haskell/control-server/src/...            # Remove BD imports/usage
-haskell/CLAUDE.md                         # Update package list
-haskell/effects/CLAUDE.md                 # Remove bd-interpreter section
-CLAUDE.md                                 # Remove BD references
-PRIMING.md                                # Already updated, verify
-```
-
-## Testing
-
-1. **Compile check**
-   ```bash
-   cabal build all
-   ```
-
-2. **Test suite**
-   ```bash
-   cabal test all
-   ```
-
-3. **Docker build**
-   ```bash
-   docker compose build
-   ```
-
-4. **MCP tools still work**
-   ```bash
-   # In Claude Code
-   /tools
-   # Verify gh_issue_* tools present, no bd_* tools
-   ```
-
-## Success Criteria
-
-- [x] `bd-interpreter` package deleted
-- [x] No compilation errors (main code builds successfully)
-- [~] Tests: Core tests pass (hook-policy, parser), some test files need updates
-- [ ] Docker builds succeed (not yet tested)
-- [x] No `grep -r "bd-interpreter\|ExoMonad.BD\|runBD" haskell/` matches
-- [x] CLAUDE.md files updated (already done in previous commits)
-- [x] No dead BD tools in MCP
-
-## Rollback Plan
-
-If something depends on BD that we didn't know about:
 ```bash
-git checkout main -- haskell/effects/bd-interpreter/
+# 1. Retry logic
+# Temporarily rate-limit GitHub (or mock), verify retries in logs:
+# "[GitHub] Request failed (attempt 1/3), retrying in 1s..."
+# "[GitHub] Request failed (attempt 2/3), retrying in 2s..."
+
+# 2. Timeout
+# Block network, verify timeout error (not hang):
+# "[GitHub] Request timed out after 10s"
+
+# 3. Structured errors
+# Verify error types are logged with context:
+# "[GitHub] GHRateLimit: retry after 2024-01-26T12:00:00Z"
 ```
 
-## Notes
+## Key Locations to Read First
 
-- This is a cleanup task, not a feature
-- Should be safe - BD has been replaced
-- Focus on thorough removal, not partial
+1. `haskell/control-server/src/Handler/Hook/SessionStart.hs` - See lines 99-102, 150-152 for silent error handling
+2. `haskell/control-server/src/ExoTools/GHTools.hs` - Current GitHub effect implementation
+3. `haskell/control-server/src/Handler/Dashboard.hs` - buildDashboard uses GitHub calls

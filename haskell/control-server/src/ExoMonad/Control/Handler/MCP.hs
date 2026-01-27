@@ -308,7 +308,6 @@ handleExoStatusTool logger tracer reqId args = do
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runGeminiIO
-        $ runGitHubIO defaultGitHubConfig
         $ runGitIO
         $ runGitHubIO defaultGitHubConfig
         $ withRetry retryCfg
@@ -431,7 +430,6 @@ handleFilePRTool logger tracer reqId args = do
       let retryCfg = defaultRetryConfig { tracer = Just tracer }
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runGitHubIO defaultGitHubConfig
         $ runGitIO
         $ runGitHubIO defaultGitHubConfig
         $ withRetry retryCfg
@@ -498,7 +496,6 @@ handlePmStatusTool logger tracer reqId args = do
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runTime
-        $ runGitHubIO defaultGitHubConfig
         $ runGitHubIO defaultGitHubConfig
         $ withRetry retryCfg
         $ fmap unwrapSingleChoice (pmStatusLogic psArgs)

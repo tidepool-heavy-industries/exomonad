@@ -13,13 +13,25 @@ export XDG_RUNTIME_DIR=/run/user/1000
 git config --global --add safe.directory '*'
 
 # --- Configure git authentication ---
-# Use GH_TOKEN env var if available (preferred), otherwise try gh CLI
-if [ -n "${GH_TOKEN:-}" ]; then
-    echo "Configuring git to use GH_TOKEN..."
-    git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
-elif command -v gh &> /dev/null && gh auth status &> /dev/null; then
+# Prefer gh CLI for git authentication; fall back to GH_TOKEN via GIT_ASKPASS
+if command -v gh &> /dev/null && gh auth status &> /dev/null; then
     echo "Configuring git to use gh CLI for authentication..."
     gh auth setup-git
+elif [ -n "${GH_TOKEN:-}" ]; then
+    echo "Configuring git to use GH_TOKEN via GIT_ASKPASS (token not stored in git config)..."
+    TMP_GIT_ASKPASS="$(mktemp)"
+    chmod 700 "$TMP_GIT_ASKPASS"
+    cat > "$TMP_GIT_ASKPASS" <<'EOF'
+#!/usr/bin/env bash
+# Minimal GIT_ASKPASS helper for GitHub using GH_TOKEN from environment.
+case "$1" in
+    *'Username for '*github.com*) echo "x-access-token" ;;
+    *'Password for '*github.com*|*'token for '*github.com*) echo "${GH_TOKEN:-}" ;;
+    *) exit 1 ;;
+esac
+EOF
+    export GIT_ASKPASS="$TMP_GIT_ASKPASS"
+    export GIT_TERMINAL_PROMPT=0
 else
     echo "Warning: No git authentication configured, operations may fail"
 fi
@@ -41,10 +53,26 @@ if [ ! -d "$AGENT_WORKSPACE/.git" ]; then
     if [ "$(ls -A "$AGENT_WORKSPACE" 2>/dev/null)" ]; then
         echo "Directory not empty, initializing git in place..."
         cd "$AGENT_WORKSPACE"
-        git init
-        git remote add origin "$REPO_URL"
-        git fetch origin "$REPO_BRANCH"
-        git checkout -f "$REPO_BRANCH"
+        if ! git init; then
+            echo "Error: git init failed in $AGENT_WORKSPACE, cleaning up partial .git state"
+            rm -rf "$AGENT_WORKSPACE/.git"
+            exit 1
+        fi
+        if ! git remote add origin "$REPO_URL"; then
+            echo "Error: git remote add failed in $AGENT_WORKSPACE, cleaning up partial .git state"
+            rm -rf "$AGENT_WORKSPACE/.git"
+            exit 1
+        fi
+        if ! git fetch origin "$REPO_BRANCH"; then
+            echo "Error: git fetch failed for branch $REPO_BRANCH from $REPO_URL, cleaning up partial .git state"
+            rm -rf "$AGENT_WORKSPACE/.git"
+            exit 1
+        fi
+        if ! git checkout -f "$REPO_BRANCH"; then
+            echo "Error: git checkout failed for branch $REPO_BRANCH, cleaning up partial .git state"
+            rm -rf "$AGENT_WORKSPACE/.git"
+            exit 1
+        fi
         echo "Repository initialized from existing directory"
     else
         # Clone the repo (use HTTPS for simplicity, SSH would need key setup)
