@@ -9,6 +9,8 @@
 module ExoMonad.Control.ExoTools.SpawnAgents.Types
   ( SpawnAgentsArgs(..)
   , SpawnAgentsResult(..)
+  , CleanupAgentsArgs(..)
+  , CleanupAgentsResult(..)
   ) where
 
 import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.=), object, withObject)
@@ -50,4 +52,37 @@ instance ToJSON SpawnAgentsResult where
       "worktrees" .= sarWorktrees res
     , "tabs"      .= sarTabs res
     , "failed"    .= sarFailed res
+    ]
+
+-- | Arguments for cleanup_agents tool.
+data CleanupAgentsArgs = CleanupAgentsArgs
+  { caaIssueNumbers :: [Text]  -- ^ List of issue numbers to clean up.
+  , caaForce :: Maybe Bool     -- ^ If true, skip confirmation (not used yet in server logic).
+  }
+  deriving stock (Show, Eq, Generic)
+
+$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "caa" } ''CleanupAgentsArgs
+  [ 'caaIssueNumbers ?? "List of issue numbers to clean up worktrees and containers for."
+  , 'caaForce        ?? "If true, skip confirmation (defaults to false)."
+  ])
+
+-- | Result of cleanup_agents tool.
+data CleanupAgentsResult = CleanupAgentsResult
+  {
+    carCleaned    :: [Text]      -- ^ Successfully cleaned issue IDs.
+  , carFailed     :: [(Text, Text)] -- ^ Failed cleanups: (issueNum, reason)
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance FromJSON CleanupAgentsResult where
+  parseJSON = withObject "CleanupAgentsResult" $ \v ->
+    CleanupAgentsResult
+      <$> v .: "cleaned"
+      <*> v .: "failed"
+
+instance ToJSON CleanupAgentsResult where
+  toJSON res = object
+    [
+      "cleaned" .= carCleaned res
+    , "failed"  .= carFailed res
     ]
