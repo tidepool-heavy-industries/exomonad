@@ -22,6 +22,7 @@ import ExoMonad.Control.Observability (withTracerProvider, getTracer, TracingCon
 import ExoMonad.Control.RoleConfig (Role(..))
 import ExoMonad.Control.Version (versionString)
 import ExoMonad.Training.Format (formatTrainingFromSkeleton)
+import ExoMonad.Control.Workflow.Store (initWorkflowStore)
 
 main :: IO ()
 main = do
@@ -71,6 +72,8 @@ runServerMode logger projectDir noTui = do
         , tcServiceName = "exomonad-control-server"
         }
 
+  workflowStore <- initWorkflowStore
+
   let config = ServerConfig 
         { projectDir = projectDir
         , role = fmap T.pack roleEnv
@@ -80,6 +83,7 @@ runServerMode logger projectDir noTui = do
         , openObserveConfig = ooConfig
         , hookPolicy = policy
         , circuitBreakerConfig = cbConfig
+        , workflowStore = workflowStore
         }
 
   -- Initialize tracing and run server

@@ -1,17 +1,16 @@
 -- | Shared types for control server.
 module ExoMonad.Control.Types
   ( ServerConfig(..)
-  , defaultConfig
   ) where
 
 import Data.Text (Text)
 
 import ExoMonad.Observability.Types (ObservabilityConfig)
 import ExoMonad.Control.OpenObserve (OpenObserveConfig)
-import ExoMonad.Control.Hook.Policy (HookPolicy, defaultPolicy)
+import ExoMonad.Control.Hook.Policy (HookPolicy)
 import ExoMonad.Control.RoleConfig (Role(..))
 import ExoMonad.Control.Hook.CircuitBreaker (CircuitBreakerConfig(..))
-
+import ExoMonad.Control.Workflow.Store (WorkflowStore)
 
 -- | Server configuration.
 data ServerConfig = ServerConfig
@@ -31,19 +30,6 @@ data ServerConfig = ServerConfig
     -- ^ Hook evaluation policy
   , circuitBreakerConfig :: CircuitBreakerConfig
     -- ^ Circuit breaker limits
-  }
-  deriving stock (Show, Eq)
-
-
--- | Default configuration: current directory
-defaultConfig :: ServerConfig
-defaultConfig = ServerConfig
-  { projectDir = "."
-  , role       = Nothing
-  , defaultRole = Dev
-  , noTui      = False
-  , observabilityConfig = Nothing
-  , openObserveConfig = Nothing
-  , hookPolicy = defaultPolicy
-  , circuitBreakerConfig = CircuitBreakerConfig 15 5 300
+  , workflowStore :: WorkflowStore
+    -- ^ Persistent workflow state
   }
