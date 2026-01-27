@@ -91,7 +91,7 @@ RUN mkdir -p rust/exomonad/src rust/exomonad-shared/src rust/exomonad-hub/src \
 RUN --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/build/rust/target \
-    cd rust && cargo build --release -p exomonad 2>/dev/null || true
+    cd rust && cargo build --release -p exomonad -p agent-status -p tui-popup 2>/dev/null || true
 
 # 5. Copy real source code
 COPY rust/ ./rust/
@@ -100,8 +100,8 @@ COPY rust/ ./rust/
 RUN --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/build/rust/target \
-    cd rust && cargo build --release -p exomonad && \
-    cp target/release/exomonad /usr/local/bin/exomonad
+    cd rust && cargo build --release -p exomonad -p agent-status -p tui-popup && \
+    cp target/release/exomonad target/release/agent-status target/release/tui-popup /usr/local/bin/
 
 # Stage 3: Runtime
 # Debian bookworm-slim provides a small, stable base for the runtime
@@ -154,8 +154,8 @@ ENV PATH="/root/.local/bin:${PATH}"
 # 6. Copy binaries from builders (change with code, but less often than configs)
 COPY --from=builder /usr/local/bin/exomonad-control-server /usr/local/bin/exomonad-control-server
 COPY --from=rust-builder /usr/local/bin/exomonad /usr/local/bin/exomonad
-COPY --from=rust-builder /build/rust/target/release/agent-status /usr/local/bin/agent-status
-COPY --from=rust-builder /build/rust/target/release/tui-popup /usr/local/bin/tui-popup
+COPY --from=rust-builder /usr/local/bin/agent-status /usr/local/bin/agent-status
+COPY --from=rust-builder /usr/local/bin/tui-popup /usr/local/bin/tui-popup
 
 # 7. Create non-root user for running Claude Code (stable)
 RUN useradd -m -u 1000 -s /bin/bash user
