@@ -11,11 +11,20 @@ layout {
 
     tab name="subagent" {
         pane split_direction="vertical" {
-            // LEFT: Main interaction pane (CLI)
-            pane size="60%" focus=true {
-                command "bash"
-                // Source .env to get EXOMONAD_CONTROL_SOCKET and other vars, then wait for socket
-                args "-c" "[ -f .env ] && source .env || { echo \"ERROR: .env not found\" >&2; exit 1; }; ./scripts/wait-for-socket.sh \"$EXOMONAD_CONTROL_SOCKET\" 60 ControlServer && exec $SUBAGENT_CMD"
+            // LEFT: Main interaction + Agent Status
+            pane size="60%" split_direction="horizontal" {
+                // Top: Main Interaction (80%)
+                pane size="80%" focus=true {
+                    command "bash"
+                    // Source .env to get EXOMONAD_CONTROL_SOCKET and other vars, then wait for socket
+                    args "-c" "[ -f .env ] && source .env || { echo \"ERROR: .env not found\" >&2; exit 1; }; ./scripts/wait-for-socket.sh \"$EXOMONAD_CONTROL_SOCKET\" 60 ControlServer && exec $SUBAGENT_CMD"
+                }
+                
+                // Bottom: Agent Status (20%)
+                pane name="Agent Status" size="20%" {
+                    command "bash"
+                    args "-c" "[ -f .env ] && source .env; while true; do agent-status; echo '⚠️ Agent Status exited. Restarting in 2s...'; sleep 2; done"
+                }
             }
 
             // RIGHT: Stacked infrastructure panes (collapsible)

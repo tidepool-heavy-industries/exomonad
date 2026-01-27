@@ -7,8 +7,14 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use std::io::{self, Read};
 use std::path::PathBuf;
-use tui_sidebar::popup::run_popup_with_tty;
-use tui_sidebar::protocol::PopupDefinition;
+
+// Use local modules instead of tui_sidebar
+use crate::popup::run_popup_with_tty;
+use crate::protocol::PopupDefinition;
+
+mod popup;
+mod protocol;
+mod realm;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
