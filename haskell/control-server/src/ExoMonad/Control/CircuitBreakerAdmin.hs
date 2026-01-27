@@ -24,7 +24,7 @@ module ExoMonad.Control.CircuitBreakerAdmin
 import GHC.Generics (Generic)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), (.:?))
+import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), (.:?), withObject)
 import Control.Monad.Freer (Eff, Member)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -53,10 +53,13 @@ instance HasJSONSchema CbStatusArgs where
     ] []
 
 instance FromJSON CbStatusArgs where
-  parseJSON = parseJSON -- Generic
+  parseJSON = withObject "CbStatusArgs" $ \v ->
+    CbStatusArgs <$> v .:? "filter_session"
 
 instance ToJSON CbStatusArgs where
-  toJSON = toJSON -- Generic
+  toJSON args = object
+    [ "filter_session" .= filterSession args
+    ]
 
 data CbSessionInfo = CbSessionInfo
   { sessionId :: Text
@@ -148,10 +151,13 @@ instance HasJSONSchema CbResetArgs where
     ] []
 
 instance FromJSON CbResetArgs where
-  parseJSON = parseJSON -- Generic
+  parseJSON = withObject "CbResetArgs" $ \v ->
+    CbResetArgs <$> v .:? "session_id"
 
 instance ToJSON CbResetArgs where
-  toJSON = toJSON -- Generic
+  toJSON args = object
+    [ "session_id" .= args.sessionId
+    ]
 
 data CbResetResult = CbResetResult
   { status :: Text
