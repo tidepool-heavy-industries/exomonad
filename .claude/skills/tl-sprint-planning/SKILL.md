@@ -73,7 +73,7 @@ spawn_agents(["123", "456", "789"])
 # Human opens Zellij tabs manually
 # In each tab:
 cd /path/to/worktree
-# Context is automatically loaded from .claude/context/issue.md
+# Issue context injected via SessionStart hook
 claude                        # Or: gemini, or ./start-augmented.sh for opus
 ```
 

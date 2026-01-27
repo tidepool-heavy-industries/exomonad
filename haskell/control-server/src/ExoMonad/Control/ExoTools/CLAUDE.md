@@ -43,8 +43,7 @@ Create git worktrees for multiple issues and launch isolated agent sessions in Z
 │     c. Bootstrap .exomonad/ directory                           │
 │     d. Generate process-compose.yaml                            │
 │     e. Write backend config (.claude/ or .gemini/)              │
-│     f. Write issue context to .claude/context/issue.md          │
-│     g. Launch Docker container with env vars via API            │
+│     f. Launch Docker container with env vars via API            │
 │     h. Create Zellij tab to attach to container                 │
 └─────────────────┬───────────────────────────────────────────────┘
                   │
@@ -62,8 +61,7 @@ Create git worktrees for multiple issues and launch isolated agent sessions in Z
 │        ├── gh-123-fix-socket-deadlock/                           │
 │        │   ├── .exomonad/logs/                                   │
 │        │   ├── .claude/                                          │
-│        │   │   ├── settings.local.json (hooks)                   │
-│        │   │   └── context/issue.md                              │
+│        │   │   └── settings.local.json (hooks)                   │
 │        │   └── process-compose.yaml (generated)                  │
 │        ├── gh-456-update-spawn-agents-paths/                     │
 │                                                                  │
@@ -199,15 +197,11 @@ Creates runtime directory structure:
 
 Writes `.claude/settings.local.json` or `.gemini/settings.json` with appropriate hooks.
 
-#### f. Write Issue Context
-
-Creates `.claude/context/issue.md` with issue title, body, and labels.
-
-#### g. Launch Docker Container
+#### f. Launch Docker Container
 
 Spawns a Docker container via `docker-ctl spawn`, passing environment variables directly through the Docker API.
 
-#### h. Create Zellij Tab
+#### g. Create Zellij Tab
 
 Creates a Zellij tab that attaches to the spawned container.
 

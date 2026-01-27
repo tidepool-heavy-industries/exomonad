@@ -114,8 +114,10 @@ services:
       - EXOMONAD_ROLE=tl
       - CONTROL_SERVER_URL=http://control-server:7432
       - EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
+      - EXOMONAD_REPO_URL=${EXOMONAD_REPO_URL:-https://github.com/tidepool-heavy-industries/tidepool.git}
+      - EXOMONAD_REPO_BRANCH=${EXOMONAD_REPO_BRANCH:-main}
     volumes:
-      # Named volume for repo (cloned on first start)
+      # Named volume for repo (cloned on first start via entrypoint)
       # Cannot use bind mounts - Docker runs on remote NixOS, not local macOS
       - exomonad-repo:/workspace/tl
       # Worktrees volume for spawned agents
@@ -157,6 +159,8 @@ services:
       - EXOMONAD_ROLE=pm
       - CONTROL_SERVER_URL=http://control-server:7432
       - EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
+      - EXOMONAD_REPO_URL=${EXOMONAD_REPO_URL:-https://github.com/tidepool-heavy-industries/tidepool.git}
+      - EXOMONAD_REPO_BRANCH=${EXOMONAD_REPO_BRANCH:-main}
     volumes:
       - exomonad-worktrees:/workspace
       - exomonad-sockets:/sockets

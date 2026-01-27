@@ -34,9 +34,8 @@ spawnAgentLogic issueNums = do
     issueInfo <- getIssue repo issueNum False    -- GitHub effect
     worktree <- createWorktree (branchName issueNum) -- Git effect
 
-    -- Context injection via effects
-    let contextPath = worktree </> ".claude/context/issue.md"
-    writeFile contextPath (renderIssue issueInfo) -- FileSystem effect
+    -- Context injection via SessionStart hook (not file-based)
+    -- Hook DSL expression generates context at session start
 
     -- Launch via effect (not shell)
     tabId <- newTab (TabConfig worktree issueNum) -- Zellij effect
