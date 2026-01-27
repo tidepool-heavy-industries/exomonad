@@ -2,10 +2,10 @@
 # Haskell Build with BuildKit Cache Mounts
 #
 # Cache strategy:
-#   - BuildKit cache mounts are GLOBAL to the builder (not per-stage)
-#   - Same mount declared in multiple stages shares the same persistent volume
-#   - Even if cabal files change, already-built deps are reused
-#   - dist-newstyle cached for incremental builds of our own code
+#   - cabal.project.freeze pins dependency versions (deterministic Unit IDs)
+#   - Copy cabal files first, build deps, then copy source
+#   - BuildKit cache mounts persist compiled deps across builds
+#   - Source changes only rebuild application code, not dependencies
 
 FROM haskell:9.12.2-slim-bookworm AS builder
 
@@ -22,47 +22,37 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# 1. Update cabal index (independent of source)
+# 1. Update cabal index (separate step, cached independently)
 RUN --mount=type=cache,target=/root/.cache/cabal,sharing=locked \
     cabal update
 
-# Configure cabal to use lld
+# Configure cabal to use lld for faster linking
 RUN mkdir -p /root/.cabal && \
-    echo "program-default-config" >> /root/.cabal/config && \
+    echo "program-default-options" >> /root/.cabal/config && \
     echo "  ghc-options: -optl-fuse-ld=lld" >> /root/.cabal/config
 
-# 2. Dependency Caching Stage
-# Copy only cabal files and cabal.project
-COPY cabal.project ./
-# We use a glob to copy only cabal files while preserving directory structure
-# This is tricky with COPY, so we use a temporary context or just copy what we need.
-# Since we have many, we'll copy the whole haskell dir but then use the dummy generator
-# to avoid invalidating cache on source changes.
-# Actually, a better way is to use a separate stage for dependency fetching.
+# 2. Copy dependency manifests (cabal files + freeze)
+COPY cabal.project cabal.project.freeze ./
 COPY haskell/ ./haskell/
-COPY docker/base/generate-dummy-modules.sh ./
-RUN chmod +x ./generate-dummy-modules.sh && \
-    sed -i '/package zlib/,+2d' cabal.project
 
+# Remove Nix-specific zlib configuration (paths don't exist in Docker)
+RUN sed -i '/package zlib/,+2d' cabal.project
+
+# 3. Build dependencies only (expensive, but cached via mount + freeze file)
+#    The freeze file ensures deterministic Unit IDs for cache hits
 RUN --mount=type=cache,target=/root/.local/state/cabal/store,sharing=locked \
     --mount=type=cache,target=/root/.cache/cabal,sharing=locked \
-    --mount=type=cache,target=/app/dist-newstyle,sharing=locked \
-    ./generate-dummy-modules.sh && \
-    cabal build all --only-dependencies -j --ghc-options=-O1
+    cabal build --only-dependencies all -j --ghc-options=-O1
 
-# 3. Final Build Stage
-# Now copy the REAL source code (this will invalidate cache for this and subsequent steps)
+# 4. Copy full source (invalidates only if source changes)
+#    This is a no-op if haskell/ hasn't changed, but ensures we have real source
 COPY haskell/ ./haskell/
 
 # Version embedding
 ARG GIT_SHA
 ENV EXOMONAD_GIT_SHA=${GIT_SHA}
 
-# Build with persistent cache mounts:
-# - /root/.local/state/cabal/store: Compiled dependency store (most important)
-# - /root/.cache/cabal: Package index and downloaded tarballs
-# - /app/dist-newstyle: Local build artifacts (incremental compilation)
-# sharing=locked prevents corruption during parallel builds
+# 5. Build application (uses cached deps from step 3)
 RUN --mount=type=cache,target=/root/.local/state/cabal/store,sharing=locked \
     --mount=type=cache,target=/root/.cache/cabal,sharing=locked \
     --mount=type=cache,target=/app/dist-newstyle,sharing=locked \
