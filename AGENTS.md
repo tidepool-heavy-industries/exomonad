@@ -177,10 +177,11 @@ TTY (Zellij)
 # Start Zellij session with control server
 nix develop .#claude-code-plus  # Auto-starts Zellij
 
-# Or manually:
-cd ~/hangars/tidepool/repo
-cabal run exomonad-control-server  # Terminal 1
-claude                              # Terminal 2
+# Manual setup:
+./start-augmented.sh                 # Terminal 1: Starts Zellij with everything
+# Or if running components manually:
+cabal run exomonad-control-server    # Terminal 2: Control server
+claude                               # Terminal 3: Claude Code session
 ```
 
 **Key Files:**

@@ -16,7 +16,9 @@ git config --global --add safe.directory '*'
 # Use GH_TOKEN env var if available (preferred), otherwise try gh CLI
 if [ -n "${GH_TOKEN:-}" ]; then
     echo "Configuring git to use GH_TOKEN..."
-    git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+    # Use a credential helper that reads the environment variable directly
+    # This avoids persisting the token in .gitconfig
+    git config --global credential.helper '!f() { echo username=x-access-token; echo password=$GH_TOKEN; }; f'
 elif command -v gh &> /dev/null && gh auth status &> /dev/null; then
     echo "Configuring git to use gh CLI for authentication..."
     gh auth setup-git
@@ -44,7 +46,7 @@ if [ ! -d "$AGENT_WORKSPACE/.git" ]; then
         git init
         git remote add origin "$REPO_URL"
         git fetch origin "$REPO_BRANCH"
-        git checkout -f "$REPO_BRANCH"
+        git checkout -B "$REPO_BRANCH" "origin/$REPO_BRANCH"
         echo "Repository initialized from existing directory"
     else
         # Clone the repo (use HTTPS for simplicity, SSH would need key setup)

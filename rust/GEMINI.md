@@ -19,9 +19,6 @@ The Rust workspace consists of several crates that bridge the gap between human-
   - Defines the NDJSON protocol for control socket communication.
   - Provides Unix socket clients and process supervision utilities.
   - Contains shared types for hooks, MCP calls, and telemetry.
-- **`hangar-config`**: Configuration management.
-  - Handles discovery and parsing of `Hangar.toml`.
-  - Resolves project-wide paths for binaries, worktrees, and sockets.
 - **`exomonad-hub`**: (WIP) A telemetry and metrics hub for tracking session progress and tool usage.
 
 ## Architecture & Communication

@@ -30,6 +30,7 @@ library
         ExoMonad.Control.Server
         ExoMonad.Control.Handler
         ExoMonad.Control.Logging
+        ExoMonad.Control.OpenObserve
         ExoMonad.Control.TUIInterpreter
         ExoMonad.Control.Runtime.Paths
         ExoMonad.Control.Runtime.ProcessCompose
@@ -53,6 +54,7 @@ library
         ExoMonad.Control.ExoTools.Internal
         ExoMonad.Control.ExoTools.Status
         ExoMonad.Control.ExoTools.SpawnAgents
+        ExoMonad.Control.ExoTools.SpawnCleanup
         ExoMonad.Control.ExoTools.FilePR
         ExoMonad.Control.ExoTools.FilePR.Context
         ExoMonad.Control.ExoTools.PrReviewStatus
@@ -70,6 +72,10 @@ library
         ExoMonad.Control.StopHook.Handlers
         ExoMonad.Control.StopHook.ErrorParser
         ExoMonad.Control.StopHook.Templates
+        -- Circuit Breaker
+        ExoMonad.Control.CircuitBreakerAdmin
+        ExoMonad.Effect.CircuitBreaker
+        ExoMonad.CircuitBreaker.Interpreter
         -- Effects
         ExoMonad.Control.Effects.SshExec
         ExoMonad.Control.Effects.Effector
@@ -385,12 +391,15 @@ test-suite circuit-breaker-test
     build-depends:
         base >= 4.17 && < 5,
         exomonad-control-server,
+        exomonad-core,
         text >= 2.0 && < 3,
         stm >= 2.5 && < 3,
         time >= 1.9 && < 2,
         containers,
         tasty,
-        tasty-hunit
+        tasty-hunit,
+        aeson,
+        freer-simple
     hs-source-dirs:   test
     default-language: GHC2024
     default-extensions:

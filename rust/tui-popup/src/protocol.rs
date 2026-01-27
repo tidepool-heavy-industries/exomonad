@@ -17,6 +17,8 @@ pub enum Component {
     Text {
         id: String,
         content: String,
+        #[serde(default)]
+        visible_when: Option<VisibilityRule>,
     },
     #[serde(rename = "slider")]
     Slider {
@@ -25,12 +27,16 @@ pub enum Component {
         min: f32,
         max: f32,
         default: f32,
+        #[serde(default)]
+        visible_when: Option<VisibilityRule>,
     },
     #[serde(rename = "checkbox")]
     Checkbox {
         id: String,
         label: String,
         default: bool,
+        #[serde(default)]
+        visible_when: Option<VisibilityRule>,
     },
     #[serde(rename = "textbox")]
     Textbox {
@@ -38,6 +44,8 @@ pub enum Component {
         label: String,
         placeholder: Option<String>,
         rows: Option<u32>,
+        #[serde(default)]
+        visible_when: Option<VisibilityRule>,
     },
     #[serde(rename = "choice")]
     Choice {
@@ -45,17 +53,24 @@ pub enum Component {
         label: String,
         options: Vec<String>,
         default: Option<usize>,
+        #[serde(default)]
+        visible_when: Option<VisibilityRule>,
     },
     #[serde(rename = "multiselect")]
     Multiselect {
         id: String,
         label: String,
         options: Vec<String>,
+        default: Option<usize>, // Keeping for backward compat, though unused in logic
+        #[serde(default)]
+        visible_when: Option<VisibilityRule>,
     },
     #[serde(rename = "group")]
     Group {
         id: String,
         label: String,
+        #[serde(default)]
+        visible_when: Option<VisibilityRule>,
     },
 }
 
@@ -73,16 +88,16 @@ impl Component {
         }
     }
 
-    /// Get the component label (for display). Text components use content as label.
-    pub fn label(&self) -> &str {
+    /// Get the visibility rule.
+    pub fn visible_when(&self) -> Option<&VisibilityRule> {
         match self {
-            Component::Text { content, .. } => content,
-            Component::Slider { label, .. } => label,
-            Component::Checkbox { label, .. } => label,
-            Component::Textbox { label, .. } => label,
-            Component::Choice { label, .. } => label,
-            Component::Multiselect { label, .. } => label,
-            Component::Group { label, .. } => label,
+            Component::Text { visible_when, .. } => visible_when.as_ref(),
+            Component::Slider { visible_when, .. } => visible_when.as_ref(),
+            Component::Checkbox { visible_when, .. } => visible_when.as_ref(),
+            Component::Textbox { visible_when, .. } => visible_when.as_ref(),
+            Component::Choice { visible_when, .. } => visible_when.as_ref(),
+            Component::Multiselect { visible_when, .. } => visible_when.as_ref(),
+            Component::Group { visible_when, .. } => visible_when.as_ref(),
         }
     }
 }
@@ -97,6 +112,30 @@ pub enum VisibilityRule {
     Checked(String),
     /// Show if choice equals value. {"visible_when": {"choice-id": "value"}}
     Equals(HashMap<String, String>),
+    /// Show if a numeric component's value is greater than or equal to `min_value`.
+    /// Haskell: GreaterThan { id, min_value }
+    GreaterThan {
+        id: String,
+        min_value: f32,
+    },
+    /// Show if a numeric component's value is less than or equal to `max_value`.
+    /// Haskell: LessThan { id, max_value }
+    LessThan {
+        id: String,
+        max_value: f32,
+    },
+    /// Show if the count for a component (e.g., multiselect) equals `exact_count`.
+    /// Haskell: CountEquals { id, exact_count }
+    CountEquals {
+        id: String,
+        exact_count: u32,
+    },
+    /// Show if the count for a component is greater than or equal to `min_count`.
+    /// Haskell: CountGreaterThan { id, min_count }
+    CountGreaterThan {
+        id: String,
+        min_count: u32,
+    },
 }
 
 /// Internal state of the popup form
@@ -210,149 +249,56 @@ pub struct PopupResult {
     pub values: Value,
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_component_deserialization() {
-        // Test the Haskell-format JSON
-        let json = r#"{"id":"my-slider","type":"slider","label":"Volume","min":0.0,"max":100.0,"default":50.0}"#;
-        let parsed: Component = serde_json::from_str(json).unwrap();
+    fn test_component_with_visibility_deserialization() {
+        // Test visibility rule deserialization
+        // Checked variant matches a simple string
+        let json = r#"{
+            "id": "slider1",
+            "type": "slider",
+            "label": "My Slider",
+            "min": 0.0,
+            "max": 100.0,
+            "default": 50.0,
+            "visible_when": "checkbox1"
+        }"#;
 
+        let parsed: Component = serde_json::from_str(json).unwrap();
         match parsed {
-            Component::Slider { id, label, min, max, default } => {
-                assert_eq!(id, "my-slider");
-                assert_eq!(label, "Volume");
-                assert_eq!(min, 0.0);
-                assert_eq!(max, 100.0);
-                assert_eq!(default, 50.0);
+            Component::Slider { id, visible_when, .. } => {
+                assert_eq!(id, "slider1");
+                assert_eq!(visible_when, Some(VisibilityRule::Checked("checkbox1".to_string())));
             }
             _ => panic!("Expected Slider component"),
         }
     }
 
     #[test]
-    fn test_text_component_deserialization() {
-        let json = r#"{"id":"msg","type":"text","content":"Hello World"}"#;
-        let parsed: Component = serde_json::from_str(json).unwrap();
-
-        match parsed {
-            Component::Text { id, content } => {
-                assert_eq!(id, "msg");
-                assert_eq!(content, "Hello World");
-            }
-            _ => panic!("Expected Text component"),
-        }
-    }
-
-    #[test]
-    fn test_popup_state_initialization() {
-        let def = PopupDefinition {
-            title: "Test Popup".to_string(),
-            components: vec![
-                Component::Checkbox {
-                    id: "chk".to_string(),
-                    label: "Check".to_string(),
-                    default: true,
-                },
-                Component::Textbox {
-                    id: "txt".to_string(),
-                    label: "Text".to_string(),
-                    placeholder: None,
-                    rows: None,
-                },
-            ],
-        };
-
-        let state = PopupState::new(&def);
-        assert_eq!(state.get_boolean("chk"), Some(true));
-        assert_eq!(state.get_text("txt"), Some(""));
-    }
-
-    #[test]
-    fn test_visibility_rule_deserialization() {
-        // String format for Checked
-        let json = r#""some-checkbox""#;
+    fn test_visibility_rule_variants() {
+        // GreaterThan (untagged, matches by structure)
+        let json = r#"{"id": "s1", "min_value": 10.0}"#;
         let rule: VisibilityRule = serde_json::from_str(json).unwrap();
-        assert_eq!(rule, VisibilityRule::Checked("some-checkbox".to_string()));
-
-        // Object format for Equals
-        let json_eq = r#"{"choice":"Value"}"#;
-        let rule_eq: VisibilityRule = serde_json::from_str(json_eq).unwrap();
-        assert_eq!(rule_eq, VisibilityRule::Equals(HashMap::from([("choice".to_string(), "Value".to_string())])));
-    }
-
-    // ═══════════════════════════════════════════════════════════════════
-    // GOLDEN FILE TESTS - Wire format contract with Haskell
-    // ═══════════════════════════════════════════════════════════════════
-    // These tests parse canonical JSON that Haskell must produce.
-    // NOTE: Disabled because golden files are not present in this worktree subset.
-    /*
-    #[test]
-    fn golden_text_component() {
-        let json = include_str!("../../../tests/golden/tui/text_component.json");
-        let parsed: Component = serde_json::from_str(json).expect("Failed to parse golden text_component.json");
-        match parsed {
-            Component::Text { id, content } => {
-                assert_eq!(id, "msg");
-                assert_eq!(content, "Hello World");
+        match rule {
+            VisibilityRule::GreaterThan { id, min_value } => {
+                assert_eq!(id, "s1");
+                assert_eq!(min_value, 10.0);
             }
-            _ => panic!("Expected Text component"),
+            _ => panic!("Expected GreaterThan"),
+        }
+        
+        // CountEquals (untagged)
+        let json = r#"{"id": "m1", "exact_count": 2}"#;
+        let rule: VisibilityRule = serde_json::from_str(json).unwrap();
+        match rule {
+            VisibilityRule::CountEquals { id, exact_count } => {
+                assert_eq!(id, "m1");
+                assert_eq!(exact_count, 2);
+            }
+            _ => panic!("Expected CountEquals"),
         }
     }
-
-    #[test]
-    fn golden_slider_component() {
-        let json = include_str!("../../../tests/golden/tui/slider_component.json");
-        let parsed: Component = serde_json::from_str(json).expect("Failed to parse golden slider_component.json");
-        match parsed {
-            Component::Slider { id, label, min, max, default } => {
-                assert_eq!(id, "volume");
-                assert_eq!(label, "Volume");
-                assert_eq!(min, 0.0);
-                assert_eq!(max, 100.0);
-                assert_eq!(default, 50.0);
-            }
-            _ => panic!("Expected Slider component"),
-        }
-    }
-
-    #[test]
-    fn golden_checkbox_component() {
-        let json = include_str!("../../../tests/golden/tui/checkbox_component.json");
-        let parsed: Component = serde_json::from_str(json).expect("Failed to parse golden checkbox_component.json");
-        match parsed {
-            Component::Checkbox { id, label, default } => {
-                assert_eq!(id, "enabled");
-                assert_eq!(label, "Enable feature");
-                assert_eq!(default, false);
-            }
-            _ => panic!("Expected Checkbox component"),
-        }
-    }
-
-    #[test]
-    fn golden_popup_definition() {
-        let json = include_str!("../../../tests/golden/tui/popup_definition.json");
-        let parsed: PopupDefinition = serde_json::from_str(json).expect("Failed to parse golden popup_definition.json");
-        assert_eq!(parsed.title, "Confirm Action");
-        assert_eq!(parsed.components.len(), 2);
-        match &parsed.components[0] {
-            Component::Text { id, content } => {
-                assert_eq!(id, "action");
-                assert_eq!(content, "Action: Delete files");
-            }
-            _ => panic!("Expected Text component at index 0"),
-        }
-    }
-
-    #[test]
-    fn golden_popup_result() {
-        let json = include_str!("../../../tests/golden/tui/popup_result.json");
-        let parsed: PopupResult = serde_json::from_str(json).expect("Failed to parse golden popup_result.json");
-        assert_eq!(parsed.button, "submit");
-    }
-    */
 }

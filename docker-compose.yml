@@ -37,6 +37,11 @@ services:
       - EXOMONAD_SOCKETS_PATH=/sockets
       - EXOMONAD_PROJECT_DIR=/repo
       - GEMMA_ENDPOINT=${GEMMA_ENDPOINT:-http://host.docker.internal:11434}
+      - OPENOBSERVE_URL=${OPENOBSERVE_URL:-http://exomonad-openobserve:5080}
+      - OPENOBSERVE_ORG=${OPENOBSERVE_ORG:-default}
+      - OPENOBSERVE_STREAM=${OPENOBSERVE_STREAM:-claude_sessions}
+      - OPENOBSERVE_EMAIL=${OPENOBSERVE_EMAIL:-admin@exomonad.local}
+      - OPENOBSERVE_PASSWORD=${OPENOBSERVE_PASSWORD:-exomonad-dev}
       - HOST_UID=${HOST_UID:-1000}
       - HOST_GID=${HOST_GID:-1000}
       - EXOMONAD_AGENT_IMAGE=${EXOMONAD_AGENT_IMAGE:-exomonad-agent:latest}
@@ -240,7 +245,7 @@ services:
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
-      - HANGAR_ROOT=/worktrees
+      - EXOMONAD_ROOT=/worktrees
       - EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
       - EXOMONAD_TUI_SOCKET=/sockets/tui.sock
       - CLAUDE_CONFIG_DIR=/home/user/.claude

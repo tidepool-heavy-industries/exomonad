@@ -3,11 +3,11 @@ resolver = "2"
 members = [
     "exomonad",
     "exomonad-shared",
-    "tui-sidebar",
     "tui-popup",
     "tui-spawner",
     "effector",
     "docker-ctl",
+    "agent-status",
 ]
 
 [workspace.dependencies]

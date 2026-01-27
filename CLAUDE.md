@@ -316,6 +316,14 @@ Human-driven Claude Code sessions augmented with ExoMonad. **Not headless automa
 8. Claude Code proceeds or blocks
 ```
 
+**Transcript Shipping (SessionEnd/SubagentStop):**
+```
+1. Claude session ends or subagent finishes
+2. exomonad hook [session-end|subagent-stop] reads transcript path from stdin
+3. control-server reads JSONL transcript, enriches with metadata (session_id, role, etc.)
+4. POSTs to OpenObserve (claude_sessions stream) in background
+```
+
 **MCP Tool Flow:**
 ```
 Tools: find_callers, show_fields, show_constructors, teach-graph, popup, spawn_agents, exo_status, file_pr, ...
@@ -353,6 +361,26 @@ In `.claude/settings.local.json`:
           {
             "type": "command",
             "command": "exomonad hook pre-tool-use"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "exomonad hook session-end"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "exomonad hook subagent-stop"
           }
         ]
       }
@@ -534,11 +562,8 @@ Understanding the runtime stack for debugging and extension.
 **Subagent "Log File Not Found"**
 - **Symptom**: Subagent Zellij tabs show a blank log pane or "No such file" error.
 - **Cause**: Mismatch between Zellij layout expecting `pc.log` and process-compose writing `process-compose.log`.
-- **Fix**: The hangar-root `.zellij/worktree.kdl` must:
-  1. Create directories: `mkdir -p .exomonad/logs .exomonad/sockets`
-  2. Force log filename: `process-compose up -L .exomonad/logs/process-compose.log`
-  3. Use robust tail: `tail -F .exomonad/logs/process-compose.log` (capital F waits for file creation)
-- **Note**: Fixed in hangar root as of 2026-01-21. New spawned subagents should work correctly.
+- **Fix**: The repo-root `.zellij/worktree.kdl` must:
+- **Note**: Fixed in repo root as of 2026-01-21. New spawned subagents should work correctly.
 
 #### Socket Lifecycle
 

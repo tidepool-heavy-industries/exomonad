@@ -6,16 +6,39 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$EXOMONAD_BIN_DIR/exomonad hook session-start --role=tl"
+            "command": "$EXOMONAD_BIN_DIR/exomonad hook session-start"
           }
         ]
       },
       {
         "matcher": "resume",
+        "matcher": "always",
         "hooks": [
           {
             "type": "command",
-            "command": "$EXOMONAD_BIN_DIR/exomonad hook session-start --role=tl"
+            "command": "$EXOMONAD_BIN_DIR/exomonad hook session-start"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "always",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$EXOMONAD_BIN_DIR/exomonad hook session-end"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "always",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$EXOMONAD_BIN_DIR/exomonad hook subagent-stop"
           }
         ]
       }

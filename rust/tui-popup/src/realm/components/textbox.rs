@@ -27,11 +27,6 @@ impl TextboxComponent {
         }
     }
 
-    #[cfg(test)]
-    pub fn get_text(&self) -> &str {
-        &self.text
-    }
-
     fn insert_char(&mut self, c: char) -> CmdResult {
         self.text.insert(self.cursor_pos, c);
         self.cursor_pos += 1;

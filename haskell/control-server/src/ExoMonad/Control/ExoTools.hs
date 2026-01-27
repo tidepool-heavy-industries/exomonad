@@ -18,7 +18,12 @@ module ExoMonad.Control.ExoTools
   , spawnAgentsLogic
   , SpawnAgentsArgs(..)
   , SpawnAgentsResult(..)
-  , findHangarRoot
+  , CleanupAgentsGraph(..)
+  , cleanupAgentsHandlers
+  , cleanupAgentsLogic
+  , CleanupAgentsArgs(..)
+  , CleanupAgentsResult(..)
+  , findRepoRoot
 
     -- * File PR
   , FilePRGraph(..)

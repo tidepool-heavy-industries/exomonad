@@ -42,6 +42,7 @@ import ExoMonad.Control.FeedbackTools
 import ExoMonad.Control.ExoTools
   ( exoStatusLogic, ExoStatusArgs(..)
   , spawnAgentsLogic, SpawnAgentsArgs(..), SpawnAgentsResult(..)
+  , cleanupAgentsLogic, CleanupAgentsArgs(..), CleanupAgentsResult(..)
   , filePRLogic, FilePRArgs(..), FilePRResult(..), PRInfo(..)
   )
 
@@ -52,6 +53,10 @@ import ExoMonad.Control.PMTools
 import ExoMonad.Control.PMStatus
   ( pmStatusLogic, PmStatusArgs(..) )
 import ExoMonad.Control.PMPropose (pmProposeLogic, PMProposeArgs(..), PMProposeResult(..))
+import ExoMonad.Control.CircuitBreakerAdmin
+  ( cbStatusLogic, CbStatusArgs(..), CbStatusResult(..)
+  , cbResetLogic, CbResetArgs(..), CbResetResult(..)
+  )
 import ExoMonad.Control.Hook.GitHubRetry (withRetry, defaultRetryConfig, RetryConfig(..))
 import ExoMonad.Control.GHTools
   ( ghIssueListLogic, GHIssueListArgs(..), GHIssueListResult(..)
@@ -69,6 +74,8 @@ import ExoMonad.Env.Interpreter (runEnvIO)
 import ExoMonad.Zellij.Interpreter (runZellijIO)
 import ExoMonad.Control.Effects.DockerCtl (runDockerCtl)
 import ExoMonad.Gemini.Interpreter (runGeminiIO)
+import ExoMonad.CircuitBreaker.Interpreter (runCircuitBreakerIO)
+import ExoMonad.Control.Hook.CircuitBreaker (CircuitBreakerMap)
 import ExoMonad.Effect.TUI (TUI(..))
 import ExoMonad.Effect.Types (runLog, LogLevel(Debug), runReturn, runTime)
 import ExoMonad.Graph.Goto (unwrapSingleChoice)
@@ -79,7 +86,6 @@ import ExoMonad.Control.Runtime.Paths as Paths
 import ExoMonad.Effects.Observability (SpanKind(..), SpanAttribute(..), withSpan, addSpanAttribute)
 import ExoMonad.Observability.Interpreter (runObservabilityWithContext)
 import ExoMonad.Observability.Types (TraceContext, ObservabilityConfig(..), defaultLokiConfig)
-import Network.HTTP.Client (newManager, defaultManagerSettings)
 
 -- | Run TUI interpreter using FIFO-based communication.
 --
@@ -159,8 +165,8 @@ withMcpTracing logger config traceCtx reqId toolName args action = do
 --
 -- == Tier 3: External Orchestration Tools (Exo)
 --   - "exo_status": Get current bead context, git status, and PR info
-handleMcpTool :: Logger -> ServerConfig -> Tracer -> TraceContext -> Text -> Text -> Value -> IO ControlResponse
-handleMcpTool logger config tracer traceCtx reqId toolName args =
+handleMcpTool :: Logger -> ServerConfig -> Tracer -> TraceContext -> CircuitBreakerMap -> Text -> Text -> Value -> IO ControlResponse
+handleMcpTool logger config tracer traceCtx cbMap reqId toolName args =
   withMcpTracing logger config traceCtx reqId toolName args $ do
     let effectiveRole = fromMaybe config.defaultRole (config.role >>= roleFromText)
     
@@ -172,8 +178,6 @@ handleMcpTool logger config tracer traceCtx reqId toolName args =
           ". Available tools: " <> T.intercalate ", " (Set.toList $ fromMaybe Set.empty $ roleTools effectiveRole)
       else do
         logInfo logger $ "[MCP:" <> reqId <> "] Dispatching: " <> toolName
-
-        let currentRole = T.toLower $ T.pack $ show effectiveRole
 
         case toolName of
           -- Tier 1: Deterministic LSP tools (graph-based)
@@ -195,11 +199,16 @@ handleMcpTool logger config tracer traceCtx reqId toolName args =
           -- Note: exo_complete and pre_commit_check have been folded into the Stop hook
           "exo_status" -> handleExoStatusTool logger tracer reqId args
           "spawn_agents" -> handleSpawnAgentsTool logger tracer reqId args
+          "cleanup_agents" -> handleCleanupAgentsTool logger reqId args
           "file_pr" -> handleFilePRTool logger tracer reqId args
           "pm_approve_expansion" -> handlePmApproveExpansionTool logger tracer reqId args
           "pm_prioritize" -> handlePmPrioritizeTool logger tracer reqId args
           "pm_status" -> handlePmStatusTool logger tracer reqId args
           "pm_propose" -> handlePMProposeTool logger tracer reqId args
+
+          -- Circuit Breaker Tools (Admin)
+          "cb_status" -> handleCbStatusTool logger cbMap reqId args
+          "cb_reset" -> handleCbResetTool logger cbMap reqId args
 
           -- GitHub tools
           "gh_issue_list" -> handleGHIssueListTool logger tracer reqId args
@@ -213,7 +222,52 @@ handleMcpTool logger config tracer traceCtx reqId toolName args =
             logError logger $ "  (unknown tool)"
             pure $ mcpToolError reqId NotFound $
               "Tool not found: " <> toolName <>
-              ". Available tools: exo_status, spawn_agents, file_pr, gh_issue_list, gh_issue_create"
+              ". Available tools: exo_status, spawn_agents, cleanup_agents, file_pr, gh_issue_list, gh_issue_create, cb_status, cb_reset"
+
+-- | Handle cb_status tool.
+handleCbStatusTool :: Logger -> CircuitBreakerMap -> Text -> Value -> IO ControlResponse
+handleCbStatusTool logger cbMap reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid cb_status arguments: " <> T.pack err
+
+    Success cbArgs -> do
+      resultOrErr <- try $ runM
+        $ runCircuitBreakerIO cbMap
+        $ fmap unwrapSingleChoice (cbStatusLogic cbArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "cb_status failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Status check complete"
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+-- | Handle cb_reset tool.
+handleCbResetTool :: Logger -> CircuitBreakerMap -> Text -> Value -> IO ControlResponse
+handleCbResetTool logger cbMap reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid cb_reset arguments: " <> T.pack err
+
+    Success cbArgs -> do
+      resultOrErr <- try $ runM
+        $ runCircuitBreakerIO cbMap
+        $ fmap unwrapSingleChoice (cbResetLogic cbArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "cb_reset failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Reset complete: " <> result.status
+          pure $ mcpToolSuccess reqId (toJSON result)
+
 
 -- | Handle the pm_prioritize tool.
 --
@@ -263,7 +317,7 @@ handleSpawnAgentsTool logger tracer reqId args = do
 
       -- Get binary directory (respects EXOMONAD_BIN_DIR env var, defaults to /usr/local/bin)
       -- In Docker: binaries are at /usr/local/bin
-      -- In local dev: EXOMONAD_BIN_DIR should point to hangar runtime/bin
+      -- In local dev: EXOMONAD_BIN_DIR should point to project runtime/bin
       binDir <- Paths.dockerBinDir
       let dockerCtlPath = Paths.dockerCtlBin binDir
 
@@ -288,6 +342,47 @@ handleSpawnAgentsTool logger tracer reqId args = do
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Spawned " <> T.pack (show $ length $ sarWorktrees result) <> " worktrees"
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+
+-- | Handle the cleanup_agents tool.
+--
+-- Runs the CleanupAgentsGraph logic to stop containers and remove worktrees.
+handleCleanupAgentsTool :: Logger -> Text -> Value -> IO ControlResponse
+handleCleanupAgentsTool logger reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid cleanup_agents arguments: " <> T.pack err
+
+    Success caArgs -> do
+      logDebug logger $ "  issue_numbers=" <> T.intercalate "," caArgs.caaIssueNumbers
+
+      -- Most interpreters use default configs which assume current dir is repo root.
+      let repoRoot = "."
+
+      -- Get binary directory (respects EXOMONAD_BIN_DIR env var, defaults to /usr/local/bin)
+      binDir <- Paths.dockerBinDir
+      let dockerCtlPath = Paths.dockerCtlBin binDir
+
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runGitHubIO defaultGitHubConfig
+        $ runGitIO
+        $ runWorktreeIO (defaultWorktreeConfig repoRoot)
+        $ runFileSystemIO
+        $ runEnvIO
+        $ runZellijIO
+        $ runDockerCtl dockerCtlPath
+        $ fmap unwrapSingleChoice (cleanupAgentsLogic caArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "cleanup_agents failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Cleaned up " <> T.pack (show $ length $ carCleaned result) <> " agents"
           pure $ mcpToolSuccess reqId (toJSON result)
 
 
