@@ -171,8 +171,6 @@ handleMcpTool logger config traceCtx reqId toolName args =
       else do
         logInfo logger $ "[MCP:" <> reqId <> "] Dispatching: " <> toolName
 
-        let currentRole = T.toLower $ T.pack $ show effectiveRole
-
         case toolName of
           -- Tier 1: Deterministic LSP tools (graph-based)
           -- NOTE: LSP-backed tools (find_callers, find_callees, show_fields,

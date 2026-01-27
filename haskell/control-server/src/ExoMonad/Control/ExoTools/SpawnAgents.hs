@@ -233,7 +233,7 @@ spawnAgentsHandlers = SpawnAgentsGraph
 
 -- | Handlers for cleanup_agents graph.
 cleanupAgentsHandlers
-  :: (Member Git es, Member Worktree es, Member DockerSpawner es, Member Log es)
+  :: (Member Worktree es, Member DockerSpawner es, Member Log es)
   => CleanupAgentsGraph (AsHandler es)
 cleanupAgentsHandlers = CleanupAgentsGraph
   {
