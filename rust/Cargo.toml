@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "exomonad",
     "exomonad-shared",
+    "exomonad-services",
     "tui-popup",
     "tui-spawner",
     "effector",
