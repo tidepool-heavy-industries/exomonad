@@ -51,12 +51,6 @@ import ExoMonad.Control.PMTools
 import ExoMonad.Control.PMStatus
   ( pmStatusLogic, PmStatusArgs(..) )
 import ExoMonad.Control.PMPropose (pmProposeLogic, PMProposeArgs(..), PMProposeResult(..))
-import ExoMonad.Control.MailboxTools
-  ( sendMessageLogic, SendRequest(..)
-  , checkInboxLogic
-  , readMessageLogic, ReadMessageArgs(..)
-  , markReadLogic, MarkReadArgs(..)
-  )
 import ExoMonad.Control.GHTools
   ( ghIssueListLogic, GHIssueListArgs(..), GHIssueListResult(..)
   , ghIssueShowLogic, GHIssueShowArgs(..), GHIssueShowResult(..)
@@ -204,12 +198,6 @@ handleMcpTool logger config traceCtx reqId toolName args =
           "pm_prioritize" -> handlePmPrioritizeTool logger reqId args
           "pm_status" -> handlePmStatusTool logger reqId args
           "pm_propose" -> handlePMProposeTool logger reqId args
-
-          -- Mailbox tools
-          "send_message" -> handleSendMessageTool logger currentRole reqId args
-          "check_inbox" -> handleCheckInboxTool logger currentRole reqId args
-          "read_message" -> handleReadMessageTool logger reqId args
-          "mark_read" -> handleMarkReadTool logger reqId args
 
           -- GitHub tools
           "gh_issue_list" -> handleGHIssueListTool logger reqId args
@@ -588,116 +576,6 @@ handleRegisterFeedbackTool logger reqId args = do
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Feedback registered for " <> rfArgs.rfaIssueId
           pure $ mcpToolSuccess reqId (toJSON result)
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- MAILBOX TOOLS
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Handle the send_message tool.
-handleSendMessageTool :: Logger -> Text -> Text -> Value -> IO ControlResponse
-handleSendMessageTool logger fromRole reqId args = do
-  case fromJSON args of
-    Error err -> do
-      logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid send_message arguments: " <> T.pack err
-
-    Success req -> do
-      logDebug logger $ "  to=" <> req.to <> " subject=" <> req.subject
-
-      resultOrErr <- try $ runM
-        $ runLog Debug
-        $ runGitHubIO defaultGitHubConfig
-        $ fmap unwrapSingleChoice (sendMessageLogic fromRole req)
-
-      case resultOrErr of
-        Left (e :: SomeException) -> do
-          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "send_message failed: " <> T.pack (displayException e)
-
-        Right msgId -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Message sent: #" <> T.pack (show msgId)
-          pure $ mcpToolSuccess reqId (toJSON msgId)
-
-
--- | Handle the check_inbox tool.
-handleCheckInboxTool :: Logger -> Text -> Text -> Value -> IO ControlResponse
-handleCheckInboxTool logger myRole reqId args = do
-  case fromJSON args of
-    Error err -> do
-      logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid check_inbox arguments: " <> T.pack err
-
-    Success ciArgs -> do
-      logDebug logger $ "  role=" <> myRole
-
-      resultOrErr <- try $ runM
-        $ runLog Debug
-        $ runGitHubIO defaultGitHubConfig
-        $ fmap unwrapSingleChoice (checkInboxLogic myRole ciArgs)
-
-      case resultOrErr of
-        Left (e :: SomeException) -> do
-          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "check_inbox failed: " <> T.pack (displayException e)
-
-        Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Found " <> T.pack (show $ length result) <> " messages"
-          pure $ mcpToolSuccess reqId (toJSON result)
-
-
--- | Handle the read_message tool.
-handleReadMessageTool :: Logger -> Text -> Value -> IO ControlResponse
-handleReadMessageTool logger reqId args = do
-  case fromJSON args of
-    Error err -> do
-      logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid read_message arguments: " <> T.pack err
-
-    Success rmArgs -> do
-      logDebug logger $ "  message_id=" <> T.pack (show rmArgs.rmaMessageId)
-
-      resultOrErr <- try $ runM
-        $ runLog Debug
-        $ runGitHubIO defaultGitHubConfig
-        $ fmap unwrapSingleChoice (readMessageLogic rmArgs)
-
-      case resultOrErr of
-        Left (e :: SomeException) -> do
-          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "read_message failed: " <> T.pack (displayException e)
-
-        Right result -> do
-          case result of
-            Just _ -> logInfo logger $ "[MCP:" <> reqId <> "] Message read successfully"
-            Nothing -> logError logger $ "[MCP:" <> reqId <> "] Message not found"
-          pure $ mcpToolSuccess reqId (toJSON result)
-
-
--- | Handle the mark_read tool.
-handleMarkReadTool :: Logger -> Text -> Value -> IO ControlResponse
-handleMarkReadTool logger reqId args = do
-  case fromJSON args of
-    Error err -> do
-      logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid mark_read arguments: " <> T.pack err
-
-    Success mrArgs -> do
-      logDebug logger $ "  message_id=" <> T.pack (show mrArgs.mraMessageId)
-
-      resultOrErr <- try $ runM
-        $ runLog Debug
-        $ runGitHubIO defaultGitHubConfig
-        $ fmap unwrapSingleChoice (markReadLogic mrArgs)
-
-      case resultOrErr of
-        Left (e :: SomeException) -> do
-          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "mark_read failed: " <> T.pack (displayException e)
-
-        Right () -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Message marked as read"
-          pure $ mcpToolSuccess reqId (toJSON ())
 
 
 -- ════════════════════════════════════════════════════════════════════════════

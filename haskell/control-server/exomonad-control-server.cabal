@@ -48,7 +48,6 @@ library
         ExoMonad.Control.PMTools
         ExoMonad.Control.PMStatus
         ExoMonad.Control.PMPropose
-        ExoMonad.Control.MailboxTools
         ExoMonad.Control.ExoTools
         ExoMonad.Control.ExoTools.Internal
         ExoMonad.Control.ExoTools.Status
@@ -195,24 +194,6 @@ test-suite stop-hook-test
     default-language: GHC2024
     default-extensions:
         OverloadedStrings
-
-test-suite mailbox-tools-test
-    import:           warnings
-    type:             exitcode-stdio-1.0
-    main-is:          MailboxToolsSpec.hs
-    build-depends:
-        base >= 4.17 && < 5,
-        exomonad-control-server,
-        exomonad-core,
-        text >= 2.0 && < 3,
-        freer-simple,
-        tasty,
-        tasty-hunit
-    hs-source-dirs:   test
-    default-language: GHC2024
-    default-extensions:
-        OverloadedStrings
-        TypeApplications
 
 test-suite code-extraction-test
     import:           warnings

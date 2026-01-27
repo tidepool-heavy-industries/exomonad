@@ -99,8 +99,11 @@ stopHookLogic repoName runPreCommit = do
       -- 3. Check for existing PR
       let repo = Repo repoName
           filt = defaultPRFilter { pfBase = Just "main", pfLimit = Just 100 }
-      prs <- listPullRequests repo filt
-      let mPR = find (\p -> p.prHeadRefName == branchName) prs
+      prsResult <- listPullRequests repo filt
+      let prs = case prsResult of
+            Left _err -> []  -- Silently degrade if GitHub unavailable
+            Right ps -> ps
+          mPR = find (\p -> p.prHeadRefName == branchName) prs
 
       -- 4. Build base context
       let hasDirty = not (null dirtyFiles)
@@ -111,16 +114,20 @@ stopHookLogic repoName runPreCommit = do
             Nothing -> pure Nothing
             Just p -> do
               -- Fetch inline review comments
-              inlineComments <- getPullRequestReviews repo p.prNumber
-              
+              inlineResult <- getPullRequestReviews repo p.prNumber
+              let inlineComments = case inlineResult of
+                    Left _err -> []
+                    Right cs -> cs
+
               -- Fetch PR-level reviews (general feedback)
-              maybePrDetails <- getPullRequest repo p.prNumber True
-              let prLevelReviews = case maybePrDetails of
-                    Nothing -> []
-                    Just pr -> map reviewToComment pr.prReviews
-              
+              prDetailsResult <- getPullRequest repo p.prNumber True
+              let prLevelReviews = case prDetailsResult of
+                    Left _err -> []
+                    Right Nothing -> []
+                    Right (Just pr) -> map reviewToComment pr.prReviews
+
               let allComments = inlineComments ++ prLevelReviews
-                  -- NOTE: We currently treat all comments as unresolved because 
+                  -- NOTE: We currently treat all comments as unresolved because
                   -- GitHub's ReviewState doesn't expose resolution status.
                   pendingCount = length allComments
 
@@ -135,13 +142,14 @@ stopHookLogic repoName runPreCommit = do
         Nothing -> pure (Nothing, False, False)
         Just num -> do
           -- Check issue status
-          mIssue <- getIssue repo num False
-          case mIssue of
-            Nothing -> pure (Nothing, False, False)
-            Just issue | issue.issueState == IssueClosed ->
+          issueResult <- getIssue repo num False
+          case issueResult of
+            Left _err -> pure (Nothing, False, False)  -- GitHub error, continue without issue info
+            Right Nothing -> pure (Nothing, False, False)
+            Right (Just issue) | issue.issueState == IssueClosed ->
               -- Issue already closed
               pure (Nothing, False, True)
-            Just _issue -> do
+            Right (Just _issue) -> do
               -- Issue is open - run pre-commit and potentially close
               if hasPR && not hasDirty && runPreCommit
                 then do
@@ -159,7 +167,7 @@ stopHookLogic repoName runPreCommit = do
                   -- Close issue if checks pass
                   if checkSuccess
                     then do
-                      closeIssue repo num
+                      _ <- closeIssue repo num  -- Ignore close failure
                       pure (pcCtx, True, False)
                     else pure (pcCtx, False, False)
                 else pure (Nothing, False, False)

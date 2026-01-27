@@ -67,6 +67,7 @@ import ExoMonad.Effects.GitHub
   ( GitHub, Repo(..), Issue(..), IssueState(..), IssueFilter(..)
   , CreateIssueInput(..), UpdateIssueInput(..), defaultIssueFilter, emptyUpdateIssueInput
   , listIssues, getIssue, createIssue, updateIssue, closeIssue, reopenIssue
+  , GitHubError(..)
   )
 import ExoMonad.Effects.Env (Env, getEnv)
 import ExoMonad.Graph.Generic (AsHandler, type (:-))
@@ -121,14 +122,15 @@ instance ToJSON GHIssueListArgs where
 data GHIssueListResult = GHIssueListResult
   { gilrIssues :: [Issue]
   , gilrCount  :: Int
+  , gilrError  :: Maybe GitHubError
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON GHIssueListResult where
-  toJSON res = object
+  toJSON res = object $
     [ "issues" .= gilrIssues res
     , "count"  .= gilrCount res
-    ]
+    ] ++ maybe [] (\e -> ["error" .= e]) (gilrError res)
 
 -- | Graph definition for gh_issue_list tool.
 data GHIssueListGraph mode = GHIssueListGraph
@@ -156,11 +158,18 @@ ghIssueListLogic args = do
         , ifState  = parseIssueState =<< args.gilaStatus
         , ifLimit  = args.gilaLimit
         }
-  issues <- listIssues repo filt
-  pure $ gotoExit $ GHIssueListResult
-    { gilrIssues = issues
-    , gilrCount  = length issues
-    }
+  result <- listIssues repo filt
+  pure $ gotoExit $ case result of
+    Left err -> GHIssueListResult
+      { gilrIssues = []
+      , gilrCount  = 0
+      , gilrError  = Just err
+      }
+    Right issues -> GHIssueListResult
+      { gilrIssues = issues
+      , gilrCount  = length issues
+      , gilrError  = Nothing
+      }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -197,14 +206,15 @@ instance ToJSON GHIssueShowArgs where
 data GHIssueShowResult = GHIssueShowResult
   { gisrIssue :: Maybe Issue
   , gisrFound :: Bool
+  , gisrError :: Maybe GitHubError
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON GHIssueShowResult where
-  toJSON res = object
+  toJSON res = object $
     [ "issue" .= gisrIssue res
     , "found" .= gisrFound res
-    ]
+    ] ++ maybe [] (\e -> ["error" .= e]) (gisrError res)
 
 -- | Graph definition for gh_issue_show tool.
 data GHIssueShowGraph mode = GHIssueShowGraph
@@ -227,13 +237,20 @@ ghIssueShowLogic
   -> Eff es (GotoChoice '[To Exit GHIssueShowResult])
 ghIssueShowLogic args = do
   repo <- getRepo args.gisaRepo
-  maybeIssue <- getIssue repo args.gisaNumber True -- Include comments
-  pure $ gotoExit $ GHIssueShowResult
-    { gisrIssue = maybeIssue
-    , gisrFound = case maybeIssue of
-        Just _ -> True
-        Nothing -> False
-    }
+  result <- getIssue repo args.gisaNumber True -- Include comments
+  pure $ gotoExit $ case result of
+    Left err -> GHIssueShowResult
+      { gisrIssue = Nothing
+      , gisrFound = False
+      , gisrError = Just err
+      }
+    Right maybeIssue -> GHIssueShowResult
+      { gisrIssue = maybeIssue
+      , gisrFound = case maybeIssue of
+          Just _ -> True
+          Nothing -> False
+      , gisrError = Nothing
+      }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -280,16 +297,17 @@ instance ToJSON GHIssueCreateArgs where
 
 -- | Result of gh_issue_create tool.
 data GHIssueCreateResult = GHIssueCreateResult
-  { gcrNumber :: Int
+  { gcrNumber  :: Maybe Int
   , gcrSuccess :: Bool
+  , gcrError   :: Maybe GitHubError
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON GHIssueCreateResult where
-  toJSON res = object
+  toJSON res = object $
     [ "number"  .= gcrNumber res
     , "success" .= gcrSuccess res
-    ]
+    ] ++ maybe [] (\e -> ["error" .= e]) (gcrError res)
 
 -- | Graph definition for gh_issue_create tool.
 data GHIssueCreateGraph mode = GHIssueCreateGraph
@@ -319,11 +337,18 @@ ghIssueCreateLogic args = do
         , ciiLabels    = fromMaybe [] args.gcaLabels
         , ciiAssignees = fromMaybe [] args.gcaAssignees
         }
-  num <- createIssue input
-  pure $ gotoExit $ GHIssueCreateResult
-    { gcrNumber  = num
-    , gcrSuccess = True
-    }
+  result <- createIssue input
+  pure $ gotoExit $ case result of
+    Left err -> GHIssueCreateResult
+      { gcrNumber  = Nothing
+      , gcrSuccess = False
+      , gcrError   = Just err
+      }
+    Right num -> GHIssueCreateResult
+      { gcrNumber  = Just num
+      , gcrSuccess = True
+      , gcrError   = Nothing
+      }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -380,14 +405,15 @@ instance ToJSON GHIssueUpdateArgs where
 data GHIssueUpdateResult = GHIssueUpdateResult
   { gurSuccess :: Bool
   , gurNumber  :: Int
+  , gurError   :: Maybe GitHubError
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON GHIssueUpdateResult where
-  toJSON res = object
+  toJSON res = object $
     [ "success" .= gurSuccess res
     , "number"  .= gurNumber res
-    ]
+    ] ++ maybe [] (\e -> ["error" .= e]) (gurError res)
 
 -- | Graph definition for gh_issue_update tool.
 data GHIssueUpdateGraph mode = GHIssueUpdateGraph
@@ -417,11 +443,18 @@ ghIssueUpdateLogic args = do
         , uiiLabels    = args.guaLabels
         , uiiAssignees = args.guaAssignees
         }
-  updateIssue repo args.guaNumber input
-  pure $ gotoExit $ GHIssueUpdateResult
-    { gurSuccess = True
-    , gurNumber  = args.guaNumber
-    }
+  result <- updateIssue repo args.guaNumber input
+  pure $ gotoExit $ case result of
+    Left err -> GHIssueUpdateResult
+      { gurSuccess = False
+      , gurNumber  = args.guaNumber
+      , gurError   = Just err
+      }
+    Right () -> GHIssueUpdateResult
+      { gurSuccess = True
+      , gurNumber  = args.guaNumber
+      , gurError   = Nothing
+      }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -458,14 +491,15 @@ instance ToJSON GHIssueCloseArgs where
 data GHIssueCloseResult = GHIssueCloseResult
   { gclrSuccess :: Bool
   , gclrNumber  :: Int
+  , gclrError   :: Maybe GitHubError
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON GHIssueCloseResult where
-  toJSON res = object
+  toJSON res = object $
     [ "success" .= gclrSuccess res
     , "number"  .= gclrNumber res
-    ]
+    ] ++ maybe [] (\e -> ["error" .= e]) (gclrError res)
 
 -- | Graph definition for gh_issue_close tool.
 data GHIssueCloseGraph mode = GHIssueCloseGraph
@@ -488,11 +522,18 @@ ghIssueCloseLogic
   -> Eff es (GotoChoice '[To Exit GHIssueCloseResult])
 ghIssueCloseLogic args = do
   repo <- getRepo args.gclaRepo
-  closeIssue repo args.gclaNumber
-  pure $ gotoExit $ GHIssueCloseResult
-    { gclrSuccess = True
-    , gclrNumber  = args.gclaNumber
-    }
+  result <- closeIssue repo args.gclaNumber
+  pure $ gotoExit $ case result of
+    Left err -> GHIssueCloseResult
+      { gclrSuccess = False
+      , gclrNumber  = args.gclaNumber
+      , gclrError   = Just err
+      }
+    Right () -> GHIssueCloseResult
+      { gclrSuccess = True
+      , gclrNumber  = args.gclaNumber
+      , gclrError   = Nothing
+      }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -529,14 +570,15 @@ instance ToJSON GHIssueReopenArgs where
 data GHIssueReopenResult = GHIssueReopenResult
   { grrSuccess :: Bool
   , grrNumber  :: Int
+  , grrError   :: Maybe GitHubError
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON GHIssueReopenResult where
-  toJSON res = object
+  toJSON res = object $
     [ "success" .= grrSuccess res
     , "number"  .= grrNumber res
-    ]
+    ] ++ maybe [] (\e -> ["error" .= e]) (grrError res)
 
 -- | Graph definition for gh_issue_reopen tool.
 data GHIssueReopenGraph mode = GHIssueReopenGraph
@@ -559,11 +601,18 @@ ghIssueReopenLogic
   -> Eff es (GotoChoice '[To Exit GHIssueReopenResult])
 ghIssueReopenLogic args = do
   repo <- getRepo args.graRepo
-  reopenIssue repo args.graNumber
-  pure $ gotoExit $ GHIssueReopenResult
-    { grrSuccess = True
-    , grrNumber  = args.graNumber
-    }
+  result <- reopenIssue repo args.graNumber
+  pure $ gotoExit $ case result of
+    Left err -> GHIssueReopenResult
+      { grrSuccess = False
+      , grrNumber  = args.graNumber
+      , grrError   = Just err
+      }
+    Right () -> GHIssueReopenResult
+      { grrSuccess = True
+      , grrNumber  = args.graNumber
+      , grrError   = Nothing
+      }
 
 
 -- ════════════════════════════════════════════════════════════════════════════

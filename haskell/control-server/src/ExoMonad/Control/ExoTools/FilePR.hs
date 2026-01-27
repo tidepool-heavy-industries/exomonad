@@ -141,16 +141,21 @@ filePRLogic args = do
       -- 3. Get Issue Info
       -- TODO: Configurable repo
       let repo = Repo "exomonad/exomonad"
-      mIssue <- getIssue repo num False
-      case mIssue of
-        Nothing ->
+      issueResult <- getIssue repo num False
+      case issueResult of
+        Left _err ->
+          pure $ gotoExit $ FilePRResult Nothing False (Just $ "GitHub error fetching issue #" <> T.pack (show num))
+        Right Nothing ->
           pure $ gotoExit $ FilePRResult Nothing False (Just $ "Issue #" <> T.pack (show num) <> " not found.")
-        Just issue -> do
+        Right (Just issue) -> do
           -- 4. Check if PR already exists (idempotent)
           let searchStr = "[gh-" <> T.pack (show num) <> "]"
               filt = defaultPRFilter { pfSearch = Just searchStr, pfLimit = Just 1 }
 
-          existingPrs <- listPullRequests repo filt
+          prsResult <- listPullRequests repo filt
+          let existingPrs = case prsResult of
+                Left _err -> []
+                Right prs -> prs
           case listToMaybe existingPrs of
             Just pr -> do
               -- PR already exists - return it (idempotent behavior)
@@ -179,13 +184,17 @@ filePRLogic args = do
                     }
 
               -- 6. Create PR
-              PRUrl url <- createPR spec
-              -- Note: We don't have the PR number from createPR, so we use 0
-              -- In practice, the URL is what matters
-              let info = PRInfo
-                    { priNumber = 0
-                    , priUrl = url
-                    , priStatus = "OPEN"
-                    , priTitle = title
-                    }
-              pure $ gotoExit $ FilePRResult (Just info) True Nothing
+              prResult <- createPR spec
+              case prResult of
+                Left _err ->
+                  pure $ gotoExit $ FilePRResult Nothing False (Just "GitHub error creating PR")
+                Right (PRUrl url) -> do
+                  -- Note: We don't have the PR number from createPR, so we use 0
+                  -- In practice, the URL is what matters
+                  let info = PRInfo
+                        { priNumber = 0
+                        , priUrl = url
+                        , priStatus = "OPEN"
+                        , priTitle = title
+                        }
+                  pure $ gotoExit $ FilePRResult (Just info) True Nothing

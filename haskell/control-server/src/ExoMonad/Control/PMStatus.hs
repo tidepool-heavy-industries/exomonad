@@ -183,7 +183,10 @@ pmStatusLogic args = do
   -- Fetch all issues
   let listInput = defaultIssueFilter
                     { ifLabels = maybe [] (:[]) args.psaLabelTrack }
-  allIssues <- listIssues repo listInput
+  allIssuesResult <- listIssues repo listInput
+  let allIssues = case allIssuesResult of
+        Left _err -> []  -- Silently degrade if GitHub unavailable
+        Right is -> is
 
   -- 1. Velocity & Trend (Simulated using state for now as Issue doesn't have closedAt yet)
   let closedIssues = filter (\i -> i.issueState == IssueClosed) allIssues
@@ -202,7 +205,10 @@ pmStatusLogic args = do
       needsPMApproval = count (\i -> "needs-approval" `elem` i.issueLabels) openIssues
 
   -- 4. PR Lag
-  allPrs <- listPullRequests repo (defaultPRFilter { pfState = Just PRMerged })
+  allPrsResult <- listPullRequests repo (defaultPRFilter { pfState = Just PRMerged })
+  let allPrs = case allPrsResult of
+        Left _err -> []  -- Silently degrade if GitHub unavailable
+        Right ps -> ps
   let prsInPeriod = filter (isPrMergedBetween periodStart now) allPrs
       prLags = mapMaybe calcPrLag prsInPeriod
       (prMedian, prP90) = calcMetrics prLags (3600) -- in hours

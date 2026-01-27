@@ -286,14 +286,16 @@ pmProposeLogic args = do
 
   
 
-  issueNum <- createIssue input
+  result <- createIssue input
 
 
 
-  pure $ gotoExit $ PMProposeResult
-
-    { pprIssueNum = issueNum
-
-    , pprStatus = "created"
-
-    }
+  case result of
+    Left _err -> pure $ gotoExit $ PMProposeResult
+      { pprIssueNum = -1
+      , pprStatus = "error: GitHub API failure"
+      }
+    Right issueNum -> pure $ gotoExit $ PMProposeResult
+      { pprIssueNum = issueNum
+      , pprStatus = "created"
+      }

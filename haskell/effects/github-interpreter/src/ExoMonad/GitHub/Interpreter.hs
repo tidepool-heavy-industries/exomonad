@@ -56,6 +56,7 @@ import System.Exit (ExitCode(..))
 
 import ExoMonad.Effects.GitHub
   ( GitHub(..)
+  , GitHubError(..)
   , Issue(..)
   , IssueFilter(..)
   , IssueState(..)
@@ -153,7 +154,7 @@ runGitHubIO config = interpret $ \case
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Create an issue using gh CLI.
-ghIssueCreate :: GitHubConfig -> CreateIssueInput -> IO Int
+ghIssueCreate :: GitHubConfig -> CreateIssueInput -> IO (Either GitHubError Int)
 ghIssueCreate config input = do
   let args = [ "issue", "create"
              , "--repo", T.unpack input.ciiRepo.unRepo
@@ -165,22 +166,20 @@ ghIssueCreate config input = do
 
   result <- runGhCommand config args
   case result of
-    Left err -> do
-      logDebug config $ "ghIssueCreate: gh command failed: " <> T.unpack err
-      error $ "Failed to create issue: " <> T.unpack err
+    Left err -> pure $ Left err
     Right output ->
       -- gh issue create returns the URL of the created issue, e.g.
       -- https://github.com/owner/repo/issues/123
       let parts = T.splitOn "/" (T.strip output)
-      in case (reverse parts) of
-        (numStr : _) -> case (reads (T.unpack numStr) :: [(Int, String)]) of
-          [(n, "")] -> pure n
-          _ -> error $ "ghIssueCreate: failed to parse issue number from " <> T.unpack output
-        _ -> error $ "ghIssueCreate: unexpected output format: " <> T.unpack output
+      in case reverse parts of
+        (numStr : _) -> case reads (T.unpack numStr) :: [(Int, String)] of
+          [(n, "")] -> pure $ Right n
+          _ -> pure $ Left $ GHParseError $ "Failed to parse issue number from: " <> output
+        _ -> pure $ Left $ GHParseError $ "Unexpected output format: " <> output
 
 
 -- | Edit an issue using gh CLI.
-ghIssueEdit :: GitHubConfig -> Text -> Int -> UpdateIssueInput -> IO ()
+ghIssueEdit :: GitHubConfig -> Text -> Int -> UpdateIssueInput -> IO (Either GitHubError ())
 ghIssueEdit config repo num input = do
   let args = [ "issue", "edit", show num
              , "--repo", T.unpack repo
@@ -195,76 +194,80 @@ ghIssueEdit config repo num input = do
 
   -- Only run if there are actual changes
   if length args <= 4 -- ["issue", "edit", numStr, "--repo", repo]
-    then pure ()
+    then pure $ Right ()
     else do
       result <- runGhCommand config args
       case result of
-        Left err -> logDebug config $ "ghIssueEdit: gh command failed: " <> T.unpack err
-        Right _ -> pure ()
+        Left err -> pure $ Left err
+        Right _ -> pure $ Right ()
 
 
 -- | Close an issue using gh CLI.
-ghIssueClose :: GitHubConfig -> Text -> Int -> IO ()
+ghIssueClose :: GitHubConfig -> Text -> Int -> IO (Either GitHubError ())
 ghIssueClose config repo num = do
   let args = ["issue", "close", show num, "--repo", T.unpack repo]
   result <- runGhCommand config args
   case result of
-    Left err -> logDebug config $ "ghIssueClose: gh command failed: " <> T.unpack err
-    Right _ -> pure ()
+    Left err -> pure $ Left err
+    Right _ -> pure $ Right ()
 
 
 -- | Reopen an issue using gh CLI.
-ghIssueReopen :: GitHubConfig -> Text -> Int -> IO ()
+ghIssueReopen :: GitHubConfig -> Text -> Int -> IO (Either GitHubError ())
 ghIssueReopen config repo num = do
   let args = ["issue", "reopen", show num, "--repo", T.unpack repo]
   result <- runGhCommand config args
   case result of
-    Left err -> logDebug config $ "ghIssueReopen: gh command failed: " <> T.unpack err
-    Right _ -> pure ()
+    Left err -> pure $ Left err
+    Right _ -> pure $ Right ()
 
 
 -- | Add a label to an issue.
-ghIssueLabelAdd :: GitHubConfig -> Text -> Int -> Text -> IO ()
+ghIssueLabelAdd :: GitHubConfig -> Text -> Int -> Text -> IO (Either GitHubError ())
 ghIssueLabelAdd config repo num label = do
   let args = ["issue", "edit", show num, "--repo", T.unpack repo, "--add-label", T.unpack label]
   result <- runGhCommand config args
   case result of
-    Left err -> logDebug config $ "ghIssueLabelAdd: gh command failed: " <> T.unpack err
-    Right _ -> pure ()
+    Left err -> pure $ Left err
+    Right _ -> pure $ Right ()
 
 
 -- | Remove a label from an issue.
-ghIssueLabelRemove :: GitHubConfig -> Text -> Int -> Text -> IO ()
+ghIssueLabelRemove :: GitHubConfig -> Text -> Int -> Text -> IO (Either GitHubError ())
 ghIssueLabelRemove config repo num label = do
   let args = ["issue", "edit", show num, "--repo", T.unpack repo, "--remove-label", T.unpack label]
   result <- runGhCommand config args
   case result of
-    Left err -> logDebug config $ "ghIssueLabelRemove: gh command failed: " <> T.unpack err
-    Right _ -> pure ()
+    Left err -> pure $ Left err
+    Right _ -> pure $ Right ()
 
 
 -- | Add an assignee to an issue.
-ghIssueAssigneeAdd :: GitHubConfig -> Text -> Int -> Text -> IO ()
+ghIssueAssigneeAdd :: GitHubConfig -> Text -> Int -> Text -> IO (Either GitHubError ())
 ghIssueAssigneeAdd config repo num assignee = do
   let args = ["issue", "edit", show num, "--repo", T.unpack repo, "--add-assignee", T.unpack assignee]
   result <- runGhCommand config args
   case result of
-    Left err -> logDebug config $ "ghIssueAssigneeAdd: gh command failed: " <> T.unpack err
-    Right _ -> pure ()
+    Left err -> pure $ Left err
+    Right _ -> pure $ Right ()
 
 
 -- | Remove an assignee from an issue.
-ghIssueAssigneeRemove :: GitHubConfig -> Text -> Int -> Text -> IO ()
+ghIssueAssigneeRemove :: GitHubConfig -> Text -> Int -> Text -> IO (Either GitHubError ())
 ghIssueAssigneeRemove config repo num assignee = do
   let args = ["issue", "edit", show num, "--repo", T.unpack repo, "--remove-assignee", T.unpack assignee]
   result <- runGhCommand config args
   case result of
-    Left err -> logDebug config $ "ghIssueAssigneeRemove: gh command failed: " <> T.unpack err
-    Right _ -> pure ()
+    Left err -> pure $ Left err
+    Right _ -> pure $ Right ()
 
 
 -- | List issues using gh CLI.
-ghIssueList :: GitHubConfig -> Text -> IssueFilter -> IO [Issue]
+--
+-- Returns Either GitHubError [Issue]:
+-- - Left GitHubError: Command failed (auth, network, etc.)
+-- - Right []: Successfully queried, no issues match filter
+ghIssueList :: GitHubConfig -> Text -> IssueFilter -> IO (Either GitHubError [Issue])
 ghIssueList config repo filt = do
   let baseFields = "number,title,body,author,labels,state,url"
       args = ["issue", "list", "--repo", T.unpack repo, "--json", baseFields]
@@ -274,15 +277,13 @@ ghIssueList config repo filt = do
 
   result <- runGhCommand config args
   case result of
-    Left err -> do
-      logDebug config $ "ghIssueList: gh command failed: " <> T.unpack err
-      pure []
+    Left err -> pure $ Left err
     Right output ->
       case eitherDecode (LBS.fromStrict $ TE.encodeUtf8 output) of
-        Right issues -> pure issues
+        Right issues -> pure $ Right issues
         Left decodeErr -> do
-          logDebug config $ "ghIssueList: JSON decode failed: " <> decodeErr
-          pure []
+          hPutStrLn stderr $ "[GitHub] ERROR: JSON decode failed: " <> decodeErr
+          pure $ Left $ GHParseError $ T.pack decodeErr
 
   where
     stateArgs Nothing           = []
@@ -297,7 +298,12 @@ ghIssueList config repo filt = do
 
 
 -- | View a single issue using gh CLI.
-ghIssueView :: GitHubConfig -> Text -> Int -> Bool -> IO (Maybe Issue)
+--
+-- Returns Either GitHubError (Maybe Issue):
+-- - Left GitHubError: Command failed (auth, network, etc.)
+-- - Right Nothing: Issue not found (valid query, but issue doesn't exist)
+-- - Right (Just issue): Issue found successfully
+ghIssueView :: GitHubConfig -> Text -> Int -> Bool -> IO (Either GitHubError (Maybe Issue))
 ghIssueView config repo num includeComments = do
   let baseFields = "number,title,body,author,labels,state,url"
       fields = if includeComments then baseFields <> ",comments" else baseFields
@@ -305,17 +311,16 @@ ghIssueView config repo num includeComments = do
 
   result <- runGhCommand config args
   case result of
-    Left err -> do
-      logDebug config $ "ghIssueView: gh command failed: " <> T.unpack err
-      pure Nothing
+    Left (GHNotFound _) -> pure $ Right Nothing  -- Not found is valid - issue doesn't exist
+    Left err -> pure $ Left err
     Right output
-      | T.null (T.strip output) -> pure Nothing
+      | T.null (T.strip output) -> pure $ Right Nothing
       | otherwise ->
           case eitherDecode (LBS.fromStrict $ TE.encodeUtf8 output) of
-            Right issue -> pure $ Just issue
+            Right issue -> pure $ Right $ Just issue
             Left decodeErr -> do
-              logDebug config $ "ghIssueView: JSON decode failed: " <> decodeErr
-              pure Nothing
+              hPutStrLn stderr $ "[GitHub] ERROR: JSON decode failed: " <> decodeErr
+              pure $ Left $ GHParseError $ T.pack decodeErr
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -323,7 +328,11 @@ ghIssueView config repo num includeComments = do
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | List pull requests using gh CLI.
-ghPrList :: GitHubConfig -> Text -> PRFilter -> IO [PullRequest]
+--
+-- Returns Either GitHubError [PullRequest]:
+-- - Left GitHubError: Command failed (auth, network, etc.)
+-- - Right []: Successfully queried, no PRs match filter
+ghPrList :: GitHubConfig -> Text -> PRFilter -> IO (Either GitHubError [PullRequest])
 ghPrList config repo filt = do
   let baseFields = "number,title,body,author,labels,state,url,headRefName,baseRefName,createdAt,mergedAt"
       args = ["pr", "list", "--repo", T.unpack repo, "--json", baseFields]
@@ -334,15 +343,13 @@ ghPrList config repo filt = do
 
   result <- runGhCommand config args
   case result of
-    Left err -> do
-      logDebug config $ "ghPrList: gh command failed: " <> T.unpack err
-      pure []
+    Left err -> pure $ Left err
     Right output ->
       case eitherDecode (LBS.fromStrict $ TE.encodeUtf8 output) of
-        Right prs -> pure prs
+        Right prs -> pure $ Right prs
         Left decodeErr -> do
-          logDebug config $ "ghPrList: JSON decode failed: " <> decodeErr
-          pure []
+          hPutStrLn stderr $ "[GitHub] ERROR: JSON decode failed: " <> decodeErr
+          pure $ Left $ GHParseError $ T.pack decodeErr
 
   where
     stateArgs Nothing         = []
@@ -361,7 +368,12 @@ ghPrList config repo filt = do
 
 
 -- | View a single pull request using gh CLI.
-ghPrView :: GitHubConfig -> Text -> Int -> Bool -> IO (Maybe PullRequest)
+--
+-- Returns Either GitHubError (Maybe PullRequest):
+-- - Left GitHubError: Command failed (auth, network, etc.)
+-- - Right Nothing: PR not found (valid query, but PR doesn't exist)
+-- - Right (Just pr): PR found successfully
+ghPrView :: GitHubConfig -> Text -> Int -> Bool -> IO (Either GitHubError (Maybe PullRequest))
 ghPrView config repo num includeDetails = do
   let baseFields = "number,title,body,author,labels,state,url,headRefName,baseRefName,createdAt,mergedAt"
       fields = if includeDetails
@@ -371,21 +383,20 @@ ghPrView config repo num includeDetails = do
 
   result <- runGhCommand config args
   case result of
-    Left err -> do
-      logDebug config $ "ghPrView: gh command failed: " <> T.unpack err
-      pure Nothing
+    Left (GHNotFound _) -> pure $ Right Nothing  -- Not found is valid - PR doesn't exist
+    Left err -> pure $ Left err
     Right output
-      | T.null (T.strip output) -> pure Nothing
+      | T.null (T.strip output) -> pure $ Right Nothing
       | otherwise ->
           case eitherDecode (LBS.fromStrict $ TE.encodeUtf8 output) of
-            Right pr -> pure $ Just pr
+            Right pr -> pure $ Right $ Just pr
             Left decodeErr -> do
-              logDebug config $ "ghPrView: JSON decode failed: " <> decodeErr
-              pure Nothing
+              hPutStrLn stderr $ "[GitHub] ERROR: JSON decode failed: " <> decodeErr
+              pure $ Left $ GHParseError $ T.pack decodeErr
 
 
 -- | Create a pull request using gh CLI.
-ghPrCreate :: GitHubConfig -> PRCreateSpec -> IO PRUrl
+ghPrCreate :: GitHubConfig -> PRCreateSpec -> IO (Either GitHubError PRUrl)
 ghPrCreate config spec = do
   let baseArgs = if T.null spec.prcsBase then [] else ["--base", T.unpack spec.prcsBase]
       args = [ "pr", "create"
@@ -397,15 +408,15 @@ ghPrCreate config spec = do
 
   result <- runGhCommand config args
   case result of
-    Left err -> do
-      logDebug config $ "ghPrCreate: gh command failed: " <> T.unpack err
-      -- For creation, we error out as we can't return a "Nothing" for PRUrl
-      error $ "Failed to create PR: " <> T.unpack err
-    Right output ->
-      pure $ PRUrl $ T.strip output
+    Left err -> pure $ Left err
+    Right output -> pure $ Right $ PRUrl $ T.strip output
 
 -- | Get pull request review comments using gh CLI (via GraphQL for resolution status).
-ghPrReviews :: GitHubConfig -> Text -> Int -> IO [ReviewComment]
+--
+-- Returns Either GitHubError [ReviewComment]:
+-- - Left GitHubError: Command failed (auth, network, etc.)
+-- - Right []: Successfully queried, no review comments
+ghPrReviews :: GitHubConfig -> Text -> Int -> IO (Either GitHubError [ReviewComment])
 ghPrReviews config repo num = do
   let (owner, repoName) = case T.splitOn "/" repo of
         [o, r] -> (o, r)
@@ -443,15 +454,13 @@ ghPrReviews config repo num = do
 
   result <- runGhCommand config args
   case result of
-    Left err -> do
-      logDebug config $ "ghPrReviews: gh command failed: " <> T.unpack err
-      pure []
+    Left err -> pure $ Left err
     Right output ->
       case eitherDecode (LBS.fromStrict $ TE.encodeUtf8 output) of
-        Right (GqlResult comments) -> pure comments
+        Right (GqlResult comments) -> pure $ Right comments
         Left decodeErr -> do
-          logDebug config $ "ghPrReviews: JSON decode failed: " <> decodeErr
-          pure []
+          hPutStrLn stderr $ "[GitHub] ERROR: JSON decode failed: " <> decodeErr
+          pure $ Left $ GHParseError $ T.pack decodeErr
 
 -- | Helper type for parsing GraphQL response
 newtype GqlResult = GqlResult { _unGqlResult :: [ReviewComment] }
@@ -523,29 +532,57 @@ ghAuthCheck = do
 -- HELPERS
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Run a gh command and return stdout or error.
-runGhCommand :: GitHubConfig -> [String] -> IO (Either Text Text)
+-- | Run a gh command and return stdout or structured error.
+--
+-- IMPORTANT: This function returns structured GitHubError for failures,
+-- making error conditions explicit in the type system.
+runGhCommand :: GitHubConfig -> [String] -> IO (Either GitHubError Text)
 runGhCommand config args = do
+  -- Log command before execution (aggressive logging per CLAUDE.md)
+  hPutStrLn stderr $ "[GitHub] Executing: gh " <> unwords args
+
   result <- try $ readProcessWithExitCode "gh" args ""
   case result of
-    Left (e :: SomeException) ->
-      pure $ Left $ "gh command failed: " <> T.pack (show e)
+    Left (e :: SomeException) -> do
+      let errMsg = "gh command exception: " <> T.pack (show e)
+      hPutStrLn stderr $ "[GitHub] ERROR: " <> T.unpack errMsg
+      pure $ Left $ GHCommandFailed 1 errMsg
 
-    Right (exitCode, stdout, stderrOutput) ->
+    Right (exitCode, stdout, stderrOutput) -> do
+      -- Log exit code (aggressive logging per CLAUDE.md)
+      hPutStrLn stderr $ "[GitHub] Exit code: " <> show exitCode
+      unless (null stderrOutput) $
+        hPutStrLn stderr $ "[GitHub] stderr: " <> take 500 stderrOutput
+
       case exitCode of
         ExitSuccess -> pure $ Right $ T.pack stdout
-        ExitFailure code
-          -- gh returns non-zero for "not found" which is OK (return empty)
-          | "not found" `T.isInfixOf` T.toLower (T.pack stderrOutput) ->
-              pure $ Right ""
-          -- Auth errors get special messaging
-          | "authentication" `T.isInfixOf` T.toLower (T.pack stderrOutput) ->
-              pure $ Left $ "Not authenticated. Run: gh auth login"
-          | otherwise ->
-              pure $ Left $ "gh exited with code " <> T.pack (show code)
-                          <> if config.ghcQuiet then "" else ": " <> T.pack stderrOutput
+        ExitFailure code -> do
+          let stderrText = T.pack stderrOutput
+              stderrLower = T.toLower stderrText
+
+          -- Parse specific error conditions into typed errors
+          -- Auth errors are the most critical - must be surfaced clearly
+          if "authentication" `T.isInfixOf` stderrLower ||
+             "not logged in" `T.isInfixOf` stderrLower ||
+             "gh auth login" `T.isInfixOf` stderrLower
+          then do
+            hPutStrLn stderr "[GitHub] ERROR: Not authenticated"
+            pure $ Left $ GHNotAuthenticated "Not authenticated. Run: gh auth login"
+
+          -- "not found" for specific resources
+          else if "not found" `T.isInfixOf` stderrLower ||
+                  "could not find" `T.isInfixOf` stderrLower
+          then do
+            hPutStrLn stderr $ "[GitHub] ERROR: Resource not found: " <> T.unpack stderrText
+            pure $ Left $ GHNotFound stderrText
+
+          -- Generic command failure with exit code and stderr
+          else do
+            hPutStrLn stderr $ "[GitHub] ERROR: Command failed with code " <> show code
+            pure $ Left $ GHCommandFailed code stderrText
 
 
 -- | Log debug message to stderr when not in quiet mode.
+-- Note: Error logging now always happens (per AGGRESSIVE LOGGING principle).
 logDebug :: GitHubConfig -> String -> IO ()
 logDebug config msg = unless config.ghcQuiet $ hPutStrLn stderr msg

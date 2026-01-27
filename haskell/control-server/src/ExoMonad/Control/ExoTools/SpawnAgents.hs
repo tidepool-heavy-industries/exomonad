@@ -266,10 +266,11 @@ processIssue spawnMode mHangarRoot repoRoot wtBaseDir backend shortId = do
               -- Get repo from env var or use default
               mEnvRepo <- getEnv "GITHUB_REPO"
               let repo = Repo $ fromMaybe "exomonad-ai/exomonad" mEnvRepo
-              mIssue <- getIssue repo n False
-              case mIssue of
-                Nothing -> pure $ Left (shortId, "Issue not found: " <> shortId)
-                Just issue -> do
+              issueResult <- getIssue repo n False
+              case issueResult of
+                Left _err -> pure $ Left (shortId, "GitHub error fetching issue: " <> shortId)
+                Right Nothing -> pure $ Left (shortId, "Issue not found: " <> shortId)
+                Right (Just issue) -> do
                   if issue.issueState == IssueClosed
                     then pure $ Left (shortId, "Issue is closed: " <> shortId)
                     else do

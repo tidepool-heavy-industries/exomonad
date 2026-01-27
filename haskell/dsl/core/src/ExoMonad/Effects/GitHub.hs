@@ -37,6 +37,9 @@ module ExoMonad.Effects.GitHub
   , getPullRequestReviews
   , checkAuth
 
+    -- * Types - Errors
+  , GitHubError(..)
+
     -- * Types - Core
   , Repo(..)
   , Author(..)
@@ -75,11 +78,51 @@ import Control.Applicative ((<|>))
 import Data.Text (Text)
 import qualified Data.Text
 import Data.Time (UTCTime)
-import Data.Aeson (FromJSON(..), ToJSON(..), withObject, withText, (.:), (.:?))
+import Data.Aeson (FromJSON(..), ToJSON(..), withObject, withText, (.:), (.:?), (.=), object)
 import GHC.Generics (Generic)
 import Control.Monad.Freer (Eff, Member, send, interpret)
 
 import ExoMonad.Effect (Log, logInfo)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- ERROR TYPES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Errors that can occur during GitHub operations.
+--
+-- These are explicit errors returned from GitHub operations, making
+-- failure modes visible in the type system rather than silently
+-- returning empty results.
+data GitHubError
+  = GHNotAuthenticated Text
+    -- ^ gh CLI is not authenticated. The Text contains the raw error message.
+  | GHNotFound Text
+    -- ^ Resource not found (issue, PR, repo). The Text describes what wasn't found.
+  | GHCommandFailed Int Text
+    -- ^ gh command exited with non-zero code. Int is exit code, Text is stderr.
+  | GHParseError Text
+    -- ^ Failed to parse gh output as JSON. Text contains the parse error.
+  deriving (Show, Eq, Generic)
+
+instance ToJSON GitHubError where
+  toJSON (GHNotAuthenticated msg) = object
+    [ "error" .= ("not_authenticated" :: Text)
+    , "message" .= msg
+    ]
+  toJSON (GHNotFound msg) = object
+    [ "error" .= ("not_found" :: Text)
+    , "message" .= msg
+    ]
+  toJSON (GHCommandFailed code msg) = object
+    [ "error" .= ("command_failed" :: Text)
+    , "exit_code" .= code
+    , "message" .= msg
+    ]
+  toJSON (GHParseError msg) = object
+    [ "error" .= ("parse_error" :: Text)
+    , "message" .= msg
+    ]
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -415,36 +458,36 @@ newtype Label = Label { unLabel :: Text }
 
 data GitHub r where
   -- Issue operations
-  CreateIssue :: CreateIssueInput -> GitHub Int
-    -- ^ Create an issue, returns the issue number.
-  UpdateIssue :: Repo -> Int -> UpdateIssueInput -> GitHub ()
+  CreateIssue :: CreateIssueInput -> GitHub (Either GitHubError Int)
+    -- ^ Create an issue, returns the issue number or error.
+  UpdateIssue :: Repo -> Int -> UpdateIssueInput -> GitHub (Either GitHubError ())
     -- ^ Update an existing issue.
-  CloseIssue  :: Repo -> Int -> GitHub ()
+  CloseIssue  :: Repo -> Int -> GitHub (Either GitHubError ())
     -- ^ Close an issue.
-  ReopenIssue :: Repo -> Int -> GitHub ()
+  ReopenIssue :: Repo -> Int -> GitHub (Either GitHubError ())
     -- ^ Reopen an issue.
-  AddIssueLabel    :: Repo -> Int -> Text -> GitHub ()
+  AddIssueLabel    :: Repo -> Int -> Text -> GitHub (Either GitHubError ())
     -- ^ Add a label to an issue.
-  RemoveIssueLabel :: Repo -> Int -> Text -> GitHub ()
+  RemoveIssueLabel :: Repo -> Int -> Text -> GitHub (Either GitHubError ())
     -- ^ Remove a label from an issue.
-  AddIssueAssignee    :: Repo -> Int -> Text -> GitHub ()
+  AddIssueAssignee    :: Repo -> Int -> Text -> GitHub (Either GitHubError ())
     -- ^ Add an assignee to an issue.
-  RemoveIssueAssignee :: Repo -> Int -> Text -> GitHub ()
+  RemoveIssueAssignee :: Repo -> Int -> Text -> GitHub (Either GitHubError ())
     -- ^ Remove an assignee from an issue.
 
-  GetIssue    :: Repo -> Int -> Bool -> GitHub (Maybe Issue)
+  GetIssue    :: Repo -> Int -> Bool -> GitHub (Either GitHubError (Maybe Issue))
     -- ^ Get issue by number. Bool = include comments.
-  ListIssues  :: Repo -> IssueFilter -> GitHub [Issue]
-    -- ^ List issues with filter.
+  ListIssues  :: Repo -> IssueFilter -> GitHub (Either GitHubError [Issue])
+    -- ^ List issues with filter. Returns error on failure, empty list only when truly empty.
 
   -- Pull request operations
-  CreatePR          :: PRCreateSpec -> GitHub PRUrl
+  CreatePR          :: PRCreateSpec -> GitHub (Either GitHubError PRUrl)
     -- ^ Create a pull request.
-  GetPullRequest    :: Repo -> Int -> Bool -> GitHub (Maybe PullRequest)
+  GetPullRequest    :: Repo -> Int -> Bool -> GitHub (Either GitHubError (Maybe PullRequest))
     -- ^ Get PR by number. Bool = include comments and reviews.
-  ListPullRequests  :: Repo -> PRFilter -> GitHub [PullRequest]
-    -- ^ List PRs with filter.
-  GetPullRequestReviews :: Repo -> Int -> GitHub [ReviewComment]
+  ListPullRequests  :: Repo -> PRFilter -> GitHub (Either GitHubError [PullRequest])
+    -- ^ List PRs with filter. Returns error on failure, empty list only when truly empty.
+  GetPullRequestReviews :: Repo -> Int -> GitHub (Either GitHubError [ReviewComment])
     -- ^ Get review comments for a PR.
 
   -- Auth
@@ -454,46 +497,46 @@ data GitHub r where
 
 -- Smart constructors
 
-createIssue :: Member GitHub effs => CreateIssueInput -> Eff effs Int
+createIssue :: Member GitHub effs => CreateIssueInput -> Eff effs (Either GitHubError Int)
 createIssue input = send (CreateIssue input)
 
-updateIssue :: Member GitHub effs => Repo -> Int -> UpdateIssueInput -> Eff effs ()
+updateIssue :: Member GitHub effs => Repo -> Int -> UpdateIssueInput -> Eff effs (Either GitHubError ())
 updateIssue repo num input = send (UpdateIssue repo num input)
 
-closeIssue :: Member GitHub effs => Repo -> Int -> Eff effs ()
+closeIssue :: Member GitHub effs => Repo -> Int -> Eff effs (Either GitHubError ())
 closeIssue repo num = send (CloseIssue repo num)
 
-reopenIssue :: Member GitHub effs => Repo -> Int -> Eff effs ()
+reopenIssue :: Member GitHub effs => Repo -> Int -> Eff effs (Either GitHubError ())
 reopenIssue repo num = send (ReopenIssue repo num)
 
-addIssueLabel :: Member GitHub effs => Repo -> Int -> Text -> Eff effs ()
+addIssueLabel :: Member GitHub effs => Repo -> Int -> Text -> Eff effs (Either GitHubError ())
 addIssueLabel repo num label = send (AddIssueLabel repo num label)
 
-removeIssueLabel :: Member GitHub effs => Repo -> Int -> Text -> Eff effs ()
+removeIssueLabel :: Member GitHub effs => Repo -> Int -> Text -> Eff effs (Either GitHubError ())
 removeIssueLabel repo num label = send (RemoveIssueLabel repo num label)
 
-addIssueAssignee :: Member GitHub effs => Repo -> Int -> Text -> Eff effs ()
+addIssueAssignee :: Member GitHub effs => Repo -> Int -> Text -> Eff effs (Either GitHubError ())
 addIssueAssignee repo num assignee = send (AddIssueAssignee repo num assignee)
 
-removeIssueAssignee :: Member GitHub effs => Repo -> Int -> Text -> Eff effs ()
+removeIssueAssignee :: Member GitHub effs => Repo -> Int -> Text -> Eff effs (Either GitHubError ())
 removeIssueAssignee repo num assignee = send (RemoveIssueAssignee repo num assignee)
 
-createPR :: Member GitHub effs => PRCreateSpec -> Eff effs PRUrl
+createPR :: Member GitHub effs => PRCreateSpec -> Eff effs (Either GitHubError PRUrl)
 createPR spec = send (CreatePR spec)
 
-getIssue :: Member GitHub effs => Repo -> Int -> Bool -> Eff effs (Maybe Issue)
+getIssue :: Member GitHub effs => Repo -> Int -> Bool -> Eff effs (Either GitHubError (Maybe Issue))
 getIssue repo number includeComments = send (GetIssue repo number includeComments)
 
-listIssues :: Member GitHub effs => Repo -> IssueFilter -> Eff effs [Issue]
+listIssues :: Member GitHub effs => Repo -> IssueFilter -> Eff effs (Either GitHubError [Issue])
 listIssues repo filt = send (ListIssues repo filt)
 
-getPullRequest :: Member GitHub effs => Repo -> Int -> Bool -> Eff effs (Maybe PullRequest)
+getPullRequest :: Member GitHub effs => Repo -> Int -> Bool -> Eff effs (Either GitHubError (Maybe PullRequest))
 getPullRequest repo number includeDetails = send (GetPullRequest repo number includeDetails)
 
-listPullRequests :: Member GitHub effs => Repo -> PRFilter -> Eff effs [PullRequest]
+listPullRequests :: Member GitHub effs => Repo -> PRFilter -> Eff effs (Either GitHubError [PullRequest])
 listPullRequests repo filt = send (ListPullRequests repo filt)
 
-getPullRequestReviews :: Member GitHub effs => Repo -> Int -> Eff effs [ReviewComment]
+getPullRequestReviews :: Member GitHub effs => Repo -> Int -> Eff effs (Either GitHubError [ReviewComment])
 getPullRequestReviews repo number = send (GetPullRequestReviews repo number)
 
 checkAuth :: Member GitHub effs => Eff effs Bool
@@ -504,67 +547,67 @@ checkAuth = send CheckAuth
 -- STUB RUNNER
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Stub runner that logs calls and errors on write operations.
+-- | Stub runner that logs calls and returns stub errors.
 --
--- Read operations return empty results; use @runGitHubIO@ from
--- @exomonad-github-interpreter@ for real implementation.
+-- All operations return errors indicating the stub is not implemented.
+-- Use @runGitHubIO@ from @exomonad-github-interpreter@ for real implementation.
 runGitHubStub :: Member Log effs => Eff (GitHub ': effs) a -> Eff effs a
 runGitHubStub = interpret $ \case
   CreateIssue input -> do
     logInfo $ "[GitHub:stub] CreateIssue called: " <> input.ciiRepo.unRepo <> " - " <> input.ciiTitle
-    error "GitHub.createIssue: not implemented"
+    pure $ Left $ GHCommandFailed 1 "Stub: createIssue not implemented"
 
   UpdateIssue (Repo repo) num _ -> do
     logInfo $ "[GitHub:stub] UpdateIssue called: " <> repo <> " #" <> showT num
-    pure ()
+    pure $ Left $ GHCommandFailed 1 "Stub: updateIssue not implemented"
 
   CloseIssue (Repo repo) num -> do
     logInfo $ "[GitHub:stub] CloseIssue called: " <> repo <> " #" <> showT num
-    pure ()
+    pure $ Left $ GHCommandFailed 1 "Stub: closeIssue not implemented"
 
   ReopenIssue (Repo repo) num -> do
     logInfo $ "[GitHub:stub] ReopenIssue called: " <> repo <> " #" <> showT num
-    pure ()
+    pure $ Left $ GHCommandFailed 1 "Stub: reopenIssue not implemented"
 
   AddIssueLabel (Repo repo) num label -> do
     logInfo $ "[GitHub:stub] AddIssueLabel called: " <> repo <> " #" <> showT num <> " label=" <> label
-    pure ()
+    pure $ Left $ GHCommandFailed 1 "Stub: addIssueLabel not implemented"
 
   RemoveIssueLabel (Repo repo) num label -> do
     logInfo $ "[GitHub:stub] RemoveIssueLabel called: " <> repo <> " #" <> showT num <> " label=" <> label
-    pure ()
+    pure $ Left $ GHCommandFailed 1 "Stub: removeIssueLabel not implemented"
 
   AddIssueAssignee (Repo repo) num assignee -> do
     logInfo $ "[GitHub:stub] AddIssueAssignee called: " <> repo <> " #" <> showT num <> " assignee=" <> assignee
-    pure ()
+    pure $ Left $ GHCommandFailed 1 "Stub: addIssueAssignee not implemented"
 
   RemoveIssueAssignee (Repo repo) num assignee -> do
     logInfo $ "[GitHub:stub] RemoveIssueAssignee called: " <> repo <> " #" <> showT num <> " assignee=" <> assignee
-    pure ()
+    pure $ Left $ GHCommandFailed 1 "Stub: removeIssueAssignee not implemented"
 
   CreatePR (PRCreateSpec (Repo repo) headBranch baseBranch title _) -> do
     logInfo $ "[GitHub:stub] CreatePR called: " <> repo <> " (" <> headBranch <> " -> " <> baseBranch <> ") - " <> title
-    error "GitHub.createPR: not implemented"
+    pure $ Left $ GHCommandFailed 1 "Stub: createPR not implemented"
 
   GetIssue (Repo repo) num _ -> do
     logInfo $ "[GitHub:stub] GetIssue called: " <> repo <> " #" <> showT num
-    pure Nothing
+    pure $ Left $ GHCommandFailed 1 "Stub: getIssue not implemented"
 
   ListIssues (Repo repo) _ -> do
     logInfo $ "[GitHub:stub] ListIssues called: " <> repo
-    pure []
+    pure $ Left $ GHCommandFailed 1 "Stub: listIssues not implemented"
 
   GetPullRequest (Repo repo) num _ -> do
     logInfo $ "[GitHub:stub] GetPullRequest called: " <> repo <> " #" <> showT num
-    pure Nothing
+    pure $ Left $ GHCommandFailed 1 "Stub: getPullRequest not implemented"
 
   ListPullRequests (Repo repo) _ -> do
     logInfo $ "[GitHub:stub] ListPullRequests called: " <> repo
-    pure []
+    pure $ Left $ GHCommandFailed 1 "Stub: listPullRequests not implemented"
 
   GetPullRequestReviews (Repo repo) num -> do
     logInfo $ "[GitHub:stub] GetPullRequestReviews called: " <> repo <> " #" <> showT num
-    pure []
+    pure $ Left $ GHCommandFailed 1 "Stub: getPullRequestReviews not implemented"
 
   CheckAuth -> do
     logInfo "[GitHub:stub] CheckAuth called"

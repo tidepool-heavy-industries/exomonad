@@ -22,8 +22,6 @@ import ExoMonad.Control.PMTools
   ( PmApproveExpansionGraph, PmPrioritizeGraph )
 import ExoMonad.Control.PMStatus (PmStatusGraph)
 import ExoMonad.Control.PMPropose (PMProposeGraph)
-import ExoMonad.Control.MailboxTools
-  ( SendMessageGraph, CheckInboxGraph, ReadMessageGraph, MarkReadGraph )
 import ExoMonad.Control.GHTools
   ( GHIssueListGraph, GHIssueShowGraph, GHIssueCreateGraph
   , GHIssueUpdateGraph, GHIssueCloseGraph, GHIssueReopenGraph
@@ -57,12 +55,6 @@ exportMCPTools logger = do
   let pmProTools = reifyMCPTools (Proxy @PMProposeGraph)
   let prTools = reifyMCPTools (Proxy @PrReviewStatusGraph)
 
-  -- Mailbox tools
-  let smTools = reifyMCPTools (Proxy @SendMessageGraph)
-  let ciTools = reifyMCPTools (Proxy @CheckInboxGraph)
-  let rmTools = reifyMCPTools (Proxy @ReadMessageGraph)
-  let mrTools = reifyMCPTools (Proxy @MarkReadGraph)
-
   -- GitHub tools
   let ghListTools = reifyMCPTools (Proxy @GHIssueListGraph)
   let ghShowTools = reifyMCPTools (Proxy @GHIssueShowGraph)
@@ -82,10 +74,6 @@ exportMCPTools logger = do
   logDebug logger $ "[MCP Discovery] PmStatusGraph: " <> T.pack (show (length pmStatTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] PMProposeGraph: " <> T.pack (show (length pmProTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] PrReviewStatusGraph: " <> T.pack (show (length prTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] SendMessageGraph: " <> T.pack (show (length smTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] CheckInboxGraph: " <> T.pack (show (length ciTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] ReadMessageGraph: " <> T.pack (show (length rmTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] MarkReadGraph: " <> T.pack (show (length mrTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] GHIssueListGraph: " <> T.pack (show (length ghListTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] GHIssueShowGraph: " <> T.pack (show (length ghShowTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] GHIssueCreateGraph: " <> T.pack (show (length ghCreateTools)) <> " tools"
@@ -96,7 +84,6 @@ exportMCPTools logger = do
   let allTools = concat
         [ popupTools, rfTools
         , esTools, saTools, fpTools, paeTools, pmPriTools, pmStatTools, pmProTools, prTools
-        , smTools, ciTools, rmTools, mrTools
         , ghListTools, ghShowTools, ghCreateTools, ghUpdateTools, ghCloseTools, ghReopenTools
         ]
 

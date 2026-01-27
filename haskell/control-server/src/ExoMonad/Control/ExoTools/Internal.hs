@@ -102,14 +102,21 @@ getDevelopmentContext maybeIssueId = do
 
   -- 3. Get Issue Info
   mIssue <- case targetIssueNum of
-    Just num -> getIssue repo num False
+    Just num -> do
+      result <- getIssue repo num False
+      pure $ case result of
+        Left _err -> Nothing
+        Right mi -> mi
     Nothing -> pure Nothing
 
   -- 4. Get PR Info
   mPR <- case mWt of
     Just wt -> do
       let filt = defaultPRFilter { pfBase = Just "main", pfLimit = Just 100 }
-      prs <- listPullRequests repo filt
+      prsResult <- listPullRequests repo filt
+      let prs = case prsResult of
+            Left _err -> []
+            Right ps -> ps
       pure $ find (\pr -> pr.prHeadRefName == wt.wiBranch) prs
     Nothing -> pure Nothing
 
@@ -117,8 +124,11 @@ getDevelopmentContext maybeIssueId = do
   mSprintSummary <- case mIssue of
     Just _ -> pure Nothing
     Nothing -> do
-      allIssues <- listIssues repo (defaultIssueFilter { ifState = Just IssueOpen })
-      let toIssueBrief i = IssueBrief
+      allIssuesResult <- listIssues repo (defaultIssueFilter { ifState = Just IssueOpen })
+      let allIssues = case allIssuesResult of
+            Left _err -> []
+            Right is -> is
+          toIssueBrief i = IssueBrief
             { ibNumber = i.issueNumber
             , ibTitle = i.issueTitle
             }

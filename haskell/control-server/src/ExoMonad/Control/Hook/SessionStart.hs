@@ -96,7 +96,11 @@ sessionStartLogic role cwdPath = do
 
       -- Fetch issue info if we have a number
       mIssue <- case maybeIssueNum of
-        Just num -> getIssue repo num False
+        Just num -> do
+          result <- getIssue repo num False
+          pure $ case result of
+            Left _err -> Nothing
+            Right mi -> mi
         Nothing -> pure Nothing
 
       -- Build template context
@@ -143,7 +147,10 @@ buildDashboard repo = do
   logDebug "Building TL dashboard..."
 
   -- Fetch open issues
-  openIssues <- listIssues repo (defaultIssueFilter { ifState = Just IssueOpen, ifLimit = Just 20 })
+  openIssuesResult <- listIssues repo (defaultIssueFilter { ifState = Just IssueOpen, ifLimit = Just 20 })
+  let openIssues = case openIssuesResult of
+        Left _err -> []  -- Silently degrade if GitHub unavailable
+        Right is -> is
 
   pure IssuesDashboardContext
     { open = map toIssueContext openIssues

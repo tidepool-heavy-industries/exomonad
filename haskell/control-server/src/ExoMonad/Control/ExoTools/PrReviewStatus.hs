@@ -202,13 +202,17 @@ prReviewStatusLogic args = do
   let repo = Repo "exomonad-ai/exomonad"
 
   -- Fetch inline review comments (code-specific feedback)
-  inlineComments <- getPullRequestReviews repo args.prsaPrNumber
+  inlineCommentsResult <- getPullRequestReviews repo args.prsaPrNumber
+  let inlineComments = case inlineCommentsResult of
+        Left _err -> []
+        Right cs -> cs
 
   -- Fetch PR-level reviews (general feedback on the PR)
-  maybePr <- getPullRequest repo args.prsaPrNumber True
-  let prLevelReviews = case maybePr of
-        Nothing -> []
-        Just pr -> map reviewToComment pr.prReviews
+  maybePrResult <- getPullRequest repo args.prsaPrNumber True
+  let prLevelReviews = case maybePrResult of
+        Left _err -> []
+        Right Nothing -> []
+        Right (Just pr) -> map reviewToComment pr.prReviews
 
   -- Combine all feedback
   let allComments = inlineComments ++ prLevelReviews

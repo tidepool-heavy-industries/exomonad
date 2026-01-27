@@ -120,26 +120,30 @@ workflowStateToLabel Ready = labelReady
 -- If multiple workflow labels are present, returns the first one found.
 getWorkflowState :: Member GitHub effs => Repo -> Int -> Eff effs (Maybe WorkflowState)
 getWorkflowState repo issueNum = do
-  mIssue <- getIssue repo issueNum False
-  case mIssue of
-    Nothing -> pure Nothing
-    Just issue -> pure $ listToMaybe $ mapMaybe labelToWorkflowState issue.issueLabels
+  result <- getIssue repo issueNum False
+  case result of
+    Left _err -> pure Nothing
+    Right Nothing -> pure Nothing
+    Right (Just issue) -> pure $ listToMaybe $ mapMaybe labelToWorkflowState issue.issueLabels
 
 -- | Set the workflow state of an issue by updating its labels.
 --
 -- This removes any existing workflow labels before adding the new one.
 setWorkflowState :: Member GitHub effs => Repo -> Int -> WorkflowState -> Eff effs ()
 setWorkflowState repo issueNum newState = do
-  mIssue <- getIssue repo issueNum False
-  case mIssue of
-    Nothing -> pure ()
-    Just issue -> do
+  result <- getIssue repo issueNum False
+  case result of
+    Left _err -> pure ()
+    Right Nothing -> pure ()
+    Right (Just issue) -> do
       -- Remove existing workflow labels
       forM_ issue.issueLabels $ \l ->
-        when (l `elem` allWorkflowLabels) $
-          removeIssueLabel repo issueNum l
+        when (l `elem` allWorkflowLabels) $ do
+          _ <- removeIssueLabel repo issueNum l
+          pure ()
       -- Add new workflow label
-      addIssueLabel repo issueNum (workflowStateToLabel newState)
+      _ <- addIssueLabel repo issueNum (workflowStateToLabel newState)
+      pure ()
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PM-APPROVE-EXPANSION GRAPH
@@ -211,13 +215,17 @@ pmApproveExpansionLogic
 pmApproveExpansionLogic args = do
   -- TODO: Configurable repo
   let repo = Repo "exomonad/exomonad"
-  mIssue <- getIssue repo args.paeaIssueNum False
-  case mIssue of
-    Nothing -> pure $ gotoExit PmApproveExpansionResult
+  issueResult <- getIssue repo args.paeaIssueNum False
+  case issueResult of
+    Left _err -> pure $ gotoExit PmApproveExpansionResult
+      { paerNewStatus = "error"
+      , paerMessage = "GitHub error fetching issue #" <> T.pack (show args.paeaIssueNum)
+      }
+    Right Nothing -> pure $ gotoExit PmApproveExpansionResult
       { paerNewStatus = "error"
       , paerMessage = "Issue #" <> T.pack (show args.paeaIssueNum) <> " not found"
       }
-    Just issue -> do
+    Right (Just issue) -> do
       case args.paeaDecision of
         "approve" -> do
           setWorkflowState repo args.paeaIssueNum Ready
@@ -233,10 +241,10 @@ pmApproveExpansionLogic args = do
           case args.paeaFeedback of
             Just feedback -> do
               let oldDesc = issue.issueBody
-                  newDesc = if T.null oldDesc 
-                            then feedback 
+                  newDesc = if T.null oldDesc
+                            then feedback
                             else oldDesc <> "\n\n**PM Feedback:**\n" <> feedback
-              updateIssue repo args.paeaIssueNum $ emptyUpdateIssueInput { uiiBody = Just newDesc }
+              _ <- updateIssue repo args.paeaIssueNum $ emptyUpdateIssueInput { uiiBody = Just newDesc }
               pure $ gotoExit PmApproveExpansionResult
                 { paerNewStatus = workflowStateToLabel NeedsTLReview
                 , paerMessage = "Issue rejected. Moved to 'needs-tl-review' and feedback appended."
@@ -340,24 +348,26 @@ pmPrioritizeLogic args = do
     if item.piNewPriority < 0 || item.piNewPriority > 4
     then pure $ PrioritizeResultItem item.piIssueNum False (Just "Invalid priority: must be between 0 and 4")
     else do
-      mIssue <- getIssue repo item.piIssueNum False
-      case mIssue of
-        Nothing -> pure $ PrioritizeResultItem item.piIssueNum False (Just "Issue not found")
-        Just issue -> do
+      issueResult <- getIssue repo item.piIssueNum False
+      case issueResult of
+        Left _err -> pure $ PrioritizeResultItem item.piIssueNum False (Just "GitHub error fetching issue")
+        Right Nothing -> pure $ PrioritizeResultItem item.piIssueNum False (Just "Issue not found")
+        Right (Just issue) -> do
           let oldDesc = Just issue.issueBody
               newDesc = appendRationale oldDesc item.piNewPriority item.piRationale
               priorityLabel = "P" <> T.pack (show item.piNewPriority)
-              
+
           -- Remove old priority labels
           forM_ ["P0", "P1", "P2", "P3", "P4"] $ \l ->
-            when (l `elem` issue.issueLabels && l /= priorityLabel) $
-              removeIssueLabel repo item.piIssueNum l
-              
+            when (l `elem` issue.issueLabels && l /= priorityLabel) $ do
+              _ <- removeIssueLabel repo item.piIssueNum l
+              pure ()
+
           -- Add new priority label
-          addIssueLabel repo item.piIssueNum priorityLabel
+          _ <- addIssueLabel repo item.piIssueNum priorityLabel
 
           -- Update description
-          updateIssue repo item.piIssueNum emptyUpdateIssueInput
+          _ <- updateIssue repo item.piIssueNum emptyUpdateIssueInput
             { uiiBody = Just newDesc
             }
           pure $ PrioritizeResultItem item.piIssueNum True Nothing
