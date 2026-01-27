@@ -16,28 +16,25 @@ layout {
     tab name="ExoMonad" focus=true {
         pane split_direction="vertical" {
 
-            // LEFT: Claude Code with supervisor loop (auto-restarts on crash)
-            pane name="Claude Code" size="50%" focus=true {
-                command "bash"
-                args "-c" "cd \"$(git rev-parse --show-toplevel)\" && if [ -z \"${EXOMONAD_CONTROL_SOCKET:-}\" ]; then echo 'ERROR: EXOMONAD_CONTROL_SOCKET must be exported before starting Zellij' >&2; sleep 5; exit 1; fi; while true; do ./scripts/wait-for-socket.sh \"$EXOMONAD_CONTROL_SOCKET\" 60 ControlServer || exit 1; claude -d --continue --dangerously-skip-permissions; echo '⚠️ Claude exited. Restarting in 2s...'; sleep 2; done"
+            // LEFT: Claude Code + Agent Status Dashboard
+            pane split_direction="horizontal" size="50%" {
+                // Top: Main Agent Interaction (80%)
+                pane name="Claude Code" size="80%" focus=true {
+                    command "bash"
+                    args "-c" "cd \"$(git rev-parse --show-toplevel)\" && if [ -z \"${EXOMONAD_CONTROL_SOCKET:-}\" ]; then echo 'ERROR: EXOMONAD_CONTROL_SOCKET must be exported before starting Zellij' >&2; sleep 5; exit 1; fi; while true; do ./scripts/wait-for-socket.sh \"$EXOMONAD_CONTROL_SOCKET\" 60 ControlServer || exit 1; claude -d --continue --dangerously-skip-permissions; echo '⚠️ Claude exited. Restarting in 2s...'; sleep 2; done"
+                }
+
+                // Bottom: Agent Status Dashboard (20%)
+                pane name="Agent Status" size="20%" {
+                    command "bash"
+                    args "-c" "cd \"$(git rev-parse --show-toplevel)\" && while true; do agent-status; echo '⚠️ Agent Status exited. Restarting in 2s...'; sleep 2; done"
+                }
             }
 
-            pane split_direction="horizontal" {
-
-                // TOP-RIGHT: TUI Sidebar with supervisor loop (auto-restarts on crash)
-                // Binaries are on PATH from start-augmented.sh (single source of truth)
-                pane name="TUI Sidebar" size="50%" {
-                    command "bash"
-                    args "-c" "cd \"$(git rev-parse --show-toplevel)\" && if [ -z \"${EXOMONAD_CONTROL_SOCKET:-}\" ] || [ -z \"${EXOMONAD_TUI_SOCKET:-}\" ]; then echo 'ERROR: EXOMONAD_CONTROL_SOCKET and EXOMONAD_TUI_SOCKET must be exported before starting Zellij' >&2; sleep 5; exit 1; fi; while true; do ./scripts/wait-for-socket.sh \"$EXOMONAD_TUI_SOCKET\" 60 TUIServer || exit 1; tui-sidebar --socket \"$EXOMONAD_TUI_SOCKET\" --health-socket .exomonad/sockets/tui-sidebar.sock; EXIT_CODE=$?; if [ $EXIT_CODE -eq 0 ]; then echo '✅ TUI Sidebar exited normally (or giving up because TUI is disabled).'; echo 'Pane will remain open. Close manually or restart Zellij if you want to retry.'; tail -f /dev/null; else echo \"⚠️ TUI exited with code $EXIT_CODE. Restarting in 2s...\"; sleep 2; fi; done"
-                }
-
-                // BOTTOM-RIGHT: Backend Status (process-compose dashboard)
-                // Uses exomonad-runner.sh wrapper to ensure trap handlers fire on Zellij exit,
-                // triggering 'process-compose down' for graceful service termination.
-                pane name="Backend" {
-                    command "bash"
-                    args "-c" "cd \"$(git rev-parse --show-toplevel)\" && mkdir -p .exomonad/sockets .exomonad/logs && exec ./scripts/exomonad-runner.sh up"
-                }
+            // RIGHT: Backend Status (process-compose dashboard)
+            pane name="Backend" {
+                command "bash"
+                args "-c" "cd \"$(git rev-parse --show-toplevel)\" && mkdir -p .exomonad/sockets .exomonad/logs && exec ./scripts/exomonad-runner.sh up"
             }
         }
     }

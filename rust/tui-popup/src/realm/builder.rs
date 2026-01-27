@@ -108,7 +108,7 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
             }
         }
 
-        Component::Multiselect { id, label, options } => {
+        Component::Multiselect { id, label, options, .. } => {
             let selections = state
                 .get_multichoice(id)
                 .map(|s| s.to_vec())
