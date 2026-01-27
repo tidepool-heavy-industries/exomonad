@@ -18,7 +18,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     gosu \
     procps \
+    gpg \
+    gnupg \
     && rm -rf /var/lib/apt/lists/*
+
+# Install GitHub CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Docker CLI (client only)
+RUN curl -fsSL https://get.docker.com | sh && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Zellij (static binary for speed)
+RUN arch=$(dpkg --print-architecture) && \
+    case "$arch" in \
+        "amd64") zarch="x86_64-unknown-linux-musl" ;; \
+        "arm64") zarch="aarch64-unknown-linux-musl" ;; \
+        *) echo "Unsupported architecture: $arch" && exit 1 ;; \
+    esac && \
+    curl -L "https://github.com/zellij-org/zellij/releases/latest/download/zellij-$zarch.tar.gz" | tar xz -C /usr/local/bin && \
+    chmod +x /usr/local/bin/zellij
 
 # Create app user at build time (UID 1000 for host compatibility)
 RUN groupadd -g 1000 user && useradd -u 1000 -g user -m -s /bin/bash user

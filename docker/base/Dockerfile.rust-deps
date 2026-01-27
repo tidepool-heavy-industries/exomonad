@@ -49,6 +49,8 @@ RUN apt-get update && apt-get install -y \
     perl \
     perl-base \
     build-essential \
+    lld \
+    clang \
     && rm -rf /var/lib/apt/lists/*
 
 RUN cargo install cargo-chef --locked
@@ -59,6 +61,8 @@ WORKDIR /app
 COPY --from=planner /recipe.json /recipe.json
 
 # Cook deps (this is the expensive cached layer)
+# Use lld for faster linking
+ENV RUSTFLAGS="-C link-arg=-fuse-ld=lld"
 RUN cargo chef cook --release --recipe-path /recipe.json
 
 # =============================================================================
@@ -72,6 +76,8 @@ RUN apt-get update && apt-get install -y \
     perl \
     perl-base \
     build-essential \
+    lld \
+    clang \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -86,6 +92,7 @@ COPY rust/ ./rust/
 # Version embedding via vergen (if build.rs configured)
 ARG GIT_SHA
 ENV VERGEN_GIT_SHA=${GIT_SHA}
+ENV RUSTFLAGS="-C link-arg=-fuse-ld=lld"
 
 # Build all binaries
 RUN cd rust && cargo build --release

@@ -18,29 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi8 \
     zlib1g \
     socat \
-    gpg \
     && rm -rf /var/lib/apt/lists/*
-
-# Install GitHub CLI (required for gh_issue_* MCP tools)
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
-    && apt-get update && apt-get install -y --no-install-recommends gh \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Docker CLI for spawner communication
-RUN curl -fsSL https://get.docker.com | sh && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install cargo-binstall for binary installation
-# Set CARGO_HOME explicitly to root's cargo since we run as root during build
-ENV CARGO_HOME=/root/.cargo
-RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
-
-# Install Zellij for cross-container tab creation
-ENV PATH="/root/.cargo/bin:${PATH}"
-RUN cargo-binstall --no-confirm zellij && \
-    cp /root/.cargo/bin/zellij /usr/local/bin/zellij && \
-    chmod 755 /usr/local/bin/zellij
 
 # Copy pre-built binaries from builder contexts
 # These come from the BuildKit contexts defined in docker-bake.hcl

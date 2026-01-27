@@ -16,16 +16,42 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     git \
     curl \
+    lld \
+    clang \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy all source
-COPY cabal.project ./
-COPY haskell/ ./haskell/
+# 1. Update cabal index (independent of source)
+RUN --mount=type=cache,target=/root/.cache/cabal,sharing=locked \
+    cabal update
 
-# Remove Nix-specific zlib configuration (paths don't exist in Docker)
+# Configure cabal to use lld
+RUN mkdir -p /root/.cabal && \
+    echo "program-default-config" >> /root/.cabal/config && \
+    echo "  ghc-options: -optl-fuse-ld=lld" >> /root/.cabal/config
+
+# 2. Dependency Caching Stage
+# Copy only cabal files and cabal.project
+COPY cabal.project ./
+# We use a glob to copy only cabal files while preserving directory structure
+# This is tricky with COPY, so we use a temporary context or just copy what we need.
+# Since we have many, we'll copy the whole haskell dir but then use the dummy generator
+# to avoid invalidating cache on source changes.
+# Actually, a better way is to use a separate stage for dependency fetching.
+COPY haskell/ ./haskell/
+COPY docker/base/generate-dummy-modules.sh ./
 RUN sed -i '/package zlib/,+2d' cabal.project
+
+RUN --mount=type=cache,target=/root/.local/state/cabal/store,sharing=locked \
+    --mount=type=cache,target=/root/.cache/cabal,sharing=locked \
+    --mount=type=cache,target=/app/dist-newstyle,sharing=locked \
+    ./generate-dummy-modules.sh && \
+    cabal build all --only-dependencies -j --ghc-options=-O1
+
+# 3. Final Build Stage
+# Now copy the REAL source code (this will invalidate cache for this and subsequent steps)
+COPY haskell/ ./haskell/
 
 # Version embedding
 ARG GIT_SHA
@@ -39,7 +65,7 @@ ENV EXOMONAD_GIT_SHA=${GIT_SHA}
 RUN --mount=type=cache,target=/root/.local/state/cabal/store,sharing=locked \
     --mount=type=cache,target=/root/.cache/cabal,sharing=locked \
     --mount=type=cache,target=/app/dist-newstyle,sharing=locked \
-    cabal update && cabal build all -j --ghc-options=-O1
+    cabal build all -j --ghc-options=-O1
 
 # Copy binary to known location (must happen outside cache mount)
 RUN --mount=type=cache,target=/app/dist-newstyle,sharing=locked \

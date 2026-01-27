@@ -11,21 +11,6 @@ FROM common-base
 ARG GIT_SHA
 LABEL org.opencontainers.image.revision=${GIT_SHA}
 
-# Install Docker CLI only (no daemon)
-RUN curl -fsSL https://get.docker.com | sh && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install cargo-binstall for binary installation
-# Set CARGO_HOME explicitly to root's cargo since we run as root during build
-ENV CARGO_HOME=/root/.cargo
-RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
-
-# Install Zellij via cargo-binstall
-ENV PATH="/root/.cargo/bin:${PATH}"
-RUN cargo-binstall --no-confirm zellij && \
-    cp /root/.cargo/bin/zellij /usr/local/bin/zellij && \
-    chmod 755 /usr/local/bin/zellij
-
 # Copy pre-built tui-popup binary from builder context
 COPY --from=rust-builder /app/rust/target/release/tui-popup /usr/local/bin/tui-popup
 RUN chmod +x /usr/local/bin/tui-popup

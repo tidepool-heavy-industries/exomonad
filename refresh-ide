@@ -30,17 +30,27 @@ echo "Git SHA: $GIT_SHA"
 echo "Building images via docker bake..."
 ./build --load
 
-# 4. Force recreation of containers
-#    Images already built above, no --build needed
-#    --force-recreate: Kills old containers, starts fresh ones
+# 4. Clean up volatile state (sockets, locks) to prevent stale container issues
+#    We use a temp container to wipe shared volumes without destroying the volumes themselves
+#    (preserving ownership/permissions is less critical here as entrypoint fixes them)
+echo "Cleaning volatile runtime state..."
+docker run --rm \
+    -v exomonad-sockets:/sockets \
+    -v exomonad-zellij:/run/user/1000 \
+    debian:bookworm-slim \
+    bash -c 'rm -rf /sockets/* /run/user/1000/*' || true
+
+# 5. Force recreation of containers
+#    --force-recreate: Essential to pick up new images even if tags haven't changed
+#    and to ensure a fresh process state.
 echo "Recreating containers..."
 docker compose up -d --force-recreate --remove-orphans
 
-# 5. Wait for services to be healthy
+# 6. Wait for services to be healthy
 echo "Waiting for services to initialize..."
 sleep 3
 
-# 6. Reconnect using the standard idempotent command
+# 7. Reconnect using the standard idempotent command
 #    gosu user: Run zellij as UID 1000 so session socket is user-owned
 #               This enables cross-container control via tui-spawner
 echo "Connecting to fresh Zellij session..."
