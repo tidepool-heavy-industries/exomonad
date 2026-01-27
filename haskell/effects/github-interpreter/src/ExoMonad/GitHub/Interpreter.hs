@@ -55,6 +55,7 @@ import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
 import System.Timeout (timeout)
 import Data.Time.Clock (getCurrentTime, addUTCTime)
+import Text.Read (readMaybe)
 
 import ExoMonad.Effects.GitHub
   ( GitHub(..)
@@ -310,10 +311,9 @@ ghIssueView config repo num includeComments = do
   let baseFields = "number,title,body,author,labels,state,url"
       fields = if includeComments then baseFields <> ",comments" else baseFields
       args = ["issue", "view", show num, "--repo", T.unpack repo, "--json", fields]
-
   result <- runGhCommand config args
   case result of
-    Left (GHUnexpected 404 _) -> pure $ Left $ GHNotFound num
+    Left (GHUnexpected 404 _) -> pure $ Right Nothing  -- Not found is valid - issue doesn't exist
     Left err -> pure $ Left err
     Right output
       | T.null (T.strip output) -> pure $ Right Nothing
@@ -385,7 +385,7 @@ ghPrView config repo num includeDetails = do
 
   result <- runGhCommand config args
   case result of
-    Left (GHUnexpected 404 _) -> pure $ Left $ GHNotFound num
+    Left (GHUnexpected 404 _) -> pure $ Right Nothing  -- Not found is valid - PR doesn't exist
     Left err -> pure $ Left err
     Right output
       | T.null (T.strip output) -> pure $ Right Nothing
@@ -608,19 +608,7 @@ runGhCommand _config args = do
                   "could not find" `T.isInfixOf` stderrLower
           then do
             hPutStrLn stderr $ "[GitHub] ERROR: Resource not found: " <> T.unpack stderrText
-            -- Try to parse a numeric resource ID from stderr to return GHNotFound consistently.
-            let mResourceId :: Maybe Int
-                mResourceId =
-                  let s = T.unpack stderrText
-                      dropNonDigits = dropWhile (\c -> c < '0' || c > '9') s
-                  in case dropNonDigits of
-                       [] -> Nothing
-                       cs ->
-                         let (digits, _) = span (\c -> c >= '0' && c <= '9') cs
-                         in if null digits then Nothing else Just (read digits)
-            case mResourceId of
-              Just rid -> pure $ Left $ GHNotFound rid
-              Nothing  -> pure $ Left $ GHUnexpected 404 stderrText
+            pure $ Left $ GHUnexpected 404 stderrText
 
           -- Generic command failure with exit code and stderr
           else do

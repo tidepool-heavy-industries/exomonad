@@ -4,6 +4,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE GADTs #-}
 
 -- | GitHub retry logic with exponential backoff.
 module ExoMonad.Control.Hook.GitHubRetry
@@ -51,16 +53,15 @@ defaultRetryConfig = RetryConfig
 -- Log each retry attempt with attempt number and delay.
 -- Also records OpenTelemetry spans if a tracer is provided.
 withRetry
-  :: (Member GitHub es, Member Log es, LastMember IO es)
+  :: forall es a. (Member GitHub es, Member Log es, LastMember IO es)
   => RetryConfig
   -> Eff es a
   -> Eff es a
-withRetry config = interpose $ \op -> do
+withRetry config = interpose $ \(op :: GitHub x) -> do
   let 
     -- Helper to run an attempt with tracing and retrying for Either GitHubError results
     runEitherAttempt 
-      :: (Member GitHub es, Member Log es, LastMember IO es) 
-      => GitHub (Either GitHubError b) 
+      :: forall b. GitHub (Either GitHubError b) 
       -> Int 
       -> Int 
       -> Eff es (Either GitHubError b)
@@ -72,36 +73,32 @@ withRetry config = interpose $ \op -> do
           let spanName = "github." <> getOpName operation
           span <- sendM $ createSpan t ctx spanName defaultSpanArguments
           
-          -- Add common attributes
           sendM $ addAttribute span "github.op" (getOpName operation)
           sendM $ addAttribute span "github.retry_count" (attempt - 1)
-          
-          -- Add op-specific attributes
           addOpAttributes span operation
           
           r <- send operation
           
           case r of
-            Left err -> do
-              sendM $ addAttribute span "error" True
-              sendM $ addAttribute span "error.message" (T.pack (show err))
+            Left err -> sendM $ do
+              addAttribute span "error" True
+              addAttribute span "error.message" (T.pack (show err))
             Right _ -> pure ()
             
           sendM $ endSpan span Nothing
           pure r
 
       case res of
-        Left err | isRetryable err && attempt <= maxRetries config -> do
+        Left err | isRetryable err && attempt <= config.maxRetries -> do
           logWarn $ "[GitHub] Request failed (attempt " 
-                 <> T.pack (show attempt) <> "/" <> T.pack (show (maxRetries config)) 
+                 <> T.pack (show attempt) <> "/" <> T.pack (show config.maxRetries) 
                  <> "), retrying in " <> T.pack (show (delay `div` 1000000)) 
                  <> "s: " <> T.pack (show err)
           sendM $ threadDelay delay
-          runEitherAttempt operation (attempt + 1) (min (maxDelayUs config) (delay * 2))
+          runEitherAttempt operation (attempt + 1) (min config.maxDelayUs (delay * 2))
         _ -> pure res
 
   case op of
-    -- Operations that return Either GitHubError _
     CreateIssue {} -> runEitherAttempt op 1 (baseDelayUs config)
     UpdateIssue {} -> runEitherAttempt op 1 (baseDelayUs config)
     CloseIssue {} -> runEitherAttempt op 1 (baseDelayUs config)
@@ -116,8 +113,6 @@ withRetry config = interpose $ \op -> do
     GetPullRequest {} -> runEitherAttempt op 1 (baseDelayUs config)
     ListPullRequests {} -> runEitherAttempt op 1 (baseDelayUs config)
     GetPullRequestReviews {} -> runEitherAttempt op 1 (baseDelayUs config)
-    
-    -- Operations that don't return Either (just tracing, no retry)
     CheckAuth -> case config.tracer of
       Nothing -> send op
       Just t -> do
