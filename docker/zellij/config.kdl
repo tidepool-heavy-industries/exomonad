@@ -24,3 +24,5 @@ keybinds {
 theme "default"
 mouse_mode true
 copy_on_select true
+simplified_ui false
+pane_frames true
