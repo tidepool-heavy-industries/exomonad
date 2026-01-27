@@ -102,9 +102,13 @@ runSpawnCleanup = runState [] . reinterpret handler
         resources <- get @[Resource]
         forM_ resources $ \case
           RContainer cid -> do
-             _ <- stopContainer cid
-             pure ()
-          RWorktree wp -> do
-             _ <- deleteWorktree wp
-             pure ()
+             res <- stopContainer cid
+             case res of
+               Left err -> logError $ "Failed to stop container " <> cid.unContainerId <> " during cleanup: " <> T.pack (show err)
+               Right _ -> pure ()
+          RWorktree wp@(WorktreePath p) -> do
+             res <- deleteWorktree wp
+             case res of
+               Left err -> logError $ "Failed to delete worktree " <> T.pack p <> " during cleanup: " <> T.pack (show err)
+               Right _ -> pure ()
         put @[Resource] []

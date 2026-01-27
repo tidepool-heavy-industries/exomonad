@@ -49,7 +49,7 @@ import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCP
 import ExoMonad.Schema (HasJSONSchema(..), objectSchema, arraySchema, emptySchema, SchemaType(..), describeField)
 
 import ExoMonad.Control.ExoTools.Internal (slugify)
-import ExoMonad.Control.ExoTools.SpawnCleanup (SpawnCleanup, Resource(..), SpawnProgress(..), runSpawnCleanup, acquireWorktree, releaseWorktree, acquireContainer, releaseContainer, emitProgress, cleanupAll)
+import ExoMonad.Control.ExoTools.SpawnCleanup (SpawnCleanup, SpawnProgress(..), runSpawnCleanup, acquireWorktree, acquireContainer, emitProgress, cleanupAll)
 import ExoMonad.Control.Runtime.Paths as Paths
 
 -- | Find the hangar root by checking ENV or walking up from repo root.
@@ -517,7 +517,8 @@ processIssue spawnMode mHangarRoot repoRoot wtBaseDir backend shortId = do
                                               emitProgress $ TabLaunched shortId tabId
                                               pure $ Right (shortId, path, tabId)
                                         else do
-                                          let errMsg = "Health check failed (exit code " <> T.pack (show execRes.erExitCode) <> "): " <> execRes.erStderr
+                                          let exitText = maybe "unknown" (T.pack . show) execRes.erExitCode
+                                              errMsg = "Health check failed (exit code " <> exitText <> "): " <> execRes.erStderr
                                           logError $ "[" <> shortId <> "] " <> errMsg
                                           emitProgress $ SpawnFailed shortId errMsg
                                           cleanupAll
@@ -530,7 +531,7 @@ processIssue spawnMode mHangarRoot repoRoot wtBaseDir backend shortId = do
 
 -- | Logic for cleanup_agents.
 cleanupAgentsLogic
-  :: (Member Git es, Member Worktree es, Member DockerSpawner es, Member Log es)
+  :: (Member Worktree es, Member DockerSpawner es, Member Log es)
   => CleanupAgentsArgs
   -> Eff es (GotoChoice '[To Exit CleanupAgentsResult])
 cleanupAgentsLogic args = do
@@ -538,38 +539,60 @@ cleanupAgentsLogic args = do
   
   -- 1. Get all worktrees to find matches
   wtListRes <- listWorktrees
-  let allWorktrees = case wtListRes of
-        Right wts -> wts
-        Left _ -> []
+  case wtListRes of
+    Left err -> do
+      -- Propagate worktree enumeration failure
+      let msg = "Failed to list worktrees: " <> T.pack (show err)
+          failed = [(shortId, msg) | shortId <- args.caaIssueNumbers]
+      logError msg
+      pure $ gotoExit $ CleanupAgentsResult
+        { carCleaned = []
+        , carFailed = failed
+        }
+    Right allWorktrees -> do
+      results <- forM args.caaIssueNumbers $ \shortId -> do
+        logInfo $ "[" <> shortId <> "] Starting cleanup"
+        
+        -- a. Stop container (using predictable name)
+        let containerId = ContainerId $ "exomonad-agent-" <> shortId
+        stopRes <- stopContainer containerId
+        stopStatus <- case stopRes of
+          Right () -> do
+            logInfo $ "[" <> shortId <> "] Container stopped"
+            pure (Right ())
+          Left err -> do
+            let errText = T.pack (show err)
+            -- Check if error is "No such container" (ignorable) or actual failure
+            -- Note: DockerSpawner interpreter currently returns DockerConnectionError for all failures
+            if "No such container" `T.isInfixOf` errText || "not found" `T.isInfixOf` errText
+              then do
+                logInfo $ "[" <> shortId <> "] Container already gone (not found)"
+                pure (Right ())
+              else do
+                logWarn $ "[" <> shortId <> "] Container stop failed: " <> errText
+                pure (Left errText)
 
-  results <- forM args.caaIssueNumbers $ \shortId -> do
-    logInfo $ "[" <> shortId <> "] Starting cleanup"
-    
-    -- a. Stop container (using predictable name)
-    let containerId = ContainerId $ "exomonad-agent-" <> shortId
-    stopRes <- stopContainer containerId
-    case stopRes of
-      Right () -> logInfo $ "[" <> shortId <> "] Container stopped (or wasn't running)"
-      Left err -> logWarn $ "[" <> shortId <> "] Container stop failed (might not exist): " <> T.pack (show err)
+        -- b. Delete worktree
+        -- Find worktrees that match "gh-<shortId>-"
+        let prefix = "gh-" <> shortId <> "-"
+            matchingWts = filter (\(WorktreePath p, _) -> prefix `T.isInfixOf` T.pack p) allWorktrees
+        
+        cleanupWtResults <- forM matchingWts $ \(wtPath@(WorktreePath p), _) -> do
+          logInfo $ "[" <> shortId <> "] Deleting worktree: " <> T.pack p
+          deleteWorktree wtPath
 
-    -- b. Delete worktree
-    -- Find worktrees that match "gh-<shortId>-"
-    let prefix = "gh-" <> shortId <> "-"
-        matchingWts = filter (\(WorktreePath p, _) -> prefix `T.isInfixOf` T.pack p) allWorktrees
-    
-    cleanupWtResults <- forM matchingWts $ \(wtPath@(WorktreePath p), _) -> do
-      logInfo $ "[" <> shortId <> "] Deleting worktree: " <> T.pack p
-      deleteWorktree wtPath
+        let wtFailures = [T.pack (show err) | Left err <- cleanupWtResults]
+        
+        -- Consolidate results
+        case (stopStatus, wtFailures) of
+          (Right (), []) -> pure $ Right shortId
+          (Left stopErr, []) -> pure $ Left (shortId, "Container stop failed: " <> stopErr)
+          (Right (), wts) -> pure $ Left (shortId, "Worktree deletion failed: " <> T.intercalate "; " wts)
+          (Left stopErr, wts) -> pure $ Left (shortId, "Container stop failed: " <> stopErr <> "; Worktree deletion failed: " <> T.intercalate "; " wts)
 
-    let wtFailures = [T.pack (show err) | Left err <- cleanupWtResults]
-    
-    if null wtFailures
-      then pure $ Right shortId
-      else pure $ Left (shortId, T.intercalate "; " wtFailures)
-
-  let (failed, succeeded) = partitionEithers results
-  pure $ gotoExit $ CleanupAgentsResult
-    {
-      carCleaned = succeeded
-    , carFailed = failed
-    }
+      let (failed, succeeded) = partitionEithers results
+      pure $ gotoExit $ CleanupAgentsResult
+        {
+          carCleaned = succeeded
+        , carFailed = failed
+        }
