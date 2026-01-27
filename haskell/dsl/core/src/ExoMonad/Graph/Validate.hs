@@ -189,7 +189,7 @@ type DuplicateSchemaError t = TypeError
 
 -- | Error when ClaudeCode annotation is used with CloudflareAI backend.
 --
--- ClaudeCode spawns a local subprocess via zellij-cc, which is not available
+-- ClaudeCode spawns a local subprocess, which is not available
 -- in Cloudflare Workers. This error triggers at compile time when a graph
 -- has both ':& Backend CloudflareAI' and any node with ':@ ClaudeCode'.
 --
@@ -212,7 +212,7 @@ type ClaudeCodeCFBackendError nodeName = Unsatisfiable
    ':$$: 'Text "Node '" ':<>: 'Text nodeName ':<>: 'Text "' has ClaudeCode annotation,"
    ':$$: 'Text "but this graph uses CloudflareAI backend."
    ':$$: 'Text ""
-   ':$$: 'Text "ClaudeCode spawns a local subprocess via zellij-cc,"
+   ':$$: 'Text "ClaudeCode spawns a local subprocess,"
    ':$$: 'Text "which is not available in Cloudflare Workers."
    ':$$: 'Text ""
    ':$$: 'Text "Fix options:"
