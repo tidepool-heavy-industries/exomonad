@@ -7,10 +7,7 @@
 #
 # Build with docker buildx bake (see docker/docker-bake.hcl)
 
-ARG GIT_SHA=unknown
 FROM common-base
-ARG GIT_SHA
-LABEL org.opencontainers.image.revision=${GIT_SHA}
 
 # Install additional runtime dependencies (on top of common-base)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -51,3 +48,7 @@ WORKDIR /home/user
 
 # Use service entrypoint which calls common entrypoint internally
 ENTRYPOINT ["/usr/local/bin/service-entrypoint.sh"]
+
+# OCI label for version tracking (at end to not bust cache on GIT_SHA changes)
+ARG GIT_SHA=unknown
+LABEL org.opencontainers.image.revision=${GIT_SHA}

@@ -7,10 +7,7 @@
 #
 # Build with docker buildx bake (see docker/docker-bake.hcl)
 
-ARG GIT_SHA=unknown
 FROM debian:bookworm-slim
-ARG GIT_SHA
-LABEL org.opencontainers.image.revision=${GIT_SHA}
 
 # Avoid prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -120,3 +117,7 @@ ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 # Default command: launch Claude Code with bypassPermissions
 CMD ["claude", "--permission-mode", "bypassPermissions"]
+
+# OCI label for version tracking (at end to not bust cache on GIT_SHA changes)
+ARG GIT_SHA=unknown
+LABEL org.opencontainers.image.revision=${GIT_SHA}

@@ -6,10 +6,7 @@
 #
 # Build with docker buildx bake (see docker/docker-bake.hcl)
 
-ARG GIT_SHA=unknown
 FROM common-base
-ARG GIT_SHA
-LABEL org.opencontainers.image.revision=${GIT_SHA}
 
 # Copy pre-built tui-popup binary from builder context
 COPY --from=rust-builder /app/rust/target/release/tui-popup /usr/local/bin/tui-popup
@@ -30,3 +27,7 @@ ENV TERM=xterm-256color
 
 ENTRYPOINT ["/usr/local/bin/service-entrypoint.sh"]
 CMD ["zellij"]
+
+# OCI label for version tracking (at end to not bust cache on GIT_SHA changes)
+ARG GIT_SHA=unknown
+LABEL org.opencontainers.image.revision=${GIT_SHA}
