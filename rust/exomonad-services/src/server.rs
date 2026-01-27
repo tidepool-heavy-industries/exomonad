@@ -32,7 +32,7 @@ impl ServiceServer {
     /// Run the server, listening on the specified Unix socket path.
     pub async fn run(self, socket_path: &str) -> Result<(), std::io::Error> {
         // Remove existing socket file if it exists
-        let _ = std::fs::remove_file(socket_path);
+        let _ = tokio::fs::remove_file(socket_path).await;
         
         let listener = UnixListener::bind(socket_path)?;
         info!("Service server listening on {}", socket_path);

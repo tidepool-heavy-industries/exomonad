@@ -45,20 +45,20 @@ import System.IO.Error (isDoesNotExistError)
 
 -- | Load LLM configuration from environment variables.
 -- REQUIRES EXOMONAD_SERVICE_SOCKET.
-loadLLMConfig :: IO (Maybe LLMConfig)
+loadLLMConfig :: IO LLMConfig
 loadLLMConfig = do
   socketPath <- lookupEnv "EXOMONAD_SERVICE_SOCKET"
   case socketPath of
-    Just path -> pure $ Just $ LLMSocketConfig path
+    Just path -> pure $ LLMSocketConfig path
     Nothing -> error "EXOMONAD_SERVICE_SOCKET environment variable required for LLM configuration"
 
 -- | Load GitHub configuration from environment variables.
 -- REQUIRES EXOMONAD_SERVICE_SOCKET.
-loadGitHubConfig :: IO (Maybe GitHubConfig)
+loadGitHubConfig :: IO GitHubConfig
 loadGitHubConfig = do
   socketPath <- lookupEnv "EXOMONAD_SERVICE_SOCKET"
   case socketPath of
-    Just path -> pure $ Just $ GitHubSocketConfig path
+    Just path -> pure $ GitHubSocketConfig path
     Nothing -> error "EXOMONAD_SERVICE_SOCKET environment variable required for GitHub configuration"
 
 -- | Load observability configuration from environment variables.
@@ -97,11 +97,11 @@ runServer logger config tracer = do
   -- Load LLM and GitHub config if not already provided
   llmCfg <- case config.llmConfig of
     Just c -> pure (Just c)
-    Nothing -> loadLLMConfig
+    Nothing -> Just <$> loadLLMConfig
   
   ghCfg <- case config.githubConfig of
     Just c -> pure (Just c)
-    Nothing -> loadGitHubConfig
+    Nothing -> Just <$> loadGitHubConfig
 
   let configFull = config 
         { observabilityConfig = obsConfig

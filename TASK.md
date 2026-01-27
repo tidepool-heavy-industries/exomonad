@@ -124,15 +124,12 @@ loadLLMConfig = do
   pure $ fmap (\k -> LLMHttpConfig { lcAnthropicSecrets = Just ... }) apiKey
 
 -- Change to:
-loadLLMConfig :: IO (Maybe LLMConfig)
+loadLLMConfig :: IO LLMConfig
 loadLLMConfig = do
   socketPath <- lookupEnv "EXOMONAD_SERVICE_SOCKET"
   case socketPath of
-    Just path -> pure $ Just $ LLMSocketConfig path
-    Nothing -> do
-      -- Fallback to HTTP if no socket
-      apiKey <- lookupEnv "ANTHROPIC_API_KEY"
-      pure $ fmap (\k -> LLMHttpConfig { lcAnthropicSecrets = Just ... }) apiKey
+    Just path -> pure $ LLMSocketConfig path
+    Nothing -> error "EXOMONAD_SERVICE_SOCKET environment variable required for LLM configuration"
 ```
 
 Similarly for GitHub, Gemini, Observability interpreters.

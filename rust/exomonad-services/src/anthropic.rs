@@ -79,27 +79,27 @@ impl ExternalService for AnthropicService {
     type Request = ServiceRequest;
     type Response = ServiceResponse;
 
-        async fn call(&self, req: Self::Request) -> Result<Self::Response, ServiceError> {
-            let (model, messages, max_tokens, tools, system, thinking) = match req {
-                ServiceRequest::AnthropicChat {
-                    model,
-                    messages,
-                    max_tokens,
-                    tools,
-                    system,
-                    thinking,
-                } => (model, messages, max_tokens, tools, system, thinking),
-                _ => panic!("Invalid request type for AnthropicService"),
-            };
-    
-            let payload = AnthropicRequestPayload {
+    async fn call(&self, req: Self::Request) -> Result<Self::Response, ServiceError> {
+        let (model, messages, max_tokens, tools, system, thinking) = match req {
+            ServiceRequest::AnthropicChat {
                 model,
                 messages,
                 max_tokens,
                 tools,
                 system,
                 thinking,
-            };
+            } => (model, messages, max_tokens, tools, system, thinking),
+            _ => panic!("Invalid request type for AnthropicService"),
+        };
+
+        let payload = AnthropicRequestPayload {
+            model,
+            messages,
+            max_tokens,
+            tools,
+            system,
+            thinking,
+        };
         let url = self.base_url.join("/v1/messages").unwrap();
         let mut attempts = 0;
         let max_attempts = 3;
