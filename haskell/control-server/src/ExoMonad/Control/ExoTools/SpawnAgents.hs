@@ -324,9 +324,14 @@ processIssue spawnMode repoRoot wtBaseDir backend shortId = do
                                   , repoRoot </> ".exomonad" </> "sockets" </> "tui.sock"
                                   )
 
-                              -- Subagents connect to shared control-server via TCP (Docker) or UDS (Zellij)
-                              -- No local control-server startup needed
-                              envVars =
+                          -- Capture auth and repo vars for subagents
+                          ghToken <- getEnv "GH_TOKEN"
+                          repoUrl <- getEnv "EXOMONAD_REPO_URL"
+                          repoBranch <- getEnv "EXOMONAD_REPO_BRANCH"
+
+                          -- Subagents connect to shared control-server via TCP (Docker) or UDS (Zellij)
+                          -- No local control-server startup needed
+                          let envVars =
                                 [
                                   ("SUBAGENT_CMD", backendCmd)
                                 , ("CONTROL_SERVER_URL", "http://control-server:7432")
@@ -335,6 +340,9 @@ processIssue spawnMode repoRoot wtBaseDir backend shortId = do
                                 , ("EXOMONAD_CONTROL_SOCKET", T.pack controlSocket)
                                 , ("EXOMONAD_TUI_SOCKET", T.pack tuiSocket)
                                 ]
+                                ++ maybe [] (\t -> [("GH_TOKEN", t)]) ghToken
+                                ++ maybe [] (\u -> [("EXOMONAD_REPO_URL", u)]) repoUrl
+                                ++ maybe [] (\b -> [("EXOMONAD_REPO_BRANCH", b)]) repoBranch
 
                           -- Skip bootstrapExoMonad - subagents use shared control-server
                           -- entrypoint.sh writes .mcp.json based on CONTROL_SERVER_URL

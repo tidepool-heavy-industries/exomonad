@@ -126,7 +126,7 @@ services:
       - EXOMONAD_ROLE=tl
       - CONTROL_SERVER_URL=http://control-server:7432
       - EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
-      - EXOMONAD_REPO_URL=${EXOMONAD_REPO_URL:-https://github.com/tidepool-heavy-industries/tidepool.git}
+      - EXOMONAD_REPO_URL=${EXOMONAD_REPO_URL:-https://github.com/tidepool-heavy-industries/exomonad.git}
       - EXOMONAD_REPO_BRANCH=${EXOMONAD_REPO_BRANCH:-main}
       - GH_TOKEN=${GH_TOKEN}
     volumes:
@@ -172,7 +172,7 @@ services:
       - EXOMONAD_ROLE=pm
       - CONTROL_SERVER_URL=http://control-server:7432
       - EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
-      - EXOMONAD_REPO_URL=${EXOMONAD_REPO_URL:-https://github.com/tidepool-heavy-industries/tidepool.git}
+      - EXOMONAD_REPO_URL=${EXOMONAD_REPO_URL:-https://github.com/tidepool-heavy-industries/exomonad.git}
       - EXOMONAD_REPO_BRANCH=${EXOMONAD_REPO_BRANCH:-main}
       - GH_TOKEN=${GH_TOKEN}
     volumes:
