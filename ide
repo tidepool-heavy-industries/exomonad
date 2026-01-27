@@ -2,13 +2,17 @@
 set -euo pipefail
 
 # =============================================================================
-# ExoMonad IDE - Idempotent Session Management
+# ExoMonad IDE - Connect to Zellij (TTY Required)
 # =============================================================================
 # Single command to enter the development environment.
 #
 # What this does:
-#   1. Ensures all containers are running (idempotent)
+#   1. Ensures containers are running (idempotent, uses cached images)
 #   2. Connects to Zellij session (creates if missing, attaches if exists)
+#
+# If you need to rebuild images after Dockerfile/layout changes:
+#   ./refresh-ide   # Rebuild + recreate (no TTY needed)
+#   ./ide           # Then connect
 #
 # The magic is `zellij attach --create` with `--layout`:
 #   - Creates session with layout if it doesn't exist
@@ -25,7 +29,7 @@ export DOCKER_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null || stat -f '%g
 # 2. Auto-detect git SHA for OCI labels (used if images need to be built)
 export GIT_SHA="${GIT_SHA:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"
 
-# 3. Ensure containers are running (idempotent)
+# 3. Ensure containers are running (idempotent, no rebuild)
 #    -d: Detached
 #    --remove-orphans: Clean up old containers
 echo "Ensuring containers are running..."

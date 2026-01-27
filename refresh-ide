@@ -2,15 +2,19 @@
 set -euo pipefail
 
 # =============================================================================
-# ExoMonad IDE - Hard Refresh
+# ExoMonad IDE - Refresh (No TTY Required)
 # =============================================================================
+# Rebuilds images and recreates containers. Does NOT connect to Zellij.
+#
 # Use this when you've:
 #   - Updated a Dockerfile
 #   - Changed a layout.kdl
 #   - Installed new system dependencies
 #   - Need to clear stale session state
 #
-# This tears down containers to force a fresh state, then reconnects.
+# After this completes, use ./ide to connect.
+#
+# Safe to run from agents (no TTY required).
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -46,14 +50,31 @@ docker run --rm \
 echo "Recreating containers..."
 docker compose up -d --force-recreate --remove-orphans
 
-# 6. Wait for services to be healthy
-echo "Waiting for services to initialize..."
-sleep 3
+# 6. Wait for health checks to pass
+echo "Waiting for services to be healthy..."
+TIMEOUT=60
+ELAPSED=0
+while [ $ELAPSED -lt $TIMEOUT ]; do
+    # Check if all required containers are healthy
+    TL_HEALTHY=$(docker inspect --format='{{.State.Health.Status}}' exomonad-tl 2>/dev/null || echo "unknown")
+    PM_HEALTHY=$(docker inspect --format='{{.State.Health.Status}}' exomonad-pm 2>/dev/null || echo "unknown")
+    CS_HEALTHY=$(docker inspect --format='{{.State.Health.Status}}' exomonad-control-server 2>/dev/null || echo "unknown")
 
-# 7. Reconnect using the standard idempotent command
-#    gosu user: Run zellij as UID 1000 so session socket is user-owned
-#               This enables cross-container control via tui-spawner
-echo "Connecting to fresh Zellij session..."
-exec docker exec -it exomonad-zellij \
-    gosu user zellij --layout /etc/zellij/layouts/main.kdl \
-    attach --create main
+    if [ "$TL_HEALTHY" = "healthy" ] && [ "$PM_HEALTHY" = "healthy" ] && [ "$CS_HEALTHY" = "healthy" ]; then
+        echo "All services healthy."
+        break
+    fi
+
+    sleep 2
+    ELAPSED=$((ELAPSED + 2))
+    echo "  Waiting... (tl=$TL_HEALTHY, pm=$PM_HEALTHY, control-server=$CS_HEALTHY)"
+done
+
+if [ $ELAPSED -ge $TIMEOUT ]; then
+    echo "Warning: Timeout waiting for services to become healthy"
+    echo "  tl=$TL_HEALTHY, pm=$PM_HEALTHY, control-server=$CS_HEALTHY"
+fi
+
+echo ""
+echo "Refresh complete. Connect with:"
+echo "  ./ide"
