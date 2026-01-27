@@ -41,9 +41,13 @@ data ServiceRequest
       , thinking :: Maybe Value
       }
   | GitHubGetIssue { owner :: Text, repo :: Text, number :: Int }
-  | GitHubListIssues { owner :: Text, repo :: Text, state :: Maybe Text, labels :: [Text] }
+  | GitHubCreateIssue { owner :: Text, repo :: Text, title :: Text, body :: Text, githubLabels :: [Text] }
+  | GitHubListIssues { owner :: Text, repo :: Text, state :: Maybe Text, issueLabels :: [Text] }
+  | GitHubCreatePR { owner :: Text, repo :: Text, title :: Text, body :: Text, head :: Text, base :: Text }
+  | GitHubGetPR { owner :: Text, repo :: Text, number :: Int }
   | OllamaGenerate { model :: Text, prompt :: Text, system :: Maybe Text }
-  | OtelSpan { traceId :: Text, spanId :: Text, name :: Text }
+  | OtelSpan { traceId :: Text, spanId :: Text, name :: Text, startNs :: Integer, endNs :: Integer, attributes :: Object }
+  | OtelMetric { name :: Text, value :: Double, otelLabels :: Object }
   deriving (Show, Eq, Generic)
 
 instance ToJSON ServiceRequest where
@@ -63,6 +67,14 @@ instance ToJSON ServiceRequest where
       , "repo" .= r
       , "number" .= n
       ]
+    GitHubCreateIssue o r t b ls -> object
+      [ "type" .= ("GitHubCreateIssue" :: Text)
+      , "owner" .= o
+      , "repo" .= r
+      , "title" .= t
+      , "body" .= b
+      , "labels" .= ls
+      ]
     GitHubListIssues o r s ls -> object
       [ "type" .= ("GitHubListIssues" :: Text)
       , "owner" .= o
@@ -70,23 +82,48 @@ instance ToJSON ServiceRequest where
       , "state" .= s
       , "labels" .= ls
       ]
+    GitHubCreatePR o r t b h b' -> object
+      [ "type" .= ("GitHubCreatePR" :: Text)
+      , "owner" .= o
+      , "repo" .= r
+      , "title" .= t
+      , "body" .= b
+      , "head" .= h
+      , "base" .= b'
+      ]
+    GitHubGetPR o r n -> object
+      [ "type" .= ("GitHubGetPR" :: Text)
+      , "owner" .= o
+      , "repo" .= r
+      , "number" .= n
+      ]
     OllamaGenerate m p s -> object
       [ "type" .= ("OllamaGenerate" :: Text)
       , "model" .= m
       , "prompt" .= p
       , "system" .= s
       ]
-    OtelSpan tid sid n -> object
+    OtelSpan tid sid n sns ens attrs -> object
       [ "type" .= ("OtelSpan" :: Text)
       , "trace_id" .= tid
       , "span_id" .= sid
       , "name" .= n
+      , "start_ns" .= sns
+      , "end_ns" .= ens
+      , "attributes" .= attrs
+      ]
+    OtelMetric n v ls -> object
+      [ "type" .= ("OtelMetric" :: Text)
+      , "name" .= n
+      , "value" .= v
+      , "labels" .= ls
       ]
 
 data ServiceResponse
   = AnthropicChatResponse { content :: [Value], stopReason :: Text, usage :: Value }
-  | GitHubIssueResponse { issueNumber :: Int, title :: Text, body :: Text }
+  | GitHubIssueResponse { issueNumber :: Int, title :: Text, body :: Text, state :: Text, labels :: [Text], url :: Text }
   | GitHubIssuesResponse { issues :: [Value] }
+  | GitHubPRResponse { number :: Int, url :: Text, state :: Text }
   | OllamaGenerateResponse { response :: Text, done :: Bool }
   | OtelAckResponse
   | ErrorResponse { code :: Int, message :: Text }
@@ -97,8 +134,9 @@ instance FromJSON ServiceResponse where
     t <- v .: "type"
     case (t :: Text) of 
       "AnthropicChatResponse" -> AnthropicChatResponse <$> v .: "content" <*> v .: "stop_reason" <*> v .: "usage"
-      "GitHubIssueResponse" -> GitHubIssueResponse <$> v .: "number" <*> v .: "title" <*> v .: "body"
+      "GitHubIssueResponse" -> GitHubIssueResponse <$> v .: "number" <*> v .: "title" <*> v .: "body" <*> v .: "state" <*> v .: "labels" <*> v .: "url"
       "GitHubIssuesResponse" -> GitHubIssuesResponse <$> v .: "issues"
+      "GitHubPRResponse" -> GitHubPRResponse <$> v .: "number" <*> v .: "url" <*> v .: "state"
       "OllamaGenerateResponse" -> OllamaGenerateResponse <$> v .: "response" <*> v .: "done"
       "OtelAckResponse" -> pure OtelAckResponse
       "ErrorResponse" -> ErrorResponse <$> v .: "code" <*> v .: "message"

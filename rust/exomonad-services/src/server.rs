@@ -31,6 +31,13 @@ impl ServiceServer {
 
     /// Run the server, listening on the specified Unix socket path.
     pub async fn run(self, socket_path: &str) -> Result<(), std::io::Error> {
+        // Ensure the parent directory for the socket exists, if any.
+        if let Some(parent) = std::path::Path::new(socket_path).parent() {
+            if !parent.as_os_str().is_empty() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
+        }
+
         // Remove existing socket file if it exists
         let _ = tokio::fs::remove_file(socket_path).await;
         
@@ -43,7 +50,11 @@ impl ServiceServer {
                     let server = self.clone();
                     tokio::spawn(async move {
                         if let Err(e) = server.handle_connection(stream).await {
-                            error!("Connection error: {}", e);
+                            if e.downcast_ref::<serde_json::Error>().is_some() {
+                                error!("Critical JSON (de)serialization error in connection: {:#}", e);
+                            } else {
+                                error!("Connection error: {:#}", e);
+                            }
                         }
                     });
                 }

@@ -4,6 +4,7 @@ use exomonad_shared::{ServiceRequest, ServiceResponse};
 use reqwest::{Client, Url};
 use serde::Serialize;
 use std::collections::HashMap;
+use tracing::warn;
 
 /// Service client for OpenTelemetry (OTLP) export.
 ///
@@ -41,8 +42,14 @@ impl OtelService {
         let mut headers = HashMap::new();
         if let Ok(h_str) = std::env::var("OTLP_HEADERS") {
             for pair in h_str.split(',') {
-                if let Some((k, v)) = pair.split_once('=') {
+                let trimmed = pair.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if let Some((k, v)) = trimmed.split_once('=') {
                     headers.insert(k.trim().to_string(), v.trim().to_string());
+                } else {
+                    warn!("OTelService: ignoring malformed OTLP_HEADERS entry without '=': {:?}", trimmed);
                 }
             }
         }
@@ -175,6 +182,11 @@ impl ExternalService for OtelService {
                 end_ns,
                 attributes,
             } => {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos() as u64;
+
                 let payload = TracesData {
                     resource_spans: vec![ResourceSpan {
                         resource: Resource { attributes: vec![] },
@@ -187,9 +199,9 @@ impl ExternalService for OtelService {
                                 trace_id,
                                 span_id,
                                 name,
-                                start_time_unix_nano: start_ns,
-                                end_time_unix_nano: end_ns,
-                                attributes: map_attributes(&attributes),
+                                start_time_unix_nano: start_ns.unwrap_or(now),
+                                end_time_unix_nano: end_ns.unwrap_or(now),
+                                attributes: map_attributes(&attributes.unwrap_or_default()),
                                 kind: 1, // Internal
                             }],
                         }],

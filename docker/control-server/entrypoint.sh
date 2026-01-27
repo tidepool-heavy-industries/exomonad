@@ -57,5 +57,7 @@ export LC_ALL=C.UTF-8
 
 # --- Delegate to common entrypoint ---
 # Common entrypoint handles Docker GID, git config, and drops privileges
+# NOTE: Starting service-server in background without formal supervision for simplicity.
+# Container exit will clean up both processes.
 echo "Starting control-server as user..."
 exec /usr/local/bin/entrypoint-common.sh bash -c "/usr/local/bin/service-server & exec /usr/local/bin/exomonad-control-server"

@@ -50,7 +50,7 @@ loadLLMConfig = do
   socketPath <- lookupEnv "EXOMONAD_SERVICE_SOCKET"
   case socketPath of
     Just path -> pure $ LLMSocketConfig path
-    Nothing -> error "EXOMONAD_SERVICE_SOCKET environment variable required for LLM configuration"
+    Nothing -> error "EXOMONAD_SERVICE_SOCKET environment variable required for LLM configuration. This is the mandatory 'blessed path' for service integration."
 
 -- | Load GitHub configuration from environment variables.
 -- REQUIRES EXOMONAD_SERVICE_SOCKET.
@@ -59,7 +59,7 @@ loadGitHubConfig = do
   socketPath <- lookupEnv "EXOMONAD_SERVICE_SOCKET"
   case socketPath of
     Just path -> pure $ GitHubSocketConfig path
-    Nothing -> error "EXOMONAD_SERVICE_SOCKET environment variable required for GitHub configuration"
+    Nothing -> error "EXOMONAD_SERVICE_SOCKET environment variable required for GitHub configuration. This is the mandatory 'blessed path' for service integration."
 
 -- | Load observability configuration from environment variables.
 loadObservabilityConfig :: IO (Maybe ObservabilityConfig)

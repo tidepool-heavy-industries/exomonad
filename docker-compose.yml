@@ -28,6 +28,8 @@ services:
           memory: 512M
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # GH_TOKEN is used by the gh CLI; GITHUB_TOKEN is used by the Rust service.
+      # Both are intentionally sourced from the same underlying token to keep auth in sync.
       - GH_TOKEN=${GH_TOKEN}
       - GITHUB_TOKEN=${GH_TOKEN}
       - GITHUB_REPO=${GITHUB_REPO:-tidepool-heavy-industries/tidepool}

@@ -321,9 +321,12 @@ pub enum ServiceRequest {
         trace_id: String,
         span_id: String,
         name: String,
-        start_ns: u64,
-        end_ns: u64,
-        attributes: HashMap<String, String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        start_ns: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        end_ns: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attributes: Option<HashMap<String, String>>,
     },
     OtelMetric {
         name: String,
