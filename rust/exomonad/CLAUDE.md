@@ -106,7 +106,7 @@ To use exomonad hooks with Claude Code, add to `.claude/settings.local.json`:
 }
 ```
 
-The `EXOMONAD_CONTROL_SOCKET` environment variable is set by `start-augmented.sh`.
+The `EXOMONAD_CONTROL_SOCKET` environment variable is set by the Docker container entrypoint.
 
 ## MCP Tools
 
@@ -151,11 +151,11 @@ Role-based endpoints filter available tools:
 
 **Solution:**
 ```bash
-# Verify socket exists
-ls -la .exomonad/sockets/control.sock
+# In Docker: verify control-server is healthy
+docker inspect --format='{{.State.Health.Status}}' exomonad-control-server
 
-# Ensure started via start-augmented.sh, which sets the env var
-./start-augmented.sh
+# Restart if needed
+./refresh-ide
 ```
 
 ### Hook Timeout
@@ -165,8 +165,8 @@ ls -la .exomonad/sockets/control.sock
 **Cause:** Control server is unresponsive or handler is stuck
 
 **Solution:**
-1. Check control server logs in `.exomonad/logs/control-server.log`
-2. Verify control-server is running and healthy
+1. Check control server logs: `docker logs exomonad-control-server`
+2. Verify control-server is healthy: `docker inspect --format='{{.State.Health.Status}}' exomonad-control-server`
 3. Check for deadlocks or infinite loops in hook handler
 
 ### curl Not Found

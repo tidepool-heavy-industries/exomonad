@@ -814,23 +814,20 @@ curl http://localhost:11434/api/tags
 
 ## Running
 
-### Hybrid ExoMonad (Recommended)
+### Docker Compose (Recommended)
 ```bash
 cd /path/to/exomonad
-./start-augmented.sh
+./ide              # Connect to Zellij (starts containers if needed)
+./refresh-ide      # Rebuild + recreate (after Dockerfile changes, no TTY required)
 ```
 
-Launches control-server with:
-- Unix socket health check for robust readiness
-- Automatic dependency management (tui-sidebar waits for health)
-- Centralized logging to `.exomonad/logs/`
+The control-server runs in the `exomonad-control-server` container with:
+- Docker health checks for readiness
 - Automatic restart on failure
+- TCP port 7432 for MCP/hook connections
 
 ### Standalone (Development)
 ```bash
-# Start in project directory
-cd /path/to/your/project
-
 # GEMMA_ENDPOINT is REQUIRED (no heuristic fallback)
 GEMMA_ENDPOINT=http://localhost:11434 cabal run exomonad-control-server
 
@@ -839,18 +836,12 @@ EXOMONAD_PROJECT_DIR=/path/to/project GEMMA_ENDPOINT=http://localhost:11434 caba
 ```
 
 ### Health Check
-The server supports a ping-pong protocol over Unix socket for health checks:
 ```bash
-# Check if control-server is ready using exomonad
-./scripts/health-check.sh
-```
+# Docker: check container health
+docker inspect --format='{{.State.Health.Status}}' exomonad-control-server
 
-**Readiness Probe:**
-The `control-server` readiness probe executes `exomonad health`, which sends a `Ping` message to `$EXOMONAD_CONTROL_SOCKET` and waits for a `Pong`.
-
-```bash
-# Verify server is listening
-Control server listening on Unix socket: /path/to/control.sock
+# View logs
+docker logs exomonad-control-server
 ```
 
 

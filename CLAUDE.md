@@ -424,16 +424,24 @@ The Docker Compose setup uses a separated container architecture:
 
 **Quick Start:**
 ```bash
-./ide              # Start containers + connect to Zellij (idempotent)
-./refresh-ide      # Rebuild + force-recreate + connect (after Dockerfile changes)
+./ide              # Connect to Zellij (starts containers if needed, idempotent)
 
 # Detach with Ctrl+p, Ctrl+q
 ```
 
+**After Dockerfile/layout changes:**
+```bash
+./refresh-ide      # Rebuild images + recreate containers (no TTY required)
+./ide              # Then connect
+```
+
+Note: `./refresh-ide` is agent-safe (no TTY required). Agents can run it to rebuild/restart
+the environment, then humans connect with `./ide`.
+
 **Manual (if scripts don't work):**
 ```bash
 docker compose up -d
-docker attach exomonad-zellij
+docker exec -it exomonad-zellij gosu user zellij attach --create main
 ```
 
 **Services:**
@@ -480,154 +488,77 @@ docker attach exomonad-orchestrator
 - **Agent not responding**: Check `docker logs exomonad-tl` or `docker logs exomonad-pm`.
 - **Authentication errors**: Verify credentials in `exomonad-claude-auth` volume.
 
-**Manual startup (3 terminals - NOT recommended):**
+**Local development (without Docker):**
+
+Not recommended. Use Docker Compose for consistency. If you must run locally:
 ```bash
-# Terminal 1: Start control server
-GEMMA_ENDPOINT=http://localhost:11434 cabal run exomonad-control-server
+# Build binaries
+cabal build exomonad-control-server
+cargo build -p exomonad -p tui-sidebar
 
-# Terminal 2: Wait for TUI socket, then start tui-sidebar
-./scripts/wait-for-socket.sh .exomonad/sockets/tui.sock 60 TUIServer
-cargo run -p tui-sidebar -- --socket .exomonad/sockets/tui.sock
+# Run control-server (Terminal 1)
+cabal run exomonad-control-server
 
-# Terminal 3: Start Claude Code
-cd /path/to/project
-claude-code
+# Run Claude Code with hooks configured (Terminal 2)
+claude
 ```
-
-**Note:** Use `start-augmented.sh` for reliable startup. Manual methods require careful sequencing.
 
 ### Orchestration Internals
 
-Understanding the runtime stack for debugging and extension.
+Understanding the Docker-based runtime stack for debugging and extension.
 
-#### Troubleshooting
+#### Scripts
 
-**`start-augmented.sh` Hangs on Startup**
-- **Symptom**: The script hangs indefinitely at "Starting Hybrid ExoMonad...".
-- **Cause**: A stale session is holding the socket and refusing to terminate.
-- **Fix**: The script now includes robust cleanup logic (timeout + force kill). If it still hangs, manually run:
-  ```bash
-  rm -f .exomonad/sockets/*.sock
-  ```
+| Script | TTY | Purpose |
+|--------|-----|---------|
+| `./ide` | Yes | Connect to Zellij (human use) |
+| `./refresh-ide` | No | Build + recreate containers (agent-safe) |
+| `./build` | No | Build images via docker buildx bake |
 
-**`Killed: 9` on macOS (Apple Silicon)**
-- **Symptom**: `control-server` or `exomonad` exits immediately with `Killed: 9` (SIGKILL).
-- **Cause**: The binaries in `../runtime/bin` are unsigned or have invalid signatures. macOS arm64 requires all native executables to be signed.
-- **Fix**: Ad-hoc sign the binaries:
-  ```bash
-  codesign -s - --force ../runtime/bin/exomonad-control-server
-  codesign -s - --force ../runtime/bin/exomonad
-  codesign -s - --force ../runtime/bin/tui-sidebar
-  ```
+#### Docker Volumes
 
-#### Socket Lifecycle
-
-Sockets are managed to ensure clean transitions between sessions and prevent stale connections:
-
-1. **Bootstrap (`start-augmented.sh`)**: Canonical cleanup occurs here. It detects stale sessions via UDS and shuts them down, then deletes all remaining `.sock` files in `.exomonad/sockets/`.
-2. **Runtime**: Services like `control-server` create their own sockets upon startup.
-3. **Shutdown**: The `shutdown` command for `control-server` removes its specific sockets. This is a best-effort cleanup for graceful shutdown; the bootstrap cleanup is the source of truth for clearing stale state.
-
-#### Port Allocation
-
-| Port | Service | Protocol | Purpose |
-|------|---------|----------|---------|
-
-**Sockets (Environment Driven):**
-- `$EXOMONAD_CONTROL_SOCKET` (default: `.exomonad/sockets/control.sock`): Main protocol (exomonad connects)
-- `$EXOMONAD_TUI_SOCKET` (default: `.exomonad/sockets/tui.sock`): TUI sidebar (control-server listens, tui-sidebar connects)
-
-**Docker Volumes (Cross-Container):**
-- `exomonad-sockets`: Shared volume for control.sock and tui.sock
-- `exomonad-zellij`: Shared XDG_RUNTIME_DIR (`/run/user/1000`) for cross-container Zellij access. Enables control-server to create Zellij tabs in orchestrator's session via `zellij --session orchestrator action new-tab`.
-
-Canonical values are defined in `start-augmented.sh` and can be overridden in `.env`.
+| Volume | Purpose |
+|--------|---------|
+| `exomonad-sockets` | Shared `/sockets` for control.sock |
+| `exomonad-zellij` | Shared XDG_RUNTIME_DIR for cross-container Zellij |
+| `exomonad-claude-auth` | Claude authentication persistence |
 
 #### Config Files
 
 | File | Format | Purpose |
 |------|--------|---------|
-| `.zellij/exomonad.kdl` | KDL | 3-pane TUI layout |
-| `.zellij/config.kdl` | KDL | Zellij behavior (force_close, mouse) |
-| `scripts/exomonad-runner.sh` | Bash | Trap handlers for cleanup |
-| `.env` | Shell | Environment (ANTHROPIC_API_KEY required) |
+| `docker/zellij/layout.kdl` | KDL | Zellij tab layout |
+| `docker/zellij/config.kdl` | KDL | Zellij behavior |
+| `docker-compose.yml` | YAML | Service orchestration |
+| `docker/docker-bake.hcl` | HCL | Multi-stage build DAG |
 
-#### Lifecycle Scripts
+#### Health Checks
 
-**`start-augmented.sh`** - Entry point:
-1. Validates `.env` contains `ANTHROPIC_API_KEY`
-2. Creates `.exomonad/{sockets,logs}` directories
-3. Detects/cleans stale sessions via Unix socket
-4. Launches Zellij with layout
+All containers use Docker health checks. `./refresh-ide` waits for all services to report healthy before completing.
 
-#### Critical: `on_force_close "quit"`
-
-In `.zellij/config.kdl`:
-```kdl
-on_force_close "quit"
+```bash
+# Check health status
+docker inspect --format='{{.State.Health.Status}}' exomonad-control-server
 ```
 
-**Why this matters:** Without this, Zellij detaches instead of exiting when closed. Detaching means:
-- Trap handlers in `exomonad-runner.sh` never fire
-- Services continue running in background (orphaned)
-- Next `start-augmented.sh` detects stale session
+#### Troubleshooting
 
-With `"quit"`, Zellij actually exits → triggers EXIT trap → orderly shutdown.
-
-#### Shutdown Flow
-
-```
-Zellij quit (Ctrl+P → q)
-    ↓
-on_force_close "quit" (doesn't detach)
-    ↓
-All services terminated
+**Containers won't start:**
+```bash
+docker compose logs control-server  # Check for errors
+docker compose down && ./refresh-ide  # Clean restart
 ```
 
-#### Health Probes
-
-**control-server** (Unix Socket):
-```yaml
-readiness_probe:
-  exec:
-    command: "test -S $EXOMONAD_CONTROL_SOCKET"
-  initial_delay_seconds: 2
-  period_seconds: 3
-  failure_threshold: 10
+**Stale Zellij session:**
+```bash
+# refresh-ide cleans volatile state automatically, but if needed:
+docker run --rm -v exomonad-zellij:/run/user/1000 debian:bookworm-slim rm -rf /run/user/1000/*
 ```
 
-**tui-sidebar** (Unix Socket):
-```yaml
-readiness_probe:
-  exec:
-    command: "test -S $EXOMONAD_TUI_SOCKET"
+**Build cache issues:**
+```bash
+./build --no-cache  # Force full rebuild
 ```
-
-#### Dependency DAG
-
-```
-tui-sidebar ──depends_on──→ control-server (condition: process_healthy)
-```
-
-tui-sidebar blocks until control-server's HTTP health probe succeeds.
-
-#### Binary Dependencies
-
-The orchestration stack relies on pre-built binaries for Haskell and Rust components. `start-augmented.sh` attempts to build these if missing or stale, but manual builds may be required for troubleshooting.
-
-**Required Binaries & Paths:**
-- `exomonad-control-server`: `dist-newstyle/build/.../exomonad-control-server`
-- `exomonad`: `rust/target/debug/exomonad`
-- `tui-sidebar`: `rust/target/debug/tui-sidebar`
-
-**When are they built?**
-`start-augmented.sh` runs `cabal build exomonad-control-server` and `cargo build -p exomonad -p tui-sidebar` on startup.
-
-**Recovery:**
-If binaries are missing or the "command not found" error occurs:
-1. Run `cabal build exomonad-control-server` manually.
-2. Run `cargo build -p exomonad -p tui-sidebar` manually.
-3. Restart `./start-augmented.sh`.
 
 ### Status
 
@@ -648,20 +579,19 @@ If binaries are missing or the "command not found" error occurs:
 
 ### Stopping
 
-Zellij session exit automatically triggers cleanup.
+**From inside Zellij:**
+- Detach: `Ctrl+p, Ctrl+q` (containers keep running)
+- Quit: `Ctrl+P` → `q` (exits Zellij, containers keep running)
 
-**Normal exit:**
-1. Press `Ctrl+P` → `q` to quit Zellij
-2. All services stop gracefully
-3. Verify: `pgrep -f control-server` returns nothing
-
-**Emergency cleanup (if session crashes):**
+**Stop all containers:**
 ```bash
-pkill -f "control-server|tui-sidebar"
+docker compose down
 ```
 
-**Stale session prevention:**
-Running `./start-augmented.sh` automatically detects and cleans up any existing sessions before launching.
+**Full cleanup (including volumes):**
+```bash
+docker compose down -v
+```
 
 ### See Also
 

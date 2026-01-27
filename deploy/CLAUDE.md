@@ -1,6 +1,6 @@
 # deploy/ - Cloudflare Worker Durable Object Harness
 
-**STATUS: FROZEN** - WASM/Cloudflare deployment is not currently maintained. The blessed development workflow is `./start-augmented.sh` for Claude Code++ integration.
+**STATUS: FROZEN** - WASM/Cloudflare deployment is not currently maintained. The blessed development workflow is Docker Compose (`./ide`) for Claude Code++ integration.
 
 TypeScript harness for running ExoMonad WASM graphs on Cloudflare's edge network.
 
