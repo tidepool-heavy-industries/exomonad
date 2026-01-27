@@ -17,19 +17,21 @@ module ExoMonad.Control.Hook.SessionStart
   , IssueContext(..)
   ) where
 
-import Control.Monad.Freer (Eff, Member)
-import Data.Maybe (fromMaybe, isJust)
+import Control.Monad.Freer (Eff, Member, LastMember)
+import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Text.Parsec.Pos (SourcePos)
 
 import ExoMonad.Effects.GitHub (GitHub, Issue(..), IssueState(..), Repo(..), Author(..), getIssue, listIssues, defaultIssueFilter, IssueFilter(..), defaultRepo)
 import ExoMonad.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
-import ExoMonad.Effect.Types (Log, logDebug, logInfo)
+import ExoMonad.Effect.Types (Log, logDebug, logWarn)
 import ExoMonad.Graph.Template (TemplateDef(..), TypedTemplate, typedTemplateFile, runTypedTemplate)
 import ExoMonad.Control.ExoTools (parseIssueNumber)
 import ExoMonad.Control.RoleConfig (Role(..))
+import ExoMonad.Control.Hook.GitHubRetry (withRetry, defaultRetryConfig, RetryConfig(..))
 import ExoMonad.Control.Hook.SessionStart.Context
+import OpenTelemetry.Trace (Tracer)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -73,14 +75,16 @@ instance TemplateDef SessionStartTpl where
 -- 6. Renders role-specific template with context
 -- 7. Returns rendered content as additionalContext
 sessionStartLogic
-  :: (Member GitHub es, Member Git es, Member Log es)
-  => Role
+  :: (Member GitHub es, Member Git es, Member Log es, LastMember IO es)
+  => Tracer
+  -> Role
   -> Text  -- ^ Current working directory
   -> Eff es (Maybe Text)  -- ^ Additional context to inject
-sessionStartLogic role cwdPath = do
+sessionStartLogic tracer role cwdPath = do
   logDebug $ "Building SessionStart context for role: " <> T.pack (show role)
 
   let repo = defaultRepo
+      retryCfg = defaultRetryConfig { tracer = Just tracer }
 
   case role of
     PM -> do
@@ -95,11 +99,13 @@ sessionStartLogic role cwdPath = do
 
       -- Fetch issue info if we have a number
       mIssue <- case maybeIssueNum of
-        Just num -> do
+        Just num -> withRetry retryCfg $ do
           result <- getIssue repo num False
-          pure $ case result of
-            Left _err -> Nothing
-            Right mi -> mi
+          case result of
+            Left err -> do
+              logWarn $ "[GitHub] Failed to fetch issue #" <> T.pack (show num) <> ": " <> T.pack (show err)
+              pure Nothing
+            Right mi -> pure mi
         Nothing -> pure Nothing
 
       -- Build template context
@@ -125,7 +131,7 @@ sessionStartLogic role cwdPath = do
       mWt <- getWorktreeInfo
 
       -- Build dashboard
-      db <- buildDashboard repo
+      db <- buildDashboard tracer repo
 
       -- Build template context
       let ctx = SessionStartContext
@@ -141,18 +147,25 @@ sessionStartLogic role cwdPath = do
       pure $ Just rendered
 
 -- | Build dashboard for TL role.
-buildDashboard :: (Member GitHub es, Member Log es) => Repo -> Eff es IssuesDashboardContext
-buildDashboard repo = do
+buildDashboard :: (Member GitHub es, Member Log es, LastMember IO es) => Tracer -> Repo -> Eff es IssuesDashboardContext
+buildDashboard tracer repo = do
   logDebug "Building TL dashboard..."
 
+  let retryCfg = defaultRetryConfig { tracer = Just tracer }
+
   -- Fetch open issues
-  openIssuesResult <- listIssues repo (defaultIssueFilter { ifState = Just IssueOpen, ifLimit = Just 20 })
-  let openIssues = case openIssuesResult of
-        Left _err -> []  -- Silently degrade if GitHub unavailable
-        Right is -> is
+  openIssuesResult <- withRetry retryCfg $ 
+    listIssues repo (defaultIssueFilter { ifState = Just IssueOpen, ifLimit = Just 20 })
+    
+  -- Let's improve error logging for buildDashboard
+  openIssuesFinal <- case openIssuesResult of
+    Left err -> do
+      logWarn $ "[GitHub] Dashboard failed to fetch issues for " <> repo.unRepo <> ": " <> T.pack (show err)
+      pure []
+    Right is -> pure is
 
   pure IssuesDashboardContext
-    { open = map toIssueContext openIssues
+    { open = map toIssueContext openIssuesFinal
     }
 
 

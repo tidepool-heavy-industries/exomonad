@@ -43,6 +43,7 @@ library
         -- Hook implementations
         ExoMonad.Control.Hook.SessionStart
         ExoMonad.Control.Hook.SessionStart.Context
+        ExoMonad.Control.Hook.GitHubRetry
         ExoMonad.Control.Hook.Stop
         ExoMonad.Control.Hook.Stop.Context
         ExoMonad.Control.LSPTools

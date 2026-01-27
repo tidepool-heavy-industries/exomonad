@@ -20,7 +20,7 @@ handleMessage :: Logger -> ServerConfig -> Tracer -> TraceContext -> CircuitBrea
 handleMessage logger config tracer traceCtx cbMap = \case
   HookEvent input r rl -> handleHook tracer config input r rl cbMap
   McpToolCall reqId name args ->
-    handleMcpTool logger config traceCtx cbMap reqId name args
+    handleMcpTool logger config tracer traceCtx cbMap reqId name args
   ToolsListRequest -> handleToolsList logger
   Ping -> pure Pong
 

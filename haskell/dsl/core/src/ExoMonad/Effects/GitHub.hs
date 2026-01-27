@@ -39,6 +39,7 @@ module ExoMonad.Effects.GitHub
 
     -- * Types - Errors
   , GitHubError(..)
+  , isRetryable
 
     -- * Types - Core
   , Repo(..)
@@ -96,27 +97,46 @@ import ExoMonad.Effect (Log, logInfo)
 -- failure modes visible in the type system rather than silently
 -- returning empty results.
 data GitHubError
-  = GHNotAuthenticated Text
-    -- ^ gh CLI is not authenticated. The Text contains the raw error message.
-  | GHNotFound Text
-    -- ^ Resource not found (issue, PR, repo). The Text describes what wasn't found.
-  | GHCommandFailed Int Text
-    -- ^ gh command exited with non-zero code. Int is exit code, Text is stderr.
-  | GHParseError Text
-    -- ^ Failed to parse gh output as JSON. Text contains the parse error.
+  = GHNotFound Int              -- ^ Issue/PR doesn't exist
+  | GHRateLimit UTCTime         -- ^ Rate limited until time
+  | GHNetworkError Text         -- ^ Connection failed
+  | GHTimeout                   -- ^ Request timed out
+  | GHPermissionDenied Text     -- ^ Auth issue (e.g. not logged in)
+  | GHUnexpected Int Text       -- ^ Other HTTP error (code, message)
+  | GHParseError Text           -- ^ Failed to parse gh output as JSON
   deriving (Show, Eq, Generic)
 
+-- | Check if a GitHub error is transient and should be retried.
+isRetryable :: GitHubError -> Bool
+isRetryable = \case
+  GHRateLimit _    -> True
+  GHNetworkError _ -> True
+  GHTimeout        -> True
+  GHUnexpected c _ -> c >= 500 && c < 600
+  _                -> False
+
 instance ToJSON GitHubError where
-  toJSON (GHNotAuthenticated msg) = object
-    [ "error" .= ("not_authenticated" :: Text)
-    , "message" .= msg
-    ]
-  toJSON (GHNotFound msg) = object
+  toJSON (GHNotFound num) = object
     [ "error" .= ("not_found" :: Text)
+    , "number" .= num
+    ]
+  toJSON (GHRateLimit resetAt) = object
+    [ "error" .= ("rate_limit" :: Text)
+    , "reset_at" .= resetAt
+    ]
+  toJSON (GHNetworkError msg) = object
+    [ "error" .= ("network_error" :: Text)
     , "message" .= msg
     ]
-  toJSON (GHCommandFailed code msg) = object
-    [ "error" .= ("command_failed" :: Text)
+  toJSON GHTimeout = object
+    [ "error" .= ("timeout" :: Text)
+    ]
+  toJSON (GHPermissionDenied msg) = object
+    [ "error" .= ("permission_denied" :: Text)
+    , "message" .= msg
+    ]
+  toJSON (GHUnexpected code msg) = object
+    [ "error" .= ("unexpected" :: Text)
     , "exit_code" .= code
     , "message" .= msg
     ]
@@ -562,59 +582,59 @@ runGitHubStub :: Member Log effs => Eff (GitHub ': effs) a -> Eff effs a
 runGitHubStub = interpret $ \case
   CreateIssue input -> do
     logInfo $ "[GitHub:stub] CreateIssue called: " <> input.ciiRepo.unRepo <> " - " <> input.ciiTitle
-    pure $ Left $ GHCommandFailed 1 "Stub: createIssue not implemented"
+    pure $ Left $ GHUnexpected 1 "Stub: createIssue not implemented"
 
   UpdateIssue (Repo repo) num _ -> do
     logInfo $ "[GitHub:stub] UpdateIssue called: " <> repo <> " #" <> showT num
-    pure $ Left $ GHCommandFailed 1 "Stub: updateIssue not implemented"
+    pure $ Left $ GHUnexpected 1 "Stub: updateIssue not implemented"
 
   CloseIssue (Repo repo) num -> do
     logInfo $ "[GitHub:stub] CloseIssue called: " <> repo <> " #" <> showT num
-    pure $ Left $ GHCommandFailed 1 "Stub: closeIssue not implemented"
+    pure $ Left $ GHUnexpected 1 "Stub: closeIssue not implemented"
 
   ReopenIssue (Repo repo) num -> do
     logInfo $ "[GitHub:stub] ReopenIssue called: " <> repo <> " #" <> showT num
-    pure $ Left $ GHCommandFailed 1 "Stub: reopenIssue not implemented"
+    pure $ Left $ GHUnexpected 1 "Stub: reopenIssue not implemented"
 
   AddIssueLabel (Repo repo) num label -> do
     logInfo $ "[GitHub:stub] AddIssueLabel called: " <> repo <> " #" <> showT num <> " label=" <> label
-    pure $ Left $ GHCommandFailed 1 "Stub: addIssueLabel not implemented"
+    pure $ Left $ GHUnexpected 1 "Stub: addIssueLabel not implemented"
 
   RemoveIssueLabel (Repo repo) num label -> do
     logInfo $ "[GitHub:stub] RemoveIssueLabel called: " <> repo <> " #" <> showT num <> " label=" <> label
-    pure $ Left $ GHCommandFailed 1 "Stub: removeIssueLabel not implemented"
+    pure $ Left $ GHUnexpected 1 "Stub: removeIssueLabel not implemented"
 
   AddIssueAssignee (Repo repo) num assignee -> do
     logInfo $ "[GitHub:stub] AddIssueAssignee called: " <> repo <> " #" <> showT num <> " assignee=" <> assignee
-    pure $ Left $ GHCommandFailed 1 "Stub: addIssueAssignee not implemented"
+    pure $ Left $ GHUnexpected 1 "Stub: addIssueAssignee not implemented"
 
   RemoveIssueAssignee (Repo repo) num assignee -> do
     logInfo $ "[GitHub:stub] RemoveIssueAssignee called: " <> repo <> " #" <> showT num <> " assignee=" <> assignee
-    pure $ Left $ GHCommandFailed 1 "Stub: removeIssueAssignee not implemented"
+    pure $ Left $ GHUnexpected 1 "Stub: removeIssueAssignee not implemented"
 
   CreatePR (PRCreateSpec (Repo repo) headBranch baseBranch title _) -> do
     logInfo $ "[GitHub:stub] CreatePR called: " <> repo <> " (" <> headBranch <> " -> " <> baseBranch <> ") - " <> title
-    pure $ Left $ GHCommandFailed 1 "Stub: createPR not implemented"
+    pure $ Left $ GHUnexpected 1 "Stub: createPR not implemented"
 
   GetIssue (Repo repo) num _ -> do
     logInfo $ "[GitHub:stub] GetIssue called: " <> repo <> " #" <> showT num
-    pure $ Left $ GHCommandFailed 1 "Stub: getIssue not implemented"
+    pure $ Left $ GHUnexpected 1 "Stub: getIssue not implemented"
 
   ListIssues (Repo repo) _ -> do
     logInfo $ "[GitHub:stub] ListIssues called: " <> repo
-    pure $ Left $ GHCommandFailed 1 "Stub: listIssues not implemented"
+    pure $ Left $ GHUnexpected 1 "Stub: listIssues not implemented"
 
   GetPullRequest (Repo repo) num _ -> do
     logInfo $ "[GitHub:stub] GetPullRequest called: " <> repo <> " #" <> showT num
-    pure $ Left $ GHCommandFailed 1 "Stub: getPullRequest not implemented"
+    pure $ Left $ GHUnexpected 1 "Stub: getPullRequest not implemented"
 
   ListPullRequests (Repo repo) _ -> do
     logInfo $ "[GitHub:stub] ListPullRequests called: " <> repo
-    pure $ Left $ GHCommandFailed 1 "Stub: listPullRequests not implemented"
+    pure $ Left $ GHUnexpected 1 "Stub: listPullRequests not implemented"
 
   GetPullRequestReviews (Repo repo) num -> do
     logInfo $ "[GitHub:stub] GetPullRequestReviews called: " <> repo <> " #" <> showT num
-    pure $ Left $ GHCommandFailed 1 "Stub: getPullRequestReviews not implemented"
+    pure $ Left $ GHUnexpected 1 "Stub: getPullRequestReviews not implemented"
 
   CheckAuth -> do
     logInfo "[GitHub:stub] CheckAuth called"
