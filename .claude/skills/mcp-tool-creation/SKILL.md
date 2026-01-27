@@ -217,8 +217,8 @@ For richer schemas, implement `HasJSONSchema` manually:
 ```haskell
 instance HasJSONSchema MyArgs where
   jsonSchema = objectSchema
-    [ ("name", describeField "name" "Function name to search for" (emptySchema TString))
-    , ("max_results", describeField "max_results" "Maximum results" (emptySchema TNumber))
+    [ ("name", describeField "Function name to search for" (emptySchema TString))
+    , ("max_results", describeField "Maximum results" (emptySchema TNumber))
     ]
     ["name"]  -- Required fields
 ```

@@ -118,8 +118,8 @@ oneOfSchema :: [JSONSchema] -> JSONSchema
 oneOfSchema variants = (emptySchema TObject) { schemaOneOf = Just variants }
 
 -- | Add description to schema
-describeField :: Text -> Text -> JSONSchema -> JSONSchema
-describeField _fieldName desc schema = schema { schemaDescription = Just desc }
+describeField :: Text -> JSONSchema -> JSONSchema
+describeField desc schema = schema { schemaDescription = Just desc }
 
 -- | Convert schema to Aeson Value (JSON Schema draft-07 format)
 -- Note: Anthropic API requires additionalProperties: false on all object types
@@ -204,7 +204,7 @@ deriveFieldSchema _typeName _conName _fieldIdx (fieldName, _, fieldType) = do
     Just doc -> pure (T.pack doc)
     Nothing  -> pure ""
   baseSchema <- typeToSchemaExp fieldType
-  [| describeField (T.pack $(litE (stringL (nameBase fieldName)))) desc $(pure baseSchema) |]
+  [| describeField desc $(pure baseSchema) |]
 
 -- | Convert a Haskell type to a JSONSchema expression
 typeToSchemaExp :: Type -> Q Exp

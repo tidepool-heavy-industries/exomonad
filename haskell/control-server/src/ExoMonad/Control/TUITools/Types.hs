@@ -110,54 +110,54 @@ instance FromJSON PopupElement where
 
 instance HasJSONSchema PopupElement where
   jsonSchema = oneOfSchema
-    [ describeField "text" "Static text display" $ objectSchema
+    [ describeField "Static text display" $ objectSchema
       [ ("type", enumSchema ["text"])
-      , ("id", describeField "id" "Unique element identifier" (emptySchema TString))
-      , ("content", describeField "content" "Text content to display" (emptySchema TString))
+      , ("id", describeField "Unique element identifier" (emptySchema TString))
+      , ("content", describeField "Text content to display" (emptySchema TString))
       ]
       ["type", "id", "content"]
-    , describeField "slider" "Numeric slider input" $ objectSchema
+    , describeField "Numeric slider input" $ objectSchema
       [ ("type", enumSchema ["slider"])
-      , ("id", describeField "id" "Unique element identifier" (emptySchema TString))
-      , ("label", describeField "label" "Label shown above slider" (emptySchema TString))
-      , ("min", describeField "min" "Minimum value" (emptySchema TNumber))
-      , ("max", describeField "max" "Maximum value" (emptySchema TNumber))
-      , ("default", describeField "default" "Default value (optional)" (emptySchema TNumber))
+      , ("id", describeField "Unique element identifier" (emptySchema TString))
+      , ("label", describeField "Label shown above slider" (emptySchema TString))
+      , ("min", describeField "Minimum value" (emptySchema TNumber))
+      , ("max", describeField "Maximum value" (emptySchema TNumber))
+      , ("default", describeField "Default value (optional)" (emptySchema TNumber))
       ]
       ["type", "id", "label", "min", "max"]
-    , describeField "checkbox" "Boolean checkbox input" $ objectSchema
+    , describeField "Boolean checkbox input" $ objectSchema
       [ ("type", enumSchema ["checkbox"])
-      , ("id", describeField "id" "Unique element identifier" (emptySchema TString))
-      , ("label", describeField "label" "Label shown next to checkbox" (emptySchema TString))
-      , ("default", describeField "default" "Default checked state (optional)" (emptySchema TBoolean))
+      , ("id", describeField "Unique element identifier" (emptySchema TString))
+      , ("label", describeField "Label shown next to checkbox" (emptySchema TString))
+      , ("default", describeField "Default checked state (optional)" (emptySchema TBoolean))
       ]
       ["type", "id", "label"]
-    , describeField "textbox" "Text input field" $ objectSchema
+    , describeField "Text input field" $ objectSchema
       [ ("type", enumSchema ["textbox"])
-      , ("id", describeField "id" "Unique element identifier" (emptySchema TString))
-      , ("label", describeField "label" "Label shown above textbox" (emptySchema TString))
-      , ("placeholder", describeField "placeholder" "Placeholder text (optional)" (emptySchema TString))
+      , ("id", describeField "Unique element identifier" (emptySchema TString))
+      , ("label", describeField "Label shown above textbox" (emptySchema TString))
+      , ("placeholder", describeField "Placeholder text (optional)" (emptySchema TString))
       ]
       ["type", "id", "label"]
-    , describeField "choice" "Single-select dropdown" $ objectSchema
+    , describeField "Single-select dropdown" $ objectSchema
       [ ("type", enumSchema ["choice"])
-      , ("id", describeField "id" "Unique element identifier" (emptySchema TString))
-      , ("label", describeField "label" "Label shown above dropdown" (emptySchema TString))
-      , ("options", describeField "options" "List of option strings" (arraySchema $ emptySchema TString))
-      , ("default", describeField "default" "Default selected index (optional)" (emptySchema TInteger))
+      , ("id", describeField "Unique element identifier" (emptySchema TString))
+      , ("label", describeField "Label shown above dropdown" (emptySchema TString))
+      , ("options", describeField "List of option strings" (arraySchema $ emptySchema TString))
+      , ("default", describeField "Default selected index (optional)" (emptySchema TInteger))
       ]
       ["type", "id", "label", "options"]
-    , describeField "multiselect" "Multiple selection list" $ objectSchema
+    , describeField "Multiple selection list" $ objectSchema
       [ ("type", enumSchema ["multiselect"])
-      , ("id", describeField "id" "Unique element identifier" (emptySchema TString))
-      , ("label", describeField "label" "Label shown above list" (emptySchema TString))
-      , ("options", describeField "options" "List of option strings" (arraySchema $ emptySchema TString))
+      , ("id", describeField "Unique element identifier" (emptySchema TString))
+      , ("label", describeField "Label shown above list" (emptySchema TString))
+      , ("options", describeField "List of option strings" (arraySchema $ emptySchema TString))
       ]
       ["type", "id", "label", "options"]
-    , describeField "group" "Section header/separator" $ objectSchema
+    , describeField "Section header/separator" $ objectSchema
       [ ("type", enumSchema ["group"])
-      , ("id", describeField "id" "Unique element identifier" (emptySchema TString))
-      , ("label", describeField "label" "Section header text" (emptySchema TString))
+      , ("id", describeField "Unique element identifier" (emptySchema TString))
+      , ("label", describeField "Section header text" (emptySchema TString))
       ]
       ["type", "id", "label"]
     ]
