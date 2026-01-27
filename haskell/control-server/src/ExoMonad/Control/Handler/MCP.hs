@@ -28,6 +28,7 @@ import qualified Data.Text as T
 import qualified Data.ByteString.Lazy as LBS
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
+import OpenTelemetry.Trace (Tracer)
 
 import ExoMonad.Control.Logging (Logger, logInfo, logDebug, logError)
 import ExoMonad.Control.Protocol
@@ -51,6 +52,7 @@ import ExoMonad.Control.PMTools
 import ExoMonad.Control.PMStatus
   ( pmStatusLogic, PmStatusArgs(..) )
 import ExoMonad.Control.PMPropose (pmProposeLogic, PMProposeArgs(..), PMProposeResult(..))
+import ExoMonad.Control.Hook.GitHubRetry (withRetry, defaultRetryConfig, RetryConfig(..))
 import ExoMonad.Control.GHTools
   ( ghIssueListLogic, GHIssueListArgs(..), GHIssueListResult(..)
   , ghIssueShowLogic, GHIssueShowArgs(..), GHIssueShowResult(..)
@@ -157,8 +159,8 @@ withMcpTracing logger config traceCtx reqId toolName args action = do
 --
 -- == Tier 3: External Orchestration Tools (Exo)
 --   - "exo_status": Get current bead context, git status, and PR info
-handleMcpTool :: Logger -> ServerConfig -> TraceContext -> Text -> Text -> Value -> IO ControlResponse
-handleMcpTool logger config traceCtx reqId toolName args =
+handleMcpTool :: Logger -> ServerConfig -> Tracer -> TraceContext -> Text -> Text -> Value -> IO ControlResponse
+handleMcpTool logger config tracer traceCtx reqId toolName args =
   withMcpTracing logger config traceCtx reqId toolName args $ do
     let effectiveRole = fromMaybe config.defaultRole (config.role >>= roleFromText)
     
@@ -191,21 +193,21 @@ handleMcpTool logger config traceCtx reqId toolName args =
 
           -- Tier 3: External Orchestration tools (Exo)
           -- Note: exo_complete and pre_commit_check have been folded into the Stop hook
-          "exo_status" -> handleExoStatusTool logger reqId args
-          "spawn_agents" -> handleSpawnAgentsTool logger reqId args
-          "file_pr" -> handleFilePRTool logger reqId args
-          "pm_approve_expansion" -> handlePmApproveExpansionTool logger reqId args
-          "pm_prioritize" -> handlePmPrioritizeTool logger reqId args
-          "pm_status" -> handlePmStatusTool logger reqId args
-          "pm_propose" -> handlePMProposeTool logger reqId args
+          "exo_status" -> handleExoStatusTool logger tracer reqId args
+          "spawn_agents" -> handleSpawnAgentsTool logger tracer reqId args
+          "file_pr" -> handleFilePRTool logger tracer reqId args
+          "pm_approve_expansion" -> handlePmApproveExpansionTool logger tracer reqId args
+          "pm_prioritize" -> handlePmPrioritizeTool logger tracer reqId args
+          "pm_status" -> handlePmStatusTool logger tracer reqId args
+          "pm_propose" -> handlePMProposeTool logger tracer reqId args
 
           -- GitHub tools
-          "gh_issue_list" -> handleGHIssueListTool logger reqId args
-          "gh_issue_show" -> handleGHIssueShowTool logger reqId args
-          "gh_issue_create" -> handleGHIssueCreateTool logger reqId args
-          "gh_issue_update" -> handleGHIssueUpdateTool logger reqId args
-          "gh_issue_close" -> handleGHIssueCloseTool logger reqId args
-          "gh_issue_reopen" -> handleGHIssueReopenTool logger reqId args
+          "gh_issue_list" -> handleGHIssueListTool logger tracer reqId args
+          "gh_issue_show" -> handleGHIssueShowTool logger tracer reqId args
+          "gh_issue_create" -> handleGHIssueCreateTool logger tracer reqId args
+          "gh_issue_update" -> handleGHIssueUpdateTool logger tracer reqId args
+          "gh_issue_close" -> handleGHIssueCloseTool logger tracer reqId args
+          "gh_issue_reopen" -> handleGHIssueReopenTool logger tracer reqId args
 
           _ -> do
             logError logger $ "  (unknown tool)"
@@ -216,8 +218,8 @@ handleMcpTool logger config traceCtx reqId toolName args =
 -- | Handle the pm_prioritize tool.
 --
 -- Runs the pmPrioritizeLogic to batch update bead priorities with rationale.
-handlePmPrioritizeTool :: Logger -> Text -> Value -> IO ControlResponse
-handlePmPrioritizeTool logger reqId args = do
+handlePmPrioritizeTool :: Logger -> Tracer -> Text -> Value -> IO ControlResponse
+handlePmPrioritizeTool logger tracer reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -226,9 +228,11 @@ handlePmPrioritizeTool logger reqId args = do
     Success ppArgs -> do
       logDebug logger $ "  updates=" <> T.pack (show $ length $ ppaUpdates ppArgs)
 
+      let retryCfg = defaultRetryConfig { tracer = Just tracer }
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runGitHubIO defaultGitHubConfig
+        $ withRetry retryCfg
         $ fmap unwrapSingleChoice (pmPrioritizeLogic ppArgs)
 
       case resultOrErr of
@@ -244,8 +248,8 @@ handlePmPrioritizeTool logger reqId args = do
 -- | Handle the spawn_agents tool.
 --
 -- Runs the SpawnAgentsGraph logic to create worktrees for parallel agents.
-handleSpawnAgentsTool :: Logger -> Text -> Value -> IO ControlResponse
-handleSpawnAgentsTool logger reqId args = do
+handleSpawnAgentsTool :: Logger -> Tracer -> Text -> Value -> IO ControlResponse
+handleSpawnAgentsTool logger tracer reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -263,6 +267,7 @@ handleSpawnAgentsTool logger reqId args = do
       binDir <- Paths.dockerBinDir
       let dockerCtlPath = Paths.dockerCtlBin binDir
 
+      let retryCfg = defaultRetryConfig { tracer = Just tracer }
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runGeminiIO
@@ -273,6 +278,7 @@ handleSpawnAgentsTool logger reqId args = do
         $ runEnvIO
         $ runZellijIO
         $ runDockerCtl dockerCtlPath
+        $ withRetry retryCfg
         $ fmap unwrapSingleChoice (spawnAgentsLogic saArgs)
 
       case resultOrErr of
@@ -288,8 +294,8 @@ handleSpawnAgentsTool logger reqId args = do
 -- | Handle the exo_status tool.
 --
 -- Runs the ExoStatusGraph logic to get development context.
-handleExoStatusTool :: Logger -> Text -> Value -> IO ControlResponse
-handleExoStatusTool logger reqId args = do
+handleExoStatusTool :: Logger -> Tracer -> Text -> Value -> IO ControlResponse
+handleExoStatusTool logger tracer reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -298,12 +304,14 @@ handleExoStatusTool logger reqId args = do
     Success esArgs -> do
       logDebug logger $ "  bead_id=" <> T.pack (show esArgs.esaBeadId)
 
+      let retryCfg = defaultRetryConfig { tracer = Just tracer }
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runGeminiIO
         $ runGitHubIO defaultGitHubConfig
         $ runGitIO
         $ runGitHubIO defaultGitHubConfig
+        $ withRetry retryCfg
         $ fmap unwrapSingleChoice (exoStatusLogic esArgs)
 
       case resultOrErr of
@@ -410,8 +418,8 @@ runWithoutTeaching logger _lspSession _maybeTuiHandle reqId _query = do
 -- | Handle the file_pr tool.
 --
 -- Runs the FilePRGraph logic to file a pull request with bead context.
-handleFilePRTool :: Logger -> Text -> Value -> IO ControlResponse
-handleFilePRTool logger reqId args = do
+handleFilePRTool :: Logger -> Tracer -> Text -> Value -> IO ControlResponse
+handleFilePRTool logger tracer reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -420,11 +428,13 @@ handleFilePRTool logger reqId args = do
     Success fpArgs -> do
       logDebug logger $ "  testing=" <> fpArgs.fpaTesting
 
+      let retryCfg = defaultRetryConfig { tracer = Just tracer }
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runGitHubIO defaultGitHubConfig
         $ runGitIO
         $ runGitHubIO defaultGitHubConfig
+        $ withRetry retryCfg
         $ fmap unwrapSingleChoice (filePRLogic fpArgs)
 
       case resultOrErr of
@@ -444,8 +454,8 @@ handleFilePRTool logger reqId args = do
 -- | Handle the pm_approve_expansion tool.
 --
 -- Runs the PmApproveExpansionGraph logic to approve or reject expansion plans.
-handlePmApproveExpansionTool :: Logger -> Text -> Value -> IO ControlResponse
-handlePmApproveExpansionTool logger reqId args = do
+handlePmApproveExpansionTool :: Logger -> Tracer -> Text -> Value -> IO ControlResponse
+handlePmApproveExpansionTool logger tracer reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -455,9 +465,11 @@ handlePmApproveExpansionTool logger reqId args = do
       logDebug logger $ "  issue_num=" <> T.pack (show paeArgs.paeaIssueNum)
       logDebug logger $ "  decision=" <> paeArgs.paeaDecision
 
+      let retryCfg = defaultRetryConfig { tracer = Just tracer }
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runGitHubIO defaultGitHubConfig
+        $ withRetry retryCfg
         $ fmap unwrapSingleChoice (pmApproveExpansionLogic paeArgs)
 
       case resultOrErr of
@@ -472,8 +484,8 @@ handlePmApproveExpansionTool logger reqId args = do
 -- | Handle the pm_status tool.
 --
 -- Runs the PmStatusGraph logic to calculate sprint health metrics.
-handlePmStatusTool :: Logger -> Text -> Value -> IO ControlResponse
-handlePmStatusTool logger reqId args = do
+handlePmStatusTool :: Logger -> Tracer -> Text -> Value -> IO ControlResponse
+handlePmStatusTool logger tracer reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -482,11 +494,13 @@ handlePmStatusTool logger reqId args = do
     Success psArgs -> do
       logDebug logger $ "  period_days=" <> T.pack (show psArgs.psaPeriodDays)
 
+      let retryCfg = defaultRetryConfig { tracer = Just tracer }
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runTime
         $ runGitHubIO defaultGitHubConfig
         $ runGitHubIO defaultGitHubConfig
+        $ withRetry retryCfg
         $ fmap unwrapSingleChoice (pmStatusLogic psArgs)
 
       case resultOrErr of
@@ -501,8 +515,8 @@ handlePmStatusTool logger reqId args = do
 -- | Handle the pm_propose tool.
 --
 -- Runs the PMProposeGraph logic to propose a new bead.
-handlePMProposeTool :: Logger -> Text -> Value -> IO ControlResponse
-handlePMProposeTool logger reqId args = do
+handlePMProposeTool :: Logger -> Tracer -> Text -> Value -> IO ControlResponse
+handlePMProposeTool logger tracer reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -511,10 +525,12 @@ handlePMProposeTool logger reqId args = do
     Success ppaArgs -> do
       logDebug logger $ "  title=" <> ppaArgs.ppaTitle
 
+      let retryCfg = defaultRetryConfig { tracer = Just tracer }
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runEnvIO
         $ runGitHubIO defaultGitHubConfig
+        $ withRetry retryCfg
         $ fmap unwrapSingleChoice (pmProposeLogic ppaArgs)
 
       case resultOrErr of
@@ -583,8 +599,8 @@ handleRegisterFeedbackTool logger reqId args = do
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Handle the gh_issue_list tool.
-handleGHIssueListTool :: Logger -> Text -> Value -> IO ControlResponse
-handleGHIssueListTool logger reqId args = do
+handleGHIssueListTool :: Logger -> Tracer -> Text -> Value -> IO ControlResponse
+handleGHIssueListTool logger tracer reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -593,10 +609,12 @@ handleGHIssueListTool logger reqId args = do
     Success gilArgs -> do
       logDebug logger $ "  status=" <> T.pack (show gilArgs.gilaStatus)
 
+      let retryCfg = defaultRetryConfig { tracer = Just tracer }
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runEnvIO
         $ runGitHubIO defaultGitHubConfig
+        $ withRetry retryCfg
         $ fmap unwrapSingleChoice (ghIssueListLogic gilArgs)
 
       case resultOrErr of
@@ -610,8 +628,8 @@ handleGHIssueListTool logger reqId args = do
 
 
 -- | Handle the gh_issue_show tool.
-handleGHIssueShowTool :: Logger -> Text -> Value -> IO ControlResponse
-handleGHIssueShowTool logger reqId args = do
+handleGHIssueShowTool :: Logger -> Tracer -> Text -> Value -> IO ControlResponse
+handleGHIssueShowTool logger tracer reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -620,10 +638,12 @@ handleGHIssueShowTool logger reqId args = do
     Success gisArgs -> do
       logDebug logger $ "  number=" <> T.pack (show gisArgs.gisaNumber)
 
+      let retryCfg = defaultRetryConfig { tracer = Just tracer }
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runEnvIO
         $ runGitHubIO defaultGitHubConfig
+        $ withRetry retryCfg
         $ fmap unwrapSingleChoice (ghIssueShowLogic gisArgs)
 
       case resultOrErr of
@@ -639,8 +659,8 @@ handleGHIssueShowTool logger reqId args = do
 
 
 -- | Handle the gh_issue_create tool.
-handleGHIssueCreateTool :: Logger -> Text -> Value -> IO ControlResponse
-handleGHIssueCreateTool logger reqId args = do
+handleGHIssueCreateTool :: Logger -> Tracer -> Text -> Value -> IO ControlResponse
+handleGHIssueCreateTool logger tracer reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -649,10 +669,12 @@ handleGHIssueCreateTool logger reqId args = do
     Success gicArgs -> do
       logDebug logger $ "  title=" <> gicArgs.gcaTitle
 
+      let retryCfg = defaultRetryConfig { tracer = Just tracer }
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runEnvIO
         $ runGitHubIO defaultGitHubConfig
+        $ withRetry retryCfg
         $ fmap unwrapSingleChoice (ghIssueCreateLogic gicArgs)
 
       case resultOrErr of
@@ -666,8 +688,8 @@ handleGHIssueCreateTool logger reqId args = do
 
 
 -- | Handle the gh_issue_update tool.
-handleGHIssueUpdateTool :: Logger -> Text -> Value -> IO ControlResponse
-handleGHIssueUpdateTool logger reqId args = do
+handleGHIssueUpdateTool :: Logger -> Tracer -> Text -> Value -> IO ControlResponse
+handleGHIssueUpdateTool logger tracer reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -676,10 +698,12 @@ handleGHIssueUpdateTool logger reqId args = do
     Success giuArgs -> do
       logDebug logger $ "  number=" <> T.pack (show giuArgs.guaNumber)
 
+      let retryCfg = defaultRetryConfig { tracer = Just tracer }
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runEnvIO
         $ runGitHubIO defaultGitHubConfig
+        $ withRetry retryCfg
         $ fmap unwrapSingleChoice (ghIssueUpdateLogic giuArgs)
 
       case resultOrErr of
@@ -693,8 +717,8 @@ handleGHIssueUpdateTool logger reqId args = do
 
 
 -- | Handle the gh_issue_close tool.
-handleGHIssueCloseTool :: Logger -> Text -> Value -> IO ControlResponse
-handleGHIssueCloseTool logger reqId args = do
+handleGHIssueCloseTool :: Logger -> Tracer -> Text -> Value -> IO ControlResponse
+handleGHIssueCloseTool logger tracer reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -703,10 +727,12 @@ handleGHIssueCloseTool logger reqId args = do
     Success gicArgs -> do
       logDebug logger $ "  number=" <> T.pack (show gicArgs.gclaNumber)
 
+      let retryCfg = defaultRetryConfig { tracer = Just tracer }
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runEnvIO
         $ runGitHubIO defaultGitHubConfig
+        $ withRetry retryCfg
         $ fmap unwrapSingleChoice (ghIssueCloseLogic gicArgs)
 
       case resultOrErr of
@@ -720,8 +746,8 @@ handleGHIssueCloseTool logger reqId args = do
 
 
 -- | Handle the gh_issue_reopen tool.
-handleGHIssueReopenTool :: Logger -> Text -> Value -> IO ControlResponse
-handleGHIssueReopenTool logger reqId args = do
+handleGHIssueReopenTool :: Logger -> Tracer -> Text -> Value -> IO ControlResponse
+handleGHIssueReopenTool logger tracer reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -730,10 +756,12 @@ handleGHIssueReopenTool logger reqId args = do
     Success graArgs -> do
       logDebug logger $ "  number=" <> T.pack (show graArgs.graNumber)
 
+      let retryCfg = defaultRetryConfig { tracer = Just tracer }
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runEnvIO
         $ runGitHubIO defaultGitHubConfig
+        $ withRetry retryCfg
         $ fmap unwrapSingleChoice (ghIssueReopenLogic graArgs)
 
       case resultOrErr of

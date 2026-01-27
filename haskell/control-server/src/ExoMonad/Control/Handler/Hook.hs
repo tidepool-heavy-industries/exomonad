@@ -142,11 +142,11 @@ handleSessionStart tracer role input = do
            runSshExec dockerCtlPath
            $ runGitRemote (T.pack container) "." 
            $ traceGit tracer
-           $ sessionStartLogic role input.cwd
+           $ sessionStartLogic tracer role input.cwd
          Nothing -> 
            runGitIO 
            $ traceGit tracer
-           $ sessionStartLogic role input.cwd
+           $ sessionStartLogic tracer role input.cwd
 
   case result of
     Left (e :: SomeException) -> do

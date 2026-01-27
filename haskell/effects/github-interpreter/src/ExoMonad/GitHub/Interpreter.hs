@@ -53,6 +53,8 @@ import Data.Text.Encoding qualified as TE
 import System.IO (hPutStrLn, stderr)
 import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
+import System.Timeout (timeout)
+import Data.Time.Clock (getCurrentTime, addUTCTime)
 
 import ExoMonad.Effects.GitHub
   ( GitHub(..)
@@ -311,7 +313,7 @@ ghIssueView config repo num includeComments = do
 
   result <- runGhCommand config args
   case result of
-    Left (GHNotFound _) -> pure $ Right Nothing  -- Not found is valid - issue doesn't exist
+    Left (GHUnexpected 404 _) -> pure $ Left $ GHNotFound num
     Left err -> pure $ Left err
     Right output
       | T.null (T.strip output) -> pure $ Right Nothing
@@ -383,7 +385,7 @@ ghPrView config repo num includeDetails = do
 
   result <- runGhCommand config args
   case result of
-    Left (GHNotFound _) -> pure $ Right Nothing  -- Not found is valid - PR doesn't exist
+    Left (GHUnexpected 404 _) -> pure $ Left $ GHNotFound num
     Left err -> pure $ Left err
     Right output
       | T.null (T.strip output) -> pure $ Right Nothing
@@ -537,18 +539,25 @@ ghAuthCheck = do
 -- IMPORTANT: This function returns structured GitHubError for failures,
 -- making error conditions explicit in the type system.
 runGhCommand :: GitHubConfig -> [String] -> IO (Either GitHubError Text)
-runGhCommand config args = do
+runGhCommand _config args = do
   -- Log command before execution (aggressive logging per CLAUDE.md)
   hPutStrLn stderr $ "[GitHub] Executing: gh " <> unwords args
 
-  result <- try $ readProcessWithExitCode "gh" args ""
-  case result of
-    Left (e :: SomeException) -> do
+  -- 10 second timeout for all GitHub CLI calls
+  let timeoutUs = 10 * 1000000 
+  mResult <- timeout timeoutUs $ try $ readProcessWithExitCode "gh" args ""
+  
+  case mResult of
+    Nothing -> do
+      hPutStrLn stderr "[GitHub] ERROR: Request timed out after 10s"
+      pure $ Left GHTimeout
+
+    Just (Left (e :: SomeException)) -> do
       let errMsg = "gh command exception: " <> T.pack (show e)
       hPutStrLn stderr $ "[GitHub] ERROR: " <> T.unpack errMsg
-      pure $ Left $ GHCommandFailed 1 errMsg
+      pure $ Left $ GHNetworkError errMsg
 
-    Right (exitCode, stdout, stderrOutput) -> do
+    Just (Right (exitCode, stdout, stderrOutput)) -> do
       -- Log exit code (aggressive logging per CLAUDE.md)
       hPutStrLn stderr $ "[GitHub] Exit code: " <> show exitCode
       unless (null stderrOutput) $
@@ -561,28 +570,30 @@ runGhCommand config args = do
               stderrLower = T.toLower stderrText
 
           -- Parse specific error conditions into typed errors
-          -- Auth errors are the most critical - must be surfaced clearly
           if "authentication" `T.isInfixOf` stderrLower ||
              "not logged in" `T.isInfixOf` stderrLower ||
              "gh auth login" `T.isInfixOf` stderrLower
           then do
             hPutStrLn stderr "[GitHub] ERROR: Not authenticated"
-            pure $ Left $ GHNotAuthenticated "Not authenticated. Run: gh auth login"
+            pure $ Left $ GHPermissionDenied "Not authenticated. Run: gh auth login"
+
+          -- Rate limit detection
+          else if "rate limit" `T.isInfixOf` stderrLower
+          then do
+            hPutStrLn stderr "[GitHub] ERROR: Rate limit exceeded"
+            now <- getCurrentTime
+            pure $ Left $ GHRateLimit (addUTCTime 3600 now)
 
           -- "not found" for specific resources
           else if "not found" `T.isInfixOf` stderrLower ||
                   "could not find" `T.isInfixOf` stderrLower
           then do
             hPutStrLn stderr $ "[GitHub] ERROR: Resource not found: " <> T.unpack stderrText
-            pure $ Left $ GHNotFound stderrText
+            -- We use 404 code here. The caller can refine to GHNotFound Int if they have the ID.
+            pure $ Left $ GHUnexpected 404 stderrText
 
           -- Generic command failure with exit code and stderr
           else do
             hPutStrLn stderr $ "[GitHub] ERROR: Command failed with code " <> show code
-            pure $ Left $ GHCommandFailed code stderrText
-
-
--- | Log debug message to stderr when not in quiet mode.
--- Note: Error logging now always happens (per AGGRESSIVE LOGGING principle).
-logDebug :: GitHubConfig -> String -> IO ()
-logDebug config msg = unless config.ghcQuiet $ hPutStrLn stderr msg
+            pure $ Left $ GHUnexpected code stderrText
+            
