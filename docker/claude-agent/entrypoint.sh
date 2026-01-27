@@ -26,6 +26,7 @@ else
     echo "Warning: No git authentication configured, operations may fail"
 fi
 
+
 # --- Initialize repo if empty ---
 # Named volume may be empty on first start; clone the repo
 ROLE="${EXOMONAD_ROLE:-agent}"
