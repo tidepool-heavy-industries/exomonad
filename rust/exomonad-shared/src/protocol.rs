@@ -17,26 +17,22 @@
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 
 // ============================================================================
 // Protocol Types
 // ============================================================================
 
 /// The runtime environment for the agent.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum, strum::Display)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum, Default, strum::Display)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum Runtime {
     /// Anthropic's Claude Code CLI.
+    #[default]
     Claude,
     /// Google's Gemini CLI.
     Gemini,
-}
-
-impl Default for Runtime {
-    fn default() -> Self {
-        Self::Claude
-    }
 }
 
 /// The role of the agent (determines hook behavior and context).
@@ -258,6 +254,122 @@ pub enum PermissionDecision {
         #[serde(default)]
         interrupt: bool,
     },
+}
+
+// ============================================================================
+// Service Protocol Types
+// ============================================================================
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(tag = "type")]
+pub enum ServiceRequest {
+    // LLM
+    AnthropicChat {
+        model: String,
+        messages: Vec<ChatMessage>,
+        max_tokens: u32,
+        tools: Option<Vec<Tool>>,
+        system: Option<String>,
+    },
+    OllamaGenerate {
+        model: String,
+        prompt: String,
+        system: Option<String>,
+    },
+
+    // GitHub
+    GitHubGetIssue { owner: String, repo: String, number: u32 },
+    GitHubCreateIssue { owner: String, repo: String, title: String, body: String, labels: Vec<String> },
+    GitHubListIssues { owner: String, repo: String, state: IssueState, labels: Vec<String> },
+    GitHubCreatePR { owner: String, repo: String, title: String, body: String, head: String, base: String },
+    GitHubGetPR { owner: String, repo: String, number: u32 },
+
+    // Observability
+    OtelSpan { trace_id: String, span_id: String, name: String, start_ns: u64, end_ns: u64, attributes: HashMap<String, String> },
+    OtelMetric { name: String, value: f64, labels: HashMap<String, String> },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(tag = "type")]
+pub enum ServiceResponse {
+    // LLM
+    AnthropicChat {
+        content: Vec<ContentBlock>,
+        stop_reason: StopReason,
+        usage: Usage,
+    },
+    OllamaGenerate {
+        response: String,
+        done: bool,
+    },
+
+    // GitHub
+    GitHubIssue { number: u32, title: String, body: String, state: String, labels: Vec<String>, url: String },
+    GitHubIssues { issues: Vec<GitHubIssueRef> },
+    GitHubPR { number: u32, url: String, state: String },
+
+    // Observability
+    OtelAck,
+
+    // Error
+    Error { code: i32, message: String },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Tool {
+    pub name: String,
+    pub description: String,
+    pub input_schema: Value,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum StopReason {
+    EndTurn,
+    MaxTokens,
+    StopSequence,
+    ToolUse,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ContentBlock {
+    #[serde(rename = "type")]
+    pub block_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<Value>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Usage {
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum IssueState {
+    Open,
+    Closed,
+    All,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GitHubIssueRef {
+    pub number: u32,
+    pub title: String,
+    pub state: String,
 }
 
 // ============================================================================

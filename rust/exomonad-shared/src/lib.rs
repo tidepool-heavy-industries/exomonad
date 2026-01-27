@@ -52,7 +52,10 @@ pub use events::{ExitReason, InterruptSignal, RunResult, StreamEvent, ToolCall};
 pub use fifo::{ResultFifo, SignalFifo};
 pub use hooks::HookConfig;
 pub use logging::{init_logging, init_logging_with_default};
-pub use protocol::{ControlMessage, ControlResponse, HookInput, HookOutput, Role};
+pub use protocol::{
+    ChatMessage, ContentBlock, ControlMessage, ControlResponse, GitHubIssueRef, HookInput,
+    HookOutput, IssueState, Role, ServiceRequest, ServiceResponse, StopReason, Tool, Usage,
+};
 pub use socket::control_socket_path;
 pub use socket::ControlSocket;
 pub use supervisor::Supervisor;

@@ -117,14 +117,13 @@ impl ControlSocket {
 
         let output = cmd.output().map_err(ExoMonadError::Io)?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            error!(status = ?output.status, stderr = %stderr, "curl failed");
-            return Err(ExoMonadError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("curl failed: {}", stderr)
-            )));
-        }
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(ExoMonadError::Io(std::io::Error::other(format!(
+                    "curl failed: {}",
+                    stderr
+                ))));
+            }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         trace!(response_len = stdout.len(), "Received response");
