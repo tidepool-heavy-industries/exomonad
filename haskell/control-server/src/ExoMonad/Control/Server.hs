@@ -58,7 +58,7 @@ loadObservabilityConfig = do
       let loki = fmap (\url -> LokiConfig (T.pack url) (fmap T.pack lokiUser) (fmap T.pack lokiToken) "exomonad-control-server") lokiUrl
           otlp = fmap (\end -> OTLPConfig (T.pack end) (fmap T.pack otlpUser) (fmap T.pack otlpToken)) otlpEndpoint
 
-      pure $ Just $ ObservabilityConfig loki otlp "exomonad-control-server"
+      pure $ Just $ ObservabilityOtelConfig loki otlp "exomonad-control-server"
 
 -- | Run the control server. Blocks forever.
 runServer :: Logger -> ServerConfig -> Tracer -> IO ()
@@ -162,8 +162,8 @@ server logger config tracer cbMap =
 
       -- Flush traces (legacy support for MCP tools)
       case config.observabilityConfig of
-        Just obsConfig | Just otlp <- ocOTLP obsConfig ->
-           flushTraces otlp obsConfig.ocServiceName traceCtx
+        Just (ObservabilityOtelConfig _ (Just otlp) svc) ->
+           flushTraces otlp svc traceCtx
         _ -> pure ()
 
       pure res
@@ -202,8 +202,8 @@ server logger config tracer cbMap =
 
               -- Flush traces (legacy)
               case config.observabilityConfig of
-                Just obsConfig | Just otlp <- ocOTLP obsConfig ->
-                   flushTraces otlp obsConfig.ocServiceName traceCtx
+                Just (ObservabilityOtelConfig _ (Just otlp) svc) ->
+                   flushTraces otlp svc traceCtx
                 _ -> pure ()
 
               pure res

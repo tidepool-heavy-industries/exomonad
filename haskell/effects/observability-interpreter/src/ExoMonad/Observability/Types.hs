@@ -92,11 +92,15 @@ instance ToJSON SpanId where
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Combined observability configuration.
-data ObservabilityConfig = ObservabilityConfig
-  { ocLoki :: Maybe LokiConfig   -- ^ Loki config (for logs)
-  , ocOTLP :: Maybe OTLPConfig   -- ^ OTLP config (for traces)
-  , ocServiceName :: Text        -- ^ Service name for resource attributes
-  }
+data ObservabilityConfig
+  = ObservabilityOtelConfig
+      { ocLoki :: Maybe LokiConfig   -- ^ Loki config (for logs)
+      , ocOTLP :: Maybe OTLPConfig   -- ^ OTLP config (for traces)
+      , ocServiceName :: Text        -- ^ Service name for resource attributes
+      }
+  | ObservabilitySocketConfig
+      { ocSocketPath :: FilePath
+      }
   deriving (Show, Eq, Generic)
 
 -- | Loki push endpoint configuration.

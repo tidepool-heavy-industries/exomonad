@@ -44,7 +44,8 @@ library
         servant >= 0.20 && < 1,
         servant-client >= 0.20 && < 1,
         servant-client-core >= 0.20 && < 1,
-        exomonad-core
+        exomonad-core,
+        exomonad-socket-client
     hs-source-dirs:   src
 
 executable test-anthropic-integration

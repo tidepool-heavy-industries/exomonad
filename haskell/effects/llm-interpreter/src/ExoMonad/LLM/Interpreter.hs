@@ -44,7 +44,8 @@ module ExoMonad.LLM.Interpreter
   ) where
 
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
-import Data.Aeson (Value)
+import Data.Aeson (Value, toJSON, fromJSON)
+import qualified Data.Aeson as Aeson
 import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -60,6 +61,14 @@ import Servant.Client
   )
 import Servant.Client.Core (ResponseF(..))
 import Network.HTTP.Types.Status (statusCode)
+
+import ExoMonad.Effects.SocketClient
+  ( SocketConfig(..)
+  , ServiceRequest(..)
+  , ServiceResponse(..)
+  , ServiceError(..)
+  , sendRequest
+  )
 
 import ExoMonad.LLM.Types
   ( LLMEnv(..)
@@ -81,6 +90,8 @@ import ExoMonad.Effects.LLMProvider
   , ThinkingBudget(..)
   , AnthropicResponse(..)
   , OpenAIResponse(..)
+  , LLMProviderConfig
+  , LLMProviderResponse
   )
 import ExoMonad.LLM.API.Anthropic qualified as Anthropic
 import ExoMonad.LLM.API.OpenAI qualified as OpenAI
@@ -253,55 +264,80 @@ clientErrorToLLMError err = case err of
 
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- SOCKET CLIENT
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Make a request to the socket-based service.
+socketRequest
+  :: SProvider p
+  -> LLMEnv
+  -> LLMProviderConfig p
+  -> Text
+  -> Maybe [Value]
+  -> IO (Either LLMError (LLMProviderResponse p))
+socketRequest provider env config userMsg maybeTools = case env.leConfig of
+  LLMHttpConfig{} -> case provider of
+    SAnthropic -> anthropicRequest env config userMsg maybeTools
+    SOpenAI -> openaiRequest env config userMsg maybeTools
+  LLMSocketConfig path -> do
+    let socketCfg = SocketConfig path 30000
+    case provider of
+      SAnthropic -> do
+        let req = AnthropicChat
+              { model = config.acModel
+              , messages = [toJSON $ Anthropic.AnthropicMessage "user" userMsg]
+              , maxTokens = config.acMaxTokens
+              , tools = maybeTools
+              , system = config.acSystemPrompt
+              , thinking = case config.acThinking of
+                  ThinkingDisabled -> Nothing
+                  ThinkingEnabled budget -> Just $ toJSON $ Anthropic.ThinkingConfig "enabled" budget
+              }
+        result <- sendRequest socketCfg req
+        case result of
+          Right (AnthropicChatResponse content stop usage) ->
+            case (fromJSON (toJSON content), fromJSON (toJSON usage)) of
+              (Aeson.Success c, Aeson.Success u) -> pure $ Right $ AnthropicResponse c stop u
+              (err, _) -> pure $ Left $ LLMParseError $ T.pack $ "Failed to parse content: " <> show err
+          Right (ErrorResponse code msg) -> pure $ Left $ LLMApiError (T.pack $ show code) msg
+          Right _ -> pure $ Left $ LLMParseError "Unexpected response type for Anthropic"
+          Left err -> pure $ Left $ socketErrorToLLMError err
+
+      SOpenAI -> do
+        -- For now, we assume OpenAI via socket uses a similar protocol if needed,
+        -- or we fall back/fail if not supported. Task only showed AnthropicChat.
+        pure $ Left $ LLMApiError "not_implemented" "OpenAI via socket not yet supported"
+
+-- | Convert SocketError to LLMError.
+socketErrorToLLMError :: ServiceError -> LLMError
+socketErrorToLLMError = \case
+  SocketError msg -> LLMHttpError msg
+  DecodeError msg -> LLMParseError (T.pack msg)
+  TimeoutError -> LLMHttpError "Socket request timed out"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT INTERPRETER
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Run LLMComplete effects using native HTTP client.
+-- | Helper to get provider name as string.
+providerName :: SProvider p -> String
+providerName SAnthropic = "Anthropic"
+providerName SOpenAI = "OpenAI"
+
+-- | Run LLMComplete effects using native HTTP client or socket.
 --
 -- This interpreter makes real API calls to Anthropic or OpenAI based on
--- the type-level provider in the effect.
---
--- = Error Handling
---
--- * 'Complete' - throws via 'error' on failure (use for fatal errors)
--- * 'CompleteTry' - returns @Either LLMError@ (use for graceful handling)
---
--- = Example
---
--- @
--- import Control.Monad.Freer (runM)
---
--- main = do
---   let config = LLMConfig { lcAnthropicSecrets = Just secrets, ... }
---   env <- mkLLMEnv config
---   runM $ runLLMComplete env $ do
---     -- Throwing variant (crashes on error)
---     response <- complete SAnthropic cfg "Hello" Nothing
---
---     -- Try variant (returns Either)
---     result <- completeTry SAnthropic cfg "Hello" Nothing
---     case result of
---       Left err -> handleError err
---       Right response -> pure response
--- @
+-- the type-level provider in the effect and the environment configuration.
 runLLMComplete :: LastMember IO effs => LLMEnv -> Eff (LLMComplete ': effs) a -> Eff effs a
 runLLMComplete env = interpret $ \case
   -- Throwing variants (for when errors are fatal)
-  Complete SAnthropic config msg tools -> sendM $ do
-    result <- anthropicRequest env config msg tools
+  Complete provider config msg tools -> sendM $ do
+    result <- socketRequest provider env config msg tools
     case result of
-      Left err -> error $ "LLMComplete (Anthropic): " <> show err
-      Right resp -> pure resp
-
-  Complete SOpenAI config msg tools -> sendM $ do
-    result <- openaiRequest env config msg tools
-    case result of
-      Left err -> error $ "LLMComplete (OpenAI): " <> show err
+      Left err -> error $ "LLMComplete (" <> providerName provider <> "): " <> show err
       Right resp -> pure resp
 
   -- Try variants (for graceful error handling)
-  CompleteTry SAnthropic config msg tools -> sendM $
-    anthropicRequest env config msg tools
-
-  CompleteTry SOpenAI config msg tools -> sendM $
-    openaiRequest env config msg tools
+  CompleteTry provider config msg tools -> sendM $
+    socketRequest provider env config msg tools

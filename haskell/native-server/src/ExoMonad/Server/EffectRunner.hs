@@ -113,7 +113,7 @@ data InterpreterConfig = InterpreterConfig
 -- Use 'loadInterpreterConfig' to load from environment variables.
 defaultInterpreterConfig :: InterpreterConfig
 defaultInterpreterConfig = InterpreterConfig
-  { ecLLMConfig = LLMConfig
+  { ecLLMConfig = LLMHttpConfig
       { lcAnthropicSecrets = Nothing
       , lcOpenAISecrets = Nothing
       }
@@ -184,7 +184,7 @@ loadInterpreterConfig = do
         _            -> True
 
   pure InterpreterConfig
-    { ecLLMConfig = LLMConfig
+    { ecLLMConfig = LLMHttpConfig
         { lcAnthropicSecrets = case anthropicKey of
             Just k -> Just AnthropicSecrets
               { asApiKey = ApiKey (T.pack k)

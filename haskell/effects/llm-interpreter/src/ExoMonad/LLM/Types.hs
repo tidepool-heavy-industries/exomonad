@@ -100,11 +100,15 @@ getBaseUrl (BaseUrl t) = t
 -- CONFIGURATION
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | LLM API configuration with secrets for both providers.
-data LLMConfig = LLMConfig
-  { lcAnthropicSecrets :: Maybe AnthropicSecrets
-  , lcOpenAISecrets    :: Maybe OpenAISecrets
-  }
+-- | LLM API configuration supporting HTTP and Unix Sockets.
+data LLMConfig
+  = LLMHttpConfig
+      { lcAnthropicSecrets :: Maybe AnthropicSecrets
+      , lcOpenAISecrets    :: Maybe OpenAISecrets
+      }
+  | LLMSocketConfig
+      { lcSocketPath :: FilePath
+      }
   deriving stock (Eq, Show, Generic)
 
 -- | Anthropic API secrets.
@@ -141,10 +145,15 @@ data LLMEnv = LLMEnv
   , leManager :: Manager
   }
 
--- | Create a new environment (creates TLS manager).
+-- | Create a new environment (creates TLS manager if needed).
 mkLLMEnv :: LLMConfig -> IO LLMEnv
-mkLLMEnv config = do
-  manager <- newManager tlsManagerSettings
-  pure LLMEnv { leConfig = config, leManager = manager }
+mkLLMEnv config = case config of
+  LLMHttpConfig{} -> do
+    manager <- newManager tlsManagerSettings
+    pure LLMEnv { leConfig = config, leManager = manager }
+  LLMSocketConfig{} -> do
+    -- Manager not used for socket connections, but kept for compatibility
+    manager <- newManager tlsManagerSettings 
+    pure LLMEnv { leConfig = config, leManager = manager }
 
 
