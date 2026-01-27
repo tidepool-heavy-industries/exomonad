@@ -315,13 +315,25 @@ processIssue spawnMode repoRoot wtBaseDir backend shortId = do
                                     "gemini" -> "gemini --debug"
                                     "claude" -> "claude --debug --verbose"
                                     _        -> "claude --debug --verbose"
-                              -- Subagents connect to shared control-server via TCP
+                              
+                              -- Resolve socket paths based on spawn mode
+                              (controlSocket, tuiSocket) = case spawnMode of
+                                SpawnDocker -> ("/sockets/control.sock", "/sockets/tui.sock")
+                                SpawnZellij -> 
+                                  ( repoRoot </> ".exomonad" </> "sockets" </> "control.sock"
+                                  , repoRoot </> ".exomonad" </> "sockets" </> "tui.sock"
+                                  )
+
+                              -- Subagents connect to shared control-server via TCP (Docker) or UDS (Zellij)
                               -- No local control-server startup needed
                               envVars =
                                 [
                                   ("SUBAGENT_CMD", backendCmd)
                                 , ("CONTROL_SERVER_URL", "http://control-server:7432")
                                 , ("EXOMONAD_ROLE", "dev")
+                                , ("EXOMONAD_BIN_DIR", T.pack binDir)
+                                , ("EXOMONAD_CONTROL_SOCKET", T.pack controlSocket)
+                                , ("EXOMONAD_TUI_SOCKET", T.pack tuiSocket)
                                 ]
 
                           -- Skip bootstrapExoMonad - subagents use shared control-server
