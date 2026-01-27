@@ -28,6 +28,8 @@ pub enum HookEventType {
     Notification,
     /// When Claude Code wants to stop
     Stop,
+    /// When a subagent (Task tool) starts
+    SubagentStart,
     /// When a subagent (Task tool) finishes
     SubagentStop,
     /// Before a compact operation

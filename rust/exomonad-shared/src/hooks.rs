@@ -42,6 +42,7 @@ const HOOK_EVENTS: &[(&str, &str, bool)] = &[
     ("PermissionRequest", "permission-request", true),
     ("Notification", "notification", false),
     ("Stop", "stop", false),
+    ("SubagentStart", "subagent-start", false),
     ("SubagentStop", "subagent-stop", false),
     ("PreCompact", "pre-compact", false),
     ("SessionStart", "session-start", false),
