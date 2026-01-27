@@ -3,17 +3,16 @@
 # Usage (preferred - auto-injects GIT_SHA):
 #   ./build                    # Build all final images
 #   ./build --load             # Build and load into local daemon
-#   ./build deps               # Build only dependency cacher layers
 #   ./build control-server     # Build specific target
 #
 # Usage (direct - requires manual GIT_SHA):
 #   export GIT_SHA=$(git rev-parse --short HEAD)
 #   docker buildx bake -f docker/docker-bake.hcl
 #
-# Cache efficiency:
-#   - Deps are built separately from source
-#   - Source changes only rebuild the final stage, not deps
-#   - cargo-chef for Rust, cabal freeze + dummy source for Haskell
+# Cache strategy:
+#   - BuildKit cache mounts persist across builds (global to builder)
+#   - Even if source/cabal files change, already-built deps are reused
+#   - dist-newstyle cached for incremental compilation
 #
 # Version embedding:
 #   GIT_SHA is read from environment (set by ./build wrapper or manually)
@@ -25,11 +24,6 @@ variable "GIT_SHA" { default = "" }
 # Default: build all final images
 group "default" {
   targets = ["control-server", "claude-agent", "zellij"]
-}
-
-# Build only dependency cachers (for CI warmup)
-group "deps" {
-  targets = ["rust-cacher", "haskell-cacher"]
 }
 
 # =============================================================================
@@ -64,31 +58,13 @@ target "rust-builder" {
 }
 
 # =============================================================================
-# Haskell Dependency Caching (cabal freeze + dummy source)
+# Haskell Build (BuildKit cache mounts - no separate cacher stage needed)
 # =============================================================================
-
-target "haskell-freeze" {
-  dockerfile = "docker/base/Dockerfile.haskell-deps"
-  target = "freeze"
-  context = "."
-}
-
-target "haskell-cacher" {
-  dockerfile = "docker/base/Dockerfile.haskell-deps"
-  target = "cacher"
-  context = "."
-  contexts = {
-    haskell-freeze = "target:haskell-freeze"
-  }
-}
 
 target "haskell-builder" {
   dockerfile = "docker/base/Dockerfile.haskell-deps"
   target = "builder"
   context = "."
-  contexts = {
-    haskell-cacher = "target:haskell-cacher"
-  }
   args = {
     GIT_SHA = GIT_SHA
   }

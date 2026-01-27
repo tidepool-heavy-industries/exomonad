@@ -1,83 +1,12 @@
-# Haskell Dependency Caching via cabal freeze + dummy source
+# syntax=docker/dockerfile:1.4
+# Haskell Build with BuildKit Cache Mounts
 #
-# Three-stage build:
-#   1. freeze  - Generate cabal.project.freeze (pinned deps)
-#   2. cacher  - Build deps with dummy source files (cached layer)
-#   3. builder - Compile real source with cached deps
-#
-# Cache invalidation:
-#   - cabal.project or *.cabal changes → rebuild deps
-#   - Source changes → rebuild only packages (deps cached)
+# Cache strategy:
+#   - BuildKit cache mounts are GLOBAL to the builder (not per-stage)
+#   - Same mount declared in multiple stages shares the same persistent volume
+#   - Even if cabal files change, already-built deps are reused
+#   - dist-newstyle cached for incremental builds of our own code
 
-# =============================================================================
-# Stage 1: Freeze - generate cabal.project.freeze
-# =============================================================================
-FROM haskell:9.12.2-slim-bookworm AS freeze
-
-RUN apt-get update && apt-get install -y \
-    libgmp-dev \
-    libffi-dev \
-    zlib1g-dev \
-    pkg-config \
-    git \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-
-# Copy cabal project and all package cabal files
-COPY cabal.project ./ 
-COPY haskell/ ./haskell/
-
-# Remove Nix-specific zlib configuration (paths don't exist in Docker)
-RUN sed -i '/package zlib/,+2d' cabal.project
-
-# Generate freeze file
-RUN cabal update && cabal freeze
-
-# =============================================================================
-# Stage 2: Cacher - build deps with dummy source (no real code)
-# =============================================================================
-FROM haskell:9.12.2-slim-bookworm AS cacher
-
-RUN apt-get update && apt-get install -y \
-    libgmp-dev \
-    libffi-dev \
-    zlib1g-dev \
-    pkg-config \
-    git \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-
-# Copy freeze file from freeze stage
-COPY --from=freeze /app/cabal.project.freeze ./
-
-# Copy cabal project and package metadata (cabal files)
-COPY cabal.project ./ 
-COPY haskell/ ./haskell/
-
-# Remove Nix-specific zlib configuration
-RUN sed -i '/package zlib/,+2d' cabal.project
-
-# Generate dummy .hs files that satisfy Cabal's module requirements
-# This allows building deps without real source code
-RUN find haskell -name '*.hs' | while read f; do \
-      modname=$(basename "$f" .hs); \
-      if [ "$modname" != "Setup" ]; then \
-        echo "module $modname where" > "$f"; \
-      fi; \
-    done
-
-# Build only dependencies (this is the expensive cached layer)
-# cabal update populates ~/.cache/cabal with hackage index
-# cabal build populates ~/.local/state/cabal with compiled deps
-RUN cabal update && cabal build all --only-dependencies -j
-
-# =============================================================================
-# Stage 3: Builder - compile real source with cached deps
-# =============================================================================
 FROM haskell:9.12.2-slim-bookworm AS builder
 
 RUN apt-get update && apt-get install -y \
@@ -91,30 +20,30 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy XDG directories from cacher (modern cabal 3.12+ uses XDG layout)
-# - ~/.cache/cabal: Package index (hackage metadata + downloaded tarballs)
-# - ~/.local/state/cabal: Compiled dependency store (nix-style v2-build store)
-# Note: NOT copying dist-newstyle - dummy source artifacts can confuse incremental builds
-COPY --from=cacher /root/.cache/cabal /root/.cache/cabal
-COPY --from=cacher /root/.local/state/cabal /root/.local/state/cabal
-
-# Copy real source code
-COPY cabal.project ./ 
+# Copy all source
+COPY cabal.project ./
 COPY haskell/ ./haskell/
 
-# Remove Nix-specific zlib configuration
+# Remove Nix-specific zlib configuration (paths don't exist in Docker)
 RUN sed -i '/package zlib/,+2d' cabal.project
 
-# Version embedding via environment variable
+# Version embedding
 ARG GIT_SHA
 ENV EXOMONAD_GIT_SHA=${GIT_SHA}
 
-# Build all packages
-RUN cabal build all -j --ghc-options=-O1
+# Build with persistent cache mounts:
+# - /root/.local/state/cabal/store: Compiled dependency store (most important)
+# - /root/.cache/cabal: Package index and downloaded tarballs
+# - /app/dist-newstyle: Local build artifacts (incremental compilation)
+# sharing=locked prevents corruption during parallel builds
+RUN --mount=type=cache,target=/root/.local/state/cabal/store,sharing=locked \
+    --mount=type=cache,target=/root/.cache/cabal,sharing=locked \
+    --mount=type=cache,target=/app/dist-newstyle,sharing=locked \
+    cabal update && cabal build all -j --ghc-options=-O1
 
-# Install binary to known location for easy COPY --from access
-# This avoids fragile glob paths in downstream Dockerfiles
-RUN mkdir -p /out && \
+# Copy binary to known location (must happen outside cache mount)
+RUN --mount=type=cache,target=/app/dist-newstyle,sharing=locked \
+    mkdir -p /out && \
     binary=$(find dist-newstyle -name exomonad-control-server -type f -perm /111 | head -1) && \
     echo "Found binary at: $binary" && \
     test -n "$binary" && cp "$binary" /out/exomonad-control-server && \

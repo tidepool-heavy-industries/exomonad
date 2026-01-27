@@ -23,7 +23,7 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 
 import ExoMonad.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
-import ExoMonad.Effects.GitHub (GitHub, Repo(..), PRCreateSpec(..), PRUrl(..), PullRequest(..), PRFilter(..), Issue(..), getIssue, createPR, listPullRequests, defaultPRFilter)
+import ExoMonad.Effects.GitHub (GitHub, Repo(..), PRCreateSpec(..), PRUrl(..), PullRequest(..), PRFilter(..), Issue(..), getIssue, createPR, listPullRequests, defaultPRFilter, defaultRepo)
 import qualified Data.Text as T
 import Data.Maybe (listToMaybe)
 import ExoMonad.Role (Role(..))
@@ -139,8 +139,7 @@ filePRLogic args = do
       pure $ gotoExit $ FilePRResult Nothing False (Just "Not on an issue branch. file_pr requires gh-{num}/* branch naming.")
     Just num -> do
       -- 3. Get Issue Info
-      -- TODO: Configurable repo
-      let repo = Repo "exomonad/exomonad"
+      let repo = defaultRepo
       issueResult <- getIssue repo num False
       case issueResult of
         Left _err ->

@@ -42,6 +42,7 @@ module ExoMonad.Effects.GitHub
 
     -- * Types - Core
   , Repo(..)
+  , defaultRepo
   , Author(..)
   , Comment(..)
 
@@ -133,6 +134,12 @@ instance ToJSON GitHubError where
 newtype Repo = Repo { unRepo :: Text }
   deriving (Show, Eq, Generic)
   deriving newtype (FromJSON, ToJSON)
+
+-- | Default GitHub repository for all tools.
+--
+-- Central constant to avoid hardcoding repo names throughout the codebase.
+defaultRepo :: Repo
+defaultRepo = Repo "tidepool-heavy-industries/exomonad"
 
 -- | GitHub user/author info.
 data Author = Author

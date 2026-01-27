@@ -57,6 +57,7 @@ import GHC.Generics (Generic)
 import ExoMonad.Effects.GitHub
   ( GitHub, Issue(..), IssueState(..), Repo(..), getIssue, listIssues, defaultIssueFilter
   , updateIssue, addIssueLabel, removeIssueLabel, UpdateIssueInput(..), emptyUpdateIssueInput
+  , defaultRepo
   )
 import ExoMonad.Role (Role(..))
 import ExoMonad.Graph.Generic (AsHandler, type (:-))
@@ -213,8 +214,7 @@ pmApproveExpansionLogic
   => PmApproveExpansionArgs
   -> Eff es (GotoChoice '[To Exit PmApproveExpansionResult])
 pmApproveExpansionLogic args = do
-  -- TODO: Configurable repo
-  let repo = Repo "exomonad/exomonad"
+  let repo = defaultRepo
   issueResult <- getIssue repo args.paeaIssueNum False
   case issueResult of
     Left _err -> pure $ gotoExit PmApproveExpansionResult
@@ -341,8 +341,7 @@ pmPrioritizeLogic
   => PmPrioritizeArgs
   -> Eff effs (GotoChoice '[To Exit PmPrioritizeResult])
 pmPrioritizeLogic args = do
-  -- TODO: Configurable repo
-  let repo = Repo "exomonad/exomonad"
+  let repo = defaultRepo
   
   results <- forM args.ppaUpdates $ \item -> do
     if item.piNewPriority < 0 || item.piNewPriority > 4

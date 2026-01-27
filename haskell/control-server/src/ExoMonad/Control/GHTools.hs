@@ -633,4 +633,4 @@ getRepo mRepo = do
     Just r -> pure $ Repo r
     Nothing -> do
       mEnvRepo <- getEnv "GITHUB_REPO"
-      pure $ Repo $ fromMaybe "exomonad-ai/exomonad" mEnvRepo
+      pure $ Repo $ fromMaybe "tidepool-heavy-industries/exomonad" mEnvRepo

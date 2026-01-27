@@ -28,7 +28,7 @@ import Data.Text (Text)
 import Data.Time (UTCTime, diffUTCTime, addUTCTime, nominalDay)
 import GHC.Generics (Generic)
 
-import ExoMonad.Effects.GitHub (GitHub, listIssues, defaultIssueFilter, IssueFilter(..), IssueState(..), Issue(..), listPullRequests, PRFilter(..), defaultPRFilter, PRState(..), PullRequest(..), Repo(..))
+import ExoMonad.Effects.GitHub (GitHub, listIssues, defaultIssueFilter, IssueFilter(..), IssueState(..), Issue(..), listPullRequests, PRFilter(..), defaultPRFilter, PRState(..), PullRequest(..), Repo(..), defaultRepo)
 import ExoMonad.Effect.Types (Time, getCurrentTime)
 import ExoMonad.Role (Role(..))
 import ExoMonad.Graph.Generic (AsHandler, type (:-))
@@ -176,9 +176,7 @@ pmStatusLogic args = do
       periodStart = addUTCTime (-periodSeconds) now
       prevPeriodStart = addUTCTime (-2 * periodSeconds) now
 
-  -- TODO: Configurable repo
-  let defaultRepo = Repo "exomonad/exomonad"
-      repo = maybe defaultRepo Repo args.psaRepo
+  let repo = maybe defaultRepo Repo args.psaRepo
 
   -- Fetch all issues
   let listInput = defaultIssueFilter

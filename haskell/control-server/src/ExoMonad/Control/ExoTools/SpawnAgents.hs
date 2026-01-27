@@ -265,7 +265,7 @@ processIssue spawnMode mHangarRoot repoRoot wtBaseDir backend shortId = do
             else do
               -- Get repo from env var or use default
               mEnvRepo <- getEnv "GITHUB_REPO"
-              let repo = Repo $ fromMaybe "exomonad-ai/exomonad" mEnvRepo
+              let repo = Repo $ fromMaybe "tidepool-heavy-industries/exomonad" mEnvRepo
               issueResult <- getIssue repo n False
               case issueResult of
                 Left _err -> pure $ Left (shortId, "GitHub error fetching issue: " <> shortId)

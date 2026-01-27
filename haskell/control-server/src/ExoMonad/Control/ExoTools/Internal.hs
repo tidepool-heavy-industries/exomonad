@@ -32,6 +32,7 @@ import ExoMonad.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo, getDirtyFil
 import ExoMonad.Effects.GitHub
   ( GitHub, PullRequest(..), Issue(..), listPullRequests, getIssue
   , Repo(..), PRFilter(..), defaultPRFilter, IssueState(..), listIssues, defaultIssueFilter, IssueFilter(..)
+  , defaultRepo
   )
 
 -- | Brief issue info for summaries.
@@ -88,8 +89,7 @@ getDevelopmentContext maybeIssueId = do
   mWt <- getWorktreeInfo
   dirtyFiles <- getDirtyFiles
 
-  -- TODO: Configurable repo
-  let repo = Repo "exomonad/exomonad"
+  let repo = defaultRepo
 
   -- 2. Determine Issue Number
   let branchIssueNum = case mWt of

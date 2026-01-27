@@ -23,7 +23,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Text.Parsec.Pos (SourcePos)
 
-import ExoMonad.Effects.GitHub (GitHub, Issue(..), IssueState(..), Repo(..), Author(..), getIssue, listIssues, defaultIssueFilter, IssueFilter(..))
+import ExoMonad.Effects.GitHub (GitHub, Issue(..), IssueState(..), Repo(..), Author(..), getIssue, listIssues, defaultIssueFilter, IssueFilter(..), defaultRepo)
 import ExoMonad.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
 import ExoMonad.Effect.Types (Log, logDebug, logInfo)
 import ExoMonad.Graph.Template (TemplateDef(..), TypedTemplate, typedTemplateFile, runTypedTemplate)
@@ -80,8 +80,7 @@ sessionStartLogic
 sessionStartLogic role cwdPath = do
   logDebug $ "Building SessionStart context for role: " <> T.pack (show role)
 
-  -- TODO: Configurable repo
-  let repo = Repo "exomonad/exomonad"
+  let repo = defaultRepo
 
   case role of
     PM -> do
