@@ -67,7 +67,7 @@ COPY rust/exomonad/Cargo.toml ./rust/exomonad/
 COPY rust/exomonad-shared/Cargo.toml ./rust/exomonad-shared/
 COPY rust/exomonad-hub/Cargo.toml ./rust/exomonad-hub/
 COPY rust/hangar-config/Cargo.toml ./rust/hangar-config/
-COPY rust/tui-sidebar/Cargo.toml ./rust/tui-sidebar/
+COPY rust/agent-status/Cargo.toml ./rust/agent-status/
 COPY rust/tui-popup/Cargo.toml ./rust/tui-popup/
 COPY rust/ssh-proxy/Cargo.toml ./rust/ssh-proxy/
 COPY rust/effector/Cargo.toml ./rust/effector/
@@ -75,13 +75,13 @@ COPY rust/effector/Cargo.toml ./rust/effector/
 # 3. Create stub source files for dependency resolution
 # Cargo needs these to compute the dependency graph
 RUN mkdir -p rust/exomonad/src rust/exomonad-shared/src rust/exomonad-hub/src \
-             rust/hangar-config/src rust/tui-sidebar/src rust/tui-popup/src \
+             rust/hangar-config/src rust/agent-status/src rust/tui-popup/src \
              rust/ssh-proxy/src rust/effector/src && \
     echo "fn main() {}" > rust/exomonad/src/main.rs && \
     echo "" > rust/exomonad-shared/src/lib.rs && \
     echo "fn main() {}" > rust/exomonad-hub/src/main.rs && \
     echo "" > rust/hangar-config/src/lib.rs && \
-    echo "fn main() {}" > rust/tui-sidebar/src/main.rs && \
+    echo "fn main() {}" > rust/agent-status/src/main.rs && \
     echo "fn main() {}" > rust/tui-popup/src/main.rs && \
     echo "fn main() {}" > rust/ssh-proxy/src/main.rs && \
     echo "" > rust/effector/src/lib.rs
@@ -91,7 +91,7 @@ RUN mkdir -p rust/exomonad/src rust/exomonad-shared/src rust/exomonad-hub/src \
 RUN --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/build/rust/target \
-    cd rust && cargo build --release -p exomonad 2>/dev/null || true
+    cd rust && cargo build --release -p exomonad -p agent-status -p tui-popup 2>/dev/null || true
 
 # 5. Copy real source code
 COPY rust/ ./rust/
@@ -100,8 +100,8 @@ COPY rust/ ./rust/
 RUN --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/build/rust/target \
-    cd rust && cargo build --release -p exomonad && \
-    cp target/release/exomonad /usr/local/bin/exomonad
+    cd rust && cargo build --release -p exomonad -p agent-status -p tui-popup && \
+    cp target/release/exomonad target/release/agent-status target/release/tui-popup /usr/local/bin/
 
 # Stage 3: Runtime
 # Debian bookworm-slim provides a small, stable base for the runtime
@@ -154,6 +154,8 @@ ENV PATH="/root/.local/bin:${PATH}"
 # 6. Copy binaries from builders (change with code, but less often than configs)
 COPY --from=builder /usr/local/bin/exomonad-control-server /usr/local/bin/exomonad-control-server
 COPY --from=rust-builder /usr/local/bin/exomonad /usr/local/bin/exomonad
+COPY --from=rust-builder /usr/local/bin/agent-status /usr/local/bin/agent-status
+COPY --from=rust-builder /usr/local/bin/tui-popup /usr/local/bin/tui-popup
 
 # 7. Create non-root user for running Claude Code (stable)
 RUN useradd -m -u 1000 -s /bin/bash user
