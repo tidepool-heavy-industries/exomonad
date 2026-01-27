@@ -27,6 +27,15 @@ group "default" {
 }
 
 # =============================================================================
+# Common Base Image (shared user/tools/entrypoint)
+# =============================================================================
+
+target "common-base" {
+  dockerfile = "docker/base/Dockerfile.common-base"
+  context = "."
+}
+
+# =============================================================================
 # Rust Dependency Caching (cargo-chef)
 # =============================================================================
 
@@ -78,6 +87,7 @@ target "control-server" {
   dockerfile = "docker/control-server/Dockerfile"
   context = "."
   contexts = {
+    common-base = "target:common-base"
     haskell-builder = "target:haskell-builder"
     rust-builder = "target:rust-builder"
   }
@@ -99,11 +109,14 @@ target "claude-agent" {
     GIT_SHA = GIT_SHA
   }
 }
+# Note: claude-agent does NOT use common-base because it uses 'agent' user
+# with sudo pattern instead of 'user' with gosu pattern
 
 target "zellij" {
   dockerfile = "docker/zellij/Dockerfile"
   context = "."
   contexts = {
+    common-base = "target:common-base"
     rust-builder = "target:rust-builder"
   }
   tags = ["${REGISTRY}exomonad-zellij:${TAG}"]

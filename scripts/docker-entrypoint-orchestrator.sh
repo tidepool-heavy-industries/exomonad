@@ -25,7 +25,7 @@ else
 fi
 
 # Clone or update repo
-REPO_URL="${EXOMONAD_REPO_URL:-git@github.com:exomonad-ai/exomonad.git}"
+REPO_URL="${EXOMONAD_REPO_URL:-git@github.com:tidepool-heavy-industries/tidepool.git}"
 REPO_BRANCH="${EXOMONAD_REPO_BRANCH:-main}"
 WORKTREES_DIR="/worktrees"
 

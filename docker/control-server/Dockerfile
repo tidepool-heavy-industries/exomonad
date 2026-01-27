@@ -8,19 +8,16 @@
 # Build with docker buildx bake (see docker/docker-bake.hcl)
 
 ARG GIT_SHA=unknown
-FROM debian:bookworm-slim
+FROM common-base
 ARG GIT_SHA
 LABEL org.opencontainers.image.revision=${GIT_SHA}
 
-# Install runtime dependencies
+# Install additional runtime dependencies (on top of common-base)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgmp10 \
     libffi8 \
     zlib1g \
-    ca-certificates \
-    gosu \
     socat \
-    curl \
     gpg \
     && rm -rf /var/lib/apt/lists/*
 
@@ -35,6 +32,8 @@ RUN curl -fsSL https://get.docker.com | sh && \
     rm -rf /var/lib/apt/lists/*
 
 # Install cargo-binstall for binary installation
+# Set CARGO_HOME explicitly to root's cargo since we run as root during build
+ENV CARGO_HOME=/root/.cargo
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 
 # Install Zellij for cross-container tab creation
@@ -54,25 +53,23 @@ RUN chmod +x /usr/local/bin/exomonad-control-server \
              /usr/local/bin/docker-ctl \
              /usr/local/bin/tui-spawner
 
-# Copy entrypoint
-COPY docker/control-server/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+# Copy service-specific entrypoint wrapper
+COPY docker/control-server/entrypoint.sh /usr/local/bin/service-entrypoint.sh
+RUN chmod +x /usr/local/bin/service-entrypoint.sh
 
-# Environment
+# Environment (extends common-base)
 ENV EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
 ENV EXOMONAD_TUI_SOCKET=/sockets/tui.sock
-ENV XDG_RUNTIME_DIR=/run/user/1000
 ENV ZELLIJ_SESSION_NAME=main
+# Override GIT_SAFE_DIRECTORY for repo bind mount
+ENV GIT_SAFE_DIRECTORY=/repo
 
-# Create non-root user matching container UID
-RUN useradd -m -u 1000 -s /bin/bash user
-
-# Create necessary directories
-RUN mkdir -p /sockets /run/user/1000 && \
-    chown -R user:user /sockets /run/user/1000
+# Create necessary directories (user already exists from common-base)
+RUN mkdir -p /sockets && chown -R user:user /sockets
 
 EXPOSE 7432
 
 WORKDIR /home/user
 
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+# Use service entrypoint which calls common entrypoint internally
+ENTRYPOINT ["/usr/local/bin/service-entrypoint.sh"]

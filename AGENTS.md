@@ -178,7 +178,7 @@ TTY (Zellij)
 nix develop .#claude-code-plus  # Auto-starts Zellij
 
 # Or manually:
-cd ~/exomonad-ai/exomonad
+cd ~/hangars/tidepool/repo
 cabal run exomonad-control-server  # Terminal 1
 claude                              # Terminal 2
 ```

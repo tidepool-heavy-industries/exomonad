@@ -29,7 +29,7 @@ services:
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - GH_TOKEN=${GH_TOKEN}
-      - GITHUB_REPO=${GITHUB_REPO:-exomonad-ai/exomonad}
+      - GITHUB_REPO=${GITHUB_REPO:-tidepool-heavy-industries/tidepool}
       - EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
       - EXOMONAD_TUI_SOCKET=/sockets/tui.sock
       - EXOMONAD_WORKTREES_PATH=/worktrees
@@ -239,7 +239,7 @@ services:
       - EXOMONAD_TUI_SOCKET=/sockets/tui.sock
       - CLAUDE_CONFIG_DIR=/home/user/.claude
       - RUST_BACKTRACE=full
-      - EXOMONAD_REPO_URL=${EXOMONAD_REPO_URL:-git@github.com:exomonad-ai/exomonad.git}
+      - EXOMONAD_REPO_URL=${EXOMONAD_REPO_URL:-git@github.com:tidepool-heavy-industries/tidepool.git}
       - EXOMONAD_REPO_BRANCH=${EXOMONAD_REPO_BRANCH:-main}
       - CLAUDE_CODE_DISABLE_INSTALLATION_CHECKS=1
       - DISABLE_AUTOUPDATER=1

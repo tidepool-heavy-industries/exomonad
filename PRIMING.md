@@ -454,7 +454,7 @@ docker exec -u user -it exomonad-control-server gh auth login
 
 **"Issue not found" from spawn_agents**
 
-Check that `GITHUB_REPO` is set correctly. Default is `exomonad-ai/exomonad`.
+Check that `GITHUB_REPO` is set correctly. Default is `tidepool-heavy-industries/tidepool`.
 
 ### Container Issues
 

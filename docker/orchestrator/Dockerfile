@@ -175,6 +175,10 @@ ENV HANGAR_ROOT=/worktrees
 ENV TERM=xterm-256color
 ENV SHELL=/bin/bash
 ENV ZELLIJ_CONFIG_DIR=/etc/exomonad/zellij
+ENV XDG_RUNTIME_DIR=/run/user/1000
+ENV GIT_SAFE_DIRECTORY=/worktrees
+ENV HOME=/home/user
+ENV USER=user
 
 # ============================================================================
 # FREQUENTLY CHANGING CONFIGS LAST (maximizes cache reuse)
@@ -185,6 +189,9 @@ COPY docker/orchestrator/config/exomonad.kdl /etc/exomonad/zellij/layouts/exomon
 COPY docker/orchestrator/config/zellij.kdl /etc/exomonad/zellij/config.kdl
 
 # 12. Copy scripts (changes more often than configs)
+# Copy common entrypoint first (shared infrastructure)
+COPY docker/base/entrypoint-common.sh /usr/local/bin/entrypoint-common.sh
+# Copy service-specific scripts
 COPY docker/orchestrator/scripts/orchestrator-entrypoint.sh /usr/local/bin/orchestrator-entrypoint.sh
 COPY scripts/docker-entrypoint-orchestrator.sh /usr/local/bin/docker-entrypoint-orchestrator.sh
 COPY docker/orchestrator/scripts/start-claude.sh /usr/local/bin/start-claude.sh
@@ -195,7 +202,7 @@ COPY docker/orchestrator/ssh-keys/orchestrator_key /etc/ssh-proxy/orchestrator_k
 RUN chmod 600 /etc/ssh-proxy/orchestrator_key
 
 # 14. Ensure scripts are executable
-RUN chmod +x /usr/local/bin/orchestrator-entrypoint.sh /usr/local/bin/docker-entrypoint-orchestrator.sh /usr/local/bin/start-claude.sh /usr/local/bin/zattach
+RUN chmod +x /usr/local/bin/entrypoint-common.sh /usr/local/bin/orchestrator-entrypoint.sh /usr/local/bin/docker-entrypoint-orchestrator.sh /usr/local/bin/start-claude.sh /usr/local/bin/zattach
 
 # Stage 4: Control Server (minimal, just Haskell binary + runtime deps)
 FROM debian:bookworm-slim AS control-server
