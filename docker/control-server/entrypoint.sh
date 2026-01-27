@@ -24,7 +24,7 @@ echo "Starting ExoMonad Control Server..."
 [ -d /worktrees ] && chown 1000:1000 /worktrees && chmod 755 /worktrees 2>/dev/null || true
 
 # --- Cleanup stale sockets ---
-rm -f /sockets/control.sock /sockets/tui.sock 2>/dev/null
+rm -f /sockets/control.sock /sockets/tui.sock /sockets/services.sock 2>/dev/null
 
 # --- Fix gh CLI auth directory ownership ---
 # Volume may have been created by root; ensure user can write to it
@@ -57,5 +57,7 @@ export LC_ALL=C.UTF-8
 
 # --- Delegate to common entrypoint ---
 # Common entrypoint handles Docker GID, git config, and drops privileges
+# NOTE: Starting service-server in background without formal supervision for simplicity.
+# Container exit will clean up both processes.
 echo "Starting control-server as user..."
-exec /usr/local/bin/entrypoint-common.sh exomonad-control-server
+exec /usr/local/bin/entrypoint-common.sh bash -c "/usr/local/bin/service-server & exec /usr/local/bin/exomonad-control-server"

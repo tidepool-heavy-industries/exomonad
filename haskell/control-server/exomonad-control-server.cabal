@@ -144,6 +144,7 @@ library
         exomonad-teaching,
         exomonad-cabal-interpreter,
         exomonad-github-interpreter,
+        exomonad-llm-interpreter,
         exomonad-git-interpreter,
         exomonad-env-interpreter,
         exomonad-justfile-interpreter,

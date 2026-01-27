@@ -28,16 +28,23 @@ services:
           memory: 512M
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # GH_TOKEN is used by the gh CLI; GITHUB_TOKEN is used by the Rust service.
+      # Both are intentionally sourced from the same underlying token to keep auth in sync.
       - GH_TOKEN=${GH_TOKEN}
+      - GITHUB_TOKEN=${GH_TOKEN}
       - GITHUB_REPO=${GITHUB_REPO:-tidepool-heavy-industries/tidepool}
       - EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
       - EXOMONAD_TUI_SOCKET=/sockets/tui.sock
+      - EXOMONAD_SERVICE_SOCKET=/sockets/services.sock
       - EXOMONAD_WORKTREES_PATH=/worktrees
       - EXOMONAD_WORKTREES_VOLUME=exomonad-worktrees
       - EXOMONAD_SOCKETS_PATH=/sockets
       - EXOMONAD_PROJECT_DIR=/repo
       - GEMMA_ENDPOINT=${GEMMA_ENDPOINT:-http://host.docker.internal:11434}
+      - OLLAMA_HOST=${GEMMA_ENDPOINT:-http://host.docker.internal:11434}
       - OPENOBSERVE_URL=${OPENOBSERVE_URL:-http://exomonad-openobserve:5080}
+      - OTLP_ENDPOINT=${OPENOBSERVE_URL:-http://exomonad-openobserve:5080}/api/${OPENOBSERVE_ORG:-default}
+      - OTLP_HEADERS=Authorization=Basic ${OPENOBSERVE_AUTH:-YWRtaW5AZXhvbW9uYWQubG9jYWw6ZXhvbW9uYWQtZGV2}
       - OPENOBSERVE_ORG=${OPENOBSERVE_ORG:-default}
       - OPENOBSERVE_STREAM=${OPENOBSERVE_STREAM:-claude_sessions}
       - OPENOBSERVE_EMAIL=${OPENOBSERVE_EMAIL:-admin@exomonad.local}

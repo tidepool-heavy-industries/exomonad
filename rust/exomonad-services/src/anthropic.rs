@@ -38,6 +38,20 @@ impl AnthropicService {
             base_url,
         }
     }
+
+    /// Create a new Anthropic service from environment variables.
+    ///
+    /// Required: `ANTHROPIC_API_KEY`.
+    /// Optional: `ANTHROPIC_BASE_URL`.
+    pub fn from_env() -> Result<Self, anyhow::Error> {
+        let api_key = std::env::var("ANTHROPIC_API_KEY")?;
+        let base_url = std::env::var("ANTHROPIC_BASE_URL")
+            .ok()
+            .and_then(|s| Url::parse(&s).ok())
+            .unwrap_or_else(|| Url::parse("https://api.anthropic.com").unwrap());
+
+        Ok(Self::with_base_url(api_key, base_url))
+    }
 }
 
 #[derive(Serialize)]
@@ -49,6 +63,8 @@ struct AnthropicRequestPayload {
     tools: Option<Vec<Tool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -64,14 +80,15 @@ impl ExternalService for AnthropicService {
     type Response = ServiceResponse;
 
     async fn call(&self, req: Self::Request) -> Result<Self::Response, ServiceError> {
-        let (model, messages, max_tokens, tools, system) = match req {
+        let (model, messages, max_tokens, tools, system, thinking) = match req {
             ServiceRequest::AnthropicChat {
                 model,
                 messages,
                 max_tokens,
                 tools,
                 system,
-            } => (model, messages, max_tokens, tools, system),
+                thinking,
+            } => (model, messages, max_tokens, tools, system, thinking),
             _ => panic!("Invalid request type for AnthropicService"),
         };
 
@@ -81,8 +98,8 @@ impl ExternalService for AnthropicService {
             max_tokens,
             tools,
             system,
+            thinking,
         };
-
         let url = self.base_url.join("/v1/messages").unwrap();
         let mut attempts = 0;
         let max_attempts = 3;

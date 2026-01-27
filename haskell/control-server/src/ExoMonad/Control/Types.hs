@@ -11,6 +11,8 @@ import ExoMonad.Control.Hook.Policy (HookPolicy)
 import ExoMonad.Control.RoleConfig (Role(..))
 import ExoMonad.Control.Hook.CircuitBreaker (CircuitBreakerConfig(..))
 import ExoMonad.Control.Workflow.Store (WorkflowStore)
+import ExoMonad.LLM.Types (LLMConfig)
+import ExoMonad.GitHub.Interpreter (GitHubConfig)
 
 -- | Server configuration.
 data ServerConfig = ServerConfig
@@ -32,4 +34,8 @@ data ServerConfig = ServerConfig
     -- ^ Circuit breaker limits
   , workflowStore :: WorkflowStore
     -- ^ Persistent workflow state
+  , llmConfig :: Maybe LLMConfig
+    -- ^ Optional LLM configuration (HTTP or Socket)
+  , githubConfig :: Maybe GitHubConfig
+    -- ^ Optional GitHub configuration (CLI or Socket)
   }

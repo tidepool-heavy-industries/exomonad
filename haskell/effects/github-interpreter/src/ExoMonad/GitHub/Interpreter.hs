@@ -194,15 +194,15 @@ socketGetIssue path repo num _includeComments = do
       let req = GitHubGetIssue owner repoName num
       result <- sendRequest (SocketConfig path 10000) req
       case result of
-        Right (GitHubIssueResponse n t b) -> 
+        Right (GitHubIssueResponse n t b s ls u) -> 
           pure $ Right $ Just $ Issue
             { issueNumber = n
             , issueTitle = t
             , issueBody = b
             , issueAuthor = Author "unknown" Nothing
-            , issueLabels = []
-            , issueState = IssueOpen
-            , issueUrl = ""
+            , issueLabels = ls
+            , issueState = if s == "open" then IssueOpen else IssueClosed
+            , issueUrl = u
             , issueComments = []
             }
         Right (ErrorResponse 404 _) -> pure $ Right Nothing

@@ -341,7 +341,14 @@ runObservabilityWithConfig ctx config = interpret $ \case
             modifyIORef ctx.tcCompletedSpans (otlpSpan :)
           
           ObservabilitySocketConfig path -> do
-            let serviceReq = OtelSpan (unTraceId traceId) (unSpanId activeSpan.asSpanId) activeSpan.asName
+            let serviceReq = OtelSpan 
+                  { traceId = unTraceId traceId
+                  , spanId = unSpanId activeSpan.asSpanId
+                  , name = activeSpan.asName
+                  , startNs = fromIntegral activeSpan.asStartTime
+                  , endNs = fromIntegral endTime
+                  , attributes = mempty -- TODO: Convert attrs to Object if needed
+                  }
             result <- sendRequest (SocketConfig path 10000) serviceReq
             case result of
               Left _ -> putStrLn "[Observability] Failed to ship span via socket"
