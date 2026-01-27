@@ -52,6 +52,10 @@ import ExoMonad.Control.PMTools
 import ExoMonad.Control.PMStatus
   ( pmStatusLogic, PmStatusArgs(..) )
 import ExoMonad.Control.PMPropose (pmProposeLogic, PMProposeArgs(..), PMProposeResult(..))
+import ExoMonad.Control.CircuitBreakerAdmin
+  ( cbStatusLogic, CbStatusArgs(..), CbStatusResult(..)
+  , cbResetLogic, CbResetArgs(..), CbResetResult(..)
+  )
 import ExoMonad.Control.GHTools
   ( ghIssueListLogic, GHIssueListArgs(..), GHIssueListResult(..)
   , ghIssueShowLogic, GHIssueShowArgs(..), GHIssueShowResult(..)
@@ -68,6 +72,8 @@ import ExoMonad.Env.Interpreter (runEnvIO)
 import ExoMonad.Zellij.Interpreter (runZellijIO)
 import ExoMonad.Control.Effects.DockerCtl (runDockerCtl)
 import ExoMonad.Gemini.Interpreter (runGeminiIO)
+import ExoMonad.CircuitBreaker.Interpreter (runCircuitBreakerIO)
+import ExoMonad.Control.Hook.CircuitBreaker (CircuitBreakerMap)
 import ExoMonad.Effect.TUI (TUI(..))
 import ExoMonad.Effect.Types (runLog, LogLevel(Debug), runReturn, runTime)
 import ExoMonad.Graph.Goto (unwrapSingleChoice)
@@ -157,8 +163,8 @@ withMcpTracing logger config traceCtx reqId toolName args action = do
 --
 -- == Tier 3: External Orchestration Tools (Exo)
 --   - "exo_status": Get current bead context, git status, and PR info
-handleMcpTool :: Logger -> ServerConfig -> TraceContext -> Text -> Text -> Value -> IO ControlResponse
-handleMcpTool logger config traceCtx reqId toolName args =
+handleMcpTool :: Logger -> ServerConfig -> TraceContext -> CircuitBreakerMap -> Text -> Text -> Value -> IO ControlResponse
+handleMcpTool logger config traceCtx cbMap reqId toolName args =
   withMcpTracing logger config traceCtx reqId toolName args $ do
     let effectiveRole = fromMaybe config.defaultRole (config.role >>= roleFromText)
     
@@ -198,6 +204,10 @@ handleMcpTool logger config traceCtx reqId toolName args =
           "pm_status" -> handlePmStatusTool logger reqId args
           "pm_propose" -> handlePMProposeTool logger reqId args
 
+          -- Circuit Breaker Tools (Admin)
+          "cb_status" -> handleCbStatusTool logger cbMap reqId args
+          "cb_reset" -> handleCbResetTool logger cbMap reqId args
+
           -- GitHub tools
           "gh_issue_list" -> handleGHIssueListTool logger reqId args
           "gh_issue_show" -> handleGHIssueShowTool logger reqId args
@@ -210,7 +220,52 @@ handleMcpTool logger config traceCtx reqId toolName args =
             logError logger $ "  (unknown tool)"
             pure $ mcpToolError reqId NotFound $
               "Tool not found: " <> toolName <>
-              ". Available tools: exo_status, spawn_agents, cleanup_agents, file_pr, gh_issue_list, gh_issue_create"
+              ". Available tools: exo_status, spawn_agents, cleanup_agents, file_pr, gh_issue_list, gh_issue_create, cb_status, cb_reset"
+
+-- | Handle cb_status tool.
+handleCbStatusTool :: Logger -> CircuitBreakerMap -> Text -> Value -> IO ControlResponse
+handleCbStatusTool logger cbMap reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid cb_status arguments: " <> T.pack err
+
+    Success cbArgs -> do
+      resultOrErr <- try $ runM
+        $ runCircuitBreakerIO cbMap
+        $ fmap unwrapSingleChoice (cbStatusLogic cbArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "cb_status failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Status check complete"
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+-- | Handle cb_reset tool.
+handleCbResetTool :: Logger -> CircuitBreakerMap -> Text -> Value -> IO ControlResponse
+handleCbResetTool logger cbMap reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid cb_reset arguments: " <> T.pack err
+
+    Success cbArgs -> do
+      resultOrErr <- try $ runM
+        $ runCircuitBreakerIO cbMap
+        $ fmap unwrapSingleChoice (cbResetLogic cbArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "cb_reset failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Reset complete: " <> result.status
+          pure $ mcpToolSuccess reqId (toJSON result)
+
 
 -- | Handle the pm_prioritize tool.
 --

@@ -22,6 +22,7 @@ import ExoMonad.Control.PMTools
   ( PmApproveExpansionGraph, PmPrioritizeGraph )
 import ExoMonad.Control.PMStatus (PmStatusGraph)
 import ExoMonad.Control.PMPropose (PMProposeGraph)
+import ExoMonad.Control.CircuitBreakerAdmin (CbStatusGraph, CbResetGraph)
 import ExoMonad.Control.GHTools
   ( GHIssueListGraph, GHIssueShowGraph, GHIssueCreateGraph
   , GHIssueUpdateGraph, GHIssueCloseGraph, GHIssueReopenGraph
@@ -56,6 +57,10 @@ exportMCPTools logger = do
   let pmProTools = reifyMCPTools (Proxy @PMProposeGraph)
   let prTools = reifyMCPTools (Proxy @PrReviewStatusGraph)
 
+  -- Circuit Breaker Tools
+  let cbStatusTools = reifyMCPTools (Proxy @CbStatusGraph)
+  let cbResetTools = reifyMCPTools (Proxy @CbResetGraph)
+
   -- GitHub tools
   let ghListTools = reifyMCPTools (Proxy @GHIssueListGraph)
   let ghShowTools = reifyMCPTools (Proxy @GHIssueShowGraph)
@@ -76,6 +81,8 @@ exportMCPTools logger = do
   logDebug logger $ "[MCP Discovery] PmStatusGraph: " <> T.pack (show (length pmStatTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] PMProposeGraph: " <> T.pack (show (length pmProTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] PrReviewStatusGraph: " <> T.pack (show (length prTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] CbStatusGraph: " <> T.pack (show (length cbStatusTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] CbResetGraph: " <> T.pack (show (length cbResetTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] GHIssueListGraph: " <> T.pack (show (length ghListTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] GHIssueShowGraph: " <> T.pack (show (length ghShowTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] GHIssueCreateGraph: " <> T.pack (show (length ghCreateTools)) <> " tools"
@@ -86,6 +93,7 @@ exportMCPTools logger = do
   let allTools = concat
         [ popupTools, rfTools
         , esTools, saTools, caTools, fpTools, paeTools, pmPriTools, pmStatTools, pmProTools, prTools
+        , cbStatusTools, cbResetTools
         , ghListTools, ghShowTools, ghCreateTools, ghUpdateTools, ghCloseTools, ghReopenTools
         ]
 

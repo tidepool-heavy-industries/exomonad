@@ -685,6 +685,32 @@ Hook events are processed by `Handler/Hook.hs`.
 
 **Implementation:** `Handler/Hook.hs`, `Hook/CircuitBreaker.hs`, `Hook/Policy.hs`
 
+## Circuit Breaker Design
+
+The **Circuit Breaker** mechanism protects the system from infinite loops during autonomous agent workflows, particularly within the `Stop` hook. It enforces limits on:
+1.  **Global Stops**: Total number of `Stop` hook executions per session.
+2.  **Stage Retries**: Number of consecutive failures for a specific workflow stage (e.g., "build-failed").
+3.  **Staleness**: A timeout to release locks held by crashed or stuck agents.
+
+### Core Components
+
+- **`CircuitBreakerState`**: Tracks session-specific counters (global stops, stage retries) and the last activity timestamp.
+- **`CircuitBreakerMap`**: A global `TVar` holding states for all active sessions.
+- **Atomic Operations**: All state updates and staleness checks are performed within a single STM transaction (`atomically`) to prevent race conditions.
+
+### Configuration
+
+Configured via environment variables (loaded at startup):
+- `CIRCUIT_BREAKER_GLOBAL_MAX` (default: 15): Max total stop hooks per session.
+- `CIRCUIT_BREAKER_STAGE_MAX` (default: 5): Max retries for a single stage.
+- `CIRCUIT_BREAKER_STALE_TIMEOUT` (default: 300s): Time after which a lock is considered stale and can be preempted.
+
+### Admin Tools
+
+Two MCP tools are provided for Team Leads (TL role) to manage the circuit breaker:
+- `cb_status`: Inspect active sessions, trip counts, and lock status.
+- `cb_reset`: Manually reset the circuit breaker state for a specific session or globally.
+
 ## Role-Based Tool Filtering
 
 The control server provides role-based endpoints that filter available tools.

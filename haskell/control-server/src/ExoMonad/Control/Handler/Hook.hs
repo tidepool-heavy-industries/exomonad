@@ -84,7 +84,7 @@ handleHook tracer config input runtime agentRole cbMap = do
     
     case input.hookEventName of
       "SessionStart" -> handleSessionStart tracer agentRole input
-      "Stop" -> handleStop tracer input runtime cbMap
+      "Stop" -> handleStop tracer config input runtime cbMap
       "PreToolUse" -> handlePreToolUse config input
       _ -> pure $ hookSuccess $ makeResponse input.hookEventName input
 
@@ -167,13 +167,14 @@ handleSessionStart tracer role input = do
 -- | Handle Stop hook: gather state, render template, provide actionable guidance.
 --
 -- Uses CircuitBreaker to prevent infinite loops and concurrent execution.
-handleStop :: Tracer -> HookInput -> Runtime -> CircuitBreakerMap -> IO ControlResponse
-handleStop tracer input runtime cbMap = do
+handleStop :: Tracer -> ServerConfig -> HookInput -> Runtime -> CircuitBreakerMap -> IO ControlResponse
+handleStop tracer config input runtime cbMap = do
   sessionId <- getOrCreateSession input
   TIO.putStrLn $ "  [HOOK] Running Stop hook with circuit breaker for session: " <> sessionId
   hFlush stdout
 
-  withCircuitBreaker cbMap sessionId (runStopHookLogic tracer input) >>= \case
+  now <- getCurrentTime
+  withCircuitBreaker cbMap config.circuitBreakerConfig now sessionId (runStopHookLogic tracer input) >>= \case
     Left err -> do
       TIO.putStrLn $ "  [HOOK] Circuit breaker blocked Stop: " <> err
       hFlush stdout
@@ -195,14 +196,14 @@ handleStop tracer input runtime cbMap = do
       let rendered = renderStopHookTemplate templateName context
 
       -- Increment circuit breaker stage counter if blocking
-      now <- getCurrentTime
+      incrementTime <- getCurrentTime
       let shouldBlock = templateName `elem` ["fix-build-errors", "max-loops", "build-stuck", "fix-test-failures", "test-stuck"]
       let stageName = context.stage
       
       -- We always increment stage in the graph/workflow state, but CB map is external
       -- For now, just logging or tracking simple stage
       if shouldBlock
-        then incrementStage cbMap sessionId stageName now
+        then incrementStage cbMap sessionId stageName incrementTime
         else pure ()
 
       -- Auto-focus if not blocking
