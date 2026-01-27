@@ -8,17 +8,16 @@
 
 FROM common-base
 
-# Copy pre-built tui-popup binary from builder context
+# Copy pre-built binaries from builder context
 COPY --from=rust-builder /app/rust/target/release/tui-popup /usr/local/bin/tui-popup
 COPY --from=rust-builder /app/rust/target/release/agent-status /usr/local/bin/agent-status
-RUN chmod +x /usr/local/bin/tui-popup /usr/local/bin/agent-status
+COPY --from=rust-builder /app/rust/target/release/zellij-gen /usr/local/bin/zellij-gen
+RUN chmod +x /usr/local/bin/tui-popup /usr/local/bin/agent-status /usr/local/bin/zellij-gen
 
-# Create config directories
+# Create config directories (layouts generated at runtime by zellij-gen)
 RUN mkdir -p /etc/zellij/layouts
 
-# Copy layouts and config
-COPY docker/zellij/layout.kdl /etc/zellij/layouts/main.kdl
-COPY docker/zellij/subagent.kdl /etc/zellij/layouts/subagent.kdl
+# Copy config (layouts are generated dynamically by zellij-gen in entrypoint)
 COPY docker/zellij/config.kdl /etc/zellij/config.kdl
 COPY docker/zellij/entrypoint.sh /usr/local/bin/service-entrypoint.sh
 RUN chmod +x /usr/local/bin/service-entrypoint.sh

@@ -27,6 +27,17 @@ echo "Starting Zellij multiplexer..."
 # --- Cleanup stale state ---
 rm -rf /tmp/zellij-* 2>/dev/null
 
+# --- Generate layout dynamically ---
+# This bakes in container names and socket paths as literals, avoiding
+# the issue where env vars don't propagate to pane processes
+echo "Generating Zellij layout..."
+LAYOUT_PATH=$(zellij-gen main)
+echo "Generated layout: $LAYOUT_PATH"
+
+# Symlink to expected location for compatibility with ./ide script
+mkdir -p /etc/zellij/layouts
+ln -sf "$LAYOUT_PATH" /etc/zellij/layouts/main.kdl
+
 echo ""
 echo "Zellij container ready."
 echo ""

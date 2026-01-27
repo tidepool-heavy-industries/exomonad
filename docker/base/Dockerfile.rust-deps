@@ -28,13 +28,14 @@ COPY rust/tui-popup/Cargo.toml ./rust/tui-popup/
 COPY rust/tui-spawner/Cargo.toml ./rust/tui-spawner/
 COPY rust/effector/Cargo.toml ./rust/effector/
 COPY rust/docker-ctl/Cargo.toml ./rust/docker-ctl/
+COPY rust/zellij-gen/Cargo.toml ./rust/zellij-gen/
 
 # Create dummy source files so cargo-chef can determine crate types
 # (Cargo.toml alone isn't enough - needs at least lib.rs or main.rs)
 RUN mkdir -p rust/exomonad/src rust/exomonad-shared/src rust/exomonad-services/src rust/agent-status/src \
-             rust/tui-popup/src rust/tui-spawner/src rust/effector/src rust/docker-ctl/src && \
+             rust/tui-popup/src rust/tui-spawner/src rust/effector/src rust/docker-ctl/src rust/zellij-gen/src && \
     touch rust/exomonad/src/main.rs rust/exomonad-shared/src/lib.rs rust/exomonad-services/src/lib.rs rust/agent-status/src/main.rs \
-          rust/tui-popup/src/main.rs rust/tui-spawner/src/main.rs rust/effector/src/main.rs rust/docker-ctl/src/main.rs
+          rust/tui-popup/src/main.rs rust/tui-spawner/src/main.rs rust/effector/src/main.rs rust/docker-ctl/src/main.rs rust/zellij-gen/src/main.rs
 
 # Generate recipe from workspace
 RUN cd rust && cargo chef prepare --recipe-path /recipe.json
@@ -105,3 +106,4 @@ RUN cd rust && cargo build --release
 #   /app/rust/target/release/tui-popup
 #   /app/rust/target/release/tui-spawner
 #   /app/rust/target/release/effector
+#   /app/rust/target/release/zellij-gen

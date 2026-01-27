@@ -1,0 +1,12 @@
+    tab name="{{ tab_name }}"{% if focus %} focus=true{% endif %} {
+        pane split_direction="horizontal" {
+            pane name="{{ pane_name }}" focus=true {
+                command "bash"
+                args "-c" "{{ command }}"
+            }
+            pane name="Agent Status" size="20%" {
+                command "bash"
+                args "-c" "export EXOMONAD_CONTROL_SOCKET={{ socket }}; while true; do agent-status; sleep 2; done"
+            }
+        }
+    }
