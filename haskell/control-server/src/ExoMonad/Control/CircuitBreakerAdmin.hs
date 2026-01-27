@@ -23,7 +23,6 @@ module ExoMonad.Control.CircuitBreakerAdmin
 
 import GHC.Generics (Generic)
 import Data.Text (Text)
-import qualified Data.Text as T
 import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), (.:?), withObject)
 import Control.Monad.Freer (Eff, Member)
 import Data.Map.Strict (Map)
@@ -36,7 +35,7 @@ import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCP
 import ExoMonad.Schema (HasJSONSchema(..), objectSchema, emptySchema, SchemaType(..), describeField)
 import ExoMonad.Graph.Goto (Goto, GotoChoice, To, gotoExit)
 import ExoMonad.Role (Role(..))
-import ExoMonad.Control.Hook.CircuitBreaker (CircuitBreakerState(..), SessionId)
+import ExoMonad.Control.Hook.CircuitBreaker (CircuitBreakerState(..))
 import ExoMonad.Effect.CircuitBreaker (CircuitBreaker, getAllCBStates, resetCBSession, resetAllCB)
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -49,7 +48,7 @@ data CbStatusArgs = CbStatusArgs
 
 instance HasJSONSchema CbStatusArgs where
   jsonSchema = objectSchema
-    [ ("filter_session", describeField "filter_session" "Optional session ID to filter results" (emptySchema TString))
+    [ ("filter_session", describeField "Optional session ID to filter results" (emptySchema TString))
     ] []
 
 instance FromJSON CbStatusArgs where
@@ -147,7 +146,7 @@ data CbResetArgs = CbResetArgs
 
 instance HasJSONSchema CbResetArgs where
   jsonSchema = objectSchema
-    [ ("session_id", describeField "session_id" "Session ID to reset. If omitted, resets ALL sessions." (emptySchema TString))
+    [ ("session_id", describeField "Session ID to reset. If omitted, resets ALL sessions." (emptySchema TString))
     ] []
 
 instance FromJSON CbResetArgs where

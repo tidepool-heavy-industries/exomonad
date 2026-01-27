@@ -30,11 +30,9 @@ import ExoMonad.Effects.GitHub
   ( GitHub
   , CreateIssueInput(..)
   , defaultCreateIssueInput
-  , Issue(..)
-  , Repo(..)
   , createIssue
   )
-import ExoMonad.Effects.Env (Env, getEnv)
+import ExoMonad.Effects.Env (Env)
 import ExoMonad.Role (Role(..))
 import ExoMonad.Control.PMTools (labelNeedsTLReview)
 import ExoMonad.Control.GHTools (getRepo)
@@ -98,9 +96,16 @@ pmProposeLogic args = do
         , ciiLabels = (fromMaybe [] args.ppaSuggestedLabels) ++ [labelNeedsTLReview, priorityLabel]
         }
   
-  issueNum <- createIssue input
+  res <- createIssue input
 
-  pure $ gotoExit $ PMProposeResult
-    { pprIssueNum = issueNum
-    , pprStatus = "created"
-    }
+  case res of
+    Left err -> pure $ gotoExit $ PMProposeResult
+      { pprIssueNum = 0
+      , pprStatus = "failed"
+      , pprError = Just (T.pack $ show err)
+      }
+    Right issueNum -> pure $ gotoExit $ PMProposeResult
+      { pprIssueNum = issueNum
+      , pprStatus = "created"
+      , pprError = Nothing
+      }

@@ -1,11 +1,11 @@
-{-# LANGUAGE DataKinds #}
-{-# LANGUAGE DeriveGeneric #}
-{-# LANGUAGE DerivingStrategies #}
-{-# LANGUAGE FlexibleContexts #}
-{-# LANGUAGE OverloadedRecordDot #}
-{-# LANGUAGE OverloadedStrings #}
-{-# LANGUAGE TypeFamilies #}
-{-# LANGUAGE TypeOperators #}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
 
 module ExoMonad.Control.ExoTools.SpawnAgents
   ( SpawnAgentsGraph(..)
@@ -24,7 +24,6 @@ where
 
 import Control.Monad (forM)
 import Control.Monad.Freer (Eff, Member)
-import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.=), object, withObject)
 import Data.Either (partitionEithers)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -46,7 +45,6 @@ import ExoMonad.Graph.Generic (AsHandler, type (:-))
 import ExoMonad.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import ExoMonad.Graph.Goto (Goto, GotoChoice, To, gotoExit)
 import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef, MCPRoleHint)
-import ExoMonad.Schema (HasJSONSchema(..), objectSchema, arraySchema, emptySchema, SchemaType(..), describeField)
 
 import ExoMonad.Control.ExoTools.Internal (slugify)
 import ExoMonad.Control.ExoTools.SpawnCleanup (SpawnCleanup, SpawnProgress(..), runSpawnCleanup, acquireWorktree, acquireContainer, emitProgress, cleanupAll)
@@ -66,59 +64,6 @@ findRepoRoot = do
       -- 2. Use Git to find top level
       mWtInfo <- getWorktreeInfo
       pure $ fmap (\wi -> wi.wiRepoRoot) mWtInfo
-
--- | Arguments for cleanup_agents tool.
-data CleanupAgentsArgs = CleanupAgentsArgs
-  { caaIssueNumbers :: [Text]  -- ^ List of issue numbers to clean up.
-  , caaForce :: Maybe Bool     -- ^ If true, skip confirmation (not used yet in server logic).
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance HasJSONSchema CleanupAgentsArgs where
-  jsonSchema = objectSchema
-    [
-      ("issue_numbers", describeField "issue_numbers" "List of issue numbers to clean up worktrees and containers for." (arraySchema (emptySchema TString)))
-    , ("force", describeField "force" "If true, skip confirmation (defaults to false)." (emptySchema TBoolean))
-    ]
-    ["issue_numbers"]
-
-instance FromJSON CleanupAgentsArgs where
-  parseJSON = withObject "CleanupAgentsArgs" $ \v ->
-    CleanupAgentsArgs
-      <*>
-      v .: "issue_numbers"
-      <*>
-      v .:? "force"
-
-instance ToJSON CleanupAgentsArgs where
-  toJSON args = object
-    [
-      "issue_numbers" .= caaIssueNumbers args
-    , "force" .= caaForce args
-    ]
-
--- | Result of cleanup_agents tool.
-data CleanupAgentsResult = CleanupAgentsResult
-  {
-    carCleaned    :: [Text]      -- ^ Successfully cleaned issue IDs.
-  , carFailed     :: [(Text, Text)] -- ^ Failed cleanups: (issueNum, reason)
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance FromJSON CleanupAgentsResult where
-  parseJSON = withObject "CleanupAgentsResult" $ \v ->
-    CleanupAgentsResult
-      <*>
-      v .: "cleaned"
-      <*>
-      v .: "failed"
-
-instance ToJSON CleanupAgentsResult where
-  toJSON res = object
-    [
-      "cleaned" .= carCleaned res
-    , "failed"  .= carFailed res
-    ]
 
 -- | Spawn mode for agents.
 data SpawnMode
@@ -174,14 +119,21 @@ spawnAgentsHandlers = SpawnAgentsGraph
   }
 
 -- | Handlers for cleanup_agents graph.
+
 cleanupAgentsHandlers
-  :: (Member Git es, Member Worktree es, Member DockerSpawner es, Member Log es)
+
+  :: (Member Worktree es, Member DockerSpawner es, Member Log es)
+
   => CleanupAgentsGraph (AsHandler es)
+
 cleanupAgentsHandlers = CleanupAgentsGraph
-  {
-    caEntry = ()
+
+  { caEntry = ()
+
   , caRun = cleanupAgentsLogic
+
   , caExit = ()
+
   }
 
 -- | Core logic for spawn_agents.
@@ -473,7 +425,7 @@ processIssue spawnMode repoRoot wtBaseDir backend shortId = do
 
 -- | Logic for cleanup_agents.
 cleanupAgentsLogic
-  :: (Member Git es, Member Worktree es, Member DockerSpawner es, Member Log es)
+  :: (Member Worktree es, Member DockerSpawner es, Member Log es)
   => CleanupAgentsArgs
   -> Eff es (GotoChoice '[To Exit CleanupAgentsResult])
 cleanupAgentsLogic args = do

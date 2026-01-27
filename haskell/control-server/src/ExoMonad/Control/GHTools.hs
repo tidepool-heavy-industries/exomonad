@@ -59,63 +59,17 @@ import qualified Data.Text as T
 import GHC.Generics (Generic)
 
 import ExoMonad.Effects.GitHub
-  ( GitHub, Repo(..), Issue(..), IssueState(..), IssueFilter(..)
+  ( GitHub, Repo(..), IssueState(..), IssueFilter(..)
   , CreateIssueInput(..), UpdateIssueInput(..), defaultIssueFilter, emptyUpdateIssueInput
   , listIssues, getIssue, createIssue, updateIssue, closeIssue, reopenIssue
   )
 import ExoMonad.Effects.Env (Env, getEnv)
-import ExoMonad.Graph.Generic (AsHandler, type (:-))
+import ExoMonad.Graph.Generic (type (:-))
 import ExoMonad.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import ExoMonad.Graph.Goto (Goto, GotoChoice, To, gotoExit)
 import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef)
-import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(..), HasJSONSchema(..))
 
 import ExoMonad.Control.GHTools.Types
-
--- ════════════════════════════════════════════════════════════════════════════
--- DERIVATIONS
--- ════════════════════════════════════════════════════════════════════════════
-
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "gila" } ''GHIssueListArgs
-  [ 'gilaRepo   ?? "Repository in owner/repo format (optional, uses environment default if omitted)"
-  , 'gilaStatus ?? "Filter by status: open, closed"
-  , 'gilaLabels ?? "Filter by labels"
-  , 'gilaLimit  ?? "Max results"
-  ])
-
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "gisa" } ''GHIssueShowArgs
-  [ 'gisaRepo   ?? "Repository in owner/repo format"
-  , 'gisaNumber ?? "The issue number to show"
-  ])
-
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "gca" } ''GHIssueCreateArgs
-  [ 'gcaRepo      ?? "Repository in owner/repo format"
-  , 'gcaTitle     ?? "Title of the new issue"
-  , 'gcaBody      ?? "Body description of the issue"
-  , 'gcaLabels    ?? "Labels to attach"
-  , 'gcaAssignees ?? "Assignee usernames"
-  ])
-
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "gua" } ''GHIssueUpdateArgs
-  [ 'guaRepo      ?? "Repository in owner/repo format"
-  , 'guaNumber    ?? "The issue number to update"
-  , 'guaTitle     ?? "New title"
-  , 'guaBody      ?? "New body description"
-  , 'guaStatus    ?? "New status: open, closed"
-  , 'guaLabels    ?? "New set of labels (replaces existing)"
-  , 'guaAssignees ?? "New set of assignees (replaces existing)"
-  ])
-
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "gcla" } ''GHIssueCloseArgs
-  [ 'gclaRepo   ?? "Repository in owner/repo format"
-  , 'gclaNumber ?? "The issue number to close"
-  ])
-
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "gra" } ''GHIssueReopenArgs
-  [ 'graRepo   ?? "Repository in owner/repo format"
-  , 'graNumber ?? "The issue number to reopen"
-  ])
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GH ISSUE LIST TOOL
@@ -147,11 +101,18 @@ ghIssueListLogic args = do
         , ifState  = parseIssueState =<< args.gilaStatus
         , ifLimit  = args.gilaLimit
         }
-  issues <- listIssues repo filt
-  pure $ gotoExit $ GHIssueListResult
-    { gilrIssues = issues
-    , gilrCount  = length issues
-    }
+  res <- listIssues repo filt
+  case res of
+    Left err -> pure $ gotoExit $ GHIssueListResult
+      { gilrIssues = []
+      , gilrCount  = 0
+      , gilrError  = Just (T.pack $ show err)
+      }
+    Right issues -> pure $ gotoExit $ GHIssueListResult
+      { gilrIssues = issues
+      , gilrCount  = length issues
+      , gilrError  = Nothing
+      }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -179,13 +140,20 @@ ghIssueShowLogic
   -> Eff es (GotoChoice '[To Exit GHIssueShowResult])
 ghIssueShowLogic args = do
   repo <- getRepo args.gisaRepo
-  maybeIssue <- getIssue repo args.gisaNumber True -- Include comments
-  pure $ gotoExit $ GHIssueShowResult
-    { gisrIssue = maybeIssue
-    , gisrFound = case maybeIssue of
-        Just _ -> True
-        Nothing -> False
-    }
+  res <- getIssue repo args.gisaNumber True -- Include comments
+  case res of
+    Left err -> pure $ gotoExit $ GHIssueShowResult
+      { gisrIssue = Nothing
+      , gisrFound = False
+      , gisrError = Just (T.pack $ show err)
+      }
+    Right maybeIssue -> pure $ gotoExit $ GHIssueShowResult
+      { gisrIssue = maybeIssue
+      , gisrFound = case maybeIssue of
+          Just _ -> True
+          Nothing -> False
+      , gisrError = Nothing
+      }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -220,11 +188,18 @@ ghIssueCreateLogic args = do
         , ciiLabels    = fromMaybe [] args.gcaLabels
         , ciiAssignees = fromMaybe [] args.gcaAssignees
         }
-  num <- createIssue input
-  pure $ gotoExit $ GHIssueCreateResult
-    { gcrNumber  = num
-    , gcrSuccess = True
-    }
+  res <- createIssue input
+  case res of
+    Left err -> pure $ gotoExit $ GHIssueCreateResult
+      { gcrNumber  = 0
+      , gcrSuccess = False
+      , gcrError   = Just (T.pack $ show err)
+      }
+    Right num -> pure $ gotoExit $ GHIssueCreateResult
+      { gcrNumber  = num
+      , gcrSuccess = True
+      , gcrError   = Nothing
+      }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -259,11 +234,18 @@ ghIssueUpdateLogic args = do
         , uiiLabels    = args.guaLabels
         , uiiAssignees = args.guaAssignees
         }
-  updateIssue repo args.guaNumber input
-  pure $ gotoExit $ GHIssueUpdateResult
-    { gurSuccess = True
-    , gurNumber  = args.guaNumber
-    }
+  res <- updateIssue repo args.guaNumber input
+  case res of
+    Left err -> pure $ gotoExit $ GHIssueUpdateResult
+      { gurSuccess = False
+      , gurNumber  = args.guaNumber
+      , gurError   = Just (T.pack $ show err)
+      }
+    Right () -> pure $ gotoExit $ GHIssueUpdateResult
+      { gurSuccess = True
+      , gurNumber  = args.guaNumber
+      , gurError   = Nothing
+      }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -291,11 +273,18 @@ ghIssueCloseLogic
   -> Eff es (GotoChoice '[To Exit GHIssueCloseResult])
 ghIssueCloseLogic args = do
   repo <- getRepo args.gclaRepo
-  closeIssue repo args.gclaNumber
-  pure $ gotoExit $ GHIssueCloseResult
-    { gclrSuccess = True
-    , gclrNumber  = args.gclaNumber
-    }
+  res <- closeIssue repo args.gclaNumber
+  case res of
+    Left err -> pure $ gotoExit $ GHIssueCloseResult
+      { gclrSuccess = False
+      , gclrNumber  = args.gclaNumber
+      , gclrError   = Just (T.pack $ show err)
+      }
+    Right () -> pure $ gotoExit $ GHIssueCloseResult
+      { gclrSuccess = True
+      , gclrNumber  = args.gclaNumber
+      , gclrError   = Nothing
+      }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -323,11 +312,18 @@ ghIssueReopenLogic
   -> Eff es (GotoChoice '[To Exit GHIssueReopenResult])
 ghIssueReopenLogic args = do
   repo <- getRepo args.graRepo
-  reopenIssue repo args.graNumber
-  pure $ gotoExit $ GHIssueReopenResult
-    { grrSuccess = True
-    , grrNumber  = args.graNumber
-    }
+  res <- reopenIssue repo args.graNumber
+  case res of
+    Left err -> pure $ gotoExit $ GHIssueReopenResult
+      { grrSuccess = False
+      , grrNumber  = args.graNumber
+      , grrError   = Just (T.pack $ show err)
+      }
+    Right () -> pure $ gotoExit $ GHIssueReopenResult
+      { grrSuccess = True
+      , grrNumber  = args.graNumber
+      , grrError   = Nothing
+      }
 
 
 -- ════════════════════════════════════════════════════════════════════════════

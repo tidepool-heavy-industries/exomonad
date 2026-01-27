@@ -7,7 +7,6 @@ module ExoMonad.Control.Export
 
 import Control.Monad (forM_)
 import Data.Proxy (Proxy(..))
-import Data.Text (Text)
 import qualified Data.Text as T
 
 import ExoMonad.Control.Logging (Logger, logInfo, logDebug)

@@ -42,6 +42,7 @@ $(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "ppa" } ''PMProposeArgs
 data PMProposeResult = PMProposeResult
   { pprIssueNum :: Int
   , pprStatus :: Text
+  , pprError :: Maybe Text
   }
   deriving stock (Show, Eq, Generic)
 
@@ -49,4 +50,5 @@ instance ToJSON PMProposeResult where
   toJSON res = object
     ["issue_num" .= pprIssueNum res
     , "status" .= pprStatus res
+    , "error" .= pprError res
     ]
