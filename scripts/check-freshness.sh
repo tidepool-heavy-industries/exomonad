@@ -2,7 +2,7 @@
 # Check if running containers match local git state
 # Usage: ./scripts/check-freshness.sh [service] [compose-file]
 
-set -uo pipefail
+set -euo pipefail
 
 SERVICE_NAME="${1:-control-server}"
 COMPOSE_FILE="${2:-docker-compose.yml}"
@@ -32,18 +32,18 @@ if [ -z "$CONTAINER_ID" ]; then
 fi
 
 # Get container's git SHA from label
-REMOTE_SHA=$(docker inspect --format "{{ index .Config.Labels \"$LABEL_NAME\" }}" "$CONTAINER_ID" 2>/dev/null)
+CONTAINER_SHA=$(docker inspect --format "{{ index .Config.Labels \"$LABEL_NAME\" }}" "$CONTAINER_ID" 2>/dev/null)
 
-if [ -z "$REMOTE_SHA" ]; then
+if [ -z "$CONTAINER_SHA" ]; then
     echo "WARNING: Container lacks '$LABEL_NAME' label."
     echo "         Rebuild with: just dev-up $SERVICE_NAME"
     exit 2
 fi
 
-echo "    Container SHA:   $REMOTE_SHA"
+echo "    Container SHA:   $CONTAINER_SHA"
 
 # Compare
-if [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
+if [ "$LOCAL_SHA" != "$CONTAINER_SHA" ]; then
     echo "!!! STALE DETECTED !!!"
     echo "    Running code does not match local git revision."
     echo "    Action: Run 'just dev-up $SERVICE_NAME'"

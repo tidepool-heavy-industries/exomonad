@@ -27,6 +27,44 @@ Always prefer failure to an undocumented heuristic or fallback.
 - Containers must use named volumes or clone repos internally
 - Don't assume local filesystem access from containers
 
+### DOCKER BUILD SYSTEM
+
+Hermetic build system using `docker buildx bake` with multi-stage dependency caching.
+
+**Commands:**
+
+| Command | Purpose |
+|---------|---------|
+| `./build` | Build all images (auto-injects GIT_SHA) |
+| `./build --load` | Build and load into local Docker daemon |
+| `./build control-server` | Build specific target |
+| `./ide` | Start/attach to IDE (idempotent) |
+| `./refresh-ide` | Hard refresh (rebuild all + recreate containers) |
+| `just check-freshness` | Verify running containers match local git |
+| `just update-rust` | Update Cargo.lock via Docker |
+| `just freeze-haskell` | Update cabal.project.freeze via Docker |
+
+**Architecture:**
+
+```
+docker-bake.hcl orchestrates the build DAG:
+
+Rust:     rust-planner → rust-cacher → rust-builder
+Haskell:  haskell-freeze → haskell-cacher → haskell-builder
+                                ↓
+Final:    control-server, claude-agent, zellij
+          (COPY --from=rust-builder, COPY --from=haskell-builder)
+```
+
+**Key files:**
+- `./build` - Wrapper that auto-injects GIT_SHA from git
+- `docker/docker-bake.hcl` - BuildKit bake orchestration
+- `docker/base/Dockerfile.rust-deps` - Rust multi-stage (cargo-chef)
+- `docker/base/Dockerfile.haskell-deps` - Haskell multi-stage (cabal freeze)
+- `justfile` - Operations recipes (build, check-freshness, update deps)
+
+**OCI Labels:** All images include `org.opencontainers.image.revision` with git SHA for freshness tracking.
+
 ### AGGRESSIVE LOGGING
 
 Silent failures are unacceptable. When code shells out to subprocesses, calls external services, or crosses process/container boundaries, **log aggressively**:

@@ -8,7 +8,7 @@
 # Build with docker buildx bake (see docker/docker-bake.hcl)
 
 ARG GIT_SHA=unknown
-FROM --platform=linux/amd64 debian:bookworm-slim
+FROM debian:bookworm-slim
 ARG GIT_SHA
 LABEL org.opencontainers.image.revision=${GIT_SHA}
 

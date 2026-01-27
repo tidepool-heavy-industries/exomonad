@@ -20,7 +20,6 @@ services:
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
     container_name: exomonad-control-server
-    platform: linux/amd64
     deploy:
       resources:
         limits:
@@ -79,7 +78,6 @@ services:
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
     container_name: exomonad-zellij
-    platform: linux/amd64
     tty: true
     stdin_open: true
     depends_on:
@@ -110,7 +108,6 @@ services:
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
     container_name: exomonad-tl
-    platform: linux/amd64
     tty: true
     stdin_open: true
     environment:
@@ -124,7 +121,7 @@ services:
       # Worktrees volume for spawned agents
       - exomonad-worktrees:/worktrees
       - exomonad-sockets:/sockets
-      - exomonad-claude-tl:/home/agent/.claude
+      - exomonad-claude-auth:/home/agent/.claude
       - exomonad-gh-auth:/home/agent/.config/gh
     depends_on:
       control-server:
@@ -154,7 +151,6 @@ services:
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
     container_name: exomonad-pm
-    platform: linux/amd64
     tty: true
     stdin_open: true
     environment:
@@ -164,7 +160,7 @@ services:
     volumes:
       - exomonad-worktrees:/workspace
       - exomonad-sockets:/sockets
-      - exomonad-claude-pm:/home/agent/.claude
+      - exomonad-claude-auth:/home/agent/.claude
       - exomonad-gh-auth:/home/agent/.config/gh
     depends_on:
       control-server:
@@ -217,7 +213,6 @@ services:
       service: docker-socket-access
     init: true
     profiles: ["legacy"]
-    platform: linux/amd64
     build:
       context: .
       dockerfile: docker/orchestrator/Dockerfile
@@ -264,10 +259,6 @@ services:
 volumes:
   exomonad-sockets:
     name: exomonad-sockets
-  exomonad-claude-tl:
-    name: exomonad-claude-tl
-  exomonad-claude-pm:
-    name: exomonad-claude-pm
   exomonad-claude-auth:
     name: exomonad-claude-auth
   exomonad-gh-auth:

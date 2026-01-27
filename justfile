@@ -29,7 +29,6 @@ dev-up target="control-server": _check_jq
 
     @echo ">>> [3/4] Updating .env..."
     @env_var=$(echo "{{target}}" | tr '[:lower:]-' '[:upper:]_')_DIGEST; \
-    digest=$(jq -r '.["{{target}}"]["containerimage.digest"]' {{metadata_file}}); \
     touch {{env_file}}; \
     if grep -q "^${env_var}=" {{env_file}}; then \
         sed -i.bak "s|^${env_var}=.*|${env_var}=$digest|" {{env_file}} && rm -f {{env_file}}.bak; \
@@ -66,7 +65,7 @@ update-rust:
     docker run --rm -v $(pwd):/app -w /app/rust lukemathwalker/cargo-chef:latest \
         cargo chef prepare --recipe-path /app/recipe.json
 
-    @echo ">>> Done. Commit 'Cargo.lock' and 'recipe.json'."
+    @echo ">>> Done. Commit 'Cargo.lock'."
 
 # Freeze Haskell dependencies
 freeze-haskell:

@@ -278,6 +278,6 @@ ENTRYPOINT ["/usr/local/bin/docker-entrypoint-orchestrator.sh"]
 CMD ["orchestrator"]
 
 # Stage 6: Dev Target
-FROM --platform=linux/amd64 builder AS dev
+FROM builder AS dev
 RUN cabal install haskell-language-server -j
 CMD ["cabal", "repl", "exomonad-control-server"]
