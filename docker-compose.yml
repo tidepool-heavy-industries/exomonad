@@ -32,7 +32,7 @@ services:
       # Both are intentionally sourced from the same underlying token to keep auth in sync.
       - GH_TOKEN=${GH_TOKEN}
       - GITHUB_TOKEN=${GH_TOKEN}
-      - GITHUB_REPO=${GITHUB_REPO:-tidepool-heavy-industries/tidepool}
+      - GITHUB_REPO=${GITHUB_REPO:-tidepool-heavy-industries/exomonad}
       - EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
       - EXOMONAD_TUI_SOCKET=/sockets/tui.sock
       - EXOMONAD_SERVICE_SOCKET=/sockets/services.sock
