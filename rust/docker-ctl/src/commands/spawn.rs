@@ -109,6 +109,12 @@ pub async fn run(
                 format!("EXOMONAD_ISSUE_ID={}", issue_id),
                 format!("EXOMONAD_BACKEND={}", backend),
             ];
+            // Inherit critical env vars for spawned agents
+            for var in ["GH_TOKEN", "CONTROL_SERVER_URL", "EXOMONAD_CONTROL_SOCKET"] {
+                if let Ok(val) = std::env::var(var) {
+                    all_env.push(format!("{}={}", var, val));
+                }
+            }
             // Add user-provided env vars (already in KEY=VALUE format)
             all_env.extend(env_vars);
             all_env
