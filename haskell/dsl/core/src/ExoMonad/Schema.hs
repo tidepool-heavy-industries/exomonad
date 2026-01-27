@@ -38,6 +38,17 @@ module ExoMonad.Schema
   , deriveHasJSONSchema
   , deriveUsesOneOf
   , deriveUsesEnum
+  , deriveMCPType
+  , deriveMCPTypeWith
+  , deriveMCPEnum
+  , FieldMapping(..)
+  , FieldMappingPartial
+  , (~>)
+  , (?)
+  , (??)
+  , omit
+  , MCPOptions(..)
+  , defaultMCPOptions
 
     -- * Conversion
   , schemaToValue
@@ -56,6 +67,20 @@ import Data.Maybe (catMaybes)
 import Data.Aeson (Value(..), object, (.=))
 import Language.Haskell.TH
 
+import ExoMonad.Schema.TH
+  ( deriveMCPType
+  , deriveMCPTypeWith
+  , deriveMCPEnum
+  , FieldMapping(..)
+  , FieldMappingPartial
+  , (~>)
+  , (?)
+  , (??)
+  , omit
+  , MCPOptions(..)
+  , defaultMCPOptions
+  )
+
 -- Import wrappers and validation from Class to avoid circularity issues
 -- and make them available for WASM.
 import ExoMonad.StructuredOutput.Class
@@ -68,6 +93,7 @@ import ExoMonad.StructuredOutput.Class
   , formatDiagnostic
   , JSONSchema(..)
   , SchemaType(..)
+  , HasJSONSchema(..)
   )
 
 -- | Empty schema of given type
@@ -94,8 +120,8 @@ oneOfSchema :: [JSONSchema] -> JSONSchema
 oneOfSchema variants = (emptySchema TObject) { schemaOneOf = Just variants }
 
 -- | Add description to schema
-describeField :: Text -> Text -> JSONSchema -> JSONSchema
-describeField _fieldName desc schema = schema { schemaDescription = Just desc }
+describeField :: Text -> JSONSchema -> JSONSchema
+describeField desc schema = schema { schemaDescription = Just desc }
 
 -- | Convert schema to Aeson Value (JSON Schema draft-07 format)
 -- Note: Anthropic API requires additionalProperties: false on all object types
@@ -180,7 +206,7 @@ deriveFieldSchema _typeName _conName _fieldIdx (fieldName, _, fieldType) = do
     Just doc -> pure (T.pack doc)
     Nothing  -> pure ""
   baseSchema <- typeToSchemaExp fieldType
-  [| describeField (T.pack $(litE (stringL (nameBase fieldName)))) desc $(pure baseSchema) |]
+  [| describeField desc $(pure baseSchema) |]
 
 -- | Convert a Haskell type to a JSONSchema expression
 typeToSchemaExp :: Type -> Q Exp
@@ -209,13 +235,9 @@ typeToSchemaExp typ = case typ of
   -- Fallback: treat as string (for complex types without HasJSONSchema)
   _ -> [| emptySchema TString |]
 
--- ══════════════════════════════════════════════════════════════
+-- ════════════════════════════════════════════════════════════════════════════
 -- HAS JSON SCHEMA TYPECLASS
--- ══════════════════════════════════════════════════════════════
-
--- | Typeclass for types that have a JSON Schema representation.
-class HasJSONSchema a where
-  jsonSchema :: JSONSchema
+-- ════════════════════════════════════════════════════════════════════════════
 
 -- | Derive a 'HasJSONSchema' instance for a record type.
 deriveHasJSONSchema :: Name -> Q [Dec]

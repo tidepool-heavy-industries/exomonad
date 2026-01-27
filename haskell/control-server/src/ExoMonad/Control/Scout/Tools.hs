@@ -1,8 +1,9 @@
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 -- | ToolDef wrapper for ScoutGemma effect
 --
@@ -14,8 +15,6 @@ module ExoMonad.Control.Scout.Tools
   , SelectSymbolsOutput(..)
   ) where
 
-import Control.Monad.Freer (Eff)
-import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Read as TR
@@ -23,8 +22,7 @@ import GHC.Generics (Generic)
 
 import ExoMonad.Graph.Tool (ToolDef(..))
 import ExoMonad.Tool.Convert (ToAnthropicTool, ToCfTool)
-import ExoMonad.Schema (HasJSONSchema(..))
-import ExoMonad.Control.Scout.DocGen.Gemma (ScoutGemma, selectRelevantSymbols)
+import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(..))
 import ExoMonad.Control.Scout.DocGen.Types (LSPSymbol(..))
 import ExoMonad.Effect.LSP (SymbolKind(..), Location(..), Position(..), Range(..))
 
@@ -39,31 +37,43 @@ data SelectSymbolsTool = SelectSymbolsTool
 -- - symbol fields: flattened from LSPSymbol
 -- - candidates: symbols extracted from signature
 data SelectSymbolsInput = SelectSymbolsInput
-  { topic :: Text
+  { ssiTopic :: Text
     -- ^ Topic description (e.g., "the scoring system")
-  , symbolName :: Text
+  , ssiSymbolName :: Text
     -- ^ Symbol being analyzed
-  , symbolKind :: Text
+  , ssiSymbolKind :: Text
     -- ^ Symbol kind as text (Function, Class, etc.)
-  , symbolLocation :: Text
+  , ssiSymbolLocation :: Text
     -- ^ Location as URI:line:col (flattened for JSON)
-  , symbolSignature :: Text
+  , ssiSymbolSignature :: Text
     -- ^ Type signature from LSP hover
-  , symbolDocComment :: Maybe Text
+  , ssiSymbolDocComment :: Maybe Text
     -- ^ Documentation comment (if available)
-  , candidates :: [Text]
+  , ssiCandidates :: [Text]
     -- ^ Candidate symbols (pre-extracted from signature)
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, HasJSONSchema)
+
+$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "ssi" } ''SelectSymbolsInput
+  [ 'ssiTopic ?? "Topic description (e.g., 'the scoring system')"
+  , 'ssiSymbolName ?? "Symbol being analyzed"
+  , 'ssiSymbolKind ?? "Symbol kind as text (Function, Class, etc.)"
+  , 'ssiSymbolLocation ?? "Location as URI:line:col"
+  , 'ssiSymbolSignature ?? "Type signature from LSP hover"
+  , 'ssiSymbolDocComment ?? "Documentation comment (if available)"
+  , 'ssiCandidates ?? "Candidate symbols (pre-extracted from signature)"
+  ])
 
 -- | Tool output (selected subset of candidates)
 newtype SelectSymbolsOutput = SelectSymbolsOutput
-  { selected :: [Text]
+  { ssoSelected :: [Text]
     -- ^ Symbols relevant to the topic
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, HasJSONSchema)
+
+$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "sso" } ''SelectSymbolsOutput
+  [ 'ssoSelected ?? "Symbols relevant to the topic"
+  ])
 
 -- | ToolDef instance bridges to ScoutGemma effect
 instance ToolDef SelectSymbolsTool where

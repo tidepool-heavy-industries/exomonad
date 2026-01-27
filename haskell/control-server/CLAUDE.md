@@ -1026,6 +1026,7 @@ pure $ mcpToolErrorWithDetails reqId NotFound
 - Automatic tool discovery via `MCPExport` + `reifyMCPTools` + `GraphEntries`
 - 23+ tools across 5 tiers: LSP, LLM-enhanced, external orchestration, TUI-interactive, mailbox
 - Type-safe schema generation from `HasJSONSchema` instances
+- Ergonomic derivation via `deriveMCPTypeWith` (auto-generates FromJSON/ToJSON/Schema from single mapping)
 - Role-based filtering via exomonad `--tools` flag
 
 ✅ **Tier 1 Tools (Logic-only)**

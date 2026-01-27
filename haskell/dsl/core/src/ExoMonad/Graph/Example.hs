@@ -53,7 +53,7 @@ newtype Response = Response { respText :: String }
 -- HasJSONSchema instances for example types (normally derived via TH)
 instance HasJSONSchema Message where
   jsonSchema = objectSchema
-    [ ("msgContent", describeField "msgContent" "The message content" (emptySchema TString))
+    [ ("msgContent", describeField "The message content" (emptySchema TString))
     ]
     ["msgContent"]
 
@@ -62,7 +62,7 @@ instance HasJSONSchema Intent where
 
 instance HasJSONSchema Response where
   jsonSchema = objectSchema
-    [ ("respText", describeField "respText" "The response text" (emptySchema TString))
+    [ ("respText", describeField "The response text" (emptySchema TString))
     ]
     ["respText"]
 
@@ -91,14 +91,14 @@ newtype SearchOutput = SearchOutput
 -- Manual HasJSONSchema instances (normally derived via TH)
 instance HasJSONSchema SearchInput where
   jsonSchema = objectSchema
-    [ ("query", describeField "query" "The search query string" (emptySchema TString))
-    , ("maxResults", describeField "maxResults" "Maximum number of results (1-100)" (emptySchema TInteger))
+    [ ("query", describeField "The search query string" (emptySchema TString))
+    , ("maxResults", describeField "Maximum number of results (1-100)" (emptySchema TInteger))
     ]
     ["query", "maxResults"]
 
 instance HasJSONSchema SearchOutput where
   jsonSchema = objectSchema
-    [ ("results", describeField "results" "List of matching results" (arraySchema (emptySchema TString)))
+    [ ("results", describeField "List of matching results" (arraySchema (emptySchema TString)))
     ]
     ["results"]
 

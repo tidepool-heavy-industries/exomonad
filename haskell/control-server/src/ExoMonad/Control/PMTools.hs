@@ -160,9 +160,9 @@ data PmApproveExpansionArgs = PmApproveExpansionArgs
 
 instance HasJSONSchema PmApproveExpansionArgs where
   jsonSchema = objectSchema
-    [ ("issue_num", describeField "issue_num" "Issue number" (emptySchema TNumber))
-    , ("decision", describeField "decision" "Decision: 'approve' or 'reject'" (emptySchema TString))
-    , ("feedback", describeField "feedback" "Feedback (required for rejection, optional for approval)" (emptySchema TString))
+    [ ("issue_num", describeField "Issue number" (emptySchema TNumber))
+    , ("decision", describeField "Decision: 'approve' or 'reject'" (emptySchema TString))
+    , ("feedback", describeField "Feedback (required for rejection, optional for approval)" (emptySchema TString))
     ]
     ["issue_num", "decision"]
 
@@ -275,9 +275,9 @@ data PrioritizeItem = PrioritizeItem
 
 instance HasJSONSchema PrioritizeItem where
   jsonSchema = objectSchema
-    [ ("issue_num", describeField "issue_num" "Issue number" (emptySchema TNumber))
-    , ("new_priority", describeField "new_priority" "New priority value (0-4)." (emptySchema TInteger))
-    , ("rationale", describeField "rationale" "Reason for the priority change. Will be added to Priority History." (emptySchema TString))
+    [ ("issue_num", describeField "Issue number" (emptySchema TNumber))
+    , ("new_priority", describeField "New priority value (0-4)." (emptySchema TInteger))
+    , ("rationale", describeField "Reason for the priority change. Will be added to Priority History." (emptySchema TString))
     ]
     ["issue_num", "new_priority", "rationale"]
 
@@ -290,7 +290,7 @@ data PmPrioritizeArgs = PmPrioritizeArgs
 
 instance HasJSONSchema PmPrioritizeArgs where
   jsonSchema = objectSchema
-    [ ("updates", describeField "updates" "List of issues to prioritize." (arraySchema (jsonSchema @PrioritizeItem)))
+    [ ("updates", describeField "List of issues to prioritize." (arraySchema (jsonSchema @PrioritizeItem)))
     ]
     ["updates"]
 

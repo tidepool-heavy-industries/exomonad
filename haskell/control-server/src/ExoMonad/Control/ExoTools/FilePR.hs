@@ -1,5 +1,4 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -18,80 +17,25 @@ module ExoMonad.Control.ExoTools.FilePR
   ) where
 
 import Control.Monad.Freer (Eff, Member)
-import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.=), object, withObject)
 import Data.Text (Text)
+import qualified Data.Text as T
+import Data.Maybe (listToMaybe)
 import GHC.Generics (Generic)
 
 import ExoMonad.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
 import ExoMonad.Effects.GitHub (GitHub, Repo(..), PRCreateSpec(..), PRUrl(..), PullRequest(..), PRFilter(..), Issue(..), getIssue, createPR, listPullRequests, defaultPRFilter, defaultRepo)
-import qualified Data.Text as T
-import Data.Maybe (listToMaybe)
 import ExoMonad.Role (Role(..))
 import ExoMonad.Graph.Generic (AsHandler, type (:-))
 import ExoMonad.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import ExoMonad.Graph.Goto (Goto, GotoChoice, To, gotoExit)
 import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef, MCPRoleHint)
-import ExoMonad.Schema (HasJSONSchema(..), objectSchema, emptySchema, SchemaType(..), describeField)
 
 import ExoMonad.Control.ExoTools.Internal (parseIssueNumber, slugify, formatPRBody)
+import ExoMonad.Control.ExoTools.FilePR.Types
 
--- | Arguments for file_pr tool.
--- Issue number and title are inferred from the branch - agent provides context.
-data FilePRArgs = FilePRArgs
-  { fpaTesting     :: Text        -- ^ Required: How was this tested?
-  , fpaCompromises :: Maybe Text  -- ^ Optional: Tradeoffs or shortcuts taken
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance HasJSONSchema FilePRArgs where
-  jsonSchema = objectSchema
-    [ ("testing", describeField "testing" "How was this tested? What scenarios were verified?" (emptySchema TString))
-    , ("compromises", describeField "compromises" "Any tradeoffs, shortcuts, or known limitations?" (emptySchema TString))
-    ]
-    ["testing"]  -- testing is required
-
-instance FromJSON FilePRArgs where
-  parseJSON = withObject "FilePRArgs" $ \v ->
-    FilePRArgs <$> v .: "testing" <*> v .:? "compromises"
-
-instance ToJSON FilePRArgs where
-  toJSON args = object
-    [ "testing" .= fpaTesting args
-    , "compromises" .= fpaCompromises args
-    ]
-
--- | PR Info for file_pr result.
-data PRInfo = PRInfo
-  { priNumber :: Int
-  , priUrl    :: Text
-  , priStatus :: Text
-  , priTitle  :: Text
-  }
-  deriving stock (Show, Eq, Generic)
-  deriving anyclass (ToJSON, FromJSON)
-
--- | Result of file_pr tool.
--- Returns PR info for either an existing or newly created PR.
-data FilePRResult = FilePRResult
-  { fprPr :: Maybe PRInfo      -- ^ PR info (existing or newly created)
-  , fprCreated :: Bool         -- ^ True if we created a new PR, False if existing found
-  , fprError :: Maybe Text     -- ^ Error message if operation failed
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON FilePRResult where
-  toJSON res = object
-    [ "pr" .= fprPr res
-    , "created" .= fprCreated res
-    , "error" .= fprError res
-    ]
-
-instance FromJSON FilePRResult where
-  parseJSON = withObject "FilePRResult" $ \v ->
-    FilePRResult
-      <$> v .:? "pr"
-      <*> v .: "created"
-      <*> v .:? "error"
+-- ════════════════════════════════════════════════════════════════════════════
+-- GRAPH
+-- ════════════════════════════════════════════════════════════════════════════
 
 -- | Graph definition for file_pr tool.
 data FilePRGraph mode = FilePRGraph

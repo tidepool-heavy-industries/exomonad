@@ -16,8 +16,6 @@ module ExoMonad.Control.ExoTools.Status
   ) where
 
 import Control.Monad.Freer (Eff, Member)
-import Data.Aeson (FromJSON(..), ToJSON(..), (.:?), (.=), object, withObject)
-import Data.Text (Text)
 import GHC.Generics (Generic)
 
 import ExoMonad.Effects.Git (Git)
@@ -26,28 +24,13 @@ import ExoMonad.Graph.Generic (AsHandler, type (:-))
 import ExoMonad.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import ExoMonad.Graph.Goto (Goto, GotoChoice, To, gotoExit)
 import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef)
-import ExoMonad.Schema (HasJSONSchema(..), objectSchema, emptySchema, SchemaType(..), describeField)
 
 import ExoMonad.Control.ExoTools.Internal (ExoStatusResult(..), getDevelopmentContext)
+import ExoMonad.Control.ExoTools.Status.Types
 
--- | Arguments for exo_status tool.
-data ExoStatusArgs = ExoStatusArgs
-  { esaBeadId :: Maybe Text  -- ^ Optional bead ID. If not provided, inferred from branch.
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance HasJSONSchema ExoStatusArgs where
-  jsonSchema = objectSchema
-    [ ("bead_id", describeField "bead_id" "Optional bead ID (e.g. exomonad-huj). If omitted, inferred from branch name." (emptySchema TString))
-    ]
-    []
-
-instance FromJSON ExoStatusArgs where
-  parseJSON = withObject "ExoStatusArgs" $ \v ->
-    ExoStatusArgs <$> v .:? "bead_id"
-
-instance ToJSON ExoStatusArgs where
-  toJSON args = object ["bead_id" .= esaBeadId args]
+-- ════════════════════════════════════════════════════════════════════════════
+-- GRAPH
+-- ════════════════════════════════════════════════════════════════════════════
 
 -- | Graph definition for exo_status tool.
 data ExoStatusGraph mode = ExoStatusGraph

@@ -50,7 +50,7 @@ newtype TestOutput = TestOutput { toResult :: Int }
 
 instance HasJSONSchema TestOutput where
   jsonSchema = objectSchema
-    [ ("result", describeField "result" "The result value" (emptySchema TInteger))
+    [ ("result", describeField "The result value" (emptySchema TInteger))
     ]
     ["result"]
 

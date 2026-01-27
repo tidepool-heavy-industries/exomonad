@@ -63,7 +63,7 @@ emptySchema TNumber
 emptySchema TBool
 
 -- With description
-describeField "name" "Description here" (emptySchema TString)
+describeField "Description here" (emptySchema TString)
 ```
 
 ## Tool Registration

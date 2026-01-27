@@ -138,26 +138,27 @@ exomonad mcp  # No --tools flag
 
 Tools follow a **schema-shaped** design where input/output types are:
 1. Defined as Haskell records
-2. Derive `HasJSONSchema` instances (via `objectSchema`)
+2. Derive `HasJSONSchema`, `FromJSON`, and `ToJSON` instances via `deriveMCPTypeWith` (eliminating boilerplate)
 3. Auto-converted to JSON Schema for MCP protocol
 4. Claude reads schema and shapes its prompts accordingly
 
 **Example (pm_status):**
 ```haskell
+-- Types are defined in a separate Types.hs module to avoid stage restrictions
 data PmStatusArgs = PmStatusArgs
-  { psaPeriodDays       :: Int         -- described: "Period in days for velocity calculation"
-  , psaIncludeBreakdown :: Bool        -- described: "Whether to include label breakdown"
-  , psaLabelTrack       :: Maybe Text  -- described: "Filter by track label"
+  { psaPeriodDays       :: Int
+  , psaIncludeBreakdown :: Bool
+  , psaLabelTrack       :: Maybe Text
   }
-  deriving stock Generic
+  deriving stock (Show, Eq, Generic)
 
-instance HasJSONSchema PmStatusArgs where
-  jsonSchema = objectSchema
-    [ ("period_days", describeField "period_days" "..." (emptySchema TInteger))
-    , ("include_breakdown", describeField "include_breakdown" "..." (emptySchema TBoolean))
-    , ("label_track", describeField "label_track" "..." (emptySchema TString))
-    ]
-    []
+-- Use deriveMCPTypeWith to generate HasJSONSchema, FromJSON, and ToJSON automatically.
+-- fieldPrefix handles stripping prefixes like "psa".
+$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "psa" } ''PmStatusArgs
+  [ 'psaPeriodDays       ?? "Period in days for velocity calculation"
+  , 'psaIncludeBreakdown ?? "Whether to include label breakdown"
+  , 'psaLabelTrack       ?? "Filter by track label"
+  ])
 ```
 
 Claude sees:

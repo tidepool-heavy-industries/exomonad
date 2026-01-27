@@ -19,7 +19,7 @@ module ExoMonad.Control.FeedbackTools
 
 import Control.Exception (try, SomeException, displayException)
 import Control.Monad.Freer (Eff, sendM, LastMember)
-import Data.Aeson (FromJSON(..), ToJSON(..), encode)
+import Data.Aeson (encode)
 import qualified Data.ByteString.Lazy as LBS
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -31,66 +31,8 @@ import ExoMonad.Graph.Generic (type (:-))
 import ExoMonad.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import ExoMonad.Graph.Goto (Goto, GotoChoice, To, gotoExit)
 import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef)
-import ExoMonad.Schema (HasJSONSchema(..), objectSchema, arraySchema, emptySchema, SchemaType(..), describeField)
 
--- ════════════════════════════════════════════════════════════════════════════
--- TYPES
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Estimate of token spend for a specific category.
-data TokenCategoryEstimate = TokenCategoryEstimate
-  { tceCategory :: Text -- ^ Category name (reading, searching, editing, testing, planning, waiting)
-  , tceEstimate :: Text -- ^ Estimate: high, medium, low
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance FromJSON TokenCategoryEstimate
-instance ToJSON TokenCategoryEstimate
-
-instance HasJSONSchema TokenCategoryEstimate where
-  jsonSchema = objectSchema
-    [ ("category", describeField "category" "Category name (reading, searching, editing, testing, planning, waiting)" (emptySchema TString))
-    , ("estimate", describeField "estimate" "Estimate of token spend: high, medium, low" (emptySchema TString))
-    ]
-    ["category", "estimate"]
-
--- | Arguments for register_feedback tool.
-data RegisterFeedbackArgs = RegisterFeedbackArgs
-  { rfaIssueId :: Text            -- ^ The ID of the issue being worked on (e.g. gh-123)
-  , rfaSuggestions :: [Text]     -- ^ Suggestions for making the task easier
-  , rfaIdeas :: [Text]           -- ^ Ideas for new tools that should exist
-  , rfaNits :: [Text]            -- ^ Small annoyances or points of confusion
-  , rfaTokenCategories :: [TokenCategoryEstimate] -- ^ Token spend estimates by category
-  , rfaOverallExperience :: Text -- ^ Overall experience: smooth, bumpy, blocked
-  , rfaNotes :: Maybe Text       -- ^ Free-form notes and reflections
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance FromJSON RegisterFeedbackArgs
-instance ToJSON RegisterFeedbackArgs
-
-instance HasJSONSchema RegisterFeedbackArgs where
-  jsonSchema = objectSchema
-    [ ("issue_id", describeField "issue_id" "The ID of the issue being worked on (e.g. gh-123)" (emptySchema TString))
-    , ("suggestions", describeField "suggestions" "Suggestions for making the task easier" (arraySchema $ emptySchema TString))
-    , ("ideas", describeField "ideas" "Ideas for new tools that should exist" (arraySchema $ emptySchema TString))
-    , ("nits", describeField "nits" "Small annoyances or points of confusion" (arraySchema $ emptySchema TString))
-    , ("token_categories", describeField "token_categories" "Token spend estimates by category (reading, searching, editing, testing, planning, waiting)" (arraySchema (jsonSchema @TokenCategoryEstimate)))
-    , ("overall_experience", describeField "overall_experience" "Overall experience: smooth, bumpy, blocked" (emptySchema TString))
-    , ("notes", describeField "notes" "Free-form notes and reflections" (emptySchema TString))
-    ]
-    ["issue_id", "suggestions", "ideas", "nits", "token_categories", "overall_experience"]
-
--- | Result of register_feedback tool.
-data RegisterFeedbackResult = RegisterFeedbackResult
-  { rfrSuccess :: Bool
-  , rfrPath :: Text
-  , rfrError :: Maybe Text
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance FromJSON RegisterFeedbackResult
-instance ToJSON RegisterFeedbackResult
+import ExoMonad.Control.FeedbackTools.Types
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPH DEFINITION
