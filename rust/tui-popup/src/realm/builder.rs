@@ -21,8 +21,7 @@ pub fn build_components(
 
     for (index, component) in definition.components.iter().enumerate() {
         id_to_index.insert(component.id().to_string(), index);
-        // Note: visibility_when not currently in new Component enum, use None
-        visibility_rules.push(None);
+        visibility_rules.push(component.visible_when().cloned());
 
         let wrapper = build_component(component, state);
         components.push(wrapper);
@@ -34,7 +33,7 @@ pub fn build_components(
 /// Build a single component from its definition
 fn build_component(component: &Component, state: &PopupState) -> ComponentWrapper {
     match component {
-        Component::Text { id, content } => ComponentWrapper {
+        Component::Text { id, content, .. } => ComponentWrapper {
             label: id.clone(),
             component: create_text_component(content),
             component_type: ComponentType::Text,
@@ -49,6 +48,7 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
             min,
             max,
             default,
+            ..
         } => {
             let value = state.get_number(id).unwrap_or(*default);
             ComponentWrapper {
@@ -61,7 +61,7 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
             }
         }
 
-        Component::Checkbox { id, label, default } => {
+        Component::Checkbox { id, label, default, .. } => {
             let checked = state.get_boolean(id).unwrap_or(*default);
             ComponentWrapper {
                 label: id.clone(),
@@ -78,6 +78,7 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
             label,
             placeholder,
             rows,
+            ..
         } => {
             let text = state.get_text(id).unwrap_or("").to_string();
             let height = rows.unwrap_or(1) as u16 + 1; // +1 for label
@@ -96,6 +97,7 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
             label,
             options,
             default,
+            ..
         } => {
             let selected = state.get_choice(id).unwrap_or(default.unwrap_or(0));
             ComponentWrapper {
@@ -124,7 +126,7 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
             }
         }
 
-        Component::Group { id, label } => ComponentWrapper {
+        Component::Group { id, label, .. } => ComponentWrapper {
             label: id.clone(),
             component: create_group_label(label),
             component_type: ComponentType::Group,

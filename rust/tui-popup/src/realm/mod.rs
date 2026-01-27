@@ -163,6 +163,26 @@ impl PopupComponent {
                 }
                 false
             }),
+            VisibilityRule::GreaterThan { id, min_value } => {
+                self.state.get_number(id).unwrap_or(0.0) >= *min_value
+            }
+            VisibilityRule::LessThan { id, max_value } => {
+                self.state.get_number(id).unwrap_or(0.0) <= *max_value
+            }
+            VisibilityRule::CountEquals { id, exact_count } => {
+                self.state
+                    .get_multichoice(id)
+                    .map(|s| s.iter().filter(|&&b| b).count() as u32)
+                    .unwrap_or(0)
+                    == *exact_count
+            }
+            VisibilityRule::CountGreaterThan { id, min_count } => {
+                self.state
+                    .get_multichoice(id)
+                    .map(|s| s.iter().filter(|&&b| b).count() as u32)
+                    .unwrap_or(0)
+                    >= *min_count
+            }
         }
     }
 

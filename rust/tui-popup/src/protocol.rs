@@ -17,6 +17,8 @@ pub enum Component {
     Text {
         id: String,
         content: String,
+        #[serde(default)]
+        visible_when: Option<VisibilityRule>,
     },
     #[serde(rename = "slider")]
     Slider {
@@ -25,12 +27,16 @@ pub enum Component {
         min: f32,
         max: f32,
         default: f32,
+        #[serde(default)]
+        visible_when: Option<VisibilityRule>,
     },
     #[serde(rename = "checkbox")]
     Checkbox {
         id: String,
         label: String,
         default: bool,
+        #[serde(default)]
+        visible_when: Option<VisibilityRule>,
     },
     #[serde(rename = "textbox")]
     Textbox {
@@ -38,6 +44,8 @@ pub enum Component {
         label: String,
         placeholder: Option<String>,
         rows: Option<u32>,
+        #[serde(default)]
+        visible_when: Option<VisibilityRule>,
     },
     #[serde(rename = "choice")]
     Choice {
@@ -45,6 +53,8 @@ pub enum Component {
         label: String,
         options: Vec<String>,
         default: Option<usize>,
+        #[serde(default)]
+        visible_when: Option<VisibilityRule>,
     },
     #[serde(rename = "multiselect")]
     Multiselect {
@@ -52,11 +62,15 @@ pub enum Component {
         label: String,
         options: Vec<String>,
         default: Option<usize>, // Keeping for backward compat, though unused in logic
+        #[serde(default)]
+        visible_when: Option<VisibilityRule>,
     },
     #[serde(rename = "group")]
     Group {
         id: String,
         label: String,
+        #[serde(default)]
+        visible_when: Option<VisibilityRule>,
     },
 }
 
@@ -73,6 +87,19 @@ impl Component {
             Component::Group { id, .. } => id,
         }
     }
+
+    /// Get the visibility rule.
+    pub fn visible_when(&self) -> Option<&VisibilityRule> {
+        match self {
+            Component::Text { visible_when, .. } => visible_when.as_ref(),
+            Component::Slider { visible_when, .. } => visible_when.as_ref(),
+            Component::Checkbox { visible_when, .. } => visible_when.as_ref(),
+            Component::Textbox { visible_when, .. } => visible_when.as_ref(),
+            Component::Choice { visible_when, .. } => visible_when.as_ref(),
+            Component::Multiselect { visible_when, .. } => visible_when.as_ref(),
+            Component::Group { visible_when, .. } => visible_when.as_ref(),
+        }
+    }
 }
 
 
@@ -85,6 +112,30 @@ pub enum VisibilityRule {
     Checked(String),
     /// Show if choice equals value. {"visible_when": {"choice-id": "value"}}
     Equals(HashMap<String, String>),
+    /// Show if a numeric component's value is greater than or equal to `min_value`.
+    /// Haskell: GreaterThan { id, min_value }
+    GreaterThan {
+        id: String,
+        min_value: f32,
+    },
+    /// Show if a numeric component's value is less than or equal to `max_value`.
+    /// Haskell: LessThan { id, max_value }
+    LessThan {
+        id: String,
+        max_value: f32,
+    },
+    /// Show if the count for a component (e.g., multiselect) equals `exact_count`.
+    /// Haskell: CountEquals { id, exact_count }
+    CountEquals {
+        id: String,
+        exact_count: u32,
+    },
+    /// Show if the count for a component is greater than or equal to `min_count`.
+    /// Haskell: CountGreaterThan { id, min_count }
+    CountGreaterThan {
+        id: String,
+        min_count: u32,
+    },
 }
 
 /// Internal state of the popup form
@@ -196,4 +247,58 @@ impl PopupState {
 pub struct PopupResult {
     pub button: String, // "submit" or "decline"
     pub values: Value,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_component_with_visibility_deserialization() {
+        // Test visibility rule deserialization
+        // Checked variant matches a simple string
+        let json = r#"{
+            "id": "slider1",
+            "type": "slider",
+            "label": "My Slider",
+            "min": 0.0,
+            "max": 100.0,
+            "default": 50.0,
+            "visible_when": "checkbox1"
+        }"#;
+
+        let parsed: Component = serde_json::from_str(json).unwrap();
+        match parsed {
+            Component::Slider { id, visible_when, .. } => {
+                assert_eq!(id, "slider1");
+                assert_eq!(visible_when, Some(VisibilityRule::Checked("checkbox1".to_string())));
+            }
+            _ => panic!("Expected Slider component"),
+        }
+    }
+
+    #[test]
+    fn test_visibility_rule_variants() {
+        // GreaterThan (untagged, matches by structure)
+        let json = r#"{"id": "s1", "min_value": 10.0}"#;
+        let rule: VisibilityRule = serde_json::from_str(json).unwrap();
+        match rule {
+            VisibilityRule::GreaterThan { id, min_value } => {
+                assert_eq!(id, "s1");
+                assert_eq!(min_value, 10.0);
+            }
+            _ => panic!("Expected GreaterThan"),
+        }
+        
+        // CountEquals (untagged)
+        let json = r#"{"id": "m1", "exact_count": 2}"#;
+        let rule: VisibilityRule = serde_json::from_str(json).unwrap();
+        match rule {
+            VisibilityRule::CountEquals { id, exact_count } => {
+                assert_eq!(id, "m1");
+                assert_eq!(exact_count, 2);
+            }
+            _ => panic!("Expected CountEquals"),
+        }
+    }
 }

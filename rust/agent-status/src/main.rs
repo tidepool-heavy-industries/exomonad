@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
     terminal.show_cursor()?;
 
     if let Err(err) = res {
-        println!("{:?}", err);
+        eprintln!("{:?}", err);
     }
 
     Ok(())
