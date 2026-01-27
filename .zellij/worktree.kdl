@@ -20,13 +20,12 @@ layout {
         }
     }
 
-    tab name="Subagent" focus=true {
-        agent {
-            pane name="Interaction" focus=true {
-                command "bash"
-                // Source .env to get EXOMONAD_CONTROL_SOCKET and other vars, then wait for socket
-                args "-c" "[ -f .env ] && source .env || { echo \"ERROR: .env not found\" >&2; exit 1; }; ./scripts/wait-for-socket.sh \"$EXOMONAD_CONTROL_SOCKET\" 60 ControlServer && exec $SUBAGENT_CMD"
-            }
+    // Use agent template directly (not nested inside tab)
+    agent name="Subagent" focus=true {
+        pane name="Interaction" focus=true {
+            command "bash"
+            // Source .env to get EXOMONAD_CONTROL_SOCKET and other vars, then wait for socket
+            args "-c" "[ -f .env ] && source .env || { echo \"ERROR: .env not found\" >&2; exit 1; }; ./scripts/wait-for-socket.sh \"$EXOMONAD_CONTROL_SOCKET\" 60 ControlServer && exec $SUBAGENT_CMD"
         }
     }
 }

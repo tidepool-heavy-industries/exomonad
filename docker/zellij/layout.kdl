@@ -9,20 +9,19 @@ layout {
         }
     }
 
-    // Template for Agent tabs: Main interaction area + Status Dashboard (20% bottom) + tab bar
+    // Template for Agent tabs: Main interaction area + Status Dashboard (20% bottom)
+    // compact-bar comes from default_tab_template (inherited via 'children')
     tab_template name="agent" {
-        pane split_direction="vertical" {
-            pane split_direction="horizontal" {
-                children
-                pane name="Agent Status" size="20%" {
-                    command "bash"
-                    // Ensure we point to the mounted socket
-                    args "-c" "export EXOMONAD_CONTROL_SOCKET=/sockets/control.sock; while true; do agent-status; echo '⚠️ Agent Status exited. Restarting in 2s...'; sleep 2; done"
-                }
+        pane split_direction="horizontal" {
+            children
+            pane name="Agent Status" size="20%" {
+                command "bash"
+                // Ensure we point to the mounted socket
+                args "-c" "export EXOMONAD_CONTROL_SOCKET=/sockets/control.sock; while true; do agent-status; echo '⚠️ Agent Status exited. Restarting in 2s...'; sleep 2; done"
             }
-            pane size=1 borderless=true {
-                plugin location="zellij:compact-bar"
-            }
+        }
+        pane size=1 borderless=true {
+            plugin location="zellij:compact-bar"
         }
     }
 

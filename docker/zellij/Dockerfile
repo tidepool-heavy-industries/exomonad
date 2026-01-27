@@ -16,8 +16,9 @@ RUN chmod +x /usr/local/bin/tui-popup /usr/local/bin/agent-status
 # Create config directories
 RUN mkdir -p /etc/zellij/layouts
 
-# Copy layout and config
+# Copy layouts and config
 COPY docker/zellij/layout.kdl /etc/zellij/layouts/main.kdl
+COPY docker/zellij/subagent.kdl /etc/zellij/layouts/subagent.kdl
 COPY docker/zellij/config.kdl /etc/zellij/config.kdl
 COPY docker/zellij/entrypoint.sh /usr/local/bin/service-entrypoint.sh
 RUN chmod +x /usr/local/bin/service-entrypoint.sh

@@ -402,14 +402,16 @@ processIssue spawnMode repoRoot wtBaseDir backend shortId = do
                                       if execRes.erExitCode == Just 0
                                         then do
                                           logInfo $ "[" <> shortId <> "] Health check passed"
-                                          let attachCmd = "docker attach " <> containerId.unContainerId
+                                          let attachCmd = "docker attach --detach-keys 'ctrl-],]' " <> containerId.unContainerId
+                                              -- Pass command via SUBAGENT_CMD env var, use subagent layout
+                                              tabEnvVars = ("SUBAGENT_CMD", attachCmd) : envVars
                                               tabConfig = TabConfig
                                                 {
                                                   tcName = shortId
-                                                , tcLayout = ""
+                                                , tcLayout = "/etc/zellij/layouts/subagent.kdl"
                                                 , tcCwd = path
-                                                , tcEnv = envVars
-                                                , tcCommand = Just attachCmd
+                                                , tcEnv = tabEnvVars
+                                                , tcCommand = Nothing
                                                 }
                                           tabRes <- newTab tabConfig
                                           case tabRes of

@@ -1,0 +1,28 @@
+// Layout for dynamically spawned subagent tabs
+// Uses SUBAGENT_CMD environment variable for the command to run
+
+layout {
+    default_tab_template {
+        children
+        pane size=1 borderless=true {
+            plugin location="zellij:compact-bar"
+        }
+    }
+
+    tab name="Subagent" focus=true {
+        pane split_direction="horizontal" {
+            pane name="Interaction" focus=true {
+                command "bash"
+                // Run the command from SUBAGENT_CMD environment variable
+                args "-c" "exec $SUBAGENT_CMD"
+            }
+            pane name="Agent Status" size="20%" {
+                command "bash"
+                args "-c" "export EXOMONAD_CONTROL_SOCKET=/sockets/control.sock; while true; do agent-status; echo '⚠️ Agent Status exited. Restarting in 2s...'; sleep 2; done"
+            }
+        }
+        pane size=1 borderless=true {
+            plugin location="zellij:compact-bar"
+        }
+    }
+}
