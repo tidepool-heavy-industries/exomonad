@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$EXOMONAD_BIN_DIR/exomonad hook session-start --role=tl"
+            "command": "$EXOMONAD_BIN_DIR/exomonad hook session-start"
           }
         ]
       },
@@ -15,9 +15,21 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$EXOMONAD_BIN_DIR/exomonad hook session-start --role=tl"
+            "command": "$EXOMONAD_BIN_DIR/exomonad hook session-start"
           }
         ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "type": "command",
+        "command": "$EXOMONAD_BIN_DIR/exomonad hook session-end"
+      }
+    ],
+    "SubagentStop": [
+      {
+        "type": "command",
+        "command": "$EXOMONAD_BIN_DIR/exomonad hook subagent-stop"
       }
     ]
   }
