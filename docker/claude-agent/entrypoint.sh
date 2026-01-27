@@ -24,9 +24,21 @@ if [ ! -d "$AGENT_WORKSPACE/.git" ]; then
     # Create workspace if needed
     sudo mkdir -p "$AGENT_WORKSPACE"
     sudo chown agent:agent "$AGENT_WORKSPACE"
-    # Clone the repo (use HTTPS for simplicity, SSH would need key setup)
-    git clone --branch "$REPO_BRANCH" "$REPO_URL" "$AGENT_WORKSPACE"
-    echo "Repository cloned to $AGENT_WORKSPACE"
+
+    # Handle non-empty directory (stale volume content)
+    if [ "$(ls -A "$AGENT_WORKSPACE" 2>/dev/null)" ]; then
+        echo "Directory not empty, initializing git in place..."
+        cd "$AGENT_WORKSPACE"
+        git init
+        git remote add origin "$REPO_URL"
+        git fetch origin "$REPO_BRANCH"
+        git checkout -f "$REPO_BRANCH"
+        echo "Repository initialized from existing directory"
+    else
+        # Clone the repo (use HTTPS for simplicity, SSH would need key setup)
+        git clone --branch "$REPO_BRANCH" "$REPO_URL" "$AGENT_WORKSPACE"
+        echo "Repository cloned to $AGENT_WORKSPACE"
+    fi
 else
     echo "Repository exists at $AGENT_WORKSPACE"
 fi
