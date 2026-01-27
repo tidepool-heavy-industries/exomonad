@@ -12,6 +12,51 @@ export XDG_RUNTIME_DIR=/run/user/1000
 # Repo volume is owned by root but we run as agent
 git config --global --add safe.directory '*'
 
+# --- Configure git authentication ---
+# Use GH_TOKEN env var if available (preferred), otherwise try gh CLI
+if [ -n "${GH_TOKEN:-}" ]; then
+    echo "Configuring git to use GH_TOKEN..."
+    # Use a credential helper that reads the environment variable directly
+    # This avoids persisting the token in .gitconfig
+    git config --global credential.helper '!f() { echo username=x-access-token; echo password=$GH_TOKEN; }; f'
+elif command -v gh &> /dev/null && gh auth status &> /dev/null; then
+    echo "Configuring git to use gh CLI for authentication..."
+    gh auth setup-git
+else
+    echo "Warning: No git authentication configured, operations may fail"
+fi
+
+# --- Initialize repo if empty ---
+# Named volume may be empty on first start; clone the repo
+ROLE="${EXOMONAD_ROLE:-agent}"
+AGENT_WORKSPACE="/workspace/${ROLE}"
+REPO_URL="${EXOMONAD_REPO_URL:-https://github.com/tidepool-heavy-industries/tidepool.git}"
+REPO_BRANCH="${EXOMONAD_REPO_BRANCH:-main}"
+
+if [ ! -d "$AGENT_WORKSPACE/.git" ]; then
+    echo "Initializing repository in $AGENT_WORKSPACE..."
+    # Create workspace if needed
+    sudo mkdir -p "$AGENT_WORKSPACE"
+    sudo chown agent:agent "$AGENT_WORKSPACE"
+
+    # Handle non-empty directory (stale volume content)
+    if [ "$(ls -A "$AGENT_WORKSPACE" 2>/dev/null)" ]; then
+        echo "Directory not empty, initializing git in place..."
+        cd "$AGENT_WORKSPACE"
+        git init
+        git remote add origin "$REPO_URL"
+        git fetch origin "$REPO_BRANCH"
+        git checkout -f "$REPO_BRANCH"
+        echo "Repository initialized from existing directory"
+    else
+        # Clone the repo (use HTTPS for simplicity, SSH would need key setup)
+        git clone --branch "$REPO_BRANCH" "$REPO_URL" "$AGENT_WORKSPACE"
+        echo "Repository cloned to $AGENT_WORKSPACE"
+    fi
+else
+    echo "Repository exists at $AGENT_WORKSPACE"
+fi
+
 # 1. Link worktree to shared git alternates if provided
 if [ -n "$GIT_ALTERNATES_OBJECT_DIR" ] && [ -d "/workspace/.git" ]; then
     echo "Linking worktree to shared git alternates: $GIT_ALTERNATES_OBJECT_DIR"
@@ -49,16 +94,9 @@ else
 fi
 
 # 3. Configure MCP
-ROLE="${EXOMONAD_ROLE:-agent}"
+# ROLE and AGENT_WORKSPACE already defined above during repo init
 # Subagents might already have .mcp.json written by SpawnAgents to their worktree root.
 # Root agents might need it in their specific workspace.
-AGENT_WORKSPACE="/workspace/${ROLE}"
-
-# Create workspace directory (may need sudo for bind mounts)
-if ! mkdir -p "$AGENT_WORKSPACE" 2>/dev/null; then
-    sudo mkdir -p "$AGENT_WORKSPACE"
-    sudo chown agent:agent "$AGENT_WORKSPACE"
-fi
 
 # Write MCP config (use sudo for bind mounts that may have host permissions)
 write_mcp_config() {

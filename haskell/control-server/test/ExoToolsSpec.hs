@@ -25,7 +25,27 @@ tests = testGroup "ExoTools"
   , testCase "pr_review_status result serialization" test_pr_serialization
   , testCase "spawn_agents is discoverable" test_discovery_spawn
   , testCase "spawn_agents result serialization" test_serialization_spawn
+  , testCase "cleanup_agents is discoverable" test_discovery_cleanup
+  , testCase "cleanup_agents result serialization" test_serialization_cleanup
   ]
+
+test_discovery_cleanup :: Assertion
+test_discovery_cleanup = do
+  let cleanupTools = reifyMCPTools (Proxy @CleanupAgentsGraph)
+  case cleanupTools of
+    [tool] -> assertEqual "Name should be cleanup_agents" "cleanup_agents" tool.mtdName
+    _ -> assertFailure $ "Expected exactly one tool, but found " ++ show (length cleanupTools)
+
+test_serialization_cleanup :: Assertion
+test_serialization_cleanup = do
+  let res = CleanupAgentsResult
+        { carCleaned = ["123", "456"]
+        , carFailed = [("789", "Worktree not found")]
+        }
+  let json = toJSON res
+  case fromJSON @CleanupAgentsResult json of
+    Success res' -> assertEqual "Should roundtrip" res res'
+    Error err -> assertFailure $ "Failed to parse: " ++ err
 
 test_discovery_spawn :: Assertion
 test_discovery_spawn = do

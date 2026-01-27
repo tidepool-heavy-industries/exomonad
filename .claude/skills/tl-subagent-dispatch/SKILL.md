@@ -41,7 +41,7 @@ TL opens Zellij tabs and starts agents based on classification:
 **Tactical agent (haiku):**
 ```bash
 cd /path/to/worktree
-# Context is automatically loaded from .claude/context/issue.md
+# Issue context injected via SessionStart hook
 claude                    # Uses default model (haiku)
 ```
 
@@ -79,8 +79,8 @@ git worktree list              # Active worktrees
 
 **Redirect (async):**
 ```bash
-# Write to worktree, agent discovers on next file read
-echo "STOP: Don't modify X, use Y instead" > /path/to/worktree/.claude/context/redirect.md
+# Write to worktree's CLAUDE.md or .claude/rules/, agent discovers on next file read
+echo "STOP: Don't modify X, use Y instead" >> /path/to/worktree/.claude/rules/redirect.md
 ```
 
 **Kill and restart (if off track):**
