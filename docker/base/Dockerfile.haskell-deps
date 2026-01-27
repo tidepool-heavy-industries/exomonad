@@ -23,13 +23,16 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # 1. Update cabal index (separate step, cached independently)
-RUN --mount=type=cache,target=/root/.cache/cabal,sharing=locked \
+#    Must mount state dir since that's where the package index lives in cabal 3.x
+RUN --mount=type=cache,target=/root/.local/state/cabal,sharing=locked \
+    --mount=type=cache,target=/root/.cache/cabal,sharing=locked \
     cabal update
 
 # Configure cabal to use lld for faster linking
-RUN mkdir -p /root/.cabal && \
-    echo "program-default-options" >> /root/.cabal/config && \
-    echo "  ghc-options: -optl-fuse-ld=lld" >> /root/.cabal/config
+# Use XDG-style config path that modern cabal prefers
+RUN mkdir -p /root/.config/cabal && \
+    echo "program-default-options" >> /root/.config/cabal/config && \
+    echo "  ghc-options: -optl-fuse-ld=lld" >> /root/.config/cabal/config
 
 # 2. Copy dependency manifests (cabal files + freeze)
 COPY cabal.project cabal.project.freeze ./
