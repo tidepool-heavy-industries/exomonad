@@ -41,6 +41,7 @@ import ExoMonad.Effects.Zellij
   ( Zellij(..)
   , TabConfig(..)
   , TabId(..)
+  , LayoutSpec(..)
   , ZellijError(..)
   )
 
@@ -57,6 +58,7 @@ runZellijIO = interpret $ \case
   CheckZellijEnv -> sendM checkZellijEnvIO
   NewTab config -> sendM $ newTabIO config
   GoToTab tabId -> sendM $ goToTabIO tabId
+  GenerateLayout spec -> sendM $ generateLayoutIO spec
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -202,3 +204,36 @@ getSessionPrefix = do
       pure $ case sessionName of
         Just name -> ["--session", name]
         Nothing -> []  -- No session configured
+
+-- | Generate a Zellij layout file via zellij-gen.
+--
+-- Uses the zellij-gen CLI which bakes commands into the layout as literals,
+-- solving the issue where env vars don't propagate to pane processes.
+--
+-- Returns the path to the generated layout file.
+generateLayoutIO :: LayoutSpec -> IO (Either ZellijError FilePath)
+generateLayoutIO spec = do
+  let args = case spec of
+        MainLayout -> ["main"]
+        SubagentLayout issueId containerId ->
+          ["subagent", T.unpack issueId, T.unpack containerId]
+
+  result <- try @SomeException $ readProcessWithExitCode "zellij-gen" args ""
+
+  case result of
+    Left e -> pure $ Left ZellijCommandFailed
+      { zceCommand = "zellij-gen"
+      , zceExitCode = -1
+      , zceStderr = T.pack (show e)
+      }
+    Right (exitCode, stdout, stderr) ->
+      case exitCode of
+        ExitSuccess ->
+          -- zellij-gen prints the path to stdout
+          let layoutPath = filter (/= '\n') stdout
+          in pure $ Right layoutPath
+        ExitFailure code -> pure $ Left ZellijCommandFailed
+          { zceCommand = "zellij-gen"
+          , zceExitCode = code
+          , zceStderr = T.pack stderr
+          }

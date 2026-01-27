@@ -39,10 +39,12 @@ module ExoMonad.Effects.Zellij
   , checkZellijEnv
   , newTab
   , goToTab
+  , generateLayout
 
     -- * Configuration Types
   , TabConfig(..)
   , TabId(..)
+  , LayoutSpec(..)
 
     -- * Error Types
   , ZellijError(..)
@@ -83,6 +85,22 @@ data TabConfig = TabConfig
 
 instance ToJSON TabConfig
 instance FromJSON TabConfig
+
+-- | Specification for generating a Zellij layout via zellij-gen.
+data LayoutSpec
+  = MainLayout
+    -- ^ Generate main layout (TL/PM/Infrastructure tabs)
+  | SubagentLayout
+      { lsIssueId :: Text
+        -- ^ Issue ID (e.g., "346")
+      , lsContainerId :: Text
+        -- ^ Container ID (e.g., "exomonad-agent-346")
+      }
+    -- ^ Generate subagent layout with docker attach command baked in
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON LayoutSpec
+instance FromJSON LayoutSpec
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -137,6 +155,13 @@ data Zellij r where
   GoToTab
     :: TabId
     -> Zellij (Either ZellijError ())
+
+  -- | Generate a Zellij layout file via zellij-gen.
+  -- Returns the path to the generated layout file on success.
+  -- This bakes commands into the layout as literals (env vars don't propagate to panes).
+  GenerateLayout
+    :: LayoutSpec
+    -> Zellij (Either ZellijError FilePath)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -197,3 +222,21 @@ goToTab
   => TabId
   -> Eff effs (Either ZellijError ())
 goToTab = send . GoToTab
+
+-- | Generate a Zellij layout file via zellij-gen.
+--
+-- This generates layouts with commands baked in as literals,
+-- which is necessary because environment variables don't propagate
+-- to pane processes spawned from layouts.
+--
+-- @
+-- result <- generateLayout (SubagentLayout "346" "exomonad-agent-346")
+-- case result of
+--   Right layoutPath -> -- use layoutPath in newTab
+--   Left err -> handleError err
+-- @
+generateLayout
+  :: Member Zellij effs
+  => LayoutSpec
+  -> Eff effs (Either ZellijError FilePath)
+generateLayout = send . GenerateLayout

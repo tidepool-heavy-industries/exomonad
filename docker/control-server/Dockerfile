@@ -23,16 +23,20 @@ COPY --from=haskell-builder /out/exomonad-control-server /usr/local/bin/exomonad
 COPY --from=rust-builder /app/rust/target/release/docker-ctl /usr/local/bin/docker-ctl
 COPY --from=rust-builder /app/rust/target/release/tui-spawner /usr/local/bin/tui-spawner
 COPY --from=rust-builder /app/rust/target/release/service-server /usr/local/bin/service-server
+COPY --from=rust-builder /app/rust/target/release/zellij-gen /usr/local/bin/zellij-gen
 
 # Verify binaries are executable
 RUN chmod +x /usr/local/bin/exomonad-control-server \
              /usr/local/bin/docker-ctl \
              /usr/local/bin/tui-spawner \
-             /usr/local/bin/service-server
+             /usr/local/bin/service-server \
+             /usr/local/bin/zellij-gen
 
 # Copy service-specific entrypoint wrapper
 COPY docker/control-server/entrypoint.sh /usr/local/bin/service-entrypoint.sh
 RUN chmod +x /usr/local/bin/service-entrypoint.sh
+
+# Note: Zellij layouts for subagent tabs are generated at runtime by zellij-gen
 
 # Environment (extends common-base)
 ENV EXOMONAD_CONTROL_SOCKET=/sockets/control.sock

@@ -38,7 +38,7 @@ import ExoMonad.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
 import ExoMonad.Effects.Worktree (Worktree, WorktreeSpec(..), WorktreePath(..), createWorktree, deleteWorktree, listWorktrees)
 
 import ExoMonad.Effects.FileSystem (FileSystem, fileExists, directoryExists)
-import ExoMonad.Effects.Zellij (Zellij, TabConfig(..), TabId(..), checkZellijEnv, newTab)
+import ExoMonad.Effects.Zellij (Zellij, TabConfig(..), TabId(..), LayoutSpec(..), checkZellijEnv, newTab, generateLayout)
 import ExoMonad.Effect.Log (Log, logInfo, logError, logWarn)
 import ExoMonad.Role (Role(..))
 import ExoMonad.Graph.Generic (AsHandler, type (:-))
@@ -410,28 +410,38 @@ processIssue spawnMode repoRoot wtBaseDir backend shortId = do
                                       if execRes.erExitCode == Just 0
                                         then do
                                           logInfo $ "[" <> shortId <> "] Health check passed"
-                                          let attachCmd = "docker attach --detach-keys 'ctrl-],]' " <> containerId.unContainerId
-                                              -- Pass command via SUBAGENT_CMD env var, use subagent layout
-                                              tabEnvVars = ("SUBAGENT_CMD", attachCmd) : envVars
-                                              tabConfig = TabConfig
-                                                {
-                                                  tcName = shortId
-                                                , tcLayout = "/etc/zellij/layouts/subagent.kdl"
-                                                , tcCwd = path
-                                                , tcEnv = tabEnvVars
-                                                , tcCommand = Nothing
-                                                }
-                                          tabRes <- newTab tabConfig
-                                          case tabRes of
-                                            Left err -> do
-                                              let errMsg = "Container spawned (" <> containerId.unContainerId <> ") but tab launch failed: " <> T.pack (show err)
+                                          -- Generate layout dynamically with zellij-gen
+                                          -- This bakes commands into the layout as literals (env vars don't propagate to panes)
+                                          logInfo $ "[" <> shortId <> "] Generating layout via zellij-gen"
+                                          genResult <- generateLayout $ SubagentLayout shortId containerId.unContainerId
+                                          case genResult of
+                                            Left genErr -> do
+                                              let errMsg = "Layout generation failed: " <> T.pack (show genErr)
                                               logError $ "[" <> shortId <> "] " <> errMsg
                                               emitProgress $ SpawnFailed shortId errMsg
                                               cleanupAll
                                               pure $ Left (shortId, errMsg)
-                                            Right tabId -> do
-                                              emitProgress $ TabLaunched shortId tabId
-                                              pure $ Right (shortId, path, tabId)
+                                            Right layoutPath -> do
+                                              logInfo $ "[" <> shortId <> "] Generated layout: " <> T.pack layoutPath
+                                              let tabConfig = TabConfig
+                                                    {
+                                                      tcName = shortId
+                                                    , tcLayout = layoutPath
+                                                    , tcCwd = path
+                                                    , tcEnv = envVars  -- No SUBAGENT_CMD needed - command baked into layout
+                                                    , tcCommand = Nothing
+                                                    }
+                                              tabRes <- newTab tabConfig
+                                              case tabRes of
+                                                Left err -> do
+                                                  let errMsg = "Container spawned (" <> containerId.unContainerId <> ") but tab launch failed: " <> T.pack (show err)
+                                                  logError $ "[" <> shortId <> "] " <> errMsg
+                                                  emitProgress $ SpawnFailed shortId errMsg
+                                                  cleanupAll
+                                                  pure $ Left (shortId, errMsg)
+                                                Right tabId -> do
+                                                  emitProgress $ TabLaunched shortId tabId
+                                                  pure $ Right (shortId, path, tabId)
                                         else do
                                           let exitText = maybe "unknown" (T.pack . show) execRes.erExitCode
                                               errMsg = "Health check failed (exit code " <> exitText <> "): " <> execRes.erStderr

@@ -115,8 +115,8 @@ WORKDIR /workspace
 # Entrypoint (init: true in docker-compose.yml provides signal handling)
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
-# Default command: launch Claude Code with bypassPermissions
-CMD ["claude", "--permission-mode", "bypassPermissions"]
+# Default command: launch Claude Code with bypassPermissions and full debug logging
+CMD ["claude", "--permission-mode", "bypassPermissions", "--debug", "--verbose"]
 
 # OCI label for version tracking (at end to not bust cache on GIT_SHA changes)
 ARG GIT_SHA=unknown
