@@ -41,7 +41,8 @@ COPY cabal.project ./
 # Actually, a better way is to use a separate stage for dependency fetching.
 COPY haskell/ ./haskell/
 COPY docker/base/generate-dummy-modules.sh ./
-RUN sed -i '/package zlib/,+2d' cabal.project
+RUN chmod +x ./generate-dummy-modules.sh && \
+    sed -i '/package zlib/,+2d' cabal.project
 
 RUN --mount=type=cache,target=/root/.local/state/cabal/store,sharing=locked \
     --mount=type=cache,target=/root/.cache/cabal,sharing=locked \
