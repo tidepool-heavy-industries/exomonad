@@ -67,7 +67,7 @@ pub enum HookEventType {
 ///
 /// Returns `Ok(())` on success. The function may call `std::process::exit()`
 /// with a non-zero code if the hook should be denied.
-pub fn handle_hook(event_type: HookEventType, runtime: Runtime, role: Role) -> Result<()> {
+pub async fn handle_hook(event_type: HookEventType, runtime: Runtime, role: Role) -> Result<()> {
     // Read hook payload from stdin
     let mut stdin_content = String::new();
     std::io::stdin()
@@ -112,7 +112,7 @@ pub fn handle_hook(event_type: HookEventType, runtime: Runtime, role: Role) -> R
     };
 
     // Connect to control server via Unix socket
-    let mut socket = match ControlSocket::connect(&path) {
+    let socket = match ControlSocket::connect(&path) {
         Ok(s) => s,
         Err(e) => {
             return handle_server_unavailable(
@@ -133,7 +133,9 @@ pub fn handle_hook(event_type: HookEventType, runtime: Runtime, role: Role) -> R
         role,
         container_id,
     };
-    let response = socket.send(&message)?;
+    
+    // Await the response (async)
+    let response = socket.send(&message).await?;
 
     // Handle response
     match response {
