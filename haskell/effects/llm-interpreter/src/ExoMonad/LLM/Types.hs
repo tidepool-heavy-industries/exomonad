@@ -1,6 +1,6 @@
 -- | LLM interpreter types - configuration and environment.
 --
--- Provides configuration for Anthropic and OpenAI API clients.
+-- Provides configuration for Anthropic API clients.
 --
 -- = See Also
 --
@@ -8,8 +8,6 @@
 -- * "ExoMonad.Tool.Wire" - Wire format types for tools
 --
 -- = Tool Schema Formats
---
--- Anthropic and OpenAI use different tool definition formats:
 --
 -- __Anthropic__ (used by native interpreter):
 --
@@ -20,20 +18,11 @@
 -- }
 -- @
 --
--- __OpenAI__ (used by CF AI, see "ExoMonad.Tool.Wire"):
---
--- @
--- { "type": "function",
---   "function": { "name": "search", "description": "...", "parameters": {...} }
--- }
--- @
---
 -- Tool wire types are now consolidated in "ExoMonad.Tool.Wire" and re-exported here.
 module ExoMonad.LLM.Types
   ( -- * Configuration
     LLMConfig(..)
   , AnthropicSecrets(..)
-  , OpenAISecrets(..)
   , defaultAnthropicConfig
 
     -- * Credential Newtypes (type-safe credentials)
@@ -41,6 +30,8 @@ module ExoMonad.LLM.Types
   , getApiKey
   , BaseUrl(..)
   , getBaseUrl
+  , Scheme(..)
+  , ParsedBaseUrl(..)
 
     -- * Environment
   , LLMEnv(..)
@@ -52,8 +43,15 @@ module ExoMonad.LLM.Types
     -- * Tool Definitions (re-exported from "ExoMonad.Tool.Wire")
   , AnthropicTool(..)
   , anthropicToolToJSON
+
+    -- * Anthropic Wire Types
+  , AnthropicRequest(..)
+  , AnthropicMessage(..)
+  , ToolChoice(..)
+  , ThinkingConfig(..)
   ) where
 
+import Data.Aeson (Value(..), ToJSON(..), FromJSON(..), object, (.=), withObject, (.:), (.:?))
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Network.HTTP.Client (Manager, newManager)
@@ -85,9 +83,20 @@ instance Show ApiKey where
 getApiKey :: ApiKey -> Text
 getApiKey (ApiKey t) = t
 
+-- | HTTP scheme.
+data Scheme = Http | Https
+  deriving stock (Eq, Show, Generic)
+
+-- | Parsed base URL.
+data ParsedBaseUrl = ParsedBaseUrl
+  { pbuScheme :: Scheme
+  , pbuHost   :: String
+  , pbuPort   :: Int
+  , pbuPath   :: String
+  }
+  deriving stock (Eq, Show, Generic)
+
 -- | Type-safe wrapper for API base URLs.
---
--- Prevents accidental confusion between URLs and other credentials.
 newtype BaseUrl = BaseUrl Text
   deriving stock (Eq, Show, Generic)
 
@@ -100,13 +109,9 @@ getBaseUrl (BaseUrl t) = t
 -- CONFIGURATION
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | LLM API configuration supporting HTTP and Unix Sockets.
+-- | LLM API configuration supporting Unix Sockets.
 data LLMConfig
-  = LLMHttpConfig
-      { lcAnthropicSecrets :: Maybe AnthropicSecrets
-      , lcOpenAISecrets    :: Maybe OpenAISecrets
-      }
-  | LLMSocketConfig
+  = LLMSocketConfig
       { lcSocketPath :: FilePath
       }
   deriving stock (Eq, Show, Generic)
@@ -115,14 +120,6 @@ data LLMConfig
 data AnthropicSecrets = AnthropicSecrets
   { asApiKey  :: ApiKey   -- ^ Type-safe API key (x-api-key header)
   , asBaseUrl :: BaseUrl  -- ^ Type-safe base URL (default: https://api.anthropic.com)
-  }
-  deriving stock (Eq, Show, Generic)
-
--- | OpenAI API secrets.
-data OpenAISecrets = OpenAISecrets
-  { osApiKey  :: ApiKey      -- ^ Type-safe API key (Authorization: Bearer)
-  , osBaseUrl :: BaseUrl     -- ^ Type-safe base URL (default: https://api.openai.com)
-  , osOrgId   :: Maybe Text  -- ^ Optional organization ID
   }
   deriving stock (Eq, Show, Generic)
 
@@ -145,15 +142,86 @@ data LLMEnv = LLMEnv
   , leManager :: Manager
   }
 
--- | Create a new environment (creates TLS manager if needed).
+-- | Create a new environment.
 mkLLMEnv :: LLMConfig -> IO LLMEnv
 mkLLMEnv config = case config of
-  LLMHttpConfig{} -> do
-    manager <- newManager tlsManagerSettings
-    pure LLMEnv { leConfig = config, leManager = manager }
   LLMSocketConfig{} -> do
-    -- Manager not used for socket connections, but kept for compatibility
     manager <- newManager tlsManagerSettings 
     pure LLMEnv { leConfig = config, leManager = manager }
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- ANTHROPIC WIRE TYPES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Anthropic Messages API request body.
+data AnthropicRequest = AnthropicRequest
+  { arModel       :: Text
+  , arMaxTokens   :: Int
+  , arMessages    :: [AnthropicMessage]
+  , arSystem      :: Maybe Text
+  , arTools       :: Maybe [Value]
+  , arToolChoice  :: Maybe ToolChoice
+  , arThinking    :: Maybe ThinkingConfig
+  }
+  deriving stock (Eq, Show, Generic)
+
+-- | Tool choice configuration for controlling tool use behavior.
+data ToolChoice
+  = ToolChoiceAuto
+  | ToolChoiceNone
+  | ToolChoiceAny
+  | ToolChoiceTool Text
+  deriving stock (Eq, Show, Generic)
+
+instance ToJSON ToolChoice where
+  toJSON ToolChoiceAuto = object ["type" .= ("auto" :: Text)]
+  toJSON ToolChoiceNone = object ["type" .= ("none" :: Text)]
+  toJSON ToolChoiceAny = object ["type" .= ("any" :: Text)]
+  toJSON (ToolChoiceTool name) = object
+    [ "type" .= ("tool" :: Text)
+    , "name" .= name
+    ]
+
+instance ToJSON AnthropicRequest where
+  toJSON req = object $ filter ((/= Null) . snd)
+    [ "model"      .= req.arModel
+    , "max_tokens" .= req.arMaxTokens
+    , "messages"   .= req.arMessages
+    , "system"     .= req.arSystem
+    , "tools"      .= req.arTools
+    , "tool_choice" .= req.arToolChoice
+    , "thinking"   .= req.arThinking
+    ]
+
+-- | A message in the conversation.
+data AnthropicMessage = AnthropicMessage
+  { amRole    :: Text
+  , amContent :: Text
+  }
+  deriving stock (Eq, Show, Generic)
+
+instance ToJSON AnthropicMessage where
+  toJSON msg = object
+    [ "role"    .= msg.amRole
+    , "content" .= msg.amContent
+    ]
+
+instance FromJSON AnthropicMessage where
+  parseJSON = withObject "AnthropicMessage" $ \v ->
+    AnthropicMessage <$> v .: "role" <*> v .: "content"
+
+-- | Thinking/extended thinking configuration.
+data ThinkingConfig = ThinkingConfig
+  { tcType        :: Text  -- ^ "enabled"
+  , tcBudgetTokens :: Int
+  }
+  deriving stock (Eq, Show, Generic)
+
+instance ToJSON ThinkingConfig where
+  toJSON cfg = object
+    [ "type"          .= cfg.tcType
+    , "budget_tokens" .= cfg.tcBudgetTokens
+    ]
 
 

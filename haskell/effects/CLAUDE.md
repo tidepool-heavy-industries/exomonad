@@ -11,13 +11,11 @@ This follows the **interpreter design pattern**: abstract syntax (effect types) 
 | Understand LLM API calls | `llm-interpreter/CLAUDE.md` |
 | Query Haskell types from an agent | `ghci-interpreter/CLAUDE.md` |
 | Work with GitHub issues/PRs | `github-interpreter/CLAUDE.md` |
-| Build agent UIs (WebSocket bridge) | `ui-interpreter/CLAUDE.md` |
 | Add code intelligence (LSP) | `lsp-interpreter/CLAUDE.md` |
 | Manage git worktrees | `worktree-interpreter/CLAUDE.md` |
 | Run just recipes | `justfile-interpreter/CLAUDE.md` |
 | Add Grafana observability | `observability-interpreter/CLAUDE.md` |
 | Run cabal builds/tests | `cabal-interpreter/CLAUDE.md` |
-| Add session logging | `devlog-interpreter/CLAUDE.md` |
 | Add gamification (Habitica) | `habitica-interpreter/CLAUDE.md` |
 | Create Zellij tabs (parallel agents) | `zellij-interpreter/CLAUDE.md` |
 | Spawn/exec in containers | `control-server/Effects/DockerCtl.hs` |
@@ -27,16 +25,14 @@ This follows the **interpreter design pattern**: abstract syntax (effect types) 
 
 ```
 effects/CLAUDE.md  ← YOU ARE HERE (router)
-├── llm-interpreter/CLAUDE.md           ← Anthropic/OpenAI API
+├── llm-interpreter/CLAUDE.md           ← Anthropic API
 ├── lsp-interpreter/CLAUDE.md           ← Language server protocol
 ├── ghci-interpreter/CLAUDE.md          ← GHCi oracle client
 ├── github-interpreter/CLAUDE.md        ← gh CLI for issues/PRs
-├── ui-interpreter/CLAUDE.md            ← WebSocket UI bridge
 ├── observability-interpreter/CLAUDE.md ← Grafana Loki & Tempo
 ├── worktree-interpreter/CLAUDE.md      ← Git worktree management
 ├── justfile-interpreter/CLAUDE.md      ← Justfile recipe execution
 ├── cabal-interpreter/CLAUDE.md         ← Build & test integration
-├── devlog-interpreter/CLAUDE.md        ← Session-scoped logging
 ├── habitica-interpreter/CLAUDE.md      .. Gamification API
 ├── env-interpreter/CLAUDE.md           ← Environment variable access
 ├── filesystem-interpreter/CLAUDE.md    ← File system operations
@@ -59,17 +55,15 @@ Most effect types live in `dsl/core/src/ExoMonad/Effect/Types.hs` or `Effects/*.
 
 | Effect | Types | Interpreter | Implementation |
 |--------|-------|-------------|----------------|
-| LLM | dsl/core | llm-interpreter | HTTP (Anthropic/OpenAI) |
+| LLM | dsl/core | llm-interpreter | Socket (preferred) |
 | LSP | dsl/core | lsp-interpreter | lsp-client library |
 | Habitica | effects/habitica | habitica-interpreter | HTTP API |
-| UI | dsl/core | ui-interpreter | WebSocket bridge |
 | Observability | dsl/core | observability-interpreter | OTLP/Loki push |
 | GHCi | dsl/core | ghci-interpreter | ghci-oracle client |
 | GitHub | dsl/core | github-interpreter | gh CLI subprocess |
 | Worktree | dsl/core | worktree-interpreter | Git subprocess |
 | Cabal | dsl/core | cabal-interpreter | Cabal CLI subprocess |
 | Justfile | dsl/core | justfile-interpreter | just CLI subprocess |
-| DevLog | dsl/core | devlog-interpreter | File IO |
 | Env | dsl/core | env-interpreter | Environment variables |
 | Filesystem | dsl/core | filesystem-interpreter | File system operations |
 | Gemini | dsl/core | gemini-interpreter | Gemini API |
@@ -87,15 +81,13 @@ Most effect types live in `dsl/core/src/ExoMonad/Effect/Types.hs` or `Effects/*.
    ```
 3. Implement interpreter (see existing for patterns)
 4. Add to `cabal.project`: `haskell/effects/{name}-interpreter`
-5. Wire into `native-server/` effect composition
+5. Wire into `control-server/` effect composition
 
 ## Implementation Patterns
 
-- **HTTP clients**: llm, habitica, github, observability
+- **HTTP clients**: habitica, github, observability
 - **Subprocesses**: worktree, cabal, docker-ctl
-- **Socket clients**: ghci, lsp
-- **WebSocket bridge**: ui
-- **File IO**: devlog
+- **Socket clients**: ghci, lsp, llm
 
 ## Claude Code Integration
 
