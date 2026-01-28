@@ -159,6 +159,126 @@ else
     echo "Using existing/linked settings.json"
 fi
 
+# 2.4 Create Gemini Adapter Script
+# Maps Gemini's hook payload structure to the Claude Code structure expected by exomonad
+cat > /usr/local/bin/gemini-adapter.js <<'JS_EOF'
+#!/usr/bin/env node
+const fs = require('fs');
+const { spawn } = require('child_process');
+
+// Read stdin
+const chunks = [];
+process.stdin.on('data', chunk => chunks.push(chunk));
+process.stdin.on('end', () => {
+  try {
+    const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    
+    // Transform Payload
+    // Gemini: "hook_event_name": "BeforeTool" (or similar), "tool_parameters": {...}
+    // Claude: "hook_event_name": "PreToolUse", "tool_input": {...}
+    
+    // Normalize Event Name
+    if (input.hook_event_name === 'BeforeTool' || input.hook_event_name === 'BeforeToolSelection') {
+        input.hook_event_name = 'PreToolUse';
+    }
+    
+    // Normalize Tool Parameters
+    if (input.tool_parameters && !input.tool_input) {
+        input.tool_input = input.tool_parameters;
+    }
+    
+    // Spawn exomonad
+    const exomonad = spawn('exomonad', ['hook', 'pre-tool-use', '--runtime=gemini'], {
+        stdio: ['pipe', 'inherit', 'inherit']
+    });
+    
+    exomonad.stdin.write(JSON.stringify(input));
+    exomonad.stdin.end();
+    
+    exomonad.on('close', (code) => {
+        process.exit(code);
+    });
+    
+  } catch (err) {
+    console.error('Gemini Adapter Error:', err);
+    process.exit(1);
+  }
+});
+JS_EOF
+chmod +x /usr/local/bin/gemini-adapter.js
+
+# 2.5 Configure Gemini hooks & MCP
+GEMINI_CONFIG_DIR="/home/agent/.gemini"
+if [ ! -f "$GEMINI_CONFIG_DIR/settings.json" ]; then
+    echo "Creating default Gemini settings with hooks..."
+    mkdir -p "$GEMINI_CONFIG_DIR"
+
+    # Prepare MCP config fragment if URL is available
+    MCP_CONFIG=""
+    if [ -n "${CONTROL_SERVER_URL:-}" ]; then
+        echo "Adding Gemini MCP config for: ${CONTROL_SERVER_URL}/role/${ROLE}/mcp"
+        MCP_CONFIG=",
+  \"mcpServers\": {
+    \"exomonad\": {
+      \"type\": \"http\",
+      \"url\": \"${CONTROL_SERVER_URL}/role/${ROLE}/mcp\"
+    }
+  }"
+    fi
+
+    cat > "$GEMINI_CONFIG_DIR/settings.json" <<EOF
+{
+  "hooks": {
+    "startup": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "exomonad hook session-start --runtime=gemini"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "exomonad hook session-start --runtime=gemini"
+          }
+        ]
+      }
+    ],
+    "BeforeTool": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gemini-adapter.js",
+            "timeout": 300
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gemini-adapter.js",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }${MCP_CONFIG}
+}
+EOF
+    chown -R agent:agent "$GEMINI_CONFIG_DIR"
+fi
+
 # 3. Configure MCP
 # ROLE and AGENT_WORKSPACE already defined above during repo init
 # Subagents might already have .mcp.json written by SpawnAgents to their worktree root.
