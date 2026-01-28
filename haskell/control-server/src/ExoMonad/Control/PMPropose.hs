@@ -10,7 +10,7 @@
 
 -- | PM Propose tool (Tier 1) as Graph DSL node.
 --
--- Enables PMs to propose new beads with intent-level details.
+-- Enables PMs to propose new issues with intent-level details.
 module ExoMonad.Control.PMPropose
   ( -- * PM Propose Graph
     PMProposeGraph(..)

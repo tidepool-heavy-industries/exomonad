@@ -6,7 +6,6 @@ module ExoMonad.Effect.Decision.Types
     Decision(..)
     -- * Context and Tracing
   , DecisionContext(..)
-  , BeadSummary(..)
   , DecisionTrace(..)
   ) where
 
@@ -20,22 +19,12 @@ import GHC.Generics (Generic)
 -- Used by the decision effect/TUI wrapper to represent standard
 -- choices available to users or supervisors during agent execution.
 data Decision
-  = SelectBead Text
-    -- ^ Select a specific bead ID to focus on.
-  | ProvideGuidance Text
+  = ProvideGuidance Text
     -- ^ Provide textual guidance or instructions.
   | Abort
     -- ^ Abort the current operation or flow.
   | Continue
     -- ^ Continue with the current plan/flow.
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
--- | Summary of a bead for decision context.
-data BeadSummary = BeadSummary
-  { bsId :: Text
-  , bsTitle :: Text
-  , bsPriority :: Int
-  }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- | Context provided to a decision request.
@@ -44,8 +33,6 @@ data BeadSummary = BeadSummary
 data DecisionContext = DecisionContext
   { dcPrompt :: Text
     -- ^ Main prompt or question for the decision.
-  , dcReadyBeads :: [BeadSummary]
-    -- ^ List of beads that are ready for selection.
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 

@@ -7,7 +7,6 @@ module ExoMonad.Effect.Decision
   , requestDecision
     -- * Context and Tracing
   , DecisionContext(..)
-  , BeadSummary(..)
   , DecisionTrace(..)
   ) where
 
@@ -28,26 +27,15 @@ import ExoMonad.Effect.Types (Time, Log, DecisionLog, getCurrentTime, logInfoWit
 -- and logs the resulting decision via the Log and DecisionLog effects.
 requestDecision :: (Member TUI r, Member Time r, Member Log r, Member DecisionLog r) => DecisionContext -> Eff r Decision
 requestDecision ctx = do
-  let beadLabels = map (\b ->
-        let icon = case b.bsPriority of
-              0 -> "🔴"
-              1 -> "🟡"
-              2 -> "🔵"
-              _ -> "⚪"
-        in icon <> " [" <> b.bsId <> "] " <> b.bsTitle) ctx.dcReadyBeads
-
   let ui = PopupDefinition
         { pdTitle = "Decision Required"
         , pdComponents =
             [ mkText "prompt" ctx.dcPrompt Nothing
-            ] ++
-            (if null ctx.dcReadyBeads then []
-             else [ mkChoice "bead_selection" "Select a bead" beadLabels Nothing Nothing ]) ++
-            [ mkTextbox "guidance" "Or provide guidance" (Just "Enter custom guidance...") Nothing Nothing
+            , mkTextbox "guidance" "Or provide guidance" (Just "Enter custom guidance...") Nothing Nothing
             ]
         }
 
-  let options = beadLabels ++ [ "Continue", "Abort", "Provide Guidance" ]
+  let options = [ "Continue", "Abort", "Provide Guidance" ]
 
   start <- getCurrentTime
   result <- showUI ui
@@ -62,19 +50,7 @@ requestDecision ctx = do
       -- Check if guidance was provided
       case lookupValue "guidance" result.prValues of
         Just (A.String val) | not (T.null val) -> pure $ ProvideGuidance val
-        _ -> do
-          -- Check if a bead was selected
-          case lookupValue "bead_selection" result.prValues of
-            Just (A.String selectedLabel) -> do
-              -- Extract bead ID from the label (format: "icon [ID] Title")
-              -- More robust parsing: split on "[", then find "]" in the remainder
-              case T.breakOn "[" selectedLabel of
-                (_, remainder) | not (T.null remainder) ->
-                  case T.breakOn "]" (T.tail remainder) of
-                    (beadId, _) | not (T.null beadId) -> pure $ SelectBead beadId
-                    _ -> pure Continue
-                _ -> pure Continue
-            _ -> pure Continue
+        _ -> pure Continue
     "decline" -> pure Abort
     _ -> requestDecision ctx
 

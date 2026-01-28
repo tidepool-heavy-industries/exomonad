@@ -23,7 +23,7 @@ rust/.cargo
 /worktrees
 /runtime/bin
 /.exomonad
-/.beads
+
 /.zellij
 typescript/*/node_modules
 deploy/node_modules

@@ -22,4 +22,4 @@ exoStatusLogic
   :: (Member Git es, Member GitHub es)
   => ExoStatusArgs
   -> Eff es ExoStatusResult
-exoStatusLogic args = getDevelopmentContext args.esaBeadId
+exoStatusLogic _args = getDevelopmentContext Nothing

@@ -290,7 +290,7 @@ data CommitDetails = CommitDetails
 
 ## Interpreter Implementation
 
-Follow the BD interpreter pattern:
+Follow the standard interpreter pattern:
 
 ```haskell
 -- | Run Git effects using git CLI.
@@ -338,7 +338,7 @@ gitCmd args = do
     ExitFailure _ -> Left (T.pack stderr)
 ```
 
-This matches the BD interpreter pattern and is sufficient for chiton-spawn context construction.
+This matches the standard interpreter pattern and is sufficient for chiton-spawn context construction.
 
 ## References
 

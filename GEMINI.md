@@ -62,7 +62,7 @@ Spawning multiple subagents creates a linear increase in resource consumption.
 
 The `spawn_agents` tool includes several safety checks to prevent common failures:
 1.  **Binary Check**: Verifies `exomonad-control-server` exists in the runtime path before creating a worktree.
-3.  **Path Traversal**: Rejects bead IDs containing `/` or `..` to prevent arbitrary file system writes.
+3.  **Path Traversal**: Rejects issue IDs containing `/` or `..` to prevent arbitrary file system writes.
 4.  **Env Var Validation**: Ensures critical environment variables (like `EXOMONAD_ROOT`) are not empty before spawning the agent.
 
 

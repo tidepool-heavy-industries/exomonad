@@ -403,12 +403,12 @@ instance FromJSON ControlResponse where
 -- === NotFound (-32001)
 -- Resource does not exist or could not be found.
 --
--- Example: Bead not found, binary missing, symbol not found in codebase
+-- Example: Issue not found, binary missing, symbol not found in codebase
 --
 -- === InvalidInput (-32002)
 -- Arguments failed validation. Caller should fix the input.
 --
--- Example: Invalid bead ID (contains path separators), empty env vars, malformed JSON
+-- Example: Invalid Issue ID (contains path separators), empty env vars, malformed JSON
 --
 -- === ExternalFailure (-32003)
 -- External subprocess or I/O operation failed.
@@ -418,7 +418,7 @@ instance FromJSON ControlResponse where
 -- === StateError (-32004)
 -- Operation cannot proceed due to invalid state (not invalid input).
 --
--- Example: Bead is blocked, worktree already exists, conflict in state
+-- Example: Issue is blocked, worktree already exists, conflict in state
 --
 -- === EnvironmentError (-32005)
 -- Missing or invalid environment configuration.
@@ -450,15 +450,15 @@ errorCodeValue PermissionDenied = -32006
 --
 -- 1. Validation error (InvalidInput):
 --    { "code": -32002
---    , "message": "Invalid spawn_agents arguments: bead_id contains path separators"
---    , "suggestion": "Use bead ID without slashes, e.g. 'm1j' instead of 'bd-m1j/'"
+--    , "message": "Invalid spawn_agents arguments: issue_id contains path separators"
+--    , "suggestion": "Use Issue ID without slashes, e.g. '123' instead of 'gh-123/'"
 --    }
 --
 -- 2. Not found error (NotFound):
 --    { "code": -32001
---    , "message": "Bead exomonad-xyz not found"
---    , "details": { "searched_in": ".beads/beads.jsonl" }
---    , "suggestion": "Use 'bd list' to see available beads"
+--    , "message": "Issue #123 not found"
+--    , "details": { "searched_in": "GitHub API" }
+--    , "suggestion": "Use 'gh_issue_list' to see available issues"
 --    }
 --
 -- 3. External failure (ExternalFailure):
@@ -471,7 +471,7 @@ errorCodeValue PermissionDenied = -32006
 -- 4. State error (StateError):
 --    { "code": -32004
 --    , "message": "Worktree already exists"
---    , "details": { "path": "worktrees/bd-m1j-..." }
+--    , "details": { "path": "worktrees/gh-123-..." }
 --    , "suggestion": "Delete existing worktree or use Zellij tabs instead"
 --    }
 --

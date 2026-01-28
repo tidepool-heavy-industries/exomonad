@@ -15,10 +15,10 @@ import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(.
 
 -- | Arguments for exo_status tool.
 data ExoStatusArgs = ExoStatusArgs
-  { esaBeadId :: Maybe Text  -- ^ Optional bead ID. If not provided, inferred from branch.
+  { esaVerbose :: Maybe Bool
   }
   deriving stock (Show, Eq, Generic)
 
 $(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "esa" } ''ExoStatusArgs
-  [ 'esaBeadId ?? "Optional bead ID (e.g. exomonad-huj). If omitted, inferred from branch name."
+  [ 'esaVerbose ?? "Optional verbose output."
   ])

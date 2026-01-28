@@ -152,4 +152,4 @@ grep '^{"text":' training.jsonl > training-clean.jsonl
 
 ## Contact
 
-Questions or issues: File a bead in `.beads/` with prefix `training-`
+Questions or issues: File an issue with prefix `training-`

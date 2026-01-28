@@ -40,7 +40,7 @@ import GHC.Generics (Generic)
 -- | Information about the current git worktree or repo.
 data WorktreeInfo = WorktreeInfo
   { wiName       :: Text
-    -- ^ Worktree name (e.g., "bd", "native-server").
+    -- ^ Worktree name (e.g., "gh-123", "native-server").
     -- For main repo, this is "main".
   , wiPath       :: FilePath
     -- ^ Absolute path to the worktree root.

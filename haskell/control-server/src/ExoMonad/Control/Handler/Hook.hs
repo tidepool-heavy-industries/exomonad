@@ -6,9 +6,9 @@
 -- | Hook event handler.
 --
 -- Handles hook events from Claude Code via exomonad.
--- Most hooks are passthrough, but some execute effect logic:
+-- Hooks are passthrough, but some execute effect logic:
 --
--- * SessionStart: Injects bead context when on a bd-* branch
+-- * SessionStart: Injects issue context when on a gh-* branch
 -- * Stop: Enforces PR filing with templated guidance + auto-focus on subagent error
 module ExoMonad.Control.Handler.Hook
   ( handleHook
@@ -189,7 +189,7 @@ handlePreToolUse config input = do
         { hookSpecificOutput = Just $ PreToolUseOutput "ask" reason Nothing
         }
 
--- | Handle SessionStart hook: inject bead context.
+-- | Handle SessionStart hook: inject issue context.
 handleSessionStart :: Tracer -> Role -> HookInput -> IO ControlResponse
 handleSessionStart tracer role input = do
   TIO.putStrLn "  [HOOK] Running SessionStart context injection..."
@@ -390,7 +390,7 @@ autoFocusOnSubagentStop = do
           hFlush stdout
         Right () -> pure ()
 
--- | Auto-focus logic: check Zellij, parse bead ID, switch focus.
+-- | Auto-focus logic: check Zellij, parse issue ID, switch focus.
 autoFocusLogic :: (Member Zellij es, Member Git es) => Eff es ()
 autoFocusLogic = do
   mZellij <- checkZellijEnv
@@ -403,22 +403,13 @@ autoFocusLogic = do
         Just wt -> do
           let branchName = wt.wiBranch
               maybeIssueNum = parseIssueNumber branchName
-              maybeBeadId = T.pack . show <$> maybeIssueNum
-          case maybeBeadId of
+              maybeIssueId = T.pack . show <$> maybeIssueNum
+          case maybeIssueId of
             Nothing -> pure ()
             Just bid -> do
-              -- Focus on tab with bead ID name
+              -- Focus on tab with Issue ID name
               _ <- goToTab (TabId bid)
               pure ()
-          case maybeBeadId of
-            Nothing -> pure ()
-            Just beadId -> do
-              let tabName = T.stripPrefix "exomonad-" beadId
-              case tabName of
-                Nothing -> pure ()
-                Just shortId -> do
-                  _ <- goToTab (TabId shortId)
-                  pure ()
 
 -- | Create appropriate response based on hook type.
 makeResponse :: Text -> HookInput -> HookOutput

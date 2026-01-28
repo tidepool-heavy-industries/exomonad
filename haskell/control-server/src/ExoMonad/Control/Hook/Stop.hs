@@ -5,7 +5,7 @@
 -- | Stop hook logic with rich state detection and templated prompting.
 --
 -- Gathers git state (dirty files, commits ahead, PR status), runs pre-commit
--- checks, and optionally closes beads. Renders a Jinja template that provides
+-- checks, and optionally closes issues. Renders a Jinja template that provides
 -- actionable guidance to the agent.
 --
 -- This module integrates the logic from exo_complete and pre_commit_check tools

@@ -3,7 +3,7 @@
 
 -- | SessionStart hook implementation.
 --
--- Injects bead context at session start when on a bd-* branch.
+-- Injects issue context at session start when on a gh-* branch.
 -- Uses typed Jinja template for consistent formatting.
 module ExoMonad.Control.Hook.SessionStart
   ( -- * Logic
@@ -45,8 +45,8 @@ data SessionStartTpl
 sessionStartDevCompiled :: TypedTemplate SessionStartContext SourcePos
 sessionStartDevCompiled = $(typedTemplateFile ''SessionStartContext "templates/hook/session-start-dev.jinja")
 
-sessionStartDevNoBeadCompiled :: TypedTemplate SessionStartContext SourcePos
-sessionStartDevNoBeadCompiled = $(typedTemplateFile ''SessionStartContext "templates/hook/session-start-dev-no-bead.jinja")
+sessionStartDevNoIssueCompiled :: TypedTemplate SessionStartContext SourcePos
+sessionStartDevNoIssueCompiled = $(typedTemplateFile ''SessionStartContext "templates/hook/session-start-dev-no-issue.jinja")
 
 sessionStartTLCompiled :: TypedTemplate SessionStartContext SourcePos
 sessionStartTLCompiled = $(typedTemplateFile ''SessionStartContext "templates/hook/session-start-tl.jinja")
@@ -121,7 +121,7 @@ sessionStartLogic tracer role cwdPath = do
       -- Select template based on issue availability
       let template = if isJust mIssue
                      then sessionStartDevCompiled
-                     else sessionStartDevNoBeadCompiled
+                     else sessionStartDevNoIssueCompiled
 
       let rendered = runTypedTemplate ctx template
       pure $ Just rendered

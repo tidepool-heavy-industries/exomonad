@@ -155,7 +155,7 @@ processIssue spawnMode repoRoot wtBaseDir backend shortId = do
           mBinDirEnv <- getEnv "EXOMONAD_BIN_DIR"
           let binDir = case (spawnMode, mBinDirEnv) of
                 (SpawnZellij, _) -> Paths.runtimeBinDir repoRoot
-                (_, Just bd)  -> T.unpack bd
+                (_, Just binDirVal)  -> T.unpack binDirVal
                 _             -> "/usr/local/bin"
 
           -- Early validation: Check for binary existence
@@ -272,7 +272,7 @@ processIssue spawnMode repoRoot wtBaseDir backend shortId = do
 
                           -- Skip bootstrapExoMonad - subagents use shared control-server
                           -- entrypoint.sh writes .mcp.json based on CONTROL_SERVER_URL
-                          -- Issue context comes from GitHub (no bead.md needed)
+                          -- Issue context comes from GitHub (no context file needed)
 
                           -- c. Launch agent (Zellij or Docker)
                           res <- case spawnMode of
