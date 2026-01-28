@@ -22,32 +22,32 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# 1. Update cabal index (separate step, cached independently)
-#    Must mount state dir since that's where the package index lives in cabal 3.x
-RUN --mount=type=cache,target=/root/.local/state/cabal,sharing=locked \
-    --mount=type=cache,target=/root/.cache/cabal,sharing=locked \
-    cabal update
-
-# Configure cabal to use lld for faster linking
-# Use XDG-style config path that modern cabal prefers
+# Create cabal config with Hackage repository and lld linker settings
+# (slim image doesn't have pre-existing config)
 RUN mkdir -p /root/.config/cabal && \
-    echo "program-default-options" >> /root/.config/cabal/config && \
-    echo "  ghc-options: -optl-fuse-ld=lld" >> /root/.config/cabal/config
+    cat > /root/.config/cabal/config <<'EOF'
+repository hackage.haskell.org
+  url: http://hackage.haskell.org/
 
-# 2. Copy dependency manifests (cabal files + freeze)
+program-default-options
+  ghc-options: -optl-fuse-ld=lld
+EOF
+
+# 1. Copy dependency manifests (cabal files + freeze)
 COPY cabal.project cabal.project.freeze ./
 COPY haskell/ ./haskell/
 
 # Remove Nix-specific zlib configuration (paths don't exist in Docker)
 RUN sed -i '/package zlib/,+2d' cabal.project
 
-# 3. Build dependencies only (expensive, but cached via mount + freeze file)
+# 2. Build dependencies only (expensive, but cached via mount + freeze file)
 #    The freeze file ensures deterministic Unit IDs for cache hits
-RUN --mount=type=cache,target=/root/.local/state/cabal/store,sharing=locked \
+#    cabal update ensures package index is available (cache mounts don't persist between RUN instructions reliably)
+RUN --mount=type=cache,target=/root/.local/state/cabal,sharing=locked \
     --mount=type=cache,target=/root/.cache/cabal,sharing=locked \
-    cabal build --only-dependencies all -j --ghc-options=-O1
+    cabal update && cabal build --only-dependencies all -j --ghc-options=-O1
 
-# 4. Copy full source (invalidates only if source changes)
+# 3. Copy full source (invalidates only if source changes)
 #    This is a no-op if haskell/ hasn't changed, but ensures we have real source
 COPY haskell/ ./haskell/
 
@@ -55,11 +55,12 @@ COPY haskell/ ./haskell/
 ARG GIT_SHA
 ENV EXOMONAD_GIT_SHA=${GIT_SHA}
 
-# 5. Build application (uses cached deps from step 3)
-RUN --mount=type=cache,target=/root/.local/state/cabal/store,sharing=locked \
+# 4. Build application (uses cached deps from step 2)
+#    cabal update is fast if index already exists, ensures availability
+RUN --mount=type=cache,target=/root/.local/state/cabal,sharing=locked \
     --mount=type=cache,target=/root/.cache/cabal,sharing=locked \
     --mount=type=cache,target=/app/dist-newstyle,sharing=locked \
-    cabal build all -j --ghc-options=-O1
+    cabal update && cabal build all -j --ghc-options=-O1
 
 # Copy binary to known location (must happen outside cache mount)
 RUN --mount=type=cache,target=/app/dist-newstyle,sharing=locked \
