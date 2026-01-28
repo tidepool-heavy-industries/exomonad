@@ -91,4 +91,4 @@ clean:
 # Demo recipe for JustExec effect
 test-exec-demo:
     @echo "Running tests..."
-    @echo "{"status": "passed", "count": 42}"
+    @echo '{"status": "passed", "count": 42}'

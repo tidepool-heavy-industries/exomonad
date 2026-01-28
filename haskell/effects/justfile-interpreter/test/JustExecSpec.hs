@@ -6,13 +6,13 @@ module JustExecSpec (spec) where
 import Data.Aeson (eitherDecode, encode)
 import Test.Hspec
 
-import ExoMonad.Effect.JustExec
+import ExoMonad.Effects.JustExec
 
 spec :: Spec
 spec = do
   describe "JustExec ExecResult JSON" $ do
     it "round-trips ExecResult" $ do
-      let res = ExecResult 0 "stdout content" "stderr content"
+      let res = ExecResult "stdout content" "stderr content" 0
           encoded = encode res
       case eitherDecode encoded of
         Left err -> expectationFailure $ "Failed to parse: " <> err

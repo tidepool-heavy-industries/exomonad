@@ -16,7 +16,7 @@ import Data.Text qualified as T
 import System.Exit (ExitCode(..))
 import System.Process (readProcessWithExitCode)
 
-import ExoMonad.Effect.JustExec (JustExec(..), ExecResult(..))
+import ExoMonad.Effects.JustExec (JustExec(..), ExecResult(..))
 
 -- | Run JustExec effects using docker-ctl.
 --
@@ -50,7 +50,7 @@ runDockerCtl cmd container recipe args = do
             -- docker-ctl failed to run (e.g. usage error), so it might not have printed JSON.
             pure $ ExecResult
               { exitCode = code
-              , stdout = ""
+              , stdout = T.pack out
               , stderr = T.pack err
               }
         ExitSuccess ->
