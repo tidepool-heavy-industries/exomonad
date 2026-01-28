@@ -73,46 +73,46 @@ heuristicScoreEdge ScoreEdgeInput{..} =
     -- Relevance heuristics: Score based on query intent matching edge type
     relQuery = case () of
       -- "What breaks?" -> References show impact
-      _ | "break" `T.isInfixOf` T.toLower seiQuery && seiEdgeType == Reference -> relevanceHigh
+      _ | "break" `T.isInfixOf` T.toLower query && edgeType == Reference -> relevanceHigh
       -- "Where is defined?" -> Definition is the answer
-      _ | "defined" `T.isInfixOf` T.toLower seiQuery && seiEdgeType == Definition -> relevanceHigh
+      _ | "defined" `T.isInfixOf` T.toLower query && edgeType == Definition -> relevanceHigh
       -- "Show usage" -> Usage edges are direct answers
-      _ | "usage" `T.isInfixOf` T.toLower seiQuery && seiEdgeType == Usage -> relevanceHigh
+      _ | "usage" `T.isInfixOf` T.toLower query && edgeType == Usage -> relevanceHigh
       -- Type family queries need type family context
-      _ | "type family" `T.isInfixOf` T.toLower seiQuery && "type family" `T.isInfixOf` T.toLower seiSourceHover -> relevanceHigh
+      _ | "type family" `T.isInfixOf` T.toLower query && "type family" `T.isInfixOf` T.toLower sourceHover -> relevanceHigh
       -- Constraint queries need TypeConstraint edges
-      _ | "constraint" `T.isInfixOf` T.toLower seiQuery && seiEdgeType == TypeConstraint -> relevanceHigh
+      _ | "constraint" `T.isInfixOf` T.toLower query && edgeType == TypeConstraint -> relevanceHigh
       -- Default: Assuming some relevance since LSP returned it
       _ -> relevanceMed
 
     -- Risk heuristics: Score based on code construct complexity
-    risk = case () of
+    riskScore = case () of
       -- Type families are brittle and affect compilation globally
-      _ | "type family" `T.isInfixOf` T.toLower seiSourceHover -> riskExtreme
+      _ | "type family" `T.isInfixOf` T.toLower sourceHover -> riskExtreme
       -- Case expressions imply logic branching which is risky to modify
-      _ | "case" `T.isInfixOf` T.toLower seiSourceHover -> riskHigh
+      _ | "case" `T.isInfixOf` T.toLower sourceHover -> riskHigh
       -- Data definitions change memory layout/serialisation
-      _ | "data" `T.isInfixOf` T.toLower seiSourceHover -> riskMed
+      _ | "data" `T.isInfixOf` T.toLower sourceHover -> riskMed
       -- Default: Standard code is relatively safe
       _ -> riskLow
 
     -- Boolean flags extraction
-    isExhaustive = "case" `T.isInfixOf` T.toLower seiSourceHover || "match" `T.isInfixOf` T.toLower seiSourceHover
-    isTypeFamily = "type family" `T.isInfixOf` T.toLower seiSourceHover || "type instance" `T.isInfixOf` T.toLower seiTargetHover
-    isExported = not ("Internal" `T.isInfixOf` seiSourceFile) && not ("_" `T.isPrefixOf` seiSourceFile)
+    isExhaustive = "case" `T.isInfixOf` T.toLower sourceHover || "match" `T.isInfixOf` T.toLower sourceHover
+    isTypeFamily = "type family" `T.isInfixOf` T.toLower sourceHover || "type instance" `T.isInfixOf` T.toLower targetHover
+    isExported = not ("Internal" `T.isInfixOf` sourceFile) && not ("_" `T.isPrefixOf` sourceFile)
 
     reasoning = T.unwords
       [ if relQuery >= 4 then "Highly relevant" else "Moderately relevant"
       , "to the query."
-      , if risk >= 4 then "High structural risk." else "Low risk."
+      , if riskScore >= 4 then "High structural risk." else "Low risk."
       , if isExhaustive then "Found pattern matching." else ""
       ]
 
   in ScoreEdgeOutput
-    { seoRelevance    = relQuery
-    , seoRisk         = risk
-    , seoReasoning    = T.strip reasoning
-    , seoIsExhaustive = isExhaustive
-    , seoIsTypeFamily = isTypeFamily
-    , seoIsExported   = isExported
+    { relevance    = relQuery
+    , risk         = riskScore
+    , reasoning    = T.strip reasoning
+    , isExhaustive = isExhaustive
+    , isTypeFamily = isTypeFamily
+    , isExported   = isExported
     }

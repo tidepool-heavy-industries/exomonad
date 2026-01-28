@@ -5,6 +5,7 @@ import Test.Tasty.HUnit
 import Data.Maybe (isJust)
 import qualified Data.Text as T
 import Control.Monad.Freer (Eff, runM, interpret)
+import OpenTelemetry.Trace (Tracer, createTracer, getGlobalTracerProvider, instrumentationLibrary)
 
 import ExoMonad.Control.Hook.SessionStart
 import ExoMonad.Control.RoleConfig (Role(..))
@@ -44,22 +45,27 @@ fromJust :: Maybe a -> a
 fromJust (Just a) = a
 fromJust Nothing = error "fromJust: Nothing"
 
+import OpenTelemetry.Trace (Tracer, createTracer, getGlobalTracerProvider, instrumentationLibrary)
+
 -- | Mock GitHub interpreter
 runMockGitHub :: Eff (GitHub ': effs) a -> Eff effs a
 runMockGitHub = interpret $ \case
-  GetIssue _ _ _ -> pure Nothing
-  ListIssues _ _ -> pure []
-  CreateIssue _ -> pure 1
-  UpdateIssue _ _ _ -> pure ()
-  CloseIssue _ _ -> pure ()
-  ReopenIssue _ _ -> pure ()
-  AddIssueLabel _ _ _ -> pure ()
-  RemoveIssueLabel _ _ _ -> pure ()
+  GetIssue _ _ _ -> pure $ Right Nothing
+  ListIssues _ _ -> pure $ Right []
+  CreateIssue _ -> pure $ Right 1
+  UpdateIssue _ _ _ -> pure $ Right ()
+  CloseIssue _ _ -> pure $ Right ()
+  ReopenIssue _ _ -> pure $ Right ()
+  AddIssueLabel _ _ _ -> pure $ Right ()
+  RemoveIssueLabel _ _ _ -> pure $ Right ()
   -- GetRepo removed
 
 runSessionStart :: Role -> T.Text -> IO (Maybe T.Text)
-runSessionStart role cwd = runM
-  $ runLog Error
-  $ runMockGitHub
-  $ runGitIO
-  $ sessionStartLogic role cwd
+runSessionStart role cwd = do
+  tp <- getGlobalTracerProvider
+  let tracer = createTracer tp $ instrumentationLibrary "test" "0.0.1"
+  runM
+    $ runLog Error
+    $ runMockGitHub
+    $ runGitIO
+    $ sessionStartLogic tracer role cwd

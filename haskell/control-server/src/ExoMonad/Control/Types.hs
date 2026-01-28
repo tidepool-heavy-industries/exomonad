@@ -4,6 +4,7 @@ module ExoMonad.Control.Types
   ) where
 
 import Data.Text (Text)
+import GHC.Generics (Generic)
 
 import ExoMonad.Observability.Types (ObservabilityConfig)
 import ExoMonad.Control.OpenObserve (OpenObserveConfig)
@@ -38,4 +39,4 @@ data ServerConfig = ServerConfig
     -- ^ Optional LLM configuration (HTTP or Socket)
   , githubConfig :: Maybe GitHubConfig
     -- ^ Optional GitHub configuration (CLI or Socket)
-  }
+  } deriving (Generic)

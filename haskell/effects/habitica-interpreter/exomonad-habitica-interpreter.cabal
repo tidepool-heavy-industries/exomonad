@@ -36,3 +36,6 @@ library
         OverloadedStrings
         TypeApplications
         TypeOperators
+        OverloadedRecordDot
+        NoFieldSelectors
+        DuplicateRecordFields

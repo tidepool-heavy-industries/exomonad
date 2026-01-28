@@ -73,9 +73,9 @@ import ExoMonad.Control.Role.Types (RoleMetadata, AsSchema)
 
 -- | Schema for an MCP server, extracted from a server record in AsSchema mode.
 data ServerSchema = ServerSchema
-  { ssDescription :: Text
+  { description :: Text
     -- ^ Human-readable server description
-  , ssTools :: [MCPToolInfo]
+  , tools :: [MCPToolInfo]
     -- ^ List of tools provided by this server
   } deriving (Show, Eq)
 
@@ -99,10 +99,10 @@ instance ( Generic (server AsSchema es)
          )
       => ReifyServer server es where
   reifyServer srv =
-    let (desc, tools) = gReifyServerFields (from srv)
+    let (desc, toolList) = gReifyServerFields (from srv)
     in ServerSchema
-      { ssDescription = desc
-      , ssTools = tools
+      { description = desc
+      , tools = toolList
       }
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -168,9 +168,9 @@ instance {-# OVERLAPPABLE #-} GReifyServerField name fieldType where
 
 -- | Schema for a role, extracted from a role record in AsSchema mode.
 data RoleSchema = RoleSchema
-  { rsMetadata :: RoleMetadata
+  { metadata :: RoleMetadata
     -- ^ Role identity information
-  , rsServers :: [(Text, ServerSchema)]
+  , servers :: [(Text, ServerSchema)]
     -- ^ Named servers belonging to this role
   } deriving (Show, Eq)
 
@@ -194,10 +194,10 @@ instance ( Generic (roleRec AsSchema es)
          )
       => ReifyRole roleRec es where
   reifyRole r =
-    let (meta, servers) = gReifyRoleFields (from r)
+    let (meta, serverList) = gReifyRoleFields (from r)
     in RoleSchema
-      { rsMetadata = meta
-      , rsServers = servers
+      { metadata = meta
+      , servers = serverList
       }
 
 -- ════════════════════════════════════════════════════════════════════════════

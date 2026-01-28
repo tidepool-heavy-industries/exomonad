@@ -57,7 +57,7 @@ instance FromJSON CbStatusArgs where
 
 instance ToJSON CbStatusArgs where
   toJSON args = object
-    [ "filter_session" .= filterSession args
+    [ "filter_session" .= args.filterSession
     ]
 
 data CbSessionInfo = CbSessionInfo
@@ -115,10 +115,10 @@ cbStatusLogic args = do
   let statesList = Map.elems allStates
       filtered = case args.filterSession of
         Nothing -> statesList
-        Just sid -> filter (\s -> s.cbSessionId == sid) statesList
+        Just sid -> filter (\s -> s.sessionId == sid) statesList
 
   let sessionInfos = map toInfo filtered
-      activeCount = length $ filter (.cbStopHookActive) filtered
+      activeCount = length $ filter (.stopHookActive) filtered
       totalCount = length filtered
 
   pure $ gotoExit CbStatusResult
@@ -129,11 +129,11 @@ cbStatusLogic args = do
   where
     toInfo :: CircuitBreakerState -> CbSessionInfo
     toInfo s = CbSessionInfo
-      { sessionId = s.cbSessionId
-      , globalStops = s.cbGlobalStops
-      , stageRetries = s.cbStageRetries
-      , lastStopTime = s.cbLastStopTime
-      , active = s.cbStopHookActive
+      { sessionId = s.sessionId
+      , globalStops = s.globalStops
+      , stageRetries = s.stageRetries
+      , lastStopTime = s.lastStopTime
+      , active = s.stopHookActive
       }
 
 -- ════════════════════════════════════════════════════════════════════════════

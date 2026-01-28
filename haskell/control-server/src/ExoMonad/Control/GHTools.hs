@@ -65,23 +65,23 @@ ghIssueListLogic
   => GHIssueListArgs
   -> Eff es GHIssueListResult
 ghIssueListLogic args = do
-  repo <- getRepo args.gilaRepo
+  repo <- getRepo args.repo
   let filt = defaultIssueFilter
-        { ifLabels = fromMaybe [] args.gilaLabels
-        , ifState  = parseIssueState =<< args.gilaStatus
-        , ifLimit  = args.gilaLimit
+        { ifLabels = fromMaybe [] args.labels
+        , ifState  = parseIssueState =<< args.status
+        , ifLimit  = args.limit
         }
   res <- listIssues repo filt
   case res of
     Left err -> pure $ GHIssueListResult
-      { gilrIssues = []
-      , gilrCount  = 0
-      , gilrError  = Just (T.pack $ show err)
+      { issues = []
+      , count  = 0
+      , error  = Just (T.pack $ show err)
       }
-    Right issues -> pure $ GHIssueListResult
-      { gilrIssues = issues
-      , gilrCount  = length issues
-      , gilrError  = Nothing
+    Right is -> pure $ GHIssueListResult
+      { issues = is
+      , count  = length is
+      , error  = Nothing
       }
 
 
@@ -95,20 +95,20 @@ ghIssueShowLogic
   => GHIssueShowArgs
   -> Eff es GHIssueShowResult
 ghIssueShowLogic args = do
-  repo <- getRepo args.gisaRepo
-  res <- getIssue repo args.gisaNumber True -- Include comments
+  repo <- getRepo args.repo
+  res <- getIssue repo args.number True -- Include comments
   case res of
     Left err -> pure $ GHIssueShowResult
-      { gisrIssue = Nothing
-      , gisrFound = False
-      , gisrError = Just (T.pack $ show err)
+      { issue = Nothing
+      , found = False
+      , error = Just (T.pack $ show err)
       }
     Right maybeIssue -> pure $ GHIssueShowResult
-      { gisrIssue = maybeIssue
-      , gisrFound = case maybeIssue of
+      { issue = maybeIssue
+      , found = case maybeIssue of
           Just _ -> True
           Nothing -> False
-      , gisrError = Nothing
+      , error = Nothing
       }
 
 
@@ -122,25 +122,25 @@ ghIssueCreateLogic
   => GHIssueCreateArgs
   -> Eff es GHIssueCreateResult
 ghIssueCreateLogic args = do
-  repo <- getRepo args.gcaRepo
+  repo <- getRepo args.repo
   let input = CreateIssueInput
         { ciiRepo      = repo
-        , ciiTitle     = args.gcaTitle
-        , ciiBody      = fromMaybe "" args.gcaBody
-        , ciiLabels    = fromMaybe [] args.gcaLabels
-        , ciiAssignees = fromMaybe [] args.gcaAssignees
+        , ciiTitle     = args.title
+        , ciiBody      = fromMaybe "" args.body
+        , ciiLabels    = fromMaybe [] args.labels
+        , ciiAssignees = fromMaybe [] args.assignees
         }
   res <- createIssue input
   case res of
     Left err -> pure $ GHIssueCreateResult
-      { gcrNumber  = 0
-      , gcrSuccess = False
-      , gcrError   = Just (T.pack $ show err)
+      { number  = 0
+      , success = False
+      , error   = Just (T.pack $ show err)
       }
     Right num -> pure $ GHIssueCreateResult
-      { gcrNumber  = num
-      , gcrSuccess = True
-      , gcrError   = Nothing
+      { number  = num
+      , success = True
+      , error   = Nothing
       }
 
 
@@ -154,25 +154,25 @@ ghIssueUpdateLogic
   => GHIssueUpdateArgs
   -> Eff es GHIssueUpdateResult
 ghIssueUpdateLogic args = do
-  repo <- getRepo args.guaRepo
+  repo <- getRepo args.repo
   let input = emptyUpdateIssueInput
-        { uiiTitle     = args.guaTitle
-        , uiiBody      = args.guaBody
-        , uiiState     = parseIssueState =<< args.guaStatus
-        , uiiLabels    = args.guaLabels
-        , uiiAssignees = args.guaAssignees
+        { uiiTitle     = args.title
+        , uiiBody      = args.body
+        , uiiState     = parseIssueState =<< args.status
+        , uiiLabels    = args.labels
+        , uiiAssignees = args.assignees
         }
-  res <- updateIssue repo args.guaNumber input
+  res <- updateIssue repo args.number input
   case res of
     Left err -> pure $ GHIssueUpdateResult
-      { gurSuccess = False
-      , gurNumber  = args.guaNumber
-      , gurError   = Just (T.pack $ show err)
+      { success = False
+      , number  = args.number
+      , error   = Just (T.pack $ show err)
       }
     Right () -> pure $ GHIssueUpdateResult
-      { gurSuccess = True
-      , gurNumber  = args.guaNumber
-      , gurError   = Nothing
+      { success = True
+      , number  = args.number
+      , error   = Nothing
       }
 
 
@@ -186,18 +186,18 @@ ghIssueCloseLogic
   => GHIssueCloseArgs
   -> Eff es GHIssueCloseResult
 ghIssueCloseLogic args = do
-  repo <- getRepo args.gclaRepo
-  res <- closeIssue repo args.gclaNumber
+  repo <- getRepo args.repo
+  res <- closeIssue repo args.number
   case res of
     Left err -> pure $ GHIssueCloseResult
-      { gclrSuccess = False
-      , gclrNumber  = args.gclaNumber
-      , gclrError   = Just (T.pack $ show err)
+      { success = False
+      , number  = args.number
+      , error   = Just (T.pack $ show err)
       }
     Right () -> pure $ GHIssueCloseResult
-      { gclrSuccess = True
-      , gclrNumber  = args.gclaNumber
-      , gclrError   = Nothing
+      { success = True
+      , number  = args.number
+      , error   = Nothing
       }
 
 
@@ -211,18 +211,18 @@ ghIssueReopenLogic
   => GHIssueReopenArgs
   -> Eff es GHIssueReopenResult
 ghIssueReopenLogic args = do
-  repo <- getRepo args.graRepo
-  res <- reopenIssue repo args.graNumber
+  repo <- getRepo args.repo
+  res <- reopenIssue repo args.number
   case res of
     Left err -> pure $ GHIssueReopenResult
-      { grrSuccess = False
-      , grrNumber  = args.graNumber
-      , grrError   = Just (T.pack $ show err)
+      { success = False
+      , number  = args.number
+      , error   = Just (T.pack $ show err)
       }
     Right () -> pure $ GHIssueReopenResult
-      { grrSuccess = True
-      , grrNumber  = args.graNumber
-      , grrError   = Nothing
+      { success = True
+      , number  = args.number
+      , error   = Nothing
       }
 
 

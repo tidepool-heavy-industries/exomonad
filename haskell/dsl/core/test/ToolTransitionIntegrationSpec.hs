@@ -48,21 +48,21 @@ data Result = Result { output :: String }
   deriving (Show, Eq, Generic)
 
 data ToolTransitionGraph mode = ToolTransitionGraph
-  { ttgEntry   :: mode :- G.EntryNode String
-  , ttgTool    :: mode :- G.LogicNode
+  { entry   :: mode :- G.EntryNode String
+  , tool    :: mode :- G.LogicNode
        :@ Input String
-       :@ UsesEffects '[Goto "ttgSuccess" Value, Goto Types.Exit Result]
-  , ttgSuccess :: mode :- G.LogicNode
+       :@ UsesEffects '[Goto "success" Value, Goto Types.Exit Result]
+  , success :: mode :- G.LogicNode
        :@ Input Value
        :@ UsesEffects '[Goto Types.Exit Result]
-  , ttgExit    :: mode :- G.ExitNode Result
+  , exit    :: mode :- G.ExitNode Result
   }
   deriving Generic
 
 -- Handler that simulates tool execution
-toolNodeHandler :: String -> Eff '[NodeMeta, GraphMeta] (GotoChoice '[To "ttgSuccess" Value, To Types.Exit Result])
+toolNodeHandler :: String -> Eff '[NodeMeta, GraphMeta] (GotoChoice '[To "success" Value, To Types.Exit Result])
 toolNodeHandler input
-  | input == "transition" = pure $ gotoChoice @"ttgSuccess" (toJSON ("transitioned" :: String))
+  | input == "transition" = pure $ gotoChoice @"success" (toJSON ("transitioned" :: String))
   | input == "exit" = pure $ gotoExit (Result "exited directly")
   | otherwise = pure $ gotoExit (Result "default exit")
 
@@ -71,10 +71,10 @@ successNodeHandler payload = pure $ gotoExit (Result $ "success: " <> show paylo
 
 handlers :: ToolTransitionGraph (AsHandler '[NodeMeta, GraphMeta])
 handlers = ToolTransitionGraph
-  { ttgEntry   = ()
-  , ttgTool    = toolNodeHandler
-  , ttgSuccess = successNodeHandler
-  , ttgExit    = ()
+  { entry   = ()
+  , tool    = toolNodeHandler
+  , success = successNodeHandler
+  , exit    = ()
   }
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -86,29 +86,30 @@ spec = describe "Tool-initiated transitions" $ do
   describe "dispatch to success node" $ do
     it "routes to specified target node with payload" $ do
       -- Dispatch a transition choice directly to success node
-      let choice :: GotoChoice '[To "ttgSuccess" Value, To Types.Exit Result]
-          choice = gotoChoice @"ttgSuccess" (toJSON ("test_payload" :: String))
+      let choice :: GotoChoice '[To "success" Value, To Types.Exit Result]
+          choice = gotoChoice @"success" (toJSON ("test_payload" :: String))
       let result = run . runGraphMeta defaultGraphMeta . runNodeMeta defaultNodeMeta $ dispatchGoto handlers choice
       result `shouldBe` Result "success: String \"test_payload\""
 
     it "preserves complex payloads through dispatch" $ do
       -- Dispatch with a more complex payload
-      let choice :: GotoChoice '[To "ttgSuccess" Value, To Types.Exit Result]
-          choice = gotoChoice @"ttgSuccess" (toJSON ("complex" :: String))
+      let choice :: GotoChoice '[To "success" Value, To Types.Exit Result]
+          choice = gotoChoice @"success" (toJSON ("complex" :: String))
       let result = run . runGraphMeta defaultGraphMeta . runNodeMeta defaultNodeMeta $ dispatchGoto handlers choice
       result `shouldBe` Result "success: String \"complex\""
 
   describe "direct exit from tool node" $ do
     it "exits directly without intermediate routing" $ do
       -- Tool handler that exits directly
-      let choice :: GotoChoice '[To "ttgSuccess" Value, To Types.Exit Result]
+      let choice :: GotoChoice '[To "success" Value, To Types.Exit Result]
           choice = gotoExit (Result "exited directly")
       let result = run . runGraphMeta defaultGraphMeta . runNodeMeta defaultNodeMeta $ dispatchGoto handlers choice
       result `shouldBe` Result "exited directly"
 
     it "produces correct output format" $ do
       -- Verify output structure
-      let choice :: GotoChoice '[To "ttgSuccess" Value, To Types.Exit Result]
+      let choice :: GotoChoice '[To "success" Value, To Types.Exit Result]
           choice = gotoExit (Result "direct exit")
-      let result = run . runGraphMeta defaultGraphMeta . runNodeMeta defaultNodeMeta $ dispatchGoto handlers choice
-      output result `shouldBe` "direct exit"
+      let result :: Result
+          result = run . runGraphMeta defaultGraphMeta . runNodeMeta defaultNodeMeta $ dispatchGoto handlers choice
+      result.output `shouldBe` "direct exit"

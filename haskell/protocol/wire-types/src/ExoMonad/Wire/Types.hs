@@ -1,3 +1,7 @@
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE NoFieldSelectors #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+
 -- | Wire format types for exomonad native GUI.
 --
 -- Defines UIState (server → client) and UserAction (client → server).
@@ -55,36 +59,36 @@ import GHC.Generics (Generic)
 
 -- | UI state sent from server to client after each graph step.
 data UIState = UIState
-  { usMessages :: [ChatMessage]
-  , usTextInput :: Maybe TextInputConfig
-  , usPhotoUpload :: Maybe PhotoUploadConfig
-  , usChoices :: Maybe ChoiceConfig
-  , usGraphNode :: Text
-  , usThinking :: Bool
+  { messages :: [ChatMessage]
+  , textInput :: Maybe TextInputConfig
+  , photoUpload :: Maybe PhotoUploadConfig
+  , choices :: Maybe ChoiceConfig
+  , graphNode :: Text
+  , thinking :: Bool
   -- DM-specific fields
-  , usDMStats :: Maybe DMStats
-  , usDMClocks :: [Clock]
-  , usDMDicePool :: Maybe DicePool
-  , usDMMood :: Maybe DMMood
-  , usDMCharCreation :: Maybe CharacterCreation
-  , usDMHistory :: [HistoryEntry]
+  , stats :: Maybe DMStats
+  , clocks :: [Clock]
+  , dicePool :: Maybe DicePool
+  , mood :: Maybe DMMood
+  , charCreation :: Maybe CharacterCreation
+  , history :: [HistoryEntry]
   }
   deriving (Show, Eq, Generic)
 
 instance ToJSON UIState where
   toJSON s = object
-    [ "messages" .= usMessages s
-    , "textInput" .= usTextInput s
-    , "photoUpload" .= usPhotoUpload s
-    , "choices" .= usChoices s
-    , "graphNode" .= usGraphNode s
-    , "thinking" .= usThinking s
-    , "dmStats" .= usDMStats s
-    , "dmClocks" .= usDMClocks s
-    , "dmDicePool" .= usDMDicePool s
-    , "dmMood" .= usDMMood s
-    , "dmCharCreation" .= usDMCharCreation s
-    , "dmHistory" .= usDMHistory s
+    [ "messages" .= s.messages
+    , "textInput" .= s.textInput
+    , "photoUpload" .= s.photoUpload
+    , "choices" .= s.choices
+    , "graphNode" .= s.graphNode
+    , "thinking" .= s.thinking
+    , "dmStats" .= s.stats
+    , "dmClocks" .= s.clocks
+    , "dmDicePool" .= s.dicePool
+    , "dmMood" .= s.mood
+    , "dmCharCreation" .= s.charCreation
+    , "dmHistory" .= s.history
     ]
 
 instance FromJSON UIState where
@@ -105,22 +109,12 @@ instance FromJSON UIState where
 
 -- | Chat message in conversation history.
 data ChatMessage = ChatMessage
-  { cmRole :: MessageRole
-  , cmContent :: Text
-  , cmTimestamp :: Text
+  { role :: MessageRole
+  , content :: Text
+  , timestamp :: Text
   }
   deriving (Show, Eq, Generic)
-
-instance ToJSON ChatMessage where
-  toJSON m = object
-    [ "role" .= cmRole m
-    , "content" .= cmContent m
-    , "timestamp" .= cmTimestamp m
-    ]
-
-instance FromJSON ChatMessage where
-  parseJSON = withObject "ChatMessage" $ \v ->
-    ChatMessage <$> v .: "role" <*> v .: "content" <*> v .: "timestamp"
+  deriving anyclass (ToJSON, FromJSON)
 
 -- | Message role.
 data MessageRole = User | Assistant | System
@@ -140,79 +134,37 @@ instance FromJSON MessageRole where
 
 -- | Text input configuration.
 data TextInputConfig = TextInputConfig
-  { ticPlaceholder :: Text
+  { placeholder :: Text
   }
   deriving (Show, Eq, Generic)
-
-instance ToJSON TextInputConfig where
-  toJSON c = object ["placeholder" .= ticPlaceholder c]
-
-instance FromJSON TextInputConfig where
-  parseJSON = withObject "TextInputConfig" $ \v ->
-    TextInputConfig <$> v .: "placeholder"
+  deriving anyclass (ToJSON, FromJSON)
 
 -- | Photo upload configuration.
 data PhotoUploadConfig = PhotoUploadConfig
-  { pucPrompt :: Text
+  { prompt :: Text
   }
   deriving (Show, Eq, Generic)
-
-instance ToJSON PhotoUploadConfig where
-  toJSON c = object ["prompt" .= pucPrompt c]
-
-instance FromJSON PhotoUploadConfig where
-  parseJSON = withObject "PhotoUploadConfig" $ \v ->
-    PhotoUploadConfig <$> v .: "prompt"
+  deriving anyclass (ToJSON, FromJSON)
 
 -- | Choice option with rich metadata.
 data ChoiceOption = ChoiceOption
-  { coIndex :: Int              -- ^ 0-based index for response
-  , coLabel :: Text             -- ^ Display label
-  , coDescription :: Maybe Text -- ^ Optional descriptive text
-  , coCosts :: [Text]           -- ^ Cost tags e.g. ["2 Stress", "1 Heat"]
-  , coDisabled :: Maybe Text    -- ^ Nothing = enabled, Just reason = disabled
+  { index :: Int              -- ^ 0-based index for response
+  , label :: Text             -- ^ Display label
+  , description :: Maybe Text -- ^ Optional descriptive text
+  , costs :: [Text]           -- ^ Cost tags e.g. ["2 Stress", "1 Heat"]
+  , disabled :: Maybe Text    -- ^ Nothing = enabled, Just reason = disabled
   }
   deriving (Show, Eq, Generic)
-
-instance ToJSON ChoiceOption where
-  toJSON c = object
-    [ "index" .= coIndex c
-    , "label" .= coLabel c
-    , "description" .= coDescription c
-    , "costs" .= coCosts c
-    , "disabled" .= coDisabled c
-    ]
-
-instance FromJSON ChoiceOption where
-  parseJSON = withObject "ChoiceOption" $ \v ->
-    ChoiceOption
-      <$> v .: "index"
-      <*> v .: "label"
-      <*> v .:? "description"
-      <*> v .: "costs"
-      <*> v .:? "disabled"
+  deriving anyclass (ToJSON, FromJSON)
 
 -- | Choice configuration with multi-select support.
 data ChoiceConfig = ChoiceConfig
-  { ccPrompt :: Text            -- ^ Prompt text shown above choices
-  , ccOptions :: [ChoiceOption] -- ^ Available options
-  , ccMultiSelect :: Bool       -- ^ True = checkboxes, False = radio buttons
+  { prompt :: Text            -- ^ Prompt text shown above choices
+  , options :: [ChoiceOption] -- ^ Available options
+  , multiSelect :: Bool       -- ^ True = checkboxes, False = radio buttons
   }
   deriving (Show, Eq, Generic)
-
-instance ToJSON ChoiceConfig where
-  toJSON c = object
-    [ "prompt" .= ccPrompt c
-    , "options" .= ccOptions c
-    , "multiSelect" .= ccMultiSelect c
-    ]
-
-instance FromJSON ChoiceConfig where
-  parseJSON = withObject "ChoiceConfig" $ \v ->
-    ChoiceConfig
-      <$> v .: "prompt"
-      <*> v .: "options"
-      <*> v .: "multiSelect"
+  deriving anyclass (ToJSON, FromJSON)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -244,34 +196,15 @@ instance FromJSON Precarity where
 
 -- | Character stats for sidebar display.
 data DMStats = DMStats
-  { dmsStress :: Int         -- ^ 0-9, trauma at 9
-  , dmsHeat :: Int           -- ^ 0-9
-  , dmsCoin :: Int
-  , dmsWantedLevel :: Int    -- ^ 0-4
-  , dmsTrauma :: [Text]      -- ^ Freeform trauma names (LLM-determined)
-  , dmsPrecarity :: Precarity
+  { stress :: Int         -- ^ 0-9, trauma at 9
+  , heat :: Int           -- ^ 0-9
+  , coin :: Int
+  , wantedLevel :: Int    -- ^ 0-4
+  , trauma :: [Text]      -- ^ Freeform trauma names (LLM-determined)
+  , precarity :: Precarity
   }
   deriving (Show, Eq, Generic)
-
-instance ToJSON DMStats where
-  toJSON s = object
-    [ "stress" .= dmsStress s
-    , "heat" .= dmsHeat s
-    , "coin" .= dmsCoin s
-    , "wantedLevel" .= dmsWantedLevel s
-    , "trauma" .= dmsTrauma s
-    , "precarity" .= dmsPrecarity s
-    ]
-
-instance FromJSON DMStats where
-  parseJSON = withObject "DMStats" $ \v ->
-    DMStats
-      <$> v .: "stress"
-      <*> v .: "heat"
-      <*> v .: "coin"
-      <*> v .: "wantedLevel"
-      <*> v .: "trauma"
-      <*> v .: "precarity"
+  deriving anyclass (ToJSON, FromJSON)
 
 -- | Clock color/type.
 data ClockColor = ClockThreat | ClockOpportunity | ClockNeutral
@@ -291,34 +224,15 @@ instance FromJSON ClockColor where
 
 -- | Progress clock for tracking threats and opportunities.
 data Clock = Clock
-  { clkId :: Text
-  , clkName :: Text
-  , clkSegments :: Int
-  , clkFilled :: Int
-  , clkVisible :: Bool       -- ^ False = hidden GM clock (revealed when triggered)
-  , clkColor :: ClockColor
+  { id :: Text
+  , name :: Text
+  , segments :: Int
+  , filled :: Int
+  , visible :: Bool       -- ^ False = hidden GM clock (revealed when triggered)
+  , color :: ClockColor
   }
   deriving (Show, Eq, Generic)
-
-instance ToJSON Clock where
-  toJSON c = object
-    [ "id" .= clkId c
-    , "name" .= clkName c
-    , "segments" .= clkSegments c
-    , "filled" .= clkFilled c
-    , "visible" .= clkVisible c
-    , "color" .= clkColor c
-    ]
-
-instance FromJSON Clock where
-  parseJSON = withObject "Clock" $ \v ->
-    Clock
-      <$> v .: "id"
-      <*> v .: "name"
-      <*> v .: "segments"
-      <*> v .: "filled"
-      <*> v .: "visible"
-      <*> v .: "color"
+  deriving anyclass (ToJSON, FromJSON)
 
 -- | Action position (risk level).
 data Position = Controlled | Risky | Desperate
@@ -380,56 +294,24 @@ instance FromJSON OutcomeTier where
 -- | Single die option with LLM-generated preview.
 -- All hints are generated at once when entering Action mood (precommitment).
 data DieOption = DieOption
-  { doValue :: Int           -- ^ 1-6
-  , doTier :: OutcomeTier    -- ^ Calculated from position
-  , doHint :: Text           -- ^ LLM-generated preview of this outcome
+  { value :: Int           -- ^ 1-6
+  , tier :: OutcomeTier    -- ^ Calculated from position
+  , hint :: Text           -- ^ LLM-generated preview of this outcome
   }
   deriving (Show, Eq, Generic)
-
-instance ToJSON DieOption where
-  toJSON d = object
-    [ "value" .= doValue d
-    , "tier" .= doTier d
-    , "hint" .= doHint d
-    ]
-
-instance FromJSON DieOption where
-  parseJSON = withObject "DieOption" $ \v ->
-    DieOption
-      <$> v .: "value"
-      <*> v .: "tier"
-      <*> v .: "hint"
+  deriving anyclass (ToJSON, FromJSON)
 
 -- | Dice pool state. Pool depletes across session until bargain mode.
 data DicePool = DicePool
-  { dpDice :: [DieOption]        -- ^ Remaining dice (starts at 5, depletes)
-  , dpPosition :: Position
-  , dpEffect :: Effect
-  , dpContext :: Text            -- ^ What they're attempting
-  , dpPushAvailable :: Bool      -- ^ Can push yourself for +1d (costs 2 stress)
-  , dpDevilBargain :: Maybe Text -- ^ Offered bargain (accept for +1d)
+  { dice :: [DieOption]        -- ^ Remaining dice (starts at 5, depletes)
+  , position :: Position
+  , effect :: Effect
+  , context :: Text            -- ^ What they're attempting
+  , pushAvailable :: Bool      -- ^ Can push yourself for +1d (costs 2 stress)
+  , devilBargain :: Maybe Text -- ^ Offered bargain (accept for +1d)
   }
   deriving (Show, Eq, Generic)
-
-instance ToJSON DicePool where
-  toJSON p = object
-    [ "dice" .= dpDice p
-    , "position" .= dpPosition p
-    , "effect" .= dpEffect p
-    , "context" .= dpContext p
-    , "pushAvailable" .= dpPushAvailable p
-    , "devilBargain" .= dpDevilBargain p
-    ]
-
-instance FromJSON DicePool where
-  parseJSON = withObject "DicePool" $ \v ->
-    DicePool
-      <$> v .: "dice"
-      <*> v .: "position"
-      <*> v .: "effect"
-      <*> v .: "context"
-      <*> v .: "pushAvailable"
-      <*> v .:? "devilBargain"
+  deriving anyclass (ToJSON, FromJSON)
 
 -- | Scene urgency level.
 data Urgency = UrgencyLow | UrgencyMedium | UrgencyHigh | UrgencyCritical
@@ -596,25 +478,12 @@ instance FromJSON BargainCost where
 
 -- | Bargain option - LLM-generated contextual deal.
 data BargainOption = BargainOption
-  { boLabel :: Text
-  , boCost :: BargainCost
-  , boDescription :: Text    -- ^ LLM explains what this deal means
+  { label :: Text
+  , cost :: BargainCost
+  , description :: Text    -- ^ LLM explains what this deal means
   }
   deriving (Show, Eq, Generic)
-
-instance ToJSON BargainOption where
-  toJSON b = object
-    [ "label" .= boLabel b
-    , "cost" .= boCost b
-    , "description" .= boDescription b
-    ]
-
-instance FromJSON BargainOption where
-  parseJSON = withObject "BargainOption" $ \v ->
-    BargainOption
-      <$> v .: "label"
-      <*> v .: "cost"
-      <*> v .: "description"
+  deriving anyclass (ToJSON, FromJSON)
 
 -- | Current game phase/mood with rich variants.
 -- LLM controls transitions via tools (Engage, Resolve, etc.) - player cannot force.
@@ -694,39 +563,20 @@ instance FromJSON Pronouns where
 
 -- | Tarot card for character creation spread.
 data TarotCard = TarotCard
-  { tcName :: Text           -- ^ Card name (e.g., "The Tower", "Three of Swords")
-  , tcMeaning :: Text        -- ^ Doskvol-flavored meaning
+  { name :: Text           -- ^ Card name (e.g., "The Tower", "Three of Swords")
+  , meaning :: Text        -- ^ Doskvol-flavored meaning
   }
   deriving (Show, Eq, Generic)
-
-instance ToJSON TarotCard where
-  toJSON c = object ["name" .= tcName c, "meaning" .= tcMeaning c]
-
-instance FromJSON TarotCard where
-  parseJSON = withObject "TarotCard" $ \v ->
-    TarotCard <$> v .: "name" <*> v .: "meaning"
+  deriving anyclass (ToJSON, FromJSON)
 
 -- | Three-card tarot spread for character creation.
 data TarotSpread = TarotSpread
-  { tsPast :: TarotCard      -- ^ What haunts them
-  , tsPresent :: TarotCard   -- ^ What drives them now
-  , tsFuture :: TarotCard    -- ^ What they're moving toward
+  { past :: TarotCard      -- ^ What haunts them
+  , present :: TarotCard   -- ^ What drives them now
+  , future :: TarotCard    -- ^ What they're moving toward
   }
   deriving (Show, Eq, Generic)
-
-instance ToJSON TarotSpread where
-  toJSON s = object
-    [ "past" .= tsPast s
-    , "present" .= tsPresent s
-    , "future" .= tsFuture s
-    ]
-
-instance FromJSON TarotSpread where
-  parseJSON = withObject "TarotSpread" $ \v ->
-    TarotSpread
-      <$> v .: "past"
-      <*> v .: "present"
-      <*> v .: "future"
+  deriving anyclass (ToJSON, FromJSON)
 
 -- | Character creation step (Tarot-based, v1 style).
 data CharCreationStep
@@ -760,50 +610,31 @@ instance FromJSON CharCreationStep where
 
 -- | Character creation state (Tarot-based, v1 style).
 data CharacterCreation = CharacterCreation
-  { ccStep :: CharCreationStep
-  , ccName :: Maybe Text
-  , ccPronouns :: Maybe Pronouns
-  , ccArchetype :: Maybe Archetype
-  , ccBackground :: Maybe Text
-  , ccTarotSpread :: Maybe TarotSpread
+  { step :: CharCreationStep
+  , name :: Maybe Text
+  , pronouns :: Maybe Pronouns
+  , archetype :: Maybe Archetype
+  , background :: Maybe Text
+  , tarotSpread :: Maybe TarotSpread
   }
   deriving (Show, Eq, Generic)
-
-instance ToJSON CharacterCreation where
-  toJSON c = object
-    [ "step" .= ccStep c
-    , "name" .= ccName c
-    , "pronouns" .= ccPronouns c
-    , "archetype" .= ccArchetype c
-    , "background" .= ccBackground c
-    , "tarotSpread" .= ccTarotSpread c
-    ]
-
-instance FromJSON CharacterCreation where
-  parseJSON = withObject "CharacterCreation" $ \v ->
-    CharacterCreation
-      <$> v .: "step"
-      <*> v .:? "name"
-      <*> v .:? "pronouns"
-      <*> v .:? "archetype"
-      <*> v .:? "background"
-      <*> v .:? "tarotSpread"
+  deriving anyclass (ToJSON, FromJSON)
 
 -- | History entry for session log.
 data HistoryEntry = HistoryEntry
-  { heTimestamp :: Text
-  , heType :: Text           -- ^ "narration", "action", "roll", "clock"
-  , heSummary :: Text
-  , heDetails :: Maybe Text
+  { timestamp :: Text
+  , type_ :: Text           -- ^ "narration", "action", "roll", "clock"
+  , summary :: Text
+  , details :: Maybe Text
   }
   deriving (Show, Eq, Generic)
 
 instance ToJSON HistoryEntry where
   toJSON e = object
-    [ "timestamp" .= heTimestamp e
-    , "type" .= heType e
-    , "summary" .= heSummary e
-    , "details" .= heDetails e
+    [ "timestamp" .= e.timestamp
+    , "type" .= e.type_
+    , "summary" .= e.summary
+    , "details" .= e.details
     ]
 
 instance FromJSON HistoryEntry where

@@ -110,7 +110,8 @@ library
         unordered-containers >= 0.2 && < 0.3,
         template-haskell >= 2.19 && < 3,
         mtl >= 2.3 && < 3,
-        optics >= 0.4 && < 1,
+        lens >= 5.0,
+        generic-lens >= 2.2,
         random >= 1.2 && < 2,
         bytestring >= 0.11 && < 1,
         parsec >= 3.1 && < 4,
@@ -138,6 +139,7 @@ library
         MultiParamTypeClasses
         NoFieldSelectors
         OverloadedRecordDot
+        OverloadedLabels
         OverloadedStrings
         TypeFamilies
         TypeOperators
@@ -210,4 +212,5 @@ test-suite graph-validation-tests
         DerivingStrategies
         OverloadedStrings
         OverloadedRecordDot
+        NoFieldSelectors
         TypeApplications

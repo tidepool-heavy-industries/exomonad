@@ -40,6 +40,7 @@ library
         OverloadedRecordDot
         TypeFamilies
         TypeOperators
+        NoFieldSelectors
 
 test-suite worktree-interpreter-test
     type:             exitcode-stdio-1.0

@@ -21,6 +21,7 @@ import ExoMonad.Effects.SocketClient
   ( SocketConfig(..)
   , ServiceRequest(..)
   , ServiceResponse(..)
+  , OllamaGenerateReq(..)
   , sendRequest
   )
 import GHC.Generics (Generic)
@@ -60,7 +61,7 @@ runGeminiWithConfig config = interpret $ \case
             }
     GeminiSocketConfig path -> sendM $ do
       let modelStr = T.pack $ geminiModelToCliId model
-      let req = OllamaGenerate modelStr prompt Nothing
+      let req = OllamaGenerate $ OllamaGenerateReq modelStr prompt Nothing
       result <- sendRequest (SocketConfig path 30000) req
       case result of
         Right (OllamaGenerateResponse resp _done) ->

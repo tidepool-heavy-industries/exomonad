@@ -59,26 +59,26 @@ data StopPRContext = StopPRContext
 
 instance ToGVal (Run SourcePos (Writer Text) Text) StopContext where
   toGVal ctx = dict
-    [ "issue_number" ~> issue_number ctx
-    , "branch" ~> branch ctx
-    , "dirty_files" ~> dirty_files ctx
-    , "commits_ahead" ~> commits_ahead ctx
-    , "pr" ~> pr ctx
-    , "clean" ~> clean ctx
-    , "pre_commit" ~> pre_commit ctx
-    , "issue_closed" ~> issue_closed ctx
-    , "issue_already_closed" ~> issue_already_closed ctx
+    [ "issue_number" ~> ctx.issue_number
+    , "branch" ~> ctx.branch
+    , "dirty_files" ~> ctx.dirty_files
+    , "commits_ahead" ~> ctx.commits_ahead
+    , "pr" ~> ctx.pr
+    , "clean" ~> ctx.clean
+    , "pre_commit" ~> ctx.pre_commit
+    , "issue_closed" ~> ctx.issue_closed
+    , "issue_already_closed" ~> ctx.issue_already_closed
     ]
 
 instance ToGVal (Run SourcePos (Writer Text) Text) StopPRContext where
   toGVal p = dict
-    [ "number" ~> number p
-    , "url" ~> url p
-    , "pending_comments" ~> pending_comments p
+    [ "number" ~> p.number
+    , "url" ~> p.url
+    , "pending_comments" ~> p.pending_comments
     ]
 
 instance ToGVal (Run SourcePos (Writer Text) Text) StopPreCommitContext where
   toGVal p = dict
-    [ "success" ~> success p
-    , "output" ~> output p
+    [ "success" ~> p.success
+    , "output" ~> p.output
     ]

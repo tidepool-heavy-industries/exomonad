@@ -16,28 +16,29 @@ import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.=), object, withObject)
 import GHC.Generics (Generic)
 import ExoMonad.Effects.GitHub (ReviewComment)
 import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(..), HasJSONSchema(..))
+import Language.Haskell.TH (mkName)
 
 -- | Arguments for pr_review_status tool.
 data PrReviewStatusArgs = PrReviewStatusArgs
-  { prsaPrNumber :: Int
+  { prNumber :: Int
   }
   deriving stock (Show, Eq, Generic)
 
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "prsa" } ''PrReviewStatusArgs
-  [ 'prsaPrNumber ?? "Pull Request number."
+$(deriveMCPTypeWith defaultMCPOptions ''PrReviewStatusArgs
+  [ mkName "prNumber" ?? "Pull Request number."
   ])
 
 -- | Feedback from a single author category (Copilot or human).
 data AuthorFeedback = AuthorFeedback
-  { afPending :: [ReviewComment]
-  , afResolved :: [ReviewComment]
+  { pending :: [ReviewComment]
+  , resolved :: [ReviewComment]
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON AuthorFeedback where
   toJSON af = object
-    [ "pending" .= afPending af
-    , "resolved" .= afResolved af
+    [ "pending" .= af.pending
+    , "resolved" .= af.resolved
     ]
 
 instance FromJSON AuthorFeedback where
@@ -48,19 +49,19 @@ instance FromJSON AuthorFeedback where
 
 -- | Summary counts for quick triage.
 data FeedbackSummary = FeedbackSummary
-  { fsCopilotPending :: Int
-  , fsCopilotResolved :: Int
-  , fsHumanPending :: Int
-  , fsHumanResolved :: Int
+  { copilotPending :: Int
+  , copilotResolved :: Int
+  , humanPending :: Int
+  , humanResolved :: Int
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON FeedbackSummary where
   toJSON fs = object
-    [ "copilot_pending" .= fsCopilotPending fs
-    , "copilot_resolved" .= fsCopilotResolved fs
-    , "human_pending" .= fsHumanPending fs
-    , "human_resolved" .= fsHumanResolved fs
+    [ "copilot_pending" .= fs.copilotPending
+    , "copilot_resolved" .= fs.copilotResolved
+    , "human_pending" .= fs.humanPending
+    , "human_resolved" .= fs.humanResolved
     ]
 
 instance FromJSON FeedbackSummary where
@@ -74,19 +75,19 @@ instance FromJSON FeedbackSummary where
 -- | Result of pr_review_status tool.
 -- Returns comprehensive feedback grouped by author type and status.
 data PrReviewStatusResult = PrReviewStatusResult
-  { prsrPrNumber :: Int
-  , prsrCopilot :: AuthorFeedback
-  , prsrHumans :: AuthorFeedback
-  , prsrSummary :: FeedbackSummary
+  { prNumber :: Int
+  , copilot :: AuthorFeedback
+  , humans :: AuthorFeedback
+  , summary :: FeedbackSummary
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON PrReviewStatusResult where
   toJSON res = object
-    [ "pr_number" .= prsrPrNumber res
-    , "copilot" .= prsrCopilot res
-    , "humans" .= prsrHumans res
-    , "summary" .= prsrSummary res
+    [ "pr_number" .= res.prNumber
+    , "copilot" .= res.copilot
+    , "humans" .= res.humans
+    , "summary" .= res.summary
     ]
 
 instance FromJSON PrReviewStatusResult where

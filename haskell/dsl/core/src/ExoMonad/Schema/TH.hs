@@ -143,19 +143,22 @@ deriveForRecord :: MCPOptions -> Name -> Name -> [VarBangType] -> [FieldMapping]
 deriveForRecord opts typeName conName fields mappings = do
   -- 1. Validate fields
   let typeFields = [n | (n, _, _) <- fields]
-      mappedFields = [n | m <- mappings, let n = case m of { Explicit x _ _ -> x; Auto x _ -> x; Omit x -> x }]
-      missingFields = filter (`notElem` mappedFields) typeFields
-      unknownFields = filter (`notElem` typeFields) mappedFields
+      typeFieldNames = map nameBase typeFields
+      getMappingName m = nameBase (case m of { Explicit x _ _ -> x; Auto x _ -> x; Omit x -> x })
+      mappedFieldNames = map getMappingName mappings
+      
+      missingFields = filter (`notElem` mappedFieldNames) typeFieldNames
+      unknownFields = filter (`notElem` typeFieldNames) mappedFieldNames
 
   unless (null missingFields) $
-    fail $ "deriveMCPType: Fields missing from mapping: " ++ show (map nameBase missingFields)
+    fail $ "deriveMCPType: Fields missing from mapping: " ++ show missingFields
   
   unless (null unknownFields) $
-    fail $ "deriveMCPType: Unknown fields in mapping: " ++ show (map nameBase unknownFields)
+    fail $ "deriveMCPType: Unknown fields in mapping: " ++ show unknownFields
 
   -- 2. Process fields into a usable structure
   fieldData <- forM fields $ \(fname, _, ftype) -> do
-    let mapping = head [m | m <- mappings, getFieldName m == fname]
+    let mapping = head [m | m <- mappings, getMappingName m == nameBase fname]
     case mapping of
       Omit _ -> pure Nothing
       _ -> do

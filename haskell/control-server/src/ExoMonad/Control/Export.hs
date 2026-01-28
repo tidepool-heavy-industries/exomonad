@@ -24,7 +24,7 @@ exportMCPTools logger role = do
   logInfo logger $ "[MCP Discovery] Discovering tools for role: " <> T.pack (show role)
 
   let schema = roleSchemaFor role
-      tools = concatMap (ssTools . snd) (rsServers schema)
+      tools = concatMap (\(_, srv) -> srv.tools) (schema.servers)
 
   logInfo logger $ "[MCP Discovery] Found " <> T.pack (show (length tools)) <> " tools"
 

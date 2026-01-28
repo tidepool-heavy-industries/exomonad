@@ -25,6 +25,8 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 import ExoMonad.Schema (deriveMCPTypeWith, deriveMCPEnum, defaultMCPOptions, (??), MCPOptions(..))
 
+import Language.Haskell.TH (mkName)
+
 -- ══════════════════════════════════════════════════════════════════════════════
 -- ENUMS
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -67,56 +69,56 @@ $(deriveMCPEnum ''Component)
 
 -- | Issue classification metadata.
 data Classification = Classification
-  { clCategory   :: IssueCategory
-  , clPriority   :: Priority
-  , clSeverity   :: Maybe Severity
-  , clComponents :: [Component]
+  { category   :: IssueCategory
+  , priority   :: Priority
+  , severity   :: Maybe Severity
+  , components :: [Component]
   }
   deriving stock (Show, Eq, Generic)
 
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "cl" } ''Classification
-  [ 'clCategory   ?? "Issue category"
-  , 'clPriority   ?? "Priority level"
-  , 'clSeverity   ?? "Severity (recommended for bugs)"
-  , 'clComponents ?? "Affected system components"
+$(deriveMCPTypeWith defaultMCPOptions ''Classification
+  [ mkName "category"   ?? "Issue category"
+  , mkName "priority"   ?? "Priority level"
+  , mkName "severity"   ?? "Severity (recommended for bugs)"
+  , mkName "components" ?? "Affected system components"
   ])
 
 -- | Single acceptance criterion.
 data Criterion = Criterion
-  { crItem     :: Text
-  , crTestable :: Bool
+  { item     :: Text
+  , testable :: Bool
   }
   deriving stock (Show, Eq, Generic)
 
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "cr" } ''Criterion
-  [ 'crItem     ?? "Acceptance criterion description"
-  , 'crTestable ?? "Can this be verified programmatically?"
+$(deriveMCPTypeWith defaultMCPOptions ''Criterion
+  [ mkName "item"     ?? "Acceptance criterion description"
+  , mkName "testable" ?? "Can this be verified programmatically?"
   ])
 
 -- | Issue content: description, reproduction steps, acceptance criteria.
 data IssueContent = IssueContent
-  { icDescription        :: Text
-  , icReproduction       :: Maybe Text
-  , icAcceptanceCriteria :: [Criterion]
+  { description        :: Text
+  , reproduction       :: Maybe Text
+  , acceptanceCriteria :: [Criterion]
   }
   deriving stock (Show, Eq, Generic)
 
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "ic" } ''IssueContent
-  [ 'icDescription        ?? "Detailed description of the issue"
-  , 'icReproduction       ?? "Steps to reproduce (for bugs)"
-  , 'icAcceptanceCriteria ?? "Definition of done checklist"
+$(deriveMCPTypeWith defaultMCPOptions ''IssueContent
+  [ mkName "description"        ?? "Detailed description of the issue"
+  , mkName "reproduction"       ?? "Steps to reproduce (for bugs)"
+  , mkName "acceptanceCriteria" ?? "Definition of done checklist"
   ])
 
 -- | Issue assignment: assignees and additional labels.
 data Assignment = Assignment
-  { asAssignees :: [Text]
-  , asLabels    :: Maybe [Text]
+  { assignees :: [Text]
+  , labels    :: Maybe [Text]
   }
   deriving stock (Show, Eq, Generic)
 
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "as" } ''Assignment
-  [ 'asAssignees ?? "GitHub usernames to assign"
-  , 'asLabels    ?? "Additional labels beyond auto-generated"
+$(deriveMCPTypeWith defaultMCPOptions ''Assignment
+  [ mkName "assignees" ?? "GitHub usernames to assign"
+  , mkName "labels"    ?? "Additional labels beyond auto-generated"
   ])
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -128,33 +130,33 @@ $(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "as" } ''Assignment
 -- Structured interface for creating issues with nested classification,
 -- content, and assignment sections.
 data TLCreateIssueArgs = TLCreateIssueArgs
-  { tliaTitle          :: Text
-  , tliaClassification :: Classification
-  , tliaContent        :: IssueContent
-  , tliaAssignment     :: Maybe Assignment
+  { title          :: Text
+  , classification :: Classification
+  , content        :: IssueContent
+  , assignment     :: Maybe Assignment
   }
   deriving stock (Show, Eq, Generic)
 
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "tlia" } ''TLCreateIssueArgs
-  [ 'tliaTitle          ?? "Concise issue title"
-  , 'tliaClassification ?? "Category, priority, severity, components"
-  , 'tliaContent        ?? "Description, reproduction, acceptance criteria"
-  , 'tliaAssignment     ?? "Assignees and additional labels"
+$(deriveMCPTypeWith defaultMCPOptions ''TLCreateIssueArgs
+  [ mkName "title"          ?? "Concise issue title"
+  , mkName "classification" ?? "Category, priority, severity, components"
+  , mkName "content"        ?? "Description, reproduction, acceptance criteria"
+  , mkName "assignment"     ?? "Assignees and additional labels"
   ])
 
 -- | Result of tl_create_issue tool.
 data TLCreateIssueResult = TLCreateIssueResult
-  { tlcrNumber  :: Int
-  , tlcrUrl     :: Text
-  , tlcrSuccess :: Bool
-  , tlcrError   :: Maybe Text
+  { number  :: Int
+  , url     :: Text
+  , success :: Bool
+  , error   :: Maybe Text
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON TLCreateIssueResult where
   toJSON r = object
-    [ "number"  .= tlcrNumber r
-    , "url"     .= tlcrUrl r
-    , "success" .= tlcrSuccess r
-    , "error"   .= tlcrError r
+    [ "number"  .= r.number
+    , "url"     .= r.url
+    , "success" .= r.success
+    , "error"   .= r.error
     ]

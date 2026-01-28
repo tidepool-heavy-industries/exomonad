@@ -52,7 +52,7 @@ handleMessage logger config tracer traceCtx cbMap = \case
 -- | Handle tool discovery request.
 handleToolsList :: Logger -> ServerConfig -> IO ControlResponse
 handleToolsList logger config = do
-  let role = fromMaybe (defaultRole config) (config.role >>= roleFromText)
+  let role = fromMaybe (config.defaultRole) (config.role >>= roleFromText)
   logInfo logger $ "[MCP] Handling ToolsListRequest for role: " <> T.pack (show role)
   tools <- exportMCPTools logger role
   logInfo logger $ "[MCP] Returning " <> T.pack (show (length tools)) <> " tools"
@@ -121,7 +121,7 @@ withMcpTracing logger config traceCtx reqId toolName args action = do
                 pure res
 
       resultOrErr <- try $ runM 
-        $ runObservabilityWithContext traceCtx (fromMaybe defaultLokiConfig $ ocLoki obsConfig)
+        $ runObservabilityWithContext traceCtx (fromMaybe defaultLokiConfig $ obsConfig.loki)
         $ withSpan ("mcp:tool:" <> toolName) SpanServer 
             [ AttrText "mcp.request_id" reqId
             , AttrText "mcp.tool_name" toolName

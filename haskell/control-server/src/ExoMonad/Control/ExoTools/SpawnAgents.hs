@@ -9,6 +9,10 @@ module ExoMonad.Control.ExoTools.SpawnAgents
   ( spawnAgentsLogic
   , SpawnAgentsArgs(..)
   , SpawnAgentsResult(..)
+  , SpawnAgentsGraph(..)
+  , CleanupAgentsGraph(..)
+  , CleanupAgentsArgs(..)
+  , CleanupAgentsResult(..)
   , findRepoRoot
   )
 where
@@ -20,6 +24,13 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import System.FilePath ((</>))
+import GHC.Generics (Generic)
+
+import ExoMonad.Graph.Generic (type (:-))
+import ExoMonad.Graph.Generic.Core (EntryNode, LogicNode, ExitNode)
+import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef, MCPRoleHint)
+import ExoMonad.Graph.Goto (Goto, To)
+import ExoMonad.Role (Role(..))
 
 import ExoMonad.Effects.GitHub (GitHub, Issue(..), IssueState(..), Repo(..), getIssue)
 import ExoMonad.Effects.DockerSpawner (DockerSpawner, SpawnConfig(..), spawnContainer, ContainerId(..), execContainer, ExecResult(..), stopContainer)
@@ -30,12 +41,37 @@ import ExoMonad.Effects.Worktree (Worktree, WorktreeSpec(..), WorktreePath(..), 
 import ExoMonad.Effects.FileSystem (FileSystem, fileExists, directoryExists, writeFileText)
 import ExoMonad.Effects.Zellij (Zellij, TabConfig(..), TabId(..), LayoutSpec(..), checkZellijEnv, newTab, generateLayout)
 import ExoMonad.Effect.Log (Log, logInfo, logError, logWarn)
+import ExoMonad.Effect.Types (Return)
 
 import ExoMonad.Control.ExoTools.Internal (slugify)
 import ExoMonad.Control.ExoTools.SpawnCleanup (SpawnCleanup, SpawnProgress(..), runSpawnCleanup, acquireWorktree, acquireContainer, emitProgress, cleanupAll)
 import ExoMonad.Control.Runtime.Paths as Paths
 import ExoMonad.Control.ExoTools.SpawnAgents.Types
 import ExoMonad.Control.ExoTools.SpawnAgents.Prompt (renderInitialPrompt)
+
+-- | Graph definition for spawn_agents tool.
+data SpawnAgentsGraph mode = SpawnAgentsGraph
+  { saEntry :: mode :- EntryNode SpawnAgentsArgs
+      :@ MCPExport
+      :@ MCPToolDef '("spawn_agents", "Spawn isolated environments for parallel task execution")
+      :@ MCPRoleHint 'TL
+  , saRun :: mode :- LogicNode
+      :@ Input SpawnAgentsArgs
+      :@ UsesEffects '[GitHub, Git, Worktree, FileSystem, Zellij, Env, DockerSpawner, Log, Return SpawnAgentsResult]
+  }
+  deriving Generic
+
+-- | Graph definition for cleanup_agents tool.
+data CleanupAgentsGraph mode = CleanupAgentsGraph
+  { caEntry :: mode :- EntryNode CleanupAgentsArgs
+      :@ MCPExport
+      :@ MCPToolDef '("cleanup_agents", "Cleanup spawn_agents resources (worktrees, containers)")
+      :@ MCPRoleHint 'TL
+  , caRun :: mode :- LogicNode
+      :@ Input CleanupAgentsArgs
+      :@ UsesEffects '[Worktree, DockerSpawner, Log, Return CleanupAgentsResult]
+  }
+  deriving Generic
 
 -- | Find the repository root by checking ENV or using Git.
 findRepoRoot
@@ -72,12 +108,12 @@ spawnAgentsLogic args = do
   case mZellijSession of
     Nothing -> pure $ SpawnAgentsResult
       {
-        sarWorktrees = []
-      , sarTabs = []
-      , sarFailed = [("*", "Not running in Zellij session")]
+        worktrees = []
+      , tabs = []
+      , failed = [("*", "Not running in Zellij session")]
       }
     Just _ -> do
-      logInfo $ "Starting spawn_agents for issues: " <> T.intercalate ", " args.saaIssueNumbers
+      logInfo $ "Starting spawn_agents for issues: " <> T.intercalate ", " args.issueNumbers
       -- 2. Determine Repo Root and Worktree Base Path
       spawnModeEnv <- getEnv "SPAWN_MODE"
       let spawnMode = parseSpawnMode spawnModeEnv
@@ -94,32 +130,32 @@ spawnAgentsLogic args = do
           pure $ T.unpack $ fromMaybe "/worktrees" mWorktreesPath
 
       -- 3. Validate and normalize backend parameter
-      let backendRaw = T.toLower $ fromMaybe "claude" args.saaBackend
+      let backendRaw = T.toLower $ fromMaybe "claude" args.backend
           validBackends = ["claude", "gemini"]
 
       if backendRaw `notElem` validBackends
         then pure $ SpawnAgentsResult
           {
-            sarWorktrees = []
-          , sarTabs = []
-          , sarFailed = [("*", "Invalid backend '" <> backendRaw <> "'. Must be 'claude' or 'gemini'.")]
+            worktrees = []
+          , tabs = []
+          , failed = [("*", "Invalid backend '" <> backendRaw <> "'. Must be 'claude' or 'gemini'.")]
           }
         else do
           -- 4. Process each issue
-          results <- forM args.saaIssueNumbers $ \shortId -> do
+          results <- forM args.issueNumbers $ \shortId -> do
             (res, _orphans) <- runSpawnCleanup $ processIssue spawnMode repoRoot wtBaseDir backendRaw shortId
             pure res
 
           -- Partition results
           let (failed, succeeded) = partitionEithers results
-              worktrees = [(sid, path) | (sid, path, _) <- succeeded]
-              tabs = [(sid, tabId) | (sid, _, TabId tabId) <- succeeded]
+              worktreesList = [(sid, path) | (sid, path, _) <- succeeded]
+              tabsList = [(sid, tabId) | (sid, _, TabId tabId) <- succeeded]
 
           pure $ SpawnAgentsResult
             {
-              sarWorktrees = worktrees
-            , sarTabs = tabs
-            , sarFailed = failed
+              worktrees = worktreesList
+            , tabs = tabsList
+            , failed = failed
             }
 
 
@@ -199,10 +235,10 @@ processIssue spawnMode repoRoot wtBaseDir backend shortId = do
                           targetPath = wtBaseDir </> "gh-" <> T.unpack shortId <> "-" <> T.unpack slug
                           spec = WorktreeSpec
                             {
-                              wsBaseName = "gh-" <> shortId
-                            , wsFromBranch = Just "origin/main"
-                            , wsBranchName = Just branchName
-                            , wsPath = Just targetPath
+                              baseName = "gh-" <> shortId
+                            , fromBranch = Just "origin/main"
+                            , branchName = Just branchName
+                            , path = Just targetPath
                             }
 
                       -- Check if worktree directory already exists (idempotency)
@@ -420,7 +456,7 @@ cleanupAgentsLogic
   => CleanupAgentsArgs
   -> Eff es CleanupAgentsResult
 cleanupAgentsLogic args = do
-  logInfo $ "Cleaning up agents for issues: " <> T.intercalate ", " args.caaIssueNumbers
+  logInfo $ "Cleaning up agents for issues: " <> T.intercalate ", " args.issueNumbers
   
   -- 1. Get all worktrees to find matches
   wtListRes <- listWorktrees
@@ -428,15 +464,15 @@ cleanupAgentsLogic args = do
     Left err -> do
       -- Propagate worktree enumeration failure
       let msg = "Failed to list worktrees: " <> T.pack (show err)
-          failed = [(shortId, msg) | shortId <- args.caaIssueNumbers]
+          failed = [(shortId, msg) | shortId <- args.issueNumbers]
       logError msg
       pure $ CleanupAgentsResult
         {
-          carCleaned = []
-        , carFailed = failed
+          cleaned = []
+        , failed = failed
         }
     Right allWorktrees -> do
-      results <- forM args.caaIssueNumbers $ \shortId -> do
+      results <- forM args.issueNumbers $ \shortId -> do
         logInfo $ "[" <> shortId <> "] Starting cleanup"
         
         -- a. Stop container (using predictable name)
@@ -479,6 +515,6 @@ cleanupAgentsLogic args = do
       let (failed, succeeded) = partitionEithers results
       pure $ CleanupAgentsResult
         {
-          carCleaned = succeeded
-        , carFailed = failed
+          cleaned = succeeded
+        , failed = failed
         }

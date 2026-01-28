@@ -30,22 +30,22 @@ import ExoMonad.Effects.Effector (GhPrStatusResult(..), PrComment(..))
 
 -- | State passed through the graph
 data AgentState = AgentState
-  { asSessionId :: Text
-  , asCwd :: FilePath
-  , asBranch :: Maybe Text
-  , asIssueNum :: Maybe Int
+  { sessionId :: Text
+  , cwd :: FilePath
+  , branch :: Maybe Text
+  , issueNum :: Maybe Int
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
 -- | Mutable workflow state (in State effect)
 data WorkflowState = WorkflowState
-  { wsGlobalStops :: Int
-  , wsStageRetries :: Map WorkflowStage Int
-  , wsCurrentStage :: WorkflowStage
-  , wsLastBuildResult :: Maybe BuildResult
-  , wsLastPRStatus :: Maybe GhPrStatusResult
-  , wsLastTestResult :: Maybe TestResult
+  { globalStops :: Int
+  , stageRetries :: Map WorkflowStage Int
+  , currentStage :: WorkflowStage
+  , lastBuildResult :: Maybe BuildResult
+  , lastPRStatus :: Maybe GhPrStatusResult
+  , lastTestResult :: Maybe TestResult
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -67,15 +67,15 @@ data BuildResult
   deriving anyclass (FromJSON, ToJSON)
 
 data BuildFailureInfo = BuildFailureInfo
-  { bfiRawOutput :: Text           -- Full cabal output
+  { rawOutput :: Text           -- Full cabal output
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
 data TestResult = TestResult
-  { trPassed :: Int
-  , trFailed :: Int
-  , trRawOutput :: Text
+  { passed :: Int
+  , failed :: Int
+  , rawOutput :: Text
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -116,24 +116,24 @@ type GingerRun = Run SourcePos (Writer Text) Text
 
 instance ToGVal GingerRun StopHookContext where
   toGVal ctx = dict
-    [ "template" ~> template ctx
-    , "stage" ~> stage ctx
-    , "issue_number" ~> issue_number ctx
-    , "branch" ~> branch ctx
-    , "global_stops" ~> global_stops ctx
-    , "stage_retries" ~> stage_retries ctx
-    , "build_failed" ~> build_failed ctx
-    , "raw_output" ~> raw_output ctx
-    , "tests_failed" ~> tests_failed ctx
-    , "test_passed_count" ~> test_passed_count ctx
-    , "test_failed_count" ~> test_failed_count ctx
-    , "pr_exists" ~> pr_exists ctx
-    , "pr_url" ~> pr_url ctx
-    , "pr_number" ~> pr_number ctx
-    , "pr_review_status" ~> pr_review_status ctx
-    , "pr_comments" ~> pr_comments ctx
-    , "stale_docs" ~> stale_docs ctx
-    , "git_dirty_files" ~> git_dirty_files ctx
+    [ "template" ~> ctx.template
+    , "stage" ~> ctx.stage
+    , "issue_number" ~> ctx.issue_number
+    , "branch" ~> ctx.branch
+    , "global_stops" ~> ctx.global_stops
+    , "stage_retries" ~> ctx.stage_retries
+    , "build_failed" ~> ctx.build_failed
+    , "raw_output" ~> ctx.raw_output
+    , "tests_failed" ~> ctx.tests_failed
+    , "test_passed_count" ~> ctx.test_passed_count
+    , "test_failed_count" ~> ctx.test_failed_count
+    , "pr_exists" ~> ctx.pr_exists
+    , "pr_url" ~> ctx.pr_url
+    , "pr_number" ~> ctx.pr_number
+    , "pr_review_status" ~> ctx.pr_review_status
+    , "pr_comments" ~> ctx.pr_comments
+    , "stale_docs" ~> ctx.stale_docs
+    , "git_dirty_files" ~> ctx.git_dirty_files
     ]
 
 instance ToGVal GingerRun PrComment where

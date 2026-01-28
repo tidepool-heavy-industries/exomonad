@@ -21,6 +21,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Data.Foldable (toList)
+import Language.Haskell.TH (mkName)
 
 import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(..), HasJSONSchema(..), objectSchema, arraySchema, oneOfSchema, emptySchema, SchemaType(..), describeField, enumSchema)
 
@@ -234,31 +235,31 @@ instance HasJSONSchema PopupResultElement where
 
 -- | Arguments for the popup tool.
 data PopupArgs = PopupArgs
-  { paTitle :: Maybe Text
+  { title :: Maybe Text
     -- ^ Optional popup title
-  , paElements :: [PopupElement]
+  , elements :: [PopupElement]
     -- ^ Flat list of UI elements
   }
   deriving stock (Show, Eq, Generic)
 
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "pa" } ''PopupArgs
-  [ 'paTitle    ?? "Optional popup title"
-  , 'paElements ?? "Flat list of UI elements"
+$(deriveMCPTypeWith defaultMCPOptions ''PopupArgs
+  [ mkName "title"    ?? "Optional popup title"
+  , mkName "elements" ?? "Flat list of UI elements"
   ])
 
 -- | Result of the popup tool.
 data PopupResult = PopupResult
-  { prStatus :: Text
+  { status :: Text
     -- ^ "completed" or "cancelled"
-  , prButton :: Text
+  , button :: Text
     -- ^ "submit" or "cancel"
-  , prElements :: [PopupResultElement]
+  , elements :: [PopupResultElement]
     -- ^ Elements with values filled in
   }
   deriving stock (Show, Eq, Generic)
 
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "pr" } ''PopupResult
-  [ 'prStatus   ?? "Result status: 'completed' or 'cancelled'"
-  , 'prButton   ?? "Button pressed: 'submit' or 'cancel'"
-  , 'prElements ?? "Elements with values filled in"
+$(deriveMCPTypeWith defaultMCPOptions ''PopupResult
+  [ mkName "status"   ?? "Result status: 'completed' or 'cancelled'"
+  , mkName "button"   ?? "Button pressed: 'submit' or 'cancel'"
+  , mkName "elements" ?? "Elements with values filled in"
   ])

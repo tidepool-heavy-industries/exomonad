@@ -58,15 +58,15 @@ import ExoMonad.Effects.Worktree
 
 -- | Configuration for Worktree interpreter.
 data WorktreeConfig = WorktreeConfig
-  { wcRepoRoot :: FilePath
+  { repoRoot :: FilePath
     -- ^ Root of the git repository.
-  , wcWorktreeDir :: FilePath
+  , worktreeDir :: FilePath
     -- ^ Directory where worktrees are created (relative to repo root).
     -- Defaults to ".worktrees".
-  , wcTargetBranch :: String
+  , targetBranch :: String
     -- ^ Branch to merge worktrees into. Defaults to "main".
     -- Set to "master" for repos using traditional naming.
-  , wcQuiet :: Bool
+  , quiet :: Bool
     -- ^ Suppress verbose output.
   }
   deriving (Show, Eq)
@@ -74,10 +74,10 @@ data WorktreeConfig = WorktreeConfig
 -- | Default configuration.
 defaultWorktreeConfig :: FilePath -> WorktreeConfig
 defaultWorktreeConfig repoRoot = WorktreeConfig
-  { wcRepoRoot = repoRoot
-  , wcWorktreeDir = ".worktrees"
-  , wcTargetBranch = "main"
-  , wcQuiet = True
+  { repoRoot = repoRoot
+  , worktreeDir = ".worktrees"
+  , targetBranch = "main"
+  , quiet = True
   }
 
 
@@ -107,19 +107,19 @@ createWorktreeIO :: WorktreeConfig -> WorktreeSpec -> IO (Either WorktreeError W
 createWorktreeIO config spec = do
   result <- try @SomeException $ do
     -- Generate branch name
-    branchName <- case spec.wsBranchName of
+    branchName <- case spec.branchName of
       Just b -> pure $ T.unpack b
       Nothing -> do
         suffix <- randomHex 6
-        pure $ T.unpack spec.wsBaseName <> "-" <> suffix
+        pure $ T.unpack spec.baseName <> "-" <> suffix
 
     -- Determine worktree path
-    let wtPath = case spec.wsPath of
+    let wtPath = case spec.path of
           Just p -> p
           Nothing ->
-            let wtDir = config.wcRepoRoot </> config.wcWorktreeDir
+            let wtDir = config.repoRoot </> config.worktreeDir
             in wtDir </> branchName
-        baseBranch = maybe "HEAD" T.unpack spec.wsFromBranch
+        baseBranch = maybe "HEAD" T.unpack spec.fromBranch
         wtDirParent = takeDirectory wtPath
 
     -- Ensure parent directory for worktree exists
@@ -128,7 +128,7 @@ createWorktreeIO config spec = do
     -- Create the worktree with a new branch
     (exitCode, _stdout, stderr) <- readProcessWithExitCode
       "git"
-      [ "-C", config.wcRepoRoot
+      [ "-C", config.repoRoot
       , "worktree", "add"
       , "-b", branchName  -- Create new branch
       , wtPath
@@ -139,16 +139,16 @@ createWorktreeIO config spec = do
     case exitCode of
       ExitSuccess -> pure $ Right $ WorktreePath wtPath
       ExitFailure code -> pure $ Left WorktreeGitError
-        { wgeCommand = "worktree add"
-        , wgeExitCode = code
-        , wgeStderr = T.pack stderr
+        { command = "worktree add"
+        , exitCode = code
+        , stderr = T.pack stderr
         }
 
   case result of
     Left (e :: SomeException) -> pure $ Left WorktreeGitError
-      { wgeCommand = "worktree add"
-      , wgeExitCode = -1
-      , wgeStderr = T.pack (show e)
+      { command = "worktree add"
+      , exitCode = -1
+      , stderr = T.pack (show e)
       }
     Right inner -> pure inner
 
@@ -176,7 +176,7 @@ deleteWorktreeIO config (WorktreePath wtPath) = do
         -- Remove the worktree
         (exitCode, _, stderr) <- readProcessWithExitCode
           "git"
-          [ "-C", config.wcRepoRoot
+          [ "-C", config.repoRoot
           , "worktree", "remove"
           , "--force"  -- Force in case of uncommitted changes
           , wtPath
@@ -193,9 +193,9 @@ deleteWorktreeIO config (WorktreePath wtPath) = do
             rmResult <- try @SomeException $ removeDirectoryRecursive wtPath
             case rmResult of
               Left _ -> pure $ Left WorktreeGitError
-                { wgeCommand = "worktree remove"
-                , wgeExitCode = 1
-                , wgeStderr = T.pack stderr
+                { command = "worktree remove"
+                , exitCode = 1
+                , stderr = T.pack stderr
                 }
               Right () -> do
                 -- Directory removed, delete branch (best effort)
@@ -204,9 +204,9 @@ deleteWorktreeIO config (WorktreePath wtPath) = do
 
   case result of
     Left (e :: SomeException) -> pure $ Left WorktreeGitError
-      { wgeCommand = "worktree remove"
-      , wgeExitCode = -1
-      , wgeStderr = T.pack (show e)
+      { command = "worktree remove"
+      , exitCode = -1
+      , stderr = T.pack (show e)
       }
     Right inner -> pure inner
 
@@ -216,7 +216,7 @@ deleteBranch _ Nothing = pure ()
 deleteBranch config (Just branch) = do
   _ <- readProcessWithExitCode
     "git"
-    [ "-C", config.wcRepoRoot
+    [ "-C", config.repoRoot
     , "branch", "-D"
     , T.unpack branch
     ]
@@ -237,31 +237,31 @@ mergeWorktreeIO config (WorktreePath wtPath) commitMsg = do
 
     case branchExit of
       ExitFailure code -> pure $ Left WorktreeGitError
-        { wgeCommand = "rev-parse --abbrev-ref HEAD"
-        , wgeExitCode = code
-        , wgeStderr = T.pack branchErr
+        { command = "rev-parse --abbrev-ref HEAD"
+        , exitCode = code
+        , stderr = T.pack branchErr
         }
       ExitSuccess -> do
         let branch = T.strip $ T.pack branchOut
-            targetBranch = config.wcTargetBranch
+            targetBranch = config.targetBranch
 
         -- Checkout target branch in repo root
         (checkoutExit, _, checkoutErr) <- readProcessWithExitCode
           "git"
-          ["-C", config.wcRepoRoot, "checkout", targetBranch]
+          ["-C", config.repoRoot, "checkout", targetBranch]
           ""
 
         case checkoutExit of
           ExitFailure code -> pure $ Left WorktreeGitError
-            { wgeCommand = T.pack $ "checkout " <> targetBranch
-            , wgeExitCode = code
-            , wgeStderr = T.pack checkoutErr
+            { command = T.pack $ "checkout " <> targetBranch
+            , exitCode = code
+            , stderr = T.pack checkoutErr
             }
           ExitSuccess -> do
             -- Merge the branch
             (mergeExit, _, mergeErr) <- readProcessWithExitCode
               "git"
-              [ "-C", config.wcRepoRoot
+              [ "-C", config.repoRoot
               , "merge"
               , "--no-ff"
               , "-m", T.unpack commitMsg
@@ -275,16 +275,16 @@ mergeWorktreeIO config (WorktreePath wtPath) commitMsg = do
                 if "CONFLICT" `T.isInfixOf` T.pack mergeErr
                   then pure $ Right $ MergeConflict $ T.pack mergeErr
                   else pure $ Left WorktreeGitError
-                    { wgeCommand = "merge"
-                    , wgeExitCode = code
-                    , wgeStderr = T.pack mergeErr
+                    { command = "merge"
+                    , exitCode = code
+                    , stderr = T.pack mergeErr
                     }
 
   case result of
     Left (e :: SomeException) -> pure $ Left WorktreeGitError
-      { wgeCommand = "merge"
-      , wgeExitCode = -1
-      , wgeStderr = T.pack (show e)
+      { command = "merge"
+      , exitCode = -1
+      , stderr = T.pack (show e)
       }
     Right inner -> pure inner
 
@@ -306,9 +306,9 @@ cherryPickFilesIO (WorktreePath srcWorktree) files destDir = do
             (f:_) -> f
             [] -> ""
       in pure $ Left WorktreeFileCopyError
-        { wfceSrcPath = srcWorktree </> failedFile
-        , wfceDestPath = destDir </> failedFile
-        , wfceReason = T.pack (show e)
+        { srcPath = srcWorktree </> failedFile
+        , destPath = destDir </> failedFile
+        , reason = T.pack (show e)
         }
     Right () -> pure $ Right ()
   where
@@ -325,21 +325,21 @@ listWorktreesIO :: WorktreeConfig -> IO (Either WorktreeError [(WorktreePath, Te
 listWorktreesIO config = do
   result <- try @SomeException $ readProcessWithExitCode
     "git"
-    ["-C", config.wcRepoRoot, "worktree", "list", "--porcelain"]
+    ["-C", config.repoRoot, "worktree", "list", "--porcelain"]
     ""
 
   case result of
     Left (e :: SomeException) -> pure $ Left WorktreeGitError
-      { wgeCommand = "worktree list"
-      , wgeExitCode = -1
-      , wgeStderr = T.pack (show e)
+      { command = "worktree list"
+      , exitCode = -1
+      , stderr = T.pack (show e)
       }
     Right (exitCode, stdout, stderr) ->
       case exitCode of
         ExitFailure code -> pure $ Left WorktreeGitError
-          { wgeCommand = "worktree list"
-          , wgeExitCode = code
-          , wgeStderr = T.pack stderr
+          { command = "worktree list"
+          , exitCode = code
+          , stderr = T.pack stderr
           }
         ExitSuccess -> pure $ Right $ parseWorktreeList stdout
 

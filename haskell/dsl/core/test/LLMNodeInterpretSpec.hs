@@ -61,18 +61,18 @@ instance HasJSONSchema TestOutput where
 
 -- | Simple logic graph: Entry → compute → Exit
 data LogicGraph mode = LogicGraph
-  { lgEntry   :: mode :- G.EntryNode Int
-  , lgCompute :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto Exit Int]
-  , lgExit    :: mode :- G.ExitNode Int
+  { entry   :: mode :- G.EntryNode Int
+  , compute :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto Exit Int]
+  , exit    :: mode :- G.ExitNode Int
   }
   deriving Generic
 
 -- | Handler record for logic graph
 logicHandlers :: LogicGraph (AsHandler '[])
 logicHandlers = LogicGraph
-  { lgEntry   = ()
-  , lgCompute = \n -> pure $ gotoExit (n + 1)
-  , lgExit    = ()
+  { entry   = ()
+  , compute = \n -> pure $ gotoExit (n + 1)
+  , exit    = ()
   }
 
 
@@ -84,6 +84,7 @@ logicHandlers = LogicGraph
 -- This is safe because the type guarantees only one option exists.
 extractExitValue :: GotoChoice '[To Exit a] -> a
 extractExitValue (GotoChoice (Here a)) = a
+extractExitValue (GotoChoice (There _)) = error "Impossible: One-element list cannot be There"
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -101,12 +102,12 @@ spec = do
       extractExitValue result `shouldBe` 6
 
     it "works with graph field handlers and returns correct value" $ do
-      let handler = lgCompute logicHandlers
+      let handler = logicHandlers.compute
       let result = run $ callHandler handler (10 :: Int)
       extractExitValue result `shouldBe` 11
 
     it "handles zero correctly" $ do
-      let handler = lgCompute logicHandlers
+      let handler = logicHandlers.compute
       let result = run $ callHandler handler (0 :: Int)
       extractExitValue result `shouldBe` 1
 
@@ -139,12 +140,12 @@ spec = do
   describe "Graph handler types" $ do
     it "Logic handler has correct type and behavior" $ do
       let handler :: Int -> Eff '[] (GotoChoice '[To Exit Int])
-          handler = lgCompute logicHandlers
+          handler = logicHandlers.compute
       -- Verify both type and behavior
       let result = run $ handler 99
       extractExitValue result `shouldBe` 100
 
     it "Graph record compiles with handlers" $ do
       -- Verify the full graph record compiles and handlers work
-      let computeResult = run $ (lgCompute logicHandlers) 5
+      let computeResult = run $ (logicHandlers.compute) 5
       extractExitValue computeResult `shouldBe` 6

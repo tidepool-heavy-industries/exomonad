@@ -42,6 +42,8 @@ import System.Directory (createDirectoryIfMissing, removeFile)
 import System.Environment (lookupEnv)
 import System.FilePath (takeDirectory)
 import System.IO.Error (isDoesNotExistError)
+import Control.Lens ((.~))
+import Data.Generics.Labels ()
 
 -- | Load LLM configuration from environment variables.
 -- REQUIRES EXOMONAD_SERVICE_SOCKET.
@@ -208,7 +210,7 @@ server logger config tracer cbMap =
     handleMcpTools = liftIO $ do
       logDebug logger "[MCP] tools/list request"
       -- Default to config role or defaultRole
-      let effectiveRole = fromMaybe (defaultRole config) (role config >>= roleFromText)
+      let effectiveRole = fromMaybe (config.defaultRole) (config.role >>= roleFromText)
       exportMCPTools logger effectiveRole
 
     handlePing :: Handler T.Text
@@ -233,7 +235,7 @@ server logger config tracer cbMap =
               traceCtx <- newTraceContext
 
               -- Update config with the role from the slug for handlers that need it
-              let configWithRole = config { role = Just slug }
+              let configWithRole = config & #role .~ Just slug
 
               res <- handleMessage logger configWithRole tracer traceCtx cbMap
                 (McpToolCall sessId req.toolName req.arguments)
@@ -307,7 +309,7 @@ server logger config tracer cbMap =
                       let sessId = fromMaybe "jsonrpc" mSessionId
                       liftIO $ logInfo logger $ "[MCP-RPC:" <> slug <> ":" <> sessId <> "] tool=" <> params.mtcpName
                       traceCtx <- liftIO newTraceContext
-                      let configWithRole = config { role = Just slug }
+                      let configWithRole = config & #role .~ Just slug
                       res <- liftIO $ handleMessage logger configWithRole tracer traceCtx cbMap
                         (McpToolCall sessId params.mtcpName params.mtcpArguments)
 

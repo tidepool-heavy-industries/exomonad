@@ -16,26 +16,27 @@ import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.=), object, withObje
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(..), HasJSONSchema(..))
+import Language.Haskell.TH (mkName)
 
 -- | Arguments for file_pr tool.
 -- Issue number and title are inferred from the branch - agent provides context.
 data FilePRArgs = FilePRArgs
-  { fpaTesting     :: Text        -- ^ Required: How was this tested?
-  , fpaCompromises :: Maybe Text  -- ^ Optional: Tradeoffs or shortcuts taken
+  { testing     :: Text        -- ^ Required: How was this tested?
+  , compromises :: Maybe Text  -- ^ Optional: Tradeoffs or shortcuts taken
   }
   deriving stock (Show, Eq, Generic)
 
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "fpa" } ''FilePRArgs
-  [ 'fpaTesting     ?? "How was this tested? What scenarios were verified?"
-  , 'fpaCompromises ?? "Any tradeoffs, shortcuts, or known limitations?"
+$(deriveMCPTypeWith defaultMCPOptions ''FilePRArgs
+  [ mkName "testing"     ?? "How was this tested? What scenarios were verified?"
+  , mkName "compromises" ?? "Any tradeoffs, shortcuts, or known limitations?"
   ])
 
 -- | PR Info for file_pr result.
 data PRInfo = PRInfo
-  { priNumber :: Int
-  , priUrl    :: Text
-  , priStatus :: Text
-  , priTitle  :: Text
+  { number :: Int
+  , url    :: Text
+  , status :: Text
+  , title  :: Text
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON, FromJSON)
@@ -43,17 +44,17 @@ data PRInfo = PRInfo
 -- | Result of file_pr tool.
 -- Returns PR info for either an existing or newly created PR.
 data FilePRResult = FilePRResult
-  { fprPr :: Maybe PRInfo      -- ^ PR info (existing or newly created)
-  , fprCreated :: Bool         -- ^ True if we created a new PR, False if existing found
-  , fprError :: Maybe Text     -- ^ Error message if operation failed
+  { pr :: Maybe PRInfo      -- ^ PR info (existing or newly created)
+  , created :: Bool         -- ^ True if we created a new PR, False if existing found
+  , error :: Maybe Text     -- ^ Error message if operation failed
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON FilePRResult where
   toJSON res = object
-    [ "pr" .= fprPr res
-    , "created" .= fprCreated res
-    , "error" .= fprError res
+    [ "pr" .= res.pr
+    , "created" .= res.created
+    , "error" .= res.error
     ]
 
 instance FromJSON FilePRResult where

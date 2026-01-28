@@ -108,8 +108,8 @@ spec = describe "Worktree Interpreter" $ do
 
       result `shouldSatisfy` isLeft
       case result of
-        Left (WorktreeGitError {wgeCommand}) ->
-          wgeCommand `shouldBe` "worktree add"
+        Left (WorktreeGitError {command}) ->
+          command `shouldBe` "worktree add"
         _ -> expectationFailure "Expected WorktreeGitError"
 
 

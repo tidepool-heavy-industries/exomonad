@@ -23,42 +23,42 @@ runCabalRemote :: Member SshExec effs => Maybe Text -> Eff (Cabal ': effs) a -> 
 runCabalRemote mContainer = interpret $ \case
   CabalBuild path -> do
     result <- execCommand $ ExecRequest
-      { erContainer = mContainer
-      , erCommand = "cabal"
-      , erArgs = ["build", "all", "-v0"]
-      , erWorkingDir = path
-      , erEnv = []
-      , erTimeout = 600
+      { container = mContainer
+      , command = "cabal"
+      , args = ["build", "all", "-v0"]
+      , workingDir = path
+      , env = []
+      , timeout = 600
       }
-    case exExitCode result of
-      Nothing -> pure $ CabalInfraError { cieError = exStderr result }
+    case result.exitCode of
+      Nothing -> pure $ CabalInfraError { cieError = result.stderr }
       Just 0 -> pure CabalSuccess
       Just code -> pure $ CabalBuildFailure
         { cbfExitCode = code
-        , cbfStderr = exStderr result
-        , cbfStdout = exStdout result
+        , cbfStderr = result.stderr
+        , cbfStdout = result.stdout
         }
 
   CabalTest path -> do
     result <- execCommand $ ExecRequest
-      { erContainer = mContainer
-      , erCommand = "cabal"
-      , erArgs = ["test", "--test-show-details=always", "-v0"]
-      , erWorkingDir = path
-      , erEnv = []
-      , erTimeout = 600
+      { container = mContainer
+      , command = "cabal"
+      , args = ["test", "--test-show-details=always", "-v0"]
+      , workingDir = path
+      , env = []
+      , timeout = 600
       }
-    let output = exStdout result <> exStderr result
-    case exExitCode result of
-      Nothing -> pure $ CabalInfraError { cieError = exStderr result }
+    let output = result.stdout <> result.stderr
+    case result.exitCode of
+      Nothing -> pure $ CabalInfraError { cieError = result.stderr }
       Just 0 -> pure $ CabalTestSuccess { ctsOutput = output }
       Just testCode ->
         -- Simple check if it's a build failure (could be improved)
-        if "error:" `T.isInfixOf` exStderr result
+        if "error:" `T.isInfixOf` result.stderr
           then pure $ CabalBuildFailure
             { cbfExitCode = testCode
-            , cbfStderr = exStderr result
-            , cbfStdout = exStdout result
+            , cbfStderr = result.stderr
+            , cbfStdout = result.stdout
             }
           else pure $ CabalTestFailure
             { ctfRawOutput = output
@@ -66,11 +66,11 @@ runCabalRemote mContainer = interpret $ \case
 
   CabalClean path -> do
     void $ execCommand $ ExecRequest
-      { erContainer = mContainer
-      , erCommand = "cabal"
-      , erArgs = ["clean"]
-      , erWorkingDir = path
-      , erEnv = []
-      , erTimeout = 60
+      { container = mContainer
+      , command = "cabal"
+      , args = ["clean"]
+      , workingDir = path
+      , env = []
+      , timeout = 60
       }
     pure CabalSuccess

@@ -37,47 +37,47 @@ import ExoMonad.Effects.GitHub
 
 -- | Brief issue info for summaries.
 data IssueBrief = IssueBrief
-  { ibNumber :: Int
-  , ibTitle :: Text
+  { number :: Int
+  , title :: Text
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON IssueBrief where
   toJSON b = object
-    [ "number" .= ibNumber b
-    , "title" .= ibTitle b
+    [ "number" .= b.number
+    , "title" .= b.title
     ]
 
 -- | Sprint summary info.
 data SprintSummary = SprintSummary
-  { ssTotalOpen :: Int
-  , ssOpenIssues :: [IssueBrief]
+  { totalOpen :: Int
+  , openIssues :: [IssueBrief]
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON SprintSummary where
   toJSON s = object
-    [ "total_open" .= ssTotalOpen s
-    , "open_issues" .= ssOpenIssues s
+    [ "total_open" .= s.totalOpen
+    , "open_issues" .= s.openIssues
     ]
 
 -- | Result of exo_status tool.
 data ExoStatusResult = ExoStatusResult
-  { esrIssue :: Maybe Issue
-  , esrWorktree :: Maybe WorktreeInfo
-  , esrDirtyFiles :: [FilePath]
-  , esrPR :: Maybe PullRequest
-  , esrSprintSummary :: Maybe SprintSummary
+  { issue :: Maybe Issue
+  , worktree :: Maybe WorktreeInfo
+  , dirtyFiles :: [FilePath]
+  , pr :: Maybe PullRequest
+  , sprintSummary :: Maybe SprintSummary
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON ExoStatusResult where
   toJSON res = object
-    [ "issue" .= esrIssue res
-    , "worktree" .= esrWorktree res
-    , "dirty_files" .= esrDirtyFiles res
-    , "pr" .= esrPR res
-    , "sprint_summary" .= esrSprintSummary res
+    [ "issue" .= res.issue
+    , "worktree" .= res.worktree
+    , "dirty_files" .= res.dirtyFiles
+    , "pr" .= res.pr
+    , "sprint_summary" .= res.sprintSummary
     ]
 
 getDevelopmentContext
@@ -129,21 +129,21 @@ getDevelopmentContext maybeIssueId = do
             Left _err -> []
             Right is -> is
           toIssueBrief i = IssueBrief
-            { ibNumber = i.issueNumber
-            , ibTitle = i.issueTitle
+            { number = i.issueNumber
+            , title = i.issueTitle
             }
 
       pure $ Just SprintSummary
-        { ssTotalOpen = length allIssues
-        , ssOpenIssues = map toIssueBrief $ take 10 allIssues
+        { totalOpen = length allIssues
+        , openIssues = map toIssueBrief $ take 10 allIssues
         }
 
   pure ExoStatusResult
-    { esrIssue = mIssue
-    , esrWorktree = mWt
-    , esrDirtyFiles = dirtyFiles
-    , esrPR = mPR
-    , esrSprintSummary = mSprintSummary
+    { issue = mIssue
+    , worktree = mWt
+    , dirtyFiles = dirtyFiles
+    , pr = mPR
+    , sprintSummary = mSprintSummary
     }
 
 -- | Parse issue number from branch name (gh-{num}/* convention)

@@ -44,28 +44,28 @@ runGitRemote container workDir = interpret $ \case
 
   GetDirtyFiles -> do
     result <- execCommand $ ExecRequest
-      { erContainer = Just container
-      , erCommand = "git"
-      , erArgs = ["status", "--porcelain"]
-      , erWorkingDir = workDir
-      , erEnv = []
-      , erTimeout = 30
+      { container = Just container
+      , command = "git"
+      , args = ["status", "--porcelain"]
+      , workingDir = workDir
+      , env = []
+      , timeout = 30
       }
-    pure $ if exExitCode result == Just 0
-      then map (drop 3 . T.unpack) $ T.lines (exStdout result)
+    pure $ if result.exitCode == Just 0
+      then map (drop 3 . T.unpack) $ T.lines (result.stdout)
       else []
 
   GetRecentCommits n -> do
     result <- execCommand $ ExecRequest
-      { erContainer = Just container
-      , erCommand = "git"
-      , erArgs = ["log", "--oneline", "-" <> T.pack (show n), "--format=%s"]
-      , erWorkingDir = workDir
-      , erEnv = []
-      , erTimeout = 30
+      { container = Just container
+      , command = "git"
+      , args = ["log", "--oneline", "-" <> T.pack (show n), "--format=%s"]
+      , workingDir = workDir
+      , env = []
+      , timeout = 30
       }
-    pure $ if exExitCode result == Just 0
-      then T.lines (exStdout result)
+    pure $ if result.exitCode == Just 0
+      then T.lines (result.stdout)
       else []
 
   GetCurrentBranch -> do
@@ -74,15 +74,15 @@ runGitRemote container workDir = interpret $ \case
 
   GetCommitsAhead ref -> do
     result <- execCommand $ ExecRequest
-      { erContainer = Just container
-      , erCommand = "git"
-      , erArgs = ["rev-list", "--count", ref <> "..HEAD"]
-      , erWorkingDir = workDir
-      , erEnv = []
-      , erTimeout = 30
+      { container = Just container
+      , command = "git"
+      , args = ["rev-list", "--count", ref <> "..HEAD"]
+      , workingDir = workDir
+      , env = []
+      , timeout = 30
       }
-    pure $ if exExitCode result == Just 0
-      then case reads (T.unpack $ T.strip $ exStdout result) of
+    pure $ if result.exitCode == Just 0
+      then case reads (T.unpack $ T.strip $ result.stdout) of
         [(n, "")] -> n
         _ -> 0
       else 0
@@ -91,13 +91,13 @@ runGitRemote container workDir = interpret $ \case
 gitCommand :: Member SshExec effs => Text -> FilePath -> [Text] -> Eff effs (Maybe Text)
 gitCommand container wd args = do
   result <- execCommand $ ExecRequest
-    { erContainer = Just container
-    , erCommand = "git"
-    , erArgs = args
-    , erWorkingDir = wd
-    , erEnv = []
-    , erTimeout = 30
+    { container = Just container
+    , command = "git"
+    , args = args
+    , workingDir = wd
+    , env = []
+    , timeout = 30
     }
-  pure $ if exExitCode result == Just 0
-    then Just (exStdout result)
+  pure $ if result.exitCode == Just 0
+    then Just (result.stdout)
     else Nothing

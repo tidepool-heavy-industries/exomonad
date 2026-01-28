@@ -99,20 +99,21 @@ withRetry config = interpose $ \(op :: GitHub x) -> do
         _ -> pure res
 
   case op of
-    CreateIssue {} -> runEitherAttempt op 1 (baseDelayUs config)
-    UpdateIssue {} -> runEitherAttempt op 1 (baseDelayUs config)
-    CloseIssue {} -> runEitherAttempt op 1 (baseDelayUs config)
-    ReopenIssue {} -> runEitherAttempt op 1 (baseDelayUs config)
-    AddIssueLabel {} -> runEitherAttempt op 1 (baseDelayUs config)
-    RemoveIssueLabel {} -> runEitherAttempt op 1 (baseDelayUs config)
-    AddIssueAssignee {} -> runEitherAttempt op 1 (baseDelayUs config)
-    RemoveIssueAssignee {} -> runEitherAttempt op 1 (baseDelayUs config)
-    GetIssue {} -> runEitherAttempt op 1 (baseDelayUs config)
-    ListIssues {} -> runEitherAttempt op 1 (baseDelayUs config)
-    CreatePR {} -> runEitherAttempt op 1 (baseDelayUs config)
-    GetPullRequest {} -> runEitherAttempt op 1 (baseDelayUs config)
-    ListPullRequests {} -> runEitherAttempt op 1 (baseDelayUs config)
-    GetPullRequestReviews {} -> runEitherAttempt op 1 (baseDelayUs config)
+    CreateIssue {} -> runEitherAttempt op 1 (config.baseDelayUs)
+    UpdateIssue {} -> runEitherAttempt op 1 (config.baseDelayUs)
+    CloseIssue {} -> runEitherAttempt op 1 (config.baseDelayUs)
+    ReopenIssue {} -> runEitherAttempt op 1 (config.baseDelayUs)
+    AddIssueLabel {} -> runEitherAttempt op 1 (config.baseDelayUs)
+    RemoveIssueLabel {} -> runEitherAttempt op 1 (config.baseDelayUs)
+    AddIssueAssignee {} -> runEitherAttempt op 1 (config.baseDelayUs)
+    RemoveIssueAssignee {} -> runEitherAttempt op 1 (config.baseDelayUs)
+    GetIssue {} -> runEitherAttempt op 1 (config.baseDelayUs)
+    ListIssues {} -> runEitherAttempt op 1 (config.baseDelayUs)
+    CreatePR {} -> runEitherAttempt op 1 (config.baseDelayUs)
+    GetPullRequest {} -> runEitherAttempt op 1 (config.baseDelayUs)
+    ListPullRequests {} -> runEitherAttempt op 1 (config.baseDelayUs)
+    GetPullRequestReviews {} -> runEitherAttempt op 1 (config.baseDelayUs)
+    GetDiscussion {} -> runEitherAttempt op 1 (config.baseDelayUs)
     CheckAuth -> case config.tracer of
       Nothing -> send op
       Just t -> do

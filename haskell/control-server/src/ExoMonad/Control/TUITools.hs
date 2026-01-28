@@ -59,19 +59,19 @@ popupLogic args = do
   TUI.PopupResult button valuesMap <- showUI internalDef
 
   -- Zip values back into element structure
-  let resultElements = zipWithValues (paElements args) valuesMap
+  let resultElements = zipWithValues (args.elements) valuesMap
 
   pure $ PopupResult
-    { prStatus = if button == "submit" then "completed" else "cancelled"
-    , prButton = button
-    , prElements = resultElements
+    { status = if button == "submit" then "completed" else "cancelled"
+    , button = button
+    , elements = resultElements
     }
 
 -- | Convert PopupArgs to internal PopupDefinition.
 toPopupDefinition :: PopupArgs -> PopupDefinition
 toPopupDefinition args = PopupDefinition
-  { pdTitle = maybe "Popup" id (paTitle args)
-  , pdComponents = map toComponent (paElements args)
+  { pdTitle = maybe "Popup" id (args.title)
+  , pdComponents = map toComponent (args.elements)
   }
   where
     toComponent :: PopupElement -> Component

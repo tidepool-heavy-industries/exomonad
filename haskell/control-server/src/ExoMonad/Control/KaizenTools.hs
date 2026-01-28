@@ -34,11 +34,11 @@ kaizenReportLogic
   => KaizenReportArgs
   -> Eff es KaizenReportResult
 kaizenReportLogic args = do
-  logInfo $ "Filing Kaizen report: " <> args.kraSummary
+  logInfo $ "Filing Kaizen report: " <> args.summary
 
   let body = formatKaizenBody args
       labels = constructKaizenLabels args
-      input = (defaultCreateIssueInput kaizenRepo args.kraSummary)
+      input = (defaultCreateIssueInput kaizenRepo args.summary)
         { ciiBody   = body
         , ciiLabels = labels
         }
@@ -46,41 +46,41 @@ kaizenReportLogic args = do
   res <- createIssue input
   case res of
     Left err -> pure $ KaizenReportResult
-      { krrNumber  = 0
-      , krrUrl     = ""
-      , krrSuccess = False
-      , krrError   = Just (T.pack $ show err)
+      { number  = 0
+      , url     = ""
+      , success = False
+      , error   = Just (T.pack $ show err)
       }
     Right num -> pure $ KaizenReportResult
-      { krrNumber  = num
-      , krrUrl     = "https://github.com/" <> kaizenRepo.unRepo <> "/issues/" <> T.pack (show num)
-      , krrSuccess = True
-      , krrError   = Nothing
+      { number  = num
+      , url     = "https://github.com/" <> kaizenRepo.unRepo <> "/issues/" <> T.pack (show num)
+      , success = True
+      , error   = Nothing
       }
 
 -- | Format the issue body from nested structured fields.
 formatKaizenBody :: KaizenReportArgs -> Text
 formatKaizenBody args = T.unlines
-  [ "**Component:** " <> T.pack (show args.kraComponent)
-      <> maybe "" (\s -> " / " <> s) args.kraSubcomponent
-  , "**Impact:** " <> T.pack (show args.kraImpact)
-  , "**Friction Type:** " <> T.pack (show args.kraFrictionType)
-  , "**Estimated Effort:** " <> T.pack (show args.kraActionability.acEstimatedEffort)
+  [ "**Component:** " <> T.pack (show args.component)
+      <> maybe "" (\s -> " / " <> s) args.subcomponent
+  , "**Impact:** " <> T.pack (show args.impact)
+  , "**Friction Type:** " <> T.pack (show args.frictionType)
+  , "**Estimated Effort:** " <> T.pack (show args.actionability.estimatedEffort)
   , ""
   , "## Description"
-  , args.kraDescription
+  , args.description
   , ""
-  , maybe "" (\w -> "## Current Workaround\n" <> w <> "\n") args.kraActionability.acWorkaround
-  , maybe "" (\s -> "## Suggested Fix\n" <> s <> "\n") args.kraActionability.acSuggestedFix
+  , maybe "" (\w -> "## Current Workaround\n" <> w <> "\n") args.actionability.workaround
+  , maybe "" (\s -> "## Suggested Fix\n" <> s <> "\n") args.actionability.suggestedFix
   ]
 
 -- | Construct labels from structured fields.
 constructKaizenLabels :: KaizenReportArgs -> [Text]
 constructKaizenLabels args =
   [ "kaizen"
-  , impactLabel args.kraImpact
-  , frictionLabel args.kraFrictionType
-  , componentLabel args.kraComponent
+  , impactLabel args.impact
+  , frictionLabel args.frictionType
+  , componentLabel args.component
   ]
 
 -- | Convert Impact to label.

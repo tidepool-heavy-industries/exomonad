@@ -90,12 +90,12 @@ spec = testGroup "Circuit Breaker Tests"
       let sessionId = "stale-session"
       now <- getCurrentTime
       let staleTime = addUTCTime (-600) now -- 10 minutes ago
-      let staleState = CircuitBreakerState
-            { cbSessionId = sessionId
-            , cbGlobalStops = 0
-            , cbStageRetries = Map.empty
-            , cbLastStopTime = staleTime
-            , cbStopHookActive = True -- Locked
+          staleState = CircuitBreakerState
+            { sessionId = sessionId
+            , globalStops = 0
+            , stageRetries = Map.empty
+            , lastStopTime = staleTime
+            , stopHookActive = True -- Locked
             }
       
       atomically $ modifyTVar' cbMap (Map.insert sessionId staleState)
@@ -109,8 +109,8 @@ spec = testGroup "Circuit Breaker Tests"
       case Map.lookup sessionId finalStates of
         Nothing -> assertFailure "Session missing"
         Just s -> do
-          assertBool "Should be inactive after run" (not (cbStopHookActive s))
-          assertBool "Time should be updated" (cbLastStopTime s >= now)
+          assertBool "Should be inactive after run" (not (s.stopHookActive))
+          assertBool "Time should be updated" (s.lastStopTime >= now)
 
   , testCase "Reset session clears state" $ do
       cbMap <- initCircuitBreaker

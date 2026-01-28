@@ -35,17 +35,17 @@ escape t = "<escape>" <> t <> "<escape>"
 
 -- | Format an edge training example as a JSONL conversation.
 formatEdgeTrainingExample :: EdgeTrainingExample -> ByteString
-formatEdgeTrainingExample EdgeTrainingExample{eteInput=ScoreEdgeInput{..}, eteOutput=ScoreEdgeOutput{..}} =
+formatEdgeTrainingExample EdgeTrainingExample{input=ScoreEdgeInput{..}, output=ScoreEdgeOutput{..}} =
   let
     userTurn = T.unlines
       [ "<start_of_turn>user"
       , "Score this edge:"
-      , "Query: " <> escape seiQuery
-      , "Source: " <> escape (seiSourceFile <> ":" <> T.pack (show seiSourceLine))
-      , "Source hover: " <> escape seiSourceHover
-      , "Target: " <> escape (seiTargetFile <> ":" <> T.pack (show seiTargetLine))
-      , "Target hover: " <> escape seiTargetHover
-      , "Edge type: " <> escape (edgeTypeToText seiEdgeType)
+      , "Query: " <> escape query
+      , "Source: " <> escape (sourceFile <> ":" <> T.pack (show sourceLine))
+      , "Source hover: " <> escape sourceHover
+      , "Target: " <> escape (targetFile <> ":" <> T.pack (show targetLine))
+      , "Target hover: " <> escape targetHover
+      , "Edge type: " <> escape (edgeTypeToText edgeType)
       , "<end_of_turn>"
       ]
     
@@ -53,12 +53,12 @@ formatEdgeTrainingExample EdgeTrainingExample{eteInput=ScoreEdgeInput{..}, eteOu
       [ "<start_of_turn>model\n"
       , "<start_function_call>"
       , "call:score_edge{"
-      , "relevance:" <> T.pack (show seoRelevance) <> ","
-      , "risk:" <> T.pack (show seoRisk) <> ","
-      , "reasoning:" <> escape seoReasoning <> ","
-      , "is_exhaustive:" <> T.toLower (T.pack (show seoIsExhaustive)) <> ","
-      , "is_type_family:" <> T.toLower (T.pack (show seoIsTypeFamily)) <> ","
-      , "is_exported:" <> T.toLower (T.pack (show seoIsExported))
+      , "relevance:" <> T.pack (show relevance) <> ","
+      , "risk:" <> T.pack (show risk) <> ","
+      , "reasoning:" <> escape reasoning <> ","
+      , "is_exhaustive:" <> T.toLower (T.pack (show isExhaustive)) <> ","
+      , "is_type_family:" <> T.toLower (T.pack (show isTypeFamily)) <> ","
+      , "is_exported:" <> T.toLower (T.pack (show isExported))
       , "}"
       , "<end_function_call>\n"
       , "<end_of_turn>"
@@ -146,10 +146,10 @@ formatSelectSymbolsExample symName moduleName packageName signature maybeDocs ca
 formatCandidateGroups :: CandidateGroups -> Text
 formatCandidateGroups CandidateGroups{..} = T.unlines
   [ "Candidates:"
-  , "  Fields: " <> formatList cgFields
-  , "  Inputs: " <> formatList cgInputs
-  , "  Output: " <> formatList cgOutput
-  , "  References: " <> case cgReferences of
+  , "  Fields: " <> formatList fields
+  , "  Inputs: " <> formatList inputs
+  , "  Output: " <> formatList output
+  , "  References: " <> case references of
       Left note -> note
       Right refs -> formatList refs
   ]
