@@ -15,11 +15,14 @@ library
     import:           warnings
     exposed-modules:
         ExoMonad.Justfile.Interpreter
+        ExoMonad.JustExec.Interpreter
     build-depends:
         base >= 4.17 && < 5,
         freer-simple >= 1.2 && < 2,
         text >= 2.0 && < 3,
         process >= 1.6 && < 2,
+        aeson >= 2.1 && < 3,
+        bytestring >= 0.11 && < 1,
         exomonad-core
     hs-source-dirs:   src
     default-language: GHC2024
@@ -38,6 +41,7 @@ library
 test-suite justfile-interpreter-test
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
+    other-modules:    JustExecSpec
     hs-source-dirs:   test
     default-language: GHC2024
     default-extensions:

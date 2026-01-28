@@ -87,3 +87,8 @@ show-sha:
 clean:
     rm -rf {{metadata_dir}}
     docker builder prune -f
+
+# Demo recipe for JustExec effect
+test-exec-demo:
+    @echo "Running tests..."
+    @echo "{"status": "passed", "count": 42}"
