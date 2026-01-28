@@ -14,7 +14,6 @@ All Haskell packages live here, organized by architectural pattern.
 | Work on semantic-scout code exploration | `control-server/CLAUDE.md` (merged from agents/semantic-scout) |
 | Work with LSP integration | `effects/lsp-interpreter/CLAUDE.md` |
 | Generate training data for FunctionGemma | `tools/training-generator/CLAUDE.md` |
-| Work on the WebSocket server | `native-server/CLAUDE.md` |
 | Understand wire protocols | `protocol/CLAUDE.md` |
 | Work on dev tools (GHCi oracle, sleeptime) | `tools/CLAUDE.md` → `tools/{name}/CLAUDE.md` |
 
@@ -42,8 +41,6 @@ haskell/CLAUDE.md  ← YOU ARE HERE (router)
 ├── protocol/CLAUDE.md
 │   ├── wire-types/CLAUDE.md
 │   └── generated-ts/CLAUDE.md
-├── native-server/CLAUDE.md  ← WebSocket server facade
-├── platform/CLAUDE.md
 └── tools/CLAUDE.md
     ├── ghci-oracle/CLAUDE.md
     ├── sleeptime/CLAUDE.md
@@ -59,7 +56,6 @@ haskell/CLAUDE.md  ← YOU ARE HERE (router)
 | `agents/` | Production agents (semantic-scout merged into control-server) | See control-server for active scout implementation |
 | `effects/` | Effect interpreters (HTTP, subprocess, etc.) | Adding/modifying external integrations |
 | `runtime/` | Execution backends (actor, WASM) | Understanding concurrent execution |
-| `native-server/` | WebSocket server facade | Server lifecycle, effect composition |
 | `protocol/` | Wire formats (native, WASM) | Client-server communication |
 | `tools/` | Standalone utilities | GHCi integration, log analysis, training data |
 | `vendor/` | Vendored dependencies | Rarely (freer-simple, ginger internals) |
@@ -76,7 +72,6 @@ This codebase follows well-known CS patterns:
 ## Common Commands
 
 Build all:     `cabal build all`
-Run server:    `just native`
 Run tests:     `cabal test all`
 Pre-commit:    `just pre-commit`
 
@@ -85,4 +80,4 @@ Pre-commit:    `just pre-commit`
 1. Define effect type in `dsl/core/src/ExoMonad/Effect/Types.hs` (or Effects/*.hs)
 2. Create interpreter package at `effects/{name}-interpreter/`
 3. Add to `cabal.project`
-4. Wire into `native-server/` (see native-server/CLAUDE.md)
+4. Wire into `control-server/` if needed for Claude Code++

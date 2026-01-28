@@ -45,7 +45,7 @@ enum Commands {
 
 /// Template for an agent tab with interaction pane and status pane.
 #[derive(Template)]
-#[template(path = "agent_tab.kdl.j2")]
+#[template(path = "agent_tab.kdl.j2", escape = "none")]
 struct AgentTab {
     tab_name: String,
     pane_name: String,
@@ -56,14 +56,14 @@ struct AgentTab {
 
 /// Template for the main layout with multiple agent tabs.
 #[derive(Template)]
-#[template(path = "main.kdl.j2")]
+#[template(path = "main.kdl.j2", escape = "none")]
 struct MainLayout {
     agent_tabs: Vec<String>,
 }
 
 /// Template for a single subagent layout.
 #[derive(Template)]
-#[template(path = "subagent.kdl.j2")]
+#[template(path = "subagent.kdl.j2", escape = "none")]
 struct SubagentLayout {
     agent_tab: String,
 }

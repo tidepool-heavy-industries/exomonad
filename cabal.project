@@ -36,9 +36,6 @@ packages:
     haskell/protocol/wire-types
     haskell/protocol/generated-ts
 
-    -- Native server
-    haskell/native-server
-
     -- Control server (Claude Code++ TCP endpoint)
     haskell/control-server
 
