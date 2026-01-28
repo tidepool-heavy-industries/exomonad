@@ -84,8 +84,11 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (getCurrentTime)
 import Data.UUID.V4 (nextRandom)
-import Servant.Client (runClientM, mkClientEnv)
+import Servant.Client (mkClientEnv)
+import qualified Servant.Client as SC
 import System.Environment (lookupEnv)
+import Network.HTTP.Client (newManager)
+import Network.HTTP.Client.TLS (tlsManagerSettings)
 
 import ExoMonad.Effect.Types
   ( LLM(..)
@@ -101,9 +104,9 @@ import ExoMonad.Effects.LLMProvider
   , ThinkingBudget(..)
   )
 import qualified ExoMonad.Effects.LLMProvider as LP
-import ExoMonad.LLM.API.Anthropic (anthropicComplete, ToolChoice(..))
-import ExoMonad.LLM.Interpreter (mkLLMEnv, buildAnthropicRequest, parseBaseUrl)
-import ExoMonad.LLM.Types (LLMConfig(..), AnthropicSecrets(..), BaseUrl(..), ApiKey(..), LLMEnv(..))
+import ExoMonad.Teaching.Anthropic (anthropicComplete)
+import ExoMonad.LLM.Interpreter (buildAnthropicRequest)
+import ExoMonad.LLM.Types (ToolChoice(..))
 import ExoMonad.Teaching.Types
   ( TeachingEnv(..)
   , TeachingConfig(..)
@@ -319,13 +322,6 @@ callHaiku TeachingEnv{..} systemPrompt userText schema = do
 
   -- Create respond tool from schema
   let respondTool = schemaToRespondTool schema
-      llmConfig = LLMHttpConfig
-        { lcAnthropicSecrets = Just $ AnthropicSecrets
-            { asApiKey = ApiKey apiKey
-            , asBaseUrl = BaseUrl "https://api.anthropic.com"
-            }
-        , lcOpenAISecrets = Nothing
-        }
 
   let anthropicCfg = AnthropicConfig
         { acModel = "claude-haiku-4-5-20251001"
@@ -342,14 +338,20 @@ callHaiku TeachingEnv{..} systemPrompt userText schema = do
         (Just $ ToolChoiceTool "respond")
 
   -- Make the actual API call
-  llmEnv <- mkLLMEnv llmConfig
-  let LLMEnv { leManager = manager } = llmEnv
-  let baseUrl = parseBaseUrl "https://api.anthropic.com"
+  manager <- newManager tlsManagerSettings
+  let baseUrl = SC.BaseUrl SC.Https "api.anthropic.com" 443 ""
       clientEnv = mkClientEnv manager baseUrl
 
-  result <- runClientM (anthropicComplete apiKey req) clientEnv
+  result <- SC.runClientM (anthropicComplete apiKey req) clientEnv
   case result of
-    Left err -> error $ "Haiku API error: " <> show err
+    Left (SC.FailureResponse _ resp) ->
+      error $ "Haiku API error: HTTP " <> show (SC.responseStatusCode resp)
+    Left (SC.DecodeFailure msg _) ->
+      error $ "Haiku API decode failure: " <> show msg
+    Left (SC.ConnectionError _) ->
+      error "Haiku API connection error"
+    Left _ ->
+      error "Haiku API unknown client error"
     Right resp -> pure resp
 
 

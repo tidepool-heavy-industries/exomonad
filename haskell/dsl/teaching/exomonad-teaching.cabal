@@ -13,6 +13,7 @@ library
     ExoMonad.Teaching.Teacher
     ExoMonad.Teaching.Record
     ExoMonad.Teaching.LLM
+    ExoMonad.Teaching.Anthropic
   hs-source-dirs: src
   build-depends:
       base >=4.14 && <5
@@ -27,7 +28,10 @@ library
     , filepath >=1.4
     , vector >=0.12
     , freer-simple >=1.2
+    , servant >=0.20
     , servant-client >=0.20
+    , http-client >=0.7
+    , http-client-tls >=0.3
   default-language: Haskell2010
   default-extensions:
     DeriveGeneric

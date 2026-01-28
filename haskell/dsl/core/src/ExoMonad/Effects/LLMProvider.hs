@@ -11,21 +11,15 @@ module ExoMonad.Effects.LLMProvider
     -- * Provider-Specific Config
   , LLMProviderConfig
   , AnthropicConfig(..)
-  , OpenAIConfig(..)
   , ThinkingBudget(..)
 
     -- * Provider-Specific Response
   , LLMProviderResponse
   , AnthropicResponse(..)
-  , OpenAIResponse(..)
 
     -- * Response Component Types
   , ContentBlock(..)
   , Usage(..)
-  , Choice(..)
-  , Message(..)
-  , ToolCall(..)
-  , FunctionCall(..)
 
     -- * Effect
   , LLMComplete(..)
@@ -51,13 +45,12 @@ import GHC.Generics (Generic)
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | LLM provider at type level.
-data LLMProvider = Anthropic | OpenAI
+data LLMProvider = Anthropic
   deriving (Show, Eq)
 
 -- | Singleton for provider - brings type-level to term-level.
 data SProvider (p :: LLMProvider) where
   SAnthropic :: SProvider 'Anthropic
-  SOpenAI :: SProvider 'OpenAI
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -83,7 +76,6 @@ instance FromJSON ThinkingBudget where
 -- | Type family mapping provider to its config type.
 type family LLMProviderConfig (p :: LLMProvider) :: Type where
   LLMProviderConfig 'Anthropic = AnthropicConfig
-  LLMProviderConfig 'OpenAI = OpenAIConfig
 
 -- | Anthropic-specific configuration.
 data AnthropicConfig = AnthropicConfig
@@ -94,16 +86,6 @@ data AnthropicConfig = AnthropicConfig
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
--- | OpenAI-specific configuration.
-data OpenAIConfig = OpenAIConfig
-  { oaModel :: Text           -- e.g., "gpt-4o"
-  , oaMaxTokens :: Int
-  , oaTemperature :: Maybe Double
-  , oaSystemPrompt :: Maybe Text
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- PROVIDER-SPECIFIC RESPONSE
 -- ════════════════════════════════════════════════════════════════════════════
@@ -111,7 +93,6 @@ data OpenAIConfig = OpenAIConfig
 -- | Type family mapping provider to its response type.
 type family LLMProviderResponse (p :: LLMProvider) :: Type where
   LLMProviderResponse 'Anthropic = AnthropicResponse
-  LLMProviderResponse 'OpenAI = OpenAIResponse
 
 -- | Anthropic API response (content blocks style).
 data AnthropicResponse = AnthropicResponse
@@ -131,23 +112,6 @@ instance ToJSON AnthropicResponse where
 instance FromJSON AnthropicResponse where
   parseJSON = withObject "AnthropicResponse" $ \v ->
     AnthropicResponse <$> v .: "content" <*> v .: "stop_reason" <*> v .: "usage"
-
--- | OpenAI API response (choices style).
-data OpenAIResponse = OpenAIResponse
-  { orChoices :: [Choice]
-  , orUsage :: Usage
-  }
-  deriving (Show, Eq, Generic)
-
-instance ToJSON OpenAIResponse where
-  toJSON r = object
-    [ "choices" .= r.orChoices
-    , "usage" .= r.orUsage
-    ]
-
-instance FromJSON OpenAIResponse where
-  parseJSON = withObject "OpenAIResponse" $ \v ->
-    OpenAIResponse <$> v .: "choices" <*> v .: "usage"
 
 -- | Content block (Anthropic-style).
 --
@@ -178,78 +142,6 @@ instance FromJSON ContentBlock where
       "redacted_thinking" -> pure RedactedThinkingContent
       _ -> fail $ "Unknown content block type: " ++ show ty
 
--- | OpenAI choice.
-data Choice = Choice
-  { cMessage :: Message
-  , cFinishReason :: Maybe Text
-  }
-  deriving (Show, Eq, Generic)
-
-instance ToJSON Choice where
-  toJSON c = object
-    [ "message" .= c.cMessage
-    , "finish_reason" .= c.cFinishReason
-    ]
-
-instance FromJSON Choice where
-  parseJSON = withObject "Choice" $ \v ->
-    Choice <$> v .: "message" <*> v .:? "finish_reason"
-
--- | OpenAI message.
-data Message = Message
-  { mRole :: Text
-  , mContent :: Maybe Text
-  , mToolCalls :: Maybe [ToolCall]
-  }
-  deriving (Show, Eq, Generic)
-
-instance ToJSON Message where
-  toJSON m = object
-    [ "role" .= m.mRole
-    , "content" .= m.mContent
-    , "tool_calls" .= m.mToolCalls
-    ]
-
-instance FromJSON Message where
-  parseJSON = withObject "Message" $ \v ->
-    Message <$> v .: "role" <*> v .:? "content" <*> v .:? "tool_calls"
-
--- | OpenAI tool call.
-data ToolCall = ToolCall
-  { tcId :: Text
-  , tcType :: Text
-  , tcFunction :: FunctionCall
-  }
-  deriving (Show, Eq, Generic)
-
-instance ToJSON ToolCall where
-  toJSON tc = object
-    [ "id" .= tc.tcId
-    , "type" .= tc.tcType
-    , "function" .= tc.tcFunction
-    ]
-
-instance FromJSON ToolCall where
-  parseJSON = withObject "ToolCall" $ \v ->
-    ToolCall <$> v .: "id" <*> v .: "type" <*> v .: "function"
-
--- | OpenAI function call.
-data FunctionCall = FunctionCall
-  { fcName :: Text
-  , fcArguments :: Text  -- JSON string
-  }
-  deriving (Show, Eq, Generic)
-
-instance ToJSON FunctionCall where
-  toJSON fc = object
-    [ "name" .= fc.fcName
-    , "arguments" .= fc.fcArguments
-    ]
-
-instance FromJSON FunctionCall where
-  parseJSON = withObject "FunctionCall" $ \v ->
-    FunctionCall <$> v .: "name" <*> v .: "arguments"
-
 -- | Token usage.
 data Usage = Usage
   { uPromptTokens :: Int
@@ -265,7 +157,6 @@ instance ToJSON Usage where
 
 instance FromJSON Usage where
   parseJSON = withObject "Usage" $ \v ->
-    -- Handle both Anthropic (input_tokens) and OpenAI (prompt_tokens) field names
     Usage
       <$> (v .: "input_tokens" <|> v .: "prompt_tokens")
       <*> (v .: "output_tokens" <|> v .: "completion_tokens")
@@ -298,7 +189,7 @@ data LLMError
 -- | LLM completion effect with type-level provider.
 --
 -- The provider parameter determines:
--- - Request schema (Anthropic messages API vs OpenAI chat completions)
+-- - Request schema (Anthropic messages API)
 -- - Response parsing
 -- - Auth mechanism
 --

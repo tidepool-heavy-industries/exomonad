@@ -136,11 +136,9 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 │   ├── tui-sidebar/CLAUDE.md   ← TUI sidebar: ratatui rendering for graph UIs (IMPLEMENTED)
 │   ├── tui-popup/CLAUDE.md     ← TUI popup: floating pane UI for user interaction
 │   └── tui-spawner/CLAUDE.md   ← FIFO-based popup spawning for cross-container TUI
-├── types-first-dev/CLAUDE.md   ← V3 TDD protocol project
 ├── deploy/CLAUDE.md            ← Cloudflare deployment
 ├── tools/CLAUDE.md             ← Root-level tools (micro-gastown, blast-radius)
 └── typescript/
-    ├── native-gui/CLAUDE.md    ← Solid.js frontend (alternative UI)
     └── telegram-bot/CLAUDE.md  ← Telegram integration
 ```
 
@@ -158,9 +156,7 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 | Work on semantic-scout code exploration | `haskell/control-server/CLAUDE.md` (merged from agents/semantic-scout) |
 | Work with LSP (Language Server Protocol) | `haskell/effects/lsp-interpreter/CLAUDE.md` |
 | Generate training data for FunctionGemma | `haskell/tools/training-generator/CLAUDE.md` |
-| Work on types-first-dev V3 protocol | `types-first-dev/CLAUDE.md` |
 | Deploy to Cloudflare Workers | `deploy/CLAUDE.md` |
-| Work on the native server | `haskell/native-server/CLAUDE.md` |
 | Work on TUI sidebar (terminal UI rendering) | `rust/tui-sidebar/CLAUDE.md` |
 | Work on container spawning/exec | `rust/docker-ctl/CLAUDE.md` |
 | Understand control protocol types | `rust/exomonad-shared/CLAUDE.md` |
@@ -626,23 +622,19 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 ### Effect Interpreters (`haskell/effects/`)
 | Package | Purpose |
 |---------|---------|
-| `haskell/native-server` | Servant + WebSocket server (facade) |
-| `haskell/effects/llm-interpreter` | Anthropic/OpenAI API calls |
+| `haskell/effects/llm-interpreter` | Anthropic API calls (Socket preferred) |
 | `haskell/effects/habitica-interpreter` | Habitica API |
-| `haskell/effects/ui-interpreter` | WebSocket ↔ UI bridging |
 | `haskell/effects/observability-interpreter` | OpenTelemetry traces to Grafana |
 | `haskell/effects/lsp-interpreter` | LSP via lsp-client |
 | `haskell/effects/ghci-interpreter` | GHCi Oracle thin client |
 | `haskell/effects/github-interpreter` | GitHub API integration |
 | `haskell/effects/worktree-interpreter` | Git worktree management |
 | `haskell/effects/cabal-interpreter` | Cabal build operations |
-| `haskell/effects/devlog-interpreter` | Devlog effect interpreter |
 
 ### Integrations (`haskell/effects/`, `haskell/protocol/`)
 | Package | Purpose |
 |---------|---------|
 | `haskell/effects/habitica` | Habitica effect types (standalone) |
-| `haskell/effects/telegram` | Telegram effect types (disabled) |
 | `haskell/protocol/wire-types` | Native protocol types |
 | `haskell/protocol/generated-ts` | TypeScript type generation |
 
@@ -674,7 +666,7 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 | New graph annotation | `haskell/dsl/core/src/ExoMonad/Graph/Types.hs` |
 | New interpreter | `haskell/effects/<name>-interpreter/` |
 | New MCP tool/agent | `haskell/agents/<name>/` |
-| TypeScript frontend/bot | `typescript/<name>/` |
+| TypeScript bot | `typescript/<name>/` |
 | Agents (consuming repos) | Separate repo (urchin, etc.) |
 
 ### Naming Conventions
@@ -767,7 +759,6 @@ withLSPSession "/path/to/project" $ \session -> do
 ## References
 
 - [haskell/dsl/core/CLAUDE.md](haskell/dsl/core/CLAUDE.md) - Graph DSL reference
-- [haskell/native-server/CLAUDE.md](haskell/native-server/CLAUDE.md) - Native server docs
 - [deploy/CLAUDE.md](deploy/CLAUDE.md) - Cloudflare deployment
 - [freer-simple](https://hackage.haskell.org/package/freer-simple) - Effect system
 - [Anthropic tool use](https://docs.anthropic.com/en/docs/tool-use)

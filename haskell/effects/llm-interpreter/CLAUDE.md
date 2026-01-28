@@ -1,14 +1,13 @@
-# LLM Interpreter - Anthropic/OpenAI HTTP Client
+# LLM Interpreter - Anthropic Socket/HTTP Client
 
-Interprets the `LLMComplete` effect by making HTTP requests to LLM APIs.
+Interprets the `LLMComplete` effect by making requests to Anthropic via Unix Socket (preferred) or direct HTTP (teaching only).
 
 ## When to Read This
 
 Read this if you're:
 - Debugging LLM API calls
-- Adding a new LLM provider
 - Understanding how graph LLM nodes interpret
-- Configuring API keys and endpoints
+- Configuring API keys and socket paths
 
 ## Architecture
 
@@ -20,24 +19,22 @@ Read this if you're:
                                        │ LLMComplete effect
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ LLM Interpreter (servant-client)                                        │
-│   buildAnthropicRequest → POST /v1/messages                         │
-│   or buildOpenAIRequest → POST /v1/chat/completions                 │
+│ LLM Interpreter (exomonad-socket-client)                             │
+│   buildAnthropicRequest → ServiceRequest::AnthropicChat             │
 └──────────────────────────────────────┬──────────────────────────────┘
-                                       │ HTTP
+                                       │ Unix Socket (NDJSON)
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ Anthropic / OpenAI API                                               │
-│   Returns: text, tool_use blocks, structured output                 │
+│ Service Server (Rust)                                                │
+│   Calls Anthropic API                                               │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Supported Providers
 
-| Provider | Singleton | Config Type | Endpoint |
-|----------|-----------|-------------|----------|
-| Anthropic | `SAnthropic` | `AnthropicConfig` | `/v1/messages` |
-| OpenAI | `SOpenAI` | `OpenAIConfig` | `/v1/chat/completions` |
+| Provider | Singleton | Config Type | Implementation |
+|----------|-----------|-------------|----------------|
+| Anthropic | `SAnthropic` | `AnthropicConfig` | Socket-based |
 
 ## Usage
 
@@ -46,13 +43,7 @@ import ExoMonad.LLM.Interpreter (runLLMComplete, mkLLMEnv, LLMConfig(..))
 import ExoMonad.Effects.LLMProvider (LLMComplete, complete, SAnthropic)
 
 config :: LLMConfig
-config = LLMConfig
-  { lcAnthropicSecrets = Just $ AnthropicSecrets
-      { asApiKey = "sk-ant-..."
-      , asBaseUrl = Nothing  -- Use default
-      }
-  , lcOpenAISecrets = Nothing
-  }
+config = LLMSocketConfig ".exomonad/sockets/service.sock"
 
 main :: IO ()
 main = do
@@ -64,27 +55,22 @@ main = do
 
 ## Configuration
 
-### API Keys
+### Config Types
 
 ```haskell
-data LLMConfig = LLMConfig
-  { lcAnthropicSecrets :: Maybe AnthropicSecrets
-  , lcOpenAISecrets :: Maybe OpenAISecrets
-  }
-
-data AnthropicSecrets = AnthropicSecrets
-  { asApiKey :: Text
-  , asBaseUrl :: Maybe BaseUrl  -- Override for proxies
-  }
+data LLMConfig
+  = LLMSocketConfig
+      { lcSocketPath :: FilePath
+      }
 ```
 
 ### Per-Request Config
 
 ```haskell
 data AnthropicConfig = AnthropicConfig
-  { acModel :: Text              -- "claude-sonnet-4-20250514"
+  { acModel :: Text              -- "claude-3-5-sonnet-latest"
   , acMaxTokens :: Int
-  , acTemperature :: Maybe Double
+  , acThinking :: ThinkingBudget  -- Extended thinking config
   , acSystemPrompt :: Maybe Text
   }
 ```
@@ -94,15 +80,7 @@ data AnthropicConfig = AnthropicConfig
 The interpreter supports:
 
 1. **Tool Use** - Passing tools to the LLM
-2. **Structured Output** - JSON schema constraints
-
-```haskell
--- With schema
-response <- complete SAnthropic cfg prompt (Just jsonSchema)
-
--- With tools
-response <- completeWithTools SAnthropic cfg prompt tools
-```
+2. **Structured Output** - JSON schema constraints (via forced respond tool)
 
 Tool definitions use `AnthropicTool`:
 
@@ -114,43 +92,15 @@ data AnthropicTool = AnthropicTool
   }
 ```
 
-## Error Handling
-
-```haskell
-data LLMError
-  = LLMNetworkError Text      -- Connection failed
-  | LLMAPIError Int Text      -- API returned error status
-  | LLMParseError Text        -- Response parse failure
-  | LLMRateLimited            -- 429 Too Many Requests
-  | LLMContextLength          -- Prompt too long
-```
-
-The interpreter maps HTTP errors to these typed errors.
-
 ## Key Modules
 
 | Module | Purpose |
 |--------|---------|
 | `Interpreter.hs` | Effect interpreter, request building |
-| `Types.hs` | Config types, environment |
-| `API/Anthropic.hs` | Anthropic-specific serialization |
-| `API/OpenAI.hs` | OpenAI-specific serialization |
-
-## Testing
-
-The interpreter can be mocked for testing:
-
-```haskell
-import Test.ExoMonad.MockLLM (runMockLLM, mockResponse)
-
--- In tests, use mock instead of real HTTP
-runMockLLM [mockResponse "Hello!"] $ do
-  result <- complete SAnthropic cfg "Hi"
-  -- result contains "Hello!"
-```
+| `Types.hs` | Config types, wire types, environment |
 
 ## Related Documentation
 
 - [dsl/core/CLAUDE.md](../../dsl/core/CLAUDE.md) - LLM effect type, handler patterns
 - [effects/CLAUDE.md](../CLAUDE.md) - Effect interpreter pattern
-- [session-interpreter/CLAUDE.md](../session-interpreter/CLAUDE.md) - Claude Code subprocess (alternative)
+- [dsl/teaching/CLAUDE.md](../../dsl/teaching/CLAUDE.md) - Standalone HTTP client for teaching
