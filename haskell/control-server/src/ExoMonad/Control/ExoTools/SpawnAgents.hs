@@ -1,6 +1,4 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -8,16 +6,9 @@
 {-# LANGUAGE TypeOperators #-}
 
 module ExoMonad.Control.ExoTools.SpawnAgents
-  ( SpawnAgentsGraph(..)
-  , spawnAgentsHandlers
-  , spawnAgentsLogic
+  ( spawnAgentsLogic
   , SpawnAgentsArgs(..)
   , SpawnAgentsResult(..)
-  , CleanupAgentsGraph(..)
-  , cleanupAgentsHandlers
-  , cleanupAgentsLogic
-  , CleanupAgentsArgs(..)
-  , CleanupAgentsResult(..)
   , findRepoRoot
   )
 where
@@ -28,23 +19,17 @@ import Data.Either (partitionEithers)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import GHC.Generics (Generic)
 import System.FilePath ((</>))
 
 import ExoMonad.Effects.GitHub (GitHub, Issue(..), IssueState(..), Repo(..), getIssue)
-import ExoMonad.Effects.DockerSpawner (DockerSpawner, SpawnConfig(..), spawnContainer, ContainerId(..), stopContainer, execContainer, ExecResult(..))
+import ExoMonad.Effects.DockerSpawner (DockerSpawner, SpawnConfig(..), spawnContainer, ContainerId(..), execContainer, ExecResult(..), stopContainer)
 import ExoMonad.Effects.Env (Env, getEnv)
 import ExoMonad.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
-import ExoMonad.Effects.Worktree (Worktree, WorktreeSpec(..), WorktreePath(..), createWorktree, deleteWorktree, listWorktrees)
+import ExoMonad.Effects.Worktree (Worktree, WorktreeSpec(..), WorktreePath(..), createWorktree, listWorktrees, deleteWorktree)
 
 import ExoMonad.Effects.FileSystem (FileSystem, fileExists, directoryExists)
 import ExoMonad.Effects.Zellij (Zellij, TabConfig(..), TabId(..), LayoutSpec(..), checkZellijEnv, newTab, generateLayout)
 import ExoMonad.Effect.Log (Log, logInfo, logError, logWarn)
-import ExoMonad.Role (Role(..))
-import ExoMonad.Graph.Generic (AsHandler, type (:-))
-import ExoMonad.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
-import ExoMonad.Graph.Goto (Goto, GotoChoice, To, gotoExit)
-import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef, MCPRoleHint)
 
 import ExoMonad.Control.ExoTools.Internal (slugify)
 import ExoMonad.Control.ExoTools.SpawnCleanup (SpawnCleanup, SpawnProgress(..), runSpawnCleanup, acquireWorktree, acquireContainer, emitProgress, cleanupAll)
@@ -70,83 +55,22 @@ findRepoRoot = do
 data SpawnMode
   = SpawnZellij  -- ^ Use local Zellij tabs (legacy)
   | SpawnDocker  -- ^ Use Docker containers via DockerSpawner
-  deriving stock (Show, Eq)
+  deriving (Show, Eq)
 
 parseSpawnMode :: Maybe Text -> SpawnMode
 parseSpawnMode (Just "zellij") = SpawnZellij
 parseSpawnMode _               = SpawnDocker
 
--- | Graph definition for spawn_agents tool.
-data SpawnAgentsGraph mode = SpawnAgentsGraph
-  {
-    saEntry :: mode :- EntryNode SpawnAgentsArgs
-      :@ MCPExport
-      :@ MCPToolDef '("spawn_agents", "Create worktrees and branches for parallel agent dispatch. Accepts optional 'backend' parameter ('claude' or 'gemini', defaults to 'claude').")
-      :@ MCPRoleHint 'TL
-
-  , saRun :: mode :- LogicNode
-      :@ Input SpawnAgentsArgs
-      :@ UsesEffects '[GitHub, Git, Worktree, FileSystem, Zellij, Env, DockerSpawner, Log, Goto Exit SpawnAgentsResult]
-
-  , saExit :: mode :- ExitNode SpawnAgentsResult
-  }
-  deriving Generic
-
--- | Graph definition for cleanup_agents tool.
-data CleanupAgentsGraph mode = CleanupAgentsGraph
-  {
-    caEntry :: mode :- EntryNode CleanupAgentsArgs
-      :@ MCPExport
-      :@ MCPToolDef '("cleanup_agents", "Stop containers and remove worktrees for specified issue numbers.")
-      :@ MCPRoleHint 'TL
-
-  , caRun :: mode :- LogicNode
-      :@ Input CleanupAgentsArgs
-      :@ UsesEffects '[Git, Worktree, DockerSpawner, Log, Goto Exit CleanupAgentsResult]
-
-  , caExit :: mode :- ExitNode CleanupAgentsResult
-  }
-  deriving Generic
-
--- | Handlers for spawn_agents graph.
-spawnAgentsHandlers
-  :: (Member GitHub es, Member Git es, Member Worktree es, Member FileSystem es, Member Zellij es, Member Env es, Member DockerSpawner es, Member Log es)
-  => SpawnAgentsGraph (AsHandler es)
-spawnAgentsHandlers = SpawnAgentsGraph
-  {
-    saEntry = ()
-  , saRun = spawnAgentsLogic
-  , saExit = ()
-  }
-
--- | Handlers for cleanup_agents graph.
-
-cleanupAgentsHandlers
-
-  :: (Member Worktree es, Member DockerSpawner es, Member Log es)
-
-  => CleanupAgentsGraph (AsHandler es)
-
-cleanupAgentsHandlers = CleanupAgentsGraph
-
-  { caEntry = ()
-
-  , caRun = cleanupAgentsLogic
-
-  , caExit = ()
-
-  }
-
 -- | Core logic for spawn_agents.
 spawnAgentsLogic
   :: (Member GitHub es, Member Git es, Member Worktree es, Member FileSystem es, Member Zellij es, Member Env es, Member DockerSpawner es, Member Log es)
   => SpawnAgentsArgs
-  -> Eff es (GotoChoice '[To Exit SpawnAgentsResult])
+  -> Eff es SpawnAgentsResult
 spawnAgentsLogic args = do
   -- 1. Check Zellij environment (fail if not in Zellij)
   mZellijSession <- checkZellijEnv
   case mZellijSession of
-    Nothing -> pure $ gotoExit $ SpawnAgentsResult
+    Nothing -> pure $ SpawnAgentsResult
       {
         sarWorktrees = []
       , sarTabs = []
@@ -174,7 +98,7 @@ spawnAgentsLogic args = do
           validBackends = ["claude", "gemini"]
 
       if backendRaw `notElem` validBackends
-        then pure $ gotoExit $ SpawnAgentsResult
+        then pure $ SpawnAgentsResult
           {
             sarWorktrees = []
           , sarTabs = []
@@ -191,7 +115,7 @@ spawnAgentsLogic args = do
               worktrees = [(sid, path) | (sid, path, _) <- succeeded]
               tabs = [(sid, tabId) | (sid, _, TabId tabId) <- succeeded]
 
-          pure $ gotoExit $ SpawnAgentsResult
+          pure $ SpawnAgentsResult
             {
               sarWorktrees = worktrees
             , sarTabs = tabs
@@ -321,7 +245,8 @@ processIssue spawnMode repoRoot wtBaseDir backend shortId = do
                               (controlSocket, tuiSocket) = case spawnMode of
                                 SpawnDocker -> ("/sockets/control.sock", "/sockets/tui.sock")
                                 SpawnZellij -> 
-                                  ( repoRoot </> ".exomonad" </> "sockets" </> "control.sock"
+                                  (
+                                    repoRoot </> ".exomonad" </> "sockets" </> "control.sock"
                                   , repoRoot </> ".exomonad" </> "sockets" </> "tui.sock"
                                   )
 
@@ -477,7 +402,7 @@ processIssue spawnMode repoRoot wtBaseDir backend shortId = do
 cleanupAgentsLogic
   :: (Member Worktree es, Member DockerSpawner es, Member Log es)
   => CleanupAgentsArgs
-  -> Eff es (GotoChoice '[To Exit CleanupAgentsResult])
+  -> Eff es CleanupAgentsResult
 cleanupAgentsLogic args = do
   logInfo $ "Cleaning up agents for issues: " <> T.intercalate ", " args.caaIssueNumbers
   
@@ -489,7 +414,7 @@ cleanupAgentsLogic args = do
       let msg = "Failed to list worktrees: " <> T.pack (show err)
           failed = [(shortId, msg) | shortId <- args.caaIssueNumbers]
       logError msg
-      pure $ gotoExit $ CleanupAgentsResult
+      pure $ CleanupAgentsResult
         {
           carCleaned = []
         , carFailed = failed
@@ -536,7 +461,7 @@ cleanupAgentsLogic args = do
           (Left stopErr, wts) -> pure $ Left (shortId, "Container stop failed: " <> stopErr <> "; Worktree deletion failed: " <> T.intercalate "; " wts)
 
       let (failed, succeeded) = partitionEithers results
-      pure $ gotoExit $ CleanupAgentsResult
+      pure $ CleanupAgentsResult
         {
           carCleaned = succeeded
         , carFailed = failed

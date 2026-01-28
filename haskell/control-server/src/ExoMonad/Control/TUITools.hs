@@ -12,8 +12,7 @@
 -- | General-purpose popup MCP tool.
 module ExoMonad.Control.TUITools
   ( -- * Popup Tool
-    PopupGraph(..)
-  , popupLogic
+    popupLogic
   , PopupArgs(..)
   , PopupResult(..)
 
@@ -37,29 +36,8 @@ import ExoMonad.Effect.TUI
   ( TUI, showUI, PopupDefinition(..), Component(..), ComponentSpec(..)
   )
 import qualified ExoMonad.Effect.TUI as TUI (PopupResult(..))
-import ExoMonad.Effect.Types (Return, returnValue)
-import ExoMonad.Role (Role(..))
-import ExoMonad.Graph.Generic (type (:-))
-import ExoMonad.Graph.Generic.Core (LogicNode)
-import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, GraphEntries, GraphEntry(..))
 
 import ExoMonad.Control.TUITools.Types
-
--- ════════════════════════════════════════════════════════════════════════════
--- GRAPH DEFINITION
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Graph definition for popup tool.
-newtype PopupGraph mode = PopupGraph
-  { popupRun :: mode :- LogicNode
-      :@ Input PopupArgs
-      :@ UsesEffects '[TUI, Return PopupResult]
-  }
-  deriving Generic
-
--- | MCP tool entry point declaration for popup.
-type instance GraphEntries PopupGraph =
-  '[ "popup" ':~> '("popupRun", PopupArgs, "Show a general-purpose popup dialog with configurable UI elements. Returns user input as structured data.", '[ 'Dev, 'TL, 'PM]) ]
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- POPUP LOGIC
@@ -70,7 +48,7 @@ type instance GraphEntries PopupGraph =
 -- Converts the input elements to the internal PopupDefinition format,
 -- shows the UI, and then zips values back into the result elements.
 popupLogic
-  :: (Member TUI es, Member (Return PopupResult) es)
+  :: (Member TUI es)
   => PopupArgs
   -> Eff es PopupResult
 popupLogic args = do
@@ -83,7 +61,7 @@ popupLogic args = do
   -- Zip values back into element structure
   let resultElements = zipWithValues (paElements args) valuesMap
 
-  returnValue $ PopupResult
+  pure $ PopupResult
     { prStatus = if button == "submit" then "completed" else "cancelled"
     , prButton = button
     , prElements = resultElements

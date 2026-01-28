@@ -1,10 +1,7 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 
@@ -15,9 +12,7 @@ module ExoMonad.Control.PMStatus
   , CycleTimeMetrics(..)
   , CurrentStateMetrics(..)
   , PrLagMetrics(..)
-  , PmStatusGraph(..)
   , pmStatusLogic
-  , pmStatusHandlers
   ) where
 
 import Control.Monad.Freer (Eff, Member)
@@ -25,50 +20,17 @@ import Data.List (sort)
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import Data.Time (UTCTime, diffUTCTime, addUTCTime, nominalDay)
-import GHC.Generics (Generic)
 
 import ExoMonad.Effects.GitHub (GitHub, listIssues, defaultIssueFilter, IssueFilter(..), IssueState(..), Issue(..), listPullRequests, PRFilter(..), defaultPRFilter, PRState(..), PullRequest(..), Repo(..), defaultRepo)
 import ExoMonad.Effect.Types (Time, getCurrentTime)
-import ExoMonad.Role (Role(..))
-import ExoMonad.Graph.Generic (AsHandler, type (:-))
-import ExoMonad.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
-import ExoMonad.Graph.Goto (Goto, GotoChoice, To, gotoExit)
-import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef, MCPRoleHint)
 
 import ExoMonad.Control.PMStatus.Types
-
--- ════════════════════════════════════════════════════════════════════════════
--- GRAPH
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Graph definition for pm_status tool.
-data PmStatusGraph mode = PmStatusGraph
-  { psEntry :: mode :- EntryNode PmStatusArgs
-      :@ MCPExport
-      :@ MCPToolDef '("pm_status", "Sprint health dashboard for PM observability. Calculates velocity, cycle time, and state distribution.")
-      :@ MCPRoleHint 'PM
-
-  , psRun :: mode :- LogicNode
-      :@ Input PmStatusArgs
-      :@ UsesEffects '[GitHub, Time, Goto Exit PmStatusResult]
-
-  , psExit :: mode :- ExitNode PmStatusResult
-  }
-  deriving Generic
-
--- | Handlers for pm_status graph.
-pmStatusHandlers :: (Member GitHub es, Member Time es) => PmStatusGraph (AsHandler es)
-pmStatusHandlers = PmStatusGraph
-  { psEntry = ()
-  , psRun = pmStatusLogic
-  , psExit = ()
-  }
 
 -- | Core logic for pm_status.
 pmStatusLogic
   :: (Member GitHub es, Member Time es)
   => PmStatusArgs
-  -> Eff es (GotoChoice '[To Exit PmStatusResult])
+  -> Eff es PmStatusResult
 pmStatusLogic args = do
   now <- getCurrentTime
   let periodSeconds = fromIntegral args.psaPeriodDays * nominalDay
@@ -115,7 +77,7 @@ pmStatusLogic args = do
                   then Just $ aggregateLabels allIssues
                   else Nothing
 
-  pure $ gotoExit PmStatusResult
+  pure $ PmStatusResult
     { psrVelocity = velocity
     , psrTrend = trend
     , psrCycleTime = CycleTimeMetrics ctMedian ctP90

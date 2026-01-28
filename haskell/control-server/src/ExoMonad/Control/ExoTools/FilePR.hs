@@ -1,6 +1,4 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -8,59 +6,21 @@
 {-# LANGUAGE TypeOperators #-}
 
 module ExoMonad.Control.ExoTools.FilePR
-  ( FilePRGraph(..)
-  , filePRHandlers
-  , filePRLogic
+  ( filePRLogic
   , FilePRArgs(..)
   , FilePRResult(..)
   , PRInfo(..)
   ) where
 
 import Control.Monad.Freer (Eff, Member)
-import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Maybe (listToMaybe)
-import GHC.Generics (Generic)
 
 import ExoMonad.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
 import ExoMonad.Effects.GitHub (GitHub, Repo(..), PRCreateSpec(..), PRUrl(..), PullRequest(..), PRFilter(..), Issue(..), getIssue, createPR, listPullRequests, defaultPRFilter, defaultRepo)
-import ExoMonad.Role (Role(..))
-import ExoMonad.Graph.Generic (AsHandler, type (:-))
-import ExoMonad.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
-import ExoMonad.Graph.Goto (Goto, GotoChoice, To, gotoExit)
-import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef, MCPRoleHint)
 
 import ExoMonad.Control.ExoTools.Internal (parseIssueNumber, slugify, formatPRBody)
 import ExoMonad.Control.ExoTools.FilePR.Types
-
--- ════════════════════════════════════════════════════════════════════════════
--- GRAPH
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Graph definition for file_pr tool.
-data FilePRGraph mode = FilePRGraph
-  { fpEntry :: mode :- EntryNode FilePRArgs
-      :@ MCPExport
-      :@ MCPToolDef '("file_pr", "File a pull request for current issue. Idempotent: returns existing PR if one exists.")
-      :@ MCPRoleHint 'Dev
-
-  , fpRun :: mode :- LogicNode
-      :@ Input FilePRArgs
-      :@ UsesEffects '[Git, GitHub, Goto Exit FilePRResult]
-
-  , fpExit :: mode :- ExitNode FilePRResult
-  }
-  deriving Generic
-
--- | Handlers for file_pr graph.
-filePRHandlers
-  :: (Member Git es, Member GitHub es)
-  => FilePRGraph (AsHandler es)
-filePRHandlers = FilePRGraph
-  { fpEntry = ()
-  , fpRun = filePRLogic
-  , fpExit = ()
-  }
 
 -- | Core logic for file_pr.
 -- Issue number and title inferred from branch. Agent provides testing/compromises.
@@ -68,7 +28,7 @@ filePRHandlers = FilePRGraph
 filePRLogic
   :: (Member Git es, Member GitHub es)
   => FilePRArgs
-  -> Eff es (GotoChoice '[To Exit FilePRResult])
+  -> Eff es FilePRResult
 filePRLogic args = do
   -- 1. Get Worktree/Git info
   mWt <- getWorktreeInfo
@@ -80,16 +40,16 @@ filePRLogic args = do
 
   case mIssueNum of
     Nothing ->
-      pure $ gotoExit $ FilePRResult Nothing False (Just "Not on an issue branch. file_pr requires gh-{num}/* branch naming.")
+      pure $ FilePRResult Nothing False (Just "Not on an issue branch. file_pr requires gh-{num}/* branch naming.")
     Just num -> do
       -- 3. Get Issue Info
       let repo = defaultRepo
       issueResult <- getIssue repo num False
       case issueResult of
         Left _err ->
-          pure $ gotoExit $ FilePRResult Nothing False (Just $ "GitHub error fetching issue #" <> T.pack (show num))
+          pure $ FilePRResult Nothing False (Just $ "GitHub error fetching issue #" <> T.pack (show num))
         Right Nothing ->
-          pure $ gotoExit $ FilePRResult Nothing False (Just $ "Issue #" <> T.pack (show num) <> " not found.")
+          pure $ FilePRResult Nothing False (Just $ "Issue #" <> T.pack (show num) <> " not found.")
         Right (Just issue) -> do
           -- 4. Check if PR already exists (idempotent)
           let searchStr = "[gh-" <> T.pack (show num) <> "]"
@@ -108,7 +68,7 @@ filePRLogic args = do
                     , priStatus = T.pack (show pr.prState)
                     , priTitle = pr.prTitle
                     }
-              pure $ gotoExit $ FilePRResult (Just info) False Nothing
+              pure $ FilePRResult (Just info) False Nothing
 
             Nothing -> do
               -- 5. Prepare PR Spec
@@ -130,7 +90,7 @@ filePRLogic args = do
               prResult <- createPR spec
               case prResult of
                 Left _err ->
-                  pure $ gotoExit $ FilePRResult Nothing False (Just "GitHub error creating PR")
+                  pure $ FilePRResult Nothing False (Just "GitHub error creating PR")
                 Right (PRUrl url) -> do
                   -- Note: We don't have the PR number from createPR, so we use 0
                   -- In practice, the URL is what matters
@@ -140,4 +100,4 @@ filePRLogic args = do
                         , priStatus = "OPEN"
                         , priTitle = title
                         }
-                  pure $ gotoExit $ FilePRResult (Just info) True Nothing
+                  pure $ FilePRResult (Just info) True Nothing

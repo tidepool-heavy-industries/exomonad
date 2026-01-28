@@ -36,7 +36,6 @@ library
         ExoMonad.Control.Hook.Policy
         ExoMonad.Control.Hook.CircuitBreaker
         ExoMonad.Control.Handler.Hook
-        ExoMonad.Control.Handler.MCP
         ExoMonad.Control.Observability
         ExoMonad.Control.Interpreters.Traced
         -- Hook implementations
@@ -71,6 +70,31 @@ library
         ExoMonad.Control.FeedbackTools
         ExoMonad.Control.FeedbackTools.Types
         ExoMonad.Control.RoleConfig
+        -- Role DSL
+        ExoMonad.Control.Role.Types
+        ExoMonad.Control.Role.Reify
+        ExoMonad.Control.Role.Dispatch
+        -- Role DSL Tools
+        ExoMonad.Control.Role.Tool.SpawnAgents
+        ExoMonad.Control.Role.Tool.ExoStatus
+        ExoMonad.Control.Role.Tool.Popup
+        ExoMonad.Control.Role.Tool.FilePR
+        ExoMonad.Control.Role.Tool.PMStatus
+        ExoMonad.Control.Role.Tool.GitHub
+        -- Role DSL Servers
+        ExoMonad.Control.Role.Server.Orchestration
+        ExoMonad.Control.Role.Server.TUI
+        ExoMonad.Control.Role.Server.Workflow
+        ExoMonad.Control.Role.Server.Planning
+        ExoMonad.Control.Role.Server.GitHub
+        -- Role DSL Definitions
+        ExoMonad.Control.Role.Definition.TL
+        ExoMonad.Control.Role.Definition.Dev
+        ExoMonad.Control.Role.Definition.PM
+        -- Role DSL Registry
+        ExoMonad.Control.Role.Registry
+        ExoMonad.Control.Role.Handlers
+        ExoMonad.Control.Runtime
         ExoMonad.Control.GHTools
         ExoMonad.Control.GHTools.Types
         ExoMonad.Control.Export

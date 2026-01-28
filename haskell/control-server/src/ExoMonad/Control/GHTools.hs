@@ -1,49 +1,38 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE QuasiQuotes #-}
 
 -- | GitHub MCP tools for centralized issue operations.
 module ExoMonad.Control.GHTools
   ( -- * List Tool
-    GHIssueListGraph(..)
-  , ghIssueListLogic
+    ghIssueListLogic
   , GHIssueListArgs(..)
   , GHIssueListResult(..)
 
     -- * Show Tool
-  , GHIssueShowGraph(..)
   , ghIssueShowLogic
   , GHIssueShowArgs(..)
   , GHIssueShowResult(..)
 
     -- * Create Tool
-  , GHIssueCreateGraph(..)
   , ghIssueCreateLogic
   , GHIssueCreateArgs(..)
   , GHIssueCreateResult(..)
 
     -- * Update Tool
-  , GHIssueUpdateGraph(..)
   , ghIssueUpdateLogic
   , GHIssueUpdateArgs(..)
   , GHIssueUpdateResult(..)
 
     -- * Close Tool
-  , GHIssueCloseGraph(..)
   , ghIssueCloseLogic
   , GHIssueCloseArgs(..)
   , GHIssueCloseResult(..)
 
     -- * Reopen Tool
-  , GHIssueReopenGraph(..)
   , ghIssueReopenLogic
   , GHIssueReopenArgs(..)
   , GHIssueReopenResult(..)
@@ -56,7 +45,6 @@ import Control.Monad.Freer (Eff, Member)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import GHC.Generics (Generic)
 
 import ExoMonad.Effects.GitHub
   ( GitHub, Repo(..), IssueState(..), IssueFilter(..)
@@ -64,10 +52,6 @@ import ExoMonad.Effects.GitHub
   , listIssues, getIssue, createIssue, updateIssue, closeIssue, reopenIssue
   )
 import ExoMonad.Effects.Env (Env, getEnv)
-import ExoMonad.Graph.Generic (type (:-))
-import ExoMonad.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
-import ExoMonad.Graph.Goto (Goto, GotoChoice, To, gotoExit)
-import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef)
 
 import ExoMonad.Control.GHTools.Types
 
@@ -75,25 +59,11 @@ import ExoMonad.Control.GHTools.Types
 -- GH ISSUE LIST TOOL
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Graph definition for gh_issue_list tool.
-data GHIssueListGraph mode = GHIssueListGraph
-  { gilEntry :: mode :- EntryNode GHIssueListArgs
-      :@ MCPExport
-      :@ MCPToolDef '("gh_issue_list", "List GitHub issues with optional status/label filters.")
-
-  , gilRun :: mode :- LogicNode
-      :@ Input GHIssueListArgs
-      :@ UsesEffects '[GitHub, Env, Goto Exit GHIssueListResult]
-
-  , gilExit :: mode :- ExitNode GHIssueListResult
-  }
-  deriving Generic
-
 -- | Core logic for gh_issue_list.
 ghIssueListLogic
   :: (Member GitHub es, Member Env es)
   => GHIssueListArgs
-  -> Eff es (GotoChoice '[To Exit GHIssueListResult])
+  -> Eff es GHIssueListResult
 ghIssueListLogic args = do
   repo <- getRepo args.gilaRepo
   let filt = defaultIssueFilter
@@ -103,12 +73,12 @@ ghIssueListLogic args = do
         }
   res <- listIssues repo filt
   case res of
-    Left err -> pure $ gotoExit $ GHIssueListResult
+    Left err -> pure $ GHIssueListResult
       { gilrIssues = []
       , gilrCount  = 0
       , gilrError  = Just (T.pack $ show err)
       }
-    Right issues -> pure $ gotoExit $ GHIssueListResult
+    Right issues -> pure $ GHIssueListResult
       { gilrIssues = issues
       , gilrCount  = length issues
       , gilrError  = Nothing
@@ -119,35 +89,21 @@ ghIssueListLogic args = do
 -- GH ISSUE SHOW TOOL
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Graph definition for gh_issue_show tool.
-data GHIssueShowGraph mode = GHIssueShowGraph
-  { gisEntry :: mode :- EntryNode GHIssueShowArgs
-      :@ MCPExport
-      :@ MCPToolDef '("gh_issue_show", "Get detailed information about a specific GitHub issue by number.")
-
-  , gisRun :: mode :- LogicNode
-      :@ Input GHIssueShowArgs
-      :@ UsesEffects '[GitHub, Env, Goto Exit GHIssueShowResult]
-
-  , gisExit :: mode :- ExitNode GHIssueShowResult
-  }
-  deriving Generic
-
 -- | Core logic for gh_issue_show.
 ghIssueShowLogic
   :: (Member GitHub es, Member Env es)
   => GHIssueShowArgs
-  -> Eff es (GotoChoice '[To Exit GHIssueShowResult])
+  -> Eff es GHIssueShowResult
 ghIssueShowLogic args = do
   repo <- getRepo args.gisaRepo
   res <- getIssue repo args.gisaNumber True -- Include comments
   case res of
-    Left err -> pure $ gotoExit $ GHIssueShowResult
+    Left err -> pure $ GHIssueShowResult
       { gisrIssue = Nothing
       , gisrFound = False
       , gisrError = Just (T.pack $ show err)
       }
-    Right maybeIssue -> pure $ gotoExit $ GHIssueShowResult
+    Right maybeIssue -> pure $ GHIssueShowResult
       { gisrIssue = maybeIssue
       , gisrFound = case maybeIssue of
           Just _ -> True
@@ -160,25 +116,11 @@ ghIssueShowLogic args = do
 -- GH ISSUE CREATE TOOL
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Graph definition for gh_issue_create tool.
-data GHIssueCreateGraph mode = GHIssueCreateGraph
-  { gcEntry :: mode :- EntryNode GHIssueCreateArgs
-      :@ MCPExport
-      :@ MCPToolDef '("gh_issue_create", "Create a new GitHub issue.")
-
-  , gcRun :: mode :- LogicNode
-      :@ Input GHIssueCreateArgs
-      :@ UsesEffects '[GitHub, Env, Goto Exit GHIssueCreateResult]
-
-  , gcExit :: mode :- ExitNode GHIssueCreateResult
-  }
-  deriving Generic
-
 -- | Core logic for gh_issue_create.
 ghIssueCreateLogic
   :: (Member GitHub es, Member Env es)
   => GHIssueCreateArgs
-  -> Eff es (GotoChoice '[To Exit GHIssueCreateResult])
+  -> Eff es GHIssueCreateResult
 ghIssueCreateLogic args = do
   repo <- getRepo args.gcaRepo
   let input = CreateIssueInput
@@ -190,12 +132,12 @@ ghIssueCreateLogic args = do
         }
   res <- createIssue input
   case res of
-    Left err -> pure $ gotoExit $ GHIssueCreateResult
+    Left err -> pure $ GHIssueCreateResult
       { gcrNumber  = 0
       , gcrSuccess = False
       , gcrError   = Just (T.pack $ show err)
       }
-    Right num -> pure $ gotoExit $ GHIssueCreateResult
+    Right num -> pure $ GHIssueCreateResult
       { gcrNumber  = num
       , gcrSuccess = True
       , gcrError   = Nothing
@@ -206,25 +148,11 @@ ghIssueCreateLogic args = do
 -- GH ISSUE UPDATE TOOL
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Graph definition for gh_issue_update tool.
-data GHIssueUpdateGraph mode = GHIssueUpdateGraph
-  { guEntry :: mode :- EntryNode GHIssueUpdateArgs
-      :@ MCPExport
-      :@ MCPToolDef '("gh_issue_update", "Update fields of a GitHub issue.")
-
-  , guRun :: mode :- LogicNode
-      :@ Input GHIssueUpdateArgs
-      :@ UsesEffects '[GitHub, Env, Goto Exit GHIssueUpdateResult]
-
-  , guExit :: mode :- ExitNode GHIssueUpdateResult
-  }
-  deriving Generic
-
 -- | Core logic for gh_issue_update.
 ghIssueUpdateLogic
   :: (Member GitHub es, Member Env es)
   => GHIssueUpdateArgs
-  -> Eff es (GotoChoice '[To Exit GHIssueUpdateResult])
+  -> Eff es GHIssueUpdateResult
 ghIssueUpdateLogic args = do
   repo <- getRepo args.guaRepo
   let input = emptyUpdateIssueInput
@@ -236,12 +164,12 @@ ghIssueUpdateLogic args = do
         }
   res <- updateIssue repo args.guaNumber input
   case res of
-    Left err -> pure $ gotoExit $ GHIssueUpdateResult
+    Left err -> pure $ GHIssueUpdateResult
       { gurSuccess = False
       , gurNumber  = args.guaNumber
       , gurError   = Just (T.pack $ show err)
       }
-    Right () -> pure $ gotoExit $ GHIssueUpdateResult
+    Right () -> pure $ GHIssueUpdateResult
       { gurSuccess = True
       , gurNumber  = args.guaNumber
       , gurError   = Nothing
@@ -252,35 +180,21 @@ ghIssueUpdateLogic args = do
 -- GH ISSUE CLOSE TOOL
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Graph definition for gh_issue_close tool.
-data GHIssueCloseGraph mode = GHIssueCloseGraph
-  { gclEntry :: mode :- EntryNode GHIssueCloseArgs
-      :@ MCPExport
-      :@ MCPToolDef '("gh_issue_close", "Close a GitHub issue.")
-
-  , gclRun :: mode :- LogicNode
-      :@ Input GHIssueCloseArgs
-      :@ UsesEffects '[GitHub, Env, Goto Exit GHIssueCloseResult]
-
-  , gclExit :: mode :- ExitNode GHIssueCloseResult
-  }
-  deriving Generic
-
 -- | Core logic for gh_issue_close.
 ghIssueCloseLogic
   :: (Member GitHub es, Member Env es)
   => GHIssueCloseArgs
-  -> Eff es (GotoChoice '[To Exit GHIssueCloseResult])
+  -> Eff es GHIssueCloseResult
 ghIssueCloseLogic args = do
   repo <- getRepo args.gclaRepo
   res <- closeIssue repo args.gclaNumber
   case res of
-    Left err -> pure $ gotoExit $ GHIssueCloseResult
+    Left err -> pure $ GHIssueCloseResult
       { gclrSuccess = False
       , gclrNumber  = args.gclaNumber
       , gclrError   = Just (T.pack $ show err)
       }
-    Right () -> pure $ gotoExit $ GHIssueCloseResult
+    Right () -> pure $ GHIssueCloseResult
       { gclrSuccess = True
       , gclrNumber  = args.gclaNumber
       , gclrError   = Nothing
@@ -291,35 +205,21 @@ ghIssueCloseLogic args = do
 -- GH ISSUE REOPEN TOOL
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Graph definition for gh_issue_reopen tool.
-data GHIssueReopenGraph mode = GHIssueReopenGraph
-  { greEntry :: mode :- EntryNode GHIssueReopenArgs
-      :@ MCPExport
-      :@ MCPToolDef '("gh_issue_reopen", "Reopen a closed GitHub issue.")
-
-  , greRun :: mode :- LogicNode
-      :@ Input GHIssueReopenArgs
-      :@ UsesEffects '[GitHub, Env, Goto Exit GHIssueReopenResult]
-
-  , greExit :: mode :- ExitNode GHIssueReopenResult
-  }
-  deriving Generic
-
 -- | Core logic for gh_issue_reopen.
 ghIssueReopenLogic
   :: (Member GitHub es, Member Env es)
   => GHIssueReopenArgs
-  -> Eff es (GotoChoice '[To Exit GHIssueReopenResult])
+  -> Eff es GHIssueReopenResult
 ghIssueReopenLogic args = do
   repo <- getRepo args.graRepo
   res <- reopenIssue repo args.graNumber
   case res of
-    Left err -> pure $ gotoExit $ GHIssueReopenResult
+    Left err -> pure $ GHIssueReopenResult
       { grrSuccess = False
       , grrNumber  = args.graNumber
       , grrError   = Just (T.pack $ show err)
       }
-    Right () -> pure $ gotoExit $ GHIssueReopenResult
+    Right () -> pure $ GHIssueReopenResult
       { grrSuccess = True
       , grrNumber  = args.graNumber
       , grrError   = Nothing
