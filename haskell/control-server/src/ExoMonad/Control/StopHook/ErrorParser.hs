@@ -8,6 +8,7 @@ module ExoMonad.Control.StopHook.ErrorParser
 import Data.Text (Text)
 import qualified Data.Text as T
 import Text.Regex.TDFA ((=~))
+import Text.Read (readMaybe)
 
 import ExoMonad.Control.StopHook.Types
 
@@ -41,14 +42,17 @@ parseHeader line =
   let pattern = "^([^:]+):([0-9]+):([0-9]+): (error|warning): (.*)$" :: Text
       matches = (line =~ pattern) :: (Text, Text, Text, [Text])
   in case matches of
-    (_, _, _, [file, lineNum, col, severity, msg]) -> Just $ GHCError
-      { geFile = T.unpack file
-      , geLine = read (T.unpack lineNum)
-      , geColumn = read (T.unpack col)
-      , geMessage = msg
-      , geErrorType = OtherError "" -- Placeholder, classified later
-      , geSeverity = if severity == "error" then ErrorSeverity else WarningSeverity
-      }
+    (_, _, _, [file, lineNum, col, severity, msg]) -> 
+      case (readMaybe (T.unpack lineNum), readMaybe (T.unpack col)) of
+        (Just ln, Just c) -> Just $ GHCError
+          { geFile = T.unpack file
+          , geLine = ln
+          , geColumn = c
+          , geMessage = msg
+          , geErrorType = OtherError "" -- Placeholder, classified later
+          , geSeverity = if severity == "error" then ErrorSeverity else WarningSeverity
+          }
+        _ -> Nothing
     _ -> Nothing
 
 -- | Classify error by pattern matching on message

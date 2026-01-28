@@ -20,6 +20,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Text.Regex.TDFA ((=~))
+import Text.Read (readMaybe)
 
 import ExoMonad.Graph.Generic (AsHandler, (:-))
 import ExoMonad.Graph.Goto (GotoChoice, To, gotoChoice, gotoExit)
@@ -182,7 +183,9 @@ translateTestResult (CabalTestFailure failures raw) =
       -- Fallback if regex parsing failed but we have failure records
       finalFailed = if failed == 0 && not (null failures) then length failures else failed
   in TestResult passed finalFailed (map translateTestFailure failures)
-translateTestResult (CabalBuildFailure _ _ _ _) = TestResult 0 1 [] -- Build failure treated as 1 failure? Or handled upstream. But checkTest shouldn't get here if checkBuild passed.
+-- Defensive case: should be unreachable if checkBuild handled build failures correctly.
+translateTestResult (CabalBuildFailure _ _ _ _) =
+  error "translateTestResult: unexpected CabalBuildFailure (test called after build failure)"
 translateTestResult CabalSuccess = TestResult 0 0 []
 
 parseTestSummary :: Text -> (Int, Int)
@@ -191,7 +194,10 @@ parseTestSummary output =
   let pattern = "([0-9]+) tests? passed, ([0-9]+) tests? failed" :: Text
       matches = (output =~ pattern) :: (Text, Text, Text, [Text])
   in case matches of
-    (_, _, _, [passedStr, failedStr]) -> (read (T.unpack passedStr), read (T.unpack failedStr))
+    (_, _, _, [passedStr, failedStr]) ->
+      case (readMaybe (T.unpack passedStr), readMaybe (T.unpack failedStr)) of
+        (Just p, Just f) -> (p, f)
+        _ -> (0, 0)
     _ -> (0, 0)
 
 translateTestFailure :: TestFailure -> TestFailureInfo
