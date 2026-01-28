@@ -69,8 +69,11 @@ detectWorktree = do
       let cleanPath = T.unpack $ T.strip $ T.pack path
 
       -- Get current branch
-      mBranch <- gitCommand ["branch", "--show-current"]
-      let branch = maybe "HEAD" (T.strip . T.pack) mBranch
+      -- Use rev-parse --abbrev-ref HEAD for robustness (handles detached HEAD as "HEAD")
+      mBranch <- gitCommand ["rev-parse", "--abbrev-ref", "HEAD"]
+      let branch = case mBranch of
+            Nothing -> "HEAD"
+            Just b -> T.strip $ T.pack b
 
       -- Check if we're in a worktree by looking for .git file (not dir)
       mGitDir <- gitCommand ["rev-parse", "--git-dir"]

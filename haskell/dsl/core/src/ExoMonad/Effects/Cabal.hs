@@ -77,6 +77,11 @@ data CabalResult
         -- ^ Test output (for logging)
       }
     -- ^ All tests passed
+  | CabalInfraError
+      { cieError :: Text
+        -- ^ Infrastructure error message (e.g. docker-ctl failure)
+      }
+    -- ^ Infrastructure failed (not a build/test failure)
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
