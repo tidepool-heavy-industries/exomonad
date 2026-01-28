@@ -20,16 +20,16 @@ import ExoMonad.Effect.JustExec (JustExec(..), ExecResult(..))
 
 -- | Run JustExec effects using docker-ctl.
 --
--- Takes an optional container name. If Nothing, runs with --local.
-runJustExecIO :: LastMember IO effs => Maybe Text -> Eff (JustExec ': effs) a -> Eff effs a
-runJustExecIO container = interpret $ \case
+-- Takes the path to the docker-ctl executable and an optional container name.
+-- If container is Nothing, runs with --local.
+runJustExecIO :: LastMember IO effs => FilePath -> Maybe Text -> Eff (JustExec ': effs) a -> Eff effs a
+runJustExecIO dockerCtlPath container = interpret $ \case
   RunRecipe recipe args ->
-    sendM $ runDockerCtl container recipe args
+    sendM $ runDockerCtl dockerCtlPath container recipe args
 
-runDockerCtl :: Maybe Text -> Text -> [Text] -> IO ExecResult
-runDockerCtl container recipe args = do
-  let cmd = "docker-ctl"
-      ctlArgs = case container of
+runDockerCtl :: FilePath -> Maybe Text -> Text -> [Text] -> IO ExecResult
+runDockerCtl cmd container recipe args = do
+  let ctlArgs = case container of
         Just c  -> ["exec", T.unpack c, "--"]
         Nothing -> ["exec", "--local", "--"]
       justCmd = ["just", T.unpack recipe] ++ map T.unpack args
