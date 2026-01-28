@@ -304,6 +304,8 @@ pub enum ServiceRequest {
         owner: String,
         repo: String,
         number: u32,
+        #[serde(default)]
+        include_comments: bool,
     },
     GitHubCreateIssue {
         owner: String,
@@ -370,6 +372,8 @@ pub enum ServiceRequest {
         owner: String,
         repo: String,
         number: u32,
+        #[serde(default)]
+        include_details: bool,
     },
     GitHubListPullRequests {
         owner: String,
@@ -433,14 +437,30 @@ pub enum ServiceResponse {
         state: String,
         labels: Vec<String>,
         url: String,
+        author: String,
+        #[serde(default)]
+        comments: Vec<GitHubDiscussionComment>,
     },
     #[serde(rename = "GitHubIssuesResponse")]
     GitHubIssues { issues: Vec<GitHubIssueRef> },
     #[serde(rename = "GitHubPRResponse")]
     GitHubPR {
         number: u32,
+        title: String,
+        body: String,
+        author: String,
         url: String,
         state: String,
+        head_ref_name: String,
+        base_ref_name: String,
+        created_at: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        merged_at: Option<String>,
+        labels: Vec<String>,
+        #[serde(default)]
+        comments: Vec<GitHubDiscussionComment>,
+        #[serde(default)]
+        reviews: Vec<GitHubReviewComment>,
     },
     #[serde(rename = "GitHubPullRequestsResponse")]
     GitHubPullRequests {
@@ -814,5 +834,417 @@ mod tests {
             }
             _ => panic!("Wrong variant"),
         }
+    }
+
+    // =========================================================================
+    // ServiceRequest/ServiceResponse GitHub roundtrip tests
+    // =========================================================================
+
+    #[test]
+    fn test_github_get_issue_request_roundtrip() {
+        let req = ServiceRequest::GitHubGetIssue {
+            owner: "octocat".into(),
+            repo: "hello-world".into(),
+            number: 42,
+            include_comments: true,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: ServiceRequest = serde_json::from_str(&json).unwrap();
+        match parsed {
+            ServiceRequest::GitHubGetIssue { owner, repo, number, include_comments } => {
+                assert_eq!(owner, "octocat");
+                assert_eq!(repo, "hello-world");
+                assert_eq!(number, 42);
+                assert!(include_comments);
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_github_get_issue_request_defaults() {
+        // include_comments should default to false when absent
+        let json = r#"{"type":"GitHubGetIssue","owner":"o","repo":"r","number":1}"#;
+        let parsed: ServiceRequest = serde_json::from_str(json).unwrap();
+        match parsed {
+            ServiceRequest::GitHubGetIssue { include_comments, .. } => {
+                assert!(!include_comments);
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_github_issue_response_roundtrip() {
+        let resp = ServiceResponse::GitHubIssue {
+            number: 42,
+            title: "Fix the bug".into(),
+            body: "It's broken".into(),
+            state: "open".into(),
+            labels: vec!["bug".into(), "critical".into()],
+            url: "https://github.com/octocat/hello-world/issues/42".into(),
+            author: "octocat".into(),
+            comments: vec![GitHubDiscussionComment {
+                author: "reviewer".into(),
+                body: "Looks good".into(),
+                created_at: "2024-01-15T10:00:00Z".into(),
+                replies: vec![],
+            }],
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let parsed: ServiceResponse = serde_json::from_str(&json).unwrap();
+        match parsed {
+            ServiceResponse::GitHubIssue { number, title, author, comments, labels, .. } => {
+                assert_eq!(number, 42);
+                assert_eq!(title, "Fix the bug");
+                assert_eq!(author, "octocat");
+                assert_eq!(comments.len(), 1);
+                assert_eq!(comments[0].author, "reviewer");
+                assert_eq!(labels, vec!["bug", "critical"]);
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_github_issue_response_empty_comments_default() {
+        // comments should default to empty vec when absent
+        let json = r#"{"type":"GitHubIssueResponse","number":1,"title":"t","body":"b","state":"open","labels":[],"url":"u","author":"a"}"#;
+        let parsed: ServiceResponse = serde_json::from_str(json).unwrap();
+        match parsed {
+            ServiceResponse::GitHubIssue { comments, .. } => {
+                assert!(comments.is_empty());
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_github_get_pr_request_roundtrip() {
+        let req = ServiceRequest::GitHubGetPR {
+            owner: "octocat".into(),
+            repo: "hello-world".into(),
+            number: 99,
+            include_details: true,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: ServiceRequest = serde_json::from_str(&json).unwrap();
+        match parsed {
+            ServiceRequest::GitHubGetPR { owner, repo, number, include_details } => {
+                assert_eq!(owner, "octocat");
+                assert_eq!(repo, "hello-world");
+                assert_eq!(number, 99);
+                assert!(include_details);
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_github_get_pr_request_defaults() {
+        let json = r#"{"type":"GitHubGetPR","owner":"o","repo":"r","number":1}"#;
+        let parsed: ServiceRequest = serde_json::from_str(json).unwrap();
+        match parsed {
+            ServiceRequest::GitHubGetPR { include_details, .. } => {
+                assert!(!include_details);
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_github_pr_response_roundtrip() {
+        let resp = ServiceResponse::GitHubPR {
+            number: 99,
+            title: "Add feature".into(),
+            body: "This adds X".into(),
+            author: "octocat".into(),
+            url: "https://github.com/octocat/hello-world/pull/99".into(),
+            state: "open".into(),
+            head_ref_name: "feature-branch".into(),
+            base_ref_name: "main".into(),
+            created_at: "2024-01-15T10:00:00Z".into(),
+            merged_at: Some("2024-01-16T12:00:00Z".into()),
+            labels: vec!["enhancement".into()],
+            comments: vec![GitHubDiscussionComment {
+                author: "reviewer".into(),
+                body: "LGTM".into(),
+                created_at: "2024-01-15T11:00:00Z".into(),
+                replies: vec![],
+            }],
+            reviews: vec![GitHubReviewComment {
+                author: "reviewer".into(),
+                body: "Approved".into(),
+                path: "src/main.rs".into(),
+                line: Some(42),
+                state: "APPROVED".into(),
+                created_at: "2024-01-15T12:00:00Z".into(),
+            }],
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let parsed: ServiceResponse = serde_json::from_str(&json).unwrap();
+        match parsed {
+            ServiceResponse::GitHubPR {
+                number, title, author, merged_at, labels, comments, reviews, ..
+            } => {
+                assert_eq!(number, 99);
+                assert_eq!(title, "Add feature");
+                assert_eq!(author, "octocat");
+                assert_eq!(merged_at, Some("2024-01-16T12:00:00Z".into()));
+                assert_eq!(labels, vec!["enhancement"]);
+                assert_eq!(comments.len(), 1);
+                assert_eq!(reviews.len(), 1);
+                assert_eq!(reviews[0].state, "APPROVED");
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_github_pr_response_optional_defaults() {
+        // merged_at absent, comments/reviews absent should all default
+        let json = r#"{
+            "type": "GitHubPRResponse",
+            "number": 1, "title": "t", "body": "b", "author": "a",
+            "url": "u", "state": "open", "head_ref_name": "h",
+            "base_ref_name": "main", "created_at": "2024-01-01T00:00:00Z",
+            "labels": []
+        }"#;
+        let parsed: ServiceResponse = serde_json::from_str(json).unwrap();
+        match parsed {
+            ServiceResponse::GitHubPR { merged_at, comments, reviews, .. } => {
+                assert_eq!(merged_at, None);
+                assert!(comments.is_empty());
+                assert!(reviews.is_empty());
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_github_create_issue_request_roundtrip() {
+        let req = ServiceRequest::GitHubCreateIssue {
+            owner: "octocat".into(),
+            repo: "hello-world".into(),
+            title: "New bug".into(),
+            body: "Details here".into(),
+            labels: vec!["bug".into()],
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: ServiceRequest = serde_json::from_str(&json).unwrap();
+        match parsed {
+            ServiceRequest::GitHubCreateIssue { owner, title, labels, .. } => {
+                assert_eq!(owner, "octocat");
+                assert_eq!(title, "New bug");
+                assert_eq!(labels, vec!["bug"]);
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_github_create_pr_request_roundtrip() {
+        let req = ServiceRequest::GitHubCreatePR {
+            owner: "octocat".into(),
+            repo: "hello-world".into(),
+            title: "Add feature".into(),
+            body: "This adds X".into(),
+            head: "feature".into(),
+            base: "main".into(),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: ServiceRequest = serde_json::from_str(&json).unwrap();
+        match parsed {
+            ServiceRequest::GitHubCreatePR { owner, title, head, base, .. } => {
+                assert_eq!(owner, "octocat");
+                assert_eq!(title, "Add feature");
+                assert_eq!(head, "feature");
+                assert_eq!(base, "main");
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_github_list_issues_request_roundtrip() {
+        let req = ServiceRequest::GitHubListIssues {
+            owner: "octocat".into(),
+            repo: "hello-world".into(),
+            state: Some(IssueState::Open),
+            labels: vec!["bug".into()],
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: ServiceRequest = serde_json::from_str(&json).unwrap();
+        match parsed {
+            ServiceRequest::GitHubListIssues { labels, .. } => {
+                assert_eq!(labels, vec!["bug"]);
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_github_issues_response_roundtrip() {
+        let resp = ServiceResponse::GitHubIssues {
+            issues: vec![
+                GitHubIssueRef { number: 1, title: "Bug".into(), state: "open".into() },
+                GitHubIssueRef { number: 2, title: "Feature".into(), state: "closed".into() },
+            ],
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let parsed: ServiceResponse = serde_json::from_str(&json).unwrap();
+        match parsed {
+            ServiceResponse::GitHubIssues { issues } => {
+                assert_eq!(issues.len(), 2);
+                assert_eq!(issues[0].number, 1);
+                assert_eq!(issues[1].state, "closed");
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_github_reviews_response_roundtrip() {
+        let resp = ServiceResponse::GitHubReviews {
+            reviews: vec![GitHubReviewComment {
+                author: "reviewer".into(),
+                body: "Changes requested".into(),
+                path: "lib.rs".into(),
+                line: None,
+                state: "CHANGES_REQUESTED".into(),
+                created_at: "2024-01-15T10:00:00Z".into(),
+            }],
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let parsed: ServiceResponse = serde_json::from_str(&json).unwrap();
+        match parsed {
+            ServiceResponse::GitHubReviews { reviews } => {
+                assert_eq!(reviews.len(), 1);
+                assert_eq!(reviews[0].state, "CHANGES_REQUESTED");
+                assert_eq!(reviews[0].line, None);
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_github_discussion_response_roundtrip() {
+        let resp = ServiceResponse::GitHubDiscussion {
+            number: 10,
+            title: "RFC: New API".into(),
+            body: "Proposal details".into(),
+            author: "octocat".into(),
+            url: "https://github.com/octocat/hello-world/discussions/10".into(),
+            comments: vec![
+                GitHubDiscussionComment {
+                    author: "commenter".into(),
+                    body: "Great idea".into(),
+                    created_at: "2024-01-15T10:00:00Z".into(),
+                    replies: vec![
+                        GitHubDiscussionComment {
+                            author: "octocat".into(),
+                            body: "Thanks!".into(),
+                            created_at: "2024-01-15T11:00:00Z".into(),
+                            replies: vec![],
+                        },
+                    ],
+                },
+            ],
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let parsed: ServiceResponse = serde_json::from_str(&json).unwrap();
+        match parsed {
+            ServiceResponse::GitHubDiscussion { number, comments, .. } => {
+                assert_eq!(number, 10);
+                assert_eq!(comments.len(), 1);
+                assert_eq!(comments[0].replies.len(), 1);
+                assert_eq!(comments[0].replies[0].author, "octocat");
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_github_auth_response_roundtrip() {
+        let resp = ServiceResponse::GitHubAuth {
+            authenticated: true,
+            user: Some("octocat".into()),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let parsed: ServiceResponse = serde_json::from_str(&json).unwrap();
+        match parsed {
+            ServiceResponse::GitHubAuth { authenticated, user } => {
+                assert!(authenticated);
+                assert_eq!(user, Some("octocat".into()));
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    /// Verify the JSON wire format uses the exact field names
+    /// the Haskell SocketClient.hs FromJSON instance expects.
+    #[test]
+    fn test_github_issue_response_wire_format() {
+        let resp = ServiceResponse::GitHubIssue {
+            number: 1,
+            title: "t".into(),
+            body: "b".into(),
+            state: "open".into(),
+            labels: vec![],
+            url: "u".into(),
+            author: "a".into(),
+            comments: vec![],
+        };
+        let val: Value = serde_json::to_value(&resp).unwrap();
+        let obj = val.as_object().unwrap();
+        // Verify the type tag matches Haskell's FromJSON dispatch
+        assert_eq!(obj["type"], "GitHubIssueResponse");
+        // Verify all expected field names are present
+        assert!(obj.contains_key("number"));
+        assert!(obj.contains_key("title"));
+        assert!(obj.contains_key("body"));
+        assert!(obj.contains_key("state"));
+        assert!(obj.contains_key("labels"));
+        assert!(obj.contains_key("url"));
+        assert!(obj.contains_key("author"));
+        assert!(obj.contains_key("comments"));
+    }
+
+    /// Verify the PR JSON wire format uses the exact field names
+    /// the Haskell SocketClient.hs FromJSON instance expects.
+    #[test]
+    fn test_github_pr_response_wire_format() {
+        let resp = ServiceResponse::GitHubPR {
+            number: 1,
+            title: "t".into(),
+            body: "b".into(),
+            author: "a".into(),
+            url: "u".into(),
+            state: "open".into(),
+            head_ref_name: "h".into(),
+            base_ref_name: "main".into(),
+            created_at: "2024-01-01T00:00:00Z".into(),
+            merged_at: None,
+            labels: vec![],
+            comments: vec![],
+            reviews: vec![],
+        };
+        let val: Value = serde_json::to_value(&resp).unwrap();
+        let obj = val.as_object().unwrap();
+        assert_eq!(obj["type"], "GitHubPRResponse");
+        assert!(obj.contains_key("number"));
+        assert!(obj.contains_key("title"));
+        assert!(obj.contains_key("body"));
+        assert!(obj.contains_key("author"));
+        assert!(obj.contains_key("url"));
+        assert!(obj.contains_key("state"));
+        assert!(obj.contains_key("head_ref_name"));
+        assert!(obj.contains_key("base_ref_name"));
+        assert!(obj.contains_key("created_at"));
+        assert!(obj.contains_key("labels"));
+        assert!(obj.contains_key("comments"));
+        assert!(obj.contains_key("reviews"));
+        // merged_at is None so should be absent (skip_serializing_if)
+        assert!(!obj.contains_key("merged_at"));
     }
 }

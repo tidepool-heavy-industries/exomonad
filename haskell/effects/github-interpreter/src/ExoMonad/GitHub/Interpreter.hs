@@ -24,8 +24,11 @@ module ExoMonad.GitHub.Interpreter
   ) where
 
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
-import Data.Aeson (toJSON, fromJSON)
+import Data.Aeson (Value(..), toJSON, fromJSON, (.:), (.:?))
 import Data.Aeson qualified as Aeson
+import Data.Aeson.Types (parseMaybe)
+import Data.Time.Clock (UTCTime)
+import Data.Time.Format.ISO8601 (iso8601ParseM)
 
 import ExoMonad.Effects.SocketClient
   ( SocketConfig(..)
@@ -34,6 +37,7 @@ import ExoMonad.Effects.SocketClient
   , ServiceError(..)
   , sendRequest
   )
+import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import System.Directory (doesFileExist)
@@ -50,9 +54,11 @@ import ExoMonad.Effects.GitHub
   , Repo(..)
   , PRCreateSpec(..)
   , PRUrl(..)
+  , Review(..)
+  , ReviewState(..)
   , ReviewComment(..)
+  , Comment(..)
   , Discussion(..)
-  , DiscussionComment(..)
   , CreateIssueInput(..)
   , UpdateIssueInput(..)
   , Author(..)
@@ -98,7 +104,7 @@ runGitHubIO (GitHubSocketConfig path) = interpret $ \case
 
   -- PR operations
   CreatePR spec -> sendM $ socketCreatePR path spec
-  GetPullRequest (Repo repo) num _includeDetails -> sendM $ socketGetPR path repo num
+  GetPullRequest (Repo repo) num includeDetails -> sendM $ socketGetPR path repo num includeDetails
   ListPullRequests (Repo repo) filt -> sendM $ socketListPullRequests path repo filt
   GetPullRequestReviews (Repo repo) num -> sendM $ socketGetPullRequestReviews path repo num
   GetDiscussion (Repo repo) num -> sendM $ socketGetDiscussion path repo num
@@ -122,23 +128,23 @@ socketCheckAuth path = do
       _ -> pure False
 
 socketGetIssue :: FilePath -> Text -> Int -> Bool -> IO (Either GitHubError (Maybe Issue))
-socketGetIssue path repo num _includeComments = do
+socketGetIssue path repo num includeComments = do
   case parseRepo repo of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubGetIssue owner repoName num
+      let req = GitHubGetIssue owner repoName num includeComments
       result <- sendRequest (SocketConfig path 10000) req
       case result of
-        Right (GitHubIssueResponse n t b s ls u) -> 
+        Right (GitHubIssueResponse n t b s ls u a cs) ->
           pure $ Right $ Just $ Issue
             { issueNumber = n
             , issueTitle = t
             , issueBody = b
-            , issueAuthor = Author "unknown" Nothing
+            , issueAuthor = Author a Nothing
             , issueLabels = ls
             , issueState = if s == "open" then IssueOpen else IssueClosed
             , issueUrl = u
-            , issueComments = []
+            , issueComments = parseCommentValues cs
             }
         Right (ErrorResponse 404 _) -> pure $ Right Nothing
         Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
@@ -153,7 +159,7 @@ socketCreateIssue path input = do
       let req = GitHubCreateIssue owner repoName input.ciiTitle input.ciiBody input.ciiLabels
       result <- sendRequest (SocketConfig path 10000) req
       case result of
-        Right (GitHubIssueResponse n _ _ _ _ _) -> pure $ Right n
+        Right (GitHubIssueResponse n _ _ _ _ _ _ _) -> pure $ Right n
         Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
         Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubCreateIssue"
         Left err -> pure $ Left $ socketErrorToGitHubError err
@@ -172,10 +178,10 @@ socketUpdateIssue path repo num input = do
             { owner = owner
             , repo = repoName
             , number = num
-            , title = input.uiiTitle
-            , body = input.uiiBody
+            , updateTitle = input.uiiTitle
+            , updateBody = input.uiiBody
             , state = stateStr
-            , labels = input.uiiLabels
+            , updateLabels = input.uiiLabels
             , assignees = input.uiiAssignees
             }
       result <- sendRequest (SocketConfig path 10000) req
@@ -262,6 +268,7 @@ socketListIssues path repo filt = do
         Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubListIssues"
         Left err -> pure $ Left $ socketErrorToGitHubError err
 
+
 socketCreatePR :: FilePath -> PRCreateSpec -> IO (Either GitHubError PRUrl)
 socketCreatePR path spec = do
   case parseRepo (spec.prcsRepo.unRepo) of
@@ -270,33 +277,36 @@ socketCreatePR path spec = do
       let req = GitHubCreatePR owner repoName spec.prcsTitle spec.prcsBody spec.prcsHead spec.prcsBase
       result <- sendRequest (SocketConfig path 10000) req
       case result of
-        Right (GitHubPRResponse _ url _) -> pure $ Right $ PRUrl url
+        Right (GitHubPRResponse _ _ _ _ url _ _ _ _ _ _ _ _) -> pure $ Right $ PRUrl url
         Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
         Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubCreatePR"
         Left err -> pure $ Left $ socketErrorToGitHubError err
 
-socketGetPR :: FilePath -> Text -> Int -> IO (Either GitHubError (Maybe PullRequest))
-socketGetPR path repo num = do
+socketGetPR :: FilePath -> Text -> Int -> Bool -> IO (Either GitHubError (Maybe PullRequest))
+socketGetPR path repo num includeDetails = do
   case parseRepo repo of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubGetPR owner repoName num
+      let req = GitHubGetPR owner repoName num includeDetails
       result <- sendRequest (SocketConfig path 10000) req
       case result of
-        Right (GitHubPRResponse n u s) -> 
+        Right (GitHubPRResponse n t b a u s h ba c ma ls cs rs) -> do
+          let createdAt = parseRFC3339 c
+          let mergedAt = ma >>= parseRFC3339Maybe
           pure $ Right $ Just $ PullRequest
             { prNumber = n
-            , prTitle = "unknown" -- Rust protocol needs update to return full PR details?
-            , prBody = "unknown"
-            , prAuthor = Author "unknown" Nothing
+            , prTitle = t
+            , prBody = b
+            , prAuthor = Author a Nothing
             , prState = if s == "open" then PROpen else if s == "merged" then PRMerged else PRClosed
             , prUrl = u
-            , prHeadRef = "unknown"
-            , prBaseRef = "unknown"
-            , prCreatedAt = "unknown"
-            , prMergedAt = Nothing
-            , prLabels = []
-            , prReviewDecision = Nothing
+            , prHeadRefName = h
+            , prBaseRefName = ba
+            , prCreatedAt = createdAt
+            , prMergedAt = mergedAt
+            , prLabels = ls
+            , prComments = parseCommentValues cs
+            , prReviews = parseReviewValues rs
             }
         Right (ErrorResponse 404 _) -> pure $ Right Nothing
         Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
@@ -379,3 +389,58 @@ socketErrorToGitHubError = \case
   SocketError msg -> GHNetworkError msg
   DecodeError msg -> GHParseError (T.pack msg)
   TimeoutError -> GHTimeout
+
+-- | Parse an ISO8601/RFC3339 timestamp, erroring on failure.
+-- Handles both "Z" and "+00:00" offset formats (Rust's chrono emits the latter).
+parseRFC3339 :: Text -> UTCTime
+parseRFC3339 t = case iso8601ParseM (T.unpack t) of
+  Just time -> time
+  Nothing -> error $ "parseRFC3339: invalid timestamp: " <> T.unpack t
+
+-- | Parse an ISO8601/RFC3339 timestamp, returning Nothing on failure.
+parseRFC3339Maybe :: Text -> Maybe UTCTime
+parseRFC3339Maybe t = iso8601ParseM (T.unpack t)
+
+-- | Parse JSON comment values from Rust's GitHubDiscussionComment format into Haskell Comments.
+-- Rust sends: {"author": "login", "body": "...", "created_at": "...", "replies": [...]}
+-- Haskell expects: Comment { commentAuthor :: Author, commentBody :: Text, commentCreatedAt :: UTCTime }
+parseCommentValues :: [Value] -> [Comment]
+parseCommentValues = mapMaybe parseOneComment
+  where
+    parseOneComment v = case v of
+      Object o -> parseMaybe parseRustComment o
+      _ -> Nothing
+    parseRustComment o = do
+      a <- o .: "author"
+      b <- o .: "body"
+      ca <- o .: "created_at"
+      let time = parseRFC3339 ca
+      pure Comment
+        { commentAuthor = Author a Nothing
+        , commentBody = b
+        , commentCreatedAt = time
+        }
+
+-- | Parse JSON review values from Rust's GitHubReviewComment format into Haskell Reviews.
+-- Rust sends: {"author": "login", "body": "...", "state": "APPROVED", ...}
+-- Haskell expects: Review { reviewAuthor :: Author, reviewBody :: Text, reviewState :: ReviewState }
+parseReviewValues :: [Value] -> [Review]
+parseReviewValues = mapMaybe parseOneReview
+  where
+    parseOneReview (Object o) = parseMaybe parseRustReview o
+    parseOneReview _ = Nothing
+    parseRustReview o = do
+      a <- o .: "author"
+      b <- o .: "body"
+      s <- o .:? "state"
+      let st = case s of
+            Just ("APPROVED" :: Text) -> ReviewApproved
+            Just "CHANGES_REQUESTED" -> ReviewChangesRequested
+            Just "DISMISSED" -> ReviewDismissed
+            Just "PENDING" -> ReviewPending
+            _ -> ReviewCommented
+      pure Review
+        { reviewAuthor = Author a Nothing
+        , reviewBody = b
+        , reviewState = st
+        }
