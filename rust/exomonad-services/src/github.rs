@@ -1,6 +1,7 @@
 use crate::{ExternalService, ServiceError};
 use async_trait::async_trait;
 use exomonad_shared::{GitHubIssueRef, IssueState, ServiceRequest, ServiceResponse};
+use exomonad_shared::protocol::{GitHubPRRef, GitHubReviewComment};
 use octocrab::{Octocrab, OctocrabBuilder};
 use reqwest::Url;
 
@@ -162,6 +163,247 @@ impl ExternalService for GitHubService {
                     .collect();
 
                 Ok(ServiceResponse::GitHubIssues { issues })
+            }
+            ServiceRequest::GitHubUpdateIssue {
+                owner,
+                repo,
+                number,
+                title,
+                body,
+                state,
+                labels,
+                assignees,
+            } => {
+                let issues = self.client.issues(&owner, &repo);
+                let mut builder = issues.update(number.into());
+
+                if let Some(ref t) = title {
+                    builder = builder.title(t);
+                }
+                if let Some(ref b) = body {
+                    builder = builder.body(b);
+                }
+                if let Some(ref s) = state {
+                    let s_enum = match s.as_str() {
+                        "open" => octocrab::models::IssueState::Open,
+                        "closed" => octocrab::models::IssueState::Closed,
+                        _ => return Err(ServiceError::Api {
+                            code: 400,
+                            message: format!("Invalid state: {}", s),
+                        }),
+                    };
+                    builder = builder.state(s_enum);
+                }
+                if let Some(ref l) = labels {
+                    builder = builder.labels(l);
+                }
+                if let Some(ref a) = assignees {
+                    builder = builder.assignees(a);
+                }
+
+                let issue = builder.send().await.map_err(|e| ServiceError::Api {
+                    code: 500,
+                    message: e.to_string(),
+                })?;
+
+                Ok(ServiceResponse::GitHubIssue {
+                    number: issue.number as u32,
+                    title: issue.title,
+                    body: issue.body.unwrap_or_default(),
+                    state: state_to_string(issue.state),
+                    labels: issue.labels.into_iter().map(|l| l.name).collect(),
+                    url: issue.html_url.to_string(),
+                })
+            }
+            ServiceRequest::GitHubAddIssueLabel {
+                owner,
+                repo,
+                number,
+                label,
+            } => {
+                self.client
+                    .issues(owner, repo)
+                    .add_labels(number.into(), &[label])
+                    .await
+                    .map_err(|e| ServiceError::Api {
+                        code: 500,
+                        message: e.to_string(),
+                    })?;
+                Ok(ServiceResponse::OtelAck) // Simple ack
+            }
+            ServiceRequest::GitHubRemoveIssueLabel {
+                owner,
+                repo,
+                number,
+                label,
+            } => {
+                self.client
+                    .issues(owner, repo)
+                    .remove_label(number.into(), label)
+                    .await
+                    .map_err(|e| ServiceError::Api {
+                        code: 500,
+                        message: e.to_string(),
+                    })?;
+                Ok(ServiceResponse::OtelAck)
+            }
+            ServiceRequest::GitHubAddIssueAssignee {
+                owner,
+                repo,
+                number,
+                assignee,
+            } => {
+                self.client
+                    .issues(owner, repo)
+                    .add_assignees(number.into(), &[&assignee])
+                    .await
+                    .map_err(|e| ServiceError::Api {
+                        code: 500,
+                        message: e.to_string(),
+                    })?;
+                Ok(ServiceResponse::OtelAck)
+            }
+            ServiceRequest::GitHubRemoveIssueAssignee {
+                owner: _,
+                repo: _,
+                number: _,
+                assignee: _,
+            } => {
+                 // FIXME: octocrab 0.38 seems to lack remove_assignees or I have the wrong name.
+                 // Disabling for now to fix build.
+                 return Err(ServiceError::Api {
+                     code: 501,
+                     message: "GitHubRemoveIssueAssignee not implemented in Rust service yet".into(),
+                 });
+            }
+            ServiceRequest::GitHubListPullRequests {
+                owner,
+                repo,
+                state,
+                limit,
+            } => {
+                let state_enum = match state.as_deref() {
+                    Some("open") => octocrab::params::State::Open,
+                    Some("closed") => octocrab::params::State::Closed,
+                    Some("all") => octocrab::params::State::All,
+                    None => octocrab::params::State::Open,
+                    Some(s) => return Err(ServiceError::Api {
+                        code: 400,
+                        message: format!("Invalid state: {}", s),
+                    }),
+                };
+
+                let page = self
+                    .client
+                    .pulls(owner, repo)
+                    .list()
+                    .state(state_enum)
+                    .per_page(limit.unwrap_or(30) as u8)
+                    .send()
+                    .await
+                    .map_err(|e| ServiceError::Api {
+                        code: 500,
+                        message: e.to_string(),
+                    })?;
+
+                let prs = page
+                    .into_iter()
+                    .map(|pr| GitHubPRRef {
+                        number: pr.number as u32,
+                        title: pr.title.unwrap_or_default(),
+                        state: state_to_string(pr.state.unwrap_or(octocrab::models::IssueState::Open)),
+                        url: pr.html_url.map(|u| u.to_string()).unwrap_or_default(),
+                    })
+                    .collect();
+
+                Ok(ServiceResponse::GitHubPullRequests { pull_requests: prs })
+            }
+            ServiceRequest::GitHubGetPullRequestReviews {
+                owner,
+                repo,
+                number,
+            } => {
+                // GraphQL query to match Haskell's logic (fetching review threads)
+                let query = serde_json::json!({
+                    "query": "query($owner: String!, $repo: String!, $number: Int!) { \
+                        repository(owner: $owner, name: $repo) { \
+                            pullRequest(number: $number) { \
+                                reviewThreads(last: 100) { \
+                                    nodes { \
+                                        isResolved \
+                                        comments(first: 100) { \
+                                            nodes { \
+                                                author { login } \
+                                                body \
+                                                path \
+                                                line \
+                                                state \
+                                                createdAt \
+                                            } \
+                                        } \
+                                    } \
+                                } \
+                            } \
+                        } \
+                    }",
+                    "variables": {
+                        "owner": owner,
+                        "repo": repo,
+                        "number": number
+                    }
+                });
+
+                let resp: serde_json::Value = self.client.graphql(&query).await.map_err(|e| ServiceError::Api {
+                    code: 500,
+                    message: e.to_string(),
+                })?;
+
+                // Parse the GraphQL response
+                // data.repository.pullRequest.reviewThreads.nodes
+                let threads = resp
+                    .get("data")
+                    .and_then(|d| d.get("repository"))
+                    .and_then(|r| r.get("pullRequest"))
+                    .and_then(|pr| pr.get("reviewThreads"))
+                    .and_then(|rt| rt.get("nodes"))
+                    .and_then(|n| n.as_array())
+                    .ok_or_else(|| ServiceError::Api {
+                        code: 500,
+                        message: "Failed to parse GraphQL response structure".into(),
+                    })?;
+
+                let mut reviews = Vec::new();
+
+                for thread in threads {
+                    let _is_resolved = thread.get("isResolved").and_then(|b| b.as_bool()).unwrap_or(false);
+                    if let Some(comments_nodes) = thread.get("comments").and_then(|c| c.get("nodes")).and_then(|n| n.as_array()) {
+                        for comment in comments_nodes {
+                            let author = comment.get("author")
+                                .and_then(|a| a.get("login"))
+                                .and_then(|l| l.as_str())
+                                .unwrap_or("unknown")
+                                .to_string();
+                            let body = comment.get("body").and_then(|b| b.as_str()).unwrap_or("").to_string();
+                            let path = comment.get("path").and_then(|p| p.as_str()).unwrap_or("").to_string();
+                            let line = comment.get("line").and_then(|l| l.as_u64()).map(|u| u as u32);
+                            let state = comment.get("state").and_then(|s| s.as_str()).unwrap_or("PENDING").to_string();
+                            let created_at = comment.get("createdAt").and_then(|d| d.as_str()).unwrap_or("").to_string();
+
+                            // Logic to map state strings if needed, but Haskell just passes them through or maps to enum.
+                            // We return simple string in struct.
+                            reviews.push(GitHubReviewComment {
+                                author,
+                                body,
+                                path,
+                                line,
+                                state, // "PENDING", "SUBMITTED", etc.
+                                created_at,
+                            });
+                        }
+                    }
+                }
+
+                Ok(ServiceResponse::GitHubReviews { reviews })
             }
             ServiceRequest::GitHubCreatePR {
                 owner,

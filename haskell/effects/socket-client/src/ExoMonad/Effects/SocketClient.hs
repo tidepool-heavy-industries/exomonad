@@ -41,10 +41,18 @@ data ServiceRequest
       , thinking :: Maybe Value
       }
   | GitHubGetIssue { owner :: Text, repo :: Text, number :: Int }
-  | GitHubCreateIssue { owner :: Text, repo :: Text, title :: Text, body :: Text, githubLabels :: [Text] }
+  | GitHubCreateIssue { owner :: Text, repo :: Text, title :: Text, body :: Text, labels :: [Text] }
+  | GitHubUpdateIssue { owner :: Text, repo :: Text, number :: Int, title :: Maybe Text, body :: Maybe Text, state :: Maybe Text, labels :: Maybe [Text], assignees :: Maybe [Text] }
+  | GitHubAddIssueLabel { owner :: Text, repo :: Text, number :: Int, label :: Text }
+  | GitHubRemoveIssueLabel { owner :: Text, repo :: Text, number :: Int, label :: Text }
+  | GitHubAddIssueAssignee { owner :: Text, repo :: Text, number :: Int, assignee :: Text }
+  | GitHubRemoveIssueAssignee { owner :: Text, repo :: Text, number :: Int, assignee :: Text }
   | GitHubListIssues { owner :: Text, repo :: Text, state :: Maybe Text, issueLabels :: [Text] }
   | GitHubCreatePR { owner :: Text, repo :: Text, title :: Text, body :: Text, head :: Text, base :: Text }
   | GitHubGetPR { owner :: Text, repo :: Text, number :: Int }
+  | GitHubListPullRequests { owner :: Text, repo :: Text, state :: Maybe Text, limit :: Maybe Int }
+  | GitHubGetPullRequestReviews { owner :: Text, repo :: Text, number :: Int }
+  | GitHubCheckAuth
   | OllamaGenerate { model :: Text, prompt :: Text, system :: Maybe Text }
   | OtelSpan { traceId :: Text, spanId :: Text, name :: Text, startNs :: Integer, endNs :: Integer, attributes :: Object }
   | OtelMetric { name :: Text, value :: Double, otelLabels :: Object }
@@ -75,6 +83,45 @@ instance ToJSON ServiceRequest where
       , "body" .= b
       , "labels" .= ls
       ]
+    GitHubUpdateIssue o r n t b s ls as -> object
+      [ "type" .= ("GitHubUpdateIssue" :: Text)
+      , "owner" .= o
+      , "repo" .= r
+      , "number" .= n
+      , "title" .= t
+      , "body" .= b
+      , "state" .= s
+      , "labels" .= ls
+      , "assignees" .= as
+      ]
+    GitHubAddIssueLabel o r n l -> object
+      [ "type" .= ("GitHubAddIssueLabel" :: Text)
+      , "owner" .= o
+      , "repo" .= r
+      , "number" .= n
+      , "label" .= l
+      ]
+    GitHubRemoveIssueLabel o r n l -> object
+      [ "type" .= ("GitHubRemoveIssueLabel" :: Text)
+      , "owner" .= o
+      , "repo" .= r
+      , "number" .= n
+      , "label" .= l
+      ]
+    GitHubAddIssueAssignee o r n a -> object
+      [ "type" .= ("GitHubAddIssueAssignee" :: Text)
+      , "owner" .= o
+      , "repo" .= r
+      , "number" .= n
+      , "assignee" .= a
+      ]
+    GitHubRemoveIssueAssignee o r n a -> object
+      [ "type" .= ("GitHubRemoveIssueAssignee" :: Text)
+      , "owner" .= o
+      , "repo" .= r
+      , "number" .= n
+      , "assignee" .= a
+      ]
     GitHubListIssues o r s ls -> object
       [ "type" .= ("GitHubListIssues" :: Text)
       , "owner" .= o
@@ -96,6 +143,22 @@ instance ToJSON ServiceRequest where
       , "owner" .= o
       , "repo" .= r
       , "number" .= n
+      ]
+    GitHubListPullRequests o r s l -> object
+      [ "type" .= ("GitHubListPullRequests" :: Text)
+      , "owner" .= o
+      , "repo" .= r
+      , "state" .= s
+      , "limit" .= l
+      ]
+    GitHubGetPullRequestReviews o r n -> object
+      [ "type" .= ("GitHubGetPullRequestReviews" :: Text)
+      , "owner" .= o
+      , "repo" .= r
+      , "number" .= n
+      ]
+    GitHubCheckAuth -> object
+      [ "type" .= ("GitHubCheckAuth" :: Text)
       ]
     OllamaGenerate m p s -> object
       [ "type" .= ("OllamaGenerate" :: Text)
@@ -124,6 +187,9 @@ data ServiceResponse
   | GitHubIssueResponse { issueNumber :: Int, title :: Text, body :: Text, state :: Text, labels :: [Text], url :: Text }
   | GitHubIssuesResponse { issues :: [Value] }
   | GitHubPRResponse { number :: Int, url :: Text, state :: Text }
+  | GitHubPullRequestsResponse { pull_requests :: [Value] }
+  | GitHubReviewsResponse { reviews :: [Value] }
+  | GitHubAuthResponse { authenticated :: Bool, user :: Maybe Text }
   | OllamaGenerateResponse { response :: Text, done :: Bool }
   | OtelAckResponse
   | ErrorResponse { code :: Int, message :: Text }
@@ -137,6 +203,9 @@ instance FromJSON ServiceResponse where
       "GitHubIssueResponse" -> GitHubIssueResponse <$> v .: "number" <*> v .: "title" <*> v .: "body" <*> v .: "state" <*> v .: "labels" <*> v .: "url"
       "GitHubIssuesResponse" -> GitHubIssuesResponse <$> v .: "issues"
       "GitHubPRResponse" -> GitHubPRResponse <$> v .: "number" <*> v .: "url" <*> v .: "state"
+      "GitHubPullRequestsResponse" -> GitHubPullRequestsResponse <$> v .: "pull_requests"
+      "GitHubReviewsResponse" -> GitHubReviewsResponse <$> v .: "reviews"
+      "GitHubAuthResponse" -> GitHubAuthResponse <$> v .: "authenticated" <*> v .: "user"
       "OllamaGenerateResponse" -> OllamaGenerateResponse <$> v .: "response" <*> v .: "done"
       "OtelAckResponse" -> pure OtelAckResponse
       "ErrorResponse" -> ErrorResponse <$> v .: "code" <*> v .: "message"

@@ -101,10 +101,10 @@ data GitHubConfig
       }
   deriving (Show, Eq)
 
--- | Default configuration (CLI mode, suppress warnings).
+-- | Default configuration (Socket mode).
 defaultGitHubConfig :: GitHubConfig
-defaultGitHubConfig = GitHubCliConfig
-  { ghcQuiet = True
+defaultGitHubConfig = GitHubSocketConfig
+  { ghcSocketPath = ".exomonad/sockets/control.sock"
   }
 
 
@@ -118,35 +118,35 @@ runGitHubIO config = interpret $ \case
   -- Issue operations
   CreateIssue input -> case config of
     GitHubCliConfig{} -> sendM $ ghIssueCreate config input
-    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for CreateIssue"
+    GitHubSocketConfig path -> sendM $ socketCreateIssue path input
 
   UpdateIssue (Repo repo) num input -> case config of
     GitHubCliConfig{} -> sendM $ ghIssueEdit config repo num input
-    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for UpdateIssue"
+    GitHubSocketConfig path -> sendM $ socketUpdateIssue path repo num input
 
   CloseIssue (Repo repo) num -> case config of
     GitHubCliConfig{} -> sendM $ ghIssueClose config repo num
-    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for CloseIssue"
+    GitHubSocketConfig path -> sendM $ socketCloseIssue path repo num
 
   ReopenIssue (Repo repo) num -> case config of
     GitHubCliConfig{} -> sendM $ ghIssueReopen config repo num
-    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for ReopenIssue"
+    GitHubSocketConfig path -> sendM $ socketReopenIssue path repo num
 
   AddIssueLabel (Repo repo) num label -> case config of
     GitHubCliConfig{} -> sendM $ ghIssueLabelAdd config repo num label
-    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for AddIssueLabel"
+    GitHubSocketConfig path -> sendM $ socketAddIssueLabel path repo num label
 
   RemoveIssueLabel (Repo repo) num label -> case config of
     GitHubCliConfig{} -> sendM $ ghIssueLabelRemove config repo num label
-    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for RemoveIssueLabel"
+    GitHubSocketConfig path -> sendM $ socketRemoveIssueLabel path repo num label
 
   AddIssueAssignee (Repo repo) num assignee -> case config of
     GitHubCliConfig{} -> sendM $ ghIssueAssigneeAdd config repo num assignee
-    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for AddIssueAssignee"
+    GitHubSocketConfig path -> sendM $ socketAddIssueAssignee path repo num assignee
 
   RemoveIssueAssignee (Repo repo) num assignee -> case config of
     GitHubCliConfig{} -> sendM $ ghIssueAssigneeRemove config repo num assignee
-    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for RemoveIssueAssignee"
+    GitHubSocketConfig path -> sendM $ socketRemoveIssueAssignee path repo num assignee
 
   GetIssue (Repo repo) num includeComments -> case config of
     GitHubCliConfig{} -> sendM $ ghIssueView config repo num includeComments
@@ -159,19 +159,19 @@ runGitHubIO config = interpret $ \case
   -- PR operations
   CreatePR spec -> case config of
     GitHubCliConfig{} -> sendM $ ghPrCreate config spec
-    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for CreatePR"
+    GitHubSocketConfig path -> sendM $ socketCreatePR path spec
 
   GetPullRequest (Repo repo) num includeDetails -> case config of
     GitHubCliConfig{} -> sendM $ ghPrView config repo num includeDetails
-    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for GetPullRequest"
+    GitHubSocketConfig path -> sendM $ socketGetPR path repo num
 
   ListPullRequests (Repo repo) filt -> case config of
     GitHubCliConfig{} -> sendM $ ghPrList config repo filt
-    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for ListPullRequests"
+    GitHubSocketConfig path -> sendM $ socketListPullRequests path repo filt
 
   GetPullRequestReviews (Repo repo) num -> case config of
     GitHubCliConfig{} -> sendM $ ghPrReviews config repo num
-    GitHubSocketConfig{} -> sendM $ pure $ Left $ GHUnexpected 501 "Socket mode not implemented for GetPullRequestReviews"
+    GitHubSocketConfig path -> sendM $ socketGetPullRequestReviews path repo num
 
   -- Auth
   CheckAuth -> case config of
@@ -184,7 +184,14 @@ runGitHubIO config = interpret $ \case
 -- ════════════════════════════════════════════════════════════════════════════
 
 socketCheckAuth :: FilePath -> IO Bool
-socketCheckAuth path = doesFileExist path
+socketCheckAuth path = do
+  exists <- doesFileExist path
+  if not exists then pure False else do
+    let req = GitHubCheckAuth
+    result <- sendRequest (SocketConfig path 10000) req
+    case result of
+      Right (GitHubAuthResponse auth _) -> pure auth
+      _ -> pure False
 
 socketGetIssue :: FilePath -> Text -> Int -> Bool -> IO (Either GitHubError (Maybe Issue))
 socketGetIssue path repo num _includeComments = do
@@ -210,6 +217,107 @@ socketGetIssue path repo num _includeComments = do
         Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubGetIssue"
         Left err -> pure $ Left $ socketErrorToGitHubError err
 
+socketCreateIssue :: FilePath -> CreateIssueInput -> IO (Either GitHubError Int)
+socketCreateIssue path input = do
+  case parseRepo (input.ciiRepo.unRepo) of
+    Left err -> pure $ Left err
+    Right (owner, repoName) -> do
+      let req = GitHubCreateIssue owner repoName input.ciiTitle input.ciiBody input.ciiLabels
+      result <- sendRequest (SocketConfig path 10000) req
+      case result of
+        Right (GitHubIssueResponse n _ _ _ _ _) -> pure $ Right n
+        Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
+        Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubCreateIssue"
+        Left err -> pure $ Left $ socketErrorToGitHubError err
+
+socketUpdateIssue :: FilePath -> Text -> Int -> UpdateIssueInput -> IO (Either GitHubError ())
+socketUpdateIssue path repo num input = do
+  case parseRepo repo of
+    Left err -> pure $ Left err
+    Right (owner, repoName) -> do
+      let stateStr = case input.uiiState of
+            Just IssueOpen -> Just "open"
+            Just IssueClosed -> Just "closed"
+            Nothing -> Nothing
+      
+      let req = GitHubUpdateIssue 
+            { owner = owner
+            , repo = repoName
+            , number = num
+            , title = input.uiiTitle
+            , body = input.uiiBody
+            , state = stateStr
+            , labels = input.uiiLabels
+            , assignees = input.uiiAssignees
+            }
+      result <- sendRequest (SocketConfig path 10000) req
+      case result of
+        Right (GitHubIssueResponse {}) -> pure $ Right ()
+        Right (OtelAckResponse) -> pure $ Right () -- Accept Ack too
+        Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
+        Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubUpdateIssue"
+        Left err -> pure $ Left $ socketErrorToGitHubError err
+
+socketCloseIssue :: FilePath -> Text -> Int -> IO (Either GitHubError ())
+socketCloseIssue path repo num = do
+  socketUpdateIssue path repo num (UpdateIssueInput Nothing Nothing (Just IssueClosed) Nothing Nothing)
+
+socketReopenIssue :: FilePath -> Text -> Int -> IO (Either GitHubError ())
+socketReopenIssue path repo num = do
+  socketUpdateIssue path repo num (UpdateIssueInput Nothing Nothing (Just IssueOpen) Nothing Nothing)
+
+socketAddIssueLabel :: FilePath -> Text -> Int -> Text -> IO (Either GitHubError ())
+socketAddIssueLabel path repo num label = do
+  case parseRepo repo of
+    Left err -> pure $ Left err
+    Right (owner, repoName) -> do
+      let req = GitHubAddIssueLabel owner repoName num label
+      result <- sendRequest (SocketConfig path 10000) req
+      case result of
+        Right OtelAckResponse -> pure $ Right ()
+        Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
+        Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubAddIssueLabel"
+        Left err -> pure $ Left $ socketErrorToGitHubError err
+
+socketRemoveIssueLabel :: FilePath -> Text -> Int -> Text -> IO (Either GitHubError ())
+socketRemoveIssueLabel path repo num label = do
+  case parseRepo repo of
+    Left err -> pure $ Left err
+    Right (owner, repoName) -> do
+      let req = GitHubRemoveIssueLabel owner repoName num label
+      result <- sendRequest (SocketConfig path 10000) req
+      case result of
+        Right OtelAckResponse -> pure $ Right ()
+        Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
+        Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubRemoveIssueLabel"
+        Left err -> pure $ Left $ socketErrorToGitHubError err
+
+socketAddIssueAssignee :: FilePath -> Text -> Int -> Text -> IO (Either GitHubError ())
+socketAddIssueAssignee path repo num assignee = do
+  case parseRepo repo of
+    Left err -> pure $ Left err
+    Right (owner, repoName) -> do
+      let req = GitHubAddIssueAssignee owner repoName num assignee
+      result <- sendRequest (SocketConfig path 10000) req
+      case result of
+        Right OtelAckResponse -> pure $ Right ()
+        Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
+        Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubAddIssueAssignee"
+        Left err -> pure $ Left $ socketErrorToGitHubError err
+
+socketRemoveIssueAssignee :: FilePath -> Text -> Int -> Text -> IO (Either GitHubError ())
+socketRemoveIssueAssignee path repo num assignee = do
+  case parseRepo repo of
+    Left err -> pure $ Left err
+    Right (owner, repoName) -> do
+      let req = GitHubRemoveIssueAssignee owner repoName num assignee
+      result <- sendRequest (SocketConfig path 10000) req
+      case result of
+        Right OtelAckResponse -> pure $ Right ()
+        Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
+        Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubRemoveIssueAssignee"
+        Left err -> pure $ Left $ socketErrorToGitHubError err
+
 socketListIssues :: FilePath -> Text -> IssueFilter -> IO (Either GitHubError [Issue])
 socketListIssues path repo filt = do
   case parseRepo repo of
@@ -225,6 +333,85 @@ socketListIssues path repo filt = do
         Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
         Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubListIssues"
         Left err -> pure $ Left $ socketErrorToGitHubError err
+
+socketCreatePR :: FilePath -> PRCreateSpec -> IO (Either GitHubError PRUrl)
+socketCreatePR path spec = do
+  case parseRepo (spec.prcsRepo.unRepo) of
+    Left err -> pure $ Left err
+    Right (owner, repoName) -> do
+      let req = GitHubCreatePR owner repoName spec.prcsTitle spec.prcsBody spec.prcsHead spec.prcsBase
+      result <- sendRequest (SocketConfig path 10000) req
+      case result of
+        Right (GitHubPRResponse _ url _) -> pure $ Right $ PRUrl url
+        Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
+        Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubCreatePR"
+        Left err -> pure $ Left $ socketErrorToGitHubError err
+
+socketGetPR :: FilePath -> Text -> Int -> IO (Either GitHubError (Maybe PullRequest))
+socketGetPR path repo num = do
+  case parseRepo repo of
+    Left err -> pure $ Left err
+    Right (owner, repoName) -> do
+      let req = GitHubGetPR owner repoName num
+      result <- sendRequest (SocketConfig path 10000) req
+      case result of
+        Right (GitHubPRResponse n u s) -> 
+          pure $ Right $ Just $ PullRequest
+            { prNumber = n
+            , prTitle = "unknown" -- Rust protocol needs update to return full PR details?
+            , prBody = "unknown"
+            , prAuthor = Author "unknown" Nothing
+            , prState = if s == "open" then PROpen else if s == "merged" then PRMerged else PRClosed
+            , prUrl = u
+            , prHeadRef = "unknown"
+            , prBaseRef = "unknown"
+            , prCreatedAt = "unknown"
+            , prMergedAt = Nothing
+            , prLabels = []
+            , prReviewDecision = Nothing
+            }
+        Right (ErrorResponse 404 _) -> pure $ Right Nothing
+        Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
+        Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubGetPR"
+        Left err -> pure $ Left $ socketErrorToGitHubError err
+
+socketListPullRequests :: FilePath -> Text -> PRFilter -> IO (Either GitHubError [PullRequest])
+socketListPullRequests path repo filt = do
+  case parseRepo repo of
+    Left err -> pure $ Left err
+    Right (owner, repoName) -> do
+      let s = case filt.pfState of
+            Just PROpen -> Just "open"
+            Just PRClosed -> Just "closed"
+            Just PRMerged -> Just "all" -- Octocrab doesn't have "merged" filter easily? Or "closed" covers it?
+            Nothing -> Nothing
+      let req = GitHubListPullRequests owner repoName s filt.pfLimit
+      result <- sendRequest (SocketConfig path 10000) req
+      case result of
+        Right (GitHubPullRequestsResponse prs) ->
+          case fromJSON (toJSON prs) of
+            Aeson.Success ps -> pure $ Right ps
+            err -> pure $ Left $ GHParseError $ T.pack $ "Failed to parse PRs: " <> show err
+        Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
+        Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubListPullRequests"
+        Left err -> pure $ Left $ socketErrorToGitHubError err
+
+socketGetPullRequestReviews :: FilePath -> Text -> Int -> IO (Either GitHubError [ReviewComment])
+socketGetPullRequestReviews path repo num = do
+  case parseRepo repo of
+    Left err -> pure $ Left err
+    Right (owner, repoName) -> do
+      let req = GitHubGetPullRequestReviews owner repoName num
+      result <- sendRequest (SocketConfig path 10000) req
+      case result of
+        Right (GitHubReviewsResponse reviews) ->
+           case fromJSON (toJSON reviews) of
+            Aeson.Success rs -> pure $ Right rs
+            err -> pure $ Left $ GHParseError $ T.pack $ "Failed to parse reviews: " <> show err
+        Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
+        Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubGetPullRequestReviews"
+        Left err -> pure $ Left $ socketErrorToGitHubError err
+
 
 parseRepo :: Text -> Either GitHubError (Text, Text)
 parseRepo repo = case T.splitOn "/" repo of

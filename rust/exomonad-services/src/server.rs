@@ -84,9 +84,17 @@ impl ServiceServer {
             ServiceRequest::AnthropicChat { .. } => self.anthropic.call(req).await,
             ServiceRequest::GitHubGetIssue { .. }
             | ServiceRequest::GitHubCreateIssue { .. }
+            | ServiceRequest::GitHubUpdateIssue { .. }
             | ServiceRequest::GitHubListIssues { .. }
+            | ServiceRequest::GitHubAddIssueLabel { .. }
+            | ServiceRequest::GitHubRemoveIssueLabel { .. }
+            | ServiceRequest::GitHubAddIssueAssignee { .. }
+            | ServiceRequest::GitHubRemoveIssueAssignee { .. }
             | ServiceRequest::GitHubCreatePR { .. }
-            | ServiceRequest::GitHubGetPR { .. } => self.github.call(req).await,
+            | ServiceRequest::GitHubGetPR { .. }
+            | ServiceRequest::GitHubListPullRequests { .. }
+            | ServiceRequest::GitHubGetPullRequestReviews { .. }
+            | ServiceRequest::GitHubCheckAuth => self.github.call(req).await,
             ServiceRequest::OllamaGenerate { .. } => self.ollama.call(req).await,
             ServiceRequest::OtelSpan { .. } | ServiceRequest::OtelMetric { .. } => {
                 self.otel.call(req).await

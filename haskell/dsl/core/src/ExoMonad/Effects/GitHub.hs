@@ -228,7 +228,7 @@ instance FromJSON Issue where
     Issue
       <$> v .: "number"
       <*> v .: "title"
-      <*> v .: "body"
+      <*> v .:? "body" .!= ""
       <*> v .: "author"
       <*> pure labelNames
       <*> v .: "state"
@@ -419,7 +419,7 @@ instance FromJSON PullRequest where
     PullRequest
       <$> v .: "number"
       <*> v .: "title"
-      <*> v .: "body"
+      <*> v .:? "body" .!= ""
       <*> v .: "author"
       <*> pure labelNames
       <*> v .: "state"
