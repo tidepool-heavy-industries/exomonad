@@ -275,7 +275,12 @@ data ToolDefinition = ToolDefinition
   , tdInputSchema :: Value
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON)
+
+instance FromJSON ToolDefinition where
+  parseJSON = withObject "ToolDefinition" $ \o -> ToolDefinition
+    <$> o .: "name"
+    <*> o .: "description"
+    <*> o .: "inputSchema"
 
 -- | Custom ToJSON to use MCP-standard field names (without td prefix)
 instance ToJSON ToolDefinition where

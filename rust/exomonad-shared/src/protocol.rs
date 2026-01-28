@@ -441,11 +441,9 @@ pub struct GitHubIssueRef {
 /// Tool definition for MCP discovery (must match Haskell ToolDefinition).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDefinition {
-    #[serde(rename = "tdName")]
     pub name: String,
-    #[serde(rename = "tdDescription")]
     pub description: String,
-    #[serde(rename = "tdInputSchema")]
+    #[serde(rename = "inputSchema")]
     pub input_schema: Value,
 }
 
@@ -533,6 +531,12 @@ pub struct McpError {
     pub code: i32,
     /// Error message.
     pub message: String,
+    /// Structured details for debugging.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
+    /// Actionable guidance to fix the issue.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggestion: Option<String>,
 }
 
 // ============================================================================

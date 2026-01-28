@@ -1,0 +1,8 @@
+{
+  "type": "MCPToolCall",
+  "id": "1",
+  "tool_name": "list_files",
+  "arguments": {
+    "path": "."
+  }
+}

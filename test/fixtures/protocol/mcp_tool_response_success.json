@@ -1,0 +1,11 @@
+{
+  "type": "MCPToolResponse",
+  "id": "1",
+  "result": {
+    "files": [
+      "a.txt",
+      "b.txt"
+    ]
+  },
+  "error": null
+}
