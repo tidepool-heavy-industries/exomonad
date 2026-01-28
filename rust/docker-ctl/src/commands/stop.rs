@@ -11,7 +11,7 @@ pub async fn run(container: String, timeout: u64) -> anyhow::Result<String> {
     let docker = Docker::connect_with_local_defaults()?;
     
     let stop_options = StopContainerOptions {
-        t: Some(timeout as i32),
+        t: Some(timeout.min(i32::MAX as u64) as i32),
         ..Default::default()
     };
     
