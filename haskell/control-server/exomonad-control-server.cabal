@@ -93,6 +93,8 @@ library
         ExoMonad.Control.Role.Definition.PM
         -- Role DSL Registry
         ExoMonad.Control.Role.Registry
+        ExoMonad.Control.Role.Handlers
+        ExoMonad.Control.Runtime
         ExoMonad.Control.GHTools
         ExoMonad.Control.GHTools.Types
         ExoMonad.Control.Export
