@@ -159,55 +159,9 @@ else
     echo "Using existing/linked settings.json"
 fi
 
-# 2.4 Create Gemini Adapter Script
-# Maps Gemini's hook payload structure to the Claude Code structure expected by exomonad
-cat > /usr/local/bin/gemini-adapter.js <<'JS_EOF'
-#!/usr/bin/env node
-const fs = require('fs');
-const { spawn } = require('child_process');
-
-// Read stdin
-const chunks = [];
-process.stdin.on('data', chunk => chunks.push(chunk));
-process.stdin.on('end', () => {
-  try {
-    const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-    
-    // Transform Payload
-    // Gemini: "hook_event_name": "BeforeTool" (or similar), "tool_parameters": {...}
-    // Claude: "hook_event_name": "PreToolUse", "tool_input": {...}
-    
-    // Normalize Event Name
-    if (input.hook_event_name === 'BeforeTool' || input.hook_event_name === 'BeforeToolSelection') {
-        input.hook_event_name = 'PreToolUse';
-    }
-    
-    // Normalize Tool Parameters
-    if (input.tool_parameters && !input.tool_input) {
-        input.tool_input = input.tool_parameters;
-    }
-    
-    // Spawn exomonad
-    const exomonad = spawn('exomonad', ['hook', 'pre-tool-use', '--runtime=gemini'], {
-        stdio: ['pipe', 'inherit', 'inherit']
-    });
-    
-    exomonad.stdin.write(JSON.stringify(input));
-    exomonad.stdin.end();
-    
-    exomonad.on('close', (code) => {
-        process.exit(code);
-    });
-    
-  } catch (err) {
-    console.error('Gemini Adapter Error:', err);
-    process.exit(1);
-  }
-});
-JS_EOF
-chmod +x /usr/local/bin/gemini-adapter.js
-
 # 2.5 Configure Gemini hooks & MCP
+# NOTE: Gemini hook payload normalization not yet implemented in exomonad binary
+# See: https://github.com/tidepool-heavy-industries/exomonad/issues/382
 GEMINI_CONFIG_DIR="/home/agent/.gemini"
 if [ ! -f "$GEMINI_CONFIG_DIR/settings.json" ]; then
     echo "Creating default Gemini settings with hooks..."
@@ -255,7 +209,7 @@ if [ ! -f "$GEMINI_CONFIG_DIR/settings.json" ]; then
         "hooks": [
           {
             "type": "command",
-            "command": "gemini-adapter.js",
+            "command": "exomonad hook pre-tool-use --runtime=gemini",
             "timeout": 300
           }
         ]
@@ -267,7 +221,7 @@ if [ ! -f "$GEMINI_CONFIG_DIR/settings.json" ]; then
         "hooks": [
           {
             "type": "command",
-            "command": "gemini-adapter.js",
+            "command": "exomonad hook pre-tool-use --runtime=gemini",
             "timeout": 300
           }
         ]
