@@ -18,7 +18,7 @@ import ExoMonad.Observability.Types (TraceContext)
 -- | Route a control message to the appropriate handler.
 handleMessage :: Logger -> ServerConfig -> Tracer -> TraceContext -> CircuitBreakerMap -> ControlMessage -> IO ControlResponse
 handleMessage logger config tracer traceCtx cbMap = \case
-  HookEvent input r rl -> handleHook tracer config input r rl cbMap
+  HookEvent input r rl cid -> handleHook tracer config input r rl cid cbMap
   McpToolCall reqId name args ->
     handleMcpTool logger config tracer traceCtx cbMap reqId name args
   ToolsListRequest -> handleToolsList logger

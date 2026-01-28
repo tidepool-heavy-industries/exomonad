@@ -463,6 +463,9 @@ pub enum ControlMessage {
         /// The role of the agent (dev, tl, pm).
         #[serde(default)]
         role: Role,
+        /// Container ID for remote command execution (derived from EXOMONAD_ISSUE_ID).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        container_id: Option<String>,
     },
 
     /// MCP tool call from Claude Code.
@@ -673,16 +676,18 @@ mod tests {
             }),
             runtime: Runtime::Claude,
             role: Role::Dev,
+            container_id: Some("exomonad-agent-123".to_string()),
         };
 
         let json = serde_json::to_string(&msg).unwrap();
         let parsed: ControlMessage = serde_json::from_str(&json).unwrap();
 
         match parsed {
-            ControlMessage::HookEvent { input, runtime, role } => {
+            ControlMessage::HookEvent { input, runtime, role, container_id } => {
                 assert_eq!(input.session_id, "test");
                 assert_eq!(runtime, Runtime::Claude);
                 assert_eq!(role, Role::Dev);
+                assert_eq!(container_id, Some("exomonad-agent-123".to_string()));
             }
             _ => panic!("Wrong variant"),
         }

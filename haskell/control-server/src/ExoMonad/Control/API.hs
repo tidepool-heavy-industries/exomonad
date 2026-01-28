@@ -187,8 +187,8 @@ instance ToJSON McpContentItem where
     ] ++ maybe [] (\t -> ["text" .= t]) c.mciText
 
 type ExoMonadControlAPI =
-       -- | Hook event: (Input, Runtime, Role) -> (Output, ExitCode)
-       "hook" :> ReqBody '[JSON] (HookInput, Runtime, Role) :> Post '[JSON] ControlResponse
+       -- | Hook event: (Input, Runtime, Role, ContainerId) -> (Output, ExitCode)
+       "hook" :> ReqBody '[JSON] (HookInput, Runtime, Role, Maybe Text) :> Post '[JSON] ControlResponse
        -- | MCP tool call: Request -> Response
   :<|> "mcp" :> "call" :> ReqBody '[JSON] McpToolCallRequest :> Post '[JSON] ControlResponse
        -- | MCP tool list

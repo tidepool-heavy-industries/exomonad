@@ -65,9 +65,9 @@ impl ControlSocket {
     /// Executes `curl --unix-socket ...` to perform the HTTP request.
     pub fn send(&mut self, message: &ControlMessage) -> Result<ControlResponse> {
         let (method, endpoint, body_json) = match message {
-            ControlMessage::HookEvent { input, runtime, role } => {
-                // API expects [HookInput, Runtime, Role]
-                let body = serde_json::json!([input, runtime, role]);
+            ControlMessage::HookEvent { input, runtime, role, container_id } => {
+                // API expects [HookInput, Runtime, Role, ContainerId]
+                let body = serde_json::json!([input, runtime, role, container_id]);
                 ("POST", "/hook".to_string(), Some(body))
             },
             ControlMessage::McpToolCall { id, tool_name, arguments, role } => {
@@ -224,6 +224,7 @@ mod tests {
             }),
             runtime: crate::protocol::Runtime::Claude,
             role: Role::Dev,
+            container_id: None,
         };
 
         let response = client.send(&message).unwrap();

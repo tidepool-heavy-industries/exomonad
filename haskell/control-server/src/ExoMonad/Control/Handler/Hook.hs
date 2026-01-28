@@ -46,7 +46,7 @@ import ExoMonad.Control.Effects.Git (runGitRemote)
 import ExoMonad.Control.Effects.Cabal (runCabalRemote)
 import ExoMonad.Control.Effects.Effector (runEffectorViaSsh, runEffectorIO)
 import ExoMonad.Control.Interpreters.Traced (traceCabal, traceGit)
-import ExoMonad.Cabal.Interpreter (runCabalIO, defaultCabalConfig)
+import ExoMonad.Cabal.Interpreter (runCabalStub)
 import ExoMonad.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
 import ExoMonad.FileSystem.Interpreter (runFileSystemIO)
 import ExoMonad.Env.Interpreter (runEnvIO)
@@ -69,8 +69,8 @@ import ExoMonad.Control.Workflow.Store (WorkflowStore, getWorkflowState, updateW
 --
 -- Executes hook-specific logic for SessionStart and Stop.
 -- Other hooks pass through with default responses.
-handleHook :: Tracer -> ServerConfig -> HookInput -> Runtime -> Role -> CircuitBreakerMap -> IO ControlResponse
-handleHook tracer config input runtime agentRole cbMap = do
+handleHook :: Tracer -> ServerConfig -> HookInput -> Runtime -> Role -> Maybe Text -> CircuitBreakerMap -> IO ControlResponse
+handleHook tracer config input runtime agentRole mContainerId cbMap = do
   TIO.putStrLn $ "  session=" <> input.sessionId
   TIO.putStrLn $ "  cwd=" <> input.cwd
   TIO.putStrLn $ "  role=" <> T.pack (show agentRole)
@@ -90,7 +90,7 @@ handleHook tracer config input runtime agentRole cbMap = do
     
     case input.hookEventName of
       "SessionStart" -> handleSessionStart tracer agentRole input
-      "Stop" -> handleStop tracer config input runtime cbMap
+      "Stop" -> handleStop tracer config input runtime mContainerId cbMap
       "PreToolUse" -> handlePreToolUse config input
       "SessionEnd" -> handleTranscriptHook config agentRole input
       "SubagentStop" -> handleTranscriptHook config agentRole input
@@ -236,14 +236,14 @@ handleSessionStart tracer role input = do
 -- | Handle Stop hook: gather state, render template, provide actionable guidance.
 --
 -- Uses CircuitBreaker to prevent infinite loops and concurrent execution.
-handleStop :: Tracer -> ServerConfig -> HookInput -> Runtime -> CircuitBreakerMap -> IO ControlResponse
-handleStop tracer config input runtime cbMap = do
+handleStop :: Tracer -> ServerConfig -> HookInput -> Runtime -> Maybe Text -> CircuitBreakerMap -> IO ControlResponse
+handleStop tracer config input runtime mContainerId cbMap = do
   sessionId <- getOrCreateSession input
   TIO.putStrLn $ "  [HOOK] Running Stop hook with circuit breaker for session: " <> sessionId
   hFlush stdout
 
   now <- getCurrentTime
-  withCircuitBreaker cbMap config.circuitBreakerConfig now sessionId (runStopHookLogic tracer config.workflowStore input) >>= \case
+  withCircuitBreaker cbMap config.circuitBreakerConfig now sessionId (runStopHookLogic tracer config.workflowStore input mContainerId) >>= \case
     Left err -> do
       TIO.putStrLn $ "  [HOOK] Circuit breaker blocked Stop: " <> err
       hFlush stdout
@@ -304,41 +304,39 @@ getOrCreateSession input = pure input.sessionId
 
 -- | Logic to run inside circuit breaker lock.
 -- Replaces old runStopHookLogic with graph execution.
-runStopHookLogic :: Tracer -> WorkflowStore -> HookInput -> IO (TemplateName, StopHookContext)
-runStopHookLogic tracer workflowStore input = do
-  -- Check environment for container/SSH
-  mContainer <- lookupEnv "EXOMONAD_CONTAINER"
-
+runStopHookLogic :: Tracer -> WorkflowStore -> HookInput -> Maybe Text -> IO (TemplateName, StopHookContext)
+runStopHookLogic tracer workflowStore input mContainerId = do
   -- Get binary directory (respects EXOMONAD_BIN_DIR, defaults to /usr/local/bin)
   binDir <- Paths.dockerBinDir
   let dockerCtlPath = Paths.dockerCtlBin binDir
 
   -- Fetch existing workflow state (or default if new)
   initialWorkflow <- getWorkflowState workflowStore input.sessionId
-  
+
   -- We need to fetch git info first to populate AgentState
-  agentState <- case mContainer of
-     Just container -> runM $ runSshExec dockerCtlPath $ runGitRemote (T.pack container) "." $ traceGit tracer $ getAgentState input
+  agentState <- case mContainerId of
+     Just container -> runM $ runSshExec dockerCtlPath $ runGitRemote container "." $ traceGit tracer $ getAgentState input
      Nothing -> runM $ runGitIO $ traceGit tracer $ getAgentState input
 
-  (result, finalState) <- case mContainer of
+  (result, finalState) <- case mContainerId of
         Just container ->
           runM
           $ runSshExec dockerCtlPath
-          $ runEffectorViaSsh (T.pack container)
-          $ runCabalRemote (T.pack container)
+          $ runEffectorViaSsh container
+          $ runCabalRemote container
           $ traceCabal tracer
-          $ runGitRemote (T.pack container) "."
+          $ runGitRemote container "."
           $ traceGit tracer
           $ runGraphMeta (GraphMetadata "stop-hook")
           $ runNodeMeta defaultNodeMeta
           $ runState initialWorkflow
           $ runGraph stopHookHandlers agentState
         Nothing ->
+          -- No container: skip cabal checks (can't run remotely without target)
           runM
           $ runState initialWorkflow
           $ runEffectorIO
-          $ runCabalIO defaultCabalConfig
+          $ runCabalStub
           $ traceCabal tracer
           $ runGitIO
           $ traceGit tracer

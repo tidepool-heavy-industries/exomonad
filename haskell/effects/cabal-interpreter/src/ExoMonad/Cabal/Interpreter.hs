@@ -21,6 +21,7 @@
 module ExoMonad.Cabal.Interpreter
   ( -- * Interpreter
     runCabalIO
+  , runCabalStub
 
     -- * Configuration
   , CabalConfig(..)
@@ -100,6 +101,40 @@ runCabalIO cfg = interpret $ \case
   CabalBuild path -> sendM $ runCabalBuild cfg path
   CabalTest path -> sendM $ runCabalTest cfg path
   CabalClean path -> sendM $ runCabalClean cfg path
+
+-- | Stub interpreter that fails for all operations.
+--
+-- Used when there's no container target for remote execution.
+-- Cabal operations are only available inside agent containers - if we're
+-- running without a container, these operations should fail explicitly
+-- rather than silently succeeding.
+--
+-- @
+-- result <- runM . runCabalStub $ cabalBuild path
+-- -- result == CabalBuildFailure (always)
+-- @
+runCabalStub
+  :: Eff (Cabal ': effs) a
+  -> Eff effs a
+runCabalStub = interpret $ \case
+  CabalBuild _path -> pure $ CabalBuildFailure
+    { cbfExitCode = 1
+    , cbfStderr = "Cabal operations only available inside agent containers (no container_id provided)"
+    , cbfStdout = ""
+    , cbfParsedErrors = []
+    }
+  CabalTest _path -> pure $ CabalBuildFailure
+    { cbfExitCode = 1
+    , cbfStderr = "Cabal operations only available inside agent containers (no container_id provided)"
+    , cbfStdout = ""
+    , cbfParsedErrors = []
+    }
+  CabalClean _path -> pure $ CabalBuildFailure
+    { cbfExitCode = 1
+    , cbfStderr = "Cabal operations only available inside agent containers (no container_id provided)"
+    , cbfStdout = ""
+    , cbfParsedErrors = []
+    }
 
 
 -- ════════════════════════════════════════════════════════════════════════════

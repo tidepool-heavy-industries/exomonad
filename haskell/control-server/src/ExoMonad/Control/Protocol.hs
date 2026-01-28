@@ -292,7 +292,7 @@ instance ToJSON ToolDefinition where
 
 -- | Message sent over Unix socket from exomonad. Tagged by "type".
 data ControlMessage
-  = HookEvent { input :: HookInput, runtime :: Runtime, role :: Role }
+  = HookEvent { input :: HookInput, runtime :: Runtime, role :: Role, containerId :: Maybe Text }
   | McpToolCall { mcpId :: Text, toolName :: Text, arguments :: Value }
   | ToolsListRequest
   | Ping
@@ -306,6 +306,7 @@ instance FromJSON ControlMessage where
         <$> o .: "input"
         <*> o .:? "runtime" .!= Claude
         <*> o .:? "role" .!= Dev
+        <*> o .:? "container_id"
       "MCPToolCall" -> McpToolCall
         <$> o .: "id"
         <*> o .: "tool_name"
@@ -315,12 +316,12 @@ instance FromJSON ControlMessage where
       _ -> fail $ "Unknown message type: " <> show msgType
 
 instance ToJSON ControlMessage where
-  toJSON (HookEvent i r rl) = object
+  toJSON (HookEvent i r rl cid) = object $
     [ "type" .= ("HookEvent" :: Text)
     , "input" .= i
     , "runtime" .= r
     , "role" .= rl
-    ]
+    ] ++ maybe [] (\c -> ["container_id" .= c]) cid
   toJSON (McpToolCall mid tn args) = object
     [ "type" .= ("MCPToolCall" :: Text)
     , "id" .= mid

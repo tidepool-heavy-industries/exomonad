@@ -181,11 +181,11 @@ server logger config tracer cbMap =
   :<|> handleRoleMcpCall
   :<|> handleRoleMcpJsonRpc
   where
-    handleHook (input, runtime, agentRole) = do
+    handleHook (input, runtime, agentRole, containerId) = do
       liftIO $ do
-        logDebug logger $ "[HOOK] " <> input.hookEventName <> " runtime=" <> T.pack (show runtime) <> " role=" <> T.pack (show agentRole)
+        logDebug logger $ "[HOOK] " <> input.hookEventName <> " runtime=" <> T.pack (show runtime) <> " role=" <> T.pack (show agentRole) <> " container=" <> T.pack (show containerId)
         traceCtx <- newTraceContext
-        handleMessage logger config tracer traceCtx cbMap (HookEvent input runtime agentRole)
+        handleMessage logger config tracer traceCtx cbMap (HookEvent input runtime agentRole containerId)
 
         -- Note: We do NOT flushTraces here because we use hs-opentelemetry (via Tracer)
         -- which handles export automatically via BatchSpanProcessor.

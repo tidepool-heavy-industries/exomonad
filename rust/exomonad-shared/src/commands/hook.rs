@@ -85,6 +85,11 @@ pub fn handle_hook(event_type: HookEventType, runtime: Runtime, role: Role) -> R
     // Parse the hook input
     let hook_input: HookInput = serde_json::from_str(&stdin_content)?;
 
+    // Derive container ID from EXOMONAD_ISSUE_ID for remote command execution
+    let container_id = std::env::var("EXOMONAD_ISSUE_ID")
+        .ok()
+        .map(|id| format!("exomonad-agent-{}", id));
+
     // Verify event type matches what Claude Code sent
     let expected_event = event_type.to_string();
     if hook_input.hook_event_name != expected_event {
@@ -126,6 +131,7 @@ pub fn handle_hook(event_type: HookEventType, runtime: Runtime, role: Role) -> R
         input: Box::new(hook_input),
         runtime,
         role,
+        container_id,
     };
     let response = socket.send(&message)?;
 
