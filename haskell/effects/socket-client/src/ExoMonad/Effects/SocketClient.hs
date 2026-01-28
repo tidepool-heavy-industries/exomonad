@@ -32,8 +32,9 @@ module ExoMonad.Effects.SocketClient
   ) where
 
 import Control.Exception (bracket, try, SomeException)
+import Control.Lens ((&), (?~), at)
 import Data.Aeson
-import qualified Data.Aeson.KeyMap as KM
+import Data.Aeson.Lens (_Object, key, _String)
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as LBS8
@@ -163,9 +164,7 @@ data ServiceRequest
 
 -- Helper to add type field
 addType :: ToJSON a => Text -> a -> Value
-addType t req = case toJSON req of
-  Object o -> Object (KM.insert "type" (String t) o)
-  v -> v
+addType t req = toJSON req & _Object . at "type" ?~ String t
 
 instance ToJSON ServiceRequest where
   toJSON = \case

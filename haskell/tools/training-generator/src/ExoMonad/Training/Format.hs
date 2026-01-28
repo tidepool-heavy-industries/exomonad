@@ -17,7 +17,9 @@ module ExoMonad.Training.Format
   , formatTrainingFromSkeleton
   ) where
 
+import Control.Lens ((^?))
 import Data.Aeson (encode, object, (.=), Value(..), (.:))
+import Data.Aeson.Lens (key, _String, _JSON)
 import Data.Aeson.Types (parseMaybe)
 import Data.ByteString.Lazy (ByteString)
 import Data.Text (Text)
@@ -253,21 +255,15 @@ formatTrainingFromSkeleton :: Value -> Either Text Value
 formatTrainingFromSkeleton skeleton = case skeleton of
   Object obj -> do
     -- Extract fields from skeleton
-    code <- case parseMaybe (.: "code") obj of
-      Just c -> Right c
-      Nothing -> Left "Missing 'code' field in skeleton"
+    code <- maybe (Left "Missing 'code' field in skeleton") Right (skeleton ^? key "code" . _String)
 
-    criteria <- case parseMaybe (.: "criteria") obj of
-      Just c -> Right c
-      Nothing -> Left "Missing 'criteria' field in skeleton"
+    criteria <- maybe (Left "Missing 'criteria' field in skeleton") Right (skeleton ^? key "criteria" . _String)
 
     -- Check for unannotated skeleton
     when (criteria == "TODO: add criteria") $
       Left "Skeleton not annotated (criteria still TODO)"
 
-    selected <- case parseMaybe (.: "selected") obj of
-      Just s -> Right s
-      Nothing -> Left "Missing 'selected' field in skeleton"
+    selected <- maybe (Left "Missing 'selected' field in skeleton") Right (skeleton ^? key "selected" . _JSON)
 
     -- Format as training example
     let formatted = formatCodeExample criteria code selected
