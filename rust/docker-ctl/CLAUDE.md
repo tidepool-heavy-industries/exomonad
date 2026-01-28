@@ -13,8 +13,10 @@ docker-ctl spawn \
   [--uid <uid>] [--gid <gid>] \
   [--expires-at <iso-date>]
 
-# Execute command in a container
-docker-ctl exec <container-id> \
+# Execute command in a container OR locally
+docker-ctl exec \
+  [--local] \
+  [<container-id>] \
   [--workdir <dir>] \
   [--user <user>] \
   [-e KEY=VALUE] ... \
@@ -25,6 +27,18 @@ docker-ctl status <container-id>
 
 # Stop and remove a container
 docker-ctl stop <container-id> [--timeout <seconds>]
+```
+
+## Local Execution (`--local`)
+
+When `--local` is specified, `docker-ctl` runs the command directly on the host using `std::process::Command` instead of via the Docker API. This allows a unified interface for both containerized and local operations.
+
+```bash
+# Run inside container
+docker-ctl exec my-agent -- cabal build
+
+# Run locally
+docker-ctl exec --local -- cabal build
 ```
 
 ## JSON Output
@@ -65,4 +79,3 @@ This allows both control-server and agent containers to share the same worktrees
 - **Stateless**: Doesn't maintain its own state; queries Docker API directly.
 - **Synchronous**: Blocks until the operation completes (or exec stream finishes).
 - **Buffered**: `exec` buffers all output before returning JSON (simplifies Haskell side).
-```

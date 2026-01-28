@@ -30,7 +30,7 @@ data SshExec a where
 
 -- | Request to execute a command in a remote container
 data ExecRequest = ExecRequest
-  { erContainer :: Text           -- ^ Container hostname (e.g., "agent-1")
+  { erContainer :: Maybe Text     -- ^ Container hostname (e.g., "agent-1") or Nothing for local
   , erCommand :: Text             -- ^ Command to execute
   , erArgs :: [Text]              -- ^ Command arguments
   , erWorkingDir :: FilePath      -- ^ Working directory
@@ -66,7 +66,11 @@ execCommand = send . ExecCommand
 runSshExec :: LastMember IO effs => FilePath -> Eff (SshExec ': effs) a -> Eff effs a
 runSshExec binPath = interpret $ \case
   ExecCommand req -> sendM $ do
-    let args = ["exec", T.unpack req.erContainer]
+    let containerArgs = case req.erContainer of
+          Just container -> [T.unpack container]
+          Nothing -> ["--local"]
+    let args = ["exec"]
+             ++ containerArgs
              ++ ["--workdir", req.erWorkingDir]
              ++ concatMap (\(k, v) -> ["--env", T.unpack $ k <> "=" <> v]) req.erEnv
              ++ ["--"] ++ T.unpack req.erCommand : map T.unpack req.erArgs

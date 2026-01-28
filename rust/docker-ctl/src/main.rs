@@ -17,8 +17,12 @@ struct Cli {
 enum Commands {
     /// Execute a command in a running container
     Exec {
+        /// Run locally instead of in container
+        #[arg(long)]
+        local: bool,
+
         /// Container ID or name
-        container: String,
+        container: Option<String>,
         
         /// Working directory inside the container
         #[arg(long)]
@@ -95,8 +99,8 @@ async fn main() {
     let cli = Cli::parse();
     
     let result = match cli.command {
-        Commands::Exec { container, workdir, user, env, cmd } => {
-            commands::exec::run(container, workdir, user, env, cmd).await
+        Commands::Exec { container, local, workdir, user, env, cmd } => {
+            commands::exec::run(container, local, workdir, user, env, cmd).await
         }
         Commands::Spawn { issue_id, worktree_path, backend, uid, gid, expires_at, env } => {
             commands::spawn::run(issue_id, worktree_path, backend, uid, gid, expires_at, env).await

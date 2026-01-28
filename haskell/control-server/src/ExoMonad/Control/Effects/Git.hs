@@ -44,7 +44,7 @@ runGitRemote container workDir = interpret $ \case
 
   GetDirtyFiles -> do
     result <- execCommand $ ExecRequest
-      { erContainer = container
+      { erContainer = Just container
       , erCommand = "git"
       , erArgs = ["status", "--porcelain"]
       , erWorkingDir = workDir
@@ -57,7 +57,7 @@ runGitRemote container workDir = interpret $ \case
 
   GetRecentCommits n -> do
     result <- execCommand $ ExecRequest
-      { erContainer = container
+      { erContainer = Just container
       , erCommand = "git"
       , erArgs = ["log", "--oneline", "-" <> T.pack (show n), "--format=%s"]
       , erWorkingDir = workDir
@@ -74,7 +74,7 @@ runGitRemote container workDir = interpret $ \case
 
   GetCommitsAhead ref -> do
     result <- execCommand $ ExecRequest
-      { erContainer = container
+      { erContainer = Just container
       , erCommand = "git"
       , erArgs = ["rev-list", "--count", ref <> "..HEAD"]
       , erWorkingDir = workDir
@@ -91,7 +91,7 @@ runGitRemote container workDir = interpret $ \case
 gitCommand :: Member SshExec effs => Text -> FilePath -> [Text] -> Eff effs (Maybe Text)
 gitCommand container wd args = do
   result <- execCommand $ ExecRequest
-    { erContainer = container
+    { erContainer = Just container
     , erCommand = "git"
     , erArgs = args
     , erWorkingDir = wd

@@ -26,7 +26,7 @@ runEffectorViaSsh :: Member SshExec effs => Text -> Eff (Effector ': effs) a -> 
 runEffectorViaSsh container = interpret $ \case
   RunEffector cmd args -> do
     result <- execCommand $ ExecRequest
-      { erContainer = container
+      { erContainer = Just container
       , erCommand = "effector"
       , erArgs = cmd : args
       , erWorkingDir = "."
@@ -38,7 +38,7 @@ runEffectorViaSsh container = interpret $ \case
 
   EffectorGitStatus cwd -> do
     result <- execCommand $ ExecRequest
-      { erContainer = container
+      { erContainer = Just container
       , erCommand = "effector"
       , erArgs = ["git", "status", "--cwd", T.pack cwd]
       , erWorkingDir = "."
@@ -54,7 +54,7 @@ runEffectorViaSsh container = interpret $ \case
                then ["git", "diff", "--staged", "--cwd", T.pack cwd]
                else ["git", "diff", "--cwd", T.pack cwd]
     result <- execCommand $ ExecRequest
-      { erContainer = container
+      { erContainer = Just container
       , erCommand = "effector"
       , erArgs = args
       , erWorkingDir = "."
@@ -67,7 +67,7 @@ runEffectorViaSsh container = interpret $ \case
 
   EffectorGitLsFiles cwd args -> do
     result <- execCommand $ ExecRequest
-      { erContainer = container
+      { erContainer = Just container
       , erCommand = "effector"
       , erArgs = ["git", "ls-files", "--cwd", T.pack cwd] ++ args
       , erWorkingDir = "."

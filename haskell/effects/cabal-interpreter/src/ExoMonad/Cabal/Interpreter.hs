@@ -8,27 +8,12 @@
 -- @
 -- import ExoMonad.Cabal.Interpreter
 --
--- main :: IO ()
--- main = do
---   let action = do
---         result <- cabalBuild projectPath
---         case result of
---           CabalSuccess -> cabalTest projectPath
---           failure -> pure failure
---   result <- runM . runCabalIO defaultCabalConfig $ action
---   print result
+-- -- Only output parsing functions are provided here now.
+-- -- Execution is handled by ExoMonad.Control.Effects.Cabal via docker-ctl.
 -- @
 module ExoMonad.Cabal.Interpreter
-  ( -- * Interpreter
-    runCabalIO
-  , runCabalStub
-
-    -- * Configuration
-  , CabalConfig(..)
-  , defaultCabalConfig
-
-    -- * Test Output Parsing
-  , parseQuickCheckOutput
+  ( -- * Test Output Parsing
+    parseQuickCheckOutput
   , parseHSpecOutput
   , parseTestOutput
 
@@ -41,175 +26,12 @@ module ExoMonad.Cabal.Interpreter
   , cabalClean
   ) where
 
-import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import System.Directory (withCurrentDirectory)
-import System.Exit (ExitCode(..))
-import System.Process (readProcessWithExitCode)
 import Text.Regex.TDFA ((=~))
 
 import ExoMonad.Effects.Cabal
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- CONFIGURATION
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Configuration for the Cabal interpreter.
-data CabalConfig = CabalConfig
-  { ccVerbosity :: Int
-    -- ^ Verbosity level: 0 = quiet, 1 = normal, 2 = verbose
-  , ccShowTestDetails :: Bool
-    -- ^ Whether to show detailed test output (--test-show-details=always)
-  , ccTimeout :: Maybe Int
-    -- ^ Optional timeout in seconds for commands
-  }
-  deriving (Show, Eq)
-
--- | Default configuration with quiet builds and detailed test output.
-defaultCabalConfig :: CabalConfig
-defaultCabalConfig = CabalConfig
-  { ccVerbosity = 0
-  , ccShowTestDetails = True
-  , ccTimeout = Nothing
-  }
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- INTERPRETER
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Run the Cabal effect to IO.
---
--- Interprets 'CabalBuild', 'CabalTest', and 'CabalClean' by spawning
--- cabal subprocesses and parsing the output.
---
--- @
--- result <- runM . runCabalIO cfg $ do
---   cabalBuild path >>= \\case
---     CabalSuccess -> cabalTest path
---     failure -> pure failure
--- @
-runCabalIO
-  :: LastMember IO effs
-  => CabalConfig
-  -> Eff (Cabal ': effs) a
-  -> Eff effs a
-runCabalIO cfg = interpret $ \case
-  CabalBuild path -> sendM $ runCabalBuild cfg path
-  CabalTest path -> sendM $ runCabalTest cfg path
-  CabalClean path -> sendM $ runCabalClean cfg path
-
--- | Stub interpreter that fails for all operations.
---
--- Used when there's no container target for remote execution.
--- Cabal operations are only available inside agent containers - if we're
--- running without a container, these operations should fail explicitly
--- rather than silently succeeding.
---
--- @
--- result <- runM . runCabalStub $ cabalBuild path
--- -- result == CabalBuildFailure (always)
--- @
-runCabalStub
-  :: Eff (Cabal ': effs) a
-  -> Eff effs a
-runCabalStub = interpret $ \case
-  CabalBuild _path -> pure $ CabalBuildFailure
-    { cbfExitCode = 1
-    , cbfStderr = "Cabal operations only available inside agent containers (no container_id provided)"
-    , cbfStdout = ""
-    , cbfParsedErrors = []
-    }
-  CabalTest _path -> pure $ CabalBuildFailure
-    { cbfExitCode = 1
-    , cbfStderr = "Cabal operations only available inside agent containers (no container_id provided)"
-    , cbfStdout = ""
-    , cbfParsedErrors = []
-    }
-  CabalClean _path -> pure $ CabalBuildFailure
-    { cbfExitCode = 1
-    , cbfStderr = "Cabal operations only available inside agent containers (no container_id provided)"
-    , cbfStdout = ""
-    , cbfParsedErrors = []
-    }
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- IMPLEMENTATION
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Run cabal build in the given directory.
-runCabalBuild :: CabalConfig -> FilePath -> IO CabalResult
-runCabalBuild cfg path = do
-  let args = ["build", "all"] ++ verbosityArgs cfg
-  (exitCode, stdout, stderr) <- withCurrentDirectory path $
-    readProcessWithExitCode "cabal" args ""
-  pure $ case exitCode of
-    ExitSuccess -> CabalSuccess
-    ExitFailure code -> CabalBuildFailure
-      { cbfExitCode = code
-      , cbfStderr = T.pack stderr
-      , cbfStdout = T.pack stdout
-      , cbfParsedErrors = []
-      }
-
--- | Run cabal test in the given directory.
-runCabalTest :: CabalConfig -> FilePath -> IO CabalResult
-runCabalTest cfg path = do
-  let detailsArg = if ccShowTestDetails cfg
-        then ["--test-show-details=always"]
-        else []
-      args = ["test"] ++ verbosityArgs cfg ++ detailsArg
-  (exitCode, stdout, stderr) <- withCurrentDirectory path $
-    readProcessWithExitCode "cabal" args ""
-  let output = T.pack $ stdout ++ stderr
-  pure $ case exitCode of
-    ExitSuccess -> CabalTestSuccess { ctsOutput = output }
-    ExitFailure code ->
-      -- Check if it's a build failure vs test failure
-      if isBuildFailure (T.pack stderr)
-        then CabalBuildFailure
-          { cbfExitCode = code
-          , cbfStderr = T.pack stderr
-          , cbfStdout = T.pack stdout
-          , cbfParsedErrors = []
-          }
-        else CabalTestFailure
-          { ctfParsedFailures = parseTestOutput output
-          , ctfRawOutput = output
-          }
-
--- | Run cabal clean in the given directory.
-runCabalClean :: CabalConfig -> FilePath -> IO CabalResult
-runCabalClean _cfg path = do
-  (exitCode, stdout, stderr) <- withCurrentDirectory path $
-    readProcessWithExitCode "cabal" ["clean"] ""
-  pure $ case exitCode of
-    ExitSuccess -> CabalSuccess
-    ExitFailure code -> CabalBuildFailure
-      { cbfExitCode = code
-      , cbfStderr = T.pack stderr
-      , cbfStdout = T.pack stdout
-      , cbfParsedErrors = []
-      }
-
--- | Generate verbosity arguments for cabal.
-verbosityArgs :: CabalConfig -> [String]
-verbosityArgs cfg = case ccVerbosity cfg of
-  0 -> ["-v0"]
-  1 -> []
-  _ -> ["-v2"]
-
--- | Check if output indicates a build failure (vs test failure).
-isBuildFailure :: Text -> Bool
-isBuildFailure output =
-  "error:" `T.isInfixOf` output &&
-  ("Failed to build" `T.isInfixOf` output ||
-   "Build failed" `T.isInfixOf` output ||
-   "cannot satisfy" `T.isInfixOf` output)
 
 
 -- ════════════════════════════════════════════════════════════════════════════

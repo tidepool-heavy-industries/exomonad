@@ -11,6 +11,50 @@ pub struct ExecResponse {
 }
 
 pub async fn run(
+    container: Option<String>,
+    local: bool,
+    workdir: Option<String>,
+    user: Option<String>,
+    env: Vec<String>,
+    cmd: Vec<String>,
+) -> anyhow::Result<String> {
+    if local || container.is_none() {
+        run_local(workdir, env, cmd)
+    } else {
+        run_in_container(container.unwrap(), workdir, user, env, cmd).await
+    }
+}
+
+fn run_local(workdir: Option<String>, env: Vec<String>, cmd: Vec<String>) -> anyhow::Result<String> {
+    use std::process::Command;
+
+    if cmd.is_empty() {
+        return Err(anyhow::anyhow!("No command provided"));
+    }
+
+    let mut command = Command::new(&cmd[0]);
+    command.args(&cmd[1..]);
+
+    if let Some(dir) = workdir {
+        command.current_dir(dir);
+    }
+
+    for e in env {
+        if let Some((k, v)) = e.split_once('=') {
+            command.env(k, v);
+        }
+    }
+
+    let output = command.output()?;
+
+    Ok(serde_json::to_string(&ExecResponse {
+        exit_code: Some(output.status.code().unwrap_or(-1) as i64),
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    })?)
+}
+
+async fn run_in_container(
     container: String,
     workdir: Option<String>,
     user: Option<String>,

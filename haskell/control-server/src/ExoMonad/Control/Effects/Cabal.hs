@@ -20,11 +20,11 @@ import ExoMonad.Control.Effects.SshExec (SshExec, ExecRequest(..), ExecResult(..
 import ExoMonad.Effects.Cabal (Cabal(..), CabalResult(..), RawCompileError(..))
 
 -- | Interpreter: uses SshExec to run cabal commands remotely
-runCabalRemote :: Member SshExec effs => Text -> Eff (Cabal ': effs) a -> Eff effs a
-runCabalRemote container = interpret $ \case
+runCabalRemote :: Member SshExec effs => Maybe Text -> Eff (Cabal ': effs) a -> Eff effs a
+runCabalRemote mContainer = interpret $ \case
   CabalBuild path -> do
     result <- execCommand $ ExecRequest
-      { erContainer = container
+      { erContainer = mContainer
       , erCommand = "cabal"
       , erArgs = ["build", "all", "-v0"]
       , erWorkingDir = path
@@ -43,7 +43,7 @@ runCabalRemote container = interpret $ \case
 
   CabalTest path -> do
     result <- execCommand $ ExecRequest
-      { erContainer = container
+      { erContainer = mContainer
       , erCommand = "cabal"
       , erArgs = ["test", "--test-show-details=always", "-v0"]
       , erWorkingDir = path
@@ -70,7 +70,7 @@ runCabalRemote container = interpret $ \case
 
   CabalClean path -> do
     void $ execCommand $ ExecRequest
-      { erContainer = container
+      { erContainer = mContainer
       , erCommand = "cabal"
       , erArgs = ["clean"]
       , erWorkingDir = path

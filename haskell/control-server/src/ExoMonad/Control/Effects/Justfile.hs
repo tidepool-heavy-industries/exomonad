@@ -22,7 +22,7 @@ runJustfileRemote :: Member SshExec effs => Text -> FilePath -> Eff (Justfile ':
 runJustfileRemote container workDir = interpret $ \case
   RunRecipe recipe args -> do
     result <- execCommand $ ExecRequest
-      { erContainer = container
+      { erContainer = Just container
       , erCommand = "just"
       , erArgs = recipe : args
       , erWorkingDir = workDir

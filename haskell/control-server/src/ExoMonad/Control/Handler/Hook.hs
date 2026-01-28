@@ -46,7 +46,6 @@ import ExoMonad.Control.Effects.Git (runGitRemote)
 import ExoMonad.Control.Effects.Cabal (runCabalRemote)
 import ExoMonad.Control.Effects.Effector (runEffectorViaSsh, runEffectorIO)
 import ExoMonad.Control.Interpreters.Traced (traceCabal, traceGit)
-import ExoMonad.Cabal.Interpreter (runCabalStub)
 import ExoMonad.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
 import ExoMonad.FileSystem.Interpreter (runFileSystemIO)
 import ExoMonad.Env.Interpreter (runEnvIO)
@@ -323,7 +322,7 @@ runStopHookLogic tracer workflowStore input mContainerId = do
           runM
           $ runSshExec dockerCtlPath
           $ runEffectorViaSsh container
-          $ runCabalRemote container
+          $ runCabalRemote (Just container)
           $ traceCabal tracer
           $ runGitRemote container "."
           $ traceGit tracer
@@ -332,11 +331,12 @@ runStopHookLogic tracer workflowStore input mContainerId = do
           $ runState initialWorkflow
           $ runGraph stopHookHandlers agentState
         Nothing ->
-          -- No container: skip cabal checks (can't run remotely without target)
+          -- No container: use local cabal execution via docker-ctl --local
           runM
+          $ runSshExec dockerCtlPath
           $ runState initialWorkflow
           $ runEffectorIO
-          $ runCabalStub
+          $ runCabalRemote Nothing
           $ traceCabal tracer
           $ runGitIO
           $ traceGit tracer
