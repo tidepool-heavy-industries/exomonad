@@ -13,6 +13,8 @@ module ExoMonad.Control.StopHook.Handlers
 
 import Control.Monad.Freer (Eff, Member)
 import Control.Monad.Freer.State (State, get, modify)
+import Control.Lens (at, non, (^.), (&), (+~), (.~))
+import Data.Generics.Labels ()
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
@@ -67,7 +69,7 @@ handleGlobalLoopCheck state = do
   if ws.globalStops >= 15
     then pure $ gotoChoice @"globalMaxReached" state
     else do
-      modify $ \s -> s { globalStops = s.globalStops + 1 }
+      modify @WorkflowState $ \s -> s & #globalStops +~ 1
       pure $ gotoChoice @"checkBuild" state
 
 -- | Global max reached: exit with max-loops template
@@ -88,10 +90,9 @@ handleCheckBuild
 handleCheckBuild state = do
   cabalRes <- cabalBuild (state.cwd)
   let buildRes = translateCabalResult cabalRes
-  modify $ \s -> s
-    { lastBuildResult = Just buildRes
-    , currentStage = StageBuild
-    }
+  modify @WorkflowState $ \s -> s
+    & #lastBuildResult .~ Just buildRes
+    & #currentStage .~ StageBuild
   pure $ gotoChoice @"routeBuild" (state, buildRes)
 
 translateCabalResult :: CabalResult -> BuildResult
@@ -121,13 +122,11 @@ handleBuildLoopCheck
   -> Eff es (GotoChoice '[To "buildMaxReached" AgentState, To "checkTest" AgentState])
 handleBuildLoopCheck state = do
   (ws :: WorkflowState) <- get
-  let buildRetries = fromMaybe 0 $ Map.lookup StageBuild (ws.stageRetries)
+  let buildRetries = ws.stageRetries ^. at StageBuild . non 0
   if buildRetries >= 5
     then pure $ gotoChoice @"buildMaxReached" state
     else do
-      modify $ \s -> s
-        { stageRetries = Map.insertWith (+) StageBuild 1 (s.stageRetries)
-        }
+      modify @WorkflowState $ \s -> s & #stageRetries . at StageBuild . non 0 +~ 1
       pure $ gotoChoice @"checkTest" state
 
 -- | Build max reached: go to buildContext with build-stuck template
@@ -146,10 +145,9 @@ handleCheckTest
 handleCheckTest state = do
   cabalRes <- cabalTest (state.cwd)
   let testRes = translateTestResult cabalRes
-  modify $ \s -> s
-    { lastTestResult = Just testRes
-    , currentStage = StageTest
-    }
+  modify @WorkflowState $ \s -> s
+    & #lastTestResult .~ Just testRes
+    & #currentStage .~ StageTest
   pure $ gotoChoice @"routeTest" (state, testRes)
 
 translateTestResult :: CabalResult -> TestResult
@@ -180,13 +178,11 @@ handleTestLoopCheck
   -> Eff es (GotoChoice '[To "testMaxReached" AgentState, To "checkDocs" AgentState])
 handleTestLoopCheck state = do
   (ws :: WorkflowState) <- get
-  let testRetries = fromMaybe 0 $ Map.lookup StageTest (ws.stageRetries)
+  let testRetries = ws.stageRetries ^. at StageTest . non 0
   if testRetries >= 3
     then pure $ gotoChoice @"testMaxReached" state
     else do
-      modify $ \s -> s
-        { stageRetries = Map.insertWith (+) StageTest 1 (s.stageRetries)
-        }
+      modify @WorkflowState $ \s -> s & #stageRetries . at StageTest . non 0 +~ 1
       pure $ gotoChoice @"checkDocs" state
 
 -- | Test max reached
@@ -203,7 +199,7 @@ handleCheckDocs
   => AgentState
   -> Eff es (GotoChoice '[To Exit (TemplateName, StopHookContext), To "checkPR" AgentState])
 handleCheckDocs state = do
-  modify $ \s -> s { currentStage = StageDocs }
+  modify @WorkflowState $ \s -> s & #currentStage .~ StageDocs
   
   -- Get git status
   status <- effectorGitStatus (state.cwd)
@@ -239,10 +235,9 @@ handleCheckPR state = do
   let result = case mResult of
         Left _err -> GhPrStatusResult False Nothing Nothing Nothing Nothing []
         Right res -> res
-  modify $ \s -> s
-    { lastPRStatus = Just result
-    , currentStage = if result.exists then StageReview else StagePR
-    }
+  modify @WorkflowState $ \s -> s
+    & #lastPRStatus .~ Just result
+    & #currentStage .~ (if result.exists then StageReview else StagePR)
   pure $ gotoChoice @"routePR" (state, result)
 
 -- | Route based on PR status
@@ -264,13 +259,11 @@ handlePrLoopCheck
   -> Eff es (GotoChoice '[To "prMaxReached" AgentState, To Exit (TemplateName, StopHookContext)])
 handlePrLoopCheck state = do
   (ws :: WorkflowState) <- get
-  let prRetries = fromMaybe 0 $ Map.lookup (ws.currentStage) (ws.stageRetries)
+  let prRetries = ws.stageRetries ^. at (ws.currentStage) . non 0
   if prRetries >= 3
     then pure $ gotoChoice @"prMaxReached" state
     else do
-      modify $ \s -> s
-        { stageRetries = Map.insertWith (+) (s.currentStage) 1 (s.stageRetries)
-        }
+      modify @WorkflowState $ \s -> s & #stageRetries . at (s.currentStage) . non 0 +~ 1
       let context = buildTemplateContext state ws "complete"
       pure $ gotoExit ("complete" :: Text, context)
 
@@ -319,7 +312,7 @@ buildTemplateContext as ws templateName =
     , issue_number = as.issueNum
     , branch = fromMaybe "" as.branch
     , global_stops = ws.globalStops
-    , stage_retries = fromMaybe 0 (Map.lookup (ws.currentStage) (ws.stageRetries))
+    , stage_retries = ws.stageRetries ^. at (ws.currentStage) . non 0
     , build_failed = failed
     , raw_output = raw
     , tests_failed = tFailed

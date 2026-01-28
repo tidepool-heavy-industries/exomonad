@@ -24,6 +24,7 @@ module ExoMonad.StructuredOutput.Generic
   , GStructuredSum(..)
   ) where
 
+import Control.Lens (each, (%~), (&), _1)
 import Data.Aeson (Value(..))
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
@@ -66,7 +67,7 @@ instance GStructuredProduct f => GStructuredOutput (M1 C c f) where
         opts' = opts { soFieldLabelModifier = prefixModifier }
         fields = gProductSchema @f opts'
         required = gProductRequired @f opts'
-    in objectSchema (map (\(k, v) -> (T.pack k, v)) fields) (map T.pack required)
+    in objectSchema (fields & each . _1 %~ T.pack) (required & each %~ T.pack)
 
   gEncodeStructured opts (M1 x) =
     let rawNames = gProductRawFieldNames @f
@@ -264,7 +265,7 @@ instance (Constructor c, GStructuredProduct f) => GStructuredSum (M1 C c f) wher
         opts' = opts { soFieldLabelModifier = prefixModifier }
         fields = gProductSchema @f opts'
         required = gProductRequired @f opts'
-        schema = objectSchema (map (\(k, v) -> (T.pack k, v)) fields) (map T.pack required)
+        schema = objectSchema (fields & each . _1 %~ T.pack) (required & each %~ T.pack)
     in [(constructorName, schema)]
 
   gSumEncode opts (M1 x) =

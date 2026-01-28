@@ -319,7 +319,8 @@ test-suite circuit-breaker-test
         tasty,
         tasty-hunit,
         aeson,
-        freer-simple
+        freer-simple,
+        lens
     hs-source-dirs:   test
     default-language: GHC2024
     default-extensions:

@@ -77,7 +77,7 @@ data ServerSchema = ServerSchema
     -- ^ Human-readable server description
   , tools :: [MCPToolInfo]
     -- ^ List of tools provided by this server
-  } deriving (Show, Eq)
+  } deriving (Show, Eq, Generic)
 
 -- | Typeclass for server records that can be reified to schemas.
 --
@@ -172,7 +172,7 @@ data RoleSchema = RoleSchema
     -- ^ Role identity information
   , servers :: [(Text, ServerSchema)]
     -- ^ Named servers belonging to this role
-  } deriving (Show, Eq)
+  } deriving (Show, Eq, Generic)
 
 -- | Typeclass for role records that can be reified to schemas.
 --

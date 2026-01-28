@@ -18,8 +18,10 @@ module ExoMonad.Control.Hook.CircuitBreaker
   , resetAll
   ) where
 
+import Control.Lens (at, (?~), (.~), (%~), (+~), non, _Just, (^.), (&))
 import Control.Concurrent.STM
 import Control.Exception (try, SomeException)
+import Data.Generics.Labels ()
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
@@ -94,7 +96,7 @@ withCircuitBreaker stateVar config now sid action = do
   -- 1. Try to acquire lock and check limits inside atomically
   acquireResult <- atomically $ do
     states <- readTVar stateVar
-    case Map.lookup sid states of
+    case states ^. at sid of
       Nothing -> do
         -- Initialize new session state and acquire lock
         let newState = CircuitBreakerState
@@ -104,7 +106,7 @@ withCircuitBreaker stateVar config now sid action = do
               , lastStopTime = now
               , stopHookActive = True
               }
-        modifyTVar' stateVar (Map.insert sid newState)
+        modifyTVar' stateVar (at sid ?~ newState)
         pure $ Right ()
 
       Just cbs -> do
@@ -122,8 +124,9 @@ withCircuitBreaker stateVar config now sid action = do
               Left err -> pure $ Left err
               Right () -> do
                 -- Acquire lock
-                let updatedState = cbs { stopHookActive = True, lastStopTime = now }
-                modifyTVar' stateVar (Map.insert sid updatedState)
+                modifyTVar' stateVar $ at sid . _Just %~ \s -> s
+                  & #stopHookActive .~ True
+                  & #lastStopTime .~ now
                 pure $ Right ()
 
   case acquireResult of
@@ -135,9 +138,9 @@ runActionAndRelease :: CircuitBreakerMap -> SessionId -> IO a -> IO (Either Text
 runActionAndRelease stateVar sid action = do
   result <- try action
   now <- getCurrentTime
-  atomically $ modifyTVar' stateVar $ Map.adjust 
-    (\s -> s { stopHookActive = False, lastStopTime = now }) 
-    sid
+  atomically $ modifyTVar' stateVar $ at sid . _Just %~ \s -> s
+    & #stopHookActive .~ False
+    & #lastStopTime .~ now
   case result of
     Left (e :: SomeException) -> pure $ Left $ T.pack (show e)
     Right val -> pure $ Right val
@@ -145,15 +148,14 @@ runActionAndRelease stateVar sid action = do
 -- | Increment stage counter (used by graph handlers)
 incrementStage :: CircuitBreakerMap -> SessionId -> Text -> UTCTime -> IO ()
 incrementStage stateVar sid stage now = do
-  atomically $ modifyTVar' stateVar $ Map.adjust (\s -> s
-    { globalStops = s.globalStops + 1
-    , stageRetries = Map.insertWith (+) stage 1 s.stageRetries
-    , lastStopTime = now
-    }) sid
+  atomically $ modifyTVar' stateVar $ at sid . _Just %~ \s -> s
+    & #globalStops +~ 1
+    & #stageRetries . at stage . non 0 +~ 1
+    & #lastStopTime .~ now
 
 -- | Get current state for a session
 getCircuitBreakerState :: CircuitBreakerMap -> SessionId -> IO (Maybe CircuitBreakerState)
-getCircuitBreakerState stateVar sessionId = Map.lookup sessionId <$> readTVarIO stateVar
+getCircuitBreakerState stateVar sessionId = (^. at sessionId) <$> readTVarIO stateVar
 
 -- | Get all circuit breaker states
 getAllCircuitBreakerStates :: CircuitBreakerMap -> IO (Map SessionId CircuitBreakerState)
@@ -161,7 +163,7 @@ getAllCircuitBreakerStates stateVar = readTVarIO stateVar
 
 -- | Reset a specific session
 resetSession :: CircuitBreakerMap -> SessionId -> IO ()
-resetSession stateVar sessionId = atomically $ modifyTVar' stateVar (Map.delete sessionId)
+resetSession stateVar sessionId = atomically $ modifyTVar' stateVar (at sessionId .~ Nothing)
 
 -- | Reset all sessions
 resetAll :: CircuitBreakerMap -> IO ()

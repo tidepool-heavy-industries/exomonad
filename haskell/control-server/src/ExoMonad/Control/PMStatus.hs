@@ -16,6 +16,8 @@ module ExoMonad.Control.PMStatus
   ) where
 
 import Control.Monad.Freer (Eff, Member)
+import Control.Lens (folded, filtered, lengthOf, traversed, (^..))
+import Data.Generics.Labels ()
 import Data.List (sort)
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
@@ -57,11 +59,12 @@ pmStatusLogic args = do
 
   -- 3. Current State
   let openIssues = filter (\i -> i.issueState == IssueOpen) allIssues
-      inFlight = count (\i -> "in-progress" `elem` i.issueLabels) openIssues
-      ready = count (\i -> "ready" `elem` i.issueLabels) openIssues
-      blocked = count (\i -> "blocked" `elem` i.issueLabels) openIssues
-      needsTLReview = count (\i -> "needs-review" `elem` i.issueLabels) openIssues
-      needsPMApproval = count (\i -> "needs-approval" `elem` i.issueLabels) openIssues
+      countWithLabel lbl = lengthOf (folded . filtered (\i -> lbl `elem` i.issueLabels))
+      inFlight = countWithLabel "in-progress" openIssues
+      ready = countWithLabel "ready" openIssues
+      blocked = countWithLabel "blocked" openIssues
+      needsTLReview = countWithLabel "needs-review" openIssues
+      needsPMApproval = countWithLabel "needs-approval" openIssues
 
   -- 4. PR Lag
   allPrsResult <- listPullRequests repo (defaultPRFilter { pfState = Just PRMerged })
@@ -102,9 +105,6 @@ calcPrLag pr = do
   end <- pr.prMergedAt
   pure $ realToFrac $ diffUTCTime end start
 
-count :: (a -> Bool) -> [a] -> Int
-count p = length . filter p
-
 calcMetrics :: [Double] -> Double -> (Double, Double)
 calcMetrics [] _ = (0, 0)
 calcMetrics xs unit =
@@ -122,7 +122,7 @@ calcMetrics xs unit =
 
 aggregateLabels :: [Issue] -> [(Text, Int)]
 aggregateLabels issues =
-  let allLabels = concatMap (\i -> i.issueLabels) issues
+  let allLabels = issues ^.. traversed . #issueLabels . traversed
       groups = group' $ sort allLabels
   in mapMaybe (\case { (x:xs) -> Just (x, 1 + length xs); [] -> Nothing }) groups
   where
