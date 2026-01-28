@@ -113,7 +113,8 @@ instance FromJSON AnthropicResponse where
   parseJSON = withObject "AnthropicResponse" $ \v ->
     AnthropicResponse <$> v .: "content" <*> v .: "stop_reason" <*> v .: "usage"
 
--- | Content block (Anthropic-style).--
+-- | Content block (Anthropic-style).
+--
 -- Supports text, tool use, and thinking blocks from extended thinking.
 data ContentBlock
   = TextContent Text

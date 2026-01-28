@@ -344,7 +344,14 @@ callHaiku TeachingEnv{..} systemPrompt userText schema = do
 
   result <- SC.runClientM (anthropicComplete apiKey req) clientEnv
   case result of
-    Left err -> error $ "Haiku API error: " <> show err
+    Left (SC.FailureResponse _ resp) ->
+      error $ "Haiku API error: HTTP " <> show (SC.responseStatusCode resp)
+    Left (SC.DecodeFailure msg _) ->
+      error $ "Haiku API decode failure: " <> show msg
+    Left (SC.ConnectionError _) ->
+      error "Haiku API connection error"
+    Left _ ->
+      error "Haiku API unknown client error"
     Right resp -> pure resp
 
 

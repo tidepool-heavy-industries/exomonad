@@ -1,6 +1,6 @@
 -- | Tests for helper functions in LLM interpreter.
 --
--- Covers parseBaseUrl and clientErrorToLLMError.
+-- Covers parseBaseUrl.
 module HelpersSpec (spec) where
 
 import Test.Hspec

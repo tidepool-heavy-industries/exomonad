@@ -1,6 +1,6 @@
 -- | LLM effect interpreter - Anthropic client.
 --
--- Implements LLMComplete effect via socket or HTTP.
+-- Implements LLMComplete effect via Unix Socket only.
 -- Type-level provider determines request/response schema.
 --
 -- = Usage
