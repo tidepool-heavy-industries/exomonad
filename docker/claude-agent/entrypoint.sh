@@ -159,11 +159,25 @@ else
     echo "Using existing/linked settings.json"
 fi
 
-# 2.5 Configure Gemini hooks
+# 2.5 Configure Gemini hooks & MCP
 GEMINI_CONFIG_DIR="/home/agent/.gemini"
 if [ ! -f "$GEMINI_CONFIG_DIR/settings.json" ]; then
     echo "Creating default Gemini settings with hooks..."
     mkdir -p "$GEMINI_CONFIG_DIR"
+
+    # Prepare MCP config fragment if URL is available
+    MCP_CONFIG=""
+    if [ -n "${CONTROL_SERVER_URL:-}" ]; then
+        echo "Adding Gemini MCP config for: ${CONTROL_SERVER_URL}/role/${ROLE}/mcp"
+        MCP_CONFIG=",
+  \"mcpServers\": {
+    \"exomonad\": {
+      \"type\": \"http\",
+      \"url\": \"${CONTROL_SERVER_URL}/role/${ROLE}/mcp\"
+    }
+  }"
+    fi
+
     cat > "$GEMINI_CONFIG_DIR/settings.json" <<EOF
 {
   "hooks": {
@@ -199,7 +213,7 @@ if [ ! -f "$GEMINI_CONFIG_DIR/settings.json" ]; then
         ]
       }
     ]
-  }
+  }${MCP_CONFIG}
 }
 EOF
     chown -R agent:agent "$GEMINI_CONFIG_DIR"
