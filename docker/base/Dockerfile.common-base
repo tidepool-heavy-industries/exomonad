@@ -50,6 +50,7 @@ ENV GIT_SAFE_DIRECTORY=/repo
 ENV XDG_RUNTIME_DIR=/run/user/1000
 ENV HOME=/home/user
 ENV USER=user
+ENV COLORTERM=truecolor
 
 # Create XDG runtime dir at build time
 RUN mkdir -p /run/user/1000 && \

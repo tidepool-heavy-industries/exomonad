@@ -172,6 +172,7 @@ ENV EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
 ENV EXOMONAD_TUI_SOCKET=/sockets/tui.sock
 ENV EXOMONAD_ROOT=/worktrees
 ENV TERM=xterm-256color
+ENV COLORTERM=truecolor
 ENV SHELL=/bin/bash
 ENV ZELLIJ_CONFIG_DIR=/etc/exomonad/zellij
 ENV XDG_RUNTIME_DIR=/run/user/1000

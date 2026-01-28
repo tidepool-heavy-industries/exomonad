@@ -107,6 +107,7 @@ RUN mkdir -p /workspace && chown agent:agent /workspace
 ENV EXOMONAD_CONTROL_SOCKET=/home/agent/.exomonad/sockets/control.sock
 ENV XDG_RUNTIME_DIR=/run/user/1000
 ENV ZELLIJ_SESSION_NAME=main
+ENV COLORTERM=truecolor
 
 # Switch back to agent user for execution
 USER agent
