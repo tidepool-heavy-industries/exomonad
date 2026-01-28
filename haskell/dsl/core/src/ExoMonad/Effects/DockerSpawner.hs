@@ -73,6 +73,7 @@ data SpawnConfig = SpawnConfig
   , scUid :: Maybe Int
   , scGid :: Maybe Int
   , scEnv :: [(Text, Text)]  -- Environment variables to pass to container
+  , scCmd :: Maybe [Text] -- ^ Optional command override
   } deriving stock (Show, Eq, Generic)
 
 instance ToJSON SpawnConfig where

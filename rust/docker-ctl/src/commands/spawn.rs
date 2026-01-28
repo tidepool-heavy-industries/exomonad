@@ -22,6 +22,7 @@ pub async fn run(
     gid: Option<u32>,
     expires_at: Option<String>,
     env_vars: Vec<String>,
+    cmd_override: Vec<String>,
 ) -> anyhow::Result<String> {
     let docker = Docker::connect_with_local_defaults()?;
     let container_name = format!("exomonad-agent-{}", issue_id);
@@ -93,6 +94,7 @@ pub async fn run(
         image: Some(agent_image),
         labels: Some(labels),
         working_dir: Some(working_dir),
+        cmd: if cmd_override.is_empty() { None } else { Some(cmd_override) },
         tty: Some(true),
         open_stdin: Some(true),
         attach_stdin: Some(false),

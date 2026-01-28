@@ -59,6 +59,7 @@ library
         ExoMonad.Control.ExoTools.Status.Types
         ExoMonad.Control.ExoTools.SpawnAgents
         ExoMonad.Control.ExoTools.SpawnAgents.Types
+        ExoMonad.Control.ExoTools.SpawnAgents.Prompt
         ExoMonad.Control.ExoTools.SpawnCleanup
         ExoMonad.Control.ExoTools.FilePR
         ExoMonad.Control.ExoTools.FilePR.Types

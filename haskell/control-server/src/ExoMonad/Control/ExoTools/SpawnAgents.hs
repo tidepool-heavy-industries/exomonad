@@ -50,6 +50,7 @@ import ExoMonad.Control.ExoTools.Internal (slugify)
 import ExoMonad.Control.ExoTools.SpawnCleanup (SpawnCleanup, SpawnProgress(..), runSpawnCleanup, acquireWorktree, acquireContainer, emitProgress, cleanupAll)
 import ExoMonad.Control.Runtime.Paths as Paths
 import ExoMonad.Control.ExoTools.SpawnAgents.Types
+import ExoMonad.Control.ExoTools.SpawnAgents.Prompt (renderInitialPrompt)
 
 -- | Find the repository root by checking ENV or using Git.
 findRepoRoot
@@ -374,6 +375,22 @@ processIssue spawnMode repoRoot wtBaseDir backend shortId = do
 
                             SpawnDocker -> do
                               logInfo $ "[" <> shortId <> "] Spawning Docker container"
+
+                              -- Render initial prompt
+                              let promptCtx = InitialPromptContext
+                                    { issue_number = shortId
+                                    , issue_title = issue.issueTitle
+                                    , issue_body = issue.issueBody
+                                    , branch_name = branchName
+                                    , worktree_path = T.pack path
+                                    }
+                              let initialPrompt = renderInitialPrompt promptCtx
+
+                              -- Build command with prompt (only for Claude for now)
+                              let cmdOverride = if backend == "claude"
+                                    then Just ["claude", "--permission-mode", "bypassPermissions", "--debug", "--verbose", initialPrompt]
+                                    else Nothing
+
                               let config = SpawnConfig
                                     {
                                       scIssueId = shortId
@@ -382,6 +399,7 @@ processIssue spawnMode repoRoot wtBaseDir backend shortId = do
                                     , scUid = Nothing
                                     , scGid = Nothing
                                     , scEnv = envVars
+                                    , scCmd = cmdOverride
                                     }
                               containerResult <- spawnContainer config
                               case containerResult of
