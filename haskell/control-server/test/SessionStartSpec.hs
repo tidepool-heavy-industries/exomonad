@@ -45,8 +45,6 @@ fromJust :: Maybe a -> a
 fromJust (Just a) = a
 fromJust Nothing = error "fromJust: Nothing"
 
-import OpenTelemetry.Trace (Tracer, createTracer, getGlobalTracerProvider, instrumentationLibrary)
-
 -- | Mock GitHub interpreter
 runMockGitHub :: Eff (GitHub ': effs) a -> Eff effs a
 runMockGitHub = interpret $ \case
@@ -60,7 +58,7 @@ runMockGitHub = interpret $ \case
   RemoveIssueLabel _ _ _ -> pure $ Right ()
   -- GetRepo removed
 
-runSessionStart :: Role -> T.Text -> IO (Maybe T.Text)
+runSessionStart :: Role -> FilePath -> IO (Maybe T.Text)
 runSessionStart role cwd = do
   tp <- getGlobalTracerProvider
   let tracer = createTracer tp $ instrumentationLibrary "test" "0.0.1"

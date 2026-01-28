@@ -37,25 +37,6 @@ data ExecRequest = ExecRequest
   , timeout :: Int              -- ^ Timeout in seconds (NOTE: not currently enforced)
   } deriving (Show, Generic)
 
-instance ToJSON ExecRequest where
-  toJSON r = object
-    [ "container" .= r.container
-    , "command" .= r.command
-    , "args" .= r.args
-    , "working_dir" .= r.workingDir
-    , "env" .= r.env
-    , "timeout" .= r.timeout
-    ]
-
-instance FromJSON ExecRequest where
-  parseJSON = withObject "ExecRequest" $ \v -> ExecRequest
-    <$> v .:? "container"
-    <*> v .: "command"
-    <*> v .: "args"
-    <*> v .: "working_dir"
-    <*> v .: "env"
-    <*> v .: "timeout"
-
 -- | Result of command execution
 -- IMPORTANT: Field names must match docker-ctl exec output (Rust ExecResponse)
 -- Expected JSON: {"exit_code": N | null, "stdout": "...", "stderr": "..."}

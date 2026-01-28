@@ -55,11 +55,6 @@ instance FromJSON CbStatusArgs where
   parseJSON = withObject "CbStatusArgs" $ \v ->
     CbStatusArgs <$> v .:? "filter_session"
 
-instance ToJSON CbStatusArgs where
-  toJSON args = object
-    [ "filter_session" .= args.filterSession
-    ]
-
 data CbSessionInfo = CbSessionInfo
   { sessionId :: Text
   , globalStops :: Int
@@ -152,11 +147,6 @@ instance HasJSONSchema CbResetArgs where
 instance FromJSON CbResetArgs where
   parseJSON = withObject "CbResetArgs" $ \v ->
     CbResetArgs <$> v .:? "session_id"
-
-instance ToJSON CbResetArgs where
-  toJSON args = object
-    [ "session_id" .= args.sessionId
-    ]
 
 data CbResetResult = CbResetResult
   { status :: Text
