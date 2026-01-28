@@ -286,7 +286,8 @@ handleStop tracer config input runtime mContainerId cbMap = do
               {
                 continue_ = False
               , stopReason = Just $ "Workflow stage: " <> templateName
-              , hookSpecificOutput = Nothing  -- Claude Code doesn't recognize Stop in hookSpecificOutput
+              -- decision="block" + reason goes to Claude; systemMessage goes to user
+              , hookSpecificOutput = Just $ StopOutput (Just "block") (Just rendered)
               , systemMessage = Just rendered
               }
           , exitCode = 1
@@ -294,7 +295,7 @@ handleStop tracer config input runtime mContainerId cbMap = do
         else pure $ hookSuccess defaultOutput
           {
             systemMessage = Just rendered
-          , hookSpecificOutput = Nothing  -- Claude Code doesn't recognize Stop in hookSpecificOutput
+          , hookSpecificOutput = Just $ StopOutput Nothing Nothing
           }
 
 -- | Get or create session ID from hook input.

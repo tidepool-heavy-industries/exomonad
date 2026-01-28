@@ -57,6 +57,11 @@ fi
 #    gosu user: Run zellij as UID 1000 so session socket is user-owned
 #               This enables cross-container control via tui-spawner
 echo "Connecting to Zellij session..."
-exec docker exec -it exomonad-zellij \
+exec docker exec -it \
+    -e COLUMNS="$(tput cols)" \
+    -e LINES="$(tput lines)" \
+    -e TERM="${TERM:-xterm-256color}" \
+    -e COLORTERM="${COLORTERM:-truecolor}" \
+    exomonad-zellij \
     gosu user zellij --layout /etc/zellij/layouts/main.kdl \
     attach --create main

@@ -216,11 +216,27 @@ pub enum HookSpecificOutput {
         decision: PermissionDecision,
     },
 
-    /// Stop hook output (no specific fields, uses top-level decision/reason).
-    Stop,
+    /// Stop hook output.
+    Stop {
+        /// Decision: "block" to prevent stopping, or None to allow.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        decision: Option<String>,
+
+        /// Claude-facing guidance when blocked.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
 
     /// SubagentStop hook output.
-    SubagentStop,
+    SubagentStop {
+        /// Decision: "block" to prevent stopping, or None to allow.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        decision: Option<String>,
+
+        /// Claude-facing guidance when blocked.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
 
     /// Notification hook output.
     Notification,

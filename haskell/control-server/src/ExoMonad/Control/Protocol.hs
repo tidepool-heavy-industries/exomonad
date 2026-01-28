@@ -163,7 +163,13 @@ data HookSpecificOutput
       { decision :: PermissionDecision
       }
   | StopOutput
+      { stopDecision :: Maybe Text  -- "block" or Nothing (allow)
+      , stopReason :: Maybe Text    -- Claude-facing guidance when blocked
+      }
   | SubagentStopOutput
+      { stopDecision :: Maybe Text  -- "block" or Nothing (allow)
+      , stopReason :: Maybe Text    -- Claude-facing guidance when blocked
+      }
   | NotificationOutput
   | PreCompactOutput
   | SessionEndOutput
@@ -193,8 +199,16 @@ instance ToJSON HookSpecificOutput where
       [ "hookEventName" .= ("PermissionRequest" :: Text)
       , "decision" .= dec
       ]
-    StopOutput -> object ["hookEventName" .= ("Stop" :: Text)]
-    SubagentStopOutput -> object ["hookEventName" .= ("SubagentStop" :: Text)]
+    StopOutput dec rsn -> object $ filter notNull
+      [ "hookEventName" .= ("Stop" :: Text)
+      , "decision" .= dec
+      , "reason" .= rsn
+      ]
+    SubagentStopOutput dec rsn -> object $ filter notNull
+      [ "hookEventName" .= ("SubagentStop" :: Text)
+      , "decision" .= dec
+      , "reason" .= rsn
+      ]
     NotificationOutput -> object ["hookEventName" .= ("Notification" :: Text)]
     PreCompactOutput -> object ["hookEventName" .= ("PreCompact" :: Text)]
     SessionEndOutput -> object ["hookEventName" .= ("SessionEnd" :: Text)]
@@ -214,8 +228,8 @@ instance FromJSON HookSpecificOutput where
       "UserPromptSubmit" -> UserPromptSubmitOutput <$> o .:? "additionalContext"
       "SessionStart" -> SessionStartOutput <$> o .:? "additionalContext"
       "PermissionRequest" -> PermissionRequestOutput <$> o .: "decision"
-      "Stop" -> pure StopOutput
-      "SubagentStop" -> pure SubagentStopOutput
+      "Stop" -> StopOutput <$> o .:? "decision" <*> o .:? "reason"
+      "SubagentStop" -> SubagentStopOutput <$> o .:? "decision" <*> o .:? "reason"
       "Notification" -> pure NotificationOutput
       "PreCompact" -> pure PreCompactOutput
       "SessionEnd" -> pure SessionEndOutput
