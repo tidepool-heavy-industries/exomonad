@@ -19,6 +19,7 @@
 //!     owner: "owner".into(),
 //!     repo: "repo".into(),
 //!     number: 1,
+//!     include_comments: false,
 //! };
 //! let res = github.call(req).await?;
 //! # Ok(())

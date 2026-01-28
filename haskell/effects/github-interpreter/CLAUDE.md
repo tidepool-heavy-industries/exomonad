@@ -1,13 +1,13 @@
-# GitHub Interpreter - gh CLI Integration
+# GitHub Interpreter - Socket Client (Rust/Octocrab)
 
-Interprets the `GitHub` effect by calling the `gh` CLI tool for issue and PR operations.
+Interprets the `GitHub` effect by communicating with the Rust `exomonad-services` backend via Unix Domain Socket. The Rust side uses Octocrab for REST and GraphQL queries against the GitHub API.
 
 ## When to Read This
 
 Read this if you're:
 - Building agents that interact with GitHub issues/PRs
 - Understanding how agents fetch issue context
-- Debugging gh CLI authentication issues
+- Debugging GitHub API or socket communication issues
 - Working with urchin's issue tracking
 
 ## Architecture
@@ -17,20 +17,22 @@ Read this if you're:
 │ Agent Effects                                                        │
 │   listIssues (Repo "owner/repo") filter                             │
 │   getIssue (Repo "owner/repo") 123 includeComments                  │
+│   getPullRequest (Repo "owner/repo") 99 includeDetails              │
 └──────────────────────────────────────┬──────────────────────────────┘
-                                       │ GitHub effect
+                                       │ GitHub effect (freer-simple)
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ GitHub Interpreter (subprocess)                                         │
-│   gh issue list --repo owner/repo --json ...                        │
-│   gh issue view 123 --repo owner/repo --json ...                    │
-│   gh pr list --repo owner/repo --json ...                           │
+│ GitHub Interpreter (Haskell)                                         │
+│   Encodes ServiceRequest → JSON                                      │
+│   Sends over Unix Domain Socket (NDJSON)                             │
+│   Decodes ServiceResponse ← JSON                                     │
 └──────────────────────────────────────┬──────────────────────────────┘
-                                       │ JSON stdout
+                                       │ Unix Socket (NDJSON)
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ GitHub API                                                           │
-│   (authenticated via gh auth login)                                  │
+│ Rust Service (exomonad-services)                                     │
+│   Octocrab REST + GraphQL → GitHub API                               │
+│   (authenticated via GITHUB_TOKEN)                                   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -51,85 +53,73 @@ main = runM $ runGitHubIO defaultGitHubConfig $ do
   -- List pull requests
   prs <- listPullRequests (Repo "owner/repo") defaultPRFilter
 
-  pure (issues, issue, prs)
+  -- Get PR with full details (comments, reviews, labels, merged_at)
+  pr <- getPullRequest (Repo "owner/repo") 99 True
+
+  pure (issues, issue, prs, pr)
 ```
 
 ## Effect Operations
 
 ### Issues
 
-| Operation | CLI Command | Returns |
-|-----------|-------------|---------|
-| `listIssues repo filter` | `gh issue list --json ...` | `[Issue]` |
-| `getIssue repo num comments` | `gh issue view N --json ...` | `Maybe Issue` |
+| Operation | Wire Type | Returns |
+|-----------|-----------|---------|
+| `listIssues repo filter` | `GitHubListIssues` | `[Issue]` |
+| `getIssue repo num includeComments` | `GitHubGetIssue` | `Maybe Issue` |
+| `createIssue repo spec` | `GitHubCreateIssue` | `Issue` |
+| `updateIssue repo num spec` | `GitHubUpdateIssue` | `Issue` |
 
 ### Pull Requests
 
-| Operation | CLI Command | Returns |
-|-----------|-------------|---------|
-| `listPullRequests repo filter` | `gh pr list --json ...` | `[PullRequest]` |
-| `getPullRequest repo num` | `gh pr view N --json ...` | `Maybe PullRequest` |
+| Operation | Wire Type | Returns |
+|-----------|-----------|---------|
+| `listPullRequests repo filter` | `GitHubListPullRequests` | `[PullRequest]` |
+| `getPullRequest repo num includeDetails` | `GitHubGetPR` | `Maybe PullRequest` |
+| `createPR repo spec` | `GitHubCreatePR` | `PullRequest` |
 
-## Filters
+### Flags
 
-```haskell
-data IssueFilter = IssueFilter
-  { ifState :: Maybe IssueState   -- Open, Closed, All
-  , ifLabels :: [Text]            -- Filter by labels
-  , ifLimit :: Maybe Int          -- Max results
-  }
-
-data PRFilter = PRFilter
-  { prfState :: Maybe PRState     -- Open, Closed, Merged, All
-  , prfLimit :: Maybe Int
-  }
-
-defaultIssueFilter :: IssueFilter
-defaultPRFilter :: PRFilter
-```
+- `includeComments` (`GitHubGetIssue`): When true, issue response includes comments from the Rust service.
+- `includeDetails` (`GitHubGetPR`): When true, PR response includes comments, review threads (via GraphQL), labels, and `merged_at`.
 
 ## Configuration
 
 ```haskell
 data GitHubConfig = GitHubConfig
-  { ghcQuiet :: Bool  -- Suppress stderr warnings
+  { ghcSocketPath :: FilePath  -- Unix socket path to Rust service
   }
 
 defaultGitHubConfig :: GitHubConfig
-defaultGitHubConfig = GitHubConfig { ghcQuiet = True }
 ```
 
-## Requirements
-
-The `gh` CLI must be installed and authenticated:
-
-```bash
-# One-time setup
-gh auth login
-
-# Verify
-gh auth status
-```
+The socket path defaults to `EXOMONAD_CONTROL_SOCKET` or `.exomonad/sockets/control.sock`.
 
 ## Key Modules
 
 | Module | Purpose |
 |--------|---------|
-| `Interpreter.hs` | Effect interpreter, CLI subprocess calls |
-| `test/Main.hs` | Integration tests (require gh auth) |
+| `Interpreter.hs` | Effect interpreter, socket communication, JSON parsing |
+| `test/Main.hs` | Integration tests (JSON parsing, no network required) |
+
+## Wire Format
+
+The interpreter communicates using the `ServiceRequest`/`ServiceResponse` types defined in `exomonad-socket-client`. These must match the Rust `protocol.rs` types exactly. Key response fields:
+
+**GitHubIssueResponse**: `number`, `title`, `body`, `state`, `labels`, `url`, `author`, `comments`
+
+**GitHubPRResponse**: `number`, `title`, `body`, `author`, `url`, `state`, `head_ref_name`, `base_ref_name`, `created_at`, `merged_at`, `labels`, `comments`, `reviews`
 
 ## Error Handling
 
-CLI errors are returned as exceptions in IO. Wrap in try for recovery:
-
-```haskell
-result <- try @SomeException $ runM $ runGitHubIO config $ do
-  getIssue repo num False
-case result of
-  Left err -> handleError err
-  Right issue -> useIssue issue
-```
+Socket/decode errors are returned as `GitHubError` values. The interpreter handles:
+- `SocketError` — connection failures
+- `DecodeError` — JSON parsing failures
+- `TimeoutError` — socket timeout
+- `ErrorResponse` — GitHub API errors forwarded from Rust
 
 ## Related Documentation
 
 - [effects/CLAUDE.md](../CLAUDE.md) - Effect interpreter pattern
+- `rust/exomonad-shared/src/protocol.rs` - Wire format types (Rust side)
+- `haskell/effects/socket-client/` - Socket client and protocol types (Haskell side)

@@ -10,7 +10,7 @@ This follows the **interpreter design pattern**: abstract syntax (effect types) 
 |--------------|-----------|
 | Understand LLM API calls | `llm-interpreter/CLAUDE.md` |
 | Query Haskell types from an agent | `ghci-interpreter/CLAUDE.md` |
-| Work with GitHub issues/PRs | `github-interpreter/CLAUDE.md` |
+| Work with GitHub issues/PRs (via Rust/Octocrab) | `github-interpreter/CLAUDE.md` |
 | Add code intelligence (LSP) | `lsp-interpreter/CLAUDE.md` |
 | Manage git worktrees | `worktree-interpreter/CLAUDE.md` |
 | Run just recipes | `justfile-interpreter/CLAUDE.md` |
@@ -28,7 +28,7 @@ effects/CLAUDE.md  ← YOU ARE HERE (router)
 ├── llm-interpreter/CLAUDE.md           ← Anthropic API
 ├── lsp-interpreter/CLAUDE.md           ← Language server protocol
 ├── ghci-interpreter/CLAUDE.md          ← GHCi oracle client
-├── github-interpreter/CLAUDE.md        ← gh CLI for issues/PRs
+├── github-interpreter/CLAUDE.md        ← Socket client (Rust Octocrab)
 ├── observability-interpreter/CLAUDE.md ← Grafana Loki & Tempo
 ├── worktree-interpreter/CLAUDE.md      ← Git worktree management
 ├── justfile-interpreter/CLAUDE.md      ← Justfile recipe execution
@@ -60,7 +60,7 @@ Most effect types live in `dsl/core/src/ExoMonad/Effect/Types.hs` or `Effects/*.
 | Habitica | effects/habitica | habitica-interpreter | HTTP API |
 | Observability | dsl/core | observability-interpreter | OTLP/Loki push |
 | GHCi | dsl/core | ghci-interpreter | ghci-oracle client |
-| GitHub | dsl/core | github-interpreter | gh CLI subprocess |
+| GitHub | dsl/core | github-interpreter | Socket client (Rust Octocrab) |
 | Worktree | dsl/core | worktree-interpreter | Git subprocess |
 | Cabal | dsl/core | cabal-interpreter | Cabal CLI subprocess |
 | Justfile | dsl/core | justfile-interpreter | just CLI subprocess |

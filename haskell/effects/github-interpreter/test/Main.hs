@@ -1,9 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE QuasiQuotes #-}
 
 -- | Tests for GitHub interpreter JSON parsing.
 --
--- These tests verify that we correctly parse the JSON output from gh CLI.
+-- These tests verify that we correctly parse GitHub JSON responses.
 module Main where
 
 import Data.Aeson (eitherDecode)
@@ -11,7 +10,6 @@ import Data.ByteString.Lazy.Char8 qualified as LBS
 import Test.Hspec
 
 import ExoMonad.Effects.GitHub
-import ExoMonad.GitHub.Interpreter (GqlResult(..))
 
 
 main :: IO ()
@@ -232,58 +230,5 @@ main = hspec $ do
         Right comment -> do
           comment.rcState `shouldBe` ReviewCommented  -- Default when missing
 
-  describe "GraphQL Response parsing" $ do
-    it "parses nested review threads and propagates resolution status" $ do
-      let json = LBS.pack $ unlines
-            [ "{"
-            , "  \"data\": {"
-            , "    \"repository\": {"
-            , "      \"pullRequest\": {"
-            , "        \"reviewThreads\": {"
-            , "          \"nodes\": ["
-            , "            {"
-            , "              \"isResolved\": true,"
-            , "              \"comments\": {"
-            , "                \"nodes\": ["
-            , "                  {"
-            , "                    \"author\": { \"login\": \"reviewer1\" },"
-            , "                    \"body\": \"Resolved comment\","
-            , "                    \"path\": \"File.hs\","
-            , "                    \"state\": \"SUBMITTED\","
-            , "                    \"createdAt\": \"2024-01-15T10:30:00Z\""
-            , "                  }"
-            , "                ]"
-            , "              }"
-            , "            },"
-            , "            {"
-            , "              \"isResolved\": false,"
-            , "              \"comments\": {"
-            , "                \"nodes\": ["
-            , "                  {"
-            , "                    \"author\": null,"
-            , "                    \"body\": \"Unresolved comment from ghost\","
-            , "                    \"path\": \"Other.hs\","
-            , "                    \"state\": \"SUBMITTED\","
-            , "                    \"createdAt\": \"2024-01-15T11:00:00Z\""
-            , "                  }"
-            , "                ]"
-            , "              }"
-            , "            }"
-            , "          ]"
-            , "        }"
-            , "      }"
-            , "    }"
-            , "  }"
-            , "}"
-            ]
-      case eitherDecode json :: Either String GqlResult of
-        Left err -> expectationFailure $ "Failed to parse GraphQL: " <> err
-        Right (GqlResult comments) -> do
-          length comments `shouldBe` 2
-          let c1 = head comments
-          c1.rcAuthor `shouldBe` "reviewer1"
-          c1.rcIsResolved `shouldBe` True
-          
-          let c2 = last comments
-          c2.rcAuthor `shouldBe` "unknown"
-          c2.rcIsResolved `shouldBe` False
+  -- GraphQL parsing is now handled on the Rust side (Octocrab).
+  -- See rust/exomonad-services/src/github.rs for review thread fetching.

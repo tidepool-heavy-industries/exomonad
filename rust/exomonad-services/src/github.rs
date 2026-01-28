@@ -50,6 +50,86 @@ impl GitHubService {
     }
 }
 
+impl GitHubService {
+    /// Fetch review thread comments via GraphQL for a pull request.
+    async fn fetch_review_threads(&self, owner: &str, repo: &str, number: u32) -> Result<Vec<GitHubReviewComment>, ServiceError> {
+        let query = serde_json::json!({
+            "query": "query($owner: String!, $repo: String!, $number: Int!) { \
+                repository(owner: $owner, name: $repo) { \
+                    pullRequest(number: $number) { \
+                        reviewThreads(last: 100) { \
+                            nodes { \
+                                isResolved \
+                                comments(first: 100) { \
+                                    nodes { \
+                                        author { login } \
+                                        body \
+                                        path \
+                                        line \
+                                        state \
+                                        createdAt \
+                                    } \
+                                } \
+                            } \
+                        } \
+                    } \
+                } \
+            }",
+            "variables": {
+                "owner": owner,
+                "repo": repo,
+                "number": number
+            }
+        });
+
+        let resp: serde_json::Value = self.client.graphql(&query).await.map_err(|e| ServiceError::Api {
+            code: 500,
+            message: e.to_string(),
+        })?;
+
+        let threads = resp
+            .get("data")
+            .and_then(|d| d.get("repository"))
+            .and_then(|r| r.get("pullRequest"))
+            .and_then(|pr| pr.get("reviewThreads"))
+            .and_then(|rt| rt.get("nodes"))
+            .and_then(|n| n.as_array())
+            .ok_or_else(|| ServiceError::Api {
+                code: 500,
+                message: "Failed to parse GraphQL review threads response".into(),
+            })?;
+
+        let mut reviews = Vec::new();
+        for thread in threads {
+            if let Some(comments_nodes) = thread.get("comments").and_then(|c| c.get("nodes")).and_then(|n| n.as_array()) {
+                for comment in comments_nodes {
+                    let author = comment.get("author")
+                        .and_then(|a| a.get("login"))
+                        .and_then(|l| l.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let body = comment.get("body").and_then(|b| b.as_str()).unwrap_or("").to_string();
+                    let path = comment.get("path").and_then(|p| p.as_str()).unwrap_or("").to_string();
+                    let line = comment.get("line").and_then(|l| l.as_u64()).map(|u| u as u32);
+                    let state = comment.get("state").and_then(|s| s.as_str()).unwrap_or("PENDING").to_string();
+                    let created_at = comment.get("createdAt").and_then(|d| d.as_str()).unwrap_or("").to_string();
+
+                    reviews.push(GitHubReviewComment {
+                        author,
+                        body,
+                        path,
+                        line,
+                        state,
+                        created_at,
+                    });
+                }
+            }
+        }
+
+        Ok(reviews)
+    }
+}
+
 fn state_to_string(state: octocrab::models::IssueState) -> String {
     match state {
         octocrab::models::IssueState::Open => "open".to_string(),
@@ -69,16 +149,40 @@ impl ExternalService for GitHubService {
                 owner,
                 repo,
                 number,
+                include_comments,
             } => {
                 let issue = self
                     .client
-                    .issues(owner, repo)
+                    .issues(&owner, &repo)
                     .get(number.into())
                     .await
                     .map_err(|e| ServiceError::Api {
                         code: 500,
                         message: e.to_string(),
                     })?;
+
+                let comments = if include_comments {
+                    self.client
+                        .issues(&owner, &repo)
+                        .list_comments(number.into())
+                        .send()
+                        .await
+                        .map_err(|e| ServiceError::Api {
+                            code: 500,
+                            message: e.to_string(),
+                        })?
+                        .items
+                        .into_iter()
+                        .map(|c| GitHubDiscussionComment {
+                            author: c.user.login,
+                            body: c.body.unwrap_or_default(),
+                            created_at: c.created_at.to_rfc3339(),
+                            replies: vec![],
+                        })
+                        .collect()
+                } else {
+                    vec![]
+                };
 
                 Ok(ServiceResponse::GitHubIssue {
                     number: issue.number as u32,
@@ -87,6 +191,8 @@ impl ExternalService for GitHubService {
                     state: state_to_string(issue.state),
                     labels: issue.labels.into_iter().map(|l| l.name).collect(),
                     url: issue.html_url.to_string(),
+                    author: issue.user.login.clone(),
+                    comments,
                 })
             }
             ServiceRequest::GitHubCreateIssue {
@@ -116,6 +222,8 @@ impl ExternalService for GitHubService {
                     state: state_to_string(issue.state),
                     labels: issue.labels.into_iter().map(|l| l.name).collect(),
                     url: issue.html_url.to_string(),
+                    author: issue.user.login.clone(),
+                    comments: vec![],
                 })
             }
             ServiceRequest::GitHubListIssues {
@@ -213,6 +321,8 @@ impl ExternalService for GitHubService {
                     state: state_to_string(issue.state),
                     labels: issue.labels.into_iter().map(|l| l.name).collect(),
                     url: issue.html_url.to_string(),
+                    author: issue.user.login.clone(),
+                    comments: vec![],
                 })
             }
             ServiceRequest::GitHubAddIssueLabel {
@@ -323,86 +433,7 @@ impl ExternalService for GitHubService {
                 repo,
                 number,
             } => {
-                // GraphQL query to match Haskell's logic (fetching review threads)
-                let query = serde_json::json!({
-                    "query": "query($owner: String!, $repo: String!, $number: Int!) { \
-                        repository(owner: $owner, name: $repo) { \
-                            pullRequest(number: $number) { \
-                                reviewThreads(last: 100) { \
-                                    nodes { \
-                                        isResolved \
-                                        comments(first: 100) { \
-                                            nodes { \
-                                                author { login } \
-                                                body \
-                                                path \
-                                                line \
-                                                state \
-                                                createdAt \
-                                            } \
-                                        } \
-                                    } \
-                                } \
-                            } \
-                        } \
-                    }",
-                    "variables": {
-                        "owner": owner,
-                        "repo": repo,
-                        "number": number
-                    }
-                });
-
-                let resp: serde_json::Value = self.client.graphql(&query).await.map_err(|e| ServiceError::Api {
-                    code: 500,
-                    message: e.to_string(),
-                })?;
-
-                // Parse the GraphQL response
-                // data.repository.pullRequest.reviewThreads.nodes
-                let threads = resp
-                    .get("data")
-                    .and_then(|d| d.get("repository"))
-                    .and_then(|r| r.get("pullRequest"))
-                    .and_then(|pr| pr.get("reviewThreads"))
-                    .and_then(|rt| rt.get("nodes"))
-                    .and_then(|n| n.as_array())
-                    .ok_or_else(|| ServiceError::Api {
-                        code: 500,
-                        message: "Failed to parse GraphQL response structure".into(),
-                    })?;
-
-                let mut reviews = Vec::new();
-
-                for thread in threads {
-                    let _is_resolved = thread.get("isResolved").and_then(|b| b.as_bool()).unwrap_or(false);
-                    if let Some(comments_nodes) = thread.get("comments").and_then(|c| c.get("nodes")).and_then(|n| n.as_array()) {
-                        for comment in comments_nodes {
-                            let author = comment.get("author")
-                                .and_then(|a| a.get("login"))
-                                .and_then(|l| l.as_str())
-                                .unwrap_or("unknown")
-                                .to_string();
-                            let body = comment.get("body").and_then(|b| b.as_str()).unwrap_or("").to_string();
-                            let path = comment.get("path").and_then(|p| p.as_str()).unwrap_or("").to_string();
-                            let line = comment.get("line").and_then(|l| l.as_u64()).map(|u| u as u32);
-                            let state = comment.get("state").and_then(|s| s.as_str()).unwrap_or("PENDING").to_string();
-                            let created_at = comment.get("createdAt").and_then(|d| d.as_str()).unwrap_or("").to_string();
-
-                            // Logic to map state strings if needed, but Haskell just passes them through or maps to enum.
-                            // We return simple string in struct.
-                            reviews.push(GitHubReviewComment {
-                                author,
-                                body,
-                                path,
-                                line,
-                                state, // "PENDING", "SUBMITTED", etc.
-                                created_at,
-                            });
-                        }
-                    }
-                }
-
+                let reviews = self.fetch_review_threads(&owner, &repo, number).await?;
                 Ok(ServiceResponse::GitHubReviews { reviews })
             }
             ServiceRequest::GitHubGetDiscussion {
@@ -525,18 +556,29 @@ impl ExternalService for GitHubService {
 
                 Ok(ServiceResponse::GitHubPR {
                     number: pr.number as u32,
+                    title: pr.title.unwrap_or_default(),
+                    body: pr.body.unwrap_or_default(),
+                    author: pr.user.map(|u| u.login).unwrap_or_else(|| "unknown".into()),
                     url: pr.html_url.expect("PR has no URL").to_string(),
                     state: state_to_string(pr.state.expect("PR has no state")),
+                    head_ref_name: pr.head.ref_field,
+                    base_ref_name: pr.base.ref_field,
+                    created_at: pr.created_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
+                    merged_at: None,
+                    labels: vec![],
+                    comments: vec![],
+                    reviews: vec![],
                 })
             }
             ServiceRequest::GitHubGetPR {
                 owner,
                 repo,
                 number,
+                include_details,
             } => {
                 let pr = self
                     .client
-                    .pulls(owner, repo)
+                    .pulls(&owner, &repo)
                     .get(number.into())
                     .await
                     .map_err(|e| ServiceError::Api {
@@ -544,10 +586,54 @@ impl ExternalService for GitHubService {
                         message: e.to_string(),
                     })?;
 
+                let merged_at = pr.merged_at.map(|t| t.to_rfc3339());
+                let labels = pr.labels.as_deref().unwrap_or(&[])
+                    .iter().map(|l| l.name.clone()).collect();
+
+                let (comments, reviews) = if include_details {
+                    // Fetch issue comments (PR discussions use the issues API)
+                    let issue_comments = self.client
+                        .issues(&owner, &repo)
+                        .list_comments(number.into())
+                        .send()
+                        .await
+                        .map_err(|e| ServiceError::Api {
+                            code: 500,
+                            message: format!("Failed to fetch PR comments: {}", e),
+                        })?
+                        .items
+                        .into_iter()
+                        .map(|c| GitHubDiscussionComment {
+                            author: c.user.login,
+                            body: c.body.unwrap_or_default(),
+                            created_at: c.created_at.to_rfc3339(),
+                            replies: vec![],
+                        })
+                        .collect();
+
+                    // Fetch review threads via GraphQL
+                    let review_comments = self.fetch_review_threads(&owner, &repo, number).await
+                        .unwrap_or_default();
+
+                    (issue_comments, review_comments)
+                } else {
+                    (vec![], vec![])
+                };
+
                 Ok(ServiceResponse::GitHubPR {
                     number: pr.number as u32,
+                    title: pr.title.unwrap_or_default(),
+                    body: pr.body.unwrap_or_default(),
+                    author: pr.user.map(|u| u.login).unwrap_or_else(|| "unknown".into()),
                     url: pr.html_url.expect("PR has no URL").to_string(),
                     state: state_to_string(pr.state.expect("PR has no state")),
+                    head_ref_name: pr.head.ref_field,
+                    base_ref_name: pr.base.ref_field,
+                    created_at: pr.created_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
+                    merged_at,
+                    labels,
+                    comments,
+                    reviews,
                 })
             }
             _ => panic!("Invalid request type for GitHubService"),
@@ -632,6 +718,7 @@ mod tests {
             owner: "owner".into(),
             repo: "repo".into(),
             number: 1,
+            include_comments: false,
         };
 
         match service.call(req).await.unwrap() {

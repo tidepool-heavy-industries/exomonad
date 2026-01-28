@@ -40,16 +40,16 @@ data ServiceRequest
       , system :: Maybe Text
       , thinking :: Maybe Value
       }
-  | GitHubGetIssue { owner :: Text, repo :: Text, number :: Int }
+  | GitHubGetIssue { owner :: Text, repo :: Text, number :: Int, includeComments :: Bool }
   | GitHubCreateIssue { owner :: Text, repo :: Text, title :: Text, body :: Text, labels :: [Text] }
-  | GitHubUpdateIssue { owner :: Text, repo :: Text, number :: Int, title :: Maybe Text, body :: Maybe Text, state :: Maybe Text, labels :: Maybe [Text], assignees :: Maybe [Text] }
+  | GitHubUpdateIssue { owner :: Text, repo :: Text, number :: Int, updateTitle :: Maybe Text, updateBody :: Maybe Text, state :: Maybe Text, updateLabels :: Maybe [Text], assignees :: Maybe [Text] }
   | GitHubAddIssueLabel { owner :: Text, repo :: Text, number :: Int, label :: Text }
   | GitHubRemoveIssueLabel { owner :: Text, repo :: Text, number :: Int, label :: Text }
   | GitHubAddIssueAssignee { owner :: Text, repo :: Text, number :: Int, assignee :: Text }
   | GitHubRemoveIssueAssignee { owner :: Text, repo :: Text, number :: Int, assignee :: Text }
   | GitHubListIssues { owner :: Text, repo :: Text, state :: Maybe Text, issueLabels :: [Text] }
   | GitHubCreatePR { owner :: Text, repo :: Text, title :: Text, body :: Text, head :: Text, base :: Text }
-  | GitHubGetPR { owner :: Text, repo :: Text, number :: Int }
+  | GitHubGetPR { owner :: Text, repo :: Text, number :: Int, includeDetails :: Bool }
   | GitHubListPullRequests { owner :: Text, repo :: Text, state :: Maybe Text, limit :: Maybe Int }
   | GitHubGetPullRequestReviews { owner :: Text, repo :: Text, number :: Int }
   | GitHubGetDiscussion { owner :: Text, repo :: Text, number :: Int }
@@ -70,11 +70,12 @@ instance ToJSON ServiceRequest where
       , "system" .= sys
       , "thinking" .= th
       ]
-    GitHubGetIssue o r n -> object
+    GitHubGetIssue o r n ic -> object
       [ "type" .= ("GitHubGetIssue" :: Text)
       , "owner" .= o
       , "repo" .= r
       , "number" .= n
+      , "include_comments" .= ic
       ]
     GitHubCreateIssue o r t b ls -> object
       [ "type" .= ("GitHubCreateIssue" :: Text)
@@ -139,11 +140,12 @@ instance ToJSON ServiceRequest where
       , "head" .= h
       , "base" .= b'
       ]
-    GitHubGetPR o r n -> object
+    GitHubGetPR o r n id' -> object
       [ "type" .= ("GitHubGetPR" :: Text)
       , "owner" .= o
       , "repo" .= r
       , "number" .= n
+      , "include_details" .= id'
       ]
     GitHubListPullRequests o r s l -> object
       [ "type" .= ("GitHubListPullRequests" :: Text)
@@ -191,9 +193,9 @@ instance ToJSON ServiceRequest where
 
 data ServiceResponse
   = AnthropicChatResponse { content :: [Value], stopReason :: Text, usage :: Value }
-  | GitHubIssueResponse { issueNumber :: Int, title :: Text, body :: Text, state :: Text, labels :: [Text], url :: Text }
+  | GitHubIssueResponse { issueNumber :: Int, title :: Text, body :: Text, state :: Text, labels :: [Text], url :: Text, issueAuthor :: Text, issueComments :: [Value] }
   | GitHubIssuesResponse { issues :: [Value] }
-  | GitHubPRResponse { number :: Int, url :: Text, state :: Text }
+  | GitHubPRResponse { number :: Int, title :: Text, body :: Text, author :: Text, url :: Text, state :: Text, head_ref_name :: Text, base_ref_name :: Text, created_at :: Text, merged_at :: Maybe Text, prLabels :: [Text], prComments :: [Value], prReviews :: [Value] }
   | GitHubPullRequestsResponse { pull_requests :: [Value] }
   | GitHubReviewsResponse { reviews :: [Value] }
   | GitHubDiscussionResponse { number :: Int, title :: Text, body :: Text, author :: Text, url :: Text, comments :: [Value] }
@@ -208,9 +210,9 @@ instance FromJSON ServiceResponse where
     t <- v .: "type"
     case (t :: Text) of 
       "AnthropicChatResponse" -> AnthropicChatResponse <$> v .: "content" <*> v .: "stop_reason" <*> v .: "usage"
-      "GitHubIssueResponse" -> GitHubIssueResponse <$> v .: "number" <*> v .: "title" <*> v .: "body" <*> v .: "state" <*> v .: "labels" <*> v .: "url"
+      "GitHubIssueResponse" -> GitHubIssueResponse <$> v .: "number" <*> v .: "title" <*> v .: "body" <*> v .: "state" <*> v .: "labels" <*> v .: "url" <*> v .: "author" <*> v .:? "comments" .!= []
       "GitHubIssuesResponse" -> GitHubIssuesResponse <$> v .: "issues"
-      "GitHubPRResponse" -> GitHubPRResponse <$> v .: "number" <*> v .: "url" <*> v .: "state"
+      "GitHubPRResponse" -> GitHubPRResponse <$> v .: "number" <*> v .: "title" <*> v .: "body" <*> v .: "author" <*> v .: "url" <*> v .: "state" <*> v .: "head_ref_name" <*> v .: "base_ref_name" <*> v .: "created_at" <*> v .:? "merged_at" <*> v .:? "labels" .!= [] <*> v .:? "comments" .!= [] <*> v .:? "reviews" .!= []
       "GitHubPullRequestsResponse" -> GitHubPullRequestsResponse <$> v .: "pull_requests"
       "GitHubReviewsResponse" -> GitHubReviewsResponse <$> v .: "reviews"
       "GitHubDiscussionResponse" -> GitHubDiscussionResponse <$> v .: "number" <*> v .: "title" <*> v .: "body" <*> v .: "author" <*> v .: "url" <*> v .: "comments"
