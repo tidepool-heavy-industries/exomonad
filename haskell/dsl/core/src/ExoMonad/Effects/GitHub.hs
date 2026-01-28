@@ -223,7 +223,7 @@ data Issue = Issue
 
 instance FromJSON Issue where
   parseJSON = withObject "Issue" $ \v -> do
-    labels <- v .: "labels"
+    labels <- v .:? "labels" .!= []
     labelNames <- mapM (.: "name") labels
     Issue
       <$> v .: "number"
@@ -414,7 +414,7 @@ data PullRequest = PullRequest
 
 instance FromJSON PullRequest where
   parseJSON = withObject "PullRequest" $ \v -> do
-    labels <- v .: "labels"
+    labels <- v .:? "labels" .!= []
     labelNames <- mapM (.: "name") labels
     PullRequest
       <$> v .: "number"
