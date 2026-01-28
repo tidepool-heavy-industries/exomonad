@@ -39,6 +39,8 @@ import ExoMonad.Control.Role.Server.TUI (TUIServer(..))
 import ExoMonad.Control.Role.Server.Workflow (WorkflowServer(..))
 import ExoMonad.Control.Role.Server.Planning (PlanningServer(..))
 import ExoMonad.Control.Role.Server.GitHub (GitHubServer(..))
+import ExoMonad.Control.Role.Server.TL (TLServer(..))
+import ExoMonad.Control.Role.Server.Kaizen (KaizenServer(..))
 
 -- Tool Logic Imports
 import ExoMonad.Control.ExoTools
@@ -52,6 +54,8 @@ import ExoMonad.Control.GHTools
   ( ghIssueListLogic
   , ghIssueShowLogic
   )
+import ExoMonad.Control.TLTools (tlCreateIssueLogic)
+import ExoMonad.Control.KaizenTools (kaizenReportLogic)
 
 -- Effect Imports
 import ExoMonad.Effect.Types (Log, Time)
@@ -71,7 +75,7 @@ import ExoMonad.Effect.TUI (TUI)
 
 -- | Team Lead role handlers.
 tlHandlers :: 
-  ( Members '[Log, Git, GitHub, Worktree, FileSystem, Env, Zellij, DockerSpawner, GeminiOp, TUI] es
+  ( Members '[Log, Git, GitHub, Worktree, FileSystem, Env, Zellij, DockerSpawner, GeminiOp, TUI, Time] es
   ) => TLRole (AsHandler es) es
 tlHandlers = TLRole
   { tlMetadataField = tlMetadata
@@ -79,11 +83,13 @@ tlHandlers = TLRole
   , tlOrchestration = orchestrationHandlers
   , tlTUI = tuiHandlers
   , tlGitHub = gitHubHandlers
+  , tlTools = tlServerHandlers
+  , tlKaizen = kaizenHandlers
   }
 
 -- | Developer role handlers.
 devHandlers :: 
-  ( Members '[Log, Git, GitHub, Env, TUI] es
+  ( Members '[Log, Git, GitHub, Env, TUI, FileSystem, Time] es
   ) => DevRole (AsHandler es) es
 devHandlers = DevRole
   { devMetadataField = devMetadata
@@ -91,11 +97,12 @@ devHandlers = DevRole
   , devWorkflow = workflowHandlers
   , devTUI = tuiHandlers
   , devGitHub = gitHubHandlers
+  , devKaizen = kaizenHandlers
   }
 
 -- | Project Manager role handlers.
 pmHandlers :: 
-  ( Members '[Log, GitHub, Env, Time, TUI] es
+  ( Members '[Log, GitHub, Env, Time, TUI, FileSystem] es
   ) => PMRole (AsHandler es) es
 pmHandlers = PMRole
   { pmMetadataField = pmMetadata
@@ -103,6 +110,7 @@ pmHandlers = PMRole
   , pmPlanning = planningHandlers
   , pmTUI = tuiHandlers
   , pmGitHub = gitHubHandlers
+  , pmKaizen = kaizenHandlers
   }
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -154,4 +162,21 @@ gitHubHandlers = GitHubServer
   { ghDescription = "GitHub issue management"
   , ghIssueList = MkToolHandler ghIssueListLogic
   , ghIssueShow = MkToolHandler ghIssueShowLogic
+  }
+
+-- | TL server handlers.
+tlServerHandlers :: 
+  ( Members '[Log, GitHub, Env] es
+  ) => TLServer (AsHandler es) es
+tlServerHandlers = TLServer
+  { tlCreateIssue = MkToolHandler tlCreateIssueLogic
+  }
+
+-- | Kaizen server handlers.
+kaizenHandlers ::
+  ( Members '[GitHub, Log] es
+  ) => KaizenServer (AsHandler es) es
+kaizenHandlers = KaizenServer
+  { kzDescription = "Continuous improvement and feedback tools"
+  , kzReport = MkToolHandler kaizenReportLogic
   }

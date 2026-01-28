@@ -25,6 +25,7 @@ import ExoMonad.Control.Role.Types
 import ExoMonad.Control.Role.Server.Workflow (WorkflowServer)
 import ExoMonad.Control.Role.Server.TUI (TUIServer)
 import ExoMonad.Control.Role.Server.GitHub (GitHubServer)
+import ExoMonad.Control.Role.Server.Kaizen (KaizenServer)
 
 -- | Developer role record.
 data DevRole mode (es :: [Type -> Type]) = DevRole
@@ -33,6 +34,7 @@ data DevRole mode (es :: [Type -> Type]) = DevRole
   , devWorkflow      :: ServerField mode es WorkflowServer
   , devTUI           :: ServerField mode es TUIServer
   , devGitHub        :: ServerField mode es GitHubServer
+  , devKaizen        :: ServerField mode es KaizenServer
   }
   deriving Generic
 

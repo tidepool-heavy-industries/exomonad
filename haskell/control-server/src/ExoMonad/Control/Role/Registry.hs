@@ -55,6 +55,8 @@ import ExoMonad.Control.Role.Server.TUI (TUIServer(..))
 import ExoMonad.Control.Role.Server.Workflow (WorkflowServer(..))
 import ExoMonad.Control.Role.Server.Planning (PlanningServer(..))
 import ExoMonad.Control.Role.Server.GitHub (GitHubServer(..))
+import ExoMonad.Control.Role.Server.TL (TLServer(..))
+import ExoMonad.Control.Role.Server.Kaizen (KaizenServer(..))
 -- Role imports
 import ExoMonad.Control.Role.Definition.TL (TLRole(..), tlMetadata)
 import ExoMonad.Control.Role.Definition.Dev (DevRole(..), devMetadata)
@@ -66,6 +68,8 @@ import ExoMonad.Control.Role.Tool.Popup (Popup)
 import ExoMonad.Control.Role.Tool.FilePR (FilePR)
 import ExoMonad.Control.Role.Tool.PMStatus (PMStatus)
 import ExoMonad.Control.Role.Tool.GitHub (GHIssueList, GHIssueShow)
+import ExoMonad.Control.Role.Tool.TLCreateIssue (TLCreateIssue)
+import ExoMonad.Control.Role.Tool.KaizenReport (KaizenReport)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SCHEMA VALUES
@@ -118,6 +122,19 @@ gitHubSchema = GitHubServer
   , ghIssueShow = toolInfo @GHIssueShow
   }
 
+-- | TL server schema.
+tlServerSchema :: TLServer AsSchema es
+tlServerSchema = TLServer
+  { tlCreateIssue = toolInfo @TLCreateIssue
+  }
+
+-- | Kaizen server schema.
+kaizenSchema :: KaizenServer AsSchema es
+kaizenSchema = KaizenServer
+  { kzDescription = "Continuous improvement and feedback tools"
+  , kzReport = toolInfo @KaizenReport
+  }
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- ROLE SCHEMAS
 -- ════════════════════════════════════════════════════════════════════════════
@@ -130,6 +147,8 @@ tlRoleSchema = TLRole
   , tlOrchestration = orchestrationSchema
   , tlTUI = tuiSchema
   , tlGitHub = gitHubSchema
+  , tlTools = tlServerSchema
+  , tlKaizen = kaizenSchema
   }
 
 -- | Dev role schema value.
@@ -140,6 +159,7 @@ devRoleSchema = DevRole
   , devWorkflow = workflowSchema
   , devTUI = tuiSchema
   , devGitHub = gitHubSchema
+  , devKaizen = kaizenSchema
   }
 
 -- | PM role schema value.
@@ -150,6 +170,7 @@ pmRoleSchema = PMRole
   , pmPlanning = planningSchema
   , pmTUI = tuiSchema
   , pmGitHub = gitHubSchema
+  , pmKaizen = kaizenSchema
   }
 
 -- ════════════════════════════════════════════════════════════════════════════

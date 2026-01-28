@@ -81,6 +81,16 @@ library
         ExoMonad.Control.Role.Tool.FilePR
         ExoMonad.Control.Role.Tool.PMStatus
         ExoMonad.Control.Role.Tool.GitHub
+        ExoMonad.Control.Role.Tool.KaizenReport
+        ExoMonad.Control.Role.Tool.TLCreateIssue
+        -- Kaizen
+        ExoMonad.Control.KaizenTools
+        ExoMonad.Control.KaizenTools.Types
+        ExoMonad.Control.Role.Server.Kaizen
+        -- TL
+        ExoMonad.Control.TLTools
+        ExoMonad.Control.TLTools.Types
+        ExoMonad.Control.Role.Server.TL
         -- Role DSL Servers
         ExoMonad.Control.Role.Server.Orchestration
         ExoMonad.Control.Role.Server.TUI

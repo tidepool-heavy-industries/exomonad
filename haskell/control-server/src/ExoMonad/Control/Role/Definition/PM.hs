@@ -25,6 +25,7 @@ import ExoMonad.Control.Role.Types
 import ExoMonad.Control.Role.Server.Planning (PlanningServer)
 import ExoMonad.Control.Role.Server.TUI (TUIServer)
 import ExoMonad.Control.Role.Server.GitHub (GitHubServer)
+import ExoMonad.Control.Role.Server.Kaizen (KaizenServer)
 
 -- | Project Manager role record.
 data PMRole mode (es :: [Type -> Type]) = PMRole
@@ -33,6 +34,7 @@ data PMRole mode (es :: [Type -> Type]) = PMRole
   , pmPlanning      :: ServerField mode es PlanningServer
   , pmTUI           :: ServerField mode es TUIServer
   , pmGitHub        :: ServerField mode es GitHubServer
+  , pmKaizen        :: ServerField mode es KaizenServer
   }
   deriving Generic
 

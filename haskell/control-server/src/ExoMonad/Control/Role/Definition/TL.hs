@@ -49,6 +49,8 @@ import ExoMonad.Control.Role.Types
 import ExoMonad.Control.Role.Server.Orchestration (OrchestrationServer)
 import ExoMonad.Control.Role.Server.TUI (TUIServer)
 import ExoMonad.Control.Role.Server.GitHub (GitHubServer)
+import ExoMonad.Control.Role.Server.TL (TLServer)
+import ExoMonad.Control.Role.Server.Kaizen (KaizenServer)
 
 -- | Team Lead role record.
 --
@@ -65,6 +67,10 @@ data TLRole mode (es :: [Type -> Type]) = TLRole
     -- ^ TUI tools (popup)
   , tlGitHub        :: ServerField mode es GitHubServer
     -- ^ GitHub tools (gh_issue_list, gh_issue_show)
+  , tlTools         :: ServerField mode es TLServer
+    -- ^ TL-specific tools (tl_create_issue)
+  , tlKaizen        :: ServerField mode es KaizenServer
+    -- ^ Kaizen tools (kaizen_report)
   }
   deriving Generic
 
