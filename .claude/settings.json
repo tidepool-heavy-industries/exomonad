@@ -1,5 +1,17 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$EXOMONAD_BIN_DIR/exomonad hook pre-tool-use",
+            "timeout": 300
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "startup",
@@ -12,7 +24,6 @@
       },
       {
         "matcher": "resume",
-        "matcher": "always",
         "hooks": [
           {
             "type": "command",
@@ -32,6 +43,16 @@
         ]
       }
     ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$EXOMONAD_BIN_DIR/exomonad hook subagent-start"
+          }
+        ]
+      }
+    ],
     "SubagentStop": [
       {
         "matcher": "always",
@@ -39,6 +60,16 @@
           {
             "type": "command",
             "command": "$EXOMONAD_BIN_DIR/exomonad hook subagent-stop"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$EXOMONAD_BIN_DIR/exomonad hook stop"
           }
         ]
       }

@@ -126,6 +126,16 @@ if [ ! -f "$CONFIG_DIR/settings.json" ]; then
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "exomonad hook stop"
+          }
+        ]
+      }
     ]
   }
 }
