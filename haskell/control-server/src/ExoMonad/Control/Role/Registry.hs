@@ -38,6 +38,7 @@ import Data.Aeson (Value(..))
 
 import ExoMonad.Role (Role(..))
 import ExoMonad.Graph.MCPReify (MCPToolInfo(..))
+import ExoMonad.Schema (jsonSchema, schemaToValue)
 import ExoMonad.Control.Role.Types
   ( AsSchema
   , emptyHooks
@@ -71,12 +72,11 @@ import ExoMonad.Control.Role.Tool.GitHub (GHIssueList, GHIssueShow)
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Tool info helper - creates MCPToolInfo from ToolSpec.
--- We use placeholder values for fields not needed for schema discovery.
 toolInfo :: forall tool. ToolSpec tool => MCPToolInfo
 toolInfo = MCPToolInfo
   { mtdName = toolName @tool
   , mtdDescription = toolDescription @tool
-  , mtdInputSchema = Object mempty  -- Placeholder, real schema from HasJSONSchema
+  , mtdInputSchema = schemaToValue (jsonSchema @(Args tool))
   , mtdEntryName = toolName @tool   -- Same as tool name for Role DSL tools
   , mtdRoles = []                   -- Roles determined by role definition, not tool
   }

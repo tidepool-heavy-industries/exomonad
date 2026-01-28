@@ -36,7 +36,6 @@ library
         ExoMonad.Control.Hook.Policy
         ExoMonad.Control.Hook.CircuitBreaker
         ExoMonad.Control.Handler.Hook
-        ExoMonad.Control.Handler.MCP
         ExoMonad.Control.Observability
         ExoMonad.Control.Interpreters.Traced
         -- Hook implementations

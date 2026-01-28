@@ -84,6 +84,7 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 
 import ExoMonad.Graph.MCPReify (MCPToolInfo)
+import ExoMonad.StructuredOutput.Class (HasJSONSchema)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TOOL SPECIFICATION
@@ -104,7 +105,7 @@ import ExoMonad.Graph.MCPReify (MCPToolInfo)
 --   toolName = "spawn_agents"
 --   toolDescription = "Spawn parallel worker agents"
 -- @
-class ToolSpec tool where
+class (HasJSONSchema (Args tool)) => ToolSpec tool where
   -- | Input type for this tool (parsed from MCP call arguments)
   type Args tool :: Type
 

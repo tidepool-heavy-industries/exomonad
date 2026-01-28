@@ -211,7 +211,9 @@ server logger config tracer cbMap =
 
     handleMcpTools = liftIO $ do
       logDebug logger "[MCP] tools/list request"
-      exportMCPTools logger
+      -- Default to config role or defaultRole
+      let effectiveRole = fromMaybe (defaultRole config) (role config >>= roleFromText)
+      exportMCPTools logger effectiveRole
 
     handlePing :: Handler T.Text
     handlePing = pure "pong"
@@ -221,8 +223,7 @@ server logger config tracer cbMap =
         Nothing -> throwError err404 { errBody = "Unknown role: " <> (Aeson.encode slug) }
         Just role -> liftIO $ do
           logDebug logger $ "[MCP:" <> slug <> "] tools/list request"
-          tools <- exportMCPTools logger
-          pure $ filter (\t -> isToolAllowed role t.tdName) tools
+          exportMCPTools logger role
 
     handleRoleMcpCall slug mSessionId req = do
       case roleFromText slug of
@@ -285,11 +286,10 @@ server logger config tracer cbMap =
 
             -- Tools list
             "tools/list" -> do
-              tools <- liftIO $ exportMCPTools logger
-              let filteredTools = filter (\t -> isToolAllowed role t.tdName) tools
+              tools <- liftIO $ exportMCPTools logger role
               pure $ McpJsonRpcResponse
                 { jrpcRespId = reqId
-                , jrpcResult = Just $ Aeson.toJSON McpToolsListResult { mtlrTools = filteredTools }
+                , jrpcResult = Just $ Aeson.toJSON McpToolsListResult { mtlrTools = tools }
                 , jrpcError = Nothing
                 }
 

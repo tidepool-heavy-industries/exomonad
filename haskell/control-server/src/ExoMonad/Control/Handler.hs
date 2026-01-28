@@ -11,7 +11,7 @@ module ExoMonad.Control.Handler
 import Control.Exception (try, SomeException, displayException, throwIO)
 import Control.Monad (when)
 import Control.Monad.Freer (runM, sendM)
-import Data.Aeson (toJSON, encode)
+import Data.Aeson (encode)
 import qualified Data.Aeson as Aeson
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe)
@@ -46,14 +46,15 @@ handleMessage logger config tracer traceCtx cbMap = \case
   HookEvent input r rl -> handleHook tracer config input r rl cbMap
   McpToolCall reqId name args ->
     handleMcpToolTyped logger config tracer traceCtx cbMap reqId name args
-  ToolsListRequest -> handleToolsList logger
+  ToolsListRequest -> handleToolsList logger config
   Ping -> pure Pong
 
 -- | Handle tool discovery request.
-handleToolsList :: Logger -> IO ControlResponse
-handleToolsList logger = do
-  logInfo logger "[MCP] Handling ToolsListRequest"
-  tools <- exportMCPTools logger
+handleToolsList :: Logger -> ServerConfig -> IO ControlResponse
+handleToolsList logger config = do
+  let role = fromMaybe (defaultRole config) (config.role >>= roleFromText)
+  logInfo logger $ "[MCP] Handling ToolsListRequest for role: " <> T.pack (show role)
+  tools <- exportMCPTools logger role
   logInfo logger $ "[MCP] Returning " <> T.pack (show (length tools)) <> " tools"
   pure $ ToolsListResponse tools
 

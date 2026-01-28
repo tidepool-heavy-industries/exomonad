@@ -54,7 +54,7 @@ import ExoMonad.Control.GHTools
   )
 
 -- Effect Imports
-import ExoMonad.Effect.Types (Log, Time, runReturn)
+import ExoMonad.Effect.Types (Log, Time)
 import ExoMonad.Effects.Git (Git)
 import ExoMonad.Effects.GitHub (GitHub)
 import ExoMonad.Effects.Worktree (Worktree)
@@ -64,7 +64,6 @@ import ExoMonad.Effects.Zellij (Zellij)
 import ExoMonad.Effects.DockerSpawner (DockerSpawner)
 import ExoMonad.Effect.Gemini (GeminiOp)
 import ExoMonad.Effect.TUI (TUI)
-import ExoMonad.Graph.Goto (unwrapSingleChoice)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ROLE HANDLERS
@@ -116,8 +115,8 @@ orchestrationHandlers ::
   ) => OrchestrationServer (AsHandler es) es
 orchestrationHandlers = OrchestrationServer
   { osDescription = "Agent orchestration tools"
-  , osSpawnAgents = MkToolHandler $ fmap unwrapSingleChoice . spawnAgentsLogic
-  , osExoStatus   = MkToolHandler $ fmap unwrapSingleChoice . exoStatusLogic
+  , osSpawnAgents = MkToolHandler spawnAgentsLogic
+  , osExoStatus   = MkToolHandler exoStatusLogic
   }
 
 -- | TUI server handlers.
@@ -126,7 +125,7 @@ tuiHandlers ::
   ) => TUIServer (AsHandler es) es
 tuiHandlers = TUIServer
   { tuiDescription = "Interactive UI tools"
-  , tuiPopup = MkToolHandler $ runReturn . popupLogic
+  , tuiPopup = MkToolHandler popupLogic
   }
 
 -- | Workflow server handlers.
@@ -135,7 +134,7 @@ workflowHandlers ::
   ) => WorkflowServer (AsHandler es) es
 workflowHandlers = WorkflowServer
   { wfDescription = "Developer workflow tools"
-  , wfFilePR = MkToolHandler $ fmap unwrapSingleChoice . filePRLogic
+  , wfFilePR = MkToolHandler filePRLogic
   }
 
 -- | Planning server handlers.
@@ -144,7 +143,7 @@ planningHandlers ::
   ) => PlanningServer (AsHandler es) es
 planningHandlers = PlanningServer
   { plDescription = "Project management tools"
-  , plPMStatus = MkToolHandler $ fmap unwrapSingleChoice . pmStatusLogic
+  , plPMStatus = MkToolHandler pmStatusLogic
   }
 
 -- | GitHub server handlers.
@@ -153,6 +152,6 @@ gitHubHandlers ::
   ) => GitHubServer (AsHandler es) es
 gitHubHandlers = GitHubServer
   { ghDescription = "GitHub issue management"
-  , ghIssueList = MkToolHandler $ fmap unwrapSingleChoice . ghIssueListLogic
-  , ghIssueShow = MkToolHandler $ fmap unwrapSingleChoice . ghIssueShowLogic
+  , ghIssueList = MkToolHandler ghIssueListLogic
+  , ghIssueShow = MkToolHandler ghIssueShowLogic
   }
