@@ -7,9 +7,11 @@ import Data.Aeson (eitherDecode, encode)
 import Test.Hspec
 
 import ExoMonad.Effects.Justfile
+import qualified JustExecSpec
 
 main :: IO ()
 main = hspec $ do
+  JustExecSpec.spec
   describe "JustResult JSON parsing" $ do
     it "round-trips JustResult" $ do
       let res = JustResult "stdout content" "stderr content" 0

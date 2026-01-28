@@ -29,6 +29,7 @@ library
         ExoMonad.Effect.Decision
         ExoMonad.Effect.Decision.Types
         ExoMonad.Effect.TUI
+        ExoMonad.Effects.JustExec
         ExoMonad.Graph
         ExoMonad.Graph.Types
         ExoMonad.Graph.Generic
