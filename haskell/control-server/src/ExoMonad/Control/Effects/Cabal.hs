@@ -11,13 +11,12 @@ module ExoMonad.Control.Effects.Cabal
 
 import Control.Monad (void)
 import Control.Monad.Freer (Eff, Member, interpret)
-import Data.Maybe (mapMaybe, fromMaybe)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Text.Regex.TDFA ((=~))
 
 import ExoMonad.Control.Effects.SshExec (SshExec, ExecRequest(..), ExecResult(..), execCommand)
-import ExoMonad.Effects.Cabal (Cabal(..), CabalResult(..), RawCompileError(..))
+import ExoMonad.Effects.Cabal (Cabal(..), CabalResult(..))
 
 -- | Interpreter: uses SshExec to run cabal commands remotely
 runCabalRemote :: Member SshExec effs => Maybe Text -> Eff (Cabal ': effs) a -> Eff effs a
@@ -38,7 +37,6 @@ runCabalRemote mContainer = interpret $ \case
         { cbfExitCode = code
         , cbfStderr = exStderr result
         , cbfStdout = exStdout result
-        , cbfParsedErrors = parseGhcErrors (exStderr result)
         }
 
   CabalTest path -> do
@@ -61,11 +59,9 @@ runCabalRemote mContainer = interpret $ \case
             { cbfExitCode = testCode
             , cbfStderr = exStderr result
             , cbfStdout = exStdout result
-            , cbfParsedErrors = parseGhcErrors (exStderr result)
             }
           else CabalTestFailure
-            { ctfParsedFailures = [] -- Output parsing could be added here
-            , ctfRawOutput = output
+            { ctfRawOutput = output
             }
 
   CabalClean path -> do
@@ -78,19 +74,3 @@ runCabalRemote mContainer = interpret $ \case
       , erTimeout = 60
       }
     pure CabalSuccess
-
--- | Parse GHC errors from stderr.
--- Example line: "src/Foo.hs:42:5: error: ..."
-parseGhcErrors :: Text -> [RawCompileError]
-parseGhcErrors stderr = mapMaybe parseErrorLine (T.lines stderr)
-  where
-    parseErrorLine :: Text -> Maybe RawCompileError
-    parseErrorLine line =
-      let matches = (T.unpack line :: String) =~ ("^([^:]+):([0-9]+):([0-9]+): (error|warning): (.*)$" :: String) :: [[String]]
-      in case matches of
-        [[_, file, lineNum, _col, _, msg]] -> Just RawCompileError
-          { rceFile = file
-          , rceLine = read lineNum
-          , rceMessage = T.pack msg
-          }
-        _ -> Nothing

@@ -53,17 +53,20 @@ traceCabal tracer = interpose $ \case
     sendM $ addAttribute span "cabal.path" (T.pack path)
     res <- send (CabalBuild path)
     case res of
-      CabalSuccess -> 
-        sendM $ addAttribute span "cabal.status" ("success" :: Text)
-      CabalBuildFailure code stderr _ _ -> do
-        sendM $ addAttribute span "cabal.status" ("build_failure" :: Text)
-        sendM $ addAttribute span "cabal.exit_code" (fromIntegral code :: Int)
-        sendM $ addAttribute span "error.message" (T.take 1000 stderr)
-      CabalTestFailure _ raw -> do
-        sendM $ addAttribute span "cabal.status" ("test_failure" :: Text)
-        sendM $ addAttribute span "error.message" (T.take 1000 raw)
-      CabalTestSuccess _ -> 
-        sendM $ addAttribute span "cabal.status" ("success" :: Text)
+      CabalSuccess
+        -> sendM $ addAttribute span "cabal.status" ("success" :: Text)
+      CabalBuildFailure code stderr _
+        -> do sendM
+                $ addAttribute span "cabal.status" ("build_failure" :: Text)
+              sendM
+                $ addAttribute span "cabal.exit_code" (fromIntegral code :: Int)
+              sendM $ addAttribute span "error.message" (T.take 1000 stderr)
+      CabalTestFailure raw
+        -> do sendM
+                $ addAttribute span "cabal.status" ("test_failure" :: Text)
+              sendM $ addAttribute span "error.message" (T.take 1000 raw)
+      CabalTestSuccess _
+        -> sendM $ addAttribute span "cabal.status" ("success" :: Text)
     pure res
 
   CabalTest path -> withSpan tracer "cabal.test" $ \span -> do
@@ -74,11 +77,11 @@ traceCabal tracer = interpose $ \case
         sendM $ addAttribute span "cabal.status" ("success" :: Text)
       CabalTestSuccess _ -> 
         sendM $ addAttribute span "cabal.status" ("success" :: Text)
-      CabalBuildFailure code stderr _ _ -> do
+      CabalBuildFailure code stderr _ -> do
         sendM $ addAttribute span "cabal.status" ("build_failure" :: Text)
         sendM $ addAttribute span "cabal.exit_code" (fromIntegral code :: Int)
         sendM $ addAttribute span "error.message" (T.take 1000 stderr)
-      CabalTestFailure _ raw -> do
+      CabalTestFailure raw -> do
         sendM $ addAttribute span "cabal.status" ("test_failure" :: Text)
         sendM $ addAttribute span "error.message" (T.take 1000 raw)
     pure res

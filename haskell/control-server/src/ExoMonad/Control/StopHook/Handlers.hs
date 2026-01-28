@@ -19,20 +19,16 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
-import Text.Regex.TDFA ((=~))
-import Text.Read (readMaybe)
 
 import ExoMonad.Graph.Generic (AsHandler, (:-))
 import ExoMonad.Graph.Goto (GotoChoice, To, gotoChoice, gotoExit)
 import ExoMonad.Graph.Types (Exit)
 import ExoMonad.Control.StopHook.Types
 import ExoMonad.Control.StopHook.Graph
-import ExoMonad.Control.StopHook.ErrorParser (parseGHCOutput)
-import ExoMonad.Effects.Cabal (Cabal, CabalResult(..), cabalBuild, cabalTest, RawCompileError(..), TestFailure(..))
+import ExoMonad.Effects.Cabal (Cabal, CabalResult(..), cabalBuild, cabalTest)
 import ExoMonad.Effects.Effector (Effector, runEffector, GhPrStatusResult(..), effectorGitStatus, effectorGitLsFiles, GitStatusResult(..))
-import Data.Aeson (eitherDecodeStrict, FromJSON, fromJSON, Result(..))
+import Data.Aeson (eitherDecodeStrict)
 import qualified Data.ByteString.Char8 as BS8
-import qualified Data.Text.Encoding as TE
 
 stopHookHandlers
   :: ( Member (State WorkflowState) es
@@ -100,30 +96,12 @@ handleCheckBuild state = do
 
 translateCabalResult :: CabalResult -> BuildResult
 translateCabalResult CabalSuccess = BuildSuccess
-translateCabalResult (CabalBuildFailure _code stderr _stdout parsed) = 
-  let errors = map translateRawError parsed
-      allErrors = parseGHCOutput stderr
-      finalErrors = if null allErrors then errors else allErrors
-      (errs, warns) = span (\e -> geSeverity e == ErrorSeverity) finalErrors
-  in BuildFailure $ BuildFailureInfo
+translateCabalResult (CabalBuildFailure _code stderr _stdout) = 
+  BuildFailure $ BuildFailureInfo
     { bfiRawOutput = stderr
-    , bfiErrors = errs
-    , bfiWarnings = warns
-    , bfiErrorCount = length errs
-    , bfiWarningCount = length warns
     }
-translateCabalResult (CabalTestFailure _ _raw) = BuildSuccess
+translateCabalResult (CabalTestFailure _raw) = BuildSuccess
 translateCabalResult (CabalTestSuccess _) = BuildSuccess
-
-translateRawError :: RawCompileError -> GHCError
-translateRawError rce = GHCError
-  { geFile = rce.rceFile
-  , geLine = rce.rceLine
-  , geColumn = 0
-  , geMessage = rce.rceMessage
-  , geErrorType = OtherError (rce.rceMessage)
-  , geSeverity = ErrorSeverity
-  }
 
 -- | Route based on build result
 handleRouteBuild
@@ -175,38 +153,14 @@ handleCheckTest state = do
   pure $ gotoChoice @"routeTest" (state, testRes)
 
 translateTestResult :: CabalResult -> TestResult
-translateTestResult (CabalTestSuccess output) = 
-  let (passed, failed) = parseTestSummary output
-  in TestResult passed failed []
-translateTestResult (CabalTestFailure failures raw) =
-  let (passed, failed) = parseTestSummary raw
-      -- Fallback if regex parsing failed but we have failure records
-      finalFailed = if failed == 0 && not (null failures) then length failures else failed
-  in TestResult passed finalFailed (map translateTestFailure failures)
+translateTestResult (CabalTestSuccess _) = 
+  TestResult 0 0
+translateTestResult (CabalTestFailure _raw) =
+  TestResult 0 1 -- Failed count 1 to signal failure
 -- Defensive case: should be unreachable if checkBuild handled build failures correctly.
-translateTestResult (CabalBuildFailure _ _ _ _) =
+translateTestResult (CabalBuildFailure _ _ _) =
   error "translateTestResult: unexpected CabalBuildFailure (test called after build failure)"
-translateTestResult CabalSuccess = TestResult 0 0 []
-
-parseTestSummary :: Text -> (Int, Int)
-parseTestSummary output =
-  -- Look for "X tests passed, Y tests failed"
-  let pattern = "([0-9]+) tests? passed, ([0-9]+) tests? failed" :: Text
-      matches = (output =~ pattern) :: (Text, Text, Text, [Text])
-  in case matches of
-    (_, _, _, [passedStr, failedStr]) ->
-      case (readMaybe (T.unpack passedStr), readMaybe (T.unpack failedStr)) of
-        (Just p, Just f) -> (p, f)
-        _ -> (0, 0)
-    _ -> (0, 0)
-
-translateTestFailure :: TestFailure -> TestFailureInfo
-translateTestFailure tf = TestFailureInfo 
-  { tfiSuite = "unknown" -- Cabal effect doesn't extract suite name yet
-  , tfiTestName = tf.tfPropertyName
-  , tfiMessage = tf.tfMessage
-  , tfiLocation = tf.tfLocation
-  }
+translateTestResult CabalSuccess = TestResult 0 0
 
 -- | Route based on test result
 handleRouteTest
@@ -341,15 +295,15 @@ handleBuildContext (state, templateName) = do
 buildTemplateContext :: AgentState -> WorkflowState -> TemplateName -> StopHookContext
 buildTemplateContext as ws templateName = 
   let mRes = wsLastBuildResult ws
-      (errs, warns, count, raw, failed) = case mRes of
+      (raw, failed) = case mRes of
         Just (BuildFailure info) -> 
-          (bfiErrors info, bfiWarnings info, bfiErrorCount info, bfiRawOutput info, True)
+          (bfiRawOutput info, True)
         _ -> 
-          ([], [], 0, "", False)
+          ("", False)
       mTestRes = wsLastTestResult ws
-      (tFailed, tPCount, tFCount, tFailures) = case mTestRes of
-        Just tr -> (tr.trFailed > 0, tr.trPassed, tr.trFailed, tr.trFailures)
-        Nothing -> (False, 0, 0, [])
+      (tFailed, tPCount, tFCount) = case mTestRes of
+        Just tr -> (tr.trFailed > 0, tr.trPassed, tr.trFailed)
+        Nothing -> (False, 0, 0)
       mPR = wsLastPRStatus ws
       (prExists, prUrl, prNum, prStatus, prComments) = case mPR of
         Just pr -> 
@@ -364,14 +318,10 @@ buildTemplateContext as ws templateName =
     , global_stops = wsGlobalStops ws
     , stage_retries = fromMaybe 0 (Map.lookup (wsCurrentStage ws) (wsStageRetries ws))
     , build_failed = failed
-    , errors = errs
-    , warnings = warns
-    , error_count = count
     , raw_output = raw
     , tests_failed = tFailed
     , test_passed_count = tPCount
     , test_failed_count = tFCount
-    , test_failures = tFailures
     , pr_exists = prExists
     , pr_url = prUrl
     , pr_number = prNum

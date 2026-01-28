@@ -4,7 +4,11 @@ The build stage has failed **5 times** in a row.
 
 ## Build Summary
 - Total stage retries: {{ stage_retries }}
-- Last error count: {{ error_count }}
+
+## Last Output
+```
+{{ raw_output | truncate(1000) }}
+```
 
 ## Suggestions
 - You seem to be having trouble fixing these specific build errors.

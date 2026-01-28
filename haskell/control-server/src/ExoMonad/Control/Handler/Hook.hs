@@ -284,18 +284,18 @@ handleStop tracer config input runtime mContainerId cbMap = do
           {
             output = defaultOutput
               {
-                continue_ = False
-              , stopReason = Just $ "Workflow stage: " <> templateName
-              -- decision="block" + reason goes to Claude; systemMessage goes to user
-              , hookSpecificOutput = Just $ StopOutput (Just "block") (Just rendered)
+                continue_ = True  -- Keep running so agent can fix issues
+              , decision = Just "block"
+              , reason = Just rendered
               , systemMessage = Just rendered
+              , hookSpecificOutput = Nothing
               }
-          , exitCode = 1
+          , exitCode = 0  -- Success exit code required for decision="block"
           }
         else pure $ hookSuccess defaultOutput
           {
             systemMessage = Just rendered
-          , hookSpecificOutput = Just $ StopOutput Nothing Nothing
+          , hookSpecificOutput = Nothing
           }
 
 -- | Get or create session ID from hook input.
@@ -468,4 +468,6 @@ defaultOutput = HookOutput
   , suppressOutput = Nothing
   , systemMessage = Nothing
   , hookSpecificOutput = Nothing
+  , decision = Nothing
+  , reason = Nothing
   }

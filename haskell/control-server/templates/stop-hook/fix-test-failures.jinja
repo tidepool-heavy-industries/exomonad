@@ -1,13 +1,13 @@
-Tests are failing. Here's the summary:
+# Tests Failed
 
-{{ test_failed_count }} tests failed out of {{ test_passed_count + test_failed_count }} total.
+## Raw Output
 
-{% for failure in test_failures[:5] %}
-## {{ failure.suite }} / {{ failure.test_name }}
-{% if failure.location %}Location: {{ failure.location }}{% endif %}
+```
+{{ raw_output | truncate(2000) }}
+```
 
-{{ failure.message }}
+## Next Steps
 
-{% endfor %}
-
-Please fix the failing tests and re-run.
+1. Review the failing tests above
+2. Fix the implementation or update the tests
+3. The stop hook will automatically re-check when you stop
