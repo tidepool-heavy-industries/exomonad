@@ -60,7 +60,7 @@ data StopHookGraph mode = StopHookGraph
   -- Test stage
   , checkTest :: mode :- LogicNode
       :@ Input AgentState
-      :@ UsesEffects '[ Effector
+      :@ UsesEffects '[ Cabal
                       , State WorkflowState
                       , Goto "routeTest" (AgentState, TestResult)
                       ]

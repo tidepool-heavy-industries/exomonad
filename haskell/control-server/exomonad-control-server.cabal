@@ -341,6 +341,21 @@ test-suite parser-test
     default-extensions:
         OverloadedStrings
 
+test-suite error-parser-test
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          ErrorParserSpec.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        exomonad-control-server,
+        text >= 2.0 && < 3,
+        tasty,
+        tasty-hunit
+    hs-source-dirs:   test
+    default-language: GHC2024
+    default-extensions:
+        OverloadedStrings
+
 test-suite hook-policy-test
     import:           warnings
     type:             exitcode-stdio-1.0
