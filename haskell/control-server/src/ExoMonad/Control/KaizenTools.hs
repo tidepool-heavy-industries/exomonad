@@ -18,6 +18,7 @@ import ExoMonad.Effects.GitHub
   ( GitHub, CreateIssueInput(..), createIssue, defaultCreateIssueInput, Repo(..)
   )
 import ExoMonad.Effect.Types (Log, logInfo)
+import ExoMonad.Control.Combinators (withEffect)
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- KAIZEN REPORT TOOL

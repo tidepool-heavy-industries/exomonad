@@ -196,10 +196,10 @@ socketUpdateIssue path repo num input = do
             { owner = owner
             , repo = repoName
             , number = num
-            , updateTitle = input.uiiTitle
-            , updateBody = input.uiiBody
+            , title = input.uiiTitle
+            , body = input.uiiBody
             , state = stateStr
-            , updateLabels = input.uiiLabels
+            , labels = input.uiiLabels
             , assignees = input.uiiAssignees
             }
       result <- sendRequest (SocketConfig path 10000) req

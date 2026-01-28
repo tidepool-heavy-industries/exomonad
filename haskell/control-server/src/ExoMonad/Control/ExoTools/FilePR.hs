@@ -21,6 +21,7 @@ import ExoMonad.Effects.GitHub (GitHub, Repo(..), PRCreateSpec(..), PRUrl(..), P
 
 import ExoMonad.Control.ExoTools.Internal (parseIssueNumber, slugify, formatPRBody)
 import ExoMonad.Control.ExoTools.FilePR.Types
+import ExoMonad.Control.Combinators (withEffect)
 
 -- | Core logic for file_pr.
 -- Issue number and title inferred from branch. Agent provides testing/compromises.
@@ -44,60 +45,58 @@ filePRLogic args = do
     Just num -> do
       -- 3. Get Issue Info
       let repo = defaultRepo
-      issueResult <- getIssue repo num False
-      case issueResult of
-        Left _err ->
-          pure $ FilePRResult Nothing False (Just $ "GitHub error fetching issue #" <> T.pack (show num))
-        Right Nothing ->
-          pure $ FilePRResult Nothing False (Just $ "Issue #" <> T.pack (show num) <> " not found.")
-        Right (Just issue) -> do
-          -- 4. Check if PR already exists (idempotent)
-          let searchStr = "[gh-" <> T.pack (show num) <> "]"
-              filt = defaultPRFilter { pfSearch = Just searchStr, pfLimit = Just 1 }
+      withEffect (getIssue repo num False)
+        (\case
+          Nothing ->
+            pure $ FilePRResult Nothing False (Just $ "Issue #" <> T.pack (show num) <> " not found.")
+          Just issue -> do
+            -- 4. Check if PR already exists (idempotent)
+            let searchStr = "[gh-" <> T.pack (show num) <> "]"
+                filt = defaultPRFilter { pfSearch = Just searchStr, pfLimit = Just 1 }
 
-          prsResult <- listPullRequests repo filt
-          let existingPrs = case prsResult of
-                Left _err -> []
-                Right prs -> prs
-          case listToMaybe existingPrs of
-            Just pr -> do
-              -- PR already exists - return it (idempotent behavior)
-              let info = PRInfo
-                    { number = pr.prNumber
-                    , url = pr.prUrl
-                    , status = T.pack (show pr.prState)
-                    , title = pr.prTitle
-                    }
-              pure $ FilePRResult (Just info) False Nothing
+            withEffect (listPullRequests repo filt)
+              (\prs ->
+                case listToMaybe prs of
+                  Just pr -> do
+                    -- PR already exists - return it (idempotent behavior)
+                    let info = PRInfo
+                          { number = pr.prNumber
+                          , url = pr.prUrl
+                          , status = T.pack (show pr.prState)
+                          , title = pr.prTitle
+                          }
+                    pure $ FilePRResult (Just info) False Nothing
 
-            Nothing -> do
-              -- 5. Prepare PR Spec
-              let headBranch = case mWt of
-                    Just wt -> wt.wiBranch
-                    Nothing -> "gh-" <> T.pack (show num) <> "/" <> slugify issue.issueTitle
+                  Nothing -> do
+                    -- 5. Prepare PR Spec
+                    let headBranch = case mWt of
+                          Just wt -> wt.wiBranch
+                          Nothing -> "gh-" <> T.pack (show num) <> "/" <> slugify issue.issueTitle
 
-              let title = "[" <> "gh-" <> T.pack (show num) <> "] " <> issue.issueTitle
-                  body = formatPRBody issue args.testing args.compromises
-                  spec = PRCreateSpec
-                    { prcsRepo = repo
-                    , prcsHead = headBranch
-                    , prcsBase = "main"
-                    , prcsTitle = title
-                    , prcsBody = body
-                    }
+                    let title = "[" <> "gh-" <> T.pack (show num) <> "] " <> issue.issueTitle
+                        body = formatPRBody issue args.testing args.compromises
+                        spec = PRCreateSpec
+                          { prcsRepo = repo
+                          , prcsHead = headBranch
+                          , prcsBase = "main"
+                          , prcsTitle = title
+                          , prcsBody = body
+                          }
 
-              -- 6. Create PR
-              prResult <- createPR spec
-              case prResult of
-                Left _err ->
-                  pure $ FilePRResult Nothing False (Just "GitHub error creating PR")
-                Right (PRUrl url) -> do
-                  -- Note: We don't have the PR number from createPR, so we use 0
-                  -- In practice, the URL is what matters
-                  let info = PRInfo
-                        { number = 0
-                        , url = url
-                        , status = "OPEN"
-                        , title = title
-                        }
-                  pure $ FilePRResult (Just info) True Nothing
+                    -- 6. Create PR
+                    withEffect (createPR spec)
+                      (\(PRUrl url) -> do
+                        -- Note: We don't have the PR number from createPR, so we use 0
+                        -- In practice, the URL is what matters
+                        let info = PRInfo
+                              { number = 0
+                              , url = url
+                              , status = "OPEN"
+                              , title = title
+                              }
+                        pure $ FilePRResult (Just info) True Nothing)
+                      (\_err -> pure $ FilePRResult Nothing False (Just "GitHub error creating PR"))
+              )
+              (\_err -> pure $ FilePRResult (Just $ PRInfo 0 "" "" "") False (Just "GitHub error listing PRs")) -- should ideally not reach here with a dummy PRInfo but maintaining structure
+        )
+        (\_err -> pure $ FilePRResult Nothing False (Just $ "GitHub error fetching issue #" <> T.pack (show num)))
