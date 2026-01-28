@@ -27,9 +27,8 @@ import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Data.Aeson (Value(..), toJSON, fromJSON, (.:), (.:?))
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Types (parseMaybe)
-import Data.Time.Clock (UTCTime(..), secondsToDiffTime)
-import Data.Time.Calendar (Day(..))
-import Data.Time.Format (parseTimeM, defaultTimeLocale)
+import Data.Time.Clock (UTCTime)
+import Data.Time.Format.ISO8601 (iso8601ParseM)
 
 import ExoMonad.Effects.SocketClient
   ( SocketConfig(..)
@@ -391,15 +390,16 @@ socketErrorToGitHubError = \case
   DecodeError msg -> GHParseError (T.pack msg)
   TimeoutError -> GHTimeout
 
--- | Parse an RFC3339 timestamp, falling back to epoch on failure.
+-- | Parse an ISO8601/RFC3339 timestamp, erroring on failure.
+-- Handles both "Z" and "+00:00" offset formats (Rust's chrono emits the latter).
 parseRFC3339 :: Text -> UTCTime
-parseRFC3339 t = case parseTimeM True defaultTimeLocale "%Y-%m-%dT%H:%M:%S%QZ" (T.unpack t) of
+parseRFC3339 t = case iso8601ParseM (T.unpack t) of
   Just time -> time
-  Nothing -> UTCTime (ModifiedJulianDay 0) (secondsToDiffTime 0)
+  Nothing -> error $ "parseRFC3339: invalid timestamp: " <> T.unpack t
 
--- | Parse an RFC3339 timestamp, returning Nothing on failure.
+-- | Parse an ISO8601/RFC3339 timestamp, returning Nothing on failure.
 parseRFC3339Maybe :: Text -> Maybe UTCTime
-parseRFC3339Maybe t = parseTimeM True defaultTimeLocale "%Y-%m-%dT%H:%M:%S%QZ" (T.unpack t)
+parseRFC3339Maybe t = iso8601ParseM (T.unpack t)
 
 -- | Parse JSON comment values from Rust's GitHubDiscussionComment format into Haskell Comments.
 -- Rust sends: {"author": "login", "body": "...", "created_at": "...", "replies": [...]}
