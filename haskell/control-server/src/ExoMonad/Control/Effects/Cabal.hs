@@ -30,10 +30,10 @@ runCabalRemote mContainer = interpret $ \case
       , erEnv = []
       , erTimeout = 600
       }
-    let code = fromMaybe (-1) (exExitCode result)
-    pure $ case code of
-      0 -> CabalSuccess
-      _ -> CabalBuildFailure
+    case exExitCode result of
+      Nothing -> pure $ CabalInfraError { cieError = exStderr result }
+      Just 0 -> pure CabalSuccess
+      Just code -> pure $ CabalBuildFailure
         { cbfExitCode = code
         , cbfStderr = exStderr result
         , cbfStdout = exStdout result
@@ -49,18 +49,18 @@ runCabalRemote mContainer = interpret $ \case
       , erTimeout = 600
       }
     let output = exStdout result <> exStderr result
-        testCode = fromMaybe (-1) (exExitCode result)
-    pure $ case testCode of
-      0 -> CabalTestSuccess { ctsOutput = output }
-      _ ->
+    case exExitCode result of
+      Nothing -> pure $ CabalInfraError { cieError = exStderr result }
+      Just 0 -> pure $ CabalTestSuccess { ctsOutput = output }
+      Just testCode ->
         -- Simple check if it's a build failure (could be improved)
         if "error:" `T.isInfixOf` exStderr result
-          then CabalBuildFailure
+          then pure $ CabalBuildFailure
             { cbfExitCode = testCode
             , cbfStderr = exStderr result
             , cbfStdout = exStdout result
             }
-          else CabalTestFailure
+          else pure $ CabalTestFailure
             { ctfRawOutput = output
             }
 

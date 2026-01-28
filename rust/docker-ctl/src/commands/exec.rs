@@ -3,10 +3,15 @@ use bollard::Docker;
 use futures_util::stream::StreamExt;
 use serde::Serialize;
 
+/// JSON response from docker-ctl exec
+/// IMPORTANT: Field names must match Haskell ExecResult in SshExec.hs
 #[derive(Serialize)]
 pub struct ExecResponse {
+    #[serde(rename = "exit_code")]
     pub exit_code: Option<i64>,
+    #[serde(rename = "stdout")]
     pub stdout: String,
+    #[serde(rename = "stderr")]
     pub stderr: String,
 }
 

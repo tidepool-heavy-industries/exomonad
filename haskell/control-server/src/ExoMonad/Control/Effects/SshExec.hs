@@ -14,8 +14,7 @@ module ExoMonad.Control.Effects.SshExec
   ) where
 
 import Control.Monad.Freer (Eff, interpret, send, Member, LastMember, sendM)
-import Data.Aeson (FromJSON(..), ToJSON(..), eitherDecode, genericParseJSON, genericToJSON)
-import Data.Aeson.Casing (aesonPrefix, snakeCase)
+import Data.Aeson (FromJSON(..), ToJSON(..), eitherDecode, withObject, object, (.:), (.:?), (.=))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -39,24 +38,47 @@ data ExecRequest = ExecRequest
   } deriving (Show, Generic)
 
 instance ToJSON ExecRequest where
-  toJSON = genericToJSON $ aesonPrefix snakeCase
+  toJSON r = object
+    [ "container" .= erContainer r
+    , "command" .= erCommand r
+    , "args" .= erArgs r
+    , "working_dir" .= erWorkingDir r
+    , "env" .= erEnv r
+    , "timeout" .= erTimeout r
+    ]
 
 instance FromJSON ExecRequest where
-  parseJSON = genericParseJSON $ aesonPrefix snakeCase
+  parseJSON = withObject "ExecRequest" $ \v -> ExecRequest
+    <$> v .:? "container"
+    <*> v .: "command"
+    <*> v .: "args"
+    <*> v .: "working_dir"
+    <*> v .: "env"
+    <*> v .: "timeout"
 
 -- | Result of command execution
--- Matches docker-ctl exec output: {"exit_code": ..., "stdout": ..., "stderr": ...}
+-- IMPORTANT: Field names must match docker-ctl exec output (Rust ExecResponse)
+-- Expected JSON: {"exit_code": N | null, "stdout": "...", "stderr": "..."}
 data ExecResult = ExecResult
-  { exExitCode :: Maybe Int  -- Changed to Maybe Int to match docker-ctl output
+  { exExitCode :: Maybe Int  -- null when docker-ctl fails to parse output
   , exStdout :: Text
   , exStderr :: Text
   } deriving (Show, Generic)
 
 instance ToJSON ExecResult where
-  toJSON = genericToJSON $ aesonPrefix snakeCase
+  toJSON r = object
+    [ "exit_code" .= exExitCode r
+    , "stdout" .= exStdout r
+    , "stderr" .= exStderr r
+    ]
 
+-- | Parse ExecResult from docker-ctl JSON output
+-- If parsing fails, exExitCode will be Nothing in the error handler in runSshExec
 instance FromJSON ExecResult where
-  parseJSON = genericParseJSON $ aesonPrefix snakeCase
+  parseJSON = withObject "ExecResult" $ \v -> ExecResult
+    <$> v .:? "exit_code"  -- Optional: null or missing becomes Nothing
+    <*> v .: "stdout"
+    <*> v .: "stderr"
 
 -- | Send an ExecCommand effect
 execCommand :: Member SshExec effs => ExecRequest -> Eff effs ExecResult

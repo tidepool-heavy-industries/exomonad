@@ -1,6 +1,6 @@
 # Single-stage Dockerfile for ExoMonad CI
 # Pre-builds all Haskell dependencies
-FROM haskell:9.10
+FROM haskell:9.12.2
 
 WORKDIR /workspace
 

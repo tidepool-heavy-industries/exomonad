@@ -152,7 +152,7 @@ parseIssueNumber branch =
   if "gh-" `T.isPrefixOf` branch
   then
     let content = T.drop 3 branch
-        (numStr, _) = T.break (== '/') content
+        (numStr, _) = T.break (\c -> c == '/' || c == '-') content
     in case (reads (T.unpack numStr) :: [(Int, String)]) of
          [(n, "")] -> Just n
          _ -> Nothing
