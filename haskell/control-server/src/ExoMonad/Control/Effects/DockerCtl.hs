@@ -42,6 +42,7 @@ doSpawn binPath cfg = do
              ] ++ maybe [] (\u -> ["--uid", show u]) (cfg.scUid)
                ++ maybe [] (\g -> ["--gid", show g]) (cfg.scGid)
                ++ envArgs
+               ++ maybe [] (\c -> "--" : map T.unpack c) (cfg.scCmd)
 
   (code, stdout, stderr) <- readProcessWithExitCode binPath args ""
   case code of

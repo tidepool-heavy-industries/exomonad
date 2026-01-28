@@ -5,18 +5,36 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module ExoMonad.Control.ExoTools.SpawnAgents.Types
   ( SpawnAgentsArgs(..)
   , SpawnAgentsResult(..)
   , CleanupAgentsArgs(..)
   , CleanupAgentsResult(..)
+  , InitialPromptContext(..)
   ) where
 
 import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.=), object, withObject)
 import Data.Text (Text)
 import GHC.Generics (Generic)
+import Text.Ginger.GVal (ToGVal(..))
 import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(..), HasJSONSchema(..), arraySchema, emptySchema, SchemaType(..), describeField)
+
+-- | Context for rendering the initial prompt.
+data InitialPromptContext = InitialPromptContext
+  { issue_number :: Text
+  , issue_title :: Text
+  , issue_body :: Text
+  , branch_name :: Text
+  , worktree_path :: Text
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (ToJSON)
+
+instance ToGVal m InitialPromptContext
 
 -- | Arguments for spawn_agents tool.
 data SpawnAgentsArgs = SpawnAgentsArgs

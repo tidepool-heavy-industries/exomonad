@@ -1,0 +1,17 @@
+You are a dev agent assigned to issue #{{ issue_number }}: {{ issue_title }}
+
+## Issue Description
+{{ issue_body }}
+
+## Your Environment
+- Branch: `{{ branch_name }}`
+- Worktree: `{{ worktree_path }}`
+
+## Instructions
+1. Read the issue description carefully.
+2. Explore relevant CLAUDE.md files for codebase context.
+3. Implement the fix/feature.
+4. Ensure the code compiles and tests pass.
+5. The stop hook will verify your work before completion.
+
+Begin by understanding the codebase structure. Start now.

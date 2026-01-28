@@ -70,6 +70,10 @@ enum Commands {
         /// Environment variables (KEY=VALUE)
         #[arg(short = 'e', long = "env")]
         env: Vec<String>,
+
+        /// Custom command to override image CMD
+        #[arg(last = true)]
+        cmd: Vec<String>,
     },
     
     /// Stop and remove a container
@@ -102,8 +106,8 @@ async fn main() {
         Commands::Exec { container, local, workdir, user, env, cmd } => {
             commands::exec::run(container, local, workdir, user, env, cmd).await
         }
-        Commands::Spawn { issue_id, worktree_path, backend, uid, gid, expires_at, env } => {
-            commands::spawn::run(issue_id, worktree_path, backend, uid, gid, expires_at, env).await
+        Commands::Spawn { issue_id, worktree_path, backend, uid, gid, expires_at, env, cmd } => {
+            commands::spawn::run(issue_id, worktree_path, backend, uid, gid, expires_at, env, cmd).await
         }
         Commands::Stop { container, timeout } => {
             commands::stop::run(container, timeout).await
