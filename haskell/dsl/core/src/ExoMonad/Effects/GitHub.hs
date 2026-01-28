@@ -80,7 +80,7 @@ import Control.Applicative ((<|>))
 import Data.Text (Text)
 import qualified Data.Text
 import Data.Time (UTCTime)
-import Data.Aeson (FromJSON(..), ToJSON(..), withObject, withText, (.:), (.:?), (.=), object)
+import Data.Aeson (FromJSON(..), ToJSON(..), withObject, withText, (.:), (.:?), (.!=), (.=), object)
 import GHC.Generics (Generic)
 import Control.Monad.Freer (Eff, Member, send, interpret)
 
