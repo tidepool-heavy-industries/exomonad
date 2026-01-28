@@ -170,7 +170,7 @@ putMem s = updateMem @s (const s)
 -- -- Using OverloadedLabels + generic-lens
 -- modifyMem \@ExploreMem #urlsVisited (newUrl :)
 --
--- -- Or with explicit optics
+-- -- Or with explicit lens
 -- modifyMem \@Config (field \@"timeout") (* 2)
 -- @
 modifyMem :: forall s a effs. (Member (Memory s) effs) => ASetter s s a a -> (a -> a) -> Eff effs ()
