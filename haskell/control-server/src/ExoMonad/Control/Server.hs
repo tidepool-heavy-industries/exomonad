@@ -182,7 +182,7 @@ server logger config tracer cbMap =
   :<|> handleRoleMcpJsonRpc
   where
     handleHook (input, runtime, agentRole) = do
-      res <- liftIO $ do
+      liftIO $ do
         logDebug logger $ "[HOOK] " <> input.hookEventName <> " runtime=" <> T.pack (show runtime) <> " role=" <> T.pack (show agentRole)
         traceCtx <- newTraceContext
         handleMessage logger config tracer traceCtx cbMap (HookEvent input runtime agentRole)
@@ -190,10 +190,6 @@ server logger config tracer cbMap =
         -- Note: We do NOT flushTraces here because we use hs-opentelemetry (via Tracer)
         -- which handles export automatically via BatchSpanProcessor.
         -- Legacy ObservabilityConfig is skipped for Hooks.
-
-      case res of
-        HookResponse out ec -> pure (out, ec)
-        _ -> throwError $ err500 { errBody = "Unexpected response from handleHook" }
 
     handleMcpCall req = liftIO $ do
       logInfo logger $ "[MCP:" <> req.mcpId <> "] tool=" <> req.toolName
