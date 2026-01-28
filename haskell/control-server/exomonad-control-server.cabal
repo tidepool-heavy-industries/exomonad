@@ -44,14 +44,8 @@ library
         ExoMonad.Control.Hook.GitHubRetry
         ExoMonad.Control.Hook.Stop
         ExoMonad.Control.Hook.Stop.Context
-        ExoMonad.Control.LSPTools
-        ExoMonad.Control.LSPTools.Types
-        ExoMonad.Control.PMTools
-        ExoMonad.Control.PMTools.Types
         ExoMonad.Control.PMStatus
         ExoMonad.Control.PMStatus.Types
-        ExoMonad.Control.PMPropose
-        ExoMonad.Control.PMPropose.Types
         ExoMonad.Control.ExoTools
         ExoMonad.Control.ExoTools.Internal
         ExoMonad.Control.ExoTools.Status
@@ -67,8 +61,6 @@ library
         ExoMonad.Control.ExoTools.PrReviewStatus.Types
         ExoMonad.Control.TUITools
         ExoMonad.Control.TUITools.Types
-        ExoMonad.Control.FeedbackTools
-        ExoMonad.Control.FeedbackTools.Types
         ExoMonad.Control.RoleConfig
         -- Role DSL
         ExoMonad.Control.Role.Types
@@ -108,7 +100,6 @@ library
         ExoMonad.Control.GHTools
         ExoMonad.Control.GHTools.Types
         ExoMonad.Control.Export
-        ExoMonad.Control.CodeExtraction
         ExoMonad.Control.Version
         ExoMonad.Control.Version.TH
         -- StopHook (workflow stages)
@@ -129,25 +120,6 @@ library
         ExoMonad.Control.Effects.Git
         ExoMonad.Control.Effects.Justfile
         ExoMonad.Control.Effects.DockerCtl
-        -- Scout (semantic code exploration)
-        ExoMonad.Control.Scout.Types
-        ExoMonad.Control.Scout.EdgeTypes
-        ExoMonad.Control.Scout.Heuristics
-        ExoMonad.Control.Scout.LSP
-        ExoMonad.Control.Scout.Templates
-        -- DocGen (teaching document generation)
-        ExoMonad.Control.Scout.DocGen
-        ExoMonad.Control.Scout.DocGen.Types
-        ExoMonad.Control.Scout.DocGen.Gemma
-        ExoMonad.Control.Scout.DocGen.Teacher
-        ExoMonad.Control.Scout.Tools
-        -- Graph-based DocGen (exomonad DSL)
-        ExoMonad.Control.Scout.Graph
-        ExoMonad.Control.Scout.Graph.Types
-        ExoMonad.Control.Scout.Graph.Templates
-        ExoMonad.Control.Scout.Graph.Templates.Context
-        ExoMonad.Control.Scout.Graph.Handlers
-        ExoMonad.Control.Scout.Graph.Runner
     build-depends:
         base >= 4.17 && < 5,
         text >= 2.0 && < 3,
@@ -249,22 +221,6 @@ test-suite stop-hook-test
     default-extensions:
         OverloadedStrings
 
-test-suite code-extraction-test
-    import:           warnings
-    type:             exitcode-stdio-1.0
-    main-is:          CodeExtractionSpec.hs
-    build-depends:
-        base >= 4.17 && < 5,
-        exomonad-control-server,
-        exomonad-core,
-        text >= 2.0 && < 3,
-        tasty,
-        tasty-hunit
-    hs-source-dirs:   test
-    default-language: GHC2024
-    default-extensions:
-        OverloadedStrings
-
 test-suite tools-test
     import:           warnings
     type:             exitcode-stdio-1.0
@@ -304,43 +260,6 @@ test-suite exo-tools-test
         OverloadedStrings
         TypeApplications
 
-test-suite pm-tools-test
-    import:           warnings
-    type:             exitcode-stdio-1.0
-    main-is:          PMToolsSpec.hs
-    build-depends:
-        base >= 4.17 && < 5,
-        exomonad-control-server,
-        exomonad-core,
-        text >= 2.0 && < 3,
-        aeson,
-        freer-simple,
-        tasty,
-        tasty-hunit
-    hs-source-dirs:   test
-    default-language: GHC2024
-    default-extensions:
-        OverloadedStrings
-        TypeApplications
-
-test-suite pm-propose-test
-    import:           warnings
-    type:             exitcode-stdio-1.0
-    main-is:          PMProposeSpec.hs
-    build-depends:
-        base >= 4.17 && < 5,
-        exomonad-control-server,
-        exomonad-core,
-        text >= 2.0 && < 3,
-        freer-simple,
-        tasty,
-        tasty-hunit
-    hs-source-dirs:   test
-    default-language: GHC2024
-    default-extensions:
-        OverloadedStrings
-
-
 test-suite pm-status-test
     import:           warnings
     type:             exitcode-stdio-1.0
@@ -360,21 +279,6 @@ test-suite pm-status-test
         OverloadedStrings
         TypeApplications
 
-test-suite parser-test
-    import:           warnings
-    type:             exitcode-stdio-1.0
-    main-is:          ParserSpec.hs
-    build-depends:
-        base >= 4.17 && < 5,
-        exomonad-control-server,
-        text >= 2.0 && < 3,
-        tasty,
-        tasty-hunit
-    hs-source-dirs:   test
-    default-language: GHC2024
-    default-extensions:
-        OverloadedStrings
-
 test-suite hook-policy-test
     import:           warnings
     type:             exitcode-stdio-1.0
@@ -391,27 +295,6 @@ test-suite hook-policy-test
     default-language: GHC2024
     default-extensions:
         OverloadedStrings
-
-test-suite feedback-tools-test
-    import:           warnings
-    type:             exitcode-stdio-1.0
-    main-is:          FeedbackToolsSpec.hs
-    build-depends:
-        base >= 4.17 && < 5,
-        exomonad-control-server,
-        exomonad-core,
-        text >= 2.0 && < 3,
-        aeson,
-        freer-simple,
-        directory,
-        filepath,
-        tasty,
-        tasty-hunit
-    hs-source-dirs:   test
-    default-language: GHC2024
-    default-extensions:
-        OverloadedStrings
-        TypeApplications
 
 test-suite ssh-exec-test
     import:           warnings
