@@ -159,6 +159,52 @@ else
     echo "Using existing/linked settings.json"
 fi
 
+# 2.5 Configure Gemini hooks
+GEMINI_CONFIG_DIR="/home/agent/.gemini"
+if [ ! -f "$GEMINI_CONFIG_DIR/settings.json" ]; then
+    echo "Creating default Gemini settings with hooks..."
+    mkdir -p "$GEMINI_CONFIG_DIR"
+    cat > "$GEMINI_CONFIG_DIR/settings.json" <<EOF
+{
+  "hooks": {
+    "startup": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "exomonad hook session-start --runtime=gemini"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "exomonad hook session-start --runtime=gemini"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "exomonad hook pre-tool-use --runtime=gemini",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}
+EOF
+    chown -R agent:agent "$GEMINI_CONFIG_DIR"
+fi
+
 # 3. Configure MCP
 # ROLE and AGENT_WORKSPACE already defined above during repo init
 # Subagents might already have .mcp.json written by SpawnAgents to their worktree root.

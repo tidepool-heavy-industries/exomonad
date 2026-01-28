@@ -311,10 +311,11 @@ processIssue spawnMode repoRoot wtBaseDir backend shortId = do
                                     }
                               let initialPrompt = renderInitialPrompt promptCtx
 
-                              -- Build command with prompt (only for Claude for now)
-                              let cmdOverride = if backend == "claude"
-                                    then Just ["claude", "--permission-mode", "bypassPermissions", "--debug", "--verbose", initialPrompt]
-                                    else Nothing
+                              -- Build command with prompt
+                              let cmdOverride = case backend of
+                                    "claude" -> Just ["claude", "--permission-mode", "bypassPermissions", "--debug", "--verbose", initialPrompt]
+                                    "gemini" -> Just ["gemini", "--debug", "--prompt-interactive", initialPrompt]
+                                    _        -> Nothing
 
                               let config = SpawnConfig
                                     {

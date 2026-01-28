@@ -40,6 +40,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# Install Gemini CLI
+RUN npm install -g @google/gemini-cli
+
 # Install Docker CLI for spawner communication (tui-spawner needs this)
 RUN curl -fsSL https://get.docker.com | sh && \
     rm -rf /var/lib/apt/lists/*
