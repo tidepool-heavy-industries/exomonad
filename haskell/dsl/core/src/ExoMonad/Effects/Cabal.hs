@@ -23,13 +23,7 @@
 -- - Tests are verified to fail (proves they're meaningful)
 -- - Implementation is written
 -- - Tests are verified to pass
--- - If tests fail, structured feedback drives iteration
---
--- = Test Failure Parsing
---
--- QuickCheck and HSpec output is parsed into structured `TestFailure` records
--- containing property names, counterexamples, and seeds. This enables LLMs
--- to receive actionable feedback for fixing implementations.
+-- - If tests fail, raw output drives iteration
 module ExoMonad.Effects.Cabal
   ( -- * Effect
     Cabal(..)
@@ -39,71 +33,12 @@ module ExoMonad.Effects.Cabal
 
     -- * Result Types
   , CabalResult(..)
-  , TestFailure(..)
-  , RawCompileError(..)
   ) where
 
 import Control.Monad.Freer (Eff, Member, send)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
 import GHC.Generics (Generic)
-
-import ExoMonad.StructuredOutput (StructuredOutput)
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- COMPILE ERROR
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Structured compile error for LLM consumption.
-data RawCompileError = RawCompileError
-  { rceFile :: FilePath
-    -- ^ Source file with the error
-  , rceLine :: Int
-    -- ^ Line number
-  , rceMessage :: Text
-    -- ^ Error message
-  }
-  deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
-
-instance StructuredOutput RawCompileError
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- TEST FAILURE
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Structured test failure for LLM consumption.
---
--- Parsed from QuickCheck/HSpec output to provide actionable feedback.
---
--- @
--- TestFailure
---   { tfPropertyName = "prop_lifo_order"
---   , tfMessage = "Falsified (after 5 tests)"
---   , tfCounterexample = Just "[1,2,3]"
---   , tfSeed = Just 12345
---   , tfLocation = Just "test/Main.hs:42"
---   }
--- @
-data TestFailure = TestFailure
-  { tfPropertyName :: Text
-    -- ^ Property or test name that failed (e.g., "prop_pushPop")
-  , tfMessage :: Text
-    -- ^ Failure message from the test framework
-  , tfCounterexample :: Maybe Text
-    -- ^ QuickCheck counterexample if available
-  , tfSeed :: Maybe Int
-    -- ^ QuickCheck seed for reproduction
-  , tfLocation :: Maybe Text
-    -- ^ Source location (file:line) if available
-  }
-  deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
-
-instance StructuredOutput TestFailure
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- RESULT TYPE
@@ -116,8 +51,8 @@ instance StructuredOutput TestFailure
 -- @
 -- case result of
 --   CabalSuccess -> proceed
---   CabalBuildFailure code stderr stdout errors -> handleBuildError errors
---   CabalTestFailure failures raw -> handleTestFailures failures
+--   CabalBuildFailure code stderr stdout -> handleBuildError stderr
+--   CabalTestFailure raw -> handleTestFailures raw
 --   CabalTestSuccess output -> handleSuccess output
 -- @
 data CabalResult
@@ -130,14 +65,10 @@ data CabalResult
         -- ^ Stderr output (usually contains errors)
       , cbfStdout :: Text
         -- ^ Stdout output
-      , cbfParsedErrors :: [RawCompileError]
-        -- ^ Structured compile errors parsed from output
       }
     -- ^ Build failed with compiler errors
   | CabalTestFailure
-      { ctfParsedFailures :: [TestFailure]
-        -- ^ Structured test failures parsed from output
-      , ctfRawOutput :: Text
+      { ctfRawOutput :: Text
         -- ^ Raw test output for debugging
       }
     -- ^ Tests ran but some failed
@@ -170,7 +101,7 @@ data Cabal r where
   -- | Run tests.
   --
   -- Equivalent to @cabal test --test-show-details=always@.
-  -- Returns 'CabalTestSuccess' or 'CabalTestFailure' with parsed failures.
+  -- Returns 'CabalTestSuccess' or 'CabalTestFailure' with raw output.
   -- Returns 'CabalBuildFailure' if build fails.
   CabalTest
     :: FilePath          -- ^ Project directory
@@ -195,7 +126,7 @@ data Cabal r where
 -- result <- cabalBuild "/path/to/project"
 -- case result of
 --   CabalSuccess -> proceed
---   CabalBuildFailure _ stderr _ _ -> handleError stderr
+--   CabalBuildFailure _ stderr _ -> handleError stderr
 -- @
 cabalBuild
   :: Member Cabal effs
@@ -209,8 +140,8 @@ cabalBuild = send . CabalBuild
 -- result <- cabalTest "/path/to/project"
 -- case result of
 --   CabalTestSuccess output -> logSuccess output
---   CabalTestFailure failures _ -> fixImplementation failures
---   CabalBuildFailure _ stderr _ _ -> fixCompilation stderr
+--   CabalTestFailure raw -> fixImplementation raw
+--   CabalBuildFailure _ stderr _ -> fixCompilation stderr
 -- @
 cabalTest
   :: Member Cabal effs

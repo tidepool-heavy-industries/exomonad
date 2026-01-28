@@ -1,48 +1,10 @@
 # Build Errors Detected
 
-Your code has {{ error_count }} error(s) that need to be fixed.
+## Raw Output
 
-## Error Summary
-
-{% for error in errors %}
-### {{ loop.index }}. {{ error.file }}:{{ error.line }}
-
-**Type:** {{ error.error_type.tag }}
-**Message:** {{ error.message }}
-
-{% if error.error_type.tag == "TypeError" %}
-{% set info = error.error_type.contents %}
-{% if info.tag == "TypeMismatch" %}
-**Expected:** `{{ info.teExpected }}`
-**Actual:** `{{ info.teActual }}`
-
-**Suggestion:** Check that the value you're passing matches the expected type. Common causes:
-- Wrong function argument order
-- Missing type conversion
-- Incorrect record field access
-{% endif %}
-{% endif %}
-
-{% if error.error_type.tag == "ScopeError" %}
-{% set info = error.error_type.contents %}
-{% if info.tag == "VariableNotInScope" %}
-**Missing:** `{{ info.contents }}`
-
-**Suggestion:**
-- Check spelling of the variable/function name
-- Ensure it's imported (add to import list)
-- Check if it's defined in scope (let binding, where clause)
-{% endif %}
-{% endif %}
-
-{% if error.error_type.tag == "ParseError" %}
-**Suggestion:**
-- Check for missing brackets, parentheses, or commas
-- Verify indentation (Haskell is whitespace-sensitive)
-- Look for incomplete expressions
-{% endif %}
-
-{% endfor %}
+```
+{{ raw_output | truncate(2000) }}
+```
 
 ## Build Retry Count
 
@@ -57,7 +19,7 @@ This is attempt **{{ stage_retries + 1 }}** of 5 for the build stage.
 
 ## Next Steps
 
-1. Review each error above
+1. Review the raw output above
 2. Fix the errors in your code
 3. The stop hook will automatically re-check when you stop
 

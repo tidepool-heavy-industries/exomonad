@@ -120,6 +120,8 @@ data HookOutput = HookOutput
   , suppressOutput :: Maybe Bool
   , systemMessage :: Maybe Text
   , hookSpecificOutput :: Maybe HookSpecificOutput
+  , decision :: Maybe Text
+  , reason :: Maybe Text
   }
   deriving stock (Show, Eq, Generic)
 
@@ -130,6 +132,8 @@ instance ToJSON HookOutput where
     , "suppressOutput" .= o.suppressOutput
     , "systemMessage" .= o.systemMessage
     , "hookSpecificOutput" .= o.hookSpecificOutput
+    , "decision" .= o.decision
+    , "reason" .= o.reason
     ]
     where
       notNull (_, Null) = False
@@ -142,6 +146,8 @@ instance FromJSON HookOutput where
     <*> o .:? "suppressOutput"
     <*> o .:? "systemMessage"
     <*> o .:? "hookSpecificOutput"
+    <*> o .:? "decision"
+    <*> o .:? "reason"
 
 -- | Hook-specific output fields. Tagged by hookEventName.
 data HookSpecificOutput
@@ -521,6 +527,8 @@ defaultOutput = HookOutput
   , suppressOutput = Nothing
   , systemMessage = Nothing
   , hookSpecificOutput = Nothing
+  , decision = Nothing
+  , reason = Nothing
   }
 
 -- | Allow a PreToolUse hook with optional reason and modified input.
