@@ -35,6 +35,7 @@ module ExoMonad.Effects.GitHub
   , getPullRequest
   , listPullRequests
   , getPullRequestReviews
+  , getDiscussion
   , checkAuth
 
     -- * Types - Errors
@@ -67,6 +68,10 @@ module ExoMonad.Effects.GitHub
   , PRCreateSpec(..)
   , PRUrl(..)
   , ReviewComment(..)
+
+    -- * Types - Discussions
+  , Discussion(..)
+  , DiscussionComment(..)
 
     -- * Types - Legacy (kept for compatibility)
   , IssueUrl(..)
@@ -228,7 +233,7 @@ instance FromJSON Issue where
     Issue
       <$> v .: "number"
       <*> v .: "title"
-      <*> v .: "body"
+      <*> v .:? "body" .!= ""
       <*> v .: "author"
       <*> pure labelNames
       <*> v .: "state"
@@ -419,7 +424,7 @@ instance FromJSON PullRequest where
     PullRequest
       <$> v .: "number"
       <*> v .: "title"
-      <*> v .: "body"
+      <*> v .:? "body" .!= ""
       <*> v .: "author"
       <*> pure labelNames
       <*> v .: "state"
@@ -462,6 +467,51 @@ data PRCreateSpec = PRCreateSpec
 newtype PRUrl = PRUrl { unPRUrl :: Text }
   deriving (Show, Eq, Generic)
   deriving newtype (FromJSON, ToJSON)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- DISCUSSION TYPES
+-- ════════════════════════════════════════════════════════════════════════════
+
+data DiscussionComment = DiscussionComment
+  { dcAuthor    :: Author
+  , dcBody      :: Text
+  , dcCreatedAt :: UTCTime
+  , dcReplies   :: [DiscussionComment]
+  }
+  deriving (Show, Eq, Generic, ToJSON)
+
+instance FromJSON DiscussionComment where
+  parseJSON = withObject "DiscussionComment" $ \v ->
+    DiscussionComment
+      <$> v .: "author"
+      <*> v .: "body"
+      <*> v .: "createdAt"
+      <*> (v .:? "replies" >>= \case
+            Nothing -> pure []
+            Just rs -> pure rs)
+
+data Discussion = Discussion
+  { discNumber   :: Int
+  , discTitle    :: Text
+  , discBody     :: Text
+  , discAuthor   :: Author
+  , discUrl      :: Text
+  , discComments :: [DiscussionComment]
+  }
+  deriving (Show, Eq, Generic, ToJSON)
+
+instance FromJSON Discussion where
+  parseJSON = withObject "Discussion" $ \v ->
+    Discussion
+      <$> v .: "number"
+      <*> v .: "title"
+      <*> v .: "body"
+      <*> v .: "author"
+      <*> v .: "url"
+      <*> (v .:? "comments" >>= \case
+            Nothing -> pure []
+            Just cs -> pure cs)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -517,6 +567,10 @@ data GitHub r where
   GetPullRequestReviews :: Repo -> Int -> GitHub (Either GitHubError [ReviewComment])
     -- ^ Get review comments for a PR.
 
+  -- Discussion operations
+  GetDiscussion :: Repo -> Int -> GitHub (Either GitHubError Discussion)
+    -- ^ Get discussion by number.
+
   -- Auth
   CheckAuth :: GitHub Bool
     -- ^ Check if gh CLI is authenticated.
@@ -565,6 +619,9 @@ listPullRequests repo filt = send (ListPullRequests repo filt)
 
 getPullRequestReviews :: Member GitHub effs => Repo -> Int -> Eff effs (Either GitHubError [ReviewComment])
 getPullRequestReviews repo number = send (GetPullRequestReviews repo number)
+
+getDiscussion :: Member GitHub effs => Repo -> Int -> Eff effs (Either GitHubError Discussion)
+getDiscussion repo number = send (GetDiscussion repo number)
 
 checkAuth :: Member GitHub effs => Eff effs Bool
 checkAuth = send CheckAuth
@@ -635,6 +692,10 @@ runGitHubStub = interpret $ \case
   GetPullRequestReviews (Repo repo) num -> do
     logInfo $ "[GitHub:stub] GetPullRequestReviews called: " <> repo <> " #" <> showT num
     pure $ Left $ GHUnexpected 1 "Stub: getPullRequestReviews not implemented"
+
+  GetDiscussion (Repo repo) num -> do
+    logInfo $ "[GitHub:stub] GetDiscussion called: " <> repo <> " #" <> showT num
+    pure $ Left $ GHUnexpected 1 "Stub: getDiscussion not implemented"
 
   CheckAuth -> do
     logInfo "[GitHub:stub] CheckAuth called"

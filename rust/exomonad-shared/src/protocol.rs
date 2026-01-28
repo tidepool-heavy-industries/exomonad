@@ -312,6 +312,45 @@ pub enum ServiceRequest {
         body: String,
         labels: Vec<String>,
     },
+    GitHubUpdateIssue {
+        owner: String,
+        repo: String,
+        number: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        state: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        labels: Option<Vec<String>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        assignees: Option<Vec<String>>,
+    },
+    GitHubAddIssueLabel {
+        owner: String,
+        repo: String,
+        number: u32,
+        label: String,
+    },
+    GitHubRemoveIssueLabel {
+        owner: String,
+        repo: String,
+        number: u32,
+        label: String,
+    },
+    GitHubAddIssueAssignee {
+        owner: String,
+        repo: String,
+        number: u32,
+        assignee: String,
+    },
+    GitHubRemoveIssueAssignee {
+        owner: String,
+        repo: String,
+        number: u32,
+        assignee: String,
+    },
     GitHubListIssues {
         owner: String,
         repo: String,
@@ -332,6 +371,25 @@ pub enum ServiceRequest {
         repo: String,
         number: u32,
     },
+    GitHubListPullRequests {
+        owner: String,
+        repo: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        state: Option<String>, // open, closed, merged, all
+        #[serde(skip_serializing_if = "Option::is_none")]
+        limit: Option<u32>,
+    },
+    GitHubGetPullRequestReviews {
+        owner: String,
+        repo: String,
+        number: u32,
+    },
+    GitHubGetDiscussion {
+        owner: String,
+        repo: String,
+        number: u32,
+    },
+    GitHubCheckAuth,
 
     // Observability
     OtelSpan {
@@ -383,6 +441,28 @@ pub enum ServiceResponse {
         number: u32,
         url: String,
         state: String,
+    },
+    #[serde(rename = "GitHubPullRequestsResponse")]
+    GitHubPullRequests {
+        pull_requests: Vec<GitHubPRRef>,
+    },
+    #[serde(rename = "GitHubReviewsResponse")]
+    GitHubReviews {
+        reviews: Vec<GitHubReviewComment>,
+    },
+    #[serde(rename = "GitHubDiscussionResponse")]
+    GitHubDiscussion {
+        number: u32,
+        title: String,
+        body: String,
+        author: String,
+        url: String,
+        comments: Vec<GitHubDiscussionComment>,
+    },
+    #[serde(rename = "GitHubAuthResponse")]
+    GitHubAuth {
+        authenticated: bool,
+        user: Option<String>,
     },
 
     // Observability
@@ -449,6 +529,32 @@ pub struct GitHubIssueRef {
     pub number: u32,
     pub title: String,
     pub state: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GitHubPRRef {
+    pub number: u32,
+    pub title: String,
+    pub state: String,
+    pub url: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GitHubReviewComment {
+    pub author: String,
+    pub body: String,
+    pub path: String,
+    pub line: Option<u32>,
+    pub state: String,
+    pub created_at: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GitHubDiscussionComment {
+    pub author: String,
+    pub body: String,
+    pub created_at: String,
+    pub replies: Vec<GitHubDiscussionComment>,
 }
 
 // ============================================================================
