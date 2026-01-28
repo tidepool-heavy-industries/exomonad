@@ -1,0 +1,12 @@
+{
+  "type": "HookResponse",
+  "output": {
+    "continue": true,
+    "hookSpecificOutput": {
+      "hookEventName": "PreToolUse",
+      "permissionDecision": "allow",
+      "permissionDecisionReason": "Allowed by ExoMonad"
+    }
+  },
+  "exit_code": 0
+}

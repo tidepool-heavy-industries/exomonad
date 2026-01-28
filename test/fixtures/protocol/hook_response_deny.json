@@ -1,0 +1,12 @@
+{
+  "type": "HookResponse",
+  "output": {
+    "continue": true,
+    "hookSpecificOutput": {
+      "hookEventName": "PreToolUse",
+      "permissionDecision": "deny",
+      "permissionDecisionReason": "Blocked for safety"
+    }
+  },
+  "exit_code": 0
+}

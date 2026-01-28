@@ -436,6 +436,25 @@ test-suite role-config-test
     default-extensions:
         OverloadedStrings
 
+test-suite protocol-golden-test
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          ProtocolGoldenSpec.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        exomonad-control-server,
+        text >= 2.0 && < 3,
+        aeson,
+        bytestring,
+        filepath,
+        tasty,
+        tasty-hunit
+    hs-source-dirs:   test
+    default-language: GHC2024
+    default-extensions:
+        OverloadedStrings
+        TypeApplications
+
 test-suite session-start-test
     import:           warnings
     type:             exitcode-stdio-1.0

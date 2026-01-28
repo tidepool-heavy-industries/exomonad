@@ -1,0 +1,10 @@
+{
+  "type": "MCPToolResponse",
+  "id": "1",
+  "result": null,
+  "error": {
+    "code": -32001,
+    "message": "File not found",
+    "suggestion": "Check the path"
+  }
+}
