@@ -19,7 +19,7 @@
 module ExoMonad.Effects.JustExec
   ( -- * Effect
     JustExec(..)
-  , runRecipe
+  , execRecipe
 
     -- * Types
   , ExecResult(..)
@@ -62,15 +62,15 @@ instance ToJSON ExecResult where
 
 -- | JustExec effect for running recipes via docker-ctl.
 data JustExec r where
-  RunRecipe :: Text -> [Text] -> JustExec ExecResult
+  ExecRecipe :: Text -> [Text] -> JustExec ExecResult
 
 -- | Run a recipe with arguments.
-runRecipe :: Member JustExec effs => Text -> [Text] -> Eff effs ExecResult
-runRecipe recipe args = send (RunRecipe recipe args)
+execRecipe :: Member JustExec effs => Text -> [Text] -> Eff effs ExecResult
+execRecipe recipe args = send (ExecRecipe recipe args)
 
 -- | Stub runner that logs calls and returns success with empty output.
 runJustExecStub :: Member Log effs => Eff (JustExec ': effs) a -> Eff effs a
 runJustExecStub = interpret $ \case
-  RunRecipe recipe args -> do
-    logInfo $ "[JustExec:stub] RunRecipe called: " <> recipe <> " " <> T.intercalate " " args
+  ExecRecipe recipe args -> do
+    logInfo $ "[JustExec:stub] ExecRecipe called: " <> recipe <> " " <> T.intercalate " " args
     pure $ ExecResult "" "" 0
