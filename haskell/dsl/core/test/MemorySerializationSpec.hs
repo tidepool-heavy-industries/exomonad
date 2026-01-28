@@ -18,6 +18,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Control.Monad.Freer (run)
+import Data.Generics.Labels ()
 
 import ExoMonad.Graph.Memory
 
@@ -138,7 +139,7 @@ spec = do
     it "persists updates to store" $ do
       let defaultMem = ExploreMem { urlsVisited = [], searchCount = 0 }
           action = do
-            updateMem @ExploreMem $ \m -> m { searchCount = m.searchCount + 1 }
+            modifyMem @ExploreMem #searchCount (+ 1)
             getMem @ExploreMem
           (result, finalStore) = run $ runMemoryScoped "test" defaultMem emptyMemoryStore action
       result.searchCount `shouldBe` 1

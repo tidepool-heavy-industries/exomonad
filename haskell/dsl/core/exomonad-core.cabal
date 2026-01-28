@@ -203,6 +203,8 @@ test-suite graph-validation-tests
         vector >= 0.13 && < 1,
         freer-simple >= 1.2 && < 2,
         time,
+        lens,
+        generic-lens,
         exomonad-core
     hs-source-dirs:   test, test/golden/valid
     default-language: GHC2024
@@ -212,5 +214,6 @@ test-suite graph-validation-tests
         DerivingStrategies
         OverloadedStrings
         OverloadedRecordDot
+        OverloadedLabels
         NoFieldSelectors
         TypeApplications
