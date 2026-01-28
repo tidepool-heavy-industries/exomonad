@@ -1,4 +1,4 @@
-use bollard::container::InspectContainerOptions;
+use bollard::query_parameters::InspectContainerOptions;
 use bollard::Docker;
 use serde::Serialize;
 

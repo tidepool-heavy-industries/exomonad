@@ -1,5 +1,5 @@
-use bollard::container::{Config, CreateContainerOptions, StartContainerOptions, RemoveContainerOptions, InspectContainerOptions};
-use bollard::models::HostConfig;
+use bollard::models::{ContainerCreateBody, HostConfig};
+use bollard::query_parameters::{CreateContainerOptions, InspectContainerOptions, RemoveContainerOptions, StartContainerOptions};
 use bollard::Docker;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -89,7 +89,7 @@ pub async fn run(
     // - tty + open_stdin: allocate TTY and keep stdin open
     // - attach_* = false: don't expect immediate client attachment
     // This lets the container run in background, attachable later via `docker attach`
-    let config = Config {
+    let config = ContainerCreateBody {
         image: Some(agent_image),
         labels: Some(labels),
         working_dir: Some(working_dir),
@@ -123,12 +123,12 @@ pub async fn run(
     };
 
     let create_options = CreateContainerOptions {
-        name: container_name.clone(),
+        name: Some(container_name.clone()),
         ..Default::default()
     };
 
     let container = docker.create_container(Some(create_options), config).await?;
-    docker.start_container(&container.id, None::<StartContainerOptions<String>>).await?;
+    docker.start_container(&container.id, None::<StartContainerOptions>).await?;
 
     Ok(serde_json::to_string(&SpawnResponse {
         container_id: container.id,

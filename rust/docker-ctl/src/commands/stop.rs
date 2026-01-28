@@ -1,4 +1,4 @@
-use bollard::container::{StopContainerOptions, RemoveContainerOptions};
+use bollard::query_parameters::{StopContainerOptions, RemoveContainerOptions};
 use bollard::Docker;
 use serde::Serialize;
 
@@ -11,7 +11,8 @@ pub async fn run(container: String, timeout: u64) -> anyhow::Result<String> {
     let docker = Docker::connect_with_local_defaults()?;
     
     let stop_options = StopContainerOptions {
-        t: timeout as i64,
+        t: Some(timeout as i32),
+        ..Default::default()
     };
     
     match docker.stop_container(&container, Some(stop_options)).await {
