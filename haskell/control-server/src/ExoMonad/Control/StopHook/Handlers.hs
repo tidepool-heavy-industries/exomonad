@@ -19,6 +19,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
+import Text.Regex.TDFA ((=~))
 
 import ExoMonad.Graph.Generic (AsHandler, (:-))
 import ExoMonad.Graph.Goto (GotoChoice, To, gotoChoice, gotoExit)
@@ -26,7 +27,7 @@ import ExoMonad.Graph.Types (Exit)
 import ExoMonad.Control.StopHook.Types
 import ExoMonad.Control.StopHook.Graph
 import ExoMonad.Control.StopHook.ErrorParser (parseGHCOutput)
-import ExoMonad.Effects.Cabal (Cabal, CabalResult(..), cabalBuild, RawCompileError(..))
+import ExoMonad.Effects.Cabal (Cabal, CabalResult(..), cabalBuild, cabalTest, RawCompileError(..), TestFailure(..))
 import ExoMonad.Effects.Effector (Effector, runEffector, GhPrStatusResult(..), effectorGitStatus, effectorGitLsFiles, GitStatusResult(..))
 import Data.Aeson (eitherDecodeStrict, FromJSON, fromJSON, Result(..))
 import qualified Data.ByteString.Char8 as BS8
@@ -160,42 +161,45 @@ handleBuildMaxReached state = do
 
 -- | Check test status
 handleCheckTest
-  :: (Member Effector es, Member (State WorkflowState) es)
+  :: (Member Cabal es, Member (State WorkflowState) es)
   => AgentState
   -> Eff es (GotoChoice '[To "routeTest" (AgentState, TestResult)])
 handleCheckTest state = do
-  raw <- runEffector "cabal" ["test"]
-  let mResult = eitherDecodeStrict (BS8.pack $ T.unpack raw)
-  let testRes = case mResult of
-        Right (JsonTestResult p f fails) -> 
-          TestResult p f (map translateTestFailure fails)
-        Left _ -> TestResult 0 0 []
+  cabalRes <- cabalTest (asCwd state)
+  let testRes = translateTestResult cabalRes
   modify $ \s -> s
     { wsLastTestResult = Just testRes
     , wsCurrentStage = StageTest
     }
   pure $ gotoChoice @"routeTest" (state, testRes)
 
--- Types for JSON parsing from effector
-data JsonTestResult = JsonTestResult
-  { passed :: Int
-  , failed :: Int
-  , failures :: [JsonTestFailure]
-  } deriving (Generic, FromJSON)
+translateTestResult :: CabalResult -> TestResult
+translateTestResult (CabalTestSuccess output) = 
+  let (passed, failed) = parseTestSummary output
+  in TestResult passed failed []
+translateTestResult (CabalTestFailure failures raw) =
+  let (passed, failed) = parseTestSummary raw
+      -- Fallback if regex parsing failed but we have failure records
+      finalFailed = if failed == 0 && not (null failures) then length failures else failed
+  in TestResult passed finalFailed (map translateTestFailure failures)
+translateTestResult (CabalBuildFailure _ _ _ _) = TestResult 0 1 [] -- Build failure treated as 1 failure? Or handled upstream. But checkTest shouldn't get here if checkBuild passed.
+translateTestResult CabalSuccess = TestResult 0 0 []
 
-data JsonTestFailure = JsonTestFailure
-  { suite :: Text
-  , test_name :: Text
-  , message :: Text
-  , location :: Maybe Text
-  } deriving (Generic, FromJSON)
+parseTestSummary :: Text -> (Int, Int)
+parseTestSummary output =
+  -- Look for "X tests passed, Y tests failed"
+  let pattern = "([0-9]+) tests? passed, ([0-9]+) tests? failed" :: Text
+      matches = (output =~ pattern) :: (Text, Text, Text, [Text])
+  in case matches of
+    (_, _, _, [passedStr, failedStr]) -> (read (T.unpack passedStr), read (T.unpack failedStr))
+    _ -> (0, 0)
 
-translateTestFailure :: JsonTestFailure -> TestFailureInfo
-translateTestFailure ctf = TestFailureInfo 
-  { tfiSuite = ctf.suite
-  , tfiTestName = ctf.test_name
-  , tfiMessage = ctf.message
-  , tfiLocation = ctf.location
+translateTestFailure :: TestFailure -> TestFailureInfo
+translateTestFailure tf = TestFailureInfo 
+  { tfiSuite = "unknown" -- Cabal effect doesn't extract suite name yet
+  , tfiTestName = tf.tfPropertyName
+  , tfiMessage = tf.tfMessage
+  , tfiLocation = tf.tfLocation
   }
 
 -- | Route based on test result

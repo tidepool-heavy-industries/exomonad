@@ -1,0 +1,37 @@
+# Test Failures Detected
+
+{{ test_failed_count }} test(s) failed out of {{ test_passed_count + test_failed_count }}.
+
+## Failure Summary
+
+{% for failure in test_failures %}
+### {{ loop.index }}. {{ failure.test_name }}
+
+**Suite:** {{ failure.suite }}
+{% if failure.location %}
+**Location:** {{ failure.location }}
+{% endif %}
+
+**Message:**
+```
+{{ failure.message }}
+```
+
+{% endfor %}
+
+## Test Retry Count
+
+This is attempt **{{ stage_retries + 1 }}** of 3 for the test stage.
+
+{% if stage_retries >= 2 %}
+**Warning:** Tests are still failing. Consider:
+- Verifying the test logic itself (is the test correct?)
+- Checking for edge cases in your implementation
+- Using `search_file_content` to find similar passing tests
+{% endif %}
+
+## Next Steps
+
+1. Analyze the failure messages
+2. Fix the implementation or the test
+3. The stop hook will automatically re-run tests when you stop
