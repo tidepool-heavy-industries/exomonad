@@ -35,9 +35,9 @@ runMockAll initial eff = run $
     GetCurrentTime -> pure initial.msNow
   ) $
   interpret (\case
-    ListPullRequests _ _ -> pure initial.msPrs
-    ListIssues _ _ -> pure initial.msIssues
-    GetIssue _ _ _ -> pure Nothing
+    ListPullRequests _ _ -> pure $ Right initial.msPrs
+    ListIssues _ _ -> pure $ Right initial.msIssues
+    GetIssue _ _ _ -> pure $ Right Nothing
     _ -> error "Not implemented in mock"
   ) eff
 
@@ -64,20 +64,20 @@ test_pmStatus = do
       mockState = MockState now [issue1, issue2, issue3, issue4] [pr1]
       
       args = PmStatusArgs 7 True Nothing Nothing
-      res = unwrapSingleChoice $ runMockAll mockState (pmStatusLogic args)
+      res = runMockAll mockState (pmStatusLogic args)
       
   -- Velocity: 2 issues closed total (logic currently just counts closed issues)
   -- 2 / 7 = 0.2857...
-  assertEqual "Velocity" (2/7 :: Double) res.psrVelocity
+  assertEqual "Velocity" (2/7 :: Double) res.velocity
   
   -- Current State
-  let CurrentStateMetrics inFlight ready blocked _ _ = res.psrCurrentState
+  let CurrentStateMetrics inFlight ready blocked _ _ = res.currentState
   assertEqual "In Flight" (1 :: Int) inFlight
   assertEqual "Ready" (1 :: Int) ready
   assertEqual "Blocked" (0 :: Int) blocked
   
   -- PR Lag (pr1): day1 - day2 = 1 day = 24 hours
-  let PrLagMetrics prMedian _ = res.psrPrLag
+  let PrLagMetrics prMedian _ = res.prLag
   assertEqual "PR Lag Median" (24 :: Double) prMedian
 
 defaultIssue :: Int -> Issue

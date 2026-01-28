@@ -38,6 +38,9 @@ library
     DeriveGeneric
     DerivingStrategies
     OverloadedStrings
+    OverloadedRecordDot
+    NoFieldSelectors
+    DuplicateRecordFields
 
 executable training-generator
   import:           warnings

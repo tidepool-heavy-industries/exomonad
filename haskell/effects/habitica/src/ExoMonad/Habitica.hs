@@ -1,3 +1,5 @@
+{-# LANGUAGE DuplicateRecordFields #-}
+
 -- | Type-safe Habitica API types and operations.
 --
 -- This module re-exports all public types for working with the Habitica API.

@@ -51,22 +51,22 @@ import qualified ExoMonad.Graph.Types as Types (Exit)
 -- 2. Computes: finalValue = startValue + (increment * times)
 -- 3. Returns CounterOutput with the result
 data CounterGraph mode = CounterGraph
-  { cgEntry   :: mode :- G.EntryNode CounterInput
-  , cgCompute :: mode :- G.LogicNode :@ Input CounterInput
+  { entry   :: mode :- G.EntryNode CounterInput
+  , compute :: mode :- G.LogicNode :@ Input CounterInput
                     :@ UsesEffects '[Goto Types.Exit CounterOutput]
-  , cgExit    :: mode :- G.ExitNode CounterOutput
+  , exit    :: mode :- G.ExitNode CounterOutput
   }
   deriving Generic
 
 -- | Handlers for the counter graph (pure logic, no effects).
 counterHandlers :: CounterGraph (AsHandler '[])
 counterHandlers = CounterGraph
-  { cgEntry   = ()
-  , cgCompute = \input -> pure $ gotoExit CounterOutput
+  { entry   = ()
+  , compute = \input -> pure $ gotoExit CounterOutput
       { finalValue = input.startValue + (input.increment * input.times)
       , operationsPerformed = input.times
       }
-  , cgExit    = ()
+  , exit    = ()
   }
 
 -- | Execute the counter graph.

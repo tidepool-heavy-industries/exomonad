@@ -36,12 +36,12 @@ data PRDepContext = PRDepContext
 
 instance ToGVal (Run SourcePos (Writer Text) Text) PRBodyContext where
   toGVal ctx = dict
-    [ "issue_number" ~> issue_number ctx
-    , "description" ~> description ctx
-    , "testing" ~> testing ctx
-    , "compromises" ~> compromises ctx
-    , "dependencies" ~> dependencies ctx
-    , "dependents" ~> dependents ctx
+    [ "issue_number" ~> ctx.issue_number
+    , "description" ~> ctx.description
+    , "testing" ~> ctx.testing
+    , "compromises" ~> ctx.compromises
+    , "dependencies" ~> ctx.dependencies
+    , "dependents" ~> ctx.dependents
     ]
 
 instance ToGVal (Run SourcePos (Writer Text) Text) PRDepContext where

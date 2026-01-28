@@ -100,7 +100,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text, pack)
 import Control.Monad.Freer.Internal (handleRelayS)
-import Optics (A_Setter, Is, Optic', over)
+import Control.Lens (ASetter, over)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- THE MEMORY EFFECT
@@ -167,13 +167,13 @@ putMem s = updateMem @s (const s)
 -- This is the preferred way to update nested fields:
 --
 -- @
--- -- Using OverloadedLabels + generic-optics
+-- -- Using OverloadedLabels + generic-lens
 -- modifyMem \@ExploreMem #urlsVisited (newUrl :)
 --
--- -- Or with explicit optics
+-- -- Or with explicit lens
 -- modifyMem \@Config (field \@"timeout") (* 2)
 -- @
-modifyMem :: forall s a effs k is. (Member (Memory s) effs, Is k A_Setter) => Optic' k is s a -> (a -> a) -> Eff effs ()
+modifyMem :: forall s a effs. (Member (Memory s) effs) => ASetter s s a a -> (a -> a) -> Eff effs ()
 modifyMem l f = updateMem @s (over l f)
 
 -- | Monadic version for updates that need effects.
@@ -279,7 +279,7 @@ runMemoryPure = evalMemory
 -- types across different nodes. Type checking happens at access time
 -- via 'FromJSON' constraints on 'getScope'.
 newtype MemoryStore = MemoryStore
-  { msScopes :: Map Text Value
+  { scopes :: Map Text Value
   }
   deriving stock (Show, Eq)
 
@@ -296,9 +296,9 @@ emptyMemoryStore = MemoryStore Map.empty
 -- correct version. Use 'mkMemorySnapshot' to create new snapshots and
 -- 'MemorySnapshotScopes' pattern to read the scopes.
 data MemorySnapshot = MemorySnapshot
-  { snapVersion :: Int
+  { version :: Int
     -- ^ Schema version for forward compatibility
-  , snapScopes  :: Map Text Value
+  , scopes  :: Map Text Value
     -- ^ Node name -> JSON value mapping
   }
   deriving stock (Show, Eq)
@@ -313,8 +313,8 @@ data MemorySnapshot = MemorySnapshot
 -- @
 mkMemorySnapshot :: Map Text Value -> MemorySnapshot
 mkMemorySnapshot scopes = MemorySnapshot
-  { snapVersion = currentSnapshotVersion
-  , snapScopes = scopes
+  { version = currentSnapshotVersion
+  , scopes = scopes
   }
 
 -- | Pattern for read-only access to snapshot scopes.
@@ -326,12 +326,12 @@ mkMemorySnapshot scopes = MemorySnapshot
 --   MemorySnapshotScopes scopes -> Map.lookup "myNode" scopes
 -- @
 pattern MemorySnapshotScopes :: Map Text Value -> MemorySnapshot
-pattern MemorySnapshotScopes scopes <- MemorySnapshot { snapScopes = scopes }
+pattern MemorySnapshotScopes scopes <- MemorySnapshot { scopes = scopes }
 
 instance ToJSON MemorySnapshot where
   toJSON snap = object
-    [ "version" .= snap.snapVersion
-    , "scopes" .= snap.snapScopes
+    [ "version" .= snap.version
+    , "scopes" .= snap.scopes
     ]
 
 instance FromJSON MemorySnapshot where
@@ -354,8 +354,8 @@ currentSnapshotVersion = 1
 -- @
 serializeMemoryStore :: MemoryStore -> Value
 serializeMemoryStore (MemoryStore scopes) = toJSON MemorySnapshot
-  { snapVersion = currentSnapshotVersion
-  , snapScopes = scopes
+  { version = currentSnapshotVersion
+  , scopes = scopes
   }
 
 -- | Restore a 'MemoryStore' from a 'Value'.
@@ -373,17 +373,17 @@ restoreMemoryStore :: Value -> Either Text MemoryStore
 restoreMemoryStore val = case Aeson.fromJSON @MemorySnapshot val of
   Aeson.Error err -> Left $ "Failed to parse MemorySnapshot: " <> pack err
   Aeson.Success snap
-    | snap.snapVersion /= currentSnapshotVersion ->
+    | snap.version /= currentSnapshotVersion ->
         let versionHint
-              | snap.snapVersion > currentSnapshotVersion =
+              | snap.version > currentSnapshotVersion =
                   " (snapshot is newer; upgrade the reader)"
               | otherwise =
                   " (snapshot is older; may need migration)"
-        in Left $ "Unsupported snapshot version: " <> pack (show snap.snapVersion)
+        in Left $ "Unsupported snapshot version: " <> pack (show snap.version)
           <> " (expected " <> pack (show currentSnapshotVersion) <> ")"
           <> versionHint
     | otherwise ->
-        Right (MemoryStore snap.snapScopes)
+        Right (MemoryStore snap.scopes)
 
 -- | Get a scope from the store, deserializing to the expected type.
 --

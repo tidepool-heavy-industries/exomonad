@@ -38,10 +38,10 @@ updateWorkflowState store sessionId newState = do
 -- | Default initial state for a new workflow.
 defaultWorkflowState :: WorkflowState
 defaultWorkflowState = WorkflowState
-  { wsGlobalStops = 0
-  , wsStageRetries = Map.empty
-  , wsCurrentStage = StageBuild
-  , wsLastBuildResult = Nothing
-  , wsLastPRStatus = Nothing
-  , wsLastTestResult = Nothing
+  { globalStops = 0
+  , stageRetries = Map.empty
+  , currentStage = StageBuild
+  , lastBuildResult = Nothing
+  , lastPRStatus = Nothing
+  , lastTestResult = Nothing
   }

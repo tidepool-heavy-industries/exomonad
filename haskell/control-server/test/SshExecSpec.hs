@@ -15,7 +15,7 @@ import ExoMonad.Control.Effects.SshExec (SshExec(..), ExecRequest(..), ExecResul
 import ExoMonad.Control.Effects.Cabal (runCabalRemote)
 import ExoMonad.Control.Effects.Git (runGitRemote)
 import ExoMonad.Control.Effects.Justfile (runJustfileRemote)
-import ExoMonad.Effects.Cabal (CabalResult(..), RawCompileError(..), cabalBuild)
+import ExoMonad.Effects.Cabal (CabalResult(..), cabalBuild)
 import ExoMonad.Effects.Git (WorktreeInfo(..), getWorktreeInfo)
 import ExoMonad.Effects.Justfile (JustResult(..), runRecipe)
 
@@ -29,36 +29,34 @@ spec = testGroup "Remote Execution Effects"
       testCase "Build Success" $ do
         let mockResult = ExecResult (Just 0) "Build OK" ""
         let action = cabalBuild "path/to/project"
-        result <- runM $ runMockSshExec mockResult $ runCabalRemote "test-agent" action
+        result <- runM $ runMockSshExec mockResult $ runCabalRemote (Just "test-agent") action
         case result of
           CabalSuccess -> pure ()
           _ -> assertFailure $ "Expected CabalSuccess, got " ++ show result
 
-    , testCase "Build Failure with Parsing" $ do
+    , testCase "Build Failure" $ do
         let stderr = "src/Main.hs:10:1: error: Variable not in scope: main"
         let mockResult = ExecResult (Just 1) "" stderr
         let action = cabalBuild "path/to/project"
-        result <- runM $ runMockSshExec mockResult $ runCabalRemote "test-agent" action
+        result <- runM $ runMockSshExec mockResult $ runCabalRemote (Just "test-agent") action
         case result of
-          CabalBuildFailure _ _ _ errors -> do
-            length errors @?= 1
-            let err = head errors
-            err.rceFile @?= "src/Main.hs"
-            err.rceLine @?= 10
+          CabalBuildFailure code err out -> do
+            code @?= 1
+            err @?= stderr
           _ -> assertFailure $ "Expected CabalBuildFailure, got " ++ show result
     ]
 
   , testGroup "Git Interpreter"
     [
       testCase "GetWorktreeInfo Success" $ do
-        let mockHandler req = case req.erArgs of
+        let mockHandler req = case req.args of
               ["rev-parse", "--show-toplevel"] -> ExecResult (Just 0) "/repo/root\n" ""
               ["branch", "--show-current"] -> ExecResult (Just 0) "feature-branch\n" ""
               ["rev-parse", "--git-dir"] -> ExecResult (Just 0) "/repo/root/.git\n" ""
               _ -> ExecResult (Just 1) "" "Unknown command"
         
         let action = getWorktreeInfo
-        result <- runM $ runMockSshExecSmart mockHandler $ runGitRemote "test-agent" "." action
+        result <- runM $ runMockSshExecSmart mockHandler $ runGitRemote (Just "test-agent") "." action
         case result of
           Just wt -> do
             wt.wiBranch @?= "feature-branch"

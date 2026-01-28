@@ -52,6 +52,7 @@ import ExoMonad.Effects.SocketClient
   , ServiceRequest(..)
   , ServiceResponse(..)
   , ServiceError(..)
+  , AnthropicChatReq(..)
   , sendRequest
   )
 
@@ -173,7 +174,7 @@ socketRequest provider env config userMsg maybeTools = case env.leConfig of
     let socketCfg = SocketConfig path 30000
     case provider of
       SAnthropic -> do
-        let req = AnthropicChat
+        let req = AnthropicChat $ AnthropicChatReq
               { model = config.acModel
               , messages = [toJSON $ AnthropicMessage "user" userMsg]
               , maxTokens = config.acMaxTokens

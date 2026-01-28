@@ -357,10 +357,10 @@ getAgentState input = do
       issueNum = branch >>= parseIssueNumber
   pure $ AgentState
     {
-      asSessionId = input.sessionId
-    , asCwd = T.unpack input.cwd
-    , asBranch = branch
-    , asIssueNum = issueNum
+      sessionId = input.sessionId
+    , cwd = T.unpack input.cwd
+    , branch = branch
+    , issueNum = issueNum
     }
 
 -- | Auto-focus on subagent tab when Stop hook fires.

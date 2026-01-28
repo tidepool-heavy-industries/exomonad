@@ -35,12 +35,30 @@ import ExoMonad.Effects.SocketClient
   , ServiceRequest(..)
   , ServiceResponse(..)
   , ServiceError(..)
+  , AnthropicChatReq(..)
+  , GitHubGetIssueReq(..)
+  , GitHubCreateIssueReq(..)
+  , GitHubUpdateIssueReq(..)
+  , GitHubAddIssueLabelReq(..)
+  , GitHubRemoveIssueLabelReq(..)
+  , GitHubAddIssueAssigneeReq(..)
+  , GitHubRemoveIssueAssigneeReq(..)
+  , GitHubListIssuesReq(..)
+  , GitHubCreatePRReq(..)
+  , GitHubGetPRReq(..)
+  , GitHubListPullRequestsReq(..)
+  , GitHubGetPullRequestReviewsReq(..)
+  , GitHubGetDiscussionReq(..)
+  , OllamaGenerateReq(..)
+  , OtelSpanReq(..)
+  , OtelMetricReq(..)
   , sendRequest
   )
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import System.Directory (doesFileExist)
+
 
 import ExoMonad.Effects.GitHub
   ( GitHub(..)
@@ -132,7 +150,7 @@ socketGetIssue path repo num includeComments = do
   case parseRepo repo of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubGetIssue owner repoName num includeComments
+      let req = GitHubGetIssue $ GitHubGetIssueReq owner repoName num includeComments
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right (GitHubIssueResponse n t b s ls u a cs) ->
@@ -156,7 +174,7 @@ socketCreateIssue path input = do
   case parseRepo (input.ciiRepo.unRepo) of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubCreateIssue owner repoName input.ciiTitle input.ciiBody input.ciiLabels
+      let req = GitHubCreateIssue $ GitHubCreateIssueReq owner repoName input.ciiTitle input.ciiBody input.ciiLabels
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right (GitHubIssueResponse n _ _ _ _ _ _ _) -> pure $ Right n
@@ -174,7 +192,7 @@ socketUpdateIssue path repo num input = do
             Just IssueClosed -> Just "closed"
             Nothing -> Nothing
       
-      let req = GitHubUpdateIssue 
+      let req = GitHubUpdateIssue $ GitHubUpdateIssueReq
             { owner = owner
             , repo = repoName
             , number = num
@@ -205,7 +223,7 @@ socketAddIssueLabel path repo num label = do
   case parseRepo repo of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubAddIssueLabel owner repoName num label
+      let req = GitHubAddIssueLabel $ GitHubAddIssueLabelReq owner repoName num label
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right OtelAckResponse -> pure $ Right ()
@@ -218,7 +236,7 @@ socketRemoveIssueLabel path repo num label = do
   case parseRepo repo of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubRemoveIssueLabel owner repoName num label
+      let req = GitHubRemoveIssueLabel $ GitHubRemoveIssueLabelReq owner repoName num label
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right OtelAckResponse -> pure $ Right ()
@@ -231,7 +249,7 @@ socketAddIssueAssignee path repo num assignee = do
   case parseRepo repo of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubAddIssueAssignee owner repoName num assignee
+      let req = GitHubAddIssueAssignee $ GitHubAddIssueAssigneeReq owner repoName num assignee
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right OtelAckResponse -> pure $ Right ()
@@ -244,7 +262,7 @@ socketRemoveIssueAssignee path repo num assignee = do
   case parseRepo repo of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubRemoveIssueAssignee owner repoName num assignee
+      let req = GitHubRemoveIssueAssignee $ GitHubRemoveIssueAssigneeReq owner repoName num assignee
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right OtelAckResponse -> pure $ Right ()
@@ -257,7 +275,7 @@ socketListIssues path repo filt = do
   case parseRepo repo of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubListIssues owner repoName (stateToText <$> filt.ifState) filt.ifLabels
+      let req = GitHubListIssues $ GitHubListIssuesReq owner repoName (stateToText <$> filt.ifState) filt.ifLabels
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right (GitHubIssuesResponse issues) ->
@@ -274,7 +292,7 @@ socketCreatePR path spec = do
   case parseRepo (spec.prcsRepo.unRepo) of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubCreatePR owner repoName spec.prcsTitle spec.prcsBody spec.prcsHead spec.prcsBase
+      let req = GitHubCreatePR $ GitHubCreatePRReq owner repoName spec.prcsTitle spec.prcsBody spec.prcsHead spec.prcsBase
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right (GitHubPRResponse _ _ _ _ url _ _ _ _ _ _ _ _) -> pure $ Right $ PRUrl url
@@ -287,7 +305,7 @@ socketGetPR path repo num includeDetails = do
   case parseRepo repo of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubGetPR owner repoName num includeDetails
+      let req = GitHubGetPR $ GitHubGetPRReq owner repoName num includeDetails
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right (GitHubPRResponse n t b a u s h ba c ma ls cs rs) -> do
@@ -323,7 +341,7 @@ socketListPullRequests path repo filt = do
             Just PRClosed -> Just "closed"
             Just PRMerged -> Just "all" -- Octocrab doesn't have "merged" filter easily? Or "closed" covers it?
             Nothing -> Nothing
-      let req = GitHubListPullRequests owner repoName s filt.pfLimit
+      let req = GitHubListPullRequests $ GitHubListPullRequestsReq owner repoName s filt.pfLimit
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right (GitHubPullRequestsResponse prs) ->
@@ -339,7 +357,7 @@ socketGetPullRequestReviews path repo num = do
   case parseRepo repo of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubGetPullRequestReviews owner repoName num
+      let req = GitHubGetPullRequestReviews $ GitHubGetPullRequestReviewsReq owner repoName num
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right (GitHubReviewsResponse reviews) ->
@@ -355,7 +373,7 @@ socketGetDiscussion path repo num = do
   case parseRepo repo of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubGetDiscussion owner repoName num
+      let req = GitHubGetDiscussion $ GitHubGetDiscussionReq owner repoName num
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right (GitHubDiscussionResponse n t b a u cs) -> 

@@ -9,16 +9,16 @@ module ExoMonad.Control.ExoTools.Status.Types
   ( ExoStatusArgs(..)
   ) where
 
-import Data.Text (Text)
 import GHC.Generics (Generic)
-import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(..), HasJSONSchema(..))
+import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), HasJSONSchema(..))
+import Language.Haskell.TH (mkName)
 
 -- | Arguments for exo_status tool.
 data ExoStatusArgs = ExoStatusArgs
-  { esaVerbose :: Maybe Bool
+  { verbose :: Maybe Bool
   }
   deriving stock (Show, Eq, Generic)
 
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "esa" } ''ExoStatusArgs
-  [ 'esaVerbose ?? "Optional verbose output."
+$(deriveMCPTypeWith defaultMCPOptions ''ExoStatusArgs
+  [ mkName "verbose" ?? "Optional verbose output."
   ])

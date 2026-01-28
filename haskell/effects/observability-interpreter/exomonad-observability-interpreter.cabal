@@ -38,3 +38,5 @@ library
         OverloadedStrings
         OverloadedRecordDot
         TypeApplications
+        DuplicateRecordFields
+        NoFieldSelectors

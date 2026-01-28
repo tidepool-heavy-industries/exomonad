@@ -63,11 +63,11 @@ data IssueContext = IssueContext
 instance ToGVal (Run SourcePos (Writer Text) Text) SessionStartContext where
   toGVal ctx = dict
     [ "role" ~> (T.toLower . T.pack . show $ ctx.role)
-    , "issue_number" ~> issue_number ctx
-    , "branch" ~> branch ctx
-    , "cwd" ~> cwd ctx
-    , "issue" ~> issue ctx
-    , "dashboard" ~> dashboard ctx
+    , "issue_number" ~> ctx.issue_number
+    , "branch" ~> ctx.branch
+    , "cwd" ~> ctx.cwd
+    , "issue" ~> ctx.issue
+    , "dashboard" ~> ctx.dashboard
     ]
 
 -- | ToGVal instance for issues dashboard context.

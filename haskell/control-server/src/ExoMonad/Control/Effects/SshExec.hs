@@ -29,22 +29,22 @@ data SshExec a where
 
 -- | Request to execute a command in a remote container
 data ExecRequest = ExecRequest
-  { erContainer :: Maybe Text     -- ^ Container hostname (e.g., "agent-1") or Nothing for local
-  , erCommand :: Text             -- ^ Command to execute
-  , erArgs :: [Text]              -- ^ Command arguments
-  , erWorkingDir :: FilePath      -- ^ Working directory
-  , erEnv :: [(Text, Text)]       -- ^ Environment variables
-  , erTimeout :: Int              -- ^ Timeout in seconds (NOTE: not currently enforced)
+  { container :: Maybe Text     -- ^ Container hostname (e.g., "agent-1") or Nothing for local
+  , command :: Text             -- ^ Command to execute
+  , args :: [Text]              -- ^ Command arguments
+  , workingDir :: FilePath      -- ^ Working directory
+  , env :: [(Text, Text)]       -- ^ Environment variables
+  , timeout :: Int              -- ^ Timeout in seconds (NOTE: not currently enforced)
   } deriving (Show, Generic)
 
 instance ToJSON ExecRequest where
   toJSON r = object
-    [ "container" .= erContainer r
-    , "command" .= erCommand r
-    , "args" .= erArgs r
-    , "working_dir" .= erWorkingDir r
-    , "env" .= erEnv r
-    , "timeout" .= erTimeout r
+    [ "container" .= r.container
+    , "command" .= r.command
+    , "args" .= r.args
+    , "working_dir" .= r.workingDir
+    , "env" .= r.env
+    , "timeout" .= r.timeout
     ]
 
 instance FromJSON ExecRequest where
@@ -60,20 +60,20 @@ instance FromJSON ExecRequest where
 -- IMPORTANT: Field names must match docker-ctl exec output (Rust ExecResponse)
 -- Expected JSON: {"exit_code": N | null, "stdout": "...", "stderr": "..."}
 data ExecResult = ExecResult
-  { exExitCode :: Maybe Int  -- null when docker-ctl fails to parse output
-  , exStdout :: Text
-  , exStderr :: Text
+  { exitCode :: Maybe Int  -- null when docker-ctl fails to parse output
+  , stdout :: Text
+  , stderr :: Text
   } deriving (Show, Generic)
 
 instance ToJSON ExecResult where
   toJSON r = object
-    [ "exit_code" .= exExitCode r
-    , "stdout" .= exStdout r
-    , "stderr" .= exStderr r
+    [ "exit_code" .= r.exitCode
+    , "stdout" .= r.stdout
+    , "stderr" .= r.stderr
     ]
 
 -- | Parse ExecResult from docker-ctl JSON output
--- If parsing fails, exExitCode will be Nothing in the error handler in runSshExec
+-- If parsing fails, exitCode will be Nothing in the error handler in runSshExec
 instance FromJSON ExecResult where
   parseJSON = withObject "ExecResult" $ \v -> ExecResult
     <$> v .:? "exit_code"  -- Optional: null or missing becomes Nothing
@@ -88,26 +88,26 @@ execCommand = send . ExecCommand
 runSshExec :: LastMember IO effs => FilePath -> Eff (SshExec ': effs) a -> Eff effs a
 runSshExec binPath = interpret $ \case
   ExecCommand req -> sendM $ do
-    let containerArgs = case req.erContainer of
+    let containerArgs = case req.container of
           Just container -> [T.unpack container]
           Nothing -> ["--local"]
     let args = ["exec"]
              ++ containerArgs
-             ++ ["--workdir", req.erWorkingDir]
-             ++ concatMap (\(k, v) -> ["--env", T.unpack $ k <> "=" <> v]) req.erEnv
-             ++ ["--"] ++ T.unpack req.erCommand : map T.unpack req.erArgs
+             ++ ["--workdir", req.workingDir]
+             ++ concatMap (\(k, v) -> ["--env", T.unpack $ k <> "=" <> v]) req.env
+             ++ ["--"] ++ T.unpack req.command : map T.unpack req.args
     
     (code, stdout, stderr) <- readProcessWithExitCode binPath args ""
     case code of
       ExitSuccess -> case eitherDecode (BL.fromStrict $ TE.encodeUtf8 $ T.pack stdout) of
         Right (res :: ExecResult) -> pure res
         Left err -> pure $ ExecResult
-          { exExitCode = Nothing  -- Parse error, no valid exit code
-          , exStdout = ""
-          , exStderr = "JSON parse error from docker-ctl: " <> T.pack err <> "\nOutput: " <> T.pack stdout
+          { exitCode = Nothing  -- Parse error, no valid exit code
+          , stdout = ""
+          , stderr = "JSON parse error from docker-ctl: " <> T.pack err <> "\nOutput: " <> T.pack stdout
           }
       ExitFailure _ -> pure $ ExecResult
-        { exExitCode = Nothing  -- docker-ctl itself failed
-        , exStdout = ""
-        , exStderr = "docker-ctl failed: " <> T.pack stderr
+        { exitCode = Nothing  -- docker-ctl itself failed
+        , stdout = ""
+        , stderr = "docker-ctl failed: " <> T.pack stderr
         }

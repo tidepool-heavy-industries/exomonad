@@ -63,10 +63,10 @@ filePRLogic args = do
             Just pr -> do
               -- PR already exists - return it (idempotent behavior)
               let info = PRInfo
-                    { priNumber = pr.prNumber
-                    , priUrl = pr.prUrl
-                    , priStatus = T.pack (show pr.prState)
-                    , priTitle = pr.prTitle
+                    { number = pr.prNumber
+                    , url = pr.prUrl
+                    , status = T.pack (show pr.prState)
+                    , title = pr.prTitle
                     }
               pure $ FilePRResult (Just info) False Nothing
 
@@ -77,7 +77,7 @@ filePRLogic args = do
                     Nothing -> "gh-" <> T.pack (show num) <> "/" <> slugify issue.issueTitle
 
               let title = "[" <> "gh-" <> T.pack (show num) <> "] " <> issue.issueTitle
-                  body = formatPRBody issue args.fpaTesting args.fpaCompromises
+                  body = formatPRBody issue args.testing args.compromises
                   spec = PRCreateSpec
                     { prcsRepo = repo
                     , prcsHead = headBranch
@@ -95,9 +95,9 @@ filePRLogic args = do
                   -- Note: We don't have the PR number from createPR, so we use 0
                   -- In practice, the URL is what matters
                   let info = PRInfo
-                        { priNumber = 0
-                        , priUrl = url
-                        , priStatus = "OPEN"
-                        , priTitle = title
+                        { number = 0
+                        , url = url
+                        , status = "OPEN"
+                        , title = title
                         }
                   pure $ FilePRResult (Just info) True Nothing

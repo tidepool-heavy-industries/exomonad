@@ -33,15 +33,15 @@ pmStatusLogic
   -> Eff es PmStatusResult
 pmStatusLogic args = do
   now <- getCurrentTime
-  let periodSeconds = fromIntegral args.psaPeriodDays * nominalDay
+  let periodSeconds = fromIntegral args.periodDays * nominalDay
       periodStart = addUTCTime (-periodSeconds) now
       prevPeriodStart = addUTCTime (-2 * periodSeconds) now
 
-  let repo = maybe defaultRepo Repo args.psaRepo
+  let repo = maybe defaultRepo Repo args.repo
 
   -- Fetch all issues
   let listInput = defaultIssueFilter
-                    { ifLabels = maybe [] (:[]) args.psaLabelTrack }
+                    { ifLabels = maybe [] (:[]) args.labelTrack }
   allIssuesResult <- listIssues repo listInput
   let allIssues = case allIssuesResult of
         Left _err -> []  -- Silently degrade if GitHub unavailable
@@ -49,7 +49,7 @@ pmStatusLogic args = do
 
   -- 1. Velocity & Trend (Simulated using state for now as Issue doesn't have closedAt yet)
   let closedIssues = filter (\i -> i.issueState == IssueClosed) allIssues
-      velocity = fromIntegral (length closedIssues) / fromIntegral args.psaPeriodDays
+      velocity = fromIntegral (length closedIssues) / fromIntegral args.periodDays
       trend = 0 -- Need timestamps for real trend
 
   -- 2. Cycle Time
@@ -73,17 +73,17 @@ pmStatusLogic args = do
       (prMedian, prP90) = calcMetrics prLags (3600) -- in hours
 
   -- 5. Breakdown (optional)
-  let breakdown = if args.psaIncludeBreakdown
+  let breakdown = if args.includeBreakdown
                   then Just $ aggregateLabels allIssues
                   else Nothing
 
   pure $ PmStatusResult
-    { psrVelocity = velocity
-    , psrTrend = trend
-    , psrCycleTime = CycleTimeMetrics ctMedian ctP90
-    , psrCurrentState = CurrentStateMetrics inFlight ready blocked needsTLReview needsPMApproval
-    , psrPrLag = PrLagMetrics prMedian prP90
-    , psrBreakdown = breakdown
+    { velocity = velocity
+    , trend = trend
+    , cycleTime = CycleTimeMetrics ctMedian ctP90
+    , currentState = CurrentStateMetrics inFlight ready blocked needsTLReview needsPMApproval
+    , prLag = PrLagMetrics prMedian prP90
+    , breakdown = breakdown
     }
 
 -- ════════════════════════════════════════════════════════════════════════════

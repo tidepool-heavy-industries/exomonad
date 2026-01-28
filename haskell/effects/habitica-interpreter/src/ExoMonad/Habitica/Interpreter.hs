@@ -83,9 +83,9 @@ import ExoMonad.Effects.Habitica
 
 -- | Habitica API configuration.
 data HabiticaConfig = HabiticaConfig
-  { hcBaseUrl  :: Text  -- ^ API base URL (default: https://habitica.com/api/v3)
-  , hcUserId   :: Text  -- ^ Habitica user ID (x-api-user header)
-  , hcApiToken :: Text  -- ^ Habitica API token (x-api-key header)
+  { baseUrl  :: Text  -- ^ API base URL (default: https://habitica.com/api/v3)
+  , userId   :: Text  -- ^ Habitica user ID (x-api-user header)
+  , apiToken :: Text  -- ^ Habitica API token (x-api-key header)
   }
   deriving stock (Eq, Show)
 
@@ -93,9 +93,9 @@ data HabiticaConfig = HabiticaConfig
 -- Credentials must be filled in.
 defaultHabiticaConfig :: HabiticaConfig
 defaultHabiticaConfig = HabiticaConfig
-  { hcBaseUrl  = "https://habitica.com/api/v3"
-  , hcUserId   = ""
-  , hcApiToken = ""
+  { baseUrl  = "https://habitica.com/api/v3"
+  , userId   = ""
+  , apiToken = ""
   }
 
 
@@ -105,15 +105,15 @@ defaultHabiticaConfig = HabiticaConfig
 
 -- | Runtime environment with HTTP manager.
 data HabiticaEnv = HabiticaEnv
-  { heConfig  :: HabiticaConfig
-  , heManager :: Manager
+  { config  :: HabiticaConfig
+  , manager :: Manager
   }
 
 -- | Create a new environment (creates TLS manager).
 mkHabiticaEnv :: HabiticaConfig -> IO HabiticaEnv
 mkHabiticaEnv config = do
   manager <- newManager tlsManagerSettings
-  pure HabiticaEnv { heConfig = config, heManager = manager }
+  pure HabiticaEnv { config = config, manager = manager }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -164,16 +164,16 @@ habiticaRequest
   -> Maybe LBS.ByteString    -- ^ Request body
   -> IO (Either HabiticaError a)
 habiticaRequest env method path maybeBody = do
-  let config = heConfig env
-      url = T.unpack (hcBaseUrl config) <> path
+  let config = env.config
+      url = T.unpack (config.baseUrl) <> path
 
   result <- try @SomeException $ do
     req0 <- parseRequest url
     let req = req0
           { method = TE.encodeUtf8 (T.pack method)
           , requestHeaders =
-              [ ("x-api-user", TE.encodeUtf8 $ hcUserId config)
-              , ("x-api-key", TE.encodeUtf8 $ hcApiToken config)
+              [ ("x-api-user", TE.encodeUtf8 $ config.userId)
+              , ("x-api-key", TE.encodeUtf8 $ config.apiToken)
               , ("Content-Type", "application/json")
               , ("x-client", "exomonad-habitica-interpreter/0.1")
               ]
@@ -181,7 +181,7 @@ habiticaRequest env method path maybeBody = do
               Nothing -> RequestBodyLBS ""
               Just b  -> RequestBodyLBS b
           }
-    httpLbs req (heManager env)
+    httpLbs req (env.manager)
 
   case result of
     Left exc -> pure $ Left $ HabiticaOther $ "HTTP error: " <> T.pack (show exc)

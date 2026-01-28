@@ -32,58 +32,58 @@ spec = do
     it "UIState - Minimal" $ do
       let state = UIState
             {
-              usMessages = []
+              messages = []
             ,
-              usTextInput = Nothing
+              textInput = Nothing
             ,
-              usPhotoUpload = Nothing
+              photoUpload = Nothing
             ,
-              usChoices = Nothing
+              choices = Nothing
             ,
-              usGraphNode = "start"
+              graphNode = "start"
             ,
-              usThinking = False
+              thinking = False
             ,
-              usDMStats = Nothing
+              stats = Nothing
             ,
-              usDMClocks = []
+              clocks = []
             ,
-              usDMDicePool = Nothing
+              dicePool = Nothing
             ,
-              usDMMood = Nothing
+              mood = Nothing
             ,
-              usDMCharCreation = Nothing
+              charCreation = Nothing
             ,
-              usDMHistory = []
+              history = []
             }
       decode (encode state) `shouldBe` Just state
 
     it "UIState - Full" $ do
       let state = UIState
             {
-              usMessages = [ChatMessage User "hello" "2023-01-01T00:00:00Z"]
+              messages = [ChatMessage User "hello" "2023-01-01T00:00:00Z"]
             ,
-              usTextInput = Just (TextInputConfig "type here...")
+              textInput = Just (TextInputConfig "type here...")
             ,
-              usPhotoUpload = Just (PhotoUploadConfig "upload a photo")
+              photoUpload = Just (PhotoUploadConfig "upload a photo")
             ,
-              usChoices = Just (ChoiceConfig "choose one" [ChoiceOption 0 "Option A" (Just "Desc") [] Nothing] False)
+              choices = Just (ChoiceConfig "choose one" [ChoiceOption 0 "Option A" (Just "Desc") [] Nothing] False)
             ,
-              usGraphNode = "node-1"
+              graphNode = "node-1"
             ,
-              usThinking = True
+              thinking = True
             ,
-              usDMStats = Just (DMStats 2 1 5 0 ["Stressed"] OperatingFromStrength)
+              stats = Just (DMStats 2 1 5 0 ["Stressed"] OperatingFromStrength)
             ,
-              usDMClocks = [Clock "clk-1" "Threat" 8 4 True ClockThreat]
+              clocks = [Clock "clk-1" "Threat" 8 4 True ClockThreat]
             ,
-              usDMDicePool = Just (DicePool [] Risky Standard "Context" True (Just "Bargain"))
+              dicePool = Just (DicePool [] Risky Standard "Context" True (Just "Bargain"))
             ,
-              usDMMood = Just (MoodScene (SvEncounter UrgencyMedium))
+              mood = Just (MoodScene (SvEncounter UrgencyMedium))
             ,
-              usDMCharCreation = Nothing
+              charCreation = Nothing
             ,
-              usDMHistory = []
+              history = []
             }
       decode (encode state) `shouldBe` Just state
 

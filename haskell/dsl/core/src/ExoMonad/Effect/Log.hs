@@ -82,9 +82,9 @@ type LogFields = [(Text, Value)]
 
 -- | Context for distributed tracing and effect chains
 data LogContext = LogContext
-  { lcCorrelationId :: Text
-  , lcEffectChain :: [Text]
-  , lcStartTime :: Maybe UTCTime -- Maybe because purely functional context might not have time
+  { correlationId :: Text
+  , effectChain :: [Text]
+  , startTime :: Maybe UTCTime -- Maybe because purely functional context might not have time
   }
   deriving (Show, Eq, Generic, ToJSON)
 
@@ -139,7 +139,7 @@ withEffectSpan :: (Member (Reader LogContext) effs)
                -> Eff effs a
                -> Eff effs a
 withEffectSpan name action =
-  local (\ctx -> ctx { lcEffectChain = ctx.lcEffectChain ++ [name] }) action
+  local (\ctx -> ctx { effectChain = ctx.effectChain ++ [name] }) action
 
 -- | Simple runner for Log effect that outputs to stderr.
 -- For production use, prefer 'ExoMonad.Log.Interpreter' which uses fast-logger.
@@ -161,9 +161,9 @@ runLog minLevel = interpret $ \case
 --
 -- Logged automatically by instrumented dispatch.
 data GraphTransitionInfo = GraphTransitionInfo
-  { gtiFromNode :: Text
-  , gtiToNode   :: Text
-  , gtiPayload  :: Value    -- ^ Input to next handler (JSON-encoded)
+  { fromNode :: Text
+  , toNode   :: Text
+  , payload  :: Value    -- ^ Input to next handler (JSON-encoded)
   }
   deriving (Show, Generic)
 
@@ -173,10 +173,10 @@ instance ToJSON GraphTransitionInfo
 --
 -- Logged after each transition for changed fields.
 data StateSnapshotInfo = StateSnapshotInfo
-  { ssiField   :: Text   -- ^ e.g., "mood", "dicePool"
-  , ssiBefore  :: Value
-  , ssiAfter   :: Value
-  , ssiChanged :: Bool   -- ^ Quick check for "(unchanged)"
+  { field   :: Text   -- ^ e.g., "mood", "dicePool"
+  , before  :: Value
+  , after   :: Value
+  , changed :: Bool   -- ^ Quick check for "(unchanged)"
   }
   deriving (Show, Generic)
 
@@ -187,13 +187,13 @@ instance ToJSON StateSnapshotInfo
 -- At Info level: metadata only (model, tokens, tools).
 -- At Debug level: includes full prompts.
 data LLMRequestInfo = LLMRequestInfo
-  { lriNodeName     :: Text
-  , lriModel        :: Text
-  , lriPromptTokens :: Int
-  , lriTools        :: [Text]  -- ^ Tool names available
+  { nodeName     :: Text
+  , model        :: Text
+  , promptTokens :: Int
+  , tools        :: [Text]  -- ^ Tool names available
   -- Full content (only at Debug verbosity)
-  , lriSystemPrompt :: Maybe Text
-  , lriUserPrompt   :: Maybe Text
+  , systemPrompt :: Maybe Text
+  , userPrompt   :: Maybe Text
   }
   deriving (Show, Generic)
 
@@ -201,12 +201,12 @@ instance ToJSON LLMRequestInfo
 
 -- | LLM response info.
 data LLMResponseInfo = LLMResponseInfo
-  { lroNodeName         :: Text
-  , lroCompletionTokens :: Int
-  , lroToolCalls        :: Int
-  , lroLatencyMs        :: Int
+  { nodeName         :: Text
+  , completionTokens :: Int
+  , toolCalls        :: Int
+  , latencyMs        :: Int
   -- Full content (only at Debug verbosity)
-  , lroResponse         :: Maybe Text
+  , response         :: Maybe Text
   }
   deriving (Show, Generic)
 
@@ -216,12 +216,12 @@ instance ToJSON LLMResponseInfo
 --
 -- Includes state snapshot and last LLM call for context.
 data ErrorContextInfo = ErrorContextInfo
-  { eciMessage     :: Text
-  , eciNode        :: Maybe Text
-  , eciState       :: Value        -- ^ Current state snapshot
-  , eciTransitions :: [(Text, Text)]  -- ^ Last N transitions (from, to)
-  , eciLastLLM     :: Maybe LLMResponseInfo
-  , eciStackTrace  :: Maybe Text
+  { message     :: Text
+  , node        :: Maybe Text
+  , state       :: Value        -- ^ Current state snapshot
+  , transitions :: [(Text, Text)]  -- ^ Last N transitions (from, to)
+  , lastLLM     :: Maybe LLMResponseInfo
+  , stackTrace  :: Maybe Text
   }
   deriving (Show, Generic)
 
@@ -237,50 +237,50 @@ instance ToJSON ErrorContextInfo
 --
 -- @
 -- logGraph GraphTransitionInfo
---   { gtiFromNode = "entry"
---   , gtiToNode = "classify"
---   , gtiPayload = toJSON input
+--   { fromNode = "entry"
+--   , toNode = "classify"
+--   , payload = toJSON input
 --   }
 -- @
 logGraph :: Member Log effs => GraphTransitionInfo -> Eff effs ()
-logGraph info = logInfoWith ("GRAPH " <> info.gtiFromNode <> " → " <> info.gtiToNode)
-  [ ("payload", info.gtiPayload)
+logGraph info = logInfoWith ("GRAPH " <> info.fromNode <> " → " <> info.toNode)
+  [ ("payload", info.payload)
   ]
 
 -- | Log a state field change.
 logState :: Member Log effs => StateSnapshotInfo -> Eff effs ()
-logState info = logInfoWith ("STATE." <> info.ssiField)
-  [ ("before", info.ssiBefore)
-  , ("after", info.ssiAfter)
-  , ("changed", toJSON info.ssiChanged)
+logState info = logInfoWith ("STATE." <> info.field)
+  [ ("before", info.before)
+  , ("after", info.after)
+  , ("changed", toJSON info.changed)
   ]
 
 -- | Log an LLM request.
 --
 -- Use 'logDebugWith' for full prompts when debugging.
 logLLMRequest :: Member Log effs => LLMRequestInfo -> Eff effs ()
-logLLMRequest info = logInfoWith ("LLM.REQUEST " <> info.lriNodeName)
-  [ ("model", toJSON info.lriModel)
-  , ("prompt_tokens", toJSON info.lriPromptTokens)
-  , ("tools", toJSON info.lriTools)
+logLLMRequest info = logInfoWith ("LLM.REQUEST " <> info.nodeName)
+  [ ("model", toJSON info.model)
+  , ("prompt_tokens", toJSON info.promptTokens)
+  , ("tools", toJSON info.tools)
   ]
 
 -- | Log an LLM response.
 logLLMResponse :: Member Log effs => LLMResponseInfo -> Eff effs ()
-logLLMResponse info = logInfoWith ("LLM.RESPONSE " <> info.lroNodeName)
-  [ ("completion_tokens", toJSON info.lroCompletionTokens)
-  , ("tool_calls", toJSON info.lroToolCalls)
-  , ("latency_ms", toJSON info.lroLatencyMs)
+logLLMResponse info = logInfoWith ("LLM.RESPONSE " <> info.nodeName)
+  [ ("completion_tokens", toJSON info.completionTokens)
+  , ("tool_calls", toJSON info.toolCalls)
+  , ("latency_ms", toJSON info.latencyMs)
   ]
 
 -- | Log an error with full context.
 --
 -- Always logs at Error level regardless of verbosity.
 logErrorContext :: Member Log effs => ErrorContextInfo -> Eff effs ()
-logErrorContext info = logErrorWith ("ERROR: " <> info.eciMessage)
-  [ ("node", toJSON info.eciNode)
-  , ("state", info.eciState)
-  , ("transitions", toJSON info.eciTransitions)
-  , ("last_llm", toJSON info.eciLastLLM)
-  , ("stack_trace", toJSON info.eciStackTrace)
+logErrorContext info = logErrorWith ("ERROR: " <> info.message)
+  [ ("node", toJSON info.node)
+  , ("state", info.state)
+  , ("transitions", toJSON info.transitions)
+  , ("last_llm", toJSON info.lastLLM)
+  , ("stack_trace", toJSON info.stackTrace)
   ]

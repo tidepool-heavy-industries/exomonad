@@ -25,6 +25,9 @@ library
         DerivingStrategies
         LambdaCase
         OverloadedStrings
+        NoFieldSelectors
+        DuplicateRecordFields
+        OverloadedRecordDot
 
 test-suite exomonad-wire-types-test
     import:           warnings

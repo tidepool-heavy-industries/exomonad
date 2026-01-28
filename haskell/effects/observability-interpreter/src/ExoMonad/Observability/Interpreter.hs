@@ -72,6 +72,7 @@ import ExoMonad.Effects.SocketClient
   ( SocketConfig(..)
   , ServiceRequest(..)
   , ServiceResponse(..)
+  , OtelSpanReq(..)
   , sendRequest
   )
 import ExoMonad.Effect.Types (LLM(..), TurnOutcome(..))
@@ -90,7 +91,7 @@ pushToLoki config pushReq = do
   result <- try @SomeException $ runReq defaultHttpConfig $ do
     let body = ReqBodyLbs (encode pushReq)
 
-    case parseUrl config.lcBaseUrl of
+    case parseUrl config.baseUrl of
       Left (httpUrl, _) -> do
         let hdrs = header "Content-Type" ("application/json" :: BS.ByteString)
                 <> authHeadersHttp config
@@ -124,7 +125,7 @@ parseUrl urlText
 
 -- | Build auth headers for Grafana Cloud (HTTP).
 authHeadersHttp :: LokiConfig -> Option 'Http
-authHeadersHttp config = case (config.lcUser, config.lcToken) of
+authHeadersHttp config = case (config.user, config.token) of
   (Just user, Just token) ->
     let creds = TE.encodeUtf8 $ user <> ":" <> token
         b64 = B64.encode creds
@@ -134,7 +135,7 @@ authHeadersHttp config = case (config.lcUser, config.lcToken) of
 
 -- | Build auth headers for Grafana Cloud (HTTPS).
 authHeadersHttps :: LokiConfig -> Option 'Https
-authHeadersHttps config = case (config.lcUser, config.lcToken) of
+authHeadersHttps config = case (config.user, config.token) of
   (Just user, Just token) ->
     let creds = TE.encodeUtf8 $ user <> ":" <> token
         b64 = B64.encode creds
@@ -155,7 +156,7 @@ pushToOTLP config traceReq = do
   result <- try @SomeException $ runReq defaultHttpConfig $ do
     let body = ReqBodyLbs (encode traceReq)
 
-    case parseOTLPUrl config.otlpEndpoint of
+    case parseOTLPUrl config.endpoint of
       Left (httpUrl, _) -> do
         let hdrs = header "Content-Type" ("application/json" :: BS.ByteString)
                 <> authHeadersHttp' config
@@ -192,7 +193,7 @@ parseOTLPUrl urlText
 
 -- | Build auth headers for OTLP (HTTP).
 authHeadersHttp' :: OTLPConfig -> Option 'Http
-authHeadersHttp' config = case (config.otlpUser, config.otlpToken) of
+authHeadersHttp' config = case (config.user, config.token) of
   (Just user, Just token) ->
     let creds = TE.encodeUtf8 $ user <> ":" <> token
         b64 = B64.encode creds
@@ -202,7 +203,7 @@ authHeadersHttp' config = case (config.otlpUser, config.otlpToken) of
 
 -- | Build auth headers for OTLP (HTTPS).
 authHeadersHttps' :: OTLPConfig -> Option 'Https
-authHeadersHttps' config = case (config.otlpUser, config.otlpToken) of
+authHeadersHttps' config = case (config.user, config.token) of
   (Just user, Just token) ->
     let creds = TE.encodeUtf8 $ user <> ":" <> token
         b64 = B64.encode creds
@@ -218,23 +219,29 @@ authHeadersHttps' config = case (config.otlpUser, config.otlpToken) of
 -- | Flush completed spans to OTLP endpoint.
 flushTraces :: OTLPConfig -> Text -> TraceContext -> IO ()
 flushTraces config serviceName ctx = do
-  spans <- readIORef ctx.tcCompletedSpans
+  spans <- readIORef ctx.completedSpans
   when (not $ null spans) $ do
     -- Clear completed spans
-    writeIORef ctx.tcCompletedSpans []
+    writeIORef ctx.completedSpans []
 
     -- Build OTLP request
-    let resource = object
+    let resource_ = object
           [ "attributes" .=
               [ object ["key" .= ("service.name" :: Text), "value" .= object ["stringValue" .= serviceName]]
               ]
           ]
-        scope = object
+        scope_ = object
           [ "name" .= ("exomonad" :: Text)
           , "version" .= ("0.1.0" :: Text)
           ]
-        scopeSpans = OTLPScopeSpans scope spans
-        resourceSpans = OTLPResourceSpans resource [scopeSpans]
+        scopeSpans = OTLPScopeSpans 
+          { scope = scope_
+          , spans = spans 
+          }
+        resourceSpans = OTLPResourceSpans 
+          { resource = resource_
+          , scopeSpans = [scopeSpans] 
+          }
         traceReq = OTLPTraceRequest [resourceSpans]
 
     -- Push to OTLP
@@ -282,7 +289,7 @@ runObservabilityWithConfig
 runObservabilityWithConfig ctx config = interpret $ \case
   PublishEvent event -> sendM $ case config of
     ObservabilityOtelConfig (Just loki) _ _ -> do
-      let labels = eventToLabels loki.lcJobLabel event
+      let labels = eventToLabels loki.jobLabel event
           line = eventToLine event
       ts <- nowNanos
       let stream = LokiStream labels [(ts, line)]
@@ -298,17 +305,17 @@ runObservabilityWithConfig ctx config = interpret $ \case
       pure ()
 
   StartSpan name kind attrs -> sendM $ do
-    spanId <- generateSpanId
+    spanId_ <- generateSpanId
     startTime <- nowNanosInt
     let activeSpan = ActiveSpan
-          { asSpanId = spanId
-          , asName = name
-          , asKind = kind
-          , asStartTime = startTime
-          , asAttributes = attrs
+          { spanId = spanId_
+          , name = name
+          , kind = kind
+          , startTime = startTime
+          , attributes = attrs
           }
     pushActiveSpan ctx activeSpan
-    pure (unSpanId spanId)
+    pure (spanId_.unSpanId)
 
   EndSpan isError extraAttrs -> sendM $ do
     mSpan <- popActiveSpan ctx
@@ -316,36 +323,36 @@ runObservabilityWithConfig ctx config = interpret $ \case
       Nothing -> pure ()
       Just activeSpan -> do
         endTime <- nowNanosInt
-        traceId <- readIORef ctx.tcTraceId
+        traceId_ <- readIORef ctx.traceId
         parentSpan <- currentActiveSpan ctx
-        let parentSpanId = asSpanId <$> parentSpan
+        let parentSpanId_ = (.spanId) <$> parentSpan
 
         case config of
           ObservabilityOtelConfig _ (Just _otlp) _serviceName -> do
-            let allAttrs = activeSpan.asAttributes <> extraAttrs
+            let allAttrs = activeSpan.attributes <> extraAttrs
                 attrValues = map toJSON allAttrs
                 status = if isError
                          then OTLPStatus StatusError (Just "error")
                          else OTLPStatus StatusOk Nothing
                 otlpSpan = OTLPSpan
-                  { ospTraceId = traceId
-                  , ospSpanId = activeSpan.asSpanId
-                  , ospParentSpanId = parentSpanId
-                  , ospName = activeSpan.asName
-                  , ospKind = spanKindToInt activeSpan.asKind
-                  , ospStartTimeUnixNano = activeSpan.asStartTime
-                  , ospEndTimeUnixNano = endTime
-                  , ospAttributes = attrValues
-                  , ospStatus = status
+                  { traceId = traceId_
+                  , spanId = activeSpan.spanId
+                  , parentSpanId = parentSpanId_
+                  , name = activeSpan.name
+                  , kind = spanKindToInt activeSpan.kind
+                  , startTimeUnixNano = activeSpan.startTime
+                  , endTimeUnixNano = endTime
+                  , attributes = attrValues
+                  , status = status
                   }
-            modifyIORef ctx.tcCompletedSpans (otlpSpan :)
+            modifyIORef ctx.completedSpans (otlpSpan :)
           
           ObservabilitySocketConfig path -> do
-            let serviceReq = OtelSpan 
-                  { traceId = unTraceId traceId
-                  , spanId = unSpanId activeSpan.asSpanId
-                  , name = activeSpan.asName
-                  , startNs = fromIntegral activeSpan.asStartTime
+            let serviceReq = OtelSpan $ OtelSpanReq
+                  { traceId = traceId_.unTraceId
+                  , spanId = activeSpan.spanId.unSpanId
+                  , name = activeSpan.name
+                  , startNs = fromIntegral activeSpan.startTime
                   , endNs = fromIntegral endTime
                   , attributes = mempty -- TODO: Convert attrs to Object if needed
                   }
@@ -358,9 +365,17 @@ runObservabilityWithConfig ctx config = interpret $ \case
           _ -> pure ()
 
   AddSpanAttribute attr -> sendM $ do
-    modifyIORef ctx.tcSpanStack $ \case
+    modifyIORef ctx.spanStack $ \case
       [] -> []
-      (s:rest) -> s { asAttributes = s.asAttributes <> [attr] } : rest
+      (s:rest) -> 
+        let newS = ActiveSpan 
+              { spanId = s.spanId
+              , name = s.name
+              , kind = s.kind
+              , startTime = s.startTime
+              , attributes = s.attributes <> [attr]
+              }
+        in newS : rest
 
 
 -- ════════════════════════════════════════════════════════════════════════════

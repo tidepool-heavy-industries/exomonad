@@ -180,7 +180,7 @@ stopHookLogic repoName runPreCommit = do
           -- If PR exists, we don't block even with dirty files
           -- Also block if pre-commit check failed
           preCommitFailed = case preCommitCtx of
-            Just pc -> not (success pc)
+            Just pc -> not (pc.success)
             Nothing -> False
           shouldBlock = (isIssueBranch && hasDirty && not hasPR) || preCommitFailed
           

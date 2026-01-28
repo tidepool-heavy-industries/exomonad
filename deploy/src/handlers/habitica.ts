@@ -80,11 +80,11 @@ export async function handleHabitica(
         return successResult({
           userId: data.data._id,
           userName: data.data.profile?.name ?? "",
-          userStats: {
-            usHp: data.data.stats.hp,
-            usMp: data.data.stats.mp,
-            usExp: data.data.stats.exp,
-            usGp: data.data.stats.gp,
+          stats: {
+            hp: data.data.stats.hp,
+            mp: data.data.stats.mp,
+            exp: data.data.stats.exp,
+            gp: data.data.stats.gp,
           },
         });
       }
@@ -101,8 +101,8 @@ export async function handleHabitica(
         const data = (await resp.json()) as HabiticaResponse<HabiticaScoreResult>;
         if (!resp.ok) throw new Error(data.message || "ScoreTask failed");
         return successResult({
-          srDelta: data.data.delta,
-          srDrop: data.data._tmp?.drop?.text ?? null,
+          delta: data.data.delta,
+          drop: data.data._tmp?.drop?.text ?? null,
         });
       }
 
@@ -120,10 +120,10 @@ export async function handleHabitica(
         if (!resp.ok) throw new Error(data.message || "GetTasks failed");
         return successResult(
           data.data.map((t) => ({
-            taskId: t._id,
-            taskText: t.text,
-            taskType: TASK_TYPE_MAP[t.type] ?? t.type,
-            taskCompleted: t.completed ?? null,
+            id: t._id,
+            text: t.text,
+            type: TASK_TYPE_MAP[t.type] ?? t.type,
+            completed: t.completed ?? null,
           }))
         );
       }
@@ -138,15 +138,15 @@ export async function handleHabitica(
         if (!resp.ok) throw new Error(data.message || "FetchTodos failed");
         return successResult(
           data.data.map((t) => ({
-            todoId: t._id,
-            todoTitle: t.text,
-            todoChecklist:
+            id: t._id,
+            title: t.text,
+            checklist:
               t.checklist?.map((c) => ({
-                checklistId: c.id,
-                checklistText: c.text,
-                checklistDone: c.completed,
+                id: c.id,
+                text: c.text,
+                completed: c.completed,
               })) ?? [],
-            todoCompleted: t.completed ?? false,
+            completed: t.completed ?? false,
           }))
         );
       }

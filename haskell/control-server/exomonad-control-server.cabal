@@ -177,7 +177,10 @@ library
         ginger,
         parsec,
         yaml,
-        template-haskell
+        template-haskell,
+        -- Lens
+        generic-lens >= 2.2,
+        lens >= 5.0
     hs-source-dirs:   src
     default-language: GHC2024
     default-extensions:
@@ -187,9 +190,12 @@ library
         LambdaCase
         OverloadedStrings
         OverloadedRecordDot
+        OverloadedLabels
         DataKinds
         TypeFamilies
         TypeOperators
+        DuplicateRecordFields
+        NoFieldSelectors
 
 executable exomonad-control-server
     import:           warnings

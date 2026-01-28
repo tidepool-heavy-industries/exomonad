@@ -3,6 +3,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE FieldSelectors #-}
 
 module SchemaDerivationSpec (spec) where
 
@@ -19,27 +20,27 @@ import ExoMonad.Schema
 
 -- Define test type
 data TestArgs = TestArgs
-  { taName :: Text
-  , taCount :: Maybe Int
-  , taFlag :: Bool
+  { name :: Text
+  , count :: Maybe Int
+  , flag :: Bool
   } deriving (Show, Eq, Generic)
 
 -- Generate instances
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "ta" } ''TestArgs
-  [ 'taName ?? "The name"
-  , 'taCount ~> "item_count" ? "Number of items"
-  , 'taFlag ~> "is_flagged" ? "A flag"
+$(deriveMCPTypeWith defaultMCPOptions ''TestArgs
+  [ 'name ?? "The name"
+  , 'count ~> "item_count" ? "Number of items"
+  , 'flag ~> "is_flagged" ? "A flag"
   ])
 
 -- Nested type for testing arrays and references
 data NestedArgs = NestedArgs
-  { naItems :: [Text]
-  , naChild :: Maybe TestArgs
+  { items :: [Text]
+  , child :: Maybe TestArgs
   } deriving (Show, Eq, Generic)
 
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "na" } ''NestedArgs
-  [ 'naItems ?? "List of items"
-  , 'naChild ?? "Optional child"
+$(deriveMCPTypeWith defaultMCPOptions ''NestedArgs
+  [ 'items ?? "List of items"
+  , 'child ?? "Optional child"
   ])
 
 -- Helper to extract a key from a JSON object

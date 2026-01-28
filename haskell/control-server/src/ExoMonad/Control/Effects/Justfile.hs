@@ -22,15 +22,15 @@ runJustfileRemote :: Member SshExec effs => Text -> FilePath -> Eff (Justfile ':
 runJustfileRemote container workDir = interpret $ \case
   RunRecipe recipe args -> do
     result <- execCommand $ ExecRequest
-      { erContainer = Just container
-      , erCommand = "just"
-      , erArgs = recipe : args
-      , erWorkingDir = workDir
-      , erEnv = []
-      , erTimeout = 300
+      { container = Just container
+      , command = "just"
+      , args = recipe : args
+      , workingDir = workDir
+      , env = []
+      , timeout = 300
       }
     pure $ JustResult
-      { stdout = exStdout result
-      , stderr = exStderr result
-      , exitCode = fromMaybe (-1) (exExitCode result)
+      { stdout = result.stdout
+      , stderr = result.stderr
+      , exitCode = fromMaybe (-1) (result.exitCode)
       }

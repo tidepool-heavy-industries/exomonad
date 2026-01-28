@@ -190,7 +190,7 @@ roleSchemaFor PM = reifyRole pmRoleSchema
 allToolsForRole :: Role -> Set.Set Text
 allToolsForRole r =
   let schema = roleSchemaFor r
-      serverTools = concatMap (ssTools . snd) (rsServers schema)
+      serverTools = concatMap (\(_, srv) -> srv.tools) (schema.servers)
   in Set.fromList $ map (.mtdName) serverTools
 
 -- | Check if a tool is allowed for a role (typed version).

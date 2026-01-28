@@ -26,26 +26,26 @@ runEffectorViaSsh :: Member SshExec effs => Text -> Eff (Effector ': effs) a -> 
 runEffectorViaSsh container = interpret $ \case
   RunEffector cmd args -> do
     result <- execCommand $ ExecRequest
-      { erContainer = Just container
-      , erCommand = "effector"
-      , erArgs = cmd : args
-      , erWorkingDir = "."
-      , erEnv = []
-      , erTimeout = 60
+      { container = Just container
+      , command = "effector"
+      , args = cmd : args
+      , workingDir = "."
+      , env = []
+      , timeout = 60
       }
     -- Return combined stdout and stderr for now, similar to how it would be used
-    pure $ exStdout result <> exStderr result
+    pure $ result.stdout <> result.stderr
 
   EffectorGitStatus cwd -> do
     result <- execCommand $ ExecRequest
-      { erContainer = Just container
-      , erCommand = "effector"
-      , erArgs = ["git", "status", "--cwd", T.pack cwd]
-      , erWorkingDir = "."
-      , erEnv = []
-      , erTimeout = 30
+      { container = Just container
+      , command = "effector"
+      , args = ["git", "status", "--cwd", T.pack cwd]
+      , workingDir = "."
+      , env = []
+      , timeout = 30
       }
-    case eitherDecodeStrict (T.encodeUtf8 (exStdout result)) of
+    case eitherDecodeStrict (T.encodeUtf8 (result.stdout)) of
       Left err -> error $ "Failed to parse effector git status JSON: " ++ err
       Right val -> pure val
 
@@ -54,27 +54,27 @@ runEffectorViaSsh container = interpret $ \case
                then ["git", "diff", "--staged", "--cwd", T.pack cwd]
                else ["git", "diff", "--cwd", T.pack cwd]
     result <- execCommand $ ExecRequest
-      { erContainer = Just container
-      , erCommand = "effector"
-      , erArgs = args
-      , erWorkingDir = "."
-      , erEnv = []
-      , erTimeout = 30
+      { container = Just container
+      , command = "effector"
+      , args = args
+      , workingDir = "."
+      , env = []
+      , timeout = 30
       }
-    case eitherDecodeStrict (T.encodeUtf8 (exStdout result)) of
+    case eitherDecodeStrict (T.encodeUtf8 (result.stdout)) of
       Left err -> error $ "Failed to parse effector git diff JSON: " ++ err
       Right val -> pure val
 
   EffectorGitLsFiles cwd args -> do
     result <- execCommand $ ExecRequest
-      { erContainer = Just container
-      , erCommand = "effector"
-      , erArgs = ["git", "ls-files", "--cwd", T.pack cwd] ++ args
-      , erWorkingDir = "."
-      , erEnv = []
-      , erTimeout = 30
+      { container = Just container
+      , command = "effector"
+      , args = ["git", "ls-files", "--cwd", T.pack cwd] ++ args
+      , workingDir = "."
+      , env = []
+      , timeout = 30
       }
-    case eitherDecodeStrict (T.encodeUtf8 (exStdout result)) of
+    case eitherDecodeStrict (T.encodeUtf8 (result.stdout)) of
       Left err -> error $ "Failed to parse effector git ls-files JSON: " ++ err
       Right val -> pure val
 

@@ -27,21 +27,21 @@ import System.IO (hPutStrLn, stderr)
 
 -- | Configuration for OpenObserve ingestion.
 data OpenObserveConfig = OpenObserveConfig
-  { ooBaseUrl  :: Text      -- ^ e.g. "http://localhost:5080"
-  , ooOrg      :: Text      -- ^ e.g. "default"
-  , ooStream   :: Text      -- ^ e.g. "claude_sessions"
-  , ooEmail    :: Text      -- ^ Ingestion user email
-  , ooPassword :: Text      -- ^ Ingestion user password
+  { baseUrl  :: Text      -- ^ e.g. "http://localhost:5080"
+  , org      :: Text      -- ^ e.g. "default"
+  , stream   :: Text      -- ^ e.g. "claude_sessions"
+  , email    :: Text      -- ^ Ingestion user email
+  , password :: Text      -- ^ Ingestion user password
   } deriving (Eq, Generic)
 
 instance Show OpenObserveConfig where
   show OpenObserveConfig{..} =
     "OpenObserveConfig"
-      <> " { ooBaseUrl = "  <> show ooBaseUrl
-      <> ", ooOrg = "       <> show ooOrg
-      <> ", ooStream = "    <> show ooStream
-      <> ", ooEmail = "     <> show ooEmail
-      <> ", ooPassword = "  <> "<redacted>"
+      <> " { baseUrl = "  <> show baseUrl
+      <> ", org = "       <> show org
+      <> ", stream = "    <> show stream
+      <> ", email = "     <> show email
+      <> ", password = "  <> "<redacted>"
       <> " }"
 
 -- | Load OpenObserve configuration from environment variables.
@@ -53,18 +53,18 @@ loadOpenObserveConfig = do
   mEmail  <- lookupEnv "OPENOBSERVE_EMAIL"
   mPass   <- lookupEnv "OPENOBSERVE_PASSWORD"
 
-  let baseUrl  = T.pack $ fromMaybe "http://localhost:5080" mUrl
-      org      = T.pack $ fromMaybe "default" mOrg
-      stream   = T.pack $ fromMaybe "claude_sessions" mStream
-      email    = T.pack $ fromMaybe "admin@exomonad.local" mEmail
-      password = T.pack $ fromMaybe "exomonad-dev" mPass
+  let baseUrl_  = T.pack $ fromMaybe "http://localhost:5080" mUrl
+      org_      = T.pack $ fromMaybe "default" mOrg
+      stream_   = T.pack $ fromMaybe "claude_sessions" mStream
+      email_    = T.pack $ fromMaybe "admin@exomonad.local" mEmail
+      password_ = T.pack $ fromMaybe "exomonad-dev" mPass
 
   pure $ Just OpenObserveConfig
-    { ooBaseUrl  = baseUrl
-    , ooOrg      = org
-    , ooStream   = stream
-    , ooEmail    = email
-    , ooPassword = password
+    { baseUrl  = baseUrl_
+    , org      = org_
+    , stream   = stream_
+    , email    = email_
+    , password = password_
     }
 
 -- | Ship session transcript to OpenObserve.
@@ -78,11 +78,11 @@ shipTranscript config events = void $ forkIO $ retry 3 1000000
     retry 0 _ = hPutStrLn stderr "[OpenObserve] Failed to ship transcript after all attempts"
     retry n delay = do
       result <- try @SomeException $ do
-        let url = T.unpack (ooBaseUrl config) 
-               <> "/api/" <> T.unpack (ooOrg config) 
-               <> "/" <> T.unpack (ooStream config) 
+        let url = T.unpack (config.baseUrl) 
+               <> "/api/" <> T.unpack (config.org) 
+               <> "/" <> T.unpack (config.stream) 
                <> "/_json"
-            auth = B64.encode $ TE.encodeUtf8 $ ooEmail config <> ":" <> ooPassword config
+            auth = B64.encode $ TE.encodeUtf8 $ config.email <> ":" <> config.password
             
             -- Prepare request
             request = setRequestBodyLBS (encode events)

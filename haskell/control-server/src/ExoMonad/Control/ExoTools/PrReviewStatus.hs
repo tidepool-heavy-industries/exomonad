@@ -105,10 +105,10 @@ partitionComments comments =
 buildSummary :: AuthorFeedback -> AuthorFeedback -> FeedbackSummary
 buildSummary copilot humans =
   FeedbackSummary
-    { fsCopilotPending = length (afPending copilot)
-    , fsCopilotResolved = length (afResolved copilot)
-    , fsHumanPending = length (afPending humans)
-    , fsHumanResolved = length (afResolved humans)
+    { copilotPending = length (copilot.pending)
+    , copilotResolved = length (copilot.resolved)
+    , humanPending = length (humans.pending)
+    , humanResolved = length (humans.resolved)
     }
 
 -- | Core logic for pr_review_status.
@@ -121,13 +121,13 @@ prReviewStatusLogic args = do
   let repo = defaultRepo
 
   -- Fetch inline review comments (code-specific feedback)
-  inlineCommentsResult <- getPullRequestReviews repo args.prsaPrNumber
+  inlineCommentsResult <- getPullRequestReviews repo args.prNumber
   let inlineComments = case inlineCommentsResult of
         Left _err -> []
         Right cs -> cs
 
   -- Fetch PR-level reviews (general feedback on the PR)
-  maybePrResult <- getPullRequest repo args.prsaPrNumber True
+  maybePrResult <- getPullRequest repo args.prNumber True
   let prLevelReviews = case maybePrResult of
         Left _err -> []
         Right Nothing -> []
@@ -141,8 +141,8 @@ prReviewStatusLogic args = do
       summary = buildSummary copilotFeedback humanFeedback
 
   pure $ gotoExit PrReviewStatusResult
-    { prsrPrNumber = args.prsaPrNumber
-    , prsrCopilot = copilotFeedback
-    , prsrHumans = humanFeedback
-    , prsrSummary = summary
+    { prNumber = args.prNumber
+    , copilot = copilotFeedback
+    , humans = humanFeedback
+    , summary = summary
     }

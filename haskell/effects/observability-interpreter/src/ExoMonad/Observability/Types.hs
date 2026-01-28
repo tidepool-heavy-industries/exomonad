@@ -94,47 +94,47 @@ instance ToJSON SpanId where
 -- | Combined observability configuration.
 data ObservabilityConfig
   = ObservabilityOtelConfig
-      { ocLoki :: Maybe LokiConfig   -- ^ Loki config (for logs)
-      , ocOTLP :: Maybe OTLPConfig   -- ^ OTLP config (for traces)
-      , ocServiceName :: Text        -- ^ Service name for resource attributes
+      { loki :: Maybe LokiConfig   -- ^ Loki config (for logs)
+      , otlp :: Maybe OTLPConfig   -- ^ OTLP config (for traces)
+      , serviceName :: Text        -- ^ Service name for resource attributes
       }
   | ObservabilitySocketConfig
-      { ocSocketPath :: FilePath
+      { socketPath :: FilePath
       }
   deriving (Show, Eq, Generic)
 
 -- | Loki push endpoint configuration.
 data LokiConfig = LokiConfig
-  { lcBaseUrl  :: Text      -- ^ Base URL (e.g., "http://localhost:3100" or Grafana Cloud URL)
-  , lcUser     :: Maybe Text  -- ^ Username for basic auth (Grafana Cloud user ID)
-  , lcToken    :: Maybe Text  -- ^ API token for basic auth
-  , lcJobLabel :: Text      -- ^ Job label for all logs (e.g., "exomonad-native")
+  { baseUrl  :: Text      -- ^ Base URL (e.g., "http://localhost:3100" or Grafana Cloud URL)
+  , user     :: Maybe Text  -- ^ Username for basic auth (Grafana Cloud user ID)
+  , token    :: Maybe Text  -- ^ API token for basic auth
+  , jobLabel :: Text      -- ^ Job label for all logs (e.g., "exomonad-native")
   }
   deriving (Show, Eq, Generic)
 
 -- | OTLP HTTP endpoint configuration.
 data OTLPConfig = OTLPConfig
-  { otlpEndpoint :: Text       -- ^ OTLP endpoint (e.g., "https://otlp-gateway.../otlp/v1/traces")
-  , otlpUser     :: Maybe Text -- ^ Username for basic auth
-  , otlpToken    :: Maybe Text -- ^ API token for basic auth
+  { endpoint :: Text       -- ^ OTLP endpoint (e.g., "https://otlp-gateway.../otlp/v1/traces")
+  , user     :: Maybe Text -- ^ Username for basic auth
+  , token    :: Maybe Text -- ^ API token for basic auth
   }
   deriving (Show, Eq, Generic)
 
 -- | Default config for local Loki instance.
 defaultLokiConfig :: LokiConfig
 defaultLokiConfig = LokiConfig
-  { lcBaseUrl  = "http://localhost:3100"
-  , lcUser     = Nothing
-  , lcToken    = Nothing
-  , lcJobLabel = "exomonad-native"
+  { baseUrl  = "http://localhost:3100"
+  , user     = Nothing
+  , token    = Nothing
+  , jobLabel = "exomonad-native"
   }
 
 -- | Default config for local OTLP collector.
 defaultOTLPConfig :: OTLPConfig
 defaultOTLPConfig = OTLPConfig
-  { otlpEndpoint = "http://localhost:4318/v1/traces"
-  , otlpUser     = Nothing
-  , otlpToken    = Nothing
+  { endpoint = "http://localhost:4318/v1/traces"
+  , user     = Nothing
+  , token    = Nothing
   }
 
 -- | Create Loki config for Grafana Cloud.
@@ -147,10 +147,10 @@ defaultOTLPConfig = OTLPConfig
 -- @
 grafanaCloudConfig :: Text -> Text -> Text -> LokiConfig
 grafanaCloudConfig url userId token = LokiConfig
-  { lcBaseUrl  = url
-  , lcUser     = Just userId
-  , lcToken    = Just token
-  , lcJobLabel = "exomonad-native"
+  { baseUrl  = url
+  , user     = Just userId
+  , token    = Just token
+  , jobLabel = "exomonad-native"
   }
 
 -- | Create OTLP config for Grafana Cloud Tempo.
@@ -163,9 +163,9 @@ grafanaCloudConfig url userId token = LokiConfig
 -- @
 grafanaCloudOTLPConfig :: Text -> Text -> Text -> OTLPConfig
 grafanaCloudOTLPConfig endpoint userId token = OTLPConfig
-  { otlpEndpoint = endpoint
-  , otlpUser     = Just userId
-  , otlpToken    = Just token
+  { endpoint = endpoint
+  , user     = Just userId
+  , token    = Just token
   }
 
 
@@ -177,26 +177,26 @@ grafanaCloudOTLPConfig endpoint userId token = OTLPConfig
 --
 -- Format: @{"streams": [{"stream": {...}, "values": [...]}]}@
 newtype LokiPushRequest = LokiPushRequest
-  { lprStreams :: [LokiStream]
+  { streams :: [LokiStream]
   }
   deriving (Show, Eq, Generic)
 
 instance ToJSON LokiPushRequest where
-  toJSON req = object ["streams" .= req.lprStreams]
+  toJSON req = object ["streams" .= req.streams]
 
 -- | A single stream in a Loki push.
 --
 -- Each stream has labels (for indexing) and values (timestamp + log line pairs).
 data LokiStream = LokiStream
-  { lsLabels :: StreamLabels
-  , lsValues :: [(Text, Text)]  -- ^ (timestamp_nanos, log_line) pairs
+  { labels :: StreamLabels
+  , values :: [(Text, Text)]  -- ^ (timestamp_nanos, log_line) pairs
   }
   deriving (Show, Eq, Generic)
 
 instance ToJSON LokiStream where
   toJSON s = object
-    [ "stream" .= s.lsLabels
-    , "values" .= map (\(ts, line) -> [ts, line]) s.lsValues
+    [ "stream" .= s.labels
+    , "values" .= map (\(ts, line) -> [ts, line]) s.values
     ]
 
 -- | Stream labels for Loki indexing.
@@ -204,17 +204,17 @@ instance ToJSON LokiStream where
 -- Only high-cardinality labels that are useful for filtering.
 -- Event-specific details go in the log line JSON, not labels.
 data StreamLabels = StreamLabels
-  { slJob       :: Text      -- ^ Job name (e.g., "exomonad-native")
-  , slEventType :: Text      -- ^ Event type for filtering
-  , slSpan      :: Maybe Text  -- ^ Current span name (if any)
+  { job       :: Text      -- ^ Job name (e.g., "exomonad-native")
+  , eventType :: Text      -- ^ Event type for filtering
+  , span      :: Maybe Text  -- ^ Current span name (if any)
   }
   deriving (Show, Eq, Generic)
 
 instance ToJSON StreamLabels where
   toJSON labels = object $ catMaybes
-    [ Just ("job" .= labels.slJob)
-    , Just ("event_type" .= labels.slEventType)
-    , ("span" .=) <$> labels.slSpan
+    [ Just ("job" .= labels.job)
+    , Just ("event_type" .= labels.eventType)
+    , ("span" .=) <$> labels.span
     ]
     where
       catMaybes = foldr (\mx acc -> maybe acc (:acc) mx) []
@@ -228,79 +228,79 @@ instance ToJSON StreamLabels where
 --
 -- See: https://opentelemetry.io/docs/specs/otlp/#otlphttp-request
 newtype OTLPTraceRequest = OTLPTraceRequest
-  { otrResourceSpans :: [OTLPResourceSpans]
+  { resourceSpans :: [OTLPResourceSpans]
   }
   deriving (Show, Eq, Generic)
 
 instance ToJSON OTLPTraceRequest where
-  toJSON req = object ["resourceSpans" .= req.otrResourceSpans]
+  toJSON req = object ["resourceSpans" .= req.resourceSpans]
 
 -- | Resource spans group spans by resource (service, host, etc.).
 data OTLPResourceSpans = OTLPResourceSpans
-  { orsResource :: Value           -- ^ Resource attributes (service.name, etc.)
-  , orsScopeSpans :: [OTLPScopeSpans]
+  { resource :: Value           -- ^ Resource attributes (service.name, etc.)
+  , scopeSpans :: [OTLPScopeSpans]
   }
   deriving (Show, Eq, Generic)
 
 instance ToJSON OTLPResourceSpans where
   toJSON rs = object
-    [ "resource" .= rs.orsResource
-    , "scopeSpans" .= rs.orsScopeSpans
+    [ "resource" .= rs.resource
+    , "scopeSpans" .= rs.scopeSpans
     ]
 
 -- | Scope spans group spans by instrumentation scope.
 data OTLPScopeSpans = OTLPScopeSpans
-  { ossScope :: Value        -- ^ Instrumentation scope (name, version)
-  , ossSpans :: [OTLPSpan]
+  { scope :: Value        -- ^ Instrumentation scope (name, version)
+  , spans :: [OTLPSpan]
   }
   deriving (Show, Eq, Generic)
 
 instance ToJSON OTLPScopeSpans where
   toJSON ss = object
-    [ "scope" .= ss.ossScope
-    , "spans" .= ss.ossSpans
+    [ "scope" .= ss.scope
+    , "spans" .= ss.spans
     ]
 
 -- | Individual OTLP span.
 data OTLPSpan = OTLPSpan
-  { ospTraceId :: TraceId        -- ^ Type-safe 32 hex chars (16 bytes)
-  , ospSpanId :: SpanId          -- ^ Type-safe 16 hex chars (8 bytes)
-  , ospParentSpanId :: Maybe SpanId -- ^ Parent span ID (if nested)
-  , ospName :: Text              -- ^ Span name
-  , ospKind :: Int               -- ^ Span kind (0=unspec, 1=internal, 2=server, 3=client)
-  , ospStartTimeUnixNano :: Integer
-  , ospEndTimeUnixNano :: Integer
-  , ospAttributes :: [Value]     -- ^ SpanAttribute as JSON
-  , ospStatus :: OTLPStatus
+  { traceId :: TraceId        -- ^ Type-safe 32 hex chars (16 bytes)
+  , spanId :: SpanId          -- ^ Type-safe 16 hex chars (8 bytes)
+  , parentSpanId :: Maybe SpanId -- ^ Parent span ID (if nested)
+  , name :: Text              -- ^ Span name
+  , kind :: Int               -- ^ Span kind (0=unspec, 1=internal, 2=server, 3=client)
+  , startTimeUnixNano :: Integer
+  , endTimeUnixNano :: Integer
+  , attributes :: [Value]     -- ^ SpanAttribute as JSON
+  , status :: OTLPStatus
   }
   deriving (Show, Eq, Generic)
 
 instance ToJSON OTLPSpan where
   toJSON s = object $ catMaybes
-    [ Just ("traceId" .= s.ospTraceId)
-    , Just ("spanId" .= s.ospSpanId)
-    , ("parentSpanId" .=) <$> s.ospParentSpanId
-    , Just ("name" .= s.ospName)
-    , Just ("kind" .= s.ospKind)
-    , Just ("startTimeUnixNano" .= show s.ospStartTimeUnixNano)
-    , Just ("endTimeUnixNano" .= show s.ospEndTimeUnixNano)
-    , Just ("attributes" .= s.ospAttributes)
-    , Just ("status" .= s.ospStatus)
+    [ Just ("traceId" .= s.traceId)
+    , Just ("spanId" .= s.spanId)
+    , ("parentSpanId" .=) <$> s.parentSpanId
+    , Just ("name" .= s.name)
+    , Just ("kind" .= s.kind)
+    , Just ("startTimeUnixNano" .= show s.startTimeUnixNano)
+    , Just ("endTimeUnixNano" .= show s.endTimeUnixNano)
+    , Just ("attributes" .= s.attributes)
+    , Just ("status" .= s.status)
     ]
     where
       catMaybes = foldr (\mx acc -> maybe acc (:acc) mx) []
 
 -- | Span status.
 data OTLPStatus = OTLPStatus
-  { osCode :: OTLPStatusCode
-  , osMessage :: Maybe Text
+  { code :: OTLPStatusCode
+  , message :: Maybe Text
   }
   deriving (Show, Eq, Generic)
 
 instance ToJSON OTLPStatus where
   toJSON st = object $ catMaybes
-    [ Just ("code" .= statusCodeToInt st.osCode)
-    , ("message" .=) <$> st.osMessage
+    [ Just ("code" .= statusCodeToInt st.code)
+    , ("message" .=) <$> st.message
     ]
     where
       catMaybes = foldr (\mx acc -> maybe acc (:acc) mx) []
@@ -320,19 +320,19 @@ data OTLPStatusCode = StatusUnset | StatusOk | StatusError
 
 -- | Active span information.
 data ActiveSpan = ActiveSpan
-  { asSpanId :: SpanId         -- ^ Type-safe span ID (16 hex chars)
-  , asName :: Text             -- ^ Span name
-  , asKind :: SpanKind         -- ^ Span kind
-  , asStartTime :: Integer     -- ^ Start time in nanos
-  , asAttributes :: [SpanAttribute] -- ^ Accumulated attributes
+  { spanId :: SpanId         -- ^ Type-safe span ID (16 hex chars)
+  , name :: Text             -- ^ Span name
+  , kind :: SpanKind         -- ^ Span kind
+  , startTime :: Integer     -- ^ Start time in nanos
+  , attributes :: [SpanAttribute] -- ^ Accumulated attributes
   }
   deriving (Show, Eq, Generic)
 
 -- | Mutable trace context for tracking the current trace and span stack.
 data TraceContext = TraceContext
-  { tcTraceId :: IORef TraceId        -- ^ Type-safe current trace ID (32 hex chars)
-  , tcSpanStack :: IORef [ActiveSpan] -- ^ Stack of active spans
-  , tcCompletedSpans :: IORef [OTLPSpan] -- ^ Spans ready to export
+  { traceId :: IORef TraceId        -- ^ Type-safe current trace ID (32 hex chars)
+  , spanStack :: IORef [ActiveSpan] -- ^ Stack of active spans
+  , completedSpans :: IORef [OTLPSpan] -- ^ Spans ready to export
   }
 
 -- | Create a new trace context with a fresh trace ID.
@@ -363,22 +363,22 @@ generateSpanId = do
 
 -- | Push an active span onto the stack.
 pushActiveSpan :: TraceContext -> ActiveSpan -> IO ()
-pushActiveSpan ctx span_ = modifyIORef ctx.tcSpanStack (span_ :)
+pushActiveSpan ctx span_ = modifyIORef ctx.spanStack (span_ :)
 
 -- | Pop an active span from the stack.
 popActiveSpan :: TraceContext -> IO (Maybe ActiveSpan)
 popActiveSpan ctx = do
-  stack <- readIORef ctx.tcSpanStack
+  stack <- readIORef ctx.spanStack
   case stack of
     [] -> pure Nothing
     (s:rest) -> do
-      writeIORef ctx.tcSpanStack rest
+      writeIORef ctx.spanStack rest
       pure (Just s)
 
 -- | Get the current (innermost) active span.
 currentActiveSpan :: TraceContext -> IO (Maybe ActiveSpan)
 currentActiveSpan ctx = do
-  stack <- readIORef ctx.tcSpanStack
+  stack <- readIORef ctx.spanStack
   pure $ case stack of
     []    -> Nothing
     (s:_) -> Just s
@@ -397,9 +397,9 @@ spanKindToInt SpanClient   = 3
 -- | Extract event type for label.
 eventToLabels :: Text -> ExoMonadEvent -> StreamLabels
 eventToLabels job event = StreamLabels
-  { slJob       = job
-  , slEventType = eventType event
-  , slSpan      = Nothing  -- Filled in by interpreter
+  { job       = job
+  , eventType = eventType event
+  , span      = Nothing  -- Filled in by interpreter
   }
   where
     eventType (GraphTransition{})      = "graph_transition"

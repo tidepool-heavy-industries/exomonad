@@ -38,10 +38,16 @@ module ExoMonad.Training.Types
   , edgeTypeToText
   ) where
 
-import Data.Aeson (FromJSON, ToJSON)
+import Data.Aeson (FromJSON(..), ToJSON(..))
+
 import Data.Text (Text)
+
 import qualified Data.Text as T
+
 import GHC.Generics (Generic)
+
+
+
 
 
 -- | Fixed tag enum for semantic classification.
@@ -75,83 +81,83 @@ tagToText = T.toLower . T.pack . show
 --
 -- All fields are 1-5 integers. Tags must be from the fixed enum.
 data Rubric = Rubric
-  { rRelevance  :: Int   -- ^ 1-5: How on-topic for the query
-  , rRisk       :: Int   -- ^ 1-5: How likely to break if changed
-  , rComplexity :: Int   -- ^ 1-5: How much context needed to understand
-  , rConfidence :: Int   -- ^ 1-5: How confident in this rating
-  , rTags       :: [Tag] -- ^ Which tags apply (from fixed enum)
+  { relevance  :: Int   -- ^ 1-5: How on-topic for the query
+  , risk       :: Int   -- ^ 1-5: How likely to break if changed
+  , complexity :: Int   -- ^ 1-5: How much context needed to understand
+  , confidence :: Int   -- ^ 1-5: How confident in this rating
+  , tags       :: [Tag] -- ^ Which tags apply (from fixed enum)
   } deriving stock (Eq, Show, Generic)
     deriving anyclass (FromJSON, ToJSON)
 
 
 -- | Input context for a code location to be rated.
 data NodeContext = NodeContext
-  { ncLocation    :: Text  -- ^ File location, e.g. "Edges.hs:89"
-  , ncHover       :: Text  -- ^ Hover info from LSP (markdown)
-  , ncCodeSnippet :: Text  -- ^ Surrounding code lines
-  , ncDepth       :: Int   -- ^ Exploration depth (0 = root)
-  , ncBreadth     :: Int   -- ^ Number of siblings at this level
+  { location    :: Text  -- ^ File location, e.g. "Edges.hs:89"
+  , hover       :: Text  -- ^ Hover info from LSP (markdown)
+  , codeSnippet :: Text  -- ^ Surrounding code lines
+  , depth       :: Int   -- ^ Exploration depth (0 = root)
+  , breadth     :: Int   -- ^ Number of siblings at this level
   } deriving stock (Eq, Show, Generic)
     deriving anyclass (FromJSON, ToJSON)
 
 
 -- | Query context from the user.
 data QueryContext = QueryContext
-  { qcQuery :: Text   -- ^ Natural language query
-  , qcTags  :: [Tag]  -- ^ Interest tags from caller
+  { query :: Text   -- ^ Natural language query
+  , tags  :: [Tag]  -- ^ Interest tags from caller
   } deriving stock (Eq, Show, Generic)
     deriving anyclass (FromJSON, ToJSON)
 
 
 -- | Complete training example.
 data TrainingExample = TrainingExample
-  { teQuery  :: QueryContext  -- ^ The query being answered
-  , teNode   :: NodeContext   -- ^ The code location being rated
-  , teRubric :: Rubric        -- ^ Ground truth rating
+  { query  :: QueryContext  -- ^ The query being answered
+  , node   :: NodeContext   -- ^ The code location being rated
+  , rubric :: Rubric        -- ^ Ground truth rating
   } deriving stock (Eq, Show, Generic)
     deriving anyclass (FromJSON, ToJSON)
 
 
 -- | Input context for scoring an edge (flattened for 270M model).
 data ScoreEdgeInput = ScoreEdgeInput
-  { seiQuery       :: Text      -- ^ Natural language query
-  , seiSourceFile  :: Text      -- ^ Source location file
-  , seiSourceLine  :: Int       -- ^ Source location line
-  , seiSourceHover :: Text      -- ^ Hover info at source
-  , seiTargetFile  :: Text      -- ^ Target location file
-  , seiTargetLine  :: Int       -- ^ Target location line
-  , seiTargetHover :: Text      -- ^ Hover info at target
-  , seiEdgeType    :: EdgeType  -- ^ Relationship type
+  { query       :: Text      -- ^ Natural language query
+  , sourceFile  :: Text      -- ^ Source location file
+  , sourceLine  :: Int       -- ^ Source location line
+  , sourceHover :: Text      -- ^ Hover info at source
+  , targetFile  :: Text      -- ^ Target location file
+  , targetLine  :: Int       -- ^ Target location line
+  , targetHover :: Text      -- ^ Hover info at target
+  , edgeType    :: EdgeType  -- ^ Relationship type
   } deriving stock (Eq, Show, Generic)
     deriving anyclass (FromJSON, ToJSON)
 
 
 -- | Output rubric for an edge (flattened for 270M model).
 data ScoreEdgeOutput = ScoreEdgeOutput
-  { seoRelevance    :: Int   -- ^ 1-5: How relevant to query
-  , seoRisk         :: Int   -- ^ 1-5: How risky to modify
-  , seoReasoning    :: Text  -- ^ Natural language justification
-  , seoIsExhaustive :: Bool  -- ^ Pattern match exhaustiveness
-  , seoIsTypeFamily :: Bool  -- ^ Type-level computation
-  , seoIsExported   :: Bool  -- ^ Public API surface
+  { relevance    :: Int   -- ^ 1-5: How relevant to query
+  , risk         :: Int   -- ^ 1-5: How risky to modify
+  , reasoning    :: Text  -- ^ Natural language justification
+  , isExhaustive :: Bool  -- ^ Pattern match exhaustiveness
+  , isTypeFamily :: Bool  -- ^ Type-level computation
+  , isExported   :: Bool  -- ^ Public API surface
   } deriving stock (Eq, Show, Generic)
     deriving anyclass (FromJSON, ToJSON)
 
 
 -- | Complete training example for edge scoring.
 data EdgeTrainingExample = EdgeTrainingExample
-  { eteInput  :: ScoreEdgeInput
-  , eteOutput :: ScoreEdgeOutput
+  { input  :: ScoreEdgeInput
+  , output :: ScoreEdgeOutput
   } deriving stock (Eq, Show, Generic)
     deriving anyclass (FromJSON, ToJSON)
 
 
 -- | Training example input for select_symbols tool (from LSP exploration).
 data SelectSymbolsExample = SelectSymbolsExample
-  { sseSymbolName :: Text   -- ^ Symbol name from LSP
-  , sseLocation   :: Text   -- ^ File location "File.hs:42"
-  , sseSignature  :: Text   -- ^ Type signature from LSP hover
-  , sseCandidates :: [Text] -- ^ Extracted type names
+  { symbolName :: Text   -- ^ Symbol name from LSP
+  , location   :: Text   -- ^ File location "File.hs:42"
+  , signature  :: Text   -- ^ Type signature from LSP hover
+  , candidates :: [Text] -- ^ Extracted type names
   } deriving stock (Eq, Show, Generic)
     deriving anyclass (FromJSON, ToJSON)
 
@@ -168,10 +174,10 @@ data SelectSymbolsExample = SelectSymbolsExample
 -- "How do I get a User?" → look at Output
 -- "What needs a Config?" → look at Inputs
 data CandidateGroups = CandidateGroups
-  { cgFields     :: [Text]            -- ^ Record fields from documentSymbol
-  , cgInputs     :: [Text]            -- ^ Argument types (dependencies)
-  , cgOutput     :: [Text]            -- ^ Return type (what this produces)
-  , cgReferences :: Either Text [Text] -- ^ Left = "[many refs]", Right = ref list
+  { fields     :: [Text]            -- ^ Record fields from documentSymbol
+  , inputs     :: [Text]            -- ^ Argument types (dependencies)
+  , output     :: [Text]            -- ^ Return type (what this produces)
+  , references :: Either Text [Text] -- ^ Left = "[many refs]", Right = ref list
   } deriving stock (Eq, Show, Generic)
     deriving anyclass (FromJSON, ToJSON)
 

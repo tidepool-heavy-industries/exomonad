@@ -33,20 +33,20 @@ import Text.Read (readMaybe)
 type SessionId = Text
 
 data CircuitBreakerState = CircuitBreakerState
-  { cbSessionId :: SessionId
-  , cbGlobalStops :: Int
-  , cbStageRetries :: Map Text Int
-  , cbLastStopTime :: UTCTime
-  , cbStopHookActive :: Bool
+  { sessionId :: SessionId
+  , globalStops :: Int
+  , stageRetries :: Map Text Int
+  , lastStopTime :: UTCTime
+  , stopHookActive :: Bool
   } deriving (Show, Eq, Generic)
 
 -- | Global state in control-server
 type CircuitBreakerMap = TVar (Map SessionId CircuitBreakerState)
 
 data CircuitBreakerConfig = CircuitBreakerConfig
-  { cbcGlobalMax :: Int
-  , cbcStageMax :: Int
-  , cbcStaleTimeout :: NominalDiffTime
+  { globalMax :: Int
+  , stageMax :: Int
+  , staleTimeout :: NominalDiffTime
   } deriving (Show, Eq)
 
 mkCircuitBreakerConfig :: Int -> Int -> Int -> Either Text CircuitBreakerConfig
@@ -74,8 +74,8 @@ initCircuitBreaker = newTVarIO Map.empty
 -- | Check if limits are exceeded
 checkLimits :: CircuitBreakerConfig -> CircuitBreakerState -> Either Text ()
 checkLimits config cbs
-  | cbs.cbGlobalStops >= config.cbcGlobalMax = Left $ "Global stop limit reached (" <> T.pack (show config.cbcGlobalMax) <> "). Wait " <> T.pack (show $ config.cbcStaleTimeout) <> "s or use cb_reset."
-  | any (>= config.cbcStageMax) (Map.elems cbs.cbStageRetries) = Left $ "Stage limit reached (" <> T.pack (show config.cbcStageMax) <> "). Fix the underlying issue or use cb_reset."
+  | cbs.globalStops >= config.globalMax = Left $ "Global stop limit reached (" <> T.pack (show config.globalMax) <> "). Wait " <> T.pack (show $ config.staleTimeout) <> "s or use cb_reset."
+  | any (>= config.stageMax) (Map.elems cbs.stageRetries) = Left $ "Stage limit reached (" <> T.pack (show config.stageMax) <> "). Fix the underlying issue or use cb_reset."
   | otherwise = Right ()
 
 -- | Acquire lock, run action, release lock (with limits check)
@@ -90,30 +90,30 @@ withCircuitBreaker
   -> SessionId
   -> IO a
   -> IO (Either Text a)
-withCircuitBreaker stateVar config now sessionId action = do
+withCircuitBreaker stateVar config now sid action = do
   -- 1. Try to acquire lock and check limits inside atomically
   acquireResult <- atomically $ do
     states <- readTVar stateVar
-    case Map.lookup sessionId states of
+    case Map.lookup sid states of
       Nothing -> do
         -- Initialize new session state and acquire lock
         let newState = CircuitBreakerState
-              { cbSessionId = sessionId
-              , cbGlobalStops = 0
-              , cbStageRetries = Map.empty
-              , cbLastStopTime = now
-              , cbStopHookActive = True
+              { sessionId = sid
+              , globalStops = 0
+              , stageRetries = Map.empty
+              , lastStopTime = now
+              , stopHookActive = True
               }
-        modifyTVar' stateVar (Map.insert sessionId newState)
+        modifyTVar' stateVar (Map.insert sid newState)
         pure $ Right ()
 
       Just cbs -> do
         -- Check staleness
-        let elapsed = diffUTCTime now cbs.cbLastStopTime
-        let isStale = elapsed > config.cbcStaleTimeout
+        let elapsed = diffUTCTime now cbs.lastStopTime
+        let isStale = elapsed > config.staleTimeout
         
         -- Check if active and not stale
-        if cbs.cbStopHookActive && not isStale
+        if cbs.stopHookActive && not isStale
           then pure $ Left "Stop hook already running"
           else do
             -- If we are here, either it's inactive OR it was stale (so we preempt)
@@ -122,34 +122,34 @@ withCircuitBreaker stateVar config now sessionId action = do
               Left err -> pure $ Left err
               Right () -> do
                 -- Acquire lock
-                let updatedState = cbs { cbStopHookActive = True, cbLastStopTime = now }
-                modifyTVar' stateVar (Map.insert sessionId updatedState)
+                let updatedState = cbs { stopHookActive = True, lastStopTime = now }
+                modifyTVar' stateVar (Map.insert sid updatedState)
                 pure $ Right ()
 
   case acquireResult of
     Left err -> pure $ Left err
-    Right () -> runActionAndRelease stateVar sessionId action
+    Right () -> runActionAndRelease stateVar sid action
 
 -- | Helper to run action and ensure lock is released
 runActionAndRelease :: CircuitBreakerMap -> SessionId -> IO a -> IO (Either Text a)
-runActionAndRelease stateVar sessionId action = do
+runActionAndRelease stateVar sid action = do
   result <- try action
   now <- getCurrentTime
   atomically $ modifyTVar' stateVar $ Map.adjust 
-    (\s -> s { cbStopHookActive = False, cbLastStopTime = now }) 
-    sessionId
+    (\s -> s { stopHookActive = False, lastStopTime = now }) 
+    sid
   case result of
     Left (e :: SomeException) -> pure $ Left $ T.pack (show e)
     Right val -> pure $ Right val
 
 -- | Increment stage counter (used by graph handlers)
 incrementStage :: CircuitBreakerMap -> SessionId -> Text -> UTCTime -> IO ()
-incrementStage stateVar sessionId stage now = do
+incrementStage stateVar sid stage now = do
   atomically $ modifyTVar' stateVar $ Map.adjust (\s -> s
-    { cbGlobalStops = s.cbGlobalStops + 1
-    , cbStageRetries = Map.insertWith (+) stage 1 s.cbStageRetries
-    , cbLastStopTime = now
-    }) sessionId
+    { globalStops = s.globalStops + 1
+    , stageRetries = Map.insertWith (+) stage 1 s.stageRetries
+    , lastStopTime = now
+    }) sid
 
 -- | Get current state for a session
 getCircuitBreakerState :: CircuitBreakerMap -> SessionId -> IO (Maybe CircuitBreakerState)

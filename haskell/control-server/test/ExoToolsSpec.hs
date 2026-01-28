@@ -11,6 +11,11 @@ import Data.Time.Clock (getCurrentTime)
 import Test.Tasty
 import Test.Tasty.HUnit
 import ExoMonad.Control.ExoTools
+import ExoMonad.Control.ExoTools.SpawnAgents (SpawnAgentsGraph(..), CleanupAgentsGraph(..))
+import ExoMonad.Control.ExoTools.SpawnAgents.Types (CleanupAgentsResult(..), SpawnAgentsResult(..))
+import ExoMonad.Control.ExoTools.FilePR (FilePRGraph(..))
+import ExoMonad.Control.ExoTools.PrReviewStatus (PrReviewStatusGraph(..))
+import ExoMonad.Control.ExoTools.PrReviewStatus.Types (PrReviewStatusResult(..), AuthorFeedback(..), FeedbackSummary(..))
 import ExoMonad.Effects.GitHub (ReviewComment(..), ReviewState(..))
 import ExoMonad.Graph.MCPReify (reifyMCPTools, MCPToolInfo(..))
 
@@ -39,8 +44,8 @@ test_discovery_cleanup = do
 test_serialization_cleanup :: Assertion
 test_serialization_cleanup = do
   let res = CleanupAgentsResult
-        { carCleaned = ["123", "456"]
-        , carFailed = [("789", "Worktree not found")]
+        { cleaned = ["123", "456"]
+        , failed = [("789", "Worktree not found")]
         }
   let json = toJSON res
   case fromJSON @CleanupAgentsResult json of
@@ -57,9 +62,9 @@ test_discovery_spawn = do
 test_serialization_spawn :: Assertion
 test_serialization_spawn = do
   let res = SpawnAgentsResult
-        { sarWorktrees = [("wzi", "/path/to/wt")]
-        , sarTabs = [("wzi", "tab-123")]
-        , sarFailed = []
+        { worktrees = [("wzi", "/path/to/wt")]
+        , tabs = [("wzi", "tab-123")]
+        , failed = []
         }
   let json = toJSON res
   case fromJSON @SpawnAgentsResult json of
@@ -111,24 +116,24 @@ test_pr_serialization = do
   let copilotComment = ReviewComment "Copilot" "Looks good" (Just "Main.hs") (Just 10) ReviewCommented now False
   let humanComment = ReviewComment "reviewer" "LGTM" Nothing Nothing ReviewApproved now True
   let copilotFeedback = AuthorFeedback
-        { afPending = [copilotComment]
-        , afResolved = []
+        { pending = [copilotComment]
+        , resolved = []
         }
   let humanFeedback = AuthorFeedback
-        { afPending = []
-        , afResolved = [humanComment]
+        { pending = []
+        , resolved = [humanComment]
         }
   let summary = FeedbackSummary
-        { fsCopilotPending = 1
-        , fsCopilotResolved = 0
-        , fsHumanPending = 0
-        , fsHumanResolved = 1
+        { copilotPending = 1
+        , copilotResolved = 0
+        , humanPending = 0
+        , humanResolved = 1
         }
   let res = PrReviewStatusResult
-        { prsrPrNumber = 123
-        , prsrCopilot = copilotFeedback
-        , prsrHumans = humanFeedback
-        , prsrSummary = summary
+        { prNumber = 123
+        , copilot = copilotFeedback
+        , humans = humanFeedback
+        , summary = summary
         }
   let json = toJSON res
   case fromJSON @PrReviewStatusResult json of

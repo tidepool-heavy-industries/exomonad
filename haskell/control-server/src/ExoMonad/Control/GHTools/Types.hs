@@ -36,6 +36,7 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 import ExoMonad.Effects.GitHub (Issue)
 import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(..), HasJSONSchema(..))
+import Language.Haskell.TH (mkName)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GH ISSUE LIST TOOL
@@ -43,33 +44,33 @@ import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(.
 
 -- | Arguments for gh_issue_list tool.
 data GHIssueListArgs = GHIssueListArgs
-  { gilaRepo   :: Maybe Text   -- ^ owner/repo
-  , gilaStatus :: Maybe Text   -- ^ open, closed
-  , gilaLabels :: Maybe [Text] -- ^ Filter by labels
-  , gilaLimit  :: Maybe Int    -- ^ Max results
+  { repo   :: Maybe Text   -- ^ owner/repo
+  , status :: Maybe Text   -- ^ open, closed
+  , labels :: Maybe [Text] -- ^ Filter by labels
+  , limit  :: Maybe Int    -- ^ Max results
   }
   deriving stock (Show, Eq, Generic)
 
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "gila" } ''GHIssueListArgs
-  [ 'gilaRepo   ?? "Repository in owner/repo format (optional, uses environment default if omitted)"
-  , 'gilaStatus ?? "Filter by status: open, closed"
-  , 'gilaLabels ?? "Filter by labels"
-  , 'gilaLimit  ?? "Max results"
+$(deriveMCPTypeWith defaultMCPOptions ''GHIssueListArgs
+  [ mkName "repo"   ?? "Repository in owner/repo format (optional, uses environment default if omitted)"
+  , mkName "status" ?? "Filter by status: open, closed"
+  , mkName "labels" ?? "Filter by labels"
+  , mkName "limit"  ?? "Max results"
   ])
 
 -- | Result of gh_issue_list tool.
 data GHIssueListResult = GHIssueListResult
-  { gilrIssues :: [Issue]
-  , gilrCount  :: Int
-  , gilrError  :: Maybe Text
+  { issues :: [Issue]
+  , count  :: Int
+  , error  :: Maybe Text
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON GHIssueListResult where
   toJSON res = object
-    [ "issues" .= gilrIssues res
-    , "count"  .= gilrCount res
-    , "error"  .= gilrError res
+    [ "issues" .= res.issues
+    , "count"  .= res.count
+    , "error"  .= res.error
     ]
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -78,29 +79,29 @@ instance ToJSON GHIssueListResult where
 
 -- | Arguments for gh_issue_show tool.
 data GHIssueShowArgs = GHIssueShowArgs
-  { gisaRepo   :: Maybe Text
-  , gisaNumber :: Int
+  { repo   :: Maybe Text
+  , number :: Int
   }
   deriving stock (Show, Eq, Generic)
 
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "gisa" } ''GHIssueShowArgs
-  [ 'gisaRepo   ?? "Repository in owner/repo format"
-  , 'gisaNumber ?? "The issue number to show"
+$(deriveMCPTypeWith defaultMCPOptions ''GHIssueShowArgs
+  [ mkName "repo"   ?? "Repository in owner/repo format"
+  , mkName "number" ?? "The issue number to show"
   ])
 
 -- | Result of gh_issue_show tool.
 data GHIssueShowResult = GHIssueShowResult
-  { gisrIssue :: Maybe Issue
-  , gisrFound :: Bool
-  , gisrError :: Maybe Text
+  { issue :: Maybe Issue
+  , found :: Bool
+  , error :: Maybe Text
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON GHIssueShowResult where
   toJSON res = object
-    [ "issue" .= gisrIssue res
-    , "found" .= gisrFound res
-    , "error" .= gisrError res
+    [ "issue" .= res.issue
+    , "found" .= res.found
+    , "error" .= res.error
     ]
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -109,35 +110,35 @@ instance ToJSON GHIssueShowResult where
 
 -- | Arguments for gh_issue_create tool.
 data GHIssueCreateArgs = GHIssueCreateArgs
-  { gcaRepo      :: Maybe Text
-  , gcaTitle     :: Text
-  , gcaBody      :: Maybe Text
-  , gcaLabels    :: Maybe [Text]
-  , gcaAssignees :: Maybe [Text]
+  { repo      :: Maybe Text
+  , title     :: Text
+  , body      :: Maybe Text
+  , labels    :: Maybe [Text]
+  , assignees :: Maybe [Text]
   }
   deriving stock (Show, Eq, Generic)
 
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "gca" } ''GHIssueCreateArgs
-  [ 'gcaRepo      ?? "Repository in owner/repo format"
-  , 'gcaTitle     ?? "Title of the new issue"
-  , 'gcaBody      ?? "Body description of the issue"
-  , 'gcaLabels    ?? "Labels to attach"
-  , 'gcaAssignees ?? "Assignee usernames"
+$(deriveMCPTypeWith defaultMCPOptions ''GHIssueCreateArgs
+  [ mkName "repo"      ?? "Repository in owner/repo format"
+  , mkName "title"     ?? "Title of the new issue"
+  , mkName "body"      ?? "Body description of the issue"
+  , mkName "labels"    ?? "Labels to attach"
+  , mkName "assignees" ?? "Assignee usernames"
   ])
 
 -- | Result of gh_issue_create tool.
 data GHIssueCreateResult = GHIssueCreateResult
-  { gcrNumber  :: Int
-  , gcrSuccess :: Bool
-  , gcrError   :: Maybe Text
+  { number  :: Int
+  , success :: Bool
+  , error   :: Maybe Text
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON GHIssueCreateResult where
   toJSON res = object
-    [ "number"  .= gcrNumber res
-    , "success" .= gcrSuccess res
-    , "error"   .= gcrError res
+    [ "number"  .= res.number
+    , "success" .= res.success
+    , "error"   .= res.error
     ]
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -146,39 +147,39 @@ instance ToJSON GHIssueCreateResult where
 
 -- | Arguments for gh_issue_update tool.
 data GHIssueUpdateArgs = GHIssueUpdateArgs
-  { guaRepo      :: Maybe Text
-  , guaNumber    :: Int
-  , guaTitle     :: Maybe Text
-  , guaBody      :: Maybe Text
-  , guaStatus    :: Maybe Text     -- ^ open, closed
-  , guaLabels    :: Maybe [Text]
-  , guaAssignees :: Maybe [Text]
+  { repo      :: Maybe Text
+  , number    :: Int
+  , title     :: Maybe Text
+  , body      :: Maybe Text
+  , status    :: Maybe Text     -- ^ open, closed
+  , labels    :: Maybe [Text]
+  , assignees :: Maybe [Text]
   }
   deriving stock (Show, Eq, Generic)
 
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "gua" } ''GHIssueUpdateArgs
-  [ 'guaRepo      ?? "Repository in owner/repo format"
-  , 'guaNumber    ?? "The issue number to update"
-  , 'guaTitle     ?? "New title"
-  , 'guaBody      ?? "New body description"
-  , 'guaStatus    ?? "New status: open, closed"
-  , 'guaLabels    ?? "New set of labels (replaces existing)"
-  , 'guaAssignees ?? "New set of assignees (replaces existing)"
+$(deriveMCPTypeWith defaultMCPOptions ''GHIssueUpdateArgs
+  [ mkName "repo"      ?? "Repository in owner/repo format"
+  , mkName "number"    ?? "The issue number to update"
+  , mkName "title"     ?? "New title"
+  , mkName "body"      ?? "New body description"
+  , mkName "status"    ?? "New status: open, closed"
+  , mkName "labels"    ?? "New set of labels (replaces existing)"
+  , mkName "assignees" ?? "New set of assignees (replaces existing)"
   ])
 
 -- | Result of gh_issue_update tool.
 data GHIssueUpdateResult = GHIssueUpdateResult
-  { gurSuccess :: Bool
-  , gurNumber  :: Int
-  , gurError   :: Maybe Text
+  { success :: Bool
+  , number  :: Int
+  , error   :: Maybe Text
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON GHIssueUpdateResult where
   toJSON res = object
-    [ "success" .= gurSuccess res
-    , "number"  .= gurNumber res
-    , "error"   .= gurError res
+    [ "success" .= res.success
+    , "number"  .= res.number
+    , "error"   .= res.error
     ]
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -187,29 +188,29 @@ instance ToJSON GHIssueUpdateResult where
 
 -- | Arguments for gh_issue_close tool.
 data GHIssueCloseArgs = GHIssueCloseArgs
-  { gclaRepo   :: Maybe Text
-  , gclaNumber :: Int
+  { repo   :: Maybe Text
+  , number :: Int
   }
   deriving stock (Show, Eq, Generic)
 
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "gcla" } ''GHIssueCloseArgs
-  [ 'gclaRepo   ?? "Repository in owner/repo format"
-  , 'gclaNumber ?? "The issue number to close"
+$(deriveMCPTypeWith defaultMCPOptions ''GHIssueCloseArgs
+  [ mkName "repo"   ?? "Repository in owner/repo format"
+  , mkName "number" ?? "The issue number to close"
   ])
 
 -- | Result of gh_issue_close tool.
 data GHIssueCloseResult = GHIssueCloseResult
-  { gclrSuccess :: Bool
-  , gclrNumber  :: Int
-  , gclrError   :: Maybe Text
+  { success :: Bool
+  , number  :: Int
+  , error   :: Maybe Text
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON GHIssueCloseResult where
   toJSON res = object
-    [ "success" .= gclrSuccess res
-    , "number"  .= gclrNumber res
-    , "error"   .= gclrError res
+    [ "success" .= res.success
+    , "number"  .= res.number
+    , "error"   .= res.error
     ]
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -218,27 +219,27 @@ instance ToJSON GHIssueCloseResult where
 
 -- | Arguments for gh_issue_reopen tool.
 data GHIssueReopenArgs = GHIssueReopenArgs
-  { graRepo   :: Maybe Text
-  , graNumber :: Int
+  { repo   :: Maybe Text
+  , number :: Int
   }
   deriving stock (Show, Eq, Generic)
 
-$(deriveMCPTypeWith defaultMCPOptions { fieldPrefix = "gra" } ''GHIssueReopenArgs
-  [ 'graRepo   ?? "Repository in owner/repo format"
-  , 'graNumber ?? "The issue number to reopen"
+$(deriveMCPTypeWith defaultMCPOptions ''GHIssueReopenArgs
+  [ mkName "repo"   ?? "Repository in owner/repo format"
+  , mkName "number" ?? "The issue number to reopen"
   ])
 
 -- | Result of gh_issue_reopen tool.
 data GHIssueReopenResult = GHIssueReopenResult
-  { grrSuccess :: Bool
-  , grrNumber  :: Int
-  , grrError   :: Maybe Text
+  { success :: Bool
+  , number  :: Int
+  , error   :: Maybe Text
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON GHIssueReopenResult where
   toJSON res = object
-    [ "success" .= grrSuccess res
-    , "number"  .= grrNumber res
-    , "error"   .= grrError res
+    [ "success" .= res.success
+    , "number"  .= res.number
+    , "error"   .= res.error
     ]

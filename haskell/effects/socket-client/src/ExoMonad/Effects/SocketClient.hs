@@ -3,18 +3,37 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE NoFieldSelectors #-}
 
 module ExoMonad.Effects.SocketClient
   ( SocketConfig(..)
   , ServiceRequest(..)
   , ServiceResponse(..)
   , ServiceError(..)
+  , AnthropicChatReq(..)
+  , GitHubGetIssueReq(..)
+  , GitHubCreateIssueReq(..)
+  , GitHubUpdateIssueReq(..)
+  , GitHubAddIssueLabelReq(..)
+  , GitHubRemoveIssueLabelReq(..)
+  , GitHubAddIssueAssigneeReq(..)
+  , GitHubRemoveIssueAssigneeReq(..)
+  , GitHubListIssuesReq(..)
+  , GitHubCreatePRReq(..)
+  , GitHubGetPRReq(..)
+  , GitHubListPullRequestsReq(..)
+  , GitHubGetPullRequestReviewsReq(..)
+  , GitHubGetDiscussionReq(..)
+  , OllamaGenerateReq(..)
+  , OtelSpanReq(..)
+  , OtelMetricReq(..)
   , sendRequest
   , withSocketConnection
   ) where
 
 import Control.Exception (bracket, try, SomeException)
 import Data.Aeson
+import qualified Data.Aeson.KeyMap as KM
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as LBS8
@@ -30,166 +49,144 @@ data SocketConfig = SocketConfig
   , scTimeout :: Int  -- milliseconds
   } deriving (Show, Eq, Generic)
 
+-- REQUEST PAYLOAD TYPES
+
+data AnthropicChatReq = AnthropicChatReq
+  { model :: Text
+  , messages :: [Value]
+  , maxTokens :: Int
+  , tools :: Maybe [Value]
+  , system :: Maybe Text
+  , thinking :: Maybe Value
+  } deriving (Show, Eq, Generic)
+instance ToJSON AnthropicChatReq
+
+data GitHubGetIssueReq = GitHubGetIssueReq { owner :: Text, repo :: Text, number :: Int, includeComments :: Bool }
+  deriving (Show, Eq, Generic)
+instance ToJSON GitHubGetIssueReq
+
+data GitHubCreateIssueReq = GitHubCreateIssueReq
+  { owner :: Text
+  , repo :: Text
+  , title :: Text
+  , body :: Text
+  , labels :: [Text]
+  } deriving (Show, Eq, Generic)
+instance ToJSON GitHubCreateIssueReq
+
+data GitHubUpdateIssueReq = GitHubUpdateIssueReq
+  { owner :: Text
+  , repo :: Text
+  , number :: Int
+  , title :: Maybe Text
+  , body :: Maybe Text
+  , state :: Maybe Text
+  , labels :: Maybe [Text]
+  , assignees :: Maybe [Text]
+  } deriving (Show, Eq, Generic)
+instance ToJSON GitHubUpdateIssueReq
+
+data GitHubAddIssueLabelReq = GitHubAddIssueLabelReq { owner :: Text, repo :: Text, number :: Int, label :: Text }
+  deriving (Show, Eq, Generic)
+instance ToJSON GitHubAddIssueLabelReq
+
+data GitHubRemoveIssueLabelReq = GitHubRemoveIssueLabelReq { owner :: Text, repo :: Text, number :: Int, label :: Text }
+  deriving (Show, Eq, Generic)
+instance ToJSON GitHubRemoveIssueLabelReq
+
+data GitHubAddIssueAssigneeReq = GitHubAddIssueAssigneeReq { owner :: Text, repo :: Text, number :: Int, assignee :: Text }
+  deriving (Show, Eq, Generic)
+instance ToJSON GitHubAddIssueAssigneeReq
+
+data GitHubRemoveIssueAssigneeReq = GitHubRemoveIssueAssigneeReq { owner :: Text, repo :: Text, number :: Int, assignee :: Text }
+  deriving (Show, Eq, Generic)
+instance ToJSON GitHubRemoveIssueAssigneeReq
+
+data GitHubListIssuesReq = GitHubListIssuesReq { owner :: Text, repo :: Text, state :: Maybe Text, issueLabels :: [Text] }
+  deriving (Show, Eq, Generic)
+instance ToJSON GitHubListIssuesReq
+
+data GitHubCreatePRReq = GitHubCreatePRReq { owner :: Text, repo :: Text, title :: Text, body :: Text, head :: Text, base :: Text }
+  deriving (Show, Eq, Generic)
+instance ToJSON GitHubCreatePRReq
+
+data GitHubGetPRReq = GitHubGetPRReq { owner :: Text, repo :: Text, number :: Int, includeDetails :: Bool }
+  deriving (Show, Eq, Generic)
+instance ToJSON GitHubGetPRReq
+
+data GitHubListPullRequestsReq = GitHubListPullRequestsReq { owner :: Text, repo :: Text, state :: Maybe Text, limit :: Maybe Int }
+  deriving (Show, Eq, Generic)
+instance ToJSON GitHubListPullRequestsReq
+
+data GitHubGetPullRequestReviewsReq = GitHubGetPullRequestReviewsReq { owner :: Text, repo :: Text, number :: Int }
+  deriving (Show, Eq, Generic)
+instance ToJSON GitHubGetPullRequestReviewsReq
+
+data GitHubGetDiscussionReq = GitHubGetDiscussionReq { owner :: Text, repo :: Text, number :: Int }
+  deriving (Show, Eq, Generic)
+instance ToJSON GitHubGetDiscussionReq
+
+data OllamaGenerateReq = OllamaGenerateReq { model :: Text, prompt :: Text, system :: Maybe Text }
+  deriving (Show, Eq, Generic)
+instance ToJSON OllamaGenerateReq
+
+data OtelSpanReq = OtelSpanReq { traceId :: Text, spanId :: Text, name :: Text, startNs :: Integer, endNs :: Integer, attributes :: Object }
+  deriving (Show, Eq, Generic)
+instance ToJSON OtelSpanReq
+
+data OtelMetricReq = OtelMetricReq { name :: Text, value :: Double, otelLabels :: Object }
+  deriving (Show, Eq, Generic)
+instance ToJSON OtelMetricReq
+
+
 -- | Mirror of Rust protocol types (to be implemented in exomonad-shared)
 data ServiceRequest
-  = AnthropicChat 
-      { model :: Text
-      , messages :: [Value]
-      , maxTokens :: Int
-      , tools :: Maybe [Value]
-      , system :: Maybe Text
-      , thinking :: Maybe Value
-      }
-  | GitHubGetIssue { owner :: Text, repo :: Text, number :: Int, includeComments :: Bool }
-  | GitHubCreateIssue { owner :: Text, repo :: Text, title :: Text, body :: Text, labels :: [Text] }
-  | GitHubUpdateIssue { owner :: Text, repo :: Text, number :: Int, updateTitle :: Maybe Text, updateBody :: Maybe Text, state :: Maybe Text, updateLabels :: Maybe [Text], assignees :: Maybe [Text] }
-  | GitHubAddIssueLabel { owner :: Text, repo :: Text, number :: Int, label :: Text }
-  | GitHubRemoveIssueLabel { owner :: Text, repo :: Text, number :: Int, label :: Text }
-  | GitHubAddIssueAssignee { owner :: Text, repo :: Text, number :: Int, assignee :: Text }
-  | GitHubRemoveIssueAssignee { owner :: Text, repo :: Text, number :: Int, assignee :: Text }
-  | GitHubListIssues { owner :: Text, repo :: Text, state :: Maybe Text, issueLabels :: [Text] }
-  | GitHubCreatePR { owner :: Text, repo :: Text, title :: Text, body :: Text, head :: Text, base :: Text }
-  | GitHubGetPR { owner :: Text, repo :: Text, number :: Int, includeDetails :: Bool }
-  | GitHubListPullRequests { owner :: Text, repo :: Text, state :: Maybe Text, limit :: Maybe Int }
-  | GitHubGetPullRequestReviews { owner :: Text, repo :: Text, number :: Int }
-  | GitHubGetDiscussion { owner :: Text, repo :: Text, number :: Int }
+  = AnthropicChat AnthropicChatReq
+  | GitHubGetIssue GitHubGetIssueReq
+  | GitHubCreateIssue GitHubCreateIssueReq
+  | GitHubUpdateIssue GitHubUpdateIssueReq
+  | GitHubAddIssueLabel GitHubAddIssueLabelReq
+  | GitHubRemoveIssueLabel GitHubRemoveIssueLabelReq
+  | GitHubAddIssueAssignee GitHubAddIssueAssigneeReq
+  | GitHubRemoveIssueAssignee GitHubRemoveIssueAssigneeReq
+  | GitHubListIssues GitHubListIssuesReq
+  | GitHubCreatePR GitHubCreatePRReq
+  | GitHubGetPR GitHubGetPRReq
+  | GitHubListPullRequests GitHubListPullRequestsReq
+  | GitHubGetPullRequestReviews GitHubGetPullRequestReviewsReq
+  | GitHubGetDiscussion GitHubGetDiscussionReq
   | GitHubCheckAuth
-  | OllamaGenerate { model :: Text, prompt :: Text, system :: Maybe Text }
-  | OtelSpan { traceId :: Text, spanId :: Text, name :: Text, startNs :: Integer, endNs :: Integer, attributes :: Object }
-  | OtelMetric { name :: Text, value :: Double, otelLabels :: Object }
+  | OllamaGenerate OllamaGenerateReq
+  | OtelSpan OtelSpanReq
+  | OtelMetric OtelMetricReq
   deriving (Show, Eq, Generic)
+
+-- Helper to add type field
+addType :: ToJSON a => Text -> a -> Value
+addType t req = case toJSON req of
+  Object o -> Object (KM.insert "type" (String t) o)
+  v -> v
 
 instance ToJSON ServiceRequest where
   toJSON = \case
-    AnthropicChat m ms mt tls sys th -> object
-      [ "type" .= ("AnthropicChat" :: Text)
-      , "model" .= m
-      , "messages" .= ms
-      , "max_tokens" .= mt
-      , "tools" .= tls
-      , "system" .= sys
-      , "thinking" .= th
-      ]
-    GitHubGetIssue o r n ic -> object
-      [ "type" .= ("GitHubGetIssue" :: Text)
-      , "owner" .= o
-      , "repo" .= r
-      , "number" .= n
-      , "include_comments" .= ic
-      ]
-    GitHubCreateIssue o r t b ls -> object
-      [ "type" .= ("GitHubCreateIssue" :: Text)
-      , "owner" .= o
-      , "repo" .= r
-      , "title" .= t
-      , "body" .= b
-      , "labels" .= ls
-      ]
-    GitHubUpdateIssue o r n t b s ls as -> object
-      [ "type" .= ("GitHubUpdateIssue" :: Text)
-      , "owner" .= o
-      , "repo" .= r
-      , "number" .= n
-      , "title" .= t
-      , "body" .= b
-      , "state" .= s
-      , "labels" .= ls
-      , "assignees" .= as
-      ]
-    GitHubAddIssueLabel o r n l -> object
-      [ "type" .= ("GitHubAddIssueLabel" :: Text)
-      , "owner" .= o
-      , "repo" .= r
-      , "number" .= n
-      , "label" .= l
-      ]
-    GitHubRemoveIssueLabel o r n l -> object
-      [ "type" .= ("GitHubRemoveIssueLabel" :: Text)
-      , "owner" .= o
-      , "repo" .= r
-      , "number" .= n
-      , "label" .= l
-      ]
-    GitHubAddIssueAssignee o r n a -> object
-      [ "type" .= ("GitHubAddIssueAssignee" :: Text)
-      , "owner" .= o
-      , "repo" .= r
-      , "number" .= n
-      , "assignee" .= a
-      ]
-    GitHubRemoveIssueAssignee o r n a -> object
-      [ "type" .= ("GitHubRemoveIssueAssignee" :: Text)
-      , "owner" .= o
-      , "repo" .= r
-      , "number" .= n
-      , "assignee" .= a
-      ]
-    GitHubListIssues o r s ls -> object
-      [ "type" .= ("GitHubListIssues" :: Text)
-      , "owner" .= o
-      , "repo" .= r
-      , "state" .= s
-      , "labels" .= ls
-      ]
-    GitHubCreatePR o r t b h b' -> object
-      [ "type" .= ("GitHubCreatePR" :: Text)
-      , "owner" .= o
-      , "repo" .= r
-      , "title" .= t
-      , "body" .= b
-      , "head" .= h
-      , "base" .= b'
-      ]
-    GitHubGetPR o r n id' -> object
-      [ "type" .= ("GitHubGetPR" :: Text)
-      , "owner" .= o
-      , "repo" .= r
-      , "number" .= n
-      , "include_details" .= id'
-      ]
-    GitHubListPullRequests o r s l -> object
-      [ "type" .= ("GitHubListPullRequests" :: Text)
-      , "owner" .= o
-      , "repo" .= r
-      , "state" .= s
-      , "limit" .= l
-      ]
-    GitHubGetPullRequestReviews o r n -> object
-      [ "type" .= ("GitHubGetPullRequestReviews" :: Text)
-      , "owner" .= o
-      , "repo" .= r
-      , "number" .= n
-      ]
-    GitHubGetDiscussion o r n -> object
-      [ "type" .= ("GitHubGetDiscussion" :: Text)
-      , "owner" .= o
-      , "repo" .= r
-      , "number" .= n
-      ]
-    GitHubCheckAuth -> object
-      [ "type" .= ("GitHubCheckAuth" :: Text)
-      ]
-    OllamaGenerate m p s -> object
-      [ "type" .= ("OllamaGenerate" :: Text)
-      , "model" .= m
-      , "prompt" .= p
-      , "system" .= s
-      ]
-    OtelSpan tid sid n sns ens attrs -> object
-      [ "type" .= ("OtelSpan" :: Text)
-      , "trace_id" .= tid
-      , "span_id" .= sid
-      , "name" .= n
-      , "start_ns" .= sns
-      , "end_ns" .= ens
-      , "attributes" .= attrs
-      ]
-    OtelMetric n v ls -> object
-      [ "type" .= ("OtelMetric" :: Text)
-      , "name" .= n
-      , "value" .= v
-      , "labels" .= ls
-      ]
+    AnthropicChat req -> addType "AnthropicChat" req
+    GitHubGetIssue req -> addType "GitHubGetIssue" req
+    GitHubCreateIssue req -> addType "GitHubCreateIssue" req
+    GitHubUpdateIssue req -> addType "GitHubUpdateIssue" req
+    GitHubAddIssueLabel req -> addType "GitHubAddIssueLabel" req
+    GitHubRemoveIssueLabel req -> addType "GitHubRemoveIssueLabel" req
+    GitHubAddIssueAssignee req -> addType "GitHubAddIssueAssignee" req
+    GitHubRemoveIssueAssignee req -> addType "GitHubRemoveIssueAssignee" req
+    GitHubListIssues req -> addType "GitHubListIssues" req
+    GitHubCreatePR req -> addType "GitHubCreatePR" req
+    GitHubGetPR req -> addType "GitHubGetPR" req
+    GitHubListPullRequests req -> addType "GitHubListPullRequests" req
+    GitHubGetPullRequestReviews req -> addType "GitHubGetPullRequestReviews" req
+    GitHubGetDiscussion req -> addType "GitHubGetDiscussion" req
+    GitHubCheckAuth -> object ["type" .= ("GitHubCheckAuth" :: Text)]
+    OllamaGenerate req -> addType "OllamaGenerate" req
+    OtelSpan req -> addType "OtelSpan" req
+    OtelMetric req -> addType "OtelMetric" req
 
 data ServiceResponse
   = AnthropicChatResponse { content :: [Value], stopReason :: Text, usage :: Value }
@@ -231,7 +228,7 @@ data ServiceError
 -- | NDJSON over Unix socket
 sendRequest :: SocketConfig -> ServiceRequest -> IO (Either ServiceError ServiceResponse)
 sendRequest config req = do
-  res <- timeout (scTimeout config * 1000) $ try $ withSocketConnection config $ \sock -> do
+  res <- timeout (config.scTimeout * 1000) $ try $ withSocketConnection config $ \sock -> do
     let encoded = encode req <> "\n"
     sendAll sock encoded
     
@@ -251,7 +248,7 @@ withSocketConnection config action = bracket open Network.Socket.close action
   where
     open = do
       sock <- socket AF_UNIX Stream defaultProtocol
-      connect sock (SockAddrUnix (scSocketPath config))
+      connect sock (SockAddrUnix (config.scSocketPath))
       pure sock
 
 -- | Read a single line from the socket

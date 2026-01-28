@@ -117,14 +117,14 @@ newtype WorktreePath = WorktreePath { unWorktreePath :: FilePath }
 
 -- | Specification for creating a worktree.
 data WorktreeSpec = WorktreeSpec
-  { wsBaseName :: Text
+  { baseName :: Text
     -- ^ Base name for the worktree (e.g., "types-first-tests").
-    -- A unique suffix will be added by the interpreter if wsBranchName is Nothing.
-  , wsFromBranch :: Maybe Text
+    -- A unique suffix will be added by the interpreter if branchName is Nothing.
+  , fromBranch :: Maybe Text
     -- ^ Branch to create worktree from. Nothing = current HEAD.
-  , wsBranchName :: Maybe Text
+  , branchName :: Maybe Text
     -- ^ Explicit branch name to use. If provided, no suffix is added.
-  , wsPath :: Maybe FilePath
+  , path :: Maybe FilePath
     -- ^ Explicit path for the worktree. If provided, wcWorktreeDir is ignored.
   }
   deriving stock (Show, Eq)
@@ -132,10 +132,10 @@ data WorktreeSpec = WorktreeSpec
 -- | Default specification for a worktree.
 defaultWorktreeSpec :: Text -> WorktreeSpec
 defaultWorktreeSpec baseName = WorktreeSpec
-  { wsBaseName = baseName
-  , wsFromBranch = Nothing
-  , wsBranchName = Nothing
-  , wsPath = Nothing
+  { baseName = baseName
+  , fromBranch = Nothing
+  , branchName = Nothing
+  , path = Nothing
   }
 
 -- | Result of merging a worktree back to main.
@@ -166,18 +166,18 @@ instance FromJSON MergeResult
 -- @
 data WorktreeError
   = WorktreeGitError
-      { wgeCommand :: Text
+      { command :: Text
         -- ^ Git command that failed (e.g., "worktree add")
-      , wgeExitCode :: Int
+      , exitCode :: Int
         -- ^ Exit code from git
-      , wgeStderr :: Text
+      , stderr :: Text
         -- ^ Stderr output from git
       }
     -- ^ Git command failed
   | WorktreeFileCopyError
-      { wfceSrcPath :: FilePath
-      , wfceDestPath :: FilePath
-      , wfceReason :: Text
+      { srcPath :: FilePath
+      , destPath :: FilePath
+      , reason :: Text
       }
     -- ^ Failed to copy files during cherry-pick
   deriving stock (Eq, Show, Generic)
