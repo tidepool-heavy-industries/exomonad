@@ -27,35 +27,50 @@ else
 fi
 
 
-# --- Initialize repo if empty ---
-# Named volume may be empty on first start; clone the repo
+# --- Determine workspace ---
+# Subagents (EXOMONAD_ISSUE_ID set) use their worktree as working directory
+# Root agents (TL, PM) use /workspace/${ROLE} and clone the repo there
 ROLE="${EXOMONAD_ROLE:-agent}"
-AGENT_WORKSPACE="/workspace/${ROLE}"
-REPO_URL="${EXOMONAD_REPO_URL:-https://github.com/tidepool-heavy-industries/exomonad.git}"
-REPO_BRANCH="${EXOMONAD_REPO_BRANCH:-main}"
 
-if [ ! -d "$AGENT_WORKSPACE/.git" ]; then
-    echo "Initializing repository in $AGENT_WORKSPACE..."
-    # Create workspace if needed
-    sudo mkdir -p "$AGENT_WORKSPACE"
-    sudo chown agent:agent "$AGENT_WORKSPACE"
+if [ -n "${EXOMONAD_ISSUE_ID:-}" ]; then
+    # Subagent: stay in current directory (the worktree set by docker-ctl)
+    AGENT_WORKSPACE="$(pwd)"
+    echo "Subagent mode (issue ${EXOMONAD_ISSUE_ID}): using worktree at $AGENT_WORKSPACE"
 
-    # Handle non-empty directory (stale volume content)
-    if [ "$(ls -A "$AGENT_WORKSPACE" 2>/dev/null)" ]; then
-        echo "Directory not empty, initializing git in place..."
-        cd "$AGENT_WORKSPACE"
-        git init
-        git remote add origin "$REPO_URL"
-        git fetch origin "$REPO_BRANCH"
-        git checkout -B "$REPO_BRANCH" "origin/$REPO_BRANCH"
-        echo "Repository initialized from existing directory"
-    else
-        # Clone the repo (use HTTPS for simplicity, SSH would need key setup)
-        git clone --branch "$REPO_BRANCH" "$REPO_URL" "$AGENT_WORKSPACE"
-        echo "Repository cloned to $AGENT_WORKSPACE"
+    # Verify we're in a git worktree
+    if [ ! -d ".git" ] && [ ! -f ".git" ]; then
+        echo "ERROR: Subagent started but not in a git worktree. Current dir: $AGENT_WORKSPACE"
+        exit 1
     fi
 else
-    echo "Repository exists at $AGENT_WORKSPACE"
+    # Root agent: use /workspace/${ROLE} and initialize repo if needed
+    AGENT_WORKSPACE="/workspace/${ROLE}"
+    REPO_URL="${EXOMONAD_REPO_URL:-https://github.com/tidepool-heavy-industries/exomonad.git}"
+    REPO_BRANCH="${EXOMONAD_REPO_BRANCH:-main}"
+
+    if [ ! -d "$AGENT_WORKSPACE/.git" ]; then
+        echo "Initializing repository in $AGENT_WORKSPACE..."
+        # Create workspace if needed
+        sudo mkdir -p "$AGENT_WORKSPACE"
+        sudo chown agent:agent "$AGENT_WORKSPACE"
+
+        # Handle non-empty directory (stale volume content)
+        if [ "$(ls -A "$AGENT_WORKSPACE" 2>/dev/null)" ]; then
+            echo "Directory not empty, initializing git in place..."
+            cd "$AGENT_WORKSPACE"
+            git init
+            git remote add origin "$REPO_URL"
+            git fetch origin "$REPO_BRANCH"
+            git checkout -B "$REPO_BRANCH" "origin/$REPO_BRANCH"
+            echo "Repository initialized from existing directory"
+        else
+            # Clone the repo (use HTTPS for simplicity, SSH would need key setup)
+            git clone --branch "$REPO_BRANCH" "$REPO_URL" "$AGENT_WORKSPACE"
+            echo "Repository cloned to $AGENT_WORKSPACE"
+        fi
+    else
+        echo "Repository exists at $AGENT_WORKSPACE"
+    fi
 fi
 
 # 1. Link worktree to shared git alternates if provided

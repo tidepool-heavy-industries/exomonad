@@ -299,9 +299,9 @@ mod tests {
             trace_id: "12345678901234567890123456789012".into(),
             span_id: "1234567890123456".into(),
             name: "test-span".into(),
-            start_ns: 1000,
-            end_ns: 2000,
-            attributes: HashMap::new(),
+            start_ns: Some(1000),
+            end_ns: Some(2000),
+            attributes: Some(HashMap::new()),
         };
 
         match service.call(req).await.unwrap() {

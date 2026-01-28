@@ -183,6 +183,7 @@ mod tests {
             max_tokens: 100,
             tools: None,
             system: None,
+            thinking: None,
         };
 
         match service.call(req).await.unwrap() {
