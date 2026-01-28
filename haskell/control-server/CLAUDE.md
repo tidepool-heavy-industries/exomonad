@@ -909,16 +909,15 @@ echo '{"type":"MCPToolCall","id":"1","tool_name":"exo_status","arguments":{}}' |
 
 ### Gemini CLI Support
 
-The control server now includes support for Gemini CLI config generation via `writeGeminiConfig` (SpawnAgents.hs:476).
+The control server includes support for Gemini CLI config generation via `writeGeminiConfig` (SpawnAgents.hs) and Docker entrypoint logic.
 
 **Key differences from Claude:**
 - Config location: `.gemini/settings.json` (NOT `.gemini/settings.local.json`)
-- Combines hooks AND MCP in single file (unlike Claude which uses separate `.mcp.json`)
-- Hooks require explicit enable: `"hooksConfig": {"enabled": true}`
-- Path variable: `$GEMINI_PROJECT_DIR` (not `$CLAUDE_PROJECT_DIR`)
-- API key: `GEMINI_API_KEY` (not `ANTHROPIC_API_KEY`)
-- CLI command: Just `gemini` (no `--debug --verbose` flags)
-- MCP command: Uses full path `$GEMINI_PROJECT_DIR/../runtime/bin/exomonad` for consistency with hooks
+- **No .mcp.json Support:** MCP servers are injected directly into `settings.json` under `mcpServers`.
+- **Hook Adapter:** Uses `gemini-adapter.js` (injected by entrypoint) to normalize Gemini hook payloads (`BeforeTool` -> `PreToolUse`, `tool_parameters` -> `tool_input`) for compatibility with `exomonad` binary.
+- **Hook Events:** Configures `startup`, `SessionEnd`, and `BeforeTool`.
+- **Context Injection:** Writes context to `INITIAL_CONTEXT.md` and launches with `gemini --debug --prompt-interactive "Read @INITIAL_CONTEXT.md and begin the task."` to avoid shell escaping issues.
+- API key: `GEMINI_API_KEY` (or `GOOGLE_API_KEY`)
 
 **Status:** Implemented and wired into spawn_agents backend selection (pass `backend: "gemini"` parameter).
 
