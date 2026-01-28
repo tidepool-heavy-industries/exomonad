@@ -15,11 +15,11 @@ import Data.Aeson (eitherDecodeStrict)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import System.Process (readProcessWithExitCode)
-import System.Exit (ExitCode(..))
 
 import ExoMonad.Control.Effects.SshExec (SshExec, ExecRequest(..), ExecResult(..), execCommand)
 import ExoMonad.Effects.Effector (Effector(..), GitStatusResult, GitDiffResult)
+import ExoMonad.Control.Logging (Logger)
+import ExoMonad.Control.Subprocess (runSubprocess, runSubprocessJSON, SubprocessResult(..), SubprocessError(..))
 
 -- | Interpreter: uses SshExec to run 'effector' commands on a container
 runEffectorViaSsh :: Member SshExec effs => Text -> Eff (Effector ': effs) a -> Eff effs a
@@ -79,37 +79,30 @@ runEffectorViaSsh container = interpret $ \case
       Right val -> pure val
 
 -- | Interpreter: runs 'effector' binary directly via IO
-runEffectorIO :: LastMember IO effs => Eff (Effector ': effs) a -> Eff effs a
-runEffectorIO = interpret $ \case
+runEffectorIO :: LastMember IO effs => Logger -> Eff (Effector ': effs) a -> Eff effs a
+runEffectorIO logger = interpret $ \case
   RunEffector cmd args -> do
-    (code, stdout, stderr) <- sendM $ readProcessWithExitCode "effector" (T.unpack cmd : map T.unpack args) ""
     -- We ignore exit code for now because Effector results are often parsed from JSON in stdout even on failure
-    pure $ T.pack stdout <> T.pack stderr
+    -- or we just want the output.
+    sendM (runSubprocess logger "[Effector]" "effector" (T.unpack cmd : map T.unpack args)) >>= \case
+      SubprocessSuccess out err -> pure $ out <> err
+      SubprocessFailure e -> pure $ e.stderr -- Return stderr on failure as well
 
   EffectorGitStatus cwd -> do
-    (exitCode, stdout, stderr) <- sendM $ readProcessWithExitCode "effector" ["git", "status", "--cwd", cwd] ""
-    case exitCode of
-      ExitSuccess -> case eitherDecodeStrict (T.encodeUtf8 (T.pack stdout)) of
-        Left err -> error $ "Failed to parse effector git status JSON: " ++ err
-        Right val -> pure val
-      ExitFailure _ -> error $ "effector git status failed: " ++ stderr
+    sendM (runSubprocessJSON logger "[Effector]" "effector" ["git", "status", "--cwd", cwd]) >>= \case
+      Right val -> pure val
+      Left err -> error $ "effector git status failed: " ++ T.unpack err.stderr
 
   EffectorGitDiff cwd staged -> do
     let args = if staged 
                then ["git", "diff", "--staged", "--cwd", cwd]
                else ["git", "diff", "--cwd", cwd]
-    (exitCode, stdout, stderr) <- sendM $ readProcessWithExitCode "effector" args ""
-    case exitCode of
-      ExitSuccess -> case eitherDecodeStrict (T.encodeUtf8 (T.pack stdout)) of
-        Left err -> error $ "Failed to parse effector git diff JSON: " ++ err
-        Right val -> pure val
-      ExitFailure _ -> error $ "effector git diff failed: " ++ stderr
+    sendM (runSubprocessJSON logger "[Effector]" "effector" args) >>= \case
+      Right val -> pure val
+      Left err -> error $ "effector git diff failed: " ++ T.unpack err.stderr
 
   EffectorGitLsFiles cwd args -> do
     let cmdArgs = ["git", "ls-files", "--cwd", cwd] ++ map T.unpack args
-    (exitCode, stdout, stderr) <- sendM $ readProcessWithExitCode "effector" cmdArgs ""
-    case exitCode of
-      ExitSuccess -> case eitherDecodeStrict (T.encodeUtf8 (T.pack stdout)) of
-        Left err -> error $ "Failed to parse effector git ls-files JSON: " ++ err
-        Right val -> pure val
-      ExitFailure _ -> error $ "effector git ls-files failed: " ++ stderr
+    sendM (runSubprocessJSON logger "[Effector]" "effector" cmdArgs) >>= \case
+      Right val -> pure val
+      Left err -> error $ "effector git ls-files failed: " ++ T.unpack err.stderr
