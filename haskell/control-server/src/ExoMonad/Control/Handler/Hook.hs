@@ -254,7 +254,7 @@ handleStop tracer config input runtime cbMap = do
             { continue_ = False
             , stopReason = Just $ "Circuit breaker: " <> err
             , systemMessage = Just $ "ExoMonad circuit breaker triggered: " <> err
-            , hookSpecificOutput = Just StopOutput
+            , hookSpecificOutput = Nothing  -- Claude Code doesn't recognize Stop in hookSpecificOutput
             }
         , exitCode = 1
         }
@@ -287,7 +287,7 @@ handleStop tracer config input runtime cbMap = do
               {
                 continue_ = False
               , stopReason = Just $ "Workflow stage: " <> templateName
-              , hookSpecificOutput = Just StopOutput
+              , hookSpecificOutput = Nothing  -- Claude Code doesn't recognize Stop in hookSpecificOutput
               , systemMessage = Just rendered
               }
           , exitCode = 1
@@ -295,7 +295,7 @@ handleStop tracer config input runtime cbMap = do
         else pure $ hookSuccess defaultOutput
           {
             systemMessage = Just rendered
-          , hookSpecificOutput = Just StopOutput
+          , hookSpecificOutput = Nothing  -- Claude Code doesn't recognize Stop in hookSpecificOutput
           }
 
 -- | Get or create session ID from hook input.
@@ -444,11 +444,11 @@ makeResponse eventName input = case eventName of
     }
   "Stop" -> defaultOutput
     {
-      hookSpecificOutput = Just StopOutput
+      hookSpecificOutput = Nothing  -- Claude Code doesn't recognize Stop in hookSpecificOutput
     }
   "SubagentStop" -> defaultOutput
     {
-      hookSpecificOutput = Just SubagentStopOutput
+      hookSpecificOutput = Nothing  -- Claude Code doesn't recognize SubagentStop in hookSpecificOutput
     }
   "Notification" -> defaultOutput
     {
