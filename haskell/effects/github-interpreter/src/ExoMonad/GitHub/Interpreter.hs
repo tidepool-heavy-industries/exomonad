@@ -51,6 +51,8 @@ import ExoMonad.Effects.GitHub
   , PRCreateSpec(..)
   , PRUrl(..)
   , ReviewComment(..)
+  , Discussion(..)
+  , DiscussionComment(..)
   , CreateIssueInput(..)
   , UpdateIssueInput(..)
   , Author(..)
@@ -99,6 +101,7 @@ runGitHubIO (GitHubSocketConfig path) = interpret $ \case
   GetPullRequest (Repo repo) num _includeDetails -> sendM $ socketGetPR path repo num
   ListPullRequests (Repo repo) filt -> sendM $ socketListPullRequests path repo filt
   GetPullRequestReviews (Repo repo) num -> sendM $ socketGetPullRequestReviews path repo num
+  GetDiscussion (Repo repo) num -> sendM $ socketGetDiscussion path repo num
 
   -- Auth
   CheckAuth -> sendM $ socketCheckAuth path
@@ -335,6 +338,30 @@ socketGetPullRequestReviews path repo num = do
             err -> pure $ Left $ GHParseError $ T.pack $ "Failed to parse reviews: " <> show err
         Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
         Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubGetPullRequestReviews"
+        Left err -> pure $ Left $ socketErrorToGitHubError err
+
+socketGetDiscussion :: FilePath -> Text -> Int -> IO (Either GitHubError Discussion)
+socketGetDiscussion path repo num = do
+  case parseRepo repo of
+    Left err -> pure $ Left err
+    Right (owner, repoName) -> do
+      let req = GitHubGetDiscussion owner repoName num
+      result <- sendRequest (SocketConfig path 10000) req
+      case result of
+        Right (GitHubDiscussionResponse n t b a u cs) -> 
+          case fromJSON (toJSON cs) of
+            Aeson.Success comments -> 
+              pure $ Right $ Discussion
+                { discNumber = n
+                , discTitle = t
+                , discBody = b
+                , discAuthor = Author a Nothing
+                , discUrl = u
+                , discComments = comments
+                }
+            err -> pure $ Left $ GHParseError $ T.pack $ "Failed to parse discussion comments: " <> show err
+        Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
+        Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubGetDiscussion"
         Left err -> pure $ Left $ socketErrorToGitHubError err
 
 

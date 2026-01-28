@@ -52,6 +52,7 @@ data ServiceRequest
   | GitHubGetPR { owner :: Text, repo :: Text, number :: Int }
   | GitHubListPullRequests { owner :: Text, repo :: Text, state :: Maybe Text, limit :: Maybe Int }
   | GitHubGetPullRequestReviews { owner :: Text, repo :: Text, number :: Int }
+  | GitHubGetDiscussion { owner :: Text, repo :: Text, number :: Int }
   | GitHubCheckAuth
   | OllamaGenerate { model :: Text, prompt :: Text, system :: Maybe Text }
   | OtelSpan { traceId :: Text, spanId :: Text, name :: Text, startNs :: Integer, endNs :: Integer, attributes :: Object }
@@ -157,6 +158,12 @@ instance ToJSON ServiceRequest where
       , "repo" .= r
       , "number" .= n
       ]
+    GitHubGetDiscussion o r n -> object
+      [ "type" .= ("GitHubGetDiscussion" :: Text)
+      , "owner" .= o
+      , "repo" .= r
+      , "number" .= n
+      ]
     GitHubCheckAuth -> object
       [ "type" .= ("GitHubCheckAuth" :: Text)
       ]
@@ -189,6 +196,7 @@ data ServiceResponse
   | GitHubPRResponse { number :: Int, url :: Text, state :: Text }
   | GitHubPullRequestsResponse { pull_requests :: [Value] }
   | GitHubReviewsResponse { reviews :: [Value] }
+  | GitHubDiscussionResponse { number :: Int, title :: Text, body :: Text, author :: Text, url :: Text, comments :: [Value] }
   | GitHubAuthResponse { authenticated :: Bool, user :: Maybe Text }
   | OllamaGenerateResponse { response :: Text, done :: Bool }
   | OtelAckResponse
@@ -205,6 +213,7 @@ instance FromJSON ServiceResponse where
       "GitHubPRResponse" -> GitHubPRResponse <$> v .: "number" <*> v .: "url" <*> v .: "state"
       "GitHubPullRequestsResponse" -> GitHubPullRequestsResponse <$> v .: "pull_requests"
       "GitHubReviewsResponse" -> GitHubReviewsResponse <$> v .: "reviews"
+      "GitHubDiscussionResponse" -> GitHubDiscussionResponse <$> v .: "number" <*> v .: "title" <*> v .: "body" <*> v .: "author" <*> v .: "url" <*> v .: "comments"
       "GitHubAuthResponse" -> GitHubAuthResponse <$> v .: "authenticated" <*> v .: "user"
       "OllamaGenerateResponse" -> OllamaGenerateResponse <$> v .: "response" <*> v .: "done"
       "OtelAckResponse" -> pure OtelAckResponse

@@ -384,6 +384,11 @@ pub enum ServiceRequest {
         repo: String,
         number: u32,
     },
+    GitHubGetDiscussion {
+        owner: String,
+        repo: String,
+        number: u32,
+    },
     GitHubCheckAuth,
 
     // Observability
@@ -444,6 +449,15 @@ pub enum ServiceResponse {
     #[serde(rename = "GitHubReviewsResponse")]
     GitHubReviews {
         reviews: Vec<GitHubReviewComment>,
+    },
+    #[serde(rename = "GitHubDiscussionResponse")]
+    GitHubDiscussion {
+        number: u32,
+        title: String,
+        body: String,
+        author: String,
+        url: String,
+        comments: Vec<GitHubDiscussionComment>,
     },
     #[serde(rename = "GitHubAuthResponse")]
     GitHubAuth {
@@ -533,6 +547,14 @@ pub struct GitHubReviewComment {
     pub line: Option<u32>,
     pub state: String,
     pub created_at: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GitHubDiscussionComment {
+    pub author: String,
+    pub body: String,
+    pub created_at: String,
+    pub replies: Vec<GitHubDiscussionComment>,
 }
 
 // ============================================================================

@@ -94,6 +94,7 @@ impl ServiceServer {
             | ServiceRequest::GitHubGetPR { .. }
             | ServiceRequest::GitHubListPullRequests { .. }
             | ServiceRequest::GitHubGetPullRequestReviews { .. }
+            | ServiceRequest::GitHubGetDiscussion { .. }
             | ServiceRequest::GitHubCheckAuth => self.github.call(req).await,
             ServiceRequest::OllamaGenerate { .. } => self.ollama.call(req).await,
             ServiceRequest::OtelSpan { .. } | ServiceRequest::OtelMetric { .. } => {

@@ -1,7 +1,7 @@
 use crate::{ExternalService, ServiceError};
 use async_trait::async_trait;
 use exomonad_shared::{GitHubIssueRef, IssueState, ServiceRequest, ServiceResponse};
-use exomonad_shared::protocol::{GitHubPRRef, GitHubReviewComment};
+use exomonad_shared::protocol::{GitHubPRRef, GitHubReviewComment, GitHubDiscussionComment};
 use octocrab::{Octocrab, OctocrabBuilder};
 use reqwest::Url;
 
@@ -404,6 +404,104 @@ impl ExternalService for GitHubService {
                 }
 
                 Ok(ServiceResponse::GitHubReviews { reviews })
+            }
+            ServiceRequest::GitHubGetDiscussion {
+                owner,
+                repo,
+                number,
+            } => {
+                let query = serde_json::json!({
+                    "query": "query($owner: String!, $repo: String!, $number: Int!) { \
+                        repository(owner: $owner, name: $repo) { \
+                            discussion(number: $number) { \
+                                number \
+                                title \
+                                body \
+                                url \
+                                author { login } \
+                                comments(first: 50) { \
+                                    nodes { \
+                                        author { login } \
+                                        body \
+                                        createdAt \
+                                        replies(first: 20) { \
+                                            nodes { \
+                                                author { login } \
+                                                body \
+                                                createdAt \
+                                            } \
+                                        } \
+                                    } \
+                                } \
+                            } \
+                        } \
+                    }",
+                    "variables": {
+                        "owner": owner,
+                        "repo": repo,
+                        "number": number
+                    }
+                });
+
+                let resp: serde_json::Value = self.client.graphql(&query).await.map_err(|e| ServiceError::Api {
+                    code: 500,
+                    message: e.to_string(),
+                })?;
+
+                let discussion = resp
+                    .get("data")
+                    .and_then(|d| d.get("repository"))
+                    .and_then(|r| r.get("discussion"))
+                    .ok_or_else(|| ServiceError::Api {
+                        code: 404,
+                        message: "Discussion not found".into(),
+                    })?;
+
+                let number = discussion.get("number").and_then(|n| n.as_u64()).unwrap_or(0) as u32;
+                let title = discussion.get("title").and_then(|t| t.as_str()).unwrap_or("").to_string();
+                let body = discussion.get("body").and_then(|b| b.as_str()).unwrap_or("").to_string();
+                let url = discussion.get("url").and_then(|u| u.as_str()).unwrap_or("").to_string();
+                let author = discussion.get("author").and_then(|a| a.get("login")).and_then(|l| l.as_str()).unwrap_or("unknown").to_string();
+
+                let mut comments = Vec::new();
+                if let Some(nodes) = discussion.get("comments").and_then(|c| c.get("nodes")).and_then(|n| n.as_array()) {
+                    for node in nodes {
+                        let c_author = node.get("author").and_then(|a| a.get("login")).and_then(|l| l.as_str()).unwrap_or("unknown").to_string();
+                        let c_body = node.get("body").and_then(|b| b.as_str()).unwrap_or("").to_string();
+                        let c_created_at = node.get("createdAt").and_then(|d| d.as_str()).unwrap_or("").to_string();
+                        
+                        let mut replies = Vec::new();
+                        if let Some(reply_nodes) = node.get("replies").and_then(|r| r.get("nodes")).and_then(|n| n.as_array()) {
+                            for reply in reply_nodes {
+                                let r_author = reply.get("author").and_then(|a| a.get("login")).and_then(|l| l.as_str()).unwrap_or("unknown").to_string();
+                                let r_body = reply.get("body").and_then(|b| b.as_str()).unwrap_or("").to_string();
+                                let r_created_at = reply.get("createdAt").and_then(|d| d.as_str()).unwrap_or("").to_string();
+                                replies.push(GitHubDiscussionComment {
+                                    author: r_author,
+                                    body: r_body,
+                                    created_at: r_created_at,
+                                    replies: Vec::new(),
+                                });
+                            }
+                        }
+
+                        comments.push(GitHubDiscussionComment {
+                            author: c_author,
+                            body: c_body,
+                            created_at: c_created_at,
+                            replies,
+                        });
+                    }
+                }
+
+                Ok(ServiceResponse::GitHubDiscussion {
+                    number,
+                    title,
+                    body,
+                    author,
+                    url,
+                    comments,
+                })
             }
             ServiceRequest::GitHubCreatePR {
                 owner,
