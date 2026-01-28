@@ -8,7 +8,7 @@ Gemini Code Assist uses the same MCP architecture as Claude Code:
 
 1. **Start the control server:**
    ```bash
-   ./start-augmented.sh
+   ./ide
    ```
 
 2. **Configure MCP in settings.json:**
@@ -31,7 +31,7 @@ Gemini-specific configuration is located in `settings.json` at the project root.
 The project uses a multi-process architecture orchestrated via Unix Domain Sockets (UDS).
 
 ### Core Components
-- **`start-augmented.sh`**: The main entry point. Orchestrates the environment, sets canonical socket paths, and launches Zellij.
+- **`./ide`**: The main entry point. Orchestrates the environment using Docker Compose and launches Zellij.
 - **`.zellij/exomonad.kdl`**: Defines the TUI layout. Each pane uses `scripts/wait-for-socket.sh` to synchronize with backend readiness.
 
 ### Socket Paths (Single Source of Truth)
@@ -39,9 +39,9 @@ The project uses a multi-process architecture orchestrated via Unix Domain Socke
 - `EXOMONAD_TUI_SOCKET`: Default `.exomonad/sockets/tui.sock`
 
 ### Key Patterns
-- **Supervision**: Zellij panes run bash loops that restart clients (Claude, TUI Sidebar) on crash.
+- **Supervision**: Zellij panes run bash loops that restart clients (Claude, TUI Dashboard) on crash.
 - **Readiness**: Clients do not connect blindly; they wait for the UDS file to appear via `wait-for-socket.sh`.
-- **TUI Detection**: `tui-sidebar` (Rust) checks for the existence of the control socket to determine if the TUI was explicitly disabled (e.g., via `--no-tui`) and exits gracefully if so.
+- **TUI Detection**: `agent-status` (Rust) checks for the existence of the control socket to determine if the TUI was explicitly disabled (e.g., via `--no-tui`) and exits gracefully if so.
 
 ### Subagent Spawning
 

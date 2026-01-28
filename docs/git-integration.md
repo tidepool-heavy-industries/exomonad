@@ -1,5 +1,9 @@
 # Git Integration Research
 
+> **STATUS: RESEARCH / REFERENCE**
+> This document represents early research. Production implementations may differ.
+> See `haskell/effects/worktree-interpreter/CLAUDE.md` or `rust/effector/CLAUDE.md` for current git handling.
+
 > Research findings for the Git effect in exomonad.
 
 ## Recommendation: Use Git CLI

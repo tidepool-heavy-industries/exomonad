@@ -85,7 +85,7 @@
               echo ""
               echo "Commands:"
               echo "  cabal build all      Build Haskell packages"
-              echo "  ./start-augmented.sh Start Claude Code++ session"
+              echo "  ./ide              Start Claude Code++ session"
               echo ""
               echo "Other shells:"
               echo "  nix develop .#worker            Cloudflare Worker dev"

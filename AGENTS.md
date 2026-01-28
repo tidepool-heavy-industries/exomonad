@@ -178,7 +178,7 @@ TTY (Zellij)
 nix develop .#claude-code-plus  # Auto-starts Zellij
 
 # Manual setup:
-./start-augmented.sh                 # Terminal 1: Starts Zellij with everything
+./ide                                    # Terminal 1: Starts Zellij with everything
 # Or if running components manually:
 cabal run exomonad-control-server    # Terminal 2: Control server
 claude                               # Terminal 3: Claude Code session

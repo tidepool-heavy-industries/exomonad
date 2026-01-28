@@ -26,31 +26,31 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 │   • status {id} - Container status
 │   • stop {id} - Stop containers
 │
-├── exomonad-hub/CLAUDE.md  ← Session hub (LEGACY, needs repurposing)
-│   • Currently: session/node tracking for headless mode
-│   • Planned: metrics collection, Grafana export
+├── effector/CLAUDE.md  ← Stateless IO executor (IMPLEMENTED)
+│   • Cabal/Git/GH operations
+│   • Returns structured JSON
 │
 ├── exomonad-shared/CLAUDE.md  ← Shared types and utilities
 │   • protocol.rs: HookInput, HookOutput, ControlMessage, ControlResponse
 │   • socket.rs: TCP client (ControlSocket), NDJSON protocol
 │   • commands/hook.rs: handle_hook() implementation
 │
-├── tui-sidebar/CLAUDE.md  ← TUI sidebar (IMPLEMENTED)
-│   • Unix socket server for rendering interactive UIs
-│   • Receives UISpec from Haskell tui-interpreter
-│   • Renders with ratatui (Text, Button, Input, Progress)
+├── agent-status/           ← TUI Dashboard (IMPLEMENTED)
+│   • Renders Status, Logs, Controls
+│   • TUI-interactive dashboard for agent monitoring
+│
+├── exomonad-services/      ← External Service Clients (Library)
+│   • Anthropic, GitHub, Ollama, OTLP
 │
 ├── tui-popup/CLAUDE.md  ← Floating pane popup (IMPLEMENTED)
 │   • Renders popup UI to /dev/tty (not stdout)
 │   • Reads definition from --input file, writes result to --output (FIFO)
 │   • Launched via `zellij action new-pane --floating`
 │
-├── tui-spawner/CLAUDE.md  ← Cross-container popup spawner (IMPLEMENTED)
-│   • Creates FIFO, spawns floating Zellij pane with tui-popup
-│   • Blocks reading FIFO until user responds
-│   • Called by Haskell TUIInterpreter via subprocess
-│
-└── ssh-proxy/CLAUDE.md  ← DEPRECATED (replaced by docker-ctl)
+└── tui-spawner/CLAUDE.md  ← Cross-container popup spawner (IMPLEMENTED)
+    • Creates FIFO, spawns floating Zellij pane with tui-popup
+    • Blocks reading FIFO until user responds
+    • Called by Haskell TUIInterpreter via subprocess
 ```
 
 ## Architecture Overview
@@ -105,12 +105,12 @@ Human TTY ──▶ Claude Code (in nix shell or direct)
 |-------|------|---------|
 | [exomonad](exomonad/CLAUDE.md) | Binary | Hook handler (HTTP over Unix socket) |
 | [docker-ctl](docker-ctl/CLAUDE.md) | Binary | CLI for container lifecycle + remote exec (replaces SSH) |
-| [exomonad-hub](exomonad-hub/CLAUDE.md) | Binary | Metrics/telemetry hub (WIP) |
+| [effector](effector/CLAUDE.md) | Binary | Stateless IO executor |
 | [exomonad-shared](exomonad-shared/CLAUDE.md) | Library | Shared types, protocols, HTTP socket client (curl-based) |
-| [tui-sidebar](tui-sidebar/CLAUDE.md) | Binary + Lib | TUI sidebar: Unix socket server for interactive UIs |
+| [agent-status](agent-status/) | Binary | TUI Dashboard |
+| [exomonad-services](exomonad-services/) | Library | External service clients |
 | [tui-popup](tui-popup/CLAUDE.md) | Binary | Floating pane UI renderer (uses /dev/tty) |
 | [tui-spawner](tui-spawner/CLAUDE.md) | Binary | FIFO-based popup spawning for cross-container TUI |
-| [ssh-proxy](ssh-proxy/CLAUDE.md) | Binary | DEPRECATED - replaced by docker-ctl |
 
 ## Quick Reference
 

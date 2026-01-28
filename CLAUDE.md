@@ -117,8 +117,6 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 │   ├── control-server/CLAUDE.md ⭐ Claude Code++ hub (hooks/MCP/scout)
 │   ├── dsl/core/CLAUDE.md      ← Graph DSL reference (START HERE for handlers)
 │   ├── dsl/teaching/CLAUDE.md  ← LLM-level teaching for FunctionGemma training
-│   ├── agents/                 ← Production agents
-│   │   └── semantic-scout/CLAUDE.md ← MERGED into control-server (redirect)
 │   ├── effects/CLAUDE.md       ← Effect interpreters
 │   │   ├── llm-interpreter/     ← Anthropic/OpenAI API
 │   │   ├── lsp-interpreter/     ← Language Server Protocol
@@ -130,10 +128,10 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 ├── rust/CLAUDE.md             ← Claude Code++ (hook handler + MCP forwarding + TUI)
 ├── exomonad/CLAUDE.md  ← Hook handler (HTTP over Unix socket) (IMPLEMENTED)
 ├── docker-ctl/CLAUDE.md    ← Container lifecycle + remote exec (IMPLEMENTED)
-├── exomonad-hub/CLAUDE.md    ← Metrics hub (LEGACY, needs repurposing)
+├── effector/CLAUDE.md      ← Stateless IO executor (Cabal, Git, GH)
 ├── exomonad-shared/CLAUDE.md ← Protocol types, Unix socket client
-├── ssh-proxy/CLAUDE.md     ← DEPRECATED (replaced by docker-ctl)
-│   ├── tui-sidebar/CLAUDE.md   ← TUI sidebar: ratatui rendering for graph UIs (IMPLEMENTED)
+├── exomonad-services/      ← External service clients (Anthropic, GitHub, Ollama, OTLP)
+├── agent-status/           ← TUI Dashboard (Status, Logs, Controls)
 │   ├── tui-popup/CLAUDE.md     ← TUI popup: floating pane UI for user interaction
 │   └── tui-spawner/CLAUDE.md   ← FIFO-based popup spawning for cross-container TUI
 ├── deploy/CLAUDE.md            ← Cloudflare deployment
@@ -157,7 +155,7 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 | Work with LSP (Language Server Protocol) | `haskell/effects/lsp-interpreter/CLAUDE.md` |
 | Generate training data for FunctionGemma | `haskell/tools/training-generator/CLAUDE.md` |
 | Deploy to Cloudflare Workers | `deploy/CLAUDE.md` |
-| Work on TUI sidebar (terminal UI rendering) | `rust/tui-sidebar/CLAUDE.md` |
+| Work on stateless IO execution | `rust/effector/CLAUDE.md` |
 | Work on container spawning/exec | `rust/docker-ctl/CLAUDE.md` |
 | Understand control protocol types | `rust/exomonad-shared/CLAUDE.md` |
 
@@ -272,7 +270,7 @@ Human-driven Claude Code sessions augmented with ExoMonad. **Not headless automa
 │  • Long-lived LSP session (HLS)         │    │
 │  • Hook Handler: Passthrough            │    │
 │  • MCP Handler: 7 tools (auto-discovery)│    │
-│  • TUI Handler: Listens for Sidebar     │◄───┘
+│  • TUI Handler: Listens for Dashboard   │◄───┘
 └─────────────────────────────────────────┘    │
                                                │ Unix Socket NDJSON
                                                │ .exomonad/sockets/tui.sock
@@ -281,9 +279,9 @@ Human-driven Claude Code sessions augmented with ExoMonad. **Not headless automa
 │
 ▼
 ┌─────────────────────────────────────────┐
-│ tui-sidebar (Rust)                      │
+│ agent-status (Rust)                     │
 │  • Connects to control-server           │
-│  • Renders UISpec with ratatui          │
+│  • Renders Status/Logs/Controls         │
 │  • Captures keyboard (Tab, Enter)       │
 │  • Sends Interaction events             │
 └─────────────────────────────────────────┘
@@ -295,7 +293,7 @@ Human-driven Claude Code sessions augmented with ExoMonad. **Not headless automa
 |-----------|----------|---------|
 | **exomonad** | `rust/exomonad/` | Hook forwarding to control server (HTTP over Unix socket) |
 | **control-server** | `haskell/control-server/` | Haskell server with LSP + MCP tools + TUI handler |
-| **tui-sidebar** | `rust/tui-sidebar/` | Rust TUI: renders UISpec, captures Interaction |
+| **agent-status** | `rust/agent-status/` | Rust TUI: renders dashboard, captures Interaction |
 | **Protocol types** | `rust/exomonad-shared/protocol.rs` + `haskell/control-server/Protocol.hs` | Bidirectional message types (must match exactly) |
 
 ### Data Flow
@@ -612,12 +610,6 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 | `haskell/runtime/actor` | Actor runtime with graph-to-actor execution |
 | `haskell/runtime/parallel` | Parallel fan-out/fan-in execution with ki |
 | `haskell/runtime/wasm` | WASM deployment scaffolding |
-| `haskell/platform` | Platform abstraction layer (deprecated) |
-
-### Agents (`haskell/agents/`)
-| Package | Purpose |
-|---------|---------|
-| `haskell/agents/semantic-scout` | Code exploration MCP tool using LSP |
 
 ### Effect Interpreters (`haskell/effects/`)
 | Package | Purpose |

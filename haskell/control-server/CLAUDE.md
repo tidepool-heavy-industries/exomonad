@@ -999,7 +999,6 @@ pure $ mcpToolErrorWithDetails reqId NotFound
 - **[rust/exomonad-shared/CLAUDE.md](../../rust/exomonad-shared/CLAUDE.md)** - Protocol types (Rust side)
 - **[haskell/effects/lsp-interpreter/CLAUDE.md](../effects/lsp-interpreter/CLAUDE.md)** - LSP integration
 - **[haskell/tools/training-generator/CLAUDE.md](../tools/training-generator/CLAUDE.md)** - Training data format
-- **[haskell/agents/semantic-scout/CLAUDE.md](../agents/semantic-scout/CLAUDE.md)** - Scout implementation details
 - **[Root CLAUDE.md](../../CLAUDE.md)** - Project overview
 
 ## Next Steps

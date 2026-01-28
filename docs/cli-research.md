@@ -1,5 +1,9 @@
 # CLI Parser Research: optparse-generic vs Alternatives
 
+> **STATUS: RESEARCH / REFERENCE**
+> This document represents early research. Production implementations may differ.
+> See `haskell/dsl/core/CLAUDE.md` for current graph input handling.
+
 Research task for evaluating CLI parser derivation approaches for exomonad graph inputs.
 
 ## Executive Summary

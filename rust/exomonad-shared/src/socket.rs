@@ -159,7 +159,7 @@ pub fn control_socket_path() -> Result<PathBuf> {
             path: PathBuf::from("UNKNOWN"),
             source: std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                "EXOMONAD_CONTROL_SOCKET environment variable not set. This should be set via start-augmented.sh or .env"
+                "EXOMONAD_CONTROL_SOCKET environment variable not set. This should be set via Docker or .env"
             ),
         })
 }

@@ -87,7 +87,7 @@ runServer logger config tracer = do
   controlSocketEnv <- lookupEnv "EXOMONAD_CONTROL_SOCKET"
   let controlSocket = case controlSocketEnv of
         Just s -> s
-        Nothing -> error "EXOMONAD_CONTROL_SOCKET environment variable not set (should be set via start-augmented.sh or .env)"
+        Nothing -> error "EXOMONAD_CONTROL_SOCKET environment variable not set (should be set via Docker or .env)"
 
   -- Load observability config if not already provided
   obsConfig <- case config.observabilityConfig of
