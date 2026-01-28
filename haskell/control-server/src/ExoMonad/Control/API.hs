@@ -188,7 +188,7 @@ instance ToJSON McpContentItem where
 
 type ExoMonadControlAPI =
        -- | Hook event: (Input, Runtime, Role) -> (Output, ExitCode)
-       "hook" :> ReqBody '[JSON] (HookInput, Runtime, Role) :> Post '[JSON] (HookOutput, Int)
+       "hook" :> ReqBody '[JSON] (HookInput, Runtime, Role) :> Post '[JSON] ControlResponse
        -- | MCP tool call: Request -> Response
   :<|> "mcp" :> "call" :> ReqBody '[JSON] McpToolCallRequest :> Post '[JSON] ControlResponse
        -- | MCP tool list
