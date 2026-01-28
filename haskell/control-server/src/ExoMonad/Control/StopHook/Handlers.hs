@@ -153,14 +153,14 @@ handleCheckTest state = do
   pure $ gotoChoice @"routeTest" (state, testRes)
 
 translateTestResult :: CabalResult -> TestResult
-translateTestResult (CabalTestSuccess _) = 
-  TestResult 0 0
-translateTestResult (CabalTestFailure _raw) =
-  TestResult 0 1 -- Failed count 1 to signal failure
+translateTestResult (CabalTestSuccess output) =
+  TestResult 0 0 output
+translateTestResult (CabalTestFailure raw) =
+  TestResult 0 1 raw  -- Capture raw output for template
 -- Defensive case: should be unreachable if checkBuild handled build failures correctly.
 translateTestResult (CabalBuildFailure _ _ _) =
   error "translateTestResult: unexpected CabalBuildFailure (test called after build failure)"
-translateTestResult CabalSuccess = TestResult 0 0
+translateTestResult CabalSuccess = TestResult 0 0 ""
 
 -- | Route based on test result
 handleRouteTest
@@ -293,17 +293,20 @@ handleBuildContext (state, templateName) = do
   pure $ gotoExit (templateName, context)
 
 buildTemplateContext :: AgentState -> WorkflowState -> TemplateName -> StopHookContext
-buildTemplateContext as ws templateName = 
+buildTemplateContext as ws templateName =
   let mRes = wsLastBuildResult ws
-      (raw, failed) = case mRes of
-        Just (BuildFailure info) -> 
+      (buildRaw, buildFailed) = case mRes of
+        Just (BuildFailure info) ->
           (bfiRawOutput info, True)
-        _ -> 
+        _ ->
           ("", False)
       mTestRes = wsLastTestResult ws
-      (tFailed, tPCount, tFCount) = case mTestRes of
-        Just tr -> (tr.trFailed > 0, tr.trPassed, tr.trFailed)
-        Nothing -> (False, 0, 0)
+      (tFailed, tPCount, tFCount, testRaw) = case mTestRes of
+        Just tr -> (tr.trFailed > 0, tr.trPassed, tr.trFailed, tr.trRawOutput)
+        Nothing -> (False, 0, 0, "")
+      -- Use test raw output if tests failed, otherwise build raw output
+      raw = if tFailed then testRaw else buildRaw
+      failed = buildFailed
       mPR = wsLastPRStatus ws
       (prExists, prUrl, prNum, prStatus, prComments) = case mPR of
         Just pr -> 

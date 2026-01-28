@@ -75,6 +75,7 @@ data BuildFailureInfo = BuildFailureInfo
 data TestResult = TestResult
   { trPassed :: Int
   , trFailed :: Int
+  , trRawOutput :: Text
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)

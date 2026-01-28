@@ -40,22 +40,18 @@ data CabalResult
   = CabalSuccess
   | CabalBuildFailure
       { cbfExitCode :: Int
-      , cbfStderr :: Text
-      , cbfStdout :: Text
-      , cbfParsedErrors :: [RawCompileError]  -- Parsed GHC errors
+      , cbfStderr :: Text      -- Raw stderr output
+      , cbfStdout :: Text      -- Raw stdout output
       }
-  | CabalTestFailure
-      { ctfParsedFailures :: [TestFailure]  -- Parsed test failures
-      , ctfRawOutput :: Text
-      }
-  | CabalTestSuccess
-      { ctsOutput :: Text
-      }
+  | CabalTestFailure Text      -- Raw test output (unparsed)
+  | CabalTestSuccess Text      -- Raw test output (unparsed)
 ```
+
+**Philosophy:** Claude can read error messages. We pass raw output to templates without parsing. This is simpler and more robust than brittle regex parsing that was removed in PR #381.
 
 ## Usage in Stop Hook
 
-The Stop hook uses cabal to verify build status before allowing agent completion. The logic is now unified:
+The Stop hook uses cabal to verify build status before allowing agent completion. Templates receive raw output via `{{ raw_output | truncate(N) }}`.
 
 ```haskell
 -- In Hook.hs runStopHookLogic:
@@ -65,21 +61,4 @@ The Stop hook uses cabal to verify build status before allowing agent completion
   $ runCabalRemote mContainerId
   $ traceCabal tracer
   $ ...
-```
-
-## Test Output Parsing
-
-The interpreter parses GHC errors from stderr:
-
-```haskell
--- Parses: "src/Foo.hs:42:5: error: Not in scope: 'bar'"
-parseGhcErrors :: Text -> [RawCompileError]
-```
-
-Additional parsers in `Interpreter.hs` handle QuickCheck and HSpec output:
-
-```haskell
-parseQuickCheckOutput :: Text -> [TestFailure]
-parseHSpecOutput :: Text -> [TestFailure]
-parseTestOutput :: Text -> [TestFailure]  -- Auto-detect framework
 ```
