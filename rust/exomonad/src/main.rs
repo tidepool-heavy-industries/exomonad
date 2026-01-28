@@ -76,15 +76,16 @@ enum Commands {
 // Main
 // ============================================================================
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     // Initialize tracing with env filter (RUST_LOG)
     exomonad_shared::init_logging();
 
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Hook { event, runtime, role } => handle_hook(event, runtime, role)?,
-        Commands::Health => health::run_health_check()?,
+        Commands::Hook { event, runtime, role } => handle_hook(event, runtime, role).await?,
+        Commands::Health => health::run_health_check().await?,
     };
 
     Ok(())

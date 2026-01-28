@@ -743,6 +743,7 @@ dependencies = [
  "serde_json",
  "strum 0.26.3",
  "tempfile",
+ "tokio",
  "tracing",
  "tracing-subscriber",
  "uuid",
@@ -773,6 +774,10 @@ name = "exomonad-shared"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "nix",
  "serde",
  "serde_json",
@@ -780,6 +785,8 @@ dependencies = [
  "strum 0.26.3",
  "tempfile",
  "thiserror 2.0.17",
+ "tokio",
+ "tower-service",
  "tracing",
  "tracing-subscriber",
 ]

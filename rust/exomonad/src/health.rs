@@ -7,13 +7,13 @@ use tracing::info;
 ///
 /// Connects to the control socket, sends a Ping message, and waits for a Pong.
 /// Returns Ok(()) if successful, or an error if the check fails.
-pub fn run_health_check() -> Result<()> {
+pub async fn run_health_check() -> Result<()> {
     let path = control_socket_path()?;
     info!(path = %path.display(), "Checking control server health");
 
-    let mut socket = ControlSocket::connect(&path)?;
+    let socket = ControlSocket::connect(&path)?;
 
-    let response = socket.send(&ControlMessage::Ping)?;
+    let response = socket.send(&ControlMessage::Ping).await?;
 
     match response {
         ControlResponse::Pong => {
@@ -35,8 +35,8 @@ mod tests {
     use tempfile::tempdir;
     use std::io::{Read, Write};
 
-    #[test]
-    fn test_health_check_success() {
+    #[tokio::test]
+    async fn test_health_check_success() {
         let dir = tempdir().unwrap();
         let socket_path = dir.path().join("control.sock");
         let socket_path_inner = socket_path.clone();
@@ -63,18 +63,19 @@ mod tests {
             );
 
             stream.write_all(http_response.as_bytes()).unwrap();
+            stream.flush().unwrap();
         });
 
         // Run health check
         std::env::set_var("EXOMONAD_CONTROL_SOCKET", socket_path_inner);
-        let result = run_health_check();
+        let result = run_health_check().await;
         assert!(result.is_ok());
 
         server_handle.join().unwrap();
     }
 
-    #[test]
-    fn test_health_check_unexpected_response() {
+    #[tokio::test]
+    async fn test_health_check_unexpected_response() {
         let dir = tempdir().unwrap();
         let socket_path = dir.path().join("control.sock");
         let socket_path_inner = socket_path.clone();
@@ -97,10 +98,11 @@ mod tests {
             );
 
             stream.write_all(http_response.as_bytes()).unwrap();
+            stream.flush().unwrap();
         });
 
         std::env::set_var("EXOMONAD_CONTROL_SOCKET", socket_path_inner);
-        let result = run_health_check();
+        let result = run_health_check().await;
         assert!(result.is_err());
         
         let err = result.unwrap_err().to_string();
