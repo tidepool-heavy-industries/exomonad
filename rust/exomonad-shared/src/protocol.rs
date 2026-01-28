@@ -84,6 +84,7 @@ pub struct HookInput {
     pub tool_name: Option<String>,
 
     /// Tool input arguments for tool-related hooks.
+    #[serde(alias = "tool_parameters")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_input: Option<Value>,
 
