@@ -51,7 +51,7 @@ module ExoMonad.LLM.Types
   , ThinkingConfig(..)
   ) where
 
-import Data.Aeson (Value(..), ToJSON(..), FromJSON(..), object, (.=), withObject, (.:), (.:?))
+import Data.Aeson (Value(..), ToJSON(..), FromJSON(..), object, (.=), withObject, (.:))
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Network.HTTP.Client (Manager, newManager)

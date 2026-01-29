@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-duplicate-exports #-}
+
 module ExoMonad.Prelude
   ( -- * Core types
     Type
@@ -120,7 +122,7 @@ import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 import Data.Maybe (fromMaybe, catMaybes, isJust, isNothing, listToMaybe, maybeToList)
 import Control.Monad (when, unless, void)
 import Data.Foldable (forM_, traverse_, toList)
-import Data.Traversable (forM, traverse)
+import Data.Traversable (forM)
 import Data.Either (isLeft, isRight, lefts, rights)
 import Control.Applicative (Alternative(..), optional)
 

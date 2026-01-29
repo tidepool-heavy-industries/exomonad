@@ -12,10 +12,10 @@ module ExoMonad.Control.ExoTools.PrReviewStatus.Types
   , FeedbackSummary(..)
   ) where
 
-import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.=), object, withObject)
+import Data.Aeson (ToJSON(..), (.=), object)
 import GHC.Generics (Generic)
 import ExoMonad.Effects.GitHub (ReviewComment)
-import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(..), HasJSONSchema(..))
+import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??))
 import Language.Haskell.TH (mkName)
 
 -- | Arguments for pr_review_status tool.

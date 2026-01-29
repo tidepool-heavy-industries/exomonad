@@ -1,6 +1,7 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# OPTIONS_GHC -Wno-deprecations #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
+{-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
 -- | Servant-style record-as-graph pattern for the ExoMonad Graph DSL.
 --
@@ -138,7 +139,7 @@ import ExoMonad.Graph.Validate (FormatSymbolList)
 import Control.Monad.Freer (Eff, Member)
 
 import ExoMonad.Graph.Types (type (:@), Input, Schema, Template, Vision, Description, Tools, Memory, System, UsesEffects, ClaudeCode, ModelChoice, Gemini, Spawn, Barrier, Awaits, HList(..), MCPExport, MCPToolDef, MCPRoleHint, Tool)
-import ExoMonad.Effect.Gemini (GeminiOp, SingGeminiModel(..))
+import ExoMonad.Effect.Gemini (SingGeminiModel(..))
 import ExoMonad.Graph.Template (TemplateContext)
 import ExoMonad.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets, GetClaudeCode, GetGeminiModel, GetSpawnTargets, GetAwaits)
 import ExoMonad.Graph.Goto (Goto, goto, GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..), GeminiLLMHandler(..))

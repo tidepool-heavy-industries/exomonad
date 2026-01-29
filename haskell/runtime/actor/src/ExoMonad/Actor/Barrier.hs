@@ -37,11 +37,10 @@ module ExoMonad.Actor.Barrier
   ) where
 
 import Control.Monad.Freer (Eff)
-import Data.Aeson (Value, ToJSON(..), FromJSON(..), (.:))
+import Data.Aeson (Value, FromJSON(..), (.:))
 import qualified Data.Aeson as Aeson
-import Data.Aeson.Types (parseEither, Parser)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.Kind (Type, Constraint)
+import Data.Aeson.Types (parseEither)
+import Data.IORef (IORef, newIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import System.IO (hFlush, stdout)

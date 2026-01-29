@@ -41,11 +41,8 @@ module ExoMonad.LLM.Interpreter
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Data.Aeson (Value, toJSON, fromJSON)
 import qualified Data.Aeson as Aeson
-import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Text.Encoding qualified as TE
-import Network.HTTP.Client (Manager)
 
 import ExoMonad.Effects.SocketClient
   ( SocketConfig(..)
@@ -62,13 +59,10 @@ import ExoMonad.LLM.Types
   , mkLLMEnv
   , AnthropicTool(..)
   , anthropicToolToJSON
-  , getApiKey
-  , getBaseUrl
   , AnthropicRequest(..)
   , AnthropicMessage(..)
   , ToolChoice(..)
   , ThinkingConfig(..)
-  , BaseUrl(..)
   , Scheme(..)
   , ParsedBaseUrl(..)
   )

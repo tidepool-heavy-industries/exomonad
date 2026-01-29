@@ -9,9 +9,7 @@ module ExoMonad.CircuitBreaker.Interpreter
   ( runCircuitBreakerIO
   ) where
 
-import Control.Concurrent.STM (readTVarIO)
-import Control.Monad.Freer (Eff, Member, interpret, LastMember, sendM)
-import qualified Data.Map.Strict as Map
+import Control.Monad.Freer (Eff, interpret, LastMember, sendM)
 
 import ExoMonad.Effect.CircuitBreaker
 import ExoMonad.Control.Hook.CircuitBreaker (CircuitBreakerMap, getCircuitBreakerState, getAllCircuitBreakerStates, resetSession, resetAll)

@@ -35,7 +35,7 @@ import Data.Aeson (ToJSON(..), object, (.=))
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import ExoMonad.Effects.GitHub (Issue)
-import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(..), HasJSONSchema(..))
+import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??))
 import Language.Haskell.TH (mkName)
 
 -- ════════════════════════════════════════════════════════════════════════════

@@ -23,7 +23,7 @@ module ExoMonad.Control.TLTools.Types
 import Data.Aeson (ToJSON(..), object, (.=))
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import ExoMonad.Schema (deriveMCPTypeWith, deriveMCPEnum, defaultMCPOptions, (??), MCPOptions(..))
+import ExoMonad.Schema (deriveMCPTypeWith, deriveMCPEnum, defaultMCPOptions, (??))
 
 import Language.Haskell.TH (mkName)
 

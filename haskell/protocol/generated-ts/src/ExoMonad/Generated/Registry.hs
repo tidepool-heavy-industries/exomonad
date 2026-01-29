@@ -55,8 +55,7 @@ module ExoMonad.Generated.Registry
 import Data.Kind (Type, Constraint)
 import Data.Proxy (Proxy(..))
 import Data.Text (Text)
-import qualified Data.Text as T
-import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
+import GHC.TypeLits (Symbol)
 
 
 -- ════════════════════════════════════════════════════════════════════════════

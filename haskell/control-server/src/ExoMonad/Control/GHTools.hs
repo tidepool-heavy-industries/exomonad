@@ -47,7 +47,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import ExoMonad.Effects.GitHub
-  ( GitHub, Repo(..), IssueState(..), IssueFilter(..)
+  ( GitHub, IssueState(..), IssueFilter(..)
   , CreateIssueInput(..), UpdateIssueInput(..), defaultIssueFilter, emptyUpdateIssueInput
   , listIssues, getIssue, createIssue, updateIssue, closeIssue, reopenIssue
   )

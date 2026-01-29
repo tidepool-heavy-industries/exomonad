@@ -10,7 +10,7 @@ module ExoMonad.Control.ExoTools.Status.Types
   ) where
 
 import GHC.Generics (Generic)
-import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), HasJSONSchema(..))
+import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??))
 import Language.Haskell.TH (mkName)
 
 -- | Arguments for exo_status tool.

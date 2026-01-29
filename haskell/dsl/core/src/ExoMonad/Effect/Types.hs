@@ -146,12 +146,10 @@ module ExoMonad.Effect.Types
 import Control.Monad.Freer (Eff, Member, send, interpret, sendM, LastMember)
 import Control.Monad.Freer.Internal (handleRelayS)
 import System.Random (randomRIO)
-import System.IO (stderr)
 import Data.Time (UTCTime)
 import qualified Data.Time as Time
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
 import Data.Aeson (Value(..), FromJSON, ToJSON, encode)
 import ExoMonad.StructuredOutput (StructuredOutput(..), formatDiagnostic)
 import qualified Data.ByteString.Lazy as LBS
@@ -181,7 +179,7 @@ import ExoMonad.Graph.Goto (GotoChoice, To)
 -- TUI effect and types (popup-tui pattern)
 import ExoMonad.Effect.TUI
   ( TUI(..), showUI
-  , PopupDefinition(..), Component(..), ComponentSpec(..), VisibilityRule(..), PopupResult(..)
+  , PopupDefinition(..), PopupResult(..)
   , mkComponent, mkText, mkSlider, mkCheckbox, mkTextbox, mkChoice, mkMultiselect, mkGroup
   )
 

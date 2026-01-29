@@ -47,7 +47,6 @@ import Data.Aeson
   , (.=)
   )
 import Data.Aeson.Lens (key, _String)
-import Data.Aeson.Types (Parser, parseMaybe)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
 import Data.Text qualified as T

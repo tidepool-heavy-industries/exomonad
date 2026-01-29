@@ -38,8 +38,11 @@ import GHC.Wasm.Prim (JSString(..), fromJSString, toJSString)
 #endif
 
 -- Import the registry which has all the logic
-import qualified Data.Text as T
 import qualified ExoMonad.Wasm.Registry as R
+
+#if defined(wasm32_HOST_ARCH)
+import qualified Data.Text as T
+#endif
 
 
 -- ════════════════════════════════════════════════════════════════════════════

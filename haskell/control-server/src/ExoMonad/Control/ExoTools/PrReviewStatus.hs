@@ -24,7 +24,7 @@ import qualified Data.Text as T
 import Data.Time (UTCTime(..), Day(ModifiedJulianDay))
 import GHC.Generics (Generic)
 
-import ExoMonad.Effects.GitHub (GitHub, getPullRequest, getPullRequestReviews, PullRequest(..), Review(..), ReviewComment(..), ReviewState(..), Author(..), Repo(..), defaultRepo)
+import ExoMonad.Effects.GitHub (GitHub, getPullRequest, getPullRequestReviews, PullRequest(..), Review(..), ReviewComment(..), ReviewState(..), Author(..), defaultRepo)
 import ExoMonad.Graph.Generic (AsHandler, type (:-))
 import ExoMonad.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import ExoMonad.Graph.Goto (Goto, GotoChoice, To, gotoExit)

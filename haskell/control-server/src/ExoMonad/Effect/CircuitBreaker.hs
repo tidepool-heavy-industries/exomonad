@@ -7,10 +7,8 @@
 
 module ExoMonad.Effect.CircuitBreaker where
 
-import Control.Monad.Freer (Eff, Member)
 import Control.Monad.Freer.TH (makeEffect)
 import Data.Map.Strict (Map)
-import Data.Text (Text)
 import ExoMonad.Control.Hook.CircuitBreaker (CircuitBreakerState, SessionId)
 
 data CircuitBreaker r where

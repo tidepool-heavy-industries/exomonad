@@ -12,7 +12,7 @@ import ExoMonad.Control.API
 import ExoMonad.Control.Handler (handleMessage)
 import ExoMonad.Control.Hook.CircuitBreaker (initCircuitBreaker, CircuitBreakerMap)
 import ExoMonad.Control.Logging (Logger, logInfo, logDebug, logError)
-import ExoMonad.Control.Protocol hiding (role)
+import ExoMonad.Control.Protocol
 import ExoMonad.Control.RoleConfig
 import ExoMonad.Control.Types (ServerConfig(..))
 import ExoMonad.LLM.Types (LLMConfig(..))

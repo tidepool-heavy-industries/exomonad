@@ -32,20 +32,20 @@ module ExoMonad.Actor.Fork
   ) where
 
 import Control.Monad (forM_)
-import Control.Monad.Freer (Eff, runM)
+import Control.Monad.Freer (Eff)
 import Data.Aeson (Value, ToJSON(..), FromJSON(..))
 import Data.Aeson.Types (parseEither)
 import Data.Kind (Type, Constraint)
 import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 import qualified Data.Text as T
-import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
+import GHC.TypeLits (KnownSymbol, symbolVal)
 import System.IO (hFlush, stdout)
 
 import ExoMonad.Graph.Goto (To)
 import ExoMonad.Graph.Types (HList(..))
 
-import ExoMonad.Actor.Graph (Router, NodeHandler(..))
+import ExoMonad.Actor.Graph (NodeHandler(..))
 
 
 -- ════════════════════════════════════════════════════════════════════════════

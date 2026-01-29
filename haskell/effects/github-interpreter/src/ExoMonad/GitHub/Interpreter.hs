@@ -25,10 +25,9 @@ module ExoMonad.GitHub.Interpreter
 
 import Control.Lens ((^?))
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
-import Data.Aeson (Value(..), toJSON, fromJSON, (.:), (.:?))
+import Data.Aeson (Value(..), toJSON, fromJSON)
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Lens (key, _String)
-import Data.Aeson.Types (parseMaybe)
 import Data.Time.Clock (UTCTime)
 import Data.Time.Format.ISO8601 (iso8601ParseM)
 
@@ -37,7 +36,6 @@ import ExoMonad.Effects.SocketClient
   , ServiceRequest(..)
   , ServiceResponse(..)
   , ServiceError(..)
-  , AnthropicChatReq(..)
   , GitHubGetIssueReq(..)
   , GitHubCreateIssueReq(..)
   , GitHubUpdateIssueReq(..)
@@ -51,9 +49,6 @@ import ExoMonad.Effects.SocketClient
   , GitHubListPullRequestsReq(..)
   , GitHubGetPullRequestReviewsReq(..)
   , GitHubGetDiscussionReq(..)
-  , OllamaGenerateReq(..)
-  , OtelSpanReq(..)
-  , OtelMetricReq(..)
   , sendRequest
   )
 import Data.Maybe (mapMaybe)
