@@ -5,7 +5,8 @@ import Test.Tasty.HUnit
 import Data.Maybe (isJust)
 import qualified Data.Text as T
 import Control.Monad.Freer (Eff, runM, interpret)
-import OpenTelemetry.Trace (Tracer, createTracer, getGlobalTracerProvider, instrumentationLibrary)
+import OpenTelemetry.Trace (Tracer, makeTracer, getGlobalTracerProvider, InstrumentationLibrary(..), tracerOptions)
+import OpenTelemetry.Attributes (emptyAttributes)
 
 import ExoMonad.Control.Hook.SessionStart
 import ExoMonad.Control.RoleConfig (Role(..))
@@ -61,9 +62,10 @@ runMockGitHub = interpret $ \case
 runSessionStart :: Role -> FilePath -> IO (Maybe T.Text)
 runSessionStart role cwd = do
   tp <- getGlobalTracerProvider
-  let tracer = createTracer tp $ instrumentationLibrary "test" "0.0.1"
+  let lib = InstrumentationLibrary "test" "0.0.1" "" emptyAttributes
+  let tracer = makeTracer tp lib tracerOptions
   runM
     $ runLog Error
     $ runMockGitHub
     $ runGitIO
-    $ sessionStartLogic tracer role cwd
+    $ sessionStartLogic tracer role (T.pack cwd)

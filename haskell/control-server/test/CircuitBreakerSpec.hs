@@ -131,5 +131,41 @@ spec = testGroup "Circuit Breaker Tests"
       case s2 of
         Nothing -> pure ()
         Just _ -> assertFailure "Session should be gone"
+
+  , testGroup "Admin Tools Logic"
+    [ testCase "cb_status returns correct info" $ do
+        cbMap <- initCircuitBreaker
+        now <- getCurrentTime
+        
+        -- Create a session
+        _ <- withCircuitBreaker cbMap defaultConfig now "sess-1" (pure ())
+        incrementStage cbMap "sess-1" "stage-A" now
+        
+        -- Run status tool logic
+        res <- runM $ runCircuitBreakerIO cbMap $ fmap unwrapSingleChoice $ cbStatusLogic (CbStatusArgs Nothing)
+        
+        res.activeSessionCount @?= 0
+        res.totalSessions @?= 1
+        length res.sessions @?= 1
+        let info = head res.sessions
+        info.sessionId @?= "sess-1"
+        info.globalStops @?= 1
+        Map.lookup "stage-A" info.stageRetries @?= Just 1
+        
+    , testCase "cb_reset clears specific session" $ do
+        cbMap <- initCircuitBreaker
+        now <- getCurrentTime
+        _ <- withCircuitBreaker cbMap defaultConfig now "sess-to-reset" (pure ())
+        
+        -- Run reset logic
+        res <- runM $ runCircuitBreakerIO cbMap $ fmap unwrapSingleChoice $ cbResetLogic (CbResetArgs (Just "sess-to-reset"))
+        res.status @?= "Reset session: sess-to-reset"
+        
+        -- Verify gone
+        s <- getCircuitBreakerState cbMap "sess-to-reset"
+        case s of
+          Nothing -> pure ()
+          Just _ -> assertFailure "Session should be reset"
+    ]
   ]
       

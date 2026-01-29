@@ -34,7 +34,7 @@ module ExoMonad.Effects.SocketClient
 import Control.Exception (bracket, try, SomeException)
 import Control.Lens ((&), (?~), at)
 import Data.Aeson
-import Data.Aeson.Lens (_Object, key, _String)
+import Data.Aeson.Lens (_Object)
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as LBS8

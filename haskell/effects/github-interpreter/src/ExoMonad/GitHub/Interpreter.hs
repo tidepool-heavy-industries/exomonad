@@ -428,71 +428,37 @@ parseRFC3339Maybe t = iso8601ParseM (T.unpack t)
 -- Haskell expects: Comment { commentAuthor :: Author, commentBody :: Text, commentCreatedAt :: UTCTime }
 
 parseCommentValues :: [Value] -> [Comment]
-
 parseCommentValues = mapMaybe parseOneComment
-
   where
-
     parseOneComment v = do
-
       a <- v ^? key "author" . _String
-
       b <- v ^? key "body" . _String
-
       ca <- v ^? key "created_at" . _String
-
       let time = parseRFC3339 ca
-
       pure Comment
-
         { commentAuthor = Author a Nothing
-
         , commentBody = b
-
         , commentCreatedAt = time
-
         }
 
-
-
 -- | Parse JSON review values from Rust's GitHubReviewComment format into Haskell Reviews.
-
 -- Rust sends: {"author": "login", "body": "...", "state": "APPROVED", ...}
-
 -- Haskell expects: Review { reviewAuthor :: Author, reviewBody :: Text, reviewState :: ReviewState }
-
 parseReviewValues :: [Value] -> [Review]
-
 parseReviewValues = mapMaybe parseOneReview
-
   where
-
     parseOneReview v = do
-
       a <- v ^? key "author" . _String
-
       b <- v ^? key "body" . _String
-
       let s = v ^? key "state" . _String
-
       let st = case s of
-
             Just ("APPROVED" :: Text) -> ReviewApproved
-
             Just "CHANGES_REQUESTED" -> ReviewChangesRequested
-
             Just "DISMISSED" -> ReviewDismissed
-
             Just "PENDING" -> ReviewPending
-
             _ -> ReviewCommented
-
       pure Review
-
         { reviewAuthor = Author a Nothing
-
         , reviewBody = b
-
         , reviewState = st
-
         }
