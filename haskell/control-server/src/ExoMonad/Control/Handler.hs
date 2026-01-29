@@ -64,7 +64,7 @@ handleToolsList logger config = do
 
 -- | Handle MCP tool call using Typed Role DSL.
 handleMcpToolTyped :: Logger -> ServerConfig -> Tracer -> TraceContext -> CircuitBreakerMap -> T.Text -> T.Text -> Aeson.Value -> IO ControlResponse
-handleMcpToolTyped logger config tracer traceCtx _cbMap reqId toolName args =
+handleMcpToolTyped logger config tracer traceCtx cbMap reqId toolName args =
   withMcpTracing logger config traceCtx reqId toolName args $ do
     let effectiveRole = fromMaybe config.defaultRole (config.role >>= roleFromText)
     
@@ -97,7 +97,7 @@ handleMcpToolTyped logger config tracer traceCtx _cbMap reqId toolName args =
 
       ToolFound action -> do
         -- Execute the action within the AppEffects runtime
-        resultOrErr <- try $ runApp config tracer logger action
+        resultOrErr <- try $ runApp config tracer cbMap logger action
         
         case resultOrErr of
           Left (e :: SomeException) -> do

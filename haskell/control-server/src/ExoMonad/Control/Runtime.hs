@@ -32,6 +32,7 @@ import ExoMonad.Control.Effects.SshExec (SshExec, runSshExec)
 import Control.Monad.Freer.Reader (Reader, runReader)
 import ExoMonad.Control.Effects.Effector (Effector, runEffectorIO)
 import ExoMonad.Control.Effects.Cabal (Cabal, runCabalRemote)
+import ExoMonad.Control.Hook.CircuitBreaker (CircuitBreakerMap)
 
 -- Interpreters
 import ExoMonad.Control.Logging (Logger)
@@ -104,13 +105,11 @@ runApp config tracer cbMap logger action = do
     $ withRetry retryCfg
     $ runZellijIO
     $ runSshExec logger dockerCtlPath
-    $ runGitIO -- Will use SshExec if GitRemote is used in other contexts? 
-               -- Wait, runGitIO uses IO. runGitRemote uses SshExec.
-               -- In runApp, we use runGitIO (local).
-               -- But order matters for the list type equality.
+    $ runGitIO
     $ runWorktreeIO (defaultWorktreeConfig repoRoot)
     $ runEffectorIO logger
     $ runCabalRemote Nothing
+    -- Using empty container/workdir for Justfile interpreter since we are running locally in this context
     $ runJustfileRemote "" "" 
     $ runDockerCtl logger dockerCtlPath
     $ runGeminiIO
