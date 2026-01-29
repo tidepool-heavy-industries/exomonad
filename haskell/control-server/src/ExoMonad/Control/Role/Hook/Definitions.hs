@@ -19,6 +19,7 @@ import ExoMonad.Control.Role.Types
   , StopInput, StopResponse
   , Notification
   , SessionEndInput
+  , SubagentStopInput
   )
 
 -- | Common hooks shared by all roles
@@ -29,7 +30,7 @@ data CommonHooks mode = CommonHooks
   , stop         :: mode :- Hook StopInput StopResponse
   , sessionEnd   :: mode :- Hook SessionEndInput ()
   , notification :: mode :- Hook Notification ()
-  , subagentStop :: mode :- Hook SessionEndInput () 
+  , subagentStop :: mode :- Hook SubagentStopInput () 
   } deriving Generic
 
 -- Role-specific hook records
