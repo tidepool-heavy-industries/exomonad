@@ -2,6 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
 -- | Message routing for control server.
 module ExoMonad.Control.Handler
@@ -35,10 +36,13 @@ import ExoMonad.Observability.Interpreter (runObservabilityWithContext)
 -- New Role DSL Imports
 import ExoMonad.Role (Role(..))
 import ExoMonad.Control.RoleConfig (roleFromText)
-import ExoMonad.Control.Role.Dispatch (dispatchRole, DispatchResult(..))
+import ExoMonad.Control.Role.Tool.Dispatch (dispatchTool, DispatchResult(..))
 import ExoMonad.Control.Role.Registry (allToolsForRole)
 import ExoMonad.Control.Role.Handlers (tlHandlers, devHandlers, pmHandlers)
-import ExoMonad.Control.Runtime (runApp)
+import ExoMonad.Control.Runtime (runApp, AppEffects)
+import ExoMonad.Control.Role.Definition.TL (TLRole(..))
+import ExoMonad.Control.Role.Definition.Dev (DevRole(..))
+import ExoMonad.Control.Role.Definition.PM (PMRole(..))
 
 -- | Route a control message to the appropriate handler.
 handleMessage :: Logger -> ServerConfig -> Tracer -> TraceContext -> CircuitBreakerMap -> ControlMessage -> IO ControlResponse
@@ -67,12 +71,23 @@ handleMcpToolTyped logger config tracer traceCtx _cbMap reqId toolName args =
     logInfo logger $ "[MCP:" <> reqId <> "] Dispatching: " <> toolName <> " (Role: " <> T.pack (show effectiveRole) <> ")"
 
     -- Dispatch based on role
+    -- Uses Generic 'dispatchTool' on the 'mode :- record' structure
     let dispatchResult = case effectiveRole of
-          TL  -> dispatchRole tlHandlers toolName args
-          Dev -> dispatchRole devHandlers toolName args
-          PM  -> dispatchRole pmHandlers toolName args
+          TL  -> 
+            let TLRole{tlToolsRecord=tools} = tlHandlers @AppEffects
+            in dispatchTool tools toolName args
+          Dev -> 
+            let DevRole{devToolsRecord=tools} = devHandlers @AppEffects
+            in dispatchTool tools toolName args
+          PM  -> 
+            let PMRole{pmToolsRecord=tools} = pmHandlers @AppEffects
+            in dispatchTool tools toolName args
 
     case dispatchResult of
+      ToolParseError msg -> do
+        logError logger $ "[MCP:" <> reqId <> "] Tool parse error: " <> msg
+        pure $ mcpToolError reqId InvalidRequest $ "Invalid arguments for tool '" <> toolName <> "': " <> msg
+
       ToolNotFound -> do
         let available = allToolsForRole effectiveRole
         logError logger $ "[MCP:" <> reqId <> "] Tool not found/allowed: " <> toolName

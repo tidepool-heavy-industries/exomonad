@@ -5,6 +5,8 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoStarIsType #-}
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 
 -- | Team Lead (TL) Role Definition.
 --
@@ -41,36 +43,17 @@ module ExoMonad.Control.Role.Definition.TL
 import Data.Kind (Type)
 import GHC.Generics (Generic)
 
-import ExoMonad.Control.Role.Types
-  ( Hooks
-  , RoleMetadata(..)
-  , ServerField
-  )
-import ExoMonad.Control.Role.Server.Orchestration (OrchestrationServer)
-import ExoMonad.Control.Role.Server.TUI (TUIServer)
-import ExoMonad.Control.Role.Server.GitHub (GitHubServer)
-import ExoMonad.Control.Role.Server.TL (TLServer)
-import ExoMonad.Control.Role.Server.Kaizen (KaizenServer)
+import ExoMonad.Control.Role.Types (Hooks, RoleMetadata(..))
+import ExoMonad.Control.Role.Tool.Definitions (TLTools)
 
 -- | Team Lead role record.
---
--- In 'AsSchema' mode, server fields become 'ServerSchema' for registration.
--- In 'AsHandler' mode, server fields become servers with handler functions.
 data TLRole mode (es :: [Type -> Type]) = TLRole
-  { tlMetadataField  :: RoleMetadata
+  { tlToolsRecord :: TLTools mode
+    -- ^ Tool definitions
+  , tlMetadata    :: RoleMetadata
     -- ^ Role identity
-  , tlHooks         :: Hooks es
+  , tlHooks       :: Hooks es
     -- ^ Lifecycle hooks
-  , tlOrchestration :: ServerField mode es OrchestrationServer
-    -- ^ Orchestration tools (spawn_agents, exo_status)
-  , tlTUI           :: ServerField mode es TUIServer
-    -- ^ TUI tools (popup)
-  , tlGitHub        :: ServerField mode es GitHubServer
-    -- ^ GitHub tools (gh_issue_list, gh_issue_show)
-  , tlTools         :: ServerField mode es TLServer
-    -- ^ TL-specific tools (tl_create_issue)
-  , tlKaizen        :: ServerField mode es KaizenServer
-    -- ^ Kaizen tools (kaizen_report)
   }
   deriving Generic
 

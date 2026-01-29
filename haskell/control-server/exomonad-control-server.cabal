@@ -66,30 +66,17 @@ library
         -- Role DSL
         ExoMonad.Control.Role.Types
         ExoMonad.Control.Role.Reify
-        ExoMonad.Control.Role.Dispatch
         -- Role DSL Tools
-        ExoMonad.Control.Role.Tool.SpawnAgents
-        ExoMonad.Control.Role.Tool.ExoStatus
-        ExoMonad.Control.Role.Tool.Popup
-        ExoMonad.Control.Role.Tool.FilePR
-        ExoMonad.Control.Role.Tool.PMStatus
-        ExoMonad.Control.Role.Tool.GitHub
-        ExoMonad.Control.Role.Tool.KaizenReport
-        ExoMonad.Control.Role.Tool.TLCreateIssue
+        ExoMonad.Control.Role.Tool.Definitions
+        ExoMonad.Control.Role.Schema
+        ExoMonad.Control.Role.Tool.Dispatch
+        ExoMonad.Control.Role.Tool.Wiring
         -- Kaizen
         ExoMonad.Control.KaizenTools
         ExoMonad.Control.KaizenTools.Types
-        ExoMonad.Control.Role.Server.Kaizen
         -- TL
         ExoMonad.Control.TLTools
         ExoMonad.Control.TLTools.Types
-        ExoMonad.Control.Role.Server.TL
-        -- Role DSL Servers
-        ExoMonad.Control.Role.Server.Orchestration
-        ExoMonad.Control.Role.Server.TUI
-        ExoMonad.Control.Role.Server.Workflow
-        ExoMonad.Control.Role.Server.Planning
-        ExoMonad.Control.Role.Server.GitHub
         -- Role DSL Definitions
         ExoMonad.Control.Role.Definition.TL
         ExoMonad.Control.Role.Definition.Dev

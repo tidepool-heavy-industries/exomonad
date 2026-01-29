@@ -5,6 +5,8 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoStarIsType #-}
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 
 -- | Project Manager Role Definition.
 --
@@ -17,24 +19,14 @@ module ExoMonad.Control.Role.Definition.PM
 import Data.Kind (Type)
 import GHC.Generics (Generic)
 
-import ExoMonad.Control.Role.Types
-  ( Hooks
-  , RoleMetadata(..)
-  , ServerField
-  )
-import ExoMonad.Control.Role.Server.Planning (PlanningServer)
-import ExoMonad.Control.Role.Server.TUI (TUIServer)
-import ExoMonad.Control.Role.Server.GitHub (GitHubServer)
-import ExoMonad.Control.Role.Server.Kaizen (KaizenServer)
+import ExoMonad.Control.Role.Types (Hooks, RoleMetadata(..))
+import ExoMonad.Control.Role.Tool.Definitions (PMTools)
 
 -- | Project Manager role record.
 data PMRole mode (es :: [Type -> Type]) = PMRole
-  { pmMetadataField :: RoleMetadata
-  , pmHooks         :: Hooks es
-  , pmPlanning      :: ServerField mode es PlanningServer
-  , pmTUI           :: ServerField mode es TUIServer
-  , pmGitHub        :: ServerField mode es GitHubServer
-  , pmKaizen        :: ServerField mode es KaizenServer
+  { pmToolsRecord :: PMTools mode
+  , pmMetadata    :: RoleMetadata
+  , pmHooks       :: Hooks es
   }
   deriving Generic
 
