@@ -97,6 +97,6 @@ filePRLogic args = do
                         pure $ FilePRResult (Just info) True Nothing)
                       (\_err -> pure $ FilePRResult Nothing False (Just "GitHub error creating PR"))
               )
-              (\_err -> pure $ FilePRResult (Just $ PRInfo 0 "" "" "") False (Just "GitHub error listing PRs")) -- should ideally not reach here with a dummy PRInfo but maintaining structure
+              (\_err -> pure $ FilePRResult Nothing False (Just "GitHub error listing PRs"))
         )
         (\_err -> pure $ FilePRResult Nothing False (Just $ "GitHub error fetching issue #" <> T.pack (show num)))
