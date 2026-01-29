@@ -13,7 +13,6 @@ module ExoMonad.Git.Interpreter
 
 import Control.Exception (try, SomeException)
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
-import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import System.Exit (ExitCode(..))

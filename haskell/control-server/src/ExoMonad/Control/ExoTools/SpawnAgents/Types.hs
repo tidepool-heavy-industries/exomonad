@@ -21,7 +21,7 @@ import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.=), object, withObject)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Text.Ginger.GVal (ToGVal(..))
-import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(..), HasJSONSchema(..), arraySchema, emptySchema, SchemaType(..), describeField)
+import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??))
 import Language.Haskell.TH (mkName)
 
 -- | Context for rendering the initial prompt.

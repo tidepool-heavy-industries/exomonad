@@ -12,10 +12,10 @@ module ExoMonad.Control.ExoTools.FilePR.Types
   , PRInfo(..)
   ) where
 
-import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.=), object, withObject)
+import Data.Aeson (ToJSON(..), (.=), object)
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(..), HasJSONSchema(..))
+import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??))
 import Language.Haskell.TH (mkName)
 
 -- | Arguments for file_pr tool.

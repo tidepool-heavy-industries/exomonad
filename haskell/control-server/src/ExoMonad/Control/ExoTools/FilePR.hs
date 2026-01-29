@@ -17,7 +17,7 @@ import qualified Data.Text as T
 import Data.Maybe (listToMaybe)
 
 import ExoMonad.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
-import ExoMonad.Effects.GitHub (GitHub, Repo(..), PRCreateSpec(..), PRUrl(..), PullRequest(..), PRFilter(..), Issue(..), getIssue, createPR, listPullRequests, defaultPRFilter, defaultRepo)
+import ExoMonad.Effects.GitHub (GitHub, PRCreateSpec(..), PRUrl(..), PullRequest(..), PRFilter(..), Issue(..), getIssue, createPR, listPullRequests, defaultPRFilter, defaultRepo)
 
 import ExoMonad.Control.ExoTools.Internal (parseIssueNumber, slugify, formatPRBody)
 import ExoMonad.Control.ExoTools.FilePR.Types

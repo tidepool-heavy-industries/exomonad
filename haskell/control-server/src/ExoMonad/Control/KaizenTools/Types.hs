@@ -19,7 +19,7 @@ module ExoMonad.Control.KaizenTools.Types
 import Data.Aeson (ToJSON(..), object, (.=))
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import ExoMonad.Schema (deriveMCPTypeWith, deriveMCPEnum, defaultMCPOptions, (??), MCPOptions(..))
+import ExoMonad.Schema (deriveMCPTypeWith, deriveMCPEnum, defaultMCPOptions, (??))
 import ExoMonad.Control.TLTools.Types (Component(..))
 import Language.Haskell.TH (mkName)
 

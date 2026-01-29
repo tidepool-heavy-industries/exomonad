@@ -20,11 +20,6 @@ library
         ExoMonad.Generated.GraphSpecs
     build-depends:
         base >= 4.17 && < 5,
-        aeson >= 2.0,
-        bytestring,
-        containers,
-        directory,
-        filepath,
         text,
         -- Dependencies from exomonad ecosystem (no exomonad-wasm to avoid circular dep)
         exomonad-core

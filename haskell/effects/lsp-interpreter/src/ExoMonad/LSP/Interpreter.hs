@@ -18,13 +18,12 @@ module ExoMonad.LSP.Interpreter
   , runLSP
   ) where
 
-import Control.Concurrent (Chan, newChan, readChan, writeChan, forkIO, killThread)
+import Control.Concurrent (Chan, newChan, readChan, writeChan, forkIO)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar, tryTakeMVar)
 import Control.Concurrent.STM (TVar, newTVarIO, readTVarIO, atomically, writeTVar)
-import Control.Exception (SomeException, throwIO, try, finally, bracket)
-import Data.Set (Set)
+import Control.Exception (SomeException, throwIO, try)
 import qualified Data.Set as Set
-import Data.Time (UTCTime, getCurrentTime, diffUTCTime)
+import Data.Time (getCurrentTime, diffUTCTime)
 import Control.Monad (when)
 import Control.Monad.Freer (Eff, LastMember, sendM, interpret)
 import qualified System.Process

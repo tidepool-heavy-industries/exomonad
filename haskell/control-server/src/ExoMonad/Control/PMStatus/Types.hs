@@ -14,10 +14,10 @@ module ExoMonad.Control.PMStatus.Types
   , PrLagMetrics(..)
   ) where
 
-import Data.Aeson (FromJSON(..), ToJSON(..), (.:?), (.=), (.!=), object, withObject)
+import Data.Aeson (ToJSON(..), (.=), object)
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), (~>), (?), MCPOptions(..), HasJSONSchema(..), emptySchema, SchemaType(..), describeField)
+import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), (~>), (?))
 import Language.Haskell.TH (mkName)
 
 -- | Arguments for pm_status tool.

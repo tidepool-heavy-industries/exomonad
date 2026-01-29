@@ -17,21 +17,20 @@ import Control.Applicative ((<|>))
 import Control.Monad.Freer (Eff, Member)
 import Data.Aeson (ToJSON(..), object, (.=))
 import Data.Char (isAlphaNum, isSpace)
-import Data.List (find, sortOn)
-import Data.Ord (Down(..))
+import Data.List (find)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
 import Text.Parsec.Pos (SourcePos)
 
-import ExoMonad.Control.ExoTools.FilePR.Context (PRBodyContext(..), PRDepContext(..))
+import ExoMonad.Control.ExoTools.FilePR.Context (PRBodyContext(..))
 import ExoMonad.Graph.Template (TypedTemplate, typedTemplateFile, runTypedTemplate)
 
 import ExoMonad.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo, getDirtyFiles)
 import ExoMonad.Effects.GitHub
   ( GitHub, PullRequest(..), Issue(..), listPullRequests, getIssue
-  , Repo(..), PRFilter(..), defaultPRFilter, IssueState(..), listIssues, defaultIssueFilter, IssueFilter(..)
+  , PRFilter(..), defaultPRFilter, IssueState(..), listIssues, defaultIssueFilter, IssueFilter(..)
   , defaultRepo
   )
 

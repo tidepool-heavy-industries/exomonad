@@ -20,10 +20,9 @@ import Data.Aeson.Types (withObject)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
-import Data.Foldable (toList)
 import Language.Haskell.TH (mkName)
 
-import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), MCPOptions(..), HasJSONSchema(..), objectSchema, arraySchema, oneOfSchema, emptySchema, SchemaType(..), describeField, enumSchema)
+import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??), HasJSONSchema(..), objectSchema, arraySchema, oneOfSchema, emptySchema, SchemaType(..), describeField, enumSchema)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- POPUP ELEMENT TYPES

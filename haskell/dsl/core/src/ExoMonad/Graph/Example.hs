@@ -107,7 +107,6 @@ instance HasJSONSchema SearchOutput where
 -- This demonstrates the unified ToolDef API where everything hangs off
 -- the typeclass - types, effects, name, description, and implementation.
 data SearchTool = SearchTool
-  deriving (Typeable)
 
 instance ToolDef SearchTool where
   type ToolInput SearchTool = SearchInput

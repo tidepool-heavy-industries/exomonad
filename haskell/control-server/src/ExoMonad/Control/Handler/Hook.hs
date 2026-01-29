@@ -18,8 +18,6 @@ where
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import Data.Maybe (fromMaybe)
-import qualified Data.Map.Strict as Map
 import System.IO (hFlush, stdout)
 import System.Environment (lookupEnv)
 import Control.Exception (SomeException, try, throwIO)
@@ -34,8 +32,8 @@ import Data.Maybe (fromMaybe)
 import OpenTelemetry.Trace
 import qualified OpenTelemetry.Context.ThreadLocal as Context
 
-import ExoMonad.Control.Logging (Logger, logInfo, logError)
-import ExoMonad.Control.Protocol hiding (role)
+import ExoMonad.Control.Logging (Logger)
+import ExoMonad.Control.Protocol
 import ExoMonad.Control.Types (ServerConfig(..))
 import ExoMonad.Control.OpenObserve (shipTranscript)
 import ExoMonad.Control.Hook.Policy (HookDecision(..), evaluatePolicy)
@@ -48,8 +46,6 @@ import ExoMonad.Control.Effects.Cabal (runCabalRemote)
 import ExoMonad.Control.Effects.Effector (runEffectorViaSsh, runEffectorIO)
 import ExoMonad.Control.Interpreters.Traced (traceCabal, traceGit)
 import ExoMonad.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
-import ExoMonad.FileSystem.Interpreter (runFileSystemIO)
-import ExoMonad.Env.Interpreter (runEnvIO)
 import ExoMonad.Effect.Types (runLog, LogLevel(..))
 import ExoMonad.Effect.NodeMeta (runGraphMeta, runNodeMeta, defaultNodeMeta, GraphMetadata(..))
 import ExoMonad.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
@@ -80,13 +76,13 @@ handleHook logger tracer config input runtime agentRole mContainerId cbMap = do
   
   -- Manual span management
   ctx <- Context.getContext
-  span <- createSpan tracer ctx spanName defaultSpanArguments
+  traceSpan <- createSpan tracer ctx spanName defaultSpanArguments
   
   result <- try $ do
-    addAttribute span "session.id" input.sessionId
-    addAttribute span "jsonl.file" input.transcriptPath
-    forM_ input.toolUseId $ \tid -> addAttribute span "tool_use_id" tid
-    forM_ input.toolName $ \tn -> addAttribute span "tool_name" tn
+    addAttribute traceSpan "session.id" input.sessionId
+    addAttribute traceSpan "jsonl.file" input.transcriptPath
+    forM_ input.toolUseId $ \tid -> addAttribute traceSpan "tool_use_id" tid
+    forM_ input.toolName $ \tn -> addAttribute traceSpan "tool_name" tn
     
     case input.hookEventName of
       "SessionStart" -> handleSessionStart logger tracer agentRole input
@@ -96,11 +92,11 @@ handleHook logger tracer config input runtime agentRole mContainerId cbMap = do
       "SubagentStop" -> handleTranscriptHook config agentRole input
       _ -> pure $ hookSuccess $ makeResponse input.hookEventName input
 
-  endSpan span Nothing
+  endSpan traceSpan Nothing
   
   case result of
     Left (e :: SomeException) -> do
-      recordException span mempty Nothing e
+      recordException traceSpan mempty Nothing e
       throwIO e
     Right r -> pure r
 
@@ -237,7 +233,7 @@ handleSessionStart logger tracer role input = do
 --
 -- Uses CircuitBreaker to prevent infinite loops and concurrent execution.
 handleStop :: Logger -> Tracer -> ServerConfig -> HookInput -> Runtime -> Maybe Text -> CircuitBreakerMap -> IO ControlResponse
-handleStop logger tracer config input runtime mContainerId cbMap = do
+handleStop logger tracer config input _runtime mContainerId cbMap = do
   sessionId <- getOrCreateSession input
   TIO.putStrLn $ "  [HOOK] Running Stop hook with circuit breaker for session: " <> sessionId
   hFlush stdout

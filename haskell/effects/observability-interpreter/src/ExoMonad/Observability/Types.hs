@@ -54,7 +54,6 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TLE
-import qualified Data.ByteString.Lazy as LBS
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import Data.Word (Word64)
 import GHC.Generics (Generic)
