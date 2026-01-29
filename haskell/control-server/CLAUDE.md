@@ -73,7 +73,24 @@ The system enforces role-based access control (RBAC) for MCP tools to ensure age
 |------|---------|-----------|
 | **TL** | Team Lead: Orchestrates agents, spawns worktrees, monitors progress. | `spawn_agents`, `exo_status`, `exo_complete`, TUI tools |
 | **Dev** | Developer: Executes implementation tasks, files PRs, uses LSP tools. | `file_pr`, `find_callers`, `show_type`, TUI tools |
-| **PM** | Product Manager: Planning, prioritization, health monitoring. | `pm_*` tools, `exo_status` (read-only) |
+| **PM** | Product Manager: Planning, prioritization, health monitoring. | `gt_*`, `pm_epic_*`, `pm_pitch`, `pm_interview` |
+
+### PM Role Workflow
+
+The Project Manager (PM) role is strictly for planning and coordination. PMs **do not** write code, run tests, or spawn sub-agents.
+
+**Responsibilities:**
+1.  **Triage**: Review inbox (`gt_mail_inbox`), prioritize messages, and understand incoming requests.
+2.  **Strategy**: Use `pm_pitch` to propose high-level plans to the human and `pm_interview` to gather requirements.
+3.  **Planning**: Create and manage Epics via `pm_epic_*` tools. Break down Epics into convoys/tasks using `gt_convoy_*`.
+4.  **Handoff**: Assign convoys/epics to a TL (via `gt_mail_send` or similar mechanism) for execution. The TL then uses `spawn_agents`.
+5.  **Coordination**: Track progress via `pm_status` and `gt_convoy_status`. Handle escalations.
+
+> **Note:** Mailbox (`gt_mail_*`) and convoy (`gt_convoy_*`) tools are **planned Tier 5 additions** in this scaffold and may not yet be implemented in the codebase. The references here describe the intended design, not necessarily the current state.
+
+**PM Tool Restrictions:**
+- **Allowed**: Mail/Convoy tools, `pm_*` (Epic/Strategy/Status), `exo_status` (read-only), TUI tools.
+- **Forbidden**: LSP tools (`find_callers`, `show_type`), file editing tools (Read/Write), `teach-graph`, `spawn_agents`, `file_pr`.
 
 ### Role Detection & Routing
 

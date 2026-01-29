@@ -33,6 +33,13 @@ import ExoMonad.Control.KaizenTools (kaizenReportLogic)
 import ExoMonad.Control.TLTools (tlCreateIssueLogic)
 import ExoMonad.Control.ExoTools.FilePR (filePRLogic)
 import ExoMonad.Control.PMStatus (pmStatusLogic)
+import ExoMonad.Control.PMTools 
+  ( pmEpicCreateLogic
+  , pmEpicListLogic
+  , pmEpicUpdateLogic
+  , pmPitchLogic
+  , pmInterviewLogic
+  )
 
 -- Import Constraints
 import ExoMonad.Effects.Env (Env)
@@ -77,6 +84,19 @@ kaizenTools = KaizenTools
   { kaizenReport = ToolHandler kaizenReportLogic
   }
 
+pmEpicTools :: (Member Log es) => PMEpicTools (AsHandler es)
+pmEpicTools = PMEpicTools
+  { pmEpicCreate = ToolHandler pmEpicCreateLogic
+  , pmEpicList = ToolHandler pmEpicListLogic
+  , pmEpicUpdate = ToolHandler pmEpicUpdateLogic
+  }
+
+pmStrategyTools :: (Member Log es) => PMStrategyTools (AsHandler es)
+pmStrategyTools = PMStrategyTools
+  { pmPitch = ToolHandler pmPitchLogic
+  , pmInterview = ToolHandler pmInterviewLogic
+  }
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- ROLE TOOL RECORDS
 -- ════════════════════════════════════════════════════════════════════════════
@@ -98,28 +118,28 @@ tlTools = TLTools
   }
 
 devTools :: ( Member Env es, Member Log es
-            , Member TUI es
-            , Member GitHub es
+            , Member TUI es, Member GitHub es
             , Member Git es
             ) => DevTools (AsHandler es)
 devTools = DevTools
   { tui           = tuiTools
   , github        = gitHubTools
   , kaizen        = kaizenTools
-  , specific      = DevSpecificTools
+  , git           = GitTools
       { filePR = ToolHandler filePRLogic
       }
   }
 
 pmTools :: ( Member Env es, Member Log es
-           , Member TUI es
-           , Member GitHub es
+           , Member TUI es, Member GitHub es
            , Member Time es
            ) => PMTools (AsHandler es)
 pmTools = PMTools
   { tui           = tuiTools
   , github        = gitHubTools
   , kaizen        = kaizenTools
+  , epic          = pmEpicTools
+  , strategy      = pmStrategyTools
   , specific      = PMSpecificTools
       { pmStatus = ToolHandler pmStatusLogic
       }

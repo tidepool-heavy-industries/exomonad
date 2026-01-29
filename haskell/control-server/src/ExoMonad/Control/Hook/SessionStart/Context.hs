@@ -9,6 +9,7 @@
 module ExoMonad.Control.Hook.SessionStart.Context
   ( SessionStartContext(..)
   , IssuesDashboardContext(..)
+  , PMDashboardContext(..)
   , IssueContext(..)
   ) where
 
@@ -39,11 +40,22 @@ data SessionStartContext = SessionStartContext
     -- ^ Full issue details if available
   , dashboard :: Maybe IssuesDashboardContext
     -- ^ Issues dashboard (for TL role)
+  , pm_dashboard :: Maybe PMDashboardContext
+    -- ^ PM dashboard (for PM role)
   } deriving stock (Show, Eq, Generic)
 
 -- | Issues dashboard context for TL role.
 data IssuesDashboardContext = IssuesDashboardContext
   { open :: [IssueContext]
+  } deriving stock (Show, Eq, Generic)
+
+-- | PM dashboard context.
+data PMDashboardContext = PMDashboardContext
+  { inboxCount :: Int
+  , urgentMessages :: [Text]
+  , activeConvoys :: [Text]
+  , agentStatus :: Text
+  , pendingPRs :: [Text]
   } deriving stock (Show, Eq, Generic)
 
 -- | Issue context for template rendering.
@@ -68,12 +80,23 @@ instance ToGVal (Run SourcePos (Writer Text) Text) SessionStartContext where
     , "cwd" ~> ctx.cwd
     , "issue" ~> ctx.issue
     , "dashboard" ~> ctx.dashboard
+    , "pm_dashboard" ~> ctx.pm_dashboard
     ]
 
 -- | ToGVal instance for issues dashboard context.
 instance ToGVal (Run SourcePos (Writer Text) Text) IssuesDashboardContext where
   toGVal db = dict
     [ "open" ~> db.open
+    ]
+
+-- | ToGVal instance for PM dashboard context.
+instance ToGVal (Run SourcePos (Writer Text) Text) PMDashboardContext where
+  toGVal db = dict
+    [ "inboxCount" ~> db.inboxCount
+    , "urgentMessages" ~> db.urgentMessages
+    , "activeConvoys" ~> db.activeConvoys
+    , "agentStatus" ~> db.agentStatus
+    , "pendingPRs" ~> db.pendingPRs
     ]
 
 -- | ToGVal instance for issue context.
