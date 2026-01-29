@@ -71,4 +71,3 @@ runLogAsYield = interpret handleLog
         let fields = fmap Map.fromList maybeFields
         _ <- yield (EffLogError msg fields) (id @EffectResult)
         pure ()
-        pure ()
