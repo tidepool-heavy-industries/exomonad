@@ -28,6 +28,8 @@ import ExoMonad.Effects.Git (Git, getWorktreeInfo, WorktreeInfo(..))
 import ExoMonad.Effects.GitHub (GitHub)
 import ExoMonad.Effect.Types (Log, logInfo) 
 import ExoMonad.Effects.Zellij (Zellij)
+import ExoMonad.Control.Effects.Cabal (Cabal)
+import ExoMonad.Control.Effects.Effector (Effector)
 
 -- We need a Reader effect for ServerConfig to access policy and workflow store
 type ConfigReader = Reader ServerConfig
