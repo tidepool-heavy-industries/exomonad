@@ -17,11 +17,13 @@ module ExoMonad.Control.Role.Tool.Definitions
   , TUITools(..)
   , GitHubTools(..)
   , KaizenTools(..)
+  , GitTools(..)
   
     -- * Role-Specific Tool Sets
   , TLSpecificTools(..)
-  , DevSpecificTools(..)
   , PMSpecificTools(..)
+  , PMEpicTools(..)
+  , PMStrategyTools(..)
 
     -- * Role Tool Records
   , TLTools(..)
@@ -43,6 +45,7 @@ import ExoMonad.Control.KaizenTools.Types (KaizenReportArgs, KaizenReportResult)
 import ExoMonad.Control.TLTools.Types (TLCreateIssueArgs, TLCreateIssueResult)
 import ExoMonad.Control.ExoTools.FilePR.Types (FilePRArgs, FilePRResult)
 import ExoMonad.Control.PMStatus.Types (PmStatusArgs, PmStatusResult)
+import ExoMonad.Control.PMTools.Types
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SHARED TOOL SETS
@@ -72,6 +75,27 @@ data KaizenTools mode = KaizenTools
       :@ Description "File a UX friction report, bug, or improvement idea for the framework."
   } deriving Generic
 
+data GitTools mode = GitTools
+  { filePR :: mode :- Tool FilePRArgs FilePRResult
+      :@ Description "File a GitHub pull request for the current branch. Issue number and title are inferred from branch name."
+  } deriving Generic
+
+data PMEpicTools mode = PMEpicTools
+  { pmEpicCreate :: mode :- Tool PMEpicCreateArgs PMEpicCreateResult
+      :@ Description "Create a high-level Epic issue to track a large body of work."
+  , pmEpicList :: mode :- Tool PMEpicListArgs PMEpicListResult
+      :@ Description "List existing Epics."
+  , pmEpicUpdate :: mode :- Tool PMEpicUpdateArgs PMEpicUpdateResult
+      :@ Description "Update an Epic's status or associated issues."
+  } deriving Generic
+
+data PMStrategyTools mode = PMStrategyTools
+  { pmPitch :: mode :- Tool PMPitchArgs PMPitchResult
+      :@ Description "Pitch a strategy or proposal to the human user for approval/feedback."
+  , pmInterview :: mode :- Tool PMInterviewArgs PMInterviewResult
+      :@ Description "Conduct a structured interview with the human user to gather requirements or strategy details."
+  } deriving Generic
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- ROLE-SPECIFIC TOOL SETS
 -- ════════════════════════════════════════════════════════════════════════════
@@ -79,11 +103,6 @@ data KaizenTools mode = KaizenTools
 data TLSpecificTools mode = TLSpecificTools
   { tlCreateIssue :: mode :- Tool TLCreateIssueArgs TLCreateIssueResult
       :@ Description "Create a new issue with domain-specific structured fields (Category, Priority, etc.). Enforces best practices for issue creation."
-  } deriving Generic
-
-data DevSpecificTools mode = DevSpecificTools
-  { filePR :: mode :- Tool FilePRArgs FilePRResult
-      :@ Description "File a GitHub pull request for the current branch. Issue number and title are inferred from branch name."
   } deriving Generic
 
 data PMSpecificTools mode = PMSpecificTools
@@ -107,12 +126,14 @@ data DevTools mode = DevTools
   { tui           :: TUITools mode
   , github        :: GitHubTools mode
   , kaizen        :: KaizenTools mode
-  , specific      :: DevSpecificTools mode
+  , git           :: GitTools mode
   } deriving Generic
 
 data PMTools mode = PMTools
   { tui           :: TUITools mode
   , github        :: GitHubTools mode
   , kaizen        :: KaizenTools mode
+  , epic          :: PMEpicTools mode
+  , strategy      :: PMStrategyTools mode
   , specific      :: PMSpecificTools mode
   } deriving Generic

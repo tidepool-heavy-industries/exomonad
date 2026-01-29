@@ -1,0 +1,21 @@
+=== PM SESSION START ===
+
+📬 INBOX: {{ pm_dashboard.inboxCount }} messages
+{% for msg in pm_dashboard.urgentMessages %}
+   - {{ msg }}
+{% endfor %}
+
+🚂 ACTIVE CONVOYS:
+{% for convoy in pm_dashboard.activeConvoys %}
+   - {{ convoy }}
+{% endfor %}
+
+👥 AGENT STATUS:
+{{ pm_dashboard.agentStatus }}
+
+🔀 PENDING PRS:
+{% for pr in pm_dashboard.pendingPRs %}
+   - {{ pr }}
+{% endfor %}
+
+=== AWAITING INSTRUCTIONS ===

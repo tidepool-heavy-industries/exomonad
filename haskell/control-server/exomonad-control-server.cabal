@@ -47,6 +47,8 @@ library
         ExoMonad.Control.Hook.Stop.Context
         ExoMonad.Control.PMStatus
         ExoMonad.Control.PMStatus.Types
+        ExoMonad.Control.PMTools
+        ExoMonad.Control.PMTools.Types
         ExoMonad.Control.ExoTools
         ExoMonad.Control.ExoTools.Internal
         ExoMonad.Control.ExoTools.Status

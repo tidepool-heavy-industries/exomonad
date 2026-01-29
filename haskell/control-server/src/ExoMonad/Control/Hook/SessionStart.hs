@@ -51,6 +51,9 @@ sessionStartDevNoIssueCompiled = $(typedTemplateFile ''SessionStartContext "temp
 sessionStartTLCompiled :: TypedTemplate SessionStartContext SourcePos
 sessionStartTLCompiled = $(typedTemplateFile ''SessionStartContext "templates/hook/session-start-tl.jinja")
 
+sessionStartPMCompiled :: TypedTemplate SessionStartContext SourcePos
+sessionStartPMCompiled = $(typedTemplateFile ''SessionStartContext "templates/hook/session-start-pm.jinja")
+
 instance TemplateDef SessionStartTpl where
   type TemplateContext SessionStartTpl = SessionStartContext
   type TemplateConstraint SessionStartTpl es = ()
@@ -88,8 +91,30 @@ sessionStartLogic tracer role cwdPath = do
 
   case role of
     PM -> do
-      logDebug "PM role: No SessionStart context injected."
-      pure Nothing
+      logDebug "PM role: Injecting SessionStart context."
+      -- Get worktree info
+      mWt <- getWorktreeInfo
+
+      let pmDb = PMDashboardContext
+            { inboxCount = 0
+            , urgentMessages = ["(Scaffold) No urgent messages"]
+            , activeConvoys = ["(Scaffold) No active convoys"]
+            , agentStatus = "(Scaffold) All agents idle"
+            , pendingPRs = ["(Scaffold) No pending PRs"]
+            }
+
+      let ctx = SessionStartContext
+            { role = PM
+            , issue_number = Nothing
+            , branch = (.wiBranch) <$> mWt
+            , cwd = cwdPath
+            , issue = Nothing
+            , dashboard = Nothing
+            , pm_dashboard = Just pmDb
+            }
+
+      let rendered = runTypedTemplate ctx sessionStartPMCompiled
+      pure $ Just rendered
 
     Dev -> do
       -- Get worktree info
@@ -116,6 +141,7 @@ sessionStartLogic tracer role cwdPath = do
             , cwd = cwdPath
             , issue = toIssueContext <$> mIssue
             , dashboard = Nothing
+            , pm_dashboard = Nothing
             }
 
       -- Select template based on issue availability
@@ -141,6 +167,7 @@ sessionStartLogic tracer role cwdPath = do
             , cwd = cwdPath
             , issue = Nothing
             , dashboard = Just db
+            , pm_dashboard = Nothing
             }
 
       let rendered = runTypedTemplate ctx sessionStartTLCompiled

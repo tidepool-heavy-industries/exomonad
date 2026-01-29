@@ -76,6 +76,24 @@ commonHooksSchema = CommonHooks
   , subagentStop = hookSchema
   }
 
+gitToolsSchema :: GitTools AsSchema
+gitToolsSchema = GitTools
+  { filePR = toolSchema
+  }
+
+pmEpicToolsSchema :: PMEpicTools AsSchema
+pmEpicToolsSchema = PMEpicTools
+  { pmEpicCreate = toolSchema
+  , pmEpicList = toolSchema
+  , pmEpicUpdate = toolSchema
+  }
+
+pmStrategyToolsSchema :: PMStrategyTools AsSchema
+pmStrategyToolsSchema = PMStrategyTools
+  { pmPitch = toolSchema
+  , pmInterview = toolSchema
+  }
+
 -- Role Tool Sets
 tlToolsSchema :: TLTools AsSchema
 tlToolsSchema = TLTools
@@ -91,7 +109,7 @@ devToolsSchema = DevTools
   { tui           = tuiSchema
   , github        = gitHubSchema
   , kaizen        = kaizenSchema
-  , specific      = DevSpecificTools { filePR = toolSchema }
+  , git           = GitTools { filePR = toolSchema }
   }
 
 pmToolsSchema :: PMTools AsSchema
@@ -99,6 +117,8 @@ pmToolsSchema = PMTools
   { tui           = tuiSchema
   , github        = gitHubSchema
   , kaizen        = kaizenSchema
+  , epic          = pmEpicToolsSchema
+  , strategy      = pmStrategyToolsSchema
   , specific      = PMSpecificTools { pmStatus = toolSchema }
   }
 
