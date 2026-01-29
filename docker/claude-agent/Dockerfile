@@ -48,11 +48,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 # Install Gemini CLI
 RUN npm install -g @google/gemini-cli
 
-# Create non-root user 'agent' setup
-# Note: User 'agent' exists now (renamed from 'user'), but we need to ensure
-# directories and permissions are correct.
-
-# Pre-seed Claude Code onboarding to avoid interactive prompts
+# Initialize non-root user 'agent' home configuration
+# User 'agent' already exists (renamed from 'user'); the following ensures its
+# Claude configuration directory and files have the correct ownership.
 RUN mkdir -p /home/agent/.claude && \
     echo '{"hasCompletedOnboarding":true}' > /home/agent/.claude.json && \
     chown -R agent:agent /home/agent/.claude /home/agent/.claude.json
