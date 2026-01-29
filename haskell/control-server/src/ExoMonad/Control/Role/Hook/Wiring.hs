@@ -28,22 +28,6 @@ import ExoMonad.Effects.Git (Git, getWorktreeInfo, WorktreeInfo(..))
 import ExoMonad.Effects.GitHub (GitHub)
 import ExoMonad.Effect.Types (Log, logInfo) 
 import ExoMonad.Effects.Zellij (Zellij)
-import GHC.Records (HasField)
-import GHC.Generics (Generic)
-
--- Stop Hook Imports
-
-import ExoMonad.Graph.Interpret (runGraph)
-import ExoMonad.Effect.NodeMeta (runNodeMeta, defaultNodeMeta, NodeMeta)
-import Control.Monad.Freer.State (runState, State)
-import ExoMonad.Control.StopHook.Types (StopHookContext(..), TemplateName, AgentState(..), WorkflowState)
-import ExoMonad.Control.StopHook.Graph (StopHookGraph) -- Import StopHookGraph
-import ExoMonad.Control.StopHook.Handlers (stopHookHandlers)
-import ExoMonad.Control.StopHook.Templates (renderStopHookTemplate)
-import ExoMonad.Control.Workflow.Store (getWorkflowState, updateWorkflowState)
-import ExoMonad.Control.Effects.Cabal (Cabal)
-import ExoMonad.Control.Effects.Effector (Effector)
-import ExoMonad.Control.ExoTools (parseIssueNumber)
 
 -- We need a Reader effect for ServerConfig to access policy and workflow store
 type ConfigReader = Reader ServerConfig
