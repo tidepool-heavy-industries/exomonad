@@ -34,7 +34,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
-import Data.Char (isUpper, toLower)
+import Data.Char (isUpper, isLower, toLower)
 import Data.Maybe (fromMaybe)
 
 import ExoMonad.Graph.Generic (GraphMode(..), type (:-), type (:@))
@@ -113,12 +113,18 @@ instance {-# OVERLAPPABLE #-} (Generic a, GReifyTools (Rep a)) => ReifyField a w
 
 -- | Helper: CamelCase to snake_case
 camelToSnake :: Text -> Text
-camelToSnake = T.dropWhile (== '_') . T.pack . go . T.unpack
+camelToSnake = T.pack . go . T.unpack
   where
     go [] = []
-    go (x:xs)
-      | isUpper x = '_' : toLower x : go xs
-      | otherwise = x : go xs
+    go (c:cs) = toLower c : go' c cs
+    
+    go' _ [] = []
+    go' prev (c:cs)
+      | isUpper c =
+          if isLower prev || (isUpper prev && (not (null cs) && isLower (head cs)))
+          then '_' : toLower c : go' c cs
+          else toLower c : go' c cs
+      | otherwise = c : go' c cs
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONSTRUCTION HELPERS (Smart Constructors)

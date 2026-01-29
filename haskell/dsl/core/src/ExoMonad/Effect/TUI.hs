@@ -196,6 +196,8 @@ data PopupResult = PopupResult
     -- ^ Button pressed: "submit" or "decline"
   , prValues :: Value
     -- ^ JSON object with all visible component values
+  , prTimeSpent :: Maybe Double
+    -- ^ Time spent interacting with popup in seconds
   }
   deriving (Show, Eq, Generic)
 
@@ -371,12 +373,13 @@ instance FromJSON VisibilityRule where
           _ -> fail "Invalid VisibilityRule: ambiguous or missing fields"
 
 instance ToJSON PopupResult where
-  toJSON (PopupResult button values) = object
+  toJSON (PopupResult button values timeSpent) = object $
     [ "button" .= button
     , "values" .= values
-    ]
+    ] ++ maybe [] (\t -> ["time_spent_seconds" .= t]) timeSpent
 
 instance FromJSON PopupResult where
   parseJSON = withObject "PopupResult" $ \o -> PopupResult
     <$> o .: "button"
     <*> o .: "values"
+    <*> o .:? "time_spent_seconds"

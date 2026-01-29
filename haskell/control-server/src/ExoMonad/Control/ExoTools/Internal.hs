@@ -16,11 +16,12 @@ module ExoMonad.Control.ExoTools.Internal
 import Control.Applicative ((<|>))
 import Control.Monad.Freer (Eff, Member)
 import Data.Aeson (ToJSON(..), object, (.=))
-import Data.Char (isAlphaNum, isSpace)
+import Data.Char (isAlphaNum, isSpace, isDigit)
 import Data.List (find)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
+import Text.Read (readMaybe)
 
 import Text.Parsec.Pos (SourcePos)
 
@@ -148,13 +149,17 @@ getDevelopmentContext maybeIssueId = do
 -- | Parse issue number from branch name (gh-{num}/* convention)
 parseIssueNumber :: Text -> Maybe Int
 parseIssueNumber branch =
-  if "gh-" `T.isPrefixOf` branch
+  if "gh-" `T.isPrefixOf` T.toLower branch
   then
     let content = T.drop 3 branch
-        (numStr, _) = T.break (\c -> c == '/' || c == '-') content
-    in case (reads (T.unpack numStr) :: [(Int, String)]) of
-         [(n, "")] -> Just n
-         _ -> Nothing
+        (numStr, rest) = T.span isDigit content
+    in if T.null numStr
+       then Nothing
+       else 
+         case T.uncons rest of
+           Nothing -> readMaybe (T.unpack numStr)
+           Just (c, _) | c == '/' || c == '-' -> readMaybe (T.unpack numStr)
+           _ -> Nothing
   else Nothing
 
 -- | Slugify a title for use in branch/directory names.

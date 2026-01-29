@@ -247,6 +247,8 @@ impl PopupState {
 pub struct PopupResult {
     pub button: String, // "submit" or "decline"
     pub values: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_spent_seconds: Option<f64>, // Time user spent interacting with popup
 }
 
 #[cfg(test)]

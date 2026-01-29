@@ -103,7 +103,7 @@ data GitHubRemoveIssueAssigneeReq = GitHubRemoveIssueAssigneeReq { owner :: Text
   deriving (Show, Eq, Generic)
 instance ToJSON GitHubRemoveIssueAssigneeReq
 
-data GitHubListIssuesReq = GitHubListIssuesReq { owner :: Text, repo :: Text, state :: Maybe Text, issueLabels :: [Text] }
+data GitHubListIssuesReq = GitHubListIssuesReq { owner :: Text, repo :: Text, state :: Maybe Text, labels :: [Text] }
   deriving (Show, Eq, Generic)
 instance ToJSON GitHubListIssuesReq
 

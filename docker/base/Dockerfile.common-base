@@ -50,7 +50,7 @@ RUN arch=$(dpkg --print-architecture) && \
     curl -L "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.10.19/cargo-binstall-$binstall_arch.tgz" | tar xz -C /usr/local/bin && \
     chmod +x /usr/local/bin/cargo-binstall && \
     cargo-binstall --no-confirm ripgrep fd-find bat just git-delta ast-grep && \
-    mv /root/.cargo/bin/{rg,fd,bat,just,delta,sg} /usr/local/bin/ && \
+    mv /root/.cargo/bin/* /usr/local/bin/ && \
     rm -rf /root/.cargo
 
 # Install yq (Go binary, not Rust)
@@ -60,7 +60,7 @@ RUN arch=$(dpkg --print-architecture) && \
         "arm64") yq_arch="arm64" ;; \
         *) echo "Unsupported architecture: $arch" && exit 1 ;; \
     esac && \
-    curl -L "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${yq_arch}" -o /usr/local/bin/yq && \
+    curl -L "https://github.com/mikefarah/yq/releases/download/v4.40.5/yq_linux_${yq_arch}" -o /usr/local/bin/yq && \
     chmod +x /usr/local/bin/yq
 
 # Install Zellij (static binary for speed)
@@ -70,7 +70,7 @@ RUN arch=$(dpkg --print-architecture) && \
         "arm64") zarch="aarch64-unknown-linux-musl" ;; \
         *) echo "Unsupported architecture: $arch" && exit 1 ;; \
     esac && \
-    curl -L "https://github.com/zellij-org/zellij/releases/latest/download/zellij-$zarch.tar.gz" | tar xz -C /usr/local/bin && \
+    curl -L "https://github.com/zellij-org/zellij/releases/download/v0.40.1/zellij-$zarch.tar.gz" | tar xz -C /usr/local/bin && \
     chmod +x /usr/local/bin/zellij
 
 # Create app user at build time (UID 1000 for host compatibility)
