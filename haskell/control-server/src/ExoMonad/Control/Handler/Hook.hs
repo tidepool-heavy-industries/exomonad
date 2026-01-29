@@ -16,6 +16,7 @@ where
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import Data.Maybe (fromMaybe)
 import System.IO (hFlush, stdout)
 import Control.Exception (SomeException, try, throwIO)
 import Control.Monad (forM_)
