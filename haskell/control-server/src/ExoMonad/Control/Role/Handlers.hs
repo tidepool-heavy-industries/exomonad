@@ -60,11 +60,8 @@ tlHandlers = TLRole
 
 -- | Developer role handlers.
 devHandlers :: 
-  ( Member DockerSpawner es, Member Env es, Member Git es, Member Justfile es
-  , Member Worktree es, Member FileSystem es, Member Zellij es
-  , Member GeminiOp es, Member Log es
-  , Member TUI es
-  , Member GitHub es
+  ( Member Env es, Member Git es, Member Log es
+  , Member TUI es, Member GitHub es
   ) => DevRole (AsHandler es) es
 devHandlers = DevRole
   { devToolsRecord = devTools
@@ -74,11 +71,8 @@ devHandlers = DevRole
 
 -- | Project Manager role handlers.
 pmHandlers :: 
-  ( Member DockerSpawner es, Member Env es, Member Git es, Member Justfile es
-  , Member Worktree es, Member FileSystem es, Member Zellij es
-  , Member GeminiOp es, Member Log es
-  , Member TUI es
-  , Member GitHub es
+  ( Member Env es, Member Log es
+  , Member TUI es, Member GitHub es
   , Member Time es
   ) => PMRole (AsHandler es) es
 pmHandlers = PMRole

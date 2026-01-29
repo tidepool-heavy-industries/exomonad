@@ -112,7 +112,7 @@ instance {-# OVERLAPPABLE #-} (Generic a, GReifyTools (Rep a)) => ReifyField a w
 
 -- | Helper: CamelCase to snake_case
 camelToSnake :: Text -> Text
-camelToSnake = T.pack . go . T.unpack
+camelToSnake = T.dropWhile (== '_') . T.pack . go . T.unpack
   where
     go [] = []
     go (x:xs)

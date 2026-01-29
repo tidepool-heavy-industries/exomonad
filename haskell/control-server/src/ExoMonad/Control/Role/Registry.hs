@@ -78,8 +78,7 @@ tlToolsSchema = TLTools
 
 devToolsSchema :: DevTools AsSchema
 devToolsSchema = DevTools
-  { orchestration = orchestrationSchema
-  , tui           = tuiSchema
+  { tui           = tuiSchema
   , github        = gitHubSchema
   , kaizen        = kaizenSchema
   , specific      = DevSpecificTools { filePR = toolSchema }
@@ -87,8 +86,7 @@ devToolsSchema = DevTools
 
 pmToolsSchema :: PMTools AsSchema
 pmToolsSchema = PMTools
-  { orchestration = orchestrationSchema
-  , tui           = tuiSchema
+  { tui           = tuiSchema
   , github        = gitHubSchema
   , kaizen        = kaizenSchema
   , specific      = PMSpecificTools { pmStatus = toolSchema }

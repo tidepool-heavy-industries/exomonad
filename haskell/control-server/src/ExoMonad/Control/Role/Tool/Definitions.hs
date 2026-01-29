@@ -104,16 +104,14 @@ data TLTools mode = TLTools
   } deriving Generic
 
 data DevTools mode = DevTools
-  { orchestration :: OrchestrationTools mode
-  , tui           :: TUITools mode
+  { tui           :: TUITools mode
   , github        :: GitHubTools mode
   , kaizen        :: KaizenTools mode
   , specific      :: DevSpecificTools mode
   } deriving Generic
 
 data PMTools mode = PMTools
-  { orchestration :: OrchestrationTools mode
-  , tui           :: TUITools mode
+  { tui           :: TUITools mode
   , github        :: GitHubTools mode
   , kaizen        :: KaizenTools mode
   , specific      :: PMSpecificTools mode

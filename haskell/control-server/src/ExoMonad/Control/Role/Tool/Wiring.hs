@@ -37,11 +37,8 @@ import ExoMonad.Control.PMStatus (pmStatusLogic)
 -- Import Constraints
 import ExoMonad.Effects.Env (Env)
 import ExoMonad.Effects.GitHub (GitHub)
-import ExoMonad.Control.Effects.DockerCtl (runDockerCtl)
 import ExoMonad.Effects.DockerSpawner (DockerSpawner)
-import ExoMonad.Control.Effects.Git (runGitRemote)
 import ExoMonad.Effects.Git (Git)
-import ExoMonad.Control.Effects.Justfile (runJustfileRemote)
 import ExoMonad.Effects.Justfile (Justfile)
 import ExoMonad.Effect.TUI (TUI)
 import ExoMonad.Effect.Types (Time, Log)
@@ -100,15 +97,13 @@ tlTools = TLTools
       }
   }
 
-devTools :: ( Member DockerSpawner es, Member Env es, Member Git es, Member Justfile es
-            , Member Worktree es, Member FileSystem es, Member Zellij es
-            , Member GeminiOp es, Member Log es
+devTools :: ( Member Env es, Member Log es
             , Member TUI es
             , Member GitHub es
+            , Member Git es
             ) => DevTools (AsHandler es)
 devTools = DevTools
-  { orchestration = orchestrationTools
-  , tui           = tuiTools
+  { tui           = tuiTools
   , github        = gitHubTools
   , kaizen        = kaizenTools
   , specific      = DevSpecificTools
@@ -116,16 +111,13 @@ devTools = DevTools
       }
   }
 
-pmTools :: ( Member DockerSpawner es, Member Env es, Member Git es, Member Justfile es
-           , Member Worktree es, Member FileSystem es, Member Zellij es
-           , Member GeminiOp es, Member Log es
+pmTools :: ( Member Env es, Member Log es
            , Member TUI es
            , Member GitHub es
            , Member Time es
            ) => PMTools (AsHandler es)
 pmTools = PMTools
-  { orchestration = orchestrationTools
-  , tui           = tuiTools
+  { tui           = tuiTools
   , github        = gitHubTools
   , kaizen        = kaizenTools
   , specific      = PMSpecificTools
