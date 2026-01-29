@@ -43,16 +43,17 @@ module ExoMonad.Control.Role.Definition.TL
 import Data.Kind (Type)
 import GHC.Generics (Generic)
 
-import ExoMonad.Control.Role.Types (Hooks, RoleMetadata(..))
+import ExoMonad.Control.Role.Types (RoleMetadata(..))
 import ExoMonad.Control.Role.Tool.Definitions (TLTools)
+import ExoMonad.Control.Role.Hook.Definitions (TLHooks)
 
 -- | Team Lead role record.
-data TLRole mode (es :: [Type -> Type]) = TLRole
+data TLRole mode = TLRole
   { tlToolsRecord :: TLTools mode
     -- ^ Tool definitions
   , tlMetadata    :: RoleMetadata
     -- ^ Role identity
-  , tlHooks       :: Hooks es
+  , tlHooks       :: TLHooks mode
     -- ^ Lifecycle hooks
   }
   deriving Generic

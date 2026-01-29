@@ -19,14 +19,15 @@ module ExoMonad.Control.Role.Definition.Dev
 import Data.Kind (Type)
 import GHC.Generics (Generic)
 
-import ExoMonad.Control.Role.Types (Hooks, RoleMetadata(..))
+import ExoMonad.Control.Role.Types (RoleMetadata(..))
 import ExoMonad.Control.Role.Tool.Definitions (DevTools)
+import ExoMonad.Control.Role.Hook.Definitions (DevHooks)
 
 -- | Developer role record.
-data DevRole mode (es :: [Type -> Type]) = DevRole
+data DevRole mode = DevRole
   { devToolsRecord :: DevTools mode
   , devMetadata    :: RoleMetadata
-  , devHooks       :: Hooks es
+  , devHooks       :: DevHooks mode
   }
   deriving Generic
 

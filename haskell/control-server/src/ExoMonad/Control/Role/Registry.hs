@@ -21,14 +21,11 @@ import Data.Text (Text)
 import qualified Data.Set as Set
 
 import ExoMonad.Role (Role(..))
-import ExoMonad.Control.Role.Types
-  ( emptyHooks
-  )
 import ExoMonad.Control.Role.Reify
   ( RoleSchema(..)
   , ReifyRole(..)
   )
-import ExoMonad.Control.Role.Schema (toolSchema, reifyTools, AsSchema)
+import ExoMonad.Control.Role.Schema (toolSchema, hookSchema, reifyTools, AsSchema)
 import ExoMonad.Graph.MCPReify (MCPToolInfo(..))
 
 -- Role imports
@@ -38,6 +35,7 @@ import ExoMonad.Control.Role.Definition.PM (PMRole(..), pmMetadata)
 
 -- Tool imports
 import ExoMonad.Control.Role.Tool.Definitions
+import ExoMonad.Control.Role.Hook.Definitions
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SCHEMA VALUES
@@ -64,6 +62,18 @@ gitHubSchema = GitHubTools
 kaizenSchema :: KaizenTools AsSchema
 kaizenSchema = KaizenTools
   { kaizenReport = toolSchema
+  }
+
+-- Hook Schemas
+commonHooksSchema :: CommonHooks AsSchema
+commonHooksSchema = CommonHooks
+  { sessionStart = hookSchema
+  , preToolUse   = hookSchema
+  , postToolUse  = hookSchema
+  , stop         = hookSchema
+  , sessionEnd   = hookSchema
+  , notification = hookSchema
+  , subagentStop = hookSchema
   }
 
 -- Role Tool Sets
@@ -93,44 +103,44 @@ pmToolsSchema = PMTools
   }
 
 -- Role Schemas
-tlRoleSchema :: TLRole AsSchema es
+tlRoleSchema :: TLRole AsSchema
 tlRoleSchema = TLRole
   { tlToolsRecord = tlToolsSchema
   , tlMetadata    = tlMetadata
-  , tlHooks       = emptyHooks
+  , tlHooks       = TLHooks { common = commonHooksSchema }
   }
 
-devRoleSchema :: DevRole AsSchema es
+devRoleSchema :: DevRole AsSchema
 devRoleSchema = DevRole
   { devToolsRecord = devToolsSchema
   , devMetadata    = devMetadata
-  , devHooks       = emptyHooks
+  , devHooks       = DevHooks { common = commonHooksSchema }
   }
 
-pmRoleSchema :: PMRole AsSchema es
+pmRoleSchema :: PMRole AsSchema
 pmRoleSchema = PMRole
   { pmToolsRecord = pmToolsSchema
   , pmMetadata    = pmMetadata
-  , pmHooks       = emptyHooks
+  , pmHooks       = PMHooks { common = commonHooksSchema }
   }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- REIFICATION INSTANCES
 -- ════════════════════════════════════════════════════════════════════════════
 
-instance ReifyRole TLRole es where
+instance ReifyRole TLRole where
   reifyRole role = RoleSchema
     { metadata = role.tlMetadata
     , tools    = reifyTools role.tlToolsRecord
     }
 
-instance ReifyRole DevRole es where
+instance ReifyRole DevRole where
   reifyRole role = RoleSchema
     { metadata = role.devMetadata
     , tools    = reifyTools role.devToolsRecord
     }
 
-instance ReifyRole PMRole es where
+instance ReifyRole PMRole where
   reifyRole role = RoleSchema
     { metadata = role.pmMetadata
     , tools    = reifyTools role.pmToolsRecord

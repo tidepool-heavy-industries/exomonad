@@ -24,5 +24,5 @@ data RoleSchema = RoleSchema
   } deriving (Show, Eq)
 
 -- | Typeclass for role records that can be reified.
-class ReifyRole (roleRec :: Type -> [Type -> Type] -> Type) (es :: [Type -> Type]) where
-  reifyRole :: roleRec AsSchema es -> RoleSchema
+class ReifyRole (roleRec :: Type -> Type) where
+  reifyRole :: roleRec AsSchema -> RoleSchema

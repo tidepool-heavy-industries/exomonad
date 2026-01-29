@@ -6,7 +6,10 @@
 {-# LANGUAGE TypeOperators #-}
 
 module ExoMonad.Control.Effects.Effector
-  ( runEffectorViaSsh
+  ( Effector(..)
+  , GitStatusResult
+  , GitDiffResult
+  , runEffectorViaSsh
   , runEffectorIO
   ) where
 

@@ -6,7 +6,9 @@
 {-# LANGUAGE TypeOperators #-}
 
 module ExoMonad.Control.Effects.Cabal
-  ( runCabalRemote
+  ( Cabal(..)
+  , CabalResult(..)
+  , runCabalRemote
   ) where
 
 import Control.Monad (void)
