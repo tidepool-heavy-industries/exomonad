@@ -1,6 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE TypeApplications #-}
 
 module ExoMonad.Control.Subprocess
@@ -9,12 +8,12 @@ module ExoMonad.Control.Subprocess
   , runSubprocessText
   , SubprocessResult(..)
   , SubprocessError(..)
-  , noopLogger
   ) where
 
 import Control.Exception (try, SomeException)
 import Control.Monad (unless)
-import Data.Aeson (FromJSON, eitherDecode, encode)
+import Data.Aeson (FromJSON, eitherDecode)
+import Data.List (isInfixOf)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -36,17 +35,6 @@ data SubprocessResult
   | SubprocessFailure SubprocessError
   deriving (Show, Eq, Generic)
 
--- | A no-op logger that does nothing. Useful for tests or where logging is not desired.
-noopLogger :: Logger
-noopLogger = Logger
-  { stderrLoggerSet = error "noopLogger: stderrLoggerSet"
-  , fileLoggerSet = error "noopLogger: fileLoggerSet"
-  , timeCache = error "noopLogger: timeCache"
-  }
--- Wait, the Logger record in Logging.hs has LoggerSet which might not like being 'error'.
--- Better to use functions that don't call the record fields if I use runSubprocess_.
--- But runSubprocess calls logInfo/logError which uses the logger.
-
 -- | Core HOF: run a subprocess with exception handling, exit code checking, and logging.
 runSubprocess
   :: Logger           -- structured logger
@@ -55,11 +43,12 @@ runSubprocess
   -> [String]         -- arguments
   -> IO SubprocessResult
 runSubprocess logger component cmd args = do
-  logInfo logger $ component <> " Executing: " <> T.pack cmd <> " " <> T.pack (unwords args)
+  let redactedArgs = redactArgs args
+  logInfo logger $ component <> " Executing: " <> T.pack cmd <> " " <> T.pack (unwords redactedArgs)
   result <- try @SomeException $ readProcessWithExitCode cmd args ""
   case result of
     Left e -> do
-      let err = SubprocessError cmd args (-1) (T.pack $ show e)
+      let err = SubprocessError cmd redactedArgs (-1) (T.pack $ show e)
       logError logger $ component <> " Exception: " <> T.pack (show e)
       pure $ SubprocessFailure err
     Right (ExitSuccess, out, err) -> do
@@ -68,9 +57,24 @@ runSubprocess logger component cmd args = do
         logDebug logger $ component <> " stderr: " <> T.pack (take 500 err)
       pure $ SubprocessSuccess (T.pack out) (T.pack err)
     Right (ExitFailure code, _out, err) -> do
-      let serr = SubprocessError cmd args code (T.pack err)
+      let serr = SubprocessError cmd redactedArgs code (T.pack err)
       logError logger $ component <> " Failed (exit=" <> T.pack (show code) <> "): " <> T.pack (take 500 err)
       pure $ SubprocessFailure serr
+
+-- | Redact sensitive arguments (env vars).
+redactArgs :: [String] -> [String]
+redactArgs [] = []
+redactArgs ("-e":kv:rest) = "-e" : redactKV kv : redactArgs rest
+redactArgs ("--env":kv:rest) = "--env" : redactKV kv : redactArgs rest
+redactArgs (x:xs) = x : redactArgs xs
+
+redactKV :: String -> String
+redactKV s = case break (== '=') s of
+  (key, '=':_) | isSensitiveKey key -> key <> "=[REDACTED]"
+  _ -> s
+
+isSensitiveKey :: String -> Bool
+isSensitiveKey k = any (`isInfixOf` k) ["TOKEN", "KEY", "SECRET", "PASSWORD", "AUTH"]
 
 -- | Run subprocess and parse JSON stdout on success.
 runSubprocessJSON
