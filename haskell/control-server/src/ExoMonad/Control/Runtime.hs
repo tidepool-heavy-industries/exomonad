@@ -26,6 +26,10 @@ import ExoMonad.Effects.DockerSpawner (DockerSpawner)
 import ExoMonad.Effect.Gemini (GeminiOp)
 import ExoMonad.Effect.TUI (TUI)
 
+import ExoMonad.Effects.Justfile (Justfile)
+import ExoMonad.Control.Effects.Justfile (runJustfileRemote)
+import ExoMonad.Control.Effects.SshExec (SshExec, runSshExec)
+
 -- Interpreters
 import ExoMonad.Control.Logging (Logger)
 import ExoMonad.Git.Interpreter (runGitIO)
@@ -49,6 +53,8 @@ import ExoMonad.Control.Types (ServerConfig(..))
 type AppEffects =
   '[ GeminiOp
    , DockerSpawner
+   , Justfile
+   , SshExec
    , Zellij
    , Worktree
    , Git
@@ -88,6 +94,9 @@ runApp config tracer logger action = do
     $ runGitIO
     $ runWorktreeIO (defaultWorktreeConfig repoRoot)
     $ runZellijIO
+    $ runSshExec logger dockerCtlPath
+    -- Using empty container/workdir for Justfile interpreter since we are running locally in this context
+    $ runJustfileRemote "" "" 
     $ runDockerCtl logger dockerCtlPath
     $ runGeminiIO
     $ action

@@ -425,7 +425,8 @@ instance FromJSON ControlResponse where
 --
 -- Example: Not in Zellij session, missing API key, incomplete setup
 data ErrorCode
-  = NotFound              -- -32001: Resource not found
+  = InvalidRequest        -- -32600: Invalid Request
+  | NotFound              -- -32001: Resource not found
   | InvalidInput          -- -32002: Bad arguments (validation failed)
   | ExternalFailure       -- -32003: Subprocess or I/O error
   | StateError            -- -32004: Invalid state (already exists, blocked)
@@ -435,6 +436,7 @@ data ErrorCode
 
 -- | Get numeric code for ErrorCode.
 errorCodeValue :: ErrorCode -> Int
+errorCodeValue InvalidRequest = -32600
 errorCodeValue NotFound = -32001
 errorCodeValue InvalidInput = -32002
 errorCodeValue ExternalFailure = -32003

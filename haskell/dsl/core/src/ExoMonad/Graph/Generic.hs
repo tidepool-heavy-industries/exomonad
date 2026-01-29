@@ -46,6 +46,11 @@ module ExoMonad.Graph.Generic
   ( -- * Graph Mode Class
     GraphMode(..)
 
+    -- * Re-exports
+  , type (:@)
+  , Tool
+  , Description
+
     -- * Modes
   , AsGraph
   , AsHandler
@@ -103,6 +108,7 @@ module ExoMonad.Graph.Generic
   , ClaudeCodeLLMHandler(..)
   , GeminiLLMHandler(..)
   , ChooseLLMHandler
+  , ToolHandler(..)
 
     -- * Record Validation
   , HasEntryField
@@ -131,7 +137,7 @@ import ExoMonad.Graph.Errors
 import ExoMonad.Graph.Validate (FormatSymbolList)
 import Control.Monad.Freer (Eff, Member)
 
-import ExoMonad.Graph.Types (type (:@), Input, Schema, Template, Vision, Tools, Memory, System, UsesEffects, ClaudeCode, ModelChoice, Gemini, Spawn, Barrier, Awaits, HList(..), MCPExport, MCPToolDef, MCPRoleHint)
+import ExoMonad.Graph.Types (type (:@), Input, Schema, Template, Vision, Description, Tools, Memory, System, UsesEffects, ClaudeCode, ModelChoice, Gemini, Spawn, Barrier, Awaits, HList(..), MCPExport, MCPToolDef, MCPRoleHint, Tool)
 import ExoMonad.Effect.Gemini (GeminiOp, SingGeminiModel(..))
 import ExoMonad.Graph.Template (TemplateContext)
 import ExoMonad.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets, GetClaudeCode, GetGeminiModel, GetSpawnTargets, GetAwaits)
@@ -226,6 +232,10 @@ type family NodeHandler nodeDef es where
   -- GraphNode with Input annotation: function from input type to exit type.
   NodeHandler (GraphNode subgraph :@ Input inputT) es =
     inputT -> Eff es ()
+
+  -- Tool handler: simple function from input to output.
+  NodeHandler (Tool input output) es =
+    input -> Eff es output
 
   -- Accumulator: (nodeDef, origNode, es, mInput, mTpl, mSchema, mEffs)
   NodeHandler (node :@ ann) es = NodeHandlerDispatch (node :@ ann) (node :@ ann) es 'Nothing 'Nothing 'Nothing 'Nothing
@@ -485,6 +495,8 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
   NodeHandlerDispatch (node :@ System _) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
+  NodeHandlerDispatch (node :@ Description _) orig es mInput mTpl mSchema mEffs =
+    NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
   NodeHandlerDispatch (node :@ ClaudeCode _) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
   NodeHandlerDispatch (node :@ Gemini _) orig es mInput mTpl mSchema mEffs =
@@ -527,6 +539,13 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
       ':$$: Fixes
       ':$$: Bullet "Combine into one: UsesEffects '[Effect1, Effect2, ...]"
     )
+
+  -- ══════════════════════════════════════════════════════════════════════════
+  -- Tool Base Case
+  -- ══════════════════════════════════════════════════════════════════════════
+
+  NodeHandlerDispatch (Tool input output) _ es _ _ _ _ =
+    ToolHandler es input output
 
   -- ══════════════════════════════════════════════════════════════════════════
   -- LLMNode Base Cases
@@ -1530,6 +1549,11 @@ instance GraphProduct (K1 i c) where
   type GProductType (K1 i c) = c
   gToProduct = unK1
   gFromProduct = K1
+
+-- | Wrapper for Tool handlers to enable Generic dispatch.
+newtype ToolHandler es input output = ToolHandler 
+  { runToolHandler :: input -> Eff es output 
+  }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONVENIENCE CONSTRAINTS

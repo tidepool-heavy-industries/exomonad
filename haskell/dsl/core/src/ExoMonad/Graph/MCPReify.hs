@@ -58,7 +58,7 @@ data MCPToolInfo = MCPToolInfo
     -- ^ Original field name in graph record (for dispatch)
   , mtdRoles :: [Role]
     -- ^ Roles allowed to use this tool
-  } deriving (Show, Eq)
+  } deriving (Show, Eq, Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- REIFICATION TYPECLASS

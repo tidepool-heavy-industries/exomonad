@@ -5,6 +5,8 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoStarIsType #-}
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 
 -- | Developer Role Definition.
 --
@@ -17,24 +19,14 @@ module ExoMonad.Control.Role.Definition.Dev
 import Data.Kind (Type)
 import GHC.Generics (Generic)
 
-import ExoMonad.Control.Role.Types
-  ( Hooks
-  , RoleMetadata(..)
-  , ServerField
-  )
-import ExoMonad.Control.Role.Server.Workflow (WorkflowServer)
-import ExoMonad.Control.Role.Server.TUI (TUIServer)
-import ExoMonad.Control.Role.Server.GitHub (GitHubServer)
-import ExoMonad.Control.Role.Server.Kaizen (KaizenServer)
+import ExoMonad.Control.Role.Types (Hooks, RoleMetadata(..))
+import ExoMonad.Control.Role.Tool.Definitions (DevTools)
 
 -- | Developer role record.
 data DevRole mode (es :: [Type -> Type]) = DevRole
-  { devMetadataField :: RoleMetadata
-  , devHooks         :: Hooks es
-  , devWorkflow      :: ServerField mode es WorkflowServer
-  , devTUI           :: ServerField mode es TUIServer
-  , devGitHub        :: ServerField mode es GitHubServer
-  , devKaizen        :: ServerField mode es KaizenServer
+  { devToolsRecord :: DevTools mode
+  , devMetadata    :: RoleMetadata
+  , devHooks       :: Hooks es
   }
   deriving Generic
 

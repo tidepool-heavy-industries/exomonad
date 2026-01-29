@@ -19,6 +19,7 @@ module ExoMonad.Graph.Types
   , System
   , Template
   , Vision
+  , Description
   , Tools
   , UsesEffects
   , Memory
@@ -196,6 +197,17 @@ data Template tpl
 
 -- | Marker for LLM nodes that process images/vision input.
 data Vision
+
+-- | Description annotation for nodes and tools.
+--
+-- Used to provide a human-readable description for documentation or MCP tool
+-- listing.
+--
+-- @
+-- myTool :: mode :- Tool Args Result :@ Description "Does the thing"
+-- @
+type Description :: Symbol -> Type
+data Description text
 
 -- | Tools record annotation for LLM nodes.
 --
