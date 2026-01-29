@@ -3,6 +3,7 @@ use tuirealm::props::{BorderType, Props};
 use tuirealm::ratatui::layout::{Constraint, Layout as RatatuiLayout, Rect};
 use tuirealm::ratatui::widgets::{Block, Clear};
 use tuirealm::{Frame, MockComponent, State, StateValue};
+use std::time::Instant;
 
 use crate::protocol::{
     Component, ElementValue, PopupDefinition, PopupResult, PopupState, VisibilityRule,
@@ -32,6 +33,7 @@ pub struct PopupComponent {
     props: Props,
     component_areas: Vec<Rect>, // Track render areas for mouse click detection
     visibility_rules: Vec<Option<VisibilityRule>>, // Per-component visibility rules
+    start_time: Instant, // Track when popup was created for time tracking
 }
 
 /// Wrapper for individual components with their metadata
@@ -60,6 +62,7 @@ impl PopupComponent {
             props: Props::default(),
             component_areas,
             visibility_rules,
+            start_time: Instant::now(), // Track popup creation time
         };
 
         // Set initial focus to first focusable visible component
@@ -125,6 +128,7 @@ impl PopupComponent {
                 .clone()
                 .unwrap_or_else(|| "decline".to_string()),
             values: serde_json::Value::Object(result_values),
+            time_spent_seconds: Some(self.start_time.elapsed().as_secs_f64()),
         }
     }
 

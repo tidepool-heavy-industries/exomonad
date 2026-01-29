@@ -56,7 +56,7 @@ popupLogic args = do
   let internalDef = toPopupDefinition args
 
   -- Show UI and get result
-  TUI.PopupResult button valuesMap <- showUI internalDef
+  TUI.PopupResult button valuesMap timeSpent <- showUI internalDef
 
   -- Zip values back into element structure
   let resultElements = zipWithValues (args.elements) valuesMap
@@ -65,6 +65,7 @@ popupLogic args = do
     { status = if button == "submit" then "completed" else "cancelled"
     , button = button
     , elements = resultElements
+    , timeSpentSeconds = timeSpent
     }
 
 -- | Convert PopupArgs to internal PopupDefinition.
