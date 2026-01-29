@@ -33,6 +33,7 @@ module ExoMonad.Habitica.Interpreter
   ) where
 
 import Control.Exception (try, SomeException)
+import Control.Lens ((^?))
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Data.Aeson
   ( FromJSON(..)
@@ -45,6 +46,7 @@ import Data.Aeson
   , (.:)
   , (.=)
   )
+import Data.Aeson.Lens (key, _String)
 import Data.Aeson.Types (Parser, parseMaybe)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
@@ -288,13 +290,13 @@ emptyObject = object []
 -- Habitica returns the full task object; we extract _id.
 parseCreatedTaskId :: Value -> Maybe TodoId
 parseCreatedTaskId val =
-  TodoId <$> parseMaybe (withObject "Task" (.: "_id")) val
+  TodoId <$> (val ^? key "_id" . _String)
 
 -- | Parse checklist item ID from response.
 -- Response format: {"id": "...", "text": "...", ...}
 parseChecklistItemId :: Value -> Maybe ChecklistItemId
 parseChecklistItemId val =
-  ChecklistItemId <$> parseMaybe (withObject "Checklist" (.: "id")) val
+  ChecklistItemId <$> (val ^? key "id" . _String)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT INTERPRETER

@@ -28,7 +28,7 @@ module ExoMonad.Effects.Git
   ) where
 
 import Control.Monad.Freer (Eff, Member, send)
-import Data.Aeson (ToJSON(..), FromJSON(..), object, withObject, (.=), (.:))
+import Data.Aeson (ToJSON(..), object, (.=))
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
@@ -61,15 +61,6 @@ instance ToJSON WorktreeInfo where
     , "repo_root"   .= wt.wiRepoRoot
     , "is_worktree" .= wt.wiIsWorktree
     ]
-
-instance FromJSON WorktreeInfo where
-  parseJSON = withObject "WorktreeInfo" $ \v ->
-    WorktreeInfo
-      <$> v .: "name"
-      <*> v .: "path"
-      <*> v .: "branch"
-      <*> v .: "repo_root"
-      <*> v .: "is_worktree"
 
 
 -- ════════════════════════════════════════════════════════════════════════════

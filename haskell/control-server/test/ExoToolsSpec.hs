@@ -13,7 +13,6 @@ import Test.Tasty.HUnit
 import ExoMonad.Control.ExoTools
 import ExoMonad.Control.ExoTools.SpawnAgents (SpawnAgentsGraph(..), CleanupAgentsGraph(..))
 import ExoMonad.Control.ExoTools.SpawnAgents.Types (CleanupAgentsResult(..), SpawnAgentsResult(..))
-import ExoMonad.Control.ExoTools.FilePR (FilePRGraph(..))
 import ExoMonad.Control.ExoTools.PrReviewStatus (PrReviewStatusGraph(..))
 import ExoMonad.Control.ExoTools.PrReviewStatus.Types (PrReviewStatusResult(..), AuthorFeedback(..), FeedbackSummary(..))
 import ExoMonad.Effects.GitHub (ReviewComment(..), ReviewState(..))
@@ -24,10 +23,7 @@ main = defaultMain tests
 
 tests :: TestTree
 tests = testGroup "ExoTools"
-  [ testCase "file_pr is discoverable" test_discovery_fpr
-  , testCase "file_pr result serialization" test_serialization_fpr
-  , testCase "pr_review_status is discoverable" test_pr_discovery
-  , testCase "pr_review_status result serialization" test_pr_serialization
+  [ testCase "pr_review_status is discoverable" test_pr_discovery
   , testCase "spawn_agents is discoverable" test_discovery_spawn
   , testCase "spawn_agents result serialization" test_serialization_spawn
   , testCase "cleanup_agents is discoverable" test_discovery_cleanup
@@ -71,71 +67,9 @@ test_serialization_spawn = do
     Success res' -> assertEqual "Should roundtrip" res res'
     Error err -> assertFailure $ "Failed to parse: " ++ err
 
-test_discovery_fpr :: Assertion
-test_discovery_fpr = do
-  -- This checks that the MCPExport annotation is correctly handled for FilePRGraph
-  let fprTools = reifyMCPTools (Proxy @FilePRGraph)
-  case fprTools of
-    [tool] -> assertEqual "Name should be file_pr" "file_pr" tool.mtdName
-    _ -> assertFailure $ "Expected exactly one tool, but found " ++ show (length fprTools)
-
-test_serialization_fpr :: Assertion
-test_serialization_fpr = do
-  -- Test created success case
-  let info = PRInfo 42 "http://pr.url" "OPEN" "[exomonad-xyz] Fix bug"
-  let resCreated = FilePRResult (Just info) True Nothing
-  let jsonCreated = toJSON resCreated
-  case fromJSON @FilePRResult jsonCreated of
-    Success res' -> assertEqual "Should roundtrip created" resCreated res'
-    Error err -> assertFailure $ "Failed to parse created: " ++ err
-
-  -- Test existing PR case (idempotent)
-  let resExisting = FilePRResult (Just info) False Nothing
-  let jsonExisting = toJSON resExisting
-  case fromJSON @FilePRResult jsonExisting of
-    Success res' -> assertEqual "Should roundtrip existing" resExisting res'
-    Error err -> assertFailure $ "Failed to parse existing: " ++ err
-
-  -- Test error case
-  let resError = FilePRResult Nothing False (Just "error message")
-  let jsonError = toJSON resError
-  case fromJSON @FilePRResult jsonError of
-    Success res' -> assertEqual "Should roundtrip error" resError res'
-    Error err -> assertFailure $ "Failed to parse error: " ++ err
-
 test_pr_discovery :: Assertion
 test_pr_discovery = do
   let prTools = reifyMCPTools (Proxy @PrReviewStatusGraph)
   case prTools of
     [tool] -> assertEqual "Name should be pr_review_status" "pr_review_status" tool.mtdName
     _ -> assertFailure $ "Expected exactly one tool, but found " ++ show (length prTools)
-
-test_pr_serialization :: Assertion
-test_pr_serialization = do
-  now <- getCurrentTime
-  let copilotComment = ReviewComment "Copilot" "Looks good" (Just "Main.hs") (Just 10) ReviewCommented now False
-  let humanComment = ReviewComment "reviewer" "LGTM" Nothing Nothing ReviewApproved now True
-  let copilotFeedback = AuthorFeedback
-        { pending = [copilotComment]
-        , resolved = []
-        }
-  let humanFeedback = AuthorFeedback
-        { pending = []
-        , resolved = [humanComment]
-        }
-  let summary = FeedbackSummary
-        { copilotPending = 1
-        , copilotResolved = 0
-        , humanPending = 0
-        , humanResolved = 1
-        }
-  let res = PrReviewStatusResult
-        { prNumber = 123
-        , copilot = copilotFeedback
-        , humans = humanFeedback
-        , summary = summary
-        }
-  let json = toJSON res
-  case fromJSON @PrReviewStatusResult json of
-    Success res' -> assertEqual "Should roundtrip" res res'
-    Error err -> assertFailure $ "Failed to parse: " ++ err

@@ -23,9 +23,11 @@ module ExoMonad.GitHub.Interpreter
   , defaultGitHubConfig
   ) where
 
+import Control.Lens ((^?))
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Data.Aeson (Value(..), toJSON, fromJSON, (.:), (.:?))
 import Data.Aeson qualified as Aeson
+import Data.Aeson.Lens (key, _String)
 import Data.Aeson.Types (parseMaybe)
 import Data.Time.Clock (UTCTime)
 import Data.Time.Format.ISO8601 (iso8601ParseM)
@@ -420,18 +422,18 @@ parseRFC3339Maybe :: Text -> Maybe UTCTime
 parseRFC3339Maybe t = iso8601ParseM (T.unpack t)
 
 -- | Parse JSON comment values from Rust's GitHubDiscussionComment format into Haskell Comments.
+
 -- Rust sends: {"author": "login", "body": "...", "created_at": "...", "replies": [...]}
+
 -- Haskell expects: Comment { commentAuthor :: Author, commentBody :: Text, commentCreatedAt :: UTCTime }
+
 parseCommentValues :: [Value] -> [Comment]
 parseCommentValues = mapMaybe parseOneComment
   where
-    parseOneComment v = case v of
-      Object o -> parseMaybe parseRustComment o
-      _ -> Nothing
-    parseRustComment o = do
-      a <- o .: "author"
-      b <- o .: "body"
-      ca <- o .: "created_at"
+    parseOneComment v = do
+      a <- v ^? key "author" . _String
+      b <- v ^? key "body" . _String
+      ca <- v ^? key "created_at" . _String
       let time = parseRFC3339 ca
       pure Comment
         { commentAuthor = Author a Nothing
@@ -445,12 +447,10 @@ parseCommentValues = mapMaybe parseOneComment
 parseReviewValues :: [Value] -> [Review]
 parseReviewValues = mapMaybe parseOneReview
   where
-    parseOneReview (Object o) = parseMaybe parseRustReview o
-    parseOneReview _ = Nothing
-    parseRustReview o = do
-      a <- o .: "author"
-      b <- o .: "body"
-      s <- o .:? "state"
+    parseOneReview v = do
+      a <- v ^? key "author" . _String
+      b <- v ^? key "body" . _String
+      let s = v ^? key "state" . _String
       let st = case s of
             Just ("APPROVED" :: Text) -> ReviewApproved
             Just "CHANGES_REQUESTED" -> ReviewChangesRequested

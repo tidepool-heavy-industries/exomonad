@@ -41,12 +41,6 @@ instance ToJSON AuthorFeedback where
     , "resolved" .= af.resolved
     ]
 
-instance FromJSON AuthorFeedback where
-  parseJSON = withObject "AuthorFeedback" $ \v ->
-    AuthorFeedback
-      <$> v .: "pending"
-      <*> v .: "resolved"
-
 -- | Summary counts for quick triage.
 data FeedbackSummary = FeedbackSummary
   { copilotPending :: Int
@@ -63,14 +57,6 @@ instance ToJSON FeedbackSummary where
     , "human_pending" .= fs.humanPending
     , "human_resolved" .= fs.humanResolved
     ]
-
-instance FromJSON FeedbackSummary where
-  parseJSON = withObject "FeedbackSummary" $ \v ->
-    FeedbackSummary
-      <$> v .: "copilot_pending"
-      <*> v .: "copilot_resolved"
-      <*> v .: "human_pending"
-      <*> v .: "human_resolved"
 
 -- | Result of pr_review_status tool.
 -- Returns comprehensive feedback grouped by author type and status.
@@ -89,11 +75,3 @@ instance ToJSON PrReviewStatusResult where
     , "humans" .= res.humans
     , "summary" .= res.summary
     ]
-
-instance FromJSON PrReviewStatusResult where
-  parseJSON = withObject "PrReviewStatusResult" $ \v ->
-    PrReviewStatusResult
-      <$> v .: "pr_number"
-      <*> v .: "copilot"
-      <*> v .: "humans"
-      <*> v .: "summary"

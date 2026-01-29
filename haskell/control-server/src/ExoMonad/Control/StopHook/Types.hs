@@ -17,7 +17,7 @@ module ExoMonad.Control.StopHook.Types
   ) where
 
 import Control.Monad.Writer (Writer)
-import Data.Aeson (FromJSON, ToJSON, FromJSONKey, ToJSONKey, Value)
+import Data.Aeson (ToJSON, ToJSONKey, Value)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -36,7 +36,7 @@ data AgentState = AgentState
   , issueNum :: Maybe Int
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (ToJSON)
 
 -- | Mutable workflow state (in State effect)
 data WorkflowState = WorkflowState
@@ -48,7 +48,7 @@ data WorkflowState = WorkflowState
   , lastTestResult :: Maybe TestResult
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (ToJSON)
 
 data WorkflowStage
   = StageBuild
@@ -58,19 +58,19 @@ data WorkflowStage
   | StageReview
   | StageComplete
   deriving stock (Show, Eq, Ord, Generic)
-  deriving anyclass (FromJSON, ToJSON, FromJSONKey, ToJSONKey)
+  deriving anyclass (ToJSON, ToJSONKey)
 
 data BuildResult
   = BuildSuccess
   | BuildFailure BuildFailureInfo
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (ToJSON)
 
 data BuildFailureInfo = BuildFailureInfo
   { rawOutput :: Text           -- Full cabal output
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (ToJSON)
 
 data TestResult = TestResult
   { passed :: Int
@@ -78,7 +78,7 @@ data TestResult = TestResult
   , rawOutput :: Text
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (ToJSON)
 
 type TemplateName = Text
 
@@ -108,7 +108,7 @@ data StopHookContext = StopHookContext
   , git_dirty_files :: [FilePath]
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (ToJSON)
 
 -- ToGVal Instances
 

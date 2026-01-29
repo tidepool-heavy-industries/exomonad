@@ -39,7 +39,7 @@ data PRInfo = PRInfo
   , title  :: Text
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (ToJSON, FromJSON)
+  deriving anyclass (ToJSON)
 
 -- | Result of file_pr tool.
 -- Returns PR info for either an existing or newly created PR.
@@ -56,10 +56,3 @@ instance ToJSON FilePRResult where
     , "created" .= res.created
     , "error" .= res.error
     ]
-
-instance FromJSON FilePRResult where
-  parseJSON = withObject "FilePRResult" $ \v ->
-    FilePRResult
-      <$> v .:? "pr"
-      <*> v .: "created"
-      <*> v .:? "error"

@@ -27,7 +27,7 @@ main = hspec $ do
   -- =========================================================================
   describe "ServiceRequest encoding" $ do
     it "encodes GitHubGetIssue with type tag and include_comments" $ do
-      let req = GitHubGetIssue "octocat" "hello-world" 42 True
+      let req = GitHubGetIssue $ GitHubGetIssueReq "octocat" "hello-world" 42 True
           json = decodeToObject req
       lookupField json "type" `shouldBe` Just (String "GitHubGetIssue")
       lookupField json "owner" `shouldBe` Just (String "octocat")
@@ -36,12 +36,12 @@ main = hspec $ do
       lookupField json "include_comments" `shouldBe` Just (Bool True)
 
     it "encodes GitHubGetIssue with include_comments=false" $ do
-      let req = GitHubGetIssue "o" "r" 1 False
+      let req = GitHubGetIssue $ GitHubGetIssueReq "o" "r" 1 False
           json = decodeToObject req
       lookupField json "include_comments" `shouldBe` Just (Bool False)
 
     it "encodes GitHubGetPR with type tag and include_details" $ do
-      let req = GitHubGetPR "octocat" "hello-world" 99 True
+      let req = GitHubGetPR $ GitHubGetPRReq "octocat" "hello-world" 99 True
           json = decodeToObject req
       lookupField json "type" `shouldBe` Just (String "GitHubGetPR")
       lookupField json "owner" `shouldBe` Just (String "octocat")
@@ -49,21 +49,21 @@ main = hspec $ do
       lookupField json "include_details" `shouldBe` Just (Bool True)
 
     it "encodes GitHubCreateIssue with all fields" $ do
-      let req = GitHubCreateIssue "octocat" "repo" "Bug" "Details" ["bug", "critical"]
+      let req = GitHubCreateIssue $ GitHubCreateIssueReq "octocat" "repo" "Bug" "Details" ["bug", "critical"]
           json = decodeToObject req
       lookupField json "type" `shouldBe` Just (String "GitHubCreateIssue")
       lookupField json "title" `shouldBe` Just (String "Bug")
       lookupField json "body" `shouldBe` Just (String "Details")
 
     it "encodes GitHubCreatePR with head and base" $ do
-      let req = GitHubCreatePR "octocat" "repo" "Add feature" "Body" "feature" "main"
+      let req = GitHubCreatePR $ GitHubCreatePRReq "octocat" "repo" "Add feature" "Body" "feature" "main"
           json = decodeToObject req
       lookupField json "type" `shouldBe` Just (String "GitHubCreatePR")
       lookupField json "head" `shouldBe` Just (String "feature")
       lookupField json "base" `shouldBe` Just (String "main")
 
     it "encodes GitHubListIssues with labels" $ do
-      let req = GitHubListIssues "o" "r" (Just "open") ["bug"]
+      let req = GitHubListIssues $ GitHubListIssuesReq "o" "r" (Just "open") ["bug"]
           json = decodeToObject req
       lookupField json "type" `shouldBe` Just (String "GitHubListIssues")
       lookupField json "state" `shouldBe` Just (String "open")
@@ -310,11 +310,11 @@ main = hspec $ do
     it "ServiceRequest roundtrip preserves type tag" $ do
       let requests :: [(Text, LBS8.ByteString)]
           requests =
-            [ ("GitHubGetIssue", encode $ GitHubGetIssue "o" "r" 1 False)
-            , ("GitHubCreateIssue", encode $ GitHubCreateIssue "o" "r" "t" "b" [])
-            , ("GitHubGetPR", encode $ GitHubGetPR "o" "r" 1 False)
-            , ("GitHubCreatePR", encode $ GitHubCreatePR "o" "r" "t" "b" "h" "main")
-            , ("GitHubListIssues", encode $ GitHubListIssues "o" "r" Nothing [])
+            [ ("GitHubGetIssue", encode $ GitHubGetIssue $ GitHubGetIssueReq "o" "r" 1 False)
+            , ("GitHubCreateIssue", encode $ GitHubCreateIssue $ GitHubCreateIssueReq "o" "r" "t" "b" [])
+            , ("GitHubGetPR", encode $ GitHubGetPR $ GitHubGetPRReq "o" "r" 1 False)
+            , ("GitHubCreatePR", encode $ GitHubCreatePR $ GitHubCreatePRReq "o" "r" "t" "b" "h" "main")
+            , ("GitHubListIssues", encode $ GitHubListIssues $ GitHubListIssuesReq "o" "r" Nothing [])
             , ("GitHubCheckAuth", encode GitHubCheckAuth)
             ]
       mapM_ (\(expected, bs) ->
