@@ -45,25 +45,15 @@ import Data.String (IsString)
 --
 -- Prevents accidental confusion between tool use IDs and other Text values.
 newtype ToolUseId = ToolUseId { unToolUseId :: Text }
-  deriving (Show, Eq, Generic, IsString)
-
-instance ToJSON ToolUseId where
-  toJSON (ToolUseId t) = toJSON t
-
-instance FromJSON ToolUseId where
-  parseJSON = fmap ToolUseId . parseJSON
+  deriving stock (Show, Eq, Generic)
+  deriving newtype (ToJSON, FromJSON, IsString)
 
 -- | Type-safe wrapper for tool result IDs.
 --
 -- Must match a corresponding 'ToolUseId' from a tool use request.
 newtype ToolResultId = ToolResultId { unToolResultId :: Text }
-  deriving (Show, Eq, Generic, IsString)
-
-instance ToJSON ToolResultId where
-  toJSON (ToolResultId t) = toJSON t
-
-instance FromJSON ToolResultId where
-  parseJSON = fmap ToolResultId . parseJSON
+  deriving stock (Show, Eq, Generic)
+  deriving newtype (ToJSON, FromJSON, IsString)
 
 -- | Convert a ToolUseId to a ToolResultId.
 --

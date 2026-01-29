@@ -214,7 +214,7 @@ getGraphInfoSpec = describe "getGraphInfo" $ do
           let edgeList = V.toList edges
           case edgeList of
             [Object e1, Object e2] -> do
-              KM.lookup "from" e1 `shouldBe` Just (String "Entry")
+              KM.lookup "from" e1 `shouldBe` Just (String "EntryNode")
               KM.lookup "to" e1 `shouldBe` Just (String "compute")
               KM.lookup "from" e2 `shouldBe` Just (String "compute")
               KM.lookup "to" e2 `shouldBe` Just (String "Exit")

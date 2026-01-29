@@ -33,12 +33,12 @@ main = hspec $ do
       lookupField json "owner" `shouldBe` Just (String "octocat")
       lookupField json "repo" `shouldBe` Just (String "hello-world")
       lookupField json "number" `shouldBe` Just (Number 42)
-      lookupField json "include_comments" `shouldBe` Just (Bool True)
+      lookupField json "includeComments" `shouldBe` Just (Bool True)
 
-    it "encodes GitHubGetIssue with include_comments=false" $ do
+    it "encodes GitHubGetIssue with includeComments=false" $ do
       let req = GitHubGetIssue $ GitHubGetIssueReq "o" "r" 1 False
           json = decodeToObject req
-      lookupField json "include_comments" `shouldBe` Just (Bool False)
+      lookupField json "includeComments" `shouldBe` Just (Bool False)
 
     it "encodes GitHubGetPR with type tag and include_details" $ do
       let req = GitHubGetPR $ GitHubGetPRReq "octocat" "hello-world" 99 True
@@ -46,7 +46,7 @@ main = hspec $ do
       lookupField json "type" `shouldBe` Just (String "GitHubGetPR")
       lookupField json "owner" `shouldBe` Just (String "octocat")
       lookupField json "number" `shouldBe` Just (Number 99)
-      lookupField json "include_details" `shouldBe` Just (Bool True)
+      lookupField json "includeDetails" `shouldBe` Just (Bool True)
 
     it "encodes GitHubCreateIssue with all fields" $ do
       let req = GitHubCreateIssue $ GitHubCreateIssueReq "octocat" "repo" "Bug" "Details" ["bug", "critical"]
@@ -295,17 +295,17 @@ main = hspec $ do
   -- Cross-language wire format contract tests
   -- =========================================================================
   describe "Cross-language wire format" $ do
-    it "GitHubGetIssue request uses snake_case include_comments" $ do
-      let req = GitHubGetIssue "o" "r" 1 True
+    it "GitHubGetIssue request uses camelCase includeComments" $ do
+      let req = GitHubGetIssue $ GitHubGetIssueReq "o" "r" 1 True
           bs = encode req
           jsonStr = LBS8.unpack bs
-      jsonStr `shouldContain` "\"include_comments\""
+      jsonStr `shouldContain` "\"includeComments\""
 
-    it "GitHubGetPR request uses snake_case include_details" $ do
-      let req = GitHubGetPR "o" "r" 1 True
+    it "GitHubGetPR request uses camelCase includeDetails" $ do
+      let req = GitHubGetPR $ GitHubGetPRReq "o" "r" 1 True
           bs = encode req
           jsonStr = LBS8.unpack bs
-      jsonStr `shouldContain` "\"include_details\""
+      jsonStr `shouldContain` "\"includeDetails\""
 
     it "ServiceRequest roundtrip preserves type tag" $ do
       let requests :: [(Text, LBS8.ByteString)]

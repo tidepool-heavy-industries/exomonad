@@ -7,6 +7,8 @@ module ExoMonad.Control.Export
   ) where
 
 import Control.Monad (forM_)
+import Control.Lens (each, (^..), _2)
+import Data.Generics.Labels ()
 import qualified Data.Text as T
 
 import ExoMonad.Control.Logging (Logger, logInfo, logDebug)
@@ -24,7 +26,7 @@ exportMCPTools logger role = do
   logInfo logger $ "[MCP Discovery] Discovering tools for role: " <> T.pack (show role)
 
   let schema = roleSchemaFor role
-      tools = concatMap (\(_, srv) -> srv.tools) (schema.servers)
+      tools = schema.servers ^.. each . _2 . #tools . each
 
   logInfo logger $ "[MCP Discovery] Found " <> T.pack (show (length tools)) <> " tools"
 

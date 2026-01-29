@@ -9,6 +9,7 @@ module ExoMonad.Control.Workflow.Store
   ) where
 
 import Control.Concurrent.STM (TVar, newTVarIO, readTVarIO, atomically, modifyTVar')
+import Control.Lens (at, (.~), non, (^.))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -26,14 +27,12 @@ initWorkflowStore = newTVarIO Map.empty
 getWorkflowState :: WorkflowStore -> Text -> IO WorkflowState
 getWorkflowState store sessionId = do
   states <- readTVarIO store
-  case Map.lookup sessionId states of
-    Just s  -> pure s
-    Nothing -> pure defaultWorkflowState
+  pure $ states ^. at sessionId . non defaultWorkflowState
 
 -- | Update the workflow state for a session.
 updateWorkflowState :: WorkflowStore -> Text -> WorkflowState -> IO ()
 updateWorkflowState store sessionId newState = do
-  atomically $ modifyTVar' store (Map.insert sessionId newState)
+  atomically $ modifyTVar' store (at sessionId .~ Just newState)
 
 -- | Default initial state for a new workflow.
 defaultWorkflowState :: WorkflowState

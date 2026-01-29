@@ -41,6 +41,7 @@ test-suite cabal-interpreter-test
     import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          Spec.hs
+
     build-depends:
         base >= 4.17 && < 5,
         hspec >= 2.10 && < 3,

@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
 module Main (main) where
 
@@ -17,14 +18,14 @@ spec = do
     it "produces relevance scores within valid range (1-5)" $ property $
       \input ->
         let output = heuristicScoreEdge input
-        in seoRelevance output `shouldSatisfy` (\x -> x >= 1 && x <= 5)
+        in output.relevance `shouldSatisfy` (\x -> x >= 1 && x <= 5)
     
     it "produces risk scores within valid range (1-5)" $ property $
       \input ->
         let output = heuristicScoreEdge input
-        in seoRisk output `shouldSatisfy` (\x -> x >= 1 && x <= 5)
+        in output.risk `shouldSatisfy` (\x -> x >= 1 && x <= 5)
 
     it "always includes reasoning" $ property $
       \input ->
         let output = heuristicScoreEdge input
-        in not (T.null (seoReasoning output))
+        in not (T.null (output.reasoning))
