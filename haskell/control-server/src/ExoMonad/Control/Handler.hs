@@ -19,6 +19,7 @@ import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.ByteString.Lazy as LBS
+import Control.Concurrent.STM (TVar)
 
 import OpenTelemetry.Trace (Tracer)
 import ExoMonad.Control.Logging (Logger, logInfo, logError)
@@ -45,11 +46,11 @@ import ExoMonad.Control.Role.Definition.Dev (DevRole(..))
 import ExoMonad.Control.Role.Definition.PM (PMRole(..))
 
 -- | Route a control message to the appropriate handler.
-handleMessage :: Logger -> ServerConfig -> Tracer -> TraceContext -> CircuitBreakerMap -> ControlMessage -> IO ControlResponse
-handleMessage logger config tracer traceCtx cbMap = \case
+handleMessage :: Logger -> ServerConfig -> Tracer -> TraceContext -> CircuitBreakerMap -> TVar [AgentStatus] -> ControlMessage -> IO ControlResponse
+handleMessage logger config tracer traceCtx cbMap agentStore = \case
   HookEvent input r rl cid -> handleHook logger tracer config input r rl cid cbMap
   McpToolCall reqId name args ->
-    handleMcpToolTyped logger config tracer traceCtx cbMap reqId name args
+    handleMcpToolTyped logger config tracer traceCtx cbMap agentStore reqId name args
   ToolsListRequest -> handleToolsList logger config
   Ping -> pure Pong
 
@@ -63,8 +64,8 @@ handleToolsList logger config = do
   pure $ ToolsListResponse tools
 
 -- | Handle MCP tool call using Typed Role DSL.
-handleMcpToolTyped :: Logger -> ServerConfig -> Tracer -> TraceContext -> CircuitBreakerMap -> T.Text -> T.Text -> Aeson.Value -> IO ControlResponse
-handleMcpToolTyped logger config tracer traceCtx cbMap reqId toolName args =
+handleMcpToolTyped :: Logger -> ServerConfig -> Tracer -> TraceContext -> CircuitBreakerMap -> TVar [AgentStatus] -> T.Text -> T.Text -> Aeson.Value -> IO ControlResponse
+handleMcpToolTyped logger config tracer traceCtx cbMap agentStore reqId toolName args =
   withMcpTracing logger config traceCtx reqId toolName args $ do
     let effectiveRole = fromMaybe config.defaultRole (config.role >>= roleFromText)
     
@@ -97,7 +98,7 @@ handleMcpToolTyped logger config tracer traceCtx cbMap reqId toolName args =
 
       ToolFound action -> do
         -- Execute the action within the AppEffects runtime
-        resultOrErr <- try $ runApp config tracer cbMap logger action
+        resultOrErr <- try $ runApp config tracer cbMap logger agentStore action
         
         case resultOrErr of
           Left (e :: SomeException) -> do

@@ -29,6 +29,10 @@ module ExoMonad.Control.Protocol
   , mcpToolError
   , mcpToolSuccess
   , mcpToolErrorWithDetails
+
+    -- * Dashboard Types
+  , AgentStatus(..)
+  , AgentsResponse(..)
   ) where
 
 import Data.Aeson
@@ -583,3 +587,44 @@ mcpToolErrorWithDetails reqId code msg details suggestion =
 -- | Create a successful MCP tool response.
 mcpToolSuccess :: Text -> Value -> ControlResponse
 mcpToolSuccess reqId result = McpToolResponse reqId (Just result) Nothing
+
+-- ============================================================================
+-- Dashboard Types
+-- ============================================================================
+
+-- | Agent status information for the dashboard.
+data AgentStatus = AgentStatus
+  { asId :: Text
+  , asContainerId :: Text
+  , asIssueNumber :: Maybe Int
+  , asStatus :: Text
+  , asStartedAt :: Text
+  , asLastActivity :: Maybe Text
+  , asLastAction :: Maybe Text
+  , asBlocker :: Maybe Text
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON AgentStatus where
+  toJSON a = object $ filter notNull
+    [ "id" .= a.asId
+    , "container_id" .= a.asContainerId
+    , "issue_number" .= a.asIssueNumber
+    , "status" .= a.asStatus
+    , "started_at" .= a.asStartedAt
+    , "last_activity" .= a.asLastActivity
+    , "last_action" .= a.asLastAction
+    , "blocker" .= a.asBlocker
+    ]
+    where
+      notNull (_, Null) = False
+      notNull _ = True
+
+-- | Response for /api/agents endpoint.
+data AgentsResponse = AgentsResponse
+  { agents :: [AgentStatus]
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON AgentsResponse where
+  toJSON r = object [ "agents" .= r.agents ]

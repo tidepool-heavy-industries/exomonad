@@ -23,6 +23,7 @@ import ExoMonad.Control.Export (exportMCPTools)
 import OpenTelemetry.Trace (Tracer)
 
 import Control.Concurrent.Async (race_)
+import Control.Concurrent.STM (TVar, newTVarIO, readTVarIO, atomically, modifyTVar')
 import Control.Exception (catch, bracket)
 import qualified Control.Exception as E
 import Control.Monad (when)
@@ -33,7 +34,7 @@ import Data.Aeson.Types (parseMaybe)
 import qualified Data.Aeson.Text as AesonText
 import qualified Data.Text.Lazy as TL
 import Data.Function ((&))
-import Data.Maybe (isJust, fromMaybe)
+import Data.Maybe (isJust, fromMaybe, listToMaybe)
 import qualified Data.Text as T
 import Network.Socket
 import Network.Wai.Handler.Warp
@@ -44,6 +45,10 @@ import System.FilePath (takeDirectory)
 import System.IO.Error (isDoesNotExistError)
 import Control.Lens ((.~))
 import Data.Generics.Labels ()
+
+-- Imports for effects
+import ExoMonad.Effects.DockerSpawner (stopContainer, ContainerId(..))
+import ExoMonad.Control.Runtime (runApp)
 
 -- | Load LLM configuration from environment variables.
 -- REQUIRES EXOMONAD_SERVICE_SOCKET.
@@ -123,6 +128,9 @@ runServer logger config tracer = do
     _ -> pure ()
 
   cbMap <- initCircuitBreaker
+  
+  -- Initialize agent store (ephemeral, in-memory)
+  agentStore <- newTVarIO []
 
   let settings = defaultSettings
         & setTimeout (5 * 60) -- 5 minutes timeout
@@ -135,10 +143,10 @@ runServer logger config tracer = do
       (cleanupUnixSocket controlSocket)
       $ \sock -> do
         logInfo logger $ "Listening on (Unix): " <> T.pack controlSocket
-        runSettingsSocket settings sock (app logger configFull tracer cbMap))
+        runSettingsSocket settings sock (app logger configFull tracer cbMap agentStore))
     (do
         logInfo logger "Listening on (TCP): 0.0.0.0:7432"
-        runSettings (setPort 7432 settings) (app logger configFull tracer cbMap))
+        runSettings (setPort 7432 settings) (app logger configFull tracer cbMap agentStore))
 
 -- | Setup Unix socket at given path.
 setupUnixSocket :: FilePath -> IO Socket
@@ -169,12 +177,12 @@ cleanupSocketFile path =
       else E.throwIO e
 
 -- | Servant application
-app :: Logger -> ServerConfig -> Tracer -> CircuitBreakerMap -> Application
-app logger config tracer cbMap = serve (Proxy @ExoMonadControlAPI) (server logger config tracer cbMap)
+app :: Logger -> ServerConfig -> Tracer -> CircuitBreakerMap -> TVar [AgentStatus] -> Application
+app logger config tracer cbMap agentStore = serve (Proxy @ExoMonadControlAPI) (server logger config tracer cbMap agentStore)
 
 -- | Servant server implementation
-server :: Logger -> ServerConfig -> Tracer -> CircuitBreakerMap -> Server ExoMonadControlAPI
-server logger config tracer cbMap =
+server :: Logger -> ServerConfig -> Tracer -> CircuitBreakerMap -> TVar [AgentStatus] -> Server ExoMonadControlAPI
+server logger config tracer cbMap agentStore =
        handleHook
   :<|> handleMcpCall
   :<|> handleMcpTools
@@ -182,12 +190,15 @@ server logger config tracer cbMap =
   :<|> handleRoleMcpTools
   :<|> handleRoleMcpCall
   :<|> handleRoleMcpJsonRpc
+  :<|> handleAgents
+  :<|> handleAgentLogs
+  :<|> handleAgentStop
   where
     handleHook (input, runtime, agentRole, containerId) = do
       liftIO $ do
         logDebug logger $ "[HOOK] " <> input.hookEventName <> " runtime=" <> T.pack (show runtime) <> " role=" <> T.pack (show agentRole) <> " container=" <> T.pack (show containerId)
         traceCtx <- newTraceContext
-        handleMessage logger config tracer traceCtx cbMap (HookEvent input runtime agentRole containerId)
+        handleMessage logger config tracer traceCtx cbMap agentStore (HookEvent input runtime agentRole containerId)
 
         -- Note: We do NOT flushTraces here because we use hs-opentelemetry (via Tracer)
         -- which handles export automatically via BatchSpanProcessor.
@@ -196,7 +207,7 @@ server logger config tracer cbMap =
     handleMcpCall req = liftIO $ do
       logInfo logger $ "[MCP:" <> req.mcpId <> "] tool=" <> req.toolName
       traceCtx <- newTraceContext
-      res <- handleMessage logger config tracer traceCtx cbMap
+      res <- handleMessage logger config tracer traceCtx cbMap agentStore
         (McpToolCall req.mcpId req.toolName req.arguments)
 
       -- Flush traces (legacy support for MCP tools)
@@ -237,7 +248,7 @@ server logger config tracer cbMap =
               -- Update config with the role from the slug for handlers that need it
               let configWithRole = config & #role .~ Just slug
 
-              res <- handleMessage logger configWithRole tracer traceCtx cbMap
+              res <- handleMessage logger configWithRole tracer traceCtx cbMap agentStore
                 (McpToolCall sessId req.toolName req.arguments)
 
               -- Flush traces (legacy)
@@ -304,13 +315,13 @@ server logger config tracer cbMap =
                       }
                   }
                 Just (params :: McpToolCallParams) -> do
+                  let sessId = fromMaybe "jsonrpc" mSessionId
                   if isToolAllowed role params.mtcpName
                     then do
-                      let sessId = fromMaybe "jsonrpc" mSessionId
                       liftIO $ logInfo logger $ "[MCP-RPC:" <> slug <> ":" <> sessId <> "] tool=" <> params.mtcpName
                       traceCtx <- liftIO newTraceContext
                       let configWithRole = config & #role .~ Just slug
-                      res <- liftIO $ handleMessage logger configWithRole tracer traceCtx cbMap
+                      res <- liftIO $ handleMessage logger configWithRole tracer traceCtx cbMap agentStore
                         (McpToolCall sessId params.mtcpName params.mtcpArguments)
 
                       -- Convert ControlResponse to MCP tool call result
@@ -347,7 +358,7 @@ server logger config tracer cbMap =
                             , jrpcErrData = Nothing
                             }
                         }
-
+                      
             -- Ping
             "ping" -> do
               liftIO $ logDebug logger $ "[MCP-RPC:" <> slug <> "] ping"
@@ -369,3 +380,35 @@ server logger config tracer cbMap =
                     , jrpcErrData = Nothing
                     }
                 }
+
+    -- | Return agent status for dashboard.
+    handleAgents :: Handler AgentsResponse
+    handleAgents = liftIO $ do
+      agents <- readTVarIO agentStore
+      pure $ AgentsResponse agents
+
+    -- | Return logs for an agent (placeholder).
+    handleAgentLogs :: T.Text -> Handler T.Text
+    handleAgentLogs _id = pure "Logs not implemented"
+
+    -- | Stop an agent.
+    handleAgentStop :: T.Text -> Handler ()
+    handleAgentStop id_ = liftIO $ do
+      agents <- readTVarIO agentStore
+      let mAgent = listToMaybe $ filter (\a -> a.asId == id_) agents
+      case mAgent of
+        Nothing -> do
+          logError logger $ "Agent not found for stop: " <> id_
+          -- Proceed anyway, maybe it's stuck in Docker but not in store?
+          -- For now, just return
+          pure ()
+        Just agent -> do
+          logInfo logger $ "Stopping agent: " <> id_ <> " (" <> agent.asContainerId <> ")"
+          let cid = ContainerId (agent.asContainerId)
+          -- Execute stop effect
+          res <- runApp config tracer logger agentStore (stopContainer cid)
+          case res of
+            Left err -> logError logger $ "Failed to stop agent: " <> T.pack (show err)
+            Right () -> do
+              -- Remove from store (handled by DockerCtl effect, but we can double check)
+              atomically $ modifyTVar' agentStore (filter (\a -> a.asId /= id_))

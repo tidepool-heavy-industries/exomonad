@@ -202,3 +202,9 @@ type ExoMonadControlAPI =
        -- | Unified MCP JSON-RPC endpoint (for Claude Code HTTP transport)
        -- Handles: initialize, notifications/initialized, tools/list, tools/call, ping
   :<|> "role" :> Capture "slug" Text :> "mcp" :> Header "Mcp-Session-Id" Text :> ReqBody '[JSON] McpJsonRpcRequest :> Post '[JSON] McpJsonRpcResponse
+       -- | Agent status dashboard
+  :<|> "api" :> "agents" :> Get '[JSON] AgentsResponse
+       -- | Agent logs
+  :<|> "api" :> "agents" :> Capture "id" Text :> "logs" :> Get '[JSON] Text
+       -- | Stop agent
+  :<|> "api" :> "agents" :> Capture "id" Text :> "stop" :> Post '[JSON] ()
