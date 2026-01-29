@@ -14,10 +14,9 @@ module ExoMonad.Control.PMTools
   ) where
 
 import Control.Monad.Freer (Eff, Member)
-import qualified Data.Text as T
 
 import ExoMonad.Control.PMTools.Types
-import ExoMonad.Effect.Types (Log, logInfo, logWarn)
+import ExoMonad.Effect.Types (Log, logInfo)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EPIC LOGIC (SCAFFOLD)

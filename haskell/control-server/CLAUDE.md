@@ -86,6 +86,8 @@ The Project Manager (PM) role is strictly for planning and coordination. PMs **d
 4.  **Handoff**: Assign convoys/epics to a TL (via `gt_mail_send` or similar mechanism) for execution. The TL then uses `spawn_agents`.
 5.  **Coordination**: Track progress via `pm_status` and `gt_convoy_status`. Handle escalations.
 
+> **Note:** Mailbox (`gt_mail_*`) and convoy (`gt_convoy_*`) tools are **planned Tier 5 additions** in this scaffold and may not yet be implemented in the codebase. The references here describe the intended design, not necessarily the current state.
+
 **PM Tool Restrictions:**
 - **Allowed**: Mail/Convoy tools, `pm_*` (Epic/Strategy/Status), `exo_status` (read-only), TUI tools.
 - **Forbidden**: LSP tools (`find_callers`, `show_type`), file editing tools (Read/Write), `teach-graph`, `spawn_agents`, `file_pr`.
