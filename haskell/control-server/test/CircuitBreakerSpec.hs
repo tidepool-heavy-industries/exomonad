@@ -7,7 +7,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import Control.Concurrent.STM
 import Control.Concurrent (threadDelay)
-import Control.Lens (at, (^.), (&))
+import Control.Lens (at, (^.), (&), (?~))
 import Control.Monad (replicateM_)
 import Control.Monad.Freer (runM)
 import Data.Either (isLeft, isRight)

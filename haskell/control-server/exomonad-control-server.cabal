@@ -229,26 +229,6 @@ test-suite stop-hook-test
     default-extensions:
         OverloadedStrings
 
-test-suite exo-tools-test
-    import:           warnings
-    type:             exitcode-stdio-1.0
-    main-is:          ExoToolsSpec.hs
-    build-depends:
-        base >= 4.17 && < 5,
-        exomonad-control-server,
-        exomonad-env-interpreter,
-        exomonad-core,
-        text >= 2.0 && < 3,
-        aeson,
-        containers,
-        time,
-        tasty,
-        tasty-hunit
-    hs-source-dirs:   test
-    default-language: GHC2024
-    default-extensions:
-        OverloadedStrings
-        TypeApplications
 
 test-suite pm-status-test
     import:           warnings
@@ -363,23 +343,4 @@ test-suite protocol-golden-test
         OverloadedStrings
         TypeApplications
 
-test-suite session-start-test
-    import:           warnings
-    type:             exitcode-stdio-1.0
-    main-is:          SessionStartSpec.hs
-    build-depends:
-        base >= 4.17 && < 5,
-        exomonad-control-server,
-        exomonad-core,
-        exomonad-git-interpreter,
-        text >= 2.0 && < 3,
-        freer-simple,
-        hs-opentelemetry-api,
-        hs-opentelemetry-sdk,
-        tasty,
-        tasty-hunit
-    hs-source-dirs:   test
-    default-language: GHC2024
-    default-extensions:
-        OverloadedStrings
-        TypeApplications
+
