@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-duplicate-exports #-}
+
 module ExoMonad.Prelude
   ( -- * Core types
     Type
@@ -10,6 +12,12 @@ module ExoMonad.Prelude
 
     -- * Common data types
   , NonEmpty(..)
+  , ByteString
+  , Map
+  , HashMap
+  , HashSet
+  , Set
+  , Vector
 
     -- * Effect system
   , Eff

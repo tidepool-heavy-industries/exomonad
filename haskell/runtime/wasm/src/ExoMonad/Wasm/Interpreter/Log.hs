@@ -10,9 +10,11 @@
 --
 -- The interpreter converts:
 --
+-- * @LogMsg Trace msg fields@ → dropped
+-- * @LogMsg Debug msg fields@ → dropped (no debug in WASM)
 -- * @LogMsg Info msg fields@ → @EffLogInfo msg fields@
 -- * @LogMsg Warn msg fields@ → @EffLogInfo msg fields@ (treated as info)
--- * @LogMsg Debug msg fields@ → dropped (no debug in WASM)
+-- * @LogMsg Error msg fields@ → @EffLogError msg fields@
 --
 -- Fire-and-forget semantics - the result from TypeScript is ignored.
 module ExoMonad.Wasm.Interpreter.Log
@@ -37,9 +39,11 @@ import ExoMonad.Wasm.WireTypes
 --
 -- Log levels are mapped as:
 --
+-- * 'Trace' - Dropped
 -- * 'Debug' - Dropped (not sent to TypeScript)
 -- * 'Info' - Sent as @EffLogInfo@
 -- * 'Warn' - Sent as @EffLogInfo@ (no separate warn level in wire format)
+-- * 'Error' - Sent as @EffLogError@
 --
 -- Structured fields are preserved for queryable log data.
 runLogAsYield
