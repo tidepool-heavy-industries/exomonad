@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     gpg \
     gnupg \
+    socat \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI
@@ -31,6 +32,26 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | g
 # Install Docker CLI (client only)
 RUN curl -fsSL https://get.docker.com | sh && \
     rm -rf /var/lib/apt/lists/*
+
+# Install dev tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    jq \
+    tree \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust-based tools via cargo-binstall (fast binary install)
+# Pin cargo-binstall version for security/reproducibility
+RUN arch=$(dpkg --print-architecture) && \
+    case "$arch" in \
+        "amd64") binstall_arch="x86_64-unknown-linux-musl" ;; \
+        "arm64") binstall_arch="aarch64-unknown-linux-musl" ;; \
+        *) echo "Unsupported architecture: $arch" && exit 1 ;; \
+    esac && \
+    curl -L "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.10.19/cargo-binstall-$binstall_arch.tgz" | tar xz -C /usr/local/bin && \
+    chmod +x /usr/local/bin/cargo-binstall && \
+    cargo-binstall --no-confirm ripgrep fd-find bat just delta yq && \
+    mv /root/.cargo/bin/{rg,fd,bat,just,delta,yq} /usr/local/bin/ && \
+    rm -rf /root/.cargo
 
 # Install Zellij (static binary for speed)
 RUN arch=$(dpkg --print-architecture) && \

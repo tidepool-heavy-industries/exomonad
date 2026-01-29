@@ -14,7 +14,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgmp10 \
     libffi8 \
     zlib1g \
-    socat \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy pre-built binaries from builder contexts

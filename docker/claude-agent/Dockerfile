@@ -7,17 +7,14 @@
 #
 # Build with docker buildx bake (see docker/docker-bake.hcl)
 
-FROM debian:bookworm-slim
+FROM common-base
 
 # Avoid prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install core dependencies (no SSH)
+# Install agent-specific dependencies
+# (removed git, curl, ca-certificates, etc. as they are in common-base)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    curl \
-    ca-certificates \
-    gnupg \
     lsb-release \
     build-essential \
     libgmp-dev \
@@ -30,10 +27,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xz-utils \
     sudo \
     python3 \
-    socat \
-    procps \
-    gosu \
     && rm -rf /var/lib/apt/lists/*
+
+# Rename 'user' to 'agent' to match existing agent environment
+# and grant sudo access
+RUN usermod -l agent user && \
+    groupmod -n agent user && \
+    usermod -d /home/agent -m agent && \
+    echo "agent ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Update environment variables to match new user
+ENV HOME=/home/agent
+ENV USER=agent
 
 # Install Node.js 20.x
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
@@ -43,24 +48,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 # Install Gemini CLI
 RUN npm install -g @google/gemini-cli
 
-# Install Docker CLI for spawner communication (tui-spawner needs this)
-RUN curl -fsSL https://get.docker.com | sh && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install cargo-binstall for binary installation
-RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
-
-# Install Zellij for cross-container tab creation
-ENV PATH="/root/.cargo/bin:${PATH}"
-RUN cargo-binstall --no-confirm zellij && \
-    cp /root/.cargo/bin/zellij /usr/local/bin/zellij && \
-    chmod 755 /usr/local/bin/zellij
-
-# Create non-root user 'agent' with UID 1000
-RUN useradd -m -s /bin/bash -u 1000 agent \
-    && echo "agent ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-
-# Pre-seed Claude Code onboarding to avoid interactive prompts
+# Initialize non-root user 'agent' home configuration
+# User 'agent' already exists (renamed from 'user'); the following ensures its
+# Claude configuration directory and files have the correct ownership.
 RUN mkdir -p /home/agent/.claude && \
     echo '{"hasCompletedOnboarding":true}' > /home/agent/.claude.json && \
     chown -R agent:agent /home/agent/.claude /home/agent/.claude.json
