@@ -34,6 +34,7 @@ import Data.Maybe (fromMaybe)
 import OpenTelemetry.Trace
 import qualified OpenTelemetry.Context.ThreadLocal as Context
 
+import ExoMonad.Control.Logging (Logger, logInfo, logError)
 import ExoMonad.Control.Protocol hiding (role)
 import ExoMonad.Control.Types (ServerConfig(..))
 import ExoMonad.Control.OpenObserve (shipTranscript)
@@ -68,8 +69,8 @@ import ExoMonad.Control.Workflow.Store (WorkflowStore, getWorkflowState, updateW
 --
 -- Executes hook-specific logic for SessionStart and Stop.
 -- Other hooks pass through with default responses.
-handleHook :: Tracer -> ServerConfig -> HookInput -> Runtime -> Role -> Maybe Text -> CircuitBreakerMap -> IO ControlResponse
-handleHook tracer config input runtime agentRole mContainerId cbMap = do
+handleHook :: Logger -> Tracer -> ServerConfig -> HookInput -> Runtime -> Role -> Maybe Text -> CircuitBreakerMap -> IO ControlResponse
+handleHook logger tracer config input runtime agentRole mContainerId cbMap = do
   TIO.putStrLn $ "  session=" <> input.sessionId
   TIO.putStrLn $ "  cwd=" <> input.cwd
   TIO.putStrLn $ "  role=" <> T.pack (show agentRole)
@@ -88,8 +89,8 @@ handleHook tracer config input runtime agentRole mContainerId cbMap = do
     forM_ input.toolName $ \tn -> addAttribute span "tool_name" tn
     
     case input.hookEventName of
-      "SessionStart" -> handleSessionStart tracer agentRole input
-      "Stop" -> handleStop tracer config input runtime mContainerId cbMap
+      "SessionStart" -> handleSessionStart logger tracer agentRole input
+      "Stop" -> handleStop logger tracer config input runtime mContainerId cbMap
       "PreToolUse" -> handlePreToolUse config input
       "SessionEnd" -> handleTranscriptHook config agentRole input
       "SubagentStop" -> handleTranscriptHook config agentRole input
@@ -190,8 +191,8 @@ handlePreToolUse config input = do
         }
 
 -- | Handle SessionStart hook: inject issue context.
-handleSessionStart :: Tracer -> Role -> HookInput -> IO ControlResponse
-handleSessionStart tracer role input = do
+handleSessionStart :: Logger -> Tracer -> Role -> HookInput -> IO ControlResponse
+handleSessionStart logger tracer role input = do
   TIO.putStrLn "  [HOOK] Running SessionStart context injection..."
   hFlush stdout
 
@@ -207,7 +208,7 @@ handleSessionStart tracer role input = do
     $ runGitHubIO defaultGitHubConfig
     $ case mContainer of 
          Just container -> 
-           runSshExec dockerCtlPath
+           runSshExec logger dockerCtlPath
            $ runGitRemote (T.pack container) "." 
            $ traceGit tracer
            $ sessionStartLogic tracer role input.cwd
@@ -235,14 +236,14 @@ handleSessionStart tracer role input = do
 -- | Handle Stop hook: gather state, render template, provide actionable guidance.
 --
 -- Uses CircuitBreaker to prevent infinite loops and concurrent execution.
-handleStop :: Tracer -> ServerConfig -> HookInput -> Runtime -> Maybe Text -> CircuitBreakerMap -> IO ControlResponse
-handleStop tracer config input runtime mContainerId cbMap = do
+handleStop :: Logger -> Tracer -> ServerConfig -> HookInput -> Runtime -> Maybe Text -> CircuitBreakerMap -> IO ControlResponse
+handleStop logger tracer config input runtime mContainerId cbMap = do
   sessionId <- getOrCreateSession input
   TIO.putStrLn $ "  [HOOK] Running Stop hook with circuit breaker for session: " <> sessionId
   hFlush stdout
 
   now <- getCurrentTime
-  withCircuitBreaker cbMap config.circuitBreakerConfig now sessionId (runStopHookLogic tracer config.workflowStore input mContainerId) >>= \case
+  withCircuitBreaker cbMap config.circuitBreakerConfig now sessionId (runStopHookLogic logger tracer config.workflowStore input mContainerId) >>= \case
     Left err -> do
       TIO.putStrLn $ "  [HOOK] Circuit breaker blocked Stop: " <> err
       hFlush stdout
@@ -276,7 +277,7 @@ handleStop tracer config input runtime mContainerId cbMap = do
 
       -- Auto-focus if not blocking
       if not shouldBlock
-        then autoFocusOnSubagentStop
+        then autoFocusOnSubagentStop logger
         else pure ()
 
       if shouldBlock
@@ -304,8 +305,8 @@ getOrCreateSession input = pure input.sessionId
 
 -- | Logic to run inside circuit breaker lock.
 -- Replaces old runStopHookLogic with graph execution.
-runStopHookLogic :: Tracer -> WorkflowStore -> HookInput -> Maybe Text -> IO (TemplateName, StopHookContext)
-runStopHookLogic tracer workflowStore input mContainerId = do
+runStopHookLogic :: Logger -> Tracer -> WorkflowStore -> HookInput -> Maybe Text -> IO (TemplateName, StopHookContext)
+runStopHookLogic logger tracer workflowStore input mContainerId = do
   -- Get binary directory (respects EXOMONAD_BIN_DIR, defaults to /usr/local/bin)
   binDir <- Paths.dockerBinDir
   let dockerCtlPath = Paths.dockerCtlBin binDir
@@ -315,13 +316,13 @@ runStopHookLogic tracer workflowStore input mContainerId = do
 
   -- We need to fetch git info first to populate AgentState
   agentState <- case mContainerId of
-     Just container -> runM $ runSshExec dockerCtlPath $ runGitRemote container "." $ traceGit tracer $ getAgentState input
+     Just container -> runM $ runSshExec logger dockerCtlPath $ runGitRemote container "." $ traceGit tracer $ getAgentState input
      Nothing -> runM $ runGitIO $ traceGit tracer $ getAgentState input
 
   (result, finalState) <- case mContainerId of
         Just container ->
           runM
-          $ runSshExec dockerCtlPath
+          $ runSshExec logger dockerCtlPath
           $ runEffectorViaSsh container
           $ runCabalRemote (Just container)
           $ traceCabal tracer
@@ -334,9 +335,9 @@ runStopHookLogic tracer workflowStore input mContainerId = do
         Nothing ->
           -- No container: use local cabal execution via docker-ctl --local
           runM
-          $ runSshExec dockerCtlPath
+          $ runSshExec logger dockerCtlPath
           $ runState initialWorkflow
-          $ runEffectorIO
+          $ runEffectorIO logger
           $ runCabalRemote Nothing
           $ traceCabal tracer
           $ runGitIO
@@ -364,8 +365,8 @@ getAgentState input = do
     }
 
 -- | Auto-focus on subagent tab when Stop hook fires.
-autoFocusOnSubagentStop :: IO ()
-autoFocusOnSubagentStop = do
+autoFocusOnSubagentStop :: Logger -> IO ()
+autoFocusOnSubagentStop logger = do
   mAutoFocus <- lookupEnv "EXOMONAD_AUTO_FOCUS_ON_ERROR"
   let autoFocusEnabled = mAutoFocus /= Just "false"
 
@@ -381,7 +382,7 @@ autoFocusOnSubagentStop = do
       result <- try $ runM
         $ runZellijIO
         $ case mContainer of
-             Just container -> runSshExec dockerCtlPath $ runGitRemote (T.pack container) "." autoFocusLogic
+             Just container -> runSshExec logger dockerCtlPath $ runGitRemote (T.pack container) "." autoFocusLogic
              Nothing -> runGitIO autoFocusLogic
 
       case result of

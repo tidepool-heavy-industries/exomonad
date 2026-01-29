@@ -10,7 +10,7 @@
 --   * 'withDualLogger' - stderr + session file (for production)
 module ExoMonad.Control.Logging
   ( -- * Logger types
-    Logger
+    Logger(..)
     -- * Initialization
   , withStderrLogger
   , withDualLogger

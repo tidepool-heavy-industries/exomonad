@@ -43,7 +43,7 @@ import ExoMonad.Control.Runtime (runApp)
 -- | Route a control message to the appropriate handler.
 handleMessage :: Logger -> ServerConfig -> Tracer -> TraceContext -> CircuitBreakerMap -> ControlMessage -> IO ControlResponse
 handleMessage logger config tracer traceCtx cbMap = \case
-  HookEvent input r rl cid -> handleHook tracer config input r rl cid cbMap
+  HookEvent input r rl cid -> handleHook logger tracer config input r rl cid cbMap
   McpToolCall reqId name args ->
     handleMcpToolTyped logger config tracer traceCtx cbMap reqId name args
   ToolsListRequest -> handleToolsList logger config

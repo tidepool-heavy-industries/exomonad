@@ -56,7 +56,7 @@ spec = testGroup "Remote Execution Effects"
               _ -> ExecResult (Just 1) "" "Unknown command"
         
         let action = getWorktreeInfo
-        result <- runM $ runMockSshExecSmart mockHandler $ runGitRemote (Just "test-agent") "." action
+        result <- runM $ runMockSshExecSmart mockHandler $ runGitRemote "test-agent" "." action
         case result of
           Just wt -> do
             wt.wiBranch @?= "feature-branch"

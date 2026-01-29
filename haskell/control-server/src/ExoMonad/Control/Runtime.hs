@@ -88,6 +88,6 @@ runApp config tracer logger action = do
     $ runGitIO
     $ runWorktreeIO (defaultWorktreeConfig repoRoot)
     $ runZellijIO
-    $ runDockerCtl dockerCtlPath
+    $ runDockerCtl logger dockerCtlPath
     $ runGeminiIO
     $ action
