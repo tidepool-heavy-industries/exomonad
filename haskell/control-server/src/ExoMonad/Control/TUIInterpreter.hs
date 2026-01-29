@@ -65,20 +65,20 @@ spawnPopupFifo logger definition = do
       -- tui-spawner failed
       logError logger $ "[TUI] ERROR: tui-spawner failed with code " <> T.pack (show code)
       logError logger $ "[TUI] stderr: " <> T.pack (take 1000 stderr)
-      pure $ PopupResult "error" $ object
+      pure $ PopupResult "error" (object
         [ "message" .= T.pack ("tui-spawner failed with exit code " <> show code)
         , "stderr" .= T.pack stderr
-        ]
+        ]) Nothing
     ExitSuccess -> do
       -- Parse stdout as PopupResult JSON
       case eitherDecode (LBS.fromStrict $ TE.encodeUtf8 $ T.pack stdout) of
         Left err -> do
           logError logger $ "[TUI] ERROR: Failed to parse result JSON: " <> T.pack err
           logError logger $ "[TUI] stdout was: " <> T.pack (take 500 stdout)
-          pure $ PopupResult "error" $ object
+          pure $ PopupResult "error" (object
             [ "message" .= T.pack ("Failed to parse popup result: " <> err)
             , "stdout" .= T.pack stdout
-            ]
+            ]) Nothing
         Right result -> do
           logInfo logger $ "[TUI] Success: button=" <> result.prButton
           pure result

@@ -110,13 +110,13 @@ instance FromJSON PopupElement where
 
 instance HasJSONSchema PopupElement where
   jsonSchema = oneOfSchema
-    [ describeField "Static text display" $ objectSchema
+    [ describeField "Static text display - Renders as plain text, no interaction. Use for instructions or context." $ objectSchema
       [ ("type", enumSchema ["text"])
       , ("id", describeField "Unique element identifier" (emptySchema TString))
       , ("content", describeField "Text content to display" (emptySchema TString))
       ]
       ["type", "id", "content"]
-    , describeField "Numeric slider input" $ objectSchema
+    , describeField "Numeric slider input - Renders as: [Label] <-- [value] -->. Navigate with left/right arrows." $ objectSchema
       [ ("type", enumSchema ["slider"])
       , ("id", describeField "Unique element identifier" (emptySchema TString))
       , ("label", describeField "Label shown above slider" (emptySchema TString))
@@ -125,39 +125,39 @@ instance HasJSONSchema PopupElement where
       , ("default", describeField "Default value (optional)" (emptySchema TNumber))
       ]
       ["type", "id", "label", "min", "max"]
-    , describeField "Boolean checkbox input" $ objectSchema
+    , describeField "Boolean checkbox input - Renders as: [ ] Label or [x] Label. Toggle with Space key." $ objectSchema
       [ ("type", enumSchema ["checkbox"])
       , ("id", describeField "Unique element identifier" (emptySchema TString))
       , ("label", describeField "Label shown next to checkbox" (emptySchema TString))
       , ("default", describeField "Default checked state (optional)" (emptySchema TBoolean))
       ]
       ["type", "id", "label"]
-    , describeField "Text input field" $ objectSchema
+    , describeField "Text input field - Renders as editable box with cursor. Type normally, backspace to delete." $ objectSchema
       [ ("type", enumSchema ["textbox"])
       , ("id", describeField "Unique element identifier" (emptySchema TString))
       , ("label", describeField "Label shown above textbox" (emptySchema TString))
-      , ("placeholder", describeField "Placeholder text (optional)" (emptySchema TString))
+      , ("placeholder", describeField "Placeholder text shown when empty (optional)" (emptySchema TString))
       ]
       ["type", "id", "label"]
-    , describeField "Single-select dropdown" $ objectSchema
+    , describeField "Single-select dropdown - Renders options vertically. Navigate with up/down arrows, current selection highlighted." $ objectSchema
       [ ("type", enumSchema ["choice"])
       , ("id", describeField "Unique element identifier" (emptySchema TString))
       , ("label", describeField "Label shown above dropdown" (emptySchema TString))
-      , ("options", describeField "List of option strings" (arraySchema $ emptySchema TString))
-      , ("default", describeField "Default selected index (optional)" (emptySchema TInteger))
+      , ("options", describeField "List of option strings (displayed vertically)" (arraySchema $ emptySchema TString))
+      , ("default", describeField "Default selected index, 0-based (optional)" (emptySchema TInteger))
       ]
       ["type", "id", "label", "options"]
-    , describeField "Multiple selection list" $ objectSchema
+    , describeField "Multiple selection list - Renders with checkboxes for each option. Space toggles current item, up/down navigates." $ objectSchema
       [ ("type", enumSchema ["multiselect"])
       , ("id", describeField "Unique element identifier" (emptySchema TString))
       , ("label", describeField "Label shown above list" (emptySchema TString))
-      , ("options", describeField "List of option strings" (arraySchema $ emptySchema TString))
+      , ("options", describeField "List of option strings (each with checkbox)" (arraySchema $ emptySchema TString))
       ]
       ["type", "id", "label", "options"]
-    , describeField "Section header/separator" $ objectSchema
+    , describeField "Section header/separator - Renders as bold text separator. Use to organize sections visually." $ objectSchema
       [ ("type", enumSchema ["group"])
       , ("id", describeField "Unique element identifier" (emptySchema TString))
-      , ("label", describeField "Section header text" (emptySchema TString))
+      , ("label", describeField "Section header text (rendered bold)" (emptySchema TString))
       ]
       ["type", "id", "label"]
     ]
@@ -254,6 +254,8 @@ data PopupResult = PopupResult
     -- ^ "submit" or "cancel"
   , elements :: [PopupResultElement]
     -- ^ Elements with values filled in
+  , timeSpentSeconds :: Maybe Double
+    -- ^ Time user spent interacting with popup (seconds)
   }
   deriving stock (Show, Eq, Generic)
 
@@ -261,4 +263,5 @@ $(deriveMCPTypeWith defaultMCPOptions ''PopupResult
   [ mkName "status"   ?? "Result status: 'completed' or 'cancelled'"
   , mkName "button"   ?? "Button pressed: 'submit' or 'cancel'"
   , mkName "elements" ?? "Elements with values filled in"
+  , mkName "timeSpentSeconds" ?? "Time spent interacting with popup in seconds. Indicates user engagement: <2s suggests defaults acceptable, >10s may indicate confusion or difficult decisions."
   ])
