@@ -16,7 +16,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap},
     Terminal,
 };
-use std::{io, time::Duration, sync::{Arc, Mutex}};
+use std::{io, time::Duration, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}};
 use tokio::sync::mpsc;
 use api::ApiClient;
 use state::DashboardState;
@@ -41,6 +41,9 @@ async fn main() -> Result<()> {
 
     // Setup state
     let state = Arc::new(Mutex::new(DashboardState::default()));
+    let running = Arc::new(AtomicBool::new(true));
+    let running_clone = running.clone();
+    
     let state_clone = state.clone();
     let client = ApiClient::new(args.control_server.clone());
     let client = Arc::new(client);
@@ -55,7 +58,9 @@ async fn main() -> Result<()> {
         while let Some(cmd) = rx.recv().await {
             match cmd {
                 AppCommand::StopAgent(id) => {
-                    let _ = client_cmd.stop_agent(&id).await;
+                    if let Err(err) = client_cmd.stop_agent(&id).await {
+                        tracing::error!(agent_id = %id, error = ?err, "failed to stop agent");
+                    }
                 }
             }
         }
@@ -63,11 +68,11 @@ async fn main() -> Result<()> {
 
     // Polling task
     tokio::spawn(async move {
-        loop {
+        while running_clone.load(Ordering::Relaxed) {
             // 1. Fetch Agents
             match client_clone.get_agents().await {
                 Ok(agents) => {
-                    let mut s = state_clone.lock().unwrap();
+                    let mut s = state_clone.lock().expect("State lock poisoned");
                     s.agents = agents;
                     s.connected = true;
                     s.last_updated = Some(chrono::Local::now().to_rfc3339());
@@ -78,20 +83,20 @@ async fn main() -> Result<()> {
                     }
                 }
                 Err(_) => {
-                    let mut s = state_clone.lock().unwrap();
+                    let mut s = state_clone.lock().expect("State lock poisoned");
                     s.connected = false;
                 }
             }
 
             // 2. Fetch Logs if needed (logic: always fetch logs for selected agent for simplicity)
             let selected_id = {
-                let s = state_clone.lock().unwrap();
+                let s = state_clone.lock().expect("State lock poisoned");
                 if s.agents.is_empty() { None } else { Some(s.agents[s.selected_index].id.clone()) }
             };
 
             if let Some(id) = selected_id {
                 if let Ok(logs) = client_clone.get_logs(&id).await {
-                    let mut s = state_clone.lock().unwrap();
+                    let mut s = state_clone.lock().expect("State lock poisoned");
                     s.logs_cache.insert(id, logs);
                 }
             }
@@ -109,6 +114,9 @@ async fn main() -> Result<()> {
 
     // Run app
     let res = run_app(&mut terminal, state, tx).await;
+
+    // Stop polling
+    running.store(false, Ordering::Relaxed);
 
     // Restore terminal
     disable_raw_mode()?;
@@ -162,7 +170,7 @@ async fn run_app<B: Backend>(
             f.render_widget(tabs_widget, chunks[0]);
 
             // Content
-            let s = state.lock().unwrap();
+            let s = state.lock().expect("State lock poisoned");
             
             match tab_index {
                 0 => render_overview(f, chunks[1], &s),
@@ -175,7 +183,7 @@ async fn run_app<B: Backend>(
 
         if crossterm::event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
-                let mut s = state.lock().unwrap();
+                let mut s = state.lock().expect("State lock poisoned");
                 match key.code {
                     KeyCode::Char('q') => return Ok(()),
                     KeyCode::Right | KeyCode::Tab => {
@@ -243,7 +251,12 @@ fn render_overview(f: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &
         .collect();
 
     let mut list_state = ListState::default();
-    list_state.select(Some(state.selected_index));
+    let selection = if state.agents.is_empty() { 
+        None 
+    } else { 
+        Some(state.selected_index.min(state.agents.len().saturating_sub(1))) 
+    };
+    list_state.select(selection);
 
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title("Agents"))
@@ -255,8 +268,7 @@ fn render_overview(f: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &
     if state.agents.is_empty() {
         let text = Paragraph::new("No agents active.").block(Block::default().borders(Borders::ALL));
         f.render_widget(text, chunks[1]);
-    } else {
-        let agent = &state.agents[state.selected_index];
+    } else if let Some(agent) = state.agents.get(state.selected_index) {
         let text = vec![
             Line::from(vec![Span::raw("ID: "), Span::styled(&agent.id, Style::default().fg(Color::Cyan))]),
             Line::from(vec![Span::raw("Container: "), Span::raw(&agent.container_id)]),
@@ -285,7 +297,10 @@ fn render_logs(f: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &Dash
         return;
     }
 
-    let agent = &state.agents[state.selected_index];
+    let agent = match state.agents.get(state.selected_index) {
+        Some(a) => a,
+        None => return,
+    };
     let logs = state.logs_cache.get(&agent.id).map(|s| s.as_str()).unwrap_or("Loading logs...");
 
     let p = Paragraph::new(logs)

@@ -620,6 +620,17 @@ instance ToJSON AgentStatus where
       notNull (_, Null) = False
       notNull _ = True
 
+instance FromJSON AgentStatus where
+  parseJSON = withObject "AgentStatus" $ \o -> AgentStatus
+    <$> o .: "id"
+    <*> o .: "container_id"
+    <*> o .:? "issue_number"
+    <*> o .: "status"
+    <*> o .: "started_at"
+    <*> o .:? "last_activity"
+    <*> o .:? "last_action"
+    <*> o .:? "blocker"
+
 -- | Response for /api/agents endpoint.
 data AgentsResponse = AgentsResponse
   { agents :: [AgentStatus]

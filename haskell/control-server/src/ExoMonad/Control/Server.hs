@@ -393,22 +393,18 @@ server logger config tracer cbMap agentStore =
 
     -- | Stop an agent.
     handleAgentStop :: T.Text -> Handler ()
-    handleAgentStop id_ = liftIO $ do
-      agents <- readTVarIO agentStore
+    handleAgentStop id_ = do
+      agents <- liftIO $ readTVarIO agentStore
       let mAgent = listToMaybe $ filter (\a -> a.asId == id_) agents
       case mAgent of
         Nothing -> do
-          logError logger $ "Agent not found for stop: " <> id_
-          -- Proceed anyway, maybe it's stuck in Docker but not in store?
-          -- For now, just return
-          pure ()
+          liftIO $ logError logger $ "Agent not found for stop: " <> id_
+          throwError $ err404 { errBody = "Agent not found for stop: " <> (Aeson.encode id_) }
         Just agent -> do
-          logInfo logger $ "Stopping agent: " <> id_ <> " (" <> agent.asContainerId <> ")"
+          liftIO $ logInfo logger $ "Stopping agent: " <> id_ <> " (" <> agent.asContainerId <> ")"
           let cid = ContainerId (agent.asContainerId)
           -- Execute stop effect
-          res <- runApp config tracer logger agentStore (stopContainer cid)
+          res <- liftIO $ runApp config tracer logger agentStore (stopContainer cid)
           case res of
-            Left err -> logError logger $ "Failed to stop agent: " <> T.pack (show err)
-            Right () -> do
-              -- Remove from store (handled by DockerCtl effect, but we can double check)
-              atomically $ modifyTVar' agentStore (filter (\a -> a.asId /= id_))
+            Left err -> liftIO $ logError logger $ "Failed to stop agent: " <> T.pack (show err)
+            Right () -> pure ()

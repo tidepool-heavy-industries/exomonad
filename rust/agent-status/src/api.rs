@@ -35,7 +35,12 @@ impl ApiClient {
 
     pub async fn stop_agent(&self, agent_id: &str) -> Result<()> {
         let url = format!("{}/api/agents/{}/stop", self.base_url, agent_id);
-        let _ = self.client.post(&url).send().await?.error_for_status()?;
+        let resp = self.client.post(&url).send().await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Request failed: {} - {}", status, text);
+        }
         Ok(())
     }
 }

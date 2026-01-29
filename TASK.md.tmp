@@ -1,0 +1,196 @@
+# Task: Make TUI Dashboard Actually Work
+
+**Priority**: High (TL's #1 ask: "I need visibility into agent state and progress")
+**Scope**: Large (long-running independent worktree)
+**Type**: Feature completion
+
+## Problem
+
+The `agent-status` TUI exists but shows hardcoded dummy data:
+- "Status: Idle" (always)
+- "CPU: 12%, Mem: 256MB" (fake)
+- Fake log lines
+- Control buttons do nothing
+
+No connection to control-server, no real data.
+
+## Goal
+
+A working TUI dashboard that shows:
+
+```
+┌─ Agent Dashboard ─────────────────────────────────────────────────┐
+│ [Overview] [Logs] [Controls]                                      │
+├───────────────────────────────────────────────────────────────────┤
+│ Agents (3 active)                                                 │
+│                                                                   │
+│ ● agent-gh-123 [IN_PROGRESS] 15m elapsed                         │
+│   Task: Implement auth middleware                                 │
+│   Last activity: 2m ago (writing tests)                          │
+│   Blockers: None                                                  │
+│                                                                   │
+│ ◐ agent-gh-124 [STUCK] 45m elapsed ⚠                             │
+│   Task: Refactoring parser                                        │
+│   Last activity: 20m ago (same grep pattern 5x)                  │
+│   Blocker: Can't find function definition                        │
+│                                                                   │
+│ ✓ agent-gh-125 [COMPLETED] 8m elapsed                            │
+│   Task: Fixed typo in README                                      │
+│   PR: #456 (awaiting review)                                      │
+│                                                                   │
+├───────────────────────────────────────────────────────────────────┤
+│ PRs (2 open)                                                      │
+│ #456 [✓ CI] [👀 needs review] 2h old                             │
+│ #455 [❌ tests] [🔁 changes requested] 1d old                    │
+├───────────────────────────────────────────────────────────────────┤
+│ Build: ✓ main passing | 156/156 tests | Coverage: 78%            │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+## Architecture
+
+```
+┌─────────────────┐     TCP :7432      ┌──────────────────────┐
+│  agent-status   │◄──────────────────►│  control-server      │
+│  (Rust TUI)     │    JSON-RPC/REST   │  (Haskell)           │
+│                 │                    │                      │
+│  - Polls status │    GET /status     │  - Agent registry    │
+│  - Shows agents │    GET /agents     │  - Spawn tracking    │
+│  - Shows PRs    │    GET /prs        │  - Docker queries    │
+│  - Shows CI     │                    │                      │
+└─────────────────┘                    └──────────────────────┘
+```
+
+## Implementation Phases
+
+### Phase 1: Wire Up Connection
+
+1. Add HTTP client to agent-status (reqwest or ureq)
+2. Connect to control-server at `http://localhost:7432` (or `$EXOMONAD_CONTROL_HOST:$EXOMONAD_CONTROL_PORT`)
+3. Create polling loop (every 2-5 seconds)
+4. Handle connection errors gracefully (show "Disconnected" state)
+
+### Phase 2: Agent Status Endpoint (Haskell side)
+
+Add endpoint to control-server:
+
+```
+GET /api/agents
+Response:
+{
+  "agents": [
+    {
+      "id": "agent-gh-123",
+      "container_id": "exomonad-agent-abc123",
+      "issue_number": 123,
+      "status": "in_progress",
+      "started_at": "2024-01-28T10:00:00Z",
+      "last_activity": "2024-01-28T10:15:00Z",
+      "last_action": "writing tests",
+      "blocker": null
+    }
+  ]
+}
+```
+
+Data sources:
+- Docker API (via docker-ctl) for container list
+- Zellij session info for tab names
+- Could track spawn_agents calls in memory
+
+### Phase 3: Real Overview Tab
+
+Replace hardcoded data with:
+- Agent count and status breakdown
+- Time elapsed per agent (now - started_at)
+- Stuck detection heuristic (no activity for N minutes)
+- Issue/PR links
+
+### Phase 4: Real Logs Tab
+
+Options:
+- Stream docker logs from agent containers
+- Or: have agents send log events to control-server
+- Or: tail OpenObserve via API
+
+Start simple: `docker logs --tail 50 <container>` via docker-ctl
+
+### Phase 5: Working Controls Tab
+
+Implement actions:
+- `[K]` Kill agent - calls docker-ctl stop
+- `[R]` Restart agent - stop + respawn
+- `[F]` Focus agent - switch Zellij tab
+- `[P]` Ping agent - send keystroke "are you stuck?"
+
+### Phase 6: PR/CI Status
+
+Add GitHub data:
+- Open PRs via `gh pr list --json`
+- CI status via `gh run list --json`
+- Show in dashboard footer or separate tab
+
+## Files to Modify/Create
+
+### Rust (agent-status)
+| File | Action |
+|------|--------|
+| `Cargo.toml` | Add reqwest/ureq, serde_json |
+| `src/main.rs` | Add async polling, state management |
+| `src/api.rs` | NEW - Control server API client |
+| `src/state.rs` | NEW - Dashboard state types |
+| `src/views/overview.rs` | NEW - Real overview rendering |
+| `src/views/logs.rs` | NEW - Log streaming |
+| `src/views/controls.rs` | NEW - Action handlers |
+
+### Haskell (control-server)
+| File | Action |
+|------|--------|
+| `Server.hs` | Add `/api/agents` route |
+| `AgentRegistry.hs` | NEW - Track spawned agents |
+| `Handler/Status.hs` | NEW - Status endpoint handler |
+
+## State Tracking Problem
+
+Currently control-server doesn't track spawned agents after spawn_agents returns. Need to:
+
+1. Store agent info in TVar/IORef on spawn
+2. Update on container stop/completion
+3. Periodically refresh from Docker (handle external kills)
+
+Simple approach: spawn_agents writes to registry, status endpoint reads + enriches from Docker.
+
+## Dependencies
+
+- Phase 2 (Haskell endpoint) blocks Phase 3-5 (Rust display)
+- Can parallelize: one engineer on Rust TUI, one on Haskell endpoint
+
+## Testing
+
+```bash
+# Build TUI
+cargo build -p agent-status
+
+# Run TUI (needs control-server running)
+./target/release/agent-status
+
+# Verify tabs switch (Left/Right arrows)
+# Verify q quits
+# Verify data refreshes every few seconds
+```
+
+## Success Criteria
+
+- [ ] TUI connects to control-server
+- [ ] Overview shows real agent data (count, status, time elapsed)
+- [ ] Logs tab shows actual container logs
+- [ ] At least one control works (Kill or Focus)
+- [ ] Handles disconnection gracefully
+- [ ] Stuck detection works (visual indicator for idle agents)
+
+## Stretch Goals
+
+- [ ] PR status from GitHub
+- [ ] CI status from GitHub Actions
+- [ ] Sparkline for agent activity over time
+- [ ] Sound/notification on agent completion or stuck
