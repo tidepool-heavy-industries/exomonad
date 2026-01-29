@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     gpg \
     gnupg \
+    socat \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI
@@ -31,6 +32,19 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | g
 # Install Docker CLI (client only)
 RUN curl -fsSL https://get.docker.com | sh && \
     rm -rf /var/lib/apt/lists/*
+
+# Install dev tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    jq \
+    tree \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust-based tools via cargo-binstall (fast binary install)
+RUN curl -L --proto '=https' --tlsv1.2 -sSf \
+    https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash \
+    && /root/.cargo/bin/cargo-binstall --no-confirm ripgrep fd-find bat just delta yq \
+    && mv /root/.cargo/bin/{cargo-binstall,rg,fd,bat,just,delta,yq} /usr/local/bin/ \
+    && rm -rf /root/.cargo
 
 # Install Zellij (static binary for speed)
 RUN arch=$(dpkg --print-architecture) && \

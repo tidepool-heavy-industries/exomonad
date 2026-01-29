@@ -101,6 +101,7 @@ target "claude-agent" {
   dockerfile = "docker/claude-agent/Dockerfile"
   context = "."
   contexts = {
+    common-base = "target:common-base"
     haskell-builder = "target:haskell-builder"
     rust-builder = "target:rust-builder"
   }
@@ -109,8 +110,7 @@ target "claude-agent" {
     GIT_SHA = GIT_SHA
   }
 }
-# Note: claude-agent does NOT use common-base because it uses 'agent' user
-# with sudo pattern instead of 'user' with gosu pattern
+# Note: claude-agent now uses common-base and renames 'user' to 'agent'
 
 target "zellij" {
   dockerfile = "docker/zellij/Dockerfile"
