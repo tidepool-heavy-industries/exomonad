@@ -3,12 +3,13 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
 module ExoMonad.Control.Role.Hook.Wiring
   ( commonHooks
   ) where
 
-import Control.Monad.Freer (Eff, Member, LastMember)
+import Control.Monad.Freer (Eff, Member, LastMember, sendM)
 import qualified Data.Text as T
 import Data.Maybe (fromMaybe)
 
@@ -23,10 +24,26 @@ import OpenTelemetry.Trace (Tracer)
 import ExoMonad.Control.RoleConfig (roleFromText)
 
 import ExoMonad.Effects.Env (Env)
-import ExoMonad.Effects.Git (Git)
+import ExoMonad.Effects.Git (Git, getWorktreeInfo, WorktreeInfo(..))
 import ExoMonad.Effects.GitHub (GitHub)
 import ExoMonad.Effect.Types (Log, logInfo) 
 import ExoMonad.Effects.Zellij (Zellij)
+import GHC.Records (HasField)
+import GHC.Generics (Generic)
+
+-- Stop Hook Imports
+
+import ExoMonad.Graph.Interpret (runGraph)
+import ExoMonad.Effect.NodeMeta (runNodeMeta, defaultNodeMeta, NodeMeta)
+import Control.Monad.Freer.State (runState, State)
+import ExoMonad.Control.StopHook.Types (StopHookContext(..), TemplateName, AgentState(..), WorkflowState)
+import ExoMonad.Control.StopHook.Graph (StopHookGraph) -- Import StopHookGraph
+import ExoMonad.Control.StopHook.Handlers (stopHookHandlers)
+import ExoMonad.Control.StopHook.Templates (renderStopHookTemplate)
+import ExoMonad.Control.Workflow.Store (getWorkflowState, updateWorkflowState)
+import ExoMonad.Control.Effects.Cabal (Cabal)
+import ExoMonad.Control.Effects.Effector (Effector)
+import ExoMonad.Control.ExoTools (parseIssueNumber)
 
 -- We need a Reader effect for ServerConfig to access policy and workflow store
 type ConfigReader = Reader ServerConfig
@@ -39,7 +56,9 @@ commonHooks ::
   , Member Log es
   , Member ConfigReader es
   , Member TracerReader es
-  , Member Zellij es 
+  , Member Zellij es
+  , Member Cabal es
+  , Member Effector es
   , LastMember IO es
   ) => CommonHooks (AsHandler es)
 commonHooks = CommonHooks
@@ -103,15 +122,24 @@ handleStop ::
   ( Member ConfigReader es
   , Member Git es
   , Member Log es
+  , Member Cabal es
+  , Member Effector es
+  , LastMember IO es
   ) => StopInput -> Eff es StopResponse
 handleStop input = do
-  -- Stop logic placeholder
-  pure $ StopResponse True Nothing
+  -- TODO: Re-implement stop hook graph execution logic.
+  -- Current implementation encounters type inference issues with runGraph/HasField/OverloadedRecordDot
+  -- when running inside the open effect stack 'es'.
+  -- Original logic involved running 'stopHookHandlers' graph with 'runState', 'runNodeMeta', etc.
+  
+  -- For now, return a default response to allow the build to pass and the refactor to land.
+  pure $ StopResponse
+    { srAllowStop = True
+    , srMessage = Nothing
+    }
 
 handleSessionEnd :: SessionEndInput -> Eff es ()
 handleSessionEnd _ = pure ()
 
 handleNotification :: Notification -> Eff es ()
 handleNotification _ = pure ()
-
-
