@@ -50,7 +50,7 @@ RUN arch=$(dpkg --print-architecture) && \
     curl -L "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.10.19/cargo-binstall-$binstall_arch.tgz" | tar xz -C /usr/local/bin && \
     chmod +x /usr/local/bin/cargo-binstall && \
     cargo-binstall --no-confirm ripgrep fd-find bat just git-delta ast-grep && \
-    mv /root/.cargo/bin/* /usr/local/bin/ && \
+    mv /root/.cargo/bin/{rg,fd,bat,just,delta,sg} /usr/local/bin/ && \
     rm -rf /root/.cargo
 
 # Install yq (Go binary, not Rust)
