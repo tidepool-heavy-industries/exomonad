@@ -1,0 +1,43 @@
+# Task: {{ issue.title }} (Context Recovered)
+
+**Issue Number:** #{{ issue.number }}
+**Branch:** {{ branch }}
+**Status:** {{ issue.status }}
+
+## Description
+
+{{ issue.description | default("No description provided.") }}
+
+{% if issue.labels %}
+## Labels
+
+{% for label in issue.labels %}
+- {{ label }}
+{% endfor %}
+{% endif %}
+
+## Workflow
+
+You are a **Dev agent** executing this task. Your workflow:
+
+1. **Implement** the changes described above
+2. **Test** your changes compile: `cabal build`
+3. **Commit** with message: `[gh-{{ issue.number }}] <description>`
+4. **Push** to remote: `git push -u origin {{ branch }}`
+5. **File PR** using the `file_pr` MCP tool (NOT gh CLI)
+
+## Important Notes
+
+- Do NOT use `gh` commands for issue management - the orchestrator manages issues
+- Do NOT spawn other agents - you are a leaf worker
+- Focus on implementation quality and test coverage
+
+## Session Close
+
+Before finishing, ensure:
+```
+git status          # Check changes
+git add <files>     # Stage changes
+git commit -m "[gh-{{ issue.number }}] ..."
+git push
+```

@@ -82,6 +82,7 @@ jsonOpts prefixLen = defaultOptions
 data SessionStartInput = SessionStartInput
   { ssiSessionId :: Text
   , ssiCwd :: FilePath
+  , ssiSessionType :: Maybe Text
   }
   deriving (Show, Eq, Generic)
 

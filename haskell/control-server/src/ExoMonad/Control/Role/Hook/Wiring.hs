@@ -74,7 +74,7 @@ handleSessionStart input = do
   let currentRole = fromMaybe config.defaultRole (config.role >>= roleFromText)
   
   -- sessionStartLogic returns Maybe Text
-  mContext <- sessionStartLogic tracer currentRole (T.pack input.ssiCwd)
+  mContext <- sessionStartLogic tracer currentRole input.ssiSessionType (T.pack input.ssiCwd)
   
   pure $ SessionStartResponse True mContext
 

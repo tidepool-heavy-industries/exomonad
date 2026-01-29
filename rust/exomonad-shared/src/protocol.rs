@@ -125,6 +125,10 @@ pub struct HookInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
 
+    /// Session type (startup, resume, compact) - injected by CLI.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_type: Option<String>,
+
     /// Session end reason (SessionEnd).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,

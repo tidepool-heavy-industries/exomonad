@@ -42,14 +42,37 @@ import OpenTelemetry.Trace (Tracer)
 data SessionStartTpl
 
 -- | Compiled templates (validated at compile time via TH).
-sessionStartDevCompiled :: TypedTemplate SessionStartContext SourcePos
-sessionStartDevCompiled = $(typedTemplateFile ''SessionStartContext "templates/hook/session-start-dev.jinja")
-
 sessionStartDevNoIssueCompiled :: TypedTemplate SessionStartContext SourcePos
 sessionStartDevNoIssueCompiled = $(typedTemplateFile ''SessionStartContext "templates/hook/session-start-dev-no-issue.jinja")
 
-sessionStartTLCompiled :: TypedTemplate SessionStartContext SourcePos
-sessionStartTLCompiled = $(typedTemplateFile ''SessionStartContext "templates/hook/session-start-tl.jinja")
+sessionStartTLStartupCompiled :: TypedTemplate SessionStartContext SourcePos
+sessionStartTLStartupCompiled = $(typedTemplateFile ''SessionStartContext "templates/hook/session-start-tl-startup.jinja")
+
+sessionStartTLResumeCompiled :: TypedTemplate SessionStartContext SourcePos
+sessionStartTLResumeCompiled = $(typedTemplateFile ''SessionStartContext "templates/hook/session-start-tl-resume.jinja")
+
+sessionStartTLCompactCompiled :: TypedTemplate SessionStartContext SourcePos
+sessionStartTLCompactCompiled = $(typedTemplateFile ''SessionStartContext "templates/hook/session-start-tl-compact.jinja")
+
+-- Dev Templates
+sessionStartDevStartupCompiled :: TypedTemplate SessionStartContext SourcePos
+sessionStartDevStartupCompiled = $(typedTemplateFile ''SessionStartContext "templates/hook/session-start-dev-startup.jinja")
+
+sessionStartDevResumeCompiled :: TypedTemplate SessionStartContext SourcePos
+sessionStartDevResumeCompiled = $(typedTemplateFile ''SessionStartContext "templates/hook/session-start-dev-resume.jinja")
+
+sessionStartDevCompactCompiled :: TypedTemplate SessionStartContext SourcePos
+sessionStartDevCompactCompiled = $(typedTemplateFile ''SessionStartContext "templates/hook/session-start-dev-compact.jinja")
+
+-- PM Templates
+sessionStartPMStartupCompiled :: TypedTemplate SessionStartContext SourcePos
+sessionStartPMStartupCompiled = $(typedTemplateFile ''SessionStartContext "templates/hook/session-start-pm-startup.jinja")
+
+sessionStartPMResumeCompiled :: TypedTemplate SessionStartContext SourcePos
+sessionStartPMResumeCompiled = $(typedTemplateFile ''SessionStartContext "templates/hook/session-start-pm-resume.jinja")
+
+sessionStartPMCompactCompiled :: TypedTemplate SessionStartContext SourcePos
+sessionStartPMCompactCompiled = $(typedTemplateFile ''SessionStartContext "templates/hook/session-start-pm-compact.jinja")
 
 instance TemplateDef SessionStartTpl where
   type TemplateContext SessionStartTpl = SessionStartContext
@@ -57,7 +80,7 @@ instance TemplateDef SessionStartTpl where
 
   templateName = "session-start"
   templateDescription = "Inject role-specific context at session start"
-  templateCompiled = sessionStartDevCompiled -- Default, but logic uses specific ones
+  templateCompiled = sessionStartDevStartupCompiled -- Default
   buildContext = error "SessionStartTpl: Use sessionStartLogic to build context"
 
 
@@ -66,30 +89,44 @@ instance TemplateDef SessionStartTpl where
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | SessionStart hook logic.
---
--- 1. Detects role
--- 2. Gets worktree info to determine current branch
--- 3. Parses issue number from branch name (gh-{id}/* pattern)
--- 4. Fetches issue info from GitHub
--- 5. Builds dashboard if role is TL
--- 6. Renders role-specific template with context
--- 7. Returns rendered content as additionalContext
 sessionStartLogic
   :: (Member GitHub es, Member Git es, Member Log es, LastMember IO es)
   => Tracer
   -> Role
+  -> Maybe Text -- ^ Session Type (startup, resume, compact)
   -> Text  -- ^ Current working directory
   -> Eff es (Maybe Text)  -- ^ Additional context to inject
-sessionStartLogic tracer role cwdPath = do
-  logDebug $ "Building SessionStart context for role: " <> T.pack (show role)
+sessionStartLogic tracer role mSessionType cwdPath = do
+  logDebug $ "Building SessionStart context for role: " <> T.pack (show role) <> ", type: " <> T.pack (show mSessionType)
 
   let repo = defaultRepo
       retryCfg = defaultRetryConfig { tracer = Just tracer }
+      
+      -- Parse session type
+      sessionType = case mSessionType of
+        Just "resume" -> Resume
+        Just "compact" -> Compact
+        _ -> Startup -- Default to startup
 
   case role of
     PM -> do
-      logDebug "PM role: No SessionStart context injected."
-      pure Nothing
+      let ctx = SessionStartContext
+            { role = PM
+            , session_type = sessionType
+            , issue_number = Nothing
+            , branch = Nothing
+            , cwd = cwdPath
+            , issue = Nothing
+            , dashboard = Nothing
+            }
+      
+      let template = case sessionType of
+            Startup -> sessionStartPMStartupCompiled
+            Resume  -> sessionStartPMResumeCompiled
+            Compact -> sessionStartPMCompactCompiled
+
+      let rendered = runTypedTemplate ctx template
+      pure $ Just rendered
 
     Dev -> do
       -- Get worktree info
@@ -111,6 +148,7 @@ sessionStartLogic tracer role cwdPath = do
       -- Build template context
       let ctx = SessionStartContext
             { role = Dev
+            , session_type = sessionType
             , issue_number = maybeIssueNum
             , branch = (.wiBranch) <$> mWt
             , cwd = cwdPath
@@ -118,9 +156,12 @@ sessionStartLogic tracer role cwdPath = do
             , dashboard = Nothing
             }
 
-      -- Select template based on issue availability
+      -- Select template based on issue availability and session type
       let template = if isJust mIssue
-                     then sessionStartDevCompiled
+                     then case sessionType of
+                        Startup -> sessionStartDevStartupCompiled
+                        Resume  -> sessionStartDevResumeCompiled
+                        Compact -> sessionStartDevCompactCompiled
                      else sessionStartDevNoIssueCompiled
 
       let rendered = runTypedTemplate ctx template
@@ -136,6 +177,7 @@ sessionStartLogic tracer role cwdPath = do
       -- Build template context
       let ctx = SessionStartContext
             { role = TL
+            , session_type = sessionType
             , issue_number = Nothing
             , branch = (.wiBranch) <$> mWt
             , cwd = cwdPath
@@ -143,7 +185,12 @@ sessionStartLogic tracer role cwdPath = do
             , dashboard = Just db
             }
 
-      let rendered = runTypedTemplate ctx sessionStartTLCompiled
+      let template = case sessionType of
+            Startup -> sessionStartTLStartupCompiled
+            Resume  -> sessionStartTLResumeCompiled
+            Compact -> sessionStartTLCompactCompiled
+
+      let rendered = runTypedTemplate ctx template
       pure $ Just rendered
 
 -- | Build dashboard for TL role.

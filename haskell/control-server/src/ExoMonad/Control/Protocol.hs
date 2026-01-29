@@ -65,6 +65,7 @@ data HookInput = HookInput
   , trigger :: Maybe Text
   , customInstructions :: Maybe Text
   , source :: Maybe Text
+  , sessionType :: Maybe Text
   , reason :: Maybe Text
   }
   deriving stock (Show, Eq, Generic)
@@ -87,6 +88,7 @@ instance FromJSON HookInput where
     <*> o .:? "trigger"
     <*> o .:? "custom_instructions"
     <*> o .:? "source"
+    <*> o .:? "session_type"
     <*> o .:? "reason"
 
 instance ToJSON HookInput where
@@ -107,6 +109,7 @@ instance ToJSON HookInput where
     , "trigger" .= i.trigger
     , "custom_instructions" .= i.customInstructions
     , "source" .= i.source
+    , "session_type" .= i.sessionType
     , "reason" .= i.reason
     ]
     where

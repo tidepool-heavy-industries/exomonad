@@ -1,0 +1,17 @@
+# Team Lead Session (Resumed)
+
+## Project Status
+
+### Open Issues ({{ dashboard.open | length }})
+{% if dashboard.open %}
+{% for issue in dashboard.open[:10] %}
+- **#{{ issue.number }}**: {{ issue.title }}
+{% endfor %}
+{% if dashboard.open | length > 10 %}
+... and {{ dashboard.open | length - 10 }} more
+{% endif %}
+{% else %}
+No open issues.
+{% endif %}
+
+You are in a resumed session. Continue your coordination work.

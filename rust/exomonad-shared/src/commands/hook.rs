@@ -106,12 +106,18 @@ fn normalize_gemini_payload(payload: &str) -> Result<String> {
 /// * `event_type` - The type of hook event being handled
 /// * `runtime` - The runtime environment (Claude or Gemini)
 /// * `role` - The role of the agent (dev, tl, pm)
+/// * `session_type` - Optional session type (startup, resume, compact)
 ///
 /// # Returns
 ///
 /// Returns `Ok(())` on success. The function may call `std::process::exit()`
 /// with a non-zero code if the hook should be denied.
-pub async fn handle_hook(event_type: HookEventType, runtime: Runtime, role: Role) -> Result<()> {
+pub async fn handle_hook(
+    event_type: HookEventType,
+    runtime: Runtime,
+    role: Role,
+    session_type: Option<String>,
+) -> Result<()> {
     // Read hook payload from stdin
     let mut stdin_content = String::new();
     std::io::stdin()
@@ -122,6 +128,7 @@ pub async fn handle_hook(event_type: HookEventType, runtime: Runtime, role: Role
         event = ?event_type,
         runtime = ?runtime,
         role = ?role,
+        session_type = ?session_type,
         payload_len = stdin_content.len(),
         "Received hook event"
     );
@@ -135,7 +142,12 @@ pub async fn handle_hook(event_type: HookEventType, runtime: Runtime, role: Role
     };
 
     // Parse the hook input
-    let hook_input: HookInput = serde_json::from_str(&normalized_content)?;
+    let mut hook_input: HookInput = serde_json::from_str(&normalized_content)?;
+
+    // Inject session_type if provided
+    if let Some(st) = session_type {
+        hook_input.session_type = Some(st);
+    }
 
     // Derive container ID from EXOMONAD_ISSUE_ID for remote command execution
     let container_id = std::env::var("EXOMONAD_ISSUE_ID")

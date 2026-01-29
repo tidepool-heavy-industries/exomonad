@@ -10,6 +10,7 @@ module ExoMonad.Control.Hook.SessionStart.Context
   ( SessionStartContext(..)
   , IssuesDashboardContext(..)
   , IssueContext(..)
+  , SessionType(..)
   ) where
 
 import Control.Monad.Writer (Writer)
@@ -23,12 +24,18 @@ import Text.Parsec.Pos (SourcePos)
 import ExoMonad.Control.RoleConfig (Role)
 
 
+-- | Session type based on Claude Code matcher.
+data SessionType = Startup | Resume | Compact
+  deriving stock (Show, Eq, Generic)
+
 -- | Context for the session start prompt.
 --
 -- Contains all information needed to render the @session-start.jinja@ template.
 data SessionStartContext = SessionStartContext
   { role :: Role
     -- ^ Role of the agent (Dev, TL, PM)
+  , session_type :: SessionType
+    -- ^ Type of session (startup, resume, compact)
   , issue_number :: Maybe Int
     -- ^ Issue number (e.g., 123) if on a gh-* branch
   , branch :: Maybe Text
@@ -63,6 +70,7 @@ data IssueContext = IssueContext
 instance ToGVal (Run SourcePos (Writer Text) Text) SessionStartContext where
   toGVal ctx = dict
     [ "role" ~> (T.toLower . T.pack . show $ ctx.role)
+    , "session_type" ~> (T.toLower . T.pack . show $ ctx.session_type)
     , "issue_number" ~> ctx.issue_number
     , "branch" ~> ctx.branch
     , "cwd" ~> ctx.cwd

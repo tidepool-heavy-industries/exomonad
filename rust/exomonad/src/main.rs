@@ -66,6 +66,10 @@ enum Commands {
         /// The role of the agent (dev, tl, pm)
         #[arg(long, env = "EXOMONAD_ROLE", default_value = "dev")]
         role: Role,
+
+        /// The session type (startup, resume, compact) - only for SessionStart
+        #[arg(long)]
+        session_type: Option<String>,
     },
 
     /// Check control server health via Ping/Pong on socket.
@@ -84,7 +88,12 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Hook { event, runtime, role } => handle_hook(event, runtime, role).await?,
+        Commands::Hook {
+            event,
+            runtime,
+            role,
+            session_type,
+        } => handle_hook(event, runtime, role, session_type).await?,
         Commands::Health => health::run_health_check().await?,
     };
 
