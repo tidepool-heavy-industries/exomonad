@@ -48,7 +48,7 @@ import ExoMonad.Control.Role.Definition.PM (PMRole(..))
 -- | Route a control message to the appropriate handler.
 handleMessage :: Logger -> ServerConfig -> Tracer -> TraceContext -> CircuitBreakerMap -> TVar [AgentStatus] -> ControlMessage -> IO ControlResponse
 handleMessage logger config tracer traceCtx cbMap agentStore = \case
-  HookEvent input r rl cid -> handleHook logger tracer config input r rl cid cbMap
+  HookEvent input r rl cid -> handleHook logger tracer config input r rl cid cbMap agentStore
   McpToolCall reqId name args ->
     handleMcpToolTyped logger config tracer traceCtx cbMap agentStore reqId name args
   ToolsListRequest -> handleToolsList logger config

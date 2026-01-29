@@ -19,6 +19,7 @@ import qualified Data.Text.IO as TIO
 import Data.Maybe (fromMaybe)
 import System.IO (hFlush, stdout)
 import Control.Exception (SomeException, try, throwIO)
+import Control.Concurrent.STM (TVar)
 import Control.Monad (forM_)
 import Control.Monad.Freer (runM)
 import Control.Monad.Freer.Reader (runReader)
@@ -67,8 +68,8 @@ import ExoMonad.Effect.Types (runLog, LogLevel(Debug), runTime)
 import Data.Maybe (fromMaybe)
 
 -- | Handle a hook event.
-handleHook :: Logger -> Tracer -> ServerConfig -> HookInput -> Runtime -> Role -> Maybe Text -> CircuitBreakerMap -> IO ControlResponse
-handleHook logger tracer config input _ agentRole mContainerId cbMap = do
+handleHook :: Logger -> Tracer -> ServerConfig -> HookInput -> Runtime -> Role -> Maybe Text -> CircuitBreakerMap -> TVar [AgentStatus] -> IO ControlResponse
+handleHook logger tracer config input _ agentRole mContainerId cbMap agentStore = do
   TIO.putStrLn $ "  session=" <> input.sessionId
   TIO.putStrLn $ "  cwd=" <> input.cwd
   TIO.putStrLn $ "  role=" <> T.pack (show agentRole)
@@ -138,8 +139,8 @@ handleHook logger tracer config input _ agentRole mContainerId cbMap = do
           $ runWorktreeIO (defaultWorktreeConfig repoRoot)
           $ runEffectorIO logger
           $ runCabalRemote mContainerId
-          $ runJustfileRemote (fromMaybe "" mContainerId) "" 
-          $ runDockerCtl logger dockerCtlPath
+          $ runJustfileRemote (fromMaybe "" mContainerId) ""
+          $ runDockerCtl logger dockerCtlPath agentStore
           $ runGeminiIO
           $ do
               val <- action

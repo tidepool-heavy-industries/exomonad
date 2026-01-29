@@ -404,7 +404,7 @@ server logger config tracer cbMap agentStore =
           liftIO $ logInfo logger $ "Stopping agent: " <> id_ <> " (" <> agent.asContainerId <> ")"
           let cid = ContainerId (agent.asContainerId)
           -- Execute stop effect
-          res <- liftIO $ runApp config tracer logger agentStore (stopContainer cid)
+          res <- liftIO $ runApp config tracer cbMap logger agentStore (stopContainer cid)
           case res of
             Left err -> liftIO $ logError logger $ "Failed to stop agent: " <> T.pack (show err)
             Right () -> pure ()
