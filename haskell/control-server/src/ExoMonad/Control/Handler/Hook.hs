@@ -65,7 +65,6 @@ import ExoMonad.Gemini.Interpreter (runGeminiIO)
 import ExoMonad.Control.TUIInterpreter (runTUIFifo)
 import ExoMonad.Control.Effects.Git (runGitRemote)
 import ExoMonad.Effect.Types (runLog, LogLevel(Debug), runTime)
-import Data.Maybe (fromMaybe)
 
 -- | Handle a hook event.
 handleHook :: Logger -> Tracer -> ServerConfig -> HookInput -> Runtime -> Role -> Maybe Text -> CircuitBreakerMap -> TVar [AgentStatus] -> IO ControlResponse
