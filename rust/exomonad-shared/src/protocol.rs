@@ -548,7 +548,25 @@ pub enum IssueState {
 pub struct GitHubIssueRef {
     pub number: u32,
     pub title: String,
+    pub body: String,
     pub state: String,
+    pub url: String,
+    pub author: GitHubAuthorRef,
+    pub labels: Vec<GitHubLabelRef>,
+    #[serde(default)]
+    pub comments: Vec<GitHubDiscussionComment>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GitHubLabelRef {
+    pub name: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GitHubAuthorRef {
+    pub login: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -1087,8 +1105,26 @@ mod tests {
     fn test_github_issues_response_roundtrip() {
         let resp = ServiceResponse::GitHubIssues {
             issues: vec![
-                GitHubIssueRef { number: 1, title: "Bug".into(), state: "open".into() },
-                GitHubIssueRef { number: 2, title: "Feature".into(), state: "closed".into() },
+                GitHubIssueRef {
+                    number: 1,
+                    title: "Bug".into(),
+                    body: "b".into(),
+                    state: "OPEN".into(),
+                    url: "u".into(),
+                    author: GitHubAuthorRef { login: "a".into(), name: None },
+                    labels: vec![],
+                    comments: vec![],
+                },
+                GitHubIssueRef {
+                    number: 2,
+                    title: "Feature".into(),
+                    body: "b".into(),
+                    state: "CLOSED".into(),
+                    url: "u".into(),
+                    author: GitHubAuthorRef { login: "a".into(), name: None },
+                    labels: vec![],
+                    comments: vec![],
+                },
             ],
         };
         let json = serde_json::to_string(&resp).unwrap();
@@ -1097,7 +1133,7 @@ mod tests {
             ServiceResponse::GitHubIssues { issues } => {
                 assert_eq!(issues.len(), 2);
                 assert_eq!(issues[0].number, 1);
-                assert_eq!(issues[1].state, "closed");
+                assert_eq!(issues[1].state, "CLOSED");
             }
             _ => panic!("Wrong variant"),
         }
