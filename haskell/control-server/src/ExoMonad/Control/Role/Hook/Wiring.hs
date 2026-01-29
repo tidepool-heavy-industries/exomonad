@@ -1,9 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE OverloadedRecordDot #-}
 
 module ExoMonad.Control.Role.Hook.Wiring
   ( commonHooks
@@ -12,6 +6,10 @@ module ExoMonad.Control.Role.Hook.Wiring
 import Control.Monad.Freer (Eff, Member, LastMember, sendM)
 import qualified Data.Text as T
 import Data.Maybe (fromMaybe)
+import Data.Aeson (Value(..), decode, (.=))
+import qualified Data.Aeson.KeyMap as KeyMap
+import qualified Data.ByteString.Lazy as BL
+import Control.Exception (try, SomeException)
 
 import ExoMonad.Graph.Generic (AsHandler, HookHandler(..))
 import ExoMonad.Control.Role.Hook.Definitions (CommonHooks(..))
@@ -19,17 +17,19 @@ import ExoMonad.Control.Role.Types
 import ExoMonad.Control.Hook.SessionStart (sessionStartLogic)
 import ExoMonad.Control.Hook.Policy (HookDecision(..), evaluatePolicy)
 import ExoMonad.Control.Types (ServerConfig(..))
+import ExoMonad.Control.OpenObserve (shipTranscript)
 import Control.Monad.Freer.Reader (Reader, ask)
 import OpenTelemetry.Trace (Tracer)
-import ExoMonad.Control.RoleConfig (roleFromText)
+import ExoMonad.Control.RoleConfig (roleFromText, Role(..))
 
-import ExoMonad.Effects.Env (Env)
+import ExoMonad.Effects.Env (Env, lookupEnv)
 import ExoMonad.Effects.Git (Git, getWorktreeInfo, WorktreeInfo(..))
 import ExoMonad.Effects.GitHub (GitHub)
 import ExoMonad.Effect.Types (Log, logInfo) 
-import ExoMonad.Effects.Zellij (Zellij)
+import ExoMonad.Effects.Zellij (Zellij, checkZellijEnv, goToTab, TabId(..))
 import ExoMonad.Control.Effects.Cabal (Cabal)
 import ExoMonad.Control.Effects.Effector (Effector)
+import ExoMonad.Control.ExoTools (parseIssueNumber)
 
 -- We need a Reader effect for ServerConfig to access policy and workflow store
 type ConfigReader = Reader ServerConfig
@@ -54,7 +54,7 @@ commonHooks = CommonHooks
   , stop         = HookHandler handleStop
   , sessionEnd   = HookHandler handleSessionEnd
   , notification = HookHandler handleNotification
-  , subagentStop = HookHandler handleSessionEnd 
+  , subagentStop = HookHandler handleSubagentStop 
   }
 
 handleSessionStart :: 
@@ -110,9 +110,19 @@ handleStop ::
   , Member Log es
   , Member Cabal es
   , Member Effector es
+  , Member Env es
+  , Member Zellij es
   , LastMember IO es
   ) => StopInput -> Eff es StopResponse
 handleStop input = do
+  -- Auto-focus logic
+  mAutoFocus <- lookupEnv "EXOMONAD_AUTO_FOCUS_ON_ERROR"
+  let autoFocusEnabled = mAutoFocus /= Just "false"
+
+  if autoFocusEnabled
+    then autoFocusLogic
+    else pure ()
+
   -- TODO: Re-implement stop hook graph execution logic.
   -- Current implementation encounters type inference issues with runGraph/HasField/OverloadedRecordDot
   -- when running inside the open effect stack 'es'.
@@ -124,8 +134,95 @@ handleStop input = do
     , srMessage = Nothing
     }
 
-handleSessionEnd :: SessionEndInput -> Eff es ()
-handleSessionEnd _ = pure ()
+handleSessionEnd :: (Member ConfigReader es, LastMember IO es, Member Log es) => SessionEndInput -> Eff es ()
+handleSessionEnd input = do
+  config <- ask @ServerConfig
+  case config.openObserveConfig of
+    Nothing -> logInfo "OpenObserve not configured, skipping transcript shipping"
+    Just ooConfig -> do
+      let path = T.unpack input.seiTranscriptPath
+      if null path
+        then logInfo "No transcript path provided, skipping"
+        else do
+          mEvents <- sendM $ readJsonl path
+          case mEvents of
+            Nothing -> logInfo $ "Failed to read or parse transcript at " <> T.pack path
+            Just events -> do
+              let role = fromMaybe config.defaultRole (config.role >>= roleFromText)
+              let enriched = map (enrichEvent role input.seiSessionId (T.pack input.seiCwd) "SessionEnd") events
+              sendM $ shipTranscript ooConfig enriched
+
+handleSubagentStop :: (Member ConfigReader es, LastMember IO es, Member Log es) => SubagentStopInput -> Eff es ()
+handleSubagentStop input = do
+  config <- ask @ServerConfig
+  case config.openObserveConfig of
+    Nothing -> logInfo "OpenObserve not configured, skipping transcript shipping"
+    Just ooConfig -> do
+      let path = T.unpack input.sasiTranscriptPath
+      if null path
+        then logInfo "No transcript path provided, skipping"
+        else do
+          mEvents <- sendM $ readJsonl path
+          case mEvents of
+            Nothing -> logInfo $ "Failed to read or parse transcript at " <> T.pack path
+            Just events -> do
+              let role = fromMaybe config.defaultRole (config.role >>= roleFromText)
+              let enriched = map (enrichEvent role input.sasiSessionId (T.pack input.sasiCwd) "SubagentStop") events
+              sendM $ shipTranscript ooConfig enriched
+
+-- | Helper to read NDJSON (JSONL) file.
+readJsonl :: FilePath -> IO (Maybe [Value])
+readJsonl path = try @SomeException (BL.readFile path) >>= \case
+  Left _ -> pure Nothing
+  Right content -> do
+    let jsonLines = filter (not . BL.null) $ BL.split 10 content -- Split by newline (\n = 10)
+    pure $ decodeAllJsonLines jsonLines
+  where
+    stripTrailingCR bs
+      | BL.null bs = bs
+      | BL.last bs == 13 = BL.init bs
+      | otherwise = bs
+
+    decodeAllJsonLines = go []
+      where
+        go acc [] = Just (reverse acc)
+        go acc (l : ls) =
+          case decode (stripTrailingCR l) of
+            Just v  -> go (v : acc) ls
+            Nothing -> Nothing
+
+-- | Helper to enrich transcript event with session metadata.
+enrichEvent :: Role -> T.Text -> T.Text -> T.Text -> Value -> Value
+enrichEvent role sessionId cwd hookName (Object o) = Object $ o 
+  <> KeyMap.fromList 
+     [ "session_id" .= sessionId
+     , "agent_role" .= T.pack (show role)
+     , "cwd" .= cwd
+     , "hook_event" .= hookName
+     ]
+enrichEvent _ _ _ _ v = v
 
 handleNotification :: Notification -> Eff es ()
 handleNotification _ = pure ()
+
+-- | Auto-focus logic: check Zellij, parse issue ID, switch focus.
+autoFocusLogic :: (Member Zellij es, Member Git es) => Eff es ()
+autoFocusLogic = do
+  mZellij <- checkZellijEnv
+  case mZellij of
+    Nothing -> pure ()
+    Just _ -> do
+      mWt <- getWorktreeInfo
+      case mWt of
+        Nothing -> pure ()
+        Just wt -> do
+          -- Using pattern matching because of OverloadedRecordDot issues
+          let branchName = (\(WorktreeInfo { wiBranch = b }) -> b) wt
+              maybeIssueNum = parseIssueNumber branchName
+              maybeIssueId = T.pack . show <$> maybeIssueNum
+          case maybeIssueId of
+            Nothing -> pure ()
+            Just bid -> do
+              -- Focus on tab with Issue ID name
+              _ <- goToTab (TabId bid)
+              pure ()

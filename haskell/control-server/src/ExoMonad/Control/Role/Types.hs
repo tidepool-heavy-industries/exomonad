@@ -57,15 +57,14 @@ module ExoMonad.Control.Role.Types
   , StopReason(..)
   , Notification(..)
   , SessionEndInput(..)
+  , SubagentStopInput(..)
 
     -- * Role Metadata
   , RoleMetadata(..)
   ) where
 
-import Control.Monad.Freer (Eff)
-import Data.Aeson (Value, FromJSON(..), ToJSON(..), genericParseJSON, genericToJSON, defaultOptions, fieldLabelModifier)
-import Data.Aeson.Casing (aesonDrop, snakeCase)
-import Data.Kind (Type)
+import Data.Aeson (Value, FromJSON(..), ToJSON(..), genericParseJSON, genericToJSON, defaultOptions, fieldLabelModifier, Options)
+import Data.Aeson.Casing (snakeCase)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
