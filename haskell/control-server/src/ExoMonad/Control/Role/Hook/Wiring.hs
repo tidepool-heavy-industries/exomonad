@@ -9,7 +9,6 @@ module ExoMonad.Control.Role.Hook.Wiring
   ) where
 
 import Control.Monad.Freer (Eff, Member, LastMember)
-import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Maybe (fromMaybe)
 
@@ -17,25 +16,17 @@ import ExoMonad.Graph.Generic (AsHandler, HookHandler(..))
 import ExoMonad.Control.Role.Hook.Definitions (CommonHooks(..))
 import ExoMonad.Control.Role.Types
 import ExoMonad.Control.Hook.SessionStart (sessionStartLogic)
-import ExoMonad.Control.Hook.Policy (HookDecision(..), evaluatePolicy, HookPolicy(..))
-import ExoMonad.Control.StopHook.Types (StopHookContext(..), TemplateName, AgentState(..))
-import ExoMonad.Control.StopHook.Handlers (stopHookHandlers)
-import ExoMonad.Control.StopHook.Templates (renderStopHookTemplate)
-import ExoMonad.Control.Workflow.Store (WorkflowStore, getWorkflowState, updateWorkflowState)
-
-import ExoMonad.Effects.Env (Env, lookupEnv)
-import ExoMonad.Effects.Git (Git, getWorktreeInfo, WorktreeInfo(..))
-import ExoMonad.Effects.GitHub (GitHub) -- Need GitHub for sessionStartLogic
-import ExoMonad.Effect.Types (Log, logDebug, logInfo, logError) 
-import ExoMonad.Effects.Zellij (Zellij)
+import ExoMonad.Control.Hook.Policy (HookDecision(..), evaluatePolicy)
 import ExoMonad.Control.Types (ServerConfig(..))
-import ExoMonad.Control.ExoTools (parseIssueNumber)
-import ExoMonad.Graph.Interpret (runGraph)
-import ExoMonad.Effect.NodeMeta (NodeMeta, runNodeMeta, defaultNodeMeta)
-import Control.Monad.Freer.State (State, runState)
 import Control.Monad.Freer.Reader (Reader, ask)
 import OpenTelemetry.Trace (Tracer)
 import ExoMonad.Control.RoleConfig (roleFromText)
+
+import ExoMonad.Effects.Env (Env)
+import ExoMonad.Effects.Git (Git)
+import ExoMonad.Effects.GitHub (GitHub)
+import ExoMonad.Effect.Types (Log, logInfo) 
+import ExoMonad.Effects.Zellij (Zellij)
 
 -- We need a Reader effect for ServerConfig to access policy and workflow store
 type ConfigReader = Reader ServerConfig
