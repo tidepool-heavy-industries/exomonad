@@ -18,6 +18,7 @@ import ExoMonad.Effects.GitHub
   ( GitHub, CreateIssueInput(..), createIssue, defaultCreateIssueInput, Repo(..)
   )
 import ExoMonad.Effect.Types (Log, logInfo)
+import ExoMonad.Control.Combinators (withEffect)
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- KAIZEN REPORT TOOL
@@ -43,20 +44,19 @@ kaizenReportLogic args = do
         , ciiLabels = labels
         }
 
-  res <- createIssue input
-  case res of
-    Left err -> pure $ KaizenReportResult
-      { number  = 0
-      , url     = ""
-      , success = False
-      , error   = Just (T.pack $ show err)
-      }
-    Right num -> pure $ KaizenReportResult
+  withEffect (createIssue input)
+    (\num -> pure $ KaizenReportResult
       { number  = num
       , url     = "https://github.com/" <> kaizenRepo.unRepo <> "/issues/" <> T.pack (show num)
       , success = True
       , error   = Nothing
-      }
+      })
+    (\err -> pure $ KaizenReportResult
+      { number  = 0
+      , url     = ""
+      , success = False
+      , error   = Just (T.pack $ show err)
+      })
 
 -- | Format the issue body from nested structured fields.
 formatKaizenBody :: KaizenReportArgs -> Text

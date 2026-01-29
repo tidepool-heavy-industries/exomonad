@@ -22,7 +22,7 @@ import ExoMonad.Effects.GitHub
   )
 import ExoMonad.Effects.Env (Env)
 import ExoMonad.Control.TLTools.Types
-import ExoMonad.Control.GHTools (getRepo)
+import ExoMonad.Control.Combinators (withEffect, getRepo)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TL CREATE ISSUE TOOL
@@ -37,29 +37,25 @@ tlCreateIssueLogic args = do
   -- Use default repo or env repo
   repo <- getRepo Nothing
 
-  let body = formatIssueBody args
-      labels = constructLabels args
-      assignees = maybe [] (.assignees) args.assignment
-      input = (defaultCreateIssueInput repo args.title)
-        { ciiBody      = body
-        , ciiLabels    = labels
-        , ciiAssignees = assignees
+  let input = (defaultCreateIssueInput repo args.title)
+        { ciiBody      = formatIssueBody args
+        , ciiLabels    = constructLabels args
+        , ciiAssignees = maybe [] (.assignees) args.assignment
         }
 
-  res <- createIssue input
-  case res of
-    Left err -> pure $ TLCreateIssueResult
-      { number  = 0
-      , url     = ""
-      , success = False
-      , error   = Just (T.pack $ show err)
-      }
-    Right num -> pure $ TLCreateIssueResult
+  withEffect (createIssue input)
+    (\num -> pure $ TLCreateIssueResult
       { number  = num
       , url     = "https://github.com/" <> repo.unRepo <> "/issues/" <> T.pack (show num)
       , success = True
       , error   = Nothing
-      }
+      })
+    (\err -> pure $ TLCreateIssueResult
+      { number  = 0
+      , url     = ""
+      , success = False
+      , error   = Just (T.pack $ show err)
+      })
 
 -- | Format the issue body from nested structured fields.
 formatIssueBody :: TLCreateIssueArgs -> Text

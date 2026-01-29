@@ -48,6 +48,7 @@ import ExoMonad.Control.ExoTools.SpawnCleanup (SpawnCleanup, SpawnProgress(..), 
 import ExoMonad.Control.Runtime.Paths as Paths
 import ExoMonad.Control.ExoTools.SpawnAgents.Types
 import ExoMonad.Control.ExoTools.SpawnAgents.Prompt (renderInitialPrompt)
+import ExoMonad.Control.Combinators (withEffect)
 
 -- | Graph definition for spawn_agents tool.
 data SpawnAgentsGraph mode = SpawnAgentsGraph
@@ -257,16 +258,15 @@ processIssue spawnMode repoRoot wtBaseDir backend shortId = do
                         else do
                           -- a. Create worktree (only if it doesn't exist)
                           logInfo $ "[" <> shortId <> "] Creating worktree: " <> T.pack targetPath
-                          wtRes <- createWorktree spec
-                          case wtRes of
-                            Left err -> do
-                              let errMsg = T.pack (show err)
-                              emitProgress $ SpawnFailed shortId errMsg
-                              pure $ Left (shortId, errMsg)
-                            Right (WorktreePath p) -> do
+                          withEffect (createWorktree spec)
+                            (\(WorktreePath p) -> do
                               acquireWorktree (WorktreePath p)
                               emitProgress $ WorktreeCreated shortId p
-                              pure $ Right p
+                              pure $ Right p)
+                            (\err -> do
+                              let errMsg = T.pack (show err)
+                              emitProgress $ SpawnFailed shortId errMsg
+                              pure $ Left (shortId, errMsg))
 
                       case mPath of
                         Left errTuple -> pure $ Left errTuple
@@ -322,17 +322,16 @@ processIssue spawnMode repoRoot wtBaseDir backend shortId = do
                                     , tcEnv = envVars
                                     , tcCommand = Nothing
                                     }
-                              tabRes <- newTab tabConfig
-                              case tabRes of
-                                Left err -> do
+                              withEffect (newTab tabConfig)
+                                (\tabId -> do
+                                  emitProgress $ TabLaunched shortId tabId
+                                  pure $ Right (shortId, path, tabId))
+                                (\err -> do
                                   let errMsg = "Tab launch failed: " <> T.pack (show err)
                                   logError $ "[" <> shortId <> "] " <> errMsg
                                   emitProgress $ SpawnFailed shortId errMsg
                                   cleanupAll
-                                  pure $ Left (shortId, errMsg)
-                                Right tabId -> do
-                                  emitProgress $ TabLaunched shortId tabId
-                                  pure $ Right (shortId, path, tabId)
+                                  pure $ Left (shortId, errMsg))
 
                             SpawnDocker -> do
                               logInfo $ "[" <> shortId <> "] Spawning Docker container"
@@ -459,30 +458,18 @@ cleanupAgentsLogic args = do
   logInfo $ "Cleaning up agents for issues: " <> T.intercalate ", " args.issueNumbers
   
   -- 1. Get all worktrees to find matches
-  wtListRes <- listWorktrees
-  case wtListRes of
-    Left err -> do
-      -- Propagate worktree enumeration failure
-      let msg = "Failed to list worktrees: " <> T.pack (show err)
-          failed = [(shortId, msg) | shortId <- args.issueNumbers]
-      logError msg
-      pure $ CleanupAgentsResult
-        {
-          cleaned = []
-        , failed = failed
-        }
-    Right allWorktrees -> do
+  withEffect listWorktrees
+    (\allWorktrees -> do
       results <- forM args.issueNumbers $ \shortId -> do
         logInfo $ "[" <> shortId <> "] Starting cleanup"
         
         -- a. Stop container (using predictable name)
         let containerId = ContainerId $ "exomonad-agent-" <> shortId
-        stopRes <- stopContainer containerId
-        stopStatus <- case stopRes of
-          Right () -> do
+        stopStatus <- withEffect (stopContainer containerId)
+          (\() -> do
             logInfo $ "[" <> shortId <> "] Container stopped"
-            pure (Right ())
-          Left err -> do
+            pure (Right ()))
+          (\err -> do
             let errText = T.pack (show err)
             -- Check if error is "No such container" (ignorable) or actual failure
             -- Note: DockerSpawner interpreter currently returns DockerConnectionError for all failures
@@ -492,7 +479,7 @@ cleanupAgentsLogic args = do
                 pure (Right ())
               else do
                 logWarn $ "[" <> shortId <> "] Container stop failed: " <> errText
-                pure (Left errText)
+                pure (Left errText))
 
         -- b. Delete worktree
         -- Find worktrees that match "gh-<shortId>-"
@@ -517,4 +504,14 @@ cleanupAgentsLogic args = do
         {
           cleaned = succeeded
         , failed = failed
-        }
+        })
+    (\err -> do
+      -- Propagate worktree enumeration failure
+      let msg = "Failed to list worktrees: " <> T.pack (show err)
+          failed = [(shortId, msg) | shortId <- args.issueNumbers]
+      logError msg
+      pure $ CleanupAgentsResult
+        {
+          cleaned = []
+        , failed = failed
+        })
