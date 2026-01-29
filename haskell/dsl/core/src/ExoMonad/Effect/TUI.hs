@@ -348,10 +348,14 @@ instance FromJSON VisibilityRule where
       parseChecked _ = fail "Not a Checked rule"
 
       parseEquals val@(A.Object o)
-        | KM.size o > 0 && all isString (KM.elems o) =
-            pure $ Equals $ KM.map (\(A.String s) -> s) o
+        | KM.size o > 0 = case traverse asString o of
+            Just strMap -> pure $ Equals strMap
+            Nothing -> fail "Not an Equals rule: values must be strings"
         | otherwise = fail "Not an Equals rule"
       parseEquals _ = fail "Not an Equals rule"
+
+      asString (A.String s) = Just s
+      asString _ = Nothing
 
       isString (A.String _) = True
       isString _ = False

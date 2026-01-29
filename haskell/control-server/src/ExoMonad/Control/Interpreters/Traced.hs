@@ -11,13 +11,11 @@ module ExoMonad.Control.Interpreters.Traced
   , traceLSP
   ) where
 
-import Control.Monad (when)
 import Control.Monad.Freer (Eff, Member, LastMember, interpose, send, sendM)
-import Data.Maybe (isJust, fromMaybe)
+import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import OpenTelemetry.Trace
-import OpenTelemetry.Context (Context)
 import OpenTelemetry.Context.ThreadLocal (getContext)
 
 import ExoMonad.Effects.Cabal (Cabal(..), CabalResult(..))
@@ -37,9 +35,9 @@ withSpan
 withSpan tracer name action = do
   -- Get current context (from thread local) to link as parent
   ctx <- sendM getContext
-  span <- sendM $ createSpan tracer ctx name defaultSpanArguments
-  result <- action span
-  sendM $ endSpan span Nothing
+  traceSpan <- sendM $ createSpan tracer ctx name defaultSpanArguments
+  result <- action traceSpan
+  sendM $ endSpan traceSpan Nothing
   pure result
 
 -- | Trace Cabal effects
@@ -49,45 +47,51 @@ traceCabal
   -> Eff effs a 
   -> Eff effs a
 traceCabal tracer = interpose $ \case
-  CabalBuild path -> withSpan tracer "cabal.build" $ \span -> do
-    sendM $ addAttribute span "cabal.path" (T.pack path)
+  CabalBuild path -> withSpan tracer "cabal.build" $ \traceSpan -> do
+    sendM $ addAttribute traceSpan "cabal.path" (T.pack path)
     res <- send (CabalBuild path)
     case res of
       CabalSuccess
-        -> sendM $ addAttribute span "cabal.status" ("success" :: Text)
+        -> sendM $ addAttribute traceSpan "cabal.status" ("success" :: Text)
       CabalBuildFailure code stderr _
         -> do sendM
-                $ addAttribute span "cabal.status" ("build_failure" :: Text)
+                $ addAttribute traceSpan "cabal.status" ("build_failure" :: Text)
               sendM
-                $ addAttribute span "cabal.exit_code" (fromIntegral code :: Int)
-              sendM $ addAttribute span "error.message" (T.take 1000 stderr)
+                $ addAttribute traceSpan "cabal.exit_code" (fromIntegral code :: Int)
+              sendM $ addAttribute traceSpan "error.message" (T.take 1000 stderr)
       CabalTestFailure raw
         -> do sendM
-                $ addAttribute span "cabal.status" ("test_failure" :: Text)
-              sendM $ addAttribute span "error.message" (T.take 1000 raw)
+                $ addAttribute traceSpan "cabal.status" ("test_failure" :: Text)
+              sendM $ addAttribute traceSpan "error.message" (T.take 1000 raw)
       CabalTestSuccess _
-        -> sendM $ addAttribute span "cabal.status" ("success" :: Text)
+        -> sendM $ addAttribute traceSpan "cabal.status" ("success" :: Text)
+      CabalInfraError err -> do
+        sendM $ addAttribute traceSpan "cabal.status" ("infra_error" :: Text)
+        sendM $ addAttribute traceSpan "error.message" (T.take 1000 err)
     pure res
 
-  CabalTest path -> withSpan tracer "cabal.test" $ \span -> do
-    sendM $ addAttribute span "cabal.path" (T.pack path)
+  CabalTest path -> withSpan tracer "cabal.test" $ \traceSpan -> do
+    sendM $ addAttribute traceSpan "cabal.path" (T.pack path)
     res <- send (CabalTest path)
     case res of
       CabalSuccess -> 
-        sendM $ addAttribute span "cabal.status" ("success" :: Text)
+        sendM $ addAttribute traceSpan "cabal.status" ("success" :: Text)
       CabalTestSuccess _ -> 
-        sendM $ addAttribute span "cabal.status" ("success" :: Text)
+        sendM $ addAttribute traceSpan "cabal.status" ("success" :: Text)
       CabalBuildFailure code stderr _ -> do
-        sendM $ addAttribute span "cabal.status" ("build_failure" :: Text)
-        sendM $ addAttribute span "cabal.exit_code" (fromIntegral code :: Int)
-        sendM $ addAttribute span "error.message" (T.take 1000 stderr)
+        sendM $ addAttribute traceSpan "cabal.status" ("build_failure" :: Text)
+        sendM $ addAttribute traceSpan "cabal.exit_code" (fromIntegral code :: Int)
+        sendM $ addAttribute traceSpan "error.message" (T.take 1000 stderr)
       CabalTestFailure raw -> do
-        sendM $ addAttribute span "cabal.status" ("test_failure" :: Text)
-        sendM $ addAttribute span "error.message" (T.take 1000 raw)
+        sendM $ addAttribute traceSpan "cabal.status" ("test_failure" :: Text)
+        sendM $ addAttribute traceSpan "error.message" (T.take 1000 raw)
+      CabalInfraError err -> do
+        sendM $ addAttribute traceSpan "cabal.status" ("infra_error" :: Text)
+        sendM $ addAttribute traceSpan "error.message" (T.take 1000 err)
     pure res
 
-  CabalClean path -> withSpan tracer "cabal.clean" $ \span -> do
-    sendM $ addAttribute span "cabal.path" (T.pack path)
+  CabalClean path -> withSpan tracer "cabal.clean" $ \traceSpan -> do
+    sendM $ addAttribute traceSpan "cabal.path" (T.pack path)
     res <- send (CabalClean path)
     pure res
 
@@ -98,36 +102,36 @@ traceGit
   -> Eff effs a 
   -> Eff effs a
 traceGit tracer = interpose $ \case
-  GetWorktreeInfo -> withSpan tracer "git.worktree_info" $ \span -> do
+  GetWorktreeInfo -> withSpan tracer "git.worktree_info" $ \traceSpan -> do
     res <- send GetWorktreeInfo
-    sendM $ addAttribute span "git.found" (isJust res)
+    sendM $ addAttribute traceSpan "git.found" (isJust res)
     case res of
       Just info -> do
-        sendM $ addAttribute span "git.branch" info.wiBranch
-        sendM $ addAttribute span "git.is_worktree" info.wiIsWorktree
+        sendM $ addAttribute traceSpan "git.branch" info.wiBranch
+        sendM $ addAttribute traceSpan "git.is_worktree" info.wiIsWorktree
       Nothing -> pure ()
     pure res
 
-  GetDirtyFiles -> withSpan tracer "git.dirty_files" $ \span -> do
+  GetDirtyFiles -> withSpan tracer "git.dirty_files" $ \traceSpan -> do
     res <- send GetDirtyFiles
-    sendM $ addAttribute span "git.dirty_count" (length res)
+    sendM $ addAttribute traceSpan "git.dirty_count" (length res)
     pure res
 
-  GetRecentCommits n -> withSpan tracer "git.recent_commits" $ \span -> do
-    sendM $ addAttribute span "git.limit" (fromIntegral n :: Int)
+  GetRecentCommits n -> withSpan tracer "git.recent_commits" $ \traceSpan -> do
+    sendM $ addAttribute traceSpan "git.limit" (fromIntegral n :: Int)
     res <- send (GetRecentCommits n)
-    sendM $ addAttribute span "git.count" (length res)
+    sendM $ addAttribute traceSpan "git.count" (length res)
     pure res
 
-  GetCurrentBranch -> withSpan tracer "git.current_branch" $ \span -> do
+  GetCurrentBranch -> withSpan tracer "git.current_branch" $ \traceSpan -> do
     res <- send GetCurrentBranch
-    sendM $ addAttribute span "git.branch" res
+    sendM $ addAttribute traceSpan "git.branch" res
     pure res
 
-  GetCommitsAhead ref -> withSpan tracer "git.commits_ahead" $ \span -> do
-    sendM $ addAttribute span "git.ref" ref
+  GetCommitsAhead ref -> withSpan tracer "git.commits_ahead" $ \traceSpan -> do
+    sendM $ addAttribute traceSpan "git.ref" ref
     res <- send (GetCommitsAhead ref)
-    sendM $ addAttribute span "git.ahead_count" (fromIntegral res :: Int)
+    sendM $ addAttribute traceSpan "git.ahead_count" (fromIntegral res :: Int)
     pure res
 
 -- | Trace LSP effects
@@ -137,23 +141,23 @@ traceLSP
   -> Eff effs a 
   -> Eff effs a
 traceLSP tracer = interpose $ \case
-  Hover doc pos -> withSpan tracer "lsp.hover" $ \span -> do
-    sendM $ addAttribute span "lsp.file" doc.tdiUri
-    sendM $ addAttribute span "lsp.line" (fromIntegral $ pos.posLine :: Int)
+  Hover doc pos -> withSpan tracer "lsp.hover" $ \traceSpan -> do
+    sendM $ addAttribute traceSpan "lsp.file" doc.tdiUri
+    sendM $ addAttribute traceSpan "lsp.line" (fromIntegral $ pos.posLine :: Int)
     res <- send (Hover doc pos)
-    sendM $ addAttribute span "lsp.found" (isJust res)
+    sendM $ addAttribute traceSpan "lsp.found" (isJust res)
     pure res
 
-  References doc pos -> withSpan tracer "lsp.references" $ \span -> do
-    sendM $ addAttribute span "lsp.file" doc.tdiUri
+  References doc pos -> withSpan tracer "lsp.references" $ \traceSpan -> do
+    sendM $ addAttribute traceSpan "lsp.file" doc.tdiUri
     res <- send (References doc pos)
-    sendM $ addAttribute span "lsp.count" (length res)
+    sendM $ addAttribute traceSpan "lsp.count" (length res)
     pure res
 
-  Diagnostics doc -> withSpan tracer "lsp.diagnostics" $ \span -> do
-    sendM $ addAttribute span "lsp.file" doc.tdiUri
+  Diagnostics doc -> withSpan tracer "lsp.diagnostics" $ \traceSpan -> do
+    sendM $ addAttribute traceSpan "lsp.file" doc.tdiUri
     res <- send (Diagnostics doc)
-    sendM $ addAttribute span "lsp.count" (length res)
+    sendM $ addAttribute traceSpan "lsp.count" (length res)
     pure res
 
   -- Fallback

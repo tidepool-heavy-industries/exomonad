@@ -71,21 +71,21 @@ withRetry config = interpose $ \(op :: GitHub x) -> do
         Just t -> do
           ctx <- sendM getContext
           let spanName = "github." <> getOpName operation
-          span <- sendM $ createSpan t ctx spanName defaultSpanArguments
+          traceSpan <- sendM $ createSpan t ctx spanName defaultSpanArguments
           
-          sendM $ addAttribute span "github.op" (getOpName operation)
-          sendM $ addAttribute span "github.retry_count" (attempt - 1)
-          addOpAttributes span operation
+          sendM $ addAttribute traceSpan "github.op" (getOpName operation)
+          sendM $ addAttribute traceSpan "github.retry_count" (attempt - 1)
+          addOpAttributes traceSpan operation
           
           r <- send operation
           
           case r of
             Left err -> sendM $ do
-              addAttribute span "error" True
-              addAttribute span "error.message" (T.pack (show err))
+              addAttribute traceSpan "error" True
+              addAttribute traceSpan "error.message" (T.pack (show err))
             Right _ -> pure ()
             
-          sendM $ endSpan span Nothing
+          sendM $ endSpan traceSpan Nothing
           pure r
 
       case res of
@@ -118,9 +118,9 @@ withRetry config = interpose $ \(op :: GitHub x) -> do
       Nothing -> send op
       Just t -> do
         ctx <- sendM getContext
-        span <- sendM $ createSpan t ctx "github.check_auth" defaultSpanArguments
+        traceSpan <- sendM $ createSpan t ctx "github.check_auth" defaultSpanArguments
         res <- send op
-        sendM $ endSpan span Nothing
+        sendM $ endSpan traceSpan Nothing
         pure res
 
 -- | Helper to get operation name for tracing.
@@ -140,15 +140,16 @@ getOpName = \case
   GetPullRequest _ _ _ -> "get_pr"
   ListPullRequests _ _ -> "list_prs"
   GetPullRequestReviews _ _ -> "get_pr_reviews"
+  GetDiscussion _ _ -> "get_discussion"
   CheckAuth -> "check_auth"
 
 -- | Helper to add operation-specific attributes.
 addOpAttributes :: LastMember IO es => Span -> GitHub r -> Eff es ()
-addOpAttributes span = \case
-  GetIssue _ num _ -> sendM $ addAttribute span "github.issue_number" (fromIntegral num :: Int)
-  UpdateIssue _ num _ -> sendM $ addAttribute span "github.issue_number" (fromIntegral num :: Int)
-  CloseIssue _ num -> sendM $ addAttribute span "github.issue_number" (fromIntegral num :: Int)
-  ReopenIssue _ num -> sendM $ addAttribute span "github.issue_number" (fromIntegral num :: Int)
-  ListIssues repo _ -> sendM $ addAttribute span "github.repo" repo.unRepo
-  GetPullRequest _ num _ -> sendM $ addAttribute span "github.pr_number" (fromIntegral num :: Int)
+addOpAttributes traceSpan = \case
+  GetIssue _ num _ -> sendM $ addAttribute traceSpan "github.issue_number" (fromIntegral num :: Int)
+  UpdateIssue _ num _ -> sendM $ addAttribute traceSpan "github.issue_number" (fromIntegral num :: Int)
+  CloseIssue _ num -> sendM $ addAttribute traceSpan "github.issue_number" (fromIntegral num :: Int)
+  ReopenIssue _ num -> sendM $ addAttribute traceSpan "github.issue_number" (fromIntegral num :: Int)
+  ListIssues repo _ -> sendM $ addAttribute traceSpan "github.repo" repo.unRepo
+  GetPullRequest _ num _ -> sendM $ addAttribute traceSpan "github.pr_number" (fromIntegral num :: Int)
   _ -> pure ()

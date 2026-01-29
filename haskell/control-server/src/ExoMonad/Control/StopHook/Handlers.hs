@@ -101,6 +101,10 @@ translateCabalResult (CabalBuildFailure _code stderr _stdout) =
   BuildFailure $ BuildFailureInfo
     { rawOutput = stderr
     }
+translateCabalResult (CabalInfraError err) =
+  BuildFailure $ BuildFailureInfo
+    { rawOutput = "Cabal infrastructure error: " <> err
+    }
 translateCabalResult (CabalTestFailure _raw) = BuildSuccess
 translateCabalResult (CabalTestSuccess _) = BuildSuccess
 
@@ -155,6 +159,8 @@ translateTestResult (CabalTestSuccess output) =
   TestResult 0 0 output
 translateTestResult (CabalTestFailure raw) =
   TestResult 0 1 raw  -- Capture raw output for template
+translateTestResult (CabalInfraError err) =
+  TestResult 0 1 ("Cabal infrastructure error: " <> err)
 -- Defensive case: should be unreachable if checkBuild handled build failures correctly.
 translateTestResult (CabalBuildFailure _ _ _) =
   error "translateTestResult: unexpected CabalBuildFailure (test called after build failure)"
