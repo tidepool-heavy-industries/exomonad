@@ -5,33 +5,38 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
 module ExoMonad.Control.Effects.DockerCtl
   ( runDockerCtl
   ) where
 
 import Control.Monad.Freer (Eff, interpret, LastMember, sendM)
+import Control.Concurrent.STM (TVar, atomically, modifyTVar')
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Time (getCurrentTime, defaultTimeLocale, formatTime)
 
 import ExoMonad.Effects.DockerSpawner
 import ExoMonad.Control.Logging (Logger)
 import ExoMonad.Control.Subprocess (runSubprocessJSON, runSubprocess, SubprocessResult(..), SubprocessError(..))
+import ExoMonad.Control.Protocol (AgentStatus(..))
 
 runDockerCtl
   :: LastMember IO es
   => Logger
   -> FilePath -- ^ Path to docker-ctl binary
+  -> TVar [AgentStatus]
   -> Eff (DockerSpawner ': es) a
   -> Eff es a
-runDockerCtl logger binPath = interpret $ \case
-  SpawnContainer cfg -> sendM $ doSpawn logger binPath cfg
-  StopContainer cid -> sendM $ doStop logger binPath cid
+runDockerCtl logger binPath agentStore = interpret $ \case
+  SpawnContainer cfg -> sendM $ doSpawn logger binPath agentStore cfg
+  StopContainer cid -> sendM $ doStop logger binPath agentStore cid
   GetContainerStatus cid -> sendM $ doStatus logger binPath cid
   ExecContainer cid cmd mWorkdir mUser -> sendM $ doExec logger binPath cid cmd mWorkdir mUser
 
-doSpawn :: Logger -> FilePath -> SpawnConfig -> IO (Either DockerError ContainerId)
-doSpawn logger binPath cfg = do
+doSpawn :: Logger -> FilePath -> TVar [AgentStatus] -> SpawnConfig -> IO (Either DockerError ContainerId)
+doSpawn logger binPath agentStore cfg = do
   let envArgs = concatMap (\(k, v) -> ["-e", T.unpack k <> "=" <> T.unpack v]) (cfg.scEnv)
       args = [ "spawn"
              , "--issue-id", T.unpack (cfg.scIssueId)
@@ -43,14 +48,30 @@ doSpawn logger binPath cfg = do
                ++ maybe [] (\c -> "--" : map T.unpack c) (cfg.scCmd)
 
   runSubprocessJSON logger "[DockerCtl]" binPath args >>= \case
-    Right res -> pure $ Right res
+    Right (ContainerId cid) -> do
+      now <- getCurrentTime
+      let timestamp = T.pack $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ" now
+      let newAgent = AgentStatus
+            { asId = cfg.scIssueId
+            , asContainerId = cid
+            , asIssueNumber = Nothing -- Simplify for now
+            , asStatus = "running"
+            , asStartedAt = timestamp
+            , asLastActivity = Just timestamp
+            , asLastAction = Just "Spawned"
+            , asBlocker = Nothing
+            }
+      atomically $ modifyTVar' agentStore (newAgent :)
+      pure $ Right (ContainerId cid)
     Left err -> pure $ Left $ DockerApiError 200 err.stderr
 
-doStop :: Logger -> FilePath -> ContainerId -> IO (Either DockerError ())
-doStop logger binPath (ContainerId cid) = do
+doStop :: Logger -> FilePath -> TVar [AgentStatus] -> ContainerId -> IO (Either DockerError ())
+doStop logger binPath agentStore (ContainerId cid) = do
   let args = ["stop", T.unpack cid]
   runSubprocess logger "[DockerCtl]" binPath args >>= \case
-    SubprocessSuccess _ _ -> pure $ Right ()
+    SubprocessSuccess _ _ -> do
+      atomically $ modifyTVar' agentStore (filter (\a -> a.asContainerId /= cid))
+      pure $ Right ()
     SubprocessFailure err -> pure $ Left $ DockerConnectionError err.stderr
 
 doStatus :: Logger -> FilePath -> ContainerId -> IO (Either DockerError ContainerStatus)

@@ -13,6 +13,7 @@ module ExoMonad.Control.Runtime
 
 import Control.Monad.Freer (Eff, runM)
 import OpenTelemetry.Trace (Tracer)
+import Control.Concurrent.STM (TVar)
 
 -- Effects
 import ExoMonad.Effect.Types (Log, Time, runLog, LogLevel(Debug), runTime)
@@ -48,6 +49,7 @@ import ExoMonad.Control.TUIInterpreter (runTUIFifo)
 import qualified ExoMonad.Control.Runtime.Paths as Paths
 import ExoMonad.Control.Hook.GitHubRetry (withRetry, defaultRetryConfig, RetryConfig(..))
 import ExoMonad.Control.Types (ServerConfig(..))
+import ExoMonad.Control.Protocol (AgentStatus)
 
 -- | The concrete effect stack for the application.
 --
@@ -77,8 +79,8 @@ type AppEffects =
    ]
 
 -- | Run the application effect stack.
-runApp :: ServerConfig -> Tracer -> CircuitBreakerMap -> Logger -> Eff AppEffects a -> IO a
-runApp config tracer cbMap logger action = do
+runApp :: ServerConfig -> Tracer -> CircuitBreakerMap -> Logger -> TVar [AgentStatus] -> Eff AppEffects a -> IO a
+runApp config tracer cbMap logger agentStore action = do
   -- Resolve paths
   binDir <- Paths.dockerBinDir
   let dockerCtlPath = Paths.dockerCtlBin binDir
@@ -111,6 +113,6 @@ runApp config tracer cbMap logger action = do
     $ runCabalRemote Nothing
     -- Using empty container/workdir for Justfile interpreter since we are running locally in this context
     $ runJustfileRemote "" "" 
-    $ runDockerCtl logger dockerCtlPath
+    $ runDockerCtl logger dockerCtlPath agentStore
     $ runGeminiIO
     $ action

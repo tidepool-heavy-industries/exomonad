@@ -1,3 +1,6 @@
+mod api;
+mod state;
+
 use anyhow::Result;
 use clap::Parser;
 use crossterm::{
@@ -10,21 +13,97 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Tabs},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap},
     Terminal,
 };
-use std::{io, time::Duration};
+use std::{io, time::Duration, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}};
+use tokio::sync::mpsc;
+use api::ApiClient;
+use state::DashboardState;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
-struct Args {}
+struct Args {
+    #[arg(long, default_value = "http://localhost:7432")]
+    control_server: String,
+}
+
+enum AppCommand {
+    StopAgent(String),
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let _args = Args::parse();
+    let args = Args::parse();
 
     // Setup logging
     tracing_subscriber::fmt::init();
+
+    // Setup state
+    let state = Arc::new(Mutex::new(DashboardState::default()));
+    let running = Arc::new(AtomicBool::new(true));
+    let running_clone = running.clone();
+    
+    let state_clone = state.clone();
+    let client = ApiClient::new(args.control_server.clone());
+    let client = Arc::new(client);
+    let client_clone = client.clone();
+
+    // Command channel
+    let (tx, mut rx) = mpsc::channel::<AppCommand>(10);
+
+    // Command processor
+    let client_cmd = client.clone();
+    tokio::spawn(async move {
+        while let Some(cmd) = rx.recv().await {
+            match cmd {
+                AppCommand::StopAgent(id) => {
+                    if let Err(err) = client_cmd.stop_agent(&id).await {
+                        tracing::error!(agent_id = %id, error = ?err, "failed to stop agent");
+                    }
+                }
+            }
+        }
+    });
+
+    // Polling task
+    tokio::spawn(async move {
+        while running_clone.load(Ordering::Relaxed) {
+            // 1. Fetch Agents
+            match client_clone.get_agents().await {
+                Ok(agents) => {
+                    let mut s = state_clone.lock().expect("State lock poisoned");
+                    s.agents = agents;
+                    s.connected = true;
+                    s.last_updated = Some(chrono::Local::now().to_rfc3339());
+                    
+                    // Adjust selection if out of bounds
+                    if !s.agents.is_empty() && s.selected_index >= s.agents.len() {
+                        s.selected_index = s.agents.len() - 1;
+                    }
+                }
+                Err(_) => {
+                    let mut s = state_clone.lock().expect("State lock poisoned");
+                    s.connected = false;
+                }
+            }
+
+            // 2. Fetch Logs if needed (logic: always fetch logs for selected agent for simplicity)
+            let selected_id = {
+                let s = state_clone.lock().expect("State lock poisoned");
+                if s.agents.is_empty() { None } else { Some(s.agents[s.selected_index].id.clone()) }
+            };
+
+            if let Some(id) = selected_id {
+                if let Ok(logs) = client_clone.get_logs(&id).await {
+                    let mut s = state_clone.lock().expect("State lock poisoned");
+                    s.logs_cache.insert(id, logs);
+                }
+            }
+
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    });
 
     // Setup terminal
     enable_raw_mode()?;
@@ -34,7 +113,10 @@ async fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     // Run app
-    let res = run_app(&mut terminal).await;
+    let res = run_app(&mut terminal, state, tx).await;
+
+    // Stop polling
+    running.store(false, Ordering::Relaxed);
 
     // Restore terminal
     disable_raw_mode()?;
@@ -52,7 +134,11 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
+async fn run_app<B: Backend>(
+    terminal: &mut Terminal<B>, 
+    state: Arc<Mutex<DashboardState>>,
+    tx: mpsc::Sender<AppCommand>
+) -> io::Result<()> {
     let mut tab_index = 0;
     let tabs = vec!["Overview", "Logs", "Controls"];
 
@@ -84,18 +170,20 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
             f.render_widget(tabs_widget, chunks[0]);
 
             // Content
-            let content = match tab_index {
-                0 => render_overview(),
-                1 => render_logs(),
-                2 => render_controls(),
-                _ => Paragraph::new("Unknown tab"),
+            let s = state.lock().expect("State lock poisoned");
+            
+            match tab_index {
+                0 => render_overview(f, chunks[1], &s),
+                1 => render_logs(f, chunks[1], &s),
+                2 => render_controls(f, chunks[1], &s),
+                _ => {},
             };
             
-            f.render_widget(content, chunks[1]);
         }).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
 
-        if crossterm::event::poll(Duration::from_millis(250))? {
+        if crossterm::event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
+                let mut s = state.lock().expect("State lock poisoned");
                 match key.code {
                     KeyCode::Char('q') => return Ok(()),
                     KeyCode::Right | KeyCode::Tab => {
@@ -108,6 +196,30 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
                             tab_index = tabs.len() - 1;
                         }
                     }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if !s.agents.is_empty() {
+                            s.selected_index = (s.selected_index + 1) % s.agents.len();
+                        }
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if !s.agents.is_empty() {
+                            if s.selected_index > 0 {
+                                s.selected_index -= 1;
+                            } else {
+                                s.selected_index = s.agents.len() - 1;
+                            }
+                        }
+                    }
+                    KeyCode::Char('K') | KeyCode::Char('x') => {
+                        // Kill/Stop agent
+                        if !s.agents.is_empty() {
+                            let id = s.agents[s.selected_index].id.clone();
+                            let tx = tx.clone();
+                            tokio::spawn(async move {
+                                let _ = tx.send(AppCommand::StopAgent(id)).await;
+                            });
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -115,39 +227,105 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> io::Result<()> {
     }
 }
 
-fn render_overview<'a>() -> Paragraph<'a> {
-    let text = vec![
-        Line::from(vec![
-            Span::raw("Status: "),
-            Span::styled("Idle", Style::default().fg(Color::Green)),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("Active Tool: "),
-            Span::styled("None", Style::default().fg(Color::DarkGray)),
-        ]),
-        Line::from(""),
-        Line::from("System Metrics:"),
-        Line::from("  CPU: 12%"),
-        Line::from("  Mem: 256MB"),
-    ];
-    Paragraph::new(text).block(Block::default().borders(Borders::ALL).title("Overview"))
+fn render_overview(f: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &DashboardState) {
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)].as_ref())
+        .split(area);
+
+    // Left: List of Agents
+    let items: Vec<ListItem> = state.agents
+        .iter()
+        .map(|agent| {
+            let style = if agent.status == "running" {
+                Style::default().fg(Color::Green)
+            } else {
+                Style::default().fg(Color::Red)
+            };
+            let content = Line::from(vec![
+                Span::styled(format!("● {}", agent.id), style),
+                Span::raw(format!(" [{}]", agent.status)),
+            ]);
+            ListItem::new(content)
+        })
+        .collect();
+
+    let mut list_state = ListState::default();
+    let selection = if state.agents.is_empty() { 
+        None 
+    } else { 
+        Some(state.selected_index.min(state.agents.len().saturating_sub(1))) 
+    };
+    list_state.select(selection);
+
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title("Agents"))
+        .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
+
+    f.render_stateful_widget(list, chunks[0], &mut list_state);
+
+    // Right: Details
+    if state.agents.is_empty() {
+        let text = Paragraph::new("No agents active.").block(Block::default().borders(Borders::ALL));
+        f.render_widget(text, chunks[1]);
+    } else if let Some(agent) = state.agents.get(state.selected_index) {
+        let text = vec![
+            Line::from(vec![Span::raw("ID: "), Span::styled(&agent.id, Style::default().fg(Color::Cyan))]),
+            Line::from(vec![Span::raw("Container: "), Span::raw(&agent.container_id)]),
+            Line::from(vec![Span::raw("Status: "), Span::raw(&agent.status)]),
+            Line::from(vec![Span::raw("Started: "), Span::raw(&agent.started_at)]),
+            Line::from(""),
+            Line::from(vec![Span::styled("Last Action:", Style::default().add_modifier(Modifier::BOLD))]),
+            Line::from(agent.last_action.clone().unwrap_or_default()),
+            Line::from(""),
+            Line::from(vec![Span::styled("Blocker:", Style::default().fg(Color::Red))]),
+            Line::from(agent.blocker.clone().unwrap_or_default()),
+        ];
+        
+        let details = Paragraph::new(text)
+            .block(Block::default().borders(Borders::ALL).title("Details"))
+            .wrap(Wrap { trim: true });
+        
+        f.render_widget(details, chunks[1]);
+    }
 }
 
-fn render_logs<'a>() -> Paragraph<'a> {
-    let text = vec![
-        Line::from("12:00:01 [INFO] Agent started"),
-        Line::from("12:00:02 [INFO] Connected to control server"),
-        Line::from("12:00:05 [WARN] Low memory warning (simulation)"),
-    ];
-    Paragraph::new(text).block(Block::default().borders(Borders::ALL).title("Recent Logs"))
+fn render_logs(f: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &DashboardState) {
+    if state.agents.is_empty() {
+        let text = Paragraph::new("No agents active.").block(Block::default().borders(Borders::ALL));
+        f.render_widget(text, area);
+        return;
+    }
+
+    let agent = match state.agents.get(state.selected_index) {
+        Some(a) => a,
+        None => return,
+    };
+    let logs = state.logs_cache.get(&agent.id).map(|s| s.as_str()).unwrap_or("Loading logs...");
+
+    let p = Paragraph::new(logs)
+        .block(Block::default().borders(Borders::ALL).title(format!("Logs: {}", agent.id)))
+        .wrap(Wrap { trim: false }); // Logs usually better unwrapped or scrolled, sticking to basic for now
+    
+    f.render_widget(p, area);
 }
 
-fn render_controls<'a>() -> Paragraph<'a> {
+fn render_controls(f: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &DashboardState) {
     let text = vec![
-        Line::from("[P] Pause Agent"),
-        Line::from("[R] Restart Session"),
-        Line::from("[C] Clear Context"),
+        Line::from("Available Actions:"),
+        Line::from(""),
+        Line::from(vec![Span::styled("[K] / [x]", Style::default().fg(Color::Red)), Span::raw(" Stop/Kill Selected Agent")]),
+        Line::from(""),
+        Line::from(vec![Span::styled("Status: ", Style::default().add_modifier(Modifier::BOLD))]),
+        Line::from(if state.connected { 
+            Span::styled("Connected to Control Server", Style::default().fg(Color::Green)) 
+        } else { 
+            Span::styled("Disconnected (Retrying...)", Style::default().fg(Color::Red)) 
+        }),
     ];
-    Paragraph::new(text).block(Block::default().borders(Borders::ALL).title("Actions"))
+    
+    let p = Paragraph::new(text)
+        .block(Block::default().borders(Borders::ALL).title("Controls"));
+    
+    f.render_widget(p, area);
 }
