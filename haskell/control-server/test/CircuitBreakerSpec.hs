@@ -190,6 +190,5 @@ spec = testGroup "Circuit Breaker Tests"
             Just _ -> assertFailure "Session should be reset"
       ]
     ]
-    ]
   ]
       
