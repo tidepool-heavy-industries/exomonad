@@ -51,9 +51,9 @@ RUN npm install -g @google/gemini-cli
 # Initialize non-root user 'agent' home configuration
 # User 'agent' already exists (renamed from 'user'); the following ensures its
 # Claude configuration directory and files have the correct ownership.
-RUN mkdir -p /home/agent/.claude && \
+RUN mkdir -p /home/agent/.claude /home/agent/.cache && \
     echo '{"hasCompletedOnboarding":true}' > /home/agent/.claude.json && \
-    chown -R agent:agent /home/agent/.claude /home/agent/.claude.json
+    chown -R agent:agent /home/agent/.claude /home/agent/.claude.json /home/agent/.cache
 
 # Set up toolchain installation for agent user
 USER agent

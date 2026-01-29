@@ -1,7 +1,7 @@
 use crate::{ExternalService, ServiceError};
 use async_trait::async_trait;
 use exomonad_shared::{GitHubIssueRef, IssueState, ServiceRequest, ServiceResponse};
-use exomonad_shared::protocol::{GitHubPRRef, GitHubReviewComment, GitHubDiscussionComment};
+use exomonad_shared::protocol::{GitHubPRRef, GitHubReviewComment, GitHubDiscussionComment, GitHubAuthorRef, GitHubLabelRef};
 use octocrab::{Octocrab, OctocrabBuilder};
 use reqwest::Url;
 
@@ -138,6 +138,14 @@ fn state_to_string(state: octocrab::models::IssueState) -> String {
     }
 }
 
+fn issue_state_to_upper_string(state: octocrab::models::IssueState) -> String {
+    match state {
+        octocrab::models::IssueState::Open => "OPEN".to_string(),
+        octocrab::models::IssueState::Closed => "CLOSED".to_string(),
+        _ => "UNKNOWN".to_string(),
+    }
+}
+
 #[async_trait]
 impl ExternalService for GitHubService {
     type Request = ServiceRequest;
@@ -266,7 +274,15 @@ impl ExternalService for GitHubService {
                     .map(|i| GitHubIssueRef {
                         number: i.number as u32,
                         title: i.title,
-                        state: state_to_string(i.state),
+                        body: i.body.unwrap_or_default(),
+                        state: issue_state_to_upper_string(i.state),
+                        url: i.html_url.to_string(),
+                        author: GitHubAuthorRef {
+                            login: i.user.login,
+                            name: None,
+                        },
+                        labels: i.labels.into_iter().map(|l| GitHubLabelRef { name: l.name }).collect(),
+                        comments: vec![],
                     })
                     .collect();
 

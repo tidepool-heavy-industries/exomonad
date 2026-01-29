@@ -49,9 +49,19 @@ RUN arch=$(dpkg --print-architecture) && \
     esac && \
     curl -L "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.10.19/cargo-binstall-$binstall_arch.tgz" | tar xz -C /usr/local/bin && \
     chmod +x /usr/local/bin/cargo-binstall && \
-    cargo-binstall --no-confirm ripgrep fd-find bat just delta yq && \
-    mv /root/.cargo/bin/{rg,fd,bat,just,delta,yq} /usr/local/bin/ && \
+    cargo-binstall --no-confirm ripgrep fd-find bat just git-delta ast-grep && \
+    mv /root/.cargo/bin/* /usr/local/bin/ && \
     rm -rf /root/.cargo
+
+# Install yq (Go binary, not Rust)
+RUN arch=$(dpkg --print-architecture) && \
+    case "$arch" in \
+        "amd64") yq_arch="amd64" ;; \
+        "arm64") yq_arch="arm64" ;; \
+        *) echo "Unsupported architecture: $arch" && exit 1 ;; \
+    esac && \
+    curl -L "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${yq_arch}" -o /usr/local/bin/yq && \
+    chmod +x /usr/local/bin/yq
 
 # Install Zellij (static binary for speed)
 RUN arch=$(dpkg --print-architecture) && \
