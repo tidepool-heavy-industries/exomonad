@@ -51,7 +51,8 @@ runLogAsYield = interpret handleLog
     handleLog :: Member (Yield SerializableEffect EffectResult) effs
               => Log x -> Eff effs x
     handleLog (LogMsg level msg maybeFields) = case level of
-      -- Debug logs are dropped in WASM (too noisy for production)
+      -- Trace and Debug logs are dropped in WASM (too noisy for production)
+      Trace -> pure ()
       Debug -> pure ()
 
       -- Info and Warn both go to EffLogInfo
@@ -63,4 +64,10 @@ runLogAsYield = interpret handleLog
       Warn -> do
         let fields = fmap Map.fromList maybeFields
         _ <- yield (EffLogInfo msg fields) (id @EffectResult)
+        pure ()
+
+      -- Error goes to EffLogError
+      Error -> do
+        let fields = fmap Map.fromList maybeFields
+        _ <- yield (EffLogError msg fields) (id @EffectResult)
         pure ()

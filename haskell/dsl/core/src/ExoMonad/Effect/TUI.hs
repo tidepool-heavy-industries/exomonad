@@ -64,11 +64,9 @@ import Control.Applicative ((<|>))
 import Control.Monad.Freer (Eff, Member, send)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Aeson (Value, ToJSON(..), FromJSON(..), object, (.=), (.:), (.:?), withObject, (.!=))
-import Data.Aeson.Types (Parser)
+import Data.Aeson (Value, ToJSON(..), FromJSON(..), object, (.=), (.:), (.:?), withObject)
 import qualified Data.Aeson as A
 import qualified Data.Aeson.KeyMap as KM
-import qualified Data.HashMap.Strict as HM
 import GHC.Generics (Generic)
 
 -- ══════════════════════════════════════════════════════════════
@@ -347,14 +345,15 @@ instance FromJSON VisibilityRule where
       parseChecked (A.String s) = pure $ Checked s
       parseChecked _ = fail "Not a Checked rule"
 
-      parseEquals val@(A.Object o)
-        | KM.size o > 0 && all isString (KM.elems o) =
-            pure $ Equals $ KM.map (\(A.String s) -> s) o
+      parseEquals (A.Object o)
+        | KM.size o > 0 = case traverse asString o of
+            Just strMap -> pure $ Equals strMap
+            Nothing -> fail "Not an Equals rule: values must be strings"
         | otherwise = fail "Not an Equals rule"
       parseEquals _ = fail "Not an Equals rule"
 
-      isString (A.String _) = True
-      isString _ = False
+      asString (A.String s) = Just s
+      asString _ = Nothing
 
       parseComparison = withObject "VisibilityRule" $ \o -> do
         -- Disambiguate by checking which fields exist (now uses unique field names)
