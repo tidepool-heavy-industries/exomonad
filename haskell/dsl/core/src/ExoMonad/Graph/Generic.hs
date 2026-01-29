@@ -50,6 +50,7 @@ module ExoMonad.Graph.Generic
     -- * Re-exports
   , type (:@)
   , Tool
+  , Hook
   , Description
 
     -- * Modes
@@ -110,6 +111,7 @@ module ExoMonad.Graph.Generic
   , GeminiLLMHandler(..)
   , ChooseLLMHandler
   , ToolHandler(..)
+  , HookHandler(..)
 
     -- * Record Validation
   , HasEntryField
@@ -138,8 +140,8 @@ import ExoMonad.Graph.Errors
 import ExoMonad.Graph.Validate (FormatSymbolList)
 import Control.Monad.Freer (Eff, Member)
 
-import ExoMonad.Graph.Types (type (:@), Input, Schema, Template, Vision, Description, Tools, Memory, System, UsesEffects, ClaudeCode, ModelChoice, Gemini, Spawn, Barrier, Awaits, HList(..), MCPExport, MCPToolDef, MCPRoleHint, Tool)
-import ExoMonad.Effect.Gemini (SingGeminiModel(..))
+import ExoMonad.Graph.Types (type (:@), Input, Schema, Template, Vision, Description, Tools, Memory, System, UsesEffects, ClaudeCode, ModelChoice, Gemini, Spawn, Barrier, Awaits, HList(..), MCPExport, MCPToolDef, MCPRoleHint, Tool, Hook)
+import ExoMonad.Effect.Gemini (GeminiOp, SingGeminiModel(..))
 import ExoMonad.Graph.Template (TemplateContext)
 import ExoMonad.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets, GetClaudeCode, GetGeminiModel, GetSpawnTargets, GetAwaits)
 import ExoMonad.Graph.Goto (Goto, goto, GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..), GeminiLLMHandler(..))
@@ -236,7 +238,11 @@ type family NodeHandler nodeDef es where
 
   -- Tool handler: simple function from input to output.
   NodeHandler (Tool input output) es =
-    input -> Eff es output
+    ToolHandler es input output
+
+  -- Hook handler: same as Tool.
+  NodeHandler (Hook input output) es =
+    HookHandler es input output
 
   -- Accumulator: (nodeDef, origNode, es, mInput, mTpl, mSchema, mEffs)
   NodeHandler (node :@ ann) es = NodeHandlerDispatch (node :@ ann) (node :@ ann) es 'Nothing 'Nothing 'Nothing 'Nothing
@@ -547,6 +553,9 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
 
   NodeHandlerDispatch (Tool input output) _ es _ _ _ _ =
     ToolHandler es input output
+
+  NodeHandlerDispatch (Hook input output) _ es _ _ _ _ =
+    HookHandler es input output
 
   -- ══════════════════════════════════════════════════════════════════════════
   -- LLMNode Base Cases
@@ -1554,6 +1563,11 @@ instance GraphProduct (K1 i c) where
 -- | Wrapper for Tool handlers to enable Generic dispatch.
 newtype ToolHandler es input output = ToolHandler 
   { runToolHandler :: input -> Eff es output 
+  }
+
+-- | Wrapper for Hook handlers to enable Generic dispatch.
+newtype HookHandler es input output = HookHandler 
+  { runHookHandler :: input -> Eff es output 
   }
 
 -- ════════════════════════════════════════════════════════════════════════════

@@ -46,10 +46,8 @@
 --   }
 -- @
 module ExoMonad.Control.Role.Types
-  ( -- * Hooks
-    Hooks(..)
-  , emptyHooks
-  , SessionStartInput(..)
+  ( -- * Hook Inputs/Outputs
+    SessionStartInput(..)
   , SessionStartResponse(..)
   , PreToolUseInput(..)
   , PreToolUseResponse(..)
@@ -58,6 +56,7 @@ module ExoMonad.Control.Role.Types
   , StopResponse(..)
   , StopReason(..)
   , Notification(..)
+  , SessionEndInput(..)
 
     -- * Role Metadata
   , RoleMetadata(..)
@@ -70,36 +69,8 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
--- HOOKS
+-- HOOK INPUTS/OUTPUTS
 -- ════════════════════════════════════════════════════════════════════════════
-
--- | Lifecycle hooks for a role.
---
--- Each hook is optional (Maybe). The runtime invokes these at the appropriate
--- lifecycle points. Circuit breaker logic for 'stop' is handled by the runtime,
--- not the hook itself.
-data Hooks es = Hooks
-  { hooksSessionStart :: Maybe (SessionStartInput -> Eff es SessionStartResponse)
-    -- ^ Called when a Claude session starts
-  , hooksPreToolUse   :: Maybe (PreToolUseInput -> Eff es PreToolUseResponse)
-    -- ^ Called before each tool invocation
-  , hooksPostToolUse  :: Maybe (PostToolUseInput -> Eff es ())
-    -- ^ Called after each tool invocation
-  , hooksStop         :: Maybe (StopInput -> Eff es StopResponse)
-    -- ^ Called when Claude wants to stop (runtime wraps with circuit breaker)
-  , hooksNotification :: Maybe (Notification -> Eff es ())
-    -- ^ Called for various notifications
-  }
-
--- | Empty hooks (all Nothing).
-emptyHooks :: Hooks es
-emptyHooks = Hooks
-  { hooksSessionStart = Nothing
-  , hooksPreToolUse = Nothing
-  , hooksPostToolUse = Nothing
-  , hooksStop = Nothing
-  , hooksNotification = Nothing
-  }
 
 -- | Input for session start hook.
 data SessionStartInput = SessionStartInput
@@ -202,6 +173,18 @@ data Notification
 
 instance FromJSON Notification
 instance ToJSON Notification
+
+-- | Input for session end hook.
+data SessionEndInput = SessionEndInput
+  { seiSessionId :: Text
+  , seiTranscriptPath :: Text
+  , seiRole :: Text
+  , seiCwd :: FilePath
+  }
+  deriving (Show, Eq, Generic)
+
+instance FromJSON SessionEndInput
+instance ToJSON SessionEndInput
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ROLE METADATA

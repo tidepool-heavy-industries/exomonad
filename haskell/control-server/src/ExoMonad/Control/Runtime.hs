@@ -29,6 +29,9 @@ import ExoMonad.Effect.TUI (TUI)
 import ExoMonad.Effects.Justfile (Justfile)
 import ExoMonad.Control.Effects.Justfile (runJustfileRemote)
 import ExoMonad.Control.Effects.SshExec (SshExec, runSshExec)
+import Control.Monad.Freer.Reader (Reader, runReader)
+import ExoMonad.Control.Effects.Effector (Effector, runEffectorIO)
+import ExoMonad.Control.Effects.Cabal (Cabal, runCabalRemote)
 
 -- Interpreters
 import ExoMonad.Control.Logging (Logger)
@@ -54,22 +57,27 @@ type AppEffects =
   '[ GeminiOp
    , DockerSpawner
    , Justfile
-   , SshExec
-   , Zellij
+   , Cabal
+   , Effector
    , Worktree
    , Git
+   , SshExec
+   , Zellij
    , GitHub
    , FileSystem
    , Env
    , TUI
+   , Reader ServerConfig
+   , Reader Tracer
+   , Reader CircuitBreakerMap
    , Time
    , Log
    , IO
    ]
 
 -- | Run the application effect stack.
-runApp :: ServerConfig -> Tracer -> Logger -> Eff AppEffects a -> IO a
-runApp config tracer logger action = do
+runApp :: ServerConfig -> Tracer -> CircuitBreakerMap -> Logger -> Eff AppEffects a -> IO a
+runApp config tracer cbMap logger action = do
   -- Resolve paths
   binDir <- Paths.dockerBinDir
   let dockerCtlPath = Paths.dockerCtlBin binDir
@@ -86,16 +94,23 @@ runApp config tracer logger action = do
   runM
     $ runLog Debug
     $ runTime
+    $ runReader cbMap
+    $ runReader tracer
+    $ runReader config
     $ runTUIFifo logger
     $ runEnvIO
     $ runFileSystemIO
     $ runGitHubIO ghConfig
     $ withRetry retryCfg
-    $ runGitIO
-    $ runWorktreeIO (defaultWorktreeConfig repoRoot)
     $ runZellijIO
     $ runSshExec logger dockerCtlPath
-    -- Using empty container/workdir for Justfile interpreter since we are running locally in this context
+    $ runGitIO -- Will use SshExec if GitRemote is used in other contexts? 
+               -- Wait, runGitIO uses IO. runGitRemote uses SshExec.
+               -- In runApp, we use runGitIO (local).
+               -- But order matters for the list type equality.
+    $ runWorktreeIO (defaultWorktreeConfig repoRoot)
+    $ runEffectorIO logger
+    $ runCabalRemote Nothing
     $ runJustfileRemote "" "" 
     $ runDockerCtl logger dockerCtlPath
     $ runGeminiIO

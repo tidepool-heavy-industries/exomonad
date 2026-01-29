@@ -91,6 +91,9 @@ module ExoMonad.Graph.Types
   , Exit
   , Self
 
+    -- * Hook Types
+  , Hook
+
     -- * Heterogeneous Lists
   , HList(..)
   ) where
@@ -1263,6 +1266,23 @@ data Exit
 -- Goto Self UpdatedState
 -- @
 data Self
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- HOOK TYPES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Hook marker for lifecycle events.
+--
+-- Analogous to 'Tool', but for internal orchestration events rather than
+-- LLM-invocable tools.
+--
+-- @
+-- data CommonHooks mode = CommonHooks
+--   { sessionStart :: mode :- Hook SessionStartInput SessionStartResponse
+--   }
+-- @
+type Hook :: Type -> Type -> Type
+data Hook input output
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HETEROGENEOUS LISTS

@@ -84,6 +84,10 @@ library
         -- Role DSL Registry
         ExoMonad.Control.Role.Registry
         ExoMonad.Control.Role.Handlers
+        -- Role DSL Hooks
+        ExoMonad.Control.Role.Hook.Definitions
+        ExoMonad.Control.Role.Hook.Dispatch
+        ExoMonad.Control.Role.Hook.Wiring
         ExoMonad.Control.Runtime
         ExoMonad.Control.GHTools
         ExoMonad.Control.GHTools.Types
@@ -295,23 +299,22 @@ test-suite role-config-test
     default-extensions:
         OverloadedStrings
 
-test-suite protocol-golden-test
+test-suite role-hook-test
     import:           warnings
     type:             exitcode-stdio-1.0
-    main-is:          ProtocolGoldenSpec.hs
+    main-is:          RoleHookSpec.hs
     build-depends:
         base >= 4.17 && < 5,
         exomonad-control-server,
-        text >= 2.0 && < 3,
+        exomonad-core,
         aeson,
-        bytestring,
-        filepath,
+        text,
+        freer-simple,
         tasty,
         tasty-hunit
     hs-source-dirs:   test
     default-language: GHC2024
     default-extensions:
         OverloadedStrings
-        TypeApplications
 
 

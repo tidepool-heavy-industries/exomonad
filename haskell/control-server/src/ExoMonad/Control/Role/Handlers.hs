@@ -14,10 +14,14 @@ module ExoMonad.Control.Role.Handlers
   , pmHandlers
   ) where
 
-import Control.Monad.Freer (Member)
+import Control.Monad.Freer (Member, LastMember)
+import Control.Monad.Freer.Reader (Reader)
+import OpenTelemetry.Trace (Tracer)
 
-import ExoMonad.Control.Role.Types (emptyHooks)
+import ExoMonad.Control.Role.Hook.Wiring (commonHooks)
+import ExoMonad.Control.Role.Hook.Definitions (TLHooks(..), DevHooks(..), PMHooks(..))
 import ExoMonad.Graph.Generic (AsHandler)
+import ExoMonad.Control.Types (ServerConfig)
 
 -- Role Definitions
 import ExoMonad.Control.Role.Definition.TL (TLRole(..), tlMetadata)
@@ -28,6 +32,8 @@ import ExoMonad.Control.Role.Definition.PM (PMRole(..), pmMetadata)
 import ExoMonad.Control.Role.Tool.Wiring (tlTools, devTools, pmTools)
 
 -- Effect Imports (Constraints)
+import ExoMonad.Control.Effects.Effector (Effector)
+import ExoMonad.Control.Effects.Cabal (Cabal)
 import ExoMonad.Effects.Env (Env)
 import ExoMonad.Effects.GitHub (GitHub)
 import ExoMonad.Effects.DockerSpawner (DockerSpawner)
@@ -51,22 +57,31 @@ tlHandlers ::
   , Member GeminiOp es, Member Log es
   , Member TUI es
   , Member GitHub es
-  ) => TLRole (AsHandler es) es
+  , Member Cabal es, Member Effector es
+  , Member (Reader ServerConfig) es
+  , Member (Reader Tracer) es
+  , LastMember IO es
+  ) => TLRole (AsHandler es)
 tlHandlers = TLRole
   { tlToolsRecord = tlTools
   , tlMetadata    = tlMetadata
-  , tlHooks       = emptyHooks
+  , tlHooks       = TLHooks { common = commonHooks }
   }
 
 -- | Developer role handlers.
 devHandlers :: 
   ( Member Env es, Member Git es, Member Log es
   , Member TUI es, Member GitHub es
-  ) => DevRole (AsHandler es) es
+  , Member Cabal es, Member Effector es
+  , Member (Reader ServerConfig) es
+  , Member (Reader Tracer) es
+  , Member Zellij es
+  , LastMember IO es
+  ) => DevRole (AsHandler es)
 devHandlers = DevRole
   { devToolsRecord = devTools
   , devMetadata    = devMetadata
-  , devHooks       = emptyHooks
+  , devHooks       = DevHooks { common = commonHooks }
   }
 
 -- | Project Manager role handlers.
@@ -74,9 +89,15 @@ pmHandlers ::
   ( Member Env es, Member Log es
   , Member TUI es, Member GitHub es
   , Member Time es
-  ) => PMRole (AsHandler es) es
+  , Member Cabal es, Member Effector es
+  , Member (Reader ServerConfig) es
+  , Member (Reader Tracer) es
+  , Member Git es
+  , Member Zellij es
+  , LastMember IO es
+  ) => PMRole (AsHandler es)
 pmHandlers = PMRole
   { pmToolsRecord = pmTools
   , pmMetadata    = pmMetadata
-  , pmHooks       = emptyHooks
+  , pmHooks       = PMHooks { common = commonHooks }
   }

@@ -23,10 +23,11 @@ module ExoMonad.Control.Role.Schema
   , camelToSnake
     -- * Construction
   , toolSchema
+  , hookSchema
   , ConstructSchema(..)
   ) where
 
-import Data.Aeson (Value)
+import Data.Aeson (Value(..))
 import Data.Kind (Type)
 import Data.Proxy (Proxy(..))
 import Data.Text (Text)
@@ -37,7 +38,7 @@ import Data.Char (isUpper, toLower)
 import Data.Maybe (fromMaybe)
 
 import ExoMonad.Graph.Generic (GraphMode(..), type (:-), type (:@))
-import ExoMonad.Graph.Types (Tool, Description)
+import ExoMonad.Graph.Types (Tool, Hook, Description)
 import ExoMonad.Graph.MCPReify (MCPToolInfo(..))
 import ExoMonad.Schema (HasJSONSchema(..), schemaToValue, jsonSchema)
 
@@ -136,6 +137,12 @@ instance (HasJSONSchema input) => ConstructSchema (Tool input output) where
     , sbInputSchema = schemaToValue (jsonSchema @input)
     }
 
+instance ConstructSchema (Hook input output) where
+  constructSchema = SchemaNode $ SchemaBuilder
+    { sbDescription = Nothing
+    , sbInputSchema = Null
+    }
+
 instance (KnownSymbol desc, ConstructSchema node) => ConstructSchema (node :@ Description desc) where
   constructSchema = 
     let SchemaNode base = constructSchema @node
@@ -147,4 +154,8 @@ instance (KnownSymbol desc, ConstructSchema node) => ConstructSchema (node :@ De
 -- myTool = toolSchema
 toolSchema :: forall nodeDef. ConstructSchema nodeDef => SchemaNode nodeDef
 toolSchema = constructSchema @nodeDef
+
+-- | Value-level helper to construct hook fields.
+hookSchema :: forall nodeDef. ConstructSchema nodeDef => SchemaNode nodeDef
+hookSchema = constructSchema @nodeDef
 

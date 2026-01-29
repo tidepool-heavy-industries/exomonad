@@ -19,14 +19,15 @@ module ExoMonad.Control.Role.Definition.PM
 import Data.Kind (Type)
 import GHC.Generics (Generic)
 
-import ExoMonad.Control.Role.Types (Hooks, RoleMetadata(..))
+import ExoMonad.Control.Role.Types (RoleMetadata(..))
 import ExoMonad.Control.Role.Tool.Definitions (PMTools)
+import ExoMonad.Control.Role.Hook.Definitions (PMHooks)
 
 -- | Project Manager role record.
-data PMRole mode (es :: [Type -> Type]) = PMRole
+data PMRole mode = PMRole
   { pmToolsRecord :: PMTools mode
   , pmMetadata    :: RoleMetadata
-  , pmHooks       :: Hooks es
+  , pmHooks       :: PMHooks mode
   }
   deriving Generic
 
