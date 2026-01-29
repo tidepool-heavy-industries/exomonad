@@ -63,7 +63,8 @@ module ExoMonad.Control.Role.Types
   ) where
 
 import Control.Monad.Freer (Eff)
-import Data.Aeson (Value, FromJSON, ToJSON)
+import Data.Aeson (Value, FromJSON(..), ToJSON(..), genericParseJSON, genericToJSON, defaultOptions, fieldLabelModifier)
+import Data.Aeson.Casing (aesonDrop, snakeCase)
 import Data.Kind (Type)
 import Data.Text (Text)
 import GHC.Generics (Generic)
@@ -72,16 +73,23 @@ import GHC.Generics (Generic)
 -- HOOK INPUTS/OUTPUTS
 -- ════════════════════════════════════════════════════════════════════════════
 
+-- | Helper for JSON options: strip prefix and snake_case.
+jsonOpts :: Int -> Data.Aeson.Options
+jsonOpts prefixLen = defaultOptions
+  { fieldLabelModifier = snakeCase . drop prefixLen
+  }
+
 -- | Input for session start hook.
 data SessionStartInput = SessionStartInput
   { ssiSessionId :: Text
   , ssiCwd :: FilePath
-  , ssiEnv :: [(Text, Text)]
   }
   deriving (Show, Eq, Generic)
 
-instance FromJSON SessionStartInput
-instance ToJSON SessionStartInput
+instance FromJSON SessionStartInput where
+  parseJSON = genericParseJSON (jsonOpts 3) -- ssi
+instance ToJSON SessionStartInput where
+  toJSON = genericToJSON (jsonOpts 3)
 
 -- | Response from session start hook.
 data SessionStartResponse = SessionStartResponse
@@ -92,19 +100,23 @@ data SessionStartResponse = SessionStartResponse
   }
   deriving (Show, Eq, Generic)
 
-instance FromJSON SessionStartResponse
-instance ToJSON SessionStartResponse
+instance FromJSON SessionStartResponse where
+  parseJSON = genericParseJSON (jsonOpts 3) -- ssr
+instance ToJSON SessionStartResponse where
+  toJSON = genericToJSON (jsonOpts 3)
 
 -- | Input for pre-tool-use hook.
 data PreToolUseInput = PreToolUseInput
   { ptuToolName :: Text
-  , ptuToolArgs :: Value
+  , ptuToolInput :: Value -- HookInput uses "tool_input"
   , ptuSessionId :: Text
   }
   deriving (Show, Eq, Generic)
 
-instance FromJSON PreToolUseInput
-instance ToJSON PreToolUseInput
+instance FromJSON PreToolUseInput where
+  parseJSON = genericParseJSON (jsonOpts 3) -- ptu
+instance ToJSON PreToolUseInput where
+  toJSON = genericToJSON (jsonOpts 3)
 
 -- | Response from pre-tool-use hook.
 data PreToolUseResponse
@@ -122,26 +134,55 @@ instance ToJSON PreToolUseResponse
 -- | Input for post-tool-use hook.
 data PostToolUseInput = PostToolUseInput
   { postuToolName :: Text
-  , postuToolArgs :: Value
-  , postuToolResult :: Value
+  , postuToolInput :: Value -- HookInput uses "tool_input"
+  , postuToolResult :: Value -- HookInput uses "tool_response" (mapped manually?)
+                             -- Wait, HookInput has "tool_response".
+                             -- "postuToolResult" -> "tool_result"?
+                             -- I need to check Protocol.hs HookInput ToJSON.
   , postuSessionId :: Text
   }
   deriving (Show, Eq, Generic)
 
-instance FromJSON PostToolUseInput
-instance ToJSON PostToolUseInput
+-- HookInput fields: tool_name, tool_input, tool_response, session_id.
+-- PostToolUseInput: postuToolName -> tool_name (OK)
+--                   postuToolInput -> tool_input (OK)
+--                   postuToolResult -> tool_result (Mismatch? HookInput has tool_response)
+--                   postuSessionId -> session_id (OK)
+
+-- I'll define custom instance for PostToolUseInput to match HookInput.
+instance FromJSON PostToolUseInput where
+  parseJSON = genericParseJSON (defaultOptions { fieldLabelModifier = \f -> case f of
+    "postuToolName" -> "tool_name"
+    "postuToolInput" -> "tool_input"
+    "postuToolResult" -> "tool_response"
+    "postuSessionId" -> "session_id"
+    s -> s
+  })
+instance ToJSON PostToolUseInput where
+  toJSON = genericToJSON (defaultOptions { fieldLabelModifier = \f -> case f of
+    "postuToolName" -> "tool_name"
+    "postuToolInput" -> "tool_input"
+    "postuToolResult" -> "tool_response"
+    "postuSessionId" -> "session_id"
+    s -> s
+  })
 
 -- | Input for stop hook.
 data StopInput = StopInput
-  { siReason :: StopReason
+  { siReason :: Maybe Text -- HookInput has "reason" which is Maybe Text (raw string)
+                           -- StopReason enum is parsed from this text?
+                           -- Or should StopInput just hold the Text?
+                           -- Wiring.hs logic uses it.
   , siSessionId :: Text
   }
   deriving (Show, Eq, Generic)
 
-instance FromJSON StopInput
-instance ToJSON StopInput
+instance FromJSON StopInput where
+  parseJSON = genericParseJSON (jsonOpts 2) -- si
+instance ToJSON StopInput where
+  toJSON = genericToJSON (jsonOpts 2)
 
--- | Why the session is stopping.
+-- | Why the session is stopping. (Used in logic, not direct input anymore?)
 data StopReason
   = StopUserRequest
   | StopTaskComplete
@@ -161,8 +202,10 @@ data StopResponse = StopResponse
   }
   deriving (Show, Eq, Generic)
 
-instance FromJSON StopResponse
-instance ToJSON StopResponse
+instance FromJSON StopResponse where
+  parseJSON = genericParseJSON (jsonOpts 2) -- sr
+instance ToJSON StopResponse where
+  toJSON = genericToJSON (jsonOpts 2)
 
 -- | Notification types for notification hook.
 data Notification
@@ -178,13 +221,37 @@ instance ToJSON Notification
 data SessionEndInput = SessionEndInput
   { seiSessionId :: Text
   , seiTranscriptPath :: Text
-  , seiRole :: Text
+  , seiRole :: Text -- HookInput doesn't have role field directly? It has permission_mode?
+                    -- Protocol.hs HookInput does NOT have "role".
+                    -- ControlMessage has role.
+                    -- But generic dispatch takes `inputJson` which is `toJSON HookInput`.
+                    -- So SessionEndInput cannot have `seiRole` if HookInput doesn't.
   , seiCwd :: FilePath
   }
   deriving (Show, Eq, Generic)
 
-instance FromJSON SessionEndInput
-instance ToJSON SessionEndInput
+-- HookInput has: session_id, transcript_path, cwd.
+-- It does not have role.
+-- So I must remove seiRole from SessionEndInput.
+
+instance FromJSON SessionEndInput where
+  parseJSON = genericParseJSON (jsonOpts 3) -- sei
+instance ToJSON SessionEndInput where
+  toJSON = genericToJSON (jsonOpts 3)
+
+-- | Input for subagent stop hook.
+data SubagentStopInput = SubagentStopInput
+  { sasiSessionId :: Text
+  , sasiTranscriptPath :: Text
+  , sasiCwd :: FilePath
+  }
+  deriving (Show, Eq, Generic)
+
+instance FromJSON SubagentStopInput where
+  parseJSON = genericParseJSON (jsonOpts 4) -- sasi
+instance ToJSON SubagentStopInput where
+  toJSON = genericToJSON (jsonOpts 4)
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ROLE METADATA
