@@ -1,3 +1,5 @@
+use crate::plugin_manager::PluginManager;
+use crate::services::Services;
 use axum::{
     extract::{Path, State},
     routing::{get, post},
@@ -5,8 +7,6 @@ use axum::{
 };
 use serde_json::Value;
 use std::sync::Arc;
-use crate::plugin_manager::PluginManager;
-use crate::services::Services;
 use tracing::info;
 
 #[derive(Clone)]
@@ -28,7 +28,9 @@ pub async fn start_server(port: u16, plugin_manager: PluginManager, services: Ar
         .route("/reload", post(reload))
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
+        .await
+        .unwrap();
     info!("Server listening on {}", listener.local_addr().unwrap());
     axum::serve(listener, app).await.unwrap();
 }
@@ -45,11 +47,13 @@ async fn mcp_call(
     info!("MCP call for role: {}", role);
     // Assuming the plugin has a function "handle_mcp_call"
     // We might wrap payload in { role: ..., args: ... }
-    
+
     // For now pass payload directly
-    let result: Value = state.plugin_manager.call("handle_mcp_call", &payload).await.unwrap_or_else(|e| {
-        serde_json::json!({ "error": e.to_string() })
-    });
+    let result: Value = state
+        .plugin_manager
+        .call("handle_mcp_call", &payload)
+        .await
+        .unwrap_or_else(|e| serde_json::json!({ "error": e.to_string() }));
     Json(result)
 }
 
@@ -60,9 +64,11 @@ async fn hook_call(
 ) -> Json<Value> {
     info!("Hook call: {}", event);
     // Assuming plugin function "handle_hook"
-    let result: Value = state.plugin_manager.call("handle_hook", &payload).await.unwrap_or_else(|e| {
-        serde_json::json!({ "error": e.to_string() })
-    });
+    let result: Value = state
+        .plugin_manager
+        .call("handle_hook", &payload)
+        .await
+        .unwrap_or_else(|e| serde_json::json!({ "error": e.to_string() }));
     Json(result)
 }
 
@@ -73,3 +79,4 @@ async fn reload(State(state): State<AppState>) -> Json<Value> {
         Err(e) => Json(serde_json::json!({ "error": e.to_string() })),
     }
 }
+

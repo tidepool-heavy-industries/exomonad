@@ -1,5 +1,5 @@
 use clap::Parser;
-use exomonad_runtime::{PluginManager, Services, start_server};
+use exomonad_runtime::{start_server, PluginManager, Services};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
