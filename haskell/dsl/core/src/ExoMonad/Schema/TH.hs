@@ -173,7 +173,12 @@ deriveForRecord opts typeName conName fields mappings = do
       _ -> do
         let (jsonKey, desc) = resolveMapping opts fname mapping
             isOptional = isMaybeType ftype
-        schemaExp <- deriveFieldSchema ftype desc
+            -- Auto-append "(optional)" to Maybe field descriptions
+            desc' = case (isOptional, desc) of
+              (True, Just d) -> Just (d ++ " (optional)")
+              (True, Nothing) -> Just "(optional)"
+              (False, d) -> d
+        schemaExp <- deriveFieldSchema ftype desc'
         pure $ Just (fname, ftype, jsonKey, schemaExp, isOptional)
 
   let validFields = catMaybes fieldData
@@ -424,12 +429,17 @@ genEnumInstances :: Name -> [Name] -> Q [Dec]
 genEnumInstances typeName conNames = do
   let -- Convert constructor names to lowercase strings
       conStrings = [(n, map toLower (nameBase n)) | n <- conNames]
+      -- Auto-generate description: "One of: value1, value2, ..."
+      validValues = map snd conStrings
+      autoDesc = "One of: " ++ intercalate ", " validValues
 
-  -- Generate HasJSONSchema instance
+  -- Generate HasJSONSchema instance with auto-description
   hasJsonSchemaDec <-
     [d|
       instance HasJSONSchema $(conT typeName) where
-        jsonSchema = enumSchema $(listE [litE (stringL s) | (_, s) <- conStrings])
+        jsonSchema =
+          describeField (T.pack $(litE (stringL autoDesc))) $
+            enumSchema $(listE [litE (stringL s) | (_, s) <- conStrings])
       |]
 
   -- Generate FromJSON instance
