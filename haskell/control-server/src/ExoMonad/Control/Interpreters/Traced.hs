@@ -6,8 +6,7 @@
 {-# LANGUAGE TypeOperators #-}
 
 module ExoMonad.Control.Interpreters.Traced
-  ( traceCabal,
-    traceGit,
+  ( traceGit,
     traceLSP,
   )
 where
@@ -17,7 +16,6 @@ import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Effect.LSP (LSP (..), Position (..), TextDocumentIdentifier (..))
-import ExoMonad.Effects.Cabal (Cabal (..), CabalResult (..))
 import ExoMonad.Effects.Git (Git (..), WorktreeInfo (..))
 import OpenTelemetry.Context.ThreadLocal (getContext)
 import OpenTelemetry.Trace
@@ -39,61 +37,6 @@ withSpan tracer name action = do
   result <- action traceSpan
   sendM $ endSpan traceSpan Nothing
   pure result
-
--- | Trace Cabal effects
-traceCabal ::
-  (Member Cabal effs, LastMember IO effs) =>
-  Tracer ->
-  Eff effs a ->
-  Eff effs a
-traceCabal tracer = interpose $ \case
-  CabalBuild path -> withSpan tracer "cabal.build" $ \traceSpan -> do
-    sendM $ addAttribute traceSpan "cabal.path" (T.pack path)
-    res <- send (CabalBuild path)
-    case res of
-      CabalSuccess ->
-        sendM $ addAttribute traceSpan "cabal.status" ("success" :: Text)
-      CabalBuildFailure code stderr _ ->
-        do
-          sendM $
-            addAttribute traceSpan "cabal.status" ("build_failure" :: Text)
-          sendM $
-            addAttribute traceSpan "cabal.exit_code" (fromIntegral code :: Int)
-          sendM $ addAttribute traceSpan "error.message" (T.take 1000 stderr)
-      CabalTestFailure raw ->
-        do
-          sendM $
-            addAttribute traceSpan "cabal.status" ("test_failure" :: Text)
-          sendM $ addAttribute traceSpan "error.message" (T.take 1000 raw)
-      CabalTestSuccess _ ->
-        sendM $ addAttribute traceSpan "cabal.status" ("success" :: Text)
-      CabalInfraError err -> do
-        sendM $ addAttribute traceSpan "cabal.status" ("infra_error" :: Text)
-        sendM $ addAttribute traceSpan "error.message" (T.take 1000 err)
-    pure res
-  CabalTest path -> withSpan tracer "cabal.test" $ \traceSpan -> do
-    sendM $ addAttribute traceSpan "cabal.path" (T.pack path)
-    res <- send (CabalTest path)
-    case res of
-      CabalSuccess ->
-        sendM $ addAttribute traceSpan "cabal.status" ("success" :: Text)
-      CabalTestSuccess _ ->
-        sendM $ addAttribute traceSpan "cabal.status" ("success" :: Text)
-      CabalBuildFailure code stderr _ -> do
-        sendM $ addAttribute traceSpan "cabal.status" ("build_failure" :: Text)
-        sendM $ addAttribute traceSpan "cabal.exit_code" (fromIntegral code :: Int)
-        sendM $ addAttribute traceSpan "error.message" (T.take 1000 stderr)
-      CabalTestFailure raw -> do
-        sendM $ addAttribute traceSpan "cabal.status" ("test_failure" :: Text)
-        sendM $ addAttribute traceSpan "error.message" (T.take 1000 raw)
-      CabalInfraError err -> do
-        sendM $ addAttribute traceSpan "cabal.status" ("infra_error" :: Text)
-        sendM $ addAttribute traceSpan "error.message" (T.take 1000 err)
-    pure res
-  CabalClean path -> withSpan tracer "cabal.clean" $ \traceSpan -> do
-    sendM $ addAttribute traceSpan "cabal.path" (T.pack path)
-    res <- send (CabalClean path)
-    pure res
 
 -- | Trace Git effects
 traceGit ::

@@ -11,7 +11,6 @@ import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString.Lazy qualified as BL
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
-import ExoMonad.Control.Effects.Cabal (Cabal)
 import ExoMonad.Control.Effects.Effector (Effector)
 import ExoMonad.Control.ExoTools (parseIssueNumber)
 import ExoMonad.Control.Hook.Policy (HookDecision (..), evaluatePolicy)
@@ -42,7 +41,6 @@ commonHooks ::
     Member ConfigReader es,
     Member TracerReader es,
     Member Zellij es,
-    Member Cabal es,
     Member Effector es,
     LastMember IO es
   ) =>
@@ -111,13 +109,13 @@ handleStop ::
   ( Member ConfigReader es,
     Member Git es,
     Member Log es,
-    Member Cabal es,
     Member Effector es,
     Member Env es,
     Member Zellij es,
     LastMember IO es
   ) =>
-  StopInput -> Eff es StopResponse
+  StopInput ->
+  Eff es StopResponse
 handleStop input = do
   -- Auto-focus logic
   mAutoFocus <- lookupEnv "EXOMONAD_AUTO_FOCUS_ON_ERROR"

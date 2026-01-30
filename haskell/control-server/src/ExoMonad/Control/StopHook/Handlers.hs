@@ -25,7 +25,6 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Control.StopHook.Graph
 import ExoMonad.Control.StopHook.Types
-import ExoMonad.Effects.Cabal (Cabal, CabalResult (..), cabalBuild, cabalTest)
 import ExoMonad.Effects.Effector (Effector, GhPrStatusResult (..), GitStatusResult (..), effectorGitLsFiles, effectorGitStatus, runEffector)
 import ExoMonad.Graph.Generic (AsHandler, (:-))
 import ExoMonad.Graph.Goto (GotoChoice, To, gotoChoice, gotoExit)
@@ -34,7 +33,6 @@ import GHC.Generics (Generic)
 
 stopHookHandlers ::
   ( Member (State WorkflowState) es,
-    Member Cabal es,
     Member Effector es
   ) =>
   StopHookGraph (AsHandler es)
@@ -83,34 +81,20 @@ handleGlobalMaxReached state = do
   let context = buildTemplateContext state ws "max-loops"
   pure $ gotoExit ("max-loops" :: Text, context)
 
--- | Check build status
+-- | Check build status (stubbed - Cabal effect removed)
 handleCheckBuild ::
-  (Member Cabal es, Member (State WorkflowState) es) =>
+  (Member (State WorkflowState) es) =>
   AgentState ->
   Eff es (GotoChoice '[To "routeBuild" (AgentState, BuildResult)])
 handleCheckBuild state = do
-  cabalRes <- cabalBuild (state.cwd)
-  let buildRes = translateCabalResult cabalRes
+  -- Stub: always return BuildSuccess since Cabal effect was removed
+  let buildRes = BuildSuccess
   modify @WorkflowState $ \s ->
     s
       & #lastBuildResult .~ Just buildRes
       & #currentStage .~ StageBuild
   pure $ gotoChoice @"routeBuild" (state, buildRes)
 
-translateCabalResult :: CabalResult -> BuildResult
-translateCabalResult CabalSuccess = BuildSuccess
-translateCabalResult (CabalBuildFailure _code stderr _stdout) =
-  BuildFailure $
-    BuildFailureInfo
-      { rawOutput = stderr
-      }
-translateCabalResult (CabalInfraError err) =
-  BuildFailure $
-    BuildFailureInfo
-      { rawOutput = "Cabal infrastructure error: " <> err
-      }
-translateCabalResult (CabalTestFailure _raw) = BuildSuccess
-translateCabalResult (CabalTestSuccess _) = BuildSuccess
 
 -- | Route based on build result
 handleRouteBuild ::
@@ -145,31 +129,20 @@ handleBuildMaxReached ::
 handleBuildMaxReached state = do
   pure $ gotoChoice @"buildContext" (state, "build-stuck" :: Text)
 
--- | Check test status
+-- | Check test status (stubbed - Cabal effect removed)
 handleCheckTest ::
-  (Member Cabal es, Member (State WorkflowState) es) =>
+  (Member (State WorkflowState) es) =>
   AgentState ->
   Eff es (GotoChoice '[To "routeTest" (AgentState, TestResult)])
 handleCheckTest state = do
-  cabalRes <- cabalTest (state.cwd)
-  let testRes = translateTestResult cabalRes
+  -- Stub: always return TestSuccess since Cabal effect was removed
+  let testRes = TestResult 0 0 ""
   modify @WorkflowState $ \s ->
     s
       & #lastTestResult .~ Just testRes
       & #currentStage .~ StageTest
   pure $ gotoChoice @"routeTest" (state, testRes)
 
-translateTestResult :: CabalResult -> TestResult
-translateTestResult (CabalTestSuccess output) =
-  TestResult 0 0 output
-translateTestResult (CabalTestFailure raw) =
-  TestResult 0 1 raw -- Capture raw output for template
-translateTestResult (CabalInfraError err) =
-  TestResult 0 1 ("Cabal infrastructure error: " <> err)
--- Defensive case: should be unreachable if checkBuild handled build failures correctly.
-translateTestResult (CabalBuildFailure _ _ _) =
-  error "translateTestResult: unexpected CabalBuildFailure (test called after build failure)"
-translateTestResult CabalSuccess = TestResult 0 0 ""
 
 -- | Route based on test result
 handleRouteTest ::

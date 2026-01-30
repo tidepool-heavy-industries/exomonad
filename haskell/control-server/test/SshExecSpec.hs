@@ -8,11 +8,9 @@
 module Main (main) where
 
 import Control.Monad.Freer
-import ExoMonad.Control.Effects.Cabal (runCabalRemote)
 import ExoMonad.Control.Effects.Git (runGitRemote)
 import ExoMonad.Control.Effects.Justfile (runJustfileRemote)
 import ExoMonad.Control.Effects.SshExec (ExecRequest (..), ExecResult (..), SshExec (..))
-import ExoMonad.Effects.Cabal (CabalResult (..), cabalBuild)
 import ExoMonad.Effects.Git (WorktreeInfo (..), getWorktreeInfo)
 import ExoMonad.Effects.Justfile (JustResult (..), runRecipe)
 import Test.Tasty
@@ -26,26 +24,6 @@ spec =
   testGroup
     "Remote Execution Effects"
     [ testGroup
-        "Cabal Interpreter"
-        [ testCase "Build Success" $ do
-            let mockResult = ExecResult (Just 0) "Build OK" ""
-            let action = cabalBuild "path/to/project"
-            result <- runM $ runMockSshExec mockResult $ runCabalRemote (Just "test-agent") action
-            case result of
-              CabalSuccess -> pure ()
-              _ -> assertFailure $ "Expected CabalSuccess, got " ++ show result,
-          testCase "Build Failure" $ do
-            let stderr = "src/Main.hs:10:1: error: Variable not in scope: main"
-            let mockResult = ExecResult (Just 1) "" stderr
-            let action = cabalBuild "path/to/project"
-            result <- runM $ runMockSshExec mockResult $ runCabalRemote (Just "test-agent") action
-            case result of
-              CabalBuildFailure code err out -> do
-                code @?= 1
-                err @?= stderr
-              _ -> assertFailure $ "Expected CabalBuildFailure, got " ++ show result
-        ],
-      testGroup
         "Git Interpreter"
         [ testCase "GetWorktreeInfo Success" $ do
             let mockHandler req = case req.args of
@@ -79,6 +57,7 @@ spec =
             result.stderr @?= "Recipe failed"
         ]
     ]
+
 
 -- | Mock SshExec returning a single result
 runMockSshExec :: ExecResult -> Eff (SshExec ': effs) a -> Eff effs a

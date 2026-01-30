@@ -88,7 +88,6 @@ library
         ExoMonad.Effects.Env
         ExoMonad.Effects.Git
         ExoMonad.Effects.Worktree
-        ExoMonad.Effects.Cabal
         ExoMonad.Effects.Effector
         ExoMonad.Effects.Justfile
         ExoMonad.Effects.DockerSpawner

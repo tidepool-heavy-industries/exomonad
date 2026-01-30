@@ -14,12 +14,10 @@ where
 
 import Control.Concurrent.STM (TVar)
 import Control.Monad.Freer (Eff, runM)
+import Control.Monad.Freer.Reader (Reader, runReader)
 -- Effects
 
-import Control.Monad.Freer.Reader (Reader, runReader)
-import ExoMonad.Control.Effects.Cabal (Cabal, runCabalRemote)
 -- Interpreters
-
 import ExoMonad.Control.Effects.DockerCtl (runDockerCtl)
 import ExoMonad.Control.Effects.Effector (Effector, runEffectorIO)
 import ExoMonad.Control.Effects.Justfile (runJustfileRemote)
@@ -60,7 +58,6 @@ type AppEffects =
   '[ GeminiOp,
      DockerSpawner,
      Justfile,
-     Cabal,
      Effector,
      Worktree,
      Git,
@@ -94,26 +91,24 @@ runApp config tracer cbMap logger agentStore action = do
   -- Retry config
   let retryCfg = defaultRetryConfig {tracer = Just tracer}
 
-  runM $
-    runLog Debug $
-      runTime $
-        runReader cbMap $
-          runReader tracer $
-            runReader config $
-              runTUIFifo logger $
-                runEnvIO $
-                  runFileSystemIO $
-                    runGitHubIO ghConfig $
-                      withRetry retryCfg $
-                        runZellijIO $
-                          runSshExec logger dockerCtlPath $
-                            runGitIO $
-                              runWorktreeIO (defaultWorktreeConfig repoRoot) $
-                                runEffectorIO logger $
-                                  runCabalRemote Nothing
-                                  -- Using empty container/workdir for Justfile interpreter since we are running locally in this context
-                                  $
-                                    runJustfileRemote "" "" $
-                                      runDockerCtl logger dockerCtlPath agentStore $
-                                        runGeminiIO $
-                                          action
+  runM
+    $ runLog Debug
+    $ runTime
+    $ runReader cbMap
+    $ runReader tracer
+    $ runReader config
+    $ runTUIFifo logger
+    $ runEnvIO
+    $ runFileSystemIO
+    $ runGitHubIO ghConfig
+    $ withRetry retryCfg
+    $ runZellijIO
+    $ runSshExec logger dockerCtlPath
+    $ runGitIO
+    $ runWorktreeIO (defaultWorktreeConfig repoRoot)
+    $ runEffectorIO logger
+    -- Using empty container/workdir for Justfile interpreter since we are running locally in this context
+    $ runJustfileRemote "" ""
+    $ runDockerCtl logger dockerCtlPath agentStore
+    $ runGeminiIO
+    $ action

@@ -22,8 +22,6 @@ import Control.Monad.Freer.Reader (Reader)
 -- Tool Wiring
 
 -- Effect Imports (Constraints)
-
-import ExoMonad.Control.Effects.Cabal (Cabal)
 import ExoMonad.Control.Effects.Effector (Effector)
 import ExoMonad.Control.Role.Definition.Dev (DevRole (..), devMetadata)
 import ExoMonad.Control.Role.Definition.PM (PMRole (..), pmMetadata)
@@ -32,6 +30,16 @@ import ExoMonad.Control.Role.Hook.Definitions (DevHooks (..), PMHooks (..), TLHo
 import ExoMonad.Control.Role.Hook.Wiring (commonHooks)
 import ExoMonad.Control.Role.Tool.Wiring (devTools, pmTools, tlTools)
 import ExoMonad.Control.Types (ServerConfig)
+import ExoMonad.Effect.TUI (TUI)
+import ExoMonad.Effect.Types (Log, Time)
+import ExoMonad.Effects.DockerSpawner (DockerSpawner)
+import ExoMonad.Effects.Env (Env)
+import ExoMonad.Effects.FileSystem (FileSystem)
+import ExoMonad.Effects.Git (Git)
+import ExoMonad.Effects.GitHub (GitHub)
+import ExoMonad.Effects.Justfile (Justfile)
+import ExoMonad.Effects.Worktree (Worktree)
+import ExoMonad.Effects.Zellij (Zellij)
 import ExoMonad.Effect.Gemini (GeminiOp)
 import ExoMonad.Effect.TUI (TUI)
 import ExoMonad.Effect.Types (Log, Time)
@@ -63,7 +71,6 @@ tlHandlers ::
     Member Log es,
     Member TUI es,
     Member GitHub es,
-    Member Cabal es,
     Member Effector es,
     Member (Reader ServerConfig) es,
     Member (Reader Tracer) es,
@@ -84,7 +91,6 @@ devHandlers ::
     Member Log es,
     Member TUI es,
     Member GitHub es,
-    Member Cabal es,
     Member Effector es,
     Member (Reader ServerConfig) es,
     Member (Reader Tracer) es,
@@ -106,7 +112,6 @@ pmHandlers ::
     Member TUI es,
     Member GitHub es,
     Member Time es,
-    Member Cabal es,
     Member Effector es,
     Member (Reader ServerConfig) es,
     Member (Reader Tracer) es,

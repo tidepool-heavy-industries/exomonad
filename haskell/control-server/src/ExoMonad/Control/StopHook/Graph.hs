@@ -9,7 +9,6 @@ where
 
 import Control.Monad.Freer.State (State)
 import ExoMonad.Control.StopHook.Types
-import ExoMonad.Effects.Cabal (Cabal)
 import ExoMonad.Effects.Effector (Effector, GhPrStatusResult)
 import ExoMonad.Graph.Generic (EntryNode, ExitNode, LogicNode, (:-))
 import ExoMonad.Graph.Goto (Goto)
@@ -39,8 +38,7 @@ data StopHookGraph mode = StopHookGraph
         :- LogicNode
         :@ Input AgentState
         :@ UsesEffects
-             '[ Cabal,
-                State WorkflowState,
+             '[ State WorkflowState,
                 Goto "routeBuild" (AgentState, BuildResult)
               ],
     routeBuild ::
@@ -72,8 +70,7 @@ data StopHookGraph mode = StopHookGraph
         :- LogicNode
         :@ Input AgentState
         :@ UsesEffects
-             '[ Cabal,
-                State WorkflowState,
+             '[ State WorkflowState,
                 Goto "routeTest" (AgentState, TestResult)
               ],
     routeTest ::

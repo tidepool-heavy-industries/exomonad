@@ -111,7 +111,6 @@ library
         -- Effects
         ExoMonad.Control.Effects.SshExec
         ExoMonad.Control.Effects.Effector
-        ExoMonad.Control.Effects.Cabal
         ExoMonad.Control.Effects.Git
         ExoMonad.Control.Effects.Justfile
         ExoMonad.Control.Effects.DockerCtl
