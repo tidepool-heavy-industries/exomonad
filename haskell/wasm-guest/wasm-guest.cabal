@@ -1,0 +1,32 @@
+cabal-version:      3.4
+name:               wasm-guest
+version:            0.1.0.0
+synopsis:           Haskell WASM Guest for ExoMonad
+license:            MIT
+author:             ExoMonad Team
+maintainer:         maintainers@exomonad.io
+build-type:         Simple
+
+executable wasm-guest
+    main-is:          Main.hs
+    hs-source-dirs:   src
+    other-modules:
+        ExoMonad.Guest.HostCall
+    default-language: GHC2021
+    
+    build-depends:
+        base >= 4.16 && < 5,
+        bytestring,
+        text,
+        aeson,
+        freer-simple,
+        extism-pdk
+
+    if arch(wasm32)
+        ghc-options:
+            -no-hs-main
+            -optl-mexec-model=reactor
+            -optl-Wl,--export=hs_init
+            -optl-Wl,--export=handle_mcp_call
+            -optl-Wl,--export=handle_pre_tool_use
+            -optl-Wl,--allow-undefined
