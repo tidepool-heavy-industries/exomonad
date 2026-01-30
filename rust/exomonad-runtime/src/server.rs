@@ -79,4 +79,3 @@ async fn reload(State(state): State<AppState>) -> Json<Value> {
         Err(e) => Json(serde_json::json!({ "error": e.to_string() })),
     }
 }
-
