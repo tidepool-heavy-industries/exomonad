@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Pre-push hook: Verify formatting and run fast tests before pushing
+#
+# To install: just install-hooks
+# To bypass (emergency): git push --no-verify
+
+set -e
+
+echo "=== Pre-push checks ==="
+
+# Get the repo root (in case hook is run from subdirectory)
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+# Check if just is available
+if ! command -v just &> /dev/null; then
+    echo "ERROR: 'just' command not found. Install with: cargo install just"
+    exit 1
+fi
+
+echo ""
+echo ">>> Checking formatting..."
+if ! just fmt-check; then
+    echo ""
+    echo "ERROR: Formatting check failed!"
+    echo "Run 'just fmt' to fix formatting, then commit and push again."
+    exit 1
+fi
+
+echo ""
+echo ">>> Running fast tests..."
+if ! just test-fast; then
+    echo ""
+    echo "ERROR: Tests failed!"
+    echo "Fix the failing tests before pushing."
+    exit 1
+fi
+
+echo ""
+echo "=== All pre-push checks passed ==="

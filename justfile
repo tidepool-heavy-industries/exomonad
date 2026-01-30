@@ -93,6 +93,26 @@ fmt-check:
     cd haskell && ormolu --mode check --ghc-opt -XImportQualifiedPost $(find . -name '*.hs' -not -path './vendor/*')
     cd rust && cargo fmt --check
 
+# Run all tests
+test:
+    cabal test all
+    cd rust && cargo test
+
+# Run fast tests only (for pre-push hook)
+test-fast:
+    cabal test exomonad-control-server
+    cd rust && cargo test --workspace
+
+# Pre-push checks (formatting + fast tests)
+pre-push: fmt-check test-fast
+
+# Install git hooks (symlinks scripts/hooks/* to .git/hooks/)
+install-hooks:
+    @echo "Installing git hooks..."
+    @ln -sf ../../scripts/hooks/pre-push .git/hooks/pre-push
+    @echo "Installed: pre-push"
+    @echo "Done. Use 'git push --no-verify' to bypass in emergencies."
+
 # Clean build artifacts
 clean:
     rm -rf {{metadata_dir}}
