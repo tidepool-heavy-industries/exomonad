@@ -49,7 +49,7 @@ import ExoMonad.Control.Role.Definition.PM (PMRole(..))
 handleMessage :: Logger -> ServerConfig -> Tracer -> TraceContext -> CircuitBreakerMap -> TVar [AgentStatus] -> ControlMessage -> IO ControlResponse
 handleMessage logger config tracer traceCtx cbMap agentStore = \case
   HookEvent input r rl cid -> handleHook logger tracer config input r rl cid cbMap agentStore
-  McpToolCall reqId name args ->
+  MCPToolCall reqId name args ->
     handleMcpToolTyped logger config tracer traceCtx cbMap agentStore reqId name args
   ToolsListRequest -> handleToolsList logger config
   Ping -> pure Pong
@@ -148,10 +148,10 @@ withMcpTracing logger config traceCtx reqId toolName args action = do
           
           -- Add response metadata
           let resSize = case res of
-                McpToolResponse _ (Just val) _ -> LBS.length $ encode val
+                MCPToolResponse _ (Just val) _ -> LBS.length $ encode val
                 _ -> 0
               isError = case res of
-                McpToolResponse _ _ (Just _) -> True
+                MCPToolResponse _ _ (Just _) -> True
                 _ -> False
 
           addSpanAttribute (AttrInt "mcp.output_size" (fromIntegral resSize))

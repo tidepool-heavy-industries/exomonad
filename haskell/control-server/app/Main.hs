@@ -11,6 +11,7 @@ import qualified Data.Text.Encoding as T
 import Data.Aeson (eitherDecode, encode)
 import qualified Data.ByteString.Lazy as BL
 import Data.Maybe (fromMaybe)
+import Control.Monad.Managed
 
 import ExoMonad.Control.Server (runServer)
 import ExoMonad.Control.Types (ServerConfig(..))
@@ -34,17 +35,19 @@ main = do
     Just dir -> pure dir
     Nothing -> getCurrentDirectory
 
-  withDualLogger projectDir $ \logger -> do
-    logInfo logger $ "Session log: " <> T.pack projectDir <> "/.exomonad/logs/control-server-*.log"
+  runManaged $ do
+    logger <- managed (withDualLogger projectDir)
+    liftIO $ do
+      logInfo logger $ "Session log: " <> T.pack projectDir <> "/.exomonad/logs/control-server-*.log"
 
-    case args of
-      ["format-training", skeletonFile] -> runFormatTrainingMode logger skeletonFile
-      ["--help"] -> printUsage
-      ["-h"] -> printUsage
-      ["--version"] -> TIO.putStrLn versionString
-      ["-V"] -> TIO.putStrLn versionString
-      ["--no-tui"] -> runServerMode logger projectDir True
-      _ -> runServerMode logger projectDir False
+      case args of
+        ["format-training", skeletonFile] -> runFormatTrainingMode logger skeletonFile
+        ["--help"] -> printUsage
+        ["-h"] -> printUsage
+        ["--version"] -> TIO.putStrLn versionString
+        ["-V"] -> TIO.putStrLn versionString
+        ["--no-tui"] -> runServerMode logger projectDir True
+        _ -> runServerMode logger projectDir False
 
 runServerMode :: Logger -> FilePath -> Bool -> IO ()
 runServerMode logger projectDir noTui = do
@@ -89,9 +92,11 @@ runServerMode logger projectDir noTui = do
         }
 
   -- Initialize tracing and run server
-  withTracerProvider tracingCfg $ \provider -> do
-    let tracer = getTracer provider "control-server"
-    runServer logger config tracer
+  runManaged $ do
+    provider <- managed (withTracerProvider tracingCfg)
+    liftIO $ do
+      let tracer = getTracer provider "control-server"
+      runServer logger config tracer
 
 runFormatTrainingMode :: Logger -> FilePath -> IO ()
 runFormatTrainingMode logger skeletonFile = do

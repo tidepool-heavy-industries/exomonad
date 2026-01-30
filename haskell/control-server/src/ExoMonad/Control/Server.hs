@@ -26,6 +26,7 @@ import Control.Concurrent.Async (race_)
 import Control.Concurrent.STM (TVar, newTVarIO, readTVarIO, atomically, modifyTVar')
 import Control.Exception (catch, bracket)
 import qualified Control.Exception as E
+import Control.Monad.Managed
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (object, (.=))
@@ -137,16 +138,15 @@ runServer logger config tracer = do
 
   -- Run both listeners concurrently
   logInfo logger "Control server starting dual listeners..."
-  race_
-    (bracket
-      (setupUnixSocket controlSocket)
-      (cleanupUnixSocket controlSocket)
-      $ \sock -> do
-        logInfo logger $ "Listening on (Unix): " <> T.pack controlSocket
-        runSettingsSocket settings sock (app logger configFull tracer cbMap agentStore))
-    (do
-        logInfo logger "Listening on (TCP): 0.0.0.0:7432"
-        runSettings (setPort 7432 settings) (app logger configFull tracer cbMap agentStore))
+  runManaged $ do
+    sock <- managed (bracket (setupUnixSocket controlSocket) (cleanupUnixSocket controlSocket))
+    liftIO $ race_
+      (do
+          logInfo logger $ "Listening on (Unix): " <> T.pack controlSocket
+          runSettingsSocket settings sock (app logger configFull tracer cbMap agentStore))
+      (do
+          logInfo logger "Listening on (TCP): 0.0.0.0:7432"
+          runSettings (setPort 7432 settings) (app logger configFull tracer cbMap agentStore))
 
 -- | Setup Unix socket at given path.
 setupUnixSocket :: FilePath -> IO Socket
@@ -208,7 +208,7 @@ server logger config tracer cbMap agentStore =
       logInfo logger $ "[MCP:" <> req.mcpId <> "] tool=" <> req.toolName
       traceCtx <- newTraceContext
       res <- handleMessage logger config tracer traceCtx cbMap agentStore
-        (McpToolCall req.mcpId req.toolName req.arguments)
+        (MCPToolCall req.mcpId req.toolName req.arguments)
 
       -- Flush traces (legacy support for MCP tools)
       case config.observabilityConfig of
@@ -249,7 +249,7 @@ server logger config tracer cbMap agentStore =
               let configWithRole = config & #role .~ Just slug
 
               res <- handleMessage logger configWithRole tracer traceCtx cbMap agentStore
-                (McpToolCall sessId req.toolName req.arguments)
+                (MCPToolCall sessId req.toolName req.arguments)
 
               -- Flush traces (legacy)
               case config.observabilityConfig of
@@ -322,11 +322,11 @@ server logger config tracer cbMap agentStore =
                       traceCtx <- liftIO newTraceContext
                       let configWithRole = config & #role .~ Just slug
                       res <- liftIO $ handleMessage logger configWithRole tracer traceCtx cbMap agentStore
-                        (McpToolCall sessId params.mtcpName params.mtcpArguments)
+                        (MCPToolCall sessId params.mtcpName params.mtcpArguments)
 
                       -- Convert ControlResponse to MCP tool call result
                       case res of
-                        McpToolResponse _ mResult mErr -> do
+                        MCPToolResponse _ mResult mErr -> do
                           let content = case mResult of
                                 Just val -> [McpContentItem "text" (Just $ TL.toStrict $ AesonText.encodeToLazyText val)]
                                 Nothing -> []
