@@ -72,7 +72,6 @@ import ExoMonad.Effects.SocketClient
   ( SocketConfig(..)
   , ServiceRequest(..)
   , ServiceResponse(..)
-  , OtelSpanReq(..)
   , sendRequest
   )
 import ExoMonad.Effect.Types (LLM(..), TurnOutcome(..))
@@ -348,7 +347,7 @@ runObservabilityWithConfig ctx config = interpret $ \case
             modifyIORef ctx.completedSpans (otlpSpan :)
           
           ObservabilitySocketConfig path -> do
-            let serviceReq = OtelSpan $ OtelSpanReq
+            let serviceReq = OtelSpan
                   { traceId = traceId_.unTraceId
                   , spanId = activeSpan.spanId.unSpanId
                   , name = activeSpan.name

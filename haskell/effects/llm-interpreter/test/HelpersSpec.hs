@@ -4,7 +4,7 @@
 module HelpersSpec (spec) where
 
 import Test.Hspec
-import ExoMonad.LLM.Types (ParsedBaseUrl(..), Scheme(..))
+import ExoMonad.LLM.Interpreter.Types (ParsedBaseUrl(..), Scheme(..))
 
 import ExoMonad.LLM.Interpreter (parseBaseUrl)
 

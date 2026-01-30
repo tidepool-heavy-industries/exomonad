@@ -50,6 +50,7 @@ import Data.Aeson (Value(..))
 import Data.Aeson.Key (fromText)
 import qualified Data.Aeson.KeyMap as KM
 import Data.Text (Text)
+import Data.List.NonEmpty (NonEmpty(..))
 
 import ExoMonad.Effect.Types
   ( LLM(..), TurnOutcome(..), TurnResult(..), ContentBlock )
@@ -64,7 +65,7 @@ import ExoMonad.Effect.Types
 -- that the correct prompts, schemas, and tools were used.
 data LLMRequest = LLMRequest
   { lrSystemPrompt :: !Text
-  , lrUserContent  :: ![ContentBlock]
+  , lrUserContent  :: !(NonEmpty ContentBlock)
   , lrSchema       :: !Value
   , lrTools        :: ![Value]
   }

@@ -34,10 +34,11 @@ import Control.Applicative ((<|>))
 import Control.Monad.Freer (Eff, Member, send)
 import Data.Aeson (Value, ToJSON(..), FromJSON(..), object, (.=), withObject, (.:), (.:?))
 import qualified Data.Aeson as Aeson
-import Data.Aeson.Types qualified as AesonTypes
+import qualified Data.Aeson.Types as AesonTypes
 import Data.Kind (Type)
 import Data.Text (Text)
 import GHC.Generics (Generic)
+import Data.List.NonEmpty (NonEmpty(..))
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -96,7 +97,7 @@ type family LLMProviderResponse (p :: LLMProvider) :: Type where
 
 -- | Anthropic API response (content blocks style).
 data AnthropicResponse = AnthropicResponse
-  { arContent :: [ContentBlock]
+  { arContent :: NonEmpty ContentBlock
   , arStopReason :: Text
   , arUsage :: Usage
   }

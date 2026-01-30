@@ -1,6 +1,7 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 -- | Core effect types for ExoMonad - pure definitions without IO runners
 --
 -- This module contains the effect type definitions and pure operations
@@ -156,6 +157,7 @@ import qualified Data.ByteString.Lazy as LBS
 import GHC.Generics (Generic)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef, modifyIORef)
 import Data.Kind (Type)
+import Data.List.NonEmpty (NonEmpty(..), toList)
 
 -- Node metadata for teaching infrastructure
 import ExoMonad.Effect.NodeMeta (NodeMeta(..), NodeMetadata(..), getNodeMeta, runNodeMeta, defaultNodeMeta)
@@ -180,7 +182,6 @@ import ExoMonad.Graph.Goto (GotoChoice, To)
 import ExoMonad.Effect.TUI
   ( TUI(..), showUI
   , PopupDefinition(..), PopupResult(..)
-  , mkComponent, mkText, mkSlider, mkCheckbox, mkTextbox, mkChoice, mkMultiselect, mkGroup
   )
 
 -- Log effect and types
@@ -258,7 +259,7 @@ data LLM r where
   RunTurnOp
     :: NodeMetadata                  -- Node/graph context for teaching
     -> Text                          -- System prompt
-    -> [ContentBlock]                -- User content
+    -> NonEmpty ContentBlock         -- User content
     -> Value                         -- Output schema
     -> [Value]                       -- Tool definitions
     -> LLM (TurnOutcome (TurnResult Value))
@@ -425,8 +426,8 @@ toolErrorToText = \case
     "Tool execution failed: " <> msg
 
 -- | Build content blocks from text + images
-withImages :: Text -> [ImageSource] -> [ContentBlock]
-withImages text images = TextBlock text : map ImageBlock images
+withImages :: Text -> [ImageSource] -> NonEmpty ContentBlock
+withImages text images = Text { text = text } :| map Image images
 
 runTurn
   :: forall output effs.
@@ -434,13 +435,13 @@ runTurn
   => Text -> Text -> Value -> [Value]
   -> Eff effs (TurnOutcome (TurnParseResult output))
 runTurn systemPrompt userAction =
-  runTurnContent systemPrompt [TextBlock userAction]
+  runTurnContent systemPrompt (Text { text = userAction } :| [])
 
 runTurnContent
   :: forall output effs.
      (Member LLM effs, Member NodeMeta effs, StructuredOutput output)
   => Text
-  -> [ContentBlock]
+  -> NonEmpty ContentBlock
   -> Value
   -> [Value]
   -> Eff effs (TurnOutcome (TurnParseResult output))
@@ -602,19 +603,19 @@ estimateTokens msgs = sum (map estimateMessageChars msgs) `div` 4
 -- | Estimate character count for a single message.
 -- This is a rough estimate for use with 'estimateTokens'.
 estimateMessageChars :: Message -> Int
-estimateMessageChars msg = sum (map estimateBlockChars msg.content)
+estimateMessageChars msg = sum (map estimateBlockChars (toList msg.content))
 
 -- | Estimate character count for a content block.
 -- All estimates are approximate and may under- or over-estimate true token usage.
 estimateBlockChars :: ContentBlock -> Int
 estimateBlockChars = \case
-  TextBlock t -> T.length t
-  ImageBlock _ -> 1000  -- Rough placeholder; actual image tokens vary by provider
-  ToolUseBlock tu -> T.length tu.toolName + estimateValueChars tu.toolInput
-  ToolResultBlock tr -> T.length tr.toolResultContent
-  ThinkingBlock tc -> T.length tc.thinkingText
-  RedactedThinkingBlock _ -> 100  -- Encrypted/hidden; arbitrary rough estimate
-  JsonBlock v -> estimateValueChars v
+  Text { text = t } -> T.length t
+  Image { source = _ } -> 1000  -- Rough placeholder; actual image tokens vary by provider
+  ToolUse { name = n, input = i } -> T.length n + estimateValueChars i
+  ToolResult { content = c } -> T.length c
+  Thinking { thinking = t } -> T.length t
+  RedactedThinking { data_ = _ } -> 100  -- Encrypted/hidden; arbitrary rough estimate
+  Json { json = v } -> estimateValueChars v
 
 -- | Estimate characters in a JSON value via its encoded length.
 estimateValueChars :: Value -> Int
@@ -770,4 +771,3 @@ returnValue = send . ReturnValue
 runReturn :: forall a effs. Eff (Return a ': effs) a -> Eff effs a
 runReturn = interpret $ \case
   ReturnValue a -> pure a
-
