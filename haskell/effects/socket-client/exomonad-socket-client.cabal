@@ -12,6 +12,7 @@ library
     exposed-modules:  ExoMonad.Effects.SocketClient
     build-depends:    base >= 4.14 && < 5,
                       aeson,
+                      deriving-aeson,
                       lens,
                       lens-aeson,
                       bytestring,

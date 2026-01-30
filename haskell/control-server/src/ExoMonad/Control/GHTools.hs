@@ -47,7 +47,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import ExoMonad.Effects.GitHub
-  ( GitHub, IssueState(..), IssueFilter(..)
+  ( GitHub, Issue(..), IssueState(..), IssueFilter(..)
   , CreateIssueInput(..), UpdateIssueInput(..), defaultIssueFilter, emptyUpdateIssueInput
   , listIssues, getIssue, createIssue, updateIssue, closeIssue, reopenIssue
   )
@@ -69,19 +69,34 @@ ghIssueListLogic args =
   withGitHubRepo args.repo
     (\repo -> listIssues repo (defaultIssueFilter
         { ifLabels = fromMaybe [] args.labels
-        , ifState  = parseIssueState =<< args.status
+        , ifState  = parseIssueState (fromMaybe "open" args.status)
         , ifLimit  = args.limit
         }))
-    (\is -> GHIssueListResult
-      { issues = is
-      , count  = length is
-      , error  = Nothing
-      })
+    (\is ->
+      let summaries = map toSummary (take 20 is)
+      in GHIssueListResult
+        { issues = summaries
+        , count  = length summaries
+        , error  = Nothing
+        })
     (\err -> GHIssueListResult
       { issues = []
       , count  = 0
       , error  = Just err
       })
+
+-- | Convert full Issue to IssueSummary
+toSummary :: Issue -> IssueSummary
+toSummary i = IssueSummary
+  { number = i.issueNumber
+  , title  = i.issueTitle
+  , state  = case i.issueState of
+      IssueOpen   -> "OPEN"
+      IssueClosed -> "CLOSED"
+  , labels = i.issueLabels
+  , url    = i.issueUrl
+  }
+
 
 
 -- ════════════════════════════════════════════════════════════════════════════

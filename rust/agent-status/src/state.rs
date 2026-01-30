@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd)]
 pub struct AgentStatus {
     pub id: String,
     pub container_id: String,
@@ -18,7 +18,7 @@ pub struct DashboardState {
     pub agents: Vec<AgentStatus>,
     pub connected: bool,
     pub last_updated: Option<String>,
-    
+
     // UI State
     pub selected_index: usize,
     pub logs_cache: HashMap<String, String>,

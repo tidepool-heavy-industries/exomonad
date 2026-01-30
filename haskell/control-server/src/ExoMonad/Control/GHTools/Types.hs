@@ -9,6 +9,7 @@ module ExoMonad.Control.GHTools.Types
   ( -- * List Tool
     GHIssueListArgs(..)
   , GHIssueListResult(..)
+  , IssueSummary(..)
 
     -- * Show Tool
   , GHIssueShowArgs(..)
@@ -58,9 +59,28 @@ $(deriveMCPTypeWith defaultMCPOptions ''GHIssueListArgs
   , mkName "limit"  ?? "Max results"
   ])
 
+-- | Summary of an issue for list responses (no body/comments).
+data IssueSummary = IssueSummary
+  { number :: Int
+  , title  :: Text
+  , state  :: Text      -- "OPEN" or "CLOSED"
+  , labels :: [Text]
+  , url    :: Text
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON IssueSummary where
+  toJSON s = object
+    [ "number" .= s.number
+    , "title"  .= s.title
+    , "state"  .= s.state
+    , "labels" .= s.labels
+    , "url"    .= s.url
+    ]
+
 -- | Result of gh_issue_list tool.
 data GHIssueListResult = GHIssueListResult
-  { issues :: [Issue]
+  { issues :: [IssueSummary]
   , count  :: Int
   , error  :: Maybe Text
   }

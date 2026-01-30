@@ -51,7 +51,7 @@ import ExoMonad.Effects.SocketClient
   , GitHubGetDiscussionReq(..)
   , sendRequest
   )
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import System.Directory (doesFileExist)
@@ -156,10 +156,10 @@ socketGetIssue path repo num includeComments = do
             , issueTitle = t
             , issueBody = b
             , issueAuthor = Author a Nothing
-            , issueLabels = ls
+            , issueLabels = fromMaybe [] ls
             , issueState = if s == "open" then IssueOpen else IssueClosed
             , issueUrl = u
-            , issueComments = parseCommentValues cs
+            , issueComments = parseCommentValues (fromMaybe [] cs)
             }
         Right (ErrorResponse 404 _) -> pure $ Right Nothing
         Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
@@ -319,9 +319,9 @@ socketGetPR path repo num includeDetails = do
             , prBaseRefName = ba
             , prCreatedAt = createdAt
             , prMergedAt = mergedAt
-            , prLabels = ls
-            , prComments = parseCommentValues cs
-            , prReviews = parseReviewValues rs
+            , prLabels = fromMaybe [] ls
+            , prComments = parseCommentValues (fromMaybe [] cs)
+            , prReviews = parseReviewValues (fromMaybe [] rs)
             }
         Right (ErrorResponse 404 _) -> pure $ Right Nothing
         Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
@@ -358,7 +358,7 @@ socketGetPullRequestReviews path repo num = do
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right (GitHubReviewsResponse reviews) ->
-           case fromJSON (toJSON reviews) of
+           case fromJSON (toJSON (fromMaybe [] reviews)) of
             Aeson.Success rs -> pure $ Right rs
             err -> pure $ Left $ GHParseError $ T.pack $ "Failed to parse reviews: " <> show err
         Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
@@ -374,7 +374,7 @@ socketGetDiscussion path repo num = do
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right (GitHubDiscussionResponse n t b a u cs) -> 
-          case fromJSON (toJSON cs) of
+          case fromJSON (toJSON (fromMaybe [] cs)) of
             Aeson.Success comments -> 
               pure $ Right $ Discussion
                 { discNumber = n

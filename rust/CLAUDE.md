@@ -191,7 +191,7 @@ Claude Code                     Control Server (Haskell)
 ```
 
 **Implementation:**
-- Hooks: `exomonad_shared::socket` uses `curl` subprocess for HTTP-over-Unix-socket requests
+- Hooks: `exomonad_shared::socket` uses `hyper` + `tokio` for native HTTP-over-Unix-socket requests
 - MCP: Claude Code connects directly to control-server TCP port 7432
 
 ## What's Missing (TODO)
@@ -244,7 +244,7 @@ cargo test -p exomonad-shared             # Shared library tests
 | Decision | Rationale |
 |----------|-----------|
 | Unix Domain Sockets | Local IPC only, no Docker boundary crossing needed in Claude Code++ mode |
-| HTTP over Unix Socket | Standard protocol, curl subprocess for simplicity |
+| HTTP over Unix Socket | Standard protocol, `hyper` + `tokio` for robust handling |
 | Fail-closed hooks | Errors immediately if server missing; catches config issues during development |
 | Sync HTTP client | Hooks block anyway; async adds complexity |
 

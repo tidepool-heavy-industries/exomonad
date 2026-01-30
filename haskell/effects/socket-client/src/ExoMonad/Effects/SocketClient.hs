@@ -4,6 +4,9 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE NoFieldSelectors #-}
+{-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveAnyClass #-}
 
 module ExoMonad.Effects.SocketClient
   ( SocketConfig(..)
@@ -32,9 +35,8 @@ module ExoMonad.Effects.SocketClient
   ) where
 
 import Control.Exception (bracket, try, SomeException)
-import Control.Lens ((&), (?~), at)
-import Data.Aeson
-import Data.Aeson.Lens (_Object)
+import Deriving.Aeson
+import Data.Aeson (eitherDecode, encode, Value, Object)
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as LBS8
@@ -59,12 +61,10 @@ data AnthropicChatReq = AnthropicChatReq
   , tools :: Maybe [Value]
   , system :: Maybe Text
   , thinking :: Maybe Value
-  } deriving (Show, Eq, Generic)
-instance ToJSON AnthropicChatReq
+  } deriving (Show, Eq, Generic, ToJSON)
 
 data GitHubGetIssueReq = GitHubGetIssueReq { owner :: Text, repo :: Text, number :: Int, includeComments :: Bool }
-  deriving (Show, Eq, Generic)
-instance ToJSON GitHubGetIssueReq
+  deriving (Show, Eq, Generic, ToJSON)
 
 data GitHubCreateIssueReq = GitHubCreateIssueReq
   { owner :: Text
@@ -72,8 +72,7 @@ data GitHubCreateIssueReq = GitHubCreateIssueReq
   , title :: Text
   , body :: Text
   , labels :: [Text]
-  } deriving (Show, Eq, Generic)
-instance ToJSON GitHubCreateIssueReq
+  } deriving (Show, Eq, Generic, ToJSON)
 
 data GitHubUpdateIssueReq = GitHubUpdateIssueReq
   { owner :: Text
@@ -84,60 +83,46 @@ data GitHubUpdateIssueReq = GitHubUpdateIssueReq
   , state :: Maybe Text
   , labels :: Maybe [Text]
   , assignees :: Maybe [Text]
-  } deriving (Show, Eq, Generic)
-instance ToJSON GitHubUpdateIssueReq
+  } deriving (Show, Eq, Generic, ToJSON)
 
 data GitHubAddIssueLabelReq = GitHubAddIssueLabelReq { owner :: Text, repo :: Text, number :: Int, label :: Text }
-  deriving (Show, Eq, Generic)
-instance ToJSON GitHubAddIssueLabelReq
+  deriving (Show, Eq, Generic, ToJSON)
 
 data GitHubRemoveIssueLabelReq = GitHubRemoveIssueLabelReq { owner :: Text, repo :: Text, number :: Int, label :: Text }
-  deriving (Show, Eq, Generic)
-instance ToJSON GitHubRemoveIssueLabelReq
+  deriving (Show, Eq, Generic, ToJSON)
 
 data GitHubAddIssueAssigneeReq = GitHubAddIssueAssigneeReq { owner :: Text, repo :: Text, number :: Int, assignee :: Text }
-  deriving (Show, Eq, Generic)
-instance ToJSON GitHubAddIssueAssigneeReq
+  deriving (Show, Eq, Generic, ToJSON)
 
 data GitHubRemoveIssueAssigneeReq = GitHubRemoveIssueAssigneeReq { owner :: Text, repo :: Text, number :: Int, assignee :: Text }
-  deriving (Show, Eq, Generic)
-instance ToJSON GitHubRemoveIssueAssigneeReq
+  deriving (Show, Eq, Generic, ToJSON)
 
 data GitHubListIssuesReq = GitHubListIssuesReq { owner :: Text, repo :: Text, state :: Maybe Text, labels :: [Text] }
-  deriving (Show, Eq, Generic)
-instance ToJSON GitHubListIssuesReq
+  deriving (Show, Eq, Generic, ToJSON)
 
 data GitHubCreatePRReq = GitHubCreatePRReq { owner :: Text, repo :: Text, title :: Text, body :: Text, head :: Text, base :: Text }
-  deriving (Show, Eq, Generic)
-instance ToJSON GitHubCreatePRReq
+  deriving (Show, Eq, Generic, ToJSON)
 
 data GitHubGetPRReq = GitHubGetPRReq { owner :: Text, repo :: Text, number :: Int, includeDetails :: Bool }
-  deriving (Show, Eq, Generic)
-instance ToJSON GitHubGetPRReq
+  deriving (Show, Eq, Generic, ToJSON)
 
 data GitHubListPullRequestsReq = GitHubListPullRequestsReq { owner :: Text, repo :: Text, state :: Maybe Text, limit :: Maybe Int }
-  deriving (Show, Eq, Generic)
-instance ToJSON GitHubListPullRequestsReq
+  deriving (Show, Eq, Generic, ToJSON)
 
 data GitHubGetPullRequestReviewsReq = GitHubGetPullRequestReviewsReq { owner :: Text, repo :: Text, number :: Int }
-  deriving (Show, Eq, Generic)
-instance ToJSON GitHubGetPullRequestReviewsReq
+  deriving (Show, Eq, Generic, ToJSON)
 
 data GitHubGetDiscussionReq = GitHubGetDiscussionReq { owner :: Text, repo :: Text, number :: Int }
-  deriving (Show, Eq, Generic)
-instance ToJSON GitHubGetDiscussionReq
+  deriving (Show, Eq, Generic, ToJSON)
 
 data OllamaGenerateReq = OllamaGenerateReq { model :: Text, prompt :: Text, system :: Maybe Text }
-  deriving (Show, Eq, Generic)
-instance ToJSON OllamaGenerateReq
+  deriving (Show, Eq, Generic, ToJSON)
 
 data OtelSpanReq = OtelSpanReq { traceId :: Text, spanId :: Text, name :: Text, startNs :: Integer, endNs :: Integer, attributes :: Object }
-  deriving (Show, Eq, Generic)
-instance ToJSON OtelSpanReq
+  deriving (Show, Eq, Generic, ToJSON)
 
 data OtelMetricReq = OtelMetricReq { name :: Text, value :: Double, otelLabels :: Object }
-  deriving (Show, Eq, Generic)
-instance ToJSON OtelMetricReq
+  deriving (Show, Eq, Generic, ToJSON)
 
 
 -- | Mirror of Rust protocol types (to be implemented in exomonad-shared)
@@ -161,62 +146,22 @@ data ServiceRequest
   | OtelSpan OtelSpanReq
   | OtelMetric OtelMetricReq
   deriving (Show, Eq, Generic)
-
--- Helper to add type field
-addType :: ToJSON a => Text -> a -> Value
-addType t req = toJSON req & _Object . at "type" ?~ String t
-
-instance ToJSON ServiceRequest where
-  toJSON = \case
-    AnthropicChat req -> addType "AnthropicChat" req
-    GitHubGetIssue req -> addType "GitHubGetIssue" req
-    GitHubCreateIssue req -> addType "GitHubCreateIssue" req
-    GitHubUpdateIssue req -> addType "GitHubUpdateIssue" req
-    GitHubAddIssueLabel req -> addType "GitHubAddIssueLabel" req
-    GitHubRemoveIssueLabel req -> addType "GitHubRemoveIssueLabel" req
-    GitHubAddIssueAssignee req -> addType "GitHubAddIssueAssignee" req
-    GitHubRemoveIssueAssignee req -> addType "GitHubRemoveIssueAssignee" req
-    GitHubListIssues req -> addType "GitHubListIssues" req
-    GitHubCreatePR req -> addType "GitHubCreatePR" req
-    GitHubGetPR req -> addType "GitHubGetPR" req
-    GitHubListPullRequests req -> addType "GitHubListPullRequests" req
-    GitHubGetPullRequestReviews req -> addType "GitHubGetPullRequestReviews" req
-    GitHubGetDiscussion req -> addType "GitHubGetDiscussion" req
-    GitHubCheckAuth -> object ["type" .= ("GitHubCheckAuth" :: Text)]
-    OllamaGenerate req -> addType "OllamaGenerate" req
-    OtelSpan req -> addType "OtelSpan" req
-    OtelMetric req -> addType "OtelMetric" req
+  deriving (ToJSON) via CustomJSON '[SumTaggedObject "type" "contents", UnwrapUnaryRecords] ServiceRequest
 
 data ServiceResponse
-  = AnthropicChatResponse { content :: [Value], stopReason :: Text, usage :: Value }
-  | GitHubIssueResponse { issueNumber :: Int, title :: Text, body :: Text, state :: Text, labels :: [Text], url :: Text, issueAuthor :: Text, issueComments :: [Value] }
+  = AnthropicChatResponse { content :: [Value], stop_reason :: Text, usage :: Value }
+  | GitHubIssueResponse { number :: Int, title :: Text, body :: Text, state :: Text, labels :: Maybe [Text], url :: Text, author :: Text, comments :: Maybe [Value] }
   | GitHubIssuesResponse { issues :: [Value] }
-  | GitHubPRResponse { number :: Int, title :: Text, body :: Text, author :: Text, url :: Text, state :: Text, head_ref_name :: Text, base_ref_name :: Text, created_at :: Text, merged_at :: Maybe Text, prLabels :: [Text], prComments :: [Value], prReviews :: [Value] }
+  | GitHubPRResponse { number :: Int, title :: Text, body :: Text, author :: Text, url :: Text, state :: Text, head_ref_name :: Text, base_ref_name :: Text, created_at :: Text, merged_at :: Maybe Text, labels :: Maybe [Text], comments :: Maybe [Value], reviews :: Maybe [Value] }
   | GitHubPullRequestsResponse { pull_requests :: [Value] }
-  | GitHubReviewsResponse { reviews :: [Value] }
-  | GitHubDiscussionResponse { number :: Int, title :: Text, body :: Text, author :: Text, url :: Text, comments :: [Value] }
+  | GitHubReviewsResponse { reviews :: Maybe [Value] }
+  | GitHubDiscussionResponse { number :: Int, title :: Text, body :: Text, author :: Text, url :: Text, comments :: Maybe [Value] }
   | GitHubAuthResponse { authenticated :: Bool, user :: Maybe Text }
   | OllamaGenerateResponse { response :: Text, done :: Bool }
   | OtelAckResponse
   | ErrorResponse { code :: Int, message :: Text }
   deriving (Show, Eq, Generic)
-
-instance FromJSON ServiceResponse where
-  parseJSON = withObject "ServiceResponse" $ \v -> do
-    t <- v .: "type"
-    case (t :: Text) of 
-      "AnthropicChatResponse" -> AnthropicChatResponse <$> v .: "content" <*> v .: "stop_reason" <*> v .: "usage"
-      "GitHubIssueResponse" -> GitHubIssueResponse <$> v .: "number" <*> v .: "title" <*> v .: "body" <*> v .: "state" <*> v .: "labels" <*> v .: "url" <*> v .: "author" <*> v .:? "comments" .!= []
-      "GitHubIssuesResponse" -> GitHubIssuesResponse <$> v .: "issues"
-      "GitHubPRResponse" -> GitHubPRResponse <$> v .: "number" <*> v .: "title" <*> v .: "body" <*> v .: "author" <*> v .: "url" <*> v .: "state" <*> v .: "head_ref_name" <*> v .: "base_ref_name" <*> v .: "created_at" <*> v .:? "merged_at" <*> v .:? "labels" .!= [] <*> v .:? "comments" .!= [] <*> v .:? "reviews" .!= []
-      "GitHubPullRequestsResponse" -> GitHubPullRequestsResponse <$> v .: "pull_requests"
-      "GitHubReviewsResponse" -> GitHubReviewsResponse <$> v .: "reviews"
-      "GitHubDiscussionResponse" -> GitHubDiscussionResponse <$> v .: "number" <*> v .: "title" <*> v .: "body" <*> v .: "author" <*> v .: "url" <*> v .: "comments"
-      "GitHubAuthResponse" -> GitHubAuthResponse <$> v .: "authenticated" <*> v .: "user"
-      "OllamaGenerateResponse" -> OllamaGenerateResponse <$> v .: "response" <*> v .: "done"
-      "OtelAckResponse" -> pure OtelAckResponse
-      "ErrorResponse" -> ErrorResponse <$> v .: "code" <*> v .: "message"
-      _ -> fail $ "Unknown response type: " <> T.unpack t
+  deriving (FromJSON) via CustomJSON '[SumTaggedObject "type" "contents"] ServiceResponse
 
 data ServiceError
   = SocketError Text
