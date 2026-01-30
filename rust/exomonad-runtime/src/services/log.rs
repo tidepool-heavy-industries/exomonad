@@ -16,14 +16,10 @@ pub enum LogLevel {
     Error,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct LogService;
 
 impl LogService {
-    pub fn new() -> Self {
-        Self
-    }
-
     pub fn log(&self, level: LogLevel, message: &str, fields: Option<&HashMap<String, String>>) {
         match level {
             LogLevel::Debug => tracing::debug!(fields = ?fields, "{}", message),
@@ -40,6 +36,7 @@ impl LogService {
 
 #[derive(Deserialize)]
 struct LogPayload {
+    #[allow(dead_code)]
     level: LogLevel,
     message: String,
     fields: Option<HashMap<String, String>>,
@@ -91,6 +88,11 @@ pub trait HasLogService {
     fn log_service(&self) -> &LogService;
 }
 
+/// Registers the `log_info` host function.
+///
+/// Note: This function executes synchronously. "Fire-and-forget" here means
+/// it returns `void` to the WASM caller, not that it runs on a background thread.
+/// It enforces `LogLevel::Info` regardless of the payload's level.
 pub fn log_info_host_fn<S: HasLogService + Send + Sync + 'static>(services: Arc<S>) -> Function {
     Function::new(
         "log_info",
@@ -101,14 +103,19 @@ pub fn log_info_host_fn<S: HasLogService + Send + Sync + 'static>(services: Arc<
             let services = user_data.get()?;
             let services = services.lock().unwrap();
             let payload: LogPayload = read_input(plugin, inputs)?;
+            // Enforce Info level
             services
                 .log_service()
-                .log(payload.level, &payload.message, payload.fields.as_ref());
+                .log(LogLevel::Info, &payload.message, payload.fields.as_ref());
             Ok(())
         },
     )
 }
 
+/// Registers the `log_error` host function.
+///
+/// Note: This function executes synchronously.
+/// It enforces `LogLevel::Error` regardless of the payload's level.
 pub fn log_error_host_fn<S: HasLogService + Send + Sync + 'static>(services: Arc<S>) -> Function {
     Function::new(
         "log_error",
@@ -119,9 +126,10 @@ pub fn log_error_host_fn<S: HasLogService + Send + Sync + 'static>(services: Arc
             let services = user_data.get()?;
             let services = services.lock().unwrap();
             let payload: LogPayload = read_input(plugin, inputs)?;
+            // Enforce Error level
             services
                 .log_service()
-                .log(payload.level, &payload.message, payload.fields.as_ref());
+                .log(LogLevel::Error, &payload.message, payload.fields.as_ref());
             Ok(())
         },
     )

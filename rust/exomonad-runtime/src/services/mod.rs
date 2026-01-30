@@ -14,7 +14,7 @@ impl Services {
     pub fn new() -> Self {
         Self {
             docker: DockerService::new(),
-            log: LogService::new(),
+            log: LogService::default(),
         }
     }
 }
