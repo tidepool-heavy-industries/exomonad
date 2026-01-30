@@ -383,10 +383,10 @@ schemaToRespondTool schema =
 convertToOutcome :: AnthropicResponse -> TurnOutcome (TurnResult Value)
 convertToOutcome (AnthropicResponse {arContent = contentBlocksNE}) =
   -- Extract text, thinking, and tool use from content blocks (LP = LLMProvider ContentBlock)
-  let blocks = NE.toList contentBlocksNE
-      textContent = T.intercalate "\n" [t | LP.TextContent t <- blocks]
-      thinkingContent = T.intercalate "\n" [t | LP.ThinkingContent t <- blocks]
-      toolUses = [(name, input_) | LP.ToolUseContent name input_ <- blocks]
+  let contentBlocks = NE.toList contentBlocksNE
+      textContent = T.intercalate "\n" [t | LP.TextContent t <- contentBlocks]
+      thinkingContent = T.intercalate "\n" [t | LP.ThinkingContent t <- contentBlocks]
+      toolUses = [(name, input_) | LP.ToolUseContent _toolUseId name input_ <- contentBlocks]
    in case toolUses of
         [] ->
           -- No tool use - return text as structured output

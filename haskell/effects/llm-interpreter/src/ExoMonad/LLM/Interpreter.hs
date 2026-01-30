@@ -46,6 +46,17 @@ import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Effects.LLMProvider
+  ( AnthropicConfig (..),
+    AnthropicResponse (..),
+    LLMComplete (..),
+    LLMError (..),
+    LLMProviderConfig,
+    LLMProviderResponse,
+    Message (..),
+    Role (..),
+    SProvider (..),
+    ThinkingBudget (..),
+  )
 import ExoMonad.Effects.SocketClient
   ( ServiceError (..),
     ServiceRequest (..),
@@ -60,7 +71,17 @@ import PyF (fmt)
 -- ANTHROPIC CLIENT
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Build Anthropic Messages API request.
+-- | Convert a Message to AnthropicMessage wire format.
+messageToAnthropicMessage :: Message -> AnthropicMessage
+messageToAnthropicMessage msg =
+  let roleText = case msg.msgRole of
+        User -> "user"
+        Assistant -> "assistant"
+      -- Convert ContentBlocks to JSON array
+      contentJson = toJSON msg.msgContent
+  in AnthropicMessage roleText contentJson
+
+-- | Build Anthropic Messages API request from single user message.
 --
 -- Tools should be in Anthropic format (with @input_schema@, not @parameters@).
 -- Use 'AnthropicTool' or 'ExoMonad.Tool.toolToJSON' which produce the correct format.
@@ -77,7 +98,7 @@ buildAnthropicRequest config userMsg maybeTools maybeToolChoice =
   AnthropicRequest
     { arModel = config.acModel,
       arMaxTokens = config.acMaxTokens,
-      arMessages = AnthropicMessage "user" userMsg :| [],
+      arMessages = [AnthropicMessage "user" (toJSON userMsg)],
       arSystem = config.acSystemPrompt,
       arTools = maybeTools,
       arToolChoice = maybeToolChoice,
@@ -93,6 +114,7 @@ buildAnthropicRequest config userMsg maybeTools maybeToolChoice =
                 tcBudgetTokens = budget
               }
     }
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS
@@ -135,7 +157,7 @@ parseBaseUrl url =
 -- SOCKET CLIENT
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Make a request to the socket-based service.
+-- | Make a request to the socket-based service with a single user message.
 socketRequest ::
   SProvider p ->
   LLMEnv ->
@@ -149,22 +171,59 @@ socketRequest provider env config userMsg maybeTools = case env.leConfig of
     case provider of
       SAnthropic -> do
         let req =
-              AnthropicChat
-                { model = config.acModel,
-                  messages = toJSON (AnthropicMessage "user" userMsg) :| [],
-                  maxTokens = config.acMaxTokens,
-                  tools = maybeTools,
-                  system = config.acSystemPrompt,
-                  thinking = case config.acThinking of
-                    ThinkingDisabled -> Nothing
-                    ThinkingEnabled budget -> Just $ toJSON $ ThinkingConfig "enabled" budget
-                }
+              AnthropicChat $
+                AnthropicChatReq
+                  { model = config.acModel,
+                    messages = [toJSON $ AnthropicMessage "user" (toJSON userMsg)],
+                    maxTokens = config.acMaxTokens,
+                    tools = maybeTools,
+                    system = config.acSystemPrompt,
+                    thinking = case config.acThinking of
+                      ThinkingDisabled -> Nothing
+                      ThinkingEnabled budget -> Just $ toJSON $ ThinkingConfig "enabled" budget
+                  }
         result <- sendRequest socketCfg req
         case result of
           Right (AnthropicChatResponse content stop usage) ->
             case (fromJSON (toJSON content), fromJSON (toJSON usage)) of
               (Aeson.Success c, Aeson.Success u) -> pure $ Right $ AnthropicResponse c stop u
-              (err, _) -> pure $ Left $ LLMParseError [fmt|Failed to parse content: {show err}|]
+              (err, _) -> pure $ Left $ LLMParseError $ T.pack $ "Failed to parse content: " <> show err
+          Right (ErrorResponse code msg) -> pure $ Left $ LLMApiError (T.pack $ show code) msg
+          Right _ -> pure $ Left $ LLMParseError "Unexpected response type for Anthropic"
+          Left err -> pure $ Left $ socketErrorToLLMError err
+
+-- | Make a request to the socket-based service with conversation history.
+socketRequestConversation ::
+  SProvider p ->
+  LLMEnv ->
+  LLMProviderConfig p ->
+  [Message] ->
+  Maybe [Value] ->
+  IO (Either LLMError (LLMProviderResponse p))
+socketRequestConversation provider env config messages maybeTools = case env.leConfig of
+  LLMSocketConfig path -> do
+    let socketCfg = SocketConfig path 30000
+    case provider of
+      SAnthropic -> do
+        let anthropicMessages = map messageToAnthropicMessage messages
+        let req =
+              AnthropicChat $
+                AnthropicChatReq
+                  { model = config.acModel,
+                    messages = map toJSON anthropicMessages,
+                    maxTokens = config.acMaxTokens,
+                    tools = maybeTools,
+                    system = config.acSystemPrompt,
+                    thinking = case config.acThinking of
+                      ThinkingDisabled -> Nothing
+                      ThinkingEnabled budget -> Just $ toJSON $ ThinkingConfig "enabled" budget
+                  }
+        result <- sendRequest socketCfg req
+        case result of
+          Right (AnthropicChatResponse content stop usage) ->
+            case (fromJSON (toJSON content), fromJSON (toJSON usage)) of
+              (Aeson.Success c, Aeson.Success u) -> pure $ Right $ AnthropicResponse c stop u
+              (err, _) -> pure $ Left $ LLMParseError $ T.pack $ "Failed to parse content: " <> show err
           Right (ErrorResponse code msg) -> pure $ Left $ LLMApiError (T.pack $ show code) msg
           Right _ -> pure $ Left $ LLMParseError "Unexpected response type for Anthropic"
           Left err -> pure $ Left $ socketErrorToLLMError err
@@ -201,3 +260,14 @@ runLLMComplete env = interpret $ \case
   CompleteTry provider config msg tools ->
     sendM $
       socketRequest provider env config msg tools
+
+  -- Conversation variants (multi-turn)
+  CompleteConversation provider config messages tools -> sendM $ do
+    result <- socketRequestConversation provider env config messages tools
+    case result of
+      Left err -> error $ "LLMCompleteConversation (" <> providerName provider <> "): " <> show err
+      Right resp -> pure resp
+
+  CompleteConversationTry provider config messages tools ->
+    sendM $
+      socketRequestConversation provider env config messages tools

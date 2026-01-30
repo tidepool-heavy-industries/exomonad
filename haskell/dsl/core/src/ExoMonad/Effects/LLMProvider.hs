@@ -22,10 +22,16 @@ module ExoMonad.Effects.LLMProvider
     ContentBlock (..),
     Usage (..),
 
+    -- * Message Types
+  , Message(..)
+  , Role(..)
+
     -- * Effect
     LLMComplete (..),
     complete,
     completeTry,
+    completeConversation,
+    completeConversationTry,
 
     -- * Error Types
     LLMError (..),
@@ -91,6 +97,43 @@ data AnthropicConfig = AnthropicConfig
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- MESSAGE TYPES (MULTI-TURN CONVERSATIONS)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Role in a conversation.
+data Role = User | Assistant
+  deriving (Show, Eq, Generic)
+
+instance ToJSON Role where
+  toJSON User = "user"
+  toJSON Assistant = "assistant"
+
+instance FromJSON Role where
+  parseJSON = withText "Role" $ \case
+    "user" -> pure User
+    "assistant" -> pure Assistant
+    other -> fail $ "Unknown role: " ++ show other
+    where
+      withText name f = Aeson.withText name f
+
+-- | A message in a multi-turn conversation.
+data Message = Message
+  { msgRole :: Role
+  , msgContent :: [ContentBlock]
+  }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON Message where
+  toJSON msg = object
+    [ "role" .= msg.msgRole
+    , "content" .= msg.msgContent
+    ]
+
+instance FromJSON Message where
+  parseJSON = withObject "Message" $ \v ->
+    Message <$> v .: "role" <*> v .: "content"
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- PROVIDER-SPECIFIC RESPONSE
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -120,19 +163,30 @@ instance FromJSON AnthropicResponse where
 
 -- | Content block (Anthropic-style).
 --
--- Supports text, tool use, and thinking blocks from extended thinking.
+-- Supports text, tool use, tool results, and thinking blocks from extended thinking.
 data ContentBlock
   = TextContent Text
-  | ToolUseContent Text Value -- tool_name, input
+  | ToolUseContent Text Text Value -- tool_use_id, tool_name, input
+  | ToolResultContent Text Value -- tool_use_id, result
   | ThinkingContent Text -- thinking text (extended thinking feature)
   | RedactedThinkingContent -- encrypted thinking block (no content exposed)
   deriving (Show, Eq, Generic)
 
 instance ToJSON ContentBlock where
   toJSON (TextContent t) = object ["type" .= ("text" :: Text), "text" .= t]
-  toJSON (ToolUseContent name input_) =
+  toJSON (ToolUseContent toolUseId name input_) =
     object
-      ["type" .= ("tool_use" :: Text), "name" .= name, "input" .= input_]
+      [ "type" .= ("tool_use" :: Text),
+        "id" .= toolUseId,
+        "name" .= name,
+        "input" .= input_
+      ]
+  toJSON (ToolResultContent toolUseId result) =
+    object
+      [ "type" .= ("tool_result" :: Text),
+        "tool_use_id" .= toolUseId,
+        "content" .= result
+      ]
   toJSON (ThinkingContent t) =
     object
       ["type" .= ("thinking" :: Text), "thinking" .= t]
@@ -145,7 +199,8 @@ instance FromJSON ContentBlock where
     ty <- v .: "type" :: AesonTypes.Parser Text
     case ty of
       "text" -> TextContent <$> v .: "text"
-      "tool_use" -> ToolUseContent <$> v .: "name" <*> v .: "input"
+      "tool_use" -> ToolUseContent <$> v .: "id" <*> v .: "name" <*> v .: "input"
+      "tool_result" -> ToolResultContent <$> v .: "tool_use_id" <*> v .: "content"
       "thinking" -> ThinkingContent <$> v .: "thinking"
       "redacted_thinking" -> pure RedactedThinkingContent
       _ -> fail $ "Unknown content block type: " ++ show ty
@@ -225,6 +280,20 @@ data LLMError
 --   Left err -> handleError err
 --   Right response -> processResponse response
 -- @
+--
+-- = Multi-Turn Conversations
+--
+-- For tool use and multi-turn conversations, use the conversation variants:
+--
+-- @
+-- -- Build conversation history
+-- let messages =
+--       [ Message User [TextContent "What's the weather?"]
+--       , Message Assistant [ToolUseContent "toolu_123" "get_weather" weatherArgs]
+--       , Message User [ToolResultContent "toolu_123" weatherResult]
+--       ]
+-- response <- completeConversation SAnthropic config messages tools
+-- @
 data LLMComplete r where
   Complete ::
     SProvider p ->
@@ -236,6 +305,18 @@ data LLMComplete r where
     SProvider p ->
     LLMProviderConfig p ->
     Text -> -- user message
+    Maybe [Value] -> -- optional tools
+    LLMComplete (Either LLMError (LLMProviderResponse p))
+  CompleteConversation ::
+    SProvider p ->
+    LLMProviderConfig p ->
+    [Message] -> -- conversation history
+    Maybe [Value] -> -- optional tools
+    LLMComplete (LLMProviderResponse p)
+  CompleteConversationTry ::
+    SProvider p ->
+    LLMProviderConfig p ->
+    [Message] -> -- conversation history
     Maybe [Value] -> -- optional tools
     LLMComplete (Either LLMError (LLMProviderResponse p))
 
@@ -278,3 +359,48 @@ completeTry ::
   Maybe [Value] ->
   Eff effs (Either LLMError (LLMProviderResponse p))
 completeTry provider config msg tools = send (CompleteTry provider config msg tools)
+
+-- | Call an LLM with multi-turn conversation history.
+--
+-- This variant supports tool use via conversation history. The messages list
+-- should include the full conversation including tool_use and tool_result blocks.
+--
+-- @
+-- let messages =
+--       [ Message User [TextContent "Search for 'monads'"]
+--       , Message Assistant [ToolUseContent "toolu_123" "search" searchArgs]
+--       , Message User [ToolResultContent "toolu_123" searchResults]
+--       ]
+-- response <- completeConversation SAnthropic config messages tools
+-- @
+--
+-- This variant throws on error. For error handling, use 'completeConversationTry'.
+completeConversation
+  :: forall p effs. Member LLMComplete effs
+  => SProvider p
+  -> LLMProviderConfig p
+  -> [Message]
+  -> Maybe [Value]
+  -> Eff effs (LLMProviderResponse p)
+completeConversation provider config messages tools =
+  send (CompleteConversation provider config messages tools)
+
+-- | Call an LLM with multi-turn conversation history, returning errors as 'Either'.
+--
+-- Use this when you want to handle errors gracefully in multi-turn scenarios:
+--
+-- @
+-- result <- completeConversationTry SAnthropic config messages tools
+-- case result of
+--   Left err -> handleError err
+--   Right response -> processResponse response
+-- @
+completeConversationTry
+  :: forall p effs. Member LLMComplete effs
+  => SProvider p
+  -> LLMProviderConfig p
+  -> [Message]
+  -> Maybe [Value]
+  -> Eff effs (Either LLMError (LLMProviderResponse p))
+completeConversationTry provider config messages tools =
+  send (CompleteConversationTry provider config messages tools)

@@ -198,9 +198,12 @@ instance ToJSON AnthropicRequest where
         ]
 
 -- | A message in the conversation.
+--
+-- Content can be either simple text (String) or structured content blocks (Array).
+-- This matches Anthropic's wire format where content is polymorphic.
 data AnthropicMessage = AnthropicMessage
   { amRole :: Text,
-    amContent :: Text
+    amContent :: Value -- Can be String (simple) or Array (content blocks)
   }
   deriving stock (Eq, Show, Generic)
 
