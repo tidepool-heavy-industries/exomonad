@@ -34,6 +34,7 @@ module Main where
 
 import Control.Monad.Freer (Eff, Member, send, runM)
 import Data.Aeson (object, (.=), Value)
+import Data.List.NonEmpty (NonEmpty(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import System.Directory (doesFileExist)
@@ -137,7 +138,7 @@ testLLMCall =
   send $ RunTurnOp
     testMeta
     testSystemPrompt
-    [TextBlock testUserContent]
+    (Text { text = testUserContent } :| [])
     testSchema
     []  -- No tools for this simple test
   where

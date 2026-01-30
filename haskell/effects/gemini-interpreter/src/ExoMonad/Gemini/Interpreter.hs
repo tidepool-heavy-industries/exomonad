@@ -24,15 +24,48 @@ import ExoMonad.Effects.SocketClient
   , sendRequest
   )
 import GHC.Generics (Generic)
--- ...
+
+-- | Configuration for Gemini interpreter.
+data GeminiConfig
+  = GeminiCliConfig
+  | GeminiSocketConfig
+      { gcSocketPath :: FilePath
+      }
+  deriving (Show, Eq, Generic)
+
+-- | Run Gemini effect via subprocess spawning of 'gemini' CLI.
+runGeminiIO :: LastMember IO effs => Eff (GeminiOp ': effs) a -> Eff effs a
+runGeminiIO = runGeminiWithConfig GeminiCliConfig
+
+-- | Run Gemini effect with explicit configuration.
+runGeminiWithConfig :: LastMember IO effs => GeminiConfig -> Eff (GeminiOp ': effs) a -> Eff effs a
+runGeminiWithConfig config = interpret $ \case
+  RunGemini _meta model prompt -> case config of
+    GeminiCliConfig -> sendM $ do
+      let modelStr = geminiModelToCliId model
+
+      (exitCode, stdout, stderr) <- readProcessWithExitCode "gemini"
+        [ "--model", modelStr
+        , "--prompt", T.unpack prompt
+        , "--output", "json"
+        ] ""
+
+      case exitCode of
+        ExitSuccess -> do
+          pure $ parseGeminiOutput stdout
+        ExitFailure _ -> do
+          pure GeminiResult
+            { grOutput = Null
+            , grRawResponse = "ERROR: " <> T.pack stderr
+            }
     GeminiSocketConfig path -> sendM $ do
       let modelStr = T.pack $ geminiModelToCliId model
       let req = OllamaGenerate { model = modelStr, prompt = prompt, system = Nothing }
       result <- sendRequest (SocketConfig path 30000) req
       case result of
-        Right (OllamaGenerateResponse resp _done) ->
+        Right (OllamaGenerateResponse response _done) ->
           -- Reuse the same JSON parsing logic as the CLI path
-          pure $ parseGeminiOutput (T.unpack resp)
+          pure $ parseGeminiOutput (T.unpack response)
         Right (ErrorResponse _code msg) ->
           pure GeminiResult
             { grOutput = Null

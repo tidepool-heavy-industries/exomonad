@@ -18,7 +18,7 @@ import Servant.API
 import Servant.Client (ClientM, client)
 
 import ExoMonad.Effects.LLMProvider (AnthropicResponse)
-import ExoMonad.LLM.Types (AnthropicRequest)
+import ExoMonad.LLM.Interpreter.Types (AnthropicRequest)
 
 -- | Anthropic Messages API endpoint.
 type AnthropicAPI =

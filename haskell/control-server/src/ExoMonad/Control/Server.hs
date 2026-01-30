@@ -1,3 +1,4 @@
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TypeApplications #-}
 
 -- | Unix socket control server for Claude Code++ integration.
@@ -15,7 +16,7 @@ import ExoMonad.Control.Logging (Logger, logInfo, logDebug, logError)
 import ExoMonad.Control.Protocol
 import ExoMonad.Control.RoleConfig
 import ExoMonad.Control.Types (ServerConfig(..))
-import ExoMonad.LLM.Types (LLMConfig(..))
+import ExoMonad.LLM.Interpreter.Types (LLMConfig(..))
 import ExoMonad.GitHub.Interpreter (GitHubConfig(..))
 import ExoMonad.Observability.Types (newTraceContext, ObservabilityConfig(..), LokiConfig(..), OTLPConfig(..))
 import ExoMonad.Observability.Interpreter (flushTraces)

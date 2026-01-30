@@ -80,6 +80,7 @@ module ExoMonad.Teaching.LLM
 import Control.Exception (bracket)
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Data.Aeson (Value(..), toJSON, object, (.=))
+import qualified Data.List.NonEmpty as NE
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (getCurrentTime)
@@ -106,7 +107,7 @@ import ExoMonad.Effects.LLMProvider
 import qualified ExoMonad.Effects.LLMProvider as LP
 import ExoMonad.Teaching.Anthropic (anthropicComplete)
 import ExoMonad.LLM.Interpreter (buildAnthropicRequest)
-import ExoMonad.LLM.Types (ToolChoice(..))
+import ExoMonad.LLM.Interpreter.Types (ToolChoice(..))
 import ExoMonad.Teaching.Types
   ( TeachingEnv(..)
   , TeachingConfig(..)
@@ -246,7 +247,7 @@ runLLMWithTeaching env = interpret $ \case
     let wrappedPrompt = wrapWithGuidance (teGuidance env) systemPrompt
 
     -- 2. Build user content as text (for Haiku call)
-    let userText = contentBlocksToText userContent
+    let userText = contentBlocksToText (NE.toList userContent)
 
     -- 3. Call Haiku with schema as forced respond tool
     sendM $ putStrLn "[Teaching] Calling Haiku..."
@@ -300,13 +301,13 @@ contentBlocksToText :: [ContentBlock] -> Text
 contentBlocksToText blocks = T.intercalate "\n" $ concatMap extractText blocks
   where
     extractText :: ContentBlock -> [Text]
-    extractText (TextBlock t) = [t]
-    extractText (ToolResultBlock tr) = [T.pack $ show tr]
-    extractText (ImageBlock _) = ["[image]"]
-    extractText (ToolUseBlock tu) = [T.pack $ show tu]
-    extractText (ThinkingBlock tc) = [T.pack $ show tc]
-    extractText (RedactedThinkingBlock _) = ["[redacted thinking]"]
-    extractText (JsonBlock v) = [T.pack $ show v]
+    extractText Text { text = t } = [t]
+    extractText ToolResult { content = c } = [c]
+    extractText Image {} = ["[image]"]
+    extractText ToolUse { name = n, input = i } = [n <> ": " <> T.pack (show i)]
+    extractText Thinking { thinking = t } = [t]
+    extractText RedactedThinking {} = ["[redacted thinking]"]
+    extractText Json { json = v } = [T.pack $ show v]
 
 
 -- | Call Haiku via Anthropic API with forced structured output.
@@ -379,11 +380,12 @@ schemaToRespondTool schema = object
 -- Currently produces a simple success outcome; tool use handling would
 -- need extension.
 convertToOutcome :: AnthropicResponse -> TurnOutcome (TurnResult Value)
-convertToOutcome (AnthropicResponse contentBlocks _usage _stopReason) =
+convertToOutcome (AnthropicResponse { arContent = contentBlocksNE }) =
   -- Extract text, thinking, and tool use from content blocks (LP = LLMProvider ContentBlock)
-  let textContent = T.intercalate "\n" [t | LP.TextContent t <- contentBlocks]
-      thinkingContent = T.intercalate "\n" [t | LP.ThinkingContent t <- contentBlocks]
-      toolUses = [(name, input_) | LP.ToolUseContent name input_ <- contentBlocks]
+  let blocks = NE.toList contentBlocksNE
+      textContent = T.intercalate "\n" [t | LP.TextContent t <- blocks]
+      thinkingContent = T.intercalate "\n" [t | LP.ThinkingContent t <- blocks]
+      toolUses = [(name, input_) | LP.ToolUseContent name input_ <- blocks]
   in case toolUses of
     [] ->
       -- No tool use - return text as structured output

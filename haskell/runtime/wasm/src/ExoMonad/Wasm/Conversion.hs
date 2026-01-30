@@ -41,6 +41,7 @@ import Data.Aeson
   )
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
+import qualified Data.List.NonEmpty as NE
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -79,42 +80,40 @@ import ExoMonad.Wasm.WireTypes
 -- | Convert a native ContentBlock to wire format.
 --
 -- Returns 'Nothing' for blocks that shouldn't be sent over the wire:
--- - ThinkingBlock (model-internal)
--- - RedactedThinkingBlock (model-internal)
--- - JsonBlock (converted to text representation)
+-- - Thinking (model-internal)
+-- - RedactedThinking (model-internal)
+-- - Json (converted to text representation)
 contentBlockToWire :: ContentBlock -> Maybe WireContentBlock
 contentBlockToWire = \case
-  TextBlock txt ->
+  Text { text = txt } ->
     Just $ WCBText txt
 
-  ImageBlock source ->
-    Just $ WCBImage source
+  Image { source = src } ->
+    Just $ WCBImage src
 
-  ToolUseBlock tu ->
-    let ToolUseId tid = tu.toolUseId
-    in Just $ WCBToolUse
+  ToolUse { id = ToolUseId tid, name = toolName, input = toolInput } ->
+    Just $ WCBToolUse
       { wcbToolId = tid
-      , wcbToolName = tu.toolName
-      , wcbToolInput = tu.toolInput
+      , wcbToolName = toolName
+      , wcbToolInput = toolInput
       }
 
-  ToolResultBlock tr ->
-    let ToolResultId tid = tr.toolResultId
-    in Just $ WCBToolResult
+  ToolResult { toolUseId = ToolResultId tid, content = resultContent, isError = isErr } ->
+    Just $ WCBToolResult
       { wcbToolUseId = tid
-      , wcbResultContent = tr.toolResultContent
-      , wcbIsError = tr.toolResultIsError
+      , wcbResultContent = resultContent
+      , wcbIsError = isErr
       }
 
   -- Thinking blocks are internal to the model and not sent to TypeScript
-  ThinkingBlock _ ->
+  Thinking {} ->
     Nothing
 
-  RedactedThinkingBlock _ ->
+  RedactedThinking {} ->
     Nothing
 
   -- JSON blocks get stringified as text
-  JsonBlock val ->
+  Json { json = val } ->
     Just $ WCBText $ TL.toStrict $ TLE.decodeUtf8 $ Aeson.encode val
 
 
@@ -122,7 +121,7 @@ contentBlockToWire = \case
 messageToWire :: Message -> WireMessage
 messageToWire msg = WireMessage
   { wmRole = roleToText msg.role
-  , wmContent = mapMaybe contentBlockToWire msg.content
+  , wmContent = mapMaybe contentBlockToWire (NE.toList msg.content)
   }
   where
     roleToText User = "user"
@@ -161,32 +160,37 @@ contentBlocksToWireMessages systemPrompt contentBlocks =
 wireContentBlockToNative :: WireContentBlock -> ContentBlock
 wireContentBlockToNative = \case
   WCBText txt ->
-    TextBlock txt
+    Text { text = txt }
 
-  WCBImage source ->
-    ImageBlock source
+  WCBImage src ->
+    Image { source = src }
 
-  WCBToolUse tid name input ->
-    ToolUseBlock ToolUse
-      { toolUseId = ToolUseId tid
-      , toolName = name
-      , toolInput = input
+  WCBToolUse tid toolName toolInput ->
+    ToolUse
+      { id = ToolUseId tid
+      , name = toolName
+      , input = toolInput
       }
 
-  WCBToolResult tid content isErr ->
-    ToolResultBlock Anthropic.ToolResult
-      { Anthropic.toolResultId = ToolResultId tid
-      , Anthropic.toolResultContent = content
-      , Anthropic.toolResultIsError = isErr
+  WCBToolResult tid resultContent isErr ->
+    ToolResult
+      { toolUseId = ToolResultId tid
+      , content = resultContent
+      , isError = isErr
       }
 
 
 -- | Convert a wire Message to native format.
-wireMessageToNative :: WireMessage -> Message
-wireMessageToNative msg = Message
-  { role = textToRole msg.wmRole
-  , content = map wireContentBlockToNative msg.wmContent
-  }
+--
+-- Returns 'Nothing' if the message has empty content (wire messages should have content).
+wireMessageToNative :: WireMessage -> Maybe Message
+wireMessageToNative msg =
+  case NE.nonEmpty (map wireContentBlockToNative msg.wmContent) of
+    Nothing -> Nothing  -- Empty content, skip this message
+    Just blocks -> Just Message
+      { role = textToRole msg.wmRole
+      , content = blocks
+      }
   where
     textToRole "user" = User
     textToRole "assistant" = Assistant
@@ -194,8 +198,10 @@ wireMessageToNative msg = Message
 
 
 -- | Convert a list of wire Messages to native format.
+--
+-- Skips messages with empty content.
 wireMessagesToNative :: [WireMessage] -> [Message]
-wireMessagesToNative = map wireMessageToNative
+wireMessagesToNative = mapMaybe wireMessageToNative
 
 
 -- ════════════════════════════════════════════════════════════════════════════
