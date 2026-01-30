@@ -17,105 +17,111 @@ import ExoMonad.Control.Effects.SshExec (ExecRequest (..), ExecResult (..), SshE
 import ExoMonad.Effects.Git (Git (..), WorktreeInfo (..))
 
 -- | Interpreter: uses SshExec to run git commands remotely
--- Takes a container name (optional) and a working directory (relative to container root).
+-- Takes a container name and a working directory (relative to container root).
 runGitRemote :: (Member SshExec effs) => Maybe Text -> FilePath -> Eff (Git ': effs) a -> Eff effs a
 runGitRemote mContainer workDir = interpret $ \case
-  GetWorktreeInfo -> do
-    -- This is a bit complex to implement perfectly for remote containers without more logic,
-    -- but we can try to get the basic info.
-    mPath <- gitCommand mContainer workDir ["rev-parse", "--show-toplevel"]
-    case mPath of
-      Nothing -> pure Nothing
-      Just path -> do
-        mBranch <- gitCommand mContainer workDir ["branch", "--show-current"]
-        let branch = maybe "HEAD" T.strip mBranch
+  op -> do
+    container <- case mContainer of
+      Just c -> pure c
+      Nothing -> error "Git operation requested but no container ID provided (remote execution requires a container)"
+    
+    case op of
+      GetWorktreeInfo -> do
+        -- This is a bit complex to implement perfectly for remote containers without more logic,
+        -- but we can try to get the basic info.
+        mPath <- gitCommand container workDir ["rev-parse", "--show-toplevel"]
+        case mPath of
+          Nothing -> pure Nothing
+          Just path -> do
+            mBranch <- gitCommand container workDir ["branch", "--show-current"]
+            let branch = maybe "HEAD" T.strip mBranch
 
-        -- Simplified worktree detection
-        mGitDir <- gitCommand mContainer workDir ["rev-parse", "--git-dir"]
-        let inWorktree = maybe False ("worktrees" `T.isInfixOf`) mGitDir
+            -- Simplified worktree detection
+            mGitDir <- gitCommand container workDir ["rev-parse", "--git-dir"]
+            let inWorktree = maybe False ("worktrees" `T.isInfixOf`) mGitDir
 
-        pure $
-          Just
-            WorktreeInfo
-              { wiName = if inWorktree then "remote-worktree" else "main",
-                wiPath = T.unpack (T.strip path),
-                wiBranch = branch,
-                wiRepoRoot = T.unpack (T.strip path), -- Simplified
-                wiIsWorktree = inWorktree
+            pure $
+              Just
+                WorktreeInfo
+                  { wiName = if inWorktree then "remote-worktree" else "main",
+                    wiPath = T.unpack (T.strip path),
+                    wiBranch = branch,
+                    wiRepoRoot = T.unpack (T.strip path), -- Simplified
+                    wiIsWorktree = inWorktree
+                  }
+      GetDirtyFiles -> do
+        result <-
+          execCommand $
+            ExecRequest
+              { container = Just container,
+                command = "git",
+                args = ["status", "--porcelain"],
+                workingDir = workDir,
+                env = [],
+                timeout = 30
               }
-  GetDirtyFiles -> do
-    result <-
-      execCommand $
-        ExecRequest
-          { container = mContainer,
-            command = "git",
-            args = ["status", "--porcelain"],
-            workingDir = workDir,
-            env = [],
-            timeout = 30
-          }
-    pure $
-      if result.exitCode == Just 0
-        then map (drop 3 . T.unpack) $ T.lines (result.stdout)
-        else []
-  GetRecentCommits n -> do
-    result <-
-      execCommand $
-        ExecRequest
-          { container = mContainer,
-            command = "git",
-            args = ["log", "--oneline", "-" <> T.pack (show n), "--format=%s"],
-            workingDir = workDir,
-            env = [],
-            timeout = 30
-          }
-    pure $
-      if result.exitCode == Just 0
-        then T.lines (result.stdout)
-        else []
-  GetCurrentBranch -> do
-    mBranch <- gitCommand mContainer workDir ["branch", "--show-current"]
-    pure $ maybe "HEAD" T.strip mBranch
-  GetCommitsAhead ref -> do
-    result <-
-      execCommand $
-        ExecRequest
-          { container = mContainer,
-            command = "git",
-            args = ["rev-list", "--count", ref <> "..HEAD"],
-            workingDir = workDir,
-            env = [],
-            timeout = 30
-          }
-    pure $
-      if result.exitCode == Just 0
-        then case reads (T.unpack $ T.strip $ result.stdout) of
-          [(n, "")] -> n
-          _ -> 0
-        else 0
-  FetchRemote remote mRefspec -> do
-    let args = case mRefspec of
-          Just refspec -> ["fetch", remote, refspec]
-          Nothing -> ["fetch", remote]
-    _ <-
-      execCommand $
-        ExecRequest
-          { container = mContainer,
-            command = "git",
-            args = args,
-            workingDir = workDir,
-            env = [],
-            timeout = 120 -- Fetches can take longer
-          }
-    pure ()
+        pure $
+          if result.exitCode == Just 0
+            then map (drop 3 . T.unpack) $ T.lines (result.stdout)
+            else []
+      GetRecentCommits n -> do
+        result <-
+          execCommand $
+            ExecRequest
+              { container = Just container,
+                command = "git",
+                args = ["log", "--oneline", "-" <> T.pack (show n), "--format=%s"],
+                workingDir = workDir,
+                env = [],
+                timeout = 30
+              }
+        pure $
+          if result.exitCode == Just 0
+            then T.lines (result.stdout)
+            else []
+      GetCurrentBranch -> do
+        mBranch <- gitCommand container workDir ["branch", "--show-current"]
+        pure $ maybe "HEAD" T.strip mBranch
+      GetCommitsAhead ref -> do
+        result <-
+          execCommand $
+            ExecRequest
+              { container = Just container,
+                command = "git",
+                args = ["rev-list", "--count", ref <> "..HEAD"],
+                workingDir = workDir,
+                env = [],
+                timeout = 30
+              }
+        pure $
+          if result.exitCode == Just 0
+            then case reads (T.unpack $ T.strip $ result.stdout) of
+              [(n, "")] -> n
+              _ -> 0
+            else 0
+      FetchRemote remote mRefspec -> do
+        let args = case mRefspec of
+              Just refspec -> ["fetch", remote, refspec]
+              Nothing -> ["fetch", remote]
+        _ <-
+          execCommand $
+            ExecRequest
+              { container = Just container,
+                command = "git",
+                args = args,
+                workingDir = workDir,
+                env = [],
+                timeout = 120 -- Fetches can take longer
+              }
+        pure ()
 
 -- | Helper to run a git command via SshExec
-gitCommand :: (Member SshExec effs) => Maybe Text -> FilePath -> [Text] -> Eff effs (Maybe Text)
-gitCommand mContainer wd args = do
+gitCommand :: (Member SshExec effs) => Text -> FilePath -> [Text] -> Eff effs (Maybe Text)
+gitCommand container wd args = do
   result <-
     execCommand $
       ExecRequest
-        { container = mContainer,
+        { container = Just container,
           command = "git",
           args = args,
           workingDir = wd,

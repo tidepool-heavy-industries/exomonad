@@ -55,12 +55,18 @@ impl PluginManager {
 
     pub async fn reload(&self, _services: Arc<Services>) -> Result<()> {
         let new_plugin = Self::load_plugin(&self.wasm_path)?;
-        // Swap it
-        {
-            let mut guard = self.plugin.write().unwrap();
+        
+        // Swap it without blocking the async runtime
+        let plugin_lock = self.plugin.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut guard = plugin_lock.write().unwrap();
             *guard = new_plugin;
-        }
+        })
+        .await
+        .context("Failed to join spawn_blocking task")?;
+
         // Init again
+        // Note: The plugin is expected to handle re-initialization gracefully or be stateless enough that calling hs_init again is safe.
         self.call::<(), ()>("hs_init", &())
             .await
             .context("Failed to call hs_init after reload")?;
