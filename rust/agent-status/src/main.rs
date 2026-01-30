@@ -1,25 +1,30 @@
 mod api;
+mod component;
+mod components;
 mod state;
 
 use anyhow::Result;
 use clap::Parser;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use futures::StreamExt;
 use ratatui::{
     backend::{Backend, CrosstermBackend},
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap},
+    widgets::{Block, Borders, Tabs},
     Terminal,
 };
-use std::{io, time::Duration, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}};
+use std::{io, time::Duration, sync::{Arc, Mutex}};
 use tokio::sync::mpsc;
 use api::ApiClient;
 use state::DashboardState;
+use component::{Component, Action};
+use components::{overview::OverviewComponent, logs::LogsComponent, controls::ControlsComponent};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -41,8 +46,6 @@ async fn main() -> Result<()> {
 
     // Setup state
     let state = Arc::new(Mutex::new(DashboardState::default()));
-    let running = Arc::new(AtomicBool::new(true));
-    let running_clone = running.clone();
     
     let state_clone = state.clone();
     let client = ApiClient::new(args.control_server.clone());
@@ -68,7 +71,7 @@ async fn main() -> Result<()> {
 
     // Polling task
     tokio::spawn(async move {
-        while running_clone.load(Ordering::Relaxed) {
+        loop {
             // 1. Fetch Agents
             match client_clone.get_agents().await {
                 Ok(agents) => {
@@ -88,7 +91,7 @@ async fn main() -> Result<()> {
                 }
             }
 
-            // 2. Fetch Logs if needed (logic: always fetch logs for selected agent for simplicity)
+            // 2. Fetch Logs if needed
             let selected_id = {
                 let s = state_clone.lock().expect("State lock poisoned");
                 if s.agents.is_empty() { None } else { Some(s.agents[s.selected_index].id.clone()) }
@@ -115,9 +118,6 @@ async fn main() -> Result<()> {
     // Run app
     let res = run_app(&mut terminal, state, tx).await;
 
-    // Stop polling
-    running.store(false, Ordering::Relaxed);
-
     // Restore terminal
     disable_raw_mode()?;
     execute!(
@@ -141,10 +141,12 @@ async fn run_app<B: Backend>(
 ) -> io::Result<()> {
     let mut tab_index = 0;
     let tabs = vec!["Overview", "Logs", "Controls"];
+    let mut reader = EventStream::new();
 
     loop {
+        // Draw
         terminal.draw(|f| {
-            let chunks = Layout::default()
+             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .margin(1)
                 .constraints([Constraint::Length(3), Constraint::Min(0)].as_ref())
@@ -169,25 +171,40 @@ async fn run_app<B: Backend>(
             
             f.render_widget(tabs_widget, chunks[0]);
 
-            // Content
+            // Component Rendering
             let s = state.lock().expect("State lock poisoned");
-            
             match tab_index {
-                0 => render_overview(f, chunks[1], &s),
-                1 => render_logs(f, chunks[1], &s),
-                2 => render_controls(f, chunks[1], &s),
-                _ => {},
-            };
-            
+                0 => {
+                    let mut comp = OverviewComponent { state: &s };
+                    comp.render(f, chunks[1]);
+                }
+                1 => {
+                    let mut comp = LogsComponent { state: &s };
+                    comp.render(f, chunks[1]);
+                }
+                2 => {
+                    let mut comp = ControlsComponent { state: &s };
+                    comp.render(f, chunks[1]);
+                }
+                _ => {}
+            }
         }).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
 
-        if crossterm::event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                let mut s = state.lock().expect("State lock poisoned");
-                match key.code {
+        // Event Loop
+        let event = tokio::select! {
+            // We can add a ticker here if we wanted constant refreshes independent of backend updates
+            // _ = tokio::time::sleep(Duration::from_millis(100)) => None, 
+            maybe_event = reader.next() => maybe_event,
+        };
+
+        match event {
+            Some(Ok(Event::Key(key))) => {
+                 // Global keys
+                 match key.code {
                     KeyCode::Char('q') => return Ok(()),
                     KeyCode::Right | KeyCode::Tab => {
                         tab_index = (tab_index + 1) % tabs.len();
+                        continue;
                     }
                     KeyCode::Left => {
                         if tab_index > 0 {
@@ -195,24 +212,47 @@ async fn run_app<B: Backend>(
                         } else {
                             tab_index = tabs.len() - 1;
                         }
+                        continue;
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
+                    _ => {}
+                }
+
+                // Component keys
+                let mut s = state.lock().expect("State lock poisoned");
+                let action = match tab_index {
+                    0 => {
+                        let mut comp = OverviewComponent { state: &s };
+                        comp.handle_key_event(key)
+                    },
+                    1 => {
+                        let mut comp = LogsComponent { state: &s };
+                        comp.handle_key_event(key)
+                    },
+                    2 => {
+                        let mut comp = ControlsComponent { state: &s };
+                        comp.handle_key_event(key)
+                    }
+                    _ => Ok(Action::None),
+                };
+
+                // Handle Actions
+                match action {
+                    Ok(Action::SelectNext) => {
                         if !s.agents.is_empty() {
                             s.selected_index = (s.selected_index + 1) % s.agents.len();
                         }
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
+                    Ok(Action::SelectPrev) => {
                         if !s.agents.is_empty() {
-                            if s.selected_index > 0 {
+                             if s.selected_index > 0 {
                                 s.selected_index -= 1;
                             } else {
                                 s.selected_index = s.agents.len() - 1;
                             }
                         }
                     }
-                    KeyCode::Char('K') | KeyCode::Char('x') => {
-                        // Kill/Stop agent
-                        if !s.agents.is_empty() {
+                    Ok(Action::KillAgent) => {
+                         if !s.agents.is_empty() {
                             let id = s.agents[s.selected_index].id.clone();
                             let tx = tx.clone();
                             tokio::spawn(async move {
@@ -220,112 +260,15 @@ async fn run_app<B: Backend>(
                             });
                         }
                     }
+                    Ok(Action::Quit) => return Ok(()),
                     _ => {}
                 }
             }
+            Some(Ok(_)) => {} // Other events
+            Some(Err(e)) => return Err(io::Error::new(io::ErrorKind::Other, e)),
+            None => break,
         }
     }
-}
 
-fn render_overview(f: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &DashboardState) {
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)].as_ref())
-        .split(area);
-
-    // Left: List of Agents
-    let items: Vec<ListItem> = state.agents
-        .iter()
-        .map(|agent| {
-            let style = if agent.status == "running" {
-                Style::default().fg(Color::Green)
-            } else {
-                Style::default().fg(Color::Red)
-            };
-            let content = Line::from(vec![
-                Span::styled(format!("● {}", agent.id), style),
-                Span::raw(format!(" [{}]", agent.status)),
-            ]);
-            ListItem::new(content)
-        })
-        .collect();
-
-    let mut list_state = ListState::default();
-    let selection = if state.agents.is_empty() { 
-        None 
-    } else { 
-        Some(state.selected_index.min(state.agents.len().saturating_sub(1))) 
-    };
-    list_state.select(selection);
-
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Agents"))
-        .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
-
-    f.render_stateful_widget(list, chunks[0], &mut list_state);
-
-    // Right: Details
-    if state.agents.is_empty() {
-        let text = Paragraph::new("No agents active.").block(Block::default().borders(Borders::ALL));
-        f.render_widget(text, chunks[1]);
-    } else if let Some(agent) = state.agents.get(state.selected_index) {
-        let text = vec![
-            Line::from(vec![Span::raw("ID: "), Span::styled(&agent.id, Style::default().fg(Color::Cyan))]),
-            Line::from(vec![Span::raw("Container: "), Span::raw(&agent.container_id)]),
-            Line::from(vec![Span::raw("Status: "), Span::raw(&agent.status)]),
-            Line::from(vec![Span::raw("Started: "), Span::raw(&agent.started_at)]),
-            Line::from(""),
-            Line::from(vec![Span::styled("Last Action:", Style::default().add_modifier(Modifier::BOLD))]),
-            Line::from(agent.last_action.clone().unwrap_or_default()),
-            Line::from(""),
-            Line::from(vec![Span::styled("Blocker:", Style::default().fg(Color::Red))]),
-            Line::from(agent.blocker.clone().unwrap_or_default()),
-        ];
-        
-        let details = Paragraph::new(text)
-            .block(Block::default().borders(Borders::ALL).title("Details"))
-            .wrap(Wrap { trim: true });
-        
-        f.render_widget(details, chunks[1]);
-    }
-}
-
-fn render_logs(f: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &DashboardState) {
-    if state.agents.is_empty() {
-        let text = Paragraph::new("No agents active.").block(Block::default().borders(Borders::ALL));
-        f.render_widget(text, area);
-        return;
-    }
-
-    let agent = match state.agents.get(state.selected_index) {
-        Some(a) => a,
-        None => return,
-    };
-    let logs = state.logs_cache.get(&agent.id).map(|s| s.as_str()).unwrap_or("Loading logs...");
-
-    let p = Paragraph::new(logs)
-        .block(Block::default().borders(Borders::ALL).title(format!("Logs: {}", agent.id)))
-        .wrap(Wrap { trim: false }); // Logs usually better unwrapped or scrolled, sticking to basic for now
-    
-    f.render_widget(p, area);
-}
-
-fn render_controls(f: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &DashboardState) {
-    let text = vec![
-        Line::from("Available Actions:"),
-        Line::from(""),
-        Line::from(vec![Span::styled("[K] / [x]", Style::default().fg(Color::Red)), Span::raw(" Stop/Kill Selected Agent")]),
-        Line::from(""),
-        Line::from(vec![Span::styled("Status: ", Style::default().add_modifier(Modifier::BOLD))]),
-        Line::from(if state.connected { 
-            Span::styled("Connected to Control Server", Style::default().fg(Color::Green)) 
-        } else { 
-            Span::styled("Disconnected (Retrying...)", Style::default().fg(Color::Red)) 
-        }),
-    ];
-    
-    let p = Paragraph::new(text)
-        .block(Block::default().borders(Borders::ALL).title("Controls"));
-    
-    f.render_widget(p, area);
+    Ok(())
 }
