@@ -50,9 +50,10 @@
 --       callNoTools cfg (System "Analyze this") (User content)
 -- @
 module ExoMonad.LLM.Interpret
-  ( -- * Interpreter
+  ( -- * Interpreters
     runLLMCall
   , runLLMCallWith
+  , runLLMCallWithTools
 
     -- * Configuration
   , InterpretConfig(..)
@@ -69,6 +70,7 @@ import qualified Data.Text.Encoding as TE
 
 import ExoMonad.LLM.Types
 import ExoMonad.LLM.Effect (LLMCall(..))
+import ExoMonad.LLM.Tools (ToolRecord(dispatchTool), ToolDispatchError(..))
 import ExoMonad.Effects.LLMProvider
   ( LLMComplete
   , completeTry
@@ -149,6 +151,8 @@ runLLMCallWith interpCfg = interpret $ \case
     runWithNudge interpCfg.icMaxNudges anthropicCfg usr Nothing
 
   CallLLMWithTools mdl maxTok _temp (System sys) (User usr) _schema toolSchemas -> do
+    -- Note: runLLMCall without tool record just ignores tool_use responses.
+    -- Use runLLMCallWithTools to properly handle tool execution.
     let anthropicCfg = AnthropicConfig
           { acModel = modelToText mdl
           , acMaxTokens = fromMaybe interpCfg.icDefaultMaxTokens maxTok
@@ -156,6 +160,189 @@ runLLMCallWith interpCfg = interpret $ \case
           , acSystemPrompt = Just sys
           }
     runWithNudge interpCfg.icMaxNudges anthropicCfg usr (Just toolSchemas)
+
+-- | Run the LLMCall effect with tool support.
+--
+-- This interpreter takes the tool record and handles multi-turn tool loops.
+-- When the LLM requests tool use, this interpreter:
+--
+-- 1. Extracts tool calls from the response
+-- 2. Executes them via 'dispatchTool'
+-- 3. Sends tool results back to the LLM
+-- 4. Repeats until the LLM provides a final answer or max loops exceeded
+--
+-- @
+-- let toolRecord = MyTools
+--       { search = \\args -> searchDocuments args
+--       , lookup = \\args -> lookupById args.id
+--       }
+--
+-- runM
+--   $ runLLMComplete env
+--   $ runLLMCallWithTools toolRecord
+--   $ do
+--       let cfg = defaultLLM \@Report & model Opus & tools toolRecord
+--       call cfg (System sys) (User usr)
+-- @
+runLLMCallWithTools
+  :: forall tools es a.
+     ( Member LLMComplete es
+     , LastMember IO es
+     , ToolRecord tools
+     )
+  => tools es
+  -> Eff (LLMCall ': es) a
+  -> Eff es a
+runLLMCallWithTools toolRecord = interpret $ \case
+
+  CallLLMNoTools mdl maxTok _temp (System sys) (User usr) _schema -> do
+    let cfg = AnthropicConfig
+          { acModel = modelToText mdl
+          , acMaxTokens = fromMaybe defaultInterpretConfig.icDefaultMaxTokens maxTok
+          , acThinking = ThinkingDisabled
+          , acSystemPrompt = Just sys
+          }
+    runWithNudge defaultInterpretConfig.icMaxNudges cfg usr Nothing
+
+  CallLLMWithTools mdl maxTok _temp (System sys) (User usr) _schema toolSchemas -> do
+    let cfg = AnthropicConfig
+          { acModel = modelToText mdl
+          , acMaxTokens = fromMaybe defaultInterpretConfig.icDefaultMaxTokens maxTok
+          , acThinking = ThinkingDisabled
+          , acSystemPrompt = Just sys
+          }
+    runToolLoop
+      defaultInterpretConfig.icMaxToolLoops
+      defaultInterpretConfig.icMaxNudges
+      cfg
+      usr
+      toolSchemas
+      toolRecord
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- INTERNAL: TOOL USE LOOP
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Run with tool loop support.
+--
+-- Handles multi-turn tool use: when the LLM returns tool_use, we execute
+-- the tools and send results back until we get a final text response.
+runToolLoop
+  :: forall tools out es.
+     ( Member LLMComplete es
+     , LastMember IO es
+     , StructuredOutput out
+     , ToolRecord tools
+     )
+  => Int                  -- ^ Remaining tool loop iterations
+  -> Int                  -- ^ Max nudges for final response
+  -> AnthropicConfig      -- ^ API config
+  -> Text                 -- ^ User message
+  -> [Value]              -- ^ Tool schemas
+  -> tools es             -- ^ Tool record for dispatch
+  -> Eff es (Either CallError out)
+runToolLoop loopsLeft nudgesLeft cfg userMsg toolSchemas tools
+  | loopsLeft <= 0 = pure $ Left $ CallMaxToolLoops defaultInterpretConfig.icMaxToolLoops
+  | otherwise = do
+      result <- completeTry SAnthropic cfg userMsg (Just toolSchemas)
+      case result of
+        Left err -> pure $ Left $ llmErrorToCallError err
+
+        Right response ->
+          -- Check if this is a tool_use response
+          case extractToolUse response.arContent of
+            -- No tool use - try to parse as structured output
+            [] -> parseResponse nudgesLeft cfg userMsg (Just toolSchemas) response
+
+            -- Tool use requested - execute and continue loop
+            toolCalls -> do
+              toolResults <- executeToolCalls tools toolCalls
+              case toolResults of
+                Left err -> pure $ Left err
+                Right results -> do
+                  -- Format tool results as follow-up message
+                  let followUp = formatToolResults results userMsg
+                  runToolLoop (loopsLeft - 1) nudgesLeft cfg followUp toolSchemas tools
+
+-- | Extract tool use blocks from response content.
+extractToolUse :: [ContentBlock] -> [(Text, Value)]
+extractToolUse = concatMap extract
+  where
+    extract (ToolUseContent name input_) = [(name, input_)]
+    extract _ = []
+
+-- | Execute tool calls and collect results.
+executeToolCalls
+  :: forall tools es.
+     (ToolRecord tools)
+  => tools es
+  -> [(Text, Value)]
+  -> Eff es (Either CallError [(Text, Either ToolDispatchError Value)])
+executeToolCalls tools calls = do
+  results <- traverse executeOne calls
+  -- Check if any tool dispatch failed fatally
+  let fatalErrors = [(n, e) | (n, Left e@(ToolNotFound _)) <- results]
+  case fatalErrors of
+    ((name, ToolNotFound _):_) ->
+      pure $ Left $ CallToolError name "Tool not found"
+    _ -> pure $ Right results
+  where
+    executeOne (name, input_) = do
+      result <- dispatchTool tools name input_
+      pure (name, result)
+
+-- | Format tool results as a follow-up user message.
+--
+-- This appends tool results to the original message so the LLM has context.
+formatToolResults :: [(Text, Either ToolDispatchError Value)] -> Text -> Text
+formatToolResults results originalMsg = T.unlines
+  [ originalMsg
+  , ""
+  , "Tool results:"
+  , T.unlines $ map formatOne results
+  , ""
+  , "Please provide your final response based on these tool results."
+  ]
+  where
+    formatOne (name, Right val) =
+      "- " <> name <> ": " <> T.pack (show val)
+    formatOne (name, Left (ToolInputParseError _ err)) =
+      "- " <> name <> " (error): Failed to parse input - " <> err
+    formatOne (name, Left (ToolNotFound _)) =
+      "- " <> name <> " (error): Tool not found"
+
+-- | Parse response as structured output with nudge retries.
+parseResponse
+  :: forall out es.
+     ( Member LLMComplete es
+     , LastMember IO es
+     , StructuredOutput out
+     )
+  => Int
+  -> AnthropicConfig
+  -> Text
+  -> Maybe [Value]
+  -> AnthropicResponse
+  -> Eff es (Either CallError out)
+parseResponse nudgesLeft cfg userMsg toolSchemas response = do
+  let textContent = extractTextContent response.arContent
+
+  case Aeson.eitherDecodeStrict (TE.encodeUtf8 textContent) of
+    Left jsonErr ->
+      if nudgesLeft > 0
+      then nudgeAndRetry (nudgesLeft - 1) cfg userMsg toolSchemas
+             ("JSON parse error: " <> T.pack jsonErr)
+      else pure $ Left $ CallParseFailed $ "JSON parse error: " <> T.pack jsonErr
+
+    Right jsonVal ->
+      case parseStructured jsonVal of
+        Right out -> pure $ Right out
+        Left diag ->
+          if nudgesLeft > 0
+          then nudgeAndRetry (nudgesLeft - 1) cfg userMsg toolSchemas
+                 (formatDiagnostic diag)
+          else pure $ Left $ CallParseFailed $ formatDiagnostic diag
 
 
 -- ════════════════════════════════════════════════════════════════════════════

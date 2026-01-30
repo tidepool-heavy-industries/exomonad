@@ -47,7 +47,7 @@
 -- call cfg (System sysText) (User userText)
 -- @
 --
--- = Running
+-- = Running (No Tools)
 --
 -- @
 -- import ExoMonad.LLM.Interpret (runLLMCall)
@@ -60,6 +60,18 @@
 --     $ runLLMCall
 --     $ yourCode
 -- @
+--
+-- = Running (With Tools)
+--
+-- @
+-- import ExoMonad.LLM.Interpret (runLLMCallWithTools)
+--
+-- let myTools = MyTools { search = searchHandler, lookup = lookupHandler }
+-- runM
+--   $ runLLMComplete env
+--   $ runLLMCallWithTools myTools
+--   $ yourCode
+-- @
 module ExoMonad.LLM
   ( -- * LLM Call Effect
     LLMCall
@@ -67,6 +79,10 @@ module ExoMonad.LLM
     -- * Making Calls
   , call
   , callNoTools
+
+    -- * Interpreters
+  , runLLMCall
+  , runLLMCallWithTools
 
     -- * Configuration
   , CallConfig
@@ -135,6 +151,12 @@ import ExoMonad.LLM.Effect
   ( LLMCall
   , call
   , callNoTools
+  )
+
+-- Interpreters
+import ExoMonad.LLM.Interpret
+  ( runLLMCall
+  , runLLMCallWithTools
   )
 
 -- Template rendering

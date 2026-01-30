@@ -41,6 +41,7 @@ module ExoMonad.LLM.Types
   , CallError(..)
   ) where
 
+import Data.Kind (Type)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Data.Aeson (ToJSON, FromJSON)
@@ -125,7 +126,7 @@ data NoTools
 --
 -- * @out@ - The expected structured output type (phantom)
 -- * @tools@ - Tool record type, or 'NoTools' if none
-data CallConfig (out :: *) (tools :: *)  = CallConfig
+data CallConfig (out :: Type) (tools :: Type)  = CallConfig
   { ccModel       :: Model
     -- ^ Which model to use (default: Sonnet)
   , ccTemperature :: Maybe Double
@@ -160,5 +161,7 @@ data CallError
     -- ^ API error (type, message)
   | CallToolError Text Text
     -- ^ Tool execution error (tool name, error message)
+  | CallMaxToolLoops Int
+    -- ^ Maximum tool use iterations exceeded
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON, FromJSON)
