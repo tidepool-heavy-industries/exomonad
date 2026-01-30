@@ -74,6 +74,7 @@ impl ControlSocket {
                 tool_name,
                 arguments,
                 role,
+                container_id,
             } => {
                 let endpoint = match role {
                     Some(r) => format!("/role/{}/mcp/call", r),
@@ -82,7 +83,8 @@ impl ControlSocket {
                 let body = serde_json::json!({
                     "id": id,
                     "tool_name": tool_name,
-                    "arguments": arguments
+                    "arguments": arguments,
+                    "container_id": container_id
                 });
                 let bytes = serde_json::to_vec(&body).map_err(ExoMonadError::JsonSerialize)?;
                 ("POST", endpoint, Some(bytes))
