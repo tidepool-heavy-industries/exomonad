@@ -290,28 +290,32 @@ pub fn register_host_functions() -> Vec<Function> {
             [ValType::I64],
             UserData::new(()),
             github_list_issues,
-        ),
+        )
+        .with_namespace("env"),
         Function::new(
             "github_get_issue",
             [ValType::I64],
             [ValType::I64],
             UserData::new(()),
             github_get_issue,
-        ),
+        )
+        .with_namespace("env"),
         Function::new(
             "github_create_pr",
             [ValType::I64],
             [ValType::I64],
             UserData::new(()),
             github_create_pr,
-        ),
+        )
+        .with_namespace("env"),
         Function::new(
             "github_list_prs",
             [ValType::I64],
             [ValType::I64],
             UserData::new(()),
             github_list_prs,
-        ),
+        )
+        .with_namespace("env"),
     ]
 }
 

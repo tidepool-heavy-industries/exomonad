@@ -139,7 +139,7 @@ pub struct HookInput {
 // ============================================================================
 
 /// Common fields for all hook output types.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookOutput {
     /// Whether to continue processing (default: true).
     #[serde(rename = "continue", default = "default_true")]
@@ -164,6 +164,18 @@ pub struct HookOutput {
     /// Hook-specific output fields.
     #[serde(skip_serializing_if = "Option::is_none", rename = "hookSpecificOutput")]
     pub hook_specific_output: Option<HookSpecificOutput>,
+}
+
+impl Default for HookOutput {
+    fn default() -> Self {
+        Self {
+            continue_: true, // Semantic default: allow continuation
+            stop_reason: None,
+            suppress_output: None,
+            system_message: None,
+            hook_specific_output: None,
+        }
+    }
 }
 
 fn default_true() -> bool {
@@ -1341,5 +1353,129 @@ mod tests {
         assert!(obj.contains_key("reviews"));
         // merged_at is None so should be absent (skip_serializing_if)
         assert!(!obj.contains_key("merged_at"));
+    }
+
+    // =========================================================================
+    // HookOutput comprehensive serialization tests
+    // =========================================================================
+
+    #[test]
+    fn test_hook_output_pre_tool_use_allow_format() {
+        let output = HookOutput::pre_tool_use_allow(Some("test reason".into()), None);
+        let json = serde_json::to_value(&output).unwrap();
+
+        assert_eq!(json["continue"], true);
+        assert!(
+            json["stopReason"].is_null() || !json.as_object().unwrap().contains_key("stopReason")
+        );
+
+        let specific = &json["hookSpecificOutput"];
+        assert_eq!(specific["hookEventName"], "PreToolUse");
+        assert_eq!(specific["permissionDecision"], "allow");
+        assert_eq!(specific["permissionDecisionReason"], "test reason");
+    }
+
+    #[test]
+    fn test_hook_output_pre_tool_use_deny_format() {
+        let output = HookOutput::pre_tool_use_deny("not allowed".into());
+        let json = serde_json::to_value(&output).unwrap();
+
+        assert_eq!(json["continue"], true); // deny still continues, just blocks this tool
+        let specific = &json["hookSpecificOutput"];
+        assert_eq!(specific["hookEventName"], "PreToolUse");
+        assert_eq!(specific["permissionDecision"], "deny");
+        assert_eq!(specific["permissionDecisionReason"], "not allowed");
+    }
+
+    #[test]
+    fn test_hook_output_pre_tool_use_with_updated_input() {
+        let modified = serde_json::json!({"file_path": "/safe/path.txt"});
+        let output = HookOutput::pre_tool_use_allow(None, Some(modified.clone()));
+        let json = serde_json::to_value(&output).unwrap();
+
+        let specific = &json["hookSpecificOutput"];
+        assert_eq!(specific["updatedInput"], modified);
+    }
+
+    #[test]
+    fn test_hook_output_block_format() {
+        let output = HookOutput::block("session terminated".into());
+        let json = serde_json::to_value(&output).unwrap();
+
+        assert_eq!(json["continue"], false);
+        assert_eq!(json["stopReason"], "session terminated");
+    }
+
+    #[test]
+    fn test_hook_output_post_tool_use_format() {
+        let output = HookOutput::post_tool_use_allow(Some("additional context".into()));
+        let json = serde_json::to_value(&output).unwrap();
+
+        assert_eq!(json["continue"], true);
+        let specific = &json["hookSpecificOutput"];
+        assert_eq!(specific["hookEventName"], "PostToolUse");
+        assert_eq!(specific["additionalContext"], "additional context");
+    }
+
+    #[test]
+    fn test_hook_output_default() {
+        let output = HookOutput::default();
+        let json = serde_json::to_value(&output).unwrap();
+
+        // Default should have continue=true and no hook_specific_output
+        assert_eq!(json["continue"], true);
+    }
+
+    // =========================================================================
+    // HookInput comprehensive parsing tests
+    // =========================================================================
+
+    #[test]
+    fn test_hook_input_minimal() {
+        let json = r#"{"session_id":"s","hook_event_name":"Stop"}"#;
+        let input: HookInput = serde_json::from_str(json).unwrap();
+        assert_eq!(input.session_id, "s");
+        assert_eq!(input.hook_event_name, "Stop");
+        assert!(input.tool_name.is_none());
+    }
+
+    #[test]
+    fn test_hook_input_with_tool_parameters_alias() {
+        // Gemini CLI uses tool_parameters instead of tool_input
+        let json = r#"{"session_id":"s","hook_event_name":"PreToolUse","tool_parameters":{"key":"value"}}"#;
+        let input: HookInput = serde_json::from_str(json).unwrap();
+        assert!(input.tool_input.is_some());
+        assert_eq!(input.tool_input.unwrap()["key"], "value");
+    }
+
+    #[test]
+    fn test_hook_input_extra_fields_ignored() {
+        let json = r#"{"session_id":"s","hook_event_name":"Stop","unknown_field":"ignored","another":123}"#;
+        let result: Result<HookInput, _> = serde_json::from_str(json);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_hook_input_all_fields() {
+        let json = r#"{
+            "session_id": "sess-123",
+            "transcript_path": "/tmp/t.jsonl",
+            "cwd": "/home/user",
+            "permission_mode": "plan",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/x"},
+            "tool_use_id": "toolu_abc",
+            "prompt": "user prompt",
+            "message": "notification",
+            "stop_hook_active": true
+        }"#;
+        let input: HookInput = serde_json::from_str(json).unwrap();
+        assert_eq!(input.session_id, "sess-123");
+        assert_eq!(input.cwd, "/home/user");
+        assert_eq!(input.permission_mode, "plan");
+        assert_eq!(input.tool_name, Some("Write".into()));
+        assert_eq!(input.prompt, Some("user prompt".into()));
+        assert_eq!(input.stop_hook_active, Some(true));
     }
 }

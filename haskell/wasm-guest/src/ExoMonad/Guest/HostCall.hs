@@ -9,10 +9,6 @@ module ExoMonad.Guest.HostCall
     host_git_get_worktree,
     host_git_get_dirty_files,
     host_git_get_recent_commits,
-    -- Docker
-    host_docker_exec,
-    host_docker_spawn,
-    host_docker_kill,
     -- GitHub
     host_github_list_issues,
     host_github_get_issue,
@@ -39,13 +35,6 @@ foreign import ccall "git_get_worktree" host_git_get_worktree :: Word64 -> IO Wo
 foreign import ccall "git_get_dirty_files" host_git_get_dirty_files :: Word64 -> IO Word64
 
 foreign import ccall "git_get_recent_commits" host_git_get_recent_commits :: Word64 -> IO Word64
-
--- Docker host functions
-foreign import ccall "docker_exec" host_docker_exec :: Word64 -> IO Word64
-
-foreign import ccall "docker_spawn" host_docker_spawn :: Word64 -> IO Word64
-
-foreign import ccall "docker_kill" host_docker_kill :: Word64 -> IO Word64
 
 -- GitHub host functions
 foreign import ccall "github_list_issues" host_github_list_issues :: Word64 -> IO Word64

@@ -185,6 +185,7 @@ pub fn git_get_branch_host_fn(git_service: Arc<GitService>) -> Function {
             Ok(())
         },
     )
+    .with_namespace("env")
 }
 
 pub fn git_get_worktree_host_fn(git_service: Arc<GitService>) -> Function {
@@ -210,6 +211,7 @@ pub fn git_get_worktree_host_fn(git_service: Arc<GitService>) -> Function {
             Ok(())
         },
     )
+    .with_namespace("env")
 }
 
 pub fn git_get_dirty_files_host_fn(git_service: Arc<GitService>) -> Function {
@@ -235,6 +237,7 @@ pub fn git_get_dirty_files_host_fn(git_service: Arc<GitService>) -> Function {
             Ok(())
         },
     )
+    .with_namespace("env")
 }
 
 pub fn git_get_recent_commits_host_fn(git_service: Arc<GitService>) -> Function {
@@ -264,6 +267,7 @@ pub fn git_get_recent_commits_host_fn(git_service: Arc<GitService>) -> Function 
             Ok(())
         },
     )
+    .with_namespace("env")
 }
 
 #[cfg(test)]

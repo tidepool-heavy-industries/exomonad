@@ -110,6 +110,7 @@ pub fn log_info_host_fn<S: HasLogService + Send + Sync + 'static>(services: Arc<
             Ok(())
         },
     )
+    .with_namespace("env")
 }
 
 /// Registers the `log_error` host function.
@@ -133,6 +134,7 @@ pub fn log_error_host_fn<S: HasLogService + Send + Sync + 'static>(services: Arc
             Ok(())
         },
     )
+    .with_namespace("env")
 }
 
 pub fn emit_event_host_fn<S: HasLogService + Send + Sync + 'static>(services: Arc<S>) -> Function {
@@ -157,4 +159,5 @@ pub fn emit_event_host_fn<S: HasLogService + Send + Sync + 'static>(services: Ar
             Ok(())
         },
     )
+    .with_namespace("env")
 }

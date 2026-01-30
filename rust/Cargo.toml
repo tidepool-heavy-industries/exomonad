@@ -5,13 +5,13 @@ members = [
     "exomonad-shared",
     "exomonad-services",
     "exomonad-runtime",
+    "exomonad-sidecar",
     "tui-popup",
     "tui-spawner",
     "effector",
     "docker-ctl",
     "agent-status",
     "zellij-gen",
-    "exomonad-runtime",
 ]
 
 [workspace.dependencies]

@@ -1,4 +1,3 @@
-use crate::host_functions;
 use crate::services::git;
 use crate::services::github;
 use crate::services::log;
@@ -24,12 +23,8 @@ impl PluginManager {
             wasm_path: path,
         };
 
-        // Initialize RTS
-        // We must call hs_init once.
-        manager
-            .call::<(), ()>("hs_init", &())
-            .await
-            .context("Failed to call hs_init")?;
+        // Note: GHC RTS initialization (hs_init) is handled automatically by the
+        // Extism Haskell PDK when the WASM module is loaded. No explicit call needed.
 
         Ok(manager)
     }
@@ -45,8 +40,9 @@ impl PluginManager {
         functions.push(git::git_get_dirty_files_host_fn(services.git.clone()));
         functions.push(git::git_get_recent_commits_host_fn(services.git.clone()));
 
-        // Docker functions (3 functions)
-        functions.extend(host_functions::docker_functions(services.docker.clone()));
+        // NOTE: Docker functions are NOT registered as WASM imports.
+        // They are Rust implementation details used internally by Git/GitHub services.
+        // Haskell calls high-level effects (GitGetBranch), Rust handles Docker internally.
 
         // Log functions (3 functions)
         let services_arc = Arc::new(services.clone());
@@ -72,11 +68,7 @@ impl PluginManager {
         .await
         .context("Failed to join spawn_blocking task")?;
 
-        // Init again
-        // Note: The plugin is expected to handle re-initialization gracefully or be stateless enough that calling hs_init again is safe.
-        self.call::<(), ()>("hs_init", &())
-            .await
-            .context("Failed to call hs_init after reload")?;
+        // Note: GHC RTS is automatically initialized when the plugin is loaded.
         Ok(())
     }
 
