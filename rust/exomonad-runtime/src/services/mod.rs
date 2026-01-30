@@ -1,16 +1,26 @@
 pub mod docker;
+pub mod log;
 
 use self::docker::DockerService;
+use self::log::{HasLogService, LogService};
 
 #[derive(Clone)]
 pub struct Services {
     pub docker: DockerService,
+    pub log: LogService,
 }
 
 impl Services {
     pub fn new() -> Self {
         Self {
             docker: DockerService::new(),
+            log: LogService::new(),
         }
+    }
+}
+
+impl HasLogService for Services {
+    fn log_service(&self) -> &LogService {
+        &self.log
     }
 }

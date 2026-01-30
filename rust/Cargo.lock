@@ -1187,6 +1187,7 @@ dependencies = [
  "axum",
  "clap",
  "extism",
+ "extism-convert",
  "serde",
  "serde_json",
  "tempfile",
