@@ -135,6 +135,10 @@ deriveToolRecord typeName tools = do
       -- Process each field
       fieldData <- forM fields $ \(fname, _, ftype) -> do
         argsType <- extractArgsType ftype fname
+        
+        -- Validate args type doesn't introduce ambiguity
+        validateArgsType argsType
+
         let jsonKey = camelToSnake (nameBase fname)
         -- Find the Tool entry for this field (guaranteed to exist by validation above)
         desc <- case find (\t -> t.toolFieldName == nameBase fname) tools of
@@ -154,6 +158,33 @@ deriveToolRecord typeName tools = do
           ++ show (length cons)
           ++ " constructor(s)"
     _ -> fail $ "deriveToolRecord: " ++ nameBase typeName ++ " must be a data type"
+
+-- | Validate that the argument type doesn't conflict with primitive wrapping.
+--
+-- We wrap primitive types in {"value": ...}. To avoid ambiguity, we forbid
+-- single-field records where the field is named "value".
+validateArgsType :: Type -> Q ()
+validateArgsType (ConT name) = do
+  info <- reify name
+  case info of
+    TyConI (DataD _ _ _ _ [RecC _ [(fieldName, _, _)]] _) -> do
+      if nameBase fieldName == "value"
+        then fail $ 
+          "deriveToolRecord: Tool input type '" ++ nameBase name ++ 
+          "' has a single field named 'value'. " ++
+          "This is reserved for primitive type wrapping. " ++
+          "Please rename the field to something else (e.g. 'content', 'itemValue')."
+        else pure ()
+    TyConI (NewtypeD _ _ _ _ (RecC _ [(fieldName, _, _)]) _) -> do
+      if nameBase fieldName == "value"
+        then fail $ 
+          "deriveToolRecord: Tool input type '" ++ nameBase name ++ 
+          "' has a single field named 'value'. " ++
+          "This is reserved for primitive type wrapping. " ++
+          "Please rename the field to something else."
+        else pure ()
+    _ -> pure ()
+validateArgsType _ = pure ()
 
 -- | Extract the type variable name from a TyVarBndr
 getTyVarName :: TyVarBndr a -> Name

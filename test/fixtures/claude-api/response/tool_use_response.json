@@ -1,0 +1,24 @@
+{
+  "id": "msg_01235",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "I will check the weather."
+    },
+    {
+      "type": "tool_use",
+      "id": "toolu_01234",
+      "name": "get_weather",
+      "input": {"location": "San Francisco"}
+    }
+  ],
+  "model": "claude-3-opus-20240229",
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 20,
+    "output_tokens": 30
+  }
+}

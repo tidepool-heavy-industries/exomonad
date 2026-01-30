@@ -236,13 +236,29 @@ cfToolToValue = toJSON
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Create an Anthropic tool from name, description, and typed schema.
+--
+-- Wraps non-object schemas in a "value" property to ensure valid JSON Schema object.
 schemaToAnthropicTool :: Text -> Text -> JSONSchema -> AnthropicTool
 schemaToAnthropicTool name desc schema =
-  AnthropicTool
-    { atName = name,
-      atDescription = desc,
-      atInputSchema = schemaToValue schema
-    }
+  let finalSchema = case schema.schemaType of
+        TObject -> schemaToValue schema
+        -- Non-object schema: wrap in object with "value" property to satisfy Anthropic requirements
+        _ ->
+          object
+            [ "type" .= ("object" :: Text),
+              "properties"
+                .= object
+                  [ "value" .= schemaToValue schema
+                  ],
+              "required" .= (["value"] :: [Text]),
+              -- Anthropic generally prefers additionalProperties: false
+              "additionalProperties" .= False
+            ]
+   in AnthropicTool
+        { atName = name,
+          atDescription = desc,
+          atInputSchema = finalSchema
+        }
 
 -- | Create a CF AI tool from name, description, and typed schema.
 schemaToCfTool :: Text -> Text -> JSONSchema -> CfTool

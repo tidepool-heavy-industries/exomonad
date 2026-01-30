@@ -3,6 +3,7 @@ module Main (main) where
 import CLIGraphSpec qualified
 import CLISpec qualified
 import CallHandlerSpec qualified
+import ClaudeAPIGoldenSpec qualified
 import ConvertTransitionHintSpec qualified
 import DecisionSpec qualified
 import DecisionToolsSpec qualified
@@ -19,10 +20,14 @@ import StructuredOutputSpec qualified
 import TUIWireFormatSpec qualified
 import Test.Hspec
 import ToolRecordTHSpec qualified
+import ToolSchemaBugSpec qualified
 import ToolTransitionIntegrationSpec qualified
 
 main :: IO ()
 main = hspec $ do
+  describe "Tool Schema Bug" $ do
+    ToolSchemaBugSpec.spec
+
   describe "Schema Derivation" $ do
     SchemaDerivationSpec.spec
 
@@ -34,6 +39,9 @@ main = hspec $ do
 
   describe "Graph DSL" $ do
     GraphValidationSpec.spec
+
+  describe "Claude API Golden" $ do
+    ClaudeAPIGoldenSpec.spec
 
   describe "LLM Node Execution" $ do
     LLMNodeInterpretSpec.spec

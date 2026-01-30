@@ -195,7 +195,7 @@ data StopReason
   | Refusal
   | PauseTurn
   deriving stock (Show, Eq, Generic)
-  deriving (ToJSON, FromJSON) via CustomJSON '[ConstructorTagModifier CamelToSnake] StopReason
+  deriving (ToJSON, FromJSON) via CustomJSON '[ConstructorTagModifier '[StripSuffix "Stop", CamelToSnake]] StopReason
 
 -- | Token usage information
 data Usage = Usage

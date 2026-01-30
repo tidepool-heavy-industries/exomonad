@@ -88,14 +88,16 @@ module ExoMonad.Graph.Tool
 where
 
 import Control.Monad.Freer (Eff)
-import Data.Aeson (FromJSON, Result (..), ToJSON, Value, fromJSON, object, (.=))
+import Data.Aeson (FromJSON, Result (..), ToJSON, Value (..), fromJSON, object, (.=))
+import Data.Aeson.KeyMap qualified as KM
 import Data.Kind (Constraint, Type)
+import Data.Maybe (fromMaybe)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Typeable (TypeRep, Typeable, typeRep)
 import ExoMonad.Effect.Types (ToolError (..), ValidatedToolInput (..))
-import ExoMonad.Schema (HasJSONSchema (..), JSONSchema, schemaToValue)
+import ExoMonad.Schema (HasJSONSchema (..), JSONSchema (..), SchemaType (..), schemaToValue)
 -- Re-exports (wire types only - Convert has its own module to avoid cycles)
 import ExoMonad.Tool.Wire
   ( AnthropicTool (..),
@@ -306,17 +308,28 @@ validateToolInput ::
   Value ->
   Either ToolError (ValidatedToolInput (ToolInput t))
 validateToolInput tool inputJson =
-  case fromJSON inputJson of
-    Success parsed ->
-      Right (ValidatedToolInput parsed)
-    Error errMsg ->
-      Left
-        ToolValidationFailed
-          { tveToolName = toolName tool,
-            tveExpectedSchema = schemaToValue (jsonSchema @(ToolInput t)),
-            tveActualInput = inputJson,
-            tveParseError = T.pack errMsg
-          }
+  let schema = jsonSchema @(ToolInput t)
+      -- If the schema is not an object, the input was wrapped in {"value": ...} by the LLM
+      -- We need to unwrap it before parsing.
+      adjustedInput = case schema.schemaType of
+        TObject -> inputJson
+        _ -> case inputJson of
+          -- Check for {"value": ...} wrapper
+          Object obj -> case KM.lookup "value" obj of
+            Just v -> v
+            Nothing -> inputJson -- Should not happen if LLM follows schema, but fallback
+          _ -> inputJson
+   in case fromJSON adjustedInput of
+        Success parsed ->
+          Right (ValidatedToolInput parsed)
+        Error errMsg ->
+          Left
+            ToolValidationFailed
+              { tveToolName = toolName tool,
+                tveExpectedSchema = schemaToValue schema,
+                tveActualInput = inputJson,
+                tveParseError = T.pack errMsg
+              }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TOOL LIST REIFICATION
