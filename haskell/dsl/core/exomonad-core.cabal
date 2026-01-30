@@ -105,6 +105,7 @@ library
         ExoMonad.LLM
         ExoMonad.LLM.Effect
         ExoMonad.LLM.Interpret
+        ExoMonad.LLM.Tools.TH
       build-depends:
         exomonad-habitica,
         optparse-applicative >= 0.17 && < 1
@@ -193,6 +194,7 @@ test-suite graph-validation-tests
         DecisionSpec
         TUIWireFormatSpec
         SchemaDerivationSpec
+        ToolRecordTHSpec
         Test.ExoMonad.MockLLM
         -- Golden test files (compile-only validation)
         BranchingLogicRecord

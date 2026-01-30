@@ -109,6 +109,10 @@ module ExoMonad.LLM
   , dispatchHandler
   , ToolDispatchError(..)
 
+    -- * TH Derivation
+  , deriveToolRecord
+  , Tool(..)
+
     -- * Template Rendering
     -- | For rendering Jinja templates to Text. See "ExoMonad.Template.Render"
     -- for more details.
@@ -144,6 +148,12 @@ import ExoMonad.LLM.Tools
   , ToolSchema(..)
   , dispatchHandler
   , ToolDispatchError(..)
+  )
+
+-- TH derivation for ToolRecord
+import ExoMonad.LLM.Tools.TH
+  ( deriveToolRecord
+  , Tool(..)
   )
 
 -- Effect and main functions
