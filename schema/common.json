@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "Repo": {
+      "type": "object",
+      "properties": {
+        "owner": { "type": "string" },
+        "name": { "type": "string" }
+      },
+      "required": ["owner", "name"]
+    },
+    "IssueFilter": {
+      "type": "object",
+      "properties": {
+        "state": { "type": "string" },
+        "labels": { "type": "array", "items": { "type": "string" } },
+        "assignee": { "type": "string" }
+      }
+    },
+    "WorktreeInfo": {
+        "type": "object",
+        "properties": {
+            "path": { "type": "string" },
+            "branch": { "type": "string" },
+            "commit": { "type": "string" }
+        },
+        "required": ["path", "branch", "commit"]
+    },
+    "EffectResult": {
+        "oneOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "kind": { "const": "Success" },
+                    "payload": { "type": ["string", "null"] }
+                },
+                "required": ["kind", "payload"]
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "kind": { "const": "Error" },
+                    "payload": { "type": ["string", "null"] }
+                },
+                "required": ["kind", "payload"]
+            }
+        ]
+    }
+  }
+}

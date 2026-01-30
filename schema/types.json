@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExoMonadTypes",
+  "definitions": {
+    "Effect": { "$ref": "effects.json" },
+    "EffectResult": { "$ref": "common.json#/definitions/EffectResult" },
+    "WorktreeInfo": { "$ref": "common.json#/definitions/WorktreeInfo" }
+  },
+  "type": "object",
+  "properties": {
+    "effect": { "$ref": "#/definitions/Effect" },
+    "effectResult": { "$ref": "#/definitions/EffectResult" },
+    "worktreeInfo": { "$ref": "#/definitions/WorktreeInfo" }
+  },
+  "required": ["effect", "effectResult"]
+}

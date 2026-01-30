@@ -1,0 +1,89 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Effect",
+  "oneOf": [
+    { "$ref": "#/definitions/LogEffect" },
+    { "$ref": "#/definitions/GitGetBranchEffect" },
+    { "$ref": "#/definitions/GitGetWorktreeEffect" },
+    { "$ref": "#/definitions/GitHubListIssuesEffect" },
+    { "$ref": "#/definitions/DockerExecEffect" }
+  ],
+  "definitions": {
+    "LogEffect": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "Log" },
+        "payload": { "$ref": "#/definitions/LogPayload" }
+      },
+      "required": ["kind", "payload"]
+    },
+    "LogPayload": {
+      "type": "object",
+      "properties": {
+        "level": { "type": "string" },
+        "message": { "type": "string" },
+        "fields": { "type": "object", "additionalProperties": { "type": "string" } }
+      },
+      "required": ["level", "message"]
+    },
+    "GitGetBranchEffect": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "GitGetBranch" },
+        "payload": { "$ref": "#/definitions/GitGetBranchPayload" }
+      },
+      "required": ["kind", "payload"]
+    },
+    "GitGetBranchPayload": {
+      "type": "object",
+      "properties": { "workingDir": { "type": "string" } },
+      "required": ["workingDir"]
+    },
+    "GitGetWorktreeEffect": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "GitGetWorktree" },
+        "payload": { "$ref": "#/definitions/GitGetWorktreePayload" }
+      },
+      "required": ["kind", "payload"]
+    },
+    "GitGetWorktreePayload": {
+      "type": "object",
+      "properties": { "workingDir": { "type": "string" } },
+      "required": ["workingDir"]
+    },
+    "GitHubListIssuesEffect": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "GitHubListIssues" },
+        "payload": { "$ref": "#/definitions/GitHubListIssuesPayload" }
+      },
+      "required": ["kind", "payload"]
+    },
+    "GitHubListIssuesPayload": {
+      "type": "object",
+      "properties": {
+        "repo": { "$ref": "common.json#/definitions/Repo" },
+        "filter": { "$ref": "common.json#/definitions/IssueFilter" }
+      },
+      "required": ["repo"]
+    },
+    "DockerExecEffect": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "DockerExec" },
+        "payload": { "$ref": "#/definitions/DockerExecPayload" }
+      },
+      "required": ["kind", "payload"]
+    },
+    "DockerExecPayload": {
+      "type": "object",
+      "properties": {
+        "containerId": { "type": "string" },
+        "command": { "type": "array", "items": { "type": "string" } },
+        "workingDir": { "type": "string" }
+      },
+      "required": ["containerId", "command"]
+    }
+  }
+}
