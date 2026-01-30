@@ -98,7 +98,10 @@ runApp config tracer cbMap logger agentStore mContainerId action = do
   let retryCfg = defaultRetryConfig {tracer = Just tracer}
 
   -- Container ID for remote execution
-  -- If no container ID is provided, git operations will fail with a helpful error
+  -- If no container ID is provided, use an explicit sentinel so git errors are clearer
+  let containerId = case mContainerId of
+        Just c -> c
+        Nothing -> "NO_CONTAINER_ID_PROVIDED"
   runM $
     runLog Debug $
       runTime $
@@ -112,9 +115,9 @@ runApp config tracer cbMap logger agentStore mContainerId action = do
                       withRetry retryCfg $
                         runZellijIO $
                           runSshExec logger dockerCtlPath $
-                            runGitRemote mContainerId "." $
+                            runGitRemote containerId "." $
                               runWorktreeIO (defaultWorktreeConfig repoRoot) $
                                 runEffectorIO logger $
-                                  runJustfileRemote mContainerId repoRoot $
+                                  runJustfileRemote containerId "" $
                                     runDockerCtl logger dockerCtlPath agentStore $
                                       runGeminiIO action

@@ -76,10 +76,15 @@ impl ControlSocket {
                 role,
                 container_id,
             } => {
-                let endpoint = match role {
+                let mut endpoint = match role {
                     Some(r) => format!("/role/{}/mcp/call", r),
                     None => "/mcp/call".to_string(),
                 };
+                
+                if let (Some(_), Some(cid)) = (role, container_id) {
+                    endpoint.push_str(&format!("?container={}", cid));
+                }
+
                 let body = serde_json::json!({
                     "id": id,
                     "tool_name": tool_name,

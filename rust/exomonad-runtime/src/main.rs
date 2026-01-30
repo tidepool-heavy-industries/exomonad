@@ -25,7 +25,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Starting ExoMonad Runtime");
     info!("Loading WASM plugin from: {:?}", args.wasm);
 
-    let services = Arc::new(Services);
+    let services = Arc::new(Services::new());
     let plugin_manager = PluginManager::new(args.wasm, services.clone()).await?;
 
     start_server(args.port, plugin_manager, services).await?;

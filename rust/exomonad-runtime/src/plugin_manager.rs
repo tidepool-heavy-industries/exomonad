@@ -13,8 +13,8 @@ pub struct PluginManager {
 }
 
 impl PluginManager {
-    pub async fn new(path: PathBuf, _services: Arc<Services>) -> Result<Self> {
-        let plugin = Self::load_plugin(&path)?;
+    pub async fn new(path: PathBuf, services: Arc<Services>) -> Result<Self> {
+        let plugin = Self::load_plugin(&path, &services)?;
 
         let manager = Self {
             plugin: Arc::new(RwLock::new(plugin)),
@@ -31,30 +31,33 @@ impl PluginManager {
         Ok(manager)
     }
 
-    fn load_plugin(path: &PathBuf) -> Result<Plugin> {
+    fn load_plugin(path: &PathBuf, services: &Services) -> Result<Plugin> {
         let manifest = Manifest::new([extism::Wasm::file(path)]);
 
-        let f1 = Function::new(
-            "git_get_branch",
-            [],
-            [ValType::I64],
-            UserData::new(()),
-            host_functions::git_get_branch,
-        );
+        let mut functions = vec![
+            Function::new(
+                "git_get_branch",
+                [],
+                [ValType::I64],
+                UserData::new(()),
+                host_functions::git_get_branch,
+            ),
+            Function::new(
+                "log_info",
+                [ValType::I64, ValType::I64], // ptr, len
+                [],
+                UserData::new(()),
+                host_functions::log_info,
+            ),
+        ];
 
-        let f2 = Function::new(
-            "log_info",
-            [ValType::I64, ValType::I64], // ptr, len
-            [],
-            UserData::new(()),
-            host_functions::log_info,
-        );
+        functions.extend(host_functions::docker_functions(services.docker.clone()));
 
-        Plugin::new(&manifest, [f1, f2], true).context("Failed to create plugin")
+        Plugin::new(&manifest, functions, true).context("Failed to create plugin")
     }
 
-    pub async fn reload(&self, _services: Arc<Services>) -> Result<()> {
-        let new_plugin = Self::load_plugin(&self.wasm_path)?;
+    pub async fn reload(&self, services: Arc<Services>) -> Result<()> {
+        let new_plugin = Self::load_plugin(&self.wasm_path, &services)?;
 
         // Swap it without blocking the async runtime
         let plugin_lock = self.plugin.clone();

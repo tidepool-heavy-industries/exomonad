@@ -1,4 +1,7 @@
--- | Git effect interpreter - pure handler injection for testing.
+-- | Pure Git effect handler injection for testing (no CLI/IO interpreter).
+--
+-- Note: The IO-based interpreter `runGitIO` has been removed from this module.
+-- For production use with remote execution, use `ExoMonad.Control.Effects.Git.runGitRemote`.
 module ExoMonad.Git.Interpreter
   ( runGit,
     worktreeName,

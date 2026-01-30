@@ -1189,6 +1189,7 @@ dependencies = [
  "extism",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
