@@ -115,6 +115,6 @@ runApp config tracer cbMap logger agentStore mContainerId action = do
                             runGitRemote mContainerId "." $
                               runWorktreeIO (defaultWorktreeConfig repoRoot) $
                                 runEffectorIO logger $
-                                  runJustfileRemote mContainerId "" $
+                                  runJustfileRemote mContainerId repoRoot $
                                     runDockerCtl logger dockerCtlPath agentStore $
                                       runGeminiIO action
