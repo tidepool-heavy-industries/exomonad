@@ -52,6 +52,12 @@ library
         ExoMonad.Tool.Wire
         ExoMonad.StructuredOutput
         ExoMonad.StructuredOutput.Class
+        -- Typed LLM DSL (WASM-safe types and builders)
+        ExoMonad.LLM.Types
+        ExoMonad.LLM.Builder
+        ExoMonad.LLM.Tools
+        -- Template rendering (WASM-safe)
+        ExoMonad.Template.Render
     -- Development/tooling modules (excluded from WASM builds)
     if !os(wasi)
       exposed-modules:
@@ -95,6 +101,10 @@ library
         ExoMonad.Graph.Interpret.Instrumented
         ExoMonad.Question
         ExoMonad.Template.DependencyTree
+        -- Typed LLM DSL (native-only: requires LLMProvider effect)
+        ExoMonad.LLM
+        ExoMonad.LLM.Effect
+        ExoMonad.LLM.Interpret
       build-depends:
         exomonad-habitica,
         optparse-applicative >= 0.17 && < 1
