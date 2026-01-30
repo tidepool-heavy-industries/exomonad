@@ -1,5 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedRecordDot #-}
@@ -58,9 +59,10 @@ handleMessage logger config tracer traceCtx cbMap agentStore = \case
 -- | Handle tool discovery request.
 handleToolsList :: Logger -> ServerConfig -> IO ControlResponse
 handleToolsList logger config = do
-  let role = fromMaybe (config.defaultRole) (config.role >>= roleFromText)
-  logInfo logger [fmt|[MCP] Handling ToolsListRequest for role: {role:s}|]
-  tools <- exportMCPTools logger role
+  let effectiveRole = fromMaybe (config.defaultRole) (config.role >>= roleFromText)
+      roleStr = show effectiveRole
+  logInfo logger [fmt|[MCP] Handling ToolsListRequest for role: {roleStr}|]
+  tools <- exportMCPTools logger effectiveRole
   logInfo logger [fmt|[MCP] Returning {length tools} tools|]
   pure $ ToolsListResponse tools
 
@@ -69,8 +71,9 @@ handleMcpToolTyped :: Logger -> ServerConfig -> Tracer -> TraceContext -> Circui
 handleMcpToolTyped logger config tracer traceCtx cbMap agentStore reqId toolName args =
   withMcpTracing logger config traceCtx reqId toolName args $ do
     let effectiveRole = fromMaybe config.defaultRole (config.role >>= roleFromText)
-    
-    logInfo logger [fmt|[MCP:{reqId}] Dispatching: {toolName} (Role: {effectiveRole:s})|]
+        roleStr = show effectiveRole
+
+    logInfo logger [fmt|[MCP:{reqId}] Dispatching: {toolName} (Role: {roleStr})|]
 
     -- Dispatch based on role
     -- Uses Generic 'dispatchTool' on the 'mode :- record' structure

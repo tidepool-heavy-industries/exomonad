@@ -289,17 +289,16 @@ instance Arbitrary GraphInfoWire where
 -- | Arbitrary ImageSource
 instance Arbitrary ImageSource where
   arbitrary = oneof
-    [ Base64Image
-        <$> elements ["image/jpeg", "image/png", "image/webp", "image/gif"]
-        <*> arbitrary  -- Base64 text
-    , UrlImage <$> arbitrary  -- URL text
+    [ Base64 <$> elements ["image/jpeg", "image/png", "image/webp", "image/gif"]
+                <*> arbitrary  -- Base64 data
+    , Url <$> arbitrary  -- URL text
     ]
 
-  shrink (Base64Image mediaType imgData) =
-    [ UrlImage "http://example.com/image.png" ]  -- Simplify to URL
-    ++ [ Base64Image mediaType imgData' | imgData' <- shrink imgData ]
-  shrink (UrlImage url) =
-    [ UrlImage url' | url' <- shrink url ]
+  shrink (Base64 mtype imgData) =
+    [ Url { url = "http://example.com/image.png" } ]  -- Simplify to URL
+    ++ [ Base64 { mediaType = mtype, data_ = imgData' } | imgData' <- shrink imgData ]
+  shrink (Url urlVal) =
+    [ Url { url = urlVal' } | urlVal' <- shrink urlVal ]
 
 
 -- | Arbitrary WireContentBlock
@@ -505,11 +504,11 @@ wireContentBlockPropertySpec = describe "WireContentBlock properties" $ do
 
   describe "WCBImage with base64 source" $ do
     it "round-trips WCBImage with base64 source" $ do
-      let img = WCBImage (Base64Image "image/jpeg" "base64data")
+      let img = WCBImage Base64 { mediaType = "image/jpeg", data_ = "base64data" }
       decode (encode img) `shouldBe` Just img
 
     it "encodes WCBImage with correct JSON structure" $ do
-      let img = WCBImage (Base64Image "image/png" "abc123")
+      let img = WCBImage Base64 { mediaType = "image/png", data_ = "abc123" }
       let json = decode (encode img) :: Maybe Value
       case json of
         Just (Object obj) -> do
@@ -524,11 +523,11 @@ wireContentBlockPropertySpec = describe "WireContentBlock properties" $ do
 
   describe "WCBImage with URL source" $ do
     it "round-trips WCBImage with URL source" $ do
-      let img = WCBImage (UrlImage "https://example.com/image.png")
+      let img = WCBImage Url { url = "https://example.com/image.png" }
       decode (encode img) `shouldBe` Just img
 
     it "encodes WCBImage URL with correct JSON structure" $ do
-      let img = WCBImage (UrlImage "https://example.com/image.png")
+      let img = WCBImage Url { url = "https://example.com/image.png" }
       let json = decode (encode img) :: Maybe Value
       case json of
         Just (Object obj) -> do

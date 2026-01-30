@@ -38,6 +38,7 @@ module ExoMonad.Wasm.Interpreter.LLM
 import Control.Monad.Freer (Eff, Member, interpret)
 import Control.Monad.Freer.Coroutine (Yield, yield)
 import Data.Aeson (Value)
+import qualified Data.List.NonEmpty as NE
 import Data.Text (Text)
 
 import ExoMonad.Effect.Types
@@ -90,8 +91,8 @@ runLLMAsYield = interpret handleLLM
     handleLLM :: Member (Yield SerializableEffect EffectResult) effs
               => LLM x -> Eff effs x
     handleLLM (RunTurnOp meta systemPrompt userContent outputSchema toolDefs) = do
-      -- Convert native ContentBlocks to wire messages
-      let wireMessages = contentBlocksToWireMessages systemPrompt userContent
+      -- Convert native ContentBlocks to wire messages (convert NonEmpty to list)
+      let wireMessages = contentBlocksToWireMessages systemPrompt (NE.toList userContent)
 
       -- Build the effect to yield, using node name from metadata
       let effect = EffLlmCall

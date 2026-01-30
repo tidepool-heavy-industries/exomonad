@@ -12,7 +12,7 @@ import ExoMonad.Control.Hook.Policy (HookPolicy)
 import ExoMonad.Control.RoleConfig (Role(..))
 import ExoMonad.Control.Hook.CircuitBreaker (CircuitBreakerConfig(..))
 import ExoMonad.Control.Workflow.Store (WorkflowStore)
-import ExoMonad.LLM.Types (LLMConfig)
+import ExoMonad.LLM.Interpreter.Types (LLMConfig(..))
 import ExoMonad.GitHub.Interpreter (GitHubConfig)
 
 -- | Server configuration.
