@@ -135,7 +135,7 @@ deriveToolRecord typeName tools = do
       -- Process each field
       fieldData <- forM fields $ \(fname, _, ftype) -> do
         argsType <- extractArgsType ftype fname
-        
+
         -- Validate args type doesn't introduce ambiguity
         validateArgsType argsType
 
@@ -169,19 +169,23 @@ validateArgsType (ConT name) = do
   case info of
     TyConI (DataD _ _ _ _ [RecC _ [(fieldName, _, _)]] _) -> do
       if nameBase fieldName == "value"
-        then fail $ 
-          "deriveToolRecord: Tool input type '" ++ nameBase name ++ 
-          "' has a single field named 'value'. " ++
-          "This is reserved for primitive type wrapping. " ++
-          "Please rename the field to something else (e.g. 'content', 'itemValue')."
+        then
+          fail $
+            "deriveToolRecord: Tool input type '"
+              ++ nameBase name
+              ++ "' has a single field named 'value'. "
+              ++ "This is reserved for primitive type wrapping. "
+              ++ "Please rename the field to something else (e.g. 'content', 'itemValue')."
         else pure ()
     TyConI (NewtypeD _ _ _ _ (RecC _ [(fieldName, _, _)]) _) -> do
       if nameBase fieldName == "value"
-        then fail $ 
-          "deriveToolRecord: Tool input type '" ++ nameBase name ++ 
-          "' has a single field named 'value'. " ++
-          "This is reserved for primitive type wrapping. " ++
-          "Please rename the field to something else."
+        then
+          fail $
+            "deriveToolRecord: Tool input type '"
+              ++ nameBase name
+              ++ "' has a single field named 'value'. "
+              ++ "This is reserved for primitive type wrapping. "
+              ++ "Please rename the field to something else."
         else pure ()
     _ -> pure ()
 validateArgsType _ = pure ()

@@ -250,7 +250,7 @@ extractToolUse :: NonEmpty ContentBlock -> [(Text, Value)]
 extractToolUse blocks = mapMaybe toToolInvocation (NE.toList blocks)
   where
     toToolInvocation :: ContentBlock -> Maybe (Text, Value)
-    toToolInvocation (ToolUseContent name input_) = Just (name, input_)
+    toToolInvocation (ToolUseContent _toolUseId name input_) = Just (name, input_)
     toToolInvocation _ = Nothing
 
 -- | Execute tool calls and collect results.

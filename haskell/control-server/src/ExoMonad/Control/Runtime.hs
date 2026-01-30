@@ -91,24 +91,25 @@ runApp config tracer cbMap logger agentStore action = do
   -- Retry config
   let retryCfg = defaultRetryConfig {tracer = Just tracer}
 
-  runM
-    $ runLog Debug
-    $ runTime
-    $ runReader cbMap
-    $ runReader tracer
-    $ runReader config
-    $ runTUIFifo logger
-    $ runEnvIO
-    $ runFileSystemIO
-    $ runGitHubIO ghConfig
-    $ withRetry retryCfg
-    $ runZellijIO
-    $ runSshExec logger dockerCtlPath
-    $ runGitIO
-    $ runWorktreeIO (defaultWorktreeConfig repoRoot)
-    $ runEffectorIO logger
-    -- Using empty container/workdir for Justfile interpreter since we are running locally in this context
-    $ runJustfileRemote "" ""
-    $ runDockerCtl logger dockerCtlPath agentStore
-    $ runGeminiIO
-    $ action
+  runM $
+    runLog Debug $
+      runTime $
+        runReader cbMap $
+          runReader tracer $
+            runReader config $
+              runTUIFifo logger $
+                runEnvIO $
+                  runFileSystemIO $
+                    runGitHubIO ghConfig $
+                      withRetry retryCfg $
+                        runZellijIO $
+                          runSshExec logger dockerCtlPath $
+                            runGitIO $
+                              runWorktreeIO (defaultWorktreeConfig repoRoot) $
+                                runEffectorIO logger
+                                -- Using empty container/workdir for Justfile interpreter since we are running locally in this context
+                                $
+                                  runJustfileRemote "" "" $
+                                    runDockerCtl logger dockerCtlPath agentStore $
+                                      runGeminiIO $
+                                        action

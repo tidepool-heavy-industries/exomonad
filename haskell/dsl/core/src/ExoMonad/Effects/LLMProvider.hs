@@ -23,8 +23,8 @@ module ExoMonad.Effects.LLMProvider
     Usage (..),
 
     -- * Message Types
-  , Message(..)
-  , Role(..)
+    Message (..),
+    Role (..),
 
     -- * Effect
     LLMComplete (..),
@@ -118,16 +118,17 @@ instance FromJSON Role where
 
 -- | A message in a multi-turn conversation.
 data Message = Message
-  { msgRole :: Role
-  , msgContent :: [ContentBlock]
+  { msgRole :: Role,
+    msgContent :: [ContentBlock]
   }
   deriving (Show, Eq, Generic)
 
 instance ToJSON Message where
-  toJSON msg = object
-    [ "role" .= msg.msgRole
-    , "content" .= msg.msgContent
-    ]
+  toJSON msg =
+    object
+      [ "role" .= msg.msgRole,
+        "content" .= msg.msgContent
+      ]
 
 instance FromJSON Message where
   parseJSON = withObject "Message" $ \v ->
@@ -375,13 +376,14 @@ completeTry provider config msg tools = send (CompleteTry provider config msg to
 -- @
 --
 -- This variant throws on error. For error handling, use 'completeConversationTry'.
-completeConversation
-  :: forall p effs. Member LLMComplete effs
-  => SProvider p
-  -> LLMProviderConfig p
-  -> [Message]
-  -> Maybe [Value]
-  -> Eff effs (LLMProviderResponse p)
+completeConversation ::
+  forall p effs.
+  (Member LLMComplete effs) =>
+  SProvider p ->
+  LLMProviderConfig p ->
+  [Message] ->
+  Maybe [Value] ->
+  Eff effs (LLMProviderResponse p)
 completeConversation provider config messages tools =
   send (CompleteConversation provider config messages tools)
 
@@ -395,12 +397,13 @@ completeConversation provider config messages tools =
 --   Left err -> handleError err
 --   Right response -> processResponse response
 -- @
-completeConversationTry
-  :: forall p effs. Member LLMComplete effs
-  => SProvider p
-  -> LLMProviderConfig p
-  -> [Message]
-  -> Maybe [Value]
-  -> Eff effs (Either LLMError (LLMProviderResponse p))
+completeConversationTry ::
+  forall p effs.
+  (Member LLMComplete effs) =>
+  SProvider p ->
+  LLMProviderConfig p ->
+  [Message] ->
+  Maybe [Value] ->
+  Eff effs (Either LLMError (LLMProviderResponse p))
 completeConversationTry provider config messages tools =
   send (CompleteConversationTry provider config messages tools)

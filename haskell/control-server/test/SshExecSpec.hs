@@ -58,7 +58,6 @@ spec =
         ]
     ]
 
-
 -- | Mock SshExec returning a single result
 runMockSshExec :: ExecResult -> Eff (SshExec ': effs) a -> Eff effs a
 runMockSshExec result = interpret $ \case

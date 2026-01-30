@@ -79,7 +79,7 @@ messageToAnthropicMessage msg =
         Assistant -> "assistant"
       -- Convert ContentBlocks to JSON array
       contentJson = toJSON msg.msgContent
-  in AnthropicMessage roleText contentJson
+   in AnthropicMessage roleText contentJson
 
 -- | Build Anthropic Messages API request from single user message.
 --
@@ -98,7 +98,7 @@ buildAnthropicRequest config userMsg maybeTools maybeToolChoice =
   AnthropicRequest
     { arModel = config.acModel,
       arMaxTokens = config.acMaxTokens,
-      arMessages = [AnthropicMessage "user" (toJSON userMsg)],
+      arMessages = AnthropicMessage "user" (toJSON userMsg) :| [],
       arSystem = config.acSystemPrompt,
       arTools = maybeTools,
       arToolChoice = maybeToolChoice,
@@ -114,7 +114,6 @@ buildAnthropicRequest config userMsg maybeTools maybeToolChoice =
                 tcBudgetTokens = budget
               }
     }
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS
@@ -171,17 +170,16 @@ socketRequest provider env config userMsg maybeTools = case env.leConfig of
     case provider of
       SAnthropic -> do
         let req =
-              AnthropicChat $
-                AnthropicChatReq
-                  { model = config.acModel,
-                    messages = [toJSON $ AnthropicMessage "user" (toJSON userMsg)],
-                    maxTokens = config.acMaxTokens,
-                    tools = maybeTools,
-                    system = config.acSystemPrompt,
-                    thinking = case config.acThinking of
-                      ThinkingDisabled -> Nothing
-                      ThinkingEnabled budget -> Just $ toJSON $ ThinkingConfig "enabled" budget
-                  }
+              AnthropicChat
+                { model = config.acModel,
+                  messages = toJSON (AnthropicMessage "user" (toJSON userMsg)) :| [],
+                  maxTokens = config.acMaxTokens,
+                  tools = maybeTools,
+                  system = config.acSystemPrompt,
+                  thinking = case config.acThinking of
+                    ThinkingDisabled -> Nothing
+                    ThinkingEnabled budget -> Just $ toJSON $ ThinkingConfig "enabled" budget
+                }
         result <- sendRequest socketCfg req
         case result of
           Right (AnthropicChatResponse content stop usage) ->
@@ -206,18 +204,20 @@ socketRequestConversation provider env config messages maybeTools = case env.leC
     case provider of
       SAnthropic -> do
         let anthropicMessages = map messageToAnthropicMessage messages
+        let messagesNE = case map toJSON anthropicMessages of
+              [] -> toJSON (AnthropicMessage "user" (toJSON ("" :: Text))) :| [] -- shouldn't happen
+              (m : ms) -> m :| ms
         let req =
-              AnthropicChat $
-                AnthropicChatReq
-                  { model = config.acModel,
-                    messages = map toJSON anthropicMessages,
-                    maxTokens = config.acMaxTokens,
-                    tools = maybeTools,
-                    system = config.acSystemPrompt,
-                    thinking = case config.acThinking of
-                      ThinkingDisabled -> Nothing
-                      ThinkingEnabled budget -> Just $ toJSON $ ThinkingConfig "enabled" budget
-                  }
+              AnthropicChat
+                { model = config.acModel,
+                  messages = messagesNE,
+                  maxTokens = config.acMaxTokens,
+                  tools = maybeTools,
+                  system = config.acSystemPrompt,
+                  thinking = case config.acThinking of
+                    ThinkingDisabled -> Nothing
+                    ThinkingEnabled budget -> Just $ toJSON $ ThinkingConfig "enabled" budget
+                }
         result <- sendRequest socketCfg req
         case result of
           Right (AnthropicChatResponse content stop usage) ->
@@ -260,14 +260,12 @@ runLLMComplete env = interpret $ \case
   CompleteTry provider config msg tools ->
     sendM $
       socketRequest provider env config msg tools
-
   -- Conversation variants (multi-turn)
   CompleteConversation provider config messages tools -> sendM $ do
     result <- socketRequestConversation provider env config messages tools
     case result of
       Left err -> error $ "LLMCompleteConversation (" <> providerName provider <> "): " <> show err
       Right resp -> pure resp
-
   CompleteConversationTry provider config messages tools ->
     sendM $
       socketRequestConversation provider env config messages tools

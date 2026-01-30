@@ -95,7 +95,6 @@ handleCheckBuild state = do
       & #currentStage .~ StageBuild
   pure $ gotoChoice @"routeBuild" (state, buildRes)
 
-
 -- | Route based on build result
 handleRouteBuild ::
   (Member (State WorkflowState) es) =>
@@ -142,7 +141,6 @@ handleCheckTest state = do
       & #lastTestResult .~ Just testRes
       & #currentStage .~ StageTest
   pure $ gotoChoice @"routeTest" (state, testRes)
-
 
 -- | Route based on test result
 handleRouteTest ::
