@@ -165,11 +165,20 @@ extractArgsType ftype fname = case ftype of
     ++ "' must have type (args -> Eff es result), but got: " ++ pprint ftype
 
 -- | Convert camelCase to snake_case.
+--
+-- @camelToSnake "search" = "search"@
+-- @camelToSnake "lookupById" = "lookup_by_id"@
 camelToSnake :: String -> String
-camelToSnake [] = []
-camelToSnake (c:cs)
-  | isUpper c = '_' : toLower c : camelToSnake cs
-  | otherwise = c : camelToSnake cs
+camelToSnake = go True
+  where
+    go _ [] = []
+    go isFirst (c:cs)
+      | isUpper c =
+          let lower = toLower c
+          in if isFirst
+             then lower : go False cs
+             else '_' : lower : go False cs
+      | otherwise = c : go False cs
 
 -- | Generate the ToolRecord instance.
 genToolRecordInstance :: Name -> Name -> [(Name, Type, String, String)] -> Q [Dec]
