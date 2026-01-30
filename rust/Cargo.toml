@@ -4,6 +4,7 @@ members = [
     "exomonad",
     "exomonad-shared",
     "exomonad-services",
+    "exomonad-runtime",
     "tui-popup",
     "tui-spawner",
     "effector",
