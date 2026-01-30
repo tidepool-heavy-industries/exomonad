@@ -17,21 +17,21 @@ import ExoMonad.Control.Effects.SshExec (ExecRequest (..), ExecResult (..), SshE
 import ExoMonad.Effects.Git (Git (..), WorktreeInfo (..))
 
 -- | Interpreter: uses SshExec to run git commands remotely
--- Takes a container name and a working directory (relative to container root).
-runGitRemote :: (Member SshExec effs) => Text -> FilePath -> Eff (Git ': effs) a -> Eff effs a
-runGitRemote container workDir = interpret $ \case
+-- Takes a container name (optional) and a working directory (relative to container root).
+runGitRemote :: (Member SshExec effs) => Maybe Text -> FilePath -> Eff (Git ': effs) a -> Eff effs a
+runGitRemote mContainer workDir = interpret $ \case
   GetWorktreeInfo -> do
     -- This is a bit complex to implement perfectly for remote containers without more logic,
     -- but we can try to get the basic info.
-    mPath <- gitCommand container workDir ["rev-parse", "--show-toplevel"]
+    mPath <- gitCommand mContainer workDir ["rev-parse", "--show-toplevel"]
     case mPath of
       Nothing -> pure Nothing
       Just path -> do
-        mBranch <- gitCommand container workDir ["branch", "--show-current"]
+        mBranch <- gitCommand mContainer workDir ["branch", "--show-current"]
         let branch = maybe "HEAD" T.strip mBranch
 
         -- Simplified worktree detection
-        mGitDir <- gitCommand container workDir ["rev-parse", "--git-dir"]
+        mGitDir <- gitCommand mContainer workDir ["rev-parse", "--git-dir"]
         let inWorktree = maybe False ("worktrees" `T.isInfixOf`) mGitDir
 
         pure $
@@ -47,7 +47,7 @@ runGitRemote container workDir = interpret $ \case
     result <-
       execCommand $
         ExecRequest
-          { container = Just container,
+          { container = mContainer,
             command = "git",
             args = ["status", "--porcelain"],
             workingDir = workDir,
@@ -62,7 +62,7 @@ runGitRemote container workDir = interpret $ \case
     result <-
       execCommand $
         ExecRequest
-          { container = Just container,
+          { container = mContainer,
             command = "git",
             args = ["log", "--oneline", "-" <> T.pack (show n), "--format=%s"],
             workingDir = workDir,
@@ -74,13 +74,13 @@ runGitRemote container workDir = interpret $ \case
         then T.lines (result.stdout)
         else []
   GetCurrentBranch -> do
-    mBranch <- gitCommand container workDir ["branch", "--show-current"]
+    mBranch <- gitCommand mContainer workDir ["branch", "--show-current"]
     pure $ maybe "HEAD" T.strip mBranch
   GetCommitsAhead ref -> do
     result <-
       execCommand $
         ExecRequest
-          { container = Just container,
+          { container = mContainer,
             command = "git",
             args = ["rev-list", "--count", ref <> "..HEAD"],
             workingDir = workDir,
@@ -100,7 +100,7 @@ runGitRemote container workDir = interpret $ \case
     _ <-
       execCommand $
         ExecRequest
-          { container = Just container,
+          { container = mContainer,
             command = "git",
             args = args,
             workingDir = workDir,
@@ -110,12 +110,12 @@ runGitRemote container workDir = interpret $ \case
     pure ()
 
 -- | Helper to run a git command via SshExec
-gitCommand :: (Member SshExec effs) => Text -> FilePath -> [Text] -> Eff effs (Maybe Text)
-gitCommand container wd args = do
+gitCommand :: (Member SshExec effs) => Maybe Text -> FilePath -> [Text] -> Eff effs (Maybe Text)
+gitCommand mContainer wd args = do
   result <-
     execCommand $
       ExecRequest
-        { container = Just container,
+        { container = mContainer,
           command = "git",
           args = args,
           workingDir = wd,

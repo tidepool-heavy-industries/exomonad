@@ -38,6 +38,9 @@ packages:
     -- Tools
     haskell/tools/training-generator
 
+    -- Guest
+    haskell/wasm-guest
+
     -- Vendored dependencies
     haskell/vendor/freer-simple
     haskell/vendor/ginger
