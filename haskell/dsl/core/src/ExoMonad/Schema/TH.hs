@@ -36,7 +36,7 @@ import Control.Monad (forM, unless, when)
 import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), object, withObject, withText, (.:), (.:?), (.=))
 import Data.Aeson.Key qualified as K
 import Data.Char (isUpper, toLower)
-import Data.List (delete, stripPrefix)
+import Data.List (delete, intercalate, stripPrefix)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.Text (Text)
@@ -443,14 +443,16 @@ genEnumInstances typeName conNames = do
 genFromJSONEnum :: Name -> [(Name, String)] -> Q [Dec]
 genFromJSONEnum typeName conStrings = do
   tVar <- newName "t"
-  let matchCases =
+  let validValues = map snd conStrings
+      validList = intercalate ", " validValues
+      matchCases =
         [ match (litP (stringL s)) (normalB [|pure $(conE n)|]) []
         | (n, s) <- conStrings
         ]
           ++ [ match
                  wildP
                  ( normalB
-                     [|fail $ "Unknown " ++ $(litE (stringL (nameBase typeName))) ++ ": " ++ T.unpack $(varE tVar)|]
+                     [|fail $ "Unknown " ++ $(litE (stringL (nameBase typeName))) ++ ": " ++ T.unpack $(varE tVar) ++ ". Valid values: " ++ $(litE (stringL validList))|]
                  )
                  []
              ]
