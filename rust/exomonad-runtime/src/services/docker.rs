@@ -1,8 +1,19 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::process::Stdio;
 use tokio::process::Command;
+
+pub trait DockerExecutor: Send + Sync {
+    fn exec<'a>(
+        &'a self,
+        container: &'a str,
+        dir: &'a str,
+        cmd: &'a [&'a str],
+    ) -> Pin<Box<dyn Future<Output = Result<String>> + Send + 'a>>;
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ExecOutput {
@@ -167,6 +178,30 @@ impl DockerService {
     }
 }
 
+impl DockerExecutor for DockerService {
+    fn exec<'a>(
+        &'a self,
+        container: &'a str,
+        dir: &'a str,
+        cmd: &'a [&'a str],
+    ) -> Pin<Box<dyn Future<Output = Result<String>> + Send + 'a>> {
+        let this = self.clone();
+        let container = container.to_string();
+        let dir = dir.to_string();
+        let cmd = cmd.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+        Box::pin(async move {
+            let cmd_refs: Vec<&str> = cmd.iter().map(|s| s.as_str()).collect();
+            let output = this.exec(&container, &cmd_refs, Some(&dir)).await?;
+            
+            if output.exit_code != 0 {
+                 return Err(anyhow::anyhow!("Docker exec failed: {}", output.stderr));
+            }
+            Ok(output.stdout)
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,24 +224,24 @@ case "$1" in
              echo "Workdir: $3"
         fi
         echo "Mock Exec Output"
-        ;;
+        ;; 
     run)
         echo "mock-container-id"
-        ;;
+        ;; 
     rm)
         if [ "$3" = "missing-container" ]; then
             echo "Error: No such container: missing-container" >&2
             exit 1
         fi
         echo "mock-container-id"
-        ;;
+        ;; 
     ps)
         echo '{"ID":"123","Names":"test-container","Image":"alpine","Status":"Up"}'
-        ;;
+        ;; 
     *)
         echo "Unknown command: $@" >&2
         exit 1
-        ;;
+        ;; 
 esac
 "#;
         fs::write(&docker_path, script).unwrap();
