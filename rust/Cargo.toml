@@ -10,6 +10,7 @@ members = [
     "docker-ctl",
     "agent-status",
     "zellij-gen",
+    "exomonad-runtime",
 ]
 
 [workspace.dependencies]

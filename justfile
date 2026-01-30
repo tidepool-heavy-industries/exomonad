@@ -122,3 +122,22 @@ clean:
 test-exec-demo:
     @echo "Running tests..."
     @echo '{"status": "passed", "count": 42}'
+
+# Generate Rust and Haskell types from JSON Schema
+gen-types:
+    npx --yes quicktype schema/types.json schema/effects.json schema/common.json \
+      --src-lang schema \
+      --lang rust --visibility public --derive-debug \
+      --out rust/exomonad-runtime/src/generated/effects.rs
+    npx --yes quicktype schema/types.json schema/effects.json schema/common.json \
+      --src-lang schema \
+      --lang haskell --module ExoMonad.Generated.Effects \
+      --out haskell/wasm-guest/src/ExoMonad/Generated/Effects.hs
+    sed '/decodeTopLevel/d' haskell/wasm-guest/src/ExoMonad/Generated/Effects.hs > haskell/wasm-guest/src/ExoMonad/Generated/Effects.hs.tmp && mv haskell/wasm-guest/src/ExoMonad/Generated/Effects.hs.tmp haskell/wasm-guest/src/ExoMonad/Generated/Effects.hs
+    cd haskell && ormolu --mode inplace wasm-guest/src/ExoMonad/Generated/Effects.hs
+    cd rust && cargo fmt -p exomonad-runtime
+
+# Verify generated types match schema (for CI)
+check-gen-types: gen-types
+    git diff --exit-code rust/exomonad-runtime/src/generated/effects.rs
+    git diff --exit-code haskell/wasm-guest/src/ExoMonad/Generated/Effects.hs

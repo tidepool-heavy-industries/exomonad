@@ -771,6 +771,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "exomonad-runtime"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "exomonad-services"
 version = "0.1.0"
 dependencies = [
