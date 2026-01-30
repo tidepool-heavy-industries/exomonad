@@ -13,10 +13,7 @@ import Data.Aeson (eitherDecode, encode)
 import qualified Data.ByteString.Lazy as BL
 import Data.Maybe (fromMaybe)
 import Control.Monad.Managed
-<<<<<<< HEAD
 import Options.Applicative
-=======
->>>>>>> f82e68f (refactor: Modern Haskell patterns (Managed resources, DerivingVia Aeson))
 
 import ExoMonad.Control.Server (runServer)
 import ExoMonad.Control.Types (ServerConfig(..))
