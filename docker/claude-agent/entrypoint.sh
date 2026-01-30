@@ -170,12 +170,18 @@ if [ ! -f "$GEMINI_CONFIG_DIR/settings.json" ]; then
     # Prepare MCP config fragment if URL is available
     MCP_CONFIG=""
     if [ -n "${CONTROL_SERVER_URL:-}" ]; then
-        echo "Adding Gemini MCP config for: ${CONTROL_SERVER_URL}/role/${ROLE}/mcp"
+        # Derive container name for remote git execution
+        if [ -n "${EXOMONAD_ISSUE_ID:-}" ]; then
+            GEMINI_CONTAINER_NAME="exomonad-agent-${EXOMONAD_ISSUE_ID}"
+        else
+            GEMINI_CONTAINER_NAME="${HOSTNAME:-}"
+        fi
+        echo "Adding Gemini MCP config for: ${CONTROL_SERVER_URL}/role/${ROLE}/mcp?container=${GEMINI_CONTAINER_NAME}"
         MCP_CONFIG=",
   \"mcpServers\": {
     \"exomonad\": {
       \"type\": \"http\",
-      \"url\": \"${CONTROL_SERVER_URL}/role/${ROLE}/mcp\"
+      \"url\": \"${CONTROL_SERVER_URL}/role/${ROLE}/mcp?container=${GEMINI_CONTAINER_NAME}\"
     }
   }"
     fi
@@ -251,12 +257,19 @@ write_mcp_config() {
 }
 
 if [ -n "${CONTROL_SERVER_URL:-}" ]; then
-    echo "Configuring MCP via TCP: ${CONTROL_SERVER_URL}/role/${ROLE}/mcp"
+    # Derive container name for remote git execution
+    if [ -n "${EXOMONAD_ISSUE_ID:-}" ]; then
+        CONTAINER_NAME="exomonad-agent-${EXOMONAD_ISSUE_ID}"
+    else
+        CONTAINER_NAME="${HOSTNAME:-}"  # For TL/PM, HOSTNAME is container name
+    fi
+
+    echo "Configuring MCP via TCP: ${CONTROL_SERVER_URL}/role/${ROLE}/mcp?container=${CONTAINER_NAME}"
     write_mcp_config '{
   "mcpServers": {
     "exomonad": {
       "type": "http",
-      "url": "'"${CONTROL_SERVER_URL}/role/${ROLE}/mcp"'"
+      "url": "'"${CONTROL_SERVER_URL}/role/${ROLE}/mcp?container=${CONTAINER_NAME}"'"
     }
   }
 }'

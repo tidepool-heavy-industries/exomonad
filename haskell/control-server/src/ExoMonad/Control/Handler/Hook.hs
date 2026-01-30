@@ -56,7 +56,6 @@ import ExoMonad.Effect.Types (LogLevel (Debug), runLog, runTime)
 import ExoMonad.Env.Interpreter (runEnvIO)
 import ExoMonad.FileSystem.Interpreter (runFileSystemIO)
 import ExoMonad.Gemini.Interpreter (runGeminiIO)
-import ExoMonad.Git.Interpreter (runGitIO)
 import ExoMonad.GitHub.Interpreter (defaultGitHubConfig, runGitHubIO)
 import ExoMonad.Worktree.Interpreter (defaultWorktreeConfig, runWorktreeIO)
 import ExoMonad.Zellij.Interpreter (runZellijIO)
@@ -114,31 +113,31 @@ handleHook logger tracer config input _ agentRole mContainerId cbMap agentStore 
         let ghConfig = fromMaybe defaultGitHubConfig config.githubConfig
         let retryCfg = defaultRetryConfig {tracer = Just tracer}
 
-        runM
-          $ runLog Debug
-          $ runTime
-          $ runReader cbMap
-          $ runReader tracer
-          $ runReader config
-          $ runTUIFifo logger
-          $ runEnvIO
-          $ runFileSystemIO
-          $ runGitHubIO ghConfig
-          $ withRetry retryCfg
-          $ runZellijIO
-          $ runSshExec logger dockerCtlPath
-          -- Dynamic Git interpreter based on container ID
-          $ case mContainerId of
-            Just c -> runGitRemote c "."
-            Nothing -> runGitIO
-          $ runWorktreeIO (defaultWorktreeConfig repoRoot)
-          $ runEffectorIO logger
-          $ runJustfileRemote (fromMaybe "" mContainerId) ""
-          $ runDockerCtl logger dockerCtlPath agentStore
-          $ runGeminiIO
-          $ do
-            val <- action
-            pure $ hookSuccess $ makeResponseFromValue input.hookEventName val
+        runM $
+          runLog Debug $
+            runTime $
+              runReader cbMap $
+                runReader tracer $
+                  runReader config $
+                    runTUIFifo logger $
+                      runEnvIO $
+                        runFileSystemIO $
+                          runGitHubIO ghConfig $
+                            withRetry retryCfg $
+                              runZellijIO $
+                                runSshExec logger dockerCtlPath
+                                -- Always use remote git execution - if no container ID, use empty string
+                                -- which will fail if git operations are attempted (fail-closed behavior)
+                                $
+                                  runGitRemote (fromMaybe "" mContainerId) "." $
+                                    runWorktreeIO (defaultWorktreeConfig repoRoot) $
+                                      runEffectorIO logger $
+                                        runJustfileRemote (fromMaybe "" mContainerId) "" $
+                                          runDockerCtl logger dockerCtlPath agentStore $
+                                            runGeminiIO $
+                                              do
+                                                val <- action
+                                                pure $ hookSuccess $ makeResponseFromValue input.hookEventName val
 
   endSpan span_ Nothing
 
