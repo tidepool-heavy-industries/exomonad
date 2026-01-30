@@ -21,6 +21,7 @@ import qualified DecisionToolsSpec
 import qualified DecisionSpec
 import qualified TUIWireFormatSpec
 import qualified SchemaDerivationSpec
+import qualified ToolRecordTHSpec
 
 main :: IO ()
 main = hspec $ do
@@ -77,3 +78,6 @@ main = hspec $ do
 
   describe "TUI Wire Format" $ do
     TUIWireFormatSpec.spec
+
+  describe "ToolRecord TH" $ do
+    ToolRecordTHSpec.spec
