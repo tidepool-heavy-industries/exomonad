@@ -87,7 +87,6 @@ data LLMCall a where
     :: StructuredOutput out
     => Model                           -- ^ Model to use
     -> Maybe Int                       -- ^ Max tokens (Nothing = default)
-    -> Maybe Double                    -- ^ Temperature (Nothing = default)
     -> System                          -- ^ System prompt
     -> User                            -- ^ User prompt
     -> Value                           -- ^ Output schema (JSON)
@@ -105,7 +104,6 @@ data LLMCall a where
     :: StructuredOutput out
     => Model                           -- ^ Model to use
     -> Maybe Int                       -- ^ Max tokens (Nothing = default)
-    -> Maybe Double                    -- ^ Temperature (Nothing = default)
     -> System                          -- ^ System prompt
     -> User                            -- ^ User prompt
     -> Value                           -- ^ Output schema (JSON)
@@ -148,12 +146,11 @@ call
   -> Eff es (Either CallError out)
 call cfg sys usr =
   let toolSchemaValues = map (anthropicToolToJSON . toolSchemaToAnthropicTool)
-                           $ toolSchemas (Proxy @tools)
+                            $ toolSchemas (Proxy @tools)
       schema = schemaToValue (structuredSchema @out)
   in send $ CallLLMWithTools
        cfg.ccModel
        cfg.ccMaxTokens
-       cfg.ccTemperature
        sys
        usr
        schema
@@ -181,7 +178,6 @@ callNoTools cfg sys usr =
   in send $ CallLLMNoTools
        cfg.ccModel
        cfg.ccMaxTokens
-       cfg.ccTemperature
        sys
        usr
        schema

@@ -36,8 +36,8 @@
 --     , ToolSchema "read_section" "Read a section" (schemaToValue $ jsonSchema \@ReadArgs)
 --     ]
 --   dispatchTool tools name input = case name of
---     "search" -> dispatchHandler tools.search input
---     "read_section" -> dispatchHandler tools.readSection input
+--     "search" -> dispatchHandler tools.search "search" input
+--     "read_section" -> dispatchHandler tools.readSection "read_section" input
 --     _ -> pure $ Left $ ToolNotFound name
 -- @
 module ExoMonad.LLM.Tools
@@ -126,8 +126,8 @@ data ToolDispatchError
 --     , ToolSchema "lookup" "Look up by ID" (schemaToValue $ jsonSchema \@LookupArgs)
 --     ]
 --   dispatchTool tools name input = case name of
---     "search" -> dispatchHandler tools.search input
---     "lookup" -> dispatchHandler tools.lookup input
+--     "search" -> dispatchHandler tools.search "search" input
+--     "lookup" -> dispatchHandler tools.lookup "lookup" input
 --     _ -> pure $ Left $ ToolNotFound name
 -- @
 class ToolRecord (tools :: [Type -> Type] -> Type) where
@@ -158,7 +158,7 @@ class ToolRecord (tools :: [Type -> Type] -> Type) where
 --
 -- @
 -- dispatchTool tools name input = case name of
---   "search" -> dispatchHandler tools.search input
+--   "search" -> dispatchHandler tools.search "search" input
 --   _ -> pure $ Left $ ToolNotFound name
 -- @
 dispatchHandler

@@ -129,8 +129,6 @@ data NoTools
 data CallConfig (out :: Type) (tools :: Type)  = CallConfig
   { ccModel       :: Model
     -- ^ Which model to use (default: Sonnet)
-  , ccTemperature :: Maybe Double
-    -- ^ Temperature setting (default: provider default)
   , ccMaxTokens   :: Maybe Int
     -- ^ Maximum tokens to generate (default: provider default)
   , ccTools       :: Maybe tools

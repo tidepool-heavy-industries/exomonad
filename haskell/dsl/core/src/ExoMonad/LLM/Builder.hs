@@ -12,7 +12,6 @@
 -- -- Customized config
 -- let cfg = defaultLLM \@Report
 --       & model Opus
---       & temp 0.7
 --       & maxTokens 4096
 --
 -- -- With tools
@@ -26,7 +25,6 @@ module ExoMonad.LLM.Builder
 
     -- * Builder Functions
   , model
-  , temp
   , maxTokens
   , tools
   ) where
@@ -43,7 +41,6 @@ import ExoMonad.LLM.Types
 -- Defaults:
 --
 -- * Model: Sonnet (balanced performance)
--- * Temperature: None (use provider default)
 -- * Max tokens: None (use provider default)
 -- * Tools: None
 --
@@ -55,7 +52,6 @@ import ExoMonad.LLM.Types
 defaultLLM :: forall out. CallConfig out NoTools
 defaultLLM = CallConfig
   { ccModel = Sonnet
-  , ccTemperature = Nothing
   , ccMaxTokens = Nothing
   , ccTools = Nothing
   }
@@ -72,19 +68,6 @@ defaultLLM = CallConfig
 -- @
 model :: Model -> CallConfig out tools -> CallConfig out tools
 model m cfg = cfg { ccModel = m }
-
--- | Set the temperature.
---
--- Temperature controls randomness in the output:
---
--- * 0.0 - Deterministic (most likely tokens)
--- * 1.0 - More creative/varied
---
--- @
--- let cfg = defaultLLM \@Report & temp 0.7
--- @
-temp :: Double -> CallConfig out tools -> CallConfig out tools
-temp t cfg = cfg { ccTemperature = Just t }
 
 -- | Set the maximum tokens to generate.
 --
@@ -113,7 +96,6 @@ maxTokens n cfg = cfg { ccMaxTokens = Just n }
 tools :: tools' -> CallConfig out tools -> CallConfig out tools'
 tools t cfg = CallConfig
   { ccModel = cfg.ccModel
-  , ccTemperature = cfg.ccTemperature
   , ccMaxTokens = cfg.ccMaxTokens
   , ccTools = Just t
   }

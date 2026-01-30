@@ -92,7 +92,6 @@ module ExoMonad.LLM
 
     -- * Builder Functions
   , model
-  , temp
   , maxTokens
   , tools
 
@@ -137,7 +136,6 @@ import ExoMonad.LLM.Types
 import ExoMonad.LLM.Builder
   ( defaultLLM
   , model
-  , temp
   , maxTokens
   , tools
   )
