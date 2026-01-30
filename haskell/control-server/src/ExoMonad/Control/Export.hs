@@ -38,7 +38,7 @@ exportMCPTools logger role = do
 toToolDef :: MCPToolInfo -> ToolDefinition
 toToolDef info =
   ToolDefinition
-    { tdName = info.mtdName,
-      tdDescription = info.mtdDescription,
-      tdInputSchema = info.mtdInputSchema
+    { name = info.mtdName,
+      description = info.mtdDescription,
+      inputSchema = info.mtdInputSchema
     }

@@ -80,6 +80,8 @@ data HookInput = HookInput
 -- ============================================================================
 
 -- | Hook output. Matches Rust HookOutput.
+-- Note: Rust uses camelCase field names (stopReason, hookSpecificOutput, etc.)
+-- so we only strip the trailing underscore from continue_, no CamelToSnake.
 data HookOutput = HookOutput
   { continue_ :: Bool,
     stopReason :: Maybe Text,
@@ -90,7 +92,7 @@ data HookOutput = HookOutput
     reason :: Maybe Text
   }
   deriving stock (Show, Eq, Generic)
-  deriving (ToJSON, FromJSON) via CustomJSON '[FieldLabelModifier '[StripSuffix "_", CamelToSnake], OmitNothingFields] HookOutput
+  deriving (ToJSON, FromJSON) via CustomJSON '[FieldLabelModifier '[StripSuffix "_"], OmitNothingFields] HookOutput
 
 -- | Hook-specific output fields. Tagged by hookEventName.
 data HookSpecificOutput
@@ -142,32 +144,34 @@ data Runtime = Claude | Gemini
   deriving (ToJSON, FromJSON) via CustomJSON '[ConstructorTagModifier '[CamelToSnake]] Runtime
 
 -- | Tool definition for MCP discovery.
--- Field names use MCP protocol standard: name, description, inputSchema
+-- Field names use MCP protocol standard: name, description, inputSchema (camelCase)
 data ToolDefinition = ToolDefinition
-  { tdName :: Text,
-    tdDescription :: Text,
-    tdInputSchema :: Value
+  { name :: Text,
+    description :: Text,
+    inputSchema :: Value
   }
   deriving stock (Show, Eq, Generic)
-  deriving (ToJSON, FromJSON) via CustomJSON '[FieldLabelModifier '[StripPrefix "td", CamelToSnake]] ToolDefinition
+  deriving (ToJSON, FromJSON) via CustomJSON '[] ToolDefinition
 
 -- | Message sent over Unix socket from exomonad. Tagged by "type".
+-- Note: Rust uses snake_case (tool_name, container_id), so we apply CamelToSnake.
 data ControlMessage
   = HookEvent {input :: HookInput, runtime :: Runtime, role :: Role, containerId :: Maybe Text}
   | MCPToolCall {id :: Text, toolName :: Text, arguments :: Value}
   | ToolsListRequest
   | Ping
   deriving stock (Show, Eq, Generic)
-  deriving (ToJSON, FromJSON) via CustomJSON '[SumTaggedObject "type" "contents", OmitNothingFields] ControlMessage
+  deriving (ToJSON, FromJSON) via CustomJSON '[SumTaggedObject "type" "contents", FieldLabelModifier CamelToSnake, OmitNothingFields] ControlMessage
 
 -- | Response sent over Unix socket to exomonad. Tagged by "type".
+-- Note: No OmitNothingFields here - MCP protocol expects explicit null for result/error.
 data ControlResponse
   = HookResponse {output :: HookOutput, exitCode :: Int}
   | MCPToolResponse {id :: Text, result :: Maybe Value, error :: Maybe McpError}
   | ToolsListResponse {tools :: [ToolDefinition]}
   | Pong
   deriving stock (Show, Eq, Generic)
-  deriving (ToJSON, FromJSON) via CustomJSON '[SumTaggedObject "type" "contents", FieldLabelModifier CamelToSnake, OmitNothingFields] ControlResponse
+  deriving (ToJSON, FromJSON) via CustomJSON '[SumTaggedObject "type" "contents", FieldLabelModifier CamelToSnake] ControlResponse
 
 -- | MCP error codes for structured error responses.
 data ErrorCode
