@@ -193,9 +193,9 @@ impl DockerExecutor for DockerService {
         Box::pin(async move {
             let cmd_refs: Vec<&str> = cmd.iter().map(|s| s.as_str()).collect();
             let output = this.exec(&container, &cmd_refs, Some(&dir)).await?;
-            
+
             if output.exit_code != 0 {
-                 return Err(anyhow::anyhow!("Docker exec failed: {}", output.stderr));
+                return Err(anyhow::anyhow!("Docker exec failed: {}", output.stderr));
             }
             Ok(output.stdout)
         })
@@ -245,7 +245,7 @@ case "$1" in
 esac
 "#;
         fs::write(&docker_path, script).unwrap();
-        
+
         #[cfg(unix)]
         {
             let mut perms = fs::metadata(&docker_path).unwrap().permissions();
@@ -286,7 +286,7 @@ esac
     async fn test_kill() {
         let (_tmp, mock_cmd) = setup_mock_docker();
         let service = DockerService::with_cmd(&mock_cmd);
-        
+
         // Test success
         let res = service.kill("test-container").await;
         assert!(res.is_ok());
