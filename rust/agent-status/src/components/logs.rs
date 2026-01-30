@@ -1,44 +1,90 @@
-use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent};
-use ratatui::{
-    layout::Rect,
-    widgets::{Block, Borders, Paragraph, Wrap},
-    Frame,
+use std::sync::{Arc, RwLock};
+use tuirealm::{
+    Component, Event, MockComponent, State,
+    command::{Cmd, CmdResult},
+    event::{Key, KeyEvent},
+    props::{AttrValue, Attribute, Props},
+    ratatui::{
+        Frame,
+        layout::Rect,
+        widgets::{Block, Borders, Paragraph, Wrap},
+    },
 };
-use crate::component::{Component, Action};
+
+use crate::app::{Msg, UserEvent};
 use crate::state::DashboardState;
 
-pub struct LogsComponent<'a> {
-    pub state: &'a DashboardState,
+pub struct LogsComponent {
+    pub state: Arc<RwLock<DashboardState>>,
+    pub props: Props,
 }
 
-impl<'a> Component for LogsComponent<'a> {
-    fn handle_key_event(&mut self, key: KeyEvent) -> Result<Action> {
-        match key.code {
-            KeyCode::Down | KeyCode::Char('j') => Ok(Action::SelectNext),
-            KeyCode::Up | KeyCode::Char('k') => Ok(Action::SelectPrev),
-             // Logs might want scrolling in the future, keeping generic for now
-            _ => Ok(Action::None),
+impl LogsComponent {
+    pub fn new(state: Arc<RwLock<DashboardState>>) -> Self {
+        Self {
+            state,
+            props: Props::default(),
         }
     }
+}
 
-    fn render(&mut self, f: &mut Frame, area: Rect) {
-        if self.state.agents.is_empty() {
-            let text = Paragraph::new("No agents active.").block(Block::default().borders(Borders::ALL));
+impl MockComponent for LogsComponent {
+    fn view(&mut self, f: &mut Frame, area: Rect) {
+        let s = self.state.read().unwrap();
+        if s.agents.is_empty() {
+            let text =
+                Paragraph::new("No agents active.").block(Block::default().borders(Borders::ALL));
             f.render_widget(text, area);
             return;
         }
 
-        let agent = match self.state.agents.get(self.state.selected_index) {
+        let agent = match s.agents.get(s.selected_index) {
             Some(a) => a,
             None => return,
         };
-        let logs = self.state.logs_cache.get(&agent.id).map(|s| s.as_str()).unwrap_or("Loading logs...");
+
+        let logs = s
+            .logs_cache
+            .get(&agent.id)
+            .map(|s| s.as_str())
+            .unwrap_or("Loading logs...");
 
         let p = Paragraph::new(logs)
-            .block(Block::default().borders(Borders::ALL).title(format!("Logs: {}", agent.id)))
-            .wrap(Wrap { trim: false }); 
-        
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(format!("Logs: {}", agent.id)),
+            )
+            .wrap(Wrap { trim: false });
+
         f.render_widget(p, area);
+    }
+
+    fn query(&self, _attr: Attribute) -> Option<AttrValue> {
+        None
+    }
+
+    fn attr(&mut self, _attr: Attribute, _value: AttrValue) {}
+
+    fn state(&self) -> State {
+        State::None
+    }
+
+    fn perform(&mut self, _cmd: Cmd) -> CmdResult {
+        CmdResult::None
+    }
+}
+
+impl Component<Msg, UserEvent> for LogsComponent {
+    fn on(&mut self, ev: Event<UserEvent>) -> Option<Msg> {
+        match ev {
+            Event::User(UserEvent::Tick) => Some(Msg::None),
+            Event::Keyboard(KeyEvent { code, .. }) => match code {
+                Key::Down | Key::Char('j') => Some(Msg::SelectNext),
+                Key::Up | Key::Char('k') => Some(Msg::SelectPrev),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 }

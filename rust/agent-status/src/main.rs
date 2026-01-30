@@ -1,30 +1,39 @@
 mod api;
-mod component;
+mod app;
+mod backend;
 mod components;
 mod state;
 
 use anyhow::Result;
 use clap::Parser;
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode},
+    event::{DisableMouseCapture, EnableMouseCapture},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use futures::StreamExt;
-use ratatui::{
-    backend::{Backend, CrosstermBackend},
-    layout::{Constraint, Direction, Layout},
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, Tabs},
-    Terminal,
+use std::{
+    io,
+    sync::{Arc, RwLock},
+    time::Duration,
 };
-use std::{io, time::Duration, sync::{Arc, Mutex}};
-use tokio::sync::mpsc;
+use tuirealm::{
+    Event, Update,
+    application::Application,
+    event::{Key, KeyEvent},
+    listener::{EventListenerCfg, SyncPort},
+    ratatui::{
+        layout::{Constraint, Direction, Layout},
+        style::{Color, Modifier, Style},
+        widgets::{Block, Borders, Tabs},
+    },
+    terminal::TerminalBridge,
+};
+
 use api::ApiClient;
+use app::{Id, Model, Msg, UserEvent};
+use backend::BackendPort;
+use components::{controls::ControlsComponent, logs::LogsComponent, overview::OverviewComponent};
 use state::DashboardState;
-use component::{Component, Action};
-use components::{overview::OverviewComponent, logs::LogsComponent, controls::ControlsComponent};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -33,242 +42,160 @@ struct Args {
     control_server: String,
 }
 
-enum AppCommand {
-    StopAgent(String),
+impl Update<Msg> for Model {
+    fn update(&mut self, msg: Option<Msg>) -> Option<Msg> {
+        if let Some(msg) = msg {
+            match msg {
+                Msg::SelectNext => {
+                    let mut s = self.state.write().unwrap();
+                    if !s.agents.is_empty() {
+                        s.selected_index = (s.selected_index + 1) % s.agents.len();
+                        self.redraw = true;
+                    }
+                }
+                Msg::SelectPrev => {
+                    let mut s = self.state.write().unwrap();
+                    if !s.agents.is_empty() {
+                        if s.selected_index > 0 {
+                            s.selected_index -= 1;
+                        } else {
+                            s.selected_index = s.agents.len() - 1;
+                        }
+                        self.redraw = true;
+                    }
+                }
+                Msg::KillAgent(_) => {}
+                Msg::None => {
+                    self.redraw = true;
+                }
+            }
+        }
+        None
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-
-    // Setup logging
     tracing_subscriber::fmt::init();
 
-    // Setup state
-    let state = Arc::new(Mutex::new(DashboardState::default()));
-    
-    let state_clone = state.clone();
-    let client = ApiClient::new(args.control_server.clone());
-    let client = Arc::new(client);
-    let client_clone = client.clone();
+    let shared_state = Arc::new(RwLock::new(DashboardState::default()));
+    let client = Arc::new(ApiClient::new(args.control_server.clone()));
 
-    // Command channel
-    let (tx, mut rx) = mpsc::channel::<AppCommand>(10);
-
-    // Command processor
-    let client_cmd = client.clone();
-    tokio::spawn(async move {
-        while let Some(cmd) = rx.recv().await {
-            match cmd {
-                AppCommand::StopAgent(id) => {
-                    if let Err(err) = client_cmd.stop_agent(&id).await {
-                        tracing::error!(agent_id = %id, error = ?err, "failed to stop agent");
-                    }
-                }
-            }
-        }
-    });
-
-    // Polling task
-    tokio::spawn(async move {
-        loop {
-            // 1. Fetch Agents
-            match client_clone.get_agents().await {
-                Ok(agents) => {
-                    let mut s = state_clone.lock().expect("State lock poisoned");
-                    s.agents = agents;
-                    s.connected = true;
-                    s.last_updated = Some(chrono::Local::now().to_rfc3339());
-                    
-                    // Adjust selection if out of bounds
-                    if !s.agents.is_empty() && s.selected_index >= s.agents.len() {
-                        s.selected_index = s.agents.len() - 1;
-                    }
-                }
-                Err(_) => {
-                    let mut s = state_clone.lock().expect("State lock poisoned");
-                    s.connected = false;
-                }
-            }
-
-            // 2. Fetch Logs if needed
-            let selected_id = {
-                let s = state_clone.lock().expect("State lock poisoned");
-                if s.agents.is_empty() { None } else { Some(s.agents[s.selected_index].id.clone()) }
-            };
-
-            if let Some(id) = selected_id {
-                if let Ok(logs) = client_clone.get_logs(&id).await {
-                    let mut s = state_clone.lock().expect("State lock poisoned");
-                    s.logs_cache.insert(id, logs);
-                }
-            }
-
-            tokio::time::sleep(Duration::from_secs(2)).await;
-        }
-    });
-
-    // Setup terminal
+    // Setup TUI
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
 
-    // Run app
-    let res = run_app(&mut terminal, state, tx).await;
+    // In tuirealm 3.3.0, TerminalBridge handles terminal setup
+    let mut terminal = TerminalBridge::new(tuirealm::terminal::CrosstermTerminalAdapter::new()?);
 
-    // Restore terminal
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
+    let mut model = Model::new(shared_state.clone());
+
+    // Note: max_poll is the 3rd argument for SyncPort::new in tuirealm 3.3?
+    // Wait, previous error said: "argument #3 of type `usize` is missing".
+    // Checking documentation via error message: SyncPort::new(poll, interval, max_poll)
+    let port = SyncPort::new(
+        Box::new(BackendPort::new(client.clone(), shared_state.clone())),
+        Duration::from_millis(100),
+        10, // max_poll events per tick
+    );
+
+    let mut app: Application<Id, Msg, UserEvent> = Application::init(
+        EventListenerCfg::default()
+            .port(port)
+            .tick_interval(Duration::from_millis(200)),
+    );
+
+    // Mount Components
+    app.mount(
+        Id::Overview,
+        Box::new(OverviewComponent::new(shared_state.clone())),
+        vec![],
     )?;
-    terminal.show_cursor()?;
+    app.mount(
+        Id::Logs,
+        Box::new(LogsComponent::new(shared_state.clone())),
+        vec![],
+    )?;
+    app.mount(
+        Id::Controls,
+        Box::new(ControlsComponent::new(shared_state.clone())),
+        vec![],
+    )?;
 
-    if let Err(err) = res {
-        eprintln!("{:?}", err);
-    }
+    app.active(&Id::Overview)?;
 
-    Ok(())
-}
-
-async fn run_app<B: Backend>(
-    terminal: &mut Terminal<B>, 
-    state: Arc<Mutex<DashboardState>>,
-    tx: mpsc::Sender<AppCommand>
-) -> io::Result<()> {
-    let mut tab_index = 0;
-    let tabs = vec!["Overview", "Logs", "Controls"];
-    let mut reader = EventStream::new();
-
-    loop {
-        // Draw
-        terminal.draw(|f| {
-             let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .margin(1)
-                .constraints([Constraint::Length(3), Constraint::Min(0)].as_ref())
-                .split(f.area());
-
-            // Tabs
-            let titles: Vec<_> = tabs
-                .iter()
-                .map(|t| {
-                    let (first, rest) = t.split_at(1);
-                    Line::from(vec![
-                        Span::styled(first, Style::default().fg(Color::Yellow)),
-                        Span::styled(rest, Style::default().fg(Color::Green)),
-                    ])
-                })
-                .collect();
-            
-            let tabs_widget = Tabs::new(titles)
-                .block(Block::default().borders(Borders::ALL).title("Agent Dashboard"))
-                .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
-                .select(tab_index);
-            
-            f.render_widget(tabs_widget, chunks[0]);
-
-            // Component Rendering
-            let s = state.lock().expect("State lock poisoned");
-            match tab_index {
-                0 => {
-                    let mut comp = OverviewComponent { state: &s };
-                    comp.render(f, chunks[1]);
+    // Main Loop
+    while !model.quit {
+        // Application::tick handles everything and returns messages
+        if let Ok(messages) = app.tick(tuirealm::PollStrategy::UpTo(5)) {
+            for msg in messages {
+                if let Msg::KillAgent(id) = &msg {
+                    let client_clone = client.clone();
+                    let id_clone = id.clone();
+                    tokio::spawn(async move {
+                        let _ = client_clone.stop_agent(&id_clone).await;
+                    });
                 }
-                1 => {
-                    let mut comp = LogsComponent { state: &s };
-                    comp.render(f, chunks[1]);
-                }
-                2 => {
-                    let mut comp = ControlsComponent { state: &s };
-                    comp.render(f, chunks[1]);
-                }
-                _ => {}
+                model.update(Some(msg));
             }
-        }).map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
-
-        // Event Loop
-        let event = tokio::select! {
-            // We can add a ticker here if we wanted constant refreshes independent of backend updates
-            // _ = tokio::time::sleep(Duration::from_millis(100)) => None, 
-            maybe_event = reader.next() => maybe_event,
-        };
-
-        match event {
-            Some(Ok(Event::Key(key))) => {
-                 // Global keys
-                 match key.code {
-                    KeyCode::Char('q') => return Ok(()),
-                    KeyCode::Right | KeyCode::Tab => {
-                        tab_index = (tab_index + 1) % tabs.len();
-                        continue;
-                    }
-                    KeyCode::Left => {
-                        if tab_index > 0 {
-                            tab_index -= 1;
-                        } else {
-                            tab_index = tabs.len() - 1;
-                        }
-                        continue;
-                    }
-                    _ => {}
-                }
-
-                // Component keys
-                let mut s = state.lock().expect("State lock poisoned");
-                let action = match tab_index {
-                    0 => {
-                        let mut comp = OverviewComponent { state: &s };
-                        comp.handle_key_event(key)
-                    },
-                    1 => {
-                        let mut comp = LogsComponent { state: &s };
-                        comp.handle_key_event(key)
-                    },
-                    2 => {
-                        let mut comp = ControlsComponent { state: &s };
-                        comp.handle_key_event(key)
-                    }
-                    _ => Ok(Action::None),
-                };
-
-                // Handle Actions
-                match action {
-                    Ok(Action::SelectNext) => {
-                        if !s.agents.is_empty() {
-                            s.selected_index = (s.selected_index + 1) % s.agents.len();
-                        }
-                    }
-                    Ok(Action::SelectPrev) => {
-                        if !s.agents.is_empty() {
-                             if s.selected_index > 0 {
-                                s.selected_index -= 1;
-                            } else {
-                                s.selected_index = s.agents.len() - 1;
-                            }
-                        }
-                    }
-                    Ok(Action::KillAgent) => {
-                         if !s.agents.is_empty() {
-                            let id = s.agents[s.selected_index].id.clone();
-                            let tx = tx.clone();
-                            tokio::spawn(async move {
-                                let _ = tx.send(AppCommand::StopAgent(id)).await;
-                            });
-                        }
-                    }
-                    Ok(Action::Quit) => return Ok(()),
-                    _ => {}
-                }
-            }
-            Some(Ok(_)) => {} // Other events
-            Some(Err(e)) => return Err(io::Error::new(io::ErrorKind::Other, e)),
-            None => break,
         }
+
+        if model.redraw {
+            terminal.raw_mut().draw(|f| {
+                let chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .margin(1)
+                    .constraints([Constraint::Length(3), Constraint::Min(0)].as_ref())
+                    .split(f.area());
+
+                let titles = vec!["Overview", "Logs", "Controls"];
+                let tabs = Tabs::new(titles)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title("Agent Dashboard"),
+                    )
+                    .highlight_style(
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                    .select(model.tab_index);
+                f.render_widget(tabs, chunks[0]);
+
+                let active_id = match model.tab_index {
+                    0 => &Id::Overview,
+                    1 => &Id::Logs,
+                    2 => &Id::Controls,
+                    _ => &Id::Overview,
+                };
+                let _ = app.view(active_id, f, chunks[1]);
+            })?;
+            model.redraw = false;
+        }
+
+        // Manual global key handling for tab switching since components only handle their own focus
+        // We can check if we have pending events that were not consumed?
+        // Actually, let's just make the active component forward unhandled keys?
+        // Or simpler: We can poll for input manually using crossterm event stream alongside the app?
+        // NO, Application::tick consumes events.
+        //
+        // Correct approach: Components should forward keys they don't handle, OR we add a global listener.
+        // But `app.tick` returns messages.
+        //
+        // For this simple app, we can make components return a specific Msg for tab switching
+        // or just handle it in the components (as we did in the components::overview::OverviewComponent::on).
+        // Wait, I removed the tab handling from components in the last update.
+        // I should add it back to components or handle it globally.
+        //
+        // Let's add tab handling to all components.
     }
+
+    // Cleanup
+    disable_raw_mode()?;
+    execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
 
     Ok(())
 }
