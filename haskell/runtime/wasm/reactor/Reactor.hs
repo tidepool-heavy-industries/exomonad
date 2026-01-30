@@ -20,9 +20,8 @@ import GHC.Wasm.Prim (JSString(..))
 
 -- Import unified FFI and Roundtrip to ensure the foreign exports are linked
 import ExoMonad.Wasm.Ffi.Unified ()
-import ExoMonad.Wasm.Roundtrip ()
 import ExoMonad.Wasm.Registry.Default (setupDefaultRegistry)
-
+import ExoMonad.Wasm.Roundtrip ()
 
 -- | Initialize the registry with default graphs.
 -- TypeScript must call this once after loading WASM, before any initialize() calls.

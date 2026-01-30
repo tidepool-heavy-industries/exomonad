@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wno-redundant-constraints #-}
+
 -- | IO-blind Language Server Protocol effect (Native-only)
 --
 -- = Overview
@@ -40,71 +41,69 @@
 --     Just h -> pure (hoverContents h)
 --     Nothing -> pure "No hover info"
 -- @
---
 module ExoMonad.Effect.LSP
   ( -- * Platform Constraint
-    NativeOnly
+    NativeOnly,
 
     -- * Effect
-  , LSP(..)
+    LSP (..),
 
     -- * Smart Constructors
-  , diagnostics
-  , hover
-  , references
-  , definition
-  , codeActions
-  , rename
-  , completion
-  , workspaceSymbol
-  , documentSymbol
-  , prepareCallHierarchy
-  , outgoingCalls
-  , getIndexingState
+    diagnostics,
+    hover,
+    references,
+    definition,
+    codeActions,
+    rename,
+    completion,
+    workspaceSymbol,
+    documentSymbol,
+    prepareCallHierarchy,
+    outgoingCalls,
+    getIndexingState,
 
     -- * Document Identifiers
-  , TextDocumentIdentifier(..)
-  , textDocument
+    TextDocumentIdentifier (..),
+    textDocument,
 
     -- * Position Types
-  , Position(..)
-  , position
-  , Range(..)
-  , range
-  , Location(..)
+    Position (..),
+    position,
+    Range (..),
+    range,
+    Location (..),
 
     -- * Result Types
-  , Diagnostic(..)
-  , DiagnosticSeverity(..)
-  , HoverInfo(..)
-  , CodeAction(..)
-  , CodeActionKind(..)
-  , WorkspaceEdit(..)
-  , TextEdit(..)
-  , CompletionItem(..)
-  , CompletionItemKind(..)
-  , SymbolInformation(..)
-  , SymbolKind(..)
-  , CallHierarchyItem(..)
-  , CallHierarchyOutgoingCall(..)
+    Diagnostic (..),
+    DiagnosticSeverity (..),
+    HoverInfo (..),
+    CodeAction (..),
+    CodeActionKind (..),
+    WorkspaceEdit (..),
+    TextEdit (..),
+    CompletionItem (..),
+    CompletionItemKind (..),
+    SymbolInformation (..),
+    SymbolKind (..),
+    CallHierarchyItem (..),
+    CallHierarchyOutgoingCall (..),
 
     -- * Indexing State
-  , IndexingState(..)
-  , IndexingInfo(..)
-  , indexingDuration
-  , getIndexingInfo
-  ) where
+    IndexingState (..),
+    IndexingInfo (..),
+    indexingDuration,
+    getIndexingInfo,
+  )
+where
 
 import Control.Monad.Freer (Eff, Member, send)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
-import Data.Time (UTCTime, NominalDiffTime, diffUTCTime)
-import qualified Data.Text as T
-import GHC.Generics (Generic)
-
+import Data.Text qualified as T
+import Data.Time (NominalDiffTime, UTCTime, diffUTCTime)
 import ExoMonad.Platform (NativeOnly)
-
+import GHC.Generics (Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- DOCUMENT IDENTIFIERS
@@ -126,10 +125,10 @@ newtype TextDocumentIdentifier = TextDocumentIdentifier
 -- -- Creates TextDocumentIdentifier with uri "file://src/Main.hs"
 -- @
 textDocument :: Text -> TextDocumentIdentifier
-textDocument uri = TextDocumentIdentifier
-  { tdiUri = if "file://" `T.isPrefixOf` uri then uri else "file://" <> uri
-  }
-
+textDocument uri =
+  TextDocumentIdentifier
+    { tdiUri = if "file://" `T.isPrefixOf` uri then uri else "file://" <> uri
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- POSITION TYPES
@@ -137,8 +136,10 @@ textDocument uri = TextDocumentIdentifier
 
 -- | A position in a text document (0-indexed line and character).
 data Position = Position
-  { posLine      :: !Int  -- ^ Line number (0-indexed)
-  , posCharacter :: !Int  -- ^ Character offset in line (0-indexed)
+  { -- | Line number (0-indexed)
+    posLine :: !Int,
+    -- | Character offset in line (0-indexed)
+    posCharacter :: !Int
   }
   deriving stock (Show, Eq, Ord, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -148,28 +149,31 @@ data Position = Position
 -- Note: LSP uses 0-indexed positions, but many tools show 1-indexed.
 -- This constructor takes 0-indexed values.
 position :: Int -> Int -> Position
-position line char = Position { posLine = line, posCharacter = char }
+position line char = Position {posLine = line, posCharacter = char}
 
 -- | A range in a text document.
 data Range = Range
-  { rangeStart :: !Position  -- ^ Start position (inclusive)
-  , rangeEnd   :: !Position  -- ^ End position (exclusive)
+  { -- | Start position (inclusive)
+    rangeStart :: !Position,
+    -- | End position (exclusive)
+    rangeEnd :: !Position
   }
   deriving stock (Show, Eq, Ord, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
 -- | Smart constructor for a range.
 range :: Position -> Position -> Range
-range start end = Range { rangeStart = start, rangeEnd = end }
+range start end = Range {rangeStart = start, rangeEnd = end}
 
 -- | A location in a document.
 data Location = Location
-  { locUri   :: !Text   -- ^ Document URI
-  , locRange :: !Range  -- ^ Range within the document
+  { -- | Document URI
+    locUri :: !Text,
+    -- | Range within the document
+    locRange :: !Range
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- RESULT TYPES
@@ -186,19 +190,26 @@ data DiagnosticSeverity
 
 -- | A diagnostic (error, warning, etc.) from the language server.
 data Diagnostic = Diagnostic
-  { diagRange    :: !Range              -- ^ Where the diagnostic applies
-  , diagSeverity :: !DiagnosticSeverity -- ^ Severity level
-  , diagCode     :: !(Maybe Text)       -- ^ Optional error code
-  , diagSource   :: !(Maybe Text)       -- ^ Source of the diagnostic (e.g., "ghc")
-  , diagMessage  :: !Text               -- ^ The diagnostic message
+  { -- | Where the diagnostic applies
+    diagRange :: !Range,
+    -- | Severity level
+    diagSeverity :: !DiagnosticSeverity,
+    -- | Optional error code
+    diagCode :: !(Maybe Text),
+    -- | Source of the diagnostic (e.g., "ghc")
+    diagSource :: !(Maybe Text),
+    -- | The diagnostic message
+    diagMessage :: !Text
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
 -- | Hover information returned by the language server.
 data HoverInfo = HoverInfo
-  { hoverContents :: !Text          -- ^ The hover text (may be markdown)
-  , hoverRange    :: !(Maybe Range) -- ^ Range the hover applies to
+  { -- | The hover text (may be markdown)
+    hoverContents :: !Text,
+    -- | Range the hover applies to
+    hoverRange :: !(Maybe Range)
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -219,25 +230,32 @@ data CodeActionKind
 
 -- | A code action (quick fix, refactoring, etc.).
 data CodeAction = CodeAction
-  { caTitle   :: !Text                    -- ^ Short description
-  , caKind    :: !(Maybe CodeActionKind)  -- ^ Kind of code action
-  , caEdit    :: !(Maybe WorkspaceEdit)   -- ^ Changes to apply
-  , caCommand :: !(Maybe Text)            -- ^ Optional command to run
+  { -- | Short description
+    caTitle :: !Text,
+    -- | Kind of code action
+    caKind :: !(Maybe CodeActionKind),
+    -- | Changes to apply
+    caEdit :: !(Maybe WorkspaceEdit),
+    -- | Optional command to run
+    caCommand :: !(Maybe Text)
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
 -- | A text edit.
 data TextEdit = TextEdit
-  { teRange   :: !Range  -- ^ Range to replace
-  , teNewText :: !Text   -- ^ New text
+  { -- | Range to replace
+    teRange :: !Range,
+    -- | New text
+    teNewText :: !Text
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
 -- | Workspace-wide edit.
 data WorkspaceEdit = WorkspaceEdit
-  { weChanges :: !(Map Text [TextEdit])  -- ^ URI -> edits
+  { -- | URI -> edits
+    weChanges :: !(Map Text [TextEdit])
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -274,11 +292,16 @@ data CompletionItemKind
 
 -- | A completion suggestion.
 data CompletionItem = CompletionItem
-  { ciLabel         :: !Text                      -- ^ Display text
-  , ciKind          :: !(Maybe CompletionItemKind) -- ^ Kind of completion
-  , ciDetail        :: !(Maybe Text)              -- ^ Additional details (e.g., type)
-  , ciDocumentation :: !(Maybe Text)              -- ^ Documentation
-  , ciInsertText    :: !(Maybe Text)              -- ^ Text to insert (if different from label)
+  { -- | Display text
+    ciLabel :: !Text,
+    -- | Kind of completion
+    ciKind :: !(Maybe CompletionItemKind),
+    -- | Additional details (e.g., type)
+    ciDetail :: !(Maybe Text),
+    -- | Documentation
+    ciDocumentation :: !(Maybe Text),
+    -- | Text to insert (if different from label)
+    ciInsertText :: !(Maybe Text)
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -316,33 +339,36 @@ data SymbolKind
 
 -- | Information about a symbol found in workspace search.
 data SymbolInformation = SymbolInformation
-  { siName     :: !Text              -- ^ Symbol name
-  , siKind     :: !SymbolKind        -- ^ Kind of symbol
-  , siLocation :: !Location          -- ^ Where the symbol is defined
-  , siContainer :: !(Maybe Text)     -- ^ Container name (e.g., module)
+  { -- | Symbol name
+    siName :: !Text,
+    -- | Kind of symbol
+    siKind :: !SymbolKind,
+    -- | Where the symbol is defined
+    siLocation :: !Location,
+    -- | Container name (e.g., module)
+    siContainer :: !(Maybe Text)
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
 -- | Represents a symbol in the call hierarchy.
 data CallHierarchyItem = CallHierarchyItem
-  { chiName           :: !Text
-  , chiKind           :: !SymbolKind
-  , chiUri            :: !Text
-  , chiRange          :: !Range
-  , chiSelectionRange :: !Range
+  { chiName :: !Text,
+    chiKind :: !SymbolKind,
+    chiUri :: !Text,
+    chiRange :: !Range,
+    chiSelectionRange :: !Range
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
 -- | Represents an outgoing call from a function.
 data CallHierarchyOutgoingCall = CallHierarchyOutgoingCall
-  { chocTo         :: !CallHierarchyItem
-  , chocFromRanges :: ![Range]
+  { chocTo :: !CallHierarchyItem,
+    chocFromRanges :: ![Range]
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- INDEXING STATE
@@ -354,9 +380,12 @@ data CallHierarchyOutgoingCall = CallHierarchyOutgoingCall
 -- incomplete results. This state is tracked by the session and can be
 -- queried by tools to add warnings to their output.
 data IndexingState
-  = Startup     -- ^ HLS has started but hasn't begun indexing (initial state)
-  | Indexing    -- ^ HLS is still indexing the workspace
-  | Ready       -- ^ HLS indexing complete, queries should be accurate
+  = -- | HLS has started but hasn't begun indexing (initial state)
+    Startup
+  | -- | HLS is still indexing the workspace
+    Indexing
+  | -- | HLS indexing complete, queries should be accurate
+    Ready
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
@@ -395,13 +424,19 @@ data IndexingState
 -- indexingDuration info = Just 45s
 -- @
 data IndexingInfo = IndexingInfo
-  { iiState          :: !IndexingState     -- ^ Binary state (Indexing | Ready)
-  , iiProgressCount  :: !Int               -- ^ Number of incomplete progress sessions
-  , iiProgressTokens :: ![Text]            -- ^ Progress token IDs for debugging
-  , iiSessionStart   :: !UTCTime           -- ^ When LSP session started
-  , iiReadyAt        :: !(Maybe UTCTime)   -- ^ When indexing completed (if Ready)
-  } deriving stock (Show, Eq, Generic)
-    deriving anyclass (FromJSON, ToJSON)
+  { -- | Binary state (Indexing | Ready)
+    iiState :: !IndexingState,
+    -- | Number of incomplete progress sessions
+    iiProgressCount :: !Int,
+    -- | Progress token IDs for debugging
+    iiProgressTokens :: ![Text],
+    -- | When LSP session started
+    iiSessionStart :: !UTCTime,
+    -- | When indexing completed (if Ready)
+    iiReadyAt :: !(Maybe UTCTime)
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
 
 -- | Compute the time HLS spent indexing.
 --
@@ -415,7 +450,6 @@ data IndexingInfo = IndexingInfo
 -- @
 indexingDuration :: IndexingInfo -> Maybe NominalDiffTime
 indexingDuration info = diffUTCTime <$> info.iiReadyAt <*> pure info.iiSessionStart
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT DEFINITION
@@ -433,49 +467,36 @@ indexingDuration info = diffUTCTime <$> info.iiReadyAt <*> pure info.iiSessionSt
 data LSP r where
   -- | Get diagnostics (errors, warnings) for a document.
   Diagnostics :: TextDocumentIdentifier -> LSP [Diagnostic]
-
   -- | Get hover information at a position.
   Hover :: TextDocumentIdentifier -> Position -> LSP (Maybe HoverInfo)
-
   -- | Find all references to the symbol at a position.
   References :: TextDocumentIdentifier -> Position -> LSP [Location]
-
   -- | Go to definition of the symbol at a position.
   Definition :: TextDocumentIdentifier -> Position -> LSP [Location]
-
   -- | Get available code actions for a range.
   CodeActions :: TextDocumentIdentifier -> Range -> LSP [CodeAction]
-
   -- | Rename the symbol at a position.
   Rename :: TextDocumentIdentifier -> Position -> Text -> LSP WorkspaceEdit
-
   -- | Get completion suggestions at a position.
   Completion :: TextDocumentIdentifier -> Position -> LSP [CompletionItem]
-
   -- | Search for symbols in the workspace by name query.
   WorkspaceSymbol :: Text -> LSP [SymbolInformation]
-
   -- | Get all symbols (functions, types, etc.) defined in a document.
   DocumentSymbol :: TextDocumentIdentifier -> LSP [SymbolInformation]
-
   -- | Prepare call hierarchy at a position.
   PrepareCallHierarchy :: TextDocumentIdentifier -> Position -> LSP [CallHierarchyItem]
-
   -- | Get outgoing calls for a call hierarchy item.
   OutgoingCalls :: CallHierarchyItem -> LSP [CallHierarchyOutgoingCall]
-
   -- | Get the current HLS indexing state.
   --
   -- Returns 'Indexing' if HLS is still indexing the workspace,
   -- 'Ready' when indexing is complete and queries should be accurate.
   GetIndexingState :: LSP IndexingState
-
   -- | Get detailed HLS indexing information.
   --
   -- Returns 'IndexingInfo' with full diagnostic data:
   -- progress count, token IDs, session timing, etc.
   GetIndexingInfo :: LSP IndexingInfo
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SMART CONSTRUCTORS

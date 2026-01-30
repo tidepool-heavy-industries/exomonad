@@ -11,23 +11,21 @@
 -- All tests use resetSession between runs to ensure isolation.
 module FfiSpec (spec) where
 
-import Test.Hspec
-import Data.Aeson (decode, Value(..))
+import Data.Aeson (Value (..), decode)
 import Data.Aeson.KeyMap qualified as KM
-import Data.Vector qualified as V
-import qualified Data.ByteString.Lazy as LBS
-import qualified Data.Text as T
+import Data.ByteString.Lazy qualified as LBS
+import Data.Text qualified as T
 import Data.Text.Encoding (encodeUtf8)
-
+import Data.Vector qualified as V
 import ExoMonad.Wasm.Registry
-  ( initialize
-  , step
-  , getGraphInfo
-  , getGraphState
-  , resetSession
+  ( getGraphInfo,
+    getGraphState,
+    initialize,
+    resetSession,
+    step,
   )
 import ExoMonad.Wasm.Registry.Default (setupDefaultRegistry)
-
+import Test.Hspec
 
 spec :: Spec
 spec = beforeAll_ setupDefaultRegistry $ do
@@ -39,11 +37,9 @@ spec = beforeAll_ setupDefaultRegistry $ do
     getGraphStateSpec
     errorCasesSpec
 
-
 -- | Helper to decode JSON from Text output
 decodeOutput :: T.Text -> Maybe Value
 decodeOutput = decode . LBS.fromStrict . encodeUtf8
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- initialize
@@ -51,7 +47,6 @@ decodeOutput = decode . LBS.fromStrict . encodeUtf8
 
 initializeSpec :: Spec
 initializeSpec = describe "initialize" $ do
-
   it "returns StepOutput with effect for valid input" $ do
     resetSession
     result <- initialize "test" "5"
@@ -90,14 +85,12 @@ initializeSpec = describe "initialize" $ do
         _ -> expectationFailure "Expected graphState object"
       _ -> expectationFailure "Expected JSON object"
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- step
 -- ════════════════════════════════════════════════════════════════════════════
 
 stepSpec :: Spec
 stepSpec = describe "step" $ do
-
   it "completes graph with success result" $ do
     resetSession
     _ <- initialize "test" "5"
@@ -132,14 +125,12 @@ stepSpec = describe "step" $ do
           _ -> expectationFailure "Expected graphState object"
       _ -> expectationFailure "Expected JSON object"
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- Full Cycle
 -- ════════════════════════════════════════════════════════════════════════════
 
 fullCycleSpec :: Spec
 fullCycleSpec = describe "Full cycle (initialize -> step -> done)" $ do
-
   it "produces n+1 for input n" $ do
     resetSession
     -- Step 1: Initialize with 10
@@ -183,14 +174,12 @@ fullCycleSpec = describe "Full cycle (initialize -> step -> done)" $ do
       Object o -> KM.lookup "stepResult" o `shouldBe` Just (Number (-4))
       _ -> expectationFailure "Expected object"
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- getGraphInfo
 -- ════════════════════════════════════════════════════════════════════════════
 
 getGraphInfoSpec :: Spec
 getGraphInfoSpec = describe "getGraphInfo" $ do
-
   it "returns static graph structure" $ do
     result <- getGraphInfo "test"
     let Just output = decodeOutput result
@@ -222,14 +211,12 @@ getGraphInfoSpec = describe "getGraphInfo" $ do
         _ -> expectationFailure "Expected edges array"
       _ -> expectationFailure "Expected JSON object"
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- getGraphState
 -- ════════════════════════════════════════════════════════════════════════════
 
 getGraphStateSpec :: Spec
 getGraphStateSpec = describe "getGraphState" $ do
-
   it "returns idle when not initialized" $ do
     resetSession
     result <- getGraphState "test"
@@ -268,14 +255,12 @@ getGraphStateSpec = describe "getGraphState" $ do
         _ -> expectationFailure "Expected phase object"
       _ -> expectationFailure "Expected JSON object"
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- Error Cases
 -- ════════════════════════════════════════════════════════════════════════════
 
 errorCasesSpec :: Spec
 errorCasesSpec = describe "Error cases" $ do
-
   it "step before initialize returns error" $ do
     resetSession
     result <- step "test" "{\"type\": \"success\"}"
@@ -316,11 +301,11 @@ errorCasesSpec = describe "Error cases" $ do
   it "double initialize resets state" $ do
     resetSession
     _ <- initialize "test" "5"
-    _ <- initialize "test" "10"  -- Reset with new value
+    _ <- initialize "test" "10" -- Reset with new value
     result <- step "test" "{\"type\": \"success\"}"
     let Just output = decodeOutput result
     case output of
-      Object o -> KM.lookup "stepResult" o `shouldBe` Just (Number 11)  -- 10+1, not 5+1
+      Object o -> KM.lookup "stepResult" o `shouldBe` Just (Number 11) -- 10+1, not 5+1
       _ -> expectationFailure "Expected object"
 
   it "step with wrong graphId returns mismatch error" $ do

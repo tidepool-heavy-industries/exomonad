@@ -1,10 +1,8 @@
 module Main where
 
+import ExoMonad.Worktree.InterpreterSpec qualified as InterpreterSpec
+import ExoMonad.Worktree.ParseSpec qualified as ParseSpec
 import Test.Hspec
-
-import qualified ExoMonad.Worktree.ParseSpec as ParseSpec
-import qualified ExoMonad.Worktree.InterpreterSpec as InterpreterSpec
-
 
 -- | Run all worktree interpreter tests.
 --

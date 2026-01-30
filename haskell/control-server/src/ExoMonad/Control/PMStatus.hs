@@ -7,32 +7,31 @@
 
 -- | PM Status tool for sprint health observability.
 module ExoMonad.Control.PMStatus
-  ( PmStatusArgs(..)
-  , PmStatusResult(..)
-  , CycleTimeMetrics(..)
-  , CurrentStateMetrics(..)
-  , PrLagMetrics(..)
-  , pmStatusLogic
-  ) where
+  ( PmStatusArgs (..),
+    PmStatusResult (..),
+    CycleTimeMetrics (..),
+    CurrentStateMetrics (..),
+    PrLagMetrics (..),
+    pmStatusLogic,
+  )
+where
 
+import Control.Lens (filtered, folded, lengthOf, traversed, (^..))
 import Control.Monad.Freer (Eff, Member)
-import Control.Lens (folded, filtered, lengthOf, traversed, (^..))
 import Data.Generics.Labels ()
 import Data.List (sort)
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
-import Data.Time (UTCTime, diffUTCTime, addUTCTime, nominalDay)
-
-import ExoMonad.Effects.GitHub (GitHub, listIssues, defaultIssueFilter, IssueFilter(..), IssueState(..), Issue(..), listPullRequests, PRFilter(..), defaultPRFilter, PRState(..), PullRequest(..), Repo(..), defaultRepo)
-import ExoMonad.Effect.Types (Time, getCurrentTime)
-
+import Data.Time (UTCTime, addUTCTime, diffUTCTime, nominalDay)
 import ExoMonad.Control.PMStatus.Types
+import ExoMonad.Effect.Types (Time, getCurrentTime)
+import ExoMonad.Effects.GitHub (GitHub, Issue (..), IssueFilter (..), IssueState (..), PRFilter (..), PRState (..), PullRequest (..), Repo (..), defaultIssueFilter, defaultPRFilter, defaultRepo, listIssues, listPullRequests)
 
 -- | Core logic for pm_status.
-pmStatusLogic
-  :: (Member GitHub es, Member Time es)
-  => PmStatusArgs
-  -> Eff es PmStatusResult
+pmStatusLogic ::
+  (Member GitHub es, Member Time es) =>
+  PmStatusArgs ->
+  Eff es PmStatusResult
 pmStatusLogic args = do
   now <- getCurrentTime
   let periodSeconds = fromIntegral args.periodDays * nominalDay
@@ -42,11 +41,13 @@ pmStatusLogic args = do
   let repo = maybe defaultRepo Repo args.repo
 
   -- Fetch all issues
-  let listInput = defaultIssueFilter
-                    { ifLabels = maybe [] (:[]) args.labelTrack }
+  let listInput =
+        defaultIssueFilter
+          { ifLabels = maybe [] (: []) args.labelTrack
+          }
   allIssuesResult <- listIssues repo listInput
   let allIssues = case allIssuesResult of
-        Left _err -> []  -- Silently degrade if GitHub unavailable
+        Left _err -> [] -- Silently degrade if GitHub unavailable
         Right is -> is
 
   -- 1. Velocity & Trend (Simulated using state for now as Issue doesn't have closedAt yet)
@@ -67,27 +68,29 @@ pmStatusLogic args = do
       needsPMApproval = countWithLabel "needs-approval" openIssues
 
   -- 4. PR Lag
-  allPrsResult <- listPullRequests repo (defaultPRFilter { pfState = Just PRMerged })
+  allPrsResult <- listPullRequests repo (defaultPRFilter {pfState = Just PRMerged})
   let allPrs = case allPrsResult of
-        Left _err -> []  -- Silently degrade if GitHub unavailable
+        Left _err -> [] -- Silently degrade if GitHub unavailable
         Right ps -> ps
   let prsInPeriod = filter (isPrMergedBetween periodStart now) allPrs
       prLags = mapMaybe calcPrLag prsInPeriod
       (prMedian, prP90) = calcMetrics prLags (3600) -- in hours
 
   -- 5. Breakdown (optional)
-  let breakdown = if args.includeBreakdown
-                  then Just $ aggregateLabels allIssues
-                  else Nothing
+  let breakdown =
+        if args.includeBreakdown
+          then Just $ aggregateLabels allIssues
+          else Nothing
 
-  pure $ PmStatusResult
-    { velocity = velocity
-    , trend = trend
-    , cycleTime = CycleTimeMetrics ctMedian ctP90
-    , currentState = CurrentStateMetrics inFlight ready blocked needsTLReview needsPMApproval
-    , prLag = PrLagMetrics prMedian prP90
-    , breakdown = breakdown
-    }
+  pure $
+    PmStatusResult
+      { velocity = velocity,
+        trend = trend,
+        cycleTime = CycleTimeMetrics ctMedian ctP90,
+        currentState = CurrentStateMetrics inFlight ready blocked needsTLReview needsPMApproval,
+        prLag = PrLagMetrics prMedian prP90,
+        breakdown = breakdown
+      }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS
@@ -113,18 +116,18 @@ calcMetrics xs unit =
       -- Use lower-middle element for median to avoid upper-middle bias
       medianIdx = (len - 1) `div` 2
       -- Compute a 0-based index for the 90th percentile and clamp into bounds
-      p90Pos = ceiling (0.9 * fromIntegral len :: Double)  -- 1-based position
-      rawP90Idx = p90Pos - 1                               -- convert to 0-based
+      p90Pos = ceiling (0.9 * fromIntegral len :: Double) -- 1-based position
+      rawP90Idx = p90Pos - 1 -- convert to 0-based
       p90Idx = max 0 (min (len - 1) rawP90Idx)
       m = sorted !! medianIdx
       p = sorted !! p90Idx
-  in (m / unit, p / unit)
+   in (m / unit, p / unit)
 
 aggregateLabels :: [Issue] -> [(Text, Int)]
 aggregateLabels issues =
   let allLabels = issues ^.. traversed . #issueLabels . traversed
       groups = group' $ sort allLabels
-  in mapMaybe (\case { (x:xs) -> Just (x, 1 + length xs); [] -> Nothing }) groups
+   in mapMaybe (\case (x : xs) -> Just (x, 1 + length xs); [] -> Nothing) groups
   where
     group' [] = []
-    group' (x:xs) = let (ys, zs) = span (== x) xs in (x:ys) : group' zs
+    group' (x : xs) = let (ys, zs) = span (== x) xs in (x : ys) : group' zs

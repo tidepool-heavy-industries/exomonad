@@ -14,16 +14,15 @@
 -- * parseToolCall roundtrip
 module DecisionToolsSpec (spec) where
 
-import Test.Hspec
-import Data.Aeson (Value(..), object, (.=))
-import qualified Data.Aeson.KeyMap as KeyMap
-import qualified Data.Vector as V
+import Data.Aeson (Value (..), object, (.=))
+import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Text (Text)
-import GHC.Generics (Generic)
-
-import ExoMonad.StructuredOutput ()  -- Bring instances into scope
+import Data.Vector qualified as V
+import ExoMonad.StructuredOutput ()
+-- Bring instances into scope
 import ExoMonad.StructuredOutput.DecisionTools
-
+import GHC.Generics (Generic)
+import Test.Hspec
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TEST FIXTURES
@@ -31,27 +30,26 @@ import ExoMonad.StructuredOutput.DecisionTools
 
 -- | Simple two-branch sum type for testing.
 data ReviewDecision
-  = Approve { approveNotes :: Text }
-  | Reject { rejectReason :: Text }
+  = Approve {approveNotes :: Text}
+  | Reject {rejectReason :: Text}
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToDecisionTools)
 
 -- | Three-branch sum type with multiple fields.
 data TaskAction
-  = Complete { completeNotes :: Text, completeScore :: Int }
-  | Defer { deferReason :: Text, deferDays :: Int }
-  | Cancel { cancelReason :: Text }
+  = Complete {completeNotes :: Text, completeScore :: Int}
+  | Defer {deferReason :: Text, deferDays :: Int}
+  | Cancel {cancelReason :: Text}
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToDecisionTools)
 
 -- | Sum type with PascalCase constructor names.
 data HttpResponse
-  = OkResponse { okBody :: Text }
-  | NotFoundError { notFoundPath :: Text }
-  | InternalServerError { iseMessage :: Text }
+  = OkResponse {okBody :: Text}
+  | NotFoundError {notFoundPath :: Text}
+  | InternalServerError {iseMessage :: Text}
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToDecisionTools)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TESTS
@@ -104,42 +102,47 @@ spec = do
 
   describe "parseToolCall" $ do
     it "parses matching tool call correctly" $ do
-      let toolCall = ToolCall
-            { tcName = "decision::approve"
-            , tcInput = object ["notes" .= ("LGTM" :: Text)]
-            }
+      let toolCall =
+            ToolCall
+              { tcName = "decision::approve",
+                tcInput = object ["notes" .= ("LGTM" :: Text)]
+              }
       parseToolCall @ReviewDecision toolCall `shouldBe` Right (Approve "LGTM")
 
     it "parses second variant correctly" $ do
-      let toolCall = ToolCall
-            { tcName = "decision::reject"
-            , tcInput = object ["reason" .= ("Needs work" :: Text)]
-            }
+      let toolCall =
+            ToolCall
+              { tcName = "decision::reject",
+                tcInput = object ["reason" .= ("Needs work" :: Text)]
+              }
       parseToolCall @ReviewDecision toolCall `shouldBe` Right (Reject "Needs work")
 
     it "parses multi-field constructor" $ do
-      let toolCall = ToolCall
-            { tcName = "decision::complete"
-            , tcInput = object ["notes" .= ("Done!" :: Text), "score" .= (5 :: Int)]
-            }
+      let toolCall =
+            ToolCall
+              { tcName = "decision::complete",
+                tcInput = object ["notes" .= ("Done!" :: Text), "score" .= (5 :: Int)]
+              }
       parseToolCall @TaskAction toolCall `shouldBe` Right (Complete "Done!" 5)
 
     it "returns error for unknown tool name" $ do
-      let toolCall = ToolCall
-            { tcName = "decision::unknown"
-            , tcInput = object []
-            }
+      let toolCall =
+            ToolCall
+              { tcName = "decision::unknown",
+                tcInput = object []
+              }
       case parseToolCall @ReviewDecision toolCall of
         Left err -> err `shouldContain` "mismatch"
         Right _ -> expectationFailure "Should have failed"
 
     it "returns error for missing required field" $ do
-      let toolCall = ToolCall
-            { tcName = "decision::approve"
-            , tcInput = object []  -- Missing "notes"
-            }
+      let toolCall =
+            ToolCall
+              { tcName = "decision::approve",
+                tcInput = object [] -- Missing "notes"
+              }
       case parseToolCall @ReviewDecision toolCall of
-        Left _ -> pure ()  -- Expected to fail
+        Left _ -> pure () -- Expected to fail
         Right _ -> expectationFailure "Should have failed"
 
   describe "roundtrip" $ do
@@ -148,10 +151,11 @@ spec = do
       let tools = toDecisionTools @ReviewDecision
       let approveTool = head $ filter (\t -> t.dtName == "decision::approve") tools
       -- Manually construct a tool call that matches
-      let toolCall = ToolCall
-            { tcName = approveTool.dtName
-            , tcInput = object ["notes" .= ("Test notes" :: Text)]
-            }
+      let toolCall =
+            ToolCall
+              { tcName = approveTool.dtName,
+                tcInput = object ["notes" .= ("Test notes" :: Text)]
+              }
       parseToolCall @ReviewDecision toolCall `shouldBe` Right original
 
   describe "decisionServerName" $ do

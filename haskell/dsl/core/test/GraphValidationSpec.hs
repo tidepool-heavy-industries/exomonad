@@ -13,21 +13,27 @@
 -- Tests cover the record-based Servant-style syntax (data MyGraph mode = ...).
 module GraphValidationSpec (spec) where
 
-import Test.Hspec
-import System.Process
-import System.Exit (ExitCode(..))
 import Data.List (isInfixOf)
+import System.Exit (ExitCode (..))
+import System.Process
+import Test.Hspec
 
 -- | Run GHC on a test file and return (exit code, stderr)
 compileTestFile :: FilePath -> IO (ExitCode, String)
 compileTestFile path = do
   -- Use cabal exec to get correct package database
-  (exitCode, _stdout, stderr) <- readProcessWithExitCode "cabal"
-    [ "exec", "ghc", "--"
-    , "-fno-code"          -- don't generate code, just typecheck
-    , "-package", "exomonad-core"
-    , path
-    ] ""
+  (exitCode, _stdout, stderr) <-
+    readProcessWithExitCode
+      "cabal"
+      [ "exec",
+        "ghc",
+        "--",
+        "-fno-code", -- don't generate code, just typecheck
+        "-package",
+        "exomonad-core",
+        path
+      ]
+      ""
   pure (exitCode, stderr)
 
 -- | Assert that compilation succeeds
@@ -36,8 +42,9 @@ shouldPass path = do
   (exitCode, stderr) <- compileTestFile path
   case exitCode of
     ExitSuccess -> pure ()
-    ExitFailure _ -> expectationFailure $
-      "Expected " ++ path ++ " to compile successfully, but got:\n" ++ stderr
+    ExitFailure _ ->
+      expectationFailure $
+        "Expected " ++ path ++ " to compile successfully, but got:\n" ++ stderr
 
 -- | Assert that compilation fails and stderr contains expected strings
 shouldFailWith :: FilePath -> [String] -> Expectation
@@ -55,7 +62,6 @@ spec = do
   -- POSITIVE TESTS: Valid record-based graphs
   -- ════════════════════════════════════════════════════════════════════════════
   describe "Valid graph definitions compile successfully" $ do
-
     it "simple linear graph compiles" $ do
       shouldPass "test/golden/valid/SimpleLinearRecord.hs"
 
@@ -75,45 +81,44 @@ spec = do
   -- NEGATIVE TESTS: Record-based DSL
   -- ════════════════════════════════════════════════════════════════════════════
   describe "Graph validation error messages (record DSL)" $ do
-
     it "unreachable field produces clear error" $ do
-      "test/golden/UnreachableFieldRecord.hs" `shouldFailWith`
-        [ "Graph validation failed: unreachable node"
-        , "Field 'orphan' cannot be reached from Entry"
-        ]
+      "test/golden/UnreachableFieldRecord.hs"
+        `shouldFailWith` [ "Graph validation failed: unreachable node",
+                           "Field 'orphan' cannot be reached from Entry"
+                         ]
 
     it "Logic field without exit path produces error" $ do
-      "test/golden/NoExitPathFieldRecord.hs" `shouldFailWith`
-        [ "Graph validation failed: Logic node cannot reach Exit"
-        , "Field 'loop' has no path to Exit"
-        ]
+      "test/golden/NoExitPathFieldRecord.hs"
+        `shouldFailWith` [ "Graph validation failed: Logic node cannot reach Exit",
+                           "Field 'loop' has no path to Exit"
+                         ]
 
     it "missing Entry field produces clear error" $ do
-      "test/golden/MissingEntryRecord.hs" `shouldFailWith`
-        [ "Missing EntryNode field"
-        , "WHAT HAPPENED:"
-        , "Your graph record has no EntryNode field."
-        ]
+      "test/golden/MissingEntryRecord.hs"
+        `shouldFailWith` [ "Missing EntryNode field",
+                           "WHAT HAPPENED:",
+                           "Your graph record has no EntryNode field."
+                         ]
 
     it "missing Exit field produces clear error" $ do
-      "test/golden/MissingExitRecord.hs" `shouldFailWith`
-        [ "Missing ExitNode field"
-        , "WHAT HAPPENED:"
-        , "Your graph record has no ExitNode field."
-        ]
+      "test/golden/MissingExitRecord.hs"
+        `shouldFailWith` [ "Missing ExitNode field",
+                           "WHAT HAPPENED:",
+                           "Your graph record has no ExitNode field."
+                         ]
 
     it "invalid Goto target produces clear error" $ do
-      "test/golden/InvalidGotoTargetRecord.hs" `shouldFailWith`
-        [ "Goto target \"nonexistent\" not found"
-        , "WHAT HAPPENED:"
-        , "no field named \"nonexistent\" exists"
-        ]
+      "test/golden/InvalidGotoTargetRecord.hs"
+        `shouldFailWith` [ "Goto target \"nonexistent\" not found",
+                           "WHAT HAPPENED:",
+                           "no field named \"nonexistent\" exists"
+                         ]
 
     it "Goto type mismatch produces clear error with expected types" $ do
-      "test/golden/GotoTypeMismatchRecord.hs" `shouldFailWith`
-        [ "Graph validation failed: Goto payload type mismatch"
-        , "Node 'router' sends:"
-        , "Goto \"handler\""
-        , "But target 'handler' expects:"
-        , "Input Int"
-        ]
+      "test/golden/GotoTypeMismatchRecord.hs"
+        `shouldFailWith` [ "Graph validation failed: Goto payload type mismatch",
+                           "Node 'router' sends:",
+                           "Goto \"handler\"",
+                           "But target 'handler' expects:",
+                           "Input Int"
+                         ]

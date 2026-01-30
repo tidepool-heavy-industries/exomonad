@@ -3,24 +3,23 @@
 -- Verifies that API requests are built with correct formats for each provider.
 module RequestBuildingSpec (spec) where
 
-import Data.Aeson (Value(..), ToJSON(..), object, (.=))
+import Data.Aeson (ToJSON (..), Value (..), object, (.=))
 import Data.Aeson.KeyMap qualified as KM
 import Data.Vector qualified as V
+import ExoMonad.Effects.LLMProvider (AnthropicConfig (..), ThinkingBudget (..))
+import ExoMonad.LLM.Interpreter (AnthropicTool (..), buildAnthropicRequest)
 import Test.Hspec
-
-import ExoMonad.LLM.Interpreter (buildAnthropicRequest, AnthropicTool(..))
-import ExoMonad.Effects.LLMProvider (AnthropicConfig(..), ThinkingBudget(..))
-
 
 spec :: Spec
 spec = do
   describe "buildAnthropicRequest" $ do
-    let baseConfig = AnthropicConfig
-          { acModel = "claude-sonnet-4-20250514"
-          , acMaxTokens = 1024
-          , acThinking = ThinkingDisabled
-          , acSystemPrompt = Nothing
-          }
+    let baseConfig =
+          AnthropicConfig
+            { acModel = "claude-sonnet-4-20250514",
+              acMaxTokens = 1024,
+              acThinking = ThinkingDisabled,
+              acSystemPrompt = Nothing
+            }
 
     describe "basic request structure" $ do
       it "includes model and max_tokens" $ do
@@ -40,7 +39,7 @@ spec = do
         KM.lookup "content" msg `shouldBe` Just (String "Hello world")
 
       it "includes system prompt when provided" $ do
-        let configWithSystem = baseConfig { acSystemPrompt = Just "You are a helpful assistant" }
+        let configWithSystem = baseConfig {acSystemPrompt = Just "You are a helpful assistant"}
             req = buildAnthropicRequest configWithSystem "Hi" Nothing Nothing
             Object fields = toJSON req
 
@@ -55,16 +54,19 @@ spec = do
 
     describe "tool format" $ do
       it "passes tools array directly" $ do
-        let anthropicTool = object
-              [ "name" .= ("search" :: String)
-              , "description" .= ("Search the web" :: String)
-              , "input_schema" .= object
-                  [ "type" .= ("object" :: String)
-                  , "properties" .= object
-                      [ "query" .= object ["type" .= ("string" :: String)]
+        let anthropicTool =
+              object
+                [ "name" .= ("search" :: String),
+                  "description" .= ("Search the web" :: String),
+                  "input_schema"
+                    .= object
+                      [ "type" .= ("object" :: String),
+                        "properties"
+                          .= object
+                            [ "query" .= object ["type" .= ("string" :: String)]
+                            ]
                       ]
-                  ]
-              ]
+                ]
             req = buildAnthropicRequest baseConfig "Search for cats" (Just [anthropicTool]) Nothing
             Object fields = toJSON req
             Just (Array tools) = KM.lookup "tools" fields
@@ -74,22 +76,26 @@ spec = do
         KM.member "input_schema" tool `shouldBe` True
 
       it "preserves input_schema key from AnthropicTool" $ do
-        let tool = AnthropicTool
-              { atName = "get_weather"
-              , atDescription = "Get weather for a location"
-              , atInputSchema = object
-                  [ "type" .= ("object" :: String)
-                  , "properties" .= object
-                      [ "location" .= object ["type" .= ("string" :: String)]
+        let tool =
+              AnthropicTool
+                { atName = "get_weather",
+                  atDescription = "Get weather for a location",
+                  atInputSchema =
+                    object
+                      [ "type" .= ("object" :: String),
+                        "properties"
+                          .= object
+                            [ "location" .= object ["type" .= ("string" :: String)]
+                            ],
+                        "required" .= (["location"] :: [String])
                       ]
-                  , "required" .= (["location"] :: [String])
-                  ]
-              }
-            toolJson = object
-              [ "name" .= tool.atName
-              , "description" .= tool.atDescription
-              , "input_schema" .= tool.atInputSchema
-              ]
+                }
+            toolJson =
+              object
+                [ "name" .= tool.atName,
+                  "description" .= tool.atDescription,
+                  "input_schema" .= tool.atInputSchema
+                ]
             req = buildAnthropicRequest baseConfig "What's the weather?" (Just [toolJson]) Nothing
             Object fields = toJSON req
             Just (Array tools) = KM.lookup "tools" fields
@@ -106,7 +112,7 @@ spec = do
 
     describe "thinking budget" $ do
       it "includes thinking config when budget provided" $ do
-        let configWithThinking = baseConfig { acThinking = ThinkingEnabled 5000 }
+        let configWithThinking = baseConfig {acThinking = ThinkingEnabled 5000}
             req = buildAnthropicRequest configWithThinking "Think hard" Nothing Nothing
             Object fields = toJSON req
             Just (Object thinking) = KM.lookup "thinking" fields

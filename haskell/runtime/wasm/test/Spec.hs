@@ -1,23 +1,22 @@
 module Main (main) where
 
+import CodegenSyncSpec qualified
+import ConversionSpec qualified
+import E2ESpec qualified
+import ExampleGraphSpec qualified
+import FfiSpec qualified
+import InterpreterSpec qualified
+import LlmTestGraphSpec qualified
+import ProtocolConformanceSpec qualified
+import ProtocolPropertySpec qualified
+import RegistrySpec qualified
+import RoundtripSpec qualified
+import RunnerSpec qualified
 import Test.Hspec
-
-import qualified WireTypesSpec
-import qualified TestGraphSpec
-import qualified ExampleGraphSpec
-import qualified LlmTestGraphSpec
-import qualified ProtocolConformanceSpec
-import qualified ProtocolPropertySpec
-import qualified RunnerSpec
-import qualified FfiSpec
-import qualified E2ESpec
-import qualified InterpreterSpec
-import qualified CodegenSyncSpec
-import qualified RoundtripSpec
-import qualified RegistrySpec
-import qualified TypedToolSpec
-import qualified ConversionSpec
-import qualified ToolResultOutcomeSpec
+import TestGraphSpec qualified
+import ToolResultOutcomeSpec qualified
+import TypedToolSpec qualified
+import WireTypesSpec qualified
 
 main :: IO ()
 main = hspec $ do

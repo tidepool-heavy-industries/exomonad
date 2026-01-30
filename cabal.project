@@ -56,6 +56,10 @@ allow-newer: all
 -- Use `cabal build -O1` or `-O2` for release builds
 optimization: 0
 
+-- Enable ImportQualifiedPost for all local packages (ormolu default style)
+package *
+  ghc-options: -XImportQualifiedPost
+
 -- Use nix zlib (compatible with nix GHC toolchain)
 package zlib
   extra-lib-dirs: /nix/store/l7xwm1f6f3zj2x8jwdbi8gdyfbx07sh7-zlib-1.3.1/lib

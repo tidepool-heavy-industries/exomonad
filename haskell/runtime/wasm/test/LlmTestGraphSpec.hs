@@ -9,22 +9,19 @@
 -- 3. The handler correctly uses the LlmComplete effect
 module LlmTestGraphSpec (spec) where
 
-import Test.Hspec
-import Data.Aeson (object, (.=), Value(..))
-import qualified Data.Text as T
-
+import Data.Aeson (Value (..), object, (.=))
+import Data.Text qualified as T
 import ExoMonad.Graph.Goto (GotoChoice, OneOf)
-import ExoMonad.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
+import ExoMonad.Graph.Goto.Internal (GotoChoice (..), OneOf (..)) -- For test assertions
 import ExoMonad.Wasm.LlmTestGraph (echoHandlerWasm)
-import ExoMonad.Wasm.Runner (initializeWasm, WasmResult(..))
-import ExoMonad.Wasm.WireTypes (SerializableEffect(..), EffectResult(..))
-
+import ExoMonad.Wasm.Runner (WasmResult (..), initializeWasm)
+import ExoMonad.Wasm.WireTypes (EffectResult (..), SerializableEffect (..))
+import Test.Hspec
 
 spec :: Spec
 spec = do
   echoHandlerSpec
   graphStructureSpec
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Echo Handler
@@ -32,7 +29,6 @@ spec = do
 
 echoHandlerSpec :: Spec
 echoHandlerSpec = describe "echoHandlerWasm" $ do
-
   it "returns LLM response for 'hello'" $ do
     let mockResponse = object ["response" .= ("Echo: hello" :: String)]
     runEchoHandler "hello" mockResponse `shouldBe` "Echo: hello"
@@ -52,7 +48,6 @@ echoHandlerSpec = describe "echoHandlerWasm" $ do
     let mockResponse = object ["response" .= ("Echo: " :: String)]
     runEchoHandler "" mockResponse `shouldBe` "Echo: "
 
-
 -- | Helper to run the echo handler through full yield/resume cycle.
 --
 -- The handler makes an LLM call (yield), we resume with mock response, and extract the result.
@@ -71,17 +66,15 @@ runEchoHandler input mockResponse =
       error $ "runEchoHandler: WasmError: " <> T.unpack msg
     _ -> error "runEchoHandler: unexpected result"
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- Graph Structure
 -- ════════════════════════════════════════════════════════════════════════════
 
 graphStructureSpec :: Spec
 graphStructureSpec = describe "LlmTestGraph structure" $ do
-
   it "handler yields LlmComplete effect" $ do
     case initializeWasm (echoHandlerWasm "test message") of
-      WasmYield (EffLlmComplete{}) _ -> pure ()
+      WasmYield (EffLlmComplete {}) _ -> pure ()
       WasmYield eff _ ->
         expectationFailure $ "Expected EffLlmComplete, got: " <> show eff
       _ -> expectationFailure "Expected yield"

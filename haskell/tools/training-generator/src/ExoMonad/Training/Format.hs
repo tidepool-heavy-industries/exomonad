@@ -1,31 +1,31 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module ExoMonad.Training.Format
-  ( formatSelectSymbolsExample
-  , formatSelectSymbolsExampleGrouped
-  , formatDeveloperTurn
-  , formatUserTurn
-  , formatUserTurnGrouped
-  , formatCandidateGroups
-  , formatModelTurnWithHole
-  , holeMarker
-  -- Edge Scoring format
-  , formatEdgeTrainingExample
-  -- V3: Code-Native Training Format
-  , formatCodeExample
-  , formatGemmaConversation
-  , formatTrainingFromSkeleton
-  ) where
+  ( formatSelectSymbolsExample,
+    formatSelectSymbolsExampleGrouped,
+    formatDeveloperTurn,
+    formatUserTurn,
+    formatUserTurnGrouped,
+    formatCandidateGroups,
+    formatModelTurnWithHole,
+    holeMarker,
+    -- Edge Scoring format
+    formatEdgeTrainingExample,
+    -- V3: Code-Native Training Format
+    formatCodeExample,
+    formatGemmaConversation,
+    formatTrainingFromSkeleton,
+  )
+where
 
 import Control.Lens ((^?))
-import Data.Aeson (encode, object, (.=), Value(..), (.:))
-import Data.Aeson.Lens (key, _String, _JSON)
+import Data.Aeson (Value (..), encode, object, (.:), (.=))
+import Data.Aeson.Lens (key, _JSON, _String)
 import Data.Aeson.Types (parseMaybe)
 import Data.ByteString.Lazy (ByteString)
 import Data.Text (Text)
-import qualified Data.Text as T
-
-import ExoMonad.Training.Types (CandidateGroups(..), ScoreEdgeInput(..), ScoreEdgeOutput(..), EdgeTrainingExample(..), edgeTypeToText)
+import Data.Text qualified as T
+import ExoMonad.Training.Types (CandidateGroups (..), EdgeTrainingExample (..), ScoreEdgeInput (..), ScoreEdgeOutput (..), edgeTypeToText)
 
 -- | Create a hole marker for human annotation.
 holeMarker :: Text -> Text
@@ -37,53 +37,55 @@ escape t = "<escape>" <> t <> "<escape>"
 
 -- | Format an edge training example as a JSONL conversation.
 formatEdgeTrainingExample :: EdgeTrainingExample -> ByteString
-formatEdgeTrainingExample EdgeTrainingExample{input=ScoreEdgeInput{..}, output=ScoreEdgeOutput{..}} =
-  let
-    userTurn = T.unlines
-      [ "<start_of_turn>user"
-      , "Score this edge:"
-      , "Query: " <> escape query
-      , "Source: " <> escape (sourceFile <> ":" <> T.pack (show sourceLine))
-      , "Source hover: " <> escape sourceHover
-      , "Target: " <> escape (targetFile <> ":" <> T.pack (show targetLine))
-      , "Target hover: " <> escape targetHover
-      , "Edge type: " <> escape (edgeTypeToText edgeType)
-      , "<end_of_turn>"
-      ]
-    
-    modelTurn = T.concat
-      [ "<start_of_turn>model\n"
-      , "<start_function_call>"
-      , "call:score_edge{"
-      , "relevance:" <> T.pack (show relevance) <> ","
-      , "risk:" <> T.pack (show risk) <> ","
-      , "reasoning:" <> escape reasoning <> ","
-      , "is_exhaustive:" <> T.toLower (T.pack (show isExhaustive)) <> ","
-      , "is_type_family:" <> T.toLower (T.pack (show isTypeFamily)) <> ","
-      , "is_exported:" <> T.toLower (T.pack (show isExported))
-      , "}"
-      , "<end_function_call>\n"
-      , "<end_of_turn>"
-      ]
-      
-    text = userTurn <> modelTurn
-  in encode $ object ["text" .= text]
+formatEdgeTrainingExample EdgeTrainingExample {input = ScoreEdgeInput {..}, output = ScoreEdgeOutput {..}} =
+  let userTurn =
+        T.unlines
+          [ "<start_of_turn>user",
+            "Score this edge:",
+            "Query: " <> escape query,
+            "Source: " <> escape (sourceFile <> ":" <> T.pack (show sourceLine)),
+            "Source hover: " <> escape sourceHover,
+            "Target: " <> escape (targetFile <> ":" <> T.pack (show targetLine)),
+            "Target hover: " <> escape targetHover,
+            "Edge type: " <> escape (edgeTypeToText edgeType),
+            "<end_of_turn>"
+          ]
+
+      modelTurn =
+        T.concat
+          [ "<start_of_turn>model\n",
+            "<start_function_call>",
+            "call:score_edge{",
+            "relevance:" <> T.pack (show relevance) <> ",",
+            "risk:" <> T.pack (show risk) <> ",",
+            "reasoning:" <> escape reasoning <> ",",
+            "is_exhaustive:" <> T.toLower (T.pack (show isExhaustive)) <> ",",
+            "is_type_family:" <> T.toLower (T.pack (show isTypeFamily)) <> ",",
+            "is_exported:" <> T.toLower (T.pack (show isExported)),
+            "}",
+            "<end_function_call>\n",
+            "<end_of_turn>"
+          ]
+
+      text = userTurn <> modelTurn
+   in encode $ object ["text" .= text]
 
 -- | Format developer turn (fixed for all examples).
 formatDeveloperTurn :: Text
-formatDeveloperTurn = T.unlines
-  [ "<start_of_turn>developer"
-  , "You are an expert function calling AI assistant."
-  , "You have access to the following functions:"
-  , ""
-  , "<start_function_declaration>select_symbols"
-  , "Select relevant symbols from candidates that help understand the topic in context of the current symbol."
-  , "Parameters:"
-  , "  selected (array): Array of selected symbol names from the candidate list. (required)"
-  , "<end_function_declaration>"
-  , ""
-  , "<end_of_turn>"
-  ]
+formatDeveloperTurn =
+  T.unlines
+    [ "<start_of_turn>developer",
+      "You are an expert function calling AI assistant.",
+      "You have access to the following functions:",
+      "",
+      "<start_function_declaration>select_symbols",
+      "Select relevant symbols from candidates that help understand the topic in context of the current symbol.",
+      "Parameters:",
+      "  selected (array): Array of selected symbol names from the candidate list. (required)",
+      "<end_function_declaration>",
+      "",
+      "<end_of_turn>"
+    ]
 
 -- | Format user turn with LSP context.
 --
@@ -92,111 +94,112 @@ formatDeveloperTurn = T.unlines
 -- - Module + Package for disambiguation
 -- - First-sentence docs only
 -- - Signature pre-cleaned (no forall, no markdown)
-formatUserTurn
-  :: Text         -- Symbol name
-  -> Text         -- Module name (e.g., "ExoMonad.Effect.LSP")
-  -> Text         -- Package name (e.g., "exomonad-core")
-  -> Text         -- Signature (cleaned)
-  -> Maybe Text   -- Documentation (first sentence only)
-  -> [Text]       -- Candidates
-  -> Text
-formatUserTurn symName moduleName packageName signature maybeDocs candidates = T.unlines $
-  [ "<start_of_turn>user"
-  , "Topic: " <> holeMarker "topic"
-  , "Symbol: " <> symName
-  , "Module: " <> moduleName
-  , "Package: " <> packageName
-  , "Signature: " <> signature
-  ]
-  <> maybe [] (\docs -> ["Docs: " <> docs]) maybeDocs
-  <>
-  [ "Candidates: " <> T.intercalate ", " candidates
-  , "<end_of_turn>"
-  ]
+formatUserTurn ::
+  Text -> -- Symbol name
+  Text -> -- Module name (e.g., "ExoMonad.Effect.LSP")
+  Text -> -- Package name (e.g., "exomonad-core")
+  Text -> -- Signature (cleaned)
+  Maybe Text -> -- Documentation (first sentence only)
+  [Text] -> -- Candidates
+  Text
+formatUserTurn symName moduleName packageName signature maybeDocs candidates =
+  T.unlines $
+    [ "<start_of_turn>user",
+      "Topic: " <> holeMarker "topic",
+      "Symbol: " <> symName,
+      "Module: " <> moduleName,
+      "Package: " <> packageName,
+      "Signature: " <> signature
+    ]
+      <> maybe [] (\docs -> ["Docs: " <> docs]) maybeDocs
+      <> [ "Candidates: " <> T.intercalate ", " candidates,
+           "<end_of_turn>"
+         ]
 
 -- | Format model turn with hole for selected symbols.
 formatModelTurnWithHole :: Text
-formatModelTurnWithHole = T.unlines
-  [ "<start_of_turn>model"
-  , "<start_function_call>"
-  , "call:select_symbols{selected:<escape>" <> holeMarker "selected" <> "<escape>}"
-  , "<end_function_call>"
-  , "<end_of_turn>"
-  ]
+formatModelTurnWithHole =
+  T.unlines
+    [ "<start_of_turn>model",
+      "<start_function_call>",
+      "call:select_symbols{selected:<escape>" <> holeMarker "selected" <> "<escape>}",
+      "<end_function_call>",
+      "<end_of_turn>"
+    ]
 
 -- | Format complete training example as JSONL line.
 --
 -- Lean format: Module + Package + cleaned signature + first-sentence docs.
-formatSelectSymbolsExample
-  :: Text         -- Symbol name
-  -> Text         -- Module name
-  -> Text         -- Package name
-  -> Text         -- Signature (cleaned)
-  -> Maybe Text   -- Documentation (first sentence)
-  -> [Text]       -- Candidates
-  -> ByteString
+formatSelectSymbolsExample ::
+  Text -> -- Symbol name
+  Text -> -- Module name
+  Text -> -- Package name
+  Text -> -- Signature (cleaned)
+  Maybe Text -> -- Documentation (first sentence)
+  [Text] -> -- Candidates
+  ByteString
 formatSelectSymbolsExample symName moduleName packageName signature maybeDocs candidates =
-  let text = T.concat
-        [ formatDeveloperTurn
-        , formatUserTurn symName moduleName packageName signature maybeDocs candidates
-        , formatModelTurnWithHole
-        ]
-  in encode $ object ["text" .= text]
-
+  let text =
+        T.concat
+          [ formatDeveloperTurn,
+            formatUserTurn symName moduleName packageName signature maybeDocs candidates,
+            formatModelTurnWithHole
+          ]
+   in encode $ object ["text" .= text]
 
 -- | Format candidate groups (Fields, Inputs, Output, References).
 formatCandidateGroups :: CandidateGroups -> Text
-formatCandidateGroups CandidateGroups{..} = T.unlines
-  [ "Candidates:"
-  , "  Fields: " <> formatList fields
-  , "  Inputs: " <> formatList inputs
-  , "  Output: " <> formatList output
-  , "  References: " <> case references of
-      Left note -> note
-      Right refs -> formatList refs
-  ]
+formatCandidateGroups CandidateGroups {..} =
+  T.unlines
+    [ "Candidates:",
+      "  Fields: " <> formatList fields,
+      "  Inputs: " <> formatList inputs,
+      "  Output: " <> formatList output,
+      "  References: " <> case references of
+        Left note -> note
+        Right refs -> formatList refs
+    ]
   where
     formatList [] = "(none)"
     formatList xs = T.intercalate ", " xs
 
-
 -- | Format user turn with grouped candidates (v2 format).
-formatUserTurnGrouped
-  :: Text            -- Symbol name
-  -> Text            -- Module name
-  -> Text            -- Package name
-  -> Text            -- Signature (cleaned)
-  -> CandidateGroups -- Grouped candidates
-  -> Text
-formatUserTurnGrouped symName moduleName packageName signature groups = T.unlines
-  [ "<start_of_turn>user"
-  , "Topic: " <> holeMarker "topic"
-  , "Symbol: " <> symName
-  , "Module: " <> moduleName
-  , "Package: " <> packageName
-  , "Signature: " <> signature
-  , ""
-  , T.strip $ formatCandidateGroups groups
-  , "<end_of_turn>"
-  ]
-
+formatUserTurnGrouped ::
+  Text -> -- Symbol name
+  Text -> -- Module name
+  Text -> -- Package name
+  Text -> -- Signature (cleaned)
+  CandidateGroups -> -- Grouped candidates
+  Text
+formatUserTurnGrouped symName moduleName packageName signature groups =
+  T.unlines
+    [ "<start_of_turn>user",
+      "Topic: " <> holeMarker "topic",
+      "Symbol: " <> symName,
+      "Module: " <> moduleName,
+      "Package: " <> packageName,
+      "Signature: " <> signature,
+      "",
+      T.strip $ formatCandidateGroups groups,
+      "<end_of_turn>"
+    ]
 
 -- | Format complete training example with grouped candidates (v2).
-formatSelectSymbolsExampleGrouped
-  :: Text            -- Symbol name
-  -> Text            -- Module name
-  -> Text            -- Package name
-  -> Text            -- Signature (cleaned)
-  -> CandidateGroups -- Grouped candidates
-  -> ByteString
+formatSelectSymbolsExampleGrouped ::
+  Text -> -- Symbol name
+  Text -> -- Module name
+  Text -> -- Package name
+  Text -> -- Signature (cleaned)
+  CandidateGroups -> -- Grouped candidates
+  ByteString
 formatSelectSymbolsExampleGrouped symName moduleName packageName signature groups =
-  let text = T.concat
-        [ formatDeveloperTurn
-        , formatUserTurnGrouped symName moduleName packageName signature groups
-        , formatModelTurnWithHole
-        ]
-  in encode $ object ["text" .= text]
-
+  let text =
+        T.concat
+          [ formatDeveloperTurn,
+            formatUserTurnGrouped symName moduleName packageName signature groups,
+            formatModelTurnWithHole
+          ]
+   in encode $ object ["text" .= text]
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- V3: CODE-NATIVE TRAINING FORMAT
@@ -208,21 +211,24 @@ formatSelectSymbolsExampleGrouped symName moduleName packageName signature group
 -- Model extracts symbols itself from code structure.
 formatCodeExample :: Text -> Text -> [Text] -> Text
 formatCodeExample criteria code selectedSymbols =
-  let userTurn = T.unlines
-        [ "Criteria: " <> criteria
-        , ""
-        , "Code:"
-        , "```haskell"
-        , code
-        , "```"
-        , ""
-        , "Extract symbols:"
-        ]
-      modelTurn = if null selectedSymbols
-        then "<start_function_call>\ncall:select_symbols{selected:<escape><escape>}\n<end_function_call>"
-        else let symbols = T.intercalate "," selectedSymbols
+  let userTurn =
+        T.unlines
+          [ "Criteria: " <> criteria,
+            "",
+            "Code:",
+            "```haskell",
+            code,
+            "```",
+            "",
+            "Extract symbols:"
+          ]
+      modelTurn =
+        if null selectedSymbols
+          then "<start_function_call>\ncall:select_symbols{selected:<escape><escape>}\n<end_function_call>"
+          else
+            let symbols = T.intercalate "," selectedSymbols
              in "<start_function_call>\ncall:select_symbols{selected:<escape>" <> symbols <> "<escape>}\n<end_function_call>"
-  in formatGemmaConversation userTurn modelTurn
+   in formatGemmaConversation userTurn modelTurn
 
 -- | Format full Gemma conversation (developer + user + model turns).
 --
@@ -231,17 +237,18 @@ formatCodeExample criteria code selectedSymbols =
 -- 2. User turn: Query + code context
 -- 3. Model turn: Function call with selected symbols
 formatGemmaConversation :: Text -> Text -> Text
-formatGemmaConversation userTurn modelTurn = T.unlines
-  [ "<start_of_turn>developer"
-  , "You are an expert code analysis assistant."
-  , "<end_of_turn>"
-  , "<start_of_turn>user"
-  , userTurn
-  , "<end_of_turn>"
-  , "<start_of_turn>model"
-  , modelTurn
-  , "<end_of_turn>"
-  ]
+formatGemmaConversation userTurn modelTurn =
+  T.unlines
+    [ "<start_of_turn>developer",
+      "You are an expert code analysis assistant.",
+      "<end_of_turn>",
+      "<start_of_turn>user",
+      userTurn,
+      "<end_of_turn>",
+      "<start_of_turn>model",
+      modelTurn,
+      "<end_of_turn>"
+    ]
 
 -- | Convert annotated skeleton to training JSONL.
 --
@@ -268,7 +275,6 @@ formatTrainingFromSkeleton skeleton = case skeleton of
     -- Format as training example
     let formatted = formatCodeExample criteria code selected
     Right $ object ["text" .= formatted]
-
   _ -> Left "Skeleton must be a JSON object"
   where
     when :: Bool -> Either a () -> Either a ()

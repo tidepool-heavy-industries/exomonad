@@ -1,12 +1,12 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoStarIsType #-}
-{-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE DuplicateRecordFields #-}
 
 -- | Team Lead (TL) Role Definition.
 --
@@ -36,32 +36,33 @@
 -- tlHandlers = tlRole AsHandler
 -- @
 module ExoMonad.Control.Role.Definition.TL
-  ( TLRole(..)
-  , tlMetadata
-  ) where
+  ( TLRole (..),
+    tlMetadata,
+  )
+where
 
 import Data.Kind (Type)
-import GHC.Generics (Generic)
-
-import ExoMonad.Control.Role.Types (RoleMetadata(..))
-import ExoMonad.Control.Role.Tool.Definitions (TLTools)
 import ExoMonad.Control.Role.Hook.Definitions (TLHooks)
+import ExoMonad.Control.Role.Tool.Definitions (TLTools)
+import ExoMonad.Control.Role.Types (RoleMetadata (..))
+import GHC.Generics (Generic)
 
 -- | Team Lead role record.
 data TLRole mode = TLRole
-  { tlToolsRecord :: TLTools mode
-    -- ^ Tool definitions
-  , tlMetadata    :: RoleMetadata
-    -- ^ Role identity
-  , tlHooks       :: TLHooks mode
-    -- ^ Lifecycle hooks
+  { -- | Tool definitions
+    tlToolsRecord :: TLTools mode,
+    -- | Role identity
+    tlMetadata :: RoleMetadata,
+    -- | Lifecycle hooks
+    tlHooks :: TLHooks mode
   }
-  deriving Generic
+  deriving (Generic)
 
 -- | Metadata for the TL role.
 tlMetadata :: RoleMetadata
-tlMetadata = RoleMetadata
-  { rmSlug = "tl"
-  , rmDisplayName = "Team Lead"
-  , rmDescription = "Primary orchestrator with full access to spawn agents, monitor status, and coordinate team work."
-  }
+tlMetadata =
+  RoleMetadata
+    { rmSlug = "tl",
+      rmDisplayName = "Team Lead",
+      rmDescription = "Primary orchestrator with full access to spawn agents, monitor status, and coordinate team work."
+    }

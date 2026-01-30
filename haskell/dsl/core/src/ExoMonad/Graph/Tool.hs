@@ -1,4 +1,3 @@
-
 -- | Unified tool definitions for the Graph DSL.
 --
 -- Tools are mid-turn capabilities that LLM nodes can invoke. This module
@@ -60,49 +59,49 @@
 -- @
 module ExoMonad.Graph.Tool
   ( -- * Tool Definition
-    ToolDef(..)
+    ToolDef (..),
 
     -- * Tool Constraints
-  , ValidTool
-  , ValidToolList
-  , AllToolsValid
+    ValidTool,
+    ValidToolList,
+    AllToolsValid,
 
     -- * Tool Info (Runtime)
-  , ToolInfo(..)
-  , toolInfoToJSON
-  , toolToInfo
+    ToolInfo (..),
+    toolInfoToJSON,
+    toolToInfo,
 
     -- * Tool Validation (Parse Don't Validate)
-  , validateToolInput
+    validateToolInput,
 
     -- * Tool List Reification
-  , ReifyToolList(..)
+    ReifyToolList (..),
 
     -- * Wire Format Types
+
     -- | Re-exported from "ExoMonad.Tool.Wire"
-  , AnthropicTool(..)
-  , CfTool(..)
-  , CfObjectSchema(..)
-  , CfProperty(..)
-  ) where
+    AnthropicTool (..),
+    CfTool (..),
+    CfObjectSchema (..),
+    CfProperty (..),
+  )
+where
 
-import Data.Aeson (Value, ToJSON, FromJSON, object, (.=), fromJSON, Result(..))
-import Data.Kind (Type, Constraint)
-import Data.Proxy (Proxy(..))
-import Data.Text (Text)
-import qualified Data.Text as T
-import Data.Typeable (TypeRep, Typeable, typeRep)
 import Control.Monad.Freer (Eff)
-
-import ExoMonad.Schema (HasJSONSchema(..), JSONSchema, schemaToValue)
-import ExoMonad.Effect.Types (ValidatedToolInput(..), ToolError(..))
-
+import Data.Aeson (FromJSON, Result (..), ToJSON, Value, fromJSON, object, (.=))
+import Data.Kind (Constraint, Type)
+import Data.Proxy (Proxy (..))
+import Data.Text (Text)
+import Data.Text qualified as T
+import Data.Typeable (TypeRep, Typeable, typeRep)
+import ExoMonad.Effect.Types (ToolError (..), ValidatedToolInput (..))
+import ExoMonad.Schema (HasJSONSchema (..), JSONSchema, schemaToValue)
 -- Re-exports (wire types only - Convert has its own module to avoid cycles)
 import ExoMonad.Tool.Wire
-  ( AnthropicTool(..)
-  , CfTool(..)
-  , CfObjectSchema(..)
-  , CfProperty(..)
+  ( AnthropicTool (..),
+    CfObjectSchema (..),
+    CfProperty (..),
+    CfTool (..),
   )
 
 -- | Effect type alias (freer-simple effects have kind Type -> Type).
@@ -142,15 +141,17 @@ type Effect = Type -> Type
 -- = Minimal definition
 --
 -- All associated types and methods must be provided.
-class ( HasJSONSchema (ToolInput t)
-      , HasJSONSchema (ToolOutput t)
-      , FromJSON (ToolInput t)
-      , ToJSON (ToolOutput t)
-      , Typeable t
-      , Typeable (ToolInput t)
-      , Typeable (ToolOutput t)
-      ) => ToolDef t where
-
+class
+  ( HasJSONSchema (ToolInput t),
+    HasJSONSchema (ToolOutput t),
+    FromJSON (ToolInput t),
+    ToJSON (ToolOutput t),
+    Typeable t,
+    Typeable (ToolInput t),
+    Typeable (ToolOutput t)
+  ) =>
+  ToolDef t
+  where
   -- | The input type for this tool (parsed from LLM JSON)
   type ToolInput t :: Type
 
@@ -218,22 +219,23 @@ type family AllToolsValid tools where
 -- * Dispatch tool calls at runtime
 -- * Validate tool inputs/outputs
 data ToolInfo = ToolInfo
-  { tiName :: Text
-  , tiDescription :: Text
-  , tiInputSchema :: JSONSchema
-  , tiOutputSchema :: JSONSchema
-  , tiInputType :: TypeRep
-  , tiOutputType :: TypeRep
+  { tiName :: Text,
+    tiDescription :: Text,
+    tiInputSchema :: JSONSchema,
+    tiOutputSchema :: JSONSchema,
+    tiInputType :: TypeRep,
+    tiOutputType :: TypeRep
   }
   deriving (Show, Eq)
 
 -- | Convert tool info to Anthropic API format.
 toolInfoToJSON :: ToolInfo -> Value
-toolInfoToJSON ti = object
-  [ "name" .= ti.tiName
-  , "description" .= ti.tiDescription
-  , "input_schema" .= schemaToValue ti.tiInputSchema
-  ]
+toolInfoToJSON ti =
+  object
+    [ "name" .= ti.tiName,
+      "description" .= ti.tiDescription,
+      "input_schema" .= schemaToValue ti.tiInputSchema
+    ]
 
 -- | Convert a tool instance to 'ToolInfo'.
 --
@@ -246,15 +248,16 @@ toolInfoToJSON ti = object
 --
 -- info = toolToInfo SearchTool
 -- @
-toolToInfo :: forall t. ToolDef t => t -> ToolInfo
-toolToInfo tool = ToolInfo
-  { tiName = toolName tool
-  , tiDescription = toolDescription tool
-  , tiInputSchema = jsonSchema @(ToolInput t)
-  , tiOutputSchema = jsonSchema @(ToolOutput t)
-  , tiInputType = typeRep (Proxy @(ToolInput t))
-  , tiOutputType = typeRep (Proxy @(ToolOutput t))
-  }
+toolToInfo :: forall t. (ToolDef t) => t -> ToolInfo
+toolToInfo tool =
+  ToolInfo
+    { tiName = toolName tool,
+      tiDescription = toolDescription tool,
+      tiInputSchema = jsonSchema @(ToolInput t),
+      tiOutputSchema = jsonSchema @(ToolOutput t),
+      tiInputType = typeRep (Proxy @(ToolInput t)),
+      tiOutputType = typeRep (Proxy @(ToolOutput t))
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TOOL VALIDATION (Parse Don't Validate)
@@ -296,22 +299,24 @@ toolToInfo tool = ToolInfo
 --   Right validated -> executeTool validated
 --   -- executeTool receives ValidatedToolInput, knows it's valid
 -- @
-validateToolInput
-  :: forall t. ToolDef t
-  => t
-  -> Value
-  -> Either ToolError (ValidatedToolInput (ToolInput t))
+validateToolInput ::
+  forall t.
+  (ToolDef t) =>
+  t ->
+  Value ->
+  Either ToolError (ValidatedToolInput (ToolInput t))
 validateToolInput tool inputJson =
   case fromJSON inputJson of
     Success parsed ->
       Right (ValidatedToolInput parsed)
     Error errMsg ->
-      Left ToolValidationFailed
-        { tveToolName = toolName tool
-        , tveExpectedSchema = schemaToValue (jsonSchema @(ToolInput t))
-        , tveActualInput = inputJson
-        , tveParseError = T.pack errMsg
-        }
+      Left
+        ToolValidationFailed
+          { tveToolName = toolName tool,
+            tveExpectedSchema = schemaToValue (jsonSchema @(ToolInput t)),
+            tveActualInput = inputJson,
+            tveParseError = T.pack errMsg
+          }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TOOL LIST REIFICATION

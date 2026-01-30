@@ -1,27 +1,25 @@
 module Main (main) where
 
+import CLIGraphSpec qualified
+import CLISpec qualified
+import CallHandlerSpec qualified
+import ConvertTransitionHintSpec qualified
+import DecisionSpec qualified
+import DecisionToolsSpec qualified
+import DispatchGotoSpec qualified
+import GotoChoiceSpec qualified
+import GraphValidationSpec qualified
+import InjectTargetSpec qualified
+import LLMNodeInterpretSpec qualified
+import MemorySerializationSpec qualified
+import MermaidSpec qualified
+import OneOfSpec qualified
+import SchemaDerivationSpec qualified
+import StructuredOutputSpec qualified
+import TUIWireFormatSpec qualified
 import Test.Hspec
-
-import qualified CLISpec
-import qualified CLIGraphSpec
-import qualified GraphValidationSpec
-import qualified LLMNodeInterpretSpec
-import qualified MemorySerializationSpec
-import qualified MermaidSpec
-import qualified StructuredOutputSpec
-
-import qualified OneOfSpec
-import qualified InjectTargetSpec
-import qualified GotoChoiceSpec
-import qualified CallHandlerSpec
-import qualified DispatchGotoSpec
-import qualified ConvertTransitionHintSpec
-import qualified ToolTransitionIntegrationSpec
-import qualified DecisionToolsSpec
-import qualified DecisionSpec
-import qualified TUIWireFormatSpec
-import qualified SchemaDerivationSpec
-import qualified ToolRecordTHSpec
+import ToolRecordTHSpec qualified
+import ToolTransitionIntegrationSpec qualified
 
 main :: IO ()
 main = hspec $ do

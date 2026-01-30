@@ -1,21 +1,17 @@
 module SpawnSpec (spec) where
 
-import Test.Hspec
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
-import Data.Aeson (Value(..))
-import qualified Ki
-
+import Data.Aeson (Value (..))
 import ExoMonad.Actor.Mailbox (send)
 import ExoMonad.Actor.Spawn (spawnActor)
-import ExoMonad.Actor.Types (Actor(..))
-
+import ExoMonad.Actor.Types (Actor (..))
+import Ki qualified
+import Test.Hspec
 
 spec :: Spec
 spec = describe "Actor Spawning" $ do
-
   describe "spawnActor" $ do
-
     it "creates an actor that receives messages" $ do
       received <- newEmptyMVar
       Ki.scoped $ \scope -> do
@@ -45,14 +41,13 @@ spec = describe "Actor Spawning" $ do
           msg -> putMVar callCount msg
         -- First message causes error
         send (actorMailbox actor) (String "boom")
-        threadDelay 10000  -- Give time for error to be caught
+        threadDelay 10000 -- Give time for error to be caught
         -- Second message should still be processed
         send (actorMailbox actor) (String "ok")
         result <- takeMVar callCount
         result `shouldBe` String "ok"
 
   describe "ki scope cleanup" $ do
-
     it "actors are cleaned up when scope exits" $ do
       -- Just verify scope exits cleanly - no hanging threads
       result <- Ki.scoped $ \scope -> do
@@ -82,7 +77,7 @@ spec = describe "Actor Spawning" $ do
       result <- Ki.scoped $ \scope -> do
         -- Actor that would block forever on receive (no messages sent)
         _actor <- spawnActor scope "blocked-on-receive" $ \_ ->
-          threadDelay 10000000  -- 10 seconds - would timeout if not cancelled
-        -- Exit immediately - ki should cancel the actor
+          threadDelay 10000000 -- 10 seconds - would timeout if not cancelled
+          -- Exit immediately - ki should cancel the actor
         pure ("quick-exit" :: String)
       result `shouldBe` "quick-exit"

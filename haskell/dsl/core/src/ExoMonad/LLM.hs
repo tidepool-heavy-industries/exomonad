@@ -74,104 +74,103 @@
 -- @
 module ExoMonad.LLM
   ( -- * LLM Call Effect
-    LLMCall
+    LLMCall,
 
     -- * Making Calls
-  , call
-  , callNoTools
+    call,
+    callNoTools,
 
     -- * Interpreters
-  , runLLMCall
-  , runLLMCallWithTools
+    runLLMCall,
+    runLLMCallWithTools,
 
     -- * Configuration
-  , CallConfig
-  , defaultLLM
-  , Model(..)
-  , NoTools
+    CallConfig,
+    defaultLLM,
+    Model (..),
+    NoTools,
 
     -- * Builder Functions
-  , model
-  , maxTokens
-  , tools
+    model,
+    maxTokens,
+    tools,
 
     -- * Prompt Types
-  , System(..)
-  , User(..)
+    System (..),
+    User (..),
 
     -- * Error Types
-  , CallError(..)
+    CallError (..),
 
     -- * Tool Support
-  , ToolRecord(..)
-  , ToolSchema(..)
-  , dispatchHandler
-  , ToolDispatchError(..)
+    ToolRecord (..),
+    ToolSchema (..),
+    dispatchHandler,
+    ToolDispatchError (..),
 
     -- * TH Derivation
-  , deriveToolRecord
-  , Tool(..)
+    deriveToolRecord,
+    Tool (..),
 
     -- * Template Rendering
+
     -- | For rendering Jinja templates to Text. See "ExoMonad.Template.Render"
     -- for more details.
-  , render
-  , renderText
-  , TypedTemplate
-  , typedTemplateFile
-  , GingerContext
-  ) where
+    render,
+    renderText,
+    TypedTemplate,
+    typedTemplateFile,
+    GingerContext,
+  )
+where
 
 -- Core types
-import ExoMonad.LLM.Types
-  ( System(..)
-  , User(..)
-  , Model(..)
-  , CallConfig
-  , NoTools
-  , CallError(..)
-  )
 
 -- Builder pattern
 import ExoMonad.LLM.Builder
-  ( defaultLLM
-  , model
-  , maxTokens
-  , tools
+  ( defaultLLM,
+    maxTokens,
+    model,
+    tools,
   )
-
 -- Tool support
-import ExoMonad.LLM.Tools
-  ( ToolRecord(..)
-  , ToolSchema(..)
-  , dispatchHandler
-  , ToolDispatchError(..)
-  )
 
 -- TH derivation for ToolRecord
-import ExoMonad.LLM.Tools.TH
-  ( deriveToolRecord
-  , Tool(..)
-  )
 
 -- Effect and main functions
 import ExoMonad.LLM.Effect
-  ( LLMCall
-  , call
-  , callNoTools
+  ( LLMCall,
+    call,
+    callNoTools,
   )
-
 -- Interpreters
 import ExoMonad.LLM.Interpret
-  ( runLLMCall
-  , runLLMCallWithTools
+  ( runLLMCall,
+    runLLMCallWithTools,
   )
-
+import ExoMonad.LLM.Tools
+  ( ToolDispatchError (..),
+    ToolRecord (..),
+    ToolSchema (..),
+    dispatchHandler,
+  )
+import ExoMonad.LLM.Tools.TH
+  ( Tool (..),
+    deriveToolRecord,
+  )
+import ExoMonad.LLM.Types
+  ( CallConfig,
+    CallError (..),
+    Model (..),
+    NoTools,
+    System (..),
+    User (..),
+  )
 -- Template rendering
 import ExoMonad.Template.Render
-  ( render
-  , renderText
-  , TypedTemplate
-  , typedTemplateFile
-  , GingerContext
+  ( GingerContext,
+    TypedTemplate,
+    render,
+    renderText,
+    typedTemplateFile,
   )

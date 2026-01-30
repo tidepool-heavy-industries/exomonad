@@ -7,14 +7,12 @@
 -- 2. JSON structure matches protocol.ts expectations
 module WireTypesSpec (spec) where
 
-import Test.Hspec
-import Data.Aeson (encode, decode, object, (.=), Value(..))
+import Data.Aeson (Value (..), decode, encode, object, (.=))
 import Data.Aeson.KeyMap qualified as KM
 import Data.Map.Strict qualified as Map
 import Data.Vector qualified as V
-
 import ExoMonad.Wasm.WireTypes
-
+import Test.Hspec
 
 spec :: Spec
 spec = do
@@ -24,14 +22,12 @@ spec = do
   graphStateSpec
   habiticaEffectSpec
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- SerializableEffect
 -- ════════════════════════════════════════════════════════════════════════════
 
 serializableEffectSpec :: Spec
 serializableEffectSpec = describe "SerializableEffect" $ do
-
   it "round-trips EffLogInfo without fields" $ do
     let effect = EffLogInfo "test message" Nothing
     decode (encode effect) `shouldBe` Just effect
@@ -45,18 +41,20 @@ serializableEffectSpec = describe "SerializableEffect" $ do
     decode (encode effect) `shouldBe` Just effect
 
   it "round-trips EffLogInfo with structured fields" $ do
-    let fields = Map.fromList
-          [ ("taskId", String "abc123")
-          , ("direction", String "up")
-          ]
+    let fields =
+          Map.fromList
+            [ ("taskId", String "abc123"),
+              ("direction", String "up")
+            ]
         effect = EffLogInfo "Scoring daily" (Just fields)
     decode (encode effect) `shouldBe` Just effect
 
   it "round-trips EffLogInfo with numeric fields" $ do
-    let fields = Map.fromList
-          [ ("count", Number 3)
-          , ("latency_ms", Number 42.5)
-          ]
+    let fields =
+          Map.fromList
+            [ ("count", Number 3),
+              ("latency_ms", Number 42.5)
+            ]
         effect = EffLogInfo "LLM call complete" (Just fields)
     decode (encode effect) `shouldBe` Just effect
 
@@ -89,10 +87,11 @@ serializableEffectSpec = describe "SerializableEffect" $ do
     decode (encode effect) `shouldBe` Just effect
 
   it "round-trips EffLogError with structured fields" $ do
-    let fields = Map.fromList
-          [ ("endpoint", String "/api/tasks")
-          , ("status", Number 500)
-          ]
+    let fields =
+          Map.fromList
+            [ ("endpoint", String "/api/tasks"),
+              ("status", Number 500)
+            ]
         effect = EffLogError "API call failed" (Just fields)
     decode (encode effect) `shouldBe` Just effect
 
@@ -150,14 +149,12 @@ serializableEffectSpec = describe "SerializableEffect" $ do
         KM.lookup "eff_model" obj `shouldBe` Just (String "@cf/meta/llama-3.2-1b-instruct")
       _ -> expectationFailure "Expected JSON object"
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- EffectResult
 -- ════════════════════════════════════════════════════════════════════════════
 
 effectResultSpec :: Spec
 effectResultSpec = describe "EffectResult" $ do
-
   it "round-trips ResSuccess with value" $ do
     let result = ResSuccess (Just (object ["foo" .= ("bar" :: String)]))
     decode (encode result) `shouldBe` Just result
@@ -187,7 +184,6 @@ effectResultSpec = describe "EffectResult" $ do
         KM.lookup "type" obj `shouldBe` Just (String "error")
         KM.lookup "message" obj `shouldBe` Just (String "oops")
       _ -> expectationFailure "Expected JSON object"
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- StepOutput
@@ -249,10 +245,8 @@ stepOutputSpec = describe "StepOutput" $ do
         KM.lookup "error" obj `shouldBe` Just (String "oops")
       _ -> expectationFailure "Expected JSON object"
 
-
 graphStateSpec :: Spec
 graphStateSpec = describe "GraphState" $ do
-
   it "round-trips GraphState with PhaseIdle" $ do
     let gs = GraphState PhaseIdle []
     decode (encode gs) `shouldBe` Just gs
@@ -289,14 +283,12 @@ graphStateSpec = describe "GraphState" $ do
           _ -> expectationFailure "Expected phase object"
       _ -> expectationFailure "Expected JSON object"
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- EffHabitica
 -- ════════════════════════════════════════════════════════════════════════════
 
 habiticaEffectSpec :: Spec
 habiticaEffectSpec = describe "EffHabitica" $ do
-
   it "round-trips EffHabitica GetUser" $ do
     let effect = EffHabitica "GetUser" (object [])
     decode (encode effect) `shouldBe` Just effect

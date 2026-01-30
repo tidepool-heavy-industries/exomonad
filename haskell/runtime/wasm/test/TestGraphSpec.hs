@@ -9,21 +9,18 @@
 -- 3. The handler correctly uses the Log effect and returns n+1
 module TestGraphSpec (spec) where
 
-import Test.Hspec
-import qualified Data.Text as T
-
+import Data.Text qualified as T
 import ExoMonad.Graph.Goto (GotoChoice, OneOf)
-import ExoMonad.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
+import ExoMonad.Graph.Goto.Internal (GotoChoice (..), OneOf (..)) -- For test assertions
+import ExoMonad.Wasm.Runner (WasmResult (..), initializeWasm)
 import ExoMonad.Wasm.TestGraph (computeHandlerWasm)
-import ExoMonad.Wasm.Runner (initializeWasm, WasmResult(..))
-import ExoMonad.Wasm.WireTypes (SerializableEffect(..), EffectResult(..))
-
+import ExoMonad.Wasm.WireTypes (EffectResult (..), SerializableEffect (..))
+import Test.Hspec
 
 spec :: Spec
 spec = do
   computeHandlerSpec
   graphStructureSpec
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Compute Handler
@@ -31,7 +28,6 @@ spec = do
 
 computeHandlerSpec :: Spec
 computeHandlerSpec = describe "computeHandlerWasm" $ do
-
   it "returns n+1 for input 0" $ do
     runComputeHandler 0 `shouldBe` 1
 
@@ -43,7 +39,6 @@ computeHandlerSpec = describe "computeHandlerWasm" $ do
 
   it "returns n+1 for large input" $ do
     runComputeHandler 1000000 `shouldBe` 1000001
-
 
 -- | Helper to run the compute handler through full yield/resume cycle.
 --
@@ -63,14 +58,12 @@ runComputeHandler n =
       error $ "runComputeHandler: WasmError: " <> T.unpack msg
     _ -> error "runComputeHandler: unexpected result"
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- Graph Structure
 -- ════════════════════════════════════════════════════════════════════════════
 
 graphStructureSpec :: Spec
 graphStructureSpec = describe "TestGraph structure" $ do
-
   it "handler yields Log effect with correct message format" $ do
     case initializeWasm (computeHandlerWasm 42) of
       WasmYield (EffLogInfo msg _) _ -> do

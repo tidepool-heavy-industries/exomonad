@@ -9,10 +9,10 @@
 -- targets have the same payload type but different names.
 module InjectTargetSpec (spec) where
 
-import Test.Hspec
-import ExoMonad.Graph.Goto (OneOf, InjectTarget(..), To, Payloads)
-import ExoMonad.Graph.Goto.Internal (OneOf(..))  -- For test assertions
+import ExoMonad.Graph.Goto (InjectTarget (..), OneOf, Payloads, To)
+import ExoMonad.Graph.Goto.Internal (OneOf (..)) -- For test assertions
 import ExoMonad.Graph.Types (Exit)
+import Test.Hspec
 
 -- | Test targets with different payload types.
 type SimpleTargets = '[To "nodeA" Int, To "nodeB" String, To Exit Bool]
@@ -30,7 +30,6 @@ spec = do
   -- SIMPLE TARGETS (different payload types)
   -- ════════════════════════════════════════════════════════════════════════════
   describe "InjectTarget with different payload types" $ do
-
     it "injects first target at position 0" $ do
       let x :: OneOf (Payloads SimpleTargets) = injectTarget @(To "nodeA" Int) @SimpleTargets 42
       case x of
@@ -53,7 +52,6 @@ spec = do
   -- DUPLICATE PAYLOAD TYPES (the critical case)
   -- ════════════════════════════════════════════════════════════════════════════
   describe "InjectTarget with duplicate payload types" $ do
-
     it "To 'alpha' Int injects at position 0 (not position 1)" $ do
       let x :: OneOf (Payloads DuplicatePayloadTargets) =
             injectTarget @(To "alpha" Int) @DuplicatePayloadTargets 100
@@ -95,26 +93,24 @@ spec = do
   -- ALL SAME PAYLOAD TYPE
   -- ════════════════════════════════════════════════════════════════════════════
   describe "InjectTarget with all same payload type" $ do
-
     it "distinguishes three Int targets by name" $ do
       let a = injectTarget @(To "a" Int) @AllSamePayload 10
           b = injectTarget @(To "b" Int) @AllSamePayload 20
           c = injectTarget @(To "c" Int) @AllSamePayload 30
 
-      case a of { Here n -> n `shouldBe` 10; _ -> expectationFailure "a wrong" }
-      case b of { There (Here n) -> n `shouldBe` 20; _ -> expectationFailure "b wrong" }
-      case c of { There (There (Here n)) -> n `shouldBe` 30; _ -> expectationFailure "c wrong" }
+      case a of Here n -> n `shouldBe` 10; _ -> expectationFailure "a wrong"
+      case b of There (Here n) -> n `shouldBe` 20; _ -> expectationFailure "b wrong"
+      case c of There (There (Here n)) -> n `shouldBe` 30; _ -> expectationFailure "c wrong"
 
   -- ════════════════════════════════════════════════════════════════════════════
   -- PAYLOADS TYPE FAMILY
   -- ════════════════════════════════════════════════════════════════════════════
   describe "Payloads type family" $ do
-
     it "extracts payload types from To markers" $ do
       -- Payloads '[To "a" Int, To "b" String] = '[Int, String]
       -- We verify this by constructing OneOf values
       let intVal :: OneOf (Payloads '[To "a" Int, To "b" String]) = Here 42
           strVal :: OneOf (Payloads '[To "a" Int, To "b" String]) = There (Here "hi")
 
-      case intVal of { Here n -> n `shouldBe` 42; _ -> expectationFailure "wrong" }
-      case strVal of { There (Here s) -> s `shouldBe` "hi"; _ -> expectationFailure "wrong" }
+      case intVal of Here n -> n `shouldBe` 42; _ -> expectationFailure "wrong"
+      case strVal of There (Here s) -> s `shouldBe` "hi"; _ -> expectationFailure "wrong"

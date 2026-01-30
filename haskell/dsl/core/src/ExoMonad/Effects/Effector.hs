@@ -3,29 +3,30 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE OverloadedRecordDot #-}
 
 module ExoMonad.Effects.Effector
   ( -- * Effect
-    Effector(..)
-  , runEffector
-  , effectorGitStatus
-  , effectorGitDiff
-  , effectorGitLsFiles
+    Effector (..),
+    runEffector,
+    effectorGitStatus,
+    effectorGitDiff,
+    effectorGitLsFiles,
 
     -- * Types
-  , GhPrStatusResult(..)
-  , GhPrCreateResult(..)
-  , PrComment(..)
-  , GitStatusResult(..)
-  , GitDiffResult(..)
-  , DiffFile(..)
-  ) where
+    GhPrStatusResult (..),
+    GhPrCreateResult (..),
+    PrComment (..),
+    GitStatusResult (..),
+    GitDiffResult (..),
+    DiffFile (..),
+  )
+where
 
 import Control.Monad.Freer (Eff, Member, send)
-import Data.Aeson (FromJSON(..), ToJSON(..), object, withObject, (.=), (.:))
+import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.=))
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
@@ -35,30 +36,30 @@ import GHC.Generics (Generic)
 
 -- | Result of @effector gh pr-status@
 data GhPrStatusResult = GhPrStatusResult
-  { exists :: Bool
-  , url :: Maybe Text
-  , number :: Maybe Int
-  , state :: Maybe Text
-  , review_status :: Maybe Text
-  , comments :: [PrComment]
+  { exists :: Bool,
+    url :: Maybe Text,
+    number :: Maybe Int,
+    state :: Maybe Text,
+    review_status :: Maybe Text,
+    comments :: [PrComment]
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
 -- | Comment on a PR, potentially inline
 data PrComment = PrComment
-  { author :: Text
-  , body :: Text
-  , path :: Maybe Text
-  , line :: Maybe Int
+  { author :: Text,
+    body :: Text,
+    path :: Maybe Text,
+    line :: Maybe Int
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
 -- | Result of @effector gh pr-create@
 data GhPrCreateResult = GhPrCreateResult
-  { url :: Text
-  , number :: Int
+  { url :: Text,
+    number :: Int
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -68,12 +69,13 @@ data GhPrCreateResult = GhPrCreateResult
 -- ════════════════════════════════════════════════════════════════════════════
 
 data GitStatusResult = GitStatusResult
-  { gsrBranch :: Text
-  , gsrDirty :: [FilePath]
-  , gsrStaged :: [FilePath]
-  , gsrAhead :: Int
-  , gsrBehind :: Int
-  } deriving (Show, Eq, Generic)
+  { gsrBranch :: Text,
+    gsrDirty :: [FilePath],
+    gsrStaged :: [FilePath],
+    gsrAhead :: Int,
+    gsrBehind :: Int
+  }
+  deriving (Show, Eq, Generic)
 
 instance FromJSON GitStatusResult where
   parseJSON = withObject "GitStatusResult" $ \v ->
@@ -87,10 +89,11 @@ instance FromJSON GitStatusResult where
 instance ToJSON GitStatusResult
 
 data GitDiffResult = GitDiffResult
-  { gdrFiles :: [DiffFile]
-  , gdrAdditions :: Int
-  , gdrDeletions :: Int
-  } deriving (Show, Eq, Generic)
+  { gdrFiles :: [DiffFile],
+    gdrAdditions :: Int,
+    gdrDeletions :: Int
+  }
+  deriving (Show, Eq, Generic)
 
 instance FromJSON GitDiffResult where
   parseJSON = withObject "GitDiffResult" $ \v ->
@@ -102,11 +105,12 @@ instance FromJSON GitDiffResult where
 instance ToJSON GitDiffResult
 
 data DiffFile = DiffFile
-  { dfPath :: FilePath
-  , dfStatus :: Text
-  , dfAdditions :: Int
-  , dfDeletions :: Int
-  } deriving (Show, Eq, Generic)
+  { dfPath :: FilePath,
+    dfStatus :: Text,
+    dfAdditions :: Int,
+    dfDeletions :: Int
+  }
+  deriving (Show, Eq, Generic)
 
 instance FromJSON DiffFile where
   parseJSON = withObject "DiffFile" $ \v ->
@@ -137,14 +141,14 @@ data Effector r where
 
 -- | Run the @effector@ tool with the given command and arguments.
 -- Returns the raw stdout as Text.
-runEffector :: Member Effector effs => Text -> [Text] -> Eff effs Text
+runEffector :: (Member Effector effs) => Text -> [Text] -> Eff effs Text
 runEffector cmd args = send (RunEffector cmd args)
 
-effectorGitStatus :: Member Effector effs => FilePath -> Eff effs GitStatusResult
+effectorGitStatus :: (Member Effector effs) => FilePath -> Eff effs GitStatusResult
 effectorGitStatus cwd = send (EffectorGitStatus cwd)
 
-effectorGitDiff :: Member Effector effs => FilePath -> Bool -> Eff effs GitDiffResult
+effectorGitDiff :: (Member Effector effs) => FilePath -> Bool -> Eff effs GitDiffResult
 effectorGitDiff cwd staged = send (EffectorGitDiff cwd staged)
 
-effectorGitLsFiles :: Member Effector effs => FilePath -> [Text] -> Eff effs [FilePath]
+effectorGitLsFiles :: (Member Effector effs) => FilePath -> [Text] -> Eff effs [FilePath]
 effectorGitLsFiles cwd args = send (EffectorGitLsFiles cwd args)

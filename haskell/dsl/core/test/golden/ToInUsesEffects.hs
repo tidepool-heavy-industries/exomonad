@@ -16,15 +16,16 @@
 -- graph definitions (Goto) and handler signatures (To).
 module ToInUsesEffects where
 
+import ExoMonad.Graph.Generic (GraphMode (..), LogicNode, ValidGraphRecord, type (:-))
+import ExoMonad.Graph.Generic qualified as G (EntryNode, ExitNode)
+import ExoMonad.Graph.Goto (To) -- Imported to demonstrate incorrect usage in UsesEffects
+import ExoMonad.Graph.Types (Exit, Input, UsesEffects, type (:@))
 import GHC.Generics (Generic)
 
-import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit)
-import ExoMonad.Graph.Generic (GraphMode(..), type (:-), LogicNode, ValidGraphRecord)
-import qualified ExoMonad.Graph.Generic as G (EntryNode, ExitNode)
-import ExoMonad.Graph.Goto (To)  -- Imported to demonstrate incorrect usage in UsesEffects
-
 data InputData
+
 data Output
+
 data Result
 
 -- | Wrong: Using 'To' markers in UsesEffects
@@ -35,15 +36,15 @@ type WrongEffects = '[To "handler" Output, To Exit Result]
 
 -- | Graph with wrong effect type - should produce a helpful error
 data BadGraph mode = BadGraph
-  { entry   :: mode :- G.EntryNode InputData
-  , router  :: mode :- LogicNode :@ Input InputData :@ UsesEffects WrongEffects
-  , handler :: mode :- LogicNode :@ Input Output :@ UsesEffects '[To Exit Result]
-  , exit    :: mode :- G.ExitNode Result
+  { entry :: mode :- G.EntryNode InputData,
+    router :: mode :- LogicNode :@ Input InputData :@ UsesEffects WrongEffects,
+    handler :: mode :- LogicNode :@ Input Output :@ UsesEffects '[To Exit Result],
+    exit :: mode :- G.ExitNode Result
   }
-  deriving Generic
+  deriving (Generic)
 
 check :: ()
 check = validGraph @BadGraph
 
-validGraph :: forall g. ValidGraphRecord g => ()
+validGraph :: forall g. (ValidGraphRecord g) => ()
 validGraph = ()

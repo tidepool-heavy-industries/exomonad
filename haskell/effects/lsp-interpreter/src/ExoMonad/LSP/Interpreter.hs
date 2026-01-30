@@ -2,60 +2,77 @@
 --
 -- Interprets 'LSP' effects by communicating with HLS via lsp-test.
 -- lsp-test handles rootUri correctly (fixes empty workspaceFolders bug).
---
 module ExoMonad.LSP.Interpreter
   ( -- * Session Management
-    LSPSession
-  , withLSPSession
+    LSPSession,
+    withLSPSession,
 
     -- * Indexing State (re-exported from effect module)
-  , IndexingState(..)
-  , IndexingInfo(..)
-  , getSessionIndexingState
-  , getSessionIndexingInfo
+    IndexingState (..),
+    IndexingInfo (..),
+    getSessionIndexingState,
+    getSessionIndexingInfo,
 
     -- * Effect Interpreter
-  , runLSP
-  ) where
+    runLSP,
+  )
+where
 
-import Control.Concurrent (Chan, newChan, readChan, writeChan, forkIO)
+import Control.Concurrent (Chan, forkIO, newChan, readChan, writeChan)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar, tryTakeMVar)
-import Control.Concurrent.STM (TVar, newTVarIO, readTVarIO, atomically, writeTVar)
+import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVarIO, writeTVar)
 import Control.Exception (SomeException, throwIO, try)
-import qualified Data.Set as Set
-import Data.Time (getCurrentTime, diffUTCTime)
 import Control.Monad (when)
-import Control.Monad.Freer (Eff, LastMember, sendM, interpret)
-import qualified System.Process
+import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Control.Monad.IO.Class (liftIO)
 import Data.Function ((&))
+import Data.Map.Strict qualified as Map
+import Data.Set qualified as Set
 import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Map.Strict as Map
-import System.IO (hPutStrLn, stderr)
-import System.Timeout (timeout)
-
+import Data.Text qualified as T
+import Data.Time (diffUTCTime, getCurrentTime)
 -- lsp-test provides the Session monad and high-level API
-import Language.LSP.Test
-  ( Session, runSessionWithConfig, defaultConfig, fullLatestClientCaps
-  , openDoc
-  , getHover, getReferences, getDefinitions, getCompletions
-  , getCodeActions, request
-  , SessionConfig(..)
-  , getIncompleteProgressSessions
-  )
-import qualified Language.LSP.Protocol.Types as L
-import qualified Language.LSP.Protocol.Message as L
 
 import ExoMonad.Effect.LSP
-  ( LSP(..), IndexingState(..), IndexingInfo(..)
-  , TextDocumentIdentifier(..), Position(..), Range(..), Location(..)
-  , HoverInfo(..), CodeAction(..), CodeActionKind(..), WorkspaceEdit(..)
-  , TextEdit(..), CompletionItem(..), CompletionItemKind(..)
-  , SymbolInformation(..), SymbolKind(..)
-  , CallHierarchyItem(..), CallHierarchyOutgoingCall(..)
+  ( CallHierarchyItem (..),
+    CallHierarchyOutgoingCall (..),
+    CodeAction (..),
+    CodeActionKind (..),
+    CompletionItem (..),
+    CompletionItemKind (..),
+    HoverInfo (..),
+    IndexingInfo (..),
+    IndexingState (..),
+    LSP (..),
+    Location (..),
+    Position (..),
+    Range (..),
+    SymbolInformation (..),
+    SymbolKind (..),
+    TextDocumentIdentifier (..),
+    TextEdit (..),
+    WorkspaceEdit (..),
   )
-
+import Language.LSP.Protocol.Message qualified as L
+import Language.LSP.Protocol.Types qualified as L
+import Language.LSP.Test
+  ( Session,
+    SessionConfig (..),
+    defaultConfig,
+    fullLatestClientCaps,
+    getCodeActions,
+    getCompletions,
+    getDefinitions,
+    getHover,
+    getIncompleteProgressSessions,
+    getReferences,
+    openDoc,
+    request,
+    runSessionWithConfig,
+  )
+import System.IO (hPutStrLn, stderr)
+import System.Process qualified
+import System.Timeout (timeout)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SESSION MANAGEMENT
@@ -63,8 +80,8 @@ import ExoMonad.Effect.LSP
 
 -- | Request sent to the background LSP worker thread.
 data LSPRequest = forall a. LSPRequest
-  { lspReqAction :: Session a
-  , lspReqResult :: MVar (Either SomeException a)
+  { lspReqAction :: Session a,
+    lspReqResult :: MVar (Either SomeException a)
   }
 
 -- | An active LSP session handle.
@@ -72,8 +89,9 @@ data LSPRequest = forall a. LSPRequest
 -- The actual Session monad runs inside withLSPSession's scope.
 -- External callers communicate via the request channel.
 data LSPSession = LSPSession
-  { lspRequestChan  :: !(Chan LSPRequest)
-  , lspIndexingInfo :: !(TVar IndexingInfo)  -- ^ Tracks HLS indexing progress with full details
+  { lspRequestChan :: !(Chan LSPRequest),
+    -- | Tracks HLS indexing progress with full details
+    lspIndexingInfo :: !(TVar IndexingInfo)
   }
 
 -- | Read the current indexing state from a session (backward compatible).
@@ -96,11 +114,12 @@ getSessionIndexingInfo session = readTVarIO session.lspIndexingInfo
 -- - logMessages = False: Prevents stdout bottleneck
 -- - messageTimeout = 120s: Allows time for large project indexing
 productionConfig :: SessionConfig
-productionConfig = defaultConfig
-  { messageTimeout = 120  -- 2 minutes for large projects
-  -- Note: logMessages is not available in older lsp-test versions
-  -- If available, set: logMessages = False
-  }
+productionConfig =
+  defaultConfig
+    { messageTimeout = 120 -- 2 minutes for large projects
+    -- Note: logMessages is not available in older lsp-test versions
+    -- If available, set: logMessages = False
+    }
 
 -- | Start an LSP session with HLS and run an action.
 --
@@ -115,27 +134,30 @@ productionConfig = defaultConfig
 --   result <- runLSP session myLSPAction
 --   pure result
 -- @
-withLSPSession
-  :: FilePath              -- ^ Project root directory
-  -> (LSPSession -> IO a)  -- ^ Action to run with session
-  -> IO a
+withLSPSession ::
+  -- | Project root directory
+  FilePath ->
+  -- | Action to run with session
+  (LSPSession -> IO a) ->
+  IO a
 withLSPSession rootDir action = do
   -- Create request channel for communication with worker
   requestChan <- newChan
   resultMVar <- newEmptyMVar
-  doneMVar <- newEmptyMVar  -- Signal when user action completes
+  doneMVar <- newEmptyMVar -- Signal when user action completes
 
   -- Capture session start time for indexing duration tracking
   sessionStart <- getCurrentTime
 
   -- Initialize with full IndexingInfo (HLS starts indexing on connect)
-  let initialInfo = IndexingInfo
-        { iiState = Startup
-        , iiProgressCount = 0
-        , iiProgressTokens = []
-        , iiSessionStart = sessionStart
-        , iiReadyAt = Nothing
-        }
+  let initialInfo =
+        IndexingInfo
+          { iiState = Startup,
+            iiProgressCount = 0,
+            iiProgressTokens = [],
+            iiSessionStart = sessionStart,
+            iiReadyAt = Nothing
+          }
   indexingInfo <- newTVarIO initialInfo
 
   -- lsp-test's runSessionWithConfig spawns HLS and handles handshake
@@ -158,7 +180,7 @@ withLSPSession rootDir action = do
       _ <- forkIO $ do
         result <- try @SomeException (action session)
         putMVar resultMVar result
-        putMVar doneMVar ()  -- Signal completion
+        putMVar doneMVar () -- Signal completion
       pure ()
 
     -- Process requests until user action completes
@@ -173,8 +195,11 @@ withLSPSession rootDir action = do
     liftIO $ hPutStrLn stderr "[LSP] Performing initial indexing check..."
     initialIncomplete <- getIncompleteProgressSessions
     let initialCount = Set.size initialIncomplete
-    liftIO $ hPutStrLn stderr $ "[LSP] Initial state: "
-      <> show initialCount <> " incomplete progress sessions"
+    liftIO $
+      hPutStrLn stderr $
+        "[LSP] Initial state: "
+          <> show initialCount
+          <> " incomplete progress sessions"
     when (initialCount > 0) $ do
       let tokens = map showProgressToken (Set.toList initialIncomplete)
       liftIO $ hPutStrLn stderr $ "[LSP] Progress tokens: " <> show tokens
@@ -183,63 +208,70 @@ withLSPSession rootDir action = do
     let processRequests lastCheck = do
           -- Check indexing state every 2 seconds
           now <- liftIO getCurrentTime
-          nextCheck <- if diffUTCTime now lastCheck > 2
-            then do
-              -- Read current info to detect state transitions
-              currentInfo <- liftIO $ readTVarIO indexingInfo
+          nextCheck <-
+            if diffUTCTime now lastCheck > 2
+              then do
+                -- Read current info to detect state transitions
+                currentInfo <- liftIO $ readTVarIO indexingInfo
 
-              -- Poll HLS for incomplete progress sessions
-              incomplete <- getIncompleteProgressSessions
-              let progressCount = Set.size incomplete
-              let progressTokens = map showProgressToken (Set.toList incomplete)
-              
-              let hasProgress = progressCount > 0
-              let timeSinceStart = diffUTCTime now sessionStart
+                -- Poll HLS for incomplete progress sessions
+                incomplete <- getIncompleteProgressSessions
+                let progressCount = Set.size incomplete
+                let progressTokens = map showProgressToken (Set.toList incomplete)
 
-              let newState = case (currentInfo.iiState, hasProgress) of
-                    (_, True) -> Indexing
-                    (Startup, False) -> 
-                      if timeSinceStart > 15 
-                        then Ready
-                        else Startup
-                    (Indexing, False) -> Ready
-                    (Ready, False) -> Ready
+                let hasProgress = progressCount > 0
+                let timeSinceStart = diffUTCTime now sessionStart
 
-              -- Set readyAt only on Indexing→Ready or Startup→Ready transition
-              let readyAt = case (currentInfo.iiState, newState) of
-                    (Indexing, Ready) -> Just now
-                    (Startup, Ready)  -> Just now
-                    _                 -> currentInfo.iiReadyAt
+                let newState = case (currentInfo.iiState, hasProgress) of
+                      (_, True) -> Indexing
+                      (Startup, False) ->
+                        if timeSinceStart > 15
+                          then Ready
+                          else Startup
+                      (Indexing, False) -> Ready
+                      (Ready, False) -> Ready
 
-              -- Build updated info
-              let newInfo = IndexingInfo
-                    { iiState = newState
-                    , iiProgressCount = progressCount
-                    , iiProgressTokens = progressTokens
-                    , iiSessionStart = sessionStart  -- preserved from outer scope
-                    , iiReadyAt = readyAt
-                    }
+                -- Set readyAt only on Indexing→Ready or Startup→Ready transition
+                let readyAt = case (currentInfo.iiState, newState) of
+                      (Indexing, Ready) -> Just now
+                      (Startup, Ready) -> Just now
+                      _ -> currentInfo.iiReadyAt
 
-              -- Update the TVar with full info
-              liftIO $ atomically $ writeTVar indexingInfo newInfo
+                -- Build updated info
+                let newInfo =
+                      IndexingInfo
+                        { iiState = newState,
+                          iiProgressCount = progressCount,
+                          iiProgressTokens = progressTokens,
+                          iiSessionStart = sessionStart, -- preserved from outer scope
+                          iiReadyAt = readyAt
+                        }
 
-              -- Log state transition (only on change)
-              when (currentInfo.iiState /= newState) $
-                liftIO $ hPutStrLn stderr $ "[LSP] Indexing: " <> show newState
-                  <> " (count=" <> show progressCount <> ")"
+                -- Update the TVar with full info
+                liftIO $ atomically $ writeTVar indexingInfo newInfo
 
-              pure now
-            else pure lastCheck
+                -- Log state transition (only on change)
+                when (currentInfo.iiState /= newState) $
+                  liftIO $
+                    hPutStrLn stderr $
+                      "[LSP] Indexing: "
+                        <> show newState
+                        <> " (count="
+                        <> show progressCount
+                        <> ")"
+
+                pure now
+              else pure lastCheck
 
           -- Check if user action is done (non-blocking)
           maybeDone <- liftIO $ tryTakeMVar doneMVar
           case maybeDone of
-            Just () -> pure ()  -- User action completed, exit
+            Just () -> pure () -- User action completed, exit
             Nothing -> do
               -- Check for pending request (100ms timeout)
               maybeReq <- liftIO $ timeout 100000 $ readChan requestChan
               case maybeReq of
-                Nothing -> processRequests nextCheck  -- No request, loop
+                Nothing -> processRequests nextCheck -- No request, loop
                 Just (LSPRequest reqAction reqResponseMVar) -> do
                   liftIO $ hPutStrLn stderr "[LSP] Processing request..."
                   -- Execute the Session action
@@ -257,10 +289,9 @@ withLSPSession rootDir action = do
     Right val -> pure val
     Left err -> throwIO err
 
-
 -- | Default timeout for LSP requests (60 seconds).
 defaultRequestTimeout :: Int
-defaultRequestTimeout = 60 * 1000000  -- microseconds
+defaultRequestTimeout = 60 * 1000000 -- microseconds
 
 -- | Execute a Session action via the session handle.
 --
@@ -281,136 +312,127 @@ executeSession session action = do
         Right value -> pure value
         Left err -> throwIO err
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT INTERPRETER
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Run LSP effects using an active session.
-runLSP :: LastMember IO effs => LSPSession -> Eff (LSP ': effs) a -> Eff effs a
+runLSP :: (LastMember IO effs) => LSPSession -> Eff (LSP ': effs) a -> Eff effs a
 runLSP session = interpret $ \case
   Diagnostics _doc ->
     -- Diagnostics come via notifications, not requests
     -- Would need to track them in session state
     pure []
-
   Hover doc pos -> sendM $ executeSession session $ do
     let lspDoc = toTextDocumentId doc
         lspPos = toPosition pos
     -- lsp-test's getHover takes TextDocumentIdentifier and Position
     result <- getHover lspDoc lspPos
     pure $ fromHoverResult result
-
   References doc pos -> sendM $ executeSession session $ do
     let lspPos = toPosition pos
         filePath = uriToFilePath doc.tdiUri
     -- Open the document first - HLS requires this for references to work
     lspDoc <- openDoc filePath "haskell"
     -- getReferences returns [Location]
-    locs <- getReferences lspDoc lspPos True  -- includeDeclaration = True
+    locs <- getReferences lspDoc lspPos True -- includeDeclaration = True
     pure $ map fromLocation locs
-
   Definition doc pos -> sendM $ executeSession session $ do
     let lspDoc = toTextDocumentId doc
         lspPos = toPosition pos
     -- getDefinitions returns [Location] | [LocationLink]
     result <- getDefinitions lspDoc lspPos
     pure $ fromDefinitionResult result
-
   CodeActions doc rng -> sendM $ executeSession session $ do
     let lspDoc = toTextDocumentId doc
         lspRange = toRange rng
     -- getCodeActions returns [Command |? CodeAction]
     actions <- getCodeActions lspDoc lspRange
     pure $ fromCodeActionsResult actions
-
   Rename doc pos newName -> sendM $ executeSession session $ do
     let lspDoc = toTextDocumentId doc
         lspPos = toPosition pos
     -- lsp-test's rename returns (), we need to use the low-level request API
-    let params = L.RenameParams
-          { L._workDoneToken = Nothing
-          , L._textDocument = lspDoc
-          , L._position = lspPos
-          , L._newName = newName
-          }
+    let params =
+          L.RenameParams
+            { L._workDoneToken = Nothing,
+              L._textDocument = lspDoc,
+              L._position = lspPos,
+              L._newName = newName
+            }
     resp <- request L.SMethod_TextDocumentRename params
     pure $ case resp of
       L.TResponseMessage _ _ (Right (L.InL edit)) -> fromWorkspaceEditResult edit
       L.TResponseMessage _ _ (Right (L.InR L.Null)) -> WorkspaceEdit Map.empty
       L.TResponseMessage _ _ (Left _) -> WorkspaceEdit Map.empty
-
   Completion doc pos -> sendM $ executeSession session $ do
     let lspDoc = toTextDocumentId doc
         lspPos = toPosition pos
     -- getCompletions returns [CompletionItem]
     items <- getCompletions lspDoc lspPos
     pure $ map fromCompletionItem items
-
   WorkspaceSymbol query -> sendM $ executeSession session $ do
     -- lsp-test doesn't have a direct getWorkspaceSymbols
     -- Use the low-level request API
-    let params = L.WorkspaceSymbolParams
-          { L._workDoneToken = Nothing
-          , L._partialResultToken = Nothing
-          , L._query = query
-          }
+    let params =
+          L.WorkspaceSymbolParams
+            { L._workDoneToken = Nothing,
+              L._partialResultToken = Nothing,
+              L._query = query
+            }
     resp <- Language.LSP.Test.request L.SMethod_WorkspaceSymbol params
     pure $ case resp of
       L.TResponseMessage _ _ (Right result) -> fromSymbolsResult result
       L.TResponseMessage _ _ (Left _) -> []
-
   DocumentSymbol doc -> sendM $ executeSession session $ do
     -- lsp-test doesn't have a direct getDocumentSymbols
     -- Use the low-level request API
     let lspDoc = toTextDocumentId doc
-        params = L.DocumentSymbolParams
-          { L._workDoneToken = Nothing
-          , L._partialResultToken = Nothing
-          , L._textDocument = lspDoc
-          }
+        params =
+          L.DocumentSymbolParams
+            { L._workDoneToken = Nothing,
+              L._partialResultToken = Nothing,
+              L._textDocument = lspDoc
+            }
     resp <- Language.LSP.Test.request L.SMethod_TextDocumentDocumentSymbol params
     pure $ case resp of
       L.TResponseMessage _ _ (Right result) -> fromDocumentSymbolResult result
       L.TResponseMessage _ _ (Left _) -> []
-
   PrepareCallHierarchy doc pos -> sendM $ executeSession session $ do
     let lspDoc = toTextDocumentId doc
         lspPos = toPosition pos
-        params = L.CallHierarchyPrepareParams
-          { L._workDoneToken = Nothing
-          , L._textDocument = lspDoc
-          , L._position = lspPos
-          }
+        params =
+          L.CallHierarchyPrepareParams
+            { L._workDoneToken = Nothing,
+              L._textDocument = lspDoc,
+              L._position = lspPos
+            }
     resp <- Language.LSP.Test.request L.SMethod_TextDocumentPrepareCallHierarchy params
     pure $ case resp of
       L.TResponseMessage _ _ (Right result) -> case result of
         L.InL items -> map fromCallHierarchyItem items
         L.InR L.Null -> []
       L.TResponseMessage _ _ (Left _) -> []
-
   OutgoingCalls item -> sendM $ executeSession session $ do
     let lspItem = toCallHierarchyItem item
-        params = L.CallHierarchyOutgoingCallsParams
-          { L._workDoneToken = Nothing
-          , L._partialResultToken = Nothing
-          , L._item = lspItem
-          }
+        params =
+          L.CallHierarchyOutgoingCallsParams
+            { L._workDoneToken = Nothing,
+              L._partialResultToken = Nothing,
+              L._item = lspItem
+            }
     resp <- Language.LSP.Test.request L.SMethod_CallHierarchyOutgoingCalls params
     pure $ case resp of
       L.TResponseMessage _ _ (Right result) -> case result of
         L.InL items -> map fromCallHierarchyOutgoingCall items
         L.InR L.Null -> []
       L.TResponseMessage _ _ (Left _) -> []
-
   GetIndexingState ->
     -- Read the indexing state from the session's TVar (backward compatible)
     sendM $ getSessionIndexingState session
-
   GetIndexingInfo ->
     -- Read full indexing information from the session's TVar
     sendM $ getSessionIndexingInfo session
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE CONVERSIONS: Our types -> lsp-types
@@ -426,21 +448,24 @@ uriToFilePath uri
   | otherwise = T.unpack uri
 
 toTextDocumentId :: TextDocumentIdentifier -> L.TextDocumentIdentifier
-toTextDocumentId doc = L.TextDocumentIdentifier
-  { L._uri = L.Uri doc.tdiUri
-  }
+toTextDocumentId doc =
+  L.TextDocumentIdentifier
+    { L._uri = L.Uri doc.tdiUri
+    }
 
 toPosition :: Position -> L.Position
-toPosition pos = L.Position
-  { L._line = fromIntegral pos.posLine
-  , L._character = fromIntegral pos.posCharacter
-  }
+toPosition pos =
+  L.Position
+    { L._line = fromIntegral pos.posLine,
+      L._character = fromIntegral pos.posCharacter
+    }
 
 toRange :: Range -> L.Range
-toRange rng = L.Range
-  { L._start = toPosition rng.rangeStart
-  , L._end = toPosition rng.rangeEnd
-  }
+toRange rng =
+  L.Range
+    { L._start = toPosition rng.rangeStart,
+      L._end = toPosition rng.rangeEnd
+    }
 
 toSymbolKind :: SymbolKind -> L.SymbolKind
 toSymbolKind k = case k of
@@ -472,47 +497,52 @@ toSymbolKind k = case k of
   SKTypeParameter -> L.SymbolKind_TypeParameter
 
 toCallHierarchyItem :: CallHierarchyItem -> L.CallHierarchyItem
-toCallHierarchyItem chi = L.CallHierarchyItem
-  { L._name = chi.chiName
-  , L._kind = toSymbolKind chi.chiKind
-  , L._tags = Nothing
-  , L._detail = Nothing
-  , L._uri = L.Uri chi.chiUri
-  , L._range = toRange chi.chiRange
-  , L._selectionRange = toRange chi.chiSelectionRange
-  , L._data_ = Nothing
-  }
-
+toCallHierarchyItem chi =
+  L.CallHierarchyItem
+    { L._name = chi.chiName,
+      L._kind = toSymbolKind chi.chiKind,
+      L._tags = Nothing,
+      L._detail = Nothing,
+      L._uri = L.Uri chi.chiUri,
+      L._range = toRange chi.chiRange,
+      L._selectionRange = toRange chi.chiSelectionRange,
+      L._data_ = Nothing
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE CONVERSIONS: lsp-types -> Our types
 -- ════════════════════════════════════════════════════════════════════════════
 
 fromPosition :: L.Position -> Position
-fromPosition pos = Position
-  { posLine = fromIntegral pos._line
-  , posCharacter = fromIntegral pos._character
-  }
+fromPosition pos =
+  Position
+    { posLine = fromIntegral pos._line,
+      posCharacter = fromIntegral pos._character
+    }
 
 fromRange :: L.Range -> Range
-fromRange rng = Range
-  { rangeStart = fromPosition rng._start
-  , rangeEnd = fromPosition rng._end
-  }
+fromRange rng =
+  Range
+    { rangeStart = fromPosition rng._start,
+      rangeEnd = fromPosition rng._end
+    }
 
 fromLocation :: L.Location -> Location
-fromLocation loc = Location
-  { locUri = let L.Uri u = loc._uri in u
-  , locRange = fromRange loc._range
-  }
+fromLocation loc =
+  Location
+    { locUri = let L.Uri u = loc._uri in u,
+      locRange = fromRange loc._range
+    }
 
 -- lsp-test's getHover returns Maybe Hover directly
 fromHoverResult :: Maybe L.Hover -> Maybe HoverInfo
 fromHoverResult Nothing = Nothing
-fromHoverResult (Just h) = Just HoverInfo
-  { hoverContents = extractMarkupContent h._contents
-  , hoverRange = fromRange <$> h._range
-  }
+fromHoverResult (Just h) =
+  Just
+    HoverInfo
+      { hoverContents = extractMarkupContent h._contents,
+        hoverRange = fromRange <$> h._range
+      }
 
 extractMarkupContent :: L.MarkupContent L.|? (L.MarkedString L.|? [L.MarkedString]) -> Text
 extractMarkupContent content = case content of
@@ -545,10 +575,11 @@ fromDefinitionResult result = case result of
     fromDefinitionLink (L.DefinitionLink link) = fromLocationLink link
 
 fromLocationLink :: L.LocationLink -> Location
-fromLocationLink link = Location
-  { locUri = let L.Uri u = link._targetUri in u
-  , locRange = fromRange link._targetRange
-  }
+fromLocationLink link =
+  Location
+    { locUri = let L.Uri u = link._targetUri in u,
+      locRange = fromRange link._targetRange
+    }
 
 -- lsp-test's getCodeActions returns [Command |? CodeAction]
 fromCodeActionsResult :: [L.Command L.|? L.CodeAction] -> [CodeAction]
@@ -556,16 +587,17 @@ fromCodeActionsResult items = concatMap fromCommandOrAction items
 
 fromCommandOrAction :: L.Command L.|? L.CodeAction -> [CodeAction]
 fromCommandOrAction cmdOrAction = case cmdOrAction of
-  L.InL _cmd -> []  -- Skip commands
+  L.InL _cmd -> [] -- Skip commands
   L.InR ca -> [fromCodeAction ca]
 
 fromCodeAction :: L.CodeAction -> CodeAction
-fromCodeAction ca = CodeAction
-  { caTitle = ca._title
-  , caKind = fromCodeActionKind <$> ca._kind
-  , caEdit = fromWorkspaceEditMaybe ca._edit
-  , caCommand = fmap (._title) ca._command
-  }
+fromCodeAction ca =
+  CodeAction
+    { caTitle = ca._title,
+      caKind = fromCodeActionKind <$> ca._kind,
+      caEdit = fromWorkspaceEditMaybe ca._edit,
+      caCommand = fmap (._title) ca._command
+    }
 
 fromCodeActionKind :: L.CodeActionKind -> CodeActionKind
 fromCodeActionKind k = case k of
@@ -579,37 +611,42 @@ fromCodeActionKind k = case k of
   L.CodeActionKind_SourceFixAll -> SourceFixAll
   L.CodeActionKind_Custom t -> OtherKind t
   L.CodeActionKind_Empty -> OtherKind ""
-  _ -> OtherKind ""  -- Handle any new constructors
+  _ -> OtherKind "" -- Handle any new constructors
 
 -- lsp-test's rename returns WorkspaceEdit directly
 fromWorkspaceEditResult :: L.WorkspaceEdit -> WorkspaceEdit
-fromWorkspaceEditResult we = fromWorkspaceEditMaybe (Just we)
-  & maybe (WorkspaceEdit Map.empty) id
+fromWorkspaceEditResult we =
+  fromWorkspaceEditMaybe (Just we)
+    & maybe (WorkspaceEdit Map.empty) id
 
 fromWorkspaceEditMaybe :: Maybe L.WorkspaceEdit -> Maybe WorkspaceEdit
 fromWorkspaceEditMaybe Nothing = Nothing
-fromWorkspaceEditMaybe (Just we) = Just $ WorkspaceEdit $
-  case we._changes of
-    Nothing -> Map.empty
-    Just changes -> Map.fromList
-      [ (uri, map fromTextEdit edits)
-      | (L.Uri uri, edits) <- Map.toList changes
-      ]
+fromWorkspaceEditMaybe (Just we) = Just $
+  WorkspaceEdit $
+    case we._changes of
+      Nothing -> Map.empty
+      Just changes ->
+        Map.fromList
+          [ (uri, map fromTextEdit edits)
+          | (L.Uri uri, edits) <- Map.toList changes
+          ]
 
 fromTextEdit :: L.TextEdit -> TextEdit
-fromTextEdit te = TextEdit
-  { teRange = fromRange te._range
-  , teNewText = te._newText
-  }
+fromTextEdit te =
+  TextEdit
+    { teRange = fromRange te._range,
+      teNewText = te._newText
+    }
 
 fromCompletionItem :: L.CompletionItem -> CompletionItem
-fromCompletionItem ci = CompletionItem
-  { ciLabel = ci._label
-  , ciKind = fromCompletionItemKind <$> ci._kind
-  , ciDetail = ci._detail
-  , ciDocumentation = extractDocumentation <$> ci._documentation
-  , ciInsertText = ci._insertText
-  }
+fromCompletionItem ci =
+  CompletionItem
+    { ciLabel = ci._label,
+      ciKind = fromCompletionItemKind <$> ci._kind,
+      ciDetail = ci._detail,
+      ciDocumentation = extractDocumentation <$> ci._documentation,
+      ciInsertText = ci._insertText
+    }
 
 extractDocumentation :: Text L.|? L.MarkupContent -> Text
 extractDocumentation doc = case doc of
@@ -653,28 +690,31 @@ fromSymbolsResult result = case result of
     L.InR L.Null -> []
 
 fromSymbolInfo :: L.SymbolInformation -> SymbolInformation
-fromSymbolInfo si = SymbolInformation
-  { siName = si._name
-  , siKind = fromSymbolKind si._kind
-  , siLocation = fromLocation si._location
-  , siContainer = si._containerName
-  }
+fromSymbolInfo si =
+  SymbolInformation
+    { siName = si._name,
+      siKind = fromSymbolKind si._kind,
+      siLocation = fromLocation si._location,
+      siContainer = si._containerName
+    }
 
 fromWorkspaceSymbol :: L.WorkspaceSymbol -> SymbolInformation
-fromWorkspaceSymbol ws = SymbolInformation
-  { siName = ws._name
-  , siKind = fromSymbolKind ws._kind
-  , siLocation = extractLocationFromWS ws._location
-  , siContainer = ws._containerName
-  }
+fromWorkspaceSymbol ws =
+  SymbolInformation
+    { siName = ws._name,
+      siKind = fromSymbolKind ws._kind,
+      siLocation = extractLocationFromWS ws._location,
+      siContainer = ws._containerName
+    }
 
 extractLocationFromWS :: L.Location L.|? L.LocationUriOnly -> Location
 extractLocationFromWS loc = case loc of
   L.InL l -> fromLocation l
-  L.InR (L.LocationUriOnly uri) -> Location
-    { locUri = let L.Uri u = uri in u
-    , locRange = Range (Position 0 0) (Position 0 0)
-    }
+  L.InR (L.LocationUriOnly uri) ->
+    Location
+      { locUri = let L.Uri u = uri in u,
+        locRange = Range (Position 0 0) (Position 0 0)
+      }
 
 fromSymbolKind :: L.SymbolKind -> SymbolKind
 fromSymbolKind k = case k of
@@ -719,33 +759,36 @@ fromDocumentSymbolResult result = case result of
 -- by including the parent and recursively flattening children.
 flattenDocumentSymbol :: L.DocumentSymbol -> [SymbolInformation]
 flattenDocumentSymbol ds =
-  let parent = SymbolInformation
-        { siName = ds._name
-        , siKind = fromSymbolKind ds._kind
-        , siLocation = Location
-            { locUri = ""  -- DocumentSymbol doesn't include URI
-            , locRange = fromRange ds._range
-            }
-        , siContainer = Nothing  -- Could extract from parent context if needed
-        }
+  let parent =
+        SymbolInformation
+          { siName = ds._name,
+            siKind = fromSymbolKind ds._kind,
+            siLocation =
+              Location
+                { locUri = "", -- DocumentSymbol doesn't include URI
+                  locRange = fromRange ds._range
+                },
+            siContainer = Nothing -- Could extract from parent context if needed
+          }
       children = maybe [] (concatMap flattenDocumentSymbol) ds._children
-  in parent : children
+   in parent : children
 
 fromCallHierarchyItem :: L.CallHierarchyItem -> CallHierarchyItem
-fromCallHierarchyItem chi = CallHierarchyItem
-  { chiName = chi._name
-  , chiKind = fromSymbolKind chi._kind
-  , chiUri = let L.Uri u = chi._uri in u
-  , chiRange = fromRange chi._range
-  , chiSelectionRange = fromRange chi._selectionRange
-  }
+fromCallHierarchyItem chi =
+  CallHierarchyItem
+    { chiName = chi._name,
+      chiKind = fromSymbolKind chi._kind,
+      chiUri = let L.Uri u = chi._uri in u,
+      chiRange = fromRange chi._range,
+      chiSelectionRange = fromRange chi._selectionRange
+    }
 
 fromCallHierarchyOutgoingCall :: L.CallHierarchyOutgoingCall -> CallHierarchyOutgoingCall
-fromCallHierarchyOutgoingCall choc = CallHierarchyOutgoingCall
-  { chocTo = fromCallHierarchyItem choc._to
-  , chocFromRanges = map fromRange choc._fromRanges
-  }
-
+fromCallHierarchyOutgoingCall choc =
+  CallHierarchyOutgoingCall
+    { chocTo = fromCallHierarchyItem choc._to,
+      chocFromRanges = map fromRange choc._fromRanges
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PROGRESS TOKEN CONVERSION
@@ -757,5 +800,5 @@ fromCallHierarchyOutgoingCall choc = CallHierarchyOutgoingCall
 -- to capture what HLS is reporting during indexing.
 showProgressToken :: L.ProgressToken -> Text
 showProgressToken (L.ProgressToken tok) = case tok of
-  L.InL n  -> T.pack (show n)  -- Int32 token
-  L.InR t  -> t                -- Text token
+  L.InL n -> T.pack (show n) -- Int32 token
+  L.InR t -> t -- Text token

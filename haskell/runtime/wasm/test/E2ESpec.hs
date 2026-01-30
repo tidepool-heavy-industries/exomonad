@@ -18,23 +18,21 @@
 -- 3. FFI is just JSON encoding on top of Runner
 module E2ESpec (spec) where
 
-import Test.Hspec
-import Data.Aeson (encode, decode, Value(..))
+import Data.Aeson (Value (..), decode, encode)
 import Data.Aeson.KeyMap qualified as KM
-
-import ExoMonad.Wasm.Runner (initializeWasm, WasmResult(..))
+import ExoMonad.Graph.Goto (GotoChoice, OneOf, To)
+import ExoMonad.Graph.Goto.Internal (GotoChoice (..), OneOf (..)) -- For test assertions
+import ExoMonad.Graph.Types (Exit)
+import ExoMonad.Wasm.Runner (WasmResult (..), initializeWasm)
 import ExoMonad.Wasm.TestGraph (computeMultiEffectWasm)
 import ExoMonad.Wasm.WireTypes
-  ( SerializableEffect(..)
-  , EffectResult(..)
-  , StepOutput(..)
-  , GraphState(..)
-  , ExecutionPhase(..)
+  ( EffectResult (..),
+    ExecutionPhase (..),
+    GraphState (..),
+    SerializableEffect (..),
+    StepOutput (..),
   )
-import ExoMonad.Graph.Goto (GotoChoice, OneOf, To)
-import ExoMonad.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
-import ExoMonad.Graph.Types (Exit)
-
+import Test.Hspec
 
 spec :: Spec
 spec = do
@@ -44,14 +42,12 @@ spec = do
     multiYieldJsonBoundarySpec
     multiYieldEdgeCasesSpec
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- Multi-Yield Runner Tests
 -- ════════════════════════════════════════════════════════════════════════════
 
 multiYieldRunnerSpec :: Spec
 multiYieldRunnerSpec = describe "Multi-yield through Runner" $ do
-
   it "yields 3 effects before completing" $ do
     -- Initialize with multi-effect handler
     let result1 = initializeWasm (computeMultiEffectWasm 5)
@@ -76,7 +72,6 @@ multiYieldRunnerSpec = describe "Multi-yield through Runner" $ do
                   WasmComplete (GotoChoice (Here n)) ->
                     n `shouldBe` 6
                   _ -> expectationFailure "Expected WasmComplete after third effect"
-
               _ -> expectationFailure "Expected third WasmYield"
           _ -> expectationFailure "Expected second WasmYield"
       _ -> expectationFailure "Expected first WasmYield"
@@ -89,7 +84,7 @@ multiYieldRunnerSpec = describe "Multi-yield through Runner" $ do
         runFull :: WasmResult (GotoChoice '[To Exit Int]) -> Maybe Int
         runFull (WasmYield _ k) = runFull (k (ResSuccess Nothing))
         runFull (WasmComplete (GotoChoice (Here result))) = Just result
-        runFull (WasmComplete (GotoChoice (There _))) = Nothing  -- impossible, but pattern match
+        runFull (WasmComplete (GotoChoice (There _))) = Nothing -- impossible, but pattern match
         runFull (WasmError _) = Nothing
 
     runMultiYield 0 `shouldBe` Just 1
@@ -97,14 +92,12 @@ multiYieldRunnerSpec = describe "Multi-yield through Runner" $ do
     runMultiYield (-5) `shouldBe` Just (-4)
     runMultiYield 1000000 `shouldBe` Just 1000001
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- Effect Sequence Verification
 -- ════════════════════════════════════════════════════════════════════════════
 
 multiYieldEffectSequenceSpec :: Spec
 multiYieldEffectSequenceSpec = describe "Effect sequence verification" $ do
-
   it "effects are yielded in correct order" $ do
     let collectEffects :: Int -> WasmResult a -> [SerializableEffect]
         collectEffects maxSteps result
@@ -137,14 +130,12 @@ multiYieldEffectSequenceSpec = describe "Effect sequence verification" $ do
 
     all isLogInfo effects `shouldBe` True
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- JSON Boundary Tests
 -- ════════════════════════════════════════════════════════════════════════════
 
 multiYieldJsonBoundarySpec :: Spec
 multiYieldJsonBoundarySpec = describe "JSON boundary (wire types)" $ do
-
   it "StepOutput encodes multi-yield correctly" $ do
     -- Simulate what FFI would produce for each step
     let state = GraphState (PhaseInNode "compute") []
@@ -184,14 +175,12 @@ multiYieldJsonBoundarySpec = describe "JSON boundary (wire types)" $ do
     let err = ResError "mid-sequence failure"
     decode (encode err) `shouldBe` Just err
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- Edge Cases
 -- ════════════════════════════════════════════════════════════════════════════
 
 multiYieldEdgeCasesSpec :: Spec
 multiYieldEdgeCasesSpec = describe "Edge cases" $ do
-
   it "Log effects ignore errors and continue (fire-and-forget)" $ do
     -- Even with ResError on each step, Log effects continue
     let result = initializeWasm (computeMultiEffectWasm 5)

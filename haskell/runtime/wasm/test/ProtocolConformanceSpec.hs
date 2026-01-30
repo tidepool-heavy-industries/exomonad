@@ -9,12 +9,10 @@
 -- Source of truth: deploy/src/protocol.ts
 module ProtocolConformanceSpec (spec) where
 
-import Test.Hspec
-import Data.Aeson (encode, decode, object, (.=), Value(..))
+import Data.Aeson (Value (..), decode, encode, object, (.=))
 import Data.Aeson.KeyMap qualified as KM
-
 import ExoMonad.Wasm.WireTypes
-
+import Test.Hspec
 
 spec :: Spec
 spec = do
@@ -24,23 +22,22 @@ spec = do
   graphStateConformanceSpec
   stepOutputConformanceSpec
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- SerializableEffect conformance with protocol.ts
 -- ════════════════════════════════════════════════════════════════════════════
 
 serializableEffectConformanceSpec :: Spec
 serializableEffectConformanceSpec = describe "SerializableEffect matches protocol.ts" $ do
-
   describe "LlmCompleteEffect" $ do
     it "encodes with correct field names: type, eff_node, eff_system_prompt, eff_user_content, eff_schema, eff_model" $ do
-      let effect = EffLlmComplete
-            { effNode = "classify"
-            , effSystemPrompt = "You are a classifier."
-            , effUserContent = "Classify this text."
-            , effSchema = Just (object ["type" .= ("string" :: String)])
-            , effModel = Just "@cf/meta/llama-3.2-1b-instruct"
-            }
+      let effect =
+            EffLlmComplete
+              { effNode = "classify",
+                effSystemPrompt = "You are a classifier.",
+                effUserContent = "Classify this text.",
+                effSchema = Just (object ["type" .= ("string" :: String)]),
+                effModel = Just "@cf/meta/llama-3.2-1b-instruct"
+              }
           json = decode (encode effect) :: Maybe Value
       case json of
         Just (Object obj) -> do
@@ -57,13 +54,14 @@ serializableEffectConformanceSpec = describe "SerializableEffect matches protoco
         _ -> expectationFailure "Expected JSON object"
 
     it "omits eff_schema and eff_model fields when Nothing" $ do
-      let effect = EffLlmComplete
-            { effNode = "node"
-            , effSystemPrompt = "sys"
-            , effUserContent = "user"
-            , effSchema = Nothing
-            , effModel = Nothing
-            }
+      let effect =
+            EffLlmComplete
+              { effNode = "node",
+                effSystemPrompt = "sys",
+                effUserContent = "user",
+                effSchema = Nothing,
+                effModel = Nothing
+              }
           json = decode (encode effect) :: Maybe Value
       case json of
         Just (Object obj) -> do
@@ -91,14 +89,12 @@ serializableEffectConformanceSpec = describe "SerializableEffect matches protoco
           KM.lookup "eff_message" obj `shouldBe` Just (String "Connection failed")
         _ -> expectationFailure "Expected JSON object"
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- EffectResult conformance with protocol.ts
 -- ════════════════════════════════════════════════════════════════════════════
 
 effectResultConformanceSpec :: Spec
 effectResultConformanceSpec = describe "EffectResult matches protocol.ts" $ do
-
   describe "success" $ do
     it "encodes as {type: \"success\", value: ...}" $ do
       let result = ResSuccess (Just (Number 42))
@@ -128,14 +124,12 @@ effectResultConformanceSpec = describe "EffectResult matches protocol.ts" $ do
           KM.lookup "message" obj `shouldBe` Just (String "Something went wrong")
         _ -> expectationFailure "Expected JSON object"
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- ExecutionPhase conformance with protocol.ts
 -- ════════════════════════════════════════════════════════════════════════════
 
 executionPhaseConformanceSpec :: Spec
 executionPhaseConformanceSpec = describe "ExecutionPhase matches protocol.ts" $ do
-
   it "encodes idle as {type: \"idle\"}" $ do
     let phase = PhaseIdle
         json = decode (encode phase) :: Maybe Value
@@ -189,14 +183,13 @@ executionPhaseConformanceSpec = describe "ExecutionPhase matches protocol.ts" $ 
   describe "round-trip" $ do
     it "round-trips all ExecutionPhase variants" $ do
       let phases =
-            [ PhaseIdle
-            , PhaseInNode "test"
-            , PhaseTransitioning "a" "b"
-            , PhaseCompleted (String "done")
-            , PhaseFailed "err"
+            [ PhaseIdle,
+              PhaseInNode "test",
+              PhaseTransitioning "a" "b",
+              PhaseCompleted (String "done"),
+              PhaseFailed "err"
             ]
       mapM_ (\p -> decode (encode p) `shouldBe` Just p) phases
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GraphState conformance with protocol.ts
@@ -204,12 +197,12 @@ executionPhaseConformanceSpec = describe "ExecutionPhase matches protocol.ts" $ 
 
 graphStateConformanceSpec :: Spec
 graphStateConformanceSpec = describe "GraphState matches protocol.ts" $ do
-
   it "encodes as {phase: {...}, completedNodes: [...]}" $ do
-    let state = GraphState
-          { gsPhase = PhaseInNode "classify"
-          , gsCompletedNodes = ["entry", "validate"]
-          }
+    let state =
+          GraphState
+            { gsPhase = PhaseInNode "classify",
+              gsCompletedNodes = ["entry", "validate"]
+            }
         json = decode (encode state) :: Maybe Value
     case json of
       Just (Object obj) -> do
@@ -225,10 +218,11 @@ graphStateConformanceSpec = describe "GraphState matches protocol.ts" $ do
       _ -> expectationFailure "Expected JSON object"
 
   it "encodes empty completedNodes as empty array" $ do
-    let state = GraphState
-          { gsPhase = PhaseIdle
-          , gsCompletedNodes = []
-          }
+    let state =
+          GraphState
+            { gsPhase = PhaseIdle,
+              gsCompletedNodes = []
+            }
         json = decode (encode state) :: Maybe Value
     case json of
       Just (Object obj) -> do
@@ -239,12 +233,12 @@ graphStateConformanceSpec = describe "GraphState matches protocol.ts" $ do
       _ -> expectationFailure "Expected JSON object"
 
   it "round-trips GraphState" $ do
-    let state = GraphState
-          { gsPhase = PhaseTransitioning "a" "b"
-          , gsCompletedNodes = ["x", "y", "z"]
-          }
+    let state =
+          GraphState
+            { gsPhase = PhaseTransitioning "a" "b",
+              gsCompletedNodes = ["x", "y", "z"]
+            }
     decode (encode state) `shouldBe` Just state
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- StepOutput conformance with protocol.ts
@@ -252,7 +246,6 @@ graphStateConformanceSpec = describe "GraphState matches protocol.ts" $ do
 
 stepOutputConformanceSpec :: Spec
 stepOutputConformanceSpec = describe "StepOutput matches protocol.ts" $ do
-
   it "has all required fields: effect, done, stepResult, graphState" $ do
     let output = StepYield (EffLogInfo "computing" Nothing) (GraphState (PhaseInNode "compute") [])
         json = decode (encode output) :: Maybe Value
@@ -303,9 +296,9 @@ stepOutputConformanceSpec = describe "StepOutput matches protocol.ts" $ do
     it "is always present in output, never omitted" $ do
       -- Test all three StepOutput variants - graphState is always present
       let outputs =
-            [ StepYield (EffLogInfo "x" Nothing) (GraphState PhaseIdle [])
-            , StepDone (String "done") (GraphState (PhaseCompleted (String "done")) [])
-            , StepFailed "error" (GraphState (PhaseFailed "error") [])
+            [ StepYield (EffLogInfo "x" Nothing) (GraphState PhaseIdle []),
+              StepDone (String "done") (GraphState (PhaseCompleted (String "done")) []),
+              StepFailed "error" (GraphState (PhaseFailed "error") [])
             ]
       forM_ outputs $ \output -> do
         let json = decode (encode output) :: Maybe Value
@@ -317,11 +310,11 @@ stepOutputConformanceSpec = describe "StepOutput matches protocol.ts" $ do
     it "phase field uses correct discriminator names" $ do
       -- This tests the critical mapping between Haskell constructors and TS type literals
       let testCases =
-            [ (PhaseIdle, "idle")
-            , (PhaseInNode "x", "in_node")
-            , (PhaseTransitioning "a" "b", "transitioning")
-            , (PhaseCompleted Null, "completed")
-            , (PhaseFailed "e", "failed")
+            [ (PhaseIdle, "idle"),
+              (PhaseInNode "x", "in_node"),
+              (PhaseTransitioning "a" "b", "transitioning"),
+              (PhaseCompleted Null, "completed"),
+              (PhaseFailed "e", "failed")
             ]
       forM_ testCases $ \(phase, expectedType) -> do
         let state = GraphState phase []
@@ -338,7 +331,6 @@ stepOutputConformanceSpec = describe "StepOutput matches protocol.ts" $ do
                   _ -> expectationFailure "Expected phase object"
               _ -> expectationFailure "Expected graphState object"
           _ -> expectationFailure "Expected JSON object"
-
 
 -- Helper for iteration in tests
 forM_ :: (Monad m) => [a] -> (a -> m b) -> m ()

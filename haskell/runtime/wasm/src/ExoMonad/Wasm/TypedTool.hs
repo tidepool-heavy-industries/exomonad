@@ -53,53 +53,52 @@
 -- @
 module ExoMonad.Wasm.TypedTool
   ( -- * ask_user Tool
-    AskUserInput(..)
-  , askUser
-  , askUserWithFallback
-  , executeAskUser
+    AskUserInput (..),
+    askUser,
+    askUserWithFallback,
+    executeAskUser,
 
     -- * Tool Input Parsing
-  , parseToolInput
-  , parseToolInputM
+    parseToolInput,
+    parseToolInputM,
 
     -- * Tool Execution Helpers
-  , ToolCallHandler
-  , handleToolCalls
-  , requireSingleTool
+    ToolCallHandler,
+    handleToolCalls,
+    requireSingleTool,
 
     -- * Re-exports for convenience
-  , WireToolCall(..)
-  ) where
+    WireToolCall (..),
+  )
+where
 
 import Control.Monad (forM)
-import Control.Monad.Freer (Member, Eff)
+import Control.Monad.Freer (Eff, Member)
 import Control.Monad.Freer.Coroutine (Yield)
 import Data.Aeson
-  ( FromJSON(..)
-  , ToJSON(..)
-  , Result(..)
-  , fromJSON
-  , object
-  , (.=)
-  , (.:)
-  , (.:?)
-  , withObject
+  ( FromJSON (..),
+    Result (..),
+    ToJSON (..),
+    fromJSON,
+    object,
+    withObject,
+    (.:),
+    (.:?),
+    (.=),
   )
 import Data.Text (Text)
-import qualified Data.Text as T
-
-import ExoMonad.Wasm.WireTypes
-  ( SerializableEffect
-  , EffectResult
-  , WireToolCall(..)
-  , TelegramAskResult(..)
-  )
+import Data.Text qualified as T
 import ExoMonad.Wasm.Effect
-  ( telegramAsk
-  , logInfo
-  , logError
+  ( logError,
+    logInfo,
+    telegramAsk,
   )
-
+import ExoMonad.Wasm.WireTypes
+  ( EffectResult,
+    SerializableEffect,
+    TelegramAskResult (..),
+    WireToolCall (..),
+  )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ASK_USER TOOL
@@ -110,24 +109,25 @@ import ExoMonad.Wasm.Effect
 -- This is what the LLM specifies when calling the tool.
 -- The question is required, options are optional (freeform text if omitted).
 data AskUserInput = AskUserInput
-  { auiQuestion :: !Text
-    -- ^ The question to ask the user
-  , auiOptions :: !(Maybe [Text])
-    -- ^ Optional button choices. If provided, user clicks one.
+  { -- | The question to ask the user
+    auiQuestion :: !Text,
+    -- | Optional button choices. If provided, user clicks one.
     --   If omitted, user types freeform response.
+    auiOptions :: !(Maybe [Text])
   }
   deriving (Eq, Show)
 
 instance FromJSON AskUserInput where
-  parseJSON = withObject "AskUserInput" $ \o -> AskUserInput
-    <$> o .: "question"
-    <*> o .:? "options"
+  parseJSON = withObject "AskUserInput" $ \o ->
+    AskUserInput
+      <$> o .: "question"
+      <*> o .:? "options"
 
 instance ToJSON AskUserInput where
-  toJSON AskUserInput{..} = object $
-    [ "question" .= auiQuestion ]
-    ++ maybe [] (\opts -> ["options" .= opts]) auiOptions
-
+  toJSON AskUserInput {..} =
+    object $
+      ["question" .= auiQuestion]
+        ++ maybe [] (\opts -> ["options" .= opts]) auiOptions
 
 -- | Execute the ask_user tool: ask the user a question via Telegram.
 --
@@ -145,11 +145,11 @@ instance ToJSON AskUserInput where
 -- selectedText <- askUser input
 -- useSelection selectedText
 -- @
-askUser
-  :: Member (Yield SerializableEffect EffectResult) effs
-  => AskUserInput
-  -> Eff effs Text
-askUser AskUserInput{..} = do
+askUser ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  AskUserInput ->
+  Eff effs Text
+askUser AskUserInput {..} = do
   logInfo $ "Asking user: " <> auiQuestion
   case auiOptions of
     Nothing -> do
@@ -159,41 +159,43 @@ askUser AskUserInput{..} = do
       case eitherResult of
         Left err -> error $ "askUser: telegram error: " <> show err
         Right (TelegramButton _) ->
-          error $ "askUser: user clicked button instead of typing for freeform question: "
-               <> T.unpack auiQuestion
+          error $
+            "askUser: user clicked button instead of typing for freeform question: "
+              <> T.unpack auiQuestion
         Right (TelegramText txt) -> pure txt
         Right TelegramStaleButton ->
-          error $ "askUser: stale button clicked for freeform question: "
-               <> T.unpack auiQuestion
+          error $
+            "askUser: stale button clicked for freeform question: "
+              <> T.unpack auiQuestion
     Just opts -> do
       -- With options = inline keyboard buttons
-      let buttons = [(opt, opt) | opt <- opts]  -- label = callback data
+      let buttons = [(opt, opt) | opt <- opts] -- label = callback data
       eitherResult <- telegramAsk auiQuestion buttons
       case eitherResult of
         Left err -> error $ "askUser: telegram error: " <> show err
-        Right (TelegramButton response) -> pure response  -- The callback_data = option text
-        Right (TelegramText txt) -> pure txt  -- User typed instead of clicking
+        Right (TelegramButton response) -> pure response -- The callback_data = option text
+        Right (TelegramText txt) -> pure txt -- User typed instead of clicking
         Right TelegramStaleButton ->
-          error $ "askUser: stale button clicked for question: "
-               <> T.unpack auiQuestion
-
+          error $
+            "askUser: stale button clicked for question: "
+              <> T.unpack auiQuestion
 
 -- | Ask user with a fallback for when no options are provided.
 --
 -- If the LLM provides non-empty options, shows them as buttons.
 -- If no options or empty list, shows the fallback options instead.
-askUserWithFallback
-  :: Member (Yield SerializableEffect EffectResult) effs
-  => [Text]  -- ^ Fallback options if LLM doesn't provide any
-  -> AskUserInput
-  -> Eff effs Text
+askUserWithFallback ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  -- | Fallback options if LLM doesn't provide any
+  [Text] ->
+  AskUserInput ->
+  Eff effs Text
 askUserWithFallback fallbackOpts input =
   let effectiveOpts = case input.auiOptions of
         Nothing -> fallbackOpts
         Just [] -> fallbackOpts
         Just opts -> opts
-  in askUser input { auiOptions = Just effectiveOpts }
-
+   in askUser input {auiOptions = Just effectiveOpts}
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TOOL EXECUTION HELPERS
@@ -205,36 +207,39 @@ askUserWithFallback fallbackOpts input =
 -- (suitable for sending back to the LLM as tool_result content).
 type ToolCallHandler effs = WireToolCall -> Eff effs (Either Text Text)
 
-
 -- | Execute multiple tool calls with a dispatcher.
 --
 -- Returns list of (tool_use_id, result) pairs for building tool_result messages.
-handleToolCalls
-  :: Member (Yield SerializableEffect EffectResult) effs
-  => ToolCallHandler effs
-  -> [WireToolCall]
-  -> Eff effs [(Text, Either Text Text)]
+handleToolCalls ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  ToolCallHandler effs ->
+  [WireToolCall] ->
+  Eff effs [(Text, Either Text Text)]
 handleToolCalls handler calls = forM calls $ \tc -> do
   result <- handler tc
   pure (tc.wtcId, result)
-
 
 -- | Extract a single expected tool call.
 --
 -- Use when you expect exactly one tool call of a specific type.
 -- Returns Left with error message if expectations not met.
-requireSingleTool
-  :: Text  -- ^ Expected tool name
-  -> [WireToolCall]
-  -> Either Text WireToolCall
+requireSingleTool ::
+  -- | Expected tool name
+  Text ->
+  [WireToolCall] ->
+  Either Text WireToolCall
 requireSingleTool expectedName calls = case calls of
   [] -> Left "No tool calls received"
   [tc]
     | tc.wtcName == expectedName -> Right tc
-    | otherwise -> Left $ "Expected tool '" <> expectedName
-                       <> "' but got '" <> tc.wtcName <> "'"
-  _  -> Left $ "Expected single tool call but got " <> T.pack (show (length calls))
-
+    | otherwise ->
+        Left $
+          "Expected tool '"
+            <> expectedName
+            <> "' but got '"
+            <> tc.wtcName
+            <> "'"
+  _ -> Left $ "Expected single tool call but got " <> T.pack (show (length calls))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TOOL INPUT PARSING
@@ -249,15 +254,18 @@ requireSingleTool expectedName calls = case calls of
 --   Right input -> askUser input
 --   Left err -> logError $ "Invalid ask_user input: " <> err
 -- @
-parseToolInput
-  :: FromJSON a
-  => WireToolCall
-  -> Either Text a
+parseToolInput ::
+  (FromJSON a) =>
+  WireToolCall ->
+  Either Text a
 parseToolInput tc = case fromJSON tc.wtcInput of
   Success a -> Right a
-  Error err -> Left $ "Failed to parse tool input for '"
-                   <> tc.wtcName <> "': " <> T.pack err
-
+  Error err ->
+    Left $
+      "Failed to parse tool input for '"
+        <> tc.wtcName
+        <> "': "
+        <> T.pack err
 
 -- | Parse tool input, failing hard if parsing fails.
 --
@@ -270,16 +278,15 @@ parseToolInput tc = case fromJSON tc.wtcInput of
 -- For graceful error handling, use 'parseToolInput' which returns 'Either'.
 --
 -- Logs the error before terminating.
-parseToolInputM
-  :: (FromJSON a, Member (Yield SerializableEffect EffectResult) effs)
-  => WireToolCall
-  -> Eff effs a
+parseToolInputM ::
+  (FromJSON a, Member (Yield SerializableEffect EffectResult) effs) =>
+  WireToolCall ->
+  Eff effs a
 parseToolInputM tc = case parseToolInput tc of
   Right a -> pure a
   Left err -> do
     logError err
     error $ T.unpack err
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- COMBINED TOOL EXECUTION
@@ -298,10 +305,10 @@ parseToolInputM tc = case parseToolInput tc of
 --     -- result is Right Text (user's selection) or Left Text (parse error)
 --   ...
 -- @
-executeAskUser
-  :: Member (Yield SerializableEffect EffectResult) effs
-  => WireToolCall
-  -> Eff effs (Either Text Text)
+executeAskUser ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  WireToolCall ->
+  Eff effs (Either Text Text)
 executeAskUser tc = case parseToolInput tc of
   Left err -> pure $ Left err
   Right input -> Right <$> askUser input

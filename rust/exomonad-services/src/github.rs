@@ -1,7 +1,9 @@
 use crate::{ExternalService, ServiceError};
 use async_trait::async_trait;
+use exomonad_shared::protocol::{
+    GitHubAuthorRef, GitHubDiscussionComment, GitHubLabelRef, GitHubPRRef, GitHubReviewComment,
+};
 use exomonad_shared::{GitHubIssueRef, IssueState, ServiceRequest, ServiceResponse};
-use exomonad_shared::protocol::{GitHubPRRef, GitHubReviewComment, GitHubDiscussionComment, GitHubAuthorRef, GitHubLabelRef};
 use octocrab::{Octocrab, OctocrabBuilder};
 use reqwest::Url;
 
@@ -52,7 +54,12 @@ impl GitHubService {
 
 impl GitHubService {
     /// Fetch review thread comments via GraphQL for a pull request.
-    async fn fetch_review_threads(&self, owner: &str, repo: &str, number: u32) -> Result<Vec<GitHubReviewComment>, ServiceError> {
+    async fn fetch_review_threads(
+        &self,
+        owner: &str,
+        repo: &str,
+        number: u32,
+    ) -> Result<Vec<GitHubReviewComment>, ServiceError> {
         let query = serde_json::json!({
             "query": "query($owner: String!, $repo: String!, $number: Int!) { \
                 repository(owner: $owner, name: $repo) { \
@@ -82,10 +89,14 @@ impl GitHubService {
             }
         });
 
-        let resp: serde_json::Value = self.client.graphql(&query).await.map_err(|e| ServiceError::Api {
-            code: 500,
-            message: e.to_string(),
-        })?;
+        let resp: serde_json::Value =
+            self.client
+                .graphql(&query)
+                .await
+                .map_err(|e| ServiceError::Api {
+                    code: 500,
+                    message: e.to_string(),
+                })?;
 
         let threads = resp
             .get("data")
@@ -101,18 +112,42 @@ impl GitHubService {
 
         let mut reviews = Vec::new();
         for thread in threads {
-            if let Some(comments_nodes) = thread.get("comments").and_then(|c| c.get("nodes")).and_then(|n| n.as_array()) {
+            if let Some(comments_nodes) = thread
+                .get("comments")
+                .and_then(|c| c.get("nodes"))
+                .and_then(|n| n.as_array())
+            {
                 for comment in comments_nodes {
-                    let author = comment.get("author")
+                    let author = comment
+                        .get("author")
                         .and_then(|a| a.get("login"))
                         .and_then(|l| l.as_str())
                         .unwrap_or("unknown")
                         .to_string();
-                    let body = comment.get("body").and_then(|b| b.as_str()).unwrap_or("").to_string();
-                    let path = comment.get("path").and_then(|p| p.as_str()).unwrap_or("").to_string();
-                    let line = comment.get("line").and_then(|l| l.as_u64()).map(|u| u as u32);
-                    let state = comment.get("state").and_then(|s| s.as_str()).unwrap_or("PENDING").to_string();
-                    let created_at = comment.get("createdAt").and_then(|d| d.as_str()).unwrap_or("").to_string();
+                    let body = comment
+                        .get("body")
+                        .and_then(|b| b.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let path = comment
+                        .get("path")
+                        .and_then(|p| p.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let line = comment
+                        .get("line")
+                        .and_then(|l| l.as_u64())
+                        .map(|u| u as u32);
+                    let state = comment
+                        .get("state")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("PENDING")
+                        .to_string();
+                    let created_at = comment
+                        .get("createdAt")
+                        .and_then(|d| d.as_str())
+                        .unwrap_or("")
+                        .to_string();
 
                     reviews.push(GitHubReviewComment {
                         author,
@@ -260,14 +295,14 @@ impl ExternalService for GitHubService {
                         message: e.to_string(),
                     })?;
 
-                let all_issues = self
-                    .client
-                    .all_pages(page)
-                    .await
-                    .map_err(|e| ServiceError::Api {
-                        code: 500,
-                        message: e.to_string(),
-                    })?;
+                let all_issues =
+                    self.client
+                        .all_pages(page)
+                        .await
+                        .map_err(|e| ServiceError::Api {
+                            code: 500,
+                            message: e.to_string(),
+                        })?;
 
                 let issues = all_issues
                     .into_iter()
@@ -281,7 +316,11 @@ impl ExternalService for GitHubService {
                             login: i.user.login,
                             name: None,
                         },
-                        labels: i.labels.into_iter().map(|l| GitHubLabelRef { name: l.name }).collect(),
+                        labels: i
+                            .labels
+                            .into_iter()
+                            .map(|l| GitHubLabelRef { name: l.name })
+                            .collect(),
                         comments: vec![],
                     })
                     .collect();
@@ -311,10 +350,12 @@ impl ExternalService for GitHubService {
                     let s_enum = match s.as_str() {
                         "open" => octocrab::models::IssueState::Open,
                         "closed" => octocrab::models::IssueState::Closed,
-                        _ => return Err(ServiceError::Api {
-                            code: 400,
-                            message: format!("Invalid state: {}", s),
-                        }),
+                        _ => {
+                            return Err(ServiceError::Api {
+                                code: 400,
+                                message: format!("Invalid state: {}", s),
+                            })
+                        }
                     };
                     builder = builder.state(s_enum);
                 }
@@ -395,12 +436,12 @@ impl ExternalService for GitHubService {
                 number: _,
                 assignee: _,
             } => {
-                 // FIXME: octocrab 0.38 seems to lack remove_assignees or I have the wrong name.
-                 // Disabling for now to fix build.
-                 return Err(ServiceError::Api {
-                     code: 501,
-                     message: "GitHubRemoveIssueAssignee not implemented in Rust service yet".into(),
-                 });
+                // FIXME: octocrab 0.38 seems to lack remove_assignees or I have the wrong name.
+                // Disabling for now to fix build.
+                return Err(ServiceError::Api {
+                    code: 501,
+                    message: "GitHubRemoveIssueAssignee not implemented in Rust service yet".into(),
+                });
             }
             ServiceRequest::GitHubListPullRequests {
                 owner,
@@ -413,10 +454,12 @@ impl ExternalService for GitHubService {
                     Some("closed") => octocrab::params::State::Closed,
                     Some("all") => octocrab::params::State::All,
                     None => octocrab::params::State::Open,
-                    Some(s) => return Err(ServiceError::Api {
-                        code: 400,
-                        message: format!("Invalid state: {}", s),
-                    }),
+                    Some(s) => {
+                        return Err(ServiceError::Api {
+                            code: 400,
+                            message: format!("Invalid state: {}", s),
+                        })
+                    }
                 };
 
                 let page = self
@@ -437,7 +480,9 @@ impl ExternalService for GitHubService {
                     .map(|pr| GitHubPRRef {
                         number: pr.number as u32,
                         title: pr.title.unwrap_or_default(),
-                        state: state_to_string(pr.state.unwrap_or(octocrab::models::IssueState::Open)),
+                        state: state_to_string(
+                            pr.state.unwrap_or(octocrab::models::IssueState::Open),
+                        ),
                         url: pr.html_url.map(|u| u.to_string()).unwrap_or_default(),
                     })
                     .collect();
@@ -490,10 +535,14 @@ impl ExternalService for GitHubService {
                     }
                 });
 
-                let resp: serde_json::Value = self.client.graphql(&query).await.map_err(|e| ServiceError::Api {
-                    code: 500,
-                    message: e.to_string(),
-                })?;
+                let resp: serde_json::Value =
+                    self.client
+                        .graphql(&query)
+                        .await
+                        .map_err(|e| ServiceError::Api {
+                            code: 500,
+                            message: e.to_string(),
+                        })?;
 
                 let discussion = resp
                     .get("data")
@@ -504,25 +553,79 @@ impl ExternalService for GitHubService {
                         message: "Discussion not found".into(),
                     })?;
 
-                let number = discussion.get("number").and_then(|n| n.as_u64()).unwrap_or(0) as u32;
-                let title = discussion.get("title").and_then(|t| t.as_str()).unwrap_or("").to_string();
-                let body = discussion.get("body").and_then(|b| b.as_str()).unwrap_or("").to_string();
-                let url = discussion.get("url").and_then(|u| u.as_str()).unwrap_or("").to_string();
-                let author = discussion.get("author").and_then(|a| a.get("login")).and_then(|l| l.as_str()).unwrap_or("unknown").to_string();
+                let number = discussion
+                    .get("number")
+                    .and_then(|n| n.as_u64())
+                    .unwrap_or(0) as u32;
+                let title = discussion
+                    .get("title")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let body = discussion
+                    .get("body")
+                    .and_then(|b| b.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let url = discussion
+                    .get("url")
+                    .and_then(|u| u.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let author = discussion
+                    .get("author")
+                    .and_then(|a| a.get("login"))
+                    .and_then(|l| l.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
 
                 let mut comments = Vec::new();
-                if let Some(nodes) = discussion.get("comments").and_then(|c| c.get("nodes")).and_then(|n| n.as_array()) {
+                if let Some(nodes) = discussion
+                    .get("comments")
+                    .and_then(|c| c.get("nodes"))
+                    .and_then(|n| n.as_array())
+                {
                     for node in nodes {
-                        let c_author = node.get("author").and_then(|a| a.get("login")).and_then(|l| l.as_str()).unwrap_or("unknown").to_string();
-                        let c_body = node.get("body").and_then(|b| b.as_str()).unwrap_or("").to_string();
-                        let c_created_at = node.get("createdAt").and_then(|d| d.as_str()).unwrap_or("").to_string();
-                        
+                        let c_author = node
+                            .get("author")
+                            .and_then(|a| a.get("login"))
+                            .and_then(|l| l.as_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let c_body = node
+                            .get("body")
+                            .and_then(|b| b.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let c_created_at = node
+                            .get("createdAt")
+                            .and_then(|d| d.as_str())
+                            .unwrap_or("")
+                            .to_string();
+
                         let mut replies = Vec::new();
-                        if let Some(reply_nodes) = node.get("replies").and_then(|r| r.get("nodes")).and_then(|n| n.as_array()) {
+                        if let Some(reply_nodes) = node
+                            .get("replies")
+                            .and_then(|r| r.get("nodes"))
+                            .and_then(|n| n.as_array())
+                        {
                             for reply in reply_nodes {
-                                let r_author = reply.get("author").and_then(|a| a.get("login")).and_then(|l| l.as_str()).unwrap_or("unknown").to_string();
-                                let r_body = reply.get("body").and_then(|b| b.as_str()).unwrap_or("").to_string();
-                                let r_created_at = reply.get("createdAt").and_then(|d| d.as_str()).unwrap_or("").to_string();
+                                let r_author = reply
+                                    .get("author")
+                                    .and_then(|a| a.get("login"))
+                                    .and_then(|l| l.as_str())
+                                    .unwrap_or("unknown")
+                                    .to_string();
+                                let r_body = reply
+                                    .get("body")
+                                    .and_then(|b| b.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let r_created_at = reply
+                                    .get("createdAt")
+                                    .and_then(|d| d.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
                                 replies.push(GitHubDiscussionComment {
                                     author: r_author,
                                     body: r_body,
@@ -603,12 +706,18 @@ impl ExternalService for GitHubService {
                     })?;
 
                 let merged_at = pr.merged_at.map(|t| t.to_rfc3339());
-                let labels = pr.labels.as_deref().unwrap_or(&[])
-                    .iter().map(|l| l.name.clone()).collect();
+                let labels = pr
+                    .labels
+                    .as_deref()
+                    .unwrap_or(&[])
+                    .iter()
+                    .map(|l| l.name.clone())
+                    .collect();
 
                 let (comments, reviews) = if include_details {
                     // Fetch issue comments (PR discussions use the issues API)
-                    let issue_comments = self.client
+                    let issue_comments = self
+                        .client
                         .issues(&owner, &repo)
                         .list_comments(number.into())
                         .send()
@@ -628,7 +737,9 @@ impl ExternalService for GitHubService {
                         .collect();
 
                     // Fetch review threads via GraphQL
-                    let review_comments = self.fetch_review_threads(&owner, &repo, number).await
+                    let review_comments = self
+                        .fetch_review_threads(&owner, &repo, number)
+                        .await
                         .unwrap_or_default();
 
                     (issue_comments, review_comments)
@@ -692,25 +803,25 @@ mod tests {
                 "color": "f29513",
                 "default": true
             }],
-            "user": { 
-                "login": "user", 
-                "id": 1, 
+            "user": {
+                "login": "user",
+                "id": 1,
                 "node_id": "MDQ6VXNlcjE=",
-                "avatar_url": "https://example.com/avatar", 
+                "avatar_url": "https://example.com/avatar",
                 "gravatar_id": "",
-                "url": "https://api.github.com/users/user", 
-                "html_url": "https://github.com/user", 
-                "followers_url": "https://api.github.com/users/user/followers", 
-                "following_url": "https://api.github.com/users/user/following{/other_user}", 
-                "gists_url": "https://api.github.com/users/user/gists{/gist_id}", 
-                "starred_url": "https://api.github.com/users/user/starred{/owner}{/repo}", 
-                "subscriptions_url": "https://api.github.com/users/user/subscriptions", 
-                "organizations_url": "https://api.github.com/users/user/orgs", 
-                "repos_url": "https://api.github.com/users/user/repos", 
-                "events_url": "https://api.github.com/users/user/events{/privacy}", 
-                "received_events_url": "https://api.github.com/users/user/received_events", 
-                "type": "User", 
-                "site_admin": false 
+                "url": "https://api.github.com/users/user",
+                "html_url": "https://github.com/user",
+                "followers_url": "https://api.github.com/users/user/followers",
+                "following_url": "https://api.github.com/users/user/following{/other_user}",
+                "gists_url": "https://api.github.com/users/user/gists{/gist_id}",
+                "starred_url": "https://api.github.com/users/user/starred{/owner}{/repo}",
+                "subscriptions_url": "https://api.github.com/users/user/subscriptions",
+                "organizations_url": "https://api.github.com/users/user/orgs",
+                "repos_url": "https://api.github.com/users/user/repos",
+                "events_url": "https://api.github.com/users/user/events{/privacy}",
+                "received_events_url": "https://api.github.com/users/user/received_events",
+                "type": "User",
+                "site_admin": false
             },
             "locked": false,
             "assignees": [],
@@ -728,8 +839,9 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let service = GitHubService::with_base_url("token".into(), mock_server.uri().parse().unwrap());
-        
+        let service =
+            GitHubService::with_base_url("token".into(), mock_server.uri().parse().unwrap());
+
         let req = ServiceRequest::GitHubGetIssue {
             owner: "owner".into(),
             repo: "repo".into(),

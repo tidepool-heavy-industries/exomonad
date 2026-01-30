@@ -57,7 +57,10 @@ fn normalize_gemini_payload(payload: &str) -> Result<String> {
 
     if let Some(obj) = value.as_object_mut() {
         // Normalize hook_event_name
-        let event_name = obj.get("hook_event_name").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let event_name = obj
+            .get("hook_event_name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         if let Some(event_name) = event_name {
             let normalized_name = match event_name.as_str() {
                 "BeforeTool" | "BeforeToolSelection" => "PreToolUse",
@@ -185,7 +188,7 @@ pub async fn handle_hook(event_type: HookEventType, runtime: Runtime, role: Role
         role,
         container_id,
     };
-    
+
     // Await the response (async)
     let response = socket.send(&message).await?;
 

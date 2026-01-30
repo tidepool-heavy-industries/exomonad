@@ -13,23 +13,23 @@
 --   Add a field like: entry :: mode :- Entry YourInputType
 module MissingEntryRecord where
 
+import ExoMonad.Graph.Generic (Exit, GraphMode (..), LLMNode, ValidGraphRecord)
+import ExoMonad.Graph.Types (Input, LLMKind (..), Schema, type (:@))
 import GHC.Generics (Generic)
 
-import ExoMonad.Graph.Types (type (:@), Input, Schema, LLMKind(..))
-import ExoMonad.Graph.Generic (GraphMode(..), Exit, LLMNode, ValidGraphRecord)
-
 data A
+
 data B
 
 -- | Graph missing Entry field - invalid!
 data BadGraph mode = BadGraph
-  { node :: mode :- LLMNode 'API :@ Input A :@ Schema B
-  , exit :: mode :- Exit B
+  { node :: mode :- LLMNode 'API :@ Input A :@ Schema B,
+    exit :: mode :- Exit B
   }
-  deriving Generic
+  deriving (Generic)
 
 check :: ()
 check = validGraph @BadGraph
 
-validGraph :: forall g. ValidGraphRecord g => ()
+validGraph :: forall g. (ValidGraphRecord g) => ()
 validGraph = ()

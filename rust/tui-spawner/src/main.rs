@@ -96,14 +96,8 @@ fn main() -> Result<()> {
     let fifo_path_cleanup = fifo_path.clone();
 
     // Catch panics and cleanup
-    let result = std::panic::catch_unwind(|| {
-        run_popup(
-            &args,
-            &definition_json,
-            &input_path,
-            &fifo_path,
-        )
-    });
+    let result =
+        std::panic::catch_unwind(|| run_popup(&args, &definition_json, &input_path, &fifo_path));
 
     // Cleanup regardless of success/failure
     cleanup(&input_path_cleanup, &fifo_path_cleanup);
@@ -132,8 +126,11 @@ fn run_popup(
     tracing::info!("Wrote input file");
 
     // 2. Create FIFO
-    mkfifo(fifo_path, Mode::S_IRUSR | Mode::S_IWUSR | Mode::S_IRGRP | Mode::S_IWGRP)
-        .with_context(|| format!("Failed to create FIFO: {}", fifo_path.display()))?;
+    mkfifo(
+        fifo_path,
+        Mode::S_IRUSR | Mode::S_IWUSR | Mode::S_IRGRP | Mode::S_IWGRP,
+    )
+    .with_context(|| format!("Failed to create FIFO: {}", fifo_path.display()))?;
     tracing::info!("Created FIFO");
 
     // 3. Spawn Zellij floating pane
@@ -142,12 +139,21 @@ fn run_popup(
     // The spawned command runs as the Zellij server's owner (typically UID 1000).
     // Use absolute path since Zellij server's PATH may differ from shell.
     let zellij_args = [
-        "exec", &args.zellij_container,
-        "zellij", "--session", &args.zellij_session,
-        "action", "new-pane", "--floating", "--close-on-exit",
-        "--", "/usr/local/bin/tui-popup",
-        "--input", input_path.to_str().unwrap(),
-        "--output", fifo_path.to_str().unwrap(),
+        "exec",
+        &args.zellij_container,
+        "zellij",
+        "--session",
+        &args.zellij_session,
+        "action",
+        "new-pane",
+        "--floating",
+        "--close-on-exit",
+        "--",
+        "/usr/local/bin/tui-popup",
+        "--input",
+        input_path.to_str().unwrap(),
+        "--output",
+        fifo_path.to_str().unwrap(),
     ];
 
     if args.dry_run {
@@ -180,7 +186,8 @@ fn run_popup(
     // 5. Read result (blocks until tui-popup writes + exits)
     let mut reader = BufReader::new(file);
     let mut content = String::new();
-    reader.read_line(&mut content)
+    reader
+        .read_line(&mut content)
         .context("Failed to read from FIFO")?;
 
     // 6. Handle crash-after-open (empty read)
@@ -219,9 +226,8 @@ fn open_fifo_with_timeout(fifo_path: &PathBuf, timeout: Duration) -> Result<File
                 // No writer yet on FIFO (Linux-specific)
             }
             Err(e) => {
-                return Err(e).with_context(|| {
-                    format!("Failed to open FIFO: {}", fifo_path.display())
-                });
+                return Err(e)
+                    .with_context(|| format!("Failed to open FIFO: {}", fifo_path.display()));
             }
         }
 

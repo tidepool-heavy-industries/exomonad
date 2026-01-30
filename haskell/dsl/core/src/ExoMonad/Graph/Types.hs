@@ -9,102 +9,102 @@
 -- the NodeKind types (LLM, Logic) below are for internal use only.
 module ExoMonad.Graph.Types
   ( -- * Node Kind
-    NodeKind(..)
-  , LLMKind(..)
+    NodeKind (..),
+    LLMKind (..),
 
     -- * Annotations
-  , type (:@)
-  , Input
-  , Schema
-  , System
-  , Template
-  , Vision
-  , Description
-  , Tools
-  , UsesEffects
-  , Memory
-  , EntryPoint
-  , Tool
-  , ExitTool
-  , ExitEffect
-  , ExitPoint
-  , Routes
-  , Route(..)
-  , ToolMetadata(..)
-  , Entries
-  , Exits
+    type (:@),
+    Input,
+    Schema,
+    System,
+    Template,
+    Vision,
+    Description,
+    Tools,
+    UsesEffects,
+    Memory,
+    EntryPoint,
+    Tool,
+    ExitTool,
+    ExitEffect,
+    ExitPoint,
+    Routes,
+    Route (..),
+    ToolMetadata (..),
+    Entries,
+    Exits,
 
     -- * Fork/Barrier Annotations
-  , Spawn
-  , Barrier
-  , Awaits
-  , Arrive(..)
+    Spawn,
+    Barrier,
+    Awaits,
+    Arrive (..),
 
     -- * Parallel Fan-In (Merge)
-  , Merge
-  , From
-  , GroupBy
-  , CorrelateBy(..)
+    Merge,
+    From,
+    GroupBy,
+    CorrelateBy (..),
 
     -- * Graph-Level Annotations
-  , type (:&)
-  , Groups
-  , Requires
-  , Global
-  , Backend
+    type (:&),
+    Groups,
+    Requires,
+    Global,
+    Backend,
 
     -- * API Backend Types
-  , CloudflareAI
-  , NativeAnthropic
+    CloudflareAI,
+    NativeAnthropic,
 
     -- * Gemini Annotation
-  , Gemini
-  , GeminiModel(..)
-  , Flash
-  , Pro
-  , Ultra
+    Gemini,
+    GeminiModel (..),
+    Flash,
+    Pro,
+    Ultra,
 
     -- * ClaudeCode Annotation
-  , ClaudeCode
-  , ModelChoice(..)
-  , Haiku
-  , Sonnet
-  , Opus
+    ClaudeCode,
+    ModelChoice (..),
+    Haiku,
+    Sonnet,
+    Opus,
 
     -- * ClaudeCode Singletons (demote type-level to runtime)
-  , SingModelChoice(..)
+    SingModelChoice (..),
 
     -- * FunctionGemma Annotation
-  , FunctionGemma
+    FunctionGemma,
 
     -- * MCP Export Annotations
-  , MCPExport
-  , MCPToolDef
-  , MCPRoleHint
+    MCPExport,
+    MCPToolDef,
+    MCPRoleHint,
 
     -- * Graph Entry Point Declaration (new DSL)
-  , GraphEntry(..)
-  , type (:~>)
-  , GraphEntries
+    GraphEntry (..),
+    type (:~>),
+    GraphEntries,
 
     -- * Special Goto Targets
-  , Exit
-  , Self
+    Exit,
+    Self,
 
     -- * Hook Types
-  , Hook
+    Hook,
 
     -- * Heterogeneous Lists
-  , HList(..)
-  ) where
+    HList (..),
+  )
+where
 
 import Data.Aeson (Value)
 import Data.Kind (Type)
 import Data.Text (Text)
+import ExoMonad.Effect.Gemini (GeminiModel (..))
+import ExoMonad.Role (Role (..))
 import GHC.TypeLits (Symbol)
-
-import ExoMonad.Role (Role(..))
-import ExoMonad.Effect.Gemini (GeminiModel(..))
 
 -- | Marks an LLM node as executed via Gemini CLI subprocess.
 type Gemini :: GeminiModel -> Type
@@ -112,7 +112,9 @@ data Gemini model
 
 -- | Type-level aliases for Gemini models.
 type Flash = 'Flash
+
 type Pro = 'Pro
+
 type Ultra = 'Ultra
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -129,9 +131,12 @@ type Ultra = 'Ultra
 -- For the record-based DSL (the only supported syntax), use LLMNode and LogicNode
 -- from ExoMonad.Graph.Generic.
 data NodeKind
-  = LLM    -- ^ Node that invokes the LLM. Output flows implicitly via Schema.
-  | Logic  -- ^ Node with effect stack. Transitions explicitly via Goto.
-  | Graph  -- ^ Nested graph execution.
+  = -- | Node that invokes the LLM. Output flows implicitly via Schema.
+    LLM
+  | -- | Node with effect stack. Transitions explicitly via Goto.
+    Logic
+  | -- | Nested graph execution.
+    Graph
 
 -- | LLM subtypes determine execution model and tool format.
 --
@@ -143,9 +148,12 @@ data NodeKind
 --
 -- Type families dispatch on this to determine tool format, exit semantics, etc.
 data LLMKind
-  = API         -- ^ Direct API invocation (Anthropic, Cloudflare)
-  | CodingAgent -- ^ Claude Code subprocess execution
-  | Local       -- ^ FunctionGemma local streaming model
+  = -- | Direct API invocation (Anthropic, Cloudflare)
+    API
+  | -- | Claude Code subprocess execution
+    CodingAgent
+  | -- | FunctionGemma local streaming model
+    Local
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ANNOTATIONS
@@ -155,6 +163,7 @@ data LLMKind
 -- @mode :- G.LLMNode :@ Input A :@ Schema B@ has Input and Schema annotations.
 type (:@) :: Type -> Type -> Type
 data node :@ annotation
+
 infixl 7 :@
 
 -- | Declares the input type for a node. The handler receives exactly this type.
@@ -524,6 +533,7 @@ data ExitEffect payload
 --
 -- See 'Exits' for usage in node annotations.
 {-# DEPRECATED ExitPoint "Use 'ExitTool' with Routes annotation for explicit routing" #-}
+
 type ExitPoint :: Type -> Type
 data ExitPoint payload
 
@@ -558,9 +568,12 @@ data ExitPoint payload
 --
 -- See 'ExitTool' for usage with exit tools.
 data Route
-  = ExitGraph              -- ^ Route to graph exit
-  | ToEntry Symbol Symbol  -- ^ Route to node entry (node name, entry field name)
-  | ToNode Symbol          -- ^ Route to node (deprecated Input support)
+  = -- | Route to graph exit
+    ExitGraph
+  | -- | Route to node entry (node name, entry field name)
+    ToEntry Symbol Symbol
+  | -- | Route to node (deprecated Input support)
+    ToNode Symbol
 
 -- | Routes annotation for exit fields.
 --
@@ -979,6 +992,7 @@ class CorrelateBy key a where
 -- | Attach a graph-level annotation (not commonly used with record-based graphs).
 type (:&) :: Type -> Type -> Type
 data graph :& annotation
+
 infixl 4 :&
 
 -- | Organize nodes into named groups for Mermaid subgraph rendering.
@@ -1034,13 +1048,18 @@ data NativeAnthropic
 
 -- | Model selection for Claude Code sessions.
 data ModelChoice
-  = Haiku   -- ^ Fast, cost-effective model
-  | Sonnet  -- ^ Balanced performance/cost
-  | Opus    -- ^ Most capable model
+  = -- | Fast, cost-effective model
+    Haiku
+  | -- | Balanced performance/cost
+    Sonnet
+  | -- | Most capable model
+    Opus
 
 -- | Type-level aliases for promoted ModelChoice constructors.
 type Haiku = 'Haiku
+
 type Sonnet = 'Sonnet
+
 type Opus = 'Opus
 
 -- | Marks an LLM node as executed via Claude Code subprocess instead of API.
@@ -1066,7 +1085,6 @@ type Opus = 'Opus
 type ClaudeCode :: ModelChoice -> Type
 data ClaudeCode model
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- CLAUDECODE SINGLETONS
 -- ════════════════════════════════════════════════════════════════════════════
@@ -1079,9 +1097,10 @@ class SingModelChoice (m :: ModelChoice) where
   singModelChoice :: ModelChoice
 
 instance SingModelChoice 'Haiku where singModelChoice = Haiku
-instance SingModelChoice 'Sonnet where singModelChoice = Sonnet
-instance SingModelChoice 'Opus where singModelChoice = Opus
 
+instance SingModelChoice 'Sonnet where singModelChoice = Sonnet
+
+instance SingModelChoice 'Opus where singModelChoice = Opus
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- FUNCTIONGEMMA ANNOTATION
@@ -1175,8 +1194,8 @@ data MCPRoleHint r
 -- graphs. The graph becomes just the computation nodes, and external
 -- entry points are declared separately.
 data GraphEntry
-  = Symbol :~> (Symbol, Type, Symbol, [Role])
-  -- ^ @externalName ':~>' '(nodeField, inputType, description, roles)@
+  = -- | @externalName ':~>' '(nodeField, inputType, description, roles)@
+    Symbol :~> (Symbol, Type, Symbol, [Role])
 
 -- | Operator for constructing 'GraphEntry' values at the type level.
 --
@@ -1187,6 +1206,7 @@ data GraphEntry
 -- Note: The single-quote prefix (e.g., @':~>@) is required when using
 -- promoted data constructors at the type level.
 type (:~>) = '(:~>)
+
 infixr 5 :~>
 
 -- | Open type family for declaring external entry points into a graph.
@@ -1317,7 +1337,7 @@ data Hook input output
 --   = HList '[ResultA, ResultB]
 -- @
 data HList (ts :: [Type]) where
-  HNil  :: HList '[]
+  HNil :: HList '[]
   (:::) :: t -> HList ts -> HList (t ': ts)
 
 infixr 5 :::
@@ -1337,4 +1357,3 @@ infixr 5 :::
 -- -- Simple tool (just logic, no Entry/Exit ceremony)
 -- findCallersTool :: Node Identity (AsHandler '[LSP, Log])
 -- findCallersTool = logic findCallersLogic
---

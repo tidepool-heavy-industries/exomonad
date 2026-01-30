@@ -7,9 +7,10 @@
 -- This module is separate from CLIGraphSpec.hs due to TH staging requirements.
 -- The FieldSelectors pragma is required for getDoc to work with deriveCLIParser.
 module CLIGraphTypes
-  ( CounterInput(..)
-  , CounterOutput(..)
-  ) where
+  ( CounterInput (..),
+    CounterOutput (..),
+  )
+where
 
 import Data.Aeson (FromJSON, ToJSON)
 import GHC.Generics (Generic)
@@ -18,12 +19,12 @@ import GHC.Generics (Generic)
 --
 -- This type demonstrates CLI derivation with multiple numeric fields.
 data CounterInput = CounterInput
-  { startValue :: Int
-    -- ^ Starting value for the counter
-  , increment :: Int
-    -- ^ Amount to add each iteration
-  , times :: Int
-    -- ^ How many times to increment
+  { -- | Starting value for the counter
+    startValue :: Int,
+    -- | Amount to add each iteration
+    increment :: Int,
+    -- | How many times to increment
+    times :: Int
   }
   deriving (Show, Eq, Generic)
 
@@ -31,7 +32,7 @@ data CounterInput = CounterInput
 --
 -- Contains the final computed value and operation count for verification.
 data CounterOutput = CounterOutput
-  { finalValue :: Int
-  , operationsPerformed :: Int
+  { finalValue :: Int,
+    operationsPerformed :: Int
   }
   deriving (Show, Eq, Generic, FromJSON, ToJSON)

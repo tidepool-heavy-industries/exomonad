@@ -36,31 +36,30 @@
 -- @
 module ExoMonad.LLM.Effect
   ( -- * Effect Type
-    LLMCall(..)
+    LLMCall (..),
 
     -- * Main Function
-  , call
-  , callNoTools
+    call,
+    callNoTools,
 
     -- * Re-exports
-  , System(..)
-  , User(..)
-  , CallConfig
-  , CallError(..)
-  , NoTools
-  , Model(..)
-  ) where
+    System (..),
+    User (..),
+    CallConfig,
+    CallError (..),
+    NoTools,
+    Model (..),
+  )
+where
 
 import Control.Monad.Freer (Eff, Member, send)
 import Data.Aeson (Value)
-import Data.Proxy (Proxy(..))
-
+import Data.Proxy (Proxy (..))
+import ExoMonad.LLM.Tools (ToolRecord (..), toolSchemaToAnthropicTool)
 import ExoMonad.LLM.Types
-import ExoMonad.LLM.Tools (ToolRecord(..), toolSchemaToAnthropicTool)
 import ExoMonad.Schema (schemaToValue)
-import ExoMonad.StructuredOutput (StructuredOutput(..))
+import ExoMonad.StructuredOutput (StructuredOutput (..))
 import ExoMonad.Tool.Wire (anthropicToolToJSON)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT TYPE
@@ -83,15 +82,19 @@ data LLMCall a where
   -- * Building the API request
   -- * Parsing structured output
   -- * Nudge retries (if output doesn't match schema)
-  CallLLMNoTools
-    :: StructuredOutput out
-    => Model                           -- ^ Model to use
-    -> Maybe Int                       -- ^ Max tokens (Nothing = default)
-    -> System                          -- ^ System prompt
-    -> User                            -- ^ User prompt
-    -> Value                           -- ^ Output schema (JSON)
-    -> LLMCall (Either CallError out)
-
+  CallLLMNoTools ::
+    (StructuredOutput out) =>
+    -- | Model to use
+    Model ->
+    -- | Max tokens (Nothing = default)
+    Maybe Int ->
+    -- | System prompt
+    System ->
+    -- | User prompt
+    User ->
+    -- | Output schema (JSON)
+    Value ->
+    LLMCall (Either CallError out)
   -- | Make an LLM call with tools.
   --
   -- The interpreter handles:
@@ -100,16 +103,21 @@ data LLMCall a where
   -- * Running tool loops (if LLM invokes tools)
   -- * Parsing structured output
   -- * Nudge retries (if output doesn't match schema)
-  CallLLMWithTools
-    :: StructuredOutput out
-    => Model                           -- ^ Model to use
-    -> Maybe Int                       -- ^ Max tokens (Nothing = default)
-    -> System                          -- ^ System prompt
-    -> User                            -- ^ User prompt
-    -> Value                           -- ^ Output schema (JSON)
-    -> [Value]                         -- ^ Tool schemas (Anthropic format)
-    -> LLMCall (Either CallError out)
-
+  CallLLMWithTools ::
+    (StructuredOutput out) =>
+    -- | Model to use
+    Model ->
+    -- | Max tokens (Nothing = default)
+    Maybe Int ->
+    -- | System prompt
+    System ->
+    -- | User prompt
+    User ->
+    -- | Output schema (JSON)
+    Value ->
+    -- | Tool schemas (Anthropic format)
+    [Value] ->
+    LLMCall (Either CallError out)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- MAIN FUNCTIONS
@@ -134,27 +142,29 @@ data LLMCall a where
 -- -- runLLMCallWithTools cfg.ccTools $ call cfg sys usr
 -- result <- call cfg (System sysPrompt) (User userPrompt)
 -- @
-call
-  :: forall out tools es.
-     ( Member LLMCall es
-     , StructuredOutput out
-     , ToolRecord tools
-     )
-  => CallConfig out (tools es)
-  -> System
-  -> User
-  -> Eff es (Either CallError out)
+call ::
+  forall out tools es.
+  ( Member LLMCall es,
+    StructuredOutput out,
+    ToolRecord tools
+  ) =>
+  CallConfig out (tools es) ->
+  System ->
+  User ->
+  Eff es (Either CallError out)
 call cfg sys usr =
-  let toolSchemaValues = map (anthropicToolToJSON . toolSchemaToAnthropicTool)
-                            $ toolSchemas (Proxy @tools)
+  let toolSchemaValues =
+        map (anthropicToolToJSON . toolSchemaToAnthropicTool) $
+          toolSchemas (Proxy @tools)
       schema = schemaToValue (structuredSchema @out)
-  in send $ CallLLMWithTools
-       cfg.ccModel
-       cfg.ccMaxTokens
-       sys
-       usr
-       schema
-       toolSchemaValues
+   in send $
+        CallLLMWithTools
+          cfg.ccModel
+          cfg.ccMaxTokens
+          sys
+          usr
+          schema
+          toolSchemaValues
 
 -- | Make an LLM call without tools.
 --
@@ -164,20 +174,21 @@ call cfg sys usr =
 -- let cfg = defaultLLM \@Classification & model Haiku
 -- result <- callNoTools cfg (System sysPrompt) (User userPrompt)
 -- @
-callNoTools
-  :: forall out es.
-     ( Member LLMCall es
-     , StructuredOutput out
-     )
-  => CallConfig out NoTools
-  -> System
-  -> User
-  -> Eff es (Either CallError out)
+callNoTools ::
+  forall out es.
+  ( Member LLMCall es,
+    StructuredOutput out
+  ) =>
+  CallConfig out NoTools ->
+  System ->
+  User ->
+  Eff es (Either CallError out)
 callNoTools cfg sys usr =
   let schema = schemaToValue (structuredSchema @out)
-  in send $ CallLLMNoTools
-       cfg.ccModel
-       cfg.ccMaxTokens
-       sys
-       usr
-       schema
+   in send $
+        CallLLMNoTools
+          cfg.ccModel
+          cfg.ccMaxTokens
+          sys
+          usr
+          schema

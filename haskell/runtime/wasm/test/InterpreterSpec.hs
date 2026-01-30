@@ -27,20 +27,17 @@
 module InterpreterSpec (spec) where
 
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
+import ExoMonad.Graph.Generic (GraphMode (..), type (:-))
+import ExoMonad.Graph.Generic qualified as G (EntryNode, ExitNode, LogicNode)
+import ExoMonad.Graph.Goto (Goto, GotoChoice, OneOf, To, gotoChoice, gotoExit, gotoSelf)
+import ExoMonad.Graph.Goto.Internal (GotoChoice (..), OneOf (..)) -- For test assertions
+import ExoMonad.Graph.Types (Exit, Input, Self, UsesEffects, type (:@))
+import ExoMonad.Wasm.Effect (WasmM, logInfo)
+import ExoMonad.Wasm.Runner (WasmResult (..), initializeWasm)
+import ExoMonad.Wasm.WireTypes (EffectResult (..))
 import GHC.Generics (Generic)
 import Test.Hspec
-
-import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit, Self)
-import ExoMonad.Graph.Generic (GraphMode(..), type (:-))
-import qualified ExoMonad.Graph.Generic as G (EntryNode, ExitNode, LogicNode)
-import ExoMonad.Graph.Goto (Goto, GotoChoice, To, OneOf, gotoChoice, gotoExit, gotoSelf)
-import ExoMonad.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
-
-import ExoMonad.Wasm.Effect (WasmM, logInfo)
-import ExoMonad.Wasm.Runner (initializeWasm, WasmResult(..))
-import ExoMonad.Wasm.WireTypes (EffectResult(..))
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TEST FIXTURE GRAPHS
@@ -50,54 +47,59 @@ import ExoMonad.Wasm.WireTypes (EffectResult(..))
 --
 -- Tests chaining of handlers through multiple nodes.
 data LinearGraph mode = LinearGraph
-  { lgEntry :: mode :- G.EntryNode Int
-  , lgAdd1  :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto "lgAdd2" Int]
-  , lgAdd2  :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto Exit Int]
-  , lgExit  :: mode :- G.ExitNode Int
+  { lgEntry :: mode :- G.EntryNode Int,
+    lgAdd1 :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto "lgAdd2" Int],
+    lgAdd2 :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto Exit Int],
+    lgExit :: mode :- G.ExitNode Int
   }
-  deriving Generic
-
+  deriving (Generic)
 
 -- | Branching graph: Entry(Int) -> IsEven -> EvenPath|OddPath -> Exit(String)
 --
 -- Tests branching based on handler logic.
 data BranchGraph mode = BranchGraph
-  { bgEntry    :: mode :- G.EntryNode Int
-  , bgIsEven   :: mode :- G.LogicNode :@ Input Int
-               :@ UsesEffects '[Goto "bgEvenPath" Int, Goto "bgOddPath" Int]
-  , bgEvenPath :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto Exit Text]
-  , bgOddPath  :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto Exit Text]
-  , bgExit     :: mode :- G.ExitNode Text
+  { bgEntry :: mode :- G.EntryNode Int,
+    bgIsEven ::
+      mode
+        :- G.LogicNode
+        :@ Input Int
+        :@ UsesEffects '[Goto "bgEvenPath" Int, Goto "bgOddPath" Int],
+    bgEvenPath :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto Exit Text],
+    bgOddPath :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto Exit Text],
+    bgExit :: mode :- G.ExitNode Text
   }
-  deriving Generic
-
+  deriving (Generic)
 
 -- | Diamond graph: Entry(Int) -> Split -> PathA|PathB -> Merge -> Exit(Int)
 --
 -- Tests convergent paths meeting at a merge node.
 data DiamondGraph mode = DiamondGraph
-  { dgEntry :: mode :- G.EntryNode Int
-  , dgSplit :: mode :- G.LogicNode :@ Input Int
-            :@ UsesEffects '[Goto "dgPathA" Int, Goto "dgPathB" Int]
-  , dgPathA :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto "dgMerge" Int]
-  , dgPathB :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto "dgMerge" Int]
-  , dgMerge :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto Exit Int]
-  , dgExit  :: mode :- G.ExitNode Int
+  { dgEntry :: mode :- G.EntryNode Int,
+    dgSplit ::
+      mode
+        :- G.LogicNode
+        :@ Input Int
+        :@ UsesEffects '[Goto "dgPathA" Int, Goto "dgPathB" Int],
+    dgPathA :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto "dgMerge" Int],
+    dgPathB :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto "dgMerge" Int],
+    dgMerge :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto Exit Int],
+    dgExit :: mode :- G.ExitNode Int
   }
-  deriving Generic
-
+  deriving (Generic)
 
 -- | Loop graph: Entry(Int) -> Decrement (self-loop until 0) -> Exit(Int)
 --
 -- Tests self-loops with bounded iteration.
 data LoopGraph mode = LoopGraph
-  { loopEntry     :: mode :- G.EntryNode Int
-  , loopDecrement :: mode :- G.LogicNode :@ Input Int
-                  :@ UsesEffects '[Goto Self Int, Goto Exit Int]
-  , loopExit      :: mode :- G.ExitNode Int
+  { loopEntry :: mode :- G.EntryNode Int,
+    loopDecrement ::
+      mode
+        :- G.LogicNode
+        :@ Input Int
+        :@ UsesEffects '[Goto Self Int, Goto Exit Int],
+    loopExit :: mode :- G.ExitNode Int
   }
-  deriving Generic
-
+  deriving (Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HANDLERS
@@ -115,12 +117,11 @@ lgAdd2Handler n = do
   logInfo $ "Add2: " <> T.pack (show n)
   pure $ gotoExit (n + 1)
 
-
 -- Branching Graph Handlers
 
 bgIsEvenHandler :: Int -> WasmM (GotoChoice '[To "bgEvenPath" Int, To "bgOddPath" Int])
 bgIsEvenHandler n
-  | even n    = pure $ gotoChoice @"bgEvenPath" n
+  | even n = pure $ gotoChoice @"bgEvenPath" n
   | otherwise = pure $ gotoChoice @"bgOddPath" n
 
 bgEvenPathHandler :: Int -> WasmM (GotoChoice '[To Exit Text])
@@ -133,12 +134,11 @@ bgOddPathHandler n = do
   logInfo $ "OddPath: " <> T.pack (show n)
   pure $ gotoExit $ "odd: " <> T.pack (show n)
 
-
 -- Diamond Graph Handlers
 
 dgSplitHandler :: Int -> WasmM (GotoChoice '[To "dgPathA" Int, To "dgPathB" Int])
 dgSplitHandler n
-  | n >= 10   = pure $ gotoChoice @"dgPathA" n
+  | n >= 10 = pure $ gotoChoice @"dgPathA" n
   | otherwise = pure $ gotoChoice @"dgPathB" n
 
 dgPathAHandler :: Int -> WasmM (GotoChoice '[To "dgMerge" Int])
@@ -156,16 +156,14 @@ dgMergeHandler n = do
   logInfo $ "Merge: " <> T.pack (show n)
   pure $ gotoExit (n + 1)
 
-
 -- Loop Graph Handlers
 
 loopDecrementHandler :: Int -> WasmM (GotoChoice '[To Self Int, To Exit Int])
 loopDecrementHandler n
-  | n <= 0    = pure $ gotoExit n
+  | n <= 0 = pure $ gotoExit n
   | otherwise = do
       logInfo $ "Loop: " <> T.pack (show n)
       pure $ gotoSelf (n - 1)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TEST RUNNERS
@@ -176,7 +174,6 @@ runToCompletion :: WasmResult a -> a
 runToCompletion (WasmComplete a) = a
 runToCompletion (WasmYield _eff resume) = runToCompletion (resume (ResSuccess Nothing))
 runToCompletion (WasmError msg) = error $ "WasmError: " <> T.unpack msg
-
 
 -- | Run the linear graph: Entry -> Add1 -> Add2 -> Exit
 runLinearGraph :: Int -> Int
@@ -189,7 +186,6 @@ runLinearGraph input = runToCompletion $ initializeWasm $ do
         GotoChoice (Here result) -> pure result
         _ -> error "runLinearGraph: unexpected choice from lgAdd2Handler"
     _ -> error "runLinearGraph: unexpected choice from lgAdd1Handler"
-
 
 -- | Run the branching graph: Entry -> IsEven -> EvenPath|OddPath -> Exit
 runBranchGraph :: Int -> Text
@@ -210,7 +206,6 @@ runBranchGraph input = runToCompletion $ initializeWasm $ do
         _ -> error "runBranchGraph: unexpected choice from bgOddPathHandler"
     _ -> error "runBranchGraph: unexpected choice from bgIsEvenHandler"
 
-
 -- | Run the diamond graph: Entry -> Split -> PathA|PathB -> Merge -> Exit
 runDiamondGraph :: Int -> Int
 runDiamondGraph input = runToCompletion $ initializeWasm $ do
@@ -227,7 +222,6 @@ runDiamondGraph input = runToCompletion $ initializeWasm $ do
         _ -> error "runDiamondGraph: unexpected choice from dgMergeHandler"
     _ -> error "runDiamondGraph: unexpected choice from dgPathHandler"
 
-
 -- | Run the loop graph: Entry -> Decrement (loop) -> Exit
 -- Manually implements the self-loop dispatch.
 runLoopGraph :: Int -> Int
@@ -237,10 +231,9 @@ runLoopGraph input = runToCompletion $ initializeWasm $ runLoop input
     runLoop n = do
       c <- loopDecrementHandler n
       case c of
-        GotoChoice (Here n') -> runLoop n'  -- Self: continue loop
-        GotoChoice (There (Here result)) -> pure result  -- Exit
+        GotoChoice (Here n') -> runLoop n' -- Self: continue loop
+        GotoChoice (There (Here result)) -> pure result -- Exit
         _ -> error "runLoopGraph: unexpected choice from loopDecrementHandler"
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TESTS
@@ -254,10 +247,8 @@ spec = do
   loopGraphSpec
   effectOrderingSpec
 
-
 linearGraphSpec :: Spec
 linearGraphSpec = describe "LinearGraph" $ do
-
   it "chains handlers through two nodes" $ do
     -- Input 5 -> Add1(+1) -> Add2(+1) -> Exit = 7
     runLinearGraph 5 `shouldBe` 7
@@ -271,10 +262,8 @@ linearGraphSpec = describe "LinearGraph" $ do
   it "handles large input" $ do
     runLinearGraph 1000000 `shouldBe` 1000002
 
-
 branchGraphSpec :: Spec
 branchGraphSpec = describe "BranchGraph" $ do
-
   it "routes even numbers to EvenPath" $ do
     runBranchGraph 4 `shouldBe` "even: 4"
 
@@ -290,10 +279,8 @@ branchGraphSpec = describe "BranchGraph" $ do
   it "routes negative odd to OddPath" $ do
     runBranchGraph (-7) `shouldBe` "odd: -7"
 
-
 diamondGraphSpec :: Spec
 diamondGraphSpec = describe "DiamondGraph" $ do
-
   it "routes >= 10 through PathA and merges" $ do
     -- 10 -> PathA(+10) -> Merge(+1) = 21
     runDiamondGraph 10 `shouldBe` 21
@@ -309,10 +296,8 @@ diamondGraphSpec = describe "DiamondGraph" $ do
   it "handles zero" $ do
     runDiamondGraph 0 `shouldBe` 101
 
-
 loopGraphSpec :: Spec
 loopGraphSpec = describe "LoopGraph (self-loop)" $ do
-
   it "loops until zero" $ do
     runLoopGraph 5 `shouldBe` 0
 
@@ -328,11 +313,9 @@ loopGraphSpec = describe "LoopGraph (self-loop)" $ do
   it "handles many iterations" $ do
     runLoopGraph 100 `shouldBe` 0
 
-
 -- | Tests for verifying effect execution order.
 effectOrderingSpec :: Spec
 effectOrderingSpec = describe "Effect Ordering" $ do
-
   it "linear graph produces effects in order" $ do
     -- Verify that the effects happen in the expected sequence
     let result = initializeWasm $ do

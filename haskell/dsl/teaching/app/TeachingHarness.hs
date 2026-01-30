@@ -32,28 +32,26 @@
 -- @
 module Main where
 
-import Control.Monad.Freer (Eff, Member, send, runM)
-import Data.Aeson (object, (.=), Value)
-import Data.List.NonEmpty (NonEmpty(..))
+import Control.Monad.Freer (Eff, Member, runM, send)
+import Data.Aeson (Value, object, (.=))
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
+import ExoMonad.Effect.NodeMeta (NodeMetadata (..))
+import ExoMonad.Effect.Types
+  ( ContentBlock (..),
+    LLM (..),
+    TurnOutcome (..),
+    TurnResult (..),
+  )
+import ExoMonad.Teaching.LLM
+  ( TeachingConfig (..),
+    loadTeachingConfig,
+    runLLMWithTeaching,
+    withTeaching,
+  )
 import System.Directory (doesFileExist)
 import System.Exit (exitFailure)
-
-import ExoMonad.Effect.Types
-  ( LLM(..)
-  , ContentBlock(..)
-  , TurnOutcome(..)
-  , TurnResult(..)
-  )
-import ExoMonad.Effect.NodeMeta (NodeMetadata(..))
-import ExoMonad.Teaching.LLM
-  ( loadTeachingConfig
-  , withTeaching
-  , runLLMWithTeaching
-  , TeachingConfig(..)
-  )
-
 
 main :: IO ()
 main = do
@@ -69,19 +67,19 @@ main = do
       putStrLn "  ANTHROPIC_API_KEY=sk-ant-..."
       putStrLn "  TEACHING_OUTPUT_DIR=./test-training  (optional)"
       exitFailure
-
     Just config -> do
       putStrLn $ "[Teaching Harness] Session ID: " <> show (tcSessionId config)
       putStrLn $ "[Teaching Harness] Output dir: " <> tcOutputDir config
 
       -- Use guidance that helps Haiku produce quality training data
-      let guidance = T.unlines
-            [ "You are generating training data for a small function-calling model."
-            , "Focus on:"
-            , "1. Clear, step-by-step reasoning in <thinking> blocks"
-            , "2. Precise tool argument formatting"
-            , "3. Explicit connections between reasoning and tool choice"
-            ]
+      let guidance =
+            T.unlines
+              [ "You are generating training data for a small function-calling model.",
+                "Focus on:",
+                "1. Clear, step-by-step reasoning in <thinking> blocks",
+                "2. Precise tool argument formatting",
+                "3. Explicit connections between reasoning and tool choice"
+              ]
 
       withTeaching config guidance $ \env -> do
         putStrLn "[Teaching Harness] Environment initialized"
@@ -99,11 +97,9 @@ main = do
             if T.null thinking
               then putStrLn "[Teaching Harness] Thinking: (empty - this may indicate thinking is disabled or not returned)"
               else putStrLn $ "[Teaching Harness] Thinking preview: " <> T.unpack thinkingPreview <> "..."
-
           TurnBroken reason -> do
             putStrLn $ "[Teaching Harness] ERROR: Turn broken: " <> T.unpack reason
             exitFailure
-
           TurnTransitionHint target _payload -> do
             putStrLn $ "[Teaching Harness] Unexpected transition hint to: " <> T.unpack target
             exitFailure
@@ -125,7 +121,6 @@ main = do
             putStrLn $ "[Teaching Harness] WARNING: Output file not found: " <> outputFile
             putStrLn "This may indicate a recording issue."
 
-
 -- | Test LLM call that exercises the teaching pipeline.
 --
 -- Sends a simple RunTurnOp with:
@@ -133,51 +128,58 @@ main = do
 -- - Simple system prompt
 -- - User content asking for classification
 -- - Basic output schema
-testLLMCall :: Member LLM effs => Eff effs (TurnOutcome (TurnResult Value))
+testLLMCall :: (Member LLM effs) => Eff effs (TurnOutcome (TurnResult Value))
 testLLMCall =
-  send $ RunTurnOp
-    testMeta
-    testSystemPrompt
-    (Text { text = testUserContent } :| [])
-    testSchema
-    []  -- No tools for this simple test
+  send $
+    RunTurnOp
+      testMeta
+      testSystemPrompt
+      (Text {text = testUserContent} :| [])
+      testSchema
+      [] -- No tools for this simple test
   where
-    testMeta = NodeMetadata
-      { nmNodeName = "test-node"
-      , nmGraphName = "TestGraph"
-      }
+    testMeta =
+      NodeMetadata
+        { nmNodeName = "test-node",
+          nmGraphName = "TestGraph"
+        }
 
-    testSystemPrompt = T.unlines
-      [ "You are a helpful assistant that classifies user intents."
-      , ""
-      , "Given a user message, classify it as one of:"
-      , "- QUESTION: User is asking a question"
-      , "- STATEMENT: User is making a statement"
-      , "- REQUEST: User is making a request"
-      , ""
-      , "Respond with a JSON object containing:"
-      , "- intent: The classified intent"
-      , "- confidence: A number 0-1 indicating confidence"
-      , "- reasoning: Brief explanation of classification"
-      ]
+    testSystemPrompt =
+      T.unlines
+        [ "You are a helpful assistant that classifies user intents.",
+          "",
+          "Given a user message, classify it as one of:",
+          "- QUESTION: User is asking a question",
+          "- STATEMENT: User is making a statement",
+          "- REQUEST: User is making a request",
+          "",
+          "Respond with a JSON object containing:",
+          "- intent: The classified intent",
+          "- confidence: A number 0-1 indicating confidence",
+          "- reasoning: Brief explanation of classification"
+        ]
 
     testUserContent =
       "Can you help me understand how the teaching infrastructure works?"
 
     testSchema :: Value
-    testSchema = object
-      [ "type" .= ("object" :: Text)
-      , "properties" .= object
-          [ "intent" .= object
-              [ "type" .= ("string" :: Text)
-              , "enum" .= (["QUESTION", "STATEMENT", "REQUEST"] :: [Text])
-              ]
-          , "confidence" .= object
-              [ "type" .= ("number" :: Text)
-              , "minimum" .= (0 :: Int)
-              , "maximum" .= (1 :: Int)
-              ]
-          , "reasoning" .= object ["type" .= ("string" :: Text)]
-          ]
-      , "required" .= (["intent", "confidence", "reasoning"] :: [Text])
-      ]
+    testSchema =
+      object
+        [ "type" .= ("object" :: Text),
+          "properties"
+            .= object
+              [ "intent"
+                  .= object
+                    [ "type" .= ("string" :: Text),
+                      "enum" .= (["QUESTION", "STATEMENT", "REQUEST"] :: [Text])
+                    ],
+                "confidence"
+                  .= object
+                    [ "type" .= ("number" :: Text),
+                      "minimum" .= (0 :: Int),
+                      "maximum" .= (1 :: Int)
+                    ],
+                "reasoning" .= object ["type" .= ("string" :: Text)]
+              ],
+          "required" .= (["intent", "confidence", "reasoning"] :: [Text])
+        ]

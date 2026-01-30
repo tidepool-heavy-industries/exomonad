@@ -61,7 +61,9 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
             }
         }
 
-        Component::Checkbox { id, label, default, .. } => {
+        Component::Checkbox {
+            id, label, default, ..
+        } => {
             let checked = state.get_boolean(id).unwrap_or(*default);
             ComponentWrapper {
                 label: id.clone(),
@@ -110,7 +112,9 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
             }
         }
 
-        Component::Multiselect { id, label, options, .. } => {
+        Component::Multiselect {
+            id, label, options, ..
+        } => {
             let selections = state
                 .get_multichoice(id)
                 .map(|s| s.to_vec())

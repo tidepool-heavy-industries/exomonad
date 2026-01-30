@@ -1,8 +1,8 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE TypeFamilies #-}
 
 -- | Graph and node context effects for reading ambient context values.
 --
@@ -48,20 +48,20 @@
 -- The interpreter wraps each handler invocation with @runNodeInput nodeInput@.
 module ExoMonad.Effect.GraphContext
   ( -- * Graph Context Effect
-    GraphContext(..)
-  , getEntry
+    GraphContext (..),
+    getEntry,
 
     -- * Node Input Effect
-  , NodeInput(..)
-  , getNodeInput
+    NodeInput (..),
+    getNodeInput,
 
     -- * Interpreters
-  , runGraphContext
-  , runNodeInput
-  ) where
+    runGraphContext,
+    runNodeInput,
+  )
+where
 
 import Control.Monad.Freer (Eff, Member, interpret, send)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPH CONTEXT EFFECT
@@ -86,7 +86,6 @@ data GraphContext entry r where
   -- | Get the entry value that spawned this graph.
   GetEntry :: GraphContext entry entry
 
-
 -- | Read the entry value that spawned this graph.
 --
 -- Usage requires type application to specify the entry type:
@@ -98,12 +97,11 @@ data GraphContext entry r where
 --
 -- This value is constant for the lifetime of the graph instance.
 -- In recursive execution, each child sees its own entry.
-getEntry
-  :: forall entry effs.
-     Member (GraphContext entry) effs
-  => Eff effs entry
+getEntry ::
+  forall entry effs.
+  (Member (GraphContext entry) effs) =>
+  Eff effs entry
 getEntry = send (GetEntry :: GraphContext entry entry)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- NODE INPUT EFFECT
@@ -127,7 +125,6 @@ getEntry = send (GetEntry :: GraphContext entry entry)
 data NodeInput input r where
   -- | Get the input value for this node invocation.
   GetNodeInput :: NodeInput input input
-
 
 -- | Read the current node's input value.
 --
@@ -158,12 +155,11 @@ data NodeInput input r where
 --   originalInput <- getNodeInput \@ImplInput
 --   ...
 -- @
-getNodeInput
-  :: forall input effs.
-     Member (NodeInput input) effs
-  => Eff effs input
+getNodeInput ::
+  forall input effs.
+  (Member (NodeInput input) effs) =>
+  Eff effs input
 getNodeInput = send (GetNodeInput :: NodeInput input input)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- INTERPRETERS
@@ -179,13 +175,12 @@ getNodeInput = send (GetNodeInput :: NodeInput input input)
 -- runGraphContext scaffoldInput $ do
 --   ... -- all handlers can now call getEntry
 -- @
-runGraphContext
-  :: entry
-  -> Eff (GraphContext entry ': effs) a
-  -> Eff effs a
+runGraphContext ::
+  entry ->
+  Eff (GraphContext entry ': effs) a ->
+  Eff effs a
 runGraphContext entry = interpret $ \case
   GetEntry -> pure entry
-
 
 -- | Run NodeInput effect with a fixed input value.
 --
@@ -198,9 +193,9 @@ runGraphContext entry = interpret $ \case
 --   (exit, sid) <- runLLMNode ...
 --   implAfter (exit, sid)  -- can now call getNodeInput
 -- @
-runNodeInput
-  :: input
-  -> Eff (NodeInput input ': effs) a
-  -> Eff effs a
+runNodeInput ::
+  input ->
+  Eff (NodeInput input ': effs) a ->
+  Eff effs a
 runNodeInput input = interpret $ \case
   GetNodeInput -> pure input

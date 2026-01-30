@@ -27,15 +27,18 @@
 -- False
 module Data.Stack
   ( -- * Stack Type
-    Stack
+    Stack,
+
     -- * Constructor
-  , empty
+    empty,
+
     -- * Core Operations
-  , push
-  , pop
-  , peek
-  , isEmpty
-  ) where
+    push,
+    pop,
+    peek,
+    isEmpty,
+  )
+where
 
 -- | A stack is a collection that maintains LIFO (Last-In-First-Out) ordering.
 --

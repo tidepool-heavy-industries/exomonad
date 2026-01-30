@@ -1,10 +1,10 @@
-use clap::{Parser, Subcommand};
 use anyhow::Result;
+use clap::{Parser, Subcommand};
 
-mod types;
 mod cabal;
-mod git;
 mod gh;
+mod git;
+mod types;
 
 #[derive(Parser)]
 #[command(name = "effector")]

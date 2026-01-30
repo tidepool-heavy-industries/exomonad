@@ -31,25 +31,25 @@
 -- @
 module ExoMonad.Template.Render
   ( -- * Pure Rendering
-    render
-  , renderText
+    render,
+    renderText,
 
     -- * Template Compilation (re-exports from ginger)
-  , TypedTemplate
-  , typedTemplateFile
-  , runTypedTemplate
+    TypedTemplate,
+    typedTemplateFile,
+    runTypedTemplate,
 
     -- * Ginger Context Constraint
-  , GingerContext
-  ) where
+    GingerContext,
+  )
+where
 
-import Data.Text (Text)
 import Control.Monad.Writer (Writer)
+import Data.Text (Text)
 import Text.Ginger.GVal (ToGVal)
 import Text.Ginger.Run.Type (Run)
-import Text.Ginger.TH (TypedTemplate, typedTemplateFile, runTypedTemplate)
+import Text.Ginger.TH (TypedTemplate, runTypedTemplate, typedTemplateFile)
 import Text.Parsec.Pos (SourcePos)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GINGER CONTEXT CONSTRAINT
@@ -60,7 +60,6 @@ import Text.Parsec.Pos (SourcePos)
 -- This is the specific monad stack that ginger uses internally.
 -- Types used as template context must satisfy this constraint.
 type GingerContext ctx = ToGVal (Run SourcePos (Writer Text) Text) ctx
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PURE RENDERING
@@ -77,19 +76,19 @@ type GingerContext ctx = ToGVal (Run SourcePos (Writer Text) Text) ctx
 -- @
 --
 -- The return type is 'Text' containing the rendered template output.
-render
-  :: GingerContext ctx
-  => TypedTemplate ctx SourcePos
-  -> ctx
-  -> Text
+render ::
+  (GingerContext ctx) =>
+  TypedTemplate ctx SourcePos ->
+  ctx ->
+  Text
 render template ctx = runTypedTemplate ctx template
 
 -- | Alias for 'render' with more explicit naming.
 --
 -- Use when you want to emphasize that this produces Text output.
-renderText
-  :: GingerContext ctx
-  => TypedTemplate ctx SourcePos
-  -> ctx
-  -> Text
+renderText ::
+  (GingerContext ctx) =>
+  TypedTemplate ctx SourcePos ->
+  ctx ->
+  Text
 renderText = render

@@ -1,67 +1,66 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+
 -- | Tests for wire type conversion utilities.
 module ConversionSpec (spec) where
 
-import Test.Hspec
-import Data.Aeson (toJSON, Value(..), object, (.=))
-import Data.List.NonEmpty (NonEmpty(..))
-import qualified Data.Text as T
-
+import Data.Aeson (Value (..), object, toJSON, (.=))
+import Data.List.NonEmpty (NonEmpty (..))
+import Data.Text qualified as T
 import ExoMonad.Anthropic.Types
-  ( ContentBlock(..)
-  , ImageSource(..)
-  , Message(..)
-  , Role(..)
-  , ToolUseId(..)
-  , ToolResultId(..)
+  ( ContentBlock (..),
+    ImageSource (..),
+    Message (..),
+    Role (..),
+    ToolResultId (..),
+    ToolUseId (..),
   )
-import ExoMonad.Wasm.WireTypes
-  ( WireMessage(..)
-  , WireContentBlock(..)
-  )
-import ExoMonad.Effect.Types (TurnResult(..))
+import ExoMonad.Effect.Types (TurnResult (..))
 import ExoMonad.Wasm.Conversion
-
+import ExoMonad.Wasm.WireTypes
+  ( WireContentBlock (..),
+    WireMessage (..),
+  )
+import Test.Hspec
 
 spec :: Spec
 spec = describe "ExoMonad.Wasm.Conversion" $ do
   describe "contentBlockToWire" $ do
     it "converts Text block" $ do
-      contentBlockToWire Text { text = "hello" } `shouldBe` Just (WCBText "hello")
+      contentBlockToWire Text {text = "hello"} `shouldBe` Just (WCBText "hello")
 
     it "converts Image block with base64" $ do
-      let src = Base64 { mediaType = "image/png", data_ = "abc123" }
-      contentBlockToWire Image { source = src } `shouldBe` Just (WCBImage src)
+      let src = Base64 {mediaType = "image/png", data_ = "abc123"}
+      contentBlockToWire Image {source = src} `shouldBe` Just (WCBImage src)
 
     it "converts ToolUse block" $ do
       let expected = WCBToolUse "tool_1" "search" (toJSON (123 :: Int))
-      contentBlockToWire ToolUse { id = ToolUseId "tool_1", name = "search", input = toJSON (123 :: Int) }
+      contentBlockToWire ToolUse {id = ToolUseId "tool_1", name = "search", input = toJSON (123 :: Int)}
         `shouldBe` Just expected
 
     it "converts ToolResult block" $ do
       let expected = WCBToolResult "tool_1" "result text" False
-      contentBlockToWire ToolResult { toolUseId = ToolResultId "tool_1", content = "result text", isError = False }
+      contentBlockToWire ToolResult {toolUseId = ToolResultId "tool_1", content = "result text", isError = False}
         `shouldBe` Just expected
 
     it "filters out Thinking block" $ do
-      contentBlockToWire Thinking { thinking = "thinking...", signature = "sig123" }
+      contentBlockToWire Thinking {thinking = "thinking...", signature = "sig123"}
         `shouldBe` Nothing
 
     it "filters out RedactedThinking block" $ do
-      contentBlockToWire RedactedThinking { data_ = "encrypted" }
+      contentBlockToWire RedactedThinking {data_ = "encrypted"}
         `shouldBe` Nothing
 
     it "converts Json block to text" $ do
-      let result = contentBlockToWire Json { json = toJSON (42 :: Int) }
+      let result = contentBlockToWire Json {json = toJSON (42 :: Int)}
       result `shouldSatisfy` \case
         Just (WCBText _) -> True
         _ -> False
 
   describe "contentBlocksToWireMessages" $ do
     it "creates system and user messages" $ do
-      let blocks = [Text { text = "hello world" }]
+      let blocks = [Text {text = "hello world"}]
       let result = contentBlocksToWireMessages "Be helpful" blocks
       length result `shouldBe` 2
       -- First message is system
@@ -72,7 +71,7 @@ spec = describe "ExoMonad.Wasm.Conversion" $ do
         WireMessage role _ -> role `shouldBe` "user"
 
     it "skips system message when empty" $ do
-      let blocks = [Text { text = "hello" }]
+      let blocks = [Text {text = "hello"}]
       let result = contentBlocksToWireMessages "" blocks
       length result `shouldBe` 1
       case head result of
@@ -80,9 +79,9 @@ spec = describe "ExoMonad.Wasm.Conversion" $ do
 
     it "filters thinking blocks from output" $ do
       let blocks =
-            [ Text { text = "hello" }
-            , Thinking { thinking = "thinking", signature = "sig" }
-            , Text { text = "world" }
+            [ Text {text = "hello"},
+              Thinking {thinking = "thinking", signature = "sig"},
+              Text {text = "world"}
             ]
       let result = contentBlocksToWireMessages "" blocks
       case head result of
@@ -90,30 +89,30 @@ spec = describe "ExoMonad.Wasm.Conversion" $ do
 
   describe "wireContentBlockToNative" $ do
     it "converts WCBText to Text block" $ do
-      wireContentBlockToNative (WCBText "hello") `shouldBe` Text { text = "hello" }
+      wireContentBlockToNative (WCBText "hello") `shouldBe` Text {text = "hello"}
 
     it "converts WCBImage to Image block" $ do
-      let src = Base64 { mediaType = "image/jpeg", data_ = "xyz" }
-      wireContentBlockToNative (WCBImage src) `shouldBe` Image { source = src }
+      let src = Base64 {mediaType = "image/jpeg", data_ = "xyz"}
+      wireContentBlockToNative (WCBImage src) `shouldBe` Image {source = src}
 
     it "converts WCBToolUse to ToolUse block" $ do
       let wcb = WCBToolUse "tid" "tname" (toJSON ("input" :: String))
-      let expected = ToolUse { id = ToolUseId "tid", name = "tname", input = toJSON ("input" :: String) }
+      let expected = ToolUse {id = ToolUseId "tid", name = "tname", input = toJSON ("input" :: String)}
       wireContentBlockToNative wcb `shouldBe` expected
 
     it "converts WCBToolResult to ToolResult block" $ do
       let wcb = WCBToolResult "tid" "content" True
-      let expected = ToolResult { toolUseId = ToolResultId "tid", content = "content", isError = True }
+      let expected = ToolResult {toolUseId = ToolResultId "tid", content = "content", isError = True}
       wireContentBlockToNative wcb `shouldBe` expected
 
   describe "messageToWire" $ do
     it "converts User message" $ do
-      let msg = Message { role = User, content = Text { text = "hi" } :| [] }
+      let msg = Message {role = User, content = Text {text = "hi"} :| []}
       let result = messageToWire msg
       result.wmRole `shouldBe` "user"
 
     it "converts Assistant message" $ do
-      let msg = Message { role = Assistant, content = Text { text = "hello" } :| [] }
+      let msg = Message {role = Assistant, content = Text {text = "hello"} :| []}
       let result = messageToWire msg
       result.wmRole `shouldBe` "assistant"
 
@@ -136,12 +135,13 @@ spec = describe "ExoMonad.Wasm.Conversion" $ do
 
   describe "parseWireTurnResult" $ do
     it "parses valid TurnResult JSON" $ do
-      let json = object
-            [ "content" .= ("output" :: String)
-            , "toolsInvoked" .= ([] :: [Value])
-            , "narrative" .= ("story" :: String)
-            , "thinking" .= ("thought" :: String)
-            ]
+      let json =
+            object
+              [ "content" .= ("output" :: String),
+                "toolsInvoked" .= ([] :: [Value]),
+                "narrative" .= ("story" :: String),
+                "thinking" .= ("thought" :: String)
+              ]
       case parseWireTurnResult json of
         Right (TurnResult _ _ narrative thinking) -> do
           narrative `shouldBe` "story"
@@ -149,9 +149,10 @@ spec = describe "ExoMonad.Wasm.Conversion" $ do
         Left err -> expectationFailure $ "Parse failed: " ++ T.unpack err
 
     it "handles missing optional fields" $ do
-      let json = object
-            [ "content" .= (123 :: Int)
-            ]
+      let json =
+            object
+              [ "content" .= (123 :: Int)
+              ]
       case parseWireTurnResult json of
         Right (TurnResult _ tools narrative thinking) -> do
           narrative `shouldBe` ""

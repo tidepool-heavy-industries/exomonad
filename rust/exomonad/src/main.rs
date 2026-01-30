@@ -29,12 +29,7 @@ mod health;
 // ============================================================================
 
 /// Build version string from compile-time environment
-const VERSION: &str = concat!(
-    env!("CARGO_PKG_VERSION"),
-    " (",
-    env!("VERGEN_GIT_SHA"),
-    ")"
-);
+const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("VERGEN_GIT_SHA"), ")");
 
 // ============================================================================
 // CLI Types
@@ -84,7 +79,11 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Hook { event, runtime, role } => handle_hook(event, runtime, role).await?,
+        Commands::Hook {
+            event,
+            runtime,
+            role,
+        } => handle_hook(event, runtime, role).await?,
         Commands::Health => health::run_health_check().await?,
     };
 

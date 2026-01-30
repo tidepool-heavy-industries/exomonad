@@ -1,6 +1,6 @@
+use crate::state::AgentStatus;
 use anyhow::Result;
 use reqwest::Client;
-use crate::state::AgentStatus;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -23,7 +23,13 @@ impl ApiClient {
 
     pub async fn get_agents(&self) -> Result<Vec<AgentStatus>> {
         let url = format!("{}/api/agents", self.base_url);
-        let resp = self.client.get(&url).send().await?.json::<AgentsResponse>().await?;
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await?
+            .json::<AgentsResponse>()
+            .await?;
         Ok(resp.agents)
     }
 

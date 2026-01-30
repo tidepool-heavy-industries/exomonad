@@ -20,43 +20,41 @@
 -- @
 module ExoMonad.LLM.Interpreter
   ( -- * Interpreter
-    runLLMComplete
+    runLLMComplete,
 
     -- * Re-exports for convenience
-  , LLMEnv
-  , LLMConfig(..)
-  , mkLLMEnv
+    LLMEnv,
+    LLMConfig (..),
+    mkLLMEnv,
 
     -- * Tool Types
-  , AnthropicTool(..)
-  , anthropicToolToJSON
+    AnthropicTool (..),
+    anthropicToolToJSON,
 
     -- * Request Building (exported for testing)
-  , buildAnthropicRequest
+    buildAnthropicRequest,
 
     -- * Helpers (exported for testing)
-  , parseBaseUrl
-  ) where
+    parseBaseUrl,
+  )
+where
 
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
-import Data.Aeson (Value, toJSON, fromJSON)
-import qualified Data.Aeson as Aeson
+import Data.Aeson (Value, fromJSON, toJSON)
+import Data.Aeson qualified as Aeson
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.List.NonEmpty (NonEmpty(..))
-import PyF (fmt)
-
-import ExoMonad.Effects.SocketClient
-  ( SocketConfig(..)
-  , ServiceRequest(..)
-  , ServiceResponse(..)
-  , ServiceError(..)
-  , sendRequest
-  )
-
-import ExoMonad.LLM.Interpreter.Types
 import ExoMonad.Effects.LLMProvider
-
+import ExoMonad.Effects.SocketClient
+  ( ServiceError (..),
+    ServiceRequest (..),
+    ServiceResponse (..),
+    SocketConfig (..),
+    sendRequest,
+  )
+import ExoMonad.LLM.Interpreter.Types
+import PyF (fmt)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ANTHROPIC CLIENT
@@ -69,30 +67,32 @@ import ExoMonad.Effects.LLMProvider
 --
 -- Note: tool_choice 'any' and 'tool' are NOT compatible with extended thinking.
 -- If you pass a ToolChoice that forces tool use, thinking will be ignored.
-buildAnthropicRequest
-  :: AnthropicConfig
-  -> Text
-  -> Maybe [Value]
-  -> Maybe ToolChoice
-  -> AnthropicRequest
-buildAnthropicRequest config userMsg maybeTools maybeToolChoice = AnthropicRequest
-  { arModel = config.acModel
-  , arMaxTokens = config.acMaxTokens
-  , arMessages = AnthropicMessage "user" userMsg :| []
-  , arSystem = config.acSystemPrompt
-  , arTools = maybeTools
-  , arToolChoice = maybeToolChoice
-  , arThinking = case (config.acThinking, maybeToolChoice) of
-      -- Disable thinking if we're forcing tool use (incompatible)
-      (_, Just ToolChoiceAny) -> Nothing
-      (_, Just (ToolChoiceTool _)) -> Nothing
-      (ThinkingDisabled, _) -> Nothing
-      (ThinkingEnabled budget, _) -> Just ThinkingConfig
-        { tcType = "enabled"
-        , tcBudgetTokens = budget
-        }
-  }
-
+buildAnthropicRequest ::
+  AnthropicConfig ->
+  Text ->
+  Maybe [Value] ->
+  Maybe ToolChoice ->
+  AnthropicRequest
+buildAnthropicRequest config userMsg maybeTools maybeToolChoice =
+  AnthropicRequest
+    { arModel = config.acModel,
+      arMaxTokens = config.acMaxTokens,
+      arMessages = AnthropicMessage "user" userMsg :| [],
+      arSystem = config.acSystemPrompt,
+      arTools = maybeTools,
+      arToolChoice = maybeToolChoice,
+      arThinking = case (config.acThinking, maybeToolChoice) of
+        -- Disable thinking if we're forcing tool use (incompatible)
+        (_, Just ToolChoiceAny) -> Nothing
+        (_, Just (ToolChoiceTool _)) -> Nothing
+        (ThinkingDisabled, _) -> Nothing
+        (ThinkingEnabled budget, _) ->
+          Just
+            ThinkingConfig
+              { tcType = "enabled",
+                tcBudgetTokens = budget
+              }
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS
@@ -106,7 +106,7 @@ parseBaseUrl :: Text -> ParsedBaseUrl
 parseBaseUrl url =
   let -- Strip trailing slash if present
       cleanUrl = case T.stripSuffix "/" url of
-        Just t  -> t
+        Just t -> t
         Nothing -> url
       -- Check for scheme
       (scheme, rest) = case T.stripPrefix "https://" cleanUrl of
@@ -120,44 +120,45 @@ parseBaseUrl url =
       (hostPort, path) = break (== '/') rest
       -- Split host and port (safely)
       (host, port) = case break (== ':') hostPort of
-        (h, ':':p) -> case safeReadPort p of
+        (h, ':' : p) -> case safeReadPort p of
           Just port' -> (h, port')
-          Nothing    -> (h, defaultPort)
+          Nothing -> (h, defaultPort)
         (h, _) -> (h, defaultPort)
       -- Safe port parsing
       safeReadPort :: String -> Maybe Int
       safeReadPort s = case reads s of
         [(n, "")] -> Just n
-        _         -> Nothing
-  in ParsedBaseUrl scheme host port path
+        _ -> Nothing
+   in ParsedBaseUrl scheme host port path
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SOCKET CLIENT
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Make a request to the socket-based service.
-socketRequest
-  :: SProvider p
-  -> LLMEnv
-  -> LLMProviderConfig p
-  -> Text
-  -> Maybe [Value]
-  -> IO (Either LLMError (LLMProviderResponse p))
+socketRequest ::
+  SProvider p ->
+  LLMEnv ->
+  LLMProviderConfig p ->
+  Text ->
+  Maybe [Value] ->
+  IO (Either LLMError (LLMProviderResponse p))
 socketRequest provider env config userMsg maybeTools = case env.leConfig of
   LLMSocketConfig path -> do
     let socketCfg = SocketConfig path 30000
     case provider of
       SAnthropic -> do
-        let req = AnthropicChat
-              { model = config.acModel
-              , messages = toJSON (AnthropicMessage "user" userMsg) :| []
-              , maxTokens = config.acMaxTokens
-              , tools = maybeTools
-              , system = config.acSystemPrompt
-              , thinking = case config.acThinking of
-                  ThinkingDisabled -> Nothing
-                  ThinkingEnabled budget -> Just $ toJSON $ ThinkingConfig "enabled" budget
-              }
+        let req =
+              AnthropicChat
+                { model = config.acModel,
+                  messages = toJSON (AnthropicMessage "user" userMsg) :| [],
+                  maxTokens = config.acMaxTokens,
+                  tools = maybeTools,
+                  system = config.acSystemPrompt,
+                  thinking = case config.acThinking of
+                    ThinkingDisabled -> Nothing
+                    ThinkingEnabled budget -> Just $ toJSON $ ThinkingConfig "enabled" budget
+                }
         result <- sendRequest socketCfg req
         case result of
           Right (AnthropicChatResponse content stop usage) ->
@@ -175,7 +176,6 @@ socketErrorToLLMError = \case
   DecodeError msg -> LLMParseError (T.pack msg)
   TimeoutError -> LLMHttpError "Socket request timed out"
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT INTERPRETER
 -- ════════════════════════════════════════════════════════════════════════════
@@ -188,7 +188,7 @@ providerName SAnthropic = "Anthropic"
 --
 -- This interpreter makes real API calls to Anthropic (via service socket)
 -- based on the type-level provider in the effect and the environment configuration.
-runLLMComplete :: LastMember IO effs => LLMEnv -> Eff (LLMComplete ': effs) a -> Eff effs a
+runLLMComplete :: (LastMember IO effs) => LLMEnv -> Eff (LLMComplete ': effs) a -> Eff effs a
 runLLMComplete env = interpret $ \case
   -- Throwing variants (for when errors are fatal)
   Complete provider config msg tools -> sendM $ do
@@ -198,5 +198,6 @@ runLLMComplete env = interpret $ \case
       Right resp -> pure resp
 
   -- Try variants (for graceful error handling)
-  CompleteTry provider config msg tools -> sendM $
-    socketRequest provider env config msg tools
+  CompleteTry provider config msg tools ->
+    sendM $
+      socketRequest provider env config msg tools

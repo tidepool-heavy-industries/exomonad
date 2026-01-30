@@ -13,66 +13,65 @@
 -- No general-purpose primitives like HTTP fetch.
 module ExoMonad.Wasm.WireTypes
   ( -- * Effects (WASM → TypeScript)
-    SerializableEffect(..)
+    SerializableEffect (..),
 
     -- * Effect Metadata (for routing) - re-exported from exomonad-core
-  , EffectCategory(..)
-  , EffectSemantics(..)
-  , effectMetadata
+    EffectCategory (..),
+    EffectSemantics (..),
+    effectMetadata,
 
     -- * LLM Call Types (for tool-aware LLM calls)
-  , WireMessage(..)
-  , WireContentBlock(..)
-  , WireToolCall(..)
-  , LlmCallResult(..)
+    WireMessage (..),
+    WireContentBlock (..),
+    WireToolCall (..),
+    LlmCallResult (..),
 
     -- * Tool Result Outcomes (tool dispatcher results)
-  , ToolResultOutcome(..)
+    ToolResultOutcome (..),
 
     -- * Results (TypeScript → WASM)
-  , EffectResult(..)
-  , TelegramAskResult(..)
+    EffectResult (..),
+    TelegramAskResult (..),
 
     -- * Graph State (for observability)
-  , ExecutionPhase(..)
-  , GraphState(..)
+    ExecutionPhase (..),
+    GraphState (..),
 
     -- * Step Output
-  , StepOutput(..)
+    StepOutput (..),
 
     -- * Graph Info (compile-time metadata)
-  , TypeInfoWire(..)
-  , GotoTargetWire(..)
-  , NodeInfoWire(..)
-  , EdgeInfoWire(..)
-  , GraphInfoWire(..)
-  ) where
+    TypeInfoWire (..),
+    GotoTargetWire (..),
+    NodeInfoWire (..),
+    EdgeInfoWire (..),
+    GraphInfoWire (..),
+  )
+where
 
 import Data.Aeson
-  ( ToJSON(..)
-  , FromJSON(..)
-  , Value(..)
-  , Object
-  , object
-  , (.=)
-  , (.:)
-  , (.:?)
-  , withObject
+  ( FromJSON (..),
+    Object,
+    ToJSON (..),
+    Value (..),
+    object,
+    withObject,
+    (.:),
+    (.:?),
+    (.=),
   )
-import qualified Data.Aeson.KeyMap as KM
 import Data.Aeson.Key (fromText)
+import Data.Aeson.KeyMap qualified as KM
 import Data.Aeson.Types (Parser)
-import Data.Text (Text)
-import qualified Data.Text as T
 import Data.Map.Strict (Map)
-import GHC.Generics (Generic)
-
+import Data.Text (Text)
+import Data.Text qualified as T
 -- Re-export effect metadata from the single source of truth
-import ExoMonad.Effect.Metadata (EffectCategory(..), EffectSemantics(..))
 
 -- Import ImageSource for image content blocks
-import ExoMonad.Anthropic.Types (ImageSource(..))
-
+import ExoMonad.Anthropic.Types (ImageSource (..))
+import ExoMonad.Effect.Metadata (EffectCategory (..), EffectSemantics (..))
+import GHC.Generics (Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- LLM CALL TYPES (for tool-aware LLM calls)
@@ -82,24 +81,25 @@ import ExoMonad.Anthropic.Types (ImageSource(..))
 --
 -- JSON encoding: @{role: "user", content: [...]}@
 data WireMessage = WireMessage
-  { wmRole :: Text
-  -- ^ Role: "user" | "assistant" | "system"
-  , wmContent :: [WireContentBlock]
-  -- ^ Content blocks
+  { -- | Role: "user" | "assistant" | "system"
+    wmRole :: Text,
+    -- | Content blocks
+    wmContent :: [WireContentBlock]
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON WireMessage where
-  toJSON msg = object
-    [ "role" .= msg.wmRole
-    , "content" .= msg.wmContent
-    ]
+  toJSON msg =
+    object
+      [ "role" .= msg.wmRole,
+        "content" .= msg.wmContent
+      ]
 
 instance FromJSON WireMessage where
-  parseJSON = withObject "WireMessage" $ \o -> WireMessage
-    <$> o .: "role"
-    <*> o .: "content"
-
+  parseJSON = withObject "WireMessage" $ \o ->
+    WireMessage
+      <$> o .: "role"
+      <*> o .: "content"
 
 -- | Wire-format content block for LLM messages.
 --
@@ -109,51 +109,55 @@ instance FromJSON WireMessage where
 -- - @{type: "tool_use", id: "...", name: "ask_user", input: {...}}@
 -- - @{type: "tool_result", tool_use_id: "...", content: "...", is_error: false}@
 data WireContentBlock
-  = WCBText { wcbText :: Text }
-    -- ^ Plain text content
-  | WCBImage { wcbImageSource :: ImageSource }
-    -- ^ Image content (base64 or URL)
+  = -- | Plain text content
+    WCBText {wcbText :: Text}
+  | -- | Image content (base64 or URL)
+    WCBImage {wcbImageSource :: ImageSource}
   | WCBToolUse
-      { wcbToolId :: Text
-      -- ^ Unique tool use ID
-      , wcbToolName :: Text
-      -- ^ Tool name
-      , wcbToolInput :: Value
-      -- ^ Tool input (JSON)
+      { -- | Unique tool use ID
+        wcbToolId :: Text,
+        -- | Tool name
+        wcbToolName :: Text,
+        -- | Tool input (JSON)
+        wcbToolInput :: Value
       }
-    -- ^ LLM is calling a tool
-  | WCBToolResult
-      { wcbToolUseId :: Text
-      -- ^ ID of the tool_use this is responding to
-      , wcbResultContent :: Text
-      -- ^ Result content (stringified)
-      , wcbIsError :: Bool
-      -- ^ Whether this is an error result
+  | -- \^ LLM is calling a tool
+    WCBToolResult
+      { -- | ID of the tool_use this is responding to
+        wcbToolUseId :: Text,
+        -- | Result content (stringified)
+        wcbResultContent :: Text,
+        -- | Whether this is an error result
+        wcbIsError :: Bool
       }
-    -- ^ Result of a tool execution
+  -- \^ Result of a tool execution
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON WireContentBlock where
-  toJSON (WCBText txt) = object
-    [ "type" .= ("text" :: Text)
-    , "text" .= txt
-    ]
-  toJSON (WCBImage source) = object
-    [ "type" .= ("image" :: Text)
-    , "source" .= source
-    ]
-  toJSON (WCBToolUse tid name input) = object
-    [ "type" .= ("tool_use" :: Text)
-    , "id" .= tid
-    , "name" .= name
-    , "input" .= input
-    ]
-  toJSON (WCBToolResult tid content isErr) = object
-    [ "type" .= ("tool_result" :: Text)
-    , "tool_use_id" .= tid
-    , "content" .= content
-    , "is_error" .= isErr
-    ]
+  toJSON (WCBText txt) =
+    object
+      [ "type" .= ("text" :: Text),
+        "text" .= txt
+      ]
+  toJSON (WCBImage source) =
+    object
+      [ "type" .= ("image" :: Text),
+        "source" .= source
+      ]
+  toJSON (WCBToolUse tid name input) =
+    object
+      [ "type" .= ("tool_use" :: Text),
+        "id" .= tid,
+        "name" .= name,
+        "input" .= input
+      ]
+  toJSON (WCBToolResult tid content isErr) =
+    object
+      [ "type" .= ("tool_result" :: Text),
+        "tool_use_id" .= tid,
+        "content" .= content,
+        "is_error" .= isErr
+      ]
 
 instance FromJSON WireContentBlock where
   parseJSON = withObject "WireContentBlock" $ \o -> do
@@ -161,43 +165,45 @@ instance FromJSON WireContentBlock where
     case typ of
       "text" -> WCBText <$> o .: "text"
       "image" -> WCBImage <$> o .: "source"
-      "tool_use" -> WCBToolUse
-        <$> o .: "id"
-        <*> o .: "name"
-        <*> o .: "input"
-      "tool_result" -> WCBToolResult
-        <$> o .: "tool_use_id"
-        <*> o .: "content"
-        <*> o .: "is_error"
+      "tool_use" ->
+        WCBToolUse
+          <$> o .: "id"
+          <*> o .: "name"
+          <*> o .: "input"
+      "tool_result" ->
+        WCBToolResult
+          <$> o .: "tool_use_id"
+          <*> o .: "content"
+          <*> o .: "is_error"
       _ -> fail $ "Unknown WireContentBlock type: " ++ T.unpack typ
-
 
 -- | Tool call request from LLM.
 --
 -- JSON encoding: @{id: "...", name: "ask_user", input: {...}}@
 data WireToolCall = WireToolCall
-  { wtcId :: Text
-  -- ^ Unique ID for this tool call (used in tool_result)
-  , wtcName :: Text
-  -- ^ Tool name (e.g., "ask_user")
-  , wtcInput :: Value
-  -- ^ Tool arguments (JSON)
+  { -- | Unique ID for this tool call (used in tool_result)
+    wtcId :: Text,
+    -- | Tool name (e.g., "ask_user")
+    wtcName :: Text,
+    -- | Tool arguments (JSON)
+    wtcInput :: Value
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON WireToolCall where
-  toJSON tc = object
-    [ "id" .= tc.wtcId
-    , "name" .= tc.wtcName
-    , "input" .= tc.wtcInput
-    ]
+  toJSON tc =
+    object
+      [ "id" .= tc.wtcId,
+        "name" .= tc.wtcName,
+        "input" .= tc.wtcInput
+      ]
 
 instance FromJSON WireToolCall where
-  parseJSON = withObject "WireToolCall" $ \o -> WireToolCall
-    <$> o .: "id"
-    <*> o .: "name"
-    <*> o .: "input"
-
+  parseJSON = withObject "WireToolCall" $ \o ->
+    WireToolCall
+      <$> o .: "id"
+      <*> o .: "name"
+      <*> o .: "input"
 
 -- | Result from LLM API call - either done or needs tools.
 --
@@ -206,38 +212,40 @@ instance FromJSON WireToolCall where
 -- - @{type: "needs_tools", tool_calls: [...], content: [...]}@
 data LlmCallResult
   = LlmDone
-      { lcrContent :: [WireContentBlock]
-      -- ^ Final response content
+      { -- | Final response content
+        lcrContent :: [WireContentBlock]
       }
   | LlmNeedsTools
-      { lcrToolCalls :: [WireToolCall]
-      -- ^ Tools the LLM wants to call
-      , lcrTextContent :: [WireContentBlock]
-      -- ^ Any text content before tools (for logging)
+      { -- | Tools the LLM wants to call
+        lcrToolCalls :: [WireToolCall],
+        -- | Any text content before tools (for logging)
+        lcrTextContent :: [WireContentBlock]
       }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON LlmCallResult where
-  toJSON (LlmDone content) = object
-    [ "type" .= ("done" :: Text)
-    , "content" .= content
-    ]
-  toJSON (LlmNeedsTools calls content) = object
-    [ "type" .= ("needs_tools" :: Text)
-    , "tool_calls" .= calls
-    , "content" .= content
-    ]
+  toJSON (LlmDone content) =
+    object
+      [ "type" .= ("done" :: Text),
+        "content" .= content
+      ]
+  toJSON (LlmNeedsTools calls content) =
+    object
+      [ "type" .= ("needs_tools" :: Text),
+        "tool_calls" .= calls,
+        "content" .= content
+      ]
 
 instance FromJSON LlmCallResult where
   parseJSON = withObject "LlmCallResult" $ \o -> do
     (typ :: Text) <- o .: "type"
     case typ of
       "done" -> LlmDone <$> o .: "content"
-      "needs_tools" -> LlmNeedsTools
-        <$> o .: "tool_calls"
-        <*> o .: "content"
+      "needs_tools" ->
+        LlmNeedsTools
+          <$> o .: "tool_calls"
+          <*> o .: "content"
       _ -> fail $ "Unknown LlmCallResult type: " ++ T.unpack typ
-
 
 -- | Tool dispatcher result outcome - what a tool execution produces.
 --
@@ -249,28 +257,31 @@ instance FromJSON LlmCallResult where
 -- - @{tag: "break", reason: "..."}@
 -- - @{tag: "transition", target: "nodeA", payload: {...}}@  (NEW: tool-initiated transitions)
 data ToolResultOutcome
-  = TROSuccess Value
-    -- ^ Tool succeeded with output value
-  | TROBreak Text
-    -- ^ Tool requested turn break
-  | TROTransition Text Value
-    -- ^ Tool-initiated graph transition (target node name + payload)
+  = -- | Tool succeeded with output value
+    TROSuccess Value
+  | -- | Tool requested turn break
+    TROBreak Text
+  | -- | Tool-initiated graph transition (target node name + payload)
+    TROTransition Text Value
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON ToolResultOutcome where
-  toJSON (TROSuccess val) = object
-    [ "tag" .= ("success" :: Text)
-    , "value" .= val
-    ]
-  toJSON (TROBreak reason) = object
-    [ "tag" .= ("break" :: Text)
-    , "reason" .= reason
-    ]
-  toJSON (TROTransition target payload) = object
-    [ "tag" .= ("transition" :: Text)
-    , "target" .= target
-    , "payload" .= payload
-    ]
+  toJSON (TROSuccess val) =
+    object
+      [ "tag" .= ("success" :: Text),
+        "value" .= val
+      ]
+  toJSON (TROBreak reason) =
+    object
+      [ "tag" .= ("break" :: Text),
+        "reason" .= reason
+      ]
+  toJSON (TROTransition target payload) =
+    object
+      [ "tag" .= ("transition" :: Text),
+        "target" .= target,
+        "payload" .= payload
+      ]
 
 instance FromJSON ToolResultOutcome where
   parseJSON = withObject "ToolResultOutcome" $ \o -> do
@@ -281,7 +292,6 @@ instance FromJSON ToolResultOutcome where
       "transition" -> TROTransition <$> o .: "target" <*> o .: "payload"
       _ -> fail $ "Unknown ToolResultOutcome tag: " ++ T.unpack tag
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECTS (WASM → TypeScript)
 -- ════════════════════════════════════════════════════════════════════════════
@@ -291,190 +301,214 @@ instance FromJSON ToolResultOutcome where
 -- JSON encoding matches protocol.ts: @{type: "LogInfo", eff_message: "...", eff_fields: {...}}@
 data SerializableEffect
   = EffLlmComplete
-      { effNode :: Text
-      -- ^ Which node is making this call
-      , effSystemPrompt :: Text
-      -- ^ System prompt
-      , effUserContent :: Text
-      -- ^ User content
-      , effSchema :: Maybe Value
-      -- ^ JSON schema for structured output
-      , effModel :: Maybe Text
-      -- ^ Model to use (e.g., "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
-      -- If Nothing, TypeScript uses its default model
+      { -- | Which node is making this call
+        effNode :: Text,
+        -- | System prompt
+        effSystemPrompt :: Text,
+        -- | User content
+        effUserContent :: Text,
+        -- | JSON schema for structured output
+        effSchema :: Maybe Value,
+        -- | Model to use (e.g., "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
+        -- If Nothing, TypeScript uses its default model
+        effModel :: Maybe Text
       }
   | EffLogInfo
-      { effMessage :: Text
-      -- ^ Log message
-      , effFields :: Maybe (Map Text Value)
-      -- ^ Optional structured fields for queryable log data
+      { -- | Log message
+        effMessage :: Text,
+        -- | Optional structured fields for queryable log data
+        effFields :: Maybe (Map Text Value)
       }
   | EffLogError
-      { effMessage :: Text
-      -- ^ Log message
-      , effFields :: Maybe (Map Text Value)
-      -- ^ Optional structured fields for queryable log data
+      { -- | Log message
+        effMessage :: Text,
+        -- | Optional structured fields for queryable log data
+        effFields :: Maybe (Map Text Value)
       }
   | EffHabitica
-      { effHabOp :: Text
-      -- ^ Operation name: "GetUser", "ScoreTask", "GetTasks", etc.
-      , effHabPayload :: Value
-      -- ^ Operation-specific payload (taskId, direction, etc.)
+      { -- | Operation name: "GetUser", "ScoreTask", "GetTasks", etc.
+        effHabOp :: Text,
+        -- | Operation-specific payload (taskId, direction, etc.)
+        effHabPayload :: Value
       }
   | EffTelegramSend
-      { effTgText :: Text
-      -- ^ Message text to send
-      , effTgParseMode :: Text
-      -- ^ Parse mode: "PlainText" | "Markdown" | "HTML"
-      , effTgThreadId :: Maybe Int
-      -- ^ Optional thread/topic ID for group forums or private chat topics
+      { -- | Message text to send
+        effTgText :: Text,
+        -- | Parse mode: "PlainText" | "Markdown" | "HTML"
+        effTgParseMode :: Text,
+        -- | Optional thread/topic ID for group forums or private chat topics
+        effTgThreadId :: Maybe Int
       }
   | EffTelegramAsk
-      { effTgAskText :: Text
-      -- ^ Message text to display
-      , effTgAskParseMode :: Text
-      -- ^ Parse mode: "PlainText" | "Markdown" | "HTML"
-      , effTgButtons :: [(Text, Text)]
-      -- ^ Button options: [(label, callback)]
-      , effTgAskThreadId :: Maybe Int
-      -- ^ Optional thread/topic ID for group forums or private chat topics
+      { -- | Message text to display
+        effTgAskText :: Text,
+        -- | Parse mode: "PlainText" | "Markdown" | "HTML"
+        effTgAskParseMode :: Text,
+        -- | Button options: [(label, callback)]
+        effTgButtons :: [(Text, Text)],
+        -- | Optional thread/topic ID for group forums or private chat topics
+        effTgAskThreadId :: Maybe Int
       }
   | EffLlmCall
-      { effLlmNode :: Text
-      -- ^ Which node is making this call
-      , effLlmMessages :: [WireMessage]
-      -- ^ Full conversation history
-      , effLlmSchema :: Maybe Value
-      -- ^ JSON schema for structured output
-      , effLlmTools :: [Value]
-      -- ^ Tool definitions (Anthropic format)
-      , effLlmModel :: Maybe Text
-      -- ^ Model to use (e.g., "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
-      -- If Nothing, TypeScript uses its default model
+      { -- | Which node is making this call
+        effLlmNode :: Text,
+        -- | Full conversation history
+        effLlmMessages :: [WireMessage],
+        -- | JSON schema for structured output
+        effLlmSchema :: Maybe Value,
+        -- | Tool definitions (Anthropic format)
+        effLlmTools :: [Value],
+        -- | Model to use (e.g., "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
+        -- If Nothing, TypeScript uses its default model
+        effLlmModel :: Maybe Text
       }
-  -- ══════════════════════════════════════════════════════════════════════════
-  -- State Effects (for DM and other stateful graphs)
-  -- ══════════════════════════════════════════════════════════════════════════
-  | EffGetState
-      { effStateKey :: Text
-      -- ^ State key (e.g., "worldState", "sessionState")
+  | -- ══════════════════════════════════════════════════════════════════════════
+    -- State Effects (for DM and other stateful graphs)
+    -- ══════════════════════════════════════════════════════════════════════════
+    EffGetState
+      { -- | State key (e.g., "worldState", "sessionState")
+        effStateKey :: Text
       }
   | EffSetState
-      { effStateKey :: Text
-      -- ^ State key
-      , effStateValue :: Value
-      -- ^ New state value (full replacement)
+      { -- | State key
+        effStateKey :: Text,
+        -- | New state value (full replacement)
+        effStateValue :: Value
       }
-  -- ══════════════════════════════════════════════════════════════════════════
-  -- Event Emission (for observability/GUI)
-  -- ══════════════════════════════════════════════════════════════════════════
-  | EffEmitEvent
-      { effEventName :: Text
-      -- ^ Event name (e.g., "StressChanged", "ClockAdvanced")
-      , effEventPayload :: Value
-      -- ^ Event-specific payload
+  | -- ══════════════════════════════════════════════════════════════════════════
+    -- Event Emission (for observability/GUI)
+    -- ══════════════════════════════════════════════════════════════════════════
+    EffEmitEvent
+      { -- | Event name (e.g., "StressChanged", "ClockAdvanced")
+        effEventName :: Text,
+        -- | Event-specific payload
+        effEventPayload :: Value
       }
-  -- ══════════════════════════════════════════════════════════════════════════
-  -- Random Number Generation
-  -- ══════════════════════════════════════════════════════════════════════════
-  | EffRandomInt
-      { effRandomMin :: Int
-      -- ^ Minimum value (inclusive)
-      , effRandomMax :: Int
-      -- ^ Maximum value (inclusive)
+  | -- ══════════════════════════════════════════════════════════════════════════
+    -- Random Number Generation
+    -- ══════════════════════════════════════════════════════════════════════════
+    EffRandomInt
+      { -- | Minimum value (inclusive)
+        effRandomMin :: Int,
+        -- | Maximum value (inclusive)
+        effRandomMax :: Int
       }
-  -- ══════════════════════════════════════════════════════════════════════════
-  -- Time
-  -- ══════════════════════════════════════════════════════════════════════════
-  | EffGetTime
-      -- ^ Get current UTC time (returns ISO8601 string)
+  | -- ══════════════════════════════════════════════════════════════════════════
+    -- Time
+    -- ══════════════════════════════════════════════════════════════════════════
+
+    -- | Get current UTC time (returns ISO8601 string)
+    EffGetTime
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON SerializableEffect where
-  toJSON (EffLlmComplete node sys user schema model) = object $
-    [ "type" .= ("LlmComplete" :: Text)
-    , "eff_node" .= node
-    , "eff_system_prompt" .= sys
-    , "eff_user_content" .= user
-    ] ++ maybe [] (\s -> ["eff_schema" .= s]) schema
-      ++ maybe [] (\m -> ["eff_model" .= m]) model
-  toJSON (EffLogInfo msg fields) = object $
-    [ "type" .= ("LogInfo" :: Text)
-    , "eff_message" .= msg
-    ] ++ maybe [] (\f -> ["eff_fields" .= f]) fields
-  toJSON (EffLogError msg fields) = object $
-    [ "type" .= ("LogError" :: Text)
-    , "eff_message" .= msg
-    ] ++ maybe [] (\f -> ["eff_fields" .= f]) fields
-  toJSON (EffHabitica op payload) = object
-    [ "type" .= ("Habitica" :: Text)
-    , "eff_hab_op" .= op
-    , "eff_hab_payload" .= payload
-    ]
-  toJSON (EffTelegramSend txt parseMode threadId) = object $
-    [ "type" .= ("TelegramSend" :: Text)
-    , "eff_tg_text" .= txt
-    , "eff_tg_parse_mode" .= parseMode
-    ] ++ maybe [] (\tid -> ["eff_tg_thread_id" .= tid]) threadId
-  toJSON (EffTelegramAsk txt parseMode buttons threadId) = object $
-    [ "type" .= ("TelegramAsk" :: Text)
-    , "eff_tg_text" .= txt
-    , "eff_tg_parse_mode" .= parseMode
-    , "eff_buttons" .= [[label, val] | (label, val) <- buttons]
-    ] ++ maybe [] (\tid -> ["eff_tg_thread_id" .= tid]) threadId
-  toJSON (EffLlmCall node msgs schema tools model) = object $
-    [ "type" .= ("LlmCall" :: Text)
-    , "eff_node" .= node
-    , "eff_messages" .= msgs
-    , "eff_tools" .= tools
-    ] ++ maybe [] (\s -> ["eff_schema" .= s]) schema
-      ++ maybe [] (\m -> ["eff_model" .= m]) model
-  toJSON (EffGetState key) = object
-    [ "type" .= ("GetState" :: Text)
-    , "eff_state_key" .= key
-    ]
-  toJSON (EffSetState key value) = object
-    [ "type" .= ("SetState" :: Text)
-    , "eff_state_key" .= key
-    , "eff_state_value" .= value
-    ]
-  toJSON (EffEmitEvent name payload) = object
-    [ "type" .= ("EmitEvent" :: Text)
-    , "eff_event_name" .= name
-    , "eff_event_payload" .= payload
-    ]
-  toJSON (EffRandomInt minVal maxVal) = object
-    [ "type" .= ("RandomInt" :: Text)
-    , "eff_min" .= minVal
-    , "eff_max" .= maxVal
-    ]
-  toJSON EffGetTime = object
-    [ "type" .= ("GetTime" :: Text)
-    ]
+  toJSON (EffLlmComplete node sys user schema model) =
+    object $
+      [ "type" .= ("LlmComplete" :: Text),
+        "eff_node" .= node,
+        "eff_system_prompt" .= sys,
+        "eff_user_content" .= user
+      ]
+        ++ maybe [] (\s -> ["eff_schema" .= s]) schema
+        ++ maybe [] (\m -> ["eff_model" .= m]) model
+  toJSON (EffLogInfo msg fields) =
+    object $
+      [ "type" .= ("LogInfo" :: Text),
+        "eff_message" .= msg
+      ]
+        ++ maybe [] (\f -> ["eff_fields" .= f]) fields
+  toJSON (EffLogError msg fields) =
+    object $
+      [ "type" .= ("LogError" :: Text),
+        "eff_message" .= msg
+      ]
+        ++ maybe [] (\f -> ["eff_fields" .= f]) fields
+  toJSON (EffHabitica op payload) =
+    object
+      [ "type" .= ("Habitica" :: Text),
+        "eff_hab_op" .= op,
+        "eff_hab_payload" .= payload
+      ]
+  toJSON (EffTelegramSend txt parseMode threadId) =
+    object $
+      [ "type" .= ("TelegramSend" :: Text),
+        "eff_tg_text" .= txt,
+        "eff_tg_parse_mode" .= parseMode
+      ]
+        ++ maybe [] (\tid -> ["eff_tg_thread_id" .= tid]) threadId
+  toJSON (EffTelegramAsk txt parseMode buttons threadId) =
+    object $
+      [ "type" .= ("TelegramAsk" :: Text),
+        "eff_tg_text" .= txt,
+        "eff_tg_parse_mode" .= parseMode,
+        "eff_buttons" .= [[label, val] | (label, val) <- buttons]
+      ]
+        ++ maybe [] (\tid -> ["eff_tg_thread_id" .= tid]) threadId
+  toJSON (EffLlmCall node msgs schema tools model) =
+    object $
+      [ "type" .= ("LlmCall" :: Text),
+        "eff_node" .= node,
+        "eff_messages" .= msgs,
+        "eff_tools" .= tools
+      ]
+        ++ maybe [] (\s -> ["eff_schema" .= s]) schema
+        ++ maybe [] (\m -> ["eff_model" .= m]) model
+  toJSON (EffGetState key) =
+    object
+      [ "type" .= ("GetState" :: Text),
+        "eff_state_key" .= key
+      ]
+  toJSON (EffSetState key value) =
+    object
+      [ "type" .= ("SetState" :: Text),
+        "eff_state_key" .= key,
+        "eff_state_value" .= value
+      ]
+  toJSON (EffEmitEvent name payload) =
+    object
+      [ "type" .= ("EmitEvent" :: Text),
+        "eff_event_name" .= name,
+        "eff_event_payload" .= payload
+      ]
+  toJSON (EffRandomInt minVal maxVal) =
+    object
+      [ "type" .= ("RandomInt" :: Text),
+        "eff_min" .= minVal,
+        "eff_max" .= maxVal
+      ]
+  toJSON EffGetTime =
+    object
+      [ "type" .= ("GetTime" :: Text)
+      ]
 
 instance FromJSON SerializableEffect where
   parseJSON = withObject "SerializableEffect" $ \o -> do
     (typ :: Text) <- o .: "type"
     case typ of
-      "LlmComplete" -> EffLlmComplete
-        <$> o .: "eff_node"
-        <*> o .: "eff_system_prompt"
-        <*> o .: "eff_user_content"
-        <*> o .:? "eff_schema"
-        <*> o .:? "eff_model"
-      "LogInfo" -> EffLogInfo
-        <$> o .: "eff_message"
-        <*> o .:? "eff_fields"
-      "LogError" -> EffLogError
-        <$> o .: "eff_message"
-        <*> o .:? "eff_fields"
-      "Habitica" -> EffHabitica
-        <$> o .: "eff_hab_op"
-        <*> o .: "eff_hab_payload"
-      "TelegramSend" -> EffTelegramSend
-        <$> o .: "eff_tg_text"
-        <*> o .: "eff_tg_parse_mode"
-        <*> o .:? "eff_tg_thread_id"
+      "LlmComplete" ->
+        EffLlmComplete
+          <$> o .: "eff_node"
+          <*> o .: "eff_system_prompt"
+          <*> o .: "eff_user_content"
+          <*> o .:? "eff_schema"
+          <*> o .:? "eff_model"
+      "LogInfo" ->
+        EffLogInfo
+          <$> o .: "eff_message"
+          <*> o .:? "eff_fields"
+      "LogError" ->
+        EffLogError
+          <$> o .: "eff_message"
+          <*> o .:? "eff_fields"
+      "Habitica" ->
+        EffHabitica
+          <$> o .: "eff_hab_op"
+          <*> o .: "eff_hab_payload"
+      "TelegramSend" ->
+        EffTelegramSend
+          <$> o .: "eff_tg_text"
+          <*> o .: "eff_tg_parse_mode"
+          <*> o .:? "eff_tg_thread_id"
       "TelegramAsk" -> do
         txt <- o .: "eff_tg_text"
         parseMode <- o .: "eff_tg_parse_mode"
@@ -482,25 +516,28 @@ instance FromJSON SerializableEffect where
         threadId <- o .:? "eff_tg_thread_id"
         let buttons = [(l, v) | [l, v] <- buttonArrays]
         pure $ EffTelegramAsk txt parseMode buttons threadId
-      "LlmCall" -> EffLlmCall
-        <$> o .: "eff_node"
-        <*> o .: "eff_messages"
-        <*> o .:? "eff_schema"
-        <*> o .: "eff_tools"
-        <*> o .:? "eff_model"
+      "LlmCall" ->
+        EffLlmCall
+          <$> o .: "eff_node"
+          <*> o .: "eff_messages"
+          <*> o .:? "eff_schema"
+          <*> o .: "eff_tools"
+          <*> o .:? "eff_model"
       "GetState" -> EffGetState <$> o .: "eff_state_key"
-      "SetState" -> EffSetState
-        <$> o .: "eff_state_key"
-        <*> o .: "eff_state_value"
-      "EmitEvent" -> EffEmitEvent
-        <$> o .: "eff_event_name"
-        <*> o .: "eff_event_payload"
-      "RandomInt" -> EffRandomInt
-        <$> o .: "eff_min"
-        <*> o .: "eff_max"
+      "SetState" ->
+        EffSetState
+          <$> o .: "eff_state_key"
+          <*> o .: "eff_state_value"
+      "EmitEvent" ->
+        EffEmitEvent
+          <$> o .: "eff_event_name"
+          <*> o .: "eff_event_payload"
+      "RandomInt" ->
+        EffRandomInt
+          <$> o .: "eff_min"
+          <*> o .: "eff_max"
       "GetTime" -> pure EffGetTime
-      _         -> fail $ "Unknown effect type: " ++ show typ
-
+      _ -> fail $ "Unknown effect type: " ++ show typ
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT METADATA (for routing decisions)
@@ -520,23 +557,22 @@ instance FromJSON SerializableEffect where
 -- emTypeName in the metadata.
 effectMetadata :: SerializableEffect -> (EffectCategory, EffectSemantics)
 effectMetadata = \case
-  EffLogInfo{}       -> (Internal, FireAndForget)
-  EffLogError{}      -> (Internal, FireAndForget)
-  EffLlmComplete{}   -> (Internal, Blocking)
-  EffLlmCall{}       -> (Internal, Blocking)      -- Raw LLM API call
-  EffHabitica{}      -> (Internal, Blocking)
-  EffTelegramSend{}  -> (Yielded, FireAndForget)  -- Send and continue
-  EffTelegramAsk{}   -> (Yielded, Blocking)       -- Wait for button click
+  EffLogInfo {} -> (Internal, FireAndForget)
+  EffLogError {} -> (Internal, FireAndForget)
+  EffLlmComplete {} -> (Internal, Blocking)
+  EffLlmCall {} -> (Internal, Blocking) -- Raw LLM API call
+  EffHabitica {} -> (Internal, Blocking)
+  EffTelegramSend {} -> (Yielded, FireAndForget) -- Send and continue
+  EffTelegramAsk {} -> (Yielded, Blocking) -- Wait for button click
   -- State effects (for DM and other stateful graphs)
-  EffGetState{}      -> (Internal, Blocking)      -- Read state from storage
-  EffSetState{}      -> (Internal, FireAndForget) -- Write state to storage
+  EffGetState {} -> (Internal, Blocking) -- Read state from storage
+  EffSetState {} -> (Internal, FireAndForget) -- Write state to storage
   -- Event emission (for observability/GUI updates)
-  EffEmitEvent{}     -> (Yielded, FireAndForget)  -- Notify listeners
+  EffEmitEvent {} -> (Yielded, FireAndForget) -- Notify listeners
   -- Random number generation
-  EffRandomInt{}     -> (Internal, Blocking)      -- Get random int
+  EffRandomInt {} -> (Internal, Blocking) -- Get random int
   -- Time
-  EffGetTime{}       -> (Internal, Blocking)      -- Get current time
-
+  EffGetTime {} -> (Internal, Blocking) -- Get current time
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT RESULTS (TypeScript → WASM)
@@ -549,26 +585,28 @@ effectMetadata = \case
 --
 -- JSON encoding: @{type: "success", value: ...}@ or @{type: "error", message: "..."}@
 data EffectResult
-  = ResSuccess { resValue :: Maybe Value }
-  | ResError { resMessage :: Text }
+  = ResSuccess {resValue :: Maybe Value}
+  | ResError {resMessage :: Text}
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON EffectResult where
-  toJSON (ResSuccess val) = object $
-    ("type" .= ("success" :: Text))
-    : maybe [] (\v -> ["value" .= v]) val
-  toJSON (ResError msg) = object
-    [ "type" .= ("error" :: Text)
-    , "message" .= msg
-    ]
+  toJSON (ResSuccess val) =
+    object $
+      ("type" .= ("success" :: Text))
+        : maybe [] (\v -> ["value" .= v]) val
+  toJSON (ResError msg) =
+    object
+      [ "type" .= ("error" :: Text),
+        "message" .= msg
+      ]
 
 instance FromJSON EffectResult where
   parseJSON = withObject "EffectResult" $ \o -> do
     (typ :: Text) <- o .: "type"
     case typ of
       "success" -> ResSuccess <$> lookupValue o
-      "error"   -> ResError <$> o .: "message"
-      _         -> fail $ "Unknown result type: " ++ show typ
+      "error" -> ResError <$> o .: "message"
+      _ -> fail $ "Unknown result type: " ++ show typ
 
 -- | Look up "value" field, distinguishing missing from null.
 --
@@ -579,7 +617,6 @@ instance FromJSON EffectResult where
 -- we need to preserve Just Null when the field is explicitly null.
 lookupValue :: Object -> Parser (Maybe Value)
 lookupValue o = pure $ KM.lookup (fromText "value") o
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TELEGRAM ASK RESULT (TypeScript → WASM)
@@ -597,26 +634,29 @@ lookupValue o = pure $ KM.lookup (fromText "value") o
 -- - @{type: "text", text: "some message"}@
 -- - @{type: "stale_button"}@
 data TelegramAskResult
-  = TelegramButton { tarResponse :: Text }
-    -- ^ User clicked a valid button
-  | TelegramText { tarText :: Text }
-    -- ^ User sent text instead of clicking
-  | TelegramStaleButton
-    -- ^ User clicked a button with expired/invalid nonce
+  = -- | User clicked a valid button
+    TelegramButton {tarResponse :: Text}
+  | -- | User sent text instead of clicking
+    TelegramText {tarText :: Text}
+  | -- | User clicked a button with expired/invalid nonce
+    TelegramStaleButton
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON TelegramAskResult where
-  toJSON (TelegramButton response) = object
-    [ "type" .= ("button" :: Text)
-    , "response" .= response
-    ]
-  toJSON (TelegramText txt) = object
-    [ "type" .= ("text" :: Text)
-    , "text" .= txt
-    ]
-  toJSON TelegramStaleButton = object
-    [ "type" .= ("stale_button" :: Text)
-    ]
+  toJSON (TelegramButton response) =
+    object
+      [ "type" .= ("button" :: Text),
+        "response" .= response
+      ]
+  toJSON (TelegramText txt) =
+    object
+      [ "type" .= ("text" :: Text),
+        "text" .= txt
+      ]
+  toJSON TelegramStaleButton =
+    object
+      [ "type" .= ("stale_button" :: Text)
+      ]
 
 instance FromJSON TelegramAskResult where
   parseJSON = withObject "TelegramAskResult" $ \o -> do
@@ -626,7 +666,6 @@ instance FromJSON TelegramAskResult where
       "text" -> TelegramText <$> o .: "text"
       "stale_button" -> pure TelegramStaleButton
       _ -> fail $ "Unknown TelegramAskResult type: " ++ T.unpack typ
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPH STATE (for observability)
@@ -642,68 +681,73 @@ instance FromJSON TelegramAskResult where
 -- - @{type: "failed", error: "..."}@
 data ExecutionPhase
   = PhaseIdle
-  | PhaseInNode { phaseName :: Text }
-  | PhaseTransitioning { phaseFrom :: Text, phaseTo :: Text }
-  | PhaseCompleted { phaseResult :: Value }
-  | PhaseFailed { phaseError :: Text }
+  | PhaseInNode {phaseName :: Text}
+  | PhaseTransitioning {phaseFrom :: Text, phaseTo :: Text}
+  | PhaseCompleted {phaseResult :: Value}
+  | PhaseFailed {phaseError :: Text}
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON ExecutionPhase where
-  toJSON PhaseIdle = object
-    [ "type" .= ("idle" :: Text)
-    ]
-  toJSON (PhaseInNode name) = object
-    [ "type" .= ("in_node" :: Text)
-    , "nodeName" .= name
-    ]
-  toJSON (PhaseTransitioning from to) = object
-    [ "type" .= ("transitioning" :: Text)
-    , "fromNode" .= from
-    , "toNode" .= to
-    ]
-  toJSON (PhaseCompleted result) = object
-    [ "type" .= ("completed" :: Text)
-    , "result" .= result
-    ]
-  toJSON (PhaseFailed err) = object
-    [ "type" .= ("failed" :: Text)
-    , "error" .= err
-    ]
+  toJSON PhaseIdle =
+    object
+      [ "type" .= ("idle" :: Text)
+      ]
+  toJSON (PhaseInNode name) =
+    object
+      [ "type" .= ("in_node" :: Text),
+        "nodeName" .= name
+      ]
+  toJSON (PhaseTransitioning from to) =
+    object
+      [ "type" .= ("transitioning" :: Text),
+        "fromNode" .= from,
+        "toNode" .= to
+      ]
+  toJSON (PhaseCompleted result) =
+    object
+      [ "type" .= ("completed" :: Text),
+        "result" .= result
+      ]
+  toJSON (PhaseFailed err) =
+    object
+      [ "type" .= ("failed" :: Text),
+        "error" .= err
+      ]
 
 instance FromJSON ExecutionPhase where
   parseJSON = withObject "ExecutionPhase" $ \o -> do
     (typ :: Text) <- o .: "type"
     case typ of
-      "idle"          -> pure PhaseIdle
-      "in_node"       -> PhaseInNode <$> o .: "nodeName"
+      "idle" -> pure PhaseIdle
+      "in_node" -> PhaseInNode <$> o .: "nodeName"
       "transitioning" -> PhaseTransitioning <$> o .: "fromNode" <*> o .: "toNode"
-      "completed"     -> PhaseCompleted <$> o .: "result"
-      "failed"        -> PhaseFailed <$> o .: "error"
-      _               -> fail $ "Unknown execution phase type: " ++ show typ
-
+      "completed" -> PhaseCompleted <$> o .: "result"
+      "failed" -> PhaseFailed <$> o .: "error"
+      _ -> fail $ "Unknown execution phase type: " ++ show typ
 
 -- | Runtime graph state - matches protocol.ts GraphState.
 --
 -- JSON encoding: @{phase: {...}, completedNodes: [...]}@
 data GraphState = GraphState
-  { gsPhase :: ExecutionPhase
-  -- ^ Current execution phase
-  , gsCompletedNodes :: [Text]
-  -- ^ Nodes that have completed
+  { -- | Current execution phase
+    gsPhase :: ExecutionPhase,
+    -- | Nodes that have completed
+    gsCompletedNodes :: [Text]
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON GraphState where
-  toJSON gs = object
-    [ "phase" .= gs.gsPhase
-    , "completedNodes" .= gs.gsCompletedNodes
-    ]
+  toJSON gs =
+    object
+      [ "phase" .= gs.gsPhase,
+        "completedNodes" .= gs.gsCompletedNodes
+      ]
 
 instance FromJSON GraphState where
-  parseJSON = withObject "GraphState" $ \o -> GraphState
-    <$> o .: "phase"
-    <*> o .: "completedNodes"
-
+  parseJSON = withObject "GraphState" $ \o ->
+    GraphState
+      <$> o .: "phase"
+      <*> o .: "completedNodes"
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- STEP OUTPUT (WASM → TypeScript per step)
@@ -722,45 +766,48 @@ instance FromJSON GraphState where
 -- 3. Repeat until StepDone or StepFailed
 data StepOutput
   = StepYield
-      { soEffect :: SerializableEffect
-      -- ^ Effect to execute
-      , soGraphState :: GraphState
-      -- ^ Current graph execution state (for observability)
+      { -- | Effect to execute
+        soEffect :: SerializableEffect,
+        -- | Current graph execution state (for observability)
+        soGraphState :: GraphState
       }
   | StepDone
-      { soResult :: Value
-      -- ^ Final result (matches Exit type)
-      , soGraphState :: GraphState
-      -- ^ Final graph execution state
+      { -- | Final result (matches Exit type)
+        soResult :: Value,
+        -- | Final graph execution state
+        soGraphState :: GraphState
       }
   | StepFailed
-      { soError :: Text
-      -- ^ Error message
-      , soGraphState :: GraphState
-      -- ^ Graph state at failure
+      { -- | Error message
+        soError :: Text,
+        -- | Graph state at failure
+        soGraphState :: GraphState
       }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON StepOutput where
-  toJSON (StepYield eff gs) = object
-    [ "effect" .= Just eff
-    , "done" .= False
-    , "stepResult" .= Null
-    , "graphState" .= gs
-    ]
-  toJSON (StepDone result gs) = object
-    [ "effect" .= Null
-    , "done" .= True
-    , "stepResult" .= result
-    , "graphState" .= gs
-    ]
-  toJSON (StepFailed err gs) = object
-    [ "effect" .= Null
-    , "done" .= True
-    , "stepResult" .= Null
-    , "error" .= err
-    , "graphState" .= gs
-    ]
+  toJSON (StepYield eff gs) =
+    object
+      [ "effect" .= Just eff,
+        "done" .= False,
+        "stepResult" .= Null,
+        "graphState" .= gs
+      ]
+  toJSON (StepDone result gs) =
+    object
+      [ "effect" .= Null,
+        "done" .= True,
+        "stepResult" .= result,
+        "graphState" .= gs
+      ]
+  toJSON (StepFailed err gs) =
+    object
+      [ "effect" .= Null,
+        "done" .= True,
+        "stepResult" .= Null,
+        "error" .= err,
+        "graphState" .= gs
+      ]
 
 instance FromJSON StepOutput where
   parseJSON = withObject "StepOutput" $ \o -> do
@@ -784,7 +831,6 @@ instance FromJSON StepOutput where
       (False, Nothing, _) ->
         fail "StepOutput: done=false requires an effect"
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPH INFO (compile-time metadata - matches protocol.ts)
 -- ════════════════════════════════════════════════════════════════════════════
@@ -793,142 +839,148 @@ instance FromJSON StepOutput where
 --
 -- JSON encoding: @{typeName: "Intent", typeModule: "Echo"}@
 data TypeInfoWire = TypeInfoWire
-  { tiwTypeName :: Text
-  -- ^ Simple type name, e.g., "Intent"
-  , tiwTypeModule :: Text
-  -- ^ Module path, e.g., "Echo"
+  { -- | Simple type name, e.g., "Intent"
+    tiwTypeName :: Text,
+    -- | Module path, e.g., "Echo"
+    tiwTypeModule :: Text
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON TypeInfoWire where
-  toJSON ti = object
-    [ "typeName" .= ti.tiwTypeName
-    , "typeModule" .= ti.tiwTypeModule
-    ]
+  toJSON ti =
+    object
+      [ "typeName" .= ti.tiwTypeName,
+        "typeModule" .= ti.tiwTypeModule
+      ]
 
 instance FromJSON TypeInfoWire where
-  parseJSON = withObject "TypeInfoWire" $ \o -> TypeInfoWire
-    <$> o .: "typeName"
-    <*> o .: "typeModule"
-
+  parseJSON = withObject "TypeInfoWire" $ \o ->
+    TypeInfoWire
+      <$> o .: "typeName"
+      <*> o .: "typeModule"
 
 -- | Goto target - control flow destination.
 --
 -- JSON encoding: @{gtTarget: "exit", gtPayloadType: {...}}@
 data GotoTargetWire = GotoTargetWire
-  { gtwTarget :: Text
-  -- ^ Target node name, or "Exit"
-  , gtwPayloadType :: TypeInfoWire
-  -- ^ Type passed (for Exit transitions)
+  { -- | Target node name, or "Exit"
+    gtwTarget :: Text,
+    -- | Type passed (for Exit transitions)
+    gtwPayloadType :: TypeInfoWire
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON GotoTargetWire where
-  toJSON gt = object
-    [ "gtTarget" .= gt.gtwTarget
-    , "gtPayloadType" .= gt.gtwPayloadType
-    ]
+  toJSON gt =
+    object
+      [ "gtTarget" .= gt.gtwTarget,
+        "gtPayloadType" .= gt.gtwPayloadType
+      ]
 
 instance FromJSON GotoTargetWire where
-  parseJSON = withObject "GotoTargetWire" $ \o -> GotoTargetWire
-    <$> o .: "gtTarget"
-    <*> o .: "gtPayloadType"
-
+  parseJSON = withObject "GotoTargetWire" $ \o ->
+    GotoTargetWire
+      <$> o .: "gtTarget"
+      <*> o .: "gtPayloadType"
 
 -- | Node metadata - matches protocol.ts NodeInfo.
 --
 -- JSON encoding:
 -- @{niName: "classify", niKind: "LLM", niInput: {...}, niSchema: null, niGotoTargets: [...]}@
 data NodeInfoWire = NodeInfoWire
-  { niwName :: Text
-  -- ^ Node name (record field name in Servant-style)
-  , niwKind :: Text
-  -- ^ "LLM" or "Logic"
-  , niwInput :: Maybe TypeInfoWire
-  -- ^ Input type this node needs (single type)
-  , niwSchema :: Maybe TypeInfoWire
-  -- ^ Output type (LLM nodes only)
-  , niwGotoTargets :: [GotoTargetWire]
-  -- ^ Possible Goto targets (Logic nodes only)
+  { -- | Node name (record field name in Servant-style)
+    niwName :: Text,
+    -- | "LLM" or "Logic"
+    niwKind :: Text,
+    -- | Input type this node needs (single type)
+    niwInput :: Maybe TypeInfoWire,
+    -- | Output type (LLM nodes only)
+    niwSchema :: Maybe TypeInfoWire,
+    -- | Possible Goto targets (Logic nodes only)
+    niwGotoTargets :: [GotoTargetWire]
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON NodeInfoWire where
-  toJSON ni = object
-    [ "niName" .= ni.niwName
-    , "niKind" .= ni.niwKind
-    , "niInput" .= ni.niwInput
-    , "niSchema" .= ni.niwSchema
-    , "niGotoTargets" .= ni.niwGotoTargets
-    ]
+  toJSON ni =
+    object
+      [ "niName" .= ni.niwName,
+        "niKind" .= ni.niwKind,
+        "niInput" .= ni.niwInput,
+        "niSchema" .= ni.niwSchema,
+        "niGotoTargets" .= ni.niwGotoTargets
+      ]
 
 instance FromJSON NodeInfoWire where
-  parseJSON = withObject "NodeInfoWire" $ \o -> NodeInfoWire
-    <$> o .: "niName"
-    <*> o .: "niKind"
-    <*> o .: "niInput"
-    <*> o .: "niSchema"
-    <*> o .: "niGotoTargets"
-
+  parseJSON = withObject "NodeInfoWire" $ \o ->
+    NodeInfoWire
+      <$> o .: "niName"
+      <*> o .: "niKind"
+      <*> o .: "niInput"
+      <*> o .: "niSchema"
+      <*> o .: "niGotoTargets"
 
 -- | Edge for graph visualization.
 --
 -- JSON encoding: @{eiFrom: "entry", eiTo: "classify", eiPayloadType: {...}}@
 data EdgeInfoWire = EdgeInfoWire
-  { eiwFrom :: Text
-  -- ^ Source: "Entry" or node name
-  , eiwTo :: Text
-  -- ^ Target: "Exit" or node name
-  , eiwPayloadType :: TypeInfoWire
-  -- ^ Type carried on this edge
+  { -- | Source: "Entry" or node name
+    eiwFrom :: Text,
+    -- | Target: "Exit" or node name
+    eiwTo :: Text,
+    -- | Type carried on this edge
+    eiwPayloadType :: TypeInfoWire
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON EdgeInfoWire where
-  toJSON ei = object
-    [ "eiFrom" .= ei.eiwFrom
-    , "eiTo" .= ei.eiwTo
-    , "eiPayloadType" .= ei.eiwPayloadType
-    ]
+  toJSON ei =
+    object
+      [ "eiFrom" .= ei.eiwFrom,
+        "eiTo" .= ei.eiwTo,
+        "eiPayloadType" .= ei.eiwPayloadType
+      ]
 
 instance FromJSON EdgeInfoWire where
-  parseJSON = withObject "EdgeInfoWire" $ \o -> EdgeInfoWire
-    <$> o .: "eiFrom"
-    <*> o .: "eiTo"
-    <*> o .: "eiPayloadType"
-
+  parseJSON = withObject "EdgeInfoWire" $ \o ->
+    EdgeInfoWire
+      <$> o .: "eiFrom"
+      <*> o .: "eiTo"
+      <*> o .: "eiPayloadType"
 
 -- | Static graph metadata - matches protocol.ts GraphInfo.
 --
 -- JSON encoding:
 -- @{name: "ExampleGraph", entryType: {...}, exitType: {...}, nodes: [...], edges: [...]}@
 data GraphInfoWire = GraphInfoWire
-  { giwName :: Text
-  -- ^ Graph name
-  , giwEntryType :: TypeInfoWire
-  -- ^ Type accepted at Entry
-  , giwExitType :: TypeInfoWire
-  -- ^ Type produced at Exit
-  , giwNodes :: [NodeInfoWire]
-  -- ^ All nodes in the graph (excludes Entry/Exit)
-  , giwEdges :: [EdgeInfoWire]
-  -- ^ Edges for visualization (from Needs/Schema and Goto)
+  { -- | Graph name
+    giwName :: Text,
+    -- | Type accepted at Entry
+    giwEntryType :: TypeInfoWire,
+    -- | Type produced at Exit
+    giwExitType :: TypeInfoWire,
+    -- | All nodes in the graph (excludes Entry/Exit)
+    giwNodes :: [NodeInfoWire],
+    -- | Edges for visualization (from Needs/Schema and Goto)
+    giwEdges :: [EdgeInfoWire]
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON GraphInfoWire where
-  toJSON gi = object
-    [ "name" .= gi.giwName
-    , "entryType" .= gi.giwEntryType
-    , "exitType" .= gi.giwExitType
-    , "nodes" .= gi.giwNodes
-    , "edges" .= gi.giwEdges
-    ]
+  toJSON gi =
+    object
+      [ "name" .= gi.giwName,
+        "entryType" .= gi.giwEntryType,
+        "exitType" .= gi.giwExitType,
+        "nodes" .= gi.giwNodes,
+        "edges" .= gi.giwEdges
+      ]
 
 instance FromJSON GraphInfoWire where
-  parseJSON = withObject "GraphInfoWire" $ \o -> GraphInfoWire
-    <$> o .: "name"
-    <*> o .: "entryType"
-    <*> o .: "exitType"
-    <*> o .: "nodes"
-    <*> o .: "edges"
+  parseJSON = withObject "GraphInfoWire" $ \o ->
+    GraphInfoWire
+      <$> o .: "name"
+      <*> o .: "entryType"
+      <*> o .: "exitType"
+      <*> o .: "nodes"
+      <*> o .: "edges"

@@ -8,28 +8,29 @@
 -- Validates that LLM and Logic nodes can coexist with proper data flow.
 module MixedLLMLogicRecord where
 
+import ExoMonad.Graph.Generic (GraphMode (..))
+import ExoMonad.Graph.Generic qualified as G
+import ExoMonad.Graph.Goto (Goto)
+import ExoMonad.Graph.Types (Exit, Input, LLMKind (..), Schema, UsesEffects, type (:@))
 import GHC.Generics (Generic)
 
-import ExoMonad.Graph.Types (type (:@), Input, Schema, UsesEffects, Exit, LLMKind(..))
-import ExoMonad.Graph.Generic (GraphMode(..))
-import qualified ExoMonad.Graph.Generic as G
-import ExoMonad.Graph.Goto (Goto)
-
 data Query
+
 data Intent
+
 data Response
 
 -- | Mixed graph: LLM classification followed by Logic routing to LLM handlers
 -- Uses Goto Exit to demonstrate exit transitions from Logic nodes
 data MixedGraph mode = MixedGraph
-  { mgEntry    :: mode :- G.EntryNode Query
-  , mgClassify :: mode :- G.LLMNode 'API :@ Input Query :@ Schema Intent
-  , mgRouter   :: mode :- G.LogicNode :@ Input Intent :@ UsesEffects '[Goto "mgHandler" Query, Goto Exit Response]
-  , mgHandler  :: mode :- G.LLMNode 'API :@ Input Query :@ Schema Response
-  , mgExit     :: mode :- G.ExitNode Response
+  { mgEntry :: mode :- G.EntryNode Query,
+    mgClassify :: mode :- G.LLMNode 'API :@ Input Query :@ Schema Intent,
+    mgRouter :: mode :- G.LogicNode :@ Input Intent :@ UsesEffects '[Goto "mgHandler" Query, Goto Exit Response],
+    mgHandler :: mode :- G.LLMNode 'API :@ Input Query :@ Schema Response,
+    mgExit :: mode :- G.ExitNode Response
   }
-  deriving Generic
+  deriving (Generic)
 
 -- This should compile without errors
-validGraph :: G.ValidGraphRecord MixedGraph => ()
+validGraph :: (G.ValidGraphRecord MixedGraph) => ()
 validGraph = ()

@@ -20,25 +20,24 @@
 -- 6. Full CLI → Graph → Output pipeline
 module CLIGraphSpec (spec) where
 
+import CLIGraphTypes (CounterInput (..), CounterOutput (..))
 import Control.Monad.Freer (run)
 import Data.Text qualified as T
+import ExoMonad.Graph.CLI
+  ( OutputFormat (..),
+    deriveCLIParser,
+    formatOutput,
+    runGraphCLIPure,
+  )
+import ExoMonad.Graph.Generic (AsHandler, GraphMode (..), type (:-))
+import ExoMonad.Graph.Generic qualified as G
+import ExoMonad.Graph.Goto (Goto, gotoExit)
+import ExoMonad.Graph.Interpret (runGraph)
+import ExoMonad.Graph.Types (Input, UsesEffects, type (:@))
+import ExoMonad.Graph.Types qualified as Types (Exit)
 import GHC.Generics (Generic)
 import Options.Applicative
 import Test.Hspec
-
-import CLIGraphTypes (CounterInput(..), CounterOutput(..))
-import ExoMonad.Graph.CLI
-  ( deriveCLIParser
-  , formatOutput
-  , OutputFormat(..)
-  , runGraphCLIPure
-  )
-import ExoMonad.Graph.Interpret (runGraph)
-import ExoMonad.Graph.Generic (GraphMode(..), type (:-), AsHandler)
-import ExoMonad.Graph.Goto (gotoExit, Goto)
-import ExoMonad.Graph.Types (Input, UsesEffects, type (:@))
-import qualified ExoMonad.Graph.Generic as G
-import qualified ExoMonad.Graph.Types as Types (Exit)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPH DEFINITION
@@ -51,23 +50,30 @@ import qualified ExoMonad.Graph.Types as Types (Exit)
 -- 2. Computes: finalValue = startValue + (increment * times)
 -- 3. Returns CounterOutput with the result
 data CounterGraph mode = CounterGraph
-  { entry   :: mode :- G.EntryNode CounterInput
-  , compute :: mode :- G.LogicNode :@ Input CounterInput
-                    :@ UsesEffects '[Goto Types.Exit CounterOutput]
-  , exit    :: mode :- G.ExitNode CounterOutput
+  { entry :: mode :- G.EntryNode CounterInput,
+    compute ::
+      mode
+        :- G.LogicNode
+        :@ Input CounterInput
+        :@ UsesEffects '[Goto Types.Exit CounterOutput],
+    exit :: mode :- G.ExitNode CounterOutput
   }
-  deriving Generic
+  deriving (Generic)
 
 -- | Handlers for the counter graph (pure logic, no effects).
 counterHandlers :: CounterGraph (AsHandler '[])
-counterHandlers = CounterGraph
-  { entry   = ()
-  , compute = \input -> pure $ gotoExit CounterOutput
-      { finalValue = input.startValue + (input.increment * input.times)
-      , operationsPerformed = input.times
-      }
-  , exit    = ()
-  }
+counterHandlers =
+  CounterGraph
+    { entry = (),
+      compute = \input ->
+        pure $
+          gotoExit
+            CounterOutput
+              { finalValue = input.startValue + (input.increment * input.times),
+                operationsPerformed = input.times
+              },
+      exit = ()
+    }
 
 -- | Execute the counter graph.
 --
@@ -81,10 +87,11 @@ runCounterGraph input = run $ runGraph counterHandlers input
 -- This function is never called (prefixed with _), but if it compiles,
 -- it proves that the type machinery works for our CounterGraph.
 _counterCLI :: IO ()
-_counterCLI = runGraphCLIPure
-  "Counter graph CLI"
-  counterParser
-  counterHandlers
+_counterCLI =
+  runGraphCLIPure
+    "Counter graph CLI"
+    counterParser
+    counterHandlers
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CLI PARSER (TH-derived)
@@ -109,38 +116,49 @@ parseArgs p args =
 spec :: Spec
 spec = do
   describe "E2E: Logic-only graph with CLI" $ do
-
     -- ─────────────────────────────────────────────────────────────────────────
     -- CLI Parsing Tests
     -- ─────────────────────────────────────────────────────────────────────────
 
     describe "CLI parsing" $ do
       it "parses all required flags" $ do
-        let result = parseArgs counterParser
-              ["--start-value", "10", "--increment", "5", "--times", "3"]
-        result `shouldBe` Right CounterInput
-          { startValue = 10
-          , increment = 5
-          , times = 3
-          }
+        let result =
+              parseArgs
+                counterParser
+                ["--start-value", "10", "--increment", "5", "--times", "3"]
+        result
+          `shouldBe` Right
+            CounterInput
+              { startValue = 10,
+                increment = 5,
+                times = 3
+              }
 
       it "parses zero values" $ do
-        let result = parseArgs counterParser
-              ["--start-value", "0", "--increment", "0", "--times", "0"]
-        result `shouldBe` Right CounterInput
-          { startValue = 0
-          , increment = 0
-          , times = 0
-          }
+        let result =
+              parseArgs
+                counterParser
+                ["--start-value", "0", "--increment", "0", "--times", "0"]
+        result
+          `shouldBe` Right
+            CounterInput
+              { startValue = 0,
+                increment = 0,
+                times = 0
+              }
 
       it "parses negative values" $ do
-        let result = parseArgs counterParser
-              ["--start-value", "-10", "--increment", "-5", "--times", "3"]
-        result `shouldBe` Right CounterInput
-          { startValue = -10
-          , increment = -5
-          , times = 3
-          }
+        let result =
+              parseArgs
+                counterParser
+                ["--start-value", "-10", "--increment", "-5", "--times", "3"]
+        result
+          `shouldBe` Right
+            CounterInput
+              { startValue = -10,
+                increment = -5,
+                times = 3
+              }
 
       it "fails on missing required flag" $ do
         let result = parseArgs counterParser ["--start-value", "10"]
@@ -154,21 +172,21 @@ spec = do
 
     describe "Graph execution" $ do
       it "computes correct result" $ do
-        let input = CounterInput { startValue = 10, increment = 5, times = 3 }
+        let input = CounterInput {startValue = 10, increment = 5, times = 3}
             result = runCounterGraph input
-        result.finalValue `shouldBe` 25  -- 10 + (5 * 3)
+        result.finalValue `shouldBe` 25 -- 10 + (5 * 3)
         result.operationsPerformed `shouldBe` 3
 
       it "handles zero iterations" $ do
-        let input = CounterInput { startValue = 100, increment = 50, times = 0 }
+        let input = CounterInput {startValue = 100, increment = 50, times = 0}
             result = runCounterGraph input
-        result.finalValue `shouldBe` 100  -- 100 + (50 * 0)
+        result.finalValue `shouldBe` 100 -- 100 + (50 * 0)
         result.operationsPerformed `shouldBe` 0
 
       it "handles negative increment" $ do
-        let input = CounterInput { startValue = 10, increment = -3, times = 4 }
+        let input = CounterInput {startValue = 10, increment = -3, times = 4}
             result = runCounterGraph input
-        result.finalValue `shouldBe` (-2)  -- 10 + (-3 * 4)
+        result.finalValue `shouldBe` (-2) -- 10 + (-3 * 4)
         result.operationsPerformed `shouldBe` 4
 
     -- ─────────────────────────────────────────────────────────────────────────
@@ -204,6 +222,6 @@ spec = do
           Right input -> do
             let result = runCounterGraph input
                 jsonOutput = formatOutput FormatJSON result
-            result.finalValue `shouldBe` 150  -- 100 + (10 * 5)
+            result.finalValue `shouldBe` 150 -- 100 + (10 * 5)
             jsonOutput `shouldSatisfy` T.isInfixOf "150"
           Left err -> expectationFailure err

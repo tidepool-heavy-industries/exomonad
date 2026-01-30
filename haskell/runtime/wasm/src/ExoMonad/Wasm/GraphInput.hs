@@ -2,13 +2,14 @@
 {-# LANGUAGE LambdaCase #-}
 
 module ExoMonad.Wasm.GraphInput
-  ( GraphInput(..)
-  ) where
+  ( GraphInput (..),
+  )
+where
 
-import Data.Aeson (FromJSON(..), ToJSON(..), Options(..), SumEncoding(..), defaultOptions, genericToJSON, genericParseJSON)
+import Data.Aeson (FromJSON (..), Options (..), SumEncoding (..), ToJSON (..), defaultOptions, genericParseJSON, genericToJSON)
 import Data.Text (Text)
+import ExoMonad.Anthropic.Types (ImageSource (..))
 import GHC.Generics (Generic)
-import ExoMonad.Anthropic.Types (ImageSource(..))
 
 -- | Universal input type for WASM graphs that can handle text or photos.
 --
@@ -27,30 +28,32 @@ data GraphInput
       { textContent :: Text
       }
   | PhotoInput
-      { photoCaption :: Maybe Text
-      , photoImage :: ImageSource  -- Reuses existing type from exomonad-core
+      { photoCaption :: Maybe Text,
+        photoImage :: ImageSource -- Reuses existing type from exomonad-core
       }
   deriving (Show, Eq, Generic)
 
 -- | Custom JSON options for GraphInput to match TypeScript format.
 graphInputOptions :: Options
-graphInputOptions = defaultOptions
-  { sumEncoding = TaggedObject
-      { tagFieldName = "type"  -- Use "type" instead of "tag"
-      , contentsFieldName = "contents"
-      }
-  , constructorTagModifier = \case
-      "TextInput"  -> "text"
-      "PhotoInput" -> "photo"
-      other        -> other
-  , fieldLabelModifier = \field ->
-      case field of
-        "textContent" -> "text"
-        "photoCaption" -> "caption"
-        "photoImage" -> "image"
-        _ -> field
-  , omitNothingFields = True  -- Omit caption field when Nothing
-  }
+graphInputOptions =
+  defaultOptions
+    { sumEncoding =
+        TaggedObject
+          { tagFieldName = "type", -- Use "type" instead of "tag"
+            contentsFieldName = "contents"
+          },
+      constructorTagModifier = \case
+        "TextInput" -> "text"
+        "PhotoInput" -> "photo"
+        other -> other,
+      fieldLabelModifier = \field ->
+        case field of
+          "textContent" -> "text"
+          "photoCaption" -> "caption"
+          "photoImage" -> "image"
+          _ -> field,
+      omitNothingFields = True -- Omit caption field when Nothing
+    }
 
 instance ToJSON GraphInput where
   toJSON = genericToJSON graphInputOptions

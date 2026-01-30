@@ -1,7 +1,7 @@
 module Main (main) where
 
+import ExoMonad.Teaching.RecordSpec qualified
 import Test.Hspec
-import qualified ExoMonad.Teaching.RecordSpec
 
 main :: IO ()
 main = hspec $ do

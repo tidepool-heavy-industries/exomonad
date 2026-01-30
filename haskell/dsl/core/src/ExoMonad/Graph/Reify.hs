@@ -1,4 +1,3 @@
-
 -- | Runtime reification of type-level graph information.
 --
 -- This module provides typeclasses that convert compile-time type information
@@ -25,88 +24,96 @@
 -- @
 module ExoMonad.Graph.Reify
   ( -- * Graph Info Types
-    GraphInfo(..)
-  , NodeInfo(..)
-  , EdgeInfo(..)
-  , RuntimeNodeKind(..)
-  , RuntimeEdgeKind(..)
-  , ToolInfo(..)
+    GraphInfo (..),
+    NodeInfo (..),
+    EdgeInfo (..),
+    RuntimeNodeKind (..),
+    RuntimeEdgeKind (..),
+    ToolInfo (..),
 
     -- * Rich Info Types
-  , SchemaInfo(..)
-  , TemplateInfo(..)
-  , MemoryInfo(..)
-  , ClaudeCodeInfo(..)
-  , GeminiInfo(..)
+    SchemaInfo (..),
+    TemplateInfo (..),
+    MemoryInfo (..),
+    ClaudeCodeInfo (..),
+    GeminiInfo (..),
 
     -- * Reification Typeclasses
-  , ReifyGraph(..)
+    ReifyGraph (..),
 
     -- * Record-Based Graph Reification
-  , ReifyRecordGraph(..)
-  , GReifyFields(..)
-  , ReifyNodeDef(..)
-  , makeGraphInfo
+    ReifyRecordGraph (..),
+    GReifyFields (..),
+    ReifyNodeDef (..),
+    makeGraphInfo,
 
     -- * EntryNode/Exit Type Extraction
-  , GetEntryTypeFromGraph
-  , GetExitTypeFromGraph
+    GetEntryTypeFromGraph,
+    GetExitTypeFromGraph,
 
     -- * Helper Typeclasses
-  , ReifyTypeList(..)
-  , ReifyMaybeType(..)
-  , ReifyGotoTargets(..)
-  , ReifyNodeKind(..)
-  , ReifyBool(..)
-  , ReifySchemaInfo(..)
-  , ReifyTemplateInfo(..)
-  , ReifyMemoryInfo(..)
-  , ReifyClaudeCodeInfo(..)
-  , ReifyGeminiInfo(..)
+    ReifyTypeList (..),
+    ReifyMaybeType (..),
+    ReifyGotoTargets (..),
+    ReifyNodeKind (..),
+    ReifyBool (..),
+    ReifySchemaInfo (..),
+    ReifyTemplateInfo (..),
+    ReifyMemoryInfo (..),
+    ReifyClaudeCodeInfo (..),
+    ReifyGeminiInfo (..),
 
     -- * Goto Target Extraction
-  , GotoTargetsFromDef
-  , GotoTargetsFromEffects
-  , HasGotoExitInDef
-  , HasGotoExitFromEffects
+    GotoTargetsFromDef,
+    GotoTargetsFromEffects,
+    HasGotoExitInDef,
+    HasGotoExitFromEffects,
 
     -- * Utilities
-  , simplifyTypeName
+    simplifyTypeName,
 
     -- * Node Type Predicates
-  , IsForkNode
-  , IsBarrierNode
-  ) where
+    IsForkNode,
+    IsBarrierNode,
+  )
+where
 
 import Data.Char (isAsciiUpper)
-import Data.Kind (Type, Constraint)
-import Data.Proxy (Proxy(..))
+import Data.Kind (Constraint, Type)
+import Data.Map.Strict qualified as Map
+import Data.Proxy (Proxy (..))
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Data.Typeable (TypeRep, Typeable, typeRep)
-import GHC.Generics (Generic(..), K1(..), M1(..), (:*:)(..), Meta(..), S, D, C)
-import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
-import qualified Data.Map.Strict as Map
-
-import ExoMonad.Graph.Types (NodeKind(..), type (:@), ModelChoice(..), GeminiModel(..), Tool)
-import ExoMonad.Graph.Tool (ToolInfo(..))
-import ExoMonad.Graph.Generic.Core (EntryNode, ExitNode, LLMNode, GeminiNode, LogicNode, ForkNode, BarrierNode, AsGraph)
 import ExoMonad.Graph.Edges
-  ( GetInput, GetSchema, GetTemplate, GetSystem
-  , GetVision, GetTools, GetMemory, GetUsesEffects
-  , GetGotoTargets, HasGotoExit
-  , GetClaudeCode, GetGeminiModel
+  ( GetClaudeCode,
+    GetGeminiModel,
+    GetGotoTargets,
+    GetInput,
+    GetMemory,
+    GetSchema,
+    GetSystem,
+    GetTemplate,
+    GetTools,
+    GetUsesEffects,
+    GetVision,
+    HasGotoExit,
   )
-import ExoMonad.Schema (JSONSchema(..), HasJSONSchema(..), SchemaType(..))
+import ExoMonad.Graph.Generic.Core (AsGraph, BarrierNode, EntryNode, ExitNode, ForkNode, GeminiNode, LLMNode, LogicNode)
 import ExoMonad.Graph.Template
-  ( TemplateDef(..)
-  , TemplateDependency(..)
-  , TemplateContextInfo(..)
-  , templateDependencyTree
-  , flattenDeps
-  , templateContextInfo
-  , templateAccessedFields
+  ( TemplateContextInfo (..),
+    TemplateDef (..),
+    TemplateDependency (..),
+    flattenDeps,
+    templateAccessedFields,
+    templateContextInfo,
+    templateDependencyTree,
   )
+import ExoMonad.Graph.Tool (ToolInfo (..))
+import ExoMonad.Graph.Types (GeminiModel (..), ModelChoice (..), NodeKind (..), Tool, type (:@))
+import ExoMonad.Schema (HasJSONSchema (..), JSONSchema (..), SchemaType (..))
+import GHC.Generics (C, D, Generic (..), K1 (..), M1 (..), Meta (..), S, (:*:) (..))
+import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 
 -- | Effect type alias (freer-simple effects have kind Type -> Type).
 type Effect = Type -> Type
@@ -155,11 +162,16 @@ type family OrMaybe a b where
 
 -- | Complete runtime representation of a graph.
 data GraphInfo = GraphInfo
-  { giEntryType :: Maybe TypeRep   -- ^ Type accepted at EntryNode
-  , giExitType :: Maybe TypeRep    -- ^ Type produced at Exit
-  , giNodes :: [NodeInfo]          -- ^ All node declarations
-  , giEdges :: [EdgeInfo]          -- ^ Derived edges
-  , giGroups :: [(Text, [Text])]   -- ^ Groups annotation (for Mermaid subgraphs)
+  { -- | Type accepted at EntryNode
+    giEntryType :: Maybe TypeRep,
+    -- | Type produced at Exit
+    giExitType :: Maybe TypeRep,
+    -- | All node declarations
+    giNodes :: [NodeInfo],
+    -- | Derived edges
+    giEdges :: [EdgeInfo],
+    -- | Groups annotation (for Mermaid subgraphs)
+    giGroups :: [(Text, [Text])]
   }
   deriving (Show, Eq)
 
@@ -169,46 +181,72 @@ data GraphInfo = GraphInfo
 -- schema details, and tool information. This serves as the single source
 -- of truth for Mermaid diagrams, JSON export, and D3 visualization.
 data NodeInfo = NodeInfo
-  { niName :: Text                      -- ^ Node name (from Symbol)
-  , niKind :: RuntimeNodeKind           -- ^ LLM, ClaudeCode, or Logic
-  , niInput :: Maybe TypeRep            -- ^ Input type this node needs
-  , niSchema :: Maybe SchemaInfo        -- ^ Rich schema info (LLM nodes)
-  , niGotoTargets :: [(Text, TypeRep)]  -- ^ Goto targets (Logic nodes)
-  , niHasGotoExit :: Bool               -- ^ Can this node exit the graph?
-  , niHasVision :: Bool                 -- ^ Has Vision annotation?
-  , niTools :: [TypeRep]                -- ^ Tool types (for backwards compat)
-  , niToolInfos :: [ToolInfo]           -- ^ Full tool info with schemas (V2)
-  , niSystem :: Maybe TemplateInfo      -- ^ System prompt template (rich info)
-  , niTemplate :: Maybe TemplateInfo    -- ^ User prompt template (rich info)
-  , niMemory :: Maybe MemoryInfo        -- ^ Memory type (rich info)
-  , niClaudeCode :: Maybe ClaudeCodeInfo -- ^ ClaudeCode annotation (rich info)
-  , niGemini :: Maybe GeminiInfo        -- ^ Gemini annotation (rich info)
+  { -- | Node name (from Symbol)
+    niName :: Text,
+    -- | LLM, ClaudeCode, or Logic
+    niKind :: RuntimeNodeKind,
+    -- | Input type this node needs
+    niInput :: Maybe TypeRep,
+    -- | Rich schema info (LLM nodes)
+    niSchema :: Maybe SchemaInfo,
+    -- | Goto targets (Logic nodes)
+    niGotoTargets :: [(Text, TypeRep)],
+    -- | Can this node exit the graph?
+    niHasGotoExit :: Bool,
+    -- | Has Vision annotation?
+    niHasVision :: Bool,
+    -- | Tool types (for backwards compat)
+    niTools :: [TypeRep],
+    -- | Full tool info with schemas (V2)
+    niToolInfos :: [ToolInfo],
+    -- | System prompt template (rich info)
+    niSystem :: Maybe TemplateInfo,
+    -- | User prompt template (rich info)
+    niTemplate :: Maybe TemplateInfo,
+    -- | Memory type (rich info)
+    niMemory :: Maybe MemoryInfo,
+    -- | ClaudeCode annotation (rich info)
+    niClaudeCode :: Maybe ClaudeCodeInfo,
+    -- | Gemini annotation (rich info)
+    niGemini :: Maybe GeminiInfo
   }
   deriving (Show, Eq)
 
 -- | Runtime representation of an edge.
 data EdgeInfo = EdgeInfo
-  { eiFrom :: Text               -- ^ Source node (or "EntryNode")
-  , eiTo :: Text                 -- ^ Target node (or "Exit")
-  , eiPayload :: Maybe TypeRep   -- ^ Type carried on edge
-  , eiKind :: RuntimeEdgeKind    -- ^ Edge classification
+  { -- | Source node (or "EntryNode")
+    eiFrom :: Text,
+    -- | Target node (or "Exit")
+    eiTo :: Text,
+    -- | Type carried on edge
+    eiPayload :: Maybe TypeRep,
+    -- | Edge classification
+    eiKind :: RuntimeEdgeKind
   }
   deriving (Show, Eq)
 
 -- | Runtime node kind.
 data RuntimeNodeKind
-  = RuntimeLLM         -- ^ Standard LLM API call
-  | RuntimeClaudeCode  -- ^ Claude Code subprocess
-  | RuntimeGemini      -- ^ Gemini CLI subprocess
-  | RuntimeLogic       -- ^ Pure routing logic
-  | RuntimeFork        -- ^ Fork node - spawns parallel workers
-  | RuntimeBarrier     -- ^ Barrier node - collects parallel results
+  = -- | Standard LLM API call
+    RuntimeLLM
+  | -- | Claude Code subprocess
+    RuntimeClaudeCode
+  | -- | Gemini CLI subprocess
+    RuntimeGemini
+  | -- | Pure routing logic
+    RuntimeLogic
+  | -- | Fork node - spawns parallel workers
+    RuntimeFork
+  | -- | Barrier node - collects parallel results
+    RuntimeBarrier
   deriving (Show, Eq)
 
 -- | Runtime edge kind.
 data RuntimeEdgeKind
-  = RuntimeImplicit    -- ^ Schema → Needs (data flow)
-  | RuntimeExplicit    -- ^ Goto (transition)
+  = -- | Schema → Needs (data flow)
+    RuntimeImplicit
+  | -- | Goto (transition)
+    RuntimeExplicit
   deriving (Show, Eq)
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -220,10 +258,14 @@ data RuntimeEdgeKind
 -- Captures everything an LLM or visualization tool needs to understand
 -- the output type of an LLM node.
 data SchemaInfo = SchemaInfo
-  { siType :: TypeRep                   -- ^ The Haskell type
-  , siTypeName :: Text                  -- ^ Simplified type name (e.g., "Intent")
-  , siJsonSchema :: JSONSchema          -- ^ Full JSON schema with descriptions
-  , siFields :: [(Text, Text, Bool)]    -- ^ (fieldName, fieldType, isRequired)
+  { -- | The Haskell type
+    siType :: TypeRep,
+    -- | Simplified type name (e.g., "Intent")
+    siTypeName :: Text,
+    -- | Full JSON schema with descriptions
+    siJsonSchema :: JSONSchema,
+    -- | (fieldName, fieldType, isRequired)
+    siFields :: [(Text, Text, Bool)]
   }
   deriving (Show, Eq)
 
@@ -232,31 +274,41 @@ data SchemaInfo = SchemaInfo
 -- Captures everything needed to understand which template file is wired
 -- to a node and what context it expects.
 data TemplateInfo = TemplateInfo
-  { tiType :: TypeRep                   -- ^ The template type (e.g., ClassifyTpl)
-  , tiTypeName :: Text                  -- ^ Simplified type name
-  , tiPath :: FilePath                  -- ^ Template file path (e.g., "templates/classify.jinja")
-  , tiDeps :: [FilePath]                -- ^ Transitive template dependencies
-  , tiAccessedFields :: [String]        -- ^ Fields accessed in template (e.g., ["topic", "history"])
-  , tiContextType :: Text               -- ^ Context type name (e.g., "ClassifyContext")
+  { -- | The template type (e.g., ClassifyTpl)
+    tiType :: TypeRep,
+    -- | Simplified type name
+    tiTypeName :: Text,
+    -- | Template file path (e.g., "templates/classify.jinja")
+    tiPath :: FilePath,
+    -- | Transitive template dependencies
+    tiDeps :: [FilePath],
+    -- | Fields accessed in template (e.g., ["topic", "history"])
+    tiAccessedFields :: [String],
+    -- | Context type name (e.g., "ClassifyContext")
+    tiContextType :: Text
   }
   deriving (Show, Eq)
 
 -- | Rich memory information for node-private persistent state.
 data MemoryInfo = MemoryInfo
-  { miType :: TypeRep                   -- ^ The memory type
-  , miTypeName :: Text                  -- ^ Simplified type name
+  { -- | The memory type
+    miType :: TypeRep,
+    -- | Simplified type name
+    miTypeName :: Text
   }
   deriving (Show, Eq)
 
 -- | Rich ClaudeCode information for nodes executed via Claude Code subprocess.
 data ClaudeCodeInfo = ClaudeCodeInfo
-  { cciModel :: Text                    -- ^ Model choice: "Haiku", "Sonnet", or "Opus"
+  { -- | Model choice: "Haiku", "Sonnet", or "Opus"
+    cciModel :: Text
   }
   deriving (Show, Eq)
 
 -- | Rich Gemini information for nodes executed via Gemini CLI subprocess.
 data GeminiInfo = GeminiInfo
-  { giModel :: Text                    -- ^ Model choice: "Flash", "Pro", or "Ultra"
+  { -- | Model choice: "Flash", "Pro", or "Ultra"
+    giModel :: Text
   }
   deriving (Show, Eq)
 
@@ -283,9 +335,9 @@ simplifyTypeName tr = T.pack $ go $ show tr
   where
     go s = case break (== '.') s of
       (_, []) -> s
-      (_, '.':rest) ->
+      (_, '.' : rest) ->
         case rest of
-          (c:_) | isAsciiUpper c -> go rest
+          (c : _) | isAsciiUpper c -> go rest
           _ -> s
       _ -> s
 
@@ -336,8 +388,10 @@ class ReifyToolRecord (record :: Type -> Type) where
   reifyToolInputs :: Proxy record -> [TypeRep]
 
 -- Default instance: traverse Generic representation
-instance GReifyToolFields (Rep (record AsGraph))
-      => ReifyToolRecord record where
+instance
+  (GReifyToolFields (Rep (record AsGraph))) =>
+  ReifyToolRecord record
+  where
   reifyToolInputs _ = gReifyToolFields (Proxy @(Rep (record AsGraph)))
 
 -- | Generic traversal for tool record fields.
@@ -347,11 +401,11 @@ class GReifyToolFields (f :: Type -> Type) where
   gReifyToolFields :: Proxy f -> [TypeRep]
 
 -- Datatype metadata: pass through
-instance GReifyToolFields f => GReifyToolFields (M1 D meta f) where
+instance (GReifyToolFields f) => GReifyToolFields (M1 D meta f) where
   gReifyToolFields _ = gReifyToolFields (Proxy @f)
 
 -- Constructor metadata: pass through
-instance GReifyToolFields f => GReifyToolFields (M1 C meta f) where
+instance (GReifyToolFields f) => GReifyToolFields (M1 C meta f) where
   gReifyToolFields _ = gReifyToolFields (Proxy @f)
 
 -- Product: combine left and right
@@ -359,8 +413,10 @@ instance (GReifyToolFields l, GReifyToolFields r) => GReifyToolFields (l :*: r) 
   gReifyToolFields _ = gReifyToolFields (Proxy @l) ++ gReifyToolFields (Proxy @r)
 
 -- Named field with Tool annotation: extract input type
-instance Typeable input
-      => GReifyToolFields (M1 S ('MetaSel ('Just name) su ss ds) (K1 i (Tool input result))) where
+instance
+  (Typeable input) =>
+  GReifyToolFields (M1 S ('MetaSel ('Just name) su ss ds) (K1 i (Tool input result)))
+  where
   gReifyToolFields _ = [typeRep (Proxy @input)]
 
 -- Unnamed field or non-Tool field: skip
@@ -381,7 +437,7 @@ class ReifyMaybeToolRecord (mrecord :: Maybe (Type -> Type)) where
 instance ReifyMaybeToolRecord 'Nothing where
   reifyMaybeToolInputs _ = []
 
-instance ReifyToolRecord record => ReifyMaybeToolRecord ('Just record) where
+instance (ReifyToolRecord record) => ReifyMaybeToolRecord ('Just record) where
   reifyMaybeToolInputs _ = reifyToolInputs (Proxy @record)
 
 -- | Reify a type-level Maybe Type to runtime Maybe TypeRep.
@@ -392,7 +448,7 @@ class ReifyMaybeType (mt :: Maybe Type) where
 instance ReifyMaybeType 'Nothing where
   reifyMaybeType _ = Nothing
 
-instance Typeable t => ReifyMaybeType ('Just t) where
+instance (Typeable t) => ReifyMaybeType ('Just t) where
   reifyMaybeType _ = Just (typeRep (Proxy @t))
 
 -- | Reify a type-level list of (Symbol, Type) pairs to runtime [(Text, TypeRep)].
@@ -405,11 +461,13 @@ class ReifyGotoTargets (ts :: [(Symbol, Type)]) where
 instance ReifyGotoTargets '[] where
   reifyGotoTargets _ = []
 
-instance (KnownSymbol name, Typeable payload, ReifyGotoTargets rest)
-      => ReifyGotoTargets ('(name, payload) ': rest) where
+instance
+  (KnownSymbol name, Typeable payload, ReifyGotoTargets rest) =>
+  ReifyGotoTargets ('(name, payload) ': rest)
+  where
   reifyGotoTargets _ =
     (T.pack (symbolVal (Proxy @name)), typeRep (Proxy @payload))
-    : reifyGotoTargets (Proxy @rest)
+      : reifyGotoTargets (Proxy @rest)
 
 -- | Reify NodeKind to RuntimeNodeKind.
 type ReifyNodeKind :: NodeKind -> Constraint
@@ -448,12 +506,14 @@ instance ReifySchemaInfo 'Nothing where
   reifySchemaInfo _ = Nothing
 
 instance (Typeable t, HasJSONSchema t) => ReifySchemaInfo ('Just t) where
-  reifySchemaInfo _ = Just SchemaInfo
-    { siType = typeRep (Proxy @t)
-    , siTypeName = simplifyTypeName (typeRep (Proxy @t))
-    , siJsonSchema = jsonSchema @t
-    , siFields = extractSchemaFields (jsonSchema @t)
-    }
+  reifySchemaInfo _ =
+    Just
+      SchemaInfo
+        { siType = typeRep (Proxy @t),
+          siTypeName = simplifyTypeName (typeRep (Proxy @t)),
+          siJsonSchema = jsonSchema @t,
+          siFields = extractSchemaFields (jsonSchema @t)
+        }
 
 -- | Reify a type-level Maybe template type to runtime Maybe TemplateInfo.
 --
@@ -466,14 +526,16 @@ instance ReifyTemplateInfo 'Nothing where
   reifyTemplateInfo _ = Nothing
 
 instance (Typeable t, TemplateDef t) => ReifyTemplateInfo ('Just t) where
-  reifyTemplateInfo _ = Just TemplateInfo
-    { tiType = typeRep (Proxy @t)
-    , tiTypeName = simplifyTypeName (typeRep (Proxy @t))
-    , tiPath = depRelativePath depTree
-    , tiDeps = map depRelativePath $ drop 1 $ flattenDeps depTree  -- Skip root
-    , tiAccessedFields = templateAccessedFields compiled
-    , tiContextType = T.pack $ tciTypeName $ templateContextInfo compiled
-    }
+  reifyTemplateInfo _ =
+    Just
+      TemplateInfo
+        { tiType = typeRep (Proxy @t),
+          tiTypeName = simplifyTypeName (typeRep (Proxy @t)),
+          tiPath = depRelativePath depTree,
+          tiDeps = map depRelativePath $ drop 1 $ flattenDeps depTree, -- Skip root
+          tiAccessedFields = templateAccessedFields compiled,
+          tiContextType = T.pack $ tciTypeName $ templateContextInfo compiled
+        }
     where
       compiled = templateCompiled @t
       depTree = templateDependencyTree compiled
@@ -486,11 +548,13 @@ class ReifyMemoryInfo (mt :: Maybe Type) where
 instance ReifyMemoryInfo 'Nothing where
   reifyMemoryInfo _ = Nothing
 
-instance Typeable t => ReifyMemoryInfo ('Just t) where
-  reifyMemoryInfo _ = Just MemoryInfo
-    { miType = typeRep (Proxy @t)
-    , miTypeName = simplifyTypeName (typeRep (Proxy @t))
-    }
+instance (Typeable t) => ReifyMemoryInfo ('Just t) where
+  reifyMemoryInfo _ =
+    Just
+      MemoryInfo
+        { miType = typeRep (Proxy @t),
+          miTypeName = simplifyTypeName (typeRep (Proxy @t))
+        }
 
 -- | Reify a type-level Maybe ModelChoice annotation to runtime Maybe ClaudeCodeInfo.
 type ReifyClaudeCodeInfo :: Maybe ModelChoice -> Constraint
@@ -501,13 +565,13 @@ instance ReifyClaudeCodeInfo 'Nothing where
   reifyClaudeCodeInfo _ = Nothing
 
 instance ReifyClaudeCodeInfo ('Just 'Haiku) where
-  reifyClaudeCodeInfo _ = Just ClaudeCodeInfo { cciModel = "Haiku" }
+  reifyClaudeCodeInfo _ = Just ClaudeCodeInfo {cciModel = "Haiku"}
 
 instance ReifyClaudeCodeInfo ('Just 'Sonnet) where
-  reifyClaudeCodeInfo _ = Just ClaudeCodeInfo { cciModel = "Sonnet" }
+  reifyClaudeCodeInfo _ = Just ClaudeCodeInfo {cciModel = "Sonnet"}
 
 instance ReifyClaudeCodeInfo ('Just 'Opus) where
-  reifyClaudeCodeInfo _ = Just ClaudeCodeInfo { cciModel = "Opus" }
+  reifyClaudeCodeInfo _ = Just ClaudeCodeInfo {cciModel = "Opus"}
 
 -- | Reify a type-level Maybe GeminiModel annotation to runtime Maybe GeminiInfo.
 type ReifyGeminiInfo :: Maybe GeminiModel -> Constraint
@@ -518,13 +582,13 @@ instance ReifyGeminiInfo 'Nothing where
   reifyGeminiInfo _ = Nothing
 
 instance ReifyGeminiInfo ('Just 'Flash) where
-  reifyGeminiInfo _ = Just GeminiInfo { giModel = "Flash" }
+  reifyGeminiInfo _ = Just GeminiInfo {giModel = "Flash"}
 
 instance ReifyGeminiInfo ('Just 'Pro) where
-  reifyGeminiInfo _ = Just GeminiInfo { giModel = "Pro" }
+  reifyGeminiInfo _ = Just GeminiInfo {giModel = "Pro"}
 
 instance ReifyGeminiInfo ('Just 'Ultra) where
-  reifyGeminiInfo _ = Just GeminiInfo { giModel = "Ultra" }
+  reifyGeminiInfo _ = Just GeminiInfo {giModel = "Ultra"}
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GOTO TARGET REIFICATION
@@ -599,24 +663,26 @@ class ReifyRecordGraph (graph :: Type -> Type) where
 -- * @GReifyFields (Rep (graph AsGraph))@ - for node extraction
 -- * @ReifyMaybeType (GetEntryTypeFromGraph graph)@ - for entry type
 -- * @ReifyMaybeType (GetExitTypeFromGraph graph)@ - for exit type
-makeGraphInfo
-  :: forall graph.
-     ( GReifyFields (Rep (graph AsGraph))
-     , ReifyMaybeType (GetEntryTypeFromGraph graph)
-     , ReifyMaybeType (GetExitTypeFromGraph graph)
-     )
-  => Proxy graph
-  -> GraphInfo
-makeGraphInfo _ = GraphInfo
-  { giEntryType = entryType
-  , giExitType = exitType
-  , giNodes = nodes
-  , giEdges = deriveImplicitEdges entryType nodes
+makeGraphInfo ::
+  forall graph.
+  ( GReifyFields (Rep (graph AsGraph)),
+    ReifyMaybeType (GetEntryTypeFromGraph graph),
+    ReifyMaybeType (GetExitTypeFromGraph graph)
+  ) =>
+  Proxy graph ->
+  GraphInfo
+makeGraphInfo _ =
+  GraphInfo
+    { giEntryType = entryType,
+      giExitType = exitType,
+      giNodes = nodes,
+      giEdges =
+        deriveImplicitEdges entryType nodes
           ++ deriveExitEdges exitType nodes
           ++ deriveGotoEdges nodes
-          ++ deriveGotoExitEdges nodes
-  , giGroups = []  -- Would need graph-level annotation extraction
-  }
+          ++ deriveGotoExitEdges nodes,
+      giGroups = [] -- Would need graph-level annotation extraction
+    }
   where
     entryType = reifyMaybeType (Proxy @(GetEntryTypeFromGraph graph))
     exitType = reifyMaybeType (Proxy @(GetExitTypeFromGraph graph))
@@ -635,11 +701,11 @@ class GReifyFields (f :: Type -> Type) where
   gReifyFields :: Proxy f -> [NodeInfo]
 
 -- Datatype metadata: pass through
-instance GReifyFields f => GReifyFields (M1 D meta f) where
+instance (GReifyFields f) => GReifyFields (M1 D meta f) where
   gReifyFields _ = gReifyFields (Proxy @f)
 
 -- Constructor metadata: pass through
-instance GReifyFields f => GReifyFields (M1 C meta f) where
+instance (GReifyFields f) => GReifyFields (M1 C meta f) where
   gReifyFields _ = gReifyFields (Proxy @f)
 
 -- Product: combine left and right
@@ -647,8 +713,10 @@ instance (GReifyFields l, GReifyFields r) => GReifyFields (l :*: r) where
   gReifyFields _ = gReifyFields (Proxy @l) ++ gReifyFields (Proxy @r)
 
 -- Named field: extract name and delegate to ReifyNodeDef
-instance (KnownSymbol name, ReifyNodeDef def)
-      => GReifyFields (M1 S ('MetaSel ('Just name) su ss ds) (K1 i def)) where
+instance
+  (KnownSymbol name, ReifyNodeDef def) =>
+  GReifyFields (M1 S ('MetaSel ('Just name) su ss ds) (K1 i def))
+  where
   gReifyFields _ = reifyNodeDef (Proxy @name) (Proxy @def)
 
 -- Unnamed field or bare K1: no nodes
@@ -662,7 +730,7 @@ instance GReifyFields (K1 i c) where
 --
 -- Returns @[]@ for EntryNode/Exit (not real nodes), @[NodeInfo]@ for LLMNode/LogicNode.
 class ReifyNodeDef (def :: Type) where
-  reifyNodeDef :: KnownSymbol name => Proxy name -> Proxy def -> [NodeInfo]
+  reifyNodeDef :: (KnownSymbol name) => Proxy name -> Proxy def -> [NodeInfo]
 
 -- EntryNode and Exit are not nodes
 instance ReifyNodeDef (EntryNode a) where
@@ -685,7 +753,7 @@ type family GetBaseNode def where
 -- | Check if the base node is LLMNode.
 type IsLLMNode :: Type -> Bool
 type family IsLLMNode def where
-  IsLLMNode (LLMNode _subtype) = 'True  -- LLMNode now has subtype parameter
+  IsLLMNode (LLMNode _subtype) = 'True -- LLMNode now has subtype parameter
   IsLLMNode (node :@ _) = IsLLMNode node
   IsLLMNode _ = 'False
 
@@ -721,152 +789,180 @@ type family IsBarrierNode def where
 --
 -- Basic support: extracts input, produces RuntimeFork kind.
 -- TODO: Could extract Spawn targets, Barrier name for richer visualization.
-instance {-# OVERLAPPING #-}
-         ( ReifyMaybeType (GetInput (ForkNode :@ ann))
-         ) => ReifyNodeDef (ForkNode :@ ann) where
-  reifyNodeDef pName _ = [NodeInfo
-    { niName = T.pack (symbolVal pName)
-    , niKind = RuntimeFork
-    , niInput = reifyMaybeType (Proxy @(GetInput (ForkNode :@ ann)))
-    , niSchema = Nothing
-    , niGotoTargets = []  -- ForkNode uses Spawn, not Goto
-    , niHasGotoExit = False
-    , niHasVision = False
-    , niTools = []
-    , niToolInfos = []
-    , niSystem = Nothing
-    , niTemplate = Nothing
-    , niMemory = Nothing
-    , niClaudeCode = Nothing
-    , niGemini = Nothing
-    }]
+instance
+  {-# OVERLAPPING #-}
+  (ReifyMaybeType (GetInput (ForkNode :@ ann))) =>
+  ReifyNodeDef (ForkNode :@ ann)
+  where
+  reifyNodeDef pName _ =
+    [ NodeInfo
+        { niName = T.pack (symbolVal pName),
+          niKind = RuntimeFork,
+          niInput = reifyMaybeType (Proxy @(GetInput (ForkNode :@ ann))),
+          niSchema = Nothing,
+          niGotoTargets = [], -- ForkNode uses Spawn, not Goto
+          niHasGotoExit = False,
+          niHasVision = False,
+          niTools = [],
+          niToolInfos = [],
+          niSystem = Nothing,
+          niTemplate = Nothing,
+          niMemory = Nothing,
+          niClaudeCode = Nothing,
+          niGemini = Nothing
+        }
+    ]
 
 -- BarrierNode instance - collects parallel results
 --
 -- Basic support: extracts input, produces RuntimeBarrier kind.
 -- TODO: Could extract Awaits types for richer visualization.
-instance {-# OVERLAPPING #-}
-         ( ReifyMaybeType (GetInput (BarrierNode :@ ann))
-         , ReifyGotoTargets (GotoTargetsFromDef (BarrierNode :@ ann))
-         , ReifyBool (HasGotoExitInDef (BarrierNode :@ ann))
-         ) => ReifyNodeDef (BarrierNode :@ ann) where
-  reifyNodeDef pName _ = [NodeInfo
-    { niName = T.pack (symbolVal pName)
-    , niKind = RuntimeBarrier
-    , niInput = reifyMaybeType (Proxy @(GetInput (BarrierNode :@ ann)))
-    , niSchema = Nothing
-    , niGotoTargets = reifyGotoTargets (Proxy @(GotoTargetsFromDef (BarrierNode :@ ann)))
-    , niHasGotoExit = reifyBool (Proxy @(HasGotoExitInDef (BarrierNode :@ ann)))
-    , niHasVision = False
-    , niTools = []
-    , niToolInfos = []
-    , niSystem = Nothing
-    , niTemplate = Nothing
-    , niMemory = Nothing
-    , niClaudeCode = Nothing
-    , niGemini = Nothing
-    }]
+instance
+  {-# OVERLAPPING #-}
+  ( ReifyMaybeType (GetInput (BarrierNode :@ ann)),
+    ReifyGotoTargets (GotoTargetsFromDef (BarrierNode :@ ann)),
+    ReifyBool (HasGotoExitInDef (BarrierNode :@ ann))
+  ) =>
+  ReifyNodeDef (BarrierNode :@ ann)
+  where
+  reifyNodeDef pName _ =
+    [ NodeInfo
+        { niName = T.pack (symbolVal pName),
+          niKind = RuntimeBarrier,
+          niInput = reifyMaybeType (Proxy @(GetInput (BarrierNode :@ ann))),
+          niSchema = Nothing,
+          niGotoTargets = reifyGotoTargets (Proxy @(GotoTargetsFromDef (BarrierNode :@ ann))),
+          niHasGotoExit = reifyBool (Proxy @(HasGotoExitInDef (BarrierNode :@ ann))),
+          niHasVision = False,
+          niTools = [],
+          niToolInfos = [],
+          niSystem = Nothing,
+          niTemplate = Nothing,
+          niMemory = Nothing,
+          niClaudeCode = Nothing,
+          niGemini = Nothing
+        }
+    ]
 
 -- General instance for any annotated node: dispatch based on base type
-instance {-# OVERLAPPABLE #-}
-         ( ReifyAnnotatedNode (def :@ ann) (IsLLMNode (def :@ ann)) (IsGeminiNode (def :@ ann)) (IsLogicNode (def :@ ann))
-         ) => ReifyNodeDef (def :@ ann) where
+instance
+  {-# OVERLAPPABLE #-}
+  (ReifyAnnotatedNode (def :@ ann) (IsLLMNode (def :@ ann)) (IsGeminiNode (def :@ ann)) (IsLogicNode (def :@ ann))) =>
+  ReifyNodeDef (def :@ ann)
+  where
   reifyNodeDef pName pDef = reifyAnnotatedNode pDef (Proxy @(IsLLMNode (def :@ ann))) (Proxy @(IsGeminiNode (def :@ ann))) (Proxy @(IsLogicNode (def :@ ann))) pName pDef
 
 -- | Helper class to dispatch based on node kind.
 class ReifyAnnotatedNode (def :: Type) (isLLM :: Bool) (isGemini :: Bool) (isLogic :: Bool) where
-  reifyAnnotatedNode :: Proxy def -> Proxy isLLM -> Proxy isGemini -> Proxy isLogic
-                     -> (forall name. KnownSymbol name => Proxy name -> Proxy def -> [NodeInfo])
+  reifyAnnotatedNode ::
+    Proxy def ->
+    Proxy isLLM ->
+    Proxy isGemini ->
+    Proxy isLogic ->
+    (forall name. (KnownSymbol name) => Proxy name -> Proxy def -> [NodeInfo])
 
 -- LLMNode case
 --
 -- Uses rich info typeclasses to extract template paths, schema fields, etc.
 -- ClaudeCode annotation is extracted to determine if this is a ClaudeCode node.
-instance ( ReifyMaybeType (GetInput def)
-         , ReifySchemaInfo (GetSchema def)
-         , ReifyTemplateInfo (GetTemplate def)
-         , ReifyTemplateInfo (GetSystem def)
-         , ReifyMemoryInfo (GetMemory def)
-         , ReifyClaudeCodeInfo (GetClaudeCode def)
-         , ReifyBool (GetVision def)
-         , ReifyMaybeToolRecord (GetTools def)
-         ) => ReifyAnnotatedNode def 'True 'False 'False where
+instance
+  ( ReifyMaybeType (GetInput def),
+    ReifySchemaInfo (GetSchema def),
+    ReifyTemplateInfo (GetTemplate def),
+    ReifyTemplateInfo (GetSystem def),
+    ReifyMemoryInfo (GetMemory def),
+    ReifyClaudeCodeInfo (GetClaudeCode def),
+    ReifyBool (GetVision def),
+    ReifyMaybeToolRecord (GetTools def)
+  ) =>
+  ReifyAnnotatedNode def 'True 'False 'False
+  where
   reifyAnnotatedNode _ _ _ _ pName _ =
     let claudeCodeInfo = reifyClaudeCodeInfo (Proxy @(GetClaudeCode def))
         nodeKind = case claudeCodeInfo of
-          Just _  -> RuntimeClaudeCode
+          Just _ -> RuntimeClaudeCode
           Nothing -> RuntimeLLM
-    in [NodeInfo
-      { niName = T.pack (symbolVal pName)
-      , niKind = nodeKind
-      , niInput = reifyMaybeType (Proxy @(GetInput def))
-      , niSchema = reifySchemaInfo (Proxy @(GetSchema def))
-      , niGotoTargets = []  -- LLM nodes don't have Goto
-      , niHasGotoExit = False
-      , niHasVision = reifyBool (Proxy @(GetVision def))
-      , niTools = reifyMaybeToolInputs (Proxy @(GetTools def))
-      , niToolInfos = []  -- Would require ToolDef instances
-      , niSystem = reifyTemplateInfo (Proxy @(GetSystem def))
-      , niTemplate = reifyTemplateInfo (Proxy @(GetTemplate def))
-      , niMemory = reifyMemoryInfo (Proxy @(GetMemory def))
-      , niClaudeCode = claudeCodeInfo
-      , niGemini = Nothing
-      }]
+     in [ NodeInfo
+            { niName = T.pack (symbolVal pName),
+              niKind = nodeKind,
+              niInput = reifyMaybeType (Proxy @(GetInput def)),
+              niSchema = reifySchemaInfo (Proxy @(GetSchema def)),
+              niGotoTargets = [], -- LLM nodes don't have Goto
+              niHasGotoExit = False,
+              niHasVision = reifyBool (Proxy @(GetVision def)),
+              niTools = reifyMaybeToolInputs (Proxy @(GetTools def)),
+              niToolInfos = [], -- Would require ToolDef instances
+              niSystem = reifyTemplateInfo (Proxy @(GetSystem def)),
+              niTemplate = reifyTemplateInfo (Proxy @(GetTemplate def)),
+              niMemory = reifyMemoryInfo (Proxy @(GetMemory def)),
+              niClaudeCode = claudeCodeInfo,
+              niGemini = Nothing
+            }
+        ]
 
 -- GeminiNode case
-instance ( ReifyMaybeType (GetInput def)
-         , ReifySchemaInfo (GetSchema def)
-         , ReifyTemplateInfo (GetTemplate def)
-         , ReifyTemplateInfo (GetSystem def)
-         , ReifyMemoryInfo (GetMemory def)
-         , ReifyGeminiInfo (GetGeminiModel def)
-         , ReifyBool (GetVision def)
-         , ReifyMaybeToolRecord (GetTools def)
-         ) => ReifyAnnotatedNode def 'False 'True 'False where
+instance
+  ( ReifyMaybeType (GetInput def),
+    ReifySchemaInfo (GetSchema def),
+    ReifyTemplateInfo (GetTemplate def),
+    ReifyTemplateInfo (GetSystem def),
+    ReifyMemoryInfo (GetMemory def),
+    ReifyGeminiInfo (GetGeminiModel def),
+    ReifyBool (GetVision def),
+    ReifyMaybeToolRecord (GetTools def)
+  ) =>
+  ReifyAnnotatedNode def 'False 'True 'False
+  where
   reifyAnnotatedNode _ _ _ _ pName _ =
     let geminiInfo = reifyGeminiInfo (Proxy @(GetGeminiModel def))
-    in [NodeInfo
-      { niName = T.pack (symbolVal pName)
-      , niKind = RuntimeGemini
-      , niInput = reifyMaybeType (Proxy @(GetInput def))
-      , niSchema = reifySchemaInfo (Proxy @(GetSchema def))
-      , niGotoTargets = []
-      , niHasGotoExit = False
-      , niHasVision = reifyBool (Proxy @(GetVision def))
-      , niTools = reifyMaybeToolInputs (Proxy @(GetTools def))
-      , niToolInfos = []
-      , niSystem = reifyTemplateInfo (Proxy @(GetSystem def))
-      , niTemplate = reifyTemplateInfo (Proxy @(GetTemplate def))
-      , niMemory = reifyMemoryInfo (Proxy @(GetMemory def))
-      , niClaudeCode = Nothing
-      , niGemini = geminiInfo
-      }]
+     in [ NodeInfo
+            { niName = T.pack (symbolVal pName),
+              niKind = RuntimeGemini,
+              niInput = reifyMaybeType (Proxy @(GetInput def)),
+              niSchema = reifySchemaInfo (Proxy @(GetSchema def)),
+              niGotoTargets = [],
+              niHasGotoExit = False,
+              niHasVision = reifyBool (Proxy @(GetVision def)),
+              niTools = reifyMaybeToolInputs (Proxy @(GetTools def)),
+              niToolInfos = [],
+              niSystem = reifyTemplateInfo (Proxy @(GetSystem def)),
+              niTemplate = reifyTemplateInfo (Proxy @(GetTemplate def)),
+              niMemory = reifyMemoryInfo (Proxy @(GetMemory def)),
+              niClaudeCode = Nothing,
+              niGemini = geminiInfo
+            }
+        ]
 
 -- LogicNode case
 --
 -- Extracts Goto targets by using GotoTargetsFromDef, which applies
 -- @Effect kind explicitly to resolve polykind ambiguity.
-instance ( ReifyMaybeType (GetInput def)
-         , ReifyMemoryInfo (GetMemory def)
-         , ReifyGotoTargets (GotoTargetsFromDef def)
-         , ReifyBool (HasGotoExitInDef def)
-         ) => ReifyAnnotatedNode def 'False 'False 'True where
-  reifyAnnotatedNode _ _ _ _ pName _ = [NodeInfo
-    { niName = T.pack (symbolVal pName)
-    , niKind = RuntimeLogic
-    , niInput = reifyMaybeType (Proxy @(GetInput def))
-    , niSchema = Nothing  -- Logic nodes don't have Schema
-    , niGotoTargets = reifyGotoTargets (Proxy @(GotoTargetsFromDef def))
-    , niHasGotoExit = reifyBool (Proxy @(HasGotoExitInDef def))
-    , niHasVision = False
-    , niTools = []
-    , niToolInfos = []
-    , niSystem = Nothing
-    , niTemplate = Nothing
-    , niMemory = reifyMemoryInfo (Proxy @(GetMemory def))
-    , niClaudeCode = Nothing  -- Logic nodes don't use ClaudeCode
-    , niGemini = Nothing
-    }]
+instance
+  ( ReifyMaybeType (GetInput def),
+    ReifyMemoryInfo (GetMemory def),
+    ReifyGotoTargets (GotoTargetsFromDef def),
+    ReifyBool (HasGotoExitInDef def)
+  ) =>
+  ReifyAnnotatedNode def 'False 'False 'True
+  where
+  reifyAnnotatedNode _ _ _ _ pName _ =
+    [ NodeInfo
+        { niName = T.pack (symbolVal pName),
+          niKind = RuntimeLogic,
+          niInput = reifyMaybeType (Proxy @(GetInput def)),
+          niSchema = Nothing, -- Logic nodes don't have Schema
+          niGotoTargets = reifyGotoTargets (Proxy @(GotoTargetsFromDef def)),
+          niHasGotoExit = reifyBool (Proxy @(HasGotoExitInDef def)),
+          niHasVision = False,
+          niTools = [],
+          niToolInfos = [],
+          niSystem = Nothing,
+          niTemplate = Nothing,
+          niMemory = reifyMemoryInfo (Proxy @(GetMemory def)),
+          niClaudeCode = Nothing, -- Logic nodes don't use ClaudeCode
+          niGemini = Nothing
+        }
+    ]
 
 -- Neither LLM nor Logic - unknown node type, return empty
 instance ReifyAnnotatedNode def 'False 'False 'False where
@@ -881,10 +977,12 @@ instance ReifyAnnotatedNode def 'False 'False 'False where
 -- For each node, creates edges from:
 -- 1. EntryNode → nodes that need the entry type
 -- 2. Nodes with Schema → nodes that need that schema type
-deriveImplicitEdges
-  :: Maybe TypeRep    -- ^ EntryNode type
-  -> [NodeInfo]       -- ^ All nodes
-  -> [EdgeInfo]
+deriveImplicitEdges ::
+  -- | EntryNode type
+  Maybe TypeRep ->
+  -- | All nodes
+  [NodeInfo] ->
+  [EdgeInfo]
 deriveImplicitEdges mEntryType nodes = entryEdges ++ schemaEdges
   where
     -- Edges from EntryNode to nodes that need the entry type
@@ -892,34 +990,36 @@ deriveImplicitEdges mEntryType nodes = entryEdges ++ schemaEdges
       Nothing -> []
       Just entryTy ->
         [ EdgeInfo "EntryNode" n.niName (Just entryTy) RuntimeImplicit
-        | n <- nodes
-        , n.niInput == Just entryTy
+        | n <- nodes,
+          n.niInput == Just entryTy
         ]
 
     -- Edges from nodes with Schema to nodes that need that type
     schemaEdges =
       [ EdgeInfo producer.niName consumer.niName (Just schemaTy) RuntimeImplicit
-      | producer <- nodes
-      , Just schemaInfo <- [producer.niSchema]
-      , let schemaTy = schemaInfo.siType
-      , consumer <- nodes
-      , consumer.niInput == Just schemaTy
+      | producer <- nodes,
+        Just schemaInfo <- [producer.niSchema],
+        let schemaTy = schemaInfo.siType,
+        consumer <- nodes,
+        consumer.niInput == Just schemaTy
       ]
 
 -- | Derive edges to Exit from Schema matching.
 --
 -- Any node with Schema matching exit type creates an edge to Exit.
-deriveExitEdges
-  :: Maybe TypeRep    -- ^ Exit type
-  -> [NodeInfo]       -- ^ All nodes
-  -> [EdgeInfo]
+deriveExitEdges ::
+  -- | Exit type
+  Maybe TypeRep ->
+  -- | All nodes
+  [NodeInfo] ->
+  [EdgeInfo]
 deriveExitEdges mExitType nodes = case mExitType of
   Nothing -> []
   Just exitTy ->
     [ EdgeInfo n.niName "Exit" (Just exitTy) RuntimeImplicit
-    | n <- nodes
-    , Just schemaInfo <- [n.niSchema]
-    , schemaInfo.siType == exitTy
+    | n <- nodes,
+      Just schemaInfo <- [n.niSchema],
+      schemaInfo.siType == exitTy
     ]
 
 -- | Derive explicit Goto edges from Logic nodes.
@@ -928,8 +1028,8 @@ deriveExitEdges mExitType nodes = case mExitType of
 deriveGotoEdges :: [NodeInfo] -> [EdgeInfo]
 deriveGotoEdges nodes =
   [ EdgeInfo node.niName targetName (Just payload) RuntimeExplicit
-  | node <- nodes
-  , (targetName, payload) <- node.niGotoTargets
+  | node <- nodes,
+    (targetName, payload) <- node.niGotoTargets
   ]
 
 -- | Derive edges to Exit from Goto Exit.
@@ -939,7 +1039,6 @@ deriveGotoEdges nodes =
 deriveGotoExitEdges :: [NodeInfo] -> [EdgeInfo]
 deriveGotoExitEdges nodes =
   [ EdgeInfo node.niName "Exit" Nothing RuntimeExplicit
-  | node <- nodes
-  , node.niHasGotoExit
+  | node <- nodes,
+    node.niHasGotoExit
   ]
- 

@@ -4,17 +4,17 @@
 
 module ExoMonad.Control.PMTools
   ( -- * Epic Logic
-    pmEpicCreateLogic
-  , pmEpicListLogic
-  , pmEpicUpdateLogic
+    pmEpicCreateLogic,
+    pmEpicListLogic,
+    pmEpicUpdateLogic,
 
     -- * Strategy Logic
-  , pmPitchLogic
-  , pmInterviewLogic
-  ) where
+    pmPitchLogic,
+    pmInterviewLogic,
+  )
+where
 
 import Control.Monad.Freer (Eff, Member)
-
 import ExoMonad.Control.PMTools.Types
 import ExoMonad.Effect.Types (Log, logInfo)
 

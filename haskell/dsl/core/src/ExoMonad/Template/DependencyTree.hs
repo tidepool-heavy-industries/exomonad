@@ -23,31 +23,32 @@
 -- @
 module ExoMonad.Template.DependencyTree
   ( -- * Mermaid Generation
-    templateTreeToMermaid
-  , templateTreeToMermaidWithConfig
-  , TemplateTreeConfig(..)
-  , defaultTemplateTreeConfig
+    templateTreeToMermaid,
+    templateTreeToMermaidWithConfig,
+    TemplateTreeConfig (..),
+    defaultTemplateTreeConfig,
 
     -- * Template Parsing
-  , parseTemplateIncludes
-  , parseTemplateExtends
-  , parseAllDependencies
+    parseTemplateIncludes,
+    parseTemplateExtends,
+    parseAllDependencies,
 
     -- * Dependency Tree Building
-  , buildDependencyTree
-  , DependencyTree(..)
-  ) where
+    buildDependencyTree,
+    DependencyTree (..),
+  )
+where
 
 import Control.Monad (foldM)
 import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
+import Data.Map.Strict qualified as Map
 import Data.Set (Set)
-import qualified Data.Set as Set
+import Data.Set qualified as Set
 import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
+import Data.Text qualified as T
+import Data.Text.IO qualified as TIO
 import System.Directory (doesFileExist)
-import System.FilePath (takeDirectory, takeFileName, (</>), normalise)
+import System.FilePath (normalise, takeDirectory, takeFileName, (</>))
 import Text.Parsec
 import Text.Parsec.Text (Parser)
 
@@ -57,21 +58,26 @@ import Text.Parsec.Text (Parser)
 
 -- | Configuration for template tree Mermaid generation.
 data TemplateTreeConfig = TemplateTreeConfig
-  { ttcDirection :: Text          -- ^ Flow direction: TD (top-down) or LR (left-right)
-  , ttcShowPath :: Bool           -- ^ Show full paths or just filenames
-  , ttcIncludeStyle :: Text       -- ^ Edge style for includes (e.g., "-->")
-  , ttcExtendsStyle :: Text       -- ^ Edge style for extends (e.g., "-.->")
+  { -- | Flow direction: TD (top-down) or LR (left-right)
+    ttcDirection :: Text,
+    -- | Show full paths or just filenames
+    ttcShowPath :: Bool,
+    -- | Edge style for includes (e.g., "-->")
+    ttcIncludeStyle :: Text,
+    -- | Edge style for extends (e.g., "-.->")
+    ttcExtendsStyle :: Text
   }
   deriving (Show, Eq)
 
 -- | Default configuration for template tree diagrams.
 defaultTemplateTreeConfig :: TemplateTreeConfig
-defaultTemplateTreeConfig = TemplateTreeConfig
-  { ttcDirection = "TD"
-  , ttcShowPath = True
-  , ttcIncludeStyle = "-->"
-  , ttcExtendsStyle = "-.->"
-  }
+defaultTemplateTreeConfig =
+  TemplateTreeConfig
+    { ttcDirection = "TD",
+      ttcShowPath = True,
+      ttcIncludeStyle = "-->",
+      ttcExtendsStyle = "-.->"
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- DEPENDENCY TREE TYPES
@@ -79,9 +85,12 @@ defaultTemplateTreeConfig = TemplateTreeConfig
 
 -- | A dependency tree for templates.
 data DependencyTree = DependencyTree
-  { dtRoot :: FilePath                    -- ^ Root template file
-  , dtIncludes :: Map FilePath [FilePath] -- ^ Template -> list of included templates
-  , dtExtends :: Map FilePath [FilePath]  -- ^ Template -> list of extended templates
+  { -- | Root template file
+    dtRoot :: FilePath,
+    -- | Template -> list of included templates
+    dtIncludes :: Map FilePath [FilePath],
+    -- | Template -> list of extended templates
+    dtExtends :: Map FilePath [FilePath]
   }
   deriving (Show, Eq)
 
@@ -104,28 +113,35 @@ templateTreeToMermaidWithConfig config rootPath = do
 
 -- | Render a dependency tree to Mermaid syntax.
 renderDependencyTree :: TemplateTreeConfig -> DependencyTree -> Text
-renderDependencyTree config tree = T.unlines $
-  [ "flowchart " <> config.ttcDirection
-  , ""
-  , "    %% Template Dependencies"
-  ]
-  ++ includeEdges
-  ++ extendsEdges
+renderDependencyTree config tree =
+  T.unlines $
+    [ "flowchart " <> config.ttcDirection,
+      "",
+      "    %% Template Dependencies"
+    ]
+      ++ includeEdges
+      ++ extendsEdges
   where
     includeEdges =
-      [ "    " <> escapeName (displayPath config from)
-        <> " " <> config.ttcIncludeStyle <> " "
-        <> escapeName (displayPath config to)
-      | (from, tos) <- Map.toList (tree.dtIncludes)
-      , to <- tos
+      [ "    "
+          <> escapeName (displayPath config from)
+          <> " "
+          <> config.ttcIncludeStyle
+          <> " "
+          <> escapeName (displayPath config to)
+      | (from, tos) <- Map.toList (tree.dtIncludes),
+        to <- tos
       ]
 
     extendsEdges =
-      [ "    " <> escapeName (displayPath config from)
-        <> " " <> config.ttcExtendsStyle <> "|extends| "
-        <> escapeName (displayPath config to)
-      | (from, tos) <- Map.toList (tree.dtExtends)
-      , to <- tos
+      [ "    "
+          <> escapeName (displayPath config from)
+          <> " "
+          <> config.ttcExtendsStyle
+          <> "|extends| "
+          <> escapeName (displayPath config to)
+      | (from, tos) <- Map.toList (tree.dtExtends),
+        to <- tos
       ]
 
 -- | Display path according to config.
@@ -153,25 +169,29 @@ escapeName name
 buildDependencyTree :: FilePath -> IO DependencyTree
 buildDependencyTree rootPath = do
   (includes, extends) <- buildTreeFrom rootPath Set.empty Map.empty Map.empty
-  pure DependencyTree
-    { dtRoot = rootPath
-    , dtIncludes = includes
-    , dtExtends = extends
-    }
+  pure
+    DependencyTree
+      { dtRoot = rootPath,
+        dtIncludes = includes,
+        dtExtends = extends
+      }
 
 -- | Recursively build dependency maps.
-buildTreeFrom
-  :: FilePath
-  -> Set FilePath           -- ^ Already visited paths (to avoid cycles)
-  -> Map FilePath [FilePath] -- ^ Accumulated includes
-  -> Map FilePath [FilePath] -- ^ Accumulated extends
-  -> IO (Map FilePath [FilePath], Map FilePath [FilePath])
+buildTreeFrom ::
+  FilePath ->
+  -- | Already visited paths (to avoid cycles)
+  Set FilePath ->
+  -- | Accumulated includes
+  Map FilePath [FilePath] ->
+  -- | Accumulated extends
+  Map FilePath [FilePath] ->
+  IO (Map FilePath [FilePath], Map FilePath [FilePath])
 buildTreeFrom path visited incMap extMap
-  | path `Set.member` visited = pure (incMap, extMap)  -- Cycle detected
+  | path `Set.member` visited = pure (incMap, extMap) -- Cycle detected
   | otherwise = do
       exists <- doesFileExist path
       if not exists
-        then pure (incMap, extMap)  -- File doesn't exist, skip
+        then pure (incMap, extMap) -- File doesn't exist, skip
         else do
           content <- TIO.readFile path
           let baseDir = takeDirectory path

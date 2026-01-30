@@ -1,4 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
+
 module ExoMonad.Control.Version.TH (gitHashTH) where
 
 import Language.Haskell.TH

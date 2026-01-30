@@ -27,32 +27,34 @@
 -- @
 module ExoMonad.Effects.UI
   ( -- * Effect
-    UI(..)
-  , showText
-  , requestTextInput
-  , requestPhotoInput
-  , requestChoice
-  , requestMultiChoice
-  , requestChoiceDesc
-  , requestChoiceMeta
-  , setThinking
-    -- * Rich Choice Metadata
-  , ChoiceAvailability(..)
-  , ChoiceMeta(..)
-    -- * Convenience Helpers
-  , confirm
-  , requestDie
-  , selectMultiple
-  ) where
+    UI (..),
+    showText,
+    requestTextInput,
+    requestPhotoInput,
+    requestChoice,
+    requestMultiChoice,
+    requestChoiceDesc,
+    requestChoiceMeta,
+    setThinking,
 
-import Data.Text (Text)
-import qualified Data.Text as T
+    -- * Rich Choice Metadata
+    ChoiceAvailability (..),
+    ChoiceMeta (..),
+
+    -- * Convenience Helpers
+    confirm,
+    requestDie,
+    selectMultiple,
+  )
+where
+
+import Control.Monad.Freer (Eff, Member, send)
 import Data.ByteString (ByteString)
 import Data.List.NonEmpty (NonEmpty)
-import qualified Data.List.NonEmpty as NE
-import Control.Monad.Freer (Eff, Member, send)
+import Data.List.NonEmpty qualified as NE
+import Data.Text (Text)
+import Data.Text qualified as T
 import GHC.Generics (Generic)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CHOICE METADATA
@@ -62,17 +64,22 @@ import GHC.Generics (Generic)
 --
 -- Sum type makes the state explicit - no more "Nothing means enabled".
 data ChoiceAvailability
-  = Available                    -- ^ Option can be selected
-  | DisabledBecause Text         -- ^ Option disabled with reason
+  = -- | Option can be selected
+    Available
+  | -- | Option disabled with reason
+    DisabledBecause Text
   deriving (Show, Eq, Generic)
 
 -- | Metadata for rich choice options.
 --
 -- Used with 'requestChoiceMeta' to provide descriptions, costs, and disabled states.
 data ChoiceMeta = ChoiceMeta
-  { cmDescription :: Maybe Text       -- ^ Descriptive text below label
-  , cmCosts :: [Text]                 -- ^ Cost tags e.g. ["2 Stress", "1 Heat"]
-  , cmAvailability :: ChoiceAvailability -- ^ Whether option is selectable
+  { -- | Descriptive text below label
+    cmDescription :: Maybe Text,
+    -- | Cost tags e.g. ["2 Stress", "1 Heat"]
+    cmCosts :: [Text],
+    -- | Whether option is selectable
+    cmAvailability :: ChoiceAvailability
   }
   deriving (Show, Eq, Generic)
 
@@ -86,53 +93,45 @@ data ChoiceMeta = ChoiceMeta
 data UI r where
   -- | Display text to the user (appended to chat log).
   ShowText :: Text -> UI ()
-
   -- | Request text input from user with a prompt.
   RequestTextInput :: Text -> UI Text
-
   -- | Request photo input from user with a prompt.
   RequestPhotoInput :: Text -> UI ByteString
-
   -- | Present choices to user, return selected value.
   --
   -- Uses 'NonEmpty' to ensure at least one option exists.
   RequestChoice :: Text -> NonEmpty (Text, a) -> UI a
-
   -- | Present multiple choices (checkboxes), return all selected values.
   --
   -- Uses 'NonEmpty' to ensure at least one option exists.
   -- Returns empty list if user selects nothing.
   RequestMultiChoice :: Text -> NonEmpty (Text, a) -> UI [a]
-
   -- | Present choices with descriptions, return selected value.
   --
   -- Each option has (label, description, value).
   RequestChoiceDesc :: Text -> NonEmpty (Text, Text, a) -> UI a
-
   -- | Present choices with full metadata, return selected value.
   --
   -- Each option has (label, metadata, value).
   -- Selecting a disabled option returns an error.
   RequestChoiceMeta :: Text -> NonEmpty (Text, ChoiceMeta, a) -> UI a
-
   -- | Set the "thinking" indicator state.
   SetThinking :: Bool -> UI ()
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SMART CONSTRUCTORS
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Display text to the user.
-showText :: Member UI effs => Text -> Eff effs ()
+showText :: (Member UI effs) => Text -> Eff effs ()
 showText = send . ShowText
 
 -- | Request text input with a prompt.
-requestTextInput :: Member UI effs => Text -> Eff effs Text
+requestTextInput :: (Member UI effs) => Text -> Eff effs Text
 requestTextInput = send . RequestTextInput
 
 -- | Request photo input with a prompt.
-requestPhotoInput :: Member UI effs => Text -> Eff effs ByteString
+requestPhotoInput :: (Member UI effs) => Text -> Eff effs ByteString
 requestPhotoInput = send . RequestPhotoInput
 
 -- | Present choices and get user selection.
@@ -144,7 +143,7 @@ requestPhotoInput = send . RequestPhotoInput
 --   ]
 -- -- die :: Int
 -- @
-requestChoice :: Member UI effs => Text -> NonEmpty (Text, a) -> Eff effs a
+requestChoice :: (Member UI effs) => Text -> NonEmpty (Text, a) -> Eff effs a
 requestChoice prompt choices = send (RequestChoice prompt choices)
 
 -- | Present multiple choices (checkboxes) and get all selected.
@@ -157,10 +156,13 @@ requestChoice prompt choices = send (RequestChoice prompt choices)
 --   ]
 -- -- activities :: [DowntimeActivity]
 -- @
-requestMultiChoice :: Member UI effs
-                   => Text                -- ^ Prompt
-                   -> NonEmpty (Text, a)  -- ^ (label, value)
-                   -> Eff effs [a]
+requestMultiChoice ::
+  (Member UI effs) =>
+  -- | Prompt
+  Text ->
+  -- | (label, value)
+  NonEmpty (Text, a) ->
+  Eff effs [a]
 requestMultiChoice prompt choices = send (RequestMultiChoice prompt choices)
 
 -- | Present choices with descriptions and get user selection.
@@ -172,10 +174,13 @@ requestMultiChoice prompt choices = send (RequestMultiChoice prompt choices)
 --   , ("Desperate", "You're outmatched", Desperate)
 --   ]
 -- @
-requestChoiceDesc :: Member UI effs
-                  => Text                        -- ^ Prompt
-                  -> NonEmpty (Text, Text, a)    -- ^ (label, description, value)
-                  -> Eff effs a
+requestChoiceDesc ::
+  (Member UI effs) =>
+  -- | Prompt
+  Text ->
+  -- | (label, description, value)
+  NonEmpty (Text, Text, a) ->
+  Eff effs a
 requestChoiceDesc prompt choices = send (RequestChoiceDesc prompt choices)
 
 -- | Present choices with full metadata and get user selection.
@@ -187,16 +192,18 @@ requestChoiceDesc prompt choices = send (RequestChoiceDesc prompt choices)
 --   , ("Give up", ChoiceMeta Nothing [] (DisabledBecause "Not available"), GiveUpAction)
 --   ]
 -- @
-requestChoiceMeta :: Member UI effs
-                  => Text                          -- ^ Prompt
-                  -> NonEmpty (Text, ChoiceMeta, a) -- ^ (label, meta, value)
-                  -> Eff effs a
+requestChoiceMeta ::
+  (Member UI effs) =>
+  -- | Prompt
+  Text ->
+  -- | (label, meta, value)
+  NonEmpty (Text, ChoiceMeta, a) ->
+  Eff effs a
 requestChoiceMeta prompt choices = send (RequestChoiceMeta prompt choices)
 
 -- | Set thinking indicator.
-setThinking :: Member UI effs => Bool -> Eff effs ()
+setThinking :: (Member UI effs) => Bool -> Eff effs ()
 setThinking = send . SetThinking
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONVENIENCE HELPERS
@@ -208,9 +215,11 @@ setThinking = send . SetThinking
 -- confirmed <- confirm "Delete this item?"
 -- when confirmed $ deleteItem item
 -- @
-confirm :: Member UI effs => Text -> Eff effs Bool
-confirm prompt = requestChoice prompt $ NE.fromList
-  [("Yes", True), ("No", False)]
+confirm :: (Member UI effs) => Text -> Eff effs Bool
+confirm prompt =
+  requestChoice prompt $
+    NE.fromList
+      [("Yes", True), ("No", False)]
 
 -- | Die selection helper (formats dice with Unicode faces).
 --
@@ -218,9 +227,10 @@ confirm prompt = requestChoice prompt $ NE.fromList
 -- die <- requestDie "Spend a die from your pool:" $ NE.fromList [4, 4, 3, 2]
 -- -- die :: Int (the selected die value)
 -- @
-requestDie :: Member UI effs => Text -> NonEmpty Int -> Eff effs Int
-requestDie prompt dice = requestChoice prompt $
-  NE.map (\d -> (dieFace d, d)) dice
+requestDie :: (Member UI effs) => Text -> NonEmpty Int -> Eff effs Int
+requestDie prompt dice =
+  requestChoice prompt $
+    NE.map (\d -> (dieFace d, d)) dice
   where
     dieFace :: Int -> Text
     dieFace n
@@ -232,5 +242,5 @@ requestDie prompt dice = requestChoice prompt $
 -- | Simple multi-choice with "Select all that apply" style.
 --
 -- Alias for 'requestMultiChoice'.
-selectMultiple :: Member UI effs => Text -> NonEmpty (Text, a) -> Eff effs [a]
+selectMultiple :: (Member UI effs) => Text -> NonEmpty (Text, a) -> Eff effs [a]
 selectMultiple = requestMultiChoice

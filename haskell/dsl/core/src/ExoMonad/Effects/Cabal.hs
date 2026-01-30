@@ -26,14 +26,15 @@
 -- - If tests fail, raw output drives iteration
 module ExoMonad.Effects.Cabal
   ( -- * Effect
-    Cabal(..)
-  , cabalBuild
-  , cabalTest
-  , cabalClean
+    Cabal (..),
+    cabalBuild,
+    cabalTest,
+    cabalClean,
 
     -- * Result Types
-  , CabalResult(..)
-  ) where
+    CabalResult (..),
+  )
+where
 
 import Control.Monad.Freer (Eff, Member, send)
 import Data.Aeson (FromJSON, ToJSON)
@@ -56,35 +57,34 @@ import GHC.Generics (Generic)
 --   CabalTestSuccess output -> handleSuccess output
 -- @
 data CabalResult
-  = CabalSuccess
-    -- ^ Operation succeeded (for clean, etc.)
+  = -- | Operation succeeded (for clean, etc.)
+    CabalSuccess
   | CabalBuildFailure
-      { cbfExitCode :: Int
-        -- ^ Exit code from cabal
-      , cbfStderr :: Text
-        -- ^ Stderr output (usually contains errors)
-      , cbfStdout :: Text
-        -- ^ Stdout output
+      { -- | Exit code from cabal
+        cbfExitCode :: Int,
+        -- | Stderr output (usually contains errors)
+        cbfStderr :: Text,
+        -- | Stdout output
+        cbfStdout :: Text
       }
-    -- ^ Build failed with compiler errors
-  | CabalTestFailure
-      { ctfRawOutput :: Text
-        -- ^ Raw test output for debugging
+  | -- \^ Build failed with compiler errors
+    CabalTestFailure
+      { -- | Raw test output for debugging
+        ctfRawOutput :: Text
       }
-    -- ^ Tests ran but some failed
-  | CabalTestSuccess
-      { ctsOutput :: Text
-        -- ^ Test output (for logging)
+  | -- \^ Tests ran but some failed
+    CabalTestSuccess
+      { -- | Test output (for logging)
+        ctsOutput :: Text
       }
-    -- ^ All tests passed
-  | CabalInfraError
-      { cieError :: Text
-        -- ^ Infrastructure error message (e.g. docker-ctl failure)
+  | -- \^ All tests passed
+    CabalInfraError
+      { -- | Infrastructure error message (e.g. docker-ctl failure)
+        cieError :: Text
       }
-    -- ^ Infrastructure failed (not a build/test failure)
+  -- \^ Infrastructure failed (not a build/test failure)
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT
@@ -99,27 +99,27 @@ data Cabal r where
   --
   -- Equivalent to @cabal build all@.
   -- Returns 'CabalSuccess' or 'CabalBuildFailure'.
-  CabalBuild
-    :: FilePath          -- ^ Project directory
-    -> Cabal CabalResult
-
+  CabalBuild ::
+    -- | Project directory
+    FilePath ->
+    Cabal CabalResult
   -- | Run tests.
   --
   -- Equivalent to @cabal test --test-show-details=always@.
   -- Returns 'CabalTestSuccess' or 'CabalTestFailure' with raw output.
   -- Returns 'CabalBuildFailure' if build fails.
-  CabalTest
-    :: FilePath          -- ^ Project directory
-    -> Cabal CabalResult
-
+  CabalTest ::
+    -- | Project directory
+    FilePath ->
+    Cabal CabalResult
   -- | Clean build artifacts.
   --
   -- Equivalent to @cabal clean@.
   -- Returns 'CabalSuccess' or 'CabalBuildFailure'.
-  CabalClean
-    :: FilePath          -- ^ Project directory
-    -> Cabal CabalResult
-
+  CabalClean ::
+    -- | Project directory
+    FilePath ->
+    Cabal CabalResult
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SMART CONSTRUCTORS
@@ -133,10 +133,10 @@ data Cabal r where
 --   CabalSuccess -> proceed
 --   CabalBuildFailure _ stderr _ -> handleError stderr
 -- @
-cabalBuild
-  :: Member Cabal effs
-  => FilePath
-  -> Eff effs CabalResult
+cabalBuild ::
+  (Member Cabal effs) =>
+  FilePath ->
+  Eff effs CabalResult
 cabalBuild = send . CabalBuild
 
 -- | Run tests with detailed output.
@@ -148,17 +148,17 @@ cabalBuild = send . CabalBuild
 --   CabalTestFailure raw -> fixImplementation raw
 --   CabalBuildFailure _ stderr _ -> fixCompilation stderr
 -- @
-cabalTest
-  :: Member Cabal effs
-  => FilePath
-  -> Eff effs CabalResult
+cabalTest ::
+  (Member Cabal effs) =>
+  FilePath ->
+  Eff effs CabalResult
 cabalTest = send . CabalTest
 
 -- | Clean build artifacts.
 --
 -- Useful before a fresh build or to reclaim disk space.
-cabalClean
-  :: Member Cabal effs
-  => FilePath
-  -> Eff effs CabalResult
+cabalClean ::
+  (Member Cabal effs) =>
+  FilePath ->
+  Eff effs CabalResult
 cabalClean = send . CabalClean

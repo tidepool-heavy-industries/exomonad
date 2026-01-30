@@ -16,56 +16,53 @@
 -- @
 module ExoMonad.GitHub.Interpreter
   ( -- * Interpreter
-    runGitHubIO
+    runGitHubIO,
 
     -- * Configuration
-  , GitHubConfig(..)
-  , defaultGitHubConfig
-  ) where
+    GitHubConfig (..),
+    defaultGitHubConfig,
+  )
+where
 
 import Control.Lens ((^?))
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
-import Data.Aeson (Value(..), toJSON, fromJSON)
+import Data.Aeson (Value (..), fromJSON, toJSON)
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Lens (key, _String)
-import Data.Time.Clock (UTCTime)
-import Data.Time.Format.ISO8601 (iso8601ParseM)
-
-import ExoMonad.Effects.SocketClient
-  ( SocketConfig(..)
-  , ServiceRequest(..)
-  , ServiceResponse(..)
-  , ServiceError(..)
-  , sendRequest
-  )
-import Data.Maybe (mapMaybe, fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
-import System.Directory (doesFileExist)
-
-
+import Data.Time.Clock (UTCTime)
+import Data.Time.Format.ISO8601 (iso8601ParseM)
 import ExoMonad.Effects.GitHub
-  ( GitHub(..)
-  , GitHubError(..)
-  , Issue(..)
-  , IssueFilter(..)
-  , IssueState(..)
-  , PullRequest(..)
-  , PRFilter(..)
-  , PRState(..)
-  , Repo(..)
-  , PRCreateSpec(..)
-  , PRUrl(..)
-  , Review(..)
-  , ReviewState(..)
-  , ReviewComment(..)
-  , Comment(..)
-  , Discussion(..)
-  , CreateIssueInput(..)
-  , UpdateIssueInput(..)
-  , Author(..)
+  ( Author (..),
+    Comment (..),
+    CreateIssueInput (..),
+    Discussion (..),
+    GitHub (..),
+    GitHubError (..),
+    Issue (..),
+    IssueFilter (..),
+    IssueState (..),
+    PRCreateSpec (..),
+    PRFilter (..),
+    PRState (..),
+    PRUrl (..),
+    PullRequest (..),
+    Repo (..),
+    Review (..),
+    ReviewComment (..),
+    ReviewState (..),
+    UpdateIssueInput (..),
   )
-
+import ExoMonad.Effects.SocketClient
+  ( ServiceError (..),
+    ServiceRequest (..),
+    ServiceResponse (..),
+    SocketConfig (..),
+    sendRequest,
+  )
+import System.Directory (doesFileExist)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONFIGURATION
@@ -74,23 +71,23 @@ import ExoMonad.Effects.GitHub
 -- | Configuration for GitHub interpreter.
 data GitHubConfig
   = GitHubSocketConfig
-      { ghcSocketPath :: FilePath
-      }
+  { ghcSocketPath :: FilePath
+  }
   deriving (Show, Eq)
 
 -- | Default configuration (Socket mode).
 defaultGitHubConfig :: GitHubConfig
-defaultGitHubConfig = GitHubSocketConfig
-  { ghcSocketPath = ".exomonad/sockets/control.sock"
-  }
-
+defaultGitHubConfig =
+  GitHubSocketConfig
+    { ghcSocketPath = ".exomonad/sockets/control.sock"
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- INTERPRETER
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Run GitHub effects using the socket client.
-runGitHubIO :: LastMember IO effs => GitHubConfig -> Eff (GitHub ': effs) a -> Eff effs a
+runGitHubIO :: (LastMember IO effs) => GitHubConfig -> Eff (GitHub ': effs) a -> Eff effs a
 runGitHubIO (GitHubSocketConfig path) = interpret $ \case
   -- Issue operations
   CreateIssue input -> sendM $ socketCreateIssue path input
@@ -103,17 +100,14 @@ runGitHubIO (GitHubSocketConfig path) = interpret $ \case
   RemoveIssueAssignee (Repo repo) num assignee -> sendM $ socketRemoveIssueAssignee path repo num assignee
   GetIssue (Repo repo) num includeComments -> sendM $ socketGetIssue path repo num includeComments
   ListIssues (Repo repo) filt -> sendM $ socketListIssues path repo filt
-
   -- PR operations
   CreatePR spec -> sendM $ socketCreatePR path spec
   GetPullRequest (Repo repo) num includeDetails -> sendM $ socketGetPR path repo num includeDetails
   ListPullRequests (Repo repo) filt -> sendM $ socketListPullRequests path repo filt
   GetPullRequestReviews (Repo repo) num -> sendM $ socketGetPullRequestReviews path repo num
   GetDiscussion (Repo repo) num -> sendM $ socketGetDiscussion path repo num
-
   -- Auth
   CheckAuth -> sendM $ socketCheckAuth path
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SOCKET FUNCTIONS
@@ -122,32 +116,37 @@ runGitHubIO (GitHubSocketConfig path) = interpret $ \case
 socketCheckAuth :: FilePath -> IO Bool
 socketCheckAuth path = do
   exists <- doesFileExist path
-  if not exists then pure False else do
-    let req = GitHubCheckAuth
-    result <- sendRequest (SocketConfig path 10000) req
-    case result of
-      Right (GitHubAuthResponse auth _) -> pure auth
-      _ -> pure False
+  if not exists
+    then pure False
+    else do
+      let req = GitHubCheckAuth
+      result <- sendRequest (SocketConfig path 10000) req
+      case result of
+        Right (GitHubAuthResponse auth _) -> pure auth
+        _ -> pure False
 
 socketGetIssue :: FilePath -> Text -> Int -> Bool -> IO (Either GitHubError (Maybe Issue))
 socketGetIssue path repo num includeComments = do
   case parseRepo repo of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubGetIssue { owner = owner, repo = repoName, number = num, includeComments = includeComments }
+      let req = GitHubGetIssue {owner = owner, repo = repoName, number = num, includeComments = includeComments}
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right (GitHubIssueResponse n t b s ls u a cs) ->
-          pure $ Right $ Just $ Issue
-            { issueNumber = n
-            , issueTitle = t
-            , issueBody = b
-            , issueAuthor = Author a Nothing
-            , issueLabels = fromMaybe [] ls
-            , issueState = if s == "open" then IssueOpen else IssueClosed
-            , issueUrl = u
-            , issueComments = parseCommentValues (fromMaybe [] cs)
-            }
+          pure $
+            Right $
+              Just $
+                Issue
+                  { issueNumber = n,
+                    issueTitle = t,
+                    issueBody = b,
+                    issueAuthor = Author a Nothing,
+                    issueLabels = fromMaybe [] ls,
+                    issueState = if s == "open" then IssueOpen else IssueClosed,
+                    issueUrl = u,
+                    issueComments = parseCommentValues (fromMaybe [] cs)
+                  }
         Right (ErrorResponse 404 _) -> pure $ Right Nothing
         Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
         Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubGetIssue"
@@ -158,13 +157,14 @@ socketCreateIssue path input = do
   case parseRepo (input.ciiRepo.unRepo) of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubCreateIssue 
-            { owner = owner
-            , repo = repoName
-            , title = Just input.ciiTitle
-            , body = Just input.ciiBody
-            , labels = Just input.ciiLabels 
-            }
+      let req =
+            GitHubCreateIssue
+              { owner = owner,
+                repo = repoName,
+                title = Just input.ciiTitle,
+                body = Just input.ciiBody,
+                labels = Just input.ciiLabels
+              }
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right (GitHubIssueResponse n _ _ _ _ _ _ _) -> pure $ Right n
@@ -181,17 +181,18 @@ socketUpdateIssue path repo num input = do
             Just IssueOpen -> Just "open"
             Just IssueClosed -> Just "closed"
             Nothing -> Nothing
-      
-      let req = GitHubUpdateIssue
-            { owner = owner
-            , repo = repoName
-            , number = num
-            , title = input.uiiTitle
-            , body = input.uiiBody
-            , state = stateStr
-            , labels = input.uiiLabels
-            , assignees = input.uiiAssignees
-            }
+
+      let req =
+            GitHubUpdateIssue
+              { owner = owner,
+                repo = repoName,
+                number = num,
+                title = input.uiiTitle,
+                body = input.uiiBody,
+                state = stateStr,
+                labels = input.uiiLabels,
+                assignees = input.uiiAssignees
+              }
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right (GitHubIssueResponse {}) -> pure $ Right ()
@@ -213,7 +214,7 @@ socketAddIssueLabel path repo num label = do
   case parseRepo repo of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubAddIssueLabel { owner = owner, repo = repoName, number = num, label = label }
+      let req = GitHubAddIssueLabel {owner = owner, repo = repoName, number = num, label = label}
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right OtelAckResponse -> pure $ Right ()
@@ -226,7 +227,7 @@ socketRemoveIssueLabel path repo num label = do
   case parseRepo repo of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubRemoveIssueLabel { owner = owner, repo = repoName, number = num, label = label }
+      let req = GitHubRemoveIssueLabel {owner = owner, repo = repoName, number = num, label = label}
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right OtelAckResponse -> pure $ Right ()
@@ -239,7 +240,7 @@ socketAddIssueAssignee path repo num assignee = do
   case parseRepo repo of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubAddIssueAssignee { owner = owner, repo = repoName, number = num, assignee = assignee }
+      let req = GitHubAddIssueAssignee {owner = owner, repo = repoName, number = num, assignee = assignee}
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right OtelAckResponse -> pure $ Right ()
@@ -252,7 +253,7 @@ socketRemoveIssueAssignee path repo num assignee = do
   case parseRepo repo of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubRemoveIssueAssignee { owner = owner, repo = repoName, number = num, assignee = assignee }
+      let req = GitHubRemoveIssueAssignee {owner = owner, repo = repoName, number = num, assignee = assignee}
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right OtelAckResponse -> pure $ Right ()
@@ -265,7 +266,7 @@ socketListIssues path repo filt = do
   case parseRepo repo of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubListIssues { owner = owner, repo = repoName, state = stateToText <$> filt.ifState, labels = Just filt.ifLabels }
+      let req = GitHubListIssues {owner = owner, repo = repoName, state = stateToText <$> filt.ifState, labels = Just filt.ifLabels}
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right (GitHubIssuesResponse issues) ->
@@ -276,20 +277,20 @@ socketListIssues path repo filt = do
         Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubListIssues"
         Left err -> pure $ Left $ socketErrorToGitHubError err
 
-
 socketCreatePR :: FilePath -> PRCreateSpec -> IO (Either GitHubError PRUrl)
 socketCreatePR path spec = do
   case parseRepo (spec.prcsRepo.unRepo) of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubCreatePR 
-            { owner = owner
-            , repo = repoName
-            , title = Just spec.prcsTitle
-            , body = Just spec.prcsBody
-            , head = spec.prcsHead
-            , base = spec.prcsBase 
-            }
+      let req =
+            GitHubCreatePR
+              { owner = owner,
+                repo = repoName,
+                title = Just spec.prcsTitle,
+                body = Just spec.prcsBody,
+                head = spec.prcsHead,
+                base = spec.prcsBase
+              }
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right (GitHubPRResponse _ _ _ _ url _ _ _ _ _ _ _ _) -> pure $ Right $ PRUrl url
@@ -302,27 +303,30 @@ socketGetPR path repo num includeDetails = do
   case parseRepo repo of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubGetPR { owner = owner, repo = repoName, number = num, includeDetails = includeDetails }
+      let req = GitHubGetPR {owner = owner, repo = repoName, number = num, includeDetails = includeDetails}
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right (GitHubPRResponse n t b a u s h ba c ma ls cs rs) -> do
           let createdAt = parseRFC3339 c
           let mergedAt = ma >>= parseRFC3339Maybe
-          pure $ Right $ Just $ PullRequest
-            { prNumber = n
-            , prTitle = t
-            , prBody = b
-            , prAuthor = Author a Nothing
-            , prState = if s == "open" then PROpen else if s == "merged" then PRMerged else PRClosed
-            , prUrl = u
-            , prHeadRefName = h
-            , prBaseRefName = ba
-            , prCreatedAt = createdAt
-            , prMergedAt = mergedAt
-            , prLabels = fromMaybe [] ls
-            , prComments = parseCommentValues (fromMaybe [] cs)
-            , prReviews = parseReviewValues (fromMaybe [] rs)
-            }
+          pure $
+            Right $
+              Just $
+                PullRequest
+                  { prNumber = n,
+                    prTitle = t,
+                    prBody = b,
+                    prAuthor = Author a Nothing,
+                    prState = if s == "open" then PROpen else if s == "merged" then PRMerged else PRClosed,
+                    prUrl = u,
+                    prHeadRefName = h,
+                    prBaseRefName = ba,
+                    prCreatedAt = createdAt,
+                    prMergedAt = mergedAt,
+                    prLabels = fromMaybe [] ls,
+                    prComments = parseCommentValues (fromMaybe [] cs),
+                    prReviews = parseReviewValues (fromMaybe [] rs)
+                  }
         Right (ErrorResponse 404 _) -> pure $ Right Nothing
         Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
         Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubGetPR"
@@ -338,7 +342,7 @@ socketListPullRequests path repo filt = do
             Just PRClosed -> Just "closed"
             Just PRMerged -> Just "all" -- Octocrab doesn't have "merged" filter easily? Or "closed" covers it?
             Nothing -> Nothing
-      let req = GitHubListPullRequests { owner = owner, repo = repoName, state = s, limit = filt.pfLimit }
+      let req = GitHubListPullRequests {owner = owner, repo = repoName, state = s, limit = filt.pfLimit}
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right (GitHubPullRequestsResponse prs) ->
@@ -354,11 +358,11 @@ socketGetPullRequestReviews path repo num = do
   case parseRepo repo of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubGetPullRequestReviews { owner = owner, repo = repoName, number = num }
+      let req = GitHubGetPullRequestReviews {owner = owner, repo = repoName, number = num}
       result <- sendRequest (SocketConfig path 10000) req
       case result of
         Right (GitHubReviewsResponse reviews) ->
-           case fromJSON (toJSON (fromMaybe [] reviews)) of
+          case fromJSON (toJSON (fromMaybe [] reviews)) of
             Aeson.Success rs -> pure $ Right rs
             err -> pure $ Left $ GHParseError $ T.pack $ "Failed to parse reviews: " <> show err
         Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
@@ -370,25 +374,26 @@ socketGetDiscussion path repo num = do
   case parseRepo repo of
     Left err -> pure $ Left err
     Right (owner, repoName) -> do
-      let req = GitHubGetDiscussion { owner = owner, repo = repoName, number = num }
+      let req = GitHubGetDiscussion {owner = owner, repo = repoName, number = num}
       result <- sendRequest (SocketConfig path 10000) req
       case result of
-        Right (GitHubDiscussionResponse n t b a u cs) -> 
+        Right (GitHubDiscussionResponse n t b a u cs) ->
           case fromJSON (toJSON (fromMaybe [] cs)) of
-            Aeson.Success comments -> 
-              pure $ Right $ Discussion
-                { discNumber = n
-                , discTitle = t
-                , discBody = b
-                , discAuthor = Author a Nothing
-                , discUrl = u
-                , discComments = comments
-                }
+            Aeson.Success comments ->
+              pure $
+                Right $
+                  Discussion
+                    { discNumber = n,
+                      discTitle = t,
+                      discBody = b,
+                      discAuthor = Author a Nothing,
+                      discUrl = u,
+                      discComments = comments
+                    }
             err -> pure $ Left $ GHParseError $ T.pack $ "Failed to parse discussion comments: " <> show err
         Right (ErrorResponse code msg) -> pure $ Left $ GHUnexpected code msg
         Right _ -> pure $ Left $ GHParseError "Unexpected response type for GitHubGetDiscussion"
         Left err -> pure $ Left $ socketErrorToGitHubError err
-
 
 parseRepo :: Text -> Either GitHubError (Text, Text)
 parseRepo repo = case T.splitOn "/" repo of
@@ -430,11 +435,12 @@ parseCommentValues = mapMaybe parseOneComment
       b <- v ^? key "body" . _String
       ca <- v ^? key "created_at" . _String
       let time = parseRFC3339 ca
-      pure Comment
-        { commentAuthor = Author a Nothing
-        , commentBody = b
-        , commentCreatedAt = time
-        }
+      pure
+        Comment
+          { commentAuthor = Author a Nothing,
+            commentBody = b,
+            commentCreatedAt = time
+          }
 
 -- | Parse JSON review values from Rust's GitHubReviewComment format into Haskell Reviews.
 -- Rust sends: {"author": "login", "body": "...", "state": "APPROVED", ...}
@@ -452,8 +458,9 @@ parseReviewValues = mapMaybe parseOneReview
             Just "DISMISSED" -> ReviewDismissed
             Just "PENDING" -> ReviewPending
             _ -> ReviewCommented
-      pure Review
-        { reviewAuthor = Author a Nothing
-        , reviewBody = b
-        , reviewState = st
-        }
+      pure
+        Review
+          { reviewAuthor = Author a Nothing,
+            reviewBody = b,
+            reviewState = st
+          }

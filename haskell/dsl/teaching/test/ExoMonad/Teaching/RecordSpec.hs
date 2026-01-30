@@ -2,17 +2,16 @@
 
 module ExoMonad.Teaching.RecordSpec (spec) where
 
-import Test.Hspec
 import Data.Aeson (object, (.=))
 import Data.Maybe (fromJust)
 import Data.Time (getCurrentTime)
-import qualified Data.UUID as UUID
+import Data.UUID qualified as UUID
+import ExoMonad.Teaching.Record
+import ExoMonad.Teaching.Types
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist)
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
-
-import ExoMonad.Teaching.Record
-import ExoMonad.Teaching.Types
+import Test.Hspec
 
 -- Helper to create a test UUID
 testUUID :: UUID.UUID
@@ -40,16 +39,17 @@ spec = do
         handles <- initRecording tmpDir sessionId
 
         now <- getCurrentTime
-        let turn = TeachingTurn
-              { ttNodeName = "gClassify"
-              , ttGraphName = "SupportGraph"
-              , ttSystemPrompt = "You are a helpful assistant."
-              , ttUserContent = object ["message" .= ("hello" :: String)]
-              , ttOutputSchema = object ["type" .= ("string" :: String)]
-              , ttToolDefs = []
-              , ttResponse = object ["content" .= ("world" :: String)]
-              , ttTimestamp = now
-              }
+        let turn =
+              TeachingTurn
+                { ttNodeName = "gClassify",
+                  ttGraphName = "SupportGraph",
+                  ttSystemPrompt = "You are a helpful assistant.",
+                  ttUserContent = object ["message" .= ("hello" :: String)],
+                  ttOutputSchema = object ["type" .= ("string" :: String)],
+                  ttToolDefs = [],
+                  ttResponse = object ["content" .= ("world" :: String)],
+                  ttTimestamp = now
+                }
 
         recordTurn handles turn
 
@@ -67,12 +67,13 @@ spec = do
       withSystemTempDirectory "test-recording" $ \tmpDir -> do
         let sessionId = testUUID
         let sessionDir = tmpDir </> ("session-" <> UUID.toString sessionId)
-        let config = TeachingConfig
-              { tcEnabled = True
-              , tcOutputDir = tmpDir
-              , tcSessionId = sessionId
-              , tcAnthropicKey = "test-key"
-              }
+        let config =
+              TeachingConfig
+                { tcEnabled = True,
+                  tcOutputDir = tmpDir,
+                  tcSessionId = sessionId,
+                  tcAnthropicKey = "test-key"
+                }
 
         -- Create the session directory first (writeMetadata expects it to exist)
         createDirectoryIfMissing True sessionDir

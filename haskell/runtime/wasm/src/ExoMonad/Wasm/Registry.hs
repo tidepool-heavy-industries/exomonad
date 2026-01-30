@@ -33,71 +33,69 @@
 -- Call 'setRegistry' once at init before any FFI calls.
 module ExoMonad.Wasm.Registry
   ( -- * Types (re-exported from Registry.Types)
-    ActiveSession(..)
-  , GraphEntry(..)
+    ActiveSession (..),
+    GraphEntry (..),
 
     -- * Graph Entry Helper
-  , makeGraphEntry
-  , graphInfoToJson
+    makeGraphEntry,
+    graphInfoToJson,
 
     -- * Registry Configuration
-  , setRegistry
-  , getRegistry
+    setRegistry,
+    getRegistry,
 
     -- * Graph Specs (for codegen)
-  , registryGraphSpecs
+    registryGraphSpecs,
 
     -- * Unified FFI (Text interface for native testing)
-  , initialize
-  , step
-  , getGraphInfo
-  , getGraphState
+    initialize,
+    step,
+    getGraphInfo,
+    getGraphState,
 
     -- * Testing
-  , resetSession
-  , resetRegistry
-  ) where
+    resetSession,
+    resetRegistry,
+  )
+where
 
-import Data.Aeson (Value(..), FromJSON, ToJSON(..), encode, eitherDecodeStrict, object, (.=))
-import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.KeyMap as KM
+import Data.Aeson (FromJSON, ToJSON (..), Value (..), eitherDecodeStrict, encode, object, (.=))
+import Data.Aeson qualified as Aeson
+import Data.Aeson.KeyMap qualified as KM
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
-import Data.Proxy (Proxy(..))
+import Data.Map.Strict qualified as Map
+import Data.Proxy (Proxy (..))
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Data.Text.Encoding (encodeUtf8)
-import qualified Data.Text.Lazy as TL
-import qualified Data.Text.Lazy.Encoding as TLE
-import qualified Data.Vector as V
-import GHC.Generics (Generic, Rep)
-import System.IO.Unsafe (unsafePerformIO)
-
-import ExoMonad.Graph.Reify
-  ( GraphInfo(..)
-  , NodeInfo(..)
-  , EdgeInfo(..)
-  , GReifyFields
-  , ReifyMaybeType
-  , GetEntryTypeFromGraph
-  , GetExitTypeFromGraph
-  , makeGraphInfo
-  )
+import Data.Text.Lazy qualified as TL
+import Data.Text.Lazy.Encoding qualified as TLE
+import Data.Vector qualified as V
+import ExoMonad.Generated.Codegen (GraphSpec (..))
 import ExoMonad.Graph.Generic (AsGraph)
-import ExoMonad.Wasm.Runner (WasmResult(..), initializeWasm, WasmM)
-import ExoMonad.Wasm.WireTypes
-  ( EffectResult
-  , ExecutionPhase(..)
-  , GraphState(..)
-  , StepOutput(..)
+import ExoMonad.Graph.Reify
+  ( EdgeInfo (..),
+    GReifyFields,
+    GetEntryTypeFromGraph,
+    GetExitTypeFromGraph,
+    GraphInfo (..),
+    NodeInfo (..),
+    ReifyMaybeType,
+    makeGraphInfo,
   )
 import ExoMonad.Wasm.Ffi.Types (encodeStepOutput, mkErrorOutput)
-import ExoMonad.Generated.Codegen (GraphSpec(..))
-
 -- Types
-import ExoMonad.Wasm.Registry.Types (ActiveSession(..), GraphEntry(..))
-
+import ExoMonad.Wasm.Registry.Types (ActiveSession (..), GraphEntry (..))
+import ExoMonad.Wasm.Runner (WasmM, WasmResult (..), initializeWasm)
+import ExoMonad.Wasm.WireTypes
+  ( EffectResult,
+    ExecutionPhase (..),
+    GraphState (..),
+    StepOutput (..),
+  )
+import GHC.Generics (Generic, Rep)
+import System.IO.Unsafe (unsafePerformIO)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPH ENTRY HELPER
@@ -115,24 +113,26 @@ import ExoMonad.Wasm.Registry.Types (ActiveSession(..), GraphEntry(..))
 -- testGraphEntry :: GraphEntry
 -- testGraphEntry = makeGraphEntry \@TestGraph "test" computeHandlerWasm
 -- @
-makeGraphEntry
-  :: forall graph input output.
-     ( Generic (graph AsGraph)
-     , GReifyFields (Rep (graph AsGraph))
-     , ReifyMaybeType (GetEntryTypeFromGraph graph)
-     , ReifyMaybeType (GetExitTypeFromGraph graph)
-     , FromJSON input
-     , ToJSON output
-     )
-  => Text                    -- ^ Graph ID (single source of truth)
-  -> (input -> WasmM output) -- ^ Graph runner
-  -> GraphEntry
-makeGraphEntry graphId runner = GraphEntry
-  { geName = graphId
-  , geGraphInfo = graphInfoToJson graphId (makeGraphInfo (Proxy @graph))
-  , geCreate = createSession graphId runner
-  }
-
+makeGraphEntry ::
+  forall graph input output.
+  ( Generic (graph AsGraph),
+    GReifyFields (Rep (graph AsGraph)),
+    ReifyMaybeType (GetEntryTypeFromGraph graph),
+    ReifyMaybeType (GetExitTypeFromGraph graph),
+    FromJSON input,
+    ToJSON output
+  ) =>
+  -- | Graph ID (single source of truth)
+  Text ->
+  -- | Graph runner
+  (input -> WasmM output) ->
+  GraphEntry
+makeGraphEntry graphId runner =
+  GraphEntry
+    { geName = graphId,
+      geGraphInfo = graphInfoToJson graphId (makeGraphInfo (Proxy @graph)),
+      geCreate = createSession graphId runner
+    }
 
 -- | Convert GraphInfo to JSON Value for FFI.
 --
@@ -146,23 +146,24 @@ makeGraphEntry graphId runner = GraphEntry
 -- }
 -- @
 graphInfoToJson :: Text -> GraphInfo -> Value
-graphInfoToJson graphId gi = object
-  [ "id" .= graphId
-  , "name" .= graphId
-  , "nodes" .= nodeNames
-  , "edges" .= map edgeToJson (gi.giEdges)
-  ]
+graphInfoToJson graphId gi =
+  object
+    [ "id" .= graphId,
+      "name" .= graphId,
+      "nodes" .= nodeNames,
+      "edges" .= map edgeToJson (gi.giEdges)
+    ]
   where
     -- Include entry/exit plus all real nodes
     nodeNames :: [Text]
     nodeNames = "entry" : map (.niName) (gi.giNodes) ++ ["exit"]
 
     edgeToJson :: EdgeInfo -> Value
-    edgeToJson e = object
-      [ "from" .= e.eiFrom
-      , "to" .= e.eiTo
-      ]
-
+    edgeToJson e =
+      object
+        [ "from" .= e.eiFrom,
+          "to" .= e.eiTo
+        ]
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SESSION STATE (generic, used by makeGraphEntry)
@@ -173,15 +174,17 @@ data SessionState a
   = SessionIdle
   | SessionWaiting (EffectResult -> WasmResult a) ExecutionPhase
 
-
 -- | Create a new session for a graph.
-createSession
-  :: forall input output.
-     (FromJSON input, ToJSON output)
-  => Text                      -- ^ Graph ID
-  -> (input -> WasmM output)   -- ^ Runner
-  -> Value                     -- ^ Input JSON
-  -> IO (Either Text (StepOutput, ActiveSession))
+createSession ::
+  forall input output.
+  (FromJSON input, ToJSON output) =>
+  -- | Graph ID
+  Text ->
+  -- | Runner
+  (input -> WasmM output) ->
+  -- | Input JSON
+  Value ->
+  IO (Either Text (StepOutput, ActiveSession))
 createSession graphId runner inputValue = do
   sessionState <- newIORef SessionIdle
 
@@ -190,17 +193,17 @@ createSession graphId runner inputValue = do
     Aeson.Success input -> do
       let result = initializeWasm (runner input)
       output <- wasmResultToOutput sessionState result
-      let session = ActiveSession
-            { asGraphId = graphId
-            , asStep = stepSession sessionState
-            , asGetState = getSessionState sessionState
-            , asGraphInfo = object ["id" .= graphId]  -- Minimal, full info in GraphEntry
-            }
+      let session =
+            ActiveSession
+              { asGraphId = graphId,
+                asStep = stepSession sessionState,
+                asGetState = getSessionState sessionState,
+                asGraphInfo = object ["id" .= graphId] -- Minimal, full info in GraphEntry
+              }
       pure $ Right (output, session)
 
-
 -- | Step the session with an effect result.
-stepSession :: ToJSON a => IORef (SessionState a) -> EffectResult -> IO StepOutput
+stepSession :: (ToJSON a) => IORef (SessionState a) -> EffectResult -> IO StepOutput
 stepSession sessionState effectResult = do
   st <- readIORef sessionState
   case st of
@@ -208,7 +211,6 @@ stepSession sessionState effectResult = do
     SessionWaiting resume _phase -> do
       let result = resume effectResult
       wasmResultToOutput sessionState result
-
 
 -- | Get current session state.
 getSessionState :: IORef (SessionState a) -> IO GraphState
@@ -218,23 +220,19 @@ getSessionState sessionState = do
     SessionIdle -> GraphState PhaseIdle []
     SessionWaiting _ phase -> GraphState phase []
 
-
 -- | Convert WasmResult to StepOutput.
-wasmResultToOutput :: ToJSON a => IORef (SessionState a) -> WasmResult a -> IO StepOutput
+wasmResultToOutput :: (ToJSON a) => IORef (SessionState a) -> WasmResult a -> IO StepOutput
 wasmResultToOutput sessionState (WasmComplete result) = do
   writeIORef sessionState SessionIdle
   let resultVal = toJSON result
   pure $ StepDone resultVal (GraphState (PhaseCompleted resultVal) [])
-
 wasmResultToOutput sessionState (WasmYield eff resume) = do
-  let phase = PhaseInNode "running"  -- Generic phase name
+  let phase = PhaseInNode "running" -- Generic phase name
   writeIORef sessionState (SessionWaiting resume phase)
   pure $ StepYield eff (GraphState phase [])
-
 wasmResultToOutput sessionState (WasmError msg) = do
   writeIORef sessionState SessionIdle
   pure $ mkErrorOutput msg
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- REGISTRY
@@ -265,7 +263,6 @@ resetRegistry = writeIORef registryRef Map.empty
 graphIds :: IO [Text]
 graphIds = Map.keys <$> getRegistry
 
-
 -- | Derive GraphSpecs from registry entries (for codegen).
 --
 -- This is the SINGLE SOURCE OF TRUTH for graph metadata.
@@ -274,12 +271,13 @@ registryGraphSpecs :: IO [GraphSpec]
 registryGraphSpecs = map entryToSpec . Map.toList <$> getRegistry
   where
     entryToSpec :: (Text, GraphEntry) -> GraphSpec
-    entryToSpec (gid, entry) = GraphSpec
-      { gsId = gid
-      , gsName = entry.geName
-      , gsNodes = extractNodes entry.geGraphInfo
-      , gsEdges = extractEdges entry.geGraphInfo
-      }
+    entryToSpec (gid, entry) =
+      GraphSpec
+        { gsId = gid,
+          gsName = entry.geName,
+          gsNodes = extractNodes entry.geGraphInfo,
+          gsEdges = extractEdges entry.geGraphInfo
+        }
 
     -- Extract nodes array from JSON: {"nodes": ["entry", "compute", "exit"]}
     extractNodes :: Value -> [Text]
@@ -301,7 +299,6 @@ registryGraphSpecs = map entryToSpec . Map.toList <$> getRegistry
       _ -> []
     parseEdge _ = []
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- ACTIVE SESSION STATE
 -- ════════════════════════════════════════════════════════════════════════════
@@ -314,7 +311,6 @@ activeSession = unsafePerformIO $ newIORef Nothing
 -- | Reset session (for testing).
 resetSession :: IO ()
 resetSession = writeIORef activeSession Nothing
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- UNIFIED FFI
@@ -334,14 +330,18 @@ initialize graphId inputJson = do
   registry <- getRegistry
   validIds <- graphIds
   case Map.lookup graphId registry of
-    Nothing -> pure $ encodeStepOutput $ mkErrorOutput $
-      "Unknown graph: " <> graphId <> ". Valid graphs: " <> T.intercalate ", " validIds
-
+    Nothing ->
+      pure $
+        encodeStepOutput $
+          mkErrorOutput $
+            "Unknown graph: " <> graphId <> ". Valid graphs: " <> T.intercalate ", " validIds
     Just entry -> do
       case eitherDecodeStrict (encodeUtf8 inputJson) of
-        Left err -> pure $ encodeStepOutput $ mkErrorOutput $
-          "JSON parse error: " <> T.pack err
-
+        Left err ->
+          pure $
+            encodeStepOutput $
+              mkErrorOutput $
+                "JSON parse error: " <> T.pack err
         Right inputValue -> do
           result <- entry.geCreate inputValue
           case result of
@@ -349,7 +349,6 @@ initialize graphId inputJson = do
             Right (output, session) -> do
               writeIORef activeSession (Just session)
               pure $ encodeStepOutput output
-
 
 -- | Step the current session with an effect result.
 --
@@ -361,28 +360,36 @@ step :: Text -> Text -> IO Text
 step graphId resultJson = do
   mSession <- readIORef activeSession
   case mSession of
-    Nothing -> pure $ encodeStepOutput $ mkErrorOutput $
-      "No active session - call initialize(\"" <> graphId <> "\", ...) first"
-
+    Nothing ->
+      pure $
+        encodeStepOutput $
+          mkErrorOutput $
+            "No active session - call initialize(\"" <> graphId <> "\", ...) first"
     Just session
-      | session.asGraphId /= graphId -> pure $ encodeStepOutput $ mkErrorOutput $
-          "Graph mismatch: session active for '" <> session.asGraphId <>
-          "' but step called with '" <> graphId <>
-          "'. This usually indicates a routing bug in the TypeScript harness."
-
+      | session.asGraphId /= graphId ->
+          pure $
+            encodeStepOutput $
+              mkErrorOutput $
+                "Graph mismatch: session active for '"
+                  <> session.asGraphId
+                  <> "' but step called with '"
+                  <> graphId
+                  <> "'. This usually indicates a routing bug in the TypeScript harness."
       | otherwise -> do
           case eitherDecodeStrict (encodeUtf8 resultJson) of
-            Left err -> pure $ encodeStepOutput $ mkErrorOutput $
-              "JSON parse error: " <> T.pack err
+            Left err ->
+              pure $
+                encodeStepOutput $
+                  mkErrorOutput $
+                    "JSON parse error: " <> T.pack err
             Right effectResult -> do
               output <- session.asStep effectResult
               -- Check if we're done (clear session on completion)
               case output of
-                StepDone{} -> writeIORef activeSession Nothing
-                StepFailed{} -> writeIORef activeSession Nothing
-                StepYield{} -> pure ()  -- Keep session active
+                StepDone {} -> writeIORef activeSession Nothing
+                StepFailed {} -> writeIORef activeSession Nothing
+                StepYield {} -> pure () -- Keep session active
               pure $ encodeStepOutput output
-
 
 -- | Get graph info for a graph ID.
 --
@@ -395,11 +402,13 @@ getGraphInfo graphId = do
   registry <- getRegistry
   validIds <- graphIds
   case Map.lookup graphId registry of
-    Nothing -> pure $ encodeStepOutput $ mkErrorOutput $
-      "Unknown graph: " <> graphId <> ". Valid graphs: " <> T.intercalate ", " validIds
+    Nothing ->
+      pure $
+        encodeStepOutput $
+          mkErrorOutput $
+            "Unknown graph: " <> graphId <> ". Valid graphs: " <> T.intercalate ", " validIds
     Just entry ->
       pure $ TL.toStrict $ TLE.decodeUtf8 $ encode entry.geGraphInfo
-
 
 -- | Get current graph state.
 --
@@ -412,14 +421,18 @@ getGraphState graphId = do
   mSession <- readIORef activeSession
   case mSession of
     Nothing ->
-      pure $ TL.toStrict $ TLE.decodeUtf8 $ encode $
-        GraphState PhaseIdle []
-
+      pure $
+        TL.toStrict $
+          TLE.decodeUtf8 $
+            encode $
+              GraphState PhaseIdle []
     Just session
       | session.asGraphId /= graphId ->
-          pure $ TL.toStrict $ TLE.decodeUtf8 $ encode $
-            GraphState PhaseIdle []
-
+          pure $
+            TL.toStrict $
+              TLE.decodeUtf8 $
+                encode $
+                  GraphState PhaseIdle []
       | otherwise -> do
           gs <- session.asGetState
           pure $ TL.toStrict $ TLE.decodeUtf8 $ encode gs

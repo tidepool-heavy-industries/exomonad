@@ -1,7 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 -- | Template Haskell derivation for 'ToolRecord' instances.
 --
@@ -47,37 +47,37 @@
 -- @
 module ExoMonad.LLM.Tools.TH
   ( -- * Main Derivation
-    deriveToolRecord
+    deriveToolRecord,
 
     -- * Tool Metadata
-  , Tool(..)
-  ) where
+    Tool (..),
+  )
+where
 
-import Language.Haskell.TH
+import Control.Monad (forM, unless)
 import Data.Char (isUpper, toLower)
-import qualified Data.Text as T
-import Control.Monad (unless, forM)
-import GHC.Records (getField)
 import Data.List (find)
-
+import Data.Text qualified as T
 -- Import for Name references in generated code
 import ExoMonad.LLM.Tools
-  ( ToolRecord(..)
-  , ToolSchema(..)
-  , dispatchHandler
-  , ToolDispatchError(..)
+  ( ToolDispatchError (..),
+    ToolRecord (..),
+    ToolSchema (..),
+    dispatchHandler,
   )
 import ExoMonad.Schema (schemaToValue)
-import ExoMonad.StructuredOutput.Class (HasJSONSchema(..))
+import ExoMonad.StructuredOutput.Class (HasJSONSchema (..))
+import GHC.Records (getField)
+import Language.Haskell.TH
 
 -- | Tool metadata for derivation.
 --
 -- Associates a field name with a description for the LLM.
 data Tool = Tool
-  { toolFieldName :: String
-    -- ^ Haskell field name (must match exactly)
-  , toolDescription :: String
-    -- ^ Description shown to the LLM
+  { -- | Haskell field name (must match exactly)
+    toolFieldName :: String,
+    -- | Description shown to the LLM
+    toolDescription :: String
   }
   deriving (Show, Eq)
 
@@ -119,18 +119,24 @@ deriveToolRecord typeName tools = do
           unknownInTools = filter (`notElem` fieldNames) toolNames
 
       unless (null missingFromTools) $
-        fail $ "deriveToolRecord: Missing Tool descriptions for fields: " ++ show missingFromTools
-          ++ "\n  Add Tool entries for these fields."
+        fail $
+          "deriveToolRecord: Missing Tool descriptions for fields: "
+            ++ show missingFromTools
+            ++ "\n  Add Tool entries for these fields."
 
       unless (null unknownInTools) $
-        fail $ "deriveToolRecord: Unknown fields in Tool list: " ++ show unknownInTools
-          ++ "\n  These don't match any field in " ++ nameBase typeName ++ "."
+        fail $
+          "deriveToolRecord: Unknown fields in Tool list: "
+            ++ show unknownInTools
+            ++ "\n  These don't match any field in "
+            ++ nameBase typeName
+            ++ "."
 
       -- Process each field
       fieldData <- forM fields $ \(fname, _, ftype) -> do
         argsType <- extractArgsType ftype fname
         let jsonKey = camelToSnake (nameBase fname)
-            -- Find the Tool entry for this field (guaranteed to exist by validation above)
+        -- Find the Tool entry for this field (guaranteed to exist by validation above)
         desc <- case find (\t -> t.toolFieldName == nameBase fname) tools of
           Just t -> pure t.toolDescription
           Nothing -> fail $ "deriveToolRecord: BUG - couldn't find Tool for field " ++ nameBase fname
@@ -138,13 +144,15 @@ deriveToolRecord typeName tools = do
 
       -- Generate instance
       genToolRecordInstance typeName tyVarName fieldData
-
     TyConI (DataD _ _ tvars _ cons _) ->
-      fail $ "deriveToolRecord: " ++ nameBase typeName
-        ++ " - expected single-constructor record with one type variable, but got "
-        ++ show (length tvars) ++ " type variable(s) and "
-        ++ show (length cons) ++ " constructor(s)"
-
+      fail $
+        "deriveToolRecord: "
+          ++ nameBase typeName
+          ++ " - expected single-constructor record with one type variable, but got "
+          ++ show (length tvars)
+          ++ " type variable(s) and "
+          ++ show (length cons)
+          ++ " constructor(s)"
     _ -> fail $ "deriveToolRecord: " ++ nameBase typeName ++ " must be a data type"
 
 -- | Extract the type variable name from a TyVarBndr
@@ -157,12 +165,14 @@ extractArgsType :: Type -> Name -> Q Type
 extractArgsType ftype fname = case ftype of
   -- Pattern: args -> Eff es result
   AppT (AppT ArrowT argsType) _ -> pure argsType
-
   -- Pattern: forall x. args -> Eff es result (unwrap forall)
   ForallT _ _ innerType -> extractArgsType innerType fname
-
-  _ -> fail $ "deriveToolRecord: Field '" ++ nameBase fname
-    ++ "' must have type (args -> Eff es result), but got: " ++ pprint ftype
+  _ ->
+    fail $
+      "deriveToolRecord: Field '"
+        ++ nameBase fname
+        ++ "' must have type (args -> Eff es result), but got: "
+        ++ pprint ftype
 
 -- | Convert camelCase to snake_case.
 --
@@ -172,12 +182,12 @@ camelToSnake :: String -> String
 camelToSnake = go True
   where
     go _ [] = []
-    go isFirst (c:cs)
+    go isFirst (c : cs)
       | isUpper c =
           let lower = toLower c
-          in if isFirst
-             then lower : go False cs
-             else '_' : lower : go False cs
+           in if isFirst
+                then lower : go False cs
+                else '_' : lower : go False cs
       | otherwise = c : go False cs
 
 -- | Generate the ToolRecord instance.
@@ -190,12 +200,19 @@ genToolRecordInstance typeName _tyVarName fieldData = do
   dispatchToolExp <- genDispatchTool fieldData
 
   -- Build the instance
-  pure [InstanceD Nothing [] (AppT (ConT ''ToolRecord) (ConT typeName))
-    [ FunD 'toolSchemas
-        [Clause [WildP] (NormalB toolSchemasExp) []]
-    , FunD 'dispatchTool
-        [Clause [] (NormalB dispatchToolExp) []]
-    ]]
+  pure
+    [ InstanceD
+        Nothing
+        []
+        (AppT (ConT ''ToolRecord) (ConT typeName))
+        [ FunD
+            'toolSchemas
+            [Clause [WildP] (NormalB toolSchemasExp) []],
+          FunD
+            'dispatchTool
+            [Clause [] (NormalB dispatchToolExp) []]
+        ]
+    ]
 
 -- | Generate the toolSchemas list expression.
 --
@@ -209,11 +226,12 @@ genToolSchemas fieldData = do
   schemas <- forM fieldData $ \(_fname, argsType, jsonKey, desc) -> do
     -- Build: ToolSchema jsonKey desc (schemaToValue $ jsonSchema @ArgsType)
     let schemaExp = AppTypeE (VarE 'jsonSchema) argsType
-    [| ToolSchema
-         (T.pack $(litE (stringL jsonKey)))
-         (T.pack $(litE (stringL desc)))
-         (schemaToValue $(pure schemaExp))
-     |]
+    [|
+      ToolSchema
+        (T.pack $(litE (stringL jsonKey)))
+        (T.pack $(litE (stringL desc)))
+        (schemaToValue $(pure schemaExp))
+      |]
   listE (map pure schemas)
 
 -- | Generate the dispatchTool case expression.
@@ -235,18 +253,24 @@ genDispatchTool fieldData = do
     -- Build: dispatchHandler (getField @"fieldName" tools) name input
     -- Note: Using getField because NoFieldSelectors is enabled
     let fieldNameStr = nameBase fname
-    match (litP (stringL jsonKey))
-          (normalB [| dispatchHandler
-                        (getField @($(litT (strTyLit fieldNameStr))) $(varE toolsName))
-                        $(varE nameName)
-                        $(varE inputName)
-                    |])
-          []
+    match
+      (litP (stringL jsonKey))
+      ( normalB
+          [|
+            dispatchHandler
+              (getField @($(litT (strTyLit fieldNameStr))) $(varE toolsName))
+              $(varE nameName)
+              $(varE inputName)
+            |]
+      )
+      []
 
   -- Add wildcard case for unknown tools
-  wildcardCase <- match wildP
-                        (normalB [| pure $ Left $ ToolNotFound $(varE nameName) |])
-                        []
+  wildcardCase <-
+    match
+      wildP
+      (normalB [|pure $ Left $ ToolNotFound $(varE nameName)|])
+      []
 
   caseExp <- caseE (varE nameName) (map pure (matchCases ++ [wildcardCase]))
 

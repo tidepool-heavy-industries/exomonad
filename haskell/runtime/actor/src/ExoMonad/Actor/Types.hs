@@ -4,15 +4,14 @@
 -- Ki scope owns lifecycle - no need to track threads.
 module ExoMonad.Actor.Types
   ( -- * Actor Types
-    Actor(..)
-  , ActorId
-  ) where
+    Actor (..),
+    ActorId,
+  )
+where
 
 import Data.Aeson (Value)
 import Data.Text (Text)
-
 import ExoMonad.Actor.Mailbox (Mailbox)
-
 
 -- | Unique identifier for an actor (corresponds to graph node name).
 type ActorId = Text
@@ -22,8 +21,8 @@ type ActorId = Text
 -- No thread field - ki's scope manages lifecycle.
 -- When the scope exits, all actors are automatically cleaned up.
 data Actor = Actor
-  { actorId      :: !ActorId
-    -- ^ Unique identifier (node name)
-  , actorMailbox :: !(Mailbox Value)
-    -- ^ Incoming message queue
+  { -- | Unique identifier (node name)
+    actorId :: !ActorId,
+    -- | Incoming message queue
+    actorMailbox :: !(Mailbox Value)
   }

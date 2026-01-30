@@ -30,7 +30,11 @@ pub async fn run(
     }
 }
 
-fn run_local(workdir: Option<String>, env: Vec<String>, cmd: Vec<String>) -> anyhow::Result<String> {
+fn run_local(
+    workdir: Option<String>,
+    env: Vec<String>,
+    cmd: Vec<String>,
+) -> anyhow::Result<String> {
     use std::process::Command;
 
     if cmd.is_empty() {
@@ -67,7 +71,7 @@ async fn run_in_container(
     cmd: Vec<String>,
 ) -> anyhow::Result<String> {
     let docker = Docker::connect_with_local_defaults()?;
-    
+
     let exec_options = CreateExecOptions {
         cmd: Some(cmd),
         attach_stdout: Some(true),

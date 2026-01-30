@@ -2,15 +2,14 @@
 
 module ToolResultOutcomeSpec (spec) where
 
+import Data.Aeson (Result (..), Value (..), decode, encode, fromJSON, object, toJSON, (.=))
+import Data.ByteString.Lazy qualified as BL
+import Data.ByteString.Lazy.Char8 qualified as BLC
+import Data.Text qualified as T
+import ExoMonad.Effect.Types (ToolResult (..))
+import ExoMonad.Wasm.Conversion (fromToolResultOutcome, toToolResultOutcome)
+import ExoMonad.Wasm.WireTypes (ToolResultOutcome (..))
 import Test.Hspec
-import Data.Aeson (toJSON, fromJSON, encode, decode, Value(..), object, (.=), Result(..))
-import qualified Data.ByteString.Lazy as BL
-import qualified Data.ByteString.Lazy.Char8 as BLC
-import qualified Data.Text as T
-
-import ExoMonad.Wasm.WireTypes (ToolResultOutcome(..))
-import ExoMonad.Wasm.Conversion (toToolResultOutcome, fromToolResultOutcome)
-import ExoMonad.Effect.Types (ToolResult(..))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TESTS

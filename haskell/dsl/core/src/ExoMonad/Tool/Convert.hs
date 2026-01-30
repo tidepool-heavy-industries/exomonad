@@ -46,23 +46,23 @@
 -- @
 module ExoMonad.Tool.Convert
   ( -- * Conversion Typeclasses
-    ToAnthropicTool(..)
-  , ToCfTool(..)
+    ToAnthropicTool (..),
+    ToCfTool (..),
 
     -- * Bulk Conversion
-  , toolDefsToAnthropic
-  , toolDefsToCf
-  ) where
-
-import ExoMonad.Schema (HasJSONSchema(..))
-import ExoMonad.Graph.Tool (ToolDef(..))
-import ExoMonad.Tool.Wire
-  ( AnthropicTool(..)
-  , CfTool(..)
-  , schemaToAnthropicTool
-  , schemaToCfTool
+    toolDefsToAnthropic,
+    toolDefsToCf,
   )
+where
 
+import ExoMonad.Graph.Tool (ToolDef (..))
+import ExoMonad.Schema (HasJSONSchema (..))
+import ExoMonad.Tool.Wire
+  ( AnthropicTool (..),
+    CfTool (..),
+    schemaToAnthropicTool,
+    schemaToCfTool,
+  )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ANTHROPIC CONVERSION
@@ -84,15 +84,14 @@ import ExoMonad.Tool.Wire
 --     , atInputSchema = customSchema
 --     }
 -- @
-class ToolDef t => ToAnthropicTool t where
+class (ToolDef t) => ToAnthropicTool t where
   toAnthropicTool :: t -> AnthropicTool
-
-  default toAnthropicTool :: HasJSONSchema (ToolInput t) => t -> AnthropicTool
-  toAnthropicTool tool = schemaToAnthropicTool
-    (toolName tool)
-    (toolDescription tool)
-    (jsonSchema @(ToolInput t))
-
+  default toAnthropicTool :: (HasJSONSchema (ToolInput t)) => t -> AnthropicTool
+  toAnthropicTool tool =
+    schemaToAnthropicTool
+      (toolName tool)
+      (toolDescription tool)
+      (jsonSchema @(ToolInput t))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CLOUDFLARE AI / OPENAI CONVERSION
@@ -114,15 +113,14 @@ class ToolDef t => ToAnthropicTool t where
 --     , ctParameters = customSchema
 --     }
 -- @
-class ToolDef t => ToCfTool t where
+class (ToolDef t) => ToCfTool t where
   toCfTool :: t -> CfTool
-
-  default toCfTool :: HasJSONSchema (ToolInput t) => t -> CfTool
-  toCfTool tool = schemaToCfTool
-    (toolName tool)
-    (toolDescription tool)
-    (jsonSchema @(ToolInput t))
-
+  default toCfTool :: (HasJSONSchema (ToolInput t)) => t -> CfTool
+  toCfTool tool =
+    schemaToCfTool
+      (toolName tool)
+      (toolDescription tool)
+      (jsonSchema @(ToolInput t))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- BULK CONVERSION

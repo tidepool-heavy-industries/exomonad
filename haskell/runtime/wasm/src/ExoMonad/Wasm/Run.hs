@@ -42,47 +42,45 @@
 -- @
 module ExoMonad.Wasm.Run
   ( -- * Running Portable Handlers
-    runPortableHandler
-  , runPortableHandlerNoState
+    runPortableHandler,
+    runPortableHandlerNoState,
 
     -- * Effect Stack Types
-  , PortableEffects
-  , PortableEffectsNoState
-  ) where
+    PortableEffects,
+    PortableEffectsNoState,
+  )
+where
 
 import Control.Monad.Freer (Eff)
 import Control.Monad.Freer.Coroutine (Yield)
-import Data.Aeson (ToJSON, FromJSON)
-
+import Data.Aeson (FromJSON, ToJSON)
 import ExoMonad.Effect.Types (LLM, Log, State)
-import ExoMonad.Wasm.WireTypes (SerializableEffect, EffectResult)
-import ExoMonad.Wasm.Interpreter
-  ( runLLMAsYield
-  , runLogAsYield
-  , runStateAsYield
-  )
 import ExoMonad.Wasm.Effect (WasmM)
-
+import ExoMonad.Wasm.Interpreter
+  ( runLLMAsYield,
+    runLogAsYield,
+    runStateAsYield,
+  )
+import ExoMonad.Wasm.WireTypes (EffectResult, SerializableEffect)
 
 -- | Effect stack for portable handlers with state.
 --
 -- Handlers can use @Member LLM effs@, @Member Log effs@, and @Member (State s) effs@.
 type PortableEffects s =
-  '[ LLM
-   , Log
-   , State s
-   , Yield SerializableEffect EffectResult
+  '[ LLM,
+     Log,
+     State s,
+     Yield SerializableEffect EffectResult
    ]
 
 -- | Effect stack for portable handlers without state.
 --
 -- Handlers can use @Member LLM effs@ and @Member Log effs@.
 type PortableEffectsNoState =
-  '[ LLM
-   , Log
-   , Yield SerializableEffect EffectResult
+  '[ LLM,
+     Log,
+     Yield SerializableEffect EffectResult
    ]
-
 
 -- | Run a portable handler in WASM context.
 --
@@ -101,17 +99,17 @@ type PortableEffectsNoState =
 -- wasmComputation :: Input -> WasmM Output
 -- wasmComputation = runPortableHandler defaultMyState . handler
 -- @
-runPortableHandler
-  :: forall s a.
-     (ToJSON s, FromJSON s)
-  => s  -- ^ Initial state
-  -> Eff (PortableEffects s) a
-  -> WasmM a
+runPortableHandler ::
+  forall s a.
+  (ToJSON s, FromJSON s) =>
+  -- | Initial state
+  s ->
+  Eff (PortableEffects s) a ->
+  WasmM a
 runPortableHandler initialState =
-    runStateAsYield initialState
-  . runLogAsYield
-  . runLLMAsYield
-
+  runStateAsYield initialState
+    . runLogAsYield
+    . runLLMAsYield
 
 -- | Run a portable handler without state in WASM context.
 --
@@ -126,9 +124,9 @@ runPortableHandler initialState =
 -- wasmComputation :: Input -> WasmM Output
 -- wasmComputation = runPortableHandlerNoState . handler
 -- @
-runPortableHandlerNoState
-  :: Eff PortableEffectsNoState a
-  -> WasmM a
+runPortableHandlerNoState ::
+  Eff PortableEffectsNoState a ->
+  WasmM a
 runPortableHandlerNoState =
-    runLogAsYield
-  . runLLMAsYield
+  runLogAsYield
+    . runLLMAsYield

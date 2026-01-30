@@ -3,28 +3,28 @@
 
 module TypedToolSpec (spec) where
 
-import Test.Hspec
-import Data.Aeson (object, (.=), Value(..))
+import Data.Aeson (Value (..), object, (.=))
 import Data.Text (Text)
-import qualified Data.Text as T
-
+import Data.Text qualified as T
 import ExoMonad.Wasm.TypedTool
-import ExoMonad.Wasm.WireTypes (WireToolCall(..))
-
+import ExoMonad.Wasm.WireTypes (WireToolCall (..))
+import Test.Hspec
 
 spec :: Spec
 spec = do
   describe "AskUserInput" $ do
     describe "parseToolInput" $ do
       it "parses ask_user with question and options" $ do
-        let tc = WireToolCall
-              { wtcId = "test-id"
-              , wtcName = "ask_user"
-              , wtcInput = object
-                  [ "question" .= ("Which meds?" :: String)
-                  , "options" .= (["Morning meds", "HRT Shot"] :: [String])
-                  ]
-              }
+        let tc =
+              WireToolCall
+                { wtcId = "test-id",
+                  wtcName = "ask_user",
+                  wtcInput =
+                    object
+                      [ "question" .= ("Which meds?" :: String),
+                        "options" .= (["Morning meds", "HRT Shot"] :: [String])
+                      ]
+                }
         case parseToolInput @AskUserInput tc of
           Left err -> expectationFailure $ T.unpack err
           Right input -> do
@@ -32,13 +32,15 @@ spec = do
             input.auiOptions `shouldBe` Just (["Morning meds", "HRT Shot"] :: [Text])
 
       it "parses ask_user with question only (no options)" $ do
-        let tc = WireToolCall
-              { wtcId = "test-id"
-              , wtcName = "ask_user"
-              , wtcInput = object
-                  [ "question" .= ("What would you like to do?" :: String)
-                  ]
-              }
+        let tc =
+              WireToolCall
+                { wtcId = "test-id",
+                  wtcName = "ask_user",
+                  wtcInput =
+                    object
+                      [ "question" .= ("What would you like to do?" :: String)
+                      ]
+                }
         case parseToolInput @AskUserInput tc of
           Left err -> expectationFailure $ T.unpack err
           Right input -> do
@@ -46,13 +48,15 @@ spec = do
             input.auiOptions `shouldBe` (Nothing :: Maybe [Text])
 
       it "fails for missing question field" $ do
-        let tc = WireToolCall
-              { wtcId = "test-id"
-              , wtcName = "ask_user"
-              , wtcInput = object
-                  [ "options" .= (["A", "B"] :: [String])
-                  ]
-              }
+        let tc =
+              WireToolCall
+                { wtcId = "test-id",
+                  wtcName = "ask_user",
+                  wtcInput =
+                    object
+                      [ "options" .= (["A", "B"] :: [String])
+                      ]
+                }
         case parseToolInput @AskUserInput tc of
           Left err -> err `shouldSatisfy` T.isInfixOf "question"
           Right _ -> expectationFailure "Should have failed"

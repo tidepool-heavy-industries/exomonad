@@ -22,14 +22,15 @@
 -- @
 module ExoMonad.Wasm.Ffi.Unified
   ( -- * Unified FFI (Text interface)
-    initialize
-  , step
-  , getGraphInfo
-  , getGraphState
+    initialize,
+    step,
+    getGraphInfo,
+    getGraphState,
 
     -- * Testing
-  , resetSession
-  ) where
+    resetSession,
+  )
+where
 
 import Data.Text (Text)
 
@@ -38,12 +39,11 @@ import GHC.Wasm.Prim (JSString(..), fromJSString, toJSString)
 #endif
 
 -- Import the registry which has all the logic
-import qualified ExoMonad.Wasm.Registry as R
+import ExoMonad.Wasm.Registry qualified as R
 
 #if defined(wasm32_HOST_ARCH)
 import qualified Data.Text as T
 #endif
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TEXT INTERFACE (for native testing)
@@ -68,7 +68,6 @@ getGraphState = R.getGraphState
 -- | Reset session (for testing).
 resetSession :: IO ()
 resetSession = R.resetSession
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- WASM FFI EXPORTS

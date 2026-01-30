@@ -3,13 +3,12 @@
 -- | Tests for CLI derivation (ExoMonad.Graph.CLI).
 module CLISpec (spec) where
 
+import CLITestTypes
 import Data.Aeson qualified as Aeson
 import Data.Text qualified as T
+import ExoMonad.Graph.CLI
 import Options.Applicative
 import Test.Hspec
-
-import CLITestTypes
-import ExoMonad.Graph.CLI
 
 -- Derive parsers using TH
 simpleParser :: Parser SimpleInput
@@ -31,34 +30,46 @@ spec = do
   describe "deriveCLIParser" $ do
     describe "flat records" $ do
       it "parses all required flags" $ do
-        let result = parseArgs simpleParser
-              ["--input-file", "in.txt", "--count", "5"]
-        result `shouldBe` Right SimpleInput
-          { inputFile = "in.txt"
-          , outputFile = Nothing
-          , count = 5
-          , verbose = False
-          }
+        let result =
+              parseArgs
+                simpleParser
+                ["--input-file", "in.txt", "--count", "5"]
+        result
+          `shouldBe` Right
+            SimpleInput
+              { inputFile = "in.txt",
+                outputFile = Nothing,
+                count = 5,
+                verbose = False
+              }
 
       it "parses optional flags" $ do
-        let result = parseArgs simpleParser
-              ["--input-file", "in.txt", "--output-file", "out.txt", "--count", "10"]
-        result `shouldBe` Right SimpleInput
-          { inputFile = "in.txt"
-          , outputFile = Just "out.txt"
-          , count = 10
-          , verbose = False
-          }
+        let result =
+              parseArgs
+                simpleParser
+                ["--input-file", "in.txt", "--output-file", "out.txt", "--count", "10"]
+        result
+          `shouldBe` Right
+            SimpleInput
+              { inputFile = "in.txt",
+                outputFile = Just "out.txt",
+                count = 10,
+                verbose = False
+              }
 
       it "parses boolean switches" $ do
-        let result = parseArgs simpleParser
-              ["--input-file", "in.txt", "--count", "1", "--verbose"]
-        result `shouldBe` Right SimpleInput
-          { inputFile = "in.txt"
-          , outputFile = Nothing
-          , count = 1
-          , verbose = True
-          }
+        let result =
+              parseArgs
+                simpleParser
+                ["--input-file", "in.txt", "--count", "1", "--verbose"]
+        result
+          `shouldBe` Right
+            SimpleInput
+              { inputFile = "in.txt",
+                outputFile = Nothing,
+                count = 1,
+                verbose = True
+              }
 
       it "fails on missing required flags" $ do
         let result = parseArgs simpleParser ["--input-file", "in.txt"]
@@ -68,18 +79,24 @@ spec = do
 
     describe "sum types (subcommands)" $ do
       it "parses first subcommand" $ do
-        let result = parseArgs commandParser
-              ["process", "--process-file", "data.txt"]
+        let result =
+              parseArgs
+                commandParser
+                ["process", "--process-file", "data.txt"]
         result `shouldBe` Right (Process "data.txt" False)
 
       it "parses subcommand with flags" $ do
-        let result = parseArgs commandParser
-              ["process", "--process-file", "data.txt", "--process-strict"]
+        let result =
+              parseArgs
+                commandParser
+                ["process", "--process-file", "data.txt", "--process-strict"]
         result `shouldBe` Right (Process "data.txt" True)
 
       it "parses second subcommand" $ do
-        let result = parseArgs commandParser
-              ["validate", "--validate-file", "schema.json"]
+        let result =
+              parseArgs
+                commandParser
+                ["validate", "--validate-file", "schema.json"]
         result `shouldBe` Right (Validate "schema.json")
 
       it "parses nullary subcommand" $ do
@@ -121,8 +138,10 @@ spec = do
     -- Testing via the generated flag names
     it "converts camelCase field names to kebab-case flags" $ do
       -- inputFile becomes --input-file
-      let result = parseArgs simpleParser
-            ["--input-file", "test.txt", "--count", "1"]
+      let result =
+            parseArgs
+              simpleParser
+              ["--input-file", "test.txt", "--count", "1"]
           isRight (Right _) = True
           isRight _ = False
       result `shouldSatisfy` isRight
@@ -133,4 +152,4 @@ spec = do
       -- We test this indirectly via the internal function
       toKebabCase "processURL" `shouldBe` "process-url"
       toKebabCase "inputFile" `shouldBe` "input-file"
-      toKebabCase "XMLParser" `shouldBe` "xmlparser"  -- All caps at start
+      toKebabCase "XMLParser" `shouldBe` "xmlparser" -- All caps at start

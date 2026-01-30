@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wno-incomplete-patterns -Wno-redundant-constraints #-}
+
 -- Pattern exhaustiveness checker doesn't understand GADT constraints for OneOf
 -- Redundant constraints are documentation for type-level dispatch
 
@@ -41,44 +42,45 @@
 -- exception-safe bracketing at the runner level.
 module ExoMonad.Graph.Interpret.Instrumented
   ( -- * Traced Graph Interpretation
-    runGraphWithSpans
-  , runGraphFromWithSpans
-  , withGraphSpan
-  , withNodeSpan
+    runGraphWithSpans,
+    runGraphFromWithSpans,
+    withGraphSpan,
+    withNodeSpan,
 
     -- * Traced Dispatch
-  , DispatchGotoTraced(..)
+    DispatchGotoTraced (..),
 
     -- * Re-exports from Execute
-  , DispatchGoto(..)
-  , CallHandler(..)
-  , executeLLMHandler
-  ) where
-
-import Data.Kind (Constraint, Type)
-import Control.Monad.Freer (Eff, Member)
-import Data.Text (Text)
-import qualified Data.Text as T
-import GHC.Generics (Generic(..))
-import GHC.Records (HasField(..))
-import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
-import Data.Proxy (Proxy(..))
-
-import ExoMonad.Effects.Observability
-  ( Observability, SpanKind(..), SpanAttribute(..)
-  , startSpan, endSpan
+    DispatchGoto (..),
+    CallHandler (..),
+    executeLLMHandler,
   )
-import ExoMonad.Graph.Interpret
-import ExoMonad.Graph.Goto (GotoChoice, To)
+where
+
+import Control.Monad.Freer (Eff, Member)
+import Data.Kind (Constraint, Type)
+import Data.Proxy (Proxy (..))
+import Data.Text (Text)
+import Data.Text qualified as T
+import ExoMonad.Effects.Observability
+  ( Observability,
+    SpanAttribute (..),
+    SpanKind (..),
+    endSpan,
+    startSpan,
+  )
 import ExoMonad.Graph.Generic (AsHandler, FieldsWithNamesOf)
 import ExoMonad.Graph.Generic.Core (AsGraph)
-import ExoMonad.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
+import ExoMonad.Graph.Goto (GotoChoice, To)
+import ExoMonad.Graph.Goto.Internal (GotoChoice (..), OneOf (..))
+import ExoMonad.Graph.Interpret
 import ExoMonad.Graph.Types (Exit)
-
+import GHC.Generics (Generic (..))
+import GHC.Records (HasField (..))
+import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 
 -- | Effect type alias.
 type Effect = Type -> Type
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- NODE SPAN HELPER
@@ -93,18 +95,22 @@ type Effect = Type -> Type
 --
 -- Used by 'DispatchGotoTraced' instances to reduce duplication.
 -- The span name follows the pattern @node:<handler-name>@.
-withNodeSpan
-  :: Member Observability es
-  => Text           -- ^ Handler name
-  -> Eff es a       -- ^ Action to run (handler call + continuation)
-  -> Eff es a
+withNodeSpan ::
+  (Member Observability es) =>
+  -- | Handler name
+  Text ->
+  -- | Action to run (handler call + continuation)
+  Eff es a ->
+  Eff es a
 withNodeSpan handlerName action = do
-  _ <- startSpan ("node:" <> handlerName) SpanInternal
-    [AttrText "node.name" handlerName]
+  _ <-
+    startSpan
+      ("node:" <> handlerName)
+      SpanInternal
+      [AttrText "node.name" handlerName]
   result <- action
   endSpan False []
   pure result
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TRACED GRAPH EXECUTION
@@ -117,45 +123,43 @@ withNodeSpan handlerName action = do
 -- @
 -- result <- runGraphWithSpans @MyGraph handlers inputValue
 -- @
-runGraphWithSpans
-  :: forall graph entryType targets exitType es entryHandlerName handler.
-     ( Generic (graph AsGraph)
-     , FindEntryHandler entryType (FieldsWithNamesOf graph) ~ 'Just entryHandlerName
-     , KnownSymbol entryHandlerName
-     , HasField entryHandlerName (graph (AsHandler es)) handler
-     , CallHandler handler entryType es targets
-     , DispatchGotoTraced graph targets es exitType
-     , Member Observability es
-     )
-  => graph (AsHandler es)
-  -> entryType
-  -> Eff es exitType
+runGraphWithSpans ::
+  forall graph entryType targets exitType es entryHandlerName handler.
+  ( Generic (graph AsGraph),
+    FindEntryHandler entryType (FieldsWithNamesOf graph) ~ 'Just entryHandlerName,
+    KnownSymbol entryHandlerName,
+    HasField entryHandlerName (graph (AsHandler es)) handler,
+    CallHandler handler entryType es targets,
+    DispatchGotoTraced graph targets es exitType,
+    Member Observability es
+  ) =>
+  graph (AsHandler es) ->
+  entryType ->
+  Eff es exitType
 runGraphWithSpans = runGraphFromWithSpans @entryHandlerName
-
 
 -- | Run a graph from a named handler with span emission.
 --
 -- @
 -- result <- runGraphFromWithSpans @"compute" handlers inputValue
 -- @
-runGraphFromWithSpans
-  :: forall (name :: Symbol) graph entryType targets exitType es handler.
-     ( KnownSymbol name
-     , HasField name (graph (AsHandler es)) handler
-     , CallHandler handler entryType es targets
-     , DispatchGotoTraced graph targets es exitType
-     , Member Observability es
-     )
-  => graph (AsHandler es)
-  -> entryType
-  -> Eff es exitType
+runGraphFromWithSpans ::
+  forall (name :: Symbol) graph entryType targets exitType es handler.
+  ( KnownSymbol name,
+    HasField name (graph (AsHandler es)) handler,
+    CallHandler handler entryType es targets,
+    DispatchGotoTraced graph targets es exitType,
+    Member Observability es
+  ) =>
+  graph (AsHandler es) ->
+  entryType ->
+  Eff es exitType
 runGraphFromWithSpans graph input = do
   let handlerName = T.pack $ symbolVal (Proxy @name)
   withNodeSpan handlerName $ do
     let handler = getField @name graph
     choice <- callHandler handler input
     dispatchGotoTraced graph choice
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TRACED DISPATCH TYPECLASS
@@ -168,7 +172,6 @@ type DispatchGotoTraced :: (Type -> Type) -> [Type] -> [Effect] -> Type -> Const
 class DispatchGotoTraced graph targets es exitType where
   dispatchGotoTraced :: graph (AsHandler es) -> GotoChoice targets -> Eff es exitType
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- EXIT INSTANCES
 -- ════════════════════════════════════════════════════════════════════════════
@@ -179,13 +182,14 @@ instance DispatchGotoTraced graph '[To Exit exitType] es exitType where
 
 -- | Exit is first, but there are more targets.
 instance
-  ( DispatchGotoTraced graph rest es exitType
-  , Member Observability es
-  ) => DispatchGotoTraced graph (To Exit exitType ': rest) es exitType where
+  ( DispatchGotoTraced graph rest es exitType,
+    Member Observability es
+  ) =>
+  DispatchGotoTraced graph (To Exit exitType ': rest) es exitType
+  where
   dispatchGotoTraced _ (GotoChoice (Here result)) = pure result
   dispatchGotoTraced graph (GotoChoice (There rest)) =
     dispatchGotoTraced @graph @rest graph (GotoChoice rest)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- NAMED NODE INSTANCES
@@ -193,39 +197,39 @@ instance
 
 -- | Single named node target with tracing.
 instance
-  ( KnownSymbol name
-  , HasField name (graph (AsHandler es)) handler
-  , CallHandler handler payload es handlerTargets
-  , DispatchGotoTraced graph handlerTargets es exitType
-  , Member Observability es
-  ) => DispatchGotoTraced graph '[To (name :: Symbol) payload] es exitType where
-
+  ( KnownSymbol name,
+    HasField name (graph (AsHandler es)) handler,
+    CallHandler handler payload es handlerTargets,
+    DispatchGotoTraced graph handlerTargets es exitType,
+    Member Observability es
+  ) =>
+  DispatchGotoTraced graph '[To (name :: Symbol) payload] es exitType
+  where
   dispatchGotoTraced graph (GotoChoice (Here payload)) =
     withNodeSpan (T.pack $ symbolVal (Proxy @name)) $ do
       let handler = getField @name graph
       nextChoice <- callHandler handler payload
       dispatchGotoTraced graph nextChoice
-
 
 -- | Named node target with more targets, with tracing.
-instance {-# OVERLAPPABLE #-}
-  ( KnownSymbol name
-  , HasField name (graph (AsHandler es)) handler
-  , CallHandler handler payload es handlerTargets
-  , DispatchGotoTraced graph handlerTargets es exitType
-  , DispatchGotoTraced graph rest es exitType
-  , Member Observability es
-  ) => DispatchGotoTraced graph (To (name :: Symbol) payload ': rest) es exitType where
-
+instance
+  {-# OVERLAPPABLE #-}
+  ( KnownSymbol name,
+    HasField name (graph (AsHandler es)) handler,
+    CallHandler handler payload es handlerTargets,
+    DispatchGotoTraced graph handlerTargets es exitType,
+    DispatchGotoTraced graph rest es exitType,
+    Member Observability es
+  ) =>
+  DispatchGotoTraced graph (To (name :: Symbol) payload ': rest) es exitType
+  where
   dispatchGotoTraced graph (GotoChoice (Here payload)) =
     withNodeSpan (T.pack $ symbolVal (Proxy @name)) $ do
       let handler = getField @name graph
       nextChoice <- callHandler handler payload
       dispatchGotoTraced graph nextChoice
-
   dispatchGotoTraced graph (GotoChoice (There rest)) =
     dispatchGotoTraced @graph @rest graph (GotoChoice rest)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ROOT SPAN WRAPPER
@@ -240,11 +244,13 @@ instance {-# OVERLAPPABLE #-}
 -- result <- withGraphSpan "my-agent:handle-request" $ do
 --   runGraphWithSpans handlers input
 -- @
-withGraphSpan
-  :: Member Observability es
-  => Text           -- ^ Span name (e.g., "graph:MyGraph" or "agent:handle-request")
-  -> Eff es a       -- ^ Action to run
-  -> Eff es a
+withGraphSpan ::
+  (Member Observability es) =>
+  -- | Span name (e.g., "graph:MyGraph" or "agent:handle-request")
+  Text ->
+  -- | Action to run
+  Eff es a ->
+  Eff es a
 withGraphSpan name action = do
   _ <- startSpan name SpanServer []
   result <- action

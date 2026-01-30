@@ -1,4 +1,3 @@
-
 -- | Type-safe template definitions for Graph nodes.
 --
 -- Templates are first-class entities that combine:
@@ -69,53 +68,54 @@
 -- The graph runner will use 'renderTemplate' to generate prompts for LLM nodes.
 module ExoMonad.Graph.Template
   ( -- * Template Definition
-    TemplateDef(..)
+    TemplateDef (..),
 
     -- * Rendering
-  , renderTemplate
+    renderTemplate,
 
     -- * Ginger Re-exports (core)
-  , TypedTemplate
-  , typedTemplateFile
-  , runTypedTemplate
-  , GingerContext
+    TypedTemplate,
+    typedTemplateFile,
+    runTypedTemplate,
+    GingerContext,
 
     -- * Ginger Re-exports (dependency tracking)
-  , TemplateDependency(..)
-  , DepRelation(..)
-  , DepLocation(..)
-  , TemplateContextInfo(..)
-  , templateDependencyTree
-  , flattenDeps
-  , templateContextInfo
-  , templateAccessedFields
+    TemplateDependency (..),
+    DepRelation (..),
+    DepLocation (..),
+    TemplateContextInfo (..),
+    templateDependencyTree,
+    flattenDeps,
+    templateContextInfo,
+    templateAccessedFields,
 
     -- * Template Haskell Helper
-  , makeTemplateCompiled
-  ) where
+    makeTemplateCompiled,
+  )
+where
 
+import Control.Monad.Freer (Eff)
+import Control.Monad.Writer (Writer)
 import Data.Char (toLower)
 import Data.Kind (Constraint, Type)
 import Data.Text (Text)
-import Control.Monad.Writer (Writer)
-import Control.Monad.Freer (Eff)
 import Language.Haskell.TH hiding (Type)
 import Text.Ginger.GVal (ToGVal)
 import Text.Ginger.Run.Type (Run)
 import Text.Ginger.TH
-  ( TypedTemplate
-  , typedTemplateFile
-  , runTypedTemplate
-  , templateDependencyTree
-  , flattenDeps
-  , templateContextInfo
-  , templateAccessedFields
+  ( TypedTemplate,
+    flattenDeps,
+    runTypedTemplate,
+    templateAccessedFields,
+    templateContextInfo,
+    templateDependencyTree,
+    typedTemplateFile,
   )
 import Text.Ginger.TH.Types
-  ( TemplateDependency(..)
-  , DepRelation(..)
-  , DepLocation(..)
-  , TemplateContextInfo(..)
+  ( DepLocation (..),
+    DepRelation (..),
+    TemplateContextInfo (..),
+    TemplateDependency (..),
   )
 import Text.Parsec.Pos (SourcePos)
 
@@ -163,6 +163,7 @@ class TemplateDef t where
   -- type TemplateConstraint MyTpl effs = (Member (State S) effs, Member Log effs)
   -- @
   type TemplateConstraint t (effs :: [Type -> Type]) :: Constraint
+
   type TemplateConstraint t effs = ()
 
   -- | Short name for this template (used in logging, debugging).
@@ -195,7 +196,7 @@ class TemplateDef t where
   --   mem <- getMem \@NodeMemory
   --   pure MyContext { ... }
   -- @
-  buildContext :: TemplateConstraint t effs => Eff effs (TemplateContext t)
+  buildContext :: (TemplateConstraint t effs) => Eff effs (TemplateContext t)
 
   -- ════════════════════════════════════════════════════════════════════════════
   -- DERIVED ACCESSORS (for documentation generation)
@@ -250,13 +251,13 @@ class TemplateDef t where
 --
 -- 1. Calls 'buildContext' to gather data from effects
 -- 2. Calls 'runTypedTemplate' to render the Jinja template
-renderTemplate
-  :: forall t effs.
-     ( TemplateDef t
-     , GingerContext (TemplateContext t)
-     , TemplateConstraint t effs
-     )
-  => Eff effs Text
+renderTemplate ::
+  forall t effs.
+  ( TemplateDef t,
+    GingerContext (TemplateContext t),
+    TemplateConstraint t effs
+  ) =>
+  Eff effs Text
 renderTemplate = do
   ctx <- buildContext @t
   pure $ runTypedTemplate ctx (templateCompiled @t)
@@ -271,6 +272,7 @@ renderTemplate = do
 -- for the compiled template:
 --
 -- @
+
 -- $(makeTemplateCompiled ''MyContext "templates/my.jinja")
 -- @
 --
@@ -283,24 +285,29 @@ renderTemplate = do
 --
 -- The binding name is derived from the context type name by appending
 -- @_compiled@ and lowercasing the first letter.
+
 makeTemplateCompiled :: Name -> FilePath -> Q [Dec]
 makeTemplateCompiled ctxName path = do
   let baseName = nameBase ctxName
       bindingName = mkName $ lowerFirst baseName ++ "_compiled"
 
   -- Generate the type signature
-  sig <- sigD bindingName
-    [t| TypedTemplate $(conT ctxName) SourcePos |]
+  sig <-
+    sigD
+      bindingName
+      [t|TypedTemplate $(conT ctxName) SourcePos|]
 
   -- Generate the binding
-  val <- valD (varP bindingName)
-    (normalB [| $(typedTemplateFile ctxName path) |])
-    []
+  val <-
+    valD
+      (varP bindingName)
+      (normalB [|$(typedTemplateFile ctxName path)|])
+      []
 
   pure [sig, val]
   where
     lowerFirst :: String -> String
     lowerFirst [] = []
-    lowerFirst (c:cs) = toLower c : cs
+    lowerFirst (c : cs) = toLower c : cs
 
-    -- toLower is imported from Data.Char
+-- toLower is imported from Data.Char

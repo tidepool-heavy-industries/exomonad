@@ -1,6 +1,6 @@
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
 -- | State effect interpreter for WASM.
 --
@@ -24,21 +24,20 @@
 -- The state type @s@ must have @ToJSON@ and @FromJSON@ instances.
 -- State is serialized to JSON for transport across the FFI boundary.
 module ExoMonad.Wasm.Interpreter.State
-  ( runStateAsYield
-  , runStateAsYieldWith
-  ) where
+  ( runStateAsYield,
+    runStateAsYieldWith,
+  )
+where
 
 import Control.Monad.Freer (Eff, Member, interpret)
 import Control.Monad.Freer.Coroutine (Yield, yield)
-import Data.Aeson (ToJSON(..), FromJSON(..), fromJSON, Result(..))
+import Data.Aeson (FromJSON (..), Result (..), ToJSON (..), fromJSON)
 import Data.Text (Text)
-
-import ExoMonad.Effect.Types (State(..))
+import ExoMonad.Effect.Types (State (..))
 import ExoMonad.Wasm.WireTypes
-  ( SerializableEffect(..)
-  , EffectResult(..)
+  ( EffectResult (..),
+    SerializableEffect (..),
   )
-
 
 -- | Default state key used when no custom key is provided.
 --
@@ -46,52 +45,55 @@ import ExoMonad.Wasm.WireTypes
 defaultStateKey :: Text
 defaultStateKey = "graphState"
 
-
 -- | Interpret @State s@ effect by yielding to TypeScript.
 --
 -- Uses 'defaultStateKey' as the default state key.
 -- The state type @s@ must have @ToJSON@ and @FromJSON@ instances.
 --
 -- State is stored in the Durable Object and persists across FFI calls.
-runStateAsYield
-  :: forall s effs a.
-     ( ToJSON s
-     , FromJSON s
-     , Member (Yield SerializableEffect EffectResult) effs
-     )
-  => s  -- ^ Initial state (used if storage is empty)
-  -> Eff (State s ': effs) a
-  -> Eff effs a
+runStateAsYield ::
+  forall s effs a.
+  ( ToJSON s,
+    FromJSON s,
+    Member (Yield SerializableEffect EffectResult) effs
+  ) =>
+  -- | Initial state (used if storage is empty)
+  s ->
+  Eff (State s ': effs) a ->
+  Eff effs a
 runStateAsYield = runStateAsYieldWith defaultStateKey
-
 
 -- | Interpret @State s@ effect with a custom state key.
 --
 -- Use this when you need multiple state stores or custom key names.
-runStateAsYieldWith
-  :: forall s effs a.
-     ( ToJSON s
-     , FromJSON s
-     , Member (Yield SerializableEffect EffectResult) effs
-     )
-  => Text  -- ^ State key (e.g., "worldState", "sessionState")
-  -> s     -- ^ Initial state (used if storage is empty)
-  -> Eff (State s ': effs) a
-  -> Eff effs a
+runStateAsYieldWith ::
+  forall s effs a.
+  ( ToJSON s,
+    FromJSON s,
+    Member (Yield SerializableEffect EffectResult) effs
+  ) =>
+  -- | State key (e.g., "worldState", "sessionState")
+  Text ->
+  -- | Initial state (used if storage is empty)
+  s ->
+  Eff (State s ': effs) a ->
+  Eff effs a
 runStateAsYieldWith key initial = interpret (handleState key initial)
   where
-    handleState :: Text -> s
-                -> State s x -> Eff effs x
+    handleState ::
+      Text ->
+      s ->
+      State s x ->
+      Eff effs x
     handleState stateKey defaultState = \case
       Get -> do
         result <- yield (EffGetState stateKey) (id @EffectResult)
         pure $ case result of
           ResSuccess (Just val) -> case fromJSON val of
             Success s -> s
-            Error _   -> defaultState  -- Parse failed, use default
-          ResSuccess Nothing -> defaultState   -- No stored state
-          ResError _         -> defaultState   -- Error, use default
-
+            Error _ -> defaultState -- Parse failed, use default
+          ResSuccess Nothing -> defaultState -- No stored state
+          ResError _ -> defaultState -- Error, use default
       Put s -> do
         _ <- yield (EffSetState stateKey (toJSON s)) (id @EffectResult)
         pure ()

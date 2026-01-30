@@ -33,22 +33,22 @@
 -- @
 module ExoMonad.Graph.Docs
   ( -- * Tree Rendering
-    renderDepTree
-  , renderDepTreeCompact
+    renderDepTree,
+    renderDepTreeCompact,
 
     -- * Template Documentation
-  , templateDocBlock
-  ) where
+    templateDocBlock,
+  )
+where
 
 import Data.List (sortOn)
 import Data.Text (Text)
-import qualified Data.Text as T
-
+import Data.Text qualified as T
 import ExoMonad.Graph.Template
-  ( TemplateDef(..)
-  , TemplateDependency(..)
-  , DepRelation(..)
-  , TemplateContextInfo(..)
+  ( DepRelation (..),
+    TemplateContextInfo (..),
+    TemplateDef (..),
+    TemplateDependency (..),
   )
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -73,17 +73,18 @@ renderDepTree = T.unlines . renderLines ""
     renderLines :: Text -> TemplateDependency -> [Text]
     renderLines prefix dep =
       (prefix <> T.pack dep.depRelativePath <> relationSuffix dep)
-      : concatMap (renderChild prefix) (withPosition $ sortedChildren dep)
+        : concatMap (renderChild prefix) (withPosition $ sortedChildren dep)
 
     renderChild :: Text -> (TemplateDependency, Bool) -> [Text]
     renderChild prefix (child, isLast) =
       let connector = if isLast then "└─ " else "├─ "
           extension = if isLast then "   " else "│  "
-          childPrefix = prefix <> "   "  -- Indent for children
-      in case child.depChildren of
-        [] -> [childPrefix <> connector <> T.pack child.depRelativePath <> relationSuffix child]
-        _  -> (childPrefix <> connector <> T.pack child.depRelativePath <> relationSuffix child)
-              : concatMap (renderChild (childPrefix <> extension)) (withPosition $ sortedChildren child)
+          childPrefix = prefix <> "   " -- Indent for children
+       in case child.depChildren of
+            [] -> [childPrefix <> connector <> T.pack child.depRelativePath <> relationSuffix child]
+            _ ->
+              (childPrefix <> connector <> T.pack child.depRelativePath <> relationSuffix child)
+                : concatMap (renderChild (childPrefix <> extension)) (withPosition $ sortedChildren child)
 
     relationSuffix :: TemplateDependency -> Text
     relationSuffix dep = case dep.depRelation of
@@ -135,15 +136,18 @@ renderDepTreeCompact dep = T.pack dep.depRelativePath <> renderChildren dep.depC
 --
 -- **Fields**: topic, categories
 -- @
-templateDocBlock :: forall t. TemplateDef t => Text
-templateDocBlock = T.unlines $ filter (not . T.null)
-  [ "### " <> templateName @t
-  , templateDescription @t
-  , ""
-  , "**Context**: " <> T.pack (tciFullyQualified (templateContextMeta @t))
-  , ""
-  , "**Template**:\n" <> renderDepTree (templateDepTree @t)
-  , if null (templateFields @t)
-      then ""
-      else "**Fields**: " <> T.intercalate ", " (map T.pack $ templateFields @t)
-  ]
+templateDocBlock :: forall t. (TemplateDef t) => Text
+templateDocBlock =
+  T.unlines $
+    filter
+      (not . T.null)
+      [ "### " <> templateName @t,
+        templateDescription @t,
+        "",
+        "**Context**: " <> T.pack (tciFullyQualified (templateContextMeta @t)),
+        "",
+        "**Template**:\n" <> renderDepTree (templateDepTree @t),
+        if null (templateFields @t)
+          then ""
+          else "**Fields**: " <> T.intercalate ", " (map T.pack $ templateFields @t)
+      ]

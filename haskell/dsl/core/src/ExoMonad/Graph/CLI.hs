@@ -54,51 +54,51 @@
 -- 3. All fields must have @-- ^@ Haddock documentation
 module ExoMonad.Graph.CLI
   ( -- * GraphCLI Typeclass
-    GraphCLI(..)
+    GraphCLI (..),
 
     -- * Type Families for EntryNode/Exit Extraction
-  , GraphEntryType
-  , GraphExitType
-  , ValidEntry
-  , ValidExit
+    GraphEntryType,
+    GraphExitType,
+    ValidEntry,
+    ValidExit,
 
     -- * TH Parser Derivation
-  , deriveCLIParser
+    deriveCLIParser,
 
     -- * Output Formatting
-  , OutputFormat(..)
-  , outputFormatParser
-  , formatOutput
+    OutputFormat (..),
+    outputFormatParser,
+    formatOutput,
 
     -- * CLI Runner
-  , runGraphCLIWith
-  , runGraphCLIPure
+    runGraphCLIWith,
+    runGraphCLIPure,
 
     -- * Helpers (exported for testing)
-  , toKebabCase
-  ) where
+    toKebabCase,
+  )
+where
 
 import Control.Monad.Freer (run)
 import Data.Aeson (ToJSON)
 import Data.Aeson.Text qualified as Aeson
 import Data.Char (isUpper, toLower)
+import Data.Kind (Constraint, Type)
 import Data.Maybe (fromMaybe)
-import Data.Kind (Type, Constraint)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
 import Data.Text.Lazy qualified as TL
-import GHC.Generics (Generic(..), M1(..), K1(..), (:*:))
+import ExoMonad.Graph.Generic (AsHandler, FieldsWithNamesOf)
+import ExoMonad.Graph.Generic.Core (AsGraph, EntryNode, ExitNode)
+import ExoMonad.Graph.Interpret (CallHandler, DispatchGoto, FindEntryHandler, runGraph)
+import GHC.Generics (Generic (..), K1 (..), M1 (..), (:*:))
 import GHC.Generics qualified as G
 import GHC.Records (HasField)
-import GHC.TypeLits (TypeError, ErrorMessage(..), KnownSymbol)
+import GHC.TypeLits (ErrorMessage (..), KnownSymbol, TypeError)
 import Language.Haskell.TH hiding (Type)
 import Language.Haskell.TH qualified as TH
 import Options.Applicative
-
-import ExoMonad.Graph.Interpret (runGraph, FindEntryHandler, CallHandler, DispatchGoto)
-import ExoMonad.Graph.Generic (AsHandler, FieldsWithNamesOf)
-import ExoMonad.Graph.Generic.Core (AsGraph, EntryNode, ExitNode)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPHCLI TYPECLASS
@@ -196,28 +196,32 @@ type family ChooseExit l r where
 -- Produces a helpful type error if 'EntryNotFound' sentinel is present.
 type ValidEntry :: Type -> Constraint
 type family ValidEntry t where
-  ValidEntry EntryNotFound = TypeError
-    ('Text "GraphCLI: Could not find EntryNode in graph."
-     ':$$: 'Text ""
-     ':$$: 'Text "Ensure your graph record has an EntryNode field:"
-     ':$$: 'Text "  data MyGraph mode = MyGraph"
-     ':$$: 'Text "    { entry :: mode :- EntryNode YourInputType"
-     ':$$: 'Text "    , ..."
-     ':$$: 'Text "    }")
+  ValidEntry EntryNotFound =
+    TypeError
+      ( 'Text "GraphCLI: Could not find EntryNode in graph."
+          ':$$: 'Text ""
+          ':$$: 'Text "Ensure your graph record has an EntryNode field:"
+          ':$$: 'Text "  data MyGraph mode = MyGraph"
+          ':$$: 'Text "    { entry :: mode :- EntryNode YourInputType"
+          ':$$: 'Text "    , ..."
+          ':$$: 'Text "    }"
+      )
   ValidEntry _ = ()
 
 -- | Constraint that validates Exit type was found.
 -- Produces a helpful type error if 'ExitNotFound' sentinel is present.
 type ValidExit :: Type -> Constraint
 type family ValidExit t where
-  ValidExit ExitNotFound = TypeError
-    ('Text "GraphCLI: Could not find Exit in graph."
-     ':$$: 'Text ""
-     ':$$: 'Text "Ensure your graph record has an Exit field:"
-     ':$$: 'Text "  data MyGraph mode = MyGraph"
-     ':$$: 'Text "    { ..."
-     ':$$: 'Text "    , exit :: mode :- ExitNode YourOutputType"
-     ':$$: 'Text "    }")
+  ValidExit ExitNotFound =
+    TypeError
+      ( 'Text "GraphCLI: Could not find Exit in graph."
+          ':$$: 'Text ""
+          ':$$: 'Text "Ensure your graph record has an Exit field:"
+          ':$$: 'Text "  data MyGraph mode = MyGraph"
+          ':$$: 'Text "    { ..."
+          ':$$: 'Text "    , exit :: mode :- ExitNode YourOutputType"
+          ':$$: 'Text "    }"
+      )
   ValidExit _ = ()
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -284,16 +288,17 @@ deriveCLIParser typeName = do
     -- Single constructor record → flat flags
     TyConI (DataD _ _ _ _ [RecC conName fields] _) ->
       deriveRecordParser typeName conName fields
-
     TyConI (NewtypeD _ _ _ _ (RecC conName fields) _) ->
       deriveRecordParser typeName conName fields
-
     -- Multiple constructors → subcommands
-    TyConI (DataD _ _ _ _ cons _) | length cons > 1 ->
-      deriveSubcommandParser typeName cons
-
-    _ -> fail $ "deriveCLIParser: " ++ show typeName
-             ++ " must be a record type or sum type with record constructors"
+    TyConI (DataD _ _ _ _ cons _)
+      | length cons > 1 ->
+          deriveSubcommandParser typeName cons
+    _ ->
+      fail $
+        "deriveCLIParser: "
+          ++ show typeName
+          ++ " must be a record type or sum type with record constructors"
 
 -- | Derive parser for a single-constructor record.
 deriveRecordParser :: Name -> Name -> [VarBangType] -> Q Exp
@@ -302,10 +307,12 @@ deriveRecordParser typeName conName fields = do
   let con = conE conName
   -- Build: ConName <$> p1 <*> p2 <*> ...
   case fieldParsers of
-    [] -> [| pure $con |]
-    (p:ps) -> foldl (\acc fp -> [| $acc <*> $(pure fp) |])
-                    [| $con <$> $(pure p) |]
-                    ps
+    [] -> [|pure $con|]
+    (p : ps) ->
+      foldl
+        (\acc fp -> [|$acc <*> $(pure fp)|])
+        [|$con <$> $(pure p)|]
+        ps
 
 -- | Derive parser for a single field.
 deriveFieldParser :: Name -> VarBangType -> Q Exp
@@ -322,47 +329,47 @@ deriveFieldParser typeName (fieldName, _, fieldType) = do
 typeToParserExp :: Name -> String -> String -> TH.Type -> Q Exp
 typeToParserExp typeName flag helpText = go
   where
-    helpMod = [| help $(litE (stringL helpText)) |]
+    helpMod = [|help $(litE (stringL helpText))|]
 
     go :: TH.Type -> Q Exp
     go = \case
       -- Text → strOption
-      ConT n | nameBase n == "Text" ->
-        [| T.pack <$> strOption (long flag <> metavar "TEXT" <> $helpMod) |]
-
+      ConT n
+        | nameBase n == "Text" ->
+            [|T.pack <$> strOption (long flag <> metavar "TEXT" <> $helpMod)|]
       -- String → strOption
-      ConT n | nameBase n == "String" ->
-        [| strOption (long flag <> metavar "TEXT" <> $helpMod) |]
-
+      ConT n
+        | nameBase n == "String" ->
+            [|strOption (long flag <> metavar "TEXT" <> $helpMod)|]
       -- FilePath (alias for String) → strOption
-      ConT n | nameBase n == "FilePath" ->
-        [| strOption (long flag <> metavar "PATH" <> $helpMod) |]
-
+      ConT n
+        | nameBase n == "FilePath" ->
+            [|strOption (long flag <> metavar "PATH" <> $helpMod)|]
       -- Int → option auto
-      ConT n | nameBase n == "Int" ->
-        [| option auto (long flag <> metavar "INT" <> $helpMod) |]
-
+      ConT n
+        | nameBase n == "Int" ->
+            [|option auto (long flag <> metavar "INT" <> $helpMod)|]
       -- Integer → option auto
-      ConT n | nameBase n == "Integer" ->
-        [| option auto (long flag <> metavar "INT" <> $helpMod) |]
-
+      ConT n
+        | nameBase n == "Integer" ->
+            [|option auto (long flag <> metavar "INT" <> $helpMod)|]
       -- Double → option auto
-      ConT n | nameBase n == "Double" ->
-        [| option auto (long flag <> metavar "NUM" <> $helpMod) |]
-
+      ConT n
+        | nameBase n == "Double" ->
+            [|option auto (long flag <> metavar "NUM" <> $helpMod)|]
       -- Bool → switch
-      ConT n | nameBase n == "Bool" ->
-        [| switch (long flag <> $helpMod) |]
-
+      ConT n
+        | nameBase n == "Bool" ->
+            [|switch (long flag <> $helpMod)|]
       -- Maybe a → optional
       AppT (ConT n) inner | nameBase n == "Maybe" -> do
         innerParser <- go inner
-        [| optional $(pure innerParser) |]
+        [|optional $(pure innerParser)|]
 
       -- [a] → many
       AppT ListT inner -> do
         innerParser <- go inner
-        [| many $(pure innerParser) |]
+        [|many $(pure innerParser)|]
 
       -- Nested record → error
       ConT n -> do
@@ -373,10 +380,12 @@ typeToParserExp typeName flag helpText = go
           TyConI (NewtypeD _ _ _ _ (RecC _ _) _) ->
             fail $ nestedRecordError typeName flag n
           _ -> fail $ unsupportedTypeError flag n
-
       other ->
-        fail $ "deriveCLIParser: Unsupported field type for --" ++ flag
-            ++ ": " ++ pprint other
+        fail $
+          "deriveCLIParser: Unsupported field type for --"
+            ++ flag
+            ++ ": "
+            ++ pprint other
 
 -- | Derive subcommand parser from sum type constructors.
 deriveSubcommandParser :: Name -> [Con] -> Q Exp
@@ -384,11 +393,14 @@ deriveSubcommandParser typeName cons = do
   commands <- mapM (deriveCommand typeName) cons
   case commands of
     [] -> fail "deriveCLIParser: Sum type must have at least one constructor"
-    [c] -> [| subparser $(pure c) |]
-    (c:cs) -> do
-      let combined = foldl (\acc cmd -> [| $acc <> $(pure cmd) |])
-                           (pure c) cs
-      [| subparser $combined |]
+    [c] -> [|subparser $(pure c)|]
+    (c : cs) -> do
+      let combined =
+            foldl
+              (\acc cmd -> [|$acc <> $(pure cmd)|])
+              (pure c)
+              cs
+      [|subparser $combined|]
 
 -- | Derive a single subcommand from a constructor.
 deriveCommand :: Name -> Con -> Q Exp
@@ -398,18 +410,19 @@ deriveCommand typeName con = case con of
     let cmdName = toKebabCase (nameBase conName)
     mDoc <- getDoc (DeclDoc conName)
     let desc = fromMaybe ("Run " ++ nameBase conName) mDoc
-    [| command cmdName (info $(pure parser) (progDesc $(litE (stringL desc)))) |]
-
+    [|command cmdName (info $(pure parser) (progDesc $(litE (stringL desc))))|]
   NormalC conName [] -> do
     -- Nullary constructor → command with no arguments
     let cmdName = toKebabCase (nameBase conName)
         con' = conE conName
     mDoc <- getDoc (DeclDoc conName)
     let desc = fromMaybe ("Run " ++ nameBase conName) mDoc
-    [| command cmdName (info (pure $con') (progDesc $(litE (stringL desc)))) |]
-
-  _ -> fail $ "deriveCLIParser: Constructor " ++ show con
-           ++ " must be a record or nullary constructor"
+    [|command cmdName (info (pure $con') (progDesc $(litE (stringL desc))))|]
+  _ ->
+    fail $
+      "deriveCLIParser: Constructor "
+        ++ show con
+        ++ " must be a record or nullary constructor"
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- OUTPUT FORMATTING
@@ -417,8 +430,10 @@ deriveCommand typeName con = case con of
 
 -- | Output format for CLI results.
 data OutputFormat
-  = FormatJSON  -- ^ Output as JSON
-  | FormatText  -- ^ Output as text (via Show)
+  = -- | Output as JSON
+    FormatJSON
+  | -- | Output as text (via Show)
+    FormatText
   deriving (Eq, Show)
 
 -- | Parser for @--format@ flag.
@@ -428,20 +443,22 @@ data OutputFormat
 -- --format text   → FormatText (default)
 -- @
 outputFormatParser :: Parser OutputFormat
-outputFormatParser = option (eitherReader parseFormat)
-  ( long "format"
-  <> short 'f'
-  <> metavar "FORMAT"
-  <> value FormatText
-  <> showDefaultWith formatName
-  <> help "Output format: json or text"
-  )
+outputFormatParser =
+  option
+    (eitherReader parseFormat)
+    ( long "format"
+        <> short 'f'
+        <> metavar "FORMAT"
+        <> value FormatText
+        <> showDefaultWith formatName
+        <> help "Output format: json or text"
+    )
   where
     parseFormat :: String -> Either String OutputFormat
     parseFormat s = case map toLower s of
       "json" -> Right FormatJSON
       "text" -> Right FormatText
-      _      -> Left $ "Unknown format '" ++ s ++ "'. Use 'json' or 'text'."
+      _ -> Left $ "Unknown format '" ++ s ++ "'. Use 'json' or 'text'."
 
     formatName :: OutputFormat -> String
     formatName FormatJSON = "json"
@@ -471,18 +488,23 @@ formatOutput FormatText = T.pack . show
 --   $(deriveCLIParser ''MyInput)
 --   runMyGraph
 -- @
-runGraphCLIWith
-  :: (Show output, ToJSON output)
-  => Text                       -- ^ Description for --help
-  -> Parser input               -- ^ Input parser (use deriveCLIParser)
-  -> (input -> IO output)       -- ^ Graph interpreter
-  -> IO ()
+runGraphCLIWith ::
+  (Show output, ToJSON output) =>
+  -- | Description for --help
+  Text ->
+  -- | Input parser (use deriveCLIParser)
+  Parser input ->
+  -- | Graph interpreter
+  (input -> IO output) ->
+  IO ()
 runGraphCLIWith desc inputParser interpreter = do
   let combinedParser = (,) <$> inputParser <*> outputFormatParser
-      parserInfo' = info (combinedParser <**> helper)
-        ( fullDesc
-        <> progDesc (T.unpack desc)
-        )
+      parserInfo' =
+        info
+          (combinedParser <**> helper)
+          ( fullDesc
+              <> progDesc (T.unpack desc)
+          )
   (input, fmt) <- execParser parserInfo'
   result <- interpreter input
   TIO.putStrLn (formatOutput fmt result)
@@ -510,21 +532,24 @@ runGraphCLIWith desc inputParser interpreter = do
 -- * Have a handler that accepts the entry type via @Needs@ (found via @FindEntryHandler@)
 -- * Use empty effect stack @'[]@ (all handlers must be pure)
 -- * Exit type must have @Show@ and @ToJSON@ instances for output formatting
-runGraphCLIPure
-  :: forall graph entryHandlerName handler targets.
-     ( Show (GraphExitType graph)
-     , ToJSON (GraphExitType graph)
-     , Generic (graph AsGraph)
-     , FindEntryHandler (GraphEntryType graph) (FieldsWithNamesOf graph) ~ 'Just entryHandlerName
-     , KnownSymbol entryHandlerName
-     , HasField entryHandlerName (graph (AsHandler '[])) handler
-     , CallHandler handler (GraphEntryType graph) '[] targets
-     , DispatchGoto graph targets '[] (GraphExitType graph)
-     )
-  => Text                              -- ^ Description for --help
-  -> Parser (GraphEntryType graph)     -- ^ Input parser (use deriveCLIParser)
-  -> graph (AsHandler '[])             -- ^ Handlers (empty effect stack)
-  -> IO ()
+runGraphCLIPure ::
+  forall graph entryHandlerName handler targets.
+  ( Show (GraphExitType graph),
+    ToJSON (GraphExitType graph),
+    Generic (graph AsGraph),
+    FindEntryHandler (GraphEntryType graph) (FieldsWithNamesOf graph) ~ 'Just entryHandlerName,
+    KnownSymbol entryHandlerName,
+    HasField entryHandlerName (graph (AsHandler '[])) handler,
+    CallHandler handler (GraphEntryType graph) '[] targets,
+    DispatchGoto graph targets '[] (GraphExitType graph)
+  ) =>
+  -- | Description for --help
+  Text ->
+  -- | Input parser (use deriveCLIParser)
+  Parser (GraphEntryType graph) ->
+  -- | Handlers (empty effect stack)
+  graph (AsHandler '[]) ->
+  IO ()
 runGraphCLIPure desc parser handlers =
   runGraphCLIWith desc parser $ \input ->
     pure $ run $ runGraph @graph @(GraphEntryType graph) @targets @(GraphExitType graph) @'[] @entryHandlerName @handler handlers input
@@ -542,62 +567,73 @@ runGraphCLIPure desc parser handlers =
 toKebabCase :: String -> String
 toKebabCase = \case
   [] -> []
-  (c:cs) -> toLower c : go c cs
+  (c : cs) -> toLower c : go c cs
   where
     go :: Char -> String -> String
     go _ [] = []
-    go prev (c:cs)
-      | isUpper c && not (isUpper prev)
-          = '-' : toLower c : go c cs
-      | otherwise
-          = toLower c : go c cs
+    go prev (c : cs)
+      | isUpper c && not (isUpper prev) =
+          '-' : toLower c : go c cs
+      | otherwise =
+          toLower c : go c cs
 
 -- | Generate error message for missing field documentation.
 cliFieldError :: Name -> Name -> TH.Type -> String
-cliFieldError typeName fieldName fieldType = unlines
-  [ "deriveCLIParser: Missing Haddock documentation for field '"
-    ++ nameBase fieldName ++ "' in '" ++ nameBase typeName ++ "'"
-  , ""
-  , "CLI help text comes from Haddock comments. Add documentation:"
-  , ""
-  , "  " ++ nameBase fieldName ++ " :: " ++ prettyType fieldType
-  , "    -- ^ <description of this field>"
-  , ""
-  , "Also ensure the module has {-# LANGUAGE FieldSelectors #-}"
-  ]
+cliFieldError typeName fieldName fieldType =
+  unlines
+    [ "deriveCLIParser: Missing Haddock documentation for field '"
+        ++ nameBase fieldName
+        ++ "' in '"
+        ++ nameBase typeName
+        ++ "'",
+      "",
+      "CLI help text comes from Haddock comments. Add documentation:",
+      "",
+      "  " ++ nameBase fieldName ++ " :: " ++ prettyType fieldType,
+      "    -- ^ <description of this field>",
+      "",
+      "Also ensure the module has {-# LANGUAGE FieldSelectors #-}"
+    ]
 
 -- | Generate error message for nested record type.
 nestedRecordError :: Name -> String -> Name -> String
-nestedRecordError typeName flagName nestedType = unlines
-  [ "deriveCLIParser: Nested record type not supported"
-  , ""
-  , "Field --" ++ flagName ++ " in '" ++ nameBase typeName
-    ++ "' has type '" ++ nameBase nestedType ++ "' which is a record."
-  , ""
-  , "CLI derivation only supports flat types. Options:"
-  , ""
-  , "  1. Flatten the type: move nested fields to top level"
-  , "  2. Use a simpler type for the nested field"
-  ]
+nestedRecordError typeName flagName nestedType =
+  unlines
+    [ "deriveCLIParser: Nested record type not supported",
+      "",
+      "Field --"
+        ++ flagName
+        ++ " in '"
+        ++ nameBase typeName
+        ++ "' has type '"
+        ++ nameBase nestedType
+        ++ "' which is a record.",
+      "",
+      "CLI derivation only supports flat types. Options:",
+      "",
+      "  1. Flatten the type: move nested fields to top level",
+      "  2. Use a simpler type for the nested field"
+    ]
 
 -- | Generate error message for unsupported type.
 unsupportedTypeError :: String -> Name -> String
-unsupportedTypeError flagName typeName = unlines
-  [ "deriveCLIParser: Unsupported type for field --" ++ flagName
-  , ""
-  , "Type '" ++ nameBase typeName ++ "' is not supported."
-  , ""
-  , "Supported types: Text, String, FilePath, Int, Integer, Double, Bool"
-  , "                 Maybe a, [a] (where a is a supported type)"
-  ]
+unsupportedTypeError flagName typeName =
+  unlines
+    [ "deriveCLIParser: Unsupported type for field --" ++ flagName,
+      "",
+      "Type '" ++ nameBase typeName ++ "' is not supported.",
+      "",
+      "Supported types: Text, String, FilePath, Int, Integer, Double, Bool",
+      "                 Maybe a, [a] (where a is a supported type)"
+    ]
 
 -- | Pretty-print a type for error messages.
 prettyType :: TH.Type -> String
 prettyType (ConT n) = nameBase n
 prettyType (AppT (ConT n) inner)
   | nameBase n == "Maybe" = "Maybe " ++ prettyType inner
-  | nameBase n == "[]"    = "[" ++ prettyType inner ++ "]"
-  | otherwise             = nameBase n ++ " " ++ prettyType inner
+  | nameBase n == "[]" = "[" ++ prettyType inner ++ "]"
+  | otherwise = nameBase n ++ " " ++ prettyType inner
 prettyType (AppT ListT inner) = "[" ++ prettyType inner ++ "]"
 prettyType (AppT l r) = prettyType l ++ " " ++ prettyType r
 prettyType t = pprint t

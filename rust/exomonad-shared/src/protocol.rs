@@ -24,7 +24,9 @@ use std::collections::HashMap;
 // ============================================================================
 
 /// The runtime environment for the agent.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum, Default, strum::Display)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum, Default, strum::Display,
+)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum Runtime {
@@ -36,7 +38,9 @@ pub enum Runtime {
 }
 
 /// The role of the agent (determines hook behavior and context).
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum, Default, strum::Display)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum, Default, strum::Display,
+)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 pub enum Role {
@@ -463,13 +467,9 @@ pub enum ServiceResponse {
         reviews: Vec<GitHubReviewComment>,
     },
     #[serde(rename = "GitHubPullRequestsResponse")]
-    GitHubPullRequests {
-        pull_requests: Vec<GitHubPRRef>,
-    },
+    GitHubPullRequests { pull_requests: Vec<GitHubPRRef> },
     #[serde(rename = "GitHubReviewsResponse")]
-    GitHubReviews {
-        reviews: Vec<GitHubReviewComment>,
-    },
+    GitHubReviews { reviews: Vec<GitHubReviewComment> },
     #[serde(rename = "GitHubDiscussionResponse")]
     GitHubDiscussion {
         number: u32,
@@ -844,7 +844,12 @@ mod tests {
         let parsed: ControlMessage = serde_json::from_str(&json).unwrap();
 
         match parsed {
-            ControlMessage::HookEvent { input, runtime, role, container_id } => {
+            ControlMessage::HookEvent {
+                input,
+                runtime,
+                role,
+                container_id,
+            } => {
                 assert_eq!(input.session_id, "test");
                 assert_eq!(runtime, Runtime::Claude);
                 assert_eq!(role, Role::Dev);
@@ -869,7 +874,12 @@ mod tests {
         let json = serde_json::to_string(&req).unwrap();
         let parsed: ServiceRequest = serde_json::from_str(&json).unwrap();
         match parsed {
-            ServiceRequest::GitHubGetIssue { owner, repo, number, include_comments } => {
+            ServiceRequest::GitHubGetIssue {
+                owner,
+                repo,
+                number,
+                include_comments,
+            } => {
                 assert_eq!(owner, "octocat");
                 assert_eq!(repo, "hello-world");
                 assert_eq!(number, 42);
@@ -885,7 +895,9 @@ mod tests {
         let json = r#"{"type":"GitHubGetIssue","owner":"o","repo":"r","number":1}"#;
         let parsed: ServiceRequest = serde_json::from_str(json).unwrap();
         match parsed {
-            ServiceRequest::GitHubGetIssue { include_comments, .. } => {
+            ServiceRequest::GitHubGetIssue {
+                include_comments, ..
+            } => {
                 assert!(!include_comments);
             }
             _ => panic!("Wrong variant"),
@@ -912,7 +924,14 @@ mod tests {
         let json = serde_json::to_string(&resp).unwrap();
         let parsed: ServiceResponse = serde_json::from_str(&json).unwrap();
         match parsed {
-            ServiceResponse::GitHubIssue { number, title, author, comments, labels, .. } => {
+            ServiceResponse::GitHubIssue {
+                number,
+                title,
+                author,
+                comments,
+                labels,
+                ..
+            } => {
                 assert_eq!(number, 42);
                 assert_eq!(title, "Fix the bug");
                 assert_eq!(author, "octocat");
@@ -948,7 +967,12 @@ mod tests {
         let json = serde_json::to_string(&req).unwrap();
         let parsed: ServiceRequest = serde_json::from_str(&json).unwrap();
         match parsed {
-            ServiceRequest::GitHubGetPR { owner, repo, number, include_details } => {
+            ServiceRequest::GitHubGetPR {
+                owner,
+                repo,
+                number,
+                include_details,
+            } => {
                 assert_eq!(owner, "octocat");
                 assert_eq!(repo, "hello-world");
                 assert_eq!(number, 99);
@@ -963,7 +987,9 @@ mod tests {
         let json = r#"{"type":"GitHubGetPR","owner":"o","repo":"r","number":1}"#;
         let parsed: ServiceRequest = serde_json::from_str(json).unwrap();
         match parsed {
-            ServiceRequest::GitHubGetPR { include_details, .. } => {
+            ServiceRequest::GitHubGetPR {
+                include_details, ..
+            } => {
                 assert!(!include_details);
             }
             _ => panic!("Wrong variant"),
@@ -1003,7 +1029,14 @@ mod tests {
         let parsed: ServiceResponse = serde_json::from_str(&json).unwrap();
         match parsed {
             ServiceResponse::GitHubPR {
-                number, title, author, merged_at, labels, comments, reviews, ..
+                number,
+                title,
+                author,
+                merged_at,
+                labels,
+                comments,
+                reviews,
+                ..
             } => {
                 assert_eq!(number, 99);
                 assert_eq!(title, "Add feature");
@@ -1030,7 +1063,12 @@ mod tests {
         }"#;
         let parsed: ServiceResponse = serde_json::from_str(json).unwrap();
         match parsed {
-            ServiceResponse::GitHubPR { merged_at, comments, reviews, .. } => {
+            ServiceResponse::GitHubPR {
+                merged_at,
+                comments,
+                reviews,
+                ..
+            } => {
                 assert_eq!(merged_at, None);
                 assert!(comments.is_empty());
                 assert!(reviews.is_empty());
@@ -1051,7 +1089,12 @@ mod tests {
         let json = serde_json::to_string(&req).unwrap();
         let parsed: ServiceRequest = serde_json::from_str(&json).unwrap();
         match parsed {
-            ServiceRequest::GitHubCreateIssue { owner, title, labels, .. } => {
+            ServiceRequest::GitHubCreateIssue {
+                owner,
+                title,
+                labels,
+                ..
+            } => {
                 assert_eq!(owner, "octocat");
                 assert_eq!(title, "New bug");
                 assert_eq!(labels, vec!["bug"]);
@@ -1073,7 +1116,13 @@ mod tests {
         let json = serde_json::to_string(&req).unwrap();
         let parsed: ServiceRequest = serde_json::from_str(&json).unwrap();
         match parsed {
-            ServiceRequest::GitHubCreatePR { owner, title, head, base, .. } => {
+            ServiceRequest::GitHubCreatePR {
+                owner,
+                title,
+                head,
+                base,
+                ..
+            } => {
                 assert_eq!(owner, "octocat");
                 assert_eq!(title, "Add feature");
                 assert_eq!(head, "feature");
@@ -1111,7 +1160,10 @@ mod tests {
                     body: "b".into(),
                     state: "OPEN".into(),
                     url: "u".into(),
-                    author: GitHubAuthorRef { login: "a".into(), name: None },
+                    author: GitHubAuthorRef {
+                        login: "a".into(),
+                        name: None,
+                    },
                     labels: vec![],
                     comments: vec![],
                 },
@@ -1121,7 +1173,10 @@ mod tests {
                     body: "b".into(),
                     state: "CLOSED".into(),
                     url: "u".into(),
-                    author: GitHubAuthorRef { login: "a".into(), name: None },
+                    author: GitHubAuthorRef {
+                        login: "a".into(),
+                        name: None,
+                    },
                     labels: vec![],
                     comments: vec![],
                 },
@@ -1171,26 +1226,24 @@ mod tests {
             body: "Proposal details".into(),
             author: "octocat".into(),
             url: "https://github.com/octocat/hello-world/discussions/10".into(),
-            comments: vec![
-                GitHubDiscussionComment {
-                    author: "commenter".into(),
-                    body: "Great idea".into(),
-                    created_at: "2024-01-15T10:00:00Z".into(),
-                    replies: vec![
-                        GitHubDiscussionComment {
-                            author: "octocat".into(),
-                            body: "Thanks!".into(),
-                            created_at: "2024-01-15T11:00:00Z".into(),
-                            replies: vec![],
-                        },
-                    ],
-                },
-            ],
+            comments: vec![GitHubDiscussionComment {
+                author: "commenter".into(),
+                body: "Great idea".into(),
+                created_at: "2024-01-15T10:00:00Z".into(),
+                replies: vec![GitHubDiscussionComment {
+                    author: "octocat".into(),
+                    body: "Thanks!".into(),
+                    created_at: "2024-01-15T11:00:00Z".into(),
+                    replies: vec![],
+                }],
+            }],
         };
         let json = serde_json::to_string(&resp).unwrap();
         let parsed: ServiceResponse = serde_json::from_str(&json).unwrap();
         match parsed {
-            ServiceResponse::GitHubDiscussion { number, comments, .. } => {
+            ServiceResponse::GitHubDiscussion {
+                number, comments, ..
+            } => {
                 assert_eq!(number, 10);
                 assert_eq!(comments.len(), 1);
                 assert_eq!(comments[0].replies.len(), 1);
@@ -1209,7 +1262,10 @@ mod tests {
         let json = serde_json::to_string(&resp).unwrap();
         let parsed: ServiceResponse = serde_json::from_str(&json).unwrap();
         match parsed {
-            ServiceResponse::GitHubAuth { authenticated, user } => {
+            ServiceResponse::GitHubAuth {
+                authenticated,
+                user,
+            } => {
                 assert!(authenticated);
                 assert_eq!(user, Some("octocat".into()));
             }

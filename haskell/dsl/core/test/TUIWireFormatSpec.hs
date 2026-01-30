@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+
 -- | Golden tests for TUI wire format compatibility with Rust.
 --
 -- These tests verify that Haskell's JSON encoding matches the canonical
@@ -8,10 +9,10 @@
 -- Golden files are in: tests/golden/tui/
 module TUIWireFormatSpec (spec) where
 
-import Test.Hspec
-import Data.Aeson (encode, eitherDecode)
-import qualified Data.ByteString.Lazy as LBS
+import Data.Aeson (eitherDecode, encode)
+import Data.ByteString.Lazy qualified as LBS
 import ExoMonad.Effect.TUI
+import Test.Hspec
 
 -- | Path to golden files (relative to test execution directory)
 -- Tests run from haskell/dsl/core/, so we go up 3 levels to repo root
@@ -49,13 +50,14 @@ spec = do
 
     describe "PopupDefinition encoding matches Rust expectations" $ do
       it "Full popup encodes correctly" $ do
-        let popup = PopupDefinition
-              { pdTitle = "Confirm Action"
-              , pdComponents =
-                  [ Component "action" (Text "Action: Delete files") Nothing
-                  , Component "details" (Text "This cannot be undone.") Nothing
-                  ]
-              }
+        let popup =
+              PopupDefinition
+                { pdTitle = "Confirm Action",
+                  pdComponents =
+                    [ Component "action" (Text "Action: Delete files") Nothing,
+                      Component "details" (Text "This cannot be undone.") Nothing
+                    ]
+                }
             encoded = encode popup
         encoded `shouldSatisfy` containsSubstring "\"title\":\"Confirm Action\""
         encoded `shouldSatisfy` containsSubstring "\"components\":"
@@ -121,4 +123,4 @@ containsSubstring :: LBS.ByteString -> LBS.ByteString -> Bool
 containsSubstring needle haystack =
   let needleLen = LBS.length needle
       haystackLen = LBS.length haystack
-  in any (\i -> LBS.take needleLen (LBS.drop i haystack) == needle) [0..haystackLen - needleLen]
+   in any (\i -> LBS.take needleLen (LBS.drop i haystack) == needle) [0 .. haystackLen - needleLen]

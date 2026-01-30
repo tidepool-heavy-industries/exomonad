@@ -9,19 +9,19 @@
 --       Add retry integration to barrier handlers in future iteration.
 module ExoMonad.Actor.Retry
   ( -- * Configuration
-    RetryConfig(..)
-  , defaultRetryConfig
+    RetryConfig (..),
+    defaultRetryConfig,
 
     -- * Retry Execution
-  , withRetry
-  , RetryResult(..)
-  ) where
+    withRetry,
+    RetryResult (..),
+  )
+where
 
 import Control.Concurrent (threadDelay)
-import Control.Exception (SomeException, try, displayException)
+import Control.Exception (SomeException, displayException, try)
 import Data.Text (Text)
-import qualified Data.Text as T
-
+import Data.Text qualified as T
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONFIGURATION
@@ -29,14 +29,14 @@ import qualified Data.Text as T
 
 -- | Configuration for retry behavior.
 data RetryConfig = RetryConfig
-  { rcMaxAttempts :: Int
-    -- ^ Maximum number of attempts (including initial). Minimum is 1.
-  , rcInitialDelayMicros :: Int
-    -- ^ Initial delay between retries in microseconds
-  , rcBackoffMultiplier :: Double
-    -- ^ Multiplier for exponential backoff (e.g., 2.0 doubles delay each retry)
-  , rcMaxDelayMicros :: Int
-    -- ^ Maximum delay between retries in microseconds
+  { -- | Maximum number of attempts (including initial). Minimum is 1.
+    rcMaxAttempts :: Int,
+    -- | Initial delay between retries in microseconds
+    rcInitialDelayMicros :: Int,
+    -- | Multiplier for exponential backoff (e.g., 2.0 doubles delay each retry)
+    rcBackoffMultiplier :: Double,
+    -- | Maximum delay between retries in microseconds
+    rcMaxDelayMicros :: Int
   }
   deriving stock (Show, Eq)
 
@@ -47,13 +47,13 @@ data RetryConfig = RetryConfig
 -- * 2x exponential backoff
 -- * 5s maximum delay
 defaultRetryConfig :: RetryConfig
-defaultRetryConfig = RetryConfig
-  { rcMaxAttempts = 3
-  , rcInitialDelayMicros = 100_000  -- 100ms
-  , rcBackoffMultiplier = 2.0
-  , rcMaxDelayMicros = 5_000_000    -- 5s
-  }
-
+defaultRetryConfig =
+  RetryConfig
+    { rcMaxAttempts = 3,
+      rcInitialDelayMicros = 100_000, -- 100ms
+      rcBackoffMultiplier = 2.0,
+      rcMaxDelayMicros = 5_000_000 -- 5s
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- RETRY EXECUTION
@@ -61,10 +61,10 @@ defaultRetryConfig = RetryConfig
 
 -- | Result of a retry operation.
 data RetryResult a
-  = RetrySuccess a Int
-    -- ^ Succeeded with the result and the attempt number (1-based)
-  | RetryFailure [(Int, Text)]
-    -- ^ Failed after all attempts with list of (attempt, error message)
+  = -- | Succeeded with the result and the attempt number (1-based)
+    RetrySuccess a Int
+  | -- | Failed after all attempts with list of (attempt, error message)
+    RetryFailure [(Int, Text)]
   deriving stock (Show, Eq, Functor)
 
 -- | Execute an action with retry logic.
@@ -101,7 +101,8 @@ withRetry config action = go 1 (config.rcInitialDelayMicros) []
                   -- Wait before retry
                   threadDelay delay
                   -- Calculate next delay with exponential backoff
-                  let nextDelay = min
-                        (round $ fromIntegral delay * config.rcBackoffMultiplier)
-                        (config.rcMaxDelayMicros)
+                  let nextDelay =
+                        min
+                          (round $ fromIntegral delay * config.rcBackoffMultiplier)
+                          (config.rcMaxDelayMicros)
                   go (attempt + 1) nextDelay errors'

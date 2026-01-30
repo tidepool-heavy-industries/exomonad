@@ -8,13 +8,11 @@
 -- 3. Aeson derives correct discriminated union format
 module GraphInputSpec (spec) where
 
-import Test.Hspec
-import Data.Aeson (encode, decode, Value(..))
+import Data.Aeson (Value (..), decode, encode)
 import Data.Aeson.KeyMap qualified as KM
-
+import ExoMonad.Anthropic.Types (ImageSource (..))
 import ExoMonad.Wasm.GraphInput
-import ExoMonad.Anthropic.Types (ImageSource(..))
-
+import Test.Hspec
 
 spec :: Spec
 spec = do
@@ -22,14 +20,12 @@ spec = do
   photoInputSpec
   jsonStructureSpec
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- TextInput Round-Tripping
 -- ════════════════════════════════════════════════════════════════════════════
 
 textInputSpec :: Spec
 textInputSpec = describe "TextInput" $ do
-
   it "round-trips simple text" $ do
     let input = TextInput "hello"
     decode (encode input) `shouldBe` Just input
@@ -46,14 +42,12 @@ textInputSpec = describe "TextInput" $ do
     let input = TextInput "Line 1\nLine 2\nLine 3"
     decode (encode input) `shouldBe` Just input
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- PhotoInput Round-Tripping
 -- ════════════════════════════════════════════════════════════════════════════
 
 photoInputSpec :: Spec
 photoInputSpec = describe "PhotoInput" $ do
-
   it "round-trips photo with caption" $ do
     let imageSource = Base64Image "image/jpeg" "base64data"
         input = PhotoInput (Just "A photo of a cat") imageSource
@@ -79,14 +73,12 @@ photoInputSpec = describe "PhotoInput" $ do
         input = PhotoInput (Just "Remote image") imageSource
     decode (encode input) `shouldBe` Just input
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- JSON Structure Validation
 -- ════════════════════════════════════════════════════════════════════════════
 
 jsonStructureSpec :: Spec
 jsonStructureSpec = describe "JSON structure" $ do
-
   it "encodes TextInput with correct discriminator and field names" $ do
     let input = TextInput "hello world"
         json = decode (encode input) :: Maybe Value

@@ -63,59 +63,58 @@
 -- * @metadata.json@ - Session configuration and timestamp
 module ExoMonad.Teaching.LLM
   ( -- * Teaching Interpreter
-    runLLMWithTeaching
+    runLLMWithTeaching,
 
     -- * Environment Setup
-  , initTeachingEnv
-  , closeTeachingEnv
-  , withTeaching
-  , loadTeachingConfig
+    initTeachingEnv,
+    closeTeachingEnv,
+    withTeaching,
+    loadTeachingConfig,
 
     -- * Re-exports
-  , TeachingEnv(..)
-  , TeachingConfig(..)
-  , TeachingTurn(..)
-  ) where
+    TeachingEnv (..),
+    TeachingConfig (..),
+    TeachingTurn (..),
+  )
+where
 
 import Control.Exception (bracket)
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
-import Data.Aeson (Value(..), toJSON, object, (.=))
-import qualified Data.List.NonEmpty as NE
+import Data.Aeson (Value (..), object, toJSON, (.=))
+import Data.List.NonEmpty qualified as NE
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Data.Time (getCurrentTime)
 import Data.UUID.V4 (nextRandom)
-import Servant.Client (mkClientEnv)
-import qualified Servant.Client as SC
-import System.Environment (lookupEnv)
+import ExoMonad.Effect.NodeMeta (NodeMetadata (..))
+import ExoMonad.Effect.Types
+  ( ContentBlock (..),
+    LLM (..),
+    ToolInvocation (..),
+    TurnOutcome (..),
+    TurnResult (..),
+  )
+import ExoMonad.Effects.LLMProvider
+  ( AnthropicConfig (..),
+    AnthropicResponse (..),
+    ThinkingBudget (..),
+  )
+import ExoMonad.Effects.LLMProvider qualified as LP
+import ExoMonad.LLM.Interpreter (buildAnthropicRequest)
+import ExoMonad.LLM.Interpreter.Types (ToolChoice (..))
+import ExoMonad.Teaching.Anthropic (anthropicComplete)
+import ExoMonad.Teaching.Record (closeRecording, initRecording, recordTurn, writeMetadata)
+import ExoMonad.Teaching.Types
+  ( RecordingHandles (..),
+    TeachingConfig (..),
+    TeachingEnv (..),
+    TeachingTurn (..),
+  )
 import Network.HTTP.Client (newManager)
 import Network.HTTP.Client.TLS (tlsManagerSettings)
-
-import ExoMonad.Effect.Types
-  ( LLM(..)
-  , TurnOutcome(..)
-  , TurnResult(..)
-  , ToolInvocation(..)
-  , ContentBlock(..)
-  )
-import ExoMonad.Effect.NodeMeta (NodeMetadata(..))
-import ExoMonad.Effects.LLMProvider
-  ( AnthropicConfig(..)
-  , AnthropicResponse(..)
-  , ThinkingBudget(..)
-  )
-import qualified ExoMonad.Effects.LLMProvider as LP
-import ExoMonad.Teaching.Anthropic (anthropicComplete)
-import ExoMonad.LLM.Interpreter (buildAnthropicRequest)
-import ExoMonad.LLM.Interpreter.Types (ToolChoice(..))
-import ExoMonad.Teaching.Types
-  ( TeachingEnv(..)
-  , TeachingConfig(..)
-  , TeachingTurn(..)
-  , RecordingHandles(..)
-  )
-import ExoMonad.Teaching.Record (initRecording, recordTurn, closeRecording, writeMetadata)
-
+import Servant.Client (mkClientEnv)
+import Servant.Client qualified as SC
+import System.Environment (lookupEnv)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ENVIRONMENT SETUP
@@ -128,22 +127,21 @@ import ExoMonad.Teaching.Record (initRecording, recordTurn, closeRecording, writ
 initTeachingEnv :: TeachingConfig -> Text -> IO TeachingEnv
 initTeachingEnv config guidance = do
   -- Use pattern match to extract fields (NoFieldSelectors)
-  let TeachingConfig { tcOutputDir = outputDir, tcSessionId = sessionId } = config
+  let TeachingConfig {tcOutputDir = outputDir, tcSessionId = sessionId} = config
   handles <- initRecording outputDir sessionId
   writeMetadata (rhSessionDir handles) config
-  pure TeachingEnv
-    { teConfig = config
-    , teHandles = handles
-    , teGuidance = guidance
-    }
-
+  pure
+    TeachingEnv
+      { teConfig = config,
+        teHandles = handles,
+        teGuidance = guidance
+      }
 
 -- | Close a teaching environment.
 --
 -- Flushes and closes recording handles.
 closeTeachingEnv :: TeachingEnv -> IO ()
-closeTeachingEnv TeachingEnv{..} = closeRecording teHandles
-
+closeTeachingEnv TeachingEnv {..} = closeRecording teHandles
 
 -- | Bracket-style teaching session management.
 --
@@ -163,7 +161,6 @@ closeTeachingEnv TeachingEnv{..} = closeRecording teHandles
 withTeaching :: TeachingConfig -> Text -> (TeachingEnv -> IO a) -> IO a
 withTeaching config guidance =
   bracket (initTeachingEnv config guidance) closeTeachingEnv
-
 
 -- | Load teaching configuration from environment variables.
 --
@@ -194,14 +191,15 @@ loadTeachingConfig = do
         Just key -> do
           outputDir <- maybe ".exomonad/training" id <$> lookupEnv "TEACHING_OUTPUT_DIR"
           sessionId <- nextRandom
-          pure $ Just TeachingConfig
-            { tcEnabled = True
-            , tcOutputDir = outputDir
-            , tcSessionId = sessionId
-            , tcAnthropicKey = T.pack key
-            }
+          pure $
+            Just
+              TeachingConfig
+                { tcEnabled = True,
+                  tcOutputDir = outputDir,
+                  tcSessionId = sessionId,
+                  tcAnthropicKey = T.pack key
+                }
     _ -> pure Nothing
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TEACHING INTERPRETER
@@ -228,20 +226,23 @@ loadTeachingConfig = do
 -- The interpreter is NOT thread-safe - each teaching session should use
 -- a single thread. For concurrent sessions, create separate TeachingEnv
 -- instances.
-runLLMWithTeaching
-  :: forall effs a.
-     LastMember IO effs
-  => TeachingEnv
-  -> Eff (LLM ': effs) a
-  -> Eff effs a
+runLLMWithTeaching ::
+  forall effs a.
+  (LastMember IO effs) =>
+  TeachingEnv ->
+  Eff (LLM ': effs) a ->
+  Eff effs a
 runLLMWithTeaching env = interpret $ \case
   RunTurnOp meta systemPrompt userContent schema tools -> do
     -- Extract node metadata via pattern match (NoFieldSelectors)
     let NodeMetadata nodeName graphName = meta
 
-    sendM $ putStrLn $ "[Teaching] RunTurnOp intercepted for node: "
-      <> T.unpack nodeName
-      <> " in graph: " <> T.unpack graphName
+    sendM $
+      putStrLn $
+        "[Teaching] RunTurnOp intercepted for node: "
+          <> T.unpack nodeName
+          <> " in graph: "
+          <> T.unpack graphName
 
     -- 1. Wrap system prompt with teacher guidance
     let wrappedPrompt = wrapWithGuidance (teGuidance env) systemPrompt
@@ -255,22 +256,22 @@ runLLMWithTeaching env = interpret $ \case
 
     -- 4. Record the turn
     now <- sendM getCurrentTime
-    let turn = TeachingTurn
-          { ttNodeName = nodeName
-          , ttGraphName = graphName
-          , ttSystemPrompt = systemPrompt  -- Original, not wrapped
-          , ttUserContent = toJSON userContent
-          , ttOutputSchema = schema
-          , ttToolDefs = tools
-          , ttResponse = toJSON response
-          , ttTimestamp = now
-          }
+    let turn =
+          TeachingTurn
+            { ttNodeName = nodeName,
+              ttGraphName = graphName,
+              ttSystemPrompt = systemPrompt, -- Original, not wrapped
+              ttUserContent = toJSON userContent,
+              ttOutputSchema = schema,
+              ttToolDefs = tools,
+              ttResponse = toJSON response,
+              ttTimestamp = now
+            }
     sendM $ recordTurn (teHandles env) turn
     sendM $ putStrLn $ "[Teaching] Recorded turn for: " <> T.unpack nodeName
 
     -- 5. Convert response to TurnOutcome
     pure $ convertToOutcome response
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS
@@ -281,16 +282,16 @@ wrapWithGuidance :: Text -> Text -> Text
 wrapWithGuidance guidance original =
   if T.null guidance
     then original
-    else T.unlines
-      [ "# Teaching Mode Active"
-      , ""
-      , guidance
-      , ""
-      , "---"
-      , ""
-      , original
-      ]
-
+    else
+      T.unlines
+        [ "# Teaching Mode Active",
+          "",
+          guidance,
+          "",
+          "---",
+          "",
+          original
+        ]
 
 -- | Convert content blocks to plain text for Haiku call.
 --
@@ -301,14 +302,13 @@ contentBlocksToText :: [ContentBlock] -> Text
 contentBlocksToText blocks = T.intercalate "\n" $ concatMap extractText blocks
   where
     extractText :: ContentBlock -> [Text]
-    extractText Text { text = t } = [t]
-    extractText ToolResult { content = c } = [c]
+    extractText Text {text = t} = [t]
+    extractText ToolResult {content = c} = [c]
     extractText Image {} = ["[image]"]
-    extractText ToolUse { name = n, input = i } = [n <> ": " <> T.pack (show i)]
-    extractText Thinking { thinking = t } = [t]
+    extractText ToolUse {name = n, input = i} = [n <> ": " <> T.pack (show i)]
+    extractText Thinking {thinking = t} = [t]
     extractText RedactedThinking {} = ["[redacted thinking]"]
-    extractText Json { json = v } = [T.pack $ show v]
-
+    extractText Json {json = v} = [T.pack $ show v]
 
 -- | Call Haiku via Anthropic API with forced structured output.
 --
@@ -317,26 +317,28 @@ contentBlocksToText blocks = T.intercalate "\n" $ concatMap extractText blocks
 --
 -- Note: Extended thinking is disabled when using forced tool_choice (API limitation).
 callHaiku :: TeachingEnv -> Text -> Text -> Value -> IO AnthropicResponse
-callHaiku TeachingEnv{..} systemPrompt userText schema = do
+callHaiku TeachingEnv {..} systemPrompt userText schema = do
   -- Extract API key via pattern match (NoFieldSelectors)
-  let TeachingConfig { tcAnthropicKey = apiKey } = teConfig
+  let TeachingConfig {tcAnthropicKey = apiKey} = teConfig
 
   -- Create respond tool from schema
   let respondTool = schemaToRespondTool schema
 
-  let anthropicCfg = AnthropicConfig
-        { acModel = "claude-haiku-4-5-20251001"
-        , acMaxTokens = 4096
-        , acThinking = ThinkingDisabled  -- Must disable for forced tool_choice
-        , acSystemPrompt = Just systemPrompt
-        }
+  let anthropicCfg =
+        AnthropicConfig
+          { acModel = "claude-haiku-4-5-20251001",
+            acMaxTokens = 4096,
+            acThinking = ThinkingDisabled, -- Must disable for forced tool_choice
+            acSystemPrompt = Just systemPrompt
+          }
 
   -- Build request with forced tool_choice
-  let req = buildAnthropicRequest
-        anthropicCfg
-        userText
-        (Just [respondTool])
-        (Just $ ToolChoiceTool "respond")
+  let req =
+        buildAnthropicRequest
+          anthropicCfg
+          userText
+          (Just [respondTool])
+          (Just $ ToolChoiceTool "respond")
 
   -- Make the actual API call
   manager <- newManager tlsManagerSettings
@@ -355,7 +357,6 @@ callHaiku TeachingEnv{..} systemPrompt userText schema = do
       error "Haiku API unknown client error"
     Right resp -> pure resp
 
-
 -- | Convert an output schema to a "respond" tool definition.
 --
 -- Anthropic tool format:
@@ -367,12 +368,12 @@ callHaiku TeachingEnv{..} systemPrompt userText schema = do
 -- }
 -- @
 schemaToRespondTool :: Value -> Value
-schemaToRespondTool schema = object
-  [ "name" .= ("respond" :: Text)
-  , "description" .= ("Return your structured response matching the required schema. You MUST call this tool with your answer." :: Text)
-  , "input_schema" .= schema
-  ]
-
+schemaToRespondTool schema =
+  object
+    [ "name" .= ("respond" :: Text),
+      "description" .= ("Return your structured response matching the required schema. You MUST call this tool with your answer." :: Text),
+      "input_schema" .= schema
+    ]
 
 -- | Convert Anthropic response to TurnOutcome.
 --
@@ -380,42 +381,50 @@ schemaToRespondTool schema = object
 -- Currently produces a simple success outcome; tool use handling would
 -- need extension.
 convertToOutcome :: AnthropicResponse -> TurnOutcome (TurnResult Value)
-convertToOutcome (AnthropicResponse { arContent = contentBlocksNE }) =
+convertToOutcome (AnthropicResponse {arContent = contentBlocksNE}) =
   -- Extract text, thinking, and tool use from content blocks (LP = LLMProvider ContentBlock)
   let blocks = NE.toList contentBlocksNE
       textContent = T.intercalate "\n" [t | LP.TextContent t <- blocks]
       thinkingContent = T.intercalate "\n" [t | LP.ThinkingContent t <- blocks]
       toolUses = [(name, input_) | LP.ToolUseContent name input_ <- blocks]
-  in case toolUses of
-    [] ->
-      -- No tool use - return text as structured output
-      TurnCompleted $ TurnResult
-        { trOutput = toJSON textContent  -- Parsed output
-        , trToolsInvoked = []
-        , trNarrative = textContent
-        , trThinking = thinkingContent
-        }
-    [(toolName, toolArgs)] ->
-      -- Single tool use - record as tool invocation
-      TurnCompleted $ TurnResult
-        { trOutput = toolArgs  -- Tool args are the structured output
-        , trToolsInvoked = [ToolInvocation
-            { tiName = toolName
-            , tiInput = toolArgs
-            , tiOutput = Null  -- Not executed yet
-            }]
-        , trNarrative = textContent
-        , trThinking = thinkingContent
-        }
-    multiTools ->
-      -- Multiple tool uses - record all invocations
-      TurnCompleted $ TurnResult
-        { trOutput = toJSON $ map snd multiTools
-        , trToolsInvoked = [ToolInvocation
-            { tiName = name
-            , tiInput = args
-            , tiOutput = Null  -- Not executed yet
-            } | (name, args) <- multiTools]
-        , trNarrative = textContent
-        , trThinking = thinkingContent
-        }
+   in case toolUses of
+        [] ->
+          -- No tool use - return text as structured output
+          TurnCompleted $
+            TurnResult
+              { trOutput = toJSON textContent, -- Parsed output
+                trToolsInvoked = [],
+                trNarrative = textContent,
+                trThinking = thinkingContent
+              }
+        [(toolName, toolArgs)] ->
+          -- Single tool use - record as tool invocation
+          TurnCompleted $
+            TurnResult
+              { trOutput = toolArgs, -- Tool args are the structured output
+                trToolsInvoked =
+                  [ ToolInvocation
+                      { tiName = toolName,
+                        tiInput = toolArgs,
+                        tiOutput = Null -- Not executed yet
+                      }
+                  ],
+                trNarrative = textContent,
+                trThinking = thinkingContent
+              }
+        multiTools ->
+          -- Multiple tool uses - record all invocations
+          TurnCompleted $
+            TurnResult
+              { trOutput = toJSON $ map snd multiTools,
+                trToolsInvoked =
+                  [ ToolInvocation
+                      { tiName = name,
+                        tiInput = args,
+                        tiOutput = Null -- Not executed yet
+                      }
+                  | (name, args) <- multiTools
+                  ],
+                trNarrative = textContent,
+                trThinking = thinkingContent
+              }

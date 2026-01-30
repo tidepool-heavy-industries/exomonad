@@ -9,33 +9,34 @@
 -- and RecordStructure.hs. Both modules import these shared types.
 module ExoMonad.Graph.Generic.Core
   ( -- * Mode Class
-    GraphMode(..)  -- Exports :- operator via (..)
+    GraphMode (..), -- Exports :- operator via (..)
 
     -- * Modes
-  , AsGraph
+    AsGraph,
 
     -- * Node Markers
-  , LLMNode
-  , GeminiNode
-  , LogicNode
-  , GraphNode
-  , EntryNode
-  , ExitNode
-  , Entry
-  , Exit
+    LLMNode,
+    GeminiNode,
+    LogicNode,
+    GraphNode,
+    EntryNode,
+    ExitNode,
+    Entry,
+    Exit,
 
     -- * Parallel Execution Markers
-  , ForkNode
-  , BarrierNode
+    ForkNode,
+    BarrierNode,
 
     -- * Phantom Wrappers
-  , NodeRef(..)
-  , GetNodeName
-  ) where
+    NodeRef (..),
+    GetNodeName,
+  )
+where
 
 import Data.Kind (Type)
-import GHC.TypeLits (Symbol)
 import ExoMonad.Graph.Types (LLMKind)
+import GHC.TypeLits (Symbol)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPH MODE CLASS
@@ -154,6 +155,7 @@ data ExitNode outputType
 
 -- | Aliases for EntryNode and ExitNode (deprecated, used by tests).
 type Entry = EntryNode
+
 type Exit = ExitNode
 
 -- ════════════════════════════════════════════════════════════════════════════

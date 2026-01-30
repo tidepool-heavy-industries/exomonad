@@ -1,31 +1,35 @@
 module Main (main) where
 
-import Test.Tasty
-import Test.Tasty.HUnit
-import Data.Aeson (eitherDecode, encode, Value)
-import qualified Data.ByteString.Lazy as BL
+import Data.Aeson (Value, eitherDecode, encode)
+import Data.ByteString.Lazy qualified as BL
 import ExoMonad.Control.Protocol
 import System.FilePath ((</>))
+import Test.Tasty
+import Test.Tasty.HUnit
 
 main :: IO ()
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Protocol Golden Tests"
-  [ testGroup "ControlResponse"
-      [ testCase "hook_response_allow.json" $ assertGoldenResponse "hook_response_allow.json"
-      , testCase "hook_response_deny.json" $ assertGoldenResponse "hook_response_deny.json"
-      , testCase "mcp_tool_response_success.json" $ assertGoldenResponse "mcp_tool_response_success.json"
-      , testCase "mcp_tool_response_error.json" $ assertGoldenResponse "mcp_tool_response_error.json"
-      , testCase "pong.json" $ assertGoldenResponse "pong.json"
-      , testCase "tools_list_response.json" $ assertGoldenResponse "tools_list_response.json"
-      ]
-  , testGroup "ControlMessage"
-      [ testCase "mcp_tool_call.json" $ assertGoldenMessage "mcp_tool_call.json"
-      , testCase "ping.json" $ assertGoldenMessage "ping.json"
-      , testCase "tools_list_request.json" $ assertGoldenMessage "tools_list_request.json"
-      ]
-  ]
+tests =
+  testGroup
+    "Protocol Golden Tests"
+    [ testGroup
+        "ControlResponse"
+        [ testCase "hook_response_allow.json" $ assertGoldenResponse "hook_response_allow.json",
+          testCase "hook_response_deny.json" $ assertGoldenResponse "hook_response_deny.json",
+          testCase "mcp_tool_response_success.json" $ assertGoldenResponse "mcp_tool_response_success.json",
+          testCase "mcp_tool_response_error.json" $ assertGoldenResponse "mcp_tool_response_error.json",
+          testCase "pong.json" $ assertGoldenResponse "pong.json",
+          testCase "tools_list_response.json" $ assertGoldenResponse "tools_list_response.json"
+        ],
+      testGroup
+        "ControlMessage"
+        [ testCase "mcp_tool_call.json" $ assertGoldenMessage "mcp_tool_call.json",
+          testCase "ping.json" $ assertGoldenMessage "ping.json",
+          testCase "tools_list_request.json" $ assertGoldenMessage "tools_list_request.json"
+        ]
+    ]
 
 fixtureDir :: FilePath
 fixtureDir = "test/fixtures/protocol"

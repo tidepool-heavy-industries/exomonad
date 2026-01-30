@@ -102,7 +102,6 @@ impl Component {
     }
 }
 
-
 /// Visibility rules from Haskell TUI.hs.
 /// Uses serde untagged since Haskell encodes these as simple objects.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -114,28 +113,16 @@ pub enum VisibilityRule {
     Equals(HashMap<String, String>),
     /// Show if a numeric component's value is greater than or equal to `min_value`.
     /// Haskell: GreaterThan { id, min_value }
-    GreaterThan {
-        id: String,
-        min_value: f32,
-    },
+    GreaterThan { id: String, min_value: f32 },
     /// Show if a numeric component's value is less than or equal to `max_value`.
     /// Haskell: LessThan { id, max_value }
-    LessThan {
-        id: String,
-        max_value: f32,
-    },
+    LessThan { id: String, max_value: f32 },
     /// Show if the count for a component (e.g., multiselect) equals `exact_count`.
     /// Haskell: CountEquals { id, exact_count }
-    CountEquals {
-        id: String,
-        exact_count: u32,
-    },
+    CountEquals { id: String, exact_count: u32 },
     /// Show if the count for a component is greater than or equal to `min_count`.
     /// Haskell: CountGreaterThan { id, min_count }
-    CountGreaterThan {
-        id: String,
-        min_count: u32,
-    },
+    CountGreaterThan { id: String, min_count: u32 },
 }
 
 /// Internal state of the popup form
@@ -222,23 +209,28 @@ impl PopupState {
     }
 
     pub fn set_number(&mut self, id: &str, value: f32) {
-        self.values.insert(id.to_string(), ElementValue::Number(value));
+        self.values
+            .insert(id.to_string(), ElementValue::Number(value));
     }
 
     pub fn set_boolean(&mut self, id: &str, value: bool) {
-        self.values.insert(id.to_string(), ElementValue::Boolean(value));
+        self.values
+            .insert(id.to_string(), ElementValue::Boolean(value));
     }
 
     pub fn set_text(&mut self, id: &str, value: String) {
-        self.values.insert(id.to_string(), ElementValue::Text(value));
+        self.values
+            .insert(id.to_string(), ElementValue::Text(value));
     }
 
     pub fn set_choice(&mut self, id: &str, value: usize) {
-        self.values.insert(id.to_string(), ElementValue::Choice(value));
+        self.values
+            .insert(id.to_string(), ElementValue::Choice(value));
     }
 
     pub fn set_multichoice(&mut self, id: &str, value: Vec<bool>) {
-        self.values.insert(id.to_string(), ElementValue::MultiChoice(value));
+        self.values
+            .insert(id.to_string(), ElementValue::MultiChoice(value));
     }
 }
 
@@ -271,9 +263,14 @@ mod tests {
 
         let parsed: Component = serde_json::from_str(json).unwrap();
         match parsed {
-            Component::Slider { id, visible_when, .. } => {
+            Component::Slider {
+                id, visible_when, ..
+            } => {
                 assert_eq!(id, "slider1");
-                assert_eq!(visible_when, Some(VisibilityRule::Checked("checkbox1".to_string())));
+                assert_eq!(
+                    visible_when,
+                    Some(VisibilityRule::Checked("checkbox1".to_string()))
+                );
             }
             _ => panic!("Expected Slider component"),
         }
@@ -291,7 +288,7 @@ mod tests {
             }
             _ => panic!("Expected GreaterThan"),
         }
-        
+
         // CountEquals (untagged)
         let json = r#"{"id": "m1", "exact_count": 2}"#;
         let rule: VisibilityRule = serde_json::from_str(json).unwrap();

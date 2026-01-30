@@ -11,22 +11,22 @@
 -- @
 module ExoMonad.StructuredOutput.Prefix
   ( -- * Field Label Modification
-    stripFieldPrefix
-  , defaultFieldLabel
-  , makeStripPrefix
+    stripFieldPrefix,
+    defaultFieldLabel,
+    makeStripPrefix,
 
     -- * Prefix Detection
-  , detectPrefix
-  , commonPrefix
+    detectPrefix,
+    commonPrefix,
 
     -- * Utilities
-  , lcFirst
-  , ucFirst
-  ) where
+    lcFirst,
+    ucFirst,
+  )
+where
 
 import Data.Char (isLower, toLower, toUpper)
 import Data.List (foldl')
-
 
 -- | Strip a known common prefix from a field name.
 --
@@ -43,10 +43,9 @@ stripFieldPrefix :: String -> String
 stripFieldPrefix fieldName =
   let prefix = takeWhile isLower fieldName
       remainder = drop (length prefix) fieldName
-  in case remainder of
-       (c:cs) | not (null prefix) -> toLower c : cs
-       _ -> lcFirst fieldName
-
+   in case remainder of
+        (c : cs) | not (null prefix) -> toLower c : cs
+        _ -> lcFirst fieldName
 
 -- | Default field label modifier.
 --
@@ -54,7 +53,6 @@ stripFieldPrefix fieldName =
 -- for use in 'StructuredOptions'.
 defaultFieldLabel :: String -> String
 defaultFieldLabel = stripFieldPrefix
-
 
 -- | Create a field modifier that strips a specific prefix.
 --
@@ -71,17 +69,16 @@ makeStripPrefix :: String -> (String -> String)
 makeStripPrefix "" = lcFirst
 makeStripPrefix prefix = \fieldName ->
   case stripPrefixExact prefix fieldName of
-    Just (c:cs) -> toLower c : cs
-    Just []     -> fieldName  -- prefix was the whole name, keep as-is
-    Nothing     -> fieldName  -- didn't match, keep as-is
+    Just (c : cs) -> toLower c : cs
+    Just [] -> fieldName -- prefix was the whole name, keep as-is
+    Nothing -> fieldName -- didn't match, keep as-is
   where
     stripPrefixExact :: String -> String -> Maybe String
     stripPrefixExact [] ys = Just ys
     stripPrefixExact _ [] = Nothing
-    stripPrefixExact (x:xs) (y:ys)
-      | x == y    = stripPrefixExact xs ys
+    stripPrefixExact (x : xs) (y : ys)
+      | x == y = stripPrefixExact xs ys
       | otherwise = Nothing
-
 
 -- | Detect the common lowercase prefix from a list of field names.
 --
@@ -96,8 +93,7 @@ makeStripPrefix prefix = \fieldName ->
 detectPrefix :: [String] -> String
 detectPrefix [] = ""
 detectPrefix [x] = takeWhile isLower x
-detectPrefix (x:xs) = foldl' commonPrefix (takeWhile isLower x) (map (takeWhile isLower) xs)
-
+detectPrefix (x : xs) = foldl' commonPrefix (takeWhile isLower x) (map (takeWhile isLower) xs)
 
 -- | Find the longest common prefix of two strings.
 --
@@ -109,7 +105,6 @@ detectPrefix (x:xs) = foldl' commonPrefix (takeWhile isLower x) (map (takeWhile 
 commonPrefix :: String -> String -> String
 commonPrefix a b = map fst $ takeWhile (uncurry (==)) $ zip a b
 
-
 -- | Lowercase the first character of a string.
 --
 -- @
@@ -119,8 +114,7 @@ commonPrefix a b = map fst $ takeWhile (uncurry (==)) $ zip a b
 -- @
 lcFirst :: String -> String
 lcFirst [] = []
-lcFirst (c:cs) = toLower c : cs
-
+lcFirst (c : cs) = toLower c : cs
 
 -- | Uppercase the first character of a string.
 --
@@ -131,4 +125,4 @@ lcFirst (c:cs) = toLower c : cs
 -- @
 ucFirst :: String -> String
 ucFirst [] = []
-ucFirst (c:cs) = toUpper c : cs
+ucFirst (c : cs) = toUpper c : cs

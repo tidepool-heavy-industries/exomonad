@@ -47,23 +47,24 @@
 -- @
 module ExoMonad.Control.Role.Types
   ( -- * Hook Inputs/Outputs
-    SessionStartInput(..)
-  , SessionStartResponse(..)
-  , PreToolUseInput(..)
-  , PreToolUseResponse(..)
-  , PostToolUseInput(..)
-  , StopInput(..)
-  , StopResponse(..)
-  , StopReason(..)
-  , Notification(..)
-  , SessionEndInput(..)
-  , SubagentStopInput(..)
+    SessionStartInput (..),
+    SessionStartResponse (..),
+    PreToolUseInput (..),
+    PreToolUseResponse (..),
+    PostToolUseInput (..),
+    StopInput (..),
+    StopResponse (..),
+    StopReason (..),
+    Notification (..),
+    SessionEndInput (..),
+    SubagentStopInput (..),
 
     -- * Role Metadata
-  , RoleMetadata(..)
-  ) where
+    RoleMetadata (..),
+  )
+where
 
-import Data.Aeson (Value, FromJSON(..), ToJSON(..), genericParseJSON, genericToJSON, defaultOptions, fieldLabelModifier, Options)
+import Data.Aeson (FromJSON (..), Options, ToJSON (..), Value, defaultOptions, fieldLabelModifier, genericParseJSON, genericToJSON)
 import Data.Aeson.Casing (snakeCase)
 import Data.Text (Text)
 import GHC.Generics (Generic)
@@ -74,71 +75,76 @@ import GHC.Generics (Generic)
 
 -- | Helper for JSON options: strip prefix and snake_case.
 jsonOpts :: Int -> Data.Aeson.Options
-jsonOpts prefixLen = defaultOptions
-  { fieldLabelModifier = snakeCase . drop prefixLen
-  }
+jsonOpts prefixLen =
+  defaultOptions
+    { fieldLabelModifier = snakeCase . drop prefixLen
+    }
 
 -- | Input for session start hook.
 data SessionStartInput = SessionStartInput
-  { ssiSessionId :: Text
-  , ssiCwd :: FilePath
+  { ssiSessionId :: Text,
+    ssiCwd :: FilePath
   }
   deriving (Show, Eq, Generic)
 
 instance FromJSON SessionStartInput where
   parseJSON = genericParseJSON (jsonOpts 3) -- ssi
+
 instance ToJSON SessionStartInput where
   toJSON = genericToJSON (jsonOpts 3)
 
 -- | Response from session start hook.
 data SessionStartResponse = SessionStartResponse
-  { ssrContinueSession :: Bool
-    -- ^ If False, session is blocked
-  , ssrInjectedContext :: Maybe Text
-    -- ^ Optional context to inject into session
+  { -- | If False, session is blocked
+    ssrContinueSession :: Bool,
+    -- | Optional context to inject into session
+    ssrInjectedContext :: Maybe Text
   }
   deriving (Show, Eq, Generic)
 
 instance FromJSON SessionStartResponse where
   parseJSON = genericParseJSON (jsonOpts 3) -- ssr
+
 instance ToJSON SessionStartResponse where
   toJSON = genericToJSON (jsonOpts 3)
 
 -- | Input for pre-tool-use hook.
 data PreToolUseInput = PreToolUseInput
-  { ptuToolName :: Text
-  , ptuToolInput :: Value -- HookInput uses "tool_input"
-  , ptuSessionId :: Text
+  { ptuToolName :: Text,
+    ptuToolInput :: Value, -- HookInput uses "tool_input"
+    ptuSessionId :: Text
   }
   deriving (Show, Eq, Generic)
 
 instance FromJSON PreToolUseInput where
   parseJSON = genericParseJSON (jsonOpts 3) -- ptu
+
 instance ToJSON PreToolUseInput where
   toJSON = genericToJSON (jsonOpts 3)
 
 -- | Response from pre-tool-use hook.
 data PreToolUseResponse
-  = PTUAllow
-    -- ^ Allow the tool call to proceed
-  | PTUDeny Text
-    -- ^ Block the tool call with a reason
-  | PTUTransform Value
-    -- ^ Allow with modified arguments
+  = -- | Allow the tool call to proceed
+    PTUAllow
+  | -- | Block the tool call with a reason
+    PTUDeny Text
+  | -- | Allow with modified arguments
+    PTUTransform Value
   deriving (Show, Eq, Generic)
 
 instance FromJSON PreToolUseResponse
+
 instance ToJSON PreToolUseResponse
 
 -- | Input for post-tool-use hook.
 data PostToolUseInput = PostToolUseInput
-  { postuToolName :: Text
-  , postuToolInput :: Value -- HookInput uses "tool_input"
-  , postuToolResult :: Value -- HookInput uses "tool_response" (mapped manually?)
-                             -- Wait, HookInput has "tool_response".
-                             -- "postuToolResult" -> "tool_result"?
-                             -- I need to check Protocol.hs HookInput ToJSON.
-  , postuSessionId :: Text
+  { postuToolName :: Text,
+    postuToolInput :: Value, -- HookInput uses "tool_input"
+    postuToolResult :: Value, -- HookInput uses "tool_response" (mapped manually?)
+    -- Wait, HookInput has "tool_response".
+    -- "postuToolResult" -> "tool_result"?
+    -- I need to check Protocol.hs HookInput ToJSON.
+    postuSessionId :: Text
   }
   deriving (Show, Eq, Generic)
 
@@ -150,34 +156,44 @@ data PostToolUseInput = PostToolUseInput
 
 -- I'll define custom instance for PostToolUseInput to match HookInput.
 instance FromJSON PostToolUseInput where
-  parseJSON = genericParseJSON (defaultOptions { fieldLabelModifier = \f -> case f of
-    "postuToolName" -> "tool_name"
-    "postuToolInput" -> "tool_input"
-    "postuToolResult" -> "tool_response"
-    "postuSessionId" -> "session_id"
-    s -> s
-  })
+  parseJSON =
+    genericParseJSON
+      ( defaultOptions
+          { fieldLabelModifier = \f -> case f of
+              "postuToolName" -> "tool_name"
+              "postuToolInput" -> "tool_input"
+              "postuToolResult" -> "tool_response"
+              "postuSessionId" -> "session_id"
+              s -> s
+          }
+      )
+
 instance ToJSON PostToolUseInput where
-  toJSON = genericToJSON (defaultOptions { fieldLabelModifier = \f -> case f of
-    "postuToolName" -> "tool_name"
-    "postuToolInput" -> "tool_input"
-    "postuToolResult" -> "tool_response"
-    "postuSessionId" -> "session_id"
-    s -> s
-  })
+  toJSON =
+    genericToJSON
+      ( defaultOptions
+          { fieldLabelModifier = \f -> case f of
+              "postuToolName" -> "tool_name"
+              "postuToolInput" -> "tool_input"
+              "postuToolResult" -> "tool_response"
+              "postuSessionId" -> "session_id"
+              s -> s
+          }
+      )
 
 -- | Input for stop hook.
 data StopInput = StopInput
-  { siReason :: Maybe Text -- HookInput has "reason" which is Maybe Text (raw string)
-                           -- StopReason enum is parsed from this text?
-                           -- Or should StopInput just hold the Text?
-                           -- Wiring.hs logic uses it.
-  , siSessionId :: Text
+  { siReason :: Maybe Text, -- HookInput has "reason" which is Maybe Text (raw string)
+  -- StopReason enum is parsed from this text?
+  -- Or should StopInput just hold the Text?
+  -- Wiring.hs logic uses it.
+    siSessionId :: Text
   }
   deriving (Show, Eq, Generic)
 
 instance FromJSON StopInput where
   parseJSON = genericParseJSON (jsonOpts 2) -- si
+
 instance ToJSON StopInput where
   toJSON = genericToJSON (jsonOpts 2)
 
@@ -190,19 +206,21 @@ data StopReason
   deriving (Show, Eq, Generic)
 
 instance FromJSON StopReason
+
 instance ToJSON StopReason
 
 -- | Response from stop hook.
 data StopResponse = StopResponse
-  { srAllowStop :: Bool
-    -- ^ If False, stop is blocked
-  , srMessage :: Maybe Text
-    -- ^ Optional message explaining why stop was blocked/allowed
+  { -- | If False, stop is blocked
+    srAllowStop :: Bool,
+    -- | Optional message explaining why stop was blocked/allowed
+    srMessage :: Maybe Text
   }
   deriving (Show, Eq, Generic)
 
 instance FromJSON StopResponse where
   parseJSON = genericParseJSON (jsonOpts 2) -- sr
+
 instance ToJSON StopResponse where
   toJSON = genericToJSON (jsonOpts 2)
 
@@ -214,18 +232,19 @@ data Notification
   deriving (Show, Eq, Generic)
 
 instance FromJSON Notification
+
 instance ToJSON Notification
 
 -- | Input for session end hook.
 data SessionEndInput = SessionEndInput
-  { seiSessionId :: Text
-  , seiTranscriptPath :: Text
-  , seiRole :: Text -- HookInput doesn't have role field directly? It has permission_mode?
-                    -- Protocol.hs HookInput does NOT have "role".
-                    -- ControlMessage has role.
-                    -- But generic dispatch takes `inputJson` which is `toJSON HookInput`.
-                    -- So SessionEndInput cannot have `seiRole` if HookInput doesn't.
-  , seiCwd :: FilePath
+  { seiSessionId :: Text,
+    seiTranscriptPath :: Text,
+    seiRole :: Text, -- HookInput doesn't have role field directly? It has permission_mode?
+    -- Protocol.hs HookInput does NOT have "role".
+    -- ControlMessage has role.
+    -- But generic dispatch takes `inputJson` which is `toJSON HookInput`.
+    -- So SessionEndInput cannot have `seiRole` if HookInput doesn't.
+    seiCwd :: FilePath
   }
   deriving (Show, Eq, Generic)
 
@@ -235,22 +254,23 @@ data SessionEndInput = SessionEndInput
 
 instance FromJSON SessionEndInput where
   parseJSON = genericParseJSON (jsonOpts 3) -- sei
+
 instance ToJSON SessionEndInput where
   toJSON = genericToJSON (jsonOpts 3)
 
 -- | Input for subagent stop hook.
 data SubagentStopInput = SubagentStopInput
-  { sasiSessionId :: Text
-  , sasiTranscriptPath :: Text
-  , sasiCwd :: FilePath
+  { sasiSessionId :: Text,
+    sasiTranscriptPath :: Text,
+    sasiCwd :: FilePath
   }
   deriving (Show, Eq, Generic)
 
 instance FromJSON SubagentStopInput where
   parseJSON = genericParseJSON (jsonOpts 4) -- sasi
+
 instance ToJSON SubagentStopInput where
   toJSON = genericToJSON (jsonOpts 4)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ROLE METADATA
@@ -258,14 +278,15 @@ instance ToJSON SubagentStopInput where
 
 -- | Metadata for a role, used for logging and identification.
 data RoleMetadata = RoleMetadata
-  { rmSlug        :: Text
-    -- ^ Short identifier (e.g., "tl", "dev", "pm")
-  , rmDisplayName :: Text
-    -- ^ Human-readable name (e.g., "Team Lead")
-  , rmDescription :: Text
-    -- ^ Description of the role's purpose
+  { -- | Short identifier (e.g., "tl", "dev", "pm")
+    rmSlug :: Text,
+    -- | Human-readable name (e.g., "Team Lead")
+    rmDisplayName :: Text,
+    -- | Description of the role's purpose
+    rmDescription :: Text
   }
   deriving (Show, Eq, Generic)
 
 instance FromJSON RoleMetadata
+
 instance ToJSON RoleMetadata

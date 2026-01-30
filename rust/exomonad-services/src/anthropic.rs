@@ -1,6 +1,8 @@
 use crate::{ExternalService, ServiceError};
 use async_trait::async_trait;
-use exomonad_shared::{ChatMessage, ContentBlock, ServiceRequest, ServiceResponse, StopReason, Tool, Usage};
+use exomonad_shared::{
+    ChatMessage, ContentBlock, ServiceRequest, ServiceResponse, StopReason, Tool, Usage,
+};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -119,7 +121,9 @@ impl ExternalService for AnthropicService {
 
             if response.status().as_u16() == 529 {
                 if attempts >= max_attempts {
-                     return Err(ServiceError::RateLimited { retry_after_ms: backoff.as_millis() as u64 });
+                    return Err(ServiceError::RateLimited {
+                        retry_after_ms: backoff.as_millis() as u64,
+                    });
                 }
                 warn!("Anthropic overloaded (529), retrying in {:?}...", backoff);
                 tokio::time::sleep(backoff).await;
@@ -128,14 +132,14 @@ impl ExternalService for AnthropicService {
             }
 
             if !response.status().is_success() {
-                 return Err(ServiceError::Api {
+                return Err(ServiceError::Api {
                     code: response.status().as_u16() as i32,
                     message: response.text().await.unwrap_or_default(),
                 });
             }
 
             let body: AnthropicResponsePayload = response.json().await?;
-            
+
             let stop_reason = match body.stop_reason.as_deref() {
                 Some("end_turn") => StopReason::EndTurn,
                 Some("max_tokens") => StopReason::MaxTokens,
@@ -162,7 +166,7 @@ mod tests {
     #[tokio::test]
     async fn test_anthropic_chat() {
         let mock_server = MockServer::start().await;
-        
+
         let mock_response = serde_json::json!({
             "content": [{"type": "text", "text": "Hello"}],
             "stop_reason": "end_turn",
@@ -175,11 +179,15 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let service = AnthropicService::with_base_url("test-key".into(), mock_server.uri().parse().unwrap());
-        
+        let service =
+            AnthropicService::with_base_url("test-key".into(), mock_server.uri().parse().unwrap());
+
         let req = ServiceRequest::AnthropicChat {
             model: "claude-3-opus".into(),
-            messages: vec![ChatMessage { role: "user".into(), content: "Hi".into() }],
+            messages: vec![ChatMessage {
+                role: "user".into(),
+                content: "Hi".into(),
+            }],
             max_tokens: 100,
             tools: None,
             system: None,
@@ -187,7 +195,11 @@ mod tests {
         };
 
         match service.call(req).await.unwrap() {
-            ServiceResponse::AnthropicChat { content, stop_reason, .. } => {
+            ServiceResponse::AnthropicChat {
+                content,
+                stop_reason,
+                ..
+            } => {
                 assert_eq!(content[0].text.as_deref(), Some("Hello"));
                 assert_eq!(stop_reason, StopReason::EndTurn);
             }

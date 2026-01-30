@@ -1,32 +1,37 @@
 {-# LANGUAGE OverloadedStrings #-}
+
 -- | Canonical path logic for ExoMonad runtime orchestration.
 module ExoMonad.Control.Runtime.Paths
   ( -- * Socket Directories
-    socketDirectoryFor
-  , controlSocketName
-  , tuiSocketName
+    socketDirectoryFor,
+    controlSocketName,
+    tuiSocketName,
+
     -- * Full Socket Paths
-  , controlSocketPath
-  , tuiSocketPath
+    controlSocketPath,
+    tuiSocketPath,
+
     -- * Binary Paths
-  , runtimeBinDir
-  , controlServerBin
-  , exomonadAgentBin
-  , tuiSidebarBin
-  , dockerCtlBin
+    runtimeBinDir,
+    controlServerBin,
+    exomonadAgentBin,
+    tuiSidebarBin,
+    dockerCtlBin,
+
     -- * Docker Spawner Paths
-  , dockerBinDir
-  , dockerWorktreesPath
-  , dockerSocketsPath
-  ) where
+    dockerBinDir,
+    dockerWorktreesPath,
+    dockerSocketsPath,
+  )
+where
 
-import Data.Text (Text)
-import qualified Data.Text as T
-import System.FilePath ((</>))
-import System.Environment (lookupEnv)
 import Data.Maybe (fromMaybe)
+import Data.Text (Text)
+import Data.Text qualified as T
+import System.Environment (lookupEnv)
+import System.FilePath ((</>))
 
--- | Base directory for transient sockets. 
+-- | Base directory for transient sockets.
 -- Uses /tmp to avoid SUN_LEN path limits (~104 bytes) on macOS.
 socketDirectoryFor :: Text -> FilePath
 socketDirectoryFor shortId = "/tmp/exomonad-" <> T.unpack shortId
@@ -39,7 +44,6 @@ controlSocketName = "control.sock"
 tuiSocketName :: FilePath
 tuiSocketName = "tui.sock"
 
-
 -- | Full path to the control socket.
 controlSocketPath :: FilePath -> FilePath
 controlSocketPath dir = dir </> controlSocketName
@@ -47,7 +51,6 @@ controlSocketPath dir = dir </> controlSocketName
 -- | Full path to the TUI socket.
 tuiSocketPath :: FilePath -> FilePath
 tuiSocketPath dir = dir </> tuiSocketName
-
 
 -- | Canonical bin directory within a project.
 runtimeBinDir :: FilePath -> FilePath

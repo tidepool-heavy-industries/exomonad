@@ -31,10 +31,7 @@ pub fn find_exomonad_binary() -> PathBuf {
     }
 
     // Try PATH via which
-    if let Ok(output) = std::process::Command::new("which")
-        .arg("exomonad")
-        .output()
-    {
+    if let Ok(output) = std::process::Command::new("which").arg("exomonad").output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !path.is_empty() {

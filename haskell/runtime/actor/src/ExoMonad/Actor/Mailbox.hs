@@ -4,22 +4,24 @@
 -- Mailboxes are unbounded queues (backpressure deferred for MVP).
 module ExoMonad.Actor.Mailbox
   ( -- * Mailbox Type
-    Mailbox
+    Mailbox,
+
     -- * Creation
-  , newMailboxIO
+    newMailboxIO,
+
     -- * Operations
-  , send
-  , receive
-  ) where
+    send,
+    receive,
+  )
+where
 
 import Control.Concurrent.STM (atomically)
 import Control.Concurrent.STM.TQueue
-  ( TQueue
-  , newTQueueIO
-  , writeTQueue
-  , readTQueue
+  ( TQueue,
+    newTQueueIO,
+    readTQueue,
+    writeTQueue,
   )
-
 
 -- | A mailbox is an unbounded queue for receiving messages.
 --

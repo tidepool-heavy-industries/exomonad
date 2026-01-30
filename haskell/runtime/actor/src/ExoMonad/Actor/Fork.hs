@@ -25,28 +25,26 @@
 -- The BarrierNode collects results from workers via 'Arrive' messages.
 module ExoMonad.Actor.Fork
   ( -- * SpawnTargets Typeclass
-    SpawnTargets(..)
+    SpawnTargets (..),
 
     -- * Handler Wrapper
-  , forkHandler
-  ) where
+    forkHandler,
+  )
+where
 
 import Control.Monad (forM_)
 import Control.Monad.Freer (Eff)
-import Data.Aeson (Value, ToJSON(..), FromJSON(..))
+import Data.Aeson (FromJSON (..), ToJSON (..), Value)
 import Data.Aeson.Types (parseEither)
-import Data.Kind (Type, Constraint)
-import Data.Proxy (Proxy(..))
+import Data.Kind (Constraint, Type)
+import Data.Proxy (Proxy (..))
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
+import ExoMonad.Actor.Graph (NodeHandler (..))
+import ExoMonad.Graph.Goto (To)
+import ExoMonad.Graph.Types (HList (..))
 import GHC.TypeLits (KnownSymbol, symbolVal)
 import System.IO (hFlush, stdout)
-
-import ExoMonad.Graph.Goto (To)
-import ExoMonad.Graph.Types (HList(..))
-
-import ExoMonad.Actor.Graph (NodeHandler(..))
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SPAWN TARGETS TYPECLASS
@@ -68,24 +66,23 @@ class SpawnTargets targets payloads | targets -> payloads where
   -- | Extract (targetName, jsonPayload) pairs from an HList.
   extractSpawnTargets :: HList payloads -> [(Text, Value)]
 
-
 -- | Base case: empty target list.
 instance SpawnTargets '[] '[] where
   extractSpawnTargets HNil = []
 
-
 -- | Recursive case: extract target name and payload.
 instance
-  ( KnownSymbol name
-  , ToJSON payload
-  , SpawnTargets rest restPayloads
-  ) => SpawnTargets (To name payload ': rest) (payload ': restPayloads) where
+  ( KnownSymbol name,
+    ToJSON payload,
+    SpawnTargets rest restPayloads
+  ) =>
+  SpawnTargets (To name payload ': rest) (payload ': restPayloads)
+  where
   extractSpawnTargets (payload ::: restPayloads) =
     let targetName = T.pack (symbolVal (Proxy @name))
         jsonPayload = toJSON payload
         restTargets = extractSpawnTargets @rest @restPayloads restPayloads
-    in (targetName, jsonPayload) : restTargets
-
+     in (targetName, jsonPayload) : restTargets
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- FORK HANDLER WRAPPER
@@ -113,14 +110,16 @@ instance
 --
 -- Note: ForkNode doesn't spawn actors - it routes to existing actors.
 -- The workers must already exist in the actor system.
-forkHandler
-  :: forall targets payloads input es.
-     ( SpawnTargets targets payloads
-     , FromJSON input
-     )
-  => (forall a. Eff es a -> IO a)         -- ^ Effect interpreter
-  -> (input -> Eff es (HList payloads))   -- ^ Fork handler
-  -> NodeHandler
+forkHandler ::
+  forall targets payloads input es.
+  ( SpawnTargets targets payloads,
+    FromJSON input
+  ) =>
+  -- | Effect interpreter
+  (forall a. Eff es a -> IO a) ->
+  -- | Fork handler
+  (input -> Eff es (HList payloads)) ->
+  NodeHandler
 forkHandler interpret handler = NodeHandler $ \router jsonPayload ->
   case parseEither parseJSON jsonPayload of
     Left err -> error $ "ForkNode: Failed to parse input: " <> err

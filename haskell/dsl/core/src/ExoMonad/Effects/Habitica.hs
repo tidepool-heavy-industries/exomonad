@@ -4,59 +4,58 @@
 -- Types are imported from "ExoMonad.Habitica".
 module ExoMonad.Effects.Habitica
   ( -- * Effect
-    Habitica(..)
-  , fetchTodos
-  , addChecklistItem
-  , createTodo
-  , getUser
-  , scoreTask
-  , getTasks
+    Habitica (..),
+    fetchTodos,
+    addChecklistItem,
+    createTodo,
+    getUser,
+    scoreTask,
+    getTasks,
 
     -- * Try Variants (return Either instead of crashing)
-  , fetchTodosTry
-  , addChecklistItemTry
-  , createTodoTry
-  , getUserTry
-  , scoreTaskTry
-  , getTasksTry
+    fetchTodosTry,
+    addChecklistItemTry,
+    createTodoTry,
+    getUserTry,
+    scoreTaskTry,
+    getTasksTry,
 
     -- * Re-exported Types
-  , TaskType(..)
-  , Direction(..)
-  , TaskId(..)
-  , TodoId(..)
-  , ChecklistItemId(..)
-  , UserInfo(..)
-  , UserStats(..)
-  , HabiticaTask(..)
-  , FetchedTodo(..)
-  , FetchedChecklistItem(..)
-  , ScoreResult(..)
-  , HabiticaError(..)
+    TaskType (..),
+    Direction (..),
+    TaskId (..),
+    TodoId (..),
+    ChecklistItemId (..),
+    UserInfo (..),
+    UserStats (..),
+    HabiticaTask (..),
+    FetchedTodo (..),
+    FetchedChecklistItem (..),
+    ScoreResult (..),
+    HabiticaError (..),
 
     -- * Runner (stub)
-  , runHabiticaStub
-  ) where
+    runHabiticaStub,
+  )
+where
 
+import Control.Monad.Freer (Eff, Member, interpret, send)
 import Data.Text (Text)
-import Control.Monad.Freer (Eff, Member, send, interpret)
-
 import ExoMonad.Effect (Log, logInfo)
 import ExoMonad.Habitica
-  ( TaskType(..)
-  , Direction(..)
-  , TaskId(..)
-  , TodoId(..)
-  , ChecklistItemId(..)
-  , UserInfo(..)
-  , UserStats(..)
-  , HabiticaTask(..)
-  , FetchedTodo(..)
-  , FetchedChecklistItem(..)
-  , ScoreResult(..)
-  , HabiticaError(..)
+  ( ChecklistItemId (..),
+    Direction (..),
+    FetchedChecklistItem (..),
+    FetchedTodo (..),
+    HabiticaError (..),
+    HabiticaTask (..),
+    ScoreResult (..),
+    TaskId (..),
+    TaskType (..),
+    TodoId (..),
+    UserInfo (..),
+    UserStats (..),
   )
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT
@@ -64,73 +63,69 @@ import ExoMonad.Habitica
 
 data Habitica r where
   -- | Original operations (crash on error)
-  FetchTodos       :: Habitica [FetchedTodo]
+  FetchTodos :: Habitica [FetchedTodo]
   AddChecklistItem :: TodoId -> Text -> Habitica ChecklistItemId
-  CreateTodo       :: Text -> Habitica TodoId
-  GetUser          :: Habitica UserInfo
-  ScoreTask        :: TaskId -> Direction -> Habitica ScoreResult
-  GetTasks         :: TaskType -> Habitica [HabiticaTask]
-
+  CreateTodo :: Text -> Habitica TodoId
+  GetUser :: Habitica UserInfo
+  ScoreTask :: TaskId -> Direction -> Habitica ScoreResult
+  GetTasks :: TaskType -> Habitica [HabiticaTask]
   -- | Try variants (return Either)
-  FetchTodosTry       :: Habitica (Either HabiticaError [FetchedTodo])
+  FetchTodosTry :: Habitica (Either HabiticaError [FetchedTodo])
   AddChecklistItemTry :: TodoId -> Text -> Habitica (Either HabiticaError ChecklistItemId)
-  CreateTodoTry       :: Text -> Habitica (Either HabiticaError TodoId)
-  GetUserTry          :: Habitica (Either HabiticaError UserInfo)
-  ScoreTaskTry        :: TaskId -> Direction -> Habitica (Either HabiticaError ScoreResult)
-  GetTasksTry         :: TaskType -> Habitica (Either HabiticaError [HabiticaTask])
-
+  CreateTodoTry :: Text -> Habitica (Either HabiticaError TodoId)
+  GetUserTry :: Habitica (Either HabiticaError UserInfo)
+  ScoreTaskTry :: TaskId -> Direction -> Habitica (Either HabiticaError ScoreResult)
+  GetTasksTry :: TaskType -> Habitica (Either HabiticaError [HabiticaTask])
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SMART CONSTRUCTORS
 -- ════════════════════════════════════════════════════════════════════════════
 
-fetchTodos :: Member Habitica effs => Eff effs [FetchedTodo]
+fetchTodos :: (Member Habitica effs) => Eff effs [FetchedTodo]
 fetchTodos = send FetchTodos
 
-addChecklistItem :: Member Habitica effs => TodoId -> Text -> Eff effs ChecklistItemId
+addChecklistItem :: (Member Habitica effs) => TodoId -> Text -> Eff effs ChecklistItemId
 addChecklistItem tid item = send (AddChecklistItem tid item)
 
-createTodo :: Member Habitica effs => Text -> Eff effs TodoId
+createTodo :: (Member Habitica effs) => Text -> Eff effs TodoId
 createTodo title = send (CreateTodo title)
 
-getUser :: Member Habitica effs => Eff effs UserInfo
+getUser :: (Member Habitica effs) => Eff effs UserInfo
 getUser = send GetUser
 
-scoreTask :: Member Habitica effs => TaskId -> Direction -> Eff effs ScoreResult
+scoreTask :: (Member Habitica effs) => TaskId -> Direction -> Eff effs ScoreResult
 scoreTask tid dir = send (ScoreTask tid dir)
 
-getTasks :: Member Habitica effs => TaskType -> Eff effs [HabiticaTask]
+getTasks :: (Member Habitica effs) => TaskType -> Eff effs [HabiticaTask]
 getTasks tt = send (GetTasks tt)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TRY VARIANTS
 -- ════════════════════════════════════════════════════════════════════════════
 
-fetchTodosTry :: Member Habitica effs => Eff effs (Either HabiticaError [FetchedTodo])
+fetchTodosTry :: (Member Habitica effs) => Eff effs (Either HabiticaError [FetchedTodo])
 fetchTodosTry = send FetchTodosTry
 
-addChecklistItemTry :: Member Habitica effs => TodoId -> Text -> Eff effs (Either HabiticaError ChecklistItemId)
+addChecklistItemTry :: (Member Habitica effs) => TodoId -> Text -> Eff effs (Either HabiticaError ChecklistItemId)
 addChecklistItemTry tid item = send (AddChecklistItemTry tid item)
 
-createTodoTry :: Member Habitica effs => Text -> Eff effs (Either HabiticaError TodoId)
+createTodoTry :: (Member Habitica effs) => Text -> Eff effs (Either HabiticaError TodoId)
 createTodoTry title = send (CreateTodoTry title)
 
-getUserTry :: Member Habitica effs => Eff effs (Either HabiticaError UserInfo)
+getUserTry :: (Member Habitica effs) => Eff effs (Either HabiticaError UserInfo)
 getUserTry = send GetUserTry
 
-scoreTaskTry :: Member Habitica effs => TaskId -> Direction -> Eff effs (Either HabiticaError ScoreResult)
+scoreTaskTry :: (Member Habitica effs) => TaskId -> Direction -> Eff effs (Either HabiticaError ScoreResult)
 scoreTaskTry tid dir = send (ScoreTaskTry tid dir)
 
-getTasksTry :: Member Habitica effs => TaskType -> Eff effs (Either HabiticaError [HabiticaTask])
+getTasksTry :: (Member Habitica effs) => TaskType -> Eff effs (Either HabiticaError [HabiticaTask])
 getTasksTry tt = send (GetTasksTry tt)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- STUB RUNNER
 -- ════════════════════════════════════════════════════════════════════════════
 
-runHabiticaStub :: Member Log effs => Eff (Habitica ': effs) a -> Eff effs a
+runHabiticaStub :: (Member Log effs) => Eff (Habitica ': effs) a -> Eff effs a
 runHabiticaStub = interpret $ \case
   -- Original operations (crash on call)
   FetchTodos -> do
@@ -171,7 +166,6 @@ runHabiticaStub = interpret $ \case
   GetTasksTry tt -> do
     logInfo $ "[Habitica:stub] GetTasksTry called: " <> taskTypeText tt
     pure $ Left (HabiticaOther "Habitica.getTasks: not implemented (stub)")
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS

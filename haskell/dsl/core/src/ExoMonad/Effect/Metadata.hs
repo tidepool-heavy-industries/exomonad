@@ -17,22 +17,22 @@
 -- 4. Decide: FireAndForget or Blocking semantics
 module ExoMonad.Effect.Metadata
   ( -- * Effect Categories
-    EffectCategory(..)
-  , EffectSemantics(..)
+    EffectCategory (..),
+    EffectSemantics (..),
 
     -- * Effect Metadata
-  , EffectMeta(..)
-  , allEffectMeta
+    EffectMeta (..),
+    allEffectMeta,
 
     -- * Helpers
-  , categoryToText
-  , semanticsToText
-  ) where
+    categoryToText,
+    semanticsToText,
+  )
+where
 
-import Data.Aeson (ToJSON(..), FromJSON(..), withText)
+import Data.Aeson (FromJSON (..), ToJSON (..), withText)
 import Data.Text (Text)
 import GHC.Generics (Generic)
-
 
 -- | Where an effect should be handled.
 --
@@ -45,13 +45,13 @@ data EffectCategory
 
 instance ToJSON EffectCategory where
   toJSON Internal = "internal"
-  toJSON Yielded  = "yielded"
+  toJSON Yielded = "yielded"
 
 instance FromJSON EffectCategory where
   parseJSON = withText "EffectCategory" $ \t -> case t of
     "internal" -> pure Internal
-    "yielded"  -> pure Yielded
-    _          -> fail $ "Unknown EffectCategory: " ++ show t
+    "yielded" -> pure Yielded
+    _ -> fail $ "Unknown EffectCategory: " ++ show t
 
 -- | How an effect interacts with the execution loop.
 --
@@ -64,23 +64,24 @@ data EffectSemantics
 
 instance ToJSON EffectSemantics where
   toJSON FireAndForget = "fire_and_forget"
-  toJSON Blocking      = "blocking"
+  toJSON Blocking = "blocking"
 
 instance FromJSON EffectSemantics where
   parseJSON = withText "EffectSemantics" $ \t -> case t of
     "fire_and_forget" -> pure FireAndForget
-    "blocking"        -> pure Blocking
-    _                 -> fail $ "Unknown EffectSemantics: " ++ show t
-
+    "blocking" -> pure Blocking
+    _ -> fail $ "Unknown EffectSemantics: " ++ show t
 
 -- | Metadata for a single effect type.
 data EffectMeta = EffectMeta
-  { emTypeName  :: Text            -- ^ Effect type name (e.g., "LogInfo", "LlmComplete")
-  , emCategory  :: EffectCategory  -- ^ Internal or Yielded
-  , emSemantics :: EffectSemantics -- ^ FireAndForget or Blocking
+  { -- | Effect type name (e.g., "LogInfo", "LlmComplete")
+    emTypeName :: Text,
+    -- | Internal or Yielded
+    emCategory :: EffectCategory,
+    -- | FireAndForget or Blocking
+    emSemantics :: EffectSemantics
   }
   deriving stock (Show, Eq, Generic)
-
 
 -- | All effect metadata - SINGLE SOURCE OF TRUTH.
 --
@@ -93,24 +94,23 @@ data EffectMeta = EffectMeta
 allEffectMeta :: [EffectMeta]
 allEffectMeta =
   -- Core IO-blind effects
-  [ EffectMeta "Log"             Internal FireAndForget  -- LogMsg with various levels
-  , EffectMeta "LLM"             Internal Blocking       -- RunTurnOp (tool-aware LLM calls)
-  , EffectMeta "State"           Internal Blocking       -- Get/Put for agent state
-  , EffectMeta "Random"          Internal Blocking       -- RandomInt/RandomDouble
-  , EffectMeta "Time"            Internal Blocking       -- GetCurrentTime
-  , EffectMeta "ChatHistory"     Internal Blocking       -- GetHistory/AppendMessages
-  , EffectMeta "Emit"            Yielded  FireAndForget  -- EmitEvent for observability
-  , EffectMeta "RequestInput"    Yielded  Blocking       -- RequestChoice/RequestText (user input)
-  , EffectMeta "QuestionUI"      Yielded  Blocking       -- AskQuestion (structured questions)
+  [ EffectMeta "Log" Internal FireAndForget, -- LogMsg with various levels
+    EffectMeta "LLM" Internal Blocking, -- RunTurnOp (tool-aware LLM calls)
+    EffectMeta "State" Internal Blocking, -- Get/Put for agent state
+    EffectMeta "Random" Internal Blocking, -- RandomInt/RandomDouble
+    EffectMeta "Time" Internal Blocking, -- GetCurrentTime
+    EffectMeta "ChatHistory" Internal Blocking, -- GetHistory/AppendMessages
+    EffectMeta "Emit" Yielded FireAndForget, -- EmitEvent for observability
+    EffectMeta "RequestInput" Yielded Blocking, -- RequestChoice/RequestText (user input)
+    EffectMeta "QuestionUI" Yielded Blocking -- AskQuestion (structured questions)
   ]
-
 
 -- | Convert EffectCategory to Text for codegen.
 categoryToText :: EffectCategory -> Text
 categoryToText Internal = "internal"
-categoryToText Yielded  = "yielded"
+categoryToText Yielded = "yielded"
 
 -- | Convert EffectSemantics to Text for codegen.
 semanticsToText :: EffectSemantics -> Text
 semanticsToText FireAndForget = "fire_and_forget"
-semanticsToText Blocking      = "blocking"
+semanticsToText Blocking = "blocking"

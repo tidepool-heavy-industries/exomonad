@@ -3,28 +3,27 @@
 -- When the ki scope exits, all actors are automatically cleaned up.
 module ExoMonad.Actor.Runtime
   ( -- * Running Actor Systems
-    withActorSystem
+    withActorSystem,
+
     -- * Types
-  , Router
-  ) where
+    Router,
+  )
+where
 
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar)
-import Data.Aeson (Value, FromJSON, fromJSON, Result(..))
+import Data.Aeson (FromJSON, Result (..), Value, fromJSON)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
-import qualified Data.Text as T
-import qualified Ki
-
+import Data.Map.Strict qualified as Map
+import Data.Text qualified as T
 import ExoMonad.Actor.Mailbox (send)
-import ExoMonad.Actor.Types (Actor(..), ActorId)
-
+import ExoMonad.Actor.Types (Actor (..), ActorId)
+import Ki qualified
 
 -- | A router sends messages to actors by ID.
 --
 -- Special target \"exit\" delivers the final result.
 type Router = ActorId -> Value -> IO ()
-
 
 -- | Run an actor system with structured concurrency.
 --
@@ -47,13 +46,14 @@ type Router = ActorId -> Value -> IO ()
 --     router \"exit\" (toJSON result)
 --   pure $ Map.singleton \"compute\" compute
 -- @
-withActorSystem
-  :: forall result
-   . FromJSON result
-  => Value  -- ^ Initial message to send to \"entry\"
-  -> (Ki.Scope -> Router -> IO (Map ActorId Actor))
-     -- ^ Setup: spawn actors, return the actor map
-  -> IO result
+withActorSystem ::
+  forall result.
+  (FromJSON result) =>
+  -- | Initial message to send to \"entry\"
+  Value ->
+  -- | Setup: spawn actors, return the actor map
+  (Ki.Scope -> Router -> IO (Map ActorId Actor)) ->
+  IO result
 withActorSystem entryPayload setup = do
   exitChan <- newEmptyMVar
   routerRef <- newIORef uninitializedRouter
@@ -75,7 +75,6 @@ withActorSystem entryPayload setup = do
 
     -- Wait for exit signal
     takeMVar exitChan
-
   where
     uninitializedRouter :: Router
     uninitializedRouter _ _ = error "Router not initialized (message sent during setup before actors registered)"
@@ -84,7 +83,7 @@ withActorSystem entryPayload setup = do
     realRouter actors exitChan target payload
       | target == "exit" = case fromJSON @result payload of
           Success r -> putMVar exitChan r
-          Error e   -> error $ "Exit actor failed to parse result: " <> e
+          Error e -> error $ "Exit actor failed to parse result: " <> e
       | otherwise = case Map.lookup target actors of
           Just actor -> send (actorMailbox actor) payload
-          Nothing    -> error $ "Unknown actor: " <> T.unpack target
+          Nothing -> error $ "Unknown actor: " <> T.unpack target

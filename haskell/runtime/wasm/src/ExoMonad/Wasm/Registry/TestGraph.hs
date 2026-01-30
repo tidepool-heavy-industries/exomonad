@@ -8,12 +8,12 @@
 -- - GraphInfo derived from TestGraph type via Generics
 -- - Session management handled by Registry
 module ExoMonad.Wasm.Registry.TestGraph
-  ( testGraphEntry
-  ) where
+  ( testGraphEntry,
+  )
+where
 
-import ExoMonad.Wasm.Registry (makeGraphEntry, GraphEntry)
+import ExoMonad.Wasm.Registry (GraphEntry, makeGraphEntry)
 import ExoMonad.Wasm.TestGraph (TestGraph, computeHandlerWasm)
-
 
 -- | TestGraph entry for the registry.
 --

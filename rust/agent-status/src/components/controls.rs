@@ -3,7 +3,7 @@ use tuirealm::{
     Component, Event, MockComponent, State,
     command::{Cmd, CmdResult},
     event::{Key, KeyEvent},
-    props::{AttrValue, Attribute, Props},
+    props::{AttrValue, Attribute},
     ratatui::{
         Frame,
         layout::Rect,
@@ -18,15 +18,11 @@ use crate::state::DashboardState;
 
 pub struct ControlsComponent {
     pub state: Arc<RwLock<DashboardState>>,
-    pub props: Props,
 }
 
 impl ControlsComponent {
     pub fn new(state: Arc<RwLock<DashboardState>>) -> Self {
-        Self {
-            state,
-            props: Props::default(),
-        }
+        Self { state }
     }
 }
 

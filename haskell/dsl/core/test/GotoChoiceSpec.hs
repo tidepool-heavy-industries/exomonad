@@ -8,16 +8,16 @@
 -- with target metadata, guaranteeing a transition is always selected.
 module GotoChoiceSpec (spec) where
 
-import Test.Hspec
 import ExoMonad.Graph.Goto
-  ( To
-  , GotoChoice
-  , gotoChoice
-  , gotoExit
-  , gotoSelf
+  ( GotoChoice,
+    To,
+    gotoChoice,
+    gotoExit,
+    gotoSelf,
   )
-import ExoMonad.Graph.Goto.Internal (OneOf(..), GotoChoice(..))  -- For test assertions
+import ExoMonad.Graph.Goto.Internal (GotoChoice (..), OneOf (..)) -- For test assertions
 import ExoMonad.Graph.Types (Exit, Self)
+import Test.Hspec
 
 -- | Simple target list for basic tests.
 type BasicTargets = '[To "nodeA" Int, To "nodeB" String, To Exit Bool]
@@ -34,7 +34,6 @@ spec = do
   -- gotoChoice SMART CONSTRUCTOR
   -- ════════════════════════════════════════════════════════════════════════════
   describe "gotoChoice" $ do
-
     it "constructs choice for first named target" $ do
       let choice :: GotoChoice BasicTargets = gotoChoice @"nodeA" (42 :: Int)
       case choice of
@@ -64,7 +63,6 @@ spec = do
   -- gotoExit SMART CONSTRUCTOR
   -- ════════════════════════════════════════════════════════════════════════════
   describe "gotoExit" $ do
-
     it "constructs Exit choice at correct position" $ do
       let choice :: GotoChoice BasicTargets = gotoExit True
       case choice of
@@ -87,7 +85,6 @@ spec = do
   -- gotoSelf SMART CONSTRUCTOR
   -- ════════════════════════════════════════════════════════════════════════════
   describe "gotoSelf" $ do
-
     it "constructs Self choice at correct position" $ do
       let choice :: GotoChoice SelfLoopTargets = gotoSelf (42 :: Int)
       case choice of
@@ -115,7 +112,6 @@ spec = do
   -- PATTERN MATCHING ON GotoChoice
   -- ════════════════════════════════════════════════════════════════════════════
   describe "GotoChoice pattern matching" $ do
-
     it "can dispatch based on GotoChoice value" $ do
       let dispatch :: GotoChoice BasicTargets -> String
           dispatch (GotoChoice (Here n)) = "nodeA: " ++ show n
@@ -137,7 +133,6 @@ spec = do
   -- EDGE CASES
   -- ════════════════════════════════════════════════════════════════════════════
   describe "Edge cases" $ do
-
     it "single Exit target" $ do
       let choice :: GotoChoice '[To Exit Int] = gotoExit (999 :: Int)
       case choice of

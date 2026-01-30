@@ -12,25 +12,24 @@
 -- This proves the LLM yield/resume cycle works over the WASM boundary.
 module ExoMonad.Wasm.LlmTestGraph
   ( -- * Graph Type
-    LlmTestGraph(..)
+    LlmTestGraph (..),
+
     -- * WASM Handler
-  , echoHandlerWasm
-  ) where
+    echoHandlerWasm,
+  )
+where
 
-import Data.Aeson (Value(..))
-import qualified Data.Aeson.KeyMap as KM
+import Data.Aeson (Value (..))
+import Data.Aeson.KeyMap qualified as KM
 import Data.Text (Text)
-import qualified Data.Text as T
-import GHC.Generics (Generic)
-
-import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit)
-import ExoMonad.Graph.Generic (GraphMode(..), type (:-))
-import qualified ExoMonad.Graph.Generic as G (EntryNode, ExitNode, LogicNode)
+import Data.Text qualified as T
+import ExoMonad.Graph.Generic (GraphMode (..), type (:-))
+import ExoMonad.Graph.Generic qualified as G (EntryNode, ExitNode, LogicNode)
 import ExoMonad.Graph.Goto (Goto, GotoChoice, To, gotoExit)
-
+import ExoMonad.Graph.Types (Exit, Input, UsesEffects, type (:@))
 import ExoMonad.Wasm.Effect (WasmM, llmComplete)
 import ExoMonad.Wasm.Error (formatWasmError)
-
+import GHC.Generics (Generic)
 
 -- | LLM test graph: Text in, Text out.
 --
@@ -39,12 +38,11 @@ import ExoMonad.Wasm.Error (formatWasmError)
 --
 -- The echo node makes an LLM call (yielding to TypeScript) then exits with the response.
 data LlmTestGraph mode = LlmTestGraph
-  { entry :: mode :- G.EntryNode Text
-  , echo  :: mode :- G.LogicNode :@ Input Text :@ UsesEffects '[Goto Exit Text]
-  , exit  :: mode :- G.ExitNode Text
+  { entry :: mode :- G.EntryNode Text,
+    echo :: mode :- G.LogicNode :@ Input Text :@ UsesEffects '[Goto Exit Text],
+    exit :: mode :- G.ExitNode Text
   }
-  deriving Generic
-
+  deriving (Generic)
 
 -- | WASM handler for the echo node.
 --
@@ -57,15 +55,15 @@ data LlmTestGraph mode = LlmTestGraph
 -- then calls resume with the result. Execution continues and returns the GotoChoice.
 echoHandlerWasm :: Text -> WasmM (GotoChoice '[To Exit Text])
 echoHandlerWasm userMsg = do
-  result <- llmComplete
-    "echo"                              -- node name
-    "You are an echo bot. Echo back whatever the user says."  -- system prompt
-    ("Echo back: " <> userMsg)          -- user content
-    Nothing                             -- no schema (free-form response)
+  result <-
+    llmComplete
+      "echo" -- node name
+      "You are an echo bot. Echo back whatever the user says." -- system prompt
+      ("Echo back: " <> userMsg) -- user content
+      Nothing -- no schema (free-form response)
   case result of
     Left err -> pure $ gotoExit ("Error: " <> formatWasmError err)
     Right response -> pure $ gotoExit (extractResponseText response)
-
 
 -- | Extract response text from LLM result.
 --

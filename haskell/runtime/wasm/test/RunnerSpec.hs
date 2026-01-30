@@ -9,16 +9,14 @@
 -- 3. Full yield/resume cycle produces expected output
 module RunnerSpec (spec) where
 
-import Test.Hspec
-import Data.Aeson (Value(..))
-import qualified Data.Text as T
-
-import ExoMonad.Wasm.Runner (initializeWasm, WasmResult(..))
-import ExoMonad.Wasm.TestGraph (computeHandlerWasm)
-import ExoMonad.Wasm.WireTypes (SerializableEffect(..), EffectResult(..))
+import Data.Aeson (Value (..))
+import Data.Text qualified as T
 import ExoMonad.Graph.Goto (GotoChoice, OneOf)
-import ExoMonad.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
-
+import ExoMonad.Graph.Goto.Internal (GotoChoice (..), OneOf (..)) -- For test assertions
+import ExoMonad.Wasm.Runner (WasmResult (..), initializeWasm)
+import ExoMonad.Wasm.TestGraph (computeHandlerWasm)
+import ExoMonad.Wasm.WireTypes (EffectResult (..), SerializableEffect (..))
+import Test.Hspec
 
 spec :: Spec
 spec = do
@@ -26,14 +24,12 @@ spec = do
   resumeCycleSpec
   fullCycleSpec
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- initializeWasm
 -- ════════════════════════════════════════════════════════════════════════════
 
 initializeWasmSpec :: Spec
 initializeWasmSpec = describe "initializeWasm" $ do
-
   it "yields Log effect with input value in message" $ do
     let result = initializeWasm (computeHandlerWasm 5)
     case result of
@@ -55,14 +51,12 @@ initializeWasmSpec = describe "initializeWasm" $ do
         msg `shouldBe` "Computing: -10"
       _ -> expectationFailure "Expected WasmYield with EffLogInfo"
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- Resume Cycle
 -- ════════════════════════════════════════════════════════════════════════════
 
 resumeCycleSpec :: Spec
 resumeCycleSpec = describe "resuming with EffectResult" $ do
-
   it "completes with n+1 after Log success" $ do
     let result = initializeWasm (computeHandlerWasm 5)
     case result of
@@ -108,14 +102,12 @@ resumeCycleSpec = describe "resuming with EffectResult" $ do
           _ -> expectationFailure "Expected WasmComplete despite error"
       _ -> expectationFailure "Expected initial WasmYield"
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- Full Cycle (integration)
 -- ════════════════════════════════════════════════════════════════════════════
 
 fullCycleSpec :: Spec
 fullCycleSpec = describe "Full yield/resume cycle" $ do
-
   it "initialize then resume produces n+1" $ do
     -- Simulate full TypeScript ↔ WASM interaction
     let input = 10
@@ -130,7 +122,6 @@ fullCycleSpec = describe "Full yield/resume cycle" $ do
           WasmComplete (GotoChoice (Here n)) ->
             n `shouldBe` 11
           _ -> expectationFailure "Expected final WasmComplete"
-
       _ -> expectationFailure "Expected initial WasmYield"
 
   it "handles multiple independent runs" $ do

@@ -1,13 +1,10 @@
-use anyhow::{Result, anyhow};
-use crate::types::{GitStatusResult, GitDiffResult, DiffFile};
-use std::process::Command;
+use crate::types::{DiffFile, GitDiffResult, GitStatusResult};
+use anyhow::{anyhow, Result};
 use std::collections::HashMap;
+use std::process::Command;
 
 fn run_git(cwd: &str, args: &[&str]) -> Result<String> {
-    let output = Command::new("git")
-        .current_dir(cwd)
-        .args(args)
-        .output()?;
+    let output = Command::new("git").current_dir(cwd).args(args).output()?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -19,7 +16,7 @@ fn run_git(cwd: &str, args: &[&str]) -> Result<String> {
 
 pub fn status(cwd: &str) -> Result<()> {
     let output_res = run_git(cwd, &["status", "--porcelain=v2", "--branch"]);
-    
+
     let mut branch = "none".to_string();
     let mut ahead = 0;
     let mut behind = 0;
@@ -94,7 +91,9 @@ pub fn diff(cwd: &str, staged: bool) -> Result<()> {
     let mut total_additions = 0;
     let mut total_deletions = 0;
 
-    if let (Ok(numstat_output), Ok(name_status_output)) = (numstat_output_res, name_status_output_res) {
+    if let (Ok(numstat_output), Ok(name_status_output)) =
+        (numstat_output_res, name_status_output_res)
+    {
         let mut statuses = HashMap::new();
         for line in name_status_output.lines() {
             let parts: Vec<&str> = line.split_whitespace().collect();
@@ -116,8 +115,11 @@ pub fn diff(cwd: &str, staged: bool) -> Result<()> {
                 let additions: u32 = parts[0].parse().unwrap_or(0);
                 let deletions: u32 = parts[1].parse().unwrap_or(0);
                 let path = parts[2].to_string();
-                
-                let status = statuses.get(&path).cloned().unwrap_or_else(|| "modified".to_string());
+
+                let status = statuses
+                    .get(&path)
+                    .cloned()
+                    .unwrap_or_else(|| "modified".to_string());
 
                 total_additions += additions;
                 total_deletions += deletions;

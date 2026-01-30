@@ -3,23 +3,24 @@
 -- Handles spawning, communicating with, and restarting GHCi subprocess.
 module GHCi.Oracle.Session
   ( -- * Session Types
-    GHCiSession(..)
-  , SessionState(..)
+    GHCiSession (..),
+    SessionState (..),
 
     -- * Session Handle
-  , SessionHandle
-  , newSessionHandle
-  , getSessionState
+    SessionHandle,
+    newSessionHandle,
+    getSessionState,
 
     -- * Session Lifecycle
-  , startSession
-  , stopSession
-  , restartSession
+    startSession,
+    stopSession,
+    restartSession,
 
     -- * Query Execution
-  , execQuery
-  , withSession
-  ) where
+    execQuery,
+    withSession,
+  )
+where
 
 import Control.Concurrent (ThreadId, forkIO, killThread)
 import Control.Concurrent.MVar
@@ -27,32 +28,30 @@ import Control.Concurrent.STM
 import Control.Exception (SomeException, try)
 import Control.Monad (forever, void, when)
 import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
-import System.Exit (ExitCode(..))
+import Data.Text qualified as T
+import Data.Text.IO qualified as TIO
+import GHCi.Oracle.Types (GHCiError (..), OracleConfig (..), isLoadError)
+import System.Exit (ExitCode (..))
 import System.IO
-  ( Handle
-  , BufferMode(..)
-  , hFlush
-  , hGetLine
-  , hPutStrLn
-  , hSetBuffering
-  , hClose
+  ( BufferMode (..),
+    Handle,
+    hClose,
+    hFlush,
+    hGetLine,
+    hPutStrLn,
+    hSetBuffering,
   )
 import System.Process
-  ( ProcessHandle
-  , CreateProcess(..)
-  , StdStream(..)
-  , createProcess
-  , shell
-  , terminateProcess
-  , waitForProcess
-  , getProcessExitCode
+  ( CreateProcess (..),
+    ProcessHandle,
+    StdStream (..),
+    createProcess,
+    getProcessExitCode,
+    shell,
+    terminateProcess,
+    waitForProcess,
   )
 import System.Timeout (timeout)
-
-import GHCi.Oracle.Types (GHCiError(..), OracleConfig(..), isLoadError)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES
@@ -60,51 +59,47 @@ import GHCi.Oracle.Types (GHCiError(..), OracleConfig(..), isLoadError)
 
 -- | Active GHCi session with subprocess handles.
 data GHCiSession = GHCiSession
-  { gsStdin :: Handle
-    -- ^ Write queries here
-  , gsStdout :: Handle
-    -- ^ Read responses here
-  , gsStderr :: Handle
-    -- ^ Read errors here
-  , gsProcess :: ProcessHandle
-    -- ^ Subprocess handle
-  , gsStderrReader :: ThreadId
-    -- ^ Background thread draining stderr
+  { -- | Write queries here
+    gsStdin :: Handle,
+    -- | Read responses here
+    gsStdout :: Handle,
+    -- | Read errors here
+    gsStderr :: Handle,
+    -- | Subprocess handle
+    gsProcess :: ProcessHandle,
+    -- | Background thread draining stderr
+    gsStderrReader :: ThreadId
   }
-
 
 -- | Session lifecycle state.
 data SessionState
   = SessionNotStarted
   | SessionStarting
   | SessionRunning GHCiSession
-  | SessionCrashed Text Int  -- last output, exit code or -1
+  | SessionCrashed Text Int -- last output, exit code or -1
   | SessionStopped
   deriving stock (Show)
 
 instance Show GHCiSession where
   show _ = "<GHCiSession>"
 
-
 -- | Thread-safe handle to GHCi session.
 data SessionHandle = SessionHandle
-  { shMutex :: MVar ()
-    -- ^ Mutex for query serialization
-  , shState :: TVar SessionState
-    -- ^ Current session state
-  , shConfig :: OracleConfig
-    -- ^ Configuration
-  , shRestartCount :: TVar Int
-    -- ^ Number of restarts attempted
-  , shLastOutput :: TVar Text
-    -- ^ Last output (for crash diagnostics)
+  { -- | Mutex for query serialization
+    shMutex :: MVar (),
+    -- | Current session state
+    shState :: TVar SessionState,
+    -- | Configuration
+    shConfig :: OracleConfig,
+    -- | Number of restarts attempted
+    shRestartCount :: TVar Int,
+    -- | Last output (for crash diagnostics)
+    shLastOutput :: TVar Text
   }
-
 
 -- | Custom prompt marker for boundary detection.
 promptMarker :: Text
 promptMarker = "<<<GHCI_READY>>>"
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HANDLE CREATION
@@ -117,19 +112,18 @@ newSessionHandle config = do
   state <- newTVarIO SessionNotStarted
   restarts <- newTVarIO 0
   lastOut <- newTVarIO ""
-  pure SessionHandle
-    { shMutex = mutex
-    , shState = state
-    , shConfig = config
-    , shRestartCount = restarts
-    , shLastOutput = lastOut
-    }
-
+  pure
+    SessionHandle
+      { shMutex = mutex,
+        shState = state,
+        shConfig = config,
+        shRestartCount = restarts,
+        shLastOutput = lastOut
+      }
 
 -- | Get current session state.
 getSessionState :: SessionHandle -> IO SessionState
 getSessionState = atomically . readTVar . shState
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SESSION LIFECYCLE
@@ -149,13 +143,14 @@ startSession handle = do
 
   result <- try $ do
     -- Spawn process
-    (Just stdin, Just stdout, Just stderr, ph) <- createProcess
-      (shell $ ocGhciCommand config)
-        { cwd = Just $ ocProjectRoot config
-        , std_in = CreatePipe
-        , std_out = CreatePipe
-        , std_err = CreatePipe
-        }
+    (Just stdin, Just stdout, Just stderr, ph) <-
+      createProcess
+        (shell $ ocGhciCommand config)
+          { cwd = Just $ ocProjectRoot config,
+            std_in = CreatePipe,
+            std_out = CreatePipe,
+            std_err = CreatePipe
+          }
 
     -- Set buffering for immediate IO
     hSetBuffering stdin LineBuffering
@@ -165,13 +160,14 @@ startSession handle = do
     -- Start stderr reader thread (drains to prevent blocking)
     stderrTid <- forkIO $ stderrReader handle stderr
 
-    let session = GHCiSession
-          { gsStdin = stdin
-          , gsStdout = stdout
-          , gsStderr = stderr
-          , gsProcess = ph
-          , gsStderrReader = stderrTid
-          }
+    let session =
+          GHCiSession
+            { gsStdin = stdin,
+              gsStdout = stdout,
+              gsStderr = stderr,
+              gsProcess = ph,
+              gsStderrReader = stderrTid
+            }
 
     -- Set custom prompt for boundary detection
     setPrompt session
@@ -201,7 +197,6 @@ startSession handle = do
       pure $ Left $ GHCiSessionCrashed (T.pack $ show e) Nothing
     Right inner -> pure inner
 
-
 -- | Stop the GHCi session.
 stopSession :: SessionHandle -> IO ()
 stopSession handle = do
@@ -211,7 +206,6 @@ stopSession handle = do
       terminateSession session
       atomically $ writeTVar (shState handle) SessionStopped
     _ -> pure ()
-
 
 -- | Restart session after crash.
 restartSession :: SessionHandle -> IO (Either GHCiError ())
@@ -235,16 +229,15 @@ restartSession handle = do
       -- Start fresh
       startSession handle
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- QUERY EXECUTION
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Execute a query with the session lock.
-withSession
-  :: SessionHandle
-  -> (GHCiSession -> IO (Either GHCiError a))
-  -> IO (Either GHCiError a)
+withSession ::
+  SessionHandle ->
+  (GHCiSession -> IO (Either GHCiError a)) ->
+  IO (Either GHCiError a)
 withSession handle action = withMVar (shMutex handle) $ \_ -> do
   state <- atomically $ readTVar (shState handle)
   case state of
@@ -254,11 +247,9 @@ withSession handle action = withMVar (shMutex handle) $ \_ -> do
       case startResult of
         Left err -> pure $ Left err
         Right () -> withSession' handle action
-
     SessionStarting ->
       -- Wait a bit and retry
       pure $ Left $ GHCiServerError "Session is starting, please retry"
-
     SessionRunning session -> do
       -- Check if process is still alive
       exitCode <- getProcessExitCode (gsProcess session)
@@ -266,8 +257,10 @@ withSession handle action = withMVar (shMutex handle) $ \_ -> do
         Just code -> do
           -- Process died - attempt restart
           lastOut <- atomically $ readTVar (shLastOutput handle)
-          atomically $ writeTVar (shState handle)
-            (SessionCrashed lastOut (exitCodeToInt code))
+          atomically $
+            writeTVar
+              (shState handle)
+              (SessionCrashed lastOut (exitCodeToInt code))
           if ocRestartOnCrash (shConfig handle)
             then do
               restartResult <- restartSession handle
@@ -276,7 +269,6 @@ withSession handle action = withMVar (shMutex handle) $ \_ -> do
                 Right () -> withSession' handle action
             else pure $ Left $ GHCiSessionCrashed lastOut (Just $ exitCodeToInt code)
         Nothing -> action session
-
     SessionCrashed lastOutput code -> do
       if ocRestartOnCrash (shConfig handle)
         then do
@@ -285,10 +277,8 @@ withSession handle action = withMVar (shMutex handle) $ \_ -> do
             Left err -> pure $ Left err
             Right () -> withSession' handle action
         else pure $ Left $ GHCiSessionCrashed lastOutput (Just code)
-
     SessionStopped ->
       pure $ Left $ GHCiServerError "Session has been stopped"
-
 
 -- | Internal helper after state check.
 withSession' :: SessionHandle -> (GHCiSession -> IO (Either GHCiError a)) -> IO (Either GHCiError a)
@@ -297,7 +287,6 @@ withSession' handle action = do
   case state of
     SessionRunning session -> action session
     _ -> pure $ Left $ GHCiServerError "Session not running"
-
 
 -- | Execute a single GHCi command.
 execQuery :: SessionHandle -> GHCiSession -> Text -> IO (Either GHCiError Text)
@@ -328,7 +317,6 @@ execQuery handle session query = do
         then pure $ Left $ GHCiParseError query output
         else pure $ Right output
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- INTERNAL HELPERS
 -- ════════════════════════════════════════════════════════════════════════════
@@ -340,7 +328,6 @@ setPrompt session = do
   hPutStrLn (gsStdin session) $ ":set prompt-cont \"" ++ T.unpack promptMarker ++ "-cont\\n\""
   hFlush (gsStdin session)
 
-
 -- | Wait for the custom prompt marker (initial startup).
 waitForPrompt :: GHCiSession -> IO ()
 waitForPrompt session = go
@@ -350,7 +337,6 @@ waitForPrompt session = go
       if promptMarker `T.isPrefixOf` T.pack line
         then pure ()
         else go
-
 
 -- | Read output until we see the prompt marker.
 readUntilPrompt :: SessionHandle -> GHCiSession -> IO Text
@@ -365,7 +351,6 @@ readUntilPrompt handle session = go []
         then pure $ T.intercalate "\n" (reverse acc)
         else go (lineT : acc)
 
-
 -- | Background thread for stderr.
 stderrReader :: SessionHandle -> Handle -> IO ()
 stderrReader handle h = void $ try @SomeException $ forever $ do
@@ -374,8 +359,8 @@ stderrReader handle h = void $ try @SomeException $ forever $ do
   -- Store for diagnostics
   atomically $ modifyTVar' (shLastOutput handle) (<> "\n[stderr] " <> lineT)
   when (ocVerbose (shConfig handle)) $
-    TIO.putStrLn $ "[ghci stderr] " <> lineT
-
+    TIO.putStrLn $
+      "[ghci stderr] " <> lineT
 
 -- | Terminate a session cleanly.
 terminateSession :: GHCiSession -> IO ()
@@ -392,11 +377,10 @@ terminateSession session = do
   void $ try @SomeException $ hClose (gsStdout session)
   void $ try @SomeException $ hClose (gsStderr session)
 
-
 -- | Load initial modules.
 loadInitialModules :: SessionHandle -> GHCiSession -> [Text] -> IO (Either GHCiError ())
 loadInitialModules _ _ [] = pure $ Right ()
-loadInitialModules handle session (m:ms) = do
+loadInitialModules handle session (m : ms) = do
   result <- execQuery handle session (":load " <> m)
   case result of
     Left err -> pure $ Left err
@@ -404,12 +388,10 @@ loadInitialModules handle session (m:ms) = do
       | isLoadError output -> pure $ Left $ GHCiLoadError m output
       | otherwise -> loadInitialModules handle session ms
 
-
 -- | Check if output indicates an error.
 isErrorOutput :: Text -> Bool
 isErrorOutput t =
   "<interactive>:" `T.isInfixOf` t && "error:" `T.isInfixOf` t
-
 
 -- | Convert ExitCode to Int.
 exitCodeToInt :: ExitCode -> Int

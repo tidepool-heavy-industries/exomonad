@@ -21,49 +21,47 @@
 -- Tool wire types are now consolidated in "ExoMonad.Tool.Wire" and re-exported here.
 module ExoMonad.LLM.Interpreter.Types
   ( -- * Configuration
-    LLMConfig(..)
-  , AnthropicSecrets(..)
-  , defaultAnthropicConfig
+    LLMConfig (..),
+    AnthropicSecrets (..),
+    defaultAnthropicConfig,
 
     -- * Credential Newtypes (type-safe credentials)
-  , ApiKey(..)
-  , getApiKey
-  , BaseUrl(..)
-  , getBaseUrl
-  , Scheme(..)
-  , ParsedBaseUrl(..)
+    ApiKey (..),
+    getApiKey,
+    BaseUrl (..),
+    getBaseUrl,
+    Scheme (..),
+    ParsedBaseUrl (..),
 
     -- * Environment
-  , LLMEnv(..)
-  , mkLLMEnv
+    LLMEnv (..),
+    mkLLMEnv,
 
     -- * Error Types (re-exported from "ExoMonad.Effects.LLMProvider")
-  , LLMError(..)
+    LLMError (..),
 
     -- * Tool Definitions (re-exported from "ExoMonad.Tool.Wire")
-  , AnthropicTool(..)
-  , anthropicToolToJSON
+    AnthropicTool (..),
+    anthropicToolToJSON,
 
     -- * Anthropic Wire Types
-  , AnthropicRequest(..)
-  , AnthropicMessage(..)
-  , ToolChoice(..)
-  , ThinkingConfig(..)
-  ) where
+    AnthropicRequest (..),
+    AnthropicMessage (..),
+    ToolChoice (..),
+    ThinkingConfig (..),
+  )
+where
 
-import Data.Aeson (Value(..), ToJSON(..), FromJSON(..), object, (.=), withObject, (.:))
+import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), object, withObject, (.:), (.=))
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
+-- Re-export error types from effect module
+import ExoMonad.Effects.LLMProvider (LLMError (..))
+-- Re-export wire types
+import ExoMonad.Tool.Wire (AnthropicTool (..), anthropicToolToJSON)
 import GHC.Generics (Generic)
 import Network.HTTP.Client (Manager, newManager)
 import Network.HTTP.Client.TLS (tlsManagerSettings)
-import Data.List.NonEmpty (NonEmpty(..))
-
--- Re-export error types from effect module
-import ExoMonad.Effects.LLMProvider (LLMError(..))
-
--- Re-export wire types
-import ExoMonad.Tool.Wire (AnthropicTool(..), anthropicToolToJSON)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CREDENTIAL NEWTYPES (Type-Safe Credentials)
@@ -90,10 +88,10 @@ data Scheme = Http | Https
 
 -- | Parsed base URL.
 data ParsedBaseUrl = ParsedBaseUrl
-  { pbuScheme :: Scheme
-  , pbuHost   :: String
-  , pbuPort   :: Int
-  , pbuPath   :: String
+  { pbuScheme :: Scheme,
+    pbuHost :: String,
+    pbuPort :: Int,
+    pbuPath :: String
   }
   deriving stock (Eq, Show, Generic)
 
@@ -105,7 +103,6 @@ newtype BaseUrl = BaseUrl Text
 getBaseUrl :: BaseUrl -> Text
 getBaseUrl (BaseUrl t) = t
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONFIGURATION
 -- ════════════════════════════════════════════════════════════════════════════
@@ -113,25 +110,27 @@ getBaseUrl (BaseUrl t) = t
 -- | LLM API configuration supporting Unix Sockets.
 data LLMConfig
   = LLMSocketConfig
-      { lcSocketPath :: FilePath
-      }
+  { lcSocketPath :: FilePath
+  }
   deriving stock (Eq, Show, Generic)
 
 -- | Anthropic API secrets.
 data AnthropicSecrets = AnthropicSecrets
-  { asApiKey  :: ApiKey   -- ^ Type-safe API key (x-api-key header)
-  , asBaseUrl :: BaseUrl  -- ^ Type-safe base URL (default: https://api.anthropic.com)
+  { -- | Type-safe API key (x-api-key header)
+    asApiKey :: ApiKey,
+    -- | Type-safe base URL (default: https://api.anthropic.com)
+    asBaseUrl :: BaseUrl
   }
   deriving stock (Eq, Show, Generic)
 
 -- | Default Anthropic configuration.
 -- API key must be filled in.
 defaultAnthropicConfig :: ApiKey -> AnthropicSecrets
-defaultAnthropicConfig apiKey = AnthropicSecrets
-  { asApiKey  = apiKey
-  , asBaseUrl = BaseUrl "https://api.anthropic.com"
-  }
-
+defaultAnthropicConfig apiKey =
+  AnthropicSecrets
+    { asApiKey = apiKey,
+      asBaseUrl = BaseUrl "https://api.anthropic.com"
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ENVIRONMENT
@@ -139,17 +138,16 @@ defaultAnthropicConfig apiKey = AnthropicSecrets
 
 -- | Runtime environment with HTTP manager.
 data LLMEnv = LLMEnv
-  { leConfig  :: LLMConfig
-  , leManager :: Manager
+  { leConfig :: LLMConfig,
+    leManager :: Manager
   }
 
 -- | Create a new environment.
 mkLLMEnv :: LLMConfig -> IO LLMEnv
 mkLLMEnv config = case config of
-  LLMSocketConfig{} -> do
-    manager <- newManager tlsManagerSettings 
-    pure LLMEnv { leConfig = config, leManager = manager }
-
+  LLMSocketConfig {} -> do
+    manager <- newManager tlsManagerSettings
+    pure LLMEnv {leConfig = config, leManager = manager}
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ANTHROPIC WIRE TYPES
@@ -157,13 +155,13 @@ mkLLMEnv config = case config of
 
 -- | Anthropic Messages API request body.
 data AnthropicRequest = AnthropicRequest
-  { arModel       :: Text
-  , arMaxTokens   :: Int
-  , arMessages    :: NonEmpty AnthropicMessage
-  , arSystem      :: Maybe Text
-  , arTools       :: Maybe [Value]
-  , arToolChoice  :: Maybe ToolChoice
-  , arThinking    :: Maybe ThinkingConfig
+  { arModel :: Text,
+    arMaxTokens :: Int,
+    arMessages :: NonEmpty AnthropicMessage,
+    arSystem :: Maybe Text,
+    arTools :: Maybe [Value],
+    arToolChoice :: Maybe ToolChoice,
+    arThinking :: Maybe ThinkingConfig
   }
   deriving stock (Eq, Show, Generic)
 
@@ -179,34 +177,39 @@ instance ToJSON ToolChoice where
   toJSON ToolChoiceAuto = object ["type" .= ("auto" :: Text)]
   toJSON ToolChoiceNone = object ["type" .= ("none" :: Text)]
   toJSON ToolChoiceAny = object ["type" .= ("any" :: Text)]
-  toJSON (ToolChoiceTool name) = object
-    [ "type" .= ("tool" :: Text)
-    , "name" .= name
-    ]
+  toJSON (ToolChoiceTool name) =
+    object
+      [ "type" .= ("tool" :: Text),
+        "name" .= name
+      ]
 
 instance ToJSON AnthropicRequest where
-  toJSON req = object $ filter ((/= Null) . snd)
-    [ "model"      .= req.arModel
-    , "max_tokens" .= req.arMaxTokens
-    , "messages"   .= req.arMessages
-    , "system"     .= req.arSystem
-    , "tools"      .= req.arTools
-    , "tool_choice" .= req.arToolChoice
-    , "thinking"   .= req.arThinking
-    ]
+  toJSON req =
+    object $
+      filter
+        ((/= Null) . snd)
+        [ "model" .= req.arModel,
+          "max_tokens" .= req.arMaxTokens,
+          "messages" .= req.arMessages,
+          "system" .= req.arSystem,
+          "tools" .= req.arTools,
+          "tool_choice" .= req.arToolChoice,
+          "thinking" .= req.arThinking
+        ]
 
 -- | A message in the conversation.
 data AnthropicMessage = AnthropicMessage
-  { amRole    :: Text
-  , amContent :: Text
+  { amRole :: Text,
+    amContent :: Text
   }
   deriving stock (Eq, Show, Generic)
 
 instance ToJSON AnthropicMessage where
-  toJSON msg = object
-    [ "role"    .= msg.amRole
-    , "content" .= msg.amContent
-    ]
+  toJSON msg =
+    object
+      [ "role" .= msg.amRole,
+        "content" .= msg.amContent
+      ]
 
 instance FromJSON AnthropicMessage where
   parseJSON = withObject "AnthropicMessage" $ \v ->
@@ -214,15 +217,15 @@ instance FromJSON AnthropicMessage where
 
 -- | Thinking/extended thinking configuration.
 data ThinkingConfig = ThinkingConfig
-  { tcType        :: Text  -- ^ "enabled"
-  , tcBudgetTokens :: Int
+  { -- | "enabled"
+    tcType :: Text,
+    tcBudgetTokens :: Int
   }
   deriving stock (Eq, Show, Generic)
 
 instance ToJSON ThinkingConfig where
-  toJSON cfg = object
-    [ "type"          .= cfg.tcType
-    , "budget_tokens" .= cfg.tcBudgetTokens
-    ]
-
-
+  toJSON cfg =
+    object
+      [ "type" .= cfg.tcType,
+        "budget_tokens" .= cfg.tcBudgetTokens
+      ]

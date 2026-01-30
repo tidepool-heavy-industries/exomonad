@@ -33,31 +33,31 @@
 --    (source, type) pairs that workers send via Arrive.
 module ExoMonad.Graph.Validate.ForkBarrier
   ( -- * Main Validation Constraints
-    ValidateForkBarrierPairs
+    ValidateForkBarrierPairs,
 
     -- * Error Messages
-  , SpawnTargetMissingError
-  , WorkerMissingArriveError
-  , ArriveBarrierMismatchError
-  , AwaitsMismatchError
+    SpawnTargetMissingError,
+    WorkerMissingArriveError,
+    ArriveBarrierMismatchError,
+    AwaitsMismatchError,
 
     -- * Internal Type Families (exported for testing)
-  , CollectForkNodes
-  , CollectBarrierNodes
-  , GetSpawnTargetNames
-  , GetWorkerArriveBarrier
-  , ValidateSpawnTargetsExist
-  , ValidateWorkersArrive
-  ) where
+    CollectForkNodes,
+    CollectBarrierNodes,
+    GetSpawnTargetNames,
+    GetWorkerArriveBarrier,
+    ValidateSpawnTargetsExist,
+    ValidateWorkersArrive,
+  )
+where
 
-import Data.Kind (Type, Constraint)
-import GHC.TypeLits (Symbol, TypeError, ErrorMessage(..))
-import GHC.Generics (Generic(..), K1(..), M1(..), (:*:)(..), Meta(..), S, D, C, Rep)
-
-import ExoMonad.Graph.Types (type (:@), UsesEffects, Arrive)
+import Data.Kind (Constraint, Type)
+import ExoMonad.Graph.Edges (GetBarrierTarget, GetSpawnTargets)
+import ExoMonad.Graph.Generic.Core (AsGraph, BarrierNode, ForkNode)
 import ExoMonad.Graph.Goto (To)
-import ExoMonad.Graph.Generic.Core (AsGraph, ForkNode, BarrierNode)
-import ExoMonad.Graph.Edges (GetSpawnTargets, GetBarrierTarget)
+import ExoMonad.Graph.Types (Arrive, UsesEffects, type (:@))
+import GHC.Generics (C, D, Generic (..), K1 (..), M1 (..), Meta (..), Rep, S, (:*:) (..))
+import GHC.TypeLits (ErrorMessage (..), Symbol, TypeError)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- MAIN VALIDATION CONSTRAINT
@@ -78,7 +78,6 @@ type family ValidateForkBarrierPairs graph where
       (CollectForkNodes (FieldsWithNamesOf graph))
       (FieldsWithNamesOf graph)
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- FORK NODE COLLECTION
 -- ════════════════════════════════════════════════════════════════════════════
@@ -90,9 +89,10 @@ type CollectForkNodes :: [(Symbol, Type)] -> [(Symbol, Type)]
 type family CollectForkNodes fields where
   CollectForkNodes '[] = '[]
   CollectForkNodes ('(name, def) ': rest) =
-    If (IsForkDef def)
-       ('(name, def) ': CollectForkNodes rest)
-       (CollectForkNodes rest)
+    If
+      (IsForkDef def)
+      ('(name, def) ': CollectForkNodes rest)
+      (CollectForkNodes rest)
 
 -- | Check if a definition is a ForkNode.
 type IsForkDef :: Type -> Bool
@@ -106,9 +106,10 @@ type CollectBarrierNodes :: [(Symbol, Type)] -> [(Symbol, Type)]
 type family CollectBarrierNodes fields where
   CollectBarrierNodes '[] = '[]
   CollectBarrierNodes ('(name, def) ': rest) =
-    If (IsBarrierDef def)
-       ('(name, def) ': CollectBarrierNodes rest)
-       (CollectBarrierNodes rest)
+    If
+      (IsBarrierDef def)
+      ('(name, def) ': CollectBarrierNodes rest)
+      (CollectBarrierNodes rest)
 
 -- | Check if a definition is a BarrierNode.
 type IsBarrierDef :: Type -> Bool
@@ -116,7 +117,6 @@ type family IsBarrierDef def where
   IsBarrierDef (node :@ _) = IsBarrierDef node
   IsBarrierDef BarrierNode = 'True
   IsBarrierDef _ = 'False
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- FORK NODE VALIDATION
@@ -127,8 +127,8 @@ type ValidateAllForkNodes :: [(Symbol, Type)] -> [(Symbol, Type)] -> Constraint
 type family ValidateAllForkNodes forkNodes allFields where
   ValidateAllForkNodes '[] _ = ()
   ValidateAllForkNodes ('(forkName, forkDef) ': rest) allFields =
-    ( ValidateSingleForkNode forkName forkDef allFields
-    , ValidateAllForkNodes rest allFields
+    ( ValidateSingleForkNode forkName forkDef allFields,
+      ValidateAllForkNodes rest allFields
     )
 
 -- | Validate a single ForkNode.
@@ -139,8 +139,8 @@ type family ValidateSingleForkNode forkName forkDef allFields where
       ValidateSpawnTargetsExist
         forkName
         (GetSpawnTargets forkDef)
-        (FieldNamesFromPairs allFields)
-    , -- 2. Each worker must have Arrive to the barrier
+        (FieldNamesFromPairs allFields),
+      -- 2. Each worker must have Arrive to the barrier
       ValidateWorkersArrive
         forkName
         (GetBarrierTargetOrError forkName forkDef)
@@ -157,13 +157,15 @@ type family GetBarrierTargetOrError forkName def where
 type FromJustBarrier :: Symbol -> Maybe Symbol -> Symbol
 type family FromJustBarrier forkName m where
   FromJustBarrier _ ('Just x) = x
-  FromJustBarrier forkName 'Nothing = TypeError
-    ('Text "ForkNode '" ':<>: 'Text forkName ':<>: 'Text "' missing Barrier annotation"
-     ':$$: 'Text ""
-     ':$$: 'Text "ForkNode must specify which BarrierNode collects the results:"
-     ':$$: 'Text "  ForkNode :@ Spawn '[...] :@ Barrier \"mergeNode\""
-    )
-
+  FromJustBarrier forkName 'Nothing =
+    TypeError
+      ( 'Text "ForkNode '"
+          ':<>: 'Text forkName
+          ':<>: 'Text "' missing Barrier annotation"
+          ':$$: 'Text ""
+          ':$$: 'Text "ForkNode must specify which BarrierNode collects the results:"
+          ':$$: 'Text "  ForkNode :@ Spawn '[...] :@ Barrier \"mergeNode\""
+      )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SPAWN TARGET VALIDATION
@@ -174,10 +176,11 @@ type ValidateSpawnTargetsExist :: Symbol -> [Type] -> [Symbol] -> Constraint
 type family ValidateSpawnTargetsExist forkName targets fieldNames where
   ValidateSpawnTargetsExist _ '[] _ = ()
   ValidateSpawnTargetsExist forkName (To (name :: Symbol) _ ': rest) fieldNames =
-    ( If (ElemSymbol name fieldNames)
-         (() :: Constraint)
-         (SpawnTargetMissingError forkName name fieldNames)
-    , ValidateSpawnTargetsExist forkName rest fieldNames
+    ( If
+        (ElemSymbol name fieldNames)
+        (() :: Constraint)
+        (SpawnTargetMissingError forkName name fieldNames),
+      ValidateSpawnTargetsExist forkName rest fieldNames
     )
   -- Skip non-To entries (shouldn't happen in well-formed Spawn)
   ValidateSpawnTargetsExist forkName (_ ': rest) fieldNames =
@@ -190,7 +193,6 @@ type family GetSpawnTargetNames targets where
   GetSpawnTargetNames (To (name :: Symbol) _ ': rest) = name ': GetSpawnTargetNames rest
   GetSpawnTargetNames (_ ': rest) = GetSpawnTargetNames rest
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- WORKER ARRIVE VALIDATION
 -- ════════════════════════════════════════════════════════════════════════════
@@ -200,8 +202,8 @@ type ValidateWorkersArrive :: Symbol -> Symbol -> [Type] -> [(Symbol, Type)] -> 
 type family ValidateWorkersArrive forkName barrierName targets allFields where
   ValidateWorkersArrive _ _ '[] _ = ()
   ValidateWorkersArrive forkName barrierName (To (workerName :: Symbol) _ ': rest) allFields =
-    ( ValidateSingleWorkerArrives forkName barrierName workerName allFields
-    , ValidateWorkersArrive forkName barrierName rest allFields
+    ( ValidateSingleWorkerArrives forkName barrierName workerName allFields,
+      ValidateWorkersArrive forkName barrierName rest allFields
     )
   ValidateWorkersArrive forkName barrierName (_ ': rest) allFields =
     ValidateWorkersArrive forkName barrierName rest allFields
@@ -244,89 +246,125 @@ type family CheckWorkerArriveBarrier forkName expectedBarrier workerName actualB
   CheckWorkerArriveBarrier forkName expectedBarrier workerName ('Just actualBarrier) =
     ArriveBarrierMismatchError forkName expectedBarrier workerName actualBarrier
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- ERROR MESSAGES
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Error when a Spawn target doesn't exist.
 type SpawnTargetMissingError :: Symbol -> Symbol -> [Symbol] -> Constraint
-type SpawnTargetMissingError forkName target fieldNames = TypeError
-  ('Text "═══════════════════════════════════════════════════════════════════"
-   ':$$: 'Text "  ForkNode spawn target doesn't exist"
-   ':$$: 'Text "═══════════════════════════════════════════════════════════════════"
-   ':$$: 'Text ""
-   ':$$: 'Text "WHAT HAPPENED"
-   ':$$: 'Text "  ForkNode '" ':<>: 'Text forkName ':<>: 'Text "' spawns: To \"" ':<>: 'Text target ':<>: 'Text "\" ..."
-   ':$$: 'Text "  But there's no field named \"" ':<>: 'Text target ':<>: 'Text "\" in your graph."
-   ':$$: 'Text ""
-   ':$$: 'Text "HOW TO FIX"
-   ':$$: 'Text "  • Check spelling: is the worker field name correct?"
-   ':$$: 'Text "  • Add the missing worker node to your graph"
-   ':$$: 'Text "  • Remove this spawn target if it was a mistake"
-  )
+type SpawnTargetMissingError forkName target fieldNames =
+  TypeError
+    ( 'Text "═══════════════════════════════════════════════════════════════════"
+        ':$$: 'Text "  ForkNode spawn target doesn't exist"
+        ':$$: 'Text "═══════════════════════════════════════════════════════════════════"
+        ':$$: 'Text ""
+        ':$$: 'Text "WHAT HAPPENED"
+        ':$$: 'Text "  ForkNode '"
+        ':<>: 'Text forkName
+        ':<>: 'Text "' spawns: To \""
+        ':<>: 'Text target
+        ':<>: 'Text "\" ..."
+        ':$$: 'Text "  But there's no field named \""
+        ':<>: 'Text target
+        ':<>: 'Text "\" in your graph."
+        ':$$: 'Text ""
+        ':$$: 'Text "HOW TO FIX"
+        ':$$: 'Text "  • Check spelling: is the worker field name correct?"
+        ':$$: 'Text "  • Add the missing worker node to your graph"
+        ':$$: 'Text "  • Remove this spawn target if it was a mistake"
+    )
 
 -- | Error when a worker is missing Arrive effect.
 type WorkerMissingArriveError :: Symbol -> Symbol -> Symbol -> Constraint
-type WorkerMissingArriveError forkName barrierName workerName = TypeError
-  ('Text "═══════════════════════════════════════════════════════════════════"
-   ':$$: 'Text "  Worker node missing Arrive effect"
-   ':$$: 'Text "═══════════════════════════════════════════════════════════════════"
-   ':$$: 'Text ""
-   ':$$: 'Text "WHAT HAPPENED"
-   ':$$: 'Text "  ForkNode '" ':<>: 'Text forkName ':<>: 'Text "' spawns worker '" ':<>: 'Text workerName ':<>: 'Text "'"
-   ':$$: 'Text "  with Barrier \"" ':<>: 'Text barrierName ':<>: 'Text "\""
-   ':$$: 'Text ""
-   ':$$: 'Text "  But worker '" ':<>: 'Text workerName ':<>: 'Text "' has no Arrive effect!"
-   ':$$: 'Text "  The barrier will wait forever for this worker."
-   ':$$: 'Text ""
-   ':$$: 'Text "HOW TO FIX"
-   ':$$: 'Text "  Add Arrive to the worker's UsesEffects:"
-   ':$$: 'Text ""
-   ':$$: 'Text "  " ':<>: 'Text workerName ':<>: 'Text " :: mode :- LLMNode"
-   ':$$: 'Text "      :@ Input ..."
-   ':$$: 'Text "      :@ Schema Result"
-   ':$$: 'Text "      :@ UsesEffects '[Arrive \"" ':<>: 'Text barrierName ':<>: 'Text "\" Result]"
-  )
+type WorkerMissingArriveError forkName barrierName workerName =
+  TypeError
+    ( 'Text "═══════════════════════════════════════════════════════════════════"
+        ':$$: 'Text "  Worker node missing Arrive effect"
+        ':$$: 'Text "═══════════════════════════════════════════════════════════════════"
+        ':$$: 'Text ""
+        ':$$: 'Text "WHAT HAPPENED"
+        ':$$: 'Text "  ForkNode '"
+        ':<>: 'Text forkName
+        ':<>: 'Text "' spawns worker '"
+        ':<>: 'Text workerName
+        ':<>: 'Text "'"
+        ':$$: 'Text "  with Barrier \""
+        ':<>: 'Text barrierName
+        ':<>: 'Text "\""
+        ':$$: 'Text ""
+        ':$$: 'Text "  But worker '"
+        ':<>: 'Text workerName
+        ':<>: 'Text "' has no Arrive effect!"
+        ':$$: 'Text "  The barrier will wait forever for this worker."
+        ':$$: 'Text ""
+        ':$$: 'Text "HOW TO FIX"
+        ':$$: 'Text "  Add Arrive to the worker's UsesEffects:"
+        ':$$: 'Text ""
+        ':$$: 'Text "  "
+        ':<>: 'Text workerName
+        ':<>: 'Text " :: mode :- LLMNode"
+        ':$$: 'Text "      :@ Input ..."
+        ':$$: 'Text "      :@ Schema Result"
+        ':$$: 'Text "      :@ UsesEffects '[Arrive \""
+        ':<>: 'Text barrierName
+        ':<>: 'Text "\" Result]"
+    )
 
 -- | Error when worker's Arrive points to wrong barrier.
 type ArriveBarrierMismatchError :: Symbol -> Symbol -> Symbol -> Symbol -> Constraint
-type ArriveBarrierMismatchError forkName expectedBarrier workerName actualBarrier = TypeError
-  ('Text "═══════════════════════════════════════════════════════════════════"
-   ':$$: 'Text "  Worker Arrive points to wrong barrier"
-   ':$$: 'Text "═══════════════════════════════════════════════════════════════════"
-   ':$$: 'Text ""
-   ':$$: 'Text "WHAT HAPPENED"
-   ':$$: 'Text "  ForkNode '" ':<>: 'Text forkName ':<>: 'Text "' uses Barrier \"" ':<>: 'Text expectedBarrier ':<>: 'Text "\""
-   ':$$: 'Text "  But worker '" ':<>: 'Text workerName ':<>: 'Text "' has Arrive \"" ':<>: 'Text actualBarrier ':<>: 'Text "\""
-   ':$$: 'Text ""
-   ':$$: 'Text "  Worker results will go to the wrong barrier!"
-   ':$$: 'Text ""
-   ':$$: 'Text "HOW TO FIX"
-   ':$$: 'Text "  Change the worker's Arrive to match the ForkNode's Barrier:"
-   ':$$: 'Text ""
-   ':$$: 'Text "  UsesEffects '[Arrive \"" ':<>: 'Text expectedBarrier ':<>: 'Text "\" Result]"
-  )
+type ArriveBarrierMismatchError forkName expectedBarrier workerName actualBarrier =
+  TypeError
+    ( 'Text "═══════════════════════════════════════════════════════════════════"
+        ':$$: 'Text "  Worker Arrive points to wrong barrier"
+        ':$$: 'Text "═══════════════════════════════════════════════════════════════════"
+        ':$$: 'Text ""
+        ':$$: 'Text "WHAT HAPPENED"
+        ':$$: 'Text "  ForkNode '"
+        ':<>: 'Text forkName
+        ':<>: 'Text "' uses Barrier \""
+        ':<>: 'Text expectedBarrier
+        ':<>: 'Text "\""
+        ':$$: 'Text "  But worker '"
+        ':<>: 'Text workerName
+        ':<>: 'Text "' has Arrive \""
+        ':<>: 'Text actualBarrier
+        ':<>: 'Text "\""
+        ':$$: 'Text ""
+        ':$$: 'Text "  Worker results will go to the wrong barrier!"
+        ':$$: 'Text ""
+        ':$$: 'Text "HOW TO FIX"
+        ':$$: 'Text "  Change the worker's Arrive to match the ForkNode's Barrier:"
+        ':$$: 'Text ""
+        ':$$: 'Text "  UsesEffects '[Arrive \""
+        ':<>: 'Text expectedBarrier
+        ':<>: 'Text "\" Result]"
+    )
 
 -- | Error when BarrierNode Awaits doesn't match worker Arrives.
 type AwaitsMismatchError :: Symbol -> Symbol -> Symbol -> Type -> Constraint
-type AwaitsMismatchError barrierName workerName expectedType actualType = TypeError
-  ('Text "═══════════════════════════════════════════════════════════════════"
-   ':$$: 'Text "  BarrierNode Awaits type mismatch"
-   ':$$: 'Text "═══════════════════════════════════════════════════════════════════"
-   ':$$: 'Text ""
-   ':$$: 'Text "WHAT HAPPENED"
-   ':$$: 'Text "  BarrierNode '" ':<>: 'Text barrierName ':<>: 'Text "' expects from '" ':<>: 'Text workerName ':<>: 'Text "':"
-   ':$$: 'Text "    " ':<>: 'ShowType expectedType
-   ':$$: 'Text ""
-   ':$$: 'Text "  But the worker sends:"
-   ':$$: 'Text "    " ':<>: 'ShowType actualType
-   ':$$: 'Text ""
-   ':$$: 'Text "HOW TO FIX"
-   ':$$: 'Text "  • Update the worker's Arrive type to match Awaits"
-   ':$$: 'Text "  • Or update the BarrierNode's Awaits to match worker output"
-  )
-
+type AwaitsMismatchError barrierName workerName expectedType actualType =
+  TypeError
+    ( 'Text "═══════════════════════════════════════════════════════════════════"
+        ':$$: 'Text "  BarrierNode Awaits type mismatch"
+        ':$$: 'Text "═══════════════════════════════════════════════════════════════════"
+        ':$$: 'Text ""
+        ':$$: 'Text "WHAT HAPPENED"
+        ':$$: 'Text "  BarrierNode '"
+        ':<>: 'Text barrierName
+        ':<>: 'Text "' expects from '"
+        ':<>: 'Text workerName
+        ':<>: 'Text "':"
+        ':$$: 'Text "    "
+        ':<>: 'ShowType expectedType
+        ':$$: 'Text ""
+        ':$$: 'Text "  But the worker sends:"
+        ':$$: 'Text "    "
+        ':<>: 'ShowType actualType
+        ':$$: 'Text ""
+        ':$$: 'Text "HOW TO FIX"
+        ':$$: 'Text "  • Update the worker's Arrive type to match Awaits"
+        ':$$: 'Text "  • Or update the BarrierNode's Awaits to match worker output"
+    )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE-LEVEL UTILITIES
@@ -357,7 +395,7 @@ type FieldsWithNames :: (Type -> Type) -> [(Symbol, Type)]
 type family FieldsWithNames f where
   FieldsWithNames (M1 D _ f) = FieldsWithNames f
   FieldsWithNames (M1 C _ f) = FieldsWithNames f
-  FieldsWithNames (M1 S ('MetaSel ('Just name) _ _ _) (K1 _ def)) = '[ '(name, def) ]
+  FieldsWithNames (M1 S ('MetaSel ('Just name) _ _ _) (K1 _ def)) = '[ '(name, def)]
   FieldsWithNames (M1 S ('MetaSel 'Nothing _ _ _) _) = '[]
   FieldsWithNames (l :*: r) = Append (FieldsWithNames l) (FieldsWithNames r)
   FieldsWithNames _ = '[]
@@ -382,7 +420,7 @@ type family LookupFieldDef fields name where
 -- | Type-level If.
 type If :: Bool -> k -> k -> k
 type family If cond t f where
-  If 'True  t _ = t
+  If 'True t _ = t
   If 'False _ f = f
 
 -- | Symbol membership check.

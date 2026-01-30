@@ -3,23 +3,25 @@
 -- | Decision types for high-level agent/user interactions.
 module ExoMonad.Effect.Decision
   ( -- * Decision Type
-    Decision(..)
-  , requestDecision
+    Decision (..),
+    requestDecision,
+
     -- * Context and Tracing
-  , DecisionContext(..)
-  , DecisionTrace(..)
-  ) where
+    DecisionContext (..),
+    DecisionTrace (..),
+  )
+where
 
 import Control.Monad.Freer (Eff, Member)
-import Data.Aeson (ToJSON(..), toJSON)
-import qualified Data.Aeson as A
-import qualified Data.Aeson.Key as Key
-import qualified Data.Aeson.KeyMap as KM
-import qualified Data.Text as T
+import Data.Aeson (ToJSON (..), toJSON)
+import Data.Aeson qualified as A
+import Data.Aeson.Key qualified as Key
+import Data.Aeson.KeyMap qualified as KM
+import Data.Text qualified as T
 import Data.Time (diffUTCTime)
 import ExoMonad.Effect.Decision.Types
 import ExoMonad.Effect.TUI
-import ExoMonad.Effect.Types (Time, Log, DecisionLog, getCurrentTime, logInfoWith, recordDecision)
+import ExoMonad.Effect.Types (DecisionLog, Log, Time, getCurrentTime, logInfoWith, recordDecision)
 
 -- | Request a decision from the user via the TUI.
 --
@@ -27,15 +29,16 @@ import ExoMonad.Effect.Types (Time, Log, DecisionLog, getCurrentTime, logInfoWit
 -- and logs the resulting decision via the Log and DecisionLog effects.
 requestDecision :: (Member TUI r, Member Time r, Member Log r, Member DecisionLog r) => DecisionContext -> Eff r Decision
 requestDecision ctx = do
-  let ui = PopupDefinition
-        { pdTitle = "Decision Required"
-        , pdComponents =
-            [ mkText "prompt" ctx.dcPrompt Nothing
-            , mkTextbox "guidance" "Or provide guidance" (Just "Enter custom guidance...") Nothing Nothing
-            ]
-        }
+  let ui =
+        PopupDefinition
+          { pdTitle = "Decision Required",
+            pdComponents =
+              [ mkText "prompt" ctx.dcPrompt Nothing,
+                mkTextbox "guidance" "Or provide guidance" (Just "Enter custom guidance...") Nothing Nothing
+              ]
+          }
 
-  let options = [ "Continue", "Abort", "Provide Guidance" ]
+  let options = ["Continue", "Abort", "Provide Guidance"]
 
   start <- getCurrentTime
   result <- showUI ui
@@ -56,13 +59,14 @@ requestDecision ctx = do
 
   -- Log decision trace
   let latencyMs = round $ realToFrac (diffUTCTime end start) * (1000 :: Double)
-  let trace = DecisionTrace
-        { dtContext = ctx
-        , dtOptionsPresented = options
-        , dtDecision = decision
-        , dtLatencyMs = latencyMs
-        , dtTimestamp = end
-        }
+  let trace =
+        DecisionTrace
+          { dtContext = ctx,
+            dtOptionsPresented = options,
+            dtDecision = decision,
+            dtLatencyMs = latencyMs,
+            dtTimestamp = end
+          }
 
   logInfoWith "Decision made" [("trace", toJSON trace)]
   recordDecision trace

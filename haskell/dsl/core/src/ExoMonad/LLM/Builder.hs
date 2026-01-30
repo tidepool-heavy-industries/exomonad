@@ -21,16 +21,16 @@
 -- @
 module ExoMonad.LLM.Builder
   ( -- * Default Config
-    defaultLLM
+    defaultLLM,
 
     -- * Builder Functions
-  , model
-  , maxTokens
-  , tools
-  ) where
+    model,
+    maxTokens,
+    tools,
+  )
+where
 
 import ExoMonad.LLM.Types
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- DEFAULT CONFIG
@@ -50,12 +50,12 @@ import ExoMonad.LLM.Types
 -- let cfg = defaultLLM \@MyOutputType
 -- @
 defaultLLM :: forall out. CallConfig out NoTools
-defaultLLM = CallConfig
-  { ccModel = Sonnet
-  , ccMaxTokens = Nothing
-  , ccTools = Nothing
-  }
-
+defaultLLM =
+  CallConfig
+    { ccModel = Sonnet,
+      ccMaxTokens = Nothing,
+      ccTools = Nothing
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- BUILDER FUNCTIONS
@@ -67,7 +67,7 @@ defaultLLM = CallConfig
 -- let cfg = defaultLLM \@Report & model Opus
 -- @
 model :: Model -> CallConfig out tools -> CallConfig out tools
-model m cfg = cfg { ccModel = m }
+model m cfg = cfg {ccModel = m}
 
 -- | Set the maximum tokens to generate.
 --
@@ -75,7 +75,7 @@ model m cfg = cfg { ccModel = m }
 -- let cfg = defaultLLM \@Report & maxTokens 4096
 -- @
 maxTokens :: Int -> CallConfig out tools -> CallConfig out tools
-maxTokens n cfg = cfg { ccMaxTokens = Just n }
+maxTokens n cfg = cfg {ccMaxTokens = Just n}
 
 -- | Attach tools to the config.
 --
@@ -94,8 +94,9 @@ maxTokens n cfg = cfg { ccMaxTokens = Just n }
 -- Note: Adding tools changes the config's tool type parameter,
 -- so you can only add tools once (or replace them entirely).
 tools :: tools' -> CallConfig out tools -> CallConfig out tools'
-tools t cfg = CallConfig
-  { ccModel = cfg.ccModel
-  , ccMaxTokens = cfg.ccMaxTokens
-  , ccTools = Just t
-  }
+tools t cfg =
+  CallConfig
+    { ccModel = cfg.ccModel,
+      ccMaxTokens = cfg.ccMaxTokens,
+      ccTools = Just t
+    }

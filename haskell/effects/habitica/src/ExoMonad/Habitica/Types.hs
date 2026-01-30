@@ -4,39 +4,38 @@
 -- both request and response types.
 module ExoMonad.Habitica.Types
   ( -- * ID Types
-    TaskId(..)
-  , TodoId(..)
-  , ChecklistItemId(..)
+    TaskId (..),
+    TodoId (..),
+    ChecklistItemId (..),
 
     -- * Enums
-  , TaskType(..)
-  , Direction(..)
-  ) where
+    TaskType (..),
+    Direction (..),
+  )
+where
 
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
 import GHC.Generics (Generic)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ID TYPES
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Opaque task ID from Habitica.
-newtype TaskId = TaskId { unTaskId :: Text }
+newtype TaskId = TaskId {unTaskId :: Text}
   deriving stock (Eq, Show)
   deriving newtype (ToJSON, FromJSON)
 
 -- | Opaque todo ID from Habitica.
-newtype TodoId = TodoId { unTodoId :: Text }
+newtype TodoId = TodoId {unTodoId :: Text}
   deriving stock (Eq, Show)
   deriving newtype (ToJSON, FromJSON)
 
 -- | Opaque checklist item ID from Habitica.
-newtype ChecklistItemId = ChecklistItemId { unChecklistItemId :: Text }
+newtype ChecklistItemId = ChecklistItemId {unChecklistItemId :: Text}
   deriving stock (Eq, Show)
   deriving newtype (ToJSON, FromJSON)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ENUMS

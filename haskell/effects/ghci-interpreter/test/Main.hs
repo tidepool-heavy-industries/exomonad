@@ -1,10 +1,8 @@
 module Main where
 
+import JsonSpec qualified
+import ProtocolSpec qualified
 import Test.Hspec
-
-import qualified ProtocolSpec
-import qualified JsonSpec
-
 
 -- | Run all ghci-interpreter tests.
 --

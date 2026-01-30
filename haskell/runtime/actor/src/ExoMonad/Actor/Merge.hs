@@ -9,40 +9,39 @@
 -- Moved from exomonad-parallel for runtime consolidation.
 module ExoMonad.Actor.Merge
   ( -- * Merge Accumulator
-    MergeAccumulator(..)
-  , newMergeAccumulator
-  , addResult
-  , checkComplete
-  , getCompletedResults
+    MergeAccumulator (..),
+    newMergeAccumulator,
+    addResult,
+    checkComplete,
+    getCompletedResults,
 
     -- * Partial Results
-  , PartialMerge(..)
-  , MergeSlot(..)
+    PartialMerge (..),
+    MergeSlot (..),
 
     -- * Type-level extraction
-  , ExpectedSources(..)
-  , ExtractMergeResults(..)
+    ExpectedSources (..),
+    ExtractMergeResults (..),
 
     -- * Type families
-  , FromPayloads
-  ) where
+    FromPayloads,
+  )
+where
 
-import Control.Concurrent.STM (TVar, newTVarIO, readTVar, readTVarIO, writeTVar, atomically)
-import Data.Aeson (Value, FromJSON(..))
+import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVar, readTVarIO, writeTVar)
+import Data.Aeson (FromJSON (..), Value)
 import Data.Aeson.Types (parseEither)
 import Data.HashMap.Strict (HashMap)
-import qualified Data.HashMap.Strict as HM
-import Data.Hashable (Hashable)
-import Data.Kind (Type, Constraint)
+import Data.HashMap.Strict qualified as HM
 import Data.HashSet (HashSet)
-import qualified Data.HashSet as HS
+import Data.HashSet qualified as HS
+import Data.Hashable (Hashable)
+import Data.Kind (Constraint, Type)
+import Data.Proxy (Proxy (..))
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
+import ExoMonad.Graph.Types (From, HList (..))
 import GHC.TypeLits (KnownSymbol, symbolVal)
-import Data.Proxy (Proxy(..))
-
-import ExoMonad.Graph.Types (HList(..), From)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- MERGE ACCUMULATOR
@@ -53,10 +52,10 @@ import ExoMonad.Graph.Types (HList(..), From)
 -- Tracks partial results grouped by correlation key. When all expected
 -- sources have reported for a key, the complete HList can be extracted.
 data MergeAccumulator key = MergeAccumulator
-  { maExpectedSources :: HashSet Text
-    -- ^ Source names we expect results from
-  , maPartials :: TVar (HashMap key PartialMerge)
-    -- ^ Partial results by correlation key
+  { -- | Source names we expect results from
+    maExpectedSources :: HashSet Text,
+    -- | Partial results by correlation key
+    maPartials :: TVar (HashMap key PartialMerge)
   }
 
 -- | Create a new merge accumulator.
@@ -64,17 +63,17 @@ data MergeAccumulator key = MergeAccumulator
 -- @
 -- acc <- newMergeAccumulator @'[From "payment" PayResult, From "inventory" InvResult]
 -- @
-newMergeAccumulator
-  :: forall sources key.
-     ( ExpectedSources sources )
-  => IO (MergeAccumulator key)
+newMergeAccumulator ::
+  forall sources key.
+  (ExpectedSources sources) =>
+  IO (MergeAccumulator key)
 newMergeAccumulator = do
   partialsVar <- newTVarIO HM.empty
-  pure MergeAccumulator
-    { maExpectedSources = expectedSources @sources
-    , maPartials = partialsVar
-    }
-
+  pure
+    MergeAccumulator
+      { maExpectedSources = expectedSources @sources,
+        maPartials = partialsVar
+      }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PARTIAL RESULTS
@@ -82,8 +81,8 @@ newMergeAccumulator = do
 
 -- | Partially accumulated merge results for a single correlation key.
 data PartialMerge = PartialMerge
-  { pmSlots :: HashMap Text MergeSlot
-    -- ^ Results by source name
+  { -- | Results by source name
+    pmSlots :: HashMap Text MergeSlot
   }
   deriving stock (Show)
 
@@ -109,17 +108,21 @@ filledSources partial = HM.keysSet $ HM.filter isFilled (partial.pmSlots)
 -- correlation key, the later result overwrites the earlier one. This is
 -- intentional - it allows retry logic to replace failed attempts with
 -- successful ones without special handling.
-addResult
-  :: (Hashable key)
-  => MergeAccumulator key
-  -> key           -- ^ Correlation key
-  -> Text          -- ^ Source name
-  -> Value         -- ^ Result payload
-  -> IO (Maybe (HashSet Text))  -- ^ Completed sources if now complete
+addResult ::
+  (Hashable key) =>
+  MergeAccumulator key ->
+  -- | Correlation key
+  key ->
+  -- | Source name
+  Text ->
+  -- | Result payload
+  Value ->
+  -- | Completed sources if now complete
+  IO (Maybe (HashSet Text))
 addResult acc key source payload = atomically $ do
   partials <- readTVar (acc.maPartials)
   let partial = HM.lookupDefault emptyPartial key partials
-      partial' = partial { pmSlots = HM.insert source (SlotFilled payload) (partial.pmSlots) }
+      partial' = partial {pmSlots = HM.insert source (SlotFilled payload) (partial.pmSlots)}
       partials' = HM.insert key partial' partials
   writeTVar (acc.maPartials) partials'
 
@@ -132,18 +135,17 @@ addResult acc key source payload = atomically $ do
     emptyPartial = PartialMerge HM.empty
 
 -- | Check if a correlation key has all expected results.
-checkComplete
-  :: (Hashable key)
-  => MergeAccumulator key
-  -> key
-  -> IO Bool
+checkComplete ::
+  (Hashable key) =>
+  MergeAccumulator key ->
+  key ->
+  IO Bool
 checkComplete acc key = do
   partials <- readTVarIO (acc.maPartials)
   case HM.lookup key partials of
     Nothing -> pure False
     Just partial ->
       pure $ filledSources partial == acc.maExpectedSources
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EXPECTED SOURCES TYPECLASS
@@ -161,9 +163,8 @@ instance (KnownSymbol name, ExpectedSources rest) => ExpectedSources (From name 
   expectedSources = HS.insert (textVal @name) (expectedSources @rest)
 
 -- | Get text value of a type-level symbol.
-textVal :: forall name. KnownSymbol name => Text
+textVal :: forall name. (KnownSymbol name) => Text
 textVal = T.pack (symbolVal (Proxy @name))
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE FAMILIES
@@ -178,7 +179,6 @@ type FromPayloads :: [Type] -> [Type]
 type family FromPayloads sources where
   FromPayloads '[] = '[]
   FromPayloads (From name payload ': rest) = payload ': FromPayloads rest
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EXTRACT MERGE RESULTS
@@ -201,10 +201,12 @@ instance ExtractMergeResults '[] where
   extractMergeResults _ = Right HNil
 
 instance
-  ( KnownSymbol name
-  , FromJSON payload
-  , ExtractMergeResults rest
-  ) => ExtractMergeResults (From name payload ': rest) where
+  ( KnownSymbol name,
+    FromJSON payload,
+    ExtractMergeResults rest
+  ) =>
+  ExtractMergeResults (From name payload ': rest)
+  where
   extractMergeResults slots = do
     let sourceName = textVal @name
     case HM.lookup sourceName slots of
@@ -214,7 +216,6 @@ instance
         Right payload -> do
           rest <- extractMergeResults @rest slots
           Right (payload ::: rest)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GET COMPLETED RESULTS
@@ -235,14 +236,14 @@ instance
 --   Just (Left err) -> putStrLn $ "Parse error: " <> err
 --   Just (Right (a ::: b ::: HNil)) -> print (a, b)
 -- @
-getCompletedResults
-  :: forall sources key.
-     ( ExtractMergeResults sources
-     , Hashable key
-     )
-  => MergeAccumulator key
-  -> key
-  -> IO (Maybe (Either Text (HList (FromPayloads sources))))
+getCompletedResults ::
+  forall sources key.
+  ( ExtractMergeResults sources,
+    Hashable key
+  ) =>
+  MergeAccumulator key ->
+  key ->
+  IO (Maybe (Either Text (HList (FromPayloads sources))))
 getCompletedResults acc key = do
   partials <- readTVarIO (acc.maPartials)
   case HM.lookup key partials of

@@ -1,35 +1,35 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE DeriveGeneric #-}
 
 module ExoMonad.Control.ExoTools.SpawnCleanup
-  ( SpawnCleanup(..)
-  , Resource(..)
-  , SpawnProgress(..)
-  , acquireWorktree
-  , releaseWorktree
-  , acquireContainer
-  , releaseContainer
-  , runSpawnCleanup
-  , emitProgress
-  , cleanupAll
-  ) where
+  ( SpawnCleanup (..),
+    Resource (..),
+    SpawnProgress (..),
+    acquireWorktree,
+    releaseWorktree,
+    acquireContainer,
+    releaseContainer,
+    runSpawnCleanup,
+    emitProgress,
+    cleanupAll,
+  )
+where
 
 import Control.Monad (forM_)
-import Control.Monad.Freer (Eff, Member, send, reinterpret, type (~>))
+import Control.Monad.Freer (Eff, Member, reinterpret, send, type (~>))
 import Control.Monad.Freer.State (State, get, put, runState)
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
+import ExoMonad.Effect.Log (Log, logError, logInfo)
+import ExoMonad.Effects.DockerSpawner (ContainerId (..), DockerSpawner, stopContainer)
+import ExoMonad.Effects.Worktree (Worktree, WorktreePath (..), deleteWorktree)
+import ExoMonad.Effects.Zellij (TabId (..))
 import GHC.Generics (Generic)
-
-import ExoMonad.Effects.DockerSpawner (ContainerId(..), DockerSpawner, stopContainer)
-import ExoMonad.Effects.Worktree (WorktreePath(..), Worktree, deleteWorktree)
-import ExoMonad.Effects.Zellij (TabId(..))
-import ExoMonad.Effect.Log (Log, logInfo, logError)
 
 data Resource
   = RWorktree WorktreePath
@@ -37,12 +37,15 @@ data Resource
   deriving (Show, Eq, Generic)
 
 data SpawnProgress
-  = SpawnStarted Text Int        -- ^ issueId, totalSteps
+  = -- | issueId, totalSteps
+    SpawnStarted Text Int
   | WorktreeCreated Text FilePath
   | ContainerSpawned Text ContainerId
   | TabLaunched Text TabId
-  | SpawnFailed Text Text        -- ^ issueId, reason
-  | SpawnComplete Text           -- ^ issueId
+  | -- | issueId, reason
+    SpawnFailed Text Text
+  | -- | issueId
+    SpawnComplete Text
   deriving (Show, Eq, Generic)
 
 data SpawnCleanup r where
@@ -53,28 +56,28 @@ data SpawnCleanup r where
   EmitProgress :: SpawnProgress -> SpawnCleanup ()
   CleanupAll :: SpawnCleanup ()
 
-acquireWorktree :: Member SpawnCleanup es => WorktreePath -> Eff es ()
+acquireWorktree :: (Member SpawnCleanup es) => WorktreePath -> Eff es ()
 acquireWorktree = send . AcquireWorktree
 
-releaseWorktree :: Member SpawnCleanup es => WorktreePath -> Eff es ()
+releaseWorktree :: (Member SpawnCleanup es) => WorktreePath -> Eff es ()
 releaseWorktree = send . ReleaseWorktree
 
-acquireContainer :: Member SpawnCleanup es => ContainerId -> Eff es ()
+acquireContainer :: (Member SpawnCleanup es) => ContainerId -> Eff es ()
 acquireContainer = send . AcquireContainer
 
-releaseContainer :: Member SpawnCleanup es => ContainerId -> Eff es ()
+releaseContainer :: (Member SpawnCleanup es) => ContainerId -> Eff es ()
 releaseContainer = send . ReleaseContainer
 
-emitProgress :: Member SpawnCleanup es => SpawnProgress -> Eff es ()
+emitProgress :: (Member SpawnCleanup es) => SpawnProgress -> Eff es ()
 emitProgress = send . EmitProgress
 
-cleanupAll :: Member SpawnCleanup es => Eff es ()
+cleanupAll :: (Member SpawnCleanup es) => Eff es ()
 cleanupAll = send CleanupAll
 
-runSpawnCleanup
-  :: (Member DockerSpawner es, Member Worktree es, Member Log es)
-  => Eff (SpawnCleanup ': es) a
-  -> Eff es (a, [Resource])
+runSpawnCleanup ::
+  (Member DockerSpawner es, Member Worktree es, Member Log es) =>
+  Eff (SpawnCleanup ': es) a ->
+  Eff es (a, [Resource])
 runSpawnCleanup = runState [] . reinterpret handler
   where
     handler :: (Member DockerSpawner es, Member Worktree es, Member Log es) => SpawnCleanup ~> Eff (State [Resource] ': es)
@@ -102,13 +105,13 @@ runSpawnCleanup = runState [] . reinterpret handler
         resources <- get @[Resource]
         forM_ resources $ \case
           RContainer cid -> do
-             res <- stopContainer cid
-             case res of
-               Left err -> logError $ "Failed to stop container " <> cid.unContainerId <> " during cleanup: " <> T.pack (show err)
-               Right _ -> pure ()
+            res <- stopContainer cid
+            case res of
+              Left err -> logError $ "Failed to stop container " <> cid.unContainerId <> " during cleanup: " <> T.pack (show err)
+              Right _ -> pure ()
           RWorktree wp@(WorktreePath p) -> do
-             res <- deleteWorktree wp
-             case res of
-               Left err -> logError $ "Failed to delete worktree " <> T.pack p <> " during cleanup: " <> T.pack (show err)
-               Right _ -> pure ()
+            res <- deleteWorktree wp
+            case res of
+              Left err -> logError $ "Failed to delete worktree " <> T.pack p <> " during cleanup: " <> T.pack (show err)
+              Right _ -> pure ()
         put @[Resource] []

@@ -6,13 +6,14 @@
 -- can reference these types (TH staging requires types to be in previously
 -- compiled modules).
 module ExoMonad.Graph.Example.Context
-  ( ClassifyContext(..)
-  ) where
+  ( ClassifyContext (..),
+  )
+where
 
 import Control.Monad.Writer (Writer)
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import Text.Ginger.GVal (ToGVal(..), dict)
+import Text.Ginger.GVal (ToGVal (..), dict)
 import Text.Ginger.Run.Type (Run)
 import Text.Parsec.Pos (SourcePos)
 
@@ -23,8 +24,10 @@ import Text.Parsec.Pos (SourcePos)
 --
 -- Note: Field names must match template variable names for ginger TH validation.
 data ClassifyContext = ClassifyContext
-  { topic :: Text       -- ^ What the message is about
-  , categories :: Text  -- ^ Available classification categories
+  { -- | What the message is about
+    topic :: Text,
+    -- | Available classification categories
+    categories :: Text
   }
   deriving (Show, Eq, Generic)
 
@@ -32,7 +35,8 @@ data ClassifyContext = ClassifyContext
 --
 -- This maps Haskell record fields to template variables.
 instance ToGVal (Run SourcePos (Writer Text) Text) ClassifyContext where
-  toGVal ctx = dict
-    [ ("topic", toGVal ctx.topic)
-    , ("categories", toGVal ctx.categories)
-    ]
+  toGVal ctx =
+    dict
+      [ ("topic", toGVal ctx.topic),
+        ("categories", toGVal ctx.categories)
+      ]

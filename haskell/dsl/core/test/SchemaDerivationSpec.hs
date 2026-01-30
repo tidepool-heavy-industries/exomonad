@@ -1,47 +1,54 @@
-{-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE FieldSelectors #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeApplications #-}
 
 module SchemaDerivationSpec (spec) where
 
-import Test.Hspec
-import Data.Aeson (encode, decode, Value(..), toJSON, object, (.=))
-import qualified Data.Aeson.KeyMap as KM
-import qualified Data.Aeson.Key as K
-import qualified Data.ByteString.Lazy as BL
-import qualified Data.Vector as V
+import Data.Aeson (Value (..), decode, encode, object, toJSON, (.=))
+import Data.Aeson.Key qualified as K
+import Data.Aeson.KeyMap qualified as KM
+import Data.ByteString.Lazy qualified as BL
 import Data.Text (Text)
-import GHC.Generics (Generic)
-
+import Data.Vector qualified as V
 import ExoMonad.Schema
+import GHC.Generics (Generic)
+import Test.Hspec
 
 -- Define test type
 data TestArgs = TestArgs
-  { name :: Text
-  , count :: Maybe Int
-  , flag :: Bool
-  } deriving (Show, Eq, Generic)
+  { name :: Text,
+    count :: Maybe Int,
+    flag :: Bool
+  }
+  deriving (Show, Eq, Generic)
 
 -- Generate instances
-$(deriveMCPTypeWith defaultMCPOptions ''TestArgs
-  [ 'name ?? "The name"
-  , 'count ~> "item_count" ? "Number of items"
-  , 'flag ~> "is_flagged" ? "A flag"
-  ])
+$( deriveMCPTypeWith
+     defaultMCPOptions
+     ''TestArgs
+     [ 'name ?? "The name",
+       'count ~> "item_count" ? "Number of items",
+       'flag ~> "is_flagged" ? "A flag"
+     ]
+ )
 
 -- Nested type for testing arrays and references
 data NestedArgs = NestedArgs
-  { items :: [Text]
-  , child :: Maybe TestArgs
-  } deriving (Show, Eq, Generic)
+  { items :: [Text],
+    child :: Maybe TestArgs
+  }
+  deriving (Show, Eq, Generic)
 
-$(deriveMCPTypeWith defaultMCPOptions ''NestedArgs
-  [ 'items ?? "List of items"
-  , 'child ?? "Optional child"
-  ])
+$( deriveMCPTypeWith
+     defaultMCPOptions
+     ''NestedArgs
+     [ 'items ?? "List of items",
+       'child ?? "Optional child"
+     ]
+ )
 
 -- Helper to extract a key from a JSON object
 getKey :: Text -> Value -> Maybe Value
@@ -51,25 +58,27 @@ getKey _ _ = Nothing
 -- Helper to extract multiple keys nested
 getPath :: [Text] -> Value -> Maybe Value
 getPath [] v = Just v
-getPath (k:ks) v = getKey k v >>= getPath ks
+getPath (k : ks) v = getKey k v >>= getPath ks
 
 spec :: Spec
 spec = do
   describe "deriveMCPType" $ do
     it "generates correct ToJSON" $ do
       let args = TestArgs "test" (Just 5) True
-      toJSON args `shouldBe` object
-        [ "name" .= ("test" :: Text)
-        , "item_count" .= (5 :: Int)
-        , "is_flagged" .= True
-        ]
+      toJSON args
+        `shouldBe` object
+          [ "name" .= ("test" :: Text),
+            "item_count" .= (5 :: Int),
+            "is_flagged" .= True
+          ]
 
       let argsNone = TestArgs "test" Nothing False
-      toJSON argsNone `shouldBe` object
-        [ "name" .= ("test" :: Text)
-        , "item_count" .= Null
-        , "is_flagged" .= False
-        ]
+      toJSON argsNone
+        `shouldBe` object
+          [ "name" .= ("test" :: Text),
+            "item_count" .= Null,
+            "is_flagged" .= False
+          ]
 
     it "generates correct FromJSON" $ do
       let json = "{\"name\":\"test\",\"item_count\":5,\"is_flagged\":true}"
@@ -158,7 +167,6 @@ spec = do
           required `shouldContain` ["items"]
           required `shouldNotContain` ["child"]
         _ -> expectationFailure "Expected required to be an array"
-
   where
     vectorToList :: V.Vector Value -> [Value]
     vectorToList = V.toList

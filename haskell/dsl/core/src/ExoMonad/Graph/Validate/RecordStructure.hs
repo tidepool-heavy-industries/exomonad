@@ -1,4 +1,3 @@
-
 -- | Structural validation for record-based (Servant-style) graphs.
 --
 -- This module provides compile-time validation of graph topology for
@@ -21,39 +20,39 @@
 -- These validations work on the Generic representation of graph records.
 module ExoMonad.Graph.Validate.RecordStructure
   ( -- * Main Structural Constraints
-    AllFieldsReachable
-  , AllLogicFieldsReachExit
-  , NoDeadGotosRecord
-  , AllLogicNodesHaveGoto
-  , NoGotoSelfOnly
+    AllFieldsReachable,
+    AllLogicFieldsReachExit,
+    NoDeadGotosRecord,
+    AllLogicNodesHaveGoto,
+    NoGotoSelfOnly,
 
     -- * Error Messages
-  , UnreachableFieldError
-  , NoExitPathFieldError
-  , DeadGotoFieldError
-  , GotoTypeMismatchError
-  , LogicNodeNoGotoError
-  , GotoSelfOnlyError
+    UnreachableFieldError,
+    NoExitPathFieldError,
+    DeadGotoFieldError,
+    GotoTypeMismatchError,
+    LogicNodeNoGotoError,
+    GotoSelfOnlyError,
 
     -- * Error Formatting
-  , FormatTypeList
+    FormatTypeList,
 
     -- * Internal Type Families (exported for testing)
-  , ComputeReachableFields
-  , ComputeExitReachingFields
-  , FindUnreachableFields
-  , FindNoExitPathFields
-  ) where
+    ComputeReachableFields,
+    ComputeExitReachingFields,
+    FindUnreachableFields,
+    FindNoExitPathFields,
+  )
+where
 
-import Data.Kind (Type, Constraint)
-import GHC.TypeLits (Symbol, TypeError, ErrorMessage(..), Nat, type (-), type (+))
-import GHC.Generics (Generic(..), K1(..), M1(..), (:*:)(..), Meta(..), S, D, C, Rep)
-
-import ExoMonad.Graph.Types (type (:@), UsesEffects, Self, Arrive)
-import qualified ExoMonad.Graph.Types as Types (Exit)
+import Data.Kind (Constraint, Type)
 import ExoMonad.Graph.Edges (GetInput, GetSchema)
+import ExoMonad.Graph.Generic.Core (AsGraph, EntryNode, LLMNode, LogicNode)
 import ExoMonad.Graph.Goto (Goto)
-import ExoMonad.Graph.Generic.Core (AsGraph, LLMNode, LogicNode, EntryNode)
+import ExoMonad.Graph.Types (Arrive, Self, UsesEffects, type (:@))
+import ExoMonad.Graph.Types qualified as Types (Exit)
+import GHC.Generics (C, D, Generic (..), K1 (..), M1 (..), Meta (..), Rep, S, (:*:) (..))
+import GHC.TypeLits (ErrorMessage (..), Nat, Symbol, TypeError, type (+), type (-))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- FIELD EXTRACTION TYPE FAMILIES
@@ -74,7 +73,7 @@ type FieldsWithNames :: (Type -> Type) -> [(Symbol, Type)]
 type family FieldsWithNames f where
   FieldsWithNames (M1 D _ f) = FieldsWithNames f
   FieldsWithNames (M1 C _ f) = FieldsWithNames f
-  FieldsWithNames (M1 S ('MetaSel ('Just name) _ _ _) (K1 _ def)) = '[ '(name, def) ]
+  FieldsWithNames (M1 S ('MetaSel ('Just name) _ _ _) (K1 _ def)) = '[ '(name, def)]
   FieldsWithNames (M1 S ('MetaSel 'Nothing _ _ _) _) = '[]
   FieldsWithNames (l :*: r) = Append (FieldsWithNames l) (FieldsWithNames r)
   FieldsWithNames _ = '[]
@@ -119,9 +118,10 @@ type AllFieldsReachable :: (Type -> Type) -> Constraint
 type family AllFieldsReachable graph where
   AllFieldsReachable graph =
     CheckAllReachableFields
-      (FindUnreachableFields
-        (FieldsWithNamesOf graph)
-        (GetRecordEntryType graph))
+      ( FindUnreachableFields
+          (FieldsWithNamesOf graph)
+          (GetRecordEntryType graph)
+      )
 
 -- | Get EntryNode type from a graph record (unwrap Maybe).
 type GetRecordEntryType :: (Type -> Type) -> Type
@@ -153,15 +153,16 @@ type CollectNodeFieldNames :: [(Symbol, Type)] -> [Symbol]
 type family CollectNodeFieldNames fields where
   CollectNodeFieldNames '[] = '[]
   CollectNodeFieldNames ('(name, def) ': rest) =
-    If (IsNodeDef def)
-       (name ': CollectNodeFieldNames rest)
-       (CollectNodeFieldNames rest)
+    If
+      (IsNodeDef def)
+      (name ': CollectNodeFieldNames rest)
+      (CollectNodeFieldNames rest)
 
 -- | Check if a definition is a node (LLMNode or LogicNode with annotations).
 type IsNodeDef :: Type -> Bool
 type family IsNodeDef def where
   IsNodeDef (node :@ _) = IsNodeDef node
-  IsNodeDef (LLMNode _subtype) = 'True  -- LLMNode now has subtype parameter
+  IsNodeDef (LLMNode _subtype) = 'True -- LLMNode now has subtype parameter
   IsNodeDef LogicNode = 'True
   IsNodeDef _ = 'False
 
@@ -200,16 +201,19 @@ type FindNewlyReachableFields :: [(Symbol, Type)] -> [Type] -> [Symbol] -> [Symb
 type family FindNewlyReachableFields fields available reached where
   FindNewlyReachableFields '[] _ _ = '[]
   FindNewlyReachableFields ('(name, def) ': rest) available reached =
-    If (And (Not (ElemSymbol name reached))
-            (And (IsNodeDef def) (InputSatisfied (GetInput def) available)))
-       (name ': FindNewlyReachableFields rest available reached)
-       (FindNewlyReachableFields rest available reached)
+    If
+      ( And
+          (Not (ElemSymbol name reached))
+          (And (IsNodeDef def) (InputSatisfied (GetInput def) available))
+      )
+      (name ': FindNewlyReachableFields rest available reached)
+      (FindNewlyReachableFields rest available reached)
 
 -- | Check if the Input type is satisfied by available types.
 -- Handles tuples by checking if all components are available.
 type InputSatisfied :: Maybe Type -> [Type] -> Bool
 type family InputSatisfied mInput available where
-  InputSatisfied 'Nothing _ = 'True  -- No Input means always satisfied
+  InputSatisfied 'Nothing _ = 'True -- No Input means always satisfied
   InputSatisfied ('Just (a, b)) available = And (ElemType a available) (ElemType b available)
   InputSatisfied ('Just t) available = ElemType t available
 
@@ -218,7 +222,9 @@ type AddFieldSchemaTypes :: [(Symbol, Type)] -> [Symbol] -> [Type] -> [Type]
 type family AddFieldSchemaTypes fields newlyReached available where
   AddFieldSchemaTypes _ '[] available = available
   AddFieldSchemaTypes fields (name ': rest) available =
-    AddFieldSchemaTypes fields rest
+    AddFieldSchemaTypes
+      fields
+      rest
       (AppendMaybeType (GetFieldSchema fields name) available)
 
 -- | Get Schema type for a field by name.
@@ -226,9 +232,10 @@ type GetFieldSchema :: [(Symbol, Type)] -> Symbol -> Maybe Type
 type family GetFieldSchema fields name where
   GetFieldSchema '[] _ = 'Nothing
   GetFieldSchema ('(n, def) ': rest) name =
-    If (n == name)
-       (GetSchema def)
-       (GetFieldSchema rest name)
+    If
+      (n == name)
+      (GetSchema def)
+      (GetFieldSchema rest name)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EXIT COVERAGE VALIDATION
@@ -260,9 +267,10 @@ type CollectLogicFieldNames :: [(Symbol, Type)] -> [Symbol]
 type family CollectLogicFieldNames fields where
   CollectLogicFieldNames '[] = '[]
   CollectLogicFieldNames ('(name, def) ': rest) =
-    If (IsLogicDef def)
-       (name ': CollectLogicFieldNames rest)
-       (CollectLogicFieldNames rest)
+    If
+      (IsLogicDef def)
+      (name ': CollectLogicFieldNames rest)
+      (CollectLogicFieldNames rest)
 
 -- | Check if a definition is a Logic node.
 type IsLogicDef :: Type -> Bool
@@ -304,9 +312,10 @@ type FieldsWithGotoExit :: [(Symbol, Type)] -> [Symbol]
 type family FieldsWithGotoExit fields where
   FieldsWithGotoExit '[] = '[]
   FieldsWithGotoExit ('(name, def) ': rest) =
-    If (FieldHasGotoExit def)
-       (name ': FieldsWithGotoExit rest)
-       (FieldsWithGotoExit rest)
+    If
+      (FieldHasGotoExit def)
+      (name ': FieldsWithGotoExit rest)
+      (FieldsWithGotoExit rest)
 
 -- | Check if a field definition has Goto Exit.
 type FieldHasGotoExit :: Type -> Bool
@@ -341,10 +350,13 @@ type FindNewlyExitReachingFields :: [(Symbol, Type)] -> [Symbol] -> [Symbol]
 type family FindNewlyExitReachingFields fields reaching where
   FindNewlyExitReachingFields '[] _ = '[]
   FindNewlyExitReachingFields ('(name, def) ': rest) reaching =
-    If (And (Not (ElemSymbol name reaching))
-            (FieldHasGotoToAny def reaching))
-       (name ': FindNewlyExitReachingFields rest reaching)
-       (FindNewlyExitReachingFields rest reaching)
+    If
+      ( And
+          (Not (ElemSymbol name reaching))
+          (FieldHasGotoToAny def reaching)
+      )
+      (name ': FindNewlyExitReachingFields rest reaching)
+      (FindNewlyExitReachingFields rest reaching)
 
 -- | Check if field has Goto to any of the targets.
 type FieldHasGotoToAny :: Type -> [Symbol] -> Bool
@@ -369,7 +381,7 @@ type ProjectGotoSymbols :: [Effect] -> [Symbol]
 type family ProjectGotoSymbols effs where
   ProjectGotoSymbols '[] = '[]
   ProjectGotoSymbols (Goto (name :: Symbol) _ ': rest) = name ': ProjectGotoSymbols rest
-  ProjectGotoSymbols (Goto Types.Exit _ ': rest) = ProjectGotoSymbols rest  -- Skip Exit
+  ProjectGotoSymbols (Goto Types.Exit _ ': rest) = ProjectGotoSymbols rest -- Skip Exit
   ProjectGotoSymbols (_ ': rest) = ProjectGotoSymbols rest
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -381,9 +393,10 @@ type NoDeadGotosRecord :: (Type -> Type) -> Constraint
 type family NoDeadGotosRecord graph where
   NoDeadGotosRecord graph =
     CheckNoDeadGotosRecord
-      (FindDeadGotosInFields
-        (FieldsWithNamesOf graph)
-        (GetRecordEntryType graph))
+      ( FindDeadGotosInFields
+          (FieldsWithNamesOf graph)
+          (GetRecordEntryType graph)
+      )
 
 -- | Check if dead goto list is empty.
 -- The tuple now includes target's Input for better error messages.
@@ -461,9 +474,10 @@ type GetFieldInput :: [(Symbol, Type)] -> Symbol -> Maybe Type
 type family GetFieldInput fields name where
   GetFieldInput '[] _ = 'Nothing
   GetFieldInput ('(n, def) ': rest) name =
-    If (n == name)
-       (GetInput def)
-       (GetFieldInput rest name)
+    If
+      (n == name)
+      (GetInput def)
+      (GetFieldInput rest name)
 
 -- | Collect all Schema types from fields.
 type CollectAllFieldSchemas :: [(Symbol, Type)] -> [Type]
@@ -477,9 +491,10 @@ type family CollectAllFieldSchemas fields where
 type CheckGotoWithTarget :: Symbol -> Symbol -> Type -> Maybe Type -> [Type] -> [(Symbol, Symbol, Type, Maybe Type)]
 type family CheckGotoWithTarget srcName targetName payload targetInput available where
   CheckGotoWithTarget srcName targetName payload targetInput available =
-    If (InputSatisfied targetInput available)
-       '[]
-       '[ '(srcName, targetName, payload, targetInput) ]
+    If
+      (InputSatisfied targetInput available)
+      '[]
+      '[ '(srcName, targetName, payload, targetInput)]
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ERROR MESSAGES
@@ -487,47 +502,61 @@ type family CheckGotoWithTarget srcName targetName payload targetInput available
 
 -- | Error when a field is unreachable.
 type UnreachableFieldError :: Symbol -> Constraint
-type UnreachableFieldError name = TypeError
-  ('Text "Graph validation failed: unreachable node"
-   ':$$: 'Text "Field '" ':<>: 'Text name ':<>: 'Text "' cannot be reached from EntryNode."
-   ':$$: 'Text ""
-   ':$$: 'Text "A node is reachable if:"
-   ':$$: 'Text "  - Its Input type matches the EntryNode type"
-   ':$$: 'Text "  - Its Input type matches a Schema output from a reachable node"
-   ':$$: 'Text "  - It is the target of a Goto from a reachable Logic node"
-   ':$$: 'Text ""
-   ':$$: 'Text "Fix: Ensure some reachable node provides this node's Input type."
-  )
+type UnreachableFieldError name =
+  TypeError
+    ( 'Text "Graph validation failed: unreachable node"
+        ':$$: 'Text "Field '"
+        ':<>: 'Text name
+        ':<>: 'Text "' cannot be reached from EntryNode."
+        ':$$: 'Text ""
+        ':$$: 'Text "A node is reachable if:"
+        ':$$: 'Text "  - Its Input type matches the EntryNode type"
+        ':$$: 'Text "  - Its Input type matches a Schema output from a reachable node"
+        ':$$: 'Text "  - It is the target of a Goto from a reachable Logic node"
+        ':$$: 'Text ""
+        ':$$: 'Text "Fix: Ensure some reachable node provides this node's Input type."
+    )
 
 -- | Error when a Logic field can't reach Exit.
 type NoExitPathFieldError :: Symbol -> Constraint
-type NoExitPathFieldError name = TypeError
-  ('Text "Graph validation failed: Logic node cannot reach Exit"
-   ':$$: 'Text "Field '" ':<>: 'Text name ':<>: 'Text "' has no path to Exit."
-   ':$$: 'Text ""
-   ':$$: 'Text "This creates a potential infinite loop or dead end."
-   ':$$: 'Text ""
-   ':$$: 'Text "Fix: Add 'Goto Exit result' to UsesEffects,"
-   ':$$: 'Text "     or add Goto to a node that reaches Exit."
-  )
+type NoExitPathFieldError name =
+  TypeError
+    ( 'Text "Graph validation failed: Logic node cannot reach Exit"
+        ':$$: 'Text "Field '"
+        ':<>: 'Text name
+        ':<>: 'Text "' has no path to Exit."
+        ':$$: 'Text ""
+        ':$$: 'Text "This creates a potential infinite loop or dead end."
+        ':$$: 'Text ""
+        ':$$: 'Text "Fix: Add 'Goto Exit result' to UsesEffects,"
+        ':$$: 'Text "     or add Goto to a node that reaches Exit."
+    )
 
 -- | Error when a Goto payload type doesn't match target's Input.
 --
 -- This improved error shows both what was sent and what was expected,
 -- making type mismatches much easier to debug.
 type GotoTypeMismatchError :: Symbol -> Symbol -> Type -> Maybe Type -> Constraint
-type GotoTypeMismatchError srcName targetName payload targetInput = TypeError
-  ('Text "Graph validation failed: Goto payload type mismatch"
-   ':$$: 'Text ""
-   ':$$: 'Text "Node '" ':<>: 'Text srcName ':<>: 'Text "' sends:"
-   ':$$: 'Text "  Goto \"" ':<>: 'Text targetName ':<>: 'Text "\" " ':<>: 'ShowType payload
-   ':$$: 'Text ""
-   ':$$: 'Text "But target '" ':<>: 'Text targetName ':<>: 'Text "' expects:"
-   ':$$: FormatMaybeType targetInput
-   ':$$: 'Text ""
-   ':$$: 'Text "The Goto payload must match the target's Input type."
-   ':$$: 'Text "Fix: Change the payload type or adjust the target's Input."
-  )
+type GotoTypeMismatchError srcName targetName payload targetInput =
+  TypeError
+    ( 'Text "Graph validation failed: Goto payload type mismatch"
+        ':$$: 'Text ""
+        ':$$: 'Text "Node '"
+        ':<>: 'Text srcName
+        ':<>: 'Text "' sends:"
+        ':$$: 'Text "  Goto \""
+        ':<>: 'Text targetName
+        ':<>: 'Text "\" "
+        ':<>: 'ShowType payload
+        ':$$: 'Text ""
+        ':$$: 'Text "But target '"
+        ':<>: 'Text targetName
+        ':<>: 'Text "' expects:"
+        ':$$: FormatMaybeType targetInput
+        ':$$: 'Text ""
+        ':$$: 'Text "The Goto payload must match the target's Input type."
+        ':$$: 'Text "Fix: Change the payload type or adjust the target's Input."
+    )
 
 -- | Legacy alias for backwards compatibility with Validate.hs exports.
 type DeadGotoFieldError :: Symbol -> Symbol -> Type -> Constraint
@@ -557,9 +586,10 @@ type family CheckLogicNodesHaveGoto fields where
 type CheckSingleLogicNodeHasGoto :: Symbol -> Type -> Constraint
 type family CheckSingleLogicNodeHasGoto name def where
   CheckSingleLogicNodeHasGoto name def =
-    If (And (IsLogicDef def) (Not (HasAnyGoto def)))
-       (LogicNodeNoGotoError name)
-       (() :: Constraint)
+    If
+      (And (IsLogicDef def) (Not (HasAnyGoto def)))
+      (LogicNodeNoGotoError name)
+      (() :: Constraint)
 
 -- | Check if a node definition has any Goto (including Exit, Self, or named).
 type HasAnyGoto :: Type -> Bool
@@ -578,21 +608,24 @@ type HasAnyGotoInEffects :: [Effect] -> Bool
 type family HasAnyGotoInEffects effs where
   HasAnyGotoInEffects '[] = 'False
   HasAnyGotoInEffects (Goto _ _ ': _) = 'True
-  HasAnyGotoInEffects (Arrive _ _ ': _) = 'True  -- Arrive is also a valid exit path
+  HasAnyGotoInEffects (Arrive _ _ ': _) = 'True -- Arrive is also a valid exit path
   HasAnyGotoInEffects (_ ': rest) = HasAnyGotoInEffects rest
 
 -- | Error when a Logic node has no Goto effects.
 type LogicNodeNoGotoError :: Symbol -> Constraint
-type LogicNodeNoGotoError name = TypeError
-  ('Text "Graph validation failed: Logic node cannot transition"
-   ':$$: 'Text ""
-   ':$$: 'Text "Node '" ':<>: 'Text name ':<>: 'Text "' is a Logic node but has no Goto effects."
-   ':$$: 'Text "Without a Goto, the node cannot transition and will deadlock at runtime."
-   ':$$: 'Text ""
-   ':$$: 'Text "Fix: Add Goto to UsesEffects:"
-   ':$$: 'Text "  LogicNode :@ UsesEffects '[Goto \"nextNode\" Payload]"
-   ':$$: 'Text "  LogicNode :@ UsesEffects '[Goto Exit Result]"
-  )
+type LogicNodeNoGotoError name =
+  TypeError
+    ( 'Text "Graph validation failed: Logic node cannot transition"
+        ':$$: 'Text ""
+        ':$$: 'Text "Node '"
+        ':<>: 'Text name
+        ':<>: 'Text "' is a Logic node but has no Goto effects."
+        ':$$: 'Text "Without a Goto, the node cannot transition and will deadlock at runtime."
+        ':$$: 'Text ""
+        ':$$: 'Text "Fix: Add Goto to UsesEffects:"
+        ':$$: 'Text "  LogicNode :@ UsesEffects '[Goto \"nextNode\" Payload]"
+        ':$$: 'Text "  LogicNode :@ UsesEffects '[Goto Exit Result]"
+    )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GOTO SELF ONLY VALIDATION
@@ -616,9 +649,10 @@ type family CheckNoGotoSelfOnly fields where
 type CheckSingleNodeGotoSelfOnly :: Symbol -> Type -> Constraint
 type family CheckSingleNodeGotoSelfOnly name def where
   CheckSingleNodeGotoSelfOnly name def =
-    If (And (HasGotoSelf def) (Not (HasNonSelfGoto def)))
-       (GotoSelfOnlyError name)
-       (() :: Constraint)
+    If
+      (And (HasGotoSelf def) (Not (HasNonSelfGoto def)))
+      (GotoSelfOnlyError name)
+      (() :: Constraint)
 
 -- | Check if node has Goto Self.
 type HasGotoSelf :: Type -> Bool
@@ -650,22 +684,25 @@ type HasNonSelfGotoInEffects :: [Effect] -> Bool
 type family HasNonSelfGotoInEffects effs where
   HasNonSelfGotoInEffects '[] = 'False
   HasNonSelfGotoInEffects (Goto Self _ ': rest) = HasNonSelfGotoInEffects rest
-  HasNonSelfGotoInEffects (Goto _ _ ': _) = 'True  -- Named or Exit
-  HasNonSelfGotoInEffects (Arrive _ _ ': _) = 'True  -- Arrive is also an exit path (for ForkNode workers)
+  HasNonSelfGotoInEffects (Goto _ _ ': _) = 'True -- Named or Exit
+  HasNonSelfGotoInEffects (Arrive _ _ ': _) = 'True -- Arrive is also an exit path (for ForkNode workers)
   HasNonSelfGotoInEffects (_ ': rest) = HasNonSelfGotoInEffects rest
 
 -- | Error when a node only has Goto Self.
 type GotoSelfOnlyError :: Symbol -> Constraint
-type GotoSelfOnlyError name = TypeError
-  ('Text "Graph validation failed: infinite loop detected"
-   ':$$: 'Text ""
-   ':$$: 'Text "Node '" ':<>: 'Text name ':<>: 'Text "' only has Goto Self with no other exit."
-   ':$$: 'Text "This creates an infinite loop - the node can never terminate."
-   ':$$: 'Text ""
-   ':$$: 'Text "Fix: Add an exit path:"
-   ':$$: 'Text "  UsesEffects '[Goto Self Payload, Goto Exit Result]"
-   ':$$: 'Text "  UsesEffects '[Goto Self Payload, Goto \"nextNode\" Payload]"
-  )
+type GotoSelfOnlyError name =
+  TypeError
+    ( 'Text "Graph validation failed: infinite loop detected"
+        ':$$: 'Text ""
+        ':$$: 'Text "Node '"
+        ':<>: 'Text name
+        ':<>: 'Text "' only has Goto Self with no other exit."
+        ':$$: 'Text "This creates an infinite loop - the node can never terminate."
+        ':$$: 'Text ""
+        ':$$: 'Text "Fix: Add an exit path:"
+        ':$$: 'Text "  UsesEffects '[Goto Self Payload, Goto Exit Result]"
+        ':$$: 'Text "  UsesEffects '[Goto Self Payload, Goto \"nextNode\" Payload]"
+    )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE-LEVEL UTILITIES
@@ -687,7 +724,7 @@ type family FormatMaybeType mt where
 -- | Type-level If.
 type If :: Bool -> k -> k -> k
 type family If cond t f where
-  If 'True  t _ = t
+  If 'True t _ = t
   If 'False _ f = f
 
 -- | Type-level And.
@@ -740,9 +777,10 @@ type FilterNotInSymbols :: [Symbol] -> [Symbol] -> [Symbol]
 type family FilterNotInSymbols xs ys where
   FilterNotInSymbols '[] _ = '[]
   FilterNotInSymbols (x ': rest) ys =
-    If (ElemSymbol x ys)
-       (FilterNotInSymbols rest ys)
-       (x ': FilterNotInSymbols rest ys)
+    If
+      (ElemSymbol x ys)
+      (FilterNotInSymbols rest ys)
+      (x ': FilterNotInSymbols rest ys)
 
 -- | Append symbol lists.
 type AppendSymbols :: [Symbol] -> [Symbol] -> [Symbol]

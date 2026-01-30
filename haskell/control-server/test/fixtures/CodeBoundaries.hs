@@ -1,9 +1,8 @@
-{- |
-Test fixture for code extraction boundary detection.
-
-This file contains various function patterns that test the boundary
-detection logic in readCodeAtRange.
--}
+-- |
+-- Test fixture for code extraction boundary detection.
+--
+-- This file contains various function patterns that test the boundary
+-- detection logic in readCodeAtRange.
 module Fixtures.CodeBoundaries where
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -15,7 +14,7 @@ simpleFunction :: Int -> Int
 simpleFunction x =
   let y = x + 1
       z = y * 2
-  in z + 3
+   in z + 3
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- CASE 2: Function followed by haddock comment
@@ -39,7 +38,6 @@ functionWithDoubleBlank :: Bool -> Int
 functionWithDoubleBlank b =
   if b then 1 else 0
 
-
 functionAfterDoubleBlank :: Int
 functionAfterDoubleBlank = 99
 
@@ -50,7 +48,8 @@ functionAfterDoubleBlank = 99
 multiLineFunction :: a -> b -> (a, b)
 multiLineFunction a b =
   let pair = (a, b)
-  in pair
+   in pair
+
 anotherTopLevel :: Int
 anotherTopLevel = 100
 

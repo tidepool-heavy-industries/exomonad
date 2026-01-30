@@ -22,26 +22,24 @@ module Main where
 
 import Control.Monad (forM_)
 import Data.Text (Text)
-import qualified Data.Text.IO as TIO
-import System.Directory (createDirectoryIfMissing, doesFileExist, copyFile)
-import System.Environment (getArgs)
-import System.FilePath ((</>))
-import System.IO (hPutStrLn, stderr)
-
+import Data.Text.IO qualified as TIO
 import ExoMonad.Generated.Codegen
-  ( generateGraphsTs
-  , generateExportsTs
-  , generateDispatcherTs
-  , generateRoutingTs
-  , generateHandlersTs
-  , generateIndexTs
-  , generatePackageJson
-  , generateTsConfig
+  ( generateDispatcherTs,
+    generateExportsTs,
+    generateGraphsTs,
+    generateHandlersTs,
+    generateIndexTs,
+    generatePackageJson,
+    generateRoutingTs,
+    generateTsConfig,
   )
 import ExoMonad.Generated.GraphSpecs (allEffectSpecs)
 import ExoMonad.Wasm.Registry (registryGraphSpecs)
 import ExoMonad.Wasm.Registry.Default (setupDefaultRegistry)
-
+import System.Directory (copyFile, createDirectoryIfMissing, doesFileExist)
+import System.Environment (getArgs)
+import System.FilePath ((</>))
+import System.IO (hPutStrLn, stderr)
 
 -- ============================================================================
 -- Package Configuration
@@ -53,7 +51,6 @@ packageName = "exomonad-generated-ts"
 packageVersion :: Text
 packageVersion = "0.1.0"
 
-
 -- ============================================================================
 -- Static Files
 -- ============================================================================
@@ -61,11 +58,10 @@ packageVersion = "0.1.0"
 -- | Static TypeScript files to copy from exomonad-generated-ts/static/
 staticFiles :: [String]
 staticFiles =
-  [ "protocol.ts"
-  , "loader.ts"
-  , "jsffi.ts"
+  [ "protocol.ts",
+    "loader.ts",
+    "jsffi.ts"
   ]
-
 
 -- ============================================================================
 -- Main
@@ -86,7 +82,6 @@ main = do
       hPutStrLn stderr "  - Generated TypeScript types for graph registry"
       hPutStrLn stderr "  - Type-safe WASM export dispatcher"
       hPutStrLn stderr "  - Protocol types and WASM loader"
-
 
 -- | Generate the complete TypeScript package.
 generatePackage :: FilePath -> IO ()
@@ -143,15 +138,14 @@ generatePackage outputDir = do
   putStrLn "To use in deploy/:"
   putStrLn "  Add to package.json: \"exomonad-generated-ts\": \"file:../path/to/output\""
 
-
 -- | Copy static TypeScript files from exomonad-generated-ts/static/
 copyStaticFiles :: FilePath -> IO ()
 copyStaticFiles outputDir = do
   -- Try to find static files relative to current directory or common locations
   let staticDirs =
-        [ "exomonad-generated-ts/static"
-        , "../exomonad-generated-ts/static"
-        , "static"  -- In case running from exomonad-generated-ts
+        [ "exomonad-generated-ts/static",
+          "../exomonad-generated-ts/static",
+          "static" -- In case running from exomonad-generated-ts
         ]
 
   forM_ staticFiles $ \fileName -> do
@@ -166,11 +160,10 @@ copyStaticFiles outputDir = do
         hPutStrLn stderr $ "  WARNING: Could not find static file: " ++ fileName
         hPutStrLn stderr $ "  Looked in: " ++ show staticDirs
 
-
 -- | Find the first existing file from a list of paths.
 findExisting :: [FilePath] -> IO (Maybe FilePath)
 findExisting [] = pure Nothing
-findExisting (p:ps) = do
+findExisting (p : ps) = do
   exists <- doesFileExist p
   if exists
     then pure (Just p)

@@ -1,20 +1,16 @@
 module RuntimeSpec (spec) where
 
-import Test.Hspec
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar, tryTakeMVar)
-import Control.Exception (try, ErrorCall(..))
-import Data.Aeson (Value(..), object, (.=), toJSON)
-import qualified Data.Map.Strict as Map
-
+import Control.Exception (ErrorCall (..), try)
+import Data.Aeson (Value (..), object, toJSON, (.=))
+import Data.Map.Strict qualified as Map
 import ExoMonad.Actor.Runtime (withActorSystem)
 import ExoMonad.Actor.Spawn (spawnActor)
-
+import Test.Hspec
 
 spec :: Spec
 spec = describe "withActorSystem" $ do
-
   describe "basic flow" $ do
-
     it "entry receives initial message and routes to exit" $ do
       -- Simplest case: entry actor immediately forwards to exit
       result <- withActorSystem @Int (Number 42) $ \scope router -> do
@@ -53,7 +49,6 @@ spec = describe "withActorSystem" $ do
       result `shouldBe` Just ()
 
   describe "router dispatch" $ do
-
     it "routes to correct actor by ID" $ do
       received <- newEmptyMVar
       result <- withActorSystem @String (String "start") $ \scope router -> do
@@ -81,11 +76,12 @@ spec = describe "withActorSystem" $ do
         actorB <- spawnActor scope "actorB" $ \msg -> do
           putMVar receivedB msg
           router "exit" (String "done")
-        pure $ Map.fromList
-          [ ("entry", entry)
-          , ("actorA", actorA)
-          , ("actorB", actorB)
-          ]
+        pure $
+          Map.fromList
+            [ ("entry", entry),
+              ("actorA", actorA),
+              ("actorB", actorB)
+            ]
       result `shouldBe` "done"
       msgA <- takeMVar receivedA
       msgB <- takeMVar receivedB
@@ -93,7 +89,6 @@ spec = describe "withActorSystem" $ do
       msgB `shouldBe` String "for-B"
 
   describe "error handling" $ do
-
     -- Note: Actor exceptions are caught by catchSync and logged, not propagated
     -- to withActorSystem. These tests verify the error IS thrown (visible in output).
 
@@ -130,7 +125,7 @@ spec = describe "withActorSystem" $ do
           case msg of
             String "start" -> do
               router "helper" (String "go")
-              router "exit" (String "not-an-int")  -- Parse error
+              router "exit" (String "not-an-int") -- Parse error
             String "recover" -> do
               putMVar callCount "recovered"
               router "exit" (Number 42)
@@ -150,7 +145,6 @@ spec = describe "withActorSystem" $ do
         Right _ -> expectationFailure "Expected error for missing entry actor"
 
   describe "multi-stage pipeline" $ do
-
     it "A -> B -> exit chain works" $ do
       -- Entry -> A (adds 1) -> B (multiplies 2) -> exit
       result <- withActorSystem @Int (Number 5) $ \scope router -> do
@@ -162,11 +156,12 @@ spec = describe "withActorSystem" $ do
         stageB <- spawnActor scope "stageB" $ \case
           Number n -> router "exit" (Number (n * 2))
           _ -> error "expected Number"
-        pure $ Map.fromList
-          [ ("entry", entry)
-          , ("stageA", stageA)
-          , ("stageB", stageB)
-          ]
+        pure $
+          Map.fromList
+            [ ("entry", entry),
+              ("stageA", stageA),
+              ("stageB", stageB)
+            ]
       -- (5 + 1) * 2 = 12
       result `shouldBe` 12
 

@@ -12,32 +12,41 @@
 -- | General-purpose popup MCP tool.
 module ExoMonad.Control.TUITools
   ( -- * Popup Tool
-    popupLogic
-  , PopupArgs(..)
-  , PopupResult(..)
+    popupLogic,
+    PopupArgs (..),
+    PopupResult (..),
 
     -- * Element Types
-  , PopupElement(..)
-  , PopupResultElement(..)
-  ) where
+    PopupElement (..),
+    PopupResultElement (..),
+  )
+where
 
 import Control.Monad.Freer (Eff, Member)
 import Data.Aeson
-  ( FromJSON(..), ToJSON(..), Value(..), (.:), (.:?), (.=)
-  , object, withObject
+  ( FromJSON (..),
+    ToJSON (..),
+    Value (..),
+    object,
+    withObject,
+    (.:),
+    (.:?),
+    (.=),
   )
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KM
 import Data.Text (Text)
-import qualified Data.Text as T
-import GHC.Generics (Generic)
-
-import ExoMonad.Effect.TUI
-  ( TUI, showUI, PopupDefinition(..), Component(..), ComponentSpec(..)
-  )
-import qualified ExoMonad.Effect.TUI as TUI (PopupResult(..))
-
+import Data.Text qualified as T
 import ExoMonad.Control.TUITools.Types
+import ExoMonad.Effect.TUI
+  ( Component (..),
+    ComponentSpec (..),
+    PopupDefinition (..),
+    TUI,
+    showUI,
+  )
+import ExoMonad.Effect.TUI qualified as TUI (PopupResult (..))
+import GHC.Generics (Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- POPUP LOGIC
@@ -47,10 +56,10 @@ import ExoMonad.Control.TUITools.Types
 --
 -- Converts the input elements to the internal PopupDefinition format,
 -- shows the UI, and then zips values back into the result elements.
-popupLogic
-  :: (Member TUI es)
-  => PopupArgs
-  -> Eff es PopupResult
+popupLogic ::
+  (Member TUI es) =>
+  PopupArgs ->
+  Eff es PopupResult
 popupLogic args = do
   -- Convert to internal TUI format
   let internalDef = toPopupDefinition args
@@ -61,19 +70,21 @@ popupLogic args = do
   -- Zip values back into element structure
   let resultElements = zipWithValues (args.elements) valuesMap
 
-  pure $ PopupResult
-    { status = if button == "submit" then "completed" else "cancelled"
-    , button = button
-    , elements = resultElements
-    , timeSpentSeconds = timeSpent
-    }
+  pure $
+    PopupResult
+      { status = if button == "submit" then "completed" else "cancelled",
+        button = button,
+        elements = resultElements,
+        timeSpentSeconds = timeSpent
+      }
 
 -- | Convert PopupArgs to internal PopupDefinition.
 toPopupDefinition :: PopupArgs -> PopupDefinition
-toPopupDefinition args = PopupDefinition
-  { pdTitle = maybe "Popup" id (args.title)
-  , pdComponents = map toComponent (args.elements)
-  }
+toPopupDefinition args =
+  PopupDefinition
+    { pdTitle = maybe "Popup" id (args.title),
+      pdComponents = map toComponent (args.elements)
+    }
   where
     toComponent :: PopupElement -> Component
     toComponent = \case
@@ -142,7 +153,7 @@ zipWithValues elements valuesObj = map zipOne elements
             selectedText = case getTextValue eid of
               "" -> defaultOpt
               t -> t
-        in RChoice eid label selectedText
+         in RChoice eid label selectedText
       PMultiselect eid label _ ->
         RMultiselect eid label (getTextArrayValue eid)
       PGroup eid label ->

@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+
 -- | LSP State Transition Verification Test
 --
 -- Verifies that the LSP interpreter correctly handles the Startup -> Ready transition
@@ -9,11 +10,10 @@ module Main where
 
 import Control.Concurrent (threadDelay)
 import Control.Monad.IO.Class (liftIO)
+import ExoMonad.Effect.LSP (IndexingState (..))
+import ExoMonad.LSP.Interpreter (LSPSession, getSessionIndexingState, withLSPSession)
 import System.Directory (getCurrentDirectory)
 import System.IO (hFlush, stdout)
-
-import ExoMonad.LSP.Interpreter (withLSPSession, getSessionIndexingState, LSPSession)
-import ExoMonad.Effect.LSP (IndexingState(..))
 
 log' :: String -> IO ()
 log' s = putStrLn s >> hFlush stdout
@@ -23,7 +23,7 @@ main = do
   cwd <- getCurrentDirectory
   log' $ "=== LSP State Transition Test ==="
   log' $ "Current Directory: " ++ cwd
-  
+
   withLSPSession cwd $ \session -> do
     log' "Session started."
     monitorState session 20 -- Monitor for 20 seconds
@@ -35,4 +35,3 @@ monitorState session n = do
   log' $ "State: " ++ show state
   threadDelay 1000000 -- 1s
   monitorState session (n - 1)
-

@@ -42,60 +42,65 @@
 -- This enables abort-on-failure semantics without explicit cancellation API.
 module ExoMonad.Actor.Subgraph
   ( -- * State
-    SubgraphState(..)
-  , newSubgraphState
-  , newSubgraphStateDeferred
+    SubgraphState (..),
+    newSubgraphState,
+    newSubgraphStateDeferred,
 
     -- * High-Level Runner
+
     -- | These functions handle the chicken-and-egg dependency automatically.
     -- Prefer these over manual state creation when possible.
-  , withRecursiveGraph
+    withRecursiveGraph,
 
     -- * Interpreter
-  , runSubgraph
+    runSubgraph,
 
     -- * Re-exports
-  , Subgraph(..)
-  , ChildHandle(..)
-  , ChildId(..)
-  , ChildError(..)
-  , spawnSelf
-  , awaitAny
-  , getPending
-  ) where
+    Subgraph (..),
+    ChildHandle (..),
+    ChildId (..),
+    ChildError (..),
+    spawnSelf,
+    awaitAny,
+    getPending,
+  )
+where
 
 import Control.Concurrent.STM
-  ( TVar, TQueue
-  , newTVarIO, newTQueueIO
-  , readTVarIO, atomically
-  , modifyTVar', writeTQueue, readTQueue
+  ( TQueue,
+    TVar,
+    atomically,
+    modifyTVar',
+    newTQueueIO,
+    newTVarIO,
+    readTQueue,
+    readTVarIO,
+    writeTQueue,
   )
 import Control.Concurrent.STM.TSem
-  ( TSem
-  , newTSem
-  , waitTSem, signalTSem
+  ( TSem,
+    newTSem,
+    signalTSem,
+    waitTSem,
   )
-import Control.Exception (SomeException, try, displayException, finally)
+import Control.Exception (SomeException, displayException, finally, try)
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
-import qualified Data.Text as T
+import Data.Map.Strict qualified as Map
+import Data.Text qualified as T
 import Data.Typeable (typeOf)
 import Data.UUID.V4 (nextRandom)
-import qualified Ki
-
 import ExoMonad.Effect.Subgraph
-  ( Subgraph(..)
-  , ChildHandle(..)
-  , ChildId(..)
-  , ChildError(..)
-  , spawnSelf
-  , awaitAny
-  , getPending
+  ( ChildError (..),
+    ChildHandle (..),
+    ChildId (..),
+    Subgraph (..),
+    awaitAny,
+    getPending,
+    spawnSelf,
   )
-
-
+import Ki qualified
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SUBGRAPH STATE
@@ -120,24 +125,23 @@ import ExoMonad.Effect.Subgraph
 --   * @entry@ - input type for the graph (e.g., Spec)
 --   * @result@ - output type from the graph (e.g., V2Result)
 data SubgraphState entry result = SubgraphState
-  { ssScope          :: !Ki.Scope
-    -- ^ Ki scope for structured concurrency. Children forked here are
+  { -- | Ki scope for structured concurrency. Children forked here are
     -- automatically cancelled when the scope exits.
-  , ssChildren       :: !(TVar (Map ChildId (Ki.Thread (Either ChildError result))))
-    -- ^ Currently running children (Ki threads). Removed when they complete.
+    ssScope :: !Ki.Scope,
+    -- | Currently running children (Ki threads). Removed when they complete.
     -- The thread result is Either to capture exceptions.
-  , ssCompleted      :: !(TQueue (ChildId, Either ChildError result))
-    -- ^ Completion queue. AwaitAny blocks on this.
+    ssChildren :: !(TVar (Map ChildId (Ki.Thread (Either ChildError result)))),
+    -- | Completion queue. AwaitAny blocks on this.
     -- Results are Either to capture child failures.
-  , ssGetRunner      :: !(IO (ChildId -> entry -> IO result))
-    -- ^ How to get the graph runner. The IO layer enables deferred binding
+    ssCompleted :: !(TQueue (ChildId, Either ChildError result)),
+    -- | How to get the graph runner. The IO layer enables deferred binding
     -- for cases where the runner can't be known at state creation time.
     -- The runner receives the ChildId for linking child nodes to parent.
-  , ssConcurrencySem :: !(Maybe TSem)
-    -- ^ Optional concurrency limiter. When present, limits number of
+    ssGetRunner :: !(IO (ChildId -> entry -> IO result)),
+    -- | Optional concurrency limiter. When present, limits number of
     -- concurrent children per parent. Nothing = unlimited.
+    ssConcurrencySem :: !(Maybe TSem)
   }
-
 
 -- | Create a new SubgraphState with an immediate runner.
 --
@@ -149,21 +153,23 @@ data SubgraphState entry result = SubgraphState
 --   state <- newSubgraphState scope simpleRunner
 --   ...
 -- @
-newSubgraphState
-  :: Ki.Scope                         -- ^ Ki scope for structured concurrency
-  -> Maybe Int                        -- ^ Optional concurrency limit (Nothing = unlimited)
-  -> (ChildId -> entry -> IO result)  -- ^ The graph runner (receives ChildId for linking)
-  -> IO (SubgraphState entry result)
+newSubgraphState ::
+  -- | Ki scope for structured concurrency
+  Ki.Scope ->
+  -- | Optional concurrency limit (Nothing = unlimited)
+  Maybe Int ->
+  -- | The graph runner (receives ChildId for linking)
+  (ChildId -> entry -> IO result) ->
+  IO (SubgraphState entry result)
 newSubgraphState scope maybeConcurrencyLimit runner = do
   sem <- case maybeConcurrencyLimit of
     Just limit -> Just <$> atomically (newTSem (fromIntegral limit))
-    Nothing    -> pure Nothing
+    Nothing -> pure Nothing
   SubgraphState scope
     <$> newTVarIO Map.empty
     <*> newTQueueIO
-    <*> pure (pure runner)  -- Wrap in pure for immediate access
+    <*> pure (pure runner) -- Wrap in pure for immediate access
     <*> pure sem
-
 
 -- | Create a new SubgraphState with deferred runner wiring.
 --
@@ -199,26 +205,28 @@ newSubgraphState scope maybeConcurrencyLimit runner = do
 -- 1. Wiring happens once, before any children spawn
 -- 2. No concurrent access during the wiring phase
 -- 3. After wiring, the IORef is only read (no writes)
-newSubgraphStateDeferred
-  :: forall entry result.
-     Ki.Scope   -- ^ Ki scope for structured concurrency
-  -> Maybe Int  -- ^ Optional concurrency limit (Nothing = unlimited)
-  -> IO (SubgraphState entry result, (ChildId -> entry -> IO result) -> IO ())
+newSubgraphStateDeferred ::
+  forall entry result.
+  -- | Ki scope for structured concurrency
+  Ki.Scope ->
+  -- | Optional concurrency limit (Nothing = unlimited)
+  Maybe Int ->
+  IO (SubgraphState entry result, (ChildId -> entry -> IO result) -> IO ())
 newSubgraphStateDeferred scope maybeConcurrencyLimit = do
   -- IORef holds the runner. Starts with error placeholder.
   -- INVARIANT: Must be written exactly once before any child spawns.
   ref <- newIORef (\_ _ -> error "Subgraph recursion not wired - call wireRecursion before running graph")
   sem <- case maybeConcurrencyLimit of
     Just limit -> Just <$> atomically (newTSem (fromIntegral limit))
-    Nothing    -> pure Nothing
-  state <- SubgraphState scope
-    <$> newTVarIO Map.empty
-    <*> newTQueueIO
-    <*> pure (readIORef ref)  -- Deferred: reads IORef when called
-    <*> pure sem
+    Nothing -> pure Nothing
+  state <-
+    SubgraphState scope
+      <$> newTVarIO Map.empty
+      <*> newTQueueIO
+      <*> pure (readIORef ref) -- Deferred: reads IORef when called
+      <*> pure sem
   -- The wire function writes the real runner to the IORef
   pure (state, writeIORef ref)
-
 
 -- | Run a computation with a recursive subgraph, handling all wiring automatically.
 --
@@ -260,19 +268,19 @@ newSubgraphStateDeferred scope maybeConcurrencyLimit = do
 -- All children spawned via @spawnSelf@ run within this scope.
 -- When the callback returns (success or exception), the scope exits
 -- and ki automatically cancels any still-running children.
-withRecursiveGraph
-  :: forall entry result a.
-     Maybe Int  -- ^ Optional concurrency limit (Nothing = unlimited)
-  -> (SubgraphState entry result -> ((ChildId -> entry -> IO result) -> IO ()) -> IO a)
-     -- ^ Callback receives (state, wireRecursion). Wire before running!
-     -- The runner receives ChildId for linking child execution trees.
-  -> IO a
+withRecursiveGraph ::
+  forall entry result a.
+  -- | Optional concurrency limit (Nothing = unlimited)
+  Maybe Int ->
+  -- | Callback receives (state, wireRecursion). Wire before running!
+  -- The runner receives ChildId for linking child execution trees.
+  (SubgraphState entry result -> ((ChildId -> entry -> IO result) -> IO ()) -> IO a) ->
+  IO a
 withRecursiveGraph maybeConcurrencyLimit callback =
   -- Create ki scope for structured concurrency
   Ki.scoped $ \scope -> do
     (state, wire) <- newSubgraphStateDeferred scope maybeConcurrencyLimit
     callback state wire
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- INTERPRETER
@@ -299,14 +307,13 @@ withRecursiveGraph maybeConcurrencyLimit callback =
 --
 -- The deferred case allows the runner to be wired up after the interpreter
 -- is built, breaking the chicken-and-egg dependency cycle.
-runSubgraph
-  :: forall entry result effs a.
-     LastMember IO effs
-  => SubgraphState entry result
-  -> Eff (Subgraph entry result ': effs) a
-  -> Eff effs a
+runSubgraph ::
+  forall entry result effs a.
+  (LastMember IO effs) =>
+  SubgraphState entry result ->
+  Eff (Subgraph entry result ': effs) a ->
+  Eff effs a
 runSubgraph state = interpret $ \case
-
   SpawnSelf childEntry -> sendM $ do
     -- Generate unique child ID
     cid <- ChildId <$> nextRandom
@@ -314,7 +321,7 @@ runSubgraph state = interpret $ \case
     -- Acquire semaphore before spawning (blocks if at limit)
     case state.ssConcurrencySem of
       Just sem -> atomically $ waitTSem sem
-      Nothing  -> pure ()
+      Nothing -> pure ()
 
     -- Spawn child graph within the ki scope
     -- When the scope exits (parent completes or throws), all children
@@ -322,7 +329,8 @@ runSubgraph state = interpret $ \case
     childThread <- Ki.fork state.ssScope $ do
       -- Ensure semaphore released on all exit paths (success, failure, cancellation)
       finally
-        (do -- Get the runner (may be deferred via IORef)
+        ( do
+            -- Get the runner (may be deferred via IORef)
             -- This is where the deferred binding resolves!
             runner <- state.ssGetRunner
 
@@ -342,35 +350,35 @@ runSubgraph state = interpret $ \case
               modifyTVar' state.ssChildren (Map.delete cid)
               writeTQueue state.ssCompleted (cid, result)
 
-            pure result)
+            pure result
+        )
         -- Release semaphore in finally block (guaranteed to run)
-        (case state.ssConcurrencySem of
-           Just sem -> atomically $ signalTSem sem
-           Nothing  -> pure ())
+        ( case state.ssConcurrencySem of
+            Just sem -> atomically $ signalTSem sem
+            Nothing -> pure ()
+        )
 
     -- Track the running child
     atomically $ modifyTVar' state.ssChildren (Map.insert cid childThread)
 
     -- Return handle to caller
     pure (ChildHandle cid)
-
-  AwaitAny -> sendM $
-    -- Block until any child completes (success or failure)
-    atomically $ readTQueue state.ssCompleted
-
+  AwaitAny ->
+    sendM $
+      -- Block until any child completes (success or failure)
+      atomically $
+        readTQueue state.ssCompleted
   GetPending -> sendM $ do
     children <- readTVarIO state.ssChildren
     pure [ChildHandle cid | cid <- Map.keys children]
-
 
 -- | Convert a SomeException to ChildError.
 --
 -- Captures exception type name and message for parent to inspect.
 exceptionToChildError :: SomeException -> ChildError
-exceptionToChildError ex = ChildError
-  { ceMessage = T.pack (displayException ex)
-  , ceException = T.pack (show (typeOf ex))
-  , ceDetails = Nothing  -- Could extract more details for specific exception types
-  }
-
-
+exceptionToChildError ex =
+  ChildError
+    { ceMessage = T.pack (displayException ex),
+      ceException = T.pack (show (typeOf ex)),
+      ceDetails = Nothing -- Could extract more details for specific exception types
+    }

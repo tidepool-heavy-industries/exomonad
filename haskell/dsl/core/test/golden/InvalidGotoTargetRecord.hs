@@ -13,27 +13,28 @@
 --   Goto "nonexistent" references a node that doesn't exist.
 module InvalidGotoTargetRecord where
 
+import ExoMonad.Graph.Generic (Entry, Exit, GraphMode (..), LLMNode, LogicNode, ValidGraphRecord)
+import ExoMonad.Graph.Goto (Goto)
+import ExoMonad.Graph.Types (Input, LLMKind (..), Schema, UsesEffects, type (:@))
 import GHC.Generics (Generic)
 
-import ExoMonad.Graph.Types (type (:@), Input, Schema, UsesEffects, LLMKind(..))
-import ExoMonad.Graph.Generic (GraphMode(..), Entry, Exit, LLMNode, LogicNode, ValidGraphRecord)
-import ExoMonad.Graph.Goto (Goto)
-
 data A
+
 data B
+
 data C
 
 -- | Graph with Logic node pointing to nonexistent field - invalid!
 data BadGraph mode = BadGraph
-  { entry  :: mode :- Entry A
-  , router :: mode :- LogicNode :@ Input A :@ UsesEffects '[Goto "nonexistent" B, Goto "handler" B]
-  , handler :: mode :- LLMNode 'API :@ Input B :@ Schema C
-  , exit   :: mode :- Exit C
+  { entry :: mode :- Entry A,
+    router :: mode :- LogicNode :@ Input A :@ UsesEffects '[Goto "nonexistent" B, Goto "handler" B],
+    handler :: mode :- LLMNode 'API :@ Input B :@ Schema C,
+    exit :: mode :- Exit C
   }
-  deriving Generic
+  deriving (Generic)
 
 check :: ()
 check = validGraph @BadGraph
 
-validGraph :: forall g. ValidGraphRecord g => ()
+validGraph :: forall g. (ValidGraphRecord g) => ()
 validGraph = ()

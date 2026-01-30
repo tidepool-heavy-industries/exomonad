@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 -- | Tests for ExampleGraph - the multi-node message classifier.
 --
@@ -12,27 +12,27 @@
 -- 4. Proper handler responses
 module ExampleGraphSpec (spec) where
 
-import Test.Hspec
-import qualified Data.Text as T
+-- For test assertions
 
+import Data.Aeson (Value (..))
+import Data.Text qualified as T
 import ExoMonad.Graph.Goto (GotoChoice, OneOf, To)
-import ExoMonad.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
+import ExoMonad.Graph.Goto.Internal (GotoChoice (..), OneOf (..))
 import ExoMonad.Graph.Types (Exit, Self)
 import ExoMonad.Wasm.Effect (WasmM)
 import ExoMonad.Wasm.ExampleGraph
-  ( UserMessage(..)
-  , Response(..)
-  , classifyHandlerWasm
-  , greetingHandlerWasm
-  , questionHandlerWasm
-  , statementHandlerWasm
-  , runExampleGraph
+  ( Response (..),
+    UserMessage (..),
+    classifyHandlerWasm,
+    greetingHandlerWasm,
+    questionHandlerWasm,
+    runExampleGraph,
+    statementHandlerWasm,
   )
-import ExoMonad.Wasm.GraphInput (GraphInput(..))
-import ExoMonad.Wasm.Runner (initializeWasm, WasmResult(..))
-import ExoMonad.Wasm.WireTypes (SerializableEffect(..), EffectResult(..))
-import Data.Aeson (Value(..))
-
+import ExoMonad.Wasm.GraphInput (GraphInput (..))
+import ExoMonad.Wasm.Runner (WasmResult (..), initializeWasm)
+import ExoMonad.Wasm.WireTypes (EffectResult (..), SerializableEffect (..))
+import Test.Hspec
 
 spec :: Spec
 spec = do
@@ -42,14 +42,12 @@ spec = do
   statementHandlerSpec
   fullGraphSpec
 
-
 -- ============================================================================
 -- Classify Handler Tests
 -- ============================================================================
 
 classifySpec :: Spec
 classifySpec = describe "classifyHandlerWasm" $ do
-
   it "routes greetings to handleGreeting" $ do
     let msg = UserMessage "Hello there!"
         input = TextInput msg.unUserMessage
@@ -63,7 +61,7 @@ classifySpec = describe "classifyHandlerWasm" $ do
             T.unpack logMsg2 `shouldContain` "Greeting"
             -- Resume and check final result
             case resume2 (ResSuccess Nothing) of
-              WasmComplete (GotoChoice (Here _)) -> pure ()  -- handleGreeting = Here
+              WasmComplete (GotoChoice (Here _)) -> pure () -- handleGreeting = Here
               WasmComplete _ -> expectationFailure "Expected route to handleGreeting (Here)"
               _ -> expectationFailure "Expected WasmComplete"
           _ -> expectationFailure "Expected second log yield"
@@ -73,14 +71,14 @@ classifySpec = describe "classifyHandlerWasm" $ do
     let msg = UserMessage "What is the meaning of life?"
     result <- runClassifyToCompletion msg
     case result of
-      GotoChoice (There (Here _)) -> pure ()  -- handleQuestion = There (Here _)
+      GotoChoice (There (Here _)) -> pure () -- handleQuestion = There (Here _)
       _ -> expectationFailure "Expected route to handleQuestion"
 
   it "routes statements to handleStatement" $ do
     let msg = UserMessage "The sky is blue."
     result <- runClassifyToCompletion msg
     case result of
-      GotoChoice (There (There (Here _))) -> pure ()  -- handleStatement
+      GotoChoice (There (There (Here _))) -> pure () -- handleStatement
       _ -> expectationFailure "Expected route to handleStatement"
 
   it "classifies 'hi' as greeting" $ do
@@ -104,27 +102,38 @@ classifySpec = describe "classifyHandlerWasm" $ do
       GotoChoice (There (Here _)) -> pure ()
       _ -> expectationFailure "Expected question classification"
 
-
 -- | Run classify handler to completion, resuming all log effects.
-runClassifyToCompletion
-  :: UserMessage
-  -> IO (GotoChoice '[To "handleGreeting" UserMessage
-                    , To "handleQuestion" UserMessage
-                    , To "handleStatement" UserMessage])
+runClassifyToCompletion ::
+  UserMessage ->
+  IO
+    ( GotoChoice
+        '[ To "handleGreeting" UserMessage,
+           To "handleQuestion" UserMessage,
+           To "handleStatement" UserMessage
+         ]
+    )
 runClassifyToCompletion msg =
   let input = TextInput msg.unUserMessage
-  in go (initializeWasm (classifyHandlerWasm input))
+   in go (initializeWasm (classifyHandlerWasm input))
   where
-    go :: WasmResult (GotoChoice '[To "handleGreeting" UserMessage
-                                 , To "handleQuestion" UserMessage
-                                 , To "handleStatement" UserMessage])
-       -> IO (GotoChoice '[To "handleGreeting" UserMessage
-                         , To "handleQuestion" UserMessage
-                         , To "handleStatement" UserMessage])
+    go ::
+      WasmResult
+        ( GotoChoice
+            '[ To "handleGreeting" UserMessage,
+               To "handleQuestion" UserMessage,
+               To "handleStatement" UserMessage
+             ]
+        ) ->
+      IO
+        ( GotoChoice
+            '[ To "handleGreeting" UserMessage,
+               To "handleQuestion" UserMessage,
+               To "handleStatement" UserMessage
+             ]
+        )
     go (WasmYield _ resume) = go (resume (ResSuccess Nothing))
     go (WasmComplete choice) = pure choice
     go (WasmError err) = error $ "Unexpected error: " <> T.unpack err
-
 
 -- ============================================================================
 -- Greeting Handler Tests
@@ -132,7 +141,6 @@ runClassifyToCompletion msg =
 
 greetingHandlerSpec :: Spec
 greetingHandlerSpec = describe "greetingHandlerWasm" $ do
-
   it "yields log effect before responding" $ do
     let msg = UserMessage "Hello!"
     case initializeWasm (greetingHandlerWasm msg) of
@@ -152,14 +160,12 @@ greetingHandlerSpec = describe "greetingHandlerWasm" $ do
     T.unpack response.unResponse `shouldContain` "Hello!"
     T.unpack response.unResponse `shouldContain` "nice to hear from you"
 
-
 -- ============================================================================
 -- Question Handler Tests
 -- ============================================================================
 
 questionHandlerSpec :: Spec
 questionHandlerSpec = describe "questionHandlerWasm" $ do
-
   it "yields log effect first" $ do
     let msg = UserMessage "What time is it?"
     case initializeWasm (questionHandlerWasm msg) of
@@ -193,7 +199,6 @@ questionHandlerSpec = describe "questionHandlerWasm" $ do
     response <- runQuestionHandlerWithLLM msg llmResponse
     T.unpack response.unResponse `shouldContain` "What is this?"
 
-
 -- | Run question handler with a mock LLM response.
 runQuestionHandlerWithLLM :: UserMessage -> Value -> IO Response
 runQuestionHandlerWithLLM msg llmResponse = go (initializeWasm (questionHandlerWasm msg))
@@ -201,11 +206,10 @@ runQuestionHandlerWithLLM msg llmResponse = go (initializeWasm (questionHandlerW
     go :: WasmResult (GotoChoice '[To Exit Response, To Self UserMessage]) -> IO Response
     go (WasmYield (EffLogInfo _ _) resume) = go (resume (ResSuccess Nothing))
     go (WasmYield (EffLlmComplete _ _ _ _ _) resume) = go (resume (ResSuccess (Just llmResponse)))
-    go (WasmYield _ resume) = go (resume (ResSuccess Nothing))  -- Handle any other effects
+    go (WasmYield _ resume) = go (resume (ResSuccess Nothing)) -- Handle any other effects
     go (WasmComplete (GotoChoice (Here response))) = pure response
     go (WasmComplete _) = error "Expected Exit, got Self"
     go (WasmError err) = error $ "Unexpected error: " <> T.unpack err
-
 
 -- ============================================================================
 -- Statement Handler Tests
@@ -213,7 +217,6 @@ runQuestionHandlerWithLLM msg llmResponse = go (initializeWasm (questionHandlerW
 
 statementHandlerSpec :: Spec
 statementHandlerSpec = describe "statementHandlerWasm" $ do
-
   it "yields log effect before responding" $ do
     let msg = UserMessage "The weather is nice today."
     case initializeWasm (statementHandlerWasm msg) of
@@ -228,14 +231,12 @@ statementHandlerSpec = describe "statementHandlerWasm" $ do
     T.unpack response.unResponse `shouldContain` "I understand"
     T.unpack response.unResponse `shouldContain` "I like pizza."
 
-
 -- ============================================================================
 -- Full Graph Integration Tests
 -- ============================================================================
 
 fullGraphSpec :: Spec
 fullGraphSpec = describe "runExampleGraph (full integration)" $ do
-
   it "processes greeting through full graph" $ do
     let msg = UserMessage "Hello!"
     response <- runFullGraph msg
@@ -264,7 +265,6 @@ fullGraphSpec = describe "runExampleGraph (full integration)" $ do
     response <- runFullGraph msg
     T.unpack response.unResponse `shouldContain` "nice to hear from you"
 
-
 -- ============================================================================
 -- Test Helpers
 -- ============================================================================
@@ -287,7 +287,7 @@ runFullGraph msg = runFullGraphWithLLM msg (String "Default LLM response")
 runFullGraphWithLLM :: UserMessage -> Value -> IO Response
 runFullGraphWithLLM msg llmResponse =
   let input = TextInput msg.unUserMessage
-  in go (initializeWasm (runExampleGraph input))
+   in go (initializeWasm (runExampleGraph input))
   where
     go :: WasmResult Response -> IO Response
     go (WasmYield (EffLlmComplete _ _ _ _ _) resume) = go (resume (ResSuccess (Just llmResponse)))

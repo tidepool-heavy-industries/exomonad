@@ -1,9 +1,9 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE DefaultSignatures #-}
-{-# LANGUAGE UndecidableSuperClasses #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE StandaloneKindSignatures #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableSuperClasses #-}
 
 -- | Core types and typeclass for LLM structured output.
 --
@@ -11,48 +11,48 @@
 -- generation and the 'StructuredOutput' typeclass.
 module ExoMonad.StructuredOutput.Class
   ( -- * The Typeclass
-    StructuredOutput(..)
-  , HasJSONSchema(..)
+    StructuredOutput (..),
+    HasJSONSchema (..),
 
     -- * JSON Schema Types
-  , JSONSchema(..)
-  , SchemaType(..)
+    JSONSchema (..),
+    SchemaType (..),
 
     -- * Generic Machinery
-  , GStructuredOutput(..)
+    GStructuredOutput (..),
 
     -- * Options
-  , StructuredOptions(..)
-  , SumEncoding(..)
-  , defaultOptions
+    StructuredOptions (..),
+    SumEncoding (..),
+    defaultOptions,
 
     -- * Error Types
-  , ParseDiagnostic(..)
-  , formatDiagnostic
+    ParseDiagnostic (..),
+    formatDiagnostic,
 
     -- * Validation
-  , ValidStructuredOutput
-  , ValidInContext
-  , SchemaContext(..)
-  , HasSumRep
-  , IsNullarySum
+    ValidStructuredOutput,
+    ValidInContext,
+    SchemaContext (..),
+    HasSumRep,
+    IsNullarySum,
 
     -- * Wrappers
-  , StringEnum(..)
-  , ExoMonadDefault(..)
-  ) where
+    StringEnum (..),
+    ExoMonadDefault (..),
+  )
+where
 
 import Data.Aeson (Value)
-import Data.Kind (Type, Constraint)
-import Data.Text (Text)
-import qualified Data.Text as T
-import GHC.Generics (Generic, Rep, from, to, (:+:), (:*:), M1, D, C, S, K1, R, U1, V1)
-import GHC.TypeLits (TypeError, ErrorMessage(..))
-import Data.Type.Bool (type (&&))
+import Data.Kind (Constraint, Type)
 import Data.List.NonEmpty (NonEmpty)
-import Data.Set (Set)
 import Data.Map.Strict (Map)
-
+import Data.Set (Set)
+import Data.Text (Text)
+import Data.Text qualified as T
+import Data.Type.Bool (type (&&))
+import GHC.Generics (C, D, Generic, K1, M1, R, Rep, S, U1, V1, from, to, (:*:), (:+:))
+import GHC.TypeLits (ErrorMessage (..), TypeError)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- JSON SCHEMA TYPES
@@ -60,14 +60,14 @@ import Data.Map.Strict (Map)
 
 -- | A JSON Schema representation.
 data JSONSchema = JSONSchema
-  { schemaType :: SchemaType
-  , schemaDescription :: Maybe Text
-  , schemaProperties :: Map Text JSONSchema
-  , schemaRequired :: [Text]
-  , schemaItems :: Maybe JSONSchema
-  , schemaMinItems :: Maybe Int
-  , schemaEnum :: Maybe [Text]
-  , schemaOneOf :: Maybe [JSONSchema]
+  { schemaType :: SchemaType,
+    schemaDescription :: Maybe Text,
+    schemaProperties :: Map Text JSONSchema,
+    schemaRequired :: [Text],
+    schemaItems :: Maybe JSONSchema,
+    schemaMinItems :: Maybe Int,
+    schemaEnum :: Maybe [Text],
+    schemaOneOf :: Maybe [JSONSchema]
   }
   deriving (Show, Eq)
 
@@ -82,45 +82,43 @@ data SchemaType
   | TNull
   deriving (Show, Eq)
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- ERROR TYPES
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Detailed parse diagnostic with field path.
 data ParseDiagnostic = ParseDiagnostic
-  { pdPath :: [Text]
-  , pdExpected :: Text
-  , pdActual :: Text
-  , pdMessage :: Text
+  { pdPath :: [Text],
+    pdExpected :: Text,
+    pdActual :: Text,
+    pdMessage :: Text
   }
   deriving (Show, Eq)
 
 -- | Format diagnostic for display.
 formatDiagnostic :: ParseDiagnostic -> Text
-formatDiagnostic pd = T.unlines
-  [ "Parse error at: " <> formatPath pd.pdPath
-  , "Expected: " <> pd.pdExpected
-  , "Got: " <> pd.pdActual
-  , pd.pdMessage
-  ]
+formatDiagnostic pd =
+  T.unlines
+    [ "Parse error at: " <> formatPath pd.pdPath,
+      "Expected: " <> pd.pdExpected,
+      "Got: " <> pd.pdActual,
+      pd.pdMessage
+    ]
   where
     formatPath [] = "(root)"
     formatPath ps = T.intercalate "." ps
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- WRAPPERS
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Wrapper for enum types that should serialize as plain string enums in JSON Schema.
-newtype StringEnum a = StringEnum { unStringEnum :: a }
+newtype StringEnum a = StringEnum {unStringEnum :: a}
   deriving (Show, Eq, Generic)
 
 -- | Newtype wrapper for 'DerivingVia' to provide standard ExoMonad instances.
-newtype ExoMonadDefault a = ExoMonadDefault { unExoMonadDefault :: a }
+newtype ExoMonadDefault a = ExoMonadDefault {unExoMonadDefault :: a}
   deriving stock (Show, Eq, Generic)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- VALIDATION
@@ -164,32 +162,33 @@ type family ValidStructuredOutputImpl (t :: Type) :: Constraint where
   -- Tuples
   ValidStructuredOutputImpl (a, b) = ()
   ValidStructuredOutputImpl (a, b, c) = ()
-
   -- Default: Validate structure
   ValidStructuredOutputImpl t =
-    ( CheckNotNonNullarySum (HasSumRep t) (IsNullarySum t) t
-    , CheckFieldsValid (Rep t)
+    ( CheckNotNonNullarySum (HasSumRep t) (IsNullarySum t) t,
+      CheckFieldsValid (Rep t)
     )
 
 -- | Reject sum types with data.
 type family CheckNotNonNullarySum (hasSum :: Bool) (isNullary :: Bool) (t :: Type) :: Constraint where
   CheckNotNonNullarySum 'False _ _ = ()
   CheckNotNonNullarySum 'True 'True _ = ()
-  CheckNotNonNullarySum 'True 'False t = TypeError
-    ( 'Text "═══════════════════════════════════════════════════════════"
-      ':$$: 'Text "  Schema error for structured output type: " ':<>: 'ShowType t
-      ':$$: 'Text "═══════════════════════════════════════════════════════"
-      ':$$: 'Text ""
-      ':$$: 'Text "Anthropic's structured output does not support 'oneOf' schemas."
-      ':$$: 'Text "This type uses a sum type with data, which generates oneOf."
-      ':$$: 'Text ""
-      ':$$: 'Text "Fix options:"
-      ':$$: 'Text "  1. Use a tagged record: data MyChoice = MyChoice { tag :: Tag, ... }"
-      ':$$: 'Text "  2. Use separate fields: data Output = Output { optionA :: Maybe A, ... }"
-      ':$$: 'Text "  3. Convert to enum: remove data from all variants"
-      ':$$: 'Text ""
-      ':$$: 'Text "Note: Nullary enums (no data) are OK and auto-generate string enums."
-    )
+  CheckNotNonNullarySum 'True 'False t =
+    TypeError
+      ( 'Text "═══════════════════════════════════════════════════════════"
+          ':$$: 'Text "  Schema error for structured output type: "
+          ':<>: 'ShowType t
+          ':$$: 'Text "═══════════════════════════════════════════════════════"
+          ':$$: 'Text ""
+          ':$$: 'Text "Anthropic's structured output does not support 'oneOf' schemas."
+          ':$$: 'Text "This type uses a sum type with data, which generates oneOf."
+          ':$$: 'Text ""
+          ':$$: 'Text "Fix options:"
+          ':$$: 'Text "  1. Use a tagged record: data MyChoice = MyChoice { tag :: Tag, ... }"
+          ':$$: 'Text "  2. Use separate fields: data Output = Output { optionA :: Maybe A, ... }"
+          ':$$: 'Text "  3. Convert to enum: remove data from all variants"
+          ':$$: 'Text ""
+          ':$$: 'Text "Note: Nullary enums (no data) are OK and auto-generate string enums."
+      )
 
 -- | Recursively validate field types.
 type family CheckFieldsValid (rep :: Type -> Type) :: Constraint where
@@ -227,7 +226,6 @@ type family IsNullarySumRep (rep :: Type -> Type) :: Bool where
   IsNullarySumRep (K1 i c) = 'False
   IsNullarySumRep _ = 'False
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- THE TYPECLASS
 -- ════════════════════════════════════════════════════════════════════════════
@@ -252,21 +250,20 @@ class StructuredOutput a where
   structuredOptions = defaultOptions
 
   -- Default implementations via Generic
-  default structuredSchema
-    :: GStructuredOutput (Rep a)
-    => JSONSchema
+  default structuredSchema ::
+    (GStructuredOutput (Rep a)) =>
+    JSONSchema
   structuredSchema = gStructuredSchema @(Rep a) (structuredOptions @a)
 
-  default encodeStructured
-    :: (Generic a, GStructuredOutput (Rep a))
-    => a -> Value
+  default encodeStructured ::
+    (Generic a, GStructuredOutput (Rep a)) =>
+    a -> Value
   encodeStructured x = gEncodeStructured (structuredOptions @a) (from x)
 
-  default parseStructured
-    :: (Generic a, GStructuredOutput (Rep a))
-    => Value -> Either ParseDiagnostic a
+  default parseStructured ::
+    (Generic a, GStructuredOutput (Rep a)) =>
+    Value -> Either ParseDiagnostic a
   parseStructured v = to <$> gParseStructured (structuredOptions @a) [] v
-
 
 -- | Generic class for structured output derivation.
 class GStructuredOutput (f :: Type -> Type) where
@@ -274,21 +271,20 @@ class GStructuredOutput (f :: Type -> Type) where
   gEncodeStructured :: StructuredOptions -> f p -> Value
   gParseStructured :: StructuredOptions -> [Text] -> Value -> Either ParseDiagnostic (f p)
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- OPTIONS
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Options for controlling encoding/decoding behavior.
 data StructuredOptions = StructuredOptions
-  { soFieldLabelModifier :: String -> String
-    -- ^ Transform record field names to JSON keys.
-  , soConstructorTagModifier :: String -> String
-    -- ^ Transform constructor names for sum type tags.
-  , soOmitNothingFields :: Bool
-    -- ^ Omit fields with 'Nothing' values from output.
-  , soSumEncoding :: SumEncoding
-    -- ^ How to encode sum types.
+  { -- | Transform record field names to JSON keys.
+    soFieldLabelModifier :: String -> String,
+    -- | Transform constructor names for sum type tags.
+    soConstructorTagModifier :: String -> String,
+    -- | Omit fields with 'Nothing' values from output.
+    soOmitNothingFields :: Bool,
+    -- | How to encode sum types.
+    soSumEncoding :: SumEncoding
   }
 
 -- | How to encode sum types in JSON.
@@ -300,9 +296,10 @@ data SumEncoding
 
 -- | Default options.
 defaultOptions :: StructuredOptions
-defaultOptions = StructuredOptions
-  { soFieldLabelModifier = id
-  , soConstructorTagModifier = id
-  , soOmitNothingFields = True
-  , soSumEncoding = TaggedObject "tag" "contents"
-  }
+defaultOptions =
+  StructuredOptions
+    { soFieldLabelModifier = id,
+      soConstructorTagModifier = id,
+      soOmitNothingFields = True,
+      soSumEncoding = TaggedObject "tag" "contents"
+    }

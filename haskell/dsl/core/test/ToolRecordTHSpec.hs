@@ -1,19 +1,18 @@
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 -- | Tests for ToolRecord TH derivation.
 module ToolRecordTHSpec (spec) where
 
-import Test.Hspec
-import Data.Proxy (Proxy(..))
-import Data.Aeson (FromJSON, ToJSON, toJSON, Value(..))
+import Control.Monad.Freer (Eff, run, runM)
+import Data.Aeson (FromJSON, ToJSON, Value (..), toJSON)
+import Data.Proxy (Proxy (..))
+import ExoMonad.LLM.Tools (ToolDispatchError (..), ToolRecord (..), ToolSchema (..), dispatchHandler)
+import ExoMonad.LLM.Tools.TH (Tool (..), deriveToolRecord)
+import ExoMonad.StructuredOutput.Class (HasJSONSchema (..))
 import GHC.Generics (Generic)
-import Control.Monad.Freer (Eff, runM, run)
-
-import ExoMonad.StructuredOutput.Class (HasJSONSchema(..))
-import ExoMonad.LLM.Tools (ToolRecord(..), ToolSchema(..), dispatchHandler, ToolDispatchError(..))
-import ExoMonad.LLM.Tools.TH (deriveToolRecord, Tool(..))
+import Test.Hspec
 
 -- Test types
 data SearchArgs = SearchArgs
@@ -32,21 +31,22 @@ data LookupArgs = LookupArgs
   deriving (Generic, Show, Eq, FromJSON, ToJSON, HasJSONSchema)
 
 data LookupResult = LookupResult
-  { found :: Bool
-  , name :: Maybe String
+  { found :: Bool,
+    name :: Maybe String
   }
   deriving (Generic, Show, Eq, FromJSON, ToJSON)
 
 -- Tool record type
 data TestTools es = TestTools
-  { search :: SearchArgs -> Eff es SearchResult
-  , lookupById :: LookupArgs -> Eff es LookupResult
+  { search :: SearchArgs -> Eff es SearchResult,
+    lookupById :: LookupArgs -> Eff es LookupResult
   }
 
 -- Derive the ToolRecord instance using TH
-deriveToolRecord ''TestTools
-  [ Tool "search" "Search for items by query string"
-  , Tool "lookupById" "Look up an item by its unique ID"
+deriveToolRecord
+  ''TestTools
+  [ Tool "search" "Search for items by query string",
+    Tool "lookupById" "Look up an item by its unique ID"
   ]
 
 spec :: Spec
@@ -70,10 +70,11 @@ spec = describe "ToolRecord TH Derivation" $ do
 
   describe "dispatchTool" $ do
     it "dispatches to search handler correctly" $ do
-      let tools = TestTools
-            { search = \args -> pure $ SearchResult ["result1", "result2"]
-            , lookupById = \_ -> pure $ LookupResult True (Just "test")
-            }
+      let tools =
+            TestTools
+              { search = \args -> pure $ SearchResult ["result1", "result2"],
+                lookupById = \_ -> pure $ LookupResult True (Just "test")
+              }
 
       result <- runM $ dispatchTool tools "search" (toJSON (SearchArgs "test query"))
       case result of
@@ -81,10 +82,11 @@ spec = describe "ToolRecord TH Derivation" $ do
         Left err -> expectationFailure $ "Expected success, got error: " ++ show err
 
     it "dispatches to lookupById handler correctly" $ do
-      let tools = TestTools
-            { search = \_ -> pure $ SearchResult []
-            , lookupById = \args -> pure $ LookupResult (args.itemId > 0) (Just "found item")
-            }
+      let tools =
+            TestTools
+              { search = \_ -> pure $ SearchResult [],
+                lookupById = \args -> pure $ LookupResult (args.itemId > 0) (Just "found item")
+              }
 
       result <- runM $ dispatchTool tools "lookup_by_id" (toJSON (LookupArgs 42))
       case result of
@@ -92,10 +94,11 @@ spec = describe "ToolRecord TH Derivation" $ do
         Left err -> expectationFailure $ "Expected success, got error: " ++ show err
 
     it "returns ToolNotFound for unknown tools" $ do
-      let tools = TestTools
-            { search = \_ -> pure $ SearchResult []
-            , lookupById = \_ -> pure $ LookupResult False Nothing
-            }
+      let tools =
+            TestTools
+              { search = \_ -> pure $ SearchResult [],
+                lookupById = \_ -> pure $ LookupResult False Nothing
+              }
 
       result <- runM $ dispatchTool tools "unknown_tool" (toJSON (SearchArgs "test"))
       case result of
@@ -103,10 +106,11 @@ spec = describe "ToolRecord TH Derivation" $ do
         _ -> expectationFailure "Expected ToolNotFound error"
 
     it "returns parse error for invalid input" $ do
-      let tools = TestTools
-            { search = \_ -> pure $ SearchResult []
-            , lookupById = \_ -> pure $ LookupResult False Nothing
-            }
+      let tools =
+            TestTools
+              { search = \_ -> pure $ SearchResult [],
+                lookupById = \_ -> pure $ LookupResult False Nothing
+              }
 
       -- Pass wrong JSON structure
       result <- runM $ dispatchTool tools "search" (Object mempty)

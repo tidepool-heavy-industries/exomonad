@@ -11,11 +11,12 @@
 -- @
 module ExoMonad.Cabal.Interpreter
   ( -- * Re-exports
-    Cabal(..)
-  , CabalResult(..)
-  , cabalBuild
-  , cabalTest
-  , cabalClean
-  ) where
+    Cabal (..),
+    CabalResult (..),
+    cabalBuild,
+    cabalTest,
+    cabalClean,
+  )
+where
 
 import ExoMonad.Effects.Cabal

@@ -38,7 +38,7 @@ impl OtelService {
     pub fn from_env() -> Result<Self, anyhow::Error> {
         let endpoint_str = std::env::var("OTLP_ENDPOINT")?;
         let endpoint = Url::parse(&endpoint_str)?;
-        
+
         let mut headers = HashMap::new();
         if let Ok(h_str) = std::env::var("OTLP_HEADERS") {
             for pair in h_str.split(',') {
@@ -49,7 +49,10 @@ impl OtelService {
                 if let Some((k, v)) = trimmed.split_once('=') {
                     headers.insert(k.trim().to_string(), v.trim().to_string());
                 } else {
-                    warn!("OTelService: ignoring malformed OTLP_HEADERS entry without '=': {:?}", trimmed);
+                    warn!(
+                        "OTelService: ignoring malformed OTLP_HEADERS entry without '=': {:?}",
+                        trimmed
+                    );
                 }
             }
         }
@@ -221,7 +224,7 @@ impl ExternalService for OtelService {
                         message: response.text().await.unwrap_or_default(),
                     });
                 }
-                
+
                 Ok(ServiceResponse::OtelAck)
             }
             ServiceRequest::OtelMetric {
@@ -229,30 +232,30 @@ impl ExternalService for OtelService {
                 value,
                 labels,
             } => {
-                 let now = std::time::SystemTime::now()
+                let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_nanos() as u64;
 
                 let payload = MetricsData {
                     resource_metrics: vec![ResourceMetric {
-                         resource: Resource { attributes: vec![] },
-                         scope_metrics: vec![ScopeMetric {
-                             scope: InstrumentationScope {
-                                 name: "exomonad-services".into(),
-                                 version: "0.1.0".into(),
-                             },
-                             metrics: vec![Metric {
-                                 name,
-                                 gauge: Some(Gauge {
-                                     data_points: vec![NumberDataPoint {
-                                         time_unix_nano: now,
-                                         as_double: value,
-                                         attributes: map_attributes(&labels),
-                                     }],
-                                 }),
-                             }],
-                         }],
+                        resource: Resource { attributes: vec![] },
+                        scope_metrics: vec![ScopeMetric {
+                            scope: InstrumentationScope {
+                                name: "exomonad-services".into(),
+                                version: "0.1.0".into(),
+                            },
+                            metrics: vec![Metric {
+                                name,
+                                gauge: Some(Gauge {
+                                    data_points: vec![NumberDataPoint {
+                                        time_unix_nano: now,
+                                        as_double: value,
+                                        attributes: map_attributes(&labels),
+                                    }],
+                                }),
+                            }],
+                        }],
                     }],
                 };
 
@@ -294,7 +297,7 @@ mod tests {
             .await;
 
         let service = OtelService::new(mock_server.uri().parse().unwrap(), HashMap::new());
-        
+
         let req = ServiceRequest::OtelSpan {
             trace_id: "12345678901234567890123456789012".into(),
             span_id: "1234567890123456".into(),
@@ -305,7 +308,7 @@ mod tests {
         };
 
         match service.call(req).await.unwrap() {
-            ServiceResponse::OtelAck => {},
+            ServiceResponse::OtelAck => {}
             _ => panic!("Wrong response type"),
         }
     }

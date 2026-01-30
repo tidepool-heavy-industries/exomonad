@@ -3,21 +3,19 @@
 -- | Tests for the unified graph registry.
 module RegistrySpec (spec) where
 
+import Data.Map.Strict qualified as Map
 import Data.Text (Text)
-import qualified Data.Text as T
-import Test.Hspec
-
+import Data.Text qualified as T
 import ExoMonad.Wasm.Registry
-  ( initialize
-  , step
-  , getGraphInfo
-  , getGraphState
-  , resetSession
-  , getRegistry
+  ( getGraphInfo,
+    getGraphState,
+    getRegistry,
+    initialize,
+    resetSession,
+    step,
   )
 import ExoMonad.Wasm.Registry.Default (setupDefaultRegistry)
-import qualified Data.Map.Strict as Map
-
+import Test.Hspec
 
 spec :: Spec
 spec = do

@@ -13,7 +13,7 @@ pub struct BuildError {
     pub line: u32,
     pub column: u32,
     pub message: String,
-    pub error_type: String,  // "type-error", "parse-error", "scope-error", etc.
+    pub error_type: String, // "type-error", "parse-error", "scope-error", etc.
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -41,8 +41,8 @@ pub struct TestFailure {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GitStatusResult {
     pub branch: String,
-    pub dirty: Vec<String>,       // modified/untracked files
-    pub staged: Vec<String>,      // staged files
+    pub dirty: Vec<String>,  // modified/untracked files
+    pub staged: Vec<String>, // staged files
     pub ahead: u32,
     pub behind: u32,
 }
@@ -57,7 +57,7 @@ pub struct GitDiffResult {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DiffFile {
     pub path: String,
-    pub status: String,  // "added", "modified", "deleted"
+    pub status: String, // "added", "modified", "deleted"
     pub additions: u32,
     pub deletions: u32,
 }
@@ -67,7 +67,7 @@ pub struct GhPrStatusResult {
     pub exists: bool,
     pub url: Option<String>,
     pub number: Option<u32>,
-    pub state: Option<String>,      // "open", "closed", "merged"
+    pub state: Option<String>,         // "open", "closed", "merged"
     pub review_status: Option<String>, // "pending", "approved", "changes_requested"
     pub comments: Vec<PrComment>,
 }
@@ -76,7 +76,7 @@ pub struct GhPrStatusResult {
 pub struct PrComment {
     pub author: String,
     pub body: String,
-    pub path: Option<String>,       // for review comments
+    pub path: Option<String>, // for review comments
     pub line: Option<u32>,
 }
 

@@ -1,4 +1,3 @@
-
 -- | Mermaid diagram generation for Graph definitions.
 --
 -- Generates Mermaid flowchart syntax from reified graph information.
@@ -26,34 +25,34 @@
 -- @
 module ExoMonad.Graph.Mermaid
   ( -- * Flowchart Generation
-    toMermaid
-  , toMermaidWithConfig
-  , graphToMermaid
-  , graphToMermaidWithConfig
+    toMermaid,
+    toMermaidWithConfig,
+    graphToMermaid,
+    graphToMermaidWithConfig,
 
     -- * State Diagram Generation
-  , toStateDiagram
-  , toStateDiagramWithConfig
+    toStateDiagram,
+    toStateDiagramWithConfig,
 
     -- * Sequence Diagram Generation
-  , toSequenceDiagram
-  , ExecutionPath(..)
+    toSequenceDiagram,
+    ExecutionPath (..),
 
     -- * Configuration
-  , MermaidConfig(..)
-  , defaultConfig
-  ) where
+    MermaidConfig (..),
+    defaultConfig,
+  )
+where
 
-import Data.Kind (Type)
-import Data.Proxy (Proxy(..))
 import Data.Char (isAsciiUpper)
+import Data.Kind (Type)
+import Data.Proxy (Proxy (..))
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Data.Typeable (TypeRep)
-import GHC.Generics (Generic(..))
-
 import ExoMonad.Graph.Generic.Core (AsGraph)
 import ExoMonad.Graph.Reify
+import GHC.Generics (Generic (..))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONFIGURATION
@@ -61,25 +60,32 @@ import ExoMonad.Graph.Reify
 
 -- | Configuration for Mermaid output.
 data MermaidConfig = MermaidConfig
-  { mcDirection :: Text          -- ^ Flow direction: TD (top-down), LR (left-right)
-  , mcShowTypes :: Bool          -- ^ Show type names on edges
-  , mcShowNodeKind :: Bool       -- ^ Show LLM/Logic labels in nodes
-  , mcEntryLabel :: Text         -- ^ Label for entry node
-  , mcExitLabel :: Text          -- ^ Label for exit node
-  , mcIncludeComments :: Bool    -- ^ Include structured comments for LLM context
+  { -- | Flow direction: TD (top-down), LR (left-right)
+    mcDirection :: Text,
+    -- | Show type names on edges
+    mcShowTypes :: Bool,
+    -- | Show LLM/Logic labels in nodes
+    mcShowNodeKind :: Bool,
+    -- | Label for entry node
+    mcEntryLabel :: Text,
+    -- | Label for exit node
+    mcExitLabel :: Text,
+    -- | Include structured comments for LLM context
+    mcIncludeComments :: Bool
   }
   deriving (Show, Eq)
 
 -- | Default configuration.
 defaultConfig :: MermaidConfig
-defaultConfig = MermaidConfig
-  { mcDirection = "TD"
-  , mcShowTypes = True
-  , mcShowNodeKind = True
-  , mcEntryLabel = "start"
-  , mcExitLabel = "end"
-  , mcIncludeComments = True
-  }
+defaultConfig =
+  MermaidConfig
+    { mcDirection = "TD",
+      mcShowTypes = True,
+      mcShowNodeKind = True,
+      mcEntryLabel = "start",
+      mcExitLabel = "end",
+      mcIncludeComments = True
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- DIAGRAM GENERATION
@@ -113,26 +119,26 @@ toMermaid = toMermaidWithConfig defaultConfig
 -- mermaidOutput :: Text
 -- mermaidOutput = graphToMermaid (Proxy @SupportGraph)
 -- @
-graphToMermaid
-  :: forall (graph :: Type -> Type).
-     ( GReifyFields (Rep (graph AsGraph))
-     , ReifyMaybeType (GetEntryTypeFromGraph graph)
-     , ReifyMaybeType (GetExitTypeFromGraph graph)
-     )
-  => Proxy graph
-  -> Text
+graphToMermaid ::
+  forall (graph :: Type -> Type).
+  ( GReifyFields (Rep (graph AsGraph)),
+    ReifyMaybeType (GetEntryTypeFromGraph graph),
+    ReifyMaybeType (GetExitTypeFromGraph graph)
+  ) =>
+  Proxy graph ->
+  Text
 graphToMermaid p = toMermaid (makeGraphInfo p)
 
 -- | Generate Mermaid diagram with custom configuration from a graph type.
-graphToMermaidWithConfig
-  :: forall (graph :: Type -> Type).
-     ( GReifyFields (Rep (graph AsGraph))
-     , ReifyMaybeType (GetEntryTypeFromGraph graph)
-     , ReifyMaybeType (GetExitTypeFromGraph graph)
-     )
-  => MermaidConfig
-  -> Proxy graph
-  -> Text
+graphToMermaidWithConfig ::
+  forall (graph :: Type -> Type).
+  ( GReifyFields (Rep (graph AsGraph)),
+    ReifyMaybeType (GetEntryTypeFromGraph graph),
+    ReifyMaybeType (GetExitTypeFromGraph graph)
+  ) =>
+  MermaidConfig ->
+  Proxy graph ->
+  Text
 graphToMermaidWithConfig config p = toMermaidWithConfig config (makeGraphInfo p)
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -141,19 +147,20 @@ graphToMermaidWithConfig config p = toMermaidWithConfig config (makeGraphInfo p)
 
 -- | Generate Mermaid diagram with custom configuration.
 toMermaidWithConfig :: MermaidConfig -> GraphInfo -> Text
-toMermaidWithConfig config info = T.unlines $
-  [ "flowchart " <> config.mcDirection
-  , ""
-  , "    %% EntryNode and Exit"
-  , "    entry((" <> config.mcEntryLabel <> "))"
-  , "    exit__((" <> config.mcExitLabel <> "))"
-  , ""
-  ]
-  ++ nodeDeclarations config info
-  ++ [""]
-  ++ groupDeclarations info
-  ++ [""]
-  ++ edgeDeclarations config info
+toMermaidWithConfig config info =
+  T.unlines $
+    [ "flowchart " <> config.mcDirection,
+      "",
+      "    %% EntryNode and Exit",
+      "    entry((" <> config.mcEntryLabel <> "))",
+      "    exit__((" <> config.mcExitLabel <> "))",
+      ""
+    ]
+      ++ nodeDeclarations config info
+      ++ [""]
+      ++ groupDeclarations info
+      ++ [""]
+      ++ edgeDeclarations config info
 
 -- | Generate node declarations.
 nodeDeclarations :: MermaidConfig -> GraphInfo -> [Text]
@@ -165,24 +172,27 @@ renderNodeWithComments :: MermaidConfig -> NodeInfo -> [Text]
 renderNodeWithComments config node =
   comments ++ [declaration]
   where
-    comments = if config.mcIncludeComments
-               then renderNodeComments node
-               else []
+    comments =
+      if config.mcIncludeComments
+        then renderNodeComments node
+        else []
     declaration = renderNode config node
 
 -- | Render structured comments for a node (for LLM context).
 renderNodeComments :: NodeInfo -> [Text]
-renderNodeComments node = filter (not . T.null)
-  [ "    %% NODE: " <> node.niName
-  , "    %% kind: " <> kindText node.niKind
-  , renderClaudeCodeComment node.niClaudeCode
-  , renderGeminiComment node.niGemini
-  , renderTemplateComment node.niTemplate
-  , renderSchemaComment node.niSchema
-  , renderToolsComment node.niToolInfos
-  , renderMemoryComment node.niMemory
-  , renderTransitionsComment node
-  ]
+renderNodeComments node =
+  filter
+    (not . T.null)
+    [ "    %% NODE: " <> node.niName,
+      "    %% kind: " <> kindText node.niKind,
+      renderClaudeCodeComment node.niClaudeCode,
+      renderGeminiComment node.niGemini,
+      renderTemplateComment node.niTemplate,
+      renderSchemaComment node.niSchema,
+      renderToolsComment node.niToolInfos,
+      renderMemoryComment node.niMemory,
+      renderTransitionsComment node
+    ]
   where
     kindText RuntimeLLM = "LLM"
     kindText RuntimeClaudeCode = "ClaudeCode"
@@ -194,22 +204,26 @@ renderNodeComments node = filter (not . T.null)
 -- | Render template comment.
 renderTemplateComment :: Maybe TemplateInfo -> Text
 renderTemplateComment Nothing = ""
-renderTemplateComment (Just ti) = T.intercalate "\n"
-  [ "    %% template: " <> T.pack ti.tiPath
-  , "    %%   deps: " <> T.pack (show ti.tiDeps)
-  , "    %%   fields: " <> T.pack (show ti.tiAccessedFields)
-  , "    %%   context: " <> ti.tiContextType
-  ]
+renderTemplateComment (Just ti) =
+  T.intercalate
+    "\n"
+    [ "    %% template: " <> T.pack ti.tiPath,
+      "    %%   deps: " <> T.pack (show ti.tiDeps),
+      "    %%   fields: " <> T.pack (show ti.tiAccessedFields),
+      "    %%   context: " <> ti.tiContextType
+    ]
 
 -- | Render schema comment.
 renderSchemaComment :: Maybe SchemaInfo -> Text
 renderSchemaComment Nothing = ""
-renderSchemaComment (Just si) = T.intercalate "\n"
-  [ "    %% schema: " <> si.siTypeName
-  , "    %%   fields: " <> renderFields si.siFields
-  ]
+renderSchemaComment (Just si) =
+  T.intercalate
+    "\n"
+    [ "    %% schema: " <> si.siTypeName,
+      "    %%   fields: " <> renderFields si.siFields
+    ]
   where
-    renderFields = T.intercalate ", " . map (\(n,t,_) -> n <> ": " <> t)
+    renderFields = T.intercalate ", " . map (\(n, t, _) -> n <> ": " <> t)
 
 -- | Render tools comment.
 renderToolsComment :: [ToolInfo] -> Text
@@ -237,33 +251,35 @@ renderTransitionsComment node
   | null node.niGotoTargets && not node.niHasGotoExit = ""
   | otherwise = "    %% transitions: " <> T.intercalate ", " targets
   where
-    targets = map fst node.niGotoTargets
-           ++ ["Exit" | node.niHasGotoExit]
+    targets =
+      map fst node.niGotoTargets
+        ++ ["Exit" | node.niHasGotoExit]
 
 -- | Render a single node declaration.
 renderNode :: MermaidConfig -> NodeInfo -> Text
 renderNode config node =
   "    " <> escapeName node.niName <> shape
   where
-    label = if config.mcShowNodeKind
-            then node.niName <> "<br/>" <> kindLabel node
-            else node.niName
+    label =
+      if config.mcShowNodeKind
+        then node.niName <> "<br/>" <> kindLabel node
+        else node.niName
     shape = case node.niKind of
-      RuntimeLLM        -> "[[\"" <> label <> "\"]]"
-      RuntimeClaudeCode -> "[[\"" <> label <> "\"]]"  -- Same shape as LLM
-      RuntimeGemini     -> "[[\"" <> label <> "\"]]"  -- Same shape as LLM
-      RuntimeLogic      -> "{{\"" <> label <> "\"}}"
-      RuntimeFork       -> "{\"" <> label <> "\"}"     -- Diamond for fork
-      RuntimeBarrier    -> "[/\"" <> label <> "\"/]"   -- Trapezoid for barrier
+      RuntimeLLM -> "[[\"" <> label <> "\"]]"
+      RuntimeClaudeCode -> "[[\"" <> label <> "\"]]" -- Same shape as LLM
+      RuntimeGemini -> "[[\"" <> label <> "\"]]" -- Same shape as LLM
+      RuntimeLogic -> "{{\"" <> label <> "\"}}"
+      RuntimeFork -> "{\"" <> label <> "\"}" -- Diamond for fork
+      RuntimeBarrier -> "[/\"" <> label <> "\"/]" -- Trapezoid for barrier
 
     -- For ClaudeCode nodes, include the model name in the label
     kindLabel n = case n.niKind of
       RuntimeLLM -> "LLM"
       RuntimeClaudeCode -> case n.niClaudeCode of
-        Just cci -> "CC " <> cci.cciModel  -- e.g., "CC Sonnet"
-        Nothing  -> "ClaudeCode"
+        Just cci -> "CC " <> cci.cciModel -- e.g., "CC Sonnet"
+        Nothing -> "ClaudeCode"
       RuntimeGemini -> case n.niGemini of
-        Just gi -> "Gemini " <> gi.giModel  -- e.g., "Gemini Flash"
+        Just gi -> "Gemini " <> gi.giModel -- e.g., "Gemini Flash"
         Nothing -> "Gemini"
       RuntimeLogic -> "Logic"
       RuntimeFork -> "Fork"
@@ -280,17 +296,18 @@ groupDeclarations info
 renderGroup :: (Text, [Text]) -> [Text]
 renderGroup (name, members) =
   [ "    subgraph " <> escapeName name
-  ] ++ map (\m -> "        " <> escapeName m) members ++
-  [ "    end"
   ]
+    ++ map (\m -> "        " <> escapeName m) members
+    ++ [ "    end"
+       ]
 
 -- | Generate edge declarations.
 edgeDeclarations :: MermaidConfig -> GraphInfo -> [Text]
 edgeDeclarations config info =
   ["    %% Edges"]
-  ++ entryEdges config info
-  ++ nodeEdges config info
-  ++ exitEdges config info
+    ++ entryEdges config info
+    ++ nodeEdges config info
+    ++ exitEdges config info
 
 -- | Generate edges from EntryNode to root nodes.
 --
@@ -319,9 +336,9 @@ nodeToNodeEdges config info node =
       Nothing -> []
       Just schemaInfo ->
         [ "    " <> escapeName node.niName <> " --> |" <> typeLabel config schemaInfo.siType <> "| " <> escapeName target.niName
-        | target <- info.giNodes
-        , target.niInput == Just schemaInfo.siType
-        , target.niName /= node.niName  -- No self-loops from schema
+        | target <- info.giNodes,
+          target.niInput == Just schemaInfo.siType,
+          target.niName /= node.niName -- No self-loops from schema
         ]
 
     -- Goto edges (explicit)
@@ -335,13 +352,13 @@ exitEdges :: MermaidConfig -> GraphInfo -> [Text]
 exitEdges config info = case info.giExitType of
   Nothing ->
     [ "    " <> escapeName node.niName <> " --> exit__"
-    | node <- info.giNodes
-    , node.niHasGotoExit
+    | node <- info.giNodes,
+      node.niHasGotoExit
     ]
   Just exitType ->
     [ "    " <> escapeName node.niName <> " --> |" <> typeLabel config exitType <> "| exit__"
-    | node <- info.giNodes
-    , node.niHasGotoExit
+    | node <- info.giNodes,
+      node.niHasGotoExit
     ]
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -370,10 +387,10 @@ simplifyType t = T.pack $ go $ T.unpack t
   where
     go s = case break (== '.') s of
       (_, []) -> s
-      (_, '.':rest) ->
+      (_, '.' : rest) ->
         -- Check if next segment is uppercase (module) or lowercase (end)
         case rest of
-          (c:_) | isAsciiUpper c -> go rest
+          (c : _) | isAsciiUpper c -> go rest
           _ -> s
       _ -> s
 
@@ -400,32 +417,33 @@ toStateDiagram = toStateDiagramWithConfig defaultConfig
 
 -- | Generate Mermaid state diagram with custom configuration.
 toStateDiagramWithConfig :: MermaidConfig -> GraphInfo -> Text
-toStateDiagramWithConfig config info = T.unlines $
-  [ "stateDiagram-v2"
-  , ""
-  ]
-  ++ stateDefinitions config info
-  ++ [""]
-  ++ stateTransitions config info
+toStateDiagramWithConfig config info =
+  T.unlines $
+    [ "stateDiagram-v2",
+      ""
+    ]
+      ++ stateDefinitions config info
+      ++ [""]
+      ++ stateTransitions config info
 
 -- | Generate state definitions with annotations.
 stateDefinitions :: MermaidConfig -> GraphInfo -> [Text]
 stateDefinitions config info =
   "    %% State definitions"
-  : map (renderState config) info.giNodes
+    : map (renderState config) info.giNodes
 
 -- | Render a state definition.
 renderState :: MermaidConfig -> NodeInfo -> Text
 renderState config node =
   if config.mcShowNodeKind
-  then "    " <> escapeName node.niName <> " : " <> kindAnnotation node
-  else ""
+    then "    " <> escapeName node.niName <> " : " <> kindAnnotation node
+    else ""
   where
     kindAnnotation n = case n.niKind of
       RuntimeLLM -> "LLM"
       RuntimeClaudeCode -> case n.niClaudeCode of
         Just cci -> "CC " <> cci.cciModel
-        Nothing  -> "ClaudeCode"
+        Nothing -> "ClaudeCode"
       RuntimeGemini -> case n.niGemini of
         Just gi -> "Gemini " <> gi.giModel
         Nothing -> "Gemini"
@@ -437,9 +455,9 @@ renderState config node =
 stateTransitions :: MermaidConfig -> GraphInfo -> [Text]
 stateTransitions config info =
   ["    %% Transitions"]
-  ++ entryStateTransitions config info
-  ++ nodeStateTransitions config info
-  ++ exitStateTransitions config info
+    ++ entryStateTransitions config info
+    ++ nodeStateTransitions config info
+    ++ exitStateTransitions config info
 
 -- | EntryNode transitions.
 --
@@ -467,9 +485,9 @@ nodeStateEdges config info node =
       Nothing -> []
       Just schemaInfo ->
         [ "    " <> escapeName node.niName <> " --> " <> escapeName target.niName <> ": " <> typeLabel config schemaInfo.siType
-        | target <- info.giNodes
-        , target.niInput == Just schemaInfo.siType
-        , target.niName /= node.niName
+        | target <- info.giNodes,
+          target.niInput == Just schemaInfo.siType,
+          target.niName /= node.niName
         ]
 
     -- Goto transitions (explicit control flow)
@@ -483,13 +501,13 @@ exitStateTransitions :: MermaidConfig -> GraphInfo -> [Text]
 exitStateTransitions config info = case info.giExitType of
   Nothing ->
     [ "    " <> escapeName node.niName <> " --> [*]"
-    | node <- info.giNodes
-    , node.niHasGotoExit
+    | node <- info.giNodes,
+      node.niHasGotoExit
     ]
   Just exitType ->
     [ "    " <> escapeName node.niName <> " --> [*]: " <> typeLabel config exitType
-    | node <- info.giNodes
-    , node.niHasGotoExit
+    | node <- info.giNodes,
+      node.niHasGotoExit
     ]
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -500,7 +518,7 @@ exitStateTransitions config info = case info.giExitType of
 --
 -- Each step is a node name. The path starts implicitly from EntryNode
 -- and ends at Exit.
-newtype ExecutionPath = ExecutionPath { pathSteps :: [Text] }
+newtype ExecutionPath = ExecutionPath {pathSteps :: [Text]}
   deriving (Show, Eq)
 
 -- | Generate Mermaid sequence diagram for a specific execution path.
@@ -521,18 +539,19 @@ newtype ExecutionPath = ExecutionPath { pathSteps :: [Text] }
 --     refund->>Exit: Response
 -- @
 toSequenceDiagram :: MermaidConfig -> GraphInfo -> ExecutionPath -> Text
-toSequenceDiagram config info path = T.unlines $
-  [ "sequenceDiagram"
-  , ""
-  , "    %% Participants"
-  , "    participant EntryNode"
-  ]
-  ++ map renderParticipant path.pathSteps
-  ++ [ "    participant Exit"
-     , ""
-     , "    %% Message flow"
-     ]
-  ++ sequenceMessages config info path
+toSequenceDiagram config info path =
+  T.unlines $
+    [ "sequenceDiagram",
+      "",
+      "    %% Participants",
+      "    participant EntryNode"
+    ]
+      ++ map renderParticipant path.pathSteps
+      ++ [ "    participant Exit",
+           "",
+           "    %% Message flow"
+         ]
+      ++ sequenceMessages config info path
 
 -- | Render a participant declaration.
 renderParticipant :: Text -> Text
@@ -545,7 +564,7 @@ sequenceMessages config info (ExecutionPath steps) =
   where
     -- EntryNode to first node
     entryMessage = case (steps, info.giEntryType) of
-      (first:_, Just entryType) ->
+      (first : _, Just entryType) ->
         ["    EntryNode->>" <> escapeName first <> ": " <> typeLabel config entryType]
       _ -> []
 
@@ -554,9 +573,9 @@ sequenceMessages config info (ExecutionPath steps) =
 
     -- Last node to Exit
     exitMessage = case (reverse steps, info.giExitType) of
-      (lastNode:_, Just exitType) ->
+      (lastNode : _, Just exitType) ->
         ["    " <> escapeName lastNode <> "->>Exit: " <> typeLabel config exitType]
-      (lastNode:_, Nothing) ->
+      (lastNode : _, Nothing) ->
         ["    " <> escapeName lastNode <> "->>Exit: "]
       _ -> []
 
@@ -591,8 +610,8 @@ findNodeByName info name =
 findRootNodes :: GraphInfo -> [Text]
 findRootNodes info =
   [ node.niName
-  | node <- info.giNodes
-  , not (hasIncomingEdge info node.niName)
+  | node <- info.giNodes,
+    not (hasIncomingEdge info node.niName)
   ]
 
 -- | Check if a node has any incoming edge (Schema→Needs or Goto).
@@ -601,11 +620,12 @@ hasIncomingEdge info targetName = any sendsTo info.giNodes
   where
     sendsTo node =
       -- Goto edge to this node?
-      targetName `elem` map fst node.niGotoTargets ||
-      -- Schema→Input edge to this node?
-      case node.niSchema of
-        Nothing -> False
-        Just schemaInfo ->
-          case findNodeByName info targetName of
-            Nothing -> False
-            Just target -> target.niInput == Just schemaInfo.siType
+      targetName `elem` map fst node.niGotoTargets
+        ||
+        -- Schema→Input edge to this node?
+        case node.niSchema of
+          Nothing -> False
+          Just schemaInfo ->
+            case findNodeByName info targetName of
+              Nothing -> False
+              Just target -> target.niInput == Just schemaInfo.siType

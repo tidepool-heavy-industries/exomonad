@@ -11,41 +11,40 @@
 --
 -- Also provides 'StringEnum' for LLM-compatible enum schemas.
 module ExoMonad.StructuredOutput.Instances
-  ( StringEnum(..)
-  , ExoMonadDefault(..)
-  ) where
+  ( StringEnum (..),
+    ExoMonadDefault (..),
+  )
+where
 
-import Data.Aeson (Value(..), ToJSON(..), FromJSON(..))
+import Data.Aeson (FromJSON (..), ToJSON (..), Value (..))
 import Data.Bifunctor (first)
-import Data.List.NonEmpty (NonEmpty(..))
-import qualified Data.List.NonEmpty as NonEmpty
-import Data.Scientific (toBoundedInteger, fromFloatDigits)
+import Data.List.NonEmpty (NonEmpty (..))
+import Data.List.NonEmpty qualified as NonEmpty
+import Data.Scientific (fromFloatDigits, toBoundedInteger)
 import Data.Set (Set)
-import qualified Data.Set as Set
+import Data.Set qualified as Set
 import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Vector as V
-import GHC.Generics (Generic, Rep, from, to)
-
-import ExoMonad.Schema (JSONSchema(..), SchemaType(..), emptySchema, arraySchema, HasJSONSchema(..), ExoMonadDefault(..), StringEnum(..))
+import Data.Text qualified as T
+import Data.Vector qualified as V
+import ExoMonad.Schema (ExoMonadDefault (..), HasJSONSchema (..), JSONSchema (..), SchemaType (..), StringEnum (..), arraySchema, emptySchema)
 import ExoMonad.StructuredOutput.Class
-  ( StructuredOutput(..)
-  , GStructuredOutput(..)
-  , gStructuredSchema
-  , gEncodeStructured
-  , gParseStructured
-  , defaultOptions
+  ( GStructuredOutput (..),
+    StructuredOutput (..),
+    defaultOptions,
+    gEncodeStructured,
+    gParseStructured,
+    gStructuredSchema,
   )
 import ExoMonad.StructuredOutput.Error
-  ( ParseDiagnostic(..)
-  , formatDiagnostic
-  , expectedString
-  , expectedNumber
-  , expectedBool
-  , expectedArray
-  , typeMismatch
+  ( ParseDiagnostic (..),
+    expectedArray,
+    expectedBool,
+    expectedNumber,
+    expectedString,
+    formatDiagnostic,
+    typeMismatch,
   )
-
+import GHC.Generics (Generic, Rep, from, to)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PRIMITIVE TYPES
@@ -93,12 +92,11 @@ instance StructuredOutput Bool where
   parseStructured (Bool b) = Right b
   parseStructured v = Left $ expectedBool [] v
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONTAINER TYPES
 -- ════════════════════════════════════════════════════════════════════════════
 
-instance StructuredOutput a => StructuredOutput (Maybe a) where
+instance (StructuredOutput a) => StructuredOutput (Maybe a) where
   -- Schema is same as inner type - optionality handled by 'required' list
   structuredSchema = structuredSchema @a
 
@@ -108,13 +106,13 @@ instance StructuredOutput a => StructuredOutput (Maybe a) where
   parseStructured Null = Right Nothing
   parseStructured v = Just <$> parseStructured v
 
-instance {-# OVERLAPPABLE #-} StructuredOutput a => StructuredOutput [a] where
+instance {-# OVERLAPPABLE #-} (StructuredOutput a) => StructuredOutput [a] where
   structuredSchema = arraySchema (structuredSchema @a)
 
   encodeStructured xs = Array $ V.fromList $ map encodeStructured xs
 
   parseStructured (Array arr) = do
-    let indexed = zip [0..] (V.toList arr)
+    let indexed = zip [0 ..] (V.toList arr)
     traverse parseWithIndex indexed
     where
       parseWithIndex :: (Int, Value) -> Either ParseDiagnostic a
@@ -124,7 +122,6 @@ instance {-# OVERLAPPABLE #-} StructuredOutput a => StructuredOutput [a] where
       addIndex :: Int -> ParseDiagnostic -> ParseDiagnostic
       addIndex i (ParseDiagnostic p e a m) =
         ParseDiagnostic (T.pack ("[" ++ show i ++ "]") : p) e a m
-
   parseStructured v = Left $ expectedArray [] v
 
 -- | Set as JSON array (elements deduplicated, order not guaranteed).
@@ -136,8 +133,8 @@ instance (StructuredOutput a, Ord a) => StructuredOutput (Set a) where
   parseStructured v = Left $ expectedArray [] v
 
 -- | NonEmpty list as JSON array (must have at least one element).
-instance StructuredOutput a => StructuredOutput (NonEmpty a) where
-  structuredSchema = (arraySchema (structuredSchema @a)) { schemaMinItems = Just 1 }
+instance (StructuredOutput a) => StructuredOutput (NonEmpty a) where
+  structuredSchema = (arraySchema (structuredSchema @a)) {schemaMinItems = Just 1}
   encodeStructured = encodeStructured . NonEmpty.toList
   parseStructured v = do
     list <- parseStructured @[a] v
@@ -145,13 +142,12 @@ instance StructuredOutput a => StructuredOutput (NonEmpty a) where
       Nothing -> Left $ typeMismatch [] "non-empty array" v
       Just ne -> Right ne
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- TUPLE TYPES (common arities)
 -- ════════════════════════════════════════════════════════════════════════════
 
 instance (StructuredOutput a, StructuredOutput b) => StructuredOutput (a, b) where
-  structuredSchema = arraySchema (emptySchema TObject)  -- Simplified
+  structuredSchema = arraySchema (emptySchema TObject) -- Simplified
   encodeStructured (x, y) = Array $ V.fromList [encodeStructured x, encodeStructured y]
   parseStructured (Array arr)
     | V.length arr == 2 = do
@@ -165,7 +161,6 @@ instance (StructuredOutput a, StructuredOutput b) => StructuredOutput (a, b) whe
         ParseDiagnostic (T.pack ("[" ++ show i ++ "]") : path) expected actual msg
   parseStructured v = Left $ expectedArray [] v
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- UNIT TYPE
 -- ════════════════════════════════════════════════════════════════════════════
@@ -175,8 +170,7 @@ instance (StructuredOutput a, StructuredOutput b) => StructuredOutput (a, b) whe
 instance StructuredOutput () where
   structuredSchema = emptySchema TNull
   encodeStructured () = Null
-  parseStructured _ = Right ()  -- Accept any JSON, like Aeson
-
+  parseStructured _ = Right () -- Accept any JSON, like Aeson
 
 -- | Pass-through instance for raw JSON Value.
 -- This enables backward compatibility with code using dynamic schemas.
@@ -185,7 +179,6 @@ instance StructuredOutput Value where
   structuredSchema = emptySchema TObject
   encodeStructured = id
   parseStructured = Right
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EXOMONAD DEFAULT WRAPPER

@@ -26,26 +26,26 @@
 -- @
 module ExoMonad.LLM.Types
   ( -- * Prompt Wrappers
-    System(..)
-  , User(..)
+    System (..),
+    User (..),
 
     -- * Model Selection
-  , Model(..)
-  , modelToText
+    Model (..),
+    modelToText,
 
     -- * LLM Configuration
-  , CallConfig(..)
-  , NoTools
+    CallConfig (..),
+    NoTools,
 
     -- * Error Types
-  , CallError(..)
-  ) where
+    CallError (..),
+  )
+where
 
+import Data.Aeson (FromJSON, ToJSON)
 import Data.Kind (Type)
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import Data.Aeson (ToJSON, FromJSON)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PROMPT WRAPPERS
@@ -58,7 +58,7 @@ import Data.Aeson (ToJSON, FromJSON)
 -- @
 -- call cfg (System "You are a helpful assistant.") (User "Hello!")
 -- @
-newtype System = System { getSystem :: Text }
+newtype System = System {getSystem :: Text}
   deriving stock (Show, Eq, Generic)
   deriving newtype (ToJSON, FromJSON)
 
@@ -69,10 +69,9 @@ newtype System = System { getSystem :: Text }
 -- @
 -- call cfg (System sysPrompt) (User userPrompt)
 -- @
-newtype User = User { getUser :: Text }
+newtype User = User {getUser :: Text}
   deriving stock (Show, Eq, Generic)
   deriving newtype (ToJSON, FromJSON)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- MODEL SELECTION
@@ -83,9 +82,12 @@ newtype User = User { getUser :: Text }
 -- These correspond to Anthropic model tiers, but the design allows
 -- for future provider expansion.
 data Model
-  = Haiku     -- ^ Fast, cost-effective for simple tasks
-  | Sonnet    -- ^ Balanced performance and cost (default)
-  | Opus      -- ^ Most capable, for complex reasoning
+  = -- | Fast, cost-effective for simple tasks
+    Haiku
+  | -- | Balanced performance and cost (default)
+    Sonnet
+  | -- | Most capable, for complex reasoning
+    Opus
   deriving stock (Show, Eq, Ord, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
@@ -94,10 +96,9 @@ data Model
 -- Maps our model enum to the actual Anthropic model identifier.
 modelToText :: Model -> Text
 modelToText = \case
-  Haiku  -> "claude-3-5-haiku-latest"
+  Haiku -> "claude-3-5-haiku-latest"
   Sonnet -> "claude-sonnet-4-20250514"
-  Opus   -> "claude-opus-4-20250514"
-
+  Opus -> "claude-opus-4-20250514"
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- LLM CONFIGURATION
@@ -126,16 +127,15 @@ data NoTools
 --
 -- * @out@ - The expected structured output type (phantom)
 -- * @tools@ - Tool record type, or 'NoTools' if none
-data CallConfig (out :: Type) (tools :: Type)  = CallConfig
-  { ccModel       :: Model
-    -- ^ Which model to use (default: Sonnet)
-  , ccMaxTokens   :: Maybe Int
-    -- ^ Maximum tokens to generate (default: provider default)
-  , ccTools       :: Maybe tools
-    -- ^ Tool record if any
+data CallConfig (out :: Type) (tools :: Type) = CallConfig
+  { -- | Which model to use (default: Sonnet)
+    ccModel :: Model,
+    -- | Maximum tokens to generate (default: provider default)
+    ccMaxTokens :: Maybe Int,
+    -- | Tool record if any
+    ccTools :: Maybe tools
   }
   deriving stock (Generic)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ERROR TYPES
@@ -143,23 +143,23 @@ data CallConfig (out :: Type) (tools :: Type)  = CallConfig
 
 -- | Errors that can occur during LLM invocation.
 data CallError
-  = CallRateLimited
-    -- ^ Rate limit hit, retry later
-  | CallTimeout
-    -- ^ Request timed out
-  | CallContextTooLong
-    -- ^ Input too long for context window
-  | CallParseFailed Text
-    -- ^ Schema parsing failed (includes error message)
-  | CallNetworkError Text
-    -- ^ Network/connection failure
-  | CallUnauthorized
-    -- ^ Invalid API key
-  | CallApiError Text Text
-    -- ^ API error (type, message)
-  | CallToolError Text Text
-    -- ^ Tool execution error (tool name, error message)
-  | CallMaxToolLoops Int
-    -- ^ Maximum tool use iterations exceeded
+  = -- | Rate limit hit, retry later
+    CallRateLimited
+  | -- | Request timed out
+    CallTimeout
+  | -- | Input too long for context window
+    CallContextTooLong
+  | -- | Schema parsing failed (includes error message)
+    CallParseFailed Text
+  | -- | Network/connection failure
+    CallNetworkError Text
+  | -- | Invalid API key
+    CallUnauthorized
+  | -- | API error (type, message)
+    CallApiError Text Text
+  | -- | Tool execution error (tool name, error message)
+    CallToolError Text Text
+  | -- | Maximum tool use iterations exceeded
+    CallMaxToolLoops Int
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON, FromJSON)

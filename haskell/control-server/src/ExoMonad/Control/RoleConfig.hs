@@ -1,12 +1,13 @@
 module ExoMonad.Control.RoleConfig
-  ( Role(..)
-  , roleFromText
-  , isToolAllowed
-  ) where
+  ( Role (..),
+    roleFromText,
+    isToolAllowed,
+  )
+where
 
 import Data.Text (Text)
-import ExoMonad.Role (Role(..))
 import ExoMonad.Control.Role.Registry (isToolAllowedTyped)
+import ExoMonad.Role (Role (..))
 
 roleFromText :: Text -> Maybe Role
 roleFromText "pm" = Just PM

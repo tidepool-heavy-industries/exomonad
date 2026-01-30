@@ -1,7 +1,7 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# OPTIONS_GHC -Wno-deprecations #-}
-{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 {-# OPTIONS_GHC -Wno-redundant-constraints #-}
+{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 -- | Servant-style record-as-graph pattern for the ExoMonad Graph DSL.
 --
@@ -45,127 +45,136 @@
 -- @
 module ExoMonad.Graph.Generic
   ( -- * Graph Mode Class
-    GraphMode(..)
+    GraphMode (..),
 
     -- * Re-exports
-  , type (:@)
-  , Tool
-  , Hook
-  , Description
+    type (:@),
+    Tool,
+    Hook,
+    Description,
 
     -- * Modes
-  , AsGraph
-  , AsHandler
+    AsGraph,
+    AsHandler,
 
     -- * Node Handler Type Family
-  , NodeHandler
+    NodeHandler,
 
     -- * Graph Product (Generic Traversal)
-  , GraphProduct(..)
+    GraphProduct (..),
 
     -- * EntryNode/ExitNode Types
-  , EntryNode
-  , ExitNode
-  , Entry
-  , Exit
+    EntryNode,
+    ExitNode,
+    Entry,
+    Exit,
 
     -- * Node Kind Wrappers (for record DSL)
-  , LLMNode
-  , GeminiNode
-  , LogicNode
-  , GraphNode
-  , ForkNode
-  , BarrierNode
+    LLMNode,
+    GeminiNode,
+    LogicNode,
+    GraphNode,
+    ForkNode,
+    BarrierNode,
 
     -- * Fork/Barrier Handler Types
-  , SpawnPayloads
-  , SpawnPayloadsInner
-  , AwaitsHList
+    SpawnPayloads,
+    SpawnPayloadsInner,
+    AwaitsHList,
 
     -- * Field Name Extraction
-  , FieldNames
-  , FieldDefs
-  , FieldsWithNames
-  , FieldNamesOf
-  , FieldsWithNamesOf
+    FieldNames,
+    FieldDefs,
+    FieldsWithNames,
+    FieldNamesOf,
+    FieldsWithNamesOf,
 
     -- * Node Definition Lookup
-  , GetNodeDef
-  , LookupField
+    GetNodeDef,
+    LookupField,
 
     -- * Graph-Validated Goto
-  , gotoField
+    gotoField,
 
     -- * Type-Level Utilities
-  , Elem
-  , ElemC
-  , ElemCWithOptions
-  , If
-  , Append
-  , type (||)
-  , OrMaybe
+    Elem,
+    ElemC,
+    ElemCWithOptions,
+    If,
+    Append,
+    type (||),
+    OrMaybe,
 
     -- * Re-exports for LLM Handlers
-  , LLMHandler(..)
-  , ClaudeCodeLLMHandler(..)
-  , GeminiLLMHandler(..)
-  , ChooseLLMHandler
-  , ToolHandler(..)
-  , HookHandler(..)
+    LLMHandler (..),
+    ClaudeCodeLLMHandler (..),
+    GeminiLLMHandler (..),
+    ChooseLLMHandler,
+    ToolHandler (..),
+    HookHandler (..),
 
     -- * Record Validation
-  , HasEntryField
-  , HasExitField
-  , CountEntries
-  , CountExits
-  , CountLogicNodes
-  , GetEntryType
-  , GetExitType
-  , ValidateEntryExit
-  , ValidateGotoTargets
-  , ValidGraphRecord
+    HasEntryField,
+    HasExitField,
+    CountEntries,
+    CountExits,
+    CountLogicNodes,
+    GetEntryType,
+    GetExitType,
+    ValidateEntryExit,
+    ValidateGotoTargets,
+    ValidGraphRecord,
 
     -- * Convenience Constraints
-  , GenericGraph
-  ) where
-
-import Data.Kind (Type, Constraint)
-import GHC.Generics (Generic(..), K1(..), M1(..), (:*:)(..), Meta(..), S, D, C)
-import GHC.TypeLits (Symbol, KnownSymbol, TypeError, ErrorMessage(..), Nat, type (+))
-import ExoMonad.Graph.Errors
-  ( HR, Blank, WhatHappened, HowItWorks, Fixes, Example
-  , Indent, CodeLine, Bullet
+    GenericGraph,
   )
+where
 
-import ExoMonad.Graph.Validate (FormatSymbolList)
 import Control.Monad.Freer (Eff, Member)
-
-import ExoMonad.Graph.Types (type (:@), Input, Schema, Template, Vision, Description, Tools, Memory, System, UsesEffects, ClaudeCode, ModelChoice, Gemini, Spawn, Barrier, Awaits, HList(..), MCPExport, MCPToolDef, MCPRoleHint, Tool, Hook)
-import ExoMonad.Effect.Gemini (GeminiOp, SingGeminiModel(..))
-import ExoMonad.Graph.Template (TemplateContext)
-import ExoMonad.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets, GetClaudeCode, GetGeminiModel, GetSpawnTargets, GetAwaits)
-import ExoMonad.Graph.Goto (Goto, goto, GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..), GeminiLLMHandler(..))
-import ExoMonad.Graph.Validate.RecordStructure
-  ( AllFieldsReachable, AllLogicFieldsReachExit, NoDeadGotosRecord
-  , AllLogicNodesHaveGoto, NoGotoSelfOnly
+import Data.Kind (Constraint, Type)
+import ExoMonad.Effect.Gemini (GeminiOp, SingGeminiModel (..))
+import ExoMonad.Graph.Edges (GetAwaits, GetClaudeCode, GetGeminiModel, GetGotoTargets, GetSpawnTargets, GetUsesEffects, GotoEffectsToTargets)
+import ExoMonad.Graph.Errors
+  ( Blank,
+    Bullet,
+    CodeLine,
+    Example,
+    Fixes,
+    HR,
+    HowItWorks,
+    Indent,
+    WhatHappened,
   )
-import ExoMonad.Graph.Validate.ForkBarrier (ValidateForkBarrierPairs)
 import ExoMonad.Graph.Generic.Core
-  ( AsGraph
-  , GraphMode(..)
-  , LLMNode
-  , GeminiNode
-  , LogicNode
-  , GraphNode
-  , EntryNode
-  , ExitNode
-  , Entry
-  , Exit
-  , ForkNode
-  , BarrierNode
-  , GetNodeName
-  , NodeRef(..)
+  ( AsGraph,
+    BarrierNode,
+    Entry,
+    EntryNode,
+    Exit,
+    ExitNode,
+    ForkNode,
+    GeminiNode,
+    GetNodeName,
+    GraphMode (..),
+    GraphNode,
+    LLMNode,
+    LogicNode,
+    NodeRef (..),
   )
+import ExoMonad.Graph.Goto (ClaudeCodeLLMHandler (..), GeminiLLMHandler (..), Goto, GotoChoice, LLMHandler (..), To, goto)
+import ExoMonad.Graph.Template (TemplateContext)
+import ExoMonad.Graph.Types (Awaits, Barrier, ClaudeCode, Description, Gemini, HList (..), Hook, Input, MCPExport, MCPRoleHint, MCPToolDef, Memory, ModelChoice, Schema, Spawn, System, Template, Tool, Tools, UsesEffects, Vision, type (:@))
+import ExoMonad.Graph.Validate (FormatSymbolList)
+import ExoMonad.Graph.Validate.ForkBarrier (ValidateForkBarrierPairs)
+import ExoMonad.Graph.Validate.RecordStructure
+  ( AllFieldsReachable,
+    AllLogicFieldsReachExit,
+    AllLogicNodesHaveGoto,
+    NoDeadGotosRecord,
+    NoGotoSelfOnly,
+  )
+import GHC.Generics (C, D, Generic (..), K1 (..), M1 (..), Meta (..), S, (:*:) (..))
+import GHC.TypeLits (ErrorMessage (..), KnownSymbol, Nat, Symbol, TypeError, type (+))
 
 -- | Effect type alias (freer-simple effects have kind Type -> Type).
 type Effect = Type -> Type
@@ -228,130 +237,129 @@ type family NodeHandler nodeDef es where
   -- EntryNode/Exit produce () (no-op markers, never invoked at runtime)
   NodeHandler (EntryNode a) es = ()
   NodeHandler (ExitNode a) es = ()
-
   -- GraphNode handler: runs child graph to completion.
   --
   -- The handler receives the graph's EntryNode type and returns its Exit type.
   -- GraphNode with Input annotation: function from input type to exit type.
   NodeHandler (GraphNode subgraph :@ Input inputT) es =
     inputT -> Eff es ()
-
   -- Tool handler: simple function from input to output.
   NodeHandler (Tool input output) es =
     ToolHandler es input output
-
   -- Hook handler: same as Tool.
   NodeHandler (Hook input output) es =
     HookHandler es input output
-
   -- Accumulator: (nodeDef, origNode, es, mInput, mTpl, mSchema, mEffs)
   NodeHandler (node :@ ann) es = NodeHandlerDispatch (node :@ ann) (node :@ ann) es 'Nothing 'Nothing 'Nothing 'Nothing
-
   -- Bare LLMNode/LogicNode without annotations - error
-  NodeHandler (LLMNode _subtype) es = TypeError
-    ( HR
-      ':$$: 'Text "  LLMNode requires annotations"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "You wrote: LLMNode with no annotations"
-      ':$$: Indent "The compiler can't determine what handler type to generate."
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "LLM nodes call a language model. For this to work, we need:"
-      ':$$: Blank
-      ':$$: CodeLine "1. WHAT to send (Template) - your handler builds context, template renders it"
-      ':$$: CodeLine "2. WHAT comes back (Schema) - the structured output type from the LLM"
-      ':$$: Blank
-      ':$$: Indent "The flow is:"
-      ':$$: CodeLine "   Handler builds context -> Template renders prompt -> LLM responds -> Schema parses"
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Add Template and Schema annotations:"
-      ':$$: CodeLine "  myNode :: mode :- LLMNode :@ Input MyInput :@ Template MyTpl :@ Schema Output"
-      ':$$: Blank
-      ':$$: Example
-      ':$$: CodeLine "-- In Context.hs (separate module for TH staging):"
-      ':$$: CodeLine "data ClassifyContext = ClassifyContext { query :: Text }"
-      ':$$: CodeLine ""
-      ':$$: CodeLine "-- In your graph definition:"
-      ':$$: CodeLine "classify :: mode :- LLMNode"
-      ':$$: CodeLine "            :@ Input Message"
-      ':$$: CodeLine "            :@ Template ClassifyTpl  -- references your context type"
-      ':$$: CodeLine "            :@ Schema Intent         -- what the LLM returns"
-    )
-  NodeHandler LogicNode es = TypeError
-    ( HR
-      ':$$: 'Text "  LogicNode requires annotations"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "You wrote: LogicNode with no annotations"
-      ':$$: Indent "The compiler can't determine what transitions this node can make."
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "Logic nodes are pure decision points - they route to other nodes."
-      ':$$: Indent "We need to know WHICH nodes they can transition to."
-      ':$$: Blank
-      ':$$: CodeLine "UsesEffects '[Goto \"nodeA\" Payload, Goto \"nodeB\" Payload, Goto Exit Result]"
-      ':$$: CodeLine "              ^^^^^^^^^^^^^^^^      ^^^^^^^^^^^^^^^^       ^^^^^^^^^^^^^^^"
-      ':$$: CodeLine "              These become the valid targets for gotoChoice/gotoExit"
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Add UsesEffects with your transitions:"
-      ':$$: CodeLine "  myRouter :: mode :- LogicNode"
-      ':$$: CodeLine "               :@ Input Intent"
-      ':$$: CodeLine "               :@ UsesEffects '[Goto \"process\" Data, Goto Exit Result]"
-      ':$$: Blank
-      ':$$: Example
-      ':$$: CodeLine "-- Handler implementation:"
-      ':$$: CodeLine "router :: Intent -> Eff es (GotoChoice '[To \"process\" Data, To Exit Result])"
-      ':$$: CodeLine "router intent = case intent of"
-      ':$$: CodeLine "  NeedsProcessing x -> pure $ gotoChoice @\"process\" x"
-      ':$$: CodeLine "  Done result       -> pure $ gotoExit result"
-    )
-  NodeHandler ForkNode es = TypeError
-    ( HR
-      ':$$: 'Text "  ForkNode requires annotations"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "You wrote: ForkNode with no annotations"
-      ':$$: Indent "The compiler can't determine what to spawn or where to collect results."
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "Fork nodes spawn parallel execution paths. They need to know:"
-      ':$$: CodeLine "  Input   -> What data to receive before spawning"
-      ':$$: CodeLine "  Spawn   -> Which nodes to spawn and with what payloads"
-      ':$$: CodeLine "  Barrier -> Where spawned paths deposit their results"
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Add Input, Spawn, and Barrier annotations:"
-      ':$$: CodeLine "  myFork :: mode :- ForkNode"
-      ':$$: CodeLine "             :@ Input Task"
-      ':$$: CodeLine "             :@ Spawn '[To \"worker1\" Task, To \"worker2\" Task]"
-      ':$$: CodeLine "             :@ Barrier \"merge\""
-    )
-  NodeHandler BarrierNode es = TypeError
-    ( HR
-      ':$$: 'Text "  BarrierNode requires annotations"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "You wrote: BarrierNode with no annotations"
-      ':$$: Indent "The compiler can't determine what results to collect or where to go next."
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "Barrier nodes synchronize parallel paths. They need to know:"
-      ':$$: CodeLine "  Awaits      -> What result types to collect from spawned paths"
-      ':$$: CodeLine "  UsesEffects -> Where to route with the collected results"
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Add Awaits and UsesEffects annotations:"
-      ':$$: CodeLine "  myBarrier :: mode :- BarrierNode"
-      ':$$: CodeLine "               :@ Awaits '[ResultA, ResultB]"
-      ':$$: CodeLine "               :@ UsesEffects '[Goto Exit (ResultA, ResultB)]"
-    )
+  NodeHandler (LLMNode _subtype) es =
+    TypeError
+      ( HR
+          ':$$: 'Text "  LLMNode requires annotations"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "You wrote: LLMNode with no annotations"
+          ':$$: Indent "The compiler can't determine what handler type to generate."
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "LLM nodes call a language model. For this to work, we need:"
+          ':$$: Blank
+          ':$$: CodeLine "1. WHAT to send (Template) - your handler builds context, template renders it"
+          ':$$: CodeLine "2. WHAT comes back (Schema) - the structured output type from the LLM"
+          ':$$: Blank
+          ':$$: Indent "The flow is:"
+          ':$$: CodeLine "   Handler builds context -> Template renders prompt -> LLM responds -> Schema parses"
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Add Template and Schema annotations:"
+          ':$$: CodeLine "  myNode :: mode :- LLMNode :@ Input MyInput :@ Template MyTpl :@ Schema Output"
+          ':$$: Blank
+          ':$$: Example
+          ':$$: CodeLine "-- In Context.hs (separate module for TH staging):"
+          ':$$: CodeLine "data ClassifyContext = ClassifyContext { query :: Text }"
+          ':$$: CodeLine ""
+          ':$$: CodeLine "-- In your graph definition:"
+          ':$$: CodeLine "classify :: mode :- LLMNode"
+          ':$$: CodeLine "            :@ Input Message"
+          ':$$: CodeLine "            :@ Template ClassifyTpl  -- references your context type"
+          ':$$: CodeLine "            :@ Schema Intent         -- what the LLM returns"
+      )
+  NodeHandler LogicNode es =
+    TypeError
+      ( HR
+          ':$$: 'Text "  LogicNode requires annotations"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "You wrote: LogicNode with no annotations"
+          ':$$: Indent "The compiler can't determine what transitions this node can make."
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "Logic nodes are pure decision points - they route to other nodes."
+          ':$$: Indent "We need to know WHICH nodes they can transition to."
+          ':$$: Blank
+          ':$$: CodeLine "UsesEffects '[Goto \"nodeA\" Payload, Goto \"nodeB\" Payload, Goto Exit Result]"
+          ':$$: CodeLine "              ^^^^^^^^^^^^^^^^      ^^^^^^^^^^^^^^^^       ^^^^^^^^^^^^^^^"
+          ':$$: CodeLine "              These become the valid targets for gotoChoice/gotoExit"
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Add UsesEffects with your transitions:"
+          ':$$: CodeLine "  myRouter :: mode :- LogicNode"
+          ':$$: CodeLine "               :@ Input Intent"
+          ':$$: CodeLine "               :@ UsesEffects '[Goto \"process\" Data, Goto Exit Result]"
+          ':$$: Blank
+          ':$$: Example
+          ':$$: CodeLine "-- Handler implementation:"
+          ':$$: CodeLine "router :: Intent -> Eff es (GotoChoice '[To \"process\" Data, To Exit Result])"
+          ':$$: CodeLine "router intent = case intent of"
+          ':$$: CodeLine "  NeedsProcessing x -> pure $ gotoChoice @\"process\" x"
+          ':$$: CodeLine "  Done result       -> pure $ gotoExit result"
+      )
+  NodeHandler ForkNode es =
+    TypeError
+      ( HR
+          ':$$: 'Text "  ForkNode requires annotations"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "You wrote: ForkNode with no annotations"
+          ':$$: Indent "The compiler can't determine what to spawn or where to collect results."
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "Fork nodes spawn parallel execution paths. They need to know:"
+          ':$$: CodeLine "  Input   -> What data to receive before spawning"
+          ':$$: CodeLine "  Spawn   -> Which nodes to spawn and with what payloads"
+          ':$$: CodeLine "  Barrier -> Where spawned paths deposit their results"
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Add Input, Spawn, and Barrier annotations:"
+          ':$$: CodeLine "  myFork :: mode :- ForkNode"
+          ':$$: CodeLine "             :@ Input Task"
+          ':$$: CodeLine "             :@ Spawn '[To \"worker1\" Task, To \"worker2\" Task]"
+          ':$$: CodeLine "             :@ Barrier \"merge\""
+      )
+  NodeHandler BarrierNode es =
+    TypeError
+      ( HR
+          ':$$: 'Text "  BarrierNode requires annotations"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "You wrote: BarrierNode with no annotations"
+          ':$$: Indent "The compiler can't determine what results to collect or where to go next."
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "Barrier nodes synchronize parallel paths. They need to know:"
+          ':$$: CodeLine "  Awaits      -> What result types to collect from spawned paths"
+          ':$$: CodeLine "  UsesEffects -> Where to route with the collected results"
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Add Awaits and UsesEffects annotations:"
+          ':$$: CodeLine "  myBarrier :: mode :- BarrierNode"
+          ':$$: CodeLine "               :@ Awaits '[ResultA, ResultB]"
+          ':$$: CodeLine "               :@ UsesEffects '[Goto Exit (ResultA, ResultB)]"
+      )
 
 -- | Unified accumulator that peels annotations and dispatches based on base kind.
 --
@@ -418,81 +426,79 @@ type family ChooseLLMHandler mClaudeCode input schema targets effs tpl where
 -- | Extract GeminiModel or fail with TypeError.
 type family OrErrorGemini mGemini orig where
   OrErrorGemini ('Just model) _ = model
-  OrErrorGemini 'Nothing orig = TypeError
-    ( HR
-      ':$$: 'Text "  GeminiNode missing Gemini annotation"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "Your GeminiNode has no Gemini annotation to specify the model."
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Add Gemini annotation: :@ Gemini 'Flash"
-    )
+  OrErrorGemini 'Nothing orig =
+    TypeError
+      ( HR
+          ':$$: 'Text "  GeminiNode missing Gemini annotation"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "Your GeminiNode has no Gemini annotation to specify the model."
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Add Gemini annotation: :@ Gemini 'Flash"
+      )
 
 type NodeHandlerDispatch :: Type -> Type -> [Effect] -> Maybe Type -> Maybe Type -> Maybe Type -> Maybe Type -> Type
 type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs where
   -- Peel Input annotation - record it
   NodeHandlerDispatch (node :@ Input t) orig es 'Nothing mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es ('Just t) mTpl mSchema mEffs
-
   -- Detect duplicate Input annotations
-  NodeHandlerDispatch (node :@ Input _) orig es ('Just _) mTpl mSchema mEffs = TypeError
-    ( HR
-      ':$$: 'Text "  Duplicate Input annotation"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "Your node has multiple Input annotations."
-      ':$$: Indent "Each node can only have one input type."
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Remove the duplicate Input annotation"
-      ':$$: Bullet "Use a tuple or custom type to combine inputs: Input (A, B)"
-    )
-
+  NodeHandlerDispatch (node :@ Input _) orig es ('Just _) mTpl mSchema mEffs =
+    TypeError
+      ( HR
+          ':$$: 'Text "  Duplicate Input annotation"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "Your node has multiple Input annotations."
+          ':$$: Indent "Each node can only have one input type."
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Remove the duplicate Input annotation"
+          ':$$: Bullet "Use a tuple or custom type to combine inputs: Input (A, B)"
+      )
   -- Peel Template annotation - record it (for LLM nodes)
   NodeHandlerDispatch (node :@ Template tpl) orig es mInput 'Nothing mSchema mEffs =
     NodeHandlerDispatch node orig es mInput ('Just tpl) mSchema mEffs
-
   -- Detect duplicate Template annotations
-  NodeHandlerDispatch (node :@ Template _) orig es mInput ('Just _) mSchema mEffs = TypeError
-    ( HR
-      ':$$: 'Text "  Duplicate Template annotation"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "Your node has multiple Template annotations."
-      ':$$: Indent "Each LLM node can only have one prompt template."
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Remove the duplicate Template annotation"
-      ':$$: Bullet "Combine templates if you need multiple prompts"
-    )
-
+  NodeHandlerDispatch (node :@ Template _) orig es mInput ('Just _) mSchema mEffs =
+    TypeError
+      ( HR
+          ':$$: 'Text "  Duplicate Template annotation"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "Your node has multiple Template annotations."
+          ':$$: Indent "Each LLM node can only have one prompt template."
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Remove the duplicate Template annotation"
+          ':$$: Bullet "Combine templates if you need multiple prompts"
+      )
   -- Peel Schema annotation - record it (for LLM nodes)
   NodeHandlerDispatch (node :@ Schema s) orig es mInput mTpl 'Nothing mEffs =
     NodeHandlerDispatch node orig es mInput mTpl ('Just s) mEffs
-
   -- Detect duplicate Schema annotations
-  NodeHandlerDispatch (node :@ Schema _) orig es mInput mTpl ('Just _) mEffs = TypeError
-    ( HR
-      ':$$: 'Text "  Duplicate Schema annotation"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "Your node has multiple Schema annotations."
-      ':$$: Indent "Each LLM node produces exactly one output type."
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "Schema defines the structured output type the LLM returns."
-      ':$$: Indent "Multiple Schema would be ambiguous - which type is the output?"
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Remove the duplicate Schema annotation"
-      ':$$: Bullet "Use a sum type if you need multiple output shapes"
-    )
-
+  NodeHandlerDispatch (node :@ Schema _) orig es mInput mTpl ('Just _) mEffs =
+    TypeError
+      ( HR
+          ':$$: 'Text "  Duplicate Schema annotation"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "Your node has multiple Schema annotations."
+          ':$$: Indent "Each LLM node produces exactly one output type."
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "Schema defines the structured output type the LLM returns."
+          ':$$: Indent "Multiple Schema would be ambiguous - which type is the output?"
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Remove the duplicate Schema annotation"
+          ':$$: Bullet "Use a sum type if you need multiple output shapes"
+      )
   -- Skip other annotations (Vision, Tools, Memory, System, ClaudeCode)
   NodeHandlerDispatch (node :@ Vision) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
@@ -508,7 +514,6 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
   NodeHandlerDispatch (node :@ Gemini _) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
-
   -- Skip MCP annotations (used for tool discovery, not runtime dispatch)
   NodeHandlerDispatch (node :@ MCPExport) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
@@ -516,7 +521,6 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
   NodeHandlerDispatch (node :@ MCPRoleHint _) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
-
   -- Skip Fork/Barrier annotations (extracted directly in terminal cases)
   NodeHandlerDispatch (node :@ Spawn _) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
@@ -524,39 +528,35 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
   NodeHandlerDispatch (node :@ Awaits _) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
-
   -- Peel UsesEffects annotation - record effects
   -- (Validation that To is not used here happens at ValidGraphRecord level)
   NodeHandlerDispatch (node :@ UsesEffects effs) orig es mInput mTpl mSchema 'Nothing =
     NodeHandlerDispatch node orig es mInput mTpl mSchema ('Just (EffStack effs))
-
   -- Detect duplicate UsesEffects annotations
-  NodeHandlerDispatch (node :@ UsesEffects _) orig es mInput mTpl mSchema ('Just _) = TypeError
-    ( HR
-      ':$$: 'Text "  Duplicate UsesEffects annotation"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "Your node has multiple UsesEffects annotations."
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "UsesEffects declares the effect stack for this handler."
-      ':$$: Indent "All effects should be listed in a single annotation."
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Combine into one: UsesEffects '[Effect1, Effect2, ...]"
-    )
-
+  NodeHandlerDispatch (node :@ UsesEffects _) orig es mInput mTpl mSchema ('Just _) =
+    TypeError
+      ( HR
+          ':$$: 'Text "  Duplicate UsesEffects annotation"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "Your node has multiple UsesEffects annotations."
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "UsesEffects declares the effect stack for this handler."
+          ':$$: Indent "All effects should be listed in a single annotation."
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Combine into one: UsesEffects '[Effect1, Effect2, ...]"
+      )
   -- ══════════════════════════════════════════════════════════════════════════
   -- Tool Base Case
   -- ══════════════════════════════════════════════════════════════════════════
 
   NodeHandlerDispatch (Tool input output) _ es _ _ _ _ =
     ToolHandler es input output
-
   NodeHandlerDispatch (Hook input output) _ es _ _ _ _ =
     HookHandler es input output
-
   -- ══════════════════════════════════════════════════════════════════════════
   -- LLMNode Base Cases
   -- ══════════════════════════════════════════════════════════════════════════
@@ -570,147 +570,150 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
   -- ══════════════════════════════════════════════════════════════════════════
 
   -- LLMNode with Template only - missing UsesEffects for routing
-  NodeHandlerDispatch (LLMNode _subtype) orig es mInput ('Just tpl) ('Just schema) 'Nothing = TypeError
-    ( HR
-      ':$$: 'Text "  LLM node missing routing: has Template but no UsesEffects"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "Your LLM node has Template and Schema but no UsesEffects."
-      ':$$: Indent "We don't know where to route after the LLM call."
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "LLM nodes need all three annotations:"
-      ':$$: CodeLine "  Template    -> Context type for prompt rendering"
-      ':$$: CodeLine "  Schema      -> Output type from LLM"
-      ':$$: CodeLine "  UsesEffects -> Where to route (Goto targets)"
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Add UsesEffects to specify routing:"
-      ':$$: CodeLine "  myNode :: mode :- LLMNode"
-      ':$$: CodeLine "             :@ Input MyInput"
-      ':$$: CodeLine "             :@ Template MyTpl"
-      ':$$: CodeLine "             :@ Schema " ':<>: 'ShowType schema
-      ':$$: CodeLine "             :@ UsesEffects '[Goto Exit Result]"
-    )
-
+  NodeHandlerDispatch (LLMNode _subtype) orig es mInput ('Just tpl) ('Just schema) 'Nothing =
+    TypeError
+      ( HR
+          ':$$: 'Text "  LLM node missing routing: has Template but no UsesEffects"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "Your LLM node has Template and Schema but no UsesEffects."
+          ':$$: Indent "We don't know where to route after the LLM call."
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "LLM nodes need all three annotations:"
+          ':$$: CodeLine "  Template    -> Context type for prompt rendering"
+          ':$$: CodeLine "  Schema      -> Output type from LLM"
+          ':$$: CodeLine "  UsesEffects -> Where to route (Goto targets)"
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Add UsesEffects to specify routing:"
+          ':$$: CodeLine "  myNode :: mode :- LLMNode"
+          ':$$: CodeLine "             :@ Input MyInput"
+          ':$$: CodeLine "             :@ Template MyTpl"
+          ':$$: CodeLine "             :@ Schema "
+          ':<>: 'ShowType schema
+          ':$$: CodeLine "             :@ UsesEffects '[Goto Exit Result]"
+      )
   -- LLMNode with Template AND UsesEffects: the complete form
   -- Uses ChooseLLMHandler to dispatch between regular LLM and ClaudeCode execution.
   -- GetClaudeCode extracts the model from the annotation for compile-time validation.
   NodeHandlerDispatch (LLMNode _subtype) orig es ('Just input) ('Just tpl) ('Just schema) ('Just (EffStack effs)) =
     ChooseLLMHandler (GetClaudeCode orig) input schema (GotoEffectsToTargets effs) es (TemplateContext tpl)
-
   -- GeminiNode Base Cases: Template + Schema + UsesEffects
   NodeHandlerDispatch GeminiNode orig es ('Just input) ('Just tpl) ('Just schema) ('Just (EffStack effs)) =
     GeminiLLMHandler (OrErrorGemini (GetGeminiModel orig) orig) input schema (GotoEffectsToTargets effs) es (TemplateContext tpl)
-
   -- LLMNode with UsesEffects but no Template - missing context for prompts
-  NodeHandlerDispatch (LLMNode _subtype) orig es mInput 'Nothing ('Just schema) ('Just (EffStack effs)) = TypeError
-    ( HR
-      ':$$: 'Text "  LLM node missing Template: has UsesEffects but no context for prompts"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "Your LLM node has Schema and UsesEffects but no Template."
-      ':$$: Indent "We don't know what context type to use for prompt rendering."
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "LLM nodes need all three annotations:"
-      ':$$: CodeLine "  Template    -> Context type for prompt rendering"
-      ':$$: CodeLine "  Schema      -> Output type from LLM"
-      ':$$: CodeLine "  UsesEffects -> Where to route (Goto targets)"
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Add Template to specify the prompt context:"
-      ':$$: CodeLine "  myNode :: mode :- LLMNode"
-      ':$$: CodeLine "             :@ Input MyInput"
-      ':$$: CodeLine "             :@ Template MyTpl"
-      ':$$: CodeLine "             :@ Schema " ':<>: 'ShowType schema
-      ':$$: CodeLine "             :@ UsesEffects '[...]"
-    )
-
+  NodeHandlerDispatch (LLMNode _subtype) orig es mInput 'Nothing ('Just schema) ('Just (EffStack effs)) =
+    TypeError
+      ( HR
+          ':$$: 'Text "  LLM node missing Template: has UsesEffects but no context for prompts"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "Your LLM node has Schema and UsesEffects but no Template."
+          ':$$: Indent "We don't know what context type to use for prompt rendering."
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "LLM nodes need all three annotations:"
+          ':$$: CodeLine "  Template    -> Context type for prompt rendering"
+          ':$$: CodeLine "  Schema      -> Output type from LLM"
+          ':$$: CodeLine "  UsesEffects -> Where to route (Goto targets)"
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Add Template to specify the prompt context:"
+          ':$$: CodeLine "  myNode :: mode :- LLMNode"
+          ':$$: CodeLine "             :@ Input MyInput"
+          ':$$: CodeLine "             :@ Template MyTpl"
+          ':$$: CodeLine "             :@ Schema "
+          ':<>: 'ShowType schema
+          ':$$: CodeLine "             :@ UsesEffects '[...]"
+      )
   -- LLMNode with Schema only (no Template or UsesEffects) - error
-  NodeHandlerDispatch (LLMNode _subtype) orig es _ 'Nothing ('Just schema) 'Nothing = TypeError
-    ( HR
-      ':$$: 'Text "  LLM node incomplete: has Schema but missing Template and UsesEffects"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "Your LLM node has:"
-      ':$$: CodeLine "Schema " ':<>: 'ShowType schema ':<>: 'Text "  -- what the LLM returns"
-      ':$$: Blank
-      ':$$: Indent "But we don't know:"
-      ':$$: Bullet "What prompt to send (no Template)"
-      ':$$: Bullet "Where to go next (no UsesEffects routing)"
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "LLM nodes need all three annotations:"
-      ':$$: CodeLine "  Template    -> Context type for prompt rendering"
-      ':$$: CodeLine "  Schema      -> Output type from LLM"
-      ':$$: CodeLine "  UsesEffects -> Where to route (Goto targets)"
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Add Template and UsesEffects:"
-      ':$$: CodeLine "  myNode :: mode :- LLMNode"
-      ':$$: CodeLine "             :@ Input MyInput"
-      ':$$: CodeLine "             :@ Template MyTpl"
-      ':$$: CodeLine "             :@ Schema " ':<>: 'ShowType schema
-      ':$$: CodeLine "             :@ UsesEffects '[Goto Exit Result]"
-    )
-
+  NodeHandlerDispatch (LLMNode _subtype) orig es _ 'Nothing ('Just schema) 'Nothing =
+    TypeError
+      ( HR
+          ':$$: 'Text "  LLM node incomplete: has Schema but missing Template and UsesEffects"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "Your LLM node has:"
+          ':$$: CodeLine "Schema "
+          ':<>: 'ShowType schema
+          ':<>: 'Text "  -- what the LLM returns"
+          ':$$: Blank
+          ':$$: Indent "But we don't know:"
+          ':$$: Bullet "What prompt to send (no Template)"
+          ':$$: Bullet "Where to go next (no UsesEffects routing)"
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "LLM nodes need all three annotations:"
+          ':$$: CodeLine "  Template    -> Context type for prompt rendering"
+          ':$$: CodeLine "  Schema      -> Output type from LLM"
+          ':$$: CodeLine "  UsesEffects -> Where to route (Goto targets)"
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Add Template and UsesEffects:"
+          ':$$: CodeLine "  myNode :: mode :- LLMNode"
+          ':$$: CodeLine "             :@ Input MyInput"
+          ':$$: CodeLine "             :@ Template MyTpl"
+          ':$$: CodeLine "             :@ Schema "
+          ':<>: 'ShowType schema
+          ':$$: CodeLine "             :@ UsesEffects '[Goto Exit Result]"
+      )
   -- LLMNode missing both Template and Schema - error
-  NodeHandlerDispatch (LLMNode _subtype) orig es _ 'Nothing 'Nothing _ = TypeError
-    ( HR
-      ':$$: 'Text "  LLM node missing required annotations"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "Your LLM node has neither Template nor Schema."
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "LLM nodes need all three annotations:"
-      ':$$: CodeLine "  Template    -> Context type for prompt rendering"
-      ':$$: CodeLine "  Schema      -> Output type from LLM"
-      ':$$: CodeLine "  UsesEffects -> Where to route (Goto targets)"
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Add Template, Schema, and UsesEffects:"
-      ':$$: CodeLine "  myNode :: mode :- LLMNode"
-      ':$$: CodeLine "             :@ Input MyInput"
-      ':$$: CodeLine "             :@ Template MyContextTpl"
-      ':$$: CodeLine "             :@ Schema MyOutputType"
-      ':$$: CodeLine "             :@ UsesEffects '[Goto Exit Result]"
-    )
-
+  NodeHandlerDispatch (LLMNode _subtype) orig es _ 'Nothing 'Nothing _ =
+    TypeError
+      ( HR
+          ':$$: 'Text "  LLM node missing required annotations"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "Your LLM node has neither Template nor Schema."
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "LLM nodes need all three annotations:"
+          ':$$: CodeLine "  Template    -> Context type for prompt rendering"
+          ':$$: CodeLine "  Schema      -> Output type from LLM"
+          ':$$: CodeLine "  UsesEffects -> Where to route (Goto targets)"
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Add Template, Schema, and UsesEffects:"
+          ':$$: CodeLine "  myNode :: mode :- LLMNode"
+          ':$$: CodeLine "             :@ Input MyInput"
+          ':$$: CodeLine "             :@ Template MyContextTpl"
+          ':$$: CodeLine "             :@ Schema MyOutputType"
+          ':$$: CodeLine "             :@ UsesEffects '[Goto Exit Result]"
+      )
   -- LLMNode missing Schema - error
-  NodeHandlerDispatch (LLMNode _subtype) orig es _ _ 'Nothing _ = TypeError
-    ( HR
-      ':$$: 'Text "  LLM node missing Schema annotation"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "Your LLM node has no Schema annotation."
-      ':$$: Indent "We don't know what type the LLM should return."
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "Schema specifies the structured output format for the LLM call."
-      ':$$: Indent "It must be a type with:"
-      ':$$: Bullet "Aeson FromJSON instance (to parse LLM response)"
-      ':$$: Bullet "HasJSONSchema instance (to generate JSON Schema for the LLM)"
-      ':$$: Blank
-      ':$$: CodeLine "-- Example output type:"
-      ':$$: CodeLine "data Intent = IntentRefund | IntentQuestion | IntentOther"
-      ':$$: CodeLine "  deriving (Generic, FromJSON)"
-      ':$$: CodeLine ""
-      ':$$: CodeLine "-- In node definition:"
-      ':$$: CodeLine "classify :: mode :- LLMNode :@ Template T :@ Schema Intent"
-      ':$$: CodeLine "                                              ^^^^^^^^^^^^"
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Add a Schema annotation:"
-      ':$$: CodeLine "  myNode :: mode :- LLMNode :@ ... :@ Schema YourOutputType"
-    )
-
+  NodeHandlerDispatch (LLMNode _subtype) orig es _ _ 'Nothing _ =
+    TypeError
+      ( HR
+          ':$$: 'Text "  LLM node missing Schema annotation"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "Your LLM node has no Schema annotation."
+          ':$$: Indent "We don't know what type the LLM should return."
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "Schema specifies the structured output format for the LLM call."
+          ':$$: Indent "It must be a type with:"
+          ':$$: Bullet "Aeson FromJSON instance (to parse LLM response)"
+          ':$$: Bullet "HasJSONSchema instance (to generate JSON Schema for the LLM)"
+          ':$$: Blank
+          ':$$: CodeLine "-- Example output type:"
+          ':$$: CodeLine "data Intent = IntentRefund | IntentQuestion | IntentOther"
+          ':$$: CodeLine "  deriving (Generic, FromJSON)"
+          ':$$: CodeLine ""
+          ':$$: CodeLine "-- In node definition:"
+          ':$$: CodeLine "classify :: mode :- LLMNode :@ Template T :@ Schema Intent"
+          ':$$: CodeLine "                                              ^^^^^^^^^^^^"
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Add a Schema annotation:"
+          ':$$: CodeLine "  myNode :: mode :- LLMNode :@ ... :@ Schema YourOutputType"
+      )
   -- ══════════════════════════════════════════════════════════════════════════
   -- LogicNode Base Cases
   -- ══════════════════════════════════════════════════════════════════════════
@@ -718,41 +721,40 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
   -- LogicNode with Input and UsesEffects: returns GotoChoice
   NodeHandlerDispatch LogicNode orig es ('Just input) _ _ ('Just (EffStack effs)) =
     input -> Eff es (GotoChoice (GotoEffectsToTargets effs))
-
   -- LogicNode without UsesEffects - error
-  NodeHandlerDispatch LogicNode orig es _ _ _ 'Nothing = TypeError
-    ( HR
-      ':$$: 'Text "  Logic node missing UsesEffects annotation"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "Your LogicNode has no UsesEffects annotation."
-      ':$$: Indent "We don't know what transitions this node can make."
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "Logic nodes are routing points in your graph. They receive input,"
-      ':$$: Indent "make a decision, and transition to another node (or Exit)."
-      ':$$: Blank
-      ':$$: Indent "The UsesEffects annotation declares ALL possible destinations:"
-      ':$$: Blank
-      ':$$: CodeLine "UsesEffects '[Goto \"nodeA\" PayloadA, Goto \"nodeB\" PayloadB, Goto Exit Result]"
-      ':$$: CodeLine "              ^^^^^^^^^^^^^^^^^^^   ^^^^^^^^^^^^^^^^^^^   ^^^^^^^^^^^^^^^^^"
-      ':$$: CodeLine "              Can go to nodeA       Can go to nodeB       Can exit graph"
-      ':$$: Blank
-      ':$$: Indent "Your handler then uses gotoChoice or gotoExit to pick one:"
-      ':$$: Blank
-      ':$$: CodeLine "router intent = case intent of"
-      ':$$: CodeLine "  CaseA x -> pure $ gotoChoice @\"nodeA\" x"
-      ':$$: CodeLine "  CaseB y -> pure $ gotoChoice @\"nodeB\" y"
-      ':$$: CodeLine "  Done r  -> pure $ gotoExit r"
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Add UsesEffects with your transitions:"
-      ':$$: CodeLine "  myRouter :: mode :- LogicNode"
-      ':$$: CodeLine "               :@ Input YourInput"
-      ':$$: CodeLine "               :@ UsesEffects '[Goto \"target\" Payload, Goto Exit Result]"
-    )
-
+  NodeHandlerDispatch LogicNode orig es _ _ _ 'Nothing =
+    TypeError
+      ( HR
+          ':$$: 'Text "  Logic node missing UsesEffects annotation"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "Your LogicNode has no UsesEffects annotation."
+          ':$$: Indent "We don't know what transitions this node can make."
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "Logic nodes are routing points in your graph. They receive input,"
+          ':$$: Indent "make a decision, and transition to another node (or Exit)."
+          ':$$: Blank
+          ':$$: Indent "The UsesEffects annotation declares ALL possible destinations:"
+          ':$$: Blank
+          ':$$: CodeLine "UsesEffects '[Goto \"nodeA\" PayloadA, Goto \"nodeB\" PayloadB, Goto Exit Result]"
+          ':$$: CodeLine "              ^^^^^^^^^^^^^^^^^^^   ^^^^^^^^^^^^^^^^^^^   ^^^^^^^^^^^^^^^^^"
+          ':$$: CodeLine "              Can go to nodeA       Can go to nodeB       Can exit graph"
+          ':$$: Blank
+          ':$$: Indent "Your handler then uses gotoChoice or gotoExit to pick one:"
+          ':$$: Blank
+          ':$$: CodeLine "router intent = case intent of"
+          ':$$: CodeLine "  CaseA x -> pure $ gotoChoice @\"nodeA\" x"
+          ':$$: CodeLine "  CaseB y -> pure $ gotoChoice @\"nodeB\" y"
+          ':$$: CodeLine "  Done r  -> pure $ gotoExit r"
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Add UsesEffects with your transitions:"
+          ':$$: CodeLine "  myRouter :: mode :- LogicNode"
+          ':$$: CodeLine "               :@ Input YourInput"
+          ':$$: CodeLine "               :@ UsesEffects '[Goto \"target\" Payload, Goto Exit Result]"
+      )
   -- ══════════════════════════════════════════════════════════════════════════
   -- ══════════════════════════════════════════════════════════════════════════
   -- EntryNode and ExitNode Base Cases (with annotations stripped)
@@ -766,10 +768,8 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
 
   -- EntryNode after stripping annotations: no-op marker
   NodeHandlerDispatch (EntryNode a) orig es _ _ _ _ = ()
-
   -- ExitNode after stripping annotations: no-op marker
   NodeHandlerDispatch (ExitNode a) orig es _ _ _ _ = ()
-
   -- ForkNode Base Cases
   -- ══════════════════════════════════════════════════════════════════════════
   --
@@ -784,29 +784,28 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
   -- Handler returns HList of payloads for spawned paths
   NodeHandlerDispatch ForkNode orig es ('Just input) _ _ _ =
     input -> Eff es (SpawnPayloads (GetSpawnTargets orig))
-
   -- ForkNode without Input - error
-  NodeHandlerDispatch ForkNode orig es 'Nothing _ _ _ = TypeError
-    ( HR
-      ':$$: 'Text "  ForkNode missing Input annotation"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "Your ForkNode has no Input annotation."
-      ':$$: Indent "We don't know what type to receive before spawning parallel paths."
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "ForkNode receives input, then spawns parallel execution paths."
-      ':$$: Indent "Each spawned path runs independently until it calls Arrive."
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Add Input, Spawn, and Barrier annotations:"
-      ':$$: CodeLine "  myFork :: mode :- ForkNode"
-      ':$$: CodeLine "             :@ Input Task"
-      ':$$: CodeLine "             :@ Spawn '[To \"worker1\" Task, To \"worker2\" Task]"
-      ':$$: CodeLine "             :@ Barrier \"merge\""
-    )
-
+  NodeHandlerDispatch ForkNode orig es 'Nothing _ _ _ =
+    TypeError
+      ( HR
+          ':$$: 'Text "  ForkNode missing Input annotation"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "Your ForkNode has no Input annotation."
+          ':$$: Indent "We don't know what type to receive before spawning parallel paths."
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "ForkNode receives input, then spawns parallel execution paths."
+          ':$$: Indent "Each spawned path runs independently until it calls Arrive."
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Add Input, Spawn, and Barrier annotations:"
+          ':$$: CodeLine "  myFork :: mode :- ForkNode"
+          ':$$: CodeLine "             :@ Input Task"
+          ':$$: CodeLine "             :@ Spawn '[To \"worker1\" Task, To \"worker2\" Task]"
+          ':$$: CodeLine "             :@ Barrier \"merge\""
+      )
   -- ══════════════════════════════════════════════════════════════════════════
   -- BarrierNode Base Cases
   -- ══════════════════════════════════════════════════════════════════════════
@@ -821,27 +820,27 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
   -- Handler receives collected results as HList, returns GotoChoice
   NodeHandlerDispatch BarrierNode orig es _ _ _ ('Just (EffStack effs)) =
     AwaitsHList (GetAwaits orig) -> Eff es (GotoChoice (GotoEffectsToTargets effs))
-
   -- BarrierNode without UsesEffects - error
-  NodeHandlerDispatch BarrierNode orig es _ _ _ 'Nothing = TypeError
-    ( HR
-      ':$$: 'Text "  BarrierNode missing UsesEffects annotation"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "Your BarrierNode has no UsesEffects annotation."
-      ':$$: Indent "We don't know where to route after collecting results."
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "BarrierNode collects results from spawned paths, then continues."
-      ':$$: Indent "UsesEffects declares where to go with the collected results."
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Add Awaits and UsesEffects annotations:"
-      ':$$: CodeLine "  myBarrier :: mode :- BarrierNode"
-      ':$$: CodeLine "               :@ Awaits '[ResultA, ResultB]"
-      ':$$: CodeLine "               :@ UsesEffects '[Goto Exit (ResultA, ResultB)]"
-    )
+  NodeHandlerDispatch BarrierNode orig es _ _ _ 'Nothing =
+    TypeError
+      ( HR
+          ':$$: 'Text "  BarrierNode missing UsesEffects annotation"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "Your BarrierNode has no UsesEffects annotation."
+          ':$$: Indent "We don't know where to route after collecting results."
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "BarrierNode collects results from spawned paths, then continues."
+          ':$$: Indent "UsesEffects declares where to go with the collected results."
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Add Awaits and UsesEffects annotations:"
+          ':$$: CodeLine "  myBarrier :: mode :- BarrierNode"
+          ':$$: CodeLine "               :@ Awaits '[ResultA, ResultB]"
+          ':$$: CodeLine "               :@ UsesEffects '[Goto Exit (ResultA, ResultB)]"
+      )
 
 -- | Wrapper to distinguish Template types from EffStack in the Maybe
 data EffStack (effs :: [Effect])
@@ -937,35 +936,36 @@ type family AwaitsHList ts where
 type ValidateNotToMarkers :: forall k. [k] -> Constraint
 type family ValidateNotToMarkers effs where
   ValidateNotToMarkers '[] = ()
-  ValidateNotToMarkers (To name payload ': _) = TypeError
-    ( HR
-      ':$$: 'Text "  Wrong type in UsesEffects"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "UsesEffects contains 'To' markers, but needs 'Goto' effects."
-      ':$$: Blank
-      ':$$: CodeLine "UsesEffects '[To \"x\" A, ...]   -- WRONG (To is for GotoChoice)"
-      ':$$: CodeLine "UsesEffects '[Goto \"x\" A, ...]  -- CORRECT (Goto is the effect)"
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "'Goto' is the effect type used in graph definitions (UsesEffects)."
-      ':$$: Indent "'To' is the target marker used in handler return types (GotoChoice)."
-      ':$$: Blank
-      ':$$: Indent "They look similar but have different kinds and purposes:"
-      ':$$: CodeLine "  Goto :: k -> Type -> Effect   -- for declaring transitions"
-      ':$$: CodeLine "  To   :: k -> Type -> Type     -- for selecting transitions"
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Change 'To' to 'Goto' in your UsesEffects list"
-      ':$$: Blank
-      ':$$: Example
-      ':$$: CodeLine "-- If you have:"
-      ':$$: CodeLine "type MyEffects = '[To \"process\" Data, To Exit Result]"
-      ':$$: CodeLine ""
-      ':$$: CodeLine "-- Change to:"
-      ':$$: CodeLine "type MyEffects = '[Goto \"process\" Data, Goto Exit Result]"
-    )
+  ValidateNotToMarkers (To name payload ': _) =
+    TypeError
+      ( HR
+          ':$$: 'Text "  Wrong type in UsesEffects"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "UsesEffects contains 'To' markers, but needs 'Goto' effects."
+          ':$$: Blank
+          ':$$: CodeLine "UsesEffects '[To \"x\" A, ...]   -- WRONG (To is for GotoChoice)"
+          ':$$: CodeLine "UsesEffects '[Goto \"x\" A, ...]  -- CORRECT (Goto is the effect)"
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "'Goto' is the effect type used in graph definitions (UsesEffects)."
+          ':$$: Indent "'To' is the target marker used in handler return types (GotoChoice)."
+          ':$$: Blank
+          ':$$: Indent "They look similar but have different kinds and purposes:"
+          ':$$: CodeLine "  Goto :: k -> Type -> Effect   -- for declaring transitions"
+          ':$$: CodeLine "  To   :: k -> Type -> Type     -- for selecting transitions"
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Change 'To' to 'Goto' in your UsesEffects list"
+          ':$$: Blank
+          ':$$: Example
+          ':$$: CodeLine "-- If you have:"
+          ':$$: CodeLine "type MyEffects = '[To \"process\" Data, To Exit Result]"
+          ':$$: CodeLine ""
+          ':$$: CodeLine "-- Change to:"
+          ':$$: CodeLine "type MyEffects = '[Goto \"process\" Data, Goto Exit Result]"
+      )
   ValidateNotToMarkers (_ ': rest) = ValidateNotToMarkers rest
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -999,18 +999,21 @@ type family Elem x xs where
 -- @
 type ElemC :: Symbol -> [Symbol] -> Constraint
 type family ElemC s ss where
-  ElemC s '[] = TypeError
-    ( HR
-      ':$$: 'Text "  Field \"" ':<>: 'Text s ':<>: 'Text "\" not found"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "You referenced a field that doesn't exist in this graph."
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Check the field name spelling"
-      ':$$: Bullet "Ensure you're using the correct graph type"
-    )
+  ElemC s '[] =
+    TypeError
+      ( HR
+          ':$$: 'Text "  Field \""
+          ':<>: 'Text s
+          ':<>: 'Text "\" not found"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "You referenced a field that doesn't exist in this graph."
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Check the field name spelling"
+          ':$$: Bullet "Ensure you're using the correct graph type"
+      )
   ElemC s (s ': _) = ()
   ElemC s (_ ': rest) = ElemC s rest
 
@@ -1019,28 +1022,31 @@ type family ElemC s ss where
 -- This variant takes the full list to display in error messages.
 type ElemCWithOptions :: Symbol -> [Symbol] -> [Symbol] -> Constraint
 type family ElemCWithOptions s ss allOptions where
-  ElemCWithOptions s '[] allOptions = TypeError
-    ( HR
-      ':$$: 'Text "  Field \"" ':<>: 'Text s ':<>: 'Text "\" not found"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "You referenced a field that doesn't exist in this graph."
-      ':$$: Blank
-      ':$$: Indent "Available fields:"
-      ':$$: FormatSymbolList allOptions
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Check the field name spelling"
-      ':$$: Bullet "Use one of the available fields listed above"
-    )
+  ElemCWithOptions s '[] allOptions =
+    TypeError
+      ( HR
+          ':$$: 'Text "  Field \""
+          ':<>: 'Text s
+          ':<>: 'Text "\" not found"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "You referenced a field that doesn't exist in this graph."
+          ':$$: Blank
+          ':$$: Indent "Available fields:"
+          ':$$: FormatSymbolList allOptions
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Check the field name spelling"
+          ':$$: Bullet "Use one of the available fields listed above"
+      )
   ElemCWithOptions s (s ': _) _ = ()
   ElemCWithOptions s (_ ': rest) allOptions = ElemCWithOptions s rest allOptions
 
 -- | Type-level If (returns Constraint).
 type If :: Bool -> Constraint -> Constraint -> Constraint
 type family If cond t f where
-  If 'True  t _ = t
+  If 'True t _ = t
   If 'False _ f = f
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -1063,12 +1069,12 @@ type family If cond t f where
 -- @
 type FieldNames :: (Type -> Type) -> [Symbol]
 type family FieldNames f where
-  FieldNames (M1 D _ f) = FieldNames f                              -- Datatype wrapper
-  FieldNames (M1 C _ f) = FieldNames f                              -- Constructor wrapper
-  FieldNames (M1 S ('MetaSel ('Just name) _ _ _) _) = '[name]       -- Named field!
-  FieldNames (M1 S ('MetaSel 'Nothing _ _ _) _) = '[]               -- Unnamed (positional)
-  FieldNames (l :*: r) = Append (FieldNames l) (FieldNames r)       -- Product
-  FieldNames (K1 _ _) = '[]                                          -- Leaf value (no name)
+  FieldNames (M1 D _ f) = FieldNames f -- Datatype wrapper
+  FieldNames (M1 C _ f) = FieldNames f -- Constructor wrapper
+  FieldNames (M1 S ('MetaSel ('Just name) _ _ _) _) = '[name] -- Named field!
+  FieldNames (M1 S ('MetaSel 'Nothing _ _ _) _) = '[] -- Unnamed (positional)
+  FieldNames (l :*: r) = Append (FieldNames l) (FieldNames r) -- Product
+  FieldNames (K1 _ _) = '[] -- Leaf value (no name)
 
 -- | Extract node definitions from each field.
 --
@@ -1080,7 +1086,7 @@ type FieldDefs :: (Type -> Type) -> [Type]
 type family FieldDefs f where
   FieldDefs (M1 D _ f) = FieldDefs f
   FieldDefs (M1 C _ f) = FieldDefs f
-  FieldDefs (M1 S _ (K1 _ def)) = '[def]                             -- Field value = node def
+  FieldDefs (M1 S _ (K1 _ def)) = '[def] -- Field value = node def
   FieldDefs (l :*: r) = Append (FieldDefs l) (FieldDefs r)
 
 -- | Pair field names with their node definitions.
@@ -1097,7 +1103,7 @@ type FieldsWithNames :: (Type -> Type) -> [(Symbol, Type)]
 type family FieldsWithNames f where
   FieldsWithNames (M1 D _ f) = FieldsWithNames f
   FieldsWithNames (M1 C _ f) = FieldsWithNames f
-  FieldsWithNames (M1 S ('MetaSel ('Just name) _ _ _) (K1 _ def)) = '[ '(name, def) ]
+  FieldsWithNames (M1 S ('MetaSel ('Just name) _ _ _) (K1 _ def)) = '[ '(name, def)]
   FieldsWithNames (M1 S ('MetaSel 'Nothing _ _ _) _) = '[]
   FieldsWithNames (l :*: r) = Append (FieldsWithNames l) (FieldsWithNames r)
   FieldsWithNames _ = '[]
@@ -1114,7 +1120,6 @@ type FieldNamesOf graph = FieldNames (Rep (graph AsGraph))
 -- | Get fields with names from a graph type.
 type FieldsWithNamesOf :: (Type -> Type) -> [(Symbol, Type)]
 type FieldsWithNamesOf graph = FieldsWithNames (Rep (graph AsGraph))
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- NODE DEFINITION LOOKUP
@@ -1142,7 +1147,6 @@ type LookupField :: Symbol -> [(Symbol, Type)] -> Type
 type family LookupField name fields where
   LookupField name ('(name, def) ': _) = def
   LookupField name (_ ': rest) = LookupField name rest
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- RECORD VALIDATION
@@ -1173,7 +1177,7 @@ type family HasExitField f where
 -- | Type-level Or for Bool.
 type (||) :: Bool -> Bool -> Bool
 type family a || b where
-  'True  || _ = 'True
+  'True || _ = 'True
   'False || b = b
 
 -- | Count EntryNode fields in a Generic representation.
@@ -1245,82 +1249,86 @@ type family OrMaybe a b where
 type ValidateEntryExit :: (Type -> Type) -> Constraint
 type family ValidateEntryExit graph where
   ValidateEntryExit graph =
-    ( ValidateEntryCount (CountEntries (Rep (graph AsGraph)))
-    , ValidateExitCount (CountExits (Rep (graph AsGraph)))
+    ( ValidateEntryCount (CountEntries (Rep (graph AsGraph))),
+      ValidateExitCount (CountExits (Rep (graph AsGraph)))
     )
 
 -- | Validate EntryNode count is exactly 1.
 type ValidateEntryCount :: Nat -> Constraint
 type family ValidateEntryCount n where
-  ValidateEntryCount 0 = DelayedTypeError
-    ( HR
-      ':$$: 'Text "  Missing EntryNode field"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "Your graph record has no EntryNode field."
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "Every graph needs exactly one entry point that defines"
-      ':$$: Indent "what type of input the graph accepts."
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Add an entry field:"
-      ':$$: CodeLine "entry :: mode :- EntryNode YourInputType"
-    )
+  ValidateEntryCount 0 =
+    DelayedTypeError
+      ( HR
+          ':$$: 'Text "  Missing EntryNode field"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "Your graph record has no EntryNode field."
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "Every graph needs exactly one entry point that defines"
+          ':$$: Indent "what type of input the graph accepts."
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Add an entry field:"
+          ':$$: CodeLine "entry :: mode :- EntryNode YourInputType"
+      )
   ValidateEntryCount 1 = ()
-  ValidateEntryCount _ = DelayedTypeError
-    ( HR
-      ':$$: 'Text "  Multiple EntryNode fields"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "Your graph record has more than one EntryNode field."
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "A graph can only have one entry point. Multiple entries"
-      ':$$: Indent "would be ambiguous - which one starts the graph?"
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Remove duplicate EntryNode fields, keeping just one"
-    )
+  ValidateEntryCount _ =
+    DelayedTypeError
+      ( HR
+          ':$$: 'Text "  Multiple EntryNode fields"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "Your graph record has more than one EntryNode field."
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "A graph can only have one entry point. Multiple entries"
+          ':$$: Indent "would be ambiguous - which one starts the graph?"
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Remove duplicate EntryNode fields, keeping just one"
+      )
 
 -- | Validate Exit count is exactly 1.
 type ValidateExitCount :: Nat -> Constraint
 type family ValidateExitCount n where
-  ValidateExitCount 0 = DelayedTypeError
-    ( HR
-      ':$$: 'Text "  Missing ExitNode field"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "Your graph record has no ExitNode field."
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "Every graph needs exactly one exit point that defines"
-      ':$$: Indent "what type of result the graph produces."
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Add an exit field:"
-      ':$$: CodeLine "exit :: mode :- ExitNode YourResultType"
-    )
+  ValidateExitCount 0 =
+    DelayedTypeError
+      ( HR
+          ':$$: 'Text "  Missing ExitNode field"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "Your graph record has no ExitNode field."
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "Every graph needs exactly one exit point that defines"
+          ':$$: Indent "what type of result the graph produces."
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Add an exit field:"
+          ':$$: CodeLine "exit :: mode :- ExitNode YourResultType"
+      )
   ValidateExitCount 1 = ()
-  ValidateExitCount _ = DelayedTypeError
-    ( HR
-      ':$$: 'Text "  Multiple Exit fields"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "Your graph record has more than one Exit field."
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "A graph can only have one exit point. Multiple exits"
-      ':$$: Indent "would be ambiguous - which defines the output type?"
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Remove duplicate Exit fields, keeping just one"
-      ':$$: Bullet "Use a sum type if you need multiple result shapes"
-    )
+  ValidateExitCount _ =
+    DelayedTypeError
+      ( HR
+          ':$$: 'Text "  Multiple Exit fields"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "Your graph record has more than one Exit field."
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "A graph can only have one exit point. Multiple exits"
+          ':$$: Indent "would be ambiguous - which defines the output type?"
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Remove duplicate Exit fields, keeping just one"
+          ':$$: Bullet "Use a sum type if you need multiple result shapes"
+      )
 
 -- | Helper to delay TypeError evaluation.
 type DelayedTypeError :: ErrorMessage -> Constraint
@@ -1379,10 +1387,11 @@ type ValidateGotoTargetsList :: [Symbol] -> [(Symbol, Type)] -> Constraint
 type family ValidateGotoTargetsList fieldNames gotos where
   ValidateGotoTargetsList _ '[] = ()
   ValidateGotoTargetsList fieldNames ('(target, _) ': rest) =
-    ( If (Elem target fieldNames)
-         (() :: Constraint)
-         (InvalidGotoTargetError target fieldNames)
-    , ValidateGotoTargetsList fieldNames rest
+    ( If
+        (Elem target fieldNames)
+        (() :: Constraint)
+        (InvalidGotoTargetError target fieldNames),
+      ValidateGotoTargetsList fieldNames rest
     )
 
 -- | Validate that no UsesEffects annotation contains To markers.
@@ -1399,8 +1408,8 @@ type ValidateNoToInEffectsList :: [(Symbol, Type)] -> Constraint
 type family ValidateNoToInEffectsList fields where
   ValidateNoToInEffectsList '[] = ()
   ValidateNoToInEffectsList ('(_name, def) ': rest) =
-    ( ValidateEffectsFromDef def
-    , ValidateNoToInEffectsList rest
+    ( ValidateEffectsFromDef def,
+      ValidateNoToInEffectsList rest
     )
 
 -- | Extract and validate effects from a node definition.
@@ -1413,8 +1422,8 @@ type family ValidateNoToInEffectsList fields where
 type ValidateEffectsFromDef :: Type -> Constraint
 type family ValidateEffectsFromDef def where
   ValidateEffectsFromDef def =
-    ( ValidateEffectsMaybeEffect (GetUsesEffects @Effect def)
-    , ValidateEffectsMaybeType (GetUsesEffects @Type def)
+    ( ValidateEffectsMaybeEffect (GetUsesEffects @Effect def),
+      ValidateEffectsMaybeType (GetUsesEffects @Type def)
     )
 
 -- | Apply validation to Maybe effect list (Effect kind).
@@ -1433,25 +1442,34 @@ type family ValidateEffectsMaybeType mTypes where
 -- | Error for invalid Goto target.
 type InvalidGotoTargetError :: Symbol -> [Symbol] -> Constraint
 type family InvalidGotoTargetError target fieldNames where
-  InvalidGotoTargetError target fieldNames = DelayedTypeError
-    ( HR
-      ':$$: 'Text "  Goto target \"" ':<>: 'Text target ':<>: 'Text "\" not found"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "Your handler has:"
-      ':$$: CodeLine "Goto \"" ':<>: 'Text target ':<>: 'Text "\" payload"
-      ':$$: Blank
-      ':$$: Indent "But no field named \"" ':<>: 'Text target ':<>: 'Text "\" exists in the graph."
-      ':$$: Blank
-      ':$$: Indent "Available fields:"
-      ':$$: FormatSymbolList fieldNames
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Add a field: " ':<>: 'Text target ':<>: 'Text " :: mode :- ..."
-      ':$$: Bullet "Use Goto Exit to terminate the graph"
-      ':$$: Bullet "Check spelling of the target name"
-    )
+  InvalidGotoTargetError target fieldNames =
+    DelayedTypeError
+      ( HR
+          ':$$: 'Text "  Goto target \""
+          ':<>: 'Text target
+          ':<>: 'Text "\" not found"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "Your handler has:"
+          ':$$: CodeLine "Goto \""
+          ':<>: 'Text target
+          ':<>: 'Text "\" payload"
+          ':$$: Blank
+          ':$$: Indent "But no field named \""
+          ':<>: 'Text target
+          ':<>: 'Text "\" exists in the graph."
+          ':$$: Blank
+          ':$$: Indent "Available fields:"
+          ':$$: FormatSymbolList fieldNames
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Add a field: "
+          ':<>: 'Text target
+          ':<>: 'Text " :: mode :- ..."
+          ':$$: Bullet "Use Goto Exit to terminate the graph"
+          ':$$: Bullet "Check spelling of the target name"
+      )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- VALID GRAPH RECORD
@@ -1478,45 +1496,46 @@ type family InvalidGotoTargetError target fieldNames where
 -- * No nodes have only Goto Self (infinite loop)
 type ValidGraphRecord :: (Type -> Type) -> Constraint
 type ValidGraphRecord graph =
-  ( RequireGeneric graph
-  , ValidateEntryExit graph
-  , ValidateGotoTargets graph
-  , ValidateNoToInEffects graph  -- Check for To markers in UsesEffects
-  -- Structural validation
-  , AllFieldsReachable graph
-  , AllLogicFieldsReachExit graph
-  , NoDeadGotosRecord graph
-  -- Transition validation
-  , AllLogicNodesHaveGoto graph
-  , NoGotoSelfOnly graph
-  -- Fork/Barrier validation
-  , ValidateForkBarrierPairs graph
+  ( RequireGeneric graph,
+    ValidateEntryExit graph,
+    ValidateGotoTargets graph,
+    ValidateNoToInEffects graph, -- Check for To markers in UsesEffects
+    -- Structural validation
+    AllFieldsReachable graph,
+    AllLogicFieldsReachExit graph,
+    NoDeadGotosRecord graph,
+    -- Transition validation
+    AllLogicNodesHaveGoto graph,
+    NoGotoSelfOnly graph,
+    -- Fork/Barrier validation
+    ValidateForkBarrierPairs graph
   )
 
 -- | Require Generic instance with a helpful error message.
 --
 -- This is a class rather than a type family so that GHC produces
 -- a clearer "No instance" error that mentions deriving Generic.
-class Generic (graph AsGraph) => RequireGeneric (graph :: Type -> Type)
+class (Generic (graph AsGraph)) => RequireGeneric (graph :: Type -> Type)
 
 -- Default instance for all types that have Generic
-instance Generic (graph AsGraph) => RequireGeneric graph
+instance (Generic (graph AsGraph)) => RequireGeneric graph
 
 -- | Error message when Generic is missing (as a type error for documentation)
 type MissingGenericError :: (Type -> Type) -> Constraint
-type MissingGenericError graph = TypeError
-  ('Text "Graph validation failed: missing Generic instance"
-   ':$$: 'Text ""
-   ':$$: 'Text "Your graph type needs 'deriving Generic' to work with ValidGraphRecord."
-   ':$$: 'Text ""
-   ':$$: 'Text "Fix: Add Generic to the deriving clause:"
-   ':$$: 'Text ""
-   ':$$: 'Text "  data MyGraph mode = MyGraph"
-   ':$$: 'Text "    { entry :: mode :- EntryNode Input"
-   ':$$: 'Text "    , ..."
-   ':$$: 'Text "    }"
-   ':$$: 'Text "    deriving Generic  -- <- Add this"
-  )
+type MissingGenericError graph =
+  TypeError
+    ( 'Text "Graph validation failed: missing Generic instance"
+        ':$$: 'Text ""
+        ':$$: 'Text "Your graph type needs 'deriving Generic' to work with ValidGraphRecord."
+        ':$$: 'Text ""
+        ':$$: 'Text "Fix: Add Generic to the deriving clause:"
+        ':$$: 'Text ""
+        ':$$: 'Text "  data MyGraph mode = MyGraph"
+        ':$$: 'Text "    { entry :: mode :- EntryNode Input"
+        ':$$: 'Text "    , ..."
+        ':$$: 'Text "    }"
+        ':$$: 'Text "    deriving Generic  -- <- Add this"
+    )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPH PRODUCT (GENERIC TRAVERSAL)
@@ -1543,7 +1562,7 @@ class GraphProduct (f :: Type -> Type) where
   gFromProduct :: GProductType f -> f p
 
 -- M1 (metadata) instance - pass through
-instance GraphProduct f => GraphProduct (M1 i c f) where
+instance (GraphProduct f) => GraphProduct (M1 i c f) where
   type GProductType (M1 i c f) = GProductType f
   gToProduct = gToProduct . unM1
   gFromProduct = M1 . gFromProduct
@@ -1561,13 +1580,13 @@ instance GraphProduct (K1 i c) where
   gFromProduct = K1
 
 -- | Wrapper for Tool handlers to enable Generic dispatch.
-newtype ToolHandler es input output = ToolHandler 
-  { runToolHandler :: input -> Eff es output 
+newtype ToolHandler es input output = ToolHandler
+  { runToolHandler :: input -> Eff es output
   }
 
 -- | Wrapper for Hook handlers to enable Generic dispatch.
-newtype HookHandler es input output = HookHandler 
-  { runHookHandler :: input -> Eff es output 
+newtype HookHandler es input output = HookHandler
+  { runHookHandler :: input -> Eff es output
   }
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -1579,9 +1598,9 @@ newtype HookHandler es input output = HookHandler
 -- Bundles the requirements for working with a graph record in a given mode.
 type GenericGraph :: (Type -> Type) -> Type -> Constraint
 type GenericGraph graph mode =
-  ( GraphMode mode
-  , Generic (graph mode)
-  , GraphProduct (Rep (graph mode))
+  ( GraphMode mode,
+    Generic (graph mode),
+    GraphProduct (Rep (graph mode))
   )
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -1622,13 +1641,13 @@ type GenericGraph graph mode =
 --   • sgFaq
 --   • sgExit
 -- @
-gotoField
-  :: forall (graph :: Type -> Type) (name :: Symbol) payload effs.
-     ( KnownSymbol name
-     , Generic (graph AsGraph)
-     , ElemCWithOptions name (FieldNamesOf graph) (FieldNamesOf graph)
-     , Member (Goto name payload) effs
-     )
-  => payload
-  -> Eff effs ()
+gotoField ::
+  forall (graph :: Type -> Type) (name :: Symbol) payload effs.
+  ( KnownSymbol name,
+    Generic (graph AsGraph),
+    ElemCWithOptions name (FieldNamesOf graph) (FieldNamesOf graph),
+    Member (Goto name payload) effs
+  ) =>
+  payload ->
+  Eff effs ()
 gotoField = goto @name

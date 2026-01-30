@@ -1,7 +1,8 @@
-{-# LANGUAGE GADTs #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
+
 -- | TUI effect for showing popup forms and waiting for user responses.
 --
 -- This effect uses the popup-tui pattern: send a complete PopupDefinition,
@@ -39,34 +40,35 @@
 -- and TUI effect provides I/O primitives used within node handlers.
 module ExoMonad.Effect.TUI
   ( -- * TUI Effect
-    TUI(..)
-  , showUI
+    TUI (..),
+    showUI,
 
     -- * Protocol Types (popup-tui pattern)
-  , PopupDefinition(..)
-  , Component(..)
-  , ComponentSpec(..)
-  , VisibilityRule(..)
-  , PopupResult(..)
+    PopupDefinition (..),
+    Component (..),
+    ComponentSpec (..),
+    VisibilityRule (..),
+    PopupResult (..),
 
     -- * Component Constructors
-  , mkComponent
-  , mkText
-  , mkSlider
-  , mkCheckbox
-  , mkTextbox
-  , mkChoice
-  , mkMultiselect
-  , mkGroup
-  ) where
+    mkComponent,
+    mkText,
+    mkSlider,
+    mkCheckbox,
+    mkTextbox,
+    mkChoice,
+    mkMultiselect,
+    mkGroup,
+  )
+where
 
 import Control.Applicative ((<|>))
 import Control.Monad.Freer (Eff, Member, send)
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.:?), (.=))
+import Data.Aeson qualified as A
+import Data.Aeson.KeyMap qualified as KM
 import Data.Text (Text)
-import qualified Data.Text as T
-import Data.Aeson (Value, ToJSON(..), FromJSON(..), object, (.=), (.:), (.:?), withObject)
-import qualified Data.Aeson as A
-import qualified Data.Aeson.KeyMap as KM
+import Data.Text qualified as T
 import GHC.Generics (Generic)
 
 -- ══════════════════════════════════════════════════════════════
@@ -102,7 +104,7 @@ data TUI r where
 --   "submit" -> ...
 --   _ -> ...
 -- @
-showUI :: Member TUI effs => PopupDefinition -> Eff effs PopupResult
+showUI :: (Member TUI effs) => PopupDefinition -> Eff effs PopupResult
 showUI = send . ShowUI
 
 -- ══════════════════════════════════════════════════════════════
@@ -114,61 +116,61 @@ showUI = send . ShowUI
 
 -- | Complete popup definition sent to the TUI sidebar.
 data PopupDefinition = PopupDefinition
-  { pdTitle :: Text
-    -- ^ Popup window title
-  , pdComponents :: [Component]
-    -- ^ Flat list of form components
+  { -- | Popup window title
+    pdTitle :: Text,
+    -- | Flat list of form components
+    pdComponents :: [Component]
   }
   deriving (Show, Eq, Generic)
 
 -- | A single form component with optional visibility rule.
 data Component = Component
-  { cId :: Text
-    -- ^ Unique component identifier
-  , cSpec :: ComponentSpec
-    -- ^ Component type and configuration
-  , cVisibleWhen :: Maybe VisibilityRule
-    -- ^ Optional visibility condition
+  { -- | Unique component identifier
+    cId :: Text,
+    -- | Component type and configuration
+    cSpec :: ComponentSpec,
+    -- | Optional visibility condition
+    cVisibleWhen :: Maybe VisibilityRule
   }
   deriving (Show, Eq, Generic)
 
 -- | Component type specifications.
 data ComponentSpec
-  = Text { csContent :: Text }
-    -- ^ Static text display
-  | Slider
-      { csSliderLabel :: Text
-      , csMin :: Double
-      , csMax :: Double
-      , csSliderDefault :: Double
+  = -- | Static text display
+    Text {csContent :: Text}
+  | -- | Numeric slider (min, max, default)
+    Slider
+      { csSliderLabel :: Text,
+        csMin :: Double,
+        csMax :: Double,
+        csSliderDefault :: Double
       }
-    -- ^ Numeric slider (min, max, default)
-  | Checkbox
-      { csCheckboxLabel :: Text
-      , csCheckboxDefault :: Bool
+  | -- | Boolean checkbox
+    Checkbox
+      { csCheckboxLabel :: Text,
+        csCheckboxDefault :: Bool
       }
-    -- ^ Boolean checkbox
-  | Textbox
-      { csTextboxLabel :: Text
-      , csPlaceholder :: Maybe Text
-      , csRows :: Maybe Int
+  | -- | Text input (optional multiline)
+    Textbox
+      { csTextboxLabel :: Text,
+        csPlaceholder :: Maybe Text,
+        csRows :: Maybe Int
       }
-    -- ^ Text input (optional multiline)
-  | Choice
-      { csChoiceLabel :: Text
-      , csChoiceOptions :: [Text]
-      , csChoiceDefault :: Maybe Int
+  | -- | Single-select dropdown
+    Choice
+      { csChoiceLabel :: Text,
+        csChoiceOptions :: [Text],
+        csChoiceDefault :: Maybe Int
       }
-    -- ^ Single-select dropdown
-  | Multiselect
-      { csMultiselectLabel :: Text
-      , csMultiselectOptions :: [Text]
+  | -- | Multiple selection list
+    Multiselect
+      { csMultiselectLabel :: Text,
+        csMultiselectOptions :: [Text]
       }
-    -- ^ Multiple selection list
-  | Group
+  | -- | Section header
+    Group
       { csGroupLabel :: Text
       }
-    -- ^ Section header
   deriving (Show, Eq, Generic)
 
 -- | Visibility rules for conditional component display.
@@ -176,28 +178,28 @@ data ComponentSpec
 -- Note: Uses untagged serialization. Field names are deliberately different
 -- to avoid ambiguity during deserialization.
 data VisibilityRule
-  = Checked Text
-    -- ^ Show if checkbox with given ID is checked
-  | Equals (KM.KeyMap Text)
-    -- ^ Show if choice equals value ({"choiceId": "expectedValue"})
-  | GreaterThan { vrId :: Text, vrMinValue :: Double }
-    -- ^ Show if slider value > min_value
-  | LessThan { vrId :: Text, vrMaxValue :: Double }
-    -- ^ Show if slider value < max_value
-  | CountEquals { vrId :: Text, vrExactCount :: Int }
-    -- ^ Show if multiselect has exactly N items selected
-  | CountGreaterThan { vrId :: Text, vrMinCount :: Int }
-    -- ^ Show if multiselect has > N items selected
+  = -- | Show if checkbox with given ID is checked
+    Checked Text
+  | -- | Show if choice equals value ({"choiceId": "expectedValue"})
+    Equals (KM.KeyMap Text)
+  | -- | Show if slider value > min_value
+    GreaterThan {vrId :: Text, vrMinValue :: Double}
+  | -- | Show if slider value < max_value
+    LessThan {vrId :: Text, vrMaxValue :: Double}
+  | -- | Show if multiselect has exactly N items selected
+    CountEquals {vrId :: Text, vrExactCount :: Int}
+  | -- | Show if multiselect has > N items selected
+    CountGreaterThan {vrId :: Text, vrMinCount :: Int}
   deriving (Show, Eq, Generic)
 
 -- | Result returned when user submits or cancels the popup.
 data PopupResult = PopupResult
-  { prButton :: Text
-    -- ^ Button pressed: "submit" or "decline"
-  , prValues :: Value
-    -- ^ JSON object with all visible component values
-  , prTimeSpent :: Maybe Double
-    -- ^ Time spent interacting with popup in seconds
+  { -- | Button pressed: "submit" or "decline"
+    prButton :: Text,
+    -- | JSON object with all visible component values
+    prValues :: Value,
+    -- | Time spent interacting with popup in seconds
+    prTimeSpent :: Maybe Double
   }
   deriving (Show, Eq, Generic)
 
@@ -248,53 +250,60 @@ mkGroup cid label =
 -- ══════════════════════════════════════════════════════════════
 
 instance ToJSON PopupDefinition where
-  toJSON (PopupDefinition title components) = object
-    [ "title" .= title
-    , "components" .= components
-    ]
+  toJSON (PopupDefinition title components) =
+    object
+      [ "title" .= title,
+        "components" .= components
+      ]
 
 instance FromJSON PopupDefinition where
-  parseJSON = withObject "PopupDefinition" $ \o -> PopupDefinition
-    <$> o .: "title"
-    <*> o .: "components"
+  parseJSON = withObject "PopupDefinition" $ \o ->
+    PopupDefinition
+      <$> o .: "title"
+      <*> o .: "components"
 
 instance ToJSON Component where
-  toJSON (Component cid spec vis) = object $
-    [ "id" .= cid
-    ] ++ specFields spec ++ visFields vis
+  toJSON (Component cid spec vis) =
+    object $
+      [ "id" .= cid
+      ]
+        ++ specFields spec
+        ++ visFields vis
     where
       specFields s = case s of
-        Text content -> [ "type" .= ("text" :: Text), "content" .= content ]
+        Text content -> ["type" .= ("text" :: Text), "content" .= content]
         Slider label minVal maxVal defVal ->
-          [ "type" .= ("slider" :: Text)
-          , "label" .= label
-          , "min" .= minVal
-          , "max" .= maxVal
-          , "default" .= defVal
+          [ "type" .= ("slider" :: Text),
+            "label" .= label,
+            "min" .= minVal,
+            "max" .= maxVal,
+            "default" .= defVal
           ]
         Checkbox label defVal ->
-          [ "type" .= ("checkbox" :: Text)
-          , "label" .= label
-          , "default" .= defVal
+          [ "type" .= ("checkbox" :: Text),
+            "label" .= label,
+            "default" .= defVal
           ]
         Textbox label placeholder rows ->
-          [ "type" .= ("textbox" :: Text)
-          , "label" .= label
-          ] ++ maybe [] (\p -> ["placeholder" .= p]) placeholder
+          [ "type" .= ("textbox" :: Text),
+            "label" .= label
+          ]
+            ++ maybe [] (\p -> ["placeholder" .= p]) placeholder
             ++ maybe [] (\r -> ["rows" .= r]) rows
         Choice label options defIdx ->
-          [ "type" .= ("choice" :: Text)
-          , "label" .= label
-          , "options" .= options
-          ] ++ maybe [] (\i -> ["default" .= i]) defIdx
+          [ "type" .= ("choice" :: Text),
+            "label" .= label,
+            "options" .= options
+          ]
+            ++ maybe [] (\i -> ["default" .= i]) defIdx
         Multiselect label options ->
-          [ "type" .= ("multiselect" :: Text)
-          , "label" .= label
-          , "options" .= options
+          [ "type" .= ("multiselect" :: Text),
+            "label" .= label,
+            "options" .= options
           ]
         Group label ->
-          [ "type" .= ("group" :: Text)
-          , "label" .= label
+          [ "type" .= ("group" :: Text),
+            "label" .= label
           ]
 
       visFields Nothing = []
@@ -306,25 +315,30 @@ instance FromJSON Component where
     ctype <- o .: "type"
     spec <- case ctype :: Text of
       "text" -> Text <$> o .: "content"
-      "slider" -> Slider
-        <$> o .: "label"
-        <*> o .: "min"
-        <*> o .: "max"
-        <*> o .: "default"
-      "checkbox" -> Checkbox
-        <$> o .: "label"
-        <*> o .: "default"
-      "textbox" -> Textbox
-        <$> o .: "label"
-        <*> o .:? "placeholder"
-        <*> o .:? "rows"
-      "choice" -> Choice
-        <$> o .: "label"
-        <*> o .: "options"
-        <*> o .:? "default"
-      "multiselect" -> Multiselect
-        <$> o .: "label"
-        <*> o .: "options"
+      "slider" ->
+        Slider
+          <$> o .: "label"
+          <*> o .: "min"
+          <*> o .: "max"
+          <*> o .: "default"
+      "checkbox" ->
+        Checkbox
+          <$> o .: "label"
+          <*> o .: "default"
+      "textbox" ->
+        Textbox
+          <$> o .: "label"
+          <*> o .:? "placeholder"
+          <*> o .:? "rows"
+      "choice" ->
+        Choice
+          <$> o .: "label"
+          <*> o .: "options"
+          <*> o .:? "default"
+      "multiselect" ->
+        Multiselect
+          <$> o .: "label"
+          <*> o .: "options"
       "group" -> Group <$> o .: "label"
       _ -> fail $ "Unknown component type: " <> T.unpack ctype
     vis <- o .:? "visible_when"
@@ -373,13 +387,16 @@ instance FromJSON VisibilityRule where
           _ -> fail "Invalid VisibilityRule: ambiguous or missing fields"
 
 instance ToJSON PopupResult where
-  toJSON (PopupResult button values timeSpent) = object $
-    [ "button" .= button
-    , "values" .= values
-    ] ++ maybe [] (\t -> ["time_spent_seconds" .= t]) timeSpent
+  toJSON (PopupResult button values timeSpent) =
+    object $
+      [ "button" .= button,
+        "values" .= values
+      ]
+        ++ maybe [] (\t -> ["time_spent_seconds" .= t]) timeSpent
 
 instance FromJSON PopupResult where
-  parseJSON = withObject "PopupResult" $ \o -> PopupResult
-    <$> o .: "button"
-    <*> o .: "values"
-    <*> o .:? "time_spent_seconds"
+  parseJSON = withObject "PopupResult" $ \o ->
+    PopupResult
+      <$> o .: "button"
+      <*> o .: "values"
+      <*> o .:? "time_spent_seconds"

@@ -26,49 +26,56 @@
 -- @
 module ExoMonad.Effect.Log
   ( -- * Log Levels
-    LogLevel(..)
-    -- * Log Context
-  , LogContext(..)
-  , emptyLogContext
-  , LogFields
-    -- * Log Effect
-  , Log(..)
-  , logMsg
-  , logMsgWith
-  , logTrace
-  , logDebug
-  , logInfo
-  , logWarn
-  , logError
-  , logTraceWith
-  , logDebugWith
-  , logInfoWith
-  , logWarnWith
-  , logErrorWith
-    -- * Domain Event Types
-  , GraphTransitionInfo(..)
-  , StateSnapshotInfo(..)
-  , LLMRequestInfo(..)
-  , LLMResponseInfo(..)
-  , ErrorContextInfo(..)
-    -- * Domain Event Helpers
-  , logGraph
-  , logState
-  , logLLMRequest
-  , logLLMResponse
-  , logErrorContext
-    -- * Scoped Logging
-  , withEffectSpan
-    -- * Runners (simple, use log-interpreter for fast-logger)
-  , runLog
-  ) where
+    LogLevel (..),
 
-import Control.Monad.Freer (Eff, Member, send, interpret, LastMember, sendM)
+    -- * Log Context
+    LogContext (..),
+    emptyLogContext,
+    LogFields,
+
+    -- * Log Effect
+    Log (..),
+    logMsg,
+    logMsgWith,
+    logTrace,
+    logDebug,
+    logInfo,
+    logWarn,
+    logError,
+    logTraceWith,
+    logDebugWith,
+    logInfoWith,
+    logWarnWith,
+    logErrorWith,
+
+    -- * Domain Event Types
+    GraphTransitionInfo (..),
+    StateSnapshotInfo (..),
+    LLMRequestInfo (..),
+    LLMResponseInfo (..),
+    ErrorContextInfo (..),
+
+    -- * Domain Event Helpers
+    logGraph,
+    logState,
+    logLLMRequest,
+    logLLMResponse,
+    logErrorContext,
+
+    -- * Scoped Logging
+    withEffectSpan,
+
+    -- * Runners (simple, use log-interpreter for fast-logger)
+    runLog,
+  )
+where
+
+import Control.Monad.Freer (Eff, LastMember, Member, interpret, send, sendM)
 import Control.Monad.Freer.Reader (Reader, local)
-import Data.Aeson (Value, ToJSON(..), toJSON)
+import Data.Aeson (ToJSON (..), Value, toJSON)
 import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
+import Data.Text qualified as T
+import Data.Text.IO qualified as TIO
 import Data.Time (UTCTime)
 import GHC.Generics (Generic)
 import System.IO (stderr)
@@ -82,9 +89,9 @@ type LogFields = [(Text, Value)]
 
 -- | Context for distributed tracing and effect chains
 data LogContext = LogContext
-  { correlationId :: Text
-  , effectChain :: [Text]
-  , startTime :: Maybe UTCTime -- Maybe because purely functional context might not have time
+  { correlationId :: Text,
+    effectChain :: [Text],
+    startTime :: Maybe UTCTime -- Maybe because purely functional context might not have time
   }
   deriving (Show, Eq, Generic, ToJSON)
 
@@ -95,55 +102,56 @@ emptyLogContext = LogContext "" [] Nothing
 data Log r where
   LogMsg :: LogLevel -> Text -> Maybe LogFields -> Log ()
 
-logMsg :: Member Log effs => LogLevel -> Text -> Eff effs ()
+logMsg :: (Member Log effs) => LogLevel -> Text -> Eff effs ()
 logMsg level msg = send (LogMsg level msg Nothing)
 
-logMsgWith :: Member Log effs => LogLevel -> Text -> LogFields -> Eff effs ()
+logMsgWith :: (Member Log effs) => LogLevel -> Text -> LogFields -> Eff effs ()
 logMsgWith level msg fields = send (LogMsg level msg (Just fields))
 
-logTrace :: Member Log effs => Text -> Eff effs ()
+logTrace :: (Member Log effs) => Text -> Eff effs ()
 logTrace = logMsg Trace
 
-logDebug :: Member Log effs => Text -> Eff effs ()
+logDebug :: (Member Log effs) => Text -> Eff effs ()
 logDebug = logMsg Debug
 
-logInfo :: Member Log effs => Text -> Eff effs ()
+logInfo :: (Member Log effs) => Text -> Eff effs ()
 logInfo = logMsg Info
 
-logWarn :: Member Log effs => Text -> Eff effs ()
+logWarn :: (Member Log effs) => Text -> Eff effs ()
 logWarn = logMsg Warn
 
-logError :: Member Log effs => Text -> Eff effs ()
+logError :: (Member Log effs) => Text -> Eff effs ()
 logError = logMsg Error
 
-logTraceWith :: Member Log effs => Text -> LogFields -> Eff effs ()
+logTraceWith :: (Member Log effs) => Text -> LogFields -> Eff effs ()
 logTraceWith = logMsgWith Trace
 
-logDebugWith :: Member Log effs => Text -> LogFields -> Eff effs ()
+logDebugWith :: (Member Log effs) => Text -> LogFields -> Eff effs ()
 logDebugWith = logMsgWith Debug
 
-logInfoWith :: Member Log effs => Text -> LogFields -> Eff effs ()
+logInfoWith :: (Member Log effs) => Text -> LogFields -> Eff effs ()
 logInfoWith = logMsgWith Info
 
-logWarnWith :: Member Log effs => Text -> LogFields -> Eff effs ()
+logWarnWith :: (Member Log effs) => Text -> LogFields -> Eff effs ()
 logWarnWith = logMsgWith Warn
 
-logErrorWith :: Member Log effs => Text -> LogFields -> Eff effs ()
+logErrorWith :: (Member Log effs) => Text -> LogFields -> Eff effs ()
 logErrorWith = logMsgWith Error
 
 -- | Execute an action within a named span.
 -- This pushes the name to the effect chain in the LogContext.
 -- It requires a Reader LogContext effect to be present.
-withEffectSpan :: (Member (Reader LogContext) effs)
-               => Text
-               -> Eff effs a
-               -> Eff effs a
+withEffectSpan ::
+  (Member (Reader LogContext) effs) =>
+  Text ->
+  Eff effs a ->
+  Eff effs a
 withEffectSpan name action =
-  local (\ctx -> ctx { effectChain = ctx.effectChain ++ [name] }) action
+  local (\ctx -> ctx {effectChain = ctx.effectChain ++ [name]}) action
 
 -- | Simple runner for Log effect that outputs to stderr.
 -- For production use, prefer 'ExoMonad.Log.Interpreter' which uses fast-logger.
-runLog :: LastMember IO effs => LogLevel -> Eff (Log ': effs) a -> Eff effs a
+runLog :: (LastMember IO effs) => LogLevel -> Eff (Log ': effs) a -> Eff effs a
 runLog minLevel = interpret $ \case
   LogMsg level msg maybeFields
     | level >= minLevel -> do
@@ -161,9 +169,10 @@ runLog minLevel = interpret $ \case
 --
 -- Logged automatically by instrumented dispatch.
 data GraphTransitionInfo = GraphTransitionInfo
-  { fromNode :: Text
-  , toNode   :: Text
-  , payload  :: Value    -- ^ Input to next handler (JSON-encoded)
+  { fromNode :: Text,
+    toNode :: Text,
+    -- | Input to next handler (JSON-encoded)
+    payload :: Value
   }
   deriving (Show, Generic)
 
@@ -173,10 +182,12 @@ instance ToJSON GraphTransitionInfo
 --
 -- Logged after each transition for changed fields.
 data StateSnapshotInfo = StateSnapshotInfo
-  { field   :: Text   -- ^ e.g., "mood", "dicePool"
-  , before  :: Value
-  , after   :: Value
-  , changed :: Bool   -- ^ Quick check for "(unchanged)"
+  { -- | e.g., "mood", "dicePool"
+    field :: Text,
+    before :: Value,
+    after :: Value,
+    -- | Quick check for "(unchanged)"
+    changed :: Bool
   }
   deriving (Show, Generic)
 
@@ -187,13 +198,14 @@ instance ToJSON StateSnapshotInfo
 -- At Info level: metadata only (model, tokens, tools).
 -- At Debug level: includes full prompts.
 data LLMRequestInfo = LLMRequestInfo
-  { nodeName     :: Text
-  , model        :: Text
-  , promptTokens :: Int
-  , tools        :: [Text]  -- ^ Tool names available
-  -- Full content (only at Debug verbosity)
-  , systemPrompt :: Maybe Text
-  , userPrompt   :: Maybe Text
+  { nodeName :: Text,
+    model :: Text,
+    promptTokens :: Int,
+    -- | Tool names available
+    -- Full content (only at Debug verbosity)
+    tools :: [Text],
+    systemPrompt :: Maybe Text,
+    userPrompt :: Maybe Text
   }
   deriving (Show, Generic)
 
@@ -201,12 +213,12 @@ instance ToJSON LLMRequestInfo
 
 -- | LLM response info.
 data LLMResponseInfo = LLMResponseInfo
-  { nodeName         :: Text
-  , completionTokens :: Int
-  , toolCalls        :: Int
-  , latencyMs        :: Int
-  -- Full content (only at Debug verbosity)
-  , response         :: Maybe Text
+  { nodeName :: Text,
+    completionTokens :: Int,
+    toolCalls :: Int,
+    latencyMs :: Int,
+    -- Full content (only at Debug verbosity)
+    response :: Maybe Text
   }
   deriving (Show, Generic)
 
@@ -216,12 +228,14 @@ instance ToJSON LLMResponseInfo
 --
 -- Includes state snapshot and last LLM call for context.
 data ErrorContextInfo = ErrorContextInfo
-  { message     :: Text
-  , node        :: Maybe Text
-  , state       :: Value        -- ^ Current state snapshot
-  , transitions :: [(Text, Text)]  -- ^ Last N transitions (from, to)
-  , lastLLM     :: Maybe LLMResponseInfo
-  , stackTrace  :: Maybe Text
+  { message :: Text,
+    node :: Maybe Text,
+    -- | Current state snapshot
+    state :: Value,
+    -- | Last N transitions (from, to)
+    transitions :: [(Text, Text)],
+    lastLLM :: Maybe LLMResponseInfo,
+    stackTrace :: Maybe Text
   }
   deriving (Show, Generic)
 
@@ -242,45 +256,55 @@ instance ToJSON ErrorContextInfo
 --   , payload = toJSON input
 --   }
 -- @
-logGraph :: Member Log effs => GraphTransitionInfo -> Eff effs ()
-logGraph info = logInfoWith ("GRAPH " <> info.fromNode <> " → " <> info.toNode)
-  [ ("payload", info.payload)
-  ]
+logGraph :: (Member Log effs) => GraphTransitionInfo -> Eff effs ()
+logGraph info =
+  logInfoWith
+    ("GRAPH " <> info.fromNode <> " → " <> info.toNode)
+    [ ("payload", info.payload)
+    ]
 
 -- | Log a state field change.
-logState :: Member Log effs => StateSnapshotInfo -> Eff effs ()
-logState info = logInfoWith ("STATE." <> info.field)
-  [ ("before", info.before)
-  , ("after", info.after)
-  , ("changed", toJSON info.changed)
-  ]
+logState :: (Member Log effs) => StateSnapshotInfo -> Eff effs ()
+logState info =
+  logInfoWith
+    ("STATE." <> info.field)
+    [ ("before", info.before),
+      ("after", info.after),
+      ("changed", toJSON info.changed)
+    ]
 
 -- | Log an LLM request.
 --
 -- Use 'logDebugWith' for full prompts when debugging.
-logLLMRequest :: Member Log effs => LLMRequestInfo -> Eff effs ()
-logLLMRequest info = logInfoWith ("LLM.REQUEST " <> info.nodeName)
-  [ ("model", toJSON info.model)
-  , ("prompt_tokens", toJSON info.promptTokens)
-  , ("tools", toJSON info.tools)
-  ]
+logLLMRequest :: (Member Log effs) => LLMRequestInfo -> Eff effs ()
+logLLMRequest info =
+  logInfoWith
+    ("LLM.REQUEST " <> info.nodeName)
+    [ ("model", toJSON info.model),
+      ("prompt_tokens", toJSON info.promptTokens),
+      ("tools", toJSON info.tools)
+    ]
 
 -- | Log an LLM response.
-logLLMResponse :: Member Log effs => LLMResponseInfo -> Eff effs ()
-logLLMResponse info = logInfoWith ("LLM.RESPONSE " <> info.nodeName)
-  [ ("completion_tokens", toJSON info.completionTokens)
-  , ("tool_calls", toJSON info.toolCalls)
-  , ("latency_ms", toJSON info.latencyMs)
-  ]
+logLLMResponse :: (Member Log effs) => LLMResponseInfo -> Eff effs ()
+logLLMResponse info =
+  logInfoWith
+    ("LLM.RESPONSE " <> info.nodeName)
+    [ ("completion_tokens", toJSON info.completionTokens),
+      ("tool_calls", toJSON info.toolCalls),
+      ("latency_ms", toJSON info.latencyMs)
+    ]
 
 -- | Log an error with full context.
 --
 -- Always logs at Error level regardless of verbosity.
-logErrorContext :: Member Log effs => ErrorContextInfo -> Eff effs ()
-logErrorContext info = logErrorWith ("ERROR: " <> info.message)
-  [ ("node", toJSON info.node)
-  , ("state", info.state)
-  , ("transitions", toJSON info.transitions)
-  , ("last_llm", toJSON info.lastLLM)
-  , ("stack_trace", toJSON info.stackTrace)
-  ]
+logErrorContext :: (Member Log effs) => ErrorContextInfo -> Eff effs ()
+logErrorContext info =
+  logErrorWith
+    ("ERROR: " <> info.message)
+    [ ("node", toJSON info.node),
+      ("state", info.state),
+      ("transitions", toJSON info.transitions),
+      ("last_llm", toJSON info.lastLLM),
+      ("stack_trace", toJSON info.stackTrace)
+    ]

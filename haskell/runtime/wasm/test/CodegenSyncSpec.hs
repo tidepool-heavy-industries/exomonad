@@ -10,25 +10,23 @@
 -- Registry entries, so they can't get out of sync.
 module CodegenSyncSpec (spec) where
 
-import Test.Hspec
-import Data.Aeson (decode, Value(..), (.:))
+import Data.Aeson (Value (..), decode, (.:))
+import Data.Aeson.Key qualified as Key
 import Data.Aeson.Types (parseMaybe)
-import qualified Data.Aeson.Key as Key
-import qualified Data.ByteString.Lazy as BL
-import Data.Text (Text)
-import qualified Data.Text as T
-import Data.Text.Encoding (encodeUtf8)
+import Data.ByteString.Lazy qualified as BL
 import Data.List (sort)
-import qualified Data.Map.Strict as Map
-
+import Data.Map.Strict qualified as Map
+import Data.Text (Text)
+import Data.Text qualified as T
+import Data.Text.Encoding (encodeUtf8)
+import ExoMonad.Generated.GraphSpecs (GraphSpec (..))
 import ExoMonad.Wasm.Registry
-  ( getRegistry
-  , getGraphInfo
-  , registryGraphSpecs
+  ( getGraphInfo,
+    getRegistry,
+    registryGraphSpecs,
   )
 import ExoMonad.Wasm.Registry.Default (setupDefaultRegistry)
-import ExoMonad.Generated.GraphSpecs (GraphSpec(..))
-
+import Test.Hspec
 
 spec :: Spec
 spec = beforeAll_ setupDefaultRegistry $ describe "Codegen Sync" $ do
@@ -44,7 +42,7 @@ spec = beforeAll_ setupDefaultRegistry $ describe "Codegen Sync" $ do
       specs <- registryGraphSpecs
       let ids = map (\s -> s.gsId) specs
           nub [] = []
-          nub (x:xs) = x : nub (filter (/= x) xs)
+          nub (x : xs) = x : nub (filter (/= x) xs)
       length ids `shouldBe` length (nub ids)
 
   describe "Unified FFI matches Registry specs" $ do
@@ -58,7 +56,6 @@ spec = beforeAll_ setupDefaultRegistry $ describe "Codegen Sync" $ do
       spec <- findSpec "example"
       verifyGraphInfo json spec
 
-
 -- | Find a GraphSpec by ID.
 findSpec :: Text -> IO GraphSpec
 findSpec gid = do
@@ -66,7 +63,6 @@ findSpec gid = do
   case filter (\s -> s.gsId == gid) specs of
     [s] -> pure s
     _ -> error $ "No spec found for: " ++ T.unpack gid
-
 
 -- | Verify that FFI JSON output matches a GraphSpec.
 verifyGraphInfo :: Text -> GraphSpec -> IO ()
@@ -98,18 +94,15 @@ verifyGraphInfo jsonText gspec = do
         Nothing -> expectationFailure "Missing 'edges' field in JSON"
         Just edges -> sort edges `shouldBe` sort gspec.gsEdges
 
-
 -- | Extract a text field from JSON.
 extractField :: Value -> Text -> Maybe Text
 extractField (Object obj) key = parseMaybe (.: Key.fromText key) obj
 extractField _ _ = Nothing
 
-
 -- | Extract nodes array from JSON.
 extractNodes :: Value -> Maybe [Text]
 extractNodes (Object obj) = parseMaybe (.: Key.fromText "nodes") obj
 extractNodes _ = Nothing
-
 
 -- | Extract edges as (from, to) pairs from JSON.
 extractEdges :: Value -> Maybe [(Text, Text)]

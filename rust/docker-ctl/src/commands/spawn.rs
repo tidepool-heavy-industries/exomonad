@@ -1,5 +1,7 @@
 use bollard::models::{ContainerCreateBody, HostConfig};
-use bollard::query_parameters::{CreateContainerOptions, InspectContainerOptions, RemoveContainerOptions, StartContainerOptions};
+use bollard::query_parameters::{
+    CreateContainerOptions, InspectContainerOptions, RemoveContainerOptions, StartContainerOptions,
+};
 use bollard::Docker;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -28,7 +30,10 @@ pub async fn run(
     let container_name = format!("exomonad-agent-{}", issue_id);
 
     // Idempotency: check if container already exists
-    match docker.inspect_container(&container_name, None::<InspectContainerOptions>).await {
+    match docker
+        .inspect_container(&container_name, None::<InspectContainerOptions>)
+        .await
+    {
         Ok(info) => {
             // Container exists - check if it's running
             let state = info.state.as_ref();
@@ -44,21 +49,33 @@ pub async fn run(
                 })?);
             } else {
                 // Stopped - remove it and create fresh (config might have changed)
-                docker.remove_container(
-                    &container_name,
-                    Some(RemoveContainerOptions { force: true, ..Default::default() })
-                ).await?;
+                docker
+                    .remove_container(
+                        &container_name,
+                        Some(RemoveContainerOptions {
+                            force: true,
+                            ..Default::default()
+                        }),
+                    )
+                    .await?;
             }
         }
-        Err(bollard::errors::Error::DockerResponseServerError { status_code: 404, .. }) => {
+        Err(bollard::errors::Error::DockerResponseServerError {
+            status_code: 404, ..
+        }) => {
             // Container doesn't exist, proceed to create
         }
         Err(e) => return Err(e.into()),
     }
 
-    let agent_image = std::env::var("EXOMONAD_AGENT_IMAGE").unwrap_or_else(|_| "exomonad-agent:latest".to_string());
-    let host_uid: u32 = std::env::var("HOST_UID").unwrap_or_else(|_| "1000".to_string()).parse()?;
-    let host_gid: u32 = std::env::var("HOST_GID").unwrap_or_else(|_| "1000".to_string()).parse()?;
+    let agent_image = std::env::var("EXOMONAD_AGENT_IMAGE")
+        .unwrap_or_else(|_| "exomonad-agent:latest".to_string());
+    let host_uid: u32 = std::env::var("HOST_UID")
+        .unwrap_or_else(|_| "1000".to_string())
+        .parse()?;
+    let host_gid: u32 = std::env::var("HOST_GID")
+        .unwrap_or_else(|_| "1000".to_string())
+        .parse()?;
     let network_name = std::env::var("EXOMONAD_NETWORK").unwrap_or_else(|_| "exomonad".to_string());
 
     let mut labels = HashMap::new();
@@ -66,7 +83,7 @@ pub async fn run(
     labels.insert("com.exomonad.role".to_string(), "agent".to_string());
     labels.insert(
         "com.exomonad.expires_at".to_string(),
-        expires_at.unwrap_or_else(|| "never".to_string())
+        expires_at.unwrap_or_else(|| "never".to_string()),
     );
 
     // Extract the worktree directory name from the full path (e.g., "gh-346-test-issue")
@@ -94,7 +111,11 @@ pub async fn run(
         image: Some(agent_image),
         labels: Some(labels),
         working_dir: Some(working_dir),
-        cmd: if cmd_override.is_empty() { None } else { Some(cmd_override) },
+        cmd: if cmd_override.is_empty() {
+            None
+        } else {
+            Some(cmd_override)
+        },
         tty: Some(true),
         open_stdin: Some(true),
         attach_stdin: Some(false),
@@ -129,8 +150,12 @@ pub async fn run(
         ..Default::default()
     };
 
-    let container = docker.create_container(Some(create_options), config).await?;
-    docker.start_container(&container.id, None::<StartContainerOptions>).await?;
+    let container = docker
+        .create_container(Some(create_options), config)
+        .await?;
+    docker
+        .start_container(&container.id, None::<StartContainerOptions>)
+        .await?;
 
     Ok(serde_json::to_string(&SpawnResponse {
         container_id: container.id,

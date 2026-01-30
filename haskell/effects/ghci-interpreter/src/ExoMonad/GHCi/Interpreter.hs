@@ -22,36 +22,35 @@
 -- @
 module ExoMonad.GHCi.Interpreter
   ( -- * Interpreter
-    runGHCiIO
+    runGHCiIO,
 
     -- * Connection Management
-  , GHCiConnection
-  , withGHCiConnection
-  , connectToOracle
-  , disconnectFromOracle
+    GHCiConnection,
+    withGHCiConnection,
+    connectToOracle,
+    disconnectFromOracle,
 
     -- * Configuration
-  , GHCiClientConfig(..)
-  , defaultClientConfig
-  ) where
+    GHCiClientConfig (..),
+    defaultClientConfig,
+  )
+where
 
 import Control.Exception (bracket)
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Data.Text (Text)
-
 import ExoMonad.Effect.GHCi
-  ( GHCi(..)
-  , GHCiError(..)
-  , GHCiRequest(..)
-  , GHCiResponse(..)
+  ( GHCi (..),
+    GHCiError (..),
+    GHCiRequest (..),
+    GHCiResponse (..),
   )
 import ExoMonad.GHCi.Protocol
-  ( GHCiConnection
-  , connect
-  , disconnect
-  , sendRequest
+  ( GHCiConnection,
+    connect,
+    disconnect,
+    sendRequest,
   )
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONFIGURATION
@@ -59,21 +58,20 @@ import ExoMonad.GHCi.Protocol
 
 -- | Client configuration for connecting to ghci-oracle.
 data GHCiClientConfig = GHCiClientConfig
-  { gccHost :: String
-    -- ^ Server host (default: "127.0.0.1")
-  , gccPort :: Int
-    -- ^ Server port (default: 9999)
+  { -- | Server host (default: "127.0.0.1")
+    gccHost :: String,
+    -- | Server port (default: 9999)
+    gccPort :: Int
   }
   deriving stock (Show, Eq)
 
-
 -- | Default client configuration.
 defaultClientConfig :: GHCiClientConfig
-defaultClientConfig = GHCiClientConfig
-  { gccHost = "127.0.0.1"
-  , gccPort = 9999
-  }
-
+defaultClientConfig =
+  GHCiClientConfig
+    { gccHost = "127.0.0.1",
+      gccPort = 9999
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONNECTION MANAGEMENT
@@ -83,11 +81,9 @@ defaultClientConfig = GHCiClientConfig
 connectToOracle :: GHCiClientConfig -> IO (Either GHCiError GHCiConnection)
 connectToOracle config = connect (gccHost config) (gccPort config)
 
-
 -- | Disconnect from a ghci-oracle server.
 disconnectFromOracle :: GHCiConnection -> IO ()
 disconnectFromOracle = disconnect
-
 
 -- | Bracket for connection lifecycle.
 --
@@ -109,7 +105,6 @@ withGHCiConnection host port action = do
       result <- bracket (pure conn) disconnect action
       pure $ Right result
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- INTERPRETER
 -- ════════════════════════════════════════════════════════════════════════════
@@ -117,36 +112,29 @@ withGHCiConnection host port action = do
 -- | Run GHCi effects by communicating with ghci-oracle server.
 --
 -- Requires an active connection to a ghci-oracle server.
-runGHCiIO :: LastMember IO effs => GHCiConnection -> Eff (GHCi ': effs) a -> Eff effs a
+runGHCiIO :: (LastMember IO effs) => GHCiConnection -> Eff (GHCi ': effs) a -> Eff effs a
 runGHCiIO conn = interpret $ \case
   QueryType expr -> sendM $ do
     resp <- sendRequest conn (ReqQueryType expr)
     pure $ handleTextResponse resp
-
   QueryInfo name -> sendM $ do
     resp <- sendRequest conn (ReqQueryInfo name)
     pure $ handleTextResponse resp
-
   QueryKind typ -> sendM $ do
     resp <- sendRequest conn (ReqQueryKind typ)
     pure $ handleTextResponse resp
-
   Evaluate expr -> sendM $ do
     resp <- sendRequest conn (ReqEvaluate expr)
     pure $ handleTextResponse resp
-
   CheckCompiles expr -> sendM $ do
     resp <- sendRequest conn (ReqCheckCompiles expr)
     pure $ handleBoolResponse resp
-
   LoadModule modName -> sendM $ do
     resp <- sendRequest conn (ReqLoadModule modName)
     pure $ handleUnitResponse resp
-
   ReloadModules -> sendM $ do
     resp <- sendRequest conn ReqReloadModules
     pure $ handleUnitResponse resp
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- RESPONSE HANDLERS
@@ -160,7 +148,6 @@ handleTextResponse = \case
   Right (RespError err) -> Left err
   Right other -> Left $ GHCiServerError $ "Unexpected response: " <> showResponse other
 
-
 -- | Handle response expecting Bool.
 handleBoolResponse :: Either GHCiError GHCiResponse -> Either GHCiError Bool
 handleBoolResponse = \case
@@ -169,7 +156,6 @@ handleBoolResponse = \case
   Right (RespError err) -> Left err
   Right other -> Left $ GHCiServerError $ "Unexpected response: " <> showResponse other
 
-
 -- | Handle response expecting ().
 handleUnitResponse :: Either GHCiError GHCiResponse -> Either GHCiError ()
 handleUnitResponse = \case
@@ -177,7 +163,6 @@ handleUnitResponse = \case
   Right RespUnit -> Right ()
   Right (RespError err) -> Left err
   Right other -> Left $ GHCiServerError $ "Unexpected response: " <> showResponse other
-
 
 -- | Show response for error messages.
 showResponse :: GHCiResponse -> Text

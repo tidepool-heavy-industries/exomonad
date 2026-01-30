@@ -64,43 +64,44 @@
 -- persistence-aware interpretation.
 module ExoMonad.Graph.Memory
   ( -- * The Memory Effect
-    Memory(..)
-  , getMem
-  , updateMem
-  , putMem
+    Memory (..),
+    getMem,
+    updateMem,
+    putMem,
 
     -- * Lens Helpers
-  , modifyMem
+    modifyMem,
 
     -- * Effect Interpretation
-  , runMemory
-  , runMemoryPure
-  , evalMemory
+    runMemory,
+    runMemoryPure,
+    evalMemory,
 
     -- * WASM Serialization
     -- $serialization
-  , MemorySnapshot
-  , pattern MemorySnapshotScopes
-  , mkMemorySnapshot
-  , MemoryStore(..)
-  , emptyMemoryStore
-  , serializeMemoryStore
-  , restoreMemoryStore
-  , getScope
-  , setScope
-  , runMemoryScoped
-  , evalMemoryScoped
-  ) where
+    MemorySnapshot,
+    pattern MemorySnapshotScopes,
+    mkMemorySnapshot,
+    MemoryStore (..),
+    emptyMemoryStore,
+    serializeMemoryStore,
+    restoreMemoryStore,
+    getScope,
+    setScope,
+    runMemoryScoped,
+    evalMemoryScoped,
+  )
+where
 
-import Control.Monad.Freer (Eff, Member, send)
-import Data.Kind (Type)
-import Data.Aeson (Value, ToJSON(..), FromJSON(..), withObject, object, (.=), (.:))
-import qualified Data.Aeson as Aeson
-import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
-import Data.Text (Text, pack)
-import Control.Monad.Freer.Internal (handleRelayS)
 import Control.Lens (ASetter, over)
+import Control.Monad.Freer (Eff, Member, send)
+import Control.Monad.Freer.Internal (handleRelayS)
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.=))
+import Data.Aeson qualified as Aeson
+import Data.Kind (Type)
+import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
+import Data.Text (Text, pack)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- THE MEMORY EFFECT
@@ -120,7 +121,6 @@ type Memory :: Type -> Type -> Type
 data Memory s r where
   -- | Get the current memory value.
   GetMem :: Memory s s
-
   -- | Update memory by applying a function.
   --
   -- Uses a function rather than a setter to prevent update conflicts.
@@ -132,7 +132,7 @@ data Memory s r where
 -- @
 -- myState <- getMem \@MyStateType
 -- @
-getMem :: forall s effs. Member (Memory s) effs => Eff effs s
+getMem :: forall s effs. (Member (Memory s) effs) => Eff effs s
 getMem = send GetMem
 
 -- | Update memory by applying a function to the current state.
@@ -147,7 +147,7 @@ getMem = send GetMem
 -- -- x <- getMem
 -- -- setMem (x + 1)  -- Could clobber concurrent updates!
 -- @
-updateMem :: forall s effs. Member (Memory s) effs => (s -> s) -> Eff effs ()
+updateMem :: forall s effs. (Member (Memory s) effs) => (s -> s) -> Eff effs ()
 updateMem f = send (UpdateMem f)
 
 -- | Set the memory value (overwriting current state).
@@ -155,7 +155,7 @@ updateMem f = send (UpdateMem f)
 -- @
 -- putMem \@MyState newState
 -- @
-putMem :: forall s effs. Member (Memory s) effs => s -> Eff effs ()
+putMem :: forall s effs. (Member (Memory s) effs) => s -> Eff effs ()
 putMem s = updateMem @s (const s)
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -204,7 +204,7 @@ modifyMem l f = updateMem @s (over l f)
 -- @
 runMemory :: forall s effs a. s -> Eff (Memory s ': effs) a -> Eff effs (a, s)
 runMemory initial = handleRelayS initial (\s a -> pure (a, s)) $ \s -> \case
-  GetMem      -> \k -> k s s
+  GetMem -> \k -> k s s
   UpdateMem f -> \k -> k (f s) ()
 
 -- | Run memory effect purely, returning only the result.
@@ -296,10 +296,10 @@ emptyMemoryStore = MemoryStore Map.empty
 -- correct version. Use 'mkMemorySnapshot' to create new snapshots and
 -- 'MemorySnapshotScopes' pattern to read the scopes.
 data MemorySnapshot = MemorySnapshot
-  { version :: Int
-    -- ^ Schema version for forward compatibility
-  , scopes  :: Map Text Value
-    -- ^ Node name -> JSON value mapping
+  { -- | Schema version for forward compatibility
+    version :: Int,
+    -- | Node name -> JSON value mapping
+    scopes :: Map Text Value
   }
   deriving stock (Show, Eq)
 
@@ -312,10 +312,11 @@ data MemorySnapshot = MemorySnapshot
 -- let snapshot = mkMemorySnapshot myScopes
 -- @
 mkMemorySnapshot :: Map Text Value -> MemorySnapshot
-mkMemorySnapshot scopes = MemorySnapshot
-  { version = currentSnapshotVersion
-  , scopes = scopes
-  }
+mkMemorySnapshot scopes =
+  MemorySnapshot
+    { version = currentSnapshotVersion,
+      scopes = scopes
+    }
 
 -- | Pattern for read-only access to snapshot scopes.
 --
@@ -326,18 +327,20 @@ mkMemorySnapshot scopes = MemorySnapshot
 --   MemorySnapshotScopes scopes -> Map.lookup "myNode" scopes
 -- @
 pattern MemorySnapshotScopes :: Map Text Value -> MemorySnapshot
-pattern MemorySnapshotScopes scopes <- MemorySnapshot { scopes = scopes }
+pattern MemorySnapshotScopes scopes <- MemorySnapshot {scopes = scopes}
 
 instance ToJSON MemorySnapshot where
-  toJSON snap = object
-    [ "version" .= snap.version
-    , "scopes" .= snap.scopes
-    ]
+  toJSON snap =
+    object
+      [ "version" .= snap.version,
+        "scopes" .= snap.scopes
+      ]
 
 instance FromJSON MemorySnapshot where
-  parseJSON = withObject "MemorySnapshot" $ \o -> MemorySnapshot
-    <$> o .: "version"
-    <*> o .: "scopes"
+  parseJSON = withObject "MemorySnapshot" $ \o ->
+    MemorySnapshot
+      <$> o .: "version"
+      <*> o .: "scopes"
 
 -- | Current snapshot format version.
 currentSnapshotVersion :: Int
@@ -353,10 +356,12 @@ currentSnapshotVersion = 1
 -- ByteString.writeFile "memory.json" (Aeson.encode json)
 -- @
 serializeMemoryStore :: MemoryStore -> Value
-serializeMemoryStore (MemoryStore scopes) = toJSON MemorySnapshot
-  { version = currentSnapshotVersion
-  , scopes = scopes
-  }
+serializeMemoryStore (MemoryStore scopes) =
+  toJSON
+    MemorySnapshot
+      { version = currentSnapshotVersion,
+        scopes = scopes
+      }
 
 -- | Restore a 'MemoryStore' from a 'Value'.
 --
@@ -379,9 +384,13 @@ restoreMemoryStore val = case Aeson.fromJSON @MemorySnapshot val of
                   " (snapshot is newer; upgrade the reader)"
               | otherwise =
                   " (snapshot is older; may need migration)"
-        in Left $ "Unsupported snapshot version: " <> pack (show snap.version)
-          <> " (expected " <> pack (show currentSnapshotVersion) <> ")"
-          <> versionHint
+         in Left $
+              "Unsupported snapshot version: "
+                <> pack (show snap.version)
+                <> " (expected "
+                <> pack (show currentSnapshotVersion)
+                <> ")"
+                <> versionHint
     | otherwise ->
         Right (MemoryStore snap.scopes)
 
@@ -392,31 +401,35 @@ restoreMemoryStore val = case Aeson.fromJSON @MemorySnapshot val of
 --
 -- Type safety is enforced by the 'FromJSON' constraint - if the stored
 -- JSON doesn't match the expected type, parsing will fail with an error.
-getScope
-  :: forall s. (FromJSON s)
-  => Text
-  -> MemoryStore
-  -> Either Text (Maybe s)
+getScope ::
+  forall s.
+  (FromJSON s) =>
+  Text ->
+  MemoryStore ->
+  Either Text (Maybe s)
 getScope scopeName (MemoryStore scopes) =
   case Map.lookup scopeName scopes of
     Nothing -> Right Nothing
     Just jsonVal -> case Aeson.fromJSON jsonVal of
-      Aeson.Error err -> Left $
-        "Failed to deserialize scope '" <> scopeName <> "': " <> pack err
+      Aeson.Error err ->
+        Left $
+          "Failed to deserialize scope '" <> scopeName <> "': " <> pack err
       Aeson.Success val -> Right (Just val)
 
 -- | Set a scope in the store, serializing the value.
 --
 -- The value is immediately serialized to JSON. Type information is not
 -- stored - type checking happens at access time via 'getScope'.
-setScope
-  :: forall s. (ToJSON s)
-  => Text
-  -> s
-  -> MemoryStore
-  -> MemoryStore
-setScope scopeName val (MemoryStore scopes) = MemoryStore $
-  Map.insert scopeName (toJSON val) scopes
+setScope ::
+  forall s.
+  (ToJSON s) =>
+  Text ->
+  s ->
+  MemoryStore ->
+  MemoryStore
+setScope scopeName val (MemoryStore scopes) =
+  MemoryStore $
+    Map.insert scopeName (toJSON val) scopes
 
 -- | Run memory effect with scoped persistence.
 --
@@ -433,19 +446,23 @@ setScope scopeName val (MemoryStore scopes) = MemoryStore $
 --   updateMem @ExploreMem $ \\m -> m { visited = newUrl : m.visited }
 --   getMem @ExploreMem
 -- @
-runMemoryScoped
-  :: forall s effs a. (ToJSON s, FromJSON s)
-  => Text              -- ^ Scope name (typically node name)
-  -> s                 -- ^ Default value if scope doesn't exist
-  -> MemoryStore       -- ^ Current store
-  -> Eff (Memory s ': effs) a
-  -> Eff effs (a, MemoryStore)
+runMemoryScoped ::
+  forall s effs a.
+  (ToJSON s, FromJSON s) =>
+  -- | Scope name (typically node name)
+  Text ->
+  -- | Default value if scope doesn't exist
+  s ->
+  -- | Current store
+  MemoryStore ->
+  Eff (Memory s ': effs) a ->
+  Eff effs (a, MemoryStore)
 runMemoryScoped scopeName defaultVal store action = do
   -- Load initial state from store or use default
   let initial = case getScope @s scopeName store of
-        Left _err -> defaultVal  -- Deserialization error: use default
-        Right Nothing -> defaultVal  -- Scope doesn't exist: use default
-        Right (Just val) -> val  -- Successfully loaded
+        Left _err -> defaultVal -- Deserialization error: use default
+        Right Nothing -> defaultVal -- Scope doesn't exist: use default
+        Right (Just val) -> val -- Successfully loaded
 
   -- Run the action
   (result, final) <- runMemory initial action
@@ -457,13 +474,13 @@ runMemoryScoped scopeName defaultVal store action = do
 -- | Run memory effect with scoped persistence, discarding result store.
 --
 -- Useful when you don't need the updated store (e.g., read-only access).
-evalMemoryScoped
-  :: forall s effs a. (ToJSON s, FromJSON s)
-  => Text
-  -> s
-  -> MemoryStore
-  -> Eff (Memory s ': effs) a
-  -> Eff effs a
+evalMemoryScoped ::
+  forall s effs a.
+  (ToJSON s, FromJSON s) =>
+  Text ->
+  s ->
+  MemoryStore ->
+  Eff (Memory s ': effs) a ->
+  Eff effs a
 evalMemoryScoped scopeName defaultVal store =
   fmap fst . runMemoryScoped scopeName defaultVal store
- 

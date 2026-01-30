@@ -1,14 +1,16 @@
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseEventKind},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseEventKind,
+    },
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use std::fs::File;
+use tuirealm::MockComponent;
 use tuirealm::command::{Cmd, Direction};
+use tuirealm::ratatui::Terminal;
 use tuirealm::ratatui::backend::CrosstermBackend;
 use tuirealm::ratatui::layout::Rect;
-use tuirealm::ratatui::Terminal;
-use tuirealm::MockComponent;
 
 use crate::protocol::{PopupDefinition, PopupResult};
 use crate::realm::PopupComponent;
@@ -35,12 +37,11 @@ pub fn run_popup_with_tty(definition: PopupDefinition) -> anyhow::Result<PopupRe
     // Event loop
     let result = loop {
         // Render popup
-        terminal
-            .draw(|f| {
-                let area = centered_rect(80, 80, f.area());
-                popup_area = Some(area);
-                popup.view(f, area);
-            })?;
+        terminal.draw(|f| {
+            let area = centered_rect(80, 80, f.area());
+            popup_area = Some(area);
+            popup.view(f, area);
+        })?;
 
         // Read event (blocking)
         match event::read()? {

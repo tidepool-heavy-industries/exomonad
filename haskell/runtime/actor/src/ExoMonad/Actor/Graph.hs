@@ -1,6 +1,7 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
+
 -- Pattern exhaustiveness checker doesn't understand GADT constraints for OneOf
 
 -- | Graph-to-Actor Execution Layer
@@ -33,71 +34,69 @@
 -- wire format between actors.
 module ExoMonad.Actor.Graph
   ( -- * Graph Execution
-    runGraphAsActors
-  , HandlerBuilder
+    runGraphAsActors,
+    HandlerBuilder,
 
     -- * Choice Extraction
-  , ExtractChoice(..)
+    ExtractChoice (..),
 
     -- * Handler Builders
-  , Router
-  , NodeHandler(..)
-  , pureHandler
-  , ioHandler
-  , effHandler
-  , effHandlerWithMem
+    Router,
+    NodeHandler (..),
+    pureHandler,
+    ioHandler,
+    effHandler,
+    effHandlerWithMem,
 
     -- * Low-level Wrappers (for custom interpreters)
-  , wrapPureHandler
-  , wrapIOHandler
-  , wrapEffHandler
+    wrapPureHandler,
+    wrapIOHandler,
+    wrapEffHandler,
 
     -- * Memory Effect
-  , Memory(..)
-  , getMem
-  , updateMem
-  , runMemoryWithIORef
+    Memory (..),
+    getMem,
+    updateMem,
+    runMemoryWithIORef,
 
     -- * Types
-  , ActorId
+    ActorId,
 
     -- * Re-exports
-  , GotoChoice
-  , To
-  , Exit
-  , gotoChoice
-  , gotoExit
-  , Eff
-  , Member
-  , LastMember
-  , runM
-  ) where
+    GotoChoice,
+    To,
+    Exit,
+    gotoChoice,
+    gotoExit,
+    Eff,
+    Member,
+    LastMember,
+    runM,
+  )
+where
 
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
-import Control.Monad.Freer (Eff, Member, interpret, sendM, LastMember, runM)
-import qualified Control.Monad.Freer as Freer
-import Data.Aeson (Value, ToJSON(..), FromJSON(..), object, (.=), (.:))
-import qualified Data.Aeson as Aeson
+import Control.Monad.Freer (Eff, LastMember, Member, interpret, runM, sendM)
+import Control.Monad.Freer qualified as Freer
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, (.:), (.=))
+import Data.Aeson qualified as Aeson
 import Data.Aeson.Types (parseEither)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef, modifyIORef')
-import Data.Kind (Type, Constraint)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.Kind (Constraint, Type)
 import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
-import Data.Proxy (Proxy(..))
+import Data.Map.Strict qualified as Map
+import Data.Proxy (Proxy (..))
 import Data.Text (Text)
-import qualified Data.Text as T
-import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
-import qualified Ki
-import System.IO (hFlush, stdout)
-
-import ExoMonad.Graph.Goto (GotoChoice, To, gotoChoice, gotoExit)
-import ExoMonad.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
-import ExoMonad.Graph.Types (Exit, Self, Arrive)
-
-import ExoMonad.Actor.Types (ActorId, Actor(..))
+import Data.Text qualified as T
 import ExoMonad.Actor.Mailbox (send)
 import ExoMonad.Actor.Spawn (spawnActor)
-
+import ExoMonad.Actor.Types (Actor (..), ActorId)
+import ExoMonad.Graph.Goto (GotoChoice, To, gotoChoice, gotoExit)
+import ExoMonad.Graph.Goto.Internal (GotoChoice (..), OneOf (..))
+import ExoMonad.Graph.Types (Arrive, Exit, Self)
+import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
+import Ki qualified
+import System.IO (hFlush, stdout)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HANDLER BRIDGE
@@ -108,7 +107,6 @@ import ExoMonad.Actor.Spawn (spawnActor)
 -- Takes target actor name and JSON payload.
 type Router = Text -> Value -> IO ()
 
-
 -- | A node handler wrapped for actor execution.
 --
 -- This is the unified type for actor handlers - it takes a JSON payload
@@ -116,7 +114,6 @@ type Router = Text -> Value -> IO ()
 newtype NodeHandler = NodeHandler
   { runNodeHandler :: Router -> Value -> IO ()
   }
-
 
 -- | Wrap a pure handler as a 'NodeHandler'.
 --
@@ -135,13 +132,13 @@ newtype NodeHandler = NodeHandler
 --
 -- nodeHandler = wrapPureHandler myHandler
 -- @
-wrapPureHandler
-  :: forall payload targets.
-     ( FromJSON payload
-     , ExtractChoice targets
-     )
-  => (payload -> GotoChoice targets)
-  -> NodeHandler
+wrapPureHandler ::
+  forall payload targets.
+  ( FromJSON payload,
+    ExtractChoice targets
+  ) =>
+  (payload -> GotoChoice targets) ->
+  NodeHandler
 wrapPureHandler handler = NodeHandler $ \router jsonPayload ->
   case parseEither parseJSON jsonPayload of
     Left err -> error $ "Failed to parse payload: " <> err
@@ -149,7 +146,6 @@ wrapPureHandler handler = NodeHandler $ \router jsonPayload ->
       let choice = handler payload
           (target, nextPayload) = extractChoice choice
       router target nextPayload
-
 
 -- | Wrap an IO handler as a 'NodeHandler'.
 --
@@ -166,13 +162,13 @@ wrapPureHandler handler = NodeHandler $ \router jsonPayload ->
 --
 -- nodeHandler = wrapIOHandler myIOHandler
 -- @
-wrapIOHandler
-  :: forall payload targets.
-     ( FromJSON payload
-     , ExtractChoice targets
-     )
-  => (payload -> IO (GotoChoice targets))
-  -> NodeHandler
+wrapIOHandler ::
+  forall payload targets.
+  ( FromJSON payload,
+    ExtractChoice targets
+  ) =>
+  (payload -> IO (GotoChoice targets)) ->
+  NodeHandler
 wrapIOHandler handler = NodeHandler $ \router jsonPayload ->
   case parseEither parseJSON jsonPayload of
     Left err -> error $ "Failed to parse payload: " <> err
@@ -180,7 +176,6 @@ wrapIOHandler handler = NodeHandler $ \router jsonPayload ->
       choice <- handler payload
       let (target, nextPayload) = extractChoice choice
       router target nextPayload
-
 
 -- | Wrap an effectful handler as a 'NodeHandler'.
 --
@@ -199,14 +194,16 @@ wrapIOHandler handler = NodeHandler $ \router jsonPayload ->
 --   (runM . runLog Info)  -- interpreter: Eff effs a -> IO a
 --   myHandler
 -- @
-wrapEffHandler
-  :: forall payload targets es.
-     ( FromJSON payload
-     , ExtractChoice targets
-     )
-  => (forall a. Eff es a -> IO a)             -- ^ Interpreter: run effects to IO
-  -> (payload -> Eff es (GotoChoice targets)) -- ^ Effectful handler
-  -> NodeHandler
+wrapEffHandler ::
+  forall payload targets es.
+  ( FromJSON payload,
+    ExtractChoice targets
+  ) =>
+  -- | Interpreter: run effects to IO
+  (forall a. Eff es a -> IO a) ->
+  -- | Effectful handler
+  (payload -> Eff es (GotoChoice targets)) ->
+  NodeHandler
 wrapEffHandler runEffects handler = NodeHandler $ \router jsonPayload ->
   case parseEither parseJSON jsonPayload of
     Left err -> error $ "Failed to parse payload: " <> err
@@ -214,7 +211,6 @@ wrapEffHandler runEffects handler = NodeHandler $ \router jsonPayload ->
       choice <- runEffects (handler payload)
       let (target, nextPayload) = extractChoice choice
       router target nextPayload
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- MEMORY EFFECT
@@ -226,15 +222,15 @@ wrapEffHandler runEffects handler = NodeHandler $ \router jsonPayload ->
 -- actors to maintain state across message processing without shared mutable
 -- state between actors.
 data Memory s r where
-  GetMem    :: Memory s s
+  GetMem :: Memory s s
   UpdateMem :: (s -> s) -> Memory s ()
 
 -- | Read the current memory state.
-getMem :: forall s es. Member (Memory s) es => Eff es s
+getMem :: forall s es. (Member (Memory s) es) => Eff es s
 getMem = Freer.send GetMem
 
 -- | Update the memory state.
-updateMem :: forall s es. Member (Memory s) es => (s -> s) -> Eff es ()
+updateMem :: forall s es. (Member (Memory s) es) => (s -> s) -> Eff es ()
 updateMem = Freer.send . UpdateMem
 
 -- | Run the Memory effect using an IORef.
@@ -245,16 +241,15 @@ updateMem = Freer.send . UpdateMem
 -- memRef <- newIORef initialState
 -- let interpreter = runM . runMemoryWithIORef memRef . runOtherEffects
 -- @
-runMemoryWithIORef
-  :: forall s effs a.
-     LastMember IO effs
-  => IORef s
-  -> Eff (Memory s ': effs) a
-  -> Eff effs a
+runMemoryWithIORef ::
+  forall s effs a.
+  (LastMember IO effs) =>
+  IORef s ->
+  Eff (Memory s ': effs) a ->
+  Eff effs a
 runMemoryWithIORef ref = interpret $ \case
-  GetMem      -> sendM $ readIORef ref
+  GetMem -> sendM $ readIORef ref
   UpdateMem f -> sendM $ modifyIORef' ref f
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPH EXECUTION
@@ -266,7 +261,6 @@ runMemoryWithIORef ref = interpret $ \case
 -- handlers to initialize their own state (e.g., IORef for memory) when
 -- the actor is spawned. Each actor runs its builder once at startup.
 type HandlerBuilder = IO NodeHandler
-
 
 -- | Run a graph as an actor system.
 --
@@ -293,12 +287,14 @@ type HandlerBuilder = IO NodeHandler
 --
 -- result <- runGraphAsActors handlers (toJSON (Message \"hello\"))
 -- @
-runGraphAsActors
-  :: forall result.
-     FromJSON result
-  => Map Text HandlerBuilder  -- ^ Map of node names to handler builders
-  -> Value                    -- ^ Initial input (sent to "entry")
-  -> IO result
+runGraphAsActors ::
+  forall result.
+  (FromJSON result) =>
+  -- | Map of node names to handler builders
+  Map Text HandlerBuilder ->
+  -- | Initial input (sent to "entry")
+  Value ->
+  IO result
 runGraphAsActors handlerBuilders entryPayload = do
   -- MVar for exit result
   exitChan <- newEmptyMVar
@@ -320,7 +316,6 @@ runGraphAsActors handlerBuilders entryPayload = do
               case parseEither parseJSON payload of
                 Left err -> error $ "Failed to parse exit payload: " <> err
                 Right result -> putMVar exitChan result
-
           | target == "arrive" = do
               -- Arrive: extract barrier name and dispatch to barrier actor
               -- Message format: { "barrier": "hJoin", "payload": {...} }
@@ -334,12 +329,12 @@ runGraphAsActors handlerBuilders entryPayload = do
                     Nothing -> error $ "Unknown barrier target: " <> T.unpack barrierName
                     Just barrierActor -> do
                       -- Build message with source info for barrier
-                      let barrierMsg = object
-                            [ "source" .= sourceName
-                            , "payload" .= workerPayload
-                            ]
+                      let barrierMsg =
+                            object
+                              [ "source" .= sourceName,
+                                "payload" .= workerPayload
+                              ]
                       send (actorMailbox barrierActor) barrierMsg
-
           | otherwise = do
               -- Normal dispatch: look up actor and send
               putStrLn $ "[GRAPH] Routing to: " <> T.unpack target
@@ -351,7 +346,7 @@ runGraphAsActors handlerBuilders entryPayload = do
 
     -- Spawn one actor per handler builder
     actors <- flip Map.traverseWithKey handlerBuilders $ \name mkHandler -> do
-      (NodeHandler handler) <- mkHandler  -- Run builder to create handler
+      (NodeHandler handler) <- mkHandler -- Run builder to create handler
       spawnActor scope name $ \payload -> do
         r <- readIORef routerRef
         handler r payload
@@ -368,35 +363,31 @@ runGraphAsActors handlerBuilders entryPayload = do
     -- Wait for exit
     takeMVar exitChan
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- HANDLER BUILDERS
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Build a handler from a pure function (no effects, no memory).
-pureHandler
-  :: (FromJSON payload, ExtractChoice targets)
-  => (payload -> GotoChoice targets)
-  -> HandlerBuilder
+pureHandler ::
+  (FromJSON payload, ExtractChoice targets) =>
+  (payload -> GotoChoice targets) ->
+  HandlerBuilder
 pureHandler h = pure $ wrapPureHandler h
 
-
 -- | Build a handler from an IO function (IO effects, no memory).
-ioHandler
-  :: (FromJSON payload, ExtractChoice targets)
-  => (payload -> IO (GotoChoice targets))
-  -> HandlerBuilder
+ioHandler ::
+  (FromJSON payload, ExtractChoice targets) =>
+  (payload -> IO (GotoChoice targets)) ->
+  HandlerBuilder
 ioHandler h = pure $ wrapIOHandler h
 
-
 -- | Build a handler with a custom effect interpreter (no memory).
-effHandler
-  :: (FromJSON payload, ExtractChoice targets)
-  => (forall a. Eff es a -> IO a)
-  -> (payload -> Eff es (GotoChoice targets))
-  -> HandlerBuilder
+effHandler ::
+  (FromJSON payload, ExtractChoice targets) =>
+  (forall a. Eff es a -> IO a) ->
+  (payload -> Eff es (GotoChoice targets)) ->
+  HandlerBuilder
 effHandler interpreter h = pure $ wrapEffHandler interpreter h
-
 
 -- | Build a handler with per-actor memory.
 --
@@ -413,15 +404,15 @@ effHandler interpreter h = pure $ wrapEffHandler interpreter h
 --   [ (\"counter\", effHandlerWithMem 0 counterHandler)
 --   ]
 -- @
-effHandlerWithMem
-  :: (FromJSON payload, ExtractChoice targets)
-  => mem  -- ^ Initial memory state
-  -> (payload -> Eff '[Memory mem, IO] (GotoChoice targets))
-  -> HandlerBuilder
+effHandlerWithMem ::
+  (FromJSON payload, ExtractChoice targets) =>
+  -- | Initial memory state
+  mem ->
+  (payload -> Eff '[Memory mem, IO] (GotoChoice targets)) ->
+  HandlerBuilder
 effHandlerWithMem initial handler = do
   memRef <- newIORef initial
   pure $ wrapEffHandler (runM . runMemoryWithIORef memRef) handler
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EXTRACT CHOICE TYPECLASS
@@ -454,94 +445,101 @@ type ExtractChoice :: [Type] -> Constraint
 class ExtractChoice targets where
   extractChoice :: GotoChoice targets -> (Text, Value)
 
-
 -- | Base case: single named target.
-instance {-# OVERLAPPING #-}
-  ( KnownSymbol name
-  , ToJSON payload
-  ) => ExtractChoice '[To (name :: Symbol) payload] where
+instance
+  {-# OVERLAPPING #-}
+  ( KnownSymbol name,
+    ToJSON payload
+  ) =>
+  ExtractChoice '[To (name :: Symbol) payload]
+  where
   extractChoice (GotoChoice (Here payload)) =
     (T.pack (symbolVal (Proxy @name)), toJSON payload)
-
 
 -- | Named target with more targets following.
-instance {-# OVERLAPPABLE #-}
-  ( KnownSymbol name
-  , ToJSON payload
-  , ExtractChoice rest
-  ) => ExtractChoice (To (name :: Symbol) payload ': rest) where
+instance
+  {-# OVERLAPPABLE #-}
+  ( KnownSymbol name,
+    ToJSON payload,
+    ExtractChoice rest
+  ) =>
+  ExtractChoice (To (name :: Symbol) payload ': rest)
+  where
   extractChoice (GotoChoice (Here payload)) =
     (T.pack (symbolVal (Proxy @name)), toJSON payload)
   extractChoice (GotoChoice (There rest)) =
     extractChoice @rest (GotoChoice rest)
 
-
 -- | Exit target only.
-instance {-# OVERLAPPING #-}
-  ToJSON payload => ExtractChoice '[To Exit payload] where
+instance {-# OVERLAPPING #-} (ToJSON payload) => ExtractChoice '[To Exit payload] where
   extractChoice (GotoChoice (Here payload)) =
     ("exit", toJSON payload)
-
 
 -- | Exit target with more targets following.
-instance {-# OVERLAPPABLE #-}
-  ( ToJSON payload
-  , ExtractChoice rest
-  ) => ExtractChoice (To Exit payload ': rest) where
+instance
+  {-# OVERLAPPABLE #-}
+  ( ToJSON payload,
+    ExtractChoice rest
+  ) =>
+  ExtractChoice (To Exit payload ': rest)
+  where
   extractChoice (GotoChoice (Here payload)) =
     ("exit", toJSON payload)
   extractChoice (GotoChoice (There rest)) =
     extractChoice @rest (GotoChoice rest)
 
-
 -- | Self target only.
-instance {-# OVERLAPPING #-}
-  ToJSON payload => ExtractChoice '[To Self payload] where
+instance {-# OVERLAPPING #-} (ToJSON payload) => ExtractChoice '[To Self payload] where
   extractChoice (GotoChoice (Here payload)) =
     ("self", toJSON payload)
 
-
 -- | Self target with more targets following.
-instance {-# OVERLAPPABLE #-}
-  ( ToJSON payload
-  , ExtractChoice rest
-  ) => ExtractChoice (To Self payload ': rest) where
+instance
+  {-# OVERLAPPABLE #-}
+  ( ToJSON payload,
+    ExtractChoice rest
+  ) =>
+  ExtractChoice (To Self payload ': rest)
+  where
   extractChoice (GotoChoice (Here payload)) =
     ("self", toJSON payload)
   extractChoice (GotoChoice (There rest)) =
     extractChoice @rest (GotoChoice rest)
-
 
 -- | Arrive target only (for ForkNode workers).
 --
 -- The barrier name is extracted from the type and included in the message,
 -- enabling the router to dispatch to the correct BarrierNode.
-instance {-# OVERLAPPING #-}
-  ( KnownSymbol barrierName
-  , ToJSON payload
-  ) => ExtractChoice '[To (Arrive barrierName) payload] where
+instance
+  {-# OVERLAPPING #-}
+  ( KnownSymbol barrierName,
+    ToJSON payload
+  ) =>
+  ExtractChoice '[To (Arrive barrierName) payload]
+  where
   extractChoice (GotoChoice (Here payload)) =
     let barrierStr = T.pack (symbolVal (Proxy @barrierName))
         msg = object ["barrier" .= barrierStr, "payload" .= payload]
-    in ("arrive", msg)
-
+     in ("arrive", msg)
 
 -- | Arrive target with more targets following.
 --
 -- The barrier name is extracted from the type and included in the message,
 -- enabling the router to dispatch to the correct BarrierNode.
-instance {-# OVERLAPPABLE #-}
-  ( KnownSymbol barrierName
-  , ToJSON payload
-  , ExtractChoice rest
-  ) => ExtractChoice (To (Arrive barrierName) payload ': rest) where
+instance
+  {-# OVERLAPPABLE #-}
+  ( KnownSymbol barrierName,
+    ToJSON payload,
+    ExtractChoice rest
+  ) =>
+  ExtractChoice (To (Arrive barrierName) payload ': rest)
+  where
   extractChoice (GotoChoice (Here payload)) =
     let barrierStr = T.pack (symbolVal (Proxy @barrierName))
         msg = object ["barrier" .= barrierStr, "payload" .= payload]
-    in ("arrive", msg)
+     in ("arrive", msg)
   extractChoice (GotoChoice (There rest)) =
     extractChoice @rest (GotoChoice rest)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ARRIVE MESSAGE PARSING

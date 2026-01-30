@@ -1,36 +1,36 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE GADTs #-}
+{-# LANGUAGE TypeOperators #-}
 
 -- | GitHub retry logic with exponential backoff.
 module ExoMonad.Control.Hook.GitHubRetry
-  ( RetryConfig(..)
-  , defaultRetryConfig
-  , withRetry
-  ) where
+  ( RetryConfig (..),
+    defaultRetryConfig,
+    withRetry,
+  )
+where
 
 import Control.Concurrent (threadDelay)
-import Control.Monad.Freer (Eff, Member, interpose, send, sendM, LastMember)
+import Control.Monad.Freer (Eff, LastMember, Member, interpose, send, sendM)
 import Data.Text (Text)
-import qualified Data.Text as T
-import OpenTelemetry.Trace
-import OpenTelemetry.Context.ThreadLocal (getContext)
-
-import ExoMonad.Effects.GitHub (GitHub(..), GitHubError(..), isRetryable, Repo(..))
+import Data.Text qualified as T
 import ExoMonad.Effect.Types (Log, logWarn)
+import ExoMonad.Effects.GitHub (GitHub (..), GitHubError (..), Repo (..), isRetryable)
+import OpenTelemetry.Context.ThreadLocal (getContext)
+import OpenTelemetry.Trace
 
 -- | Configuration for GitHub retries.
 data RetryConfig = RetryConfig
-  { maxRetries    :: Int
-  , baseDelayUs   :: Int
-  , maxDelayUs    :: Int
-  , tracer        :: Maybe Tracer
-  } 
+  { maxRetries :: Int,
+    baseDelayUs :: Int,
+    maxDelayUs :: Int,
+    tracer :: Maybe Tracer
+  }
 
 instance Show RetryConfig where
   show c = "RetryConfig { maxRetries = " ++ show c.maxRetries ++ " }"
@@ -40,63 +40,70 @@ instance Eq RetryConfig where
 
 -- | Default retry configuration: 3 retries, starting at 1s, capped at 8s.
 defaultRetryConfig :: RetryConfig
-defaultRetryConfig = RetryConfig
-  { maxRetries    = 3
-  , baseDelayUs   = 1000000 -- 1s
-  , maxDelayUs    = 8000000 -- 8s
-  , tracer        = Nothing
-  }
+defaultRetryConfig =
+  RetryConfig
+    { maxRetries = 3,
+      baseDelayUs = 1000000, -- 1s
+      maxDelayUs = 8000000, -- 8s
+      tracer = Nothing
+    }
 
 -- | Retry a GitHub operation with exponential backoff.
 --
 -- Only retries transient errors as defined by 'isRetryable'.
 -- Log each retry attempt with attempt number and delay.
 -- Also records OpenTelemetry spans if a tracer is provided.
-withRetry
-  :: forall es a. (Member GitHub es, Member Log es, LastMember IO es)
-  => RetryConfig
-  -> Eff es a
-  -> Eff es a
+withRetry ::
+  forall es a.
+  (Member GitHub es, Member Log es, LastMember IO es) =>
+  RetryConfig ->
+  Eff es a ->
+  Eff es a
 withRetry config = interpose $ \(op :: GitHub x) -> do
-  let 
-    -- Helper to run an attempt with tracing and retrying for Either GitHubError results
-    runEitherAttempt 
-      :: forall b. GitHub (Either GitHubError b) 
-      -> Int 
-      -> Int 
-      -> Eff es (Either GitHubError b)
-    runEitherAttempt operation attempt delay = do
-      res <- case config.tracer of
-        Nothing -> send operation
-        Just t -> do
-          ctx <- sendM getContext
-          let spanName = "github." <> getOpName operation
-          traceSpan <- sendM $ createSpan t ctx spanName defaultSpanArguments
-          
-          sendM $ addAttribute traceSpan "github.op" (getOpName operation)
-          sendM $ addAttribute traceSpan "github.retry_count" (attempt - 1)
-          addOpAttributes traceSpan operation
-          
-          r <- send operation
-          
-          case r of
-            Left err -> sendM $ do
-              addAttribute traceSpan "error" True
-              addAttribute traceSpan "error.message" (T.pack (show err))
-            Right _ -> pure ()
-            
-          sendM $ endSpan traceSpan Nothing
-          pure r
+  let -- Helper to run an attempt with tracing and retrying for Either GitHubError results
+      runEitherAttempt ::
+        forall b.
+        GitHub (Either GitHubError b) ->
+        Int ->
+        Int ->
+        Eff es (Either GitHubError b)
+      runEitherAttempt operation attempt delay = do
+        res <- case config.tracer of
+          Nothing -> send operation
+          Just t -> do
+            ctx <- sendM getContext
+            let spanName = "github." <> getOpName operation
+            traceSpan <- sendM $ createSpan t ctx spanName defaultSpanArguments
 
-      case res of
-        Left err | isRetryable err && attempt <= config.maxRetries -> do
-          logWarn $ "[GitHub] Request failed (attempt " 
-                 <> T.pack (show attempt) <> "/" <> T.pack (show config.maxRetries) 
-                 <> "), retrying in " <> T.pack (show (delay `div` 1000000)) 
-                 <> "s: " <> T.pack (show err)
-          sendM $ threadDelay delay
-          runEitherAttempt operation (attempt + 1) (min config.maxDelayUs (delay * 2))
-        _ -> pure res
+            sendM $ addAttribute traceSpan "github.op" (getOpName operation)
+            sendM $ addAttribute traceSpan "github.retry_count" (attempt - 1)
+            addOpAttributes traceSpan operation
+
+            r <- send operation
+
+            case r of
+              Left err -> sendM $ do
+                addAttribute traceSpan "error" True
+                addAttribute traceSpan "error.message" (T.pack (show err))
+              Right _ -> pure ()
+
+            sendM $ endSpan traceSpan Nothing
+            pure r
+
+        case res of
+          Left err | isRetryable err && attempt <= config.maxRetries -> do
+            logWarn $
+              "[GitHub] Request failed (attempt "
+                <> T.pack (show attempt)
+                <> "/"
+                <> T.pack (show config.maxRetries)
+                <> "), retrying in "
+                <> T.pack (show (delay `div` 1000000))
+                <> "s: "
+                <> T.pack (show err)
+            sendM $ threadDelay delay
+            runEitherAttempt operation (attempt + 1) (min config.maxDelayUs (delay * 2))
+          _ -> pure res
 
   case op of
     CreateIssue {} -> runEitherAttempt op 1 (config.baseDelayUs)
@@ -144,7 +151,7 @@ getOpName = \case
   CheckAuth -> "check_auth"
 
 -- | Helper to add operation-specific attributes.
-addOpAttributes :: LastMember IO es => Span -> GitHub r -> Eff es ()
+addOpAttributes :: (LastMember IO es) => Span -> GitHub r -> Eff es ()
 addOpAttributes traceSpan = \case
   GetIssue _ num _ -> sendM $ addAttribute traceSpan "github.issue_number" (fromIntegral num :: Int)
   UpdateIssue _ num _ -> sendM $ addAttribute traceSpan "github.issue_number" (fromIntegral num :: Int)

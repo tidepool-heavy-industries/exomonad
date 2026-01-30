@@ -15,45 +15,46 @@
 -- Return format: @{ok: true, value: ...}@ or @{ok: false, error: "..."}@
 module ExoMonad.Wasm.Roundtrip
   ( -- * Roundtrip FFI Exports
-    roundtripSerializableEffect
-  , roundtripEffectResult
-  , roundtripExecutionPhase
-  , roundtripGraphState
-  , roundtripStepOutput
+    roundtripSerializableEffect,
+    roundtripEffectResult,
+    roundtripExecutionPhase,
+    roundtripGraphState,
+    roundtripStepOutput,
+
     -- ** Graph Info Types
-  , roundtripTypeInfoWire
-  , roundtripGotoTargetWire
-  , roundtripNodeInfoWire
-  , roundtripEdgeInfoWire
-  , roundtripGraphInfoWire
+    roundtripTypeInfoWire,
+    roundtripGotoTargetWire,
+    roundtripNodeInfoWire,
+    roundtripEdgeInfoWire,
+    roundtripGraphInfoWire,
+
     -- * Pure implementation (for native testing)
-  , roundtripImpl
-  ) where
+    roundtripImpl,
+  )
+where
 
 import Data.Aeson (FromJSON, ToJSON, eitherDecodeStrict, encode, object, (.=))
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Data.Text.Encoding (encodeUtf8)
-import qualified Data.Text.Lazy as TL
-import qualified Data.Text.Lazy.Encoding as TLE
-
+import Data.Text.Lazy qualified as TL
+import Data.Text.Lazy.Encoding qualified as TLE
 import ExoMonad.Wasm.WireTypes
-  ( SerializableEffect
-  , EffectResult
-  , ExecutionPhase
-  , GraphState
-  , StepOutput
-  , TypeInfoWire
-  , GotoTargetWire
-  , NodeInfoWire
-  , EdgeInfoWire
-  , GraphInfoWire
+  ( EdgeInfoWire,
+    EffectResult,
+    ExecutionPhase,
+    GotoTargetWire,
+    GraphInfoWire,
+    GraphState,
+    NodeInfoWire,
+    SerializableEffect,
+    StepOutput,
+    TypeInfoWire,
   )
 
 #if defined(wasm32_HOST_ARCH)
 import GHC.Wasm.Prim (JSString(..), fromJSString, toJSString)
 #endif
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- FFI EXPORTS (WASM target)
@@ -93,7 +94,6 @@ foreign export javascript "roundtripGraphInfoWire"
 
 #endif
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- IMPLEMENTATION
 -- ════════════════════════════════════════════════════════════════════════════
@@ -105,11 +105,16 @@ foreign export javascript "roundtripGraphInfoWire"
 roundtripImpl :: forall a. (FromJSON a, ToJSON a) => Text -> Text
 roundtripImpl input =
   case eitherDecodeStrict (encodeUtf8 input) of
-    Left err -> TL.toStrict $ TLE.decodeUtf8 $ encode $
-      object ["ok" .= False, "error" .= T.pack err]
-    Right (val :: a) -> TL.toStrict $ TLE.decodeUtf8 $ encode $
-      object ["ok" .= True, "value" .= val]
-
+    Left err ->
+      TL.toStrict $
+        TLE.decodeUtf8 $
+          encode $
+            object ["ok" .= False, "error" .= T.pack err]
+    Right (val :: a) ->
+      TL.toStrict $
+        TLE.decodeUtf8 $
+          encode $
+            object ["ok" .= True, "value" .= val]
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE-SPECIFIC EXPORTS
@@ -125,7 +130,6 @@ roundtripSerializableEffect :: Text -> IO Text
 roundtripSerializableEffect = pure . roundtripImpl @SerializableEffect
 #endif
 
-
 -- | Roundtrip EffectResult through Haskell's Aeson.
 #if defined(wasm32_HOST_ARCH)
 roundtripEffectResult :: JSString -> IO JSString
@@ -135,7 +139,6 @@ roundtripEffectResult input =
 roundtripEffectResult :: Text -> IO Text
 roundtripEffectResult = pure . roundtripImpl @EffectResult
 #endif
-
 
 -- | Roundtrip ExecutionPhase through Haskell's Aeson.
 #if defined(wasm32_HOST_ARCH)
@@ -147,7 +150,6 @@ roundtripExecutionPhase :: Text -> IO Text
 roundtripExecutionPhase = pure . roundtripImpl @ExecutionPhase
 #endif
 
-
 -- | Roundtrip GraphState through Haskell's Aeson.
 #if defined(wasm32_HOST_ARCH)
 roundtripGraphState :: JSString -> IO JSString
@@ -158,7 +160,6 @@ roundtripGraphState :: Text -> IO Text
 roundtripGraphState = pure . roundtripImpl @GraphState
 #endif
 
-
 -- | Roundtrip StepOutput through Haskell's Aeson.
 #if defined(wasm32_HOST_ARCH)
 roundtripStepOutput :: JSString -> IO JSString
@@ -168,7 +169,6 @@ roundtripStepOutput input =
 roundtripStepOutput :: Text -> IO Text
 roundtripStepOutput = pure . roundtripImpl @StepOutput
 #endif
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPH INFO TYPE EXPORTS
@@ -184,7 +184,6 @@ roundtripTypeInfoWire :: Text -> IO Text
 roundtripTypeInfoWire = pure . roundtripImpl @TypeInfoWire
 #endif
 
-
 -- | Roundtrip GotoTargetWire through Haskell's Aeson.
 #if defined(wasm32_HOST_ARCH)
 roundtripGotoTargetWire :: JSString -> IO JSString
@@ -194,7 +193,6 @@ roundtripGotoTargetWire input =
 roundtripGotoTargetWire :: Text -> IO Text
 roundtripGotoTargetWire = pure . roundtripImpl @GotoTargetWire
 #endif
-
 
 -- | Roundtrip NodeInfoWire through Haskell's Aeson.
 #if defined(wasm32_HOST_ARCH)
@@ -206,7 +204,6 @@ roundtripNodeInfoWire :: Text -> IO Text
 roundtripNodeInfoWire = pure . roundtripImpl @NodeInfoWire
 #endif
 
-
 -- | Roundtrip EdgeInfoWire through Haskell's Aeson.
 #if defined(wasm32_HOST_ARCH)
 roundtripEdgeInfoWire :: JSString -> IO JSString
@@ -216,7 +213,6 @@ roundtripEdgeInfoWire input =
 roundtripEdgeInfoWire :: Text -> IO Text
 roundtripEdgeInfoWire = pure . roundtripImpl @EdgeInfoWire
 #endif
-
 
 -- | Roundtrip GraphInfoWire through Haskell's Aeson.
 #if defined(wasm32_HOST_ARCH)

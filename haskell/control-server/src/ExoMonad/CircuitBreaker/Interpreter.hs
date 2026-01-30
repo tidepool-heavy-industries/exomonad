@@ -1,20 +1,20 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE DataKinds #-}
 
 module ExoMonad.CircuitBreaker.Interpreter
-  ( runCircuitBreakerIO
-  ) where
+  ( runCircuitBreakerIO,
+  )
+where
 
-import Control.Monad.Freer (Eff, interpret, LastMember, sendM)
-
+import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
+import ExoMonad.Control.Hook.CircuitBreaker (CircuitBreakerMap, getAllCircuitBreakerStates, getCircuitBreakerState, resetAll, resetSession)
 import ExoMonad.Effect.CircuitBreaker
-import ExoMonad.Control.Hook.CircuitBreaker (CircuitBreakerMap, getCircuitBreakerState, getAllCircuitBreakerStates, resetSession, resetAll)
 
-runCircuitBreakerIO :: LastMember IO effs => CircuitBreakerMap -> Eff (CircuitBreaker ': effs) a -> Eff effs a
+runCircuitBreakerIO :: (LastMember IO effs) => CircuitBreakerMap -> Eff (CircuitBreaker ': effs) a -> Eff effs a
 runCircuitBreakerIO cbMap = interpret $ \case
   GetCBState sessionId -> sendM $ getCircuitBreakerState cbMap sessionId
   GetAllCBStates -> sendM $ getAllCircuitBreakerStates cbMap

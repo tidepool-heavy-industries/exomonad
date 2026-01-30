@@ -40,30 +40,29 @@
 -- the tool call back to the sum type via 'parseToolCall'.
 module ExoMonad.StructuredOutput.DecisionTools
   ( -- * MCP Tool Definition
-    DecisionTool(..)
-  , ToolCall(..)
+    DecisionTool (..),
+    ToolCall (..),
 
     -- * Typeclass
-  , ToDecisionTools(..)
+    ToDecisionTools (..),
 
     -- * Constants
-  , decisionServerName
-  ) where
+    decisionServerName,
+  )
+where
 
-import Data.Aeson (FromJSON(..), ToJSON(..), Value(..), object, (.=), (.:))
+import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), object, (.:), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Bifunctor (first)
 import Data.Char (isUpper, toLower)
 import Data.Kind (Type)
 import Data.Text (Text)
 import Data.Text qualified as T
-import GHC.Generics
-
-import ExoMonad.Schema (schemaToValue, objectSchema)
-import ExoMonad.StructuredOutput.Class (StructuredOptions(..), defaultOptions)
-import ExoMonad.StructuredOutput.Generic (GStructuredProduct(..))
+import ExoMonad.Schema (objectSchema, schemaToValue)
+import ExoMonad.StructuredOutput.Class (StructuredOptions (..), defaultOptions)
+import ExoMonad.StructuredOutput.Generic (GStructuredProduct (..))
 import ExoMonad.StructuredOutput.Prefix (detectPrefix, makeStripPrefix)
-
+import GHC.Generics
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONSTANTS
@@ -74,7 +73,6 @@ import ExoMonad.StructuredOutput.Prefix (detectPrefix, makeStripPrefix)
 -- All decision tools are prefixed with this server name: @decision::approve@.
 decisionServerName :: Text
 decisionServerName = "decision"
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- WIRE TYPES
@@ -90,49 +88,54 @@ decisionServerName = "decision"
 --   }
 -- @
 data DecisionTool = DecisionTool
-  { dtName        :: !Text   -- ^ Full tool name (e.g., "decision::approve")
-  , dtDescription :: !Text   -- ^ Human-readable description
-  , dtInputSchema :: !Value  -- ^ JSON Schema for tool input (the branch's fields)
+  { -- | Full tool name (e.g., "decision::approve")
+    dtName :: !Text,
+    -- | Human-readable description
+    dtDescription :: !Text,
+    -- | JSON Schema for tool input (the branch's fields)
+    dtInputSchema :: !Value
   }
   deriving stock (Eq, Show)
 
 instance ToJSON DecisionTool where
-  toJSON t = object
-    [ "name" .= t.dtName
-    , "description" .= t.dtDescription
-    , "inputSchema" .= t.dtInputSchema
-    ]
+  toJSON t =
+    object
+      [ "name" .= t.dtName,
+        "description" .= t.dtDescription,
+        "inputSchema" .= t.dtInputSchema
+      ]
 
 instance FromJSON DecisionTool where
   parseJSON = Aeson.withObject "DecisionTool" $ \o -> do
     dtName <- o .: "name"
     dtDescription <- o .: "description"
     dtInputSchema <- o .: "inputSchema"
-    pure DecisionTool{..}
-
+    pure DecisionTool {..}
 
 -- | A tool call from Claude Code.
 --
 -- When Claude calls @decision::approve { approvedBy: "alice", notes: "LGTM" }@,
 -- exomonad captures this and returns it in @SessionOutput.soToolCalls@.
 data ToolCall = ToolCall
-  { tcName  :: !Text   -- ^ Full tool name (e.g., "decision::approve")
-  , tcInput :: !Value  -- ^ Tool input (the branch's field values)
+  { -- | Full tool name (e.g., "decision::approve")
+    tcName :: !Text,
+    -- | Tool input (the branch's field values)
+    tcInput :: !Value
   }
   deriving stock (Eq, Show)
 
 instance ToJSON ToolCall where
-  toJSON t = object
-    [ "name" .= t.tcName
-    , "input" .= t.tcInput
-    ]
+  toJSON t =
+    object
+      [ "name" .= t.tcName,
+        "input" .= t.tcInput
+      ]
 
 instance FromJSON ToolCall where
   parseJSON = Aeson.withObject "ToolCall" $ \o -> do
     tcName <- o .: "name"
     tcInput <- o .: "input"
-    pure ToolCall{..}
-
+    pure ToolCall {..}
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPECLASS
@@ -165,12 +168,11 @@ class ToDecisionTools a where
   -- any constructor or the input fails to parse.
   parseToolCall :: ToolCall -> Either String a
 
-  default toDecisionTools :: GDecisionTools (Rep a) => [DecisionTool]
+  default toDecisionTools :: (GDecisionTools (Rep a)) => [DecisionTool]
   toDecisionTools = gToDecisionTools @(Rep a) defaultOptions
 
   default parseToolCall :: (Generic a, GDecisionTools (Rep a)) => ToolCall -> Either String a
   parseToolCall tc = fmap to $ gParseToolCall @(Rep a) defaultOptions tc
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GENERIC MACHINERY
@@ -184,12 +186,10 @@ class GDecisionTools (f :: Type -> Type) where
   -- | Try to parse a tool call.
   gParseToolCall :: StructuredOptions -> ToolCall -> Either String (f p)
 
-
 -- | Pass through datatype metadata.
-instance GDecisionTools f => GDecisionTools (M1 D d f) where
+instance (GDecisionTools f) => GDecisionTools (M1 D d f) where
   gToDecisionTools = gToDecisionTools @f
   gParseToolCall opts tc = M1 <$> gParseToolCall @f opts tc
-
 
 -- | Sum type: generate tools for each branch.
 instance (GDecisionTools l, GDecisionTools r) => GDecisionTools (l :+: r) where
@@ -201,8 +201,7 @@ instance (GDecisionTools l, GDecisionTools r) => GDecisionTools (l :+: r) where
       Right x -> Right (L1 x)
       Left _ -> case gParseToolCall @r opts tc of
         Right x -> Right (R1 x)
-        Left e -> Left e  -- Return last error
-
+        Left e -> Left e -- Return last error
 
 -- | Single constructor: generate one tool.
 instance (Constructor c, GStructuredProduct f) => GDecisionTools (M1 C c f) where
@@ -215,31 +214,35 @@ instance (Constructor c, GStructuredProduct f) => GDecisionTools (M1 C c f) wher
         rawFieldNames = gProductRawFieldNames @f
         commonPfx = detectPrefix rawFieldNames
         prefixModifier = makeStripPrefix commonPfx
-        opts' = opts { soFieldLabelModifier = prefixModifier }
+        opts' = opts {soFieldLabelModifier = prefixModifier}
         fields = gProductSchema @f opts'
         required = gProductRequired @f opts'
         schema = objectSchema (map (\(k, v) -> (T.pack k, v)) fields) (map T.pack required)
-    in [DecisionTool
-          { dtName = toolName
-          , dtDescription = description
-          , dtInputSchema = schemaToValue schema
-          }]
+     in [ DecisionTool
+            { dtName = toolName,
+              dtDescription = description,
+              dtInputSchema = schemaToValue schema
+            }
+        ]
 
   gParseToolCall opts tc =
     let rawName = conName (undefined :: M1 C c f p)
         expectedToolName = decisionServerName <> "::" <> T.pack (camelToSnake rawName)
-    in if tc.tcName == expectedToolName
-       then case tc.tcInput of
-         Object obj -> do
-           let rawFieldNames = gProductRawFieldNames @f
-               commonPfx = detectPrefix rawFieldNames
-               prefixModifier = makeStripPrefix commonPfx
-               opts' = opts { soFieldLabelModifier = prefixModifier }
-           M1 <$> first show (gProductParse @f opts' [] obj)
-         _ -> Left $ "Expected object input for tool " <> T.unpack tc.tcName
-       else Left $ "Tool name mismatch: expected " <> T.unpack expectedToolName
-                   <> ", got " <> T.unpack tc.tcName
-
+     in if tc.tcName == expectedToolName
+          then case tc.tcInput of
+            Object obj -> do
+              let rawFieldNames = gProductRawFieldNames @f
+                  commonPfx = detectPrefix rawFieldNames
+                  prefixModifier = makeStripPrefix commonPfx
+                  opts' = opts {soFieldLabelModifier = prefixModifier}
+              M1 <$> first show (gProductParse @f opts' [] obj)
+            _ -> Left $ "Expected object input for tool " <> T.unpack tc.tcName
+          else
+            Left $
+              "Tool name mismatch: expected "
+                <> T.unpack expectedToolName
+                <> ", got "
+                <> T.unpack tc.tcName
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS
@@ -252,10 +255,10 @@ camelToSnake :: String -> String
 camelToSnake = go True
   where
     go _ [] = []
-    go isFirst (c:cs)
+    go isFirst (c : cs)
       | isUpper c =
           let lower = toLower c
-          in if isFirst
-             then lower : go False cs
-             else '_' : lower : go False cs
+           in if isFirst
+                then lower : go False cs
+                else '_' : lower : go False cs
       | otherwise = c : go False cs

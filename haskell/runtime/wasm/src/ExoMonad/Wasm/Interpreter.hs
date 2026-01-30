@@ -39,15 +39,16 @@
 -- This ensures that LLM handlers can use Log and State effects.
 module ExoMonad.Wasm.Interpreter
   ( -- * LLM Interpreter
-    runLLMAsYield
+    runLLMAsYield,
 
     -- * Log Interpreter
-  , runLogAsYield
+    runLogAsYield,
 
     -- * State Interpreter
-  , runStateAsYield
-  , runStateAsYieldWith
-  ) where
+    runStateAsYield,
+    runStateAsYieldWith,
+  )
+where
 
 import ExoMonad.Wasm.Interpreter.LLM (runLLMAsYield)
 import ExoMonad.Wasm.Interpreter.Log (runLogAsYield)

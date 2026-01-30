@@ -1,6 +1,6 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Golden test: Config record pattern with field-witness routing.
@@ -16,52 +16,64 @@
 -- Goal: Confirm the design compiles and provides excellent UX for library users.
 module ConfigRecordGraph where
 
+import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
-import Data.Aeson (ToJSON, FromJSON)
-import GHC.Generics (Generic)
-
-import ExoMonad.Prelude
-import qualified ExoMonad.Graph.Generic as G
-import ExoMonad.Graph.Generic.Core (NodeRef(..), type (:-))
-import ExoMonad.Graph.Types
-  ( type (:@), Entries, Tools, Exits, Routes, Route(..)
-  , EntryPoint, Tool, ExitTool, ToolMetadata(..)
-  , LLMKind(..)
-  )
-import ExoMonad.Graph.Goto (GotoChoice, gotoNode, (-->), gotoExit, LLMHandler(..))
 import ExoMonad.Effect.Types (State)
+import ExoMonad.Graph.Generic qualified as G
+import ExoMonad.Graph.Generic.Core (NodeRef (..), type (:-))
+import ExoMonad.Graph.Goto (GotoChoice, LLMHandler (..), gotoExit, gotoNode, (-->))
+import ExoMonad.Graph.Types
+  ( Entries,
+    EntryPoint,
+    ExitTool,
+    Exits,
+    LLMKind (..),
+    Route (..),
+    Routes,
+    Tool,
+    ToolMetadata (..),
+    Tools,
+    type (:@),
+  )
+import ExoMonad.Prelude
+import GHC.Generics (Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- DOMAIN TYPES
 -- ════════════════════════════════════════════════════════════════════════════
 
 data TaskSpec = TaskSpec
-  { taskDescription :: Text
-  , taskPriority :: Priority
-  } deriving (Generic, ToJSON, FromJSON)
+  { taskDescription :: Text,
+    taskPriority :: Priority
+  }
+  deriving (Generic, ToJSON, FromJSON)
 
 data Priority = Low | Medium | High
   deriving (Generic, ToJSON, FromJSON)
 
 data RetryInfo = RetryInfo
-  { originalTask :: TaskSpec
-  , attemptCount :: Int
-  , lastError :: Text
-  } deriving (Generic, ToJSON, FromJSON)
+  { originalTask :: TaskSpec,
+    attemptCount :: Int,
+    lastError :: Text
+  }
+  deriving (Generic, ToJSON, FromJSON)
 
 data WorkResult = WorkResult
-  { resultSummary :: Text
-  , effortLevel :: Int
-  } deriving (Generic, ToJSON, FromJSON)
+  { resultSummary :: Text,
+    effortLevel :: Int
+  }
+  deriving (Generic, ToJSON, FromJSON)
 
 data SearchQuery = SearchQuery
-  { query :: Text
-  , maxResults :: Int
-  } deriving (Generic, ToJSON, FromJSON)
+  { query :: Text,
+    maxResults :: Int
+  }
+  deriving (Generic, ToJSON, FromJSON)
 
 data SearchResult = SearchResult
   { results :: [Text]
-  } deriving (Generic, ToJSON, FromJSON)
+  }
+  deriving (Generic, ToJSON, FromJSON)
 
 instance ToolMetadata SearchQuery where
   toolName = "search_database"
@@ -69,11 +81,13 @@ instance ToolMetadata SearchQuery where
 
 data CalculatorInput = CalculatorInput
   { expression :: Text
-  } deriving (Generic, ToJSON, FromJSON)
+  }
+  deriving (Generic, ToJSON, FromJSON)
 
 data CalculatorResult = CalculatorResult
   { result :: Double
-  } deriving (Generic, ToJSON, FromJSON)
+  }
+  deriving (Generic, ToJSON, FromJSON)
 
 instance ToolMetadata CalculatorInput where
   toolName = "calculate"
@@ -82,16 +96,18 @@ instance ToolMetadata CalculatorInput where
 -- Exit tool payloads
 data CompleteTaskPayload = CompleteTaskPayload
   { summary :: Text
-  } deriving (Generic, ToJSON, FromJSON)
+  }
+  deriving (Generic, ToJSON, FromJSON)
 
 instance ToolMetadata CompleteTaskPayload where
   toolName = "complete_task"
   toolDescription = "Mark task as successfully completed"
 
 data RequestRetryPayload = RequestRetryPayload
-  { reason :: Text
-  , suggestedApproach :: Text
-  } deriving (Generic, ToJSON, FromJSON)
+  { reason :: Text,
+    suggestedApproach :: Text
+  }
+  deriving (Generic, ToJSON, FromJSON)
 
 instance ToolMetadata RequestRetryPayload where
   toolName = "request_retry"
@@ -103,32 +119,40 @@ instance ToolMetadata RequestRetryPayload where
 
 -- | Work node entries - multiple entry points.
 data WorkEntries mode = WorkEntries
-  { fresh :: mode :- EntryPoint TaskSpec
-  , retry :: mode :- EntryPoint RetryInfo
-  } deriving Generic
+  { fresh :: mode :- EntryPoint TaskSpec,
+    retry :: mode :- EntryPoint RetryInfo
+  }
+  deriving (Generic)
 
 -- | Work node tools - available during LLM call.
 data WorkTools mode = WorkTools
-  { search :: mode :- Tool SearchQuery SearchResult
-  , calc   :: mode :- Tool CalculatorInput CalculatorResult
-  } deriving Generic
+  { search :: mode :- Tool SearchQuery SearchResult,
+    calc :: mode :- Tool CalculatorInput CalculatorResult
+  }
+  deriving (Generic)
 
 -- | Work node exits - LLM chooses via tool calls.
 data WorkExits mode = WorkExits
-  { complete :: mode :- ExitTool CompleteTaskPayload '[WorkResult]
-      :@ Routes '[ExitGraph]
-  , needRetry :: mode :- ExitTool RequestRetryPayload '[RetryInfo]
-      :@ Routes '[ToEntry "gWork" "retry"]
-  } deriving Generic
+  { complete ::
+      mode
+        :- ExitTool CompleteTaskPayload '[WorkResult]
+        :@ Routes '[ExitGraph],
+    needRetry ::
+      mode
+        :- ExitTool RequestRetryPayload '[RetryInfo]
+        :@ Routes '[ToEntry "gWork" "retry"]
+  }
+  deriving (Generic)
 
 -- | Work node config - groups all components.
 --
 -- This is the testable, reusable unit. Can be instantiated in AsGraph or AsHandler mode.
 data WorkConfig mode = WorkConfig
-  { entries :: WorkEntries mode
-  , tools   :: WorkTools mode
-  , exits   :: WorkExits mode
-  } deriving Generic
+  { entries :: WorkEntries mode,
+    tools :: WorkTools mode,
+    exits :: WorkExits mode
+  }
+  deriving (Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPH DEFINITION
@@ -143,10 +167,11 @@ data WorkConfig mode = WorkConfig
 --
 -- This enables field-witness routing: gWork graph `gotoNode` (retry . entries)
 data WorkGraph mode = WorkGraph
-  { gEntry :: NodeRef "gEntry" (mode :- G.EntryNode TaskSpec)
-  , gWork  :: NodeRef "gWork" (mode :- G.LLMNode 'API :@ Entries WorkEntries :@ Tools WorkTools :@ Exits WorkExits)
-  , gExit  :: NodeRef "gExit" (mode :- G.ExitNode WorkResult)
-  } deriving Generic
+  { gEntry :: NodeRef "gEntry" (mode :- G.EntryNode TaskSpec),
+    gWork :: NodeRef "gWork" (mode :- G.LLMNode 'API :@ Entries WorkEntries :@ Tools WorkTools :@ Exits WorkExits),
+    gExit :: NodeRef "gExit" (mode :- G.ExitNode WorkResult)
+  }
+  deriving (Generic)
 
 -- Note: We're using traditional annotations (Entries, Tools, Exits) for now.
 -- Future: Might consolidate to single Config annotation once Generic extraction works.
@@ -158,6 +183,7 @@ data WorkGraph mode = WorkGraph
 -- | Work node handlers using config record pattern with field-witness routing.
 --
 -- The config record is instantiated in AsHandler mode, providing handler functions.
+
 {-
 -- First, define the graph in AsHandler mode
 handlers :: WorkGraph (G.AsHandler '[State SessionState])

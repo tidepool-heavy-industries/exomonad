@@ -1,41 +1,43 @@
-{-# LANGUAGE GADTs #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE TypeOperators #-}
 
 module ExoMonad.Effects.DockerSpawner
-  ( DockerSpawner(..)
-  , ContainerId(..)
-  , ContainerStatus(..)
-  , SpawnConfig(..)
-  , DockerError(..)
-  , ExecResult(..)
-  , SpawnResponse(..)
-  , spawnContainer
-  , stopContainer
-  , getContainerStatus
-  , execContainer
-  ) where
+  ( DockerSpawner (..),
+    ContainerId (..),
+    ContainerStatus (..),
+    SpawnConfig (..),
+    DockerError (..),
+    ExecResult (..),
+    SpawnResponse (..),
+    spawnContainer,
+    stopContainer,
+    getContainerStatus,
+    execContainer,
+  )
+where
 
-import Data.Text (Text)
-import Control.Monad.Freer (Member, Eff, send)
-import GHC.Generics (Generic)
-import Data.Aeson (ToJSON(..), FromJSON(..), genericParseJSON, genericToJSON, withObject, (.:))
-import Data.Aeson.Types (Parser)
+import Control.Monad.Freer (Eff, Member, send)
+import Data.Aeson (FromJSON (..), ToJSON (..), genericParseJSON, genericToJSON, withObject, (.:))
 import Data.Aeson.Casing (aesonPrefix, snakeCase)
+import Data.Aeson.Types (Parser)
+import Data.Text (Text)
+import GHC.Generics (Generic)
 
 -- | Container ID extracted from spawn response
-newtype ContainerId = ContainerId { unContainerId :: Text }
+newtype ContainerId = ContainerId {unContainerId :: Text}
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON)
 
 -- | Response from docker-ctl spawn command
 -- JSON: {"container_id": "...", "hostname": "..."}
 data SpawnResponse = SpawnResponse
-  { srContainerId :: Text
-  , srHostname :: Text
-  } deriving stock (Show, Eq, Generic)
+  { srContainerId :: Text,
+    srHostname :: Text
+  }
+  deriving stock (Show, Eq, Generic)
 
 instance ToJSON SpawnResponse where
   toJSON = genericToJSON $ aesonPrefix snakeCase
@@ -64,17 +66,20 @@ instance FromJSON ContainerStatus where
     case status of
       "running" -> pure Running
       "not_found" -> pure NotFound
-      _ -> pure Stopped  -- Any other Docker status (exited, paused, etc.)
+      _ -> pure Stopped -- Any other Docker status (exited, paused, etc.)
 
 data SpawnConfig = SpawnConfig
-  { scIssueId :: Text
-  , scWorktreePath :: FilePath
-  , scBackend :: Text  -- "claude" | "gemini"
-  , scUid :: Maybe Int
-  , scGid :: Maybe Int
-  , scEnv :: [(Text, Text)]  -- Environment variables to pass to container
-  , scCmd :: Maybe [Text] -- ^ Optional command override
-  } deriving stock (Show, Eq, Generic)
+  { scIssueId :: Text,
+    scWorktreePath :: FilePath,
+    scBackend :: Text, -- "claude" | "gemini"
+    scUid :: Maybe Int,
+    scGid :: Maybe Int,
+    scEnv :: [(Text, Text)], -- Environment variables to pass to container
+
+    -- | Optional command override
+    scCmd :: Maybe [Text]
+  }
+  deriving stock (Show, Eq, Generic)
 
 instance ToJSON SpawnConfig where
   toJSON = genericToJSON $ aesonPrefix snakeCase
@@ -85,10 +90,11 @@ instance FromJSON SpawnConfig where
 -- | Result of command execution
 -- Matches docker-ctl exec output: {"exit_code": ..., "stdout": ..., "stderr": ...}
 data ExecResult = ExecResult
-  { erExitCode :: Maybe Int
-  , erStdout :: Text
-  , erStderr :: Text
-  } deriving stock (Show, Eq, Generic)
+  { erExitCode :: Maybe Int,
+    erStdout :: Text,
+    erStderr :: Text
+  }
+  deriving stock (Show, Eq, Generic)
 
 instance ToJSON ExecResult where
   toJSON = genericToJSON $ aesonPrefix snakeCase
@@ -111,14 +117,14 @@ data DockerSpawner r where
   ExecContainer :: ContainerId -> [Text] -> Maybe FilePath -> Maybe Text -> DockerSpawner (Either DockerError ExecResult)
 
 -- Smart constructors
-spawnContainer :: Member DockerSpawner es => SpawnConfig -> Eff es (Either DockerError ContainerId)
+spawnContainer :: (Member DockerSpawner es) => SpawnConfig -> Eff es (Either DockerError ContainerId)
 spawnContainer = send . SpawnContainer
 
-stopContainer :: Member DockerSpawner es => ContainerId -> Eff es (Either DockerError ())
+stopContainer :: (Member DockerSpawner es) => ContainerId -> Eff es (Either DockerError ())
 stopContainer = send . StopContainer
 
-getContainerStatus :: Member DockerSpawner es => ContainerId -> Eff es (Either DockerError ContainerStatus)
+getContainerStatus :: (Member DockerSpawner es) => ContainerId -> Eff es (Either DockerError ContainerStatus)
 getContainerStatus = send . GetContainerStatus
 
-execContainer :: Member DockerSpawner es => ContainerId -> [Text] -> Maybe FilePath -> Maybe Text -> Eff es (Either DockerError ExecResult)
+execContainer :: (Member DockerSpawner es) => ContainerId -> [Text] -> Maybe FilePath -> Maybe Text -> Eff es (Either DockerError ExecResult)
 execContainer cid cmd mWorkdir mUser = send $ ExecContainer cid cmd mWorkdir mUser

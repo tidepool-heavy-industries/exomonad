@@ -10,34 +10,37 @@
 --   * 'withDualLogger' - stderr + session file (for production)
 module ExoMonad.Control.Logging
   ( -- * Logger types
-    Logger(..)
+    Logger (..),
+
     -- * Initialization
-  , withStderrLogger
-  , withDualLogger
+    withStderrLogger,
+    withDualLogger,
+
     -- * Logging functions
-  , logInfo
-  , logDebug
-  , logError
-  , logWarn
-  ) where
+    logInfo,
+    logDebug,
+    logError,
+    logWarn,
+  )
+where
 
 import Control.Exception (bracket)
 import Data.Text (Text)
-import qualified Data.Text.Encoding as T
+import Data.Text.Encoding qualified as T
 import Data.Time.Clock (getCurrentTime)
-import Data.Time.Format (formatTime, defaultTimeLocale)
+import Data.Time.Format (defaultTimeLocale, formatTime)
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
 import System.Log.FastLogger
-  ( LoggerSet
-  , FormattedTime
-  , newStderrLoggerSet
-  , newFileLoggerSet
-  , defaultBufSize
-  , toLogStr
-  , rmLoggerSet
-  , pushLogStrLn
-  , flushLogStr
+  ( FormattedTime,
+    LoggerSet,
+    defaultBufSize,
+    flushLogStr,
+    newFileLoggerSet,
+    newStderrLoggerSet,
+    pushLogStrLn,
+    rmLoggerSet,
+    toLogStr,
   )
 import System.Log.FastLogger.Date (newTimeCache, simpleTimeFormat)
 
@@ -45,9 +48,9 @@ import System.Log.FastLogger.Date (newTimeCache, simpleTimeFormat)
 --
 -- For stderr-only mode (testing), both fields point to the same LoggerSet.
 data Logger = Logger
-  { stderrLoggerSet :: LoggerSet
-  , fileLoggerSet   :: LoggerSet
-  , timeCache       :: IO FormattedTime
+  { stderrLoggerSet :: LoggerSet,
+    fileLoggerSet :: LoggerSet,
+    timeCache :: IO FormattedTime
   }
 
 -- | Generate session log file path with timestamp.
@@ -72,11 +75,14 @@ withDualLogger projectDir action = do
   logPath <- sessionLogPath projectDir
   tc <- newTimeCache simpleTimeFormat
   bracket
-    ((,) <$> newStderrLoggerSet defaultBufSize
-         <*> newFileLoggerSet defaultBufSize logPath)
-    (\(stderrLS, fileLS) -> do
+    ( (,)
+        <$> newStderrLoggerSet defaultBufSize
+        <*> newFileLoggerSet defaultBufSize logPath
+    )
+    ( \(stderrLS, fileLS) -> do
         flushLogStr stderrLS >> flushLogStr fileLS
-        rmLoggerSet stderrLS >> rmLoggerSet fileLS)
+        rmLoggerSet stderrLS >> rmLoggerSet fileLS
+    )
     (\(stderrLS, fileLS) -> action (Logger stderrLS fileLS tc))
 
 -- | Run action with stderr logger, ensuring cleanup.
@@ -119,7 +125,11 @@ logWarn logger msg = logWithLevel logger "WARN" msg
 logWithLevel :: Logger -> Text -> Text -> IO ()
 logWithLevel (Logger stderrLS fileLS tc) level msg = do
   time <- tc
-  let logMsg = toLogStr time <> " [" <> toLogStr (T.encodeUtf8 level) <> "] "
-            <> toLogStr (T.encodeUtf8 msg)
+  let logMsg =
+        toLogStr time
+          <> " ["
+          <> toLogStr (T.encodeUtf8 level)
+          <> "] "
+          <> toLogStr (T.encodeUtf8 msg)
   pushLogStrLn stderrLS logMsg
   pushLogStrLn fileLS logMsg

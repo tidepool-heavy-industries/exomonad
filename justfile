@@ -83,6 +83,16 @@ test-compose-sync:
 show-sha:
     @echo "Git SHA: $(git rev-parse --short HEAD)"
 
+# Format all code (Haskell + Rust)
+fmt:
+    cd haskell && ormolu --mode inplace --ghc-opt -XImportQualifiedPost $(find . -name '*.hs' -not -path './vendor/*')
+    cd rust && cargo fmt
+
+# Check formatting (no changes, exit 1 if unformatted)
+fmt-check:
+    cd haskell && ormolu --mode check --ghc-opt -XImportQualifiedPost $(find . -name '*.hs' -not -path './vendor/*')
+    cd rust && cargo fmt --check
+
 # Clean build artifacts
 clean:
     rm -rf {{metadata_dir}}

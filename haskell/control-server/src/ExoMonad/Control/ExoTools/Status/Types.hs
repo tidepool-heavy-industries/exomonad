@@ -2,15 +2,16 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module ExoMonad.Control.ExoTools.Status.Types
-  ( ExoStatusArgs(..)
-  ) where
+  ( ExoStatusArgs (..),
+  )
+where
 
+import ExoMonad.Schema (defaultMCPOptions, deriveMCPTypeWith, (??))
 import GHC.Generics (Generic)
-import ExoMonad.Schema (deriveMCPTypeWith, defaultMCPOptions, (??))
 import Language.Haskell.TH (mkName)
 
 -- | Arguments for exo_status tool.
@@ -19,6 +20,9 @@ data ExoStatusArgs = ExoStatusArgs
   }
   deriving stock (Show, Eq, Generic)
 
-$(deriveMCPTypeWith defaultMCPOptions ''ExoStatusArgs
-  [ mkName "verbose" ?? "Optional verbose output."
-  ])
+$( deriveMCPTypeWith
+     defaultMCPOptions
+     ''ExoStatusArgs
+     [ mkName "verbose" ?? "Optional verbose output."
+     ]
+ )

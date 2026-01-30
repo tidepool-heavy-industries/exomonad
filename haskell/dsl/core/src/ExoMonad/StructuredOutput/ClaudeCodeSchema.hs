@@ -34,21 +34,20 @@
 -- @
 module ExoMonad.StructuredOutput.ClaudeCodeSchema
   ( -- * Typeclass
-    ClaudeCodeSchema(..)
+    ClaudeCodeSchema (..),
 
     -- * Type-Level Detection
-  , IsSumWithData
-  ) where
+    IsSumWithData,
+  )
+where
 
 import Data.Aeson (Value)
 import Data.Kind (Type)
 import Data.Text qualified as T
-
-import ExoMonad.StructuredOutput.Class (StructuredOutput(..), HasSumRep, IsNullarySum)
+import ExoMonad.StructuredOutput.Class (HasSumRep, IsNullarySum, StructuredOutput (..))
 import ExoMonad.StructuredOutput.DecisionTools (DecisionTool)
-import qualified ExoMonad.StructuredOutput.DecisionTools as DT
+import ExoMonad.StructuredOutput.DecisionTools qualified as DT
 import ExoMonad.StructuredOutput.Error (ParseDiagnostic)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE-LEVEL DETECTION
@@ -65,9 +64,8 @@ type family IsSumWithData (t :: Type) :: Bool where
   IsSumWithData t = IsSumWithDataImpl (HasSumRep t) (IsNullarySum t)
 
 type family IsSumWithDataImpl (hasSum :: Bool) (isNullary :: Bool) :: Bool where
-  IsSumWithDataImpl 'True 'False = 'True   -- Sum with data
-  IsSumWithDataImpl _ _ = 'False           -- Not a sum, or nullary enum
-
+  IsSumWithDataImpl 'True 'False = 'True -- Sum with data
+  IsSumWithDataImpl _ _ = 'False -- Not a sum, or nullary enum
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPECLASS
@@ -106,7 +104,7 @@ type family IsSumWithDataImpl (hasSum :: Bool) (isNullary :: Bool) :: Bool where
 --   ccDecisionTools = Just (toDecisionTools @Decision)
 --   ccParseToolCall = parseToolCall @Decision
 -- @
-class StructuredOutput a => ClaudeCodeSchema a where
+class (StructuredOutput a) => ClaudeCodeSchema a where
   -- | Get decision tools if this is a sum type with data.
   --
   -- Returns 'Just' with tool definitions for sum types.
@@ -123,8 +121,11 @@ class StructuredOutput a => ClaudeCodeSchema a where
   --
   -- Default: Returns error (tool calls not expected)
   ccParseToolCall :: DT.ToolCall -> Either String a
-  ccParseToolCall tc = Left $ "Unexpected tool call: " <> T.unpack tc.tcName
-    <> " (this type does not use decision tools)"
+  ccParseToolCall tc =
+    Left $
+      "Unexpected tool call: "
+        <> T.unpack tc.tcName
+        <> " (this type does not use decision tools)"
 
   -- | Parse from structured output JSON.
   --

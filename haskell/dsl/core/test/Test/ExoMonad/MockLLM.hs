@@ -29,31 +29,35 @@
 -- @
 module Test.ExoMonad.MockLLM
   ( -- * Simple Mocks
-    runMockLLM
-  , runMockLLMSequence
+    runMockLLM,
+    runMockLLMSequence,
 
     -- * Schema-Matched Mock
-  , runMockLLMMatched
+    runMockLLMMatched,
 
     -- * Capturing Mock
-  , runMockLLMCapture
-  , LLMRequest(..)
+    runMockLLMCapture,
+    LLMRequest (..),
 
     -- * Schema Matching Helpers
-  , schemaHasField
-  , schemaHasId
-  ) where
+    schemaHasField,
+    schemaHasId,
+  )
+where
 
 import Control.Monad.Freer (Eff, interpret)
-import Control.Monad.Freer.Internal (handleRelayS, Arr)
-import Data.Aeson (Value(..))
+import Control.Monad.Freer.Internal (Arr, handleRelayS)
+import Data.Aeson (Value (..))
 import Data.Aeson.Key (fromText)
-import qualified Data.Aeson.KeyMap as KM
+import Data.Aeson.KeyMap qualified as KM
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
-import Data.List.NonEmpty (NonEmpty(..))
-
 import ExoMonad.Effect.Types
-  ( LLM(..), TurnOutcome(..), TurnResult(..), ContentBlock )
+  ( ContentBlock,
+    LLM (..),
+    TurnOutcome (..),
+    TurnResult (..),
+  )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES
@@ -64,10 +68,10 @@ import ExoMonad.Effect.Types
 -- Contains all parameters passed to the LLM effect, allowing tests to verify
 -- that the correct prompts, schemas, and tools were used.
 data LLMRequest = LLMRequest
-  { lrSystemPrompt :: !Text
-  , lrUserContent  :: !(NonEmpty ContentBlock)
-  , lrSchema       :: !Value
-  , lrTools        :: ![Value]
+  { lrSystemPrompt :: !Text,
+    lrUserContent :: !(NonEmpty ContentBlock),
+    lrSchema :: !Value,
+    lrTools :: ![Value]
   }
   deriving (Show, Eq)
 
@@ -85,12 +89,14 @@ data LLMRequest = LLMRequest
 runMockLLM :: Value -> Eff (LLM ': effs) a -> Eff effs a
 runMockLLM fixedOutput = interpret $ \case
   RunTurnOp _meta _sys _content _schema _tools ->
-    pure $ TurnCompleted TurnResult
-      { trOutput = fixedOutput
-      , trToolsInvoked = []
-      , trNarrative = ""
-      , trThinking = ""
-      }
+    pure $
+      TurnCompleted
+        TurnResult
+          { trOutput = fixedOutput,
+            trToolsInvoked = [],
+            trNarrative = "",
+            trThinking = ""
+          }
 
 -- | Run LLM returning outputs from a sequence in order.
 --
@@ -110,20 +116,22 @@ runMockLLMSequence outputs = handleRelayS outputs pure' handler
     pure' :: [Value] -> a -> Eff effs a
     pure' _ = pure
 
-    handler
-      :: [Value]
-      -> LLM v
-      -> ([Value] -> Arr effs v a)
-      -> Eff effs a
+    handler ::
+      [Value] ->
+      LLM v ->
+      ([Value] -> Arr effs v a) ->
+      Eff effs a
     handler [] (RunTurnOp _ _ _ _ _) _ =
       error "runMockLLMSequence: ran out of fixture outputs"
-    handler (o:os) (RunTurnOp _ _ _ _ _) k =
-      k os $ TurnCompleted TurnResult
-        { trOutput = o
-        , trToolsInvoked = []
-        , trNarrative = ""
-        , trThinking = ""
-        }
+    handler (o : os) (RunTurnOp _ _ _ _ _) k =
+      k os $
+        TurnCompleted
+          TurnResult
+            { trOutput = o,
+              trToolsInvoked = [],
+              trNarrative = "",
+              trThinking = ""
+            }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SCHEMA-MATCHED MOCK
@@ -143,23 +151,27 @@ runMockLLMSequence outputs = handleRelayS outputs pure' handler
 --       ]
 -- let result = run $ runMockLLMMatched matchers defaultVal computation
 -- @
-runMockLLMMatched
-  :: [(Value -> Bool, Value)]  -- ^ (predicate, output) pairs
-  -> Value                     -- ^ Default output if no match
-  -> Eff (LLM ': effs) a
-  -> Eff effs a
+runMockLLMMatched ::
+  -- | (predicate, output) pairs
+  [(Value -> Bool, Value)] ->
+  -- | Default output if no match
+  Value ->
+  Eff (LLM ': effs) a ->
+  Eff effs a
 runMockLLMMatched matchers defaultOutput = interpret $ \case
   RunTurnOp _meta _sys _content schema _tools ->
-    pure $ TurnCompleted TurnResult
-      { trOutput = findMatch schema matchers
-      , trToolsInvoked = []
-      , trNarrative = ""
-      , trThinking = ""
-      }
+    pure $
+      TurnCompleted
+        TurnResult
+          { trOutput = findMatch schema matchers,
+            trToolsInvoked = [],
+            trNarrative = "",
+            trThinking = ""
+          }
   where
     findMatch :: Value -> [(Value -> Bool, Value)] -> Value
     findMatch _ [] = defaultOutput
-    findMatch s ((predicate, out):rest)
+    findMatch s ((predicate, out) : rest)
       | predicate s = out
       | otherwise = findMatch s rest
 
@@ -179,29 +191,31 @@ runMockLLMMatched matchers defaultOutput = interpret $ \case
 --   (req:_) -> req.lrSystemPrompt \`shouldContain\` "classify"
 --   []      -> expectationFailure "expected at least one request"
 -- @
-runMockLLMCapture
-  :: Value
-  -> Eff (LLM ': effs) a
-  -> Eff effs ([LLMRequest], a)
+runMockLLMCapture ::
+  Value ->
+  Eff (LLM ': effs) a ->
+  Eff effs ([LLMRequest], a)
 runMockLLMCapture fixedOutput =
   handleRelayS [] finalizer handler
   where
     finalizer :: [LLMRequest] -> a -> Eff effs ([LLMRequest], a)
     finalizer reqs a = pure (reverse reqs, a)
 
-    handler
-      :: [LLMRequest]
-      -> LLM v
-      -> ([LLMRequest] -> Arr effs v ([LLMRequest], a))
-      -> Eff effs ([LLMRequest], a)
+    handler ::
+      [LLMRequest] ->
+      LLM v ->
+      ([LLMRequest] -> Arr effs v ([LLMRequest], a)) ->
+      Eff effs ([LLMRequest], a)
     handler reqs (RunTurnOp _meta sysPmt content schema tools) k = do
       let req = LLMRequest sysPmt content schema tools
-      k (req : reqs) $ TurnCompleted TurnResult
-        { trOutput = fixedOutput
-        , trToolsInvoked = []
-        , trNarrative = ""
-        , trThinking = ""
-        }
+      k (req : reqs) $
+        TurnCompleted
+          TurnResult
+            { trOutput = fixedOutput,
+              trToolsInvoked = [],
+              trNarrative = "",
+              trThinking = ""
+            }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SCHEMA MATCHING HELPERS
@@ -226,6 +240,6 @@ schemaHasField _ _ = False
 -- @
 schemaHasId :: Text -> Value -> Bool
 schemaHasId ident (Object obj) =
-  KM.lookup "$id" obj == Just (String ident) ||
-  KM.lookup "title" obj == Just (String ident)
+  KM.lookup "$id" obj == Just (String ident)
+    || KM.lookup "title" obj == Just (String ident)
 schemaHasId _ _ = False

@@ -19,26 +19,27 @@
 -- probably fighting the type system. Ask: "Why do I need to pattern match?"
 module ExoMonad.Graph.Goto.Internal
   ( -- * OneOf Constructors (for typed dispatch only)
-    OneOf(..)
+    OneOf (..),
 
     -- * GotoChoice Constructor (for typed dispatch only)
-  , GotoChoice(..)
+    GotoChoice (..),
 
     -- * GotoAll Constructor (for parallel dispatch only)
-  , GotoAll(..)
+    GotoAll (..),
 
     -- * Target Marker (re-exported for type families)
-  , To
+    To,
 
     -- * Type families (re-exported for convenience)
-  , Payloads
-  , PayloadOf
-  ) where
+    Payloads,
+    PayloadOf,
+  )
+where
 
+import Data.Aeson (ToJSON (..), Value (..))
 import Data.Kind (Type)
-import ExoMonad.Graph.Types (HList(..))
-import Data.Aeson (ToJSON(..), Value(..))
-import qualified Data.Vector as V
+import Data.Vector qualified as V
+import ExoMonad.Graph.Types (HList (..))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ONEOF: TYPE-INDEXED SUM TYPE
@@ -58,11 +59,11 @@ import qualified Data.Vector as V
 type OneOf :: [Type] -> Type
 data OneOf ts where
   -- | The value is the first type in the list
-  Here  :: t -> OneOf (t ': ts)
+  Here :: t -> OneOf (t ': ts)
   -- | The value is somewhere in the rest of the list
   There :: OneOf ts -> OneOf (t ': ts)
 
-instance {-# OVERLAPPING #-} ToJSON t => ToJSON (OneOf '[t]) where
+instance {-# OVERLAPPING #-} (ToJSON t) => ToJSON (OneOf '[t]) where
   toJSON (Here t) = toJSON t
   toJSON (There _) = error "Impossible: There in single-element OneOf"
 
@@ -125,9 +126,9 @@ type family PayloadOf t where
 -- The @targets@ parameter is a type-level list of 'To' markers.
 -- Internally wraps 'OneOf' for fully typed dispatch.
 type GotoChoice :: [Type] -> Type
-newtype GotoChoice targets = GotoChoice { unGotoChoice :: OneOf (Payloads targets) }
+newtype GotoChoice targets = GotoChoice {unGotoChoice :: OneOf (Payloads targets)}
 
-instance ToJSON (OneOf (Payloads targets)) => ToJSON (GotoChoice targets) where
+instance (ToJSON (OneOf (Payloads targets))) => ToJSON (GotoChoice targets) where
   toJSON (GotoChoice choice) = toJSON choice
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -151,7 +152,7 @@ instance ToJSON (OneOf (Payloads targets)) => ToJSON (GotoChoice targets) where
 -- Note: The handler also provides a correlation key that workers will use
 -- to identify which fan-out batch their results belong to.
 type GotoAll :: [Type] -> Type
-newtype GotoAll targets = GotoAll { unGotoAll :: HList (Payloads targets) }
+newtype GotoAll targets = GotoAll {unGotoAll :: HList (Payloads targets)}
 
-instance ToJSON (HList (Payloads targets)) => ToJSON (GotoAll targets) where
+instance (ToJSON (HList (Payloads targets))) => ToJSON (GotoAll targets) where
   toJSON (GotoAll list) = toJSON list

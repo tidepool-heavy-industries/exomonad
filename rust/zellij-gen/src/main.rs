@@ -76,9 +76,7 @@ fn get_socket() -> String {
 /// Generate the docker attach command with reconnect loop.
 fn docker_attach_cmd(container: &str) -> String {
     // Extract a friendly name for the disconnect message
-    let friendly_name = container
-        .strip_prefix("exomonad-")
-        .unwrap_or(container);
+    let friendly_name = container.strip_prefix("exomonad-").unwrap_or(container);
 
     format!(
         "while true; do docker attach --detach-keys 'ctrl-],]' {}; echo '[{} disconnected - reconnecting in 2s]'; sleep 2; done",

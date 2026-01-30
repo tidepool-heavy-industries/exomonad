@@ -1,9 +1,9 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators #-}
 
 -- | Node and graph metadata effects for LLM node context.
 --
@@ -38,28 +38,30 @@
 -- * Teaching interpreters use metadata for recording
 module ExoMonad.Effect.NodeMeta
   ( -- * Metadata Types
-    NodeMetadata(..)
-  , GraphMetadata(..)
-  , defaultNodeMeta
-  , defaultGraphMeta
+    NodeMetadata (..),
+    GraphMetadata (..),
+    defaultNodeMeta,
+    defaultGraphMeta,
 
     -- * Node Metadata Effect
-  , NodeMeta(..)
-  , getNodeMeta
+    NodeMeta (..),
+    getNodeMeta,
 
     -- * Graph Metadata Effect
-  , GraphMeta(..)
-  , getGraphMeta
+    GraphMeta (..),
+    getGraphMeta,
 
     -- * Interpreters
-  , runNodeMeta
-  , runGraphMeta
-    -- * Interposition (Local Override)
-  , withNodeMeta
-  , withGraphMeta
-  ) where
+    runNodeMeta,
+    runGraphMeta,
 
-import Control.Monad.Freer (Eff, Member, interpret, send, interpose)
+    -- * Interposition (Local Override)
+    withNodeMeta,
+    withGraphMeta,
+  )
+where
+
+import Control.Monad.Freer (Eff, Member, interpose, interpret, send)
 import Data.Text (Text)
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -71,10 +73,10 @@ import Data.Text (Text)
 -- This is set by 'DispatchNamedNode' when invoking each handler,
 -- extracted from the type-level Symbol field name.
 data NodeMetadata = NodeMetadata
-  { nmNodeName :: Text
-    -- ^ Name of the node (field name from graph record, e.g., "gClassify")
-  , nmGraphName :: Text
-    -- ^ Name of the containing graph (from GraphMeta effect)
+  { -- | Name of the node (field name from graph record, e.g., "gClassify")
+    nmNodeName :: Text,
+    -- | Name of the containing graph (from GraphMeta effect)
+    nmGraphName :: Text
   }
   deriving (Show, Eq)
 
@@ -82,8 +84,8 @@ data NodeMetadata = NodeMetadata
 --
 -- This is set once at the 'runGraph' entry point.
 data GraphMetadata = GraphMetadata
-  { gmGraphName :: Text
-    -- ^ Name of the graph type (e.g., "SupportGraph")
+  { -- | Name of the graph type (e.g., "SupportGraph")
+    gmGraphName :: Text
   }
   deriving (Show, Eq)
 
@@ -93,16 +95,18 @@ data GraphMetadata = GraphMetadata
 -- * Running outside of graph dispatch (e.g., tests)
 -- * Running with production interpreter that doesn't care about metadata
 defaultNodeMeta :: NodeMetadata
-defaultNodeMeta = NodeMetadata
-  { nmNodeName = "unknown"
-  , nmGraphName = "unknown"
-  }
+defaultNodeMeta =
+  NodeMetadata
+    { nmNodeName = "unknown",
+      nmGraphName = "unknown"
+    }
 
 -- | Default graph metadata for unknown contexts.
 defaultGraphMeta :: GraphMetadata
-defaultGraphMeta = GraphMetadata
-  { gmGraphName = "unknown"
-  }
+defaultGraphMeta =
+  GraphMetadata
+    { gmGraphName = "unknown"
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- NODE METADATA EFFECT
@@ -119,7 +123,7 @@ data NodeMeta r where
 --
 -- Returns 'NodeMetadata' containing the node name and graph name.
 -- In teaching mode, this is used to annotate recorded LLM turns.
-getNodeMeta :: Member NodeMeta effs => Eff effs NodeMetadata
+getNodeMeta :: (Member NodeMeta effs) => Eff effs NodeMetadata
 getNodeMeta = send GetNodeMeta
 
 -- | Interpret 'NodeMeta' effect with provided metadata.
@@ -147,7 +151,7 @@ data GraphMeta r where
   GetGraphMeta :: GraphMeta GraphMetadata
 
 -- | Read the current graph metadata.
-getGraphMeta :: Member GraphMeta effs => Eff effs GraphMetadata
+getGraphMeta :: (Member GraphMeta effs) => Eff effs GraphMetadata
 getGraphMeta = send GetGraphMeta
 
 -- | Interpret 'GraphMeta' effect with provided metadata.
@@ -162,7 +166,6 @@ getGraphMeta = send GetGraphMeta
 runGraphMeta :: GraphMetadata -> Eff (GraphMeta ': effs) a -> Eff effs a
 runGraphMeta meta = interpret $ \case
   GetGraphMeta -> pure meta
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- INTERPOSITION (LOCAL OVERRIDE)
@@ -189,7 +192,7 @@ runGraphMeta meta = interpret $ \case
 -- Uses freer-simple's 'interpose' to intercept 'GetNodeMeta' requests and
 -- return the specified metadata, without removing 'NodeMeta' from the stack.
 -- This allows nested 'withNodeMeta' calls where inner calls shadow outer ones.
-withNodeMeta :: Member NodeMeta effs => NodeMetadata -> Eff effs a -> Eff effs a
+withNodeMeta :: (Member NodeMeta effs) => NodeMetadata -> Eff effs a -> Eff effs a
 withNodeMeta meta = interpose $ \case
   GetNodeMeta -> pure meta
 
@@ -197,6 +200,6 @@ withNodeMeta meta = interpose $ \case
 --
 -- Similar to 'withNodeMeta', this intercepts 'GraphMeta' without removing it
 -- from the stack.
-withGraphMeta :: Member GraphMeta effs => GraphMetadata -> Eff effs a -> Eff effs a
+withGraphMeta :: (Member GraphMeta effs) => GraphMetadata -> Eff effs a -> Eff effs a
 withGraphMeta meta = interpose $ \case
   GetGraphMeta -> pure meta

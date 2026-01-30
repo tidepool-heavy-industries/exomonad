@@ -1,9 +1,9 @@
+use std::time::Instant;
 use tuirealm::command::{Cmd, CmdResult, Direction};
 use tuirealm::props::{BorderType, Props};
 use tuirealm::ratatui::layout::{Constraint, Layout as RatatuiLayout, Rect};
 use tuirealm::ratatui::widgets::{Block, Clear};
 use tuirealm::{Frame, MockComponent, State, StateValue};
-use std::time::Instant;
 
 use crate::protocol::{
     Component, ElementValue, PopupDefinition, PopupResult, PopupState, VisibilityRule,
@@ -33,7 +33,7 @@ pub struct PopupComponent {
     props: Props,
     component_areas: Vec<Rect>, // Track render areas for mouse click detection
     visibility_rules: Vec<Option<VisibilityRule>>, // Per-component visibility rules
-    start_time: Instant, // Track when popup was created for time tracking
+    start_time: Instant,        // Track when popup was created for time tracking
 }
 
 /// Wrapper for individual components with their metadata
@@ -76,10 +76,7 @@ impl PopupComponent {
 
         for (index, component) in self.definition.components.iter().enumerate() {
             // Skip non-interactive components (Text and Group are display-only)
-            if matches!(
-                component,
-                Component::Text { .. } | Component::Group { .. }
-            ) {
+            if matches!(component, Component::Text { .. } | Component::Group { .. }) {
                 continue;
             }
 
@@ -155,7 +152,8 @@ impl PopupComponent {
             VisibilityRule::Checked(id) => self.state.get_boolean(id).unwrap_or(false),
             VisibilityRule::Equals(conditions) => conditions.iter().all(|(id, expected_value)| {
                 if let Some(choice_index) = self.state.get_choice(id) {
-                    if let Some(component) = self.definition.components.iter().find(|c| c.id() == id)
+                    if let Some(component) =
+                        self.definition.components.iter().find(|c| c.id() == id)
                     {
                         if let Component::Choice { options, .. } = component {
                             return options

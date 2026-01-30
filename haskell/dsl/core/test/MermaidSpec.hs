@@ -1,8 +1,8 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE OverloadedStrings #-}
 
 -- | Tests for Mermaid diagram generation.
 --
@@ -11,74 +11,79 @@
 -- 2. Template dependency parsing extracts include/extends directives
 module MermaidSpec (spec) where
 
-import Test.Hspec
-import Data.Proxy (Proxy(..))
+import Data.Map.Strict qualified as Map
+import Data.Proxy (Proxy (..))
 import Data.Text (Text)
-import qualified Data.Text as T
-import GHC.Generics (Generic)
-
-import ExoMonad.Graph.Types (type (:@), Input, Schema, UsesEffects, LLMKind(..))
-import ExoMonad.Graph.Generic (GraphMode(..), Entry, Exit, LLMNode, LogicNode)
+import Data.Text qualified as T
+import ExoMonad.Graph.Generic (Entry, Exit, GraphMode (..), LLMNode, LogicNode)
 import ExoMonad.Graph.Goto (Goto)
 import ExoMonad.Graph.Mermaid (graphToMermaid)
-import ExoMonad.Schema (HasJSONSchema(..), JSONSchema(..), SchemaType(..))
-import qualified Data.Map.Strict as Map
+import ExoMonad.Graph.Types (Input, LLMKind (..), Schema, UsesEffects, type (:@))
+import ExoMonad.Schema (HasJSONSchema (..), JSONSchema (..), SchemaType (..))
 import ExoMonad.Template.DependencyTree
-  ( parseTemplateIncludes
-  , parseTemplateExtends
-  , parseAllDependencies
+  ( parseAllDependencies,
+    parseTemplateExtends,
+    parseTemplateIncludes,
   )
+import GHC.Generics (Generic)
+import Test.Hspec
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TEST GRAPH TYPES
 -- ════════════════════════════════════════════════════════════════════════════
 
 data InputA
+
 data OutputB
+
 data TypeX
+
 data TypeY
+
 data TypeZ
 
 -- Minimal HasJSONSchema instances for test types
 instance HasJSONSchema OutputB where
-  jsonSchema = JSONSchema
-    { schemaType = TObject
-    , schemaDescription = Nothing
-    , schemaProperties = Map.empty
-    , schemaRequired = []
-    , schemaItems = Nothing
-    , schemaEnum = Nothing
-    , schemaOneOf = Nothing
-    }
+  jsonSchema =
+    JSONSchema
+      { schemaType = TObject,
+        schemaDescription = Nothing,
+        schemaProperties = Map.empty,
+        schemaRequired = [],
+        schemaItems = Nothing,
+        schemaEnum = Nothing,
+        schemaOneOf = Nothing
+      }
 
 instance HasJSONSchema TypeZ where
-  jsonSchema = JSONSchema
-    { schemaType = TObject
-    , schemaDescription = Nothing
-    , schemaProperties = Map.empty
-    , schemaRequired = []
-    , schemaItems = Nothing
-    , schemaEnum = Nothing
-    , schemaOneOf = Nothing
-    }
+  jsonSchema =
+    JSONSchema
+      { schemaType = TObject,
+        schemaDescription = Nothing,
+        schemaProperties = Map.empty,
+        schemaRequired = [],
+        schemaItems = Nothing,
+        schemaEnum = Nothing,
+        schemaOneOf = Nothing
+      }
 
 -- | Simple graph for testing Mermaid output: Entry -> llmNode -> Exit
 data SimpleTestGraph mode = SimpleTestGraph
-  { stgEntry   :: mode :- Entry InputA
-  , stgProcess :: mode :- LLMNode 'API :@ Input InputA :@ Schema OutputB
-  , stgExit    :: mode :- Exit OutputB
+  { stgEntry :: mode :- Entry InputA,
+    stgProcess :: mode :- LLMNode 'API :@ Input InputA :@ Schema OutputB,
+    stgExit :: mode :- Exit OutputB
   }
-  deriving Generic
+  deriving (Generic)
 
 -- | Branching graph with Logic node for more complex Mermaid output
 -- Logic nodes use UsesEffects with Goto targets, not Schema
 data BranchingTestGraph mode = BranchingTestGraph
-  { btgEntry  :: mode :- Entry TypeX
-  , btgRouter :: mode :- LogicNode :@ Input TypeX :@ UsesEffects '[Goto "btgLlm" TypeY]
-  , btgLlm    :: mode :- LLMNode 'API :@ Input TypeY :@ Schema TypeZ
-  , btgExit   :: mode :- Exit TypeZ
+  { btgEntry :: mode :- Entry TypeX,
+    btgRouter :: mode :- LogicNode :@ Input TypeX :@ UsesEffects '[Goto "btgLlm" TypeY],
+    btgLlm :: mode :- LLMNode 'API :@ Input TypeY :@ Schema TypeZ,
+    btgExit :: mode :- Exit TypeZ
   }
-  deriving Generic
+  deriving (Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SPEC
@@ -127,11 +132,12 @@ spec = do
       parseTemplateIncludes template `shouldBe` ["_shared/context.jinja"]
 
     it "parses multiple include directives" $ do
-      let template = T.unlines
-            [ "{% include \"header.jinja\" %}"
-            , "Content here"
-            , "{% include \"footer.jinja\" %}"
-            ]
+      let template =
+            T.unlines
+              [ "{% include \"header.jinja\" %}",
+                "Content here",
+                "{% include \"footer.jinja\" %}"
+              ]
       parseTemplateIncludes template `shouldBe` ["header.jinja", "footer.jinja"]
 
     it "returns empty list for template without includes" $ do
@@ -153,12 +159,13 @@ spec = do
 
   describe "parseAllDependencies" $ do
     it "parses both includes and extends" $ do
-      let template = T.unlines
-            [ "{% extends \"base.jinja\" %}"
-            , "{% include \"header.jinja\" %}"
-            , "Content"
-            , "{% include \"footer.jinja\" %}"
-            ]
+      let template =
+            T.unlines
+              [ "{% extends \"base.jinja\" %}",
+                "{% include \"header.jinja\" %}",
+                "Content",
+                "{% include \"footer.jinja\" %}"
+              ]
       let (incs, exts) = parseAllDependencies template
       incs `shouldBe` ["header.jinja", "footer.jinja"]
       exts `shouldBe` ["base.jinja"]

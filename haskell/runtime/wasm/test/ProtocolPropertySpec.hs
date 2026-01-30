@@ -6,29 +6,27 @@
 -- that @decode . encode ≡ id@ holds for all types that cross the WASM/JSON boundary.
 module ProtocolPropertySpec (spec) where
 
-import Test.Hspec
-import Test.Hspec.QuickCheck (prop)
-import Test.QuickCheck
-  ( Arbitrary(..)
-  , Gen
-  , oneof
-  , elements
-  , listOf
-  , scale
-  , frequency
-  , arbitraryUnicodeChar
-  )
-import Data.Aeson (encode, decode, Value(..), object, (.=))
+import Data.Aeson (Value (..), decode, encode, object, (.=))
 import Data.Aeson.KeyMap qualified as KM
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Vector qualified as V
-
+import ExoMonad.Anthropic.Types (ImageSource (..))
 import ExoMonad.Wasm.WireTypes
-import ExoMonad.Anthropic.Types (ImageSource(..))
-
+import Test.Hspec
+import Test.Hspec.QuickCheck (prop)
+import Test.QuickCheck
+  ( Arbitrary (..),
+    Gen,
+    arbitraryUnicodeChar,
+    elements,
+    frequency,
+    listOf,
+    oneof,
+    scale,
+  )
 
 spec :: Spec
 spec = do
@@ -41,7 +39,6 @@ spec = do
   wireContentBlockPropertySpec
   edgeCaseSpec
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- ARBITRARY INSTANCES
 -- ════════════════════════════════════════════════════════════════════════════
@@ -49,21 +46,21 @@ spec = do
 -- | Generate arbitrary Text with various edge cases.
 -- Uses frequency to weight random generation more heavily than fixed cases.
 instance Arbitrary Text where
-  arbitrary = frequency
-    [ (5, T.pack <$> listOf arbitraryUnicodeChar)  -- Random unicode (most common)
-    , (3, T.pack <$> listOf (elements ['a'..'z'])) -- Simple ASCII letters
-    , (1, pure "")                                  -- Empty string
-    , (1, pure " ")                                 -- Single space
-    , (1, pure "\t\n\r")                            -- Whitespace chars
-    , (1, pure "emoji: \x1F600\x1F4A9\x2764")      -- Emoji
-    , (1, pure "null")                              -- JSON keyword as string
-    , (1, pure "{\"nested\": \"json\"}")            -- JSON-like string
-    ]
+  arbitrary =
+    frequency
+      [ (5, T.pack <$> listOf arbitraryUnicodeChar), -- Random unicode (most common)
+        (3, T.pack <$> listOf (elements ['a' .. 'z'])), -- Simple ASCII letters
+        (1, pure ""), -- Empty string
+        (1, pure " "), -- Single space
+        (1, pure "\t\n\r"), -- Whitespace chars
+        (1, pure "emoji: \x1F600\x1F4A9\x2764"), -- Emoji
+        (1, pure "null"), -- JSON keyword as string
+        (1, pure "{\"nested\": \"json\"}") -- JSON-like string
+      ]
 
   shrink t
-    | T.null t  = []
+    | T.null t = []
     | otherwise = [T.empty, T.take (T.length t `div` 2) t]
-
 
 -- Note: Arbitrary Value instance is provided by aeson (Data.Aeson.Types.Internal)
 -- with depth limiting built-in.
@@ -74,17 +71,19 @@ instance Arbitrary Text where
 arbMaybeNonNullValue :: Gen (Maybe Value)
 arbMaybeNonNullValue = do
   mv <- arbitrary
-  pure $ mv >>= \v -> case v of
-    Null -> Nothing
-    _    -> Just v
+  pure $
+    mv >>= \v -> case v of
+      Null -> Nothing
+      _ -> Just v
 
 -- | Generate Maybe (Map Text Value) for log fields.
 -- Avoid null values in the map since they don't roundtrip correctly.
 arbMaybeFields :: Gen (Maybe (Map Text Value))
-arbMaybeFields = oneof
-  [ pure Nothing
-  , Just . Map.fromList <$> listOf ((,) <$> arbitrary <*> arbNonNullValue)
-  ]
+arbMaybeFields =
+  oneof
+    [ pure Nothing,
+      Just . Map.fromList <$> listOf ((,) <$> arbitrary <*> arbNonNullValue)
+    ]
   where
     arbNonNullValue = arbitrary `suchThat` (/= Null)
     suchThat gen p = do
@@ -93,234 +92,235 @@ arbMaybeFields = oneof
 
 -- | Arbitrary SerializableEffect covering all constructors
 instance Arbitrary SerializableEffect where
-  arbitrary = oneof
-    [ EffLlmComplete
-        <$> arbitrary
-        <*> arbitrary
-        <*> arbitrary
-        <*> arbMaybeNonNullValue  -- Avoid Just Null (doesn't roundtrip)
-        <*> arbitrary             -- model: Maybe Text
-    , EffLogInfo <$> arbitrary <*> arbMaybeFields
-    , EffLogError <$> arbitrary <*> arbMaybeFields
-    , EffHabitica
-        <$> elements ["GetUser", "ScoreTask", "GetTasks", "FetchTodos", "CreateTodo", "AddChecklistItem"]
-        <*> scale (`div` 2) arbitrary
-    , EffTelegramSend
-        <$> arbitrary
-        <*> elements ["PlainText", "Markdown", "HTML"]
-        <*> arbitrary  -- threadId: Maybe Int
-    , EffTelegramAsk
-        <$> arbitrary
-        <*> elements ["PlainText", "Markdown", "HTML"]
-        <*> listOf ((,) <$> arbitrary <*> arbitrary)
-        <*> arbitrary  -- threadId: Maybe Int
-    ]
+  arbitrary =
+    oneof
+      [ EffLlmComplete
+          <$> arbitrary
+          <*> arbitrary
+          <*> arbitrary
+          <*> arbMaybeNonNullValue -- Avoid Just Null (doesn't roundtrip)
+          <*> arbitrary, -- model: Maybe Text
+        EffLogInfo <$> arbitrary <*> arbMaybeFields,
+        EffLogError <$> arbitrary <*> arbMaybeFields,
+        EffHabitica
+          <$> elements ["GetUser", "ScoreTask", "GetTasks", "FetchTodos", "CreateTodo", "AddChecklistItem"]
+          <*> scale (`div` 2) arbitrary,
+        EffTelegramSend
+          <$> arbitrary
+          <*> elements ["PlainText", "Markdown", "HTML"]
+          <*> arbitrary, -- threadId: Maybe Int
+        EffTelegramAsk
+          <$> arbitrary
+          <*> elements ["PlainText", "Markdown", "HTML"]
+          <*> listOf ((,) <$> arbitrary <*> arbitrary)
+          <*> arbitrary -- threadId: Maybe Int
+      ]
 
   shrink (EffLlmComplete node sys user schema model) =
-    [ EffLogInfo node Nothing ]  -- Simplify to simpler effect
-    ++ [ EffLlmComplete node' sys user schema model | node' <- shrink node ]
-    ++ [ EffLlmComplete node sys' user schema model | sys' <- shrink sys ]
-    ++ [ EffLlmComplete node sys user' schema model | user' <- shrink user ]
-    ++ [ EffLlmComplete node sys user schema' model
-       | schema' <- shrink schema
-       , schema' /= Just Null  -- Avoid Just Null (doesn't roundtrip)
-       ]
-    ++ [ EffLlmComplete node sys user schema model' | model' <- shrink model ]
+    [EffLogInfo node Nothing] -- Simplify to simpler effect
+      ++ [EffLlmComplete node' sys user schema model | node' <- shrink node]
+      ++ [EffLlmComplete node sys' user schema model | sys' <- shrink sys]
+      ++ [EffLlmComplete node sys user' schema model | user' <- shrink user]
+      ++ [ EffLlmComplete node sys user schema' model
+         | schema' <- shrink schema,
+           schema' /= Just Null -- Avoid Just Null (doesn't roundtrip)
+         ]
+      ++ [EffLlmComplete node sys user schema model' | model' <- shrink model]
   shrink (EffLogInfo msg fields) =
-    [ EffLogInfo msg Nothing | Just _ <- [fields] ]  -- Remove fields first
-    ++ [ EffLogInfo msg' fields | msg' <- shrink msg ]
+    [EffLogInfo msg Nothing | Just _ <- [fields]] -- Remove fields first
+      ++ [EffLogInfo msg' fields | msg' <- shrink msg]
   shrink (EffLogError msg fields) =
-    [ EffLogInfo msg Nothing ]  -- Error to Info
-    ++ [ EffLogError msg Nothing | Just _ <- [fields] ]  -- Remove fields first
-    ++ [ EffLogError msg' fields | msg' <- shrink msg ]
+    [EffLogInfo msg Nothing] -- Error to Info
+      ++ [EffLogError msg Nothing | Just _ <- [fields]] -- Remove fields first
+      ++ [EffLogError msg' fields | msg' <- shrink msg]
   shrink (EffHabitica op payload) =
-    [ EffLogInfo op Nothing ]
-    ++ [ EffHabitica op payload' | payload' <- shrink payload ]
+    [EffLogInfo op Nothing]
+      ++ [EffHabitica op payload' | payload' <- shrink payload]
   shrink (EffTelegramSend txt parseMode threadId) =
-    [ EffLogInfo txt Nothing ]
-    ++ [ EffTelegramSend txt' parseMode threadId | txt' <- shrink txt ]
-    ++ [ EffTelegramSend txt parseMode Nothing | Just _ <- [threadId] ]  -- Remove threadId
+    [EffLogInfo txt Nothing]
+      ++ [EffTelegramSend txt' parseMode threadId | txt' <- shrink txt]
+      ++ [EffTelegramSend txt parseMode Nothing | Just _ <- [threadId]] -- Remove threadId
   shrink (EffTelegramAsk txt parseMode buttons threadId) =
-    [ EffLogInfo txt Nothing ]
-    ++ [ EffTelegramAsk txt' parseMode buttons threadId | txt' <- shrink txt ]
-    ++ [ EffTelegramAsk txt parseMode buttons' threadId | buttons' <- shrink buttons ]
-    ++ [ EffTelegramAsk txt parseMode buttons Nothing | Just _ <- [threadId] ]  -- Remove threadId
-
+    [EffLogInfo txt Nothing]
+      ++ [EffTelegramAsk txt' parseMode buttons threadId | txt' <- shrink txt]
+      ++ [EffTelegramAsk txt parseMode buttons' threadId | buttons' <- shrink buttons]
+      ++ [EffTelegramAsk txt parseMode buttons Nothing | Just _ <- [threadId]] -- Remove threadId
 
 -- | Arbitrary EffectResult covering success and error cases
 instance Arbitrary EffectResult where
-  arbitrary = oneof
-    [ ResSuccess <$> arbitrary
-    , ResError <$> arbitrary
-    ]
+  arbitrary =
+    oneof
+      [ ResSuccess <$> arbitrary,
+        ResError <$> arbitrary
+      ]
 
   shrink (ResSuccess val) =
-    [ ResSuccess Nothing ]
-    ++ [ ResSuccess val' | val' <- shrink val ]
+    [ResSuccess Nothing]
+      ++ [ResSuccess val' | val' <- shrink val]
   shrink (ResError msg) =
-    [ ResSuccess Nothing ]  -- Error to success with nothing
-    ++ [ ResError msg' | msg' <- shrink msg ]
-
+    [ResSuccess Nothing] -- Error to success with nothing
+      ++ [ResError msg' | msg' <- shrink msg]
 
 -- | Arbitrary ExecutionPhase covering all variants
 instance Arbitrary ExecutionPhase where
-  arbitrary = oneof
-    [ pure PhaseIdle
-    , PhaseInNode <$> arbitrary
-    , PhaseTransitioning <$> arbitrary <*> arbitrary
-    , PhaseCompleted <$> scale (`div` 2) arbitrary
-    , PhaseFailed <$> arbitrary
-    ]
+  arbitrary =
+    oneof
+      [ pure PhaseIdle,
+        PhaseInNode <$> arbitrary,
+        PhaseTransitioning <$> arbitrary <*> arbitrary,
+        PhaseCompleted <$> scale (`div` 2) arbitrary,
+        PhaseFailed <$> arbitrary
+      ]
 
   shrink PhaseIdle = []
   shrink (PhaseInNode name) =
-    [ PhaseIdle ]
-    ++ [ PhaseInNode name' | name' <- shrink name ]
+    [PhaseIdle]
+      ++ [PhaseInNode name' | name' <- shrink name]
   shrink (PhaseTransitioning from to) =
-    [ PhaseIdle, PhaseInNode from ]
-    ++ [ PhaseTransitioning from' to | from' <- shrink from ]
-    ++ [ PhaseTransitioning from to' | to' <- shrink to ]
+    [PhaseIdle, PhaseInNode from]
+      ++ [PhaseTransitioning from' to | from' <- shrink from]
+      ++ [PhaseTransitioning from to' | to' <- shrink to]
   shrink (PhaseCompleted result) =
-    [ PhaseIdle ]
-    ++ [ PhaseCompleted result' | result' <- shrink result ]
+    [PhaseIdle]
+      ++ [PhaseCompleted result' | result' <- shrink result]
   shrink (PhaseFailed err) =
-    [ PhaseIdle ]
-    ++ [ PhaseFailed err' | err' <- shrink err ]
-
+    [PhaseIdle]
+      ++ [PhaseFailed err' | err' <- shrink err]
 
 -- | Arbitrary GraphState
 instance Arbitrary GraphState where
-  arbitrary = GraphState
-    <$> arbitrary
-    <*> listOf arbitrary
+  arbitrary =
+    GraphState
+      <$> arbitrary
+      <*> listOf arbitrary
 
   shrink (GraphState phase nodes) =
-    [ GraphState phase' nodes | phase' <- shrink phase ]
-    ++ [ GraphState phase nodes' | nodes' <- shrink nodes ]
-
+    [GraphState phase' nodes | phase' <- shrink phase]
+      ++ [GraphState phase nodes' | nodes' <- shrink nodes]
 
 -- | Arbitrary StepOutput covering all variants
 instance Arbitrary StepOutput where
-  arbitrary = oneof
-    [ StepYield <$> arbitrary <*> arbitrary
-    , StepDone <$> scale (`div` 2) arbitrary <*> arbitrary
-    , StepFailed <$> arbitrary <*> arbitrary
-    ]
+  arbitrary =
+    oneof
+      [ StepYield <$> arbitrary <*> arbitrary,
+        StepDone <$> scale (`div` 2) arbitrary <*> arbitrary,
+        StepFailed <$> arbitrary <*> arbitrary
+      ]
 
   shrink (StepYield effect gs) =
-    [ StepYield effect' gs | effect' <- shrink effect ]
-    ++ [ StepYield effect gs' | gs' <- shrink gs ]
+    [StepYield effect' gs | effect' <- shrink effect]
+      ++ [StepYield effect gs' | gs' <- shrink gs]
   shrink (StepDone result gs) =
-    [ StepDone result' gs | result' <- shrink result ]
-    ++ [ StepDone result gs' | gs' <- shrink gs ]
+    [StepDone result' gs | result' <- shrink result]
+      ++ [StepDone result gs' | gs' <- shrink gs]
   shrink (StepFailed err gs) =
-    [ StepFailed err' gs | err' <- shrink err ]
-    ++ [ StepFailed err gs' | gs' <- shrink gs ]
-
+    [StepFailed err' gs | err' <- shrink err]
+      ++ [StepFailed err gs' | gs' <- shrink gs]
 
 -- | Arbitrary TypeInfoWire
 instance Arbitrary TypeInfoWire where
-  arbitrary = TypeInfoWire
-    <$> arbitrary
-    <*> arbitrary
+  arbitrary =
+    TypeInfoWire
+      <$> arbitrary
+      <*> arbitrary
 
   shrink (TypeInfoWire name mod') =
-    [ TypeInfoWire name' mod' | name' <- shrink name ]
-    ++ [ TypeInfoWire name mod'' | mod'' <- shrink mod' ]
-
+    [TypeInfoWire name' mod' | name' <- shrink name]
+      ++ [TypeInfoWire name mod'' | mod'' <- shrink mod']
 
 -- | Arbitrary GotoTargetWire
 instance Arbitrary GotoTargetWire where
-  arbitrary = GotoTargetWire
-    <$> arbitrary
-    <*> arbitrary
+  arbitrary =
+    GotoTargetWire
+      <$> arbitrary
+      <*> arbitrary
 
   shrink (GotoTargetWire target payload) =
-    [ GotoTargetWire target' payload | target' <- shrink target ]
-    ++ [ GotoTargetWire target payload' | payload' <- shrink payload ]
-
+    [GotoTargetWire target' payload | target' <- shrink target]
+      ++ [GotoTargetWire target payload' | payload' <- shrink payload]
 
 -- | Arbitrary NodeInfoWire
 instance Arbitrary NodeInfoWire where
-  arbitrary = NodeInfoWire
-    <$> arbitrary
-    <*> elements ["LLM", "Logic"]
-    <*> arbitrary
-    <*> arbitrary
-    <*> scale (`div` 2) (listOf arbitrary)
+  arbitrary =
+    NodeInfoWire
+      <$> arbitrary
+      <*> elements ["LLM", "Logic"]
+      <*> arbitrary
+      <*> arbitrary
+      <*> scale (`div` 2) (listOf arbitrary)
 
   shrink (NodeInfoWire name kind input_ schema targets) =
-    [ NodeInfoWire name' kind input_ schema targets | name' <- shrink name ]
-    ++ [ NodeInfoWire name kind input_' schema targets | input_' <- shrink input_ ]
-    ++ [ NodeInfoWire name kind input_ schema' targets | schema' <- shrink schema ]
-    ++ [ NodeInfoWire name kind input_ schema targets' | targets' <- shrink targets ]
-
+    [NodeInfoWire name' kind input_ schema targets | name' <- shrink name]
+      ++ [NodeInfoWire name kind input_' schema targets | input_' <- shrink input_]
+      ++ [NodeInfoWire name kind input_ schema' targets | schema' <- shrink schema]
+      ++ [NodeInfoWire name kind input_ schema targets' | targets' <- shrink targets]
 
 -- | Arbitrary EdgeInfoWire
 instance Arbitrary EdgeInfoWire where
-  arbitrary = EdgeInfoWire
-    <$> arbitrary
-    <*> arbitrary
-    <*> arbitrary
+  arbitrary =
+    EdgeInfoWire
+      <$> arbitrary
+      <*> arbitrary
+      <*> arbitrary
 
   shrink (EdgeInfoWire from to payload) =
-    [ EdgeInfoWire from' to payload | from' <- shrink from ]
-    ++ [ EdgeInfoWire from to' payload | to' <- shrink to ]
-    ++ [ EdgeInfoWire from to payload' | payload' <- shrink payload ]
-
+    [EdgeInfoWire from' to payload | from' <- shrink from]
+      ++ [EdgeInfoWire from to' payload | to' <- shrink to]
+      ++ [EdgeInfoWire from to payload' | payload' <- shrink payload]
 
 -- | Arbitrary GraphInfoWire
 instance Arbitrary GraphInfoWire where
-  arbitrary = GraphInfoWire
-    <$> arbitrary
-    <*> arbitrary
-    <*> arbitrary
-    <*> scale (`div` 2) (listOf arbitrary)
-    <*> scale (`div` 2) (listOf arbitrary)
+  arbitrary =
+    GraphInfoWire
+      <$> arbitrary
+      <*> arbitrary
+      <*> arbitrary
+      <*> scale (`div` 2) (listOf arbitrary)
+      <*> scale (`div` 2) (listOf arbitrary)
 
   shrink (GraphInfoWire name entry exit nodes edges) =
-    [ GraphInfoWire name' entry exit nodes edges | name' <- shrink name ]
-    ++ [ GraphInfoWire name entry' exit nodes edges | entry' <- shrink entry ]
-    ++ [ GraphInfoWire name entry exit' nodes edges | exit' <- shrink exit ]
-    ++ [ GraphInfoWire name entry exit nodes' edges | nodes' <- shrink nodes ]
-    ++ [ GraphInfoWire name entry exit nodes edges' | edges' <- shrink edges ]
-
+    [GraphInfoWire name' entry exit nodes edges | name' <- shrink name]
+      ++ [GraphInfoWire name entry' exit nodes edges | entry' <- shrink entry]
+      ++ [GraphInfoWire name entry exit' nodes edges | exit' <- shrink exit]
+      ++ [GraphInfoWire name entry exit nodes' edges | nodes' <- shrink nodes]
+      ++ [GraphInfoWire name entry exit nodes edges' | edges' <- shrink edges]
 
 -- | Arbitrary ImageSource
 instance Arbitrary ImageSource where
-  arbitrary = oneof
-    [ Base64 <$> elements ["image/jpeg", "image/png", "image/webp", "image/gif"]
-                <*> arbitrary  -- Base64 data
-    , Url <$> arbitrary  -- URL text
-    ]
+  arbitrary =
+    oneof
+      [ Base64
+          <$> elements ["image/jpeg", "image/png", "image/webp", "image/gif"]
+          <*> arbitrary, -- Base64 data
+        Url <$> arbitrary -- URL text
+      ]
 
   shrink (Base64 mtype imgData) =
-    [ Url { url = "http://example.com/image.png" } ]  -- Simplify to URL
-    ++ [ Base64 { mediaType = mtype, data_ = imgData' } | imgData' <- shrink imgData ]
+    [Url {url = "http://example.com/image.png"}] -- Simplify to URL
+      ++ [Base64 {mediaType = mtype, data_ = imgData'} | imgData' <- shrink imgData]
   shrink (Url urlVal) =
-    [ Url { url = urlVal' } | urlVal' <- shrink urlVal ]
-
+    [Url {url = urlVal'} | urlVal' <- shrink urlVal]
 
 -- | Arbitrary WireContentBlock
 instance Arbitrary WireContentBlock where
-  arbitrary = oneof
-    [ WCBText <$> arbitrary
-    , WCBImage <$> arbitrary  -- Uses Arbitrary ImageSource
-    , WCBToolUse <$> arbitrary <*> arbitrary <*> arbitrary
-    , WCBToolResult <$> arbitrary <*> arbitrary <*> arbitrary
-    ]
+  arbitrary =
+    oneof
+      [ WCBText <$> arbitrary,
+        WCBImage <$> arbitrary, -- Uses Arbitrary ImageSource
+        WCBToolUse <$> arbitrary <*> arbitrary <*> arbitrary,
+        WCBToolResult <$> arbitrary <*> arbitrary <*> arbitrary
+      ]
 
   shrink (WCBText txt) = [WCBText txt' | txt' <- shrink txt]
   shrink (WCBImage source) = [WCBImage source' | source' <- shrink source]
   shrink (WCBToolUse toolId name input) =
-    [WCBText "tool"]  -- Simplify to text
-    ++ [WCBToolUse toolId' name input | toolId' <- shrink toolId]
-    ++ [WCBToolUse toolId name' input | name' <- shrink name]
+    [WCBText "tool"] -- Simplify to text
+      ++ [WCBToolUse toolId' name input | toolId' <- shrink toolId]
+      ++ [WCBToolUse toolId name' input | name' <- shrink name]
   shrink (WCBToolResult toolId content isErr) =
-    [WCBText content]  -- Simplify to text
-    ++ [WCBToolResult toolId' content isErr | toolId' <- shrink toolId]
-    ++ [WCBToolResult toolId content' isErr | content' <- shrink content]
-
+    [WCBText content] -- Simplify to text
+      ++ [WCBToolResult toolId' content isErr | toolId' <- shrink toolId]
+      ++ [WCBToolResult toolId content' isErr | content' <- shrink content]
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PROPERTY TESTS
@@ -328,7 +328,6 @@ instance Arbitrary WireContentBlock where
 
 serializableEffectPropertySpec :: Spec
 serializableEffectPropertySpec = describe "SerializableEffect properties" $ do
-
   prop "decode . encode ≡ id (roundtrip)" $ \(effect :: SerializableEffect) ->
     decode (encode effect) == Just effect
 
@@ -337,32 +336,28 @@ serializableEffectPropertySpec = describe "SerializableEffect properties" $ do
       Just (Object obj) -> KM.member "type" obj
       _ -> False
 
-
 effectResultPropertySpec :: Spec
 effectResultPropertySpec = describe "EffectResult properties" $ do
-
   prop "decode . encode ≡ id (roundtrip)" $ \(result :: EffectResult) ->
     decode (encode result) == Just result
 
   prop "success results have 'value' field iff value is Just" $ \val ->
     let result = ResSuccess val
         json = decode (encode result) :: Maybe Value
-    in case (val, json) of
-         (Nothing, Just (Object obj)) -> not (KM.member "value" obj)
-         (Just _, Just (Object obj)) -> KM.member "value" obj
-         _ -> False
+     in case (val, json) of
+          (Nothing, Just (Object obj)) -> not (KM.member "value" obj)
+          (Just _, Just (Object obj)) -> KM.member "value" obj
+          _ -> False
 
   prop "error results have 'message' field" $ \msg ->
     let result = ResError msg
         json = decode (encode result) :: Maybe Value
-    in case json of
-         Just (Object obj) -> KM.member "message" obj
-         _ -> False
-
+     in case json of
+          Just (Object obj) -> KM.member "message" obj
+          _ -> False
 
 executionPhasePropertySpec :: Spec
 executionPhasePropertySpec = describe "ExecutionPhase properties" $ do
-
   prop "decode . encode ≡ id (roundtrip)" $ \(phase :: ExecutionPhase) ->
     decode (encode phase) == Just phase
 
@@ -371,10 +366,8 @@ executionPhasePropertySpec = describe "ExecutionPhase properties" $ do
       Just (Object obj) -> KM.member "type" obj
       _ -> False
 
-
 graphStatePropertySpec :: Spec
 graphStatePropertySpec = describe "GraphState properties" $ do
-
   prop "decode . encode ≡ id (roundtrip)" $ \(gs :: GraphState) ->
     decode (encode gs) == Just gs
 
@@ -384,10 +377,8 @@ graphStatePropertySpec = describe "GraphState properties" $ do
         KM.member "phase" obj && KM.member "completedNodes" obj
       _ -> False
 
-
 stepOutputPropertySpec :: Spec
 stepOutputPropertySpec = describe "StepOutput properties" $ do
-
   prop "decode . encode ≡ id (roundtrip)" $ \(output :: StepOutput) ->
     decode (encode output) == Just output
 
@@ -400,37 +391,35 @@ stepOutputPropertySpec = describe "StepOutput properties" $ do
   prop "StepYield has done=false and non-null effect" $ \effect gs ->
     let output = StepYield effect gs
         json = decode (encode output) :: Maybe Value
-    in case json of
-         Just (Object obj) ->
-           KM.lookup "done" obj == Just (Bool False) &&
-           case KM.lookup "effect" obj of
-             Just Null -> False
-             Just (Object _) -> True
-             _ -> False
-         _ -> False
+     in case json of
+          Just (Object obj) ->
+            KM.lookup "done" obj == Just (Bool False)
+              && case KM.lookup "effect" obj of
+                Just Null -> False
+                Just (Object _) -> True
+                _ -> False
+          _ -> False
 
   prop "StepDone has done=true and null effect" $ \result gs ->
     let output = StepDone result gs
         json = decode (encode output) :: Maybe Value
-    in case json of
-         Just (Object obj) ->
-           KM.lookup "done" obj == Just (Bool True) &&
-           KM.lookup "effect" obj == Just Null
-         _ -> False
+     in case json of
+          Just (Object obj) ->
+            KM.lookup "done" obj == Just (Bool True)
+              && KM.lookup "effect" obj == Just Null
+          _ -> False
 
   prop "StepFailed has done=true and error field" $ \err gs ->
     let output = StepFailed err gs
         json = decode (encode output) :: Maybe Value
-    in case json of
-         Just (Object obj) ->
-           KM.lookup "done" obj == Just (Bool True) &&
-           KM.member "error" obj
-         _ -> False
-
+     in case json of
+          Just (Object obj) ->
+            KM.lookup "done" obj == Just (Bool True)
+              && KM.member "error" obj
+          _ -> False
 
 graphInfoPropertySpec :: Spec
 graphInfoPropertySpec = describe "GraphInfo wire type properties" $ do
-
   describe "TypeInfoWire" $ do
     prop "decode . encode ≡ id (roundtrip)" $ \(ti :: TypeInfoWire) ->
       decode (encode ti) == Just ti
@@ -458,10 +447,10 @@ graphInfoPropertySpec = describe "GraphInfo wire type properties" $ do
     prop "has all required fields" $ \(ni :: NodeInfoWire) ->
       case decode (encode ni) :: Maybe Value of
         Just (Object obj) ->
-          KM.member "niName" obj &&
-          KM.member "niKind" obj &&
-          KM.member "niInput" obj &&
-          KM.member "niGotoTargets" obj
+          KM.member "niName" obj
+            && KM.member "niKind" obj
+            && KM.member "niInput" obj
+            && KM.member "niGotoTargets" obj
         _ -> False
 
   describe "EdgeInfoWire" $ do
@@ -471,9 +460,9 @@ graphInfoPropertySpec = describe "GraphInfo wire type properties" $ do
     prop "has all required fields" $ \(ei :: EdgeInfoWire) ->
       case decode (encode ei) :: Maybe Value of
         Just (Object obj) ->
-          KM.member "eiFrom" obj &&
-          KM.member "eiTo" obj &&
-          KM.member "eiPayloadType" obj
+          KM.member "eiFrom" obj
+            && KM.member "eiTo" obj
+            && KM.member "eiPayloadType" obj
         _ -> False
 
   describe "GraphInfoWire" $ do
@@ -483,17 +472,15 @@ graphInfoPropertySpec = describe "GraphInfo wire type properties" $ do
     prop "has all required fields" $ \(gi :: GraphInfoWire) ->
       case decode (encode gi) :: Maybe Value of
         Just (Object obj) ->
-          KM.member "name" obj &&
-          KM.member "entryType" obj &&
-          KM.member "exitType" obj &&
-          KM.member "nodes" obj &&
-          KM.member "edges" obj
+          KM.member "name" obj
+            && KM.member "entryType" obj
+            && KM.member "exitType" obj
+            && KM.member "nodes" obj
+            && KM.member "edges" obj
         _ -> False
-
 
 wireContentBlockPropertySpec :: Spec
 wireContentBlockPropertySpec = describe "WireContentBlock properties" $ do
-
   prop "decode . encode ≡ id (roundtrip)" $ \(block :: WireContentBlock) ->
     decode (encode block) == Just block
 
@@ -504,11 +491,11 @@ wireContentBlockPropertySpec = describe "WireContentBlock properties" $ do
 
   describe "WCBImage with base64 source" $ do
     it "round-trips WCBImage with base64 source" $ do
-      let img = WCBImage Base64 { mediaType = "image/jpeg", data_ = "base64data" }
+      let img = WCBImage Base64 {mediaType = "image/jpeg", data_ = "base64data"}
       decode (encode img) `shouldBe` Just img
 
     it "encodes WCBImage with correct JSON structure" $ do
-      let img = WCBImage Base64 { mediaType = "image/png", data_ = "abc123" }
+      let img = WCBImage Base64 {mediaType = "image/png", data_ = "abc123"}
       let json = decode (encode img) :: Maybe Value
       case json of
         Just (Object obj) -> do
@@ -523,11 +510,11 @@ wireContentBlockPropertySpec = describe "WireContentBlock properties" $ do
 
   describe "WCBImage with URL source" $ do
     it "round-trips WCBImage with URL source" $ do
-      let img = WCBImage Url { url = "https://example.com/image.png" }
+      let img = WCBImage Url {url = "https://example.com/image.png"}
       decode (encode img) `shouldBe` Just img
 
     it "encodes WCBImage URL with correct JSON structure" $ do
-      let img = WCBImage Url { url = "https://example.com/image.png" }
+      let img = WCBImage Url {url = "https://example.com/image.png"}
       let json = decode (encode img) :: Maybe Value
       case json of
         Just (Object obj) -> do
@@ -539,14 +526,12 @@ wireContentBlockPropertySpec = describe "WireContentBlock properties" $ do
             _ -> expectationFailure "Expected source to be an object"
         _ -> expectationFailure "Expected JSON object"
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- EDGE CASE TESTS
 -- ════════════════════════════════════════════════════════════════════════════
 
 edgeCaseSpec :: Spec
 edgeCaseSpec = describe "Edge cases" $ do
-
   describe "Empty strings" $ do
     it "roundtrips EffLogInfo with empty message" $ do
       let effect = EffLogInfo "" Nothing
@@ -629,7 +614,7 @@ edgeCaseSpec = describe "Edge cases" $ do
       decode (encode gs) `shouldBe` Just gs
 
     it "roundtrips Value with large integer" $ do
-      let gs = GraphState (PhaseCompleted (Number 9007199254740991)) []  -- JS MAX_SAFE_INTEGER
+      let gs = GraphState (PhaseCompleted (Number 9007199254740991)) [] -- JS MAX_SAFE_INTEGER
       decode (encode gs) `shouldBe` Just gs
 
     it "roundtrips Value with small decimal" $ do
@@ -638,15 +623,19 @@ edgeCaseSpec = describe "Edge cases" $ do
 
   describe "Complex nested structures" $ do
     it "roundtrips deeply nested JSON value" $ do
-      let nested = object
-            [ "level1" .= object
-                [ "level2" .= object
-                    [ "level3" .= object
-                        [ "value" .= ("deep" :: Text)
-                        ]
+      let nested =
+            object
+              [ "level1"
+                  .= object
+                    [ "level2"
+                        .= object
+                          [ "level3"
+                              .= object
+                                [ "value" .= ("deep" :: Text)
+                                ]
+                          ]
                     ]
-                ]
-            ]
+              ]
           output = StepDone nested (GraphState (PhaseCompleted nested) [])
       decode (encode output) `shouldBe` Just output
 
@@ -656,7 +645,7 @@ edgeCaseSpec = describe "Edge cases" $ do
       decode (encode output) `shouldBe` Just output
 
     it "roundtrips StepOutput with many completed nodes" $ do
-      let nodes = ["node" <> T.pack (show i) | i <- [1..100 :: Int]]
+      let nodes = ["node" <> T.pack (show i) | i <- [1 .. 100 :: Int]]
           gs = GraphState (PhaseCompleted (String "done")) nodes
           output = StepDone (String "done") gs
       decode (encode output) `shouldBe` Just output
@@ -664,10 +653,10 @@ edgeCaseSpec = describe "Edge cases" $ do
   describe "Sum type encoding (variant tags)" $ do
     it "all SerializableEffect variants have distinct 'type' values" $ do
       let effects =
-            [ EffLlmComplete "n" "s" "u" Nothing Nothing
-            , EffLogInfo "msg" Nothing
-            , EffLogError "err" Nothing
-            , EffHabitica "GetUser" (object [])
+            [ EffLlmComplete "n" "s" "u" Nothing Nothing,
+              EffLogInfo "msg" Nothing,
+              EffLogError "err" Nothing,
+              EffHabitica "GetUser" (object [])
             ]
           getType eff = case decode (encode eff) :: Maybe Value of
             Just (Object obj) -> KM.lookup "type" obj
@@ -679,11 +668,11 @@ edgeCaseSpec = describe "Edge cases" $ do
 
     it "all ExecutionPhase variants have distinct 'type' values" $ do
       let phases =
-            [ PhaseIdle
-            , PhaseInNode "n"
-            , PhaseTransitioning "a" "b"
-            , PhaseCompleted Null
-            , PhaseFailed "err"
+            [ PhaseIdle,
+              PhaseInNode "n",
+              PhaseTransitioning "a" "b",
+              PhaseCompleted Null,
+              PhaseFailed "err"
             ]
           getType ph = case decode (encode ph) :: Maybe Value of
             Just (Object obj) -> KM.lookup "type" obj

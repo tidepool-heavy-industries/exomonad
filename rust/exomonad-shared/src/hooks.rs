@@ -103,8 +103,8 @@ impl HookConfig {
         // Read existing settings if present
         let (original_content, mut settings) = if settings_path.exists() {
             let content = fs::read_to_string(&settings_path).map_err(ExoMonadError::Io)?;
-            let settings: Value =
-                serde_json::from_str(&content).map_err(|e| ExoMonadError::JsonParse { source: e })?;
+            let settings: Value = serde_json::from_str(&content)
+                .map_err(|e| ExoMonadError::JsonParse { source: e })?;
             (Some(content), settings)
         } else {
             (None, json!({}))

@@ -20,45 +20,46 @@
 -- @
 module ExoMonad.Graph.MCPReify
   ( -- * Tool Definition
-    MCPToolInfo(..)
+    MCPToolInfo (..),
 
     -- * Reification (Legacy - MCPExport annotation)
-  , ReifyMCPTools(..)
-  , GReifyMCPEntries(..)
+    ReifyMCPTools (..),
+    GReifyMCPEntries (..),
 
     -- * Reification (New - GraphEntries type family)
-  , ReifyGraphEntries(..)
-  , ReifyEntryList(..)
-  ) where
+    ReifyGraphEntries (..),
+    ReifyEntryList (..),
+  )
+where
 
 import Data.Aeson (Value)
-import Data.Char (toLower, isUpper)
+import Data.Char (isUpper, toLower)
 import Data.Kind (Type)
-import Data.Proxy (Proxy(..))
+import Data.Proxy (Proxy (..))
 import Data.Text (Text)
-import qualified Data.Text as T
-import GHC.Generics
-import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
-
-import ExoMonad.Role (Role(..))
-import ExoMonad.Schema (HasJSONSchema(..), schemaToValue)
-import ExoMonad.Graph.Types (type (:@), MCPToolDef, GraphEntry(..), GraphEntries, MCPRoleHint, MCPExport)
-import ExoMonad.Graph.Generic.Core (AsGraph, EntryNode)
+import Data.Text qualified as T
 import ExoMonad.Graph.Edges (HasMCPExport)
+import ExoMonad.Graph.Generic.Core (AsGraph, EntryNode)
+import ExoMonad.Graph.Types (GraphEntries, GraphEntry (..), MCPExport, MCPRoleHint, MCPToolDef, type (:@))
+import ExoMonad.Role (Role (..))
+import ExoMonad.Schema (HasJSONSchema (..), schemaToValue)
+import GHC.Generics
+import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 
 -- | An MCP tool definition extracted from a graph EntryNode.
 data MCPToolInfo = MCPToolInfo
-  { mtdName :: Text
-    -- ^ Tool name (snake_case, from MCPToolDef or field name)
-  , mtdDescription :: Text
-    -- ^ Tool description (from MCPToolDef)
-  , mtdInputSchema :: Value
-    -- ^ JSON Schema for tool parameters (from HasJSONSchema)
-  , mtdEntryName :: Text
-    -- ^ Original field name in graph record (for dispatch)
-  , mtdRoles :: [Role]
-    -- ^ Roles allowed to use this tool
-  } deriving (Show, Eq, Generic)
+  { -- | Tool name (snake_case, from MCPToolDef or field name)
+    mtdName :: Text,
+    -- | Tool description (from MCPToolDef)
+    mtdDescription :: Text,
+    -- | JSON Schema for tool parameters (from HasJSONSchema)
+    mtdInputSchema :: Value,
+    -- | Original field name in graph record (for dispatch)
+    mtdEntryName :: Text,
+    -- | Roles allowed to use this tool
+    mtdRoles :: [Role]
+  }
+  deriving (Show, Eq, Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- REIFICATION TYPECLASS
@@ -72,8 +73,10 @@ data MCPToolInfo = MCPToolInfo
 class ReifyMCPTools (graph :: Type -> Type) where
   reifyMCPTools :: Proxy graph -> [MCPToolInfo]
 
-instance (GReifyMCPEntries (Rep (graph AsGraph)))
-      => ReifyMCPTools graph where
+instance
+  (GReifyMCPEntries (Rep (graph AsGraph))) =>
+  ReifyMCPTools graph
+  where
   reifyMCPTools _ = gReifyMCPEntries (Proxy @(Rep (graph AsGraph)))
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -85,15 +88,17 @@ class GReifyMCPEntries (rep :: Type -> Type) where
   gReifyMCPEntries :: Proxy rep -> [MCPToolInfo]
 
 -- Unwrap metadata
-instance GReifyMCPEntries inner => GReifyMCPEntries (M1 D meta inner) where
+instance (GReifyMCPEntries inner) => GReifyMCPEntries (M1 D meta inner) where
   gReifyMCPEntries _ = gReifyMCPEntries (Proxy @inner)
 
-instance GReifyMCPEntries inner => GReifyMCPEntries (M1 C meta inner) where
+instance (GReifyMCPEntries inner) => GReifyMCPEntries (M1 C meta inner) where
   gReifyMCPEntries _ = gReifyMCPEntries (Proxy @inner)
 
 -- Product: combine both sides
-instance (GReifyMCPEntries left, GReifyMCPEntries right)
-      => GReifyMCPEntries (left :*: right) where
+instance
+  (GReifyMCPEntries left, GReifyMCPEntries right) =>
+  GReifyMCPEntries (left :*: right)
+  where
   gReifyMCPEntries _ =
     gReifyMCPEntries (Proxy @left) ++ gReifyMCPEntries (Proxy @right)
 
@@ -102,9 +107,10 @@ instance GReifyMCPEntries U1 where
   gReifyMCPEntries _ = []
 
 -- Field: check for MCPExport
-instance ( ReifyMCPField (HasMCPExport fieldType) name fieldType
-         )
-      => GReifyMCPEntries (M1 S ('MetaSel ('Just name) su ss ds) (K1 i fieldType)) where
+instance
+  (ReifyMCPField (HasMCPExport fieldType) name fieldType) =>
+  GReifyMCPEntries (M1 S ('MetaSel ('Just name) su ss ds) (K1 i fieldType))
+  where
   gReifyMCPEntries _ = reifyMCPField @(HasMCPExport fieldType) @name @fieldType Proxy
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -120,19 +126,23 @@ instance ReifyMCPField 'False name fieldType where
   reifyMCPField _ = []
 
 -- MCP-exported: extract tool definition
-instance ( KnownSymbol name
-         , HasJSONSchema (EntryInputType fieldType)
-         , ExtractToolMeta name fieldType
-         , ExtractRoleMeta fieldType
-         )
-      => ReifyMCPField 'True name fieldType where
-  reifyMCPField _ = [MCPToolInfo
-    { mtdName = getToolName @name @fieldType
-    , mtdDescription = getToolDescription @name @fieldType
-    , mtdInputSchema = schemaToValue (jsonSchema @(EntryInputType fieldType))
-    , mtdEntryName = T.pack (symbolVal (Proxy @name))
-    , mtdRoles = getToolRoles @fieldType
-    }]
+instance
+  ( KnownSymbol name,
+    HasJSONSchema (EntryInputType fieldType),
+    ExtractToolMeta name fieldType,
+    ExtractRoleMeta fieldType
+  ) =>
+  ReifyMCPField 'True name fieldType
+  where
+  reifyMCPField _ =
+    [ MCPToolInfo
+        { mtdName = getToolName @name @fieldType,
+          mtdDescription = getToolDescription @name @fieldType,
+          mtdInputSchema = schemaToValue (jsonSchema @(EntryInputType fieldType)),
+          mtdEntryName = T.pack (symbolVal (Proxy @name)),
+          mtdRoles = getToolRoles @fieldType
+        }
+    ]
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPER TYPE FAMILIES AND CLASSES
@@ -160,14 +170,16 @@ class ExtractRoleMeta (node :: Type) where
 instance {-# OVERLAPPABLE #-} ExtractRoleMeta node where
   getToolRoles = []
 
-instance (ExtractRoleMeta node, ReifyRoleList '[r])
-      => ExtractRoleMeta (node :@ MCPRoleHint r) where
+instance
+  (ExtractRoleMeta node, ReifyRoleList '[r]) =>
+  ExtractRoleMeta (node :@ MCPRoleHint r)
+  where
   getToolRoles = reifyRoleList @'[r] ++ getToolRoles @node
 
-instance ExtractRoleMeta node => ExtractRoleMeta (node :@ MCPToolDef meta) where
+instance (ExtractRoleMeta node) => ExtractRoleMeta (node :@ MCPToolDef meta) where
   getToolRoles = getToolRoles @node
 
-instance ExtractRoleMeta node => ExtractRoleMeta (node :@ MCPExport) where
+instance (ExtractRoleMeta node) => ExtractRoleMeta (node :@ MCPExport) where
   getToolRoles = getToolRoles @node
 
 class ReifyRoleList (roles :: [Role]) where
@@ -176,33 +188,39 @@ class ReifyRoleList (roles :: [Role]) where
 instance ReifyRoleList '[] where
   reifyRoleList = []
 
-instance ReifyRoleList rest => ReifyRoleList ('Dev ': rest) where
+instance (ReifyRoleList rest) => ReifyRoleList ('Dev ': rest) where
   reifyRoleList = Dev : reifyRoleList @rest
 
-instance ReifyRoleList rest => ReifyRoleList ('TL ': rest) where
+instance (ReifyRoleList rest) => ReifyRoleList ('TL ': rest) where
   reifyRoleList = TL : reifyRoleList @rest
 
-instance ReifyRoleList rest => ReifyRoleList ('PM ': rest) where
+instance (ReifyRoleList rest) => ReifyRoleList ('PM ': rest) where
   reifyRoleList = PM : reifyRoleList @rest
 
 -- Default: use field name as tool name
-instance {-# OVERLAPPABLE #-} KnownSymbol name => ExtractToolMeta name node where
+instance {-# OVERLAPPABLE #-} (KnownSymbol name) => ExtractToolMeta name node where
   getToolName = T.pack (camelToSnake (symbolVal (Proxy @name)))
   getToolDescription = "No description provided"
 
 -- With MCPToolDef: use provided name/description
-instance (KnownSymbol toolName, KnownSymbol toolDesc)
-      => ExtractToolMeta name (node :@ MCPToolDef '(toolName, toolDesc)) where
+instance
+  (KnownSymbol toolName, KnownSymbol toolDesc) =>
+  ExtractToolMeta name (node :@ MCPToolDef '(toolName, toolDesc))
+  where
   getToolName = T.pack (symbolVal (Proxy @toolName))
   getToolDescription = T.pack (symbolVal (Proxy @toolDesc))
 
-instance ExtractToolMeta name node
-      => ExtractToolMeta name (node :@ MCPRoleHint r) where
+instance
+  (ExtractToolMeta name node) =>
+  ExtractToolMeta name (node :@ MCPRoleHint r)
+  where
   getToolName = getToolName @name @node
   getToolDescription = getToolDescription @name @node
 
-instance ExtractToolMeta name node
-      => ExtractToolMeta name (node :@ MCPExport) where
+instance
+  (ExtractToolMeta name node) =>
+  ExtractToolMeta name (node :@ MCPExport)
+  where
   getToolName = getToolName @name @node
   getToolDescription = getToolDescription @name @node
 
@@ -240,7 +258,7 @@ class ReifyGraphEntries (graph :: Type -> Type) where
   reifyGraphEntries :: Proxy graph -> [MCPToolInfo]
 
 -- | Default instance that delegates to 'ReifyEntryList'.
-instance ReifyEntryList (GraphEntries graph) => ReifyGraphEntries graph where
+instance (ReifyEntryList (GraphEntries graph)) => ReifyGraphEntries graph where
   reifyGraphEntries _ = reifyEntryList (Proxy @(GraphEntries graph))
 
 -- | Reify a type-level list of 'GraphEntry' values.
@@ -252,20 +270,23 @@ instance ReifyEntryList '[] where
   reifyEntryList _ = []
 
 -- | Recursive case: reify head and append tail.
-instance ( KnownSymbol toolName
-         , KnownSymbol nodeField
-         , KnownSymbol description
-         , ReifyRoleList roles
-         , HasJSONSchema inputType
-         , ReifyEntryList rest
-         )
-      => ReifyEntryList ((toolName ':~> '(nodeField, inputType, description, roles)) ': rest) where
+instance
+  ( KnownSymbol toolName,
+    KnownSymbol nodeField,
+    KnownSymbol description,
+    ReifyRoleList roles,
+    HasJSONSchema inputType,
+    ReifyEntryList rest
+  ) =>
+  ReifyEntryList ((toolName ':~> '(nodeField, inputType, description, roles)) ': rest)
+  where
   reifyEntryList _ =
-    let tool = MCPToolInfo
-          { mtdName = T.pack (symbolVal (Proxy @toolName))
-          , mtdDescription = T.pack (symbolVal (Proxy @description))
-          , mtdInputSchema = schemaToValue (jsonSchema @inputType)
-          , mtdEntryName = T.pack (symbolVal (Proxy @nodeField))
-          , mtdRoles = reifyRoleList @roles
-          }
-    in tool : reifyEntryList (Proxy @rest)
+    let tool =
+          MCPToolInfo
+            { mtdName = T.pack (symbolVal (Proxy @toolName)),
+              mtdDescription = T.pack (symbolVal (Proxy @description)),
+              mtdInputSchema = schemaToValue (jsonSchema @inputType),
+              mtdEntryName = T.pack (symbolVal (Proxy @nodeField)),
+              mtdRoles = reifyRoleList @roles
+            }
+     in tool : reifyEntryList (Proxy @rest)

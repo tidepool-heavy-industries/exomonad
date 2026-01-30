@@ -1,5 +1,6 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# OPTIONS_GHC -Wno-incomplete-patterns -Wno-redundant-constraints #-}
+
 -- Pattern exhaustiveness checker doesn't understand GADT constraints for OneOf
 -- Redundant constraints are documentation for type-level dispatch
 
@@ -26,72 +27,82 @@
 -- using 'HasField' to get handlers from the graph record by name.
 module ExoMonad.Graph.Interpret
   ( -- * Dispatch Typeclass
-    DispatchGoto(..)
+    DispatchGoto (..),
+
     -- * Graph Interpretation
-  , runGraph
-  , runGraphFrom
-  , runGraphWith
+    runGraph,
+    runGraphFrom,
+    runGraphWith,
+
     -- * EntryNode Handler Discovery
-  , FindEntryHandler
+    FindEntryHandler,
+
     -- * Handler Invocation
-  , CallHandler(..)
+    CallHandler (..),
+
     -- * LLM Handler Execution
-  , executeLLMHandler
-  , executeClaudeCodeHandler
-  , executeGeminiHandler
+    executeLLMHandler,
+    executeClaudeCodeHandler,
+    executeGeminiHandler,
 
     -- * Self-Loop Dispatch
-  , DispatchGotoWithSelf(..)
+    DispatchGotoWithSelf (..),
 
     -- * Transition Conversion
-  , ConvertTransitionHint(..)
+    ConvertTransitionHint (..),
 
     -- * Fork/Barrier Orchestration
-  , SpawnWorkers(..)
-  ) where
+    SpawnWorkers (..),
+  )
+where
 
 import Control.Monad (when)
-import Debug.Trace (trace)
+import Control.Monad.Freer (Eff, Member)
 import Data.Aeson (Value, toJSON)
 import Data.Kind (Constraint, Type)
 import Data.Maybe (fromMaybe)
-import Data.Proxy (Proxy(..))
+import Data.Proxy (Proxy (..))
 import Data.Text (Text)
-import qualified Data.Text as T
-import Control.Monad.Freer (Eff, Member)
-import GHC.Generics (Generic(..))
-import GHC.Records (HasField(..))
-import GHC.TypeLits (Symbol, KnownSymbol, ErrorMessage(..), symbolVal)
+import Data.Text qualified as T
+import Debug.Trace (trace)
+import ExoMonad.Effect (LLM)
+import ExoMonad.Effect.Gemini (GeminiModel (..), GeminiOp, GeminiResult (..), SGeminiModel (..), SingGeminiModel (..), runGemini)
+import ExoMonad.Effect.NodeMeta (GraphMeta, GraphMetadata (..), NodeMeta, NodeMetadata (..), getGraphMeta, withNodeMeta)
+import ExoMonad.Effect.Session (Session, SessionId (..), SessionOperation (..), SessionOutput (..), ToolCall (..), continueSession, forkSession, startSession)
+import ExoMonad.Effect.Types (TurnOutcome (..), TurnParseResult (..), TurnResult (..), runTurn)
+import ExoMonad.Graph.Edges (GetAwaits, GetBarrierTarget, GetInput, GetSpawnTargets)
 import ExoMonad.Graph.Errors
-  ( HR, Blank, WhatHappened, HowItWorks, Fixes
-  , Indent, CodeLine, Bullet
-  , Unsatisfiable, unsatisfiable
-  , SelfLoopDispatchError
+  ( Blank,
+    Bullet,
+    CodeLine,
+    Fixes,
+    HR,
+    HowItWorks,
+    Indent,
+    SelfLoopDispatchError,
+    Unsatisfiable,
+    WhatHappened,
+    unsatisfiable,
   )
+import ExoMonad.Graph.Generic (AsHandler, AwaitsHList, FieldsWithNamesOf, GetNodeDef, SpawnPayloads, SpawnPayloadsInner)
+import ExoMonad.Graph.Generic.Core (AsGraph, EntryNode)
+import ExoMonad.Graph.Generic.Core qualified as G (ExitNode)
+import ExoMonad.Graph.Goto (ClaudeCodeLLMHandler (..), ClaudeCodeResult (..), GeminiLLMHandler (..), GotoChoice, LLMHandler (..), To)
+import ExoMonad.Graph.Goto.Internal (GotoChoice (..), OneOf (..))
+import ExoMonad.Graph.Reify (IsForkNode)
+import ExoMonad.Graph.Template (GingerContext)
+import ExoMonad.Graph.Types (Arrive, Exit, HList (..), ModelChoice, Self, SingModelChoice (..))
+import ExoMonad.Schema (schemaToValue)
+import ExoMonad.StructuredOutput (ClaudeCodeSchema (..), DecisionTool, StructuredOutput (..), ValidStructuredOutput, formatDiagnostic)
+import ExoMonad.StructuredOutput.DecisionTools qualified as DT
+import GHC.Generics (Generic (..))
+import GHC.Records (HasField (..))
+import GHC.TypeLits (ErrorMessage (..), KnownSymbol, Symbol, symbolVal)
 import Text.Ginger.TH (TypedTemplate, runTypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 
-import ExoMonad.Effect (LLM)
-import ExoMonad.Effect.Gemini (GeminiOp, GeminiModel(..), SGeminiModel(..), SingGeminiModel(..), runGemini, GeminiResult(..))
-import ExoMonad.Effect.NodeMeta (NodeMeta, NodeMetadata(..), withNodeMeta, GraphMeta, GraphMetadata(..), getGraphMeta)
-import ExoMonad.Effect.Session (Session, SessionOutput(..), SessionId(..), SessionOperation(..), startSession, continueSession, forkSession, ToolCall(..))
-import ExoMonad.Effect.Types (TurnOutcome(..), TurnParseResult(..), TurnResult(..), runTurn)
-import ExoMonad.Graph.Edges (GetInput, GetSpawnTargets, GetBarrierTarget, GetAwaits)
-import ExoMonad.Graph.Generic (AsHandler, FieldsWithNamesOf, SpawnPayloads, SpawnPayloadsInner, AwaitsHList, GetNodeDef)
-import ExoMonad.Graph.Reify (IsForkNode)
-import ExoMonad.Graph.Generic.Core (EntryNode, AsGraph)
-import qualified ExoMonad.Graph.Generic.Core as G (ExitNode)
-import ExoMonad.Graph.Goto (GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..), ClaudeCodeResult(..), GeminiLLMHandler(..))
-import ExoMonad.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
-import ExoMonad.Graph.Template (GingerContext)
-import ExoMonad.Graph.Types (Exit, Self, Arrive, SingModelChoice(..), HList(..), ModelChoice)
-import ExoMonad.Schema (schemaToValue)
-import ExoMonad.StructuredOutput (StructuredOutput(..), ValidStructuredOutput, ClaudeCodeSchema(..), DecisionTool, formatDiagnostic)
-import qualified ExoMonad.StructuredOutput.DecisionTools as DT
-
 -- | Effect type alias (freer-simple effects have kind Type -> Type).
 type Effect = Type -> Type
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE-LEVEL UTILITIES (local definitions)
@@ -100,9 +111,8 @@ type Effect = Type -> Type
 -- | Type-level If (polykinded).
 type IfMaybe :: Bool -> Maybe k -> Maybe k -> Maybe k
 type family IfMaybe cond t f where
-  IfMaybe 'True  t _ = t
+  IfMaybe 'True t _ = t
   IfMaybe 'False _ f = f
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ENTRY HANDLER DISCOVERY
@@ -125,21 +135,21 @@ type FindEntryHandler :: Type -> [(Symbol, Type)] -> Maybe Symbol
 type family FindEntryHandler entryType fields where
   FindEntryHandler _ '[] = 'Nothing
   FindEntryHandler entryType ('(name, EntryNode _) ': rest) =
-    FindEntryHandler entryType rest  -- Skip EntryNode marker
+    FindEntryHandler entryType rest -- Skip EntryNode marker
   FindEntryHandler entryType ('(name, G.ExitNode _) ': rest) =
-    FindEntryHandler entryType rest  -- Skip ExitNode marker
+    FindEntryHandler entryType rest -- Skip ExitNode marker
   FindEntryHandler entryType ('(name, def) ': rest) =
-    IfMaybe (MatchesInput entryType (GetInput def))
-            ('Just name)
-            (FindEntryHandler entryType rest)
+    IfMaybe
+      (MatchesInput entryType (GetInput def))
+      ('Just name)
+      (FindEntryHandler entryType rest)
 
 -- | Check if the entry type matches the Input type.
 type MatchesInput :: Type -> Maybe Type -> Bool
 type family MatchesInput entryType mInput where
-  MatchesInput _ 'Nothing = 'False   -- No Input annotation means no match
-  MatchesInput t ('Just t) = 'True   -- Exact match
-  MatchesInput _ _ = 'False          -- Different types
-
+  MatchesInput _ 'Nothing = 'False -- No Input annotation means no match
+  MatchesInput t ('Just t) = 'True -- Exact match
+  MatchesInput _ _ = 'False -- Different types
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPH EXECUTION
@@ -153,21 +163,20 @@ type family MatchesInput entryType mInput where
 -- @
 -- result <- runGraphFrom @"compute" handlers inputValue
 -- @
-runGraphFrom
-  :: forall (name :: Symbol) graph entryType targets exitType es handler.
-     ( KnownSymbol name
-     , HasField name (graph (AsHandler es)) handler
-     , CallHandler handler entryType es targets
-     , DispatchGoto graph targets es exitType
-     )
-  => graph (AsHandler es)
-  -> entryType
-  -> Eff es exitType
+runGraphFrom ::
+  forall (name :: Symbol) graph entryType targets exitType es handler.
+  ( KnownSymbol name,
+    HasField name (graph (AsHandler es)) handler,
+    CallHandler handler entryType es targets,
+    DispatchGoto graph targets es exitType
+  ) =>
+  graph (AsHandler es) ->
+  entryType ->
+  Eff es exitType
 runGraphFrom graph input = do
   let handler = getField @name graph
   choice <- callHandler handler input
   dispatchGoto graph choice
-
 
 -- | Run a graph from EntryNode to Exit.
 --
@@ -186,20 +195,19 @@ runGraphFrom graph input = do
 -- -- Run it
 -- result <- runGraph handlers 5  -- Returns 6 (if compute does +1)
 -- @
-runGraph
-  :: forall graph entryType targets exitType es entryHandlerName handler.
-     ( Generic (graph AsGraph)
-     , FindEntryHandler entryType (FieldsWithNamesOf graph) ~ 'Just entryHandlerName
-     , KnownSymbol entryHandlerName
-     , HasField entryHandlerName (graph (AsHandler es)) handler
-     , CallHandler handler entryType es targets
-     , DispatchGoto graph targets es exitType
-     )
-  => graph (AsHandler es)
-  -> entryType
-  -> Eff es exitType
+runGraph ::
+  forall graph entryType targets exitType es entryHandlerName handler.
+  ( Generic (graph AsGraph),
+    FindEntryHandler entryType (FieldsWithNamesOf graph) ~ 'Just entryHandlerName,
+    KnownSymbol entryHandlerName,
+    HasField entryHandlerName (graph (AsHandler es)) handler,
+    CallHandler handler entryType es targets,
+    DispatchGoto graph targets es exitType
+  ) =>
+  graph (AsHandler es) ->
+  entryType ->
+  Eff es exitType
 runGraph = runGraphFrom @entryHandlerName
-
 
 -- | Run a graph with an explicitly provided entry handler.
 --
@@ -214,19 +222,21 @@ runGraph = runGraphFrom @entryHandlerName
 -- -- Use:
 -- result <- runGraphWith handlers.v3Scaffold handlers input  -- No HasField needed
 -- @
-runGraphWith
-  :: forall graph entryType targets exitType es handler.
-     ( CallHandler handler entryType es targets
-     , DispatchGoto graph targets es exitType
-     )
-  => handler              -- ^ EntryNode handler (e.g., @handlers.v3Scaffold@)
-  -> graph (AsHandler es) -- ^ Full handler record (for dispatch to other nodes)
-  -> entryType            -- ^ Input to the entry handler
-  -> Eff es exitType
+runGraphWith ::
+  forall graph entryType targets exitType es handler.
+  ( CallHandler handler entryType es targets,
+    DispatchGoto graph targets es exitType
+  ) =>
+  -- | EntryNode handler (e.g., @handlers.v3Scaffold@)
+  handler ->
+  -- | Full handler record (for dispatch to other nodes)
+  graph (AsHandler es) ->
+  -- | Input to the entry handler
+  entryType ->
+  Eff es exitType
 runGraphWith entryHandler graph input = do
   choice <- callHandler entryHandler input
   dispatchGoto graph choice
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- LLM HANDLER EXECUTION
@@ -259,21 +269,25 @@ runGraphWith entryHandler graph input = do
 --   (\\output -> pure (gotoExit output)) -- route based on output
 --   inputValue
 -- @
-executeLLMHandler
-  :: forall needs schema targets es tpl.
-     ( Member LLM es
-     , Member NodeMeta es
-     , StructuredOutput schema
-     , ValidStructuredOutput schema
-     , GingerContext tpl
-     , ConvertTransitionHint targets
-     )
-  => Maybe (TypedTemplate tpl SourcePos)  -- ^ Optional system prompt template
-  -> TypedTemplate tpl SourcePos         -- ^ User prompt template
-  -> (needs -> Eff es tpl)               -- ^ Before function: build template context
-  -> (schema -> Eff es (GotoChoice targets)) -- ^ After function: handle LLM output
-  -> needs
-  -> Eff es (GotoChoice targets)
+executeLLMHandler ::
+  forall needs schema targets es tpl.
+  ( Member LLM es,
+    Member NodeMeta es,
+    StructuredOutput schema,
+    ValidStructuredOutput schema,
+    GingerContext tpl,
+    ConvertTransitionHint targets
+  ) =>
+  -- | Optional system prompt template
+  Maybe (TypedTemplate tpl SourcePos) ->
+  -- | User prompt template
+  TypedTemplate tpl SourcePos ->
+  -- | Before function: build template context
+  (needs -> Eff es tpl) ->
+  -- | After function: handle LLM output
+  (schema -> Eff es (GotoChoice targets)) ->
+  needs ->
+  Eff es (GotoChoice targets)
 executeLLMHandler mSystemTpl userTpl beforeFn afterFn input = do
   -- Build context from before-handler
   ctx <- beforeFn input
@@ -291,7 +305,6 @@ executeLLMHandler mSystemTpl userTpl beforeFn afterFn input = do
         Nothing -> error $ "Tool transition to unknown target or wrong type: " <> T.unpack targetName
     TurnCompleted (TurnParsed (TurnResult {trOutput})) -> afterFn trOutput
     TurnCompleted (TurnParseFailed {tpfError}) -> error $ "Parse failed: " <> tpfError
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CLAUDE CODE HANDLER EXECUTION
@@ -341,20 +354,25 @@ executeLLMHandler mSystemTpl userTpl beforeFn afterFn input = do
 -- 4. If Claude doesn't call a tool, nags with a retry prompt (max 5 retries)
 --
 -- This works around Anthropic's lack of oneOf support in structured output.
-executeClaudeCodeHandler
-  :: forall model needs schema targets es tpl.
-     ( Member Session es
-     , ClaudeCodeSchema schema
-     , GingerContext tpl
-     , SingModelChoice model
-     , ConvertTransitionHint targets
-     )
-  => Maybe (TypedTemplate tpl SourcePos)                    -- ^ Optional system prompt template
-  -> TypedTemplate tpl SourcePos                            -- ^ User prompt template (required)
-  -> (needs -> Eff es (tpl, SessionOperation))              -- ^ Before handler: builds context AND session strategy
-  -> ((ClaudeCodeResult schema, SessionId) -> Eff es (GotoChoice targets))  -- ^ After handler: routes with output AND session ID
-  -> needs                                                  -- ^ Input from Input annotation
-  -> Eff es (GotoChoice targets)
+executeClaudeCodeHandler ::
+  forall model needs schema targets es tpl.
+  ( Member Session es,
+    ClaudeCodeSchema schema,
+    GingerContext tpl,
+    SingModelChoice model,
+    ConvertTransitionHint targets
+  ) =>
+  -- | Optional system prompt template
+  Maybe (TypedTemplate tpl SourcePos) ->
+  -- | User prompt template (required)
+  TypedTemplate tpl SourcePos ->
+  -- | Before handler: builds context AND session strategy
+  (needs -> Eff es (tpl, SessionOperation)) ->
+  -- | After handler: routes with output AND session ID
+  ((ClaudeCodeResult schema, SessionId) -> Eff es (GotoChoice targets)) ->
+  -- | Input from Input annotation
+  needs ->
+  Eff es (GotoChoice targets)
 executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
   let model = singModelChoice @model
 
@@ -369,9 +387,10 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
       -- Combine system and user prompts for Claude Code
       -- (Claude Code doesn't have separate system prompt, so prepend it)
       fullPrompt :: Text
-      fullPrompt = if systemPrompt == ""
-                   then userPrompt
-                   else systemPrompt <> "\n\n" <> userPrompt
+      fullPrompt =
+        if systemPrompt == ""
+          then userPrompt
+          else systemPrompt <> "\n\n" <> userPrompt
 
   -- Get decision tools if schema is a sum type with data
   let mDecisionTools :: Maybe [DecisionTool]
@@ -385,7 +404,7 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
       -- (Sum types use tools instead of structured output schema)
       schemaVal :: Maybe Value
       schemaVal = case mDecisionTools of
-        Just _ -> Nothing  -- Don't pass schema when using decision tools
+        Just _ -> Nothing -- Don't pass schema when using decision tools
         Nothing -> Just $ schemaToValue (structuredSchema @schema)
 
   -- Execute session and parse result with nag logic for sum types
@@ -398,40 +417,46 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
 
     -- Nag prompt when Claude doesn't call a decision tool
     decisionToolNagPrompt :: Text
-    decisionToolNagPrompt = "You must call one of the decision:: tools to indicate your choice. " <>
-                            "Please review the available tools and call the appropriate one."
+    decisionToolNagPrompt =
+      "You must call one of the decision:: tools to indicate your choice. "
+        <> "Please review the available tools and call the appropriate one."
 
     -- Nag prompt for parse failures
     parseErrorNagPrompt :: Text -> Text
     parseErrorNagPrompt diagText =
-      "Your output didn't match the expected JSON schema. Error:\n" <>
-      diagText <> "\n\n" <>
-      "Please try again with valid JSON matching the schema."
+      "Your output didn't match the expected JSON schema. Error:\n"
+        <> diagText
+        <> "\n\n"
+        <> "Please try again with valid JSON matching the schema."
 
     -- Execute session, parsing output and handling nag retries
-    executeWithNag
-      :: forall s.
-         ( ClaudeCodeSchema s )
-      => Text              -- ^ Prompt
-      -> Maybe Value       -- ^ JSON schema (Nothing for sum types)
-      -> Maybe Value       -- ^ Decision tools JSON (Just for sum types)
-      -> SessionOperation  -- ^ Session operation
-      -> ModelChoice       -- ^ Model to use
-      -> ((ClaudeCodeResult s, SessionId) -> Eff es (GotoChoice targets))
-      -> Int               -- ^ Current retry count
-      -> Eff es (GotoChoice targets)
+    executeWithNag ::
+      forall s.
+      (ClaudeCodeSchema s) =>
+      Text ->
+      -- \^ Prompt
+      Maybe Value ->
+      -- \^ JSON schema (Nothing for sum types)
+      Maybe Value ->
+      -- \^ Decision tools JSON (Just for sum types)
+      SessionOperation ->
+      -- \^ Session operation
+      ModelChoice ->
+      -- \^ Model to use
+      ((ClaudeCodeResult s, SessionId) -> Eff es (GotoChoice targets)) ->
+      Int ->
+      -- \^ Current retry count
+      Eff es (GotoChoice targets)
     executeWithNag prompt schema tools sessionOp_ model_ afterFn_ retryCount = do
       -- Dispatch to appropriate Session operation
       result <- case sessionOp_ of
         StartFresh slug ->
           startSession slug prompt model_ schema tools
-
         ContinueFrom sid worktree branch ->
           -- Guard against empty session ID (indicates prior exomonad failure)
           if T.null sid.unSessionId
-          then error "ClaudeCode: Cannot continue session - no valid session ID (prior exomonad failure)"
-          else continueSession sid worktree branch model_ prompt schema tools
-
+            then error "ClaudeCode: Cannot continue session - no valid session ID (prior exomonad failure)"
+            else continueSession sid worktree branch model_ prompt schema tools
         ForkFrom parentSid parentWorktree parentBranch childSlug ->
           forkSession parentSid parentWorktree parentBranch model_ childSlug prompt schema tools
 
@@ -440,9 +465,13 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
       when result.soIsError $ do
         let errDetails = fromMaybe "unknown error" result.soError
             stderrInfo = maybe "" (\s -> "\n\nStderr:\n" <> T.unpack s) result.soStderrOutput
-        error $ "ClaudeCode session failed (exomonad/process error): " <> T.unpack errDetails
-          <> " [exit code: " <> show result.soExitCode <> "]"
-          <> stderrInfo
+        error $
+          "ClaudeCode session failed (exomonad/process error): "
+            <> T.unpack errDetails
+            <> " [exit code: "
+            <> show result.soExitCode
+            <> "]"
+            <> stderrInfo
 
       -- Extract cc_session_id (required for resume/fork) - fail early if missing
       ccSessionId <- case result.soCcSessionId of
@@ -450,82 +479,106 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
         Nothing -> do
           let errDetails = fromMaybe "no cc_session_id in output" result.soError
               stderrInfo = maybe "" (\s -> "\n\nStderr:\n" <> T.unpack s) result.soStderrOutput
-          error $ "ClaudeCode session failed to return cc_session_id (required for resume/fork). "
-            <> "Error: " <> T.unpack errDetails
-            <> " [exit code: " <> show result.soExitCode <> "]"
-            <> stderrInfo
+          error $
+            "ClaudeCode session failed to return cc_session_id (required for resume/fork). "
+              <> "Error: "
+              <> T.unpack errDetails
+              <> " [exit code: "
+              <> show result.soExitCode
+              <> "]"
+              <> stderrInfo
 
       -- Parse result based on whether we're using decision tools
       case tools of
         Just _ -> do
           -- Sum type: parse from tool calls
           case result.soToolCalls of
-            Just (tc:rest) ->
+            Just (tc : rest) ->
               -- Got at least one tool call, take the first
               -- (Claude sometimes calls multiple despite "STOP NOW"; ignore subsequent)
               trace ("[DECISION] Taking first of " <> show (1 + length rest) <> " decision tool calls") $
-              case ccParseToolCall @s (convertToolCall tc) of
-                Right output -> afterFn_ (ClaudeCodeResult output ccSessionId result.soWorktree result.soBranch, ccSessionId)
-                Left err -> error $ "ClaudeCode decision tool parse error: " <> err
-
+                case ccParseToolCall @s (convertToolCall tc) of
+                  Right output -> afterFn_ (ClaudeCodeResult output ccSessionId result.soWorktree result.soBranch, ccSessionId)
+                  Left err -> error $ "ClaudeCode decision tool parse error: " <> err
             _ ->
               -- No tool call - nag and retry
               if retryCount >= maxNagRetries
-              then error $ "ClaudeCode: Claude completed but failed to call a decision tool after "
-                        <> show maxNagRetries <> " retries. "
-                        <> "Session output: " <> maybe "(no text)" T.unpack result.soResultText
-              else do
-                -- Continue the same session with nag prompt
-                executeWithNag @s decisionToolNagPrompt schema tools
-                  (ContinueFrom ccSessionId result.soWorktree result.soBranch) model_ afterFn_ (retryCount + 1)
-
+                then
+                  error $
+                    "ClaudeCode: Claude completed but failed to call a decision tool after "
+                      <> show maxNagRetries
+                      <> " retries. "
+                      <> "Session output: "
+                      <> maybe "(no text)" T.unpack result.soResultText
+                else do
+                  -- Continue the same session with nag prompt
+                  executeWithNag @s
+                    decisionToolNagPrompt
+                    schema
+                    tools
+                    (ContinueFrom ccSessionId result.soWorktree result.soBranch)
+                    model_
+                    afterFn_
+                    (retryCount + 1)
         Nothing ->
           -- Regular type: parse from structured output
           case result.soStructuredOutput of
-            Nothing -> error $ "ClaudeCode session returned no structured output"
-              <> maybe "" (\e -> ": " <> T.unpack e) result.soError
+            Nothing ->
+              error $
+                "ClaudeCode session returned no structured output"
+                  <> maybe "" (\e -> ": " <> T.unpack e) result.soError
             Just outputVal ->
               case ccParseStructured @s outputVal of
                 Right output -> afterFn_ (ClaudeCodeResult output ccSessionId result.soWorktree result.soBranch, ccSessionId)
                 Left diag ->
                   -- Parse failed - nag and retry
                   if retryCount >= maxNagRetries
-                  then error $ "ClaudeCode output parse error after "
-                            <> show maxNagRetries <> " retries: "
-                            <> T.unpack (formatDiagnostic diag)
-                  else do
-                    -- Continue the same session with parse error nag prompt
-                    let nagText = parseErrorNagPrompt (formatDiagnostic diag)
-                    executeWithNag @s nagText schema tools
-                      (ContinueFrom ccSessionId result.soWorktree result.soBranch) model_ afterFn_ (retryCount + 1)
+                    then
+                      error $
+                        "ClaudeCode output parse error after "
+                          <> show maxNagRetries
+                          <> " retries: "
+                          <> T.unpack (formatDiagnostic diag)
+                    else do
+                      -- Continue the same session with parse error nag prompt
+                      let nagText = parseErrorNagPrompt (formatDiagnostic diag)
+                      executeWithNag @s
+                        nagText
+                        schema
+                        tools
+                        (ContinueFrom ccSessionId result.soWorktree result.soBranch)
+                        model_
+                        afterFn_
+                        (retryCount + 1)
 
     -- Convert Session.ToolCall to DecisionTools.ToolCall format
     convertToolCall :: ToolCall -> DT.ToolCall
-    convertToolCall tc = DT.ToolCall
-      { DT.tcName = tc.tcName
-      , DT.tcInput = tc.tcInput
-      }
+    convertToolCall tc =
+      DT.ToolCall
+        { DT.tcName = tc.tcName,
+          DT.tcInput = tc.tcInput
+        }
 
 -- | Execute a GeminiLLMHandler, returning a GotoChoice.
 --
 -- Spawns Gemini CLI subprocess via the Gemini effect.
-executeGeminiHandler
-  :: forall model needs schema targets es tpl.
-     ( Member GeminiOp es
-     , Member NodeMeta es
-     , Member GraphMeta es
-     , StructuredOutput schema
-     , ValidStructuredOutput schema
-     , GingerContext tpl
-     , SingGeminiModel model
-     , ConvertTransitionHint targets
-     )
-  => Maybe (TypedTemplate tpl SourcePos)
-  -> TypedTemplate tpl SourcePos
-  -> (needs -> Eff es tpl)
-  -> (schema -> Eff es (GotoChoice targets))
-  -> needs
-  -> Eff es (GotoChoice targets)
+executeGeminiHandler ::
+  forall model needs schema targets es tpl.
+  ( Member GeminiOp es,
+    Member NodeMeta es,
+    Member GraphMeta es,
+    StructuredOutput schema,
+    ValidStructuredOutput schema,
+    GingerContext tpl,
+    SingGeminiModel model,
+    ConvertTransitionHint targets
+  ) =>
+  Maybe (TypedTemplate tpl SourcePos) ->
+  TypedTemplate tpl SourcePos ->
+  (needs -> Eff es tpl) ->
+  (schema -> Eff es (GotoChoice targets)) ->
+  needs ->
+  Eff es (GotoChoice targets)
 executeGeminiHandler mSystemTpl userTpl beforeFn afterFn input = do
   -- Build context from before-handler
   ctx <- beforeFn input
@@ -533,21 +586,20 @@ executeGeminiHandler mSystemTpl userTpl beforeFn afterFn input = do
   let systemPrompt = maybe "" (runTypedTemplate ctx) mSystemTpl
       userPrompt = runTypedTemplate ctx userTpl
       fullPrompt = if systemPrompt == "" then userPrompt else systemPrompt <> "\n\n" <> userPrompt
-  
+
   -- Demote model to term-level for the Gemini effect
   let modelVal = case singGeminiModel @model of
         SFlash -> Flash
-        SPro   -> Pro
+        SPro -> Pro
         SUltra -> Ultra
 
   -- Run Gemini effect
-  GeminiResult{grOutput} <- runGemini modelVal fullPrompt
-  
+  GeminiResult {grOutput} <- runGemini modelVal fullPrompt
+
   -- Parse output
   case parseStructured grOutput of
     Right parsed -> afterFn parsed
     Left diag -> error $ "Parse failed: Gemini parse error: " <> T.unpack (formatDiagnostic diag)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HANDLER INVOCATION TYPECLASS
@@ -571,13 +623,15 @@ instance CallHandler (payload -> Eff es (GotoChoice targets)) payload es targets
 
 -- | LLM node handler: execute via executeLLMHandler.
 instance
-  ( Member LLM es
-  , Member NodeMeta es
-  , StructuredOutput schema
-  , ValidStructuredOutput schema
-  , GingerContext tpl
-  , ConvertTransitionHint targets
-  ) => CallHandler (LLMHandler payload schema targets es tpl) payload es targets where
+  ( Member LLM es,
+    Member NodeMeta es,
+    StructuredOutput schema,
+    ValidStructuredOutput schema,
+    GingerContext tpl,
+    ConvertTransitionHint targets
+  ) =>
+  CallHandler (LLMHandler payload schema targets es tpl) payload es targets
+  where
   callHandler (LLMHandler mSysTpl userTpl beforeFn afterFn) =
     executeLLMHandler mSysTpl userTpl beforeFn afterFn
 
@@ -590,29 +644,32 @@ instance
 -- For sum types with data, generates MCP decision tools and parses
 -- tool calls. For other types, uses standard structured output.
 instance
-  ( Member Session es
-  , ClaudeCodeSchema schema
-  , GingerContext tpl
-  , SingModelChoice model
-  , ConvertTransitionHint targets
-  ) => CallHandler (ClaudeCodeLLMHandler model payload schema targets es tpl) payload es targets where
+  ( Member Session es,
+    ClaudeCodeSchema schema,
+    GingerContext tpl,
+    SingModelChoice model,
+    ConvertTransitionHint targets
+  ) =>
+  CallHandler (ClaudeCodeLLMHandler model payload schema targets es tpl) payload es targets
+  where
   callHandler (ClaudeCodeLLMHandler mSysTpl userTpl beforeFn afterFn) =
     executeClaudeCodeHandler @model mSysTpl userTpl beforeFn afterFn
 
 -- | Gemini LLM node handler: execute via executeGeminiHandler.
 instance
-  ( Member GeminiOp es
-  , Member NodeMeta es
-  , Member GraphMeta es
-  , StructuredOutput schema
-  , ValidStructuredOutput schema
-  , GingerContext tpl
-  , SingGeminiModel model
-  , ConvertTransitionHint targets
-  ) => CallHandler (GeminiLLMHandler model payload schema targets es tpl) payload es targets where
+  ( Member GeminiOp es,
+    Member NodeMeta es,
+    Member GraphMeta es,
+    StructuredOutput schema,
+    ValidStructuredOutput schema,
+    GingerContext tpl,
+    SingGeminiModel model,
+    ConvertTransitionHint targets
+  ) =>
+  CallHandler (GeminiLLMHandler model payload schema targets es tpl) payload es targets
+  where
   callHandler (GeminiLLMHandler mSysTpl userTpl beforeFn afterFn) =
     executeGeminiHandler @model mSysTpl userTpl beforeFn afterFn
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPHNODE EXECUTION
@@ -646,7 +703,6 @@ instance
 --   -> entryType                   -- ^ Input to child graph's EntryNode
 --   -> Eff es exitType             -- ^ Child graph's Exit value
 -- executeGraphNode = runGraph
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- DISPATCH TYPECLASS
@@ -689,7 +745,6 @@ type DispatchGoto :: (Type -> Type) -> [Type] -> [Effect] -> Type -> Constraint
 class DispatchGoto graph targets es exitType where
   dispatchGoto :: graph (AsHandler es) -> GotoChoice targets -> Eff es exitType
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONVERT UNTYPED TRANSITIONS TO TYPED CHOICES
 -- ════════════════════════════════════════════════════════════════════════════
@@ -729,10 +784,12 @@ instance ConvertTransitionHint '[] where
 -- Check if the target name matches the symbol, parse payload if it does,
 -- and recurse for the rest of the target list.
 instance
-  ( KnownSymbol name
-  , StructuredOutput payload
-  , ConvertTransitionHint rest
-  ) => ConvertTransitionHint (To name payload ': rest) where
+  ( KnownSymbol name,
+    StructuredOutput payload,
+    ConvertTransitionHint rest
+  ) =>
+  ConvertTransitionHint (To name payload ': rest)
+  where
   convertTransitionHint targetName payloadVal
     | targetName == T.pack (symbolVal (Proxy @name)) =
         case parseStructured payloadVal of
@@ -747,9 +804,11 @@ instance
 --
 -- Check if target name is "Exit", parse payload if it is, and recurse for rest.
 instance
-  ( StructuredOutput payload
-  , ConvertTransitionHint rest
-  ) => ConvertTransitionHint (To Exit payload ': rest) where
+  ( StructuredOutput payload,
+    ConvertTransitionHint rest
+  ) =>
+  ConvertTransitionHint (To Exit payload ': rest)
+  where
   convertTransitionHint targetName payloadVal
     | targetName == "Exit" =
         case parseStructured payloadVal of
@@ -764,9 +823,11 @@ instance
 --
 -- Check if target name is "Self", parse payload if it is, and recurse for rest.
 instance
-  ( StructuredOutput payload
-  , ConvertTransitionHint rest
-  ) => ConvertTransitionHint (To Self payload ': rest) where
+  ( StructuredOutput payload,
+    ConvertTransitionHint rest
+  ) =>
+  ConvertTransitionHint (To Self payload ': rest)
+  where
   convertTransitionHint targetName payloadVal
     | targetName == "Self" =
         case parseStructured payloadVal of
@@ -784,9 +845,11 @@ instance
 -- The barrier name (Symbol) is encoded in the message for routing, but dispatch
 -- just needs to know it's an Arrive target.
 instance
-  ( StructuredOutput payload
-  , ConvertTransitionHint rest
-  ) => ConvertTransitionHint (To (Arrive barrierName) payload ': rest) where
+  ( StructuredOutput payload,
+    ConvertTransitionHint rest
+  ) =>
+  ConvertTransitionHint (To (Arrive barrierName) payload ': rest)
+  where
   convertTransitionHint targetName payloadVal
     | targetName == "arrive" =
         case parseStructured payloadVal of
@@ -796,7 +859,6 @@ instance
         case convertTransitionHint @rest targetName payloadVal of
           Just (GotoChoice oneOf) -> Just $ GotoChoice (There oneOf)
           Nothing -> Nothing
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ERROR CASE: EMPTY TARGET LIST
@@ -809,34 +871,37 @@ instance
 --
 -- Uses 'Unsatisfiable' rather than 'TypeError' because an empty target list
 -- is logically impossible - there's no way to construct 'OneOf '[]'.
-instance Unsatisfiable
-  ( HR
-    ':$$: 'Text "  Cannot dispatch: handler has no exit points"
-    ':$$: HR
-    ':$$: Blank
-    ':$$: WhatHappened
-    ':$$: Indent "dispatchGoto was called with GotoChoice '[]"
-    ':$$: Indent "This type has no constructors - the handler can never return!"
-    ':$$: Blank
-    ':$$: HowItWorks
-    ':$$: Indent "The graph interpreter pattern-matches on GotoChoice to determine"
-    ':$$: Indent "which handler to call next. With an empty target list, there's"
-    ':$$: Indent "nothing to match on."
-    ':$$: Blank
-    ':$$: CodeLine "dispatchGoto graph (GotoChoice oneOf)"
-    ':$$: CodeLine "                             ^^^^"
-    ':$$: CodeLine "                             OneOf '[] has no constructors!"
-    ':$$: Blank
-    ':$$: Fixes
-    ':$$: Bullet "Add at least one target to your UsesEffects annotation:"
-    ':$$: CodeLine "  UsesEffects '[Goto Exit ResultType]"
-    ':$$: Bullet "Or add transitions to other nodes:"
-    ':$$: CodeLine "  UsesEffects '[Goto \"nextNode\" Payload, Goto Exit Result]"
-  ) => DispatchGoto graph '[] es exitType where
+instance
+  ( Unsatisfiable
+      ( HR
+          ':$$: 'Text "  Cannot dispatch: handler has no exit points"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "dispatchGoto was called with GotoChoice '[]"
+          ':$$: Indent "This type has no constructors - the handler can never return!"
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "The graph interpreter pattern-matches on GotoChoice to determine"
+          ':$$: Indent "which handler to call next. With an empty target list, there's"
+          ':$$: Indent "nothing to match on."
+          ':$$: Blank
+          ':$$: CodeLine "dispatchGoto graph (GotoChoice oneOf)"
+          ':$$: CodeLine "                             ^^^^"
+          ':$$: CodeLine "                             OneOf '[] has no constructors!"
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Add at least one target to your UsesEffects annotation:"
+          ':$$: CodeLine "  UsesEffects '[Goto Exit ResultType]"
+          ':$$: Bullet "Or add transitions to other nodes:"
+          ':$$: CodeLine "  UsesEffects '[Goto \"nextNode\" Payload, Goto Exit Result]"
+      )
+  ) =>
+  DispatchGoto graph '[] es exitType
+  where
   -- UNREACHABLE: The Unsatisfiable constraint means this code is never executed.
   -- If a GotoChoice '[] type is constructed, compilation fails with the error message above.
   dispatchGoto = unsatisfiable
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EXIT INSTANCES
@@ -852,13 +917,14 @@ instance {-# OVERLAPPING #-} DispatchGoto graph '[To Exit exitType] es exitType 
 -- | Exit is first, but there are more targets.
 --
 -- Handle the Exit case (return result) or skip to rest of targets.
-instance {-# OVERLAPPABLE #-}
-  ( DispatchGoto graph rest es exitType
-  ) => DispatchGoto graph (To Exit exitType ': rest) es exitType where
+instance
+  {-# OVERLAPPABLE #-}
+  (DispatchGoto graph rest es exitType) =>
+  DispatchGoto graph (To Exit exitType ': rest) es exitType
+  where
   dispatchGoto _ (GotoChoice (Here result)) = pure result
   dispatchGoto graph (GotoChoice (There rest)) =
     dispatchGoto @graph @rest graph (GotoChoice rest)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ARRIVE INSTANCES (for ForkNode workers)
@@ -879,13 +945,14 @@ instance {-# OVERLAPPING #-} DispatchGoto graph '[To (Arrive barrierName) result
 --
 -- Handle the Arrive case (return result) or skip to rest of targets.
 -- The barrier name (Symbol) is for routing; dispatch just returns the result.
-instance {-# OVERLAPPABLE #-}
-  ( DispatchGoto graph rest es exitType
-  ) => DispatchGoto graph (To (Arrive barrierName) exitType ': rest) es exitType where
+instance
+  {-# OVERLAPPABLE #-}
+  (DispatchGoto graph rest es exitType) =>
+  DispatchGoto graph (To (Arrive barrierName) exitType ': rest) es exitType
+  where
   dispatchGoto _ (GotoChoice (Here result)) = pure result
   dispatchGoto graph (GotoChoice (There rest)) =
     dispatchGoto @graph @rest graph (GotoChoice rest)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SELF-LOOP INSTANCES (error guidance)
@@ -899,8 +966,10 @@ instance {-# OVERLAPPABLE #-}
 -- Uses 'Unsatisfiable' rather than 'TypeError' because using 'dispatchGoto'
 -- with a self-looping handler is API misuse that cannot be fixed by adding
 -- annotations - it requires using a different function entirely.
-instance Unsatisfiable SelfLoopDispatchError
-  => DispatchGoto graph '[To Self payload] es exitType where
+instance
+  (Unsatisfiable SelfLoopDispatchError) =>
+  DispatchGoto graph '[To Self payload] es exitType
+  where
   -- UNREACHABLE: The Unsatisfiable constraint means this code is never executed.
   -- If gotoSelf is used with dispatchGoto (instead of dispatchGotoWithSelf),
   -- compilation fails with the error directing to the correct API.
@@ -911,13 +980,15 @@ instance Unsatisfiable SelfLoopDispatchError
 -- Uses 'Unsatisfiable' rather than 'TypeError' because using 'dispatchGoto'
 -- with a self-looping handler is API misuse that cannot be fixed by adding
 -- annotations - it requires using a different function entirely.
-instance {-# OVERLAPPABLE #-} Unsatisfiable SelfLoopDispatchError
-  => DispatchGoto graph (To Self payload ': rest) es exitType where
+instance
+  {-# OVERLAPPABLE #-}
+  (Unsatisfiable SelfLoopDispatchError) =>
+  DispatchGoto graph (To Self payload ': rest) es exitType
+  where
   -- UNREACHABLE: The Unsatisfiable constraint means this code is never executed.
   -- If gotoSelf is used with dispatchGoto (instead of dispatchGotoWithSelf),
   -- compilation fails with the error directing to the correct API.
   dispatchGoto = unsatisfiable
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- NAMED NODE DISPATCH (with automatic ForkNode detection)
@@ -934,10 +1005,10 @@ instance {-# OVERLAPPABLE #-} Unsatisfiable SelfLoopDispatchError
 -- - 'True  → fork dispatch (spawn workers, collect results, route to barrier)
 type DispatchNamedNode :: (Type -> Type) -> Symbol -> Type -> [Effect] -> Type -> Bool -> Constraint
 class DispatchNamedNode graph name payload es exitType (isFork :: Bool) where
-  dispatchNamedNode
-    :: graph (AsHandler es)
-    -> payload
-    -> Eff es exitType
+  dispatchNamedNode ::
+    graph (AsHandler es) ->
+    payload ->
+    Eff es exitType
 
 -- | Regular node dispatch: call handler and recurse on its targets.
 --
@@ -945,22 +1016,25 @@ class DispatchNamedNode graph name payload es exitType (isFork :: Bool) where
 -- teaching/observability. The node name is extracted from the type-level
 -- Symbol, and graph name is read from the 'GraphMeta' effect (set by 'runGraph').
 instance
-  ( KnownSymbol name
-  , Member NodeMeta es
-  , Member GraphMeta es
-  , HasField name (graph (AsHandler es)) handler
-  , CallHandler handler payload es handlerTargets
-  , DispatchGoto graph handlerTargets es exitType
-  ) => DispatchNamedNode graph name payload es exitType 'False where
+  ( KnownSymbol name,
+    Member NodeMeta es,
+    Member GraphMeta es,
+    HasField name (graph (AsHandler es)) handler,
+    CallHandler handler payload es handlerTargets,
+    DispatchGoto graph handlerTargets es exitType
+  ) =>
+  DispatchNamedNode graph name payload es exitType 'False
+  where
   dispatchNamedNode graph payload = do
     -- Get graph name from GraphMeta effect
     GraphMetadata graphName <- getGraphMeta
     -- Build node metadata from type-level name and graph context
     let nodeName = T.pack $ symbolVal (Proxy @name)
-        meta = NodeMetadata
-          { nmNodeName = nodeName
-          , nmGraphName = graphName
-          }
+        meta =
+          NodeMetadata
+            { nmNodeName = nodeName,
+              nmGraphName = graphName
+            }
     let handler = getField @name graph
     -- Wrap handler call with NodeMeta context (interpose, not interpret)
     nextChoice <- withNodeMeta meta (callHandler handler payload)
@@ -978,44 +1052,47 @@ instance
 -- Both fork and barrier handlers are wrapped with 'withNodeMeta' to provide
 -- node context for teaching/observability.
 instance
-  ( KnownSymbol name
-  , Member NodeMeta es
-  , Member GraphMeta es
-  , Generic (graph AsGraph)
-  , HasField name (graph (AsHandler es)) (payload -> Eff es (SpawnPayloads spawnTargets))
-  , GetSpawnTargets (GetNodeDef name graph) ~ spawnTargets
-  , GetBarrierTarget (GetNodeDef name graph) ~ 'Just barrierName
-  , KnownSymbol barrierName
-  , GetAwaits (GetNodeDef barrierName graph) ~ resultTypes
-  , SpawnWorkers graph spawnTargets resultTypes es
-  , HasField barrierName (graph (AsHandler es)) barrierHandler
-  , CallHandler barrierHandler (AwaitsHList resultTypes) es barrierTargets
-  , DispatchGoto graph barrierTargets es exitType
-  ) => DispatchNamedNode graph name payload es exitType 'True where
+  ( KnownSymbol name,
+    Member NodeMeta es,
+    Member GraphMeta es,
+    Generic (graph AsGraph),
+    HasField name (graph (AsHandler es)) (payload -> Eff es (SpawnPayloads spawnTargets)),
+    GetSpawnTargets (GetNodeDef name graph) ~ spawnTargets,
+    GetBarrierTarget (GetNodeDef name graph) ~ 'Just barrierName,
+    KnownSymbol barrierName,
+    GetAwaits (GetNodeDef barrierName graph) ~ resultTypes,
+    SpawnWorkers graph spawnTargets resultTypes es,
+    HasField barrierName (graph (AsHandler es)) barrierHandler,
+    CallHandler barrierHandler (AwaitsHList resultTypes) es barrierTargets,
+    DispatchGoto graph barrierTargets es exitType
+  ) =>
+  DispatchNamedNode graph name payload es exitType 'True
+  where
   dispatchNamedNode graph payload = do
     -- Get graph name from GraphMeta effect
     GraphMetadata graphName <- getGraphMeta
     -- Build metadata for fork node
     let forkNodeName = T.pack $ symbolVal (Proxy @name)
-        forkMeta = NodeMetadata
-          { nmNodeName = forkNodeName
-          , nmGraphName = graphName
-          }
+        forkMeta =
+          NodeMetadata
+            { nmNodeName = forkNodeName,
+              nmGraphName = graphName
+            }
     let forkHandler = getField @name graph
     -- Wrap fork handler with NodeMeta context (interpose, not interpret)
     spawnPayloads <- withNodeMeta forkMeta (forkHandler payload)
     results <- spawnWorkers @graph @spawnTargets @resultTypes graph spawnPayloads
     -- Build metadata for barrier node
     let barrierNodeName = T.pack $ symbolVal (Proxy @barrierName)
-        barrierMeta = NodeMetadata
-          { nmNodeName = barrierNodeName
-          , nmGraphName = graphName
-          }
+        barrierMeta =
+          NodeMetadata
+            { nmNodeName = barrierNodeName,
+              nmGraphName = graphName
+            }
     let barrierHandler = getField @barrierName graph
     -- Wrap barrier handler with NodeMeta context (interpose, not interpret)
     barrierChoice <- withNodeMeta barrierMeta (callHandler barrierHandler results)
     dispatchGoto graph barrierChoice
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- NAMED NODE INSTANCES (delegate to DispatchNamedNode)
@@ -1039,14 +1116,15 @@ instance
 --   data <- fetchData input
 --   pure $ gotoChoice \@"process" data
 -- @
-instance {-# OVERLAPPING #-}
-  ( Generic (graph AsGraph)
-  , DispatchNamedNode graph name payload es exitType (IsForkNode (GetNodeDef name graph))
-  ) => DispatchGoto graph '[To (name :: Symbol) payload] es exitType where
-
+instance
+  {-# OVERLAPPING #-}
+  ( Generic (graph AsGraph),
+    DispatchNamedNode graph name payload es exitType (IsForkNode (GetNodeDef name graph))
+  ) =>
+  DispatchGoto graph '[To (name :: Symbol) payload] es exitType
+  where
   dispatchGoto graph (GotoChoice (Here payload)) =
     dispatchNamedNode @graph @name @payload @es @exitType @(IsForkNode (GetNodeDef name graph)) graph payload
-
 
 -- | Named node target with additional targets: dispatch via DispatchNamedNode helper.
 --
@@ -1057,18 +1135,18 @@ instance {-# OVERLAPPING #-}
 --
 -- The @handler@ type is inferred from the graph record, and 'DispatchNamedNode'
 -- determines how to invoke it based on whether it's a ForkNode or regular node.
-instance {-# OVERLAPPABLE #-}
-  ( Generic (graph AsGraph)
-  , DispatchNamedNode graph name payload es exitType (IsForkNode (GetNodeDef name graph))
-  , DispatchGoto graph rest es exitType
-  ) => DispatchGoto graph (To (name :: Symbol) payload ': rest) es exitType where
-
+instance
+  {-# OVERLAPPABLE #-}
+  ( Generic (graph AsGraph),
+    DispatchNamedNode graph name payload es exitType (IsForkNode (GetNodeDef name graph)),
+    DispatchGoto graph rest es exitType
+  ) =>
+  DispatchGoto graph (To (name :: Symbol) payload ': rest) es exitType
+  where
   dispatchGoto graph (GotoChoice (Here payload)) =
     dispatchNamedNode @graph @name @payload @es @exitType @(IsForkNode (GetNodeDef name graph)) graph payload
-
   dispatchGoto graph (GotoChoice (There rest)) =
     dispatchGoto @graph @rest graph (GotoChoice rest)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SELF-LOOP DISPATCH
@@ -1104,11 +1182,14 @@ instance {-# OVERLAPPABLE #-}
 -- returns. This ensures type consistency when recursing back via Self.
 type DispatchGotoWithSelf :: (Type -> Type) -> Type -> [Type] -> [Type] -> [Effect] -> Type -> Constraint
 class DispatchGotoWithSelf graph selfPayload allTargets targets es exitType where
-  dispatchGotoWithSelf
-    :: (selfPayload -> Eff es (GotoChoice allTargets))  -- ^ Self-handler (returns full target list)
-    -> graph (AsHandler es)                              -- ^ Graph handlers
-    -> GotoChoice targets                                -- ^ Current choice (may be subset)
-    -> Eff es exitType
+  dispatchGotoWithSelf ::
+    -- | Self-handler (returns full target list)
+    (selfPayload -> Eff es (GotoChoice allTargets)) ->
+    -- | Graph handlers
+    graph (AsHandler es) ->
+    -- | Current choice (may be subset)
+    GotoChoice targets ->
+    Eff es exitType
 
 -- | Base case: Exit is the only target.
 instance DispatchGotoWithSelf graph selfPayload allTargets '[To Exit exitType] es exitType where
@@ -1116,9 +1197,11 @@ instance DispatchGotoWithSelf graph selfPayload allTargets '[To Exit exitType] e
 
 -- | Self is first target: call self-handler and recurse with full target list.
 instance
-  ( DispatchGotoWithSelf graph selfPayload allTargets allTargets es exitType
-  , DispatchGotoWithSelf graph selfPayload allTargets rest es exitType
-  ) => DispatchGotoWithSelf graph selfPayload allTargets (To Self selfPayload ': rest) es exitType where
+  ( DispatchGotoWithSelf graph selfPayload allTargets allTargets es exitType,
+    DispatchGotoWithSelf graph selfPayload allTargets rest es exitType
+  ) =>
+  DispatchGotoWithSelf graph selfPayload allTargets (To Self selfPayload ': rest) es exitType
+  where
   dispatchGotoWithSelf selfHandler graph (GotoChoice (Here payload)) = do
     -- Call self-handler, which returns GotoChoice allTargets
     nextChoice <- selfHandler payload
@@ -1129,8 +1212,9 @@ instance
 
 -- | Exit in current position: handle exit or skip.
 instance
-  ( DispatchGotoWithSelf graph selfPayload allTargets rest es exitType
-  ) => DispatchGotoWithSelf graph selfPayload allTargets (To Exit exitType ': rest) es exitType where
+  (DispatchGotoWithSelf graph selfPayload allTargets rest es exitType) =>
+  DispatchGotoWithSelf graph selfPayload allTargets (To Exit exitType ': rest) es exitType
+  where
   dispatchGotoWithSelf _ _ (GotoChoice (Here result)) = pure result
   dispatchGotoWithSelf selfHandler graph (GotoChoice (There rest)) =
     dispatchGotoWithSelf @graph @selfPayload @allTargets @rest selfHandler graph (GotoChoice rest)
@@ -1138,8 +1222,9 @@ instance
 -- | Arrive in current position: return result or skip (like Exit for parallel workers).
 -- The barrier name (Symbol) is for routing; dispatch just returns the result.
 instance
-  ( DispatchGotoWithSelf graph selfPayload allTargets rest es exitType
-  ) => DispatchGotoWithSelf graph selfPayload allTargets (To (Arrive barrierName) exitType ': rest) es exitType where
+  (DispatchGotoWithSelf graph selfPayload allTargets rest es exitType) =>
+  DispatchGotoWithSelf graph selfPayload allTargets (To (Arrive barrierName) exitType ': rest) es exitType
+  where
   dispatchGotoWithSelf _ _ (GotoChoice (Here result)) = pure result
   dispatchGotoWithSelf selfHandler graph (GotoChoice (There rest)) =
     dispatchGotoWithSelf @graph @selfPayload @allTargets @rest selfHandler graph (GotoChoice rest)
@@ -1150,18 +1235,19 @@ instance
 -- handler's target list, not allTargets. The self-handler is still threaded
 -- through for nested Self transitions.
 instance
-  ( KnownSymbol name
-  , HasField name (graph (AsHandler es)) (payload -> Eff es (GotoChoice handlerTargets))
-  , DispatchGotoWithSelf graph selfPayload allTargets handlerTargets es exitType
-  , DispatchGotoWithSelf graph selfPayload allTargets rest es exitType
-  ) => DispatchGotoWithSelf graph selfPayload allTargets (To (name :: Symbol) payload ': rest) es exitType where
+  ( KnownSymbol name,
+    HasField name (graph (AsHandler es)) (payload -> Eff es (GotoChoice handlerTargets)),
+    DispatchGotoWithSelf graph selfPayload allTargets handlerTargets es exitType,
+    DispatchGotoWithSelf graph selfPayload allTargets rest es exitType
+  ) =>
+  DispatchGotoWithSelf graph selfPayload allTargets (To (name :: Symbol) payload ': rest) es exitType
+  where
   dispatchGotoWithSelf selfHandler graph (GotoChoice (Here payload)) = do
     let handler = getField @name graph
     nextChoice <- handler payload
     dispatchGotoWithSelf @graph @selfPayload @allTargets @handlerTargets selfHandler graph nextChoice
   dispatchGotoWithSelf selfHandler graph (GotoChoice (There rest)) =
     dispatchGotoWithSelf @graph @selfPayload @allTargets @rest selfHandler graph (GotoChoice rest)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- FORK/BARRIER ORCHESTRATION
@@ -1193,10 +1279,10 @@ instance
 -- interpreting workers to IO and using concurrently/async.
 type SpawnWorkers :: (Type -> Type) -> [Type] -> [Type] -> [Effect] -> Constraint
 class SpawnWorkers graph targets resultTypes es where
-  spawnWorkers
-    :: graph (AsHandler es)
-    -> SpawnPayloads targets
-    -> Eff es (AwaitsHList resultTypes)
+  spawnWorkers ::
+    graph (AsHandler es) ->
+    SpawnPayloads targets ->
+    Eff es (AwaitsHList resultTypes)
 
 -- | Base case: no more targets, no more results.
 instance SpawnWorkers graph '[] '[] es where
@@ -1216,12 +1302,14 @@ instance SpawnWorkers graph '[] '[] es where
 --   SpawnPayloads restTargets ~ HList (SpawnPayloadsInner restTargets)
 -- for non-empty restTargets by definition of SpawnPayloads.
 instance
-  ( KnownSymbol name
-  , HasField name (graph (AsHandler es)) handler
-  , CallHandler handler payload es workerTargets
-  , DispatchGoto graph workerTargets es result
-  , SpawnWorkersInner graph restTargets restResults es
-  ) => SpawnWorkers graph (To name payload ': restTargets) (result ': restResults) es where
+  ( KnownSymbol name,
+    HasField name (graph (AsHandler es)) handler,
+    CallHandler handler payload es workerTargets,
+    DispatchGoto graph workerTargets es result,
+    SpawnWorkersInner graph restTargets restResults es
+  ) =>
+  SpawnWorkers graph (To name payload ': restTargets) (result ': restResults) es
+  where
   spawnWorkers graph (payload ::: rest) = do
     let handler = getField @name graph
     firstChoice <- callHandler handler payload
@@ -1229,17 +1317,16 @@ instance
     restResults <- spawnWorkersInner @graph @restTargets @restResults graph rest
     pure (thisResult ::: restResults)
 
-
 -- | Inner spawn workers that works directly with HList (SpawnPayloadsInner targets).
 --
 -- This helper avoids the type family reduction issue where GHC can't see that
 -- SpawnPayloads restTargets ~ HList (SpawnPayloadsInner restTargets).
 type SpawnWorkersInner :: (Type -> Type) -> [Type] -> [Type] -> [Effect] -> Constraint
 class SpawnWorkersInner graph targets resultTypes es where
-  spawnWorkersInner
-    :: graph (AsHandler es)
-    -> HList (SpawnPayloadsInner targets)
-    -> Eff es (HList resultTypes)
+  spawnWorkersInner ::
+    graph (AsHandler es) ->
+    HList (SpawnPayloadsInner targets) ->
+    Eff es (HList resultTypes)
 
 -- | Base case: empty targets list.
 instance SpawnWorkersInner graph '[] '[] es where
@@ -1247,19 +1334,20 @@ instance SpawnWorkersInner graph '[] '[] es where
 
 -- | Recursive case for inner spawning.
 instance
-  ( KnownSymbol name
-  , HasField name (graph (AsHandler es)) handler
-  , CallHandler handler payload es workerTargets
-  , DispatchGoto graph workerTargets es result
-  , SpawnWorkersInner graph restTargets restResults es
-  ) => SpawnWorkersInner graph (To name payload ': restTargets) (result ': restResults) es where
+  ( KnownSymbol name,
+    HasField name (graph (AsHandler es)) handler,
+    CallHandler handler payload es workerTargets,
+    DispatchGoto graph workerTargets es result,
+    SpawnWorkersInner graph restTargets restResults es
+  ) =>
+  SpawnWorkersInner graph (To name payload ': restTargets) (result ': restResults) es
+  where
   spawnWorkersInner graph (payload ::: rest) = do
     let handler = getField @name graph
     firstChoice <- callHandler handler payload
     thisResult <- dispatchGoto graph firstChoice
     restResults <- spawnWorkersInner @graph @restTargets @restResults graph rest
     pure (thisResult ::: restResults)
-
 
 -- Note: For parallel execution with 'async', we would need to:
 -- 1. Add 'async' to build-depends

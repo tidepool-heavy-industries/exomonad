@@ -18,19 +18,18 @@
 --
 -- Fire-and-forget semantics - the result from TypeScript is ignored.
 module ExoMonad.Wasm.Interpreter.Log
-  ( runLogAsYield
-  ) where
+  ( runLogAsYield,
+  )
+where
 
 import Control.Monad.Freer (Eff, Member, interpret)
 import Control.Monad.Freer.Coroutine (Yield, yield)
-import qualified Data.Map.Strict as Map
-
-import ExoMonad.Effect.Types (Log(..), LogLevel(..))
+import Data.Map.Strict qualified as Map
+import ExoMonad.Effect.Types (Log (..), LogLevel (..))
 import ExoMonad.Wasm.WireTypes
-  ( SerializableEffect(..)
-  , EffectResult(..)
+  ( EffectResult (..),
+    SerializableEffect (..),
   )
-
 
 -- | Interpret @Log@ effect by yielding to TypeScript.
 --
@@ -46,25 +45,24 @@ import ExoMonad.Wasm.WireTypes
 -- * 'Error' - Sent as @EffLogError@
 --
 -- Structured fields are preserved for queryable log data.
-runLogAsYield
-  :: Member (Yield SerializableEffect EffectResult) effs
-  => Eff (Log ': effs) a
-  -> Eff effs a
+runLogAsYield ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  Eff (Log ': effs) a ->
+  Eff effs a
 runLogAsYield = interpret handleLog
   where
-    handleLog :: Member (Yield SerializableEffect EffectResult) effs
-              => Log x -> Eff effs x
+    handleLog ::
+      (Member (Yield SerializableEffect EffectResult) effs) =>
+      Log x -> Eff effs x
     handleLog (LogMsg level msg maybeFields) = case level of
       -- Trace and Debug logs are dropped in WASM (too noisy for production)
       Trace -> pure ()
       Debug -> pure ()
-
       -- Info and Warn both go to EffLogInfo
       Info -> do
         let fields = fmap Map.fromList maybeFields
         _ <- yield (EffLogInfo msg fields) (id @EffectResult)
         pure ()
-
       Warn -> do
         let fields = fmap Map.fromList maybeFields
         _ <- yield (EffLogInfo msg fields) (id @EffectResult)

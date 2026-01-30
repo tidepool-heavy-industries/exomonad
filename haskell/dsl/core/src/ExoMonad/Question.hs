@@ -1,5 +1,5 @@
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Question DSL for structured user interaction.
@@ -8,16 +8,17 @@
 -- via GUI backends. Originally from Tidying agent, now shared in core.
 module ExoMonad.Question
   ( -- * Question Tree
-    Question(..)
-  , Choice(..)
-  , ChoiceOption(..)
+    Question (..),
+    Choice (..),
+    ChoiceOption (..),
 
     -- * Item Disposition
-  , ItemDisposition(..)
+    ItemDisposition (..),
 
     -- * Answers
-  , Answer(..)
-  ) where
+    Answer (..),
+  )
+where
 
 import Control.Applicative ((<|>))
 import Data.Aeson
@@ -26,12 +27,18 @@ import GHC.Generics (Generic)
 
 -- | Where an item goes
 data ItemDisposition
-  = PlaceAt Text        -- ^ Specific location
-  | Trash               -- ^ Garbage
-  | Donate              -- ^ Give away
-  | Recycle             -- ^ Recycling bin
-  | SkipForNow          -- ^ Put it back, come back later
-  | NeedMoreInfo        -- ^ Agent needs more context
+  = -- | Specific location
+    PlaceAt Text
+  | -- | Garbage
+    Trash
+  | -- | Give away
+    Donate
+  | -- | Recycling bin
+    Recycle
+  | -- | Put it back, come back later
+    SkipForNow
+  | -- | Agent needs more context
+    NeedMoreInfo
   deriving (Show, Eq, Generic)
 
 instance ToJSON ItemDisposition where
@@ -54,73 +61,81 @@ instance FromJSON ItemDisposition where
 -- | A question the agent asks the user
 data Question
   = ProposeDisposition
-      { pdItem :: Text
-      , pdChoices :: [Choice]
-      , pdFallback :: Maybe Text
+      { pdItem :: Text,
+        pdChoices :: [Choice],
+        pdFallback :: Maybe Text
       }
   | Confirm
-      { cfPrompt :: Text
-      , cfDefault :: Bool
+      { cfPrompt :: Text,
+        cfDefault :: Bool
       }
   | Choose
-      { chPrompt :: Text
-      , chId :: Text
-      , chChoices :: [ChoiceOption]
+      { chPrompt :: Text,
+        chId :: Text,
+        chChoices :: [ChoiceOption]
       }
   | FreeText
-      { ftPrompt :: Text
-      , ftPlaceholder :: Maybe Text
+      { ftPrompt :: Text,
+        ftPlaceholder :: Maybe Text
       }
   deriving (Show, Eq, Generic)
 
 -- | A choice for ProposeDisposition
 data Choice = Choice
-  { choiceLabel :: Text
-  , choiceValue :: ItemDisposition
+  { choiceLabel :: Text,
+    choiceValue :: ItemDisposition
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- | A choice option for Choose
 data ChoiceOption = ChoiceOption
-  { optionLabel :: Text
-  , optionValue :: Text
+  { optionLabel :: Text,
+    optionValue :: Text
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 instance ToJSON Question where
-  toJSON (ProposeDisposition item choices fallback) = object
-    [ "proposeDisposition" .= object
-        [ "item" .= item
-        , "choices" .= choices
-        , "fallback" .= fallback
-        ]
-    ]
-  toJSON (Confirm prompt def) = object
-    [ "confirm" .= object
-        [ "prompt" .= prompt
-        , "default" .= def
-        ]
-    ]
-  toJSON (Choose prompt qid choices) = object
-    [ "choose" .= object
-        [ "prompt" .= prompt
-        , "id" .= qid
-        , "choices" .= choices
-        ]
-    ]
-  toJSON (FreeText prompt placeholder) = object
-    [ "freeText" .= object
-        [ "prompt" .= prompt
-        , "placeholder" .= placeholder
-        ]
-    ]
+  toJSON (ProposeDisposition item choices fallback) =
+    object
+      [ "proposeDisposition"
+          .= object
+            [ "item" .= item,
+              "choices" .= choices,
+              "fallback" .= fallback
+            ]
+      ]
+  toJSON (Confirm prompt def) =
+    object
+      [ "confirm"
+          .= object
+            [ "prompt" .= prompt,
+              "default" .= def
+            ]
+      ]
+  toJSON (Choose prompt qid choices) =
+    object
+      [ "choose"
+          .= object
+            [ "prompt" .= prompt,
+              "id" .= qid,
+              "choices" .= choices
+            ]
+      ]
+  toJSON (FreeText prompt placeholder) =
+    object
+      [ "freeText"
+          .= object
+            [ "prompt" .= prompt,
+              "placeholder" .= placeholder
+            ]
+      ]
 
 instance FromJSON Question where
   parseJSON = withObject "Question" $ \o ->
     parseProposeDisposition o
-    <|> parseConfirm o
-    <|> parseChoose o
-    <|> parseFreeText o
+      <|> parseConfirm o
+      <|> parseChoose o
+      <|> parseFreeText o
     where
       parseProposeDisposition o = do
         pd <- o .: "proposeDisposition"

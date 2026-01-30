@@ -26,39 +26,37 @@
 -- with the typed HList of results.
 module ExoMonad.Actor.Barrier
   ( -- * Barrier State
-    BarrierState(..)
-  , newBarrierState
+    BarrierState (..),
+    newBarrierState,
 
     -- * Handler Wrapper
-  , barrierHandler
+    barrierHandler,
 
     -- * Arrive Message
-  , ArriveMessage(..)
-  ) where
+    ArriveMessage (..),
+  )
+where
 
 import Control.Monad.Freer (Eff)
-import Data.Aeson (Value, FromJSON(..), (.:))
-import qualified Data.Aeson as Aeson
+import Data.Aeson (FromJSON (..), Value, (.:))
+import Data.Aeson qualified as Aeson
 import Data.Aeson.Types (parseEither)
 import Data.IORef (IORef, newIORef)
 import Data.Text (Text)
-import qualified Data.Text as T
-import System.IO (hFlush, stdout)
-
+import Data.Text qualified as T
+import ExoMonad.Actor.Graph (ExtractChoice (..), NodeHandler (..))
+import ExoMonad.Actor.Merge
+  ( ExpectedSources,
+    ExtractMergeResults,
+    FromPayloads,
+    MergeAccumulator,
+    addResult,
+    getCompletedResults,
+    newMergeAccumulator,
+  )
 import ExoMonad.Graph.Goto (GotoChoice)
 import ExoMonad.Graph.Types (HList)
-
-import ExoMonad.Actor.Graph (NodeHandler(..), ExtractChoice(..))
-import ExoMonad.Actor.Merge
-  ( MergeAccumulator
-  , newMergeAccumulator
-  , addResult
-  , getCompletedResults
-  , ExpectedSources
-  , ExtractMergeResults
-  , FromPayloads
-  )
-
+import System.IO (hFlush, stdout)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ARRIVE MESSAGE
@@ -73,9 +71,12 @@ import ExoMonad.Actor.Merge
 -- { "barrier": "hJoin", "payload": {...} }
 -- @
 data ArriveMessage = ArriveMessage
-  { amBarrier :: Text    -- ^ Target barrier name
-  , amSource  :: Text    -- ^ Source worker name
-  , amPayload :: Value   -- ^ Worker result payload
+  { -- | Target barrier name
+    amBarrier :: Text,
+    -- | Source worker name
+    amSource :: Text,
+    -- | Worker result payload
+    amPayload :: Value
   }
   deriving stock (Show, Eq)
 
@@ -85,12 +86,12 @@ instance FromJSON ArriveMessage where
     payload <- o .: "payload"
     -- Note: Source name is added by the router when dispatching
     -- For now, extract from barrier context
-    pure ArriveMessage
-      { amBarrier = barrier
-      , amSource = ""  -- Filled in by router
-      , amPayload = payload
-      }
-
+    pure
+      ArriveMessage
+        { amBarrier = barrier,
+          amSource = "", -- Filled in by router
+          amPayload = payload
+        }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- BARRIER STATE
@@ -102,25 +103,25 @@ instance FromJSON ArriveMessage where
 -- collects a single fan-out. For multiple concurrent fan-outs to the same
 -- barrier, use a different key type.
 data BarrierState sources = BarrierState
-  { bsAccumulator :: MergeAccumulator ()
-    -- ^ Merge accumulator (unit key for single fan-out)
-  , bsSourceCount :: IORef Int
-    -- ^ Number of sources that have arrived
+  { -- | Merge accumulator (unit key for single fan-out)
+    bsAccumulator :: MergeAccumulator (),
+    -- | Number of sources that have arrived
+    bsSourceCount :: IORef Int
   }
 
 -- | Create new barrier state for the expected sources.
-newBarrierState
-  :: forall sources.
-     ( ExpectedSources sources )
-  => IO (BarrierState sources)
+newBarrierState ::
+  forall sources.
+  (ExpectedSources sources) =>
+  IO (BarrierState sources)
 newBarrierState = do
   acc <- newMergeAccumulator @sources
   countRef <- newIORef 0
-  pure BarrierState
-    { bsAccumulator = acc
-    , bsSourceCount = countRef
-    }
-
+  pure
+    BarrierState
+      { bsAccumulator = acc,
+        bsSourceCount = countRef
+      }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- BARRIER HANDLER WRAPPER
@@ -147,15 +148,17 @@ newBarrierState = do
 -- @
 --
 -- Note: The handler is created via 'IO' to allocate per-barrier state.
-barrierHandler
-  :: forall sources targets es.
-     ( ExpectedSources sources
-     , ExtractMergeResults sources
-     , ExtractChoice targets
-     )
-  => (forall a. Eff es a -> IO a)                              -- ^ Effect interpreter
-  -> (HList (FromPayloads sources) -> Eff es (GotoChoice targets))  -- ^ User handler
-  -> IO NodeHandler
+barrierHandler ::
+  forall sources targets es.
+  ( ExpectedSources sources,
+    ExtractMergeResults sources,
+    ExtractChoice targets
+  ) =>
+  -- | Effect interpreter
+  (forall a. Eff es a -> IO a) ->
+  -- | User handler
+  (HList (FromPayloads sources) -> Eff es (GotoChoice targets)) ->
+  IO NodeHandler
 barrierHandler interpret userHandler = do
   state <- newBarrierState @sources
 
@@ -171,7 +174,7 @@ barrierHandler interpret userHandler = do
         maybeComplete <- addResult (state.bsAccumulator) () source payload
 
         case maybeComplete of
-          Nothing -> pure ()  -- Still waiting for more workers
+          Nothing -> pure () -- Still waiting for more workers
           Just _completedSources -> do
             putStrLn "[BARRIER] All workers arrived, continuing"
             hFlush stdout
@@ -189,7 +192,6 @@ barrierHandler interpret userHandler = do
                 -- Extract target and route
                 let (target, nextPayload) = extractChoice choice
                 router target nextPayload
-
 
 -- | Parse arrive message with source name.
 --

@@ -13,17 +13,16 @@
 module CallHandlerSpec (spec) where
 
 import Control.Monad.Freer (Eff, run)
-import Test.Hspec
-
 import ExoMonad.Graph.Goto
-  ( To
-  , GotoChoice
-  , gotoChoice
-  , gotoExit
+  ( GotoChoice,
+    To,
+    gotoChoice,
+    gotoExit,
   )
-import ExoMonad.Graph.Interpret (CallHandler(..))
-import ExoMonad.Graph.Goto.Internal (OneOf(..), GotoChoice(..))  -- For test assertions
+import ExoMonad.Graph.Goto.Internal (GotoChoice (..), OneOf (..)) -- For test assertions
+import ExoMonad.Graph.Interpret (CallHandler (..))
 import ExoMonad.Graph.Types (Exit)
+import Test.Hspec
 
 -- | Simple target list.
 type SimpleTargets = '[To "next" String, To Exit Int]
@@ -37,29 +36,28 @@ spec = do
   -- LOGIC HANDLER INVOCATION
   -- ════════════════════════════════════════════════════════════════════════════
   describe "CallHandler for Logic handlers" $ do
-
     it "invokes handler that returns gotoExit" $
       let handler :: Int -> Eff '[] (GotoChoice '[To Exit Int])
           handler n = pure $ gotoExit (n * 2)
           result = run $ callHandler handler (21 :: Int)
-      in case result of
-        GotoChoice (Here n) -> n `shouldBe` (42 :: Int)
-        GotoChoice (There _) -> expectationFailure "Unexpected There"
+       in case result of
+            GotoChoice (Here n) -> n `shouldBe` (42 :: Int)
+            GotoChoice (There _) -> expectationFailure "Unexpected There"
 
     it "invokes handler that returns gotoChoice" $
       let handler :: Int -> Eff '[] (GotoChoice SimpleTargets)
           handler n = pure $ gotoChoice @"next" (("got: " ++ show n) :: String)
           result = run $ callHandler handler (42 :: Int)
-      in case result of
-        GotoChoice (Here s) -> s `shouldBe` "got: 42"
-        GotoChoice (There _) -> expectationFailure "Expected position 0"
+       in case result of
+            GotoChoice (Here s) -> s `shouldBe` "got: 42"
+            GotoChoice (There _) -> expectationFailure "Expected position 0"
 
     it "invokes handler with branching logic" $ do
       -- Test negative -> pathA
       let handler :: Int -> Eff '[] (GotoChoice BranchTargets)
           handler n
-            | n < 0     = pure $ gotoChoice @"pathA" (abs n)
-            | n > 100   = pure $ gotoChoice @"pathB" (n - 100)
+            | n < 0 = pure $ gotoChoice @"pathA" (abs n)
+            | n > 100 = pure $ gotoChoice @"pathB" (n - 100)
             | otherwise = pure $ gotoExit (("normal: " ++ show n) :: String)
           resultA = run $ callHandler handler ((-5) :: Int)
       case resultA of
@@ -82,23 +80,22 @@ spec = do
       let handler :: (Int, String) -> Eff '[] (GotoChoice '[To Exit String])
           handler (n, s) = pure $ gotoExit ((s ++ ": " ++ show n) :: String)
           result = run $ callHandler handler ((42, "answer") :: (Int, String))
-      in case result of
-        GotoChoice (Here s) -> s `shouldBe` "answer: 42"
-        GotoChoice (There _) -> expectationFailure "Unexpected There"
+       in case result of
+            GotoChoice (Here s) -> s `shouldBe` "answer: 42"
+            GotoChoice (There _) -> expectationFailure "Unexpected There"
 
     it "invokes handler with unit input" $
       let handler :: () -> Eff '[] (GotoChoice '[To Exit String])
           handler () = pure $ gotoExit ("started" :: String)
           result = run $ callHandler handler ()
-      in case result of
-        GotoChoice (Here s) -> s `shouldBe` "started"
-        GotoChoice (There _) -> expectationFailure "Unexpected There"
+       in case result of
+            GotoChoice (Here s) -> s `shouldBe` "started"
+            GotoChoice (There _) -> expectationFailure "Unexpected There"
 
   -- ════════════════════════════════════════════════════════════════════════════
   -- HANDLER TYPE INFERENCE
   -- ════════════════════════════════════════════════════════════════════════════
   describe "Handler type inference" $ do
-
     it "handler type determines payload and targets" $ do
       -- The CallHandler instance infers payload type from handler signature
       let intHandler :: Int -> Eff '[] (GotoChoice '[To Exit Bool])
@@ -121,22 +118,21 @@ spec = do
   -- EDGE CASES
   -- ════════════════════════════════════════════════════════════════════════════
   describe "Edge cases" $ do
-
     it "handler with complex return type" $
       let handler :: Int -> Eff '[] (GotoChoice '[To Exit (Int, Int, Int)])
           handler n = pure $ gotoExit (n, n * 2, n * 3)
           result = run $ callHandler handler (10 :: Int)
-      in case result of
-        GotoChoice (Here (a, b, c)) -> do
-          a `shouldBe` (10 :: Int)
-          b `shouldBe` (20 :: Int)
-          c `shouldBe` (30 :: Int)
-        GotoChoice (There _) -> expectationFailure "Unexpected There"
+       in case result of
+            GotoChoice (Here (a, b, c)) -> do
+              a `shouldBe` (10 :: Int)
+              b `shouldBe` (20 :: Int)
+              c `shouldBe` (30 :: Int)
+            GotoChoice (There _) -> expectationFailure "Unexpected There"
 
     it "handler identity (just wraps input)" $
       let handler :: Int -> Eff '[] (GotoChoice '[To Exit Int])
           handler = pure . gotoExit
           result = run $ callHandler handler (123 :: Int)
-      in case result of
-        GotoChoice (Here n) -> n `shouldBe` (123 :: Int)
-        GotoChoice (There _) -> expectationFailure "Unexpected There"
+       in case result of
+            GotoChoice (Here n) -> n `shouldBe` (123 :: Int)
+            GotoChoice (There _) -> expectationFailure "Unexpected There"

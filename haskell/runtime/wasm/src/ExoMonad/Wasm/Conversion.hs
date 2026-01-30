@@ -13,65 +13,64 @@
 -- contexts, with the WASM interpreter converting to/from wire format.
 module ExoMonad.Wasm.Conversion
   ( -- * Native → Wire (for sending to TypeScript)
-    contentBlockToWire
-  , contentBlocksToWireMessages
-  , messageToWire
-  , toToolResultOutcome
+    contentBlockToWire,
+    contentBlocksToWireMessages,
+    messageToWire,
+    toToolResultOutcome,
 
     -- * Wire → Native (for receiving from TypeScript)
-  , wireContentBlockToNative
-  , wireMessageToNative
-  , wireMessagesToNative
-  , fromToolResultOutcome
+    wireContentBlockToNative,
+    wireMessageToNative,
+    wireMessagesToNative,
+    fromToolResultOutcome,
 
     -- * TurnResult parsing (from TypeScript response)
-  , parseWireTurnResult
-  , WireTurnResult(..)
-  ) where
+    parseWireTurnResult,
+    WireTurnResult (..),
+  )
+where
 
 import Data.Aeson
-  ( FromJSON(..)
-  , ToJSON(..)
-  , Value(..)
-  , (.:)
-  , (.:?)
-  , (.=)
-  , object
-  , withObject
+  ( FromJSON (..),
+    ToJSON (..),
+    Value (..),
+    object,
+    withObject,
+    (.:),
+    (.:?),
+    (.=),
   )
-import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.Types as Aeson
-import qualified Data.List.NonEmpty as NE
+import Data.Aeson qualified as Aeson
+import Data.Aeson.Types qualified as Aeson
+import Data.List.NonEmpty qualified as NE
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Text.Lazy as TL
-import qualified Data.Text.Lazy.Encoding as TLE
-import GHC.Generics (Generic)
-
+import Data.Text qualified as T
+import Data.Text.Lazy qualified as TL
+import Data.Text.Lazy.Encoding qualified as TLE
 -- Native types from exomonad-core
-import qualified ExoMonad.Anthropic.Types as Anthropic
-import ExoMonad.Anthropic.Types
-  ( ContentBlock(..)
-  , Message(..)
-  , Role(..)
-  , ToolUse(..)
-  , ToolUseId(..)
-  , ToolResultId(..)
-  )
-import qualified ExoMonad.Effect.Types as Effect
-import ExoMonad.Effect.Types
-  ( TurnResult(..)
-  , ToolInvocation(..)
-  )
 
+import ExoMonad.Anthropic.Types
+  ( ContentBlock (..),
+    Message (..),
+    Role (..),
+    ToolResultId (..),
+    ToolUse (..),
+    ToolUseId (..),
+  )
+import ExoMonad.Anthropic.Types qualified as Anthropic
+import ExoMonad.Effect.Types
+  ( ToolInvocation (..),
+    TurnResult (..),
+  )
+import ExoMonad.Effect.Types qualified as Effect
 -- Wire types
 import ExoMonad.Wasm.WireTypes
-  ( WireMessage(..)
-  , WireContentBlock(..)
-  , ToolResultOutcome(..)
+  ( ToolResultOutcome (..),
+    WireContentBlock (..),
+    WireMessage (..),
   )
-
+import GHC.Generics (Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- NATIVE → WIRE (for sending to TypeScript)
@@ -85,48 +84,43 @@ import ExoMonad.Wasm.WireTypes
 -- - Json (converted to text representation)
 contentBlockToWire :: ContentBlock -> Maybe WireContentBlock
 contentBlockToWire = \case
-  Text { text = txt } ->
+  Text {text = txt} ->
     Just $ WCBText txt
-
-  Image { source = src } ->
+  Image {source = src} ->
     Just $ WCBImage src
-
-  ToolUse { id = ToolUseId tid, name = toolName, input = toolInput } ->
-    Just $ WCBToolUse
-      { wcbToolId = tid
-      , wcbToolName = toolName
-      , wcbToolInput = toolInput
-      }
-
-  ToolResult { toolUseId = ToolResultId tid, content = resultContent, isError = isErr } ->
-    Just $ WCBToolResult
-      { wcbToolUseId = tid
-      , wcbResultContent = resultContent
-      , wcbIsError = isErr
-      }
-
+  ToolUse {id = ToolUseId tid, name = toolName, input = toolInput} ->
+    Just $
+      WCBToolUse
+        { wcbToolId = tid,
+          wcbToolName = toolName,
+          wcbToolInput = toolInput
+        }
+  ToolResult {toolUseId = ToolResultId tid, content = resultContent, isError = isErr} ->
+    Just $
+      WCBToolResult
+        { wcbToolUseId = tid,
+          wcbResultContent = resultContent,
+          wcbIsError = isErr
+        }
   -- Thinking blocks are internal to the model and not sent to TypeScript
   Thinking {} ->
     Nothing
-
   RedactedThinking {} ->
     Nothing
-
   -- JSON blocks get stringified as text
-  Json { json = val } ->
+  Json {json = val} ->
     Just $ WCBText $ TL.toStrict $ TLE.decodeUtf8 $ Aeson.encode val
-
 
 -- | Convert a native Message to wire format.
 messageToWire :: Message -> WireMessage
-messageToWire msg = WireMessage
-  { wmRole = roleToText msg.role
-  , wmContent = mapMaybe contentBlockToWire (NE.toList msg.content)
-  }
+messageToWire msg =
+  WireMessage
+    { wmRole = roleToText msg.role,
+      wmContent = mapMaybe contentBlockToWire (NE.toList msg.content)
+    }
   where
     roleToText User = "user"
     roleToText Assistant = "assistant"
-
 
 -- | Convert system prompt + user content blocks to wire messages.
 --
@@ -147,10 +141,9 @@ contentBlocksToWireMessages systemPrompt contentBlocks =
     -- User message with converted content
     userMsgs =
       let wireBlocks = mapMaybe contentBlockToWire contentBlocks
-      in if null wireBlocks
-         then []
-         else [WireMessage "user" wireBlocks]
-
+       in if null wireBlocks
+            then []
+            else [WireMessage "user" wireBlocks]
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- WIRE → NATIVE (for receiving from TypeScript)
@@ -160,25 +153,21 @@ contentBlocksToWireMessages systemPrompt contentBlocks =
 wireContentBlockToNative :: WireContentBlock -> ContentBlock
 wireContentBlockToNative = \case
   WCBText txt ->
-    Text { text = txt }
-
+    Text {text = txt}
   WCBImage src ->
-    Image { source = src }
-
+    Image {source = src}
   WCBToolUse tid toolName toolInput ->
     ToolUse
-      { id = ToolUseId tid
-      , name = toolName
-      , input = toolInput
+      { id = ToolUseId tid,
+        name = toolName,
+        input = toolInput
       }
-
   WCBToolResult tid resultContent isErr ->
     ToolResult
-      { toolUseId = ToolResultId tid
-      , content = resultContent
-      , isError = isErr
+      { toolUseId = ToolResultId tid,
+        content = resultContent,
+        isError = isErr
       }
-
 
 -- | Convert a wire Message to native format.
 --
@@ -186,23 +175,23 @@ wireContentBlockToNative = \case
 wireMessageToNative :: WireMessage -> Maybe Message
 wireMessageToNative msg =
   case NE.nonEmpty (map wireContentBlockToNative msg.wmContent) of
-    Nothing -> Nothing  -- Empty content, skip this message
-    Just blocks -> Just Message
-      { role = textToRole msg.wmRole
-      , content = blocks
-      }
+    Nothing -> Nothing -- Empty content, skip this message
+    Just blocks ->
+      Just
+        Message
+          { role = textToRole msg.wmRole,
+            content = blocks
+          }
   where
     textToRole "user" = User
     textToRole "assistant" = Assistant
-    textToRole _ = User  -- Default to user for unknown roles
-
+    textToRole _ = User -- Default to user for unknown roles
 
 -- | Convert a list of wire Messages to native format.
 --
 -- Skips messages with empty content.
 wireMessagesToNative :: [WireMessage] -> [Message]
 wireMessagesToNative = mapMaybe wireMessageToNative
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TURN RESULT PARSING (from TypeScript response)
@@ -220,32 +209,33 @@ wireMessagesToNative = mapMaybe wireMessageToNative
 -- }
 -- @
 data WireTurnResult = WireTurnResult
-  { wtrContent :: Value
-    -- ^ The parsed output (JSON value)
-  , wtrToolsInvoked :: [ToolInvocation]
-    -- ^ Tools that were invoked during the turn
-  , wtrNarrative :: Text
-    -- ^ Text narrative extracted from response
-  , wtrThinking :: Text
-    -- ^ Extended thinking content (if any)
+  { -- | The parsed output (JSON value)
+    wtrContent :: Value,
+    -- | Tools that were invoked during the turn
+    wtrToolsInvoked :: [ToolInvocation],
+    -- | Text narrative extracted from response
+    wtrNarrative :: Text,
+    -- | Extended thinking content (if any)
+    wtrThinking :: Text
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON WireTurnResult where
-  toJSON wtr = object
-    [ "content" .= wtr.wtrContent
-    , "toolsInvoked" .= wtr.wtrToolsInvoked
-    , "narrative" .= wtr.wtrNarrative
-    , "thinking" .= wtr.wtrThinking
-    ]
+  toJSON wtr =
+    object
+      [ "content" .= wtr.wtrContent,
+        "toolsInvoked" .= wtr.wtrToolsInvoked,
+        "narrative" .= wtr.wtrNarrative,
+        "thinking" .= wtr.wtrThinking
+      ]
 
 instance FromJSON WireTurnResult where
-  parseJSON = withObject "WireTurnResult" $ \o -> WireTurnResult
-    <$> o .: "content"
-    <*> (o .:? "toolsInvoked" >>= maybe (pure []) parseJSON)
-    <*> (o .:? "narrative" >>= maybe (pure "") pure)
-    <*> (o .:? "thinking" >>= maybe (pure "") pure)
-
+  parseJSON = withObject "WireTurnResult" $ \o ->
+    WireTurnResult
+      <$> o .: "content"
+      <*> (o .:? "toolsInvoked" >>= maybe (pure []) parseJSON)
+      <*> (o .:? "narrative" >>= maybe (pure "") pure)
+      <*> (o .:? "thinking" >>= maybe (pure "") pure)
 
 -- | Parse a wire TurnResult from TypeScript's JSON response.
 --
@@ -257,13 +247,14 @@ parseWireTurnResult :: Value -> Either Text (TurnResult Value)
 parseWireTurnResult val =
   case Aeson.parseEither parseJSON val of
     Left err -> Left $ "Failed to parse TurnResult: " <> T.pack err
-    Right (WireTurnResult content tools narrative thinking) -> Right TurnResult
-      { trOutput = content
-      , trToolsInvoked = tools
-      , trNarrative = narrative
-      , trThinking = thinking
-      }
-
+    Right (WireTurnResult content tools narrative thinking) ->
+      Right
+        TurnResult
+          { trOutput = content,
+            trToolsInvoked = tools,
+            trNarrative = narrative,
+            trThinking = thinking
+          }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TOOL RESULT OUTCOME CONVERSIONS (dispatcher results)
@@ -282,7 +273,6 @@ toToolResultOutcome = \case
   Effect.ToolTransition target payload ->
     TROTransition target payload
 
-
 -- | Convert a wire ToolResultOutcome back to untyped ToolResult.
 --
 -- Returns ToolResult with empty target list ('[]') since type information is lost at FFI boundary.
@@ -295,4 +285,3 @@ fromToolResultOutcome = \case
     Effect.ToolBreak reason
   TROTransition target payload ->
     Effect.ToolTransition target payload
-

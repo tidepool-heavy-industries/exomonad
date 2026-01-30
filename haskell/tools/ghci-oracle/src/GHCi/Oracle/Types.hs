@@ -4,25 +4,25 @@
 -- @ExoMonad.Effect.GHCi@ exactly for interoperability.
 module GHCi.Oracle.Types
   ( -- * Error Types
-    GHCiError(..)
+    GHCiError (..),
 
     -- * Wire Protocol
-  , GHCiRequest(..)
-  , GHCiResponse(..)
+    GHCiRequest (..),
+    GHCiResponse (..),
 
     -- * Configuration
-  , OracleConfig(..)
-  , defaultConfig
+    OracleConfig (..),
+    defaultConfig,
 
     -- * Helpers
-  , isLoadError
-  ) where
+    isLoadError,
+  )
+where
 
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import GHC.Generics (Generic)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ERROR TYPES
@@ -33,20 +33,20 @@ import GHC.Generics (Generic)
 -- MUST match ExoMonad.Effect.GHCi.GHCiError exactly.
 data GHCiError
   = GHCiSessionCrashed
-      { gseCrashOutput :: Text
-      , gseExitCode :: Maybe Int
+      { gseCrashOutput :: Text,
+        gseExitCode :: Maybe Int
       }
   | GHCiTimeout
-      { gteQuery :: Text
-      , gteTimeoutMs :: Int
+      { gteQuery :: Text,
+        gteTimeoutMs :: Int
       }
   | GHCiParseError
-      { gpeQuery :: Text
-      , gpeGHCOutput :: Text
+      { gpeQuery :: Text,
+        gpeGHCOutput :: Text
       }
   | GHCiLoadError
-      { gleModule :: Text
-      , gleErrors :: Text
+      { gleModule :: Text,
+        gleErrors :: Text
       }
   | GHCiNotConnected
   | GHCiServerError
@@ -54,7 +54,6 @@ data GHCiError
       }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- WIRE PROTOCOL
@@ -75,7 +74,6 @@ data GHCiRequest
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
-
 -- | Response sent from oracle server to client.
 --
 -- MUST match ExoMonad.Effect.GHCi.GHCiResponse exactly.
@@ -88,49 +86,47 @@ data GHCiResponse
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONFIGURATION
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Oracle server configuration.
 data OracleConfig = OracleConfig
-  { ocPort :: Int
-    -- ^ Port to listen on
-  , ocProjectRoot :: FilePath
-    -- ^ Project root (where to run ghci from)
-  , ocInitialModules :: [Text]
-    -- ^ Modules to load at startup
-  , ocGhciCommand :: String
-    -- ^ Command to start ghci (default: "cabal repl")
-  , ocQueryTimeoutMs :: Int
-    -- ^ Timeout for individual queries in milliseconds
-  , ocStartupTimeoutMs :: Int
-    -- ^ Timeout for session startup in milliseconds
-  , ocRestartOnCrash :: Bool
-    -- ^ Auto-restart on crash
-  , ocMaxRestarts :: Int
-    -- ^ Maximum restart attempts
-  , ocVerbose :: Bool
-    -- ^ Verbose logging
+  { -- | Port to listen on
+    ocPort :: Int,
+    -- | Project root (where to run ghci from)
+    ocProjectRoot :: FilePath,
+    -- | Modules to load at startup
+    ocInitialModules :: [Text],
+    -- | Command to start ghci (default: "cabal repl")
+    ocGhciCommand :: String,
+    -- | Timeout for individual queries in milliseconds
+    ocQueryTimeoutMs :: Int,
+    -- | Timeout for session startup in milliseconds
+    ocStartupTimeoutMs :: Int,
+    -- | Auto-restart on crash
+    ocRestartOnCrash :: Bool,
+    -- | Maximum restart attempts
+    ocMaxRestarts :: Int,
+    -- | Verbose logging
+    ocVerbose :: Bool
   }
   deriving stock (Show, Eq)
 
-
 -- | Default configuration.
 defaultConfig :: OracleConfig
-defaultConfig = OracleConfig
-  { ocPort = 9999
-  , ocProjectRoot = "."
-  , ocInitialModules = []
-  , ocGhciCommand = "cabal repl"
-  , ocQueryTimeoutMs = 10000
-  , ocStartupTimeoutMs = 60000
-  , ocRestartOnCrash = True
-  , ocMaxRestarts = 3
-  , ocVerbose = False
-  }
-
+defaultConfig =
+  OracleConfig
+    { ocPort = 9999,
+      ocProjectRoot = ".",
+      ocInitialModules = [],
+      ocGhciCommand = "cabal repl",
+      ocQueryTimeoutMs = 10000,
+      ocStartupTimeoutMs = 60000,
+      ocRestartOnCrash = True,
+      ocMaxRestarts = 3,
+      ocVerbose = False
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS

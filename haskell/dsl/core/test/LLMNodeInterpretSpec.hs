@@ -23,37 +23,35 @@
 -- on the CallHandler abstraction and Logic node paths.
 module LLMNodeInterpretSpec (spec) where
 
-import Data.Aeson (FromJSON, ToJSON, object, (.=))
-import Data.Proxy (Proxy(..))
 import Control.Monad.Freer (Eff, run)
+import Data.Aeson (FromJSON, ToJSON, object, (.=))
+import Data.Proxy (Proxy (..))
+import ExoMonad.Graph.Generic (AsHandler, GraphMode (..))
+import ExoMonad.Graph.Generic qualified as G
+import ExoMonad.Graph.Goto (Goto, GotoChoice, To, gotoExit)
+import ExoMonad.Graph.Goto.Internal (GotoChoice (..), OneOf (..)) -- For test assertions
+import ExoMonad.Graph.Interpret (CallHandler (..))
+import ExoMonad.Graph.Types (Exit, Input, UsesEffects, type (:@))
+import ExoMonad.Schema (HasJSONSchema (..), SchemaType (..), describeField, emptySchema, objectSchema)
 import GHC.Generics (Generic)
-import Test.Hspec
-
 import Test.ExoMonad.MockLLM (runMockLLM)
-import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit)
-import ExoMonad.Graph.Generic (GraphMode(..), AsHandler)
-import qualified ExoMonad.Graph.Generic as G
-import ExoMonad.Graph.Goto (Goto, To, GotoChoice, gotoExit)
-import ExoMonad.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
-import ExoMonad.Graph.Interpret (CallHandler(..))
-import ExoMonad.Schema (HasJSONSchema(..), SchemaType(..), objectSchema, describeField, emptySchema)
-
+import Test.Hspec
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TEST TYPES
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Simple output type for LLM tests
-newtype TestOutput = TestOutput { toResult :: Int }
+newtype TestOutput = TestOutput {toResult :: Int}
   deriving (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
 instance HasJSONSchema TestOutput where
-  jsonSchema = objectSchema
-    [ ("result", describeField "The result value" (emptySchema TInteger))
-    ]
-    ["result"]
-
+  jsonSchema =
+    objectSchema
+      [ ("result", describeField "The result value" (emptySchema TInteger))
+      ]
+      ["result"]
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- LOGIC NODE TESTS - Verify Logic nodes still work
@@ -61,20 +59,20 @@ instance HasJSONSchema TestOutput where
 
 -- | Simple logic graph: Entry → compute → Exit
 data LogicGraph mode = LogicGraph
-  { entry   :: mode :- G.EntryNode Int
-  , compute :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto Exit Int]
-  , exit    :: mode :- G.ExitNode Int
+  { entry :: mode :- G.EntryNode Int,
+    compute :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto Exit Int],
+    exit :: mode :- G.ExitNode Int
   }
-  deriving Generic
+  deriving (Generic)
 
 -- | Handler record for logic graph
 logicHandlers :: LogicGraph (AsHandler '[])
-logicHandlers = LogicGraph
-  { entry   = ()
-  , compute = \n -> pure $ gotoExit (n + 1)
-  , exit    = ()
-  }
-
+logicHandlers =
+  LogicGraph
+    { entry = (),
+      compute = \n -> pure $ gotoExit (n + 1),
+      exit = ()
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS
@@ -85,7 +83,6 @@ logicHandlers = LogicGraph
 extractExitValue :: GotoChoice '[To Exit a] -> a
 extractExitValue (GotoChoice (Here a)) = a
 extractExitValue (GotoChoice (There _)) = error "Impossible: One-element list cannot be There"
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TESTS

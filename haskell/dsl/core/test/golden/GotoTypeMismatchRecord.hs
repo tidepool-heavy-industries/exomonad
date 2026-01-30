@@ -16,26 +16,26 @@
 --     Input Int
 module GotoTypeMismatchRecord where
 
+import ExoMonad.Graph.Generic (Entry, Exit, GraphMode (..), LLMNode, LogicNode, ValidGraphRecord)
+import ExoMonad.Graph.Goto (Goto)
+import ExoMonad.Graph.Types (Input, LLMKind (..), Schema, UsesEffects, type (:@))
 import GHC.Generics (Generic)
 
-import ExoMonad.Graph.Types (type (:@), Input, Schema, UsesEffects, LLMKind(..))
-import ExoMonad.Graph.Generic (GraphMode(..), Entry, Exit, LLMNode, LogicNode, ValidGraphRecord)
-import ExoMonad.Graph.Goto (Goto)
-
 data InputData
+
 data Result
 
 -- | Graph with type mismatch: router sends String but handler expects Int
 data TypeMismatchGraph mode = TypeMismatchGraph
-  { entry   :: mode :- Entry InputData
-  , router  :: mode :- LogicNode :@ Input InputData :@ UsesEffects '[Goto "handler" String]  -- Sends String
-  , handler :: mode :- LLMNode 'API :@ Input Int :@ Schema Result  -- Expects Int!
-  , exit    :: mode :- Exit Result
+  { entry :: mode :- Entry InputData,
+    router :: mode :- LogicNode :@ Input InputData :@ UsesEffects '[Goto "handler" String], -- Sends String
+    handler :: mode :- LLMNode 'API :@ Input Int :@ Schema Result, -- Expects Int!
+    exit :: mode :- Exit Result
   }
-  deriving Generic
+  deriving (Generic)
 
 check :: ()
 check = validGraph @TypeMismatchGraph
 
-validGraph :: forall g. ValidGraphRecord g => ()
+validGraph :: forall g. (ValidGraphRecord g) => ()
 validGraph = ()

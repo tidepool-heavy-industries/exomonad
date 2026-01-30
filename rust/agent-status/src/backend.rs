@@ -68,7 +68,11 @@ impl BackendPort {
             }
         });
 
-        Self { client, state, shutdown }
+        Self {
+            client,
+            state,
+            shutdown,
+        }
     }
 }
 

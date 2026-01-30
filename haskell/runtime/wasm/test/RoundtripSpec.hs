@@ -8,23 +8,22 @@
 -- ProtocolPropertySpec.hs.
 module RoundtripSpec (spec) where
 
-import Test.Hspec
-import Test.Hspec.QuickCheck (prop)
-import Data.Aeson (decode, encode, toJSON, Value(..))
+import Data.Aeson (Value (..), decode, encode, toJSON)
 import Data.Aeson.KeyMap qualified as KM
-import qualified Data.Text.Lazy as TL
-import qualified Data.Text.Lazy.Encoding as TLE
-
+import Data.Text.Lazy qualified as TL
+import Data.Text.Lazy.Encoding qualified as TLE
 import ExoMonad.Wasm.Roundtrip
 import ExoMonad.Wasm.WireTypes
-import ProtocolPropertySpec ()  -- Import orphan Arbitrary instances
+import ProtocolPropertySpec ()
+import Test.Hspec
+import Test.Hspec.QuickCheck (prop)
 
+-- Import orphan Arbitrary instances
 
 spec :: Spec
 spec = do
   roundtripFunctionSpec
   errorHandlingSpec
-
 
 -- | Helper to check if result is ok=true
 isOk :: Value -> Bool
@@ -33,22 +32,18 @@ isOk (Object obj) = case KM.lookup "ok" obj of
   _ -> False
 isOk _ = False
 
-
 -- | Helper to get the "value" field from a result
 getValue :: Value -> Maybe Value
 getValue (Object obj) = KM.lookup "value" obj
 getValue _ = Nothing
-
 
 -- | Helper to get the "error" field from a result
 getError :: Value -> Maybe Value
 getError (Object obj) = KM.lookup "error" obj
 getError _ = Nothing
 
-
 roundtripFunctionSpec :: Spec
 roundtripFunctionSpec = describe "Roundtrip functions" $ do
-
   describe "roundtripSerializableEffect" $ do
     prop "roundtrips correctly via native interface" $ \(effect :: SerializableEffect) -> do
       let input = TL.toStrict $ TLE.decodeUtf8 $ encode effect
@@ -149,10 +144,8 @@ roundtripFunctionSpec = describe "Roundtrip functions" $ do
           getValue obj `shouldBe` Just (toJSON gi)
         Nothing -> expectationFailure "Failed to parse roundtrip result as JSON"
 
-
 errorHandlingSpec :: Spec
 errorHandlingSpec = describe "Error handling" $ do
-
   it "returns ok=false for invalid JSON" $ do
     result <- roundtripSerializableEffect "not valid json"
     case decode (TLE.encodeUtf8 $ TL.fromStrict result) of

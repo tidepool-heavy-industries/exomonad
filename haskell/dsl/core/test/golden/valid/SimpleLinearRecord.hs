@@ -8,22 +8,22 @@
 -- Entry -> node -> Exit, basic data flow validation.
 module SimpleLinearRecord where
 
+import ExoMonad.Graph.Generic (Entry, Exit, GraphMode (..), LLMNode, ValidGraphRecord)
+import ExoMonad.Graph.Types (Input, LLMKind (..), Schema, type (:@))
 import GHC.Generics (Generic)
 
-import ExoMonad.Graph.Types (type (:@), Input, Schema, LLMKind(..))
-import ExoMonad.Graph.Generic (GraphMode(..), Entry, Exit, LLMNode, ValidGraphRecord)
-
 data A
+
 data B
 
 -- | Simple linear graph: Entry -> node -> Exit
 data SimpleGraph mode = SimpleGraph
-  { sgEntry :: mode :- Entry A
-  , sgNode  :: mode :- LLMNode 'API :@ Input A :@ Schema B
-  , sgExit  :: mode :- Exit B
+  { sgEntry :: mode :- Entry A,
+    sgNode :: mode :- LLMNode 'API :@ Input A :@ Schema B,
+    sgExit :: mode :- Exit B
   }
-  deriving Generic
+  deriving (Generic)
 
 -- This should compile without errors
-validGraph :: ValidGraphRecord SimpleGraph => ()
+validGraph :: (ValidGraphRecord SimpleGraph) => ()
 validGraph = ()

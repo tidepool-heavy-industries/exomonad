@@ -22,80 +22,86 @@
 -- (yielded with a continuation).
 module ExoMonad.Wasm.Effect
   ( -- * Effect Types
-    WasmEffects
-  , WasmM
+    WasmEffects,
+    WasmM,
 
     -- * Smart Constructors
-  , logInfo
-  , logInfoWith
-  , logError
-  , logErrorWith
-  , llmComplete
-  , llmCompleteWith
-  , llmCall
-  , llmCallWith
+    logInfo,
+    logInfoWith,
+    logError,
+    logErrorWith,
+    llmComplete,
+    llmCompleteWith,
+    llmCall,
+    llmCallWith,
+
     -- ** LLM Call Types (for tool-aware calls)
-  , LlmCallResult(..)
-  , WireMessage(..)
-  , WireContentBlock(..)
-  , WireToolCall(..)
-  , askUserToolSchema
+    LlmCallResult (..),
+    WireMessage (..),
+    WireContentBlock (..),
+    WireToolCall (..),
+    askUserToolSchema,
+
     -- ** Telegram
-  , telegramSend
-  , telegramMarkdown
-  , telegramHtml
-  , telegramAsk
+    telegramSend,
+    telegramMarkdown,
+    telegramHtml,
+    telegramAsk,
+
     -- ** Telegram (thread-aware)
-  , telegramSendTo
-  , telegramMarkdownTo
-  , telegramHtmlTo
-  , telegramAskIn
-  , TelegramAskResult(..)
+    telegramSendTo,
+    telegramMarkdownTo,
+    telegramHtmlTo,
+    telegramAskIn,
+    TelegramAskResult (..),
+
     -- ** State
-  , getState
-  , setState
-  , modifyState
+    getState,
+    setState,
+    modifyState,
+
     -- ** Events
-  , emitEvent
+    emitEvent,
+
     -- ** Random
-  , randomInt
-  , rollDice
+    randomInt,
+    rollDice,
+
     -- ** Time
-  , getTime
+    getTime,
 
     -- * Habitica (typed API)
-  , habitica
+    habitica,
 
     -- * Running Effects
-  , runWasmM
-  , WasmStatus
-  ) where
+    runWasmM,
+    WasmStatus,
+  )
+where
 
 import Control.Monad.Freer (Eff, Member, run)
-import Control.Monad.Freer.Coroutine (Yield, yield, runC, Status(..))
-import Data.Aeson (Value(..), fromJSON, Result(..))
+import Control.Monad.Freer.Coroutine (Status (..), Yield, runC, yield)
+import Data.Aeson (Result (..), Value (..), fromJSON)
+import Data.Map.Strict qualified as Map
 import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Map.Strict as Map
-
-import ExoMonad.Wasm.CfTool (CfTool(..), CfObjectSchema(..), CfProperty(..), cfToolToValue)
-import ExoMonad.Wasm.WireTypes
-  ( SerializableEffect(..)
-  , EffectResult(..)
-  , TelegramAskResult(..)
-  , LlmCallResult(..)
-  , WireMessage(..)
-  , WireContentBlock(..)
-  , WireToolCall(..)
-  )
+import Data.Text qualified as T
+import ExoMonad.Wasm.CfTool (CfObjectSchema (..), CfProperty (..), CfTool (..), cfToolToValue)
 import ExoMonad.Wasm.Error
-  ( WasmError
-  , effectFailed
-  , parseFailed
-  , emptyResult
+  ( WasmError,
+    effectFailed,
+    emptyResult,
+    parseFailed,
   )
 import ExoMonad.Wasm.Habitica (habitica)
-
+import ExoMonad.Wasm.WireTypes
+  ( EffectResult (..),
+    LlmCallResult (..),
+    SerializableEffect (..),
+    TelegramAskResult (..),
+    WireContentBlock (..),
+    WireMessage (..),
+    WireToolCall (..),
+  )
 
 -- | The effect stack for WASM computations.
 --
@@ -115,7 +121,6 @@ type WasmM a = Eff WasmEffects a
 -- and a continuation to resume.
 type WasmStatus a = Status '[] SerializableEffect EffectResult a
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- SMART CONSTRUCTORS
 -- ════════════════════════════════════════════════════════════════════════════
@@ -123,8 +128,9 @@ type WasmStatus a = Status '[] SerializableEffect EffectResult a
 -- | Log an info message (no structured fields).
 --
 -- Yields 'EffLogInfo', expects acknowledgment (result ignored).
-logInfo :: Member (Yield SerializableEffect EffectResult) effs
-        => Text -> Eff effs ()
+logInfo ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  Text -> Eff effs ()
 logInfo msg = do
   _ <- yield (EffLogInfo msg Nothing) (id @EffectResult)
   pure ()
@@ -140,8 +146,9 @@ logInfo msg = do
 -- @
 --
 -- Yields 'EffLogInfo' with fields, expects acknowledgment (result ignored).
-logInfoWith :: Member (Yield SerializableEffect EffectResult) effs
-            => Text -> [(Text, Value)] -> Eff effs ()
+logInfoWith ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  Text -> [(Text, Value)] -> Eff effs ()
 logInfoWith msg fields = do
   _ <- yield (EffLogInfo msg (Just (Map.fromList fields))) (id @EffectResult)
   pure ()
@@ -149,8 +156,9 @@ logInfoWith msg fields = do
 -- | Log an error message (no structured fields).
 --
 -- Yields 'EffLogError', expects acknowledgment (result ignored).
-logError :: Member (Yield SerializableEffect EffectResult) effs
-         => Text -> Eff effs ()
+logError ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  Text -> Eff effs ()
 logError msg = do
   _ <- yield (EffLogError msg Nothing) (id @EffectResult)
   pure ()
@@ -158,8 +166,9 @@ logError msg = do
 -- | Log an error message with structured fields for queryable log data.
 --
 -- Yields 'EffLogError' with fields, expects acknowledgment (result ignored).
-logErrorWith :: Member (Yield SerializableEffect EffectResult) effs
-             => Text -> [(Text, Value)] -> Eff effs ()
+logErrorWith ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  Text -> [(Text, Value)] -> Eff effs ()
 logErrorWith msg fields = do
   _ <- yield (EffLogError msg (Just (Map.fromList fields))) (id @EffectResult)
   pure ()
@@ -170,12 +179,17 @@ logErrorWith msg fields = do
 -- Uses the default model configured in the TypeScript handler.
 --
 -- Returns @Left WasmError@ on failure, @Right Value@ on success.
-llmComplete :: Member (Yield SerializableEffect EffectResult) effs
-            => Text           -- ^ Node name (for observability)
-            -> Text           -- ^ System prompt
-            -> Text           -- ^ User content
-            -> Maybe Value    -- ^ Output schema (optional)
-            -> Eff effs (Either WasmError Value)
+llmComplete ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  -- | Node name (for observability)
+  Text ->
+  -- | System prompt
+  Text ->
+  -- | User content
+  Text ->
+  -- | Output schema (optional)
+  Maybe Value ->
+  Eff effs (Either WasmError Value)
 llmComplete = llmCompleteWith Nothing
 
 -- | Make an LLM completion call with explicit model.
@@ -185,20 +199,26 @@ llmComplete = llmCompleteWith Nothing
 -- or @Nothing@ to use the TypeScript handler's default.
 --
 -- Returns @Left WasmError@ on failure, @Right Value@ on success.
-llmCompleteWith :: Member (Yield SerializableEffect EffectResult) effs
-                => Maybe Text     -- ^ Model to use (Nothing for default)
-                -> Text           -- ^ Node name (for observability)
-                -> Text           -- ^ System prompt
-                -> Text           -- ^ User content
-                -> Maybe Value    -- ^ Output schema (optional)
-                -> Eff effs (Either WasmError Value)
+llmCompleteWith ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  -- | Model to use (Nothing for default)
+  Maybe Text ->
+  -- | Node name (for observability)
+  Text ->
+  -- | System prompt
+  Text ->
+  -- | User content
+  Text ->
+  -- | Output schema (optional)
+  Maybe Value ->
+  Eff effs (Either WasmError Value)
 llmCompleteWith model node systemPrompt userContent schema = do
   let eff = EffLlmComplete node systemPrompt userContent schema model
   result <- yield eff (id @EffectResult)
   pure $ case result of
     ResSuccess (Just v) -> Right v
-    ResSuccess Nothing  -> Left $ emptyResult eff "LLM response"
-    ResError msg        -> Left $ effectFailed eff msg
+    ResSuccess Nothing -> Left $ emptyResult eff "LLM response"
+    ResError msg -> Left $ effectFailed eff msg
 
 -- | Make a raw LLM call with full message history and optional tools.
 --
@@ -207,12 +227,17 @@ llmCompleteWith model node systemPrompt userContent schema = do
 -- Uses the default model configured in the TypeScript handler.
 --
 -- Returns @Left WasmError@ on failure, @Right LlmCallResult@ on success.
-llmCall :: Member (Yield SerializableEffect EffectResult) effs
-        => Text           -- ^ Node name (for observability)
-        -> [WireMessage]  -- ^ Full message history
-        -> Maybe Value    -- ^ Output schema (optional)
-        -> [Value]        -- ^ Tool definitions (CF AI flat format)
-        -> Eff effs (Either WasmError LlmCallResult)
+llmCall ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  -- | Node name (for observability)
+  Text ->
+  -- | Full message history
+  [WireMessage] ->
+  -- | Output schema (optional)
+  Maybe Value ->
+  -- | Tool definitions (CF AI flat format)
+  [Value] ->
+  Eff effs (Either WasmError LlmCallResult)
 llmCall = llmCallWith Nothing
 
 -- | Make a raw LLM call with explicit model.
@@ -223,13 +248,19 @@ llmCall = llmCallWith Nothing
 -- or @Nothing@ to use the TypeScript handler's default.
 --
 -- Returns @Left WasmError@ on failure, @Right LlmCallResult@ on success.
-llmCallWith :: Member (Yield SerializableEffect EffectResult) effs
-            => Maybe Text     -- ^ Model to use (Nothing for default)
-            -> Text           -- ^ Node name (for observability)
-            -> [WireMessage]  -- ^ Full message history
-            -> Maybe Value    -- ^ Output schema (optional)
-            -> [Value]        -- ^ Tool definitions (CF AI flat format)
-            -> Eff effs (Either WasmError LlmCallResult)
+llmCallWith ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  -- | Model to use (Nothing for default)
+  Maybe Text ->
+  -- | Node name (for observability)
+  Text ->
+  -- | Full message history
+  [WireMessage] ->
+  -- | Output schema (optional)
+  Maybe Value ->
+  -- | Tool definitions (CF AI flat format)
+  [Value] ->
+  Eff effs (Either WasmError LlmCallResult)
 llmCallWith model node messages schema tools = do
   let eff = EffLlmCall node messages schema tools model
   result <- yield eff (id @EffectResult)
@@ -237,8 +268,8 @@ llmCallWith model node messages schema tools = do
     ResSuccess (Just v) -> case fromJSON v of
       Success r -> Right r
       Error err -> Left $ parseFailed eff "LlmCallResult" v (T.pack err)
-    ResSuccess Nothing  -> Left $ emptyResult eff "LLM call response"
-    ResError msg        -> Left $ effectFailed eff msg
+    ResSuccess Nothing -> Left $ emptyResult eff "LLM call response"
+    ResError msg -> Left $ effectFailed eff msg
 
 -- | Tool schema for asking user a clarifying question (CF AI flat format).
 askUserToolSchema :: Value
@@ -246,64 +277,72 @@ askUserToolSchema = cfToolToValue askUserTool
 
 -- | Tool definition for ask_user.
 askUserTool :: CfTool
-askUserTool = CfTool
-  { ctName = "ask_user"
-  , ctDescription = "Ask the user a clarifying question. Use when the input is ambiguous and you need more information to proceed accurately."
-  , ctParameters = CfObjectSchema
-      { cosProperties = Map.fromList
-          [ ("question", CfString "The question to ask the user")
-          , ("options", CfArray "Optional button choices. If provided, user clicks one. If omitted, user types freeform response." CfStringType)
-          ]
-      , cosRequired = ["question"]
-      }
-  }
-
+askUserTool =
+  CfTool
+    { ctName = "ask_user",
+      ctDescription = "Ask the user a clarifying question. Use when the input is ambiguous and you need more information to proceed accurately.",
+      ctParameters =
+        CfObjectSchema
+          { cosProperties =
+              Map.fromList
+                [ ("question", CfString "The question to ask the user"),
+                  ("options", CfArray "Optional button choices. If provided, user clicks one. If omitted, user types freeform response." CfStringType)
+                ],
+            cosRequired = ["question"]
+          }
+    }
 
 -- | Send a plain text message via Telegram.
 --
 -- Yields 'EffTelegramSend', returns message ID (as Int wrapped in Value).
 -- Fire-and-forget semantics - doesn't block for response.
-telegramSend :: Member (Yield SerializableEffect EffectResult) effs
-             => Text  -- ^ Message text
-             -> Eff effs Int
+telegramSend ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  -- | Message text
+  Text ->
+  Eff effs Int
 telegramSend txt = do
   result <- yield (EffTelegramSend txt "PlainText" Nothing) (id @EffectResult)
   case result of
     ResSuccess (Just v) -> case v of
       Number n -> pure $ round n
-      _        -> pure 0  -- Fire-and-forget OK
-    ResSuccess Nothing  -> pure 0
-    ResError msg        -> error $ "Telegram send failed: " <> T.unpack msg
+      _ -> pure 0 -- Fire-and-forget OK
+    ResSuccess Nothing -> pure 0
+    ResError msg -> error $ "Telegram send failed: " <> T.unpack msg
 
 -- | Send a Markdown-formatted message via Telegram.
 --
 -- Yields 'EffTelegramSend' with Markdown parse mode.
-telegramMarkdown :: Member (Yield SerializableEffect EffectResult) effs
-                 => Text  -- ^ Markdown text
-                 -> Eff effs Int
+telegramMarkdown ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  -- | Markdown text
+  Text ->
+  Eff effs Int
 telegramMarkdown txt = do
   result <- yield (EffTelegramSend txt "Markdown" Nothing) (id @EffectResult)
   case result of
     ResSuccess (Just v) -> case v of
       Number n -> pure $ round n
-      _        -> pure 0
-    ResSuccess Nothing  -> pure 0
-    ResError msg        -> error $ "Telegram send failed: " <> T.unpack msg
+      _ -> pure 0
+    ResSuccess Nothing -> pure 0
+    ResError msg -> error $ "Telegram send failed: " <> T.unpack msg
 
 -- | Send an HTML-formatted message via Telegram.
 --
 -- Yields 'EffTelegramSend' with HTML parse mode.
-telegramHtml :: Member (Yield SerializableEffect EffectResult) effs
-             => Text  -- ^ HTML text
-             -> Eff effs Int
+telegramHtml ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  -- | HTML text
+  Text ->
+  Eff effs Int
 telegramHtml txt = do
   result <- yield (EffTelegramSend txt "HTML" Nothing) (id @EffectResult)
   case result of
     ResSuccess (Just v) -> case v of
       Number n -> pure $ round n
-      _        -> pure 0
-    ResSuccess Nothing  -> pure 0
-    ResError msg        -> error $ "Telegram send failed: " <> T.unpack msg
+      _ -> pure 0
+    ResSuccess Nothing -> pure 0
+    ResError msg -> error $ "Telegram send failed: " <> T.unpack msg
 
 -- | Ask user with custom buttons, returns the result.
 --
@@ -314,20 +353,22 @@ telegramHtml txt = do
 -- 3. Click a stale button → 'TelegramStaleButton'
 --
 -- Returns @Left WasmError@ on failure, @Right TelegramAskResult@ on success.
-telegramAsk :: Member (Yield SerializableEffect EffectResult) effs
-            => Text           -- ^ Message to display
-            -> [(Text, Text)] -- ^ [(button label, callback data)]
-            -> Eff effs (Either WasmError TelegramAskResult)
+telegramAsk ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  -- | Message to display
+  Text ->
+  -- | [(button label, callback data)]
+  [(Text, Text)] ->
+  Eff effs (Either WasmError TelegramAskResult)
 telegramAsk message buttons = do
   let eff = EffTelegramAsk message "Markdown" buttons Nothing
   result <- yield eff (id @EffectResult)
   pure $ case result of
     ResSuccess (Just v) -> case fromJSON v of
       Success askResult -> Right askResult
-      Error err         -> Left $ parseFailed eff "TelegramAskResult" v (T.pack err)
-    ResSuccess Nothing  -> Left $ emptyResult eff "Telegram user response"
-    ResError msg        -> Left $ effectFailed eff msg
-
+      Error err -> Left $ parseFailed eff "TelegramAskResult" v (T.pack err)
+    ResSuccess Nothing -> Left $ emptyResult eff "Telegram user response"
+    ResError msg -> Left $ effectFailed eff msg
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- Thread-Aware Telegram Functions
@@ -341,50 +382,59 @@ telegramAsk message buttons = do
 -- Use for:
 -- - Group forums with topics enabled
 -- - Private chats with topics (if bot supports it)
-telegramSendTo :: Member (Yield SerializableEffect EffectResult) effs
-               => Int   -- ^ Thread/topic ID
-               -> Text  -- ^ Message text
-               -> Eff effs Int
+telegramSendTo ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  -- | Thread/topic ID
+  Int ->
+  -- | Message text
+  Text ->
+  Eff effs Int
 telegramSendTo threadId txt = do
   result <- yield (EffTelegramSend txt "PlainText" (Just threadId)) (id @EffectResult)
   case result of
     ResSuccess (Just v) -> case v of
       Number n -> pure $ round n
-      _        -> pure 0
-    ResSuccess Nothing  -> pure 0
-    ResError msg        -> error $ "Telegram send failed: " <> T.unpack msg
+      _ -> pure 0
+    ResSuccess Nothing -> pure 0
+    ResError msg -> error $ "Telegram send failed: " <> T.unpack msg
 
 -- | Send a Markdown-formatted message to a specific Telegram thread/topic.
 --
 -- Yields 'EffTelegramSend' with Markdown parse mode and thread ID.
-telegramMarkdownTo :: Member (Yield SerializableEffect EffectResult) effs
-                   => Int   -- ^ Thread/topic ID
-                   -> Text  -- ^ Markdown text
-                   -> Eff effs Int
+telegramMarkdownTo ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  -- | Thread/topic ID
+  Int ->
+  -- | Markdown text
+  Text ->
+  Eff effs Int
 telegramMarkdownTo threadId txt = do
   result <- yield (EffTelegramSend txt "Markdown" (Just threadId)) (id @EffectResult)
   case result of
     ResSuccess (Just v) -> case v of
       Number n -> pure $ round n
-      _        -> pure 0
-    ResSuccess Nothing  -> pure 0
-    ResError msg        -> error $ "Telegram send failed: " <> T.unpack msg
+      _ -> pure 0
+    ResSuccess Nothing -> pure 0
+    ResError msg -> error $ "Telegram send failed: " <> T.unpack msg
 
 -- | Send an HTML-formatted message to a specific Telegram thread/topic.
 --
 -- Yields 'EffTelegramSend' with HTML parse mode and thread ID.
-telegramHtmlTo :: Member (Yield SerializableEffect EffectResult) effs
-               => Int   -- ^ Thread/topic ID
-               -> Text  -- ^ HTML text
-               -> Eff effs Int
+telegramHtmlTo ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  -- | Thread/topic ID
+  Int ->
+  -- | HTML text
+  Text ->
+  Eff effs Int
 telegramHtmlTo threadId txt = do
   result <- yield (EffTelegramSend txt "HTML" (Just threadId)) (id @EffectResult)
   case result of
     ResSuccess (Just v) -> case v of
       Number n -> pure $ round n
-      _        -> pure 0
-    ResSuccess Nothing  -> pure 0
-    ResError msg        -> error $ "Telegram send failed: " <> T.unpack msg
+      _ -> pure 0
+    ResSuccess Nothing -> pure 0
+    ResError msg -> error $ "Telegram send failed: " <> T.unpack msg
 
 -- | Ask user with custom buttons in a specific Telegram thread/topic.
 --
@@ -395,21 +445,24 @@ telegramHtmlTo threadId txt = do
 -- 3. Click a stale button → 'TelegramStaleButton'
 --
 -- Returns @Left WasmError@ on failure, @Right TelegramAskResult@ on success.
-telegramAskIn :: Member (Yield SerializableEffect EffectResult) effs
-              => Int            -- ^ Thread/topic ID
-              -> Text           -- ^ Message to display
-              -> [(Text, Text)] -- ^ [(button label, callback data)]
-              -> Eff effs (Either WasmError TelegramAskResult)
+telegramAskIn ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  -- | Thread/topic ID
+  Int ->
+  -- | Message to display
+  Text ->
+  -- | [(button label, callback data)]
+  [(Text, Text)] ->
+  Eff effs (Either WasmError TelegramAskResult)
 telegramAskIn threadId message buttons = do
   let eff = EffTelegramAsk message "Markdown" buttons (Just threadId)
   result <- yield eff (id @EffectResult)
   pure $ case result of
     ResSuccess (Just v) -> case fromJSON v of
       Success askResult -> Right askResult
-      Error err         -> Left $ parseFailed eff "TelegramAskResult" v (T.pack err)
-    ResSuccess Nothing  -> Left $ emptyResult eff "Telegram user response"
-    ResError msg        -> Left $ effectFailed eff msg
-
+      Error err -> Left $ parseFailed eff "TelegramAskResult" v (T.pack err)
+    ResSuccess Nothing -> Left $ emptyResult eff "Telegram user response"
+    ResError msg -> Left $ effectFailed eff msg
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- STATE EFFECTS
@@ -418,23 +471,28 @@ telegramAskIn threadId message buttons = do
 -- | Get state by key.
 --
 -- Yields 'EffGetState', returns the state value (or Null if not found).
-getState :: Member (Yield SerializableEffect EffectResult) effs
-         => Text  -- ^ State key (e.g., "worldState")
-         -> Eff effs Value
+getState ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  -- | State key (e.g., "worldState")
+  Text ->
+  Eff effs Value
 getState key = do
   result <- yield (EffGetState key) (id @EffectResult)
   case result of
     ResSuccess (Just v) -> pure v
-    ResSuccess Nothing  -> pure Null
-    ResError msg        -> error $ "getState failed: " <> T.unpack msg
+    ResSuccess Nothing -> pure Null
+    ResError msg -> error $ "getState failed: " <> T.unpack msg
 
 -- | Set state by key.
 --
 -- Yields 'EffSetState', fire-and-forget semantics.
-setState :: Member (Yield SerializableEffect EffectResult) effs
-         => Text   -- ^ State key
-         -> Value  -- ^ New state value
-         -> Eff effs ()
+setState ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  -- | State key
+  Text ->
+  -- | New state value
+  Value ->
+  Eff effs ()
 setState key value = do
   _ <- yield (EffSetState key value) (id @EffectResult)
   pure ()
@@ -443,14 +501,16 @@ setState key value = do
 --
 -- Convenience wrapper that performs get → modify → set.
 -- The modifier function receives the current state (or Null if not found).
-modifyState :: Member (Yield SerializableEffect EffectResult) effs
-            => Text            -- ^ State key
-            -> (Value -> Value)  -- ^ Modifier function
-            -> Eff effs ()
+modifyState ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  -- | State key
+  Text ->
+  -- | Modifier function
+  (Value -> Value) ->
+  Eff effs ()
 modifyState key f = do
   current <- getState key
   setState key (f current)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EVENT EFFECTS
@@ -460,14 +520,16 @@ modifyState key f = do
 --
 -- Yields 'EffEmitEvent', fire-and-forget semantics.
 -- Events are forwarded to connected clients (WebSocket) for real-time updates.
-emitEvent :: Member (Yield SerializableEffect EffectResult) effs
-          => Text   -- ^ Event name (e.g., "StressChanged", "ClockAdvanced")
-          -> Value  -- ^ Event payload
-          -> Eff effs ()
+emitEvent ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  -- | Event name (e.g., "StressChanged", "ClockAdvanced")
+  Text ->
+  -- | Event payload
+  Value ->
+  Eff effs ()
 emitEvent name payload = do
   _ <- yield (EffEmitEvent name payload) (id @EffectResult)
   pure ()
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- RANDOM EFFECTS
@@ -476,28 +538,33 @@ emitEvent name payload = do
 -- | Get a random integer in range [min, max] (inclusive).
 --
 -- Yields 'EffRandomInt', returns a random integer.
-randomInt :: Member (Yield SerializableEffect EffectResult) effs
-          => Int  -- ^ Minimum value (inclusive)
-          -> Int  -- ^ Maximum value (inclusive)
-          -> Eff effs Int
+randomInt ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  -- | Minimum value (inclusive)
+  Int ->
+  -- | Maximum value (inclusive)
+  Int ->
+  Eff effs Int
 randomInt minVal maxVal = do
   result <- yield (EffRandomInt minVal maxVal) (id @EffectResult)
   case result of
     ResSuccess (Just v) -> case v of
       Number n -> pure $ round n
-      _        -> error "randomInt: expected number"
-    ResSuccess Nothing  -> error "randomInt: no response"
-    ResError msg        -> error $ "randomInt failed: " <> T.unpack msg
+      _ -> error "randomInt: expected number"
+    ResSuccess Nothing -> error "randomInt: no response"
+    ResError msg -> error $ "randomInt failed: " <> T.unpack msg
 
 -- | Roll multiple dice (e.g., for FitD mechanics).
 --
 -- Convenience function that rolls n dice with sides [1..sides].
-rollDice :: Member (Yield SerializableEffect EffectResult) effs
-         => Int  -- ^ Number of dice
-         -> Int  -- ^ Number of sides per die
-         -> Eff effs [Int]
-rollDice n sides = mapM (\_ -> randomInt 1 sides) [1..n]
-
+rollDice ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  -- | Number of dice
+  Int ->
+  -- | Number of sides per die
+  Int ->
+  Eff effs [Int]
+rollDice n sides = mapM (\_ -> randomInt 1 sides) [1 .. n]
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TIME EFFECTS
@@ -506,17 +573,17 @@ rollDice n sides = mapM (\_ -> randomInt 1 sides) [1..n]
 -- | Get current UTC time as ISO8601 string.
 --
 -- Yields 'EffGetTime', returns time like "2024-01-15T10:30:00Z".
-getTime :: Member (Yield SerializableEffect EffectResult) effs
-        => Eff effs Text
+getTime ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  Eff effs Text
 getTime = do
   result <- yield EffGetTime (id @EffectResult)
   case result of
     ResSuccess (Just v) -> case v of
       String s -> pure s
-      _        -> error "getTime: expected string"
-    ResSuccess Nothing  -> error "getTime: no response"
-    ResError msg        -> error $ "getTime failed: " <> T.unpack msg
-
+      _ -> error "getTime: expected string"
+    ResSuccess Nothing -> error "getTime: no response"
+    ResError msg -> error $ "getTime failed: " <> T.unpack msg
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- RUNNING EFFECTS

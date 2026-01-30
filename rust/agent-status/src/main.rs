@@ -17,9 +17,8 @@ use std::{
     time::Duration,
 };
 use tuirealm::{
-    Event, Update,
+    Update,
     application::Application,
-    event::{Key, KeyEvent},
     listener::{EventListenerCfg, SyncPort},
     ratatui::{
         layout::{Constraint, Direction, Layout},

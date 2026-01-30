@@ -1,29 +1,30 @@
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module ExoMonad.Gemini.Interpreter
-  ( runGeminiIO
-  , runGeminiWithConfig
-  , GeminiConfig(..)
-  , parseGeminiOutput
-  ) where
+  ( runGeminiIO,
+    runGeminiWithConfig,
+    GeminiConfig (..),
+    parseGeminiOutput,
+  )
+where
 
-import Control.Monad.Freer (Eff, interpret, sendM, LastMember)
-import Data.Aeson (decodeStrict, Value(Null))
-import qualified Data.ByteString.Char8 as BS
-import qualified Data.Text as T
-import System.Process (readProcessWithExitCode)
-import System.Exit (ExitCode(..))
-import ExoMonad.Effect.Gemini (GeminiOp(..), GeminiModel(..), GeminiResult(..))
+import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
+import Data.Aeson (Value (Null), decodeStrict)
+import Data.ByteString.Char8 qualified as BS
+import Data.Text qualified as T
+import ExoMonad.Effect.Gemini (GeminiModel (..), GeminiOp (..), GeminiResult (..))
 import ExoMonad.Effects.SocketClient
-  ( SocketConfig(..)
-  , ServiceRequest(..)
-  , ServiceResponse(..)
-  , sendRequest
+  ( ServiceRequest (..),
+    ServiceResponse (..),
+    SocketConfig (..),
+    sendRequest,
   )
 import GHC.Generics (Generic)
+import System.Exit (ExitCode (..))
+import System.Process (readProcessWithExitCode)
 
 -- | Configuration for Gemini interpreter.
 data GeminiConfig
@@ -34,53 +35,63 @@ data GeminiConfig
   deriving (Show, Eq, Generic)
 
 -- | Run Gemini effect via subprocess spawning of 'gemini' CLI.
-runGeminiIO :: LastMember IO effs => Eff (GeminiOp ': effs) a -> Eff effs a
+runGeminiIO :: (LastMember IO effs) => Eff (GeminiOp ': effs) a -> Eff effs a
 runGeminiIO = runGeminiWithConfig GeminiCliConfig
 
 -- | Run Gemini effect with explicit configuration.
-runGeminiWithConfig :: LastMember IO effs => GeminiConfig -> Eff (GeminiOp ': effs) a -> Eff effs a
+runGeminiWithConfig :: (LastMember IO effs) => GeminiConfig -> Eff (GeminiOp ': effs) a -> Eff effs a
 runGeminiWithConfig config = interpret $ \case
   RunGemini _meta model prompt -> case config of
     GeminiCliConfig -> sendM $ do
       let modelStr = geminiModelToCliId model
 
-      (exitCode, stdout, stderr) <- readProcessWithExitCode "gemini"
-        [ "--model", modelStr
-        , "--prompt", T.unpack prompt
-        , "--output", "json"
-        ] ""
+      (exitCode, stdout, stderr) <-
+        readProcessWithExitCode
+          "gemini"
+          [ "--model",
+            modelStr,
+            "--prompt",
+            T.unpack prompt,
+            "--output",
+            "json"
+          ]
+          ""
 
       case exitCode of
         ExitSuccess -> do
           pure $ parseGeminiOutput stdout
         ExitFailure _ -> do
-          pure GeminiResult
-            { grOutput = Null
-            , grRawResponse = "ERROR: " <> T.pack stderr
-            }
+          pure
+            GeminiResult
+              { grOutput = Null,
+                grRawResponse = "ERROR: " <> T.pack stderr
+              }
     GeminiSocketConfig path -> sendM $ do
       let modelStr = T.pack $ geminiModelToCliId model
-      let req = OllamaGenerate { model = modelStr, prompt = prompt, system = Nothing }
+      let req = OllamaGenerate {model = modelStr, prompt = prompt, system = Nothing}
       result <- sendRequest (SocketConfig path 30000) req
       case result of
         Right (OllamaGenerateResponse response _done) ->
           -- Reuse the same JSON parsing logic as the CLI path
           pure $ parseGeminiOutput (T.unpack response)
         Right (ErrorResponse _code msg) ->
-          pure GeminiResult
-            { grOutput = Null
-            , grRawResponse = "ERROR: " <> msg
-            }
+          pure
+            GeminiResult
+              { grOutput = Null,
+                grRawResponse = "ERROR: " <> msg
+              }
         Right _ ->
-          pure GeminiResult
-            { grOutput = Null
-            , grRawResponse = "ERROR: Unexpected response type"
-            }
+          pure
+            GeminiResult
+              { grOutput = Null,
+                grRawResponse = "ERROR: Unexpected response type"
+              }
         Left err ->
-          pure GeminiResult
-            { grOutput = Null
-            , grRawResponse = "ERROR: " <> T.pack (show err)
-            }
+          pure
+            GeminiResult
+              { grOutput = Null,
+                grRawResponse = "ERROR: " <> T.pack (show err)
+              }
 
 -- | Map our internal 'GeminiModel' to the corresponding 'gemini' CLI model id.
 --
@@ -92,7 +103,7 @@ runGeminiWithConfig config = interpret $ \case
 geminiModelToCliId :: GeminiModel -> String
 geminiModelToCliId = \case
   Flash -> "flash-2"
-  Pro   -> "pro-2"
+  Pro -> "pro-2"
   Ultra -> "ultra-2"
 
 -- | Parse the output of the gemini CLI.
@@ -100,9 +111,9 @@ parseGeminiOutput :: String -> GeminiResult
 parseGeminiOutput stdout =
   let outBS = BS.pack stdout
       val = case decodeStrict outBS of
-            Just v -> v
-            Nothing -> Null
-  in GeminiResult
-    { grOutput = val
-    , grRawResponse = T.pack stdout
-    }
+        Just v -> v
+        Nothing -> Null
+   in GeminiResult
+        { grOutput = val,
+          grRawResponse = T.pack stdout
+        }

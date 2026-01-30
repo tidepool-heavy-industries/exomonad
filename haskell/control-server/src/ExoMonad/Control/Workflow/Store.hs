@@ -1,20 +1,20 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module ExoMonad.Control.Workflow.Store
-  ( WorkflowStore
-  , initWorkflowStore
-  , getWorkflowState
-  , updateWorkflowState
-  , defaultWorkflowState
-  ) where
+  ( WorkflowStore,
+    initWorkflowStore,
+    getWorkflowState,
+    updateWorkflowState,
+    defaultWorkflowState,
+  )
+where
 
-import Control.Concurrent.STM (TVar, newTVarIO, readTVarIO, atomically, modifyTVar')
-import Control.Lens (at, (.~), non, (^.))
+import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVarIO)
+import Control.Lens (at, non, (.~), (^.))
 import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
+import Data.Map.Strict qualified as Map
 import Data.Text (Text)
-
-import ExoMonad.Control.StopHook.Types (WorkflowState(..), WorkflowStage(..))
+import ExoMonad.Control.StopHook.Types (WorkflowStage (..), WorkflowState (..))
 
 -- | Global store for workflow states, keyed by Session ID.
 type WorkflowStore = TVar (Map Text WorkflowState)
@@ -36,11 +36,12 @@ updateWorkflowState store sessionId newState = do
 
 -- | Default initial state for a new workflow.
 defaultWorkflowState :: WorkflowState
-defaultWorkflowState = WorkflowState
-  { globalStops = 0
-  , stageRetries = Map.empty
-  , currentStage = StageBuild
-  , lastBuildResult = Nothing
-  , lastPRStatus = Nothing
-  , lastTestResult = Nothing
-  }
+defaultWorkflowState =
+  WorkflowState
+    { globalStops = 0,
+      stageRetries = Map.empty,
+      currentStage = StageBuild,
+      lastBuildResult = Nothing,
+      lastPRStatus = Nothing,
+      lastTestResult = Nothing
+    }

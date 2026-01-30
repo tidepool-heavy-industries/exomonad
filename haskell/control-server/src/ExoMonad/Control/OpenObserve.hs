@@ -1,71 +1,85 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeApplications #-}
 
 -- | OpenObserve client for shipping session transcripts.
 module ExoMonad.Control.OpenObserve
-  ( OpenObserveConfig(..)
-  , shipTranscript
-  , loadOpenObserveConfig
-  ) where
+  ( OpenObserveConfig (..),
+    shipTranscript,
+    loadOpenObserveConfig,
+  )
+where
 
-import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as TE
-import Data.Aeson (Value, encode, object, (.=))
-import qualified Data.ByteString.Lazy as LBS
-import qualified Data.ByteString.Base64 as B64
-import Network.HTTP.Simple
-import Control.Exception (try, SomeException)
-import System.Environment (lookupEnv)
-import Data.Maybe (fromMaybe)
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Monad (void, forM)
+import Control.Exception (SomeException, try)
+import Control.Monad (forM, void)
+import Data.Aeson (Value, encode, object, (.=))
+import Data.ByteString.Base64 qualified as B64
+import Data.ByteString.Lazy qualified as LBS
+import Data.Maybe (fromMaybe)
+import Data.Text (Text)
+import Data.Text qualified as T
+import Data.Text.Encoding qualified as TE
 import GHC.Generics (Generic)
+import Network.HTTP.Simple
+import System.Environment (lookupEnv)
 import System.IO (hPutStrLn, stderr)
 
 -- | Configuration for OpenObserve ingestion.
 data OpenObserveConfig = OpenObserveConfig
-  { baseUrl  :: Text      -- ^ e.g. "http://localhost:5080"
-  , org      :: Text      -- ^ e.g. "default"
-  , stream   :: Text      -- ^ e.g. "claude_sessions"
-  , email    :: Text      -- ^ Ingestion user email
-  , password :: Text      -- ^ Ingestion user password
-  } deriving (Eq, Generic)
+  { -- | e.g. "http://localhost:5080"
+    baseUrl :: Text,
+    -- | e.g. "default"
+    org :: Text,
+    -- | e.g. "claude_sessions"
+    stream :: Text,
+    -- | Ingestion user email
+    email :: Text,
+    -- | Ingestion user password
+    password :: Text
+  }
+  deriving (Eq, Generic)
 
 instance Show OpenObserveConfig where
-  show OpenObserveConfig{..} =
+  show OpenObserveConfig {..} =
     "OpenObserveConfig"
-      <> " { baseUrl = "  <> show baseUrl
-      <> ", org = "       <> show org
-      <> ", stream = "    <> show stream
-      <> ", email = "     <> show email
-      <> ", password = "  <> "<redacted>"
+      <> " { baseUrl = "
+      <> show baseUrl
+      <> ", org = "
+      <> show org
+      <> ", stream = "
+      <> show stream
+      <> ", email = "
+      <> show email
+      <> ", password = "
+      <> "<redacted>"
       <> " }"
 
 -- | Load OpenObserve configuration from environment variables.
 loadOpenObserveConfig :: IO (Maybe OpenObserveConfig)
 loadOpenObserveConfig = do
-  mUrl    <- lookupEnv "OPENOBSERVE_URL"
-  mOrg    <- lookupEnv "OPENOBSERVE_ORG"
+  mUrl <- lookupEnv "OPENOBSERVE_URL"
+  mOrg <- lookupEnv "OPENOBSERVE_ORG"
   mStream <- lookupEnv "OPENOBSERVE_STREAM"
-  mEmail  <- lookupEnv "OPENOBSERVE_EMAIL"
-  mPass   <- lookupEnv "OPENOBSERVE_PASSWORD"
+  mEmail <- lookupEnv "OPENOBSERVE_EMAIL"
+  mPass <- lookupEnv "OPENOBSERVE_PASSWORD"
 
-  let baseUrl_  = T.pack $ fromMaybe "http://localhost:5080" mUrl
-      org_      = T.pack $ fromMaybe "default" mOrg
-      stream_   = T.pack $ fromMaybe "claude_sessions" mStream
-      email_    = T.pack $ fromMaybe "admin@exomonad.local" mEmail
+  let baseUrl_ = T.pack $ fromMaybe "http://localhost:5080" mUrl
+      org_ = T.pack $ fromMaybe "default" mOrg
+      stream_ = T.pack $ fromMaybe "claude_sessions" mStream
+      email_ = T.pack $ fromMaybe "admin@exomonad.local" mEmail
       password_ = T.pack $ fromMaybe "exomonad-dev" mPass
 
-  pure $ Just OpenObserveConfig
-    { baseUrl  = baseUrl_
-    , org      = org_
-    , stream   = stream_
-    , email    = email_
-    , password = password_
-    }
+  pure $
+    Just
+      OpenObserveConfig
+        { baseUrl = baseUrl_,
+          org = org_,
+          stream = stream_,
+          email = email_,
+          password = password_
+        }
 
 -- | Ship session transcript to OpenObserve.
 --
@@ -78,19 +92,23 @@ shipTranscript config events = void $ forkIO $ retry 3 1000000
     retry 0 _ = hPutStrLn stderr "[OpenObserve] Failed to ship transcript after all attempts"
     retry n delay = do
       result <- try @SomeException $ do
-        let url = T.unpack (config.baseUrl) 
-               <> "/api/" <> T.unpack (config.org) 
-               <> "/" <> T.unpack (config.stream) 
-               <> "/_json"
+        let url =
+              T.unpack (config.baseUrl)
+                <> "/api/"
+                <> T.unpack (config.org)
+                <> "/"
+                <> T.unpack (config.stream)
+                <> "/_json"
             auth = B64.encode $ TE.encodeUtf8 $ config.email <> ":" <> config.password
-            
+
             -- Prepare request
-            request = setRequestBodyLBS (encode events)
-                    $ setRequestHeader "Authorization" ["Basic " <> auth]
-                    $ setRequestHeader "Content-Type" ["application/json"]
-                    $ setRequestMethod "POST"
-                    $ parseRequest_ url
-        
+            request =
+              setRequestBodyLBS (encode events) $
+                setRequestHeader "Authorization" ["Basic " <> auth] $
+                  setRequestHeader "Content-Type" ["application/json"] $
+                    setRequestMethod "POST" $
+                      parseRequest_ url
+
         response <- httpLBS request
         let status = getResponseStatusCode response
         if status >= 200 && status < 300

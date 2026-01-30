@@ -32,37 +32,35 @@
 -- runWasmHandler = runLLMAsYield . myHandler
 -- @
 module ExoMonad.Wasm.Interpreter.LLM
-  ( runLLMAsYield
-  ) where
+  ( runLLMAsYield,
+  )
+where
 
 import Control.Monad.Freer (Eff, Member, interpret)
 import Control.Monad.Freer.Coroutine (Yield, yield)
 import Data.Aeson (Value)
-import qualified Data.List.NonEmpty as NE
+import Data.List.NonEmpty qualified as NE
 import Data.Text (Text)
-
 import ExoMonad.Effect.Types
-  ( LLM(..)
-  , NodeMetadata(..)
-  , TurnOutcome(..)
-  , TurnResult(..)
-  )
-import ExoMonad.Wasm.WireTypes
-  ( SerializableEffect(..)
-  , EffectResult(..)
+  ( LLM (..),
+    NodeMetadata (..),
+    TurnOutcome (..),
+    TurnResult (..),
   )
 import ExoMonad.Wasm.Conversion
-  ( contentBlocksToWireMessages
-  , parseWireTurnResult
+  ( contentBlocksToWireMessages,
+    parseWireTurnResult,
   )
-
+import ExoMonad.Wasm.WireTypes
+  ( EffectResult (..),
+    SerializableEffect (..),
+  )
 
 -- | Default node name used when no context is provided.
 --
 -- In production, this should be passed from the graph interpreter context.
 defaultNodeName :: Text
 defaultNodeName = "graph-node"
-
 
 -- | Interpret @LLM@ effect by yielding to TypeScript.
 --
@@ -82,33 +80,34 @@ defaultNodeName = "graph-node"
 --
 -- Currently uses 'defaultNodeName' as a placeholder. In production, this should
 -- be passed from the graph interpreter context.
-runLLMAsYield
-  :: Member (Yield SerializableEffect EffectResult) effs
-  => Eff (LLM ': effs) a
-  -> Eff effs a
+runLLMAsYield ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  Eff (LLM ': effs) a ->
+  Eff effs a
 runLLMAsYield = interpret handleLLM
   where
-    handleLLM :: Member (Yield SerializableEffect EffectResult) effs
-              => LLM x -> Eff effs x
+    handleLLM ::
+      (Member (Yield SerializableEffect EffectResult) effs) =>
+      LLM x -> Eff effs x
     handleLLM (RunTurnOp meta systemPrompt userContent outputSchema toolDefs) = do
       -- Convert native ContentBlocks to wire messages (convert NonEmpty to list)
       let wireMessages = contentBlocksToWireMessages systemPrompt (NE.toList userContent)
 
       -- Build the effect to yield, using node name from metadata
-      let effect = EffLlmCall
-            { effLlmNode = meta.nmNodeName
-            , effLlmMessages = wireMessages
-            , effLlmSchema = Just outputSchema
-            , effLlmTools = toolDefs
-            , effLlmModel = Nothing  -- Use TypeScript default
-            }
+      let effect =
+            EffLlmCall
+              { effLlmNode = meta.nmNodeName,
+                effLlmMessages = wireMessages,
+                effLlmSchema = Just outputSchema,
+                effLlmTools = toolDefs,
+                effLlmModel = Nothing -- Use TypeScript default
+              }
 
       -- Yield to TypeScript and get result
       result <- yield effect (id @EffectResult)
 
       -- Parse result back to TurnOutcome
       pure $ parseEffectResult effect result
-
 
 -- | Parse EffectResult back to TurnOutcome.
 --
@@ -119,9 +118,7 @@ parseEffectResult _eff result = case result of
     case parseWireTurnResult val of
       Right turnResult -> TurnCompleted turnResult
       Left err -> TurnBroken $ "Failed to parse TurnResult: " <> err
-
   ResSuccess Nothing ->
     TurnBroken "Empty result from LLM call"
-
   ResError msg ->
     TurnBroken $ "LLM call failed: " <> msg

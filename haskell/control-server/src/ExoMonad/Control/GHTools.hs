@@ -8,230 +8,276 @@
 -- | GitHub MCP tools for centralized issue operations.
 module ExoMonad.Control.GHTools
   ( -- * List Tool
-    ghIssueListLogic
-  , GHIssueListArgs(..)
-  , GHIssueListResult(..)
+    ghIssueListLogic,
+    GHIssueListArgs (..),
+    GHIssueListResult (..),
 
     -- * Show Tool
-  , ghIssueShowLogic
-  , GHIssueShowArgs(..)
-  , GHIssueShowResult(..)
+    ghIssueShowLogic,
+    GHIssueShowArgs (..),
+    GHIssueShowResult (..),
 
     -- * Create Tool
-  , ghIssueCreateLogic
-  , GHIssueCreateArgs(..)
-  , GHIssueCreateResult(..)
+    ghIssueCreateLogic,
+    GHIssueCreateArgs (..),
+    GHIssueCreateResult (..),
 
     -- * Update Tool
-  , ghIssueUpdateLogic
-  , GHIssueUpdateArgs(..)
-  , GHIssueUpdateResult(..)
+    ghIssueUpdateLogic,
+    GHIssueUpdateArgs (..),
+    GHIssueUpdateResult (..),
 
     -- * Close Tool
-  , ghIssueCloseLogic
-  , GHIssueCloseArgs(..)
-  , GHIssueCloseResult(..)
+    ghIssueCloseLogic,
+    GHIssueCloseArgs (..),
+    GHIssueCloseResult (..),
 
     -- * Reopen Tool
-  , ghIssueReopenLogic
-  , GHIssueReopenArgs(..)
-  , GHIssueReopenResult(..)
+    ghIssueReopenLogic,
+    GHIssueReopenArgs (..),
+    GHIssueReopenResult (..),
 
     -- * Helpers
-  , getRepo
-  ) where
+    getRepo,
+  )
+where
 
 import Control.Monad.Freer (Eff, Member)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import qualified Data.Text as T
-
-import ExoMonad.Effects.GitHub
-  ( GitHub, Issue(..), IssueState(..), IssueFilter(..)
-  , CreateIssueInput(..), UpdateIssueInput(..), defaultIssueFilter, emptyUpdateIssueInput
-  , listIssues, getIssue, createIssue, updateIssue, closeIssue, reopenIssue
-  )
-import ExoMonad.Effects.Env (Env)
-
+import Data.Text qualified as T
+import ExoMonad.Control.Combinators (getRepo, withGitHubRepo)
 import ExoMonad.Control.GHTools.Types
-import ExoMonad.Control.Combinators (withGitHubRepo, getRepo)
+import ExoMonad.Effects.Env (Env)
+import ExoMonad.Effects.GitHub
+  ( CreateIssueInput (..),
+    GitHub,
+    Issue (..),
+    IssueFilter (..),
+    IssueState (..),
+    UpdateIssueInput (..),
+    closeIssue,
+    createIssue,
+    defaultIssueFilter,
+    emptyUpdateIssueInput,
+    getIssue,
+    listIssues,
+    reopenIssue,
+    updateIssue,
+  )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GH ISSUE LIST TOOL
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Core logic for gh_issue_list.
-ghIssueListLogic
-  :: (Member GitHub es, Member Env es)
-  => GHIssueListArgs
-  -> Eff es GHIssueListResult
+ghIssueListLogic ::
+  (Member GitHub es, Member Env es) =>
+  GHIssueListArgs ->
+  Eff es GHIssueListResult
 ghIssueListLogic args =
-  withGitHubRepo args.repo
-    (\repo -> listIssues repo (defaultIssueFilter
-        { ifLabels = fromMaybe [] args.labels
-        , ifState  = parseIssueState (fromMaybe "open" args.status)
-        , ifLimit  = args.limit
-        }))
-    (\is ->
-      let summaries = map toSummary (take 20 is)
-      in GHIssueListResult
-        { issues = summaries
-        , count  = length summaries
-        , error  = Nothing
-        })
-    (\err -> GHIssueListResult
-      { issues = []
-      , count  = 0
-      , error  = Just err
-      })
+  withGitHubRepo
+    args.repo
+    ( \repo ->
+        listIssues
+          repo
+          ( defaultIssueFilter
+              { ifLabels = fromMaybe [] args.labels,
+                ifState = parseIssueState (fromMaybe "open" args.status),
+                ifLimit = args.limit
+              }
+          )
+    )
+    ( \is ->
+        let summaries = map toSummary (take 20 is)
+         in GHIssueListResult
+              { issues = summaries,
+                count = length summaries,
+                error = Nothing
+              }
+    )
+    ( \err ->
+        GHIssueListResult
+          { issues = [],
+            count = 0,
+            error = Just err
+          }
+    )
 
 -- | Convert full Issue to IssueSummary
 toSummary :: Issue -> IssueSummary
-toSummary i = IssueSummary
-  { number = i.issueNumber
-  , title  = i.issueTitle
-  , state  = case i.issueState of
-      IssueOpen   -> "OPEN"
-      IssueClosed -> "CLOSED"
-  , labels = i.issueLabels
-  , url    = i.issueUrl
-  }
-
-
+toSummary i =
+  IssueSummary
+    { number = i.issueNumber,
+      title = i.issueTitle,
+      state = case i.issueState of
+        IssueOpen -> "OPEN"
+        IssueClosed -> "CLOSED",
+      labels = i.issueLabels,
+      url = i.issueUrl
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GH ISSUE SHOW TOOL
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Core logic for gh_issue_show.
-ghIssueShowLogic
-  :: (Member GitHub es, Member Env es)
-  => GHIssueShowArgs
-  -> Eff es GHIssueShowResult
+ghIssueShowLogic ::
+  (Member GitHub es, Member Env es) =>
+  GHIssueShowArgs ->
+  Eff es GHIssueShowResult
 ghIssueShowLogic args =
-  withGitHubRepo args.repo
+  withGitHubRepo
+    args.repo
     (\repo -> getIssue repo args.number True) -- Include comments
-    (\maybeIssue -> GHIssueShowResult
-      { issue = maybeIssue
-      , found = case maybeIssue of
-          Just _ -> True
-          Nothing -> False
-      , error = Nothing
-      })
-    (\err -> GHIssueShowResult
-      { issue = Nothing
-      , found = False
-      , error = Just err
-      })
-
+    ( \maybeIssue ->
+        GHIssueShowResult
+          { issue = maybeIssue,
+            found = case maybeIssue of
+              Just _ -> True
+              Nothing -> False,
+            error = Nothing
+          }
+    )
+    ( \err ->
+        GHIssueShowResult
+          { issue = Nothing,
+            found = False,
+            error = Just err
+          }
+    )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GH ISSUE CREATE TOOL
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Core logic for gh_issue_create.
-ghIssueCreateLogic
-  :: (Member GitHub es, Member Env es)
-  => GHIssueCreateArgs
-  -> Eff es GHIssueCreateResult
+ghIssueCreateLogic ::
+  (Member GitHub es, Member Env es) =>
+  GHIssueCreateArgs ->
+  Eff es GHIssueCreateResult
 ghIssueCreateLogic args =
-  withGitHubRepo args.repo
-    (\repo -> createIssue CreateIssueInput
-        { ciiRepo      = repo
-        , ciiTitle     = args.title
-        , ciiBody      = fromMaybe "" args.body
-        , ciiLabels    = fromMaybe [] args.labels
-        , ciiAssignees = fromMaybe [] args.assignees
-        })
-    (\num -> GHIssueCreateResult
-      { number  = num
-      , success = True
-      , error   = Nothing
-      })
-    (\err -> GHIssueCreateResult
-      { number  = 0
-      , success = False
-      , error   = Just err
-      })
-
+  withGitHubRepo
+    args.repo
+    ( \repo ->
+        createIssue
+          CreateIssueInput
+            { ciiRepo = repo,
+              ciiTitle = args.title,
+              ciiBody = fromMaybe "" args.body,
+              ciiLabels = fromMaybe [] args.labels,
+              ciiAssignees = fromMaybe [] args.assignees
+            }
+    )
+    ( \num ->
+        GHIssueCreateResult
+          { number = num,
+            success = True,
+            error = Nothing
+          }
+    )
+    ( \err ->
+        GHIssueCreateResult
+          { number = 0,
+            success = False,
+            error = Just err
+          }
+    )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GH ISSUE UPDATE TOOL
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Core logic for gh_issue_update.
-ghIssueUpdateLogic
-  :: (Member GitHub es, Member Env es)
-  => GHIssueUpdateArgs
-  -> Eff es GHIssueUpdateResult
+ghIssueUpdateLogic ::
+  (Member GitHub es, Member Env es) =>
+  GHIssueUpdateArgs ->
+  Eff es GHIssueUpdateResult
 ghIssueUpdateLogic args =
-  withGitHubRepo args.repo
-    (\repo -> updateIssue repo args.number emptyUpdateIssueInput
-        { uiiTitle     = args.title
-        , uiiBody      = args.body
-        , uiiState     = parseIssueState =<< args.status
-        , uiiLabels    = args.labels
-        , uiiAssignees = args.assignees
-        })
-    (\() -> GHIssueUpdateResult
-      { success = True
-      , number  = args.number
-      , error   = Nothing
-      })
-    (\err -> GHIssueUpdateResult
-      { success = False
-      , number  = args.number
-      , error   = Just err
-      })
-
+  withGitHubRepo
+    args.repo
+    ( \repo ->
+        updateIssue
+          repo
+          args.number
+          emptyUpdateIssueInput
+            { uiiTitle = args.title,
+              uiiBody = args.body,
+              uiiState = parseIssueState =<< args.status,
+              uiiLabels = args.labels,
+              uiiAssignees = args.assignees
+            }
+    )
+    ( \() ->
+        GHIssueUpdateResult
+          { success = True,
+            number = args.number,
+            error = Nothing
+          }
+    )
+    ( \err ->
+        GHIssueUpdateResult
+          { success = False,
+            number = args.number,
+            error = Just err
+          }
+    )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GH ISSUE CLOSE TOOL
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Core logic for gh_issue_close.
-ghIssueCloseLogic
-  :: (Member GitHub es, Member Env es)
-  => GHIssueCloseArgs
-  -> Eff es GHIssueCloseResult
+ghIssueCloseLogic ::
+  (Member GitHub es, Member Env es) =>
+  GHIssueCloseArgs ->
+  Eff es GHIssueCloseResult
 ghIssueCloseLogic args =
-  withGitHubRepo args.repo
+  withGitHubRepo
+    args.repo
     (\repo -> closeIssue repo args.number)
-    (\() -> GHIssueCloseResult
-      { success = True
-      , number  = args.number
-      , error   = Nothing
-      })
-    (\err -> GHIssueCloseResult
-      { success = False
-      , number  = args.number
-      , error   = Just err
-      })
-
+    ( \() ->
+        GHIssueCloseResult
+          { success = True,
+            number = args.number,
+            error = Nothing
+          }
+    )
+    ( \err ->
+        GHIssueCloseResult
+          { success = False,
+            number = args.number,
+            error = Just err
+          }
+    )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GH ISSUE REOPEN TOOL
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Core logic for gh_issue_reopen.
-ghIssueReopenLogic
-  :: (Member GitHub es, Member Env es)
-  => GHIssueReopenArgs
-  -> Eff es GHIssueReopenResult
+ghIssueReopenLogic ::
+  (Member GitHub es, Member Env es) =>
+  GHIssueReopenArgs ->
+  Eff es GHIssueReopenResult
 ghIssueReopenLogic args =
-  withGitHubRepo args.repo
+  withGitHubRepo
+    args.repo
     (\repo -> reopenIssue repo args.number)
-    (\() -> GHIssueReopenResult
-      { success = True
-      , number  = args.number
-      , error   = Nothing
-      })
-    (\err -> GHIssueReopenResult
-      { success = False
-      , number  = args.number
-      , error   = Just err
-      })
-
+    ( \() ->
+        GHIssueReopenResult
+          { success = True,
+            number = args.number,
+            error = Nothing
+          }
+    )
+    ( \err ->
+        GHIssueReopenResult
+          { success = False,
+            number = args.number,
+            error = Just err
+          }
+    )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS
@@ -240,6 +286,6 @@ ghIssueReopenLogic args =
 -- | Parse status text to IssueState.
 parseIssueState :: Text -> Maybe IssueState
 parseIssueState t = case T.toUpper t of
-  "OPEN"   -> Just IssueOpen
+  "OPEN" -> Just IssueOpen
   "CLOSED" -> Just IssueClosed
-  _        -> Nothing
+  _ -> Nothing

@@ -1,20 +1,17 @@
 -- | Tests for JSON serialization of wire protocol types.
 module JsonSpec (spec) where
 
-import Data.Aeson (encode, decode, eitherDecode)
-import Test.Hspec
-
+import Data.Aeson (decode, eitherDecode, encode)
 import ExoMonad.Effect.GHCi
-  ( GHCiRequest(..)
-  , GHCiResponse(..)
-  , GHCiError(..)
+  ( GHCiError (..),
+    GHCiRequest (..),
+    GHCiResponse (..),
   )
-
+import Test.Hspec
 
 spec :: Spec
 spec = do
   describe "GHCiRequest" $ do
-
     it "round-trips ReqQueryType" $ do
       let req = ReqQueryType "fmap"
       decode (encode req) `shouldBe` Just req
@@ -48,7 +45,6 @@ spec = do
       decode (encode req) `shouldBe` Just req
 
   describe "GHCiResponse" $ do
-
     it "round-trips RespSuccess" $ do
       let resp = RespSuccess "Functor f => (a -> b) -> f a -> f b"
       decode (encode resp) `shouldBe` Just resp
@@ -94,7 +90,6 @@ spec = do
       decode (encode resp) `shouldBe` Just resp
 
   describe "Cross-compatibility" $ do
-
     it "decodes GHCiRequest JSON from oracle server format" $ do
       -- Verify we can decode what the server would send
       let json = "{\"tag\":\"ReqQueryType\",\"contents\":\"fmap\"}"

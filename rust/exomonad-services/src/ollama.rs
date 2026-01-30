@@ -59,10 +59,14 @@ impl ExternalService for OllamaService {
                     request = request.system(s);
                 }
 
-                let response = self.client.generate(request).await.map_err(|e| ServiceError::Api {
-                    code: 500,
-                    message: e.to_string(),
-                })?;
+                let response =
+                    self.client
+                        .generate(request)
+                        .await
+                        .map_err(|e| ServiceError::Api {
+                            code: 500,
+                            message: e.to_string(),
+                        })?;
 
                 Ok(ServiceResponse::OllamaGenerate {
                     response: response.response,
@@ -105,7 +109,7 @@ mod tests {
             .await;
 
         let service = OllamaService::new(Some(mock_server.uri().parse().unwrap()));
-        
+
         let req = ServiceRequest::OllamaGenerate {
             model: "llama2".into(),
             prompt: "Hi".into(),

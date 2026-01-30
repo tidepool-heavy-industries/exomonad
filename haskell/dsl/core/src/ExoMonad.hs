@@ -1,8 +1,9 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE UndecidableInstances #-}
+
 -- | ExoMonad: Opinionated LLM Agent Framework
 --
 -- An agent is (State, Event, Run). That's the opinion.
@@ -23,30 +24,30 @@
 --
 -- For platform-specific runners that interpret effects with real IO (HTTP, SQLite, GUI),
 -- see @ExoMonad.Effect.Runners@ in exomonad-platform.
---
 module ExoMonad
   ( -- * Agent Definition
-    Agent(..)
-  , SimpleAgent
-  , AgentM
-  , BaseEffects
-  , type (++)
+    Agent (..),
+    SimpleAgent,
+    AgentM,
+    BaseEffects,
+    type (++),
 
     -- * Tool Dispatcher
-  , AgentDispatcher(..)
-  , noDispatcher
+    AgentDispatcher (..),
+    noDispatcher,
 
     -- * Configuration (for runners in exomonad-platform)
-  , AgentConfig(..)
+    AgentConfig (..),
 
     -- * Re-exports
-  , module ExoMonad.Effect
-  ) where
+    module ExoMonad.Effect,
+  )
+where
 
 import Control.Monad.Freer (Eff, Member)
+import Data.Aeson (Value, toJSON)
 import Data.Kind (Type)
 import Data.Text (Text)
-import Data.Aeson (Value, toJSON)
 import ExoMonad.Effect
 
 -- ══════════════════════════════════════════════════════════════════════
@@ -73,15 +74,15 @@ type family (++) (xs :: [k]) (ys :: [k]) :: [k] where
 -- when it needs input, 'emit' when it has output, and returns when done.
 -- The runner just interprets effects - it doesn't impose loop structure.
 data Agent s evt (extra :: [Effect]) = Agent
-  { agentName       :: Text
-    -- ^ Human-readable name for logging
-  , agentInit       :: s
-    -- ^ Initial state (before agentRun starts)
-  , agentRun        :: AgentM s evt extra ()
-    -- ^ The agent's entire lifecycle. Uses RequestInput when it needs input,
+  { -- | Human-readable name for logging
+    agentName :: Text,
+    -- | Initial state (before agentRun starts)
+    agentInit :: s,
+    -- | The agent's entire lifecycle. Uses RequestInput when it needs input,
     -- Emit for output, returns () when session is complete.
-  , agentDispatcher :: AgentDispatcher s evt
-    -- ^ Tool dispatcher for LLM tool calls (use 'noDispatcher' if no tools)
+    agentRun :: AgentM s evt extra (),
+    -- | Tool dispatcher for LLM tool calls (use 'noDispatcher' if no tools)
+    agentDispatcher :: AgentDispatcher s evt
   }
 
 -- | Effect type alias (freer-simple effects have kind Type -> Type).
@@ -103,14 +104,14 @@ type AgentM s evt extra = Eff (extra ++ BaseEffects s evt)
 -- applies to the /remaining/ stack after interpretation, not the agent's
 -- visible stack.
 type BaseEffects s evt =
-  '[ LLM
-   , State s
-   , Emit evt
-   , RequestInput
-   , Log
-   , ChatHistory
-   , Random
-   , Time
+  '[ LLM,
+     State s,
+     Emit evt,
+     RequestInput,
+     Log,
+     ChatHistory,
+     Random,
+     Time
    ]
 
 -- ══════════════════════════════════════════════════════════════════════
@@ -124,17 +125,17 @@ type BaseEffects s evt =
 --
 -- Use 'noDispatcher' for agents without tools.
 newtype AgentDispatcher s evt = AgentDispatcher
-  { runDispatcher
-      :: forall effs.
-         ( Member (State s) effs
-         , Member (Emit evt) effs
-         , Member RequestInput effs
-         , Member Random effs
-         , Member Log effs
-         )
-      => Text   -- Tool name
-      -> Value  -- Tool input (JSON)
-      -> Eff effs (Either Text (ToolResult '[]))  -- Empty target list (no transitions for agents)
+  { runDispatcher ::
+      forall effs.
+      ( Member (State s) effs,
+        Member (Emit evt) effs,
+        Member RequestInput effs,
+        Member Random effs,
+        Member Log effs
+      ) =>
+      Text -> -- Tool name
+      Value -> -- Tool input (JSON)
+      Eff effs (Either Text (ToolResult '[])) -- Empty target list (no transitions for agents)
   }
 
 -- | Default dispatcher for agents without tools
@@ -151,18 +152,18 @@ noDispatcher = AgentDispatcher $ \_ _ ->
 -- Events stream via callback rather than accumulating in memory.
 -- This supports long sessions (DM campaigns) without memory growth.
 data AgentConfig s evt = AgentConfig
-  { acOnEvent     :: evt -> IO ()
-    -- ^ Handle each event as it's emitted (display, log, etc.)
-  , acOnSave      :: s -> IO ()
-    -- ^ Periodic persistence hook
-  , acGetInput    :: IO Text
-    -- ^ Get user input for next turn
-  , acLLM         :: LLMConfig
-    -- ^ LLM API configuration
-  , acLogLevel    :: LogLevel
-    -- ^ Minimum log level to display
-  , acQuitCommands :: [Text]
-    -- ^ Commands that end the session (e.g., ["quit", "exit"])
+  { -- | Handle each event as it's emitted (display, log, etc.)
+    acOnEvent :: evt -> IO (),
+    -- | Periodic persistence hook
+    acOnSave :: s -> IO (),
+    -- | Get user input for next turn
+    acGetInput :: IO Text,
+    -- | LLM API configuration
+    acLLM :: LLMConfig,
+    -- | Minimum log level to display
+    acLogLevel :: LogLevel,
+    -- | Commands that end the session (e.g., ["quit", "exit"])
+    acQuitCommands :: [Text]
   }
 
 -- Note: Platform-specific runners (exomonad, exomonadWith) are in

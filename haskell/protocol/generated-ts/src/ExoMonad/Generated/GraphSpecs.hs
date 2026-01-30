@@ -12,21 +12,21 @@
 -- which is the SINGLE SOURCE OF TRUTH for effect routing decisions.
 module ExoMonad.Generated.GraphSpecs
   ( -- * Effect Specifications (derived from exomonad-core)
-    allEffectSpecs
+    allEffectSpecs,
 
     -- * Re-export types
-  , GraphSpec(..)
-  , EffectSpec(..)
-  ) where
-
-import ExoMonad.Generated.Codegen (GraphSpec(..), EffectSpec(..))
-import ExoMonad.Effect.Metadata
-  ( allEffectMeta
-  , EffectMeta(..)
-  , categoryToText
-  , semanticsToText
+    GraphSpec (..),
+    EffectSpec (..),
   )
+where
 
+import ExoMonad.Effect.Metadata
+  ( EffectMeta (..),
+    allEffectMeta,
+    categoryToText,
+    semanticsToText,
+  )
+import ExoMonad.Generated.Codegen (EffectSpec (..), GraphSpec (..))
 
 -- ============================================================================
 -- Effect Specifications (derived from exomonad-core)
@@ -40,8 +40,9 @@ import ExoMonad.Effect.Metadata
 allEffectSpecs :: [EffectSpec]
 allEffectSpecs = map toEffectSpec allEffectMeta
   where
-    toEffectSpec meta = EffectSpec
-      { esType      = meta.emTypeName
-      , esCategory  = categoryToText meta.emCategory
-      , esSemantics = semanticsToText meta.emSemantics
-      }
+    toEffectSpec meta =
+      EffectSpec
+        { esType = meta.emTypeName,
+          esCategory = categoryToText meta.emCategory,
+          esSemantics = semanticsToText meta.emSemantics
+        }

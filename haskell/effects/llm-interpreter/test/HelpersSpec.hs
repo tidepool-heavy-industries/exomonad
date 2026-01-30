@@ -3,11 +3,9 @@
 -- Covers parseBaseUrl.
 module HelpersSpec (spec) where
 
-import Test.Hspec
-import ExoMonad.LLM.Interpreter.Types (ParsedBaseUrl(..), Scheme(..))
-
 import ExoMonad.LLM.Interpreter (parseBaseUrl)
-
+import ExoMonad.LLM.Interpreter.Types (ParsedBaseUrl (..), Scheme (..))
+import Test.Hspec
 
 spec :: Spec
 spec = do

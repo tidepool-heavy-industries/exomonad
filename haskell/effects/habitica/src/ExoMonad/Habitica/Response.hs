@@ -1,7 +1,7 @@
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE NoFieldSelectors #-}
-{-# LANGUAGE DuplicateRecordFields #-}
-{-# LANGUAGE DeriveAnyClass #-}
 
 -- | Response types from Habitica API.
 --
@@ -9,33 +9,32 @@
 -- produced by the TypeScript handler (deploy/src/handlers/habitica.ts).
 module ExoMonad.Habitica.Response
   ( -- * User Types
-    UserInfo(..)
-  , UserStats(..)
+    UserInfo (..),
+    UserStats (..),
 
     -- * Task Types
-  , HabiticaTask(..)
+    HabiticaTask (..),
 
     -- * Todo Types
-  , FetchedTodo(..)
-  , FetchedChecklistItem(..)
+    FetchedTodo (..),
+    FetchedChecklistItem (..),
 
     -- * Score Types
-  , ScoreResult(..)
-  ) where
+    ScoreResult (..),
+  )
+where
 
 import Data.Aeson
-  ( FromJSON(..)
-  , withObject
-  , (.:)
-  , (.:?)
+  ( FromJSON (..),
+    withObject,
+    (.:),
+    (.:?),
   )
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
+import ExoMonad.Habitica.Types (TaskId (..), TaskType (..), TodoId (..))
 import GHC.Generics (Generic)
-
-import ExoMonad.Habitica.Types (TaskId(..), TodoId(..), TaskType(..))
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- USER TYPES
@@ -43,21 +42,22 @@ import ExoMonad.Habitica.Types (TaskId(..), TodoId(..), TaskType(..))
 
 -- | User info returned by GetUser.
 data UserInfo = UserInfo
-  { userId   :: Text
-  , userName :: Text
-  , stats    :: UserStats
-  } deriving stock (Eq, Show, Generic)
-    deriving anyclass (FromJSON)
+  { userId :: Text,
+    userName :: Text,
+    stats :: UserStats
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON)
 
 -- | User stats (HP, MP, EXP, GP).
 data UserStats = UserStats
-  { hp  :: Double
-  , mp  :: Double
-  , exp :: Double
-  , gp  :: Double
-  } deriving stock (Eq, Show, Generic)
-    deriving anyclass (FromJSON)
-
+  { hp :: Double,
+    mp :: Double,
+    exp :: Double,
+    gp :: Double
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TASK TYPES
@@ -65,19 +65,20 @@ data UserStats = UserStats
 
 -- | Task returned by GetTasks.
 data HabiticaTask = HabiticaTask
-  { id        :: TaskId
-  , text      :: Text
-  , taskType  :: TaskType
-  , completed :: Maybe Bool
-  } deriving stock (Eq, Show, Generic)
+  { id :: TaskId,
+    text :: Text,
+    taskType :: TaskType,
+    completed :: Maybe Bool
+  }
+  deriving stock (Eq, Show, Generic)
 
 instance FromJSON HabiticaTask where
-  parseJSON = withObject "HabiticaTask" $ \v -> HabiticaTask
-    <$> fmap TaskId (v .: "id")
-    <*> v .: "text"
-    <*> (v .: "type" >>= parseTaskType)
-    <*> v .:? "completed"
-
+  parseJSON = withObject "HabiticaTask" $ \v ->
+    HabiticaTask
+      <$> fmap TaskId (v .: "id")
+      <*> v .: "text"
+      <*> (v .: "type" >>= parseTaskType)
+      <*> v .:? "completed"
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TODO TYPES
@@ -85,21 +86,22 @@ instance FromJSON HabiticaTask where
 
 -- | Todo returned by FetchTodos.
 data FetchedTodo = FetchedTodo
-  { id        :: TodoId
-  , title     :: Text
-  , checklist :: [FetchedChecklistItem]
-  , completed :: Bool
-  } deriving stock (Eq, Show, Generic)
-    deriving anyclass (FromJSON)
+  { id :: TodoId,
+    title :: Text,
+    checklist :: [FetchedChecklistItem],
+    completed :: Bool
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON)
 
 -- | Checklist item within a todo.
 data FetchedChecklistItem = FetchedChecklistItem
-  { id        :: Text
-  , text      :: Text
-  , completed :: Bool
-  } deriving stock (Eq, Show, Generic)
-    deriving anyclass (FromJSON)
-
+  { id :: Text,
+    text :: Text,
+    completed :: Bool
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SCORE TYPES
@@ -107,11 +109,11 @@ data FetchedChecklistItem = FetchedChecklistItem
 
 -- | Result of scoring a task.
 data ScoreResult = ScoreResult
-  { delta :: Double
-  , drop  :: Maybe Text
-  } deriving stock (Eq, Show, Generic)
-    deriving anyclass (FromJSON)
-
+  { delta :: Double,
+    drop :: Maybe Text
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS
@@ -119,8 +121,8 @@ data ScoreResult = ScoreResult
 
 parseTaskType :: Text -> Parser TaskType
 parseTaskType t = case T.toLower t of
-  "habits"  -> pure Habits
-  "dailys"  -> pure Dailys
-  "todos"   -> pure Todos
+  "habits" -> pure Habits
+  "dailys" -> pure Dailys
+  "todos" -> pure Todos
   "rewards" -> pure Rewards
-  other     -> fail $ "Unknown task type: " <> T.unpack other
+  other -> fail $ "Unknown task type: " <> T.unpack other

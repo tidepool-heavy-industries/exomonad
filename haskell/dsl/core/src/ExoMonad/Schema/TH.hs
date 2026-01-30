@@ -1,73 +1,74 @@
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module ExoMonad.Schema.TH
   ( -- * Main Derivation Functions
-    deriveMCPType
-  , deriveMCPTypeWith
-  , deriveMCPEnum
+    deriveMCPType,
+    deriveMCPTypeWith,
+    deriveMCPEnum,
 
     -- * Field Mapping DSL (Blessed Operators)
-  , FieldMapping(..)
-  , (??)      -- ^ RECOMMENDED: Auto-rename + description
-  , omit      -- ^ Exclude field from JSON/Schema
+    FieldMapping (..),
+    (??), -- ^ RECOMMENDED: Auto-rename + description
+    omit, -- ^ Exclude field from JSON/Schema
 
     -- * Field Mapping (Advanced - rarely needed)
-  , FieldMappingPartial
-  , (~>)      -- ^ Explicit key rename (only for non-standard keys)
-  , (?)       -- ^ Add description to explicit mapping
+    FieldMappingPartial,
+    (~>), -- ^ Explicit key rename (only for non-standard keys)
+    (?), -- ^ Add description to explicit mapping
 
     -- * Options
-  , MCPOptions(..)
-  , defaultMCPOptions
+    MCPOptions (..),
+    defaultMCPOptions,
 
     -- * Helper functions (required for generated code)
-  , objectSchema
-  , arraySchema
-  , describeField
-  , emptySchema
-  , enumSchema
-  ) where
+    objectSchema,
+    arraySchema,
+    describeField,
+    emptySchema,
+    enumSchema,
+  )
+where
 
+import Control.Monad (forM, unless, when)
+import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), object, withObject, withText, (.:), (.:?), (.=))
+import Data.Aeson.Key qualified as K
+import Data.Char (isUpper, toLower)
+import Data.List (delete, stripPrefix)
+import Data.Map.Strict qualified as Map
+import Data.Maybe (catMaybes, fromMaybe)
+import Data.Text (Text)
+import Data.Text qualified as T
+-- Import types for HasJSONSchema instance generation
+import ExoMonad.StructuredOutput.Class (HasJSONSchema (..), JSONSchema (..), SchemaType (..))
+import GHC.Generics (Generic)
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
-import Data.Aeson (FromJSON(..), ToJSON(..), object, (.=), (.:), (.:?), withObject, withText, Value(..))
-import qualified Data.Aeson.Key as K
-import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Map.Strict as Map
-import GHC.Generics (Generic)
-import Control.Monad (unless, forM, when)
-import Data.List (stripPrefix, delete)
-import Data.Maybe (fromMaybe, catMaybes)
-import Data.Char (toLower, isUpper)
-
--- Import types for HasJSONSchema instance generation
-import ExoMonad.StructuredOutput.Class (HasJSONSchema(..), JSONSchema(..), SchemaType(..))
 
 -- | Options for MCP type derivation
 data MCPOptions = MCPOptions
-  { fieldPrefix :: String
-    -- ^ Exact prefix to strip from field names (error if missing)
-  , fieldModifier :: String -> String
-    -- ^ Function to transform field names to JSON keys (default: snake_case)
+  { -- | Exact prefix to strip from field names (error if missing)
+    fieldPrefix :: String,
+    -- | Function to transform field names to JSON keys (default: snake_case)
+    fieldModifier :: String -> String
   }
 
 -- | Default options: no prefix, camelToSnake transformation
 defaultMCPOptions :: MCPOptions
-defaultMCPOptions = MCPOptions
-  { fieldPrefix = ""
-  , fieldModifier = camelToSnake
-  }
+defaultMCPOptions =
+  MCPOptions
+    { fieldPrefix = "",
+      fieldModifier = camelToSnake
+    }
 
 -- | Simple camelCase to snake_case converter
 camelToSnake :: String -> String
 camelToSnake = go
   where
     go [] = []
-    go (c:cs)
+    go (c : cs)
       | isUpper c = '_' : toLower c : go cs
       | otherwise = c : go cs
 
@@ -94,9 +95,12 @@ camelToSnake = go
 
 -- | Field mapping DSL types
 data FieldMapping
-  = Explicit Name String (Maybe String) -- ^ Explicit mapping: field -> key + optional description
-  | Auto Name (Maybe String)            -- ^ Auto mapping: field -> derived key + optional description
-  | Omit Name                           -- ^ Omit field from JSON/Schema
+  = -- | Explicit mapping: field -> key + optional description
+    Explicit Name String (Maybe String)
+  | -- | Auto mapping: field -> derived key + optional description
+    Auto Name (Maybe String)
+  | -- | Omit field from JSON/Schema
+    Omit Name
 
 data FieldMappingPartial = FieldMappingPartial Name String
 
@@ -105,18 +109,21 @@ data FieldMappingPartial = FieldMappingPartial Name String
 -- __Prefer @(??)@ unless you need non-standard key names.__
 -- This operator should only be used when the auto-derived key won't work.
 infixl 1 ~>
+
 (~>) :: Name -> String -> FieldMapping
 n ~> k = Explicit n k Nothing
 
 -- | Add a description to a mapping
 infixl 0 ?
+
 (?) :: FieldMapping -> String -> FieldMapping
 (Explicit n k _) ? d = Explicit n k (Just d)
-(Auto n _) ? d       = Auto n (Just d)
-(Omit n) ? _         = Omit n -- Should not happen typically
+(Auto n _) ? d = Auto n (Just d)
+(Omit n) ? _ = Omit n -- Should not happen typically
 
 -- | Auto-map a field with a description
 infixl 0 ??
+
 (??) :: Name -> String -> FieldMapping
 n ?? d = Auto n (Just d)
 
@@ -133,9 +140,9 @@ deriveMCPTypeWith :: MCPOptions -> Name -> [FieldMapping] -> Q [Dec]
 deriveMCPTypeWith opts typeName mappings = do
   info <- reify typeName
   case info of
-    TyConI (DataD _ _ _ _ [RecC conName fields] _) -> 
+    TyConI (DataD _ _ _ _ [RecC conName fields] _) ->
       deriveForRecord opts typeName conName fields mappings
-    TyConI (NewtypeD _ _ _ _ (RecC conName fields) _) -> 
+    TyConI (NewtypeD _ _ _ _ (RecC conName fields) _) ->
       deriveForRecord opts typeName conName fields mappings
     _ -> fail $ "deriveMCPType: " ++ show typeName ++ " must be a single-constructor record type"
 
@@ -144,17 +151,19 @@ deriveForRecord opts typeName conName fields mappings = do
   -- 1. Validate fields
   let typeFields = [n | (n, _, _) <- fields]
       typeFieldNames = map nameBase typeFields
-      getMappingName m = nameBase (case m of { Explicit x _ _ -> x; Auto x _ -> x; Omit x -> x })
+      getMappingName m = nameBase (case m of Explicit x _ _ -> x; Auto x _ -> x; Omit x -> x)
       mappedFieldNames = map getMappingName mappings
-      
+
       missingFields = filter (`notElem` mappedFieldNames) typeFieldNames
       unknownFields = filter (`notElem` typeFieldNames) mappedFieldNames
 
   unless (null missingFields) $
-    fail $ "deriveMCPType: Fields missing from mapping: " ++ show missingFields
-  
+    fail $
+      "deriveMCPType: Fields missing from mapping: " ++ show missingFields
+
   unless (null unknownFields) $
-    fail $ "deriveMCPType: Unknown fields in mapping: " ++ show unknownFields
+    fail $
+      "deriveMCPType: Unknown fields in mapping: " ++ show unknownFields
 
   -- 2. Process fields into a usable structure
   fieldData <- forM fields $ \(fname, _, ftype) -> do
@@ -179,7 +188,6 @@ deriveForRecord opts typeName conName fields mappings = do
   toJsonDec <- genToJSON typeName validFields
 
   pure [hasJsonSchemaDec, fromJsonDec, toJsonDec]
-
   where
     getFieldName (Explicit n _ _) = n
     getFieldName (Auto n _) = n
@@ -187,21 +195,21 @@ deriveForRecord opts typeName conName fields mappings = do
 
 resolveMapping :: MCPOptions -> Name -> FieldMapping -> (String, Maybe String)
 resolveMapping _ _ (Explicit _ k d) = (k, d)
-resolveMapping opts fname (Auto _ d) = 
+resolveMapping opts fname (Auto _ d) =
   let baseName = nameBase fname
       prefix = opts.fieldPrefix
-      processed = 
+      processed =
         if null prefix
-        then baseName
-        else case stripPrefix prefix baseName of
-          Just rest -> rest
-          Nothing -> error $ "deriveMCPType: Field '" ++ baseName ++ "' does not start with expected prefix '" ++ prefix ++ "'"
-      
+          then baseName
+          else case stripPrefix prefix baseName of
+            Just rest -> rest
+            Nothing -> error $ "deriveMCPType: Field '" ++ baseName ++ "' does not start with expected prefix '" ++ prefix ++ "'"
+
       processed' = case processed of
-        (c:cs) -> toLower c : cs
+        (c : cs) -> toLower c : cs
         [] -> []
       key = opts.fieldModifier processed'
-  in (key, d)
+   in (key, d)
 resolveMapping _ _ (Omit _) = error "Omit should be filtered out"
 
 isMaybeType :: Type -> Bool
@@ -214,32 +222,34 @@ deriveFieldSchema ftype desc = do
   baseSchema <- typeToSchemaExp ftype
   -- Add description if present
   case desc of
-    Just d -> [| describeField $(litE (stringL d)) $(pure baseSchema) |]
+    Just d -> [|describeField $(litE (stringL d)) $(pure baseSchema)|]
     Nothing -> pure baseSchema
 
 -- | Convert a Haskell type to a JSONSchema expression (simplified from original Schema.hs)
 typeToSchemaExp :: Type -> Q Exp
 typeToSchemaExp typ = case typ of
-  ConT name | nameBase name `elem` ["Text", "String", "FilePath"] -> [| emptySchema TString |]
-  ConT name | nameBase name `elem` ["Int", "Integer"] -> [| emptySchema TInteger |]
-  ConT name | nameBase name `elem` ["Double", "Float"] -> [| emptySchema TNumber |]
-  ConT name | nameBase name == "Bool" -> [| emptySchema TBoolean |]
+  ConT name | nameBase name `elem` ["Text", "String", "FilePath"] -> [|emptySchema TString|]
+  ConT name | nameBase name `elem` ["Int", "Integer"] -> [|emptySchema TInteger|]
+  ConT name | nameBase name `elem` ["Double", "Float"] -> [|emptySchema TNumber|]
+  ConT name | nameBase name == "Bool" -> [|emptySchema TBoolean|]
   AppT ListT elemType -> do
     elemSchema <- typeToSchemaExp elemType
-    [| arraySchema $(pure elemSchema) |]
+    [|arraySchema $(pure elemSchema)|]
   AppT (ConT name) innerType | nameBase name == "Maybe" -> typeToSchemaExp innerType
-  ConT name -> [| jsonSchema @($(conT name)) |]
-  _ -> [| emptySchema TString |] -- Fallback
+  ConT name -> [|jsonSchema @($(conT name))|]
+  _ -> [|emptySchema TString|] -- Fallback
 
 -- | Generate HasJSONSchema instance
 genHasJSONSchema :: Name -> [(Name, Type, String, Exp, Bool)] -> Q Dec
 genHasJSONSchema typeName fields = do
-  let props = listE [ tupE [litE (stringL k), pure s] | (_, _, k, s, _) <- fields ]
-      required = listE [ litE (stringL k) | (_, _, k, _, isOpt) <- fields, not isOpt ]
-  
-  [d| instance HasJSONSchema $(conT typeName) where
-        jsonSchema = objectSchema $props $required
-    |] >>= \case
+  let props = listE [tupE [litE (stringL k), pure s] | (_, _, k, s, _) <- fields]
+      required = listE [litE (stringL k) | (_, _, k, _, isOpt) <- fields, not isOpt]
+
+  [d|
+    instance HasJSONSchema $(conT typeName) where
+      jsonSchema = objectSchema $props $required
+    |]
+    >>= \case
       [dec] -> pure dec
       _ -> fail "genHasJSONSchema produced unexpected declarations"
 
@@ -249,36 +259,45 @@ genFromJSON typeName conName fields = do
   vName <- newName "v"
 
   -- Construct the record
-  let applicativeParse = foldl 
-        (\acc (fname, _, key, _, isOpt) -> 
-            let keyLit = litE (stringL key)
-                -- We use AppE to apply the operator to the arguments
-                -- acc <*> (v .: "key")
-                -- The operator is (<*>)
-                -- The second arg is (v .: "key")
-                parseExpr = if isOpt
-                  then [| $(varE vName) .:? K.fromText (T.pack $keyLit) |]
-                  else [| $(varE vName) .: K.fromText (T.pack $keyLit) |]
-            in [| $acc <*> $parseExpr |] 
-        )
-        [| pure $(conE conName) |] 
-        fields
+  let applicativeParse =
+        foldl
+          ( \acc (fname, _, key, _, isOpt) ->
+              let keyLit = litE (stringL key)
+                  -- We use AppE to apply the operator to the arguments
+                  -- acc <*> (v .: "key")
+                  -- The operator is (<*>)
+                  -- The second arg is (v .: "key")
+                  parseExpr =
+                    if isOpt
+                      then [|$(varE vName) .:? K.fromText (T.pack $keyLit)|]
+                      else [|$(varE vName) .: K.fromText (T.pack $keyLit)|]
+               in [|$acc <*> $parseExpr|]
+          )
+          [|pure $(conE conName)|]
+          fields
 
-  [d| instance FromJSON $(conT typeName) where
-        parseJSON = withObject $(litE (stringL (nameBase typeName))) $ \ $(varP vName) -> $applicativeParse
-    |] >>= \case
+  [d|
+    instance FromJSON $(conT typeName) where
+      parseJSON = withObject $(litE (stringL (nameBase typeName))) $ \ $(varP vName) -> $applicativeParse
+    |]
+    >>= \case
       [dec] -> pure dec
       _ -> fail "genFromJSON produced unexpected declarations"
 
 -- | Generate ToJSON instance
 genToJSON :: Name -> [(Name, Type, String, Exp, Bool)] -> Q Dec
 genToJSON typeName fields = do
-  let pairs = listE [ [| K.fromText (T.pack $(litE (stringL key))) .= $(varE fname) args |] 
-                    | (fname, _, key, _, _) <- fields ]
-  
-  [d| instance ToJSON $(conT typeName) where
-        toJSON args = object $pairs
-    |] >>= \case
+  let pairs =
+        listE
+          [ [|K.fromText (T.pack $(litE (stringL key))) .= $(varE fname) args|]
+          | (fname, _, key, _, _) <- fields
+          ]
+
+  [d|
+    instance ToJSON $(conT typeName) where
+      toJSON args = object $pairs
+    |]
+    >>= \case
       [dec] -> pure dec
       _ -> fail "genToJSON produced unexpected declarations"
 
@@ -313,7 +332,7 @@ genToJSON typeName fields = do
 -- AND I cannot import ExoMonad.Schema because of cycle.
 --
 -- SOLUTION:
--- I must implement `objectSchema`, `arraySchema`, `describeField`, `emptySchema` in THIS module (ExoMonad.Schema.TH) 
+-- I must implement `objectSchema`, `arraySchema`, `describeField`, `emptySchema` in THIS module (ExoMonad.Schema.TH)
 -- and export them, OR define them locally and use them.
 --
 -- Since ExoMonad.Schema already defines them, I should move them to a shared module `ExoMonad.Schema.Core` or similar.
@@ -323,7 +342,7 @@ genToJSON typeName fields = do
 -- If I use them in the splice `[| objectSchema ... |]`, the splice will refer to `ExoMonad.Schema.TH.objectSchema`.
 -- So I must export them from here.
 -- And ExoMonad.Schema can re-export them (or hide its own and re-export these).
--- 
+--
 -- Let's duplicate them here for now to break the cycle and keep it simple.
 -- I'll use the names `objectSchema`, `arraySchema` etc. in the splice, which resolve to this module's versions.
 
@@ -331,19 +350,20 @@ emptySchema :: SchemaType -> JSONSchema
 emptySchema t = JSONSchema t Nothing Map.empty [] Nothing Nothing Nothing Nothing
 
 objectSchema :: [(Text, JSONSchema)] -> [Text] -> JSONSchema
-objectSchema props required = (emptySchema TObject)
-  { schemaProperties = Map.fromList props
-  , schemaRequired = required
-  }
+objectSchema props required =
+  (emptySchema TObject)
+    { schemaProperties = Map.fromList props,
+      schemaRequired = required
+    }
 
 arraySchema :: JSONSchema -> JSONSchema
-arraySchema items = (emptySchema TArray) { schemaItems = Just items }
+arraySchema items = (emptySchema TArray) {schemaItems = Just items}
 
 describeField :: Text -> JSONSchema -> JSONSchema
-describeField desc schema = schema { schemaDescription = Just desc }
+describeField desc schema = schema {schemaDescription = Just desc}
 
 enumSchema :: [Text] -> JSONSchema
-enumSchema variants = (emptySchema TString) { schemaEnum = Just variants }
+enumSchema variants = (emptySchema TString) {schemaEnum = Just variants}
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ENUM DERIVATION
@@ -359,7 +379,7 @@ enumSchema variants = (emptySchema TString) { schemaEnum = Just variants }
 -- @
 -- data Depth = Low | Medium | High
 --   deriving stock (Show, Eq, Generic, Bounded, Enum)
---
+
 -- $(deriveMCPEnum ''Depth)
 -- @
 --
@@ -382,6 +402,7 @@ enumSchema variants = (emptySchema TString) { schemaEnum = Just variants }
 --   toJSON Medium = String "medium"
 --   toJSON High   = String "high"
 -- @
+
 deriveMCPEnum :: Name -> Q [Dec]
 deriveMCPEnum typeName = do
   info <- reify typeName
@@ -390,9 +411,11 @@ deriveMCPEnum typeName = do
       -- Extract nullary constructor names
       let conNames = [n | NormalC n [] <- cons]
       when (length conNames /= length cons) $
-        fail $ "deriveMCPEnum: " ++ show typeName ++ " must have only nullary constructors"
+        fail $
+          "deriveMCPEnum: " ++ show typeName ++ " must have only nullary constructors"
       when (null conNames) $
-        fail $ "deriveMCPEnum: " ++ show typeName ++ " must have at least one constructor"
+        fail $
+          "deriveMCPEnum: " ++ show typeName ++ " must have at least one constructor"
 
       genEnumInstances typeName conNames
     _ -> fail $ "deriveMCPEnum: " ++ show typeName ++ " must be a data type with nullary constructors"
@@ -403,10 +426,11 @@ genEnumInstances typeName conNames = do
       conStrings = [(n, map toLower (nameBase n)) | n <- conNames]
 
   -- Generate HasJSONSchema instance
-  hasJsonSchemaDec <- [d|
-    instance HasJSONSchema $(conT typeName) where
-      jsonSchema = enumSchema $(listE [litE (stringL s) | (_, s) <- conStrings])
-    |]
+  hasJsonSchemaDec <-
+    [d|
+      instance HasJSONSchema $(conT typeName) where
+        jsonSchema = enumSchema $(listE [litE (stringL s) | (_, s) <- conStrings])
+      |]
 
   -- Generate FromJSON instance
   fromJsonDec <- genFromJSONEnum typeName conStrings
@@ -420,27 +444,32 @@ genFromJSONEnum :: Name -> [(Name, String)] -> Q [Dec]
 genFromJSONEnum typeName conStrings = do
   tVar <- newName "t"
   let matchCases =
-        [ match (litP (stringL s)) (normalB [| pure $(conE n) |]) []
+        [ match (litP (stringL s)) (normalB [|pure $(conE n)|]) []
         | (n, s) <- conStrings
-        ] ++
-        [ match wildP (normalB
-            [| fail $ "Unknown " ++ $(litE (stringL (nameBase typeName))) ++ ": " ++ T.unpack $(varE tVar) |]) []
         ]
+          ++ [ match
+                 wildP
+                 ( normalB
+                     [|fail $ "Unknown " ++ $(litE (stringL (nameBase typeName))) ++ ": " ++ T.unpack $(varE tVar)|]
+                 )
+                 []
+             ]
 
-  caseExp <- caseE [| T.toLower $(varE tVar) |] matchCases
-  [d| instance FromJSON $(conT typeName) where
-        parseJSON = withText $(litE (stringL (nameBase typeName))) $ \ $(varP tVar) ->
-          $(pure caseExp)
+  caseExp <- caseE [|T.toLower $(varE tVar)|] matchCases
+  [d|
+    instance FromJSON $(conT typeName) where
+      parseJSON = withText $(litE (stringL (nameBase typeName))) $ \ $(varP tVar) ->
+        $(pure caseExp)
     |]
 
 genToJSONEnum :: Name -> [(Name, String)] -> Q [Dec]
 genToJSONEnum typeName conStrings = do
   let matchCases =
-        [ match (conP n []) (normalB [| String (T.pack $(litE (stringL s))) |]) []
+        [ match (conP n []) (normalB [|String (T.pack $(litE (stringL s)))|]) []
         | (n, s) <- conStrings
         ]
 
-  [d| instance ToJSON $(conT typeName) where
-        toJSON = $(lamCaseE matchCases)
+  [d|
+    instance ToJSON $(conT typeName) where
+      toJSON = $(lamCaseE matchCases)
     |]
-

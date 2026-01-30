@@ -42,27 +42,26 @@
 -- @
 module ExoMonad.LLM.Tools
   ( -- * Tool Schema Types
-    ToolSchema(..)
-  , toolSchemaToAnthropicTool
+    ToolSchema (..),
+    toolSchemaToAnthropicTool,
 
     -- * Tool Record Typeclass
-  , ToolRecord(..)
+    ToolRecord (..),
 
     -- * Tool Dispatch Helpers
-  , dispatchHandler
-  , ToolDispatchError(..)
-  ) where
+    dispatchHandler,
+    ToolDispatchError (..),
+  )
+where
 
 import Control.Monad.Freer (Eff)
-import Data.Aeson (Value, FromJSON, ToJSON, fromJSON, toJSON)
-import qualified Data.Aeson as Aeson
+import Data.Aeson (FromJSON, ToJSON, Value, fromJSON, toJSON)
+import Data.Aeson qualified as Aeson
 import Data.Kind (Type)
 import Data.Proxy (Proxy)
 import Data.Text (Text)
-import qualified Data.Text as T
-
-import ExoMonad.Tool.Wire (AnthropicTool(..))
-
+import Data.Text qualified as T
+import ExoMonad.Tool.Wire (AnthropicTool (..))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TOOL SCHEMA TYPES
@@ -72,23 +71,23 @@ import ExoMonad.Tool.Wire (AnthropicTool(..))
 --
 -- This is the information needed to tell the LLM about a tool.
 data ToolSchema = ToolSchema
-  { tsName        :: Text
-    -- ^ Tool name (snake_case, used in tool_use blocks)
-  , tsDescription :: Text
-    -- ^ Human-readable description (shown to LLM)
-  , tsInputSchema :: Value
-    -- ^ JSON Schema for tool input
+  { -- | Tool name (snake_case, used in tool_use blocks)
+    tsName :: Text,
+    -- | Human-readable description (shown to LLM)
+    tsDescription :: Text,
+    -- | JSON Schema for tool input
+    tsInputSchema :: Value
   }
   deriving stock (Show, Eq)
 
 -- | Convert a ToolSchema to Anthropic wire format.
 toolSchemaToAnthropicTool :: ToolSchema -> AnthropicTool
-toolSchemaToAnthropicTool ts = AnthropicTool
-  { atName = ts.tsName
-  , atDescription = ts.tsDescription
-  , atInputSchema = ts.tsInputSchema
-  }
-
+toolSchemaToAnthropicTool ts =
+  AnthropicTool
+    { atName = ts.tsName,
+      atDescription = ts.tsDescription,
+      atInputSchema = ts.tsInputSchema
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TOOL DISPATCH ERROR
@@ -96,12 +95,11 @@ toolSchemaToAnthropicTool ts = AnthropicTool
 
 -- | Errors that can occur during tool dispatch.
 data ToolDispatchError
-  = ToolNotFound Text
-    -- ^ Tool name not found in the record
-  | ToolInputParseError Text Text
-    -- ^ Tool input failed to parse: (tool name, error message)
+  = -- | Tool name not found in the record
+    ToolNotFound Text
+  | -- | Tool input failed to parse: (tool name, error message)
+    ToolInputParseError Text Text
   deriving stock (Show, Eq)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TOOL RECORD TYPECLASS
@@ -141,12 +139,11 @@ class ToolRecord (tools :: [Type -> Type] -> Type) where
   --
   -- Given a tool record, tool name, and JSON input, calls the
   -- matching handler and returns the JSON result.
-  dispatchTool
-    :: tools es
-    -> Text
-    -> Value
-    -> Eff es (Either ToolDispatchError Value)
-
+  dispatchTool ::
+    tools es ->
+    Text ->
+    Value ->
+    Eff es (Either ToolDispatchError Value)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- DISPATCH HELPERS
@@ -161,12 +158,12 @@ class ToolRecord (tools :: [Type -> Type] -> Type) where
 --   "search" -> dispatchHandler tools.search "search" input
 --   _ -> pure $ Left $ ToolNotFound name
 -- @
-dispatchHandler
-  :: (FromJSON args, ToJSON result, Applicative m)
-  => (args -> m result)
-  -> Text
-  -> Value
-  -> m (Either ToolDispatchError Value)
+dispatchHandler ::
+  (FromJSON args, ToJSON result, Applicative m) =>
+  (args -> m result) ->
+  Text ->
+  Value ->
+  m (Either ToolDispatchError Value)
 dispatchHandler handler toolName input =
   case fromJSON input of
     Aeson.Success args ->

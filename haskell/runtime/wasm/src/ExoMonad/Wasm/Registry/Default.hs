@@ -7,28 +7,27 @@
 -- or use individual entries to build a custom registry.
 module ExoMonad.Wasm.Registry.Default
   ( -- * Setup
-    setupDefaultRegistry
-  , defaultGraphEntries
+    setupDefaultRegistry,
+    defaultGraphEntries,
 
     -- * Individual entries (re-exported)
-  , testGraphEntry
-  , exampleGraphEntry
-  ) where
+    testGraphEntry,
+    exampleGraphEntry,
+  )
+where
 
 import Data.Text (Text)
 import ExoMonad.Wasm.Registry (setRegistry)
-import ExoMonad.Wasm.Registry.Types (GraphEntry)
-import ExoMonad.Wasm.Registry.TestGraph (testGraphEntry)
 import ExoMonad.Wasm.Registry.ExampleGraph (exampleGraphEntry)
-
+import ExoMonad.Wasm.Registry.TestGraph (testGraphEntry)
+import ExoMonad.Wasm.Registry.Types (GraphEntry)
 
 -- | All default graph entries.
 defaultGraphEntries :: [(Text, GraphEntry)]
 defaultGraphEntries =
-  [ ("test", testGraphEntry)
-  , ("example", exampleGraphEntry)
+  [ ("test", testGraphEntry),
+    ("example", exampleGraphEntry)
   ]
-
 
 -- | Set up the default registry with all standard graphs.
 --

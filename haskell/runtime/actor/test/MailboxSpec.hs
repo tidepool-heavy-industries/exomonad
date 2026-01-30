@@ -1,21 +1,17 @@
 module MailboxSpec (spec) where
 
-import Test.Hspec
-import Control.Concurrent (threadDelay, forkIO)
+import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Monad (forM_, replicateM)
-import Data.Aeson (Value(..), object, (.=))
-import qualified Data.Aeson.KeyMap as KM
-import qualified Data.Vector as V
-
+import Data.Aeson (Value (..), object, (.=))
+import Data.Aeson.KeyMap qualified as KM
+import Data.Vector qualified as V
 import ExoMonad.Actor.Mailbox
-
+import Test.Hspec
 
 spec :: Spec
 spec = describe "Mailbox" $ do
-
   describe "basic operations" $ do
-
     it "can send and receive a message" $ do
       mailbox <- newMailboxIO @Value
       send mailbox (String "hello")
@@ -33,7 +29,6 @@ spec = describe "Mailbox" $ do
       [m1, m2, m3] `shouldBe` [String "first", String "second", String "third"]
 
   describe "concurrent access" $ do
-
     it "handles concurrent sends" $ do
       mailbox <- newMailboxIO @Value
       done <- newEmptyMVar
@@ -60,7 +55,7 @@ spec = describe "Mailbox" $ do
         msg <- receive mailbox
         putMVar result msg
       -- Small delay to ensure receiver is blocked
-      threadDelay 10000  -- 10ms
+      threadDelay 10000 -- 10ms
       -- Send message
       send mailbox (String "unblock")
       -- Receiver should now complete
@@ -68,7 +63,6 @@ spec = describe "Mailbox" $ do
       msg `shouldBe` String "unblock"
 
   describe "JSON Value types" $ do
-
     it "handles all JSON Value types" $ do
       mailbox <- newMailboxIO @Value
       -- Send all types
@@ -100,23 +94,25 @@ spec = describe "Mailbox" $ do
 
     it "handles nested objects" $ do
       mailbox <- newMailboxIO @Value
-      let nested = object
-            [ "level1" .= object
-                [ "level2" .= object
-                    [ "value" .= (42 :: Int)
+      let nested =
+            object
+              [ "level1"
+                  .= object
+                    [ "level2"
+                        .= object
+                          [ "value" .= (42 :: Int)
+                          ]
                     ]
-                ]
-            ]
+              ]
       send mailbox nested
       result <- receive mailbox
       result `shouldBe` nested
 
   describe "stress" $ do
-
     it "handles 100 queued messages" $ do
       mailbox <- newMailboxIO @Value
       -- Send 100 messages
-      forM_ [1..100 :: Int] $ \i ->
+      forM_ [1 .. 100 :: Int] $ \i ->
         send mailbox (Number (fromIntegral i))
       -- Receive all 100
       msgs <- replicateM 100 (receive mailbox)
@@ -129,9 +125,9 @@ spec = describe "Mailbox" $ do
       mailbox <- newMailboxIO @Value
       dones <- replicateM 20 newEmptyMVar
       -- 20 threads each sending 5 messages
-      forM_ (zip [1..20 :: Int] dones) $ \(tid, done) ->
+      forM_ (zip [1 .. 20 :: Int] dones) $ \(tid, done) ->
         forkIO $ do
-          forM_ [1..5 :: Int] $ \i ->
+          forM_ [1 .. 5 :: Int] $ \i ->
             send mailbox (Number (fromIntegral $ tid * 100 + i))
           putMVar done ()
       -- Wait for all senders

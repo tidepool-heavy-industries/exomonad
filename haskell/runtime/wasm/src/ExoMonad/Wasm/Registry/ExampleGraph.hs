@@ -8,12 +8,12 @@
 -- - GraphInfo derived from ExampleGraph type via Generics
 -- - Session management handled by Registry
 module ExoMonad.Wasm.Registry.ExampleGraph
-  ( exampleGraphEntry
-  ) where
+  ( exampleGraphEntry,
+  )
+where
 
-import ExoMonad.Wasm.Registry (makeGraphEntry, GraphEntry)
 import ExoMonad.Wasm.ExampleGraph (ExampleGraph, runExampleGraph)
-
+import ExoMonad.Wasm.Registry (GraphEntry, makeGraphEntry)
 
 -- | ExampleGraph entry for the registry.
 --

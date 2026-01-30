@@ -26,16 +26,20 @@
 -- @
 module ExoMonad.Actor
   ( -- * Core Types
-    module ExoMonad.Actor.Types
-    -- * Mailbox Operations
-  , module ExoMonad.Actor.Mailbox
-    -- * Actor Spawning
-  , module ExoMonad.Actor.Spawn
-    -- * Runtime
-  , module ExoMonad.Actor.Runtime
-  ) where
+    module ExoMonad.Actor.Types,
 
-import ExoMonad.Actor.Types
+    -- * Mailbox Operations
+    module ExoMonad.Actor.Mailbox,
+
+    -- * Actor Spawning
+    module ExoMonad.Actor.Spawn,
+
+    -- * Runtime
+    module ExoMonad.Actor.Runtime,
+  )
+where
+
 import ExoMonad.Actor.Mailbox
-import ExoMonad.Actor.Spawn
 import ExoMonad.Actor.Runtime
+import ExoMonad.Actor.Spawn
+import ExoMonad.Actor.Types

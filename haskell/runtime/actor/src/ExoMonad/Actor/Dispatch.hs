@@ -10,34 +10,33 @@
 -- Moved from exomonad-parallel for runtime consolidation.
 module ExoMonad.Actor.Dispatch
   ( -- * Configuration
-    ParallelConfig(..)
-  , defaultParallelConfig
+    ParallelConfig (..),
+    defaultParallelConfig,
 
     -- * Execution
-  , dispatchAll
+    dispatchAll,
 
     -- * Worker Management
-  , WorkerResult(..)
-  , spawnWorker
+    WorkerResult (..),
+    spawnWorker,
 
     -- * Type-level extraction
-  , SpawnWorkers(..)
-  ) where
+    SpawnWorkers (..),
+  )
+where
 
 import Control.Concurrent.STM (atomically)
-import Data.Aeson (Value, ToJSON(..))
-import Data.Kind (Type, Constraint)
+import Data.Aeson (ToJSON (..), Value)
+import Data.Kind (Constraint, Type)
+import Data.Proxy (Proxy (..))
 import Data.Text (Text)
-import qualified Data.Text as T
-import GHC.TypeLits (KnownSymbol, symbolVal)
-import Data.Proxy (Proxy(..))
-import qualified Ki
-
+import Data.Text qualified as T
+import ExoMonad.Actor.Retry (RetryConfig (..), RetryResult (..), defaultRetryConfig, withRetry)
 import ExoMonad.Graph.Goto (To)
-import ExoMonad.Graph.Goto.Internal (GotoAll(..))
-import ExoMonad.Graph.Types (HList(..))
-import ExoMonad.Actor.Retry (RetryConfig(..), defaultRetryConfig, withRetry, RetryResult(..))
-
+import ExoMonad.Graph.Goto.Internal (GotoAll (..))
+import ExoMonad.Graph.Types (HList (..))
+import GHC.TypeLits (KnownSymbol, symbolVal)
+import Ki qualified
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONFIGURATION
@@ -45,19 +44,19 @@ import ExoMonad.Actor.Retry (RetryConfig(..), defaultRetryConfig, withRetry, Ret
 
 -- | Configuration for parallel execution.
 data ParallelConfig = ParallelConfig
-  { pcRetry :: RetryConfig
-    -- ^ Retry configuration for failed workers
-  , pcMaxConcurrency :: Maybe Int
-    -- ^ Maximum number of concurrent workers (Nothing = unlimited)
+  { -- | Retry configuration for failed workers
+    pcRetry :: RetryConfig,
+    -- | Maximum number of concurrent workers (Nothing = unlimited)
+    pcMaxConcurrency :: Maybe Int
   }
 
 -- | Default parallel configuration.
 defaultParallelConfig :: ParallelConfig
-defaultParallelConfig = ParallelConfig
-  { pcRetry = defaultRetryConfig
-  , pcMaxConcurrency = Nothing
-  }
-
+defaultParallelConfig =
+  ParallelConfig
+    { pcRetry = defaultRetryConfig,
+      pcMaxConcurrency = Nothing
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- WORKER TYPES
@@ -65,13 +64,12 @@ defaultParallelConfig = ParallelConfig
 
 -- | Result from a worker, tagged with its source.
 data WorkerResult = WorkerResult
-  { wrSource :: Text
-    -- ^ Source node name
-  , wrPayload :: Value
-    -- ^ JSON-serialized result
+  { -- | Source node name
+    wrSource :: Text,
+    -- | JSON-serialized result
+    wrPayload :: Value
   }
   deriving stock (Show, Eq)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- DISPATCH ALL
@@ -87,12 +85,14 @@ data WorkerResult = WorkerResult
 --   dispatchAll defaultParallelConfig scope workerDispatch
 --     [("hTests", testsPayload), ("hImpl", implPayload)]
 -- @
-dispatchAll
-  :: ParallelConfig
-  -> Ki.Scope
-  -> (Text -> Value -> IO WorkerResult)  -- ^ Single target dispatcher
-  -> [(Text, Value)]                      -- ^ Targets with payloads
-  -> IO [WorkerResult]
+dispatchAll ::
+  ParallelConfig ->
+  Ki.Scope ->
+  -- | Single target dispatcher
+  (Text -> Value -> IO WorkerResult) ->
+  -- | Targets with payloads
+  [(Text, Value)] ->
+  IO [WorkerResult]
 dispatchAll config scope dispatch targets = do
   -- Spawn all workers concurrently
   threads <- mapM (spawnWorker config scope dispatch) targets
@@ -100,15 +100,14 @@ dispatchAll config scope dispatch targets = do
   mapM (atomically . Ki.await) threads
 
 -- | Spawn a single worker with retry logic.
-spawnWorker
-  :: ParallelConfig
-  -> Ki.Scope
-  -> (Text -> Value -> IO WorkerResult)
-  -> (Text, Value)
-  -> IO (Ki.Thread WorkerResult)
+spawnWorker ::
+  ParallelConfig ->
+  Ki.Scope ->
+  (Text -> Value -> IO WorkerResult) ->
+  (Text, Value) ->
+  IO (Ki.Thread WorkerResult)
 spawnWorker config scope dispatch (target, payload) =
   Ki.fork scope $ runWithRetryOrFail (config.pcRetry) $ dispatch target payload
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SPAWN WORKERS TYPECLASS
@@ -134,16 +133,17 @@ instance SpawnWorkers '[] where
 
 -- | Recursive case: named target.
 instance
-  ( KnownSymbol name
-  , ToJSON payload
-  , SpawnWorkers rest
-  ) => SpawnWorkers (To name payload ': rest) where
+  ( KnownSymbol name,
+    ToJSON payload,
+    SpawnWorkers rest
+  ) =>
+  SpawnWorkers (To name payload ': rest)
+  where
   extractTargets (GotoAll (payload ::: restPayloads)) =
     let targetName = T.pack (symbolVal (Proxy @name))
         jsonPayload = toJSON payload
         restTargets = extractTargets @rest (GotoAll restPayloads)
-    in (targetName, jsonPayload) : restTargets
-
+     in (targetName, jsonPayload) : restTargets
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPER FUNCTIONS

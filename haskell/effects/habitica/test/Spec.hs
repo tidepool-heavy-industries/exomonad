@@ -1,8 +1,7 @@
 module Main (main) where
 
+import ResponseSpec qualified
 import Test.Hspec
-
-import qualified ResponseSpec
 
 main :: IO ()
 main = hspec $ do

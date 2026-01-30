@@ -1,8 +1,8 @@
-use anyhow::{Result, Context};
-use std::process::Command;
-use std::io::{BufReader, BufRead};
+use crate::types::{BuildError, BuildWarning, CabalBuildResult, CabalTestResult, TestFailure};
+use anyhow::{Context, Result};
 use regex::Regex;
-use crate::types::{CabalBuildResult, CabalTestResult, TestFailure, BuildError, BuildWarning};
+use std::io::{BufRead, BufReader};
+use std::process::Command;
 
 pub fn build(cwd: &str, package: Option<String>) -> Result<()> {
     let mut cmd = Command::new("cabal");
@@ -42,38 +42,40 @@ pub fn build(cwd: &str, package: Option<String>) -> Result<()> {
     let mut current: Option<Pending> = None;
 
     // Helper closure to flush pending message
-    let push_message = |p: Pending, errors: &mut Vec<BuildError>, warnings: &mut Vec<BuildWarning>| {
-        let message = p.lines.join("\n").trim().to_string();
-        if p.is_error {
-            let error_type = if message.contains("Couldn't match type") || 
-                               message.contains("Expected type") || 
-                               message.contains("No instance for") ||
-                               message.contains("Ambiguous type variable") ||
-                               message.contains("Couldn't match expected type") {
-                "type-error".to_string()
-            } else if message.contains("Not in scope") || message.contains("not in scope") {
-                "scope-error".to_string()
-            } else if message.contains("parse error") {
-                "parse-error".to_string()
-            } else {
-                "other".to_string()
-            };
+    let push_message =
+        |p: Pending, errors: &mut Vec<BuildError>, warnings: &mut Vec<BuildWarning>| {
+            let message = p.lines.join("\n").trim().to_string();
+            if p.is_error {
+                let error_type = if message.contains("Couldn't match type")
+                    || message.contains("Expected type")
+                    || message.contains("No instance for")
+                    || message.contains("Ambiguous type variable")
+                    || message.contains("Couldn't match expected type")
+                {
+                    "type-error".to_string()
+                } else if message.contains("Not in scope") || message.contains("not in scope") {
+                    "scope-error".to_string()
+                } else if message.contains("parse error") {
+                    "parse-error".to_string()
+                } else {
+                    "other".to_string()
+                };
 
-            errors.push(BuildError {
-                file: p.file,
-                line: p.line,
-                column: p.column,
-                message,
-                error_type,
-            });
-        } else {
-            warnings.push(BuildWarning {
-                file: p.file,
-                line: p.line,
-                message,
-            });
-        }
-    };
+                errors.push(BuildError {
+                    file: p.file,
+                    line: p.line,
+                    column: p.column,
+                    message,
+                    error_type,
+                });
+            } else {
+                warnings.push(BuildWarning {
+                    file: p.file,
+                    line: p.line,
+                    message,
+                });
+            }
+        };
 
     for line in all_output.lines() {
         if let Some(caps) = header_re.captures(line) {
@@ -154,7 +156,7 @@ pub fn test(cwd: &str, _package: Option<String>) -> Result<()> {
 
     for line in reader.lines() {
         let line = line?;
-        
+
         if let Some(caps) = suite_result_re.captures(&line) {
             current_suite = caps[1].to_string();
         }
@@ -178,7 +180,7 @@ pub fn test(cwd: &str, _package: Option<String>) -> Result<()> {
             });
         } else if in_failure_block {
             if line.trim().is_empty() {
-                // Potential end of failure block if we see multiple empty lines or a summary, 
+                // Potential end of failure block if we see multiple empty lines or a summary,
                 // but let's keep it simple for now.
             } else if let Some(ref mut fail) = current_failure {
                 if !fail.message.is_empty() {

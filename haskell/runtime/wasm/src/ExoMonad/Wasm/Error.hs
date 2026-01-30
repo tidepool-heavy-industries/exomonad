@@ -12,27 +12,26 @@
 -- fail-fast semantics while providing actionable debugging information.
 module ExoMonad.Wasm.Error
   ( -- * Error Types
-    WasmError(..)
-  , WasmEffectError(..)
+    WasmError (..),
+    WasmEffectError (..),
 
     -- * Smart Constructors
-  , effectFailed
-  , parseFailed
-  , emptyResult
+    effectFailed,
+    parseFailed,
+    emptyResult,
 
     -- * Error Formatting
-  , formatWasmError
-  , formatEffectError
-  , effectName
-  ) where
+    formatWasmError,
+    formatEffectError,
+    effectName,
+  )
+where
 
 import Data.Aeson (Value, encode)
 import Data.Text (Text)
-import qualified Data.Text.Lazy as TL
-import qualified Data.Text.Lazy.Encoding as TLE
-
-import ExoMonad.Wasm.WireTypes (SerializableEffect(..))
-
+import Data.Text.Lazy qualified as TL
+import Data.Text.Lazy.Encoding qualified as TLE
+import ExoMonad.Wasm.WireTypes (SerializableEffect (..))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ERROR TYPES
@@ -40,10 +39,10 @@ import ExoMonad.Wasm.WireTypes (SerializableEffect(..))
 
 -- | Errors during WASM graph execution.
 data WasmError
-  = WasmEffectError WasmEffectError
-    -- ^ Error executing an effect
-  | WasmUnexpectedError Text
-    -- ^ Unexpected error (should not happen in validated graphs)
+  = -- | Error executing an effect
+    WasmEffectError WasmEffectError
+  | -- | Unexpected error (should not happen in validated graphs)
+    WasmUnexpectedError Text
   deriving (Show, Eq)
 
 -- | Errors that occur when executing effects.
@@ -52,29 +51,28 @@ data WasmError
 -- what was expected, what was received, and why it failed.
 data WasmEffectError
   = EffectFailed
-      { weeEffect :: SerializableEffect
-      -- ^ The effect that failed
-      , weeMessage :: Text
-      -- ^ Error message from TypeScript (ResError)
+      { -- | The effect that failed
+        weeEffect :: SerializableEffect,
+        -- | Error message from TypeScript (ResError)
+        weeMessage :: Text
       }
   | ParseFailed
-      { weeEffect :: SerializableEffect
-      -- ^ The effect that returned the value
-      , weeExpectedType :: Text
-      -- ^ Type we were trying to parse (e.g., "LlmCallResult")
-      , weeActualValue :: Value
-      -- ^ The value we got (for debugging type mismatches)
-      , weeParseError :: Text
-      -- ^ Aeson parse error message
+      { -- | The effect that returned the value
+        weeEffect :: SerializableEffect,
+        -- | Type we were trying to parse (e.g., "LlmCallResult")
+        weeExpectedType :: Text,
+        -- | The value we got (for debugging type mismatches)
+        weeActualValue :: Value,
+        -- | Aeson parse error message
+        weeParseError :: Text
       }
   | EmptyResult
-      { weeEffect :: SerializableEffect
-      -- ^ The effect that returned empty
-      , weeContext :: Text
-      -- ^ What we were expecting (e.g., "LLM response")
+      { -- | The effect that returned empty
+        weeEffect :: SerializableEffect,
+        -- | What we were expecting (e.g., "LLM response")
+        weeContext :: Text
       }
   deriving (Show, Eq)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SMART CONSTRUCTORS
@@ -92,7 +90,6 @@ parseFailed eff ty val err = WasmEffectError (ParseFailed eff ty val err)
 emptyResult :: SerializableEffect -> Text -> WasmError
 emptyResult eff ctx = WasmEffectError (EmptyResult eff ctx)
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- ERROR FORMATTING
 -- ════════════════════════════════════════════════════════════════════════════
@@ -106,15 +103,23 @@ formatWasmError (WasmUnexpectedError msg) = "Unexpected error: " <> msg
 formatEffectError :: WasmEffectError -> Text
 formatEffectError (EffectFailed eff msg) =
   "Effect failed: " <> effectName eff <> "\n  Error: " <> msg
-
 formatEffectError (ParseFailed eff expectedTy val parseErr) =
-  "Failed to parse " <> expectedTy <> " from " <> effectName eff <> "\n" <>
-  "  Parse error: " <> parseErr <> "\n" <>
-  "  Received value: " <> (TL.toStrict $ TLE.decodeUtf8 $ encode val)
-
+  "Failed to parse "
+    <> expectedTy
+    <> " from "
+    <> effectName eff
+    <> "\n"
+    <> "  Parse error: "
+    <> parseErr
+    <> "\n"
+    <> "  Received value: "
+    <> (TL.toStrict $ TLE.decodeUtf8 $ encode val)
 formatEffectError (EmptyResult eff ctx) =
-  "Effect returned empty result: " <> effectName eff <> "\n" <>
-  "  Expected: " <> ctx
+  "Effect returned empty result: "
+    <> effectName eff
+    <> "\n"
+    <> "  Expected: "
+    <> ctx
 
 -- | Get effect name for error messages.
 effectName :: SerializableEffect -> Text

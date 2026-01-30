@@ -5,35 +5,33 @@ module ExoMonad.Worktree.InterpreterSpec (spec) where
 
 import Control.Exception (bracket)
 import Control.Monad (void)
-import Control.Monad.Freer (runM, sendM, Eff)
+import Control.Monad.Freer (Eff, runM, sendM)
+import Data.Either (isLeft, isRight)
 import Data.OpenUnion (LastMember)
-import Data.Either (isRight, isLeft)
 import Data.Text qualified as T
+import ExoMonad.Effects.Worktree
+  ( MergeResult (..),
+    WorktreeError (..),
+    WorktreePath (..),
+    WorktreeSpec (..),
+    cherryPickFiles,
+    createWorktree,
+    deleteWorktree,
+    listWorktrees,
+    mergeWorktree,
+    withWorktree,
+  )
+import ExoMonad.Worktree.Interpreter (defaultWorktreeConfig, runWorktreeIO)
 import System.Directory
-  ( createDirectoryIfMissing
-  , doesDirectoryExist
-  , doesFileExist
-  , removeDirectoryRecursive
-  , getTemporaryDirectory
+  ( createDirectoryIfMissing,
+    doesDirectoryExist,
+    doesFileExist,
+    getTemporaryDirectory,
+    removeDirectoryRecursive,
   )
 import System.FilePath ((</>))
-import System.Process (readProcessWithExitCode, getCurrentPid)
+import System.Process (getCurrentPid, readProcessWithExitCode)
 import Test.Hspec
-
-import ExoMonad.Effects.Worktree
-  ( WorktreePath(..)
-  , WorktreeSpec(..)
-  , WorktreeError(..)
-  , MergeResult(..)
-  , createWorktree
-  , deleteWorktree
-  , listWorktrees
-  , withWorktree
-  , mergeWorktree
-  , cherryPickFiles
-  )
-import ExoMonad.Worktree.Interpreter (runWorktreeIO, defaultWorktreeConfig)
-
 
 -- | Create a temporary git repository for testing.
 --
@@ -51,14 +49,23 @@ withTempGitRepo action = bracket setup teardown action
       void $ readProcessWithExitCode "git" ["-C", testDir, "init", "-b", "main"] ""
 
       -- Configure git user (required for commits)
-      void $ readProcessWithExitCode "git"
-        ["-C", testDir, "config", "user.email", "test@test.com"] ""
-      void $ readProcessWithExitCode "git"
-        ["-C", testDir, "config", "user.name", "Test"] ""
+      void $
+        readProcessWithExitCode
+          "git"
+          ["-C", testDir, "config", "user.email", "test@test.com"]
+          ""
+      void $
+        readProcessWithExitCode
+          "git"
+          ["-C", testDir, "config", "user.name", "Test"]
+          ""
 
       -- Create initial commit (required for worktrees)
-      void $ readProcessWithExitCode "git"
-        ["-C", testDir, "commit", "--allow-empty", "-m", "Initial commit"] ""
+      void $
+        readProcessWithExitCode
+          "git"
+          ["-C", testDir, "commit", "--allow-empty", "-m", "Initial commit"]
+          ""
 
       pure testDir
 
@@ -68,16 +75,15 @@ withTempGitRepo action = bracket setup teardown action
         then removeDirectoryRecursive dir
         else pure ()
 
-
 spec :: Spec
 spec = describe "Worktree Interpreter" $ do
-
   describe "createWorktree" $ do
-
     it "creates a worktree directory that exists" $ withTempGitRepo $ \repoDir -> do
       let config = defaultWorktreeConfig repoDir
-      result <- runM $ runWorktreeIO config $
-        createWorktree (WorktreeSpec "test-wt" Nothing Nothing Nothing)
+      result <-
+        runM $
+          runWorktreeIO config $
+            createWorktree (WorktreeSpec "test-wt" Nothing Nothing Nothing)
 
       result `shouldSatisfy` isRight
       case result of
@@ -98,13 +104,15 @@ spec = describe "Worktree Interpreter" $ do
 
       case (result1, result2) of
         (Right path1, Right path2) ->
-          path1 `shouldNotBe` path2  -- Different random suffixes
+          path1 `shouldNotBe` path2 -- Different random suffixes
         _ -> expectationFailure "Expected both to be Right"
 
     it "returns error for invalid base branch" $ withTempGitRepo $ \repoDir -> do
       let config = defaultWorktreeConfig repoDir
-      result <- runM $ runWorktreeIO config $
-        createWorktree (WorktreeSpec "test" (Just "nonexistent-branch") Nothing Nothing)
+      result <-
+        runM $
+          runWorktreeIO config $
+            createWorktree (WorktreeSpec "test" (Just "nonexistent-branch") Nothing Nothing)
 
       result `shouldSatisfy` isLeft
       case result of
@@ -112,9 +120,7 @@ spec = describe "Worktree Interpreter" $ do
           command `shouldBe` "worktree add"
         _ -> expectationFailure "Expected WorktreeGitError"
 
-
   describe "deleteWorktree" $ do
-
     it "removes an existing worktree" $ withTempGitRepo $ \repoDir -> do
       let config = defaultWorktreeConfig repoDir
       result <- runM $ runWorktreeIO config $ do
@@ -134,14 +140,14 @@ spec = describe "Worktree Interpreter" $ do
 
     it "succeeds silently for non-existent worktree" $ withTempGitRepo $ \repoDir -> do
       let config = defaultWorktreeConfig repoDir
-      result <- runM $ runWorktreeIO config $
-        deleteWorktree (WorktreePath "/nonexistent/path")
+      result <-
+        runM $
+          runWorktreeIO config $
+            deleteWorktree (WorktreePath "/nonexistent/path")
 
       result `shouldBe` Right ()
 
-
   describe "listWorktrees" $ do
-
     it "lists created worktrees" $ withTempGitRepo $ \repoDir -> do
       let config = defaultWorktreeConfig repoDir
       result <- runM $ runWorktreeIO config $ do
@@ -158,9 +164,7 @@ spec = describe "Worktree Interpreter" $ do
           any containsListTest wts `shouldBe` True
         Left _ -> expectationFailure "Expected Right"
 
-
   describe "withWorktree (bracket)" $ do
-
     it "cleans up worktree after action completes" $ withTempGitRepo $ \repoDir -> do
       let config = defaultWorktreeConfig repoDir
       (result, capturedPath) <- runM $ runWorktreeIO config $ do
@@ -174,7 +178,7 @@ spec = describe "Worktree Interpreter" $ do
       case capturedPath of
         Just (WorktreePath path) -> do
           exists <- doesDirectoryExist path
-          exists `shouldBe` False  -- Should be cleaned up
+          exists `shouldBe` False -- Should be cleaned up
         Nothing -> expectationFailure "Expected to capture path"
 
     it "cleans up even if action returns error value" $ withTempGitRepo $ \repoDir -> do
@@ -190,23 +194,21 @@ spec = describe "Worktree Interpreter" $ do
       case capturedPath of
         Just (WorktreePath path) -> do
           exists <- doesDirectoryExist path
-          exists `shouldBe` False  -- Should still be cleaned up
+          exists `shouldBe` False -- Should still be cleaned up
         Nothing -> expectationFailure "Expected to capture path"
 
     it "returns creation error without running action" $ withTempGitRepo $ \repoDir -> do
       let config = defaultWorktreeConfig repoDir
       actionRan <- runM $ runWorktreeIO config $ do
         res <- withWorktree (WorktreeSpec "fail" (Just "bad-branch") Nothing Nothing) $ \_ -> do
-          pure True  -- This should never run
+          pure True -- This should never run
         case res of
           Right ran -> pure ran
           Left _ -> pure False
 
       actionRan `shouldBe` False
 
-
   describe "mergeWorktree" $ do
-
     it "merges worktree changes back to main" $ withTempGitRepo $ \repoDir -> do
       let config = defaultWorktreeConfig repoDir
       result <- runM $ runWorktreeIO config $ do
@@ -231,14 +233,14 @@ spec = describe "Worktree Interpreter" $ do
 
     it "returns error for non-existent worktree" $ withTempGitRepo $ \repoDir -> do
       let config = defaultWorktreeConfig repoDir
-      result <- runM $ runWorktreeIO config $
-        mergeWorktree (WorktreePath "/nonexistent/worktree") "Test merge"
+      result <-
+        runM $
+          runWorktreeIO config $
+            mergeWorktree (WorktreePath "/nonexistent/worktree") "Test merge"
 
       result `shouldSatisfy` isLeft
 
-
   describe "cherryPickFiles" $ do
-
     it "copies files from worktree to destination" $ withTempGitRepo $ \repoDir -> do
       let config = defaultWorktreeConfig repoDir
           destDir = repoDir </> "cherry-pick-dest"
@@ -297,7 +299,6 @@ spec = describe "Worktree Interpreter" $ do
 
       result `shouldBe` Right ()
 
-
 -- | Helper to lift IO into Eff
-liftIO :: LastMember IO effs => IO a -> Eff effs a
+liftIO :: (LastMember IO effs) => IO a -> Eff effs a
 liftIO = sendM

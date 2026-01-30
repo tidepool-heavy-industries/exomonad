@@ -1,4 +1,3 @@
-
 -- | Educational type errors for the Graph DSL.
 --
 -- = Philosophy
@@ -31,28 +30,29 @@
 -- @
 module ExoMonad.Graph.Errors
   ( -- * Error Formatting Primitives
-    HR
-  , Section
-  , CodeLine
-  , Bullet
-  , Indent
-  , Blank
+    HR,
+    Section,
+    CodeLine,
+    Bullet,
+    Indent,
+    Blank,
 
     -- * Section Headers
-  , WhatHappened
-  , HowItWorks
-  , Fixes
-  , Example
+    WhatHappened,
+    HowItWorks,
+    Fixes,
+    Example,
 
     -- * Symbol Utilities
-  , FormatSymbolList
-  , FormatTargetList
-  , ExtractTargetNames
+    FormatSymbolList,
+    FormatTargetList,
+    ExtractTargetNames,
 
     -- * Pre-defined Error Messages
-  , SelfLoopDispatchError
+    SelfLoopDispatchError,
 
     -- * Type Error Infrastructure (from GHC.TypeError)
+
     -- | Re-exported from "GHC.TypeError" for use in validation modules.
     --
     -- == Semantic Distinction
@@ -60,14 +60,15 @@ module ExoMonad.Graph.Errors
     -- * 'TypeError' - "You're missing something" (user can add annotation, fix typo)
     -- * 'Unsatisfiable' - "These constraints are contradictory" (fundamental redesign needed)
     -- * 'Assert' - Conditional check that emits error on failure
-  , Unsatisfiable
-  , unsatisfiable
-  , Assert
-  ) where
+    Unsatisfiable,
+    unsatisfiable,
+    Assert,
+  )
+where
 
 import Data.Kind (Type)
-import GHC.TypeLits (Symbol, ErrorMessage(..))
-import GHC.TypeError (Unsatisfiable, unsatisfiable, Assert)
+import GHC.TypeError (Assert, Unsatisfiable, unsatisfiable)
+import GHC.TypeLits (ErrorMessage (..), Symbol)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- FORMATTING PRIMITIVES
@@ -138,8 +139,8 @@ type ExtractTargetNames :: [Type] -> [Symbol]
 type family ExtractTargetNames targets where
   ExtractTargetNames '[] = '[]
   ExtractTargetNames (To (name :: Symbol) _ ': rest) = name ': ExtractTargetNames rest
-  ExtractTargetNames (To Exit _ ': rest) = ExtractTargetNames rest  -- Skip Exit
-  ExtractTargetNames (To Self _ ': rest) = ExtractTargetNames rest  -- Skip Self
+  ExtractTargetNames (To Exit _ ': rest) = ExtractTargetNames rest -- Skip Exit
+  ExtractTargetNames (To Self _ ': rest) = ExtractTargetNames rest -- Skip Self
   ExtractTargetNames (_ ': rest) = ExtractTargetNames rest
 
 -- | Format a target list showing both names and payload types.
@@ -186,30 +187,30 @@ data Self
 -- 'dispatchGoto' instead of 'dispatchGotoWithSelf'.
 type SelfLoopDispatchError =
   HR
-  ':$$: 'Text "  Self-loop requires special dispatch"
-  ':$$: HR
-  ':$$: Blank
-  ':$$: WhatHappened
-  ':$$: Indent "Your handler can 'gotoSelf', but you called 'dispatchGoto'."
-  ':$$: Indent "The standard dispatcher doesn't know which handler to re-invoke."
-  ':$$: Blank
-  ':$$: HowItWorks
-  ':$$: Indent "Normal dispatch:  GotoChoice -> find handler by name -> call it"
-  ':$$: Indent "Self dispatch:    GotoChoice -> ??? -> call... which handler?"
-  ':$$: Blank
-  ':$$: Indent "The graph record has fields like 'compute', 'route', etc."
-  ':$$: Indent "But there's no 'self' field! We need you to tell us what"
-  ':$$: Indent "'self' means for this particular dispatch."
-  ':$$: Blank
-  ':$$: Fixes
-  ':$$: Bullet "Use dispatchGotoWithSelf and pass the self-handler:"
-  ':$$: Blank
-  ':$$: CodeLine "-- Instead of:"
-  ':$$: CodeLine "choice <- loopHandler input"
-  ':$$: CodeLine "result <- dispatchGoto handlers choice        -- ERROR"
-  ':$$: Blank
-  ':$$: CodeLine "-- Use:"
-  ':$$: CodeLine "choice <- loopHandler input"
-  ':$$: CodeLine "result <- dispatchGotoWithSelf loopHandler handlers choice  -- OK"
-  ':$$: CodeLine "                               ^^^^^^^^^^^"
-  ':$$: CodeLine "                               \"when you see Self, call this\""
+    ':$$: 'Text "  Self-loop requires special dispatch"
+    ':$$: HR
+    ':$$: Blank
+    ':$$: WhatHappened
+    ':$$: Indent "Your handler can 'gotoSelf', but you called 'dispatchGoto'."
+    ':$$: Indent "The standard dispatcher doesn't know which handler to re-invoke."
+    ':$$: Blank
+    ':$$: HowItWorks
+    ':$$: Indent "Normal dispatch:  GotoChoice -> find handler by name -> call it"
+    ':$$: Indent "Self dispatch:    GotoChoice -> ??? -> call... which handler?"
+    ':$$: Blank
+    ':$$: Indent "The graph record has fields like 'compute', 'route', etc."
+    ':$$: Indent "But there's no 'self' field! We need you to tell us what"
+    ':$$: Indent "'self' means for this particular dispatch."
+    ':$$: Blank
+    ':$$: Fixes
+    ':$$: Bullet "Use dispatchGotoWithSelf and pass the self-handler:"
+    ':$$: Blank
+    ':$$: CodeLine "-- Instead of:"
+    ':$$: CodeLine "choice <- loopHandler input"
+    ':$$: CodeLine "result <- dispatchGoto handlers choice        -- ERROR"
+    ':$$: Blank
+    ':$$: CodeLine "-- Use:"
+    ':$$: CodeLine "choice <- loopHandler input"
+    ':$$: CodeLine "result <- dispatchGotoWithSelf loopHandler handlers choice  -- OK"
+    ':$$: CodeLine "                               ^^^^^^^^^^^"
+    ':$$: CodeLine "                               \"when you see Self, call this\""

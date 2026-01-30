@@ -3,42 +3,41 @@
 -- Handles connection and message exchange with ghci-oracle server.
 module ExoMonad.GHCi.Protocol
   ( -- * Connection
-    GHCiConnection(..)
-  , connect
-  , disconnect
+    GHCiConnection (..),
+    connect,
+    disconnect,
 
     -- * Communication
-  , sendRequest
-  , receiveResponse
+    sendRequest,
+    receiveResponse,
 
     -- * Length Encoding (for testing)
-  , encodeLen
-  , decodeLen
-  ) where
+    encodeLen,
+    decodeLen,
+  )
+where
 
 import Control.Concurrent.MVar
-import Control.Exception (bracketOnError, try, SomeException)
-import Data.Aeson (encode, eitherDecode')
+import Control.Exception (SomeException, bracketOnError, try)
+import Data.Aeson (eitherDecode', encode)
 import Data.Bits (shiftR)
 import Data.ByteString (ByteString)
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as BL
-import qualified Data.Text as T
+import Data.ByteString qualified as BS
+import Data.ByteString.Lazy qualified as BL
+import Data.Text qualified as T
+import ExoMonad.Effect.GHCi (GHCiError (..), GHCiRequest (..), GHCiResponse (..))
 import Network.Socket
-  ( Socket
-  , AddrInfo(..)
-  , SocketType(..)
-  , close
-  , defaultHints
-  , getAddrInfo
-  , socket
-  , withSocketsDo
+  ( AddrInfo (..),
+    Socket,
+    SocketType (..),
+    close,
+    defaultHints,
+    getAddrInfo,
+    socket,
+    withSocketsDo,
   )
-import qualified Network.Socket as NS
-import qualified Network.Socket.ByteString as NBS
-
-import ExoMonad.Effect.GHCi (GHCiRequest(..), GHCiResponse(..), GHCiError(..))
-
+import Network.Socket qualified as NS
+import Network.Socket.ByteString qualified as NBS
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES
@@ -46,12 +45,11 @@ import ExoMonad.Effect.GHCi (GHCiRequest(..), GHCiResponse(..), GHCiError(..))
 
 -- | Connection to GHCi Oracle server.
 data GHCiConnection = GHCiConnection
-  { gcSocket :: Socket
-    -- ^ Socket to server
-  , gcLock :: MVar ()
-    -- ^ Mutex to serialize requests
+  { -- | Socket to server
+    gcSocket :: Socket,
+    -- | Mutex to serialize requests
+    gcLock :: MVar ()
   }
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONNECTION
@@ -61,26 +59,24 @@ data GHCiConnection = GHCiConnection
 connect :: String -> Int -> IO (Either GHCiError GHCiConnection)
 connect host port = withSocketsDo $ do
   result <- try @SomeException $ do
-    let hints = defaultHints { addrSocketType = Stream }
+    let hints = defaultHints {addrSocketType = Stream}
     addrs <- getAddrInfo (Just hints) (Just host) (Just $ show port)
     addr <- case addrs of
-      (a:_) -> pure a
-      []    -> ioError (userError "getAddrInfo: no addresses found")
+      (a : _) -> pure a
+      [] -> ioError (userError "getAddrInfo: no addresses found")
     sock <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
     bracketOnError (pure sock) close $ \s -> do
       NS.connect s (addrAddress addr)
       lock <- newMVar ()
-      pure GHCiConnection { gcSocket = s, gcLock = lock }
+      pure GHCiConnection {gcSocket = s, gcLock = lock}
 
   case result of
     Left _ -> pure $ Left $ GHCiNotConnected
     Right conn -> pure $ Right conn
 
-
 -- | Disconnect from server.
 disconnect :: GHCiConnection -> IO ()
 disconnect conn = close (gcSocket conn)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- COMMUNICATION
@@ -103,7 +99,6 @@ sendRequest conn req = withMVar (gcLock conn) $ \_ -> do
     Left e -> pure $ Left $ GHCiServerError $ "Communication error: " <> T.pack (show e)
     Right resp -> pure resp
 
-
 -- | Receive a response from the server.
 receiveResponse :: GHCiConnection -> IO (Either GHCiError GHCiResponse)
 receiveResponse conn = do
@@ -113,7 +108,7 @@ receiveResponse conn = do
     then pure $ Left GHCiNotConnected
     else do
       let len = decodeLen lenBytes
-      if len > 1000000  -- 1MB sanity limit
+      if len > 1000000 -- 1MB sanity limit
         then pure $ Left $ GHCiServerError $ "Message too large: " <> T.pack (show len)
         else do
           payload <- recvExact (gcSocket conn) len
@@ -123,31 +118,29 @@ receiveResponse conn = do
               Left err -> pure $ Left $ GHCiServerError $ "JSON decode error: " <> T.pack err
               Right resp -> pure $ Right resp
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Encode length as 4 big-endian bytes.
 encodeLen :: Int -> ByteString
-encodeLen n = BS.pack
-  [ fromIntegral (n `shiftR` 24)
-  , fromIntegral (n `shiftR` 16)
-  , fromIntegral (n `shiftR` 8)
-  , fromIntegral n
-  ]
-
+encodeLen n =
+  BS.pack
+    [ fromIntegral (n `shiftR` 24),
+      fromIntegral (n `shiftR` 16),
+      fromIntegral (n `shiftR` 8),
+      fromIntegral n
+    ]
 
 -- | Decode 4 big-endian bytes to length.
 decodeLen :: ByteString -> Int
 decodeLen bs = case BS.unpack bs of
   [b0, b1, b2, b3] ->
-    fromIntegral b0 * 16777216 +
-    fromIntegral b1 * 65536 +
-    fromIntegral b2 * 256 +
-    fromIntegral b3
+    fromIntegral b0 * 16777216
+      + fromIntegral b1 * 65536
+      + fromIntegral b2 * 256
+      + fromIntegral b3
   _ -> 0
-
 
 -- | Receive exactly n bytes from socket.
 recvExact :: Socket -> Int -> IO ByteString
@@ -157,5 +150,5 @@ recvExact sock n = go n []
     go remaining acc = do
       chunk <- NBS.recv sock (min remaining 4096)
       if BS.null chunk
-        then pure $ BS.concat (reverse acc)  -- Connection closed
+        then pure $ BS.concat (reverse acc) -- Connection closed
         else go (remaining - BS.length chunk) (chunk : acc)

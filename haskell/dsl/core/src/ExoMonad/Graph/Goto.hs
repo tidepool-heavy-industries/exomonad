@@ -1,5 +1,6 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
+
 -- Note: -Wno-incomplete-patterns is needed because unwrapSingleChoice has a pattern
 -- that IS exhaustive for single-element OneOf lists, but GHC can't prove this.
 -- By suppressing the warning here, we absorb it so users don't see it.
@@ -43,71 +44,78 @@
 -- @
 module ExoMonad.Graph.Goto
   ( -- * The Goto Effect
-    Goto(..)
-  , goto
+    Goto (..),
+    goto,
 
     -- * The Arrive Effect (for ForkNode workers)
+
     -- Note: Arrive type is exported from ExoMonad.Graph.Types
-  , arrive
+    arrive,
 
     -- * OneOf Sum Type (constructors hidden - use smart constructors)
-  , OneOf       -- Type only, constructors in Goto.Internal
-  , NonEmptyList
-  , Payloads
-  , PayloadOf
-  , InjectTarget(..)
-  -- Note: Inject has been removed from exports. It uses type equality which
-  -- finds the first match in duplicate-type lists. Use InjectTarget instead,
-  -- which matches on full (To name payload) markers for correct positioning.
+    OneOf, -- Type only, constructors in Goto.Internal
+    NonEmptyList,
+    Payloads,
+    PayloadOf,
+    InjectTarget (..),
+    -- Note: Inject has been removed from exports. It uses type equality which
+    -- finds the first match in duplicate-type lists. Use InjectTarget instead,
+    -- which matches on full (To name payload) markers for correct positioning.
 
     -- * GotoChoice Return Type (constructor hidden - use smart constructors)
-  , To
-  , GotoChoice  -- Type only, constructor in Goto.Internal
-  , gotoChoice
-  , gotoExit
-  , gotoSelf
-  , gotoArrive
-  , unwrapSingleChoice
+    To,
+    GotoChoice, -- Type only, constructor in Goto.Internal
+    gotoChoice,
+    gotoExit,
+    gotoSelf,
+    gotoArrive,
+    unwrapSingleChoice,
 
     -- * Field-Witness Routing (Phantom-Tagged Records)
-  , gotoNode
-  , (-->)
+    gotoNode,
+    (-->),
 
     -- * GotoAll Return Type (for parallel fan-out)
-  , GotoAll  -- Type only, constructor in Goto.Internal
-  , gotoAll
+    GotoAll, -- Type only, constructor in Goto.Internal
+    gotoAll,
 
     -- * LLM Handler Variants
-  , LLMHandler(..)
-  , ClaudeCodeLLMHandler(..)
-  , ClaudeCodeResult(..)
-  , GeminiLLMHandler(..)
+    LLMHandler (..),
+    ClaudeCodeLLMHandler (..),
+    ClaudeCodeResult (..),
+    GeminiLLMHandler (..),
 
     -- * Target Validation
-  , GotoElem
-  , GotoElemC
-  ) where
+    GotoElem,
+    GotoElemC,
+  )
+where
 
 import Control.Monad.Freer (Eff, Member, send)
-import Data.Kind (Type, Constraint)
+import Data.Kind (Constraint, Type)
 import Data.Text (Text)
-import GHC.TypeLits (Symbol, TypeError, ErrorMessage(..))
-
+import ExoMonad.Effect.Gemini (GeminiModel (..), SingGeminiModel (..))
+import ExoMonad.Effect.Session (SessionId, SessionOperation (..))
 import ExoMonad.Graph.Errors
-  ( HR, Blank, WhatHappened, HowItWorks, Fixes, Example
-  , Indent, CodeLine, Bullet, FormatTargetList
-  , Unsatisfiable
+  ( Blank,
+    Bullet,
+    CodeLine,
+    Example,
+    Fixes,
+    FormatTargetList,
+    HR,
+    HowItWorks,
+    Indent,
+    Unsatisfiable,
+    WhatHappened,
   )
+import ExoMonad.Graph.Generic.Core (NodeRef (..))
+-- Import from Internal (re-exports types, we hide constructors in this module's exports)
+import ExoMonad.Graph.Goto.Internal (GotoAll (..), GotoChoice (..), OneOf (..), PayloadOf, Payloads, To)
+import ExoMonad.Graph.Types (Arrive (..), Exit, HList (..), ModelChoice (..), Self, SingModelChoice (..))
+import GHC.TypeLits (ErrorMessage (..), Symbol, TypeError)
 import Text.Ginger.TH (TypedTemplate)
 import Text.Parsec.Pos (SourcePos)
-
-import ExoMonad.Graph.Types (Exit, Self, Arrive(..), ModelChoice(..), SingModelChoice(..), HList(..))
-import ExoMonad.Effect.Gemini (GeminiModel(..), SingGeminiModel(..))
-import ExoMonad.Effect.Session (SessionId, SessionOperation(..))
-import ExoMonad.Graph.Generic.Core (NodeRef(..))
-
--- Import from Internal (re-exports types, we hide constructors in this module's exports)
-import ExoMonad.Graph.Goto.Internal (OneOf(..), GotoChoice(..), GotoAll(..), To, Payloads, PayloadOf)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ONEOF CONSTRAINTS AND INJECTION
@@ -129,38 +137,39 @@ import ExoMonad.Graph.Goto.Internal (OneOf(..), GotoChoice(..), GotoAll(..), To,
 -- and cannot be instantiated.
 type NonEmptyList :: [Type] -> Constraint
 type family NonEmptyList ts where
-  NonEmptyList '[] = Unsatisfiable
-    ( HR
-      ':$$: 'Text "  Handler has no exit points (empty target list)"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "Your handler returns GotoChoice '[]"
-      ':$$: Indent "This type has NO constructors - there's no way to return a value!"
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "Every handler must be able to exit. The type system enforces"
-      ':$$: Indent "this by requiring at least one target in GotoChoice:"
-      ':$$: Blank
-      ':$$: CodeLine "GotoChoice '[]                               -- Impossible!"
-      ':$$: CodeLine "GotoChoice '[To Exit Result]                 -- Can exit"
-      ':$$: CodeLine "GotoChoice '[To \"next\" X, To Exit Result]    -- Can continue OR exit"
-      ':$$: Blank
-      ':$$: Indent "This is like requiring every code path to return a value."
-      ':$$: Indent "Dead ends are compile errors, not runtime mysteries."
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Add Goto Exit to UsesEffects: UsesEffects '[Goto Exit YourResultType]"
-      ':$$: Bullet "Add a transition: UsesEffects '[Goto \"nextNode\" Payload]"
-      ':$$: Bullet "Check that you haven't accidentally filtered out all targets"
-      ':$$: Blank
-      ':$$: Example
-      ':$$: CodeLine "-- A handler that can either continue or exit:"
-      ':$$: CodeLine "router :: Intent -> Eff es (GotoChoice '[To \"process\" Data, To Exit Done])"
-      ':$$: CodeLine "router intent = case intent of"
-      ':$$: CodeLine "  NeedMore x -> pure $ gotoChoice @\"process\" x"
-      ':$$: CodeLine "  Finished   -> pure $ gotoExit Done"
-    )
+  NonEmptyList '[] =
+    Unsatisfiable
+      ( HR
+          ':$$: 'Text "  Handler has no exit points (empty target list)"
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "Your handler returns GotoChoice '[]"
+          ':$$: Indent "This type has NO constructors - there's no way to return a value!"
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "Every handler must be able to exit. The type system enforces"
+          ':$$: Indent "this by requiring at least one target in GotoChoice:"
+          ':$$: Blank
+          ':$$: CodeLine "GotoChoice '[]                               -- Impossible!"
+          ':$$: CodeLine "GotoChoice '[To Exit Result]                 -- Can exit"
+          ':$$: CodeLine "GotoChoice '[To \"next\" X, To Exit Result]    -- Can continue OR exit"
+          ':$$: Blank
+          ':$$: Indent "This is like requiring every code path to return a value."
+          ':$$: Indent "Dead ends are compile errors, not runtime mysteries."
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Add Goto Exit to UsesEffects: UsesEffects '[Goto Exit YourResultType]"
+          ':$$: Bullet "Add a transition: UsesEffects '[Goto \"nextNode\" Payload]"
+          ':$$: Bullet "Check that you haven't accidentally filtered out all targets"
+          ':$$: Blank
+          ':$$: Example
+          ':$$: CodeLine "-- A handler that can either continue or exit:"
+          ':$$: CodeLine "router :: Intent -> Eff es (GotoChoice '[To \"process\" Data, To Exit Done])"
+          ':$$: CodeLine "router intent = case intent of"
+          ':$$: CodeLine "  NeedMore x -> pure $ gotoChoice @\"process\" x"
+          ':$$: CodeLine "  Finished   -> pure $ gotoExit Done"
+      )
   NonEmptyList (_ ': _) = ()
 
 -- | Inject a value into a 'OneOf' at its position in the type list.
@@ -179,7 +188,7 @@ instance {-# OVERLAPPING #-} Inject t (t ': ts) where
   inject = Here
 
 -- | Inductive case: t is somewhere in the tail
-instance Inject t ts => Inject t (t' ': ts) where
+instance (Inject t ts) => Inject t (t' ': ts) where
   inject = There . inject
 
 -- | Inject a target's payload into a 'OneOf' at the correct position.
@@ -202,7 +211,7 @@ instance {-# OVERLAPPING #-} InjectTarget (To name payload) (To name payload ': 
 --
 -- Note: We match on @To name' payload'@ specifically so GHC can reduce
 -- @Payloads (To name' payload' : ts)@ to @payload' : Payloads ts@.
-instance InjectTarget target ts => InjectTarget target (To name' payload' ': ts) where
+instance (InjectTarget target ts) => InjectTarget target (To name' payload' ': ts) where
   injectTarget = There . injectTarget @target @ts
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -230,7 +239,7 @@ data Goto (target :: k) (payload :: Type) r where
 -- -- Exit the graph
 -- goto @Exit finalResult
 -- @
-goto :: forall {k} (target :: k) a effs. Member (Goto target a) effs => a -> Eff effs ()
+goto :: forall {k} (target :: k) a effs. (Member (Goto target a) effs) => a -> Eff effs ()
 goto x = send (GotoOp x :: Goto target a ())
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -253,7 +262,7 @@ goto x = send (GotoOp x :: Goto target a ())
 --
 -- Note: The 'Arrive' type is defined in "ExoMonad.Graph.Types" with the
 -- 'ArriveOp' constructor.
-arrive :: forall barrierName result effs. Member (Arrive barrierName result) effs => result -> Eff effs ()
+arrive :: forall barrierName result effs. (Member (Arrive barrierName result) effs) => result -> Eff effs ()
 arrive r = send (ArriveOp r :: Arrive barrierName result ())
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -276,61 +285,73 @@ type family GotoElemC g targets where
 type GotoElemC' :: Type -> [Type] -> Bool -> Constraint
 type family GotoElemC' g targets result where
   GotoElemC' _ _ 'True = ()
-  GotoElemC' (To (name :: Symbol) payload) targets 'False = TypeError
-    ( HR
-      ':$$: 'Text "  Unknown transition target: \"" ':<>: 'Text name ':<>: 'Text "\""
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "You wrote:"
-      ':$$: CodeLine "gotoChoice @\"" ':<>: 'Text name ':<>: 'Text "\" ..."
-      ':$$: Blank
-      ':$$: Indent "But this target is not in your handler's allowed transitions."
-      ':$$: Blank
-      ':$$: Indent "Valid targets for this handler:"
-      ':$$: FormatTargetList targets
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "Handlers declare their possible exits via UsesEffects:"
-      ':$$: Blank
-      ':$$: CodeLine "myHandler :: X -> Eff es (GotoChoice '[To \"a\" A, To Exit B])"
-      ':$$: CodeLine "                                      ^^^^^^^^^^^^^^^^^^^^^^^"
-      ':$$: CodeLine "                                      Only THESE targets are valid"
-      ':$$: Blank
-      ':$$: Indent "The type checker ensures you can only transition to declared"
-      ':$$: Indent "targets. This prevents runtime \"node not found\" errors."
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Check spelling of the target name"
-      ':$$: Bullet "Add the target: UsesEffects '[Goto \"" ':<>: 'Text name ':<>: 'Text "\" " ':<>: 'ShowType payload ':<>: 'Text ", ...]"
-      ':$$: Bullet "Use gotoExit if you meant to exit the graph"
-      ':$$: Blank
-      ':$$: Example
-      ':$$: CodeLine "-- Your handler signature declares valid targets:"
-      ':$$: CodeLine "router :: Intent -> Eff es (GotoChoice '[To \"refund\" Msg, To Exit Done])"
-      ':$$: CodeLine ""
-      ':$$: CodeLine "-- Then you can only use those targets:"
-      ':$$: CodeLine "router intent = case intent of"
-      ':$$: CodeLine "  Refund -> pure $ gotoChoice @\"refund\" msg  -- OK: declared above"
-      ':$$: CodeLine "  Done   -> pure $ gotoExit done              -- OK: Exit declared"
-      ':$$: CodeLine "  Other  -> pure $ gotoChoice @\"faq\" msg     -- ERROR: not declared!"
-    )
+  GotoElemC' (To (name :: Symbol) payload) targets 'False =
+    TypeError
+      ( HR
+          ':$$: 'Text "  Unknown transition target: \""
+          ':<>: 'Text name
+          ':<>: 'Text "\""
+          ':$$: HR
+          ':$$: Blank
+          ':$$: WhatHappened
+          ':$$: Indent "You wrote:"
+          ':$$: CodeLine "gotoChoice @\""
+          ':<>: 'Text name
+          ':<>: 'Text "\" ..."
+          ':$$: Blank
+          ':$$: Indent "But this target is not in your handler's allowed transitions."
+          ':$$: Blank
+          ':$$: Indent "Valid targets for this handler:"
+          ':$$: FormatTargetList targets
+          ':$$: Blank
+          ':$$: HowItWorks
+          ':$$: Indent "Handlers declare their possible exits via UsesEffects:"
+          ':$$: Blank
+          ':$$: CodeLine "myHandler :: X -> Eff es (GotoChoice '[To \"a\" A, To Exit B])"
+          ':$$: CodeLine "                                      ^^^^^^^^^^^^^^^^^^^^^^^"
+          ':$$: CodeLine "                                      Only THESE targets are valid"
+          ':$$: Blank
+          ':$$: Indent "The type checker ensures you can only transition to declared"
+          ':$$: Indent "targets. This prevents runtime \"node not found\" errors."
+          ':$$: Blank
+          ':$$: Fixes
+          ':$$: Bullet "Check spelling of the target name"
+          ':$$: Bullet "Add the target: UsesEffects '[Goto \""
+          ':<>: 'Text name
+          ':<>: 'Text "\" "
+          ':<>: 'ShowType payload
+          ':<>: 'Text ", ...]"
+          ':$$: Bullet "Use gotoExit if you meant to exit the graph"
+          ':$$: Blank
+          ':$$: Example
+          ':$$: CodeLine "-- Your handler signature declares valid targets:"
+          ':$$: CodeLine "router :: Intent -> Eff es (GotoChoice '[To \"refund\" Msg, To Exit Done])"
+          ':$$: CodeLine ""
+          ':$$: CodeLine "-- Then you can only use those targets:"
+          ':$$: CodeLine "router intent = case intent of"
+          ':$$: CodeLine "  Refund -> pure $ gotoChoice @\"refund\" msg  -- OK: declared above"
+          ':$$: CodeLine "  Done   -> pure $ gotoExit done              -- OK: Exit declared"
+          ':$$: CodeLine "  Other  -> pure $ gotoChoice @\"faq\" msg     -- ERROR: not declared!"
+      )
   -- Fallback for non-To types (shouldn't happen in practice)
-  GotoElemC' g targets 'False = TypeError
-    ( 'Text "Invalid transition target: " ':<>: 'ShowType g
-      ':$$: 'Text "Expected a To marker but got something else."
-      ':$$: 'Text "Valid targets: " ':<>: 'ShowType targets
-    )
+  GotoElemC' g targets 'False =
+    TypeError
+      ( 'Text "Invalid transition target: "
+          ':<>: 'ShowType g
+          ':$$: 'Text "Expected a To marker but got something else."
+          ':$$: 'Text "Valid targets: "
+          ':<>: 'ShowType targets
+      )
 
 -- | Construct a 'GotoChoice' for a named node target.
 --
 -- @
 -- gotoChoice @"nextNode" payload
 -- @
-gotoChoice
-  :: forall (name :: Symbol) payload targets.
-     InjectTarget (To name payload) targets
-  => payload -> GotoChoice targets
+gotoChoice ::
+  forall (name :: Symbol) payload targets.
+  (InjectTarget (To name payload) targets) =>
+  payload -> GotoChoice targets
 gotoChoice payload = GotoChoice (injectTarget @(To name payload) @targets payload)
 
 -- | Construct a 'GotoChoice' for exiting the graph.
@@ -338,10 +359,10 @@ gotoChoice payload = GotoChoice (injectTarget @(To name payload) @targets payloa
 -- @
 -- gotoExit response
 -- @
-gotoExit
-  :: forall payload targets.
-     InjectTarget (To Exit payload) targets
-  => payload -> GotoChoice targets
+gotoExit ::
+  forall payload targets.
+  (InjectTarget (To Exit payload) targets) =>
+  payload -> GotoChoice targets
 gotoExit payload = GotoChoice (injectTarget @(To Exit payload) @targets payload)
 
 -- | Construct a 'GotoChoice' for a self-loop.
@@ -349,10 +370,10 @@ gotoExit payload = GotoChoice (injectTarget @(To Exit payload) @targets payload)
 -- @
 -- gotoSelf updatedState
 -- @
-gotoSelf
-  :: forall payload targets.
-     InjectTarget (To Self payload) targets
-  => payload -> GotoChoice targets
+gotoSelf ::
+  forall payload targets.
+  (InjectTarget (To Self payload) targets) =>
+  payload -> GotoChoice targets
 gotoSelf payload = GotoChoice (injectTarget @(To Self payload) @targets payload)
 
 -- | Construct a 'GotoChoice' for arriving at a barrier.
@@ -367,10 +388,10 @@ gotoSelf payload = GotoChoice (injectTarget @(To Self payload) @targets payload)
 --
 -- The barrier name (Symbol) identifies which BarrierNode receives the result.
 -- This enables type-safe routing even when multiple barriers exist in a graph.
-gotoArrive
-  :: forall barrierName payload targets.
-     InjectTarget (To (Arrive barrierName) payload) targets
-  => payload -> GotoChoice targets
+gotoArrive ::
+  forall barrierName payload targets.
+  (InjectTarget (To (Arrive barrierName) payload) targets) =>
+  payload -> GotoChoice targets
 gotoArrive payload = GotoChoice (injectTarget @(To (Arrive barrierName) payload) @targets payload)
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -413,13 +434,16 @@ gotoArrive payload = GotoChoice (injectTarget @(To (Arrive barrierName) payload)
 -- -- Field-witness routing (no string literals!)
 -- gotoNode (gWork graph) (retry . entries) retryInfo
 -- @
-gotoNode
-  :: forall name nodeType config entry payload targets mode.
-     InjectTarget (To name payload) targets
-  => NodeRef name nodeType          -- ^ Target node witness (from graph record)
-  -> (config mode -> entry mode)    -- ^ Field accessor path (e.g., retry . entries)
-  -> payload                        -- ^ Payload for the entry
-  -> GotoChoice targets
+gotoNode ::
+  forall name nodeType config entry payload targets mode.
+  (InjectTarget (To name payload) targets) =>
+  -- | Target node witness (from graph record)
+  NodeRef name nodeType ->
+  -- | Field accessor path (e.g., retry . entries)
+  (config mode -> entry mode) ->
+  -- | Payload for the entry
+  payload ->
+  GotoChoice targets
 gotoNode _nodeRef _entryAccessor payload =
   -- The field accessor carries the entry name via type inference
   -- We extract the node name from NodeRef's phantom parameter
@@ -437,13 +461,13 @@ gotoNode _nodeRef _entryAccessor payload =
 -- @
 -- gotoNode (gWork graph) (retry . entries) retryInfo
 -- @
-(-->)
-  :: forall name nodeType config mode entry payload targets.
-     InjectTarget (To name payload) targets
-  => NodeRef name nodeType          -- NodeRef "nodeName" nodeType
-  -> (config mode -> entry mode)    -- Field accessor (retry . entries)
-  -> payload                        -- EntryNode payload
-  -> GotoChoice targets
+(-->) ::
+  forall name nodeType config mode entry payload targets.
+  (InjectTarget (To name payload) targets) =>
+  NodeRef name nodeType -> -- NodeRef "nodeName" nodeType
+  (config mode -> entry mode) -> -- Field accessor (retry . entries)
+  payload -> -- EntryNode payload
+  GotoChoice targets
 (-->) = gotoNode
 
 infixl 8 -->
@@ -497,9 +521,9 @@ unwrapSingleChoice (GotoChoice (Here p)) = p
 --   , gotoAll (paymentReq ::: inventoryReq ::: HNil)
 --   )
 -- @
-gotoAll
-  :: forall targets.
-     HList (Payloads targets) -> GotoAll targets
+gotoAll ::
+  forall targets.
+  HList (Payloads targets) -> GotoAll targets
 gotoAll = GotoAll
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -532,19 +556,18 @@ data LLMHandler needs schema targets effs tpl where
   --
   -- Takes optional system template, required user template, before handler, and after handler.
   -- Both templates share the same context type (tpl).
-  LLMHandler
-    :: forall tpl needs schema targets effs.
-       { llmSystem :: Maybe (TypedTemplate tpl SourcePos)
-         -- ^ Optional system prompt template
-       , llmUser   :: TypedTemplate tpl SourcePos
-         -- ^ User prompt template (required)
-       , llmBefore :: needs -> Eff effs tpl
-         -- ^ Builds context for both templates
-       , llmAfter  :: schema -> Eff effs (GotoChoice targets)
-         -- ^ Routes based on LLM output
-       }
-    -> LLMHandler needs schema targets effs tpl
-
+  LLMHandler ::
+    forall tpl needs schema targets effs.
+    { -- | Optional system prompt template
+      llmSystem :: Maybe (TypedTemplate tpl SourcePos),
+      -- | User prompt template (required)
+      llmUser :: TypedTemplate tpl SourcePos,
+      -- | Builds context for both templates
+      llmBefore :: needs -> Eff effs tpl,
+      -- | Routes based on LLM output
+      llmAfter :: schema -> Eff effs (GotoChoice targets)
+    } ->
+    LLMHandler needs schema targets effs tpl
 
 -- | Result from ClaudeCode execution with metadata.
 --
@@ -555,17 +578,16 @@ data LLMHandler needs schema targets effs tpl where
 -- All session info is provided because exomonad is stateless - continuation
 -- and fork operations need full session data passed as arguments.
 data ClaudeCodeResult schema = ClaudeCodeResult
-  { ccrParsedOutput :: schema
-    -- ^ The parsed structured output from Claude Code.
-  , ccrSessionId :: SessionId
-    -- ^ Claude Code session ID (for --resume/--fork-session).
-  , ccrWorktree :: FilePath
-    -- ^ Worktree path (for stateless continuation/fork).
-  , ccrBranch :: Text
-    -- ^ Branch name (for stateless continuation/fork).
+  { -- | The parsed structured output from Claude Code.
+    ccrParsedOutput :: schema,
+    -- | Claude Code session ID (for --resume/--fork-session).
+    ccrSessionId :: SessionId,
+    -- | Worktree path (for stateless continuation/fork).
+    ccrWorktree :: FilePath,
+    -- | Branch name (for stateless continuation/fork).
+    ccrBranch :: Text
   }
   deriving stock (Show, Eq, Functor)
-
 
 -- | Handler for ClaudeCode-annotated LLM nodes.
 --
@@ -607,25 +629,29 @@ data ClaudeCodeResult schema = ClaudeCodeResult
 -- Mismatches result in compile-time type errors, preventing runtime inconsistencies.
 type ClaudeCodeLLMHandler :: ModelChoice -> Type -> Type -> [Type] -> [Type -> Type] -> Type -> Type
 data ClaudeCodeLLMHandler model needs schema targets effs tpl where
-  ClaudeCodeLLMHandler
-    :: forall model tpl needs schema targets effs.
-       SingModelChoice model
-    => Maybe (TypedTemplate tpl SourcePos)                    -- ^ Optional system prompt template
-    -> TypedTemplate tpl SourcePos                            -- ^ User prompt template (required)
-    -> (needs -> Eff effs (tpl, SessionOperation))            -- ^ Builds context AND session strategy
-    -> ((ClaudeCodeResult schema, SessionId) -> Eff effs (GotoChoice targets))  -- ^ Routes with output AND session ID
-    -> ClaudeCodeLLMHandler model needs schema targets effs tpl
+  ClaudeCodeLLMHandler ::
+    forall model tpl needs schema targets effs.
+    (SingModelChoice model) =>
+    -- | Optional system prompt template
+    Maybe (TypedTemplate tpl SourcePos) ->
+    -- | User prompt template (required)
+    TypedTemplate tpl SourcePos ->
+    -- | Builds context AND session strategy
+    (needs -> Eff effs (tpl, SessionOperation)) ->
+    -- | Routes with output AND session ID
+    ((ClaudeCodeResult schema, SessionId) -> Eff effs (GotoChoice targets)) ->
+    ClaudeCodeLLMHandler model needs schema targets effs tpl
 
 -- | Handler for Gemini-annotated nodes.
 --
 -- Executed via Gemini CLI subprocess.
 type GeminiLLMHandler :: GeminiModel -> Type -> Type -> [Type] -> [Type -> Type] -> Type -> Type
 data GeminiLLMHandler model needs schema targets effs tpl where
-  GeminiLLMHandler
-    :: forall model tpl needs schema targets effs.
-       SingGeminiModel model
-    => Maybe (TypedTemplate tpl SourcePos)
-    -> TypedTemplate tpl SourcePos
-    -> (needs -> Eff effs tpl)
-    -> (schema -> Eff effs (GotoChoice targets))
-    -> GeminiLLMHandler model needs schema targets effs tpl
+  GeminiLLMHandler ::
+    forall model tpl needs schema targets effs.
+    (SingGeminiModel model) =>
+    Maybe (TypedTemplate tpl SourcePos) ->
+    TypedTemplate tpl SourcePos ->
+    (needs -> Eff effs tpl) ->
+    (schema -> Eff effs (GotoChoice targets)) ->
+    GeminiLLMHandler model needs schema targets effs tpl

@@ -1,13 +1,13 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Main (main) where
 
-import Test.Hspec
-import Data.Aeson (Value(..), object, (.=))
-import qualified Data.Text as T
+import Data.Aeson (Value (..), object, (.=))
+import Data.Text qualified as T
+import ExoMonad.Effect.Gemini (GeminiResult (..))
 import ExoMonad.Gemini.Interpreter
-import ExoMonad.Effect.Gemini (GeminiResult(..))
+import Test.Hspec
 
 main :: IO ()
 main = hspec spec

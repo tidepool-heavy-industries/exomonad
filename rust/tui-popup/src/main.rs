@@ -53,8 +53,7 @@ fn main() -> Result<()> {
         serde_json::from_str(&json).context("Failed to parse PopupDefinition JSON")?;
 
     // Run popup with /dev/tty backend (blocking)
-    let result = run_popup_with_tty(definition)
-        .context("Popup failed")?;
+    let result = run_popup_with_tty(definition).context("Popup failed")?;
 
     // Write result to output file/FIFO
     let result_json = serde_json::to_string(&result)?;

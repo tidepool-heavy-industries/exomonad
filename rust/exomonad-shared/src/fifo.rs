@@ -338,10 +338,11 @@ pub fn write_signal(fifo_path: &Path, signal: &InterruptSignal) -> Result<()> {
             path: fifo_path.to_path_buf(),
             source: e,
         })?;
-    file.write_all(b"\n").map_err(|e| ExoMonadError::FifoWrite {
-        path: fifo_path.to_path_buf(),
-        source: e,
-    })?;
+    file.write_all(b"\n")
+        .map_err(|e| ExoMonadError::FifoWrite {
+            path: fifo_path.to_path_buf(),
+            source: e,
+        })?;
 
     debug!(
         signal_type = %signal.signal_type,
@@ -390,12 +391,12 @@ mod tests {
     fn test_fifo_guard_cleanup() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("test.fifo");
-        
+
         {
             let _guard = FifoGuard::new(path.clone()).unwrap();
             assert!(path.exists());
         }
-        
+
         assert!(!path.exists());
     }
 
@@ -425,14 +426,16 @@ mod tests {
 
         let path_clone = path.clone();
         let expected_clone = expected.clone();
-        
+
         thread::spawn(move || {
             // Give reader a moment to open
             thread::sleep(Duration::from_millis(50));
             write_result(&path_clone, &expected_clone).unwrap();
         });
 
-        let received = result_fifo.read_with_timeout(Duration::from_secs(2)).unwrap();
+        let received = result_fifo
+            .read_with_timeout(Duration::from_secs(2))
+            .unwrap();
         assert_eq!(received.session_id, expected.session_id);
         assert_eq!(received.exit_code, expected.exit_code);
     }

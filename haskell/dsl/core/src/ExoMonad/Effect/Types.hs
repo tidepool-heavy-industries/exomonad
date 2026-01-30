@@ -1,7 +1,8 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
 -- | Core effect types for ExoMonad - pure definitions without IO runners
 --
 -- This module contains the effect type definitions and pure operations
@@ -9,188 +10,196 @@
 -- in exomonad-platform.
 module ExoMonad.Effect.Types
   ( -- * Core Effects
-    State(..)
-  , Random(..)
-  , Time(..)
-  , LLM(..)
-  , ChatHistory(..)
-  , Emit(..)
-  , RequestInput        -- ^ Use smart constructors (requestChoice, requestText, etc.)
-  , Log(..)
-  , LogLevel(..)
-  , QuestionUI(..)
-  , DecisionLog(..)
-  , TUI(..)
+    State (..),
+    Random (..),
+    Time (..),
+    LLM (..),
+    ChatHistory (..),
+    Emit (..),
+    RequestInput, -- ^ Use smart constructors (requestChoice, requestText, etc.)
+    Log (..),
+    LogLevel (..),
+    QuestionUI (..),
+    DecisionLog (..),
+    TUI (..),
 
     -- * Return Effect (graph termination)
-  , Return(..)
-  , returnValue
-  , runReturn
+    Return (..),
+    returnValue,
+    runReturn,
 
     -- * Node Metadata Effect (re-exports from ExoMonad.Effect.NodeMeta)
-  , NodeMeta(..)
-  , NodeMetadata(..)
-  , getNodeMeta
-  , runNodeMeta
-  , defaultNodeMeta
+    NodeMeta (..),
+    NodeMetadata (..),
+    getNodeMeta,
+    runNodeMeta,
+    defaultNodeMeta,
 
     -- * Effect Operations
-  , get
-  , gets
-  , put
-  , modify
-  , randomInt
-  , randomDouble
-  , getCurrentTime
-  , emit
-  , requestChoice
-  , requestText
-  , requestTextWithPhoto
-  , requestCustom
-  , requestQuestion
-  , logMsg
-  , logMsgWith
-  , logDebug
-  , logDebugWith
-  , logInfo
-  , logInfoWith
-  , logWarn
-  , logWarnWith
-  , logError
-  , logErrorWith
-  , LogFields
-  , getHistory
-  , appendMessages
-  , clearHistory
-  , estimateTokens
-  , estimateMessageChars
-  , estimateBlockChars
+    get,
+    gets,
+    put,
+    modify,
+    randomInt,
+    randomDouble,
+    getCurrentTime,
+    emit,
+    requestChoice,
+    requestText,
+    requestTextWithPhoto,
+    requestCustom,
+    requestQuestion,
+    logMsg,
+    logMsgWith,
+    logDebug,
+    logDebugWith,
+    logInfo,
+    logInfoWith,
+    logWarn,
+    logWarnWith,
+    logError,
+    logErrorWith,
+    LogFields,
+    getHistory,
+    appendMessages,
+    clearHistory,
+    estimateTokens,
+    estimateMessageChars,
+    estimateBlockChars,
 
     -- * LLM Operations
-  , runTurn
-  , runTurnContent
-  , llmCall
-  , llmCallEither
-  , llmCallEitherWithTools
-  , llmCallStructured
-  , llmCallStructuredWithTools
-  , withImages
+    runTurn,
+    runTurnContent,
+    llmCall,
+    llmCallEither,
+    llmCallEitherWithTools,
+    llmCallStructured,
+    llmCallStructuredWithTools,
+    withImages,
 
     -- * LLM Error Types
-  , LlmError(..)
+    LlmError (..),
 
     -- * Result Types
-  , TurnResult(..)
-  , TurnParseResult(..)
-  , ToolInvocation(..)
-  , TurnOutcome(..)
-  , ToolResult(..)
-  , LLMConfig(..)
-  , LLMHooks(..)
-  , noHooks
-  , InputHandler(..)
-  , QuestionHandler
+    TurnResult (..),
+    TurnParseResult (..),
+    ToolInvocation (..),
+    TurnOutcome (..),
+    ToolResult (..),
+    LLMConfig (..),
+    LLMHooks (..),
+    noHooks,
+    InputHandler (..),
+    QuestionHandler,
 
     -- * Tool Dispatcher Type
-  , ToolDispatcher
+    ToolDispatcher,
 
     -- * Goto Types (for tool transitions)
-  , GotoChoice
-  , To
+    GotoChoice,
+    To,
 
     -- * Tool Validation (Parse Don't Validate)
-  , ValidatedToolInput(..)
-  , ToolError(..)
-  , toolErrorToText
+    ValidatedToolInput (..),
+    ToolError (..),
+    toolErrorToText,
 
     -- * Simple Runners (pure/IO)
-  , runState
-  , runRandom
-  , runTime
-  , runEmit
-  , runLog
-  , runChatHistory
-  , runRequestInput
-  , runQuestionUI
-  , runDecisionLogPure
+    runState,
+    runRandom,
+    runTime,
+    runEmit,
+    runLog,
+    runChatHistory,
+    runRequestInput,
+    runQuestionUI,
+    runDecisionLogPure,
 
     -- * TUI Effect Operations
-  , showUI
+    showUI,
 
     -- * Decision Types
-  , Decision(..)
-  , DecisionContext(..)
-  , DecisionTrace(..)
-  , recordDecision
+    Decision (..),
+    DecisionContext (..),
+    DecisionTrace (..),
+    recordDecision,
 
     -- * TUI Types (popup-tui protocol)
+
     -- Note: Import ExoMonad.Effect.TUI directly for full component types
-  , PopupDefinition(..)
-  , PopupResult(..)
+    PopupDefinition (..),
+    PopupResult (..),
 
     -- * Content Types (re-exports from Anthropic.Types)
-  , ContentBlock(..)
-  , ImageSource(..)
-  , Message(..)
-  , Role(..)
-  , ThinkingContent(..)
-  , RedactedThinking(..)
+    ContentBlock (..),
+    ImageSource (..),
+    Message (..),
+    Role (..),
+    ThinkingContent (..),
+    RedactedThinking (..),
 
     -- * Question DSL (re-exports from ExoMonad.Question)
-  , Question(..)
-  , Answer(..)
-  , ItemDisposition(..)
-  , Choice(..)
-  , ChoiceOption(..)
-  ) where
+    Question (..),
+    Answer (..),
+    ItemDisposition (..),
+    Choice (..),
+    ChoiceOption (..),
+  )
+where
 
-import Control.Monad.Freer (Eff, Member, send, interpret, sendM, LastMember)
+import Control.Monad.Freer (Eff, LastMember, Member, interpret, send, sendM)
 import Control.Monad.Freer.Internal (handleRelayS)
-import System.Random (randomRIO)
-import Data.Time (UTCTime)
-import qualified Data.Time as Time
-import Data.Text (Text)
-import qualified Data.Text as T
-import Data.Aeson (Value(..), FromJSON, ToJSON, encode)
-import ExoMonad.StructuredOutput (StructuredOutput(..), formatDiagnostic)
-import qualified Data.ByteString.Lazy as LBS
-import GHC.Generics (Generic)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef, modifyIORef)
+import Data.Aeson (FromJSON, ToJSON, Value (..), encode)
+import Data.ByteString.Lazy qualified as LBS
+import Data.IORef (IORef, modifyIORef, newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
-import Data.List.NonEmpty (NonEmpty(..), toList)
-
+import Data.List.NonEmpty (NonEmpty (..), toList)
+import Data.Text (Text)
+import Data.Text qualified as T
+import Data.Time (UTCTime)
+import Data.Time qualified as Time
 -- Node metadata for teaching infrastructure
-import ExoMonad.Effect.NodeMeta (NodeMeta(..), NodeMetadata(..), getNodeMeta, runNodeMeta, defaultNodeMeta)
 
 -- Re-exports from Anthropic.Types (pure types)
 -- Note: We import ToolUse but not ToolResult from Anthropic.Types
 -- because ExoMonad.Effect.Types defines its own ToolResult for tool dispatchers.
 import ExoMonad.Anthropic.Types
-  ( ContentBlock(..), ImageSource(..), Message(..), Role(..)
-  , ThinkingContent(..), RedactedThinking(..)
-  , ToolUse(..)
+  ( ContentBlock (..),
+    ImageSource (..),
+    Message (..),
+    RedactedThinking (..),
+    Role (..),
+    ThinkingContent (..),
+    ToolUse (..),
   )
-import qualified ExoMonad.Anthropic.Types as AT (ToolResult(..))
-
+import ExoMonad.Anthropic.Types qualified as AT (ToolResult (..))
 -- Question DSL types (shared across agents)
-import ExoMonad.Question (Question(..), Answer(..), ItemDisposition(..), Choice(..), ChoiceOption(..))
 
 -- Goto types for tool transitions
-import ExoMonad.Graph.Goto (GotoChoice, To)
 
 -- TUI effect and types (popup-tui pattern)
-import ExoMonad.Effect.TUI
-  ( TUI(..), showUI
-  , PopupDefinition(..), PopupResult(..)
-  )
 
 -- Log effect and types
-import ExoMonad.Effect.Log
 
 -- Decision types
 import ExoMonad.Effect.Decision.Types
-  ( Decision(..), DecisionContext(..), DecisionTrace(..)
+  ( Decision (..),
+    DecisionContext (..),
+    DecisionTrace (..),
   )
+import ExoMonad.Effect.Log
+import ExoMonad.Effect.NodeMeta (NodeMeta (..), NodeMetadata (..), defaultNodeMeta, getNodeMeta, runNodeMeta)
+import ExoMonad.Effect.TUI
+  ( PopupDefinition (..),
+    PopupResult (..),
+    TUI (..),
+    showUI,
+  )
+import ExoMonad.Graph.Goto (GotoChoice, To)
+import ExoMonad.Question (Answer (..), Choice (..), ChoiceOption (..), ItemDisposition (..), Question (..))
+import ExoMonad.StructuredOutput (StructuredOutput (..), formatDiagnostic)
+import GHC.Generics (Generic)
+import System.Random (randomRIO)
 
 -- ══════════════════════════════════════════════════════════════
 -- STATE EFFECT
@@ -200,21 +209,21 @@ data State s r where
   Get :: State s s
   Put :: s -> State s ()
 
-get :: Member (State s) effs => Eff effs s
+get :: (Member (State s) effs) => Eff effs s
 get = send Get
 
-gets :: Member (State s) effs => (s -> a) -> Eff effs a
+gets :: (Member (State s) effs) => (s -> a) -> Eff effs a
 gets f = f <$> get
 
-put :: Member (State s) effs => s -> Eff effs ()
+put :: (Member (State s) effs) => s -> Eff effs ()
 put = send . Put
 
-modify :: Member (State s) effs => (s -> s) -> Eff effs ()
+modify :: (Member (State s) effs) => (s -> s) -> Eff effs ()
 modify f = get >>= put . f
 
 runState :: s -> Eff (State s ': effs) a -> Eff effs (a, s)
 runState initial = handleRelayS initial (\s a -> pure (a, s)) $ \s -> \case
-  Get   -> \k -> k s s
+  Get -> \k -> k s s
   Put s' -> \k -> k s' ()
 
 -- ══════════════════════════════════════════════════════════════
@@ -222,19 +231,19 @@ runState initial = handleRelayS initial (\s a -> pure (a, s)) $ \s -> \case
 -- ══════════════════════════════════════════════════════════════
 
 data Random r where
-  RandomInt :: Int -> Int -> Random Int  -- lo hi inclusive
+  RandomInt :: Int -> Int -> Random Int -- lo hi inclusive
   RandomDouble :: Random Double
 
-randomInt :: Member Random effs => Int -> Int -> Eff effs Int
+randomInt :: (Member Random effs) => Int -> Int -> Eff effs Int
 randomInt lo hi = send (RandomInt lo hi)
 
-randomDouble :: Member Random effs => Eff effs Double
+randomDouble :: (Member Random effs) => Eff effs Double
 randomDouble = send RandomDouble
 
-runRandom :: LastMember IO effs => Eff (Random ': effs) a -> Eff effs a
+runRandom :: (LastMember IO effs) => Eff (Random ': effs) a -> Eff effs a
 runRandom = interpret $ \case
   RandomInt lo hi -> sendM $ randomRIO (lo, hi)
-  RandomDouble    -> sendM $ randomRIO (0.0, 1.0)
+  RandomDouble -> sendM $ randomRIO (0.0, 1.0)
 
 -- ══════════════════════════════════════════════════════════════
 -- TIME EFFECT
@@ -243,10 +252,10 @@ runRandom = interpret $ \case
 data Time r where
   GetCurrentTime :: Time UTCTime
 
-getCurrentTime :: Member Time effs => Eff effs UTCTime
+getCurrentTime :: (Member Time effs) => Eff effs UTCTime
 getCurrentTime = send GetCurrentTime
 
-runTime :: LastMember IO effs => Eff (Time ': effs) a -> Eff effs a
+runTime :: (LastMember IO effs) => Eff (Time ': effs) a -> Eff effs a
 runTime = interpret $ \case
   GetCurrentTime -> sendM Time.getCurrentTime
 
@@ -256,13 +265,13 @@ runTime = interpret $ \case
 
 -- | The LLM effect runs a complete turn with template and tools
 data LLM r where
-  RunTurnOp
-    :: NodeMetadata                  -- Node/graph context for teaching
-    -> Text                          -- System prompt
-    -> NonEmpty ContentBlock         -- User content
-    -> Value                         -- Output schema
-    -> [Value]                       -- Tool definitions
-    -> LLM (TurnOutcome (TurnResult Value))
+  RunTurnOp ::
+    NodeMetadata -> -- Node/graph context for teaching
+    Text -> -- System prompt
+    NonEmpty ContentBlock -> -- User content
+    Value -> -- Output schema
+    [Value] -> -- Tool definitions
+    LLM (TurnOutcome (TurnResult Value))
 
 -- | Outcome of running a turn
 --
@@ -271,15 +280,15 @@ data LLM r where
 data TurnOutcome a
   = TurnCompleted a
   | TurnBroken Text
-  | TurnTransitionHint Text Value  -- target name + payload (untyped)
+  | TurnTransitionHint Text Value -- target name + payload (untyped)
   deriving (Show, Eq, Functor)
 
 -- | Result of running an LLM turn
 data TurnResult output = TurnResult
-  { trOutput :: output
-  , trToolsInvoked :: [ToolInvocation]
-  , trNarrative :: Text
-  , trThinking :: Text
+  { trOutput :: output,
+    trToolsInvoked :: [ToolInvocation],
+    trNarrative :: Text,
+    trThinking :: Text
   }
   deriving (Show, Eq, Generic, Functor)
 
@@ -287,18 +296,18 @@ data TurnResult output = TurnResult
 data TurnParseResult output
   = TurnParsed (TurnResult output)
   | TurnParseFailed
-      { tpfRawJson :: Value
-      , tpfNarrative :: Text
-      , tpfError :: String
-      , tpfToolsInvoked :: [ToolInvocation]
+      { tpfRawJson :: Value,
+        tpfNarrative :: Text,
+        tpfError :: String,
+        tpfToolsInvoked :: [ToolInvocation]
       }
   deriving (Show, Eq, Functor)
 
 -- | Record of a tool invocation
 data ToolInvocation = ToolInvocation
-  { tiName :: Text
-  , tiInput :: Value
-  , tiOutput :: Value
+  { tiName :: Text,
+    tiInput :: Value,
+    tiOutput :: Value
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -311,7 +320,7 @@ data ToolInvocation = ToolInvocation
 data ToolResult (targets :: [Type])
   = ToolSuccess Value
   | ToolBreak Text
-  | ToolTransition Text Value  -- target name + payload (untyped, will be type-checked at interpreter)
+  | ToolTransition Text Value -- target name + payload (untyped, will be type-checked at interpreter)
 
 instance Show (ToolResult targets) where
   show (ToolSuccess val) = "ToolSuccess " <> show val
@@ -326,17 +335,17 @@ instance Eq (ToolResult targets) where
 
 -- | LLM configuration
 data LLMConfig = LLMConfig
-  { llmApiKey :: Text
-  , llmModel :: Text
-  , llmMaxTokens :: Int
-  , llmThinkingBudget :: Maybe Int
+  { llmApiKey :: Text,
+    llmModel :: Text,
+    llmMaxTokens :: Int,
+    llmThinkingBudget :: Maybe Int
   }
   deriving (Show, Eq, Generic)
 
 -- | Hooks for LLM lifecycle events
 data LLMHooks = LLMHooks
-  { onTurnStart :: IO ()
-  , onTurnEnd :: IO ()
+  { onTurnStart :: IO (),
+    onTurnEnd :: IO ()
   }
 
 noHooks :: LLMHooks
@@ -378,7 +387,7 @@ type ToolDispatcher (targets :: [Type]) event effs =
 -- @
 --
 -- The type carries the proof that validation succeeded.
-newtype ValidatedToolInput a = ValidatedToolInput { getValidated :: a }
+newtype ValidatedToolInput a = ValidatedToolInput {getValidated :: a}
   deriving (Show, Eq, Functor)
 
 -- | Structured errors for tool execution.
@@ -393,24 +402,26 @@ newtype ValidatedToolInput a = ValidatedToolInput { getValidated :: a }
 --   Right output -> ...
 -- @
 data ToolError
-  = ToolNotFound Text
-    -- ^ Tool name not recognized in registry
+  = -- | Tool name not recognized in registry
+    ToolNotFound Text
   | ToolValidationFailed
-    { tveToolName :: Text
-      -- ^ Name of the tool that failed validation
-    , tveExpectedSchema :: Value
-      -- ^ JSON Schema the input should have matched
-    , tveActualInput :: Value
-      -- ^ The actual input that failed to parse
-    , tveParseError :: Text
-      -- ^ The parse error message
-    }
-    -- ^ Tool input failed schema validation
-  | ToolExecutionFailed Text
-    -- ^ Tool execution threw an error
+      { -- | Name of the tool that failed validation
+        tveToolName :: Text,
+        -- | JSON Schema the input should have matched
+        tveExpectedSchema :: Value,
+        -- | The actual input that failed to parse
+        tveActualInput :: Value,
+        -- | The parse error message
+        tveParseError :: Text
+      }
+  | -- \^ Tool input failed schema validation
+
+    -- | Tool execution threw an error
+    ToolExecutionFailed Text
   deriving (Show, Eq, Generic)
 
 instance ToJSON ToolError
+
 instance FromJSON ToolError
 
 -- | Convert a ToolError to a human-readable message.
@@ -420,31 +431,34 @@ toolErrorToText :: ToolError -> Text
 toolErrorToText = \case
   ToolNotFound name ->
     "Unknown tool: " <> name
-  ToolValidationFailed{tveToolName, tveParseError} ->
+  ToolValidationFailed {tveToolName, tveParseError} ->
     "Tool '" <> tveToolName <> "' input validation failed: " <> tveParseError
   ToolExecutionFailed msg ->
     "Tool execution failed: " <> msg
 
 -- | Build content blocks from text + images
 withImages :: Text -> [ImageSource] -> NonEmpty ContentBlock
-withImages text images = Text { text = text } :| map Image images
+withImages text images = Text {text = text} :| map Image images
 
-runTurn
-  :: forall output effs.
-     (Member LLM effs, Member NodeMeta effs, StructuredOutput output)
-  => Text -> Text -> Value -> [Value]
-  -> Eff effs (TurnOutcome (TurnParseResult output))
+runTurn ::
+  forall output effs.
+  (Member LLM effs, Member NodeMeta effs, StructuredOutput output) =>
+  Text ->
+  Text ->
+  Value ->
+  [Value] ->
+  Eff effs (TurnOutcome (TurnParseResult output))
 runTurn systemPrompt userAction =
-  runTurnContent systemPrompt (Text { text = userAction } :| [])
+  runTurnContent systemPrompt (Text {text = userAction} :| [])
 
-runTurnContent
-  :: forall output effs.
-     (Member LLM effs, Member NodeMeta effs, StructuredOutput output)
-  => Text
-  -> NonEmpty ContentBlock
-  -> Value
-  -> [Value]
-  -> Eff effs (TurnOutcome (TurnParseResult output))
+runTurnContent ::
+  forall output effs.
+  (Member LLM effs, Member NodeMeta effs, StructuredOutput output) =>
+  Text ->
+  NonEmpty ContentBlock ->
+  Value ->
+  [Value] ->
+  Eff effs (TurnOutcome (TurnParseResult output))
 runTurnContent systemPrompt userContent schema tools = do
   meta <- getNodeMeta
   rawResult <- send (RunTurnOp meta systemPrompt userContent schema tools)
@@ -454,22 +468,26 @@ runTurnContent systemPrompt userContent schema tools = do
     TurnCompleted tr -> do
       let rawJson = tr.trOutput
       case parseStructured rawJson of
-        Right parsed -> return $ TurnCompleted $ TurnParsed tr { trOutput = parsed }
-        Left diag -> return $ TurnCompleted $ TurnParseFailed
-          { tpfRawJson = rawJson
-          , tpfNarrative = tr.trNarrative
-          , tpfError = T.unpack (formatDiagnostic diag)
-          , tpfToolsInvoked = tr.trToolsInvoked
-          }
+        Right parsed -> return $ TurnCompleted $ TurnParsed tr {trOutput = parsed}
+        Left diag ->
+          return $
+            TurnCompleted $
+              TurnParseFailed
+                { tpfRawJson = rawJson,
+                  tpfNarrative = tr.trNarrative,
+                  tpfError = T.unpack (formatDiagnostic diag),
+                  tpfToolsInvoked = tr.trToolsInvoked
+                }
 
 -- | Make an LLM call that throws on error.
 --
 -- Throws an exception if the LLM call fails. For error handling, use
 -- 'llmCallEither' (returns Either with Text errors) or 'llmCallStructured'
 -- (returns Either with structured LlmError type).
-llmCall
-  :: forall output effs. (Member LLM effs, Member NodeMeta effs, StructuredOutput output)
-  => Text -> Text -> Value -> Eff effs output
+llmCall ::
+  forall output effs.
+  (Member LLM effs, Member NodeMeta effs, StructuredOutput output) =>
+  Text -> Text -> Value -> Eff effs output
 llmCall systemPrompt userInput schema = do
   result <- llmCallEither @output systemPrompt userInput schema
   case result of
@@ -481,9 +499,10 @@ llmCall systemPrompt userInput schema = do
 -- Returns @Left (error message)@ on failure or @Right output@ on success.
 -- Errors are represented as plain Text. Use 'llmCallStructured' for structured
 -- error types (rate limits, timeouts, etc.).
-llmCallEither
-  :: forall output effs. (Member LLM effs, Member NodeMeta effs, StructuredOutput output)
-  => Text -> Text -> Value -> Eff effs (Either Text output)
+llmCallEither ::
+  forall output effs.
+  (Member LLM effs, Member NodeMeta effs, StructuredOutput output) =>
+  Text -> Text -> Value -> Eff effs (Either Text output)
 llmCallEither systemPrompt userInput schema = do
   result <- runTurn @output systemPrompt userInput schema []
   case result of
@@ -496,9 +515,10 @@ llmCallEither systemPrompt userInput schema = do
 --
 -- Like 'llmCallEither' but supports tool definitions and invocations.
 -- Returns @Left (error message)@ on failure or @Right output@ on success.
-llmCallEitherWithTools
-  :: forall output effs. (Member LLM effs, Member NodeMeta effs, StructuredOutput output)
-  => Text -> Text -> Value -> [Value] -> Eff effs (Either Text output)
+llmCallEitherWithTools ::
+  forall output effs.
+  (Member LLM effs, Member NodeMeta effs, StructuredOutput output) =>
+  Text -> Text -> Value -> [Value] -> Eff effs (Either Text output)
 llmCallEitherWithTools systemPrompt userInput schema tools = do
   result <- runTurn @output systemPrompt userInput schema tools
   case result of
@@ -516,14 +536,22 @@ llmCallEitherWithTools systemPrompt userInput schema tools = do
 -- in Habitica/Telegram where stub runners return Left but real implementations
 -- will use all variants.
 data LlmError
-  = LlmRateLimited              -- ^ Rate limit hit, retry later
-  | LlmTimeout                  -- ^ Request timed out
-  | LlmContextTooLong           -- ^ Input too long for context window
-  | LlmParseFailed Text         -- ^ Schema parsing failed (includes error message)
-  | LlmTurnBroken Text          -- ^ Turn was broken by tool (unexpected)
-  | LlmNetworkError Text        -- ^ Network/connection failure
-  | LlmUnauthorized             -- ^ Invalid API key
-  | LlmOther Text               -- ^ Other errors with message
+  = -- | Rate limit hit, retry later
+    LlmRateLimited
+  | -- | Request timed out
+    LlmTimeout
+  | -- | Input too long for context window
+    LlmContextTooLong
+  | -- | Schema parsing failed (includes error message)
+    LlmParseFailed Text
+  | -- | Turn was broken by tool (unexpected)
+    LlmTurnBroken Text
+  | -- | Network/connection failure
+    LlmNetworkError Text
+  | -- | Invalid API key
+    LlmUnauthorized
+  | -- | Other errors with message
+    LlmOther Text
   deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
 -- | Make an LLM call returning Either with structured errors (no tools).
@@ -531,9 +559,10 @@ data LlmError
 -- Like 'llmCallEither' but returns structured 'LlmError' type instead of Text.
 -- This allows better error handling with pattern matching on specific error cases
 -- (rate limits, timeouts, etc.).
-llmCallStructured
-  :: forall output effs. (Member LLM effs, Member NodeMeta effs, StructuredOutput output)
-  => Text -> Text -> Value -> Eff effs (Either LlmError output)
+llmCallStructured ::
+  forall output effs.
+  (Member LLM effs, Member NodeMeta effs, StructuredOutput output) =>
+  Text -> Text -> Value -> Eff effs (Either LlmError output)
 llmCallStructured systemPrompt userInput schema = do
   result <- runTurn @output systemPrompt userInput schema []
   case result of
@@ -546,9 +575,10 @@ llmCallStructured systemPrompt userInput schema = do
 --
 -- Like 'llmCallEitherWithTools' but returns structured 'LlmError' type instead of Text.
 -- This allows better error handling with pattern matching on specific error cases.
-llmCallStructuredWithTools
-  :: forall output effs. (Member LLM effs, Member NodeMeta effs, StructuredOutput output)
-  => Text -> Text -> Value -> [Value] -> Eff effs (Either LlmError output)
+llmCallStructuredWithTools ::
+  forall output effs.
+  (Member LLM effs, Member NodeMeta effs, StructuredOutput output) =>
+  Text -> Text -> Value -> [Value] -> Eff effs (Either LlmError output)
 llmCallStructuredWithTools systemPrompt userInput schema tools = do
   result <- runTurn @output systemPrompt userInput schema tools
   case result of
@@ -566,21 +596,21 @@ data ChatHistory r where
   AppendMessages :: [Message] -> ChatHistory ()
   ClearHistory :: ChatHistory ()
 
-getHistory :: Member ChatHistory effs => Eff effs [Message]
+getHistory :: (Member ChatHistory effs) => Eff effs [Message]
 getHistory = send GetHistory
 
-appendMessages :: Member ChatHistory effs => [Message] -> Eff effs ()
+appendMessages :: (Member ChatHistory effs) => [Message] -> Eff effs ()
 appendMessages = send . AppendMessages
 
-clearHistory :: Member ChatHistory effs => Eff effs ()
+clearHistory :: (Member ChatHistory effs) => Eff effs ()
 clearHistory = send ClearHistory
 
-runChatHistory :: LastMember IO effs => Eff (ChatHistory ': effs) a -> Eff effs a
+runChatHistory :: (LastMember IO effs) => Eff (ChatHistory ': effs) a -> Eff effs a
 runChatHistory action = do
   ref <- sendM $ newIORef ([] :: [Message])
   runChatHistoryWith ref action
 
-runChatHistoryWith :: LastMember IO effs => IORef [Message] -> Eff (ChatHistory ': effs) a -> Eff effs a
+runChatHistoryWith :: (LastMember IO effs) => IORef [Message] -> Eff (ChatHistory ': effs) a -> Eff effs a
 runChatHistoryWith ref = interpret $ \case
   GetHistory -> sendM $ readIORef ref
   AppendMessages msgs -> sendM $ modifyIORef ref (++ msgs)
@@ -609,13 +639,13 @@ estimateMessageChars msg = sum (map estimateBlockChars (toList msg.content))
 -- All estimates are approximate and may under- or over-estimate true token usage.
 estimateBlockChars :: ContentBlock -> Int
 estimateBlockChars = \case
-  Text { text = t } -> T.length t
-  Image { source = _ } -> 1000  -- Rough placeholder; actual image tokens vary by provider
-  ToolUse { name = n, input = i } -> T.length n + estimateValueChars i
-  ToolResult { content = c } -> T.length c
-  Thinking { thinking = t } -> T.length t
-  RedactedThinking { data_ = _ } -> 100  -- Encrypted/hidden; arbitrary rough estimate
-  Json { json = v } -> estimateValueChars v
+  Text {text = t} -> T.length t
+  Image {source = _} -> 1000 -- Rough placeholder; actual image tokens vary by provider
+  ToolUse {name = n, input = i} -> T.length n + estimateValueChars i
+  ToolResult {content = c} -> T.length c
+  Thinking {thinking = t} -> T.length t
+  RedactedThinking {data_ = _} -> 100 -- Encrypted/hidden; arbitrary rough estimate
+  Json {json = v} -> estimateValueChars v
 
 -- | Estimate characters in a JSON value via its encoded length.
 estimateValueChars :: Value -> Int
@@ -628,10 +658,10 @@ estimateValueChars = fromIntegral . LBS.length . encode
 data Emit event r where
   EmitEvent :: event -> Emit event ()
 
-emit :: Member (Emit event) effs => event -> Eff effs ()
+emit :: (Member (Emit event) effs) => event -> Eff effs ()
 emit = send . EmitEvent
 
-runEmit :: LastMember IO effs => (event -> IO ()) -> Eff (Emit event ': effs) a -> Eff effs a
+runEmit :: (LastMember IO effs) => (event -> IO ()) -> Eff (Emit event ': effs) a -> Eff effs a
 runEmit handler = interpret $ \case
   EmitEvent e -> sendM $ handler e
 
@@ -657,33 +687,33 @@ data RequestInput r where
 -- @
 -- result <- requestChoice "Which option?" [("Option A", 1), ("Option B", 2)]
 -- @
-requestChoice :: Member RequestInput effs => Text -> [(Text, a)] -> Eff effs a
+requestChoice :: (Member RequestInput effs) => Text -> [(Text, a)] -> Eff effs a
 requestChoice prompt choices = send (RequestChoice prompt choices)
 
 -- | Ask user for free text input.
-requestText :: Member RequestInput effs => Text -> Eff effs Text
+requestText :: (Member RequestInput effs) => Text -> Eff effs Text
 requestText = send . RequestText
 
 -- | Ask user for text input with photo support.
-requestTextWithPhoto :: Member RequestInput effs => Text -> Eff effs (Text, [(Text, Text)])
+requestTextWithPhoto :: (Member RequestInput effs) => Text -> Eff effs (Text, [(Text, Text)])
 requestTextWithPhoto = send . RequestTextWithPhoto
 
 -- | Send a custom request to the UI (extensibility point).
-requestCustom :: Member RequestInput effs => Text -> Value -> Eff effs Value
+requestCustom :: (Member RequestInput effs) => Text -> Value -> Eff effs Value
 requestCustom tag payload = send (RequestCustom tag payload)
 
 data InputHandler = InputHandler
-  { ihChoice :: forall a. Text -> [(Text, a)] -> IO a
-  , ihText   :: Text -> IO Text
-  , ihTextWithPhoto :: Text -> IO (Text, [(Text, Text)])
-  , ihCustom :: Text -> Value -> IO Value
+  { ihChoice :: forall a. Text -> [(Text, a)] -> IO a,
+    ihText :: Text -> IO Text,
+    ihTextWithPhoto :: Text -> IO (Text, [(Text, Text)]),
+    ihCustom :: Text -> Value -> IO Value
   }
 
-runRequestInput :: LastMember IO effs => InputHandler -> Eff (RequestInput ': effs) a -> Eff effs a
+runRequestInput :: (LastMember IO effs) => InputHandler -> Eff (RequestInput ': effs) a -> Eff effs a
 runRequestInput handler = interpret $ \case
   RequestChoice prompt choices ->
-    let InputHandler { ihChoice = choiceHandler } = handler
-    in sendM $ choiceHandler prompt choices
+    let InputHandler {ihChoice = choiceHandler} = handler
+     in sendM $ choiceHandler prompt choices
   RequestText prompt -> sendM $ handler.ihText prompt
   RequestTextWithPhoto prompt -> sendM $ handler.ihTextWithPhoto prompt
   RequestCustom tag payload -> sendM $ handler.ihCustom tag payload
@@ -695,12 +725,12 @@ runRequestInput handler = interpret $ \case
 data QuestionUI r where
   AskQuestion :: Question -> QuestionUI Answer
 
-requestQuestion :: Member QuestionUI effs => Question -> Eff effs Answer
+requestQuestion :: (Member QuestionUI effs) => Question -> Eff effs Answer
 requestQuestion q = send (AskQuestion q)
 
 type QuestionHandler = Question -> IO Answer
 
-runQuestionUI :: LastMember IO effs => QuestionHandler -> Eff (QuestionUI ': effs) a -> Eff effs a
+runQuestionUI :: (LastMember IO effs) => QuestionHandler -> Eff (QuestionUI ': effs) a -> Eff effs a
 runQuestionUI handler = interpret $ \case
   AskQuestion q -> sendM $ handler q
 
@@ -712,7 +742,7 @@ data DecisionLog r where
   RecordDecision :: DecisionTrace -> DecisionLog ()
 
 -- | Record a decision trace for training data.
-recordDecision :: Member DecisionLog effs => DecisionTrace -> Eff effs ()
+recordDecision :: (Member DecisionLog effs) => DecisionTrace -> Eff effs ()
 recordDecision trace = send (RecordDecision trace)
 
 -- | Pure runner for DecisionLog (drops logs).
@@ -755,7 +785,7 @@ data Return (a :: Type) r where
 --
 -- Note: Returns the value directly, so the computation's result type
 -- must match the Return effect's type parameter.
-returnValue :: Member (Return a) effs => a -> Eff effs a
+returnValue :: (Member (Return a) effs) => a -> Eff effs a
 returnValue = send . ReturnValue
 
 -- | Run the Return effect, extracting the returned value.

@@ -1,8 +1,8 @@
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE NoFieldSelectors #-}
-{-# LANGUAGE DuplicateRecordFields #-}
 
 -- | Tests for Habitica response type parsing.
 --
@@ -12,33 +12,36 @@
 -- This catches protocol mismatches before they become runtime errors.
 module ResponseSpec (spec) where
 
-import Test.Hspec
 import Data.Aeson (decode, encode, object, (.=))
 import Data.Aeson.QQ (aesonQQ)
 import Data.Maybe (isJust)
-import qualified Data.Text as T
-
+import Data.Text qualified as T
 import ExoMonad.Habitica
-  ( UserInfo(..)
-  , UserStats(..)
-  , HabiticaTask(..)
-  , FetchedTodo(..)
-  , FetchedChecklistItem(..)
-  , ScoreResult(..)
-  , TaskType(..)
-  , TaskId(..)
-  , TodoId(..)
+  ( FetchedChecklistItem (..),
+    FetchedTodo (..),
+    HabiticaTask (..),
+    ScoreResult (..),
+    TaskId (..),
+    TaskType (..),
+    TodoId (..),
+    UserInfo (..),
+    UserStats (..),
   )
-
+import Test.Hspec
 
 -- | Helper to parse a task type string through a minimal HabiticaTask JSON.
 parseTaskType :: T.Text -> Maybe TaskType
-parseTaskType t = fmap (.taskType) $ (decode $ encode $ object
-  [ "id" .= ("x" :: T.Text)
-  , "text" .= ("x" :: T.Text)
-  , "type" .= t
-  ] :: Maybe HabiticaTask)
-
+parseTaskType t =
+  fmap (.taskType) $
+    ( decode $
+        encode $
+          object
+            [ "id" .= ("x" :: T.Text),
+              "text" .= ("x" :: T.Text),
+              "type" .= t
+            ] ::
+        Maybe HabiticaTask
+    )
 
 spec :: Spec
 spec = do
@@ -48,17 +51,16 @@ spec = do
   fetchedTodoSpec
   scoreResultSpec
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- UserInfo (GetUser response)
 -- ════════════════════════════════════════════════════════════════════════════
 
 userInfoSpec :: Spec
 userInfoSpec = describe "UserInfo" $ do
-
   it "parses GetUser response from TypeScript handler" $ do
     -- This JSON matches what handleHabitica returns for GetUser
-    let json = [aesonQQ|{
+    let json =
+          [aesonQQ|{
       "userId": "abc123",
       "userName": "TestUser",
       "stats": {
@@ -81,7 +83,8 @@ userInfoSpec = describe "UserInfo" $ do
       Nothing -> expectationFailure "Expected successful parse"
 
   it "parses empty username" $ do
-    let json = [aesonQQ|{
+    let json =
+          [aesonQQ|{
       "userId": "xyz",
       "userName": "",
       "stats": {"hp": 0, "mp": 0, "exp": 0, "gp": 0}
@@ -89,17 +92,16 @@ userInfoSpec = describe "UserInfo" $ do
     let parsed = decode (encode json) :: Maybe UserInfo
     parsed `shouldSatisfy` isJust
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- UserStats
 -- ════════════════════════════════════════════════════════════════════════════
 
 userStatsSpec :: Spec
 userStatsSpec = describe "UserStats" $ do
-
   it "parses integer values as doubles" $ do
     -- TypeScript may send integer values, Haskell expects Double
-    let json = [aesonQQ|{
+    let json =
+          [aesonQQ|{
       "hp": 50,
       "mp": 100,
       "exp": 1500,
@@ -109,7 +111,8 @@ userStatsSpec = describe "UserStats" $ do
     parsed `shouldSatisfy` isJust
 
   it "parses floating point values" $ do
-    let json = [aesonQQ|{
+    let json =
+          [aesonQQ|{
       "hp": 49.5,
       "mp": 99.9,
       "exp": 1500.75,
@@ -118,17 +121,16 @@ userStatsSpec = describe "UserStats" $ do
     let parsed = decode (encode json) :: Maybe UserStats
     parsed `shouldSatisfy` isJust
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- HabiticaTask (GetTasks response)
 -- ════════════════════════════════════════════════════════════════════════════
 
 habiticaTaskSpec :: Spec
 habiticaTaskSpec = describe "HabiticaTask" $ do
-
   it "parses GetTasks response item from TypeScript handler" $ do
     -- This JSON matches what handleHabitica returns for GetTasks
-    let json = [aesonQQ|{
+    let json =
+          [aesonQQ|{
       "id": "task-123-abc",
       "text": "Complete daily review",
       "type": "Dailys",
@@ -157,7 +159,8 @@ habiticaTaskSpec = describe "HabiticaTask" $ do
     parseTaskType "rewards" `shouldBe` Just Rewards
 
   it "parses null taskCompleted as Nothing" $ do
-    let json = [aesonQQ|{
+    let json =
+          [aesonQQ|{
       "id": "x",
       "text": "x",
       "type": "Habits",
@@ -169,7 +172,8 @@ habiticaTaskSpec = describe "HabiticaTask" $ do
       Nothing -> expectationFailure "Expected successful parse"
 
   it "parses missing taskCompleted as Nothing" $ do
-    let json = [aesonQQ|{
+    let json =
+          [aesonQQ|{
       "id": "x",
       "text": "x",
       "type": "Habits"
@@ -180,7 +184,8 @@ habiticaTaskSpec = describe "HabiticaTask" $ do
       Nothing -> expectationFailure "Expected successful parse"
 
   it "parses list of tasks" $ do
-    let json = [aesonQQ|[
+    let json =
+          [aesonQQ|[
       {"id": "1", "text": "Task 1", "type": "Dailys", "completed": true},
       {"id": "2", "text": "Task 2", "type": "Todos", "completed": false}
     ]|]
@@ -190,17 +195,16 @@ habiticaTaskSpec = describe "HabiticaTask" $ do
       Just tasks -> length tasks `shouldBe` 2
       Nothing -> expectationFailure "Expected successful parse"
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- FetchedTodo (FetchTodos response)
 -- ════════════════════════════════════════════════════════════════════════════
 
 fetchedTodoSpec :: Spec
 fetchedTodoSpec = describe "FetchedTodo" $ do
-
   it "parses FetchTodos response item from TypeScript handler" $ do
     -- This JSON matches what handleHabitica returns for FetchTodos
-    let json = [aesonQQ|{
+    let json =
+          [aesonQQ|{
       "id": "todo-456-def",
       "title": "Write tests",
       "checklist": [
@@ -219,7 +223,7 @@ fetchedTodoSpec = describe "FetchedTodo" $ do
         todo.completed `shouldBe` False
 
         case todo.checklist of
-          (item1:_) -> do
+          (item1 : _) -> do
             item1.id `shouldBe` "cl-1"
             item1.text `shouldBe` "Unit tests"
             item1.completed `shouldBe` True
@@ -227,7 +231,8 @@ fetchedTodoSpec = describe "FetchedTodo" $ do
       Nothing -> expectationFailure "Expected successful parse"
 
   it "parses todo with empty checklist" $ do
-    let json = [aesonQQ|{
+    let json =
+          [aesonQQ|{
       "id": "x",
       "title": "Simple todo",
       "checklist": [],
@@ -242,7 +247,8 @@ fetchedTodoSpec = describe "FetchedTodo" $ do
       Nothing -> expectationFailure "Expected successful parse"
 
   it "parses list of todos" $ do
-    let json = [aesonQQ|[
+    let json =
+          [aesonQQ|[
       {"id": "1", "title": "A", "checklist": [], "completed": false},
       {"id": "2", "title": "B", "checklist": [], "completed": true}
     ]|]
@@ -252,17 +258,16 @@ fetchedTodoSpec = describe "FetchedTodo" $ do
       Just todos -> length todos `shouldBe` 2
       Nothing -> expectationFailure "Expected successful parse"
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- ScoreResult (ScoreTask response)
 -- ════════════════════════════════════════════════════════════════════════════
 
 scoreResultSpec :: Spec
 scoreResultSpec = describe "ScoreResult" $ do
-
   it "parses ScoreTask response from TypeScript handler" $ do
     -- This JSON matches what handleHabitica returns for ScoreTask
-    let json = [aesonQQ|{
+    let json =
+          [aesonQQ|{
       "delta": 1.5,
       "drop": "Sword of Destiny"
     }|]
@@ -275,7 +280,8 @@ scoreResultSpec = describe "ScoreResult" $ do
       Nothing -> expectationFailure "Expected successful parse"
 
   it "parses null drop as Nothing" $ do
-    let json = [aesonQQ|{
+    let json =
+          [aesonQQ|{
       "delta": -0.5,
       "drop": null
     }|]
@@ -287,7 +293,8 @@ scoreResultSpec = describe "ScoreResult" $ do
       Nothing -> expectationFailure "Expected successful parse"
 
   it "parses missing drop as Nothing" $ do
-    let json = [aesonQQ|{
+    let json =
+          [aesonQQ|{
       "delta": 2.0
     }|]
     let parsed = decode (encode json) :: Maybe ScoreResult

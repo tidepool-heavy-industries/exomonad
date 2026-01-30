@@ -1,9 +1,9 @@
 module DecisionSpec (spec) where
 
-import Test.Hspec
-import Data.Aeson (encode, decode)
-import Data.Time (UTCTime(..), fromGregorian)
+import Data.Aeson (decode, encode)
+import Data.Time (UTCTime (..), fromGregorian)
 import ExoMonad.Effect.Decision
+import Test.Hspec
 
 spec :: Spec
 spec = do
@@ -27,11 +27,12 @@ spec = do
 
   describe "DecisionTrace JSON roundtrip" $ do
     it "roundtrips full trace" $ do
-      let t = DecisionTrace
-            { dtContext = DecisionContext "What next?"
-            , dtOptionsPresented = ["Continue", "Abort", "Provide Guidance (Enter to submit)"]
-            , dtDecision = Continue
-            , dtLatencyMs = 1234
-            , dtTimestamp = UTCTime (fromGregorian 2026 1 19) 0
-            }
+      let t =
+            DecisionTrace
+              { dtContext = DecisionContext "What next?",
+                dtOptionsPresented = ["Continue", "Abort", "Provide Guidance (Enter to submit)"],
+                dtDecision = Continue,
+                dtLatencyMs = 1234,
+                dtTimestamp = UTCTime (fromGregorian 2026 1 19) 0
+              }
       decode (encode t) `shouldBe` Just t

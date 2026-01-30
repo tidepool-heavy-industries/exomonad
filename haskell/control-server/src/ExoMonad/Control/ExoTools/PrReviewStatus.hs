@@ -8,29 +8,28 @@
 {-# LANGUAGE TypeOperators #-}
 
 module ExoMonad.Control.ExoTools.PrReviewStatus
-  ( PrReviewStatusGraph(..)
-  , prReviewStatusHandlers
-  , prReviewStatusLogic
-  , PrReviewStatusArgs(..)
-  , PrReviewStatusResult(..)
-  , AuthorFeedback(..)
-  , FeedbackSummary(..)
-  ) where
+  ( PrReviewStatusGraph (..),
+    prReviewStatusHandlers,
+    prReviewStatusLogic,
+    PrReviewStatusArgs (..),
+    PrReviewStatusResult (..),
+    AuthorFeedback (..),
+    FeedbackSummary (..),
+  )
+where
 
 import Control.Monad.Freer (Eff, Member)
 import Data.List (partition)
 import Data.Text (Text)
-import qualified Data.Text as T
-import Data.Time (UTCTime(..), Day(ModifiedJulianDay))
-import GHC.Generics (Generic)
-
-import ExoMonad.Effects.GitHub (GitHub, getPullRequest, getPullRequestReviews, PullRequest(..), Review(..), ReviewComment(..), ReviewState(..), Author(..), defaultRepo)
+import Data.Text qualified as T
+import Data.Time (Day (ModifiedJulianDay), UTCTime (..))
+import ExoMonad.Control.ExoTools.PrReviewStatus.Types
+import ExoMonad.Effects.GitHub (Author (..), GitHub, PullRequest (..), Review (..), ReviewComment (..), ReviewState (..), defaultRepo, getPullRequest, getPullRequestReviews)
 import ExoMonad.Graph.Generic (AsHandler, type (:-))
 import ExoMonad.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import ExoMonad.Graph.Goto (Goto, GotoChoice, To, gotoExit)
-import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef)
-
-import ExoMonad.Control.ExoTools.PrReviewStatus.Types
+import ExoMonad.Graph.Types (Exit, Input, MCPExport, MCPToolDef, UsesEffects, type (:@))
+import GHC.Generics (Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPH
@@ -38,27 +37,30 @@ import ExoMonad.Control.ExoTools.PrReviewStatus.Types
 
 -- | Graph definition for pr_review_status tool.
 data PrReviewStatusGraph mode = PrReviewStatusGraph
-  { prsEntry :: mode :- EntryNode PrReviewStatusArgs
-      :@ MCPExport
-      :@ MCPToolDef '("pr_review_status", "Get comprehensive PR feedback: Copilot vs human comments, pending vs resolved, with summary counts.")
-
-  , prsRun :: mode :- LogicNode
-      :@ Input PrReviewStatusArgs
-      :@ UsesEffects '[GitHub, Goto Exit PrReviewStatusResult]
-
-  , prsExit :: mode :- ExitNode PrReviewStatusResult
+  { prsEntry ::
+      mode
+        :- EntryNode PrReviewStatusArgs
+        :@ MCPExport
+        :@ MCPToolDef '("pr_review_status", "Get comprehensive PR feedback: Copilot vs human comments, pending vs resolved, with summary counts."),
+    prsRun ::
+      mode
+        :- LogicNode
+        :@ Input PrReviewStatusArgs
+        :@ UsesEffects '[GitHub, Goto Exit PrReviewStatusResult],
+    prsExit :: mode :- ExitNode PrReviewStatusResult
   }
-  deriving Generic
+  deriving (Generic)
 
 -- | Handlers for pr_review_status graph.
-prReviewStatusHandlers
-  :: (Member GitHub es)
-  => PrReviewStatusGraph (AsHandler es)
-prReviewStatusHandlers = PrReviewStatusGraph
-  { prsEntry = ()
-  , prsRun = prReviewStatusLogic
-  , prsExit = ()
-  }
+prReviewStatusHandlers ::
+  (Member GitHub es) =>
+  PrReviewStatusGraph (AsHandler es)
+prReviewStatusHandlers =
+  PrReviewStatusGraph
+    { prsEntry = (),
+      prsRun = prReviewStatusLogic,
+      prsExit = ()
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- LOGIC
@@ -76,7 +78,7 @@ reviewToComment (Review author body state) =
       createdAt = UTCTime (ModifiedJulianDay 0) 0
       -- Treat APPROVED and DISMISSED as resolved.
       isResolved = state `elem` [ReviewApproved, ReviewDismissed]
-  in ReviewComment login body Nothing Nothing state createdAt isResolved
+   in ReviewComment login body Nothing Nothing state createdAt isResolved
 
 -- | Check if an author is Copilot or a bot.
 isCopilotAuthor :: Text -> Bool
@@ -97,26 +99,26 @@ partitionComments comments =
   let (copilotComments, humanComments) = partition (isCopilotAuthor . commentAuthor) comments
       (copilotPending, copilotResolved) = partition (not . isCommentResolved) copilotComments
       (humanPending, humanResolved) = partition (not . isCommentResolved) humanComments
-  in ( AuthorFeedback copilotPending copilotResolved
-     , AuthorFeedback humanPending humanResolved
-     )
+   in ( AuthorFeedback copilotPending copilotResolved,
+        AuthorFeedback humanPending humanResolved
+      )
 
 -- | Build summary counts from feedback.
 buildSummary :: AuthorFeedback -> AuthorFeedback -> FeedbackSummary
 buildSummary copilot humans =
   FeedbackSummary
-    { copilotPending = length (copilot.pending)
-    , copilotResolved = length (copilot.resolved)
-    , humanPending = length (humans.pending)
-    , humanResolved = length (humans.resolved)
+    { copilotPending = length (copilot.pending),
+      copilotResolved = length (copilot.resolved),
+      humanPending = length (humans.pending),
+      humanResolved = length (humans.resolved)
     }
 
 -- | Core logic for pr_review_status.
 -- Fetches both inline review comments and PR-level reviews, then consolidates them.
-prReviewStatusLogic
-  :: (Member GitHub es)
-  => PrReviewStatusArgs
-  -> Eff es (GotoChoice '[To Exit PrReviewStatusResult])
+prReviewStatusLogic ::
+  (Member GitHub es) =>
+  PrReviewStatusArgs ->
+  Eff es (GotoChoice '[To Exit PrReviewStatusResult])
 prReviewStatusLogic args = do
   let repo = defaultRepo
 
@@ -140,9 +142,11 @@ prReviewStatusLogic args = do
   let (copilotFeedback, humanFeedback) = partitionComments allComments
       summary = buildSummary copilotFeedback humanFeedback
 
-  pure $ gotoExit PrReviewStatusResult
-    { prNumber = args.prNumber
-    , copilot = copilotFeedback
-    , humans = humanFeedback
-    , summary = summary
-    }
+  pure $
+    gotoExit
+      PrReviewStatusResult
+        { prNumber = args.prNumber,
+          copilot = copilotFeedback,
+          humans = humanFeedback,
+          summary = summary
+        }

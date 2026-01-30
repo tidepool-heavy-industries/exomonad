@@ -30,10 +30,10 @@ pub async fn run_health_check() -> Result<()> {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
     use std::os::unix::net::UnixListener;
     use std::thread;
     use tempfile::tempdir;
-    use std::io::{Read, Write};
 
     #[tokio::test]
     async fn test_health_check_success() {
@@ -46,7 +46,7 @@ mod tests {
 
         let server_handle = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            
+
             // Read request
             let mut buf = [0u8; 1024];
             let _ = stream.read(&mut buf).unwrap();
@@ -54,7 +54,7 @@ mod tests {
             // Construct response
             let response_obj = ControlResponse::Pong;
             let response_json = serde_json::to_string(&response_obj).unwrap();
-            
+
             // Minimal HTTP response
             let http_response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}\r\n",
@@ -90,7 +90,7 @@ mod tests {
             // Return something else instead of Pong
             let response_obj = ControlResponse::ToolsListResponse { tools: vec![] };
             let response_json = serde_json::to_string(&response_obj).unwrap();
-            
+
             let http_response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}\r\n",
                 response_json.len(),
@@ -104,7 +104,7 @@ mod tests {
         std::env::set_var("EXOMONAD_CONTROL_SOCKET", socket_path_inner);
         let result = run_health_check().await;
         assert!(result.is_err());
-        
+
         let err = result.unwrap_err().to_string();
         assert!(err.contains("Unexpected response to Ping"));
 

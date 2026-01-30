@@ -1,10 +1,10 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE DataKinds #-}
 
 -- | Tests for the StructuredOutput typeclass.
 --
@@ -18,20 +18,18 @@
 -- * Schema validity checking
 module StructuredOutputSpec (spec) where
 
-import Test.Hspec
-import Data.Text (Text)
-import qualified Data.Text as T
-import Data.Aeson (Value(..), withText)
-import qualified Data.Aeson.KeyMap as KeyMap
-import Data.List.NonEmpty (NonEmpty(..))
+import Data.Aeson (Value (..), withText)
+import Data.Aeson.KeyMap qualified as KeyMap
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Set (Set)
-import qualified Data.Set as Set
-import GHC.Generics (Generic)
-
+import Data.Set qualified as Set
+import Data.Text (Text)
+import Data.Text qualified as T
+import ExoMonad.Schema (JSONSchema (..), SchemaType (..), enumSchema, schemaToValue)
 import ExoMonad.StructuredOutput
-import ExoMonad.StructuredOutput.Error (ParseDiagnostic(..))
-import ExoMonad.Schema (JSONSchema(..), SchemaType(..), enumSchema, schemaToValue)
-
+import ExoMonad.StructuredOutput.Error (ParseDiagnostic (..))
+import GHC.Generics (Generic)
+import Test.Hspec
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TEST FIXTURES
@@ -39,16 +37,16 @@ import ExoMonad.Schema (JSONSchema(..), SchemaType(..), enumSchema, schemaToValu
 
 -- | Simple record with prefix-stripped fields.
 data SimpleRecord = SimpleRecord
-  { srName :: Text
-  , srAge :: Int
+  { srName :: Text,
+    srAge :: Int
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (StructuredOutput)
 
 -- | Record with optional (Maybe) field.
 data OptionalRecord = OptionalRecord
-  { orRequired :: Text
-  , orOptional :: Maybe Int
+  { orRequired :: Text,
+    orOptional :: Maybe Int
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (StructuredOutput)
@@ -94,7 +92,6 @@ instance StructuredOutput Status where
     String other -> Left $ ParseDiagnostic [] "Pending | Active | Completed" other ("Unknown Status: " <> other)
     other -> Left $ ParseDiagnostic [] "string" (T.pack $ show other) "Expected string for Status enum"
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS
 -- ════════════════════════════════════════════════════════════════════════════
@@ -102,7 +99,6 @@ instance StructuredOutput Status where
 -- | Roundtrip test: encode then parse should return original value.
 roundtrip :: (StructuredOutput a, Eq a, Show a) => a -> Expectation
 roundtrip x = parseStructured (encodeStructured x) `shouldBe` Right x
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TESTS
@@ -114,7 +110,7 @@ spec = do
     it "Text" $ roundtrip ("hello" :: Text)
     it "String" $ roundtrip ("world" :: String)
     it "Int" $ roundtrip (42 :: Int)
-    it "Integer" $ roundtrip (123456789 :: Integer)  -- within Int bounds
+    it "Integer" $ roundtrip (123456789 :: Integer) -- within Int bounds
     it "Double" $ roundtrip (3.14159 :: Double)
     it "Bool True" $ roundtrip True
     it "Bool False" $ roundtrip False
@@ -187,13 +183,17 @@ spec = do
       parseStructured @OptionalRecord json `shouldBe` Right (OptionalRecord "hello" Nothing)
 
     it "null optional field parses as Nothing" $ do
-      let json = Object $ KeyMap.fromList
-            [("required", String "hello"), ("optional", Null)]
+      let json =
+            Object $
+              KeyMap.fromList
+                [("required", String "hello"), ("optional", Null)]
       parseStructured @OptionalRecord json `shouldBe` Right (OptionalRecord "hello" Nothing)
 
     it "present optional field parses as Just" $ do
-      let json = Object $ KeyMap.fromList
-            [("required", String "hello"), ("optional", Number 42)]
+      let json =
+            Object $
+              KeyMap.fromList
+                [("required", String "hello"), ("optional", Number 42)]
       parseStructured @OptionalRecord json `shouldBe` Right (OptionalRecord "hello" (Just 42))
 
   describe "Maybe field encoding" $ do
@@ -297,19 +297,19 @@ spec = do
   describe "Validation" $ do
     it "recognizes simple records as valid" $ do
       -- This test is mostly a compile-time check
-      let _ = () :: ValidStructuredOutput SimpleRecord => ()
+      let _ = () :: (ValidStructuredOutput SimpleRecord) => ()
       True `shouldBe` True
 
     it "recognizes enums as valid" $ do
-      let _ = () :: ValidStructuredOutput Priority => ()
+      let _ = () :: (ValidStructuredOutput Priority) => ()
       True `shouldBe` True
 
     it "containers are valid if their contents are" $ do
-      let _ = () :: ValidStructuredOutput [Text] => ()
-      let _ = () :: ValidStructuredOutput (Maybe Int) => ()
+      let _ = () :: (ValidStructuredOutput [Text]) => ()
+      let _ = () :: (ValidStructuredOutput (Maybe Int)) => ()
       True `shouldBe` True
 
-    -- it "SumType is recognized as invalid for structured output" $ do
-    --   -- THIS WOULD FAIL TO COMPILE (which is what we want to verify manually)
-    --   -- let _ = () :: ValidStructuredOutput SumType => ()
-    --   pendingWith "Manually verified that SumType fails compile check in llmCall"
+-- it "SumType is recognized as invalid for structured output" $ do
+--   -- THIS WOULD FAIL TO COMPILE (which is what we want to verify manually)
+--   -- let _ = () :: ValidStructuredOutput SumType => ()
+--   pendingWith "Manually verified that SumType fails compile check in llmCall"

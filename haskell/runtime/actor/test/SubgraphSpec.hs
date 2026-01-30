@@ -12,25 +12,23 @@ module SubgraphSpec (spec) where
 
 import Control.Concurrent (threadDelay)
 import Control.Monad.Freer (Eff, runM)
-import Data.IORef (newIORef, atomicModifyIORef')
+import Data.IORef (atomicModifyIORef', newIORef)
 import Data.List (sort)
-import Test.Hspec
-import qualified Ki
-
 import ExoMonad.Actor.Subgraph
-  ( SubgraphState(..)
-  , newSubgraphState
-  , newSubgraphStateDeferred
-  , withRecursiveGraph
-  , runSubgraph
-  , Subgraph
-  , spawnSelf
-  , awaitAny
-  , getPending
-  , ChildHandle(..)
-  , ChildId(..)
+  ( ChildHandle (..),
+    ChildId (..),
+    Subgraph,
+    SubgraphState (..),
+    awaitAny,
+    getPending,
+    newSubgraphState,
+    newSubgraphStateDeferred,
+    runSubgraph,
+    spawnSelf,
+    withRecursiveGraph,
   )
-
+import Ki qualified
+import Test.Hspec
 
 spec :: Spec
 spec = do
@@ -48,8 +46,7 @@ spec = do
         handle <- runSubgraphAction state (spawnSelf @Int @Int 42)
         -- Handle should have a valid child ID
         let ChildHandle cid = handle
-        cid `shouldSatisfy` (\_ -> True)  -- Just checking it exists
-
+        cid `shouldSatisfy` (\_ -> True) -- Just checking it exists
     it "child appears in getPending while running" $ do
       Ki.scoped $ \scope -> do
         state <- newSubgraphState scope Nothing slowRunner
@@ -67,8 +64,7 @@ spec = do
         state <- newSubgraphState scope Nothing simpleRunner
         _ <- runSubgraphAction state (spawnSelf @Int @Int 42)
         (_, result) <- runSubgraphAction state (awaitAny @Int @Int)
-        result `shouldBe` Right 43  -- simpleRunner adds 1
-
+        result `shouldBe` Right 43 -- simpleRunner adds 1
     it "collects multiple children" $ do
       Ki.scoped $ \scope -> do
         state <- newSubgraphState scope Nothing simpleRunner
@@ -198,7 +194,7 @@ spec = do
       result <- withRecursiveGraph @Int @Int Nothing $ \state wire -> do
         -- In real code, this would be: buildHandlerMap (interpret state)
         -- For testing, we just wire directly (ignore ChildId)
-        wire $ \_ n -> pure (n * 2)  -- Simulated "graph runner"
+        wire $ \_ n -> pure (n * 2) -- Simulated "graph runner"
 
         -- Spawn children
         _ <- runSubgraphAction state (spawnSelf @Int @Int 5)
@@ -212,48 +208,44 @@ spec = do
           (Right v1, Right v2) -> pure (v1 + v2)
           _ -> error "Unexpected child failure"
 
-      result `shouldBe` 30  -- (5*2) + (10*2)
-
+      result `shouldBe` 30 -- (5*2) + (10*2)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TEST HELPERS
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Run a Subgraph action against a state.
-runSubgraphAction
-  :: SubgraphState entry result
-  -> Eff '[Subgraph entry result, IO] a
-  -> IO a
+runSubgraphAction ::
+  SubgraphState entry result ->
+  Eff '[Subgraph entry result, IO] a ->
+  IO a
 runSubgraphAction state action =
   runM $ runSubgraph state action
-
 
 -- | Simple runner: adds 1 to input.
 simpleRunner :: ChildId -> Int -> IO Int
 simpleRunner _ n = pure (n + 1)
-
 
 -- | Slow runner: waits briefly before returning.
 -- Used to test getPending while children are still running.
 slowRunner :: ChildId -> Int -> IO Int
 slowRunner _ n = do
   -- Small delay to ensure child is "in progress"
-  threadDelay 100000  -- 100ms delay
+  threadDelay 100000 -- 100ms delay
   pure (n + 1)
-
 
 -- | Collection loop pattern from the plan.
 --
 -- Awaits children one by one, tracking which have completed.
-collectLoop
-  :: SubgraphState Int Int
-  -> [ChildHandle]
-  -> IO [Int]
+collectLoop ::
+  SubgraphState Int Int ->
+  [ChildHandle] ->
+  IO [Int]
 collectLoop state = go []
   where
     go acc [] = pure acc
-    go acc (_:rest) = do
+    go acc (_ : rest) = do
       (_, eitherResult) <- runSubgraphAction state (awaitAny @Int @Int)
       case eitherResult of
         Right result -> go (result : acc) rest
-        Left _err -> go acc rest  -- Skip failed children
+        Left _err -> go acc rest -- Skip failed children

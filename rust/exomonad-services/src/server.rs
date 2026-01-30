@@ -1,4 +1,6 @@
-use crate::{AnthropicService, ExternalService, GitHubService, OllamaService, OtelService, ServiceError};
+use crate::{
+    AnthropicService, ExternalService, GitHubService, OllamaService, OtelService, ServiceError,
+};
 use exomonad_shared::protocol::{ServiceRequest, ServiceResponse};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -40,7 +42,7 @@ impl ServiceServer {
 
         // Remove existing socket file if it exists
         let _ = tokio::fs::remove_file(socket_path).await;
-        
+
         let listener = UnixListener::bind(socket_path)?;
         info!("Service server listening on {}", socket_path);
 
@@ -51,7 +53,10 @@ impl ServiceServer {
                     tokio::spawn(async move {
                         if let Err(e) = server.handle_connection(stream).await {
                             if e.downcast_ref::<serde_json::Error>().is_some() {
-                                error!("Critical JSON (de)serialization error in connection: {:#}", e);
+                                error!(
+                                    "Critical JSON (de)serialization error in connection: {:#}",
+                                    e
+                                );
                             } else {
                                 error!("Connection error: {:#}", e);
                             }

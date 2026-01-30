@@ -1,15 +1,12 @@
 -- | Tests for wire protocol encoding/decoding.
 module ProtocolSpec (spec) where
 
-import qualified Data.ByteString as BS
+import Data.ByteString qualified as BS
+import ExoMonad.GHCi.Protocol (decodeLen, encodeLen)
 import Test.Hspec
-
-import ExoMonad.GHCi.Protocol (encodeLen, decodeLen)
-
 
 spec :: Spec
 spec = describe "Length Encoding" $ do
-
   it "encodes 0 correctly" $ do
     encodeLen 0 `shouldBe` BS.pack [0, 0, 0, 0]
 

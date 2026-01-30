@@ -1,12 +1,12 @@
 module Main where
 
+import GraphSpec qualified
+import IntegrationSpec qualified
+import MailboxSpec qualified
+import RuntimeSpec qualified
+import SpawnSpec qualified
+import SubgraphSpec qualified
 import Test.Hspec
-import qualified MailboxSpec
-import qualified SpawnSpec
-import qualified RuntimeSpec
-import qualified IntegrationSpec
-import qualified GraphSpec
-import qualified SubgraphSpec
 
 main :: IO ()
 main = hspec $ do

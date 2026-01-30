@@ -58,183 +58,187 @@
 -- Generate Mermaid diagrams from graph definitions using reification.
 module ExoMonad.Graph
   ( -- * Node Kind
-    NodeKind(..)
+    NodeKind (..),
 
     -- * Annotations
-  , type (:@)
-  , Input
-  , Schema
-  , System
-  , Template
-  , Vision
-  , Tools
-  , UsesEffects
-  , Memory
+    type (:@),
+    Input,
+    Schema,
+    System,
+    Template,
+    Vision,
+    Tools,
+    UsesEffects,
+    Memory,
 
     -- * Graph-Level Annotations
-  , type (:&)
-  , Groups
-  , Requires
-  , Global
-  , Backend
+    type (:&),
+    Groups,
+    Requires,
+    Global,
+    Backend,
 
     -- * API Backend Types
-  , CloudflareAI
-  , NativeAnthropic
+    CloudflareAI,
+    NativeAnthropic,
 
     -- * ClaudeCode Annotation
-  , ClaudeCode
-  , ModelChoice(..)
-  , Haiku
-  , Sonnet
-  , Opus
+    ClaudeCode,
+    ModelChoice (..),
+    Haiku,
+    Sonnet,
+    Opus,
 
     -- * Gemini Annotation
-  , Gemini
-  , GeminiModel(..)
-  , Flash
-  , Pro
-  , Ultra
+    Gemini,
+    GeminiModel (..),
+    Flash,
+    Pro,
+    Ultra,
 
     -- * The Goto Effect
-  , Goto(..)
-  , goto
+    Goto (..),
+    goto,
 
     -- * The Memory Effect
     -- $memoryEffect
-  , Mem.getMem
-  , Mem.updateMem
-  , Mem.modifyMem
-  , Mem.runMemory
-  , Mem.evalMemory
+    Mem.getMem,
+    Mem.updateMem,
+    Mem.modifyMem,
+    Mem.runMemory,
+    Mem.evalMemory,
     -- For the Memory effect type itself, import ExoMonad.Graph.Memory directly
 
     -- * Template Definitions
     -- $templateDef
-  , Tpl.TemplateDef(..)
-  , Tpl.renderTemplate
-  , Tpl.GingerContext
-  , Tpl.TypedTemplate
-  , Tpl.typedTemplateFile
-  , Tpl.runTypedTemplate
-  , Tpl.makeTemplateCompiled
+    Tpl.TemplateDef (..),
+    Tpl.renderTemplate,
+    Tpl.GingerContext,
+    Tpl.TypedTemplate,
+    Tpl.typedTemplateFile,
+    Tpl.runTypedTemplate,
+    Tpl.makeTemplateCompiled,
+
     -- ** Dependency Tracking
-  , Tpl.TemplateDependency(..)
-  , Tpl.DepRelation(..)
-  , Tpl.DepLocation(..)
-  , Tpl.TemplateContextInfo(..)
-  , Tpl.templateDependencyTree
-  , Tpl.flattenDeps
+    Tpl.TemplateDependency (..),
+    Tpl.DepRelation (..),
+    Tpl.DepLocation (..),
+    Tpl.TemplateContextInfo (..),
+    Tpl.templateDependencyTree,
+    Tpl.flattenDeps,
 
     -- * Template Documentation
     -- $templateDocs
-  , Docs.renderDepTree
-  , Docs.renderDepTreeCompact
-  , Docs.templateDocBlock
+    Docs.renderDepTree,
+    Docs.renderDepTreeCompact,
+    Docs.templateDocBlock,
 
     -- * Validation
+
     -- These constraints operate on graphs of kind @Type -> Type@,
     -- i.e. graphs defined with @mode@ parameter.
-  , AllNodesReachable
-  , AllLogicNodesReachExit
-  , NoDeadGotos
+    AllNodesReachable,
+    AllLogicNodesReachExit,
+    NoDeadGotos,
 
     -- * Reification
-  , ReifyGraph(..)
-  , GraphInfo(..)
-  , NodeInfo(..)
-  , EdgeInfo(..)
-  , RuntimeNodeKind(..)
-  , RuntimeEdgeKind(..)
+    ReifyGraph (..),
+    GraphInfo (..),
+    NodeInfo (..),
+    EdgeInfo (..),
+    RuntimeNodeKind (..),
+    RuntimeEdgeKind (..),
+
     -- ** Rich Node Info Types
-  , SchemaInfo(..)
-  , TemplateInfo(..)
-  , MemoryInfo(..)
+    SchemaInfo (..),
+    TemplateInfo (..),
+    MemoryInfo (..),
 
     -- * JSON Export
-  , graphToExport
-  , graphToJSON
-  , GraphExport(..)
-  , NodeExport(..)
-  , EdgeExport(..)
-  , SchemaExport(..)
-  , TemplateExport(..)
-  , MemoryExport(..)
+    graphToExport,
+    graphToJSON,
+    GraphExport (..),
+    NodeExport (..),
+    EdgeExport (..),
+    SchemaExport (..),
+    TemplateExport (..),
+    MemoryExport (..),
 
     -- * Record-Based Reification
     -- $recordReification
-  , ReifyRecordGraph(..)
-  , makeGraphInfo
+    ReifyRecordGraph (..),
+    makeGraphInfo,
 
     -- * Mermaid Diagrams
-  , toMermaid
-  , toMermaidWithConfig
-  , MermaidConfig(..)
-  , defaultConfig
+    toMermaid,
+    toMermaidWithConfig,
+    MermaidConfig (..),
+    defaultConfig,
 
     -- * Record-Based Graph DSL
     -- $recordDSL
-  , G.GraphMode(..)
-  , G.AsGraph
-  , G.AsHandler
+    G.GraphMode (..),
+    G.AsGraph,
+    G.AsHandler,
     -- For G.Entry, G.Exit, use: import qualified ExoMonad.Graph.Generic as G
-  , G.LLMNode
-  , G.GeminiNode
-  , G.LogicNode
-  , G.ValidGraphRecord
-  , G.NodeHandler
-  , G.GraphProduct(..)
-  , G.FieldNamesOf
-  , G.FieldsWithNamesOf
-  , G.ElemC
-  , G.gotoField
-  , G.GenericGraph
+    G.LLMNode,
+    G.GeminiNode,
+    G.LogicNode,
+    G.ValidGraphRecord,
+    G.NodeHandler,
+    G.GraphProduct (..),
+    G.FieldNamesOf,
+    G.FieldsWithNamesOf,
+    G.ElemC,
+    G.gotoField,
+    G.GenericGraph,
 
     -- * Annotation Extraction (used by record DSL)
-  , GetInput
-  , GetSchema
-  , GetUsesEffects
-  , GetGotoTargets
-  , GotosToTos
-  , GetMemory
-  , GetGlobal
-  , GetBackend
-  , GetClaudeCode
-  , HasClaudeCode
-  , GetGeminiModel
-  , HasGeminiModel
+    GetInput,
+    GetSchema,
+    GetUsesEffects,
+    GetGotoTargets,
+    GotosToTos,
+    GetMemory,
+    GetGlobal,
+    GetBackend,
+    GetClaudeCode,
+    HasClaudeCode,
+    GetGeminiModel,
+    HasGeminiModel,
 
     -- * Backend Compatibility Validation
-  , ClaudeCodeCFBackendError
+    ClaudeCodeCFBackendError,
 
     -- * LLM Handler Variants
-  , LLMHandler(..)
-  , ClaudeCodeLLMHandler(..)
-  , GeminiLLMHandler(..)
+    LLMHandler (..),
+    ClaudeCodeLLMHandler (..),
+    GeminiLLMHandler (..),
 
     -- * Tools
-  , ToolDef(..)
-  , ValidTool
-  , ValidToolList
-  , AllToolsValid
-  , ToolInfo(..)
-  , ReifyToolList(..)
-  , toolInfoToJSON
-  , toolToInfo
-  ) where
+    ToolDef (..),
+    ValidTool,
+    ValidToolList,
+    AllToolsValid,
+    ToolInfo (..),
+    ReifyToolList (..),
+    toolInfoToJSON,
+    toolToInfo,
+  )
+where
 
-import ExoMonad.Graph.Types
-import ExoMonad.Graph.Goto
+import ExoMonad.Graph.Docs qualified as Docs
 import ExoMonad.Graph.Edges
-import ExoMonad.Graph.Validate
-import ExoMonad.Graph.Reify
 import ExoMonad.Graph.Export
+import ExoMonad.Graph.Generic qualified as G
+import ExoMonad.Graph.Goto
+import ExoMonad.Graph.Memory qualified as Mem
 import ExoMonad.Graph.Mermaid
+import ExoMonad.Graph.Reify
+import ExoMonad.Graph.Template qualified as Tpl
 import ExoMonad.Graph.Tool
-import qualified ExoMonad.Graph.Memory as Mem
-import qualified ExoMonad.Graph.Template as Tpl
-import qualified ExoMonad.Graph.Docs as Docs
-import qualified ExoMonad.Graph.Generic as G
+import ExoMonad.Graph.Types
+import ExoMonad.Graph.Validate
 
 -- $memoryEffect
 --

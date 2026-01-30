@@ -9,77 +9,94 @@
 -- These type families power the record-based (Servant-style) graph definitions.
 module ExoMonad.Graph.Edges
   ( -- * Edge Type
-    EdgeKind(..)
+    EdgeKind (..),
 
     -- * Annotation Extraction
-  , GetInput
-  , GetSchema
-  , GetUsesEffects
-  , GetSystem
-  , GetTemplate
-  , GetVision
-  , GetTools
-  , GetMemory
+    GetInput,
+    GetSchema,
+    GetUsesEffects,
+    GetSystem,
+    GetTemplate,
+    GetVision,
+    GetTools,
+    GetMemory,
 
     -- * EntryNode/Exit Extraction
-  , GetEntries
-  , GetExits
-  , HasEntries
-  , HasExits
+    GetEntries,
+    GetExits,
+    HasEntries,
+    HasExits,
 
     -- * Graph-Level Extraction
-  , GetGlobal
-  , GetBackend
+    GetGlobal,
+    GetBackend,
 
     -- * ClaudeCode Extraction
-  , GetClaudeCode
-  , HasClaudeCode
+    GetClaudeCode,
+    HasClaudeCode,
 
     -- * Gemini Extraction
-  , GetGeminiModel
-  , HasGeminiModel
+    GetGeminiModel,
+    HasGeminiModel,
 
     -- * Goto Extraction
-  , GetGotoTargets
-  , GotoEffectsToTargets
-  , GotosToTos
-  , HasGotoExit
-  , ExtractGotoTarget
-  , ExtractGotoPayload
+    GetGotoTargets,
+    GotoEffectsToTargets,
+    GotosToTos,
+    HasGotoExit,
+    ExtractGotoTarget,
+    ExtractGotoPayload,
 
     -- * Fork/Barrier Extraction
-  , GetSpawnTargets
-  , GetBarrierTarget
-  , GetAwaits
-  , HasArrive
-  , GetArriveType
+    GetSpawnTargets,
+    GetBarrierTarget,
+    GetAwaits,
+    HasArrive,
+    GetArriveType,
 
     -- * Node Queries
-  , HasAnnotation
-  , FindAnnotation
+    HasAnnotation,
+    FindAnnotation,
 
     -- * MCP Export Detection
-  , HasMCPExport
-  , GetMCPToolDef
-  , HasMCPToolDef
-  , GetMCPEntries
-  ) where
+    HasMCPExport,
+    GetMCPToolDef,
+    HasMCPToolDef,
+    GetMCPEntries,
+  )
+where
 
 import Data.Kind (Type)
-import GHC.TypeLits (Symbol)
-import ExoMonad.Graph.Types
-  ( type (:@), type (:&)
-  , Input, Schema, System, Template, Vision, Tools, UsesEffects, Memory
-  , MCPExport, MCPToolDef
-  , Spawn, Barrier, Awaits, Arrive
-  , Global, Backend
-  , ClaudeCode, ModelChoice
-  , Gemini, GeminiModel
-  , Self
-  , Entries, Exits
-  )
-import qualified ExoMonad.Graph.Types as Types
 import ExoMonad.Graph.Goto (Goto, To)
+import ExoMonad.Graph.Types
+  ( Arrive,
+    Awaits,
+    Backend,
+    Barrier,
+    ClaudeCode,
+    Entries,
+    Exits,
+    Gemini,
+    GeminiModel,
+    Global,
+    Input,
+    MCPExport,
+    MCPToolDef,
+    Memory,
+    ModelChoice,
+    Schema,
+    Self,
+    Spawn,
+    System,
+    Template,
+    Tools,
+    UsesEffects,
+    Vision,
+    type (:&),
+    type (:@),
+  )
+import ExoMonad.Graph.Types qualified as Types
+import GHC.TypeLits (Symbol)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EDGE TYPES
@@ -87,8 +104,10 @@ import ExoMonad.Graph.Goto (Goto, To)
 
 -- | Classification of edges for Mermaid rendering.
 data EdgeKind
-  = ImplicitEdge      -- ^ Data flow via Schema → Input (solid arrow)
-  | ExplicitEdge      -- ^ Transition via Goto (solid arrow)
+  = -- | Data flow via Schema → Input (solid arrow)
+    ImplicitEdge
+  | -- | Transition via Goto (solid arrow)
+    ExplicitEdge
   deriving (Show, Eq)
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -445,9 +464,10 @@ type family SameAnnotationType ann target where
 type FindAnnotation :: Type -> Type -> Maybe Type
 type family FindAnnotation node annType where
   FindAnnotation (node :@ ann) annType =
-    If (SameAnnotationType ann annType)
-       ('Just ann)
-       (FindAnnotation node annType)
+    If
+      (SameAnnotationType ann annType)
+      ('Just ann)
+      (FindAnnotation node annType)
   FindAnnotation _ _ = 'Nothing
 
 -- | Get the Global state type from a graph-level annotation.
@@ -684,8 +704,7 @@ type family HasMCPToolDef node where
 -- @
 type GetMCPEntries :: (Type -> Type) -> [(Symbol, Type)]
 type family GetMCPEntries graph where
-  GetMCPEntries g = '[]  -- Placeholder: actual implementation in Stream B via typeclass
-
+  GetMCPEntries g = '[] -- Placeholder: actual implementation in Stream B via typeclass
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE-LEVEL UTILITIES
@@ -694,7 +713,7 @@ type family GetMCPEntries graph where
 -- | Type-level If.
 type If :: Bool -> k -> k -> k
 type family If cond t f where
-  If 'True  t _ = t
+  If 'True t _ = t
   If 'False _ f = f
 
 -- | Type-level Or.
@@ -716,4 +735,3 @@ type family Elem x xs where
   Elem _ '[] = 'False
   Elem x (x ': _) = 'True
   Elem x (_ ': rest) = Elem x rest
-

@@ -13,31 +13,39 @@ fn get_fixture_path(name: &str) -> PathBuf {
 fn assert_golden_response(fixture_name: &str) {
     let path = get_fixture_path(fixture_name);
     let json_str = fs::read_to_string(path).expect("Failed to read fixture");
-    
+
     // Test deserialization
-    let response: ControlResponse = serde_json::from_str(&json_str)
-        .expect(&format!("Failed to deserialize {}", fixture_name));
-    
+    let response: ControlResponse =
+        serde_json::from_str(&json_str).expect(&format!("Failed to deserialize {}", fixture_name));
+
     // Test serialization
     let serialized = serde_json::to_value(&response).unwrap();
     let expected: Value = serde_json::from_str(&json_str).unwrap();
-    
-    assert_eq!(serialized, expected, "Serialization mismatch for {}", fixture_name);
+
+    assert_eq!(
+        serialized, expected,
+        "Serialization mismatch for {}",
+        fixture_name
+    );
 }
 
 fn assert_golden_message(fixture_name: &str) {
     let path = get_fixture_path(fixture_name);
     let json_str = fs::read_to_string(path).expect("Failed to read fixture");
-    
+
     // Test deserialization
-    let message: ControlMessage = serde_json::from_str(&json_str)
-        .expect(&format!("Failed to deserialize {}", fixture_name));
-    
+    let message: ControlMessage =
+        serde_json::from_str(&json_str).expect(&format!("Failed to deserialize {}", fixture_name));
+
     // Test serialization
     let serialized = serde_json::to_value(&message).unwrap();
     let expected: Value = serde_json::from_str(&json_str).unwrap();
-    
-    assert_eq!(serialized, expected, "Serialization mismatch for {}", fixture_name);
+
+    assert_eq!(
+        serialized, expected,
+        "Serialization mismatch for {}",
+        fixture_name
+    );
 }
 
 #[test]

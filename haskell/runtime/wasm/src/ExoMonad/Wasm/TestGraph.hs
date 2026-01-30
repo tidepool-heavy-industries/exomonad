@@ -13,16 +13,16 @@
 -- This proves the effect yield/resume cycle works over the WASM boundary.
 module ExoMonad.Wasm.TestGraph
   ( -- * Graph Type
-    TestGraph(..)
+    TestGraph (..),
+
     -- * WASM Handlers
-  , computeHandlerWasm
-  , computeMultiEffectWasm
-  ) where
+    computeHandlerWasm,
+    computeMultiEffectWasm,
+  )
+where
 
-import qualified Data.Text as T
-
+import Data.Text qualified as T
 import ExoMonad.Wasm.Prelude
-
 
 -- | Minimal test graph: Int in, Int+1 out.
 --
@@ -31,12 +31,11 @@ import ExoMonad.Wasm.Prelude
 --
 -- The compute node logs a message (yielding to TypeScript) then exits with n+1.
 data TestGraph mode = TestGraph
-  { entry   :: mode :- EntryNode Int
-  , compute :: mode :- LogicNode :@ Input Int :@ UsesEffects '[Goto ExitTarget Int]
-  , exit    :: mode :- ExitNode Int
+  { entry :: mode :- EntryNode Int,
+    compute :: mode :- LogicNode :@ Input Int :@ UsesEffects '[Goto ExitTarget Int],
+    exit :: mode :- ExitNode Int
   }
-  deriving Generic
-
+  deriving (Generic)
 
 -- | WASM handler for the compute node.
 --
@@ -50,7 +49,6 @@ computeHandlerWasm :: Int -> WasmM (GotoChoice '[To ExitTarget Int])
 computeHandlerWasm n = do
   logInfo $ "Computing: " <> T.pack (show n)
   pure $ gotoExit (n + 1)
-
 
 -- | Multi-effect WASM handler for E2E testing.
 --

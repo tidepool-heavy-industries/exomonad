@@ -21,62 +21,61 @@
 -- @
 module ExoMonad.Habitica.Interpreter
   ( -- * Interpreter
-    runHabitica
+    runHabitica,
 
     -- * Configuration
-  , HabiticaConfig(..)
-  , defaultHabiticaConfig
+    HabiticaConfig (..),
+    defaultHabiticaConfig,
 
     -- * Internal (for testing)
-  , HabiticaEnv(..)
-  , mkHabiticaEnv
-  ) where
+    HabiticaEnv (..),
+    mkHabiticaEnv,
+  )
+where
 
-import Control.Exception (try, SomeException)
+import Control.Exception (SomeException, try)
 import Control.Lens ((^?))
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Data.Aeson
-  ( FromJSON(..)
-  , ToJSON(..)
-  , Value
-  , eitherDecode
-  , encode
-  , object
-  , withObject
-  , (.:)
-  , (.=)
+  ( FromJSON (..),
+    ToJSON (..),
+    Value,
+    eitherDecode,
+    encode,
+    object,
+    withObject,
+    (.:),
+    (.=),
   )
 import Data.Aeson.Lens (key, _String)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
+import ExoMonad.Effects.Habitica
+  ( ChecklistItemId (..),
+    Direction (..),
+    FetchedTodo,
+    Habitica (..),
+    HabiticaError (..),
+    HabiticaTask,
+    ScoreResult,
+    TaskId (..),
+    TaskType (..),
+    TodoId (..),
+    UserInfo,
+  )
 import Network.HTTP.Client
-  ( Manager
-  , Request(..)
-  , RequestBody(..)
-  , Response(..)
-  , httpLbs
-  , newManager
-  , parseRequest
+  ( Manager,
+    Request (..),
+    RequestBody (..),
+    Response (..),
+    httpLbs,
+    newManager,
+    parseRequest,
   )
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Network.HTTP.Types.Status (statusCode)
-
-import ExoMonad.Effects.Habitica
-  ( Habitica(..)
-  , HabiticaError(..)
-  , TaskType(..)
-  , Direction(..)
-  , TaskId(..)
-  , TodoId(..)
-  , ChecklistItemId(..)
-  , UserInfo
-  , HabiticaTask
-  , FetchedTodo
-  , ScoreResult
-  )
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONFIGURATION
@@ -84,21 +83,24 @@ import ExoMonad.Effects.Habitica
 
 -- | Habitica API configuration.
 data HabiticaConfig = HabiticaConfig
-  { baseUrl  :: Text  -- ^ API base URL (default: https://habitica.com/api/v3)
-  , userId   :: Text  -- ^ Habitica user ID (x-api-user header)
-  , apiToken :: Text  -- ^ Habitica API token (x-api-key header)
+  { -- | API base URL (default: https://habitica.com/api/v3)
+    baseUrl :: Text,
+    -- | Habitica user ID (x-api-user header)
+    userId :: Text,
+    -- | Habitica API token (x-api-key header)
+    apiToken :: Text
   }
   deriving stock (Eq, Show)
 
 -- | Default config pointing to production Habitica.
 -- Credentials must be filled in.
 defaultHabiticaConfig :: HabiticaConfig
-defaultHabiticaConfig = HabiticaConfig
-  { baseUrl  = "https://habitica.com/api/v3"
-  , userId   = ""
-  , apiToken = ""
-  }
-
+defaultHabiticaConfig =
+  HabiticaConfig
+    { baseUrl = "https://habitica.com/api/v3",
+      userId = "",
+      apiToken = ""
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- INTERNAL ENVIRONMENT
@@ -106,16 +108,15 @@ defaultHabiticaConfig = HabiticaConfig
 
 -- | Runtime environment with HTTP manager.
 data HabiticaEnv = HabiticaEnv
-  { config  :: HabiticaConfig
-  , manager :: Manager
+  { config :: HabiticaConfig,
+    manager :: Manager
   }
 
 -- | Create a new environment (creates TLS manager).
 mkHabiticaEnv :: HabiticaConfig -> IO HabiticaEnv
 mkHabiticaEnv config = do
   manager <- newManager tlsManagerSettings
-  pure HabiticaEnv { config = config, manager = manager }
-
+  pure HabiticaEnv {config = config, manager = manager}
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HABITICA API RESPONSE WRAPPER
@@ -124,64 +125,70 @@ mkHabiticaEnv config = do
 -- | Habitica wraps all responses in {"success": bool, "data": ..., "error"?: ...}
 data HabiticaResponse a
   = HabiticaSuccess a
-  | HabiticaFailure Text  -- error message
+  | HabiticaFailure Text -- error message
   deriving stock (Show)
 
-instance FromJSON a => FromJSON (HabiticaResponse a) where
+instance (FromJSON a) => FromJSON (HabiticaResponse a) where
   parseJSON = withObject "HabiticaResponse" $ \v -> do
     success <- v .: "success"
     if success
       then HabiticaSuccess <$> v .: "data"
       else HabiticaFailure <$> v .: "message"
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- HTTP HELPERS
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Make a GET request to Habitica API.
-habiticaGet
-  :: FromJSON a
-  => HabiticaEnv
-  -> String        -- ^ Path (e.g., "/user")
-  -> IO (Either HabiticaError a)
+habiticaGet ::
+  (FromJSON a) =>
+  HabiticaEnv ->
+  -- | Path (e.g., "/user")
+  String ->
+  IO (Either HabiticaError a)
 habiticaGet env path = habiticaRequest env "GET" path Nothing
 
 -- | Make a POST request to Habitica API.
-habiticaPost
-  :: (ToJSON body, FromJSON a)
-  => HabiticaEnv
-  -> String        -- ^ Path
-  -> body          -- ^ Request body
-  -> IO (Either HabiticaError a)
+habiticaPost ::
+  (ToJSON body, FromJSON a) =>
+  HabiticaEnv ->
+  -- | Path
+  String ->
+  -- | Request body
+  body ->
+  IO (Either HabiticaError a)
 habiticaPost env path body = habiticaRequest env "POST" path (Just $ encode body)
 
 -- | Make an HTTP request to Habitica API.
-habiticaRequest
-  :: FromJSON a
-  => HabiticaEnv
-  -> String                  -- ^ Method
-  -> String                  -- ^ Path
-  -> Maybe LBS.ByteString    -- ^ Request body
-  -> IO (Either HabiticaError a)
+habiticaRequest ::
+  (FromJSON a) =>
+  HabiticaEnv ->
+  -- | Method
+  String ->
+  -- | Path
+  String ->
+  -- | Request body
+  Maybe LBS.ByteString ->
+  IO (Either HabiticaError a)
 habiticaRequest env method path maybeBody = do
   let config = env.config
       url = T.unpack (config.baseUrl) <> path
 
   result <- try @SomeException $ do
     req0 <- parseRequest url
-    let req = req0
-          { method = TE.encodeUtf8 (T.pack method)
-          , requestHeaders =
-              [ ("x-api-user", TE.encodeUtf8 $ config.userId)
-              , ("x-api-key", TE.encodeUtf8 $ config.apiToken)
-              , ("Content-Type", "application/json")
-              , ("x-client", "exomonad-habitica-interpreter/0.1")
-              ]
-          , requestBody = case maybeBody of
-              Nothing -> RequestBodyLBS ""
-              Just b  -> RequestBodyLBS b
-          }
+    let req =
+          req0
+            { method = TE.encodeUtf8 (T.pack method),
+              requestHeaders =
+                [ ("x-api-user", TE.encodeUtf8 $ config.userId),
+                  ("x-api-key", TE.encodeUtf8 $ config.apiToken),
+                  ("Content-Type", "application/json"),
+                  ("x-client", "exomonad-habitica-interpreter/0.1")
+                ],
+              requestBody = case maybeBody of
+                Nothing -> RequestBodyLBS ""
+                Just b -> RequestBodyLBS b
+            }
     httpLbs req (env.manager)
 
   case result of
@@ -189,7 +196,7 @@ habiticaRequest env method path maybeBody = do
     Right resp -> parseResponse resp
 
 -- | Parse Habitica API response.
-parseResponse :: FromJSON a => Response LBS.ByteString -> IO (Either HabiticaError a)
+parseResponse :: (FromJSON a) => Response LBS.ByteString -> IO (Either HabiticaError a)
 parseResponse resp = do
   let status = statusCode (responseStatus resp)
       body = responseBody resp
@@ -198,16 +205,17 @@ parseResponse resp = do
     401 -> pure $ Left HabiticaUnauthorized
     429 -> pure $ Left HabiticaRateLimited
     404 -> pure $ Left $ HabiticaNotFound "Resource not found"
-    _ | status >= 200 && status < 300 ->
-        case eitherDecode body of
-          Left err -> pure $ Left $ HabiticaOther $ "JSON decode error: " <> T.pack err
-          Right (HabiticaSuccess a) -> pure $ Right a
-          Right (HabiticaFailure msg) -> pure $ Left $ parseErrorMessage msg
+    _
+      | status >= 200 && status < 300 ->
+          case eitherDecode body of
+            Left err -> pure $ Left $ HabiticaOther $ "JSON decode error: " <> T.pack err
+            Right (HabiticaSuccess a) -> pure $ Right a
+            Right (HabiticaFailure msg) -> pure $ Left $ parseErrorMessage msg
       | otherwise ->
-        -- Try to parse error message from response body
-        case eitherDecode @(HabiticaResponse Value) body of
-          Right (HabiticaFailure msg) -> pure $ Left $ parseErrorMessage msg
-          _ -> pure $ Left $ HabiticaOther $ "HTTP " <> T.pack (show status)
+          -- Try to parse error message from response body
+          case eitherDecode @(HabiticaResponse Value) body of
+            Right (HabiticaFailure msg) -> pure $ Left $ parseErrorMessage msg
+            _ -> pure $ Left $ HabiticaOther $ "HTTP " <> T.pack (show status)
 
 -- | Parse Habitica error messages into structured errors.
 parseErrorMessage :: Text -> HabiticaError
@@ -217,7 +225,6 @@ parseErrorMessage msg
   | "not found" `T.isInfixOf` T.toLower msg = HabiticaNotFound msg
   | "unauthorized" `T.isInfixOf` T.toLower msg = HabiticaUnauthorized
   | otherwise = HabiticaOther msg
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- API OPERATIONS
@@ -245,10 +252,12 @@ scoreTask env (TaskId tid) dir =
 -- | POST /tasks/user (create todo)
 createTodo :: HabiticaEnv -> Text -> IO (Either HabiticaError TodoId)
 createTodo env title = do
-  result <- habiticaPost env "/tasks/user" $ object
-    [ "type" .= ("todo" :: Text)
-    , "text" .= title
-    ]
+  result <-
+    habiticaPost env "/tasks/user" $
+      object
+        [ "type" .= ("todo" :: Text),
+          "text" .= title
+        ]
   pure $ case result of
     Left err -> Left err
     Right (val :: Value) -> case parseCreatedTaskId val of
@@ -258,28 +267,29 @@ createTodo env title = do
 -- | POST /tasks/{taskId}/checklist
 addChecklistItem :: HabiticaEnv -> TodoId -> Text -> IO (Either HabiticaError ChecklistItemId)
 addChecklistItem env (TodoId tid) itemText = do
-  result <- habiticaPost env ("/tasks/" <> T.unpack tid <> "/checklist") $ object
-    [ "text" .= itemText
-    ]
+  result <-
+    habiticaPost env ("/tasks/" <> T.unpack tid <> "/checklist") $
+      object
+        [ "text" .= itemText
+        ]
   pure $ case result of
     Left err -> Left err
     Right (val :: Value) -> case parseChecklistItemId val of
       Nothing -> Left $ HabiticaOther "Failed to parse checklist item ID"
       Just cid -> Right cid
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS
 -- ════════════════════════════════════════════════════════════════════════════
 
 taskTypeStr :: TaskType -> String
-taskTypeStr Habits  = "habits"
-taskTypeStr Dailys  = "dailys"
-taskTypeStr Todos   = "todos"
+taskTypeStr Habits = "habits"
+taskTypeStr Dailys = "dailys"
+taskTypeStr Todos = "todos"
 taskTypeStr Rewards = "rewards"
 
 directionStr :: Direction -> String
-directionStr Up   = "up"
+directionStr Up = "up"
 directionStr Down = "down"
 
 emptyObject :: Value
@@ -319,7 +329,7 @@ parseChecklistItemId val =
 --     todos <- fetchTodos
 --     forM_ todos $ \\todo -> logInfo (ftTitle todo)
 -- @
-runHabitica :: LastMember IO effs => HabiticaEnv -> Eff (Habitica ': effs) a -> Eff effs a
+runHabitica :: (LastMember IO effs) => HabiticaEnv -> Eff (Habitica ': effs) a -> Eff effs a
 runHabitica env = interpret $ \case
   -- Crashing variants (error on failure)
   FetchTodos -> sendM $ do
@@ -327,31 +337,26 @@ runHabitica env = interpret $ \case
     case result of
       Left err -> error $ "Habitica.fetchTodos: " <> show err
       Right todos -> pure todos
-
   AddChecklistItem tid item -> sendM $ do
     result <- addChecklistItem env tid item
     case result of
       Left err -> error $ "Habitica.addChecklistItem: " <> show err
       Right cid -> pure cid
-
   CreateTodo title -> sendM $ do
     result <- createTodo env title
     case result of
       Left err -> error $ "Habitica.createTodo: " <> show err
       Right tid -> pure tid
-
   GetUser -> sendM $ do
     result <- getUser env
     case result of
       Left err -> error $ "Habitica.getUser: " <> show err
       Right info -> pure info
-
   ScoreTask tid dir -> sendM $ do
     result <- scoreTask env tid dir
     case result of
       Left err -> error $ "Habitica.scoreTask: " <> show err
       Right sr -> pure sr
-
   GetTasks tt -> sendM $ do
     result <- getTasks env tt
     case result of
@@ -360,13 +365,8 @@ runHabitica env = interpret $ \case
 
   -- Try variants (return Either)
   FetchTodosTry -> sendM $ fetchTodos env
-
   AddChecklistItemTry tid item -> sendM $ addChecklistItem env tid item
-
   CreateTodoTry title -> sendM $ createTodo env title
-
   GetUserTry -> sendM $ getUser env
-
   ScoreTaskTry tid dir -> sendM $ scoreTask env tid dir
-
   GetTasksTry tt -> sendM $ getTasks env tt

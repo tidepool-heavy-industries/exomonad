@@ -1,45 +1,46 @@
 {-# LANGUAGE UndecidableInstances #-}
+
 -- | LLM provider types with type-level provider switching.
 --
 -- Effect type only - interpreters live in exomonad-llm-interpreter.
 -- The type-level provider switch determines request/response schema.
 module ExoMonad.Effects.LLMProvider
   ( -- * Provider Type
-    LLMProvider(..)
-  , SProvider(..)
+    LLMProvider (..),
+    SProvider (..),
 
     -- * Provider-Specific Config
-  , LLMProviderConfig
-  , AnthropicConfig(..)
-  , ThinkingBudget(..)
+    LLMProviderConfig,
+    AnthropicConfig (..),
+    ThinkingBudget (..),
 
     -- * Provider-Specific Response
-  , LLMProviderResponse
-  , AnthropicResponse(..)
+    LLMProviderResponse,
+    AnthropicResponse (..),
 
     -- * Response Component Types
-  , ContentBlock(..)
-  , Usage(..)
+    ContentBlock (..),
+    Usage (..),
 
     -- * Effect
-  , LLMComplete(..)
-  , complete
-  , completeTry
+    LLMComplete (..),
+    complete,
+    completeTry,
 
     -- * Error Types
-  , LLMError(..)
-  ) where
+    LLMError (..),
+  )
+where
 
 import Control.Applicative ((<|>))
 import Control.Monad.Freer (Eff, Member, send)
-import Data.Aeson (Value, ToJSON(..), FromJSON(..), object, (.=), withObject, (.:), (.:?))
-import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.Types as AesonTypes
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.:?), (.=))
+import Data.Aeson qualified as Aeson
+import Data.Aeson.Types qualified as AesonTypes
 import Data.Kind (Type)
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import Data.List.NonEmpty (NonEmpty(..))
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PROVIDER TYPE (TYPE-LEVEL)
@@ -53,7 +54,6 @@ data LLMProvider = Anthropic
 data SProvider (p :: LLMProvider) where
   SAnthropic :: SProvider 'Anthropic
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- PROVIDER-SPECIFIC CONFIG
 -- ════════════════════════════════════════════════════════════════════════════
@@ -62,8 +62,10 @@ data SProvider (p :: LLMProvider) where
 --
 -- Sum type makes the enabled/disabled state explicit - no more "Nothing means disabled".
 data ThinkingBudget
-  = ThinkingDisabled           -- ^ Extended thinking is disabled
-  | ThinkingEnabled Int        -- ^ Extended thinking enabled with token budget
+  = -- | Extended thinking is disabled
+    ThinkingDisabled
+  | -- | Extended thinking enabled with token budget
+    ThinkingEnabled Int
   deriving (Show, Eq, Generic)
 
 instance ToJSON ThinkingBudget where
@@ -80,10 +82,11 @@ type family LLMProviderConfig (p :: LLMProvider) :: Type where
 
 -- | Anthropic-specific configuration.
 data AnthropicConfig = AnthropicConfig
-  { acModel :: Text           -- e.g., "claude-sonnet-4-20250514"
-  , acMaxTokens :: Int
-  , acThinking :: ThinkingBudget  -- ^ Extended thinking configuration
-  , acSystemPrompt :: Maybe Text
+  { acModel :: Text, -- e.g., "claude-sonnet-4-20250514"
+    acMaxTokens :: Int,
+    -- | Extended thinking configuration
+    acThinking :: ThinkingBudget,
+    acSystemPrompt :: Maybe Text
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -97,18 +100,19 @@ type family LLMProviderResponse (p :: LLMProvider) :: Type where
 
 -- | Anthropic API response (content blocks style).
 data AnthropicResponse = AnthropicResponse
-  { arContent :: NonEmpty ContentBlock
-  , arStopReason :: Text
-  , arUsage :: Usage
+  { arContent :: NonEmpty ContentBlock,
+    arStopReason :: Text,
+    arUsage :: Usage
   }
   deriving (Show, Eq, Generic)
 
 instance ToJSON AnthropicResponse where
-  toJSON r = object
-    [ "content" .= r.arContent
-    , "stop_reason" .= r.arStopReason
-    , "usage" .= r.arUsage
-    ]
+  toJSON r =
+    object
+      [ "content" .= r.arContent,
+        "stop_reason" .= r.arStopReason,
+        "usage" .= r.arUsage
+      ]
 
 instance FromJSON AnthropicResponse where
   parseJSON = withObject "AnthropicResponse" $ \v ->
@@ -119,19 +123,22 @@ instance FromJSON AnthropicResponse where
 -- Supports text, tool use, and thinking blocks from extended thinking.
 data ContentBlock
   = TextContent Text
-  | ToolUseContent Text Value  -- tool_name, input
-  | ThinkingContent Text       -- thinking text (extended thinking feature)
-  | RedactedThinkingContent    -- encrypted thinking block (no content exposed)
+  | ToolUseContent Text Value -- tool_name, input
+  | ThinkingContent Text -- thinking text (extended thinking feature)
+  | RedactedThinkingContent -- encrypted thinking block (no content exposed)
   deriving (Show, Eq, Generic)
 
 instance ToJSON ContentBlock where
   toJSON (TextContent t) = object ["type" .= ("text" :: Text), "text" .= t]
-  toJSON (ToolUseContent name input_) = object
-    ["type" .= ("tool_use" :: Text), "name" .= name, "input" .= input_]
-  toJSON (ThinkingContent t) = object
-    ["type" .= ("thinking" :: Text), "thinking" .= t]
-  toJSON RedactedThinkingContent = object
-    ["type" .= ("redacted_thinking" :: Text)]
+  toJSON (ToolUseContent name input_) =
+    object
+      ["type" .= ("tool_use" :: Text), "name" .= name, "input" .= input_]
+  toJSON (ThinkingContent t) =
+    object
+      ["type" .= ("thinking" :: Text), "thinking" .= t]
+  toJSON RedactedThinkingContent =
+    object
+      ["type" .= ("redacted_thinking" :: Text)]
 
 instance FromJSON ContentBlock where
   parseJSON = withObject "ContentBlock" $ \v -> do
@@ -145,23 +152,23 @@ instance FromJSON ContentBlock where
 
 -- | Token usage.
 data Usage = Usage
-  { uPromptTokens :: Int
-  , uCompletionTokens :: Int
+  { uPromptTokens :: Int,
+    uCompletionTokens :: Int
   }
   deriving (Show, Eq, Generic)
 
 instance ToJSON Usage where
-  toJSON u = object
-    [ "prompt_tokens" .= u.uPromptTokens
-    , "completion_tokens" .= u.uCompletionTokens
-    ]
+  toJSON u =
+    object
+      [ "prompt_tokens" .= u.uPromptTokens,
+        "completion_tokens" .= u.uCompletionTokens
+      ]
 
 instance FromJSON Usage where
   parseJSON = withObject "Usage" $ \v ->
     Usage
       <$> (v .: "input_tokens" <|> v .: "prompt_tokens")
       <*> (v .: "output_tokens" <|> v .: "completion_tokens")
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ERROR TYPES
@@ -172,16 +179,23 @@ instance FromJSON Usage where
 -- These are returned by 'completeTry' and can be pattern-matched to handle
 -- specific error conditions.
 data LLMError
-  = LLMHttpError Text           -- ^ Network/HTTP error
-  | LLMParseError Text          -- ^ JSON parsing failed
-  | LLMRateLimited              -- ^ Rate limit hit (429)
-  | LLMUnauthorized             -- ^ Invalid API key (401)
-  | LLMContextTooLong           -- ^ Input too long (400 with specific error)
-  | LLMOverloaded               -- ^ Service overloaded (529)
-  | LLMApiError Text Text       -- ^ API error (type, message)
-  | LLMNoProviderConfigured     -- ^ No provider secrets configured
+  = -- | Network/HTTP error
+    LLMHttpError Text
+  | -- | JSON parsing failed
+    LLMParseError Text
+  | -- | Rate limit hit (429)
+    LLMRateLimited
+  | -- | Invalid API key (401)
+    LLMUnauthorized
+  | -- | Input too long (400 with specific error)
+    LLMContextTooLong
+  | -- | Service overloaded (529)
+    LLMOverloaded
+  | -- | API error (type, message)
+    LLMApiError Text Text
+  | -- | No provider secrets configured
+    LLMNoProviderConfigured
   deriving stock (Eq, Show, Generic)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT
@@ -212,20 +226,18 @@ data LLMError
 --   Right response -> processResponse response
 -- @
 data LLMComplete r where
-  Complete
-    :: SProvider p
-    -> LLMProviderConfig p
-    -> Text                      -- user message
-    -> Maybe [Value]             -- optional tools
-    -> LLMComplete (LLMProviderResponse p)
-
-  CompleteTry
-    :: SProvider p
-    -> LLMProviderConfig p
-    -> Text                      -- user message
-    -> Maybe [Value]             -- optional tools
-    -> LLMComplete (Either LLMError (LLMProviderResponse p))
-
+  Complete ::
+    SProvider p ->
+    LLMProviderConfig p ->
+    Text -> -- user message
+    Maybe [Value] -> -- optional tools
+    LLMComplete (LLMProviderResponse p)
+  CompleteTry ::
+    SProvider p ->
+    LLMProviderConfig p ->
+    Text -> -- user message
+    Maybe [Value] -> -- optional tools
+    LLMComplete (Either LLMError (LLMProviderResponse p))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SMART CONSTRUCTORS
@@ -234,13 +246,14 @@ data LLMComplete r where
 -- | Call an LLM with provider-specific config.
 --
 -- This variant throws on error. For error handling, use 'completeTry'.
-complete
-  :: forall p effs. Member LLMComplete effs
-  => SProvider p
-  -> LLMProviderConfig p
-  -> Text
-  -> Maybe [Value]
-  -> Eff effs (LLMProviderResponse p)
+complete ::
+  forall p effs.
+  (Member LLMComplete effs) =>
+  SProvider p ->
+  LLMProviderConfig p ->
+  Text ->
+  Maybe [Value] ->
+  Eff effs (LLMProviderResponse p)
 complete provider config msg tools = send (Complete provider config msg tools)
 
 -- | Call an LLM with provider-specific config, returning errors as 'Either'.
@@ -256,11 +269,12 @@ complete provider config msg tools = send (Complete provider config msg tools)
 --   Left err -> logError $ "LLM failed: " <> show err
 --   Right response -> processResponse response
 -- @
-completeTry
-  :: forall p effs. Member LLMComplete effs
-  => SProvider p
-  -> LLMProviderConfig p
-  -> Text
-  -> Maybe [Value]
-  -> Eff effs (Either LLMError (LLMProviderResponse p))
+completeTry ::
+  forall p effs.
+  (Member LLMComplete effs) =>
+  SProvider p ->
+  LLMProviderConfig p ->
+  Text ->
+  Maybe [Value] ->
+  Eff effs (Either LLMError (LLMProviderResponse p))
 completeTry provider config msg tools = send (CompleteTry provider config msg tools)

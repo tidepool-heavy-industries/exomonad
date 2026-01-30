@@ -1,6 +1,6 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 -- | Serialization roundtrip tests for the socket client protocol types.
 --
@@ -12,17 +12,16 @@
 -- No network or GitHub API calls are made.
 module Main where
 
-import Data.Aeson (Value(..), decode, encode, object, (.=))
+import Data.Aeson (Value (..), decode, encode, object, (.=))
 import Data.Aeson.Key (fromText)
-import qualified Data.Aeson.KeyMap as KM
-import qualified Data.ByteString.Lazy.Char8 as LBS8
+import Data.Aeson.KeyMap qualified as KM
+import Data.ByteString.Lazy.Char8 qualified as LBS8
+import Data.List.NonEmpty (NonEmpty (..))
+import Data.List.NonEmpty qualified as NE
 import Data.Text (Text)
-import qualified Data.Text as T
-import Data.List.NonEmpty (NonEmpty(..))
-import qualified Data.List.NonEmpty as NE
-import Test.Hspec
-
+import Data.Text qualified as T
 import ExoMonad.Effects.SocketClient
+import Test.Hspec
 
 main :: IO ()
 main = hspec $ do
@@ -31,7 +30,7 @@ main = hspec $ do
   -- =========================================================================
   describe "ServiceRequest encoding" $ do
     it "encodes GitHubGetIssue with type tag and include_comments" $ do
-      let req = GitHubGetIssue { owner = "octocat", repo = "hello-world", number = 42, includeComments = True }
+      let req = GitHubGetIssue {owner = "octocat", repo = "hello-world", number = 42, includeComments = True}
           json = decodeToObject req
       lookupField json "type" `shouldBe` Just (String "GitHubGetIssue")
       lookupField json "owner" `shouldBe` Just (String "octocat")
@@ -40,12 +39,12 @@ main = hspec $ do
       lookupField json "includeComments" `shouldBe` Just (Bool True)
 
     it "encodes GitHubGetIssue with includeComments=false" $ do
-      let req = GitHubGetIssue { owner = "o", repo = "r", number = 1, includeComments = False }
+      let req = GitHubGetIssue {owner = "o", repo = "r", number = 1, includeComments = False}
           json = decodeToObject req
       lookupField json "includeComments" `shouldBe` Just (Bool False)
 
     it "encodes GitHubGetPR with type tag and include_details" $ do
-      let req = GitHubGetPR { owner = "octocat", repo = "hello-world", number = 99, includeDetails = True }
+      let req = GitHubGetPR {owner = "octocat", repo = "hello-world", number = 99, includeDetails = True}
           json = decodeToObject req
       lookupField json "type" `shouldBe` Just (String "GitHubGetPR")
       lookupField json "owner" `shouldBe` Just (String "octocat")
@@ -53,34 +52,36 @@ main = hspec $ do
       lookupField json "includeDetails" `shouldBe` Just (Bool True)
 
     it "encodes GitHubCreateIssue with all fields" $ do
-      let req = GitHubCreateIssue 
-            { owner = "octocat"
-            , repo = "repo"
-            , title = Just "Bug"
-            , body = Just "Details"
-            , labels = Just ["bug", "critical"]
-            }
+      let req =
+            GitHubCreateIssue
+              { owner = "octocat",
+                repo = "repo",
+                title = Just "Bug",
+                body = Just "Details",
+                labels = Just ["bug", "critical"]
+              }
           json = decodeToObject req
       lookupField json "type" `shouldBe` Just (String "GitHubCreateIssue")
       lookupField json "title" `shouldBe` Just (String "Bug")
       lookupField json "body" `shouldBe` Just (String "Details")
 
     it "encodes GitHubCreatePR with head and base" $ do
-      let req = GitHubCreatePR 
-            { owner = "octocat"
-            , repo = "repo"
-            , title = Just "Add feature"
-            , body = Just "Body"
-            , head = "feature"
-            , base = "main"
-            }
+      let req =
+            GitHubCreatePR
+              { owner = "octocat",
+                repo = "repo",
+                title = Just "Add feature",
+                body = Just "Body",
+                head = "feature",
+                base = "main"
+              }
           json = decodeToObject req
       lookupField json "type" `shouldBe` Just (String "GitHubCreatePR")
       lookupField json "head" `shouldBe` Just (String "feature")
       lookupField json "base" `shouldBe` Just (String "main")
 
     it "encodes GitHubListIssues with labels" $ do
-      let req = GitHubListIssues { owner = "o", repo = "r", state = Just "open", labels = Just ["bug"] }
+      let req = GitHubListIssues {owner = "o", repo = "r", state = Just "open", labels = Just ["bug"]}
           json = decodeToObject req
       lookupField json "type" `shouldBe` Just (String "GitHubListIssues")
       lookupField json "state" `shouldBe` Just (String "open")
@@ -95,24 +96,25 @@ main = hspec $ do
   -- =========================================================================
   describe "ServiceResponse decoding" $ do
     it "decodes GitHubIssueResponse with all fields" $ do
-      let json = object
-            ["type" .= ("GitHubIssueResponse" :: Text)
-            ,"number" .= (42 :: Int)
-            ,"title" .= ("Fix the bug" :: Text)
-            ,"body" .= ("It's broken" :: Text)
-            ,"state" .= ("open" :: Text)
-            ,"labels" .= (["bug", "critical"] :: [Text])
-            ,"url" .= ("https://github.com/octocat/repo/issues/42" :: Text)
-            ,"author" .= ("octocat" :: Text)
-            ,"comments" .=
-                [ object
-                    ["author" .= ("reviewer" :: Text)
-                    ,"body" .= ("Looks good" :: Text)
-                    ,"created_at" .= ("2024-01-15T10:00:00Z" :: Text)
-                    ,"replies" .= ([] :: [Value])
-                    ]
-                ]
-            ]
+      let json =
+            object
+              [ "type" .= ("GitHubIssueResponse" :: Text),
+                "number" .= (42 :: Int),
+                "title" .= ("Fix the bug" :: Text),
+                "body" .= ("It's broken" :: Text),
+                "state" .= ("open" :: Text),
+                "labels" .= (["bug", "critical"] :: [Text]),
+                "url" .= ("https://github.com/octocat/repo/issues/42" :: Text),
+                "author" .= ("octocat" :: Text),
+                "comments"
+                  .= [ object
+                         [ "author" .= ("reviewer" :: Text),
+                           "body" .= ("Looks good" :: Text),
+                           "created_at" .= ("2024-01-15T10:00:00Z" :: Text),
+                           "replies" .= ([] :: [Value])
+                         ]
+                     ]
+              ]
       case decode (encode json) :: Maybe ServiceResponse of
         Nothing -> expectationFailure "Failed to decode GitHubIssueResponse"
         Just (GitHubIssueResponse n t b s ls u a cs) -> do
@@ -127,16 +129,17 @@ main = hspec $ do
         Just other -> expectationFailure $ "Wrong variant: " <> show other
 
     it "decodes GitHubIssueResponse with missing optional comments" $ do
-      let json = object
-            ["type" .= ("GitHubIssueResponse" :: Text)
-            ,"number" .= (1 :: Int)
-            ,"title" .= ("t" :: Text)
-            ,"body" .= ("b" :: Text)
-            ,"state" .= ("open" :: Text)
-            ,"labels" .= ([] :: [Text])
-            ,"url" .= ("u" :: Text)
-            ,"author" .= ("a" :: Text)
-            ]
+      let json =
+            object
+              [ "type" .= ("GitHubIssueResponse" :: Text),
+                "number" .= (1 :: Int),
+                "title" .= ("t" :: Text),
+                "body" .= ("b" :: Text),
+                "state" .= ("open" :: Text),
+                "labels" .= ([] :: [Text]),
+                "url" .= ("u" :: Text),
+                "author" .= ("a" :: Text)
+              ]
       case decode (encode json) :: Maybe ServiceResponse of
         Nothing -> expectationFailure "Failed to decode GitHubIssueResponse without comments"
         Just (GitHubIssueResponse _ _ _ _ _ _ _ cs) ->
@@ -144,38 +147,39 @@ main = hspec $ do
         Just other -> expectationFailure $ "Wrong variant: " <> show other
 
     it "decodes GitHubPRResponse with all fields" $ do
-      let json = object
-            ["type" .= ("GitHubPRResponse" :: Text)
-            ,"number" .= (99 :: Int)
-            ,"title" .= ("Add feature" :: Text)
-            ,"body" .= ("This adds X" :: Text)
-            ,"author" .= ("octocat" :: Text)
-            ,"url" .= ("https://github.com/octocat/repo/pull/99" :: Text)
-            ,"state" .= ("open" :: Text)
-            ,"head_ref_name" .= ("feature-branch" :: Text)
-            ,"base_ref_name" .= ("main" :: Text)
-            ,"created_at" .= ("2024-01-15T10:00:00Z" :: Text)
-            ,"merged_at" .= ("2024-01-16T12:00:00Z" :: Text)
-            ,"labels" .= (["enhancement"] :: [Text])
-            ,"comments" .=
-                [ object
-                    ["author" .= ("reviewer" :: Text)
-                    ,"body" .= ("LGTM" :: Text)
-                    ,"created_at" .= ("2024-01-15T11:00:00Z" :: Text)
-                    ,"replies" .= ([] :: [Value])
-                    ]
-                ]
-            ,"reviews" .=
-                [ object
-                    ["author" .= ("reviewer" :: Text)
-                    ,"body" .= ("Approved" :: Text)
-                    ,"path" .= ("src/main.rs" :: Text)
-                    ,"line" .= (42 :: Int)
-                    ,"state" .= ("APPROVED" :: Text)
-                    ,"created_at" .= ("2024-01-15T12:00:00Z" :: Text)
-                    ]
-                ]
-            ]
+      let json =
+            object
+              [ "type" .= ("GitHubPRResponse" :: Text),
+                "number" .= (99 :: Int),
+                "title" .= ("Add feature" :: Text),
+                "body" .= ("This adds X" :: Text),
+                "author" .= ("octocat" :: Text),
+                "url" .= ("https://github.com/octocat/repo/pull/99" :: Text),
+                "state" .= ("open" :: Text),
+                "head_ref_name" .= ("feature-branch" :: Text),
+                "base_ref_name" .= ("main" :: Text),
+                "created_at" .= ("2024-01-15T10:00:00Z" :: Text),
+                "merged_at" .= ("2024-01-16T12:00:00Z" :: Text),
+                "labels" .= (["enhancement"] :: [Text]),
+                "comments"
+                  .= [ object
+                         [ "author" .= ("reviewer" :: Text),
+                           "body" .= ("LGTM" :: Text),
+                           "created_at" .= ("2024-01-15T11:00:00Z" :: Text),
+                           "replies" .= ([] :: [Value])
+                         ]
+                     ],
+                "reviews"
+                  .= [ object
+                         [ "author" .= ("reviewer" :: Text),
+                           "body" .= ("Approved" :: Text),
+                           "path" .= ("src/main.rs" :: Text),
+                           "line" .= (42 :: Int),
+                           "state" .= ("APPROVED" :: Text),
+                           "created_at" .= ("2024-01-15T12:00:00Z" :: Text)
+                         ]
+                     ]
+              ]
       case decode (encode json) :: Maybe ServiceResponse of
         Nothing -> expectationFailure "Failed to decode GitHubPRResponse"
         Just (GitHubPRResponse n t b a u s h ba c ma ls cs rs) -> do
@@ -194,19 +198,20 @@ main = hspec $ do
         Just other -> expectationFailure $ "Wrong variant: " <> show other
 
     it "decodes GitHubPRResponse with missing optional fields" $ do
-      let json = object
-            ["type" .= ("GitHubPRResponse" :: Text)
-            ,"number" .= (1 :: Int)
-            ,"title" .= ("t" :: Text)
-            ,"body" .= ("b" :: Text)
-            ,"author" .= ("a" :: Text)
-            ,"url" .= ("u" :: Text)
-            ,"state" .= ("open" :: Text)
-            ,"head_ref_name" .= ("h" :: Text)
-            ,"base_ref_name" .= ("main" :: Text)
-            ,"created_at" .= ("2024-01-01T00:00:00Z" :: Text)
-            ,"labels" .= ([] :: [Text])
-            ]
+      let json =
+            object
+              [ "type" .= ("GitHubPRResponse" :: Text),
+                "number" .= (1 :: Int),
+                "title" .= ("t" :: Text),
+                "body" .= ("b" :: Text),
+                "author" .= ("a" :: Text),
+                "url" .= ("u" :: Text),
+                "state" .= ("open" :: Text),
+                "head_ref_name" .= ("h" :: Text),
+                "base_ref_name" .= ("main" :: Text),
+                "created_at" .= ("2024-01-01T00:00:00Z" :: Text),
+                "labels" .= ([] :: [Text])
+              ]
       case decode (encode json) :: Maybe ServiceResponse of
         Nothing -> expectationFailure "Failed to decode GitHubPRResponse without optionals"
         Just (GitHubPRResponse _ _ _ _ _ _ _ _ _ ma ls cs rs) -> do
@@ -217,11 +222,12 @@ main = hspec $ do
         Just other -> expectationFailure $ "Wrong variant: " <> show other
 
     it "decodes GitHubAuthResponse" $ do
-      let json = object
-            ["type" .= ("GitHubAuthResponse" :: Text)
-            ,"authenticated" .= True
-            ,"user" .= ("octocat" :: Text)
-            ]
+      let json =
+            object
+              [ "type" .= ("GitHubAuthResponse" :: Text),
+                "authenticated" .= True,
+                "user" .= ("octocat" :: Text)
+              ]
       case decode (encode json) :: Maybe ServiceResponse of
         Nothing -> expectationFailure "Failed to decode GitHubAuthResponse"
         Just (GitHubAuthResponse auth user) -> do
@@ -230,13 +236,14 @@ main = hspec $ do
         Just other -> expectationFailure $ "Wrong variant: " <> show other
 
     it "decodes GitHubIssuesResponse" $ do
-      let json = object
-            ["type" .= ("GitHubIssuesResponse" :: Text)
-            ,"issues" .=
-                [ object [ "number" .= (1 :: Int), "title" .= ("Bug" :: Text), "state" .= ("open" :: Text) ]
-                , object [ "number" .= (2 :: Int), "title" .= ("Feature" :: Text), "state" .= ("closed" :: Text) ]
-                ]
-            ]
+      let json =
+            object
+              [ "type" .= ("GitHubIssuesResponse" :: Text),
+                "issues"
+                  .= [ object ["number" .= (1 :: Int), "title" .= ("Bug" :: Text), "state" .= ("open" :: Text)],
+                       object ["number" .= (2 :: Int), "title" .= ("Feature" :: Text), "state" .= ("closed" :: Text)]
+                     ]
+              ]
       case decode (encode json) :: Maybe ServiceResponse of
         Nothing -> expectationFailure "Failed to decode GitHubIssuesResponse"
         Just (GitHubIssuesResponse issues) ->
@@ -244,18 +251,19 @@ main = hspec $ do
         Just other -> expectationFailure $ "Wrong variant: " <> show other
 
     it "decodes GitHubReviewsResponse" $ do
-      let json = object
-            ["type" .= ("GitHubReviewsResponse" :: Text)
-            ,"reviews" .=
-                [ object
-                    ["author" .= ("reviewer" :: Text)
-                    ,"body" .= ("Changes needed" :: Text)
-                    ,"path" .= ("lib.rs" :: Text)
-                    ,"state" .= ("CHANGES_REQUESTED" :: Text)
-                    ,"created_at" .= ("2024-01-15T10:00:00Z" :: Text)
-                    ]
-                ]
-            ]
+      let json =
+            object
+              [ "type" .= ("GitHubReviewsResponse" :: Text),
+                "reviews"
+                  .= [ object
+                         [ "author" .= ("reviewer" :: Text),
+                           "body" .= ("Changes needed" :: Text),
+                           "path" .= ("lib.rs" :: Text),
+                           "state" .= ("CHANGES_REQUESTED" :: Text),
+                           "created_at" .= ("2024-01-15T10:00:00Z" :: Text)
+                         ]
+                     ]
+              ]
       case decode (encode json) :: Maybe ServiceResponse of
         Nothing -> expectationFailure "Failed to decode GitHubReviewsResponse"
         Just (GitHubReviewsResponse reviews) ->
@@ -263,22 +271,23 @@ main = hspec $ do
         Just other -> expectationFailure $ "Wrong variant: " <> show other
 
     it "decodes GitHubDiscussionResponse" $ do
-      let json = object
-            ["type" .= ("GitHubDiscussionResponse" :: Text)
-            ,"number" .= (10 :: Int)
-            ,"title" .= ("RFC" :: Text)
-            ,"body" .= ("Proposal" :: Text)
-            ,"author" .= ("octocat" :: Text)
-            ,"url" .= ("https://github.com/octocat/repo/discussions/10" :: Text)
-            ,"comments" .=
-                [ object
-                    ["author" .= ("commenter" :: Text)
-                    ,"body" .= ("Great idea" :: Text)
-                    ,"created_at" .= ("2024-01-15T10:00:00Z" :: Text)
-                    ,"replies" .= ([] :: [Value])
-                    ]
-                ]
-            ]
+      let json =
+            object
+              [ "type" .= ("GitHubDiscussionResponse" :: Text),
+                "number" .= (10 :: Int),
+                "title" .= ("RFC" :: Text),
+                "body" .= ("Proposal" :: Text),
+                "author" .= ("octocat" :: Text),
+                "url" .= ("https://github.com/octocat/repo/discussions/10" :: Text),
+                "comments"
+                  .= [ object
+                         [ "author" .= ("commenter" :: Text),
+                           "body" .= ("Great idea" :: Text),
+                           "created_at" .= ("2024-01-15T10:00:00Z" :: Text),
+                           "replies" .= ([] :: [Value])
+                         ]
+                     ]
+              ]
       case decode (encode json) :: Maybe ServiceResponse of
         Nothing -> expectationFailure "Failed to decode GitHubDiscussionResponse"
         Just (GitHubDiscussionResponse n t b a u cs) -> do
@@ -289,11 +298,12 @@ main = hspec $ do
         Just other -> expectationFailure $ "Wrong variant: " <> show other
 
     it "decodes ErrorResponse" $ do
-      let json = object
-            ["type" .= ("ErrorResponse" :: Text)
-            ,"code" .= (404 :: Int)
-            ,"message" .= ("Not found" :: Text)
-            ]
+      let json =
+            object
+              [ "type" .= ("ErrorResponse" :: Text),
+                "code" .= (404 :: Int),
+                "message" .= ("Not found" :: Text)
+              ]
       case decode (encode json) :: Maybe ServiceResponse of
         Nothing -> expectationFailure "Failed to decode ErrorResponse"
         Just (ErrorResponse code msg) -> do
@@ -302,21 +312,22 @@ main = hspec $ do
         Just other -> expectationFailure $ "Wrong variant: " <> show other
 
     it "decodes OtelAckResponse" $ do
-      let json = object [ "type" .= ("OtelAckResponse" :: Text) ]
+      let json = object ["type" .= ("OtelAckResponse" :: Text)]
       case decode (encode json) :: Maybe ServiceResponse of
         Nothing -> expectationFailure "Failed to decode OtelAckResponse"
         Just OtelAckResponse -> pure ()
         Just other -> expectationFailure $ "Wrong variant: " <> show other
 
     it "decodes AnthropicChatResponse" $ do
-      let json = object
-            ["type" .= ("AnthropicChatResponse" :: Text)
-            ,"content" .=
-                [object ["type" .= ("text" :: Text), "text" .= ("Hello" :: Text)]]
-            ,"stop_reason" .= ("end_turn" :: Text)
-            ,"usage" .=
-                object ["input_tokens" .= (10 :: Int), "output_tokens" .= (20 :: Int)]
-            ]
+      let json =
+            object
+              [ "type" .= ("AnthropicChatResponse" :: Text),
+                "content"
+                  .= [object ["type" .= ("text" :: Text), "text" .= ("Hello" :: Text)]],
+                "stop_reason" .= ("end_turn" :: Text),
+                "usage"
+                  .= object ["input_tokens" .= (10 :: Int), "output_tokens" .= (20 :: Int)]
+              ]
       case decode (encode json) :: Maybe ServiceResponse of
         Nothing -> expectationFailure "Failed to decode AnthropicChatResponse"
         Just (AnthropicChatResponse content stop _) -> do
@@ -329,13 +340,13 @@ main = hspec $ do
   -- =========================================================================
   describe "Cross-language wire format" $ do
     it "GitHubGetIssue request uses camelCase includeComments" $ do
-      let req = GitHubGetIssue { owner = "o", repo = "r", number = 1, includeComments = True }
+      let req = GitHubGetIssue {owner = "o", repo = "r", number = 1, includeComments = True}
           bs = encode req
           jsonStr = LBS8.unpack bs
       jsonStr `shouldContain` "\"includeComments\""
 
     it "GitHubGetPR request uses camelCase includeDetails" $ do
-      let req = GitHubGetPR { owner = "o", repo = "r", number = 1, includeDetails = True }
+      let req = GitHubGetPR {owner = "o", repo = "r", number = 1, includeDetails = True}
           bs = encode req
           jsonStr = LBS8.unpack bs
       jsonStr `shouldContain` "\"includeDetails\""
@@ -343,22 +354,24 @@ main = hspec $ do
     it "ServiceRequest roundtrip preserves type tag" $ do
       let requests :: [(Text, LBS8.ByteString)]
           requests =
-            [ ("GitHubGetIssue", encode $ GitHubGetIssue { owner = "o", repo = "r", number = 1, includeComments = False })
-            , ("GitHubCreateIssue", encode $ GitHubCreateIssue { owner = "o", repo = "r", title = Just "t", body = Just "b", labels = Just [] })
-            , ("GitHubGetPR", encode $ GitHubGetPR { owner = "o", repo = "r", number = 1, includeDetails = False })
-            , ("GitHubCreatePR", encode $ GitHubCreatePR { owner = "o", repo = "r", title = Just "t", body = Just "b", head = "h", base = "main" })
-            , ("GitHubListIssues", encode $ GitHubListIssues { owner = "o", repo = "r", state = Nothing, labels = Just [] })
-            , ("GitHubCheckAuth", encode GitHubCheckAuth)
+            [ ("GitHubGetIssue", encode $ GitHubGetIssue {owner = "o", repo = "r", number = 1, includeComments = False}),
+              ("GitHubCreateIssue", encode $ GitHubCreateIssue {owner = "o", repo = "r", title = Just "t", body = Just "b", labels = Just []}),
+              ("GitHubGetPR", encode $ GitHubGetPR {owner = "o", repo = "r", number = 1, includeDetails = False}),
+              ("GitHubCreatePR", encode $ GitHubCreatePR {owner = "o", repo = "r", title = Just "t", body = Just "b", head = "h", base = "main"}),
+              ("GitHubListIssues", encode $ GitHubListIssues {owner = "o", repo = "r", state = Nothing, labels = Just []}),
+              ("GitHubCheckAuth", encode GitHubCheckAuth)
             ]
-      mapM_ (\(expected, bs) ->
-        case decode bs :: Maybe Value of
-          Nothing -> expectationFailure $ "Failed to decode " <> T.unpack expected
-          Just (Object o) ->
-            case KM.lookup "type" o of
-              Just (String t) -> t `shouldBe` expected
-              _ -> expectationFailure $ "Missing type tag in " <> T.unpack expected
-          _ -> expectationFailure $ "Not an object: " <> T.unpack expected
-        ) requests
+      mapM_
+        ( \(expected, bs) ->
+            case decode bs :: Maybe Value of
+              Nothing -> expectationFailure $ "Failed to decode " <> T.unpack expected
+              Just (Object o) ->
+                case KM.lookup "type" o of
+                  Just (String t) -> t `shouldBe` expected
+                  _ -> expectationFailure $ "Missing type tag in " <> T.unpack expected
+              _ -> expectationFailure $ "Not an object: " <> T.unpack expected
+        )
+        requests
 
 -- | Helper: encode a ServiceRequest and decode as a raw JSON object.
 decodeToObject :: ServiceRequest -> Maybe Value

@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wno-redundant-constraints #-}
+
 -- | IO-blind GHCi Oracle effect (Native-only)
 --
 -- = Overview
@@ -60,43 +61,41 @@
 --   result <- queryType "fmap"
 --   pure ()
 -- @
---
 module ExoMonad.Effect.GHCi
   ( -- * Platform Constraint
-    NativeOnly
+    NativeOnly,
 
     -- * Effect
-  , GHCi(..)
+    GHCi (..),
 
     -- * Smart Constructors
-  , queryType
-  , queryInfo
-  , queryKind
-  , evaluate
-  , checkCompiles
-  , loadModule
-  , reloadModules
+    queryType,
+    queryInfo,
+    queryKind,
+    evaluate,
+    checkCompiles,
+    loadModule,
+    reloadModules,
 
     -- * Error Types
-  , GHCiError(..)
+    GHCiError (..),
 
     -- * Wire Protocol
-  , GHCiRequest(..)
-  , GHCiResponse(..)
+    GHCiRequest (..),
+    GHCiResponse (..),
 
     -- * Stub Runner
-  , runGHCiStub
-  ) where
+    runGHCiStub,
+  )
+where
 
 import Control.Monad.Freer (Eff, Member, interpret, send)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
-import qualified Data.Text as T
-import GHC.Generics (Generic)
-
+import Data.Text qualified as T
 import ExoMonad.Effect (Log, logInfo)
 import ExoMonad.Platform (NativeOnly)
-
+import GHC.Generics (Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ERROR TYPES
@@ -105,43 +104,43 @@ import ExoMonad.Platform (NativeOnly)
 -- | Errors that can occur during GHCi operations.
 data GHCiError
   = GHCiSessionCrashed
-      { gseCrashOutput :: Text
-        -- ^ Last output before crash
-      , gseExitCode :: Maybe Int
-        -- ^ Exit code if available
+      { -- | Last output before crash
+        gseCrashOutput :: Text,
+        -- | Exit code if available
+        gseExitCode :: Maybe Int
       }
-    -- ^ GHCi process crashed unexpectedly
-  | GHCiTimeout
-      { gteQuery :: Text
-        -- ^ Query that timed out
-      , gteTimeoutMs :: Int
-        -- ^ Timeout in milliseconds
+  | -- \^ GHCi process crashed unexpectedly
+    GHCiTimeout
+      { -- | Query that timed out
+        gteQuery :: Text,
+        -- | Timeout in milliseconds
+        gteTimeoutMs :: Int
       }
-    -- ^ Query exceeded timeout
-  | GHCiParseError
-      { gpeQuery :: Text
-        -- ^ Query that failed
-      , gpeGHCOutput :: Text
-        -- ^ GHCi error output
+  | -- \^ Query exceeded timeout
+    GHCiParseError
+      { -- | Query that failed
+        gpeQuery :: Text,
+        -- | GHCi error output
+        gpeGHCOutput :: Text
       }
-    -- ^ GHCi reported a parse/type error
-  | GHCiLoadError
-      { gleModule :: Text
-        -- ^ Module that failed to load
-      , gleErrors :: Text
-        -- ^ Compilation errors
+  | -- \^ GHCi reported a parse/type error
+    GHCiLoadError
+      { -- | Module that failed to load
+        gleModule :: Text,
+        -- | Compilation errors
+        gleErrors :: Text
       }
-    -- ^ Module failed to load
-  | GHCiNotConnected
-    -- ^ Cannot reach the oracle server
+  | -- \^ Module failed to load
+
+    -- | Cannot reach the oracle server
+    GHCiNotConnected
   | GHCiServerError
-      { gseMessage :: Text
-        -- ^ Error message from server
+      { -- | Error message from server
+        gseMessage :: Text
       }
-    -- ^ Oracle server reported an error
+  -- \^ Oracle server reported an error
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- WIRE PROTOCOL
@@ -149,41 +148,39 @@ data GHCiError
 
 -- | Request sent from client to oracle server.
 data GHCiRequest
-  = ReqQueryType Text
-    -- ^ @:type expression@
-  | ReqQueryInfo Text
-    -- ^ @:info name@
-  | ReqQueryKind Text
-    -- ^ @:kind type@
-  | ReqEvaluate Text
-    -- ^ Evaluate expression
-  | ReqCheckCompiles Text
-    -- ^ Check if expression compiles (no execution)
-  | ReqLoadModule Text
-    -- ^ @:load ModuleName@
-  | ReqReloadModules
-    -- ^ @:reload@
-  | ReqPing
-    -- ^ Health check
+  = -- | @:type expression@
+    ReqQueryType Text
+  | -- | @:info name@
+    ReqQueryInfo Text
+  | -- | @:kind type@
+    ReqQueryKind Text
+  | -- | Evaluate expression
+    ReqEvaluate Text
+  | -- | Check if expression compiles (no execution)
+    ReqCheckCompiles Text
+  | -- | @:load ModuleName@
+    ReqLoadModule Text
+  | -- | @:reload@
+    ReqReloadModules
+  | -- | Health check
+    ReqPing
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
-
 
 -- | Response sent from oracle server to client.
 data GHCiResponse
-  = RespSuccess Text
-    -- ^ Successful query with text result
-  | RespBool Bool
-    -- ^ Boolean result (for CheckCompiles)
-  | RespUnit
-    -- ^ Successful operation with no result (for Load, Reload)
-  | RespError GHCiError
-    -- ^ Error occurred
-  | RespPong
-    -- ^ Response to Ping
+  = -- | Successful query with text result
+    RespSuccess Text
+  | -- | Boolean result (for CheckCompiles)
+    RespBool Bool
+  | -- | Successful operation with no result (for Load, Reload)
+    RespUnit
+  | -- | Error occurred
+    RespError GHCiError
+  | -- | Response to Ping
+    RespPong
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT DEFINITION
@@ -203,31 +200,24 @@ data GHCi r where
   -- | Query the type of an expression.
   -- @:type expression@
   QueryType :: Text -> GHCi (Either GHCiError Text)
-
   -- | Query information about a name (type, definition, instances).
   -- @:info name@
   QueryInfo :: Text -> GHCi (Either GHCiError Text)
-
   -- | Query the kind of a type.
   -- @:kind type@
   QueryKind :: Text -> GHCi (Either GHCiError Text)
-
   -- | Evaluate an expression (for pure expressions).
   -- Returns the result or error.
   Evaluate :: Text -> GHCi (Either GHCiError Text)
-
   -- | Check if an expression compiles without executing.
   -- Useful for type-checking code generation results.
   CheckCompiles :: Text -> GHCi (Either GHCiError Bool)
-
   -- | Load a module into the session.
   -- @:load Module.Name@
   LoadModule :: Text -> GHCi (Either GHCiError ())
-
   -- | Reload all currently loaded modules.
   -- @:reload@
   ReloadModules :: GHCi (Either GHCiError ())
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SMART CONSTRUCTORS
@@ -293,7 +283,6 @@ loadModule = send . LoadModule
 reloadModules :: (Member GHCi effs, NativeOnly) => Eff effs (Either GHCiError ())
 reloadModules = send ReloadModules
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- STUB RUNNER
 -- ════════════════════════════════════════════════════════════════════════════
@@ -302,32 +291,26 @@ reloadModules = send ReloadModules
 --
 -- This is a placeholder for testing and development. For real GHCi
 -- functionality, use 'ExoMonad.GHCi.Interpreter.runGHCiIO' from ghci-interpreter.
-runGHCiStub :: Member Log effs => Eff (GHCi ': effs) a -> Eff effs a
+runGHCiStub :: (Member Log effs) => Eff (GHCi ': effs) a -> Eff effs a
 runGHCiStub = interpret $ \case
   QueryType expr -> do
     logInfo $ "[GHCi:stub] :type " <> expr
     pure $ Right $ expr <> " :: a -> b -> c"
-
   QueryInfo name -> do
     logInfo $ "[GHCi:stub] :info " <> name
     pure $ Right $ "-- info for " <> name
-
   QueryKind typ -> do
     logInfo $ "[GHCi:stub] :kind " <> typ
     pure $ Right $ typ <> " :: * -> *"
-
   Evaluate expr -> do
     logInfo $ "[GHCi:stub] evaluate: " <> expr
     pure $ Right "(stub result)"
-
   CheckCompiles expr -> do
     logInfo $ "[GHCi:stub] check compiles: " <> T.take 50 expr
     pure $ Right True
-
   LoadModule modName -> do
     logInfo $ "[GHCi:stub] :load " <> modName
     pure $ Right ()
-
   ReloadModules -> do
     logInfo "[GHCi:stub] :reload"
     pure $ Right ()

@@ -1,12 +1,11 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module JustExecSpec (spec) where
 
 import Data.Aeson (eitherDecode, encode)
-import Test.Hspec
-
 import ExoMonad.Effects.JustExec
+import Test.Hspec
 
 spec :: Spec
 spec = do

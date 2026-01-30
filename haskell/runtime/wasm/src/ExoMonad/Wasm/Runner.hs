@@ -25,24 +25,23 @@
 -- a global 'IORef', allowing resume across FFI boundaries.
 module ExoMonad.Wasm.Runner
   ( -- * Running Computations
-    initializeWasm
-  , stepWasm
+    initializeWasm,
+    stepWasm,
 
     -- * Result Types
-  , WasmResult(..)
+    WasmResult (..),
 
     -- * Re-exports for convenience
-  , WasmM
-  , WasmStatus
-  ) where
+    WasmM,
+    WasmStatus,
+  )
+where
 
 import Control.Monad.Freer (Eff, run)
-import Control.Monad.Freer.Coroutine (Status(..))
+import Control.Monad.Freer.Coroutine (Status (..))
 import Data.Text (Text)
-
 import ExoMonad.Wasm.Effect (WasmM, WasmStatus, runWasmM)
-import ExoMonad.Wasm.WireTypes (SerializableEffect, EffectResult(..))
-
+import ExoMonad.Wasm.WireTypes (EffectResult (..), SerializableEffect)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- RESULT TYPES
@@ -52,13 +51,12 @@ import ExoMonad.Wasm.WireTypes (SerializableEffect, EffectResult(..))
 --
 -- This is the high-level result type used by the FFI layer.
 data WasmResult a
-  = WasmYield SerializableEffect (EffectResult -> WasmResult a)
-    -- ^ Yielded an effect. Call the continuation with the result to resume.
-  | WasmComplete a
-    -- ^ Computation completed with a result.
-  | WasmError Text
-    -- ^ Computation failed with an error.
-
+  = -- | Yielded an effect. Call the continuation with the result to resume.
+    WasmYield SerializableEffect (EffectResult -> WasmResult a)
+  | -- | Computation completed with a result.
+    WasmComplete a
+  | -- | Computation failed with an error.
+    WasmError Text
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- RUNNING COMPUTATIONS
@@ -93,7 +91,6 @@ initializeWasm wasm = statusToResult (runWasmM wasm)
 -- External callers should use the continuation returned by 'initializeWasm'.
 stepWasm :: (EffectResult -> Eff '[] (WasmStatus a)) -> EffectResult -> WasmResult a
 stepWasm k result = statusToResult (run (k result))
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- INTERNAL HELPERS

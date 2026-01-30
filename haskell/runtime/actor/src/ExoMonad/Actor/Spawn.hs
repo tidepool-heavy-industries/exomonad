@@ -4,25 +4,26 @@
 -- all actors are automatically cancelled.
 module ExoMonad.Actor.Spawn
   ( -- * Spawning
-    spawnActor
-  , spawnActorWithMailbox
+    spawnActor,
+    spawnActorWithMailbox,
+
     -- * Handler Types
-  , ActorHandler
+    ActorHandler,
+
     -- * Re-exports
-  , Ki.Scope
-  , Ki.scoped
-  ) where
+    Ki.Scope,
+    Ki.scoped,
+  )
+where
 
 import Control.Exception (AsyncException, SomeException, catch, fromException, throwIO)
 import Control.Monad (forever)
 import Data.Aeson (Value)
-import qualified Data.Text as T
-import qualified Ki
-import System.IO (hFlush, stdout)
-
+import Data.Text qualified as T
 import ExoMonad.Actor.Mailbox (Mailbox, newMailboxIO, receive)
-import ExoMonad.Actor.Types (Actor(..), ActorId)
-
+import ExoMonad.Actor.Types (Actor (..), ActorId)
+import Ki qualified
+import System.IO (hFlush, stdout)
 
 -- | Handler function type for actors.
 --
@@ -52,10 +53,11 @@ spawnActor scope actorId handler = do
 spawnActorWithMailbox :: Ki.Scope -> ActorId -> Mailbox Value -> ActorHandler -> IO Actor
 spawnActorWithMailbox scope aid mailbox handler = do
   _ <- Ki.fork scope $ actorLoop aid mailbox handler
-  pure Actor
-    { actorId      = aid
-    , actorMailbox = mailbox
-    }
+  pure
+    Actor
+      { actorId = aid,
+        actorMailbox = mailbox
+      }
 
 -- | The main actor loop.
 --
@@ -79,10 +81,11 @@ actorLoop actorId mailbox handler = forever $ do
 -- This is critical for ki's structured concurrency - async exceptions
 -- (like ThreadKilled) must propagate for proper cancellation.
 catchSync :: IO a -> (SomeException -> IO a) -> IO a
-catchSync action handler = action `catch` \e ->
-  if isAsyncException e
-    then throwIO e  -- Re-throw async exceptions
-    else handler e
+catchSync action handler =
+  action `catch` \e ->
+    if isAsyncException e
+      then throwIO e -- Re-throw async exceptions
+      else handler e
 
 -- | Check if an exception is asynchronous.
 --

@@ -18,36 +18,35 @@
 -- @
 module ExoMonad.Wasm.Habitica
   ( -- * Re-exported Types
-    module ExoMonad.Habitica
+    module ExoMonad.Habitica,
 
     -- * WASM Effect
-  , habitica
-  ) where
+    habitica,
+  )
+where
 
 import Control.Monad.Freer (Eff, Member)
 import Control.Monad.Freer.Coroutine (Yield, yield)
 import Data.Aeson
-  ( FromJSON(..)
-  , Result(..)
-  , Value(..)
-  , fromJSON
-  , object
-  , withObject
-  , (.=)
-  , (.:)
+  ( FromJSON (..),
+    Result (..),
+    Value (..),
+    fromJSON,
+    object,
+    withObject,
+    (.:),
+    (.=),
   )
 import Data.Text (Text)
-import qualified Data.Text as T
-
+import Data.Text qualified as T
 import ExoMonad.Habitica
-import ExoMonad.Wasm.WireTypes (SerializableEffect(..), EffectResult(..))
 import ExoMonad.Wasm.Error
-  ( WasmError
-  , effectFailed
-  , parseFailed
-  , emptyResult
+  ( WasmError,
+    effectFailed,
+    emptyResult,
+    parseFailed,
   )
-
+import ExoMonad.Wasm.WireTypes (EffectResult (..), SerializableEffect (..))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- WASM EFFECT IMPLEMENTATION
@@ -68,18 +67,18 @@ import ExoMonad.Wasm.Error
 --   Left err -> -- handle error
 --   Right todos -> -- use todos
 -- @
-habitica :: Member (Yield SerializableEffect EffectResult) effs
-         => HabiticaOp a
-         -> Eff effs (Either WasmError a)
+habitica ::
+  (Member (Yield SerializableEffect EffectResult) effs) =>
+  HabiticaOp a ->
+  Eff effs (Either WasmError a)
 habitica op = do
   let (opName, payload) = encodeOp op
       eff = EffHabitica opName payload
   result <- yield eff (id @EffectResult)
   pure $ case result of
     ResSuccess (Just v) -> decodeResult eff op v
-    ResSuccess Nothing  -> Left $ emptyResult eff "Habitica API response"
-    ResError msg        -> Left $ effectFailed eff msg
-
+    ResSuccess Nothing -> Left $ emptyResult eff "Habitica API response"
+    ResError msg -> Left $ effectFailed eff msg
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- WIRE FORMAT ENCODING
@@ -90,28 +89,26 @@ encodeOp :: HabiticaOp a -> (Text, Value)
 encodeOp = \case
   GetUser ->
     ("GetUser", object [])
-
   GetTasks taskType ->
     ("GetTasks", object ["taskType" .= taskTypeToText taskType])
-
   FetchTodos ->
     ("FetchTodos", object [])
-
   ScoreTask taskId direction ->
-    ("ScoreTask", object
-      [ "taskId" .= taskId
-      , "direction" .= directionToText direction
-      ])
-
+    ( "ScoreTask",
+      object
+        [ "taskId" .= taskId,
+          "direction" .= directionToText direction
+        ]
+    )
   CreateTodo title ->
     ("CreateTodo", object ["title" .= title])
-
   AddChecklistItem todoId item ->
-    ("AddChecklistItem", object
-      [ "todoId" .= todoId
-      , "item" .= item
-      ])
-
+    ( "AddChecklistItem",
+      object
+        [ "todoId" .= todoId,
+          "item" .= item
+        ]
+    )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- WIRE FORMAT DECODING
@@ -127,7 +124,7 @@ decodeResult eff op v = case op of
   CreateTodo _ -> parseTodoId v
   AddChecklistItem _ _ -> parseChecklistItemId v
   where
-    parse :: FromJSON a => Text -> Value -> Either WasmError a
+    parse :: (FromJSON a) => Text -> Value -> Either WasmError a
     parse typeName val = case fromJSON val of
       Success a -> Right a
       Error err -> Left $ parseFailed eff typeName val (T.pack err)
@@ -144,25 +141,24 @@ decodeResult eff op v = case op of
       Success (t :: Text) -> Right (ChecklistItemId t)
       Error err -> Left $ parseFailed eff "ChecklistItemId" val (T.pack err)
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS
 -- ════════════════════════════════════════════════════════════════════════════
 
 taskTypeToText :: TaskType -> Text
 taskTypeToText = \case
-  Habits  -> "habits"
-  Dailys  -> "dailys"
-  Todos   -> "todos"
+  Habits -> "habits"
+  Dailys -> "dailys"
+  Todos -> "todos"
   Rewards -> "rewards"
 
 directionToText :: Direction -> Text
 directionToText = \case
-  Up   -> "up"
+  Up -> "up"
   Down -> "down"
 
 -- Helper newtype for parsing CreateTodo response
-newtype TodoIdResponse = TodoIdResponse { tirTodoId :: Text }
+newtype TodoIdResponse = TodoIdResponse {tirTodoId :: Text}
 
 instance FromJSON TodoIdResponse where
   parseJSON = withObject "TodoIdResponse" $ \v ->

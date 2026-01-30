@@ -1,10 +1,10 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE OverloadedStrings #-}
 
 -- | Integration tests for tool-initiated graph transitions.
 --
@@ -15,25 +15,34 @@
 -- 1. Tool returns ToolTransition with target name + payload
 -- 2. Graph interpreter's ConvertTransitionHint converts to typed GotoChoice
 -- 3. Dispatch continues to target node, skipping handler's afterHandler
---
 module ToolTransitionIntegrationSpec (spec) where
 
-import Control.Monad.Freer (run, Eff, Member)
-import Data.Aeson (toJSON, Value)
-import qualified Data.Text as T
+import Control.Monad.Freer (Eff, Member, run)
+import Data.Aeson (Value, toJSON)
+import Data.Text qualified as T
+import ExoMonad.Effect.NodeMeta (GraphMeta, NodeMeta, defaultGraphMeta, defaultNodeMeta, runGraphMeta, runNodeMeta)
+import ExoMonad.Graph.Generic
+  ( AsHandler,
+    GraphMode (..),
+    type (:-),
+  )
+import ExoMonad.Graph.Generic qualified as G
+import ExoMonad.Graph.Goto
+  ( Goto,
+    GotoChoice,
+    To,
+    gotoChoice,
+    gotoExit,
+  )
+import ExoMonad.Graph.Interpret (DispatchGoto (..))
+import ExoMonad.Graph.Types
+  ( Input,
+    UsesEffects,
+    type (:@),
+  )
+import ExoMonad.Graph.Types qualified as Types (Exit)
 import GHC.Generics (Generic)
 import Test.Hspec
-
-import ExoMonad.Graph.Goto
-  ( To, GotoChoice, gotoChoice, gotoExit, Goto )
-import ExoMonad.Graph.Generic
-  ( GraphMode(..), type (:-), AsHandler )
-import ExoMonad.Graph.Types
-  ( Input, UsesEffects, type (:@) )
-import ExoMonad.Effect.NodeMeta (NodeMeta, GraphMeta, runNodeMeta, runGraphMeta, defaultNodeMeta, defaultGraphMeta)
-import qualified ExoMonad.Graph.Types as Types (Exit)
-import qualified ExoMonad.Graph.Generic as G
-import ExoMonad.Graph.Interpret (DispatchGoto(..))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TEST GRAPH: Simple tool transition
@@ -44,20 +53,24 @@ import ExoMonad.Graph.Interpret (DispatchGoto(..))
 --
 -- ════════════════════════════════════════════════════════════════════════════
 
-data Result = Result { output :: String }
+data Result = Result {output :: String}
   deriving (Show, Eq, Generic)
 
 data ToolTransitionGraph mode = ToolTransitionGraph
-  { entry   :: mode :- G.EntryNode String
-  , tool    :: mode :- G.LogicNode
-       :@ Input String
-       :@ UsesEffects '[Goto "success" Value, Goto Types.Exit Result]
-  , success :: mode :- G.LogicNode
-       :@ Input Value
-       :@ UsesEffects '[Goto Types.Exit Result]
-  , exit    :: mode :- G.ExitNode Result
+  { entry :: mode :- G.EntryNode String,
+    tool ::
+      mode
+        :- G.LogicNode
+        :@ Input String
+        :@ UsesEffects '[Goto "success" Value, Goto Types.Exit Result],
+    success ::
+      mode
+        :- G.LogicNode
+        :@ Input Value
+        :@ UsesEffects '[Goto Types.Exit Result],
+    exit :: mode :- G.ExitNode Result
   }
-  deriving Generic
+  deriving (Generic)
 
 -- Handler that simulates tool execution
 toolNodeHandler :: String -> Eff '[NodeMeta, GraphMeta] (GotoChoice '[To "success" Value, To Types.Exit Result])
@@ -70,12 +83,13 @@ successNodeHandler :: Value -> Eff '[NodeMeta, GraphMeta] (GotoChoice '[To Types
 successNodeHandler payload = pure $ gotoExit (Result $ "success: " <> show payload)
 
 handlers :: ToolTransitionGraph (AsHandler '[NodeMeta, GraphMeta])
-handlers = ToolTransitionGraph
-  { entry   = ()
-  , tool    = toolNodeHandler
-  , success = successNodeHandler
-  , exit    = ()
-  }
+handlers =
+  ToolTransitionGraph
+    { entry = (),
+      tool = toolNodeHandler,
+      success = successNodeHandler,
+      exit = ()
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TESTS

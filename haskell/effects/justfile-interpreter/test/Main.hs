@@ -1,13 +1,12 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Main where
 
 import Data.Aeson (eitherDecode, encode)
-import Test.Hspec
-
 import ExoMonad.Effects.Justfile
-import qualified JustExecSpec
+import JustExecSpec qualified
+import Test.Hspec
 
 main :: IO ()
 main = hspec $ do

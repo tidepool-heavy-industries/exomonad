@@ -11,15 +11,14 @@
 -- with type-checking via FromJSON for each target's payload.
 module ConvertTransitionHintSpec (spec) where
 
-import Test.Hspec
-import Data.Aeson (toJSON, object, (.=), Value)
+import Data.Aeson (Value, object, toJSON, (.=))
 import Data.Text (Text)
-import qualified Data.Text as T
-
-import ExoMonad.Graph.Interpret (ConvertTransitionHint(..))
-import ExoMonad.Graph.Goto (To, GotoChoice)
-import ExoMonad.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
+import Data.Text qualified as T
+import ExoMonad.Graph.Goto (GotoChoice, To)
+import ExoMonad.Graph.Goto.Internal (GotoChoice (..), OneOf (..))
+import ExoMonad.Graph.Interpret (ConvertTransitionHint (..))
 import ExoMonad.Graph.Types (Exit, Self)
+import Test.Hspec
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TEST TARGET LISTS
@@ -49,7 +48,6 @@ type EmptyTargets = '[]
 
 spec :: Spec
 spec = describe "ConvertTransitionHint typeclass" $ do
-
   describe "Named targets" $ do
     it "matches first named target with correct payload" $
       case convertTransitionHint @SimpleTargets "nodeA" (toJSON (42 :: Int)) of
@@ -94,7 +92,7 @@ spec = describe "ConvertTransitionHint typeclass" $ do
 
     it "accepts any JSON for unit type (Aeson FromJSON behavior)" $
       case convertTransitionHint @MultiNamedTargets "Exit" (toJSON (123 :: Int)) of
-        Just _ -> pure ()  -- Unit types accept any JSON per Aeson
+        Just _ -> pure () -- Unit types accept any JSON per Aeson
         Nothing -> expectationFailure "Should accept Int JSON for () type"
 
   describe "Self targets" $ do

@@ -57,115 +57,119 @@
 -- * 'whenM', 'unlessM' - Lifted monad conditionals
 module ExoMonad.Wasm.Prelude
   ( -- * Graph Structure
+
     -- ** Node Types
-    EntryNode
-  , ExitNode
-  , LogicNode
+    EntryNode,
+    ExitNode,
+    LogicNode,
+
     -- ** Mode Application
-  , GraphMode(..)
-  , AsGraph
+    GraphMode (..),
+    AsGraph,
+
     -- ** Annotations
-  , type (:@)
-  , Input
-  , UsesEffects
+    type (:@),
+    Input,
+    UsesEffects,
+
     -- ** Goto Targets (for UsesEffects)
-  , ExitTarget   -- Use: Goto ExitTarget Result (or just use gotoExit at value level)
-  , Self
+    ExitTarget, -- Use: Goto ExitTarget Result (or just use gotoExit at value level)
+    Self,
 
     -- * Transitions
-  , Goto
-  , GotoChoice   -- Constructors hidden; use gotoChoice/gotoExit/gotoSelf
-  , OneOf        -- Constructors hidden; import Goto.Internal for dispatch
-  , To
-  , gotoChoice
-  , gotoExit
-  , gotoSelf
+    Goto,
+    GotoChoice, -- Constructors hidden; use gotoChoice/gotoExit/gotoSelf
+    OneOf, -- Constructors hidden; import Goto.Internal for dispatch
+    To,
+    gotoChoice,
+    gotoExit,
+    gotoSelf,
 
     -- * Effects
-  , WasmM
-  , logInfo
-  , logError
-  , llmComplete
+    WasmM,
+    logInfo,
+    logError,
+    llmComplete,
 
     -- * Common Types
-  , Text
-  , Generic
-  , FromJSON(..)
-  , ToJSON(..)
+    Text,
+    Generic,
+    FromJSON (..),
+    ToJSON (..),
 
     -- * JSON (Aeson)
-  , Value(..)
-  , object
-  , (.=)
-  , (.:)
-  , (.:?)
+    Value (..),
+    object,
+    (.=),
+    (.:),
+    (.:?),
 
     -- * Control.Monad
-  , forM
-  , forM_
-  , when
-  , unless
-  , void
-  , (>=>)
-  , (<=<)
+    forM,
+    forM_,
+    when,
+    unless,
+    void,
+    (>=>),
+    (<=<),
 
     -- * Data.Maybe
-  , fromMaybe
-  , catMaybes
-  , mapMaybe
-  , isJust
-  , isNothing
+    fromMaybe,
+    catMaybes,
+    mapMaybe,
+    isJust,
+    isNothing,
 
     -- * Data.Either
-  , lefts
-  , rights
-  , partitionEithers
+    lefts,
+    rights,
+    partitionEithers,
 
     -- * Data.Text
-  , pack
-  , unpack
+    pack,
+    unpack,
 
     -- * Lifted Conditionals
-  , whenM
-  , unlessM
-  ) where
+    whenM,
+    unlessM,
+  )
+where
 
 -- Graph structure
-import ExoMonad.Graph.Types (type (:@), Input, UsesEffects, Self)
-import qualified ExoMonad.Graph.Types as Types (Exit)
-import ExoMonad.Graph.Generic
-  ( GraphMode(..)
-  , AsGraph
-  , type (:-)
-  , EntryNode
-  , ExitNode
-  , LogicNode
-  )
 
 -- Transitions
-import ExoMonad.Graph.Goto
-  ( Goto
-  , GotoChoice
-  , OneOf
-  , To
-  , gotoChoice
-  , gotoExit
-  , gotoSelf
-  )
 
 -- Effects
-import ExoMonad.Wasm.Effect (WasmM, logInfo, logError, llmComplete)
 
 -- Common types
-import Data.Text (Text, pack, unpack)
-import GHC.Generics (Generic)
-import Data.Aeson (FromJSON(..), ToJSON(..), Value(..), object, (.=), (.:), (.:?))
 
 -- Common combinators
-import Control.Monad (forM, forM_, when, unless, void, (>=>), (<=<))
-import Data.Maybe (fromMaybe, catMaybes, mapMaybe, isJust, isNothing)
-import Data.Either (lefts, rights, partitionEithers)
-
+import Control.Monad (forM, forM_, unless, void, when, (<=<), (>=>))
+import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), object, (.:), (.:?), (.=))
+import Data.Either (lefts, partitionEithers, rights)
+import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing, mapMaybe)
+import Data.Text (Text, pack, unpack)
+import ExoMonad.Graph.Generic
+  ( AsGraph,
+    EntryNode,
+    ExitNode,
+    GraphMode (..),
+    LogicNode,
+    type (:-),
+  )
+import ExoMonad.Graph.Goto
+  ( Goto,
+    GotoChoice,
+    OneOf,
+    To,
+    gotoChoice,
+    gotoExit,
+    gotoSelf,
+  )
+import ExoMonad.Graph.Types (Input, Self, UsesEffects, type (:@))
+import ExoMonad.Graph.Types qualified as Types (Exit)
+import ExoMonad.Wasm.Effect (WasmM, llmComplete, logError, logInfo)
+import GHC.Generics (Generic)
 
 -- ============================================================================
 -- Lifted Conditionals
@@ -176,7 +180,7 @@ import Data.Either (lefts, rights, partitionEithers)
 -- @
 -- whenM (isReady state) $ logInfo "Ready to proceed"
 -- @
-whenM :: Monad m => m Bool -> m () -> m ()
+whenM :: (Monad m) => m Bool -> m () -> m ()
 whenM mb action = mb >>= \b -> when b action
 
 -- | Lifted 'unless' - run action when monadic condition is false.
@@ -184,7 +188,7 @@ whenM mb action = mb >>= \b -> when b action
 -- @
 -- unlessM (hasErrors state) $ logInfo "Processing complete"
 -- @
-unlessM :: Monad m => m Bool -> m () -> m ()
+unlessM :: (Monad m) => m Bool -> m () -> m ()
 unlessM mb action = mb >>= \b -> unless b action
 
 -- | Type alias for Exit as a Goto target.

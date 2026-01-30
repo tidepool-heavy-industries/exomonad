@@ -57,72 +57,75 @@
 -- @
 module ExoMonad.StructuredOutput
   ( -- * The Typeclass
-    StructuredOutput(..)
+    StructuredOutput (..),
 
     -- * Options
-  , StructuredOptions(..)
-  , SumEncoding(..)
-  , defaultOptions
+    StructuredOptions (..),
+    SumEncoding (..),
+    defaultOptions,
 
     -- * Error Types
-  , ParseDiagnostic(..)
-  , formatDiagnostic
+    ParseDiagnostic (..),
+    formatDiagnostic,
 
     -- * String Enum Wrapper
-  , StringEnum(..)
-  , ExoMonadDefault(..)
+    StringEnum (..),
+    ExoMonadDefault (..),
 
     -- * Field Label Utilities
-  , stripFieldPrefix
-  , defaultFieldLabel
+    stripFieldPrefix,
+    defaultFieldLabel,
 
     -- * ClaudeCode Schema Handling
-  , ClaudeCodeSchema(..)
-  , IsSumWithData
+    ClaudeCodeSchema (..),
+    IsSumWithData,
 
     -- * Validation
-  , ValidStructuredOutput
-  , ValidInContext
-  , SchemaContext(..)
+    ValidStructuredOutput,
+    ValidInContext,
+    SchemaContext (..),
 
     -- * Decision Tools
-  , ToDecisionTools(..)
-  , DecisionTool(..)
-  , ToolCall(..)
-  ) where
+    ToDecisionTools (..),
+    DecisionTool (..),
+    ToolCall (..),
+  )
+where
 
 -- Import instances to bring them into scope
-import ExoMonad.StructuredOutput.Generic ()  -- GStructuredOutput instances for M1, :*:, etc.
-import ExoMonad.StructuredOutput.Instances ()  -- Base type instances
+-- GStructuredOutput instances for M1, :*:, etc.
+-- Base type instances
 
 -- Re-export from submodules
 import ExoMonad.StructuredOutput.Class
-  ( StructuredOutput(..)
-  , StructuredOptions(..)
-  , SumEncoding(..)
-  , defaultOptions
-  , ValidStructuredOutput
-  , ValidInContext
-  , SchemaContext(..)
-  , StringEnum(..)
-  , ExoMonadDefault(..)
-  )
-import ExoMonad.StructuredOutput.Error
-  ( ParseDiagnostic(..)
-  , formatDiagnostic
-  )
-import ExoMonad.StructuredOutput.Prefix
-  ( stripFieldPrefix
-  , defaultFieldLabel
+  ( ExoMonadDefault (..),
+    SchemaContext (..),
+    StringEnum (..),
+    StructuredOptions (..),
+    StructuredOutput (..),
+    SumEncoding (..),
+    ValidInContext,
+    ValidStructuredOutput,
+    defaultOptions,
   )
 import ExoMonad.StructuredOutput.ClaudeCodeSchema
-  ( ClaudeCodeSchema(..)
-  , IsSumWithData
+  ( ClaudeCodeSchema (..),
+    IsSumWithData,
   )
 import ExoMonad.StructuredOutput.DecisionTools
-  ( ToDecisionTools(..)
-  , DecisionTool(..)
-  , ToolCall(..)
+  ( DecisionTool (..),
+    ToDecisionTools (..),
+    ToolCall (..),
+  )
+import ExoMonad.StructuredOutput.Error
+  ( ParseDiagnostic (..),
+    formatDiagnostic,
+  )
+import ExoMonad.StructuredOutput.Generic ()
+import ExoMonad.StructuredOutput.Instances ()
+import ExoMonad.StructuredOutput.Prefix
+  ( defaultFieldLabel,
+    stripFieldPrefix,
   )
 
 -- Note: Generic.hs instances are imported above to bring them into scope.

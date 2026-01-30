@@ -24,28 +24,29 @@
 -- * "ExoMonad.Habitica.Error" - HabiticaError ADT
 module ExoMonad.Habitica
   ( -- * Domain Types
-    TaskType(..)
-  , Direction(..)
-  , TaskId(..)
-  , TodoId(..)
-  , ChecklistItemId(..)
+    TaskType (..),
+    Direction (..),
+    TaskId (..),
+    TodoId (..),
+    ChecklistItemId (..),
 
     -- * Response Types
-  , UserInfo(..)
-  , UserStats(..)
-  , HabiticaTask(..)
-  , FetchedTodo(..)
-  , FetchedChecklistItem(..)
-  , ScoreResult(..)
+    UserInfo (..),
+    UserStats (..),
+    HabiticaTask (..),
+    FetchedTodo (..),
+    FetchedChecklistItem (..),
+    ScoreResult (..),
 
     -- * Operations GADT
-  , HabiticaOp(..)
+    HabiticaOp (..),
 
     -- * Error Types
-  , HabiticaError(..)
-  ) where
+    HabiticaError (..),
+  )
+where
 
-import ExoMonad.Habitica.Types
-import ExoMonad.Habitica.Response
-import ExoMonad.Habitica.Op
 import ExoMonad.Habitica.Error
+import ExoMonad.Habitica.Op
+import ExoMonad.Habitica.Response
+import ExoMonad.Habitica.Types

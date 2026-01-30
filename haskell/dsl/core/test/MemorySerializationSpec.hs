@@ -9,19 +9,17 @@
 -- verifying that memory scopes survive WASM instance lifecycle.
 module MemorySerializationSpec (spec) where
 
-import Test.Hspec
-import Data.Aeson (ToJSON(..), FromJSON(..), Value, encode, decode)
-import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.KeyMap as KM
+import Control.Monad.Freer (run)
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, decode, encode)
+import Data.Aeson qualified as Aeson
+import Data.Aeson.KeyMap qualified as KM
+import Data.Generics.Labels ()
 import Data.List (isInfixOf)
 import Data.Text (Text)
-import qualified Data.Text as T
-import GHC.Generics (Generic)
-import Control.Monad.Freer (run)
-import Data.Generics.Labels ()
-
+import Data.Text qualified as T
 import ExoMonad.Graph.Memory
-
+import GHC.Generics (Generic)
+import Test.Hspec
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TEST TYPES
@@ -29,28 +27,27 @@ import ExoMonad.Graph.Memory
 
 -- | Example node memory: tracks URLs visited during exploration
 data ExploreMem = ExploreMem
-  { urlsVisited :: [Text]
-  , searchCount :: Int
+  { urlsVisited :: [Text],
+    searchCount :: Int
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
 -- | Another node memory type: tracks classification results
 data ClassifyMem = ClassifyMem
-  { categories :: [Text]
-  , confidence :: Double
+  { categories :: [Text],
+    confidence :: Double
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
 -- | Global session state example
 data SessionState = SessionState
-  { userId :: Text
-  , turnCount :: Int
+  { userId :: Text,
+    turnCount :: Int
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON, FromJSON)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TESTS
@@ -59,7 +56,6 @@ data SessionState = SessionState
 spec :: Spec
 spec = do
   describe "MemoryStore serialization" $ do
-
     it "round-trips empty store" $ do
       let store = emptyMemoryStore
           json = serializeMemoryStore store
@@ -68,7 +64,7 @@ spec = do
         Right restored -> restored `shouldBe` emptyMemoryStore
 
     it "round-trips single scope" $ do
-      let mem = ExploreMem { urlsVisited = ["https://example.com"], searchCount = 5 }
+      let mem = ExploreMem {urlsVisited = ["https://example.com"], searchCount = 5}
           store = setScope @ExploreMem "explore" mem emptyMemoryStore
           json = serializeMemoryStore store
 
@@ -81,13 +77,14 @@ spec = do
             Right (Just val) -> val `shouldBe` mem
 
     it "round-trips multiple scopes with different types" $ do
-      let exploreMem = ExploreMem { urlsVisited = ["a", "b"], searchCount = 10 }
-          classifyMem = ClassifyMem { categories = ["tech", "news"], confidence = 0.95 }
-          sessionMem = SessionState { userId = "user123", turnCount = 42 }
-          store = setScope @ExploreMem "explore" exploreMem
-                $ setScope @ClassifyMem "classify" classifyMem
-                $ setScope @SessionState "session" sessionMem
-                $ emptyMemoryStore
+      let exploreMem = ExploreMem {urlsVisited = ["a", "b"], searchCount = 10}
+          classifyMem = ClassifyMem {categories = ["tech", "news"], confidence = 0.95}
+          sessionMem = SessionState {userId = "user123", turnCount = 42}
+          store =
+            setScope @ExploreMem "explore" exploreMem $
+              setScope @ClassifyMem "classify" classifyMem $
+                setScope @SessionState "session" sessionMem $
+                  emptyMemoryStore
           json = serializeMemoryStore store
 
       case restoreMemoryStore json of
@@ -103,7 +100,7 @@ spec = do
 
     it "returns error for type mismatch" $ do
       -- Store ExploreMem but try to read as ClassifyMem
-      let mem = ExploreMem { urlsVisited = ["url"], searchCount = 1 }
+      let mem = ExploreMem {urlsVisited = ["url"], searchCount = 1}
           store = setScope @ExploreMem "explore" mem emptyMemoryStore
 
       case getScope @ClassifyMem "explore" store of
@@ -112,32 +109,32 @@ spec = do
 
     it "rejects unknown snapshot version" $ do
       -- Manually construct a snapshot with wrong version
-      let badSnapshot = Aeson.object
-            [ "version" Aeson..= (99 :: Int)
-            , "scopes" Aeson..= Aeson.object []
-            ]
+      let badSnapshot =
+            Aeson.object
+              [ "version" Aeson..= (99 :: Int),
+                "scopes" Aeson..= Aeson.object []
+              ]
       case restoreMemoryStore badSnapshot of
         Left err -> T.unpack err `shouldSatisfy` ("Unsupported snapshot version" `isInfixOf`)
         Right _ -> expectationFailure "Should have rejected version 99"
 
   describe "runMemoryScoped" $ do
-
     it "initializes from empty store with default value" $ do
-      let defaultMem = ExploreMem { urlsVisited = [], searchCount = 0 }
+      let defaultMem = ExploreMem {urlsVisited = [], searchCount = 0}
           action = getMem @ExploreMem
           (result, _) = run $ runMemoryScoped "test" defaultMem emptyMemoryStore action
       result `shouldBe` defaultMem
 
     it "loads existing scope value" $ do
-      let mem = ExploreMem { urlsVisited = ["stored"], searchCount = 99 }
+      let mem = ExploreMem {urlsVisited = ["stored"], searchCount = 99}
           store = setScope @ExploreMem "test" mem emptyMemoryStore
-          defaultMem = ExploreMem { urlsVisited = [], searchCount = 0 }
+          defaultMem = ExploreMem {urlsVisited = [], searchCount = 0}
           action = getMem @ExploreMem
           (result, _) = run $ runMemoryScoped "test" defaultMem store action
       result `shouldBe` mem
 
     it "persists updates to store" $ do
-      let defaultMem = ExploreMem { urlsVisited = [], searchCount = 0 }
+      let defaultMem = ExploreMem {urlsVisited = [], searchCount = 0}
           action = do
             modifyMem @ExploreMem #searchCount (+ 1)
             getMem @ExploreMem
@@ -149,12 +146,13 @@ spec = do
         _ -> expectationFailure "Value not persisted to store"
 
     it "isolates different scope names" $ do
-      let mem1 = ExploreMem { urlsVisited = ["a"], searchCount = 1 }
-          mem2 = ExploreMem { urlsVisited = ["b"], searchCount = 2 }
-          store = setScope @ExploreMem "node1" mem1
-                $ setScope @ExploreMem "node2" mem2
-                $ emptyMemoryStore
-          defaultMem = ExploreMem { urlsVisited = [], searchCount = 0 }
+      let mem1 = ExploreMem {urlsVisited = ["a"], searchCount = 1}
+          mem2 = ExploreMem {urlsVisited = ["b"], searchCount = 2}
+          store =
+            setScope @ExploreMem "node1" mem1 $
+              setScope @ExploreMem "node2" mem2 $
+                emptyMemoryStore
+          defaultMem = ExploreMem {urlsVisited = [], searchCount = 0}
           -- Read from node1
           (result1, _) = run $ runMemoryScoped "node1" defaultMem store (getMem @ExploreMem)
           -- Read from node2
@@ -163,9 +161,8 @@ spec = do
       result2 `shouldBe` mem2
 
   describe "MemorySnapshot JSON format" $ do
-
     it "produces expected JSON structure" $ do
-      let mem = ExploreMem { urlsVisited = ["url1"], searchCount = 5 }
+      let mem = ExploreMem {urlsVisited = ["url1"], searchCount = 5}
           store = setScope @ExploreMem "explore" mem emptyMemoryStore
           json = serializeMemoryStore store
 
@@ -180,7 +177,7 @@ spec = do
         _ -> expectationFailure "Expected object at top level"
 
     it "can be encoded/decoded as ByteString" $ do
-      let mem = ExploreMem { urlsVisited = ["test"], searchCount = 42 }
+      let mem = ExploreMem {urlsVisited = ["test"], searchCount = 42}
           store = setScope @ExploreMem "mynode" mem emptyMemoryStore
           json = serializeMemoryStore store
           bs = encode json

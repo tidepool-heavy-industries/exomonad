@@ -1,12 +1,12 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE AllowAmbiguousTypes #-}
 
 -- | Schema mode for Role Tools.
 --
@@ -14,33 +14,34 @@
 -- reify a tool record into a list of 'MCPToolInfo'.
 module ExoMonad.Control.Role.Schema
   ( -- * Schema Mode
-    AsSchema
-  , SchemaBuilder(..)
-  
+    AsSchema,
+    SchemaBuilder (..),
+
     -- * Reification
-  , reifyTools
-  , GReifyTools(..)
-  , camelToSnake
+    reifyTools,
+    GReifyTools (..),
+    camelToSnake,
+
     -- * Construction
-  , toolSchema
-  , hookSchema
-  , ConstructSchema(..)
-  ) where
+    toolSchema,
+    hookSchema,
+    ConstructSchema (..),
+  )
+where
 
-import Data.Aeson (Value(..))
+import Data.Aeson (Value (..))
+import Data.Char (isLower, isUpper, toLower)
 import Data.Kind (Type)
-import Data.Proxy (Proxy(..))
-import Data.Text (Text)
-import qualified Data.Text as T
-import GHC.Generics
-import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
-import Data.Char (isUpper, isLower, toLower)
 import Data.Maybe (fromMaybe)
-
-import ExoMonad.Graph.Generic (GraphMode(..), type (:-), type (:@))
-import ExoMonad.Graph.Types (Tool, Hook, Description)
-import ExoMonad.Graph.MCPReify (MCPToolInfo(..))
-import ExoMonad.Schema (HasJSONSchema(..), schemaToValue, jsonSchema)
+import Data.Proxy (Proxy (..))
+import Data.Text (Text)
+import Data.Text qualified as T
+import ExoMonad.Graph.Generic (GraphMode (..), type (:-), type (:@))
+import ExoMonad.Graph.MCPReify (MCPToolInfo (..))
+import ExoMonad.Graph.Types (Description, Hook, Tool)
+import ExoMonad.Schema (HasJSONSchema (..), jsonSchema, schemaToValue)
+import GHC.Generics
+import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SCHEMA MODE
@@ -51,15 +52,15 @@ data AsSchema
 
 -- | Value held in fields during schema construction.
 data SchemaBuilder = SchemaBuilder
-  { sbDescription :: Maybe Text
-  , sbInputSchema :: Value
+  { sbDescription :: Maybe Text,
+    sbInputSchema :: Value
   }
 
 instance GraphMode AsSchema where
   type AsSchema :- nodeDef = SchemaNode nodeDef
 
 -- | Wrapper to preserve type info for inference.
-newtype SchemaNode nodeDef = SchemaNode { unSchemaNode :: SchemaBuilder }
+newtype SchemaNode nodeDef = SchemaNode {unSchemaNode :: SchemaBuilder}
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- REIFICATION
@@ -76,10 +77,10 @@ class GReifyTools f where
   gReifyTools :: f p -> [MCPToolInfo]
 
 -- Unwrap metadata
-instance GReifyTools f => GReifyTools (M1 D c f) where
+instance (GReifyTools f) => GReifyTools (M1 D c f) where
   gReifyTools (M1 x) = gReifyTools x
 
-instance GReifyTools f => GReifyTools (M1 C c f) where
+instance (GReifyTools f) => GReifyTools (M1 C c f) where
   gReifyTools (M1 x) = gReifyTools x
 
 -- Product: concatenate lists
@@ -98,11 +99,11 @@ class ReifyField a where
 instance {-# OVERLAPPING #-} ReifyField (SchemaNode nodeDef) where
   reifyField name (SchemaNode builder) =
     [ MCPToolInfo
-        { mtdName = camelToSnake name
-        , mtdDescription = fromMaybe "" builder.sbDescription
-        , mtdInputSchema = builder.sbInputSchema
-        , mtdEntryName = camelToSnake name -- Same as name for now
-        , mtdRoles = [] -- To be filled by role context if needed
+        { mtdName = camelToSnake name,
+          mtdDescription = fromMaybe "" builder.sbDescription,
+          mtdInputSchema = builder.sbInputSchema,
+          mtdEntryName = camelToSnake name, -- Same as name for now
+          mtdRoles = [] -- To be filled by role context if needed
         }
     ]
 
@@ -116,14 +117,14 @@ camelToSnake :: Text -> Text
 camelToSnake = T.pack . go . T.unpack
   where
     go [] = []
-    go (c:cs) = toLower c : go' c cs
-    
+    go (c : cs) = toLower c : go' c cs
+
     go' _ [] = []
-    go' prev (c:cs)
+    go' prev (c : cs)
       | isUpper c =
           if isLower prev || (isUpper prev && (not (null cs) && isLower (head cs)))
-          then '_' : toLower c : go' c cs
-          else toLower c : go' c cs
+            then '_' : toLower c : go' c cs
+            else toLower c : go' c cs
       | otherwise = c : go' c cs
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -138,30 +139,33 @@ class ConstructSchema nodeDef where
   constructSchema :: SchemaNode nodeDef
 
 instance (HasJSONSchema input) => ConstructSchema (Tool input output) where
-  constructSchema = SchemaNode $ SchemaBuilder
-    { sbDescription = Nothing
-    , sbInputSchema = schemaToValue (jsonSchema @input)
-    }
+  constructSchema =
+    SchemaNode $
+      SchemaBuilder
+        { sbDescription = Nothing,
+          sbInputSchema = schemaToValue (jsonSchema @input)
+        }
 
 instance ConstructSchema (Hook input output) where
-  constructSchema = SchemaNode $ SchemaBuilder
-    { sbDescription = Nothing
-    , sbInputSchema = Null
-    }
+  constructSchema =
+    SchemaNode $
+      SchemaBuilder
+        { sbDescription = Nothing,
+          sbInputSchema = Null
+        }
 
 instance (KnownSymbol desc, ConstructSchema node) => ConstructSchema (node :@ Description desc) where
-  constructSchema = 
+  constructSchema =
     let SchemaNode base = constructSchema @node
-    in SchemaNode $ base { sbDescription = Just (T.pack $ symbolVal (Proxy @desc)) }
+     in SchemaNode $ base {sbDescription = Just (T.pack $ symbolVal (Proxy @desc))}
 
 -- | Value-level helper to construct the field value.
 --
 -- Usage:
 -- myTool = toolSchema
-toolSchema :: forall nodeDef. ConstructSchema nodeDef => SchemaNode nodeDef
+toolSchema :: forall nodeDef. (ConstructSchema nodeDef) => SchemaNode nodeDef
 toolSchema = constructSchema @nodeDef
 
 -- | Value-level helper to construct hook fields.
-hookSchema :: forall nodeDef. ConstructSchema nodeDef => SchemaNode nodeDef
+hookSchema :: forall nodeDef. (ConstructSchema nodeDef) => SchemaNode nodeDef
 hookSchema = constructSchema @nodeDef
-

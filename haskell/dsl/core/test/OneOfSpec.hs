@@ -12,9 +12,9 @@
 -- with To markers for injection. See InjectTargetSpec for those tests.
 module OneOfSpec (spec) where
 
-import Test.Hspec
 import ExoMonad.Graph.Goto (OneOf)
-import ExoMonad.Graph.Goto.Internal (OneOf(..))  -- For test assertions
+import ExoMonad.Graph.Goto.Internal (OneOf (..)) -- For test assertions
+import Test.Hspec
 
 spec :: Spec
 spec = do
@@ -22,7 +22,6 @@ spec = do
   -- DIRECT CONSTRUCTION
   -- ════════════════════════════════════════════════════════════════════════════
   describe "OneOf direct construction" $ do
-
     it "Here puts value at position 0 (head)" $ do
       let x :: OneOf '[Int, String, Bool] = Here 42
       case x of
@@ -52,7 +51,6 @@ spec = do
   -- PATTERN MATCHING
   -- ════════════════════════════════════════════════════════════════════════════
   describe "Pattern matching" $ do
-
     it "exhaustive match on three-element OneOf" $ do
       let check :: OneOf '[Int, String, Bool] -> String
           check (Here n) = "Int: " ++ show n
@@ -81,19 +79,18 @@ spec = do
   -- TYPE SAFETY
   -- ════════════════════════════════════════════════════════════════════════════
   describe "Type safety" $ do
-
     it "different types at same position are distinguished" $ do
       -- Even though both are "first element", they have different types
       let intList :: OneOf '[Int] = Here 42
           strList :: OneOf '[String] = Here "hello"
 
-      case intList of { Here n -> n `shouldBe` 42 }
-      case strList of { Here s -> s `shouldBe` "hello" }
+      case intList of Here n -> n `shouldBe` 42
+      case strList of Here s -> s `shouldBe` "hello"
 
     it "same value, different list positions" $ do
       -- Int at position 0 vs position 1
       let pos0 :: OneOf '[Int, String] = Here 42
           pos1 :: OneOf '[String, Int] = There (Here 42)
 
-      case pos0 of { Here n -> n `shouldBe` 42; _ -> expectationFailure "wrong" }
-      case pos1 of { There (Here n) -> n `shouldBe` 42; _ -> expectationFailure "wrong" }
+      case pos0 of Here n -> n `shouldBe` 42; _ -> expectationFailure "wrong"
+      case pos1 of There (Here n) -> n `shouldBe` 42; _ -> expectationFailure "wrong"

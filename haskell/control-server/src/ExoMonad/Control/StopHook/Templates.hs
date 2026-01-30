@@ -2,15 +2,15 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module ExoMonad.Control.StopHook.Templates
-  ( renderStopHookTemplate
-  ) where
+  ( renderStopHookTemplate,
+  )
+where
 
 import Data.Text (Text)
-import qualified Data.Text as T
-import Text.Parsec.Pos (SourcePos)
-
-import ExoMonad.Graph.Template (TypedTemplate, typedTemplateFile, runTypedTemplate)
+import Data.Text qualified as T
 import ExoMonad.Control.StopHook.Types (StopHookContext, TemplateName)
+import ExoMonad.Graph.Template (TypedTemplate, runTypedTemplate, typedTemplateFile)
+import Text.Parsec.Pos (SourcePos)
 
 -- Compile all templates against the unified StopHookContext
 -- This ensures that all templates are valid with respect to the context at compile time.

@@ -1,11 +1,13 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
-module ExoMonad.Role
-  ( Role(..)
-  ) where
 
-import Data.Aeson (ToJSON(..), FromJSON(..), Value(..), withText)
-import qualified Data.Text as T
+module ExoMonad.Role
+  ( Role (..),
+  )
+where
+
+import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), withText)
+import Data.Text qualified as T
 import GHC.Generics (Generic)
 
 -- | Agent role for access control and orchestration.

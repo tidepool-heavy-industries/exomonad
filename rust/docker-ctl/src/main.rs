@@ -23,24 +23,24 @@ enum Commands {
 
         /// Container ID or name
         container: Option<String>,
-        
+
         /// Working directory inside the container
         #[arg(long)]
         workdir: Option<String>,
-        
+
         /// User to run the command as
         #[arg(long)]
         user: Option<String>,
-        
+
         /// Environment variables (KEY=VALUE)
         #[arg(short = 'e', long)]
         env: Vec<String>,
-        
+
         /// Command and arguments to execute
         #[arg(last = true)]
         cmd: Vec<String>,
     },
-    
+
     /// Spawn a new container
     Spawn {
         /// Issue ID for the container
@@ -75,17 +75,17 @@ enum Commands {
         #[arg(last = true)]
         cmd: Vec<String>,
     },
-    
+
     /// Stop and remove a container
     Stop {
         /// Container ID or name
         container: String,
-        
+
         /// Timeout in seconds
         #[arg(long, default_value = "10")]
         timeout: u64,
     },
-    
+
     /// Get container status
     Status {
         /// Container ID or name
@@ -101,22 +101,42 @@ struct ErrorResponse {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
-    
+
     let result = match cli.command {
-        Commands::Exec { container, local, workdir, user, env, cmd } => {
-            commands::exec::run(container, local, workdir, user, env, cmd).await
+        Commands::Exec {
+            container,
+            local,
+            workdir,
+            user,
+            env,
+            cmd,
+        } => commands::exec::run(container, local, workdir, user, env, cmd).await,
+        Commands::Spawn {
+            issue_id,
+            worktree_path,
+            backend,
+            uid,
+            gid,
+            expires_at,
+            env,
+            cmd,
+        } => {
+            commands::spawn::run(
+                issue_id,
+                worktree_path,
+                backend,
+                uid,
+                gid,
+                expires_at,
+                env,
+                cmd,
+            )
+            .await
         }
-        Commands::Spawn { issue_id, worktree_path, backend, uid, gid, expires_at, env, cmd } => {
-            commands::spawn::run(issue_id, worktree_path, backend, uid, gid, expires_at, env, cmd).await
-        }
-        Commands::Stop { container, timeout } => {
-            commands::stop::run(container, timeout).await
-        }
-        Commands::Status { container } => {
-            commands::status::run(container).await
-        }
+        Commands::Stop { container, timeout } => commands::stop::run(container, timeout).await,
+        Commands::Status { container } => commands::status::run(container).await,
     };
-    
+
     match result {
         Ok(output) => {
             println!("{}", output);
@@ -124,7 +144,8 @@ async fn main() {
         Err(e) => {
             let err_json = serde_json::to_string(&ErrorResponse {
                 error: e.to_string(),
-            }).unwrap();
+            })
+            .unwrap();
             eprintln!("{}", err_json);
             process::exit(1);
         }

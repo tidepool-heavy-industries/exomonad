@@ -11,6 +11,9 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
+-- \$(deriveAllFFIExports ''GraphRegistry)
+-- @
+
 -- | Graph registry and FFI typeclass definitions.
 --
 -- This module provides the infrastructure for registering graphs that can be
@@ -37,26 +40,24 @@
 -- Then in Ffi.hs, use the TH splice:
 --
 -- @
--- $(deriveAllFFIExports ''GraphRegistry)
--- @
 module ExoMonad.Generated.Registry
   ( -- * Metadata Typeclass
-    GraphMeta(..)
+    GraphMeta (..),
 
     -- * Type-Level Registry Helpers
-  , AllGraphMeta
-  , GraphIds
-  , ReifyGraphIds(..)
+    AllGraphMeta,
+    GraphIds,
+    ReifyGraphIds (..),
 
     -- * Effect Detection
-  , GraphEffects(..)
-  ) where
+    GraphEffects (..),
+  )
+where
 
-import Data.Kind (Type, Constraint)
-import Data.Proxy (Proxy(..))
+import Data.Kind (Constraint, Type)
+import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import GHC.TypeLits (Symbol)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- METADATA TYPECLASS
@@ -82,7 +83,6 @@ class GraphMeta (g :: Type -> Type) where
   --
   -- This should be the payload type, not @GotoChoice '[To Exit T]@.
   type GraphExit g :: Type
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE-LEVEL REGISTRY HELPERS
@@ -118,7 +118,6 @@ instance ReifyGraphIds '[] where
 instance (GraphMeta g, ReifyGraphIds gs) => ReifyGraphIds (g ': gs) where
   reifyGraphIds _ = graphId (Proxy @g) : reifyGraphIds (Proxy @gs)
 
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT DETECTION
 -- ════════════════════════════════════════════════════════════════════════════
@@ -132,6 +131,5 @@ class GraphEffects (g :: Type -> Type) where
   --
   -- Example: @["Log", "LlmComplete", "Habitica"]@
   graphEffects :: Proxy g -> [Text]
-
   -- Default: empty list (no special effects beyond Log)
   graphEffects _ = []

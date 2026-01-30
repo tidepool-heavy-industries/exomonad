@@ -25,26 +25,25 @@
 -- - Cross-container access with ZELLIJ_SESSION_NAME set and shared XDG_RUNTIME_DIR
 module ExoMonad.Zellij.Interpreter
   ( -- * Interpreter
-    runZellijIO
-  ) where
+    runZellijIO,
+  )
+where
 
-import Control.Exception (try, SomeException)
+import Control.Exception (SomeException, try)
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
+import ExoMonad.Effects.Zellij
+  ( LayoutSpec (..),
+    TabConfig (..),
+    TabId (..),
+    Zellij (..),
+    ZellijError (..),
+  )
 import System.Directory (doesFileExist)
 import System.Environment (lookupEnv)
-import System.Exit (ExitCode(..))
+import System.Exit (ExitCode (..))
 import System.Process (readProcessWithExitCode)
-
-import ExoMonad.Effects.Zellij
-  ( Zellij(..)
-  , TabConfig(..)
-  , TabId(..)
-  , LayoutSpec(..)
-  , ZellijError(..)
-  )
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- INTERPRETER
@@ -53,13 +52,12 @@ import ExoMonad.Effects.Zellij
 -- | Run Zellij effects using zellij CLI commands.
 --
 -- All operations are wrapped in try/catch to return explicit errors.
-runZellijIO :: LastMember IO effs => Eff (Zellij ': effs) a -> Eff effs a
+runZellijIO :: (LastMember IO effs) => Eff (Zellij ': effs) a -> Eff effs a
 runZellijIO = interpret $ \case
   CheckZellijEnv -> sendM checkZellijEnvIO
   NewTab config -> sendM $ newTabIO config
   GoToTab tabId -> sendM $ goToTabIO tabId
   GenerateLayout spec -> sendM $ generateLayoutIO spec
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- IMPLEMENTATION
@@ -94,12 +92,13 @@ checkZellijEnvIO = do
 newTabIO :: TabConfig -> IO (Either ZellijError TabId)
 newTabIO config = do
   -- Check if layout file exists (only if layout is specified)
-  layoutExists <- if null config.tcLayout
-                    then pure True
-                    else doesFileExist config.tcLayout
+  layoutExists <-
+    if null config.tcLayout
+      then pure True
+      else doesFileExist config.tcLayout
 
   if not layoutExists
-    then pure $ Left ZellijLayoutNotFound { zlnfPath = config.tcLayout }
+    then pure $ Left ZellijLayoutNotFound {zlnfPath = config.tcLayout}
     else do
       result <- try @SomeException $ do
         -- Check if we need cross-container session targeting
@@ -112,29 +111,40 @@ newTabIO config = do
         let args = case (null config.tcLayout, config.tcCommand) of
               -- Has layout: use new-tab with layout
               (False, _) ->
-                sessionPrefix ++
-                [ "action", "new-tab"
-                , "--cwd", config.tcCwd
-                , "--name", T.unpack config.tcName
-                , "--layout", config.tcLayout
-                ]
-
+                sessionPrefix
+                  ++ [ "action",
+                       "new-tab",
+                       "--cwd",
+                       config.tcCwd,
+                       "--name",
+                       T.unpack config.tcName,
+                       "--layout",
+                       config.tcLayout
+                     ]
               -- Has command, no layout: use new-pane with command
               (True, Just cmd) ->
-                sessionPrefix ++
-                [ "action", "new-pane"
-                , "--cwd", config.tcCwd
-                , "--name", T.unpack config.tcName
-                , "--", "bash", "-c", T.unpack cmd
-                ]
-
+                sessionPrefix
+                  ++ [ "action",
+                       "new-pane",
+                       "--cwd",
+                       config.tcCwd,
+                       "--name",
+                       T.unpack config.tcName,
+                       "--",
+                       "bash",
+                       "-c",
+                       T.unpack cmd
+                     ]
               -- No layout, no command: simple new-tab
               (True, Nothing) ->
-                sessionPrefix ++
-                [ "action", "new-tab"
-                , "--cwd", config.tcCwd
-                , "--name", T.unpack config.tcName
-                ]
+                sessionPrefix
+                  ++ [ "action",
+                       "new-tab",
+                       "--cwd",
+                       config.tcCwd,
+                       "--name",
+                       T.unpack config.tcName
+                     ]
 
         -- If we have environment variables, we need to set them
         -- We do this by using env -S for the current process
@@ -147,19 +157,25 @@ newTabIO config = do
             readProcessWithExitCode "env" (envArgs ++ ["zellij"] ++ args) ""
 
       case result of
-        Left e -> pure $ Left ZellijCommandFailed
-          { zceCommand = "new-tab/new-pane"
-          , zceExitCode = -1
-          , zceStderr = T.pack (show e)
-          }
+        Left e ->
+          pure $
+            Left
+              ZellijCommandFailed
+                { zceCommand = "new-tab/new-pane",
+                  zceExitCode = -1,
+                  zceStderr = T.pack (show e)
+                }
         Right (exitCode, _stdout, stderr) ->
           case exitCode of
             ExitSuccess -> pure $ Right $ TabId config.tcName
-            ExitFailure code -> pure $ Left ZellijCommandFailed
-              { zceCommand = "new-tab/new-pane"
-              , zceExitCode = code
-              , zceStderr = T.pack stderr
-              }
+            ExitFailure code ->
+              pure $
+                Left
+                  ZellijCommandFailed
+                    { zceCommand = "new-tab/new-pane",
+                      zceExitCode = code,
+                      zceStderr = T.pack stderr
+                    }
 
 -- | Switch focus to a tab by name.
 --
@@ -175,19 +191,25 @@ goToTabIO (TabId tabName) = do
     readProcessWithExitCode "zellij" args ""
 
   case result of
-    Left e -> pure $ Left ZellijCommandFailed
-      { zceCommand = "go-to-tab-name"
-      , zceExitCode = -1
-      , zceStderr = T.pack (show e)
-      }
+    Left e ->
+      pure $
+        Left
+          ZellijCommandFailed
+            { zceCommand = "go-to-tab-name",
+              zceExitCode = -1,
+              zceStderr = T.pack (show e)
+            }
     Right (exitCode, _stdout, stderr) ->
       case exitCode of
         ExitSuccess -> pure $ Right ()
-        ExitFailure code -> pure $ Left ZellijCommandFailed
-          { zceCommand = "go-to-tab-name"
-          , zceExitCode = code
-          , zceStderr = T.pack stderr
-          }
+        ExitFailure code ->
+          pure $
+            Left
+              ZellijCommandFailed
+                { zceCommand = "go-to-tab-name",
+                  zceExitCode = code,
+                  zceStderr = T.pack stderr
+                }
 
 -- | Get session prefix args for cross-container access.
 --
@@ -197,13 +219,13 @@ getSessionPrefix :: IO [String]
 getSessionPrefix = do
   zellijEnv <- lookupEnv "ZELLIJ"
   case zellijEnv of
-    Just _ -> pure []  -- Inside Zellij pane, no prefix needed
+    Just _ -> pure [] -- Inside Zellij pane, no prefix needed
     Nothing -> do
       -- Check for cross-container session name
       sessionName <- lookupEnv "ZELLIJ_SESSION_NAME"
       pure $ case sessionName of
         Just name -> ["--session", name]
-        Nothing -> []  -- No session configured
+        Nothing -> [] -- No session configured
 
 -- | Generate a Zellij layout file via zellij-gen.
 --
@@ -221,19 +243,25 @@ generateLayoutIO spec = do
   result <- try @SomeException $ readProcessWithExitCode "zellij-gen" args ""
 
   case result of
-    Left e -> pure $ Left ZellijCommandFailed
-      { zceCommand = "zellij-gen"
-      , zceExitCode = -1
-      , zceStderr = T.pack (show e)
-      }
+    Left e ->
+      pure $
+        Left
+          ZellijCommandFailed
+            { zceCommand = "zellij-gen",
+              zceExitCode = -1,
+              zceStderr = T.pack (show e)
+            }
     Right (exitCode, stdout, stderr) ->
       case exitCode of
         ExitSuccess ->
           -- zellij-gen prints the path to stdout
           let layoutPath = filter (/= '\n') stdout
-          in pure $ Right layoutPath
-        ExitFailure code -> pure $ Left ZellijCommandFailed
-          { zceCommand = "zellij-gen"
-          , zceExitCode = code
-          , zceStderr = T.pack stderr
-          }
+           in pure $ Right layoutPath
+        ExitFailure code ->
+          pure $
+            Left
+              ZellijCommandFailed
+                { zceCommand = "zellij-gen",
+                  zceExitCode = code,
+                  zceStderr = T.pack stderr
+                }

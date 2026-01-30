@@ -13,23 +13,23 @@
 --   Add a field like: exit :: mode :- Exit YourOutputType
 module MissingExitRecord where
 
+import ExoMonad.Graph.Generic (Entry, GraphMode (..), LLMNode, ValidGraphRecord)
+import ExoMonad.Graph.Types (Input, LLMKind (..), Schema, type (:@))
 import GHC.Generics (Generic)
 
-import ExoMonad.Graph.Types (type (:@), Input, Schema, LLMKind(..))
-import ExoMonad.Graph.Generic (GraphMode(..), Entry, LLMNode, ValidGraphRecord)
-
 data A
+
 data B
 
 -- | Graph missing Exit field - invalid!
 data BadGraph mode = BadGraph
-  { entry :: mode :- Entry A
-  , node  :: mode :- LLMNode 'API :@ Input A :@ Schema B
+  { entry :: mode :- Entry A,
+    node :: mode :- LLMNode 'API :@ Input A :@ Schema B
   }
-  deriving Generic
+  deriving (Generic)
 
 check :: ()
 check = validGraph @BadGraph
 
-validGraph :: forall g. ValidGraphRecord g => ()
+validGraph :: forall g. (ValidGraphRecord g) => ()
 validGraph = ()

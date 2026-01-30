@@ -1,3 +1,7 @@
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE UndecidableInstances #-}
+
 -- | Zellij effect for terminal multiplexer operations.
 --
 -- Effect type only - interpreter lives in exomonad-zellij-interpreter.
@@ -27,35 +31,31 @@
 --
 -- The Zellij effect requires running inside a Zellij session.
 -- Use 'checkZellijEnv' to verify this before attempting tab operations.
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE UndecidableInstances #-}
-
 module ExoMonad.Effects.Zellij
   ( -- * Effect
-    Zellij(..)
+    Zellij (..),
 
     -- * Smart Constructors
-  , checkZellijEnv
-  , newTab
-  , goToTab
-  , generateLayout
+    checkZellijEnv,
+    newTab,
+    goToTab,
+    generateLayout,
 
     -- * Configuration Types
-  , TabConfig(..)
-  , TabId(..)
-  , LayoutSpec(..)
+    TabConfig (..),
+    TabId (..),
+    LayoutSpec (..),
 
     -- * Error Types
-  , ZellijError(..)
-  ) where
+    ZellijError (..),
+  )
+where
 
 import Control.Monad.Freer (Eff, Member, send)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.String (IsString)
 import Data.Text (Text)
 import GHC.Generics (Generic)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES
@@ -64,44 +64,45 @@ import GHC.Generics (Generic)
 -- | Opaque identifier for a Zellij tab.
 --
 -- This is typically the tab name as specified in 'tcName'.
-newtype TabId = TabId { unTabId :: Text }
+newtype TabId = TabId {unTabId :: Text}
   deriving stock (Eq, Ord, Show)
   deriving newtype (IsString, ToJSON, FromJSON)
 
 -- | Configuration for creating a new Zellij tab.
 data TabConfig = TabConfig
-  { tcName :: Text
-    -- ^ Tab name (displayed in Zellij tab bar)
-  , tcLayout :: FilePath
-    -- ^ Path to Zellij layout file (.kdl)
-  , tcCwd :: FilePath
-    -- ^ Working directory for the tab
-  , tcEnv :: [(Text, Text)]
-    -- ^ Environment variables to set (e.g., SUBAGENT_CMD)
-  , tcCommand :: Maybe Text
-    -- ^ Optional command to run in the new tab (mutually exclusive with tcLayout in some interpreters)
+  { -- | Tab name (displayed in Zellij tab bar)
+    tcName :: Text,
+    -- | Path to Zellij layout file (.kdl)
+    tcLayout :: FilePath,
+    -- | Working directory for the tab
+    tcCwd :: FilePath,
+    -- | Environment variables to set (e.g., SUBAGENT_CMD)
+    tcEnv :: [(Text, Text)],
+    -- | Optional command to run in the new tab (mutually exclusive with tcLayout in some interpreters)
+    tcCommand :: Maybe Text
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON TabConfig
+
 instance FromJSON TabConfig
 
 -- | Specification for generating a Zellij layout via zellij-gen.
 data LayoutSpec
-  = MainLayout
-    -- ^ Generate main layout (TL/PM/Infrastructure tabs)
+  = -- | Generate main layout (TL/PM/Infrastructure tabs)
+    MainLayout
   | SubagentLayout
-      { lsIssueId :: Text
-        -- ^ Issue ID (e.g., "346")
-      , lsContainerId :: Text
-        -- ^ Container ID (e.g., "exomonad-agent-346")
+      { -- | Issue ID (e.g., "346")
+        lsIssueId :: Text,
+        -- | Container ID (e.g., "exomonad-agent-346")
+        lsContainerId :: Text
       }
-    -- ^ Generate subagent layout with docker attach command baked in
+  -- \^ Generate subagent layout with docker attach command baked in
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON LayoutSpec
-instance FromJSON LayoutSpec
 
+instance FromJSON LayoutSpec
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ERRORS
@@ -109,27 +110,27 @@ instance FromJSON LayoutSpec
 
 -- | Errors that can occur during Zellij operations.
 data ZellijError
-  = ZellijNotRunning
-    -- ^ Not running inside a Zellij session ($ZELLIJ not set)
+  = -- | Not running inside a Zellij session ($ZELLIJ not set)
+    ZellijNotRunning
   | ZellijCommandFailed
-      { zceCommand :: Text
-        -- ^ Zellij command that failed
-      , zceExitCode :: Int
-        -- ^ Exit code from zellij
-      , zceStderr :: Text
-        -- ^ Stderr output
+      { -- | Zellij command that failed
+        zceCommand :: Text,
+        -- | Exit code from zellij
+        zceExitCode :: Int,
+        -- | Stderr output
+        zceStderr :: Text
       }
-    -- ^ Zellij command returned non-zero exit code
-  | ZellijLayoutNotFound
-      { zlnfPath :: FilePath
-        -- ^ Layout file path that wasn't found
+  | -- \^ Zellij command returned non-zero exit code
+    ZellijLayoutNotFound
+      { -- | Layout file path that wasn't found
+        zlnfPath :: FilePath
       }
-    -- ^ Layout file does not exist
+  -- \^ Layout file does not exist
   deriving stock (Eq, Show, Generic)
 
 instance ToJSON ZellijError
-instance FromJSON ZellijError
 
+instance FromJSON ZellijError
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT
@@ -141,28 +142,24 @@ instance FromJSON ZellijError
 data Zellij r where
   -- | Check if we're running inside a Zellij session.
   -- Returns the $ZELLIJ environment variable value if set.
-  CheckZellijEnv
-    :: Zellij (Maybe Text)
-
+  CheckZellijEnv ::
+    Zellij (Maybe Text)
   -- | Create a new tab with the specified configuration.
   -- Returns the TabId on success, or an error if tab creation failed.
-  NewTab
-    :: TabConfig
-    -> Zellij (Either ZellijError TabId)
-
+  NewTab ::
+    TabConfig ->
+    Zellij (Either ZellijError TabId)
   -- | Switch focus to a tab by name.
   -- Returns success or error if tab doesn't exist or command failed.
-  GoToTab
-    :: TabId
-    -> Zellij (Either ZellijError ())
-
+  GoToTab ::
+    TabId ->
+    Zellij (Either ZellijError ())
   -- | Generate a Zellij layout file via zellij-gen.
   -- Returns the path to the generated layout file on success.
   -- This bakes commands into the layout as literals (env vars don't propagate to panes).
-  GenerateLayout
-    :: LayoutSpec
-    -> Zellij (Either ZellijError FilePath)
-
+  GenerateLayout ::
+    LayoutSpec ->
+    Zellij (Either ZellijError FilePath)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SMART CONSTRUCTORS
@@ -179,9 +176,9 @@ data Zellij r where
 --   Nothing -> error "Must run inside Zellij"
 --   Just _ -> proceed
 -- @
-checkZellijEnv
-  :: Member Zellij effs
-  => Eff effs (Maybe Text)
+checkZellijEnv ::
+  (Member Zellij effs) =>
+  Eff effs (Maybe Text)
 checkZellijEnv = send CheckZellijEnv
 
 -- | Create a new Zellij tab with the specified configuration.
@@ -200,10 +197,10 @@ checkZellijEnv = send CheckZellijEnv
 --   Right tabId -> -- tab created successfully
 --   Left err -> handleError err
 -- @
-newTab
-  :: Member Zellij effs
-  => TabConfig
-  -> Eff effs (Either ZellijError TabId)
+newTab ::
+  (Member Zellij effs) =>
+  TabConfig ->
+  Eff effs (Either ZellijError TabId)
 newTab = send . NewTab
 
 -- | Switch focus to a tab by name.
@@ -217,10 +214,10 @@ newTab = send . NewTab
 --   Right () -> -- focus switched successfully
 --   Left err -> handleError err
 -- @
-goToTab
-  :: Member Zellij effs
-  => TabId
-  -> Eff effs (Either ZellijError ())
+goToTab ::
+  (Member Zellij effs) =>
+  TabId ->
+  Eff effs (Either ZellijError ())
 goToTab = send . GoToTab
 
 -- | Generate a Zellij layout file via zellij-gen.
@@ -235,8 +232,8 @@ goToTab = send . GoToTab
 --   Right layoutPath -> -- use layoutPath in newTab
 --   Left err -> handleError err
 -- @
-generateLayout
-  :: Member Zellij effs
-  => LayoutSpec
-  -> Eff effs (Either ZellijError FilePath)
+generateLayout ::
+  (Member Zellij effs) =>
+  LayoutSpec ->
+  Eff effs (Either ZellijError FilePath)
 generateLayout = send . GenerateLayout

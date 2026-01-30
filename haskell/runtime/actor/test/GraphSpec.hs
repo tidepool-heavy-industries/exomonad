@@ -9,25 +9,23 @@
 
 module GraphSpec (spec) where
 
-import Test.Hspec
-import Data.Aeson (ToJSON(..), FromJSON(..), Result(..), Value)
-import qualified Data.Aeson as Aeson
+import Data.Aeson (FromJSON (..), Result (..), ToJSON (..), Value)
+import Data.Aeson qualified as Aeson
+import Data.IORef (atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
+import Data.Map.Strict qualified as Map
 import Data.Text (Text)
-import qualified Data.Text as T
-import GHC.Generics (Generic)
-
+import Data.Text qualified as T
 import ExoMonad.Actor.Graph
-import Data.IORef (newIORef, readIORef, writeIORef, atomicModifyIORef')
-
+import GHC.Generics (Generic)
+import Test.Hspec
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TEST TYPES
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Simple input message
-data Message = Message { content :: Text }
+data Message = Message {content :: Text}
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
@@ -37,10 +35,9 @@ data Intent = ProcessIntent | DoneIntent
   deriving anyclass (ToJSON, FromJSON)
 
 -- | Final response
-data Response = Response { reply :: Text }
+data Response = Response {reply :: Text}
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON, FromJSON)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TESTS
@@ -48,9 +45,7 @@ data Response = Response { reply :: Text }
 
 spec :: Spec
 spec = describe "Graph Execution" $ do
-
   describe "ExtractChoice" $ do
-
     it "extracts named target" $ do
       let choice :: GotoChoice '[To "process" Message]
           choice = gotoChoice @"process" (Message "hello")
@@ -79,9 +74,7 @@ spec = describe "Graph Execution" $ do
           (target3, _) = extractChoice choice3
       target3 `shouldBe` "exit"
 
-
   describe "wrapPureHandler" $ do
-
     it "wraps pure handler and routes correctly" $ do
       -- Track what gets routed
       routedRef <- newIORef Nothing
@@ -96,15 +89,14 @@ spec = describe "Graph Execution" $ do
       result <- readIORef routedRef
       fst <$> result `shouldBe` Just "exit"
 
-
   describe "runGraphAsActors" $ do
-
     it "runs single-node graph" $ do
       -- Simplest graph: entry immediately exits
       let handlers :: Map Text HandlerBuilder
-          handlers = Map.fromList
-            [ ("entry", pureHandler entryHandler)
-            ]
+          handlers =
+            Map.fromList
+              [ ("entry", pureHandler entryHandler)
+              ]
 
           entryHandler :: Message -> GotoChoice '[To Exit Response]
           entryHandler msg = gotoExit (Response $ "echo: " <> msg.content)
@@ -115,10 +107,11 @@ spec = describe "Graph Execution" $ do
     it "runs two-node pipeline" $ do
       -- Entry -> Process -> Exit
       let handlers :: Map Text HandlerBuilder
-          handlers = Map.fromList
-            [ ("entry", pureHandler entryHandler)
-            , ("process", pureHandler processHandler)
-            ]
+          handlers =
+            Map.fromList
+              [ ("entry", pureHandler entryHandler),
+                ("process", pureHandler processHandler)
+              ]
 
           entryHandler :: Message -> GotoChoice '[To "process" Message]
           entryHandler msg = gotoChoice @"process" msg
@@ -132,12 +125,13 @@ spec = describe "Graph Execution" $ do
     it "runs multi-branch graph" $ do
       -- Entry -> Route (based on content) -> A or B -> Exit
       let handlers :: Map Text HandlerBuilder
-          handlers = Map.fromList
-            [ ("entry", pureHandler entryHandler)
-            , ("route", pureHandler routeHandler)
-            , ("branchA", pureHandler branchAHandler)
-            , ("branchB", pureHandler branchBHandler)
-            ]
+          handlers =
+            Map.fromList
+              [ ("entry", pureHandler entryHandler),
+                ("route", pureHandler routeHandler),
+                ("branchA", pureHandler branchAHandler),
+                ("branchB", pureHandler branchBHandler)
+              ]
 
           entryHandler :: Message -> GotoChoice '[To "route" Message]
           entryHandler msg = gotoChoice @"route" msg
@@ -162,9 +156,10 @@ spec = describe "Graph Execution" $ do
     it "handles effectful handlers with per-actor memory" $ do
       -- Each actor gets its own counter that persists across calls
       let handlers :: Map Text HandlerBuilder
-          handlers = Map.fromList
-            [ ("entry", effHandlerWithMem (0 :: Int) entryHandler)
-            ]
+          handlers =
+            Map.fromList
+              [ ("entry", effHandlerWithMem (0 :: Int) entryHandler)
+              ]
 
           entryHandler :: Message -> Eff '[Memory Int, IO] (GotoChoice '[To Exit Int])
           entryHandler _ = do
@@ -178,28 +173,26 @@ spec = describe "Graph Execution" $ do
     it "each actor has isolated memory" $ do
       -- Two actors, each with their own counter (different types even!)
       let handlers :: Map Text HandlerBuilder
-          handlers = Map.fromList
-            [ ("entry", effHandlerWithMem (0 :: Int) entryHandler)
-            , ("process", effHandlerWithMem (0 :: Int) processHandler)
-            ]
+          handlers =
+            Map.fromList
+              [ ("entry", effHandlerWithMem (0 :: Int) entryHandler),
+                ("process", effHandlerWithMem (0 :: Int) processHandler)
+              ]
 
           entryHandler :: Message -> Eff '[Memory Int, IO] (GotoChoice '[To "process" Message])
           entryHandler msg = do
-            updateMem @Int (+ 100)  -- Entry adds 100
+            updateMem @Int (+ 100) -- Entry adds 100
             pure $ gotoChoice @"process" msg
 
           processHandler :: Message -> Eff '[Memory Int, IO] (GotoChoice '[To Exit Int])
           processHandler _ = do
-            updateMem @Int (+ 1)  -- Process adds 1
-            count <- getMem @Int  -- Should be 1, not 101
+            updateMem @Int (+ 1) -- Process adds 1
+            count <- getMem @Int -- Should be 1, not 101
             pure $ gotoExit count
 
       result <- runGraphAsActors handlers (toJSON (Message "hello"))
-      result `shouldBe` (1 :: Int)  -- Process has its own memory starting at 0
-
-
+      result `shouldBe` (1 :: Int) -- Process has its own memory starting at 0
   describe "wrapEffHandler" $ do
-
     it "wraps effectful handler and routes correctly" $ do
       -- Track what gets routed
       routedRef <- newIORef Nothing
@@ -214,9 +207,7 @@ spec = describe "Graph Execution" $ do
       result <- readIORef routedRef
       fst <$> result `shouldBe` Just "exit"
 
-
   describe "Memory effect" $ do
-
     it "getMem reads initial state" $ do
       memRef <- newIORef (42 :: Int)
       let action :: Eff '[Memory Int, IO] Int
@@ -268,24 +259,23 @@ spec = describe "Graph Execution" $ do
       results <- readIORef resultsRef
       results `shouldBe` [1, 2, 3]
 
-
   describe "Integration: real task patterns" $ do
-
     it "batch processing: accumulates results across multiple items" $ do
       -- Simulate processing a batch of items, accumulating results
       -- Entry receives batch, sends items one by one to processor
       -- Processor accumulates in memory, exits when done
       let handlers :: Map Text HandlerBuilder
-          handlers = Map.fromList
-            [ ("entry", pureHandler entryHandler)
-            , ("processor", effHandlerWithMem ([] :: [Text]) processorHandler)
-            ]
+          handlers =
+            Map.fromList
+              [ ("entry", pureHandler entryHandler),
+                ("processor", effHandlerWithMem ([] :: [Text]) processorHandler)
+              ]
 
           -- Entry unpacks batch and sends first item
           entryHandler :: [Text] -> GotoChoice '[To "processor" (Text, [Text])]
           entryHandler items = case items of
             [] -> error "Empty batch"
-            (x:xs) -> gotoChoice @"processor" (x, xs)
+            (x : xs) -> gotoChoice @"processor" (x, xs)
 
           -- Processor: accumulate item, continue or exit
           processorHandler :: (Text, [Text]) -> Eff '[Memory [Text], IO] (GotoChoice '[To "processor" (Text, [Text]), To Exit [Text]])
@@ -294,7 +284,7 @@ spec = describe "Graph Execution" $ do
             accumulated <- getMem @[Text]
             case remaining of
               [] -> pure $ gotoExit accumulated
-              (next:rest) -> pure $ gotoChoice @"processor" (next, rest)
+              (next : rest) -> pure $ gotoChoice @"processor" (next, rest)
 
       result <- runGraphAsActors handlers (toJSON (["a", "b", "c"] :: [Text]))
       result `shouldBe` (["a-processed", "b-processed", "c-processed"] :: [Text])
@@ -303,10 +293,11 @@ spec = describe "Graph Execution" $ do
       -- Simulate a task that might fail, with retry count
       -- Uses Self-like pattern via explicit routing
       let handlers :: Map Text HandlerBuilder
-          handlers = Map.fromList
-            [ ("entry", pureHandler entryHandler)
-            , ("worker", effHandlerWithMem (0 :: Int) workerHandler)
-            ]
+          handlers =
+            Map.fromList
+              [ ("entry", pureHandler entryHandler),
+                ("worker", effHandlerWithMem (0 :: Int) workerHandler)
+              ]
 
           entryHandler :: Text -> GotoChoice '[To "worker" Text]
           entryHandler task = gotoChoice @"worker" task
@@ -318,8 +309,7 @@ spec = describe "Graph Execution" $ do
             attempt <- getMem @Int
             if attempt >= 3
               then pure $ gotoExit (task <> "-done", attempt)
-              else pure $ gotoChoice @"worker" task  -- retry
-
+              else pure $ gotoChoice @"worker" task -- retry
       result <- runGraphAsActors handlers (toJSON ("task" :: Text))
       result `shouldBe` (("task-done", 3) :: (Text, Int))
 
@@ -327,28 +317,28 @@ spec = describe "Graph Execution" $ do
       -- Three-stage pipeline, each stage has its own counter
       -- Proves memory isolation between actors
       let handlers :: Map Text HandlerBuilder
-          handlers = Map.fromList
-            [ ("entry", effHandlerWithMem (0 :: Int) entryHandler)
-            , ("stage1", effHandlerWithMem (0 :: Int) stage1Handler)
-            , ("stage2", effHandlerWithMem (0 :: Int) stage2Handler)
-            ]
+          handlers =
+            Map.fromList
+              [ ("entry", effHandlerWithMem (0 :: Int) entryHandler),
+                ("stage1", effHandlerWithMem (0 :: Int) stage1Handler),
+                ("stage2", effHandlerWithMem (0 :: Int) stage2Handler)
+              ]
 
           entryHandler :: Int -> Eff '[Memory Int, IO] (GotoChoice '[To "stage1" Int])
           entryHandler n = do
-            updateMem @Int (+ 1000)  -- entry adds 1000 to its memory
+            updateMem @Int (+ 1000) -- entry adds 1000 to its memory
             pure $ gotoChoice @"stage1" n
 
           stage1Handler :: Int -> Eff '[Memory Int, IO] (GotoChoice '[To "stage2" Int])
           stage1Handler n = do
-            updateMem @Int (+ 100)  -- stage1 adds 100 to its memory
+            updateMem @Int (+ 100) -- stage1 adds 100 to its memory
             mem <- getMem @Int
-            pure $ gotoChoice @"stage2" (n + mem)  -- pass input + stage1's memory
-
+            pure $ gotoChoice @"stage2" (n + mem) -- pass input + stage1's memory
           stage2Handler :: Int -> Eff '[Memory Int, IO] (GotoChoice '[To Exit Int])
           stage2Handler n = do
-            updateMem @Int (+ 10)  -- stage2 adds 10 to its memory
+            updateMem @Int (+ 10) -- stage2 adds 10 to its memory
             mem <- getMem @Int
-            pure $ gotoExit (n + mem)  -- final: input + stage2's memory
+            pure $ gotoExit (n + mem) -- final: input + stage2's memory
 
       -- Input is 5
       -- Entry adds 1000 to its own memory (not passed forward)
@@ -360,11 +350,12 @@ spec = describe "Graph Execution" $ do
     it "mixed memory types: each actor has different state type" $ do
       -- Prove that different actors can have different memory types
       let handlers :: Map Text HandlerBuilder
-          handlers = Map.fromList
-            [ ("entry", pureHandler entryHandler)  -- no memory
-            , ("counter", effHandlerWithMem (0 :: Int) counterHandler)  -- Int memory
-            , ("logger", effHandlerWithMem ([] :: [Text]) loggerHandler)  -- [Text] memory
-            ]
+          handlers =
+            Map.fromList
+              [ ("entry", pureHandler entryHandler), -- no memory
+                ("counter", effHandlerWithMem (0 :: Int) counterHandler), -- Int memory
+                ("logger", effHandlerWithMem ([] :: [Text]) loggerHandler) -- [Text] memory
+              ]
 
           entryHandler :: Text -> GotoChoice '[To "counter" Text]
           entryHandler msg = gotoChoice @"counter" msg
@@ -384,7 +375,6 @@ spec = describe "Graph Execution" $ do
       result <- runGraphAsActors handlers (toJSON ("hello" :: Text))
       result `shouldBe` (["hello:1"] :: [Text])
 
-
 -- Helper for JSON parsing in tests
-fromJSON :: FromJSON a => Value -> Result a
+fromJSON :: (FromJSON a) => Value -> Result a
 fromJSON = Aeson.fromJSON

@@ -1,6 +1,5 @@
-use crate::state::{AgentStatus, DashboardState};
+use crate::state::DashboardState;
 use std::sync::{Arc, RwLock};
-use tuirealm::Update;
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub enum Id {

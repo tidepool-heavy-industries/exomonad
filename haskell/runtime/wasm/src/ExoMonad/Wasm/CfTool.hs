@@ -40,16 +40,17 @@
 -- @
 module ExoMonad.Wasm.CfTool
   ( -- * Tool Schema (re-exported from "ExoMonad.Tool.Wire")
-    CfTool(..)
-  , CfObjectSchema(..)
-  , CfProperty(..)
-  , cfToolToValue
-  ) where
+    CfTool (..),
+    CfObjectSchema (..),
+    CfProperty (..),
+    cfToolToValue,
+  )
+where
 
 -- All types now defined in exomonad-core and re-exported here
 import ExoMonad.Tool.Wire
-  ( CfTool(..)
-  , CfObjectSchema(..)
-  , CfProperty(..)
-  , cfToolToValue
+  ( CfObjectSchema (..),
+    CfProperty (..),
+    CfTool (..),
+    cfToolToValue,
   )

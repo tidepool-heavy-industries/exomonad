@@ -45,44 +45,48 @@
 -- The interpreter (in exomonad-session-interpreter) spawns `exomonad session` processes.
 module ExoMonad.Effect.Session
   ( -- * Effect
-    Session(..)
+    Session (..),
 
     -- * Types
-  , SessionId(..)
-  , SessionInfo(..)
-  , SessionOutput(..)
-  , SessionMetadata(..)
-  , InterruptSignal(..)
-  , SessionOperation(..)
-  , ToolCall(..)
+    SessionId (..),
+    SessionInfo (..),
+    SessionOutput (..),
+    SessionMetadata (..),
+    InterruptSignal (..),
+    SessionOperation (..),
+    ToolCall (..),
 
     -- * Smart Constructors
-  , startSession
-  , continueSession
-  , forkSession
+    startSession,
+    continueSession,
+    forkSession,
 
     -- * Fork Detection
-  , detectForkRequest
+    detectForkRequest,
 
     -- * Pure Interpreter (for testing)
-  , runSession
-  ) where
+    runSession,
+  )
+where
 
 import Control.Monad.Freer (Eff, Member, interpret, send)
 import Data.Aeson
-  ( FromJSON(..), ToJSON(..), Options(..), Value
-  , defaultOptions, genericToJSON, genericParseJSON
+  ( FromJSON (..),
+    Options (..),
+    ToJSON (..),
+    Value,
+    defaultOptions,
+    genericParseJSON,
+    genericToJSON,
   )
-import Data.Char (toLower, isUpper)
+import Data.Char (isUpper, toLower)
 import Data.List (find)
 import Data.Text (Text)
 import Data.Time (UTCTime)
-import GHC.Generics (Generic)
-
 import ExoMonad.Graph.Types (ModelChoice)
-import ExoMonad.Schema (HasJSONSchema(..), emptySchema, SchemaType(TString))
+import ExoMonad.Schema (HasJSONSchema (..), SchemaType (TString), emptySchema)
 import ExoMonad.StructuredOutput (StructuredOutput)
-
+import GHC.Generics (Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES
@@ -91,14 +95,13 @@ import ExoMonad.StructuredOutput (StructuredOutput)
 -- | Claude Code session identifier.
 --
 -- Sessions persist across container lifecycles via shared ~/.claude/ volume.
-newtype SessionId = SessionId { unSessionId :: Text }
+newtype SessionId = SessionId {unSessionId :: Text}
   deriving stock (Eq, Ord, Show, Generic)
   deriving newtype (FromJSON, ToJSON)
   deriving anyclass (StructuredOutput)
 
 instance HasJSONSchema SessionId where
   jsonSchema = emptySchema TString
-
 
 -- | Bundled session info for continuation/forking.
 --
@@ -116,13 +119,15 @@ instance HasJSONSchema SessionId where
 --   Nothing -> StartFresh "slug"
 -- @
 data SessionInfo = SessionInfo
-  { siSessionId :: SessionId  -- ^ CC session ID for --resume flag
-  , siWorktree  :: FilePath   -- ^ Worktree path for exomonad
-  , siBranch    :: Text       -- ^ Git branch name
+  { -- | CC session ID for --resume flag
+    siSessionId :: SessionId,
+    -- | Worktree path for exomonad
+    siWorktree :: FilePath,
+    -- | Git branch name
+    siBranch :: Text
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
-
 
 -- | Session operation strategy for ClaudeCode handlers.
 --
@@ -149,14 +154,13 @@ data SessionInfo = SessionInfo
 --   pure (ctx, sessionOp)
 -- @
 data SessionOperation
-  = StartFresh Text
-      -- ^ Fresh session with slug
-  | ContinueFrom SessionId FilePath Text
-      -- ^ Continue: (cc_session_id, worktree, branch)
-  | ForkFrom SessionId FilePath Text Text
-      -- ^ Fork: (parent_cc_session_id, parent_worktree, parent_branch, child_slug)
+  = -- | Fresh session with slug
+    StartFresh Text
+  | -- | Continue: (cc_session_id, worktree, branch)
+    ContinueFrom SessionId FilePath Text
+  | -- | Fork: (parent_cc_session_id, parent_worktree, parent_branch, child_slug)
+    ForkFrom SessionId FilePath Text Text
   deriving (Show, Eq)
-
 
 -- | Result from a session turn (parsed from exomonad JSON stdout).
 --
@@ -165,22 +169,38 @@ data SessionOperation
 -- Field naming: @so@ prefix stripped, camelCase → snake_case for JSON.
 -- @soSessionId@ → @session_id@
 data SessionOutput = SessionOutput
-  { soSessionId        :: SessionId      -- ^ ExoMonad session ID (UUID)
-  , soCcSessionId      :: Maybe Text     -- ^ Claude Code session ID (for --resume/--fork-session)
-  , soBranch           :: Text           -- ^ Git branch name
-  , soWorktree         :: FilePath       -- ^ Absolute path to worktree
-  , soExitCode         :: Int            -- ^ Container exit code
-  , soIsError          :: Bool           -- ^ Whether Claude reported an error
-  , soResultText       :: Maybe Text     -- ^ Final output text (prose)
-  , soStructuredOutput :: Maybe Value    -- ^ JSON output (when schema was provided)
-  , soTotalCostUsd     :: Double         -- ^ API cost for this turn
-  , soNumTurns         :: Int            -- ^ Number of turns in this run
-  , soInterrupts       :: [InterruptSignal] -- ^ Fork requests, escalations, etc.
-  , soDurationSecs     :: Double         -- ^ Wall-clock duration in seconds
-  , soError            :: Maybe Text     -- ^ Error if failed before Claude ran
-  , soToolCalls        :: Maybe [ToolCall] -- ^ Decision tool calls from Claude Code
-  , soStderrOutput     :: Maybe Text     -- ^ Captured stderr on error (for auth/setup diagnosis)
-  } deriving stock (Show, Eq, Generic)
+  { -- | ExoMonad session ID (UUID)
+    soSessionId :: SessionId,
+    -- | Claude Code session ID (for --resume/--fork-session)
+    soCcSessionId :: Maybe Text,
+    -- | Git branch name
+    soBranch :: Text,
+    -- | Absolute path to worktree
+    soWorktree :: FilePath,
+    -- | Container exit code
+    soExitCode :: Int,
+    -- | Whether Claude reported an error
+    soIsError :: Bool,
+    -- | Final output text (prose)
+    soResultText :: Maybe Text,
+    -- | JSON output (when schema was provided)
+    soStructuredOutput :: Maybe Value,
+    -- | API cost for this turn
+    soTotalCostUsd :: Double,
+    -- | Number of turns in this run
+    soNumTurns :: Int,
+    -- | Fork requests, escalations, etc.
+    soInterrupts :: [InterruptSignal],
+    -- | Wall-clock duration in seconds
+    soDurationSecs :: Double,
+    -- | Error if failed before Claude ran
+    soError :: Maybe Text,
+    -- | Decision tool calls from Claude Code
+    soToolCalls :: Maybe [ToolCall],
+    -- | Captured stderr on error (for auth/setup diagnosis)
+    soStderrOutput :: Maybe Text
+  }
+  deriving stock (Show, Eq, Generic)
 
 instance ToJSON SessionOutput where
   toJSON = genericToJSON sessionOutputOptions
@@ -189,27 +209,29 @@ instance FromJSON SessionOutput where
   parseJSON = genericParseJSON sessionOutputOptions
 
 sessionOutputOptions :: Options
-sessionOutputOptions = defaultOptions
-  { fieldLabelModifier = camelToSnake . dropPrefix "so"
-  , omitNothingFields = True
-  }
-
+sessionOutputOptions =
+  defaultOptions
+    { fieldLabelModifier = camelToSnake . dropPrefix "so",
+      omitNothingFields = True
+    }
 
 -- | Session metadata from @exomonad session info@.
 --
 -- Field naming: @sm@ prefix stripped, camelCase → snake_case for JSON.
 data SessionMetadata = SessionMetadata
-  { smSessionId     :: SessionId
-  , smBranch        :: Text
-  , smWorktree      :: FilePath
-  , smParentSession :: Maybe SessionId
-  , smChildSessions :: [SessionId]
-  , smStatus        :: Text           -- ^ "idle", "active", "completed", "failed"
-  , smCreatedAt     :: UTCTime
-  , smUpdatedAt     :: UTCTime
-  , smLastExitCode  :: Int
-  , smTotalCostUsd  :: Double
-  } deriving stock (Show, Eq, Generic)
+  { smSessionId :: SessionId,
+    smBranch :: Text,
+    smWorktree :: FilePath,
+    smParentSession :: Maybe SessionId,
+    smChildSessions :: [SessionId],
+    -- | "idle", "active", "completed", "failed"
+    smStatus :: Text,
+    smCreatedAt :: UTCTime,
+    smUpdatedAt :: UTCTime,
+    smLastExitCode :: Int,
+    smTotalCostUsd :: Double
+  }
+  deriving stock (Show, Eq, Generic)
 
 instance ToJSON SessionMetadata where
   toJSON = genericToJSON sessionMetadataOptions
@@ -218,11 +240,11 @@ instance FromJSON SessionMetadata where
   parseJSON = genericParseJSON sessionMetadataOptions
 
 sessionMetadataOptions :: Options
-sessionMetadataOptions = defaultOptions
-  { fieldLabelModifier = camelToSnake . dropPrefix "sm"
-  , omitNothingFields = True
-  }
-
+sessionMetadataOptions =
+  defaultOptions
+    { fieldLabelModifier = camelToSnake . dropPrefix "sm",
+      omitNothingFields = True
+    }
 
 -- | Signal from Claude via @exomonad signal@ bash command.
 --
@@ -231,10 +253,14 @@ sessionMetadataOptions = defaultOptions
 --
 -- Field naming: @is@ prefix stripped, camelCase → snake_case for JSON.
 data InterruptSignal = InterruptSignal
-  { isSignalType :: Text           -- ^ "fork", "escalate", "transition", etc.
-  , isState      :: Maybe Text     -- ^ e.g., child branch name for fork
-  , isReason     :: Maybe Text     -- ^ e.g., child prompt for fork
-  } deriving stock (Show, Eq, Generic)
+  { -- | "fork", "escalate", "transition", etc.
+    isSignalType :: Text,
+    -- | e.g., child branch name for fork
+    isState :: Maybe Text,
+    -- | e.g., child prompt for fork
+    isReason :: Maybe Text
+  }
+  deriving stock (Show, Eq, Generic)
 
 instance ToJSON InterruptSignal where
   toJSON = genericToJSON interruptSignalOptions
@@ -243,11 +269,11 @@ instance FromJSON InterruptSignal where
   parseJSON = genericParseJSON interruptSignalOptions
 
 interruptSignalOptions :: Options
-interruptSignalOptions = defaultOptions
-  { fieldLabelModifier = camelToSnake . dropPrefix "is"
-  , omitNothingFields = True
-  }
-
+interruptSignalOptions =
+  defaultOptions
+    { fieldLabelModifier = camelToSnake . dropPrefix "is",
+      omitNothingFields = True
+    }
 
 -- | A tool call from Claude Code (for decision tools).
 --
@@ -256,9 +282,12 @@ interruptSignalOptions = defaultOptions
 --
 -- Field naming: @tc@ prefix stripped, camelCase → snake_case for JSON.
 data ToolCall = ToolCall
-  { tcName  :: !Text   -- ^ Full tool name (e.g., "decision::approve")
-  , tcInput :: !Value  -- ^ Tool input (the branch's field values)
-  } deriving stock (Show, Eq, Generic)
+  { -- | Full tool name (e.g., "decision::approve")
+    tcName :: !Text,
+    -- | Tool input (the branch's field values)
+    tcInput :: !Value
+  }
+  deriving stock (Show, Eq, Generic)
 
 instance ToJSON ToolCall where
   toJSON = genericToJSON toolCallOptions
@@ -267,11 +296,11 @@ instance FromJSON ToolCall where
   parseJSON = genericParseJSON toolCallOptions
 
 toolCallOptions :: Options
-toolCallOptions = defaultOptions
-  { fieldLabelModifier = camelToSnake . dropPrefix "tc"
-  , omitNothingFields = True
-  }
-
+toolCallOptions =
+  defaultOptions
+    { fieldLabelModifier = camelToSnake . dropPrefix "tc",
+      omitNothingFields = True
+    }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- JSON HELPERS
@@ -293,14 +322,13 @@ camelToSnake :: String -> String
 camelToSnake = go True
   where
     go _ [] = []
-    go isFirst (c:cs)
+    go isFirst (c : cs)
       | isUpper c =
           let lower = toLower c
-          in if isFirst
-             then lower : go False cs
-             else '_' : lower : go False cs
+           in if isFirst
+                then lower : go False cs
+                else '_' : lower : go False cs
       | otherwise = c : go False cs
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT
@@ -331,42 +359,59 @@ data Session r where
   --
   -- ExoMonad creates branch @<slug>-<hex>@ and worktree at
   -- @.exomonad/worktrees/<slug>-<hex>/@.
-  StartSession
-    :: Text           -- ^ Slug (e.g., "user-auth" or "implement/user-auth")
-    -> Text           -- ^ Initial prompt
-    -> ModelChoice    -- ^ Model: Haiku, Sonnet, Opus
-    -> Maybe Value    -- ^ JSON schema for structured output (optional)
-    -> Maybe Value    -- ^ Decision tools JSON array (optional)
-    -> Session SessionOutput
-
+  StartSession ::
+    -- | Slug (e.g., "user-auth" or "implement/user-auth")
+    Text ->
+    -- | Initial prompt
+    Text ->
+    -- | Model: Haiku, Sonnet, Opus
+    ModelChoice ->
+    -- | JSON schema for structured output (optional)
+    Maybe Value ->
+    -- | Decision tools JSON array (optional)
+    Maybe Value ->
+    Session SessionOutput
   -- | Continue an existing session (subsequent turns).
   --
   -- All session data passed as args (exomonad is stateless).
-  ContinueSession
-    :: SessionId      -- ^ Claude Code session ID (for --resume)
-    -> FilePath       -- ^ Worktree path
-    -> Text           -- ^ Branch name
-    -> ModelChoice    -- ^ Model to use
-    -> Text           -- ^ Prompt for this turn
-    -> Maybe Value    -- ^ JSON schema for structured output (optional)
-    -> Maybe Value    -- ^ Decision tools JSON array (optional)
-    -> Session SessionOutput
-
+  ContinueSession ::
+    -- | Claude Code session ID (for --resume)
+    SessionId ->
+    -- | Worktree path
+    FilePath ->
+    -- | Branch name
+    Text ->
+    -- | Model to use
+    ModelChoice ->
+    -- | Prompt for this turn
+    Text ->
+    -- | JSON schema for structured output (optional)
+    Maybe Value ->
+    -- | Decision tools JSON array (optional)
+    Maybe Value ->
+    Session SessionOutput
   -- | Fork a session (child inherits parent's conversation history).
   --
   -- Uses @--resume <parent> --fork-session@ so parent is unchanged.
   -- All parent session data passed as args (exomonad is stateless).
-  ForkSession
-    :: SessionId      -- ^ Parent's Claude Code session ID (for --fork-session)
-    -> FilePath       -- ^ Parent's worktree path
-    -> Text           -- ^ Parent's branch name
-    -> ModelChoice    -- ^ Model to use
-    -> Text           -- ^ Child slug (e.g., "subtask/handle-edge-case")
-    -> Text           -- ^ Child prompt
-    -> Maybe Value    -- ^ JSON schema for structured output (optional)
-    -> Maybe Value    -- ^ Decision tools JSON array (optional)
-    -> Session SessionOutput  -- Returns child's first turn result
-
+  ForkSession ::
+    -- | Parent's Claude Code session ID (for --fork-session)
+    SessionId ->
+    -- | Parent's worktree path
+    FilePath ->
+    -- | Parent's branch name
+    Text ->
+    -- | Model to use
+    ModelChoice ->
+    -- | Child slug (e.g., "subtask/handle-edge-case")
+    Text ->
+    -- | Child prompt
+    Text ->
+    -- | JSON schema for structured output (optional)
+    Maybe Value ->
+    -- | Decision tools JSON array (optional)
+    Maybe Value ->
+    Session SessionOutput -- Returns child's first turn result
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SMART CONSTRUCTORS
@@ -390,14 +435,19 @@ data Session r where
 -- result <- startSession "review" "Review this PR" Sonnet Nothing (Just toolsJson)
 -- let toolCalls = soToolCalls result  -- Just [ToolCall] when tools provided
 -- @
-startSession
-  :: Member Session effs
-  => Text           -- ^ Slug (e.g., "user-auth" or "implement/user-auth")
-  -> Text           -- ^ Initial prompt
-  -> ModelChoice    -- ^ Model to use
-  -> Maybe Value    -- ^ JSON schema for structured output (optional)
-  -> Maybe Value    -- ^ Decision tools JSON array (optional)
-  -> Eff effs SessionOutput
+startSession ::
+  (Member Session effs) =>
+  -- | Slug (e.g., "user-auth" or "implement/user-auth")
+  Text ->
+  -- | Initial prompt
+  Text ->
+  -- | Model to use
+  ModelChoice ->
+  -- | JSON schema for structured output (optional)
+  Maybe Value ->
+  -- | Decision tools JSON array (optional)
+  Maybe Value ->
+  Eff effs SessionOutput
 startSession slug prompt model schema tools =
   send $ StartSession slug prompt model schema tools
 
@@ -408,16 +458,23 @@ startSession slug prompt model schema tools =
 -- @
 -- result <- continueSession ccSid worktree branch Sonnet "Now add error handling" Nothing Nothing
 -- @
-continueSession
-  :: Member Session effs
-  => SessionId      -- ^ Claude Code session ID (for --resume)
-  -> FilePath       -- ^ Worktree path
-  -> Text           -- ^ Branch name
-  -> ModelChoice    -- ^ Model to use
-  -> Text           -- ^ Prompt for this turn
-  -> Maybe Value    -- ^ JSON schema for structured output (optional)
-  -> Maybe Value    -- ^ Decision tools JSON array (optional)
-  -> Eff effs SessionOutput
+continueSession ::
+  (Member Session effs) =>
+  -- | Claude Code session ID (for --resume)
+  SessionId ->
+  -- | Worktree path
+  FilePath ->
+  -- | Branch name
+  Text ->
+  -- | Model to use
+  ModelChoice ->
+  -- | Prompt for this turn
+  Text ->
+  -- | JSON schema for structured output (optional)
+  Maybe Value ->
+  -- | Decision tools JSON array (optional)
+  Maybe Value ->
+  Eff effs SessionOutput
 continueSession ccSid worktree branch model prompt schema tools =
   send $ ContinueSession ccSid worktree branch model prompt schema tools
 
@@ -432,20 +489,27 @@ continueSession ccSid worktree branch model prompt schema tools =
 -- let childSid = soSessionId childResult
 -- -- Child branch: subtask/auth-tests-7b2c4e
 -- @
-forkSession
-  :: Member Session effs
-  => SessionId      -- ^ Parent's Claude Code session ID (for --fork-session)
-  -> FilePath       -- ^ Parent's worktree path
-  -> Text           -- ^ Parent's branch name
-  -> ModelChoice    -- ^ Model to use
-  -> Text           -- ^ Child slug (e.g., "subtask/auth-tests")
-  -> Text           -- ^ Child prompt
-  -> Maybe Value    -- ^ JSON schema for structured output (optional)
-  -> Maybe Value    -- ^ Decision tools JSON array (optional)
-  -> Eff effs SessionOutput
+forkSession ::
+  (Member Session effs) =>
+  -- | Parent's Claude Code session ID (for --fork-session)
+  SessionId ->
+  -- | Parent's worktree path
+  FilePath ->
+  -- | Parent's branch name
+  Text ->
+  -- | Model to use
+  ModelChoice ->
+  -- | Child slug (e.g., "subtask/auth-tests")
+  Text ->
+  -- | Child prompt
+  Text ->
+  -- | JSON schema for structured output (optional)
+  Maybe Value ->
+  -- | Decision tools JSON array (optional)
+  Maybe Value ->
+  Eff effs SessionOutput
 forkSession parentCcSid parentWorktree parentBranch model childSlug childPrompt schema tools =
   send $ ForkSession parentCcSid parentWorktree parentBranch model childSlug childPrompt schema tools
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- FORK DETECTION
@@ -464,10 +528,9 @@ detectForkRequest :: SessionOutput -> Maybe (Text, Text)
 detectForkRequest result =
   case find isForkSignal result.soInterrupts of
     Just sig -> (,) <$> sig.isState <*> sig.isReason
-    Nothing  -> Nothing
+    Nothing -> Nothing
   where
     isForkSignal sig = sig.isSignalType == "fork"
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PURE INTERPRETER
@@ -486,10 +549,10 @@ detectForkRequest result =
 --
 -- result <- runM $ runSession mockHandler myProgram
 -- @
-runSession
-  :: (forall x. Session x -> Eff effs x)
-  -> Eff (Session ': effs) a
-  -> Eff effs a
+runSession ::
+  (forall x. Session x -> Eff effs x) ->
+  Eff (Session ': effs) a ->
+  Eff effs a
 runSession handler = interpret $ \case
   op@(StartSession _ _ _ _ _) -> handler op
   op@(ContinueSession _ _ _ _ _ _ _) -> handler op
