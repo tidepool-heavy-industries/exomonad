@@ -1,6 +1,7 @@
 pub mod docker;
-pub mod log;
+pub mod git;
 pub mod github;
+pub mod log;
 
 use self::docker::DockerService;
 use self::log::{HasLogService, LogService};

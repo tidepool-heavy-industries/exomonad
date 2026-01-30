@@ -113,6 +113,14 @@ handleHook logger tracer config input _ agentRole mContainerId cbMap agentStore 
         let ghConfig = fromMaybe defaultGitHubConfig config.githubConfig
         let retryCfg = defaultRetryConfig {tracer = Just tracer}
 
+        -- Fail if no container ID is provided for hooks (hooks must run in agent context)
+        containerId <- case mContainerId of
+          Just cid -> pure cid
+          Nothing -> do
+            let msg = "Missing container ID for hook execution"
+            TIO.putStrLn $ "  [HOOK] " <> msg
+            throwIO (userError (T.unpack msg))
+
         runM $
           runLog Debug $
             runTime $
@@ -126,13 +134,12 @@ handleHook logger tracer config input _ agentRole mContainerId cbMap agentStore 
                             withRetry retryCfg $
                               runZellijIO $
                                 runSshExec logger dockerCtlPath
-                                -- Always use remote git execution - if no container ID, use empty string
-                                -- which will fail if git operations are attempted (fail-closed behavior)
+                                -- Always use remote git execution
                                 $
-                                  runGitRemote (fromMaybe "" mContainerId) "." $
+                                  runGitRemote (Just containerId) "." $
                                     runWorktreeIO (defaultWorktreeConfig repoRoot) $
                                       runEffectorIO logger $
-                                        runJustfileRemote (fromMaybe "" mContainerId) "" $
+                                        runJustfileRemote (Just containerId) repoRoot $
                                           runDockerCtl logger dockerCtlPath agentStore $
                                             runGeminiIO $
                                               do

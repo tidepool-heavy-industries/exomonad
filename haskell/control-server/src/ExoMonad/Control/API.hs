@@ -206,7 +206,7 @@ type ExoMonadControlAPI =
   -- | Hook event: (Input, Runtime, Role, ContainerId) -> (Output, ExitCode)
   "hook" :> ReqBody '[JSON] (HookInput, Runtime, Role, Maybe Text) :> Post '[JSON] ControlResponse
     -- \| MCP tool call: Request -> Response
-    :<|> "mcp" :> "call" :> ReqBody '[JSON] McpToolCallRequest :> Post '[JSON] ControlResponse
+    :<|> "mcp" :> "call" :> QueryParam "container" Text :> ReqBody '[JSON] McpToolCallRequest :> Post '[JSON] ControlResponse
     -- \| MCP tool list
     :<|> "mcp" :> "tools" :> Get '[JSON] [ToolDefinition]
     -- \| Health check

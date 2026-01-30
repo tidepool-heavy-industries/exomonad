@@ -211,8 +211,8 @@ server logger config tracer cbMap agentStore =
     -- which handles export automatically via BatchSpanProcessor.
     -- Legacy ObservabilityConfig is skipped for Hooks.
 
-    handleMcpCall req = liftIO $ do
-      logInfo logger $ "[MCP:" <> req.mcpId <> "] tool=" <> req.toolName
+    handleMcpCall mContainer req = liftIO $ do
+      logInfo logger $ "[MCP:" <> req.mcpId <> "] tool=" <> req.toolName <> " container=" <> T.pack (show mContainer)
       traceCtx <- newTraceContext
       res <-
         handleMessage
@@ -222,7 +222,7 @@ server logger config tracer cbMap agentStore =
           traceCtx
           cbMap
           agentStore
-          (MCPToolCall req.mcpId req.toolName req.arguments Nothing)
+          (MCPToolCall req.mcpId req.toolName req.arguments mContainer)
 
       -- Flush traces (legacy support for MCP tools)
       case config.observabilityConfig of
@@ -454,6 +454,7 @@ server logger config tracer cbMap agentStore =
           liftIO $ logInfo logger $ "Stopping agent: " <> id_ <> " (" <> agent.asContainerId <> ")"
           let cid = ContainerId agent.asContainerId
           -- Execute stop effect, passing the agent's container ID
-          res <- liftIO $ runApp config tracer cbMap logger agentStore (Just agent.asContainerId) (stopContainer cid)          case res of
+          res <- liftIO $ runApp config tracer cbMap logger agentStore (Just agent.asContainerId) (stopContainer cid)
+          case res of
             Left err -> liftIO $ logError logger $ "Failed to stop agent: " <> T.pack (show err)
             Right () -> pure ()

@@ -11,7 +11,7 @@ import Control.Monad.Freer
 import ExoMonad.Control.Effects.Git (runGitRemote)
 import ExoMonad.Control.Effects.Justfile (runJustfileRemote)
 import ExoMonad.Control.Effects.SshExec (ExecRequest (..), ExecResult (..), SshExec (..))
-import ExoMonad.Effects.Git (WorktreeInfo (..), getWorktreeInfo)
+import ExoMonad.Effects.Git (WorktreeInfo (..), fetchRemote, getWorktreeInfo)
 import ExoMonad.Effects.Justfile (JustResult (..), runRecipe)
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -33,26 +33,34 @@ spec =
                   _ -> ExecResult (Just 1) "" "Unknown command"
 
             let action = getWorktreeInfo
-            result <- runM $ runMockSshExecSmart mockHandler $ runGitRemote "test-agent" "." action
+            result <- runM $ runMockSshExecSmart mockHandler $ runGitRemote (Just "test-agent") "." action
             case result of
               Just wt -> do
                 wt.wiBranch @?= "feature-branch"
                 wt.wiPath @?= "/repo/root"
                 wt.wiIsWorktree @?= False
-              Nothing -> assertFailure "Expected Just WorktreeInfo"
+              Nothing -> assertFailure "Expected Just WorktreeInfo",
+          testCase "FetchRemote Success" $ do
+            let mockHandler req = case req.args of
+                  ["fetch", "origin"] -> ExecResult (Just 0) "" ""
+                  _ -> ExecResult (Just 1) "" "Unknown command"
+
+            let action = fetchRemote "origin" Nothing
+            -- Expect no error
+            runM $ runMockSshExecSmart mockHandler $ runGitRemote (Just "test-agent") "." action
         ],
       testGroup
         "Justfile Interpreter"
         [ testCase "Run Recipe Success" $ do
             let mockResult = ExecResult (Just 0) "Recipe output" ""
             let action = runRecipe "build" ["--release"]
-            result <- runM $ runMockSshExec mockResult $ runJustfileRemote "test-agent" "." action
+            result <- runM $ runMockSshExec mockResult $ runJustfileRemote (Just "test-agent") "." action
             result.exitCode @?= 0
             result.stdout @?= "Recipe output",
           testCase "Run Recipe Failure" $ do
             let mockResult = ExecResult (Just 1) "" "Recipe failed"
             let action = runRecipe "test" []
-            result <- runM $ runMockSshExec mockResult $ runJustfileRemote "test-agent" "." action
+            result <- runM $ runMockSshExec mockResult $ runJustfileRemote (Just "test-agent") "." action
             result.exitCode @?= 1
             result.stderr @?= "Recipe failed"
         ]

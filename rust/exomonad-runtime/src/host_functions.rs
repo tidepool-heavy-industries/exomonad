@@ -99,7 +99,9 @@ pub fn docker_functions(service: DockerService) -> Vec<Function> {
 fn block_on<F: std::future::Future>(future: F) -> Result<F::Output, Error> {
     match tokio::runtime::Handle::try_current() {
         Ok(handle) => Ok(handle.block_on(future)),
-        Err(_) => Err(Error::msg("No Tokio runtime available for async Docker operation")),
+        Err(_) => Err(Error::msg(
+            "No Tokio runtime available for async Docker operation",
+        )),
     }
 }
 
@@ -113,15 +115,14 @@ fn docker_exec(
     let input: ExecInput = get_input(plugin, inputs[0].clone())?;
 
     let service_arc = user_data.get()?;
-    let service = service_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+    let service = service_arc
+        .lock()
+        .map_err(|_| Error::msg("Poisoned lock"))?;
     let cmd_strs: Vec<&str> = input.command.iter().map(|s| s.as_str()).collect();
 
     // Block on async execution
-    let result = block_on(service.exec(
-        &input.container_id,
-        &cmd_strs,
-        input.working_dir.as_deref(),
-    ))?;
+    let result =
+        block_on(service.exec(&input.container_id, &cmd_strs, input.working_dir.as_deref()))?;
 
     let output_data = match result {
         Ok(out) => DockerResult::Success(ExecSuccess {
@@ -147,13 +148,11 @@ fn docker_spawn(
     let input: SpawnInput = get_input(plugin, inputs[0].clone())?;
 
     let service_arc = user_data.get()?;
-    let service = service_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
-    
-    let result = block_on(service.spawn(
-        &input.image,
-        &input.name,
-        &input.env,
-    ))?;
+    let service = service_arc
+        .lock()
+        .map_err(|_| Error::msg("Poisoned lock"))?;
+
+    let result = block_on(service.spawn(&input.image, &input.name, &input.env))?;
 
     let output_data = match result {
         Ok(id) => DockerResult::Success(id),
@@ -175,8 +174,10 @@ fn docker_kill(
     let input: KillInput = get_input(plugin, inputs[0].clone())?;
 
     let service_arc = user_data.get()?;
-    let service = service_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
-    
+    let service = service_arc
+        .lock()
+        .map_err(|_| Error::msg("Poisoned lock"))?;
+
     let result = block_on(service.kill(&input.container_id))?;
 
     let output_data = match result {
@@ -220,7 +221,7 @@ pub fn log_info(
         ));
     }
     // Updated to use unwrap_i64() for Extism 1.13 compatibility
-    let _offset = inputs[0].unwrap_i64(); 
+    let _offset = inputs[0].unwrap_i64();
     // let len = inputs[1].unwrap_i64();
 
     info!("Host function called: log_info");
