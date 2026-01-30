@@ -55,12 +55,14 @@ module ExoMonad.LLM.Tools
 where
 
 import Control.Monad.Freer (Eff)
-import Data.Aeson (FromJSON, ToJSON, Value, fromJSON, toJSON)
+import Data.Aeson (FromJSON, ToJSON, Value (..), fromJSON, toJSON)
 import Data.Aeson qualified as Aeson
+import Data.Aeson.KeyMap qualified as KM
 import Data.Kind (Type)
 import Data.Proxy (Proxy)
 import Data.Text (Text)
 import Data.Text qualified as T
+import ExoMonad.Schema (HasJSONSchema (..), JSONSchema (..), SchemaType (..))
 import ExoMonad.Tool.Wire (AnthropicTool (..))
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -159,14 +161,23 @@ class ToolRecord (tools :: [Type -> Type] -> Type) where
 --   _ -> pure $ Left $ ToolNotFound name
 -- @
 dispatchHandler ::
-  (FromJSON args, ToJSON result, Applicative m) =>
+  forall args result m.
+  (FromJSON args, HasJSONSchema args, ToJSON result, Applicative m) =>
   (args -> m result) ->
   Text ->
   Value ->
   m (Either ToolDispatchError Value)
 dispatchHandler handler toolName input =
-  case fromJSON input of
-    Aeson.Success args ->
-      Right . toJSON <$> handler args
-    Aeson.Error err ->
-      pure $ Left $ ToolInputParseError toolName (T.pack err)
+  let schema = jsonSchema @args
+      adjustedInput = case schema.schemaType of
+        TObject -> input
+        _ -> case input of
+          Object obj -> case KM.lookup "value" obj of
+            Just v -> v
+            Nothing -> input
+          _ -> input
+   in case fromJSON adjustedInput of
+        Aeson.Success args ->
+          Right . toJSON <$> handler args
+        Aeson.Error err ->
+          pure $ Left $ ToolInputParseError toolName (T.pack err)

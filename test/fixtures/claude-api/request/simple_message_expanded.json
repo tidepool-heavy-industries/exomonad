@@ -1,0 +1,11 @@
+{
+  "model": "claude-3-opus-20240229",
+  "max_tokens": 1024,
+  "system": "You are a helpful assistant.",
+  "messages": [
+    {
+      "role": "user",
+      "content": [{"type": "text", "text": "Hello"}]
+    }
+  ]
+}

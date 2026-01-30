@@ -8,27 +8,26 @@ module ToolRecordTHSpec (spec) where
 import Control.Monad.Freer (Eff, run, runM)
 import Data.Aeson (FromJSON, ToJSON, Value (..), toJSON)
 import Data.Proxy (Proxy (..))
+import Data.Text (Text)
 import ExoMonad.LLM.Tools (ToolDispatchError (..), ToolRecord (..), ToolSchema (..), dispatchHandler)
 import ExoMonad.LLM.Tools.TH (Tool (..), deriveToolRecord)
-import ExoMonad.StructuredOutput.Class (HasJSONSchema (..))
+import ExoMonad.Schema (HasJSONSchema (..), deriveHasJSONSchema, schemaToValue)
 import GHC.Generics (Generic)
 import Test.Hspec
 
--- Test types
-data SearchArgs = SearchArgs
-  { query :: String
-  }
-  deriving (Generic, Show, Eq, FromJSON, ToJSON, HasJSONSchema)
-
-data SearchResult = SearchResult
-  { results :: [String]
-  }
+-- Define tool input types
+data SearchArgs = SearchArgs {query :: Text}
   deriving (Generic, Show, Eq, FromJSON, ToJSON)
 
-data LookupArgs = LookupArgs
-  { itemId :: Int
-  }
-  deriving (Generic, Show, Eq, FromJSON, ToJSON, HasJSONSchema)
+deriveHasJSONSchema ''SearchArgs
+
+data SearchResult = SearchResult {results :: [Text]}
+  deriving (Generic, FromJSON, ToJSON)
+
+data LookupArgs = LookupArgs {id :: Int}
+  deriving (Generic, Show, Eq, FromJSON, ToJSON)
+
+deriveHasJSONSchema ''LookupArgs
 
 data LookupResult = LookupResult
   { found :: Bool,
@@ -85,7 +84,7 @@ spec = describe "ToolRecord TH Derivation" $ do
       let tools =
             TestTools
               { search = \_ -> pure $ SearchResult [],
-                lookupById = \args -> pure $ LookupResult (args.itemId > 0) (Just "found item")
+                lookupById = \args -> pure $ LookupResult (args.id > 0) (Just "found item")
               }
 
       result <- runM $ dispatchTool tools "lookup_by_id" (toJSON (LookupArgs 42))

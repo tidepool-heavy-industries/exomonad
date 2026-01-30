@@ -179,6 +179,7 @@ test-suite graph-validation-tests
         CLITestTypes
         CLIGraphSpec
         CLIGraphTypes
+        ClaudeAPIGoldenSpec
         GraphValidationSpec
         LLMNodeInterpretSpec
         MemorySerializationSpec
@@ -194,8 +195,9 @@ test-suite graph-validation-tests
         DecisionToolsSpec
         DecisionSpec
         TUIWireFormatSpec
-        SchemaDerivationSpec
         ToolRecordTHSpec
+        ToolSchemaBugSpec
+        SchemaDerivationSpec
         Test.ExoMonad.MockLLM
         -- Golden test files (compile-only validation)
         BranchingLogicRecord
@@ -218,6 +220,8 @@ test-suite graph-validation-tests
         time,
         lens,
         generic-lens,
+        directory,
+        filepath,
         exomonad-core
     hs-source-dirs:   test, test/golden/valid
     default-language: GHC2024
