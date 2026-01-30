@@ -14,9 +14,13 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
+thiserror = { workspace = true }
+octocrab = "0.32"
+exomonad-shared = { path = "../exomonad-shared" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+wiremock = "0.5"
 
 [lib]
 path = "src/lib.rs"
