@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 extism = "1.13"
+extism-convert = "1.13"
 tokio = { workspace = true }
 axum = "0.7"
 serde = { workspace = true }
