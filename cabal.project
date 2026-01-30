@@ -8,7 +8,6 @@ packages:
     -- Runtime
     haskell/runtime/wasm
     haskell/runtime/actor
-    haskell/wasm-guest
 
     -- Effect interpreters
     haskell/effects/llm-interpreter
