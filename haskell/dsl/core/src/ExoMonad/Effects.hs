@@ -18,7 +18,6 @@ module ExoMonad.Effects
     module ExoMonad.Effect.Types,
 
     -- * Integration Effects
-    module ExoMonad.Effects.Cabal,
     module ExoMonad.Effects.Effector,
     module ExoMonad.Effects.Env,
     module ExoMonad.Effects.Git,
@@ -33,7 +32,6 @@ where
 
 import ExoMonad.Effect.Session
 import ExoMonad.Effect.Types
-import ExoMonad.Effects.Cabal
 import ExoMonad.Effects.Effector
 import ExoMonad.Effects.Env
 import ExoMonad.Effects.Git

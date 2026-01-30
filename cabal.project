@@ -19,7 +19,6 @@ packages:
     haskell/effects/github-interpreter
     haskell/effects/git-interpreter
     haskell/effects/worktree-interpreter
-    haskell/effects/cabal-interpreter
     haskell/effects/justfile-interpreter
     haskell/effects/gemini-interpreter
     haskell/effects/filesystem-interpreter
