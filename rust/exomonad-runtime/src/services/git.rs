@@ -132,6 +132,34 @@ impl<T> From<Result<T>> for GitHostOutput<T> {
     }
 }
 
+// Helper functions for Extism memory access (Pattern A: memory handles)
+
+fn get_input<T: serde::de::DeserializeOwned>(
+    plugin: &mut CurrentPlugin,
+    val: Val,
+) -> Result<T, Error> {
+    let handle = plugin
+        .memory_from_val(&val)
+        .ok_or_else(|| Error::msg("Invalid memory handle in input"))?;
+    let bytes = plugin.memory_bytes(handle)?;
+    Ok(serde_json::from_slice(bytes)?)
+}
+
+fn set_output<T: Serialize>(plugin: &mut CurrentPlugin, data: &T) -> Result<Val, Error> {
+    let json = serde_json::to_vec(data)?;
+    let handle = plugin.memory_new(json)?;
+    Ok(plugin.memory_to_val(handle))
+}
+
+fn block_on<F: std::future::Future>(future: F) -> Result<F::Output, Error> {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => Ok(handle.block_on(future)),
+        Err(_) => Err(Error::msg(
+            "No Tokio runtime available for async Git operation",
+        )),
+    }
+}
+
 // Host Function Factories
 
 pub fn git_get_branch_host_fn(git_service: Arc<GitService>) -> Function {
@@ -140,29 +168,21 @@ pub fn git_get_branch_host_fn(git_service: Arc<GitService>) -> Function {
         [ValType::I64],
         [ValType::I64],
         UserData::new(git_service),
-        move |_plugin: &mut CurrentPlugin,
-              _inputs: &[Val],
-              _outputs: &mut [Val],
-              _user_data: UserData<Arc<GitService>>|
-              -> Result<(), Error> {
-            /*
-            let offset = inputs[0].i64().ok_or(Error::msg("Invalid input argument"))? as u64;
-            // FIXME: Extism 1.13 API update required for memory access
+        |plugin: &mut CurrentPlugin,
+         inputs: &[Val],
+         outputs: &mut [Val],
+         user_data: UserData<Arc<GitService>>|
+         -> Result<(), Error> {
+            let input: GitHostInput = get_input(plugin, inputs[0].clone())?;
 
-            let git_mutex = user_data.get()?;
-            let git = git_mutex.lock().map_err(|_| Error::msg("Lock error"))?;
+            let git_arc = user_data.get()?;
+            let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
-            let handle = tokio::runtime::Handle::current();
-            let result = handle.block_on(async {
-                git.get_branch(&input_json.container_id, &input_json.working_dir).await
-            });
-
+            let result = block_on(git.get_branch(&input.container_id, &input.working_dir))?;
             let output: GitHostOutput<String> = result.into();
-            let output_json = serde_json::to_string(&output)?;
 
-            // Write output to memory...
-            */
-            todo!("Implement Extism 1.13 memory access")
+            outputs[0] = set_output(plugin, &output)?;
+            Ok(())
         },
     )
 }
@@ -173,15 +193,21 @@ pub fn git_get_worktree_host_fn(git_service: Arc<GitService>) -> Function {
         [ValType::I64],
         [ValType::I64],
         UserData::new(git_service),
-        move |_plugin: &mut CurrentPlugin,
-              _inputs: &[Val],
-              _outputs: &mut [Val],
-              _user_data: UserData<Arc<GitService>>|
-              -> Result<(), Error> {
-            /*
-            // FIXME: Extism 1.13 API update required
-             */
-            todo!("Implement Extism 1.13 memory access")
+        |plugin: &mut CurrentPlugin,
+         inputs: &[Val],
+         outputs: &mut [Val],
+         user_data: UserData<Arc<GitService>>|
+         -> Result<(), Error> {
+            let input: GitHostInput = get_input(plugin, inputs[0].clone())?;
+
+            let git_arc = user_data.get()?;
+            let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+
+            let result = block_on(git.get_worktree(&input.container_id, &input.working_dir))?;
+            let output: GitHostOutput<WorktreeInfo> = result.into();
+
+            outputs[0] = set_output(plugin, &output)?;
+            Ok(())
         },
     )
 }
@@ -192,15 +218,21 @@ pub fn git_get_dirty_files_host_fn(git_service: Arc<GitService>) -> Function {
         [ValType::I64],
         [ValType::I64],
         UserData::new(git_service),
-        move |_plugin: &mut CurrentPlugin,
-              _inputs: &[Val],
-              _outputs: &mut [Val],
-              _user_data: UserData<Arc<GitService>>|
-              -> Result<(), Error> {
-            /*
-            // FIXME: Extism 1.13 API update required
-             */
-            todo!("Implement Extism 1.13 memory access")
+        |plugin: &mut CurrentPlugin,
+         inputs: &[Val],
+         outputs: &mut [Val],
+         user_data: UserData<Arc<GitService>>|
+         -> Result<(), Error> {
+            let input: GitHostInput = get_input(plugin, inputs[0].clone())?;
+
+            let git_arc = user_data.get()?;
+            let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+
+            let result = block_on(git.get_dirty_files(&input.container_id, &input.working_dir))?;
+            let output: GitHostOutput<Vec<String>> = result.into();
+
+            outputs[0] = set_output(plugin, &output)?;
+            Ok(())
         },
     )
 }
@@ -211,15 +243,25 @@ pub fn git_get_recent_commits_host_fn(git_service: Arc<GitService>) -> Function 
         [ValType::I64],
         [ValType::I64],
         UserData::new(git_service),
-        move |_plugin: &mut CurrentPlugin,
-              _inputs: &[Val],
-              _outputs: &mut [Val],
-              _user_data: UserData<Arc<GitService>>|
-              -> Result<(), Error> {
-            /*
-            // FIXME: Extism 1.13 API update required
-             */
-            todo!("Implement Extism 1.13 memory access")
+        |plugin: &mut CurrentPlugin,
+         inputs: &[Val],
+         outputs: &mut [Val],
+         user_data: UserData<Arc<GitService>>|
+         -> Result<(), Error> {
+            let input: GitLogInput = get_input(plugin, inputs[0].clone())?;
+
+            let git_arc = user_data.get()?;
+            let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+
+            let result = block_on(git.get_recent_commits(
+                &input.container_id,
+                &input.working_dir,
+                input.limit,
+            ))?;
+            let output: GitHostOutput<Vec<Commit>> = result.into();
+
+            outputs[0] = set_output(plugin, &output)?;
+            Ok(())
         },
     )
 }

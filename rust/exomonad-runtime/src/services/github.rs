@@ -1,6 +1,5 @@
 use anyhow::Result;
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
-use extism_convert::MemoryHandle;
 use octocrab::{models, params, Octocrab, OctocrabBuilder};
 use serde::{Deserialize, Serialize};
 
@@ -63,6 +62,7 @@ pub struct PullRequest {
 // Service Implementation
 // ============================================================================
 
+#[derive(Clone)]
 pub struct GitHubService {
     client: Octocrab,
 }
@@ -221,76 +221,93 @@ impl GitHubService {
 // ============================================================================
 
 #[derive(Serialize, Deserialize)]
-struct HostResult<T> {
-    kind: String,
-    payload: Option<T>,
-    error: Option<HostError>,
+#[serde(tag = "kind", content = "payload")]
+enum GitHubHostOutput<T> {
+    Success(T),
+    Error(GitHubHostError),
 }
 
 #[derive(Serialize, Deserialize)]
-struct HostError {
+struct GitHubHostError {
     message: String,
     code: String,
 }
 
-impl<T> HostResult<T> {
-    fn success(payload: T) -> Self {
-        Self {
-            kind: "Success".to_string(),
-            payload: Some(payload),
-            error: None,
-        }
-    }
-
-    fn error(message: String, code: String) -> Self {
-        Self {
-            kind: "Error".to_string(),
-            payload: None,
-            error: Some(HostError { message, code }),
-        }
-    }
-}
-
-fn map_error(e: anyhow::Error) -> (String, String) {
+fn map_error(e: anyhow::Error) -> GitHubHostError {
     let msg = e.to_string();
-    if msg.contains("403") || msg.contains("rate limit") {
-        (msg, "rate_limited".to_string())
+    let code = if msg.contains("403") || msg.contains("rate limit") {
+        "rate_limited"
     } else if msg.contains("404") {
-        (msg, "not_found".to_string())
+        "not_found"
     } else if msg.contains("401") {
-        (msg, "unauthorized".to_string())
+        "unauthorized"
     } else {
-        (msg, "internal_error".to_string())
+        "internal_error"
+    };
+    GitHubHostError {
+        message: msg,
+        code: code.to_string(),
     }
 }
 
-// Define the host functions
+// Helper functions for Extism memory access (Pattern A: memory handles)
+
+fn get_input<T: serde::de::DeserializeOwned>(
+    plugin: &mut CurrentPlugin,
+    val: Val,
+) -> std::result::Result<T, Error> {
+    let handle = plugin
+        .memory_from_val(&val)
+        .ok_or_else(|| Error::msg("Invalid memory handle in input"))?;
+    let bytes = plugin.memory_bytes(handle)?;
+    Ok(serde_json::from_slice(bytes)?)
+}
+
+fn set_output<T: Serialize>(
+    plugin: &mut CurrentPlugin,
+    data: &T,
+) -> std::result::Result<Val, Error> {
+    let json = serde_json::to_vec(data)?;
+    let handle = plugin.memory_new(json)?;
+    Ok(plugin.memory_to_val(handle))
+}
+
+fn block_on<F: std::future::Future>(future: F) -> std::result::Result<F::Output, Error> {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => Ok(handle.block_on(future)),
+        Err(_) => Err(Error::msg(
+            "No Tokio runtime available for async GitHub operation",
+        )),
+    }
+}
+
+// Define the host functions (Pattern A: single I64 memory handle)
 pub fn register_host_functions() -> Vec<Function> {
     vec![
         Function::new(
             "github_list_issues",
-            [ValType::I64, ValType::I64],
+            [ValType::I64],
             [ValType::I64],
             UserData::new(()),
             github_list_issues,
         ),
         Function::new(
             "github_get_issue",
-            [ValType::I64, ValType::I64],
+            [ValType::I64],
             [ValType::I64],
             UserData::new(()),
             github_get_issue,
         ),
         Function::new(
             "github_create_pr",
-            [ValType::I64, ValType::I64],
+            [ValType::I64],
             [ValType::I64],
             UserData::new(()),
             github_create_pr,
         ),
         Function::new(
             "github_list_prs",
-            [ValType::I64, ValType::I64],
+            [ValType::I64],
             [ValType::I64],
             UserData::new(()),
             github_list_prs,
@@ -303,48 +320,26 @@ fn github_list_issues(
     inputs: &[Val],
     outputs: &mut [Val],
     _user_data: UserData<()>,
-) -> Result<(), Error> {
-    let offset = inputs[0].unwrap_i64() as u64;
-    let len = inputs[1].unwrap_i64() as u64;
-    let handle = unsafe { MemoryHandle::new(offset, len) };
-    let input_str = plugin.memory_str(handle)?;
-
+) -> std::result::Result<(), Error> {
     #[derive(Deserialize)]
     struct Input {
         repo: Repo,
         filter: Option<IssueFilter>,
     }
 
-    let input: Input = serde_json::from_str(input_str)?;
+    let input: Input = get_input(plugin, inputs[0].clone())?;
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let result = rt.block_on(service.list_issues(&input.repo, input.filter.as_ref()));
+    let result = block_on(service.list_issues(&input.repo, input.filter.as_ref()))?;
 
-    let response = match result {
-        Ok(issues) => HostResult::success(issues),
-        Err(e) => {
-            let (msg, code) = map_error(e);
-            HostResult::error(msg, code)
-        }
+    let output = match result {
+        Ok(issues) => GitHubHostOutput::Success(issues),
+        Err(e) => GitHubHostOutput::Error(map_error(e)),
     };
 
-    let json = serde_json::to_string(&response)?;
-    let handle = plugin.memory_alloc(json.len() as u64)?;
-    let output_offset = handle.offset();
-
-    {
-        let mem_str = plugin.memory_str_mut(handle)?;
-        unsafe {
-            let slice = mem_str.as_bytes_mut();
-            slice.copy_from_slice(json.as_bytes());
-        }
-    }
-
-    outputs[0] = Val::I64(output_offset as i64);
-
+    outputs[0] = set_output(plugin, &output)?;
     Ok(())
 }
 
@@ -353,48 +348,26 @@ fn github_get_issue(
     inputs: &[Val],
     outputs: &mut [Val],
     _user_data: UserData<()>,
-) -> Result<(), Error> {
-    let offset = inputs[0].unwrap_i64() as u64;
-    let len = inputs[1].unwrap_i64() as u64;
-    let handle = unsafe { MemoryHandle::new(offset, len) };
-    let input_str = plugin.memory_str(handle)?;
-
+) -> std::result::Result<(), Error> {
     #[derive(Deserialize)]
     struct Input {
         repo: Repo,
         number: u64,
     }
 
-    let input: Input = serde_json::from_str(input_str)?;
+    let input: Input = get_input(plugin, inputs[0].clone())?;
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let result = rt.block_on(service.get_issue(&input.repo, input.number));
+    let result = block_on(service.get_issue(&input.repo, input.number))?;
 
-    let response = match result {
-        Ok(issue) => HostResult::success(issue),
-        Err(e) => {
-            let (msg, code) = map_error(e);
-            HostResult::error(msg, code)
-        }
+    let output = match result {
+        Ok(issue) => GitHubHostOutput::Success(issue),
+        Err(e) => GitHubHostOutput::Error(map_error(e)),
     };
 
-    let json = serde_json::to_string(&response)?;
-    let handle = plugin.memory_alloc(json.len() as u64)?;
-    let output_offset = handle.offset();
-
-    {
-        let mem_str = plugin.memory_str_mut(handle)?;
-        unsafe {
-            let slice = mem_str.as_bytes_mut();
-            slice.copy_from_slice(json.as_bytes());
-        }
-    }
-
-    outputs[0] = Val::I64(output_offset as i64);
-
+    outputs[0] = set_output(plugin, &output)?;
     Ok(())
 }
 
@@ -403,48 +376,26 @@ fn github_create_pr(
     inputs: &[Val],
     outputs: &mut [Val],
     _user_data: UserData<()>,
-) -> Result<(), Error> {
-    let offset = inputs[0].unwrap_i64() as u64;
-    let len = inputs[1].unwrap_i64() as u64;
-    let handle = unsafe { MemoryHandle::new(offset, len) };
-    let input_str = plugin.memory_str(handle)?;
-
+) -> std::result::Result<(), Error> {
     #[derive(Deserialize)]
     struct Input {
         repo: Repo,
         spec: CreatePRSpec,
     }
 
-    let input: Input = serde_json::from_str(input_str)?;
+    let input: Input = get_input(plugin, inputs[0].clone())?;
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let result = rt.block_on(service.create_pr(&input.repo, input.spec));
+    let result = block_on(service.create_pr(&input.repo, input.spec))?;
 
-    let response = match result {
-        Ok(pr) => HostResult::success(pr),
-        Err(e) => {
-            let (msg, code) = map_error(e);
-            HostResult::error(msg, code)
-        }
+    let output = match result {
+        Ok(pr) => GitHubHostOutput::Success(pr),
+        Err(e) => GitHubHostOutput::Error(map_error(e)),
     };
 
-    let json = serde_json::to_string(&response)?;
-    let handle = plugin.memory_alloc(json.len() as u64)?;
-    let output_offset = handle.offset();
-
-    {
-        let mem_str = plugin.memory_str_mut(handle)?;
-        unsafe {
-            let slice = mem_str.as_bytes_mut();
-            slice.copy_from_slice(json.as_bytes());
-        }
-    }
-
-    outputs[0] = Val::I64(output_offset as i64);
-
+    outputs[0] = set_output(plugin, &output)?;
     Ok(())
 }
 
@@ -453,48 +404,26 @@ fn github_list_prs(
     inputs: &[Val],
     outputs: &mut [Val],
     _user_data: UserData<()>,
-) -> Result<(), Error> {
-    let offset = inputs[0].unwrap_i64() as u64;
-    let len = inputs[1].unwrap_i64() as u64;
-    let handle = unsafe { MemoryHandle::new(offset, len) };
-    let input_str = plugin.memory_str(handle)?;
-
+) -> std::result::Result<(), Error> {
     #[derive(Deserialize)]
     struct Input {
         repo: Repo,
         filter: Option<PRFilter>,
     }
 
-    let input: Input = serde_json::from_str(input_str)?;
+    let input: Input = get_input(plugin, inputs[0].clone())?;
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let result = rt.block_on(service.list_prs(&input.repo, input.filter.as_ref()));
+    let result = block_on(service.list_prs(&input.repo, input.filter.as_ref()))?;
 
-    let response = match result {
-        Ok(prs) => HostResult::success(prs),
-        Err(e) => {
-            let (msg, code) = map_error(e);
-            HostResult::error(msg, code)
-        }
+    let output = match result {
+        Ok(prs) => GitHubHostOutput::Success(prs),
+        Err(e) => GitHubHostOutput::Error(map_error(e)),
     };
 
-    let json = serde_json::to_string(&response)?;
-    let handle = plugin.memory_alloc(json.len() as u64)?;
-    let output_offset = handle.offset();
-
-    {
-        let mem_str = plugin.memory_str_mut(handle)?;
-        unsafe {
-            let slice = mem_str.as_bytes_mut();
-            slice.copy_from_slice(json.as_bytes());
-        }
-    }
-
-    outputs[0] = Val::I64(output_offset as i64);
-
+    outputs[0] = set_output(plugin, &output)?;
     Ok(())
 }
 

@@ -1,7 +1,10 @@
 use crate::host_functions;
+use crate::services::git;
+use crate::services::github;
+use crate::services::log;
 use crate::services::Services;
 use anyhow::{Context, Result};
-use extism::{Function, Manifest, Plugin, UserData, ValType};
+use extism::{Manifest, Plugin};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -34,24 +37,25 @@ impl PluginManager {
     fn load_plugin(path: &PathBuf, services: &Services) -> Result<Plugin> {
         let manifest = Manifest::new([extism::Wasm::file(path)]);
 
-        let mut functions = vec![
-            Function::new(
-                "git_get_branch",
-                [],
-                [ValType::I64],
-                UserData::new(()),
-                host_functions::git_get_branch,
-            ),
-            Function::new(
-                "log_info",
-                [ValType::I64, ValType::I64], // ptr, len
-                [],
-                UserData::new(()),
-                host_functions::log_info,
-            ),
-        ];
+        let mut functions = vec![];
 
+        // Git functions (4 functions)
+        functions.push(git::git_get_branch_host_fn(services.git.clone()));
+        functions.push(git::git_get_worktree_host_fn(services.git.clone()));
+        functions.push(git::git_get_dirty_files_host_fn(services.git.clone()));
+        functions.push(git::git_get_recent_commits_host_fn(services.git.clone()));
+
+        // Docker functions (3 functions)
         functions.extend(host_functions::docker_functions(services.docker.clone()));
+
+        // Log functions (3 functions)
+        let services_arc = Arc::new(services.clone());
+        functions.push(log::log_info_host_fn(services_arc.clone()));
+        functions.push(log::log_error_host_fn(services_arc.clone()));
+        functions.push(log::emit_event_host_fn(services_arc));
+
+        // GitHub functions (4 functions) - always register, they check GITHUB_TOKEN at runtime
+        functions.extend(github::register_host_functions());
 
         Plugin::new(&manifest, functions, true).context("Failed to create plugin")
     }

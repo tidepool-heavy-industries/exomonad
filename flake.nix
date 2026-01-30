@@ -119,25 +119,24 @@
           # WASM: Cross-compilation to WebAssembly
           wasm = pkgs.mkShell {
             packages = [
-              wasmPkgs.all_9_10  # GHC 9.10 WASM toolchain
+              wasmPkgs.all_9_12  # GHC 9.12 WASM toolchain (matches native)
               pkgs.wizer
             ] ++ commonPkgs ++ nodePkgs;
 
             shellHook = ''
               echo "╔═══════════════════════════════════════════════════════════╗"
-              echo "║            WASM Cross-Compilation Shell                   ║"
+              echo "║            WASM Cross-Compilation Shell (GHC 9.12)        ║"
               echo "╚═══════════════════════════════════════════════════════════╝"
               echo ""
               echo "Tools available:"
               echo "  wasm32-wasi-ghc --version"
-              echo "  wasm32-wasi-cabal build exomonad-wasm"
+              echo "  wasm32-wasi-cabal build --project-file=cabal.project.wasm wasm-guest"
               echo ""
-              echo "Build pipeline:"
-              echo "  cd repo"
-              echo "  wasm32-wasi-cabal build exomonad-wasm"
-              echo "  # Output: dist-newstyle/.../exomonad-wasm.wasm"
+              echo "Build wasm-guest:"
+              echo "  wasm32-wasi-cabal build --project-file=cabal.project.wasm wasm-guest"
               echo ""
-              echo "NOTE: Using GHC 9.10 for WASM (9.12 not yet available in ghc-wasm-meta)"
+              echo "Generate WASM freeze file:"
+              echo "  wasm32-wasi-cabal freeze --project-file=cabal.project.wasm"
               echo ""
             '';
           };

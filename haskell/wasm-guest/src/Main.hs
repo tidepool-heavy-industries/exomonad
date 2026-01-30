@@ -15,6 +15,7 @@ import Control.Exception (SomeException, try)
 import Control.Monad.Freer
 import Data.Aeson (FromJSON, ToJSON, Value, object, (.=))
 import Data.Aeson qualified as Aeson
+import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as BSL
 import ExoMonad.Guest.HostCall
 import Extism.PDK (input, output)
@@ -55,7 +56,7 @@ foreign export ccall handle_pre_tool_use :: IO CInt
 handle_mcp_call :: IO CInt
 handle_mcp_call = wrapHandler $ do
   -- Just echo for now
-  inp <- input
+  inp <- input @ByteString
   output inp
   pure 0
 
