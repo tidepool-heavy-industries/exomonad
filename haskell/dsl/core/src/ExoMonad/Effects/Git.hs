@@ -22,6 +22,7 @@ module ExoMonad.Effects.Git
     getRecentCommits,
     getCurrentBranch,
     getCommitsAhead,
+    fetchRemote,
 
     -- * Types
     WorktreeInfo (..),
@@ -67,9 +68,9 @@ instance ToJSON WorktreeInfo where
 -- EFFECT
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Git effect for querying repository state.
+-- | Git effect for repository operations.
 --
--- Read-only queries against git.
+-- Mostly read-only queries, plus fetch for remote sync.
 data Git r where
   -- | Get worktree/repo information.
   -- Returns Nothing if not in a git repository.
@@ -82,6 +83,9 @@ data Git r where
   GetCurrentBranch :: Git Text
   -- | Get number of commits ahead of a ref (e.g., "origin/main").
   GetCommitsAhead :: Text -> Git Int
+  -- | Fetch from a remote (e.g., "origin") to update refs.
+  -- Optionally specify a refspec (e.g., "main" to fetch only main).
+  FetchRemote :: Text -> Maybe Text -> Git ()
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SMART CONSTRUCTORS
@@ -106,3 +110,9 @@ getCurrentBranch = send GetCurrentBranch
 -- | Get number of commits ahead of a ref (e.g., "origin/main").
 getCommitsAhead :: (Member Git effs) => Text -> Eff effs Int
 getCommitsAhead = send . GetCommitsAhead
+
+-- | Fetch from a remote to update refs.
+-- Example: @fetchRemote "origin" (Just "main")@ fetches only main from origin.
+-- Example: @fetchRemote "origin" Nothing@ fetches all refs from origin.
+fetchRemote :: (Member Git effs) => Text -> Maybe Text -> Eff effs ()
+fetchRemote remote refspec = send $ FetchRemote remote refspec

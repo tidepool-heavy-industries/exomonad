@@ -34,7 +34,7 @@ import ExoMonad.Effect.Types (Return)
 import ExoMonad.Effects.DockerSpawner (ContainerId (..), DockerSpawner, ExecResult (..), SpawnConfig (..), execContainer, spawnContainer, stopContainer)
 import ExoMonad.Effects.Env (Env, getEnv)
 import ExoMonad.Effects.FileSystem (FileSystem, directoryExists, fileExists, writeFileText)
-import ExoMonad.Effects.Git (Git, WorktreeInfo (..), getWorktreeInfo)
+import ExoMonad.Effects.Git (Git, WorktreeInfo (..), fetchRemote, getWorktreeInfo)
 import ExoMonad.Effects.GitHub (GitHub, Issue (..), IssueState (..), Repo (..), getIssue)
 import ExoMonad.Effects.Worktree (Worktree, WorktreePath (..), WorktreeSpec (..), createWorktree, deleteWorktree, listWorktrees)
 import ExoMonad.Effects.Zellij (LayoutSpec (..), TabConfig (..), TabId (..), Zellij, checkZellijEnv, generateLayout, newTab)
@@ -122,6 +122,11 @@ spawnAgentsLogic args = do
           }
     Just _ -> do
       logInfo $ "Starting spawn_agents for issues: " <> T.intercalate ", " args.issueNumbers
+
+      -- Fetch latest main from origin before creating worktrees
+      logInfo "Fetching origin/main to ensure worktrees are based on latest code"
+      fetchRemote "origin" (Just "main")
+
       -- 2. Determine Repo Root and Worktree Base Path
       spawnModeEnv <- getEnv "SPAWN_MODE"
       let spawnMode = parseSpawnMode spawnModeEnv

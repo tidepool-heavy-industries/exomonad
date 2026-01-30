@@ -1,3 +1,5 @@
+{-# LANGUAGE TypeApplications #-}
+
 -- | Git effect interpreter - CLI client.
 --
 -- Implements Git effect by calling git CLI commands.
@@ -37,14 +39,17 @@ runGit ::
   Eff effs Text ->
   -- | Handler for GetCommitsAhead
   (Text -> Eff effs Int) ->
+  -- | Handler for FetchRemote
+  (Text -> Maybe Text -> Eff effs ()) ->
   Eff (Git ': effs) a ->
   Eff effs a
-runGit hWorktree hDirty hCommits hBranch hAhead = interpret $ \case
+runGit hWorktree hDirty hCommits hBranch hAhead hFetch = interpret $ \case
   GetWorktreeInfo -> hWorktree
   GetDirtyFiles -> hDirty
   GetRecentCommits n -> hCommits n
   GetCurrentBranch -> hBranch
   GetCommitsAhead ref -> hAhead ref
+  FetchRemote remote refspec -> hFetch remote refspec
 
 -- | Run Git effects using the git CLI.
 runGitIO :: (LastMember IO effs) => Eff (Git ': effs) a -> Eff effs a
@@ -54,6 +59,7 @@ runGitIO = interpret $ \case
   GetRecentCommits n -> sendM $ getGitRecentCommits n
   GetCurrentBranch -> sendM getGitCurrentBranch
   GetCommitsAhead ref -> sendM $ getGitCommitsAhead ref
+  FetchRemote remote refspec -> sendM $ gitFetchRemote remote refspec
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GIT CLI FUNCTIONS
@@ -171,6 +177,15 @@ getGitCommitsAhead ref = do
         [(n, "")] -> pure n
         _ -> pure 0
     Right _ -> pure 0
+
+-- | Fetch from a remote, optionally with a refspec.
+gitFetchRemote :: Text -> Maybe Text -> IO ()
+gitFetchRemote remote mRefspec = do
+  let args = case mRefspec of
+        Just refspec -> ["fetch", T.unpack remote, T.unpack refspec]
+        Nothing -> ["fetch", T.unpack remote]
+  _ <- try @SomeException $ readProcessWithExitCode "git" args ""
+  pure ()
 
 -- | Run a git command and return stdout on success.
 gitCommand :: [String] -> IO (Maybe String)
