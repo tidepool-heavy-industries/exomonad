@@ -24,7 +24,7 @@ runGitRemote mContainer workDir = interpret $ \case
     container <- case mContainer of
       Just c -> pure c
       Nothing -> error "Git operation requested but no container ID provided (remote execution requires a container)"
-    
+
     case op of
       GetWorktreeInfo -> do
         -- This is a bit complex to implement perfectly for remote containers without more logic,

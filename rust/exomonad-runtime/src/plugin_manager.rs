@@ -55,7 +55,7 @@ impl PluginManager {
 
     pub async fn reload(&self, _services: Arc<Services>) -> Result<()> {
         let new_plugin = Self::load_plugin(&self.wasm_path)?;
-        
+
         // Swap it without blocking the async runtime
         let plugin_lock = self.plugin.clone();
         tokio::task::spawn_blocking(move || {

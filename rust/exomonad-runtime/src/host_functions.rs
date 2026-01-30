@@ -9,7 +9,9 @@ pub fn git_get_branch(
 ) -> Result<(), Error> {
     info!("Host function called: git_get_branch");
     if outputs.is_empty() {
-        return Err(Error::msg("git_get_branch: expected at least one output value"));
+        return Err(Error::msg(
+            "git_get_branch: expected at least one output value",
+        ));
     }
     outputs[0] = Val::I64(0);
     Ok(())
