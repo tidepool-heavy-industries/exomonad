@@ -1,10 +1,11 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
 module Main where
 
 import Control.Monad (forM_)
 import System.Directory (getCurrentDirectory)
-import System.Environment (getArgs, lookupEnv)
+import System.Environment (lookupEnv)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.Text.Encoding as T
@@ -12,6 +13,7 @@ import Data.Aeson (eitherDecode, encode)
 import qualified Data.ByteString.Lazy as BL
 import Data.Maybe (fromMaybe)
 import Control.Monad.Managed
+import Options.Applicative
 
 import ExoMonad.Control.Server (runServer)
 import ExoMonad.Control.Types (ServerConfig(..))
@@ -25,9 +27,43 @@ import ExoMonad.Control.Version (versionString)
 import ExoMonad.Training.Format (formatTrainingFromSkeleton)
 import ExoMonad.Control.Workflow.Store (initWorkflowStore)
 
+data Command
+  = Run { noTui :: Bool }
+  | FormatTraining { skeletonFile :: FilePath }
+
+data ControlServerOpts = ControlServerOpts
+  { cmd :: Command
+  }
+
+parser :: Parser ControlServerOpts
+parser = ControlServerOpts <$> (subparser
+  ( Options.Applicative.command "run" (info (runParser <**> helper) (progDesc "Start control server (default)"))
+ <> Options.Applicative.command "format-training" (info (formatParser <**> helper) (progDesc "Format annotated skeletons to training JSONL"))
+  ) <|> runParser) -- Default to run if no subcommand matches
+
+runParser :: Parser Command
+runParser = Run
+  <$> switch (long "no-tui" <> help "Start control server without TUI sidebar listener")
+
+formatParser :: Parser Command
+formatParser = FormatTraining
+  <$> strArgument (metavar "SKELETON_FILE" <> help "Path to skeleton file")
+
+optsInfo :: ParserInfo ControlServerOpts
+optsInfo = info (helper <*> versionOption <*> parser)
+  ( fullDesc
+ <> progDesc "ExoMonad Control Server - Unix socket control server for Claude Code++ integration"
+ <> header "exomonad-control-server - The brain of the operation" )
+
+versionOption :: Parser (a -> a)
+versionOption = infoOption (T.unpack versionString)
+  ( long "version"
+ <> short 'V'
+ <> help "Show version" )
+
 main :: IO ()
 main = do
-  args <- getArgs
+  opts <- execParser optsInfo
 
   -- Extract project directory early for dual logger initialization
   projectDirEnv <- lookupEnv "EXOMONAD_PROJECT_DIR"
@@ -40,14 +76,9 @@ main = do
     liftIO $ do
       logInfo logger $ "Session log: " <> T.pack projectDir <> "/.exomonad/logs/control-server-*.log"
 
-      case args of
-        ["format-training", skeletonFile] -> runFormatTrainingMode logger skeletonFile
-        ["--help"] -> printUsage
-        ["-h"] -> printUsage
-        ["--version"] -> TIO.putStrLn versionString
-        ["-V"] -> TIO.putStrLn versionString
-        ["--no-tui"] -> runServerMode logger projectDir True
-        _ -> runServerMode logger projectDir False
+      case opts.cmd of
+        Run noTui -> runServerMode logger projectDir noTui
+        FormatTraining file -> runFormatTrainingMode logger file
 
 runServerMode :: Logger -> FilePath -> Bool -> IO ()
 runServerMode logger projectDir noTui = do
