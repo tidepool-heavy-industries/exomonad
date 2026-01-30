@@ -638,6 +638,9 @@ pub enum ControlMessage {
         tool_name: String,
         /// Tool arguments.
         arguments: Value,
+        /// Container ID for remote execution.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        container_id: Option<String>,
         /// Optional role for routing (not serialized).
         #[serde(skip)]
         role: Option<Role>,

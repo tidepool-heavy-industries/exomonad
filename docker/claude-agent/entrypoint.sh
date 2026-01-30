@@ -171,11 +171,8 @@ if [ ! -f "$GEMINI_CONFIG_DIR/settings.json" ]; then
     MCP_CONFIG=""
     if [ -n "${CONTROL_SERVER_URL:-}" ]; then
         # Derive container name for remote git execution
-        if [ -n "${EXOMONAD_ISSUE_ID:-}" ]; then
-            GEMINI_CONTAINER_NAME="exomonad-agent-${EXOMONAD_ISSUE_ID}"
-        else
-            GEMINI_CONTAINER_NAME="${HOSTNAME:-}"
-        fi
+        GEMINI_CONTAINER_NAME="$(derive_container_name)"
+        
         echo "Adding Gemini MCP config for: ${CONTROL_SERVER_URL}/role/${ROLE}/mcp?container=${GEMINI_CONTAINER_NAME}"
         MCP_CONFIG=",
   \"mcpServers\": {
@@ -256,13 +253,24 @@ write_mcp_config() {
     echo "✓ MCP config written to $target"
 }
 
+derive_container_name() {
+    if [ -n "${EXOMONAD_ISSUE_ID:-}" ]; then
+        echo "exomonad-agent-${EXOMONAD_ISSUE_ID}"
+    elif [ -r /etc/hostname ] && [ -s /etc/hostname ]; then
+        tr -d ' \t\r\n' < /etc/hostname
+    elif command -v hostname >/dev/null 2>&1; then
+        hostname
+    elif [ -n "${HOSTNAME:-}" ]; then
+        echo "${HOSTNAME}"
+    else
+        echo "Error: Unable to determine container name. Set EXOMONAD_ISSUE_ID or ensure /etc/hostname, hostname, or HOSTNAME is available." >&2
+        exit 1
+    fi
+}
+
 if [ -n "${CONTROL_SERVER_URL:-}" ]; then
     # Derive container name for remote git execution
-    if [ -n "${EXOMONAD_ISSUE_ID:-}" ]; then
-        CONTAINER_NAME="exomonad-agent-${EXOMONAD_ISSUE_ID}"
-    else
-        CONTAINER_NAME="${HOSTNAME:-}"  # For TL/PM, HOSTNAME is container name
-    fi
+    CONTAINER_NAME="$(derive_container_name)"
 
     echo "Configuring MCP via TCP: ${CONTROL_SERVER_URL}/role/${ROLE}/mcp?container=${CONTAINER_NAME}"
     write_mcp_config '{

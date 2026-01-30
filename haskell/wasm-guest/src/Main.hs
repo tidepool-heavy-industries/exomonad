@@ -15,15 +15,15 @@ import Control.Exception (SomeException, try)
 import Control.Monad.Freer
 import Data.Aeson (FromJSON, ToJSON, Value, object, (.=))
 import Data.Aeson qualified as Aeson
-import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as BSL
-import Data.Text (Text, pack)
 import ExoMonad.Guest.HostCall
 import Extism.PDK (input, output)
 import Foreign.C.Types (CInt (..))
 import GHC.Generics (Generic)
 
 -- Define an Effect
+-- NOTE: This duplicates ExoMonad.Effects.Git because that module is excluded
+-- from WASM builds in exomonad-core.
 data Git r where
   GetBranch :: Git String
 
@@ -45,21 +45,21 @@ runGit = interpret $ \case
   GetBranch -> sendM $ do
     res <- callHost host_git_get_branch GetBranchReq
     case res of
-      Left err -> error err
+      Left err -> pure ("Error: " ++ err)
       Right (GetBranchResp b) -> pure b
 
-foreign export ccall handle_mcp_call :: IO Int32
+foreign export ccall handle_mcp_call :: IO CInt
 
-foreign export ccall handle_pre_tool_use :: IO Int32
+foreign export ccall handle_pre_tool_use :: IO CInt
 
-handle_mcp_call :: IO Int32
+handle_mcp_call :: IO CInt
 handle_mcp_call = wrapHandler $ do
   -- Just echo for now
   inp <- input
   output inp
   pure 0
 
-handle_pre_tool_use :: IO Int32
+handle_pre_tool_use :: IO CInt
 handle_pre_tool_use = wrapHandler $ do
   -- logic that uses Git
   br <- runM $ runGit $ getBranch
@@ -70,7 +70,7 @@ handle_pre_tool_use = wrapHandler $ do
 getBranch :: (Member Git effs) => Eff effs String
 getBranch = send GetBranch
 
-wrapHandler :: IO Int32 -> IO Int32
+wrapHandler :: IO CInt -> IO CInt
 wrapHandler action = do
   res <- try @SomeException action
   case res of

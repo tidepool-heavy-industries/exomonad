@@ -17,14 +17,14 @@ import ExoMonad.Control.Effects.SshExec (ExecRequest (..), ExecResult (..), SshE
 import ExoMonad.Effects.Justfile (JustResult (..), Justfile (..))
 
 -- | Interpreter: uses SshExec to run just commands remotely
--- Takes a container name and a working directory (relative to container root).
-runJustfileRemote :: (Member SshExec effs) => Text -> FilePath -> Eff (Justfile ': effs) a -> Eff effs a
-runJustfileRemote container workDir = interpret $ \case
+-- Takes a container name (optional) and a working directory (relative to container root).
+runJustfileRemote :: (Member SshExec effs) => Maybe Text -> FilePath -> Eff (Justfile ': effs) a -> Eff effs a
+runJustfileRemote mContainer workDir = interpret $ \case
   RunRecipe recipe args -> do
     result <-
       execCommand $
         ExecRequest
-          { container = Just container,
+          { container = mContainer,
             command = "just",
             args = recipe : args,
             workingDir = workDir,

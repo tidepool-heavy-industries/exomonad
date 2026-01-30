@@ -20,7 +20,7 @@ executable wasm-guest
         text,
         aeson,
         freer-simple,
-        extism-pdk
+        extism-pdk >= 0.1 && < 1
 
     if arch(wasm32)
         ghc-options:

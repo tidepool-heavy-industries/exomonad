@@ -7,6 +7,7 @@ module ExoMonad.Guest.HostCall
   )
 where
 
+import Control.Exception (bracket)
 import Data.Aeson (FromJSON, ToJSON, eitherDecode, encode)
 import Data.ByteString.Lazy (fromStrict, toStrict)
 import Data.Word (Word64)
@@ -18,20 +19,17 @@ callHost :: (ToJSON req, FromJSON resp) => (Word64 -> IO Word64) -> req -> IO (E
 callHost rawFn request = do
   -- Encode and allocate
   let reqBs = toStrict (encode request)
-  reqMem <- alloc reqBs
 
-  -- Call host
-  respOffset <- rawFn (unMemoryOffset reqMem)
+  bracket (alloc reqBs) free $ \reqMem -> do
+    -- Call host
+    respOffset <- rawFn (unMemoryOffset reqMem)
 
-  -- Read response
-  let respMem = MemoryOffset respOffset
-  respBs <- load respMem
+    -- Read response (ensure we free the response memory)
+    let respMem = MemoryOffset respOffset
+    bracket (pure respMem) free $ \_ -> do
+      respBs <- load respMem
 
-  -- Cleanup
-  free reqMem
-  free respMem
-
-  -- Decode
-  case eitherDecode (fromStrict respBs) of
-    Left err -> pure $ Left ("Decode error: " ++ err)
-    Right v -> pure $ Right v
+      -- Decode
+      case eitherDecode (fromStrict respBs) of
+        Left err -> pure $ Left ("Decode error: " ++ err)
+        Right v -> pure $ Right v
