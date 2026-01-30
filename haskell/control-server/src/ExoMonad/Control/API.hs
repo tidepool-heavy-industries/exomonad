@@ -212,12 +212,12 @@ type ExoMonadControlAPI =
     -- \| Health check
     :<|> "ping" :> Get '[JSON] Text
     -- \| Role-based MCP tool list (legacy REST endpoint)
-    :<|> "role" :> Capture "slug" Text :> "mcp" :> "tools" :> Header "Mcp-Session-Id" Text :> Get '[JSON] [ToolDefinition]
+    :<|> "role" :> Capture "slug" Text :> "mcp" :> "tools" :> Header "Mcp-Session-Id" Text :> QueryParam "container" Text :> Get '[JSON] [ToolDefinition]
     -- \| Role-based MCP tool call (legacy REST endpoint)
-    :<|> "role" :> Capture "slug" Text :> "mcp" :> "call" :> Header "Mcp-Session-Id" Text :> ReqBody '[JSON] McpToolCallRequest :> Post '[JSON] ControlResponse
+    :<|> "role" :> Capture "slug" Text :> "mcp" :> "call" :> Header "Mcp-Session-Id" Text :> QueryParam "container" Text :> ReqBody '[JSON] McpToolCallRequest :> Post '[JSON] ControlResponse
     -- \| Unified MCP JSON-RPC endpoint (for Claude Code HTTP transport)
     -- Handles: initialize, notifications/initialized, tools/list, tools/call, ping
-    :<|> "role" :> Capture "slug" Text :> "mcp" :> Header "Mcp-Session-Id" Text :> ReqBody '[JSON] McpJsonRpcRequest :> Post '[JSON] McpJsonRpcResponse
+    :<|> "role" :> Capture "slug" Text :> "mcp" :> Header "Mcp-Session-Id" Text :> QueryParam "container" Text :> ReqBody '[JSON] McpJsonRpcRequest :> Post '[JSON] McpJsonRpcResponse
     -- \| Agent status dashboard
     :<|> "api" :> "agents" :> Get '[JSON] AgentsResponse
     -- \| Agent logs

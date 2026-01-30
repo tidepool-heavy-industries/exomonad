@@ -15,11 +15,13 @@ where
 import Control.Concurrent.STM (TVar)
 import Control.Monad.Freer (Eff, runM)
 import Control.Monad.Freer.Reader (Reader, runReader)
+import Data.Text (Text)
 -- Effects
 
 -- Interpreters
 import ExoMonad.Control.Effects.DockerCtl (runDockerCtl)
 import ExoMonad.Control.Effects.Effector (Effector, runEffectorIO)
+import ExoMonad.Control.Effects.Git (runGitRemote)
 import ExoMonad.Control.Effects.Justfile (runJustfileRemote)
 import ExoMonad.Control.Effects.SshExec (SshExec, runSshExec)
 import ExoMonad.Control.Hook.CircuitBreaker (CircuitBreakerMap)
@@ -43,7 +45,6 @@ import ExoMonad.Effects.Zellij (Zellij)
 import ExoMonad.Env.Interpreter (runEnvIO)
 import ExoMonad.FileSystem.Interpreter (runFileSystemIO)
 import ExoMonad.Gemini.Interpreter (runGeminiIO)
-import ExoMonad.Git.Interpreter (runGitIO)
 import ExoMonad.GitHub.Interpreter (defaultGitHubConfig, runGitHubIO)
 import ExoMonad.Worktree.Interpreter (defaultWorktreeConfig, runWorktreeIO)
 import ExoMonad.Zellij.Interpreter (runZellijIO)
@@ -76,8 +77,13 @@ type AppEffects =
    ]
 
 -- | Run the application effect stack.
-runApp :: ServerConfig -> Tracer -> CircuitBreakerMap -> Logger -> TVar [AgentStatus] -> Eff AppEffects a -> IO a
-runApp config tracer cbMap logger agentStore action = do
+--
+-- REQUIRES a container ID for git operations. This is a deliberate design choice:
+-- - MCP tools need to run git commands in the agent's container, not locally
+-- - Without a container ID, we can't know where to run git commands
+-- - Pass Nothing only for non-git operations (will fail if git is used)
+runApp :: ServerConfig -> Tracer -> CircuitBreakerMap -> Logger -> TVar [AgentStatus] -> Maybe Text -> Eff AppEffects a -> IO a
+runApp config tracer cbMap logger agentStore mContainerId action = do
   -- Resolve paths
   binDir <- Paths.dockerBinDir
   let dockerCtlPath = Paths.dockerCtlBin binDir
@@ -91,6 +97,11 @@ runApp config tracer cbMap logger agentStore action = do
   -- Retry config
   let retryCfg = defaultRetryConfig {tracer = Just tracer}
 
+  -- Container ID for remote execution
+  -- If no container ID is provided, git operations will fail with a helpful error
+  let containerId = case mContainerId of
+        Just c -> c
+        Nothing -> "" -- Empty container ID - runGitRemote will fail if git operations are attempted
   runM $
     runLog Debug $
       runTime $
@@ -104,12 +115,9 @@ runApp config tracer cbMap logger agentStore action = do
                       withRetry retryCfg $
                         runZellijIO $
                           runSshExec logger dockerCtlPath $
-                            runGitIO $
+                            runGitRemote containerId "." $
                               runWorktreeIO (defaultWorktreeConfig repoRoot) $
-                                runEffectorIO logger
-                                -- Using empty container/workdir for Justfile interpreter since we are running locally in this context
-                                $
-                                  runJustfileRemote "" "" $
+                                runEffectorIO logger $
+                                  runJustfileRemote containerId "" $
                                     runDockerCtl logger dockerCtlPath agentStore $
-                                      runGeminiIO $
-                                        action
+                                      runGeminiIO action

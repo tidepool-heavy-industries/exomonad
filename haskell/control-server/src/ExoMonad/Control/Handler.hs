@@ -51,8 +51,8 @@ import PyF (fmt)
 handleMessage :: Logger -> ServerConfig -> Tracer -> TraceContext -> CircuitBreakerMap -> TVar [AgentStatus] -> ControlMessage -> IO ControlResponse
 handleMessage logger config tracer traceCtx cbMap agentStore = \case
   HookEvent input r rl cid -> handleHook logger tracer config input r rl cid cbMap agentStore
-  MCPToolCall reqId name args ->
-    handleMcpToolTyped logger config tracer traceCtx cbMap agentStore reqId name args
+  MCPToolCall reqId name args mContainerId ->
+    handleMcpToolTyped logger config tracer traceCtx cbMap agentStore reqId name args mContainerId
   ToolsListRequest -> handleToolsList logger config
   Ping -> pure Pong
 
@@ -67,13 +67,13 @@ handleToolsList logger config = do
   pure $ ToolsListResponse tools
 
 -- | Handle MCP tool call using Typed Role DSL.
-handleMcpToolTyped :: Logger -> ServerConfig -> Tracer -> TraceContext -> CircuitBreakerMap -> TVar [AgentStatus] -> T.Text -> T.Text -> Aeson.Value -> IO ControlResponse
-handleMcpToolTyped logger config tracer traceCtx cbMap agentStore reqId toolName args =
+handleMcpToolTyped :: Logger -> ServerConfig -> Tracer -> TraceContext -> CircuitBreakerMap -> TVar [AgentStatus] -> T.Text -> T.Text -> Aeson.Value -> Maybe T.Text -> IO ControlResponse
+handleMcpToolTyped logger config tracer traceCtx cbMap agentStore reqId toolName args mContainerId =
   withMcpTracing logger config traceCtx reqId toolName args $ do
     let effectiveRole = fromMaybe config.defaultRole (config.role >>= roleFromText)
         roleStr = show effectiveRole
 
-    logInfo logger [fmt|[MCP:{reqId}] Dispatching: {toolName} (Role: {roleStr})|]
+    logInfo logger [fmt|[MCP:{reqId}] Dispatching: {toolName} (Role: {roleStr}) Container: {show mContainerId}|]
 
     -- Dispatch based on role
     -- Uses Generic 'dispatchTool' on the 'mode :- record' structure
@@ -105,7 +105,8 @@ handleMcpToolTyped logger config tracer traceCtx cbMap agentStore reqId toolName
               <> T.intercalate ", " (Set.toList available)
       ToolFound action -> do
         -- Execute the action within the AppEffects runtime
-        resultOrErr <- try $ runApp config tracer cbMap logger agentStore action
+        -- mContainerId is passed to runApp for remote git execution
+        resultOrErr <- try $ runApp config tracer cbMap logger agentStore mContainerId action
 
         case resultOrErr of
           Left (e :: SomeException) -> do

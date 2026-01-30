@@ -157,7 +157,7 @@ data ToolDefinition = ToolDefinition
 -- Note: Rust uses snake_case (tool_name, container_id), so we apply CamelToSnake.
 data ControlMessage
   = HookEvent {input :: HookInput, runtime :: Runtime, role :: Role, containerId :: Maybe Text}
-  | MCPToolCall {id :: Text, toolName :: Text, arguments :: Value}
+  | MCPToolCall {id :: Text, toolName :: Text, arguments :: Value, containerId :: Maybe Text}
   | ToolsListRequest
   | Ping
   deriving stock (Show, Eq, Generic)

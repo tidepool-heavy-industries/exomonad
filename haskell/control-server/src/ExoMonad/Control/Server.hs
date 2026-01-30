@@ -222,7 +222,7 @@ server logger config tracer cbMap agentStore =
           traceCtx
           cbMap
           agentStore
-          (MCPToolCall req.mcpId req.toolName req.arguments)
+          (MCPToolCall req.mcpId req.toolName req.arguments Nothing)
 
       -- Flush traces (legacy support for MCP tools)
       case config.observabilityConfig of
@@ -241,14 +241,14 @@ server logger config tracer cbMap agentStore =
     handlePing :: Handler T.Text
     handlePing = pure "pong"
 
-    handleRoleMcpTools slug _mSessionId = do
+    handleRoleMcpTools slug _mSessionId _mContainer = do
       case roleFromText slug of
         Nothing -> throwError err404 {errBody = "Unknown role: " <> (Aeson.encode slug)}
         Just role -> liftIO $ do
           logDebug logger $ "[MCP:" <> slug <> "] tools/list request"
           exportMCPTools logger role
 
-    handleRoleMcpCall slug mSessionId req = do
+    handleRoleMcpCall slug mSessionId mContainer req = do
       case roleFromText slug of
         Nothing -> throwError err404 {errBody = "Unknown role: " <> (Aeson.encode slug)}
         Just role -> do
@@ -256,7 +256,7 @@ server logger config tracer cbMap agentStore =
             then liftIO $ do
               -- Use session ID from header if available, otherwise use request ID
               let sessId = fromMaybe req.mcpId mSessionId
-              logInfo logger $ "[MCP:" <> slug <> ":" <> sessId <> "] tool=" <> req.toolName
+              logInfo logger $ "[MCP:" <> slug <> ":" <> sessId <> "] tool=" <> req.toolName <> " container=" <> T.pack (show mContainer)
               traceCtx <- newTraceContext
 
               -- Update config with the role from the slug for handlers that need it
@@ -270,7 +270,7 @@ server logger config tracer cbMap agentStore =
                   traceCtx
                   cbMap
                   agentStore
-                  (MCPToolCall sessId req.toolName req.arguments)
+                  (MCPToolCall sessId req.toolName req.arguments mContainer)
 
               -- Flush traces (legacy)
               case config.observabilityConfig of
@@ -286,8 +286,8 @@ server logger config tracer cbMap agentStore =
 
     -- \| Unified MCP JSON-RPC endpoint for Claude Code HTTP transport.
     -- Dispatches based on method field: initialize, notifications/initialized, tools/list, tools/call, ping
-    handleRoleMcpJsonRpc :: T.Text -> Maybe T.Text -> McpJsonRpcRequest -> Handler McpJsonRpcResponse
-    handleRoleMcpJsonRpc slug mSessionId req = do
+    handleRoleMcpJsonRpc :: T.Text -> Maybe T.Text -> Maybe T.Text -> McpJsonRpcRequest -> Handler McpJsonRpcResponse
+    handleRoleMcpJsonRpc slug mSessionId mContainer req = do
       case roleFromText slug of
         Nothing -> throwError err404 {errBody = "Unknown role: " <> Aeson.encode slug}
         Just role -> do
@@ -348,7 +348,7 @@ server logger config tracer cbMap agentStore =
                   let sessId = fromMaybe "jsonrpc" mSessionId
                   if isToolAllowed role params.mtcpName
                     then do
-                      liftIO $ logInfo logger $ "[MCP-RPC:" <> slug <> ":" <> sessId <> "] tool=" <> params.mtcpName
+                      liftIO $ logInfo logger $ "[MCP-RPC:" <> slug <> ":" <> sessId <> "] tool=" <> params.mtcpName <> " container=" <> T.pack (show mContainer)
                       traceCtx <- liftIO newTraceContext
                       let configWithRole = config & #role .~ Just slug
                       res <-
@@ -360,7 +360,7 @@ server logger config tracer cbMap agentStore =
                             traceCtx
                             cbMap
                             agentStore
-                            (MCPToolCall sessId params.mtcpName params.mtcpArguments)
+                            (MCPToolCall sessId params.mtcpName params.mtcpArguments mContainer)
 
                       -- Convert ControlResponse to MCP tool call result
                       case res of
@@ -452,9 +452,9 @@ server logger config tracer cbMap agentStore =
           throwError $ err404 {errBody = "Agent not found for stop: " <> (Aeson.encode id_)}
         Just agent -> do
           liftIO $ logInfo logger $ "Stopping agent: " <> id_ <> " (" <> agent.asContainerId <> ")"
-          let cid = ContainerId (agent.asContainerId)
-          -- Execute stop effect
-          res <- liftIO $ runApp config tracer cbMap logger agentStore (stopContainer cid)
+          let cid = ContainerId agent.asContainerId
+          -- Execute stop effect (no git operations needed, so pass Nothing for container)
+          res <- liftIO $ runApp config tracer cbMap logger agentStore Nothing (stopContainer cid)
           case res of
             Left err -> liftIO $ logError logger $ "Failed to stop agent: " <> T.pack (show err)
             Right () -> pure ()

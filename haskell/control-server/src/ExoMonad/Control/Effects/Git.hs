@@ -93,6 +93,21 @@ runGitRemote container workDir = interpret $ \case
           [(n, "")] -> n
           _ -> 0
         else 0
+  FetchRemote remote mRefspec -> do
+    let args = case mRefspec of
+          Just refspec -> ["fetch", remote, refspec]
+          Nothing -> ["fetch", remote]
+    _ <-
+      execCommand $
+        ExecRequest
+          { container = Just container,
+            command = "git",
+            args = args,
+            workingDir = workDir,
+            env = [],
+            timeout = 120 -- Fetches can take longer
+          }
+    pure ()
 
 -- | Helper to run a git command via SshExec
 gitCommand :: (Member SshExec effs) => Text -> FilePath -> [Text] -> Eff effs (Maybe Text)
