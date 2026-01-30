@@ -453,7 +453,9 @@ server logger config tracer cbMap agentStore =
         Just agent -> do
           liftIO $ logInfo logger $ "Stopping agent: " <> id_ <> " (" <> agent.asContainerId <> ")"
           let cid = ContainerId agent.asContainerId
-          -- Execute stop effect (no git operations needed, so pass Nothing for container)
+          -- Execute stop effect. Git is intentionally disabled here by passing Nothing
+          -- for the container, so any git operations in this call path would fail and
+          -- therefore must not be used.
           res <- liftIO $ runApp config tracer cbMap logger agentStore Nothing (stopContainer cid)
           case res of
             Left err -> liftIO $ logError logger $ "Failed to stop agent: " <> T.pack (show err)
