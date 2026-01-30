@@ -43,39 +43,19 @@ import Data.Aeson (Value, toJSON, fromJSON)
 import qualified Data.Aeson as Aeson
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.List.NonEmpty (NonEmpty(..))
+import PyF (fmt)
 
 import ExoMonad.Effects.SocketClient
   ( SocketConfig(..)
   , ServiceRequest(..)
   , ServiceResponse(..)
   , ServiceError(..)
-  , AnthropicChatReq(..)
   , sendRequest
   )
 
-import ExoMonad.LLM.Types
-  ( LLMEnv(..)
-  , LLMConfig(..)
-  , mkLLMEnv
-  , AnthropicTool(..)
-  , anthropicToolToJSON
-  , AnthropicRequest(..)
-  , AnthropicMessage(..)
-  , ToolChoice(..)
-  , ThinkingConfig(..)
-  , Scheme(..)
-  , ParsedBaseUrl(..)
-  )
+import ExoMonad.LLM.Interpreter.Types
 import ExoMonad.Effects.LLMProvider
-  ( LLMComplete(..)
-  , LLMError(..)
-  , SProvider(..)
-  , AnthropicConfig(..)
-  , ThinkingBudget(..)
-  , AnthropicResponse(..)
-  , LLMProviderConfig
-  , LLMProviderResponse
-  )
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -98,7 +78,7 @@ buildAnthropicRequest
 buildAnthropicRequest config userMsg maybeTools maybeToolChoice = AnthropicRequest
   { arModel = config.acModel
   , arMaxTokens = config.acMaxTokens
-  , arMessages = [AnthropicMessage "user" userMsg]
+  , arMessages = AnthropicMessage "user" userMsg :| []
   , arSystem = config.acSystemPrompt
   , arTools = maybeTools
   , arToolChoice = maybeToolChoice
@@ -168,9 +148,9 @@ socketRequest provider env config userMsg maybeTools = case env.leConfig of
     let socketCfg = SocketConfig path 30000
     case provider of
       SAnthropic -> do
-        let req = AnthropicChat $ AnthropicChatReq
+        let req = AnthropicChat
               { model = config.acModel
-              , messages = [toJSON $ AnthropicMessage "user" userMsg]
+              , messages = toJSON (AnthropicMessage "user" userMsg) :| []
               , maxTokens = config.acMaxTokens
               , tools = maybeTools
               , system = config.acSystemPrompt
@@ -183,7 +163,7 @@ socketRequest provider env config userMsg maybeTools = case env.leConfig of
           Right (AnthropicChatResponse content stop usage) ->
             case (fromJSON (toJSON content), fromJSON (toJSON usage)) of
               (Aeson.Success c, Aeson.Success u) -> pure $ Right $ AnthropicResponse c stop u
-              (err, _) -> pure $ Left $ LLMParseError $ T.pack $ "Failed to parse content: " <> show err
+              (err, _) -> pure $ Left $ LLMParseError [fmt|Failed to parse content: {show err}|]
           Right (ErrorResponse code msg) -> pure $ Left $ LLMApiError (T.pack $ show code) msg
           Right _ -> pure $ Left $ LLMParseError "Unexpected response type for Anthropic"
           Left err -> pure $ Left $ socketErrorToLLMError err

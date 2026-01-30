@@ -157,6 +157,7 @@ library
         -- Template rendering (for Graph/Templates.hs)
         mtl,
         deriving-aeson >= 0.2,
+        PyF >= 0.11,
         ginger,
         parsec,
         template-haskell,

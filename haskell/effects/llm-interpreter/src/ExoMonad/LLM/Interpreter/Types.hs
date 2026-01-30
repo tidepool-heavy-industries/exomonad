@@ -19,7 +19,7 @@
 -- @
 --
 -- Tool wire types are now consolidated in "ExoMonad.Tool.Wire" and re-exported here.
-module ExoMonad.LLM.Types
+module ExoMonad.LLM.Interpreter.Types
   ( -- * Configuration
     LLMConfig(..)
   , AnthropicSecrets(..)
@@ -56,6 +56,7 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 import Network.HTTP.Client (Manager, newManager)
 import Network.HTTP.Client.TLS (tlsManagerSettings)
+import Data.List.NonEmpty (NonEmpty(..))
 
 -- Re-export error types from effect module
 import ExoMonad.Effects.LLMProvider (LLMError(..))
@@ -158,7 +159,7 @@ mkLLMEnv config = case config of
 data AnthropicRequest = AnthropicRequest
   { arModel       :: Text
   , arMaxTokens   :: Int
-  , arMessages    :: [AnthropicMessage]
+  , arMessages    :: NonEmpty AnthropicMessage
   , arSystem      :: Maybe Text
   , arTools       :: Maybe [Value]
   , arToolChoice  :: Maybe ToolChoice

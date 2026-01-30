@@ -13,23 +13,6 @@ module ExoMonad.Effects.SocketClient
   , ServiceRequest(..)
   , ServiceResponse(..)
   , ServiceError(..)
-  , AnthropicChatReq(..)
-  , GitHubGetIssueReq(..)
-  , GitHubCreateIssueReq(..)
-  , GitHubUpdateIssueReq(..)
-  , GitHubAddIssueLabelReq(..)
-  , GitHubRemoveIssueLabelReq(..)
-  , GitHubAddIssueAssigneeReq(..)
-  , GitHubRemoveIssueAssigneeReq(..)
-  , GitHubListIssuesReq(..)
-  , GitHubCreatePRReq(..)
-  , GitHubGetPRReq(..)
-  , GitHubListPullRequestsReq(..)
-  , GitHubGetPullRequestReviewsReq(..)
-  , GitHubGetDiscussionReq(..)
-  , OllamaGenerateReq(..)
-  , OtelSpanReq(..)
-  , OtelMetricReq(..)
   , sendRequest
   , withSocketConnection
   ) where
@@ -38,6 +21,7 @@ import Control.Exception (bracket, try, SomeException)
 import Deriving.Aeson
 import Data.Aeson (eitherDecode, encode, Value, Object)
 import Data.ByteString.Lazy (ByteString)
+import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as LBS8
 import Data.Text (Text)
@@ -52,104 +36,53 @@ data SocketConfig = SocketConfig
   , scTimeout :: Int  -- milliseconds
   } deriving (Show, Eq, Generic)
 
--- REQUEST PAYLOAD TYPES
-
-data AnthropicChatReq = AnthropicChatReq
-  { model :: Text
-  , messages :: [Value]
-  , maxTokens :: Int
-  , tools :: Maybe [Value]
-  , system :: Maybe Text
-  , thinking :: Maybe Value
-  } deriving (Show, Eq, Generic, ToJSON)
-
-data GitHubGetIssueReq = GitHubGetIssueReq { owner :: Text, repo :: Text, number :: Int, includeComments :: Bool }
-  deriving (Show, Eq, Generic, ToJSON)
-
-data GitHubCreateIssueReq = GitHubCreateIssueReq
-  { owner :: Text
-  , repo :: Text
-  , title :: Text
-  , body :: Text
-  , labels :: [Text]
-  } deriving (Show, Eq, Generic, ToJSON)
-
-data GitHubUpdateIssueReq = GitHubUpdateIssueReq
-  { owner :: Text
-  , repo :: Text
-  , number :: Int
-  , title :: Maybe Text
-  , body :: Maybe Text
-  , state :: Maybe Text
-  , labels :: Maybe [Text]
-  , assignees :: Maybe [Text]
-  } deriving (Show, Eq, Generic, ToJSON)
-
-data GitHubAddIssueLabelReq = GitHubAddIssueLabelReq { owner :: Text, repo :: Text, number :: Int, label :: Text }
-  deriving (Show, Eq, Generic, ToJSON)
-
-data GitHubRemoveIssueLabelReq = GitHubRemoveIssueLabelReq { owner :: Text, repo :: Text, number :: Int, label :: Text }
-  deriving (Show, Eq, Generic, ToJSON)
-
-data GitHubAddIssueAssigneeReq = GitHubAddIssueAssigneeReq { owner :: Text, repo :: Text, number :: Int, assignee :: Text }
-  deriving (Show, Eq, Generic, ToJSON)
-
-data GitHubRemoveIssueAssigneeReq = GitHubRemoveIssueAssigneeReq { owner :: Text, repo :: Text, number :: Int, assignee :: Text }
-  deriving (Show, Eq, Generic, ToJSON)
-
-data GitHubListIssuesReq = GitHubListIssuesReq { owner :: Text, repo :: Text, state :: Maybe Text, labels :: [Text] }
-  deriving (Show, Eq, Generic, ToJSON)
-
-data GitHubCreatePRReq = GitHubCreatePRReq { owner :: Text, repo :: Text, title :: Text, body :: Text, head :: Text, base :: Text }
-  deriving (Show, Eq, Generic, ToJSON)
-
-data GitHubGetPRReq = GitHubGetPRReq { owner :: Text, repo :: Text, number :: Int, includeDetails :: Bool }
-  deriving (Show, Eq, Generic, ToJSON)
-
-data GitHubListPullRequestsReq = GitHubListPullRequestsReq { owner :: Text, repo :: Text, state :: Maybe Text, limit :: Maybe Int }
-  deriving (Show, Eq, Generic, ToJSON)
-
-data GitHubGetPullRequestReviewsReq = GitHubGetPullRequestReviewsReq { owner :: Text, repo :: Text, number :: Int }
-  deriving (Show, Eq, Generic, ToJSON)
-
-data GitHubGetDiscussionReq = GitHubGetDiscussionReq { owner :: Text, repo :: Text, number :: Int }
-  deriving (Show, Eq, Generic, ToJSON)
-
-data OllamaGenerateReq = OllamaGenerateReq { model :: Text, prompt :: Text, system :: Maybe Text }
-  deriving (Show, Eq, Generic, ToJSON)
-
-data OtelSpanReq = OtelSpanReq { traceId :: Text, spanId :: Text, name :: Text, startNs :: Integer, endNs :: Integer, attributes :: Object }
-  deriving (Show, Eq, Generic, ToJSON)
-
-data OtelMetricReq = OtelMetricReq { name :: Text, value :: Double, otelLabels :: Object }
-  deriving (Show, Eq, Generic, ToJSON)
-
-
 -- | Mirror of Rust protocol types (to be implemented in exomonad-shared)
 data ServiceRequest
-  = AnthropicChat AnthropicChatReq
-  | GitHubGetIssue GitHubGetIssueReq
-  | GitHubCreateIssue GitHubCreateIssueReq
-  | GitHubUpdateIssue GitHubUpdateIssueReq
-  | GitHubAddIssueLabel GitHubAddIssueLabelReq
-  | GitHubRemoveIssueLabel GitHubRemoveIssueLabelReq
-  | GitHubAddIssueAssignee GitHubAddIssueAssigneeReq
-  | GitHubRemoveIssueAssignee GitHubRemoveIssueAssigneeReq
-  | GitHubListIssues GitHubListIssuesReq
-  | GitHubCreatePR GitHubCreatePRReq
-  | GitHubGetPR GitHubGetPRReq
-  | GitHubListPullRequests GitHubListPullRequestsReq
-  | GitHubGetPullRequestReviews GitHubGetPullRequestReviewsReq
-  | GitHubGetDiscussion GitHubGetDiscussionReq
+  = AnthropicChat
+      { model :: Text
+      , messages :: NonEmpty Value
+      , maxTokens :: Int
+      , tools :: Maybe [Value]
+      , system :: Maybe Text
+      , thinking :: Maybe Value
+      }
+  | GitHubGetIssue { owner :: Text, repo :: Text, number :: Int, includeComments :: Bool }
+  | GitHubCreateIssue
+      { owner :: Text
+      , repo :: Text
+      , title :: Maybe Text -- Use Maybe to unify with Update
+      , body :: Maybe Text
+      , labels :: Maybe [Text]
+      }
+  | GitHubUpdateIssue
+      { owner :: Text
+      , repo :: Text
+      , number :: Int
+      , title :: Maybe Text
+      , body :: Maybe Text
+      , state :: Maybe Text
+      , labels :: Maybe [Text]
+      , assignees :: Maybe [Text]
+      }
+  | GitHubAddIssueLabel { owner :: Text, repo :: Text, number :: Int, label :: Text }
+  | GitHubRemoveIssueLabel { owner :: Text, repo :: Text, number :: Int, label :: Text }
+  | GitHubAddIssueAssignee { owner :: Text, repo :: Text, number :: Int, assignee :: Text }
+  | GitHubRemoveIssueAssignee { owner :: Text, repo :: Text, number :: Int, assignee :: Text }
+  | GitHubListIssues { owner :: Text, repo :: Text, state :: Maybe Text, labels :: Maybe [Text] }
+  | GitHubCreatePR { owner :: Text, repo :: Text, title :: Maybe Text, body :: Maybe Text, head :: Text, base :: Text }
+  | GitHubGetPR { owner :: Text, repo :: Text, number :: Int, includeDetails :: Bool }
+  | GitHubListPullRequests { owner :: Text, repo :: Text, state :: Maybe Text, limit :: Maybe Int }
+  | GitHubGetPullRequestReviews { owner :: Text, repo :: Text, number :: Int }
+  | GitHubGetDiscussion { owner :: Text, repo :: Text, number :: Int }
   | GitHubCheckAuth
-  | OllamaGenerate OllamaGenerateReq
-  | OtelSpan OtelSpanReq
-  | OtelMetric OtelMetricReq
+  | OllamaGenerate { model :: Text, prompt :: Text, system :: Maybe Text }
+  | OtelSpan { traceId :: Text, spanId :: Text, name :: Text, startNs :: Integer, endNs :: Integer, attributes :: Object }
+  | OtelMetric { name :: Text, value :: Double, otelLabels :: Object }
   deriving (Show, Eq, Generic)
-  deriving (ToJSON) via CustomJSON '[SumTaggedObject "type" "contents", UnwrapUnaryRecords] ServiceRequest
+  deriving (ToJSON) via CustomJSON '[SumTaggedObject "type" "", OmitNothingFields] ServiceRequest
 
 data ServiceResponse
-  = AnthropicChatResponse { content :: [Value], stop_reason :: Text, usage :: Value }
+  = AnthropicChatResponse { content :: NonEmpty Value, stop_reason :: Text, usage :: Value }
   | GitHubIssueResponse { number :: Int, title :: Text, body :: Text, state :: Text, labels :: Maybe [Text], url :: Text, author :: Text, comments :: Maybe [Value] }
   | GitHubIssuesResponse { issues :: [Value] }
   | GitHubPRResponse { number :: Int, title :: Text, body :: Text, author :: Text, url :: Text, state :: Text, head_ref_name :: Text, base_ref_name :: Text, created_at :: Text, merged_at :: Maybe Text, labels :: Maybe [Text], comments :: Maybe [Value], reviews :: Maybe [Value] }
@@ -161,7 +94,7 @@ data ServiceResponse
   | OtelAckResponse
   | ErrorResponse { code :: Int, message :: Text }
   deriving (Show, Eq, Generic)
-  deriving (FromJSON) via CustomJSON '[SumTaggedObject "type" "contents"] ServiceResponse
+  deriving (FromJSON) via CustomJSON '[SumTaggedObject "type" ""] ServiceResponse
 
 data ServiceError
   = SocketError Text

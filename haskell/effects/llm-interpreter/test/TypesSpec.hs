@@ -7,7 +7,7 @@ import Data.Aeson (Value(..), decode, encode, object, (.=))
 import Data.Aeson.KeyMap qualified as KM
 import Test.Hspec
 
-import ExoMonad.LLM.Types (AnthropicTool(..), anthropicToolToJSON)
+import ExoMonad.LLM.Interpreter.Types (AnthropicTool(..), anthropicToolToJSON)
 
 
 spec :: Spec

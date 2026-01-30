@@ -46,6 +46,7 @@ import System.FilePath (takeDirectory)
 import System.IO.Error (isDoesNotExistError)
 import Control.Lens ((.~))
 import Data.Generics.Labels ()
+import PyF (fmt)
 
 -- Imports for effects
 import ExoMonad.Effects.DockerSpawner (stopContainer, ContainerId(..))
@@ -121,11 +122,11 @@ runServer logger config tracer = do
     logInfo logger "Observability enabled (Loki/OTLP)"
   
   case llmCfg of
-    Just (LLMSocketConfig path) -> logInfo logger $ "LLM via Service Socket: " <> T.pack path
+    Just (LLMSocketConfig path) -> logInfo logger [fmt|LLM via Service Socket: {path}|]
     _ -> pure ()
 
   case ghCfg of
-    Just (GitHubSocketConfig path) -> logInfo logger $ "GitHub via Service Socket: " <> T.pack path
+    Just (GitHubSocketConfig path) -> logInfo logger [fmt|GitHub via Service Socket: {path}|]
     _ -> pure ()
 
   cbMap <- initCircuitBreaker
@@ -142,7 +143,7 @@ runServer logger config tracer = do
     sock <- managed (bracket (setupUnixSocket controlSocket) (cleanupUnixSocket controlSocket))
     liftIO $ race_
       (do
-          logInfo logger $ "Listening on (Unix): " <> T.pack controlSocket
+          logInfo logger [fmt|Listening on (Unix): {controlSocket}|]
           runSettingsSocket settings sock (app logger configFull tracer cbMap agentStore))
       (do
           logInfo logger "Listening on (TCP): 0.0.0.0:7432"

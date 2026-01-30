@@ -63,7 +63,10 @@ module ExoMonad.LLM.Interpret
 import Control.Monad.Freer (Eff, Member, interpret, LastMember)
 import Data.Aeson (Value)
 import qualified Data.Aeson as Aeson
-import Data.Maybe (fromMaybe)
+import qualified Data.ByteString.Lazy as LBS
+import Data.List.NonEmpty (NonEmpty(..))
+import qualified Data.List.NonEmpty as NE
+import Data.Maybe (mapMaybe, fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -162,28 +165,6 @@ runLLMCallWith interpCfg = interpret $ \case
     runWithNudge interpCfg.icMaxNudges anthropicCfg usr (Just toolSchemas)
 
 -- | Run the LLMCall effect with tool support.
---
--- This interpreter takes the tool record and handles multi-turn tool loops.
--- When the LLM requests tool use, this interpreter:
---
--- 1. Extracts tool calls from the response
--- 2. Executes them via 'dispatchTool'
--- 3. Sends tool results back to the LLM
--- 4. Repeats until the LLM provides a final answer or max loops exceeded
---
--- @
--- let toolRecord = MyTools
---       { search = \\args -> searchDocuments args
---       , lookup = \\args -> lookupById args.id
---       }
---
--- runM
---   $ runLLMComplete env
---   $ runLLMCallWithTools toolRecord
---   $ do
---       let cfg = defaultLLM \@Report & model Opus & tools toolRecord
---       call cfg (System sys) (User usr)
--- @
 runLLMCallWithTools
   :: forall tools es a.
      ( Member LLMComplete es
@@ -225,9 +206,6 @@ runLLMCallWithTools toolRecord = interpret $ \case
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Run with tool loop support.
---
--- Handles multi-turn tool use: when the LLM returns tool_use, we execute
--- the tools and send results back until we get a final text response.
 runToolLoop
   :: forall tools out es.
      ( Member LLMComplete es
@@ -265,12 +243,13 @@ runToolLoop loopsLeft nudgesLeft cfg userMsg toolSchemas tools
                   let followUp = formatToolResults results userMsg
                   runToolLoop (loopsLeft - 1) nudgesLeft cfg followUp toolSchemas tools
 
--- | Extract tool use blocks from response content.
-extractToolUse :: [ContentBlock] -> [(Text, Value)]
-extractToolUse = concatMap extract
+-- | Extract tool uses from content blocks.
+extractToolUse :: NonEmpty ContentBlock -> [(Text, Value)]
+extractToolUse blocks = mapMaybe toToolInvocation (NE.toList blocks)
   where
-    extract (ToolUseContent name input_) = [(name, input_)]
-    extract _ = []
+    toToolInvocation :: ContentBlock -> Maybe (Text, Value)
+    toToolInvocation (ToolUseContent name input_) = Just (name, input_)
+    toToolInvocation _ = Nothing
 
 -- | Execute tool calls and collect results.
 executeToolCalls
@@ -293,24 +272,20 @@ executeToolCalls tools calls = do
       pure (name, result)
 
 -- | Format tool results as a follow-up user message.
---
--- This appends tool results to the original message so the LLM has context.
 formatToolResults :: [(Text, Either ToolDispatchError Value)] -> Text -> Text
 formatToolResults results originalMsg = T.unlines
-  [ originalMsg
-  , ""
-  , "Tool results:"
+  [
+    originalMsg
+  ,
+    "Tool results:"
   , T.unlines $ map formatOne results
-  , ""
-  , "Please provide your final response based on these tool results."
+  ,
+  "Please provide your final response based on these tool results."
   ]
   where
-    formatOne (name, Right val) =
-      "- " <> name <> ": " <> T.pack (show val)
-    formatOne (name, Left (ToolInputParseError _ err)) =
-      "- " <> name <> " (error): Failed to parse input - " <> err
-    formatOne (name, Left (ToolNotFound _)) =
-      "- " <> name <> " (error): Tool not found"
+    formatOne (name, Right val) = "- " <> name <> ": " <> T.pack (show val)
+    formatOne (name, Left (ToolInputParseError _ err)) = "- " <> name <> " (error): Failed to parse input - " <> err
+    formatOne (name, Left (ToolNotFound _)) = "- " <> name <> " (error): Tool not found"
 
 -- | Parse response as structured output with nudge retries.
 parseResponse
@@ -358,7 +333,7 @@ runWithNudge
      )
   => Int                  -- ^ Remaining nudges
   -> AnthropicConfig      -- ^ API config
-  -> Text                 -- ^ User message
+  -> Text                 -- ^ Original user message
   -> Maybe [Value]        -- ^ Tool schemas (if any)
   -> Eff es (Either CallError out)
 runWithNudge nudgesLeft cfg userMsg toolSchemas = do
@@ -402,11 +377,12 @@ nudgeAndRetry
   -> Eff es (Either CallError out)
 nudgeAndRetry nudgesLeft cfg origMsg toolSchemas errMsg =
   let nudgeMsg = T.unlines
-        [ "Your previous response didn't match the required JSON schema."
-        , ""
-        , "Error: " <> errMsg
-        , ""
-        , "Please respond again with valid JSON matching the schema."
+        [
+          "Your previous response didn't match the required JSON schema."
+        ,
+          "Error: " <> errMsg
+        ,
+        "Please respond again with valid JSON matching the schema."
         , "Original request: " <> origMsg
         ]
   in runWithNudge nudgesLeft cfg nudgeMsg toolSchemas
@@ -416,12 +392,12 @@ nudgeAndRetry nudgesLeft cfg origMsg toolSchemas errMsg =
 -- HELPERS
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Extract text content from response blocks.
-extractTextContent :: [ContentBlock] -> Text
-extractTextContent blocks = T.intercalate "\n" $ concatMap extractText blocks
+extractTextContent :: NonEmpty ContentBlock -> Text
+extractTextContent blocks = T.intercalate "\n" $ mapMaybe toText (NE.toList blocks)
   where
-    extractText (TextContent t) = [t]
-    extractText _ = []
+    toText :: ContentBlock -> Maybe Text
+    toText (TextContent t) = Just t
+    toText _ = Nothing
 
 -- | Convert LLMError to CallError.
 llmErrorToCallError :: LLMError -> CallError

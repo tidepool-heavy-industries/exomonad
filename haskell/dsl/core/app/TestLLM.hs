@@ -7,6 +7,7 @@ import qualified Data.Text.IO as TIO
 import System.Environment (lookupEnv)
 import Data.Aeson (Value, object, (.=), encode)
 import qualified Data.ByteString.Lazy.Char8 as LBS
+import Data.List.NonEmpty (NonEmpty(..))
 
 import ExoMonad.Anthropic.Client
 
@@ -54,7 +55,7 @@ testToolUse config = do
         ]
 
       req = SingleCallRequest
-        { scrMessages = [Message User [TextBlock "What is 15 * 7? Use the calculator tool."]]
+        { scrMessages = Message User (TextBlock "What is 15 * 7? Use the calculator tool." :| []) :| []
         , scrSystemPrompt = Just "You have a calculator tool. Always use it for math."
         , scrOutputSchema = Nothing
         , scrTools = [calculatorTool]
@@ -83,7 +84,7 @@ testStructuredOutput config = do
         ]
 
       req = SingleCallRequest
-        { scrMessages = [Message User [TextBlock "What is 6 * 9?"]]
+        { scrMessages = Message User (TextBlock "What is 6 * 9?" :| []) :| []
         , scrSystemPrompt = Nothing
         , scrOutputSchema = Just schema
         , scrTools = []

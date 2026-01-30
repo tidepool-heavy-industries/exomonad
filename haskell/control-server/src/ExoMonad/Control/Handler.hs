@@ -29,6 +29,7 @@ import ExoMonad.Control.Hook.CircuitBreaker (CircuitBreakerMap)
 import ExoMonad.Control.Export (exportMCPTools)
 import ExoMonad.Control.Handler.Hook (handleHook)
 import ExoMonad.Observability.Types (TraceContext, ObservabilityConfig(..), defaultLokiConfig)
+import PyF (fmt)
 
 -- Tracing Imports
 import ExoMonad.Effects.Observability (SpanKind(..), SpanAttribute(..), withSpan, addSpanAttribute)
@@ -58,9 +59,9 @@ handleMessage logger config tracer traceCtx cbMap agentStore = \case
 handleToolsList :: Logger -> ServerConfig -> IO ControlResponse
 handleToolsList logger config = do
   let role = fromMaybe (config.defaultRole) (config.role >>= roleFromText)
-  logInfo logger $ "[MCP] Handling ToolsListRequest for role: " <> T.pack (show role)
+  logInfo logger [fmt|[MCP] Handling ToolsListRequest for role: {role:s}|]
   tools <- exportMCPTools logger role
-  logInfo logger $ "[MCP] Returning " <> T.pack (show (length tools)) <> " tools"
+  logInfo logger [fmt|[MCP] Returning {length tools} tools|]
   pure $ ToolsListResponse tools
 
 -- | Handle MCP tool call using Typed Role DSL.
@@ -69,7 +70,7 @@ handleMcpToolTyped logger config tracer traceCtx cbMap agentStore reqId toolName
   withMcpTracing logger config traceCtx reqId toolName args $ do
     let effectiveRole = fromMaybe config.defaultRole (config.role >>= roleFromText)
     
-    logInfo logger $ "[MCP:" <> reqId <> "] Dispatching: " <> toolName <> " (Role: " <> T.pack (show effectiveRole) <> ")"
+    logInfo logger [fmt|[MCP:{reqId}] Dispatching: {toolName} (Role: {effectiveRole:s})|]
 
     -- Dispatch based on role
     -- Uses Generic 'dispatchTool' on the 'mode :- record' structure
@@ -86,12 +87,12 @@ handleMcpToolTyped logger config tracer traceCtx cbMap agentStore reqId toolName
 
     case dispatchResult of
       ToolParseError msg -> do
-        logError logger $ "[MCP:" <> reqId <> "] Tool parse error: " <> msg
+        logError logger [fmt|[MCP:{reqId}] Tool parse error: {msg}|]
         pure $ mcpToolError reqId InvalidRequest $ "Invalid arguments for tool '" <> toolName <> "': " <> msg
 
       ToolNotFound -> do
         let available = allToolsForRole effectiveRole
-        logError logger $ "[MCP:" <> reqId <> "] Tool not found/allowed: " <> toolName
+        logError logger [fmt|[MCP:{reqId}] Tool not found/allowed: {toolName}|]
         pure $ mcpToolError reqId NotFound $
           "Tool '" <> toolName <> "' not found for role " <> T.pack (show effectiveRole) <>
           ". Available tools: " <> T.intercalate ", " (Set.toList available)
@@ -102,12 +103,12 @@ handleMcpToolTyped logger config tracer traceCtx cbMap agentStore reqId toolName
         
         case resultOrErr of
           Left (e :: SomeException) -> do
-            logError logger $ "[MCP:" <> reqId <> "] Execution failed: " <> T.pack (displayException e)
+            logError logger [fmt|[MCP:{reqId}] Execution failed: {displayException e}|]
             pure $ mcpToolError reqId ExternalFailure $ 
               "Tool execution failed: " <> T.pack (displayException e)
               
           Right val -> do
-            logInfo logger $ "[MCP:" <> reqId <> "] Success"
+            logInfo logger [fmt|[MCP:{reqId}] Success|]
             pure $ mcpToolSuccess reqId val
 
 -- | Wrap MCP tool call with tracing if enabled.
@@ -161,6 +162,6 @@ withMcpTracing logger config traceCtx reqId toolName args action = do
       
       case resultOrErr of
         Left (e :: SomeException) -> do
-          logError logger $ "[MCP:" <> reqId <> "] Tracing error: " <> T.pack (show e)
+          logError logger [fmt|[MCP:{reqId}] Tracing error: {show e}|]
           throwIO e
         Right res -> pure res
