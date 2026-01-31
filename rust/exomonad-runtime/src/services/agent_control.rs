@@ -99,7 +99,9 @@ impl AgentControlService {
 
         // Try to load GitHub token from secrets
         let secrets = super::secrets::Secrets::load();
-        let github = secrets.github_token().and_then(|t| GitHubService::new(t).ok());
+        let github = secrets
+            .github_token()
+            .and_then(|t| GitHubService::new(t).ok());
 
         Ok(Self {
             project_dir,
@@ -118,11 +120,7 @@ impl AgentControlService {
     /// 2. Creates git worktree from origin/main
     /// 3. Writes context files (.exomonad/config.toml, INITIAL_CONTEXT.md, .mcp.json)
     /// 4. Opens Zellij tab with claude command
-    pub async fn spawn_agent(
-        &self,
-        issue_id: &str,
-        options: &SpawnOptions,
-    ) -> Result<SpawnResult> {
+    pub async fn spawn_agent(&self, issue_id: &str, options: &SpawnOptions) -> Result<SpawnResult> {
         // Validate we're in Zellij
         self.check_zellij_env()?;
 
@@ -151,7 +149,10 @@ impl AgentControlService {
             .worktree_dir
             .clone()
             .unwrap_or_else(|| "./worktrees".to_string());
-        let worktree_path = self.project_dir.join(&worktree_dir).join(format!("gh-{}-{}", issue_id, slug));
+        let worktree_path = self
+            .project_dir
+            .join(&worktree_dir)
+            .join(format!("gh-{}-{}", issue_id, slug));
         let branch_name = format!("gh-{}/{}", issue_id, slug);
 
         // Fetch origin/main
@@ -564,13 +565,7 @@ fn slugify(title: &str) -> String {
     title
         .to_lowercase()
         .chars()
-        .map(|c| {
-            if c.is_alphanumeric() {
-                c
-            } else {
-                '-'
-            }
-        })
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
         .collect::<String>()
         .split('-')
         .filter(|s| !s.is_empty())
@@ -682,7 +677,9 @@ pub fn spawn_agent_host_fn(service: Arc<AgentControlService>) -> Function {
             let input: SpawnAgentInput = get_input(plugin, inputs[0].clone())?;
 
             let service_arc = user_data.get()?;
-            let service = service_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+            let service = service_arc
+                .lock()
+                .map_err(|_| Error::msg("Poisoned lock"))?;
 
             let options = SpawnOptions {
                 owner: input.owner,
@@ -714,7 +711,9 @@ pub fn spawn_agents_host_fn(service: Arc<AgentControlService>) -> Function {
             let input: SpawnAgentsInput = get_input(plugin, inputs[0].clone())?;
 
             let service_arc = user_data.get()?;
-            let service = service_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+            let service = service_arc
+                .lock()
+                .map_err(|_| Error::msg("Poisoned lock"))?;
 
             let options = SpawnOptions {
                 owner: input.owner,
@@ -745,7 +744,9 @@ pub fn cleanup_agent_host_fn(service: Arc<AgentControlService>) -> Function {
             let input: CleanupAgentInput = get_input(plugin, inputs[0].clone())?;
 
             let service_arc = user_data.get()?;
-            let service = service_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+            let service = service_arc
+                .lock()
+                .map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(service.cleanup_agent(&input.issue_id, input.force))?;
             let output: HostResult<()> = result.into();
@@ -771,7 +772,9 @@ pub fn cleanup_agents_host_fn(service: Arc<AgentControlService>) -> Function {
             let input: CleanupAgentsInput = get_input(plugin, inputs[0].clone())?;
 
             let service_arc = user_data.get()?;
-            let service = service_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+            let service = service_arc
+                .lock()
+                .map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(service.cleanup_agents(&input.issue_ids, input.force))?;
 
@@ -794,7 +797,9 @@ pub fn list_agents_host_fn(service: Arc<AgentControlService>) -> Function {
          user_data: UserData<Arc<AgentControlService>>|
          -> Result<(), Error> {
             let service_arc = user_data.get()?;
-            let service = service_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+            let service = service_arc
+                .lock()
+                .map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(service.list_agents())?;
             let output: HostResult<Vec<AgentInfo>> = result.into();

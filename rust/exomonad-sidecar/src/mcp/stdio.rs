@@ -159,19 +159,17 @@ async fn handle_request(state: &McpState, request: JsonRpcRequest) -> JsonRpcRes
             JsonRpcResponse::success(id, json!({}))
         }
 
-        "tools/list" => {
-            match tools::get_tool_definitions(state).await {
-                Ok(tool_defs) => {
-                    let mcp_tools: Vec<McpTool> = tool_defs.into_iter().map(McpTool::from).collect();
-                    let result = McpToolsListResult { tools: mcp_tools };
-                    JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
-                }
-                Err(e) => {
-                    error!(error = %e, "Failed to get tool definitions");
-                    JsonRpcResponse::error(id, -32603, format!("Failed to get tool definitions: {}", e))
-                }
+        "tools/list" => match tools::get_tool_definitions(state).await {
+            Ok(tool_defs) => {
+                let mcp_tools: Vec<McpTool> = tool_defs.into_iter().map(McpTool::from).collect();
+                let result = McpToolsListResult { tools: mcp_tools };
+                JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
             }
-        }
+            Err(e) => {
+                error!(error = %e, "Failed to get tool definitions");
+                JsonRpcResponse::error(id, -32603, format!("Failed to get tool definitions: {}", e))
+            }
+        },
 
         "tools/call" => {
             let tool_name = request

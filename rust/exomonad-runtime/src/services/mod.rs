@@ -8,8 +8,7 @@ pub mod log;
 pub mod secrets;
 
 pub use self::agent_control::{
-    AgentControlService, AgentInfo, BatchCleanupResult, BatchSpawnResult, SpawnOptions,
-    SpawnResult,
+    AgentControlService, AgentInfo, BatchCleanupResult, BatchSpawnResult, SpawnOptions, SpawnResult,
 };
 use self::docker::{DockerExecutor, DockerService};
 pub use self::filesystem::FileSystemService;

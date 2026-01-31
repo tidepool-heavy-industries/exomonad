@@ -130,9 +130,12 @@ impl FileSystemService {
 
         if input.create_parents {
             if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)
-                    .await
-                    .with_context(|| format!("Failed to create parent directories for: {}", path.display()))?;
+                fs::create_dir_all(parent).await.with_context(|| {
+                    format!(
+                        "Failed to create parent directories for: {}",
+                        path.display()
+                    )
+                })?;
             }
         }
 
@@ -222,7 +225,9 @@ pub fn fs_read_file_host_fn(service: Arc<FileSystemService>) -> Function {
             let input: ReadFileInput = get_input(plugin, inputs[0].clone())?;
 
             let service_arc = user_data.get()?;
-            let service = service_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+            let service = service_arc
+                .lock()
+                .map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(service.read_file(&input))?;
             let output: HostResult<ReadFileOutput> = result.into();
@@ -249,7 +254,9 @@ pub fn fs_write_file_host_fn(service: Arc<FileSystemService>) -> Function {
             let input: WriteFileInput = get_input(plugin, inputs[0].clone())?;
 
             let service_arc = user_data.get()?;
-            let service = service_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+            let service = service_arc
+                .lock()
+                .map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(service.write_file(&input))?;
             let output: HostResult<WriteFileOutput> = result.into();
