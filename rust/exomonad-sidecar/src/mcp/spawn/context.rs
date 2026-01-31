@@ -120,4 +120,3 @@ pub async fn write_mcp_config(worktree_path: &Path, sidecar_path: &str) -> Resul
 
     Ok(())
 }
-

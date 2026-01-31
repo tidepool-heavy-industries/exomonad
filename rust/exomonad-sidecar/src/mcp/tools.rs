@@ -594,6 +594,9 @@ async fn spawn_agents(state: &McpState, args: Value) -> Result<Value> {
         spawn_args.worktree_dir.clone(),
     );
 
+    // Fetch origin/main to ensure we have latest
+    worktree_manager.fetch_origin().await?;
+
     let mut result = SpawnAgentsResult {
         spawned: Vec::new(),
         failed: Vec::new(),
@@ -601,9 +604,7 @@ async fn spawn_agents(state: &McpState, args: Value) -> Result<Value> {
 
     // Process each issue
     for issue_id in &spawn_args.issues {
-        match spawn_single_agent(&worktree_manager, github, &repo, issue_id)
-            .await
-        {
+        match spawn_single_agent(&worktree_manager, github, &repo, issue_id).await {
             Ok(agent) => result.spawned.push(agent),
             Err(e) => {
                 warn!(issue_id, error = %e, "Failed to spawn agent");

@@ -93,7 +93,10 @@ QUOTED="value with spaces"
 
         let parsed = parse_env_file(content);
         assert_eq!(parsed.get("GITHUB_TOKEN"), Some(&"ghp_123".to_string()));
-        assert_eq!(parsed.get("ANTHROPIC_API_KEY"), Some(&"sk-ant-456".to_string()));
+        assert_eq!(
+            parsed.get("ANTHROPIC_API_KEY"),
+            Some(&"sk-ant-456".to_string())
+        );
         assert_eq!(parsed.get("EMPTY"), Some(&"".to_string()));
         assert_eq!(parsed.get("QUOTED"), Some(&"value with spaces".to_string()));
     }

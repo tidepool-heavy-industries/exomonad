@@ -35,12 +35,6 @@ impl WorktreeManager {
         format!("gh-{}/{}", issue_id, slug)
     }
 
-    /// Check if a worktree already exists for the given issue.
-    pub async fn worktree_exists(&self, issue_id: &str, slug: &str) -> bool {
-        let path = self.worktree_path(issue_id, slug);
-        path.exists()
-    }
-
     /// Fetch origin/main to ensure we have latest.
     pub async fn fetch_origin(&self) -> Result<()> {
         info!("Fetching origin/main");
@@ -54,7 +48,7 @@ impl WorktreeManager {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            warn!(stderr = %stderr, "git fetch warning (may be ok if offline)");
+            warn!(stderr = %stderr, "git fetch warning (continuing anyway)");
         }
 
         Ok(())

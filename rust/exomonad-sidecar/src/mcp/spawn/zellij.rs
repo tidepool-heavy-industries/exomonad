@@ -116,21 +116,3 @@ pub async fn close_tab(name: &str) -> Result<()> {
 
     Ok(())
 }
-
-/// Go to a tab by name.
-pub async fn go_to_tab(name: &str) -> Result<()> {
-    debug!(name, "Switching to Zellij tab");
-
-    let output = Command::new("zellij")
-        .args(["action", "go-to-tab-name", name])
-        .output()
-        .await
-        .context("Failed to execute zellij go-to-tab-name")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("Failed to switch to tab '{}': {}", name, stderr));
-    }
-
-    Ok(())
-}
