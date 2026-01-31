@@ -1,7 +1,11 @@
-//! MCP (Model Context Protocol) HTTP server for Claude Code integration.
+//! MCP (Model Context Protocol) server for Claude Code integration.
 //!
-//! Exposes tools via HTTP endpoints that Claude Code can call directly.
+//! Supports two transports:
+//! - HTTP: Traditional REST endpoints for tools
+//! - stdio: JSON-RPC over stdin/stdout for Claude Code's native MCP support
 
+pub mod spawn;
+pub mod stdio;
 mod tools;
 
 use axum::{

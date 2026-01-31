@@ -62,6 +62,25 @@ Add `.mcp.json` to your project root:
 | `git_status` | Get dirty files (git status --porcelain) | `path?`: directory |
 | `git_log` | Get recent commits | `path?`: directory, `limit?`: count |
 | `read_file` | Read file contents | `path`: file path, `max_lines?`: limit |
+| `github_list_issues` | List GitHub issues | `owner`, `repo`, `state?`, `labels?` |
+| `github_get_issue` | Get single issue details | `owner`, `repo`, `number` |
+| `github_list_prs` | List GitHub pull requests | `owner`, `repo`, `state?`, `limit?` |
+| `spawn_agents` | Spawn agents in Zellij tabs | `issues[]`, `owner`, `repo`, `worktree_dir?` |
+| `cleanup_agents` | Clean up agent worktrees | `issues[]`, `force?` |
+| `list_agents` | List active agent worktrees | (none) |
+
+### Spawn Tools Requirements
+
+The spawn tools (`spawn_agents`, `cleanup_agents`, `list_agents`) require:
+- **Zellij session**: Must be running inside a Zellij terminal multiplexer
+- **GITHUB_TOKEN**: Environment variable for GitHub API access
+- **Git repository**: The project directory must be a git repository
+
+**spawn_agents flow:**
+1. Fetches issue details from GitHub
+2. Creates git worktree from `origin/main`
+3. Writes context files (`.exomonad/config.toml`, `INITIAL_CONTEXT.md`, `.mcp.json`)
+4. Opens new Zellij tab running `claude` in the worktree
 
 ### Endpoints
 

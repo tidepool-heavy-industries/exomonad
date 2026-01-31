@@ -1,25 +1,27 @@
 //! exomonad: Hook handler for Claude Code++ sessions.
 //!
-//! This binary handles Claude Code hooks via HTTP requests to the control server.
+//! This binary handles Claude Code hooks. In standalone mode (default), hooks
+//! are passthrough - they allow all operations. For advanced hook logic,
+//! use exomonad-sidecar with WASM plugins.
 //!
 //! ## Subcommands
 //!
-//! - `hook <event>` - Handle a Claude Code hook event
-//! - `health` - Check socket health
+//! - `hook <event>` - Handle a Claude Code hook event (passthrough)
+//! - `health` - Check control server health (if using sidecar mode)
 //!
 //! ## MCP Tools
 //!
-//! MCP tools are accessed directly via HTTP transport. Claude Code connects to
-//! the control-server's HTTP API (no proxy needed). Configure in .mcp.json:
+//! MCP tools are provided by exomonad-sidecar via stdio transport.
+//! Configure in .mcp.json:
 //! ```json
-//! {"mcpServers": {"exomonad": {"type": "http", "url": "http://localhost:7432/role/tl/mcp"}}}
+//! {"mcpServers": {"exomonad": {"type": "stdio", "command": "exomonad-sidecar", "args": ["mcp-stdio"]}}}
 //! ```
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::io::Read;
 
 use exomonad_shared::commands::HookEventType;
-use exomonad_shared::handle_hook;
 use exomonad_shared::protocol::{Role, Runtime};
 
 mod health;
@@ -68,6 +70,29 @@ enum Commands {
 }
 
 // ============================================================================
+// Passthrough Hook Handler
+// ============================================================================
+
+/// Handle hook by reading stdin and outputting passthrough response.
+///
+/// This is a standalone passthrough - no external server connection needed.
+/// For advanced hook logic, use exomonad-sidecar with WASM plugins.
+fn handle_hook_passthrough(event: HookEventType) -> Result<()> {
+    // Read stdin (Claude Code sends hook input here)
+    let mut stdin_content = String::new();
+    std::io::stdin().read_to_string(&mut stdin_content)?;
+
+    // Log the event (goes to stderr, not stdout)
+    eprintln!("[exomonad] hook {} (passthrough)", event);
+
+    // Output passthrough response - allow all operations
+    // Claude Code expects {"continue": true} to proceed
+    println!(r#"{{"continue":true}}"#);
+
+    Ok(())
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -81,9 +106,9 @@ async fn main() -> Result<()> {
     match cli.command {
         Commands::Hook {
             event,
-            runtime,
-            role,
-        } => handle_hook(event, runtime, role).await?,
+            runtime: _,
+            role: _,
+        } => handle_hook_passthrough(event)?,
         Commands::Health => health::run_health_check().await?,
     };
 

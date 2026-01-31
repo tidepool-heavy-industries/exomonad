@@ -6,6 +6,7 @@
 //!
 //! All IO is handled by Rust; Haskell WASM yields high-level semantic effects.
 
+mod config;
 mod mcp;
 
 use anyhow::{Context, Result};
@@ -61,6 +62,12 @@ enum Commands {
         #[arg(long, env = "EXOMONAD_PROJECT_DIR")]
         project_dir: Option<PathBuf>,
     },
+
+    /// Run as stdio MCP server (Claude Code spawns this)
+    ///
+    /// Reads config from .exomonad/config.toml in current directory.
+    /// Claude Code should configure this in .mcp.json with type: "stdio".
+    McpStdio,
 }
 
 // ============================================================================
@@ -171,7 +178,7 @@ async fn main() -> Result<()> {
 
             info!(port, project_dir = %project_dir.display(), "Starting MCP server");
 
-            // Initialize services with local executor (local mode)
+            // Initialize services with local executor and secrets from .exomonad/secrets
             let services = Arc::new(Services::new_local());
 
             let state = mcp::McpState {
@@ -180,6 +187,39 @@ async fn main() -> Result<()> {
             };
 
             mcp::run_server(state, port).await?;
+        }
+
+        Commands::McpStdio => {
+            // stdio MCP server - Claude Code spawns this process
+            // Discover project_dir from config or use cwd
+            let cfg = match config::Config::discover() {
+                Ok(c) => {
+                    info!(role = %c.role, project_dir = %c.project_dir.display(), "Config discovered");
+                    c
+                }
+                Err(e) => {
+                    debug!(error = %e, "No config file found, using defaults");
+                    config::Config::default_for_role("dev")
+                }
+            };
+
+            let project_dir = if cfg.project_dir.is_absolute() {
+                cfg.project_dir
+            } else {
+                std::env::current_dir()
+                    .expect("Failed to get current directory")
+                    .join(&cfg.project_dir)
+            };
+
+            // Initialize services (secrets loaded from ~/.exomonad/secrets)
+            let services = Arc::new(Services::new_local());
+
+            let state = mcp::McpState {
+                services,
+                project_dir,
+            };
+
+            mcp::stdio::run_stdio_server(state).await?;
         }
     }
 

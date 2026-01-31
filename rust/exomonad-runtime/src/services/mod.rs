@@ -3,12 +3,14 @@ pub mod git;
 pub mod github;
 pub mod local;
 pub mod log;
+pub mod secrets;
 
 use self::docker::{DockerExecutor, DockerService};
 use self::git::GitService;
 use self::github::GitHubService;
 use self::local::LocalExecutor;
 use self::log::{HasLogService, LogService};
+pub use self::secrets::Secrets;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -29,6 +31,7 @@ impl Services {
     /// Create services using local executor (for local development).
     ///
     /// Commands run directly as subprocesses without Docker.
+    /// Loads secrets from ~/.exomonad/secrets.
     pub fn new_local() -> Self {
         let local = LocalExecutor::new();
         let local_arc: Arc<dyn DockerExecutor> = Arc::new(local);
@@ -36,11 +39,12 @@ impl Services {
     }
 
     fn with_executor(executor: Arc<dyn DockerExecutor>) -> Self {
+        let secrets = Secrets::load();
         let git = Arc::new(GitService::new(executor));
 
-        // GitHub service is optional (requires GITHUB_TOKEN env var)
-        let github = std::env::var("GITHUB_TOKEN")
-            .ok()
+        // GitHub service is optional - try secrets file first, then env var
+        let github = secrets
+            .github_token()
             .and_then(|t| GitHubService::new(t).ok());
 
         Self {
