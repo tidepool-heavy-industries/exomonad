@@ -1,9 +1,8 @@
 module Main (main) where
 
+import ParsersSpec qualified
 import Test.Hspec
-
-import qualified ToolsSpec
-import qualified ParsersSpec
+import ToolsSpec qualified
 
 main :: IO ()
 main = hspec $ do

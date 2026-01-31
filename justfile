@@ -15,7 +15,7 @@ _check_jq:
     @command -v jq >/dev/null 2>&1 || { echo "ERROR: jq required but not installed"; exit 1; }
 
 # Build and launch a service with digest pinning
-dev-up target="control-server": _check_jq
+dev-up target: _check_jq
     @echo ">>> [1/4] Building target '{{target}}'..."
     mkdir -p {{metadata_dir}}
     ./build {{target}} --load --metadata-file {{metadata_file}}
@@ -53,7 +53,7 @@ build-deps:
     ./build deps
 
 # Check if running containers match local git state
-check-freshness service="control-server":
+check-freshness service:
     ./scripts/check-freshness.sh {{service}}
 
 # Update Rust dependencies and regenerate cargo-chef recipe
@@ -100,7 +100,6 @@ test:
 
 # Run fast tests only (for pre-push hook)
 test-fast:
-    cabal test exomonad-control-server
     cd rust && cargo test --workspace
 
 # Pre-push checks (formatting + fast tests)

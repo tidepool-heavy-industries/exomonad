@@ -33,7 +33,7 @@ import Control.Monad.Freer
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.=))
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
-import qualified Data.Text
+import Data.Text qualified
 import ExoMonad.Guest.HostCall (callHost, host_fs_read_file, host_fs_write_file)
 import GHC.Generics (Generic)
 import Prelude hiding (readFile, writeFile)

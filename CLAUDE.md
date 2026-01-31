@@ -19,52 +19,6 @@ The repository should be kept clean of dead code, placeholders, and half-done he
 
 Always prefer failure to an undocumented heuristic or fallback.
 
-### DOCKER ENVIRONMENT
-
-**CRITICAL:** Docker runs on a **remote NixOS host**, not locally on macOS. This means:
-- Host bind mounts using macOS paths (e.g., `/Users/...`) will NOT work - those paths don't exist on NixOS
-- The Docker socket is forwarded via SSH, but the filesystem is not shared
-- Containers must use named volumes or clone repos internally
-- Don't assume local filesystem access from containers
-
-### DOCKER BUILD SYSTEM
-
-Hermetic build system using `docker buildx bake` with multi-stage dependency caching.
-
-**Commands:**
-
-| Command | Purpose |
-|---------|---------|
-| `./build` | Build all images (auto-injects GIT_SHA) |
-| `./build --load` | Build and load into local Docker daemon |
-| `./build control-server` | Build specific target |
-| `./ide` | Start/attach to IDE (idempotent) |
-| `./refresh-ide` | Hard refresh (rebuild all + recreate containers) |
-| `just check-freshness` | Verify running containers match local git |
-| `just update-rust` | Update Cargo.lock via Docker |
-| `just freeze-haskell` | Update cabal.project.freeze via Docker |
-
-**Architecture:**
-
-```
-docker-bake.hcl orchestrates the build DAG:
-
-Rust:     rust-planner → rust-cacher → rust-builder
-Haskell:  haskell-freeze → haskell-cacher → haskell-builder
-                                ↓
-Final:    control-server, claude-agent, zellij
-          (COPY --from=rust-builder, COPY --from=haskell-builder)
-```
-
-**Key files:**
-- `./build` - Wrapper that auto-injects GIT_SHA from git
-- `docker/docker-bake.hcl` - BuildKit bake orchestration
-- `docker/base/Dockerfile.rust-deps` - Rust multi-stage (cargo-chef)
-- `docker/base/Dockerfile.haskell-deps` - Haskell multi-stage (cabal freeze)
-- `justfile` - Operations recipes (build, check-freshness, update deps)
-
-**OCI Labels:** All images include `org.opencontainers.image.revision` with git SHA for freshness tracking.
-
 ### AGGRESSIVE LOGGING
 
 Silent failures are unacceptable. When code shells out to subprocesses, calls external services, or crosses process/container boundaries, **log aggressively**:
@@ -114,7 +68,6 @@ Navigate to the right docs for your task:
 ```
 CLAUDE.md  ← YOU ARE HERE (project overview)
 ├── haskell/CLAUDE.md  ← Haskell package organization
-│   ├── control-server/CLAUDE.md ⭐ Claude Code++ hub (hooks/MCP/scout)
 │   ├── dsl/core/CLAUDE.md      ← Graph DSL reference (START HERE for handlers)
 │   ├── dsl/teaching/CLAUDE.md  ← LLM-level teaching for FunctionGemma training
 │   ├── effects/CLAUDE.md       ← Effect interpreters
@@ -125,15 +78,9 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 │   │   └── actor/CLAUDE.md     ← Actor model details
 │   ├── protocol/CLAUDE.md      ← Wire formats
 │   └── tools/CLAUDE.md         ← Dev tools (ghci-oracle, sleeptime, training-generator)
-├── rust/CLAUDE.md             ← Claude Code++ (hook handler + MCP forwarding + TUI)
-├── exomonad/CLAUDE.md  ← Hook handler (HTTP over Unix socket) (IMPLEMENTED)
-├── docker-ctl/CLAUDE.md    ← Container lifecycle + remote exec (IMPLEMENTED)
-├── effector/CLAUDE.md      ← Stateless IO executor (Cabal, Git, GH)
-├── exomonad-shared/CLAUDE.md ← Protocol types, Unix socket client
-├── exomonad-services/      ← External service clients (Anthropic, GitHub, Ollama, OTLP)
-├── agent-status/           ← TUI Dashboard (Status, Logs, Controls)
-│   ├── tui-popup/CLAUDE.md     ← TUI popup: floating pane UI for user interaction
-│   └── tui-spawner/CLAUDE.md   ← FIFO-based popup spawning for cross-container TUI
+├── rust/CLAUDE.md             ← Rust workspace overview (sidecar, runtime, services)
+├── rust/exomonad-sidecar/CLAUDE.md  ← MCP server + hook handler (WASM host)
+├── rust/exomonad-runtime/CLAUDE.md  ← WASM plugin loading + host functions
 ├── deploy/CLAUDE.md            ← Cloudflare deployment
 ├── tools/CLAUDE.md             ← Root-level tools (micro-gastown, blast-radius)
 └── typescript/
@@ -144,20 +91,15 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 
 | I want to... | Read this |
 |--------------|-----------|
-| Work on Claude Code++ (hooks/MCP/scout) ⭐ | `haskell/control-server/CLAUDE.md` |
-| Understand MCP tool architecture/tiers | `docs/architecture/ADR-003-MCP-Tool-Design-Patterns.md` |
-| Understand hook/MCP forwarding (Rust side) | `rust/exomonad/CLAUDE.md` |
+| Understand MCP tool architecture | `rust/exomonad-sidecar/CLAUDE.md` |
+| Work on WASM host functions | `rust/exomonad-runtime/CLAUDE.md` |
 | Define a graph, handlers, annotations | `haskell/dsl/core/CLAUDE.md` |
 | Work on LLM-level teaching infrastructure | `haskell/dsl/teaching/CLAUDE.md` |
 | Add or modify an effect interpreter | `haskell/effects/CLAUDE.md` |
 | Understand actor execution model | `haskell/runtime/actor/CLAUDE.md` |
-| Work on semantic-scout code exploration | `haskell/control-server/CLAUDE.md` (merged from agents/semantic-scout) |
 | Work with LSP (Language Server Protocol) | `haskell/effects/lsp-interpreter/CLAUDE.md` |
 | Generate training data for FunctionGemma | `haskell/tools/training-generator/CLAUDE.md` |
 | Deploy to Cloudflare Workers | `deploy/CLAUDE.md` |
-| Work on stateless IO execution | `rust/effector/CLAUDE.md` |
-| Work on container spawning/exec | `rust/docker-ctl/CLAUDE.md` |
-| Understand control protocol types | `rust/exomonad-shared/CLAUDE.md` |
 
 ---
 
@@ -251,87 +193,57 @@ Human-driven Claude Code sessions augmented with ExoMonad. **Not headless automa
 
 ### Architecture
 
-```
-┌────────────────────────────────────────────────────────────────┐
-│ User TTY (Zellij 3-pane)                                       │
-│  Pane 1: Claude Code  │  Pane 2: control-server  │ Pane 3: TUI │
-└───────────┬──────────────────────────────────┬─────────────────┘
-            │ Hooks/MCP                        │
-            ▼                                  │
-┌─────────────────────────────────────────┐    │
-│ exomonad (Rust)                     │    │
-│  • hook: CC hooks → Unix Socket         │    │
-└───────────┬─────────────────────────────┘    │
-            │ Unix Socket NDJSON               │
-            │ .exomonad/sockets/control.sock   │
-            ▼                                  │
-┌─────────────────────────────────────────┐    │
-│ control-server (Haskell)                │    │
-│  • Long-lived LSP session (HLS)         │    │
-│  • Hook Handler: Passthrough            │    │
-│  • MCP Handler: 7 tools (auto-discovery)│    │
-│  • TUI Handler: Listens for Dashboard   │◄───┘
-└─────────────────────────────────────────┘    │
-                                               │ Unix Socket NDJSON
-                                               │ .exomonad/sockets/tui.sock
-                                               │
-┌──────────────────────────────────────────────┘
-│
-▼
-┌─────────────────────────────────────────┐
-│ agent-status (Rust)                     │
-│  • Connects to control-server           │
-│  • Renders Status/Logs/Controls         │
-│  • Captures keyboard (Tab, Enter)       │
-│  • Sends Interaction events             │
-└─────────────────────────────────────────┘
-```
+**Haskell WASM = Embedded DSL**
+- Defines tool schemas, handlers, decision logic
+- Yields typed effects (no I/O)
+- Compiled to WASM32-WASI
+- Single source of truth for MCP tools
 
-### Key Components
+**Rust = Runtime**
+- Hosts WASM plugin via Extism
+- Executes all effects (git, GitHub API, filesystem, Zellij)
+- Owns the process lifecycle
+- MCP server (stdio mode for Claude Code)
 
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| **exomonad** | `rust/exomonad/` | Hook forwarding to control server (HTTP over Unix socket) |
-| **control-server** | `haskell/control-server/` | Haskell server with LSP + MCP tools + TUI handler |
-| **agent-status** | `rust/agent-status/` | Rust TUI: renders dashboard, captures Interaction |
-| **Protocol types** | `rust/exomonad-shared/protocol.rs` + `haskell/control-server/Protocol.hs` | Bidirectional message types (must match exactly) |
+**Worktrees + Zellij = Isolation/Multiplexing**
+- Git worktrees for code isolation (no Docker containers)
+- Zellij tabs within the enclosing session
+- Each agent = worktree + tab, managed by Rust runtime
+
+```
+Human in Zellij session
+    └── Claude Code + exomonad-sidecar (Rust + Haskell WASM)
+            ├── MCP tools via WASM (git_branch, spawn_agents, etc.)
+            └── Spawn agents:
+                ├── worktree: ./agents/issue-123
+                │   └── Zellij tab: "123-fix-bug"
+                └── worktree: ./agents/issue-456
+                    └── Zellij tab: "456-add-feature"
+```
 
 ### Data Flow
 
-**Hook Flow (PreToolUse):**
+**MCP Tool Call:**
+```
+1. User asks question in Claude Code
+2. Claude plans to call MCP tool (e.g., spawn_agents, git_branch)
+3. Claude Code sends request to exomonad-sidecar (stdio)
+4. Rust calls WASM handle_mcp_call
+5. Haskell dispatches to tool handler
+6. Handler yields effects (GitGetBranch, SpawnAgent, etc.)
+7. Rust executes effects via host functions
+8. Result returned to Claude Code
+```
+
+**Hook Call:**
 ```
 1. Claude Code wants to call Write tool
 2. Generates hook JSON on stdin
-3. exomonad hook pre-tool-use reads stdin
-4. Forwards ControlMessage::HookEvent via Unix Socket
-5. control-server receives, routes to handleHook
-6. Returns HookResponse (allow/deny)
-7. exomonad prints to stdout
-8. Claude Code proceeds or blocks
-```
-
-**Transcript Shipping (SessionEnd/SubagentStop):**
-```
-1. Claude session ends or subagent finishes
-2. exomonad hook [session-end|subagent-stop] reads transcript path from stdin
-3. control-server reads JSONL transcript, enriches with metadata (session_id, role, etc.)
-4. POSTs to OpenObserve (claude_sessions stream) in background
-```
-
-**MCP Tool Flow:**
-```
-Tools: find_callers, show_fields, show_constructors, teach-graph, popup, spawn_agents, exo_status, file_pr, ...
-
-1. User asks question requiring code intelligence or human decision
-2. Claude plans to call MCP tool (e.g., teach-graph, popup)
-3. Claude Code sends HTTP request to control-server (TCP port 7432)
-4. control-server routes to appropriate handler
-   - Tier 1 (LSP-only): find_callers, show_fields, show_constructors
-   - Tier 2 (LLM-enhanced): teach-graph (LSP + Haiku selection)
-   - Tier 3 (External): spawn_agents, exo_status, file_pr
-   - Tier 4 (TUI-interactive): popup
-5. Returns tool result (JSON) via HTTP response
-6. Claude analyzes and responds to user
+3. exomonad-sidecar hook pre-tool-use reads stdin
+4. Calls WASM handle_pre_tool_use
+5. Haskell logic decides allow/deny
+6. Returns HookOutput to stdout
+7. Claude Code proceeds or blocks
 ```
 
 ### Configuration
@@ -354,7 +266,7 @@ In `.claude/settings.local.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "exomonad hook pre-tool-use"
+            "command": "exomonad-sidecar hook pre-tool-use"
           }
         ]
       }
@@ -364,7 +276,7 @@ In `.claude/settings.local.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "exomonad hook session-end"
+            "command": "exomonad-sidecar hook session-end"
           }
         ]
       }
@@ -374,7 +286,7 @@ In `.claude/settings.local.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "exomonad hook subagent-stop"
+            "command": "exomonad-sidecar hook subagent-stop"
           }
         ]
       }
@@ -383,216 +295,70 @@ In `.claude/settings.local.json`:
 }
 ```
 
-**Note:** MCP server configuration uses `.mcp.json`. Claude Code connects directly to control-server via HTTP (TCP port 7432):
+**MCP server configuration (`.mcp.json`):**
 ```json
-{"mcpServers": {"exomonad": {"type": "http", "url": "http://localhost:7432/role/tl/mcp"}}}
+{
+  "mcpServers": {
+    "exomonad": {
+      "type": "stdio",
+      "command": "exomonad-sidecar",
+      "args": ["mcp-stdio"],
+      "env": {
+        "EXOMONAD_WASM_PATH": "/path/to/wasm-guest.wasm"
+      }
+    }
+  }
+}
 ```
 
-### Running
-
-**Docker Compose - Container Separation Architecture (Recommended)**
-
-The Docker Compose setup uses a separated container architecture:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ zellij container (human attaches here)                          │
-│  • Minimal: Zellij + Docker CLI + curl                          │
-│  • Panes: docker attach tl, docker attach pm, ...               │
-└─────────────────────────────────────────────────────────────────┘
-              │ docker attach
-              ▼
-┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
-│ tl (claude-agent)│  │ pm (claude-agent)│  │ subagents...     │
-│ ROLE=tl          │  │ ROLE=pm          │  │ (dynamic)        │
-└────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘
-         │ TCP :7432           │                     │
-         ▼                     ▼                     ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ control-server container                                        │
-│  • MCP server (TCP 7432)                                        │
-│  • Calls docker-ctl (Rust binary) for spawn + exec              │
-│  • Creates Zellij tabs (shared socket)                          │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**Quick Start:**
-```bash
-./ide              # Connect to Zellij (starts containers if needed, idempotent)
-
-# Detach with Ctrl+p, Ctrl+q
-```
-
-**After Dockerfile/layout changes:**
-```bash
-./refresh-ide      # Rebuild images + recreate containers (no TTY required)
-./ide              # Then connect
-```
-
-Note: `./refresh-ide` is agent-safe (no TTY required). Agents can run it to rebuild/restart
-the environment, then humans connect with `./ide`.
-
-**Manual (if scripts don't work):**
-```bash
-docker compose up -d
-docker exec -it exomonad-zellij gosu user zellij attach --create main
-```
-
-**Services:**
-| Container | Purpose |
-|-----------|---------|
-| `exomonad-zellij` | Minimal Zellij multiplexer (human attaches here) |
-| `exomonad-control-server` | Haskell MCP server (TCP 7432) |
-| `exomonad-tl` | Tech Lead agent (coding) |
-| `exomonad-pm` | Project Manager agent (planning) |
-| `docker-ctl` | Container lifecycle CLI (inside control-server) |
-
-**Features:**
-- ✅ Named agent containers (TL + PM always running)
-- ✅ TCP MCP transport (no Unix socket complexity)
-- ✅ `docker-ctl exec` for remote command execution
-- ✅ Zellij panes connect via `docker attach`
-- ✅ Clean separation of concerns
-- ✅ Dynamic subagent spawning via docker-ctl
-
-**Testing MCP connection:**
-```
-# In TL or PM pane
-/mcp
-Expected: Shows "exomonad" server connected
-
-/tools
-Expected: Lists MCP tools
-```
-
-**Testing docker-ctl exec:**
-```bash
-docker exec exomonad-control-server docker-ctl exec exomonad-tl -- echo hello
-```
-
-**Rollback to Legacy Orchestrator:**
-```bash
-# Use the legacy profile
-docker compose --profile legacy up orchestrator
-docker attach exomonad-orchestrator
-```
-
-**Troubleshooting:**
-- **MCP shows "failed" on startup**: control-server still initializing. Use `/mcp` → `Reconnect` after 10 seconds.
-- **Agent not responding**: Check `docker logs exomonad-tl` or `docker logs exomonad-pm`.
-- **Authentication errors**: Verify credentials in `exomonad-claude-auth` volume.
-
-**Local development (without Docker):**
-
-Not recommended. Use Docker Compose for consistency. If you must run locally:
-```bash
-# Build binaries
-cabal build exomonad-control-server
-cargo build -p exomonad -p tui-sidebar
-
-# Run control-server (Terminal 1)
-cabal run exomonad-control-server
-
-# Run Claude Code with hooks configured (Terminal 2)
-claude
-```
-
-### Orchestration Internals
-
-Understanding the Docker-based runtime stack for debugging and extension.
-
-#### Scripts
-
-| Script | TTY | Purpose |
-|--------|-----|---------|
-| `./ide` | Yes | Connect to Zellij (human use) |
-| `./refresh-ide` | No | Build + recreate containers (agent-safe) |
-| `./build` | No | Build images via docker buildx bake |
-
-#### Docker Volumes
-
-| Volume | Purpose |
-|--------|---------|
-| `exomonad-sockets` | Shared `/sockets` for control.sock |
-| `exomonad-zellij` | Shared XDG_RUNTIME_DIR for cross-container Zellij |
-| `exomonad-claude-auth` | Claude authentication persistence |
-
-#### Config Files
-
-| File | Format | Purpose |
-|------|--------|---------|
-| `docker/zellij/layout.kdl` | KDL | Zellij tab layout |
-| `docker/zellij/config.kdl` | KDL | Zellij behavior |
-| `docker-compose.yml` | YAML | Service orchestration |
-| `docker/docker-bake.hcl` | HCL | Multi-stage build DAG |
-
-#### Health Checks
-
-All containers use Docker health checks. `./refresh-ide` waits for all services to report healthy before completing.
+### Building
 
 ```bash
-# Check health status
-docker inspect --format='{{.State.Health.Status}}' exomonad-control-server
+# Build Rust runtime
+cargo build --release -p exomonad-sidecar
+
+# Build Haskell WASM plugin (requires nix develop .#wasm)
+nix develop .#wasm -c wasm32-wasi-cabal build --project-file=cabal.project.wasm wasm-guest
+
+# Copy WASM to expected location
+cp haskell/wasm-guest/dist-newstyle/.../wasm-guest.wasm ~/.exomonad/wasm-guest.wasm
 ```
 
-#### Troubleshooting
+### MCP Tools
 
-**Containers won't start:**
-```bash
-docker compose logs control-server  # Check for errors
-docker compose down && ./refresh-ide  # Clean restart
-```
+All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/Tools.hs`):
 
-**Stale Zellij session:**
-```bash
-# refresh-ide cleans volatile state automatically, but if needed:
-docker run --rm -v exomonad-zellij:/run/user/1000 debian:bookworm-slim rm -rf /run/user/1000/*
-```
+| Tool | Description |
+|------|-------------|
+| `git_branch` | Get current git branch |
+| `git_status` | Get dirty files |
+| `git_log` | Get recent commits |
+| `read_file` | Read file contents |
+| `github_list_issues` | List GitHub issues |
+| `github_get_issue` | Get single issue details |
+| `github_list_prs` | List GitHub pull requests |
+| `spawn_agents` | Spawn agents in Zellij tabs with worktrees |
+| `cleanup_agents` | Clean up agent worktrees |
+| `list_agents` | List active agent worktrees |
 
-**Build cache issues:**
-```bash
-./build --no-cache  # Force full rebuild
-```
+### Future: Zellij Plugins
+
+TODO: Integrate via WASM-based Zellij plugins for tighter integration:
+- Custom panes, status bars, agent dashboards
+- Native Zellij events instead of shelling out to `zellij action`
+- Real-time agent state visualization
 
 ### Status
 
-- ✅ Hook forwarding (passthrough)
-- ✅ MCP server + 20+ tools via auto-discovery (popup, spawn_agents, exo_status, file_pr, pm_status, mailbox tools, GitHub tools, etc.)
-- ✅ LSP integration (HLS via lsp-test)
-- ✅ FunctionGemma scoring (HTTP interpreter via Ollama)
-- ✅ Automatic tool registration via MCPExport annotation + reifyMCPTools
-- ✅ Hybrid orchestration (Zellij)
-- ✅ Unix socket health checks for robust readiness checks
-- ✅ Declarative service dependencies and restart policies
-- ✅ MCP direct execution via .mcp.json (exomonad spawned per-call by Claude)
-- ✅ Unix socket communication for all local components
-- 🔄 Training data generation (types ready, CLI pending)
-- ❌ Daemon mode (not implemented, uses per-call connection)
-- ❌ Metrics hub (exomonad-hub needs repurposing)
-- ❌ Real hook logic (currently allow-all passthrough)
-
-### Stopping
-
-**From inside Zellij:**
-- Detach: `Ctrl+p, Ctrl+q` (containers keep running)
-- Quit: `Ctrl+P` → `q` (exits Zellij, containers keep running)
-
-**Stop all containers:**
-```bash
-docker compose down
-```
-
-**Full cleanup (including volumes):**
-```bash
-docker compose down -v
-```
-
-### See Also
-
-- **[haskell/control-server/CLAUDE.md](haskell/control-server/CLAUDE.md)** - Complete data flow + implementation
-- **[rust/CLAUDE.md](rust/CLAUDE.md)** - Rust workspace overview
-- **[rust/exomonad/CLAUDE.md](rust/exomonad/CLAUDE.md)** - Hook/MCP implementation
-- **[haskell/agents/semantic-scout/CLAUDE.md](haskell/agents/semantic-scout/CLAUDE.md)** - Scout exploration algorithm
+- ✅ 100% WASM routing (all logic in Haskell, Rust handles I/O only)
+- ✅ MCP stdio server for Claude Code
+- ✅ Hook forwarding via WASM
+- ✅ High-level effects (SpawnAgent, not CreateWorktree + OpenTab)
+- ✅ Git worktrees for agent isolation
+- ✅ Zellij tab management
+- ✅ GitHub API integration
+- 🔄 Zellij plugin integration (planned)
+- ❌ Hook logic (currently allow-all passthrough)
 
 ---
 
@@ -657,7 +423,7 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 | New integration | `haskell/dsl/core/src/ExoMonad/Effects/` (plural) |
 | New graph annotation | `haskell/dsl/core/src/ExoMonad/Graph/Types.hs` |
 | New interpreter | `haskell/effects/<name>-interpreter/` |
-| New MCP tool/agent | `haskell/agents/<name>/` |
+| New MCP tool | `haskell/wasm-guest/src/ExoMonad/Guest/Tools.hs` |
 | TypeScript bot | `typescript/<name>/` |
 | Agents (consuming repos) | Separate repo (urchin, etc.) |
 
@@ -705,6 +471,7 @@ cabal test all             # Run tests
 2. **Typed Jinja templates** - Compile-time validation via ginger
 3. **OneOf sum type** - Fully typed dispatch without Dynamic
 4. **IO-blind agents** - All IO in runners, enables WASM + deterministic testing
+5. **Haskell WASM = embedded DSL** - All logic in Haskell, Rust handles I/O only
 
 
 ### Code Smells: Data Flow Dead-Ends
@@ -751,6 +518,7 @@ withLSPSession "/path/to/project" $ \session -> do
 ## References
 
 - [haskell/dsl/core/CLAUDE.md](haskell/dsl/core/CLAUDE.md) - Graph DSL reference
+- [rust/exomonad-sidecar/CLAUDE.md](rust/exomonad-sidecar/CLAUDE.md) - MCP server + WASM host
 - [deploy/CLAUDE.md](deploy/CLAUDE.md) - Cloudflare deployment
 - [freer-simple](https://hackage.haskell.org/package/freer-simple) - Effect system
 - [Anthropic tool use](https://docs.anthropic.com/en/docs/tool-use)

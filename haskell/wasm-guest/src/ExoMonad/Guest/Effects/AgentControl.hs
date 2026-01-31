@@ -38,7 +38,7 @@ import Control.Monad.Freer
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.:?), (.=))
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
-import qualified Data.Text
+import Data.Text qualified
 import ExoMonad.Guest.HostCall (callHost, host_agent_cleanup, host_agent_cleanup_batch, host_agent_list, host_agent_spawn, host_agent_spawn_batch)
 import GHC.Generics (Generic)
 
@@ -162,7 +162,7 @@ data HostResult a
 
 instance (FromJSON a) => FromJSON (HostResult a) where
   parseJSON = withObject "HostResult" $ \v -> do
-    kind <- v .: "kind" :: FromJSON (Maybe Text) => Data.Aeson.Types.Parser Text
+    kind <- v .: "kind" :: (FromJSON (Maybe Text)) => Data.Aeson.Types.Parser Text
     case kind of
       "Success" -> Success <$> v .: "payload"
       "Error" -> do

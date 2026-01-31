@@ -10,8 +10,7 @@ All Haskell packages live here, organized by architectural pattern.
 | Work on LLM-level teaching infrastructure | `dsl/teaching/CLAUDE.md` |
 | Add or modify an effect interpreter | `effects/CLAUDE.md` → `effects/{name}-interpreter/CLAUDE.md` |
 | Understand graph execution model | `runtime/CLAUDE.md` → `runtime/actor/CLAUDE.md` |
-| Work on Claude Code++ (hooks/MCP/scout) | `control-server/CLAUDE.md` ⭐ |
-| Work on semantic-scout code exploration | `control-server/CLAUDE.md` (merged from agents/semantic-scout) |
+| Work on WASM guest (MCP tools) | `wasm-guest/` (see `../rust/exomonad-sidecar/CLAUDE.md` for runtime) |
 | Work with LSP integration | `effects/lsp-interpreter/CLAUDE.md` |
 | Generate training data for FunctionGemma | `tools/training-generator/CLAUDE.md` |
 | Understand wire protocols | `protocol/CLAUDE.md` |
@@ -23,15 +22,13 @@ All Haskell packages live here, organized by architectural pattern.
 
 ```
 haskell/CLAUDE.md  ← YOU ARE HERE (router)
-├── control-server/CLAUDE.md  ⭐ Claude Code++ hub (hooks/MCP/scout/LSP)
+├── wasm-guest/  ← WASM plugin (MCP tools, hosted by Rust runtime)
 ├── dsl/CLAUDE.md
 │   ├── core/CLAUDE.md  ← Graph DSL reference (detailed)
 │   └── teaching/CLAUDE.md  ← LLM-level teaching for FunctionGemma training
-├── agents/
-│   └── semantic-scout/CLAUDE.md  ← MERGED into control-server (redirect notice)
 ├── effects/CLAUDE.md  ← Effect interpreter pattern
 │   ├── llm-interpreter/CLAUDE.md
-│   ├── lsp-interpreter/CLAUDE.md  ← Language Server Protocol (used by scout)
+│   ├── lsp-interpreter/CLAUDE.md  ← Language Server Protocol
 │   ├── ghci-interpreter/CLAUDE.md
 │   ├── habitica/CLAUDE.md
 │   └── ...
@@ -44,16 +41,15 @@ haskell/CLAUDE.md  ← YOU ARE HERE (router)
 └── tools/CLAUDE.md
     ├── ghci-oracle/CLAUDE.md
     ├── sleeptime/CLAUDE.md
-    └── training-generator/CLAUDE.md  ← FunctionGemma training data (used by scout)
+    └── training-generator/CLAUDE.md  ← FunctionGemma training data
 ```
 
 ## Structure
 
 | Directory | Purpose | When to read |
 |-----------|---------|--------------|
-| `control-server/` ⭐ | Claude Code++ hub: hook/MCP handler + semantic-scout + LSP session manager | Working on Claude Code++ integration, scout, or hook logic |
+| `wasm-guest/` | WASM plugin with MCP tools (hosted by Rust runtime) | Adding/modifying MCP tools, effect handlers |
 | `dsl/` | Graph DSL (core) + LLM teaching infrastructure (teaching) | Defining graphs, handlers, templates; LLM-level training data capture |
-| `agents/` | Production agents (semantic-scout merged into control-server) | See control-server for active scout implementation |
 | `effects/` | Effect interpreters (HTTP, subprocess, etc.) | Adding/modifying external integrations |
 | `runtime/` | Execution backends (actor, WASM) | Understanding concurrent execution |
 | `protocol/` | Wire formats (native, WASM) | Client-server communication |
@@ -67,7 +63,7 @@ This codebase follows well-known CS patterns:
 - **Algebraic effects**: Free monad over effect types, interpreted to IO
 - **Actor model**: Alternative execution backend (runtime/actor)
 - **Adapter pattern**: Interpreters adapt external APIs (HTTP, subprocess, sockets)
-- **Facade pattern**: Server provides unified interface over all interpreters
+- **Embedded DSL**: Haskell WASM as pure logic, hosted by Rust runtime
 
 ## Common Commands
 
@@ -80,4 +76,4 @@ Pre-commit:    `just pre-commit`
 1. Define effect type in `dsl/core/src/ExoMonad/Effect/Types.hs` (or Effects/*.hs)
 2. Create interpreter package at `effects/{name}-interpreter/`
 3. Add to `cabal.project`
-4. Wire into `control-server/` if needed for Claude Code++
+4. Wire into `wasm-guest/` if needed for MCP tools (via host functions)

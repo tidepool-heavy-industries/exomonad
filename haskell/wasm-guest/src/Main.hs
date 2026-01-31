@@ -13,16 +13,16 @@ module Main where
 
 import Control.Exception (SomeException, try)
 import Control.Monad.Freer
-import Data.Aeson (FromJSON, ToJSON, Value, object, (.=), (.:), (.:?))
+import Data.Aeson (FromJSON, ToJSON, Value, object, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Types (Parser, parseEither)
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as BSL
 import Data.Text (Text, pack)
-import qualified Data.Text as T
-import ExoMonad.Guest.HostCall
+import Data.Text qualified as T
 import ExoMonad.Guest.Effects.AgentControl qualified as AC
 import ExoMonad.Guest.Effects.FileSystem qualified as FS
+import ExoMonad.Guest.HostCall
 import ExoMonad.Guest.Tools qualified as Tools
 import Extism.PDK (input, output)
 import Foreign.C.Types (CInt (..))
@@ -204,21 +204,17 @@ dispatchTool name args = case name of
   "spawn_agents" -> handleSpawnAgents args
   "cleanup_agents" -> handleCleanupAgents args
   "list_agents" -> handleListAgents
-
   -- Filesystem tools
   "read_file" -> handleReadFile args
   "write_file" -> handleWriteFile args
-
   -- Git tools
   "git_branch" -> handleGitBranch args
   "git_status" -> handleGitStatus args
   "git_log" -> handleGitLog args
-
   -- GitHub tools
   "github_list_issues" -> handleGitHubListIssues args
   "github_get_issue" -> handleGitHubGetIssue args
   "github_list_prs" -> handleGitHubListPRs args
-
   -- Unknown tool
   _ -> pure $ errorResult $ "Unknown tool: " <> name
 
@@ -255,9 +251,10 @@ handleCleanupAgents args = do
 parseCleanupAgentsArgs :: Value -> Parser ([Text], Bool)
 parseCleanupAgentsArgs = Aeson.withObject "cleanup_agents args" $ \v -> do
   issues <- v .: "issues"
-  force <- v .:? "force" >>= \case
-    Nothing -> pure False
-    Just f -> pure f
+  force <-
+    v .:? "force" >>= \case
+      Nothing -> pure False
+      Just f -> pure f
   pure (issues, force)
 
 -- | Handle list_agents MCP tool call.
@@ -282,9 +279,10 @@ handleReadFile args = do
 parseReadFileArgs :: Value -> Parser (Text, Int)
 parseReadFileArgs = Aeson.withObject "read_file args" $ \v -> do
   path <- v .: "path"
-  maxBytes <- v .:? "max_bytes" >>= \case
-    Nothing -> pure 0
-    Just m -> pure m
+  maxBytes <-
+    v .:? "max_bytes" >>= \case
+      Nothing -> pure 0
+      Just m -> pure m
   pure (path, maxBytes)
 
 -- | Handle write_file MCP tool call.
@@ -302,9 +300,10 @@ parseWriteFileArgs :: Value -> Parser (Text, Text, Bool)
 parseWriteFileArgs = Aeson.withObject "write_file args" $ \v -> do
   path <- v .: "path"
   content <- v .: "content"
-  createParents <- v .:? "create_parents" >>= \case
-    Nothing -> pure True
-    Just c -> pure c
+  createParents <-
+    v .:? "create_parents" >>= \case
+      Nothing -> pure True
+      Just c -> pure c
   pure (path, content, createParents)
 
 -- | Handle git_branch MCP tool call.
@@ -324,16 +323,17 @@ handleGitStatus args = do
         Left err -> pure $ errorResult $ pack err
         Right (resp :: GitDirtyFilesResp) -> pure $ successResult $ Aeson.toJSON resp
 
-data GitDirtyFilesReq = GitDirtyFilesReq { gdfPath :: Maybe Text }
+data GitDirtyFilesReq = GitDirtyFilesReq {gdfPath :: Maybe Text}
   deriving (Show, Generic)
 
 instance ToJSON GitDirtyFilesReq where
   toJSON (GitDirtyFilesReq p) = object ["path" .= p]
 
-data GitDirtyFilesResp = GitDirtyFilesResp { files :: [Text] }
+data GitDirtyFilesResp = GitDirtyFilesResp {files :: [Text]}
   deriving (Show, Generic)
 
 instance FromJSON GitDirtyFilesResp
+
 instance ToJSON GitDirtyFilesResp
 
 -- | Handle git_log MCP tool call.
@@ -350,21 +350,23 @@ handleGitLog args = do
 parseGitLogArgs :: Value -> Parser (Maybe Text, Int)
 parseGitLogArgs = Aeson.withObject "git_log args" $ \v -> do
   path <- v .:? "path"
-  limit <- v .:? "limit" >>= \case
-    Nothing -> pure 10
-    Just l -> pure l
+  limit <-
+    v .:? "limit" >>= \case
+      Nothing -> pure 10
+      Just l -> pure l
   pure (path, limit)
 
-data GitLogReq = GitLogReq { glPath :: Maybe Text, glLimit :: Int }
+data GitLogReq = GitLogReq {glPath :: Maybe Text, glLimit :: Int}
   deriving (Show, Generic)
 
 instance ToJSON GitLogReq where
   toJSON (GitLogReq p l) = object ["path" .= p, "limit" .= l]
 
-data GitLogResp = GitLogResp { commits :: [GitCommit] }
+data GitLogResp = GitLogResp {commits :: [GitCommit]}
   deriving (Show, Generic)
 
 instance FromJSON GitLogResp
+
 instance ToJSON GitLogResp
 
 data GitCommit = GitCommit
@@ -422,7 +424,7 @@ instance ToJSON GitHubListIssuesReq where
   toJSON (GitHubListIssuesReq o r s l) =
     object ["owner" .= o, "repo" .= r, "state" .= s, "labels" .= l]
 
-data GitHubIssuesResp = GitHubIssuesResp { ghIssues :: [GitHubIssue] }
+data GitHubIssuesResp = GitHubIssuesResp {ghIssues :: [GitHubIssue]}
   deriving (Show, Generic)
 
 instance FromJSON GitHubIssuesResp where
@@ -551,7 +553,7 @@ instance ToJSON GitHubListPRsReq where
   toJSON (GitHubListPRsReq o r s l) =
     object ["owner" .= o, "repo" .= r, "state" .= s, "limit" .= l]
 
-data GitHubPRsResp = GitHubPRsResp { ghPRs :: [GitHubPR] }
+data GitHubPRsResp = GitHubPRsResp {ghPRs :: [GitHubPR]}
   deriving (Show, Generic)
 
 instance FromJSON GitHubPRsResp where

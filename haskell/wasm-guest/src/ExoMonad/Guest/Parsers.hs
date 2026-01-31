@@ -28,7 +28,7 @@ module ExoMonad.Guest.Parsers
   )
 where
 
-import Data.Aeson (ToJSON (..), Value, object, (.=), (.:), (.:?))
+import Data.Aeson (ToJSON (..), Value, object, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
@@ -75,9 +75,10 @@ parseSpawnAgentsArgs = Aeson.withObject "spawn_agents args" $ \v -> do
 parseCleanupAgentsArgs :: Value -> Parser ([Text], Bool)
 parseCleanupAgentsArgs = Aeson.withObject "cleanup_agents args" $ \v -> do
   issues <- v .: "issues"
-  force <- v .:? "force" >>= \case
-    Nothing -> pure False
-    Just f -> pure f
+  force <-
+    v .:? "force" >>= \case
+      Nothing -> pure False
+      Just f -> pure f
   pure (issues, force)
 
 -- ============================================================================
@@ -87,9 +88,10 @@ parseCleanupAgentsArgs = Aeson.withObject "cleanup_agents args" $ \v -> do
 parseGitLogArgs :: Value -> Parser (Maybe Text, Int)
 parseGitLogArgs = Aeson.withObject "git_log args" $ \v -> do
   path <- v .:? "path"
-  limit <- v .:? "limit" >>= \case
-    Nothing -> pure 10
-    Just l -> pure l
+  limit <-
+    v .:? "limit" >>= \case
+      Nothing -> pure 10
+      Just l -> pure l
   pure (path, limit)
 
 parseGitPathArgs :: Value -> Parser (Maybe Text)
@@ -102,18 +104,20 @@ parseGitPathArgs = Aeson.withObject "git args" $ \v -> v .:? "path"
 parseReadFileArgs :: Value -> Parser (Text, Int)
 parseReadFileArgs = Aeson.withObject "read_file args" $ \v -> do
   path <- v .: "path"
-  maxBytes <- v .:? "max_bytes" >>= \case
-    Nothing -> pure 0
-    Just m -> pure m
+  maxBytes <-
+    v .:? "max_bytes" >>= \case
+      Nothing -> pure 0
+      Just m -> pure m
   pure (path, maxBytes)
 
 parseWriteFileArgs :: Value -> Parser (Text, Text, Bool)
 parseWriteFileArgs = Aeson.withObject "write_file args" $ \v -> do
   path <- v .: "path"
   content <- v .: "content"
-  createParents <- v .:? "create_parents" >>= \case
-    Nothing -> pure True
-    Just c -> pure c
+  createParents <-
+    v .:? "create_parents" >>= \case
+      Nothing -> pure True
+      Just c -> pure c
   pure (path, content, createParents)
 
 -- ============================================================================

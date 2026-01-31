@@ -6,7 +6,7 @@ import Data.Aeson (Value (..))
 import Data.Aeson.KeyMap qualified as KM
 import Data.Char (isAsciiLower)
 import Data.List (nub)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import ExoMonad.Guest.Tools
 import Test.Hspec
 
@@ -29,7 +29,7 @@ spec = do
   describe "toMCPFormat" $ do
     it "produces object with name, description, inputSchema" $ do
       case allTools of
-        (tool:_) -> do
+        (tool : _) -> do
           let json = toMCPFormat tool
           case json of
             Object obj -> do
@@ -41,7 +41,7 @@ spec = do
 
     it "name field matches tdName" $ do
       case allTools of
-        (tool:_) -> do
+        (tool : _) -> do
           let json = toMCPFormat tool
           case json of
             Object obj ->

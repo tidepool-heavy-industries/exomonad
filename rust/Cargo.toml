@@ -9,7 +9,6 @@ members = [
     "tui-popup",
     "tui-spawner",
     "effector",
-    "docker-ctl",
     "agent-status",
     "zellij-gen",
 ]
