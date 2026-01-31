@@ -1,25 +1,33 @@
 # exomonad-sidecar
 
-Unified sidecar binary: Rust host with Haskell WASM plugin + local MCP server.
+Unified sidecar binary: Rust host with Haskell WASM plugin.
 
 ## Architecture
 
-Two operating modes:
-
-### 1. Hook Mode (requires WASM)
-
-For Claude Code hooks, the sidecar loads a Haskell WASM plugin:
+**All logic is in Haskell WASM. Rust handles I/O only.**
 
 ```
-Claude Code → exomonad-sidecar hook → WASM plugin → HookOutput
+Claude Code → exomonad-sidecar --wasm plugin.wasm [hook|mcp|mcp-stdio]
+                     ↓
+              WASM plugin (Haskell)
+                     ↓ yields effects
+              Rust host functions execute I/O
+                     ↓
+              Result returned via WASM
 ```
 
-### 2. MCP Mode (pure Rust)
+### Hook Mode
 
-For MCP tools, the sidecar runs a local HTTP server with Rust-native tools:
-
+For Claude Code hooks:
 ```
-Claude Code → HTTP → exomonad-sidecar mcp → Local git/file operations
+Claude Code → exomonad-sidecar hook → WASM handle_pre_tool_use → HookOutput
+```
+
+### MCP Mode
+
+For MCP tools:
+```
+Claude Code → HTTP/stdio → exomonad-sidecar mcp → WASM handle_mcp_call → Result
 ```
 
 ## CLI Usage
@@ -28,16 +36,16 @@ Claude Code → HTTP → exomonad-sidecar mcp → Local git/file operations
 # Handle a hook (reads JSON from stdin, writes response to stdout)
 exomonad-sidecar --wasm /path/to/plugin.wasm hook pre-tool-use
 
-# Start MCP server (no WASM needed)
-exomonad-sidecar mcp --port 7432
+# Start MCP HTTP server
+exomonad-sidecar --wasm /path/to/plugin.wasm mcp --port 7432
 
-# MCP server with custom project directory
-exomonad-sidecar mcp --port 7432 --project-dir /path/to/project
+# Start MCP stdio server (for Claude Code .mcp.json)
+exomonad-sidecar --wasm /path/to/plugin.wasm mcp-stdio
 ```
 
 ## MCP Server
 
-The MCP server provides Claude Code with local tools via HTTP.
+The MCP server provides Claude Code with tools via HTTP or stdio.
 
 ### Configuration
 
@@ -47,8 +55,8 @@ Add `.mcp.json` to your project root:
 {
   "mcpServers": {
     "exomonad": {
-      "type": "http",
-      "url": "http://localhost:7432/mcp"
+      "command": "exomonad-sidecar",
+      "args": ["--wasm", "/path/to/plugin.wasm", "mcp-stdio"]
     }
   }
 }
@@ -76,13 +84,7 @@ The spawn tools (`spawn_agents`, `cleanup_agents`, `list_agents`) require:
 - **GITHUB_TOKEN**: Environment variable for GitHub API access
 - **Git repository**: The project directory must be a git repository
 
-**spawn_agents flow:**
-1. Fetches issue details from GitHub
-2. Creates git worktree from `origin/main`
-3. Writes context files (`.exomonad/config.toml`, `INITIAL_CONTEXT.md`, `.mcp.json`)
-4. Opens new Zellij tab running `claude` in the worktree
-
-### Endpoints
+### Endpoints (HTTP mode)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -90,50 +92,60 @@ The spawn tools (`spawn_agents`, `cleanup_agents`, `list_agents`) require:
 | `/mcp/call` | POST | Execute a tool |
 | `/health` | GET | Health check |
 
-### Example Usage
-
-```bash
-# Start the server
-exomonad-sidecar mcp --port 7432
-
-# In another terminal:
-curl http://localhost:7432/mcp/tools
-curl -X POST http://localhost:7432/mcp/call \
-  -H "Content-Type: application/json" \
-  -d '{"tool_name":"git_branch","arguments":{}}'
-```
-
 ## Environment Variables
 
 | Variable | Required | Purpose |
 |----------|----------|---------|
-| `EXOMONAD_WASM_PATH` | For hooks | Path to WASM plugin file |
+| `EXOMONAD_WASM_PATH` | Yes | Path to WASM plugin file |
 | `EXOMONAD_PROJECT_DIR` | No | Project directory for MCP operations |
 | `EXOMONAD_ROLE` | No | Agent role (dev, tl, pm) |
 | `RUST_LOG` | No | Tracing log level |
 
-## Effect Boundary (Hook Mode)
+## Effect Boundary (WASM)
 
 Haskell WASM calls these host functions (high-level semantic effects):
 
+### Git Effects
 | Effect | Host Function | Rust implements via |
 |--------|---------------|---------------------|
-| `GitGetBranch` | `git_get_branch` | docker exec + git |
-| `GitGetWorktree` | `git_get_worktree` | docker exec + git |
-| `GitGetDirtyFiles` | `git_get_dirty_files` | docker exec + git |
-| `GitGetRecentCommits` | `git_get_recent_commits` | docker exec + git |
-| `GitHubListIssues` | `github_list_issues` | HTTP |
-| `GitHubGetIssue` | `github_get_issue` | HTTP |
-| `GitHubCreatePR` | `github_create_pr` | HTTP |
-| `GitHubListPRs` | `github_list_prs` | HTTP |
-| `LogInfo` | `log_info` | stdout |
-| `LogError` | `log_error` | stderr |
+| `GitGetBranch` | `git_get_branch` | local git subprocess |
+| `GitGetWorktree` | `git_get_worktree` | local git subprocess |
+| `GitGetDirtyFiles` | `git_get_dirty_files` | local git subprocess |
+| `GitGetRecentCommits` | `git_get_recent_commits` | local git subprocess |
+
+### GitHub Effects
+| Effect | Host Function | Rust implements via |
+|--------|---------------|---------------------|
+| `GitHubListIssues` | `github_list_issues` | HTTP API |
+| `GitHubGetIssue` | `github_get_issue` | HTTP API |
+| `GitHubCreatePR` | `github_create_pr` | HTTP API |
+| `GitHubListPRs` | `github_list_prs` | HTTP API |
+
+### Agent Control Effects (High-Level)
+| Effect | Host Function | Rust implements via |
+|--------|---------------|---------------------|
+| `SpawnAgent` | `agent_spawn` | GitHub API + git worktree + Zellij |
+| `SpawnAgents` | `agent_spawn_batch` | Batch version of spawn |
+| `CleanupAgent` | `agent_cleanup` | Zellij close + git worktree remove |
+| `CleanupAgents` | `agent_cleanup_batch` | Batch version of cleanup |
+| `ListAgents` | `agent_list` | git worktree list |
+
+### Filesystem Effects
+| Effect | Host Function | Rust implements via |
+|--------|---------------|---------------------|
+| `ReadFile` | `fs_read_file` | tokio::fs |
+| `WriteFile` | `fs_write_file` | tokio::fs |
+
+### Log Effects
+| Effect | Host Function | Rust implements via |
+|--------|---------------|---------------------|
+| `LogInfo` | `log_info` | tracing |
+| `LogError` | `log_error` | tracing |
 | `EmitEvent` | `emit_event` | event bus |
 
 **NOT exposed to Haskell** (Rust internals):
-- Docker operations (exec, spawn, kill)
-- File operations
-- HTTP client details
+- HTTP client implementation details
+- Subprocess management
 
 ## Building
 
@@ -153,27 +165,28 @@ cargo test -p exomonad-sidecar
 
 # E2E hook test (requires built WASM)
 echo '{"session_id":"test","hook_event_name":"PreToolUse","tool_name":"Write","transcript_path":"/tmp/t.jsonl","cwd":"/","permission_mode":"default"}' | \
-  ./target/debug/exomonad-sidecar --wasm rust/exomonad-runtime/tests/fixtures/wasm-guest.wasm hook pre-tool-use
+  ./target/debug/exomonad-sidecar --wasm /path/to/wasm-guest.wasm hook pre-tool-use
 
 # MCP server test
-./target/debug/exomonad-sidecar mcp --port 17432 &
+./target/debug/exomonad-sidecar --wasm /path/to/wasm-guest.wasm mcp --port 17432 &
 curl http://localhost:17432/health
 curl http://localhost:17432/mcp/tools
 pkill exomonad-sidecar
 ```
 
-## Hook Flow
+## Data Flow
 
+### Hook Flow
 ```
 Claude Code hook JSON (stdin)
          ↓
-    exomonad-sidecar
+    exomonad-sidecar --wasm plugin.wasm hook pre-tool-use
          ↓
     Parse HookInput
          ↓
     Call WASM handle_pre_tool_use
          ↓
-    Haskell yields effects (GitGetBranch, LogInfo)
+    Haskell yields effects (GitGetBranch, LogInfo, etc.)
          ↓
     Rust executes effects via host functions
          ↓
@@ -184,8 +197,28 @@ Claude Code hook JSON (stdin)
     Claude Code receives response
 ```
 
+### MCP Tool Flow
+```
+Claude Code MCP request
+         ↓
+    exomonad-sidecar --wasm plugin.wasm mcp
+         ↓
+    HTTP server receives POST /mcp/call
+         ↓
+    Call WASM handle_mcp_call
+         ↓
+    Haskell dispatchTool routes to handler
+         ↓
+    Handler yields effects (AgentControl, FileSystem, etc.)
+         ↓
+    Rust executes effects via host functions
+         ↓
+    Haskell returns MCPCallOutput
+         ↓
+    HTTP response with result
+```
+
 ## Related Documentation
 
 - **[exomonad-runtime](../exomonad-runtime/)** - Plugin loading and host functions
 - **[wasm-guest](../../haskell/wasm-guest/)** - Haskell WASM plugin source
-- **[Plan](../../../.claude/plans/)** - Migration plan from Haskell control-server

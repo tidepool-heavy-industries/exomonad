@@ -12,6 +12,8 @@ executable wasm-guest
     hs-source-dirs:   src
     other-modules:
         ExoMonad.Guest.HostCall
+        ExoMonad.Guest.Effects.AgentControl
+        ExoMonad.Guest.Effects.FileSystem
     default-language: GHC2021
     
     build-depends:

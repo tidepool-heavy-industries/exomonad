@@ -18,6 +18,15 @@ module ExoMonad.Guest.HostCall
     host_log_info,
     host_log_error,
     host_emit_event,
+    -- Agent Control
+    host_agent_spawn,
+    host_agent_spawn_batch,
+    host_agent_cleanup,
+    host_agent_cleanup_batch,
+    host_agent_list,
+    -- Filesystem
+    host_fs_read_file,
+    host_fs_write_file,
   )
 where
 
@@ -51,6 +60,22 @@ foreign import ccall "log_info" host_log_info :: Word64 -> IO ()
 foreign import ccall "log_error" host_log_error :: Word64 -> IO ()
 
 foreign import ccall "emit_event" host_emit_event :: Word64 -> IO ()
+
+-- Agent Control host functions (high-level semantic operations)
+foreign import ccall "agent_spawn" host_agent_spawn :: Word64 -> IO Word64
+
+foreign import ccall "agent_spawn_batch" host_agent_spawn_batch :: Word64 -> IO Word64
+
+foreign import ccall "agent_cleanup" host_agent_cleanup :: Word64 -> IO Word64
+
+foreign import ccall "agent_cleanup_batch" host_agent_cleanup_batch :: Word64 -> IO Word64
+
+foreign import ccall "agent_list" host_agent_list :: Word64 -> IO Word64
+
+-- Filesystem host functions
+foreign import ccall "fs_read_file" host_fs_read_file :: Word64 -> IO Word64
+
+foreign import ccall "fs_write_file" host_fs_write_file :: Word64 -> IO Word64
 
 callHost :: (ToJSON req, FromJSON resp) => (Word64 -> IO Word64) -> req -> IO (Either String resp)
 callHost rawFn request = do

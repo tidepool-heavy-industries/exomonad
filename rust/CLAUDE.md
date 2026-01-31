@@ -4,63 +4,40 @@ Rust workspace for augmenting human-driven Claude Code sessions with ExoMonad in
 
 **This is NOT a headless orchestration system.** Humans interact with Claude Code directly via TTY; this infrastructure adds superpowers.
 
-## Deployment Modes
+## Architecture
 
-| Mode | Human Interface | MCP Transport | Hook Transport |
-|------|-----------------|---------------|----------------|
-| **Docker Compose** (recommended) | Zellij container + `docker attach` | TCP (control-server:7432) | TCP (control-server:7432) |
-| **Local dev** | Zellij panes | TCP (localhost:7432) or Unix socket | Unix socket |
-
-## Documentation Tree
+**100% WASM routing.** All MCP tool logic lives in Haskell WASM; Rust handles I/O only.
 
 ```
-rust/CLAUDE.md  ← YOU ARE HERE (router)
-├── exomonad/CLAUDE.md  ← Hook handler (IMPLEMENTED)
-│   • hook subcommand: forwards CC hooks to control server
-│   • health subcommand: check control server connectivity
-│   • Fail-closed: errors if control server unavailable
-│
-├── docker-ctl/CLAUDE.md  ← Container lifecycle management (IMPLEMENTED)
-│   • spawn - Create new agent containers
-│   • exec {id} - Execute commands in containers (replaces SSH)
-│   • status {id} - Container status
-│   • stop {id} - Stop containers
-│
-├── effector/CLAUDE.md  ← Stateless IO executor (IMPLEMENTED)
-│   • Cabal/Git/GH operations
-│   • Returns structured JSON
-│
-├── exomonad-shared/CLAUDE.md  ← Shared types and utilities
-│   • protocol.rs: HookInput, HookOutput, ControlMessage, ControlResponse
-│   • socket.rs: TCP client (ControlSocket), NDJSON protocol
-│   • commands/hook.rs: handle_hook() implementation
-│
-├── agent-status/           ← TUI Dashboard (IMPLEMENTED)
-│   • Renders Status, Logs, Controls
-│   • TUI-interactive dashboard for agent monitoring
-│
-├── exomonad-services/      ← External Service Clients (Library)
-│   • Anthropic, GitHub, Ollama, OTLP
-│
-├── tui-popup/CLAUDE.md  ← Floating pane popup (IMPLEMENTED)
-│   • Renders popup UI to /dev/tty (not stdout)
-│   • Reads definition from --input file, writes result to --output (FIFO)
-│   • Launched via `zellij action new-pane --floating`
-│
-└── tui-spawner/CLAUDE.md  ← Cross-container popup spawner (IMPLEMENTED)
-    • Creates FIFO, spawns floating Zellij pane with tui-popup
-    • Blocks reading FIFO until user responds
-    • Called by Haskell TUIInterpreter via subprocess
+Claude Code (hook or MCP call)
+       ↓
+  exomonad-sidecar (Rust)
+       ↓
+  PluginManager::call("handle_*", ...)
+       ↓
+  WASM guest (Haskell) ← PURE LOGIC ONLY
+       ↓
+  Yields effects (Git, GitHub, AgentControl, Log, etc.)
+       ↓
+  Rust host functions execute ALL I/O
+       ↓
+  Result marshalled back through WASM
 ```
 
-## Architecture Overview
+### Key Components
 
-### Docker Compose (Recommended)
+| Component | Purpose |
+|-----------|---------|
+| **exomonad-sidecar** | Rust binary with WASM plugin support (hooks + MCP) |
+| **exomonad-runtime** | WASM plugin loading + host functions |
+| **wasm-guest** | Haskell WASM plugin (pure logic, no I/O) |
+
+### Deployment
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │ zellij container (human attaches here via docker attach)        │
-│  • Minimal: Zellij + Docker CLI + curl                          │
+│  • Minimal: Zellij + Docker CLI                                 │
 │  • Panes: docker attach tl, docker attach pm                    │
 └─────────────────────────────────────────────────────────────────┘
               │ docker attach
@@ -69,198 +46,194 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 │ tl (claude-agent)│  │ pm (claude-agent)│  │ subagents...     │
 │ ROLE=tl          │  │ ROLE=pm          │  │ (dynamic)        │
 │ Claude Code CLI  │  │ Claude Code CLI  │  │                  │
-└────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘
-         │ TCP :7432           │                     │
-         ▼                     ▼                     ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ control-server container                                        │
-│  • MCP server (TCP 7432)                                        │
-│  • Calls docker-ctl (Rust binary) for spawn + exec              │
-│  • LSP session (HLS)                                            │
-└─────────────────────────────────────────────────────────────────┘
+│ exomonad-sidecar │  │ exomonad-sidecar │  │ exomonad-sidecar │
+└──────────────────┘  └──────────────────┘  └──────────────────┘
 ```
 
-### Local Development
+Each agent runs its own `exomonad-sidecar` with WASM plugin. No central control-server.
+
+## Documentation Tree
 
 ```
-Human TTY ──▶ Claude Code (in nix shell or direct)
-               │
-               ├─ MCP tools ──────▶ HTTP (localhost:7432) ──▶ control-server
-               │                                                    │
-               └─ Hooks ──────────▶ exomonad hook ──────────────┘
-                                   (Unix socket or TCP)
+rust/CLAUDE.md  ← YOU ARE HERE (router)
+├── exomonad-sidecar/CLAUDE.md  ← MCP + Hook handler via WASM (CORE)
+│   • hook subcommand: handles CC hooks via WASM
+│   • mcp subcommand: MCP HTTP server via WASM
+│   • mcp-stdio subcommand: MCP stdio server for Claude Code
+│
+├── exomonad-runtime/CLAUDE.md  ← WASM plugin loading + host functions
+│   • PluginManager: loads WASM, routes calls
+│   • Services: Git, GitHub, AgentControl, FileSystem
+│   • Host functions: git_*, github_*, agent_*, fs_*
+│
+├── docker-ctl/CLAUDE.md  ← Container lifecycle management
+│   • spawn - Create new agent containers
+│   • exec {id} - Execute commands in containers
+│   • status {id} - Container status
+│   • stop {id} - Stop containers
+│
+├── effector/CLAUDE.md  ← Stateless IO executor
+│   • Cabal/Git/GH operations
+│   • Returns structured JSON
+│
+├── exomonad-shared/CLAUDE.md  ← Shared types and utilities
+│   • protocol.rs: HookInput, HookOutput, MCPCallInput, MCPCallOutput
+│   • commands/hook.rs: handle_hook() implementation
+│
+├── agent-status/           ← TUI Dashboard
+│   • Renders Status, Logs, Controls
+│
+├── exomonad-services/      ← External Service Clients (Library)
+│   • Anthropic, GitHub, Ollama, OTLP
+│
+├── tui-popup/CLAUDE.md  ← Floating pane popup
+│   • Renders popup UI to /dev/tty
+│
+└── tui-spawner/CLAUDE.md  ← Cross-container popup spawner
+    • Creates FIFO, spawns floating Zellij pane
 ```
-
-**Current state:**
-- `exomonad hook` - Forwards Claude Code hooks to control server ✓
-- `docker-ctl` - CLI for container lifecycle + remote exec ✓
-- `haskell/control-server` - Haskell MCP server (hooks, tools, LSP) ✓
-- **MCP:** HTTP transport (TCP 7432 in Docker, Unix socket locally) ✓
-- **Remote exec:** docker-ctl subprocess call (replaces SSH) ✓
-- **Missing:** Daemon mode, metrics hub, real hook logic in Haskell
 
 ## Workspace Members
 
 | Crate | Type | Purpose |
 |-------|------|---------|
-| [exomonad](exomonad/CLAUDE.md) | Binary | Hook handler (HTTP over Unix socket) |
-| [docker-ctl](docker-ctl/CLAUDE.md) | Binary | CLI for container lifecycle + remote exec (replaces SSH) |
+| [exomonad-sidecar](exomonad-sidecar/CLAUDE.md) | Binary | MCP + Hook handler via WASM |
+| [exomonad-runtime](exomonad-runtime/) | Library | WASM plugin loading + host functions |
+| [docker-ctl](docker-ctl/CLAUDE.md) | Binary | Container lifecycle + remote exec |
 | [effector](effector/CLAUDE.md) | Binary | Stateless IO executor |
-| [exomonad-shared](exomonad-shared/CLAUDE.md) | Library | Shared types, protocols, HTTP socket client (curl-based) |
+| [exomonad-shared](exomonad-shared/CLAUDE.md) | Library | Shared types, protocols |
 | [agent-status](agent-status/) | Binary | TUI Dashboard |
 | [exomonad-services](exomonad-services/) | Library | External service clients |
-| [tui-popup](tui-popup/CLAUDE.md) | Binary | Floating pane UI renderer (uses /dev/tty) |
-| [tui-spawner](tui-spawner/CLAUDE.md) | Binary | FIFO-based popup spawning for cross-container TUI |
+| [tui-popup](tui-popup/CLAUDE.md) | Binary | Floating pane UI renderer |
+| [tui-spawner](tui-spawner/CLAUDE.md) | Binary | FIFO-based popup spawning |
 
 ## Quick Reference
 
 ### Building
 ```bash
-cargo build --release           # Build all crates
-cargo build -p exomonad     # Build just agent
-cargo test                      # Run all tests
+cargo build --release                    # Build all crates
+cargo build -p exomonad-sidecar          # Build sidecar only
+cargo test                               # Run all tests
+
+# Build WASM plugin (requires nix develop .#wasm)
+nix develop .#wasm -c wasm32-wasi-cabal build --project-file=cabal.project.wasm wasm-guest
 ```
 
-### Current Subcommands
+### Running
 ```bash
-# Handle Claude Code hook (reads JSON stdin, outputs JSON stdout)
-exomonad hook pre-tool-use
+# MCP stdio server (Claude Code spawns this)
+exomonad-sidecar mcp-stdio
 
-# Check control server health
-exomonad health
+# MCP HTTP server (for testing)
+exomonad-sidecar mcp --port 7432
+
+# Handle Claude Code hook
+echo '{"hook_event_name":"PreToolUse",...}' | exomonad-sidecar hook pre-tool-use
 ```
 
 ### Environment Variables
 | Variable | Used By | Purpose |
 |----------|---------|---------|
-| `EXOMONAD_CONTROL_SOCKET` | exomonad | Unix socket path for control server (required; e.g., `.exomonad/sockets/control.sock`) |
+| `EXOMONAD_WASM_PATH` | exomonad-sidecar | Path to WASM plugin file (required) |
+| `EXOMONAD_PROJECT_DIR` | exomonad-sidecar | Project directory for MCP operations |
+| `EXOMONAD_ROLE` | exomonad-sidecar | Agent role (dev, tl, pm) |
+| `GITHUB_TOKEN` | services | GitHub API access |
 | `RUST_LOG` | all | Tracing log level |
 
-## What Works Today
+## MCP Tools
 
-### 1. Hook Handler
-```bash
-exomonad hook pre-tool-use  # Reads JSON from stdin
+All tools are implemented in Haskell WASM and executed via host functions:
+
+| Tool | Description |
+|------|-------------|
+| `git_branch` | Get current git branch |
+| `git_status` | Get dirty files |
+| `git_log` | Get recent commits |
+| `read_file` | Read file contents |
+| `github_list_issues` | List GitHub issues |
+| `github_get_issue` | Get single issue details |
+| `github_list_prs` | List GitHub pull requests |
+| `spawn_agents` | Spawn agents in Zellij tabs |
+| `cleanup_agents` | Clean up agent worktrees |
+| `list_agents` | List active agent worktrees |
+
+## Host Functions (Effect Boundary)
+
+Rust host functions exposed to WASM:
+
+### Git Effects
+| Effect | Host Function | Implementation |
+|--------|---------------|----------------|
+| `GitGetBranch` | `git_get_branch` | git subprocess |
+| `GitGetDirtyFiles` | `git_get_dirty_files` | git subprocess |
+| `GitGetRecentCommits` | `git_get_recent_commits` | git subprocess |
+
+### GitHub Effects
+| Effect | Host Function | Implementation |
+|--------|---------------|----------------|
+| `GitHubListIssues` | `github_list_issues` | HTTP API |
+| `GitHubGetIssue` | `github_get_issue` | HTTP API |
+| `GitHubListPRs` | `github_list_prs` | HTTP API |
+
+### Agent Control Effects (High-Level)
+| Effect | Host Function | Implementation |
+|--------|---------------|----------------|
+| `SpawnAgent` | `agent_spawn` | GitHub API + git worktree + Zellij |
+| `CleanupAgent` | `agent_cleanup` | Zellij close + git worktree remove |
+| `ListAgents` | `agent_list` | git worktree list |
+
+### Filesystem Effects
+| Effect | Host Function | Implementation |
+|--------|---------------|----------------|
+| `ReadFile` | `fs_read_file` | tokio::fs |
+| `WriteFile` | `fs_write_file` | tokio::fs |
+
+## Configuration
+
+Add to `.mcp.json` in project root:
+```json
+{
+  "mcpServers": {
+    "exomonad": {
+      "command": "exomonad-sidecar",
+      "args": ["mcp-stdio"]
+    }
+  }
+}
 ```
-- Called by `.claude/settings.local.json` hooks
-- Parses Claude Code's hook JSON from stdin
-- Forwards to control server via HTTP over Unix socket (using `curl` subprocess)
-- Returns response JSON to stdout
-- **Fail-closed:** Errors immediately if control server unavailable (catches config issues during dev)
-
-### 2. MCP Tools (Direct HTTP)
-Claude Code now connects directly to control-server's HTTP MCP endpoint:
-- Transport: `http+unix://.exomonad/sockets/control.sock`
-- Protocol: MCP over HTTP (no proxy needed)
-- Configuration: `.mcp.json` in project root
-- Tools: Discovered automatically from control-server's `/mcp/tools` endpoint
-
-**The `exomonad mcp` subcommand has been removed.** Claude Code's built-in HTTP MCP support eliminates the need for a stdio proxy.
-
-## Control Server Protocol
-
-**Hooks** use HTTP over Unix Domain Socket:
-
-```
-exomonad hook               Control Server (Haskell)
-     │                                    │
-     │  POST /hook                        │
-     │  Body: [HookInput, Runtime]        │
-     │───────────────────────────────────▶│
-     │                                    │
-     │  200 OK                            │
-     │  Body: HookResponse                │
-     │◀───────────────────────────────────│
-```
-
-**MCP tools** use HTTP transport (direct from Claude Code via TCP port 7432):
-
-```
-Claude Code                     Control Server (Haskell)
-     │                                    │
-     │  GET /role/tl/mcp/tools            │
-     │───────────────────────────────────▶│
-     │  200 OK (tool definitions)         │
-     │◀───────────────────────────────────│
-     │                                    │
-     │  POST /role/tl/mcp/call            │
-     │  Body: {tool_name, arguments}      │
-     │───────────────────────────────────▶│
-     │  200 OK (result)                   │
-     │◀───────────────────────────────────│
-```
-
-**Implementation:**
-- Hooks: `exomonad_shared::socket` uses `hyper` + `tokio` for native HTTP-over-Unix-socket requests
-- MCP: Claude Code connects directly to control-server TCP port 7432
-
-## What's Missing (TODO)
-
-### Daemon Mode
-Goal: Long-lived process that collects metrics + forwards to Haskell
-
-```bash
-# Planned:
-exomonad daemon start  # Connection pooling, metrics collection
-```
-
-Status: Not implemented. Current architecture uses per-hook process spawning with `curl` subprocess.
-
-### Metrics Hub
-Goal: Store tool call traces, export to Grafana
-
-Status: exomonad-hub needs repurposing from session tracking to metrics collection.
-
-### Real Hook Logic in Haskell
-Goal: Wire control-server handlers to ExoMonad effect stack
-
-Status: Current implementation is passthrough (logs and allows all hooks).
-
-### MCP Tool Implementation
-Goal: Expose more ExoMonad agents as MCP tools via control-server
-
-Status: Basic tools implemented (find_callers, teach-graph, etc.). More agents coming.
-
-### Fail-Open Mode for Production
-Goal: Add configurable fail-open mode so Claude Code works even if control server is down
-
-Status: Not implemented. Currently always fails closed (errors if server unavailable). For production deployments, need:
-- `EXOMONAD_FAIL_MODE` environment variable
-- Monitoring/alerting when falling back to fail-open
-- Graceful degradation logic
-
-See TODO comment in `rust/exomonad-shared/src/commands/hook.rs`
 
 ## Testing
 
 ```bash
 cargo test                              # All tests
-cargo test -p exomonad              # Agent tests only
-cargo test -p exomonad-shared             # Shared library tests
+cargo test -p exomonad-sidecar          # Sidecar tests only
+cargo test -p exomonad-runtime          # Runtime tests only
+
+# E2E test with WASM
+./target/debug/exomonad-sidecar mcp --port 17432 &
+curl http://localhost:17432/health
+curl http://localhost:17432/mcp/tools
+pkill exomonad-sidecar
 ```
 
 ## Design Decisions
 
 | Decision | Rationale |
 |----------|-----------|
-| Unix Domain Sockets | Local IPC only, no Docker boundary crossing needed in Claude Code++ mode |
-| HTTP over Unix Socket | Standard protocol, `hyper` + `tokio` for robust handling |
-| Fail-closed hooks | Errors immediately if server missing; catches config issues during development |
-| Sync HTTP client | Hooks block anyway; async adds complexity |
+| 100% WASM routing | All logic in Haskell, Rust handles I/O only |
+| High-level effects | `SpawnAgent` not `CreateWorktree + OpenTab` |
+| Sidecar per agent | No central control-server, each agent independent |
+| Extism runtime | Mature WASM runtime with host function support |
 
-## Migration from Headless Mode
+## Migration Notes
 
-The previous headless Docker orchestration is archived. Key differences:
+### control-server is DEPRECATED
 
-| Aspect | Old (headless) | New (Claude Code++) |
-|--------|----------------|---------------------|
-| Execution | Docker container | Nix shell (`nix develop .#claude-code-plus`) |
-| Control | Haskell subprocess | Human TTY |
-| Hub role | Session tracking | Metrics/telemetry (TODO) |
-| Focus | Automation | Augmentation |
+The Haskell `control-server` package has been retired. All functionality is now in:
+- **exomonad-sidecar** - Rust binary that hosts WASM
+- **wasm-guest** - Haskell WASM plugin with tool logic
 
-To resurrect old code:
+To use legacy control-server (not recommended):
 ```bash
-git show headless-exomonad-archive:rust/exomonad/src/session/start.rs
-git checkout headless-exomonad-archive -- rust/exomonad/
+docker compose --profile legacy up control-server
 ```

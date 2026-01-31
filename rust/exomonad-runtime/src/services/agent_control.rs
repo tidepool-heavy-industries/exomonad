@@ -1,0 +1,830 @@
+//! High-level agent control service.
+//!
+//! Provides semantic operations for agent lifecycle management:
+//! - SpawnAgent: Create worktree, write context, open Zellij tab
+//! - CleanupAgent: Close tab, delete worktree
+//! - ListAgents: List active agent worktrees
+//!
+//! These are high-level effects exposed to Haskell WASM, not granular operations.
+
+use anyhow::{anyhow, Context, Result};
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokio::fs;
+use tokio::process::Command;
+use tracing::{debug, info, warn};
+
+use super::github::{GitHubService, Repo};
+
+// ============================================================================
+// Types
+// ============================================================================
+
+/// Options for spawning an agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpawnOptions {
+    /// GitHub repository owner
+    pub owner: String,
+    /// GitHub repository name
+    pub repo: String,
+    /// Base directory for worktrees (relative to project)
+    pub worktree_dir: Option<String>,
+}
+
+/// Result of spawning an agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpawnResult {
+    /// Path to the created worktree
+    pub worktree_path: String,
+    /// Git branch name
+    pub branch_name: String,
+    /// Zellij tab name
+    pub tab_name: String,
+    /// Issue title
+    pub issue_title: String,
+}
+
+/// Information about an active agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentInfo {
+    /// Issue ID (e.g., "123")
+    pub issue_id: String,
+    /// Full path to worktree
+    pub worktree_path: String,
+    /// Git branch name
+    pub branch_name: String,
+    /// Whether the worktree has uncommitted changes
+    pub has_changes: bool,
+}
+
+/// Result of batch spawn operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchSpawnResult {
+    pub spawned: Vec<SpawnResult>,
+    pub failed: Vec<(String, String)>, // (issue_id, error)
+}
+
+/// Result of batch cleanup operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchCleanupResult {
+    pub cleaned: Vec<String>,
+    pub failed: Vec<(String, String)>, // (issue_id, error)
+}
+
+// ============================================================================
+// Service
+// ============================================================================
+
+/// Agent control service for high-level agent lifecycle management.
+pub struct AgentControlService {
+    /// Project root directory
+    project_dir: PathBuf,
+    /// GitHub service for fetching issues
+    github: Option<GitHubService>,
+}
+
+impl AgentControlService {
+    /// Create a new agent control service.
+    pub fn new(project_dir: PathBuf, github: Option<GitHubService>) -> Self {
+        Self {
+            project_dir,
+            github,
+        }
+    }
+
+    /// Create from environment (loads secrets from ~/.exomonad/secrets).
+    pub fn from_env() -> Result<Self> {
+        let project_dir = std::env::current_dir().context("Failed to get current directory")?;
+
+        // Try to load GitHub token from secrets
+        let secrets = super::secrets::Secrets::load();
+        let github = secrets.github_token().and_then(|t| GitHubService::new(t).ok());
+
+        Ok(Self {
+            project_dir,
+            github,
+        })
+    }
+
+    // ========================================================================
+    // Spawn Agent
+    // ========================================================================
+
+    /// Spawn an agent for a GitHub issue.
+    ///
+    /// This is the high-level semantic operation that:
+    /// 1. Fetches issue from GitHub
+    /// 2. Creates git worktree from origin/main
+    /// 3. Writes context files (.exomonad/config.toml, INITIAL_CONTEXT.md, .mcp.json)
+    /// 4. Opens Zellij tab with claude command
+    pub async fn spawn_agent(
+        &self,
+        issue_id: &str,
+        options: &SpawnOptions,
+    ) -> Result<SpawnResult> {
+        // Validate we're in Zellij
+        self.check_zellij_env()?;
+
+        // Get GitHub service
+        let github = self
+            .github
+            .as_ref()
+            .ok_or_else(|| anyhow!("GitHub service not available (GITHUB_TOKEN not set)"))?;
+
+        // Parse issue number
+        let issue_num: u64 = issue_id
+            .parse()
+            .with_context(|| format!("Invalid issue number: {}", issue_id))?;
+
+        // Fetch issue from GitHub
+        info!(issue_id, "Fetching issue from GitHub");
+        let repo = Repo {
+            owner: options.owner.clone(),
+            name: options.repo.clone(),
+        };
+        let issue = github.get_issue(&repo, issue_num).await?;
+
+        // Generate slug from title
+        let slug = slugify(&issue.title);
+        let worktree_dir = options
+            .worktree_dir
+            .clone()
+            .unwrap_or_else(|| "./worktrees".to_string());
+        let worktree_path = self.project_dir.join(&worktree_dir).join(format!("gh-{}-{}", issue_id, slug));
+        let branch_name = format!("gh-{}/{}", issue_id, slug);
+
+        // Fetch origin/main
+        self.fetch_origin().await?;
+
+        // Create worktree
+        self.create_worktree(&worktree_path, &branch_name).await?;
+
+        // Write context files
+        self.write_context_files(
+            &worktree_path,
+            issue_id,
+            &issue.title,
+            &issue.body,
+            &branch_name,
+            &format!(
+                "https://github.com/{}/{}/issues/{}",
+                options.owner, options.repo, issue_id
+            ),
+        )
+        .await?;
+
+        // Open Zellij tab
+        let tab_name = format!("gh-{}", issue_id);
+        self.new_zellij_tab(&tab_name, &worktree_path, Some("claude"))
+            .await?;
+
+        Ok(SpawnResult {
+            worktree_path: worktree_path.to_string_lossy().to_string(),
+            branch_name,
+            tab_name,
+            issue_title: issue.title,
+        })
+    }
+
+    /// Spawn multiple agents.
+    pub async fn spawn_agents(
+        &self,
+        issue_ids: &[String],
+        options: &SpawnOptions,
+    ) -> BatchSpawnResult {
+        let mut result = BatchSpawnResult {
+            spawned: Vec::new(),
+            failed: Vec::new(),
+        };
+
+        for issue_id in issue_ids {
+            match self.spawn_agent(issue_id, options).await {
+                Ok(spawn_result) => result.spawned.push(spawn_result),
+                Err(e) => {
+                    warn!(issue_id, error = %e, "Failed to spawn agent");
+                    result.failed.push((issue_id.clone(), e.to_string()));
+                }
+            }
+        }
+
+        result
+    }
+
+    // ========================================================================
+    // Cleanup Agent
+    // ========================================================================
+
+    /// Clean up an agent (close Zellij tab, delete worktree).
+    pub async fn cleanup_agent(&self, issue_id: &str, force: bool) -> Result<()> {
+        // Close Zellij tab first
+        let tab_name = format!("gh-{}", issue_id);
+        if let Err(e) = self.close_zellij_tab(&tab_name).await {
+            warn!(tab_name, error = %e, "Failed to close Zellij tab (may not exist)");
+        }
+
+        // Find and delete worktree
+        let agents = self.list_agents().await?;
+        let prefix = format!("gh-{}-", issue_id);
+
+        for agent in agents {
+            let path = Path::new(&agent.worktree_path);
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if name.starts_with(&prefix) {
+                    self.delete_worktree(path, force).await?;
+                    return Ok(());
+                }
+            }
+        }
+
+        Err(anyhow!("No worktree found for issue {}", issue_id))
+    }
+
+    /// Clean up multiple agents.
+    pub async fn cleanup_agents(&self, issue_ids: &[String], force: bool) -> BatchCleanupResult {
+        let mut result = BatchCleanupResult {
+            cleaned: Vec::new(),
+            failed: Vec::new(),
+        };
+
+        for issue_id in issue_ids {
+            match self.cleanup_agent(issue_id, force).await {
+                Ok(()) => result.cleaned.push(issue_id.clone()),
+                Err(e) => {
+                    warn!(issue_id, error = %e, "Failed to cleanup agent");
+                    result.failed.push((issue_id.clone(), e.to_string()));
+                }
+            }
+        }
+
+        result
+    }
+
+    // ========================================================================
+    // List Agents
+    // ========================================================================
+
+    /// List all active agent worktrees.
+    pub async fn list_agents(&self) -> Result<Vec<AgentInfo>> {
+        let output = Command::new("git")
+            .args(["worktree", "list", "--porcelain"])
+            .current_dir(&self.project_dir)
+            .output()
+            .await
+            .context("Failed to execute git worktree list")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!("git worktree list failed: {}", stderr));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut agents = Vec::new();
+
+        let mut current_path: Option<PathBuf> = None;
+        let mut current_branch: Option<String> = None;
+
+        for line in stdout.lines() {
+            if let Some(path) = line.strip_prefix("worktree ") {
+                current_path = Some(PathBuf::from(path));
+            } else if let Some(branch) = line.strip_prefix("branch refs/heads/") {
+                current_branch = Some(branch.to_string());
+            } else if line.is_empty() {
+                if let (Some(path), Some(branch)) = (current_path.take(), current_branch.take()) {
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                        if name.starts_with("gh-") {
+                            let issue_id = name
+                                .strip_prefix("gh-")
+                                .and_then(|s| s.split('-').next())
+                                .unwrap_or("")
+                                .to_string();
+
+                            let has_changes = self.has_uncommitted_changes(&path).await;
+
+                            agents.push(AgentInfo {
+                                issue_id,
+                                worktree_path: path.to_string_lossy().to_string(),
+                                branch_name: branch,
+                                has_changes,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(agents)
+    }
+
+    // ========================================================================
+    // Internal: Zellij
+    // ========================================================================
+
+    fn check_zellij_env(&self) -> Result<String> {
+        std::env::var("ZELLIJ_SESSION_NAME")
+            .context("Not running inside a Zellij session (ZELLIJ_SESSION_NAME not set)")
+    }
+
+    async fn new_zellij_tab(&self, name: &str, cwd: &Path, command: Option<&str>) -> Result<()> {
+        info!(name, cwd = %cwd.display(), "Creating Zellij tab");
+
+        let mut args = vec![
+            "action".to_string(),
+            "new-tab".to_string(),
+            "--name".to_string(),
+            name.to_string(),
+            "--cwd".to_string(),
+            cwd.to_string_lossy().to_string(),
+        ];
+
+        if let Some(cmd) = command {
+            args.push("--".to_string());
+            args.push(cmd.to_string());
+        }
+
+        let output = Command::new("zellij")
+            .args(&args)
+            .output()
+            .await
+            .context("Failed to execute zellij")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!("zellij new-tab failed: {}", stderr));
+        }
+
+        Ok(())
+    }
+
+    async fn close_zellij_tab(&self, name: &str) -> Result<()> {
+        debug!(name, "Closing Zellij tab");
+
+        let output = Command::new("zellij")
+            .args(["action", "close-tab", "--tab-name", name])
+            .output()
+            .await
+            .context("Failed to execute zellij")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!("zellij close-tab failed: {}", stderr));
+        }
+
+        Ok(())
+    }
+
+    // ========================================================================
+    // Internal: Git Worktree
+    // ========================================================================
+
+    async fn fetch_origin(&self) -> Result<()> {
+        info!("Fetching origin/main");
+
+        let output = Command::new("git")
+            .args(["fetch", "origin", "main"])
+            .current_dir(&self.project_dir)
+            .output()
+            .await
+            .context("Failed to execute git fetch")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            warn!(stderr = %stderr, "git fetch warning (continuing anyway)");
+        }
+
+        Ok(())
+    }
+
+    async fn create_worktree(&self, path: &Path, branch: &str) -> Result<()> {
+        if path.exists() {
+            info!(path = %path.display(), "Worktree already exists, reusing");
+            return Ok(());
+        }
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .await
+                .context("Failed to create worktree parent directory")?;
+        }
+
+        info!(path = %path.display(), branch, "Creating worktree");
+
+        let output = Command::new("git")
+            .args([
+                "worktree",
+                "add",
+                "-b",
+                branch,
+                path.to_str().unwrap(),
+                "origin/main",
+            ])
+            .current_dir(&self.project_dir)
+            .output()
+            .await
+            .context("Failed to execute git worktree add")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+
+            if stderr.contains("already exists") {
+                debug!("Branch already exists, creating worktree without -b");
+                let output = Command::new("git")
+                    .args(["worktree", "add", path.to_str().unwrap(), branch])
+                    .current_dir(&self.project_dir)
+                    .output()
+                    .await?;
+
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    return Err(anyhow!("git worktree add failed: {}", stderr));
+                }
+            } else {
+                return Err(anyhow!("git worktree add failed: {}", stderr));
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn delete_worktree(&self, path: &Path, force: bool) -> Result<()> {
+        if !path.exists() {
+            debug!(path = %path.display(), "Worktree doesn't exist");
+            return Ok(());
+        }
+
+        info!(path = %path.display(), force, "Deleting worktree");
+
+        let mut args = vec!["worktree", "remove"];
+        if force {
+            args.push("--force");
+        }
+        args.push(path.to_str().unwrap());
+
+        let output = Command::new("git")
+            .args(&args)
+            .current_dir(&self.project_dir)
+            .output()
+            .await
+            .context("Failed to execute git worktree remove")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!("git worktree remove failed: {}", stderr));
+        }
+
+        Ok(())
+    }
+
+    async fn has_uncommitted_changes(&self, worktree_path: &Path) -> bool {
+        let output = Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(worktree_path)
+            .output()
+            .await;
+
+        match output {
+            Ok(o) => !o.stdout.is_empty(),
+            Err(_) => false,
+        }
+    }
+
+    // ========================================================================
+    // Internal: Context Files
+    // ========================================================================
+
+    async fn write_context_files(
+        &self,
+        worktree_path: &Path,
+        issue_id: &str,
+        title: &str,
+        body: &str,
+        branch: &str,
+        issue_url: &str,
+    ) -> Result<()> {
+        // Create .exomonad directory
+        let exomonad_dir = worktree_path.join(".exomonad");
+        fs::create_dir_all(&exomonad_dir).await?;
+
+        // Write config.toml
+        let config_content = r#"role = "dev"
+project_dir = "."
+"#;
+        fs::write(exomonad_dir.join("config.toml"), config_content).await?;
+
+        // Write INITIAL_CONTEXT.md
+        let context_content = format!(
+            r#"# Issue #{issue_id}: {title}
+
+**Branch:** `{branch}`
+**Issue URL:** {issue_url}
+
+## Description
+
+{body}
+
+## Instructions
+
+You are working on this GitHub issue in an isolated worktree.
+When done, commit your changes and create a pull request.
+"#
+        );
+        fs::write(worktree_path.join("INITIAL_CONTEXT.md"), context_content).await?;
+
+        // Write .mcp.json
+        let sidecar_path = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.to_str().map(String::from))
+            .unwrap_or_else(|| "exomonad-sidecar".to_string());
+
+        let mcp_content = format!(
+            r#"{{
+  "mcpServers": {{
+    "exomonad": {{
+      "command": "{}",
+      "args": ["mcp-stdio"]
+    }}
+  }}
+}}
+"#,
+            sidecar_path
+        );
+        fs::write(worktree_path.join(".mcp.json"), mcp_content).await?;
+
+        info!(worktree = %worktree_path.display(), "Context files written");
+        Ok(())
+    }
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/// Create a URL-safe slug from a title.
+fn slugify(title: &str) -> String {
+    title
+        .to_lowercase()
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+        .chars()
+        .take(50)
+        .collect()
+}
+
+// ============================================================================
+// Host Functions for WASM
+// ============================================================================
+
+use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
+
+// Input/Output types for host functions
+
+#[derive(Deserialize)]
+struct SpawnAgentInput {
+    issue_id: String,
+    owner: String,
+    repo: String,
+    worktree_dir: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct SpawnAgentsInput {
+    issue_ids: Vec<String>,
+    owner: String,
+    repo: String,
+    worktree_dir: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CleanupAgentInput {
+    issue_id: String,
+    force: bool,
+}
+
+#[derive(Deserialize)]
+struct CleanupAgentsInput {
+    issue_ids: Vec<String>,
+    force: bool,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind", content = "payload")]
+enum HostResult<T> {
+    Success(T),
+    Error(HostError),
+}
+
+#[derive(Serialize)]
+struct HostError {
+    message: String,
+}
+
+impl<T> From<Result<T>> for HostResult<T> {
+    fn from(res: Result<T>) -> Self {
+        match res {
+            Ok(val) => HostResult::Success(val),
+            Err(e) => HostResult::Error(HostError {
+                message: e.to_string(),
+            }),
+        }
+    }
+}
+
+// Helper functions
+
+fn get_input<T: serde::de::DeserializeOwned>(
+    plugin: &mut CurrentPlugin,
+    val: Val,
+) -> Result<T, Error> {
+    let handle = plugin
+        .memory_from_val(&val)
+        .ok_or_else(|| Error::msg("Invalid memory handle in input"))?;
+    let bytes = plugin.memory_bytes(handle)?;
+    Ok(serde_json::from_slice(bytes)?)
+}
+
+fn set_output<T: Serialize>(plugin: &mut CurrentPlugin, data: &T) -> Result<Val, Error> {
+    let json = serde_json::to_vec(data)?;
+    let handle = plugin.memory_new(json)?;
+    Ok(plugin.memory_to_val(handle))
+}
+
+fn block_on<F: std::future::Future>(future: F) -> Result<F::Output, Error> {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => Ok(handle.block_on(future)),
+        Err(_) => Err(Error::msg("No Tokio runtime available")),
+    }
+}
+
+// Host function factories
+
+pub fn spawn_agent_host_fn(service: Arc<AgentControlService>) -> Function {
+    Function::new(
+        "agent_spawn",
+        [ValType::I64],
+        [ValType::I64],
+        UserData::new(service),
+        |plugin: &mut CurrentPlugin,
+         inputs: &[Val],
+         outputs: &mut [Val],
+         user_data: UserData<Arc<AgentControlService>>|
+         -> Result<(), Error> {
+            let input: SpawnAgentInput = get_input(plugin, inputs[0].clone())?;
+
+            let service_arc = user_data.get()?;
+            let service = service_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+
+            let options = SpawnOptions {
+                owner: input.owner,
+                repo: input.repo,
+                worktree_dir: input.worktree_dir,
+            };
+
+            let result = block_on(service.spawn_agent(&input.issue_id, &options))?;
+            let output: HostResult<SpawnResult> = result.into();
+
+            outputs[0] = set_output(plugin, &output)?;
+            Ok(())
+        },
+    )
+    .with_namespace("env")
+}
+
+pub fn spawn_agents_host_fn(service: Arc<AgentControlService>) -> Function {
+    Function::new(
+        "agent_spawn_batch",
+        [ValType::I64],
+        [ValType::I64],
+        UserData::new(service),
+        |plugin: &mut CurrentPlugin,
+         inputs: &[Val],
+         outputs: &mut [Val],
+         user_data: UserData<Arc<AgentControlService>>|
+         -> Result<(), Error> {
+            let input: SpawnAgentsInput = get_input(plugin, inputs[0].clone())?;
+
+            let service_arc = user_data.get()?;
+            let service = service_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+
+            let options = SpawnOptions {
+                owner: input.owner,
+                repo: input.repo,
+                worktree_dir: input.worktree_dir,
+            };
+
+            let result = block_on(service.spawn_agents(&input.issue_ids, &options))?;
+
+            outputs[0] = set_output(plugin, &result)?;
+            Ok(())
+        },
+    )
+    .with_namespace("env")
+}
+
+pub fn cleanup_agent_host_fn(service: Arc<AgentControlService>) -> Function {
+    Function::new(
+        "agent_cleanup",
+        [ValType::I64],
+        [ValType::I64],
+        UserData::new(service),
+        |plugin: &mut CurrentPlugin,
+         inputs: &[Val],
+         outputs: &mut [Val],
+         user_data: UserData<Arc<AgentControlService>>|
+         -> Result<(), Error> {
+            let input: CleanupAgentInput = get_input(plugin, inputs[0].clone())?;
+
+            let service_arc = user_data.get()?;
+            let service = service_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+
+            let result = block_on(service.cleanup_agent(&input.issue_id, input.force))?;
+            let output: HostResult<()> = result.into();
+
+            outputs[0] = set_output(plugin, &output)?;
+            Ok(())
+        },
+    )
+    .with_namespace("env")
+}
+
+pub fn cleanup_agents_host_fn(service: Arc<AgentControlService>) -> Function {
+    Function::new(
+        "agent_cleanup_batch",
+        [ValType::I64],
+        [ValType::I64],
+        UserData::new(service),
+        |plugin: &mut CurrentPlugin,
+         inputs: &[Val],
+         outputs: &mut [Val],
+         user_data: UserData<Arc<AgentControlService>>|
+         -> Result<(), Error> {
+            let input: CleanupAgentsInput = get_input(plugin, inputs[0].clone())?;
+
+            let service_arc = user_data.get()?;
+            let service = service_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+
+            let result = block_on(service.cleanup_agents(&input.issue_ids, input.force))?;
+
+            outputs[0] = set_output(plugin, &result)?;
+            Ok(())
+        },
+    )
+    .with_namespace("env")
+}
+
+pub fn list_agents_host_fn(service: Arc<AgentControlService>) -> Function {
+    Function::new(
+        "agent_list",
+        [ValType::I64],
+        [ValType::I64],
+        UserData::new(service),
+        |plugin: &mut CurrentPlugin,
+         _inputs: &[Val],
+         outputs: &mut [Val],
+         user_data: UserData<Arc<AgentControlService>>|
+         -> Result<(), Error> {
+            let service_arc = user_data.get()?;
+            let service = service_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+
+            let result = block_on(service.list_agents())?;
+            let output: HostResult<Vec<AgentInfo>> = result.into();
+
+            outputs[0] = set_output(plugin, &output)?;
+            Ok(())
+        },
+    )
+    .with_namespace("env")
+}
+
+/// Register all agent control host functions.
+pub fn register_host_functions(service: Arc<AgentControlService>) -> Vec<Function> {
+    vec![
+        spawn_agent_host_fn(service.clone()),
+        spawn_agents_host_fn(service.clone()),
+        cleanup_agent_host_fn(service.clone()),
+        cleanup_agents_host_fn(service.clone()),
+        list_agents_host_fn(service),
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_slugify() {
+        assert_eq!(slugify("Fix the Bug"), "fix-the-bug");
+        assert_eq!(slugify("Add new feature!"), "add-new-feature");
+        assert_eq!(slugify("CamelCase"), "camelcase");
+    }
+}

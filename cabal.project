@@ -33,8 +33,8 @@ packages:
     haskell/protocol/wire-types
     haskell/protocol/generated-ts
 
-    -- Control server (Claude Code++ TCP endpoint)
-    haskell/control-server
+    -- Control server: RETIRED (replaced by exomonad-sidecar + wasm-guest)
+    -- haskell/control-server
 
     -- Tools
     haskell/tools/training-generator

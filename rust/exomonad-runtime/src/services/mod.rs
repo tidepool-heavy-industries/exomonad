@@ -1,11 +1,18 @@
+pub mod agent_control;
 pub mod docker;
+pub mod filesystem;
 pub mod git;
 pub mod github;
 pub mod local;
 pub mod log;
 pub mod secrets;
 
+pub use self::agent_control::{
+    AgentControlService, AgentInfo, BatchCleanupResult, BatchSpawnResult, SpawnOptions,
+    SpawnResult,
+};
 use self::docker::{DockerExecutor, DockerService};
+pub use self::filesystem::FileSystemService;
 use self::git::GitService;
 use self::github::GitHubService;
 use self::local::LocalExecutor;
@@ -18,6 +25,8 @@ pub struct Services {
     pub log: LogService,
     pub git: Arc<GitService>,
     pub github: Option<GitHubService>,
+    pub agent_control: Arc<AgentControlService>,
+    pub filesystem: Arc<FileSystemService>,
 }
 
 impl Services {
@@ -47,10 +56,22 @@ impl Services {
             .github_token()
             .and_then(|t| GitHubService::new(t).ok());
 
+        // Agent control service for high-level agent lifecycle
+        let project_dir = std::env::current_dir().unwrap_or_default();
+        let agent_control = Arc::new(AgentControlService::new(
+            project_dir.clone(),
+            github.clone(),
+        ));
+
+        // Filesystem service for file read/write operations
+        let filesystem = Arc::new(FileSystemService::new(project_dir));
+
         Self {
             log: LogService::default(),
             git,
             github,
+            agent_control,
+            filesystem,
         }
     }
 }

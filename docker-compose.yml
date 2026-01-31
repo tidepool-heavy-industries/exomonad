@@ -1,14 +1,18 @@
 # Container Separation Architecture
 # ================================
 # - zellij: Minimal visual multiplexer (human attaches here)
-# - control-server: Dedicated Haskell MCP server (with docker-ctl CLI)
-# - tl/pm: Named agent containers (always running)
+# - tl/pm: Named agent containers (always running, each with exomonad-sidecar)
+#
+# MIGRATION NOTE: control-server is DEPRECATED.
+# Each agent container now runs exomonad-sidecar with WASM for MCP tools.
+# The control-server service is kept in "legacy" profile for rollback.
 
 services:
   # ===========================================================================
-  # Control Server: MCP server for all agents
+  # DEPRECATED: Control Server (kept for rollback, use exomonad-sidecar instead)
   # ===========================================================================
   control-server:
+    profiles: ["legacy"]
     extends:
       file: compose.base.yml
       service: docker-socket-access
@@ -124,11 +128,10 @@ services:
     stdin_open: true
     environment:
       - EXOMONAD_ROLE=tl
-      - CONTROL_SERVER_URL=http://control-server:7432
-      - EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
       - EXOMONAD_REPO_URL=${EXOMONAD_REPO_URL:-https://github.com/tidepool-heavy-industries/exomonad.git}
       - EXOMONAD_REPO_BRANCH=${EXOMONAD_REPO_BRANCH:-main}
       - GH_TOKEN=${GH_TOKEN}
+      - GITHUB_TOKEN=${GH_TOKEN}
     volumes:
       # Named volume for repo (cloned on first start via entrypoint)
       # Cannot use bind mounts - Docker runs on remote NixOS, not local macOS
@@ -138,9 +141,6 @@ services:
       - exomonad-sockets:/sockets
       - exomonad-claude-auth:/home/agent/.claude
       - exomonad-gh-auth:/home/agent/.config/gh
-    depends_on:
-      control-server:
-        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "pgrep -f 'node.*claude' || exit 1"]
       interval: 10s
@@ -170,19 +170,15 @@ services:
     stdin_open: true
     environment:
       - EXOMONAD_ROLE=pm
-      - CONTROL_SERVER_URL=http://control-server:7432
-      - EXOMONAD_CONTROL_SOCKET=/sockets/control.sock
       - EXOMONAD_REPO_URL=${EXOMONAD_REPO_URL:-https://github.com/tidepool-heavy-industries/exomonad.git}
       - EXOMONAD_REPO_BRANCH=${EXOMONAD_REPO_BRANCH:-main}
       - GH_TOKEN=${GH_TOKEN}
+      - GITHUB_TOKEN=${GH_TOKEN}
     volumes:
       - exomonad-worktrees:/workspace
       - exomonad-sockets:/sockets
       - exomonad-claude-auth:/home/agent/.claude
       - exomonad-gh-auth:/home/agent/.config/gh
-    depends_on:
-      control-server:
-        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "pgrep -f 'node.*claude' || exit 1"]
       interval: 10s

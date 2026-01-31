@@ -1,3 +1,5 @@
+use crate::services::agent_control;
+use crate::services::filesystem;
 use crate::services::git;
 use crate::services::github;
 use crate::services::log;
@@ -52,6 +54,16 @@ impl PluginManager {
 
         // GitHub functions (4 functions) - always register, they check GITHUB_TOKEN at runtime
         functions.extend(github::register_host_functions());
+
+        // Agent control functions (5 functions) - high-level agent lifecycle
+        functions.extend(agent_control::register_host_functions(
+            services.agent_control.clone(),
+        ));
+
+        // Filesystem functions (2 functions) - file read/write
+        functions.extend(filesystem::register_host_functions(
+            services.filesystem.clone(),
+        ));
 
         Plugin::new(&manifest, functions, true).context("Failed to create plugin")
     }

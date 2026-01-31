@@ -3,8 +3,10 @@
 //! Supports two transports:
 //! - HTTP: Traditional REST endpoints for tools
 //! - stdio: JSON-RPC over stdin/stdout for Claude Code's native MCP support
+//!
+//! All tool logic is in Haskell WASM. This module handles HTTP routing
+//! and forwards tool calls to the WASM plugin via handle_mcp_call.
 
-pub mod spawn;
 pub mod stdio;
 mod tools;
 
@@ -15,7 +17,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use exomonad_runtime::Services;
+use exomonad_runtime::PluginManager;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -31,10 +33,11 @@ use tracing::{debug, error, info};
 /// Shared state for MCP server.
 #[derive(Clone)]
 pub struct McpState {
-    /// Services for git, github, etc.
-    pub services: Arc<Services>,
-    /// Working directory for git operations.
+    /// Working directory for git operations (used for logging).
     pub project_dir: PathBuf,
+    /// WASM plugin for routing tool calls through Haskell.
+    /// All tool calls are routed through handle_mcp_call in WASM.
+    pub plugin: Arc<PluginManager>,
 }
 
 // ============================================================================
