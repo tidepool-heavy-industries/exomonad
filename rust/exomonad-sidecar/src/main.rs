@@ -2,9 +2,11 @@
 //!
 //! This binary runs as a sidecar in each agent container, handling:
 //! - Claude Code hooks via WASM plugin
-//! - MCP tools via WASM plugin (TODO)
+//! - MCP tools via local Rust implementation
 //!
 //! All IO is handled by Rust; Haskell WASM yields high-level semantic effects.
+
+mod mcp;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -24,9 +26,9 @@ use tracing::{debug, error, info};
 #[command(about = "Rust sidecar with Haskell WASM plugin for Claude Code")]
 #[command(version)]
 struct Cli {
-    /// Path to the WASM plugin file
+    /// Path to the WASM plugin file (required for hook command)
     #[arg(long, env = "EXOMONAD_WASM_PATH")]
-    wasm: PathBuf,
+    wasm: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Commands,
@@ -49,11 +51,15 @@ enum Commands {
         role: Role,
     },
 
-    /// Start MCP server (TODO)
+    /// Start MCP HTTP server for Claude Code tools
     Mcp {
         /// Port to listen on
         #[arg(long, default_value = "7432")]
         port: u16,
+
+        /// Project directory for git operations (defaults to current directory)
+        #[arg(long, env = "EXOMONAD_PROJECT_DIR")]
+        project_dir: Option<PathBuf>,
     },
 }
 
@@ -127,36 +133,53 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    // Verify WASM file exists
-    if !cli.wasm.exists() {
-        error!(path = ?cli.wasm, "WASM plugin file not found");
-        anyhow::bail!("WASM plugin not found: {}", cli.wasm.display());
-    }
-
-    info!(wasm = ?cli.wasm, "Loading WASM plugin");
-
-    // Initialize services (Rust-side IO implementations)
-    let services = Arc::new(Services::new());
-
-    // Load WASM plugin
-    let plugin = PluginManager::new(cli.wasm.clone(), services)
-        .await
-        .context("Failed to load WASM plugin")?;
-
-    info!("WASM plugin loaded and initialized");
-
     match cli.command {
         Commands::Hook {
             event,
             runtime,
             role,
         } => {
+            // Hook command requires WASM plugin
+            let wasm_path = cli.wasm.ok_or_else(|| {
+                anyhow::anyhow!("--wasm or EXOMONAD_WASM_PATH is required for hook command")
+            })?;
+
+            if !wasm_path.exists() {
+                error!(path = ?wasm_path, "WASM plugin file not found");
+                anyhow::bail!("WASM plugin not found: {}", wasm_path.display());
+            }
+
+            info!(wasm = ?wasm_path, "Loading WASM plugin");
+
+            // Initialize services with Docker executor (containerized mode)
+            let services = Arc::new(Services::new());
+
+            // Load WASM plugin
+            let plugin = PluginManager::new(wasm_path, services)
+                .await
+                .context("Failed to load WASM plugin")?;
+
+            info!("WASM plugin loaded and initialized");
+
             handle_hook(&plugin, event, runtime, role).await?;
         }
-        Commands::Mcp { port } => {
-            info!(port, "MCP server not yet implemented");
-            // TODO: Phase 4 - implement MCP server
-            anyhow::bail!("MCP server not yet implemented");
+        Commands::Mcp { port, project_dir } => {
+            // MCP server uses local execution (no WASM needed)
+            let project_dir = project_dir.unwrap_or_else(|| {
+                std::env::current_dir().expect("Failed to get current directory")
+            });
+
+            info!(port, project_dir = %project_dir.display(), "Starting MCP server");
+
+            // Initialize services with local executor (local mode)
+            let services = Arc::new(Services::new_local());
+
+            let state = mcp::McpState {
+                services,
+                project_dir,
+            };
+
+            mcp::run_server(state, port).await?;
         }
     }
 

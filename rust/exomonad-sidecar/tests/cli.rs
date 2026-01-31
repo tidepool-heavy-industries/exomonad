@@ -268,25 +268,43 @@ fn test_cli_other_hook_types_passthrough() {
 }
 
 #[test]
-fn test_cli_mcp_not_implemented() {
-    let wasm_path = wasm_fixture_path();
-    if !wasm_path.exists() {
-        eprintln!("Skipping test: WASM fixture not found at {:?}", wasm_path);
-        return;
+fn test_cli_mcp_server_starts() {
+    use std::process::{Command as StdCommand, Stdio};
+    use std::thread;
+    use std::time::Duration;
+
+    // Use a random high port to avoid conflicts
+    let port = 17432 + (std::process::id() % 1000) as u16;
+
+    // Start MCP server in background (no WASM needed for MCP)
+    let mut child = StdCommand::new(env!("CARGO_BIN_EXE_exomonad-sidecar"))
+        .args(["mcp", "--port", &port.to_string()])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to start MCP server");
+
+    // Give server time to start
+    thread::sleep(Duration::from_millis(500));
+
+    // Check that the server is responding
+    let health_url = format!("http://127.0.0.1:{}/health", port);
+    let client = std::process::Command::new("curl")
+        .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", &health_url])
+        .output();
+
+    // Clean up
+    let _ = child.kill();
+    let _ = child.wait();
+
+    // Verify health check succeeded
+    if let Ok(output) = client {
+        let status = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(status.trim(), "200", "Health check should return 200");
+    } else {
+        // curl might not be available, skip test
+        eprintln!("Skipping test: curl not available");
     }
-
-    let mut cmd = Command::cargo_bin("exomonad-sidecar").unwrap();
-
-    cmd.args([
-        "--wasm",
-        wasm_path.to_str().unwrap(),
-        "mcp",
-        "--port",
-        "7432",
-    ])
-    .assert()
-    .failure()
-    .stderr(predicate::str::contains("not yet implemented"));
 }
 
 #[test]
