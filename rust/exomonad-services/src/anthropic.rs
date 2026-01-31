@@ -1,6 +1,6 @@
 use crate::{ExternalService, ServiceError};
 use async_trait::async_trait;
-use exomonad_shared::{
+use exomonad_shared::protocol::{
     ChatMessage, ContentBlock, ServiceRequest, ServiceResponse, StopReason, Tool, Usage,
 };
 use reqwest::{Client, Url};

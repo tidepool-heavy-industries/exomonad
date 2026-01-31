@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use exomonad_shared::protocol::{
     GitHubAuthorRef, GitHubDiscussionComment, GitHubLabelRef, GitHubPRRef, GitHubReviewComment,
 };
-use exomonad_shared::{GitHubIssueRef, IssueState, ServiceRequest, ServiceResponse};
+use exomonad_shared::protocol::{GitHubIssueRef, IssueState, ServiceRequest, ServiceResponse};
 use octocrab::{Octocrab, OctocrabBuilder};
 use reqwest::Url;
 

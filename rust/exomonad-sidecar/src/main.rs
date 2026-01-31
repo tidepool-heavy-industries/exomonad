@@ -12,8 +12,7 @@ mod mcp;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use exomonad_runtime::{PluginManager, Services};
-use exomonad_shared::commands::HookEventType;
-use exomonad_shared::protocol::{HookInput, HookOutput, Role, Runtime};
+use exomonad_shared::protocol::{HookEventType, HookInput, HookOutput, Runtime};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{debug, error, info};
@@ -46,10 +45,6 @@ enum Commands {
         /// The runtime environment (Claude or Gemini)
         #[arg(long, default_value = "claude")]
         runtime: Runtime,
-
-        /// The role of the agent (dev, tl, pm)
-        #[arg(long, env = "EXOMONAD_ROLE", default_value = "dev")]
-        role: Role,
     },
 
     /// Start MCP HTTP server for Claude Code tools
@@ -78,7 +73,6 @@ async fn handle_hook(
     plugin: &PluginManager,
     event_type: HookEventType,
     _runtime: Runtime,
-    _role: Role,
 ) -> Result<()> {
     use std::io::Read;
 
@@ -148,11 +142,7 @@ async fn main() -> Result<()> {
     }
 
     match cli.command {
-        Commands::Hook {
-            event,
-            runtime,
-            role,
-        } => {
+        Commands::Hook { event, runtime } => {
             info!(wasm = ?wasm_path, "Loading WASM plugin");
 
             // Initialize services with Docker executor (containerized mode)
@@ -165,7 +155,7 @@ async fn main() -> Result<()> {
 
             info!("WASM plugin loaded and initialized");
 
-            handle_hook(&plugin, event, runtime, role).await?;
+            handle_hook(&plugin, event, runtime).await?;
         }
 
         Commands::Mcp { port, project_dir } => {
@@ -198,12 +188,12 @@ async fn main() -> Result<()> {
             // Discover project_dir from config or use cwd
             let cfg = match config::Config::discover() {
                 Ok(c) => {
-                    info!(role = %c.role, project_dir = %c.project_dir.display(), "Config discovered");
+                    info!(project_dir = %c.project_dir.display(), "Config discovered");
                     c
                 }
                 Err(e) => {
                     debug!(error = %e, "No config file found, using defaults");
-                    config::Config::default_for_role("dev")
+                    config::Config::default()
                 }
             };
 

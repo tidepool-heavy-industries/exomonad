@@ -8,9 +8,6 @@ use tracing::info;
 /// Sidecar configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    /// Agent role (tl, pm, dev).
-    pub role: String,
-
     /// Project directory for git operations.
     #[serde(default = "default_project_dir")]
     pub project_dir: PathBuf,
@@ -37,15 +34,14 @@ impl Config {
         let config: Config = toml::from_str(&content)
             .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
 
-        info!(role = %config.role, project_dir = %config.project_dir.display(), "Config loaded");
+        info!(project_dir = %config.project_dir.display(), "Config loaded");
 
         Ok(config)
     }
 
     /// Create a default config (for when no config file exists).
-    pub fn default_for_role(role: &str) -> Self {
+    pub fn default() -> Self {
         Self {
-            role: role.to_string(),
             project_dir: PathBuf::from("."),
         }
     }
@@ -59,22 +55,18 @@ mod tests {
 
     #[test]
     fn test_parse_minimal_config() {
-        let toml = r#"
-role = "tl"
-"#;
+        // Empty config should use defaults
+        let toml = "";
         let config: Config = toml::from_str(toml).unwrap();
-        assert_eq!(config.role, "tl");
         assert_eq!(config.project_dir, PathBuf::from("."));
     }
 
     #[test]
     fn test_parse_full_config() {
         let toml = r#"
-role = "pm"
 project_dir = "/home/user/project"
 "#;
         let config: Config = toml::from_str(toml).unwrap();
-        assert_eq!(config.role, "pm");
         assert_eq!(config.project_dir, PathBuf::from("/home/user/project"));
     }
 
@@ -84,16 +76,15 @@ project_dir = "/home/user/project"
         let config_path = dir.path().join("config.toml");
 
         let mut file = std::fs::File::create(&config_path).unwrap();
-        writeln!(file, r#"role = "dev""#).unwrap();
+        writeln!(file, r#"project_dir = "/tmp/test""#).unwrap();
 
         let config = Config::from_path(&config_path).unwrap();
-        assert_eq!(config.role, "dev");
+        assert_eq!(config.project_dir, PathBuf::from("/tmp/test"));
     }
 
     #[test]
-    fn test_default_for_role() {
-        let config = Config::default_for_role("tl");
-        assert_eq!(config.role, "tl");
+    fn test_default() {
+        let config = Config::default();
         assert_eq!(config.project_dir, PathBuf::from("."));
     }
 }

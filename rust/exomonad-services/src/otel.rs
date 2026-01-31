@@ -1,6 +1,6 @@
 use crate::{ExternalService, ServiceError};
 use async_trait::async_trait;
-use exomonad_shared::{ServiceRequest, ServiceResponse};
+use exomonad_shared::protocol::{ServiceRequest, ServiceResponse};
 use reqwest::{Client, Url};
 use serde::Serialize;
 use std::collections::HashMap;

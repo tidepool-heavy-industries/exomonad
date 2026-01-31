@@ -37,20 +37,32 @@ pub enum Runtime {
     Gemini,
 }
 
-/// The role of the agent (determines hook behavior and context).
-#[derive(
-    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum, Default, strum::Display,
-)]
-#[serde(rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
-pub enum Role {
-    /// Developer/subagent role - focused on implementing tasks.
-    #[default]
-    Dev,
-    /// Tech Lead role - orchestration, oversight, planning.
-    Tl,
-    /// Product Manager role - triage, prioritization, health.
-    Pm,
+/// Hook event type for Claude Code hooks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, strum::Display)]
+#[strum(serialize_all = "kebab-case")]
+pub enum HookEventType {
+    /// Before tool execution (can allow/deny/modify)
+    PreToolUse,
+    /// After tool completion
+    PostToolUse,
+    /// When a notification is shown
+    Notification,
+    /// When Claude Code wants to stop
+    Stop,
+    /// When a subagent (Task tool) starts
+    SubagentStart,
+    /// When a subagent (Task tool) finishes
+    SubagentStop,
+    /// Before a compact operation
+    PreCompact,
+    /// When a session starts or resumes
+    SessionStart,
+    /// When a session ends
+    SessionEnd,
+    /// When permission dialog is shown
+    PermissionRequest,
+    /// When user submits a prompt
+    UserPromptSubmit,
 }
 
 // ============================================================================
@@ -620,89 +632,6 @@ pub struct ToolDefinition {
     pub input_schema: Value,
 }
 
-/// Message sent over the control socket to Haskell.
-///
-/// Wraps either a hook event, MCP tool call, or tools list request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum ControlMessage {
-    /// Hook event from Claude Code.
-    HookEvent {
-        /// The raw hook input from CC stdin (boxed to reduce enum size).
-        input: Box<HookInput>,
-        /// The runtime that emitted the hook.
-        #[serde(default)]
-        runtime: Runtime,
-        /// The role of the agent (dev, tl, pm).
-        #[serde(default)]
-        role: Role,
-        /// Container ID for remote command execution (derived from EXOMONAD_ISSUE_ID).
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        container_id: Option<String>,
-    },
-
-    /// MCP tool call from Claude Code.
-    #[serde(rename = "MCPToolCall")]
-    McpToolCall {
-        /// JSON-RPC request ID.
-        id: String,
-        /// Tool name.
-        tool_name: String,
-        /// Tool arguments.
-        arguments: Value,
-        /// Container ID for remote execution.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        container_id: Option<String>,
-        /// Optional role for routing (not serialized).
-        #[serde(skip)]
-        role: Option<Role>,
-    },
-
-    /// Request list of available MCP tools from control server.
-    ToolsListRequest {
-        /// Optional role for routing (not serialized).
-        #[serde(skip)]
-        role: Option<Role>,
-    },
-
-    /// Health check ping.
-    Ping,
-}
-
-/// Response from Haskell control socket.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum ControlResponse {
-    /// Response to hook event.
-    HookResponse {
-        /// The hook output to send to CC stdout.
-        output: HookOutput,
-
-        /// Exit code for the hook command (0 = success, 2 = blocking error).
-        exit_code: i32,
-    },
-
-    /// Response to MCP tool call.
-    #[serde(rename = "MCPToolResponse")]
-    McpToolResponse {
-        /// JSON-RPC request ID.
-        id: String,
-        /// Tool result (null on error).
-        result: Option<Value>,
-        /// Error details (null on success).
-        error: Option<McpError>,
-    },
-
-    /// Response to tools list request.
-    ToolsListResponse {
-        /// Available MCP tools.
-        tools: Vec<ToolDefinition>,
-    },
-
-    /// Health check pong.
-    Pong,
-}
-
 /// MCP error response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpError {
@@ -768,32 +697,6 @@ impl HookOutput {
     }
 }
 
-impl ControlResponse {
-    /// Create a success response for a hook.
-    pub fn hook_success(output: HookOutput) -> Self {
-        Self::HookResponse {
-            output,
-            exit_code: 0,
-        }
-    }
-
-    /// Create a blocking error response for a hook.
-    pub fn hook_error(message: String, runtime: Runtime) -> Self {
-        let exit_code = match runtime {
-            Runtime::Claude => 1,
-            Runtime::Gemini => 2,
-        };
-        Self::HookResponse {
-            output: HookOutput {
-                continue_: false,
-                stop_reason: Some(message),
-                ..Default::default()
-            },
-            exit_code,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -826,52 +729,6 @@ mod tests {
         let json = serde_json::to_string_pretty(&output).unwrap();
         assert!(json.contains("permissionDecision"));
         assert!(json.contains("allow"));
-    }
-
-    #[test]
-    fn test_control_message_roundtrip() {
-        let msg = ControlMessage::HookEvent {
-            input: Box::new(HookInput {
-                session_id: "test".to_string(),
-                transcript_path: String::new(),
-                cwd: String::new(),
-                permission_mode: "default".to_string(),
-                hook_event_name: "Stop".to_string(),
-                tool_name: None,
-                tool_input: None,
-                tool_use_id: None,
-                tool_response: None,
-                prompt: None,
-                message: None,
-                notification_type: None,
-                stop_hook_active: Some(true),
-                trigger: None,
-                custom_instructions: None,
-                source: None,
-                reason: None,
-            }),
-            runtime: Runtime::Claude,
-            role: Role::Dev,
-            container_id: Some("exomonad-agent-123".to_string()),
-        };
-
-        let json = serde_json::to_string(&msg).unwrap();
-        let parsed: ControlMessage = serde_json::from_str(&json).unwrap();
-
-        match parsed {
-            ControlMessage::HookEvent {
-                input,
-                runtime,
-                role,
-                container_id,
-            } => {
-                assert_eq!(input.session_id, "test");
-                assert_eq!(runtime, Runtime::Claude);
-                assert_eq!(role, Role::Dev);
-                assert_eq!(container_id, Some("exomonad-agent-123".to_string()));
-            }
-            _ => panic!("Wrong variant"),
-        }
     }
 
     // =========================================================================

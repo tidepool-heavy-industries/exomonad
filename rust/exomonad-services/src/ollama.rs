@@ -1,6 +1,6 @@
 use crate::{ExternalService, ServiceError};
 use async_trait::async_trait;
-use exomonad_shared::{ServiceRequest, ServiceResponse};
+use exomonad_shared::protocol::{ServiceRequest, ServiceResponse};
 use ollama_rs::generation::completion::request::GenerationRequest;
 use ollama_rs::Ollama;
 use reqwest::Url;
