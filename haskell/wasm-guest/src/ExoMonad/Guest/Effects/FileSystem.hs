@@ -71,6 +71,14 @@ instance FromJSON ReadFileOutput where
       <*> v .: "bytes_read"
       <*> v .: "truncated"
 
+instance ToJSON ReadFileOutput where
+  toJSON (ReadFileOutput c b t) =
+    object
+      [ "content" .= c,
+        "bytes_read" .= b,
+        "truncated" .= t
+      ]
+
 -- | Input for writing a file.
 data WriteFileInput = WriteFileInput
   { wfiPath :: Text,
@@ -99,6 +107,13 @@ instance FromJSON WriteFileOutput where
     WriteFileOutput
       <$> v .: "bytes_written"
       <*> v .: "path"
+
+instance ToJSON WriteFileOutput where
+  toJSON (WriteFileOutput b p) =
+    object
+      [ "bytes_written" .= b,
+        "path" .= p
+      ]
 
 -- | Host result wrapper (matches Rust HostResult).
 data HostResult a

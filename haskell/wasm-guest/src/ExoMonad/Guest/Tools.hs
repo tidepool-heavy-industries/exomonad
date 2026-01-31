@@ -11,7 +11,7 @@ module ExoMonad.Guest.Tools
   )
 where
 
-import Data.Aeson (ToJSON (..), Value, object, (.=), emptyObject)
+import Data.Aeson (ToJSON (..), Value, object, (.=))
 import Data.Text (Text)
 
 -- | Tool definition for MCP discovery.
@@ -322,6 +322,6 @@ listAgents =
       tdInputSchema =
         object
           [ "type" .= ("object" :: Text),
-            "properties" .= emptyObject
+            "properties" .= object []
           ]
     }

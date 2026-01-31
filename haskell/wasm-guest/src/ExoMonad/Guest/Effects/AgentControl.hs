@@ -79,6 +79,15 @@ instance FromJSON SpawnResult where
       <*> v .: "tab_name"
       <*> v .: "issue_title"
 
+instance ToJSON SpawnResult where
+  toJSON (SpawnResult w b t i) =
+    object
+      [ "worktree_path" .= w,
+        "branch_name" .= b,
+        "tab_name" .= t,
+        "issue_title" .= i
+      ]
+
 -- | Information about an active agent.
 data AgentInfo = AgentInfo
   { agentIssueId :: Text,
@@ -96,6 +105,15 @@ instance FromJSON AgentInfo where
       <*> v .: "branch_name"
       <*> v .: "has_changes"
 
+instance ToJSON AgentInfo where
+  toJSON (AgentInfo i w b h) =
+    object
+      [ "issue_id" .= i,
+        "worktree_path" .= w,
+        "branch_name" .= b,
+        "has_changes" .= h
+      ]
+
 -- | Result of batch spawn operation.
 data BatchSpawnResult = BatchSpawnResult
   { spawned :: [SpawnResult],
@@ -109,6 +127,13 @@ instance FromJSON BatchSpawnResult where
       <$> v .: "spawned"
       <*> v .: "failed"
 
+instance ToJSON BatchSpawnResult where
+  toJSON (BatchSpawnResult s f) =
+    object
+      [ "spawned" .= s,
+        "failed" .= f
+      ]
+
 -- | Result of batch cleanup operation.
 data BatchCleanupResult = BatchCleanupResult
   { cleaned :: [Text],
@@ -121,6 +146,13 @@ instance FromJSON BatchCleanupResult where
     BatchCleanupResult
       <$> v .: "cleaned"
       <*> v .: "failed"
+
+instance ToJSON BatchCleanupResult where
+  toJSON (BatchCleanupResult c f) =
+    object
+      [ "cleaned" .= c,
+        "failed" .= f
+      ]
 
 -- | Host result wrapper (matches Rust HostResult).
 data HostResult a

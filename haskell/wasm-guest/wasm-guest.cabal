@@ -7,7 +7,17 @@ author:             ExoMonad Team
 maintainer:         maintainers@exomonad.io
 build-type:         Simple
 
+common shared
+    default-language: GHC2021
+    build-depends:
+        base >= 4.16 && < 5,
+        bytestring,
+        text,
+        aeson,
+        freer-simple
+
 executable wasm-guest
+    import:           shared
     main-is:          Main.hs
     hs-source-dirs:   src
     other-modules:
@@ -15,14 +25,8 @@ executable wasm-guest
         ExoMonad.Guest.Effects.AgentControl
         ExoMonad.Guest.Effects.FileSystem
         ExoMonad.Guest.Tools
-    default-language: GHC2021
 
     build-depends:
-        base >= 4.16 && < 5,
-        bytestring,
-        text,
-        aeson,
-        freer-simple,
         extism-pdk >= 0.1 && < 1
 
     if arch(wasm32)
@@ -34,3 +38,27 @@ executable wasm-guest
             -optl-Wl,--export=handle_pre_tool_use
             -optl-Wl,--export=handle_list_tools
             -optl-Wl,--allow-undefined
+
+library wasm-guest-lib
+    import:           shared
+    hs-source-dirs:   src
+    exposed-modules:
+        ExoMonad.Guest.Tools
+        ExoMonad.Guest.Parsers
+    other-modules:
+        ExoMonad.Guest.Effects.AgentControl
+        ExoMonad.Guest.HostCall
+    build-depends:
+        extism-pdk >= 0.1 && < 1
+
+test-suite wasm-guest-tests
+    import:           shared
+    type:             exitcode-stdio-1.0
+    main-is:          Spec.hs
+    hs-source-dirs:   test
+    other-modules:
+        ToolsSpec
+        ParsersSpec
+    build-depends:
+        wasm-guest:wasm-guest-lib,
+        hspec >= 2.10 && < 3

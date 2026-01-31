@@ -334,6 +334,7 @@ data GitDirtyFilesResp = GitDirtyFilesResp { files :: [Text] }
   deriving (Show, Generic)
 
 instance FromJSON GitDirtyFilesResp
+instance ToJSON GitDirtyFilesResp
 
 -- | Handle git_log MCP tool call.
 handleGitLog :: Value -> IO MCPCallOutput
@@ -364,6 +365,7 @@ data GitLogResp = GitLogResp { commits :: [GitCommit] }
   deriving (Show, Generic)
 
 instance FromJSON GitLogResp
+instance ToJSON GitLogResp
 
 data GitCommit = GitCommit
   { gcSha :: Text,
@@ -380,6 +382,10 @@ instance FromJSON GitCommit where
       <*> v .: "message"
       <*> v .: "author"
       <*> v .: "date"
+
+instance ToJSON GitCommit where
+  toJSON (GitCommit s m a d) =
+    object ["sha" .= s, "message" .= m, "author" .= a, "date" .= d]
 
 -- Helper for git path-only args
 parseGitPathArgs :: Value -> Parser (Maybe Text)
@@ -422,6 +428,9 @@ data GitHubIssuesResp = GitHubIssuesResp { ghIssues :: [GitHubIssue] }
 instance FromJSON GitHubIssuesResp where
   parseJSON = Aeson.withObject "GitHubIssuesResp" $ \v ->
     GitHubIssuesResp <$> v .: "issues"
+
+instance ToJSON GitHubIssuesResp where
+  toJSON (GitHubIssuesResp is) = object ["issues" .= is]
 
 data GitHubIssue = GitHubIssue
   { ghiNumber :: Int,
@@ -548,6 +557,9 @@ data GitHubPRsResp = GitHubPRsResp { ghPRs :: [GitHubPR] }
 instance FromJSON GitHubPRsResp where
   parseJSON = Aeson.withObject "GitHubPRsResp" $ \v ->
     GitHubPRsResp <$> v .: "prs"
+
+instance ToJSON GitHubPRsResp where
+  toJSON (GitHubPRsResp prs) = object ["prs" .= prs]
 
 data GitHubPR = GitHubPR
   { ghprNumber :: Int,
