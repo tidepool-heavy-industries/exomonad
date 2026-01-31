@@ -30,12 +30,14 @@ pub async fn run_health_check() -> Result<()> {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::io::{Read, Write};
     use std::os::unix::net::UnixListener;
     use std::thread;
     use tempfile::tempdir;
 
     #[tokio::test]
+    #[serial]
     async fn test_health_check_success() {
         let dir = tempdir().unwrap();
         let socket_path = dir.path().join("control.sock");
@@ -75,6 +77,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_health_check_unexpected_response() {
         let dir = tempdir().unwrap();
         let socket_path = dir.path().join("control.sock");
