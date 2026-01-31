@@ -23,6 +23,7 @@ import qualified Data.Text as T
 import ExoMonad.Guest.HostCall
 import ExoMonad.Guest.Effects.AgentControl qualified as AC
 import ExoMonad.Guest.Effects.FileSystem qualified as FS
+import ExoMonad.Guest.Tools qualified as Tools
 import Extism.PDK (input, output)
 import Foreign.C.Types (CInt (..))
 import GHC.Generics (Generic)
@@ -211,6 +212,12 @@ dispatchTool name args = case name of
   -- Git tools
   "git_branch" -> handleGitBranch args
   "git_status" -> handleGitStatus args
+  "git_log" -> handleGitLog args
+
+  -- GitHub tools
+  "github_list_issues" -> handleGitHubListIssues args
+  "github_get_issue" -> handleGitHubGetIssue args
+  "github_list_prs" -> handleGitHubListPRs args
 
   -- Unknown tool
   _ -> pure $ errorResult $ "Unknown tool: " <> name
@@ -306,11 +313,265 @@ handleGitBranch _args = do
   br <- runM $ runLog $ runGit getBranch
   pure $ successResult $ Aeson.toJSON br
 
--- | Handle git_status MCP tool call (placeholder).
+-- | Handle git_status MCP tool call.
 handleGitStatus :: Value -> IO MCPCallOutput
-handleGitStatus _args = do
-  -- TODO: Implement proper git status via host function
-  pure $ successResult $ object ["status" .= ("clean" :: Text)]
+handleGitStatus args = do
+  case parseEither parseGitPathArgs args of
+    Left err -> pure $ errorResult $ "Invalid arguments: " <> pack err
+    Right path -> do
+      result <- callHost host_git_get_dirty_files (GitDirtyFilesReq path)
+      case result of
+        Left err -> pure $ errorResult $ pack err
+        Right (resp :: GitDirtyFilesResp) -> pure $ successResult $ Aeson.toJSON resp
+
+data GitDirtyFilesReq = GitDirtyFilesReq { gdfPath :: Maybe Text }
+  deriving (Show, Generic)
+
+instance ToJSON GitDirtyFilesReq where
+  toJSON (GitDirtyFilesReq p) = object ["path" .= p]
+
+data GitDirtyFilesResp = GitDirtyFilesResp { files :: [Text] }
+  deriving (Show, Generic)
+
+instance FromJSON GitDirtyFilesResp
+
+-- | Handle git_log MCP tool call.
+handleGitLog :: Value -> IO MCPCallOutput
+handleGitLog args = do
+  case parseEither parseGitLogArgs args of
+    Left err -> pure $ errorResult $ "Invalid arguments: " <> pack err
+    Right (path, limit) -> do
+      result <- callHost host_git_get_recent_commits (GitLogReq path limit)
+      case result of
+        Left err -> pure $ errorResult $ pack err
+        Right (resp :: GitLogResp) -> pure $ successResult $ Aeson.toJSON resp
+
+parseGitLogArgs :: Value -> Parser (Maybe Text, Int)
+parseGitLogArgs = Aeson.withObject "git_log args" $ \v -> do
+  path <- v .:? "path"
+  limit <- v .:? "limit" >>= \case
+    Nothing -> pure 10
+    Just l -> pure l
+  pure (path, limit)
+
+data GitLogReq = GitLogReq { glPath :: Maybe Text, glLimit :: Int }
+  deriving (Show, Generic)
+
+instance ToJSON GitLogReq where
+  toJSON (GitLogReq p l) = object ["path" .= p, "limit" .= l]
+
+data GitLogResp = GitLogResp { commits :: [GitCommit] }
+  deriving (Show, Generic)
+
+instance FromJSON GitLogResp
+
+data GitCommit = GitCommit
+  { gcSha :: Text,
+    gcMessage :: Text,
+    gcAuthor :: Text,
+    gcDate :: Text
+  }
+  deriving (Show, Generic)
+
+instance FromJSON GitCommit where
+  parseJSON = Aeson.withObject "GitCommit" $ \v ->
+    GitCommit
+      <$> v .: "sha"
+      <*> v .: "message"
+      <*> v .: "author"
+      <*> v .: "date"
+
+-- Helper for git path-only args
+parseGitPathArgs :: Value -> Parser (Maybe Text)
+parseGitPathArgs = Aeson.withObject "git args" $ \v -> v .:? "path"
+
+-- | Handle github_list_issues MCP tool call.
+handleGitHubListIssues :: Value -> IO MCPCallOutput
+handleGitHubListIssues args = do
+  case parseEither parseListIssuesArgs args of
+    Left err -> pure $ errorResult $ "Invalid arguments: " <> pack err
+    Right req -> do
+      result <- callHost host_github_list_issues req
+      case result of
+        Left err -> pure $ errorResult $ pack err
+        Right (resp :: GitHubIssuesResp) -> pure $ successResult $ Aeson.toJSON resp
+
+parseListIssuesArgs :: Value -> Parser GitHubListIssuesReq
+parseListIssuesArgs = Aeson.withObject "github_list_issues args" $ \v ->
+  GitHubListIssuesReq
+    <$> v .: "owner"
+    <*> v .: "repo"
+    <*> v .:? "state"
+    <*> v .:? "labels"
+
+data GitHubListIssuesReq = GitHubListIssuesReq
+  { ghliOwner :: Text,
+    ghliRepo :: Text,
+    ghliState :: Maybe Text,
+    ghliLabels :: Maybe [Text]
+  }
+  deriving (Show, Generic)
+
+instance ToJSON GitHubListIssuesReq where
+  toJSON (GitHubListIssuesReq o r s l) =
+    object ["owner" .= o, "repo" .= r, "state" .= s, "labels" .= l]
+
+data GitHubIssuesResp = GitHubIssuesResp { ghIssues :: [GitHubIssue] }
+  deriving (Show, Generic)
+
+instance FromJSON GitHubIssuesResp where
+  parseJSON = Aeson.withObject "GitHubIssuesResp" $ \v ->
+    GitHubIssuesResp <$> v .: "issues"
+
+data GitHubIssue = GitHubIssue
+  { ghiNumber :: Int,
+    ghiTitle :: Text,
+    ghiState :: Text,
+    ghiLabels :: [Text],
+    ghiCreatedAt :: Text
+  }
+  deriving (Show, Generic)
+
+instance FromJSON GitHubIssue where
+  parseJSON = Aeson.withObject "GitHubIssue" $ \v ->
+    GitHubIssue
+      <$> v .: "number"
+      <*> v .: "title"
+      <*> v .: "state"
+      <*> v .: "labels"
+      <*> v .: "created_at"
+
+instance ToJSON GitHubIssue where
+  toJSON (GitHubIssue n t s l c) =
+    object ["number" .= n, "title" .= t, "state" .= s, "labels" .= l, "created_at" .= c]
+
+-- | Handle github_get_issue MCP tool call.
+handleGitHubGetIssue :: Value -> IO MCPCallOutput
+handleGitHubGetIssue args = do
+  case parseEither parseGetIssueArgs args of
+    Left err -> pure $ errorResult $ "Invalid arguments: " <> pack err
+    Right req -> do
+      result <- callHost host_github_get_issue req
+      case result of
+        Left err -> pure $ errorResult $ pack err
+        Right (resp :: GitHubIssueDetailResp) -> pure $ successResult $ Aeson.toJSON resp
+
+parseGetIssueArgs :: Value -> Parser GitHubGetIssueReq
+parseGetIssueArgs = Aeson.withObject "github_get_issue args" $ \v ->
+  GitHubGetIssueReq
+    <$> v .: "owner"
+    <*> v .: "repo"
+    <*> v .: "number"
+
+data GitHubGetIssueReq = GitHubGetIssueReq
+  { ghgiOwner :: Text,
+    ghgiRepo :: Text,
+    ghgiNumber :: Int
+  }
+  deriving (Show, Generic)
+
+instance ToJSON GitHubGetIssueReq where
+  toJSON (GitHubGetIssueReq o r n) =
+    object ["owner" .= o, "repo" .= r, "number" .= n]
+
+data GitHubIssueDetailResp = GitHubIssueDetailResp
+  { ghidNumber :: Int,
+    ghidTitle :: Text,
+    ghidBody :: Maybe Text,
+    ghidState :: Text,
+    ghidLabels :: [Text],
+    ghidAssignees :: [Text],
+    ghidCreatedAt :: Text,
+    ghidUpdatedAt :: Text
+  }
+  deriving (Show, Generic)
+
+instance FromJSON GitHubIssueDetailResp where
+  parseJSON = Aeson.withObject "GitHubIssueDetailResp" $ \v ->
+    GitHubIssueDetailResp
+      <$> v .: "number"
+      <*> v .: "title"
+      <*> v .:? "body"
+      <*> v .: "state"
+      <*> v .: "labels"
+      <*> v .: "assignees"
+      <*> v .: "created_at"
+      <*> v .: "updated_at"
+
+instance ToJSON GitHubIssueDetailResp where
+  toJSON r =
+    object
+      [ "number" .= ghidNumber r,
+        "title" .= ghidTitle r,
+        "body" .= ghidBody r,
+        "state" .= ghidState r,
+        "labels" .= ghidLabels r,
+        "assignees" .= ghidAssignees r,
+        "created_at" .= ghidCreatedAt r,
+        "updated_at" .= ghidUpdatedAt r
+      ]
+
+-- | Handle github_list_prs MCP tool call.
+handleGitHubListPRs :: Value -> IO MCPCallOutput
+handleGitHubListPRs args = do
+  case parseEither parseListPRsArgs args of
+    Left err -> pure $ errorResult $ "Invalid arguments: " <> pack err
+    Right req -> do
+      result <- callHost host_github_list_prs req
+      case result of
+        Left err -> pure $ errorResult $ pack err
+        Right (resp :: GitHubPRsResp) -> pure $ successResult $ Aeson.toJSON resp
+
+parseListPRsArgs :: Value -> Parser GitHubListPRsReq
+parseListPRsArgs = Aeson.withObject "github_list_prs args" $ \v ->
+  GitHubListPRsReq
+    <$> v .: "owner"
+    <*> v .: "repo"
+    <*> v .:? "state"
+    <*> v .:? "limit"
+
+data GitHubListPRsReq = GitHubListPRsReq
+  { ghlpOwner :: Text,
+    ghlpRepo :: Text,
+    ghlpState :: Maybe Text,
+    ghlpLimit :: Maybe Int
+  }
+  deriving (Show, Generic)
+
+instance ToJSON GitHubListPRsReq where
+  toJSON (GitHubListPRsReq o r s l) =
+    object ["owner" .= o, "repo" .= r, "state" .= s, "limit" .= l]
+
+data GitHubPRsResp = GitHubPRsResp { ghPRs :: [GitHubPR] }
+  deriving (Show, Generic)
+
+instance FromJSON GitHubPRsResp where
+  parseJSON = Aeson.withObject "GitHubPRsResp" $ \v ->
+    GitHubPRsResp <$> v .: "prs"
+
+data GitHubPR = GitHubPR
+  { ghprNumber :: Int,
+    ghprTitle :: Text,
+    ghprState :: Text,
+    ghprHead :: Text,
+    ghprBase :: Text,
+    ghprCreatedAt :: Text
+  }
+  deriving (Show, Generic)
+
+instance FromJSON GitHubPR where
+  parseJSON = Aeson.withObject "GitHubPR" $ \v ->
+    GitHubPR
+      <$> v .: "number"
+      <*> v .: "title"
+      <*> v .: "state"
+      <*> v .: "head"
+      <*> v .: "base"
+      <*> v .: "created_at"
+
+instance ToJSON GitHubPR where
+  toJSON (GitHubPR n t s h b c) =
+    object ["number" .= n, "title" .= t, "state" .= s, "head" .= h, "base" .= b, "created_at" .= c]
 
 -- ============================================================================
 -- Exported WASM functions
@@ -319,6 +580,8 @@ handleGitStatus _args = do
 foreign export ccall handle_mcp_call :: IO CInt
 
 foreign export ccall handle_pre_tool_use :: IO CInt
+
+foreign export ccall handle_list_tools :: IO CInt
 
 handle_mcp_call :: IO CInt
 handle_mcp_call = wrapHandler $ do
@@ -342,7 +605,7 @@ handle_pre_tool_use = wrapHandler $ do
       let errResp = object ["error" .= ("Parse error: " ++ err)]
       output (BSL.toStrict $ Aeson.encode errResp)
       pure 1
-    Right (hookInput :: HookInput) -> do
+    Right (_hookInput :: HookInput) -> do
       -- Run effects to gather context
       br <- runM $ runLog $ runGit $ do
         logInfo "Handling PreToolUse hook"
@@ -354,6 +617,14 @@ handle_pre_tool_use = wrapHandler $ do
 
       output (BSL.toStrict $ Aeson.encode resp)
       pure 0
+
+-- | List all available MCP tools.
+-- Returns JSON array of tool definitions.
+handle_list_tools :: IO CInt
+handle_list_tools = wrapHandler $ do
+  let tools = map Tools.toMCPFormat Tools.allTools
+  output (BSL.toStrict $ Aeson.encode tools)
+  pure 0
 
 wrapHandler :: IO CInt -> IO CInt
 wrapHandler action = do

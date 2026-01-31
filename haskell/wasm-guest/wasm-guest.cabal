@@ -14,8 +14,9 @@ executable wasm-guest
         ExoMonad.Guest.HostCall
         ExoMonad.Guest.Effects.AgentControl
         ExoMonad.Guest.Effects.FileSystem
+        ExoMonad.Guest.Tools
     default-language: GHC2021
-    
+
     build-depends:
         base >= 4.16 && < 5,
         bytestring,
@@ -31,4 +32,5 @@ executable wasm-guest
             -optl-Wl,--export=hs_init
             -optl-Wl,--export=handle_mcp_call
             -optl-Wl,--export=handle_pre_tool_use
+            -optl-Wl,--export=handle_list_tools
             -optl-Wl,--allow-undefined

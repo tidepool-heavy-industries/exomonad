@@ -95,9 +95,19 @@ pub fn create_router(state: McpState) -> Router {
 }
 
 /// GET /mcp/tools - List available tools.
-async fn list_tools() -> Json<Vec<ToolDefinition>> {
+async fn list_tools(State(state): State<McpState>) -> impl IntoResponse {
     debug!("Listing MCP tools");
-    Json(tools::get_tool_definitions())
+    match tools::get_tool_definitions(&state).await {
+        Ok(tools) => Json(tools).into_response(),
+        Err(e) => {
+            error!(error = %e, "Failed to get tool definitions");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to get tool definitions: {}", e),
+            )
+                .into_response()
+        }
+    }
 }
 
 /// POST /mcp/call - Execute a tool.
