@@ -36,9 +36,9 @@ import ExoMonad.Guest.Graph qualified as Graph
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)
 
--- ============================================================================ 
+-- ============================================================================
 -- ExploreCodebase
--- ============================================================================ 
+-- ============================================================================
 
 data ExploreCodebase
 
@@ -66,44 +66,38 @@ instance MCPTool ExploreCodebase where
   toolDescription = "Iteratively explore the codebase to answer a question"
   toolSchema =
     object
-      ["type" .= ("object" :: Text),
-       "required" .= (["question"] :: [Text]),
-       "properties"
-         .=
-         object
-           ["question"
-              .=
-              object
-                ["type" .= ("string" :: Text),
-                 "description" .= ("Question to answer" :: Text)
-                ],
-            "seed"
-              .=
-              object
-                ["type" .= ("string" :: Text),
-                 "description" .= ("Optional starting point (file path or symbol)" :: Text)
-                ],
-            "max_steps"
-              .=
-              object
-                ["type" .= ("integer" :: Text),
-                 "description" .= ("Maximum exploration steps (default: 10)" :: Text)
-                ],
-            "languages"
-              .=
-              object
-                ["type" .= ("array" :: Text),
-                 "items" .= object ["type" .= ("string" :: Text)],
-                 "description" .= ("Languages to include (default: ['haskell'])" :: Text)
-                ],
-            "depth"
-              .=
-              object
-                ["type" .= ("string" :: Text),
-                 "enum" .= (["quick", "medium", "thorough"] :: [Text]),
-                 "description" .= ("Exploration depth" :: Text)
-                ]
-           ]
+      [ "type" .= ("object" :: Text),
+        "required" .= (["question"] :: [Text]),
+        "properties"
+          .= object
+            [ "question"
+                .= object
+                  [ "type" .= ("string" :: Text),
+                    "description" .= ("Question to answer" :: Text)
+                  ],
+              "seed"
+                .= object
+                  [ "type" .= ("string" :: Text),
+                    "description" .= ("Optional starting point (file path or symbol)" :: Text)
+                  ],
+              "max_steps"
+                .= object
+                  [ "type" .= ("integer" :: Text),
+                    "description" .= ("Maximum exploration steps (default: 10)" :: Text)
+                  ],
+              "languages"
+                .= object
+                  [ "type" .= ("array" :: Text),
+                    "items" .= object ["type" .= ("string" :: Text)],
+                    "description" .= ("Languages to include (default: ['haskell'])" :: Text)
+                  ],
+              "depth"
+                .= object
+                  [ "type" .= ("string" :: Text),
+                    "enum" .= (["quick", "medium", "thorough"] :: [Text]),
+                    "description" .= ("Exploration depth" :: Text)
+                  ]
+            ]
       ]
   toolHandler args = do
     -- Run the exploration loop
@@ -116,9 +110,9 @@ instance MCPTool ExploreCodebase where
 
     pure $ successResult (toJSON result)
 
--- ============================================================================ 
+-- ============================================================================
 -- Exploration Logic
--- ============================================================================ 
+-- ============================================================================
 
 data ExploreAction
   = AstGrepSearch Text Text Text -- language pattern path
@@ -164,10 +158,10 @@ data ExplorationResult = ExplorationResult
 instance ToJSON ExplorationResult where
   toJSON (ExplorationResult s g st t) =
     object
-      ["summary" .= s,
-       "graph" .= g,
-       "steps_used" .= st,
-       "trace" .= t
+      [ "summary" .= s,
+        "graph" .= g,
+        "steps_used" .= st,
+        "trace" .= t
       ]
 
 exploreLoop ::
@@ -259,7 +253,7 @@ executeAction action = case action of
     pure ("Found " <> T.pack (show (length locs)) <> " definitions", nodes, [])
   LspHover file pos -> do
     maybeHover <- Exp.lspHover file pos
-    case maybeHover of 
+    case maybeHover of
       Nothing -> pure ("No hover info", [], [])
       Just h -> pure ("Hover: " <> h, [], [])
   ReadFileRange file start end -> do
@@ -269,8 +263,8 @@ executeAction action = case action of
     pure ("Concluded: " <> summary, [], [])
 
 locToNode :: Text -> Exp.Location -> Graph.Node
-locToNode source loc = 
-  Graph.Node 
+locToNode source loc =
+  Graph.Node
     { Graph.nodeId = Exp.locUri loc <> ":" <> T.pack (show (Exp.posLine (Exp.rangeStart (Exp.locRange loc)))),
       Graph.nodeType = Graph.NTOther source,
       Graph.nodeFile = T.unpack (Exp.locUri loc),
@@ -278,9 +272,9 @@ locToNode source loc =
       Graph.nodeSnippet = Exp.locContext loc
     }
 
--- ============================================================================ 
+-- ============================================================================
 -- ContinueExploration
--- ============================================================================ 
+-- ============================================================================
 
 data ContinueExploration
 
@@ -304,30 +298,26 @@ instance MCPTool ContinueExploration where
   toolDescription = "Resume or extend a previous exploration"
   toolSchema =
     object
-      ["type" .= ("object" :: Text),
-       "required" .= (["exploration_id", "followup"] :: [Text]),
-       "properties"
-         .=
-         object
-           ["exploration_id"
-              .=
-              object
-                ["type" .= ("string" :: Text),
-                 "description" .= ("ID of previous exploration" :: Text)
-                ],
-            "followup"
-              .=
-              object
-                ["type" .= ("string" :: Text),
-                 "description" .= ("Follow-up question or instruction" :: Text)
-                ],
-            "additional_steps"
-              .=
-              object
-                ["type" .= ("integer" :: Text),
-                 "description" .= ("Additional steps to execute" :: Text)
-                ]
-           ]
+      [ "type" .= ("object" :: Text),
+        "required" .= (["exploration_id", "followup"] :: [Text]),
+        "properties"
+          .= object
+            [ "exploration_id"
+                .= object
+                  [ "type" .= ("string" :: Text),
+                    "description" .= ("ID of previous exploration" :: Text)
+                  ],
+              "followup"
+                .= object
+                  [ "type" .= ("string" :: Text),
+                    "description" .= ("Follow-up question or instruction" :: Text)
+                  ],
+              "additional_steps"
+                .= object
+                  [ "type" .= ("integer" :: Text),
+                    "description" .= ("Additional steps to execute" :: Text)
+                  ]
+            ]
       ]
   toolHandler _args = do
     pure $ successResult $ object ["status" .= ("Not implemented yet" :: Text)]
