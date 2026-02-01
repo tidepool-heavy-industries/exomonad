@@ -175,7 +175,7 @@ impl AgentControlService {
         )
         .await?;
 
-        // Open Zellij tab
+        // Open Zellij tab with claude command
         let tab_name = format!("gh-{}", issue_id);
         self.new_zellij_tab(&tab_name, &worktree_path, Some("claude"))
             .await?;
@@ -327,31 +327,84 @@ impl AgentControlService {
     }
 
     async fn new_zellij_tab(&self, name: &str, cwd: &Path, command: Option<&str>) -> Result<()> {
-        info!(name, cwd = %cwd.display(), "Creating Zellij tab");
-
-        let mut args = vec![
-            "action".to_string(),
-            "new-tab".to_string(),
-            "--name".to_string(),
-            name.to_string(),
-            "--cwd".to_string(),
-            cwd.to_string_lossy().to_string(),
-        ];
+        info!(name, cwd = %cwd.display(), command = ?command, "Creating Zellij tab");
 
         if let Some(cmd) = command {
-            args.push("--".to_string());
-            args.push(cmd.to_string());
-        }
+            // Generate KDL layout with full tab template and command pane
+            let layout_content = format!(
+                r#"layout {{
+    default_tab_template {{
+        pane size=1 borderless=true {{
+            plugin location="zellij:tab-bar"
+        }}
+        children
+        pane size=1 borderless=true {{
+            plugin location="zellij:status-bar"
+        }}
+    }}
+    tab name="{name}" {{
+        pane command="sh" {{
+            args "-c" "{cmd}"
+            cwd "{cwd}"
+            close_on_exit true
+        }}
+    }}
+}}"#,
+                name = name,
+                cmd = cmd,
+                cwd = cwd.display()
+            );
 
-        let output = Command::new("zellij")
-            .args(&args)
-            .output()
-            .await
-            .context("Failed to execute zellij")?;
+            // Write to temporary file
+            let temp_dir = std::env::temp_dir();
+            let layout_file = temp_dir.join(format!("zellij-tab-{}.kdl", name));
+            tokio::fs::write(&layout_file, &layout_content)
+                .await
+                .context("Failed to write temporary layout file")?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow!("zellij new-tab failed: {}", stderr));
+            tracing::debug!(
+                layout_file = %layout_file.display(),
+                "Generated temporary Zellij layout"
+            );
+
+            // Create tab with layout
+            let output = Command::new("zellij")
+                .args(&[
+                    "action",
+                    "new-tab",
+                    "--layout",
+                    layout_file.to_str().unwrap(),
+                ])
+                .output()
+                .await
+                .context("Failed to execute zellij")?;
+
+            // Clean up temp file
+            let _ = tokio::fs::remove_file(&layout_file).await;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(anyhow!("zellij new-tab failed: {}", stderr));
+            }
+        } else {
+            // Fallback: create empty tab (no command)
+            let output = Command::new("zellij")
+                .args(&[
+                    "action",
+                    "new-tab",
+                    "--name",
+                    name,
+                    "--cwd",
+                    &cwd.to_string_lossy(),
+                ])
+                .output()
+                .await
+                .context("Failed to execute zellij")?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(anyhow!("zellij new-tab failed: {}", stderr));
+            }
         }
 
         Ok(())
