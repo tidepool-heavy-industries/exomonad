@@ -173,6 +173,22 @@ impl PopupState {
         }
     }
 
+    // Helper to extract plain JSON values for submission
+    pub fn to_json_values(&self) -> Value {
+        let mut map = serde_json::Map::new();
+        for (k, v) in &self.values {
+            let json_val = match v {
+                ElementValue::Number(n) => serde_json::json!(n),
+                ElementValue::Boolean(b) => serde_json::json!(b),
+                ElementValue::Text(s) => serde_json::json!(s),
+                ElementValue::Choice(i) => serde_json::json!(i),
+                ElementValue::MultiChoice(vec) => serde_json::json!(vec),
+            };
+            map.insert(k.clone(), json_val);
+        }
+        Value::Object(map)
+    }
+
     pub fn get_number(&self, id: &str) -> Option<f32> {
         match self.values.get(id) {
             Some(ElementValue::Number(n)) => Some(*n),
@@ -299,5 +315,33 @@ mod tests {
             }
             _ => panic!("Expected CountEquals"),
         }
+    }
+
+    #[test]
+    fn test_to_json_values() {
+        let mut values = HashMap::new();
+        values.insert("num".to_string(), ElementValue::Number(42.0));
+        values.insert("bool".to_string(), ElementValue::Boolean(true));
+        values.insert("text".to_string(), ElementValue::Text("hello".to_string()));
+        values.insert("choice".to_string(), ElementValue::Choice(1));
+        values.insert(
+            "multi".to_string(),
+            ElementValue::MultiChoice(vec![true, false]),
+        );
+
+        let state = PopupState {
+            values,
+            button_clicked: None,
+        };
+
+        let json = state.to_json_values();
+        let obj = json.as_object().unwrap();
+
+        assert_eq!(obj["num"], 42.0);
+        assert_eq!(obj["bool"], true);
+        assert_eq!(obj["text"], "hello");
+        assert_eq!(obj["choice"], 1);
+        assert_eq!(obj["multi"][0], true);
+        assert_eq!(obj["multi"][1], false);
     }
 }

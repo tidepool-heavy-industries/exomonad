@@ -2,13 +2,11 @@
 resolver = "2"
 members = [
     "exomonad-shared",
+    "exomonad-ui-protocol",
     "exomonad-services",
     "exomonad-runtime",
     "exomonad-sidecar",
-    "tui-popup",
-    "tui-spawner",
     "effector",
-    "agent-status",
     "zellij-gen",
 ]
 

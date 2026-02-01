@@ -173,6 +173,9 @@ pub fn git_get_branch_host_fn(git_service: Arc<GitService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<GitService>>|
          -> Result<(), Error> {
+            if inputs.is_empty() {
+                return Err(Error::msg("git_get_branch: expected input argument"));
+            }
             let input: GitHostInput = get_input(plugin, inputs[0].clone())?;
 
             let git_arc = user_data.get()?;
@@ -181,6 +184,9 @@ pub fn git_get_branch_host_fn(git_service: Arc<GitService>) -> Function {
             let result = block_on(git.get_branch(&input.container_id, &input.working_dir))?;
             let output: GitHostOutput<String> = result.into();
 
+            if outputs.is_empty() {
+                return Err(Error::msg("git_get_branch: expected output argument"));
+            }
             outputs[0] = set_output(plugin, &output)?;
             Ok(())
         },
@@ -199,6 +205,9 @@ pub fn git_get_worktree_host_fn(git_service: Arc<GitService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<GitService>>|
          -> Result<(), Error> {
+            if inputs.is_empty() {
+                return Err(Error::msg("git_get_worktree: expected input argument"));
+            }
             let input: GitHostInput = get_input(plugin, inputs[0].clone())?;
 
             let git_arc = user_data.get()?;
@@ -207,6 +216,9 @@ pub fn git_get_worktree_host_fn(git_service: Arc<GitService>) -> Function {
             let result = block_on(git.get_worktree(&input.container_id, &input.working_dir))?;
             let output: GitHostOutput<WorktreeInfo> = result.into();
 
+            if outputs.is_empty() {
+                return Err(Error::msg("git_get_worktree: expected output argument"));
+            }
             outputs[0] = set_output(plugin, &output)?;
             Ok(())
         },
@@ -225,6 +237,9 @@ pub fn git_get_dirty_files_host_fn(git_service: Arc<GitService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<GitService>>|
          -> Result<(), Error> {
+            if inputs.is_empty() {
+                return Err(Error::msg("git_get_dirty_files: expected input argument"));
+            }
             let input: GitHostInput = get_input(plugin, inputs[0].clone())?;
 
             let git_arc = user_data.get()?;
@@ -233,6 +248,9 @@ pub fn git_get_dirty_files_host_fn(git_service: Arc<GitService>) -> Function {
             let result = block_on(git.get_dirty_files(&input.container_id, &input.working_dir))?;
             let output: GitHostOutput<Vec<String>> = result.into();
 
+            if outputs.is_empty() {
+                return Err(Error::msg("git_get_dirty_files: expected output argument"));
+            }
             outputs[0] = set_output(plugin, &output)?;
             Ok(())
         },
@@ -251,6 +269,11 @@ pub fn git_get_recent_commits_host_fn(git_service: Arc<GitService>) -> Function 
          outputs: &mut [Val],
          user_data: UserData<Arc<GitService>>|
          -> Result<(), Error> {
+            if inputs.is_empty() {
+                return Err(Error::msg(
+                    "git_get_recent_commits: expected input argument",
+                ));
+            }
             let input: GitLogInput = get_input(plugin, inputs[0].clone())?;
 
             let git_arc = user_data.get()?;
@@ -263,6 +286,11 @@ pub fn git_get_recent_commits_host_fn(git_service: Arc<GitService>) -> Function 
             ))?;
             let output: GitHostOutput<Vec<Commit>> = result.into();
 
+            if outputs.is_empty() {
+                return Err(Error::msg(
+                    "git_get_recent_commits: expected output argument",
+                ));
+            }
             outputs[0] = set_output(plugin, &output)?;
             Ok(())
         },
