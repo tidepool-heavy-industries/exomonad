@@ -117,8 +117,9 @@ allowResponse reason =
             }
     }
 
--- | Create a "block" response for stop hooks (SessionEnd, SubagentStop).
--- NOTE: This is the OLD format. Use StopHookOutput for actual Stop hooks.
+-- | Deprecated: Use 'blockStopResponse' for Stop hooks (SessionEnd, SubagentStop).
+-- This function uses the old PreToolUse-style format and is kept for compatibility.
+{-# DEPRECATED blockResponse "Use blockStopResponse for Stop hooks instead" #-}
 blockResponse :: Text -> HookOutput
 blockResponse reason =
   HookOutput

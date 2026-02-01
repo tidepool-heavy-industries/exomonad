@@ -11,6 +11,7 @@ module ExoMonad.Guest.HostCall
     host_git_get_recent_commits,
     host_git_has_unpushed_commits,
     host_git_get_remote_url,
+    host_git_get_repo_info,
     -- GitHub
     host_github_list_issues,
     host_github_get_issue,
@@ -52,6 +53,8 @@ foreign import ccall "git_get_recent_commits" host_git_get_recent_commits :: Wor
 foreign import ccall "git_has_unpushed_commits" host_git_has_unpushed_commits :: Word64 -> IO Word64
 
 foreign import ccall "git_get_remote_url" host_git_get_remote_url :: Word64 -> IO Word64
+
+foreign import ccall "git_get_repo_info" host_git_get_repo_info :: Word64 -> IO Word64
 
 -- GitHub host functions
 foreign import ccall "github_list_issues" host_github_list_issues :: Word64 -> IO Word64

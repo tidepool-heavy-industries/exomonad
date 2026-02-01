@@ -12,7 +12,9 @@ common shared
     default-extensions:
         AllowAmbiguousTypes
         DataKinds
+        DeriveAnyClass
         DeriveGeneric
+        DerivingStrategies
         FlexibleContexts
         FlexibleInstances
         ForeignFunctionInterface
