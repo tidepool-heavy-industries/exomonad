@@ -63,6 +63,21 @@ enum Commands {
     /// Reads config from .exomonad/config.toml in current directory.
     /// Claude Code should configure this in .mcp.json with type: "stdio".
     McpStdio,
+
+    /// Reply to a UI request (sent by Zellij plugin)
+    Reply {
+        /// Request ID
+        #[arg(long)]
+        id: String,
+
+        /// JSON payload
+        #[arg(long)]
+        payload: Option<String>,
+
+        /// Cancel the request
+        #[arg(long)]
+        cancel: bool,
+    },
 }
 
 // ============================================================================
@@ -221,6 +236,15 @@ async fn main() -> Result<()> {
             };
 
             mcp::stdio::run_stdio_server(state).await?;
+        }
+
+        Commands::Reply { id, payload, cancel } => {
+            // TODO: Implement actual socket communication to Control Server
+            if cancel {
+                info!(id = %id, "Received Cancel reply (Stub)");
+            } else {
+                info!(id = %id, payload = ?payload, "Received Payload reply (Stub)");
+            }
         }
     }
 

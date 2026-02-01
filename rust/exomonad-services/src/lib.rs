@@ -11,7 +11,7 @@
 //! ```rust,no_run
 //! use exomonad_services::{ExternalService, ServiceError};
 //! use exomonad_services::github::GitHubService;
-//! use exomonad_shared::ServiceRequest;
+//! use exomonad_shared::protocol::ServiceRequest;
 //!
 //! # async fn run() -> Result<(), ServiceError> {
 //! let github = GitHubService::new("token".to_string());
