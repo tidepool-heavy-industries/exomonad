@@ -112,6 +112,15 @@ install-hooks:
     @echo "Installed: pre-push"
     @echo "Done. Use 'git push --no-verify' to bypass in emergencies."
 
+# Build WASM guest and install to ~/.exomonad/wasm/
+wasm role="tl":
+    @echo ">>> Building wasm-guest-{{role}}..."
+    nix develop .#wasm -c wasm32-wasi-cabal build --project-file=cabal.project.wasm wasm-guest-{{role}}
+    @echo ">>> Installing to ~/.exomonad/wasm/..."
+    mkdir -p ~/.exomonad/wasm
+    cp dist-newstyle/build/wasm32-wasi/ghc-*/wasm-guest-*/x/wasm-guest-{{role}}/noopt/build/wasm-guest-{{role}}/wasm-guest-{{role}}.wasm ~/.exomonad/wasm/
+    @echo ">>> Done: ~/.exomonad/wasm/wasm-guest-{{role}}.wasm"
+
 # Clean build artifacts
 clean:
     rm -rf {{metadata_dir}}

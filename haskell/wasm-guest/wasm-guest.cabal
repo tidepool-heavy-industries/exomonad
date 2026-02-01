@@ -20,7 +20,6 @@ common shared
         LambdaCase
         OverloadedStrings
         ScopedTypeVariables
-        TemplateHaskell
         TypeApplications
         TypeFamilies
         TypeOperators
@@ -30,8 +29,7 @@ common shared
         bytestring,
         text,
         aeson,
-        freer-simple,
-        template-haskell
+        freer-simple
 
 -- Internal library with shared tool infrastructure
 library wasm-guest-internal
@@ -42,7 +40,7 @@ library wasm-guest-internal
         ExoMonad.Guest.Tool.Class
         ExoMonad.Guest.Tool.Mode
         ExoMonad.Guest.Tool.Record
-        ExoMonad.Guest.Tool.TH
+        ExoMonad.Guest.Tool.Runtime
         -- Tools
         ExoMonad.Guest.Tools.Ping
         ExoMonad.Guest.Tools.Agent
