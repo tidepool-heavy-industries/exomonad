@@ -7,7 +7,9 @@ use anyhow::{Context, Result};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
 use serde::{Deserialize, Serialize};
 use std::process::Command;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
+
+use super::{git, zellij_events};
 
 // ============================================================================
 // Types
@@ -117,31 +119,12 @@ fn check_existing_pr() -> Result<Option<(String, u64, String, String)>> {
     Ok(Some((pr.url, pr.number, pr.head_ref_name, pr.base_ref_name)))
 }
 
-/// Get current branch name
-fn get_current_branch() -> Result<String> {
-    let output = Command::new("git")
-        .args(["branch", "--show-current"])
-        .output()
-        .context("Failed to execute git branch --show-current")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("Not on a branch: {}", stderr.trim());
-    }
-
-    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if branch.is_empty() {
-        anyhow::bail!("Not on a branch (detached HEAD?)");
-    }
-
-    Ok(branch)
-}
 
 /// Create a new PR using gh CLI
 fn create_pr(input: &FilePRInput) -> Result<FilePROutput> {
     info!("[FilePR] Creating new PR: {}", input.title);
 
-    let head_branch = get_current_branch()?;
+    let head_branch = git::get_current_branch()?;
     info!("[FilePR] Current branch: {}", head_branch);
 
     let args = vec![
@@ -186,6 +169,19 @@ fn create_pr(input: &FilePRInput) -> Result<FilePROutput> {
 
     // Get base branch from the created PR
     let base_branch = get_pr_base_branch(pr_number)?;
+
+    // Emit pr:filed event
+    // Extract agent_id from branch name (format: gh-123/slug)
+    if let Some(agent_id) = git::extract_agent_id(&head_branch) {
+        let event = exomonad_ui_protocol::AgentEvent::PrFiled {
+            agent_id,
+            pr_number,
+            timestamp: zellij_events::now_iso8601(),
+        };
+        if let Err(e) = zellij_events::emit_event(&event) {
+            warn!("Failed to emit pr:filed event: {}", e);
+        }
+    }
 
     Ok(FilePROutput {
         pr_url,

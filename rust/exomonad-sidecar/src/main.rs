@@ -11,13 +11,14 @@ mod mcp;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use exomonad_runtime::services::{git, zellij_events};
 use exomonad_runtime::{PluginManager, Services};
 use exomonad_shared::protocol::{HookEventType, HookInput, HookOutput, Runtime, ServiceRequest};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
-use tracing::{debug, info};
+use tracing::{debug, error, info, warn};
 
 // ============================================================================
 // CLI Types
@@ -129,6 +130,25 @@ async fn handle_hook(
 
     // Exit code based on output
     if !output.continue_ {
+        // Emit StopHookBlocked event for SubagentStop hooks
+        if event_type == HookEventType::SubagentStop {
+            if let Ok(branch) = git::get_current_branch() {
+                if let Some(agent_id) = git::extract_agent_id(&branch) {
+                    let reason = output
+                        .stop_reason
+                        .clone()
+                        .unwrap_or_else(|| "Hook blocked agent stop".to_string());
+                    let event = exomonad_ui_protocol::AgentEvent::StopHookBlocked {
+                        agent_id,
+                        reason,
+                        timestamp: zellij_events::now_iso8601(),
+                    };
+                    if let Err(e) = zellij_events::emit_event(&event) {
+                        warn!("Failed to emit stop_hook:blocked event: {}", e);
+                    }
+                }
+            }
+        }
         std::process::exit(2);
     }
 

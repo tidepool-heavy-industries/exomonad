@@ -1,7 +1,8 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use zellij_tile::prelude::*;
 
 mod protocol;
+use exomonad_ui_protocol::AgentEvent;
 use protocol::{
     Component, ElementValue, PluginMessage, PopupDefinition, PopupState, VisibilityRule,
 };
@@ -14,6 +15,8 @@ struct ExoMonadPlugin {
     selected_index: usize,
     // Used for navigation within a component (e.g. Multiselect options)
     sub_index: usize,
+    // Agent events for sidebar display (ring buffer with max 100 events)
+    events: VecDeque<AgentEvent>,
 }
 
 register_plugin!(ExoMonadPlugin);
@@ -23,6 +26,31 @@ impl ZellijPlugin for ExoMonadPlugin {
         subscribe(&[EventType::CustomMessage, EventType::Key]);
         self.status_state = "IDLE".to_string();
         self.status_message = "Ready.".to_string();
+        self.events = VecDeque::new();
+    }
+
+    fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
+        // Handle pipe messages from zellij pipe --name exomonad-events
+        if pipe_message.name == "exomonad-events" {
+            if let Some(payload) = pipe_message.payload {
+                match serde_json::from_str::<AgentEvent>(&payload) {
+                    Ok(agent_event) => {
+                        self.events.push_back(agent_event);
+                        // Keep only last 100 events
+                        if self.events.len() > 100 {
+                            self.events.pop_front();
+                        }
+                        return true; // Request re-render
+                    }
+                    Err(e) => {
+                        self.status_state = "ERROR".to_string();
+                        self.status_message = format!("Invalid event payload: {}", e);
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 
     fn update(&mut self, event: Event) -> bool {
@@ -223,6 +251,71 @@ impl ZellijPlugin for ExoMonadPlugin {
             self.status_state, self.status_message
         );
 
+        // Render event sidebar
+        if !self.events.is_empty() {
+            println!("\n=== Agent Events ===");
+            // Show last 10 events (most recent first)
+            for event in self.events.iter().rev().take(10) {
+                match event {
+                    AgentEvent::AgentStarted { agent_id, timestamp } => {
+                        println!("{} {} started", format_timestamp(timestamp), agent_id);
+                    }
+                    AgentEvent::AgentStopped { agent_id, timestamp } => {
+                        println!("{} {} done", format_timestamp(timestamp), agent_id);
+                    }
+                    AgentEvent::StopHookBlocked {
+                        agent_id,
+                        reason,
+                        timestamp,
+                    } => {
+                        println!(
+                            "{} {} blocked: {}",
+                            format_timestamp(timestamp),
+                            agent_id,
+                            reason
+                        );
+                    }
+                    AgentEvent::PrFiled {
+                        agent_id,
+                        pr_number,
+                        timestamp,
+                    } => {
+                        println!(
+                            "{} {} PR #{}",
+                            format_timestamp(timestamp),
+                            agent_id,
+                            pr_number
+                        );
+                    }
+                    AgentEvent::CopilotReviewed {
+                        agent_id,
+                        comment_count,
+                        timestamp,
+                    } => {
+                        println!(
+                            "{} {} copilot: {} comments",
+                            format_timestamp(timestamp),
+                            agent_id,
+                            comment_count
+                        );
+                    }
+                    AgentEvent::AgentStuck {
+                        agent_id,
+                        failed_stop_count,
+                        timestamp,
+                    } => {
+                        println!(
+                            "{} {} ⚠ STUCK ({} failed stops)",
+                            format_timestamp(timestamp),
+                            agent_id,
+                            failed_stop_count
+                        );
+                    }
+                }
+            }
+            println!("====================\n");
+        }
+
         if let Some((_, def, state)) = &self.active_popup {
             println!("\n--- POPUP: {} ---", def.title);
             for (i, comp) in def.components.iter().enumerate() {
@@ -311,6 +404,17 @@ impl ZellijPlugin for ExoMonadPlugin {
             println!("-------------------");
             println!("(Ctrl+S to Submit, Esc to Cancel)");
         }
+    }
+}
+
+/// Format ISO8601 timestamp to HH:MM for display
+fn format_timestamp(timestamp: &str) -> String {
+    // Parse ISO8601 timestamp and extract time
+    if let Ok(datetime) = chrono::DateTime::parse_from_rfc3339(timestamp) {
+        datetime.format("%H:%M").to_string()
+    } else {
+        // Fallback to first 5 chars if parsing fails
+        timestamp.chars().take(5).collect()
     }
 }
 

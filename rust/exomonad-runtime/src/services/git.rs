@@ -1,8 +1,54 @@
 use crate::services::docker::DockerExecutor;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
 use serde::{Deserialize, Serialize};
+use std::process::Command;
 use std::sync::Arc;
+
+/// Get current branch name from local git repository.
+///
+/// This is a standalone helper function that calls git directly without
+/// requiring Docker or the GitService. Used by file_pr and copilot_review
+/// services to extract agent IDs from branch names.
+pub fn get_current_branch() -> Result<String> {
+    let output = Command::new("git")
+        .args(["branch", "--show-current"])
+        .output()
+        .context("Failed to execute git branch --show-current")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("Not on a branch: {}", stderr.trim());
+    }
+
+    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if branch.is_empty() {
+        anyhow::bail!("Not on a branch (detached HEAD?)");
+    }
+
+    Ok(branch)
+}
+
+/// Extract agent ID from a branch name following gh-{number}/{slug} convention.
+///
+/// Returns the agent ID in the format "gh-{number}" if the branch follows the
+/// convention, or None if it doesn't match the expected pattern.
+///
+/// # Examples
+///
+/// ```
+/// # use exomonad_runtime::services::git::extract_agent_id;
+/// assert_eq!(extract_agent_id("gh-123/feat-add-sidebar"), Some("gh-123".to_string()));
+/// assert_eq!(extract_agent_id("main"), None);
+/// assert_eq!(extract_agent_id("gh-456"), Some("gh-456".to_string()));
+/// ```
+pub fn extract_agent_id(branch: &str) -> Option<String> {
+    branch
+        .strip_prefix("gh-")
+        .and_then(|s| s.split('/').next())
+        .filter(|id| !id.is_empty())
+        .map(|id| format!("gh-{}", id))
+}
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Commit {
@@ -549,5 +595,42 @@ mod tests {
         assert_eq!(commits.len(), 2);
         assert_eq!(commits[0].hash, "hash1");
         assert_eq!(commits[1].message, "Message 2");
+    }
+
+    #[test]
+    fn test_extract_agent_id_valid_branches() {
+        // Standard format: gh-{number}/{slug}
+        assert_eq!(
+            extract_agent_id("gh-123/feat-add-sidebar"),
+            Some("gh-123".to_string())
+        );
+        assert_eq!(
+            extract_agent_id("gh-456/fix-bug-with-events"),
+            Some("gh-456".to_string())
+        );
+
+        // Branch without slug (just gh-{number})
+        assert_eq!(extract_agent_id("gh-789"), Some("gh-789".to_string()));
+
+        // Multi-part slug
+        assert_eq!(
+            extract_agent_id("gh-111/feat/nested/path"),
+            Some("gh-111".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_agent_id_invalid_branches() {
+        // Regular branches without gh- prefix
+        assert_eq!(extract_agent_id("main"), None);
+        assert_eq!(extract_agent_id("develop"), None);
+        assert_eq!(extract_agent_id("feature/something"), None);
+
+        // Malformed gh- branches
+        assert_eq!(extract_agent_id("gh-"), None);
+        assert_eq!(extract_agent_id("gh-/no-number"), None);
+
+        // Empty string
+        assert_eq!(extract_agent_id(""), None);
     }
 }

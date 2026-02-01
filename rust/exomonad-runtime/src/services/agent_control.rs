@@ -16,6 +16,7 @@ use tokio::process::Command;
 use tracing::{debug, info, warn};
 
 use super::github::{GitHubService, Repo};
+use super::zellij_events;
 
 // ============================================================================
 // Types
@@ -180,6 +181,15 @@ impl AgentControlService {
         self.new_zellij_tab(&tab_name, &worktree_path, Some("claude"))
             .await?;
 
+        // Emit agent:started event
+        let event = exomonad_ui_protocol::AgentEvent::AgentStarted {
+            agent_id: format!("gh-{}", issue_id),
+            timestamp: zellij_events::now_iso8601(),
+        };
+        if let Err(e) = zellij_events::emit_event(&event) {
+            warn!("Failed to emit agent:started event: {}", e);
+        }
+
         Ok(SpawnResult {
             worktree_path: worktree_path.to_string_lossy().to_string(),
             branch_name,
@@ -233,6 +243,16 @@ impl AgentControlService {
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                 if name.starts_with(&prefix) {
                     self.delete_worktree(path, force).await?;
+
+                    // Emit agent:stopped event
+                    let event = exomonad_ui_protocol::AgentEvent::AgentStopped {
+                        agent_id: format!("gh-{}", issue_id),
+                        timestamp: zellij_events::now_iso8601(),
+                    };
+                    if let Err(e) = zellij_events::emit_event(&event) {
+                        warn!("Failed to emit agent:stopped event: {}", e);
+                    }
+
                     return Ok(());
                 }
             }

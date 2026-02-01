@@ -7,6 +7,7 @@ description = "Sidecar binary: Rust host with Haskell WASM plugin for Claude Cod
 [dependencies]
 exomonad-runtime = { path = "../exomonad-runtime" }
 exomonad-shared = { path = "../exomonad-shared" }
+exomonad-ui-protocol = { path = "../exomonad-ui-protocol" }
 axum = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
