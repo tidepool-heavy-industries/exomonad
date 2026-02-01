@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::process::Command;
 use tracing::{debug, error, info, warn};
 
-use super::zellij_events;
+use super::{git, zellij_events};
 
 // ============================================================================
 // Types
@@ -119,31 +119,12 @@ fn check_existing_pr() -> Result<Option<(String, u64, String, String)>> {
     Ok(Some((pr.url, pr.number, pr.head_ref_name, pr.base_ref_name)))
 }
 
-/// Get current branch name
-fn get_current_branch() -> Result<String> {
-    let output = Command::new("git")
-        .args(["branch", "--show-current"])
-        .output()
-        .context("Failed to execute git branch --show-current")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("Not on a branch: {}", stderr.trim());
-    }
-
-    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if branch.is_empty() {
-        anyhow::bail!("Not on a branch (detached HEAD?)");
-    }
-
-    Ok(branch)
-}
 
 /// Create a new PR using gh CLI
 fn create_pr(input: &FilePRInput) -> Result<FilePROutput> {
     info!("[FilePR] Creating new PR: {}", input.title);
 
-    let head_branch = get_current_branch()?;
+    let head_branch = git::get_current_branch()?;
     info!("[FilePR] Current branch: {}", head_branch);
 
     let args = vec![
@@ -194,7 +175,7 @@ fn create_pr(input: &FilePRInput) -> Result<FilePROutput> {
     if let Some(agent_id) = head_branch.strip_prefix("gh-").and_then(|s| s.split('/').next()) {
         let event = exomonad_ui_protocol::AgentEvent::PrFiled {
             agent_id: format!("gh-{}", agent_id),
-            pr_number: pr_number as u32,
+            pr_number,
             timestamp: zellij_events::now_iso8601(),
         };
         if let Err(e) = zellij_events::emit_event(&event) {

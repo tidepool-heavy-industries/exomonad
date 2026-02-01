@@ -5,7 +5,7 @@
 use anyhow::{Context, Result};
 use exomonad_ui_protocol::AgentEvent;
 use std::process::Command;
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// Emit an agent event to the Zellij plugin sidebar via pipe.
 ///
@@ -29,7 +29,6 @@ pub fn emit_event(event: &AgentEvent) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        warn!("[ZellijEvents] Failed to emit event: {}", stderr);
         return Err(anyhow::anyhow!("zellij pipe failed: {}", stderr));
     }
 

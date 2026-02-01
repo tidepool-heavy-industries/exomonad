@@ -25,7 +25,7 @@ pub enum AgentEvent {
     #[serde(rename = "pr:filed")]
     PrFiled {
         agent_id: String,
-        pr_number: u32,
+        pr_number: u64,
         timestamp: String,
     },
     #[serde(rename = "copilot:reviewed")]

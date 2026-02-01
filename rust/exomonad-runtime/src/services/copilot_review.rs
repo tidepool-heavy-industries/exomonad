@@ -11,7 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
-use super::zellij_events;
+use super::{git, zellij_events};
 
 // ============================================================================
 // Types
@@ -254,19 +254,6 @@ fn fetch_pr_reviews(owner: &str, repo: &str, pr_number: u64) -> Result<bool> {
     Ok(has_copilot_review)
 }
 
-/// Get current branch name to extract agent ID
-fn get_current_branch() -> Result<String> {
-    let output = Command::new("git")
-        .args(["branch", "--show-current"])
-        .output()
-        .context("Failed to execute git branch --show-current")?;
-
-    if !output.status.success() {
-        anyhow::bail!("Not on a branch");
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
 
 /// Main wait_for_copilot_review implementation
 pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<CopilotReviewOutput> {
@@ -292,7 +279,7 @@ pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<Copi
             );
 
             // Emit copilot:reviewed event
-            if let Ok(branch) = get_current_branch() {
+            if let Ok(branch) = git::get_current_branch() {
                 if let Some(agent_id) = branch.strip_prefix("gh-").and_then(|s| s.split('/').next()) {
                     let event = exomonad_ui_protocol::AgentEvent::CopilotReviewed {
                         agent_id: format!("gh-{}", agent_id),
@@ -316,7 +303,7 @@ pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<Copi
             info!("[CopilotReview] Found Copilot review (no inline comments)");
 
             // Emit copilot:reviewed event with 0 comments
-            if let Ok(branch) = get_current_branch() {
+            if let Ok(branch) = git::get_current_branch() {
                 if let Some(agent_id) = branch.strip_prefix("gh-").and_then(|s| s.split('/').next()) {
                     let event = exomonad_ui_protocol::AgentEvent::CopilotReviewed {
                         agent_id: format!("gh-{}", agent_id),

@@ -1,8 +1,33 @@
 use crate::services::docker::DockerExecutor;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
 use serde::{Deserialize, Serialize};
+use std::process::Command;
 use std::sync::Arc;
+
+/// Get current branch name from local git repository.
+///
+/// This is a standalone helper function that calls git directly without
+/// requiring Docker or the GitService. Used by file_pr and copilot_review
+/// services to extract agent IDs from branch names.
+pub fn get_current_branch() -> Result<String> {
+    let output = Command::new("git")
+        .args(["branch", "--show-current"])
+        .output()
+        .context("Failed to execute git branch --show-current")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("Not on a branch: {}", stderr.trim());
+    }
+
+    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if branch.is_empty() {
+        anyhow::bail!("Not on a branch (detached HEAD?)");
+    }
+
+    Ok(branch)
+}
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Commit {
