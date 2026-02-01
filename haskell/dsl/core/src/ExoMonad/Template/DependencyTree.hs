@@ -39,6 +39,8 @@ module ExoMonad.Template.DependencyTree
   )
 where
 
+import Prelude hiding (many, (<|>))
+
 import Control.Monad (foldM)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map

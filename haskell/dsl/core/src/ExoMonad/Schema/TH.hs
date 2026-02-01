@@ -32,11 +32,13 @@ module ExoMonad.Schema.TH
   )
 where
 
+import Prelude hiding (head, (??))
+
 import Control.Monad (forM, unless, when)
 import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), object, withObject, withText, (.:), (.:?), (.=))
 import Data.Aeson.Key qualified as K
 import Data.Char (isUpper, toLower)
-import Data.List (delete, intercalate, stripPrefix)
+import Data.List (delete, head, intercalate, stripPrefix, foldl')
 import Data.Map.Strict qualified as Map
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.Text (Text)
@@ -44,8 +46,8 @@ import Data.Text qualified as T
 -- Import types for HasJSONSchema instance generation
 import ExoMonad.StructuredOutput.Class (HasJSONSchema (..), JSONSchema (..), SchemaType (..))
 import GHC.Generics (Generic)
-import Language.Haskell.TH
-import Language.Haskell.TH.Syntax
+import Language.Haskell.TH hiding (Type)
+import Language.Haskell.TH.Syntax qualified as TH
 
 -- | Options for MCP type derivation
 data MCPOptions = MCPOptions
@@ -208,7 +210,7 @@ resolveMapping opts fname (Auto _ d) =
           then baseName
           else case stripPrefix prefix baseName of
             Just rest -> rest
-            Nothing -> error $ "deriveMCPType: Field '" ++ baseName ++ "' does not start with expected prefix '" ++ prefix ++ "'"
+            Nothing -> error $ T.pack $ "deriveMCPType: Field '" ++ baseName ++ "' does not start with expected prefix '" ++ prefix ++ "'"
 
       processed' = case processed of
         (c : cs) -> toLower c : cs
@@ -217,11 +219,11 @@ resolveMapping opts fname (Auto _ d) =
    in (key, d)
 resolveMapping _ _ (Omit _) = error "Omit should be filtered out"
 
-isMaybeType :: Type -> Bool
+isMaybeType :: TH.Type -> Bool
 isMaybeType (AppT (ConT name) _) = nameBase name == "Maybe"
 isMaybeType _ = False
 
-deriveFieldSchema :: Type -> Maybe String -> Q Exp
+deriveFieldSchema :: TH.Type -> Maybe String -> Q Exp
 deriveFieldSchema ftype desc = do
   -- Base schema expression
   baseSchema <- typeToSchemaExp ftype
@@ -231,7 +233,7 @@ deriveFieldSchema ftype desc = do
     Nothing -> pure baseSchema
 
 -- | Convert a Haskell type to a JSONSchema expression (simplified from original Schema.hs)
-typeToSchemaExp :: Type -> Q Exp
+typeToSchemaExp :: TH.Type -> Q Exp
 typeToSchemaExp typ = case typ of
   ConT name | nameBase name `elem` ["Text", "String", "FilePath"] -> [|emptySchema TString|]
   ConT name | nameBase name `elem` ["Int", "Integer"] -> [|emptySchema TInteger|]
@@ -245,7 +247,7 @@ typeToSchemaExp typ = case typ of
   _ -> [|emptySchema TString|] -- Fallback
 
 -- | Generate HasJSONSchema instance
-genHasJSONSchema :: Name -> [(Name, Type, String, Exp, Bool)] -> Q Dec
+genHasJSONSchema :: Name -> [(Name, TH.Type, String, Exp, Bool)] -> Q Dec
 genHasJSONSchema typeName fields = do
   let props = listE [tupE [litE (stringL k), pure s] | (_, _, k, s, _) <- fields]
       required = listE [litE (stringL k) | (_, _, k, _, isOpt) <- fields, not isOpt]
@@ -259,13 +261,13 @@ genHasJSONSchema typeName fields = do
       _ -> fail "genHasJSONSchema produced unexpected declarations"
 
 -- | Generate FromJSON instance
-genFromJSON :: Name -> Name -> [(Name, Type, String, Exp, Bool)] -> Q Dec
+genFromJSON :: Name -> Name -> [(Name, TH.Type, String, Exp, Bool)] -> Q Dec
 genFromJSON typeName conName fields = do
   vName <- newName "v"
 
   -- Construct the record
   let applicativeParse =
-        foldl
+        foldl'
           ( \acc (fname, _, key, _, isOpt) ->
               let keyLit = litE (stringL key)
                   -- We use AppE to apply the operator to the arguments
@@ -290,7 +292,7 @@ genFromJSON typeName conName fields = do
       _ -> fail "genFromJSON produced unexpected declarations"
 
 -- | Generate ToJSON instance
-genToJSON :: Name -> [(Name, Type, String, Exp, Bool)] -> Q Dec
+genToJSON :: Name -> [(Name, TH.Type, String, Exp, Bool)] -> Q Dec
 genToJSON typeName fields = do
   let pairs =
         listE

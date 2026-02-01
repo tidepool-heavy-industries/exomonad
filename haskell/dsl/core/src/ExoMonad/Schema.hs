@@ -61,6 +61,8 @@ module ExoMonad.Schema
   )
 where
 
+import Prelude hiding ((??))
+
 import Data.Aeson (Value (..), object, (.=))
 import Data.Map.Strict qualified as Map
 import Data.Maybe (catMaybes)
@@ -93,7 +95,8 @@ import ExoMonad.StructuredOutput.Class
     ValidStructuredOutput,
     formatDiagnostic,
   )
-import Language.Haskell.TH
+import Language.Haskell.TH hiding (Type)
+import Language.Haskell.TH.Syntax qualified as TH
 
 -- | Empty schema of given type
 emptySchema :: SchemaType -> JSONSchema
@@ -219,7 +222,7 @@ deriveFieldSchema _typeName _conName _fieldIdx (fieldName, _, fieldType) = do
   [|describeField desc $(pure baseSchema)|]
 
 -- | Convert a Haskell type to a JSONSchema expression
-typeToSchemaExp :: Type -> Q Exp
+typeToSchemaExp :: TH.Type -> Q Exp
 typeToSchemaExp typ = case typ of
   -- Text, String, FilePath -> TString
   ConT name

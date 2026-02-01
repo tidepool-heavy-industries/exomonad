@@ -1,23 +1,8 @@
 {-# OPTIONS_GHC -Wno-duplicate-exports #-}
 
 module ExoMonad.Prelude
-  ( -- * Core types
-    Type,
-    Constraint,
-    Generic,
-    Symbol,
-    KnownSymbol,
-    symbolVal,
-    Proxy (..),
-
-    -- * Common data types
-    NonEmpty (..),
-    ByteString,
-    Map,
-    HashMap,
-    HashSet,
-    Set,
-    Vector,
+  ( -- * Relude (Standard Library Replacement)
+    module Prelude,
 
     -- * Effect system
     Eff,
@@ -39,6 +24,7 @@ module ExoMonad.Prelude
     logError,
     logDebug,
     logWarn,
+    logTrace,
     Emit,
     emit,
     RequestInput,
@@ -78,33 +64,7 @@ module ExoMonad.Prelude
     (.:),
     (.:?),
 
-    -- * Maybe
-    fromMaybe,
-    catMaybes,
-    isJust,
-    isNothing,
-    listToMaybe,
-    maybeToList,
-
-    -- * Either
-    isLeft,
-    isRight,
-    lefts,
-    rights,
-
-    -- * Control & Flow
-    when,
-    unless,
-    void,
-    forM,
-    forM_,
-    traverse,
-    traverse_,
-    toList,
-    optional,
-    Alternative (..),
-
-    -- * Qualified re-exports (import ExoMonad.Prelude gets you T.foo, M.foo, etc.)
+    -- * Qualified re-exports
     module T,
     module M,
     module BS,
@@ -115,31 +75,36 @@ module ExoMonad.Prelude
   )
 where
 
-import Control.Applicative (Alternative (..), optional)
-import Control.Monad (unless, void, when)
+-- Relude re-exports
+import Prelude hiding
+  ( -- Hide things that collide with ExoMonad DSL or are legacy
+    id,
+    trace,
+    -- We use freer-simple's State/Reader usually, but Relude's are fine if qualified.
+    -- However, we export our own 'State' effect.
+    State,
+    get,
+    put,
+    modify,
+    gets,
+  )
+
+-- Effect System
 import Control.Monad.Freer (Eff, LastMember, Member, interpret, send, sendM)
+
+-- JSON
 import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), object, (.:), (.:?), (.=))
-import Data.ByteString (ByteString)
+
+-- Qualified Imports (Standard)
 import Data.ByteString qualified as BS
-import Data.Either (isLeft, isRight, lefts, rights)
-import Data.Foldable (forM_, toList, traverse_)
-import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
-import Data.HashSet (HashSet)
 import Data.HashSet qualified as HS
-import Data.Kind (Constraint, Type)
-import Data.List.NonEmpty (NonEmpty (..))
-import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as M
-import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing, listToMaybe, maybeToList)
-import Data.Proxy (Proxy (..))
-import Data.Set (Set)
 import Data.Set qualified as S
-import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Traversable (forM)
-import Data.Vector (Vector)
 import Data.Vector qualified as V
+
+-- ExoMonad Internal Imports
 import ExoMonad.Effect.Types
   ( Emit,
     LLM,
@@ -156,6 +121,7 @@ import ExoMonad.Effect.Types
     logDebug,
     logError,
     logInfo,
+    logTrace,
     logWarn,
     modify,
     put,
@@ -166,5 +132,3 @@ import ExoMonad.Effect.Types
   )
 import ExoMonad.Graph.Goto (Goto, goto, gotoChoice, gotoExit, gotoSelf, (-->))
 import ExoMonad.Graph.Types (EntryPoint, Exit, Input, Schema, Self, Template, UsesEffects, type (:@))
-import GHC.Generics (Generic)
-import GHC.TypeLits (KnownSymbol, Symbol, symbolVal)

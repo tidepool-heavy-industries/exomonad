@@ -56,16 +56,8 @@ module ExoMonad.Graph.Interpret
   )
 where
 
-import Control.Monad (when)
-import Control.Monad.Freer (Eff, Member)
-import Data.Aeson (Value, toJSON)
-import Data.Kind (Constraint, Type)
-import Data.Maybe (fromMaybe)
-import Data.Proxy (Proxy (..))
-import Data.Text (Text)
-import Data.Text qualified as T
-import Debug.Trace (trace)
 import ExoMonad.Effect (LLM)
+import Data.Text qualified as T
 import ExoMonad.Effect.Gemini (GeminiModel (..), GeminiOp, GeminiResult (..), SGeminiModel (..), SingGeminiModel (..), runGemini)
 import ExoMonad.Effect.NodeMeta (GraphMeta, GraphMetadata (..), NodeMeta, NodeMetadata (..), getGraphMeta, withNodeMeta)
 import ExoMonad.Effect.Session (Session, SessionId (..), SessionOperation (..), SessionOutput (..), ToolCall (..), continueSession, forkSession, startSession)
@@ -92,12 +84,13 @@ import ExoMonad.Graph.Goto.Internal (GotoChoice (..), OneOf (..))
 import ExoMonad.Graph.Reify (IsForkNode)
 import ExoMonad.Graph.Template (GingerContext)
 import ExoMonad.Graph.Types (Arrive, Exit, HList (..), ModelChoice, Self, SingModelChoice (..))
+import ExoMonad.Prelude
 import ExoMonad.Schema (schemaToValue)
 import ExoMonad.StructuredOutput (ClaudeCodeSchema (..), DecisionTool, StructuredOutput (..), ValidStructuredOutput, formatDiagnostic)
 import ExoMonad.StructuredOutput.DecisionTools qualified as DT
-import GHC.Generics (Generic (..))
 import GHC.Records (HasField (..))
 import GHC.TypeLits (ErrorMessage (..), KnownSymbol, Symbol, symbolVal)
+import PyF (fmt)
 import Text.Ginger.TH (TypedTemplate, runTypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 
@@ -298,13 +291,13 @@ executeLLMHandler mSystemTpl userTpl beforeFn afterFn input = do
   -- Call LLM with rendered prompts and handle tool-initiated transitions
   turnResult <- runTurn @schema systemPrompt userPrompt schemaVal []
   case turnResult of
-    TurnBroken reason -> error $ "LLM turn broken: " <> T.unpack reason
+    TurnBroken reason -> error [fmt|LLM turn broken: {reason}|]
     TurnTransitionHint targetName payload ->
       case convertTransitionHint @targets targetName payload of
         Just choice -> pure choice
-        Nothing -> error $ "Tool transition to unknown target or wrong type: " <> T.unpack targetName
+        Nothing -> error [fmt|Tool transition to unknown target or wrong type: {targetName}|]
     TurnCompleted (TurnParsed (TurnResult {trOutput})) -> afterFn trOutput
-    TurnCompleted (TurnParseFailed {tpfError}) -> error $ "Parse failed: " <> tpfError
+    TurnCompleted (TurnParseFailed {tpfError}) -> error [fmt|Parse failed: {tpfError}|]
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CLAUDE CODE HANDLER EXECUTION
@@ -357,6 +350,7 @@ executeLLMHandler mSystemTpl userTpl beforeFn afterFn input = do
 executeClaudeCodeHandler ::
   forall model needs schema targets es tpl.
   ( Member Session es,
+    Member Log es,
     ClaudeCodeSchema schema,
     GingerContext tpl,
     SingModelChoice model,
@@ -424,10 +418,10 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
     -- Nag prompt for parse failures
     parseErrorNagPrompt :: Text -> Text
     parseErrorNagPrompt diagText =
-      "Your output didn't match the expected JSON schema. Error:\n"
-        <> diagText
-        <> "\n\n"
-        <> "Please try again with valid JSON matching the schema."
+      [fmt|Your output didn't match the expected JSON schema. Error:
+{diagText}
+
+Please try again with valid JSON matching the schema.|]
 
     -- Execute session, parsing output and handling nag retries
     executeWithNag ::
@@ -465,13 +459,7 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
       when result.soIsError $ do
         let errDetails = fromMaybe "unknown error" result.soError
             stderrInfo = maybe "" (\s -> "\n\nStderr:\n" <> T.unpack s) result.soStderrOutput
-        error $
-          "ClaudeCode session failed (exomonad/process error): "
-            <> T.unpack errDetails
-            <> " [exit code: "
-            <> show result.soExitCode
-            <> "]"
-            <> stderrInfo
+        error [fmt|ClaudeCode session failed (exomonad/process error): {errDetails} [exit code: {result.soExitCode}]{stderrInfo}|]
 
       -- Extract cc_session_id (required for resume/fork) - fail early if missing
       ccSessionId <- case result.soCcSessionId of
@@ -479,14 +467,7 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
         Nothing -> do
           let errDetails = fromMaybe "no cc_session_id in output" result.soError
               stderrInfo = maybe "" (\s -> "\n\nStderr:\n" <> T.unpack s) result.soStderrOutput
-          error $
-            "ClaudeCode session failed to return cc_session_id (required for resume/fork). "
-              <> "Error: "
-              <> T.unpack errDetails
-              <> " [exit code: "
-              <> show result.soExitCode
-              <> "]"
-              <> stderrInfo
+          error [fmt|ClaudeCode session failed to return cc_session_id (required for resume/fork). Error: {errDetails} [exit code: {result.soExitCode}]{stderrInfo}|]
 
       -- Parse result based on whether we're using decision tools
       case tools of
@@ -496,20 +477,16 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
             Just (tc : rest) ->
               -- Got at least one tool call, take the first
               -- (Claude sometimes calls multiple despite "STOP NOW"; ignore subsequent)
-              trace ("[DECISION] Taking first of " <> show (1 + length rest) <> " decision tool calls") $
+              do
+                logTrace [fmt|[DECISION] Taking first of {1 + length rest} decision tool calls|]
                 case ccParseToolCall @s (convertToolCall tc) of
                   Right output -> afterFn_ (ClaudeCodeResult output ccSessionId result.soWorktree result.soBranch, ccSessionId)
-                  Left err -> error $ "ClaudeCode decision tool parse error: " <> err
+                  Left err -> error [fmt|ClaudeCode decision tool parse error: {err}|]
             _ ->
               -- No tool call - nag and retry
               if retryCount >= maxNagRetries
                 then
-                  error $
-                    "ClaudeCode: Claude completed but failed to call a decision tool after "
-                      <> show maxNagRetries
-                      <> " retries. "
-                      <> "Session output: "
-                      <> maybe "(no text)" T.unpack result.soResultText
+                  error [fmt|ClaudeCode: Claude completed but failed to call a decision tool after {maxNagRetries} retries. Session output: {maybe "(no text)" T.unpack result.soResultText}|]
                 else do
                   -- Continue the same session with nag prompt
                   executeWithNag @s
@@ -524,9 +501,7 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
           -- Regular type: parse from structured output
           case result.soStructuredOutput of
             Nothing ->
-              error $
-                "ClaudeCode session returned no structured output"
-                  <> maybe "" (\e -> ": " <> T.unpack e) result.soError
+              error [fmt|ClaudeCode session returned no structured output{maybe "" (\e -> ": " <> T.unpack e) result.soError}|]
             Just outputVal ->
               case ccParseStructured @s outputVal of
                 Right output -> afterFn_ (ClaudeCodeResult output ccSessionId result.soWorktree result.soBranch, ccSessionId)
@@ -534,11 +509,7 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
                   -- Parse failed - nag and retry
                   if retryCount >= maxNagRetries
                     then
-                      error $
-                        "ClaudeCode output parse error after "
-                          <> show maxNagRetries
-                          <> " retries: "
-                          <> T.unpack (formatDiagnostic diag)
+                      error [fmt|ClaudeCode output parse error after {maxNagRetries} retries: {formatDiagnostic diag}|]
                     else do
                       -- Continue the same session with parse error nag prompt
                       let nagText = parseErrorNagPrompt (formatDiagnostic diag)
@@ -599,7 +570,7 @@ executeGeminiHandler mSystemTpl userTpl beforeFn afterFn input = do
   -- Parse output
   case parseStructured grOutput of
     Right parsed -> afterFn parsed
-    Left diag -> error $ "Parse failed: Gemini parse error: " <> T.unpack (formatDiagnostic diag)
+    Left diag -> error [fmt|Parse failed: Gemini parse error: {formatDiagnostic diag}|]
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HANDLER INVOCATION TYPECLASS
@@ -645,6 +616,7 @@ instance
 -- tool calls. For other types, uses standard structured output.
 instance
   ( Member Session es,
+    Member Log es,
     ClaudeCodeSchema schema,
     GingerContext tpl,
     SingModelChoice model,

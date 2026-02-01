@@ -23,6 +23,8 @@ module ExoMonad.Graph.Example
   )
 where
 
+import Prelude hiding (State, get)
+
 import Control.Monad.Freer (Member)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)

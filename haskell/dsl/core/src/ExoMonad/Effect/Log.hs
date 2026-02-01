@@ -70,6 +70,8 @@ module ExoMonad.Effect.Log
   )
 where
 
+import Prelude hiding (Reader, local)
+
 import Control.Monad.Freer (Eff, LastMember, Member, interpret, send, sendM)
 import Control.Monad.Freer.Reader (Reader, local)
 import Data.Aeson (ToJSON (..), Value, toJSON)

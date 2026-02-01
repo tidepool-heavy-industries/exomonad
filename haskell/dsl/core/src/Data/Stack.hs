@@ -40,6 +40,8 @@ module Data.Stack
   )
 where
 
+import Prelude hiding (empty)
+
 -- | A stack is a collection that maintains LIFO (Last-In-First-Out) ordering.
 --
 -- The stack can be empty or contain a list of elements, with the most

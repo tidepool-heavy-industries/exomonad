@@ -25,13 +25,12 @@ module ExoMonad.StructuredOutput.Generic
   )
 where
 
-import Control.Lens (each, (%~), (&), _1)
+import Lens.Micro ((%~), _1)
+import Lens.Micro.GHC (each)
 import Data.Aeson (Value (..))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Bifunctor (first)
-import Data.Kind (Type)
-import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Schema (JSONSchema (..), SchemaType (..), emptySchema, objectSchema)
 import ExoMonad.StructuredOutput.Class (GStructuredOutput (..), StructuredOptions (..), StructuredOutput (..), SumEncoding (..))

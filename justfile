@@ -128,16 +128,34 @@ wasm-all:
     @echo ">>> Installed to ~/.exomonad/wasm/:"
     @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
 
-# Install everything: Rust binaries + WASM plugins
+# Install everything: Rust binaries + WASM plugins (uses release build)
 install-all:
-    @echo ">>> [1/2] Installing Rust binaries..."
-    cd rust && cargo install --path exomonad-sidecar
-    @echo ">>> [2/2] Building and installing WASM plugins..."
+    @echo ">>> [1/3] Building Rust binaries (release)..."
+    cd rust && cargo build --release -p exomonad-sidecar
+    @echo ">>> [2/3] Installing binaries to ~/.cargo/bin/..."
+    mkdir -p ~/.cargo/bin
+    cp rust/target/release/exomonad-sidecar ~/.cargo/bin/
+    @echo ">>> [3/3] Building and installing WASM plugins..."
     @just wasm-all
     @echo ">>> Done!"
     @echo ""
     @echo "Installed:"
-    @which exomonad-sidecar
+    @ls -lh ~/.cargo/bin/exomonad-sidecar
+    @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
+
+# Install everything (fast dev build)
+install-all-dev:
+    @echo ">>> [1/3] Building Rust binaries (debug)..."
+    cd rust && cargo build -p exomonad-sidecar
+    @echo ">>> [2/3] Installing binaries to ~/.cargo/bin/..."
+    mkdir -p ~/.cargo/bin
+    cp rust/target/debug/exomonad-sidecar ~/.cargo/bin/
+    @echo ">>> [3/3] Building and installing WASM plugins..."
+    @just wasm-all
+    @echo ">>> Done!"
+    @echo ""
+    @echo "Installed:"
+    @ls -lh ~/.cargo/bin/exomonad-sidecar
     @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
 
 # Clean build artifacts

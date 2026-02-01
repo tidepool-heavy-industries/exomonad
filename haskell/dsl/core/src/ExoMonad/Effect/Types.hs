@@ -51,6 +51,8 @@ module ExoMonad.Effect.Types
     requestQuestion,
     logMsg,
     logMsgWith,
+    logTrace,
+    logTraceWith,
     logDebug,
     logDebugWith,
     logInfo,
@@ -147,6 +149,8 @@ module ExoMonad.Effect.Types
   )
 where
 
+import Prelude hiding (State, get, gets, put, modify, runState, toList, newIORef, readIORef, writeIORef, modifyIORef)
+
 import Control.Monad.Freer (Eff, LastMember, Member, interpret, send, sendM)
 import Control.Monad.Freer.Internal (handleRelayS)
 import Data.Aeson (FromJSON, ToJSON, Value (..), encode)
@@ -155,7 +159,7 @@ import Data.IORef (IORef, modifyIORef, newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import Data.List.NonEmpty (NonEmpty (..), toList)
 import Data.Text (Text)
-import Data.Text qualified as T
+import Data.Text qualified as T hiding (show)
 import Data.Time (UTCTime)
 import Data.Time qualified as Time
 -- Node metadata for teaching infrastructure
@@ -199,6 +203,8 @@ import ExoMonad.Graph.Goto (GotoChoice, To)
 import ExoMonad.Question (Answer (..), Choice (..), ChoiceOption (..), ItemDisposition (..), Question (..))
 import ExoMonad.StructuredOutput (StructuredOutput (..), formatDiagnostic)
 import GHC.Generics (Generic)
+import GHC.Show (Show (..))
+import Prelude qualified as P
 import System.Random (randomRIO)
 
 -- ══════════════════════════════════════════════════════════════
@@ -323,9 +329,9 @@ data ToolResult (targets :: [Type])
   | ToolTransition Text Value -- target name + payload (untyped, will be type-checked at interpreter)
 
 instance Show (ToolResult targets) where
-  show (ToolSuccess val) = "ToolSuccess " <> show val
-  show (ToolBreak reason) = "ToolBreak " <> show reason
-  show (ToolTransition target payload) = "ToolTransition " <> show target <> " " <> show payload
+  show (ToolSuccess val) = "ToolSuccess " <> P.show val
+  show (ToolBreak reason) = "ToolBreak " <> P.show reason
+  show (ToolTransition target payload) = "ToolTransition " <> P.show target <> " " <> P.show payload
 
 instance Eq (ToolResult targets) where
   (ToolSuccess v1) == (ToolSuccess v2) = v1 == v2
@@ -491,7 +497,7 @@ llmCall ::
 llmCall systemPrompt userInput schema = do
   result <- llmCallEither @output systemPrompt userInput schema
   case result of
-    Left err -> error $ "LLM call failed: " <> T.unpack err
+    Left err -> error $ "LLM call failed: " <> err
     Right output -> pure output
 
 -- | Make an LLM call returning Either with simple Text errors (no tools).

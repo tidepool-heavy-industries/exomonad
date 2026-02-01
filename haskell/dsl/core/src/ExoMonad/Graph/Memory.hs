@@ -93,7 +93,7 @@ module ExoMonad.Graph.Memory
   )
 where
 
-import Control.Lens (ASetter, over)
+import Lens.Micro (ASetter, over)
 import Control.Monad.Freer (Eff, Member, send)
 import Control.Monad.Freer.Internal (handleRelayS)
 import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.=))

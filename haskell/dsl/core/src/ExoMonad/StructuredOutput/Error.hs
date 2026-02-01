@@ -25,6 +25,7 @@ module ExoMonad.StructuredOutput.Error
 where
 
 import Data.Aeson (Value (..))
+import Data.List qualified as List
 import Data.Scientific (floatingOrInteger)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -97,7 +98,7 @@ missingField path =
   where
     fieldName = case path of
       [] -> "(unknown)"
-      ps -> last ps
+      ps -> List.last ps
 
 -- | Generic type mismatch error.
 typeMismatch :: [Text] -> Text -> Value -> ParseDiagnostic
