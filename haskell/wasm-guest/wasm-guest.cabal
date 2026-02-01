@@ -29,7 +29,10 @@ common shared
         bytestring,
         text,
         aeson,
-        freer-simple
+        freer-simple,
+        ginger,
+        mtl,
+        unordered-containers
 
 -- Internal library with shared tool infrastructure
 library wasm-guest-internal
@@ -50,7 +53,13 @@ library wasm-guest-internal
         -- Effects (for internal composition)
         ExoMonad.Guest.Effects.AgentControl
         ExoMonad.Guest.Effects.FileSystem
+        ExoMonad.Guest.Effects.Cabal
+        ExoMonad.Guest.Effects.Git
+        ExoMonad.Guest.Effects.GitHub
+        ExoMonad.Guest.Effects.WorkflowState
         ExoMonad.Guest.HostCall
+        -- Hooks
+        ExoMonad.Guest.Hooks.StopWorkflow
         -- Types
         ExoMonad.Guest.Types
         ExoMonad.Guest.Parsers

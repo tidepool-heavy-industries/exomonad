@@ -5,7 +5,8 @@
 module Main where
 
 import Dev.Tools (DevTools, devToolsHandler)
-import ExoMonad.Guest.Tool.Runtime (hookHandler, listHandlerRecord, mcpHandlerRecord, wrapHandler)
+import ExoMonad.Guest.Tool.Runtime (listHandlerRecord, mcpHandlerRecord, wrapHandler)
+import ExoMonad.Guest.Hooks.StopWorkflow (stopWorkflowHandler)
 import Foreign.C.Types (CInt (..))
 
 -- WASM exports
@@ -22,7 +23,7 @@ handle_list_tools :: IO CInt
 handle_list_tools = wrapHandler $ listHandlerRecord @DevTools
 
 handle_pre_tool_use :: IO CInt
-handle_pre_tool_use = wrapHandler hookHandler
+handle_pre_tool_use = wrapHandler stopWorkflowHandler
 
 -- Required for WASM but not called (reactor model)
 main :: IO ()

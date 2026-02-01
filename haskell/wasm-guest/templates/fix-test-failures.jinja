@@ -1,0 +1,7 @@
+{{ failures | length }} test(s) failed:
+
+{% for failure in failures %}
+- {{ failure.name }}: {{ failure.message }}
+{% endfor %}
+
+Please fix these test failures.

@@ -1,8 +1,10 @@
 use crate::services::agent_control;
+use crate::services::cabal;
 use crate::services::filesystem;
 use crate::services::git;
 use crate::services::github;
 use crate::services::log;
+use crate::services::workflow_state;
 use crate::services::Services;
 use anyhow::{Context, Result};
 use extism::{Manifest, Plugin};
@@ -41,6 +43,7 @@ impl PluginManager {
         functions.push(git::git_get_worktree_host_fn(services.git.clone()));
         functions.push(git::git_get_dirty_files_host_fn(services.git.clone()));
         functions.push(git::git_get_recent_commits_host_fn(services.git.clone()));
+        functions.push(git::git_get_remote_url_host_fn(services.git.clone()));
 
         // NOTE: Docker functions are NOT registered as WASM imports.
         // They are Rust implementation details used internally by Git/GitHub services.
@@ -63,6 +66,14 @@ impl PluginManager {
         // Filesystem functions (2 functions) - file read/write
         functions.extend(filesystem::register_host_functions(
             services.filesystem.clone(),
+        ));
+
+        // Cabal functions (2 functions)
+        functions.extend(cabal::register_host_functions(services.cabal.clone()));
+
+        // Workflow state functions (3 functions)
+        functions.extend(workflow_state::register_host_functions(
+            services.workflow_state.clone(),
         ));
 
         Plugin::new(&manifest, functions, true).context("Failed to create plugin")

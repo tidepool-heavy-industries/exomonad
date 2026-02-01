@@ -9,6 +9,7 @@ module ExoMonad.Guest.HostCall
     host_git_get_worktree,
     host_git_get_dirty_files,
     host_git_get_recent_commits,
+    host_git_get_remote_url,
     -- GitHub
     host_github_list_issues,
     host_github_get_issue,
@@ -27,6 +28,13 @@ module ExoMonad.Guest.HostCall
     -- Filesystem
     host_fs_read_file,
     host_fs_write_file,
+    -- Cabal
+    host_cabal_build,
+    host_cabal_test,
+    -- Workflow State
+    host_workflow_state_get_attempts,
+    host_workflow_state_increment_attempts,
+    host_workflow_state_reset_attempts,
   )
 where
 
@@ -36,6 +44,18 @@ import Data.ByteString.Lazy (fromStrict, toStrict)
 import Data.Word (Word64)
 import Extism.PDK.Memory (Memory, alloc, findMemory, free, load, memoryOffset)
 
+-- Cabal host functions
+foreign import ccall "cabal_build" host_cabal_build :: Word64 -> IO Word64
+
+foreign import ccall "cabal_test" host_cabal_test :: Word64 -> IO Word64
+
+-- Workflow State host functions
+foreign import ccall "workflow_state_get_attempts" host_workflow_state_get_attempts :: Word64 -> IO Word64
+
+foreign import ccall "workflow_state_increment_attempts" host_workflow_state_increment_attempts :: Word64 -> IO Word64
+
+foreign import ccall "workflow_state_reset_attempts" host_workflow_state_reset_attempts :: Word64 -> IO Word64
+
 -- Git host functions
 foreign import ccall "git_get_branch" host_git_get_branch :: Word64 -> IO Word64
 
@@ -44,6 +64,8 @@ foreign import ccall "git_get_worktree" host_git_get_worktree :: Word64 -> IO Wo
 foreign import ccall "git_get_dirty_files" host_git_get_dirty_files :: Word64 -> IO Word64
 
 foreign import ccall "git_get_recent_commits" host_git_get_recent_commits :: Word64 -> IO Word64
+
+foreign import ccall "git_get_remote_url" host_git_get_remote_url :: Word64 -> IO Word64
 
 -- GitHub host functions
 foreign import ccall "github_list_issues" host_github_list_issues :: Word64 -> IO Word64

@@ -59,6 +59,13 @@ impl GitService {
         Ok(output.lines().map(|l| l.to_string()).collect())
     }
 
+    pub async fn get_remote_url(&self, container: &str, dir: &str, remote: &str) -> Result<String> {
+        let output = self
+            .exec_git(container, dir, &["remote", "get-url", remote])
+            .await?;
+        Ok(output.trim().to_string())
+    }
+
     pub async fn get_recent_commits(
         &self,
         container: &str,
@@ -98,6 +105,15 @@ struct GitHostInput {
     working_dir: String,
     #[serde(rename = "containerId")]
     container_id: String,
+}
+
+#[derive(Deserialize)]
+struct GitRemoteInput {
+    #[serde(rename = "workingDir")]
+    working_dir: String,
+    #[serde(rename = "containerId")]
+    container_id: String,
+    remote: String,
 }
 
 #[derive(Deserialize)]
@@ -232,6 +248,36 @@ pub fn git_get_dirty_files_host_fn(git_service: Arc<GitService>) -> Function {
 
             let result = block_on(git.get_dirty_files(&input.container_id, &input.working_dir))?;
             let output: GitHostOutput<Vec<String>> = result.into();
+
+            outputs[0] = set_output(plugin, &output)?;
+            Ok(())
+        },
+    )
+    .with_namespace("env")
+}
+
+pub fn git_get_remote_url_host_fn(git_service: Arc<GitService>) -> Function {
+    Function::new(
+        "git_get_remote_url",
+        [ValType::I64],
+        [ValType::I64],
+        UserData::new(git_service),
+        |plugin: &mut CurrentPlugin,
+         inputs: &[Val],
+         outputs: &mut [Val],
+         user_data: UserData<Arc<GitService>>|
+         -> Result<(), Error> {
+            let input: GitRemoteInput = get_input(plugin, inputs[0].clone())?;
+
+            let git_arc = user_data.get()?;
+            let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+
+            let result = block_on(git.get_remote_url(
+                &input.container_id,
+                &input.working_dir,
+                &input.remote,
+            ))?;
+            let output: GitHostOutput<String> = result.into();
 
             outputs[0] = set_output(plugin, &output)?;
             Ok(())

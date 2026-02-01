@@ -1,4 +1,5 @@
 pub mod agent_control;
+pub mod cabal;
 pub mod docker;
 pub mod filesystem;
 pub mod git;
@@ -6,10 +7,12 @@ pub mod github;
 pub mod local;
 pub mod log;
 pub mod secrets;
+pub mod workflow_state;
 
 pub use self::agent_control::{
     AgentControlService, AgentInfo, BatchCleanupResult, BatchSpawnResult, SpawnOptions, SpawnResult,
 };
+use self::cabal::CabalService;
 use self::docker::{DockerExecutor, DockerService};
 pub use self::filesystem::FileSystemService;
 use self::git::GitService;
@@ -17,6 +20,7 @@ use self::github::GitHubService;
 use self::local::LocalExecutor;
 use self::log::{HasLogService, LogService};
 pub use self::secrets::Secrets;
+use self::workflow_state::WorkflowStateService;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -26,6 +30,8 @@ pub struct Services {
     pub github: Option<GitHubService>,
     pub agent_control: Arc<AgentControlService>,
     pub filesystem: Arc<FileSystemService>,
+    pub cabal: Arc<CabalService>,
+    pub workflow_state: Arc<WorkflowStateService>,
 }
 
 impl Services {
@@ -48,7 +54,7 @@ impl Services {
 
     fn with_executor(executor: Arc<dyn DockerExecutor>) -> Self {
         let secrets = Secrets::load();
-        let git = Arc::new(GitService::new(executor));
+        let git = Arc::new(GitService::new(executor.clone()));
 
         // GitHub service is optional - try secrets file first, then env var
         let github = secrets
@@ -65,12 +71,17 @@ impl Services {
         // Filesystem service for file read/write operations
         let filesystem = Arc::new(FileSystemService::new(project_dir));
 
+        let cabal = Arc::new(CabalService::new(executor));
+        let workflow_state = Arc::new(WorkflowStateService::new());
+
         Self {
             log: LogService::default(),
             git,
             github,
             agent_control,
             filesystem,
+            cabal,
+            workflow_state,
         }
     }
 }

@@ -1,0 +1,9 @@
+The build is failing with {{ errors | length }} error(s):
+
+{% for error in errors %}
+## {{ error.file }}:{{ error.line }}
+{{ error.message }}
+
+{% endfor %}
+
+Please fix these build errors before continuing.

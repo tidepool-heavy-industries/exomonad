@@ -1,0 +1,290 @@
+# Stop Hook Workflow - Dev Agent Best Practices
+
+Bring back the stop hook workflow logic from the old control-server, reimplemented as effect-stack logic in the WASM guest stop hook handler.
+
+## Concept
+
+When a dev agent thinks it's done (SubagentStop fires), the hook handler:
+1. Checks what phase of work the agent is in
+2. Runs verification steps (build, test, PR status)
+3. Either nudges the agent to continue, or allows it to stop
+
+```
+Agent: "I'm done!"
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Stop Hook Handler                                          │
+│                                                             │
+│  1. Check build status (cabal build)                        │
+│     └─ Fails? → continue "Fix build errors: ..."            │
+│                                                             │
+│  2. Check test status (cabal test)                          │
+│     └─ Fails? → continue "Fix test failures: ..."           │
+│     └─ No tests? → continue "Write tests for: ..."          │
+│                                                             │
+│  3. Check PR status (gh pr view)                            │
+│     └─ No PR? → continue "Create PR: gh pr create ..."      │
+│     └─ PR exists, CI failing? → continue "Fix CI: ..."      │
+│                                                             │
+│  4. All good? → allow (agent actually stops)                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Old Control-Server Reference
+
+The old implementation had (from git show 110a650a):
+
+```haskell
+data StopHookGraph mode = StopHookGraph
+  { globalLoopCheck  -- max iterations guard
+  , checkBuild       -- Cabal build
+  , routeBuild       -- handle build result
+  , buildLoopCheck   -- per-stage loop guard
+  , checkTest        -- Cabal test
+  , routeTest        -- handle test result
+  , testLoopCheck    -- per-stage loop guard
+  , checkDocs        -- doc updates
+  , checkPR          -- PR creation/status
+  }
+```
+
+Templates:
+- `fix-build-errors.jinja`
+- `fix-test-failures.jinja`
+- `update-docs.jinja`
+- `create-pr.jinja`
+
+## New Implementation
+
+Instead of graph DSL, direct effect composition:
+
+```haskell
+handleSubagentStop :: StopInput -> Eff effs StopOutput
+handleSubagentStop input = do
+  -- Loop guard
+  attempts <- getAttempts (agentId input)
+  when (attempts > maxAttempts) $
+    pure $ allow "Max attempts reached, stopping"
+
+  -- Build check
+  buildResult <- cabalBuild (projectDir input)
+  case buildResult of
+    BuildFailed errors -> do
+      incrementAttempts (agentId input)
+      pure $ continue $ renderTemplate "fix-build-errors" errors
+
+    BuildSuccess -> do
+      -- Test check
+      testResult <- cabalTest (projectDir input)
+      case testResult of
+        TestsFailed failures -> do
+          incrementAttempts (agentId input)
+          pure $ continue $ renderTemplate "fix-test-failures" failures
+
+        NoTests -> do
+          changedFiles <- gitDiff (projectDir input)
+          pure $ continue $ renderTemplate "write-tests" changedFiles
+
+        TestsPassed -> do
+          -- PR check
+          prStatus <- ghPrStatus (branch input)
+          case prStatus of
+            NoPR -> do
+              summary <- summarizeChanges input
+              pure $ continue $ renderTemplate "create-pr" summary
+
+            PRExists pr | ciFailing pr -> do
+              pure $ continue $ renderTemplate "fix-ci" (ciErrors pr)
+
+            PRExists pr | ciPassing pr ->
+              pure $ allow "PR ready for review"
+```
+
+## Effects Needed
+
+### Cabal Effect
+```haskell
+data Cabal r where
+  CabalBuild :: FilePath -> Cabal BuildResult
+  CabalTest :: FilePath -> Cabal TestResult
+
+data BuildResult
+  = BuildSuccess
+  | BuildFailed [GHCError]
+
+data TestResult
+  = TestsPassed { passCount :: Int }
+  | TestsFailed { failures :: [TestFailure] }
+  | NoTests
+```
+
+### Git Effect
+```haskell
+data Git r where
+  GitDiff :: FilePath -> Git [FilePath]
+  GitStatus :: FilePath -> Git GitStatus
+  GitBranch :: FilePath -> Git Text
+```
+
+### GitHub Effect
+```haskell
+data GitHub r where
+  GhPrStatus :: Text -> GitHub PRStatus
+  GhPrCreate :: PRCreateInput -> GitHub PRCreateResult
+
+data PRStatus
+  = NoPR
+  | PRExists { prNumber :: Int, ciStatus :: CIStatus }
+
+data CIStatus = CIPending | CIPassing | CIFailing [CIError]
+```
+
+### State Effect (for loop guards)
+```haskell
+data WorkflowState r where
+  GetAttempts :: AgentId -> WorkflowState Int
+  IncrementAttempts :: AgentId -> WorkflowState ()
+  ResetAttempts :: AgentId -> WorkflowState ()
+```
+
+## Host Functions (Rust)
+
+Each effect needs a host function:
+
+```rust
+// Cabal
+fn host_cabal_build(path: &str) -> Result<BuildResult>
+fn host_cabal_test(path: &str) -> Result<TestResult>
+
+// Git
+fn host_git_diff(path: &str) -> Result<Vec<String>>
+fn host_git_status(path: &str) -> Result<GitStatus>
+fn host_git_branch(path: &str) -> Result<String>
+
+// GitHub
+fn host_gh_pr_status(branch: &str) -> Result<PRStatus>
+fn host_gh_pr_create(input: &PRCreateInput) -> Result<PRCreateResult>
+
+// State (session storage)
+fn host_get_attempts(agent_id: &str) -> Result<i32>
+fn host_increment_attempts(agent_id: &str) -> Result<()>
+```
+
+## Templates
+
+Port from old control-server or write fresh:
+
+### fix-build-errors.jinja
+```jinja
+The build is failing with {{ errors | length }} error(s):
+
+{% for error in errors %}
+## {{ error.file }}:{{ error.line }}
+{{ error.message }}
+
+{% endfor %}
+
+Please fix these build errors before continuing.
+```
+
+### fix-test-failures.jinja
+```jinja
+{{ failures | length }} test(s) failed:
+
+{% for failure in failures %}
+- {{ failure.name }}: {{ failure.message }}
+{% endfor %}
+
+Please fix these test failures.
+```
+
+### write-tests.jinja
+```jinja
+You've modified the following files but haven't added tests:
+
+{% for file in changed_files %}
+- {{ file }}
+{% endfor %}
+
+Please write tests covering the new functionality.
+```
+
+### create-pr.jinja
+```jinja
+All tests pass. Please create a pull request:
+
+```bash
+gh pr create --title "{{ suggested_title }}" --body "{{ suggested_body }}"
+```
+
+Summary of changes:
+{{ change_summary }}
+```
+
+## Implementation Phases
+
+### Phase 1: Effect Types
+- [ ] Define Cabal effect in wasm-guest
+- [ ] Define Git effect (extend existing or new)
+- [ ] Define GitHub effect (extend existing or new)
+- [ ] Define WorkflowState effect
+
+### Phase 2: Host Functions
+- [ ] Implement cabal build/test in Rust (shell out)
+- [ ] Implement git diff/status/branch in Rust
+- [ ] Implement gh pr status/create in Rust
+- [ ] Implement session state storage in Rust
+
+### Phase 3: Stop Hook Handler
+- [ ] Wire up SubagentStop in hook handler
+- [ ] Implement workflow logic as effect composition
+- [ ] Add loop guards (max attempts per stage)
+- [ ] Return continue/allow decisions
+
+### Phase 4: Templates
+- [ ] Port or rewrite jinja templates
+- [ ] Template rendering in Haskell (ginger)
+- [ ] Context building from effect results
+
+### Phase 5: Testing
+- [ ] Mock interpreters for unit tests
+- [ ] Integration test with real agent
+
+## Configuration
+
+The workflow should be configurable per-role:
+
+```haskell
+data WorkflowConfig = WorkflowConfig
+  { maxGlobalAttempts :: Int      -- default: 10
+  , maxBuildAttempts :: Int       -- default: 3
+  , maxTestAttempts :: Int        -- default: 3
+  , requireTests :: Bool          -- default: True
+  , requirePR :: Bool             -- default: True
+  , skipDocs :: Bool              -- default: False
+  }
+```
+
+## Files to Create
+
+```
+haskell/wasm-guest/src/ExoMonad/Guest/Effects/Cabal.hs
+haskell/wasm-guest/src/ExoMonad/Guest/Effects/Git.hs      (or extend existing)
+haskell/wasm-guest/src/ExoMonad/Guest/Effects/GitHub.hs   (or extend existing)
+haskell/wasm-guest/src/ExoMonad/Guest/Effects/WorkflowState.hs
+haskell/wasm-guest/src/ExoMonad/Guest/Hooks/StopWorkflow.hs
+haskell/wasm-guest/templates/fix-build-errors.jinja
+haskell/wasm-guest/templates/fix-test-failures.jinja
+haskell/wasm-guest/templates/write-tests.jinja
+haskell/wasm-guest/templates/create-pr.jinja
+rust/exomonad-runtime/src/services/cabal.rs
+rust/exomonad-runtime/src/services/workflow_state.rs
+```
+
+## Relationship to Other Work
+
+- Uses same effect infrastructure as MCP tools
+- Could share Git/GitHub effects with other tools
+- Templates use same ginger system as LLM prompts
+- State storage shares infrastructure with refactor-preview plans
