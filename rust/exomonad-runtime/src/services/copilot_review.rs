@@ -280,9 +280,9 @@ pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<Copi
 
             // Emit copilot:reviewed event
             if let Ok(branch) = git::get_current_branch() {
-                if let Some(agent_id) = branch.strip_prefix("gh-").and_then(|s| s.split('/').next()) {
+                if let Some(agent_id) = git::extract_agent_id(&branch) {
                     let event = exomonad_ui_protocol::AgentEvent::CopilotReviewed {
-                        agent_id: format!("gh-{}", agent_id),
+                        agent_id,
                         comment_count: comments.len() as u32,
                         timestamp: zellij_events::now_iso8601(),
                     };
@@ -304,9 +304,9 @@ pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<Copi
 
             // Emit copilot:reviewed event with 0 comments
             if let Ok(branch) = git::get_current_branch() {
-                if let Some(agent_id) = branch.strip_prefix("gh-").and_then(|s| s.split('/').next()) {
+                if let Some(agent_id) = git::extract_agent_id(&branch) {
                     let event = exomonad_ui_protocol::AgentEvent::CopilotReviewed {
-                        agent_id: format!("gh-{}", agent_id),
+                        agent_id,
                         comment_count: 0,
                         timestamp: zellij_events::now_iso8601(),
                     };

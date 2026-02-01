@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use zellij_tile::prelude::*;
 
 mod protocol;
@@ -15,8 +15,8 @@ struct ExoMonadPlugin {
     selected_index: usize,
     // Used for navigation within a component (e.g. Multiselect options)
     sub_index: usize,
-    // Agent events for sidebar display
-    events: Vec<AgentEvent>,
+    // Agent events for sidebar display (ring buffer with max 100 events)
+    events: VecDeque<AgentEvent>,
 }
 
 register_plugin!(ExoMonadPlugin);
@@ -26,7 +26,7 @@ impl ZellijPlugin for ExoMonadPlugin {
         subscribe(&[EventType::CustomMessage, EventType::Key]);
         self.status_state = "IDLE".to_string();
         self.status_message = "Ready.".to_string();
-        self.events = Vec::new();
+        self.events = VecDeque::new();
     }
 
     fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
@@ -35,10 +35,10 @@ impl ZellijPlugin for ExoMonadPlugin {
             if let Some(payload) = pipe_message.payload {
                 match serde_json::from_str::<AgentEvent>(&payload) {
                     Ok(agent_event) => {
-                        self.events.push(agent_event);
+                        self.events.push_back(agent_event);
                         // Keep only last 100 events
                         if self.events.len() > 100 {
-                            self.events.remove(0);
+                            self.events.pop_front();
                         }
                         return true; // Request re-render
                     }

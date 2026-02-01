@@ -172,9 +172,9 @@ fn create_pr(input: &FilePRInput) -> Result<FilePROutput> {
 
     // Emit pr:filed event
     // Extract agent_id from branch name (format: gh-123/slug)
-    if let Some(agent_id) = head_branch.strip_prefix("gh-").and_then(|s| s.split('/').next()) {
+    if let Some(agent_id) = git::extract_agent_id(&head_branch) {
         let event = exomonad_ui_protocol::AgentEvent::PrFiled {
-            agent_id: format!("gh-{}", agent_id),
+            agent_id,
             pr_number,
             timestamp: zellij_events::now_iso8601(),
         };

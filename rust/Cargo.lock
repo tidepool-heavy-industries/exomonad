@@ -1053,6 +1053,7 @@ dependencies = [
  "clap",
  "exomonad-runtime",
  "exomonad-shared",
+ "exomonad-ui-protocol",
  "predicates",
  "serde",
  "serde_json",
