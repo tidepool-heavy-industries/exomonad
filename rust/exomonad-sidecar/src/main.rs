@@ -89,7 +89,7 @@ enum Commands {
 async fn handle_hook(
     plugin: &PluginManager,
     event_type: HookEventType,
-    _runtime: Runtime,
+    runtime: Runtime,
 ) -> Result<()> {
     use std::io::Read;
 
@@ -101,17 +101,22 @@ async fn handle_hook(
 
     debug!(
         event = ?event_type,
+        runtime = ?runtime,
         payload_len = stdin_content.len(),
         "Received hook event"
     );
 
-    // Parse the hook input
-    let hook_input: HookInput =
+    // Parse the hook input and inject runtime
+    let mut hook_input: HookInput =
         serde_json::from_str(&stdin_content).context("Failed to parse hook input")?;
+    hook_input.runtime = Some(runtime);
 
     // Call WASM plugin
+    // hookHandler dispatches based on hiHookEventName for stop hooks
     let output: HookOutput = match event_type {
-        HookEventType::PreToolUse => plugin
+        HookEventType::PreToolUse
+        | HookEventType::SessionEnd
+        | HookEventType::SubagentStop => plugin
             .call("handle_pre_tool_use", &hook_input)
             .await
             .context("WASM handle_pre_tool_use failed")?,
