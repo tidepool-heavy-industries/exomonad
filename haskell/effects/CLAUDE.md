@@ -18,7 +18,6 @@ This follows the **interpreter design pattern**: abstract syntax (effect types) 
 | Run cabal builds/tests | `cabal-interpreter/CLAUDE.md` |
 | Add gamification (Habitica) | `habitica-interpreter/CLAUDE.md` |
 | Create Zellij tabs (parallel agents) | `zellij-interpreter/CLAUDE.md` |
-| Spawn/exec in containers | `control-server/Effects/DockerCtl.hs` |
 | Understand the interpreter pattern | This file (you're here) |
 
 ## Documentation Tree
@@ -68,7 +67,6 @@ Most effect types live in `dsl/core/src/ExoMonad/Effect/Types.hs` or `Effects/*.
 | Filesystem | dsl/core | filesystem-interpreter | File system operations |
 | Gemini | dsl/core | gemini-interpreter | Gemini API |
 | Zellij | dsl/core | zellij-interpreter | Zellij multiplexer |
-| DockerSpawner | dsl/core | control-server | Subprocess to docker-ctl CLI |
 
 ## Adding a New Effect Interpreter
 
@@ -81,7 +79,7 @@ Most effect types live in `dsl/core/src/ExoMonad/Effect/Types.hs` or `Effects/*.
    ```
 3. Implement interpreter (see existing for patterns)
 4. Add to `cabal.project`: `haskell/effects/{name}-interpreter`
-5. Wire into `control-server/` effect composition
+5. Wire into `wasm-guest/` if needed for MCP tools (via host functions in Rust runtime)
 
 ## Implementation Patterns
 
@@ -92,6 +90,7 @@ Most effect types live in `dsl/core/src/ExoMonad/Effect/Types.hs` or `Effects/*.
 ## Claude Code Integration
 
 For Claude Code integration, see `rust/CLAUDE.md`. The Rust workspace provides:
-- **exomonad hook** - Forwards hooks to Haskell via HTTP over Unix socket
+- **exomonad-sidecar** - MCP server + hook handler that hosts Haskell WASM plugin
+- **exomonad-runtime** - WASM plugin loading + host functions for effect execution
 
-MCP tools are served directly by control-server via HTTP MCP transport. This replaces the removed `session-interpreter` which was used for headless orchestration.
+All MCP tools and hook logic live in the Haskell WASM plugin (`wasm-guest/`). Rust executes effects via host functions (git, GitHub API, filesystem, Zellij).

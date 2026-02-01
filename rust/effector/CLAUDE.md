@@ -26,4 +26,4 @@ Stateless IO executor that runs in agent containers and returns structured JSON.
 
 ## Integration
 
-Used by the Haskell control-server via SSH or HTTP effects to execute commands in isolated agent environments.
+Stateless IO executor used by agents and consuming repos to run builds, tests, and git operations with structured JSON output.

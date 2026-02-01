@@ -7,7 +7,9 @@ Unified sidecar binary: Rust host with Haskell WASM plugin.
 **All logic is in Haskell WASM. Rust handles I/O only.**
 
 ```
-Claude Code → exomonad-sidecar --wasm plugin.wasm [hook|mcp|mcp-stdio]
+Claude Code → exomonad-sidecar [hook|mcp|mcp-stdio]
+                     ↓
+              Load WASM via config (role field)
                      ↓
               WASM plugin (Haskell)
                      ↓ yields effects
@@ -188,7 +190,9 @@ pkill exomonad-sidecar
 ```
 Claude Code hook JSON (stdin)
          ↓
-    exomonad-sidecar --wasm plugin.wasm hook pre-tool-use
+    exomonad-sidecar hook pre-tool-use
+         ↓
+    Load WASM via config (role field)
          ↓
     Parse HookInput
          ↓
@@ -209,9 +213,11 @@ Claude Code hook JSON (stdin)
 ```
 Claude Code MCP request
          ↓
-    exomonad-sidecar --wasm plugin.wasm mcp
+    exomonad-sidecar mcp (or mcp-stdio)
          ↓
-    HTTP server receives POST /mcp/call
+    Load WASM via config (role field)
+         ↓
+    HTTP server receives POST /mcp/call (or stdio)
          ↓
     Call WASM handle_mcp_call
          ↓
@@ -223,7 +229,7 @@ Claude Code MCP request
          ↓
     Haskell returns MCPCallOutput
          ↓
-    HTTP response with result
+    HTTP response with result (or stdio output)
 ```
 
 ## Related Documentation
