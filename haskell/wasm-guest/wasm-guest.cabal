@@ -12,7 +12,9 @@ common shared
     default-extensions:
         AllowAmbiguousTypes
         DataKinds
+        DeriveAnyClass
         DeriveGeneric
+        DerivingStrategies
         FlexibleContexts
         FlexibleInstances
         ForeignFunctionInterface
@@ -50,6 +52,7 @@ library wasm-guest-internal
         -- Effects (for internal composition)
         ExoMonad.Guest.Effects.AgentControl
         ExoMonad.Guest.Effects.FileSystem
+        ExoMonad.Guest.Effects.StopHook
         ExoMonad.Guest.HostCall
         -- Types
         ExoMonad.Guest.Types

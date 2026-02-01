@@ -7,7 +7,10 @@ module ExoMonad.Guest.Types
     HookInput (..),
     HookOutput (..),
     HookSpecificOutput (..),
+    StopHookOutput (..),
     allowResponse,
+    allowStopResponse,
+    blockStopResponse,
   )
 where
 
@@ -111,4 +114,42 @@ allowResponse reason =
               permissionDecisionReason = reason,
               updatedInput = Nothing
             }
+    }
+
+-- ============================================================================
+-- Stop Hook Types (SessionEnd, SubagentStop)
+-- ============================================================================
+
+-- | Output for Stop hooks (SessionEnd, SubagentStop).
+-- Uses the simplified {"decision": "block", "reason": "..."} format.
+data StopHookOutput = StopHookOutput
+  { decision :: Text,
+    reason :: Maybe Text
+  }
+  deriving (Show, Generic)
+
+instance ToJSON StopHookOutput where
+  toJSON s =
+    case reason s of
+      Nothing -> object ["decision" .= decision s]
+      Just r ->
+        object
+          [ "decision" .= decision s,
+            "reason" .= r
+          ]
+
+-- | Create an "allow" response for Stop hooks.
+allowStopResponse :: StopHookOutput
+allowStopResponse =
+  StopHookOutput
+    { decision = "allow",
+      reason = Nothing
+    }
+
+-- | Create a "block" response for Stop hooks with additional prompting.
+blockStopResponse :: Text -> StopHookOutput
+blockStopResponse msg =
+  StopHookOutput
+    { decision = "block",
+      reason = Just msg
     }

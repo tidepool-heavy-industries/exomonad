@@ -36,11 +36,14 @@ impl PluginManager {
 
         let mut functions = vec![];
 
-        // Git functions (4 functions)
+        // Git functions (7 functions)
         functions.push(git::git_get_branch_host_fn(services.git.clone()));
         functions.push(git::git_get_worktree_host_fn(services.git.clone()));
         functions.push(git::git_get_dirty_files_host_fn(services.git.clone()));
         functions.push(git::git_get_recent_commits_host_fn(services.git.clone()));
+        functions.push(git::git_has_unpushed_commits_host_fn(services.git.clone()));
+        functions.push(git::git_get_remote_url_host_fn(services.git.clone()));
+        functions.push(git::git_get_repo_info_host_fn(services.git.clone()));
 
         // NOTE: Docker functions are NOT registered as WASM imports.
         // They are Rust implementation details used internally by Git/GitHub services.
@@ -52,7 +55,7 @@ impl PluginManager {
         functions.push(log::log_error_host_fn(services_arc.clone()));
         functions.push(log::emit_event_host_fn(services_arc));
 
-        // GitHub functions (4 functions) - always register, they check GITHUB_TOKEN at runtime
+        // GitHub functions (6 functions) - always register, they check GITHUB_TOKEN at runtime
         functions.extend(github::register_host_functions());
 
         // Agent control functions (5 functions) - high-level agent lifecycle
