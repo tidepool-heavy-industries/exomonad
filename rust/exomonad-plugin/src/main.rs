@@ -268,17 +268,21 @@ impl ZellijPlugin for ExoMonadPlugin {
                         let val = state.get_number(id).unwrap_or(*min);
                         println!("{}{} [{:.1}] ({:.1}-{:.1})", prefix, label, val, min, max);
                     }
-                    Component::Textbox { label, id, .. } => {
+                    Component::Textbox { label, id, placeholder, .. } => {
                         let txt = state.get_text(id).unwrap_or("");
-                        // Show cursor if selected
                         let display_txt = if is_selected {
                             format!("{}|", txt)
+                        } else if txt.is_empty() {
+                            if let Some(p) = placeholder {
+                                format!("({})", p)
+                            } else {
+                                "".to_string()
+                            }
                         } else {
                             txt.to_string()
                         };
                         println!(
-                            "{}{} [{}]
-",
+                            "{}{} [{}]",
                             prefix, label, display_txt
                         );
                     }
@@ -299,7 +303,9 @@ impl ZellijPlugin for ExoMonadPlugin {
                             }
                         }
                     }
-                    _ => println!("{}{:?} (Not implemented)", prefix, comp),
+                    Component::Group { label, .. } => {
+                        println!("\n{}--- {} ---", prefix, label);
+                    }
                 }
             }
             println!("-------------------");
