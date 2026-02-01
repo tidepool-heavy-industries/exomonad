@@ -105,6 +105,10 @@ impl ServiceServer {
             ServiceRequest::OtelSpan { .. } | ServiceRequest::OtelMetric { .. } => {
                 self.otel.call(req).await
             }
+            ServiceRequest::UserInteraction { .. } => Err(ServiceError::Api {
+                code: 400,
+                message: "UserInteraction not supported by ServiceServer".to_string(),
+            }),
         };
 
         match result {

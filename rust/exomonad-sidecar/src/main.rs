@@ -15,13 +15,13 @@ use exomonad_runtime::{PluginManager, Services};
 use exomonad_shared::protocol::{HookEventType, HookInput, HookOutput, Runtime, ServiceRequest};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{debug, error, info};
-use tokio::net::UnixStream;
 use tokio::io::AsyncWriteExt;
+use tokio::net::UnixStream;
+use tracing::{debug, error, info};
 
-// ============================================================================ 
+// ============================================================================
 // CLI Types
-// ============================================================================ 
+// ============================================================================
 
 #[derive(Parser)]
 #[command(name = "exomonad-sidecar")]
@@ -82,9 +82,9 @@ enum Commands {
     },
 }
 
-// ============================================================================ 
+// ============================================================================
 // Hook Handler
-// ============================================================================ 
+// ============================================================================
 
 async fn handle_hook(
     plugin: &PluginManager,
@@ -134,9 +134,9 @@ async fn handle_hook(
     Ok(())
 }
 
-// ============================================================================ 
+// ============================================================================
 // Main
-// ============================================================================ 
+// ============================================================================
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -261,9 +261,10 @@ async fn main() -> Result<()> {
 
             debug!(socket = %socket_path, "Connecting to control socket");
 
-            let mut stream = UnixStream::connect(&socket_path)
-                .await
-                .context(format!("Failed to connect to control socket at {}", socket_path))?;
+            let mut stream = UnixStream::connect(&socket_path).await.context(format!(
+                "Failed to connect to control socket at {}",
+                socket_path
+            ))?;
 
             let parsed_payload = if let Some(p) = payload {
                 Some(serde_json::from_str(&p).context("Invalid JSON payload")?)
@@ -281,8 +282,11 @@ async fn main() -> Result<()> {
             let mut json = serde_json::to_vec(&request).context("Serialization failed")?;
             json.push(b'\n');
 
-            stream.write_all(&json).await.context("Failed to write to socket")?;
-            
+            stream
+                .write_all(&json)
+                .await
+                .context("Failed to write to socket")?;
+
             // We don't necessarily wait for response here, it's a push notification
             info!("Sent reply to control socket");
         }
