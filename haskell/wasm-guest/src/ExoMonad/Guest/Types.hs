@@ -9,7 +9,6 @@ module ExoMonad.Guest.Types
     HookSpecificOutput (..),
     StopHookOutput (..),
     allowResponse,
-    blockResponse,
     allowStopResponse,
     blockStopResponse,
   )
@@ -115,19 +114,6 @@ allowResponse reason =
               permissionDecisionReason = reason,
               updatedInput = Nothing
             }
-    }
-
--- | Deprecated: Use 'blockStopResponse' for Stop hooks (SessionEnd, SubagentStop).
--- This function uses the old PreToolUse-style format and is kept for compatibility.
-{-# DEPRECATED blockResponse "Use blockStopResponse for Stop hooks instead" #-}
-blockResponse :: Text -> HookOutput
-blockResponse reason =
-  HookOutput
-    { continue_ = False,
-      stopReason = Just reason,
-      suppressOutput = Nothing,
-      systemMessage = Nothing,
-      hookSpecificOutput = Nothing
     }
 
 -- ============================================================================
