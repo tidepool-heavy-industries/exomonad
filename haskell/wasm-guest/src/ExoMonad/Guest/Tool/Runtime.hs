@@ -20,7 +20,7 @@ import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), toMCPFormat)
 import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
-import ExoMonad.Guest.Types (HookInput, MCPCallInput (..), allowResponse, hiHookEventName)
+import ExoMonad.Guest.Types (HookInput (..), MCPCallInput (..), allowResponse)
 import Extism.PDK (input, output)
 import Foreign.C.Types (CInt (..))
 
@@ -46,6 +46,9 @@ listHandlerRecord = do
   pure 0
 
 -- | Hook handler - handles PreToolUse, SessionEnd, and SubagentStop hooks.
+--
+-- For stop hooks (SessionEnd, SubagentStop), runs the stop hook checks
+-- that verify uncommitted changes, unpushed commits, PR status, etc.
 hookHandler :: IO CInt
 hookHandler = do
   inp <- input @ByteString

@@ -94,6 +94,10 @@ pub struct HookInput {
     /// The hook event name (PreToolUse, PostToolUse, etc.).
     pub hook_event_name: String,
 
+    /// Runtime environment (claude, gemini). Injected by Rust before WASM call.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<Runtime>,
+
     // ----- Tool-related fields (PreToolUse, PostToolUse, PermissionRequest) -----
     /// Tool name for tool-related hooks.
     #[serde(skip_serializing_if = "Option::is_none")]
