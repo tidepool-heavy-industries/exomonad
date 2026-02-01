@@ -88,6 +88,49 @@ impl GitService {
         }
         Ok(commits)
     }
+
+    pub async fn has_unpushed_commits(&self, container: &str, dir: &str) -> Result<bool> {
+        tracing::info!(
+            "[GitService] Checking for unpushed commits in container={} dir={}",
+            container,
+            dir
+        );
+
+        let output = self
+            .exec_git(container, dir, &["rev-list", "--count", "@{upstream}..HEAD"])
+            .await;
+
+        match output {
+            Ok(count_str) => {
+                let count = count_str.trim().parse::<u32>().unwrap_or(0);
+                tracing::info!("[GitService] Unpushed commits count: {}", count);
+                Ok(count > 0)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "[GitService] Failed to check unpushed commits: {}. Assuming no upstream.",
+                    e
+                );
+                Ok(false)
+            }
+        }
+    }
+
+    pub async fn get_remote_url(&self, container: &str, dir: &str) -> Result<String> {
+        tracing::info!(
+            "[GitService] Getting remote URL in container={} dir={}",
+            container,
+            dir
+        );
+
+        let output = self
+            .exec_git(container, dir, &["remote", "get-url", "origin"])
+            .await?;
+
+        let url = output.trim().to_string();
+        tracing::info!("[GitService] Remote URL: {}", url);
+        Ok(url)
+    }
 }
 
 // Host Function Types
@@ -290,6 +333,74 @@ pub fn git_get_recent_commits_host_fn(git_service: Arc<GitService>) -> Function 
                 return Err(Error::msg(
                     "git_get_recent_commits: expected output argument",
                 ));
+            }
+            outputs[0] = set_output(plugin, &output)?;
+            Ok(())
+        },
+    )
+    .with_namespace("env")
+}
+
+pub fn git_has_unpushed_commits_host_fn(git_service: Arc<GitService>) -> Function {
+    Function::new(
+        "git_has_unpushed_commits",
+        [ValType::I64],
+        [ValType::I64],
+        UserData::new(git_service),
+        |plugin: &mut CurrentPlugin,
+         inputs: &[Val],
+         outputs: &mut [Val],
+         user_data: UserData<Arc<GitService>>|
+         -> Result<(), Error> {
+            if inputs.is_empty() {
+                return Err(Error::msg(
+                    "git_has_unpushed_commits: expected input argument",
+                ));
+            }
+            let input: GitHostInput = get_input(plugin, inputs[0].clone())?;
+
+            let git_arc = user_data.get()?;
+            let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+
+            let result = block_on(git.has_unpushed_commits(&input.container_id, &input.working_dir))?;
+            let output: GitHostOutput<bool> = result.into();
+
+            if outputs.is_empty() {
+                return Err(Error::msg(
+                    "git_has_unpushed_commits: expected output argument",
+                ));
+            }
+            outputs[0] = set_output(plugin, &output)?;
+            Ok(())
+        },
+    )
+    .with_namespace("env")
+}
+
+pub fn git_get_remote_url_host_fn(git_service: Arc<GitService>) -> Function {
+    Function::new(
+        "git_get_remote_url",
+        [ValType::I64],
+        [ValType::I64],
+        UserData::new(git_service),
+        |plugin: &mut CurrentPlugin,
+         inputs: &[Val],
+         outputs: &mut [Val],
+         user_data: UserData<Arc<GitService>>|
+         -> Result<(), Error> {
+            if inputs.is_empty() {
+                return Err(Error::msg("git_get_remote_url: expected input argument"));
+            }
+            let input: GitHostInput = get_input(plugin, inputs[0].clone())?;
+
+            let git_arc = user_data.get()?;
+            let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+
+            let result = block_on(git.get_remote_url(&input.container_id, &input.working_dir))?;
+            let output: GitHostOutput<String> = result.into();
+
+            if outputs.is_empty() {
+                return Err(Error::msg("git_get_remote_url: expected output argument"));
             }
             outputs[0] = set_output(plugin, &output)?;
             Ok(())

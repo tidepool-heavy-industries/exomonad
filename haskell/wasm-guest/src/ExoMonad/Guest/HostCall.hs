@@ -9,11 +9,15 @@ module ExoMonad.Guest.HostCall
     host_git_get_worktree,
     host_git_get_dirty_files,
     host_git_get_recent_commits,
+    host_git_has_unpushed_commits,
+    host_git_get_remote_url,
     -- GitHub
     host_github_list_issues,
     host_github_get_issue,
     host_github_create_pr,
     host_github_list_prs,
+    host_github_get_pr_for_branch,
+    host_github_get_pr_review_comments,
     -- Log
     host_log_info,
     host_log_error,
@@ -45,6 +49,10 @@ foreign import ccall "git_get_dirty_files" host_git_get_dirty_files :: Word64 ->
 
 foreign import ccall "git_get_recent_commits" host_git_get_recent_commits :: Word64 -> IO Word64
 
+foreign import ccall "git_has_unpushed_commits" host_git_has_unpushed_commits :: Word64 -> IO Word64
+
+foreign import ccall "git_get_remote_url" host_git_get_remote_url :: Word64 -> IO Word64
+
 -- GitHub host functions
 foreign import ccall "github_list_issues" host_github_list_issues :: Word64 -> IO Word64
 
@@ -53,6 +61,10 @@ foreign import ccall "github_get_issue" host_github_get_issue :: Word64 -> IO Wo
 foreign import ccall "github_create_pr" host_github_create_pr :: Word64 -> IO Word64
 
 foreign import ccall "github_list_prs" host_github_list_prs :: Word64 -> IO Word64
+
+foreign import ccall "github_get_pr_for_branch" host_github_get_pr_for_branch :: Word64 -> IO Word64
+
+foreign import ccall "github_get_pr_review_comments" host_github_get_pr_review_comments :: Word64 -> IO Word64
 
 -- Log host functions (void return - fire and forget)
 foreign import ccall "log_info" host_log_info :: Word64 -> IO ()

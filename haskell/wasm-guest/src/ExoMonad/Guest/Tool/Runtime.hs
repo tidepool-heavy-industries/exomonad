@@ -16,10 +16,11 @@ import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as BSL
 import Data.Proxy (Proxy (..))
 import Data.Text qualified as T
+import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), toMCPFormat)
 import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
-import ExoMonad.Guest.Types (HookInput, MCPCallInput (..), allowResponse)
+import ExoMonad.Guest.Types (HookInput, MCPCallInput (..), allowResponse, hiHookEventName)
 import Extism.PDK (input, output)
 import Foreign.C.Types (CInt (..))
 
@@ -44,8 +45,7 @@ listHandlerRecord = do
   output (BSL.toStrict $ Aeson.encode tools)
   pure 0
 
--- | Hook handler - handles PreToolUse hooks.
--- Currently allows all tool uses.
+-- | Hook handler - handles PreToolUse, SessionEnd, and SubagentStop hooks.
 hookHandler :: IO CInt
 hookHandler = do
   inp <- input @ByteString
@@ -54,9 +54,19 @@ hookHandler = do
       let errResp = Aeson.object ["error" Aeson..= ("Parse error: " ++ err)]
       output (BSL.toStrict $ Aeson.encode errResp)
       pure 1
-    Right (_hookInput :: HookInput) -> do
-      let resp = allowResponse Nothing
-      output (BSL.toStrict $ Aeson.encode resp)
+    Right hookInput -> do
+      case hiHookEventName hookInput of
+        "SessionEnd" -> handleStopHook
+        "SubagentStop" -> handleStopHook
+        _ -> do
+          let resp = allowResponse Nothing
+          output (BSL.toStrict $ Aeson.encode resp)
+          pure 0
+  where
+    handleStopHook = do
+      -- Stop hooks use a different JSON format: {"decision": "block", "reason": "..."}
+      result <- runStopHookChecks
+      output (BSL.toStrict $ Aeson.encode result)
       pure 0
 
 -- | Wrap a handler with exception handling.
