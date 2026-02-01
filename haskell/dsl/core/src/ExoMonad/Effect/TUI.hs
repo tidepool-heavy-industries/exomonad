@@ -62,14 +62,8 @@ module ExoMonad.Effect.TUI
   )
 where
 
-import Control.Applicative ((<|>))
 import Control.Monad.Freer (Eff, Member, send)
-import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.:?), (.=))
-import Data.Aeson qualified as A
-import Data.Aeson.KeyMap qualified as KM
-import Data.Text (Text)
-import Data.Text qualified as T
-import GHC.Generics (Generic)
+import Data.Aeson (FromJSON, ToJSON)
 
 -- ══════════════════════════════════════════════════════════════
 -- TUI EFFECT

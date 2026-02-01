@@ -121,6 +121,43 @@ wasm role="tl":
     cp dist-newstyle/build/wasm32-wasi/ghc-*/wasm-guest-*/x/wasm-guest-{{role}}/noopt/build/wasm-guest-{{role}}/wasm-guest-{{role}}.wasm ~/.exomonad/wasm/
     @echo ">>> Done: ~/.exomonad/wasm/wasm-guest-{{role}}.wasm"
 
+# Build both dev and TL WASM guests
+wasm-all:
+    @just wasm dev
+    @just wasm tl
+    @echo ">>> Installed to ~/.exomonad/wasm/:"
+    @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
+
+# Install everything: Rust binaries + WASM plugins (uses release build)
+install-all:
+    @echo ">>> [1/3] Building Rust binaries (release)..."
+    cd rust && cargo build --release -p exomonad-sidecar
+    @echo ">>> [2/3] Installing binaries to ~/.cargo/bin/..."
+    mkdir -p ~/.cargo/bin
+    cp rust/target/release/exomonad-sidecar ~/.cargo/bin/
+    @echo ">>> [3/3] Building and installing WASM plugins..."
+    @just wasm-all
+    @echo ">>> Done!"
+    @echo ""
+    @echo "Installed:"
+    @ls -lh ~/.cargo/bin/exomonad-sidecar
+    @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
+
+# Install everything (fast dev build)
+install-all-dev:
+    @echo ">>> [1/3] Building Rust binaries (debug)..."
+    cd rust && cargo build -p exomonad-sidecar
+    @echo ">>> [2/3] Installing binaries to ~/.cargo/bin/..."
+    mkdir -p ~/.cargo/bin
+    cp rust/target/debug/exomonad-sidecar ~/.cargo/bin/
+    @echo ">>> [3/3] Building and installing WASM plugins..."
+    @just wasm-all
+    @echo ">>> Done!"
+    @echo ""
+    @echo "Installed:"
+    @ls -lh ~/.cargo/bin/exomonad-sidecar
+    @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
+
 # Clean build artifacts
 clean:
     rm -rf {{metadata_dir}}

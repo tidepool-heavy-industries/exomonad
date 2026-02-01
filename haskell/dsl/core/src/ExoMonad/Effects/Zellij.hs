@@ -52,10 +52,6 @@ module ExoMonad.Effects.Zellij
 where
 
 import Control.Monad.Freer (Eff, Member, send)
-import Data.Aeson (FromJSON, ToJSON)
-import Data.String (IsString)
-import Data.Text (Text)
-import GHC.Generics (Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES

@@ -11,12 +11,15 @@ module ExoMonad.Guest.Tool.Runtime
 where
 
 import Control.Exception (SomeException, try)
+import Control.Monad (unless)
 import Data.Aeson qualified as Aeson
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as BSL
+import Data.Maybe (fromMaybe)
 import Data.Proxy (Proxy (..))
 import Data.Text qualified as T
 import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
+import ExoMonad.Guest.HostCall (LogLevel (..), LogPayload (..), callHostVoid, host_log_error, host_log_info)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), toMCPFormat)
 import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
@@ -30,11 +33,18 @@ mcpHandlerRecord handlers = do
   inp <- input @ByteString
   case Aeson.eitherDecodeStrict inp of
     Left err -> do
+      callHostVoid host_log_error (LogPayload Error ("MCP parse error: " <> T.pack err) Nothing)
       let resp = MCPCallOutput False Nothing (Just $ "Parse error: " <> T.pack err)
       output (BSL.toStrict $ Aeson.encode resp)
       pure 1
     Right mcpCall -> do
+      callHostVoid host_log_info (LogPayload Info ("Dispatching tool: " <> toolName mcpCall) Nothing)
+
       resp <- dispatchRecord handlers (toolName mcpCall) (toolArgs mcpCall)
+
+      unless (success resp) $
+        callHostVoid host_log_error (LogPayload Error ("Tool failed: " <> fromMaybe "No error message" (mcpError resp)) Nothing)
+
       output (BSL.toStrict $ Aeson.encode resp)
       if success resp then pure 0 else pure 1
 
@@ -79,6 +89,11 @@ wrapHandler action = do
   case res of
     Right code -> pure code
     Left err -> do
-      let errJson = Aeson.encode $ Aeson.object ["error" Aeson..= show err]
-      output (BSL.toStrict errJson)
+      -- Return proper MCPCallOutput format
+      let resp = MCPCallOutput
+            { success = False
+            , result = Nothing
+            , mcpError = Just $ T.pack ("Exception in WASM handler: " <> show err)
+            }
+      output (BSL.toStrict $ Aeson.encode resp)
       pure 1

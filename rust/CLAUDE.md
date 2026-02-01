@@ -34,23 +34,26 @@ Claude Code (hook or MCP call)
 
 ### Deployment
 
+**Local Zellij-based orchestration:**
+
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│ zellij container (human attaches here via docker attach)        │
-│  • Minimal: Zellij + Docker CLI                                 │
-│  • Panes: docker attach tl, docker attach pm                    │
-└─────────────────────────────────────────────────────────────────┘
-              │ docker attach
-              ▼
-┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
-│ tl (claude-agent)│  │ pm (claude-agent)│  │ subagents...     │
-│ ROLE=tl          │  │ ROLE=pm          │  │ (dynamic)        │
-│ Claude Code CLI  │  │ Claude Code CLI  │  │                  │
-│ exomonad-sidecar │  │ exomonad-sidecar │  │ exomonad-sidecar │
-└──────────────────┘  └──────────────────┘  └──────────────────┘
+Human in Zellij session
+    └── Claude Code (main tab, role=tl)
+            ├── MCP server: exomonad-sidecar mcp-stdio
+            ├── WASM: ~/.exomonad/wasm/wasm-guest-tl.wasm
+            └── spawn_agents creates:
+                ├── Tab gh-433 (worktree, role=dev, auto-starts Claude)
+                ├── Tab gh-456 (worktree, role=dev, auto-starts Claude)
+                └── ... (one tab per spawned agent)
 ```
 
-Each agent runs its own `exomonad-sidecar` with WASM plugin. No central control-server.
+Each agent:
+- Runs in isolated git worktree (`worktrees/gh-{issue}-{title}/`)
+- Has own `.exomonad/config.toml` (role="dev")
+- Has own `.mcp.json` (no --wasm, config-based resolution)
+- Gets full issue context in `INITIAL_CONTEXT.md`
+- Runs in Zellij tab with native UI (tab-bar, status-bar)
+- Auto-closes when Claude exits
 
 ## Documentation Tree
 
@@ -66,12 +69,6 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 │   • Services: Git, GitHub, AgentControl, FileSystem
 │   • Host functions: git_*, github_*, agent_*, fs_*
 │
-├── docker-ctl/CLAUDE.md  ← Container lifecycle management
-│   • spawn - Create new agent containers
-│   • exec {id} - Execute commands in containers
-│   • status {id} - Container status
-│   • stop {id} - Stop containers
-│
 ├── effector/CLAUDE.md  ← Stateless IO executor
 │   • Cabal/Git/GH operations
 │   • Returns structured JSON
@@ -80,17 +77,21 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 │   • protocol.rs: HookInput, HookOutput, MCPCallInput, MCPCallOutput
 │   • commands/hook.rs: handle_hook() implementation
 │
-├── agent-status/           ← TUI Dashboard
-│   • Renders Status, Logs, Controls
-│
-├── exomonad-services/      ← External Service Clients (Library)
+├── exomonad-services/CLAUDE.md  ← External service clients (Library)
 │   • Anthropic, GitHub, Ollama, OTLP
+│   • ExternalService trait implementations
 │
-├── tui-popup/CLAUDE.md  ← Floating pane popup
-│   • Renders popup UI to /dev/tty
+├── exomonad-ui-protocol/CLAUDE.md  ← Popup UI protocol types
+│   • PopupDefinition, Component, VisibilityRule
+│   • Shared between Haskell WASM and Zellij plugin
 │
-└── tui-spawner/CLAUDE.md  ← Cross-container popup spawner
-    • Creates FIFO, spawns floating Zellij pane
+├── exomonad-plugin/CLAUDE.md  ← Zellij WASM plugin
+│   • Status display and popup UI rendering
+│   • Built separately (wasm32-wasi target)
+│
+└── zellij-gen/CLAUDE.md  ← KDL layout generator
+    • Generates Zellij layouts with baked-in commands
+    • Solves environment variable propagation
 ```
 
 ## Workspace Members
@@ -98,14 +99,14 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 | Crate | Type | Purpose |
 |-------|------|---------|
 | [exomonad-sidecar](exomonad-sidecar/CLAUDE.md) | Binary | MCP + Hook handler via WASM |
-| [exomonad-runtime](exomonad-runtime/) | Library | WASM plugin loading + host functions |
-| [docker-ctl](docker-ctl/CLAUDE.md) | Binary | Container lifecycle + remote exec |
+| [exomonad-runtime](exomonad-runtime/CLAUDE.md) | Library | WASM plugin loading + host functions |
 | [effector](effector/CLAUDE.md) | Binary | Stateless IO executor |
 | [exomonad-shared](exomonad-shared/CLAUDE.md) | Library | Shared types, protocols |
-| [agent-status](agent-status/) | Binary | TUI Dashboard |
-| [exomonad-services](exomonad-services/) | Library | External service clients |
-| [tui-popup](tui-popup/CLAUDE.md) | Binary | Floating pane UI renderer |
-| [tui-spawner](tui-spawner/CLAUDE.md) | Binary | FIFO-based popup spawning |
+| [exomonad-services](exomonad-services/CLAUDE.md) | Library | External service clients |
+| [exomonad-ui-protocol](exomonad-ui-protocol/CLAUDE.md) | Library | Popup UI protocol types |
+| [zellij-gen](zellij-gen/CLAUDE.md) | Binary | KDL layout generator |
+
+**Note:** [exomonad-plugin](exomonad-plugin/CLAUDE.md) is built separately (wasm32-wasi target for Zellij) and not a workspace member.
 
 ## Quick Reference
 
@@ -131,14 +132,14 @@ exomonad-sidecar mcp --port 7432
 echo '{"hook_event_name":"PreToolUse",...}' | exomonad-sidecar hook pre-tool-use
 ```
 
+**Note:** WASM plugin path is auto-resolved from `.exomonad/config.toml`'s `role` field (defaults to `dev`).
+
 ### Environment Variables
 | Variable | Used By | Purpose |
 |----------|---------|---------|
-| `EXOMONAD_WASM_PATH` | exomonad-sidecar | Path to WASM plugin file (required) |
-| `EXOMONAD_PROJECT_DIR` | exomonad-sidecar | Project directory for MCP operations |
-| `EXOMONAD_ROLE` | exomonad-sidecar | Agent role (dev, tl, pm) |
 | `GITHUB_TOKEN` | services | GitHub API access |
 | `RUST_LOG` | all | Tracing log level |
+| `EXOMONAD_WASM_PATH` | (deprecated) | **DEPRECATED** - Use `.exomonad/config.toml` with `role` field |
 
 ## MCP Tools
 
@@ -153,8 +154,8 @@ All tools are implemented in Haskell WASM and executed via host functions:
 | `github_list_issues` | List GitHub issues |
 | `github_get_issue` | Get single issue details |
 | `github_list_prs` | List GitHub pull requests |
-| `spawn_agents` | Spawn agents in Zellij tabs |
-| `cleanup_agents` | Clean up agent worktrees |
+| `spawn_agents` | Create git worktrees + Zellij tabs, auto-start Claude with KDL layout |
+| `cleanup_agents` | Close Zellij tabs and delete worktrees |
 | `list_agents` | List active agent worktrees |
 
 ## Host Functions (Effect Boundary)
@@ -178,9 +179,17 @@ Rust host functions exposed to WASM:
 ### Agent Control Effects (High-Level)
 | Effect | Host Function | Implementation |
 |--------|---------------|----------------|
-| `SpawnAgent` | `agent_spawn` | GitHub API + git worktree + Zellij |
+| `SpawnAgent` | `agent_spawn` | GitHub API + git worktree + Zellij KDL layout |
+| `SpawnAgents` | `agent_spawn_batch` | Batch version of SpawnAgent |
 | `CleanupAgent` | `agent_cleanup` | Zellij close + git worktree remove |
+| `CleanupAgents` | `agent_cleanup_batch` | Batch version of CleanupAgent |
 | `ListAgents` | `agent_list` | git worktree list |
+
+**Zellij Integration:**
+- Uses declarative KDL layouts (not CLI flags)
+- Includes tab-bar and status-bar plugins (native UI)
+- Wraps command in shell (`sh -c "claude"`) for environment inheritance
+- Sets `close_on_exit true` for automatic cleanup
 
 ### Filesystem Effects
 | Effect | Host Function | Implementation |
@@ -202,6 +211,14 @@ Add to `.mcp.json` in project root:
 }
 ```
 
+And ensure `.exomonad/config.toml` exists with the `role` field:
+```toml
+role = "dev"  # or "tl", "pm", etc.
+project_dir = "."
+```
+
+The sidecar will load `~/.exomonad/wasm/wasm-guest-{role}.wasm` automatically.
+
 ## Testing
 
 ```bash
@@ -222,18 +239,13 @@ pkill exomonad-sidecar
 |----------|-----------|
 | 100% WASM routing | All logic in Haskell, Rust handles I/O only |
 | High-level effects | `SpawnAgent` not `CreateWorktree + OpenTab` |
-| Sidecar per agent | No central control-server, each agent independent |
+| Local Zellij orchestration | Git worktrees + Zellij tabs, no Docker containers |
 | Extism runtime | Mature WASM runtime with host function support |
+| KDL layouts | Declarative tab creation with proper environment inheritance |
+| Config-based WASM resolution | `role` field in `.exomonad/config.toml` replaces `--wasm` flag |
 
-## Migration Notes
+## Related Documentation
 
-### control-server is DEPRECATED
-
-The Haskell `control-server` package has been retired. All functionality is now in:
-- **exomonad-sidecar** - Rust binary that hosts WASM
-- **wasm-guest** - Haskell WASM plugin with tool logic
-
-To use legacy control-server (not recommended):
-```bash
-docker compose --profile legacy up control-server
-```
+- [Root CLAUDE.md](../CLAUDE.md) - Project overview and documentation tree
+- [Haskell wasm-guest](../haskell/wasm-guest/) - Haskell WASM plugin source
+- [Haskell effects](../haskell/effects/CLAUDE.md) - Effect interpreters

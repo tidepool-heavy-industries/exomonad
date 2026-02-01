@@ -45,14 +45,13 @@ module ExoMonad.Graph.Validate.RecordStructure
   )
 where
 
-import Data.Kind (Constraint, Type)
 import ExoMonad.Graph.Edges (GetInput, GetSchema)
 import ExoMonad.Graph.Generic.Core (AsGraph, EntryNode, LLMNode, LogicNode)
 import ExoMonad.Graph.Goto (Goto)
 import ExoMonad.Graph.Types (Arrive, Self, UsesEffects, type (:@))
 import ExoMonad.Graph.Types qualified as Types (Exit)
 import GHC.Generics (C, D, Generic (..), K1 (..), M1 (..), Meta (..), Rep, S, (:*:) (..))
-import GHC.TypeLits (ErrorMessage (..), Nat, Symbol, TypeError, type (+), type (-))
+import GHC.TypeLits (ErrorMessage (..), Symbol, TypeError, type (+), type (-))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- FIELD EXTRACTION TYPE FAMILIES

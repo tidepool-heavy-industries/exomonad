@@ -30,9 +30,6 @@ module ExoMonad.Effects.Git
 where
 
 import Control.Monad.Freer (Eff, Member, send)
-import Data.Aeson (ToJSON (..), object, (.=))
-import Data.Text (Text)
-import GHC.Generics (Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES

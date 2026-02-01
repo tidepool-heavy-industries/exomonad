@@ -28,10 +28,7 @@ module ExoMonad.Effects.Observability
 where
 
 import Control.Monad.Freer (Eff, Member, send)
-import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.=))
-import Data.Aeson.Types qualified as Aeson
-import Data.Text (Text)
-import GHC.Generics (Generic)
+import Data.Aeson (Value)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EVENT TYPES

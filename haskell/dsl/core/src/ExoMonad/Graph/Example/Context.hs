@@ -11,9 +11,7 @@ module ExoMonad.Graph.Example.Context
 where
 
 import Control.Monad.Writer (Writer)
-import Data.Text (Text)
-import GHC.Generics (Generic)
-import Text.Ginger.GVal (ToGVal (..), dict)
+import Text.Ginger (GVal, ToGVal (..), toGVal)
 import Text.Ginger.Run.Type (Run)
 import Text.Parsec.Pos (SourcePos)
 

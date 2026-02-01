@@ -16,35 +16,10 @@ module ExoMonad.StructuredOutput.Instances
   )
 where
 
-import Data.Aeson (FromJSON (..), ToJSON (..), Value (..))
-import Data.Bifunctor (first)
-import Data.List.NonEmpty (NonEmpty (..))
-import Data.List.NonEmpty qualified as NonEmpty
-import Data.Scientific (fromFloatDigits, toBoundedInteger)
-import Data.Set (Set)
-import Data.Set qualified as Set
-import Data.Text (Text)
-import Data.Text qualified as T
-import Data.Vector qualified as V
-import ExoMonad.Schema (ExoMonadDefault (..), HasJSONSchema (..), JSONSchema (..), SchemaType (..), StringEnum (..), arraySchema, emptySchema)
-import ExoMonad.StructuredOutput.Class
-  ( GStructuredOutput (..),
-    StructuredOutput (..),
-    defaultOptions,
-    gEncodeStructured,
-    gParseStructured,
-    gStructuredSchema,
-  )
-import ExoMonad.StructuredOutput.Error
-  ( ParseDiagnostic (..),
-    expectedArray,
-    expectedBool,
-    expectedNumber,
-    expectedString,
-    formatDiagnostic,
-    typeMismatch,
-  )
-import GHC.Generics (Generic, Rep, from, to)
+import Data.Aeson (Value (..))
+import ExoMonad.StructuredOutput.Class (GStructuredOutput (..), StructuredOutput (..))
+import ExoMonad.StructuredOutput.Error (expectedArray, expectedNumber, expectedString, typeMismatch)
+import GHC.Generics (Rep, from, to)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PRIMITIVE TYPES

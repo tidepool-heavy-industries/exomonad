@@ -80,7 +80,7 @@ Set `VITE_WS_URL` to override the WebSocket URL (default: `ws://localhost:8080`)
 
 ## Running
 
-**Note:** The native server workflow is not the primary development path. See root CLAUDE.md for Docker Compose (`./ide`) for Claude Code++ integration.
+**Note:** The native server workflow is not the primary development path. The primary workflow is Zellij-based local orchestration (git worktrees + Zellij tabs) for Claude Code++ integration. See root CLAUDE.md and rust/CLAUDE.md for current architecture.
 
 ## Related Documentation
 

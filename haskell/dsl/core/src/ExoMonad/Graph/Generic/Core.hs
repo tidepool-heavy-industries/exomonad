@@ -34,8 +34,7 @@ module ExoMonad.Graph.Generic.Core
   )
 where
 
-import Data.Kind (Type)
-import ExoMonad.Graph.Types (LLMKind)
+import GHC.Generics (Generic)
 import GHC.TypeLits (Symbol)
 
 -- ════════════════════════════════════════════════════════════════════════════

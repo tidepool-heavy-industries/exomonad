@@ -45,7 +45,6 @@ module ExoMonad.Template.Render
 where
 
 import Control.Monad.Writer (Writer)
-import Data.Text (Text)
 import Text.Ginger.GVal (ToGVal)
 import Text.Ginger.Run.Type (Run)
 import Text.Ginger.TH (TypedTemplate, runTypedTemplate, typedTemplateFile)

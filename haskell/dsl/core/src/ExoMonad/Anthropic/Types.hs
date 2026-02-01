@@ -34,12 +34,8 @@ module ExoMonad.Anthropic.Types
   )
 where
 
-import Data.Aeson (FromJSON (..), ToJSON (..), Value)
-import Data.List.NonEmpty (NonEmpty (..))
-import Data.String (IsString)
-import Data.Text (Text)
+import Data.Aeson (Value)
 import Deriving.Aeson
-import GHC.Generics (Generic)
 
 -- ══════════════════════════════════════════════════════════════
 -- ID NEWTYPES (Type-Safe IDs)

@@ -53,10 +53,7 @@ module ExoMonad.Effect.Subgraph
 where
 
 import Control.Monad.Freer (Eff, Member, send)
-import Data.Aeson (FromJSON, ToJSON)
-import Data.Text (Text)
 import Data.UUID (UUID)
-import GHC.Generics (Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT TYPE

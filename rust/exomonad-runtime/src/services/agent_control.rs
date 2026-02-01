@@ -176,7 +176,7 @@ impl AgentControlService {
         )
         .await?;
 
-        // Open Zellij tab
+        // Open Zellij tab with claude command
         let tab_name = format!("gh-{}", issue_id);
         self.new_zellij_tab(&tab_name, &worktree_path, Some("claude"))
             .await?;
@@ -347,31 +347,84 @@ impl AgentControlService {
     }
 
     async fn new_zellij_tab(&self, name: &str, cwd: &Path, command: Option<&str>) -> Result<()> {
-        info!(name, cwd = %cwd.display(), "Creating Zellij tab");
-
-        let mut args = vec![
-            "action".to_string(),
-            "new-tab".to_string(),
-            "--name".to_string(),
-            name.to_string(),
-            "--cwd".to_string(),
-            cwd.to_string_lossy().to_string(),
-        ];
+        info!(name, cwd = %cwd.display(), command = ?command, "Creating Zellij tab");
 
         if let Some(cmd) = command {
-            args.push("--".to_string());
-            args.push(cmd.to_string());
-        }
+            // Generate KDL layout with full tab template and command pane
+            let layout_content = format!(
+                r#"layout {{
+    default_tab_template {{
+        pane size=1 borderless=true {{
+            plugin location="zellij:tab-bar"
+        }}
+        children
+        pane size=1 borderless=true {{
+            plugin location="zellij:status-bar"
+        }}
+    }}
+    tab name="{name}" {{
+        pane command="sh" {{
+            args "-c" "{cmd}"
+            cwd "{cwd}"
+            close_on_exit true
+        }}
+    }}
+}}"#,
+                name = name,
+                cmd = cmd,
+                cwd = cwd.display()
+            );
 
-        let output = Command::new("zellij")
-            .args(&args)
-            .output()
-            .await
-            .context("Failed to execute zellij")?;
+            // Write to temporary file
+            let temp_dir = std::env::temp_dir();
+            let layout_file = temp_dir.join(format!("zellij-tab-{}.kdl", name));
+            tokio::fs::write(&layout_file, &layout_content)
+                .await
+                .context("Failed to write temporary layout file")?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow!("zellij new-tab failed: {}", stderr));
+            tracing::debug!(
+                layout_file = %layout_file.display(),
+                "Generated temporary Zellij layout"
+            );
+
+            // Create tab with layout
+            let output = Command::new("zellij")
+                .args(&[
+                    "action",
+                    "new-tab",
+                    "--layout",
+                    layout_file.to_str().unwrap(),
+                ])
+                .output()
+                .await
+                .context("Failed to execute zellij")?;
+
+            // Clean up temp file
+            let _ = tokio::fs::remove_file(&layout_file).await;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(anyhow!("zellij new-tab failed: {}", stderr));
+            }
+        } else {
+            // Fallback: create empty tab (no command)
+            let output = Command::new("zellij")
+                .args(&[
+                    "action",
+                    "new-tab",
+                    "--name",
+                    name,
+                    "--cwd",
+                    &cwd.to_string_lossy(),
+                ])
+                .output()
+                .await
+                .context("Failed to execute zellij")?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(anyhow!("zellij new-tab failed: {}", stderr));
+            }
         }
 
         Ok(())
@@ -526,11 +579,16 @@ impl AgentControlService {
         let exomonad_dir = worktree_path.join(".exomonad");
         fs::create_dir_all(&exomonad_dir).await?;
 
-        // Write config.toml
-        let config_content = r#"role = "dev"
-project_dir = "."
+        // Write config.toml with role = "dev" for spawned agents
+        let config_content = r#"# Agent config (auto-generated)
+role = "dev"
+project_dir = "../.."
 "#;
         fs::write(exomonad_dir.join("config.toml"), config_content).await?;
+        tracing::info!(
+            worktree = %worktree_path.display(),
+            "Wrote .exomonad/config.toml with role=dev"
+        );
 
         // Write INITIAL_CONTEXT.md
         let context_content = format!(
@@ -551,7 +609,7 @@ When done, commit your changes and create a pull request.
         );
         fs::write(worktree_path.join("INITIAL_CONTEXT.md"), context_content).await?;
 
-        // Write .mcp.json
+        // Write .mcp.json (no --wasm argument, config file handles WASM path)
         let sidecar_path = std::env::current_exe()
             .ok()
             .and_then(|p| p.to_str().map(String::from))
@@ -741,9 +799,10 @@ pub fn spawn_agents_host_fn(service: Arc<AgentControlService>) -> Function {
                 worktree_dir: input.worktree_dir,
             };
 
-            let result = block_on(service.spawn_agents(&input.issue_ids, &options))?;
+            let result = block_on(service.spawn_agents(&input.issue_ids, &options));
+            let output: HostResult<BatchSpawnResult> = result.into();
 
-            outputs[0] = set_output(plugin, &result)?;
+            outputs[0] = set_output(plugin, &output)?;
             Ok(())
         },
     )
@@ -796,9 +855,10 @@ pub fn cleanup_agents_host_fn(service: Arc<AgentControlService>) -> Function {
                 .lock()
                 .map_err(|_| Error::msg("Poisoned lock"))?;
 
-            let result = block_on(service.cleanup_agents(&input.issue_ids, input.force))?;
+            let result = block_on(service.cleanup_agents(&input.issue_ids, input.force));
+            let output: HostResult<BatchCleanupResult> = result.into();
 
-            outputs[0] = set_output(plugin, &result)?;
+            outputs[0] = set_output(plugin, &output)?;
             Ok(())
         },
     )

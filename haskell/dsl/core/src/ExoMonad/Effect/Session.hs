@@ -69,24 +69,9 @@ module ExoMonad.Effect.Session
   )
 where
 
-import Control.Monad.Freer (Eff, Member, interpret, send)
-import Data.Aeson
-  ( FromJSON (..),
-    Options (..),
-    ToJSON (..),
-    Value,
-    defaultOptions,
-    genericParseJSON,
-    genericToJSON,
-  )
-import Data.Char (isUpper, toLower)
-import Data.List (find)
-import Data.Text (Text)
-import Data.Time (UTCTime)
+import Control.Monad.Freer (Eff, Member, send)
+import Data.Aeson (FromJSON (..), ToJSON (..), Value)
 import ExoMonad.Graph.Types (ModelChoice)
-import ExoMonad.Schema (HasJSONSchema (..), SchemaType (TString), emptySchema)
-import ExoMonad.StructuredOutput (StructuredOutput)
-import GHC.Generics (Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES

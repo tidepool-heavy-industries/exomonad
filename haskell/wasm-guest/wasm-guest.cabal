@@ -31,7 +31,8 @@ common shared
         bytestring,
         text,
         aeson,
-        freer-simple
+        freer-simple,
+        unordered-containers
 
 -- Internal library with shared tool infrastructure
 library wasm-guest-internal

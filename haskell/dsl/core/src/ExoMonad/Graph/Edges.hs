@@ -66,7 +66,6 @@ module ExoMonad.Graph.Edges
   )
 where
 
-import Data.Kind (Type)
 import ExoMonad.Graph.Goto (Goto, To)
 import ExoMonad.Graph.Types
   ( Arrive,

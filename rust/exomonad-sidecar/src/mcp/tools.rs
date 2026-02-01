@@ -8,7 +8,7 @@ use super::{McpState, ToolDefinition};
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tracing::debug;
+use tracing::{debug, error};
 
 // ============================================================================
 // WASM MCP Types (matches Haskell Main.hs MCPCallInput/MCPCallOutput)
@@ -68,11 +68,40 @@ pub async fn execute_tool(state: &McpState, name: &str, args: Value) -> Result<V
         tool_args: args,
     };
 
-    let output: MCPCallOutput = state
-        .plugin
-        .call("handle_mcp_call", &input)
-        .await
-        .context("WASM handle_mcp_call failed")?;
+    // Log before calling WASM
+    debug!(tool = %name, "Calling WASM handle_mcp_call");
+
+    let call_result = state.plugin.call("handle_mcp_call", &input).await;
+
+    // Log raw result before deserialization
+    match &call_result {
+        Ok(_) => debug!(tool = %name, "WASM call succeeded"),
+        Err(e) => {
+            error!(
+                tool = %name,
+                error = %e,
+                "WASM call failed before deserialization"
+            );
+        }
+    }
+
+    let output: MCPCallOutput = call_result.map_err(|e| {
+        // Preserve full error chain with tool name
+        anyhow!("WASM call failed for tool '{}': {}", name, e)
+    })?;
+
+    // Log the parsed output
+    debug!(
+        tool = %name,
+        success = output.success,
+        has_result = output.result.is_some(),
+        has_error = output.error.is_some(),
+        "Parsed MCPCallOutput"
+    );
+
+    if let Some(ref err) = output.error {
+        error!(tool = %name, mcp_error = %err, "Tool returned error in MCPCallOutput");
+    }
 
     if output.success {
         output

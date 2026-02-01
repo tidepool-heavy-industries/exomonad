@@ -89,11 +89,6 @@ module ExoMonad.Effects.Worktree
 where
 
 import Control.Monad.Freer (Eff, Member, send)
-import Data.Aeson (FromJSON, ToJSON)
-import Data.String (IsString)
-import Data.Text (Text)
-import ExoMonad.StructuredOutput (StructuredOutput)
-import GHC.Generics (Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES

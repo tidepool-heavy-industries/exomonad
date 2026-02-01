@@ -21,10 +21,6 @@ where
 
 import Control.Monad.Freer (Eff, Member, send)
 import Data.Aeson (FromJSON, ToJSON, Value)
-import Data.Text (Text)
-import ExoMonad.Effect.NodeMeta (NodeMeta, NodeMetadata, getNodeMeta)
-import ExoMonad.Platform (NativeOnly)
-import GHC.Generics (Generic)
 
 -- | Gemini models available in the CLI.
 data GeminiModel = Flash | Pro | Ultra

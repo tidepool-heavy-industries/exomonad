@@ -70,14 +70,12 @@ module ExoMonad.Effect.Log
   )
 where
 
+import Prelude hiding (Reader, local)
+
 import Control.Monad.Freer (Eff, LastMember, Member, interpret, send, sendM)
 import Control.Monad.Freer.Reader (Reader, local)
 import Data.Aeson (ToJSON (..), Value, toJSON)
-import Data.Text (Text)
-import Data.Text qualified as T
-import Data.Text.IO qualified as TIO
 import Data.Time (UTCTime)
-import GHC.Generics (Generic)
 import System.IO (stderr)
 
 -- | Log severity levels

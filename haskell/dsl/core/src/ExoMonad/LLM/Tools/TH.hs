@@ -68,7 +68,8 @@ import ExoMonad.LLM.Tools
 import ExoMonad.Schema (schemaToValue)
 import ExoMonad.StructuredOutput.Class (HasJSONSchema (..))
 import GHC.Records (getField)
-import Language.Haskell.TH
+import Language.Haskell.TH hiding (Type)
+import Language.Haskell.TH.Syntax qualified as TH
 
 -- | Tool metadata for derivation.
 --
@@ -163,7 +164,7 @@ deriveToolRecord typeName tools = do
 --
 -- We wrap primitive types in {"value": ...}. To avoid ambiguity, we forbid
 -- single-field records where the field is named "value".
-validateArgsType :: Type -> Q ()
+validateArgsType :: TH.Type -> Q ()
 validateArgsType (ConT name) = do
   info <- reify name
   case info of
@@ -196,7 +197,7 @@ getTyVarName (PlainTV n _) = n
 getTyVarName (KindedTV n _ _) = n
 
 -- | Extract the @args@ type from @args -> Eff es result@.
-extractArgsType :: Type -> Name -> Q Type
+extractArgsType :: TH.Type -> Name -> Q TH.Type
 extractArgsType ftype fname = case ftype of
   -- Pattern: args -> Eff es result
   AppT (AppT ArrowT argsType) _ -> pure argsType
@@ -226,7 +227,7 @@ camelToSnake = go True
       | otherwise = c : go False cs
 
 -- | Generate the ToolRecord instance.
-genToolRecordInstance :: Name -> Name -> [(Name, Type, String, String)] -> Q [Dec]
+genToolRecordInstance :: Name -> Name -> [(Name, TH.Type, String, String)] -> Q [Dec]
 genToolRecordInstance typeName _tyVarName fieldData = do
   -- Generate toolSchemas method
   toolSchemasExp <- genToolSchemas fieldData
@@ -256,7 +257,7 @@ genToolRecordInstance typeName _tyVarName fieldData = do
 -- , ToolSchema "lookup" "Look up by ID" (schemaToValue $ jsonSchema \@LookupArgs)
 -- ]
 -- @
-genToolSchemas :: [(Name, Type, String, String)] -> Q Exp
+genToolSchemas :: [(Name, TH.Type, String, String)] -> Q Exp
 genToolSchemas fieldData = do
   schemas <- forM fieldData $ \(_fname, argsType, jsonKey, desc) -> do
     -- Build: ToolSchema jsonKey desc (schemaToValue $ jsonSchema @ArgsType)
@@ -277,7 +278,7 @@ genToolSchemas fieldData = do
 --   "lookup" -> dispatchHandler (getField \@"lookup" tools) name input
 --   _ -> pure $ Left $ ToolNotFound name
 -- @
-genDispatchTool :: [(Name, Type, String, String)] -> Q Exp
+genDispatchTool :: [(Name, TH.Type, String, String)] -> Q Exp
 genDispatchTool fieldData = do
   toolsName <- newName "tools"
   nameName <- newName "name"

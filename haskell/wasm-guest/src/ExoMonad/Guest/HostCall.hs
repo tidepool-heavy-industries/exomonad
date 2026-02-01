@@ -23,6 +23,8 @@ module ExoMonad.Guest.HostCall
     host_log_info,
     host_log_error,
     host_emit_event,
+    LogLevel (..),
+    LogPayload (..),
     -- Agent Control
     host_agent_spawn,
     host_agent_spawn_batch,
@@ -41,11 +43,43 @@ where
 
 import Control.Exception (bracket)
 import Data.Aeson (FromJSON, ToJSON, eitherDecode, encode)
+import qualified Data.Aeson as Aeson
+import Data.ByteString (ByteString)
 import Data.ByteString.Lazy (fromStrict, toStrict)
+import Data.HashMap.Strict (HashMap)
+import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
+import qualified Data.Text.Encoding.Error as T
 import Data.Word (Word64)
 import Extism.PDK.Memory (Memory, alloc, findMemory, free, load, memoryOffset)
+import GHC.Generics (Generic)
 
+-- ============================================================================
+-- Log Types (matches Rust LogPayload/LogLevel)
+-- ============================================================================
+
+data LogLevel = Debug | Info | Warn | Error
+  deriving (Show, Eq, Generic)
+
+instance ToJSON LogLevel where
+  toJSON Debug = Aeson.String "debug"
+  toJSON Info = Aeson.String "info"
+  toJSON Warn = Aeson.String "warn"
+  toJSON Error = Aeson.String "error"
+
+data LogPayload = LogPayload
+  { level :: LogLevel,
+    message :: Text,
+    fields :: Maybe (HashMap Text Text)
+  }
+  deriving (Show, Generic)
+
+instance ToJSON LogPayload
+
+-- ============================================================================
 -- Git host functions
+-- ============================================================================
 foreign import ccall "git_get_branch" host_git_get_branch :: Word64 -> IO Word64
 
 foreign import ccall "git_get_worktree" host_git_get_worktree :: Word64 -> IO Word64
@@ -118,9 +152,14 @@ callHost rawFn request = do
 
       -- Decode (load returns Either String ByteString)
       case loadResult of
-        Left loadErr -> pure $ Left ("Load error: " ++ loadErr)
+        Left loadErr -> do
+          callHostVoid host_log_error (LogPayload Error ("Host call load error: " <> T.pack loadErr) Nothing)
+          pure $ Left ("Load error: " ++ loadErr)
         Right respBs -> case eitherDecode (fromStrict respBs) of
-          Left err -> pure $ Left ("Decode error: " ++ err)
+          Left err -> do
+            let preview = T.take 200 (T.decodeUtf8With T.lenientDecode respBs)
+            callHostVoid host_log_error (LogPayload Error ("Host call decode error: " <> T.pack err <> " | Raw: " <> preview) Nothing)
+            pure $ Left ("Decode error: " ++ err)
           Right v -> pure $ Right v
 
 -- | Call a host function that returns void (fire-and-forget, e.g., logging)

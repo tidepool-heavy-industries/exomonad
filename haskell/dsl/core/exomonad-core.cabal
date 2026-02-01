@@ -110,6 +110,12 @@ library
         optparse-applicative >= 0.17 && < 1
     build-depends:
         base >= 4.17 && < 5,
+        relude >= 1.2,
+        microlens >= 0.4,
+        microlens-mtl,
+        microlens-ghc,
+        PyF >= 0.11,
+        co-log-core,
         freer-simple >= 1.2 && < 2,
         ginger >= 0.10,
         aeson >= 2.1 && < 3,
@@ -121,8 +127,6 @@ library
         unordered-containers >= 0.2 && < 0.3,
         template-haskell >= 2.19 && < 3,
         mtl >= 2.3 && < 3,
-        lens >= 5.0,
-        generic-lens >= 2.2,
         random >= 1.2 && < 2,
         bytestring >= 0.11 && < 1,
         parsec >= 3.1 && < 4,
@@ -130,7 +134,11 @@ library
         time >= 1.12 && < 2,
         directory >= 1.3 && < 2,
         filepath >= 1.4 && < 2,
-        uuid >= 1.3 && < 2
+        uuid >= 1.3 && < 2,
+        deepseq
+    mixins:
+        base hiding (Prelude),
+        relude (Relude as Prelude)
     hs-source-dirs:   src
     -- Platform-specific source directories for NativeOnly constraint
     if os(wasi)
@@ -152,6 +160,7 @@ library
         OverloadedRecordDot
         OverloadedLabels
         OverloadedStrings
+        StrictData
         TypeFamilies
         TypeOperators
         QuasiQuotes

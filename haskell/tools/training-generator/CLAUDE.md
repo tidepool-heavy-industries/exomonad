@@ -1,12 +1,12 @@
 # Training Generator - FunctionGemma Fine-Tuning Data
 
-Generates JSONL training data for fine-tuning FunctionGemma 270M as a semantic edge scorer. Used by control-server to replace heuristics with learned models.
+Generates JSONL training data for fine-tuning FunctionGemma 270M as a semantic edge scorer. Used by agents and consuming repos to replace heuristics with learned models.
 
 ## When to Read This
 
 Read this if you're:
 - Generating datasets for FunctionGemma fine-tuning
-- Working on control-server training data generation
+- Working on agent training data generation
 - Understanding the heuristics → ML migration path
 
 ## What It Does
@@ -40,7 +40,7 @@ Schema is "baked" into model weights via fine-tuning - no schema turn needed.
                                        │ Model
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ control-server (Scout Module)                                       │
+│ Agent (Semantic Scout Module)                                       │
 │   • HTTP to Ollama (port 11434) with OpenAI-style tools array       │
 │   • Ollama auto-translates → FunctionGemma token format             │
 │   • Response in message.tool_calls[0].function.arguments            │
@@ -134,7 +134,7 @@ This bootstraps training data - the fine-tuned model learns to generalize.
 
 ## Shared Types
 
-**Edge types** (used by control-server for scoring):
+**Edge types** (used by agents for semantic edge scoring):
 - `ScoreEdgeInput` - Input to Ollama: query + source/target locations + hover info
 - `ScoreEdgeOutput` - Output from Ollama: relevance, risk, reasoning, boolean flags
 - `EdgeType` - Edge classification (Definition, Reference, Usage, Instance, TypeConstraint)
@@ -146,7 +146,6 @@ This bootstraps training data - the fine-tuned model learns to generalize.
 
 ## Related Documentation
 
-- [control-server/CLAUDE.md](../../control-server/CLAUDE.md) - Uses these types
 - [effects/lsp-interpreter/CLAUDE.md](../../effects/lsp-interpreter/CLAUDE.md) - LSP for hover info
 - [tools/CLAUDE.md](../CLAUDE.md) - Tools overview
 - [Root CLAUDE.md](../../../CLAUDE.md) - Project overview

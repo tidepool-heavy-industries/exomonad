@@ -53,10 +53,7 @@ where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), object, (.:), (.=))
 import Data.Aeson qualified as Aeson
-import Data.Bifunctor (first)
 import Data.Char (isUpper, toLower)
-import Data.Kind (Type)
-import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Schema (objectSchema, schemaToValue)
 import ExoMonad.StructuredOutput.Class (StructuredOptions (..), defaultOptions)

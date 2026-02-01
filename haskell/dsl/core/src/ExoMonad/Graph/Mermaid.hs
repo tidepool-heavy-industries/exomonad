@@ -44,15 +44,14 @@ module ExoMonad.Graph.Mermaid
   )
 where
 
+import Prelude
+
+import Data.List qualified as List
+import Data.List (lookup)
 import Data.Char (isAsciiUpper)
-import Data.Kind (Type)
-import Data.Proxy (Proxy (..))
-import Data.Text (Text)
-import Data.Text qualified as T
 import Data.Typeable (TypeRep)
 import ExoMonad.Graph.Generic.Core (AsGraph)
 import ExoMonad.Graph.Reify
-import GHC.Generics (Generic (..))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONFIGURATION
@@ -589,7 +588,7 @@ makeMessage config info fromNode toNode =
       Nothing -> ""
       Just node ->
         -- Check if it's a Goto transition
-        case lookup toNode node.niGotoTargets of
+        case List.lookup toNode node.niGotoTargets of
           Just payload -> typeLabel config payload
           Nothing ->
             -- Must be Schema → Needs

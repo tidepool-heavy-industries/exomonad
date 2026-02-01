@@ -7,6 +7,8 @@ module ExoMonad.Effects.Env
   )
 where
 
+import Prelude hiding (lookupEnv)
+
 import Control.Monad.Freer (Eff, Member, send)
 import Data.Text (Text)
 

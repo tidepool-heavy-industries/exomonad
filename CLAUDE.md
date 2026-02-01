@@ -79,8 +79,14 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 │   ├── protocol/CLAUDE.md      ← Wire formats
 │   └── tools/CLAUDE.md         ← Dev tools (ghci-oracle, sleeptime, training-generator)
 ├── rust/CLAUDE.md             ← Rust workspace overview (sidecar, runtime, services)
-├── rust/exomonad-sidecar/CLAUDE.md  ← MCP server + hook handler (WASM host)
-├── rust/exomonad-runtime/CLAUDE.md  ← WASM plugin loading + host functions
+│   ├── exomonad-sidecar/CLAUDE.md  ← MCP server + hook handler (WASM host)
+│   ├── exomonad-runtime/CLAUDE.md  ← WASM plugin loading + host functions
+│   ├── exomonad-shared/CLAUDE.md   ← Shared types and protocols
+│   ├── exomonad-services/CLAUDE.md ← External service clients (Anthropic, GitHub, etc.)
+│   ├── exomonad-ui-protocol/CLAUDE.md ← Popup UI protocol types
+│   ├── exomonad-plugin/CLAUDE.md   ← Zellij WASM plugin (status + popups)
+│   ├── zellij-gen/CLAUDE.md        ← KDL layout generator
+│   └── effector/CLAUDE.md          ← Stateless IO executor
 ├── deploy/CLAUDE.md            ← Cloudflare deployment
 ├── tools/CLAUDE.md             ← Root-level tools (micro-gastown, blast-radius)
 └── typescript/
@@ -93,6 +99,12 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 |--------------|-----------|
 | Understand MCP tool architecture | `rust/exomonad-sidecar/CLAUDE.md` |
 | Work on WASM host functions | `rust/exomonad-runtime/CLAUDE.md` |
+| Understand shared protocol types | `rust/exomonad-shared/CLAUDE.md` |
+| Work with external service clients | `rust/exomonad-services/CLAUDE.md` |
+| Modify popup UI protocol | `rust/exomonad-ui-protocol/CLAUDE.md` |
+| Work on Zellij plugin | `rust/exomonad-plugin/CLAUDE.md` |
+| Modify KDL layout generation | `rust/zellij-gen/CLAUDE.md` |
+| Work on stateless IO executor | `rust/effector/CLAUDE.md` |
 | Define a graph, handlers, annotations | `haskell/dsl/core/CLAUDE.md` |
 | Work on LLM-level teaching infrastructure | `haskell/dsl/teaching/CLAUDE.md` |
 | Add or modify an effect interpreter | `haskell/effects/CLAUDE.md` |
@@ -302,27 +314,42 @@ In `.claude/settings.local.json`:
     "exomonad": {
       "type": "stdio",
       "command": "exomonad-sidecar",
-      "args": ["mcp-stdio"],
-      "env": {
-        "EXOMONAD_WASM_PATH": "/path/to/wasm-guest.wasm"
-      }
+      "args": ["mcp-stdio"]
     }
   }
 }
 ```
 
+**Note:** The WASM plugin path is auto-resolved from `.exomonad/config.toml`'s `role` field. Ensure you have a config file:
+```toml
+role = "tl"  # or "dev", "pm", etc.
+project_dir = "."
+```
+
+This will load `~/.exomonad/wasm/wasm-guest-tl.wasm` automatically.
+
 ### Building
 
 ```bash
-# Build Rust runtime
-cargo build --release -p exomonad-sidecar
+# One-command install (recommended - uses debug build for fast iteration)
+just install-all-dev
 
-# Build Haskell WASM plugin (requires nix develop .#wasm)
-nix develop .#wasm -c wasm32-wasi-cabal build --project-file=cabal.project.wasm wasm-guest
+# Or install release build (optimized, slower compile)
+just install-all
 
-# Copy WASM to expected location
-cp haskell/wasm-guest/dist-newstyle/.../wasm-guest.wasm ~/.exomonad/wasm-guest.wasm
+# Individual commands:
+just wasm tl   # Build and install TL WASM plugin
+just wasm dev  # Build and install dev WASM plugin
+cd rust && cargo build --release -p exomonad-sidecar  # Build sidecar
 ```
+
+**What `just install-all-dev` does:**
+1. Builds exomonad-sidecar (debug mode, fast incremental builds)
+2. Copies binary to `~/.cargo/bin/exomonad-sidecar`
+3. Builds both WASM plugins (dev and tl) using nix
+4. Installs to `~/.exomonad/wasm/wasm-guest-{dev,tl}.wasm`
+
+The sidecar auto-discovers WASM plugins based on `.exomonad/config.toml`'s `role` field.
 
 ### MCP Tools
 
@@ -337,27 +364,32 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 | `github_list_issues` | List GitHub issues |
 | `github_get_issue` | Get single issue details |
 | `github_list_prs` | List GitHub pull requests |
-| `spawn_agents` | Spawn agents in Zellij tabs with worktrees |
-| `cleanup_agents` | Clean up agent worktrees |
+| `spawn_agents` | Spawn Claude agents in Zellij tabs with isolated git worktrees |
+| `cleanup_agents` | Clean up agent worktrees and close Zellij tabs |
 | `list_agents` | List active agent worktrees |
 
-### Future: Zellij Plugins
-
-TODO: Integrate via WASM-based Zellij plugins for tighter integration:
-- Custom panes, status bars, agent dashboards
-- Native Zellij events instead of shelling out to `zellij action`
-- Real-time agent state visualization
+**How spawn_agents works:**
+1. Creates git worktree: `worktrees/gh-{issue}-{title}/`
+2. Creates branch: `gh-{issue}/{title}`
+3. Writes `.exomonad/config.toml` (role="dev") and `.mcp.json` (no --wasm!)
+4. Writes `INITIAL_CONTEXT.md` with full issue context
+5. Creates Zellij tab using KDL layout with tab/status bars
+6. Runs `claude` command in worktree directory via shell wrapper
+7. Tab auto-closes when Claude exits (`close_on_exit true`)
 
 ### Status
 
 - ✅ 100% WASM routing (all logic in Haskell, Rust handles I/O only)
 - ✅ MCP stdio server for Claude Code
 - ✅ Hook forwarding via WASM
-- ✅ High-level effects (SpawnAgent, not CreateWorktree + OpenTab)
-- ✅ Git worktrees for agent isolation
-- ✅ Zellij tab management
-- ✅ GitHub API integration
-- 🔄 Zellij plugin integration (planned)
+- ✅ Config-based WASM path resolution (no CLI arguments)
+- ✅ spawn_agents: Git worktrees + Zellij KDL layouts
+- ✅ Proper Zellij tab creation with full UI (tab-bar, status-bar)
+- ✅ Shell-wrapped commands for environment inheritance
+- ✅ GitHub API integration with token from ~/.exomonad/secrets
+- ✅ Auto-cleanup tabs on agent exit
+- ✅ Zellij plugin (exomonad-plugin) for status display and popup UI
+- ✅ KDL layout generation (zellij-gen) for proper environment inheritance
 - ❌ Hook logic (currently allow-all passthrough)
 
 ---

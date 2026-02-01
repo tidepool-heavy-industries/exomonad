@@ -26,9 +26,7 @@ module ExoMonad.Effects.Effector
 where
 
 import Control.Monad.Freer (Eff, Member, send)
-import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.=))
-import Data.Text (Text)
-import GHC.Generics (Generic)
+import Data.Aeson (FromJSON (..), ToJSON (..), withObject, (.:))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES: GitHub

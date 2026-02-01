@@ -44,10 +44,10 @@ module ExoMonad
   )
 where
 
+import Prelude hiding (State)
+
 import Control.Monad.Freer (Eff, Member)
 import Data.Aeson (Value, toJSON)
-import Data.Kind (Type)
-import Data.Text (Text)
 import ExoMonad.Effect
 
 -- ══════════════════════════════════════════════════════════════════════

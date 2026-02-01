@@ -38,15 +38,9 @@ module ExoMonad.Effects.LLMProvider
   )
 where
 
-import Control.Applicative ((<|>))
 import Control.Monad.Freer (Eff, Member, send)
-import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.:?), (.=))
-import Data.Aeson qualified as Aeson
-import Data.Aeson.Types qualified as AesonTypes
-import Data.Kind (Type)
-import Data.List.NonEmpty (NonEmpty (..))
-import Data.Text (Text)
-import GHC.Generics (Generic)
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.=))
+import ExoMonad.Effect.Types (ContentBlock, LLMConfig, LlmError, Message)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PROVIDER TYPE (TYPE-LEVEL)
