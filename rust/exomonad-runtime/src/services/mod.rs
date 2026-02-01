@@ -8,6 +8,7 @@ pub mod github;
 pub mod local;
 pub mod log;
 pub mod secrets;
+pub mod zellij_events;
 
 pub use self::agent_control::{
     AgentControlService, AgentInfo, BatchCleanupResult, BatchSpawnResult, SpawnOptions, SpawnResult,

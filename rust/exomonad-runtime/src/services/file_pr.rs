@@ -7,7 +7,9 @@ use anyhow::{Context, Result};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
 use serde::{Deserialize, Serialize};
 use std::process::Command;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
+
+use super::zellij_events;
 
 // ============================================================================
 // Types
@@ -186,6 +188,19 @@ fn create_pr(input: &FilePRInput) -> Result<FilePROutput> {
 
     // Get base branch from the created PR
     let base_branch = get_pr_base_branch(pr_number)?;
+
+    // Emit pr:filed event
+    // Extract agent_id from branch name (format: gh-123/slug)
+    if let Some(agent_id) = head_branch.strip_prefix("gh-").and_then(|s| s.split('/').next()) {
+        let event = exomonad_ui_protocol::AgentEvent::PrFiled {
+            agent_id: format!("gh-{}", agent_id),
+            pr_number: pr_number as u32,
+            timestamp: zellij_events::now_iso8601(),
+        };
+        if let Err(e) = zellij_events::emit_event(&event) {
+            warn!("Failed to emit pr:filed event: {}", e);
+        }
+    }
 
     Ok(FilePROutput {
         pr_url,

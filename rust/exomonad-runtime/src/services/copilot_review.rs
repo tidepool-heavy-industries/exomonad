@@ -11,6 +11,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
+use super::zellij_events;
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -252,6 +254,20 @@ fn fetch_pr_reviews(owner: &str, repo: &str, pr_number: u64) -> Result<bool> {
     Ok(has_copilot_review)
 }
 
+/// Get current branch name to extract agent ID
+fn get_current_branch() -> Result<String> {
+    let output = Command::new("git")
+        .args(["branch", "--show-current"])
+        .output()
+        .context("Failed to execute git branch --show-current")?;
+
+    if !output.status.success() {
+        anyhow::bail!("Not on a branch");
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 /// Main wait_for_copilot_review implementation
 pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<CopilotReviewOutput> {
     info!(
@@ -274,6 +290,21 @@ pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<Copi
                 "[CopilotReview] Found {} Copilot comments",
                 comments.len()
             );
+
+            // Emit copilot:reviewed event
+            if let Ok(branch) = get_current_branch() {
+                if let Some(agent_id) = branch.strip_prefix("gh-").and_then(|s| s.split('/').next()) {
+                    let event = exomonad_ui_protocol::AgentEvent::CopilotReviewed {
+                        agent_id: format!("gh-{}", agent_id),
+                        comment_count: comments.len() as u32,
+                        timestamp: zellij_events::now_iso8601(),
+                    };
+                    if let Err(e) = zellij_events::emit_event(&event) {
+                        warn!("Failed to emit copilot:reviewed event: {}", e);
+                    }
+                }
+            }
+
             return Ok(CopilotReviewOutput {
                 status: "reviewed".to_string(),
                 comments,
@@ -283,6 +314,21 @@ pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<Copi
         // Also check for review (without inline comments)
         if fetch_pr_reviews(&owner, &repo, input.pr_number)? {
             info!("[CopilotReview] Found Copilot review (no inline comments)");
+
+            // Emit copilot:reviewed event with 0 comments
+            if let Ok(branch) = get_current_branch() {
+                if let Some(agent_id) = branch.strip_prefix("gh-").and_then(|s| s.split('/').next()) {
+                    let event = exomonad_ui_protocol::AgentEvent::CopilotReviewed {
+                        agent_id: format!("gh-{}", agent_id),
+                        comment_count: 0,
+                        timestamp: zellij_events::now_iso8601(),
+                    };
+                    if let Err(e) = zellij_events::emit_event(&event) {
+                        warn!("Failed to emit copilot:reviewed event: {}", e);
+                    }
+                }
+            }
+
             return Ok(CopilotReviewOutput {
                 status: "reviewed".to_string(),
                 comments: vec![],

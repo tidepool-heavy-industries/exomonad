@@ -2,6 +2,46 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
+/// Events broadcast by agent sidecars via Zellij pipes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum AgentEvent {
+    #[serde(rename = "agent:started")]
+    AgentStarted {
+        agent_id: String,
+        timestamp: String,
+    },
+    #[serde(rename = "agent:stopped")]
+    AgentStopped {
+        agent_id: String,
+        timestamp: String,
+    },
+    #[serde(rename = "stop_hook:blocked")]
+    StopHookBlocked {
+        agent_id: String,
+        reason: String,
+        timestamp: String,
+    },
+    #[serde(rename = "pr:filed")]
+    PrFiled {
+        agent_id: String,
+        pr_number: u32,
+        timestamp: String,
+    },
+    #[serde(rename = "copilot:reviewed")]
+    CopilotReviewed {
+        agent_id: String,
+        comment_count: u32,
+        timestamp: String,
+    },
+    #[serde(rename = "agent:stuck")]
+    AgentStuck {
+        agent_id: String,
+        failed_stop_count: u32,
+        timestamp: String,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PopupDefinition {
     pub title: String,
