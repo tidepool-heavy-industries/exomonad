@@ -121,6 +121,25 @@ wasm role="tl":
     cp dist-newstyle/build/wasm32-wasi/ghc-*/wasm-guest-*/x/wasm-guest-{{role}}/noopt/build/wasm-guest-{{role}}/wasm-guest-{{role}}.wasm ~/.exomonad/wasm/
     @echo ">>> Done: ~/.exomonad/wasm/wasm-guest-{{role}}.wasm"
 
+# Build both dev and TL WASM guests
+wasm-all:
+    @just wasm dev
+    @just wasm tl
+    @echo ">>> Installed to ~/.exomonad/wasm/:"
+    @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
+
+# Install everything: Rust binaries + WASM plugins
+install-all:
+    @echo ">>> [1/2] Installing Rust binaries..."
+    cd rust && cargo install --path exomonad-sidecar
+    @echo ">>> [2/2] Building and installing WASM plugins..."
+    @just wasm-all
+    @echo ">>> Done!"
+    @echo ""
+    @echo "Installed:"
+    @which exomonad-sidecar
+    @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
+
 # Clean build artifacts
 clean:
     rm -rf {{metadata_dir}}
