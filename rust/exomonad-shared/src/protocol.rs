@@ -440,6 +440,15 @@ pub enum ServiceRequest {
         value: f64,
         labels: HashMap<String, String>,
     },
+
+    // User Interaction (from Zellij plugin)
+    UserInteraction {
+        request_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        payload: Option<Value>,
+        #[serde(default)]
+        cancel: bool,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

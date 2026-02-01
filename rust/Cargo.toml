@@ -6,10 +6,7 @@ members = [
     "exomonad-services",
     "exomonad-runtime",
     "exomonad-sidecar",
-    "tui-popup",
-    "tui-spawner",
     "effector",
-    "agent-status",
     "zellij-gen",
 ]
 

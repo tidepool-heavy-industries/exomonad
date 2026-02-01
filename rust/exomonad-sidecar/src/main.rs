@@ -12,14 +12,16 @@ mod mcp;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use exomonad_runtime::{PluginManager, Services};
-use exomonad_shared::protocol::{HookEventType, HookInput, HookOutput, Runtime};
+use exomonad_shared::protocol::{HookEventType, HookInput, HookOutput, Runtime, ServiceRequest};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{debug, error, info};
+use tokio::net::UnixStream;
+use tokio::io::AsyncWriteExt;
 
-// ============================================================================
+// ============================================================================ 
 // CLI Types
-// ============================================================================
+// ============================================================================ 
 
 #[derive(Parser)]
 #[command(name = "exomonad-sidecar")]
@@ -80,9 +82,9 @@ enum Commands {
     },
 }
 
-// ============================================================================
+// ============================================================================ 
 // Hook Handler
-// ============================================================================
+// ============================================================================ 
 
 async fn handle_hook(
     plugin: &PluginManager,
@@ -132,9 +134,9 @@ async fn handle_hook(
     Ok(())
 }
 
-// ============================================================================
+// ============================================================================ 
 // Main
-// ============================================================================
+// ============================================================================ 
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -149,15 +151,15 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    // Validate WASM plugin exists
-    let wasm_path = cli.wasm;
-    if !wasm_path.exists() {
-        error!(path = ?wasm_path, "WASM plugin file not found");
-        anyhow::bail!("WASM plugin not found: {}", wasm_path.display());
-    }
-
     match cli.command {
         Commands::Hook { event, runtime } => {
+            // Validate WASM plugin exists for Hook
+            let wasm_path = cli.wasm;
+            if !wasm_path.exists() {
+                error!(path = ?wasm_path, "WASM plugin file not found");
+                anyhow::bail!("WASM plugin not found: {}", wasm_path.display());
+            }
+
             info!(wasm = ?wasm_path, "Loading WASM plugin");
 
             // Initialize services with Docker executor (containerized mode)
@@ -174,6 +176,11 @@ async fn main() -> Result<()> {
         }
 
         Commands::Mcp { port, project_dir } => {
+            let wasm_path = cli.wasm;
+            if !wasm_path.exists() {
+                anyhow::bail!("WASM plugin not found: {}", wasm_path.display());
+            }
+
             let project_dir = project_dir.unwrap_or_else(|| {
                 std::env::current_dir().expect("Failed to get current directory")
             });
@@ -199,6 +206,11 @@ async fn main() -> Result<()> {
         }
 
         Commands::McpStdio => {
+            let wasm_path = cli.wasm;
+            if !wasm_path.exists() {
+                anyhow::bail!("WASM plugin not found: {}", wasm_path.display());
+            }
+
             // stdio MCP server - Claude Code spawns this process
             // Discover project_dir from config or use cwd
             let cfg = match config::Config::discover() {
@@ -238,13 +250,41 @@ async fn main() -> Result<()> {
             mcp::stdio::run_stdio_server(state).await?;
         }
 
-        Commands::Reply { id, payload, cancel } => {
-            // TODO: Implement actual socket communication to Control Server
-            if cancel {
-                info!(id = %id, "Received Cancel reply (Stub)");
+        Commands::Reply {
+            id,
+            payload,
+            cancel,
+        } => {
+            // Socket path env var or default
+            let socket_path = std::env::var("EXOMONAD_CONTROL_SOCKET")
+                .unwrap_or_else(|_| ".exomonad/sockets/control.sock".to_string());
+
+            debug!(socket = %socket_path, "Connecting to control socket");
+
+            let mut stream = UnixStream::connect(&socket_path)
+                .await
+                .context(format!("Failed to connect to control socket at {}", socket_path))?;
+
+            let parsed_payload = if let Some(p) = payload {
+                Some(serde_json::from_str(&p).context("Invalid JSON payload")?)
             } else {
-                info!(id = %id, payload = ?payload, "Received Payload reply (Stub)");
-            }
+                None
+            };
+
+            let request = ServiceRequest::UserInteraction {
+                request_id: id,
+                payload: parsed_payload,
+                cancel,
+            };
+
+            // NDJSON format: JSON + newline
+            let mut json = serde_json::to_vec(&request).context("Serialization failed")?;
+            json.push(b'\n');
+
+            stream.write_all(&json).await.context("Failed to write to socket")?;
+            
+            // We don't necessarily wait for response here, it's a push notification
+            info!("Sent reply to control socket");
         }
     }
 

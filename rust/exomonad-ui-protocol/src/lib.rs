@@ -172,7 +172,7 @@ impl PopupState {
             button_clicked: None,
         }
     }
-    
+
     // Helper to extract plain JSON values for submission
     pub fn to_json_values(&self) -> Value {
         let mut map = serde_json::Map::new();
@@ -257,4 +257,91 @@ pub struct PopupResult {
     pub values: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub time_spent_seconds: Option<f64>, // Time user spent interacting with popup
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_component_with_visibility_deserialization() {
+        // Test visibility rule deserialization
+        // Checked variant matches a simple string
+        let json = r#"{
+            "id": "slider1",
+            "type": "slider",
+            "label": "My Slider",
+            "min": 0.0,
+            "max": 100.0,
+            "default": 50.0,
+            "visible_when": "checkbox1"
+        }"#;
+
+        let parsed: Component = serde_json::from_str(json).unwrap();
+        match parsed {
+            Component::Slider {
+                id, visible_when, ..
+            } => {
+                assert_eq!(id, "slider1");
+                assert_eq!(
+                    visible_when,
+                    Some(VisibilityRule::Checked("checkbox1".to_string()))
+                );
+            }
+            _ => panic!("Expected Slider component"),
+        }
+    }
+
+    #[test]
+    fn test_visibility_rule_variants() {
+        // GreaterThan (untagged, matches by structure)
+        let json = r#"{"id": "s1", "min_value": 10.0}"#;
+        let rule: VisibilityRule = serde_json::from_str(json).unwrap();
+        match rule {
+            VisibilityRule::GreaterThan { id, min_value } => {
+                assert_eq!(id, "s1");
+                assert_eq!(min_value, 10.0);
+            }
+            _ => panic!("Expected GreaterThan"),
+        }
+
+        // CountEquals (untagged)
+        let json = r#"{"id": "m1", "exact_count": 2}"#;
+        let rule: VisibilityRule = serde_json::from_str(json).unwrap();
+        match rule {
+            VisibilityRule::CountEquals { id, exact_count } => {
+                assert_eq!(id, "m1");
+                assert_eq!(exact_count, 2);
+            }
+            _ => panic!("Expected CountEquals"),
+        }
+    }
+
+    #[test]
+    fn test_to_json_values() {
+        let mut values = HashMap::new();
+        values.insert("num".to_string(), ElementValue::Number(42.0));
+        values.insert("bool".to_string(), ElementValue::Boolean(true));
+        values.insert("text".to_string(), ElementValue::Text("hello".to_string()));
+        values.insert("choice".to_string(), ElementValue::Choice(1));
+        values.insert(
+            "multi".to_string(),
+            ElementValue::MultiChoice(vec![true, false]),
+        );
+
+        let state = PopupState {
+            values,
+            button_clicked: None,
+        };
+
+        let json = state.to_json_values();
+        let obj = json.as_object().unwrap();
+
+        assert_eq!(obj["num"], 42.0);
+        assert_eq!(obj["bool"], true);
+        assert_eq!(obj["text"], "hello");
+        assert_eq!(obj["choice"], 1);
+        assert_eq!(obj["multi"][0], true);
+        assert_eq!(obj["multi"][1], false);
+    }
 }
