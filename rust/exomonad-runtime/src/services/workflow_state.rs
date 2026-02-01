@@ -116,7 +116,7 @@ fn get_attempts(
     let input: AgentIdInput = get_input(plugin, inputs[0].clone())?;
     let service = user_data.get()?;
     let attempts = service.lock().unwrap().get_attempts(&input.agent_id);
-    
+
     let output = StateResult::Success(attempts);
     outputs[0] = set_output(plugin, &output)?;
     Ok(())
@@ -131,7 +131,7 @@ fn increment_attempts(
     let input: AgentIdInput = get_input(plugin, inputs[0].clone())?;
     let service = user_data.get()?;
     service.lock().unwrap().increment_attempts(&input.agent_id);
-    
+
     let output = StateResult::<()>::Success(());
     outputs[0] = set_output(plugin, &output)?;
     Ok(())
@@ -146,7 +146,7 @@ fn reset_attempts(
     let input: AgentIdInput = get_input(plugin, inputs[0].clone())?;
     let service = user_data.get()?;
     service.lock().unwrap().reset_attempts(&input.agent_id);
-    
+
     let output = StateResult::<()>::Success(());
     outputs[0] = set_output(plugin, &output)?;
     Ok(())

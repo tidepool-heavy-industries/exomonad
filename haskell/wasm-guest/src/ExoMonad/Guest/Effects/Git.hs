@@ -9,12 +9,15 @@
 module ExoMonad.Guest.Effects.Git
   ( -- * Effect type
     Git (..),
+
     -- * Smart constructors
     gitDiff,
     gitBranch,
     gitRemoteUrl,
+
     -- * Interpreter
     runGit,
+
     -- * Types
     GitInput (..),
   )
@@ -24,8 +27,8 @@ import Control.Monad.Freer
 import Data.Aeson (FromJSON, ToJSON (..), object, (.=))
 import Data.Text (Text)
 import Data.Text qualified as T
-import ExoMonad.Guest.HostCall (callHost, host_git_get_dirty_files, host_git_get_branch, host_git_get_remote_url)
 import ExoMonad.Guest.Effects.FileSystem (HostResult (..))
+import ExoMonad.Guest.HostCall (callHost, host_git_get_branch, host_git_get_dirty_files, host_git_get_remote_url)
 import GHC.Generics (Generic)
 
 -- Types
@@ -37,10 +40,11 @@ data GitInput = GitInput
   deriving (Show, Eq, Generic)
 
 instance ToJSON GitInput where
-  toJSON (GitInput w c) = object
-    [ "workingDir" .= w,
-    "containerId" .= c
-    ]
+  toJSON (GitInput w c) =
+    object
+      [ "workingDir" .= w,
+        "containerId" .= c
+      ]
 
 data GitRemoteInput = GitRemoteInput
   { griWorkingDir :: Text,
@@ -50,11 +54,12 @@ data GitRemoteInput = GitRemoteInput
   deriving (Show, Eq, Generic)
 
 instance ToJSON GitRemoteInput where
-  toJSON (GitRemoteInput w c r) = object
-    [ "workingDir" .= w,
-    "containerId" .= c,
-    "remote" .= r
-    ]
+  toJSON (GitRemoteInput w c r) =
+    object
+      [ "workingDir" .= w,
+        "containerId" .= c,
+        "remote" .= r
+      ]
 
 -- Effect
 
@@ -85,7 +90,6 @@ runGit = interpret $ \case
       Left err -> Left (T.pack err)
       Right (Success r) -> Right (map T.pack r) -- Rust returns Vec<String>
       Right (HostError msg) -> Left msg
-      
   GitBranch wd cid -> sendM $ do
     let input = GitInput wd cid
     res <- callHost host_git_get_branch input
@@ -93,7 +97,6 @@ runGit = interpret $ \case
       Left err -> Left (T.pack err)
       Right (Success r) -> Right (T.pack r)
       Right (HostError msg) -> Left msg
-
   GitRemoteUrl wd cid remote -> sendM $ do
     let input = GitRemoteInput wd cid remote
     res <- callHost host_git_get_remote_url input

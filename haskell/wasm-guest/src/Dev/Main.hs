@@ -5,8 +5,8 @@
 module Main where
 
 import Dev.Tools (DevTools, devToolsHandler)
-import ExoMonad.Guest.Tool.Runtime (listHandlerRecord, mcpHandlerRecord, wrapHandler)
 import ExoMonad.Guest.Hooks.StopWorkflow (stopWorkflowHandler)
+import ExoMonad.Guest.Tool.Runtime (listHandlerRecord, mcpHandlerRecord, wrapHandler)
 import Foreign.C.Types (CInt (..))
 
 -- WASM exports

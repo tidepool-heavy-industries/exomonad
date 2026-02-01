@@ -9,11 +9,14 @@
 module ExoMonad.Guest.Effects.Cabal
   ( -- * Effect type
     Cabal (..),
+
     -- * Smart constructors
     cabalBuild,
     cabalTest,
+
     -- * Interpreter
     runCabal,
+
     -- * Types
     CabalInput (..),
     BuildResult (..),
@@ -24,11 +27,11 @@ module ExoMonad.Guest.Effects.Cabal
 where
 
 import Control.Monad.Freer
-import Data.Aeson (FromJSON (..), ToJSON (..), object, (.=), (.:), withObject)
+import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.=))
 import Data.Text (Text)
 import Data.Text qualified as T
-import ExoMonad.Guest.HostCall (callHost, host_cabal_build, host_cabal_test)
 import ExoMonad.Guest.Effects.FileSystem (HostResult (..))
+import ExoMonad.Guest.HostCall (callHost, host_cabal_build, host_cabal_test)
 import GHC.Generics (Generic)
 
 -- Types
@@ -40,14 +43,17 @@ data CabalInput = CabalInput
   deriving (Show, Eq, Generic)
 
 instance ToJSON CabalInput where
-  toJSON (CabalInput p c) = object
-    [ "path" .= p
-    , "containerId" .= c
-    ]
+  toJSON (CabalInput p c) =
+    object
+      [ "path" .= p,
+        "containerId" .= c
+      ]
+
 instance FromJSON CabalInput where
-    parseJSON = withObject "CabalInput" $ \v -> CabalInput
-        <$> v .: "path"
-        <*> v .: "containerId"
+  parseJSON = withObject "CabalInput" $ \v ->
+    CabalInput
+      <$> v .: "path"
+      <*> v .: "containerId"
 
 data GHCError = GHCError
   { geFile :: Text,
@@ -58,11 +64,13 @@ data GHCError = GHCError
 
 instance ToJSON GHCError where
   toJSON (GHCError f l m) = object ["file" .= f, "line" .= l, "message" .= m]
+
 instance FromJSON GHCError where
-  parseJSON = withObject "GHCError" $ \v -> GHCError
-    <$> v .: "file"
-    <*> v .: "line"
-    <*> v .: "message"
+  parseJSON = withObject "GHCError" $ \v ->
+    GHCError
+      <$> v .: "file"
+      <*> v .: "line"
+      <*> v .: "message"
 
 data BuildResult
   = BuildSuccess
@@ -70,6 +78,7 @@ data BuildResult
   deriving (Show, Eq, Generic)
 
 instance ToJSON BuildResult
+
 instance FromJSON BuildResult
 
 data TestFailure = TestFailure
@@ -80,10 +89,12 @@ data TestFailure = TestFailure
 
 instance ToJSON TestFailure where
   toJSON (TestFailure n m) = object ["name" .= n, "message" .= m]
+
 instance FromJSON TestFailure where
-  parseJSON = withObject "TestFailure" $ \v -> TestFailure
-    <$> v .: "name"
-    <*> v .: "message"
+  parseJSON = withObject "TestFailure" $ \v ->
+    TestFailure
+      <$> v .: "name"
+      <*> v .: "message"
 
 data TestResult
   = TestsPassed Int
@@ -92,6 +103,7 @@ data TestResult
   deriving (Show, Eq, Generic)
 
 instance ToJSON TestResult
+
 instance FromJSON TestResult
 
 -- Effect

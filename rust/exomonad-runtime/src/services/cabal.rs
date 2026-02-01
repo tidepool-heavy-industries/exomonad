@@ -47,7 +47,7 @@ impl CabalService {
     pub async fn build(&self, container_id: &str, path: &str) -> Result<BuildResult> {
         let cmd = vec!["cabal", "build"];
         let res = self.docker.exec(container_id, path, &cmd).await;
-        
+
         match res {
             Ok(_) => Ok(BuildResult::BuildSuccess),
             Err(e) => {
@@ -67,13 +67,13 @@ impl CabalService {
     pub async fn test(&self, container_id: &str, path: &str) -> Result<TestResult> {
         let cmd = vec!["cabal", "test"];
         let res = self.docker.exec(container_id, path, &cmd).await;
-        
-         match res {
+
+        match res {
             Ok(_) => Ok(TestResult::TestsPassed(1)), // TODO: Parse count
             Err(e) => {
                 let msg = e.to_string();
                 let stderr = msg.strip_prefix("Docker exec failed: ").unwrap_or(&msg);
-                
+
                 if stderr.contains("no test suites") {
                     Ok(TestResult::NoTests)
                 } else {
@@ -128,9 +128,7 @@ fn set_output<T: Serialize>(plugin: &mut CurrentPlugin, data: &T) -> Result<Val,
 fn block_on<F: std::future::Future>(future: F) -> Result<F::Output, Error> {
     match tokio::runtime::Handle::try_current() {
         Ok(handle) => Ok(handle.block_on(future)),
-        Err(_) => Err(Error::msg(
-            "No Tokio runtime available",
-        )),
+        Err(_) => Err(Error::msg("No Tokio runtime available")),
     }
 }
 
@@ -142,14 +140,16 @@ pub fn register_host_functions(service: Arc<CabalService>) -> Vec<Function> {
             [ValType::I64],
             UserData::new(service.clone()),
             cabal_build,
-        ).with_namespace("env"),
+        )
+        .with_namespace("env"),
         Function::new(
             "cabal_test",
             [ValType::I64],
             [ValType::I64],
             UserData::new(service.clone()),
             cabal_test,
-        ).with_namespace("env"),
+        )
+        .with_namespace("env"),
     ]
 }
 
@@ -162,13 +162,15 @@ fn cabal_build(
     let input: CabalInput = get_input(plugin, inputs[0].clone())?;
     let service_lock = user_data.get()?;
     let service = service_lock.lock().unwrap();
-    
+
     let res = block_on(service.build(&input.container_id, &input.path))?;
     let output = match res {
         Ok(r) => CabalResult::Success(r),
-        Err(e) => CabalResult::Error(CabalError { message: e.to_string() }),
+        Err(e) => CabalResult::Error(CabalError {
+            message: e.to_string(),
+        }),
     };
-    
+
     outputs[0] = set_output(plugin, &output)?;
     Ok(())
 }
@@ -182,13 +184,15 @@ fn cabal_test(
     let input: CabalInput = get_input(plugin, inputs[0].clone())?;
     let service_lock = user_data.get()?;
     let service = service_lock.lock().unwrap();
-    
+
     let res = block_on(service.test(&input.container_id, &input.path))?;
     let output = match res {
         Ok(r) => CabalResult::Success(r),
-        Err(e) => CabalResult::Error(CabalError { message: e.to_string() }),
+        Err(e) => CabalResult::Error(CabalError {
+            message: e.to_string(),
+        }),
     };
-    
+
     outputs[0] = set_output(plugin, &output)?;
     Ok(())
 }
