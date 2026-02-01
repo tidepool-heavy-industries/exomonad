@@ -17,6 +17,7 @@ clap = { workspace = true }
 thiserror = { workspace = true }
 octocrab = "0.32"
 exomonad-shared = { path = "../exomonad-shared" }
+exomonad-services = { path = "../exomonad-services" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

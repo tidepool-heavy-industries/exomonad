@@ -33,6 +33,8 @@ module ExoMonad.Guest.HostCall
     host_explore_lsp_definition,
     host_explore_lsp_hover,
     host_explore_read_file_range,
+    -- LLM
+    host_llm_complete,
   )
 where
 
@@ -93,6 +95,9 @@ foreign import ccall "explore_lsp_definition" host_explore_lsp_definition :: Wor
 foreign import ccall "explore_lsp_hover" host_explore_lsp_hover :: Word64 -> IO Word64
 
 foreign import ccall "explore_read_file_range" host_explore_read_file_range :: Word64 -> IO Word64
+
+-- LLM host functions
+foreign import ccall "llm_complete" host_llm_complete :: Word64 -> IO Word64
 
 callHost :: (ToJSON req, FromJSON resp) => (Word64 -> IO Word64) -> req -> IO (Either String resp)
 callHost rawFn request = do

@@ -4,6 +4,7 @@ pub mod exploration;
 pub mod filesystem;
 pub mod git;
 pub mod github;
+pub mod llm;
 pub mod local;
 pub mod log;
 pub mod secrets;
@@ -16,6 +17,7 @@ pub use self::exploration::ExplorationService;
 pub use self::filesystem::FileSystemService;
 use self::git::GitService;
 use self::github::GitHubService;
+pub use self::llm::LlmService;
 use self::local::LocalExecutor;
 use self::log::{HasLogService, LogService};
 pub use self::secrets::Secrets;
@@ -29,6 +31,7 @@ pub struct Services {
     pub agent_control: Arc<AgentControlService>,
     pub filesystem: Arc<FileSystemService>,
     pub exploration: Arc<ExplorationService>,
+    pub llm: Arc<LlmService>,
 }
 
 impl Services {
@@ -71,6 +74,9 @@ impl Services {
         // Exploration service for code intelligence
         let exploration = Arc::new(ExplorationService::new());
 
+        // LLM service for AI capabilities
+        let llm = Arc::new(LlmService::new());
+
         Self {
             log: LogService::default(),
             git,
@@ -78,6 +84,7 @@ impl Services {
             agent_control,
             filesystem,
             exploration,
+            llm,
         }
     }
 }

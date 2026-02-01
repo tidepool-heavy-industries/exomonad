@@ -3,6 +3,7 @@ use crate::services::exploration;
 use crate::services::filesystem;
 use crate::services::git;
 use crate::services::github;
+use crate::services::llm;
 use crate::services::log;
 use crate::services::Services;
 use anyhow::{Context, Result};
@@ -70,6 +71,9 @@ impl PluginManager {
         functions.extend(exploration::register_host_functions(
             services.exploration.clone(),
         ));
+
+        // LLM functions (1 function)
+        functions.extend(llm::register_host_functions(services.llm.clone()));
 
         Plugin::new(&manifest, functions, true).context("Failed to create plugin")
     }

@@ -1223,6 +1223,7 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "exomonad-services",
  "exomonad-shared",
  "extism",
  "extism-convert",

@@ -54,6 +54,7 @@ library wasm-guest-internal
         ExoMonad.Guest.Effects.AgentControl
         ExoMonad.Guest.Effects.Explore
         ExoMonad.Guest.Effects.FileSystem
+        ExoMonad.Guest.Effects.LLM
         ExoMonad.Guest.HostCall
         -- Types
         ExoMonad.Guest.Types
