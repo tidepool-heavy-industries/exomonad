@@ -9,10 +9,9 @@ module TL.Tools
   )
 where
 
-import GHC.Generics (Generic)
-
 import ExoMonad.Guest.Records.Agent (AgentTools (..), agentToolsHandler, agentToolsSchema)
 import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema, ToolMode ((:-)))
+import GHC.Generics (Generic)
 
 -- | Tools available to the TL role.
 --

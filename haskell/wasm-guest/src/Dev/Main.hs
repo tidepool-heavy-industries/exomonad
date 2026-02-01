@@ -1,13 +1,12 @@
--- | Dev role WASM entry point.
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE TypeApplications #-}
 
+-- | Dev role WASM entry point.
 module Main where
-
-import Foreign.C.Types (CInt (..))
 
 import Dev.Tools (DevTools, devToolsHandler)
 import ExoMonad.Guest.Tool.Runtime (hookHandler, listHandlerRecord, mcpHandlerRecord, wrapHandler)
+import Foreign.C.Types (CInt (..))
 
 -- WASM exports
 foreign export ccall handle_mcp_call :: IO CInt

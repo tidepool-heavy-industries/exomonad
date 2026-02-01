@@ -8,9 +8,8 @@ where
 import Data.Aeson (FromJSON, Value, object, (.=))
 import Data.Aeson qualified as Aeson
 import Data.Text (Text)
-import GHC.Generics (Generic)
-
 import ExoMonad.Guest.Tool.Class
+import GHC.Generics (Generic)
 
 -- | Simple ping tool - returns "pong" to verify guest is alive.
 data Ping

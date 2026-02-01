@@ -6,10 +6,9 @@ module ExoMonad.Guest.Records.Ping
   )
 where
 
-import GHC.Generics (Generic)
-
 import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema, ToolMode ((:-)), mkHandler, mkSchema)
 import ExoMonad.Guest.Tools.Ping (Ping)
+import GHC.Generics (Generic)
 
 -- | Ping tools record.
 data PingTools mode = PingTools

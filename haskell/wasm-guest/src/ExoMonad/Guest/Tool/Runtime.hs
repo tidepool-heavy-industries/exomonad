@@ -16,13 +16,12 @@ import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as BSL
 import Data.Proxy (Proxy (..))
 import Data.Text qualified as T
-import Extism.PDK (input, output)
-import Foreign.C.Types (CInt (..))
-
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), toMCPFormat)
 import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
 import ExoMonad.Guest.Types (HookInput, MCPCallInput (..), allowResponse)
+import Extism.PDK (input, output)
+import Foreign.C.Types (CInt (..))
 
 -- | MCP call handler - dispatches to tools based on a record.
 mcpHandlerRecord :: forall tools. (DispatchRecord tools) => tools AsHandler -> IO CInt

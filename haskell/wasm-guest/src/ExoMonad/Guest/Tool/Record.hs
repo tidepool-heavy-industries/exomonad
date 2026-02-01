@@ -37,10 +37,9 @@ import Data.Kind (Type)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Data.Text qualified as T
-import GHC.Generics
-
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), MCPTool (..), ToolDefinition (..), errorResult)
 import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema, Handler (..), Schema (..), ToolMode ((:-)))
+import GHC.Generics
 
 -- ============================================================================
 -- Record Dispatch

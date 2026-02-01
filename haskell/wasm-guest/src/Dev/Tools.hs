@@ -9,10 +9,9 @@ module Dev.Tools
   )
 where
 
-import GHC.Generics (Generic)
-
 import ExoMonad.Guest.Records.Ping (PingTools (..), pingToolsHandler, pingToolsSchema)
 import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema, ToolMode ((:-)))
+import GHC.Generics (Generic)
 
 -- | Tools available to the Dev role.
 --

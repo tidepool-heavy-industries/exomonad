@@ -17,10 +17,9 @@ import Data.Aeson (FromJSON, ToJSON, Value, object, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as T
-import GHC.Generics (Generic)
-
 import ExoMonad.Guest.Effects.AgentControl qualified as AC
 import ExoMonad.Guest.Tool.Class
+import GHC.Generics (Generic)
 
 -- ============================================================================
 -- SpawnAgents

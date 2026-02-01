@@ -36,7 +36,6 @@ where
 
 import Data.Aeson (FromJSON)
 import Data.Kind (Type)
-
 import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), ToolDefinition, mkToolDef)
 
 -- ============================================================================

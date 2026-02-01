@@ -79,10 +79,10 @@ instance ToJSON HookOutput where
 -- | Hook-specific output (varies by hook type).
 data HookSpecificOutput
   = PreToolUseOutput
-      { permissionDecision :: Text,
-        permissionDecisionReason :: Maybe Text,
-        updatedInput :: Maybe Value
-      }
+  { permissionDecision :: Text,
+    permissionDecisionReason :: Maybe Text,
+    updatedInput :: Maybe Value
+  }
   deriving (Show, Generic)
 
 instance ToJSON HookSpecificOutput where

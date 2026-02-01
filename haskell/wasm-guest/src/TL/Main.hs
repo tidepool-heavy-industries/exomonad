@@ -1,12 +1,11 @@
--- | TL role WASM entry point.
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE TypeApplications #-}
 
+-- | TL role WASM entry point.
 module Main where
 
-import Foreign.C.Types (CInt (..))
-
 import ExoMonad.Guest.Tool.Runtime (hookHandler, listHandlerRecord, mcpHandlerRecord, wrapHandler)
+import Foreign.C.Types (CInt (..))
 import TL.Tools (TLTools, tlToolsHandler)
 
 -- WASM exports
