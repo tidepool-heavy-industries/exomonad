@@ -4,11 +4,11 @@
 -- The resulting WASM blob includes all tools from 'TLTools'.
 module Main where
 
-import ExoMonad.Guest.Tool.TH (mkWasmExports)
-import TL.Tools (TLTools)
+import ExoMonad.Guest.Tool.TH (mkWasmExportsRecord)
+import TL.Tools (tlToolsHandler)
 
 -- Generate WASM exports for TLTools
-$(mkWasmExports ''TLTools)
+$(mkWasmExportsRecord 'tlToolsHandler)
 
 -- Required for WASM but not called (reactor model)
 main :: IO ()

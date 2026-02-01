@@ -4,11 +4,11 @@
 -- The resulting WASM blob only includes tools from 'DevTools'.
 module Main where
 
-import Dev.Tools (DevTools)
-import ExoMonad.Guest.Tool.TH (mkWasmExports)
+import Dev.Tools (devToolsHandler)
+import ExoMonad.Guest.Tool.TH (mkWasmExportsRecord)
 
 -- Generate WASM exports for DevTools
-$(mkWasmExports ''DevTools)
+$(mkWasmExportsRecord 'devToolsHandler)
 
 -- Required for WASM but not called (reactor model)
 main :: IO ()

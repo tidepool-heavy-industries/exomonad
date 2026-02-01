@@ -1,32 +1,34 @@
--- | Dev role tool list.
+-- | Dev role tool record.
 --
--- This module defines the tools available to the Dev role.
--- The Dev role is for spawned development agents that focus on code tasks.
--- They do NOT have access to agent control tools (spawn/cleanup/list agents).
+-- Dev agents use Claude Code native tools for most operations.
+-- This provides a minimal ping tool to verify WASM guest is responsive.
 module Dev.Tools
-  ( DevTools,
+  ( DevTools (..),
+    devToolsHandler,
+    devToolsSchema,
   )
 where
 
-import ExoMonad.Guest.Tools.File (ReadFile, WriteFile)
-import ExoMonad.Guest.Tools.Git (GitBranch, GitLog, GitStatus)
-import ExoMonad.Guest.Tools.GitHub (GitHubGetIssue)
+import GHC.Generics (Generic)
+
+import ExoMonad.Guest.Records.Ping (PingTools (..), pingToolsHandler, pingToolsSchema)
+import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema, ToolMode ((:-)))
 
 -- | Tools available to the Dev role.
 --
--- Dev agents have access to:
--- - Git tools (branch, status, log)
--- - File tools (read, write)
--- - GitHub issue reading (get single issue)
+-- Minimal toolset:
+-- - ping: Verify WASM guest is responsive
 --
--- Dev agents do NOT have:
--- - Agent control (spawn, cleanup, list)
--- - GitHub listing tools (list issues, list PRs)
-type DevTools =
-  '[ GitBranch,
-     GitStatus,
-     GitLog,
-     ReadFile,
-     WriteFile,
-     GitHubGetIssue
-   ]
+-- All other operations use Claude Code native tools.
+data DevTools mode = DevTools
+  { util :: PingTools mode
+  }
+  deriving (Generic)
+
+-- | Dev tools handler record.
+devToolsHandler :: DevTools AsHandler
+devToolsHandler = DevTools {util = pingToolsHandler}
+
+-- | Dev tools schema record.
+devToolsSchema :: DevTools AsSchema
+devToolsSchema = DevTools {util = pingToolsSchema}

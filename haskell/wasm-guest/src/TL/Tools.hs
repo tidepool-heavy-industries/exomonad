@@ -1,30 +1,45 @@
--- | TL (Tech Lead) role tool list.
+-- | TL (Tech Lead) role tool record.
 --
--- This module defines the tools available to the TL role.
 -- TL is the supervisor role that can spawn/manage dev agents.
--- It includes all Dev tools plus agent control tools.
+-- Tools focus on orchestration, not duplicating CLI capabilities.
 module TL.Tools
-  ( TLTools,
+  ( TLTools (..),
+    tlToolsHandler,
+    tlToolsSchema,
   )
 where
 
-import Dev.Tools (DevTools)
-import ExoMonad.Guest.Tool.Class (type (:++))
-import ExoMonad.Guest.Tools.Agent (CleanupAgents, ListAgents, SpawnAgents)
-import ExoMonad.Guest.Tools.GitHub (GitHubListIssues, GitHubListPRs)
+import GHC.Generics (Generic)
+
+import ExoMonad.Guest.Records.Agent (AgentTools (..), agentToolsHandler, agentToolsSchema)
+import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema, ToolMode ((:-)))
 
 -- | Tools available to the TL role.
 --
--- TL agents have all Dev tools plus:
--- - Agent control (spawn, cleanup, list)
--- - GitHub listing tools (list issues, list PRs)
+-- Orchestration-focused:
+-- - spawn_agents: Spawn Claude Code agents for issues in isolated worktrees
+-- - cleanup_agents: Clean up agent worktrees and Zellij tabs
+-- - list_agents: List active agent worktrees
 --
--- This extends DevTools with TL-specific capabilities.
-type TLTools =
-  DevTools
-    :++ '[ SpawnAgents,
-           CleanupAgents,
-           ListAgents,
-           GitHubListIssues,
-           GitHubListPRs
-         ]
+-- NOT included (use Claude Code native tools):
+-- - git commands (git status, git log, etc.)
+-- - file operations (Read, Write, Edit)
+-- - GitHub queries (gh issue, gh pr)
+data TLTools mode = TLTools
+  { agent :: AgentTools mode
+  }
+  deriving (Generic)
+
+-- | TL tools handler record.
+tlToolsHandler :: TLTools AsHandler
+tlToolsHandler =
+  TLTools
+    { agent = agentToolsHandler
+    }
+
+-- | TL tools schema record.
+tlToolsSchema :: TLTools AsSchema
+tlToolsSchema =
+  TLTools
+    { agent = agentToolsSchema
+    }
