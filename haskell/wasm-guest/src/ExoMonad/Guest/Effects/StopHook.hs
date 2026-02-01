@@ -17,7 +17,7 @@ import ExoMonad.Guest.HostCall
     host_git_get_repo_info,
     host_git_has_unpushed_commits,
     host_github_get_pr_for_branch,
-    host_github_get_pr_review_comments,
+    host_wait_for_copilot_review,
   )
 import ExoMonad.Guest.Types (StopHookOutput, allowStopResponse, blockStopResponse)
 import GHC.Generics (Generic)
@@ -113,20 +113,6 @@ instance FromJSON PullRequest where
       <*> v .: "title"
       <*> v .: "url"
 
-data ReviewComment = ReviewComment
-  { rcId :: Int,
-    rcBody :: Text,
-    rcAuthor :: Text
-  }
-  deriving stock (Show, Generic)
-
-instance FromJSON ReviewComment where
-  parseJSON = Aeson.withObject "ReviewComment" $ \v ->
-    ReviewComment
-      <$> v .: "id"
-      <*> v .: "body"
-      <*> v .: "author"
-
 data GetPRInput = GetPRInput
   { repo :: Repo,
     prHead :: Text
@@ -140,18 +126,71 @@ instance ToJSON GetPRInput where
         "head" .= prHead i
       ]
 
-data GetCommentsInput = GetCommentsInput
-  { commentsRepo :: Repo,
-    commentsPrNumber :: Int
+data WaitForCopilotReviewInput = WaitForCopilotReviewInput
+  { wcrPrNumber :: Int,
+    wcrTimeoutSecs :: Int,
+    wcrPollIntervalSecs :: Int
   }
   deriving stock (Show, Generic)
 
-instance ToJSON GetCommentsInput where
+instance ToJSON WaitForCopilotReviewInput where
   toJSON i =
     object
-      [ "repo" .= commentsRepo i,
-        "pr_number" .= commentsPrNumber i
+      [ "pr_number" .= wcrPrNumber i,
+        "timeout_secs" .= wcrTimeoutSecs i,
+        "poll_interval_secs" .= wcrPollIntervalSecs i
       ]
+
+data CopilotReviewOutput = CopilotReviewOutput
+  { croStatus :: Text, -- "reviewed", "pending", "timeout"
+    croComments :: [CopilotComment]
+  }
+  deriving stock (Show, Generic)
+
+instance FromJSON CopilotReviewOutput where
+  parseJSON = Aeson.withObject "CopilotReviewOutput" $ \v ->
+    CopilotReviewOutput
+      <$> v .: "status"
+      <*> v .: "comments"
+
+data CopilotComment = CopilotComment
+  { ccPath :: Text,
+    ccLine :: Maybe Int,
+    ccBody :: Text
+  }
+  deriving stock (Show, Generic)
+
+instance FromJSON CopilotComment where
+  parseJSON = Aeson.withObject "CopilotComment" $ \v ->
+    CopilotComment
+      <$> v .: "path"
+      <*> v .: "line"
+      <*> v .: "body"
+
+data CopilotHostOutput a
+  = CopilotSuccess a
+  | CopilotError CopilotHostError
+  deriving stock (Show, Generic)
+
+instance (FromJSON a) => FromJSON (CopilotHostOutput a) where
+  parseJSON = Aeson.withObject "CopilotHostOutput" $ \v -> do
+    kind <- v .: "kind"
+    case kind :: Text of
+      "Success" -> CopilotSuccess <$> v .: "payload"
+      "Error" -> CopilotError <$> v .: "payload"
+      _ -> fail "Unknown kind"
+
+data CopilotHostError = CopilotHostError
+  { cheMessage :: Text,
+    cheCode :: Text
+  }
+  deriving stock (Show, Generic)
+
+instance FromJSON CopilotHostError where
+  parseJSON = Aeson.withObject "CopilotHostError" $ \v ->
+    CopilotHostError
+      <$> v .: "message"
+      <*> v .: "code"
 
 -- ============================================================================
 -- Main Check Logic
@@ -211,23 +250,40 @@ checkPRFiled repoInfo = do
         Right (GHSuccess (Just pr)) -> checkReviewComments repo pr
 
 checkReviewComments :: Repo -> PullRequest -> IO StopHookOutput
-checkReviewComments repo pr = do
-  let commentsInput =
-        GetCommentsInput
-          { commentsRepo = repo,
-            commentsPrNumber = prNumber pr
+checkReviewComments _repo pr = do
+  -- Wait for Copilot to review the PR (polls with 30s interval, 5 min timeout)
+  let waitInput =
+        WaitForCopilotReviewInput
+          { wcrPrNumber = prNumber pr,
+            wcrTimeoutSecs = 300, -- 5 minutes
+            wcrPollIntervalSecs = 30
           }
 
-  commentsResult <- callHost host_github_get_pr_review_comments commentsInput
-  case commentsResult of
-    Left err -> pure $ blockStopResponse $ "Failed to check review comments: " <> T.pack err
-    Right (GHError ghErr) -> pure $ blockStopResponse $ "GitHub error checking review comments: " <> ghMessage ghErr
-    Right (GHSuccess comments) ->
-      if not (null (comments :: [ReviewComment]))
-        then
+  reviewResult <- callHost host_wait_for_copilot_review waitInput
+  case reviewResult of
+    Left err -> pure $ blockStopResponse $ "Failed to wait for Copilot review: " <> T.pack err
+    Right (CopilotError copilotErr) ->
+      pure $ blockStopResponse $ "Error waiting for Copilot review: " <> cheMessage copilotErr
+    Right (CopilotSuccess reviewOutput) ->
+      case croStatus reviewOutput of
+        "timeout" ->
           pure $
             blockStopResponse $
-              "Copilot left comments to address on PR #"
+              "Copilot hasn't reviewed PR #"
                 <> T.pack (show (prNumber pr))
-                <> ". Fix these, commit, push, then stop again."
-        else pure allowStopResponse
+                <> " yet. Wait for Copilot review or check if Copilot is enabled for this repo."
+        "reviewed" ->
+          if null (croComments reviewOutput)
+            then pure allowStopResponse -- Copilot reviewed with no comments - good to go
+            else
+              pure $
+                blockStopResponse $
+                  "Copilot left "
+                    <> T.pack (show (length (croComments reviewOutput)))
+                    <> " comment(s) on PR #"
+                    <> T.pack (show (prNumber pr))
+                    <> ". Address them, commit, push, then stop again."
+        _ ->
+          pure $
+            blockStopResponse $
+              "Unexpected Copilot review status: " <> croStatus reviewOutput
