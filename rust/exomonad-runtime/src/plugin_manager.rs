@@ -1,4 +1,5 @@
 use crate::services::agent_control;
+use crate::services::exploration;
 use crate::services::filesystem;
 use crate::services::git;
 use crate::services::github;
@@ -63,6 +64,11 @@ impl PluginManager {
         // Filesystem functions (2 functions) - file read/write
         functions.extend(filesystem::register_host_functions(
             services.filesystem.clone(),
+        ));
+
+        // Exploration functions (5 functions)
+        functions.extend(exploration::register_host_functions(
+            services.exploration.clone(),
         ));
 
         Plugin::new(&manifest, functions, true).context("Failed to create plugin")

@@ -10,6 +10,7 @@ module TL.Tools
 where
 
 import ExoMonad.Guest.Records.Agent (AgentTools (..), agentToolsHandler, agentToolsSchema)
+import ExoMonad.Guest.Records.Explorer (ExplorerTools (..), explorerToolsHandler, explorerToolsSchema)
 import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema, ToolMode ((:-)))
 import GHC.Generics (Generic)
 
@@ -19,13 +20,16 @@ import GHC.Generics (Generic)
 -- - spawn_agents: Spawn Claude Code agents for issues in isolated worktrees
 -- - cleanup_agents: Clean up agent worktrees and Zellij tabs
 -- - list_agents: List active agent worktrees
+-- - explore_codebase: Haiku-driven code exploration
+-- - continue_exploration: Resume exploration
 --
 -- NOT included (use Claude Code native tools):
 -- - git commands (git status, git log, etc.)
 -- - file operations (Read, Write, Edit)
 -- - GitHub queries (gh issue, gh pr)
 data TLTools mode = TLTools
-  { agent :: AgentTools mode
+  { agent :: AgentTools mode,
+    explorer :: ExplorerTools mode
   }
   deriving (Generic)
 
@@ -33,12 +37,14 @@ data TLTools mode = TLTools
 tlToolsHandler :: TLTools AsHandler
 tlToolsHandler =
   TLTools
-    { agent = agentToolsHandler
+    { agent = agentToolsHandler,
+      explorer = explorerToolsHandler
     }
 
 -- | TL tools schema record.
 tlToolsSchema :: TLTools AsSchema
 tlToolsSchema =
   TLTools
-    { agent = agentToolsSchema
+    { agent = agentToolsSchema,
+      explorer = explorerToolsSchema
     }

@@ -27,6 +27,12 @@ module ExoMonad.Guest.HostCall
     -- Filesystem
     host_fs_read_file,
     host_fs_write_file,
+    -- Exploration
+    host_explore_ast_grep,
+    host_explore_lsp_references,
+    host_explore_lsp_definition,
+    host_explore_lsp_hover,
+    host_explore_read_file_range,
   )
 where
 
@@ -76,6 +82,17 @@ foreign import ccall "agent_list" host_agent_list :: Word64 -> IO Word64
 foreign import ccall "fs_read_file" host_fs_read_file :: Word64 -> IO Word64
 
 foreign import ccall "fs_write_file" host_fs_write_file :: Word64 -> IO Word64
+
+-- Exploration host functions
+foreign import ccall "explore_ast_grep" host_explore_ast_grep :: Word64 -> IO Word64
+
+foreign import ccall "explore_lsp_references" host_explore_lsp_references :: Word64 -> IO Word64
+
+foreign import ccall "explore_lsp_definition" host_explore_lsp_definition :: Word64 -> IO Word64
+
+foreign import ccall "explore_lsp_hover" host_explore_lsp_hover :: Word64 -> IO Word64
+
+foreign import ccall "explore_read_file_range" host_explore_read_file_range :: Word64 -> IO Word64
 
 callHost :: (ToJSON req, FromJSON resp) => (Word64 -> IO Word64) -> req -> IO (Either String resp)
 callHost rawFn request = do

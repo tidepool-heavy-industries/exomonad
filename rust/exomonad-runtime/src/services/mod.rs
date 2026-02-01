@@ -1,5 +1,6 @@
 pub mod agent_control;
 pub mod docker;
+pub mod exploration;
 pub mod filesystem;
 pub mod git;
 pub mod github;
@@ -11,6 +12,7 @@ pub use self::agent_control::{
     AgentControlService, AgentInfo, BatchCleanupResult, BatchSpawnResult, SpawnOptions, SpawnResult,
 };
 use self::docker::{DockerExecutor, DockerService};
+pub use self::exploration::ExplorationService;
 pub use self::filesystem::FileSystemService;
 use self::git::GitService;
 use self::github::GitHubService;
@@ -26,6 +28,7 @@ pub struct Services {
     pub github: Option<GitHubService>,
     pub agent_control: Arc<AgentControlService>,
     pub filesystem: Arc<FileSystemService>,
+    pub exploration: Arc<ExplorationService>,
 }
 
 impl Services {
@@ -65,12 +68,16 @@ impl Services {
         // Filesystem service for file read/write operations
         let filesystem = Arc::new(FileSystemService::new(project_dir));
 
+        // Exploration service for code intelligence
+        let exploration = Arc::new(ExplorationService::new());
+
         Self {
             log: LogService::default(),
             git,
             github,
             agent_control,
             filesystem,
+            exploration,
         }
     }
 }

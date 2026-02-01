@@ -29,7 +29,8 @@ common shared
         bytestring,
         text,
         aeson,
-        freer-simple
+        freer-simple,
+        containers
 
 -- Internal library with shared tool infrastructure
 library wasm-guest-internal
@@ -44,15 +45,19 @@ library wasm-guest-internal
         -- Tools
         ExoMonad.Guest.Tools.Ping
         ExoMonad.Guest.Tools.Agent
+        ExoMonad.Guest.Tools.Explorer
         -- Tool records
         ExoMonad.Guest.Records.Ping
         ExoMonad.Guest.Records.Agent
+        ExoMonad.Guest.Records.Explorer
         -- Effects (for internal composition)
         ExoMonad.Guest.Effects.AgentControl
+        ExoMonad.Guest.Effects.Explore
         ExoMonad.Guest.Effects.FileSystem
         ExoMonad.Guest.HostCall
         -- Types
         ExoMonad.Guest.Types
+        ExoMonad.Guest.Graph
         ExoMonad.Guest.Parsers
         -- Role tools
         Dev.Tools

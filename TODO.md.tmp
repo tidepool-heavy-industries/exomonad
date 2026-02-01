@@ -1,0 +1,274 @@
+# Haiku Explorer - DAG-Building Codebase Exploration
+
+An MCP tool where Haiku iteratively explores the codebase using LSP + ast-grep, building a directed acyclic graph of code relationships.
+
+## Concept
+
+Instead of one-shot searches, Haiku drives an exploration loop:
+1. Start with a seed (symbol, file, question)
+2. Haiku decides what to query (LSP refs, ast-grep pattern, file read)
+3. Results come back, Haiku interprets and decides next step
+4. Graph of discoveries accumulates
+5. When satisfied (or budget exhausted), synthesize answer
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  explore_codebase("How does auth flow work?")                   │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Haiku Loop                                                     │
+│                                                                 │
+│  Step 1: "I should find auth-related types"                     │
+│    → ast-grep: `type.*Auth` in *.hs                             │
+│    → Found: AuthToken, AuthConfig, AuthError                    │
+│                                                                 │
+│  Step 2: "Let me find where AuthToken is created"               │
+│    → LSP: find references to AuthToken constructor              │
+│    → Found: Login.hs:45, Refresh.hs:23                          │
+│                                                                 │
+│  Step 3: "What calls Login.authenticate?"                       │
+│    → LSP: incoming calls to authenticate                        │
+│    → Found: API.hs:Handler, CLI.hs:main                         │
+│                                                                 │
+│  Step 4: "I have enough to answer"                              │
+│    → Synthesize graph + summary                                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Returns:                                                       │
+│  - DAG of discovered nodes + edges                              │
+│  - Natural language summary                                     │
+│  - Key files/symbols identified                                 │
+│  - Exploration trace (for debugging/replay)                     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## MCP Tool
+
+### `explore_codebase`
+
+**Input:**
+```json
+{
+  "question": "How does the auth flow work?",
+  "seed": "src/Auth/",           // optional starting point
+  "max_steps": 10,               // budget
+  "languages": ["haskell"],      // scope
+  "depth": "medium"              // quick/medium/thorough
+}
+```
+
+**Output:**
+```json
+{
+  "exploration_id": "uuid",
+  "summary": "Auth flow starts at API handlers, calls Login.authenticate...",
+  "graph": {
+    "nodes": [
+      {"id": "AuthToken", "type": "type", "file": "Types.hs", "line": 23},
+      {"id": "authenticate", "type": "function", "file": "Login.hs", "line": 45},
+      ...
+    ],
+    "edges": [
+      {"from": "API.handler", "to": "authenticate", "relation": "calls"},
+      {"from": "authenticate", "to": "AuthToken", "relation": "returns"},
+      ...
+    ]
+  },
+  "key_files": ["src/Auth/Login.hs", "src/Auth/Types.hs"],
+  "steps_used": 7,
+  "trace": [...]  // optional, for debugging
+}
+```
+
+### `continue_exploration`
+
+Resume or extend a previous exploration:
+
+**Input:**
+```json
+{
+  "exploration_id": "uuid",
+  "followup": "What about token refresh?",
+  "additional_steps": 5
+}
+```
+
+## Haiku's Available Actions
+
+Each iteration, Haiku can invoke:
+
+```haskell
+data ExploreAction
+  = AstGrepSearch Language Pattern FilePath
+  | LspReferences FilePath Position
+  | LspDefinition FilePath Position
+  | LspIncomingCalls FilePath Position
+  | LspOutgoingCalls FilePath Position
+  | LspHover FilePath Position
+  | ReadFileRange FilePath (Int, Int)
+  | GrepPattern Text FilePath
+  | Conclude Summary
+```
+
+Haiku's prompt includes:
+- Original question
+- Current graph state
+- Previous actions + results
+- Remaining budget
+
+## Graph Model
+
+```haskell
+data Node = Node
+  { nodeId :: Text
+  , nodeType :: NodeType  -- Type, Function, Module, File
+  , nodeFile :: FilePath
+  , nodeLine :: Int
+  , nodeSnippet :: Maybe Text
+  }
+
+data Edge = Edge
+  { edgeFrom :: Text
+  , edgeTo :: Text
+  , edgeRelation :: Relation  -- Calls, Returns, Imports, Defines, Uses
+  }
+
+data ExplorationGraph = ExplorationGraph
+  { graphNodes :: Map Text Node
+  , graphEdges :: [Edge]
+  }
+```
+
+## Implementation Phases
+
+### Phase 1: Effect Types
+
+- [ ] `Explore` effect with available actions
+- [ ] Graph types (Node, Edge, ExplorationGraph)
+- [ ] Exploration state type
+
+### Phase 2: LSP Integration
+
+- [ ] Wire up existing LSP interpreter
+- [ ] Host functions for LSP operations
+- [ ] Parse LSP responses into graph nodes
+
+### Phase 3: ast-grep Integration
+
+- [ ] Depends on ast-grep-integration worktree
+- [ ] Search patterns → graph nodes
+- [ ] Structural queries for relationships
+
+### Phase 4: Haiku Loop
+
+- [ ] Prompt template for exploration decisions
+- [ ] Action parsing from Haiku response
+- [ ] Iteration loop with budget tracking
+- [ ] Termination conditions
+
+### Phase 5: Graph Building
+
+- [ ] Accumulate nodes as discovered
+- [ ] Infer edges from relationships
+- [ ] Deduplicate overlapping discoveries
+- [ ] Synthesize summary at end
+
+### Phase 6: Session Persistence
+
+- [ ] Store exploration state in Rust host
+- [ ] Enable `continue_exploration`
+- [ ] TTL for old explorations
+
+### Phase 7: MCP Wiring
+
+- [ ] `explore_codebase` tool
+- [ ] `continue_exploration` tool
+- [ ] Add to TL tools
+- [ ] Rebuild WASM
+
+## Haiku Prompt Template
+
+```
+You are exploring a codebase to answer: {question}
+
+Current understanding (graph):
+{graph_summary}
+
+Previous steps:
+{trace}
+
+Budget remaining: {remaining} steps
+
+Available actions:
+- ast_grep(language, pattern, path) - structural search
+- lsp_refs(file, line, col) - find references
+- lsp_def(file, line, col) - go to definition
+- lsp_calls_in(file, line, col) - who calls this?
+- lsp_calls_out(file, line, col) - what does this call?
+- read_file(file, start, end) - read code
+- grep(pattern, path) - text search
+- conclude(summary) - done exploring
+
+Decide your next action. Respond with JSON:
+{"action": "...", "args": {...}, "reasoning": "..."}
+```
+
+## Example Session
+
+```
+User: "How does error handling work in this codebase?"
+
+Claude: [calls explore_codebase]
+  question: "How does error handling work?"
+  languages: ["haskell"]
+  max_steps: 10
+
+[Haiku explores]
+  Step 1: ast_grep("haskell", "data.*Error", "src/")
+    → Found: AppError, ValidationError, ApiError
+  Step 2: lsp_refs("src/Error/Types.hs", 15, 1)  -- AppError
+    → 34 references across 12 files
+  Step 3: ast_grep("haskell", "throwError $ERR", "src/")
+    → Found throw sites
+  Step 4: lsp_def on error handlers
+    → Found: handleError in Error/Handler.hs
+  Step 5: read_file("src/Error/Handler.hs", 1, 50)
+    → Read the handler implementation
+  Step 6: conclude
+    → "Error handling uses AppError sum type, thrown via throwError,
+       caught in API.hs middleware, logged via handleError..."
+
+Claude receives:
+  summary: "..."
+  graph: {nodes: [...], edges: [...]}
+  key_files: ["src/Error/Types.hs", "src/Error/Handler.hs", "src/API.hs"]
+
+Claude to user: "Here's how error handling works: [summary]
+  Key files: [list]
+  [optional: shows graph visualization]"
+```
+
+## Dependencies
+
+- LSP interpreter (existing)
+- ast-grep integration (parallel worktree)
+- Haiku API access
+- Session state storage (Rust)
+
+## Relationship to Other Worktrees
+
+- **ast-grep-integration**: Provides ast-grep effect, this consumes it
+- **refactor-preview**: Similar Haiku loop pattern, different goal
+
+## Files to Create
+
+```
+haskell/wasm-guest/src/ExoMonad/Guest/Tools/Explorer.hs
+haskell/wasm-guest/src/ExoMonad/Guest/Effects/Explore.hs
+haskell/wasm-guest/src/ExoMonad/Guest/Graph.hs
+rust/exomonad-runtime/src/services/exploration_state.rs
+```
