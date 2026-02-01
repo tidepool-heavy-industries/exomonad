@@ -17,9 +17,11 @@ clap = { workspace = true }
 thiserror = { workspace = true }
 octocrab = "0.32"
 exomonad-shared = { path = "../exomonad-shared" }
+uuid = { version = "1.10", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tempfile = { workspace = true }
 
 [dev-dependencies]
-tempfile = { workspace = true }
 wiremock = "0.5"
 
 [lib]

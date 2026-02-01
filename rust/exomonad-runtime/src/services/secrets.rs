@@ -3,8 +3,11 @@
 //! Secrets are stored in a simple KEY=value format (like .env files).
 //! Single canonical location: ~/.exomonad/secrets
 
+use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Loaded secrets from ~/.exomonad/secrets file.
 #[derive(Debug, Clone, Default)]
@@ -73,6 +76,88 @@ fn parse_env_file(content: &str) -> HashMap<String, String> {
             Some((key.to_string(), value.to_string()))
         })
         .collect()
+}
+
+// --- Host Functions ---
+
+#[derive(Deserialize)]
+struct GetSecretInput {
+    key: String,
+}
+
+#[derive(Serialize)]
+struct GetSecretOutput {
+    value: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind", content = "payload")]
+enum HostResult<T> {
+    Success(T),
+    Error(HostError),
+}
+
+#[derive(Serialize)]
+struct HostError {
+    message: String,
+}
+
+impl<T> From<Result<T, anyhow::Error>> for HostResult<T> {
+    fn from(res: Result<T, anyhow::Error>) -> Self {
+        match res {
+            Ok(val) => HostResult::Success(val),
+            Err(e) => HostResult::Error(HostError {
+                message: e.to_string(),
+            }),
+        }
+    }
+}
+
+fn get_input<T: serde::de::DeserializeOwned>(
+    plugin: &mut CurrentPlugin,
+    val: Val,
+) -> Result<T, Error> {
+    let handle = plugin
+        .memory_from_val(&val)
+        .ok_or_else(|| Error::msg("Invalid memory handle in input"))?;
+    let bytes = plugin.memory_bytes(handle)?;
+    Ok(serde_json::from_slice(bytes)?)
+}
+
+fn set_output<T: Serialize>(plugin: &mut CurrentPlugin, data: &T) -> Result<Val, Error> {
+    let json = serde_json::to_vec(data)?;
+    let handle = plugin.memory_new(json)?;
+    Ok(plugin.memory_to_val(handle))
+}
+
+pub fn register_host_functions(service: Arc<Secrets>) -> Vec<Function> {
+    vec![Function::new(
+        "secrets_get",
+        [ValType::I64],
+        [ValType::I64],
+        UserData::new(service),
+        secrets_get,
+    )
+    .with_namespace("env")]
+}
+
+fn secrets_get(
+    plugin: &mut CurrentPlugin,
+    inputs: &[Val],
+    outputs: &mut [Val],
+    user_data: UserData<Arc<Secrets>>,
+) -> Result<(), Error> {
+    let input: GetSecretInput = get_input(plugin, inputs[0].clone())?;
+    let service_arc = user_data.get()?;
+    let service = service_arc
+        .lock()
+        .map_err(|_| Error::msg("Poisoned lock"))?;
+
+    let value = service.get(&input.key);
+    let output: HostResult<GetSecretOutput> = Ok(GetSecretOutput { value }).into();
+
+    outputs[0] = set_output(plugin, &output)?;
+    Ok(())
 }
 
 #[cfg(test)]

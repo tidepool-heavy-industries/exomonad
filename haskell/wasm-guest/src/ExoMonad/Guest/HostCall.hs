@@ -27,6 +27,15 @@ module ExoMonad.Guest.HostCall
     -- Filesystem
     host_fs_read_file,
     host_fs_write_file,
+    -- AstGrep
+    host_ast_grep_scan,
+    host_ast_grep_apply,
+    -- PlanStore
+    host_plan_store_save,
+    host_plan_store_get,
+    host_plan_store_delete,
+    -- Secrets
+    host_secrets_get,
   )
 where
 
@@ -76,6 +85,21 @@ foreign import ccall "agent_list" host_agent_list :: Word64 -> IO Word64
 foreign import ccall "fs_read_file" host_fs_read_file :: Word64 -> IO Word64
 
 foreign import ccall "fs_write_file" host_fs_write_file :: Word64 -> IO Word64
+
+-- AstGrep host functions
+foreign import ccall "ast_grep_scan" host_ast_grep_scan :: Word64 -> IO Word64
+
+foreign import ccall "ast_grep_apply" host_ast_grep_apply :: Word64 -> IO Word64
+
+-- PlanStore host functions
+foreign import ccall "plan_store_save" host_plan_store_save :: Word64 -> IO Word64
+
+foreign import ccall "plan_store_get" host_plan_store_get :: Word64 -> IO Word64
+
+foreign import ccall "plan_store_delete" host_plan_store_delete :: Word64 -> IO Word64
+
+-- Secrets host functions
+foreign import ccall "secrets_get" host_secrets_get :: Word64 -> IO Word64
 
 callHost :: (ToJSON req, FromJSON resp) => (Word64 -> IO Word64) -> req -> IO (Either String resp)
 callHost rawFn request = do

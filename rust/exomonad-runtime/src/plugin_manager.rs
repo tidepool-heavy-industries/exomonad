@@ -1,8 +1,11 @@
 use crate::services::agent_control;
+use crate::services::ast_grep;
 use crate::services::filesystem;
 use crate::services::git;
 use crate::services::github;
 use crate::services::log;
+use crate::services::plan_store;
+use crate::services::secrets;
 use crate::services::Services;
 use anyhow::{Context, Result};
 use extism::{Manifest, Plugin};
@@ -64,6 +67,17 @@ impl PluginManager {
         functions.extend(filesystem::register_host_functions(
             services.filesystem.clone(),
         ));
+
+        // AstGrep functions (2 functions)
+        functions.extend(ast_grep::register_host_functions(services.ast_grep.clone()));
+
+        // PlanStore functions (3 functions)
+        functions.extend(plan_store::register_host_functions(
+            services.plan_store.clone(),
+        ));
+
+        // Secrets functions (1 function)
+        functions.extend(secrets::register_host_functions(services.secrets.clone()));
 
         Plugin::new(&manifest, functions, true).context("Failed to create plugin")
     }

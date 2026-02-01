@@ -1,21 +1,25 @@
 pub mod agent_control;
+pub mod ast_grep;
 pub mod docker;
 pub mod filesystem;
 pub mod git;
 pub mod github;
 pub mod local;
 pub mod log;
+pub mod plan_store;
 pub mod secrets;
 
 pub use self::agent_control::{
     AgentControlService, AgentInfo, BatchCleanupResult, BatchSpawnResult, SpawnOptions, SpawnResult,
 };
+use self::ast_grep::AstGrepService;
 use self::docker::{DockerExecutor, DockerService};
 pub use self::filesystem::FileSystemService;
 use self::git::GitService;
 use self::github::GitHubService;
 use self::local::LocalExecutor;
 use self::log::{HasLogService, LogService};
+use self::plan_store::PlanStore;
 pub use self::secrets::Secrets;
 use std::sync::Arc;
 
@@ -26,6 +30,9 @@ pub struct Services {
     pub github: Option<GitHubService>,
     pub agent_control: Arc<AgentControlService>,
     pub filesystem: Arc<FileSystemService>,
+    pub ast_grep: Arc<AstGrepService>,
+    pub plan_store: Arc<PlanStore>,
+    pub secrets: Arc<Secrets>,
 }
 
 impl Services {
@@ -47,7 +54,7 @@ impl Services {
     }
 
     fn with_executor(executor: Arc<dyn DockerExecutor>) -> Self {
-        let secrets = Secrets::load();
+        let secrets = Arc::new(Secrets::load());
         let git = Arc::new(GitService::new(executor));
 
         // GitHub service is optional - try secrets file first, then env var
@@ -65,12 +72,18 @@ impl Services {
         // Filesystem service for file read/write operations
         let filesystem = Arc::new(FileSystemService::new(project_dir));
 
+        let ast_grep = Arc::new(AstGrepService::new());
+        let plan_store = Arc::new(PlanStore::new());
+
         Self {
             log: LogService::default(),
             git,
             github,
             agent_control,
             filesystem,
+            ast_grep,
+            plan_store,
+            secrets,
         }
     }
 }

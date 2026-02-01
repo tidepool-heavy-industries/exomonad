@@ -10,6 +10,7 @@ module TL.Tools
 where
 
 import ExoMonad.Guest.Records.Agent (AgentTools (..), agentToolsHandler, agentToolsSchema)
+import ExoMonad.Guest.Records.RefactorPreview (RefactorPreviewTools (..), refactorPreviewToolsHandler, refactorPreviewToolsSchema)
 import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema, ToolMode ((:-)))
 import GHC.Generics (Generic)
 
@@ -20,12 +21,19 @@ import GHC.Generics (Generic)
 -- - cleanup_agents: Clean up agent worktrees and Zellij tabs
 -- - list_agents: List active agent worktrees
 --
+-- Refactoring-focused:
+-- - refactor_preview: Generate ast-grep rule and preview diff
+-- - enact_refactor: Apply the refactor
+-- - steer_refactor: Refine the rule
+-- - discard_refactor: Discard the plan
+--
 -- NOT included (use Claude Code native tools):
 -- - git commands (git status, git log, etc.)
 -- - file operations (Read, Write, Edit)
 -- - GitHub queries (gh issue, gh pr)
 data TLTools mode = TLTools
-  { agent :: AgentTools mode
+  { agent :: AgentTools mode,
+    refactor :: RefactorPreviewTools mode
   }
   deriving (Generic)
 
@@ -33,12 +41,14 @@ data TLTools mode = TLTools
 tlToolsHandler :: TLTools AsHandler
 tlToolsHandler =
   TLTools
-    { agent = agentToolsHandler
+    { agent = agentToolsHandler,
+      refactor = refactorPreviewToolsHandler
     }
 
 -- | TL tools schema record.
 tlToolsSchema :: TLTools AsSchema
 tlToolsSchema =
   TLTools
-    { agent = agentToolsSchema
+    { agent = agentToolsSchema,
+      refactor = refactorPreviewToolsSchema
     }

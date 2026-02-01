@@ -44,12 +44,17 @@ library wasm-guest-internal
         -- Tools
         ExoMonad.Guest.Tools.Ping
         ExoMonad.Guest.Tools.Agent
+        ExoMonad.Guest.Tools.RefactorPreview
         -- Tool records
         ExoMonad.Guest.Records.Ping
         ExoMonad.Guest.Records.Agent
+        ExoMonad.Guest.Records.RefactorPreview
         -- Effects (for internal composition)
         ExoMonad.Guest.Effects.AgentControl
         ExoMonad.Guest.Effects.FileSystem
+        ExoMonad.Guest.Effects.AstGrep
+        ExoMonad.Guest.Effects.LLM
+        ExoMonad.Guest.Effects.PlanStore
         ExoMonad.Guest.HostCall
         -- Types
         ExoMonad.Guest.Types
