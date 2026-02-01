@@ -1,4 +1,6 @@
 use crate::services::agent_control;
+use crate::services::copilot_review;
+use crate::services::file_pr;
 use crate::services::filesystem;
 use crate::services::git;
 use crate::services::github;
@@ -67,6 +69,12 @@ impl PluginManager {
         functions.extend(filesystem::register_host_functions(
             services.filesystem.clone(),
         ));
+
+        // File PR functions (1 function) - create/update PRs via gh CLI
+        functions.extend(file_pr::register_host_functions());
+
+        // Copilot review functions (1 function) - poll for Copilot review comments
+        functions.extend(copilot_review::register_host_functions());
 
         Plugin::new(&manifest, functions, true).context("Failed to create plugin")
     }

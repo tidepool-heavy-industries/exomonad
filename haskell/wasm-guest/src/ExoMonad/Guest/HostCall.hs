@@ -32,6 +32,10 @@ module ExoMonad.Guest.HostCall
     -- Filesystem
     host_fs_read_file,
     host_fs_write_file,
+    -- File PR
+    host_file_pr,
+    -- Copilot Review
+    host_wait_for_copilot_review,
   )
 where
 
@@ -91,6 +95,12 @@ foreign import ccall "agent_list" host_agent_list :: Word64 -> IO Word64
 foreign import ccall "fs_read_file" host_fs_read_file :: Word64 -> IO Word64
 
 foreign import ccall "fs_write_file" host_fs_write_file :: Word64 -> IO Word64
+
+-- File PR host function (create/update PRs via gh CLI)
+foreign import ccall "file_pr" host_file_pr :: Word64 -> IO Word64
+
+-- Copilot Review host function (poll for Copilot review comments)
+foreign import ccall "wait_for_copilot_review" host_wait_for_copilot_review :: Word64 -> IO Word64
 
 callHost :: (ToJSON req, FromJSON resp) => (Word64 -> IO Word64) -> req -> IO (Either String resp)
 callHost rawFn request = do
