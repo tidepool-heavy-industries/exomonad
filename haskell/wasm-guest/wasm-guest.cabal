@@ -9,24 +9,58 @@ build-type:         Simple
 
 common shared
     default-language: GHC2021
+    default-extensions:
+        AllowAmbiguousTypes
+        DataKinds
+        DeriveGeneric
+        FlexibleContexts
+        FlexibleInstances
+        ForeignFunctionInterface
+        GADTs
+        LambdaCase
+        OverloadedStrings
+        ScopedTypeVariables
+        TemplateHaskell
+        TypeApplications
+        TypeFamilies
+        TypeOperators
+        UndecidableInstances
     build-depends:
         base >= 4.16 && < 5,
         bytestring,
         text,
         aeson,
-        freer-simple
+        freer-simple,
+        template-haskell
 
-executable wasm-guest
+-- Internal library with shared tool infrastructure
+library wasm-guest-internal
     import:           shared
-    main-is:          Main.hs
     hs-source-dirs:   src
-    other-modules:
-        ExoMonad.Guest.HostCall
+    exposed-modules:
+        ExoMonad.Guest.Tool.Class
+        ExoMonad.Guest.Tool.TH
+        ExoMonad.Guest.Tools.Git
+        ExoMonad.Guest.Tools.File
+        ExoMonad.Guest.Tools.GitHub
+        ExoMonad.Guest.Tools.Agent
+        ExoMonad.Guest.Types
         ExoMonad.Guest.Effects.AgentControl
         ExoMonad.Guest.Effects.FileSystem
-        ExoMonad.Guest.Tools
-
+        ExoMonad.Guest.HostCall
+        ExoMonad.Guest.Parsers
     build-depends:
+        extism-pdk >= 0.1 && < 1
+
+-- TL role executable (includes agent control tools)
+executable wasm-guest-tl
+    import:           shared
+    hs-source-dirs:   src
+    main-is:          TL/Main.hs
+    other-modules:
+        TL.Tools
+    build-depends:
+        wasm-guest:wasm-guest-internal,
         extism-pdk >= 0.1 && < 1
 
     if arch(wasm32)
@@ -39,18 +73,30 @@ executable wasm-guest
             -optl-Wl,--export=handle_list_tools
             -optl-Wl,--allow-undefined
 
-library wasm-guest-lib
+-- Dev role executable (code tools only, no agent control)
+executable wasm-guest-dev
     import:           shared
     hs-source-dirs:   src
-    exposed-modules:
-        ExoMonad.Guest.Tools
-        ExoMonad.Guest.Parsers
+    main-is:          Dev/Main.hs
     other-modules:
-        ExoMonad.Guest.Effects.AgentControl
-        ExoMonad.Guest.HostCall
+        Dev.Tools
     build-depends:
+        wasm-guest:wasm-guest-internal,
         extism-pdk >= 0.1 && < 1
 
+    if arch(wasm32)
+        ghc-options:
+            -no-hs-main
+            -optl-mexec-model=reactor
+            -optl-Wl,--export=hs_init
+            -optl-Wl,--export=handle_mcp_call
+            -optl-Wl,--export=handle_pre_tool_use
+            -optl-Wl,--export=handle_list_tools
+            -optl-Wl,--allow-undefined
+
+-- NOTE: Tests cannot run natively because extism-pdk requires WASM runtime.
+-- The internal library and TH generation are verified by library build success.
+-- Tests can be run in WASM environment with wasm32-wasi-cabal.
 test-suite wasm-guest-tests
     import:           shared
     type:             exitcode-stdio-1.0
@@ -60,5 +106,8 @@ test-suite wasm-guest-tests
         ToolsSpec
         ParsersSpec
     build-depends:
-        wasm-guest:wasm-guest-lib,
+        wasm-guest:wasm-guest-internal,
         hspec >= 2.10 && < 3
+    -- Tests only buildable on WASM (host functions don't exist natively)
+    if !arch(wasm32)
+        buildable: False
