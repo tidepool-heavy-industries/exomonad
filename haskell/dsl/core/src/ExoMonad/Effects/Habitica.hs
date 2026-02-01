@@ -42,7 +42,6 @@ where
 import Prelude hiding (Down)
 
 import Control.Monad.Freer (Eff, Member, interpret, send)
-import Data.Text (Text)
 import ExoMonad.Effect (Log, logInfo)
 import ExoMonad.Habitica
   ( ChecklistItemId (..),

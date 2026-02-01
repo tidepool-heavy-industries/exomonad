@@ -42,13 +42,6 @@ where
 import Prelude hiding (many, (<|>))
 
 import Control.Monad (foldM)
-import Data.Map.Strict (Map)
-import Data.Map.Strict qualified as Map
-import Data.Set (Set)
-import Data.Set qualified as Set
-import Data.Text (Text)
-import Data.Text qualified as T
-import Data.Text.IO qualified as TIO
 import System.Directory (doesFileExist)
 import System.FilePath (normalise, takeDirectory, takeFileName, (</>))
 import Text.Parsec

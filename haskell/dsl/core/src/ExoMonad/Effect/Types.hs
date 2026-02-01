@@ -155,11 +155,6 @@ import Control.Monad.Freer (Eff, LastMember, Member, interpret, send, sendM)
 import Control.Monad.Freer.Internal (handleRelayS)
 import Data.Aeson (FromJSON, ToJSON, Value (..), encode)
 import Data.ByteString.Lazy qualified as LBS
-import Data.IORef (IORef, modifyIORef, newIORef, readIORef, writeIORef)
-import Data.Kind (Type)
-import Data.List.NonEmpty (NonEmpty (..), toList)
-import Data.Text (Text)
-import Data.Text qualified as T hiding (show)
 import Data.Time (UTCTime)
 import Data.Time qualified as Time
 -- Node metadata for teaching infrastructure
@@ -174,18 +169,7 @@ import ExoMonad.Anthropic.Types
     RedactedThinking (..),
     Role (..),
     ThinkingContent (..),
-    ToolUse (..),
   )
-import ExoMonad.Anthropic.Types qualified as AT (ToolResult (..))
--- Question DSL types (shared across agents)
-
--- Goto types for tool transitions
-
--- TUI effect and types (popup-tui pattern)
-
--- Log effect and types
-
--- Decision types
 import ExoMonad.Effect.Decision.Types
   ( Decision (..),
     DecisionContext (..),
@@ -202,7 +186,6 @@ import ExoMonad.Effect.TUI
 import ExoMonad.Graph.Goto (GotoChoice, To)
 import ExoMonad.Question (Answer (..), Choice (..), ChoiceOption (..), ItemDisposition (..), Question (..))
 import ExoMonad.StructuredOutput (StructuredOutput (..), formatDiagnostic)
-import GHC.Generics (Generic)
 import GHC.Show (Show (..))
 import Prelude qualified as P
 import System.Random (randomRIO)

@@ -4,12 +4,7 @@
 --
 -- In native builds, platform-specific constraints are trivially satisfied.
 -- See 'src-platform-wasm/ExoMonad/Platform.hs' for the WASM version.
-module ExoMonad.Platform
-  ( NativeOnly,
-  )
-where
-
-import Data.Kind (Constraint)
+module ExoMonad.Platform where
 
 -- | Constraint for effects that require native execution.
 --

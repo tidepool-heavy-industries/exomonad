@@ -66,9 +66,7 @@ module ExoMonad.Graph.Errors
   )
 where
 
-import Data.Kind (Type)
-import GHC.TypeError (Assert, Unsatisfiable, unsatisfiable)
-import GHC.TypeLits (ErrorMessage (..), Symbol)
+import GHC.TypeLits (ErrorMessage (..), Symbol, TypeError)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- FORMATTING PRIMITIVES

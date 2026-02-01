@@ -11,10 +11,8 @@ module ExoMonad.Effect.Decision.Types
   )
 where
 
-import Data.Aeson (FromJSON, ToJSON)
-import Data.Text (Text)
-import Data.Time (UTCTime)
-import GHC.Generics (Generic)
+import Data.Aeson (ToJSON)
+import ExoMonad.Effect.Log (LogFields)
 
 -- | High-level decision outcomes for agent flows.
 --

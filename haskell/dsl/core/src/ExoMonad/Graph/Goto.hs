@@ -92,8 +92,6 @@ module ExoMonad.Graph.Goto
 where
 
 import Control.Monad.Freer (Eff, Member, send)
-import Data.Kind (Constraint, Type)
-import Data.Text (Text)
 import ExoMonad.Effect.Gemini (GeminiModel (..), SingGeminiModel (..))
 import ExoMonad.Effect.Session (SessionId, SessionOperation (..))
 import ExoMonad.Graph.Errors

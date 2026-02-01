@@ -49,14 +49,9 @@ import Prelude
 import Data.List qualified as List
 import Data.List (lookup)
 import Data.Char (isAsciiUpper)
-import Data.Kind (Type)
-import Data.Proxy (Proxy (..))
-import Data.Text (Text)
-import Data.Text qualified as T
 import Data.Typeable (TypeRep)
 import ExoMonad.Graph.Generic.Core (AsGraph)
 import ExoMonad.Graph.Reify
-import GHC.Generics (Generic (..))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONFIGURATION

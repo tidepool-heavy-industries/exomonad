@@ -53,9 +53,6 @@ import Data.ByteString (ByteString)
 import Data.List ((!!))
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NE
-import Data.Text (Text)
-import Data.Text qualified as T
-import GHC.Generics (Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CHOICE METADATA

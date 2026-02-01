@@ -42,11 +42,8 @@ module ExoMonad.StructuredOutput.ClaudeCodeSchema
 where
 
 import Data.Aeson (Value)
-import Data.Kind (Type)
-import Data.Text qualified as T
-import ExoMonad.StructuredOutput.Class (HasSumRep, IsNullarySum, StructuredOutput (..))
+import ExoMonad.StructuredOutput.Class (StructuredOutput (..))
 import ExoMonad.StructuredOutput.DecisionTools (DecisionTool)
-import ExoMonad.StructuredOutput.DecisionTools qualified as DT
 import ExoMonad.StructuredOutput.Error (ParseDiagnostic)
 
 -- ════════════════════════════════════════════════════════════════════════════

@@ -27,9 +27,6 @@ import Prelude hiding (State, get)
 
 import Control.Monad.Freer (Member)
 import Data.Aeson (FromJSON, ToJSON)
-import Data.Text (Text)
-import Data.Text qualified as T
-import Data.Typeable (Typeable)
 import ExoMonad.Effect (State, get)
 import ExoMonad.Graph.Example.Context (ClassifyContext (..))
 import ExoMonad.Graph.Generic (AsHandler, GraphMode (..))

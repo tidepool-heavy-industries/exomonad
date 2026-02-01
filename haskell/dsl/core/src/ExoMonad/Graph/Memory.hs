@@ -93,15 +93,8 @@ module ExoMonad.Graph.Memory
   )
 where
 
+import Data.Aeson (FromJSON, ToJSON)
 import Lens.Micro (ASetter, over)
-import Control.Monad.Freer (Eff, Member, send)
-import Control.Monad.Freer.Internal (handleRelayS)
-import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.=))
-import Data.Aeson qualified as Aeson
-import Data.Kind (Type)
-import Data.Map.Strict (Map)
-import Data.Map.Strict qualified as Map
-import Data.Text (Text, pack)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- THE MEMORY EFFECT

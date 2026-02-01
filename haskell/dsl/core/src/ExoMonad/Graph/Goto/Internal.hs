@@ -36,8 +36,7 @@ module ExoMonad.Graph.Goto.Internal
   )
 where
 
-import Data.Aeson (ToJSON (..), Value (..))
-import Data.Kind (Type)
+import Data.Aeson (ToJSON (..), Value, object, (.=))
 import Data.Vector qualified as V
 import ExoMonad.Graph.Types (HList (..))
 

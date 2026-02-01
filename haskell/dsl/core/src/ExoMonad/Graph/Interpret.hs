@@ -478,7 +478,8 @@ Please try again with valid JSON matching the schema.|]
               -- Got at least one tool call, take the first
               -- (Claude sometimes calls multiple despite "STOP NOW"; ignore subsequent)
               do
-                logTrace [fmt|[DECISION] Taking first of {1 + length rest} decision tool calls|]
+                let count = 1 + length rest
+                logTrace [fmt|[DECISION] Taking first of {count} decision tool calls|]
                 case ccParseToolCall @s (convertToolCall tc) of
                   Right output -> afterFn_ (ClaudeCodeResult output ccSessionId result.soWorktree result.soBranch, ccSessionId)
                   Left err -> error [fmt|ClaudeCode decision tool parse error: {err}|]
@@ -486,7 +487,8 @@ Please try again with valid JSON matching the schema.|]
               -- No tool call - nag and retry
               if retryCount >= maxNagRetries
                 then
-                  error [fmt|ClaudeCode: Claude completed but failed to call a decision tool after {maxNagRetries} retries. Session output: {maybe "(no text)" T.unpack result.soResultText}|]
+                  let sessionOut = fromMaybe "(no text)" result.soResultText
+                  in error [fmt|ClaudeCode: Claude completed but failed to call a decision tool after {maxNagRetries} retries. Session output: {sessionOut}|]
                 else do
                   -- Continue the same session with nag prompt
                   executeWithNag @s
@@ -501,7 +503,8 @@ Please try again with valid JSON matching the schema.|]
           -- Regular type: parse from structured output
           case result.soStructuredOutput of
             Nothing ->
-              error [fmt|ClaudeCode session returned no structured output{maybe "" (\e -> ": " <> T.unpack e) result.soError}|]
+              let errInfo = maybe "" (": " <>) result.soError
+              in error [fmt|ClaudeCode session returned no structured output{errInfo}|]
             Just outputVal ->
               case ccParseStructured @s outputVal of
                 Right output -> afterFn_ (ClaudeCodeResult output ccSessionId result.soWorktree result.soBranch, ccSessionId)
@@ -509,7 +512,8 @@ Please try again with valid JSON matching the schema.|]
                   -- Parse failed - nag and retry
                   if retryCount >= maxNagRetries
                     then
-                      error [fmt|ClaudeCode output parse error after {maxNagRetries} retries: {formatDiagnostic diag}|]
+                      let diagMsg = formatDiagnostic diag
+                      in error [fmt|ClaudeCode output parse error after {maxNagRetries} retries: {diagMsg}|]
                     else do
                       -- Continue the same session with parse error nag prompt
                       let nagText = parseErrorNagPrompt (formatDiagnostic diag)

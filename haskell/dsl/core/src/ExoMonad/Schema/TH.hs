@@ -34,18 +34,14 @@ where
 
 import Prelude hiding (head, (??))
 
-import Control.Monad (forM, unless, when)
+import Control.Monad (forM)
 import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), object, withObject, withText, (.:), (.:?), (.=))
 import Data.Aeson.Key qualified as K
 import Data.Char (isUpper, toLower)
 import Data.List (delete, head, intercalate, stripPrefix, foldl')
 import Data.Map.Strict qualified as Map
-import Data.Maybe (catMaybes, fromMaybe)
-import Data.Text (Text)
-import Data.Text qualified as T
 -- Import types for HasJSONSchema instance generation
 import ExoMonad.StructuredOutput.Class (HasJSONSchema (..), JSONSchema (..), SchemaType (..))
-import GHC.Generics (Generic)
 import Language.Haskell.TH hiding (Type)
 import Language.Haskell.TH.Syntax qualified as TH
 

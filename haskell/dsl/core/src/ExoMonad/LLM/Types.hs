@@ -42,10 +42,7 @@ module ExoMonad.LLM.Types
   )
 where
 
-import Data.Aeson (FromJSON, ToJSON)
-import Data.Kind (Type)
-import Data.Text (Text)
-import GHC.Generics (Generic)
+import Data.Aeson (FromJSON, ToJSON, Value)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PROMPT WRAPPERS

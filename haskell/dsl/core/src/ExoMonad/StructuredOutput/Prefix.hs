@@ -26,7 +26,6 @@ module ExoMonad.StructuredOutput.Prefix
 where
 
 import Data.Char (isLower, toLower, toUpper)
-import Data.List (foldl')
 
 -- | Strip a known common prefix from a field name.
 --

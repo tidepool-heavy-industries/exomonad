@@ -20,10 +20,7 @@ module ExoMonad.Question
   )
 where
 
-import Control.Applicative ((<|>))
-import Data.Aeson
-import Data.Text (Text)
-import GHC.Generics (Generic)
+import Data.Aeson (FromJSON, ToJSON, Value)
 
 -- | Where an item goes
 data ItemDisposition

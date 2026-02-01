@@ -27,8 +27,6 @@ where
 import Data.Aeson (Value (..))
 import Data.List qualified as List
 import Data.Scientific (floatingOrInteger)
-import Data.Text (Text)
-import Data.Text qualified as T
 -- Core types imported from Class.hs to avoid circularity
 import ExoMonad.StructuredOutput.Class (ParseDiagnostic (..), formatDiagnostic)
 

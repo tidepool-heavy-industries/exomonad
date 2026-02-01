@@ -20,11 +20,6 @@ module ExoMonad.Effects.DockerSpawner
 where
 
 import Control.Monad.Freer (Eff, Member, send)
-import Data.Aeson (FromJSON (..), ToJSON (..), genericParseJSON, genericToJSON, withObject, (.:))
-import Data.Aeson.Casing (aesonPrefix, snakeCase)
-import Data.Aeson.Types (Parser)
-import Data.Text (Text)
-import GHC.Generics (Generic)
 
 -- | Container ID extracted from spawn response
 newtype ContainerId = ContainerId {unContainerId :: Text}

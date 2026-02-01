@@ -99,9 +99,6 @@ module ExoMonad.Graph.Types
   )
 where
 
-import Data.Aeson (Value)
-import Data.Kind (Type)
-import Data.Text (Text)
 import ExoMonad.Effect.Gemini (GeminiModel (..))
 import ExoMonad.Role (Role (..))
 import GHC.TypeLits (Symbol)

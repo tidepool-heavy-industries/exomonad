@@ -65,9 +65,6 @@ import Prelude hiding ((??))
 
 import Data.Aeson (Value (..), object, (.=))
 import Data.Map.Strict qualified as Map
-import Data.Maybe (catMaybes)
-import Data.Text (Text)
-import Data.Text qualified as T
 import ExoMonad.Schema.TH
   ( FieldMapping (..),
     FieldMappingPartial,

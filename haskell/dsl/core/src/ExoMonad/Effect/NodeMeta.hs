@@ -61,8 +61,7 @@ module ExoMonad.Effect.NodeMeta
   )
 where
 
-import Control.Monad.Freer (Eff, Member, interpose, interpret, send)
-import Data.Text (Text)
+import Control.Monad.Freer (Eff, Member, interpret, send)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- METADATA TYPES

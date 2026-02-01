@@ -309,7 +309,7 @@ deriveRecordParser typeName conName fields = do
   case fieldParsers of
     [] -> [|pure $con|]
     (p : ps) ->
-      foldl
+      foldl'
         (\acc fp -> [|$acc <*> $(pure fp)|])
         [|$con <$> $(pure p)|]
         ps
@@ -379,10 +379,10 @@ typeToParserExp typeName flag helpText = go
             fail $ nestedRecordError typeName flag n
           TyConI (NewtypeD _ _ _ _ (RecC _ _) _) ->
             fail $ nestedRecordError typeName flag n
-          _ -> fail $ unsupportedTypeError flag n
+          _ -> fail $ T.unpack $ unsupportedTypeError flag n
       other ->
-        fail $
-          "deriveCLIParser: Unsupported field type for --"
+        fail $ T.unpack $
+          T.pack $ "deriveCLIParser: Unsupported field type for --"
             ++ flag
             ++ ": "
             ++ pprint other
@@ -396,7 +396,7 @@ deriveSubcommandParser typeName cons = do
     [c] -> [|subparser $(pure c)|]
     (c : cs) -> do
       let combined =
-            foldl
+            foldl'
               (\acc cmd -> [|$acc <> $(pure cmd)|])
               (pure c)
               cs
@@ -580,8 +580,8 @@ toKebabCase = \case
 -- | Generate error message for missing field documentation.
 cliFieldError :: Name -> Name -> TH.Type -> String
 cliFieldError typeName fieldName fieldType =
-  unlines
-    [ "deriveCLIParser: Missing Haddock documentation for field '"
+  T.unpack $ T.unlines
+    [ T.pack $ "deriveCLIParser: Missing Haddock documentation for field '"
         ++ nameBase fieldName
         ++ "' in '"
         ++ nameBase typeName
@@ -589,7 +589,7 @@ cliFieldError typeName fieldName fieldType =
       "",
       "CLI help text comes from Haddock comments. Add documentation:",
       "",
-      "  " ++ nameBase fieldName ++ " :: " ++ prettyType fieldType,
+      T.pack $ "  " ++ nameBase fieldName ++ " :: " ++ prettyType fieldType,
       "    -- ^ <description of this field>",
       "",
       "Also ensure the module has {-# LANGUAGE FieldSelectors #-}"
@@ -598,10 +598,10 @@ cliFieldError typeName fieldName fieldType =
 -- | Generate error message for nested record type.
 nestedRecordError :: Name -> String -> Name -> String
 nestedRecordError typeName flagName nestedType =
-  unlines
-    [ "deriveCLIParser: Nested record type not supported",
+  T.unpack $ T.unlines
+    [ T.pack $ "deriveCLIParser: Nested record type not supported",
       "",
-      "Field --"
+      T.pack $ "Field --"
         ++ flagName
         ++ " in '"
         ++ nameBase typeName
@@ -616,12 +616,12 @@ nestedRecordError typeName flagName nestedType =
     ]
 
 -- | Generate error message for unsupported type.
-unsupportedTypeError :: String -> Name -> String
+unsupportedTypeError :: String -> Name -> Text
 unsupportedTypeError flagName typeName =
-  unlines
-    [ "deriveCLIParser: Unsupported type for field --" ++ flagName,
+  T.unlines
+    [ T.pack $ "deriveCLIParser: Unsupported type for field --" ++ flagName,
       "",
-      "Type '" ++ nameBase typeName ++ "' is not supported.",
+      T.pack $ "Type '" ++ nameBase typeName ++ "' is not supported.",
       "",
       "Supported types: Text, String, FilePath, Int, Integer, Double, Bool",
       "                 Maybe a, [a] (where a is a supported type)"

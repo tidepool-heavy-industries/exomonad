@@ -97,13 +97,7 @@ module ExoMonad.Effect.LSP
 where
 
 import Control.Monad.Freer (Eff, Member, send)
-import Data.Aeson (FromJSON, ToJSON)
-import Data.Map.Strict (Map)
-import Data.Text (Text)
-import Data.Text qualified as T
-import Data.Time (NominalDiffTime, UTCTime, diffUTCTime)
-import ExoMonad.Platform (NativeOnly)
-import GHC.Generics (Generic)
+import Data.Aeson (FromJSON, ToJSON, Value)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- DOCUMENT IDENTIFIERS

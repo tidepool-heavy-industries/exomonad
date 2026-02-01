@@ -95,28 +95,7 @@ module ExoMonad.Graph.Template
 where
 
 import Control.Monad.Freer (Eff)
-import Control.Monad.Writer (Writer)
-import Data.Char (toLower)
-import Data.Kind (Constraint, Type)
-import Data.Text (Text)
-import Language.Haskell.TH hiding (Type)
-import Text.Ginger.GVal (ToGVal)
-import Text.Ginger.Run.Type (Run)
-import Text.Ginger.TH
-  ( TypedTemplate,
-    flattenDeps,
-    runTypedTemplate,
-    templateAccessedFields,
-    templateContextInfo,
-    templateDependencyTree,
-    typedTemplateFile,
-  )
-import Text.Ginger.TH.Types
-  ( DepLocation (..),
-    DepRelation (..),
-    TemplateContextInfo (..),
-    TemplateDependency (..),
-  )
+import Text.Ginger.TH (TypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 
 -- ════════════════════════════════════════════════════════════════════════════
