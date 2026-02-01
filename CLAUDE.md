@@ -302,14 +302,19 @@ In `.claude/settings.local.json`:
     "exomonad": {
       "type": "stdio",
       "command": "exomonad-sidecar",
-      "args": ["mcp-stdio"],
-      "env": {
-        "EXOMONAD_WASM_PATH": "/path/to/wasm-guest.wasm"
-      }
+      "args": ["mcp-stdio"]
     }
   }
 }
 ```
+
+**Note:** The WASM plugin path is auto-resolved from `.exomonad/config.toml`'s `role` field. Ensure you have a config file:
+```toml
+role = "tl"  # or "dev", "pm", etc.
+project_dir = "."
+```
+
+This will load `~/.exomonad/wasm/wasm-guest-tl.wasm` automatically.
 
 ### Building
 
@@ -317,12 +322,16 @@ In `.claude/settings.local.json`:
 # Build Rust runtime
 cargo build --release -p exomonad-sidecar
 
-# Build Haskell WASM plugin (requires nix develop .#wasm)
-nix develop .#wasm -c wasm32-wasi-cabal build --project-file=cabal.project.wasm wasm-guest
-
-# Copy WASM to expected location
-cp haskell/wasm-guest/dist-newstyle/.../wasm-guest.wasm ~/.exomonad/wasm-guest.wasm
+# Build and install WASM plugin for a specific role
+just wasm tl   # Builds and installs ~/.exomonad/wasm/wasm-guest-tl.wasm
+just wasm dev  # Builds and installs ~/.exomonad/wasm/wasm-guest-dev.wasm
+just wasm pm   # Builds and installs ~/.exomonad/wasm/wasm-guest-pm.wasm
 ```
+
+The `just wasm {role}` command:
+1. Builds the WASM plugin using nix develop
+2. Installs it to `~/.exomonad/wasm/wasm-guest-{role}.wasm`
+3. The sidecar auto-discovers it based on `.exomonad/config.toml`'s `role` field
 
 ### MCP Tools
 

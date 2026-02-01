@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 // ============================================================================
 // CLI Types
@@ -28,10 +28,6 @@ use tracing::{debug, error, info};
 #[command(about = "Rust sidecar with Haskell WASM plugin for Claude Code")]
 #[command(version)]
 struct Cli {
-    /// Path to the WASM plugin file (required for all commands)
-    #[arg(long, env = "EXOMONAD_WASM_PATH")]
-    wasm: PathBuf,
-
     #[command(subcommand)]
     command: Commands,
 }
@@ -156,15 +152,31 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
+    // Deprecation warning for old env var
+    if std::env::var("EXOMONAD_WASM_PATH").is_ok() {
+        tracing::warn!(
+            "EXOMONAD_WASM_PATH is deprecated. \
+             Use .exomonad/config.toml with role field instead."
+        );
+    }
+
+    // Discover config (or use default)
+    let config = config::Config::discover().unwrap_or_else(|e| {
+        debug!(error = %e, "No config found, using defaults");
+        config::Config::default()
+    });
+
+    // Validate WASM exists and get path
+    let wasm_path = config.validate_wasm_exists()?;
+
+    info!(
+        role = %config.role,
+        wasm_path = %wasm_path.display(),
+        "Loaded config and resolved WASM path"
+    );
+
     match cli.command {
         Commands::Hook { event, runtime } => {
-            // Validate WASM plugin exists for Hook
-            let wasm_path = cli.wasm;
-            if !wasm_path.exists() {
-                error!(path = ?wasm_path, "WASM plugin file not found");
-                anyhow::bail!("WASM plugin not found: {}", wasm_path.display());
-            }
-
             info!(wasm = ?wasm_path, "Loading WASM plugin");
 
             // Initialize services with Docker executor (containerized mode)
@@ -181,11 +193,6 @@ async fn main() -> Result<()> {
         }
 
         Commands::Mcp { port, project_dir } => {
-            let wasm_path = cli.wasm;
-            if !wasm_path.exists() {
-                anyhow::bail!("WASM plugin not found: {}", wasm_path.display());
-            }
-
             let project_dir = project_dir.unwrap_or_else(|| {
                 std::env::current_dir().expect("Failed to get current directory")
             });
@@ -211,30 +218,14 @@ async fn main() -> Result<()> {
         }
 
         Commands::McpStdio => {
-            let wasm_path = cli.wasm;
-            if !wasm_path.exists() {
-                anyhow::bail!("WASM plugin not found: {}", wasm_path.display());
-            }
-
             // stdio MCP server - Claude Code spawns this process
-            // Discover project_dir from config or use cwd
-            let cfg = match config::Config::discover() {
-                Ok(c) => {
-                    info!(project_dir = %c.project_dir.display(), "Config discovered");
-                    c
-                }
-                Err(e) => {
-                    debug!(error = %e, "No config file found, using defaults");
-                    config::Config::default()
-                }
-            };
-
-            let project_dir = if cfg.project_dir.is_absolute() {
-                cfg.project_dir
+            // Use config already loaded above
+            let project_dir = if config.project_dir.is_absolute() {
+                config.project_dir.clone()
             } else {
                 std::env::current_dir()
                     .expect("Failed to get current directory")
-                    .join(&cfg.project_dir)
+                    .join(&config.project_dir)
             };
 
             info!(wasm = ?wasm_path, "Loading WASM plugin");

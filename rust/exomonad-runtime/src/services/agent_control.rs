@@ -506,11 +506,16 @@ impl AgentControlService {
         let exomonad_dir = worktree_path.join(".exomonad");
         fs::create_dir_all(&exomonad_dir).await?;
 
-        // Write config.toml
-        let config_content = r#"role = "dev"
-project_dir = "."
+        // Write config.toml with role = "dev" for spawned agents
+        let config_content = r#"# Agent config (auto-generated)
+role = "dev"
+project_dir = "../.."
 "#;
         fs::write(exomonad_dir.join("config.toml"), config_content).await?;
+        tracing::info!(
+            worktree = %worktree_path.display(),
+            "Wrote .exomonad/config.toml with role=dev"
+        );
 
         // Write INITIAL_CONTEXT.md
         let context_content = format!(
@@ -531,7 +536,7 @@ When done, commit your changes and create a pull request.
         );
         fs::write(worktree_path.join("INITIAL_CONTEXT.md"), context_content).await?;
 
-        // Write .mcp.json
+        // Write .mcp.json (no --wasm argument, config file handles WASM path)
         let sidecar_path = std::env::current_exe()
             .ok()
             .and_then(|p| p.to_str().map(String::from))

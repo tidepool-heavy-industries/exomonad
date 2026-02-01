@@ -11,10 +11,18 @@ pub struct Config {
     /// Project directory for git operations.
     #[serde(default = "default_project_dir")]
     pub project_dir: PathBuf,
+
+    /// Agent role (dev, tl, pm).
+    #[serde(default = "default_role")]
+    pub role: String,
 }
 
 fn default_project_dir() -> PathBuf {
     PathBuf::from(".")
+}
+
+fn default_role() -> String {
+    "dev".to_string()
 }
 
 impl Config {
@@ -42,8 +50,33 @@ impl Config {
     /// Create a default config (for when no config file exists).
     pub fn default() -> Self {
         Self {
-            project_dir: PathBuf::from("."),
+            project_dir: default_project_dir(),
+            role: default_role(),
         }
+    }
+
+    /// Resolve WASM path based on role.
+    pub fn wasm_path(&self) -> PathBuf {
+        let home = std::env::var("HOME").expect("HOME not set");
+        PathBuf::from(home)
+            .join(".exomonad/wasm")
+            .join(format!("wasm-guest-{}.wasm", self.role))
+    }
+
+    /// Validate WASM exists, fail with helpful error.
+    pub fn validate_wasm_exists(&self) -> Result<PathBuf> {
+        let path = self.wasm_path();
+        if !path.exists() {
+            anyhow::bail!(
+                "WASM plugin not found: {}\n\
+                 Expected role: {}\n\
+                 Run: just wasm {}",
+                path.display(),
+                self.role,
+                self.role
+            );
+        }
+        Ok(path)
     }
 }
 
@@ -59,6 +92,7 @@ mod tests {
         let toml = "";
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.project_dir, PathBuf::from("."));
+        assert_eq!(config.role, "dev");
     }
 
     #[test]
@@ -86,5 +120,29 @@ project_dir = "/home/user/project"
     fn test_default() {
         let config = Config::default();
         assert_eq!(config.project_dir, PathBuf::from("."));
+        assert_eq!(config.role, "dev");
+    }
+
+    #[test]
+    fn test_wasm_path() {
+        let config = Config {
+            role: "tl".to_string(),
+            project_dir: PathBuf::from("."),
+        };
+
+        let expected = PathBuf::from(std::env::var("HOME").unwrap())
+            .join(".exomonad/wasm/wasm-guest-tl.wasm");
+
+        assert_eq!(config.wasm_path(), expected);
+    }
+
+    #[test]
+    fn test_wasm_path_dev_role() {
+        let config = Config::default();
+
+        let expected = PathBuf::from(std::env::var("HOME").unwrap())
+            .join(".exomonad/wasm/wasm-guest-dev.wasm");
+
+        assert_eq!(config.wasm_path(), expected);
     }
 }

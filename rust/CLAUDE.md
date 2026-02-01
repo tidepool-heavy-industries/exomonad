@@ -131,14 +131,14 @@ exomonad-sidecar mcp --port 7432
 echo '{"hook_event_name":"PreToolUse",...}' | exomonad-sidecar hook pre-tool-use
 ```
 
+**Note:** WASM plugin path is auto-resolved from `.exomonad/config.toml`'s `role` field (defaults to `dev`).
+
 ### Environment Variables
 | Variable | Used By | Purpose |
 |----------|---------|---------|
-| `EXOMONAD_WASM_PATH` | exomonad-sidecar | Path to WASM plugin file (required) |
-| `EXOMONAD_PROJECT_DIR` | exomonad-sidecar | Project directory for MCP operations |
-| `EXOMONAD_ROLE` | exomonad-sidecar | Agent role (dev, tl, pm) |
 | `GITHUB_TOKEN` | services | GitHub API access |
 | `RUST_LOG` | all | Tracing log level |
+| `EXOMONAD_WASM_PATH` | (deprecated) | **DEPRECATED** - Use `.exomonad/config.toml` with `role` field |
 
 ## MCP Tools
 
@@ -201,6 +201,14 @@ Add to `.mcp.json` in project root:
   }
 }
 ```
+
+And ensure `.exomonad/config.toml` exists with the `role` field:
+```toml
+role = "dev"  # or "tl", "pm", etc.
+project_dir = "."
+```
+
+The sidecar will load `~/.exomonad/wasm/wasm-guest-{role}.wasm` automatically.
 
 ## Testing
 
