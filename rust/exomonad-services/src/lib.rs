@@ -11,7 +11,10 @@
 //! ```rust,no_run
 //! use exomonad_services::{ExternalService, ServiceError};
 //! use exomonad_services::github::GitHubService;
-//! use exomonad_shared::ServiceRequest;
+//! use exomonad_services::AnthropicService;
+//! use exomonad_shared::protocol::ServiceRequest;
+//!
+//! let api_key = "sk-ant-api03-...";
 //!
 //! # async fn run() -> Result<(), ServiceError> {
 //! let github = GitHubService::new("token".to_string());
