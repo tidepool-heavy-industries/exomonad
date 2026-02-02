@@ -18,7 +18,6 @@
 
 **Benefits of CLI approach**:
 - No native dependencies
-- Works in WASM (via effect yield to TypeScript)
 - Easy to test with mock outputs
 
 ## Command Output Formats

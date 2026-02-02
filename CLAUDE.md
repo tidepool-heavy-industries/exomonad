@@ -87,10 +87,7 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 │   ├── exomonad-plugin/CLAUDE.md   ← Zellij WASM plugin (status + popups)
 │   ├── zellij-gen/CLAUDE.md        ← KDL layout generator
 │   └── effector/CLAUDE.md          ← Stateless IO executor
-├── deploy/CLAUDE.md            ← Cloudflare deployment
-├── tools/CLAUDE.md             ← Root-level tools (micro-gastown, blast-radius)
-└── typescript/
-    └── telegram-bot/CLAUDE.md  ← Telegram integration
+└── tools/CLAUDE.md             ← Root-level tools (micro-gastown, blast-radius)
 ```
 
 ## When to Read Which CLAUDE.md
@@ -111,7 +108,6 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 | Understand actor execution model | `haskell/runtime/actor/CLAUDE.md` |
 | Work with LSP (Language Server Protocol) | `haskell/effects/lsp-interpreter/CLAUDE.md` |
 | Generate training data for FunctionGemma | `haskell/tools/training-generator/CLAUDE.md` |
-| Deploy to Cloudflare Workers | `deploy/CLAUDE.md` |
 
 ---
 
@@ -167,11 +163,11 @@ instance ToolDef MyTool where
 
 ## Running Agents
 
-### WASM/Cloudflare (Production - Frozen)
-Compile to WASM, deploy to Cloudflare Durable Objects. TypeScript harness interprets effects.
+### WASM (Production - Frozen)
+Compile to WASM.
 
 ```bash
-cd deploy && pnpm dev  # Local CF worker
+just wasm tl
 ```
 
 ## Consuming Repos
@@ -413,7 +409,7 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 ### Effect Interpreters (`haskell/effects/`)
 | Package | Purpose |
 |---------|---------|
-| `haskell/effects/llm-interpreter` | Anthropic API calls (Socket preferred) |
+| `haskell/effects/llm-interpreter` | Anthropic/OpenAI API calls |
 | `haskell/effects/habitica-interpreter` | Habitica API |
 | `haskell/effects/observability-interpreter` | OpenTelemetry traces to Grafana |
 | `haskell/effects/lsp-interpreter` | LSP via lsp-client |
@@ -427,7 +423,6 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 |---------|---------|
 | `haskell/effects/habitica` | Habitica effect types (standalone) |
 | `haskell/protocol/wire-types` | Native protocol types |
-| `haskell/protocol/generated-ts` | TypeScript type generation |
 
 ### Tools (`haskell/tools/`)
 | Package | Purpose |
@@ -436,17 +431,6 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 | `haskell/tools/sleeptime` | Log analysis for agent evolution |
 | `haskell/tools/training-generator` | Training data types for FunctionGemma |
 | `tools/micro-gastown` | Experimental tooling (non-Haskell) |
-
-### TypeScript Packages (`typescript/`)
-| Package | Purpose |
-|---------|---------|
-| `typescript/telegram-bot` | Telegram bot implementation |
-| `typescript/native-gui` | Solid.js frontend for native server |
-
-### Deployment
-| Directory | Purpose |
-|-----------|---------|
-| `deploy/` | Cloudflare Worker Durable Object harness |
 
 ## Where Things Go
 
@@ -457,7 +441,6 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 | New graph annotation | `haskell/dsl/core/src/ExoMonad/Graph/Types.hs` |
 | New interpreter | `haskell/effects/<name>-interpreter/` |
 | New MCP tool | `haskell/wasm-guest/src/ExoMonad/Guest/Tools.hs` |
-| TypeScript bot | `typescript/<name>/` |
 | Agents (consuming repos) | Separate repo (urchin, etc.) |
 
 ### Naming Conventions
@@ -552,6 +535,5 @@ withLSPSession "/path/to/project" $ \session -> do
 
 - [haskell/dsl/core/CLAUDE.md](haskell/dsl/core/CLAUDE.md) - Graph DSL reference
 - [rust/exomonad-sidecar/CLAUDE.md](rust/exomonad-sidecar/CLAUDE.md) - MCP server + WASM host
-- [deploy/CLAUDE.md](deploy/CLAUDE.md) - Cloudflare deployment
 - [freer-simple](https://hackage.haskell.org/package/freer-simple) - Effect system
 - [Anthropic tool use](https://docs.anthropic.com/en/docs/tool-use)

@@ -6,7 +6,7 @@
 -- | Response types from Habitica API.
 --
 -- These types have custom FromJSON instances that match the JSON structure
--- produced by the TypeScript handler (deploy/src/handlers/habitica.ts).
+-- produced by the Habitica API.
 module ExoMonad.Habitica.Response
   ( -- * User Types
     UserInfo (..),

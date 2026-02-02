@@ -6,7 +6,7 @@ This document guides AI coding agents working on the ExoMonad project. It supple
 
 ## Project Overview
 
-ExoMonad is a Haskell library for building LLM agents as typed state machines. Agents are **IO-blind**: they express typed effects (LLM calls, state mutations, tool calls) that external interpreters handle, enabling sandboxed execution and WASM deployment.
+ExoMonad is a Haskell library for building LLM agents as typed state machines. Agents are **IO-blind**: they express typed effects (LLM calls, state mutations, tool calls) that external interpreters handle, enabling sandboxed execution.
 
 ### Architecture
 
@@ -31,25 +31,20 @@ ExoMonad is a Haskell library for building LLM agents as typed state machines. A
 ## Technology Stack
 
 ### Core Languages
-- **Haskell** - Primary language (GHC 9.10+
-- **TypeScript** - Cloudflare Worker harness, Claude Code++ MCP server
+- **Haskell** - Primary language (GHC 9.10+)
 - **Rust** - Claude Code++ hook/MCP forwarding (`exomonad`)
 
 ### Build & Development
 - **Cabal** - Haskell build system (monorepo with 30+ packages)
 - **Just** - Task runner (`justfile` at root)
 - **Nix** - Reproducible dev environments (flakes + fallback shell.nix)
-- **Node.js/pnpm** - TypeScript tooling and deployment
 
 ### Testing
 - **Cabal test** - Haskell unit/property tests
-- **Vitest** - TypeScript tests for Cloudflare Worker
 - **hlint** - Haskell linting (errors only, configured)
-- **ESLint** - TypeScript linting
 
 ### Deployment
-- **WASM** - Cross-compilation to wasm32-wasi (Cloudflare Workers)
-- **Cloudflare** - Durable Objects + Workers
+- **WASM** - Cross-compilation to wasm32-wasi
 - **Native** - Servant server via `exomonad-native-server`
 
 ## Project Structure
@@ -63,19 +58,15 @@ exomonad/
 │   ├── runtime/               # Execution backends (actor, WASM)
 │   ├── effects/               # Effect interpreters (LLM, LSP, GitHub, etc.)
 │   ├── agents/                # Production agents (semantic-scout)
-│   ├── protocol/              # Wire protocols (Haskell ↔ TypeScript)
+│   ├── protocol/              # Wire protocols
 │   ├── tools/                 # Dev tools (sleeptime, training-generator)
 │   ├── vendor/                # Vendored forks (freer-simple, ginger)
 │   ├── control-server/        # Claude Code++ TCP server (OSCAR winner)
 │   └── native-server/         # Native HTTP/WebSocket server
-├── deploy/                    # Cloudflare Worker harness
 ├── rust/                      # Claude Code++ infrastructure
 │   ├── exomonad/          # Hook/MCP forwarding (Rust ↔ Haskell TCP)
 │   ├── exomonad-shared/         # Protocol types
 │   └── exomonad-hub/            # Metrics (legacy)
-├── typescript/                # TypeScript packages
-│   ├── native-gui/            # Solid.js frontend
-│   └── telegram-bot/          # Bot implementation
 ├── tools/                     # Root-level analysis tools
 ├── docs/                      # Documentation
 └── plans/                     # Design documents
@@ -107,16 +98,6 @@ just test
 
 # Graph validation only (fast)
 just test-graph
-
-# TypeScript tests
-cd deploy && pnpm test
-
-# Protocol conformance (Haskell → TypeScript)
-just test-protocol-conformance
-
-# Cross-boundary property tests (requires WASM)
-just build-wasm
-just test-roundtrip
 ```
 
 ### Development
@@ -125,11 +106,8 @@ just test-roundtrip
 # Native server (localhost:8080)
 just native
 
-# Cloudflare Worker local dev
-cd deploy && pnpm dev
-
 # Lint codebase
-just lint            # hlint (Haskell) + ESLint (TypeScript)
+just lint            # hlint (Haskell)
 
 # Pre-commit checks
 just pre-commit      # build + lint + tests
@@ -137,20 +115,6 @@ just pre-commit-fast # build + lint only
 
 # Install git hooks
 just install-hooks   # Runs pre-commit on every commit
-```
-
-### Deployment
-
-```bash
-# Build WASM
-just build-wasm      # Requires: nix develop .#wasm
-
-# Deploy to Cloudflare
-just deploy          # build-wasm + deploy-worker
-
-# View logs
-just logs            # Pretty format
-just logs-json       # JSON format
 ```
 
 ## Development Workflows
@@ -235,16 +199,6 @@ data MyAgent mode = MyAgent
 cabal test <package-name>
 ```
 
-**Property tests:** Use `hedgehog` or `quickcheck` for protocol validation
-```bash
-just test-protocol-conformance  # Haskell ↔ TypeScript roundtrip
-```
-
-**Integration tests:** Cloudflare Worker tests with Vitest
-```bash
-cd deploy && pnpm test
-```
-
 **Manual testing:** Run agents in native server or Claude Code sessions
 ```bash
 just native  # Interactive UI at localhost:8080
@@ -258,7 +212,7 @@ just native  # Interactive UI at localhost:8080
 ```bash
 nix develop .#wasm
 wasm32-wasi-cabal build exomonad-reactor
-wasm-opt -Oz <input.wasm> -o deploy/src/exomonad.wasm
+wasm-opt -Oz <input.wasm> -o exomonad.wasm
 ```
 
 **Limitations:**
@@ -290,14 +244,6 @@ ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints -Wunused-packag
 - If a pattern binds `_field`, it's a data flow dead-end
 - Thread data forward via input fields, memory, or context
 - See `CLAUDE.md` section "Code Smells: Data Flow Dead-Ends"
-
-### TypeScript
-
-**Format:** ESLint configured in `deploy/.eslintrc.js`
-
-**Type checking:** `tsc --noEmit`
-
-**Module system:** ES Modules (`"type": "module"`)
 
 ### Jinja Templates
 
@@ -337,19 +283,9 @@ Use `Execute.Instrumented` for automatic span emission on graph dispatch.
 
 **WASM sandboxing:**
 - No native IO in WASM target
-- All effects mediated by TypeScript harness
 - Browser WASI shim for limited syscall support
 
 ## Common Pitfalls
-
-### "Build succeeds but tests fail"
-
-**Cause:** Protocol drift between Haskell and TypeScript
-
-**Fix:**
-```bash
-just test-protocol-conformance  # Regenerate samples and verify
-```
 
 ### "WASM build fails with TH error"
 

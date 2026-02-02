@@ -39,5 +39,4 @@ This package defines types only. Execution happens in:
 - `exomonad-native-gui/habitica-interpreter/` - Native HTTP execution
 ...
 - [exomonad-native-gui/CLAUDE.md](../exomonad-native-gui/CLAUDE.md) - Native interpreters including habitica-interpreter
-- [deploy/CLAUDE.md](../deploy/CLAUDE.md) - Cloudflare Worker Habitica handler
 - [exomonad-core/CLAUDE.md](../exomonad-core/CLAUDE.md) - Habitica effect in `Effects/Habitica.hs`

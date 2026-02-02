@@ -1239,10 +1239,10 @@ The `exomonad-wasm` package enables yield/resume across FFI boundaries:
 ```haskell
 type WasmM a = Eff '[Yield SerializableEffect EffectResult] a
 
--- Effects yield to TypeScript, resume with result
+-- Effects yield to Host, resume with result
 computeHandler :: Int -> WasmM (GotoChoice '[To Exit Int])
 computeHandler n = do
-  logInfo $ "Computing: " <> T.pack (show n)  -- Yields to TS
+  logInfo $ "Computing: " <> T.pack (show n)  -- Yields to Host
   pure $ gotoExit (n + 1)
 ```
 
@@ -1339,6 +1339,4 @@ All paths relative to `exomonad-core/src/ExoMonad/Graph/`.
 ## Related Documentation
 
 - [exomonad-wasm/CLAUDE.md](../exomonad-wasm/CLAUDE.md) - WASM compilation, FFI, wire types
-- [exomonad-generated-ts/CLAUDE.md](../exomonad-generated-ts/CLAUDE.md) - Generated TypeScript types
-- [deploy/CLAUDE.md](../deploy/CLAUDE.md) - Cloudflare Worker harness and effect handlers
 - [Root CLAUDE.md](../CLAUDE.md) - Project overview and consuming repo patterns

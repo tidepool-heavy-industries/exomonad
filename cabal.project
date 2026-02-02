@@ -1,6 +1,6 @@
 packages:
     haskell/dsl/core
-    haskell/protocol
+    haskell/protocol/wire-types
     haskell/effects/socket-client
     haskell/effects/observability-interpreter
     haskell/effects/llm-interpreter
