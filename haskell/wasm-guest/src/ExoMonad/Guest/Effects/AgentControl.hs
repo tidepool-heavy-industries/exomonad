@@ -35,7 +35,7 @@ module ExoMonad.Guest.Effects.AgentControl
   )
 where
 
-import Polysemy (Sem, Member, interpret, embed, makeSem)
+import Polysemy (Sem, Member, interpret, embed, send)
 import Polysemy.Embed (Embed)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.:?), (.=))
 import Data.Aeson.Types (Parser)
@@ -283,7 +283,21 @@ data AgentControl m a where
   -- | List all active agent worktrees.
   ListAgents :: AgentControl m (Either Text [AgentInfo])
 
-makeSem ''AgentControl
+-- Smart constructors (manually written - makeSem doesn't work with WASM cross-compilation)
+spawnAgent :: Member AgentControl r => Text -> SpawnOptions -> Sem r (Either Text SpawnResult)
+spawnAgent issueId opts = send (SpawnAgent issueId opts)
+
+spawnAgents :: Member AgentControl r => [Text] -> SpawnOptions -> Sem r BatchSpawnResult
+spawnAgents issueIds opts = send (SpawnAgents issueIds opts)
+
+cleanupAgent :: Member AgentControl r => Text -> Bool -> Sem r (Either Text ())
+cleanupAgent issueId force = send (CleanupAgent issueId force)
+
+cleanupAgents :: Member AgentControl r => [Text] -> Bool -> Sem r BatchCleanupResult
+cleanupAgents issueIds force = send (CleanupAgents issueIds force)
+
+listAgents :: Member AgentControl r => Sem r (Either Text [AgentInfo])
+listAgents = send ListAgents
 
 -- ============================================================================
 -- Interpreter

@@ -1,11 +1,13 @@
 -- cabal.project.wasm
 -- -------------------------------------------------------------------------
--- WASM Cross-Compilation Overlay for GHC 9.12
+-- WASM Cross-Compilation Project for GHC 9.12
 -- Usage: wasm32-wasi-cabal build --project-file=cabal.project.wasm <target>
 -- -------------------------------------------------------------------------
 
--- 1. Inherit Base Configuration
-import: cabal.project
+-- 1. Packages for WASM build (wasm-guest + vendored polysemy)
+packages:
+    haskell/wasm-guest
+    haskell/vendor/polysemy
 
 -- 2. Repository Management - head.hackage for patched libraries
 repository head.hackage
@@ -14,10 +16,6 @@ repository head.hackage
 
 -- 3. WASM-specific configuration
 if arch(wasm32)
-  -- CRITICAL: Enable shared libraries for Template Haskell support.
-  -- GHC 9.12+ requires dynamic linking for TH external interpreter.
-  shared: True
-
   -- COMPATIBILITY: Fix upstream 'time' package C99 compliance blocker.
   -- Forces Cabal to use patched version instead of boot library.
   constraints: time >= 1.14
@@ -27,9 +25,11 @@ if arch(wasm32)
   package *
     ghc-options: -O1
 
--- 4. Override freeze file behavior
--- When using --project-file=cabal.project.wasm, Cabal automatically
--- looks for cabal.project.wasm.freeze instead of cabal.project.freeze
-
--- 5. Allow newer to handle base version differences between GHC versions
+-- 4. Allow newer to handle base version differences between GHC versions
 allow-newer: all
+
+-- Note: polysemy uses build-type: Custom for doctests which requires threading.
+-- WASM doesn't support threaded RTS. We removed polysemy-plugin from wasm-guest.cabal
+-- to avoid cross-compilation issues (GHC #14335). If polysemy itself still fails to
+-- build, we'll need to patch it via source-repository-package.
+-- See: https://discourse.haskell.org/t/errors-while-building-polysemy-for-wasm/11149/2

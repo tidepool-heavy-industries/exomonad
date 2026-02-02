@@ -53,8 +53,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
 import Data.Word (Word64)
-import Extism.PDK.Memory (Memory, alloc, findMemory, free, load, memoryOffset, JSON (..))
-import Text.JSON.Generic (Data)
+import Extism.PDK.Memory (Memory, alloc, findMemory, free, load, memoryOffset)
 import GHC.Generics (Generic)
 
 -- ============================================================================
@@ -84,7 +83,7 @@ instance FromJSON HostErrorDetails where
 -- ============================================================================
 
 data LogLevel = Debug | Info | Warn | Error
-  deriving (Show, Eq, Generic, Data)
+  deriving (Show, Eq, Generic)
 
 instance ToJSON LogLevel where
   toJSON Debug = Aeson.String "debug"
@@ -97,7 +96,7 @@ data LogPayload = LogPayload
     message :: Text,
     fields :: Maybe [(Text, Text)]
   }
-  deriving (Show, Generic, Data)
+  deriving (Show, Generic)
 
 instance ToJSON LogPayload
 
@@ -161,11 +160,11 @@ foreign import ccall "file_pr" host_file_pr :: Word64 -> IO Word64
 foreign import ccall "wait_for_copilot_review" host_wait_for_copilot_review :: Word64 -> IO Word64
 
 -- | Call a host function with automatic JSON serialization/deserialization.
--- Request uses Text.JSON.Generic (Data), response uses aeson (FromJSON) to handle HostResult wrapper.
-callHost :: (Data req, FromJSON resp) => (Word64 -> IO Word64) -> req -> IO (Either String resp)
+-- Request uses aeson (ToJSON), response uses aeson (FromJSON) to handle HostResult wrapper.
+callHost :: (ToJSON req, FromJSON resp) => (Word64 -> IO Word64) -> req -> IO (Either String resp)
 callHost rawFn request = do
-  -- Allocate request with automatic JSON encoding via ToBytes (JSON a) instance
-  reqMem <- alloc (JSON request)
+  -- Allocate request with automatic JSON encoding via Aeson
+  reqMem <- alloc (toStrict (encode request))
 
   bracket (pure reqMem) free $ \_ -> do
     -- Call host function
@@ -187,9 +186,9 @@ callHost rawFn request = do
             HostError (HostErrorDetails msg) -> pure $ Left (T.unpack msg)
 
 -- | Call a host function that returns void (fire-and-forget, e.g., logging)
-callHostVoid :: (Data req) => (Word64 -> IO ()) -> req -> IO ()
+callHostVoid :: (ToJSON req) => (Word64 -> IO ()) -> req -> IO ()
 callHostVoid rawFn request = do
   -- Allocate request with automatic JSON encoding
-  reqMem <- alloc (JSON request)
+  reqMem <- alloc (toStrict (encode request))
   bracket (pure reqMem) free $ \_ -> do
     rawFn (memoryOffset reqMem)

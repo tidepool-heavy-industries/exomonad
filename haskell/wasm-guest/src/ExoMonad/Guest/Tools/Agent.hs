@@ -15,7 +15,7 @@ module ExoMonad.Guest.Tools.Agent
   )
 where
 
-import Control.Monad.Freer (runM)
+import Polysemy (runM)
 import Data.Aeson (FromJSON, ToJSON, Value, object, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Text (Text)

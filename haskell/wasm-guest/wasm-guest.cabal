@@ -32,8 +32,11 @@ common shared
         text,
         aeson,
         polysemy >= 1.9,
-        polysemy-plugin >= 0.4,
         unordered-containers
+
+    -- Polysemy plugin doesn't work with WASM cross-compilation (GHC #14335)
+    if !arch(wasm32)
+        build-depends: polysemy-plugin >= 0.4
 
 -- Internal library with shared tool infrastructure
 library wasm-guest-internal
@@ -65,8 +68,11 @@ library wasm-guest-internal
         Dev.Tools
         TL.Tools
     build-depends:
-        extism-pdk >= 0.1 && < 1
-    ghc-options: -fplugin=Polysemy.Plugin
+        extism-pdk ^>= 1.2.0.0
+
+    -- Polysemy plugin doesn't work with WASM cross-compilation
+    if !arch(wasm32)
+        ghc-options: -fplugin=Polysemy.Plugin
 
 -- TL role executable (orchestration tools)
 executable wasm-guest-tl
@@ -75,7 +81,7 @@ executable wasm-guest-tl
     main-is:          TL/Main.hs
     build-depends:
         wasm-guest:wasm-guest-internal,
-        extism-pdk >= 0.1 && < 1
+        extism-pdk ^>= 1.2.0.0
 
     if arch(wasm32)
         ghc-options:
@@ -94,7 +100,7 @@ executable wasm-guest-dev
     main-is:          Dev/Main.hs
     build-depends:
         wasm-guest:wasm-guest-internal,
-        extism-pdk >= 0.1 && < 1
+        extism-pdk ^>= 1.2.0.0
 
     if arch(wasm32)
         ghc-options:

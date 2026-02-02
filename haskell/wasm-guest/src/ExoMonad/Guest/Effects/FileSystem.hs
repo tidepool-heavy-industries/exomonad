@@ -29,7 +29,7 @@ module ExoMonad.Guest.Effects.FileSystem
   )
 where
 
-import Polysemy (Sem, Member, interpret, embed, makeSem)
+import Polysemy (Sem, Member, interpret, embed, send)
 import Polysemy.Embed (Embed)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.=))
 import Data.Aeson.Types (Parser)
@@ -144,19 +144,12 @@ data FileSystem m a where
   -- | Write a file.
   WriteFileOp :: Text -> Text -> Bool -> FileSystem m (Either Text WriteFileOutput)
 
-makeSem ''FileSystem
+-- Smart constructors (manually written - makeSem doesn't work with WASM cross-compilation)
+readFile :: Member FileSystem r => Text -> Int -> Sem r (Either Text ReadFileOutput)
+readFile path maxBytes = send (ReadFileOp path maxBytes)
 
--- ============================================================================
--- Smart constructors
--- ============================================================================
-
--- | Read a file (path, max_bytes).
-readFile :: (Member FileSystem r) => Text -> Int -> Sem r (Either Text ReadFileOutput)
-readFile = readFileOp
-
--- | Write a file (path, content, create_parents).
-writeFile :: (Member FileSystem r) => Text -> Text -> Bool -> Sem r (Either Text WriteFileOutput)
-writeFile = writeFileOp
+writeFile :: Member FileSystem r => Text -> Text -> Bool -> Sem r (Either Text WriteFileOutput)
+writeFile path content createParents = send (WriteFileOp path content createParents)
 
 -- ============================================================================
 -- Interpreter

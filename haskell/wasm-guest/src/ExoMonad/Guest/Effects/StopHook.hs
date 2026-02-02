@@ -21,7 +21,6 @@ import ExoMonad.Guest.HostCall
   )
 import ExoMonad.Guest.Types (StopHookOutput, allowStopResponse, blockStopResponse)
 import GHC.Generics (Generic)
-import Text.JSON.Generic (Data)
 
 -- ============================================================================
 -- Types
@@ -31,7 +30,7 @@ data GitHostInput = GitHostInput
   { workingDir :: Text,
     containerId :: Text
   }
-  deriving stock (Show, Generic, Data)
+  deriving stock (Show, Generic)
   deriving anyclass (ToJSON)
 
 -- Removed GitHostOutput wrapper - host functions now return T directly
@@ -41,7 +40,7 @@ data RepoInfo = RepoInfo
     owner :: Maybe Text,
     name :: Maybe Text
   }
-  deriving stock (Show, Generic, Data)
+  deriving stock (Show, Generic)
   deriving anyclass (FromJSON)
 
 -- Removed GitHubHostOutput wrapper - host functions now return T directly
@@ -50,7 +49,7 @@ data Repo = Repo
   { repoOwner :: Text,
     repoName :: Text
   }
-  deriving stock (Show, Generic, Data)
+  deriving stock (Show, Generic)
 
 instance ToJSON Repo where
   toJSON r =
@@ -64,7 +63,7 @@ data PullRequest = PullRequest
     prTitle :: Text,
     prUrl :: Text
   }
-  deriving stock (Show, Generic, Data)
+  deriving stock (Show, Generic)
 
 instance FromJSON PullRequest where
   parseJSON = Aeson.withObject "PullRequest" $ \v ->
@@ -77,7 +76,7 @@ data GetPRInput = GetPRInput
   { repo :: Repo,
     prHead :: Text
   }
-  deriving stock (Show, Generic, Data)
+  deriving stock (Show, Generic)
 
 instance ToJSON GetPRInput where
   toJSON i =
@@ -91,7 +90,7 @@ data WaitForCopilotReviewInput = WaitForCopilotReviewInput
     wcrTimeoutSecs :: Int,
     wcrPollIntervalSecs :: Int
   }
-  deriving stock (Show, Generic, Data)
+  deriving stock (Show, Generic)
 
 instance ToJSON WaitForCopilotReviewInput where
   toJSON i =
@@ -105,7 +104,7 @@ data CopilotReviewOutput = CopilotReviewOutput
   { croStatus :: Text, -- "reviewed", "pending", "timeout"
     croComments :: [CopilotComment]
   }
-  deriving stock (Show, Generic, Data)
+  deriving stock (Show, Generic)
 
 instance FromJSON CopilotReviewOutput where
   parseJSON = Aeson.withObject "CopilotReviewOutput" $ \v ->
@@ -118,7 +117,7 @@ data CopilotComment = CopilotComment
     ccLine :: Maybe Int,
     ccBody :: Text
   }
-  deriving stock (Show, Generic, Data)
+  deriving stock (Show, Generic)
 
 instance FromJSON CopilotComment where
   parseJSON = Aeson.withObject "CopilotComment" $ \v ->
