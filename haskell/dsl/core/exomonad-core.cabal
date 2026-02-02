@@ -21,7 +21,6 @@ library
         Data.Stack
         ExoMonad
         ExoMonad.WASM
-        ExoMonad.Platform
         ExoMonad.Effect
         ExoMonad.Effect.DevLog
         ExoMonad.Effect.Log
@@ -43,9 +42,6 @@ library
         ExoMonad.LLM.Tools
         -- Template rendering (WASM-safe)
         ExoMonad.Template.Render
-    -- Development/tooling modules (excluded from WASM builds)
-    if !os(wasi)
-      exposed-modules:
         -- Unified re-export module
         ExoMonad.Effects
         -- Native-only effects (require subprocesses)
@@ -78,6 +74,7 @@ library
         ExoMonad.LLM.Interpret
         ExoMonad.LLM.Tools.TH
         ExoMonad.Middleware.Logging
+    -- Development/tooling modules (excluded from WASM builds)
       build-depends:
         exomonad-habitica,
         optparse-applicative >= 0.17 && < 1
@@ -114,11 +111,6 @@ library
         base hiding (Prelude),
         relude (Relude as Prelude)
     hs-source-dirs:   src
-    -- Platform-specific source directories for NativeOnly constraint
-    if os(wasi)
-      hs-source-dirs: src-platform-wasm
-    else
-      hs-source-dirs: src-platform-native
     default-language: GHC2024
     default-extensions:
         DataKinds
