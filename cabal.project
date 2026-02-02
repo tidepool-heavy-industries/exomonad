@@ -6,6 +6,7 @@ packages:
     haskell/effects/llm-interpreter
     haskell/effects/filesystem-interpreter
     haskell/effects/env-interpreter
+    haskell/effects/context-interpreter
     haskell/effects/git-interpreter
     haskell/effects/github-interpreter
     haskell/effects/justfile-interpreter

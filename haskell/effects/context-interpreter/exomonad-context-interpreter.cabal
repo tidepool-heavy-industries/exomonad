@@ -1,0 +1,34 @@
+cabal-version:      3.0
+name:               exomonad-context-interpreter
+version:            0.1.0.0
+synopsis:           Context effect interpreter
+license:            MIT
+author:             Inanna
+build-type:         Simple
+
+common warnings
+    ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints -Wunused-packages -fplugin=Polysemy.Plugin
+
+library
+    import:           warnings
+    exposed-modules:
+        ExoMonad.Context.Interpreter
+    build-depends:
+        base >= 4.17 && < 5,
+        polysemy >= 1.9,
+        polysemy-plugin >= 0.4,
+        path >= 0.9,
+        path-io >= 1.7,
+        text,
+        exomonad-core
+    hs-source-dirs:   src
+    default-language: GHC2024
+    default-extensions:
+        DataKinds
+        DeriveAnyClass
+        DeriveGeneric
+        DerivingStrategies
+        LambdaCase
+        OverloadedStrings
+        TypeFamilies
+        TypeOperators

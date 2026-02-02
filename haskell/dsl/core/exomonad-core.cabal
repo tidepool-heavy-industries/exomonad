@@ -30,6 +30,7 @@ library
         ExoMonad.Effect.Decision
         ExoMonad.Effect.Decision.Types
         ExoMonad.Effect.TUI
+        ExoMonad.Effect.Context
         ExoMonad.Effects.JustExec
         ExoMonad.Role
         -- Types needed by WASM (no native dependencies)
