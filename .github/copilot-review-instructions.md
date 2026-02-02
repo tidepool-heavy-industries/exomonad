@@ -27,12 +27,6 @@
 - Using `unsafeCoerce` or `Dynamic` (should use `OneOf` pattern instead)
 - Partial functions (`head`, `tail`, `!!`) without guards
 
-### TypeScript (deploy/)
-
-- Protocol types must match Haskell `Serializable.hs` exactly
-- WASM loader uses GHC-specific JSFFI - don't modify without care
-- Durable Object state must be serializable
-
 ## Review Focus
 
 1. **Type Safety** - This codebase prioritizes compile-time guarantees

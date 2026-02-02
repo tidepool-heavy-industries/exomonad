@@ -281,18 +281,9 @@ Migration strategy:
 3. Update imports
 4. Delete old manual definitions
 
-## Pattern: Handler Registry (from CF deploy)
+## Pattern: Handler Registry
 
-The Cloudflare deploy has a clean pattern we'll adapt:
-
-```typescript
-// TypeScript version
-const internalHandlers: InternalEffectHandlers<Env> = {
-  LogInfo: (effect, _env) => handleLogInfo(effect),
-  GitGetBranch: (effect, env) => handleGitGetBranch(effect, env),
-  // ...
-};
-```
+We'll use a handler registry pattern:
 
 Rust equivalent:
 

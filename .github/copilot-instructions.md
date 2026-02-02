@@ -54,10 +54,6 @@ exomonad-native-gui/        # Native execution layer
 ├── ui-executor/            # UI effect interpreter
 ├── observability-executor/ # OTLP + Loki
 └── ...                     # Other effect executors
-
-deploy/                     # Cloudflare Worker Durable Object harness
-├── src/                    # TypeScript harness for WASM state machines
-└── wrangler.toml           # CF Worker configuration
 ```
 
 ## Building and Testing
@@ -71,9 +67,6 @@ just native  # Starts at localhost:8080
 
 # Run tests
 cabal test all
-
-# TypeScript (deploy/)
-cd deploy && pnpm dev
 ```
 
 ## Code Conventions
@@ -146,11 +139,6 @@ data StateDelta = StateDelta
 - **aeson** - JSON serialization
 - **servant** - REST API + WebSocket
 
-### TypeScript (deploy/)
-
-- **@cloudflare/workers-types** - Cloudflare Worker types
-- **wrangler** - Cloudflare deployment tool
-
 ## Common Patterns
 
 ### Error Handling
@@ -161,7 +149,6 @@ data StateDelta = StateDelta
 ### Testing
 
 - Graph validation tests check type-level graph structure
-- Protocol conformance tests verify Haskell ↔ TypeScript JSON contract
 
 ## Additional Resources
 

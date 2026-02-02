@@ -7,7 +7,7 @@
 -- | Tests for Habitica response type parsing.
 --
 -- These tests validate that the Haskell FromJSON instances correctly parse
--- the JSON structures produced by the TypeScript handler (deploy/src/handlers/habitica.ts).
+-- the JSON structures produced by the Habitica API.
 --
 -- This catches protocol mismatches before they become runtime errors.
 module ResponseSpec (spec) where
@@ -57,7 +57,7 @@ spec = do
 
 userInfoSpec :: Spec
 userInfoSpec = describe "UserInfo" $ do
-  it "parses GetUser response from TypeScript handler" $ do
+  it "parses GetUser response" $ do
     -- This JSON matches what handleHabitica returns for GetUser
     let json =
           [aesonQQ|{
@@ -99,7 +99,6 @@ userInfoSpec = describe "UserInfo" $ do
 userStatsSpec :: Spec
 userStatsSpec = describe "UserStats" $ do
   it "parses integer values as doubles" $ do
-    -- TypeScript may send integer values, Haskell expects Double
     let json =
           [aesonQQ|{
       "hp": 50,
@@ -127,7 +126,7 @@ userStatsSpec = describe "UserStats" $ do
 
 habiticaTaskSpec :: Spec
 habiticaTaskSpec = describe "HabiticaTask" $ do
-  it "parses GetTasks response item from TypeScript handler" $ do
+  it "parses GetTasks response item" $ do
     -- This JSON matches what handleHabitica returns for GetTasks
     let json =
           [aesonQQ|{
@@ -201,7 +200,7 @@ habiticaTaskSpec = describe "HabiticaTask" $ do
 
 fetchedTodoSpec :: Spec
 fetchedTodoSpec = describe "FetchedTodo" $ do
-  it "parses FetchTodos response item from TypeScript handler" $ do
+  it "parses FetchTodos response item" $ do
     -- This JSON matches what handleHabitica returns for FetchTodos
     let json =
           [aesonQQ|{
@@ -264,7 +263,7 @@ fetchedTodoSpec = describe "FetchedTodo" $ do
 
 scoreResultSpec :: Spec
 scoreResultSpec = describe "ScoreResult" $ do
-  it "parses ScoreTask response from TypeScript handler" $ do
+  it "parses ScoreTask response" $ do
     -- This JSON matches what handleHabitica returns for ScoreTask
     let json =
           [aesonQQ|{

@@ -25,6 +25,7 @@
           just
           curl
           git
+          nodejs_20 # For quicktype codegen
         ];
 
         # Haskell toolchain
@@ -43,12 +44,6 @@
         };
         rustPkgs = [ rustToolchain ];
 
-        # Node.js toolchain
-        nodePkgs = with pkgs; [
-          nodejs_20
-          pnpm
-        ];
-
         # Orchestration tools
         orchestrationPkgs = with pkgs; [
           zellij
@@ -61,7 +56,6 @@
             packages = commonPkgs
               ++ haskellPkgs "ghc912"
               ++ rustPkgs
-              ++ nodePkgs
               ++ orchestrationPkgs
               ++ [ pkgs.sqlite ];
 
@@ -77,8 +71,6 @@
               echo "  GHC:      $(ghc --numeric-version)"
               echo "  Cabal:    $(cabal --numeric-version)"
               echo "  Cargo:    $(cargo --version | cut -d' ' -f2)"
-              echo "  Node.js:  $(node --version)"
-              echo "  pnpm:     $(pnpm --version)"
               echo ""
               echo "Paths:"
               echo "  EXOMONAD_ROOT: $EXOMONAD_ROOT"
@@ -88,30 +80,7 @@
               echo "  ./ide              Start Claude Code++ session"
               echo ""
               echo "Other shells:"
-              echo "  nix develop .#worker            Cloudflare Worker dev"
               echo "  nix develop .#wasm              WASM cross-compilation"
-              echo ""
-            '';
-          };
-
-          # Worker: Cloudflare Worker development (TypeScript only)
-          worker = pkgs.mkShell {
-            packages = commonPkgs ++ nodePkgs;
-
-            shellHook = ''
-              echo "╔═══════════════════════════════════════════════════════════╗"
-              echo "║         Cloudflare Worker Development Shell               ║"
-              echo "╚═══════════════════════════════════════════════════════════╝"
-              echo ""
-              echo "  Node.js: $(node --version)"
-              echo "  pnpm:    $(pnpm --version)"
-              echo ""
-              echo "Setup:"
-              echo "  cd repo/deploy && pnpm install"
-              echo ""
-              echo "Development:"
-              echo "  pnpm dev      # wrangler dev (local)"
-              echo "  pnpm deploy   # wrangler deploy (production)"
               echo ""
             '';
           };
@@ -121,7 +90,7 @@
             packages = [
               wasmPkgs.all_9_12  # GHC 9.12 WASM toolchain (matches native)
               pkgs.wizer
-            ] ++ commonPkgs ++ nodePkgs;
+            ] ++ commonPkgs;
 
             shellHook = ''
               echo "╔═══════════════════════════════════════════════════════════╗"

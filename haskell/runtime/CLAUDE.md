@@ -43,7 +43,7 @@ For edge deployment on Cloudflare Workers:
 ```haskell
 import ExoMonad.Wasm (WasmM, stepGraph)
 
--- Effects yield to TypeScript harness
+-- Effects yield to host
 computeHandler :: Int -> WasmM (GotoChoice '[To Exit Int])
 computeHandler n = do
   logInfo "Computing..."  -- Yields Log effect
@@ -53,7 +53,6 @@ computeHandler n = do
 **Key features:**
 - **Yield/resume protocol** - Effects cross FFI boundary
 - **Serializable state** - GraphState survives across invocations
-- **TypeScript harness** - Interprets effects in Cloudflare Worker
 
 ## Adding a New Backend
 

@@ -26,18 +26,3 @@ setup:
     run: |
       cabal update
       cabal build all
-
-  - name: Setup pnpm (for deploy/)
-    uses: pnpm/action-setup@v4
-    with:
-      version: 9
-
-  - name: Setup Node
-    uses: actions/setup-node@v4
-    with:
-      node-version: '20'
-
-  - name: Install TypeScript dependencies
-    run: |
-      cd deploy
-      pnpm install --frozen-lockfile

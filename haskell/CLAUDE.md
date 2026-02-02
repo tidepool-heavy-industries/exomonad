@@ -36,8 +36,7 @@ haskell/CLAUDE.md  ← YOU ARE HERE (router)
 │   ├── actor/CLAUDE.md  ← Actor model (detailed)
 │   └── wasm/CLAUDE.md
 ├── protocol/CLAUDE.md
-│   ├── wire-types/CLAUDE.md
-│   └── generated-ts/CLAUDE.md
+│   └── wire-types/CLAUDE.md
 └── tools/CLAUDE.md
     ├── ghci-oracle/CLAUDE.md
     ├── sleeptime/CLAUDE.md

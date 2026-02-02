@@ -7,15 +7,14 @@ Serialization formats for ExoMonad's wire protocols.
 | Package | Purpose | Key Types |
 |---------|---------|-----------|
 | `wire-types/` | Native GUI protocol → see wire-types/CLAUDE.md | `UIState`, `UserAction` |
-| `generated-ts/` | WASM TypeScript codegen → see generated-ts/CLAUDE.md | Generated from Haskell |
 
 ## Protocol Overview
 
-ExoMonad has two wire protocols:
+ExoMonad has one wire protocol:
 
 ### Native Protocol (wire-types)
 
-For the native WebSocket server ↔ Solid.js frontend:
+For the native WebSocket server:
 
 ```
 Server → Client:  UIState (chat messages, input configs, DM state)
@@ -24,18 +23,6 @@ Client → Server:  UserAction (text input, choice selection, photo upload)
 
 **Format**: JSON over WebSocket
 **Lifecycle**: See `native-server/PROTOCOL.md`
-
-### WASM Protocol (generated-ts)
-
-For WASM graphs ↔ TypeScript harness (Cloudflare Workers):
-
-```
-WASM yields:    SerializableEffect (effect to execute)
-Harness returns: EffectResult (result from TypeScript)
-```
-
-**Format**: JSON across WASM FFI boundary
-**Generation**: Run `cabal run generate-ts-package`
 
 ## Key Types
 
@@ -61,22 +48,6 @@ data UserAction
   | UAPhotoUpload ByteString    -- User uploaded photo
 ```
 
-## TypeScript Codegen
-
-The `generated-ts` package generates TypeScript from Haskell metadata:
-
-1. Protocol types matching Haskell wire types
-2. Effect routing tables (internal vs yielded)
-3. WASM loader with GHC RTS setup
-4. Type-safe dispatcher
-
-**To regenerate:**
-```bash
-cd exomonad-wasm && cabal run generate-ts-package -- ../deploy/exomonad-generated-ts
-```
-
 ## Related Documentation
 
 - [native-server/CLAUDE.md](../native-server/CLAUDE.md) - WebSocket server
-- [deploy/CLAUDE.md](../../deploy/CLAUDE.md) - Cloudflare Worker using these types
-- [typescript/native-gui/CLAUDE.md](../../typescript/native-gui/CLAUDE.md) - Solid.js frontend

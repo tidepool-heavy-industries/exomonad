@@ -22,6 +22,7 @@ let
     just
     curl
     git
+    nodejs_20 # For quicktype codegen
   ];
 
   # Haskell toolchain
@@ -40,12 +41,6 @@ let
   };
   rustPkgs = [ rustToolchain ];
 
-  # Node.js toolchain
-  nodePkgs = with pkgs; [
-    nodejs_20
-    pnpm
-  ];
-
   # Orchestration
   orchestrationPkgs = with pkgs; [
     zellij
@@ -55,7 +50,6 @@ in pkgs.mkShell {
   buildInputs = commonPkgs
     ++ haskellPkgs
     ++ rustPkgs
-    ++ nodePkgs
     ++ orchestrationPkgs
     ++ [ pkgs.sqlite ];
 
@@ -71,8 +65,6 @@ in pkgs.mkShell {
     echo "  GHC:      $(ghc --numeric-version)"
     echo "  Cabal:    $(cabal --numeric-version)"
     echo "  Cargo:    $(cargo --version | cut -d' ' -f2)"
-    echo "  Node.js:  $(node --version)"
-    echo "  pnpm:     $(pnpm --version)"
     echo ""
     echo "Paths:"
     echo "  EXOMONAD_REPO: $EXOMONAD_REPO"

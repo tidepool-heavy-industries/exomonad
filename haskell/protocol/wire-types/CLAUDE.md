@@ -1,6 +1,6 @@
 # Wire Types - Native GUI Protocol
 
-WebSocket protocol types for the native server ↔ Solid.js frontend communication.
+WebSocket protocol types for the native server.
 
 ## When to Read This
 
@@ -13,7 +13,7 @@ Read this if you're:
 ## Protocol Overview
 
 ```
-Server (native-server)          Client (typescript/native-gui)
+Server (native-server)          Client
         │                                │
         │◄───── UserAction ──────────────│  (user typed, clicked, uploaded)
         │                                │
@@ -119,5 +119,4 @@ See `native-server/PROTOCOL.md` for full WebSocket lifecycle including:
 ## Related Documentation
 
 - [native-server/CLAUDE.md](../../native-server/CLAUDE.md) - Server that uses these types
-- [typescript/native-gui/CLAUDE.md](../../../typescript/native-gui/CLAUDE.md) - Client that consumes these types
 - [protocol/CLAUDE.md](../CLAUDE.md) - Protocol overview
