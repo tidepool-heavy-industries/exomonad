@@ -43,7 +43,7 @@ instance (Arbitrary a) => Arbitrary (HostResult a) where
   arbitrary = oneof [Success <$> arbitrary, HostError <$> arbText]
 
 instance Arbitrary SpawnAgentInput where
-  arbitrary = SpawnAgentInput <$> arbText <*> arbText <*> arbText <*> arbMaybeText <*> arbitrary
+  arbitrary = SpawnAgentInput <$> arbitrary <*> arbText <*> arbText <*> arbMaybeText <*> arbitrary
 
 instance Arbitrary SpawnAgentsInput where
   arbitrary = SpawnAgentsInput <$> listOf arbText <*> arbText <*> arbText <*> arbMaybeText <*> arbitrary

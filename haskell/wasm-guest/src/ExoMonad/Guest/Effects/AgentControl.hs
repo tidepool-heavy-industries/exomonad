@@ -45,9 +45,12 @@ import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
 import Data.Text qualified
+import qualified Data.Text.Read as TR
+import Data.Word (Word64)
 import ExoMonad.Guest.HostCall (callHost, host_agent_cleanup, host_agent_cleanup_batch, host_agent_list, host_agent_spawn, host_agent_spawn_batch)
 import GHC.Generics (Generic)
 import Data.Kind (Type)
+import Data.Maybe (fromMaybe)
 
 -- ============================================================================
 -- Types (match Rust agent_control.rs)
@@ -213,11 +216,11 @@ instance (FromJSON a) => FromJSON (HostResult a) where
 -- ============================================================================
 
 data SpawnAgentInput = SpawnAgentInput
-  { saiIssueId :: Text,
+  { saiIssueId :: Word64,
     saiOwner :: Text,
     saiRepo :: Text,
     saiWorktreeDir :: Maybe Text,
-    saiAgentType :: Maybe AgentType
+    saiAgentType :: AgentType
   }
   deriving (Show, Eq, Generic)
 
@@ -244,7 +247,7 @@ data SpawnAgentsInput = SpawnAgentsInput
     sasOwner :: Text,
     sasRepo :: Text,
     sasWorktreeDir :: Maybe Text,
-    sasAgentType :: Maybe AgentType
+    sasAgentType :: AgentType
   }
   deriving (Show, Eq, Generic)
 
@@ -345,22 +348,31 @@ listAgents = send ListAgents
 -- Interpreter
 -- ============================================================================
 
+-- | Parse an issue ID from text to Word64.
+parseIssueId :: Text -> Either Text Word64
+parseIssueId t = case TR.decimal t of
+  Right (n, "") -> Right n
+  _ -> Left $ "Invalid issue ID: " <> t
+
 -- | Interpret AgentControl by calling Rust host functions.
 runAgentControl :: (Member (Embed IO) r) => Sem (AgentControl ': r) a -> Sem r a
 runAgentControl = interpret $ \case
   SpawnAgent issueId opts -> embed $ do
-    let input =
-          SpawnAgentInput
-            { saiIssueId = issueId,
-              saiOwner = owner opts,
-              saiRepo = repo opts,
-              saiWorktreeDir = worktreeDir opts,
-              saiAgentType = agentType opts
-            }
-    res <- callHost host_agent_spawn input
-    pure $ case res of
-      Left err -> Left (Data.Text.pack err)
-      Right r -> Right r
+    case parseIssueId issueId of
+      Left err -> pure $ Left err
+      Right issueIdNum -> do
+        let input =
+              SpawnAgentInput
+                { saiIssueId = issueIdNum,
+                  saiOwner = owner opts,
+                  saiRepo = repo opts,
+                  saiWorktreeDir = worktreeDir opts,
+                  saiAgentType = fromMaybe Gemini (agentType opts)
+                }
+        res <- callHost host_agent_spawn input
+        pure $ case res of
+          Left err -> Left (Data.Text.pack err)
+          Right r -> Right r
   SpawnAgents issueIds opts -> embed $ do
     let input =
           SpawnAgentsInput
@@ -368,7 +380,7 @@ runAgentControl = interpret $ \case
               sasOwner = owner opts,
               sasRepo = repo opts,
               sasWorktreeDir = worktreeDir opts,
-              sasAgentType = agentType opts
+              sasAgentType = fromMaybe Gemini (agentType opts)
             }
     res <- callHost host_agent_spawn_batch input
     pure $ case res of
