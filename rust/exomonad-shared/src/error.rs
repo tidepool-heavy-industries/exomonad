@@ -25,14 +25,6 @@ pub enum ExoMonadError {
     #[error("I/O error: {0}")]
     Io(#[source] io::Error),
 
-    /// HTTP error.
-    #[error("HTTP error: {0}")]
-    Http(#[source] http::Error),
-
-    /// Hyper error.
-    #[error("Hyper error: {0}")]
-    Hyper(#[source] hyper::Error),
-
     // ---- Socket errors (for control envelope) ----
     /// Failed to connect to control server via Unix socket.
     #[error("failed to connect to control server at {path}: {source}")]
@@ -85,17 +77,5 @@ impl From<serde_json::Error> for ExoMonadError {
 impl From<std::io::Error> for ExoMonadError {
     fn from(e: std::io::Error) -> Self {
         Self::Io(e)
-    }
-}
-
-impl From<http::Error> for ExoMonadError {
-    fn from(e: http::Error) -> Self {
-        Self::Http(e)
-    }
-}
-
-impl From<hyper::Error> for ExoMonadError {
-    fn from(e: hyper::Error) -> Self {
-        Self::Hyper(e)
     }
 }
