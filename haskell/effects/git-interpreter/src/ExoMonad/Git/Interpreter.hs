@@ -13,7 +13,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Effects.Git (Git (..), WorktreeInfo)
 import ExoMonad.Path (Path, Rel, File, toFilePath)
-import System.FilePath (takeFileName)
+import System.FilePath (takeFileName, splitDirectories)
 
 -- | Run Git effects with pure handlers (for testing).
 runGit ::
@@ -37,12 +37,12 @@ runGit hWorktree hDirty hCommits hBranch hAhead hFetch = interpret $ \case
 worktreeName :: Path b t -> Text
 worktreeName path =
   let pathStr = toFilePath path
-      parts = T.splitOn "/" (T.pack pathStr)
+      parts = splitDirectories pathStr
       findAfterWorktrees [] = Nothing
       findAfterWorktrees [_] = Nothing
       findAfterWorktrees (x : y : rest)
         | x == "worktrees" = Just y
         | otherwise = findAfterWorktrees (y : rest)
    in case findAfterWorktrees parts of
-        Just name -> name
+        Just name -> T.pack name
         Nothing -> T.pack $ takeFileName pathStr

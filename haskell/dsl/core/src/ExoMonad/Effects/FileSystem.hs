@@ -49,7 +49,6 @@ where
 
 import ExoMonad.Path
 import Polysemy (Sem, Member, makeSem)
-import Polysemy.Error (Error, throw)
 import Data.Kind (Type)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)

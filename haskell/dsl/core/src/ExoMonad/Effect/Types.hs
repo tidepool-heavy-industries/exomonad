@@ -150,6 +150,8 @@ import Prelude hiding (State, get, gets, put, modify, runState, toList, newIORef
 import Polysemy (Sem, Member, interpret, embed, makeSem)
 import Polysemy.Internal (send) -- for manual definitions if needed, or generated code
 import Polysemy.State (State, get, gets, put, modify, runState)
+import Polysemy.Error (Error, throw, catch)
+import Lens.Micro.TH (makeLenses)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef, modifyIORef)
 import Data.Kind (Type)
 import Data.Aeson (FromJSON, ToJSON, Value (..), encode)
@@ -464,7 +466,9 @@ llmCallEither ::
   Value ->
   Sem effs (Either Text output)
 llmCallEither systemPrompt userInput schema =
-  Right <$> llmCall @output systemPrompt userInput schema
+  catch
+    (Right <$> llmCall @output systemPrompt userInput schema)
+    (\e -> pure $ Left $ T.pack $ show e)
 
 -- | Deprecated in favor of llmCall
 llmCallStructured ::
@@ -475,7 +479,9 @@ llmCallStructured ::
   Value ->
   Sem effs (Either LlmError output)
 llmCallStructured systemPrompt userInput schema =
-  Right <$> llmCall @output systemPrompt userInput schema
+  catch
+    (Right <$> llmCall @output systemPrompt userInput schema)
+    (\e -> pure $ Left e)
 
 -- | Deprecated in favor of llmCallWithTools
 llmCallEitherWithTools ::
@@ -487,7 +493,9 @@ llmCallEitherWithTools ::
   [Value] ->
   Sem effs (Either Text output)
 llmCallEitherWithTools systemPrompt userInput schema tools =
-  Right . trOutput <$> llmCallWithTools @output systemPrompt userInput schema tools
+  catch
+    (Right . trOutput <$> llmCallWithTools @output systemPrompt userInput schema tools)
+    (\e -> pure $ Left $ T.pack $ show e)
 
 -- | Deprecated in favor of llmCallWithTools
 llmCallStructuredWithTools ::
@@ -499,7 +507,9 @@ llmCallStructuredWithTools ::
   [Value] ->
   Sem effs (Either LlmError output)
 llmCallStructuredWithTools systemPrompt userInput schema tools =
-  Right . trOutput <$> llmCallWithTools @output systemPrompt userInput schema tools
+  catch
+    (Right . trOutput <$> llmCallWithTools @output systemPrompt userInput schema tools)
+    (\e -> pure $ Left e)
 
 -- ══════════════════════════════════════════════════════════════
 -- CHAT HISTORY EFFECT
