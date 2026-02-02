@@ -49,21 +49,23 @@ logLLMCalls = intercept $ \case
 -- | Intercept GitHub calls to log operations.
 logGitHubCalls :: (Member GitHub r, Member Log r) => Sem r a -> Sem r a
 logGitHubCalls = intercept $ \case
-  ListIssues repo -> do
-    logInfo $ "Listing issues for " <> repo
-    send (ListIssues repo)
-  GetIssue repo num -> do
-    logInfo $ "Getting issue " <> repo <> "#" <> T.pack (show num)
-    send (GetIssue repo num)
-  CreatePR repo title body branch base -> do
-    logInfo $ "Creating PR in " <> repo <> ": " <> title
-    send (CreatePR repo title body branch base)
-  ListPRs repo -> do
-    logInfo $ "Listing PRs for " <> repo
-    send (ListPRs repo)
-  GetPRForBranch repo branch -> do
-    logInfo $ "Getting PR for branch " <> branch <> " in " <> repo
-    send (GetPRForBranch repo branch)
-  GetPRReviewComments repo num -> do
-    logInfo $ "Getting review comments for " <> repo <> "#" <> T.pack (show num)
-    send (GetPRReviewComments repo num)
+  ListIssues repo _ -> do
+    logInfo $ "Listing issues for " <> repo.unRepo
+    send (ListIssues repo defaultIssueFilter)
+  GetIssue repo num _ -> do
+    logInfo $ "Getting issue " <> repo.unRepo <> "#" <> T.pack (show num)
+    send (GetIssue repo num True)
+  CreatePR spec -> do
+    logInfo $ "Creating PR in " <> spec.prcsRepo.unRepo <> ": " <> spec.prcsTitle
+    send (CreatePR spec)
+  ListPullRequests repo _ -> do
+    logInfo $ "Listing PRs for " <> repo.unRepo
+    send (ListPullRequests repo defaultPRFilter)
+  GetPullRequest repo num _ -> do
+    logInfo $ "Getting PR " <> repo.unRepo <> "#" <> T.pack (show num)
+    send (GetPullRequest repo num True)
+  GetPullRequestReviews repo num -> do
+    logInfo $ "Getting review comments for " <> repo.unRepo <> "#" <> T.pack (show num)
+    send (GetPullRequestReviews repo num)
+  -- Pass through other cases
+  op -> send op

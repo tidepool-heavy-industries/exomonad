@@ -24,8 +24,8 @@ module ExoMonad.GitHub.Interpreter
   )
 where
 
-import Control.Lens ((^?))
 import Polysemy (Sem, Member, interpret, embed)
+import Polysemy.Error (Error, throw)
 import Polysemy.Embed (Embed)
 import Data.Aeson (Value (..), fromJSON, toJSON)
 import Data.Aeson qualified as Aeson
@@ -88,27 +88,32 @@ defaultGitHubConfig =
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Run GitHub effects using the socket client.
-runGitHubIO :: (Member (Embed IO) r) => GitHubConfig -> Sem (GitHub ': r) a -> Sem r a
+runGitHubIO :: (Member (Embed IO) r, Member (Error GitHubError) r) => GitHubConfig -> Sem (GitHub ': r) a -> Sem r a
 runGitHubIO (GitHubSocketConfig path) = interpret $ \case
   -- Issue operations
-  CreateIssue input -> embed $ socketCreateIssue path input
-  UpdateIssue (Repo repo) num input -> embed $ socketUpdateIssue path repo num input
-  CloseIssue (Repo repo) num -> embed $ socketCloseIssue path repo num
-  ReopenIssue (Repo repo) num -> embed $ socketReopenIssue path repo num
-  AddIssueLabel (Repo repo) num label -> embed $ socketAddIssueLabel path repo num label
-  RemoveIssueLabel (Repo repo) num label -> embed $ socketRemoveIssueLabel path repo num label
-  AddIssueAssignee (Repo repo) num assignee -> embed $ socketAddIssueAssignee path repo num assignee
-  RemoveIssueAssignee (Repo repo) num assignee -> embed $ socketRemoveIssueAssignee path repo num assignee
-  GetIssue (Repo repo) num includeComments -> embed $ socketGetIssue path repo num includeComments
-  ListIssues (Repo repo) filt -> embed $ socketListIssues path repo filt
+  CreateIssue input -> embed (socketCreateIssue path input) >>= fromEither
+  UpdateIssue (Repo repo) num input -> embed (socketUpdateIssue path repo num input) >>= fromEither
+  CloseIssue (Repo repo) num -> embed (socketCloseIssue path repo num) >>= fromEither
+  ReopenIssue (Repo repo) num -> embed (socketReopenIssue path repo num) >>= fromEither
+  AddIssueLabel (Repo repo) num label -> embed (socketAddIssueLabel path repo num label) >>= fromEither
+  RemoveIssueLabel (Repo repo) num label -> embed (socketRemoveIssueLabel path repo num label) >>= fromEither
+  AddIssueAssignee (Repo repo) num assignee -> embed (socketAddIssueAssignee path repo num assignee) >>= fromEither
+  RemoveIssueAssignee (Repo repo) num assignee -> embed (socketRemoveIssueAssignee path repo num assignee) >>= fromEither
+  GetIssue (Repo repo) num includeComments -> embed (socketGetIssue path repo num includeComments) >>= fromEither
+  ListIssues (Repo repo) filt -> embed (socketListIssues path repo filt) >>= fromEither
   -- PR operations
-  CreatePR spec -> embed $ socketCreatePR path spec
-  GetPullRequest (Repo repo) num includeDetails -> embed $ socketGetPR path repo num includeDetails
-  ListPullRequests (Repo repo) filt -> embed $ socketListPullRequests path repo filt
-  GetPullRequestReviews (Repo repo) num -> embed $ socketGetPullRequestReviews path repo num
-  GetDiscussion (Repo repo) num -> embed $ socketGetDiscussion path repo num
+  CreatePR spec -> embed (socketCreatePR path spec) >>= fromEither
+  GetPullRequest (Repo repo) num includeDetails -> embed (socketGetPR path repo num includeDetails) >>= fromEither
+  ListPullRequests (Repo repo) filt -> embed (socketListPullRequests path repo filt) >>= fromEither
+  GetPullRequestReviews (Repo repo) num -> embed (socketGetPullRequestReviews path repo num) >>= fromEither
+  GetDiscussion (Repo repo) num -> embed (socketGetDiscussion path repo num) >>= fromEither
   -- Auth
-  CheckAuth -> embed $ socketCheckAuth path
+  CheckAuth -> embed (socketCheckAuth path)
+
+-- | Helper to lift Either into Polysemy Error
+fromEither :: (Member (Error e) r) => Either e a -> Sem r a
+fromEither (Left e) = throw e
+fromEither (Right a) = pure a
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SOCKET FUNCTIONS

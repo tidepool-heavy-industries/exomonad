@@ -50,10 +50,7 @@
 --     Nothing -> pure "No hover info"
 -- @
 module ExoMonad.Effect.LSP
-  ( -- * Platform Constraint
-    NativeOnly,
-
-    -- * Effect
+  ( -- * Effect
     LSP (..),
 
     -- * Smart Constructors
@@ -109,7 +106,6 @@ import Data.Kind (Type)
 import Data.Aeson (FromJSON, ToJSON, Value)
 import Data.Text qualified as T
 import Data.Time (UTCTime, NominalDiffTime, diffUTCTime)
-import ExoMonad.Platform (NativeOnly)
 import Data.Map.Strict (Map)
 
 -- ════════════════════════════════════════════════════════════════════════════
