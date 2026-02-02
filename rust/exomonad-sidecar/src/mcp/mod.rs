@@ -8,7 +8,7 @@
 //! and forwards tool calls to the WASM plugin via handle_mcp_call.
 
 pub mod stdio;
-mod tools;
+pub mod tools;
 
 use axum::{
     extract::State,

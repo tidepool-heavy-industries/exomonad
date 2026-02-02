@@ -6,8 +6,7 @@
 //!
 //! All IO is handled by Rust; Haskell WASM yields high-level semantic effects.
 
-mod config;
-mod mcp;
+use exomonad_sidecar::{config, mcp};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};

@@ -6,6 +6,7 @@ members = [
     "exomonad-services",
     "exomonad-runtime",
     "exomonad-sidecar",
+    "exomonad-repl",
     "effector",
     "zellij-gen",
 ]

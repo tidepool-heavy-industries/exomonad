@@ -354,8 +354,11 @@ pub fn git_get_branch_host_fn(git_service: Arc<GitService>) -> Function {
                 return Err(Error::msg("git_get_branch: expected input argument"));
             }
             let Json(input): Json<GitHostInput> = plugin.memory_get_val(&inputs[0])?;
-            tracing::debug!("[git_get_branch] Input: workingDir={}, containerId={}",
-                input.working_dir, input.container_id);
+            tracing::debug!(
+                "[git_get_branch] Input: workingDir={}, containerId={}",
+                input.working_dir,
+                input.container_id
+            );
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
@@ -364,7 +367,8 @@ pub fn git_get_branch_host_fn(git_service: Arc<GitService>) -> Function {
             let output: HostResult<String> = result.into();
 
             // Debug: log the JSON we're about to send
-            let json_str = serde_json::to_string(&output).map_err(|e| Error::msg(format!("JSON serialization failed: {}", e)))?;
+            let json_str = serde_json::to_string(&output)
+                .map_err(|e| Error::msg(format!("JSON serialization failed: {}", e)))?;
             tracing::info!("[git_get_branch] Returning JSON: {}", json_str);
 
             plugin.memory_set_val(&mut outputs[0], Json(output))?;
@@ -496,7 +500,8 @@ pub fn git_has_unpushed_commits_host_fn(git_service: Arc<GitService>) -> Functio
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
-            let result = block_on(git.has_unpushed_commits(&input.container_id, &input.working_dir))?;
+            let result =
+                block_on(git.has_unpushed_commits(&input.container_id, &input.working_dir))?;
             let output: HostResult<bool> = result.into();
 
             plugin.memory_set_val(&mut outputs[0], Json(output))?;
