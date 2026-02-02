@@ -143,7 +143,7 @@ fn create_pr(input: &FilePRInput) -> Result<FilePROutput> {
 
     info!("[FilePR] Executing: gh {}", args.join(" "));
 
-    let stdout = cmd("gh", &args)
+    let stdout = cmd("gh", args.as_slice())
         .read()
         .context("Failed to execute gh pr create")?;
 

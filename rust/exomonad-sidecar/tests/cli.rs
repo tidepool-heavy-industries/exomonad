@@ -257,6 +257,7 @@ fn test_cli_mcp_server_starts() -> Result<(), Box<dyn std::error::Error>> {
         "%{http_code}",
         &health_url
     )
+    .unchecked()
     .read();
 
     // Clean up

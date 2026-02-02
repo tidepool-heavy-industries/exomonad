@@ -14,7 +14,6 @@ tracing-subscriber = { workspace = true }
 shell-escape = "0.1"
 clap = { workspace = true }
 duct = { workspace = true }
-anyhow = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

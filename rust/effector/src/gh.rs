@@ -14,7 +14,7 @@ pub fn pr_status(branch: Option<String>) -> Result<()> {
 
     args.extend(&["--json", "number,url,state,reviewDecision,reviews,comments"]);
 
-    let output = cmd("gh", &args)
+    let output = cmd("gh", args.as_slice())
         .unchecked()
         .stderr_to_stdout()
         .read()
@@ -35,7 +35,12 @@ pub fn pr_status(branch: Option<String>) -> Result<()> {
         return Ok(());
     }
 
-    let json: Value = serde_json::from_str(&output)?;
+    let json: Value = serde_json::from_str(&output).with_context(|| {
+        format!(
+            "Failed to parse 'gh' output as JSON. Raw output: {}",
+            output
+        )
+    })?;
 
     let exists = true;
     let url = json["url"].as_str().map(|s| s.to_string());
@@ -108,7 +113,7 @@ pub fn pr_create(title: String, body: String, base: Option<String>) -> Result<()
         args.extend(&["--base", &base_str]);
     }
 
-    let stdout = cmd("gh", &args)
+    let stdout = cmd("gh", args.as_slice())
         .read()
         .context("Failed to execute 'gh' CLI or PR creation failed")?;
     // gh pr create output is just the URL of the created PR
