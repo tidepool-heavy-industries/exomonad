@@ -285,7 +285,7 @@ fn file_pr_host_fn(
     outputs: &mut [Val],
     _user_data: UserData<()>,
 ) -> std::result::Result<(), Error> {
-    let input: FilePRInput = get_input(plugin, inputs[0].clone())?;
+    let input: FilePRInput = get_input(plugin, inputs[0])?;
 
     let result = file_pr(&input);
     let output: HostResult<FilePROutput> = result.into();

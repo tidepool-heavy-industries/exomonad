@@ -415,7 +415,7 @@ fn github_list_issues(
         filter: Option<IssueFilter>,
     }
 
-    let input: Input = get_input(plugin, inputs[0].clone())?;
+    let input: Input = get_input(plugin, inputs[0])?;
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;
@@ -443,7 +443,7 @@ fn github_get_issue(
         number: u64,
     }
 
-    let input: Input = get_input(plugin, inputs[0].clone())?;
+    let input: Input = get_input(plugin, inputs[0])?;
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;
@@ -471,7 +471,7 @@ fn github_create_pr(
         spec: CreatePRSpec,
     }
 
-    let input: Input = get_input(plugin, inputs[0].clone())?;
+    let input: Input = get_input(plugin, inputs[0])?;
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;
@@ -499,7 +499,7 @@ fn github_list_prs(
         filter: Option<PRFilter>,
     }
 
-    let input: Input = get_input(plugin, inputs[0].clone())?;
+    let input: Input = get_input(plugin, inputs[0])?;
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;
@@ -527,7 +527,7 @@ fn github_get_pr_for_branch(
         head: String,
     }
 
-    let input: Input = get_input(plugin, inputs[0].clone())?;
+    let input: Input = get_input(plugin, inputs[0])?;
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;
@@ -555,7 +555,7 @@ fn github_get_pr_review_comments(
         pr_number: u64,
     }
 
-    let input: Input = get_input(plugin, inputs[0].clone())?;
+    let input: Input = get_input(plugin, inputs[0])?;
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;

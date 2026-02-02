@@ -99,7 +99,7 @@ impl Services {
         let filesystem = Arc::new(FileSystemService::new(project_dir));
 
         Self {
-            log: LogService::default(),
+            log: LogService,
             git,
             github,
             agent_control,

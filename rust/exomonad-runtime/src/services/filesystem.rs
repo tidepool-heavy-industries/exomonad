@@ -222,7 +222,7 @@ pub fn fs_read_file_host_fn(service: Arc<FileSystemService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<FileSystemService>>|
          -> Result<(), Error> {
-            let input: ReadFileInput = get_input(plugin, inputs[0].clone())?;
+            let input: ReadFileInput = get_input(plugin, inputs[0])?;
 
             let service_arc = user_data.get()?;
             let service = service_arc
@@ -251,7 +251,7 @@ pub fn fs_write_file_host_fn(service: Arc<FileSystemService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<FileSystemService>>|
          -> Result<(), Error> {
-            let input: WriteFileInput = get_input(plugin, inputs[0].clone())?;
+            let input: WriteFileInput = get_input(plugin, inputs[0])?;
 
             let service_arc = user_data.get()?;
             let service = service_arc

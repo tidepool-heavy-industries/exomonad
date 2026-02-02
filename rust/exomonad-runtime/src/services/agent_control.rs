@@ -26,8 +26,10 @@ use super::zellij_events;
 /// Agent type for spawned agents.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum AgentType {
     Claude,
+    #[default]
     Gemini,
 }
 
@@ -57,11 +59,6 @@ impl AgentType {
     }
 }
 
-impl Default for AgentType {
-    fn default() -> Self {
-        AgentType::Gemini
-    }
-}
 
 /// Options for spawning an agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -485,7 +482,7 @@ impl AgentControlService {
 
             // Create tab with layout
             let output = Command::new("zellij")
-                .args(&[
+                .args([
                     "action",
                     "new-tab",
                     "--layout",
@@ -847,7 +844,7 @@ pub fn spawn_agent_host_fn(service: Arc<AgentControlService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<AgentControlService>>|
          -> Result<(), Error> {
-            let input: SpawnAgentInput = get_input(plugin, inputs[0].clone())?;
+            let input: SpawnAgentInput = get_input(plugin, inputs[0])?;
 
             let service_arc = user_data.get()?;
             let service = service_arc
@@ -882,7 +879,7 @@ pub fn spawn_agents_host_fn(service: Arc<AgentControlService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<AgentControlService>>|
          -> Result<(), Error> {
-            let input: SpawnAgentsInput = get_input(plugin, inputs[0].clone())?;
+            let input: SpawnAgentsInput = get_input(plugin, inputs[0])?;
 
             let service_arc = user_data.get()?;
             let service = service_arc
@@ -917,7 +914,7 @@ pub fn cleanup_agent_host_fn(service: Arc<AgentControlService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<AgentControlService>>|
          -> Result<(), Error> {
-            let input: CleanupAgentInput = get_input(plugin, inputs[0].clone())?;
+            let input: CleanupAgentInput = get_input(plugin, inputs[0])?;
 
             let service_arc = user_data.get()?;
             let service = service_arc
@@ -945,7 +942,7 @@ pub fn cleanup_agents_host_fn(service: Arc<AgentControlService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<AgentControlService>>|
          -> Result<(), Error> {
-            let input: CleanupAgentsInput = get_input(plugin, inputs[0].clone())?;
+            let input: CleanupAgentsInput = get_input(plugin, inputs[0])?;
 
             let service_arc = user_data.get()?;
             let service = service_arc

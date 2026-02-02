@@ -25,12 +25,6 @@ pub mod hooks;
 pub mod logging;
 pub mod util;
 
-// Legacy modules (preserved for reference, may be removed later)
-pub mod events;
-pub mod fifo;
-pub mod humanize;
-pub mod supervisor;
-
 // Re-export commonly used types at crate root
 pub use domain::{
     AbsolutePath, DomainError, GithubOwner, GithubRepo, IssueNumber, PathError, Role, SessionId,

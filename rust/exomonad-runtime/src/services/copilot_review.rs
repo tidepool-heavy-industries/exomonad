@@ -380,7 +380,7 @@ fn wait_for_copilot_review_host_fn(
     outputs: &mut [Val],
     _user_data: UserData<()>,
 ) -> std::result::Result<(), Error> {
-    let input: WaitForCopilotReviewInput = get_input(plugin, inputs[0].clone())?;
+    let input: WaitForCopilotReviewInput = get_input(plugin, inputs[0])?;
 
     let result = wait_for_copilot_review(&input);
     let output: HostResult<CopilotReviewOutput> = result.into();
