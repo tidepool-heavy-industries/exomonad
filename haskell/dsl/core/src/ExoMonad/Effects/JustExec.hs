@@ -71,18 +71,14 @@ instance ToJSON ExecResult where
 
 -- | JustExec effect for running recipes via docker-ctl.
 data JustExec m a where
-  ExecRecipeOp :: Text -> [Text] -> JustExec m ExecResult
+  ExecRecipe :: Text -> [Text] -> JustExec m ExecResult
 
 makeSem ''JustExec
-
--- | Run a recipe with arguments.
-execRecipe :: (Member JustExec r) => Text -> [Text] -> Sem r ExecResult
-execRecipe = execRecipeOp
 
 -- | Stub runner that logs calls and returns success with empty output.
 runJustExecStub :: (Member Log effs) => Sem (JustExec ': effs) a -> Sem effs a
 runJustExecStub = interpret $ \case
-  ExecRecipeOp recipe args -> do
+  ExecRecipe recipe args -> do
     logInfo $ "[JustExec:stub] ExecRecipe called: " <> recipe <> " " <> T.intercalate " " args
     pure $ ExecResult "" "" 0
 

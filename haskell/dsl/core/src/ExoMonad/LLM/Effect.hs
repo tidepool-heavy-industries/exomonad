@@ -85,7 +85,7 @@ import ExoMonad.Tool.Wire (anthropicToolToJSON)
 -- to call tool handlers during the tool use loop.
 data LLMCall m a where
   -- | Make an LLM call (no tools).
-  CallLLMNoToolsOp ::
+  PerformLLMCall ::
     (StructuredOutput out) =>
     -- | Model to use
     Model ->
@@ -99,7 +99,7 @@ data LLMCall m a where
     Value ->
     LLMCall m (Either CallError out)
   -- | Make an LLM call with tools.
-  CallLLMWithToolsOp ::
+  PerformLLMCallWithTools ::
     (StructuredOutput out) =>
     -- | Model to use
     Model ->
@@ -141,7 +141,7 @@ call cfg sys usr =
         map (anthropicToolToJSON . toolSchemaToAnthropicTool) $
           toolSchemas (Proxy @tools)
       schema = schemaToValue (structuredSchema @out)
-   in callLLMWithToolsOp
+   in performLLMCallWithTools
         cfg.ccModel
         cfg.ccMaxTokens
         sys
@@ -161,7 +161,7 @@ callNoTools ::
   Sem r (Either CallError out)
 callNoTools cfg sys usr =
   let schema = schemaToValue (structuredSchema @out)
-   in callLLMNoToolsOp
+   in performLLMCall
         cfg.ccModel
         cfg.ccMaxTokens
         sys

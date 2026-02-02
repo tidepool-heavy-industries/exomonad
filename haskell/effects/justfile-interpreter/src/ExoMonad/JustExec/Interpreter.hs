@@ -25,7 +25,7 @@ import System.Process (readProcessWithExitCode)
 -- If container is Nothing, runs with --local.
 runJustExecIO :: (Member (Embed IO) r) => FilePath -> Maybe Text -> Sem (JustExec ': r) a -> Sem r a
 runJustExecIO dockerCtlPath container = interpret $ \case
-  ExecRecipeOp recipe args ->
+  ExecRecipe recipe args ->
     embed $ runDockerCtl dockerCtlPath container recipe args
 
 runDockerCtl :: FilePath -> Maybe Text -> Text -> [Text] -> IO ExecResult

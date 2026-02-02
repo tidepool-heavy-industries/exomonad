@@ -7,6 +7,11 @@ author:             Inanna
 build-type:         Simple
 
 common warnings
+    -- NOTE: Polysemy.Plugin is enabled globally here to improve type inference
+    -- for complex Polysemy effect stacks across the codebase. This can increase
+    -- compilation time for all modules that import this stanza. If build times
+    -- become an issue, consider moving -fplugin=Polysemy.Plugin to only those
+    -- components or modules that require the improved inference.
     ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints -Wunused-packages -haddock -fwrite-interface -fplugin=Polysemy.Plugin
 
 library

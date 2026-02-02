@@ -300,6 +300,16 @@ data LLMError
 --       ]
 -- response <- completeConversation SAnthropic config messages tools
 -- @
+--
+-- Note: The provider appears both at the effect level (@p :: LLMProvider@) and
+-- as an explicit singleton argument (@SProvider p@) to each operation. The type
+-- parameter @p@ is used to select and statically fix the provider in the effect
+-- stack (so different providers inhabit different effects), while the
+-- @SProvider p@ value is available at runtime for interpreters and callers that
+-- need to pattern match on the provider, perform provider-specific logging, or
+-- recover the provider when type applications are not convenient. This
+-- duplication is intentional and required by the architecture; it is not an
+-- accidental redundancy.
 data LLMComplete (p :: LLMProvider) m a where
   Complete ::
     SProvider p ->

@@ -105,15 +105,15 @@ emptyLogContext = LogContext "" [] Nothing
 
 -- | The Log effect
 data Log m a where
-  LogOp :: LogLevel -> Text -> Maybe LogFields -> Log m ()
+  LogMessage :: LogLevel -> Text -> Maybe LogFields -> Log m ()
 
 makeSem ''Log
 
 logMsg :: (Member Log effs) => LogLevel -> Text -> Sem effs ()
-logMsg level msg = logOp level msg Nothing
+logMsg level msg = logMessage level msg Nothing
 
 logMsgWith :: (Member Log effs) => LogLevel -> Text -> LogFields -> Sem effs ()
-logMsgWith level msg fields = logOp level msg (Just fields)
+logMsgWith level msg fields = logMessage level msg (Just fields)
 
 logTrace :: (Member Log effs) => Text -> Sem effs ()
 logTrace = logMsg Trace
@@ -160,7 +160,7 @@ withEffectSpan name action =
 -- For production use, prefer 'ExoMonad.Log.Interpreter' which uses fast-logger.
 runLog :: (Member (Embed IO) effs) => LogLevel -> Sem (Log ': effs) a -> Sem effs a
 runLog minLevel = interpret $ \case
-  LogOp level msg maybeFields
+  LogMessage level msg maybeFields
     | level >= minLevel -> do
         let fieldStr = case maybeFields of
               Nothing -> ""

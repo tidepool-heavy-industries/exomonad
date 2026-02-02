@@ -144,7 +144,7 @@ runLLMCallWith ::
   Sem (LLMCall ': es) a ->
   Sem es a
 runLLMCallWith interpCfg = interpret $ \case
-  CallLLMNoToolsOp mdl maxTok (System sys) (User usr) _schema -> do
+  PerformLLMCall mdl maxTok (System sys) (User usr) _schema -> do
     let anthropicCfg =
           AnthropicConfig
             { acModel = modelToText mdl,
@@ -153,7 +153,7 @@ runLLMCallWith interpCfg = interpret $ \case
               acSystemPrompt = Just sys
             }
     runWithNudge interpCfg.icMaxNudges anthropicCfg usr Nothing
-  CallLLMWithToolsOp mdl maxTok (System sys) (User usr) _schema toolSchemas -> do
+  PerformLLMCallWithTools mdl maxTok (System sys) (User usr) _schema toolSchemas -> do
     -- Note: runLLMCall without tool record just ignores tool_use responses.
     -- Use runLLMCallWithTools to properly handle tool execution.
     let anthropicCfg =
@@ -176,7 +176,7 @@ runLLMCallWithTools ::
   Sem (LLMCall ': es) a ->
   Sem es a
 runLLMCallWithTools toolRecord = interpret $ \case
-  CallLLMNoToolsOp mdl maxTok (System sys) (User usr) _schema -> do
+  PerformLLMCall mdl maxTok (System sys) (User usr) _schema -> do
     let cfg =
           AnthropicConfig
             { acModel = modelToText mdl,
@@ -185,7 +185,7 @@ runLLMCallWithTools toolRecord = interpret $ \case
               acSystemPrompt = Just sys
             }
     runWithNudge defaultInterpretConfig.icMaxNudges cfg usr Nothing
-  CallLLMWithToolsOp mdl maxTok (System sys) (User usr) _schema toolSchemas -> do
+  PerformLLMCallWithTools mdl maxTok (System sys) (User usr) _schema toolSchemas -> do
     let cfg =
           AnthropicConfig
             { acModel = modelToText mdl,
