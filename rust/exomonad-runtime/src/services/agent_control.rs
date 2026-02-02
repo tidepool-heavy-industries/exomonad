@@ -24,17 +24,27 @@ use super::zellij_events;
 // ============================================================================
 
 /// Agent type for spawned agents.
+///
+/// Determines which CLI tool to use when spawning an agent in a Zellij tab.
+/// Each type has different command names and prompt flags.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 #[derive(Default)]
 pub enum AgentType {
+    /// Claude Code CLI (spawns with `claude --prompt '...'`).
     Claude,
+
+    /// Gemini CLI (spawns with `gemini --prompt-interactive '...'`).
+    ///
+    /// Default agent type.
     #[default]
     Gemini,
 }
 
 impl AgentType {
     /// Get the CLI command for this agent type.
+    ///
+    /// Returns "claude" or "gemini".
     fn command(&self) -> &'static str {
         match self {
             AgentType::Claude => "claude",
@@ -43,6 +53,8 @@ impl AgentType {
     }
 
     /// Get the prompt flag for this agent type.
+    ///
+    /// Claude uses `--prompt`, Gemini uses `--prompt-interactive`.
     fn prompt_flag(&self) -> &'static str {
         match self {
             AgentType::Claude => "--prompt",
@@ -51,6 +63,8 @@ impl AgentType {
     }
 
     /// Get the suffix for tab/worktree names (lowercase).
+    ///
+    /// Used to construct unique tab/worktree names (e.g., "gh-123-title-claude").
     fn suffix(&self) -> &'static str {
         match self {
             AgentType::Claude => "claude",

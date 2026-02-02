@@ -8,64 +8,144 @@ use serde::{Deserialize, Serialize};
 // Types
 // ============================================================================
 
+/// GitHub repository identifier.
+///
+/// Uniquely identifies a repository by owner and name (e.g., "anthropics/exomonad").
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Repo {
+    /// Repository owner (user or organization name).
     pub owner: GithubOwner,
+
+    /// Repository name.
     pub name: GithubRepo,
 }
 
+/// Filter criteria for listing GitHub issues.
+///
+/// Used with [`GitHubService::list_issues()`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IssueFilter {
+    /// Filter by issue state: "open", "closed", or "all".
     pub state: Option<String>,
+
+    /// Filter by label names (AND logic - issue must have all labels).
     pub labels: Option<Vec<String>>,
 }
 
+/// Specification for creating a pull request.
+///
+/// Used with [`GitHubService::create_pr()`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreatePRSpec {
+    /// PR title.
     pub title: String,
+
+    /// PR body (markdown description).
     pub body: String,
+
+    /// Head branch (source branch containing changes).
     pub head: String,
+
+    /// Base branch (target branch to merge into, usually "main").
     pub base: String,
 }
 
+/// Filter criteria for listing pull requests.
+///
+/// Used with [`GitHubService::list_prs()`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PRFilter {
+    /// Filter by PR state: "open", "closed", or "all".
     pub state: Option<String>,
+
+    /// Maximum number of PRs to return (default: API default, usually 30).
     pub limit: Option<u32>,
 }
 
+/// A GitHub issue with metadata.
+///
+/// Returned by [`GitHubService::list_issues()`] and [`GitHubService::get_issue()`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Issue {
+    /// Issue number (unique within repository).
     pub number: u64,
+
+    /// Issue title.
     pub title: String,
+
+    /// Issue body (markdown description).
     pub body: String,
+
+    /// Issue state ("open" or "closed").
     pub state: String,
+
+    /// Web URL to the issue.
     pub url: String,
+
+    /// Issue author's GitHub username.
     pub author: String,
+
+    /// Label names attached to the issue.
     pub labels: Vec<String>,
 }
 
+/// A GitHub pull request with metadata.
+///
+/// Returned by [`GitHubService::list_prs()`] and [`GitHubService::get_pr_for_branch()`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PullRequest {
+    /// PR number (unique within repository).
     pub number: u64,
+
+    /// PR title.
     pub title: String,
+
+    /// PR body (markdown description).
     pub body: String,
+
+    /// PR state ("open", "closed", or "merged").
     pub state: String,
+
+    /// Web URL to the PR.
     pub url: String,
+
+    /// PR author's GitHub username.
     pub author: String,
+
+    /// Head branch (source branch with changes).
     pub head_ref: String,
+
+    /// Base branch (target branch for merge).
     pub base_ref: String,
+
+    /// Creation timestamp (ISO 8601).
     pub created_at: String,
+
+    /// Merge timestamp (ISO 8601, if merged).
     pub merged_at: Option<String>,
 }
 
+/// A review comment on a pull request.
+///
+/// Returned by [`GitHubService::get_pr_review_comments()`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewComment {
+    /// Comment ID (unique).
     pub id: u64,
+
+    /// Comment body (markdown).
     pub body: String,
+
+    /// File path the comment is attached to.
     pub path: String,
+
+    /// Line number in the file (if available).
     pub line: Option<u32>,
+
+    /// Comment author's GitHub username.
     pub author: String,
+
+    /// Creation timestamp (ISO 8601).
     pub created_at: String,
 }
 
@@ -73,17 +153,73 @@ pub struct ReviewComment {
 // Service Implementation
 // ============================================================================
 
+/// GitHub API service.
+///
+/// Provides access to GitHub REST API for issues, pull requests, and review comments.
+/// Uses octocrab for API access and requires a personal access token for authentication.
+///
+/// # Authentication
+///
+/// Requires a GitHub personal access token with appropriate scopes:
+/// - `repo` - Required for private repositories
+/// - `public_repo` - Sufficient for public repositories
+///
+/// # Examples
+///
+/// ```no_run
+/// use exomonad_runtime::services::github::{GitHubService, Repo};
+/// use exomonad_shared::{GithubOwner, GithubRepo};
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let github = GitHubService::new("ghp_...".to_string())?;
+///
+/// let repo = Repo {
+///     owner: GithubOwner::new("anthropics")?,
+///     name: GithubRepo::new("exomonad")?,
+/// };
+///
+/// let issues = github.list_issues(&repo, None).await?;
+/// println!("Found {} issues", issues.len());
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone)]
 pub struct GitHubService {
     client: Octocrab,
 }
 
 impl GitHubService {
+    /// Create a new GitHubService with the given personal access token.
+    ///
+    /// # Arguments
+    ///
+    /// * `token` - GitHub personal access token (starts with "ghp_" or "github_pat_")
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the octocrab client fails to initialize.
     pub fn new(token: String) -> Result<Self> {
         let client = OctocrabBuilder::new().personal_token(token).build()?;
         Ok(Self { client })
     }
 
+    /// List issues in a repository.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo` - Repository identifier (owner + name)
+    /// * `filter` - Optional filter criteria (state, labels)
+    ///
+    /// # Returns
+    ///
+    /// A vector of issues matching the filter criteria.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Repository doesn't exist or is not accessible
+    /// - Network request fails
+    /// - Authentication fails
     pub async fn list_issues(
         &self,
         repo: &Repo,

@@ -51,33 +51,88 @@ pub fn extract_agent_id(branch: &str) -> Option<String> {
         .map(|id| format!("gh-{}", id))
 }
 
+/// A git commit with metadata.
+///
+/// Returned by [`GitService::get_recent_commits()`].
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Commit {
+    /// Full commit hash (SHA-1).
     pub hash: String,
+
+    /// First line of the commit message.
     pub message: String,
+
+    /// Author name and email (e.g., "John Doe <john@example.com>").
     pub author: String,
+
+    /// Commit date in ISO 8601 format.
     pub date: String,
 }
 
+/// Information about a git worktree.
+///
+/// Returned by [`GitService::get_worktree()`].
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct WorktreeInfo {
+    /// Absolute path to the worktree directory.
     pub path: String,
+
+    /// Current branch name (or "HEAD" if detached).
     pub branch: String,
 }
 
+/// Git repository information.
+///
+/// Returned by [`GitService::get_repo_info()`].
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct RepoInfo {
+    /// Current branch name.
     pub branch: String,
+
+    /// Repository owner (parsed from remote URL, if available).
+    ///
+    /// For GitHub repos, this is the user/org name (e.g., "anthropics").
     pub owner: Option<String>,
+
+    /// Repository name (parsed from remote URL, if available).
+    ///
+    /// For GitHub repos, this is the repo name (e.g., "exomonad").
     pub name: Option<String>,
 }
 
+/// Git operations service.
+///
+/// Executes git commands via the configured executor (local subprocess or Docker).
+/// All operations are asynchronous.
+///
+/// # Examples
+///
+/// ```no_run
+/// use exomonad_runtime::services::git::GitService;
+/// use exomonad_runtime::services::local::LocalExecutor;
+/// use std::sync::Arc;
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let executor = Arc::new(LocalExecutor::new());
+/// let git = GitService::new(executor);
+///
+/// // Get current branch
+/// let branch = git.get_branch("", ".").await?;
+/// println!("On branch: {}", branch);
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone)]
 pub struct GitService {
     docker: Arc<dyn DockerExecutor>,
 }
 
 impl GitService {
+    /// Create a new GitService with the given executor.
+    ///
+    /// # Arguments
+    ///
+    /// * `docker` - Executor for running git commands (LocalExecutor or DockerService)
     pub fn new(docker: Arc<dyn DockerExecutor>) -> Self {
         Self { docker }
     }
