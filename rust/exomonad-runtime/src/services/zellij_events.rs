@@ -22,9 +22,22 @@ pub fn emit_event(event: &AgentEvent) -> Result<()> {
 
     debug!("[ZellijEvents] Emitting event: {}", json);
 
-    cmd!("zellij", "pipe", "--name", "exomonad-events", "--", &json)
-        .run()
-        .context("zellij pipe failed")?;
+    // Use --plugin flag to auto-launch the plugin if not running
+    // This prevents hanging when no plugin is subscribed to the pipe
+    let plugin_path = format!("file:{}",
+        std::env::var("HOME")
+            .unwrap_or_else(|_| "/Users/inannamalick".to_string())
+        + "/.config/zellij/plugins/exomonad-plugin.wasm"
+    );
+
+    cmd!(
+        "zellij", "pipe",
+        "--plugin", &plugin_path,
+        "--name", "exomonad-events",
+        "--", &json
+    )
+    .start()
+    .context("Failed to spawn zellij pipe")?;
 
     Ok(())
 }
