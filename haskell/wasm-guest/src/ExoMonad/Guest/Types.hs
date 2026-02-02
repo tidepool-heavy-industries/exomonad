@@ -8,6 +8,7 @@ module ExoMonad.Guest.Types
     HookOutput (..),
     HookSpecificOutput (..),
     StopHookOutput (..),
+    StopDecision (..),
     allowResponse,
     allowStopResponse,
     blockStopResponse,
@@ -122,10 +123,19 @@ allowResponse reason =
 -- Stop Hook Types (SessionEnd, SubagentStop)
 -- ============================================================================
 
+-- | Stop hook decision (strongly typed).
+-- Serialized to "allow" or "block" at the JSON boundary.
+data StopDecision = Allow | Block
+  deriving (Show, Eq, Generic)
+
+instance ToJSON StopDecision where
+  toJSON Allow = Aeson.String "allow"
+  toJSON Block = Aeson.String "block"
+
 -- | Output for Stop hooks (SessionEnd, SubagentStop).
 -- Uses the simplified {"decision": "block", "reason": "..."} format.
 data StopHookOutput = StopHookOutput
-  { decision :: Text,
+  { decision :: StopDecision,
     reason :: Maybe Text
   }
   deriving (Show, Generic)
@@ -144,7 +154,7 @@ instance ToJSON StopHookOutput where
 allowStopResponse :: StopHookOutput
 allowStopResponse =
   StopHookOutput
-    { decision = "allow",
+    { decision = Allow,
       reason = Nothing
     }
 
@@ -152,6 +162,6 @@ allowStopResponse =
 blockStopResponse :: Text -> StopHookOutput
 blockStopResponse msg =
   StopHookOutput
-    { decision = "block",
+    { decision = Block,
       reason = Just msg
     }

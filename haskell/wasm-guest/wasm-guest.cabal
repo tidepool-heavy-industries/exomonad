@@ -32,7 +32,10 @@ common shared
         text,
         aeson,
         polysemy >= 1.9,
-        unordered-containers
+        unordered-containers,
+        time,
+        directory,
+        filepath
 
     -- Polysemy plugin doesn't work with WASM cross-compilation (GHC #14335)
     if !arch(wasm32)

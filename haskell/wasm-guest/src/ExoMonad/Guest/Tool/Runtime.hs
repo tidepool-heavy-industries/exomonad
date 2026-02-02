@@ -13,19 +13,26 @@ where
 import Control.Exception (SomeException, try)
 import Control.Monad (unless)
 import Data.Aeson qualified as Aeson
+import Data.Aeson ((.=))
+import Data.Aeson.Key qualified as Key
+import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as BSL
 import Data.Maybe (fromMaybe)
 import Data.Proxy (Proxy (..))
 import Data.Text qualified as T
+import Data.Text (Text)
+import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
 import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
-import ExoMonad.Guest.HostCall (LogLevel (..), LogPayload (..), callHostVoid, host_log_error, host_log_info)
+import ExoMonad.Guest.HostCall (LogLevel (..), LogPayload (..), callHostVoid, host_log_error, host_log_info, host_emit_event)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), toMCPFormat)
 import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
-import ExoMonad.Guest.Types (HookInput (..), MCPCallInput (..), allowResponse)
+import ExoMonad.Guest.Types (HookInput (..), MCPCallInput (..), StopHookOutput (..), StopDecision (..), allowResponse)
 import Extism.PDK (input, output)
 import Foreign.C.Types (CInt (..))
+import System.Directory (getCurrentDirectory)
+import System.FilePath (takeFileName)
 
 -- | MCP call handler - dispatches to tools based on a record.
 mcpHandlerRecord :: forall tools. (DispatchRecord tools) => tools AsHandler -> IO CInt
@@ -64,21 +71,60 @@ hookHandler = do
   inp <- input @ByteString
   case Aeson.eitherDecodeStrict inp of
     Left err -> do
+      callHostVoid host_log_error (LogPayload Error ("Hook parse error: " <> T.pack err) Nothing)
       let errResp = Aeson.object ["error" Aeson..= ("Parse error: " ++ err)]
       output (BSL.toStrict $ Aeson.encode errResp)
       pure 1
     Right hookInput -> do
-      case hiHookEventName hookInput of
-        "SessionEnd" -> handleStopHook
-        "SubagentStop" -> handleStopHook
+      let hookName = hiHookEventName hookInput
+      callHostVoid host_log_info (LogPayload Info ("Hook received: " <> hookName) Nothing)
+
+      case hookName of
+        "SessionEnd" -> handleStopHook hookName
+        "SubagentStop" -> handleStopHook hookName
         _ -> do
+          callHostVoid host_log_info (LogPayload Info ("Allowing hook: " <> hookName) Nothing)
           let resp = allowResponse Nothing
           output (BSL.toStrict $ Aeson.encode resp)
           pure 0
   where
-    handleStopHook = do
-      -- Stop hooks use a different JSON format: {"decision": "block", "reason": "..."}
+    handleStopHook :: Text -> IO CInt
+    handleStopHook hookName = do
+      -- Extract agent ID from current working directory (e.g., "gh-453-gemini")
+      cwd <- getCurrentDirectory
+      let agentId = T.pack $ takeFileName cwd
+
+      -- Get current timestamp in ISO8601 format
+      now <- getCurrentTime
+      let timestamp = T.pack $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%QZ" now
+
+      -- Log that stop hook was called
+      callHostVoid host_log_info (LogPayload Info ("Stop hook firing for agent: " <> agentId) Nothing)
+
+      -- Emit AgentStopped event BEFORE running checks
+      -- This ensures we see the event even if checks fail
+      let event = Aeson.object
+            [ "type" .= ("agent:stopped" :: Text)
+            , "agent_id" .= agentId
+            , "timestamp" .= timestamp
+            ]
+      callHostVoid host_emit_event event
+
+      -- Run stop hook validation checks
       result <- runStopHookChecks
+
+      -- Log the decision
+      case decision result of
+        Allow ->
+          callHostVoid host_log_info (LogPayload Info ("Stop hook allowed for " <> agentId) Nothing)
+        Block ->
+          case reason result of
+            Just r ->
+              callHostVoid host_log_info (LogPayload Info ("Stop hook blocked for " <> agentId <> ": " <> r) Nothing)
+            Nothing ->
+              callHostVoid host_log_info (LogPayload Info ("Stop hook blocked for " <> agentId) Nothing)
+
+      -- Return the result to the hook caller
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
 
