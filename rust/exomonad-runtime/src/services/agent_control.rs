@@ -457,7 +457,12 @@ impl AgentControlService {
                 None => cmd.to_string(),
             };
 
+            // Escape the command for KDL string literal (escape backslashes, quotes, newlines)
+            let kdl_escaped_command = Self::escape_for_kdl(&full_command);
+
             // Generate KDL layout with full tab template and command pane
+            // Use login shell to ensure PATH is loaded (gemini, claude, etc.)
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
             let layout_content = format!(
                 r#"layout {{
     default_tab_template {{
@@ -470,8 +475,8 @@ impl AgentControlService {
         }}
     }}
     tab name="{name}" {{
-        pane command="sh" {{
-            args "-c" "{cmd}"
+        pane command="{shell}" {{
+            args "-l" "-c" "{cmd}"
             cwd "{cwd}"
             close_on_exit true
         }}
@@ -481,7 +486,8 @@ impl AgentControlService {
     }}
 }}"#,
                 name = name,
-                cmd = full_command,
+                shell = shell,
+                cmd = kdl_escaped_command,
                 cwd = cwd.display()
             );
 
@@ -497,30 +503,53 @@ impl AgentControlService {
                 "Generated temporary Zellij layout"
             );
 
-            // Create tab with layout (spawn in background, don't wait for agent to finish)
-            let mut child = Command::new("zellij")
+            // Log the command we're about to execute
+            info!(
+                name,
+                layout_file = %layout_file.display(),
+                "Executing zellij action new-tab"
+            );
+
+            // Create tab with layout (use output() to capture stderr if it fails quickly)
+            let output = Command::new("zellij")
                 .args([
                     "action",
                     "new-tab",
                     "--layout",
                     layout_file.to_str().unwrap(),
                 ])
-                .spawn()
-                .context("Failed to spawn zellij")?;
+                .output()
+                .await
+                .context("Failed to execute zellij")?;
 
-            // Wait briefly to ensure zellij action completes, but not for the agent inside
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            info!(
+                name,
+                exit_code = ?output.status.code(),
+                "Zellij command completed"
+            );
 
-            // Clean up temp file
-            let _ = tokio::fs::remove_file(&layout_file).await;
+            // Check if command failed
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stdout = String::from_utf8_lossy(&output.stdout);
 
-            // Check if zellij command failed immediately
-            if let Ok(Some(status)) = child.try_wait() {
-                if !status.success() {
-                    return Err(anyhow!("zellij new-tab failed with status: {}", status));
-                }
+                // Keep temp file for debugging on error
+                warn!(
+                    layout_file = %layout_file.display(),
+                    "Keeping temp layout file for debugging"
+                );
+
+                return Err(anyhow!(
+                    "zellij new-tab failed with status: {}\nstderr: {}\nstdout: {}\nlayout_file: {}",
+                    output.status,
+                    stderr,
+                    stdout,
+                    layout_file.display()
+                ));
             }
-            // If still running or completed successfully, we're good
+
+            // Clean up temp file on success
+            let _ = tokio::fs::remove_file(&layout_file).await;
         }
 
         Ok(())
@@ -806,6 +835,16 @@ When done, commit your changes and create a pull request."#
         // Replace ' with '\'' (end quote, escaped quote, start quote)
         let escaped = s.replace('\'', r"'\''");
         format!("'{}'", escaped)
+    }
+
+    /// Escape a string for use inside a KDL string literal.
+    /// KDL strings use backslash escaping: \n for newline, \\ for backslash, \" for quote.
+    fn escape_for_kdl(s: &str) -> String {
+        s.replace('\\', r"\\")
+            .replace('"', r#"\""#)
+            .replace('\n', r"\n")
+            .replace('\r', r"\r")
+            .replace('\t', r"\t")
     }
 }
 
