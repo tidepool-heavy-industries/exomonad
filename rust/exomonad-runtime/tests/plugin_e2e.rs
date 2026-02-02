@@ -38,7 +38,7 @@ async fn test_plugin_loads_and_initializes() {
         return;
     }
 
-    let services = Arc::new(Services::new());
+    let services = Arc::new(Services::new().validate().expect("services validation"));
     let result = PluginManager::new(wasm_path, services).await;
 
     match result {
@@ -61,7 +61,7 @@ async fn test_plugin_call_handle_pre_tool_use() {
         return;
     }
 
-    let services = Arc::new(Services::new());
+    let services = Arc::new(Services::new().validate().expect("services validation"));
     let plugin = match PluginManager::new(wasm_path, services).await {
         Ok(p) => p,
         Err(e) => {
@@ -113,7 +113,7 @@ async fn test_plugin_call_handle_mcp_call() {
         return;
     }
 
-    let services = Arc::new(Services::new());
+    let services = Arc::new(Services::new().validate().expect("services validation"));
     let plugin = match PluginManager::new(wasm_path, services).await {
         Ok(p) => p,
         Err(e) => {
@@ -146,7 +146,7 @@ async fn test_plugin_call_with_minimal_input() {
         return;
     }
 
-    let services = Arc::new(Services::new());
+    let services = Arc::new(Services::new().validate().expect("services validation"));
     let plugin = match PluginManager::new(wasm_path, services).await {
         Ok(p) => p,
         Err(e) => {
@@ -187,7 +187,7 @@ async fn test_plugin_reload() {
         return;
     }
 
-    let services = Arc::new(Services::new());
+    let services = Arc::new(Services::new().validate().expect("services validation"));
     let plugin = match PluginManager::new(wasm_path, services.clone()).await {
         Ok(p) => p,
         Err(e) => {

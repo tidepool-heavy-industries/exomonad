@@ -250,8 +250,12 @@ async fn main() -> Result<()> {
         Commands::Hook { event, runtime } => {
             info!(wasm = ?wasm_path, "Loading WASM plugin");
 
-            // Initialize services with Docker executor (containerized mode)
-            let services = Arc::new(Services::new());
+            // Initialize and validate services with Docker executor (containerized mode)
+            let services = Arc::new(
+                Services::new()
+                    .validate()
+                    .context("Failed to validate services")?,
+            );
 
             // Load WASM plugin
             let plugin = PluginManager::new(wasm_path, services)
@@ -270,8 +274,12 @@ async fn main() -> Result<()> {
 
             info!(wasm = ?wasm_path, "Loading WASM plugin");
 
-            // Initialize services with local executor
-            let services = Arc::new(Services::new_local());
+            // Initialize and validate services with local executor
+            let services = Arc::new(
+                Services::new_local()
+                    .validate()
+                    .context("Failed to validate services")?,
+            );
 
             // Load WASM plugin
             let plugin = PluginManager::new(wasm_path, services.clone())
@@ -302,8 +310,12 @@ async fn main() -> Result<()> {
 
             info!(wasm = ?wasm_path, "Loading WASM plugin");
 
-            // Initialize services (secrets loaded from ~/.exomonad/secrets)
-            let services = Arc::new(Services::new_local());
+            // Initialize and validate services (secrets loaded from ~/.exomonad/secrets)
+            let services = Arc::new(
+                Services::new_local()
+                    .validate()
+                    .context("Failed to validate services")?,
+            );
 
             // Load WASM plugin
             let plugin = PluginManager::new(wasm_path, services.clone())
