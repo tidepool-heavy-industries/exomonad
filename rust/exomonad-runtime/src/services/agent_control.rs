@@ -88,7 +88,7 @@ pub struct SpawnOptions {
 }
 
 /// Result of spawning an agent.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SpawnResult {
     /// Path to the created worktree
     pub worktree_path: String,
@@ -103,7 +103,7 @@ pub struct SpawnResult {
 }
 
 /// Information about an active agent.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentInfo {
     /// Issue ID (e.g., "123")
     pub issue_id: String,
@@ -116,14 +116,14 @@ pub struct AgentInfo {
 }
 
 /// Result of batch spawn operation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BatchSpawnResult {
     pub spawned: Vec<SpawnResult>,
     pub failed: Vec<(String, String)>, // (issue_id, error)
 }
 
 /// Result of batch cleanup operation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BatchCleanupResult {
     pub cleaned: Vec<String>,
     pub failed: Vec<(String, String)>, // (issue_id, error)
@@ -763,48 +763,48 @@ use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
 
 // Input/Output types for host functions
 
-#[derive(Deserialize)]
-struct SpawnAgentInput {
-    issue_id: IssueNumber,
-    owner: GithubOwner,
-    repo: GithubRepo,
-    worktree_dir: Option<String>,
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+pub struct SpawnAgentInput {
+    pub issue_id: IssueNumber,
+    pub owner: GithubOwner,
+    pub repo: GithubRepo,
+    pub worktree_dir: Option<String>,
     #[serde(default)]
-    agent_type: AgentType,
+    pub agent_type: AgentType,
 }
 
-#[derive(Deserialize)]
-struct SpawnAgentsInput {
-    issue_ids: Vec<String>,
-    owner: GithubOwner,
-    repo: GithubRepo,
-    worktree_dir: Option<String>,
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+pub struct SpawnAgentsInput {
+    pub issue_ids: Vec<String>,
+    pub owner: GithubOwner,
+    pub repo: GithubRepo,
+    pub worktree_dir: Option<String>,
     #[serde(default)]
-    agent_type: AgentType,
+    pub agent_type: AgentType,
 }
 
-#[derive(Deserialize)]
-struct CleanupAgentInput {
-    issue_id: String,
-    force: bool,
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+pub struct CleanupAgentInput {
+    pub issue_id: String,
+    pub force: bool,
 }
 
-#[derive(Deserialize)]
-struct CleanupAgentsInput {
-    issue_ids: Vec<String>,
-    force: bool,
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+pub struct CleanupAgentsInput {
+    pub issue_ids: Vec<String>,
+    pub force: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(tag = "kind", content = "payload")]
-enum HostResult<T> {
+pub enum HostResult<T> {
     Success(T),
     Error(HostError),
 }
 
-#[derive(Serialize)]
-struct HostError {
-    message: String,
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct HostError {
+    pub message: String,
 }
 
 impl<T> From<Result<T>> for HostResult<T> {

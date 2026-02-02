@@ -1,5 +1,4 @@
-use anyhow::Result;
-use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
+use extism::{Error, Function, UserData, ValType};
 use extism_convert::Json;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
