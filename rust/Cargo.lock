@@ -773,15 +773,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crossbeam-channel"
-version = "0.5.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
-dependencies = [
- "crossbeam-utils",
-]
-
-[[package]]
 name = "crossbeam-deque"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -934,8 +925,6 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -992,9 +981,7 @@ name = "exomonad-runtime"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "axum",
  "chrono",
- "clap",
  "exomonad-shared",
  "exomonad-ui-protocol",
  "extism",
@@ -1006,7 +993,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "tracing-subscriber",
  "wiremock 0.5.22",
 ]
 
@@ -1041,7 +1027,6 @@ dependencies = [
  "strum",
  "tempfile",
  "thiserror 2.0.18",
- "tokio",
  "tracing",
  "tracing-subscriber",
 ]
@@ -1067,7 +1052,6 @@ dependencies = [
  "toml 0.8.23",
  "tower-http 0.6.8",
  "tracing",
- "tracing-appender",
  "tracing-subscriber",
 ]
 
@@ -1077,7 +1061,6 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
- "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -4129,18 +4112,6 @@ dependencies = [
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
-]
-
-[[package]]
-name = "tracing-appender"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "786d480bce6247ab75f005b14ae1624ad978d3029d9113f0a22fa1ac773faeaf"
-dependencies = [
- "crossbeam-channel",
- "thiserror 2.0.18",
- "time",
- "tracing-subscriber",
 ]
 
 [[package]]
