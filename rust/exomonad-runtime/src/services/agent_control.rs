@@ -510,46 +510,34 @@ impl AgentControlService {
                 "Executing zellij action new-tab"
             );
 
-            // Create tab with layout (use output() to capture stderr if it fails quickly)
-            let output = Command::new("zellij")
+            // Create tab with layout (spawn in background, don't wait for agent to finish)
+            let mut child = Command::new("zellij")
                 .args([
                     "action",
                     "new-tab",
                     "--layout",
                     layout_file.to_str().unwrap(),
                 ])
-                .output()
-                .await
-                .context("Failed to execute zellij")?;
+                .spawn()
+                .context("Failed to spawn zellij")?;
 
-            info!(
-                name,
-                exit_code = ?output.status.code(),
-                "Zellij command completed"
-            );
+            // Wait briefly to ensure zellij action completes, but not for the agent inside
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-            // Check if command failed
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                let stdout = String::from_utf8_lossy(&output.stdout);
-
-                // Keep temp file for debugging on error
-                warn!(
-                    layout_file = %layout_file.display(),
-                    "Keeping temp layout file for debugging"
-                );
-
-                return Err(anyhow!(
-                    "zellij new-tab failed with status: {}\nstderr: {}\nstdout: {}\nlayout_file: {}",
-                    output.status,
-                    stderr,
-                    stdout,
-                    layout_file.display()
-                ));
-            }
-
-            // Clean up temp file on success
+            // Clean up temp file
             let _ = tokio::fs::remove_file(&layout_file).await;
+
+            // Check if zellij command failed immediately
+            if let Ok(Some(status)) = child.try_wait() {
+                if !status.success() {
+                    return Err(anyhow!(
+                        "zellij new-tab failed with status: {} (layout file was: {})",
+                        status,
+                        layout_file.display()
+                    ));
+                }
+            }
+            // If still running or completed successfully, we're good
         }
 
         Ok(())
