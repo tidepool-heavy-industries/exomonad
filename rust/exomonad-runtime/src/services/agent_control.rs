@@ -8,6 +8,7 @@
 //! These are high-level effects exposed to Haskell WASM, not granular operations.
 
 use anyhow::{anyhow, Context, Result};
+use crate::common::HostResult;
 use exomonad_shared::{GithubOwner, GithubRepo, IssueNumber};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -866,29 +867,6 @@ pub struct CleanupAgentInput {
 pub struct CleanupAgentsInput {
     pub issue_ids: Vec<String>,
     pub force: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-#[serde(tag = "kind", content = "payload")]
-pub enum HostResult<T> {
-    Success(T),
-    Error(HostError),
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct HostError {
-    pub message: String,
-}
-
-impl<T> From<Result<T>> for HostResult<T> {
-    fn from(res: Result<T>) -> Self {
-        match res {
-            Ok(val) => HostResult::Success(val),
-            Err(e) => HostResult::Error(HostError {
-                message: e.to_string(),
-            }),
-        }
-    }
 }
 
 // Helper functions

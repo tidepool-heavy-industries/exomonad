@@ -1,7 +1,8 @@
 use proptest::prelude::*;
+use exomonad_runtime::common::{ErrorCode, ErrorContext, HostError, HostResult};
 use exomonad_runtime::services::agent_control::*;
 use exomonad_shared::{GithubOwner, GithubRepo, IssueNumber};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 // ============================================================================
 // Strategies for Shared Types
@@ -30,6 +31,38 @@ fn arb_agent_type() -> BoxedStrategy<AgentType> {
         Just(AgentType::Claude),
         Just(AgentType::Gemini),
     ].boxed()
+}
+
+fn arb_error_code() -> BoxedStrategy<ErrorCode> {
+    prop_oneof![
+        Just(ErrorCode::NotFound),
+        Just(ErrorCode::NotAuthenticated),
+        Just(ErrorCode::GitError),
+        Just(ErrorCode::IoError),
+        Just(ErrorCode::NetworkError),
+        Just(ErrorCode::InvalidInput),
+        Just(ErrorCode::InternalError),
+        Just(ErrorCode::Timeout),
+        Just(ErrorCode::AlreadyExists),
+    ].boxed()
+}
+
+prop_compose! {
+    fn arb_error_context()(
+        command in proptest::option::of(".*"),
+        exit_code in proptest::option::of(any::<i32>()),
+        stderr in proptest::option::of(".*"),
+        file_path in proptest::option::of(".*"),
+        working_dir in proptest::option::of(".*"),
+    ) -> ErrorContext {
+        ErrorContext {
+            command,
+            exit_code,
+            stderr,
+            file_path,
+            working_dir,
+        }
+    }
 }
 
 // ============================================================================
@@ -101,8 +134,18 @@ prop_compose! {
 // ============================================================================
 
 prop_compose! {
-    fn arb_host_error()(message in ".*") -> HostError {
-        HostError { message }
+    fn arb_host_error()(
+        message in ".*",
+        code in arb_error_code(),
+        context in proptest::option::of(arb_error_context()),
+        suggestion in proptest::option::of(".*"),
+    ) -> HostError {
+        HostError {
+            message,
+            code,
+            context,
+            suggestion,
+        }
     }
 }
 

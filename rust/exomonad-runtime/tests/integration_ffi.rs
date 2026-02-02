@@ -1,5 +1,6 @@
 use extism::{Plugin, Manifest, Wasm, Function, Val, ValType, UserData};
-use exomonad_runtime::services::agent_control::{SpawnAgentsInput, BatchSpawnResult, SpawnResult, HostResult, AgentType};
+use exomonad_runtime::common::HostResult;
+use exomonad_runtime::services::agent_control::{SpawnAgentsInput, BatchSpawnResult, SpawnResult, AgentType};
 use serde_json::json;
 
 #[test]

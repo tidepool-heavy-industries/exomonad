@@ -3,15 +3,18 @@
 //! Provides file read/write operations for hooks and MCP tools that need
 //! to access file contents (e.g., reading transcript files, writing context).
 
+use crate::common::HostResult;
 use anyhow::{Context, Result};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
+use extism_convert::Json;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::fs;
 use tracing::{debug, info};
 
 // ============================================================================
-// Types
+// Service
 // ============================================================================
 
 /// Input for reading a file.
@@ -160,31 +163,6 @@ impl FileSystemService {
 // ============================================================================
 // Host Functions for WASM
 // ============================================================================
-
-use std::sync::Arc;
-
-#[derive(Serialize)]
-#[serde(tag = "kind", content = "payload")]
-enum HostResult<T> {
-    Success(T),
-    Error(HostError),
-}
-
-#[derive(Serialize)]
-struct HostError {
-    message: String,
-}
-
-impl<T> From<Result<T>> for HostResult<T> {
-    fn from(res: Result<T>) -> Self {
-        match res {
-            Ok(val) => HostResult::Success(val),
-            Err(e) => HostResult::Error(HostError {
-                message: e.to_string(),
-            }),
-        }
-    }
-}
 
 fn get_input<T: serde::de::DeserializeOwned>(
     plugin: &mut CurrentPlugin,

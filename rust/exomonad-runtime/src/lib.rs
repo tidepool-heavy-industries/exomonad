@@ -65,8 +65,10 @@
 //!
 //! See the individual service modules under [`services`] for details.
 
+pub mod common;
 pub mod plugin_manager;
 pub mod services;
 
+pub use common::{ErrorCode, ErrorContext, HostError, HostResult};
 pub use plugin_manager::PluginManager;
 pub use services::Services;

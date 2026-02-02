@@ -3,7 +3,7 @@
 //! This implements the `DockerExecutor` trait but runs commands as local subprocesses.
 //! Used for local development where we don't need Docker container isolation.
 
-use crate::services::docker::DockerExecutor;
+use crate::services::docker::{CommandError, DockerExecutor};
 use anyhow::{Context, Result};
 use std::future::Future;
 use std::pin::Pin;
@@ -41,6 +41,7 @@ impl DockerExecutor for LocalExecutor {
 
             let program = &cmd[0];
             let args = &cmd[1..];
+            let command_str = cmd.join(" ");
 
             debug!(
                 program = program,
@@ -56,7 +57,10 @@ impl DockerExecutor for LocalExecutor {
                 .stderr(Stdio::piped())
                 .output()
                 .await
-                .with_context(|| format!("Failed to execute '{}' in '{}'", program, dir))?;
+                .map_err(|e| CommandError::LaunchFailed {
+                    command: command_str.clone(),
+                    message: e.to_string(),
+                })?;
 
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -69,12 +73,13 @@ impl DockerExecutor for LocalExecutor {
             );
 
             if !output.status.success() {
-                return Err(anyhow::anyhow!(
-                    "Command '{}' failed with exit code {:?}: {}",
-                    program,
-                    output.status.code(),
-                    stderr
-                ));
+                return Err(CommandError::ExecutionFailed {
+                    command: command_str,
+                    exit_code: output.status.code(),
+                    stderr,
+                    stdout,
+                }
+                .into());
             }
 
             Ok(stdout)
