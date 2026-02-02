@@ -70,7 +70,8 @@ parseSpawnAgentsArgs = Aeson.withObject "spawn_agents args" $ \v -> do
   owner <- v .: "owner"
   repo <- v .: "repo"
   worktreeDir <- v .:? "worktree_dir"
-  pure (issues, AC.SpawnOptions owner repo worktreeDir)
+  agentType <- v .:? "agent_type"
+  pure (issues, AC.SpawnOptions owner repo worktreeDir agentType)
 
 parseCleanupAgentsArgs :: Value -> Parser ([Text], Bool)
 parseCleanupAgentsArgs = Aeson.withObject "cleanup_agents args" $ \v -> do

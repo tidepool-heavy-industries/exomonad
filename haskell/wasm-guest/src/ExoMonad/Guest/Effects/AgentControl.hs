@@ -25,6 +25,7 @@ module ExoMonad.Guest.Effects.AgentControl
     runAgentControl,
 
     -- * Types
+    AgentType (..),
     SpawnOptions (..),
     SpawnResult (..),
     AgentInfo (..),
@@ -36,7 +37,7 @@ where
 
 import Polysemy (Sem, Member, interpret, embed, makeSem)
 import Polysemy.Embed (Embed)
-import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.:?), (.=))
+import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.:?), (.=))
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
 import Data.Text qualified
@@ -57,7 +58,7 @@ instance ToJSON AgentType where
   toJSON Gemini = "gemini"
 
 instance FromJSON AgentType where
-  parseJSON = Data.Aeson.withText "AgentType" $ \case
+  parseJSON = withText "AgentType" $ \case
     "claude" -> pure Claude
     "gemini" -> pure Gemini
     other -> fail $ "Invalid agent type: " <> Data.Text.unpack other
