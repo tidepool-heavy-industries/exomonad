@@ -111,12 +111,12 @@ async fn handle_hook(
     // Call WASM plugin
     // hookHandler dispatches based on hiHookEventName for stop hooks
     let output: HookOutput = match event_type {
-        HookEventType::PreToolUse
-        | HookEventType::SessionEnd
-        | HookEventType::SubagentStop => plugin
-            .call("handle_pre_tool_use", &hook_input)
-            .await
-            .context("WASM handle_pre_tool_use failed")?,
+        HookEventType::PreToolUse | HookEventType::SessionEnd | HookEventType::SubagentStop => {
+            plugin
+                .call("handle_pre_tool_use", &hook_input)
+                .await
+                .context("WASM handle_pre_tool_use failed")?
+        }
         _ => {
             // For now, other hook types pass through with allow
             debug!(event = ?event_type, "Hook type not implemented in WASM, allowing");
@@ -166,13 +166,11 @@ fn init_logging(command: &Commands) {
     match command {
         Commands::McpStdio => {
             // File-based logging for stdio mode
-            let home_dir = std::env::var("HOME")
-                .expect("HOME environment variable not set");
+            let home_dir = std::env::var("HOME").expect("HOME environment variable not set");
             let log_dir = PathBuf::from(home_dir).join(".exomonad").join("logs");
 
             // Create log directory if it doesn't exist
-            std::fs::create_dir_all(&log_dir)
-                .expect("Failed to create log directory");
+            std::fs::create_dir_all(&log_dir).expect("Failed to create log directory");
 
             // Generate timestamped filename
             let timestamp = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S");
@@ -190,7 +188,7 @@ fn init_logging(command: &Commands) {
                         .add_directive(tracing::Level::INFO.into()),
                 )
                 .with_writer(std::sync::Arc::new(file))
-                .with_ansi(false)  // No ANSI colors in file
+                .with_ansi(false) // No ANSI colors in file
                 .init();
 
             eprintln!("MCP stdio logging to: {}", log_file.display());
@@ -226,9 +224,9 @@ async fn main() -> Result<()> {
     });
 
     // Validate config (exits early with helpful error if invalid)
-    let config = raw_config.validate().map_err(|e| {
-        anyhow::anyhow!("Config validation failed: {}", e)
-    })?;
+    let config = raw_config
+        .validate()
+        .map_err(|e| anyhow::anyhow!("Config validation failed: {}", e))?;
 
     let wasm_path = config.wasm_path_buf();
 

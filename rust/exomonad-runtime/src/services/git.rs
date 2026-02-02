@@ -150,7 +150,11 @@ impl GitService {
         );
 
         let output = self
-            .exec_git(container, dir, &["rev-list", "--count", "@{upstream}..HEAD"])
+            .exec_git(
+                container,
+                dir,
+                &["rev-list", "--count", "@{upstream}..HEAD"],
+            )
             .await;
 
         match output {
@@ -207,7 +211,11 @@ impl GitService {
             name
         );
 
-        Ok(RepoInfo { branch, owner, name })
+        Ok(RepoInfo {
+            branch,
+            owner,
+            name,
+        })
     }
 }
 
@@ -455,7 +463,8 @@ pub fn git_has_unpushed_commits_host_fn(git_service: Arc<GitService>) -> Functio
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
-            let result = block_on(git.has_unpushed_commits(&input.container_id, &input.working_dir))?;
+            let result =
+                block_on(git.has_unpushed_commits(&input.container_id, &input.working_dir))?;
             let output: GitHostOutput<bool> = result.into();
 
             if outputs.is_empty() {

@@ -59,7 +59,6 @@ impl AgentType {
     }
 }
 
-
 /// Options for spawning an agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpawnOptions {
@@ -164,7 +163,11 @@ impl AgentControlService {
     /// 2. Creates git worktree from origin/main
     /// 3. Writes context files (.exomonad/config.toml, INITIAL_CONTEXT.md, .mcp.json)
     /// 4. Opens Zellij tab with claude command
-    pub async fn spawn_agent(&self, issue_number: IssueNumber, options: &SpawnOptions) -> Result<SpawnResult> {
+    pub async fn spawn_agent(
+        &self,
+        issue_number: IssueNumber,
+        options: &SpawnOptions,
+    ) -> Result<SpawnResult> {
         // Validate we're in Zellij
         self.check_zellij_env()?;
 
@@ -266,15 +269,13 @@ impl AgentControlService {
         for issue_id_str in issue_ids {
             // Parse issue ID
             match IssueNumber::try_from(issue_id_str.clone()) {
-                Ok(issue_number) => {
-                    match self.spawn_agent(issue_number, options).await {
-                        Ok(spawn_result) => result.spawned.push(spawn_result),
-                        Err(e) => {
-                            warn!(issue_id = issue_id_str, error = %e, "Failed to spawn agent");
-                            result.failed.push((issue_id_str.clone(), e.to_string()));
-                        }
+                Ok(issue_number) => match self.spawn_agent(issue_number, options).await {
+                    Ok(spawn_result) => result.spawned.push(spawn_result),
+                    Err(e) => {
+                        warn!(issue_id = issue_id_str, error = %e, "Failed to spawn agent");
+                        result.failed.push((issue_id_str.clone(), e.to_string()));
                     }
-                }
+                },
                 Err(e) => {
                     warn!(issue_id = issue_id_str, error = %e, "Invalid issue number");
                     result.failed.push((issue_id_str.clone(), e.to_string()));
@@ -384,9 +385,7 @@ impl AgentControlService {
                             // Parse: gh-{issue}-{slug}-{agent}
                             // Extract issue ID (second component after 'gh-')
                             let parts: Vec<&str> = name.splitn(4, '-').collect();
-                            let issue_id = parts.get(1)
-                                .map(|s| s.to_string())
-                                .unwrap_or_default();
+                            let issue_id = parts.get(1).map(|s| s.to_string()).unwrap_or_default();
 
                             // Note: We don't store agent type in AgentInfo yet,
                             // but could add it if needed

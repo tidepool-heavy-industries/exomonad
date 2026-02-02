@@ -83,12 +83,15 @@ impl PluginManager {
 
         // Swap it without blocking the async runtime
         let plugin_lock = self.plugin.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut guard = plugin_lock.write().unwrap();
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let mut guard = plugin_lock
+                .write()
+                .map_err(|e| anyhow::anyhow!("Plugin lock poisoned: {}", e))?;
             *guard = new_plugin;
+            Ok(())
         })
         .await
-        .context("Failed to join spawn_blocking task")?;
+        .context("Failed to join spawn_blocking task")??;
 
         // Note: GHC RTS is automatically initialized when the plugin is loaded.
         Ok(())
@@ -103,8 +106,10 @@ impl PluginManager {
         let function_name = function.to_string();
         let input_data = serde_json::to_vec(input)?;
 
-        let result_bytes = tokio::task::spawn_blocking(move || {
-            let mut plugin = plugin_lock.write().unwrap();
+        let result_bytes = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
+            let mut plugin = plugin_lock
+                .write()
+                .map_err(|e| anyhow::anyhow!("Plugin lock poisoned: {}", e))?;
             plugin.call::<&[u8], Vec<u8>>(&function_name, &input_data)
         })
         .await??;

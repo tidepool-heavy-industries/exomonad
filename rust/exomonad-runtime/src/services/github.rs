@@ -245,11 +245,7 @@ impl GitHubService {
         let pr = page.into_iter().next();
 
         match &pr {
-            Some(p) => tracing::info!(
-                "[GitHubService] Found PR #{} for branch {}",
-                p.number,
-                head
-            ),
+            Some(p) => tracing::info!("[GitHubService] Found PR #{} for branch {}", p.number, head),
             None => tracing::info!("[GitHubService] No PR found for branch {}", head),
         }
 

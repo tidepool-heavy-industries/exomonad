@@ -7,15 +7,9 @@ use std::collections::HashMap;
 #[serde(tag = "type")]
 pub enum AgentEvent {
     #[serde(rename = "agent:started")]
-    AgentStarted {
-        agent_id: String,
-        timestamp: String,
-    },
+    AgentStarted { agent_id: String, timestamp: String },
     #[serde(rename = "agent:stopped")]
-    AgentStopped {
-        agent_id: String,
-        timestamp: String,
-    },
+    AgentStopped { agent_id: String, timestamp: String },
     #[serde(rename = "stop_hook:blocked")]
     StopHookBlocked {
         agent_id: String,

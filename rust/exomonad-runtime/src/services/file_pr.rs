@@ -53,19 +53,18 @@ impl<T> From<Result<T>> for HostResult<T> {
             Ok(val) => HostResult::Success(val),
             Err(e) => {
                 let msg = e.to_string();
-                let code = if msg.contains("not on a branch")
-                    || msg.contains("not a git repository")
-                {
-                    "not_git_repo"
-                } else if msg.contains("no remote") || msg.contains("No remote") {
-                    "no_remote"
-                } else if msg.contains("gh auth") || msg.contains("not logged") {
-                    "not_authenticated"
-                } else if msg.contains("already exists") {
-                    "pr_exists"
-                } else {
-                    "internal_error"
-                };
+                let code =
+                    if msg.contains("not on a branch") || msg.contains("not a git repository") {
+                        "not_git_repo"
+                    } else if msg.contains("no remote") || msg.contains("No remote") {
+                        "no_remote"
+                    } else if msg.contains("gh auth") || msg.contains("not logged") {
+                        "not_authenticated"
+                    } else if msg.contains("already exists") {
+                        "pr_exists"
+                    } else {
+                        "internal_error"
+                    };
                 HostResult::Error(HostError {
                     message: msg,
                     code: code.to_string(),
@@ -116,9 +115,13 @@ fn check_existing_pr() -> Result<Option<(String, u64, String, String)>> {
     let pr: PRView =
         serde_json::from_str(&stdout).context("Failed to parse gh pr view JSON output")?;
 
-    Ok(Some((pr.url, pr.number, pr.head_ref_name, pr.base_ref_name)))
+    Ok(Some((
+        pr.url,
+        pr.number,
+        pr.head_ref_name,
+        pr.base_ref_name,
+    )))
 }
-
 
 /// Create a new PR using gh CLI
 fn create_pr(input: &FilePRInput) -> Result<FilePROutput> {
@@ -146,7 +149,10 @@ fn create_pr(input: &FilePRInput) -> Result<FilePROutput> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    info!("[FilePR] gh pr create exit code: {:?}", output.status.code());
+    info!(
+        "[FilePR] gh pr create exit code: {:?}",
+        output.status.code()
+    );
     if !stderr.is_empty() {
         debug!("[FilePR] stderr: {}", stderr.trim());
     }

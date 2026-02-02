@@ -115,8 +115,7 @@ fn get_repo_info() -> Result<(String, String)> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let info: RepoInfo =
-        serde_json::from_str(&stdout).context("Failed to parse repo info JSON")?;
+    let info: RepoInfo = serde_json::from_str(&stdout).context("Failed to parse repo info JSON")?;
 
     Ok((info.owner.login, info.name))
 }
@@ -125,10 +124,7 @@ fn get_repo_info() -> Result<(String, String)> {
 fn fetch_pr_comments(owner: &str, repo: &str, pr_number: u64) -> Result<Vec<CopilotComment>> {
     let endpoint = format!("/repos/{}/{}/pulls/{}/comments", owner, repo, pr_number);
 
-    debug!(
-        "[CopilotReview] Fetching comments from: {}",
-        endpoint
-    );
+    debug!("[CopilotReview] Fetching comments from: {}", endpoint);
 
     let output = Command::new("gh")
         .args(["api", &endpoint])
@@ -254,7 +250,6 @@ fn fetch_pr_reviews(owner: &str, repo: &str, pr_number: u64) -> Result<bool> {
     Ok(has_copilot_review)
 }
 
-
 /// Main wait_for_copilot_review implementation
 pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<CopilotReviewOutput> {
     info!(
@@ -273,10 +268,7 @@ pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<Copi
         let comments = fetch_pr_comments(&owner, &repo, input.pr_number)?;
 
         if !comments.is_empty() {
-            info!(
-                "[CopilotReview] Found {} Copilot comments",
-                comments.len()
-            );
+            info!("[CopilotReview] Found {} Copilot comments", comments.len());
 
             // Emit copilot:reviewed event
             if let Ok(branch) = git::get_current_branch() {
@@ -398,7 +390,10 @@ mod tests {
         assert!(is_copilot_comment("copilot", None));
         assert!(is_copilot_comment("copilot[bot]", Some("Bot")));
         assert!(is_copilot_comment("Copilot", None));
-        assert!(is_copilot_comment("github-advanced-security[bot]", Some("Bot")));
+        assert!(is_copilot_comment(
+            "github-advanced-security[bot]",
+            Some("Bot")
+        ));
         assert!(!is_copilot_comment("octocat", None));
         assert!(!is_copilot_comment("github-actions[bot]", Some("Bot")));
     }

@@ -21,17 +21,11 @@ pub enum DomainError {
 
     /// Invalid field value.
     #[error("invalid {field}: {value}")]
-    Invalid {
-        field: &'static str,
-        value: String,
-    },
+    Invalid { field: &'static str, value: String },
 
     /// Parse error for numeric types.
     #[error("parse error for {field}: {value}")]
-    ParseError {
-        field: &'static str,
-        value: String,
-    },
+    ParseError { field: &'static str, value: String },
 }
 
 // ============================================================================
@@ -653,6 +647,9 @@ mod tests {
         let wrong_ext = dir.path().join("test.txt");
         fs::write(&wrong_ext, b"not wasm").unwrap();
         let result = WasmPath::try_from(wrong_ext);
-        assert!(matches!(result, Err(PathError::InvalidWasmExtension { .. })));
+        assert!(matches!(
+            result,
+            Err(PathError::InvalidWasmExtension { .. })
+        ));
     }
 }

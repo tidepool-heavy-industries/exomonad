@@ -128,30 +128,30 @@ impl Services {
     /// - If GitHub service is enabled, gh CLI is available
     pub fn validate(self) -> Result<ValidatedServices, ServicesError> {
         // Check if git is available on PATH
-        let git_check = std::process::Command::new("git")
-            .arg("--version")
-            .output();
+        let git_check = std::process::Command::new("git").arg("--version").output();
 
         match git_check {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 return Err(ServicesError::GitNotFound);
             }
             Err(e) => {
-                return Err(ServicesError::CommandFailed(format!("git --version: {}", e)));
+                return Err(ServicesError::CommandFailed(format!(
+                    "git --version: {}",
+                    e
+                )));
             }
             Ok(output) if !output.status.success() => {
-                return Err(ServicesError::CommandFailed(
-                    format!("git --version exited with: {}", output.status)
-                ));
+                return Err(ServicesError::CommandFailed(format!(
+                    "git --version exited with: {}",
+                    output.status
+                )));
             }
             Ok(_) => {} // git is available
         }
 
         // If GitHub service is enabled, check gh CLI
         if self.github.is_some() {
-            let gh_check = std::process::Command::new("gh")
-                .arg("--version")
-                .output();
+            let gh_check = std::process::Command::new("gh").arg("--version").output();
 
             match gh_check {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -161,9 +161,10 @@ impl Services {
                     return Err(ServicesError::CommandFailed(format!("gh --version: {}", e)));
                 }
                 Ok(output) if !output.status.success() => {
-                    return Err(ServicesError::CommandFailed(
-                        format!("gh --version exited with: {}", output.status)
-                    ));
+                    return Err(ServicesError::CommandFailed(format!(
+                        "gh --version exited with: {}",
+                        output.status
+                    )));
                 }
                 Ok(_) => {} // gh is available
             }
