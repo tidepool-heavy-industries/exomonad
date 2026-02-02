@@ -50,7 +50,6 @@ library
         ExoMonad.Effects
         -- Native-only effects (require subprocesses)
         ExoMonad.Effect.LSP
-        ExoMonad.Effect.GHCi
         -- Native-only tooling
         ExoMonad.Schema
         ExoMonad.Schema.TH

@@ -10,7 +10,6 @@ packages:
     haskell/effects/github-interpreter
     haskell/effects/justfile-interpreter
     haskell/effects/worktree-interpreter
-    haskell/effects/ghci-interpreter
     haskell/effects/habitica
     haskell/effects/habitica-interpreter
     haskell/effects/lsp-interpreter

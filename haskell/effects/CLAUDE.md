@@ -9,7 +9,6 @@ This follows the **interpreter design pattern**: abstract syntax (effect types) 
 | I want to... | Read this |
 |--------------|-----------|
 | Understand LLM API calls | `llm-interpreter/CLAUDE.md` |
-| Query Haskell types from an agent | `ghci-interpreter/CLAUDE.md` |
 | Work with GitHub issues/PRs (via Rust/Octocrab) | `github-interpreter/CLAUDE.md` |
 | Add code intelligence (LSP) | `lsp-interpreter/CLAUDE.md` |
 | Manage git worktrees | `worktree-interpreter/CLAUDE.md` |
@@ -26,7 +25,6 @@ This follows the **interpreter design pattern**: abstract syntax (effect types) 
 effects/CLAUDE.md  ← YOU ARE HERE (router)
 ├── llm-interpreter/CLAUDE.md           ← Anthropic API
 ├── lsp-interpreter/CLAUDE.md           ← Language server protocol
-├── ghci-interpreter/CLAUDE.md          ← GHCi oracle client
 ├── github-interpreter/CLAUDE.md        ← Socket client (Rust Octocrab)
 ├── observability-interpreter/CLAUDE.md ← Grafana Loki & Tempo
 ├── worktree-interpreter/CLAUDE.md      ← Git worktree management
@@ -58,7 +56,6 @@ Most effect types live in `dsl/core/src/ExoMonad/Effect/Types.hs` or `Effects/*.
 | LSP | dsl/core | lsp-interpreter | lsp-client library |
 | Habitica | effects/habitica | habitica-interpreter | HTTP API |
 | Observability | dsl/core | observability-interpreter | OTLP/Loki push |
-| GHCi | dsl/core | ghci-interpreter | ghci-oracle client |
 | GitHub | dsl/core | github-interpreter | Socket client (Rust Octocrab) |
 | Worktree | dsl/core | worktree-interpreter | Git subprocess |
 | Cabal | dsl/core | cabal-interpreter | Cabal CLI subprocess |
@@ -85,7 +82,7 @@ Most effect types live in `dsl/core/src/ExoMonad/Effect/Types.hs` or `Effects/*.
 
 - **HTTP clients**: habitica, github, observability
 - **Subprocesses**: worktree, cabal, docker-ctl
-- **Socket clients**: ghci, lsp, llm
+- **Socket clients**: lsp, llm
 
 ## Claude Code Integration
 
