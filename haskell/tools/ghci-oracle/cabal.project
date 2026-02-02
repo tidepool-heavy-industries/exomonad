@@ -1,5 +1,0 @@
--- Standalone cabal.project for ghci-oracle
--- This package is intentionally separate from main exomonad build
--- to avoid pulling GHCi/process dependencies into the main build.
-
-packages: .

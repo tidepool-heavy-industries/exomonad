@@ -50,7 +50,6 @@ library
         ExoMonad.Effects
         -- Native-only effects (require subprocesses)
         ExoMonad.Effect.LSP
-        ExoMonad.Effect.GHCi
         -- Native-only tooling
         ExoMonad.Schema
         ExoMonad.Schema.TH
@@ -69,7 +68,6 @@ library
         ExoMonad.Effects.Worktree
         ExoMonad.Effects.Effector
         ExoMonad.Effects.Justfile
-        ExoMonad.Effects.DockerSpawner
         ExoMonad.Effects.FileSystem
         ExoMonad.Effects.Zellij
         ExoMonad.Question
@@ -79,6 +77,7 @@ library
         ExoMonad.LLM.Effect
         ExoMonad.LLM.Interpret
         ExoMonad.LLM.Tools.TH
+        ExoMonad.Middleware.Logging
       build-depends:
         exomonad-habitica,
         optparse-applicative >= 0.17 && < 1
