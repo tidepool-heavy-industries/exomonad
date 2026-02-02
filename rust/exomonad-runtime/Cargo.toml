@@ -7,13 +7,10 @@ edition = "2021"
 extism = "1.13"
 extism-convert = "1.13"
 tokio = { workspace = true }
-axum = "0.7"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
-clap = { workspace = true }
 thiserror = { workspace = true }
 octocrab = "0.32"
 chrono = "0.4"
