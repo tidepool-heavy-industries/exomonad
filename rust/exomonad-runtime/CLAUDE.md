@@ -25,7 +25,6 @@ Results marshalled back through WASM → Haskell
 | `plugin_manager` | plugin_manager.rs | Extism plugin loading, host function registration |
 | `services` | services/mod.rs | Service struct (Git, GitHub, AgentControl, FileSystem, Log) |
 | `host_functions` | host_functions.rs | WASM import helpers (get_input, set_output, HostResult protocol) |
-| `server` | server.rs | Standalone HTTP server (optional, not used by sidecar) |
 
 ### Services Breakdown
 

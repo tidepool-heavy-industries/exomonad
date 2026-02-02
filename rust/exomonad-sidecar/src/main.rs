@@ -228,18 +228,22 @@ async fn main() -> Result<()> {
     }
 
     // Discover config (or use default)
-    let config = config::Config::discover().unwrap_or_else(|e| {
+    let raw_config = config::Config::discover().unwrap_or_else(|e| {
         debug!(error = %e, "No config found, using defaults");
         config::Config::default()
     });
 
-    // Validate WASM exists and get path
-    let wasm_path = config.validate_wasm_exists()?;
+    // Validate config (exits early with helpful error if invalid)
+    let config = raw_config.validate().map_err(|e| {
+        anyhow::anyhow!("Config validation failed: {}", e)
+    })?;
+
+    let wasm_path = config.wasm_path();
 
     info!(
-        role = %config.role,
+        role = ?config.role(),
         wasm_path = %wasm_path.display(),
-        "Loaded config and resolved WASM path"
+        "Loaded and validated config"
     );
 
     match cli.command {
@@ -287,12 +291,13 @@ async fn main() -> Result<()> {
         Commands::McpStdio => {
             // stdio MCP server - Claude Code spawns this process
             // Use config already loaded above
-            let project_dir = if config.project_dir.is_absolute() {
-                config.project_dir.clone()
+            let project_dir_ref = config.project_dir();
+            let project_dir = if project_dir_ref.is_absolute() {
+                project_dir_ref.clone()
             } else {
                 std::env::current_dir()
                     .expect("Failed to get current directory")
-                    .join(&config.project_dir)
+                    .join(project_dir_ref)
             };
 
             info!(wasm = ?wasm_path, "Loading WASM plugin");
