@@ -219,14 +219,6 @@ async fn main() -> Result<()> {
     // Initialize logging based on command type
     init_logging(&cli.command);
 
-    // Deprecation warning for old env var
-    if std::env::var("EXOMONAD_WASM_PATH").is_ok() {
-        tracing::warn!(
-            "EXOMONAD_WASM_PATH is deprecated. \
-             Use .exomonad/config.toml with role field instead."
-        );
-    }
-
     // Discover config (or use default)
     let raw_config = config::Config::discover().unwrap_or_else(|e| {
         debug!(error = %e, "No config found, using defaults");
@@ -250,7 +242,7 @@ async fn main() -> Result<()> {
         Commands::Hook { event, runtime } => {
             info!(wasm = ?wasm_path, "Loading WASM plugin");
 
-            // Initialize and validate services with Docker executor (containerized mode)
+            // Initialize and validate services
             let services = Arc::new(
                 Services::new()
                     .validate()
@@ -274,9 +266,9 @@ async fn main() -> Result<()> {
 
             info!(wasm = ?wasm_path, "Loading WASM plugin");
 
-            // Initialize and validate services with local executor
+            // Initialize and validate services
             let services = Arc::new(
-                Services::new_local()
+                Services::new()
                     .validate()
                     .context("Failed to validate services")?,
             );
@@ -312,7 +304,7 @@ async fn main() -> Result<()> {
 
             // Initialize and validate services (secrets loaded from ~/.exomonad/secrets)
             let services = Arc::new(
-                Services::new_local()
+                Services::new()
                     .validate()
                     .context("Failed to validate services")?,
             );

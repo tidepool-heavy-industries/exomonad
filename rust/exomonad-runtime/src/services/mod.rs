@@ -13,7 +13,7 @@ pub mod zellij_events;
 pub use self::agent_control::{
     AgentControlService, AgentInfo, BatchCleanupResult, BatchSpawnResult, SpawnOptions, SpawnResult,
 };
-use self::docker::{DockerExecutor, DockerService};
+use self::docker::DockerExecutor;
 pub use self::filesystem::FileSystemService;
 use self::git::GitService;
 use self::github::GitHubService;
@@ -62,21 +62,20 @@ pub struct Services {
 pub struct ValidatedServices(Services);
 
 impl Services {
-    /// Create services using Docker executor (for containerized environments).
-    pub fn new() -> Self {
-        let docker = DockerService::new();
-        let docker_arc: Arc<dyn DockerExecutor> = Arc::new(docker);
-        Self::with_executor(docker_arc)
-    }
-
-    /// Create services using local executor (for local development).
+    /// Create services using local executor.
     ///
-    /// Commands run directly as subprocesses without Docker.
+    /// Commands run directly as subprocesses.
     /// Loads secrets from ~/.exomonad/secrets.
-    pub fn new_local() -> Self {
+    pub fn new() -> Self {
         let local = LocalExecutor::new();
         let local_arc: Arc<dyn DockerExecutor> = Arc::new(local);
         Self::with_executor(local_arc)
+    }
+
+    /// Deprecated: Use `new()` instead. All services now use local executor.
+    #[deprecated(since = "0.1.0", note = "Use `new()` instead - Docker mode removed")]
+    pub fn new_local() -> Self {
+        Self::new()
     }
 
     fn with_executor(executor: Arc<dyn DockerExecutor>) -> Self {
