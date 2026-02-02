@@ -45,8 +45,9 @@ module Test.ExoMonad.MockLLM
   )
 where
 
-import Control.Monad.Freer (Eff, interpret)
-import Control.Monad.Freer.Internal (Arr, handleRelayS)
+import Polysemy (Sem, Member, interpret, reinterpret, raise)
+import Polysemy.State (State, evalState, get, put)
+import Polysemy.Writer (Writer, runWriter, tell)
 import Data.Aeson (Value (..))
 import Data.Aeson.Key (fromText)
 import Data.Aeson.KeyMap qualified as KM
@@ -55,7 +56,6 @@ import Data.Text (Text)
 import ExoMonad.Effect.Types
   ( ContentBlock,
     LLM (..),
-    TurnOutcome (..),
     TurnResult (..),
   )
 
@@ -86,17 +86,16 @@ data LLMRequest = LLMRequest
 -- @
 -- let result = run $ runMockLLM (object ["ok" .= True]) computation
 -- @
-runMockLLM :: Value -> Eff (LLM ': effs) a -> Eff effs a
+runMockLLM :: Value -> Sem (LLM ': effs) a -> Sem effs a
 runMockLLM fixedOutput = interpret $ \case
-  RunTurnOp _meta _sys _content _schema _tools ->
+  RunTurnOp _sys _content _schema _tools ->
     pure $
-      TurnCompleted
-        TurnResult
-          { trOutput = fixedOutput,
-            trToolsInvoked = [],
-            trNarrative = "",
-            trThinking = ""
-          }
+      TurnResult
+        { trOutput = fixedOutput,
+          trToolsInvoked = [],
+          trNarrative = "",
+          trThinking = ""
+        }
 
 -- | Run LLM returning outputs from a sequence in order.
 --
@@ -110,28 +109,23 @@ runMockLLM fixedOutput = interpret $ \case
 --       r2 <- llmCall "sys" "second" schema
 --       pure (r1, r2)
 -- @
-runMockLLMSequence :: [Value] -> Eff (LLM ': effs) a -> Eff effs a
-runMockLLMSequence outputs = handleRelayS outputs pure' handler
+runMockLLMSequence :: [Value] -> Sem (LLM ': effs) a -> Sem effs a
+runMockLLMSequence outputs = evalState outputs . reinterpret handler
   where
-    pure' :: [Value] -> a -> Eff effs a
-    pure' _ = pure
-
-    handler ::
-      [Value] ->
-      LLM v ->
-      ([Value] -> Arr effs v a) ->
-      Eff effs a
-    handler [] (RunTurnOp _ _ _ _ _) _ =
-      error "runMockLLMSequence: ran out of fixture outputs"
-    handler (o : os) (RunTurnOp _ _ _ _ _) k =
-      k os $
-        TurnCompleted
-          TurnResult
-            { trOutput = o,
-              trToolsInvoked = [],
-              trNarrative = "",
-              trThinking = ""
-            }
+    handler :: (Member (State [Value]) r) => LLM m x -> Sem r x
+    handler (RunTurnOp _ _ _ _) = do
+      outs <- get
+      case outs of
+        [] -> error "runMockLLMSequence: ran out of fixture outputs"
+        (o : os) -> do
+          put os
+          pure $
+            TurnResult
+              { trOutput = o,
+                trToolsInvoked = [],
+                trNarrative = "",
+                trThinking = ""
+              }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SCHEMA-MATCHED MOCK
@@ -156,18 +150,17 @@ runMockLLMMatched ::
   [(Value -> Bool, Value)] ->
   -- | Default output if no match
   Value ->
-  Eff (LLM ': effs) a ->
-  Eff effs a
+  Sem (LLM ': effs) a ->
+  Sem effs a
 runMockLLMMatched matchers defaultOutput = interpret $ \case
-  RunTurnOp _meta _sys _content schema _tools ->
+  RunTurnOp _sys _content schema _tools ->
     pure $
-      TurnCompleted
-        TurnResult
-          { trOutput = findMatch schema matchers,
-            trToolsInvoked = [],
-            trNarrative = "",
-            trThinking = ""
-          }
+      TurnResult
+        { trOutput = findMatch schema matchers,
+          trToolsInvoked = [],
+          trNarrative = "",
+          trThinking = ""
+        }
   where
     findMatch :: Value -> [(Value -> Bool, Value)] -> Value
     findMatch _ [] = defaultOutput
@@ -193,29 +186,21 @@ runMockLLMMatched matchers defaultOutput = interpret $ \case
 -- @
 runMockLLMCapture ::
   Value ->
-  Eff (LLM ': effs) a ->
-  Eff effs ([LLMRequest], a)
-runMockLLMCapture fixedOutput =
-  handleRelayS [] finalizer handler
+  Sem (LLM ': effs) a ->
+  Sem effs ([LLMRequest], a)
+runMockLLMCapture fixedOutput = runWriter . reinterpret handler
   where
-    finalizer :: [LLMRequest] -> a -> Eff effs ([LLMRequest], a)
-    finalizer reqs a = pure (reverse reqs, a)
-
-    handler ::
-      [LLMRequest] ->
-      LLM v ->
-      ([LLMRequest] -> Arr effs v ([LLMRequest], a)) ->
-      Eff effs ([LLMRequest], a)
-    handler reqs (RunTurnOp _meta sysPmt content schema tools) k = do
+    handler :: (Member (Writer [LLMRequest]) r) => LLM m x -> Sem r x
+    handler (RunTurnOp sysPmt content schema tools) = do
       let req = LLMRequest sysPmt content schema tools
-      k (req : reqs) $
-        TurnCompleted
-          TurnResult
-            { trOutput = fixedOutput,
-              trToolsInvoked = [],
-              trNarrative = "",
-              trThinking = ""
-            }
+      tell [req]
+      pure $
+        TurnResult
+          { trOutput = fixedOutput,
+            trToolsInvoked = [],
+            trNarrative = "",
+            trThinking = ""
+          }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SCHEMA MATCHING HELPERS
