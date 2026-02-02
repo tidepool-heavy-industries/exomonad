@@ -1,6 +1,7 @@
 use crate::services::docker::DockerExecutor;
 use anyhow::{Context, Result};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
+use extism_convert::Json;
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 use std::sync::Arc;
@@ -255,44 +256,25 @@ struct GitLogInput {
 
 #[derive(Serialize)]
 #[serde(tag = "kind", content = "payload")]
-enum GitHostOutput<T> {
+enum HostResult<T> {
     Success(T),
-    Error(GitError),
+    Error(HostError),
 }
 
 #[derive(Serialize)]
-struct GitError {
+struct HostError {
     message: String,
 }
 
-impl<T> From<Result<T>> for GitHostOutput<T> {
+impl<T> From<Result<T>> for HostResult<T> {
     fn from(res: Result<T>) -> Self {
         match res {
-            Ok(val) => GitHostOutput::Success(val),
-            Err(e) => GitHostOutput::Error(GitError {
+            Ok(val) => HostResult::Success(val),
+            Err(e) => HostResult::Error(HostError {
                 message: e.to_string(),
             }),
         }
     }
-}
-
-// Helper functions for Extism memory access (Pattern A: memory handles)
-
-fn get_input<T: serde::de::DeserializeOwned>(
-    plugin: &mut CurrentPlugin,
-    val: Val,
-) -> Result<T, Error> {
-    let handle = plugin
-        .memory_from_val(&val)
-        .ok_or_else(|| Error::msg("Invalid memory handle in input"))?;
-    let bytes = plugin.memory_bytes(handle)?;
-    Ok(serde_json::from_slice(bytes)?)
-}
-
-fn set_output<T: Serialize>(plugin: &mut CurrentPlugin, data: &T) -> Result<Val, Error> {
-    let json = serde_json::to_vec(data)?;
-    let handle = plugin.memory_new(json)?;
-    Ok(plugin.memory_to_val(handle))
 }
 
 fn block_on<F: std::future::Future>(future: F) -> Result<F::Output, Error> {
@@ -317,21 +299,26 @@ pub fn git_get_branch_host_fn(git_service: Arc<GitService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<GitService>>|
          -> Result<(), Error> {
+            tracing::info!("[git_get_branch] Starting host function call");
+
             if inputs.is_empty() {
                 return Err(Error::msg("git_get_branch: expected input argument"));
             }
-            let input: GitHostInput = get_input(plugin, inputs[0])?;
+            let Json(input): Json<GitHostInput> = plugin.memory_get_val(&inputs[0])?;
+            tracing::debug!("[git_get_branch] Input: workingDir={}, containerId={}",
+                input.working_dir, input.container_id);
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(git.get_branch(&input.container_id, &input.working_dir))?;
-            let output: GitHostOutput<String> = result.into();
+            let output: HostResult<String> = result.into();
 
-            if outputs.is_empty() {
-                return Err(Error::msg("git_get_branch: expected output argument"));
-            }
-            outputs[0] = set_output(plugin, &output)?;
+            // Debug: log the JSON we're about to send
+            let json_str = serde_json::to_string(&output).map_err(|e| Error::msg(format!("JSON serialization failed: {}", e)))?;
+            tracing::info!("[git_get_branch] Returning JSON: {}", json_str);
+
+            plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
         },
     )
@@ -349,21 +336,20 @@ pub fn git_get_worktree_host_fn(git_service: Arc<GitService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<GitService>>|
          -> Result<(), Error> {
+            tracing::info!("[git_get_worktree] Starting host function call");
+
             if inputs.is_empty() {
                 return Err(Error::msg("git_get_worktree: expected input argument"));
             }
-            let input: GitHostInput = get_input(plugin, inputs[0])?;
+            let Json(input): Json<GitHostInput> = plugin.memory_get_val(&inputs[0])?;
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(git.get_worktree(&input.container_id, &input.working_dir))?;
-            let output: GitHostOutput<WorktreeInfo> = result.into();
+            let output: HostResult<WorktreeInfo> = result.into();
 
-            if outputs.is_empty() {
-                return Err(Error::msg("git_get_worktree: expected output argument"));
-            }
-            outputs[0] = set_output(plugin, &output)?;
+            plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
         },
     )
@@ -381,21 +367,20 @@ pub fn git_get_dirty_files_host_fn(git_service: Arc<GitService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<GitService>>|
          -> Result<(), Error> {
+            tracing::info!("[git_get_dirty_files] Starting host function call");
+
             if inputs.is_empty() {
                 return Err(Error::msg("git_get_dirty_files: expected input argument"));
             }
-            let input: GitHostInput = get_input(plugin, inputs[0])?;
+            let Json(input): Json<GitHostInput> = plugin.memory_get_val(&inputs[0])?;
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(git.get_dirty_files(&input.container_id, &input.working_dir))?;
-            let output: GitHostOutput<Vec<String>> = result.into();
+            let output: HostResult<Vec<String>> = result.into();
 
-            if outputs.is_empty() {
-                return Err(Error::msg("git_get_dirty_files: expected output argument"));
-            }
-            outputs[0] = set_output(plugin, &output)?;
+            plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
         },
     )
@@ -413,12 +398,14 @@ pub fn git_get_recent_commits_host_fn(git_service: Arc<GitService>) -> Function 
          outputs: &mut [Val],
          user_data: UserData<Arc<GitService>>|
          -> Result<(), Error> {
+            tracing::info!("[git_get_recent_commits] Starting host function call");
+
             if inputs.is_empty() {
                 return Err(Error::msg(
                     "git_get_recent_commits: expected input argument",
                 ));
             }
-            let input: GitLogInput = get_input(plugin, inputs[0])?;
+            let Json(input): Json<GitLogInput> = plugin.memory_get_val(&inputs[0])?;
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
@@ -428,14 +415,9 @@ pub fn git_get_recent_commits_host_fn(git_service: Arc<GitService>) -> Function 
                 &input.working_dir,
                 input.limit,
             ))?;
-            let output: GitHostOutput<Vec<Commit>> = result.into();
+            let output: HostResult<Vec<Commit>> = result.into();
 
-            if outputs.is_empty() {
-                return Err(Error::msg(
-                    "git_get_recent_commits: expected output argument",
-                ));
-            }
-            outputs[0] = set_output(plugin, &output)?;
+            plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
         },
     )
@@ -453,26 +435,22 @@ pub fn git_has_unpushed_commits_host_fn(git_service: Arc<GitService>) -> Functio
          outputs: &mut [Val],
          user_data: UserData<Arc<GitService>>|
          -> Result<(), Error> {
+            tracing::info!("[git_has_unpushed_commits] Starting host function call");
+
             if inputs.is_empty() {
                 return Err(Error::msg(
                     "git_has_unpushed_commits: expected input argument",
                 ));
             }
-            let input: GitHostInput = get_input(plugin, inputs[0])?;
+            let Json(input): Json<GitHostInput> = plugin.memory_get_val(&inputs[0])?;
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
-            let result =
-                block_on(git.has_unpushed_commits(&input.container_id, &input.working_dir))?;
-            let output: GitHostOutput<bool> = result.into();
+            let result = block_on(git.has_unpushed_commits(&input.container_id, &input.working_dir))?;
+            let output: HostResult<bool> = result.into();
 
-            if outputs.is_empty() {
-                return Err(Error::msg(
-                    "git_has_unpushed_commits: expected output argument",
-                ));
-            }
-            outputs[0] = set_output(plugin, &output)?;
+            plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
         },
     )
@@ -490,21 +468,20 @@ pub fn git_get_remote_url_host_fn(git_service: Arc<GitService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<GitService>>|
          -> Result<(), Error> {
+            tracing::info!("[git_get_remote_url] Starting host function call");
+
             if inputs.is_empty() {
                 return Err(Error::msg("git_get_remote_url: expected input argument"));
             }
-            let input: GitHostInput = get_input(plugin, inputs[0])?;
+            let Json(input): Json<GitHostInput> = plugin.memory_get_val(&inputs[0])?;
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(git.get_remote_url(&input.container_id, &input.working_dir))?;
-            let output: GitHostOutput<String> = result.into();
+            let output: HostResult<String> = result.into();
 
-            if outputs.is_empty() {
-                return Err(Error::msg("git_get_remote_url: expected output argument"));
-            }
-            outputs[0] = set_output(plugin, &output)?;
+            plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
         },
     )
@@ -522,21 +499,20 @@ pub fn git_get_repo_info_host_fn(git_service: Arc<GitService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<GitService>>|
          -> Result<(), Error> {
+            tracing::info!("[git_get_repo_info] Starting host function call");
+
             if inputs.is_empty() {
                 return Err(Error::msg("git_get_repo_info: expected input argument"));
             }
-            let input: GitHostInput = get_input(plugin, inputs[0])?;
+            let Json(input): Json<GitHostInput> = plugin.memory_get_val(&inputs[0])?;
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(git.get_repo_info(&input.container_id, &input.working_dir))?;
-            let output: GitHostOutput<RepoInfo> = result.into();
+            let output: HostResult<RepoInfo> = result.into();
 
-            if outputs.is_empty() {
-                return Err(Error::msg("git_get_repo_info: expected output argument"));
-            }
-            outputs[0] = set_output(plugin, &output)?;
+            plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
         },
     )

@@ -1,5 +1,6 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE PackageImports #-}
 
 module ExoMonad.Guest.HostCall
   ( callHost,
@@ -42,7 +43,7 @@ module ExoMonad.Guest.HostCall
 where
 
 import Control.Exception (bracket)
-import Data.Aeson (FromJSON, ToJSON, eitherDecode, encode)
+import Data.Aeson (FromJSON, ToJSON, eitherDecode, encode, (.:))
 import qualified Data.Aeson as Aeson
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy (fromStrict, toStrict)
@@ -52,15 +53,38 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
 import Data.Word (Word64)
-import Extism.PDK.Memory (Memory, alloc, findMemory, free, load, memoryOffset)
+import Extism.PDK.Memory (Memory, alloc, findMemory, free, load, memoryOffset, JSON (..))
+import Text.JSON.Generic (Data)
 import GHC.Generics (Generic)
+
+-- ============================================================================
+-- HostResult wrapper (matches Rust serde format)
+-- ============================================================================
+
+data HostResult a = HostSuccess a | HostError HostErrorDetails
+  deriving (Show, Generic)
+
+data HostErrorDetails = HostErrorDetails {errorMessage :: Text}
+  deriving (Show, Generic)
+
+instance (FromJSON a) => FromJSON (HostResult a) where
+  parseJSON = Aeson.withObject "HostResult" $ \v -> do
+    kind <- v .: "kind"
+    case kind :: Text of
+      "Success" -> HostSuccess <$> v .: "payload"
+      "Error" -> HostError <$> v .: "payload"
+      _ -> fail "Unknown kind"
+
+instance FromJSON HostErrorDetails where
+  parseJSON = Aeson.withObject "HostErrorDetails" $ \v ->
+    HostErrorDetails <$> v .: "message"
 
 -- ============================================================================
 -- Log Types (matches Rust LogPayload/LogLevel)
 -- ============================================================================
 
 data LogLevel = Debug | Info | Warn | Error
-  deriving (Show, Eq, Generic)
+  deriving (Show, Eq, Generic, Data)
 
 instance ToJSON LogLevel where
   toJSON Debug = Aeson.String "debug"
@@ -71,9 +95,9 @@ instance ToJSON LogLevel where
 data LogPayload = LogPayload
   { level :: LogLevel,
     message :: Text,
-    fields :: Maybe (HashMap Text Text)
+    fields :: Maybe [(Text, Text)]
   }
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 instance ToJSON LogPayload
 
@@ -136,35 +160,36 @@ foreign import ccall "file_pr" host_file_pr :: Word64 -> IO Word64
 -- Copilot Review host function (poll for Copilot review comments)
 foreign import ccall "wait_for_copilot_review" host_wait_for_copilot_review :: Word64 -> IO Word64
 
-callHost :: (ToJSON req, FromJSON resp) => (Word64 -> IO Word64) -> req -> IO (Either String resp)
+-- | Call a host function with automatic JSON serialization/deserialization.
+-- Request uses Text.JSON.Generic (Data), response uses aeson (FromJSON) to handle HostResult wrapper.
+callHost :: (Data req, FromJSON resp) => (Word64 -> IO Word64) -> req -> IO (Either String resp)
 callHost rawFn request = do
-  -- Encode and allocate
-  let reqBs = toStrict (encode request)
+  -- Allocate request with automatic JSON encoding via ToBytes (JSON a) instance
+  reqMem <- alloc (JSON request)
 
-  bracket (alloc reqBs) free $ \reqMem -> do
-    -- Call host
+  bracket (pure reqMem) free $ \_ -> do
+    -- Call host function
     respOffset <- rawFn (memoryOffset reqMem)
 
     -- Read response (ensure we free the response memory)
     respMem <- findMemory respOffset
     bracket (pure respMem) free $ \_ -> do
-      loadResult <- load respMem
+      -- Load raw bytes
+      respBytes <- (load respMem :: IO (Either String ByteString))
 
-      -- Decode (load returns Either String ByteString)
-      case loadResult of
-        Left loadErr -> do
-          callHostVoid host_log_error (LogPayload Error ("Host call load error: " <> T.pack loadErr) Nothing)
-          pure $ Left ("Load error: " ++ loadErr)
-        Right respBs -> case eitherDecode (fromStrict respBs) of
-          Left err -> do
-            let preview = T.take 200 (T.decodeUtf8With T.lenientDecode respBs)
-            callHostVoid host_log_error (LogPayload Error ("Host call decode error: " <> T.pack err <> " | Raw: " <> preview) Nothing)
-            pure $ Left ("Decode error: " ++ err)
-          Right v -> pure $ Right v
+      -- Decode with aeson (to handle Rust's serde format)
+      case respBytes of
+        Left loadErr -> pure $ Left ("Load error: " ++ loadErr)
+        Right bytes -> case eitherDecode (fromStrict bytes) of
+          Left decodeErr -> pure $ Left ("JSON decode error: " ++ decodeErr)
+          Right result -> case result of
+            HostSuccess val -> pure $ Right val
+            HostError (HostErrorDetails msg) -> pure $ Left (T.unpack msg)
 
 -- | Call a host function that returns void (fire-and-forget, e.g., logging)
-callHostVoid :: (ToJSON req) => (Word64 -> IO ()) -> req -> IO ()
+callHostVoid :: (Data req) => (Word64 -> IO ()) -> req -> IO ()
 callHostVoid rawFn request = do
-  let reqBs = toStrict (encode request)
-  bracket (alloc reqBs) free $ \reqMem -> do
+  -- Allocate request with automatic JSON encoding
+  reqMem <- alloc (JSON request)
+  bracket (pure reqMem) free $ \_ -> do
     rawFn (memoryOffset reqMem)
