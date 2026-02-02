@@ -474,6 +474,9 @@ impl AgentControlService {
             cwd "{cwd}"
             close_on_exit true
         }}
+        pane size=3 borderless=true {{
+            plugin location="file:~/.config/zellij/plugins/exomonad-plugin.wasm"
+        }}
     }}
 }}"#,
                 name = name,
