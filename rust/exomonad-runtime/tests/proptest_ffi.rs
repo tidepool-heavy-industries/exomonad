@@ -52,6 +52,7 @@ prop_compose! {
         command in proptest::option::of(".*"),
         exit_code in proptest::option::of(any::<i32>()),
         stderr in proptest::option::of(".*"),
+        stdout in proptest::option::of(".*"),
         file_path in proptest::option::of(".*"),
         working_dir in proptest::option::of(".*"),
     ) -> ErrorContext {
@@ -59,6 +60,7 @@ prop_compose! {
             command,
             exit_code,
             stderr,
+            stdout,
             file_path,
             working_dir,
         }

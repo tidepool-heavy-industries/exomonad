@@ -3,7 +3,8 @@
 //! This implements the `DockerExecutor` trait but runs commands as local subprocesses.
 //! Used for local development where we don't need Docker container isolation.
 
-use crate::services::docker::{CommandError, DockerExecutor};
+use crate::common::CommandError;
+use crate::services::docker::DockerExecutor;
 use anyhow::{Context, Result};
 use std::future::Future;
 use std::pin::Pin;

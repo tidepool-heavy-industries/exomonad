@@ -43,7 +43,7 @@ module ExoMonad.Guest.HostCall
 where
 
 import Control.Exception (bracket)
-import Data.Aeson (FromJSON, ToJSON, eitherDecode, encode, (.:), (.:?))
+import Data.Aeson (FromJSON, ToJSON, eitherDecode, encode, (.:), (.:?), (.!=))
 import qualified Data.Aeson as Aeson
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy (fromStrict, toStrict)
@@ -64,19 +64,20 @@ data HostResult a = HostSuccess a | HostError HostErrorDetails
   deriving (Show, Generic)
 
 data HostErrorDetails = HostErrorDetails
-  { message :: Text,
-    code :: Text,
-    context :: Maybe ErrorContext,
-    suggestion :: Maybe Text
+  { hostErrorMessage :: Text,
+    hostErrorCode :: Text,
+    hostErrorContext :: Maybe ErrorContext,
+    hostErrorSuggestion :: Maybe Text
   }
   deriving (Show, Generic)
 
 data ErrorContext = ErrorContext
-  { command :: Maybe Text,
-    exit_code :: Maybe Int,
-    stderr :: Maybe Text,
-    file_path :: Maybe Text,
-    working_dir :: Maybe Text
+  { errorContextCommand :: Maybe Text,
+    errorContextExitCode :: Maybe Int,
+    errorContextStderr :: Maybe Text,
+    errorContextStdout :: Maybe Text,
+    errorContextFilePath :: Maybe Text,
+    errorContextWorkingDir :: Maybe Text
   }
   deriving (Show, Generic)
 
@@ -92,7 +93,7 @@ instance FromJSON HostErrorDetails where
   parseJSON = Aeson.withObject "HostErrorDetails" $ \v ->
     HostErrorDetails
       <$> v .: "message"
-      <*> v .: "code"
+      <*> v .:? "code" .!= "internal_error" -- Default for backward compatibility
       <*> v .:? "context"
       <*> v .:? "suggestion"
 
@@ -102,6 +103,7 @@ instance FromJSON ErrorContext where
       <$> v .:? "command"
       <*> v .:? "exit_code"
       <*> v .:? "stderr"
+      <*> v .:? "stdout"
       <*> v .:? "file_path"
       <*> v .:? "working_dir"
 
@@ -216,18 +218,19 @@ callHost rawFn request = do
 formatError :: HostErrorDetails -> String
 formatError details =
   T.unpack $
-    "[" <> code details <> "] " <> message details
-      <> maybe "" (\s -> "\nSuggestion: " <> s) (suggestion details)
-      <> maybe "" formatContext (context details)
+    "[" <> hostErrorCode details <> "] " <> hostErrorMessage details
+      <> maybe "" (\s -> "\nSuggestion: " <> s) (hostErrorSuggestion details)
+      <> maybe "" formatContext (hostErrorContext details)
 
 formatContext :: ErrorContext -> Text
 formatContext ctx =
   "\nContext:"
-    <> maybe "" (\c -> "\n  Command: " <> c) (command ctx)
-    <> maybe "" (\e -> "\n  Exit Code: " <> T.pack (show e)) (exit_code ctx)
-    <> maybe "" (\s -> "\n  Stderr: " <> s) (stderr ctx)
-    <> maybe "" (\p -> "\n  File: " <> p) (file_path ctx)
-    <> maybe "" (\w -> "\n  Working Dir: " <> w) (working_dir ctx)
+    <> maybe "" (\c -> "\n  Command: " <> c) (errorContextCommand ctx)
+    <> maybe "" (\e -> "\n  Exit Code: " <> T.pack (show e)) (errorContextExitCode ctx)
+    <> maybe "" (\s -> "\n  Stderr: " <> s) (errorContextStderr ctx)
+    <> maybe "" (\s -> "\n  Stdout: " <> s) (errorContextStdout ctx)
+    <> maybe "" (\p -> "\n  File: " <> p) (errorContextFilePath ctx)
+    <> maybe "" (\w -> "\n  Working Dir: " <> w) (errorContextWorkingDir ctx)
 
 -- | Call a host function that returns void (fire-and-forget, e.g., logging)
 callHostVoid :: (ToJSON req) => (Word64 -> IO ()) -> req -> IO ()

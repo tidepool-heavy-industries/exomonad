@@ -3,13 +3,11 @@
 // Uses `gh api` to check for Copilot review comments on a PR.
 // Blocks until comments are found or timeout is reached.
 
-use crate::common::{ErrorCode, HostResult};
+use crate::common::HostResult;
 use crate::services::git;
 use anyhow::{Context, Result};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
-use extism_convert::Json;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};

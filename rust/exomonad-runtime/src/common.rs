@@ -1,5 +1,21 @@
-use crate::services::docker::CommandError;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum CommandError {
+    #[error("Command '{command}' failed with exit code {exit_code:?}: {stderr}")]
+    ExecutionFailed {
+        command: String,
+        exit_code: Option<i32>,
+        stderr: String,
+        stdout: String, // Useful for some cases even on failure
+    },
+    #[error("Failed to execute '{command}': {message}")]
+    LaunchFailed {
+        command: String,
+        message: String,
+    },
+}
 
 /// Standardized error code for programmatic handling across the FFI boundary.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -45,6 +61,10 @@ pub struct ErrorContext {
     /// Standard error output from the command (truncated if necessary).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stderr: Option<String>,
+
+    /// Standard output from the command (truncated if necessary).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stdout: Option<String>,
     
     /// Relevant file path.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -90,15 +110,26 @@ impl<T> From<anyhow::Error> for HostResult<T> {
                     command,
                     exit_code,
                     stderr,
-                    stdout: _,
+                    stdout,
                 } => {
+                    // Heuristically map command failures: git commands -> GitError, others -> IoError.
+                    let inferred_code = {
+                        let trimmed = command.trim_start();
+                        if trimmed == "git" || trimmed.starts_with("git ") {
+                            ErrorCode::GitError
+                        } else {
+                            ErrorCode::IoError
+                        }
+                    };
+
                     return HostResult::Error(HostError {
                         message: format!("Command failed: {}", command),
-                        code: ErrorCode::GitError, // Default assumption, caller can refine
+                        code: inferred_code,
                         context: Some(ErrorContext {
                             command: Some(command.clone()),
                             exit_code: *exit_code,
                             stderr: Some(stderr.clone()),
+                            stdout: Some(stdout.clone()),
                             ..Default::default()
                         }),
                         suggestion: None, // Can be improved with heuristic analysis of stderr

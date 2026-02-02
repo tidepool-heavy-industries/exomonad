@@ -6,7 +6,6 @@
 use crate::common::HostResult;
 use anyhow::{Context, Result};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
-use extism_convert::Json;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
