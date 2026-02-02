@@ -220,7 +220,7 @@ impl AgentControlService {
         self.create_worktree(&worktree_path, &branch_name).await?;
 
         // Write config files (no INITIAL_CONTEXT.md)
-        self.write_context_files(&worktree_path).await?;
+        self.write_context_files(&worktree_path, options.agent_type).await?;
 
         // Build initial prompt
         let issue_url = format!(
@@ -658,7 +658,7 @@ impl AgentControlService {
     // Internal: Context Files
     // ========================================================================
 
-    async fn write_context_files(&self, worktree_path: &Path) -> Result<()> {
+    async fn write_context_files(&self, worktree_path: &Path, agent_type: AgentType) -> Result<()> {
         // Create .exomonad directory
         let exomonad_dir = worktree_path.join(".exomonad");
         fs::create_dir_all(&exomonad_dir).await?;
@@ -694,12 +694,15 @@ project_dir = "../.."
         );
         fs::write(worktree_path.join(".mcp.json"), mcp_content).await?;
 
-        // Create .claude directory and write settings with SubagentStop hook
-        let claude_dir = worktree_path.join(".claude");
-        fs::create_dir_all(&claude_dir).await?;
+        // Write agent-specific hook configuration
+        match agent_type {
+            AgentType::Claude => {
+                // Create .claude directory and write settings with SubagentStop hook
+                let claude_dir = worktree_path.join(".claude");
+                fs::create_dir_all(&claude_dir).await?;
 
-        let settings_content = format!(
-            r#"{{
+                let settings_content = format!(
+                    r#"{{
   "enableAllProjectMcpServers": true,
   "hooks": {{
     "SubagentStop": [
@@ -715,13 +718,46 @@ project_dir = "../.."
   }}
 }}
 "#,
-            sidecar_path
-        );
-        fs::write(claude_dir.join("settings.local.json"), settings_content).await?;
-        tracing::info!(
-            worktree = %worktree_path.display(),
-            "Wrote .claude/settings.local.json with SubagentStop hook"
-        );
+                    sidecar_path
+                );
+                fs::write(claude_dir.join("settings.local.json"), settings_content).await?;
+                tracing::info!(
+                    worktree = %worktree_path.display(),
+                    "Wrote .claude/settings.local.json with SubagentStop hook"
+                );
+            }
+            AgentType::Gemini => {
+                // Create .gemini directory and write settings with SessionEnd hook
+                let gemini_dir = worktree_path.join(".gemini");
+                fs::create_dir_all(&gemini_dir).await?;
+
+                let settings_content = format!(
+                    r#"{{
+  "hooks": {{
+    "SessionEnd": [
+      {{
+        "hooks": [
+          {{
+            "name": "stop-check",
+            "type": "command",
+            "command": "{} hook subagent-stop",
+            "timeout": 30000
+          }}
+        ]
+      }}
+    ]
+  }}
+}}
+"#,
+                    sidecar_path
+                );
+                fs::write(gemini_dir.join("settings.json"), settings_content).await?;
+                tracing::info!(
+                    worktree = %worktree_path.display(),
+                    "Wrote .gemini/settings.json with SessionEnd hook"
+                );
+            }
+        }
 
         info!(worktree = %worktree_path.display(), "Context files written");
         Ok(())
