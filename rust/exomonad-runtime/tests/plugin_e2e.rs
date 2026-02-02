@@ -89,7 +89,8 @@ async fn test_plugin_call_handle_pre_tool_use() {
                         ..
                     } => {
                         assert_eq!(
-                            permission_decision, "allow",
+                            permission_decision,
+                            exomonad_shared::ToolPermission::Allow,
                             "Expected allow permission decision"
                         );
                     }

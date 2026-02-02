@@ -14,6 +14,7 @@
 //! Message formats match Claude Code's hook stdin/stdout schemas exactly
 //! to allow passthrough with minimal transformation.
 
+use crate::domain::{GithubOwner, GithubRepo, SessionId, ToolName, ToolPermission};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -77,7 +78,7 @@ pub enum HookEventType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookInput {
     /// Session ID from Claude Code.
-    pub session_id: String,
+    pub session_id: SessionId,
 
     /// Path to the transcript file.
     #[serde(default)]
@@ -101,7 +102,7 @@ pub struct HookInput {
     // ----- Tool-related fields (PreToolUse, PostToolUse, PermissionRequest) -----
     /// Tool name for tool-related hooks.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_name: Option<String>,
+    pub tool_name: Option<ToolName>,
 
     /// Tool input arguments for tool-related hooks.
     #[serde(alias = "tool_parameters")]
@@ -208,7 +209,7 @@ pub enum HookSpecificOutput {
     PreToolUse {
         /// Permission decision: "allow", "deny", or "ask".
         #[serde(rename = "permissionDecision")]
-        permission_decision: String,
+        permission_decision: ToolPermission,
 
         /// Reason for the decision.
         #[serde(
@@ -333,22 +334,22 @@ pub enum ServiceRequest {
 
     // GitHub
     GitHubGetIssue {
-        owner: String,
-        repo: String,
+        owner: GithubOwner,
+        repo: GithubRepo,
         number: u32,
         #[serde(default)]
         include_comments: bool,
     },
     GitHubCreateIssue {
-        owner: String,
-        repo: String,
+        owner: GithubOwner,
+        repo: GithubRepo,
         title: String,
         body: String,
         labels: Vec<String>,
     },
     GitHubUpdateIssue {
-        owner: String,
-        repo: String,
+        owner: GithubOwner,
+        repo: GithubRepo,
         number: u32,
         #[serde(skip_serializing_if = "Option::is_none")]
         title: Option<String>,
@@ -362,67 +363,67 @@ pub enum ServiceRequest {
         assignees: Option<Vec<String>>,
     },
     GitHubAddIssueLabel {
-        owner: String,
-        repo: String,
+        owner: GithubOwner,
+        repo: GithubRepo,
         number: u32,
         label: String,
     },
     GitHubRemoveIssueLabel {
-        owner: String,
-        repo: String,
+        owner: GithubOwner,
+        repo: GithubRepo,
         number: u32,
         label: String,
     },
     GitHubAddIssueAssignee {
-        owner: String,
-        repo: String,
+        owner: GithubOwner,
+        repo: GithubRepo,
         number: u32,
         assignee: String,
     },
     GitHubRemoveIssueAssignee {
-        owner: String,
-        repo: String,
+        owner: GithubOwner,
+        repo: GithubRepo,
         number: u32,
         assignee: String,
     },
     GitHubListIssues {
-        owner: String,
-        repo: String,
+        owner: GithubOwner,
+        repo: GithubRepo,
         #[serde(skip_serializing_if = "Option::is_none")]
         state: Option<IssueState>,
         labels: Vec<String>,
     },
     GitHubCreatePR {
-        owner: String,
-        repo: String,
+        owner: GithubOwner,
+        repo: GithubRepo,
         title: String,
         body: String,
         head: String,
         base: String,
     },
     GitHubGetPR {
-        owner: String,
-        repo: String,
+        owner: GithubOwner,
+        repo: GithubRepo,
         number: u32,
         #[serde(default)]
         include_details: bool,
     },
     GitHubListPullRequests {
-        owner: String,
-        repo: String,
+        owner: GithubOwner,
+        repo: GithubRepo,
         #[serde(skip_serializing_if = "Option::is_none")]
         state: Option<String>, // open, closed, merged, all
         #[serde(skip_serializing_if = "Option::is_none")]
         limit: Option<u32>,
     },
     GitHubGetPullRequestReviews {
-        owner: String,
-        repo: String,
+        owner: GithubOwner,
+        repo: GithubRepo,
         number: u32,
     },
     GitHubGetDiscussion {
-        owner: String,
-        repo: String,
+        owner: GithubOwner,
+        repo: GithubRepo,
         number: u32,
     },
     GitHubCheckAuth,
@@ -670,7 +671,7 @@ impl HookOutput {
         Self {
             continue_: true,
             hook_specific_output: Some(HookSpecificOutput::PreToolUse {
-                permission_decision: "allow".to_string(),
+                permission_decision: ToolPermission::Allow,
                 permission_decision_reason: reason,
                 updated_input: modified_input,
             }),
@@ -683,7 +684,7 @@ impl HookOutput {
         Self {
             continue_: true,
             hook_specific_output: Some(HookSpecificOutput::PreToolUse {
-                permission_decision: "deny".to_string(),
+                permission_decision: ToolPermission::Deny,
                 permission_decision_reason: Some(reason),
                 updated_input: None,
             }),
@@ -729,7 +730,10 @@ mod tests {
 
         let input: HookInput = serde_json::from_str(json).unwrap();
         assert_eq!(input.hook_event_name, "PreToolUse");
-        assert_eq!(input.tool_name, Some("Write".to_string()));
+        assert_eq!(
+            input.tool_name.as_ref().map(|t| t.as_str()),
+            Some("Write")
+        );
     }
 
     #[test]
@@ -765,8 +769,8 @@ mod tests {
                 number,
                 include_comments,
             } => {
-                assert_eq!(owner, "octocat");
-                assert_eq!(repo, "hello-world");
+                assert_eq!(owner.as_str(), "octocat");
+                assert_eq!(repo.as_str(), "hello-world");
                 assert_eq!(number, 42);
                 assert!(include_comments);
             }
@@ -858,8 +862,8 @@ mod tests {
                 number,
                 include_details,
             } => {
-                assert_eq!(owner, "octocat");
-                assert_eq!(repo, "hello-world");
+                assert_eq!(owner.as_str(), "octocat");
+                assert_eq!(repo.as_str(), "hello-world");
                 assert_eq!(number, 99);
                 assert!(include_details);
             }
@@ -980,7 +984,7 @@ mod tests {
                 labels,
                 ..
             } => {
-                assert_eq!(owner, "octocat");
+                assert_eq!(owner.as_str(), "octocat");
                 assert_eq!(title, "New bug");
                 assert_eq!(labels, vec!["bug"]);
             }
@@ -1008,7 +1012,7 @@ mod tests {
                 base,
                 ..
             } => {
-                assert_eq!(owner, "octocat");
+                assert_eq!(owner.as_str(), "octocat");
                 assert_eq!(title, "Add feature");
                 assert_eq!(head, "feature");
                 assert_eq!(base, "main");
@@ -1304,7 +1308,7 @@ mod tests {
     fn test_hook_input_minimal() {
         let json = r#"{"session_id":"s","hook_event_name":"Stop"}"#;
         let input: HookInput = serde_json::from_str(json).unwrap();
-        assert_eq!(input.session_id, "s");
+        assert_eq!(input.session_id.as_str(), "s");
         assert_eq!(input.hook_event_name, "Stop");
         assert!(input.tool_name.is_none());
     }
@@ -1341,10 +1345,13 @@ mod tests {
             "stop_hook_active": true
         }"#;
         let input: HookInput = serde_json::from_str(json).unwrap();
-        assert_eq!(input.session_id, "sess-123");
+        assert_eq!(input.session_id.as_str(), "sess-123");
         assert_eq!(input.cwd, "/home/user");
         assert_eq!(input.permission_mode, "plan");
-        assert_eq!(input.tool_name, Some("Write".into()));
+        assert_eq!(
+            input.tool_name.as_ref().map(|t| t.as_str()),
+            Some("Write")
+        );
         assert_eq!(input.prompt, Some("user prompt".into()));
         assert_eq!(input.stop_hook_active, Some(true));
     }

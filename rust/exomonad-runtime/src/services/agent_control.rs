@@ -8,6 +8,7 @@
 //! These are high-level effects exposed to Haskell WASM, not granular operations.
 
 use anyhow::{anyhow, Context, Result};
+use exomonad_shared::{GithubOwner, GithubRepo, IssueNumber};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -66,9 +67,9 @@ impl Default for AgentType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpawnOptions {
     /// GitHub repository owner
-    pub owner: String,
+    pub owner: GithubOwner,
     /// GitHub repository name
-    pub repo: String,
+    pub repo: GithubRepo,
     /// Base directory for worktrees (relative to project)
     pub worktree_dir: Option<String>,
     /// Agent type (Claude or Gemini)
@@ -166,7 +167,7 @@ impl AgentControlService {
     /// 2. Creates git worktree from origin/main
     /// 3. Writes context files (.exomonad/config.toml, INITIAL_CONTEXT.md, .mcp.json)
     /// 4. Opens Zellij tab with claude command
-    pub async fn spawn_agent(&self, issue_id: &str, options: &SpawnOptions) -> Result<SpawnResult> {
+    pub async fn spawn_agent(&self, issue_number: IssueNumber, options: &SpawnOptions) -> Result<SpawnResult> {
         // Validate we're in Zellij
         self.check_zellij_env()?;
 
@@ -176,18 +177,14 @@ impl AgentControlService {
             .as_ref()
             .ok_or_else(|| anyhow!("GitHub service not available (GITHUB_TOKEN not set)"))?;
 
-        // Parse issue number
-        let issue_num: u64 = issue_id
-            .parse()
-            .with_context(|| format!("Invalid issue number: {}", issue_id))?;
-
         // Fetch issue from GitHub
+        let issue_id = issue_number.as_u64().to_string();
         info!(issue_id, "Fetching issue from GitHub");
         let repo = Repo {
             owner: options.owner.clone(),
             name: options.repo.clone(),
         };
-        let issue = github.get_issue(&repo, issue_num).await?;
+        let issue = github.get_issue(&repo, issue_number.as_u64()).await?;
 
         // Generate slug from title
         let slug = slugify(&issue.title);
@@ -217,7 +214,7 @@ impl AgentControlService {
             options.owner, options.repo, issue_id
         );
         let initial_prompt = Self::build_initial_prompt(
-            issue_id,
+            &issue_id,
             &issue.title,
             &issue.body,
             &branch_name,
@@ -269,12 +266,21 @@ impl AgentControlService {
             failed: Vec::new(),
         };
 
-        for issue_id in issue_ids {
-            match self.spawn_agent(issue_id, options).await {
-                Ok(spawn_result) => result.spawned.push(spawn_result),
+        for issue_id_str in issue_ids {
+            // Parse issue ID
+            match IssueNumber::try_from(issue_id_str.clone()) {
+                Ok(issue_number) => {
+                    match self.spawn_agent(issue_number, options).await {
+                        Ok(spawn_result) => result.spawned.push(spawn_result),
+                        Err(e) => {
+                            warn!(issue_id = issue_id_str, error = %e, "Failed to spawn agent");
+                            result.failed.push((issue_id_str.clone(), e.to_string()));
+                        }
+                    }
+                }
                 Err(e) => {
-                    warn!(issue_id, error = %e, "Failed to spawn agent");
-                    result.failed.push((issue_id.clone(), e.to_string()));
+                    warn!(issue_id = issue_id_str, error = %e, "Invalid issue number");
+                    result.failed.push((issue_id_str.clone(), e.to_string()));
                 }
             }
         }
@@ -749,9 +755,9 @@ use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
 
 #[derive(Deserialize)]
 struct SpawnAgentInput {
-    issue_id: String,
-    owner: String,
-    repo: String,
+    issue_id: IssueNumber,
+    owner: GithubOwner,
+    repo: GithubRepo,
     worktree_dir: Option<String>,
     #[serde(default)]
     agent_type: AgentType,
@@ -760,8 +766,8 @@ struct SpawnAgentInput {
 #[derive(Deserialize)]
 struct SpawnAgentsInput {
     issue_ids: Vec<String>,
-    owner: String,
-    repo: String,
+    owner: GithubOwner,
+    repo: GithubRepo,
     worktree_dir: Option<String>,
     #[serde(default)]
     agent_type: AgentType,
@@ -855,7 +861,7 @@ pub fn spawn_agent_host_fn(service: Arc<AgentControlService>) -> Function {
                 agent_type: input.agent_type,
             };
 
-            let result = block_on(service.spawn_agent(&input.issue_id, &options))?;
+            let result = block_on(service.spawn_agent(input.issue_id, &options))?;
             let output: HostResult<SpawnResult> = result.into();
 
             outputs[0] = set_output(plugin, &output)?;

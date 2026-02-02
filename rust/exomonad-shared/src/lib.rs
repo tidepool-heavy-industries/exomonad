@@ -8,6 +8,7 @@
 //! ### Core Types
 //! - [`error`]: Typed error types for all failure modes
 //! - [`protocol`]: Hook event types and MCP response types
+//! - [`domain`]: Domain types with parse-at-edge validation
 //!
 //! ### Utilities
 //! - [`logging`]: Tracing/logging setup with env filter
@@ -15,6 +16,7 @@
 //! - [`hooks`]: Hook configuration generation for Claude Code
 
 // Core types
+pub mod domain;
 pub mod error;
 pub mod protocol;
 
@@ -30,6 +32,9 @@ pub mod humanize;
 pub mod supervisor;
 
 // Re-export commonly used types at crate root
+pub use domain::{
+    DomainError, GithubOwner, GithubRepo, IssueNumber, Role, SessionId, ToolName, ToolPermission,
+};
 pub use error::{ExoMonadError, Result};
 pub use hooks::HookConfig;
 pub use logging::{init_logging, init_logging_with_default};
