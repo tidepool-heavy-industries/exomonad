@@ -494,7 +494,9 @@ impl ExternalService for GitHubService {
                 repo,
                 number,
             } => {
-                let reviews = self.fetch_review_threads(owner.as_str(), repo.as_str(), number).await?;
+                let reviews = self
+                    .fetch_review_threads(owner.as_str(), repo.as_str(), number)
+                    .await?;
                 Ok(ServiceResponse::GitHubReviews { reviews })
             }
             ServiceRequest::GitHubGetDiscussion {

@@ -83,7 +83,6 @@ impl Config {
         }
     }
 
-
     /// Validate configuration and return a ValidatedConfig.
     ///
     /// This method performs all validation checks and consumes self to return
@@ -200,8 +199,8 @@ project_dir = "/home/user/project"
             project_dir: PathBuf::from("."),
         };
 
-        let expected = PathBuf::from(std::env::var("HOME").unwrap())
-            .join(".exomonad/wasm/wasm-guest-tl.wasm");
+        let expected =
+            PathBuf::from(std::env::var("HOME").unwrap()).join(".exomonad/wasm/wasm-guest-tl.wasm");
 
         assert_eq!(config.wasm_path_internal().unwrap(), expected);
     }
@@ -224,7 +223,10 @@ project_dir = "/home/user/project"
         };
 
         let result = config.validate();
-        assert!(matches!(result, Err(ConfigError::ProjectDirNotFound { .. })));
+        assert!(matches!(
+            result,
+            Err(ConfigError::ProjectDirNotFound { .. })
+        ));
     }
 
     #[test]
@@ -240,7 +242,10 @@ project_dir = "/home/user/project"
         };
 
         let result = config.validate();
-        assert!(matches!(result, Err(ConfigError::ProjectDirNotDirectory { .. })));
+        assert!(matches!(
+            result,
+            Err(ConfigError::ProjectDirNotDirectory { .. })
+        ));
     }
 
     #[test]

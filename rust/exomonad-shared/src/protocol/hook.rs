@@ -316,10 +316,7 @@ mod tests {
 
         let input: HookInput = serde_json::from_str(json).unwrap();
         assert_eq!(input.hook_event_name, "PreToolUse");
-        assert_eq!(
-            input.tool_name.as_ref().map(|t| t.as_str()),
-            Some("Write")
-        );
+        assert_eq!(input.tool_name.as_ref().map(|t| t.as_str()), Some("Write"));
     }
 
     #[test]
@@ -453,10 +450,7 @@ mod tests {
         assert_eq!(input.session_id.as_str(), "sess-123");
         assert_eq!(input.cwd, "/home/user");
         assert_eq!(input.permission_mode, "plan");
-        assert_eq!(
-            input.tool_name.as_ref().map(|t| t.as_str()),
-            Some("Write")
-        );
+        assert_eq!(input.tool_name.as_ref().map(|t| t.as_str()), Some("Write"));
         assert_eq!(input.prompt, Some("user prompt".into()));
         assert_eq!(input.stop_hook_active, Some(true));
     }

@@ -26,7 +26,8 @@ impl AnthropicService {
         Self {
             client: Client::new(),
             api_key,
-            base_url: Url::parse("https://api.anthropic.com").unwrap(),
+            base_url: Url::parse("https://api.anthropic.com")
+                .expect("hardcoded Anthropic API URL should be valid"),
         }
     }
 
@@ -50,7 +51,10 @@ impl AnthropicService {
         let base_url = std::env::var("ANTHROPIC_BASE_URL")
             .ok()
             .and_then(|s| Url::parse(&s).ok())
-            .unwrap_or_else(|| Url::parse("https://api.anthropic.com").unwrap());
+            .unwrap_or_else(|| {
+                Url::parse("https://api.anthropic.com")
+                    .expect("hardcoded Anthropic API URL should be valid")
+            });
 
         Ok(Self::with_base_url(api_key, base_url))
     }

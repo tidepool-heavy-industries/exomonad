@@ -142,10 +142,10 @@ fn test_cli_invalid_json_returns_error() -> Result<(), Box<dyn std::error::Error
     let mut cmd = cargo_bin_cmd!("exomonad-sidecar");
 
     cmd.args(["hook", "pre-tool-use"])
-    .write_stdin("not valid json")
-    .assert()
-    .failure()
-    .stderr(predicate::str::contains("parse"));
+        .write_stdin("not valid json")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("parse"));
 
     Ok(())
 }
@@ -161,9 +161,9 @@ fn test_cli_empty_stdin_returns_error() -> Result<(), Box<dyn std::error::Error>
     let mut cmd = cargo_bin_cmd!("exomonad-sidecar");
 
     cmd.args(["hook", "pre-tool-use"])
-    .write_stdin("")
-    .assert()
-    .failure();
+        .write_stdin("")
+        .assert()
+        .failure();
 
     Ok(())
 }
@@ -236,11 +236,7 @@ fn test_cli_mcp_server_starts() -> Result<(), Box<dyn std::error::Error>> {
 
     // Start MCP server in background
     let mut child = StdCommand::new(env!("CARGO_BIN_EXE_exomonad-sidecar"))
-        .args([
-            "mcp",
-            "--port",
-            &port.to_string(),
-        ])
+        .args(["mcp", "--port", &port.to_string()])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
