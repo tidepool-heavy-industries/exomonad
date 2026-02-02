@@ -38,6 +38,9 @@ jobs:
       - name: Protocol Alignment Test
         run: cabal build exomonad-control-server --enable-tests -j && cabal test exomonad-control-server:protocol-golden-test
 
+      - name: FFI Serialization Tests
+        run: cabal test wasm-guest:ffi-serialization-tests
+
   rust:
     runs-on: ubuntu-latest
     steps:
@@ -57,4 +60,7 @@ jobs:
 
       - name: Protocol Alignment Test
         run: cd rust && cargo test -p exomonad-shared --test protocol_golden
+
+      - name: Runtime Tests
+        run: cd rust && cargo test -p exomonad-runtime
 

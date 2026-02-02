@@ -96,3 +96,24 @@ Agents live in separate repos to keep the library clean:
 - [polysemy](https://hackage.haskell.org/package/polysemy) - Higher-power, low-boilerplate effect system
 - [ginger](https://github.com/inanna-malick/ginger) - Jinja template engine for Haskell (typed fork)
 - [Anthropic Tool Use](https://docs.anthropic.com/en/docs/tool-use) - LLM tool calling
+
+## Testing
+
+### FFI Property Tests
+
+We use property-based testing to verify JSON serialization across the WASM FFI boundary.
+
+**Rust:**
+```bash
+cd rust && cargo test --test proptest_ffi
+```
+
+**Haskell:**
+```bash
+cd haskell/wasm-guest && cabal test ffi-serialization-tests
+```
+
+**Integration (Round-trip):**
+```bash
+cd rust && cargo test --test integration_ffi
+```

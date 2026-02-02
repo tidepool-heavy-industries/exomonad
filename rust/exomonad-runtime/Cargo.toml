@@ -20,6 +20,7 @@ exomonad-ui-protocol = { path = "../exomonad-ui-protocol" }
 [dev-dependencies]
 tempfile = { workspace = true }
 wiremock = "0.5"
+proptest = "1.4"
 
 [lib]
 path = "src/lib.rs"

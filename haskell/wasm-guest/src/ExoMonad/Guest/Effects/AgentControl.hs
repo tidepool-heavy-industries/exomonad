@@ -32,6 +32,10 @@ module ExoMonad.Guest.Effects.AgentControl
     BatchSpawnResult (..),
     BatchCleanupResult (..),
     HostResult (..),
+    SpawnAgentInput (..),
+    SpawnAgentsInput (..),
+    CleanupAgentInput (..),
+    CleanupAgentsInput (..),
   )
 where
 
@@ -182,6 +186,18 @@ data HostResult a
   | HostError Text
   deriving (Show, Eq, Generic)
 
+instance (ToJSON a) => ToJSON (HostResult a) where
+  toJSON (Success payload) =
+    object
+      [ "kind" .= ("Success" :: Text),
+        "payload" .= payload
+      ]
+  toJSON (HostError msg) =
+    object
+      [ "kind" .= ("Error" :: Text),
+        "payload" .= object ["message" .= msg]
+      ]
+
 instance (FromJSON a) => FromJSON (HostResult a) where
   parseJSON = withObject "HostResult" $ \v -> do
     kind <- v .: "kind" :: (FromJSON (Maybe Text)) => Data.Aeson.Types.Parser Text
@@ -203,7 +219,7 @@ data SpawnAgentInput = SpawnAgentInput
     saiWorktreeDir :: Maybe Text,
     saiAgentType :: Maybe AgentType
   }
-  deriving (Show, Generic)
+  deriving (Show, Eq, Generic)
 
 instance ToJSON SpawnAgentInput where
   toJSON (SpawnAgentInput i o r w a) =
@@ -214,6 +230,14 @@ instance ToJSON SpawnAgentInput where
         "worktree_dir" .= w,
         "agent_type" .= a
       ]
+instance FromJSON SpawnAgentInput where
+  parseJSON = withObject "SpawnAgentInput" $ \v ->
+    SpawnAgentInput
+      <$> v .: "issue_id"
+      <*> v .: "owner"
+      <*> v .: "repo"
+      <*> v .: "worktree_dir"
+      <*> v .: "agent_type"
 
 data SpawnAgentsInput = SpawnAgentsInput
   { sasIssueIds :: [Text],
@@ -222,7 +246,7 @@ data SpawnAgentsInput = SpawnAgentsInput
     sasWorktreeDir :: Maybe Text,
     sasAgentType :: Maybe AgentType
   }
-  deriving (Show, Generic)
+  deriving (Show, Eq, Generic)
 
 instance ToJSON SpawnAgentsInput where
   toJSON (SpawnAgentsInput is o r w a) =
@@ -233,12 +257,20 @@ instance ToJSON SpawnAgentsInput where
         "worktree_dir" .= w,
         "agent_type" .= a
       ]
+instance FromJSON SpawnAgentsInput where
+  parseJSON = withObject "SpawnAgentsInput" $ \v ->
+    SpawnAgentsInput
+      <$> v .: "issue_ids"
+      <*> v .: "owner"
+      <*> v .: "repo"
+      <*> v .: "worktree_dir"
+      <*> v .: "agent_type"
 
 data CleanupAgentInput = CleanupAgentInput
   { caiIssueId :: Text,
     caiForce :: Bool
   }
-  deriving (Show, Generic)
+  deriving (Show, Eq, Generic)
 
 instance ToJSON CleanupAgentInput where
   toJSON (CleanupAgentInput i f) =
@@ -246,12 +278,17 @@ instance ToJSON CleanupAgentInput where
       [ "issue_id" .= i,
         "force" .= f
       ]
+instance FromJSON CleanupAgentInput where
+  parseJSON = withObject "CleanupAgentInput" $ \v ->
+    CleanupAgentInput
+      <$> v .: "issue_id"
+      <*> v .: "force"
 
 data CleanupAgentsInput = CleanupAgentsInput
   { casIssueIds :: [Text],
     casForce :: Bool
   }
-  deriving (Show, Generic)
+  deriving (Show, Eq, Generic)
 
 instance ToJSON CleanupAgentsInput where
   toJSON (CleanupAgentsInput is f) =
@@ -259,6 +296,11 @@ instance ToJSON CleanupAgentsInput where
       [ "issue_ids" .= is,
         "force" .= f
       ]
+instance FromJSON CleanupAgentsInput where
+  parseJSON = withObject "CleanupAgentsInput" $ \v ->
+    CleanupAgentsInput
+      <$> v .: "issue_ids"
+      <*> v .: "force"
 
 data ListAgentsInput = ListAgentsInput
   deriving (Show, Generic)
@@ -318,8 +360,7 @@ runAgentControl = interpret $ \case
     res <- callHost host_agent_spawn input
     pure $ case res of
       Left err -> Left (Data.Text.pack err)
-      Right (Success r) -> Right r
-      Right (HostError msg) -> Left msg
+      Right r -> Right r
   SpawnAgents issueIds opts -> embed $ do
     let input =
           SpawnAgentsInput
@@ -336,19 +377,13 @@ runAgentControl = interpret $ \case
           { spawned = [],
             spawnFailed = [("", Data.Text.pack err)]
           }
-      Right (Success r) -> r
-      Right (HostError msg) ->
-        BatchSpawnResult
-          { spawned = [],
-            spawnFailed = [("", msg)]
-          }
+      Right r -> r
   CleanupAgent issueId force -> embed $ do
     let input = CleanupAgentInput issueId force
     res <- callHost host_agent_cleanup input
     pure $ case res of
       Left err -> Left (Data.Text.pack err)
-      Right (Success ()) -> Right ()
-      Right (HostError msg) -> Left msg
+      Right () -> Right ()
   CleanupAgents issueIds force -> embed $ do
     let input = CleanupAgentsInput issueIds force
     res <- callHost host_agent_cleanup_batch input
@@ -358,16 +393,10 @@ runAgentControl = interpret $ \case
           { cleaned = [],
             cleanupFailed = [("", Data.Text.pack err)]
           }
-      Right (Success r) -> r
-      Right (HostError msg) ->
-        BatchCleanupResult
-          { cleaned = [],
-            cleanupFailed = [("", msg)]
-          }
+      Right r -> r
   ListAgents -> embed $ do
     res <- callHost host_agent_list ListAgentsInput
     pure $ case res of
       Left err -> Left (Data.Text.pack err)
-      Right (Success agents) -> Right agents
-      Right (HostError msg) -> Left msg
+      Right agents -> Right agents
 
