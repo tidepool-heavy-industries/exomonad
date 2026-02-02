@@ -95,6 +95,7 @@ where
 
 import Control.Applicative ((<|>))
 import Polysemy (Sem, Member, interpret, makeSem)
+import Polysemy.Error (Error, throw)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.!=), (.:), (.:?), (.=))
 import Data.Text (Text)
 import Data.Text qualified
@@ -568,86 +569,86 @@ data GitHub m a where
   -- Issue operations
   CreateIssue ::
     CreateIssueInput ->
-    -- | Create an issue, returns the issue number or error.
-    GitHub m (Either GitHubError Int)
+    -- | Create an issue, returns the issue number.
+    GitHub m Int
   UpdateIssue ::
     Repo ->
     Int ->
     UpdateIssueInput ->
     -- | Update an existing issue.
-    GitHub m (Either GitHubError ())
+    GitHub m ()
   CloseIssue ::
     Repo ->
     Int ->
     -- | Close an issue.
-    GitHub m (Either GitHubError ())
+    GitHub m ()
   ReopenIssue ::
     Repo ->
     Int ->
     -- | Reopen an issue.
-    GitHub m (Either GitHubError ())
+    GitHub m ()
   AddIssueLabel ::
     Repo ->
     Int ->
     Text ->
     -- | Add a label to an issue.
-    GitHub m (Either GitHubError ())
+    GitHub m ()
   RemoveIssueLabel ::
     Repo ->
     Int ->
     Text ->
     -- | Remove a label from an issue.
-    GitHub m (Either GitHubError ())
+    GitHub m ()
   AddIssueAssignee ::
     Repo ->
     Int ->
     Text ->
     -- | Add an assignee to an issue.
-    GitHub m (Either GitHubError ())
+    GitHub m ()
   RemoveIssueAssignee ::
     Repo ->
     Int ->
     Text ->
     -- | Remove an assignee from an issue.
-    GitHub m (Either GitHubError ())
+    GitHub m ()
   GetIssue ::
     Repo ->
     Int ->
     Bool ->
     -- | Get issue by number. Bool = include comments.
-    GitHub m (Either GitHubError (Maybe Issue))
+    GitHub m (Maybe Issue)
   ListIssues ::
     Repo ->
     IssueFilter ->
-    -- | List issues with filter. Returns error on failure, empty list only when truly empty.
-    GitHub m (Either GitHubError [Issue])
+    -- | List issues with filter.
+    GitHub m [Issue]
   -- Pull request operations
   CreatePR ::
     PRCreateSpec ->
     -- | Create a pull request.
-    GitHub m (Either GitHubError PRUrl)
+    GitHub m PRUrl
   GetPullRequest ::
     Repo ->
     Int ->
     Bool ->
     -- | Get PR by number. Bool = include comments and reviews.
-    GitHub m (Either GitHubError (Maybe PullRequest))
+    GitHub m (Maybe PullRequest)
   ListPullRequests ::
     Repo ->
     PRFilter ->
-    -- | List PRs with filter. Returns error on failure, empty list only when truly empty.
-    GitHub m (Either GitHubError [PullRequest])
+    -- | List PRs with filter.
+    GitHub m [PullRequest]
   GetPullRequestReviews ::
     Repo ->
     Int ->
     -- | Get review comments for a PR.
-    GitHub m (Either GitHubError [ReviewComment])
+    GitHub m [ReviewComment]
   -- Discussion operations
   GetDiscussion ::
     Repo ->
     Int ->
     -- | Get discussion by number.
-    GitHub m (Either GitHubError Discussion)
+    GitHub m Discussion
   -- Auth
   CheckAuth ::
     -- | Check if gh CLI is authenticated.
@@ -659,57 +660,54 @@ makeSem ''GitHub
 -- STUB RUNNER
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Stub runner that logs calls and returns stub errors.
---
--- All operations return errors indicating the stub is not implemented.
--- Use @runGitHubIO@ from @exomonad-github-interpreter@ for real implementation.
-runGitHubStub :: (Member Log effs) => Sem (GitHub ': effs) a -> Sem effs a
+-- | Stub runner that logs calls and throws stub errors.
+runGitHubStub :: (Member Log effs, Member (Error GitHubError) effs) => Sem (GitHub ': effs) a -> Sem effs a
 runGitHubStub = interpret $ \case
   CreateIssue input -> do
     logInfo $ "[GitHub:stub] CreateIssue called: " <> input.ciiRepo.unRepo <> " - " <> input.ciiTitle
-    pure $ Left $ GHUnexpected 1 "Stub: createIssue not implemented"
+    throw $ GHUnexpected 1 "Stub: createIssue not implemented"
   UpdateIssue (Repo repo) num _ -> do
     logInfo $ "[GitHub:stub] UpdateIssue called: " <> repo <> " #" <> showT num
-    pure $ Left $ GHUnexpected 1 "Stub: updateIssue not implemented"
+    throw $ GHUnexpected 1 "Stub: updateIssue not implemented"
   CloseIssue (Repo repo) num -> do
     logInfo $ "[GitHub:stub] CloseIssue called: " <> repo <> " #" <> showT num
-    pure $ Left $ GHUnexpected 1 "Stub: closeIssue not implemented"
+    throw $ GHUnexpected 1 "Stub: closeIssue not implemented"
   ReopenIssue (Repo repo) num -> do
     logInfo $ "[GitHub:stub] ReopenIssue called: " <> repo <> " #" <> showT num
-    pure $ Left $ GHUnexpected 1 "Stub: reopenIssue not implemented"
+    throw $ GHUnexpected 1 "Stub: reopenIssue not implemented"
   AddIssueLabel (Repo repo) num label -> do
     logInfo $ "[GitHub:stub] AddIssueLabel called: " <> repo <> " #" <> showT num <> " label=" <> label
-    pure $ Left $ GHUnexpected 1 "Stub: addIssueLabel not implemented"
+    throw $ GHUnexpected 1 "Stub: addIssueLabel not implemented"
   RemoveIssueLabel (Repo repo) num label -> do
     logInfo $ "[GitHub:stub] RemoveIssueLabel called: " <> repo <> " #" <> showT num <> " label=" <> label
-    pure $ Left $ GHUnexpected 1 "Stub: removeIssueLabel not implemented"
+    throw $ GHUnexpected 1 "Stub: removeIssueLabel not implemented"
   AddIssueAssignee (Repo repo) num assignee -> do
     logInfo $ "[GitHub:stub] AddIssueAssignee called: " <> repo <> " #" <> showT num <> " assignee=" <> assignee
-    pure $ Left $ GHUnexpected 1 "Stub: addIssueAssignee not implemented"
+    throw $ GHUnexpected 1 "Stub: addIssueAssignee not implemented"
   RemoveIssueAssignee (Repo repo) num assignee -> do
     logInfo $ "[GitHub:stub] RemoveIssueAssignee called: " <> repo <> " #" <> showT num <> " assignee=" <> assignee
-    pure $ Left $ GHUnexpected 1 "Stub: removeIssueAssignee not implemented"
+    throw $ GHUnexpected 1 "Stub: removeIssueAssignee not implemented"
   CreatePR (PRCreateSpec (Repo repo) headBranch baseBranch title _) -> do
     logInfo $ "[GitHub:stub] CreatePR called: " <> repo <> " (" <> headBranch <> " -> " <> baseBranch <> ") - " <> title
-    pure $ Left $ GHUnexpected 1 "Stub: createPR not implemented"
+    throw $ GHUnexpected 1 "Stub: createPR not implemented"
   GetIssue (Repo repo) num _ -> do
     logInfo $ "[GitHub:stub] GetIssue called: " <> repo <> " #" <> showT num
-    pure $ Left $ GHUnexpected 1 "Stub: getIssue not implemented"
+    throw $ GHUnexpected 1 "Stub: getIssue not implemented"
   ListIssues (Repo repo) _ -> do
     logInfo $ "[GitHub:stub] ListIssues called: " <> repo
-    pure $ Left $ GHUnexpected 1 "Stub: listIssues not implemented"
+    throw $ GHUnexpected 1 "Stub: listIssues not implemented"
   GetPullRequest (Repo repo) num _ -> do
     logInfo $ "[GitHub:stub] GetPullRequest called: " <> repo <> " #" <> showT num
-    pure $ Left $ GHUnexpected 1 "Stub: getPullRequest not implemented"
+    throw $ GHUnexpected 1 "Stub: getPullRequest not implemented"
   ListPullRequests (Repo repo) _ -> do
     logInfo $ "[GitHub:stub] ListPullRequests called: " <> repo
-    pure $ Left $ GHUnexpected 1 "Stub: listPullRequests not implemented"
+    throw $ GHUnexpected 1 "Stub: listPullRequests not implemented"
   GetPullRequestReviews (Repo repo) num -> do
     logInfo $ "[GitHub:stub] GetPullRequestReviews called: " <> repo <> " #" <> showT num
-    pure $ Left $ GHUnexpected 1 "Stub: getPullRequestReviews not implemented"
+    throw $ GHUnexpected 1 "Stub: getPullRequestReviews not implemented"
   GetDiscussion (Repo repo) num -> do
     logInfo $ "[GitHub:stub] GetDiscussion called: " <> repo <> " #" <> showT num
-    pure $ Left $ GHUnexpected 1 "Stub: getDiscussion not implemented"
+    throw $ GHUnexpected 1 "Stub: getDiscussion not implemented"
   CheckAuth -> do
     logInfo "[GitHub:stub] CheckAuth called"
     pure False
