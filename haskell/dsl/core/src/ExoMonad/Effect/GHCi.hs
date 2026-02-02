@@ -1,3 +1,11 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators #-}
 {-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
 -- | IO-blind GHCi Oracle effect (Native-only)
@@ -43,7 +51,7 @@
 -- @
 -- import ExoMonad.Effect.GHCi
 --
--- myHandler :: (Member GHCi effs, NativeOnly) => Eff effs Text
+-- myHandler :: (Member GHCi r, NativeOnly) => Sem r Text
 -- myHandler = do
 --   result <- queryType "fmap"
 --   case result of
@@ -89,7 +97,8 @@ module ExoMonad.Effect.GHCi
   )
 where
 
-import Control.Monad.Freer (Eff, Member, interpret, send)
+import Polysemy (Sem, Member, interpret, makeSem)
+import Data.Kind (Type)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -196,102 +205,36 @@ data GHCiResponse
 --
 -- * Native: Use 'ExoMonad.GHCi.Interpreter.runGHCiIO' to connect to oracle
 -- * WASM: Not available - 'NativeOnly' constraint prevents use in WASM builds
-data GHCi r where
+data GHCi m a where
   -- | Query the type of an expression.
   -- @:type expression@
-  QueryType :: Text -> GHCi (Either GHCiError Text)
+  QueryType :: Text -> GHCi m (Either GHCiError Text)
   -- | Query information about a name (type, definition, instances).
   -- @:info name@
-  QueryInfo :: Text -> GHCi (Either GHCiError Text)
+  QueryInfo :: Text -> GHCi m (Either GHCiError Text)
   -- | Query the kind of a type.
   -- @:kind type@
-  QueryKind :: Text -> GHCi (Either GHCiError Text)
+  QueryKind :: Text -> GHCi m (Either GHCiError Text)
   -- | Evaluate an expression (for pure expressions).
   -- Returns the result or error.
-  Evaluate :: Text -> GHCi (Either GHCiError Text)
+  Evaluate :: Text -> GHCi m (Either GHCiError Text)
   -- | Check if an expression compiles without executing.
   -- Useful for type-checking code generation results.
-  CheckCompiles :: Text -> GHCi (Either GHCiError Bool)
+  CheckCompiles :: Text -> GHCi m (Either GHCiError Bool)
   -- | Load a module into the session.
   -- @:load Module.Name@
-  LoadModule :: Text -> GHCi (Either GHCiError ())
+  LoadModule :: Text -> GHCi m (Either GHCiError ())
   -- | Reload all currently loaded modules.
   -- @:reload@
-  ReloadModules :: GHCi (Either GHCiError ())
+  ReloadModules :: GHCi m (Either GHCiError ())
 
--- ════════════════════════════════════════════════════════════════════════════
--- SMART CONSTRUCTORS
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Query the type of an expression.
---
--- @
--- queryType "fmap"
--- -- Right "fmap :: Functor f => (a -> b) -> f a -> f b"
--- @
-queryType :: (Member GHCi effs, NativeOnly) => Text -> Eff effs (Either GHCiError Text)
-queryType = send . QueryType
-
--- | Query information about a name.
---
--- @
--- queryInfo "Functor"
--- -- Right "class Functor (f :: * -> *) where..."
--- @
-queryInfo :: (Member GHCi effs, NativeOnly) => Text -> Eff effs (Either GHCiError Text)
-queryInfo = send . QueryInfo
-
--- | Query the kind of a type.
---
--- @
--- queryKind "Maybe"
--- -- Right "Maybe :: * -> *"
--- @
-queryKind :: (Member GHCi effs, NativeOnly) => Text -> Eff effs (Either GHCiError Text)
-queryKind = send . QueryKind
-
--- | Evaluate an expression and return the result.
---
--- @
--- evaluate "1 + 1"
--- -- Right "2"
--- @
-evaluate :: (Member GHCi effs, NativeOnly) => Text -> Eff effs (Either GHCiError Text)
-evaluate = send . Evaluate
-
--- | Check if code compiles without executing it.
---
--- @
--- checkCompiles "let x :: Int; x = \"hello\" in x"
--- -- Right False
--- @
-checkCompiles :: (Member GHCi effs, NativeOnly) => Text -> Eff effs (Either GHCiError Bool)
-checkCompiles = send . CheckCompiles
-
--- | Load a module into the session.
---
--- @
--- loadModule "Data.Map"
--- -- Right ()
--- @
-loadModule :: (Member GHCi effs, NativeOnly) => Text -> Eff effs (Either GHCiError ())
-loadModule = send . LoadModule
-
--- | Reload all loaded modules.
---
--- Call this after file changes to refresh the session.
-reloadModules :: (Member GHCi effs, NativeOnly) => Eff effs (Either GHCiError ())
-reloadModules = send ReloadModules
-
--- ════════════════════════════════════════════════════════════════════════════
--- STUB RUNNER
--- ════════════════════════════════════════════════════════════════════════════
+makeSem ''GHCi
 
 -- | Stub runner that logs operations and returns mock results.
 --
 -- This is a placeholder for testing and development. For real GHCi
 -- functionality, use 'ExoMonad.GHCi.Interpreter.runGHCiIO' from ghci-interpreter.
-runGHCiStub :: (Member Log effs) => Eff (GHCi ': effs) a -> Eff effs a
+runGHCiStub :: (Member Log effs) => Sem (GHCi ': effs) a -> Sem effs a
 runGHCiStub = interpret $ \case
   QueryType expr -> do
     logInfo $ "[GHCi:stub] :type " <> expr
@@ -314,3 +257,4 @@ runGHCiStub = interpret $ \case
   ReloadModules -> do
     logInfo "[GHCi:stub] :reload"
     pure $ Right ()
+

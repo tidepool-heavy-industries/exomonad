@@ -1,3 +1,11 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators #-}
 {-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
 -- | IO-blind Language Server Protocol effect (Native-only)
@@ -34,7 +42,7 @@
 -- Effectful handler:
 --
 -- @
--- myHandler :: (Member LSP effs, NativeOnly) => Eff effs Text
+-- myHandler :: (Member LSP r, NativeOnly) => Sem r Text
 -- myHandler = do
 --   info <- hover (textDocument "src/Main.hs") (position 42 10)
 --   case info of
@@ -61,6 +69,7 @@ module ExoMonad.Effect.LSP
     prepareCallHierarchy,
     outgoingCalls,
     getIndexingState,
+    getIndexingInfo,
 
     -- * Document Identifiers
     TextDocumentIdentifier (..),
@@ -92,15 +101,16 @@ module ExoMonad.Effect.LSP
     IndexingState (..),
     IndexingInfo (..),
     indexingDuration,
-    getIndexingInfo,
   )
 where
 
-import Control.Monad.Freer (Eff, Member, send)
+import Polysemy (Sem, Member, makeSem)
+import Data.Kind (Type)
 import Data.Aeson (FromJSON, ToJSON, Value)
 import Data.Text qualified as T
-import Data.Time (UTCTime, NominalDiffTime)
+import Data.Time (UTCTime, NominalDiffTime, diffUTCTime)
 import ExoMonad.Platform (NativeOnly)
+import Data.Map.Strict (Map)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- DOCUMENT IDENTIFIERS
@@ -461,146 +471,39 @@ indexingDuration info = diffUTCTime <$> info.iiReadyAt <*> pure info.iiSessionSt
 --
 -- * Native: Use 'ExoMonad.LSP.Interpreter.runLSP' with lsp-client
 -- * WASM: Not available – 'NativeOnly' constraint prevents use in WASM builds
-data LSP r where
+data LSP m a where
   -- | Get diagnostics (errors, warnings) for a document.
-  Diagnostics :: TextDocumentIdentifier -> LSP [Diagnostic]
+  Diagnostics :: TextDocumentIdentifier -> LSP m [Diagnostic]
   -- | Get hover information at a position.
-  Hover :: TextDocumentIdentifier -> Position -> LSP (Maybe HoverInfo)
+  Hover :: TextDocumentIdentifier -> Position -> LSP m (Maybe HoverInfo)
   -- | Find all references to the symbol at a position.
-  References :: TextDocumentIdentifier -> Position -> LSP [Location]
+  References :: TextDocumentIdentifier -> Position -> LSP m [Location]
   -- | Go to definition of the symbol at a position.
-  Definition :: TextDocumentIdentifier -> Position -> LSP [Location]
+  Definition :: TextDocumentIdentifier -> Position -> LSP m [Location]
   -- | Get available code actions for a range.
-  CodeActions :: TextDocumentIdentifier -> Range -> LSP [CodeAction]
+  CodeActions :: TextDocumentIdentifier -> Range -> LSP m [CodeAction]
   -- | Rename the symbol at a position.
-  Rename :: TextDocumentIdentifier -> Position -> Text -> LSP WorkspaceEdit
+  Rename :: TextDocumentIdentifier -> Position -> Text -> LSP m WorkspaceEdit
   -- | Get completion suggestions at a position.
-  Completion :: TextDocumentIdentifier -> Position -> LSP [CompletionItem]
+  Completion :: TextDocumentIdentifier -> Position -> LSP m [CompletionItem]
   -- | Search for symbols in the workspace by name query.
-  WorkspaceSymbol :: Text -> LSP [SymbolInformation]
+  WorkspaceSymbol :: Text -> LSP m [SymbolInformation]
   -- | Get all symbols (functions, types, etc.) defined in a document.
-  DocumentSymbol :: TextDocumentIdentifier -> LSP [SymbolInformation]
+  DocumentSymbol :: TextDocumentIdentifier -> LSP m [SymbolInformation]
   -- | Prepare call hierarchy at a position.
-  PrepareCallHierarchy :: TextDocumentIdentifier -> Position -> LSP [CallHierarchyItem]
+  PrepareCallHierarchy :: TextDocumentIdentifier -> Position -> LSP m [CallHierarchyItem]
   -- | Get outgoing calls for a call hierarchy item.
-  OutgoingCalls :: CallHierarchyItem -> LSP [CallHierarchyOutgoingCall]
+  OutgoingCalls :: CallHierarchyItem -> LSP m [CallHierarchyOutgoingCall]
   -- | Get the current HLS indexing state.
   --
   -- Returns 'Indexing' if HLS is still indexing the workspace,
   -- 'Ready' when indexing is complete and queries should be accurate.
-  GetIndexingState :: LSP IndexingState
+  GetIndexingState :: LSP m IndexingState
   -- | Get detailed HLS indexing information.
   --
   -- Returns 'IndexingInfo' with full diagnostic data:
   -- progress count, token IDs, session timing, etc.
-  GetIndexingInfo :: LSP IndexingInfo
+  GetIndexingInfo :: LSP m IndexingInfo
 
--- ════════════════════════════════════════════════════════════════════════════
--- SMART CONSTRUCTORS
--- ════════════════════════════════════════════════════════════════════════════
+makeSem ''LSP
 
--- | Get diagnostics for a document.
---
--- Note: This operation requires native execution (not available in WASM).
-diagnostics :: (Member LSP effs, NativeOnly) => TextDocumentIdentifier -> Eff effs [Diagnostic]
-diagnostics doc = send (Diagnostics doc)
-
--- | Get hover information at a position.
---
--- Note: This operation requires native execution (not available in WASM).
-hover :: (Member LSP effs, NativeOnly) => TextDocumentIdentifier -> Position -> Eff effs (Maybe HoverInfo)
-hover doc pos = send (Hover doc pos)
-
--- | Find all references to a symbol.
---
--- Note: This operation requires native execution (not available in WASM).
-references :: (Member LSP effs, NativeOnly) => TextDocumentIdentifier -> Position -> Eff effs [Location]
-references doc pos = send (References doc pos)
-
--- | Go to definition of a symbol.
---
--- Note: This operation requires native execution (not available in WASM).
-definition :: (Member LSP effs, NativeOnly) => TextDocumentIdentifier -> Position -> Eff effs [Location]
-definition doc pos = send (Definition doc pos)
-
--- | Get available code actions.
---
--- Note: This operation requires native execution (not available in WASM).
-codeActions :: (Member LSP effs, NativeOnly) => TextDocumentIdentifier -> Range -> Eff effs [CodeAction]
-codeActions doc rng = send (CodeActions doc rng)
-
--- | Rename a symbol.
---
--- Note: This operation requires native execution (not available in WASM).
-rename :: (Member LSP effs, NativeOnly) => TextDocumentIdentifier -> Position -> Text -> Eff effs WorkspaceEdit
-rename doc pos newName = send (Rename doc pos newName)
-
--- | Get completion suggestions.
---
--- Note: This operation requires native execution (not available in WASM).
-completion :: (Member LSP effs, NativeOnly) => TextDocumentIdentifier -> Position -> Eff effs [CompletionItem]
-completion doc pos = send (Completion doc pos)
-
--- | Search for symbols in the workspace.
---
--- Note: This operation requires native execution (not available in WASM).
-workspaceSymbol :: (Member LSP effs, NativeOnly) => Text -> Eff effs [SymbolInformation]
-workspaceSymbol query = send (WorkspaceSymbol query)
-
--- | Get all symbols defined in a document.
---
--- Returns all functions, types, classes, etc. defined in the file with their ranges.
---
--- Note: This operation requires native execution (not available in WASM).
-documentSymbol :: (Member LSP effs, NativeOnly) => TextDocumentIdentifier -> Eff effs [SymbolInformation]
-documentSymbol doc = send (DocumentSymbol doc)
-
--- | Prepare call hierarchy at a position.
---
--- Note: This operation requires native execution (not available in WASM).
-prepareCallHierarchy :: (Member LSP effs, NativeOnly) => TextDocumentIdentifier -> Position -> Eff effs [CallHierarchyItem]
-prepareCallHierarchy doc pos = send (PrepareCallHierarchy doc pos)
-
--- | Get outgoing calls for a call hierarchy item.
---
--- Note: This operation requires native execution (not available in WASM).
-outgoingCalls :: (Member LSP effs, NativeOnly) => CallHierarchyItem -> Eff effs [CallHierarchyOutgoingCall]
-outgoingCalls item = send (OutgoingCalls item)
-
--- | Get the current HLS indexing state.
---
--- Returns 'Indexing' if HLS is still indexing the workspace (results may be incomplete),
--- or 'Ready' when indexing is complete and queries should be accurate.
---
--- Use this to add warnings to tool results when HLS is still indexing:
---
--- @
--- state <- getIndexingState
--- let warning = case state of
---       Indexing -> Just "HLS is still indexing. Results may be incomplete."
---       Ready -> Nothing
--- @
---
--- Note: This operation requires native execution (not available in WASM).
-getIndexingState :: (Member LSP effs, NativeOnly) => Eff effs IndexingState
-getIndexingState = send GetIndexingState
-
--- | Get detailed HLS indexing information.
---
--- Returns 'IndexingInfo' with full diagnostic data including:
---
--- * Progress count and token IDs (for debugging HLS behavior)
--- * Session start time and ready timestamp (for measuring indexing duration)
---
--- Use 'indexingDuration' to compute how long HLS spent indexing:
---
--- @
--- info <- getIndexingInfo
--- case indexingDuration info of
---   Just duration -> log $ "HLS indexed in " <> show duration
---   Nothing -> log $ "Still indexing, " <> show (iiProgressCount info) <> " tasks remaining"
--- @
---
--- Note: This operation requires native execution (not available in WASM).
-getIndexingInfo :: (Member LSP effs, NativeOnly) => Eff effs IndexingInfo
-getIndexingInfo = send GetIndexingInfo

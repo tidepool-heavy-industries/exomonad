@@ -30,7 +30,8 @@ module ExoMonad.Zellij.Interpreter
 where
 
 import Control.Exception (SomeException, try)
-import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
+import Polysemy (Sem, Member, interpret, embed)
+import Polysemy.Embed (Embed)
 import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Effects.Zellij
@@ -52,12 +53,12 @@ import System.Process (readProcessWithExitCode)
 -- | Run Zellij effects using zellij CLI commands.
 --
 -- All operations are wrapped in try/catch to return explicit errors.
-runZellijIO :: (LastMember IO effs) => Eff (Zellij ': effs) a -> Eff effs a
+runZellijIO :: (Member (Embed IO) r) => Sem (Zellij ': r) a -> Sem r a
 runZellijIO = interpret $ \case
-  CheckZellijEnv -> sendM checkZellijEnvIO
-  NewTab config -> sendM $ newTabIO config
-  GoToTab tabId -> sendM $ goToTabIO tabId
-  GenerateLayout spec -> sendM $ generateLayoutIO spec
+  CheckZellijEnv -> embed checkZellijEnvIO
+  NewTab config -> embed $ newTabIO config
+  GoToTab tabId -> embed $ goToTabIO tabId
+  GenerateLayout spec -> embed $ generateLayoutIO spec
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- IMPLEMENTATION

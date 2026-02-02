@@ -1,6 +1,11 @@
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TypeOperators #-}
 
 -- | FileSystem effect for basic file operations.
 --
@@ -12,11 +17,11 @@
 -- @
 -- import ExoMonad.Effects.FileSystem
 --
--- setupHandler :: Member FileSystem effs => Eff effs (Either FileSystemError ())
+-- setupHandler :: Member FileSystem r => Sem r (Either FileSystemError ())
 -- setupHandler = do
 --   result <- createDirectory "/path/to/.exomonad"
 --   case result of
---     Right () -> writeFile "/path/to/.exomonad/config" "..."
+--     Right () -> writeFileText "/path/to/.exomonad/config" "..."
 --     Left err -> pure (Left err)
 -- @
 --
@@ -44,7 +49,8 @@ where
 
 import Prelude hiding (readFileText, writeFileText)
 
-import Control.Monad.Freer (Eff, Member, send)
+import Polysemy (Sem, Member, makeSem)
+import Data.Kind (Type)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
 import GHC.Generics (Generic)
@@ -77,18 +83,18 @@ instance FromJSON FileSystemError
 -- | FileSystem effect for basic file operations.
 --
 -- All operations return @Either FileSystemError@ for explicit error handling.
-data FileSystem r where
+data FileSystem m a where
   -- | Create a directory (including parent directories).
   -- Returns () on success, or an error if creation failed.
   CreateDirectory ::
     FilePath ->
-    FileSystem (Either FileSystemError ())
+    FileSystem m (Either FileSystemError ())
   -- | Write text content to a file.
   -- Creates the file if it doesn't exist, overwrites if it does.
   WriteFileText ::
     FilePath ->
     Text ->
-    FileSystem (Either FileSystemError ())
+    FileSystem m (Either FileSystemError ())
   -- | Copy a file from source to destination.
   -- Creates parent directories of destination if needed.
   CopyFile ::
@@ -96,7 +102,7 @@ data FileSystem r where
     FilePath ->
     -- | Destination path
     FilePath ->
-    FileSystem (Either FileSystemError ())
+    FileSystem m (Either FileSystemError ())
   -- | Create a symbolic link.
   -- Target is the file/directory the link points to.
   -- Link is the new symlink path.
@@ -105,112 +111,18 @@ data FileSystem r where
     FilePath ->
     -- | Link path (the new symlink)
     FilePath ->
-    FileSystem (Either FileSystemError ())
+    FileSystem m (Either FileSystemError ())
   -- | Check if a file exists.
   FileExists ::
     FilePath ->
-    FileSystem (Either FileSystemError Bool)
+    FileSystem m (Either FileSystemError Bool)
   -- | Check if a directory exists.
   DirectoryExists ::
     FilePath ->
-    FileSystem (Either FileSystemError Bool)
+    FileSystem m (Either FileSystemError Bool)
   -- | Read text content from a file.
   ReadFileText ::
     FilePath ->
-    FileSystem (Either FileSystemError Text)
+    FileSystem m (Either FileSystemError Text)
 
--- ════════════════════════════════════════════════════════════════════════════
--- SMART CONSTRUCTORS
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Create a directory (including parent directories).
---
--- @
--- result <- createDirectory "/path/to/new/dir"
--- case result of
---   Right () -> -- directory created
---   Left err -> handleError err
--- @
-createDirectory ::
-  (Member FileSystem effs) =>
-  FilePath ->
-  Eff effs (Either FileSystemError ())
-createDirectory = send . CreateDirectory
-
--- | Write text content to a file.
---
--- @
--- result <- writeFileText "/path/to/file.txt" "Hello, world!"
--- @
-writeFileText ::
-  (Member FileSystem effs) =>
-  FilePath ->
-  Text ->
-  Eff effs (Either FileSystemError ())
-writeFileText path content = send (WriteFileText path content)
-
--- | Copy a file from source to destination.
---
--- @
--- result <- copyFile "/src/template.yaml" "/dest/config.yaml"
--- @
-copyFile ::
-  (Member FileSystem effs) =>
-  FilePath ->
-  FilePath ->
-  Eff effs (Either FileSystemError ())
-copyFile src dest = send (CopyFile src dest)
-
--- | Create a symbolic link.
---
--- @
--- result <- createSymlink "/path/to/.env" "/worktree/.env"
--- @
-createSymlink ::
-  (Member FileSystem effs) =>
-  -- | Target (what the link points to)
-  FilePath ->
-  -- | Link path (the new symlink)
-  FilePath ->
-  Eff effs (Either FileSystemError ())
-createSymlink target link = send (CreateSymlink target link)
-
--- | Check if a file exists.
---
--- @
--- result <- fileExists "/path/to/file.txt"
--- case result of
---   Right True -> -- file exists
---   Right False -> -- file does not exist
---   Left err -> handleError err
--- @
-fileExists ::
-  (Member FileSystem effs) =>
-  FilePath ->
-  Eff effs (Either FileSystemError Bool)
-fileExists = send . FileExists
-
--- | Check if a directory exists.
---
--- @
--- result <- directoryExists "/path/to/dir"
--- @
-directoryExists ::
-  (Member FileSystem effs) =>
-  FilePath ->
-  Eff effs (Either FileSystemError Bool)
-directoryExists = send . DirectoryExists
-
--- | Read text content from a file.
---
--- @
--- result <- readFileText "/path/to/file.txt"
--- case result of
---   Right content -> -- use content
---   Left err -> handleError err
--- @
-readFileText ::
-  (Member FileSystem effs) =>
-  FilePath ->
-  Eff effs (Either FileSystemError Text)
-readFileText = send . ReadFileText
+makeSem ''FileSystem

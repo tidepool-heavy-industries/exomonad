@@ -1,7 +1,16 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators #-}
+
 -- | UI effect for user interface interactions.
 --
 -- Effect type only - interpreters live in exomonad-ui-interpreter.
--- This effect bridges graph execution to UI state via wire types.
+-- This effect bridges agent execution to UI state via wire types.
 --
 -- == Core Primitives
 --
@@ -48,11 +57,12 @@ module ExoMonad.Effects.UI
   )
 where
 
-import Control.Monad.Freer (Eff, Member, send)
+import Polysemy (Sem, Member, makeSem)
+import Data.Kind (Type)
 import Data.ByteString (ByteString)
-import Data.List ((!!))
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NE
+import Data.Text qualified as T
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CHOICE METADATA
@@ -88,120 +98,35 @@ data ChoiceMeta = ChoiceMeta
 -- | UI effect for displaying content and requesting user input.
 --
 -- The interpreter translates these to wire types (UIState/UserAction).
-data UI r where
+data UI m a where
   -- | Display text to the user (appended to chat log).
-  ShowText :: Text -> UI ()
+  ShowText :: Text -> UI m ()
   -- | Request text input from user with a prompt.
-  RequestTextInput :: Text -> UI Text
+  RequestTextInput :: Text -> UI m Text
   -- | Request photo input from user with a prompt.
-  RequestPhotoInput :: Text -> UI ByteString
+  RequestPhotoInput :: Text -> UI m ByteString
   -- | Present choices to user, return selected value.
   --
   -- Uses 'NonEmpty' to ensure at least one option exists.
-  RequestChoice :: Text -> NonEmpty (Text, a) -> UI a
+  RequestChoice :: Text -> NonEmpty (Text, a) -> UI m a
   -- | Present multiple choices (checkboxes), return all selected values.
   --
   -- Uses 'NonEmpty' to ensure at least one option exists.
   -- Returns empty list if user selects nothing.
-  RequestMultiChoice :: Text -> NonEmpty (Text, a) -> UI [a]
+  RequestMultiChoice :: Text -> NonEmpty (Text, a) -> UI m [a]
   -- | Present choices with descriptions, return selected value.
   --
   -- Each option has (label, description, value).
-  RequestChoiceDesc :: Text -> NonEmpty (Text, Text, a) -> UI a
+  RequestChoiceDesc :: Text -> NonEmpty (Text, Text, a) -> UI m a
   -- | Present choices with full metadata, return selected value.
   --
   -- Each option has (label, metadata, value).
   -- Selecting a disabled option returns an error.
-  RequestChoiceMeta :: Text -> NonEmpty (Text, ChoiceMeta, a) -> UI a
+  RequestChoiceMeta :: Text -> NonEmpty (Text, ChoiceMeta, a) -> UI m a
   -- | Set the "thinking" indicator state.
-  SetThinking :: Bool -> UI ()
+  SetThinking :: Bool -> UI m ()
 
--- ════════════════════════════════════════════════════════════════════════════
--- SMART CONSTRUCTORS
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Display text to the user.
-showText :: (Member UI effs) => Text -> Eff effs ()
-showText = send . ShowText
-
--- | Request text input with a prompt.
-requestTextInput :: (Member UI effs) => Text -> Eff effs Text
-requestTextInput = send . RequestTextInput
-
--- | Request photo input with a prompt.
-requestPhotoInput :: (Member UI effs) => Text -> Eff effs ByteString
-requestPhotoInput = send . RequestPhotoInput
-
--- | Present choices and get user selection.
---
--- @
--- die <- requestChoice "Spend a die:" $ NE.fromList
---   [ ("⚃ 4", 4)
---   , ("⚂ 3", 3)
---   ]
--- -- die :: Int
--- @
-requestChoice :: (Member UI effs) => Text -> NonEmpty (Text, a) -> Eff effs a
-requestChoice prompt choices = send (RequestChoice prompt choices)
-
--- | Present multiple choices (checkboxes) and get all selected.
---
--- @
--- activities <- requestMultiChoice "How do you spend downtime?" $ NE.fromList
---   [ ("Recover", RecoverActivity)
---   , ("Train", TrainActivity)
---   , ("Work on project", ProjectActivity)
---   ]
--- -- activities :: [DowntimeActivity]
--- @
-requestMultiChoice ::
-  (Member UI effs) =>
-  -- | Prompt
-  Text ->
-  -- | (label, value)
-  NonEmpty (Text, a) ->
-  Eff effs [a]
-requestMultiChoice prompt choices = send (RequestMultiChoice prompt choices)
-
--- | Present choices with descriptions and get user selection.
---
--- @
--- choice <- requestChoiceDesc "Choose position:" $ NE.fromList
---   [ ("Controlled", "You have clear advantage", Controlled)
---   , ("Risky", "Things could go either way", Risky)
---   , ("Desperate", "You're outmatched", Desperate)
---   ]
--- @
-requestChoiceDesc ::
-  (Member UI effs) =>
-  -- | Prompt
-  Text ->
-  -- | (label, description, value)
-  NonEmpty (Text, Text, a) ->
-  Eff effs a
-requestChoiceDesc prompt choices = send (RequestChoiceDesc prompt choices)
-
--- | Present choices with full metadata and get user selection.
---
--- @
--- choice <- requestChoiceMeta "Choose action:" $ NE.fromList
---   [ ("Push yourself", ChoiceMeta (Just "Take +1d") ["2 Stress"] Available, PushAction)
---   , ("Devil's bargain", ChoiceMeta (Just "Complication later") [] Available, BargainAction)
---   , ("Give up", ChoiceMeta Nothing [] (DisabledBecause "Not available"), GiveUpAction)
---   ]
--- @
-requestChoiceMeta ::
-  (Member UI effs) =>
-  -- | Prompt
-  Text ->
-  -- | (label, meta, value)
-  NonEmpty (Text, ChoiceMeta, a) ->
-  Eff effs a
-requestChoiceMeta prompt choices = send (RequestChoiceMeta prompt choices)
-
--- | Set thinking indicator.
-setThinking :: (Member UI effs) => Bool -> Eff effs ()
-setThinking = send . SetThinking
+makeSem ''UI
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONVENIENCE HELPERS
@@ -213,7 +138,7 @@ setThinking = send . SetThinking
 -- confirmed <- confirm "Delete this item?"
 -- when confirmed $ deleteItem item
 -- @
-confirm :: (Member UI effs) => Text -> Eff effs Bool
+confirm :: (Member UI r) => Text -> Sem r Bool
 confirm prompt =
   requestChoice prompt $
     NE.fromList
@@ -225,7 +150,7 @@ confirm prompt =
 -- die <- requestDie "Spend a die from your pool:" $ NE.fromList [4, 4, 3, 2]
 -- -- die :: Int (the selected die value)
 -- @
-requestDie :: (Member UI effs) => Text -> NonEmpty Int -> Eff effs Int
+requestDie :: (Member UI r) => Text -> NonEmpty Int -> Sem r Int
 requestDie prompt dice =
   requestChoice prompt $
     NE.map (\d -> (dieFace d, d)) dice
@@ -240,5 +165,6 @@ requestDie prompt dice =
 -- | Simple multi-choice with "Select all that apply" style.
 --
 -- Alias for 'requestMultiChoice'.
-selectMultiple :: (Member UI effs) => Text -> NonEmpty (Text, a) -> Eff effs [a]
+selectMultiple :: (Member UI r) => Text -> NonEmpty (Text, a) -> Sem r [a]
 selectMultiple = requestMultiChoice
+

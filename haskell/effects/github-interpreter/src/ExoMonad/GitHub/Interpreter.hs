@@ -25,7 +25,8 @@ module ExoMonad.GitHub.Interpreter
 where
 
 import Control.Lens ((^?))
-import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
+import Polysemy (Sem, Member, interpret, embed)
+import Polysemy.Embed (Embed)
 import Data.Aeson (Value (..), fromJSON, toJSON)
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Lens (key, _String)
@@ -87,27 +88,27 @@ defaultGitHubConfig =
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Run GitHub effects using the socket client.
-runGitHubIO :: (LastMember IO effs) => GitHubConfig -> Eff (GitHub ': effs) a -> Eff effs a
+runGitHubIO :: (Member (Embed IO) r) => GitHubConfig -> Sem (GitHub ': r) a -> Sem r a
 runGitHubIO (GitHubSocketConfig path) = interpret $ \case
   -- Issue operations
-  CreateIssue input -> sendM $ socketCreateIssue path input
-  UpdateIssue (Repo repo) num input -> sendM $ socketUpdateIssue path repo num input
-  CloseIssue (Repo repo) num -> sendM $ socketCloseIssue path repo num
-  ReopenIssue (Repo repo) num -> sendM $ socketReopenIssue path repo num
-  AddIssueLabel (Repo repo) num label -> sendM $ socketAddIssueLabel path repo num label
-  RemoveIssueLabel (Repo repo) num label -> sendM $ socketRemoveIssueLabel path repo num label
-  AddIssueAssignee (Repo repo) num assignee -> sendM $ socketAddIssueAssignee path repo num assignee
-  RemoveIssueAssignee (Repo repo) num assignee -> sendM $ socketRemoveIssueAssignee path repo num assignee
-  GetIssue (Repo repo) num includeComments -> sendM $ socketGetIssue path repo num includeComments
-  ListIssues (Repo repo) filt -> sendM $ socketListIssues path repo filt
+  CreateIssue input -> embed $ socketCreateIssue path input
+  UpdateIssue (Repo repo) num input -> embed $ socketUpdateIssue path repo num input
+  CloseIssue (Repo repo) num -> embed $ socketCloseIssue path repo num
+  ReopenIssue (Repo repo) num -> embed $ socketReopenIssue path repo num
+  AddIssueLabel (Repo repo) num label -> embed $ socketAddIssueLabel path repo num label
+  RemoveIssueLabel (Repo repo) num label -> embed $ socketRemoveIssueLabel path repo num label
+  AddIssueAssignee (Repo repo) num assignee -> embed $ socketAddIssueAssignee path repo num assignee
+  RemoveIssueAssignee (Repo repo) num assignee -> embed $ socketRemoveIssueAssignee path repo num assignee
+  GetIssue (Repo repo) num includeComments -> embed $ socketGetIssue path repo num includeComments
+  ListIssues (Repo repo) filt -> embed $ socketListIssues path repo filt
   -- PR operations
-  CreatePR spec -> sendM $ socketCreatePR path spec
-  GetPullRequest (Repo repo) num includeDetails -> sendM $ socketGetPR path repo num includeDetails
-  ListPullRequests (Repo repo) filt -> sendM $ socketListPullRequests path repo filt
-  GetPullRequestReviews (Repo repo) num -> sendM $ socketGetPullRequestReviews path repo num
-  GetDiscussion (Repo repo) num -> sendM $ socketGetDiscussion path repo num
+  CreatePR spec -> embed $ socketCreatePR path spec
+  GetPullRequest (Repo repo) num includeDetails -> embed $ socketGetPR path repo num includeDetails
+  ListPullRequests (Repo repo) filt -> embed $ socketListPullRequests path repo filt
+  GetPullRequestReviews (Repo repo) num -> embed $ socketGetPullRequestReviews path repo num
+  GetDiscussion (Repo repo) num -> embed $ socketGetDiscussion path repo num
   -- Auth
-  CheckAuth -> sendM $ socketCheckAuth path
+  CheckAuth -> embed $ socketCheckAuth path
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SOCKET FUNCTIONS

@@ -54,7 +54,7 @@ module ExoMonad.LLM.Tools
   )
 where
 
-import Control.Monad.Freer (Eff)
+import Polysemy (Sem)
 import Data.Aeson (FromJSON, ToJSON, Value (..), fromJSON, toJSON)
 import Data.Aeson qualified as Aeson
 import Data.Aeson.KeyMap qualified as KM
@@ -116,8 +116,8 @@ data ToolDispatchError
 --
 -- @
 -- data MyTools es = MyTools
---   { search :: SearchArgs -> Eff es SearchResult
---   , lookup :: LookupArgs -> Eff es LookupResult
+--   { search :: SearchArgs -> Sem es SearchResult
+--   , lookup :: LookupArgs -> Sem es LookupResult
 --   }
 --
 -- instance ToolRecord MyTools where
@@ -130,7 +130,62 @@ data ToolDispatchError
 --     "lookup" -> dispatchHandler tools.lookup "lookup" input
 --     _ -> pure $ Left $ ToolNotFound name
 -- @
-class ToolRecord (tools :: [Type -> Type] -> Type) where
+-- @
+--
+-- === Migration from older versions
+--
+-- In earlier versions, 'ToolRecord' had the kind:
+--
+-- @
+-- ToolRecord :: ([Type -> Type] -> Type) -> Constraint
+-- @
+--
+-- That is, tool records were typically written as:
+--
+-- @
+-- data MyTools m = MyTools
+--   { search :: SearchArgs -> m SearchResult
+--   , lookup :: LookupArgs -> m LookupResult
+--   }
+--
+-- instance ToolRecord MyTools where ...
+-- @
+--
+-- The kind of 'ToolRecord' is now:
+--
+-- @
+-- ToolRecord :: ([(Type -> Type) -> Type -> Type] -> Type) -> Constraint
+-- @
+--
+-- which matches Polysemy's effect kind @Sem :: [(Type -> Type) -> Type -> Type] -> Type -> Type@.
+-- Tool records are now parameterized by an effect stack @es@ rather than a plain monad @m@,
+-- and handlers typically use @Sem es@:
+--
+-- @
+-- data MyTools es = MyTools
+--   { search :: SearchArgs -> Sem es SearchResult
+--   , lookup :: LookupArgs -> Sem es LookupResult
+--   }
+--
+-- instance ToolRecord MyTools where ...
+-- @
+--
+-- To migrate existing tool records:
+--
+-- * Change your tool record parameter from a monad @m@ to an effect stack @es@, e.g.
+--
+--   @data MyTools m@ ⟶ @data MyTools es@
+--
+-- * Replace handler result types of the form @args -> m result@ with @args -> Sem es result@.
+--
+-- * The instance head stays the same:
+--
+--   @instance ToolRecord MyTools where ...@
+--
+-- If you were previously using a concrete monad @m@ instead of Polysemy, you will need to
+-- provide a Polysemy effect stack @es@ and an interpreter that runs @Sem es@ into @m@ in
+-- your runner code. The core 'ToolRecord' API itself remains unchanged apart from its kind.
+class ToolRecord (tools :: [(Type -> Type) -> Type -> Type] -> Type) where
   -- | Extract tool schemas from the record type.
   --
   -- This uses the proxy pattern since schemas are derived from types,
@@ -145,7 +200,7 @@ class ToolRecord (tools :: [Type -> Type] -> Type) where
     tools es ->
     Text ->
     Value ->
-    Eff es (Either ToolDispatchError Value)
+    Sem es (Either ToolDispatchError Value)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- DISPATCH HELPERS

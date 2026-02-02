@@ -7,13 +7,14 @@ module ExoMonad.Env.Interpreter
   )
 where
 
-import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
+import Polysemy (Sem, Member, interpret, embed)
+import Polysemy.Embed (Embed)
 import Data.Text qualified as T
 import ExoMonad.Effects.Env (Env (..))
 import System.Environment (getEnvironment, lookupEnv)
 
 -- | Run Env effects using standard Haskell environment operations.
-runEnvIO :: (LastMember IO effs) => Eff (Env ': effs) a -> Eff effs a
+runEnvIO :: (Member (Embed IO) r) => Sem (Env ': r) a -> Sem r a
 runEnvIO = interpret $ \case
-  GetEnv name -> sendM $ fmap (fmap T.pack) (lookupEnv (T.unpack name))
-  GetEnvironment -> sendM $ fmap (map (\(k, v) -> (T.pack k, T.pack v))) getEnvironment
+  GetEnv name -> embed $ fmap (fmap T.pack) (lookupEnv (T.unpack name))
+  GetEnvironment -> embed $ fmap (map (\(k, v) -> (T.pack k, T.pack v))) getEnvironment

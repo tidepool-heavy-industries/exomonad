@@ -37,7 +37,8 @@ module ExoMonad.GHCi.Interpreter
 where
 
 import Control.Exception (bracket)
-import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
+import Polysemy (Sem, Member, interpret, embed)
+import Polysemy.Embed (Embed)
 import Data.Text (Text)
 import ExoMonad.Effect.GHCi
   ( GHCi (..),
@@ -112,27 +113,27 @@ withGHCiConnection host port action = do
 -- | Run GHCi effects by communicating with ghci-oracle server.
 --
 -- Requires an active connection to a ghci-oracle server.
-runGHCiIO :: (LastMember IO effs) => GHCiConnection -> Eff (GHCi ': effs) a -> Eff effs a
+runGHCiIO :: (Member (Embed IO) r) => GHCiConnection -> Sem (GHCi ': r) a -> Sem r a
 runGHCiIO conn = interpret $ \case
-  QueryType expr -> sendM $ do
+  QueryType expr -> embed $ do
     resp <- sendRequest conn (ReqQueryType expr)
     pure $ handleTextResponse resp
-  QueryInfo name -> sendM $ do
+  QueryInfo name -> embed $ do
     resp <- sendRequest conn (ReqQueryInfo name)
     pure $ handleTextResponse resp
-  QueryKind typ -> sendM $ do
+  QueryKind typ -> embed $ do
     resp <- sendRequest conn (ReqQueryKind typ)
     pure $ handleTextResponse resp
-  Evaluate expr -> sendM $ do
+  Evaluate expr -> embed $ do
     resp <- sendRequest conn (ReqEvaluate expr)
     pure $ handleTextResponse resp
-  CheckCompiles expr -> sendM $ do
+  CheckCompiles expr -> embed $ do
     resp <- sendRequest conn (ReqCheckCompiles expr)
     pure $ handleBoolResponse resp
-  LoadModule modName -> sendM $ do
+  LoadModule modName -> embed $ do
     resp <- sendRequest conn (ReqLoadModule modName)
     pure $ handleUnitResponse resp
-  ReloadModules -> sendM $ do
+  ReloadModules -> embed $ do
     resp <- sendRequest conn ReqReloadModules
     pure $ handleUnitResponse resp
 

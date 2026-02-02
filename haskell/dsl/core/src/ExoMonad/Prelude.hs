@@ -37,24 +37,6 @@ module ExoMonad.Prelude
     Return,
     returnValue,
 
-    -- * ExoMonad Graph DSL
-    type (:@),
-    Input,
-    Schema,
-    Template,
-    UsesEffects,
-    EntryPoint,
-    Exit,
-    Self,
-
-    -- * Graph Combinators
-    Goto,
-    goto,
-    gotoChoice,
-    gotoExit,
-    gotoSelf,
-    (-->),
-
     -- * JSON
     Value (..),
     FromJSON (..),
@@ -80,7 +62,7 @@ import Prelude hiding
   ( -- Hide things that collide with ExoMonad DSL or are legacy
     id,
     trace,
-    -- We use freer-simple's State/Reader usually, but Relude's are fine if qualified.
+    -- We use Polysemy's State/Reader usually, but Relude's are fine if qualified.
     -- However, we export our own 'State' effect.
     State,
     get,
@@ -90,7 +72,30 @@ import Prelude hiding
   )
 
 -- Effect System
-import Control.Monad.Freer (Eff, LastMember, Member, interpret, send, sendM)
+import Polysemy (Sem, Member, interpret, send, embed, makeSem)
+import Polysemy.Embed (Embed)
+
+-- | Alias for Polysemy's 'Sem' to maintain compatibility
+type Eff = Sem
+
+-- | Compatibility alias for @'Member' ('Embed' m)@ to mimic the traditional
+--   @LastMember@ constraint from earlier versions.
+--
+--   This is a temporary shim to preserve the old API surface while the
+--   codebase migrates to using @Member (Embed m)@ directly. New code
+--   should prefer the more explicit @Member (Embed m) r@ constraint.
+--   This alias may be deprecated and removed in a future major release.
+type LastMember m r = Member (Embed m) r
+
+-- | Compatibility alias for 'embed' to mimic the traditional @sendM@ helper
+--   from earlier versions.
+--
+--   This is a temporary shim to preserve the old API surface while the
+--   codebase migrates to using 'embed' directly. New code should prefer
+--   calling 'embed' rather than 'sendM'. This alias may be deprecated and
+--   removed in a future major release.
+sendM :: Member (Embed m) r => m a -> Sem r a
+sendM = embed
 
 -- JSON
 import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), object, (.:), (.:?), (.=))
@@ -130,5 +135,3 @@ import ExoMonad.Effect.Types
     requestText,
     returnValue,
   )
-import ExoMonad.Graph.Goto (Goto, goto, gotoChoice, gotoExit, gotoSelf, (-->))
-import ExoMonad.Graph.Types (EntryPoint, Exit, Input, Schema, Self, Template, UsesEffects, type (:@))

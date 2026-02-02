@@ -33,7 +33,8 @@ module ExoMonad.Worktree.Interpreter
 where
 
 import Control.Exception (SomeException, try)
-import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
+import Polysemy (Sem, Member, interpret, embed)
+import Polysemy.Embed (Embed)
 import Data.List (isPrefixOf)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -88,13 +89,13 @@ defaultWorktreeConfig repoRoot =
 --
 -- This interpreter shells out to git for each operation.
 -- All operations return Either, so errors are recoverable.
-runWorktreeIO :: (LastMember IO effs) => WorktreeConfig -> Eff (Worktree ': effs) a -> Eff effs a
+runWorktreeIO :: (Member (Embed IO) r) => WorktreeConfig -> Sem (Worktree ': r) a -> Sem r a
 runWorktreeIO config = interpret $ \case
-  CreateWorktree spec -> sendM $ createWorktreeIO config spec
-  DeleteWorktree path -> sendM $ deleteWorktreeIO config path
-  MergeWorktree path msg -> sendM $ mergeWorktreeIO config path msg
-  CherryPickFiles src files dest -> sendM $ cherryPickFilesIO src files dest
-  ListWorktrees -> sendM $ listWorktreesIO config
+  CreateWorktree spec -> embed $ createWorktreeIO config spec
+  DeleteWorktree path -> embed $ deleteWorktreeIO config path
+  MergeWorktree path msg -> embed $ mergeWorktreeIO config path msg
+  CherryPickFiles src files dest -> embed $ cherryPickFilesIO src files dest
+  ListWorktrees -> embed $ listWorktreesIO config
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- IMPLEMENTATION

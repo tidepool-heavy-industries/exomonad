@@ -9,7 +9,7 @@ author:             Inanna
 build-type:         Simple
 
 common defaults
-    ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints -Wunused-packages
+    ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints -Wunused-packages -fplugin=Polysemy.Plugin
     default-language: GHC2024
     default-extensions:
         DataKinds
@@ -33,7 +33,8 @@ library
         ExoMonad.LLM.Interpreter.Types
     build-depends:
         base >= 4.17 && < 5,
-        freer-simple >= 1.2 && < 2,
+        polysemy >= 1.9,
+        polysemy-plugin >= 0.4,
         text >= 2.0 && < 3,
         http-client >= 0.7 && < 1,
         http-client-tls >= 0.3 && < 1,

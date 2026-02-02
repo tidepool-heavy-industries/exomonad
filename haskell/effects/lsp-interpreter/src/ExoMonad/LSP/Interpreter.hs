@@ -23,7 +23,8 @@ import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar, tryTakeMV
 import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVarIO, writeTVar)
 import Control.Exception (SomeException, throwIO, try)
 import Control.Monad (when)
-import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
+import Polysemy (Sem, Member, interpret, embed)
+import Polysemy.Embed (Embed)
 import Control.Monad.IO.Class (liftIO)
 import Data.Function ((&))
 import Data.Map.Strict qualified as Map
@@ -317,19 +318,19 @@ executeSession session action = do
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Run LSP effects using an active session.
-runLSP :: (LastMember IO effs) => LSPSession -> Eff (LSP ': effs) a -> Eff effs a
+runLSP :: (Member (Embed IO) r) => LSPSession -> Sem (LSP ': r) a -> Sem r a
 runLSP session = interpret $ \case
   Diagnostics _doc ->
     -- Diagnostics come via notifications, not requests
     -- Would need to track them in session state
     pure []
-  Hover doc pos -> sendM $ executeSession session $ do
+  Hover doc pos -> embed $ executeSession session $ do
     let lspDoc = toTextDocumentId doc
         lspPos = toPosition pos
     -- lsp-test's getHover takes TextDocumentIdentifier and Position
     result <- getHover lspDoc lspPos
     pure $ fromHoverResult result
-  References doc pos -> sendM $ executeSession session $ do
+  References doc pos -> embed $ executeSession session $ do
     let lspPos = toPosition pos
         filePath = uriToFilePath doc.tdiUri
     -- Open the document first - HLS requires this for references to work
@@ -337,19 +338,19 @@ runLSP session = interpret $ \case
     -- getReferences returns [Location]
     locs <- getReferences lspDoc lspPos True -- includeDeclaration = True
     pure $ map fromLocation locs
-  Definition doc pos -> sendM $ executeSession session $ do
+  Definition doc pos -> embed $ executeSession session $ do
     let lspDoc = toTextDocumentId doc
         lspPos = toPosition pos
     -- getDefinitions returns [Location] | [LocationLink]
     result <- getDefinitions lspDoc lspPos
     pure $ fromDefinitionResult result
-  CodeActions doc rng -> sendM $ executeSession session $ do
+  CodeActions doc rng -> embed $ executeSession session $ do
     let lspDoc = toTextDocumentId doc
         lspRange = toRange rng
     -- getCodeActions returns [Command |? CodeAction]
     actions <- getCodeActions lspDoc lspRange
     pure $ fromCodeActionsResult actions
-  Rename doc pos newName -> sendM $ executeSession session $ do
+  Rename doc pos newName -> embed $ executeSession session $ do
     let lspDoc = toTextDocumentId doc
         lspPos = toPosition pos
     -- lsp-test's rename returns (), we need to use the low-level request API
@@ -365,13 +366,13 @@ runLSP session = interpret $ \case
       L.TResponseMessage _ _ (Right (L.InL edit)) -> fromWorkspaceEditResult edit
       L.TResponseMessage _ _ (Right (L.InR L.Null)) -> WorkspaceEdit Map.empty
       L.TResponseMessage _ _ (Left _) -> WorkspaceEdit Map.empty
-  Completion doc pos -> sendM $ executeSession session $ do
+  Completion doc pos -> embed $ executeSession session $ do
     let lspDoc = toTextDocumentId doc
         lspPos = toPosition pos
     -- getCompletions returns [CompletionItem]
     items <- getCompletions lspDoc lspPos
     pure $ map fromCompletionItem items
-  WorkspaceSymbol query -> sendM $ executeSession session $ do
+  WorkspaceSymbol query -> embed $ executeSession session $ do
     -- lsp-test doesn't have a direct getWorkspaceSymbols
     -- Use the low-level request API
     let params =
@@ -384,7 +385,7 @@ runLSP session = interpret $ \case
     pure $ case resp of
       L.TResponseMessage _ _ (Right result) -> fromSymbolsResult result
       L.TResponseMessage _ _ (Left _) -> []
-  DocumentSymbol doc -> sendM $ executeSession session $ do
+  DocumentSymbol doc -> embed $ executeSession session $ do
     -- lsp-test doesn't have a direct getDocumentSymbols
     -- Use the low-level request API
     let lspDoc = toTextDocumentId doc
@@ -398,7 +399,7 @@ runLSP session = interpret $ \case
     pure $ case resp of
       L.TResponseMessage _ _ (Right result) -> fromDocumentSymbolResult result
       L.TResponseMessage _ _ (Left _) -> []
-  PrepareCallHierarchy doc pos -> sendM $ executeSession session $ do
+  PrepareCallHierarchy doc pos -> embed $ executeSession session $ do
     let lspDoc = toTextDocumentId doc
         lspPos = toPosition pos
         params =
@@ -413,7 +414,7 @@ runLSP session = interpret $ \case
         L.InL items -> map fromCallHierarchyItem items
         L.InR L.Null -> []
       L.TResponseMessage _ _ (Left _) -> []
-  OutgoingCalls item -> sendM $ executeSession session $ do
+  OutgoingCalls item -> embed $ executeSession session $ do
     let lspItem = toCallHierarchyItem item
         params =
           L.CallHierarchyOutgoingCallsParams
@@ -429,10 +430,10 @@ runLSP session = interpret $ \case
       L.TResponseMessage _ _ (Left _) -> []
   GetIndexingState ->
     -- Read the indexing state from the session's TVar (backward compatible)
-    sendM $ getSessionIndexingState session
+    embed $ getSessionIndexingState session
   GetIndexingInfo ->
     -- Read full indexing information from the session's TVar
-    sendM $ getSessionIndexingInfo session
+    embed $ getSessionIndexingInfo session
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE CONVERSIONS: Our types -> lsp-types

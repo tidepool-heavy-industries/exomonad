@@ -1,3 +1,11 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- | LLM provider types with type-level provider switching.
@@ -38,9 +46,14 @@ module ExoMonad.Effects.LLMProvider
   )
 where
 
-import Control.Monad.Freer (Eff, Member, send)
+import Polysemy (Sem, Member, makeSem)
+import Polysemy.Internal (send)
+import Data.Kind (Type)
 import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.=))
-import ExoMonad.Effect.Types (ContentBlock, LLMConfig, LlmError, Message)
+import Data.Aeson qualified as Aeson
+import Data.Aeson.Types qualified as AesonTypes
+import ExoMonad.Effect.Types (LLMConfig, LlmError)
+import GHC.Generics (Generic)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PROVIDER TYPE (TYPE-LEVEL)
@@ -103,12 +116,10 @@ instance ToJSON Role where
   toJSON Assistant = "assistant"
 
 instance FromJSON Role where
-  parseJSON = withText "Role" $ \case
+  parseJSON = Aeson.withText "Role" $ \case
     "user" -> pure User
     "assistant" -> pure Assistant
     other -> fail $ "Unknown role: " ++ show other
-    where
-      withText name f = Aeson.withText name f
 
 -- | A message in a multi-turn conversation.
 data Message = Message
@@ -289,115 +300,41 @@ data LLMError
 --       ]
 -- response <- completeConversation SAnthropic config messages tools
 -- @
-data LLMComplete r where
+--
+-- Note: The provider appears both at the effect level (@p :: LLMProvider@) and
+-- as an explicit singleton argument (@SProvider p@) to each operation. The type
+-- parameter @p@ is used to select and statically fix the provider in the effect
+-- stack (so different providers inhabit different effects), while the
+-- @SProvider p@ value is available at runtime for interpreters and callers that
+-- need to pattern match on the provider, perform provider-specific logging, or
+-- recover the provider when type applications are not convenient. This
+-- duplication is intentional and required by the architecture; it is not an
+-- accidental redundancy.
+data LLMComplete (p :: LLMProvider) m a where
   Complete ::
     SProvider p ->
     LLMProviderConfig p ->
     Text -> -- user message
     Maybe [Value] -> -- optional tools
-    LLMComplete (LLMProviderResponse p)
+    LLMComplete p m (LLMProviderResponse p)
   CompleteTry ::
     SProvider p ->
     LLMProviderConfig p ->
     Text -> -- user message
     Maybe [Value] -> -- optional tools
-    LLMComplete (Either LLMError (LLMProviderResponse p))
+    LLMComplete p m (Either LLMError (LLMProviderResponse p))
   CompleteConversation ::
     SProvider p ->
     LLMProviderConfig p ->
     [Message] -> -- conversation history
     Maybe [Value] -> -- optional tools
-    LLMComplete (LLMProviderResponse p)
+    LLMComplete p m (LLMProviderResponse p)
   CompleteConversationTry ::
     SProvider p ->
     LLMProviderConfig p ->
     [Message] -> -- conversation history
     Maybe [Value] -> -- optional tools
-    LLMComplete (Either LLMError (LLMProviderResponse p))
+    LLMComplete p m (Either LLMError (LLMProviderResponse p))
 
--- ════════════════════════════════════════════════════════════════════════════
--- SMART CONSTRUCTORS
--- ════════════════════════════════════════════════════════════════════════════
+makeSem ''LLMComplete
 
--- | Call an LLM with provider-specific config.
---
--- This variant throws on error. For error handling, use 'completeTry'.
-complete ::
-  forall p effs.
-  (Member LLMComplete effs) =>
-  SProvider p ->
-  LLMProviderConfig p ->
-  Text ->
-  Maybe [Value] ->
-  Eff effs (LLMProviderResponse p)
-complete provider config msg tools = send (Complete provider config msg tools)
-
--- | Call an LLM with provider-specific config, returning errors as 'Either'.
---
--- Use this when you want to handle errors gracefully:
---
--- @
--- result <- completeTry SAnthropic config msg tools
--- case result of
---   Left LLMRateLimited -> do
---     liftIO $ threadDelay 1000000
---     completeTry SAnthropic config msg tools  -- retry
---   Left err -> logError $ "LLM failed: " <> show err
---   Right response -> processResponse response
--- @
-completeTry ::
-  forall p effs.
-  (Member LLMComplete effs) =>
-  SProvider p ->
-  LLMProviderConfig p ->
-  Text ->
-  Maybe [Value] ->
-  Eff effs (Either LLMError (LLMProviderResponse p))
-completeTry provider config msg tools = send (CompleteTry provider config msg tools)
-
--- | Call an LLM with multi-turn conversation history.
---
--- This variant supports tool use via conversation history. The messages list
--- should include the full conversation including tool_use and tool_result blocks.
---
--- @
--- let messages =
---       [ Message User [TextContent "Search for 'monads'"]
---       , Message Assistant [ToolUseContent "toolu_123" "search" searchArgs]
---       , Message User [ToolResultContent "toolu_123" searchResults]
---       ]
--- response <- completeConversation SAnthropic config messages tools
--- @
---
--- This variant throws on error. For error handling, use 'completeConversationTry'.
-completeConversation ::
-  forall p effs.
-  (Member LLMComplete effs) =>
-  SProvider p ->
-  LLMProviderConfig p ->
-  [Message] ->
-  Maybe [Value] ->
-  Eff effs (LLMProviderResponse p)
-completeConversation provider config messages tools =
-  send (CompleteConversation provider config messages tools)
-
--- | Call an LLM with multi-turn conversation history, returning errors as 'Either'.
---
--- Use this when you want to handle errors gracefully in multi-turn scenarios:
---
--- @
--- result <- completeConversationTry SAnthropic config messages tools
--- case result of
---   Left err -> handleError err
---   Right response -> processResponse response
--- @
-completeConversationTry ::
-  forall p effs.
-  (Member LLMComplete effs) =>
-  SProvider p ->
-  LLMProviderConfig p ->
-  [Message] ->
-  Maybe [Value] ->
-  Eff effs (Either LLMError (LLMProviderResponse p))
-completeConversationTry provider config messages tools =
-  send (CompleteConversationTry provider config messages tools)

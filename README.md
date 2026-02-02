@@ -4,7 +4,7 @@
 
 ## What Is This?
 
-A library for building LLM agents as typed state machines using **freer-simple** for sandboxed effects with reified continuations, **ginger** (Jinja) templates validated at compile time, and **structured output** for LLM → state mutations.
+A library for building LLM agents using **polysemy** for sandboxed effects, **ginger** (Jinja) templates validated at compile time, and **structured output** for LLM → state mutations.
 
 The key insight: LLMs don't need raw IO access. They need:
 1. **Typed state** they can read (via templates)
@@ -79,11 +79,9 @@ just native  # Starts at localhost:8080
 ## Project Structure
 
 ```
-exomonad-core/           # Core library (Graph DSL, effects, templates)
-exomonad-native-gui/     # Native execution layer (server + effect interpreters)
-exomonad-wasm/           # WASM compilation target
-deploy/                  # Cloudflare Worker harness
-tools/                   # Agent evolution tooling (sleeptime)
+haskell/dsl/core/        # Core library (effects, templates)
+haskell/effects/         # Native effect interpreters
+haskell/protocol/        # Wire types and FFI
 ```
 
 For detailed documentation, see `CLAUDE.md`.
@@ -95,6 +93,6 @@ Agents live in separate repos to keep the library clean:
 
 ## See Also
 
-- [freer-simple](https://hackage.haskell.org/package/freer-simple) - Effect system with reified continuations
-- [ginger](https://hackage.haskell.org/package/ginger) - Jinja template engine for Haskell
+- [polysemy](https://hackage.haskell.org/package/polysemy) - Higher-power, low-boilerplate effect system
+- [ginger](https://github.com/inanna-malick/ginger) - Jinja template engine for Haskell (typed fork)
 - [Anthropic Tool Use](https://docs.anthropic.com/en/docs/tool-use) - LLM tool calling

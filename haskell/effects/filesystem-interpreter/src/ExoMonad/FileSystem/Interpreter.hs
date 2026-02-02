@@ -22,7 +22,8 @@ module ExoMonad.FileSystem.Interpreter
 where
 
 import Control.Exception (SomeException, try)
-import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
+import Polysemy (Sem, Member, interpret, embed)
+import Polysemy.Embed (Embed)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
@@ -46,15 +47,15 @@ import System.Posix.Files (createSymbolicLink)
 -- | Run FileSystem effects using standard Haskell IO operations.
 --
 -- All operations are wrapped in try/catch to return explicit errors.
-runFileSystemIO :: (LastMember IO effs) => Eff (FileSystem ': effs) a -> Eff effs a
+runFileSystemIO :: (Member (Embed IO) r) => Sem (FileSystem ': r) a -> Sem r a
 runFileSystemIO = interpret $ \case
-  CreateDirectory path -> sendM $ createDirectoryIO path
-  WriteFileText path content -> sendM $ writeFileTextIO path content
-  CopyFile src dest -> sendM $ copyFileIO src dest
-  CreateSymlink target link -> sendM $ createSymlinkIO target link
-  FileExists path -> sendM $ fileExistsIO path
-  DirectoryExists path -> sendM $ directoryExistsIO path
-  ReadFileText path -> sendM $ readFileTextIO path
+  CreateDirectory path -> embed $ createDirectoryIO path
+  WriteFileText path content -> embed $ writeFileTextIO path content
+  CopyFile src dest -> embed $ copyFileIO src dest
+  CreateSymlink target link -> embed $ createSymlinkIO target link
+  FileExists path -> embed $ fileExistsIO path
+  DirectoryExists path -> embed $ directoryExistsIO path
+  ReadFileText path -> embed $ readFileTextIO path
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- IMPLEMENTATION

@@ -46,9 +46,11 @@ where
 
 import Prelude hiding (State)
 
-import Control.Monad.Freer (Eff, Member)
+import Polysemy (Sem, Member)
+import Data.Kind (Type)
 import Data.Aeson (Value, toJSON)
 import ExoMonad.Effect
+import ExoMonad.Prelude (Eff)
 
 -- ══════════════════════════════════════════════════════════════════════
 -- TYPE-LEVEL UTILITIES
@@ -85,8 +87,24 @@ data Agent s evt (extra :: [Effect]) = Agent
     agentDispatcher :: AgentDispatcher s evt
   }
 
--- | Effect type alias (freer-simple effects have kind Type -> Type).
-type Effect = Type -> Type
+-- | Effect type alias following Polysemy's design.
+--
+-- Polysemy represents effects with the kind @(Type -> Type) -> Type -> Type@:
+--
+-- @
+-- data MyEffect (m :: Type -> Type) (a :: Type) where
+--   -- constructors use @m@ for subcomputations and return @a@
+-- @
+--
+-- Earlier versions of some effect systems (and code in this project) used
+-- effects of kind @Type -> Type@ instead. Moving to Polysemy's kind is a
+-- breaking change for any custom effects: all user-defined effects must now
+-- take both the monad parameter @m@ and the result type @a@ explicitly, as
+-- in the example above.
+--
+-- For guidance on updating existing custom effects to this representation,
+-- see the Polysemy effect definition documentation.
+type Effect = (Type -> Type) -> Type -> Type
 
 -- | Convenience alias for agents with no extra effects
 type SimpleAgent s evt = Agent s evt '[]
@@ -135,7 +153,7 @@ newtype AgentDispatcher s evt = AgentDispatcher
       ) =>
       Text -> -- Tool name
       Value -> -- Tool input (JSON)
-      Eff effs (Either Text (ToolResult '[])) -- Empty target list (no transitions for agents)
+      Eff effs (Either Text ToolResult) -- Simplified ToolResult (no targets)
   }
 
 -- | Default dispatcher for agents without tools

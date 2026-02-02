@@ -35,7 +35,8 @@ where
 
 import Control.Exception (SomeException, try)
 import Control.Lens ((^?))
-import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
+import Polysemy (Sem, Member, interpret, embed)
+import Polysemy.Embed (Embed)
 import Data.Aeson
   ( FromJSON (..),
     ToJSON (..),
@@ -320,7 +321,7 @@ parseChecklistItemId val =
 -- = Example
 --
 -- @
--- import Control.Monad.Freer (runM)
+-- import Polysemy (runM)
 --
 -- main = do
 --   let config = HabiticaConfig {...}
@@ -329,44 +330,44 @@ parseChecklistItemId val =
 --     todos <- fetchTodos
 --     forM_ todos $ \\todo -> logInfo (ftTitle todo)
 -- @
-runHabitica :: (LastMember IO effs) => HabiticaEnv -> Eff (Habitica ': effs) a -> Eff effs a
+runHabitica :: (Member (Embed IO) r) => HabiticaEnv -> Sem (Habitica ': r) a -> Sem r a
 runHabitica env = interpret $ \case
   -- Crashing variants (error on failure)
-  FetchTodos -> sendM $ do
+  FetchTodos -> embed $ do
     result <- fetchTodos env
     case result of
       Left err -> error $ "Habitica.fetchTodos: " <> show err
       Right todos -> pure todos
-  AddChecklistItem tid item -> sendM $ do
+  AddChecklistItem tid item -> embed $ do
     result <- addChecklistItem env tid item
     case result of
       Left err -> error $ "Habitica.addChecklistItem: " <> show err
       Right cid -> pure cid
-  CreateTodo title -> sendM $ do
+  CreateTodo title -> embed $ do
     result <- createTodo env title
     case result of
       Left err -> error $ "Habitica.createTodo: " <> show err
       Right tid -> pure tid
-  GetUser -> sendM $ do
+  GetUser -> embed $ do
     result <- getUser env
     case result of
       Left err -> error $ "Habitica.getUser: " <> show err
       Right info -> pure info
-  ScoreTask tid dir -> sendM $ do
+  ScoreTask tid dir -> embed $ do
     result <- scoreTask env tid dir
     case result of
       Left err -> error $ "Habitica.scoreTask: " <> show err
       Right sr -> pure sr
-  GetTasks tt -> sendM $ do
+  GetTasks tt -> embed $ do
     result <- getTasks env tt
     case result of
       Left err -> error $ "Habitica.getTasks: " <> show err
       Right tasks -> pure tasks
 
   -- Try variants (return Either)
-  FetchTodosTry -> sendM $ fetchTodos env
-  AddChecklistItemTry tid item -> sendM $ addChecklistItem env tid item
-  CreateTodoTry title -> sendM $ createTodo env title
-  GetUserTry -> sendM $ getUser env
-  ScoreTaskTry tid dir -> sendM $ scoreTask env tid dir
-  GetTasksTry tt -> sendM $ getTasks env tt
+  FetchTodosTry -> embed $ fetchTodos env
+  AddChecklistItemTry tid item -> embed $ addChecklistItem env tid item
+  CreateTodoTry title -> embed $ createTodo env title
+  GetUserTry -> embed $ getUser env
+  ScoreTaskTry tid dir -> embed $ scoreTask env tid dir
+  GetTasksTry tt -> embed $ getTasks env tt

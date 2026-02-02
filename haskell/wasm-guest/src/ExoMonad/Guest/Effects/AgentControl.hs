@@ -34,13 +34,15 @@ module ExoMonad.Guest.Effects.AgentControl
   )
 where
 
-import Control.Monad.Freer
+import Polysemy (Sem, Member, interpret, embed, makeSem)
+import Polysemy.Embed (Embed)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.:?), (.=))
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
 import Data.Text qualified
 import ExoMonad.Guest.HostCall (callHost, host_agent_cleanup, host_agent_cleanup_batch, host_agent_list, host_agent_spawn, host_agent_spawn_batch)
 import GHC.Generics (Generic)
+import Data.Kind (Type)
 
 -- ============================================================================
 -- Types (match Rust agent_control.rs)
@@ -268,45 +270,28 @@ instance ToJSON ListAgentsInput where
 -- ============================================================================
 
 -- | Agent control effect for high-level agent lifecycle management.
-data AgentControl r where
+data AgentControl m a where
   -- | Spawn an agent for a GitHub issue.
-  SpawnAgent :: Text -> SpawnOptions -> AgentControl (Either Text SpawnResult)
+  SpawnAgent :: Text -> SpawnOptions -> AgentControl m (Either Text SpawnResult)
   -- | Spawn multiple agents.
-  SpawnAgents :: [Text] -> SpawnOptions -> AgentControl BatchSpawnResult
+  SpawnAgents :: [Text] -> SpawnOptions -> AgentControl m BatchSpawnResult
   -- | Clean up an agent (close tab, delete worktree).
-  CleanupAgent :: Text -> Bool -> AgentControl (Either Text ())
+  CleanupAgent :: Text -> Bool -> AgentControl m (Either Text ())
   -- | Clean up multiple agents.
-  CleanupAgents :: [Text] -> Bool -> AgentControl BatchCleanupResult
+  CleanupAgents :: [Text] -> Bool -> AgentControl m BatchCleanupResult
   -- | List all active agent worktrees.
-  ListAgents :: AgentControl (Either Text [AgentInfo])
+  ListAgents :: AgentControl m (Either Text [AgentInfo])
 
--- ============================================================================
--- Smart constructors
--- ============================================================================
-
-spawnAgent :: (Member AgentControl effs) => Text -> SpawnOptions -> Eff effs (Either Text SpawnResult)
-spawnAgent issueId opts = send (SpawnAgent issueId opts)
-
-spawnAgents :: (Member AgentControl effs) => [Text] -> SpawnOptions -> Eff effs BatchSpawnResult
-spawnAgents issueIds opts = send (SpawnAgents issueIds opts)
-
-cleanupAgent :: (Member AgentControl effs) => Text -> Bool -> Eff effs (Either Text ())
-cleanupAgent issueId force = send (CleanupAgent issueId force)
-
-cleanupAgents :: (Member AgentControl effs) => [Text] -> Bool -> Eff effs BatchCleanupResult
-cleanupAgents issueIds force = send (CleanupAgents issueIds force)
-
-listAgents :: (Member AgentControl effs) => Eff effs (Either Text [AgentInfo])
-listAgents = send ListAgents
+makeSem ''AgentControl
 
 -- ============================================================================
 -- Interpreter
 -- ============================================================================
 
 -- | Interpret AgentControl by calling Rust host functions.
-runAgentControl :: (LastMember IO effs) => Eff (AgentControl ': effs) a -> Eff effs a
+runAgentControl :: (Member (Embed IO) r) => Sem (AgentControl ': r) a -> Sem r a
 runAgentControl = interpret $ \case
-  SpawnAgent issueId opts -> sendM $ do
+  SpawnAgent issueId opts -> embed $ do
     let input =
           SpawnAgentInput
             { saiIssueId = issueId,
@@ -320,7 +305,7 @@ runAgentControl = interpret $ \case
       Left err -> Left (Data.Text.pack err)
       Right (Success r) -> Right r
       Right (HostError msg) -> Left msg
-  SpawnAgents issueIds opts -> sendM $ do
+  SpawnAgents issueIds opts -> embed $ do
     let input =
           SpawnAgentsInput
             { sasIssueIds = issueIds,
@@ -342,14 +327,14 @@ runAgentControl = interpret $ \case
           { spawned = [],
             spawnFailed = [("", msg)]
           }
-  CleanupAgent issueId force -> sendM $ do
+  CleanupAgent issueId force -> embed $ do
     let input = CleanupAgentInput issueId force
     res <- callHost host_agent_cleanup input
     pure $ case res of
       Left err -> Left (Data.Text.pack err)
       Right (Success ()) -> Right ()
       Right (HostError msg) -> Left msg
-  CleanupAgents issueIds force -> sendM $ do
+  CleanupAgents issueIds force -> embed $ do
     let input = CleanupAgentsInput issueIds force
     res <- callHost host_agent_cleanup_batch input
     pure $ case res of
@@ -364,9 +349,10 @@ runAgentControl = interpret $ \case
           { cleaned = [],
             cleanupFailed = [("", msg)]
           }
-  ListAgents -> sendM $ do
+  ListAgents -> embed $ do
     res <- callHost host_agent_list ListAgentsInput
     pure $ case res of
       Left err -> Left (Data.Text.pack err)
       Right (Success agents) -> Right agents
       Right (HostError msg) -> Left msg
+

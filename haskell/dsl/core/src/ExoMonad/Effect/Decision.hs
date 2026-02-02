@@ -12,7 +12,7 @@ module ExoMonad.Effect.Decision
   )
 where
 
-import Control.Monad.Freer (Eff, Member)
+import Polysemy (Sem, Member)
 import Data.Aeson (ToJSON (..), toJSON)
 import Data.Aeson qualified as A
 import Data.Aeson.Key qualified as Key
@@ -27,7 +27,7 @@ import ExoMonad.Effect.Types (DecisionLog, Log, Time, getCurrentTime, logInfoWit
 --
 -- This builds a UISpec from the context, waits for an interaction,
 -- and logs the resulting decision via the Log and DecisionLog effects.
-requestDecision :: (Member TUI r, Member Time r, Member Log r, Member DecisionLog r) => DecisionContext -> Eff r Decision
+requestDecision :: (Member TUI r, Member Time r, Member Log r, Member DecisionLog r) => DecisionContext -> Sem r Decision
 requestDecision ctx = do
   let ui =
         PopupDefinition

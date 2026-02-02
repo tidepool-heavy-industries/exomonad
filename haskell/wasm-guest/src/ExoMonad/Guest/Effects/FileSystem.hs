@@ -29,7 +29,8 @@ module ExoMonad.Guest.Effects.FileSystem
   )
 where
 
-import Control.Monad.Freer
+import Polysemy (Sem, Member, interpret, embed, makeSem)
+import Polysemy.Embed (Embed)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.=))
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
@@ -37,6 +38,7 @@ import Data.Text qualified
 import ExoMonad.Guest.HostCall (callHost, host_fs_read_file, host_fs_write_file)
 import GHC.Generics (Generic)
 import Prelude hiding (readFile, writeFile)
+import Data.Kind (Type)
 
 -- ============================================================================
 -- Types (match Rust filesystem.rs)
@@ -136,42 +138,45 @@ instance (FromJSON a) => FromJSON (HostResult a) where
 -- ============================================================================
 
 -- | Filesystem effect for file operations.
-data FileSystem r where
+data FileSystem m a where
   -- | Read a file.
-  ReadFile :: Text -> Int -> FileSystem (Either Text ReadFileOutput)
+  ReadFileOp :: Text -> Int -> FileSystem m (Either Text ReadFileOutput)
   -- | Write a file.
-  WriteFile :: Text -> Text -> Bool -> FileSystem (Either Text WriteFileOutput)
+  WriteFileOp :: Text -> Text -> Bool -> FileSystem m (Either Text WriteFileOutput)
+
+makeSem ''FileSystem
 
 -- ============================================================================
 -- Smart constructors
 -- ============================================================================
 
 -- | Read a file (path, max_bytes).
-readFile :: (Member FileSystem effs) => Text -> Int -> Eff effs (Either Text ReadFileOutput)
-readFile path maxBytes = send (ReadFile path maxBytes)
+readFile :: (Member FileSystem r) => Text -> Int -> Sem r (Either Text ReadFileOutput)
+readFile = readFileOp
 
 -- | Write a file (path, content, create_parents).
-writeFile :: (Member FileSystem effs) => Text -> Text -> Bool -> Eff effs (Either Text WriteFileOutput)
-writeFile path content createParents = send (WriteFile path content createParents)
+writeFile :: (Member FileSystem r) => Text -> Text -> Bool -> Sem r (Either Text WriteFileOutput)
+writeFile = writeFileOp
 
 -- ============================================================================
 -- Interpreter
 -- ============================================================================
 
 -- | Interpret FileSystem by calling Rust host functions.
-runFileSystem :: (LastMember IO effs) => Eff (FileSystem ': effs) a -> Eff effs a
+runFileSystem :: (Member (Embed IO) r) => Sem (FileSystem ': r) a -> Sem r a
 runFileSystem = interpret $ \case
-  ReadFile path maxBytes -> sendM $ do
+  ReadFileOp path maxBytes -> embed $ do
     let input = ReadFileInput path maxBytes
     res <- callHost host_fs_read_file input
     pure $ case res of
       Left err -> Left (Data.Text.pack err)
       Right (Success r) -> Right r
       Right (HostError msg) -> Left msg
-  WriteFile path content createParents -> sendM $ do
+  WriteFileOp path content createParents -> embed $ do
     let input = WriteFileInput path content createParents
     res <- callHost host_fs_write_file input
     pure $ case res of
       Left err -> Left (Data.Text.pack err)
       Right (Success r) -> Right r
       Right (HostError msg) -> Left msg
+

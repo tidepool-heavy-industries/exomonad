@@ -1,14 +1,23 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators #-}
+
 -- | Git effect for querying repository state.
 --
 -- Effect type only - interpreters live in exomonad-git-interpreter.
--- Enables graphs to query git worktree info, dirty files, and commit history.
+-- Enables agents to query git worktree info, dirty files, and commit history.
 --
 -- = Example Usage
 --
 -- @
 -- import ExoMonad.Effects.Git (Git, getWorktreeInfo, getDirtyFiles)
 --
--- myHandler :: Member Git effs => Eff effs ()
+-- myHandler :: Member Git r => Sem r ()
 -- myHandler = do
 --   wt <- getWorktreeInfo
 --   dirtyFiles <- getDirtyFiles
@@ -29,7 +38,9 @@ module ExoMonad.Effects.Git
   )
 where
 
-import Control.Monad.Freer (Eff, Member, send)
+import Polysemy (Sem, Member, makeSem)
+import Data.Kind (Type)
+import Data.Aeson (ToJSON (..), object, (.=))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES
@@ -68,48 +79,20 @@ instance ToJSON WorktreeInfo where
 -- | Git effect for repository operations.
 --
 -- Mostly read-only queries, plus fetch for remote sync.
-data Git r where
+data Git m a where
   -- | Get worktree/repo information.
   -- Returns Nothing if not in a git repository.
-  GetWorktreeInfo :: Git (Maybe WorktreeInfo)
+  GetWorktreeInfo :: Git m (Maybe WorktreeInfo)
   -- | Get list of dirty (uncommitted) files.
-  GetDirtyFiles :: Git [FilePath]
+  GetDirtyFiles :: Git m [FilePath]
   -- | Get recent commit subjects.
-  GetRecentCommits :: Int -> Git [Text]
+  GetRecentCommits :: Int -> Git m [Text]
   -- | Get current branch name.
-  GetCurrentBranch :: Git Text
+  GetCurrentBranch :: Git m Text
   -- | Get number of commits ahead of a ref (e.g., "origin/main").
-  GetCommitsAhead :: Text -> Git Int
+  GetCommitsAhead :: Text -> Git m Int
   -- | Fetch from a remote (e.g., "origin") to update refs.
   -- Optionally specify a refspec (e.g., "main" to fetch only main).
-  FetchRemote :: Text -> Maybe Text -> Git ()
+  FetchRemote :: Text -> Maybe Text -> Git m ()
 
--- ════════════════════════════════════════════════════════════════════════════
--- SMART CONSTRUCTORS
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Get worktree/repo information.
-getWorktreeInfo :: (Member Git effs) => Eff effs (Maybe WorktreeInfo)
-getWorktreeInfo = send GetWorktreeInfo
-
--- | Get list of dirty files.
-getDirtyFiles :: (Member Git effs) => Eff effs [FilePath]
-getDirtyFiles = send GetDirtyFiles
-
--- | Get recent commit subjects.
-getRecentCommits :: (Member Git effs) => Int -> Eff effs [Text]
-getRecentCommits = send . GetRecentCommits
-
--- | Get current branch name.
-getCurrentBranch :: (Member Git effs) => Eff effs Text
-getCurrentBranch = send GetCurrentBranch
-
--- | Get number of commits ahead of a ref (e.g., "origin/main").
-getCommitsAhead :: (Member Git effs) => Text -> Eff effs Int
-getCommitsAhead = send . GetCommitsAhead
-
--- | Fetch from a remote to update refs.
--- Example: @fetchRemote "origin" (Just "main")@ fetches only main from origin.
--- Example: @fetchRemote "origin" Nothing@ fetches all refs from origin.
-fetchRemote :: (Member Git effs) => Text -> Maybe Text -> Eff effs ()
-fetchRemote remote refspec = send $ FetchRemote remote refspec
+makeSem ''Git

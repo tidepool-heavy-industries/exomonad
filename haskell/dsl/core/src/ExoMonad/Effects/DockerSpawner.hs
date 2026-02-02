@@ -3,6 +3,10 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE KindSignatures #-}
 
 module ExoMonad.Effects.DockerSpawner
   ( DockerSpawner (..),
@@ -19,7 +23,10 @@ module ExoMonad.Effects.DockerSpawner
   )
 where
 
-import Control.Monad.Freer (Eff, Member, send)
+import Polysemy (Sem, Member, makeSem)
+import Data.Kind (Type)
+import Data.Aeson (FromJSON (..), ToJSON (..), withObject, (.:))
+import Data.Aeson.Casing (aesonPrefix, snakeCase)
 
 -- | Container ID extracted from spawn response
 newtype ContainerId = ContainerId {unContainerId :: Text}
@@ -105,21 +112,11 @@ data DockerError
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
-data DockerSpawner r where
-  SpawnContainer :: SpawnConfig -> DockerSpawner (Either DockerError ContainerId)
-  StopContainer :: ContainerId -> DockerSpawner (Either DockerError ())
-  GetContainerStatus :: ContainerId -> DockerSpawner (Either DockerError ContainerStatus)
-  ExecContainer :: ContainerId -> [Text] -> Maybe FilePath -> Maybe Text -> DockerSpawner (Either DockerError ExecResult)
+data DockerSpawner m a where
+  SpawnContainer :: SpawnConfig -> DockerSpawner m (Either DockerError ContainerId)
+  StopContainer :: ContainerId -> DockerSpawner m (Either DockerError ())
+  GetContainerStatus :: ContainerId -> DockerSpawner m (Either DockerError ContainerStatus)
+  ExecContainer :: ContainerId -> [Text] -> Maybe FilePath -> Maybe Text -> DockerSpawner m (Either DockerError ExecResult)
 
--- Smart constructors
-spawnContainer :: (Member DockerSpawner es) => SpawnConfig -> Eff es (Either DockerError ContainerId)
-spawnContainer = send . SpawnContainer
+makeSem ''DockerSpawner
 
-stopContainer :: (Member DockerSpawner es) => ContainerId -> Eff es (Either DockerError ())
-stopContainer = send . StopContainer
-
-getContainerStatus :: (Member DockerSpawner es) => ContainerId -> Eff es (Either DockerError ContainerStatus)
-getContainerStatus = send . GetContainerStatus
-
-execContainer :: (Member DockerSpawner es) => ContainerId -> [Text] -> Maybe FilePath -> Maybe Text -> Eff es (Either DockerError ExecResult)
-execContainer cid cmd mWorkdir mUser = send $ ExecContainer cid cmd mWorkdir mUser

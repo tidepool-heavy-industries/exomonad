@@ -56,7 +56,9 @@ where
 
 import Control.Exception (SomeException, try)
 import Control.Monad (void, when)
-import Control.Monad.Freer (Eff, LastMember, Member, interpose, interpret, send, sendM)
+import Polysemy (Sem, Member, interpret, embed, intercept)
+import Polysemy.Embed (Embed)
+import Polysemy.Internal (send)
 import Data.Aeson (encode, object, toJSON, (.=))
 import Data.ByteString qualified as BS
 import Data.ByteString.Base64 qualified as B64
@@ -275,19 +277,19 @@ flushTraces config serviceName ctx = do
 -- | Run Observability effects with Loki-only config (backward compatible).
 --
 -- Creates a fresh trace context for each run.
-runObservability :: (LastMember IO effs) => LokiConfig -> Eff (Observability ': effs) a -> Eff effs a
+runObservability :: (Member (Embed IO) r) => LokiConfig -> Sem (Observability ': r) a -> Sem r a
 runObservability lokiConfig action = do
-  ctx <- sendM newTraceContext
+  ctx <- embed newTraceContext
   let config = ObservabilityOtelConfig (Just lokiConfig) Nothing "exomonad"
   runObservabilityWithConfig ctx config action
 
 -- | Deprecated: Use 'runObservabilityWithConfig' instead.
 runObservabilityWithContext ::
-  (LastMember IO effs) =>
+  (Member (Embed IO) r) =>
   TraceContext ->
   LokiConfig ->
-  Eff (Observability ': effs) a ->
-  Eff effs a
+  Sem (Observability ': r) a ->
+  Sem r a
 runObservabilityWithContext ctx lokiConfig =
   runObservabilityWithConfig ctx (ObservabilityOtelConfig (Just lokiConfig) Nothing "exomonad")
 
@@ -298,13 +300,13 @@ runObservabilityWithContext ctx lokiConfig =
 -- 2. Tracks spans in the trace context
 -- 3. Handles errors gracefully (logs but doesn't throw)
 runObservabilityWithConfig ::
-  (LastMember IO effs) =>
+  (Member (Embed IO) r) =>
   TraceContext ->
   ObservabilityConfig ->
-  Eff (Observability ': effs) a ->
-  Eff effs a
+  Sem (Observability ': r) a ->
+  Sem r a
 runObservabilityWithConfig ctx config = interpret $ \case
-  PublishEvent event -> sendM $ case config of
+  PublishEvent event -> embed $ case config of
     ObservabilityOtelConfig (Just loki) _ _ -> do
       let labels = eventToLabels loki.jobLabel event
           line = eventToLine event
@@ -320,7 +322,7 @@ runObservabilityWithConfig ctx config = interpret $ \case
       -- TODO: Define socket protocol for logs if needed.
       -- For now we just ignore or log locally.
       pure ()
-  StartSpan name kind attrs -> sendM $ do
+  StartSpan name kind attrs -> embed $ do
     spanId_ <- generateSpanId
     startTime <- nowNanosInt
     let activeSpan =
@@ -333,7 +335,7 @@ runObservabilityWithConfig ctx config = interpret $ \case
             }
     pushActiveSpan ctx activeSpan
     pure (spanId_.unSpanId)
-  EndSpan isError extraAttrs -> sendM $ do
+  EndSpan isError extraAttrs -> embed $ do
     mSpan <- popActiveSpan ctx
     case mSpan of
       Nothing -> pure ()
@@ -380,7 +382,7 @@ runObservabilityWithConfig ctx config = interpret $ \case
               Right (ErrorResponse _ msg) -> putStrLn $ "[Observability] Error shipping span via socket: " <> T.unpack msg
               Right _ -> pure ()
           _ -> pure ()
-  AddSpanAttribute attr -> sendM $ do
+  AddSpanAttribute attr -> embed $ do
     modifyIORef ctx.spanStack $ \case
       [] -> []
       (s : rest) ->
@@ -400,22 +402,22 @@ runObservabilityWithConfig ctx config = interpret $ \case
 
 -- | Intercept LLM effects and wrap them in spans.
 --
--- This uses freer-simple's @interpose@ to transparently trace LLM calls
+-- This uses Polysemy's @intercept@ to transparently trace LLM calls
 -- without removing the LLM effect from the stack. The original effect is
 -- re-sent after wrapping, so the actual LLM handler elsewhere in the stack
 -- still executes the call.
 --
 -- = The Interpose Pattern
 --
--- Unlike @interpret@ which removes an effect from the stack, @interpose@
+-- Unlike @interpret@ which removes an effect from the stack, @intercept@
 -- intercepts effects while leaving them in place:
 --
 -- @
 -- -- interpret: removes effect, handles completely
--- interpret :: (e a -> Eff es a) -> Eff (e ': es) a -> Eff es a
+-- interpret :: (e a -> Sem r a) -> Sem (e ': r) a -> Sem r a
 --
--- -- interpose: intercepts effect, can re-send it
--- interpose :: Member e es => (e a -> Eff es a) -> Eff es a -> Eff es a
+-- -- intercept: intercepts effect, can re-send it
+-- intercept :: Member e r => (e a -> Sem r a) -> Sem r a -> Sem r a
 -- @
 --
 -- = Usage
@@ -429,31 +431,12 @@ runObservabilityWithConfig ctx config = interpret $ \case
 -- -- With tracing (just wrap the computation)
 -- result <- runLLM config $ interposeWithLLMTracing $ myAgent input
 -- @
---
--- = Why This Matters
---
--- Traditional approach requires duplicating logic:
---
--- @
--- -- BAD: Must duplicate dispatch typeclass for traced/untraced versions
--- class DispatchGoto graph ...        -- Untraced
--- class DispatchGotoTraced graph ...  -- Traced (duplicate instances!)
--- @
---
--- With interposition:
---
--- @
--- -- GOOD: Single dispatch, optional tracing wrapper
--- result <- interposeWithLLMTracing $ dispatchGoto graph choice
--- @
---
--- The tracing concern is separated from the dispatch logic.
 interposeWithLLMTracing ::
-  (Member LLM es, Member Observability es) =>
-  Eff es a ->
-  Eff es a
-interposeWithLLMTracing = interpose $ \case
-  op@(RunTurnOp _meta systemPrompt _userContent _schema tools) -> do
+  (Member LLM r, Member Observability r) =>
+  Sem r a ->
+  Sem r a
+interposeWithLLMTracing = intercept $ \case
+  op@(RunTurnOp systemPrompt _userContent _schema tools) -> do
     -- Start span before LLM call
     _ <-
       startSpan
@@ -473,3 +456,4 @@ interposeWithLLMTracing = interpose $ \case
     endSpan isError []
 
     pure result
+

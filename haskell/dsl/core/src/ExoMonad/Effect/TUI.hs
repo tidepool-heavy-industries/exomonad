@@ -2,6 +2,10 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators #-}
 
 -- | TUI effect for showing popup forms and waiting for user responses.
 --
@@ -62,7 +66,7 @@ module ExoMonad.Effect.TUI
   )
 where
 
-import Control.Monad.Freer (Eff, Member, send)
+import Polysemy (Sem, Member, makeSem)
 import Data.Aeson (FromJSON, ToJSON)
 
 -- ══════════════════════════════════════════════════════════════
@@ -73,33 +77,12 @@ import Data.Aeson (FromJSON, ToJSON)
 --
 -- Uses the popup-tui pattern: send PopupDefinition, receive PopupResult.
 -- No streaming interactions or dynamic updates.
-data TUI r where
+data TUI m a where
   -- | Show a popup and block until the user submits or cancels.
   --   Returns the form result with button pressed and all component values.
-  ShowUI :: PopupDefinition -> TUI PopupResult
+  ShowUI :: PopupDefinition -> TUI m PopupResult
 
--- | Show a popup definition and wait for user response.
---
--- This is the primary TUI operation. The effect interpreter will send the
--- PopupDefinition to the connected TUI sidebar, which renders it and waits
--- for user input. When the user submits (Enter) or cancels (Esc), the
--- PopupResult is returned with all form values.
---
--- @
--- result <- showUI $ PopupDefinition
---   { pdTitle = "Config"
---   , pdComponents =
---       [ mkSlider "budget" "Budget" 10 100 50 Nothing
---       , mkCheckbox "tests" "Include tests" False Nothing
---       ]
---   }
---
--- case result.prButton of
---   "submit" -> ...
---   _ -> ...
--- @
-showUI :: (Member TUI effs) => PopupDefinition -> Eff effs PopupResult
-showUI = send . ShowUI
+makeSem ''TUI
 
 -- ══════════════════════════════════════════════════════════════
 -- PROTOCOL TYPES (popup-tui pattern)
