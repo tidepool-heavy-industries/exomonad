@@ -1,6 +1,5 @@
 use extism::{Plugin, Manifest, Wasm, Function, Val, ValType, UserData};
 use exomonad_runtime::services::agent_control::{SpawnAgentsInput, SpawnAgentInput, BatchSpawnResult, SpawnResult, HostResult, AgentType};
-use exomonad_shared::{GithubOwner, GithubRepo, IssueNumber};
 use serde_json::json;
 
 #[test]
