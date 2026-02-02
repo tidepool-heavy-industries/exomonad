@@ -15,6 +15,7 @@ pub enum Msg {
     None,
     ToolSelected(String),
     ExecuteTool(String, serde_json::Value),
+    SwitchFocus(Id),
     AppClose,
 }
 

@@ -12,12 +12,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
 tokio = { version = "1.35", features = ["full"] }
-tracing = "0.1"
-tracing-subscriber = "0.3"
-chrono = "0.4"
 clap = { version = "4", features = ["derive", "env"] }
 
 exomonad-runtime = { path = "../exomonad-runtime" }
 exomonad-shared = { path = "../exomonad-shared" }
 exomonad-sidecar = { path = "../exomonad-sidecar" }
-exomonad-ui-protocol = { path = "../exomonad-ui-protocol" }

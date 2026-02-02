@@ -1184,19 +1184,15 @@ name = "exomonad-repl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chrono",
  "clap",
  "crossterm 0.27.0",
  "exomonad-runtime",
  "exomonad-shared",
  "exomonad-sidecar",
- "exomonad-ui-protocol",
  "ratatui 0.26.3",
  "serde",
  "serde_json",
  "tokio",
- "tracing",
- "tracing-subscriber",
  "tui-realm-stdlib",
  "tuirealm",
 ]

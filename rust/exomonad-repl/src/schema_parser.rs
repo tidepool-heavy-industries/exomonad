@@ -48,6 +48,8 @@ impl ToolSchema {
             }
         }
 
+        properties.sort_by(|a, b| a.name.cmp(&b.name));
+
         Self {
             properties,
         }

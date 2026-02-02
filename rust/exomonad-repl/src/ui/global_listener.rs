@@ -2,7 +2,7 @@ use tuirealm::command::{Cmd, CmdResult};
 use tuirealm::event::{Key, KeyEvent, KeyModifiers};
 use tuirealm::{Component, Event, MockComponent, NoUserEvent, State};
 
-use crate::app::{Msg};
+use crate::app::{Msg, Id};
 
 pub struct GlobalListener;
 
@@ -34,6 +34,18 @@ impl Component<Msg, NoUserEvent> for GlobalListener {
             Event::Keyboard(KeyEvent {
                 code: Key::Char('q'), ..
             }) => Some(Msg::AppClose),
+            Event::Keyboard(KeyEvent {
+                code: Key::Char('l'),
+                modifiers: KeyModifiers::CONTROL,
+            }) => Some(Msg::SwitchFocus(Id::ToolList)),
+            Event::Keyboard(KeyEvent {
+                code: Key::Char('f'),
+                modifiers: KeyModifiers::CONTROL,
+            }) => Some(Msg::SwitchFocus(Id::Form)),
+            Event::Keyboard(KeyEvent {
+                code: Key::Char('r'),
+                modifiers: KeyModifiers::CONTROL,
+            }) => Some(Msg::SwitchFocus(Id::Results)),
             _ => None,
         }
     }

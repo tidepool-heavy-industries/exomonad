@@ -20,6 +20,15 @@ struct Args {
     wasm: PathBuf,
 }
 
+struct TerminalGuard<'a>(&'a mut Model);
+
+impl<'a> Drop for TerminalGuard<'a> {
+    fn drop(&mut self) {
+        let _ = self.0.terminal.leave_alternate_screen();
+        let _ = self.0.terminal.disable_raw_mode();
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -41,13 +50,16 @@ async fn main() -> Result<()> {
     // Active ToolList
     model.app.active(&Id::ToolList)?;
     
-    // Main loop
+    // Setup terminal
     model.terminal.enter_alternate_screen()?;
     model.terminal.enable_raw_mode()?;
     
-    while !model.quit {
-        if model.redo_render {
-            model.terminal.draw(|f| {
+    // Ensure cleanup on exit/panic
+    let mut _guard = TerminalGuard(&mut model);
+    
+    while !_guard.0.quit {
+        if _guard.0.redo_render {
+            _guard.0.terminal.draw(|f| {
                 let chunks = tuirealm::ratatui::layout::Layout::default()
                     .direction(tuirealm::ratatui::layout::Direction::Horizontal)
                     .constraints([
@@ -64,41 +76,33 @@ async fn main() -> Result<()> {
                     ])
                     .split(chunks[1]);
                 
-                model.app.view(&Id::ToolList, f, chunks[0]);
-                model.app.view(&Id::Form, f, right_chunks[0]);
-                model.app.view(&Id::Results, f, right_chunks[1]);
+                _guard.0.app.view(&Id::ToolList, f, chunks[0]);
+                _guard.0.app.view(&Id::Form, f, right_chunks[0]);
+                _guard.0.app.view(&Id::Results, f, right_chunks[1]);
             })?;
-            model.redo_render = false;
+            _guard.0.redo_render = false;
         }
         
-        match model.app.tick(tuirealm::PollStrategy::Once) {
-            Err(_) => {
-                // Handle error
+        match _guard.0.app.tick(tuirealm::PollStrategy::Once) {
+            Err(err) => {
+                eprintln!("Error during UI tick: {err}");
+                _guard.0.quit = true;
             }
             Ok(messages) if !messages.is_empty() => {
-                model.redo_render = true;
+                _guard.0.redo_render = true;
                 for msg in messages {
                     match msg {
                         Msg::ToolSelected(name) => {
-                            if let Some(tool) = model.tools.iter().find(|t| t.name == name) {
+                            if let Some(tool) = _guard.0.tools.iter().find(|t| t.name == name) {
                                 let mut form = ui::Form::default();
                                 form.set_tool(tool);
-                                model.app.remount(Id::Form, Box::new(form), vec![])?;
-                                model.app.active(&Id::Form)?;
+                                _guard.0.app.remount(Id::Form, Box::new(form), vec![])?;
+                                _guard.0.app.active(&Id::Form)?;
                             }
                         }
                         Msg::ExecuteTool(name, args) => {
-                            let client_clone = client.clone();
-                            let name_clone = name.clone();
-                            let args_clone = args.clone();
-                            
-                            // For now we'll just block, or we can use a message to signal completion.
-                            // To use a message, we'd need a UserEvent in tuirealm.
-                            // Let's just do it synchronously for now to see it working.
-                            
-                            let result = tokio::runtime::Handle::current().block_on(async move {
-                                client_clone.call_tool(&name_clone, args_clone).await
-                            });
+                            // Direct await since main is async
+                            let result = client.call_tool(&name, args).await;
                             
                             let mut results_comp = ui::Results::default();
                             match result {
@@ -109,12 +113,15 @@ async fn main() -> Result<()> {
                                     results_comp.set_text(&format!("Error: {}", e));
                                 }
                             }
-                            model.app.remount(Id::Results, Box::new(results_comp), vec![])?;
+                            _guard.0.app.remount(Id::Results, Box::new(results_comp), vec![])?;
                         }
-                        Msg::AppClose => model.quit = true,
+                        Msg::SwitchFocus(id) => {
+                            _guard.0.app.active(&id)?;
+                        }
+                        Msg::AppClose => _guard.0.quit = true,
                         _ => {
                             let mut m = Some(msg);
-                            while let Some(next) = model.update(m) {
+                            while let Some(next) = _guard.0.update(m) {
                                 m = Some(next);
                             }
                         }
@@ -125,8 +132,6 @@ async fn main() -> Result<()> {
         }
     }
     
-    model.terminal.leave_alternate_screen()?;
-    model.terminal.disable_raw_mode()?;
-    
+    // Cleanup happens via Drop
     Ok(())
 }

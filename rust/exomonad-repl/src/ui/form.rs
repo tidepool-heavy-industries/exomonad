@@ -3,6 +3,7 @@ use tuirealm::event::{Key, KeyEvent};
 use tuirealm::props::{Alignment, BorderType, Borders, Color, BorderSides};
 use tuirealm::{Component, Event, MockComponent, NoUserEvent, State};
 use tui_realm_stdlib::Input;
+use exomonad_sidecar::mcp::ToolDefinition;
 
 use crate::app::Msg;
 use crate::schema_parser::{ToolSchema, PropertyKind};
@@ -44,16 +45,40 @@ impl Form {
                 if let Some(val) = self.values.get(&prop.name) {
                     // Try to parse based on kind
                     let json_val = match &prop.kind {
-                        PropertyKind::Boolean { .. } => {
+                        PropertyKind::Boolean => {
                             serde_json::Value::Bool(val.to_lowercase() == "true")
                         }
-                        PropertyKind::Number { .. } => {
+                        PropertyKind::Number => {
                             val.parse::<f64>().map(|n| serde_json::json!(n)).unwrap_or(serde_json::Value::String(val.clone()))
                         }
-                        PropertyKind::Array { .. } => {
-                            // Split by comma for now
-                            let items: Vec<serde_json::Value> = val.split(',')
-                                .map(|s| serde_json::Value::String(s.trim().to_string()))
+                        PropertyKind::Array { item_type } => {
+                            // Split by comma and parse each item according to its item_type
+                            let items: Vec<serde_json::Value> = val
+                                .split(',')
+                                .map(|s| {
+                                    let item_str = s.trim();
+                                    match &**item_type {
+                                        PropertyKind::Boolean => {
+                                            serde_json::Value::Bool(item_str.eq_ignore_ascii_case("true"))
+                                        }
+                                        PropertyKind::Number => {
+                                            item_str
+                                                .parse::<f64>()
+                                                .map(|n| serde_json::json!(n))
+                                                .unwrap_or_else(|_| serde_json::Value::String(item_str.to_string()))
+                                        }
+                                        // For objects, strings, or other types, try JSON-parse first, then fall back to string
+                                        _ => {
+                                            // Ideally we would parse nested objects, but for now we just fallback to string
+                                            // or basic JSON parsing if the user entered valid JSON
+                                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(item_str) {
+                                                v
+                                            } else {
+                                                serde_json::Value::String(item_str.to_string())
+                                            }
+                                        }
+                                    }
+                                })
                                 .collect();
                             serde_json::Value::Array(items)
                         }
@@ -70,8 +95,6 @@ impl Form {
         self.title.clone()
     }
 }
-
-use exomonad_sidecar::mcp::ToolDefinition;
 
 impl MockComponent for Form {
     fn view(&mut self, frame: &mut tuirealm::Frame, area: tuirealm::ratatui::layout::Rect) {
@@ -153,16 +176,22 @@ impl Component<Msg, NoUserEvent> for Form {
         match ev {
             Event::Keyboard(KeyEvent { code: Key::Tab, .. }) => {
                 if let Some(schema) = &self.schema {
-                    self.focused_idx = (self.focused_idx + 1) % schema.properties.len();
+                    let len = schema.properties.len();
+                    if len > 0 {
+                        self.focused_idx = (self.focused_idx + 1) % len;
+                    }
                 }
                 Some(Msg::None)
             }
             Event::Keyboard(KeyEvent { code: Key::BackTab, .. }) => {
                 if let Some(schema) = &self.schema {
-                    if self.focused_idx == 0 {
-                        self.focused_idx = schema.properties.len() - 1;
-                    } else {
-                        self.focused_idx -= 1;
+                    let len = schema.properties.len();
+                    if len > 0 {
+                        if self.focused_idx == 0 {
+                            self.focused_idx = len - 1;
+                        } else {
+                            self.focused_idx -= 1;
+                        }
                     }
                 }
                 Some(Msg::None)
