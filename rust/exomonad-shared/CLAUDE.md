@@ -7,16 +7,11 @@ Shared library for the exomonad workspace. Provides protocol types, HTTP socket 
 | Module | File | Purpose |
 |--------|------|---------|
 | `protocol` | `protocol.rs` | Control envelope types (HookInput, HookOutput, ControlMessage, ControlResponse) |
-| `socket` | `socket.rs` | HTTP client for hook communication (Unix socket via curl) |
-| `commands` | `commands/` | CLI command implementations (hook handler, signal sender) |
+| `domain` | `domain.rs` | Domain types with parse-at-edge validation (SessionId, ToolName, Role, WasmPath, etc.) |
 | `error` | `error.rs` | Typed error types (`ExoMonadError`) |
-| `events` | `events.rs` | Stream event types for Claude Code `--stream-json` output |
 | `hooks` | `hooks.rs` | Hook configuration generator for Claude Code settings |
 | `logging` | `logging.rs` | Tracing/logging setup with env filter |
 | `util` | `util.rs` | Shell quoting, binary path resolution |
-| `fifo` | `fifo.rs` | Named pipe abstractions (legacy, for headless mode) |
-| `supervisor` | `supervisor.rs` | Process supervision (legacy, for headless mode) |
-| `humanize` | `humanize.rs` | Human-readable output formatting |
 
 ## Key Types
 
@@ -222,14 +217,3 @@ cargo test -p exomonad-shared
 - **curl subprocess:** Avoids async dependencies for synchronous CLI tool
 - **Fail-closed:** Errors immediately if server missing; catches config issues during development
 - **Boxed HookInput:** Reduces `ControlMessage` enum size (HookInput is large)
-
-## Legacy Modules (from headless mode)
-
-These modules were used for Docker-based headless orchestration (now archived):
-
-- `fifo.rs` - Named pipes for result/signal IPC
-- `supervisor.rs` - Process lifecycle with timeout/signals
-- `events.rs` - Parsing Claude Code `--stream-json` output
-- `humanize.rs` - Terminal output formatting
-
-The headless code is preserved in git tag `headless-exomonad-archive`.
