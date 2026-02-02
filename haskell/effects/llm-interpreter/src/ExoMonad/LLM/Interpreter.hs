@@ -40,6 +40,7 @@ module ExoMonad.LLM.Interpreter
 where
 
 import Polysemy (Sem, Member, interpret, embed)
+import Polysemy.Error (Error, throw)
 import Polysemy.Embed (Embed)
 import Data.Aeson (Value, fromJSON, toJSON)
 import Data.Aeson qualified as Aeson
@@ -248,25 +249,13 @@ providerName SAnthropic = "Anthropic"
 --
 -- This interpreter makes real API calls to Anthropic (via service socket)
 -- based on the type-level provider in the effect and the environment configuration.
-runLLMComplete :: (Member (Embed IO) r) => LLMEnv -> Sem (LLMComplete p ': r) a -> Sem r a
+-- Throws LLMError on failure via Polysemy Error effect.
+runLLMComplete :: (Member (Embed IO) r, Member (Error LLMError) r) => LLMEnv -> Sem (LLMComplete p ': r) a -> Sem r a
 runLLMComplete env = interpret $ \case
-  -- Throwing variants (for when errors are fatal)
-  Complete provider config msg tools -> embed $ do
-    result <- socketRequest provider env config msg tools
-    case result of
-      Left err -> error $ "LLMComplete (" <> providerName provider <> "): " <> show err
-      Right resp -> pure resp
+  Complete provider config msg tools -> embed (socketRequest provider env config msg tools) >>= fromEither
+  CompleteConversation provider config messages tools -> embed (socketRequestConversation provider env config messages tools) >>= fromEither
 
-  -- Try variants (for graceful error handling)
-  CompleteTry provider config msg tools ->
-    embed $
-      socketRequest provider env config msg tools
-  -- Conversation variants (multi-turn)
-  CompleteConversation provider config messages tools -> embed $ do
-    result <- socketRequestConversation provider env config messages tools
-    case result of
-      Left err -> error $ "LLMCompleteConversation (" <> providerName provider <> "): " <> show err
-      Right resp -> pure resp
-  CompleteConversationTry provider config messages tools ->
-    embed $
-      socketRequestConversation provider env config messages tools
+-- | Helper to lift Either into Polysemy Error
+fromEither :: (Member (Error e) r) => Either e a -> Sem r a
+fromEither (Left e) = throw e
+fromEither (Right a) = pure a

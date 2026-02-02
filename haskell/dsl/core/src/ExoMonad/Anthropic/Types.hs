@@ -36,6 +36,7 @@ where
 
 import Data.Aeson (Value)
 import Deriving.Aeson
+import Lens.Micro.TH (makeLenses)
 
 -- ══════════════════════════════════════════════════════════════
 -- ID NEWTYPES (Type-Safe IDs)
@@ -73,6 +74,8 @@ data MessagesRequest = MessagesRequest
   deriving stock (Show, Eq, Generic)
   deriving (ToJSON, FromJSON) via CustomJSON '[FieldLabelModifier CamelToSnake, OmitNothingFields] MessagesRequest
 
+makeLenses ''MessagesRequest
+
 -- | Extended thinking configuration
 data ThinkingConfig = ThinkingConfig
   { type_ :: Text,
@@ -80,6 +83,8 @@ data ThinkingConfig = ThinkingConfig
   }
   deriving stock (Show, Eq, Generic)
   deriving (ToJSON, FromJSON) via CustomJSON '[FieldLabelModifier '[StripSuffix "_", CamelToSnake]] ThinkingConfig
+
+makeLenses ''ThinkingConfig
 
 -- | Structured output format specification
 data OutputFormat = OutputFormat
@@ -89,6 +94,8 @@ data OutputFormat = OutputFormat
   deriving stock (Show, Eq, Generic)
   deriving (ToJSON, FromJSON) via CustomJSON '[FieldLabelModifier '[StripSuffix "_"]] OutputFormat
 
+makeLenses ''OutputFormat
+
 -- | A message in the conversation
 data Message = Message
   { role :: Role,
@@ -96,6 +103,8 @@ data Message = Message
   }
   deriving stock (Show, Eq, Generic)
   deriving (ToJSON, FromJSON) via CustomJSON '[] Message
+
+makeLenses ''Message
 
 -- | Message role
 data Role = User | Assistant
@@ -114,6 +123,8 @@ data ImageSource
   deriving stock (Show, Eq, Generic)
   deriving (ToJSON, FromJSON) via CustomJSON '[SumTaggedObject "type" "", ConstructorTagModifier CamelToSnake, FieldLabelModifier '[StripSuffix "_", CamelToSnake]] ImageSource
 
+makeLenses ''ImageSource
+
 -- | Content block - can be text, image, tool use, tool result, thinking, or json
 data ContentBlock
   = Text {text :: Text}
@@ -126,6 +137,8 @@ data ContentBlock
   deriving stock (Show, Eq, Generic)
   deriving (ToJSON, FromJSON) via CustomJSON '[SumTaggedObject "type" "", ConstructorTagModifier CamelToSnake, FieldLabelModifier '[StripSuffix "_", CamelToSnake]] ContentBlock
 
+makeLenses ''ContentBlock
+
 -- | A tool use request from the model
 data ToolUse = ToolUseData
   { id :: ToolUseId,
@@ -134,6 +147,8 @@ data ToolUse = ToolUseData
   }
   deriving stock (Show, Eq, Generic)
   deriving (ToJSON, FromJSON) via CustomJSON '[] ToolUse
+
+makeLenses ''ToolUse
 
 -- | A tool result to send back to the model
 data ToolResult = ToolResultData
@@ -144,6 +159,8 @@ data ToolResult = ToolResultData
   deriving stock (Show, Eq, Generic)
   deriving (ToJSON, FromJSON) via CustomJSON '[FieldLabelModifier CamelToSnake] ToolResult
 
+makeLenses ''ToolResult
+
 -- | Thinking content from extended thinking
 data ThinkingContent = ThinkingContentData
   { thinking :: Text,
@@ -152,12 +169,16 @@ data ThinkingContent = ThinkingContentData
   deriving stock (Show, Eq, Generic)
   deriving (ToJSON, FromJSON) via CustomJSON '[] ThinkingContent
 
+makeLenses ''ThinkingContent
+
 -- | Redacted thinking (encrypted, for safety)
 data RedactedThinking = RedactedThinkingData
   { data_ :: Text
   }
   deriving stock (Show, Eq, Generic)
   deriving (ToJSON, FromJSON) via CustomJSON '[FieldLabelModifier '[StripSuffix "_", CamelToSnake]] RedactedThinking
+
+makeLenses ''RedactedThinking
 
 -- | Tool choice configuration
 data ToolChoice
@@ -167,6 +188,8 @@ data ToolChoice
   | Tool {name :: Text}
   deriving stock (Show, Eq, Generic)
   deriving (ToJSON, FromJSON) via CustomJSON '[SumTaggedObject "type" "", ConstructorTagModifier CamelToSnake] ToolChoice
+
+makeLenses ''ToolChoice
 
 -- ══════════════════════════════════════════════════════════════
 -- RESPONSE TYPES
@@ -181,6 +204,8 @@ data MessagesResponse = MessagesResponse
   }
   deriving stock (Show, Eq, Generic)
   deriving (ToJSON, FromJSON) via CustomJSON '[FieldLabelModifier CamelToSnake] MessagesResponse
+
+makeLenses ''MessagesResponse
 
 -- | Why the model stopped generating
 data StopReason
@@ -200,6 +225,8 @@ data Usage = Usage
   }
   deriving stock (Show, Eq, Generic)
   deriving (ToJSON, FromJSON) via CustomJSON '[FieldLabelModifier CamelToSnake] Usage
+
+makeLenses ''Usage
 
 -- ══════════════════════════════════════════════════════════════
 -- ERROR TYPES

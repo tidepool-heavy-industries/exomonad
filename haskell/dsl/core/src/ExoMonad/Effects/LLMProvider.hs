@@ -47,6 +47,7 @@ module ExoMonad.Effects.LLMProvider
 where
 
 import Polysemy (Sem, Member, makeSem)
+import Polysemy.Error (Error, throw)
 import Polysemy.Internal (send)
 import Data.Kind (Type)
 import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.=))
@@ -237,7 +238,7 @@ instance FromJSON Usage where
 
 -- | LLM API errors.
 --
--- These are returned by 'completeTry' and can be pattern-matched to handle
+-- These are thrown via Polysemy Error and can be pattern-matched to handle
 -- specific error conditions.
 data LLMError
   = -- | Network/HTTP error
@@ -258,6 +259,10 @@ data LLMError
     LLMNoProviderConfigured
   deriving stock (Eq, Show, Generic)
 
+instance ToJSON LLMError
+
+instance FromJSON LLMError
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT
 -- ════════════════════════════════════════════════════════════════════════════
@@ -271,20 +276,10 @@ data LLMError
 --
 -- = Error Handling
 --
--- The effect provides two variants:
---
--- * 'Complete' - throws on error (use when errors are fatal)
--- * 'CompleteTry' - returns @Either LLMError@ (use when you want to handle errors)
+-- All operations throw LLMError via Polysemy Error.
 --
 -- @
--- -- Throwing variant (crashes on error)
 -- response <- complete SAnthropic config msg tools
---
--- -- Try variant (returns Either)
--- result <- completeTry SAnthropic config msg tools
--- case result of
---   Left err -> handleError err
---   Right response -> processResponse response
 -- @
 --
 -- = Multi-Turn Conversations
@@ -317,24 +312,12 @@ data LLMComplete (p :: LLMProvider) m a where
     Text -> -- user message
     Maybe [Value] -> -- optional tools
     LLMComplete p m (LLMProviderResponse p)
-  CompleteTry ::
-    SProvider p ->
-    LLMProviderConfig p ->
-    Text -> -- user message
-    Maybe [Value] -> -- optional tools
-    LLMComplete p m (Either LLMError (LLMProviderResponse p))
   CompleteConversation ::
     SProvider p ->
     LLMProviderConfig p ->
     [Message] -> -- conversation history
     Maybe [Value] -> -- optional tools
     LLMComplete p m (LLMProviderResponse p)
-  CompleteConversationTry ::
-    SProvider p ->
-    LLMProviderConfig p ->
-    [Message] -> -- conversation history
-    Maybe [Value] -> -- optional tools
-    LLMComplete p m (Either LLMError (LLMProviderResponse p))
 
 makeSem ''LLMComplete
 

@@ -150,6 +150,7 @@ import Prelude hiding (State, get, gets, put, modify, runState, toList, newIORef
 import Polysemy (Sem, Member, interpret, embed, makeSem)
 import Polysemy.Internal (send) -- for manual definitions if needed, or generated code
 import Polysemy.State (State, get, gets, put, modify, runState)
+import Lens.Micro.TH (makeLenses)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef, modifyIORef)
 import Data.Kind (Type)
 import Data.Aeson (FromJSON, ToJSON, Value (..), encode)
@@ -227,614 +228,285 @@ runTime = interpret $ \case
 -- ══════════════════════════════════════════════════════════════
 
 -- | The LLM effect runs a complete turn with template and tools
-
 data LLM m a where
-
   RunTurnOp ::
-
     Text -> -- System prompt
-
     NonEmpty ContentBlock -> -- User content
-
     Value -> -- Output schema
-
     [Value] -> -- Tool definitions
-
-    LLM m (TurnOutcome (TurnResult Value))
-
-
+    LLM m (TurnResult Value)
 
 makeSem ''LLM
 
-
-
--- | Outcome of running a turn
-
---
-
--- Internal representation (unparameterized) used by the LLM effect.
-
-data TurnOutcome a
-
-  = TurnCompleted a
-
-  | TurnBroken Text
-
-  deriving (Show, Eq, Functor)
-
-
-
 -- | Result of running an LLM turn
-
 data TurnResult output = TurnResult
-
   { trOutput :: output,
-
     trToolsInvoked :: [ToolInvocation],
-
     trNarrative :: Text,
-
     trThinking :: Text
-
   }
-
   deriving (Show, Eq, Generic, Functor)
 
-
+makeLenses ''TurnResult
 
 -- | Result of parsing LLM output
-
 data TurnParseResult output
-
   = TurnParsed (TurnResult output)
-
   | TurnParseFailed
-
       { tpfRawJson :: Value,
-
         tpfNarrative :: Text,
-
         tpfError :: String,
-
         tpfToolsInvoked :: [ToolInvocation]
-
       }
-
   deriving (Show, Eq, Functor)
-
-
 
 -- | Record of a tool invocation
-
 data ToolInvocation = ToolInvocation
-
   { tiName :: Text,
-
     tiInput :: Value,
-
     tiOutput :: Value
-
   }
-
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
-
+makeLenses ''ToolInvocation
 
 -- | Result of executing a tool
-
 data ToolResult
-
   = ToolSuccess Value
-
   | ToolBreak Text
 
-
-
 instance Show ToolResult where
-
   show (ToolSuccess val) = "ToolSuccess " <> P.show val
-
   show (ToolBreak reason) = "ToolBreak " <> P.show reason
 
-
-
 instance Eq ToolResult where
-
   (ToolSuccess v1) == (ToolSuccess v2) = v1 == v2
-
   (ToolBreak t1) == (ToolBreak t2) = t1 == t2
-
   _ == _ = False
 
-
-
 -- | LLM configuration
-
 data LLMConfig = LLMConfig
-
   { llmApiKey :: Text,
-
     llmModel :: Text,
-
     llmMaxTokens :: Int,
-
     llmThinkingBudget :: Maybe Int
-
   }
-
   deriving (Show, Eq, Generic)
 
-
+makeLenses ''LLMConfig
 
 -- | Hooks for LLM lifecycle events
-
 data LLMHooks = LLMHooks
-
   { onTurnStart :: IO (),
-
     onTurnEnd :: IO ()
-
   }
 
-
-
 noHooks :: LLMHooks
-
 noHooks = LLMHooks (pure ()) (pure ())
 
-
-
 -- | A tool dispatcher executes tools by name, returning results
-
 type ToolDispatcher event effs =
-
   Text -> Value -> Eff effs (Either Text ToolResult)
 
-
-
 -- ══════════════════════════════════════════════════════════════
-
 -- TOOL VALIDATION (Parse Don't Validate)
-
 -- ══════════════════════════════════════════════════════════════
-
-
 
 -- | Evidence that a tool input has been validated against its schema.
-
 --
-
 -- This newtype provides proof that JSON was successfully parsed into
-
 -- the tool's input type. Functions receiving @ValidatedToolInput a@
-
 -- can trust that validation has already occurred - no need to re-check.
-
 --
-
 -- = The "Parse Don't Validate" Pattern
-
 --
-
 -- Instead of:
-
 --
-
 -- @
-
 -- validateInput :: Value -> Bool
-
 -- executeIfValid :: Value -> IO Result
-
 -- executeIfValid val = if validateInput val then ... else error "invalid"
-
 -- @
-
 --
-
 -- Use:
-
 --
-
 -- @
-
 -- parseInput :: Value -> Either ToolError (ValidatedToolInput MyInput)
-
 -- execute :: ValidatedToolInput MyInput -> IO Result
-
 -- execute (ValidatedToolInput input) = ...  -- validation guaranteed
-
 -- @
-
 --
-
 -- The type carries the proof that validation succeeded.
-
 newtype ValidatedToolInput a = ValidatedToolInput {getValidated :: a}
-
   deriving (Show, Eq, Functor)
 
-
-
 -- | Structured errors for tool execution.
-
 --
-
 -- Use pattern matching to handle specific error cases:
-
 --
-
 -- @
-
 -- case result of
-
 --   Left (ToolNotFound name) -> logWarn $ "Unknown tool: " <> name
-
 --   Left (ToolValidationFailed err) -> logWarn $ "Bad input: " <> tveParseError err
-
 --   Left (ToolExecutionFailed msg) -> logWarn $ "Execution error: " <> msg
-
 --   Right output -> ...
-
 -- @
-
 data ToolError
-
   = -- | Tool name not recognized in registry
-
     ToolNotFound Text
-
   | ToolValidationFailed
-
       { -- | Name of the tool that failed validation
-
         tveToolName :: Text,
-
         -- | JSON Schema the input should have matched
-
         tveExpectedSchema :: Value,
-
         -- | The actual input that failed to parse
-
         tveActualInput :: Value,
-
         -- | The parse error message
-
         tveParseError :: Text
-
       }
-
   | -- \^ Tool input failed schema validation
 
-
-
     -- | Tool execution threw an error
-
     ToolExecutionFailed Text
-
   deriving (Show, Eq, Generic)
-
-
 
 instance ToJSON ToolError
 
-
-
 instance FromJSON ToolError
 
-
-
 -- | Convert a ToolError to a human-readable message.
-
 --
-
 -- Useful for compatibility with code expecting @Either Text ToolResult@.
-
 toolErrorToText :: ToolError -> Text
-
 toolErrorToText = \case
-
   ToolNotFound name ->
-
     "Unknown tool: " <> name
-
   ToolValidationFailed {tveToolName, tveParseError} ->
-
     "Tool '" <> tveToolName <> "' input validation failed: " <> tveParseError
-
   ToolExecutionFailed msg ->
-
     "Tool execution failed: " <> msg
 
-
-
 -- | Build content blocks from text + images
-
 withImages :: Text -> [ImageSource] -> NonEmpty ContentBlock
-
 withImages text images = Text {text = text} :| map Image images
 
-
-
+-- | Run a turn and throw LlmError on failure.
 runTurn ::
-
   forall output effs.
-
-  (Member LLM effs, StructuredOutput output) =>
-
+  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
   Text ->
-
   Text ->
-
   Value ->
-
   [Value] ->
-
-  Eff effs (TurnOutcome (TurnParseResult output))
-
+  Sem effs (TurnResult output)
 runTurn systemPrompt userAction =
-
   runTurnContent systemPrompt (Text {text = userAction} :| [])
 
-
-
 runTurnContent ::
-
   forall output effs.
-
-  (Member LLM effs, StructuredOutput output) =>
-
+  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
   Text ->
-
   NonEmpty ContentBlock ->
-
   Value ->
-
   [Value] ->
-
-  Eff effs (TurnOutcome (TurnParseResult output))
-
+  Sem effs (TurnResult output)
 runTurnContent systemPrompt userContent schema tools = do
+  tr <- runTurnOp systemPrompt userContent schema tools
+  let rawJson = tr.trOutput
+  case parseStructured rawJson of
+    Right parsed -> pure tr {trOutput = parsed}
+    Left diag ->
+      throw $
+        LlmParseFailed (formatDiagnostic diag)
 
-  rawResult <- runTurnOp systemPrompt userContent schema tools
-
-  case rawResult of
-
-    TurnBroken reason -> return (TurnBroken reason)
-
-    TurnCompleted tr -> do
-
-      let rawJson = tr.trOutput
-
-      case parseStructured rawJson of
-
-        Right parsed -> return $ TurnCompleted $ TurnParsed tr {trOutput = parsed}
-
-        Left diag ->
-
-          return $
-
-            TurnCompleted $
-
-              TurnParseFailed
-
-                { tpfRawJson = rawJson,
-
-                  tpfNarrative = tr.trNarrative,
-
-                  tpfError = T.unpack (formatDiagnostic diag),
-
-                  tpfToolsInvoked = tr.trToolsInvoked
-
-                }
-
-
-
--- | Make an LLM call that throws on error.
-
---
-
--- Throws an exception if the LLM call fails. For error handling, use
-
--- 'llmCallEither' (returns Either with Text errors) or 'llmCallStructured'
-
--- (returns Either with structured LlmError type).
-
+-- | Make an LLM call that throws LlmError on failure.
 llmCall ::
-
   forall output effs.
-
-  (Member LLM effs, StructuredOutput output) =>
-
-  Text -> Text -> Value -> Eff effs output
-
+  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  Text ->
+  Text ->
+  Value ->
+  Sem effs output
 llmCall systemPrompt userInput schema = do
+  tr <- runTurn @output systemPrompt userInput schema []
+  pure tr.trOutput
 
-  result <- llmCallEither @output systemPrompt userInput schema
-
-  case result of
-
-    Left err -> error $ "LLM call failed: " <> err
-
-    Right output -> pure output
-
-
-
--- | Make an LLM call returning Either with simple Text errors (no tools).
-
---
-
--- Returns @Left (error message)@ on failure or @Right output@ on success.
-
--- Errors are represented as plain Text. Use 'llmCallStructured' for structured
-
--- error types (rate limits, timeouts, etc.).
-
-llmCallEither ::
-
+-- | Make an LLM call with tool support, throwing LlmError on failure.
+llmCallWithTools ::
   forall output effs.
-
-  (Member LLM effs, StructuredOutput output) =>
-
-  Text -> Text -> Value -> Eff effs (Either Text output)
-
-llmCallEither systemPrompt userInput schema = do
-
-  result <- runTurn @output systemPrompt userInput schema []
-
-  case result of
-
-    TurnBroken reason -> pure $ Left $ "Unexpected break: " <> reason
-
-    TurnCompleted (TurnParsed tr) -> pure $ Right tr.trOutput
-
-    TurnCompleted (TurnParseFailed {tpfError}) -> pure $ Left $ "Parse failed: " <> T.pack tpfError
-
-
-
--- | Make an LLM call with tool support, returning Either with simple Text errors.
-
---
-
--- Like 'llmCallEither' but supports tool definitions and invocations.
-
--- Returns @Left (error message)@ on failure or @Right output@ on success.
-
-llmCallEitherWithTools ::
-
-  forall output effs.
-
-  (Member LLM effs, StructuredOutput output) =>
-
-  Text -> Text -> Value -> [Value] -> Eff effs (Either Text output)
-
-llmCallEitherWithTools systemPrompt userInput schema tools = do
-
-  result <- runTurn @output systemPrompt userInput schema tools
-
-  case result of
-
-    TurnBroken reason -> pure $ Left $ "Turn broken: " <> reason
-
-    TurnCompleted (TurnParsed tr) -> pure $ Right tr.trOutput
-
-    TurnCompleted (TurnParseFailed {tpfError}) -> pure $ Left $ "Parse failed: " <> T.pack tpfError
-
-
+  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  Text ->
+  Text ->
+  Value ->
+  [Value] ->
+  Sem effs (TurnResult output)
+llmCallWithTools = runTurn @output
 
 -- | Structured error type for LLM call failures.
-
---
-
--- Note: Currently 'llmCallStructured' and 'llmCallStructuredWithTools' only
-
--- produce 'LlmTurnBroken' and 'LlmParseFailed'. The other variants (RateLimited,
-
--- Timeout, NetworkError, etc.) are defined for future use when the LLM runner
-
--- is updated to return errors instead of crashing. This matches the pattern used
-
--- in Habitica/Telegram where stub runners return Left but real implementations
-
--- will use all variants.
-
 data LlmError
-
   = -- | Rate limit hit, retry later
-
     LlmRateLimited
-
   | -- | Request timed out
-
     LlmTimeout
-
   | -- | Input too long for context window
-
     LlmContextTooLong
-
   | -- | Schema parsing failed (includes error message)
-
     LlmParseFailed Text
-
   | -- | Turn was broken by tool (unexpected)
-
     LlmTurnBroken Text
-
   | -- | Network/connection failure
-
     LlmNetworkError Text
-
   | -- | Invalid API key
-
     LlmUnauthorized
-
   | -- | Other errors with message
-
     LlmOther Text
-
   deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
+-- | Deprecated in favor of llmCall
+llmCallEither ::
+  forall output effs.
+  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  Text ->
+  Text ->
+  Value ->
+  Sem effs (Either Text output)
+llmCallEither systemPrompt userInput schema =
+  Right <$> llmCall @output systemPrompt userInput schema
 
-
--- | Make an LLM call returning Either with structured errors (no tools).
-
---
-
--- Like 'llmCallEither' but returns structured 'LlmError' type instead of Text.
-
--- This allows better error handling with pattern matching on specific error cases
-
--- (rate limits, timeouts, etc.).
-
+-- | Deprecated in favor of llmCall
 llmCallStructured ::
-
   forall output effs.
+  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  Text ->
+  Text ->
+  Value ->
+  Sem effs (Either LlmError output)
+llmCallStructured systemPrompt userInput schema =
+  Right <$> llmCall @output systemPrompt userInput schema
 
-  (Member LLM effs, StructuredOutput output) =>
+-- | Deprecated in favor of llmCallWithTools
+llmCallEitherWithTools ::
+  forall output effs.
+  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  Text ->
+  Text ->
+  Value ->
+  [Value] ->
+  Sem effs (Either Text output)
+llmCallEitherWithTools systemPrompt userInput schema tools =
+  Right . trOutput <$> llmCallWithTools @output systemPrompt userInput schema tools
 
-  Text -> Text -> Value -> Eff effs (Either LlmError output)
-
-llmCallStructured systemPrompt userInput schema = do
-
-  result <- runTurn @output systemPrompt userInput schema []
-
-  case result of
-
-    TurnBroken reason -> pure $ Left $ LlmTurnBroken reason
-
-    TurnCompleted (TurnParsed tr) -> pure $ Right tr.trOutput
-
-    TurnCompleted (TurnParseFailed {tpfError}) -> pure $ Left $ LlmParseFailed (T.pack tpfError)
-
-
-
--- | Make an LLM call with tool support, returning Either with structured errors.
-
---
-
--- Like 'llmCallEitherWithTools' but returns structured 'LlmError' type instead of Text.
-
--- This allows better error handling with pattern matching on specific error cases.
-
+-- | Deprecated in favor of llmCallWithTools
 llmCallStructuredWithTools ::
-
   forall output effs.
-
-  (Member LLM effs, StructuredOutput output) =>
-
-  Text -> Text -> Value -> [Value] -> Eff effs (Either LlmError output)
-
-llmCallStructuredWithTools systemPrompt userInput schema tools = do
-
-  result <- runTurn @output systemPrompt userInput schema tools
-
-  case result of
-
-    TurnBroken reason -> pure $ Left $ LlmTurnBroken reason
-
-    TurnCompleted (TurnParsed tr) -> pure $ Right tr.trOutput
-
-    TurnCompleted (TurnParseFailed {tpfError}) -> pure $ Left $ LlmParseFailed (T.pack tpfError)
+  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  Text ->
+  Text ->
+  Value ->
+  [Value] ->
+  Sem effs (Either LlmError output)
+llmCallStructuredWithTools systemPrompt userInput schema tools =
+  Right . trOutput <$> llmCallWithTools @output systemPrompt userInput schema tools
 
 -- ══════════════════════════════════════════════════════════════
 -- CHAT HISTORY EFFECT

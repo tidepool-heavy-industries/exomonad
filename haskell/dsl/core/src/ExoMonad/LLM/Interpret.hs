@@ -62,6 +62,7 @@ module ExoMonad.LLM.Interpret
 where
 
 import Polysemy (Sem, Member, interpret, embed)
+import Polysemy.Error (Error, throw, catch)
 import Polysemy.Embed (Embed)
 import Data.Aeson (Value)
 import Data.Aeson qualified as Aeson
@@ -80,7 +81,7 @@ import ExoMonad.Effects.LLMProvider
     LLMError (..),
     SProvider (SAnthropic),
     ThinkingBudget (..),
-    completeTry,
+    complete,
   )
 import ExoMonad.LLM.Effect (LLMCall (..))
 import ExoMonad.LLM.Tools (ToolDispatchError (..), ToolRecord (dispatchTool))
@@ -125,21 +126,16 @@ defaultInterpretConfig =
 -- * Parsing structured output from responses
 -- * Nudge retries when output doesn't match schema
 --
--- @
--- runM
---   $ runLLMComplete env
---   $ runLLMCall
---   $ yourEffectfulCode
--- @
+-- Throws 'CallError' via Polysemy Error effect.
 runLLMCall ::
-  (Member LLMComplete es, Member (Embed IO) es) =>
+  (Member LLMComplete es, Member (Error LLMError) es, Member (Error CallError) es, Member (Embed IO) es) =>
   Sem (LLMCall ': es) a ->
   Sem es a
 runLLMCall = runLLMCallWith defaultInterpretConfig
 
 -- | Run the LLMCall effect with custom configuration.
 runLLMCallWith ::
-  (Member LLMComplete es, Member (Embed IO) es) =>
+  (Member LLMComplete es, Member (Error LLMError) es, Member (Error CallError) es, Member (Embed IO) es) =>
   InterpretConfig ->
   Sem (LLMCall ': es) a ->
   Sem es a
@@ -169,6 +165,8 @@ runLLMCallWith interpCfg = interpret $ \case
 runLLMCallWithTools ::
   forall tools es a.
   ( Member LLMComplete es,
+    Member (Error LLMError) es,
+    Member (Error CallError) es,
     Member (Embed IO) es,
     ToolRecord tools
   ) =>
@@ -209,6 +207,8 @@ runLLMCallWithTools toolRecord = interpret $ \case
 runToolLoop ::
   forall tools out es.
   ( Member LLMComplete es,
+    Member (Error LLMError) es,
+    Member (Error CallError) es,
     Member (Embed IO) es,
     StructuredOutput out,
     ToolRecord tools
@@ -225,27 +225,21 @@ runToolLoop ::
   [Value] ->
   -- | Tool record for dispatch
   tools es ->
-  Sem es (Either CallError out)
+  Sem es out
 runToolLoop loopsLeft nudgesLeft cfg userMsg toolSchemas tools
-  | loopsLeft <= 0 = pure $ Left $ CallMaxToolLoops defaultInterpretConfig.icMaxToolLoops
+  | loopsLeft <= 0 = throw $ CallMaxToolLoops defaultInterpretConfig.icMaxToolLoops
   | otherwise = do
-      result <- completeTry SAnthropic cfg userMsg (Just toolSchemas)
-      case result of
-        Left err -> pure $ Left $ llmErrorToCallError err
-        Right response ->
-          -- Check if this is a tool_use response
-          case extractToolUse response.arContent of
-            -- No tool use - try to parse as structured output
-            [] -> parseResponse nudgesLeft cfg userMsg (Just toolSchemas) response
-            -- Tool use requested - execute and continue loop
-            toolCalls -> do
-              toolResults <- executeToolCalls tools toolCalls
-              case toolResults of
-                Left err -> pure $ Left err
-                Right results -> do
-                  -- Format tool results as follow-up message
-                  let followUp = formatToolResults results userMsg
-                  runToolLoop (loopsLeft - 1) nudgesLeft cfg followUp toolSchemas tools
+      response <- catch (complete SAnthropic cfg userMsg (Just toolSchemas)) (throw . llmErrorToCallError)
+      -- Check if this is a tool_use response
+      case extractToolUse response.arContent of
+        -- No tool use - try to parse as structured output
+        [] -> parseResponse nudgesLeft cfg userMsg (Just toolSchemas) response
+        -- Tool use requested - execute and continue loop
+        toolCalls -> do
+          results <- executeToolCalls tools toolCalls
+          -- Format tool results as follow-up message
+          let followUp = formatToolResults results userMsg
+          runToolLoop (loopsLeft - 1) nudgesLeft cfg followUp toolSchemas tools
 
 -- | Extract tool uses from content blocks.
 extractToolUse :: NonEmpty ContentBlock -> [(Text, Value)]
@@ -258,18 +252,18 @@ extractToolUse blocks = mapMaybe toToolInvocation (NE.toList blocks)
 -- | Execute tool calls and collect results.
 executeToolCalls ::
   forall tools es.
-  (ToolRecord tools) =>
+  (ToolRecord tools, Member (Error CallError) es) =>
   tools es ->
   [(Text, Value)] ->
-  Sem es (Either CallError [(Text, Either ToolDispatchError Value)])
+  Sem es [(Text, Either ToolDispatchError Value)]
 executeToolCalls tools calls = do
   results <- traverse executeOne calls
   -- Check if any tool dispatch failed fatally
   let fatalErrors = [(n, e) | (n, Left e@(ToolNotFound _)) <- results]
   case fatalErrors of
     ((name, ToolNotFound _) : _) ->
-      pure $ Left $ CallToolError name "Tool not found"
-    _ -> pure $ Right results
+      throw $ CallToolError name "Tool not found"
+    _ -> pure results
   where
     executeOne (name, input_) = do
       result <- dispatchTool tools name input_
@@ -293,6 +287,8 @@ formatToolResults results originalMsg =
 parseResponse ::
   forall out es.
   ( Member LLMComplete es,
+    Member (Error LLMError) es,
+    Member (Error CallError) es,
     Member (Embed IO) es,
     StructuredOutput out
   ) =>
@@ -301,7 +297,7 @@ parseResponse ::
   Text ->
   Maybe [Value] ->
   AnthropicResponse ->
-  Sem es (Either CallError out)
+  Sem es out
 parseResponse nudgesLeft cfg userMsg toolSchemas response = do
   let textContent = extractTextContent response.arContent
 
@@ -315,10 +311,10 @@ parseResponse nudgesLeft cfg userMsg toolSchemas response = do
             userMsg
             toolSchemas
             ("JSON parse error: " <> T.pack jsonErr)
-        else pure $ Left $ CallParseFailed $ "JSON parse error: " <> T.pack jsonErr
+        else throw $ CallParseFailed $ "JSON parse error: " <> T.pack jsonErr
     Right jsonVal ->
       case parseStructured jsonVal of
-        Right out -> pure $ Right out
+        Right out -> pure out
         Left diag ->
           if nudgesLeft > 0
             then
@@ -328,7 +324,7 @@ parseResponse nudgesLeft cfg userMsg toolSchemas response = do
                 userMsg
                 toolSchemas
                 (formatDiagnostic diag)
-            else pure $ Left $ CallParseFailed $ formatDiagnostic diag
+            else throw $ CallParseFailed $ formatDiagnostic diag
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- INTERNAL: NUDGE LOOP
@@ -338,6 +334,8 @@ parseResponse nudgesLeft cfg userMsg toolSchemas response = do
 runWithNudge ::
   forall out es.
   ( Member LLMComplete es,
+    Member (Error LLMError) es,
+    Member (Error CallError) es,
     Member (Embed IO) es,
     StructuredOutput out
   ) =>
@@ -349,18 +347,28 @@ runWithNudge ::
   Text ->
   -- | Tool schemas (if any)
   Maybe [Value] ->
-  Sem es (Either CallError out)
+  Sem es out
 runWithNudge nudgesLeft cfg userMsg toolSchemas = do
-  result <- completeTry SAnthropic cfg userMsg toolSchemas
-  case result of
-    Left err -> pure $ Left $ llmErrorToCallError err
-    Right response -> do
-      -- Extract text content from response
-      let textContent = extractTextContent response.arContent
+  response <- catch (complete SAnthropic cfg userMsg toolSchemas) (throw . llmErrorToCallError)
+  -- Extract text content from response
+  let textContent = extractTextContent response.arContent
 
-      -- Try to parse as JSON and then as structured output
-      case Aeson.eitherDecodeStrict (TE.encodeUtf8 textContent) of
-        Left jsonErr ->
+  -- Try to parse as JSON and then as structured output
+  case Aeson.eitherDecodeStrict (TE.encodeUtf8 textContent) of
+    Left jsonErr ->
+      if nudgesLeft > 0
+        then
+          nudgeAndRetry
+            (nudgesLeft - 1)
+            cfg
+            userMsg
+            toolSchemas
+            ("JSON parse error: " <> T.pack jsonErr)
+        else throw $ CallParseFailed $ "JSON parse error: " <> T.pack jsonErr
+    Right jsonVal ->
+      case parseStructured jsonVal of
+        Right out -> pure out
+        Left diag ->
           if nudgesLeft > 0
             then
               nudgeAndRetry
@@ -368,26 +376,15 @@ runWithNudge nudgesLeft cfg userMsg toolSchemas = do
                 cfg
                 userMsg
                 toolSchemas
-                ("JSON parse error: " <> T.pack jsonErr)
-            else pure $ Left $ CallParseFailed $ "JSON parse error: " <> T.pack jsonErr
-        Right jsonVal ->
-          case parseStructured jsonVal of
-            Right out -> pure $ Right out
-            Left diag ->
-              if nudgesLeft > 0
-                then
-                  nudgeAndRetry
-                    (nudgesLeft - 1)
-                    cfg
-                    userMsg
-                    toolSchemas
-                    (formatDiagnostic diag)
-                else pure $ Left $ CallParseFailed $ formatDiagnostic diag
+                (formatDiagnostic diag)
+            else throw $ CallParseFailed $ formatDiagnostic diag
 
 -- | Send a nudge message and retry.
 nudgeAndRetry ::
   forall out es.
   ( Member LLMComplete es,
+    Member (Error LLMError) es,
+    Member (Error CallError) es,
     Member (Embed IO) es,
     StructuredOutput out
   ) =>
@@ -401,7 +398,7 @@ nudgeAndRetry ::
   Maybe [Value] ->
   -- | Error message from previous attempt
   Text ->
-  Sem es (Either CallError out)
+  Sem es out
 nudgeAndRetry nudgesLeft cfg origMsg toolSchemas errMsg =
   let nudgeMsg =
         T.unlines
@@ -434,3 +431,4 @@ llmErrorToCallError = \case
   LLMOverloaded -> CallRateLimited -- Treat overloaded as rate limit
   LLMApiError typ msg -> CallApiError typ msg
   LLMNoProviderConfigured -> CallUnauthorized
+

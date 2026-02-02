@@ -60,29 +60,25 @@ module ExoMonad.LLM.Effect
 where
 
 import Polysemy (Sem, Member, makeSem)
-import Polysemy.Internal (send)
-import Data.Kind (Type)
+import Polysemy.Error (Error, throw)
 import Data.Aeson (Value)
-import Data.Proxy (Proxy (..))
-import ExoMonad.LLM.Tools (ToolRecord (..), toolSchemaToAnthropicTool)
+import Data.Kind (Type)
 import ExoMonad.LLM.Types
-import ExoMonad.Schema (schemaToValue)
 import ExoMonad.StructuredOutput (StructuredOutput (..))
-import ExoMonad.Tool.Wire (anthropicToolToJSON)
 
 -- ════════════════════════════════════════════════════════════════════════════
--- EFFECT TYPE
+-- EFFECT DEFINITION
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | The LLM call effect.
+-- | High-level LLM call effect with structured output and tool support.
 --
--- This is a GADT that captures all the information needed to make an LLM call.
--- The interpreter receives this and handles the actual API interaction,
--- including tool loops and nudge retries.
+-- This effect represents a single "call" to an LLM, abstracting away
+-- the underlying provider, history, and retry logic.
 --
--- Note: Tool dispatch is handled internally by the interpreter using the
--- schemas. The tools record is passed separately to allow the interpreter
--- to call tool handlers during the tool use loop.
+-- Interpreters (like runLLMCall) handle the complexities of converting
+-- to provider-specific formats and parsing responses.
+--
+-- Operations throw 'CallError' via Polysemy Error effect.
 data LLMCall m a where
   -- | Make an LLM call (no tools).
   PerformLLMCall ::
@@ -97,7 +93,7 @@ data LLMCall m a where
     User ->
     -- | Output schema (JSON)
     Value ->
-    LLMCall m (Either CallError out)
+    LLMCall m out
   -- | Make an LLM call with tools.
   PerformLLMCallWithTools ::
     (StructuredOutput out) =>
@@ -113,7 +109,7 @@ data LLMCall m a where
     Value ->
     -- | Tool schemas (Anthropic format)
     [Value] ->
-    LLMCall m (Either CallError out)
+    LLMCall m out
 
 makeSem ''LLMCall
 
@@ -126,16 +122,19 @@ makeSem ''LLMCall
 -- This is the primary function for invoking an LLM from effectful code
 -- when you need tool support. The config carries the output type and
 -- tool record.
+--
+-- Throws 'CallError' on failure.
 call ::
   forall out tools r.
   ( Member LLMCall r,
+    Member (Error CallError) r,
     StructuredOutput out,
     ToolRecord tools
   ) =>
   CallConfig out (tools r) ->
   System ->
   User ->
-  Sem r (Either CallError out)
+  Sem r out
 call cfg sys usr =
   let toolSchemaValues =
         map (anthropicToolToJSON . toolSchemaToAnthropicTool) $
@@ -150,15 +149,18 @@ call cfg sys usr =
         toolSchemaValues
 
 -- | Make an LLM call without tools.
+--
+-- Throws 'CallError' on failure.
 callNoTools ::
   forall out r.
   ( Member LLMCall r,
+    Member (Error CallError) r,
     StructuredOutput out
   ) =>
   CallConfig out NoTools ->
   System ->
   User ->
-  Sem r (Either CallError out)
+  Sem r out
 callNoTools cfg sys usr =
   let schema = schemaToValue (structuredSchema @out)
    in performLLMCall
