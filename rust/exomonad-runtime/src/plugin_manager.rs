@@ -22,7 +22,6 @@ use std::sync::{Arc, RwLock};
 /// - Registering Rust host functions (git, GitHub, filesystem, etc.) that the WASM can call
 /// - Thread-safe access to the plugin via RwLock
 /// - Marshalling JSON data in/out across the WASM boundary
-/// - Hot reloading the plugin when the WASM file changes
 ///
 /// # Architecture
 ///
@@ -67,9 +66,6 @@ pub struct PluginManager {
     /// Uses RwLock to allow concurrent reads (though in practice we always need write
     /// access for calls). The Plugin itself is not Send, so we use spawn_blocking.
     plugin: Arc<RwLock<Plugin>>,
-
-    /// Path to the WASM file, stored for hot reloading.
-    wasm_path: PathBuf,
 }
 
 impl PluginManager {
@@ -104,15 +100,12 @@ impl PluginManager {
     pub async fn new(path: PathBuf, services: Arc<ValidatedServices>) -> Result<Self> {
         let plugin = Self::load_plugin(&path, &services)?;
 
-        let manager = Self {
-            plugin: Arc::new(RwLock::new(plugin)),
-            wasm_path: path,
-        };
-
         // Note: GHC RTS initialization (hs_init) is handled automatically by the
         // Extism Haskell PDK when the WASM module is loaded. No explicit call needed.
 
-        Ok(manager)
+        Ok(Self {
+            plugin: Arc::new(RwLock::new(plugin)),
+        })
     }
 
     fn load_plugin(path: &PathBuf, services: &ValidatedServices) -> Result<Plugin> {
@@ -158,50 +151,6 @@ impl PluginManager {
         functions.extend(copilot_review::register_host_functions());
 
         Plugin::new(&manifest, functions, true).context("Failed to create plugin")
-    }
-
-    /// Hot reload the WASM plugin from disk.
-    ///
-    /// Useful for development: recompile the WASM guest, then call this to load the new version
-    /// without restarting the sidecar. All host functions are re-registered with the new plugin.
-    ///
-    /// # Arguments
-    ///
-    /// * `services` - Validated service container (must be same services used in `new()`)
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - WASM file no longer exists or is invalid
-    /// - Plugin creation fails
-    /// - Lock is poisoned (previous panic while holding lock)
-    ///
-    /// # Thread Safety
-    ///
-    /// Uses spawn_blocking to avoid blocking the tokio runtime during the lock acquisition
-    /// and plugin swap. The old plugin is dropped after the swap completes.
-    ///
-    /// # Notes
-    ///
-    /// GHC RTS is automatically re-initialized when the new plugin loads. Any state in the
-    /// old plugin (Haskell heap) is lost.
-    pub async fn reload(&self, services: Arc<ValidatedServices>) -> Result<()> {
-        let new_plugin = Self::load_plugin(&self.wasm_path, &services)?;
-
-        // Swap it without blocking the async runtime
-        let plugin_lock = self.plugin.clone();
-        tokio::task::spawn_blocking(move || -> Result<()> {
-            let mut guard = plugin_lock
-                .write()
-                .map_err(|e| anyhow::anyhow!("Plugin lock poisoned: {}", e))?;
-            *guard = new_plugin;
-            Ok(())
-        })
-        .await
-        .context("Failed to join spawn_blocking task")??;
-
-        // Note: GHC RTS is automatically initialized when the plugin is loaded.
-        Ok(())
     }
 
     /// Call a WASM guest function with typed input/output marshalling.
