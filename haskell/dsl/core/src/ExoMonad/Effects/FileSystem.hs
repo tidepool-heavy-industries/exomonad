@@ -47,9 +47,9 @@ module ExoMonad.Effects.FileSystem
   )
 where
 
-import Prelude hiding (readFileText, writeFileText)
-
+import ExoMonad.Path
 import Polysemy (Sem, Member, makeSem)
+import Polysemy.Error (Error, throw)
 import Data.Kind (Type)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
@@ -82,47 +82,45 @@ instance FromJSON FileSystemError
 
 -- | FileSystem effect for basic file operations.
 --
--- All operations return @Either FileSystemError@ for explicit error handling.
+-- Operations throw 'FileSystemError' via Polysemy Error effect.
+-- Using 'Path' types ensures we don't mix up files and directories or
+-- relative and absolute paths at the type level.
 data FileSystem m a where
   -- | Create a directory (including parent directories).
-  -- Returns () on success, or an error if creation failed.
   CreateDirectory ::
-    FilePath ->
-    FileSystem m (Either FileSystemError ())
+    Path b Dir ->
+    FileSystem m ()
   -- | Write text content to a file.
   -- Creates the file if it doesn't exist, overwrites if it does.
   WriteFileText ::
-    FilePath ->
+    Path b File ->
     Text ->
-    FileSystem m (Either FileSystemError ())
+    FileSystem m ()
   -- | Copy a file from source to destination.
-  -- Creates parent directories of destination if needed.
   CopyFile ::
     -- | Source path
-    FilePath ->
+    Path b1 File ->
     -- | Destination path
-    FilePath ->
-    FileSystem m (Either FileSystemError ())
+    Path b2 File ->
+    FileSystem m ()
   -- | Create a symbolic link.
-  -- Target is the file/directory the link points to.
-  -- Link is the new symlink path.
   CreateSymlink ::
     -- | Target (what the link points to)
-    FilePath ->
+    Path b1 t1 ->
     -- | Link path (the new symlink)
-    FilePath ->
-    FileSystem m (Either FileSystemError ())
+    Path b2 t2 ->
+    FileSystem m ()
   -- | Check if a file exists.
   FileExists ::
-    FilePath ->
-    FileSystem m (Either FileSystemError Bool)
+    Path b File ->
+    FileSystem m Bool
   -- | Check if a directory exists.
   DirectoryExists ::
-    FilePath ->
-    FileSystem m (Either FileSystemError Bool)
+    Path b Dir ->
+    FileSystem m Bool
   -- | Read text content from a file.
   ReadFileText ::
-    FilePath ->
-    FileSystem m (Either FileSystemError Text)
+    Path b File ->
+    FileSystem m Text
 
 makeSem ''FileSystem

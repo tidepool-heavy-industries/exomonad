@@ -38,6 +38,7 @@ module ExoMonad.Effects.Git
   )
 where
 
+import ExoMonad.Path (Path, Abs, Rel, File, Dir, toFilePathText)
 import Polysemy (Sem, Member, makeSem)
 import Data.Kind (Type)
 import Data.Aeson (ToJSON (..), object, (.=))
@@ -52,11 +53,11 @@ data WorktreeInfo = WorktreeInfo
     -- For main repo, this is "main".
     wiName :: Text,
     -- | Absolute path to the worktree root.
-    wiPath :: FilePath,
+    wiPath :: Path Abs Dir,
     -- | Current branch name.
     wiBranch :: Text,
     -- | Path to the main git repository (may be same as wiPath).
-    wiRepoRoot :: FilePath,
+    wiRepoRoot :: Path Abs Dir,
     -- | True if this is a worktree, False if main repo.
     wiIsWorktree :: Bool
   }
@@ -66,9 +67,9 @@ instance ToJSON WorktreeInfo where
   toJSON wt =
     object
       [ "name" .= wt.wiName,
-        "path" .= wt.wiPath,
+        "path" .= toFilePathText wt.wiPath,
         "branch" .= wt.wiBranch,
-        "repo_root" .= wt.wiRepoRoot,
+        "repo_root" .= toFilePathText wt.wiRepoRoot,
         "is_worktree" .= wt.wiIsWorktree
       ]
 
@@ -84,7 +85,7 @@ data Git m a where
   -- Returns Nothing if not in a git repository.
   GetWorktreeInfo :: Git m (Maybe WorktreeInfo)
   -- | Get list of dirty (uncommitted) files.
-  GetDirtyFiles :: Git m [FilePath]
+  GetDirtyFiles :: Git m [Path Rel File]
   -- | Get recent commit subjects.
   GetRecentCommits :: Int -> Git m [Text]
   -- | Get current branch name.
