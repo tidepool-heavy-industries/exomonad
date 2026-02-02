@@ -493,25 +493,30 @@ impl AgentControlService {
                 "Generated temporary Zellij layout"
             );
 
-            // Create tab with layout
-            let output = Command::new("zellij")
+            // Create tab with layout (spawn in background, don't wait for agent to finish)
+            let mut child = Command::new("zellij")
                 .args([
                     "action",
                     "new-tab",
                     "--layout",
                     layout_file.to_str().unwrap(),
                 ])
-                .output()
-                .await
-                .context("Failed to execute zellij")?;
+                .spawn()
+                .context("Failed to spawn zellij")?;
+
+            // Wait briefly to ensure zellij action completes, but not for the agent inside
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
             // Clean up temp file
             let _ = tokio::fs::remove_file(&layout_file).await;
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(anyhow!("zellij new-tab failed: {}", stderr));
+            // Check if zellij command failed immediately
+            if let Ok(Some(status)) = child.try_wait() {
+                if !status.success() {
+                    return Err(anyhow!("zellij new-tab failed with status: {}", status));
+                }
             }
+            // If still running or completed successfully, we're good
         }
 
         Ok(())
@@ -688,6 +693,35 @@ project_dir = "../.."
             sidecar_path
         );
         fs::write(worktree_path.join(".mcp.json"), mcp_content).await?;
+
+        // Create .claude directory and write settings with SubagentStop hook
+        let claude_dir = worktree_path.join(".claude");
+        fs::create_dir_all(&claude_dir).await?;
+
+        let settings_content = format!(
+            r#"{{
+  "enableAllProjectMcpServers": true,
+  "hooks": {{
+    "SubagentStop": [
+      {{
+        "hooks": [
+          {{
+            "type": "command",
+            "command": "{} hook subagent-stop"
+          }}
+        ]
+      }}
+    ]
+  }}
+}}
+"#,
+            sidecar_path
+        );
+        fs::write(claude_dir.join("settings.local.json"), settings_content).await?;
+        tracing::info!(
+            worktree = %worktree_path.display(),
+            "Wrote .claude/settings.local.json with SubagentStop hook"
+        );
 
         info!(worktree = %worktree_path.display(), "Context files written");
         Ok(())
