@@ -24,31 +24,87 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
 
-/// Services validation errors.
+/// Errors that can occur during services validation.
+///
+/// These errors are returned by [`Services::validate()`] when validating
+/// service prerequisites (executables, paths, etc.).
 #[derive(Debug, Error)]
 pub enum ServicesError {
+    /// Current working directory could not be determined.
     #[error("failed to get current directory: {0}")]
     CurrentDirFailed(String),
 
+    /// Specified working directory does not exist or is inaccessible.
     #[error("working directory does not exist: {path}")]
     WorkingDirNotFound { path: PathBuf },
 
+    /// Git executable not found on PATH (required for git operations).
     #[error("git executable not found on PATH")]
     GitNotFound,
 
+    /// GitHub CLI (gh) not found on PATH (required when GitHub service is enabled).
     #[error("gh CLI not found on PATH (required when GitHub service is enabled)")]
     GhCliNotFound,
 
+    /// Command execution failed during validation.
     #[error("command execution failed: {0}")]
     CommandFailed(String),
 }
 
+/// Container for all external services used by the runtime.
+///
+/// Services is the dependency injection container for all I/O operations
+/// that WASM host functions can perform. It provides:
+///
+/// - **Git**: Operations on git repositories (branch, status, commits, worktrees)
+/// - **GitHub**: GitHub API access (issues, PRs, comments) via REST API
+/// - **Agent Control**: High-level agent lifecycle (spawn, cleanup, list)
+/// - **Filesystem**: File I/O (read, write)
+/// - **Log**: Structured logging via tracing
+///
+/// # Validation
+///
+/// Services must be validated before use via [`Services::validate()`]. This
+/// checks that required executables exist on PATH:
+///
+/// ```no_run
+/// use exomonad_runtime::services::Services;
+///
+/// let services = Services::new().validate()?;
+/// # Ok::<(), exomonad_runtime::services::ServicesError>(())
+/// ```
+///
+/// # GitHub Token
+///
+/// GitHub service is optional. Token is loaded from (in order):
+/// 1. `~/.exomonad/secrets` file (JSON key: `github_token`)
+/// 2. `GITHUB_TOKEN` environment variable
+///
+/// If no token is available, GitHub service will be `None`.
+///
+/// # Thread Safety
+///
+/// Services is `Clone` (cheap via Arc) and can be shared across threads.
+/// Individual services are thread-safe:
+///
+/// - `LogService`: Uses tracing (thread-local)
+/// - `GitService`, `AgentControlService`, `FileSystemService`: `Arc<T>` (shared reference)
+/// - `GitHubService`: Cloneable HTTP client
 #[derive(Clone)]
 pub struct Services {
+    /// Structured logging service (uses tracing).
     pub log: LogService,
+
+    /// Git operations (branch, status, commits, worktrees).
     pub git: Arc<GitService>,
+
+    /// GitHub API access (optional - requires token).
     pub github: Option<GitHubService>,
+
+    /// High-level agent lifecycle operations (spawn, cleanup, list).
     pub agent_control: Arc<AgentControlService>,
+
+    /// File I/O operations (read, write).
     pub filesystem: Arc<FileSystemService>,
 }
 

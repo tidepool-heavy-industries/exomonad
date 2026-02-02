@@ -221,6 +221,7 @@ fn test_cli_other_hook_types_passthrough() -> Result<(), Box<dyn std::error::Err
 
 #[test]
 fn test_cli_mcp_server_starts() -> Result<(), Box<dyn std::error::Error>> {
+    use duct::cmd;
     use std::process::{Command as StdCommand, Stdio};
     use std::thread;
     use std::time::Duration;
@@ -247,28 +248,38 @@ fn test_cli_mcp_server_starts() -> Result<(), Box<dyn std::error::Error>> {
 
     // Check that the server is responding
     let health_url = format!("http://127.0.0.1:{}/health", port);
-    let client = std::process::Command::new("curl")
-        .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", &health_url])
-        .output();
+    let status_result = cmd!(
+        "curl",
+        "-s",
+        "-o",
+        "/dev/null",
+        "-w",
+        "%{http_code}",
+        &health_url
+    )
+    .unchecked()
+    .read();
 
     // Clean up
     let _ = child.kill();
     let _ = child.wait();
 
     // Verify health check succeeded
-    if let Ok(output) = client {
-        let status = String::from_utf8_lossy(&output.stdout);
-        // Health check may return 200 or fail to connect if WASM load takes too long
-        // Either is acceptable for a smoke test
-        if status.trim() != "200" && status.trim() != "000" {
-            panic!(
-                "Unexpected status code: {} (expected 200 or 000 for connection refused)",
-                status.trim()
-            );
+    match status_result {
+        Ok(status) => {
+            // Health check may return 200 or fail to connect if WASM load takes too long
+            // Either is acceptable for a smoke test
+            if status.trim() != "200" && status.trim() != "000" {
+                panic!(
+                    "Unexpected status code: {} (expected 200 or 000 for connection refused)",
+                    status.trim()
+                );
+            }
         }
-    } else {
-        // curl might not be available, skip test
-        eprintln!("Skipping test: curl not available");
+        Err(_) => {
+            // curl might not be available, skip test
+            eprintln!("Skipping test: curl not available");
+        }
     }
 
     Ok(())

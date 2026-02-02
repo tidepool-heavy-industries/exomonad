@@ -3,8 +3,8 @@
 //! Broadcasts agent lifecycle events to the Zellij plugin sidebar via pipe.
 
 use anyhow::{Context, Result};
+use duct::cmd;
 use exomonad_ui_protocol::AgentEvent;
-use std::process::Command;
 use tracing::debug;
 
 /// Emit an agent event to the Zellij plugin sidebar via pipe.
@@ -22,15 +22,9 @@ pub fn emit_event(event: &AgentEvent) -> Result<()> {
 
     debug!("[ZellijEvents] Emitting event: {}", json);
 
-    let output = Command::new("zellij")
-        .args(["pipe", "--name", "exomonad-events", "--", &json])
-        .output()
-        .context("Failed to execute zellij pipe")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow::anyhow!("zellij pipe failed: {}", stderr));
-    }
+    cmd!("zellij", "pipe", "--name", "exomonad-events", "--", &json)
+        .run()
+        .context("zellij pipe failed")?;
 
     Ok(())
 }

@@ -1,43 +1,46 @@
 use crate::types::{GhPrCreateResult, GhPrStatusResult, PrComment};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
+use duct::cmd;
 use serde_json::Value;
-use std::process::Command;
 
 pub fn pr_status(branch: Option<String>) -> Result<()> {
-    let mut cmd = Command::new("gh");
-    cmd.arg("pr").arg("view");
+    let mut args = vec!["pr", "view"];
 
-    if let Some(b) = branch {
-        cmd.arg(b);
+    let branch_str;
+    if let Some(b) = &branch {
+        branch_str = b.clone();
+        args.push(&branch_str);
     }
 
-    cmd.arg("--json")
-        .arg("number,url,state,reviewDecision,reviews,comments");
+    args.extend(&["--json", "number,url,state,reviewDecision,reviews,comments"]);
 
-    let output = cmd
-        .output()
+    let output = cmd("gh", args.as_slice())
+        .unchecked()
+        .stderr_to_stdout()
+        .read()
         .context("Failed to execute 'gh' CLI. Is it installed?")?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if stderr.contains("no pull requests found")
-            || stderr.contains("could not find any pull record")
-        {
-            let result = GhPrStatusResult {
-                exists: false,
-                url: None,
-                number: None,
-                state: None,
-                review_status: None,
-                comments: vec![],
-            };
-            println!("{}", serde_json::to_string(&result)?);
-            return Ok(());
-        }
-        return Err(anyhow!("gh pr view failed: {}", stderr));
+    if output.contains("no pull requests found")
+        || output.contains("could not find any pull record")
+    {
+        let result = GhPrStatusResult {
+            exists: false,
+            url: None,
+            number: None,
+            state: None,
+            review_status: None,
+            comments: vec![],
+        };
+        println!("{}", serde_json::to_string(&result)?);
+        return Ok(());
     }
 
-    let json: Value = serde_json::from_slice(&output.stdout)?;
+    let json: Value = serde_json::from_str(&output).with_context(|| {
+        format!(
+            "Failed to parse 'gh' output as JSON. Raw output: {}",
+            output
+        )
+    })?;
 
     let exists = true;
     let url = json["url"].as_str().map(|s| s.to_string());
@@ -102,28 +105,17 @@ pub fn pr_status(branch: Option<String>) -> Result<()> {
 }
 
 pub fn pr_create(title: String, body: String, base: Option<String>) -> Result<()> {
-    let mut cmd = Command::new("gh");
-    cmd.arg("pr")
-        .arg("create")
-        .arg("--title")
-        .arg(title)
-        .arg("--body")
-        .arg(body);
+    let mut args = vec!["pr", "create", "--title", &title, "--body", &body];
 
-    if let Some(b) = base {
-        cmd.arg("--base").arg(b);
+    let base_str;
+    if let Some(b) = &base {
+        base_str = b.clone();
+        args.extend(&["--base", &base_str]);
     }
 
-    let output = cmd
-        .output()
-        .context("Failed to execute 'gh' CLI. Is it installed?")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("gh pr create failed: {}", stderr));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stdout = cmd("gh", args.as_slice())
+        .read()
+        .context("Failed to execute 'gh' CLI or PR creation failed")?;
     // gh pr create output is just the URL of the created PR
     let url = stdout.clone();
 

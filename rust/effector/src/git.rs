@@ -1,17 +1,13 @@
 use crate::types::{DiffFile, GitDiffResult, GitStatusResult};
-use anyhow::{anyhow, Result};
+use anyhow::{Context, Result};
+use duct::cmd;
 use std::collections::HashMap;
-use std::process::Command;
 
 fn run_git(cwd: &str, args: &[&str]) -> Result<String> {
-    let output = Command::new("git").current_dir(cwd).args(args).output()?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("git command failed: {}", stderr));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    cmd("git", args)
+        .dir(cwd)
+        .read()
+        .with_context(|| format!("git {} failed", args.first().unwrap_or(&"<unknown>")))
 }
 
 pub fn status(cwd: &str) -> Result<()> {

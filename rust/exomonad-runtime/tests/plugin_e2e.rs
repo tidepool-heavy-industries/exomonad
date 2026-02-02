@@ -178,33 +178,3 @@ async fn test_plugin_call_with_minimal_input() {
         }
     }
 }
-
-#[tokio::test]
-async fn test_plugin_reload() {
-    let wasm_path = wasm_fixture_path();
-    if !wasm_path.exists() {
-        eprintln!("Skipping test: WASM fixture not found at {:?}", wasm_path);
-        return;
-    }
-
-    let services = Arc::new(Services::new().validate().expect("services validation"));
-    let plugin = match PluginManager::new(wasm_path, services.clone()).await {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("Plugin load failed (may need WASM rebuild): {}", e);
-            return;
-        }
-    };
-
-    // Reload should reinitialize the plugin
-    let result = plugin.reload(services).await;
-
-    match result {
-        Ok(()) => {
-            // Reload succeeded
-        }
-        Err(e) => {
-            eprintln!("Plugin reload failed: {}", e);
-        }
-    }
-}

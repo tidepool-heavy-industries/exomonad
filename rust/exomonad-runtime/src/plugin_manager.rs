@@ -12,25 +12,100 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
+/// Manages the lifecycle of a Haskell WASM plugin.
+///
+/// The PluginManager loads a WASM module compiled from Haskell (via GHC's wasm32-wasi target)
+/// and provides the interface for calling exported functions within that module. All MCP tool
+/// logic and hook handling is implemented in the Haskell WASM guest; this manager handles:
+///
+/// - Loading the WASM module via Extism
+/// - Registering Rust host functions (git, GitHub, filesystem, etc.) that the WASM can call
+/// - Thread-safe access to the plugin via RwLock
+/// - Marshalling JSON data in/out across the WASM boundary
+///
+/// # Architecture
+///
+/// ```text
+/// Rust Sidecar
+///     ↓
+/// PluginManager::call("handle_mcp_call", input)
+///     ↓
+/// WASM Guest (Haskell) - pure logic, yields effects
+///     ↓
+/// Host Functions (git_get_branch, agent_spawn, etc.) - executes I/O
+///     ↓
+/// Result marshalled back through WASM → Haskell → Rust
+/// ```
+///
+/// # Example
+///
+/// ```no_run
+/// use exomonad_runtime::{PluginManager, services::Services};
+/// use std::path::PathBuf;
+/// use std::sync::Arc;
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let services = Arc::new(Services::new_local()?.validate()?);
+/// let manager = PluginManager::new(
+///     PathBuf::from("wasm-guest.wasm"),
+///     services
+/// ).await?;
+///
+/// // Call WASM function with typed input/output
+/// let result: serde_json::Value = manager.call(
+///     "handle_mcp_call",
+///     &serde_json::json!({"tool": "git_branch"})
+/// ).await?;
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone)]
 pub struct PluginManager {
+    /// The loaded Extism plugin, wrapped for thread-safe access.
+    ///
+    /// Uses RwLock to allow concurrent reads (though in practice we always need write
+    /// access for calls). The Plugin itself is not Send, so we use spawn_blocking.
     plugin: Arc<RwLock<Plugin>>,
-    wasm_path: PathBuf,
 }
 
 impl PluginManager {
+    /// Load a WASM plugin and register all host functions.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the wasm32-wasi compiled WASM file
+    /// * `services` - Validated service container (Git, GitHub, AgentControl, FileSystem, etc.)
+    ///
+    /// # Host Functions Registered
+    ///
+    /// - **Git (7)**: `git_get_branch`, `git_get_worktree`, `git_get_dirty_files`, etc.
+    /// - **GitHub (6)**: `github_list_issues`, `github_get_issue`, `github_create_pr`, etc.
+    /// - **Agent Control (5)**: `agent_spawn`, `agent_cleanup`, `agent_list`, etc.
+    /// - **Filesystem (2)**: `fs_read_file`, `fs_write_file`
+    /// - **File PR (1)**: `file_pr` (create/update PRs via gh CLI)
+    /// - **Copilot Review (1)**: `copilot_poll_review`
+    /// - **Log (3)**: `log_info`, `log_error`, `emit_event`
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - WASM file doesn't exist or is invalid
+    /// - Extism fails to create the plugin
+    /// - Host function registration fails
+    ///
+    /// # Notes
+    ///
+    /// GHC RTS initialization (hs_init) is handled automatically by the Extism Haskell PDK
+    /// when the module loads. No explicit initialization is needed.
     pub async fn new(path: PathBuf, services: Arc<ValidatedServices>) -> Result<Self> {
         let plugin = Self::load_plugin(&path, &services)?;
-
-        let manager = Self {
-            plugin: Arc::new(RwLock::new(plugin)),
-            wasm_path: path,
-        };
 
         // Note: GHC RTS initialization (hs_init) is handled automatically by the
         // Extism Haskell PDK when the WASM module is loaded. No explicit call needed.
 
-        Ok(manager)
+        Ok(Self {
+            plugin: Arc::new(RwLock::new(plugin)),
+        })
     }
 
     fn load_plugin(path: &PathBuf, services: &ValidatedServices) -> Result<Plugin> {
@@ -78,25 +153,64 @@ impl PluginManager {
         Plugin::new(&manifest, functions, true).context("Failed to create plugin")
     }
 
-    pub async fn reload(&self, services: Arc<ValidatedServices>) -> Result<()> {
-        let new_plugin = Self::load_plugin(&self.wasm_path, &services)?;
-
-        // Swap it without blocking the async runtime
-        let plugin_lock = self.plugin.clone();
-        tokio::task::spawn_blocking(move || -> Result<()> {
-            let mut guard = plugin_lock
-                .write()
-                .map_err(|e| anyhow::anyhow!("Plugin lock poisoned: {}", e))?;
-            *guard = new_plugin;
-            Ok(())
-        })
-        .await
-        .context("Failed to join spawn_blocking task")??;
-
-        // Note: GHC RTS is automatically initialized when the plugin is loaded.
-        Ok(())
-    }
-
+    /// Call a WASM guest function with typed input/output marshalling.
+    ///
+    /// This is the core method for invoking Haskell logic in the WASM guest. Input is
+    /// serialized to JSON, passed to the WASM function, and the result is deserialized
+    /// from JSON.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `I` - Input type (must be serializable to JSON)
+    /// * `O` - Output type (must be deserializable from JSON)
+    ///
+    /// # Arguments
+    ///
+    /// * `function` - Name of the exported WASM function (e.g., "handle_mcp_call", "handle_hook")
+    /// * `input` - Input data (will be JSON-serialized)
+    ///
+    /// # Returns
+    ///
+    /// The deserialized output from the WASM function.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Input serialization fails
+    /// - Lock is poisoned (previous panic while holding lock)
+    /// - WASM function doesn't exist or execution fails
+    /// - Output deserialization fails
+    ///
+    /// # Thread Safety
+    ///
+    /// Uses spawn_blocking to avoid blocking the tokio runtime during WASM execution.
+    /// The Extism Plugin is not Send, so we must execute calls on a blocking thread.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use exomonad_runtime::PluginManager;
+    /// # async fn example(manager: &PluginManager) -> anyhow::Result<()> {
+    /// use serde_json::json;
+    ///
+    /// // Call handle_mcp_call function
+    /// let result: serde_json::Value = manager.call(
+    ///     "handle_mcp_call",
+    ///     &json!({
+    ///         "id": "call_123",
+    ///         "tool_name": "git_branch",
+    ///         "arguments": {}
+    ///     })
+    /// ).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// - Empty WASM responses are treated as JSON `null`
+    /// - Function names are not validated at compile time (runtime error if function doesn't exist)
+    /// - Consider using typed wrapper methods (e.g., `handle_mcp_call()`) for type safety
     pub async fn call<I, O>(&self, function: &str, input: &I) -> Result<O>
     where
         I: Serialize + Send + Sync + 'static,
