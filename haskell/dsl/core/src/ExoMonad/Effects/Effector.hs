@@ -5,6 +5,9 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 
 module ExoMonad.Effects.Effector
@@ -25,7 +28,8 @@ module ExoMonad.Effects.Effector
   )
 where
 
-import Control.Monad.Freer (Eff, Member, send)
+import Polysemy (Sem, Member, makeSem)
+import Data.Kind (Type)
 import Data.Aeson (FromJSON (..), ToJSON (..), withObject, (.:))
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -127,26 +131,11 @@ instance ToJSON DiffFile
 -- | Effector effect for running the @effector@ tool.
 --
 -- This tool handles SSH transparently for subagent control.
-data Effector r where
-  RunEffector :: Text -> [Text] -> Effector Text
-  EffectorGitStatus :: FilePath -> Effector GitStatusResult
-  EffectorGitDiff :: FilePath -> Bool -> Effector GitDiffResult
-  EffectorGitLsFiles :: FilePath -> [Text] -> Effector [FilePath]
+data Effector m a where
+  RunEffector :: Text -> [Text] -> Effector m Text
+  EffectorGitStatus :: FilePath -> Effector m GitStatusResult
+  EffectorGitDiff :: FilePath -> Bool -> Effector m GitDiffResult
+  EffectorGitLsFiles :: FilePath -> [Text] -> Effector m [FilePath]
 
--- ════════════════════════════════════════════════════════════════════════════
--- SMART CONSTRUCTORS
--- ════════════════════════════════════════════════════════════════════════════
+makeSem ''Effector
 
--- | Run the @effector@ tool with the given command and arguments.
--- Returns the raw stdout as Text.
-runEffector :: (Member Effector effs) => Text -> [Text] -> Eff effs Text
-runEffector cmd args = send (RunEffector cmd args)
-
-effectorGitStatus :: (Member Effector effs) => FilePath -> Eff effs GitStatusResult
-effectorGitStatus cwd = send (EffectorGitStatus cwd)
-
-effectorGitDiff :: (Member Effector effs) => FilePath -> Bool -> Eff effs GitDiffResult
-effectorGitDiff cwd staged = send (EffectorGitDiff cwd staged)
-
-effectorGitLsFiles :: (Member Effector effs) => FilePath -> [Text] -> Eff effs [FilePath]
-effectorGitLsFiles cwd args = send (EffectorGitLsFiles cwd args)

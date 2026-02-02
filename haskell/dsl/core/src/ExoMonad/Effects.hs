@@ -26,11 +26,9 @@ module ExoMonad.Effects
     module ExoMonad.Effects.Justfile,
     module ExoMonad.Effects.Observability,
     module ExoMonad.Effects.Worktree,
-    module ExoMonad.Effect.Session,
   )
 where
 
-import ExoMonad.Effect.Session
 import ExoMonad.Effect.Types
 import ExoMonad.Effects.Effector
 import ExoMonad.Effects.Env
@@ -40,3 +38,4 @@ import ExoMonad.Effects.Habitica
 import ExoMonad.Effects.Justfile
 import ExoMonad.Effects.Observability
 import ExoMonad.Effects.Worktree
+

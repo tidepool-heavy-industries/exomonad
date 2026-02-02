@@ -11,9 +11,10 @@ build-type:         Simple
 library
     exposed-modules:  ExoMonad.Env.Interpreter
     build-depends:    base >= 4.17 && < 5
-                    , freer-simple
+                    , polysemy >= 1.9
+                    , polysemy-plugin >= 0.4
                     , text
                     , exomonad-core
     hs-source-dirs:   src
     default-language: GHC2021
-    ghc-options:      -Wall -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+    ghc-options:      -Wall -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -fplugin=Polysemy.Plugin

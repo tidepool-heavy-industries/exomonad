@@ -1,18 +1,23 @@
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TypeOperators #-}
 
 -- | Zellij effect for terminal multiplexer operations.
 --
 -- Effect type only - interpreter lives in exomonad-zellij-interpreter.
--- Enables graphs to interact with Zellij sessions and tabs.
+-- Enables agents to interact with Zellij sessions and tabs.
 --
 -- = Example Usage
 --
 -- @
 -- import ExoMonad.Effects.Zellij
 --
--- spawnHandler :: Member Zellij effs => Eff effs (Either ZellijError TabId)
+-- spawnHandler :: Member Zellij r => Sem r (Either ZellijError TabId)
 -- spawnHandler = do
 --   mSession <- checkZellijEnv
 --   case mSession of
@@ -23,6 +28,7 @@
 --             , tcLayout = ".zellij/worktree.kdl"
 --             , tcCwd = "/path/to/worktree"
 --             , tcEnv = [("SUBAGENT_CMD", "claude")]
+--             , tcCommand = Nothing
 --             }
 --       newTab cfg
 -- @
@@ -51,7 +57,8 @@ module ExoMonad.Effects.Zellij
   )
 where
 
-import Control.Monad.Freer (Eff, Member, send)
+import Polysemy (Sem, Member, makeSem)
+import Data.Kind (Type)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES
@@ -135,101 +142,26 @@ instance FromJSON ZellijError
 -- | Zellij effect for terminal multiplexer operations.
 --
 -- Operations are designed to work with Zellij's IPC capabilities.
-data Zellij r where
+data Zellij m a where
   -- | Check if we're running inside a Zellij session.
   -- Returns the $ZELLIJ environment variable value if set.
   CheckZellijEnv ::
-    Zellij (Maybe Text)
+    Zellij m (Maybe Text)
   -- | Create a new tab with the specified configuration.
   -- Returns the TabId on success, or an error if tab creation failed.
   NewTab ::
     TabConfig ->
-    Zellij (Either ZellijError TabId)
+    Zellij m (Either ZellijError TabId)
   -- | Switch focus to a tab by name.
   -- Returns success or error if tab doesn't exist or command failed.
   GoToTab ::
     TabId ->
-    Zellij (Either ZellijError ())
+    Zellij m (Either ZellijError ())
   -- | Generate a Zellij layout file via zellij-gen.
   -- Returns the path to the generated layout file on success.
   -- This bakes commands into the layout as literals (env vars don't propagate to panes).
   GenerateLayout ::
     LayoutSpec ->
-    Zellij (Either ZellijError FilePath)
+    Zellij m (Either ZellijError FilePath)
 
--- ════════════════════════════════════════════════════════════════════════════
--- SMART CONSTRUCTORS
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Check if we're running inside a Zellij session.
---
--- Returns 'Just' with the $ZELLIJ value if inside Zellij,
--- 'Nothing' if not running in Zellij.
---
--- @
--- mSession <- checkZellijEnv
--- case mSession of
---   Nothing -> error "Must run inside Zellij"
---   Just _ -> proceed
--- @
-checkZellijEnv ::
-  (Member Zellij effs) =>
-  Eff effs (Maybe Text)
-checkZellijEnv = send CheckZellijEnv
-
--- | Create a new Zellij tab with the specified configuration.
---
--- The tab will be created in the current Zellij session.
--- Requires running inside Zellij (check with 'checkZellijEnv' first).
---
--- @
--- result <- newTab TabConfig
---   { tcName = "worker"
---   , tcLayout = ".zellij/worktree.kdl"
---   , tcCwd = "/path/to/worktree"
---   , tcEnv = [("SUBAGENT_CMD", "claude")]
---   }
--- case result of
---   Right tabId -> -- tab created successfully
---   Left err -> handleError err
--- @
-newTab ::
-  (Member Zellij effs) =>
-  TabConfig ->
-  Eff effs (Either ZellijError TabId)
-newTab = send . NewTab
-
--- | Switch focus to a tab by name.
---
--- The tab must already exist in the current Zellij session.
--- Requires running inside Zellij (check with 'checkZellijEnv' first).
---
--- @
--- result <- goToTab (TabId "5dj")
--- case result of
---   Right () -> -- focus switched successfully
---   Left err -> handleError err
--- @
-goToTab ::
-  (Member Zellij effs) =>
-  TabId ->
-  Eff effs (Either ZellijError ())
-goToTab = send . GoToTab
-
--- | Generate a Zellij layout file via zellij-gen.
---
--- This generates layouts with commands baked in as literals,
--- which is necessary because environment variables don't propagate
--- to pane processes spawned from layouts.
---
--- @
--- result <- generateLayout (SubagentLayout "346" "exomonad-agent-346")
--- case result of
---   Right layoutPath -> -- use layoutPath in newTab
---   Left err -> handleError err
--- @
-generateLayout ::
-  (Member Zellij effs) =>
-  LayoutSpec ->
-  Eff effs (Either ZellijError FilePath)
-generateLayout = send . GenerateLayout
+makeSem ''Zellij

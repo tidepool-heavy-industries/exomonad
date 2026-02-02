@@ -8,7 +8,8 @@ module ExoMonad.Justfile.Interpreter
 where
 
 import Control.Exception (SomeException, try)
-import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
+import Polysemy (Sem, Member, interpret, embed)
+import Polysemy.Embed (Embed)
 import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Effects.Justfile
@@ -21,10 +22,10 @@ import System.Process (readProcessWithExitCode)
 -- | Run Justfile effects using the just CLI.
 --
 -- This interpreter shells out to the just command for each operation.
-runJustfileIO :: (LastMember IO effs) => Eff (Justfile ': effs) a -> Eff effs a
+runJustfileIO :: (Member (Embed IO) r) => Sem (Justfile ': r) a -> Sem r a
 runJustfileIO = interpret $ \case
   RunRecipe recipe args ->
-    sendM $ runJustCommand recipe args
+    embed $ runJustCommand recipe args
 
 -- | Run a just command and return result.
 runJustCommand :: Text -> [Text] -> IO JustResult

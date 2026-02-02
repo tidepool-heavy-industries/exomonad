@@ -39,7 +39,8 @@ module ExoMonad.LLM.Interpreter
   )
 where
 
-import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
+import Polysemy (Sem, Member, interpret, embed)
+import Polysemy.Embed (Embed)
 import Data.Aeson (Value, fromJSON, toJSON)
 import Data.Aeson qualified as Aeson
 import Data.List.NonEmpty (NonEmpty (..))
@@ -247,10 +248,10 @@ providerName SAnthropic = "Anthropic"
 --
 -- This interpreter makes real API calls to Anthropic (via service socket)
 -- based on the type-level provider in the effect and the environment configuration.
-runLLMComplete :: (LastMember IO effs) => LLMEnv -> Eff (LLMComplete ': effs) a -> Eff effs a
+runLLMComplete :: (Member (Embed IO) r) => LLMEnv -> Sem (LLMComplete p ': r) a -> Sem r a
 runLLMComplete env = interpret $ \case
   -- Throwing variants (for when errors are fatal)
-  Complete provider config msg tools -> sendM $ do
+  Complete provider config msg tools -> embed $ do
     result <- socketRequest provider env config msg tools
     case result of
       Left err -> error $ "LLMComplete (" <> providerName provider <> "): " <> show err
@@ -258,14 +259,14 @@ runLLMComplete env = interpret $ \case
 
   -- Try variants (for graceful error handling)
   CompleteTry provider config msg tools ->
-    sendM $
+    embed $
       socketRequest provider env config msg tools
   -- Conversation variants (multi-turn)
-  CompleteConversation provider config messages tools -> sendM $ do
+  CompleteConversation provider config messages tools -> embed $ do
     result <- socketRequestConversation provider env config messages tools
     case result of
       Left err -> error $ "LLMCompleteConversation (" <> providerName provider <> "): " <> show err
       Right resp -> pure resp
   CompleteConversationTry provider config messages tools ->
-    sendM $
+    embed $
       socketRequestConversation provider env config messages tools

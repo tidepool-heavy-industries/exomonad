@@ -1,46 +1,42 @@
 packages:
-    -- Vendored packages (patched for our use)
-
-    -- Core DSL
     haskell/dsl/core
-    haskell/dsl/teaching
-
-    -- Runtime
-    haskell/runtime/wasm
-    haskell/runtime/actor
-    haskell/wasm-guest
-
-    -- Effect interpreters
-    haskell/effects/llm-interpreter
-    haskell/effects/env-interpreter
-    haskell/effects/habitica-interpreter
-    haskell/effects/observability-interpreter
-    haskell/effects/lsp-interpreter
-    haskell/effects/ghci-interpreter
-    haskell/effects/github-interpreter
-    haskell/effects/git-interpreter
-    haskell/effects/worktree-interpreter
-    haskell/effects/justfile-interpreter
-    haskell/effects/filesystem-interpreter
-    haskell/effects/zellij-interpreter
+    haskell/protocol
     haskell/effects/socket-client
-
-    -- Effect types (standalone)
+    haskell/effects/observability-interpreter
+    haskell/effects/llm-interpreter
+    haskell/effects/filesystem-interpreter
+    haskell/effects/env-interpreter
+    haskell/effects/git-interpreter
+    haskell/effects/github-interpreter
+    haskell/effects/justfile-interpreter
+    haskell/effects/worktree-interpreter
+    haskell/effects/ghci-interpreter
     haskell/effects/habitica
-
-    -- Protocol
-    haskell/protocol/wire-types
-    haskell/protocol/generated-ts
-
-    -- Tools
-    haskell/tools/training-generator
-
-    -- Guest
-    haskell/wasm-guest
-
-    -- Vendored dependencies
-    haskell/vendor/freer-simple
+    haskell/effects/habitica-interpreter
+    haskell/effects/lsp-interpreter
+    haskell/effects/zellij-interpreter
+    haskell/runtime/control-server
+    haskell/runtime/sidecar
     haskell/vendor/ginger
+    haskell/tools/exo-query
+    haskell/tools/seance
+    haskell/tools/teach-harness
+    haskell/tools/graphcli-parser
+    haskell/tools/template-reify
+    haskell/tools/tl-sprint-planning
+    haskell/tools/tl-subagent-dispatch
+    haskell/tools/tool-definitions
+    haskell/tools/tidepool-v2-graph
+    haskell/tools/tidepool-wasm-debug
+    haskell/tools/orchestration-debug
+    haskell/tools/tidepool-observability
+    haskell/tools/mcp-tool-creation
+    haskell/tools/ginger-typed-templates
+    haskell/tools/effects-first-orchestration
+    haskell/tools/control-server-dev
+    haskell/tools/lsp-client-integration
+    haskell/tools/type-error-philosophy
+    haskell/wasm-guest
 
 -- Disabled packages:
 -- (none currently)

@@ -1,3 +1,12 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators #-}
+
 -- | Env effect for reading environment variables.
 module ExoMonad.Effects.Env
   ( Env (..),
@@ -9,22 +18,17 @@ where
 
 import Prelude hiding (lookupEnv)
 
-import Control.Monad.Freer (Eff, Member, send)
+import Polysemy (Sem, Member, makeSem)
 import Data.Text (Text)
 
 -- | Env effect for reading environment variables.
-data Env r where
-  GetEnv :: Text -> Env (Maybe Text)
-  GetEnvironment :: Env [(Text, Text)]
+data Env m a where
+  GetEnv :: Text -> Env m (Maybe Text)
+  GetEnvironment :: Env m [(Text, Text)]
 
--- | Get an environment variable.
-getEnv :: (Member Env effs) => Text -> Eff effs (Maybe Text)
-getEnv = send . GetEnv
+makeSem ''Env
 
 -- | Lookup an environment variable (alias for getEnv).
-lookupEnv :: (Member Env effs) => Text -> Eff effs (Maybe Text)
-lookupEnv = send . GetEnv
+lookupEnv :: (Member Env r) => Text -> Sem r (Maybe Text)
+lookupEnv = getEnv
 
--- | Get all environment variables.
-getEnvironment :: (Member Env effs) => Eff effs [(Text, Text)]
-getEnvironment = send GetEnvironment

@@ -1,3 +1,12 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators #-}
+
 -- | Observability effect for structured logging and tracing.
 --
 -- Effect type only - interpreters live in exomonad-observability-interpreter.
@@ -27,8 +36,10 @@ module ExoMonad.Effects.Observability
   )
 where
 
-import Control.Monad.Freer (Eff, Member, send)
-import Data.Aeson (Value)
+import Polysemy (Sem, Member, makeSem)
+import Data.Kind (Type)
+import Data.Aeson (Value, ToJSON (..), FromJSON (..), object, (.=), (.:), withObject)
+import Data.Aeson qualified as Aeson
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EVENT TYPES
@@ -38,12 +49,7 @@ import Data.Aeson (Value)
 --
 -- These events are published to Loki for queryability and dashboard visualization.
 data ExoMonadEvent
-  = GraphTransition
-      { getFrom :: Text,
-        getTo :: Text,
-        getTrigger :: Text
-      }
-  | LLMCallEvent
+  = LLMCallEvent
       { llmModel :: Text,
         llmPromptTokens :: Int,
         llmCompletionTokens :: Int,
@@ -65,13 +71,6 @@ data ExoMonadEvent
   deriving (Show, Eq, Generic)
 
 instance ToJSON ExoMonadEvent where
-  toJSON (GraphTransition from_ to_ trigger_) =
-    object
-      [ "type" .= ("graph_transition" :: Text),
-        "from" .= from_,
-        "to" .= to_,
-        "trigger" .= trigger_
-      ]
   toJSON (LLMCallEvent model_ prompt_ completion_ latency_) =
     object
       [ "type" .= ("llm_call" :: Text),
@@ -104,8 +103,6 @@ instance FromJSON ExoMonadEvent where
   parseJSON = withObject "ExoMonadEvent" $ \v -> do
     eventType <- v .: "type" :: Aeson.Parser Text
     case eventType of
-      "graph_transition" ->
-        GraphTransition <$> v .: "from" <*> v .: "to" <*> v .: "trigger"
       "llm_call" ->
         LLMCallEvent
           <$> v .: "model"
@@ -172,52 +169,18 @@ instance ToJSON SpanAttribute where
 --
 -- Span tracking uses start/end operations. Use 'withSpan' for bracket-style
 -- span management that ensures spans are properly closed.
-data Observability r where
-  PublishEvent :: ExoMonadEvent -> Observability ()
+data Observability m a where
+  PublishEvent :: ExoMonadEvent -> Observability m ()
   -- | Start a new span, pushing onto the span stack.
   -- Returns a span ID for correlation.
-  StartSpan :: Text -> SpanKind -> [SpanAttribute] -> Observability Text
+  StartSpan :: Text -> SpanKind -> [SpanAttribute] -> Observability m Text
   -- | End the current span with optional status and additional attributes.
   -- If isError is True, the span is marked as failed.
-  EndSpan :: Bool -> [SpanAttribute] -> Observability ()
+  EndSpan :: Bool -> [SpanAttribute] -> Observability m ()
   -- | Add an attribute to the current span (no-op if no span active).
-  AddSpanAttribute :: SpanAttribute -> Observability ()
+  AddSpanAttribute :: SpanAttribute -> Observability m ()
 
--- ════════════════════════════════════════════════════════════════════════════
--- SMART CONSTRUCTORS
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Publish an observability event.
-publishEvent :: (Member Observability effs) => ExoMonadEvent -> Eff effs ()
-publishEvent = send . PublishEvent
-
--- | Start a new span.
---
--- Returns a span ID. Must be paired with 'endSpan'.
--- Prefer 'withSpan' for automatic span management.
-startSpan ::
-  (Member Observability effs) =>
-  -- | Span name
-  Text ->
-  -- | Span kind
-  SpanKind ->
-  -- | Initial attributes
-  [SpanAttribute] ->
-  -- | Span ID
-  Eff effs Text
-startSpan name kind attrs = send (StartSpan name kind attrs)
-
--- | End the current span.
---
--- @isError@ should be True if the span represents a failed operation.
-endSpan ::
-  (Member Observability effs) =>
-  -- | Is error?
-  Bool ->
-  -- | Final attributes to add
-  [SpanAttribute] ->
-  Eff effs ()
-endSpan isError attrs = send (EndSpan isError attrs)
+makeSem ''Observability
 
 -- | Run an action within a span.
 --
@@ -231,7 +194,7 @@ endSpan isError attrs = send (EndSpan isError attrs)
 --   pure result
 -- @
 withSpan ::
-  (Member Observability effs) =>
+  (Member Observability r) =>
   -- | Span name
   Text ->
   -- | Span kind
@@ -239,16 +202,11 @@ withSpan ::
   -- | Initial attributes
   [SpanAttribute] ->
   -- | Action to run
-  Eff effs a ->
-  Eff effs a
+  Sem r a ->
+  Sem r a
 withSpan name kind attrs action = do
   _ <- startSpan name kind attrs
   result <- action
   endSpan False []
   pure result
 
--- | Add an attribute to the current span.
---
--- No-op if no span is active.
-addSpanAttribute :: (Member Observability effs) => SpanAttribute -> Eff effs ()
-addSpanAttribute = send . AddSpanAttribute

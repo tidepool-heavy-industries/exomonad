@@ -8,7 +8,7 @@ author:             Inanna
 build-type:         Simple
 
 common warnings
-    ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints -Wunused-packages
+    ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints -Wunused-packages -fplugin=Polysemy.Plugin
 
 library
     import:           warnings
@@ -16,7 +16,8 @@ library
         ExoMonad.Git.Interpreter
     build-depends:
         base >= 4.17 && < 5,
-        freer-simple >= 1.2 && < 2,
+        polysemy >= 1.9,
+        polysemy-plugin >= 0.4,
         text >= 2.0 && < 3,
         process >= 1.6 && < 2,
         filepath >= 1.4 && < 2,

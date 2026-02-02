@@ -70,11 +70,10 @@ The `spawn_agents` tool includes several safety checks to prevent common failure
 
 The Haskell codebase adheres to a set of core principles designed for maximum safety, testability, and type-level expressiveness:
 
-1. **Extensible Effect Manifold**: Business logic resides strictly in the `Eff` monad (`freer-simple`), ensuring agents remain IO-blind. Interpreters mediate all world interactions (FS, Network, Time) at the application edge.
-2. **Servant-Patterned Graphs**: Graph DSLs use the `mode :- nodeDef` record pattern. This allows a single record structure to serve as a type-level specification (`AsGraph` mode) and a runtime handler map (`AsHandler` mode).
-3. **Inductive Type-Safe Dispatch**: Graph traversal is performed via recursive typeclass dispatch on `OneOf` sum types (via `GotoChoice`), providing fully typed state transitions without `Dynamic` or `unsafeCoerce`.
-4. **Proof-Carrying Structured I/O**: The `StructuredOutput` system unifies JSON Schema generation, encoding, and diagnostic parsing. Success types carry proof of validity, ensuring "Parse, Don't Validate" remains the standard.
-5. **Strict Compile-Time Guardrails**: Extensive use of `TypeError` and `Unsatisfiable` constraints to catch graph errors—such as unreachable nodes, dead ends, or invalid transition targets—during compilation.
+1. **Extensible Effect Manifold**: Business logic resides strictly in the `Sem` monad (`polysemy`), ensuring agents remain IO-blind. Interpreters mediate all world interactions (FS, Network, Time) at the application edge.
+2. **Direct-Style Agents**: Agents are defined as effectful functions (`Sem r a`), avoiding the overhead of explicit state machine graphs.
+3. **Proof-Carrying Structured I/O**: The `StructuredOutput` system unifies JSON Schema generation, encoding, and diagnostic parsing. Success types carry proof of validity, ensuring "Parse, Don't Validate" remains the standard.
+4. **Compile-Time Guardrails**: Extensive use of type-level constraints to ensure effect safety and correct tool usage.
 
 ## Gemini Added Memories
 - Implemented TUI-interactive MCP tools (confirm_action, select_option, request_guidance) in haskell/control-server. Verified via mock TUI logic. Committed changes.

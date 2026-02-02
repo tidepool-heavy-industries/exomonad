@@ -61,7 +61,8 @@ module ExoMonad.LLM.Interpret
   )
 where
 
-import Control.Monad.Freer (Eff, LastMember, Member, interpret)
+import Polysemy (Sem, Member, interpret, embed)
+import Polysemy.Embed (Embed)
 import Data.Aeson (Value)
 import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy qualified as LBS
@@ -85,6 +86,7 @@ import ExoMonad.LLM.Effect (LLMCall (..))
 import ExoMonad.LLM.Tools (ToolDispatchError (..), ToolRecord (dispatchTool))
 import ExoMonad.LLM.Types
 import ExoMonad.StructuredOutput (StructuredOutput (..), formatDiagnostic)
+import ExoMonad.Prelude (LastMember)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONFIGURATION
@@ -130,19 +132,19 @@ defaultInterpretConfig =
 --   $ yourEffectfulCode
 -- @
 runLLMCall ::
-  (Member LLMComplete es, LastMember IO es) =>
-  Eff (LLMCall ': es) a ->
-  Eff es a
+  (Member LLMComplete es, Member (Embed IO) es) =>
+  Sem (LLMCall ': es) a ->
+  Sem es a
 runLLMCall = runLLMCallWith defaultInterpretConfig
 
 -- | Run the LLMCall effect with custom configuration.
 runLLMCallWith ::
-  (Member LLMComplete es, LastMember IO es) =>
+  (Member LLMComplete es, Member (Embed IO) es) =>
   InterpretConfig ->
-  Eff (LLMCall ': es) a ->
-  Eff es a
+  Sem (LLMCall ': es) a ->
+  Sem es a
 runLLMCallWith interpCfg = interpret $ \case
-  CallLLMNoTools mdl maxTok (System sys) (User usr) _schema -> do
+  CallLLMNoToolsOp mdl maxTok (System sys) (User usr) _schema -> do
     let anthropicCfg =
           AnthropicConfig
             { acModel = modelToText mdl,
@@ -151,7 +153,7 @@ runLLMCallWith interpCfg = interpret $ \case
               acSystemPrompt = Just sys
             }
     runWithNudge interpCfg.icMaxNudges anthropicCfg usr Nothing
-  CallLLMWithTools mdl maxTok (System sys) (User usr) _schema toolSchemas -> do
+  CallLLMWithToolsOp mdl maxTok (System sys) (User usr) _schema toolSchemas -> do
     -- Note: runLLMCall without tool record just ignores tool_use responses.
     -- Use runLLMCallWithTools to properly handle tool execution.
     let anthropicCfg =
@@ -167,14 +169,14 @@ runLLMCallWith interpCfg = interpret $ \case
 runLLMCallWithTools ::
   forall tools es a.
   ( Member LLMComplete es,
-    LastMember IO es,
+    Member (Embed IO) es,
     ToolRecord tools
   ) =>
   tools es ->
-  Eff (LLMCall ': es) a ->
-  Eff es a
+  Sem (LLMCall ': es) a ->
+  Sem es a
 runLLMCallWithTools toolRecord = interpret $ \case
-  CallLLMNoTools mdl maxTok (System sys) (User usr) _schema -> do
+  CallLLMNoToolsOp mdl maxTok (System sys) (User usr) _schema -> do
     let cfg =
           AnthropicConfig
             { acModel = modelToText mdl,
@@ -183,7 +185,7 @@ runLLMCallWithTools toolRecord = interpret $ \case
               acSystemPrompt = Just sys
             }
     runWithNudge defaultInterpretConfig.icMaxNudges cfg usr Nothing
-  CallLLMWithTools mdl maxTok (System sys) (User usr) _schema toolSchemas -> do
+  CallLLMWithToolsOp mdl maxTok (System sys) (User usr) _schema toolSchemas -> do
     let cfg =
           AnthropicConfig
             { acModel = modelToText mdl,
@@ -207,7 +209,7 @@ runLLMCallWithTools toolRecord = interpret $ \case
 runToolLoop ::
   forall tools out es.
   ( Member LLMComplete es,
-    LastMember IO es,
+    Member (Embed IO) es,
     StructuredOutput out,
     ToolRecord tools
   ) =>
@@ -223,7 +225,7 @@ runToolLoop ::
   [Value] ->
   -- | Tool record for dispatch
   tools es ->
-  Eff es (Either CallError out)
+  Sem es (Either CallError out)
 runToolLoop loopsLeft nudgesLeft cfg userMsg toolSchemas tools
   | loopsLeft <= 0 = pure $ Left $ CallMaxToolLoops defaultInterpretConfig.icMaxToolLoops
   | otherwise = do
@@ -259,7 +261,7 @@ executeToolCalls ::
   (ToolRecord tools) =>
   tools es ->
   [(Text, Value)] ->
-  Eff es (Either CallError [(Text, Either ToolDispatchError Value)])
+  Sem es (Either CallError [(Text, Either ToolDispatchError Value)])
 executeToolCalls tools calls = do
   results <- traverse executeOne calls
   -- Check if any tool dispatch failed fatally
@@ -291,7 +293,7 @@ formatToolResults results originalMsg =
 parseResponse ::
   forall out es.
   ( Member LLMComplete es,
-    LastMember IO es,
+    Member (Embed IO) es,
     StructuredOutput out
   ) =>
   Int ->
@@ -299,7 +301,7 @@ parseResponse ::
   Text ->
   Maybe [Value] ->
   AnthropicResponse ->
-  Eff es (Either CallError out)
+  Sem es (Either CallError out)
 parseResponse nudgesLeft cfg userMsg toolSchemas response = do
   let textContent = extractTextContent response.arContent
 
@@ -336,7 +338,7 @@ parseResponse nudgesLeft cfg userMsg toolSchemas response = do
 runWithNudge ::
   forall out es.
   ( Member LLMComplete es,
-    LastMember IO es,
+    Member (Embed IO) es,
     StructuredOutput out
   ) =>
   -- | Remaining nudges
@@ -347,7 +349,7 @@ runWithNudge ::
   Text ->
   -- | Tool schemas (if any)
   Maybe [Value] ->
-  Eff es (Either CallError out)
+  Sem es (Either CallError out)
 runWithNudge nudgesLeft cfg userMsg toolSchemas = do
   result <- completeTry SAnthropic cfg userMsg toolSchemas
   case result of
@@ -386,7 +388,7 @@ runWithNudge nudgesLeft cfg userMsg toolSchemas = do
 nudgeAndRetry ::
   forall out es.
   ( Member LLMComplete es,
-    LastMember IO es,
+    Member (Embed IO) es,
     StructuredOutput out
   ) =>
   -- | Remaining nudges
@@ -399,7 +401,7 @@ nudgeAndRetry ::
   Maybe [Value] ->
   -- | Error message from previous attempt
   Text ->
-  Eff es (Either CallError out)
+  Sem es (Either CallError out)
 nudgeAndRetry nudgesLeft cfg origMsg toolSchemas errMsg =
   let nudgeMsg =
         T.unlines

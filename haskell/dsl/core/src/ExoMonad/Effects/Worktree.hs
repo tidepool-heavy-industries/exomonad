@@ -1,21 +1,26 @@
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TypeOperators #-}
 
 -- | Worktree effect for managing git worktrees.
 --
 -- Effect type only - interpreter lives in exomonad-native-gui/worktree-interpreter.
--- Enables graphs to create isolated working directories for parallel agents.
+-- Enables agents to create isolated working directories for parallel subagents.
 --
 -- = Example Usage
 --
 -- @
 -- import ExoMonad.Effects.Worktree
 --
--- forkHandler :: Member Worktree effs => Eff effs (Either WorktreeError ())
+-- forkHandler :: Member Worktree r => Sem r (Either WorktreeError ())
 -- forkHandler = do
---   result <- withWorktree (WorktreeSpec "tests" Nothing) $ \wtTests ->
---     withWorktree (WorktreeSpec "impl" Nothing) $ \wtImpl -> do
+--   result <- withWorktree (WorktreeSpec "tests" Nothing Nothing Nothing) $ \wtTests ->
+--     withWorktree (WorktreeSpec "impl" Nothing Nothing Nothing) $ \wtImpl -> do
 --       -- ... run parallel agents in each worktree ...
 --       pure ()
 --   pure result
@@ -56,63 +61,9 @@ module ExoMonad.Effects.Worktree
   )
 where
 
-
--- | Worktree effect for managing git worktrees.
---
--- Effect type only - interpreter lives in exomonad-native-gui/worktree-interpreter.
--- Enables graphs to create isolated working directories for parallel agents.
---
--- = Example Usage
---
--- @
--- import ExoMonad.Effects.Worktree
---
--- forkHandler :: Member Worktree effs => Eff effs (Either WorktreeError ())
--- forkHandler = do
---   result <- withWorktree (WorktreeSpec "tests" Nothing) $ \wtTests ->
---     withWorktree (WorktreeSpec "impl" Nothing) $ \wtImpl -> do
---       -- ... run parallel agents in each worktree ...
---       pure ()
---   pure result
--- @
---
--- = Design Notes
---
--- Worktrees provide isolation for parallel agent execution:
--- - Each worktree has its own working directory
--- - Changes in one worktree don't affect others
--- - Agents can be spawned with --cwd pointing to a worktree
--- - Agents can be spawned with --cwd pointing to a worktree
--- - After work completes, files can be cherry-picked back to main
---
--- = Error Handling
---
--- All operations return @Either WorktreeError a@ for explicit error handling.
--- Use 'withWorktree' for bracket-style resource safety (automatic cleanup).
-module ExoMonad.Effects.Worktree
-  ( -- * Effect
-    Worktree (..),
-    createWorktree,
-    deleteWorktree,
-    mergeWorktree,
-    cherryPickFiles,
-    listWorktrees,
-
-    -- * Construction
-    defaultWorktreeSpec,
-
-    -- * Bracket
-    withWorktree,
-
-    -- * Types
-    WorktreePath (..),
-    WorktreeSpec (..),
-    MergeResult (..),
-    WorktreeError (..),
-  )
-where
-
-import Control.Monad.Freer (Eff, Member, send)
+import Polysemy (Sem, Member, makeSem)
+import Data.Kind (Type)
+import ExoMonad.StructuredOutput (StructuredOutput)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES
@@ -214,17 +165,17 @@ instance FromJSON WorktreeError
 --
 -- All operations return @Either WorktreeError@ for explicit error handling.
 -- Provides isolation for parallel agent execution.
-data Worktree r where
+data Worktree m a where
   -- | Create a new worktree with a branch.
   -- Returns the path to the created worktree, or an error.
   CreateWorktree ::
     WorktreeSpec ->
-    Worktree (Either WorktreeError WorktreePath)
+    Worktree m (Either WorktreeError WorktreePath)
   -- | Delete a worktree and its branch.
   -- Returns () on success, or an error if deletion failed.
   DeleteWorktree ::
     WorktreePath ->
-    Worktree (Either WorktreeError ())
+    Worktree m (Either WorktreeError ())
   -- | Merge changes from a worktree back to main branch.
   -- Returns MergeSuccess or MergeConflict on success, or an error.
   MergeWorktree ::
@@ -232,7 +183,7 @@ data Worktree r where
     WorktreePath ->
     -- | Commit message for the merge
     Text ->
-    Worktree (Either WorktreeError MergeResult)
+    Worktree m (Either WorktreeError MergeResult)
   -- | Cherry-pick specific files from a worktree to a destination.
   -- Copies files without committing - useful for combining outputs.
   CherryPickFiles ::
@@ -242,72 +193,13 @@ data Worktree r where
     [FilePath] ->
     -- | Destination directory
     FilePath ->
-    Worktree (Either WorktreeError ())
+    Worktree m (Either WorktreeError ())
   -- | List all worktrees for the repository.
   -- Returns list of (path, branch) pairs.
   ListWorktrees ::
-    Worktree (Either WorktreeError [(WorktreePath, Text)])
+    Worktree m (Either WorktreeError [(WorktreePath, Text)])
 
--- ════════════════════════════════════════════════════════════════════════════
--- SMART CONSTRUCTORS
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Create a new worktree.
---
--- @
--- result <- createWorktree (WorktreeSpec "my-feature" Nothing)
--- case result of
---   Right path -> -- path is like "/repo/.worktrees/my-feature-abc123"
---   Left err -> handleError err
--- @
-createWorktree ::
-  (Member Worktree effs) =>
-  WorktreeSpec ->
-  Eff effs (Either WorktreeError WorktreePath)
-createWorktree = send . CreateWorktree
-
--- | Delete a worktree and its associated branch.
---
--- Returns 'Right ()' on success (including when the worktree doesn't exist),
--- or 'Left WorktreeGitError' if git fails unexpectedly.
-deleteWorktree ::
-  (Member Worktree effs) =>
-  WorktreePath ->
-  Eff effs (Either WorktreeError ())
-deleteWorktree = send . DeleteWorktree
-
--- | Merge a worktree's changes back to main branch.
---
--- The worktree should have changes committed to its branch.
--- Returns 'MergeSuccess' if clean, 'MergeConflict' if conflicts occurred,
--- or 'Left WorktreeGitError' if git fails.
-mergeWorktree ::
-  (Member Worktree effs) =>
-  WorktreePath ->
-  Text ->
-  Eff effs (Either WorktreeError MergeResult)
-mergeWorktree path msg = send (MergeWorktree path msg)
-
--- | Copy specific files from a worktree to a destination.
---
--- Useful for combining outputs from parallel agents without full merge.
---
--- @
--- cherryPickFiles testsWt ["test/StackSpec.hs"] implWt
--- @
-cherryPickFiles ::
-  (Member Worktree effs) =>
-  WorktreePath ->
-  [FilePath] ->
-  FilePath ->
-  Eff effs (Either WorktreeError ())
-cherryPickFiles src files dest = send (CherryPickFiles src files dest)
-
--- | List all worktrees in the repository.
-listWorktrees ::
-  (Member Worktree effs) =>
-  Eff effs (Either WorktreeError [(WorktreePath, Text)])
-listWorktrees = send ListWorktrees
+makeSem ''Worktree
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- BRACKET
@@ -319,7 +211,7 @@ listWorktrees = send ListWorktrees
 -- regardless of success or failure of the action.
 --
 -- @
--- result <- withWorktree (WorktreeSpec "tests" Nothing) $ \wtPath -> do
+-- result <- withWorktree (WorktreeSpec "tests" Nothing Nothing Nothing) $ \wtPath -> do
 --   -- Work in the worktree (wtPath :: WorktreePath)
 --   output <- runAgent (unWorktreePath wtPath)
 --   pure output
@@ -334,10 +226,10 @@ listWorktrees = send ListWorktrees
 -- Note: If the action throws an exception at the IO level, cleanup may not
 -- occur. For full IO-level safety, the interpreter also uses IO bracket.
 withWorktree ::
-  (Member Worktree effs) =>
+  (Member Worktree r) =>
   WorktreeSpec ->
-  (WorktreePath -> Eff effs a) ->
-  Eff effs (Either WorktreeError a)
+  (WorktreePath -> Sem r a) ->
+  Sem r (Either WorktreeError a)
 withWorktree spec action = do
   createResult <- createWorktree spec
   case createResult of
@@ -348,3 +240,4 @@ withWorktree spec action = do
       -- Always cleanup (best effort - ignore delete errors)
       _ <- deleteWorktree wtPath
       pure $ Right result
+

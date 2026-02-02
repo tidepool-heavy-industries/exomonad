@@ -1,3 +1,12 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators #-}
+
 -- | GitHub integration effect
 --
 -- Provides typed access to GitHub issues and pull requests via the @gh@ CLI.
@@ -44,6 +53,8 @@ module ExoMonad.Effects.GitHub
 
     -- * Types - Core
     Repo (..),
+    authorLogin,
+    authorName,
     defaultRepo,
     Author (..),
     Comment (..),
@@ -83,7 +94,7 @@ module ExoMonad.Effects.GitHub
 where
 
 import Control.Applicative ((<|>))
-import Control.Monad.Freer (Eff, Member, interpret, send)
+import Polysemy (Sem, Member, interpret, makeSem)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.!=), (.:), (.:?), (.=))
 import Data.Text (Text)
 import Data.Text qualified
@@ -553,144 +564,96 @@ newtype Label = Label {unLabel :: Text}
 -- EFFECT
 -- ════════════════════════════════════════════════════════════════════════════
 
-data GitHub r where
+data GitHub m a where
   -- Issue operations
   CreateIssue ::
     CreateIssueInput ->
     -- | Create an issue, returns the issue number or error.
-    GitHub (Either GitHubError Int)
+    GitHub m (Either GitHubError Int)
   UpdateIssue ::
     Repo ->
     Int ->
     UpdateIssueInput ->
     -- | Update an existing issue.
-    GitHub (Either GitHubError ())
+    GitHub m (Either GitHubError ())
   CloseIssue ::
     Repo ->
     Int ->
     -- | Close an issue.
-    GitHub (Either GitHubError ())
+    GitHub m (Either GitHubError ())
   ReopenIssue ::
     Repo ->
     Int ->
     -- | Reopen an issue.
-    GitHub (Either GitHubError ())
+    GitHub m (Either GitHubError ())
   AddIssueLabel ::
     Repo ->
     Int ->
     Text ->
     -- | Add a label to an issue.
-    GitHub (Either GitHubError ())
+    GitHub m (Either GitHubError ())
   RemoveIssueLabel ::
     Repo ->
     Int ->
     Text ->
     -- | Remove a label from an issue.
-    GitHub (Either GitHubError ())
+    GitHub m (Either GitHubError ())
   AddIssueAssignee ::
     Repo ->
     Int ->
     Text ->
     -- | Add an assignee to an issue.
-    GitHub (Either GitHubError ())
+    GitHub m (Either GitHubError ())
   RemoveIssueAssignee ::
     Repo ->
     Int ->
     Text ->
     -- | Remove an assignee from an issue.
-    GitHub (Either GitHubError ())
+    GitHub m (Either GitHubError ())
   GetIssue ::
     Repo ->
     Int ->
     Bool ->
     -- | Get issue by number. Bool = include comments.
-    GitHub (Either GitHubError (Maybe Issue))
+    GitHub m (Either GitHubError (Maybe Issue))
   ListIssues ::
     Repo ->
     IssueFilter ->
     -- | List issues with filter. Returns error on failure, empty list only when truly empty.
-    GitHub (Either GitHubError [Issue])
+    GitHub m (Either GitHubError [Issue])
   -- Pull request operations
   CreatePR ::
     PRCreateSpec ->
     -- | Create a pull request.
-    GitHub (Either GitHubError PRUrl)
+    GitHub m (Either GitHubError PRUrl)
   GetPullRequest ::
     Repo ->
     Int ->
     Bool ->
     -- | Get PR by number. Bool = include comments and reviews.
-    GitHub (Either GitHubError (Maybe PullRequest))
+    GitHub m (Either GitHubError (Maybe PullRequest))
   ListPullRequests ::
     Repo ->
     PRFilter ->
     -- | List PRs with filter. Returns error on failure, empty list only when truly empty.
-    GitHub (Either GitHubError [PullRequest])
+    GitHub m (Either GitHubError [PullRequest])
   GetPullRequestReviews ::
     Repo ->
     Int ->
     -- | Get review comments for a PR.
-    GitHub (Either GitHubError [ReviewComment])
+    GitHub m (Either GitHubError [ReviewComment])
   -- Discussion operations
   GetDiscussion ::
     Repo ->
     Int ->
     -- | Get discussion by number.
-    GitHub (Either GitHubError Discussion)
+    GitHub m (Either GitHubError Discussion)
   -- Auth
   CheckAuth ::
     -- | Check if gh CLI is authenticated.
-    GitHub Bool
+    GitHub m Bool
 
--- Smart constructors
-
-createIssue :: (Member GitHub effs) => CreateIssueInput -> Eff effs (Either GitHubError Int)
-createIssue input = send (CreateIssue input)
-
-updateIssue :: (Member GitHub effs) => Repo -> Int -> UpdateIssueInput -> Eff effs (Either GitHubError ())
-updateIssue repo num input = send (UpdateIssue repo num input)
-
-closeIssue :: (Member GitHub effs) => Repo -> Int -> Eff effs (Either GitHubError ())
-closeIssue repo num = send (CloseIssue repo num)
-
-reopenIssue :: (Member GitHub effs) => Repo -> Int -> Eff effs (Either GitHubError ())
-reopenIssue repo num = send (ReopenIssue repo num)
-
-addIssueLabel :: (Member GitHub effs) => Repo -> Int -> Text -> Eff effs (Either GitHubError ())
-addIssueLabel repo num label = send (AddIssueLabel repo num label)
-
-removeIssueLabel :: (Member GitHub effs) => Repo -> Int -> Text -> Eff effs (Either GitHubError ())
-removeIssueLabel repo num label = send (RemoveIssueLabel repo num label)
-
-addIssueAssignee :: (Member GitHub effs) => Repo -> Int -> Text -> Eff effs (Either GitHubError ())
-addIssueAssignee repo num assignee = send (AddIssueAssignee repo num assignee)
-
-removeIssueAssignee :: (Member GitHub effs) => Repo -> Int -> Text -> Eff effs (Either GitHubError ())
-removeIssueAssignee repo num assignee = send (RemoveIssueAssignee repo num assignee)
-
-createPR :: (Member GitHub effs) => PRCreateSpec -> Eff effs (Either GitHubError PRUrl)
-createPR spec = send (CreatePR spec)
-
-getIssue :: (Member GitHub effs) => Repo -> Int -> Bool -> Eff effs (Either GitHubError (Maybe Issue))
-getIssue repo number includeComments = send (GetIssue repo number includeComments)
-
-listIssues :: (Member GitHub effs) => Repo -> IssueFilter -> Eff effs (Either GitHubError [Issue])
-listIssues repo filt = send (ListIssues repo filt)
-
-getPullRequest :: (Member GitHub effs) => Repo -> Int -> Bool -> Eff effs (Either GitHubError (Maybe PullRequest))
-getPullRequest repo number includeDetails = send (GetPullRequest repo number includeDetails)
-
-listPullRequests :: (Member GitHub effs) => Repo -> PRFilter -> Eff effs (Either GitHubError [PullRequest])
-listPullRequests repo filt = send (ListPullRequests repo filt)
-
-getPullRequestReviews :: (Member GitHub effs) => Repo -> Int -> Eff effs (Either GitHubError [ReviewComment])
-getPullRequestReviews repo number = send (GetPullRequestReviews repo number)
-
-getDiscussion :: (Member GitHub effs) => Repo -> Int -> Eff effs (Either GitHubError Discussion)
-getDiscussion repo number = send (GetDiscussion repo number)
-
-checkAuth :: (Member GitHub effs) => Eff effs Bool
-checkAuth = send CheckAuth
+makeSem ''GitHub
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- STUB RUNNER
@@ -700,7 +663,7 @@ checkAuth = send CheckAuth
 --
 -- All operations return errors indicating the stub is not implemented.
 -- Use @runGitHubIO@ from @exomonad-github-interpreter@ for real implementation.
-runGitHubStub :: (Member Log effs) => Eff (GitHub ': effs) a -> Eff effs a
+runGitHubStub :: (Member Log effs) => Sem (GitHub ': effs) a -> Sem effs a
 runGitHubStub = interpret $ \case
   CreateIssue input -> do
     logInfo $ "[GitHub:stub] CreateIssue called: " <> input.ciiRepo.unRepo <> " - " <> input.ciiTitle

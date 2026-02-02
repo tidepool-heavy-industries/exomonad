@@ -1,3 +1,12 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators #-}
+
 -- | Justfile execution effect
 --
 -- Provides access to run recipes from a Justfile via the @just@ CLI.
@@ -14,7 +23,8 @@ module ExoMonad.Effects.Justfile
   )
 where
 
-import Control.Monad.Freer (Eff, Member, interpret, send)
+import Polysemy (Sem, Member, interpret, makeSem)
+import Data.Kind (Type)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
 import Data.Text qualified
@@ -31,20 +41,19 @@ data JustResult = JustResult
   deriving anyclass (FromJSON, ToJSON)
 
 -- | Justfile effect.
-data Justfile r where
+data Justfile m a where
   RunRecipe ::
     Text ->
     [Text] ->
     -- | Run a recipe with arguments.
-    Justfile JustResult
+    Justfile m JustResult
 
--- | Run a just recipe.
-runRecipe :: (Member Justfile effs) => Text -> [Text] -> Eff effs JustResult
-runRecipe recipe args = send (RunRecipe recipe args)
+makeSem ''Justfile
 
 -- | Stub runner that logs calls and returns success with empty output.
-runJustfileStub :: (Member Log effs) => Eff (Justfile ': effs) a -> Eff effs a
+runJustfileStub :: (Member Log effs) => Sem (Justfile ': effs) a -> Sem effs a
 runJustfileStub = interpret $ \case
   RunRecipe recipe args -> do
     logInfo $ "[Justfile:stub] RunRecipe called: " <> recipe <> " " <> Data.Text.unwords args
     pure $ JustResult "" "" 0
+

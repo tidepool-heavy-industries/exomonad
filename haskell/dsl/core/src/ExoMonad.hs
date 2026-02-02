@@ -46,9 +46,11 @@ where
 
 import Prelude hiding (State)
 
-import Control.Monad.Freer (Eff, Member)
+import Polysemy (Sem, Member)
+import Data.Kind (Type)
 import Data.Aeson (Value, toJSON)
 import ExoMonad.Effect
+import ExoMonad.Prelude (Eff)
 
 -- ══════════════════════════════════════════════════════════════════════
 -- TYPE-LEVEL UTILITIES
@@ -85,8 +87,8 @@ data Agent s evt (extra :: [Effect]) = Agent
     agentDispatcher :: AgentDispatcher s evt
   }
 
--- | Effect type alias (freer-simple effects have kind Type -> Type).
-type Effect = Type -> Type
+-- | Effect type alias (polysemy effects have kind (Type -> Type) -> Type -> Type).
+type Effect = (Type -> Type) -> Type -> Type
 
 -- | Convenience alias for agents with no extra effects
 type SimpleAgent s evt = Agent s evt '[]
@@ -135,7 +137,7 @@ newtype AgentDispatcher s evt = AgentDispatcher
       ) =>
       Text -> -- Tool name
       Value -> -- Tool input (JSON)
-      Eff effs (Either Text (ToolResult '[])) -- Empty target list (no transitions for agents)
+      Eff effs (Either Text ToolResult) -- Simplified ToolResult (no targets)
   }
 
 -- | Default dispatcher for agents without tools

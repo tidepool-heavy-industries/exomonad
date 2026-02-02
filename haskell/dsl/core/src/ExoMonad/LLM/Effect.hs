@@ -1,4 +1,11 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- | LLM call effect for typed LLM invocations.
@@ -24,9 +31,9 @@
 --
 -- @
 -- analyzeDoc
---   :: (Member LLMCall es, Member Log es)
+--   :: (Member LLMCall r, Member Log r)
 --   => Document
---   -> Eff es (Either CallError Report)
+--   -> Sem r (Either CallError Report)
 -- analyzeDoc doc = do
 --   logInfo "Analyzing document..."
 --
@@ -38,7 +45,7 @@ module ExoMonad.LLM.Effect
   ( -- * Effect Type
     LLMCall (..),
 
-    -- * Main Function
+    -- * Main Functions
     call,
     callNoTools,
 
@@ -52,7 +59,9 @@ module ExoMonad.LLM.Effect
   )
 where
 
-import Control.Monad.Freer (Eff, Member, send)
+import Polysemy (Sem, Member, makeSem)
+import Polysemy.Internal (send)
+import Data.Kind (Type)
 import Data.Aeson (Value)
 import Data.Proxy (Proxy (..))
 import ExoMonad.LLM.Tools (ToolRecord (..), toolSchemaToAnthropicTool)
@@ -74,15 +83,9 @@ import ExoMonad.Tool.Wire (anthropicToolToJSON)
 -- Note: Tool dispatch is handled internally by the interpreter using the
 -- schemas. The tools record is passed separately to allow the interpreter
 -- to call tool handlers during the tool use loop.
-data LLMCall a where
+data LLMCall m a where
   -- | Make an LLM call (no tools).
-  --
-  -- The interpreter handles:
-  --
-  -- * Building the API request
-  -- * Parsing structured output
-  -- * Nudge retries (if output doesn't match schema)
-  CallLLMNoTools ::
+  CallLLMNoToolsOp ::
     (StructuredOutput out) =>
     -- | Model to use
     Model ->
@@ -94,16 +97,9 @@ data LLMCall a where
     User ->
     -- | Output schema (JSON)
     Value ->
-    LLMCall (Either CallError out)
+    LLMCall m (Either CallError out)
   -- | Make an LLM call with tools.
-  --
-  -- The interpreter handles:
-  --
-  -- * Building the API request with tool schemas
-  -- * Running tool loops (if LLM invokes tools)
-  -- * Parsing structured output
-  -- * Nudge retries (if output doesn't match schema)
-  CallLLMWithTools ::
+  CallLLMWithToolsOp ::
     (StructuredOutput out) =>
     -- | Model to use
     Model ->
@@ -117,7 +113,9 @@ data LLMCall a where
     Value ->
     -- | Tool schemas (Anthropic format)
     [Value] ->
-    LLMCall (Either CallError out)
+    LLMCall m (Either CallError out)
+
+makeSem ''LLMCall
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- MAIN FUNCTIONS
@@ -128,67 +126,45 @@ data LLMCall a where
 -- This is the primary function for invoking an LLM from effectful code
 -- when you need tool support. The config carries the output type and
 -- tool record.
---
--- Note: The tool record itself is not passed to the effect; only the
--- schemas are extracted. Tool dispatch happens at the interpreter level
--- where you must provide the actual tool record for execution.
---
--- @
--- let cfg = defaultLLM \@Report
---       & model Opus
---       & tools MyTools { search = searchHandler }
---
--- -- In practice, use the interpreter that accepts the tool record:
--- -- runLLMCallWithTools cfg.ccTools $ call cfg sys usr
--- result <- call cfg (System sysPrompt) (User userPrompt)
--- @
 call ::
-  forall out tools es.
-  ( Member LLMCall es,
+  forall out tools r.
+  ( Member LLMCall r,
     StructuredOutput out,
     ToolRecord tools
   ) =>
-  CallConfig out (tools es) ->
+  CallConfig out (tools r) ->
   System ->
   User ->
-  Eff es (Either CallError out)
+  Sem r (Either CallError out)
 call cfg sys usr =
   let toolSchemaValues =
         map (anthropicToolToJSON . toolSchemaToAnthropicTool) $
           toolSchemas (Proxy @tools)
       schema = schemaToValue (structuredSchema @out)
-   in send $
-        CallLLMWithTools
-          cfg.ccModel
-          cfg.ccMaxTokens
-          sys
-          usr
-          schema
-          toolSchemaValues
+   in callLLMWithToolsOp
+        cfg.ccModel
+        cfg.ccMaxTokens
+        sys
+        usr
+        schema
+        toolSchemaValues
 
 -- | Make an LLM call without tools.
---
--- Simplified version for calls that don't need tool support.
---
--- @
--- let cfg = defaultLLM \@Classification & model Haiku
--- result <- callNoTools cfg (System sysPrompt) (User userPrompt)
--- @
 callNoTools ::
-  forall out es.
-  ( Member LLMCall es,
+  forall out r.
+  ( Member LLMCall r,
     StructuredOutput out
   ) =>
   CallConfig out NoTools ->
   System ->
   User ->
-  Eff es (Either CallError out)
+  Sem r (Either CallError out)
 callNoTools cfg sys usr =
   let schema = schemaToValue (structuredSchema @out)
-   in send $
-        CallLLMNoTools
-          cfg.ccModel
-          cfg.ccMaxTokens
-          sys
-          usr
-          schema
+   in callLLMNoToolsOp
+        cfg.ccModel
+        cfg.ccMaxTokens
+        sys
+        usr
+        schema
+

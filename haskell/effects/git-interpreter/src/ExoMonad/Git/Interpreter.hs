@@ -8,7 +8,7 @@ module ExoMonad.Git.Interpreter
   )
 where
 
-import Control.Monad.Freer (Eff, interpret)
+import Polysemy (Sem, interpret)
 import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Effects.Git (Git (..), WorktreeInfo)
@@ -16,14 +16,14 @@ import System.FilePath (takeFileName)
 
 -- | Run Git effects with pure handlers (for testing).
 runGit ::
-  Eff effs (Maybe WorktreeInfo) ->
-  Eff effs [FilePath] ->
-  (Int -> Eff effs [Text]) ->
-  Eff effs Text ->
-  (Text -> Eff effs Int) ->
-  (Text -> Maybe Text -> Eff effs ()) ->
-  Eff (Git ': effs) a ->
-  Eff effs a
+  Sem r (Maybe WorktreeInfo) ->
+  Sem r [FilePath] ->
+  (Int -> Sem r [Text]) ->
+  Sem r Text ->
+  (Text -> Sem r Int) ->
+  (Text -> Maybe Text -> Sem r ()) ->
+  Sem (Git ': r) a ->
+  Sem r a
 runGit hWorktree hDirty hCommits hBranch hAhead hFetch = interpret $ \case
   GetWorktreeInfo -> hWorktree
   GetDirtyFiles -> hDirty

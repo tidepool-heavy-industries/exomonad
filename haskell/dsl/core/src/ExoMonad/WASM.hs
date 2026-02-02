@@ -19,52 +19,12 @@
 -- import ExoMonad  -- pulls in everything
 -- @
 module ExoMonad.WASM
-  ( -- * Graph System
-
-    -- ** Core Type-Level Operators
-    type (:@),
-    Input,
-    UsesEffects,
-    Self,
-
-    -- ** Generic Graph Modes
-    GraphMode (..), -- Includes (:-) type operator
-    AsGraph,
-    EntryNode,
-    ExitNode,
-    LLMNode,
-    LogicNode,
-
-    -- ** Goto System
-    module ExoMonad.Graph.Goto,
-    module ExoMonad.Graph.Goto.Internal,
-
-    -- ** Graph Reification
-    module ExoMonad.Graph.Reify,
-
-    -- * Effects
+  ( -- * Effects
     module ExoMonad.Effect.Metadata,
+    module ExoMonad.Effect.Types,
   )
 where
 
--- Graph types (selective re-export to avoid Exit conflict)
-
--- Goto system
-
--- Reification
-
 -- Effect metadata
 import ExoMonad.Effect.Metadata
-import ExoMonad.Graph.Generic
-  ( AsGraph,
-    EntryNode,
-    ExitNode,
-    GraphMode (..),
-    LLMNode,
-    LogicNode,
-    type (:-),
-  )
-import ExoMonad.Graph.Goto
-import ExoMonad.Graph.Goto.Internal
-import ExoMonad.Graph.Reify
-import ExoMonad.Graph.Types (Input, Self, UsesEffects, type (:@))
+import ExoMonad.Effect.Types

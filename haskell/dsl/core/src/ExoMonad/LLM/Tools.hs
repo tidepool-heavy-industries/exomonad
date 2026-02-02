@@ -54,7 +54,7 @@ module ExoMonad.LLM.Tools
   )
 where
 
-import Control.Monad.Freer (Eff)
+import Polysemy (Sem)
 import Data.Aeson (FromJSON, ToJSON, Value (..), fromJSON, toJSON)
 import Data.Aeson qualified as Aeson
 import Data.Aeson.KeyMap qualified as KM
@@ -116,8 +116,8 @@ data ToolDispatchError
 --
 -- @
 -- data MyTools es = MyTools
---   { search :: SearchArgs -> Eff es SearchResult
---   , lookup :: LookupArgs -> Eff es LookupResult
+--   { search :: SearchArgs -> Sem es SearchResult
+--   , lookup :: LookupArgs -> Sem es LookupResult
 --   }
 --
 -- instance ToolRecord MyTools where
@@ -130,7 +130,7 @@ data ToolDispatchError
 --     "lookup" -> dispatchHandler tools.lookup "lookup" input
 --     _ -> pure $ Left $ ToolNotFound name
 -- @
-class ToolRecord (tools :: [Type -> Type] -> Type) where
+class ToolRecord (tools :: [(Type -> Type) -> Type -> Type] -> Type) where
   -- | Extract tool schemas from the record type.
   --
   -- This uses the proxy pattern since schemas are derived from types,
@@ -145,7 +145,7 @@ class ToolRecord (tools :: [Type -> Type] -> Type) where
     tools es ->
     Text ->
     Value ->
-    Eff es (Either ToolDispatchError Value)
+    Sem es (Either ToolDispatchError Value)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- DISPATCH HELPERS

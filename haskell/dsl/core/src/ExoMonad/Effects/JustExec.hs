@@ -1,8 +1,14 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE KindSignatures #-}
 
 -- | JustExec effect for structured recipe execution.
 --
@@ -29,7 +35,8 @@ module ExoMonad.Effects.JustExec
   )
 where
 
-import Control.Monad.Freer (Eff, Member, interpret, send)
+import Polysemy (Sem, Member, interpret, makeSem)
+import Data.Kind (Type)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.:?), (.=))
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -63,16 +70,19 @@ instance ToJSON ExecResult where
       ]
 
 -- | JustExec effect for running recipes via docker-ctl.
-data JustExec r where
-  ExecRecipe :: Text -> [Text] -> JustExec ExecResult
+data JustExec m a where
+  ExecRecipeOp :: Text -> [Text] -> JustExec m ExecResult
+
+makeSem ''JustExec
 
 -- | Run a recipe with arguments.
-execRecipe :: (Member JustExec effs) => Text -> [Text] -> Eff effs ExecResult
-execRecipe recipe args = send (ExecRecipe recipe args)
+execRecipe :: (Member JustExec r) => Text -> [Text] -> Sem r ExecResult
+execRecipe = execRecipeOp
 
 -- | Stub runner that logs calls and returns success with empty output.
-runJustExecStub :: (Member Log effs) => Eff (JustExec ': effs) a -> Eff effs a
+runJustExecStub :: (Member Log effs) => Sem (JustExec ': effs) a -> Sem effs a
 runJustExecStub = interpret $ \case
-  ExecRecipe recipe args -> do
+  ExecRecipeOp recipe args -> do
     logInfo $ "[JustExec:stub] ExecRecipe called: " <> recipe <> " " <> T.intercalate " " args
     pure $ ExecResult "" "" 0
+

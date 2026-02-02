@@ -8,7 +8,8 @@ module ExoMonad.JustExec.Interpreter
 where
 
 import Control.Exception (SomeException, try)
-import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
+import Polysemy (Sem, Member, interpret, embed)
+import Polysemy.Embed (Embed)
 import Data.Aeson (eitherDecode)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
@@ -22,10 +23,10 @@ import System.Process (readProcessWithExitCode)
 --
 -- Takes the path to the docker-ctl executable and an optional container name.
 -- If container is Nothing, runs with --local.
-runJustExecIO :: (LastMember IO effs) => FilePath -> Maybe Text -> Eff (JustExec ': effs) a -> Eff effs a
+runJustExecIO :: (Member (Embed IO) r) => FilePath -> Maybe Text -> Sem (JustExec ': r) a -> Sem r a
 runJustExecIO dockerCtlPath container = interpret $ \case
-  ExecRecipe recipe args ->
-    sendM $ runDockerCtl dockerCtlPath container recipe args
+  ExecRecipeOp recipe args ->
+    embed $ runDockerCtl dockerCtlPath container recipe args
 
 runDockerCtl :: FilePath -> Maybe Text -> Text -> [Text] -> IO ExecResult
 runDockerCtl cmd container recipe args = do

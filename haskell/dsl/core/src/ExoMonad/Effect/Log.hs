@@ -8,7 +8,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StrictData #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE PolyKinds #-}
 
 -- | Unified logging effect for ExoMonad.
 --
@@ -72,8 +75,10 @@ where
 
 import Prelude hiding (Reader, local)
 
-import Control.Monad.Freer (Eff, LastMember, Member, interpret, send, sendM)
-import Control.Monad.Freer.Reader (Reader, local)
+import Polysemy (Sem, Member, interpret, embed, makeSem)
+import Polysemy.Reader (Reader, local)
+import Polysemy.Embed (Embed)
+import Data.Kind (Type)
 import Data.Aeson (ToJSON (..), Value, toJSON)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
@@ -99,43 +104,45 @@ emptyLogContext :: LogContext
 emptyLogContext = LogContext "" [] Nothing
 
 -- | The Log effect
-data Log r where
-  LogMsg :: LogLevel -> Text -> Maybe LogFields -> Log ()
+data Log m a where
+  LogOp :: LogLevel -> Text -> Maybe LogFields -> Log m ()
 
-logMsg :: (Member Log effs) => LogLevel -> Text -> Eff effs ()
-logMsg level msg = send (LogMsg level msg Nothing)
+makeSem ''Log
 
-logMsgWith :: (Member Log effs) => LogLevel -> Text -> LogFields -> Eff effs ()
-logMsgWith level msg fields = send (LogMsg level msg (Just fields))
+logMsg :: (Member Log effs) => LogLevel -> Text -> Sem effs ()
+logMsg level msg = logOp level msg Nothing
 
-logTrace :: (Member Log effs) => Text -> Eff effs ()
+logMsgWith :: (Member Log effs) => LogLevel -> Text -> LogFields -> Sem effs ()
+logMsgWith level msg fields = logOp level msg (Just fields)
+
+logTrace :: (Member Log effs) => Text -> Sem effs ()
 logTrace = logMsg Trace
 
-logDebug :: (Member Log effs) => Text -> Eff effs ()
+logDebug :: (Member Log effs) => Text -> Sem effs ()
 logDebug = logMsg Debug
 
-logInfo :: (Member Log effs) => Text -> Eff effs ()
+logInfo :: (Member Log effs) => Text -> Sem effs ()
 logInfo = logMsg Info
 
-logWarn :: (Member Log effs) => Text -> Eff effs ()
+logWarn :: (Member Log effs) => Text -> Sem effs ()
 logWarn = logMsg Warn
 
-logError :: (Member Log effs) => Text -> Eff effs ()
+logError :: (Member Log effs) => Text -> Sem effs ()
 logError = logMsg Error
 
-logTraceWith :: (Member Log effs) => Text -> LogFields -> Eff effs ()
+logTraceWith :: (Member Log effs) => Text -> LogFields -> Sem effs ()
 logTraceWith = logMsgWith Trace
 
-logDebugWith :: (Member Log effs) => Text -> LogFields -> Eff effs ()
+logDebugWith :: (Member Log effs) => Text -> LogFields -> Sem effs ()
 logDebugWith = logMsgWith Debug
 
-logInfoWith :: (Member Log effs) => Text -> LogFields -> Eff effs ()
+logInfoWith :: (Member Log effs) => Text -> LogFields -> Sem effs ()
 logInfoWith = logMsgWith Info
 
-logWarnWith :: (Member Log effs) => Text -> LogFields -> Eff effs ()
+logWarnWith :: (Member Log effs) => Text -> LogFields -> Sem effs ()
 logWarnWith = logMsgWith Warn
 
-logErrorWith :: (Member Log effs) => Text -> LogFields -> Eff effs ()
+logErrorWith :: (Member Log effs) => Text -> LogFields -> Sem effs ()
 logErrorWith = logMsgWith Error
 
 -- | Execute an action within a named span.
@@ -144,26 +151,27 @@ logErrorWith = logMsgWith Error
 withEffectSpan ::
   (Member (Reader LogContext) effs) =>
   Text ->
-  Eff effs a ->
-  Eff effs a
+  Sem effs a ->
+  Sem effs a
 withEffectSpan name action =
   local (\ctx -> ctx {effectChain = ctx.effectChain ++ [name]}) action
 
 -- | Simple runner for Log effect that outputs to stderr.
 -- For production use, prefer 'ExoMonad.Log.Interpreter' which uses fast-logger.
-runLog :: (LastMember IO effs) => LogLevel -> Eff (Log ': effs) a -> Eff effs a
+runLog :: (Member (Embed IO) effs) => LogLevel -> Sem (Log ': effs) a -> Sem effs a
 runLog minLevel = interpret $ \case
-  LogMsg level msg maybeFields
+  LogOp level msg maybeFields
     | level >= minLevel -> do
         let fieldStr = case maybeFields of
               Nothing -> ""
               Just fs -> " | " <> T.intercalate ", " (map fst fs)
-        sendM $ TIO.hPutStrLn stderr ("[" <> T.pack (show level) <> "] " <> msg <> fieldStr)
+        embed $ TIO.hPutStrLn stderr ("[" <> T.pack (show level) <> "] " <> msg <> fieldStr)
     | otherwise -> pure ()
 
 -- ══════════════════════════════════════════════════════════════
 -- DOMAIN EVENT TYPES
 -- ══════════════════════════════════════════════════════════════
+
 
 -- | Graph transition info.
 --
@@ -256,7 +264,7 @@ instance ToJSON ErrorContextInfo
 --   , payload = toJSON input
 --   }
 -- @
-logGraph :: (Member Log effs) => GraphTransitionInfo -> Eff effs ()
+logGraph :: (Member Log effs) => GraphTransitionInfo -> Sem effs ()
 logGraph info =
   logInfoWith
     ("GRAPH " <> info.fromNode <> " → " <> info.toNode)
@@ -264,7 +272,7 @@ logGraph info =
     ]
 
 -- | Log a state field change.
-logState :: (Member Log effs) => StateSnapshotInfo -> Eff effs ()
+logState :: (Member Log effs) => StateSnapshotInfo -> Sem effs ()
 logState info =
   logInfoWith
     ("STATE." <> info.field)
@@ -276,7 +284,7 @@ logState info =
 -- | Log an LLM request.
 --
 -- Use 'logDebugWith' for full prompts when debugging.
-logLLMRequest :: (Member Log effs) => LLMRequestInfo -> Eff effs ()
+logLLMRequest :: (Member Log effs) => LLMRequestInfo -> Sem effs ()
 logLLMRequest info =
   logInfoWith
     ("LLM.REQUEST " <> info.nodeName)
@@ -286,7 +294,7 @@ logLLMRequest info =
     ]
 
 -- | Log an LLM response.
-logLLMResponse :: (Member Log effs) => LLMResponseInfo -> Eff effs ()
+logLLMResponse :: (Member Log effs) => LLMResponseInfo -> Sem effs ()
 logLLMResponse info =
   logInfoWith
     ("LLM.RESPONSE " <> info.nodeName)
@@ -298,7 +306,7 @@ logLLMResponse info =
 -- | Log an error with full context.
 --
 -- Always logs at Error level regardless of verbosity.
-logErrorContext :: (Member Log effs) => ErrorContextInfo -> Eff effs ()
+logErrorContext :: (Member Log effs) => ErrorContextInfo -> Sem effs ()
 logErrorContext info =
   logErrorWith
     ("ERROR: " <> info.message)
