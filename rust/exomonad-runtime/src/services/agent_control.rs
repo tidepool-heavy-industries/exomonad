@@ -906,8 +906,8 @@ pub fn spawn_agents_host_fn(service: Arc<AgentControlService>) -> Function {
                 agent_type: input.agent_type,
             };
 
-            let result = block_on(service.spawn_agents(&input.issue_ids, &options));
-            let output: HostResult<BatchSpawnResult> = result.into();
+            let result = block_on(service.spawn_agents(&input.issue_ids, &options))?;
+            let output = HostResult::Success(result);
 
             outputs[0] = set_output(plugin, &output)?;
             Ok(())
@@ -962,8 +962,8 @@ pub fn cleanup_agents_host_fn(service: Arc<AgentControlService>) -> Function {
                 .lock()
                 .map_err(|_| Error::msg("Poisoned lock"))?;
 
-            let result = block_on(service.cleanup_agents(&input.issue_ids, input.force));
-            let output: HostResult<BatchCleanupResult> = result.into();
+            let result = block_on(service.cleanup_agents(&input.issue_ids, input.force))?;
+            let output = HostResult::Success(result);
 
             outputs[0] = set_output(plugin, &output)?;
             Ok(())
