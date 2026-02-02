@@ -65,12 +65,12 @@ pub fn log_info_host_fn<S: HasLogService + Send + Sync + 'static>(services: Arc<
         |plugin, inputs, _outputs, user_data| {
             let services = user_data.get()?;
             let services = services.lock().map_err(|_| Error::msg("Poisoned lock"))?;
-            
+
             if inputs.is_empty() {
                 return Err(Error::msg("No inputs provided"));
             }
             let Json(payload): Json<LogPayload> = plugin.memory_get_val(&inputs[0])?;
-            
+
             // Enforce Info level
             services
                 .log_service()
@@ -94,12 +94,12 @@ pub fn log_error_host_fn<S: HasLogService + Send + Sync + 'static>(services: Arc
         |plugin, inputs, _outputs, user_data| {
             let services = user_data.get()?;
             let services = services.lock().map_err(|_| Error::msg("Poisoned lock"))?;
-            
+
             if inputs.is_empty() {
                 return Err(Error::msg("No inputs provided"));
             }
             let Json(payload): Json<LogPayload> = plugin.memory_get_val(&inputs[0])?;
-            
+
             // Enforce Error level
             services
                 .log_service()
@@ -125,12 +125,12 @@ pub fn emit_event_host_fn<S: HasLogService + Send + Sync + 'static>(services: Ar
 
             let services = user_data.get()?;
             let services = services.lock().map_err(|_| Error::msg("Poisoned lock"))?;
-            
+
             if inputs.is_empty() {
                 return Err(Error::msg("No inputs provided"));
             }
             let Json(payload): Json<EventPayload> = plugin.memory_get_val(&inputs[0])?;
-            
+
             services
                 .log_service()
                 .emit_event(&payload.event_type, &payload.data);

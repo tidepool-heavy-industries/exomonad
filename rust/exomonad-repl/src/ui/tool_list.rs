@@ -1,8 +1,8 @@
+use tui_realm_stdlib::List;
 use tuirealm::command::{Cmd, CmdResult};
 use tuirealm::event::{Key, KeyEvent};
-use tuirealm::props::{Alignment, BorderType, Borders, Color, TextSpan, BorderSides};
+use tuirealm::props::{Alignment, BorderSides, BorderType, Borders, Color, TextSpan};
 use tuirealm::{Component, Event, MockComponent, NoUserEvent, State, StateValue};
-use tui_realm_stdlib::List;
 
 use crate::app::Msg;
 
@@ -20,7 +20,11 @@ impl ToolList {
 
         Self {
             component: List::default()
-                .borders(Borders::default().sides(BorderSides::ALL).modifiers(BorderType::Rounded))
+                .borders(
+                    Borders::default()
+                        .sides(BorderSides::ALL)
+                        .modifiers(BorderType::Rounded),
+                )
                 .title("Tools", Alignment::Center)
                 .highlighted_color(Color::Yellow)
                 .highlighted_str("▶ ")
@@ -58,9 +62,9 @@ impl Component<Msg, NoUserEvent> for ToolList {
             Event::Keyboard(KeyEvent {
                 code: Key::Down, ..
             }) => Cmd::Move(tuirealm::command::Direction::Down),
-            Event::Keyboard(KeyEvent {
-                code: Key::Up, ..
-            }) => Cmd::Move(tuirealm::command::Direction::Up),
+            Event::Keyboard(KeyEvent { code: Key::Up, .. }) => {
+                Cmd::Move(tuirealm::command::Direction::Up)
+            }
             Event::Keyboard(KeyEvent {
                 code: Key::Enter, ..
             }) => {

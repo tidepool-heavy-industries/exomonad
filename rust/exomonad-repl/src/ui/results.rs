@@ -1,8 +1,8 @@
+use tui_realm_stdlib::Textarea;
 use tuirealm::command::{Cmd, CmdResult};
 use tuirealm::event::{Key, KeyEvent};
-use tuirealm::props::{Alignment, BorderType, Borders, TextSpan, BorderSides};
+use tuirealm::props::{Alignment, BorderSides, BorderType, Borders, TextSpan};
 use tuirealm::{Component, Event, MockComponent, NoUserEvent, State};
-use tui_realm_stdlib::Textarea;
 
 use crate::app::Msg;
 
@@ -14,7 +14,11 @@ impl Default for Results {
     fn default() -> Self {
         Self {
             component: Textarea::default()
-                .borders(Borders::default().sides(BorderSides::ALL).modifiers(BorderType::Rounded))
+                .borders(
+                    Borders::default()
+                        .sides(BorderSides::ALL)
+                        .modifiers(BorderType::Rounded),
+                )
                 .title("Results", Alignment::Center),
         }
     }
@@ -48,9 +52,9 @@ impl Component<Msg, NoUserEvent> for Results {
             Event::Keyboard(KeyEvent {
                 code: Key::Down, ..
             }) => Cmd::Scroll(tuirealm::command::Direction::Down),
-            Event::Keyboard(KeyEvent {
-                code: Key::Up, ..
-            }) => Cmd::Scroll(tuirealm::command::Direction::Up),
+            Event::Keyboard(KeyEvent { code: Key::Up, .. }) => {
+                Cmd::Scroll(tuirealm::command::Direction::Up)
+            }
             _ => return None,
         };
 

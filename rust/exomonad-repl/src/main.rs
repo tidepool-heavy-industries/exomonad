@@ -9,7 +9,7 @@ use clap::Parser;
 use mcp_client::McpClient;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tuirealm::{Update};
+use tuirealm::Update;
 
 #[derive(Parser)]
 #[command(name = "exomonad-repl")]
@@ -32,7 +32,7 @@ impl<'a> Drop for TerminalGuard<'a> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    
+
     // Initialize MCP client
     let client = Arc::new(McpClient::new(args.wasm).await?);
     let tools = client.list_tools().await?;
@@ -40,23 +40,33 @@ async fn main() -> Result<()> {
 
     // Initialize model
     let mut model = Model::new(tools);
-    
+
     // Register components
-    model.app.mount(Id::ToolList, Box::new(ui::ToolList::new(tool_names)), vec![])?;
-    model.app.mount(Id::Form, Box::new(ui::Form::default()), vec![])?;
-    model.app.mount(Id::Results, Box::new(ui::Results::default()), vec![])?;
-    model.app.mount(Id::GlobalListener, Box::new(ui::GlobalListener), vec![])?;
-    
+    model.app.mount(
+        Id::ToolList,
+        Box::new(ui::ToolList::new(tool_names)),
+        vec![],
+    )?;
+    model
+        .app
+        .mount(Id::Form, Box::new(ui::Form::default()), vec![])?;
+    model
+        .app
+        .mount(Id::Results, Box::new(ui::Results::default()), vec![])?;
+    model
+        .app
+        .mount(Id::GlobalListener, Box::new(ui::GlobalListener), vec![])?;
+
     // Active ToolList
     model.app.active(&Id::ToolList)?;
-    
+
     // Setup terminal
     model.terminal.enter_alternate_screen()?;
     model.terminal.enable_raw_mode()?;
-    
+
     // Ensure cleanup on exit/panic
     let mut _guard = TerminalGuard(&mut model);
-    
+
     while !_guard.0.quit {
         if _guard.0.redo_render {
             _guard.0.terminal.draw(|f| {
@@ -67,7 +77,7 @@ async fn main() -> Result<()> {
                         tuirealm::ratatui::layout::Constraint::Percentage(70),
                     ])
                     .split(f.area());
-                
+
                 let right_chunks = tuirealm::ratatui::layout::Layout::default()
                     .direction(tuirealm::ratatui::layout::Direction::Vertical)
                     .constraints([
@@ -75,14 +85,14 @@ async fn main() -> Result<()> {
                         tuirealm::ratatui::layout::Constraint::Percentage(50),
                     ])
                     .split(chunks[1]);
-                
+
                 _guard.0.app.view(&Id::ToolList, f, chunks[0]);
                 _guard.0.app.view(&Id::Form, f, right_chunks[0]);
                 _guard.0.app.view(&Id::Results, f, right_chunks[1]);
             })?;
             _guard.0.redo_render = false;
         }
-        
+
         match _guard.0.app.tick(tuirealm::PollStrategy::Once) {
             Err(err) => {
                 eprintln!("Error during UI tick: {err}");
@@ -103,17 +113,23 @@ async fn main() -> Result<()> {
                         Msg::ExecuteTool(name, args) => {
                             // Direct await since main is async
                             let result = client.call_tool(&name, args).await;
-                            
+
                             let mut results_comp = ui::Results::default();
                             match result {
                                 Ok(val) => {
-                                    results_comp.set_text(&serde_json::to_string_pretty(&val).unwrap_or_else(|_| "Failed to serialize".to_string()));
+                                    results_comp.set_text(
+                                        &serde_json::to_string_pretty(&val)
+                                            .unwrap_or_else(|_| "Failed to serialize".to_string()),
+                                    );
                                 }
                                 Err(e) => {
                                     results_comp.set_text(&format!("Error: {}", e));
                                 }
                             }
-                            _guard.0.app.remount(Id::Results, Box::new(results_comp), vec![])?;
+                            _guard
+                                .0
+                                .app
+                                .remount(Id::Results, Box::new(results_comp), vec![])?;
                         }
                         Msg::SwitchFocus(id) => {
                             _guard.0.app.active(&id)?;
@@ -131,7 +147,7 @@ async fn main() -> Result<()> {
             _ => {}
         }
     }
-    
+
     // Cleanup happens via Drop
     Ok(())
 }

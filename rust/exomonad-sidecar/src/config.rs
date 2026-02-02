@@ -38,6 +38,15 @@ pub struct Config {
     pub role: Role,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            project_dir: default_project_dir(),
+            role: Role::default(),
+        }
+    }
+}
+
 fn default_project_dir() -> PathBuf {
     PathBuf::from(".")
 }
@@ -76,11 +85,8 @@ impl Config {
     }
 
     /// Create a default config (for when no config file exists).
-    pub fn default() -> Self {
-        Self {
-            project_dir: default_project_dir(),
-            role: Role::default(),
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Validate configuration and return a ValidatedConfig.

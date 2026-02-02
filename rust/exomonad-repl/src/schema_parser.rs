@@ -39,7 +39,7 @@ impl ToolSchema {
             for (name, prop_val) in props {
                 let kind = parse_kind(prop_val);
                 let is_required = required.contains(name);
-                
+
                 properties.push(Property {
                     name: name.clone(),
                     kind,
@@ -50,15 +50,16 @@ impl ToolSchema {
 
         properties.sort_by(|a, b| a.name.cmp(&b.name));
 
-        Self {
-            properties,
-        }
+        Self { properties }
     }
 }
 
 fn parse_kind(v: &serde_json::Value) -> PropertyKind {
     if let Some(enum_vals) = v.get("enum").and_then(|v| v.as_array()) {
-        let options = enum_vals.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect();
+        let options = enum_vals
+            .iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect();
         return PropertyKind::Enum { options };
     }
 
@@ -67,12 +68,15 @@ fn parse_kind(v: &serde_json::Value) -> PropertyKind {
         Some("number") | Some("integer") => PropertyKind::Number,
         Some("boolean") => PropertyKind::Boolean,
         Some("array") => {
-            let item_type = v.get("items").map(|v| Box::new(parse_kind(v))).unwrap_or(Box::new(PropertyKind::Unknown));
+            let item_type = v
+                .get("items")
+                .map(|v| Box::new(parse_kind(v)))
+                .unwrap_or(Box::new(PropertyKind::Unknown));
             PropertyKind::Array { item_type }
         }
-        Some("object") => {
-            PropertyKind::Object { schema: Box::new(ToolSchema::from_json(v)) }
-        }
+        Some("object") => PropertyKind::Object {
+            schema: Box::new(ToolSchema::from_json(v)),
+        },
         _ => PropertyKind::Unknown,
     }
 }

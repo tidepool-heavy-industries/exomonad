@@ -1,6 +1,6 @@
-use tuirealm::{Application, NoUserEvent, Update};
-use tuirealm::terminal::{TerminalBridge, CrosstermTerminalAdapter};
 use exomonad_sidecar::mcp::ToolDefinition;
+use tuirealm::terminal::{CrosstermTerminalAdapter, TerminalBridge};
+use tuirealm::{Application, NoUserEvent, Update};
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub enum Id {
@@ -33,13 +33,15 @@ impl Model {
             tuirealm::EventListenerCfg::default()
                 .crossterm_input_listener(std::time::Duration::from_millis(10), 3),
         );
-        
+
         Self {
             app,
             quit: false,
             redo_render: true,
-            terminal: TerminalBridge::init(CrosstermTerminalAdapter::new().expect("Failed to create terminal adapter"))
-                .expect("Failed to create terminal bridge"),
+            terminal: TerminalBridge::init(
+                CrosstermTerminalAdapter::new().expect("Failed to create terminal adapter"),
+            )
+            .expect("Failed to create terminal bridge"),
             tools,
         }
     }
@@ -62,4 +64,3 @@ impl Update<Msg> for Model {
         }
     }
 }
-

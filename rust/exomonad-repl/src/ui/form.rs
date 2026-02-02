@@ -1,12 +1,12 @@
+use exomonad_sidecar::mcp::ToolDefinition;
+use tui_realm_stdlib::Input;
 use tuirealm::command::{Cmd, CmdResult};
 use tuirealm::event::{Key, KeyEvent};
-use tuirealm::props::{Alignment, BorderType, Borders, Color, BorderSides};
+use tuirealm::props::{Alignment, BorderSides, BorderType, Borders, Color};
 use tuirealm::{Component, Event, MockComponent, NoUserEvent, State};
-use tui_realm_stdlib::Input;
-use exomonad_sidecar::mcp::ToolDefinition;
 
 use crate::app::Msg;
-use crate::schema_parser::{ToolSchema, PropertyKind};
+use crate::schema_parser::{PropertyKind, ToolSchema};
 
 pub struct Form {
     title: String,
@@ -48,9 +48,10 @@ impl Form {
                         PropertyKind::Boolean => {
                             serde_json::Value::Bool(val.to_lowercase() == "true")
                         }
-                        PropertyKind::Number => {
-                            val.parse::<f64>().map(|n| serde_json::json!(n)).unwrap_or(serde_json::Value::String(val.clone()))
-                        }
+                        PropertyKind::Number => val
+                            .parse::<f64>()
+                            .map(|n| serde_json::json!(n))
+                            .unwrap_or(serde_json::Value::String(val.clone())),
                         PropertyKind::Array { item_type } => {
                             // Split by comma and parse each item according to its item_type
                             let items: Vec<serde_json::Value> = val
@@ -58,20 +59,22 @@ impl Form {
                                 .map(|s| {
                                     let item_str = s.trim();
                                     match &**item_type {
-                                        PropertyKind::Boolean => {
-                                            serde_json::Value::Bool(item_str.eq_ignore_ascii_case("true"))
-                                        }
-                                        PropertyKind::Number => {
-                                            item_str
-                                                .parse::<f64>()
-                                                .map(|n| serde_json::json!(n))
-                                                .unwrap_or_else(|_| serde_json::Value::String(item_str.to_string()))
-                                        }
+                                        PropertyKind::Boolean => serde_json::Value::Bool(
+                                            item_str.eq_ignore_ascii_case("true"),
+                                        ),
+                                        PropertyKind::Number => item_str
+                                            .parse::<f64>()
+                                            .map(|n| serde_json::json!(n))
+                                            .unwrap_or_else(|_| {
+                                                serde_json::Value::String(item_str.to_string())
+                                            }),
                                         // For objects, strings, or other types, try JSON-parse first, then fall back to string
                                         _ => {
                                             // Ideally we would parse nested objects, but for now we just fallback to string
                                             // or basic JSON parsing if the user entered valid JSON
-                                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(item_str) {
+                                            if let Ok(v) =
+                                                serde_json::from_str::<serde_json::Value>(item_str)
+                                            {
                                                 v
                                             } else {
                                                 serde_json::Value::String(item_str.to_string())
@@ -116,29 +119,34 @@ impl MockComponent for Form {
             chunks[0],
         );
 
-        frame.render_widget(
-            TuiParagraph::new(self.description.clone()),
-            chunks[1],
-        );
+        frame.render_widget(TuiParagraph::new(self.description.clone()), chunks[1]);
 
         if let Some(schema) = &self.schema {
-            let field_constraints: Vec<Constraint> = schema.properties.iter()
+            let field_constraints: Vec<Constraint> = schema
+                .properties
+                .iter()
                 .map(|_| Constraint::Length(3))
                 .collect();
-            
+
             let field_chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints(field_constraints)
                 .split(chunks[2]);
 
             for (i, prop) in schema.properties.iter().enumerate() {
-                if i >= field_chunks.len() { break; }
-                
+                if i >= field_chunks.len() {
+                    break;
+                }
+
                 let is_focused = i == self.focused_idx;
-                let border_color = if is_focused { Color::Yellow } else { Color::White };
-                
+                let border_color = if is_focused {
+                    Color::Yellow
+                } else {
+                    Color::White
+                };
+
                 let value = self.values.get(&prop.name).cloned().unwrap_or_default();
-                
+
                 let label = if prop.required {
                     format!("{} *", prop.name)
                 } else {
@@ -146,10 +154,15 @@ impl MockComponent for Form {
                 };
 
                 let mut input = Input::default()
-                    .borders(Borders::default().color(border_color).sides(BorderSides::ALL).modifiers(BorderType::Rounded))
+                    .borders(
+                        Borders::default()
+                            .color(border_color)
+                            .sides(BorderSides::ALL)
+                            .modifiers(BorderType::Rounded),
+                    )
                     .title(label, Alignment::Left)
                     .value(value);
-                
+
                 input.view(frame, field_chunks[i]);
             }
         }
@@ -159,8 +172,7 @@ impl MockComponent for Form {
         None
     }
 
-    fn attr(&mut self, _attr: tuirealm::props::Attribute, _value: tuirealm::props::AttrValue) {
-    }
+    fn attr(&mut self, _attr: tuirealm::props::Attribute, _value: tuirealm::props::AttrValue) {}
 
     fn state(&self) -> State {
         State::None
@@ -183,7 +195,9 @@ impl Component<Msg, NoUserEvent> for Form {
                 }
                 Some(Msg::None)
             }
-            Event::Keyboard(KeyEvent { code: Key::BackTab, .. }) => {
+            Event::Keyboard(KeyEvent {
+                code: Key::BackTab, ..
+            }) => {
                 if let Some(schema) = &self.schema {
                     let len = schema.properties.len();
                     if len > 0 {
@@ -196,16 +210,24 @@ impl Component<Msg, NoUserEvent> for Form {
                 }
                 Some(Msg::None)
             }
-            Event::Keyboard(KeyEvent { code: Key::Char(c), .. }) => {
+            Event::Keyboard(KeyEvent {
+                code: Key::Char(c), ..
+            }) => {
                 if let Some(schema) = &self.schema {
                     if let Some(prop) = schema.properties.get(self.focused_idx) {
-                        let val = self.values.entry(prop.name.clone()).or_insert(String::new());
+                        let val = self
+                            .values
+                            .entry(prop.name.clone())
+                            .or_default();
                         val.push(c);
                     }
                 }
                 Some(Msg::None)
             }
-            Event::Keyboard(KeyEvent { code: Key::Backspace, .. }) => {
+            Event::Keyboard(KeyEvent {
+                code: Key::Backspace,
+                ..
+            }) => {
                 if let Some(schema) = &self.schema {
                     if let Some(prop) = schema.properties.get(self.focused_idx) {
                         if let Some(val) = self.values.get_mut(&prop.name) {
@@ -215,9 +237,9 @@ impl Component<Msg, NoUserEvent> for Form {
                 }
                 Some(Msg::None)
             }
-            Event::Keyboard(KeyEvent { code: Key::Enter, .. }) => {
-                Some(Msg::ExecuteTool(self.get_current_tool(), self.get_values()))
-            }
+            Event::Keyboard(KeyEvent {
+                code: Key::Enter, ..
+            }) => Some(Msg::ExecuteTool(self.get_current_tool(), self.get_values())),
             _ => None,
         }
     }
