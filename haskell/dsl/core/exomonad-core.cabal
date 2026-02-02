@@ -69,7 +69,6 @@ library
         ExoMonad.Effects.Worktree
         ExoMonad.Effects.Effector
         ExoMonad.Effects.Justfile
-        ExoMonad.Effects.DockerSpawner
         ExoMonad.Effects.FileSystem
         ExoMonad.Effects.Zellij
         ExoMonad.Question
