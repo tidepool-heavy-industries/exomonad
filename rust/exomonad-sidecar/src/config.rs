@@ -1,7 +1,7 @@
 //! Configuration discovery from .exomonad/config.toml
 
 use anyhow::{Context, Result};
-use exomonad_shared::Role;
+use exomonad_shared::{PathError, Role, WasmPath};
 use serde::Deserialize;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -19,14 +19,8 @@ pub enum ConfigError {
     #[error("HOME environment variable not set")]
     HomeNotSet,
 
-    #[error("WASM plugin not found: {path}\nExpected role: {role}\nRun: just wasm {role}")]
-    WasmNotFound { path: PathBuf, role: String },
-
-    #[error("WASM path is not a file: {path}")]
-    WasmNotFile { path: PathBuf },
-
-    #[error("WASM path does not have .wasm extension: {path}")]
-    WasmInvalidExtension { path: PathBuf },
+    #[error("WASM plugin validation failed: {0}")]
+    WasmValidation(#[from] PathError),
 
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
@@ -52,10 +46,12 @@ fn default_project_dir() -> PathBuf {
 ///
 /// This type guarantees that all configuration fields have been validated:
 /// - project_dir exists and is a directory
-/// - project_dir contains a .git directory (git repo check)
-/// - WASM path exists and is a valid .wasm file
+/// - WASM path exists, is a file, and has .wasm extension (stored as WasmPath)
 #[derive(Debug, Clone)]
-pub struct ValidatedConfig(Config);
+pub struct ValidatedConfig {
+    config: Config,
+    wasm_path: WasmPath,
+}
 
 impl Config {
     /// Discover configuration from .exomonad/config.toml in current directory.
@@ -118,28 +114,14 @@ impl Config {
             );
         }
 
-        // Resolve WASM path
-        let wasm_path = self.wasm_path_internal()?;
+        // Resolve and validate WASM path using WasmPath newtype
+        let wasm_path_buf = self.wasm_path_internal()?;
+        let wasm_path = WasmPath::try_from(wasm_path_buf)?;
 
-        // Check WASM file exists
-        if !wasm_path.exists() {
-            return Err(ConfigError::WasmNotFound {
-                path: wasm_path,
-                role: self.role.to_string(),
-            });
-        }
-
-        // Check WASM path is a file
-        if !wasm_path.is_file() {
-            return Err(ConfigError::WasmNotFile { path: wasm_path });
-        }
-
-        // Check WASM file has .wasm extension
-        if wasm_path.extension().and_then(|e| e.to_str()) != Some("wasm") {
-            return Err(ConfigError::WasmInvalidExtension { path: wasm_path });
-        }
-
-        Ok(ValidatedConfig(self))
+        Ok(ValidatedConfig {
+            config: self,
+            wasm_path,
+        })
     }
 
     /// Internal helper for WASM path resolution (returns ConfigError).
@@ -154,21 +136,17 @@ impl Config {
 impl ValidatedConfig {
     /// Get the validated project directory.
     pub fn project_dir(&self) -> &PathBuf {
-        &self.0.project_dir
+        &self.config.project_dir
     }
 
     /// Get the validated role.
     pub fn role(&self) -> Role {
-        self.0.role
+        self.config.role
     }
 
-    /// Get the validated WASM path.
-    ///
-    /// This method cannot fail because validation guarantees the WASM path exists.
-    pub fn wasm_path(&self) -> PathBuf {
-        self.0
-            .wasm_path_internal()
-            .expect("validated config guarantees valid WASM path")
+    /// Get the WASM path as a PathBuf.
+    pub fn wasm_path_buf(&self) -> PathBuf {
+        self.wasm_path.as_path().to_path_buf()
     }
 }
 
@@ -282,11 +260,11 @@ project_dir = "/home/user/project"
             Ok(_) => {
                 // WASM exists in dev environment
             }
-            Err(ConfigError::WasmNotFound { .. }) => {
-                // Expected if WASM not installed
+            Err(ConfigError::WasmValidation(_)) => {
+                // Expected if WASM not installed (PathError::NotFound)
             }
             Err(e) => {
-                panic!("Expected WasmNotFound or success, got: {:?}", e);
+                panic!("Expected WasmValidation or success, got: {:?}", e);
             }
         }
     }
@@ -310,7 +288,7 @@ project_dir = "/home/user/project"
             Ok(_) => {
                 // WASM exists in dev environment, test passes
             }
-            Err(ConfigError::WasmNotFound { .. }) => {
+            Err(ConfigError::WasmValidation(_)) => {
                 // Expected if WASM not installed
             }
             Err(e) => {
@@ -360,7 +338,7 @@ project_dir = "/home/user/project"
         if let Ok(validated) = config.validate() {
             assert_eq!(validated.role(), Role::Dev);
             assert_eq!(validated.project_dir(), dir.path());
-            let wasm = validated.wasm_path();
+            let wasm = validated.wasm_path_buf();
             assert!(wasm.to_str().unwrap().ends_with("wasm-guest-dev.wasm"));
         }
     }

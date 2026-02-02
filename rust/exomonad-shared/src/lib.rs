@@ -33,7 +33,8 @@ pub mod supervisor;
 
 // Re-export commonly used types at crate root
 pub use domain::{
-    DomainError, GithubOwner, GithubRepo, IssueNumber, Role, SessionId, ToolName, ToolPermission,
+    AbsolutePath, DomainError, GithubOwner, GithubRepo, IssueNumber, PathError, Role, SessionId,
+    ToolName, ToolPermission, WasmPath,
 };
 pub use error::{ExoMonadError, Result};
 pub use hooks::HookConfig;

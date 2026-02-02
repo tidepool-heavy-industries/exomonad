@@ -238,7 +238,7 @@ async fn main() -> Result<()> {
         anyhow::anyhow!("Config validation failed: {}", e)
     })?;
 
-    let wasm_path = config.wasm_path();
+    let wasm_path = config.wasm_path_buf();
 
     info!(
         role = ?config.role(),

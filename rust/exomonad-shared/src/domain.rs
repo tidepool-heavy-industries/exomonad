@@ -363,6 +363,124 @@ impl TryFrom<String> for Role {
 }
 
 // ============================================================================
+// Path Types
+// ============================================================================
+
+use std::path::{Path, PathBuf};
+
+/// Path validation errors.
+#[derive(Debug, thiserror::Error)]
+pub enum PathError {
+    #[error("path must be absolute: {path}")]
+    NotAbsolute { path: PathBuf },
+
+    #[error("path does not exist: {path}")]
+    NotFound { path: PathBuf },
+
+    #[error("path is not a file: {path}")]
+    NotFile { path: PathBuf },
+
+    #[error("path does not have .wasm extension: {path}")]
+    InvalidWasmExtension { path: PathBuf },
+}
+
+/// Absolute path (must be absolute).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AbsolutePath(PathBuf);
+
+impl TryFrom<PathBuf> for AbsolutePath {
+    type Error = PathError;
+
+    fn try_from(p: PathBuf) -> Result<Self, Self::Error> {
+        if !p.is_absolute() {
+            return Err(PathError::NotAbsolute { path: p });
+        }
+        Ok(Self(p))
+    }
+}
+
+impl From<AbsolutePath> for PathBuf {
+    fn from(p: AbsolutePath) -> PathBuf {
+        p.0
+    }
+}
+
+impl AbsolutePath {
+    /// Get the path as a Path reference.
+    pub fn as_path(&self) -> &Path {
+        &self.0
+    }
+
+    /// Convert to PathBuf (consumes self).
+    pub fn into_path_buf(self) -> PathBuf {
+        self.0
+    }
+}
+
+impl AsRef<Path> for AbsolutePath {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl fmt::Display for AbsolutePath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0.display())
+    }
+}
+
+/// WASM path (must exist, be a file, and have .wasm extension).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WasmPath(PathBuf);
+
+impl TryFrom<PathBuf> for WasmPath {
+    type Error = PathError;
+
+    fn try_from(p: PathBuf) -> Result<Self, Self::Error> {
+        if !p.exists() {
+            return Err(PathError::NotFound { path: p });
+        }
+        if !p.is_file() {
+            return Err(PathError::NotFile { path: p });
+        }
+        if p.extension().and_then(|e| e.to_str()) != Some("wasm") {
+            return Err(PathError::InvalidWasmExtension { path: p });
+        }
+        Ok(Self(p))
+    }
+}
+
+impl From<WasmPath> for PathBuf {
+    fn from(p: WasmPath) -> PathBuf {
+        p.0
+    }
+}
+
+impl WasmPath {
+    /// Get the path as a Path reference.
+    pub fn as_path(&self) -> &Path {
+        &self.0
+    }
+
+    /// Convert to PathBuf (consumes self).
+    pub fn into_path_buf(self) -> PathBuf {
+        self.0
+    }
+}
+
+impl AsRef<Path> for WasmPath {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl fmt::Display for WasmPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0.display())
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -492,5 +610,49 @@ mod tests {
         let json = serde_json::to_string(&permission).unwrap();
         let deserialized: ToolPermission = serde_json::from_str(&json).unwrap();
         assert_eq!(permission, deserialized);
+    }
+
+    #[test]
+    fn test_absolute_path() {
+        // Valid absolute path
+        let abs = AbsolutePath::try_from(PathBuf::from("/tmp/test")).unwrap();
+        assert_eq!(abs.as_path(), Path::new("/tmp/test"));
+
+        // Relative path should fail
+        let result = AbsolutePath::try_from(PathBuf::from("relative/path"));
+        assert!(matches!(result, Err(PathError::NotAbsolute { .. })));
+
+        // Test as_ref
+        let _: &Path = abs.as_ref();
+    }
+
+    #[test]
+    fn test_wasm_path() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+
+        // Create a valid .wasm file
+        let wasm_file = dir.path().join("test.wasm");
+        fs::write(&wasm_file, b"fake wasm").unwrap();
+
+        let wasm = WasmPath::try_from(wasm_file.clone()).unwrap();
+        assert_eq!(wasm.as_path(), wasm_file.as_path());
+
+        // Non-existent file
+        let missing = dir.path().join("missing.wasm");
+        let result = WasmPath::try_from(missing);
+        assert!(matches!(result, Err(PathError::NotFound { .. })));
+
+        // Directory instead of file
+        let result = WasmPath::try_from(dir.path().to_path_buf());
+        assert!(matches!(result, Err(PathError::NotFile { .. })));
+
+        // Wrong extension
+        let wrong_ext = dir.path().join("test.txt");
+        fs::write(&wrong_ext, b"not wasm").unwrap();
+        let result = WasmPath::try_from(wrong_ext);
+        assert!(matches!(result, Err(PathError::InvalidWasmExtension { .. })));
     }
 }
