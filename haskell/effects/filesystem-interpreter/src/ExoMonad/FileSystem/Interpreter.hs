@@ -21,8 +21,8 @@ module ExoMonad.FileSystem.Interpreter
   )
 where
 
-import Control.Exception (SomeException, try)
 import Polysemy (Sem, Member, interpret, embed)
+import Polysemy.Error (Error, throw)
 import Polysemy.Embed (Embed)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -47,16 +47,21 @@ import Path.IO qualified as PathIO
 
 -- | Run FileSystem effects using standard Haskell IO operations (via path-io).
 --
--- All operations are wrapped in try/catch to return explicit errors.
-runFileSystemIO :: (Member (Embed IO) r) => Sem (FileSystem ': r) a -> Sem r a
+-- Throws FileSystemError on failure via Polysemy Error effect.
+runFileSystemIO :: (Member (Embed IO) r, Member (Error FileSystemError) r) => Sem (FileSystem ': r) a -> Sem r a
 runFileSystemIO = interpret $ \case
-  CreateDirectory path -> embed $ createDirectoryIO path
-  WriteFileText path content -> embed $ writeFileTextIO path content
-  CopyFile src dest -> embed $ copyFileIO src dest
-  CreateSymlink target link -> embed $ createSymlinkIO target link
-  FileExists path -> embed $ fileExistsIO path
-  DirectoryExists path -> embed $ directoryExistsIO path
-  ReadFileText path -> embed $ readFileTextIO path
+  CreateDirectory path -> embed (createDirectoryIO path) >>= fromEither
+  WriteFileText path content -> embed (writeFileTextIO path content) >>= fromEither
+  CopyFile src dest -> embed (copyFileIO src dest) >>= fromEither
+  CreateSymlink target link -> embed (createSymlinkIO target link) >>= fromEither
+  FileExists path -> embed (fileExistsIO path) >>= fromEither
+  DirectoryExists path -> embed (directoryExistsIO path) >>= fromEither
+  ReadFileText path -> embed (readFileTextIO path) >>= fromEither
+
+-- | Helper to lift Either into Polysemy Error
+fromEither :: (Member (Error e) r) => Either e a -> Sem r a
+fromEither (Left e) = throw e
+fromEither (Right a) = pure a
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- IMPLEMENTATION
@@ -92,10 +97,6 @@ writeFileTextIO path content = do
               fseReason = T.pack (show e)
             }
     Right () -> do
-      -- PathIO.readFileUtf8 exists, but writeFileUtf8 is usually just TIO.writeFile with toFilePath
-      -- Actually path-io doesn't seem to export writeFileText/Utf8 directly?
-      -- Checked path-io docs: it has generic IO helpers but strict text IO is usually via Data.Text.IO
-      -- But we can use toFilePath to bridge.
       writeResult <- try @SomeException $ PathIO.writeFileUtf8 path content
       case writeResult of
         Left e ->

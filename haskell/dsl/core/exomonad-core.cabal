@@ -45,8 +45,6 @@ library
         ExoMonad.Template.Render
         -- Unified re-export module
         ExoMonad.Effects
-        -- Native-only effects (require subprocesses)
-        ExoMonad.Effect.LSP
         -- Native-only tooling
         ExoMonad.Schema
         ExoMonad.Schema.TH

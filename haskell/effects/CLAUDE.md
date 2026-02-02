@@ -10,7 +10,6 @@ This follows the **interpreter design pattern**: abstract syntax (effect types) 
 |--------------|-----------|
 | Understand LLM API calls | `llm-interpreter/CLAUDE.md` |
 | Work with GitHub issues/PRs (via Rust/Octocrab) | `github-interpreter/CLAUDE.md` |
-| Add code intelligence (LSP) | `lsp-interpreter/CLAUDE.md` |
 | Manage git worktrees | `worktree-interpreter/CLAUDE.md` |
 | Run just recipes | `justfile-interpreter/CLAUDE.md` |
 | Add Grafana observability | `observability-interpreter/CLAUDE.md` |
@@ -24,7 +23,6 @@ This follows the **interpreter design pattern**: abstract syntax (effect types) 
 ```
 effects/CLAUDE.md  ← YOU ARE HERE (router)
 ├── llm-interpreter/CLAUDE.md           ← Anthropic API
-├── lsp-interpreter/CLAUDE.md           ← Language server protocol
 ├── github-interpreter/CLAUDE.md        ← Socket client (Rust Octocrab)
 ├── observability-interpreter/CLAUDE.md ← Grafana Loki & Tempo
 ├── worktree-interpreter/CLAUDE.md      ← Git worktree management
@@ -53,7 +51,6 @@ Most effect types live in `dsl/core/src/ExoMonad/Effect/Types.hs` or `Effects/*.
 | Effect | Types | Interpreter | Implementation |
 |--------|-------|-------------|----------------|
 | LLM | dsl/core | llm-interpreter | Socket (preferred) |
-| LSP | dsl/core | lsp-interpreter | lsp-client library |
 | Habitica | effects/habitica | habitica-interpreter | HTTP API |
 | Observability | dsl/core | observability-interpreter | OTLP/Loki push |
 | GitHub | dsl/core | github-interpreter | Socket client (Rust Octocrab) |

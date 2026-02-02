@@ -51,8 +51,10 @@ import Prelude hiding (readFileText, writeFileText)
 
 import ExoMonad.Path
 import Polysemy (Sem, Member, makeSem)
+import Polysemy.Error (Error, throw)
 import Data.Kind (Type)
 import Data.Aeson (FromJSON, ToJSON)
+import Polysemy.Error (Error, throw)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
@@ -83,45 +85,45 @@ instance FromJSON FileSystemError
 
 -- | FileSystem effect for basic file operations.
 --
--- All operations return @Either FileSystemError@ for explicit error handling.
+-- Operations throw 'FileSystemError' via Polysemy Error effect.
 -- Using 'Path' types ensures we don't mix up files and directories or
 -- relative and absolute paths at the type level.
 data FileSystem m a where
   -- | Create a directory (including parent directories).
   CreateDirectory ::
     Path b Dir ->
-    FileSystem m (Either FileSystemError ())
+    FileSystem m ()
   -- | Write text content to a file.
   -- Creates the file if it doesn't exist, overwrites if it does.
   WriteFileText ::
     Path b File ->
     Text ->
-    FileSystem m (Either FileSystemError ())
+    FileSystem m ()
   -- | Copy a file from source to destination.
   CopyFile ::
     -- | Source path
     Path b1 File ->
     -- | Destination path
     Path b2 File ->
-    FileSystem m (Either FileSystemError ())
+    FileSystem m ()
   -- | Create a symbolic link.
   CreateSymlink ::
     -- | Target (what the link points to)
     Path b1 t1 ->
     -- | Link path (the new symlink)
     Path b2 t2 ->
-    FileSystem m (Either FileSystemError ())
+    FileSystem m ()
   -- | Check if a file exists.
   FileExists ::
     Path b File ->
-    FileSystem m (Either FileSystemError Bool)
+    FileSystem m Bool
   -- | Check if a directory exists.
   DirectoryExists ::
     Path b Dir ->
-    FileSystem m (Either FileSystemError Bool)
+    FileSystem m Bool
   -- | Read text content from a file.
   ReadFileText ::
     Path b File ->
-    FileSystem m (Either FileSystemError Text)
+    FileSystem m Text
 
 makeSem ''FileSystem

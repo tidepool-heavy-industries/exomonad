@@ -12,7 +12,6 @@ packages:
     haskell/effects/worktree-interpreter
     haskell/effects/habitica
     haskell/effects/habitica-interpreter
-    haskell/effects/lsp-interpreter
     haskell/effects/zellij-interpreter
     haskell/runtime/control-server
     haskell/runtime/sidecar
