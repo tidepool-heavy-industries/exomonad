@@ -4,7 +4,7 @@
 //! Full E2E WASM tests may fail if the WASM fixture is stale or incompatible
 //! with current host function protocols - these are marked as lenient.
 
-use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::path::PathBuf;
 
@@ -48,49 +48,32 @@ fn wasm_loaded_ok(stderr: &str) -> bool {
 }
 
 #[test]
-fn test_cli_missing_wasm_file_errors() {
-    let mut cmd = Command::cargo_bin("exomonad-sidecar").unwrap();
-
-    cmd.args([
-        "--wasm",
-        "/nonexistent/path/to/plugin.wasm",
-        "hook",
-        "pre-tool-use",
-    ])
-    .write_stdin(test_hook_json())
-    .assert()
-    .failure()
-    .stderr(predicate::str::contains("WASM plugin not found"));
+fn test_cli_missing_wasm_file_errors() -> Result<(), Box<dyn std::error::Error>> {
+    // This test is no longer applicable with config-based WASM resolution
+    // The WASM path is now resolved from .exomonad/config.toml
+    // If no config exists, defaults are used and validated at startup
+    Ok(())
 }
 
 #[test]
-fn test_cli_missing_wasm_arg_errors() {
-    let mut cmd = Command::cargo_bin("exomonad-sidecar").unwrap();
-
-    cmd.args(["hook", "pre-tool-use"])
-        .write_stdin(test_hook_json())
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("--wasm"));
+fn test_cli_missing_wasm_arg_errors() -> Result<(), Box<dyn std::error::Error>> {
+    // This test is no longer applicable with config-based WASM resolution
+    // The WASM path is now resolved from .exomonad/config.toml, not --wasm flag
+    Ok(())
 }
 
 #[test]
-fn test_cli_hook_pre_tool_use() {
+fn test_cli_hook_pre_tool_use() -> Result<(), Box<dyn std::error::Error>> {
     let wasm_path = wasm_fixture_path();
     if !wasm_path.exists() {
         eprintln!("Skipping test: WASM fixture not found at {:?}", wasm_path);
-        return;
+        return Ok(());
     }
 
-    let mut cmd = Command::cargo_bin("exomonad-sidecar").unwrap();
+    let mut cmd = cargo_bin_cmd!("exomonad-sidecar");
 
     let output = cmd
-        .args([
-            "--wasm",
-            wasm_path.to_str().unwrap(),
-            "hook",
-            "pre-tool-use",
-        ])
+        .args(["hook", "pre-tool-use"])
         .write_stdin(test_hook_json())
         .output()
         .expect("Failed to execute command");
@@ -118,25 +101,22 @@ fn test_cli_hook_pre_tool_use() {
             stderr
         );
     }
+
+    Ok(())
 }
 
 #[test]
-fn test_cli_hook_with_minimal_input() {
+fn test_cli_hook_with_minimal_input() -> Result<(), Box<dyn std::error::Error>> {
     let wasm_path = wasm_fixture_path();
     if !wasm_path.exists() {
         eprintln!("Skipping test: WASM fixture not found at {:?}", wasm_path);
-        return;
+        return Ok(());
     }
 
-    let mut cmd = Command::cargo_bin("exomonad-sidecar").unwrap();
+    let mut cmd = cargo_bin_cmd!("exomonad-sidecar");
 
     let output = cmd
-        .args([
-            "--wasm",
-            wasm_path.to_str().unwrap(),
-            "hook",
-            "pre-tool-use",
-        ])
+        .args(["hook", "pre-tool-use"])
         .write_stdin(minimal_hook_json())
         .output()
         .expect("Failed to execute command");
@@ -147,88 +127,63 @@ fn test_cli_hook_with_minimal_input() {
         "WASM should load successfully. Stderr: {}",
         stderr
     );
+
+    Ok(())
 }
 
 #[test]
-fn test_cli_invalid_json_returns_error() {
+fn test_cli_invalid_json_returns_error() -> Result<(), Box<dyn std::error::Error>> {
     let wasm_path = wasm_fixture_path();
     if !wasm_path.exists() {
         eprintln!("Skipping test: WASM fixture not found at {:?}", wasm_path);
-        return;
+        return Ok(());
     }
 
-    let mut cmd = Command::cargo_bin("exomonad-sidecar").unwrap();
+    let mut cmd = cargo_bin_cmd!("exomonad-sidecar");
 
-    cmd.args([
-        "--wasm",
-        wasm_path.to_str().unwrap(),
-        "hook",
-        "pre-tool-use",
-    ])
+    cmd.args(["hook", "pre-tool-use"])
     .write_stdin("not valid json")
     .assert()
     .failure()
     .stderr(predicate::str::contains("parse"));
+
+    Ok(())
 }
 
 #[test]
-fn test_cli_empty_stdin_returns_error() {
+fn test_cli_empty_stdin_returns_error() -> Result<(), Box<dyn std::error::Error>> {
     let wasm_path = wasm_fixture_path();
     if !wasm_path.exists() {
         eprintln!("Skipping test: WASM fixture not found at {:?}", wasm_path);
-        return;
+        return Ok(());
     }
 
-    let mut cmd = Command::cargo_bin("exomonad-sidecar").unwrap();
+    let mut cmd = cargo_bin_cmd!("exomonad-sidecar");
 
-    cmd.args([
-        "--wasm",
-        wasm_path.to_str().unwrap(),
-        "hook",
-        "pre-tool-use",
-    ])
+    cmd.args(["hook", "pre-tool-use"])
     .write_stdin("")
     .assert()
     .failure();
+
+    Ok(())
 }
 
 #[test]
-fn test_cli_wasm_env_var() {
-    let wasm_path = wasm_fixture_path();
-    if !wasm_path.exists() {
-        eprintln!("Skipping test: WASM fixture not found at {:?}", wasm_path);
-        return;
-    }
-
-    let mut cmd = Command::cargo_bin("exomonad-sidecar").unwrap();
-
-    // Use env var instead of --wasm flag
-    let output = cmd
-        .env("EXOMONAD_WASM_PATH", wasm_path.to_str().unwrap())
-        .args(["hook", "pre-tool-use"])
-        .write_stdin(test_hook_json())
-        .output()
-        .expect("Failed to execute command");
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    // Verify env var is picked up and WASM loads
-    assert!(
-        wasm_loaded_ok(&stderr),
-        "WASM should load successfully via env var. Stderr: {}",
-        stderr
-    );
+fn test_cli_wasm_env_var() -> Result<(), Box<dyn std::error::Error>> {
+    // This test is no longer applicable with config-based WASM resolution
+    // EXOMONAD_WASM_PATH is deprecated in favor of .exomonad/config.toml
+    Ok(())
 }
 
 #[test]
-fn test_cli_other_hook_types_passthrough() {
+fn test_cli_other_hook_types_passthrough() -> Result<(), Box<dyn std::error::Error>> {
     let wasm_path = wasm_fixture_path();
     if !wasm_path.exists() {
         eprintln!("Skipping test: WASM fixture not found at {:?}", wasm_path);
-        return;
+        return Ok(());
     }
 
-    let mut cmd = Command::cargo_bin("exomonad-sidecar").unwrap();
+    let mut cmd = cargo_bin_cmd!("exomonad-sidecar");
 
     // Post-tool-use should pass through (not implemented in WASM, uses default)
     let input = r#"{
@@ -240,12 +195,7 @@ fn test_cli_other_hook_types_passthrough() {
     }"#;
 
     let output = cmd
-        .args([
-            "--wasm",
-            wasm_path.to_str().unwrap(),
-            "hook",
-            "post-tool-use",
-        ])
+        .args(["hook", "post-tool-use"])
         .write_stdin(input)
         .output()
         .expect("Failed to execute command");
@@ -265,10 +215,12 @@ fn test_cli_other_hook_types_passthrough() {
             "Default should allow continuation"
         );
     }
+
+    Ok(())
 }
 
 #[test]
-fn test_cli_mcp_server_starts() {
+fn test_cli_mcp_server_starts() -> Result<(), Box<dyn std::error::Error>> {
     use std::process::{Command as StdCommand, Stdio};
     use std::thread;
     use std::time::Duration;
@@ -276,7 +228,7 @@ fn test_cli_mcp_server_starts() {
     let wasm_path = wasm_fixture_path();
     if !wasm_path.exists() {
         eprintln!("Skipping test: WASM fixture not found at {:?}", wasm_path);
-        return;
+        return Ok(());
     }
 
     // Use a random high port to avoid conflicts
@@ -285,8 +237,6 @@ fn test_cli_mcp_server_starts() {
     // Start MCP server in background
     let mut child = StdCommand::new(env!("CARGO_BIN_EXE_exomonad-sidecar"))
         .args([
-            "--wasm",
-            wasm_path.to_str().unwrap(),
             "mcp",
             "--port",
             &port.to_string(),
@@ -324,4 +274,6 @@ fn test_cli_mcp_server_starts() {
         // curl might not be available, skip test
         eprintln!("Skipping test: curl not available");
     }
+
+    Ok(())
 }

@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 // ============================================================================
 // CLI Types
@@ -156,21 +156,68 @@ async fn handle_hook(
 }
 
 // ============================================================================
+// Logging
+// ============================================================================
+
+/// Initialize logging based on the command mode.
+/// - MCP stdio: Logs to ~/.exomonad/logs/sidecar-TIMESTAMP.log
+/// - Other modes: Logs to stderr (preserves current behavior)
+fn init_logging(command: &Commands) {
+    match command {
+        Commands::McpStdio => {
+            // File-based logging for stdio mode
+            let home_dir = std::env::var("HOME")
+                .expect("HOME environment variable not set");
+            let log_dir = PathBuf::from(home_dir).join(".exomonad").join("logs");
+
+            // Create log directory if it doesn't exist
+            std::fs::create_dir_all(&log_dir)
+                .expect("Failed to create log directory");
+
+            // Generate timestamped filename
+            let timestamp = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S");
+            let log_file = log_dir.join(format!("sidecar-{}.log", timestamp));
+
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_file)
+                .expect("Failed to open log file");
+
+            tracing_subscriber::fmt()
+                .with_env_filter(
+                    tracing_subscriber::EnvFilter::from_default_env()
+                        .add_directive(tracing::Level::INFO.into()),
+                )
+                .with_writer(std::sync::Arc::new(file))
+                .with_ansi(false)  // No ANSI colors in file
+                .init();
+
+            eprintln!("MCP stdio logging to: {}", log_file.display());
+        }
+        _ => {
+            // Stderr logging for other modes (existing behavior)
+            tracing_subscriber::fmt()
+                .with_env_filter(
+                    tracing_subscriber::EnvFilter::from_default_env()
+                        .add_directive(tracing::Level::INFO.into()),
+                )
+                .with_writer(std::io::stderr)
+                .init();
+        }
+    }
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::INFO.into()),
-        )
-        .with_writer(std::io::stderr)
-        .init();
-
     let cli = Cli::parse();
+
+    // Initialize logging based on command type
+    init_logging(&cli.command);
 
     // Deprecation warning for old env var
     if std::env::var("EXOMONAD_WASM_PATH").is_ok() {
