@@ -178,4 +178,3 @@ async fn test_plugin_call_with_minimal_input() {
         }
     }
 }
-

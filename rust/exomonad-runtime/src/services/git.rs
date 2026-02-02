@@ -1,9 +1,9 @@
 use crate::services::docker::DockerExecutor;
 use anyhow::{Context, Result};
+use duct::cmd;
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
 use extism_convert::Json;
 use serde::{Deserialize, Serialize};
-use std::process::Command;
 use std::sync::Arc;
 
 /// Get current branch name from local git repository.
@@ -12,22 +12,16 @@ use std::sync::Arc;
 /// requiring Docker or the GitService. Used by file_pr and copilot_review
 /// services to extract agent IDs from branch names.
 pub fn get_current_branch() -> Result<String> {
-    let output = Command::new("git")
-        .args(["branch", "--show-current"])
-        .output()
+    let branch = cmd!("git", "branch", "--show-current")
+        .read()
         .context("Failed to execute git branch --show-current")?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("Not on a branch: {}", stderr.trim());
-    }
-
-    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let branch = branch.trim();
     if branch.is_empty() {
         anyhow::bail!("Not on a branch (detached HEAD?)");
     }
 
-    Ok(branch)
+    Ok(branch.to_string())
 }
 
 /// Extract agent ID from a branch name following gh-{number}/{slug} convention.

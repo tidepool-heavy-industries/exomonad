@@ -4,10 +4,10 @@
 // Returns immediately with PR URL and number.
 
 use anyhow::{Context, Result};
+use duct::cmd;
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
 use serde::{Deserialize, Serialize};
-use std::process::Command;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use super::{git, zellij_events};
 
@@ -82,25 +82,27 @@ impl<T> From<Result<T>> for HostResult<T> {
 fn check_existing_pr() -> Result<Option<(String, u64, String, String)>> {
     info!("[FilePR] Checking for existing PR");
 
-    let output = Command::new("gh")
-        .args(["pr", "view", "--json", "url,number,headRefName,baseRefName"])
-        .output()
-        .context("Failed to execute gh pr view")?;
+    let output = cmd!(
+        "gh",
+        "pr",
+        "view",
+        "--json",
+        "url,number,headRefName,baseRefName"
+    )
+    .unchecked()
+    .stderr_to_stdout()
+    .read()
+    .context("Failed to execute gh pr view")?;
 
-    debug!(
-        "[FilePR] gh pr view exit code: {}",
-        output.status.code().unwrap_or(-1)
-    );
+    debug!("[FilePR] gh pr view output length: {}", output.len());
 
-    if !output.status.success() {
-        // No existing PR is not an error - just means we need to create one
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        debug!("[FilePR] No existing PR found: {}", stderr.trim());
+    // Check if this is an error (no PR found)
+    if output.contains("no pull requests found") || output.contains("could not find") {
+        debug!("[FilePR] No existing PR found");
         return Ok(None);
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    debug!("[FilePR] Existing PR found: {}", stdout.trim());
+    debug!("[FilePR] Existing PR found: {}", output.trim());
 
     #[derive(Deserialize)]
     struct PRView {
@@ -113,7 +115,7 @@ fn check_existing_pr() -> Result<Option<(String, u64, String, String)>> {
     }
 
     let pr: PRView =
-        serde_json::from_str(&stdout).context("Failed to parse gh pr view JSON output")?;
+        serde_json::from_str(&output).context("Failed to parse gh pr view JSON output")?;
 
     Ok(Some((
         pr.url,
@@ -141,26 +143,11 @@ fn create_pr(input: &FilePRInput) -> Result<FilePROutput> {
 
     info!("[FilePR] Executing: gh {}", args.join(" "));
 
-    let output = Command::new("gh")
-        .args(&args)
-        .output()
+    let stdout = cmd("gh", &args)
+        .read()
         .context("Failed to execute gh pr create")?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    info!(
-        "[FilePR] gh pr create exit code: {:?}",
-        output.status.code()
-    );
-    if !stderr.is_empty() {
-        debug!("[FilePR] stderr: {}", stderr.trim());
-    }
-
-    if !output.status.success() {
-        error!("[FilePR] FAILED: {}", stderr.trim());
-        anyhow::bail!("Failed to create PR: {}", stderr.trim());
-    }
+    info!("[FilePR] gh pr create succeeded");
 
     // gh pr create outputs the PR URL on success
     let pr_url = stdout.trim().to_string();
@@ -200,19 +187,14 @@ fn create_pr(input: &FilePRInput) -> Result<FilePROutput> {
 
 /// Get base branch for a PR number
 fn get_pr_base_branch(pr_number: u64) -> Result<String> {
-    let output = Command::new("gh")
-        .args([
-            "pr",
-            "view",
-            &pr_number.to_string(),
-            "--json",
-            "baseRefName",
-        ])
-        .output()
+    let pr_num_str = pr_number.to_string();
+    let output = cmd!("gh", "pr", "view", &pr_num_str, "--json", "baseRefName")
+        .unchecked()
+        .read()
         .context("Failed to get PR base branch")?;
 
-    if !output.status.success() {
-        // Default to main if we can't get it
+    // If the command failed (e.g., network issue), default to main
+    if output.contains("error") || output.is_empty() {
         return Ok("main".to_string());
     }
 
@@ -222,8 +204,7 @@ fn get_pr_base_branch(pr_number: u64) -> Result<String> {
         base_ref_name: String,
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let pr: PRBase = serde_json::from_str(&stdout).unwrap_or(PRBase {
+    let pr: PRBase = serde_json::from_str(&output).unwrap_or(PRBase {
         base_ref_name: "main".to_string(),
     });
 

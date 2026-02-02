@@ -24,4 +24,5 @@ toml = "0.8"
 [dev-dependencies]
 tempfile = { workspace = true }
 assert_cmd = "2.0"
+duct = { workspace = true }
 predicates = "3.0"

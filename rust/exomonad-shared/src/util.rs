@@ -2,6 +2,7 @@
 //!
 //! Common helper functions used across both `exomonad` and `exomonad`.
 
+use duct::cmd;
 use shell_escape::escape;
 use std::borrow::Cow;
 use std::path::PathBuf;
@@ -31,12 +32,10 @@ pub fn find_exomonad_binary() -> PathBuf {
     }
 
     // Try PATH via which
-    if let Ok(output) = std::process::Command::new("which").arg("exomonad").output() {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return PathBuf::from(path);
-            }
+    if let Ok(path) = cmd!("which", "exomonad").read() {
+        let path = path.trim();
+        if !path.is_empty() {
+            return PathBuf::from(path);
         }
     }
 

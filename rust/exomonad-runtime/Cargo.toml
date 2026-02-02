@@ -14,6 +14,7 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 octocrab = "0.32"
 chrono = "0.4"
+duct = { workspace = true }
 exomonad-shared = { path = "../exomonad-shared" }
 exomonad-ui-protocol = { path = "../exomonad-ui-protocol" }
 
