@@ -79,6 +79,7 @@ library
         ExoMonad.LLM.Effect
         ExoMonad.LLM.Interpret
         ExoMonad.LLM.Tools.TH
+        ExoMonad.Middleware.Logging
       build-depends:
         exomonad-habitica,
         optparse-applicative >= 0.17 && < 1
