@@ -12,12 +12,13 @@ import Polysemy (Sem, interpret)
 import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Effects.Git (Git (..), WorktreeInfo)
+import ExoMonad.Path (Path, Rel, File, toFilePath)
 import System.FilePath (takeFileName)
 
 -- | Run Git effects with pure handlers (for testing).
 runGit ::
   Sem r (Maybe WorktreeInfo) ->
-  Sem r [FilePath] ->
+  Sem r [Path Rel File] ->
   (Int -> Sem r [Text]) ->
   Sem r Text ->
   (Text -> Sem r Int) ->
@@ -33,10 +34,18 @@ runGit hWorktree hDirty hCommits hBranch hAhead hFetch = interpret $ \case
   FetchRemote remote refspec -> hFetch remote refspec
 
 -- | Extract worktree name from path.
-worktreeName :: FilePath -> Text
+worktreeName :: Path b t -> Text
 worktreeName path =
-  let parts = T.splitOn "/" (T.pack path)
+  let pathStr = toFilePath path
+      parts = T.splitOn "/" (T.pack pathStr)
       findAfterWorktrees [] = Nothing
+      findAfterWorktrees [_] = Nothing
+      findAfterWorktrees (x : y : rest)
+        | x == "worktrees" = Just y
+        | otherwise = findAfterWorktrees (y : rest)
+   in case findAfterWorktrees parts of
+        Just name -> name
+        Nothing -> T.pack $ takeFileName pathStr
       findAfterWorktrees [_] = Nothing
       findAfterWorktrees (x : y : rest)
         | x == "worktrees" = Just y

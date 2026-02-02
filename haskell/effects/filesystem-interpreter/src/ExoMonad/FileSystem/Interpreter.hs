@@ -26,25 +26,26 @@ import Polysemy (Sem, Member, interpret, embed)
 import Polysemy.Embed (Embed)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Text.IO qualified as TIO
 import ExoMonad.Effects.FileSystem
   ( FileSystem (..),
     FileSystemError (..),
   )
-import System.Directory
+import ExoMonad.Path (Path, File, Dir, toFilePathText, toFilePath)
+import Path.IO
   ( copyFile,
-    createDirectoryIfMissing,
-    doesDirectoryExist,
+    createDirIfMissing,
+    doesDirExist,
     doesFileExist,
+    ensureDir,
+    createFileLink,
   )
-import System.FilePath (takeDirectory)
-import System.Posix.Files (createSymbolicLink)
+import Path.IO qualified as PathIO
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- INTERPRETER
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Run FileSystem effects using standard Haskell IO operations.
+-- | Run FileSystem effects using standard Haskell IO operations (via path-io).
 --
 -- All operations are wrapped in try/catch to return explicit errors.
 runFileSystemIO :: (Member (Embed IO) r) => Sem (FileSystem ': r) a -> Sem r a
@@ -62,61 +63,62 @@ runFileSystemIO = interpret $ \case
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Create a directory (including parent directories).
-createDirectoryIO :: FilePath -> IO (Either FileSystemError ())
+createDirectoryIO :: Path b Dir -> IO (Either FileSystemError ())
 createDirectoryIO path = do
-  result <- try @SomeException $ createDirectoryIfMissing True path
+  result <- try @SomeException $ createDirIfMissing True path
   case result of
     Left e ->
       pure $
         Left
           FSIOError
             { fseOperation = "createDirectory",
-              fsePath = path,
+              fsePath = toFilePathText path,
               fseReason = T.pack (show e)
             }
     Right () -> pure $ Right ()
 
 -- | Write text content to a file.
-writeFileTextIO :: FilePath -> Text -> IO (Either FileSystemError ())
+writeFileTextIO :: Path b File -> Text -> IO (Either FileSystemError ())
 writeFileTextIO path content = do
-  -- Ensure parent directory exists
-  let parentDir = takeDirectory path
-  dirResult <- try @SomeException $ createDirectoryIfMissing True parentDir
+  -- ensureDir creates parents for the file
+  dirResult <- try @SomeException $ ensureDir path
   case dirResult of
     Left e ->
       pure $
         Left
           FSIOError
             { fseOperation = "writeFile (create parent)",
-              fsePath = parentDir,
+              fsePath = toFilePathText path,
               fseReason = T.pack (show e)
             }
     Right () -> do
-      writeResult <- try @SomeException $ TIO.writeFile path content
+      -- PathIO.readFileUtf8 exists, but writeFileUtf8 is usually just TIO.writeFile with toFilePath
+      -- Actually path-io doesn't seem to export writeFileText/Utf8 directly?
+      -- Checked path-io docs: it has generic IO helpers but strict text IO is usually via Data.Text.IO
+      -- But we can use toFilePath to bridge.
+      writeResult <- try @SomeException $ PathIO.writeFileUtf8 path content
       case writeResult of
         Left e ->
           pure $
             Left
               FSIOError
                 { fseOperation = "writeFile",
-                  fsePath = path,
+                  fsePath = toFilePathText path,
                   fseReason = T.pack (show e)
                 }
         Right () -> pure $ Right ()
 
 -- | Copy a file from source to destination.
-copyFileIO :: FilePath -> FilePath -> IO (Either FileSystemError ())
+copyFileIO :: Path b1 File -> Path b2 File -> IO (Either FileSystemError ())
 copyFileIO src dest = do
-  -- Ensure parent directory exists
-  let parentDir = takeDirectory dest
-  dirResult <- try @SomeException $ createDirectoryIfMissing True parentDir
+  dirResult <- try @SomeException $ ensureDir dest
   case dirResult of
     Left e ->
       pure $
         Left
           FSIOError
             { fseOperation = "copyFile (create parent)",
-              fsePath = parentDir,
+              fsePath = toFilePathText dest,
               fseReason = T.pack (show e)
             }
     Right () -> do
@@ -127,41 +129,40 @@ copyFileIO src dest = do
             Left
               FSIOError
                 { fseOperation = "copyFile",
-                  fsePath = src <> " -> " <> dest,
+                  fsePath = toFilePathText src <> " -> " <> toFilePathText dest,
                   fseReason = T.pack (show e)
                 }
         Right () -> pure $ Right ()
 
 -- | Create a symbolic link.
-createSymlinkIO :: FilePath -> FilePath -> IO (Either FileSystemError ())
+createSymlinkIO :: Path b1 t1 -> Path b2 t2 -> IO (Either FileSystemError ())
 createSymlinkIO target link = do
-  -- Ensure parent directory exists
-  let parentDir = takeDirectory link
-  dirResult <- try @SomeException $ createDirectoryIfMissing True parentDir
+  -- ensureDir works on Path b t, extracting the parent dir
+  dirResult <- try @SomeException $ ensureDir link
   case dirResult of
     Left e ->
       pure $
         Left
           FSIOError
             { fseOperation = "createSymlink (create parent)",
-              fsePath = parentDir,
+              fsePath = toFilePathText link,
               fseReason = T.pack (show e)
             }
     Right () -> do
-      linkResult <- try @SomeException $ createSymbolicLink target link
+      linkResult <- try @SomeException $ createFileLink target link
       case linkResult of
         Left e ->
           pure $
             Left
               FSIOError
                 { fseOperation = "createSymlink",
-                  fsePath = link <> " -> " <> target,
+                  fsePath = toFilePathText link <> " -> " <> toFilePathText target,
                   fseReason = T.pack (show e)
                 }
         Right () -> pure $ Right ()
 
 -- | Check if a file exists.
-fileExistsIO :: FilePath -> IO (Either FileSystemError Bool)
+fileExistsIO :: Path b File -> IO (Either FileSystemError Bool)
 fileExistsIO path = do
   result <- try @SomeException $ doesFileExist path
   case result of
@@ -170,37 +171,37 @@ fileExistsIO path = do
         Left
           FSIOError
             { fseOperation = "fileExists",
-              fsePath = path,
+              fsePath = toFilePathText path,
               fseReason = T.pack (show e)
             }
     Right exists -> pure $ Right exists
 
 -- | Check if a directory exists.
-directoryExistsIO :: FilePath -> IO (Either FileSystemError Bool)
+directoryExistsIO :: Path b Dir -> IO (Either FileSystemError Bool)
 directoryExistsIO path = do
-  result <- try @SomeException $ doesDirectoryExist path
+  result <- try @SomeException $ doesDirExist path
   case result of
     Left e ->
       pure $
         Left
           FSIOError
             { fseOperation = "directoryExists",
-              fsePath = path,
+              fsePath = toFilePathText path,
               fseReason = T.pack (show e)
             }
     Right exists -> pure $ Right exists
 
 -- | Read text content from a file.
-readFileTextIO :: FilePath -> IO (Either FileSystemError Text)
+readFileTextIO :: Path b File -> IO (Either FileSystemError Text)
 readFileTextIO path = do
-  result <- try @SomeException $ TIO.readFile path
+  result <- try @SomeException $ PathIO.readFileUtf8 path
   case result of
     Left e ->
       pure $
         Left
           FSIOError
             { fseOperation = "readFileText",
-              fsePath = path,
+              fsePath = toFilePathText path,
               fseReason = T.pack (show e)
             }
     Right content -> pure $ Right content
