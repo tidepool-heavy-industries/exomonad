@@ -76,19 +76,10 @@ module ExoMonad.StructuredOutput
     stripFieldPrefix,
     defaultFieldLabel,
 
-    -- * ClaudeCode Schema Handling
-    ClaudeCodeSchema (..),
-    IsSumWithData,
-
     -- * Validation
     ValidStructuredOutput,
     ValidInContext,
     SchemaContext (..),
-
-    -- * Decision Tools
-    ToDecisionTools (..),
-    DecisionTool (..),
-    ToolCall (..),
   )
 where
 
@@ -107,15 +98,6 @@ import ExoMonad.StructuredOutput.Class
     ValidInContext,
     ValidStructuredOutput,
     defaultOptions,
-  )
-import ExoMonad.StructuredOutput.ClaudeCodeSchema
-  ( ClaudeCodeSchema (..),
-    IsSumWithData,
-  )
-import ExoMonad.StructuredOutput.DecisionTools
-  ( DecisionTool (..),
-    ToDecisionTools (..),
-    ToolCall (..),
   )
 import ExoMonad.StructuredOutput.Error
   ( ParseDiagnostic (..),

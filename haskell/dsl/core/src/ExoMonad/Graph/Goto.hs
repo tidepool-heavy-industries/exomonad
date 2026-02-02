@@ -81,9 +81,6 @@ module ExoMonad.Graph.Goto
 
     -- * LLM Handler Variants
     LLMHandler (..),
-    ClaudeCodeLLMHandler (..),
-    ClaudeCodeResult (..),
-    GeminiLLMHandler (..),
 
     -- * Target Validation
     GotoElem,
@@ -92,8 +89,6 @@ module ExoMonad.Graph.Goto
 where
 
 import Control.Monad.Freer (Eff, Member, send)
-import ExoMonad.Effect.Gemini (GeminiModel (..), SingGeminiModel (..))
-import ExoMonad.Effect.Session (SessionId, SessionOperation (..))
 import ExoMonad.Graph.Errors
   ( Blank,
     Bullet,
@@ -110,7 +105,7 @@ import ExoMonad.Graph.Errors
 import ExoMonad.Graph.Generic.Core (NodeRef (..))
 -- Import from Internal (re-exports types, we hide constructors in this module's exports)
 import ExoMonad.Graph.Goto.Internal (GotoAll (..), GotoChoice (..), OneOf (..), PayloadOf, Payloads, To)
-import ExoMonad.Graph.Types (Arrive (..), Exit, HList (..), ModelChoice (..), Self, SingModelChoice (..))
+import ExoMonad.Graph.Types (Arrive (..), Exit, HList (..), Self)
 import GHC.TypeLits (ErrorMessage (..), Symbol, TypeError)
 import Text.Ginger.TH (TypedTemplate)
 import Text.Parsec.Pos (SourcePos)
@@ -566,90 +561,3 @@ data LLMHandler needs schema targets effs tpl where
       llmAfter :: schema -> Eff effs (GotoChoice targets)
     } ->
     LLMHandler needs schema targets effs tpl
-
--- | Result from ClaudeCode execution with metadata.
---
--- Wraps the parsed structured output along with session metadata.
--- Use 'ccrParsedOutput' to get the schema output, session fields for
--- continuation/fork in parallel execution.
---
--- All session info is provided because exomonad is stateless - continuation
--- and fork operations need full session data passed as arguments.
-data ClaudeCodeResult schema = ClaudeCodeResult
-  { -- | The parsed structured output from Claude Code.
-    ccrParsedOutput :: schema,
-    -- | Claude Code session ID (for --resume/--fork-session).
-    ccrSessionId :: SessionId,
-    -- | Worktree path (for stateless continuation/fork).
-    ccrWorktree :: FilePath,
-    -- | Branch name (for stateless continuation/fork).
-    ccrBranch :: Text
-  }
-  deriving stock (Show, Eq, Functor)
-
--- | Handler for ClaudeCode-annotated LLM nodes.
---
--- Like 'LLMHandler', but executed via Claude Code subprocess instead of API.
--- The model is compile-time validated through a type parameter that must match
--- the node's ClaudeCode annotation.
---
--- = Session Management
---
--- The before handler returns both template context AND a session strategy:
--- - 'StartFresh slug' - Create new session
--- - 'ContinueFrom sid' - Resume existing session
--- - 'ForkFrom parent slug' - Read-only fork from parent
---
--- The after handler receives both the parsed output AND the session ID used/created.
---
--- = Usage
---
--- @
--- gWork :: mode :- G.LLMNode
---     :@ Input TaskInfo
---     :@ Template WorkTpl
---     :@ Schema WorkResult
---     :@ ClaudeCode 'Sonnet
---
--- -- Handler: model is derived from types, not passed as arguments
--- gWork = ClaudeCodeLLMHandler @'Sonnet
---   Nothing                              -- no system template
---   (templateCompiled @WorkTpl)          -- user template
---   (\\task -> do                         -- context builder + session strategy
---      let ctx = WorkContext { ... }
---      pure (ctx, StartFresh \"work-session\"))
---   (\\(ccResult, sid) -> do              -- router receives output + session ID
---      registerSession sid
---      pure $ gotoExit ccResult.ccrParsedOutput)
--- @
---
--- Note: The @model@ type parameter MUST match the ClaudeCode annotation.
--- Mismatches result in compile-time type errors, preventing runtime inconsistencies.
-type ClaudeCodeLLMHandler :: ModelChoice -> Type -> Type -> [Type] -> [Type -> Type] -> Type -> Type
-data ClaudeCodeLLMHandler model needs schema targets effs tpl where
-  ClaudeCodeLLMHandler ::
-    forall model tpl needs schema targets effs.
-    (SingModelChoice model) =>
-    -- | Optional system prompt template
-    Maybe (TypedTemplate tpl SourcePos) ->
-    -- | User prompt template (required)
-    TypedTemplate tpl SourcePos ->
-    -- | Builds context AND session strategy
-    (needs -> Eff effs (tpl, SessionOperation)) ->
-    -- | Routes with output AND session ID
-    ((ClaudeCodeResult schema, SessionId) -> Eff effs (GotoChoice targets)) ->
-    ClaudeCodeLLMHandler model needs schema targets effs tpl
-
--- | Handler for Gemini-annotated nodes.
---
--- Executed via Gemini CLI subprocess.
-type GeminiLLMHandler :: GeminiModel -> Type -> Type -> [Type] -> [Type -> Type] -> Type -> Type
-data GeminiLLMHandler model needs schema targets effs tpl where
-  GeminiLLMHandler ::
-    forall model tpl needs schema targets effs.
-    (SingGeminiModel model) =>
-    Maybe (TypedTemplate tpl SourcePos) ->
-    TypedTemplate tpl SourcePos ->
-    (needs -> Eff effs tpl) ->
-    (schema -> Eff effs (GotoChoice targets)) ->
-    GeminiLLMHandler model needs schema targets effs tpl

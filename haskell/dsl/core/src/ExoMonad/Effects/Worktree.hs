@@ -2,7 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 
--- \| Worktree effect for managing git worktrees.
+-- | Worktree effect for managing git worktrees.
 --
 -- Effect type only - interpreter lives in exomonad-native-gui/worktree-interpreter.
 -- Enables graphs to create isolated working directories for parallel agents.
@@ -26,13 +26,36 @@
 -- Worktrees provide isolation for parallel agent execution:
 -- - Each worktree has its own working directory
 -- - Changes in one worktree don't affect others
--- - Claude Code can be spawned with --cwd pointing to a worktree
+-- - Agents can be spawned with --cwd pointing to a worktree
 -- - After work completes, files can be cherry-picked back to main
 --
 -- = Error Handling
 --
 -- All operations return @Either WorktreeError a@ for explicit error handling.
 -- Use 'withWorktree' for bracket-style resource safety (automatic cleanup).
+module ExoMonad.Effects.Worktree
+  ( -- * Effect
+    Worktree (..),
+    createWorktree,
+    deleteWorktree,
+    mergeWorktree,
+    cherryPickFiles,
+    listWorktrees,
+
+    -- * Construction
+    defaultWorktreeSpec,
+
+    -- * Bracket
+    withWorktree,
+
+    -- * Types
+    WorktreePath (..),
+    WorktreeSpec (..),
+    MergeResult (..),
+    WorktreeError (..),
+  )
+where
+
 
 -- | Worktree effect for managing git worktrees.
 --
@@ -58,7 +81,8 @@
 -- Worktrees provide isolation for parallel agent execution:
 -- - Each worktree has its own working directory
 -- - Changes in one worktree don't affect others
--- - Claude Code can be spawned with --cwd pointing to a worktree
+-- - Agents can be spawned with --cwd pointing to a worktree
+-- - Agents can be spawned with --cwd pointing to a worktree
 -- - After work completes, files can be cherry-picked back to main
 --
 -- = Error Handling
@@ -102,7 +126,7 @@ import Control.Monad.Freer (Eff, Member, send)
 -- @
 -- path <- createWorktree spec
 -- case path of
---   Right (WorktreePath p) -> runClaudeCode p
+--   Right (WorktreePath p) -> runAgent p
 --   Left err -> handleError err
 -- @
 newtype WorktreePath = WorktreePath {unWorktreePath :: FilePath}

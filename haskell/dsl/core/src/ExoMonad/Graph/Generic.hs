@@ -71,7 +71,6 @@ module ExoMonad.Graph.Generic
 
     -- * Node Kind Wrappers (for record DSL)
     LLMNode,
-    GeminiNode,
     LogicNode,
     GraphNode,
     ForkNode,
@@ -107,9 +106,6 @@ module ExoMonad.Graph.Generic
 
     -- * Re-exports for LLM Handlers
     LLMHandler (..),
-    ClaudeCodeLLMHandler (..),
-    GeminiLLMHandler (..),
-    ChooseLLMHandler,
     ToolHandler (..),
     HookHandler (..),
 
@@ -132,8 +128,7 @@ where
 
 import Control.Monad.Freer (Eff, Member)
 import Data.Kind (Constraint, Type)
-import ExoMonad.Effect.Gemini (GeminiOp, SingGeminiModel (..))
-import ExoMonad.Graph.Edges (GetAwaits, GetClaudeCode, GetGeminiModel, GetGotoTargets, GetSpawnTargets, GetUsesEffects, GotoEffectsToTargets)
+import ExoMonad.Graph.Edges (GetAwaits, GetGotoTargets, GetSpawnTargets, GetUsesEffects, GotoEffectsToTargets)
 import ExoMonad.Graph.Errors
   ( Blank,
     Bullet,
@@ -153,7 +148,6 @@ import ExoMonad.Graph.Generic.Core
     Exit,
     ExitNode,
     ForkNode,
-    GeminiNode,
     GetNodeName,
     GraphMode (..),
     GraphNode,
@@ -161,9 +155,9 @@ import ExoMonad.Graph.Generic.Core
     LogicNode,
     NodeRef (..),
   )
-import ExoMonad.Graph.Goto (ClaudeCodeLLMHandler (..), GeminiLLMHandler (..), Goto, GotoChoice, LLMHandler (..), To, goto)
+import ExoMonad.Graph.Goto (Goto, GotoChoice, LLMHandler (..), To, goto)
 import ExoMonad.Graph.Template (TemplateContext)
-import ExoMonad.Graph.Types (Awaits, Barrier, ClaudeCode, Description, Gemini, HList (..), Hook, Input, MCPExport, MCPRoleHint, MCPToolDef, Memory, ModelChoice, Schema, Spawn, System, Template, Tool, Tools, UsesEffects, Vision, type (:@))
+import ExoMonad.Graph.Types (Awaits, Barrier, Description, HList (..), Hook, Input, MCPExport, MCPRoleHint, MCPToolDef, Memory, Schema, Spawn, System, Template, Tool, Tools, UsesEffects, Vision, type (:@))
 import ExoMonad.Graph.Validate (FormatSymbolList)
 import ExoMonad.Graph.Validate.ForkBarrier (ValidateForkBarrierPairs)
 import ExoMonad.Graph.Validate.RecordStructure
@@ -411,36 +405,7 @@ type family NodeHandler nodeDef es where
 -- used in error messages to show the user what they wrote, even after annotations
 -- have been peeled away.
 
--- | Choose between LLMHandler and ClaudeCodeLLMHandler based on GetClaudeCode.
---
--- When a node has the ClaudeCode annotation, we use ClaudeCodeLLMHandler with
--- the model from the annotation. The type parameter ensures compile-time
--- validation that the handler matches the annotation.
-type ChooseLLMHandler :: Maybe ModelChoice -> Type -> Type -> [Type] -> [Effect] -> Type -> Type
-type family ChooseLLMHandler mClaudeCode input schema targets effs tpl where
-  ChooseLLMHandler ('Just model) input schema targets effs tpl =
-    ClaudeCodeLLMHandler model input schema targets effs tpl
-  ChooseLLMHandler 'Nothing input schema targets effs tpl =
-    LLMHandler input schema targets effs tpl
-
--- | Extract GeminiModel or fail with TypeError.
-type family OrErrorGemini mGemini orig where
-  OrErrorGemini ('Just model) _ = model
-  OrErrorGemini 'Nothing orig =
-    TypeError
-      ( HR
-          ':$$: 'Text "  GeminiNode missing Gemini annotation"
-          ':$$: HR
-          ':$$: Blank
-          ':$$: WhatHappened
-          ':$$: Indent "Your GeminiNode has no Gemini annotation to specify the model."
-          ':$$: Blank
-          ':$$: Fixes
-          ':$$: Bullet "Add Gemini annotation: :@ Gemini 'Flash"
-      )
-
-type NodeHandlerDispatch :: Type -> Type -> [Effect] -> Maybe Type -> Maybe Type -> Maybe Type -> Maybe Type -> Type
-type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs where
+-- | Unified accumulator that peels annotations and dispatches based on base kind.
   -- Peel Input annotation - record it
   NodeHandlerDispatch (node :@ Input t) orig es 'Nothing mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es ('Just t) mTpl mSchema mEffs
@@ -499,7 +464,7 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
           ':$$: Bullet "Remove the duplicate Schema annotation"
           ':$$: Bullet "Use a sum type if you need multiple output shapes"
       )
-  -- Skip other annotations (Vision, Tools, Memory, System, ClaudeCode)
+  -- Skip other annotations (Vision, Tools, Memory, System)
   NodeHandlerDispatch (node :@ Vision) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
   NodeHandlerDispatch (node :@ Tools _) orig es mInput mTpl mSchema mEffs =
@@ -509,10 +474,6 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
   NodeHandlerDispatch (node :@ System _) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
   NodeHandlerDispatch (node :@ Description _) orig es mInput mTpl mSchema mEffs =
-    NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
-  NodeHandlerDispatch (node :@ ClaudeCode _) orig es mInput mTpl mSchema mEffs =
-    NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
-  NodeHandlerDispatch (node :@ Gemini _) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
   -- Skip MCP annotations (used for tool discovery, not runtime dispatch)
   NodeHandlerDispatch (node :@ MCPExport) orig es mInput mTpl mSchema mEffs =
@@ -596,13 +557,8 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
           ':$$: CodeLine "             :@ UsesEffects '[Goto Exit Result]"
       )
   -- LLMNode with Template AND UsesEffects: the complete form
-  -- Uses ChooseLLMHandler to dispatch between regular LLM and ClaudeCode execution.
-  -- GetClaudeCode extracts the model from the annotation for compile-time validation.
   NodeHandlerDispatch (LLMNode _subtype) orig es ('Just input) ('Just tpl) ('Just schema) ('Just (EffStack effs)) =
-    ChooseLLMHandler (GetClaudeCode orig) input schema (GotoEffectsToTargets effs) es (TemplateContext tpl)
-  -- GeminiNode Base Cases: Template + Schema + UsesEffects
-  NodeHandlerDispatch GeminiNode orig es ('Just input) ('Just tpl) ('Just schema) ('Just (EffStack effs)) =
-    GeminiLLMHandler (OrErrorGemini (GetGeminiModel orig) orig) input schema (GotoEffectsToTargets effs) es (TemplateContext tpl)
+    LLMHandler input schema (GotoEffectsToTargets effs) es (TemplateContext tpl)
   -- LLMNode with UsesEffects but no Template - missing context for prompts
   NodeHandlerDispatch (LLMNode _subtype) orig es mInput 'Nothing ('Just schema) ('Just (EffStack effs)) =
     TypeError

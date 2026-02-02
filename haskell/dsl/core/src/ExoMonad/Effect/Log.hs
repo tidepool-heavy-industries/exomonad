@@ -75,6 +75,8 @@ import Prelude hiding (Reader, local)
 import Control.Monad.Freer (Eff, LastMember, Member, interpret, send, sendM)
 import Control.Monad.Freer.Reader (Reader, local)
 import Data.Aeson (ToJSON (..), Value, toJSON)
+import Data.Text qualified as T
+import Data.Text.IO qualified as TIO
 import Data.Time (UTCTime)
 import System.IO (stderr)
 

@@ -82,20 +82,6 @@ module ExoMonad.Graph
     CloudflareAI,
     NativeAnthropic,
 
-    -- * ClaudeCode Annotation
-    ClaudeCode,
-    ModelChoice (..),
-    Haiku,
-    Sonnet,
-    Opus,
-
-    -- * Gemini Annotation
-    Gemini,
-    GeminiModel (..),
-    Flash,
-    Pro,
-    Ultra,
-
     -- * The Goto Effect
     Goto (..),
     goto,
@@ -182,7 +168,6 @@ module ExoMonad.Graph
     G.AsHandler,
     -- For G.Entry, G.Exit, use: import qualified ExoMonad.Graph.Generic as G
     G.LLMNode,
-    G.GeminiNode,
     G.LogicNode,
     G.ValidGraphRecord,
     G.NodeHandler,
@@ -202,18 +187,9 @@ module ExoMonad.Graph
     GetMemory,
     GetGlobal,
     GetBackend,
-    GetClaudeCode,
-    HasClaudeCode,
-    GetGeminiModel,
-    HasGeminiModel,
-
-    -- * Backend Compatibility Validation
-    ClaudeCodeCFBackendError,
 
     -- * LLM Handler Variants
     LLMHandler (..),
-    ClaudeCodeLLMHandler (..),
-    GeminiLLMHandler (..),
 
     -- * Tools
     ToolDef (..),

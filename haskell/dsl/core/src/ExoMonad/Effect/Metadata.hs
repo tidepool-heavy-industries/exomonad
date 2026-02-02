@@ -30,8 +30,9 @@ module ExoMonad.Effect.Metadata
   )
 where
 
-import Data.Aeson (ToJSON)
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, (.=))
 import Data.Map.Strict (Map)
+import GHC.Generics (Generic)
 
 -- | Where an effect should be handled.
 --

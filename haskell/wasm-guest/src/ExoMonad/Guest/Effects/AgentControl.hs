@@ -46,20 +46,36 @@ import GHC.Generics (Generic)
 -- Types (match Rust agent_control.rs)
 -- ============================================================================
 
+-- | Agent type for spawned agents.
+data AgentType = Claude | Gemini
+  deriving (Show, Eq, Generic)
+
+instance ToJSON AgentType where
+  toJSON Claude = "claude"
+  toJSON Gemini = "gemini"
+
+instance FromJSON AgentType where
+  parseJSON = Data.Aeson.withText "AgentType" $ \case
+    "claude" -> pure Claude
+    "gemini" -> pure Gemini
+    other -> fail $ "Invalid agent type: " <> Data.Text.unpack other
+
 -- | Options for spawning an agent.
 data SpawnOptions = SpawnOptions
   { owner :: Text,
     repo :: Text,
-    worktreeDir :: Maybe Text
+    worktreeDir :: Maybe Text,
+    agentType :: Maybe AgentType
   }
   deriving (Show, Eq, Generic)
 
 instance ToJSON SpawnOptions where
-  toJSON (SpawnOptions o r w) =
+  toJSON (SpawnOptions o r w a) =
     object
       [ "owner" .= o,
         "repo" .= r,
-        "worktree_dir" .= w
+        "worktree_dir" .= w,
+        "agent_type" .= a
       ]
 
 -- | Result of spawning an agent.
@@ -67,7 +83,8 @@ data SpawnResult = SpawnResult
   { worktreePath :: Text,
     branchName :: Text,
     tabName :: Text,
-    issueTitle :: Text
+    issueTitle :: Text,
+    agentTypeResult :: Text
   }
   deriving (Show, Eq, Generic)
 
@@ -78,14 +95,16 @@ instance FromJSON SpawnResult where
       <*> v .: "branch_name"
       <*> v .: "tab_name"
       <*> v .: "issue_title"
+      <*> v .: "agent_type"
 
 instance ToJSON SpawnResult where
-  toJSON (SpawnResult w b t i) =
+  toJSON (SpawnResult w b t i a) =
     object
       [ "worktree_path" .= w,
         "branch_name" .= b,
         "tab_name" .= t,
-        "issue_title" .= i
+        "issue_title" .= i,
+        "agent_type" .= a
       ]
 
 -- | Information about an active agent.
@@ -178,34 +197,38 @@ data SpawnAgentInput = SpawnAgentInput
   { saiIssueId :: Text,
     saiOwner :: Text,
     saiRepo :: Text,
-    saiWorktreeDir :: Maybe Text
+    saiWorktreeDir :: Maybe Text,
+    saiAgentType :: Maybe AgentType
   }
   deriving (Show, Generic)
 
 instance ToJSON SpawnAgentInput where
-  toJSON (SpawnAgentInput i o r w) =
+  toJSON (SpawnAgentInput i o r w a) =
     object
       [ "issue_id" .= i,
         "owner" .= o,
         "repo" .= r,
-        "worktree_dir" .= w
+        "worktree_dir" .= w,
+        "agent_type" .= a
       ]
 
 data SpawnAgentsInput = SpawnAgentsInput
   { sasIssueIds :: [Text],
     sasOwner :: Text,
     sasRepo :: Text,
-    sasWorktreeDir :: Maybe Text
+    sasWorktreeDir :: Maybe Text,
+    sasAgentType :: Maybe AgentType
   }
   deriving (Show, Generic)
 
 instance ToJSON SpawnAgentsInput where
-  toJSON (SpawnAgentsInput is o r w) =
+  toJSON (SpawnAgentsInput is o r w a) =
     object
       [ "issue_ids" .= is,
         "owner" .= o,
         "repo" .= r,
-        "worktree_dir" .= w
+        "worktree_dir" .= w,
+        "agent_type" .= a
       ]
 
 data CleanupAgentInput = CleanupAgentInput
@@ -289,7 +312,8 @@ runAgentControl = interpret $ \case
             { saiIssueId = issueId,
               saiOwner = owner opts,
               saiRepo = repo opts,
-              saiWorktreeDir = worktreeDir opts
+              saiWorktreeDir = worktreeDir opts,
+              saiAgentType = agentType opts
             }
     res <- callHost host_agent_spawn input
     pure $ case res of
@@ -302,7 +326,8 @@ runAgentControl = interpret $ \case
             { sasIssueIds = issueIds,
               sasOwner = owner opts,
               sasRepo = repo opts,
-              sasWorktreeDir = worktreeDir opts
+              sasWorktreeDir = worktreeDir opts,
+              sasAgentType = agentType opts
             }
     res <- callHost host_agent_spawn_batch input
     pure $ case res of

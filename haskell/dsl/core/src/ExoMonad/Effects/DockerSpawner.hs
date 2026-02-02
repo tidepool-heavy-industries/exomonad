@@ -66,7 +66,7 @@ instance FromJSON ContainerStatus where
 data SpawnConfig = SpawnConfig
   { scIssueId :: Text,
     scWorktreePath :: FilePath,
-    scBackend :: Text, -- "claude" | "gemini"
+    scBackend :: Text,
     scUid :: Maybe Int,
     scGid :: Maybe Int,
     scEnv :: [(Text, Text)], -- Environment variables to pass to container

@@ -364,18 +364,19 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 | `github_list_issues` | List GitHub issues |
 | `github_get_issue` | Get single issue details |
 | `github_list_prs` | List GitHub pull requests |
-| `spawn_agents` | Spawn Claude agents in Zellij tabs with isolated git worktrees |
+| `spawn_agents` | Spawn agents (Claude/Gemini) in Zellij tabs with isolated git worktrees |
 | `cleanup_agents` | Clean up agent worktrees and close Zellij tabs |
 | `list_agents` | List active agent worktrees |
 
 **How spawn_agents works:**
-1. Creates git worktree: `worktrees/gh-{issue}-{title}/`
-2. Creates branch: `gh-{issue}/{title}`
+1. Creates git worktree: `worktrees/gh-{issue}-{title}-{agent}/`
+2. Creates branch: `gh-{issue}/{title}-{agent}`
 3. Writes `.exomonad/config.toml` (role="dev") and `.mcp.json` (no --wasm!)
-4. Writes `INITIAL_CONTEXT.md` with full issue context
-5. Creates Zellij tab using KDL layout with tab/status bars
-6. Runs `claude` command in worktree directory via shell wrapper
-7. Tab auto-closes when Claude exits (`close_on_exit true`)
+4. Builds initial prompt with full issue context
+5. Creates Zellij tab using KDL layout with agent-specific command:
+   - `claude --prompt '...'` for Claude agents
+   - `gemini --prompt-interactive '...'` for Gemini agents
+6. Tab auto-closes when agent exits (`close_on_exit true`)
 
 ### Status
 

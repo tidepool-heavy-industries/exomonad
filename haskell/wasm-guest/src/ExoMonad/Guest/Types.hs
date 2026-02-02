@@ -11,9 +11,6 @@ module ExoMonad.Guest.Types
     allowResponse,
     allowStopResponse,
     blockStopResponse,
-
-    -- * Runtime-agnostic types
-    Runtime (..),
   )
 where
 
@@ -49,7 +46,6 @@ data HookInput = HookInput
     hiHookEventName :: Text,
     hiToolName :: Maybe Text,
     hiToolInput :: Maybe Value,
-    hiRuntime :: Maybe Runtime,
     hiStopHookActive :: Maybe Bool
   }
   deriving (Show, Generic)
@@ -61,7 +57,6 @@ instance FromJSON HookInput where
       <*> v .: "hook_event_name"
       <*> v .:? "tool_name"
       <*> v .:? "tool_input"
-      <*> v .:? "runtime"
       <*> v .:? "stop_hook_active"
 
 -- | Output from a hook handler.
@@ -160,22 +155,3 @@ blockStopResponse msg =
     { decision = "block",
       reason = Just msg
     }
-
--- ============================================================================
--- Runtime-Agnostic Types
--- ============================================================================
-
--- | Runtime indicator (parsed from --runtime flag, injected by Rust).
-data Runtime = Claude | Gemini
-  deriving (Show, Eq, Generic)
-
-instance FromJSON Runtime where
-  parseJSON = Aeson.withText "Runtime" $ \t ->
-    case t of
-      "claude" -> pure Claude
-      "gemini" -> pure Gemini
-      other -> fail $ "Unknown runtime: " <> show other
-
-instance ToJSON Runtime where
-  toJSON Claude = Aeson.String "claude"
-  toJSON Gemini = Aeson.String "gemini"

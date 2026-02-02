@@ -48,12 +48,14 @@ Human in Zellij session
 ```
 
 Each agent:
-- Runs in isolated git worktree (`worktrees/gh-{issue}-{title}/`)
+- Runs in isolated git worktree (`worktrees/gh-{issue}-{title}-{agent}/`)
 - Has own `.exomonad/config.toml` (role="dev")
 - Has own `.mcp.json` (no --wasm, config-based resolution)
-- Gets full issue context in `INITIAL_CONTEXT.md`
+- Gets full issue context via agent-specific CLI argument:
+  - `claude --prompt '...'` for Claude agents
+  - `gemini --prompt-interactive '...'` for Gemini agents
 - Runs in Zellij tab with native UI (tab-bar, status-bar)
-- Auto-closes when Claude exits
+- Auto-closes when agent exits
 
 ## Documentation Tree
 
@@ -154,7 +156,7 @@ All tools are implemented in Haskell WASM and executed via host functions:
 | `github_list_issues` | List GitHub issues |
 | `github_get_issue` | Get single issue details |
 | `github_list_prs` | List GitHub pull requests |
-| `spawn_agents` | Create git worktrees + Zellij tabs, auto-start Claude with KDL layout |
+| `spawn_agents` | Create git worktrees + Zellij tabs, auto-start agents (Claude/Gemini) with KDL layout |
 | `cleanup_agents` | Close Zellij tabs and delete worktrees |
 | `list_agents` | List active agent worktrees |
 

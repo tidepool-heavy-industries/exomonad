@@ -184,8 +184,6 @@ renderNodeComments node =
     (not . T.null)
     [ "    %% NODE: " <> node.niName,
       "    %% kind: " <> kindText node.niKind,
-      renderClaudeCodeComment node.niClaudeCode,
-      renderGeminiComment node.niGemini,
       renderTemplateComment node.niTemplate,
       renderSchemaComment node.niSchema,
       renderToolsComment node.niToolInfos,
@@ -194,8 +192,6 @@ renderNodeComments node =
     ]
   where
     kindText RuntimeLLM = "LLM"
-    kindText RuntimeClaudeCode = "ClaudeCode"
-    kindText RuntimeGemini = "Gemini"
     kindText RuntimeLogic = "Logic"
     kindText RuntimeFork = "Fork"
     kindText RuntimeBarrier = "Barrier"
@@ -234,16 +230,6 @@ renderMemoryComment :: Maybe MemoryInfo -> Text
 renderMemoryComment Nothing = ""
 renderMemoryComment (Just mi) = "    %% memory: " <> mi.miTypeName
 
--- | Render ClaudeCode comment.
-renderClaudeCodeComment :: Maybe ClaudeCodeInfo -> Text
-renderClaudeCodeComment Nothing = ""
-renderClaudeCodeComment (Just cci) = "    %% claudeCode: " <> cci.cciModel
-
--- | Render Gemini comment.
-renderGeminiComment :: Maybe GeminiInfo -> Text
-renderGeminiComment Nothing = ""
-renderGeminiComment (Just gi) = "    %% gemini: " <> gi.giModel
-
 -- | Render transitions comment.
 renderTransitionsComment :: NodeInfo -> Text
 renderTransitionsComment node
@@ -265,21 +251,12 @@ renderNode config node =
         else node.niName
     shape = case node.niKind of
       RuntimeLLM -> "[[\"" <> label <> "\"]]"
-      RuntimeClaudeCode -> "[[\"" <> label <> "\"]]" -- Same shape as LLM
-      RuntimeGemini -> "[[\"" <> label <> "\"]]" -- Same shape as LLM
       RuntimeLogic -> "{{\"" <> label <> "\"}}"
       RuntimeFork -> "{\"" <> label <> "\"}" -- Diamond for fork
       RuntimeBarrier -> "[/\"" <> label <> "\"/]" -- Trapezoid for barrier
 
-    -- For ClaudeCode nodes, include the model name in the label
     kindLabel n = case n.niKind of
       RuntimeLLM -> "LLM"
-      RuntimeClaudeCode -> case n.niClaudeCode of
-        Just cci -> "CC " <> cci.cciModel -- e.g., "CC Sonnet"
-        Nothing -> "ClaudeCode"
-      RuntimeGemini -> case n.niGemini of
-        Just gi -> "Gemini " <> gi.giModel -- e.g., "Gemini Flash"
-        Nothing -> "Gemini"
       RuntimeLogic -> "Logic"
       RuntimeFork -> "Fork"
       RuntimeBarrier -> "Barrier"
@@ -440,12 +417,6 @@ renderState config node =
   where
     kindAnnotation n = case n.niKind of
       RuntimeLLM -> "LLM"
-      RuntimeClaudeCode -> case n.niClaudeCode of
-        Just cci -> "CC " <> cci.cciModel
-        Nothing -> "ClaudeCode"
-      RuntimeGemini -> case n.niGemini of
-        Just gi -> "Gemini " <> gi.giModel
-        Nothing -> "Gemini"
       RuntimeLogic -> "Logic"
       RuntimeFork -> "Fork"
       RuntimeBarrier -> "Barrier"

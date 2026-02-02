@@ -12,8 +12,6 @@ module ExoMonad.Graph.Export
     SchemaExport (..),
     TemplateExport (..),
     MemoryExport (..),
-    ClaudeCodeExport (..),
-    GeminiExport (..),
     ToolExport (..),
 
     -- * Conversion
@@ -28,9 +26,7 @@ import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Graph.Reify
-  ( ClaudeCodeInfo (..),
-    EdgeInfo (..),
-    GeminiInfo (..),
+  ( EdgeInfo (..),
     GraphInfo (..),
     MemoryInfo (..),
     NodeInfo (..),
@@ -72,7 +68,7 @@ instance ToJSON GraphExport where
 
 -- | Export format for a single node.
 data NodeExport = NodeExport
-  { -- | "LLM" | "ClaudeCode" | "Logic"
+  { -- | "LLM" | "Logic"
     neKind :: Text,
     -- | Input type names
     neNeeds :: [Text],
@@ -86,10 +82,6 @@ data NodeExport = NodeExport
     neTools :: [ToolExport],
     -- | Node-private state info
     neMemory :: Maybe MemoryExport,
-    -- | ClaudeCode annotation info
-    neClaudeCode :: Maybe ClaudeCodeExport,
-    -- | Gemini annotation info
-    neGemini :: Maybe GeminiExport,
     -- | Explicit Goto target names
     neTransitions :: [Text],
     -- | Has Goto Exit?
@@ -109,7 +101,6 @@ instance ToJSON NodeExport where
         "system" .= ne.neSystem,
         "tools" .= ne.neTools,
         "memory" .= ne.neMemory,
-        "claudeCode" .= ne.neClaudeCode,
         "transitions" .= ne.neTransitions,
         "canExit" .= ne.neCanExit,
         "hasVision" .= ne.neHasVision
@@ -201,32 +192,6 @@ instance ToJSON MemoryExport where
       [ "typeName" .= me.meTypeName
       ]
 
--- | Export format for ClaudeCode info.
-data ClaudeCodeExport = ClaudeCodeExport
-  { -- | Model: "Haiku", "Sonnet", or "Opus"
-    ceModel :: Text
-  }
-  deriving (Show, Eq, Generic)
-
-instance ToJSON ClaudeCodeExport where
-  toJSON ce =
-    object
-      [ "model" .= ce.ceModel
-      ]
-
--- | Export format for Gemini info.
-data GeminiExport = GeminiExport
-  { -- | Model: "Flash", "Pro", or "Ultra"
-    geModel :: Text
-  }
-  deriving (Show, Eq, Generic)
-
-instance ToJSON GeminiExport where
-  toJSON ge =
-    object
-      [ "model" .= ge.geModel
-      ]
-
 -- | Export format for tool info.
 data ToolExport = ToolExport
   { -- | Tool name
@@ -279,8 +244,6 @@ nodeToExport ni =
       neSystem = templateToExport <$> ni.niSystem,
       neTools = map toolToExport ni.niToolInfos,
       neMemory = memoryToExport <$> ni.niMemory,
-      neClaudeCode = claudeCodeToExport <$> ni.niClaudeCode,
-      neGemini = geminiToExport <$> ni.niGemini,
       neTransitions = map fst ni.niGotoTargets,
       neCanExit = ni.niHasGotoExit,
       neHasVision = ni.niHasVision
@@ -332,20 +295,6 @@ toolToExport ti =
       txInputSchema = schemaToValue ti.tiInputSchema
     }
 
--- | Convert ClaudeCodeInfo to ClaudeCodeExport.
-claudeCodeToExport :: ClaudeCodeInfo -> ClaudeCodeExport
-claudeCodeToExport cci =
-  ClaudeCodeExport
-    { ceModel = cci.cciModel
-    }
-
--- | Convert GeminiInfo to GeminiExport.
-geminiToExport :: GeminiInfo -> GeminiExport
-geminiToExport gi =
-  GeminiExport
-    { geModel = gi.giModel
-    }
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS
 -- ════════════════════════════════════════════════════════════════════════════
@@ -353,8 +302,6 @@ geminiToExport gi =
 -- | Convert RuntimeNodeKind to text.
 kindToText :: RuntimeNodeKind -> Text
 kindToText RuntimeLLM = "LLM"
-kindToText RuntimeClaudeCode = "ClaudeCode"
-kindToText RuntimeGemini = "Gemini"
 kindToText RuntimeLogic = "Logic"
 kindToText RuntimeFork = "Fork"
 kindToText RuntimeBarrier = "Barrier"

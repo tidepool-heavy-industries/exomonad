@@ -57,23 +57,6 @@ module ExoMonad.Graph.Types
     CloudflareAI,
     NativeAnthropic,
 
-    -- * Gemini Annotation
-    Gemini,
-    GeminiModel (..),
-    Flash,
-    Pro,
-    Ultra,
-
-    -- * ClaudeCode Annotation
-    ClaudeCode,
-    ModelChoice (..),
-    Haiku,
-    Sonnet,
-    Opus,
-
-    -- * ClaudeCode Singletons (demote type-level to runtime)
-    SingModelChoice (..),
-
     -- * FunctionGemma Annotation
     FunctionGemma,
 
@@ -99,20 +82,8 @@ module ExoMonad.Graph.Types
   )
 where
 
-import ExoMonad.Effect.Gemini (GeminiModel (..))
 import ExoMonad.Role (Role (..))
 import GHC.TypeLits (Symbol)
-
--- | Marks an LLM node as executed via Gemini CLI subprocess.
-type Gemini :: GeminiModel -> Type
-data Gemini model
-
--- | Type-level aliases for Gemini models.
-type Flash = 'Flash
-
-type Pro = 'Pro
-
-type Ultra = 'Ultra
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- NODE KIND
@@ -1021,10 +992,8 @@ data Global stateType
 -- @
 -- type MyGraph = Graph '[...] :& Backend NativeAnthropic
 -- @
---
--- Note: 'ClaudeCode' annotation is only valid with 'NativeAnthropic' backend.
--- Using ClaudeCode with CloudflareAI will produce a compile-time error.
 type Backend :: Type -> Type
+data Backend backendType
 data Backend backendType
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -1032,72 +1001,10 @@ data Backend backendType
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Cloudflare AI backend. Uses Cloudflare Workers AI for LLM calls.
--- Does not support 'ClaudeCode' annotation (no local subprocess access).
 data CloudflareAI
 
 -- | Native Anthropic API backend. Calls Anthropic API directly.
--- Supports 'ClaudeCode' annotation for spawning Claude Code sessions.
 data NativeAnthropic
-
--- ════════════════════════════════════════════════════════════════════════════
--- CLAUDE CODE ANNOTATION
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Model selection for Claude Code sessions.
-data ModelChoice
-  = -- | Fast, cost-effective model
-    Haiku
-  | -- | Balanced performance/cost
-    Sonnet
-  | -- | Most capable model
-    Opus
-
--- | Type-level aliases for promoted ModelChoice constructors.
-type Haiku = 'Haiku
-
-type Sonnet = 'Sonnet
-
-type Opus = 'Opus
-
--- | Marks an LLM node as executed via Claude Code subprocess instead of API.
---
--- When present, the node's template is rendered and passed to @claude -p@
--- via exomonad, which spawns a Claude Code session in a managed worktree and
--- returns JSON output.
---
--- @
--- gWork :: mode :- G.LLMNode
---     :@ Input IssueInfo
---     :@ Template WorkTpl
---     :@ Schema WorkResult
---     :@ ClaudeCode 'Sonnet
--- @
---
--- Parameters:
---
--- * @model@ - Which Claude model to use (Haiku, Sonnet, Opus)
---
--- Note: Only valid with 'Backend NativeAnthropic'. Using with CloudflareAI
--- will produce a compile-time type error.
-type ClaudeCode :: ModelChoice -> Type
-data ClaudeCode model
-
--- ════════════════════════════════════════════════════════════════════════════
--- CLAUDECODE SINGLETONS
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Demote type-level ModelChoice to runtime value.
---
--- This enables compile-time validated ClaudeCode handlers where the model
--- is derived from the type annotation rather than passed as a runtime argument.
-class SingModelChoice (m :: ModelChoice) where
-  singModelChoice :: ModelChoice
-
-instance SingModelChoice 'Haiku where singModelChoice = Haiku
-
-instance SingModelChoice 'Sonnet where singModelChoice = Sonnet
-
-instance SingModelChoice 'Opus where singModelChoice = Opus
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- FUNCTIONGEMMA ANNOTATION
@@ -1105,7 +1012,7 @@ instance SingModelChoice 'Opus where singModelChoice = Opus
 
 -- | Marker for FunctionGemma local streaming execution (LLMKind 'Local).
 --
--- Unlike API and ClaudeCode execution which make single request/response calls,
+-- Unlike API execution which make single request/response calls,
 -- FunctionGemma streams delimiter-separated messages where each message triggers
 -- the exit handler as a fold function.
 --

@@ -45,8 +45,8 @@ where
 
 import Data.Aeson (Value)
 import GHC.Generics (C, D, K1, M1, R, Rep, S, U1, V1, from, to, (:*:), (:+:))
-import GHC.TypeLits (ErrorMessage (..), TypeError)
-
+import GHC.TypeLits (ErrorMessage (..), Symbol, TypeError)
+import Data.Type.Bool (type (&&))
 -- ════════════════════════════════════════════════════════════════════════════
 -- JSON SCHEMA TYPES
 -- ════════════════════════════════════════════════════════════════════════════

@@ -31,14 +31,6 @@ module ExoMonad.Graph.Edges
     GetGlobal,
     GetBackend,
 
-    -- * ClaudeCode Extraction
-    GetClaudeCode,
-    HasClaudeCode,
-
-    -- * Gemini Extraction
-    GetGeminiModel,
-    HasGeminiModel,
-
     -- * Goto Extraction
     GetGotoTargets,
     GotoEffectsToTargets,
@@ -72,17 +64,13 @@ import ExoMonad.Graph.Types
     Awaits,
     Backend,
     Barrier,
-    ClaudeCode,
     Entries,
     Exits,
-    Gemini,
-    GeminiModel,
     Global,
     Input,
     MCPExport,
     MCPToolDef,
     Memory,
-    ModelChoice,
     Schema,
     Self,
     Spawn,
@@ -450,8 +438,6 @@ type family SameAnnotationType ann target where
   SameAnnotationType (Entries _) (Entries _) = 'True
   SameAnnotationType (Exits _) (Exits _) = 'True
   SameAnnotationType Vision Vision = 'True
-  SameAnnotationType (ClaudeCode _) (ClaudeCode _) = 'True
-  SameAnnotationType (Gemini _) (Gemini _) = 'True
   SameAnnotationType (Backend _) (Backend _) = 'True
   SameAnnotationType (Spawn _) (Spawn _) = 'True
   SameAnnotationType (Barrier _) (Barrier _) = 'True
@@ -492,55 +478,6 @@ type family GetBackend graph where
   GetBackend (graph :& Backend t) = 'Just t
   GetBackend (graph :& _) = GetBackend graph
   GetBackend _ = 'Nothing
-
--- ════════════════════════════════════════════════════════════════════════════
--- CLAUDE CODE EXTRACTION
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Extract ClaudeCode annotation from a node.
---
--- Returns the model choice.
---
--- @
--- GetClaudeCode (LLMNode :@ Schema Result :@ ClaudeCode 'Sonnet) = 'Just 'Sonnet
--- @
-type GetClaudeCode :: Type -> Maybe ModelChoice
-type family GetClaudeCode node where
-  GetClaudeCode (node :@ ClaudeCode m) = 'Just m
-  GetClaudeCode (node :@ _) = GetClaudeCode node
-  GetClaudeCode _ = 'Nothing
-
--- | Check if a node has the ClaudeCode annotation.
---
--- @
--- HasClaudeCode (LLMNode :@ ClaudeCode 'Haiku) = 'True
--- HasClaudeCode (LLMNode :@ Schema Result) = 'False
--- @
-type HasClaudeCode :: Type -> Bool
-type family HasClaudeCode node where
-  HasClaudeCode (node :@ ClaudeCode _) = 'True
-  HasClaudeCode (node :@ _) = HasClaudeCode node
-  HasClaudeCode _ = 'False
-
--- ════════════════════════════════════════════════════════════════════════════
--- GEMINI EXTRACTION
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Extract Gemini annotation from a node.
---
--- Returns the model choice.
-type GetGeminiModel :: Type -> Maybe GeminiModel
-type family GetGeminiModel node where
-  GetGeminiModel (node :@ Gemini m) = 'Just m
-  GetGeminiModel (node :@ _) = GetGeminiModel node
-  GetGeminiModel _ = 'Nothing
-
--- | Check if a node has the Gemini annotation.
-type HasGeminiModel :: Type -> Bool
-type family HasGeminiModel node where
-  HasGeminiModel (node :@ Gemini _) = 'True
-  HasGeminiModel (node :@ _) = HasGeminiModel node
-  HasGeminiModel _ = 'False
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- FORK/BARRIER EXTRACTION

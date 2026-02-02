@@ -9,6 +9,9 @@ module ExoMonad.Guest.Tools.Agent
     SpawnAgentsArgs (..),
     CleanupAgentsArgs (..),
     ListAgentsArgs (..),
+
+    -- * Re-export AgentType for use in other modules
+    AC.AgentType (..),
   )
 where
 
@@ -32,7 +35,8 @@ data SpawnAgentsArgs = SpawnAgentsArgs
   { saIssues :: [Text],
     saOwner :: Text,
     saRepo :: Text,
-    saWorktreeDir :: Maybe Text
+    saWorktreeDir :: Maybe Text,
+    saAgentType :: Maybe AC.AgentType
   }
   deriving (Show, Eq, Generic)
 
@@ -43,11 +47,12 @@ instance FromJSON SpawnAgentsArgs where
       <*> v .: "owner"
       <*> v .: "repo"
       <*> v .:? "worktree_dir"
+      <*> v .:? "agent_type"
 
 instance MCPTool SpawnAgents where
   type ToolArgs SpawnAgents = SpawnAgentsArgs
   toolName = "spawn_agents"
-  toolDescription = "Spawn Claude Code agents for GitHub issues in isolated worktrees"
+  toolDescription = "Spawn agents (Claude/Gemini) for GitHub issues in isolated worktrees"
   toolSchema =
     object
       [ "type" .= ("object" :: Text),
@@ -74,6 +79,12 @@ instance MCPTool SpawnAgents where
                 .= object
                   [ "type" .= ("string" :: Text),
                     "description" .= ("Base directory for worktrees (default: ./worktrees)" :: Text)
+                  ],
+              "agent_type"
+                .= object
+                  [ "type" .= ("string" :: Text),
+                    "enum" .= (["claude", "gemini"] :: [Text]),
+                    "description" .= ("Agent type (default: gemini)" :: Text)
                   ]
             ]
       ]
@@ -82,7 +93,8 @@ instance MCPTool SpawnAgents where
           AC.SpawnOptions
             { AC.owner = saOwner args,
               AC.repo = saRepo args,
-              AC.worktreeDir = saWorktreeDir args
+              AC.worktreeDir = saWorktreeDir args,
+              AC.agentType = saAgentType args
             }
     result <- runM $ AC.runAgentControl $ AC.spawnAgents (saIssues args) opts
     pure $ successResult $ Aeson.toJSON result

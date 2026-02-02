@@ -21,7 +21,6 @@ packages:
     haskell/effects/git-interpreter
     haskell/effects/worktree-interpreter
     haskell/effects/justfile-interpreter
-    haskell/effects/gemini-interpreter
     haskell/effects/filesystem-interpreter
     haskell/effects/zellij-interpreter
     haskell/effects/socket-client

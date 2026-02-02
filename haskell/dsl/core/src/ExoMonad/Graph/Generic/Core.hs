@@ -16,7 +16,6 @@ module ExoMonad.Graph.Generic.Core
 
     -- * Node Markers
     LLMNode,
-    GeminiNode,
     LogicNode,
     GraphNode,
     EntryNode,
@@ -36,6 +35,7 @@ where
 
 import GHC.Generics (Generic)
 import GHC.TypeLits (Symbol)
+import ExoMonad.Graph.Types (LLMKind)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPH MODE CLASS
@@ -98,11 +98,6 @@ instance GraphMode AsGraph where
 -- LLMNode has kind 'LLMKind -> Type' (parameterized by LLMKind from Types.hs).
 type LLMNode :: LLMKind -> Type
 data LLMNode subtype
-
--- | Gemini node marker (parallel to LLMNode).
---
--- Executes via the Gemini CLI interpreter.
-data GeminiNode
 
 -- | Graph node marker - embeds a subgraph as a node.
 --

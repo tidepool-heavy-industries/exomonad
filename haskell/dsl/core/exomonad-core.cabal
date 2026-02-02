@@ -19,7 +19,6 @@ library
         ExoMonad.Platform
         ExoMonad.Effect
         ExoMonad.Effect.GraphContext
-        ExoMonad.Effect.Session
         ExoMonad.Effect.Subgraph
         ExoMonad.Effect.DevLog
         ExoMonad.Effect.Log
@@ -66,12 +65,9 @@ library
         -- Native-only effects (require subprocesses)
         ExoMonad.Effect.LSP
         ExoMonad.Effect.GHCi
-        ExoMonad.Effect.Gemini
         -- Native-only tooling
         ExoMonad.Schema
         ExoMonad.Schema.TH
-        ExoMonad.StructuredOutput.ClaudeCodeSchema
-        ExoMonad.StructuredOutput.DecisionTools
         ExoMonad.StructuredOutput.Error
         ExoMonad.StructuredOutput.Generic
         ExoMonad.StructuredOutput.Instances
@@ -187,7 +183,6 @@ test-suite graph-validation-tests
         CLITestTypes
         CLIGraphSpec
         CLIGraphTypes
-        ClaudeAPIGoldenSpec
         GraphValidationSpec
         LLMNodeInterpretSpec
         MemorySerializationSpec
@@ -200,7 +195,6 @@ test-suite graph-validation-tests
         DispatchGotoSpec
         ConvertTransitionHintSpec
         ToolTransitionIntegrationSpec
-        DecisionToolsSpec
         DecisionSpec
         TUIWireFormatSpec
         ToolRecordTHSpec

@@ -29,9 +29,6 @@ module ExoMonad.Graph.Validate
     UnreachableNodeError,
     NoExitPathError,
     DeadGotoError,
-
-    -- * Backend Compatibility Errors
-    ClaudeCodeCFBackendError,
   )
 where
 
@@ -46,7 +43,6 @@ import ExoMonad.Graph.Validate.RecordStructure
     NoExitPathFieldError,
     UnreachableFieldError,
   )
-import GHC.TypeError (Unsatisfiable)
 import GHC.TypeLits (ErrorMessage (..), Symbol, TypeError)
 
 -- Create type family wrappers for backward compatibility
@@ -227,47 +223,4 @@ type DuplicateSchemaError t =
         ':<>: 'Text " is produced by multiple nodes."
         ':$$: 'Text "This creates ambiguous Needs resolution."
         ':$$: 'Text "Fix: Use distinct types for each node's Schema output."
-    )
-
--- ════════════════════════════════════════════════════════════════════════════
--- BACKEND COMPATIBILITY ERRORS
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Error when ClaudeCode annotation is used with CloudflareAI backend.
---
--- ClaudeCode spawns a local subprocess, which is not available
--- in Cloudflare Workers. This error triggers at compile time when a graph
--- has both ':& Backend CloudflareAI' and any node with ':@ ClaudeCode'.
---
--- @
--- -- This will produce the error:
--- type BadGraph = Graph '[...]
---   :@ ClaudeCode 'Sonnet
---   :& Backend CloudflareAI
--- @
--- | Error for ClaudeCode annotation with CloudflareAI backend.
---
--- Uses 'Unsatisfiable' rather than 'TypeError' because this represents
--- mutually exclusive requirements - ClaudeCode requires a local subprocess
--- which is physically impossible in Cloudflare Workers. No annotation can
--- fix this; it requires choosing a different backend or architecture.
-type ClaudeCodeCFBackendError :: Symbol -> Constraint
-type ClaudeCodeCFBackendError nodeName =
-  Unsatisfiable
-    ( 'Text "Graph validation failed: incompatible backend for ClaudeCode"
-        ':$$: 'Text ""
-        ':$$: 'Text "Node '"
-        ':<>: 'Text nodeName
-        ':<>: 'Text "' has ClaudeCode annotation,"
-        ':$$: 'Text "but this graph uses CloudflareAI backend."
-        ':$$: 'Text ""
-        ':$$: 'Text "ClaudeCode spawns a local subprocess,"
-        ':$$: 'Text "which is not available in Cloudflare Workers."
-        ':$$: 'Text ""
-        ':$$: 'Text "Fix options:"
-        ':$$: 'Text "  1. Use 'Backend NativeAnthropic' for this graph"
-        ':$$: 'Text "  2. Remove the ClaudeCode annotation from node '"
-        ':<>: 'Text nodeName
-        ':<>: 'Text "'"
-        ':$$: 'Text "  3. Move ClaudeCode nodes to a separate NativeAnthropic graph"
     )

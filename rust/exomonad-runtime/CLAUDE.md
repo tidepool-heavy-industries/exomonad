@@ -80,13 +80,15 @@ Methods:
 
 **Spawn flow:**
 1. Fetch issue from GitHub API
-2. Create git worktree: `worktrees/gh-{issue}-{title}/`
-3. Create branch: `gh-{issue}/{title}`
+2. Create git worktree: `worktrees/gh-{issue}-{title}-{agent}/`
+3. Create branch: `gh-{issue}/{title}-{agent}`
 4. Write `.exomonad/config.toml` (role="dev") and `.mcp.json`
-5. Write `INITIAL_CONTEXT.md` with full issue context
-6. Generate KDL layout via `zellij-gen`
+5. Build initial prompt with full issue context
+6. Generate KDL layout with agent-specific command:
+   - Claude: `claude --prompt '...'`
+   - Gemini: `gemini --prompt-interactive '...'`
 7. Create Zellij tab: `zellij action new-tab --layout /tmp/exomonad-layouts/<name>.kdl`
-8. Tab auto-closes when Claude exits (`close_on_exit true`)
+8. Tab auto-closes when agent exits (`close_on_exit true`)
 
 **Cleanup flow:**
 1. Close Zellij tab: `zellij action close-tab`

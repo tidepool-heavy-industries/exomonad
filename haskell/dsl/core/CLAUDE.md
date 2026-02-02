@@ -977,13 +977,9 @@ llmAfter (result :: ClaudeCodeResult WorkExit, sessionId) = do
 
 ### Key Differences from LLMHandler
 
-| Aspect | LLMHandler | ClaudeCodeLLMHandler |
-|--------|------------|----------------------|
-| **Before return type** | `Eff es tpl` | `Eff es (tpl, SessionOperation)` |
-| **After input type** | `schema` | `(ClaudeCodeResult schema, SessionId)` |
-| **Session management** | N/A (implicit in LLM effect) | **Explicit** via SessionOperation enum |
-| **Execution** | Anthropic API call | Claude Code subprocess via exomonad |
-| **Type parameters** | 5 (needs, schema, targets, effs, tpl) | 6 (model, needs, schema, targets, effs, tpl) |
+| `llmAfter` | `output -> Eff es (GotoChoice targets)` | Routes based on LLM output |
+| `logic` | `input -> Eff es (GotoChoice targets)` | Pure routing logic |
+
 
 ### Before Function: SessionOperation
 
@@ -1315,7 +1311,7 @@ All paths relative to `exomonad-core/src/ExoMonad/Graph/`.
 
 | File | Key Exports | Purpose |
 |------|-------------|---------|
-| `Types.hs` | `(:@)`, `Input`, `Schema`, `Goto`, `Exit`, `Self`, `ClaudeCode`, `ModelChoice`, `GraphEntry`, `(:~>)`, `GraphEntries` | Core DSL syntax and annotations |
+| `Types.hs` | `(:@)`, `Input`, `Schema`, `Goto`, `Exit`, `Self`, `GraphEntry`, `(:~>)`, `GraphEntries` | Core DSL syntax and annotations |
 | `Generic.hs` | `GraphMode`, `AsHandler`, `AsGraph`, `NodeHandler`, `ValidGraphRecord` | Mode system and handler type computation |
 | `Edges.hs` | `GetInput`, `GetSchema`, `GetUsesEffects`, `GotoEffectsToTargets`, `GotosToTos` | Type families for annotation extraction |
 | `Goto.hs` | `Goto`, `To`, `OneOf`, `GotoChoice`, `gotoChoice`, `gotoExit`, `gotoSelf`, `LLMHandler` | Transition types and smart constructors |

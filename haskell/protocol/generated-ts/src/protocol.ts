@@ -492,7 +492,6 @@ export interface TelegramConfirmResponse {
 // - DbQueryEffect (D1 database)
 // - KvGetEffect / KvPutEffect (Workers KV)
 // - ScheduleAlarmEffect (Durable Object alarms)
-// - ClaudeCodeEffect (subprocess execution - native only)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // EFFECT RESULTS (what TypeScript returns to WASM - matches Haskell EffectResult)

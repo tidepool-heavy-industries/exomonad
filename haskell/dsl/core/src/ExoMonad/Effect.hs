@@ -13,9 +13,6 @@ module ExoMonad.Effect
     -- * Log
     module ExoMonad.Effect.Log,
 
-    -- * Session (ClaudeCode orchestration)
-    module ExoMonad.Effect.Session,
-
     -- * Graph Context (entry + node input)
     module ExoMonad.Effect.GraphContext,
 
@@ -27,6 +24,5 @@ where
 import ExoMonad.Effect.DevLog
 import ExoMonad.Effect.GraphContext
 import ExoMonad.Effect.Log
-import ExoMonad.Effect.Session
 import ExoMonad.Effect.Subgraph
 import ExoMonad.Effect.Types

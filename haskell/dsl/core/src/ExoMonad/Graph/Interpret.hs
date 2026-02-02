@@ -42,8 +42,6 @@ module ExoMonad.Graph.Interpret
 
     -- * LLM Handler Execution
     executeLLMHandler,
-    executeClaudeCodeHandler,
-    executeGeminiHandler,
 
     -- * Self-Loop Dispatch
     DispatchGotoWithSelf (..),
@@ -58,9 +56,7 @@ where
 
 import ExoMonad.Effect (LLM)
 import Data.Text qualified as T
-import ExoMonad.Effect.Gemini (GeminiModel (..), GeminiOp, GeminiResult (..), SGeminiModel (..), SingGeminiModel (..), runGemini)
 import ExoMonad.Effect.NodeMeta (GraphMeta, GraphMetadata (..), NodeMeta, NodeMetadata (..), getGraphMeta, withNodeMeta)
-import ExoMonad.Effect.Session (Session, SessionId (..), SessionOperation (..), SessionOutput (..), ToolCall (..), continueSession, forkSession, startSession)
 import ExoMonad.Effect.Types (TurnOutcome (..), TurnParseResult (..), TurnResult (..), runTurn)
 import ExoMonad.Graph.Edges (GetAwaits, GetBarrierTarget, GetInput, GetSpawnTargets)
 import ExoMonad.Graph.Errors
@@ -79,15 +75,14 @@ import ExoMonad.Graph.Errors
 import ExoMonad.Graph.Generic (AsHandler, AwaitsHList, FieldsWithNamesOf, GetNodeDef, SpawnPayloads, SpawnPayloadsInner)
 import ExoMonad.Graph.Generic.Core (AsGraph, EntryNode)
 import ExoMonad.Graph.Generic.Core qualified as G (ExitNode)
-import ExoMonad.Graph.Goto (ClaudeCodeLLMHandler (..), ClaudeCodeResult (..), GeminiLLMHandler (..), GotoChoice, LLMHandler (..), To)
+import ExoMonad.Graph.Goto (GotoChoice, LLMHandler (..), To)
 import ExoMonad.Graph.Goto.Internal (GotoChoice (..), OneOf (..))
 import ExoMonad.Graph.Reify (IsForkNode)
 import ExoMonad.Graph.Template (GingerContext)
-import ExoMonad.Graph.Types (Arrive, Exit, HList (..), ModelChoice, Self, SingModelChoice (..))
+import ExoMonad.Graph.Types (Arrive, Exit, HList (..), Self)
 import ExoMonad.Prelude
 import ExoMonad.Schema (schemaToValue)
-import ExoMonad.StructuredOutput (ClaudeCodeSchema (..), DecisionTool, StructuredOutput (..), ValidStructuredOutput, formatDiagnostic)
-import ExoMonad.StructuredOutput.DecisionTools qualified as DT
+import ExoMonad.StructuredOutput (StructuredOutput (..), ValidStructuredOutput, formatDiagnostic)
 import GHC.Records (HasField (..))
 import GHC.TypeLits (ErrorMessage (..), KnownSymbol, Symbol, symbolVal)
 import PyF (fmt)
@@ -300,283 +295,6 @@ executeLLMHandler mSystemTpl userTpl beforeFn afterFn input = do
     TurnCompleted (TurnParseFailed {tpfError}) -> error [fmt|Parse failed: {tpfError}|]
 
 -- ════════════════════════════════════════════════════════════════════════════
--- CLAUDE CODE HANDLER EXECUTION
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Execute a ClaudeCodeLLMHandler, returning a GotoChoice.
---
--- Similar to 'executeLLMHandler', but uses the Session effect to spawn
--- a dockerized Claude Code session via exomonad.
---
--- This function:
--- 1. Calls the before-handler to build template context AND session strategy
--- 2. Renders the user template (system template appended to prompt)
--- 3. Detects if schema is a sum type → generates decision tools
--- 4. Executes the appropriate Session operation (start/continue/fork)
--- 5. Parses output from tool calls (sum types) or structured output (others)
--- 6. Implements nag logic if sum type but no tool call (max 5 retries)
--- 7. Calls the after-handler with output AND session ID for routing
---
--- = Type Parameters
---
--- * @model@ - The ModelChoice from ClaudeCode annotation (type-level)
--- * @needs@ - The input type from Input annotation
--- * @schema@ - The LLM output schema type
--- * @targets@ - The transition targets from UsesEffects
--- * @es@ - The effect stack (must include Session)
--- * @tpl@ - The template context type
---
--- = Session Management
---
--- The before handler returns a 'SessionOperation' alongside the template context:
---
--- * 'StartFresh slug' - Create a new session with the given slug
--- * 'ContinueFrom sid' - Resume an existing session (preserves conversation history)
--- * 'ForkFrom parentSid childSlug' - Create a read-only fork from parent session
---
--- The after handler receives both the parsed output and the session ID that was
--- used/created, enabling downstream handlers to register sessions for later reuse.
---
--- = Sum Type Handling (Decision Tools)
---
--- For sum types with data (detected via 'ClaudeCodeSchema'), this function:
---
--- 1. Generates MCP decision tools where each tool = one constructor
--- 2. Passes tools to the session; Claude Code calls one to "select" a branch
--- 3. Parses the tool call back to the Haskell sum type
--- 4. If Claude doesn't call a tool, nags with a retry prompt (max 5 retries)
---
--- This works around Anthropic's lack of oneOf support in structured output.
-executeClaudeCodeHandler ::
-  forall model needs schema targets es tpl.
-  ( Member Session es,
-    Member Log es,
-    ClaudeCodeSchema schema,
-    GingerContext tpl,
-    SingModelChoice model,
-    ConvertTransitionHint targets
-  ) =>
-  -- | Optional system prompt template
-  Maybe (TypedTemplate tpl SourcePos) ->
-  -- | User prompt template (required)
-  TypedTemplate tpl SourcePos ->
-  -- | Before handler: builds context AND session strategy
-  (needs -> Eff es (tpl, SessionOperation)) ->
-  -- | After handler: routes with output AND session ID
-  ((ClaudeCodeResult schema, SessionId) -> Eff es (GotoChoice targets)) ->
-  -- | Input from Input annotation
-  needs ->
-  Eff es (GotoChoice targets)
-executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
-  let model = singModelChoice @model
-
-  -- Build context and get session operation from before-handler
-  (ctx, sessionOp) <- beforeFn input
-
-  -- Render templates
-  let systemPrompt :: Text
-      systemPrompt = maybe "" (runTypedTemplate ctx) mSystemTpl
-      userPrompt :: Text
-      userPrompt = runTypedTemplate ctx userTpl
-      -- Combine system and user prompts for Claude Code
-      -- (Claude Code doesn't have separate system prompt, so prepend it)
-      fullPrompt :: Text
-      fullPrompt =
-        if systemPrompt == ""
-          then userPrompt
-          else systemPrompt <> "\n\n" <> userPrompt
-
-  -- Get decision tools if schema is a sum type with data
-  let mDecisionTools :: Maybe [DecisionTool]
-      mDecisionTools = ccDecisionTools @schema
-
-      -- Convert to JSON Value for session API
-      mToolsJson :: Maybe Value
-      mToolsJson = toJSON <$> mDecisionTools
-
-      -- Schema is only used when NOT using decision tools
-      -- (Sum types use tools instead of structured output schema)
-      schemaVal :: Maybe Value
-      schemaVal = case mDecisionTools of
-        Just _ -> Nothing -- Don't pass schema when using decision tools
-        Nothing -> Just $ schemaToValue (structuredSchema @schema)
-
-  -- Execute session and parse result with nag logic for sum types
-  executeWithNag @schema fullPrompt schemaVal mToolsJson sessionOp model afterFn 0
-  where
-    -- Maximum nag retries when Claude doesn't call a decision tool or parse fails
-    -- NOTE: Set to 1 for debugging while decision tool termination is being fixed
-    maxNagRetries :: Int
-    maxNagRetries = 1
-
-    -- Nag prompt when Claude doesn't call a decision tool
-    decisionToolNagPrompt :: Text
-    decisionToolNagPrompt =
-      "You must call one of the decision:: tools to indicate your choice. "
-        <> "Please review the available tools and call the appropriate one."
-
-    -- Nag prompt for parse failures
-    parseErrorNagPrompt :: Text -> Text
-    parseErrorNagPrompt diagText =
-      [fmt|Your output didn't match the expected JSON schema. Error:
-{diagText}
-
-Please try again with valid JSON matching the schema.|]
-
-    -- Execute session, parsing output and handling nag retries
-    executeWithNag ::
-      forall s.
-      (ClaudeCodeSchema s) =>
-      Text ->
-      -- \^ Prompt
-      Maybe Value ->
-      -- \^ JSON schema (Nothing for sum types)
-      Maybe Value ->
-      -- \^ Decision tools JSON (Just for sum types)
-      SessionOperation ->
-      -- \^ Session operation
-      ModelChoice ->
-      -- \^ Model to use
-      ((ClaudeCodeResult s, SessionId) -> Eff es (GotoChoice targets)) ->
-      Int ->
-      -- \^ Current retry count
-      Eff es (GotoChoice targets)
-    executeWithNag prompt schema tools sessionOp_ model_ afterFn_ retryCount = do
-      -- Dispatch to appropriate Session operation
-      result <- case sessionOp_ of
-        StartFresh slug ->
-          startSession slug prompt model_ schema tools
-        ContinueFrom sid worktree branch ->
-          -- Guard against empty session ID (indicates prior exomonad failure)
-          if T.null sid.unSessionId
-            then error "ClaudeCode: Cannot continue session - no valid session ID (prior exomonad failure)"
-            else continueSession sid worktree branch model_ prompt schema tools
-        ForkFrom parentSid parentWorktree parentBranch childSlug ->
-          forkSession parentSid parentWorktree parentBranch model_ childSlug prompt schema tools
-
-      -- Check for exomonad/process-level failure BEFORE parsing output
-      -- This distinguishes "exomonad crashed" from "Claude didn't call tool"
-      when result.soIsError $ do
-        let errDetails = fromMaybe "unknown error" result.soError
-            stderrInfo = maybe "" (\s -> "\n\nStderr:\n" <> T.unpack s) result.soStderrOutput
-        error [fmt|ClaudeCode session failed (exomonad/process error): {errDetails} [exit code: {result.soExitCode}]{stderrInfo}|]
-
-      -- Extract cc_session_id (required for resume/fork) - fail early if missing
-      ccSessionId <- case result.soCcSessionId of
-        Just sid -> pure (SessionId sid)
-        Nothing -> do
-          let errDetails = fromMaybe "no cc_session_id in output" result.soError
-              stderrInfo = maybe "" (\s -> "\n\nStderr:\n" <> T.unpack s) result.soStderrOutput
-          error [fmt|ClaudeCode session failed to return cc_session_id (required for resume/fork). Error: {errDetails} [exit code: {result.soExitCode}]{stderrInfo}|]
-
-      -- Parse result based on whether we're using decision tools
-      case tools of
-        Just _ -> do
-          -- Sum type: parse from tool calls
-          case result.soToolCalls of
-            Just (tc : rest) ->
-              -- Got at least one tool call, take the first
-              -- (Claude sometimes calls multiple despite "STOP NOW"; ignore subsequent)
-              do
-                let count = 1 + length rest
-                logTrace [fmt|[DECISION] Taking first of {count} decision tool calls|]
-                case ccParseToolCall @s (convertToolCall tc) of
-                  Right output -> afterFn_ (ClaudeCodeResult output ccSessionId result.soWorktree result.soBranch, ccSessionId)
-                  Left err -> error [fmt|ClaudeCode decision tool parse error: {err}|]
-            _ ->
-              -- No tool call - nag and retry
-              if retryCount >= maxNagRetries
-                then
-                  let sessionOut = fromMaybe "(no text)" result.soResultText
-                  in error [fmt|ClaudeCode: Claude completed but failed to call a decision tool after {maxNagRetries} retries. Session output: {sessionOut}|]
-                else do
-                  -- Continue the same session with nag prompt
-                  executeWithNag @s
-                    decisionToolNagPrompt
-                    schema
-                    tools
-                    (ContinueFrom ccSessionId result.soWorktree result.soBranch)
-                    model_
-                    afterFn_
-                    (retryCount + 1)
-        Nothing ->
-          -- Regular type: parse from structured output
-          case result.soStructuredOutput of
-            Nothing ->
-              let errInfo = maybe "" (": " <>) result.soError
-              in error [fmt|ClaudeCode session returned no structured output{errInfo}|]
-            Just outputVal ->
-              case ccParseStructured @s outputVal of
-                Right output -> afterFn_ (ClaudeCodeResult output ccSessionId result.soWorktree result.soBranch, ccSessionId)
-                Left diag ->
-                  -- Parse failed - nag and retry
-                  if retryCount >= maxNagRetries
-                    then
-                      let diagMsg = formatDiagnostic diag
-                      in error [fmt|ClaudeCode output parse error after {maxNagRetries} retries: {diagMsg}|]
-                    else do
-                      -- Continue the same session with parse error nag prompt
-                      let nagText = parseErrorNagPrompt (formatDiagnostic diag)
-                      executeWithNag @s
-                        nagText
-                        schema
-                        tools
-                        (ContinueFrom ccSessionId result.soWorktree result.soBranch)
-                        model_
-                        afterFn_
-                        (retryCount + 1)
-
-    -- Convert Session.ToolCall to DecisionTools.ToolCall format
-    convertToolCall :: ToolCall -> DT.ToolCall
-    convertToolCall tc =
-      DT.ToolCall
-        { DT.tcName = tc.tcName,
-          DT.tcInput = tc.tcInput
-        }
-
--- | Execute a GeminiLLMHandler, returning a GotoChoice.
---
--- Spawns Gemini CLI subprocess via the Gemini effect.
-executeGeminiHandler ::
-  forall model needs schema targets es tpl.
-  ( Member GeminiOp es,
-    Member NodeMeta es,
-    Member GraphMeta es,
-    StructuredOutput schema,
-    ValidStructuredOutput schema,
-    GingerContext tpl,
-    SingGeminiModel model,
-    ConvertTransitionHint targets
-  ) =>
-  Maybe (TypedTemplate tpl SourcePos) ->
-  TypedTemplate tpl SourcePos ->
-  (needs -> Eff es tpl) ->
-  (schema -> Eff es (GotoChoice targets)) ->
-  needs ->
-  Eff es (GotoChoice targets)
-executeGeminiHandler mSystemTpl userTpl beforeFn afterFn input = do
-  -- Build context from before-handler
-  ctx <- beforeFn input
-  -- Render templates
-  let systemPrompt = maybe "" (runTypedTemplate ctx) mSystemTpl
-      userPrompt = runTypedTemplate ctx userTpl
-      fullPrompt = if systemPrompt == "" then userPrompt else systemPrompt <> "\n\n" <> userPrompt
-
-  -- Demote model to term-level for the Gemini effect
-  let modelVal = case singGeminiModel @model of
-        SFlash -> Flash
-        SPro -> Pro
-        SUltra -> Ultra
-
-  -- Run Gemini effect
-  GeminiResult {grOutput} <- runGemini modelVal fullPrompt
-
-  -- Parse output
-  case parseStructured grOutput of
-    Right parsed -> afterFn parsed
-    Left diag -> error [fmt|Parse failed: Gemini parse error: {formatDiagnostic diag}|]
-
--- ════════════════════════════════════════════════════════════════════════════
 -- HANDLER INVOCATION TYPECLASS
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -609,43 +327,6 @@ instance
   where
   callHandler (LLMHandler mSysTpl userTpl beforeFn afterFn) =
     executeLLMHandler mSysTpl userTpl beforeFn afterFn
-
--- | ClaudeCode LLM node handler: execute via executeClaudeCodeHandler.
---
--- Dispatches to dockerized Claude Code session via exomonad.
--- Model is derived from type parameters, ensuring compile-time
--- validation that the handler matches the ClaudeCode annotation.
---
--- For sum types with data, generates MCP decision tools and parses
--- tool calls. For other types, uses standard structured output.
-instance
-  ( Member Session es,
-    Member Log es,
-    ClaudeCodeSchema schema,
-    GingerContext tpl,
-    SingModelChoice model,
-    ConvertTransitionHint targets
-  ) =>
-  CallHandler (ClaudeCodeLLMHandler model payload schema targets es tpl) payload es targets
-  where
-  callHandler (ClaudeCodeLLMHandler mSysTpl userTpl beforeFn afterFn) =
-    executeClaudeCodeHandler @model mSysTpl userTpl beforeFn afterFn
-
--- | Gemini LLM node handler: execute via executeGeminiHandler.
-instance
-  ( Member GeminiOp es,
-    Member NodeMeta es,
-    Member GraphMeta es,
-    StructuredOutput schema,
-    ValidStructuredOutput schema,
-    GingerContext tpl,
-    SingGeminiModel model,
-    ConvertTransitionHint targets
-  ) =>
-  CallHandler (GeminiLLMHandler model payload schema targets es tpl) payload es targets
-  where
-  callHandler (GeminiLLMHandler mSysTpl userTpl beforeFn afterFn) =
-    executeGeminiHandler @model mSysTpl userTpl beforeFn afterFn
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPHNODE EXECUTION

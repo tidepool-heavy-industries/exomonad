@@ -22,6 +22,46 @@ use super::zellij_events;
 // Types
 // ============================================================================
 
+/// Agent type for spawned agents.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentType {
+    Claude,
+    Gemini,
+}
+
+impl AgentType {
+    /// Get the CLI command for this agent type.
+    fn command(&self) -> &'static str {
+        match self {
+            AgentType::Claude => "claude",
+            AgentType::Gemini => "gemini",
+        }
+    }
+
+    /// Get the prompt flag for this agent type.
+    fn prompt_flag(&self) -> &'static str {
+        match self {
+            AgentType::Claude => "--prompt",
+            AgentType::Gemini => "--prompt-interactive",
+        }
+    }
+
+    /// Get the suffix for tab/worktree names (lowercase).
+    fn suffix(&self) -> &'static str {
+        match self {
+            AgentType::Claude => "claude",
+            AgentType::Gemini => "gemini",
+        }
+    }
+}
+
+impl Default for AgentType {
+    fn default() -> Self {
+        AgentType::Gemini
+    }
+}
+
 /// Options for spawning an agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpawnOptions {
@@ -31,6 +71,9 @@ pub struct SpawnOptions {
     pub repo: String,
     /// Base directory for worktrees (relative to project)
     pub worktree_dir: Option<String>,
+    /// Agent type (Claude or Gemini)
+    #[serde(default)]
+    pub agent_type: AgentType,
 }
 
 /// Result of spawning an agent.
@@ -44,6 +87,8 @@ pub struct SpawnResult {
     pub tab_name: String,
     /// Issue title
     pub issue_title: String,
+    /// Agent type
+    pub agent_type: String,
 }
 
 /// Information about an active agent.
@@ -146,6 +191,7 @@ impl AgentControlService {
 
         // Generate slug from title
         let slug = slugify(&issue.title);
+        let agent_suffix = options.agent_type.suffix();
         let worktree_dir = options
             .worktree_dir
             .clone()
@@ -153,8 +199,8 @@ impl AgentControlService {
         let worktree_path = self
             .project_dir
             .join(&worktree_dir)
-            .join(format!("gh-{}-{}", issue_id, slug));
-        let branch_name = format!("gh-{}/{}", issue_id, slug);
+            .join(format!("gh-{}-{}-{}", issue_id, slug, agent_suffix));
+        let branch_name = format!("gh-{}/{}-{}", issue_id, slug, agent_suffix);
 
         // Fetch origin/main
         self.fetch_origin().await?;
@@ -162,28 +208,41 @@ impl AgentControlService {
         // Create worktree
         self.create_worktree(&worktree_path, &branch_name).await?;
 
-        // Write context files
-        self.write_context_files(
-            &worktree_path,
+        // Write config files (no INITIAL_CONTEXT.md)
+        self.write_context_files(&worktree_path).await?;
+
+        // Build initial prompt
+        let issue_url = format!(
+            "https://github.com/{}/{}/issues/{}",
+            options.owner, options.repo, issue_id
+        );
+        let initial_prompt = Self::build_initial_prompt(
             issue_id,
             &issue.title,
             &issue.body,
             &branch_name,
-            &format!(
-                "https://github.com/{}/{}/issues/{}",
-                options.owner, options.repo, issue_id
-            ),
+            &issue_url,
+        );
+
+        tracing::info!(
+            issue_id,
+            prompt_length = initial_prompt.len(),
+            "Built initial prompt for agent"
+        );
+
+        // Open Zellij tab with agent command and initial prompt
+        let tab_name = format!("gh-{}-{}", issue_id, agent_suffix);
+        self.new_zellij_tab(
+            &tab_name,
+            &worktree_path,
+            options.agent_type,
+            Some(&initial_prompt),
         )
         .await?;
 
-        // Open Zellij tab with claude command
-        let tab_name = format!("gh-{}", issue_id);
-        self.new_zellij_tab(&tab_name, &worktree_path, Some("claude"))
-            .await?;
-
         // Emit agent:started event
         let event = exomonad_ui_protocol::AgentEvent::AgentStarted {
-            agent_id: format!("gh-{}", issue_id),
+            agent_id: tab_name.clone(),
             timestamp: zellij_events::now_iso8601(),
         };
         if let Err(e) = zellij_events::emit_event(&event) {
@@ -195,6 +254,7 @@ impl AgentControlService {
             branch_name,
             tab_name,
             issue_title: issue.title,
+            agent_type: options.agent_type.suffix().to_string(),
         })
     }
 
@@ -228,13 +288,7 @@ impl AgentControlService {
 
     /// Clean up an agent (close Zellij tab, delete worktree).
     pub async fn cleanup_agent(&self, issue_id: &str, force: bool) -> Result<()> {
-        // Close Zellij tab first
-        let tab_name = format!("gh-{}", issue_id);
-        if let Err(e) = self.close_zellij_tab(&tab_name).await {
-            warn!(tab_name, error = %e, "Failed to close Zellij tab (may not exist)");
-        }
-
-        // Find and delete worktree
+        // Find and delete worktree first (to extract agent type from path)
         let agents = self.list_agents().await?;
         let prefix = format!("gh-{}-", issue_id);
 
@@ -242,6 +296,16 @@ impl AgentControlService {
             let path = Path::new(&agent.worktree_path);
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                 if name.starts_with(&prefix) {
+                    // Extract agent suffix from worktree name: gh-{issue}-{slug}-{agent}
+                    let parts: Vec<&str> = name.rsplitn(2, '-').collect();
+                    let agent_suffix = parts.first().unwrap_or(&"");
+
+                    // Close Zellij tab with correct agent suffix
+                    let tab_name = format!("gh-{}-{}", issue_id, agent_suffix);
+                    if let Err(e) = self.close_zellij_tab(&tab_name).await {
+                        warn!(tab_name, error = %e, "Failed to close Zellij tab (may not exist)");
+                    }
+
                     self.delete_worktree(path, force).await?;
 
                     // Emit agent:stopped event
@@ -314,11 +378,15 @@ impl AgentControlService {
                 if let (Some(path), Some(branch)) = (current_path.take(), current_branch.take()) {
                     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                         if name.starts_with("gh-") {
-                            let issue_id = name
-                                .strip_prefix("gh-")
-                                .and_then(|s| s.split('-').next())
-                                .unwrap_or("")
-                                .to_string();
+                            // Parse: gh-{issue}-{slug}-{agent}
+                            // Extract issue ID (second component after 'gh-')
+                            let parts: Vec<&str> = name.splitn(4, '-').collect();
+                            let issue_id = parts.get(1)
+                                .map(|s| s.to_string())
+                                .unwrap_or_default();
+
+                            // Note: We don't store agent type in AgentInfo yet,
+                            // but could add it if needed
 
                             let has_changes = self.has_uncommitted_changes(&path).await;
 
@@ -346,10 +414,32 @@ impl AgentControlService {
             .context("Not running inside a Zellij session (ZELLIJ_SESSION_NAME not set)")
     }
 
-    async fn new_zellij_tab(&self, name: &str, cwd: &Path, command: Option<&str>) -> Result<()> {
-        info!(name, cwd = %cwd.display(), command = ?command, "Creating Zellij tab");
+    async fn new_zellij_tab(
+        &self,
+        name: &str,
+        cwd: &Path,
+        agent_type: AgentType,
+        prompt: Option<&str>,
+    ) -> Result<()> {
+        info!(name, cwd = %cwd.display(), agent_type = ?agent_type, "Creating Zellij tab");
 
-        if let Some(cmd) = command {
+        {
+            let cmd = agent_type.command();
+            // Build full command with optional prompt
+            let full_command = match prompt {
+                Some(p) => {
+                    let escaped_prompt = Self::escape_for_shell_command(p);
+                    tracing::info!(
+                        tab_name = name,
+                        agent_type = ?agent_type,
+                        prompt_length = p.len(),
+                        "Spawning agent with CLI prompt"
+                    );
+                    format!("{} {} {}", cmd, agent_type.prompt_flag(), escaped_prompt)
+                }
+                None => cmd.to_string(),
+            };
+
             // Generate KDL layout with full tab template and command pane
             let layout_content = format!(
                 r#"layout {{
@@ -371,7 +461,7 @@ impl AgentControlService {
     }}
 }}"#,
                 name = name,
-                cmd = cmd,
+                cmd = full_command,
                 cwd = cwd.display()
             );
 
@@ -401,25 +491,6 @@ impl AgentControlService {
 
             // Clean up temp file
             let _ = tokio::fs::remove_file(&layout_file).await;
-
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(anyhow!("zellij new-tab failed: {}", stderr));
-            }
-        } else {
-            // Fallback: create empty tab (no command)
-            let output = Command::new("zellij")
-                .args(&[
-                    "action",
-                    "new-tab",
-                    "--name",
-                    name,
-                    "--cwd",
-                    &cwd.to_string_lossy(),
-                ])
-                .output()
-                .await
-                .context("Failed to execute zellij")?;
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
@@ -566,15 +637,7 @@ impl AgentControlService {
     // Internal: Context Files
     // ========================================================================
 
-    async fn write_context_files(
-        &self,
-        worktree_path: &Path,
-        issue_id: &str,
-        title: &str,
-        body: &str,
-        branch: &str,
-        issue_url: &str,
-    ) -> Result<()> {
+    async fn write_context_files(&self, worktree_path: &Path) -> Result<()> {
         // Create .exomonad directory
         let exomonad_dir = worktree_path.join(".exomonad");
         fs::create_dir_all(&exomonad_dir).await?;
@@ -589,25 +652,6 @@ project_dir = "../.."
             worktree = %worktree_path.display(),
             "Wrote .exomonad/config.toml with role=dev"
         );
-
-        // Write INITIAL_CONTEXT.md
-        let context_content = format!(
-            r#"# Issue #{issue_id}: {title}
-
-**Branch:** `{branch}`
-**Issue URL:** {issue_url}
-
-## Description
-
-{body}
-
-## Instructions
-
-You are working on this GitHub issue in an isolated worktree.
-When done, commit your changes and create a pull request.
-"#
-        );
-        fs::write(worktree_path.join("INITIAL_CONTEXT.md"), context_content).await?;
 
         // Write .mcp.json (no --wasm argument, config file handles WASM path)
         let sidecar_path = std::env::current_exe()
@@ -631,6 +675,47 @@ When done, commit your changes and create a pull request.
 
         info!(worktree = %worktree_path.display(), "Context files written");
         Ok(())
+    }
+
+    // ========================================================================
+    // Internal: Prompt Building
+    // ========================================================================
+
+    /// Build the initial prompt for a spawned agent.
+    fn build_initial_prompt(
+        issue_id: &str,
+        title: &str,
+        body: &str,
+        branch: &str,
+        issue_url: &str,
+    ) -> String {
+        format!(
+            r#"# Issue #{issue_id}: {title}
+
+**Branch:** `{branch}`
+**Issue URL:** {issue_url}
+
+## Description
+
+{body}
+
+## Instructions
+
+You are working on this GitHub issue in an isolated worktree.
+When done, commit your changes and create a pull request."#
+        )
+    }
+
+    /// Escape a string for safe use in shell command with single quotes.
+    ///
+    /// Wraps the string in single quotes and escapes any embedded single quotes.
+    /// This is suitable for: sh -c "claude --prompt '...'"
+    ///
+    /// Example: "user's issue" -> "'user'\''s issue'"
+    fn escape_for_shell_command(s: &str) -> String {
+        // Replace ' with '\'' (end quote, escaped quote, start quote)
+        let escaped = s.replace('\'', r"'\''");
+        format!("'{}'", escaped)
     }
 }
 
@@ -668,6 +753,8 @@ struct SpawnAgentInput {
     owner: String,
     repo: String,
     worktree_dir: Option<String>,
+    #[serde(default)]
+    agent_type: AgentType,
 }
 
 #[derive(Deserialize)]
@@ -676,6 +763,8 @@ struct SpawnAgentsInput {
     owner: String,
     repo: String,
     worktree_dir: Option<String>,
+    #[serde(default)]
+    agent_type: AgentType,
 }
 
 #[derive(Deserialize)]
@@ -763,6 +852,7 @@ pub fn spawn_agent_host_fn(service: Arc<AgentControlService>) -> Function {
                 owner: input.owner,
                 repo: input.repo,
                 worktree_dir: input.worktree_dir,
+                agent_type: input.agent_type,
             };
 
             let result = block_on(service.spawn_agent(&input.issue_id, &options))?;
@@ -797,6 +887,7 @@ pub fn spawn_agents_host_fn(service: Arc<AgentControlService>) -> Function {
                 owner: input.owner,
                 repo: input.repo,
                 worktree_dir: input.worktree_dir,
+                agent_type: input.agent_type,
             };
 
             let result = block_on(service.spawn_agents(&input.issue_ids, &options));
@@ -911,5 +1002,84 @@ mod tests {
         assert_eq!(slugify("Fix the Bug"), "fix-the-bug");
         assert_eq!(slugify("Add new feature!"), "add-new-feature");
         assert_eq!(slugify("CamelCase"), "camelcase");
+    }
+
+    #[test]
+    fn test_escape_for_shell_command_simple() {
+        assert_eq!(
+            AgentControlService::escape_for_shell_command("hello world"),
+            "'hello world'"
+        );
+    }
+
+    #[test]
+    fn test_escape_for_shell_command_with_quote() {
+        assert_eq!(
+            AgentControlService::escape_for_shell_command("user's issue"),
+            r"'user'\''s issue'"
+        );
+    }
+
+    #[test]
+    fn test_escape_for_shell_command_shell_chars() {
+        let result = AgentControlService::escape_for_shell_command("Test $VAR and `code`");
+        assert!(result.contains("$VAR"));
+        assert!(result.contains("`code`"));
+        assert_eq!(result, "'Test $VAR and `code`'");
+    }
+
+    #[test]
+    fn test_build_initial_prompt_format() {
+        let prompt = AgentControlService::build_initial_prompt(
+            "123",
+            "Fix the bug",
+            "Description",
+            "gh-123/fix",
+            "https://github.com/owner/repo/issues/123",
+        );
+
+        assert!(prompt.contains("# Issue #123: Fix the bug"));
+        assert!(prompt.contains("**Branch:** `gh-123/fix`"));
+        assert!(prompt.contains("Description"));
+        assert!(prompt.contains("https://github.com/owner/repo/issues/123"));
+        assert!(prompt.contains("When done, commit your changes and create a pull request."));
+    }
+
+    #[test]
+    fn test_agent_type_command() {
+        assert_eq!(AgentType::Claude.command(), "claude");
+        assert_eq!(AgentType::Gemini.command(), "gemini");
+    }
+
+    #[test]
+    fn test_agent_type_prompt_flag() {
+        assert_eq!(AgentType::Claude.prompt_flag(), "--prompt");
+        assert_eq!(AgentType::Gemini.prompt_flag(), "--prompt-interactive");
+    }
+
+    #[test]
+    fn test_agent_type_suffix() {
+        assert_eq!(AgentType::Claude.suffix(), "claude");
+        assert_eq!(AgentType::Gemini.suffix(), "gemini");
+    }
+
+    #[test]
+    fn test_agent_type_default() {
+        assert_eq!(AgentType::default(), AgentType::Gemini);
+    }
+
+    #[test]
+    fn test_agent_type_deserialization() {
+        use serde_json;
+
+        let claude: AgentType = serde_json::from_str("\"claude\"").unwrap();
+        assert_eq!(claude, AgentType::Claude);
+
+        let gemini: AgentType = serde_json::from_str("\"gemini\"").unwrap();
+        assert_eq!(gemini, AgentType::Gemini);
+
+        // Invalid agent type should fail at parse boundary
+        let invalid = serde_json::from_str::<AgentType>("\"invalid\"");
+        assert!(invalid.is_err());
     }
 }
