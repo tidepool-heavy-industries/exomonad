@@ -5,7 +5,7 @@ use crate::services::filesystem;
 use crate::services::git;
 use crate::services::github;
 use crate::services::log;
-use crate::services::Services;
+use crate::services::ValidatedServices;
 use anyhow::{Context, Result};
 use extism::{Manifest, Plugin};
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ pub struct PluginManager {
 }
 
 impl PluginManager {
-    pub async fn new(path: PathBuf, services: Arc<Services>) -> Result<Self> {
+    pub async fn new(path: PathBuf, services: Arc<ValidatedServices>) -> Result<Self> {
         let plugin = Self::load_plugin(&path, &services)?;
 
         let manager = Self {
@@ -33,41 +33,40 @@ impl PluginManager {
         Ok(manager)
     }
 
-    fn load_plugin(path: &PathBuf, services: &Services) -> Result<Plugin> {
+    fn load_plugin(path: &PathBuf, services: &ValidatedServices) -> Result<Plugin> {
         let manifest = Manifest::new([extism::Wasm::file(path)]);
-
-        let mut functions = vec![];
-
-        // Git functions (7 functions)
-        functions.push(git::git_get_branch_host_fn(services.git.clone()));
-        functions.push(git::git_get_worktree_host_fn(services.git.clone()));
-        functions.push(git::git_get_dirty_files_host_fn(services.git.clone()));
-        functions.push(git::git_get_recent_commits_host_fn(services.git.clone()));
-        functions.push(git::git_has_unpushed_commits_host_fn(services.git.clone()));
-        functions.push(git::git_get_remote_url_host_fn(services.git.clone()));
-        functions.push(git::git_get_repo_info_host_fn(services.git.clone()));
 
         // NOTE: Docker functions are NOT registered as WASM imports.
         // They are Rust implementation details used internally by Git/GitHub services.
         // Haskell calls high-level effects (GitGetBranch), Rust handles Docker internally.
 
-        // Log functions (3 functions)
         let services_arc = Arc::new(services.clone());
-        functions.push(log::log_info_host_fn(services_arc.clone()));
-        functions.push(log::log_error_host_fn(services_arc.clone()));
-        functions.push(log::emit_event_host_fn(services_arc));
+
+        // Git functions (7) + Log functions (3)
+        let mut functions = vec![
+            git::git_get_branch_host_fn(services.git().clone()),
+            git::git_get_worktree_host_fn(services.git().clone()),
+            git::git_get_dirty_files_host_fn(services.git().clone()),
+            git::git_get_recent_commits_host_fn(services.git().clone()),
+            git::git_has_unpushed_commits_host_fn(services.git().clone()),
+            git::git_get_remote_url_host_fn(services.git().clone()),
+            git::git_get_repo_info_host_fn(services.git().clone()),
+            log::log_info_host_fn(services_arc.clone()),
+            log::log_error_host_fn(services_arc.clone()),
+            log::emit_event_host_fn(services_arc),
+        ];
 
         // GitHub functions (6 functions) - always register, they check GITHUB_TOKEN at runtime
         functions.extend(github::register_host_functions());
 
         // Agent control functions (5 functions) - high-level agent lifecycle
         functions.extend(agent_control::register_host_functions(
-            services.agent_control.clone(),
+            services.agent_control().clone(),
         ));
 
         // Filesystem functions (2 functions) - file read/write
         functions.extend(filesystem::register_host_functions(
-            services.filesystem.clone(),
+            services.filesystem().clone(),
         ));
 
         // File PR functions (1 function) - create/update PRs via gh CLI
@@ -79,7 +78,7 @@ impl PluginManager {
         Plugin::new(&manifest, functions, true).context("Failed to create plugin")
     }
 
-    pub async fn reload(&self, services: Arc<Services>) -> Result<()> {
+    pub async fn reload(&self, services: Arc<ValidatedServices>) -> Result<()> {
         let new_plugin = Self::load_plugin(&self.wasm_path, &services)?;
 
         // Swap it without blocking the async runtime

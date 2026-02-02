@@ -131,7 +131,7 @@ pub fn pr_create(title: String, body: String, base: Option<String>) -> Result<()
     // URL format: https://github.com/owner/repo/pull/123
     let number = url
         .split('/')
-        .last()
+        .next_back()
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(0);
 

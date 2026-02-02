@@ -5,56 +5,11 @@
 
 use std::io;
 use std::path::PathBuf;
-use std::time::Duration;
 use thiserror::Error;
 
 /// All error types that can occur in exomonad operations.
 #[derive(Debug, Error)]
 pub enum ExoMonadError {
-    /// Failed to create a FIFO (named pipe).
-    #[error("failed to create FIFO at {path}: {source}")]
-    FifoCreate {
-        path: PathBuf,
-        #[source]
-        source: io::Error,
-    },
-
-    /// Failed to open a FIFO for reading or writing.
-    #[error("failed to open FIFO at {path}: {source}")]
-    FifoOpen {
-        path: PathBuf,
-        #[source]
-        source: io::Error,
-    },
-
-    /// Failed to read from a FIFO.
-    #[error("failed to read from FIFO at {path}: {source}")]
-    FifoRead {
-        path: PathBuf,
-        #[source]
-        source: io::Error,
-    },
-
-    /// Failed to write to a FIFO.
-    #[error("failed to write to FIFO at {path}: {source}")]
-    FifoWrite {
-        path: PathBuf,
-        #[source]
-        source: io::Error,
-    },
-
-    /// Timeout waiting for FIFO data.
-    #[error("timeout after {elapsed:?} waiting for FIFO data")]
-    FifoTimeout { elapsed: Duration },
-
-    /// Failed to spawn the claude subprocess.
-    #[error("failed to spawn claude: {0}")]
-    Spawn(#[source] io::Error),
-
-    /// Child process was killed due to timeout.
-    #[error("child process killed after {elapsed:?} timeout")]
-    ProcessTimeout { elapsed: Duration },
-
     /// JSON parse error while processing stream.
     #[error("JSON parse error: {source}")]
     JsonParse {
@@ -65,14 +20,6 @@ pub enum ExoMonadError {
     /// Failed to serialize result to JSON.
     #[error("JSON serialize error: {0}")]
     JsonSerialize(#[source] serde_json::Error),
-
-    /// Signal FIFO communication error.
-    #[error("signal error: {0}")]
-    Signal(String),
-
-    /// Poll system call error.
-    #[error("poll error: {0}")]
-    Poll(#[source] nix::Error),
 
     /// Generic I/O error (for cases not covered above).
     #[error("I/O error: {0}")]
@@ -85,10 +32,6 @@ pub enum ExoMonadError {
     /// Hyper error.
     #[error("Hyper error: {0}")]
     Hyper(#[source] hyper::Error),
-
-    /// Hyper legacy client error.
-    #[error("Hyper legacy client error: {0}")]
-    HyperLegacy(#[source] hyper_util::client::legacy::Error),
 
     // ---- Socket errors (for control envelope) ----
     /// Failed to connect to control server via Unix socket.
@@ -139,12 +82,6 @@ impl From<serde_json::Error> for ExoMonadError {
     }
 }
 
-impl From<nix::Error> for ExoMonadError {
-    fn from(e: nix::Error) -> Self {
-        Self::Poll(e)
-    }
-}
-
 impl From<std::io::Error> for ExoMonadError {
     fn from(e: std::io::Error) -> Self {
         Self::Io(e)
@@ -160,11 +97,5 @@ impl From<http::Error> for ExoMonadError {
 impl From<hyper::Error> for ExoMonadError {
     fn from(e: hyper::Error) -> Self {
         Self::Hyper(e)
-    }
-}
-
-impl From<hyper_util::client::legacy::Error> for ExoMonadError {
-    fn from(e: hyper_util::client::legacy::Error) -> Self {
-        Self::HyperLegacy(e)
     }
 }

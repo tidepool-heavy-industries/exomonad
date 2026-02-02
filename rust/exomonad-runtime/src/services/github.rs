@@ -1,4 +1,5 @@
 use anyhow::Result;
+use exomonad_shared::{GithubOwner, GithubRepo};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
 use octocrab::{models, params, Octocrab, OctocrabBuilder};
 use serde::{Deserialize, Serialize};
@@ -9,8 +10,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Repo {
-    pub owner: String,
-    pub name: String,
+    pub owner: GithubOwner,
+    pub name: GithubRepo,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,7 +89,7 @@ impl GitHubService {
         repo: &Repo,
         filter: Option<&IssueFilter>,
     ) -> Result<Vec<Issue>> {
-        let issues_handler = self.client.issues(&repo.owner, &repo.name);
+        let issues_handler = self.client.issues(repo.owner.as_str(), repo.name.as_str());
         let mut builder = issues_handler.list();
 
         if let Some(f) = filter {
@@ -132,7 +133,7 @@ impl GitHubService {
     pub async fn get_issue(&self, repo: &Repo, number: u64) -> Result<Issue> {
         let issue = self
             .client
-            .issues(&repo.owner, &repo.name)
+            .issues(repo.owner.as_str(), repo.name.as_str())
             .get(number)
             .await?;
 
@@ -154,7 +155,7 @@ impl GitHubService {
     pub async fn create_pr(&self, repo: &Repo, spec: CreatePRSpec) -> Result<PullRequest> {
         let pr = self
             .client
-            .pulls(&repo.owner, &repo.name)
+            .pulls(repo.owner.as_str(), repo.name.as_str())
             .create(spec.title, spec.head, spec.base)
             .body(spec.body)
             .send()
@@ -183,7 +184,7 @@ impl GitHubService {
         repo: &Repo,
         filter: Option<&PRFilter>,
     ) -> Result<Vec<PullRequest>> {
-        let pulls_handler = self.client.pulls(&repo.owner, &repo.name);
+        let pulls_handler = self.client.pulls(repo.owner.as_str(), repo.name.as_str());
         let mut builder = pulls_handler.list();
 
         if let Some(f) = filter {
@@ -233,7 +234,7 @@ impl GitHubService {
             repo.name
         );
 
-        let pulls_handler = self.client.pulls(&repo.owner, &repo.name);
+        let pulls_handler = self.client.pulls(repo.owner.as_str(), repo.name.as_str());
         let page = pulls_handler
             .list()
             .state(params::State::Open)
@@ -414,7 +415,7 @@ fn github_list_issues(
         filter: Option<IssueFilter>,
     }
 
-    let input: Input = get_input(plugin, inputs[0].clone())?;
+    let input: Input = get_input(plugin, inputs[0])?;
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;
@@ -442,7 +443,7 @@ fn github_get_issue(
         number: u64,
     }
 
-    let input: Input = get_input(plugin, inputs[0].clone())?;
+    let input: Input = get_input(plugin, inputs[0])?;
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;
@@ -470,7 +471,7 @@ fn github_create_pr(
         spec: CreatePRSpec,
     }
 
-    let input: Input = get_input(plugin, inputs[0].clone())?;
+    let input: Input = get_input(plugin, inputs[0])?;
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;
@@ -498,7 +499,7 @@ fn github_list_prs(
         filter: Option<PRFilter>,
     }
 
-    let input: Input = get_input(plugin, inputs[0].clone())?;
+    let input: Input = get_input(plugin, inputs[0])?;
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;
@@ -526,7 +527,7 @@ fn github_get_pr_for_branch(
         head: String,
     }
 
-    let input: Input = get_input(plugin, inputs[0].clone())?;
+    let input: Input = get_input(plugin, inputs[0])?;
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;
@@ -554,7 +555,7 @@ fn github_get_pr_review_comments(
         pr_number: u64,
     }
 
-    let input: Input = get_input(plugin, inputs[0].clone())?;
+    let input: Input = get_input(plugin, inputs[0])?;
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;
@@ -623,8 +624,8 @@ mod tests {
             .await;
 
         let repo = Repo {
-            owner: "owner".to_string(),
-            name: "repo".to_string(),
+            owner: "owner".into(),
+            name: "repo".into(),
         };
 
         let issues = service.list_issues(&repo, None).await.unwrap();
@@ -667,8 +668,8 @@ mod tests {
             .await;
 
         let repo = Repo {
-            owner: "owner".to_string(),
-            name: "repo".to_string(),
+            owner: "owner".into(),
+            name: "repo".into(),
         };
 
         let issue = service.get_issue(&repo, 1).await.unwrap();
@@ -712,8 +713,8 @@ mod tests {
             .await;
 
         let repo = Repo {
-            owner: "owner".to_string(),
-            name: "repo".to_string(),
+            owner: "owner".into(),
+            name: "repo".into(),
         };
 
         let spec = CreatePRSpec {
@@ -766,8 +767,8 @@ mod tests {
             .await;
 
         let repo = Repo {
-            owner: "owner".to_string(),
-            name: "repo".to_string(),
+            owner: "owner".into(),
+            name: "repo".into(),
         };
 
         let prs = service.list_prs(&repo, None).await.unwrap();

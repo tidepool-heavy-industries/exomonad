@@ -25,10 +25,10 @@ pub fn status(cwd: &str) -> Result<()> {
 
     if let Ok(output) = output_res {
         for line in output.lines() {
-            if line.starts_with("# branch.head ") {
-                branch = line[14..].to_string();
-            } else if line.starts_with("# branch.ab ") {
-                let parts: Vec<&str> = line[12..].split_whitespace().collect();
+            if let Some(stripped) = line.strip_prefix("# branch.head ") {
+                branch = stripped.to_string();
+            } else if let Some(stripped) = line.strip_prefix("# branch.ab ") {
+                let parts: Vec<&str> = stripped.split_whitespace().collect();
                 if parts.len() >= 2 {
                     ahead = parts[0].trim_start_matches('+').parse().unwrap_or(0);
                     behind = parts[1].trim_start_matches('-').parse().unwrap_or(0);
@@ -50,8 +50,8 @@ pub fn status(cwd: &str) -> Result<()> {
                         dirty.push(path);
                     }
                 }
-            } else if line.starts_with("? ") {
-                let path = line[2..].to_string();
+            } else if let Some(stripped) = line.strip_prefix("? ") {
+                let path = stripped.to_string();
                 dirty.push(path);
             } else if line.starts_with("u ") {
                 let parts: Vec<&str> = line.split_whitespace().collect();

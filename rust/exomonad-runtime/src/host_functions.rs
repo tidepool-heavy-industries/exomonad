@@ -111,7 +111,7 @@ fn docker_exec(
     user_data: UserData<DockerService>,
 ) -> Result<(), Error> {
     // Input is a MemoryHandle (passed as I64)
-    let input: ExecInput = get_input(plugin, inputs[0].clone())?;
+    let input: ExecInput = get_input(plugin, inputs[0])?;
 
     let service_arc = user_data.get()?;
     let service = service_arc
@@ -144,7 +144,7 @@ fn docker_spawn(
     outputs: &mut [Val],
     user_data: UserData<DockerService>,
 ) -> Result<(), Error> {
-    let input: SpawnInput = get_input(plugin, inputs[0].clone())?;
+    let input: SpawnInput = get_input(plugin, inputs[0])?;
 
     let service_arc = user_data.get()?;
     let service = service_arc
@@ -170,7 +170,7 @@ fn docker_kill(
     outputs: &mut [Val],
     user_data: UserData<DockerService>,
 ) -> Result<(), Error> {
-    let input: KillInput = get_input(plugin, inputs[0].clone())?;
+    let input: KillInput = get_input(plugin, inputs[0])?;
 
     let service_arc = user_data.get()?;
     let service = service_arc

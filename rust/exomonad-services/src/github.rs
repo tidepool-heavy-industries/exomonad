@@ -196,7 +196,7 @@ impl ExternalService for GitHubService {
             } => {
                 let issue = self
                     .client
-                    .issues(&owner, &repo)
+                    .issues(owner.as_str(), repo.as_str())
                     .get(number.into())
                     .await
                     .map_err(|e| ServiceError::Api {
@@ -206,7 +206,7 @@ impl ExternalService for GitHubService {
 
                 let comments = if include_comments {
                     self.client
-                        .issues(&owner, &repo)
+                        .issues(owner.as_str(), repo.as_str())
                         .list_comments(number.into())
                         .send()
                         .await
@@ -337,7 +337,7 @@ impl ExternalService for GitHubService {
                 labels,
                 assignees,
             } => {
-                let issues = self.client.issues(&owner, &repo);
+                let issues = self.client.issues(owner.as_str(), repo.as_str());
                 let mut builder = issues.update(number.into());
 
                 if let Some(ref t) = title {
@@ -494,7 +494,7 @@ impl ExternalService for GitHubService {
                 repo,
                 number,
             } => {
-                let reviews = self.fetch_review_threads(&owner, &repo, number).await?;
+                let reviews = self.fetch_review_threads(owner.as_str(), repo.as_str(), number).await?;
                 Ok(ServiceResponse::GitHubReviews { reviews })
             }
             ServiceRequest::GitHubGetDiscussion {
@@ -697,7 +697,7 @@ impl ExternalService for GitHubService {
             } => {
                 let pr = self
                     .client
-                    .pulls(&owner, &repo)
+                    .pulls(owner.as_str(), repo.as_str())
                     .get(number.into())
                     .await
                     .map_err(|e| ServiceError::Api {
@@ -718,7 +718,7 @@ impl ExternalService for GitHubService {
                     // Fetch issue comments (PR discussions use the issues API)
                     let issue_comments = self
                         .client
-                        .issues(&owner, &repo)
+                        .issues(owner.as_str(), repo.as_str())
                         .list_comments(number.into())
                         .send()
                         .await
@@ -738,7 +738,7 @@ impl ExternalService for GitHubService {
 
                     // Fetch review threads via GraphQL
                     let review_comments = self
-                        .fetch_review_threads(&owner, &repo, number)
+                        .fetch_review_threads(owner.as_str(), repo.as_str(), number)
                         .await
                         .unwrap_or_default();
 

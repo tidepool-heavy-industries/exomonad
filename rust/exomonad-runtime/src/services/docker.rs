@@ -35,6 +35,12 @@ pub struct DockerService {
     docker_cmd: String,
 }
 
+impl Default for DockerService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DockerService {
     pub fn new() -> Self {
         Self {

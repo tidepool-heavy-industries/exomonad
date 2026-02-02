@@ -312,7 +312,7 @@ pub fn git_get_branch_host_fn(git_service: Arc<GitService>) -> Function {
             if inputs.is_empty() {
                 return Err(Error::msg("git_get_branch: expected input argument"));
             }
-            let input: GitHostInput = get_input(plugin, inputs[0].clone())?;
+            let input: GitHostInput = get_input(plugin, inputs[0])?;
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
@@ -344,7 +344,7 @@ pub fn git_get_worktree_host_fn(git_service: Arc<GitService>) -> Function {
             if inputs.is_empty() {
                 return Err(Error::msg("git_get_worktree: expected input argument"));
             }
-            let input: GitHostInput = get_input(plugin, inputs[0].clone())?;
+            let input: GitHostInput = get_input(plugin, inputs[0])?;
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
@@ -376,7 +376,7 @@ pub fn git_get_dirty_files_host_fn(git_service: Arc<GitService>) -> Function {
             if inputs.is_empty() {
                 return Err(Error::msg("git_get_dirty_files: expected input argument"));
             }
-            let input: GitHostInput = get_input(plugin, inputs[0].clone())?;
+            let input: GitHostInput = get_input(plugin, inputs[0])?;
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
@@ -410,7 +410,7 @@ pub fn git_get_recent_commits_host_fn(git_service: Arc<GitService>) -> Function 
                     "git_get_recent_commits: expected input argument",
                 ));
             }
-            let input: GitLogInput = get_input(plugin, inputs[0].clone())?;
+            let input: GitLogInput = get_input(plugin, inputs[0])?;
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
@@ -450,7 +450,7 @@ pub fn git_has_unpushed_commits_host_fn(git_service: Arc<GitService>) -> Functio
                     "git_has_unpushed_commits: expected input argument",
                 ));
             }
-            let input: GitHostInput = get_input(plugin, inputs[0].clone())?;
+            let input: GitHostInput = get_input(plugin, inputs[0])?;
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
@@ -484,7 +484,7 @@ pub fn git_get_remote_url_host_fn(git_service: Arc<GitService>) -> Function {
             if inputs.is_empty() {
                 return Err(Error::msg("git_get_remote_url: expected input argument"));
             }
-            let input: GitHostInput = get_input(plugin, inputs[0].clone())?;
+            let input: GitHostInput = get_input(plugin, inputs[0])?;
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
@@ -516,7 +516,7 @@ pub fn git_get_repo_info_host_fn(git_service: Arc<GitService>) -> Function {
             if inputs.is_empty() {
                 return Err(Error::msg("git_get_repo_info: expected input argument"));
             }
-            let input: GitHostInput = get_input(plugin, inputs[0].clone())?;
+            let input: GitHostInput = get_input(plugin, inputs[0])?;
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
