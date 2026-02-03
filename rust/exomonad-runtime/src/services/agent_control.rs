@@ -221,8 +221,8 @@ impl AgentControlService {
             let worktree_path = self
                 .project_dir
                 .join(&worktree_dir)
-                .join(format!("gh-{}-{{}}-{{}}", issue_id, slug, agent_suffix));
-            let branch_name = format!("gh-{{}}/{{}}-{{}}", issue_id, slug, agent_suffix);
+                .join(format!("gh-{}-{}-{{}}", issue_id, slug, agent_suffix));
+            let branch_name = format!("gh-{}/{}-{{}}", issue_id, slug, agent_suffix);
 
             // Fetch origin/main
             self.fetch_origin().await?;
@@ -253,7 +253,7 @@ impl AgentControlService {
             );
 
             // Open Zellij tab with agent command and initial prompt
-            let tab_name = format!("gh-{{}}-{{}}", issue_id, agent_suffix);
+            let tab_name = format!("gh-{}-{{}}", issue_id, agent_suffix);
             self.new_zellij_tab(
                 &tab_name,
                 &worktree_path,
@@ -284,7 +284,7 @@ impl AgentControlService {
             let msg = format!("spawn_agent timed out after {}s", SPAWN_TIMEOUT.as_secs());
             warn!(issue_id = %issue_id_log, error = %msg, "spawn_agent timed out");
             anyhow::Error::new(TimeoutError { message: msg })
-        })?;
+        })??;
 
         info!(issue_id = %issue_id_log, "spawn_agent completed successfully");
         Ok(result)
@@ -358,7 +358,7 @@ impl AgentControlService {
                         warn!("Failed to emit agent:stopped event: {}", e);
                     }
 
-                    return Ok(());
+                    return Ok(())
                 }
             }
         }
@@ -492,21 +492,21 @@ impl AgentControlService {
                 r###"layout {{ 
     default_tab_template {{ 
         pane size=1 borderless=true {{ 
-            plugin location="zellij:tab-bar"
+            plugin location=\"zellij:tab-bar\"
         }}
         children
         pane size=1 borderless=true {{ 
-            plugin location="zellij:status-bar"
+            plugin location=\"zellij:status-bar\"
         }}
     }}
-    tab name="{name}" {{ 
-        pane command="{shell}" {{ 
-            args "-l" "-c" "{cmd}"
-            cwd "{cwd}"
+    tab name=\"{name}\" {{ 
+        pane command=\"{shell}\" {{ 
+            args \"-l\" \"-c\" \"{cmd}\" 
+            cwd \"{cwd}\" 
             close_on_exit true
         }}
         pane size=3 borderless=true {{ 
-            plugin location="file:~/.config/zellij/plugins/exomonad-plugin.wasm"
+            plugin location=\"file:~/.config/zellij/plugins/exomonad-plugin.wasm\"
         }}
     }}
 }}"###,
@@ -587,7 +587,7 @@ impl AgentControlService {
                     ZELLIJ_TIMEOUT.as_secs()
                 ),
             })
-        })?;
+        })??;
 
         if !result.status.success() {
             let stderr = String::from_utf8_lossy(&result.stderr);
@@ -621,7 +621,7 @@ impl AgentControlService {
             anyhow::Error::new(TimeoutError {
                 message: format!("git fetch timed out after {}s", GIT_TIMEOUT.as_secs()),
             })
-        })?;
+        })??;
 
         if !result.status.success() {
             let stderr = String::from_utf8_lossy(&result.stderr);
@@ -637,7 +637,7 @@ impl AgentControlService {
     async fn create_worktree(&self, path: &Path, branch: &str) -> Result<()> {
         if path.exists() {
             info!(path = %path.display(), "Worktree already exists, reusing");
-            return Ok(());
+            return Ok(())
         }
 
         if let Some(parent) = path.parent() {
@@ -668,7 +668,7 @@ impl AgentControlService {
             anyhow::Error::new(TimeoutError {
                 message: format!("git worktree add timed out after {}s", GIT_TIMEOUT.as_secs()),
             })
-        })?;
+        })??;
 
         if !result.status.success() {
             let stderr = String::from_utf8_lossy(&result.stderr);
@@ -692,7 +692,7 @@ impl AgentControlService {
                             GIT_TIMEOUT.as_secs()
                         ),
                     })
-                })?;
+                })??;
 
                 if !fallback_result.status.success() {
                     let stderr = String::from_utf8_lossy(&fallback_result.stderr);
@@ -714,7 +714,7 @@ impl AgentControlService {
     async fn delete_worktree(&self, path: &Path, force: bool) -> Result<()> {
         if !path.exists() {
             debug!(path = %path.display(), "Worktree doesn't exist");
-            return Ok(());
+            return Ok(())
         }
 
         info!(path = %path.display(), force, "Running git worktree remove");
@@ -741,7 +741,7 @@ impl AgentControlService {
                     GIT_TIMEOUT.as_secs()
                 ),
             })
-        })?;
+        })??;
 
         if !result.status.success() {
             let stderr = String::from_utf8_lossy(&result.stderr);
@@ -801,7 +801,7 @@ project_dir = "../.."
       "args": ["mcp-stdio"]
     }}
   }}
-}}"###,
+}} "###,
             sidecar_path
         );
         fs::write(worktree_path.join(".mcp.json"), mcp_content).await?;
@@ -828,7 +828,7 @@ project_dir = "../.."
       }}
     ]
   }}
-}}"###,
+}} "###,
                     sidecar_path
                 );
                 fs::write(claude_dir.join("settings.local.json"), settings_content).await?;
@@ -858,7 +858,7 @@ project_dir = "../.."
       }}
     ]
   }}
-}}"###,
+}} "###,
                     sidecar_path
                 );
                 fs::write(gemini_dir.join("settings.json"), settings_content).await?;
@@ -898,8 +898,7 @@ project_dir = "../.."
 ## Instructions
 
 You are working on this GitHub issue in an isolated worktree.
-When done, commit your changes and create a pull request."
-###,
+When done, commit your changes and create a pull request."###,
             issue_id = issue_id,
             title = title,
             branch = branch,
@@ -924,7 +923,7 @@ When done, commit your changes and create a pull request."
     /// KDL strings use backslash escaping: \n for newline, \\ for backslash, \" for quote.
     fn escape_for_kdl(s: &str) -> String {
         s.replace('\\', r"\\\\")
-            .replace('"', r"\"")
+            .replace('"', r"\\\"")
             .replace('\n', r"\\n")
             .replace('\r', r"\\r")
             .replace('\t', r"\\t")
