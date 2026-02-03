@@ -1,0 +1,141 @@
+use crate::common::{HostResult, IntoFFIResult};
+use anyhow::{Context, Result};
+use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
+use extism_convert::Json;
+use exomonad_ui_protocol::{PopupDefinition, PopupResult};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use tokio::sync::oneshot;
+use tracing::debug;
+
+// Map of request_id -> Sender channel for the response
+type PendingRequests = Arc<Mutex<HashMap<String, oneshot::Sender<PopupResult>>>>;
+
+#[derive(Clone)]
+pub struct UIService {
+    pending_requests: PendingRequests,
+}
+
+impl UIService {
+    pub fn new() -> Self {
+        Self {
+            pending_requests: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub async fn show_popup(&self, definition: PopupDefinition) -> Result<PopupResult> {
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let (tx, rx) = oneshot::channel();
+
+        // Register pending request
+        {
+            let mut pending = self.pending_requests.lock().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+            pending.insert(request_id.clone(), tx);
+        }
+
+        // Send message to Zellij plugin
+        let message = serde_json::json!({
+            "kind": "popup",
+            "request_id": request_id,
+            "definition": definition
+        });
+        
+        let payload = serde_json::to_string(&message)?;
+        
+        debug!("Sending popup request {} to Zellij", request_id);
+        
+        // Use zellij CLI to send message
+        // Note: This spawns a subprocess. In a high-throughput scenario, we might want to use
+        // a persistent pipe connection or similar, but for UI interactions this is fine.
+        let status = tokio::process::Command::new("zellij")
+            .args(["action", "message", "--name", "exomonad", "--payload", &payload])
+            .status()
+            .await
+            .context("Failed to execute zellij action message")?;
+            
+        if !status.success() {
+            // Clean up if sending failed
+            let mut pending = self.pending_requests.lock().unwrap();
+            pending.remove(&request_id);
+            return Err(anyhow::anyhow!("zellij action message failed with status {}", status));
+        }
+
+        // Wait for response
+        match rx.await {
+            Ok(result) => Ok(result),
+            Err(_) => {
+                Err(anyhow::anyhow!("Popup request cancelled or lost"))
+            }
+        }
+    }
+
+    pub fn handle_reply(&self, request_id: &str, result: PopupResult) -> Result<()> {
+        let mut pending = self.pending_requests.lock().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+        
+        if let Some(tx) = pending.remove(request_id) {
+            let _ = tx.send(result);
+            Ok(())
+        } else {
+            debug!("Received reply for unknown/expired request {}", request_id);
+            Ok(())
+        }
+    }
+}
+
+impl Default for UIService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn block_on<F: std::future::Future>(future: F) -> Result<F::Output, Error> {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => Ok(handle.block_on(future)),
+        Err(_) => {
+            // If no runtime available (e.g. running in thread pool), create a temporary one
+             match tokio::runtime::Runtime::new() {
+                Ok(rt) => Ok(rt.block_on(future)),
+                Err(e) => Err(Error::msg(format!("Failed to create temporary runtime: {}", e))),
+             }
+        }
+    }
+}
+
+pub fn ui_show_popup_host_fn(ui_service: Arc<UIService>) -> Function {
+    Function::new(
+        "ui_show_popup",
+        [ValType::I64],
+        [ValType::I64],
+        UserData::new(ui_service),
+        |plugin: &mut CurrentPlugin,
+         inputs: &[Val],
+         outputs: &mut [Val],
+         user_data: UserData<Arc<UIService>>|
+         -> Result<(), Error> {
+            let _span = tracing::info_span!("host_function", function = "ui_show_popup").entered();
+
+            if inputs.is_empty() {
+                return Err(Error::msg("ui_show_popup: expected input argument"));
+            }
+            
+            let Json(definition): Json<PopupDefinition> = plugin.memory_get_val(&inputs[0])?;
+            tracing::info!(title = %definition.title, "Showing popup");
+
+            let ui_mutex = user_data.get()?;
+            let ui_arc = ui_mutex.lock().map_err(|_| Error::msg("Poisoned lock"))?;
+            
+            let result = block_on(ui_arc.show_popup(definition))?;
+
+            match &result {
+                Ok(_) => tracing::info!("Popup completed successfully"),
+                Err(e) => tracing::warn!(error = %e, "Popup failed"),
+            }
+
+            let output: HostResult<PopupResult> = result.into_ffi_result();
+
+            plugin.memory_set_val(&mut outputs[0], Json(output))?;
+            Ok(())
+        },
+    )
+    .with_namespace("env")
+}

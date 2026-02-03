@@ -397,6 +397,79 @@ async fn main() -> Result<()> {
                 .await
                 .context("Failed to load WASM plugin")?;
 
+            // Start control socket listener for UI replies
+            // This listens for "reply" commands from the zellij plugin/sidecar CLI
+            // and forwards them to the UIService to resolve pending host function calls.
+            let socket_path = PathBuf::from(".exomonad/sockets/control.sock");
+            if let Some(parent) = socket_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if socket_path.exists() {
+                let _ = std::fs::remove_file(&socket_path);
+            }
+            
+            let listener = tokio::net::UnixListener::bind(&socket_path)
+                .context("Failed to bind control socket")?;
+                
+            let ui_service = services.ui().clone();
+            
+            // Spawn background task for socket
+            tokio::spawn(async move {
+                loop {
+                    match listener.accept().await {
+                        Ok((mut stream, _addr)) => {
+                            let ui_service = ui_service.clone();
+                            tokio::spawn(async move {
+                                use tokio::io::{AsyncBufReadExt, BufReader};
+                                let mut reader = BufReader::new(&mut stream);
+                                let mut line = String::new();
+                                
+                                loop {
+                                    line.clear();
+                                    match reader.read_line(&mut line).await {
+                                        Ok(0) => break, // EOF
+                                        Ok(_) => {
+                                            if let Ok(req) = serde_json::from_str::<ServiceRequest>(&line) {
+                                                match req {
+                                                    ServiceRequest::UserInteraction { request_id, payload, cancel } => {
+                                                        let result = if cancel {
+                                                            exomonad_ui_protocol::PopupResult {
+                                                                button: "cancel".to_string(),
+                                                                values: serde_json::json!({}),
+                                                                time_spent_seconds: None,
+                                                            }
+                                                        } else {
+                                                            exomonad_ui_protocol::PopupResult {
+                                                                button: "submit".to_string(),
+                                                                values: payload.unwrap_or(serde_json::json!({})),
+                                                                time_spent_seconds: None,
+                                                            }
+                                                        };
+                                                        
+                                                        if let Err(e) = ui_service.handle_reply(&request_id, result) {
+                                                            warn!("Failed to handle reply: {}", e);
+                                                        }
+                                                    }
+                                                    _ => {}
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            warn!("Read error: {}", e);
+                                            break;
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            warn!("Accept failed: {}", e);
+                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        }
+                    }
+                }
+            });
+
             let state = mcp::McpState {
                 project_dir,
                 plugin: Arc::new(plugin),
