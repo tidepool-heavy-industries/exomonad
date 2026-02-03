@@ -19,6 +19,25 @@ The repository should be kept clean of dead code, placeholders, and half-done he
 
 Always prefer failure to an undocumented heuristic or fallback.
 
+### CROSSCUTTING RULES
+
+When you learn something that applies to a crosscutting context (a programming language, a tool like git worktrees, a pattern that spans directories), **create or update a `.claude/rules/*.md` file** rather than documenting it in a directory-specific CLAUDE.md.
+
+Examples of crosscutting concerns:
+- Language idioms (`.claude/rules/haskell.md`, `.claude/rules/rust.md`)
+- Tool usage patterns (git, cabal, cargo, zellij)
+- Architectural patterns that span the codebase
+
+Rules files use YAML frontmatter to scope when they load:
+```yaml
+---
+paths:
+  - "**/*.hs"
+---
+```
+
+Keep rules files focused and concise. If a rule only applies to one directory, put it in that directory's CLAUDE.md instead.
+
 ### AGGRESSIVE LOGGING
 
 Silent failures are unacceptable. When code shells out to subprocesses, calls external services, or crosses process/container boundaries, **log aggressively**:
