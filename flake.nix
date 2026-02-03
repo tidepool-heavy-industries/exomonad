@@ -198,7 +198,7 @@ EOF
             echo "ExoMonad environment check"
             echo "Run 'nix develop' to enter the development shell"
           '';
-          wasm-guest-tl = makeWasmGuest "tl" "sha256-A46JDaQk96P66u/EWNQTe/u/T8UH8Y9jtsRce0bkYmI=";
+          wasm-guest-tl = makeWasmGuest "tl" "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
           wasm-guest-dev = makeWasmGuest "dev" "sha256-I2wvYxVz4WCbiDU1QbEl7rUBAeLYoK5m6/YZDSpP+8w=";
         };
       }

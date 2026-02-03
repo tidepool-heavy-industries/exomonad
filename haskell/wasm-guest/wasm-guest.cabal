@@ -94,6 +94,7 @@ executable wasm-guest-tl
             -optl-Wl,--export=handle_mcp_call
             -optl-Wl,--export=handle_pre_tool_use
             -optl-Wl,--export=handle_list_tools
+            -optl-Wl,--export=handle_test_call
             -optl-Wl,--allow-undefined
 
             -optl-Wl,--export=handle_list_tools

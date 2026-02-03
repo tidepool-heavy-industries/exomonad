@@ -131,6 +131,15 @@ wasm-all:
     @echo ">>> Installed to ~/.exomonad/wasm/:"
     @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
 
+# Build WASM guest using local shell (no hash updates needed, impure)
+wasm-dev role="tl":
+    @echo ">>> Building wasm-guest-{{role}} (Impure/Dev Mode)..."
+    nix develop .#wasm --command bash -c "\
+        wasm32-wasi-cabal build --project-file=cabal.project.wasm wasm-guest-{{role}} && \
+        mkdir -p ~/.exomonad/wasm && \
+        cp \$(find dist-newstyle -name wasm-guest-{{role}}.wasm -type f | head -n 1) ~/.exomonad/wasm/"
+    @echo ">>> Done: ~/.exomonad/wasm/wasm-guest-{{role}}.wasm"
+
 # Install everything: Rust binaries + WASM plugins (uses release build)
 install-all:
     @echo ">>> [1/3] Building Rust binaries (release)..."
