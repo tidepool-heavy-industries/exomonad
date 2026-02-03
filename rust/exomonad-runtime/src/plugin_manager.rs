@@ -7,7 +7,7 @@ use crate::services::github;
 use crate::services::log;
 use crate::services::ValidatedServices;
 use anyhow::{Context, Result};
-use extism::{Manifest, Plugin};
+use extism::{Manifest, Plugin, PluginBuilder};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -122,16 +122,7 @@ impl PluginManager {
     }
 
     fn load_plugin(path: &PathBuf, services: &ValidatedServices) -> Result<Plugin> {
-        let cwasm_path = path.with_extension("cwasm");
-        let wasm_source = if cwasm_path.exists() {
-            tracing::info!("Loading pre-compiled WASM plugin: {:?}", cwasm_path);
-            extism::Wasm::file(cwasm_path)
-        } else {
-            tracing::info!("Loading WASM plugin: {:?}", path);
-            extism::Wasm::file(path)
-        };
-
-        let manifest = Manifest::new([wasm_source]);
+        let manifest = Manifest::new([extism::Wasm::file(path)]);
 
         // NOTE: Docker functions are NOT registered as WASM imports.
         // They are Rust implementation details used internally by Git/GitHub services.
@@ -172,7 +163,20 @@ impl PluginManager {
         // Copilot review functions (1 function) - poll for Copilot review comments
         functions.extend(copilot_review::register_host_functions());
 
-        Plugin::new(&manifest, functions, true).context("Failed to create plugin")
+        let mut builder = PluginBuilder::new(manifest)
+            .with_functions(functions)
+            .with_wasi(true);
+
+        // Try to enable WASM caching if config exists
+        if let Ok(home) = std::env::var("HOME") {
+            let cache_config = PathBuf::from(home).join(".exomonad/wasm-cache.toml");
+            if cache_config.exists() {
+                tracing::info!("Using WASM cache config: {:?}", cache_config);
+                builder = builder.with_cache_config(cache_config);
+            }
+        }
+
+        builder.build().context("Failed to create plugin")
     }
 
     /// Reload the plugin to clear memory/state.

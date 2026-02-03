@@ -65,6 +65,12 @@ enum Commands {
         #[arg(long)]
         cancel: bool,
     },
+
+    /// Warmup the WASM plugin cache
+    Warmup {
+        /// Path to the WASM file
+        path: PathBuf,
+    },
 }
 
 // ============================================================================
@@ -382,6 +388,24 @@ async fn main() -> Result<()> {
 
             // We don't necessarily wait for response here, it's a push notification
             info!("Sent reply to control socket");
+        }
+
+        Commands::Warmup { path } => {
+            info!(path = %path.display(), "Warming up WASM plugin cache...");
+
+            // Initialize services (required for PluginManager)
+            let services = Arc::new(
+                Services::new()
+                    .validate()
+                    .context("Failed to validate services")?,
+            );
+
+            // Load WASM plugin - this triggers compilation and caching
+            let _plugin = PluginManager::new(path, services)
+                .await
+                .context("Failed to load WASM plugin")?;
+
+            info!("WASM plugin warmed up successfully");
         }
     }
 
