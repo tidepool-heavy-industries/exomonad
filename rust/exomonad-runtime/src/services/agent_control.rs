@@ -7,7 +7,7 @@
 //! 
 //! These are high-level effects exposed to Haskell WASM, not granular operations.
 
-use crate::common::{HostResult, TimeoutError};
+use crate::common::{HostResult, IntoFFIResult, TimeoutError, FFIBoundary};
 use anyhow::{anyhow, Context, Result};
 use exomonad_shared::{GithubOwner, GithubRepo, IssueNumber};
 use serde::{Deserialize, Serialize};
@@ -127,6 +127,8 @@ pub struct SpawnResult {
     pub agent_type: String,
 }
 
+impl FFIBoundary for SpawnResult {}
+
 /// Information about an active agent.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentInfo {
@@ -140,6 +142,8 @@ pub struct AgentInfo {
     pub has_changes: bool,
 }
 
+impl FFIBoundary for AgentInfo {}
+
 /// Result of batch spawn operation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BatchSpawnResult {
@@ -147,12 +151,16 @@ pub struct BatchSpawnResult {
     pub failed: Vec<(String, String)>, // (issue_id, error)
 }
 
+impl FFIBoundary for BatchSpawnResult {}
+
 /// Result of batch cleanup operation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BatchCleanupResult {
     pub cleaned: Vec<String>,
     pub failed: Vec<(String, String)>, // (issue_id, error)
 }
+
+impl FFIBoundary for BatchCleanupResult {}
 
 // ============================================================================ 
 // Service
@@ -1025,6 +1033,8 @@ pub struct SpawnAgentInput {
     pub agent_type: AgentType,
 }
 
+impl FFIBoundary for SpawnAgentInput {}
+
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct SpawnAgentsInput {
     pub issue_ids: Vec<String>,
@@ -1035,17 +1045,23 @@ pub struct SpawnAgentsInput {
     pub agent_type: AgentType,
 }
 
+impl FFIBoundary for SpawnAgentsInput {}
+
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct CleanupAgentInput {
     pub issue_id: String,
     pub force: bool,
 }
 
+impl FFIBoundary for CleanupAgentInput {}
+
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct CleanupAgentsInput {
     pub issue_ids: Vec<String>,
     pub force: bool,
 }
+
+impl FFIBoundary for CleanupAgentsInput {}
 
 // Helper functions
 
@@ -1106,7 +1122,7 @@ pub fn spawn_agent_host_fn(service: Arc<AgentControlService>) -> Function {
             };
 
             let result = block_on(service.spawn_agent(issue_number, &options))?;
-            let output: HostResult<SpawnResult> = result.into();
+            let output: HostResult<SpawnResult> = result.into_ffi_result();
 
             outputs[0] = set_output(plugin, &output)?;
             Ok(())
@@ -1171,7 +1187,7 @@ pub fn cleanup_agent_host_fn(service: Arc<AgentControlService>) -> Function {
                 .map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(service.cleanup_agent(&input.issue_id, input.force))?;
-            let output: HostResult<()> = result.into();
+            let output: HostResult<()> = result.into_ffi_result();
 
             outputs[0] = set_output(plugin, &output)?;
             Ok(())
@@ -1227,7 +1243,7 @@ pub fn list_agents_host_fn(service: Arc<AgentControlService>) -> Function {
                 .map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(service.list_agents())?;
-            let output: HostResult<Vec<AgentInfo>> = result.into();
+            let output: HostResult<Vec<AgentInfo>> = result.into_ffi_result();
 
             outputs[0] = set_output(plugin, &output)?;
             Ok(())

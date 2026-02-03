@@ -3,7 +3,7 @@
 // Uses `gh pr create` / `gh pr view` for idempotent PR management.
 // Returns immediately with PR URL and number.
 
-use crate::common::{ErrorCode, HostResult};
+use crate::common::{ErrorCode, HostResult, FFIBoundary};
 use crate::services::git;
 use anyhow::{Context, Result};
 use duct::cmd;
@@ -17,13 +17,15 @@ use super::zellij_events;
 // Types
 // ============================================================================
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FilePRInput {
     pub title: String,
     pub body: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+impl FFIBoundary for FilePRInput {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FilePROutput {
     pub pr_url: String,
     pub pr_number: u64,
@@ -31,6 +33,8 @@ pub struct FilePROutput {
     pub base_branch: String,
     pub created: bool, // true if newly created, false if already existed
 }
+
+impl FFIBoundary for FilePROutput {}
 
 // ============================================================================
 // Host Output Wrapper

@@ -64,6 +64,7 @@ library wasm-guest-internal
         ExoMonad.Guest.Effects.FileSystem
         ExoMonad.Guest.Effects.StopHook
         ExoMonad.Guest.HostCall
+        ExoMonad.Guest.FFI
         -- Types
         ExoMonad.Guest.Types
         ExoMonad.Guest.Parsers

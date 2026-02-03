@@ -3,7 +3,7 @@
 //! Provides file read/write operations for hooks and MCP tools that need
 //! to access file contents (e.g., reading transcript files, writing context).
 
-use crate::common::HostResult;
+use crate::common::{HostResult, IntoFFIResult, FFIBoundary};
 use anyhow::{Context, Result};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
 use serde::{Deserialize, Serialize};
@@ -25,6 +25,8 @@ pub struct ReadFileInput {
     pub max_bytes: usize,
 }
 
+impl FFIBoundary for ReadFileInput {}
+
 /// Result of reading a file.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ReadFileOutput {
@@ -35,6 +37,8 @@ pub struct ReadFileOutput {
     /// Whether the file was truncated
     pub truncated: bool,
 }
+
+impl FFIBoundary for ReadFileOutput {}
 
 /// Input for writing a file.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -48,6 +52,8 @@ pub struct WriteFileInput {
     pub create_parents: bool,
 }
 
+impl FFIBoundary for WriteFileInput {}
+
 fn default_true() -> bool {
     true
 }
@@ -60,6 +66,8 @@ pub struct WriteFileOutput {
     /// Absolute path of the written file
     pub path: String,
 }
+
+impl FFIBoundary for WriteFileOutput {}
 
 // ============================================================================
 // Service
@@ -194,7 +202,7 @@ pub fn fs_read_file_host_fn(service: Arc<FileSystemService>) -> Function {
                 .map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(service.read_file(&input))?;
-            let output: HostResult<ReadFileOutput> = result.into();
+            let output: HostResult<ReadFileOutput> = result.into_ffi_result();
 
             outputs[0] = set_output(plugin, &output)?;
             Ok(())
@@ -224,7 +232,7 @@ pub fn fs_write_file_host_fn(service: Arc<FileSystemService>) -> Function {
                 .map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(service.write_file(&input))?;
-            let output: HostResult<WriteFileOutput> = result.into();
+            let output: HostResult<WriteFileOutput> = result.into_ffi_result();
 
             outputs[0] = set_output(plugin, &output)?;
             Ok(())

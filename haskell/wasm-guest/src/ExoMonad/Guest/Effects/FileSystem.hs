@@ -33,6 +33,7 @@ import Polysemy.Embed (Embed)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.=))
 import Data.Text (Text)
 import ExoMonad.Guest.HostCall (callHost, host_fs_read_file, host_fs_write_file)
+import ExoMonad.Guest.FFI (FFIBoundary)
 import GHC.Generics (Generic)
 import Prelude hiding (readFile, writeFile)
 
@@ -60,6 +61,8 @@ instance FromJSON ReadFileInput where
       <$> v .: "path"
       <*> v .: "max_bytes"
 
+instance FFIBoundary ReadFileInput
+
 -- | Result of reading a file.
 data ReadFileOutput = ReadFileOutput
   { rfoContent :: Text,
@@ -82,6 +85,8 @@ instance ToJSON ReadFileOutput where
         "bytes_read" .= b,
         "truncated" .= t
       ]
+
+instance FFIBoundary ReadFileOutput
 
 -- | Input for writing a file.
 data WriteFileInput = WriteFileInput
@@ -106,6 +111,8 @@ instance FromJSON WriteFileInput where
       <*> v .: "content"
       <*> v .: "create_parents"
 
+instance FFIBoundary WriteFileInput
+
 -- | Result of writing a file.
 data WriteFileOutput = WriteFileOutput
   { wfoBytesWritten :: Int,
@@ -125,6 +132,8 @@ instance ToJSON WriteFileOutput where
       [ "bytes_written" .= b,
         "path" .= p
       ]
+
+instance FFIBoundary WriteFileOutput
 
 -- ============================================================================
 -- Effect type

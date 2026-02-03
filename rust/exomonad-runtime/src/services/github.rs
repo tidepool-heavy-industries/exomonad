@@ -1,4 +1,4 @@
-use crate::common::{ErrorCode, HostResult};
+use crate::common::{ErrorCode, HostResult, FFIBoundary};
 use anyhow::{anyhow, Result};
 use exomonad_shared::{GithubOwner, GithubRepo};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
@@ -25,6 +25,8 @@ pub struct Repo {
     pub name: GithubRepo,
 }
 
+impl FFIBoundary for Repo {}
+
 /// Filter criteria for listing GitHub issues.
 ///
 /// Used with [`GitHubService::list_issues()`].
@@ -36,6 +38,8 @@ pub struct IssueFilter {
     /// Filter by label names (AND logic - issue must have all labels).
     pub labels: Option<Vec<String>>,
 }
+
+impl FFIBoundary for IssueFilter {}
 
 /// Specification for creating a pull request.
 ///
@@ -55,6 +59,8 @@ pub struct CreatePRSpec {
     pub base: String,
 }
 
+impl FFIBoundary for CreatePRSpec {}
+
 /// Filter criteria for listing pull requests.
 ///
 /// Used with [`GitHubService::list_prs()`].
@@ -66,6 +72,8 @@ pub struct PRFilter {
     /// Maximum number of PRs to return (default: API default, usually 30).
     pub limit: Option<u32>,
 }
+
+impl FFIBoundary for PRFilter {}
 
 /// A GitHub issue with metadata.
 ///
@@ -93,6 +101,8 @@ pub struct Issue {
     /// Label names attached to the issue.
     pub labels: Vec<String>,
 }
+
+impl FFIBoundary for Issue {}
 
 /// A GitHub pull request with metadata.
 ///
@@ -130,6 +140,8 @@ pub struct PullRequest {
     pub merged_at: Option<String>,
 }
 
+impl FFIBoundary for PullRequest {}
+
 /// A review comment on a pull request.
 ///
 /// Returned by [`GitHubService::get_pr_review_comments()`].
@@ -153,6 +165,8 @@ pub struct ReviewComment {
     /// Creation timestamp (ISO 8601).
     pub created_at: String,
 }
+
+impl FFIBoundary for ReviewComment {}
 
 // ============================================================================
 // Service Implementation

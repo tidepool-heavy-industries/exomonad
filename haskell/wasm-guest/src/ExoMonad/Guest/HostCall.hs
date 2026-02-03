@@ -5,8 +5,9 @@
 module ExoMonad.Guest.HostCall
   ( callHost,
     callHostVoid,
-    HostResult (..),
-    HostErrorDetails (..),
+    FFIResult (..),
+    FFIError (..),
+    ErrorCode (..),
     ErrorContext (..),
     -- Git
     host_git_get_branch,
@@ -42,120 +43,20 @@ module ExoMonad.Guest.HostCall
     host_file_pr,
     -- Copilot Review
     host_wait_for_copilot_review,
-    -- Shared types (also exported above, but grouped here for clarity)
-    ResultKind (..),
   )
 where
 
 import Control.Exception (bracket)
-import Data.Aeson (FromJSON, ToJSON (..), eitherDecode, encode, object, (.:), (.:?), (.!=), (.=))
+import Data.Aeson (FromJSON, ToJSON (..), Value, object, (.=))
 import qualified Data.Aeson as Aeson
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy (fromStrict, toStrict)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Word (Word64)
+import ExoMonad.Guest.FFI
 import Extism.PDK.Memory (alloc, findMemory, free, load, memoryOffset)
 import GHC.Generics (Generic)
-
--- ============================================================================ 
--- HostResult wrapper (matches Rust serde format)
--- ============================================================================ 
-
--- | Result kind discriminator (strongly typed).
--- Serialized to "Success" or "Error" at the JSON boundary.
-data ResultKind = SuccessKind | ErrorKind
-  deriving (Show, Eq, Generic)
-
-instance ToJSON ResultKind where
-  toJSON SuccessKind = Aeson.String "Success"
-  toJSON ErrorKind = Aeson.String "Error"
-
-instance FromJSON ResultKind where
-  parseJSON = Aeson.withText "ResultKind" $ \case
-    "Success" -> pure SuccessKind
-    "Error" -> pure ErrorKind
-    other -> fail $ "Unknown ResultKind: " <> T.unpack other
-
-data HostResult a = HostSuccess a | HostError HostErrorDetails
-  deriving (Show, Eq, Generic)
-
-data HostErrorDetails = HostErrorDetails
-  { hostErrorMessage :: Text,
-    hostErrorCode :: Text,
-    hostErrorContext :: Maybe ErrorContext,
-    hostErrorSuggestion :: Maybe Text
-  }
-  deriving (Show, Eq, Generic)
-
-data ErrorContext = ErrorContext
-  {
-    errorContextCommand :: Maybe Text,
-    errorContextExitCode :: Maybe Int,
-    errorContextStderr :: Maybe Text,
-    errorContextStdout :: Maybe Text,
-    errorContextFilePath :: Maybe Text,
-    errorContextWorkingDir :: Maybe Text
-  }
-  deriving (Show, Eq, Generic)
-
-instance (FromJSON a) => FromJSON (HostResult a) where
-  parseJSON = Aeson.withObject "HostResult" $ \v -> do
-    kind <- v .: "kind"
-    case kind of
-      SuccessKind -> HostSuccess <$> v .: "payload"
-      ErrorKind -> HostError <$> v .: "payload"
-
-instance (ToJSON a) => ToJSON (HostResult a) where
-  toJSON (HostSuccess payload) = 
-    object
-      [ "kind" .= ("Success" :: Text),
-        "payload" .= payload
-      ]
-  toJSON (HostError details) = 
-    object
-      [ "kind" .= ("Error" :: Text),
-        "payload" .= details
-      ]
-
-instance FromJSON HostErrorDetails where
-  parseJSON = Aeson.withObject "HostErrorDetails" $ \v ->
-    HostErrorDetails
-      <$> v .: "message"
-      <*> v .:? "code" .!= "internal_error" -- Default for backward compatibility
-      <*> v .:? "context"
-      <*> v .:? "suggestion"
-
-instance ToJSON HostErrorDetails where
-  toJSON (HostErrorDetails msg code ctx sugg) = 
-    object
-      [ "message" .= msg,
-        "code" .= code,
-        "context" .= ctx,
-        "suggestion" .= sugg
-      ]
-
-instance FromJSON ErrorContext where
-  parseJSON = Aeson.withObject "ErrorContext" $ \v ->
-    ErrorContext
-      <$> v .:? "command"
-      <*> v .:? "exit_code"
-      <*> v .:? "stderr"
-      <*> v .:? "stdout"
-      <*> v .:? "file_path"
-      <*> v .:? "working_dir"
-
-instance ToJSON ErrorContext where
-  toJSON (ErrorContext cmd code stderr stdout path dir) = 
-    object
-      [ "command" .= cmd,
-        "exit_code" .= code,
-        "stderr" .= stderr,
-        "stdout" .= stdout,
-        "file_path" .= path,
-        "working_dir" .= dir
-      ]
-
 
 -- ============================================================================ 
 -- Log Types (matches Rust LogPayload/LogLevel)
@@ -170,6 +71,14 @@ instance ToJSON LogLevel where
   toJSON Warn = Aeson.String "warn"
   toJSON Error = Aeson.String "error"
 
+instance FromJSON LogLevel where
+  parseJSON = Aeson.withText "LogLevel" $ \case
+    "debug" -> pure Debug
+    "info" -> pure Info
+    "warn" -> pure Warn
+    "error" -> pure Error
+    other -> fail $ "Unknown LogLevel: " <> T.unpack other
+
 data LogPayload = LogPayload
   { level :: LogLevel,
     message :: Text,
@@ -178,6 +87,9 @@ data LogPayload = LogPayload
   deriving (Show, Generic)
 
 instance ToJSON LogPayload
+instance FromJSON LogPayload
+
+instance FFIBoundary LogPayload
 
 -- ============================================================================ 
 -- Git host functions
@@ -239,12 +151,12 @@ foreign import ccall "file_pr" host_file_pr :: Word64 -> IO Word64
 foreign import ccall "wait_for_copilot_review" host_wait_for_copilot_review :: Word64 -> IO Word64
 
 -- | Call a host function with automatic JSON serialization/deserialization.
--- Request uses aeson (ToJSON), response uses aeson (FromJSON) to handle HostResult wrapper.
+-- Request uses FFIBoundary, response uses FFIBoundary to handle FFIResult wrapper.
 -- Returns Either Text for errors (no String conversion needed at call sites).
-callHost :: (ToJSON req, FromJSON resp) => (Word64 -> IO Word64) -> req -> IO (Either Text resp)
+callHost :: (FFIBoundary req, FFIBoundary resp) => (Word64 -> IO Word64) -> req -> IO (Either Text resp)
 callHost rawFn request = do
-  -- Allocate request with automatic JSON encoding via Aeson
-  reqMem <- alloc (toStrict (encode request))
+  -- Allocate request with automatic JSON encoding via Aeson (via FFIBoundary)
+  reqMem <- alloc (toStrict (toFFI request))
 
   bracket (pure reqMem) free $ \_ -> do
     -- Call host function
@@ -256,20 +168,19 @@ callHost rawFn request = do
       -- Load raw bytes
       respBytes <- (load respMem :: IO (Either String ByteString))
 
-      -- Decode with aeson (to handle Rust's serde format)
       case respBytes of
         Left loadErr -> pure $ Left ("Load error: " <> T.pack loadErr)
-        Right bytes -> case eitherDecode (fromStrict bytes) of
-          Left decodeErr -> pure $ Left ("JSON decode error: " <> T.pack decodeErr)
-          Right result -> case result of
-            HostSuccess val -> pure $ Right val
-            HostError details -> pure $ Left (formatError details)
+        Right bytes -> 
+            -- Decode with FFIBoundary
+            case fromFFI (fromStrict bytes) of
+              Left err -> pure $ Left (formatFFIError err)
+              Right val -> pure $ Right val
 
-formatError :: HostErrorDetails -> Text
-formatError details =
-  "[" <> hostErrorCode details <> "] " <> hostErrorMessage details
-    <> maybe "" (\s -> "\nSuggestion: " <> s) (hostErrorSuggestion details)
-    <> maybe "" formatContext (hostErrorContext details)
+formatFFIError :: FFIError -> Text
+formatFFIError err =
+  "[" <> T.pack (show (feCode err)) <> "] " <> feMessage err
+    <> maybe "" (\s -> "\nSuggestion: " <> s) (feSuggestion err)
+    <> maybe "" formatContext (feContext err)
 
 formatContext :: ErrorContext -> Text
 formatContext ctx = 
@@ -282,9 +193,9 @@ formatContext ctx =
     <> maybe "" (\w -> "\n  Working Dir: " <> w) (errorContextWorkingDir ctx)
 
 -- | Call a host function that returns void (fire-and-forget, e.g., logging)
-callHostVoid :: (ToJSON req) => (Word64 -> IO ()) -> req -> IO ()
+callHostVoid :: (FFIBoundary req) => (Word64 -> IO ()) -> req -> IO ()
 callHostVoid rawFn request = do
   -- Allocate request with automatic JSON encoding
-  reqMem <- alloc (toStrict (encode request))
+  reqMem <- alloc (toStrict (toFFI request))
   bracket (pure reqMem) free $ \_ -> do
     rawFn (memoryOffset reqMem)
