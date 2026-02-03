@@ -31,6 +31,7 @@ where
 import Data.Aeson (ToJSON (..), Value, object, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Types (Parser)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import ExoMonad.Guest.Effects.AgentControl qualified as AC
 import GHC.Generics (Generic)
@@ -71,7 +72,7 @@ parseSpawnAgentsArgs = Aeson.withObject "spawn_agents args" $ \v -> do
   repo <- v .: "repo"
   worktreeDir <- v .:? "worktree_dir"
   agentType <- v .:? "agent_type"
-  pure (issues, AC.SpawnOptions owner repo worktreeDir agentType)
+  pure (issues, AC.SpawnOptions owner repo worktreeDir (fromMaybe AC.Gemini agentType))
 
 parseCleanupAgentsArgs :: Value -> Parser ([Text], Bool)
 parseCleanupAgentsArgs = Aeson.withObject "cleanup_agents args" $ \v -> do
