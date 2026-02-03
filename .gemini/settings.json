@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "name": "stop-check",
+            "type": "command",
+            "command": "/Users/inannamalick/.cargo/bin/exomonad-sidecar hook subagent-stop",
+            "timeout": 30000
+          }
+        ]
+      }
+    ]
+  }
+}

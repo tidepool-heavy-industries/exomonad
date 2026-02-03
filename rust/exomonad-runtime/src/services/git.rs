@@ -49,7 +49,7 @@ pub fn extract_agent_id(branch: &str) -> Option<String> {
 /// A git commit with metadata.
 ///
 /// Returned by [`GitService::get_recent_commits()`].
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct Commit {
     /// Full commit hash (SHA-1).
     pub hash: String,
@@ -67,7 +67,7 @@ pub struct Commit {
 /// Information about a git worktree.
 ///
 /// Returned by [`GitService::get_worktree()`].
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct WorktreeInfo {
     /// Absolute path to the worktree directory.
     pub path: String,
@@ -79,7 +79,7 @@ pub struct WorktreeInfo {
 /// Git repository information.
 ///
 /// Returned by [`GitService::get_repo_info()`].
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct RepoInfo {
     /// Current branch name.
     pub branch: String,

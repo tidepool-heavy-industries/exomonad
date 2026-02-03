@@ -57,6 +57,12 @@ instance ToJSON ReadFileInput where
         "max_bytes" .= m
       ]
 
+instance FromJSON ReadFileInput where
+  parseJSON = withObject "ReadFileInput" $ \v ->
+    ReadFileInput
+      <$> v .: "path"
+      <*> v .: "max_bytes"
+
 -- | Result of reading a file.
 data ReadFileOutput = ReadFileOutput
   { rfoContent :: Text,
@@ -95,6 +101,13 @@ instance ToJSON WriteFileInput where
         "content" .= c,
         "create_parents" .= cp
       ]
+
+instance FromJSON WriteFileInput where
+  parseJSON = withObject "WriteFileInput" $ \v ->
+    WriteFileInput
+      <$> v .: "path"
+      <*> v .: "content"
+      <*> v .: "create_parents"
 
 -- | Result of writing a file.
 data WriteFileOutput = WriteFileOutput

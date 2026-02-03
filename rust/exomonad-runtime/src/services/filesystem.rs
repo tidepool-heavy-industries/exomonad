@@ -16,7 +16,7 @@ use tokio::fs;
 // ============================================================================
 
 /// Input for reading a file.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ReadFileInput {
     /// Path to the file (absolute or relative to project_dir)
     pub path: String,
@@ -26,7 +26,7 @@ pub struct ReadFileInput {
 }
 
 /// Result of reading a file.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ReadFileOutput {
     /// File contents (UTF-8)
     pub content: String,
@@ -37,7 +37,7 @@ pub struct ReadFileOutput {
 }
 
 /// Input for writing a file.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct WriteFileInput {
     /// Path to the file (absolute or relative to project_dir)
     pub path: String,
@@ -53,7 +53,7 @@ fn default_true() -> bool {
 }
 
 /// Result of writing a file.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WriteFileOutput {
     /// Number of bytes written
     pub bytes_written: usize,

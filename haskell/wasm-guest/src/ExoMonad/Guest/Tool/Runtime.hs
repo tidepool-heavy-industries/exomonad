@@ -1,3 +1,5 @@
+{-# LANGUAGE TypeApplications #-}
+
 -- | Runtime handlers for WASM exports.
 --
 -- Separated from TH.hs because these use Extism.PDK which cannot be
@@ -6,6 +8,7 @@ module ExoMonad.Guest.Tool.Runtime
   ( mcpHandlerRecord,
     listHandlerRecord,
     hookHandler,
+    testHandler,
     wrapHandler,
   )
 where
@@ -13,7 +16,7 @@ where
 import Control.Exception (SomeException, try)
 import Control.Monad (unless)
 import Data.Aeson qualified as Aeson
-import Data.Aeson ((.=))
+import Data.Aeson (FromJSON, ToJSON, Value, (.:), (.=), withObject)
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString (ByteString)
@@ -24,15 +27,93 @@ import Data.Text qualified as T
 import Data.Text (Text)
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
 import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
-import ExoMonad.Guest.HostCall (LogLevel (..), LogPayload (..), callHostVoid, host_log_error, host_log_info, host_emit_event)
+import ExoMonad.Guest.HostCall
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), toMCPFormat)
 import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
 import ExoMonad.Guest.Types (HookInput (..), HookEventType (..), MCPCallInput (..), StopHookOutput (..), StopDecision (..), allowResponse)
 import Extism.PDK (input, output)
 import Foreign.C.Types (CInt (..))
+import GHC.Generics (Generic)
 import System.Directory (getCurrentDirectory)
 import System.FilePath (takeFileName)
+import Data.Word (Word64)
+
+-- | Test handler - allows calling any host function directly for property testing.
+testHandler :: IO CInt
+testHandler = do
+  inp <- input @ByteString
+  case Aeson.eitherDecodeStrict inp of
+    Left err -> do
+      output (BSL.toStrict $ Aeson.encode $ TestResult @Value False Nothing (Just $ "JSON decode error: " ++ err))
+      pure 1
+    Right (TestCall func payload) -> do
+      dispatch func payload
+  where
+    dispatch :: Text -> Value -> IO CInt
+    dispatch "git_get_branch" val = callAndReturn @Value @Value host_git_get_branch val
+    dispatch "git_get_worktree" val = callAndReturn @Value @Value host_git_get_worktree val
+    dispatch "git_get_dirty_files" val = callAndReturn @Value @Value host_git_get_dirty_files val
+    dispatch "git_get_recent_commits" val = callAndReturn @Value @Value host_git_get_recent_commits val
+    dispatch "git_has_unpushed_commits" val = callAndReturn @Value @Value host_git_has_unpushed_commits val
+    dispatch "git_get_remote_url" val = callAndReturn @Value @Value host_git_get_remote_url val
+    dispatch "git_get_repo_info" val = callAndReturn @Value @Value host_git_get_repo_info val
+    dispatch "agent_spawn" val = callAndReturn @Value @Value host_agent_spawn val
+    dispatch "agent_spawn_batch" val = callAndReturn @Value @Value host_agent_spawn_batch val
+    dispatch "agent_cleanup" val = callAndReturn @Value @Value host_agent_cleanup val
+    dispatch "agent_cleanup_batch" val = callAndReturn @Value @Value host_agent_cleanup_batch val
+    dispatch "agent_list" val = callAndReturn @Value @Value host_agent_list val
+    dispatch "fs_read_file" val = callAndReturn @Value @Value host_fs_read_file val
+    dispatch "fs_write_file" val = callAndReturn @Value @Value host_fs_write_file val
+    dispatch other _ = do
+      output (BSL.toStrict $ Aeson.encode $ TestResult @Value False Nothing (Just $ "Unknown function: " ++ T.unpack other))
+      pure 1
+
+    callAndReturn :: forall req resp. (FromJSON req, ToJSON req, FromJSON resp, ToJSON resp) 
+                  => (Word64 -> IO Word64) -> Value -> IO CInt
+    callAndReturn hostFn val = do
+      case Aeson.fromJSON val of
+        Aeson.Error err -> do
+          output (BSL.toStrict $ Aeson.encode $ TestResult @Value False Nothing (Just $ "Argument decode error: " ++ err))
+          pure 1
+        Aeson.Success req -> do
+          res <- callHost @req @resp hostFn req
+          case res of
+            Left err -> do
+              output (BSL.toStrict $ Aeson.encode $ TestResult @Value False Nothing (Just $ "Host call error: " ++ err))
+              pure 1
+            Right successVal -> do
+              output (BSL.toStrict $ Aeson.encode $ TestResult @resp True (Just successVal) Nothing)
+              pure 0
+
+-- | Input structure for testHandler
+data TestCall = TestCall
+  { functionName :: Text,
+    args :: Value
+  }
+  deriving (Show, Generic)
+
+instance FromJSON TestCall where
+  parseJSON = withObject "TestCall" $ \v ->
+    TestCall
+      <$> v .: "function"
+      <*> v .: "args"
+
+-- | Output structure for testHandler
+data TestResult a = TestResult
+  { successTest :: Bool,
+    resultTest :: Maybe a,
+    errorTest :: Maybe String
+  }
+  deriving (Show, Generic)
+
+instance (ToJSON a) => ToJSON (TestResult a) where
+  toJSON (TestResult s r e) =
+    Aeson.object
+      [ "success" .= s,
+        "result" .= r,
+        "error" .= e
+      ]
 
 -- | MCP call handler - dispatches to tools based on a record.
 mcpHandlerRecord :: forall tools. (DispatchRecord tools) => tools AsHandler -> IO CInt

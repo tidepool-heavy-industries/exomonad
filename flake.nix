@@ -49,34 +49,13 @@
           zellij
         ];
 
-        # WASM build infrastructure
-        makeWasmGuest = role: hash: pkgs.stdenv.mkDerivation {
-          pname = "wasm-guest-${role}";
-          version = "0.1.0.0";
-          src = pkgs.lib.cleanSourceWith {
-            src = ./.;
-            filter = path: type:
-              let base = baseNameOf path; in
-              type == "directory" ||
-              base == "cabal.project.wasm" ||
-              pkgs.lib.hasSuffix ".cabal" base ||
-              pkgs.lib.hasSuffix ".hs" base ||
-              pkgs.lib.hasSuffix ".hs-boot" base ||
-              base == "LICENSE" ||
-              base == "Setup.hs";
-          };
-          nativeBuildInputs = [ wasmPkgs.all_9_12 pkgs.wizer pkgs.cacert pkgs.curl ];
+        # Shared cabal config setup
+        cabalConfig = ''
+          export HOME=$TMPDIR
+          export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
 
-          outputHashAlgo = "sha256";
-          outputHashMode = "recursive";
-          outputHash = hash;
-
-          buildPhase = ''
-            export HOME=$TMPDIR
-            export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
-
-            mkdir -p $HOME/.ghc-wasm/.cabal
-            cat > $HOME/.ghc-wasm/.cabal/config <<EOF
+          mkdir -p $HOME/.ghc-wasm/.cabal
+          cat > $HOME/.ghc-wasm/.cabal/config <<EOF
 repository hackage.haskell.org
   url: https://hackage.haskell.org/
   secure: True
@@ -86,22 +65,115 @@ executable-profiling: False
 shared: True
 executable-dynamic: False
 EOF
+        '';
 
-            # Rename cabal.project temporarily to avoid interference
-            if [ -f cabal.project ]; then mv cabal.project cabal.project.native; fi
-            if [ -f cabal.project.freeze ]; then mv cabal.project.freeze cabal.project.freeze.native; fi
+        # 1. Dependency Derivation (Fixed-Output)
+        # Only rebuilds when .cabal or cabal.project files change.
+        mkWasmDeps = hash: pkgs.stdenv.mkDerivation {
+          pname = "wasm-guest-deps";
+          version = "0.1.0.0";
 
-            # Remove head.hackage from the project file to avoid network errors
+          src = pkgs.lib.cleanSourceWith {
+            src = ./.;
+            filter = path: type:
+              let 
+                base = baseNameOf path;
+                relPath = pkgs.lib.removePrefix (toString ./.) (toString path);
+              in
+              base == "cabal.project.wasm" ||
+              base == "cabal.project" ||
+              base == "cabal.project.freeze" ||
+              pkgs.lib.hasSuffix ".cabal" base ||
+              # Keep directory structure for local packages
+              (type == "directory" && (
+                base == "haskell" || 
+                base == "wasm-guest" || 
+                base == "vendor" || 
+                base == "polysemy"
+              ));
+          };
+
+          nativeBuildInputs = [ wasmPkgs.all_9_12 pkgs.cacert ];
+
+          outputHashAlgo = "sha256";
+          outputHashMode = "recursive";
+          outputHash = hash;
+
+          # Disable fixup to prevent patching shebangs with store paths,
+          # which would create illegal references in a fixed-output derivation.
+          dontFixup = true;
+          dontPatchShebangs = true;
+
+          buildPhase = ''
+            ${cabalConfig}
+
+            # Remove potential conflicting native project files
+            rm -f cabal.project cabal.project.freeze
+
+            # Setup project files
             cp cabal.project.wasm cabal.project.offline
             sed -i '/repository head.hackage/,/secure: True/d' cabal.project.offline
 
-            wasm32-wasi-cabal update
-            wasm32-wasi-cabal build -v --project-file=cabal.project.offline wasm-guest-${role} --only-dependencies --enable-shared --enable-static --disable-tests --disable-benchmarks
-            wasm32-wasi-cabal build -v --project-file=cabal.project.offline wasm-guest-${role} --enable-shared --enable-static --disable-tests --disable-benchmarks
+            echo "Updating package index..."
+            # Update index using the project file so it learns about head.hackage
+            wasm32-wasi-cabal update --project-file=cabal.project.offline
 
-            # Restore cabal.project
-            if [ -f cabal.project.native ]; then mv cabal.project.native cabal.project; fi
-            if [ -f cabal.project.freeze.native ]; then mv cabal.project.freeze.native cabal.project.freeze; fi
+            echo "Fetching dependencies..."
+            # Fetch dependencies so they are cached in the FOD
+            # Use build --only-download to be compatible with the wrapper's injected flags
+            wasm32-wasi-cabal build --project-file=cabal.project.offline --only-download all -j
+          '';
+
+          installPhase = ''
+            mkdir -p $out
+            cp -r $HOME/.ghc-wasm $out/ghc-wasm
+          '';
+        };
+
+        # 2. Guest Builder (Pure Derivation)
+        # Rebuilds when source changes, using pre-built deps from mkWasmDeps.
+        # No network access, no hash required.
+        mkWasmGuest = role: deps: pkgs.stdenv.mkDerivation {
+          pname = "wasm-guest-${role}";
+          version = "0.1.0.0";
+          
+          # Use full source, but filter out git/build artifacts
+          src = pkgs.lib.cleanSourceWith {
+            src = ./.;
+            filter = path: type:
+              let base = baseNameOf path; in
+              type == "directory" ||
+              base == "cabal.project.wasm" ||
+              pkgs.lib.hasSuffix ".cabal" base ||
+              pkgs.lib.hasSuffix ".hs" base ||
+              pkgs.lib.hasSuffix ".hs-boot" base ||
+              base == "LICENSE";
+          };
+
+          nativeBuildInputs = [ wasmPkgs.all_9_12 pkgs.wizer ];
+
+          buildPhase = ''
+            ${cabalConfig}
+
+            echo "Restoring dependencies from store..."
+            rm -rf $HOME/.ghc-wasm
+            cp -r ${deps}/ghc-wasm $HOME/.ghc-wasm
+            chmod -R u+w $HOME/.ghc-wasm
+
+            # Setup project files
+            cp cabal.project.wasm cabal.project.offline
+            sed -i '/repository head.hackage/,/secure: True/d' cabal.project.offline
+
+            echo "Building ${role}..."
+            
+            # Debug: List available packages to verify cache restoration
+            echo "Listing cached packages:"
+            find $HOME/.ghc-wasm -name "*.tar.gz" | head -n 20 || echo "No tarballs found!"
+
+            # Build offline using the restored dependencies
+            # We remove --offline because it sometimes prevents using the local cache if index state checks fail
+            # The build is sandboxed anyway, so network access will fail if it tries.
+            wasm32-wasi-cabal build --project-file=cabal.project.offline wasm-guest-${role}
           '';
 
           installPhase = ''
@@ -192,14 +264,23 @@ EOF
           };
         };
 
-        # Allow `nix build` to produce a simple check
-        packages = {
+        # Build Outputs
+        packages = let
+          # Hash for dependencies ONLY. Update this if you change .cabal files.
+          # Nix will tell you the new hash if it mismatches.
+          deps = mkWasmDeps "sha256-RnjX41sAfU2dcynOHMCI+XulTnEB4FRJMehQZD5cgtA=";
+        in {
           default = pkgs.writeShellScriptBin "exomonad-env-check" ''
             echo "ExoMonad environment check"
             echo "Run 'nix develop' to enter the development shell"
           '';
-          wasm-guest-tl = makeWasmGuest "tl" "sha256-A46JDaQk96P66u/EWNQTe/u/T8UH8Y9jtsRce0bkYmI=";
-          wasm-guest-dev = makeWasmGuest "dev" "sha256-I2wvYxVz4WCbiDU1QbEl7rUBAeLYoK5m6/YZDSpP+8w=";
+          
+          # Expose deps derivation so we can build it directly to check hash
+          wasm-deps = deps;
+          
+          # Guest binaries (no explicit hashes needed here!)
+          wasm-guest-tl = mkWasmGuest "tl" deps;
+          wasm-guest-dev = mkWasmGuest "dev" deps;
         };
       }
     );
