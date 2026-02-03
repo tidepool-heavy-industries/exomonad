@@ -1,4 +1,4 @@
-use crate::common::{HostResult};
+use crate::common::{HostResult, IntoFFIResult, FFIBoundary};
 use crate::services::docker::DockerExecutor;
 use anyhow::{Context, Result};
 use duct::cmd;
@@ -64,6 +64,8 @@ pub struct Commit {
     pub date: String,
 }
 
+impl FFIBoundary for Commit {}
+
 /// Information about a git worktree.
 ///
 /// Returned by [`GitService::get_worktree()`].
@@ -75,6 +77,8 @@ pub struct WorktreeInfo {
     /// Current branch name (or "HEAD" if detached).
     pub branch: String,
 }
+
+impl FFIBoundary for WorktreeInfo {}
 
 /// Git repository information.
 ///
@@ -94,6 +98,8 @@ pub struct RepoInfo {
     /// For GitHub repos, this is the repo name (e.g., "exomonad").
     pub name: Option<String>,
 }
+
+impl FFIBoundary for RepoInfo {}
 
 /// Git operations service.
 ///
@@ -269,7 +275,7 @@ fn parse_github_url(url: &str) -> Option<(String, String)> {
 
 // Host Function Types
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct GitHostInput {
     #[serde(rename = "workingDir")]
     working_dir: String,
@@ -277,7 +283,9 @@ struct GitHostInput {
     container_id: String,
 }
 
-#[derive(Deserialize)]
+impl FFIBoundary for GitHostInput {}
+
+#[derive(Deserialize, Serialize)]
 struct GitLogInput {
     #[serde(rename = "workingDir")]
     working_dir: String,
@@ -285,6 +293,8 @@ struct GitLogInput {
     container_id: String,
     limit: u32,
 }
+
+impl FFIBoundary for GitLogInput {}
 
 fn block_on<F: std::future::Future>(future: F) -> Result<F::Output, Error> {
     match tokio::runtime::Handle::try_current() {
@@ -319,7 +329,7 @@ pub fn git_get_branch_host_fn(git_service: Arc<GitService>) -> Function {
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(git.get_branch(&input.container_id, &input.working_dir))?;
-            let output: HostResult<String> = result.into();
+            let output: HostResult<String> = result.into_ffi_result();
 
             plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
@@ -350,7 +360,7 @@ pub fn git_get_worktree_host_fn(git_service: Arc<GitService>) -> Function {
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(git.get_worktree(&input.container_id, &input.working_dir))?;
-            let output: HostResult<WorktreeInfo> = result.into();
+            let output: HostResult<WorktreeInfo> = result.into_ffi_result();
 
             plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
@@ -381,7 +391,7 @@ pub fn git_get_dirty_files_host_fn(git_service: Arc<GitService>) -> Function {
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(git.get_dirty_files(&input.container_id, &input.working_dir))?;
-            let output: HostResult<Vec<String>> = result.into();
+            let output: HostResult<Vec<String>> = result.into_ffi_result();
 
             plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
@@ -418,7 +428,7 @@ pub fn git_get_recent_commits_host_fn(git_service: Arc<GitService>) -> Function 
                 &input.working_dir,
                 input.limit,
             ))?;
-            let output: HostResult<Vec<Commit>> = result.into();
+            let output: HostResult<Vec<Commit>> = result.into_ffi_result();
 
             plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
@@ -452,7 +462,7 @@ pub fn git_has_unpushed_commits_host_fn(git_service: Arc<GitService>) -> Functio
 
             let result =
                 block_on(git.has_unpushed_commits(&input.container_id, &input.working_dir))?;
-            let output: HostResult<bool> = result.into();
+            let output: HostResult<bool> = result.into_ffi_result();
 
             plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
@@ -483,7 +493,7 @@ pub fn git_get_remote_url_host_fn(git_service: Arc<GitService>) -> Function {
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(git.get_remote_url(&input.container_id, &input.working_dir))?;
-            let output: HostResult<String> = result.into();
+            let output: HostResult<String> = result.into_ffi_result();
 
             plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
@@ -514,7 +524,7 @@ pub fn git_get_repo_info_host_fn(git_service: Arc<GitService>) -> Function {
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(git.get_repo_info(&input.container_id, &input.working_dir))?;
-            let output: HostResult<RepoInfo> = result.into();
+            let output: HostResult<RepoInfo> = result.into_ffi_result();
 
             plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())

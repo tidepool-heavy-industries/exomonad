@@ -18,6 +18,7 @@
 // Core types
 pub mod domain;
 pub mod error;
+pub mod ffi;
 pub mod protocol;
 pub mod telemetry;
 
@@ -32,6 +33,7 @@ pub use domain::{
     ToolName, ToolPermission, WasmPath,
 };
 pub use error::{ExoMonadError, Result};
+pub use ffi::{ErrorCode, ErrorContext, FFIBoundary, FFIError, FFIResult};
 pub use hooks::HookConfig;
 pub use logging::{init_logging, init_logging_with_default};
 pub use protocol::{

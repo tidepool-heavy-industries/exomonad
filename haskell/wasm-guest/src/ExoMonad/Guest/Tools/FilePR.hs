@@ -10,6 +10,7 @@ import Data.Aeson qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Guest.HostCall (LogLevel (..), LogPayload (..), callHost, callHostVoid, host_file_pr, host_log_error, host_log_info)
+import ExoMonad.Guest.FFI (FFIBoundary)
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)
 
@@ -43,6 +44,14 @@ instance ToJSON FilePRInput where
         "body" .= b
       ]
 
+instance FromJSON FilePRInput where
+  parseJSON = withObject "FilePRInput" $ \v ->
+    FilePRInput
+      <$> v .: "title"
+      <*> v .: "body"
+
+instance FFIBoundary FilePRInput
+
 -- | Output type from host function (matches Rust FilePROutput).
 data FilePROutput = FilePROutput
   { fpoUrl :: Text,
@@ -71,6 +80,8 @@ instance ToJSON FilePROutput where
         "base_branch" .= b,
         "created" .= c
       ]
+
+instance FFIBoundary FilePROutput
 
 instance MCPTool FilePR where
   type ToolArgs FilePR = FilePRArgs

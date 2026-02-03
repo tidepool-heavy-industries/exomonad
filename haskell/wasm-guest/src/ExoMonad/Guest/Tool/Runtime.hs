@@ -28,6 +28,7 @@ import Data.Text (Text)
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
 import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
 import ExoMonad.Guest.HostCall
+import ExoMonad.Guest.FFI (FFIBoundary)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), toMCPFormat)
 import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
@@ -69,7 +70,7 @@ testHandler = do
       output (BSL.toStrict $ Aeson.encode $ TestResult @Value False Nothing (Just $ "Unknown function: " ++ T.unpack other))
       pure 1
 
-    callAndReturn :: forall req resp. (FromJSON req, ToJSON req, FromJSON resp, ToJSON resp) 
+    callAndReturn :: forall req resp. (FFIBoundary req, FFIBoundary resp) 
                   => (Word64 -> IO Word64) -> Value -> IO CInt
     callAndReturn hostFn val = do
       case Aeson.fromJSON val of

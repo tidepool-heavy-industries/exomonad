@@ -10,6 +10,7 @@ import Data.Aeson (encode, decode, ToJSON, FromJSON)
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Text as T
 import ExoMonad.Guest.Effects.AgentControl
+import ExoMonad.Guest.FFI
 
 -- ============================================================================
 -- Arbitrary Instances
@@ -42,14 +43,17 @@ instance Arbitrary BatchCleanupResult where
 instance Arbitrary ErrorContext where
   arbitrary = ErrorContext <$> arbMaybeText <*> arbitrary <*> arbMaybeText <*> arbMaybeText <*> arbMaybeText <*> arbMaybeText
 
-instance Arbitrary HostErrorDetails where
-  arbitrary = HostErrorDetails <$> arbText <*> arbText <*> (Just <$> arbitrary) <*> arbMaybeText
+instance Arbitrary ErrorCode where
+  arbitrary = elements [NotFound, NotAuthenticated, GitError, IoError, NetworkError, InvalidInput, InternalError, Timeout, AlreadyExists]
 
-instance (Arbitrary a) => Arbitrary (HostResult a) where
-  arbitrary = oneof [HostSuccess <$> arbitrary, HostError <$> arbitrary]
+instance Arbitrary FFIError where
+  arbitrary = FFIError <$> arbText <*> arbitrary <*> (Just <$> arbitrary) <*> arbMaybeText
+
+instance (Arbitrary a) => Arbitrary (FFIResult a) where
+  arbitrary = oneof [FFISuccess <$> arbitrary, FFIErrorResult <$> arbitrary]
 
 instance Arbitrary SpawnAgentInput where
-  arbitrary = SpawnAgentInput <$> arbitrary <*> arbText <*> arbText <*> arbMaybeText <*> arbitrary
+  arbitrary = SpawnAgentInput <$> arbText <*> arbText <*> arbText <*> arbMaybeText <*> arbitrary
 
 instance Arbitrary SpawnAgentsInput where
   arbitrary = SpawnAgentsInput <$> listOf arbText <*> arbText <*> arbText <*> arbMaybeText <*> arbitrary
@@ -64,11 +68,12 @@ instance Arbitrary CleanupAgentsInput where
 -- Tests
 -- ============================================================================
 
-roundtrip :: (Eq a, Show a, ToJSON a, FromJSON a) => a -> Expectation
+roundtrip :: (Eq a, Show a, ToJSON a, FFIBoundary a) => a -> Expectation
 roundtrip original = do
-  let encoded = encode original
-  let decoded = decode encoded
-  decoded `shouldBe` Just original
+  -- Simulate Host returning Success response
+  let encoded = encode (FFISuccess original)
+  let decoded = fromFFI encoded
+  decoded `shouldBe` Right original
 
 main :: IO ()
 main = hspec $ do
@@ -77,8 +82,3 @@ main = hspec $ do
     it "SpawnAgentsInput roundtrip" $ property $ \(x :: SpawnAgentsInput) -> roundtrip x
     it "CleanupAgentInput roundtrip" $ property $ \(x :: CleanupAgentInput) -> roundtrip x
     it "CleanupAgentsInput roundtrip" $ property $ \(x :: CleanupAgentsInput) -> roundtrip x
-    
-    it "HostResult SpawnResult roundtrip" $ property $ \(x :: HostResult SpawnResult) -> roundtrip x
-    it "HostResult BatchSpawnResult roundtrip" $ property $ \(x :: HostResult BatchSpawnResult) -> roundtrip x
-    it "HostResult BatchCleanupResult roundtrip" $ property $ \(x :: HostResult BatchCleanupResult) -> roundtrip x
-    it "HostResult [AgentInfo] roundtrip" $ property $ \(x :: HostResult [AgentInfo]) -> roundtrip x

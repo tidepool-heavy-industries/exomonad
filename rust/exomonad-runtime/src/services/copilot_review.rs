@@ -3,7 +3,7 @@
 // Uses `gh api` to check for Copilot review comments on a PR.
 // Blocks until comments are found or timeout is reached.
 
-use crate::common::HostResult;
+use crate::common::{HostResult, IntoFFIResult, FFIBoundary};
 use crate::services::git;
 use anyhow::{Context, Result};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
@@ -19,7 +19,7 @@ use super::zellij_events;
 // Types
 // ============================================================================
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WaitForCopilotReviewInput {
     pub pr_number: u64,
     #[serde(default = "default_timeout")]
@@ -27,6 +27,8 @@ pub struct WaitForCopilotReviewInput {
     #[serde(default = "default_poll_interval")]
     pub poll_interval_secs: u64,
 }
+
+impl FFIBoundary for WaitForCopilotReviewInput {}
 
 fn default_timeout() -> u64 {
     300 // 5 minutes
@@ -36,19 +38,23 @@ fn default_poll_interval() -> u64 {
     30
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CopilotReviewOutput {
     pub status: String,
     pub comments: Vec<CopilotComment>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+impl FFIBoundary for CopilotReviewOutput {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CopilotComment {
     pub path: String,
     pub line: Option<u64>,
     pub body: String,
     pub diff_hunk: Option<String>,
 }
+
+impl FFIBoundary for CopilotComment {}
 
 // ============================================================================
 // Service
@@ -339,7 +345,7 @@ fn wait_for_copilot_review_host_fn(
     let input: WaitForCopilotReviewInput = get_input(plugin, inputs[0])?;
 
     let result = wait_for_copilot_review(&input);
-    let output: HostResult<CopilotReviewOutput> = result.into();
+    let output: HostResult<CopilotReviewOutput> = result.into_ffi_result();
 
     outputs[0] = set_output(plugin, &output)?;
     Ok(())

@@ -31,10 +31,10 @@ module ExoMonad.Guest.Effects.AgentControl
     AgentInfo (..),
     BatchSpawnResult (..),
     BatchCleanupResult (..),
-    HostResult (..),
-    HostErrorDetails (..),
+    FFIResult (..),
+    FFIError (..),
     ErrorContext (..),
-    ResultKind (..),
+    ErrorCode (..),
     SpawnAgentInput (..),
     SpawnAgentsInput (..),
     CleanupAgentInput (..),
@@ -46,7 +46,8 @@ import Polysemy (Sem, Member, interpret, embed, send)
 import Polysemy.Embed (Embed)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.=))
 import Data.Text (Text, unpack)
-import ExoMonad.Guest.HostCall (callHost, host_agent_cleanup, host_agent_cleanup_batch, host_agent_list, host_agent_spawn, host_agent_spawn_batch, HostResult (..), HostErrorDetails (..), ErrorContext (..), ResultKind (..))
+import ExoMonad.Guest.HostCall (callHost, host_agent_cleanup, host_agent_cleanup_batch, host_agent_list, host_agent_spawn, host_agent_spawn_batch)
+import ExoMonad.Guest.FFI (FFIBoundary (..), FFIResult (..), FFIError (..), ErrorContext (..), ErrorCode (..))
 import GHC.Generics (Generic)
 
 -- ============================================================================
@@ -67,6 +68,8 @@ instance FromJSON AgentType where
     "gemini" -> pure Gemini
     other -> fail $ "Invalid agent type: " <> unpack other
 
+instance FFIBoundary AgentType
+
 -- | Options for spawning an agent.
 -- agentType is non-optional; default (Gemini) is applied at the tool layer.
 data SpawnOptions = SpawnOptions
@@ -85,6 +88,16 @@ instance ToJSON SpawnOptions where
         "worktree_dir" .= w,
         "agent_type" .= a
       ]
+
+instance FromJSON SpawnOptions where
+  parseJSON = withObject "SpawnOptions" $ \v ->
+    SpawnOptions
+      <$> v .: "owner"
+      <*> v .: "repo"
+      <*> v .: "worktree_dir"
+      <*> v .: "agent_type"
+
+instance FFIBoundary SpawnOptions
 
 -- | Result of spawning an agent.
 data SpawnResult = SpawnResult
@@ -115,6 +128,8 @@ instance ToJSON SpawnResult where
         "agent_type" .= a
       ]
 
+instance FFIBoundary SpawnResult
+
 -- | Information about an active agent.
 data AgentInfo = AgentInfo
   { agentIssueId :: Text,
@@ -141,6 +156,8 @@ instance ToJSON AgentInfo where
         "has_changes" .= h
       ]
 
+instance FFIBoundary AgentInfo
+
 -- | Result of batch spawn operation.
 data BatchSpawnResult = BatchSpawnResult
   { spawned :: [SpawnResult],
@@ -161,6 +178,8 @@ instance ToJSON BatchSpawnResult where
         "failed" .= f
       ]
 
+instance FFIBoundary BatchSpawnResult
+
 -- | Result of batch cleanup operation.
 data BatchCleanupResult = BatchCleanupResult
   { cleaned :: [Text],
@@ -180,6 +199,8 @@ instance ToJSON BatchCleanupResult where
       [ "cleaned" .= c,
         "failed" .= f
       ]
+
+instance FFIBoundary BatchCleanupResult
 
 -- ============================================================================
 -- Input types (for serialization to host)
@@ -212,6 +233,8 @@ instance FromJSON SpawnAgentInput where
       <*> v .: "worktree_dir"
       <*> v .: "agent_type"
 
+instance FFIBoundary SpawnAgentInput
+
 data SpawnAgentsInput = SpawnAgentsInput
   { sasIssueIds :: [Text],
     sasOwner :: Text,
@@ -239,6 +262,8 @@ instance FromJSON SpawnAgentsInput where
       <*> v .: "worktree_dir"
       <*> v .: "agent_type"
 
+instance FFIBoundary SpawnAgentsInput
+
 data CleanupAgentInput = CleanupAgentInput
   { caiIssueId :: Text,
     caiForce :: Bool
@@ -256,6 +281,8 @@ instance FromJSON CleanupAgentInput where
     CleanupAgentInput
       <$> v .: "issue_id"
       <*> v .: "force"
+
+instance FFIBoundary CleanupAgentInput
 
 data CleanupAgentsInput = CleanupAgentsInput
   { casIssueIds :: [Text],
@@ -275,11 +302,18 @@ instance FromJSON CleanupAgentsInput where
       <$> v .: "issue_ids"
       <*> v .: "force"
 
+instance FFIBoundary CleanupAgentsInput
+
 data ListAgentsInput = ListAgentsInput
   deriving (Show, Generic)
 
 instance ToJSON ListAgentsInput where
   toJSON ListAgentsInput = object []
+
+instance FromJSON ListAgentsInput where
+  parseJSON = withObject "ListAgentsInput" $ \_ -> pure ListAgentsInput
+
+instance FFIBoundary ListAgentsInput
 
 -- ============================================================================
 -- Effect type

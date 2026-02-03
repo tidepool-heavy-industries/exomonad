@@ -164,6 +164,20 @@ All tools are implemented in Haskell WASM and executed via host functions:
 
 Rust host functions exposed to WASM:
 
+### FFI Boundary
+
+Unified trait/typeclass for WASM/Rust communication.
+
+**Rust:** `FFIBoundary` trait in `exomonad-shared`.
+**Haskell:** `FFIBoundary` typeclass in `ExoMonad.Guest.FFI`.
+
+**Contract:**
+- All host function inputs/outputs must implement `FFIBoundary`.
+- Serialization: JSON (via `serde` in Rust, `aeson` in Haskell).
+- Error Handling: `FFIResult` envelope (Success/Error).
+  - Rust returns `FFIResult<T>`.
+  - Haskell receives `Either FFIError T`.
+
 ### Git Effects
 | Effect | Host Function | Implementation |
 |--------|---------------|----------------|

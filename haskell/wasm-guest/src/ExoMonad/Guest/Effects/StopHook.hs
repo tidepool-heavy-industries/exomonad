@@ -12,6 +12,7 @@ import Data.Aeson (FromJSON, ToJSON, object, (.:), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as T
+import ExoMonad.Guest.FFI (FFIBoundary)
 import ExoMonad.Guest.HostCall
   ( callHost,
     host_git_get_dirty_files,
@@ -32,7 +33,9 @@ data GitHostInput = GitHostInput
     containerId :: Text
   }
   deriving stock (Show, Generic)
-  deriving anyclass (ToJSON)
+  deriving anyclass (ToJSON, FromJSON)
+
+instance FFIBoundary GitHostInput
 
 -- Removed GitHostOutput wrapper - host functions now return T directly
 
@@ -42,7 +45,9 @@ data RepoInfo = RepoInfo
     name :: Maybe Text
   }
   deriving stock (Show, Generic)
-  deriving anyclass (FromJSON)
+  deriving anyclass (FromJSON, ToJSON)
+
+instance FFIBoundary RepoInfo
 
 -- Removed GitHubHostOutput wrapper - host functions now return T directly
 
@@ -59,6 +64,14 @@ instance ToJSON Repo where
         "name" .= repoName r
       ]
 
+instance FromJSON Repo where
+  parseJSON = Aeson.withObject "Repo" $ \v ->
+    Repo
+      <$> v .: "owner"
+      <*> v .: "name"
+
+instance FFIBoundary Repo
+
 data PullRequest = PullRequest
   { prNumber :: Int,
     prTitle :: Text,
@@ -73,6 +86,16 @@ instance FromJSON PullRequest where
       <*> v .: "title"
       <*> v .: "url"
 
+instance ToJSON PullRequest where
+  toJSON p =
+    object
+      [ "number" .= prNumber p,
+        "title" .= prTitle p,
+        "url" .= prUrl p
+      ]
+
+instance FFIBoundary PullRequest
+
 data GetPRInput = GetPRInput
   { repo :: Repo,
     prHead :: Text
@@ -85,6 +108,14 @@ instance ToJSON GetPRInput where
       [ "repo" .= repo i,
         "head" .= prHead i
       ]
+
+instance FromJSON GetPRInput where
+  parseJSON = Aeson.withObject "GetPRInput" $ \v ->
+    GetPRInput
+      <$> v .: "repo"
+      <*> v .: "head"
+
+instance FFIBoundary GetPRInput
 
 data WaitForCopilotReviewInput = WaitForCopilotReviewInput
   { wcrPrNumber :: Int,
@@ -100,6 +131,15 @@ instance ToJSON WaitForCopilotReviewInput where
         "timeout_secs" .= wcrTimeoutSecs i,
         "poll_interval_secs" .= wcrPollIntervalSecs i
       ]
+
+instance FromJSON WaitForCopilotReviewInput where
+  parseJSON = Aeson.withObject "WaitForCopilotReviewInput" $ \v ->
+    WaitForCopilotReviewInput
+      <$> v .: "pr_number"
+      <*> v .: "timeout_secs"
+      <*> v .: "poll_interval_secs"
+
+instance FFIBoundary WaitForCopilotReviewInput
 
 -- | Copilot review status (strongly typed).
 -- Serialized to "reviewed", "pending", or "timeout" at the JSON boundary.
@@ -118,6 +158,8 @@ instance FromJSON ReviewStatus where
     "timeout" -> pure Timeout
     other -> fail $ "Unknown review status: " <> T.unpack other
 
+instance FFIBoundary ReviewStatus
+
 data CopilotReviewOutput = CopilotReviewOutput
   { croStatus :: ReviewStatus,
     croComments :: [CopilotComment]
@@ -129,6 +171,15 @@ instance FromJSON CopilotReviewOutput where
     CopilotReviewOutput
       <$> v .: "status"
       <*> v .: "comments"
+
+instance ToJSON CopilotReviewOutput where
+  toJSON c =
+    object
+      [ "status" .= croStatus c,
+        "comments" .= croComments c
+      ]
+
+instance FFIBoundary CopilotReviewOutput
 
 data CopilotComment = CopilotComment
   { ccPath :: Text,
@@ -143,6 +194,16 @@ instance FromJSON CopilotComment where
       <$> v .: "path"
       <*> v .: "line"
       <*> v .: "body"
+
+instance ToJSON CopilotComment where
+  toJSON c =
+    object
+      [ "path" .= ccPath c,
+        "line" .= ccLine c,
+        "body" .= ccBody c
+      ]
+
+instance FFIBoundary CopilotComment
 
 -- Removed CopilotHostOutput wrapper - host functions now return T directly
 
