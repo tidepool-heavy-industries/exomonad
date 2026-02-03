@@ -122,14 +122,13 @@ wasm role="tl":
     nix develop .#wasm -c wasm32-wasi-cabal build --project-file=cabal.project.wasm wasm-guest-{{role}}
     @echo ">>> Installing to ~/.exomonad/wasm/..."
     mkdir -p ~/.exomonad/wasm
-    cp dist-newstyle/build/wasm32-wasi/ghc-*/wasm-guest-*/x/wasm-guest-{{role}}/noopt/build/wasm-guest-{{role}}/wasm-guest-{{role}}.wasm ~/.exomonad/wasm/
+    cp dist-newstyle/build/wasm32-wasi/ghc-*/wasm-guest-*/x/wasm-guest-{{role}}/build/wasm-guest-{{role}}/wasm-guest-{{role}}.wasm ~/.exomonad/wasm/
     @echo ">>> Done: ~/.exomonad/wasm/wasm-guest-{{role}}.wasm"
 
-# Build both dev and TL WASM guests
+# Build WASM guest (only tl exists currently)
 wasm-all:
-    @just wasm dev
     @just wasm tl
-    @echo ">>> Installed to ~/.exomonad/wasm/:
+    @echo ">>> Installed to ~/.exomonad/wasm/:"
     @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
 
 # Install everything: Rust binaries + WASM plugins (uses release build)
@@ -149,17 +148,22 @@ install-all:
 
 # Install everything (fast dev build)
 install-all-dev:
-    @echo ">>> [1/3] Building Rust binaries (debug)..."
+    @echo ">>> [1/4] Building Rust sidecar (debug)..."
     cd rust && cargo build -p exomonad-sidecar
-    @echo ">>> [2/3] Installing binaries to ~/.cargo/bin/..."
+    @echo ">>> [2/4] Building Zellij plugin (wasm32-wasip1)..."
+    cd rust/exomonad-plugin && cargo build --target wasm32-wasip1
+    @echo ">>> [3/4] Installing binaries..."
     mkdir -p ~/.cargo/bin
+    mkdir -p ~/.config/zellij/plugins
     cp rust/target/debug/exomonad-sidecar ~/.cargo/bin/
-    @echo ">>> [3/3] Building and installing WASM plugins..."
+    cp rust/exomonad-plugin/target/wasm32-wasip1/debug/exomonad-plugin.wasm ~/.config/zellij/plugins/
+    @echo ">>> [4/4] Building and installing Haskell WASM plugins..."
     @just wasm-all
     @echo ">>> Done!"
     @echo ""
     @echo "Installed:"
     @ls -lh ~/.cargo/bin/exomonad-sidecar
+    @ls -lh ~/.config/zellij/plugins/exomonad-plugin.wasm
     @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
 
 # Clean build artifacts
