@@ -1,31 +1,36 @@
 //! High-level agent control service.
-//!
+//! 
 //! Provides semantic operations for agent lifecycle management:
 //! - SpawnAgent: Create worktree, write context, open Zellij tab
 //! - CleanupAgent: Close tab, delete worktree
 //! - ListAgents: List active agent worktrees
-//!
+//! 
 //! These are high-level effects exposed to Haskell WASM, not granular operations.
 
+use crate::common::{HostResult, TimeoutError};
 use anyhow::{anyhow, Context, Result};
-use crate::common::HostResult;
 use exomonad_shared::{GithubOwner, GithubRepo, IssueNumber};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 use tokio::process::Command;
+use tokio::time::{timeout, Duration};
 use tracing::{debug, info, warn};
 
 use super::github::{GitHubService, Repo};
 use super::zellij_events;
 
-// ============================================================================
+const SPAWN_TIMEOUT: Duration = Duration::from_secs(60);
+const GIT_TIMEOUT: Duration = Duration::from_secs(30);
+const ZELLIJ_TIMEOUT: Duration = Duration::from_secs(30);
+
+// ============================================================================ 
 // Types
-// ============================================================================
+// ============================================================================ 
 
 /// Agent type for spawned agents.
-///
+/// 
 /// Determines which CLI tool to use when spawning an agent in a Zellij tab.
 /// Each type has different command names and prompt flags.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -36,7 +41,7 @@ pub enum AgentType {
     Claude,
 
     /// Gemini CLI (spawns with `gemini --prompt-interactive '...'`).
-    ///
+    /// 
     /// Default agent type.
     #[default]
     Gemini,
@@ -44,7 +49,7 @@ pub enum AgentType {
 
 impl AgentType {
     /// Get the CLI command for this agent type.
-    ///
+    /// 
     /// Returns "claude" or "gemini".
     fn command(&self) -> &'static str {
         match self {
@@ -54,7 +59,7 @@ impl AgentType {
     }
 
     /// Get the prompt flag for this agent type.
-    ///
+    /// 
     /// Claude uses `--prompt`, Gemini uses `--prompt-interactive`.
     fn prompt_flag(&self) -> &'static str {
         match self {
@@ -64,7 +69,7 @@ impl AgentType {
     }
 
     /// Get the suffix for tab/worktree names (lowercase).
-    ///
+    /// 
     /// Used to construct unique tab/worktree names (e.g., "gh-123-title-claude").
     fn suffix(&self) -> &'static str {
         match self {
@@ -130,9 +135,9 @@ pub struct BatchCleanupResult {
     pub failed: Vec<(String, String)>, // (issue_id, error)
 }
 
-// ============================================================================
+// ============================================================================ 
 // Service
-// ============================================================================
+// ============================================================================ 
 
 /// Agent control service for high-level agent lifecycle management.
 pub struct AgentControlService {
@@ -167,12 +172,12 @@ impl AgentControlService {
         })
     }
 
-    // ========================================================================
+    // ======================================================================== 
     // Spawn Agent
-    // ========================================================================
+    // ======================================================================== 
 
     /// Spawn an agent for a GitHub issue.
-    ///
+    /// 
     /// This is the high-level semantic operation that:
     /// 1. Fetches issue from GitHub
     /// 2. Creates git worktree from origin/main
@@ -184,91 +189,105 @@ impl AgentControlService {
         issue_number: IssueNumber,
         options: &SpawnOptions,
     ) -> Result<SpawnResult> {
-        // Validate we're in Zellij
-        self.check_zellij_env()?;
+        let issue_id_log = issue_number.as_u64().to_string();
+        info!(issue_id = %issue_id_log, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_agent");
 
-        // Get GitHub service
-        let github = self
-            .github
-            .as_ref()
-            .ok_or_else(|| anyhow!("GitHub service not available (GITHUB_TOKEN not set)"))?;
+        let result = timeout(SPAWN_TIMEOUT, async {
+            // Validate we're in Zellij
+            self.check_zellij_env()?;
 
-        // Fetch issue from GitHub
-        let issue_id = issue_number.as_u64().to_string();
-        debug!(issue_id, "Fetching issue from GitHub");
-        let repo = Repo {
-            owner: options.owner.clone(),
-            name: options.repo.clone(),
-        };
-        let issue = github.get_issue(&repo, issue_number.as_u64()).await?;
+            // Get GitHub service
+            let github = self
+                .github
+                .as_ref()
+                .ok_or_else(|| anyhow!("GitHub service not available (GITHUB_TOKEN not set)"))?;
 
-        // Generate slug from title
-        let slug = slugify(&issue.title);
-        let agent_suffix = options.agent_type.suffix();
-        let worktree_dir = options
-            .worktree_dir
-            .clone()
-            .unwrap_or_else(|| "./worktrees".to_string());
-        let worktree_path = self
-            .project_dir
-            .join(&worktree_dir)
-            .join(format!("gh-{}-{}-{}", issue_id, slug, agent_suffix));
-        let branch_name = format!("gh-{}/{}-{}", issue_id, slug, agent_suffix);
+            // Fetch issue from GitHub
+            let issue_id = issue_number.as_u64().to_string();
+            info!(issue_id, "Fetching issue from GitHub");
+            let repo = Repo {
+                owner: options.owner.clone(),
+                name: options.repo.clone(),
+            };
+            let issue = github.get_issue(&repo, issue_number.as_u64()).await?;
 
-        // Fetch origin/main
-        self.fetch_origin().await?;
+            // Generate slug from title
+            let slug = slugify(&issue.title);
+            let agent_suffix = options.agent_type.suffix();
+            let worktree_dir = options
+                .worktree_dir
+                .clone()
+                .unwrap_or_else(|| "./worktrees".to_string());
+            let worktree_path = self
+                .project_dir
+                .join(&worktree_dir)
+                .join(format!("gh-{}-{}-{{}}", issue_id, slug, agent_suffix));
+            let branch_name = format!("gh-{}/{}-{{}}", issue_id, slug, agent_suffix);
 
-        // Create worktree
-        self.create_worktree(&worktree_path, &branch_name).await?;
+            // Fetch origin/main
+            self.fetch_origin().await?;
 
-        // Write config files (no INITIAL_CONTEXT.md)
-        self.write_context_files(&worktree_path, options.agent_type).await?;
+            // Create worktree
+            self.create_worktree(&worktree_path, &branch_name).await?;
 
-        // Build initial prompt
-        let issue_url = format!(
-            "https://github.com/{}/{}/issues/{}",
-            options.owner, options.repo, issue_id
-        );
-        let initial_prompt = Self::build_initial_prompt(
-            &issue_id,
-            &issue.title,
-            &issue.body,
-            &branch_name,
-            &issue_url,
-        );
+            // Write config files (no INITIAL_CONTEXT.md)
+            self.write_context_files(&worktree_path, options.agent_type).await?;
 
-        debug!(
-            issue_id,
-            prompt_length = initial_prompt.len(),
-            "Built initial prompt for agent"
-        );
+            // Build initial prompt
+            let issue_url = format!(
+                "https://github.com/{}/{}/issues/{}",
+                options.owner, options.repo, issue_id
+            );
+            let initial_prompt = Self::build_initial_prompt(
+                &issue_id,
+                &issue.title,
+                &issue.body,
+                &branch_name,
+                &issue_url,
+            );
 
-        // Open Zellij tab with agent command and initial prompt
-        let tab_name = format!("gh-{}-{}", issue_id, agent_suffix);
-        self.new_zellij_tab(
-            &tab_name,
-            &worktree_path,
-            options.agent_type,
-            Some(&initial_prompt),
-        )
-        .await?;
+            tracing::info!(
+                issue_id,
+                prompt_length = initial_prompt.len(),
+                "Built initial prompt for agent"
+            );
 
-        // Emit agent:started event
-        let event = exomonad_ui_protocol::AgentEvent::AgentStarted {
-            agent_id: tab_name.clone(),
-            timestamp: zellij_events::now_iso8601(),
-        };
-        if let Err(e) = zellij_events::emit_event(&event) {
-            warn!("Failed to emit agent:started event: {}", e);
-        }
+            // Open Zellij tab with agent command and initial prompt
+            let tab_name = format!("gh-{}-{{}}", issue_id, agent_suffix);
+            self.new_zellij_tab(
+                &tab_name,
+                &worktree_path,
+                options.agent_type,
+                Some(&initial_prompt),
+            )
+            .await?;
 
-        Ok(SpawnResult {
-            worktree_path: worktree_path.to_string_lossy().to_string(),
-            branch_name,
-            tab_name,
-            issue_title: issue.title,
-            agent_type: options.agent_type.suffix().to_string(),
+            // Emit agent:started event
+            let event = exomonad_ui_protocol::AgentEvent::AgentStarted {
+                agent_id: tab_name.clone(),
+                timestamp: zellij_events::now_iso8601(),
+            };
+            if let Err(e) = zellij_events::emit_event(&event) {
+                warn!("Failed to emit agent:started event: {}", e);
+            }
+
+            Ok::<SpawnResult, anyhow::Error>(SpawnResult {
+                worktree_path: worktree_path.to_string_lossy().to_string(),
+                branch_name,
+                tab_name,
+                issue_title: issue.title,
+                agent_type: options.agent_type.suffix().to_string(),
+            })
         })
+        .await
+        .map_err(|_| {
+            let msg = format!("spawn_agent timed out after {}s", SPAWN_TIMEOUT.as_secs());
+            warn!(issue_id = %issue_id_log, error = %msg, "spawn_agent timed out");
+            anyhow::Error::new(TimeoutError { message: msg })
+        })??;
+
+        info!(issue_id = %issue_id_log, "spawn_agent completed successfully");
+        Ok(result)
     }
 
     /// Spawn multiple agents.
@@ -303,9 +322,9 @@ impl AgentControlService {
         result
     }
 
-    // ========================================================================
+    // ======================================================================== 
     // Cleanup Agent
-    // ========================================================================
+    // ======================================================================== 
 
     /// Clean up an agent (close Zellij tab, delete worktree).
     #[tracing::instrument(skip(self))]
@@ -323,7 +342,7 @@ impl AgentControlService {
                     let agent_suffix = parts.first().unwrap_or(&"");
 
                     // Close Zellij tab with correct agent suffix
-                    let tab_name = format!("gh-{}-{}", issue_id, agent_suffix);
+                    let tab_name = format!("gh-{}-{{}}", issue_id, agent_suffix);
                     if let Err(e) = self.close_zellij_tab(&tab_name).await {
                         warn!(tab_name, error = %e, "Failed to close Zellij tab (may not exist)");
                     }
@@ -339,7 +358,7 @@ impl AgentControlService {
                         warn!("Failed to emit agent:stopped event: {}", e);
                     }
 
-                    return Ok(());
+                    return Ok(())
                 }
             }
         }
@@ -368,9 +387,9 @@ impl AgentControlService {
         result
     }
 
-    // ========================================================================
+    // ======================================================================== 
     // List Agents
-    // ========================================================================
+    // ======================================================================== 
 
     /// List all active agent worktrees.
     #[tracing::instrument(skip(self))]
@@ -427,9 +446,9 @@ impl AgentControlService {
         Ok(agents)
     }
 
-    // ========================================================================
+    // ======================================================================== 
     // Internal: Zellij
-    // ========================================================================
+    // ======================================================================== 
 
     fn check_zellij_env(&self) -> Result<String> {
         std::env::var("ZELLIJ_SESSION_NAME")
@@ -470,27 +489,27 @@ impl AgentControlService {
             // Use login shell to ensure PATH is loaded (gemini, claude, etc.)
             let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
             let layout_content = format!(
-                r#"layout {{
-    default_tab_template {{
-        pane size=1 borderless=true {{
-            plugin location="zellij:tab-bar"
+                r###"layout {{ 
+    default_tab_template {{ 
+        pane size=1 borderless=true {{ 
+            plugin location=\"zellij:tab-bar\"
         }}
         children
-        pane size=1 borderless=true {{
-            plugin location="zellij:status-bar"
+        pane size=1 borderless=true {{ 
+            plugin location=\"zellij:status-bar\"
         }}
     }}
-    tab name="{name}" {{
-        pane command="{shell}" {{
-            args "-l" "-c" "{cmd}"
-            cwd "{cwd}"
+    tab name=\"{name}\" {{ 
+        pane command=\"{shell}\" {{ 
+            args \"-l\" \"-c\" \"{cmd}\" 
+            cwd \"{cwd}\" 
             close_on_exit true
         }}
-        pane size=3 borderless=true {{
-            plugin location="file:~/.config/zellij/plugins/exomonad-plugin.wasm"
+        pane size=3 borderless=true {{ 
+            plugin location=\"file:~/.config/zellij/plugins/exomonad-plugin.wasm\"
         }}
     }}
-}}"#,
+}}"###,
                 name = name,
                 shell = shell,
                 cmd = kdl_escaped_command,
@@ -551,40 +570,64 @@ impl AgentControlService {
 
     #[tracing::instrument(skip(self))]
     async fn close_zellij_tab(&self, name: &str) -> Result<()> {
-        debug!(name, "Closing Zellij tab");
+        info!(name, "Running zellij action close-tab");
 
-        let output = Command::new("zellij")
-            .args(["action", "close-tab", "--tab-name", name])
-            .output()
-            .await
-            .context("Failed to execute zellij")?;
+        let result = timeout(ZELLIJ_TIMEOUT, async {
+            Command::new("zellij")
+                .args(["action", "close-tab", "--tab-name", name])
+                .output()
+                .await
+                .context("Failed to execute zellij")
+        })
+        .await
+        .map_err(|_| {
+            anyhow::Error::new(TimeoutError {
+                message: format!(
+                    "zellij close-tab timed out after {}s",
+                    ZELLIJ_TIMEOUT.as_secs()
+                ),
+            })
+        })??;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
+        if !result.status.success() {
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            warn!(stderr = %stderr, exit_code = ?result.status.code(), "zellij close-tab failed");
             return Err(anyhow!("zellij close-tab failed: {}", stderr));
+        } else {
+            info!(exit_code = ?result.status.code(), "zellij close-tab successful");
         }
 
         Ok(())
     }
 
-    // ========================================================================
+    // ======================================================================== 
     // Internal: Git Worktree
-    // ========================================================================
+    // ======================================================================== 
 
     #[tracing::instrument(skip(self))]
     async fn fetch_origin(&self) -> Result<()> {
-        info!("Fetching origin/main");
+        info!("Running git fetch origin main");
 
-        let output = Command::new("git")
-            .args(["fetch", "origin", "main"])
-            .current_dir(&self.project_dir)
-            .output()
-            .await
-            .context("Failed to execute git fetch")?;
+        let result = timeout(GIT_TIMEOUT, async {
+            Command::new("git")
+                .args(["fetch", "origin", "main"])
+                .current_dir(&self.project_dir)
+                .output()
+                .await
+                .context("Failed to execute git fetch")
+        })
+        .await
+        .map_err(|_| {
+            anyhow::Error::new(TimeoutError {
+                message: format!("git fetch timed out after {}s", GIT_TIMEOUT.as_secs()),
+            })
+        })??;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            warn!(stderr = %stderr, "git fetch warning (continuing anyway)");
+        if !result.status.success() {
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            warn!(stderr = %stderr, exit_code = ?result.status.code(), "git fetch warning (continuing anyway)");
+        } else {
+            info!(exit_code = ?result.status.code(), "git fetch successful");
         }
 
         Ok(())
@@ -594,7 +637,7 @@ impl AgentControlService {
     async fn create_worktree(&self, path: &Path, branch: &str) -> Result<()> {
         if path.exists() {
             info!(path = %path.display(), "Worktree already exists, reusing");
-            return Ok(());
+            return Ok(())
         }
 
         if let Some(parent) = path.parent() {
@@ -603,40 +646,65 @@ impl AgentControlService {
                 .context("Failed to create worktree parent directory")?;
         }
 
-        info!(path = %path.display(), branch, "Creating worktree");
+        info!(path = %path.display(), branch, "Running git worktree add");
 
-        let output = Command::new("git")
-            .args([
-                "worktree",
-                "add",
-                "-b",
-                branch,
-                path.to_str().unwrap(),
-                "origin/main",
-            ])
-            .current_dir(&self.project_dir)
-            .output()
-            .await
-            .context("Failed to execute git worktree add")?;
+        let result = timeout(GIT_TIMEOUT, async {
+            Command::new("git")
+                .args([
+                    "worktree",
+                    "add",
+                    "-b",
+                    branch,
+                    path.to_str().unwrap(),
+                    "origin/main",
+                ])
+                .current_dir(&self.project_dir)
+                .output()
+                .await
+                .context("Failed to execute git worktree add")
+        })
+        .await
+        .map_err(|_| {
+            anyhow::Error::new(TimeoutError {
+                message: format!("git worktree add timed out after {}s", GIT_TIMEOUT.as_secs()),
+            })
+        })??;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
+        if !result.status.success() {
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            warn!(stderr = %stderr, exit_code = ?result.status.code(), "git worktree add failed, checking if branch exists");
 
             if stderr.contains("already exists") {
                 debug!("Branch already exists, creating worktree without -b");
-                let output = Command::new("git")
-                    .args(["worktree", "add", path.to_str().unwrap(), branch])
-                    .current_dir(&self.project_dir)
-                    .output()
-                    .await?;
+                let fallback_result = timeout(GIT_TIMEOUT, async {
+                    Command::new("git")
+                        .args(["worktree", "add", path.to_str().unwrap(), branch])
+                        .current_dir(&self.project_dir)
+                        .output()
+                        .await
+                        .context("Failed to execute git worktree add (fallback)")
+                })
+                .await
+                .map_err(|_| {
+                    anyhow::Error::new(TimeoutError {
+                        message: format!(
+                            "git worktree add (fallback) timed out after {}s",
+                            GIT_TIMEOUT.as_secs()
+                        ),
+                    })
+                })??;
 
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
+                if !fallback_result.status.success() {
+                    let stderr = String::from_utf8_lossy(&fallback_result.stderr);
+                    warn!(stderr = %stderr, exit_code = ?fallback_result.status.code(), "git worktree add (fallback) failed");
                     return Err(anyhow!("git worktree add failed: {}", stderr));
                 }
+                info!(exit_code = ?fallback_result.status.code(), "git worktree add (fallback) successful");
             } else {
                 return Err(anyhow!("git worktree add failed: {}", stderr));
             }
+        } else {
+            info!(exit_code = ?result.status.code(), "git worktree add successful");
         }
 
         Ok(())
@@ -646,10 +714,10 @@ impl AgentControlService {
     async fn delete_worktree(&self, path: &Path, force: bool) -> Result<()> {
         if !path.exists() {
             debug!(path = %path.display(), "Worktree doesn't exist");
-            return Ok(());
+            return Ok(())
         }
 
-        info!(path = %path.display(), force, "Deleting worktree");
+        info!(path = %path.display(), force, "Running git worktree remove");
 
         let mut args = vec!["worktree", "remove"];
         if force {
@@ -657,16 +725,30 @@ impl AgentControlService {
         }
         args.push(path.to_str().unwrap());
 
-        let output = Command::new("git")
-            .args(&args)
-            .current_dir(&self.project_dir)
-            .output()
-            .await
-            .context("Failed to execute git worktree remove")?;
+        let result = timeout(GIT_TIMEOUT, async {
+            Command::new("git")
+                .args(&args)
+                .current_dir(&self.project_dir)
+                .output()
+                .await
+                .context("Failed to execute git worktree remove")
+        })
+        .await
+        .map_err(|_| {
+            anyhow::Error::new(TimeoutError {
+                message: format!(
+                    "git worktree remove timed out after {}s",
+                    GIT_TIMEOUT.as_secs()
+                ),
+            })
+        })??;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
+        if !result.status.success() {
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            warn!(stderr = %stderr, exit_code = ?result.status.code(), "git worktree remove failed");
             return Err(anyhow!("git worktree remove failed: {}", stderr));
+        } else {
+            info!(exit_code = ?result.status.code(), "git worktree remove successful");
         }
 
         Ok(())
@@ -685,9 +767,9 @@ impl AgentControlService {
         }
     }
 
-    // ========================================================================
+    // ======================================================================== 
     // Internal: Context Files
-    // ========================================================================
+    // ======================================================================== 
 
     async fn write_context_files(&self, worktree_path: &Path, agent_type: AgentType) -> Result<()> {
         // Create .exomonad directory
@@ -695,10 +777,10 @@ impl AgentControlService {
         fs::create_dir_all(&exomonad_dir).await?;
 
         // Write config.toml with role = "dev" for spawned agents
-        let config_content = r#"# Agent config (auto-generated)
+        let config_content = r###"# Agent config (auto-generated)
 role = "dev"
 project_dir = "../.."
-"#;
+"###;
         fs::write(exomonad_dir.join("config.toml"), config_content).await?;
         tracing::info!(
             worktree = %worktree_path.display(),
@@ -712,15 +794,14 @@ project_dir = "../.."
             .unwrap_or_else(|| "exomonad-sidecar".to_string());
 
         let mcp_content = format!(
-            r#"{{
+            r###"{{
   "mcpServers": {{
     "exomonad": {{
       "command": "{}",
       "args": ["mcp-stdio"]
     }}
   }}
-}}
-"#,
+}} "###,
             sidecar_path
         );
         fs::write(worktree_path.join(".mcp.json"), mcp_content).await?;
@@ -733,7 +814,7 @@ project_dir = "../.."
                 fs::create_dir_all(&claude_dir).await?;
 
                 let settings_content = format!(
-                    r#"{{
+                    r###"{{
   "enableAllProjectMcpServers": true,
   "hooks": {{
     "SubagentStop": [
@@ -747,8 +828,7 @@ project_dir = "../.."
       }}
     ]
   }}
-}}
-"#,
+}} "###,
                     sidecar_path
                 );
                 fs::write(claude_dir.join("settings.local.json"), settings_content).await?;
@@ -763,7 +843,7 @@ project_dir = "../.."
                 fs::create_dir_all(&gemini_dir).await?;
 
                 let settings_content = format!(
-                    r#"{{
+                    r###"{{
   "hooks": {{
     "SessionEnd": [
       {{
@@ -778,8 +858,7 @@ project_dir = "../.."
       }}
     ]
   }}
-}}
-"#,
+}} "###,
                     sidecar_path
                 );
                 fs::write(gemini_dir.join("settings.json"), settings_content).await?;
@@ -794,9 +873,9 @@ project_dir = "../.."
         Ok(())
     }
 
-    // ========================================================================
+    // ======================================================================== 
     // Internal: Prompt Building
-    // ========================================================================
+    // ======================================================================== 
 
     /// Build the initial prompt for a spawned agent.
     fn build_initial_prompt(
@@ -807,7 +886,7 @@ project_dir = "../.."
         issue_url: &str,
     ) -> String {
         format!(
-            r#"# Issue #{issue_id}: {title}
+            r###"# Issue #{issue_id}: {title}
 
 **Branch:** `{branch}`
 **Issue URL:** {issue_url}
@@ -819,36 +898,41 @@ project_dir = "../.."
 ## Instructions
 
 You are working on this GitHub issue in an isolated worktree.
-When done, commit your changes and create a pull request."#
+When done, commit your changes and create a pull request."###,
+            issue_id = issue_id,
+            title = title,
+            branch = branch,
+            issue_url = issue_url,
+            body = body,
         )
     }
 
     /// Escape a string for safe use in shell command with single quotes.
-    ///
+    /// 
     /// Wraps the string in single quotes and escapes any embedded single quotes.
     /// This is suitable for: sh -c "claude --prompt '...'"
-    ///
-    /// Example: "user's issue" -> "'user'\''s issue'"
+    /// 
+    /// Example: "user's issue" -> "'user'\'s issue'"
     fn escape_for_shell_command(s: &str) -> String {
         // Replace ' with '\'' (end quote, escaped quote, start quote)
-        let escaped = s.replace('\'', r"'\''");
-        format!("'{}'", escaped)
+        let escaped = s.replace('"', r"'\''");
+        format!("'{{}}"", escaped)
     }
 
     /// Escape a string for use inside a KDL string literal.
     /// KDL strings use backslash escaping: \n for newline, \\ for backslash, \" for quote.
     fn escape_for_kdl(s: &str) -> String {
-        s.replace('\\', r"\\")
-            .replace('"', r#"\""#)
-            .replace('\n', r"\n")
-            .replace('\r', r"\r")
-            .replace('\t', r"\t")
+        s.replace('\\', r"\\\\")
+            .replace('"', r"\\\"")
+            .replace('\n', r"\\n")
+            .replace('\r', r"\\r")
+            .replace('\t', r"\\t")
     }
 }
 
-// ============================================================================
+// ============================================================================ 
 // Helpers
-// ============================================================================
+// ============================================================================ 
 
 /// Create a URL-safe slug from a title.
 fn slugify(title: &str) -> String {
@@ -866,9 +950,9 @@ fn slugify(title: &str) -> String {
         .collect()
 }
 
-// ============================================================================
+// ============================================================================ 
 // Host Functions for WASM
-// ============================================================================
+// ============================================================================ 
 
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
 
@@ -1125,7 +1209,7 @@ mod tests {
     fn test_escape_for_shell_command_with_quote() {
         assert_eq!(
             AgentControlService::escape_for_shell_command("user's issue"),
-            r"'user'\''s issue'"
+            r"'user'\'s issue'"
         );
     }
 

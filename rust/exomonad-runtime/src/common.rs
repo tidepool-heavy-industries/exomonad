@@ -17,6 +17,12 @@ pub enum CommandError {
     },
 }
 
+#[derive(Debug, Error)]
+#[error("{message}")]
+pub struct TimeoutError {
+    pub message: String,
+}
+
 /// Standardized error code for programmatic handling across the FFI boundary.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -147,6 +153,26 @@ impl<T> From<anyhow::Error> for HostResult<T> {
                     });
                 }
             }
+        }
+
+        // Check for timeout (typed)
+        if let Some(timeout_err) = e.downcast_ref::<TimeoutError>() {
+             return HostResult::Error(HostError {
+                message: timeout_err.message.clone(),
+                code: ErrorCode::Timeout,
+                context: None,
+                suggestion: Some("Try increasing the timeout or checking network connection.".to_string()),
+            });
+        }
+
+        // Check for timeout (legacy string matching for other sources)
+        if e.to_string().to_lowercase().contains("timed out") {
+             return HostResult::Error(HostError {
+                message: format!("Operation timed out: {}", e),
+                code: ErrorCode::Timeout,
+                context: None,
+                suggestion: Some("Try increasing the timeout or checking network connection.".to_string()),
+            });
         }
 
         // Default to InternalError

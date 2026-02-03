@@ -245,7 +245,12 @@ pub async fn run_stdio_server(state: McpState) -> Result<()> {
         let request: JsonRpcRequest = match serde_json::from_str(&line) {
             Ok(req) => req,
             Err(e) => {
-                error!(error = %e, "Failed to parse JSON-RPC request");
+                let truncated = if line.len() > 1000 {
+                    format!("{}...", &line[..1000])
+                } else {
+                    line.clone()
+                };
+                error!(error = %e, request = %truncated, "Failed to parse JSON-RPC request");
                 let response =
                     JsonRpcResponse::error(Value::Null, -32700, format!("Parse error: {}", e));
                 let response_json = serde_json::to_string(&response)?;
