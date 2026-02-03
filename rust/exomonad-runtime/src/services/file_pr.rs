@@ -150,17 +150,21 @@ fn create_pr(input: &FilePRInput) -> Result<FilePROutput> {
 
     // Emit pr:filed event
     // Extract agent_id from branch name (format: gh-123/slug)
-    if let Some(agent_id) = git::extract_agent_id(&head_branch) {
-        let agent_id = exomonad_ui_protocol::AgentId::try_from(agent_id)
-            .map_err(|e| anyhow::anyhow!("Invalid agent_id: {}", e))?;
-
-        let event = exomonad_ui_protocol::AgentEvent::PrFiled {
-            agent_id,
-            pr_number,
-            timestamp: zellij_events::now_iso8601(),
-        };
-        if let Err(e) = zellij_events::emit_event(&event) {
-            warn!("Failed to emit pr:filed event: {}", e);
+    if let Some(agent_id_str) = git::extract_agent_id(&head_branch) {
+        match exomonad_ui_protocol::AgentId::try_from(agent_id_str) {
+            Ok(agent_id) => {
+                let event = exomonad_ui_protocol::AgentEvent::PrFiled {
+                    agent_id,
+                    pr_number,
+                    timestamp: zellij_events::now_iso8601(),
+                };
+                if let Err(e) = zellij_events::emit_event(&event) {
+                    warn!("Failed to emit pr:filed event: {}", e);
+                }
+            }
+            Err(e) => {
+                warn!("Invalid agent_id in branch '{}', skipping event: {}", head_branch, e);
+            }
         }
     }
 

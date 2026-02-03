@@ -187,7 +187,13 @@ impl ExternalService for OtelService {
             } => {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
+                    .map_err(|e| {
+                        warn!("SystemTime error (clock skew?): {}", e);
+                        ServiceError::Api {
+                            code: 500,
+                            message: format!("SystemTime error: {}", e),
+                        }
+                    })?
                     .as_nanos() as u64;
 
                 let payload = TracesData {
@@ -237,7 +243,13 @@ impl ExternalService for OtelService {
             } => {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
+                    .map_err(|e| {
+                        warn!("SystemTime error (clock skew?): {}", e);
+                        ServiceError::Api {
+                            code: 500,
+                            message: format!("SystemTime error: {}", e),
+                        }
+                    })?
                     .as_nanos() as u64;
 
                 let payload = MetricsData {
