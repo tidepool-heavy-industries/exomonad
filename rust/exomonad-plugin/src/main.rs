@@ -114,6 +114,10 @@ impl ratatui::backend::Backend for ZellijBackend {
 
         // Ensure we leave the terminal in a default style state after drawing.
         write!(buffer, "\x1b[0m").unwrap();
+        // Reset tracking state to match the terminal reset
+        current_fg = None;
+        current_bg = None;
+        current_mod = Modifier::empty();
 
         use std::io::Write as IoWrite;
         std::io::stdout().write_all(buffer.as_bytes())?;
