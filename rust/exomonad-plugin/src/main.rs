@@ -114,10 +114,6 @@ impl ratatui::backend::Backend for ZellijBackend {
 
         // Ensure we leave the terminal in a default style state after drawing.
         write!(buffer, "\x1b[0m").unwrap();
-        // Reset tracking state to match the terminal reset
-        current_fg = None;
-        current_bg = None;
-        current_mod = Modifier::empty();
 
         use std::io::Write as IoWrite;
         std::io::stdout().write_all(buffer.as_bytes())?;
@@ -262,14 +258,12 @@ impl ZellijPlugin for ExoMonadPlugin {
                                             state.values.get_mut(id)
                                         {
                                             s.push(c);
-                                            should_render = true;
                                             return true;
                                         }
                                     }
                                 } else if let BareKey::Backspace = key.bare_key {
                                     if let Some(ElementValue::Text(s)) = state.values.get_mut(id) {
                                         s.pop();
-                                        should_render = true;
                                         return true;
                                     }
                                 }
@@ -279,14 +273,12 @@ impl ZellijPlugin for ExoMonadPlugin {
                                     if let Some(ElementValue::Number(v)) = state.values.get_mut(id)
                                     {
                                         *v = (*v - 1.0).max(*min);
-                                        should_render = true;
                                         return true;
                                     }
                                 } else if let BareKey::Right = key.bare_key {
                                     if let Some(ElementValue::Number(v)) = state.values.get_mut(id)
                                     {
                                         *v = (*v + 1.0).min(*max);
-                                        should_render = true;
                                         return true;
                                     }
                                 }
@@ -295,13 +287,11 @@ impl ZellijPlugin for ExoMonadPlugin {
                                 if let BareKey::Left = key.bare_key {
                                     if self.sub_index > 0 {
                                         self.sub_index -= 1;
-                                        should_render = true;
                                         return true;
                                     }
                                 } else if let BareKey::Right = key.bare_key {
                                     if self.sub_index < options.len().saturating_sub(1) {
                                         self.sub_index += 1;
-                                        should_render = true;
                                         return true;
                                     }
                                 } else if let BareKey::Char(' ') = key.bare_key {
@@ -310,7 +300,6 @@ impl ZellijPlugin for ExoMonadPlugin {
                                     {
                                         if let Some(val) = vec.get_mut(self.sub_index) {
                                             *val = !*val;
-                                            should_render = true;
                                             return true;
                                         }
                                     }
@@ -627,15 +616,5 @@ fn evaluate_visibility(rule: &VisibilityRule, state: &PopupState) -> bool {
             true
         }
         _ => true,
-    }
-}
-
-trait KeyModifierExt {
-    fn has_modifiers(&self, modifiers: &[KeyModifier]) -> bool;
-}
-
-impl KeyModifierExt for KeyWithModifier {
-    fn has_modifiers(&self, modifiers: &[KeyModifier]) -> bool {
-        modifiers.iter().all(|m| self.key_modifiers.contains(m))
     }
 }
