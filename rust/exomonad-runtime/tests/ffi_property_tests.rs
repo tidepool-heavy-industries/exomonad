@@ -155,7 +155,7 @@ where
         
         // Borrow plugin mutably
         let mut plugin = plugin_cell.borrow_mut();
-        let result: O = call_guest(&mut *plugin, func_name, input_json);
+        let result: O = call_guest(&mut plugin, func_name, input_json);
         
         assert_eq!(result, expected_output);
         Ok(())

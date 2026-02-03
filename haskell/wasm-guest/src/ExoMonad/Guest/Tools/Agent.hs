@@ -16,11 +16,10 @@ module ExoMonad.Guest.Tools.Agent
 where
 
 import Polysemy (runM)
-import Data.Aeson (FromJSON, ToJSON, Value, object, (.:), (.:?), (.=))
+import Data.Aeson (FromJSON, object, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import Data.Text qualified as T
 import ExoMonad.Guest.Effects.AgentControl qualified as AC
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)

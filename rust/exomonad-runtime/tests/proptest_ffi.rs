@@ -192,7 +192,7 @@ prop_compose! {
     ) -> BatchSpawnResult {
         BatchSpawnResult {
             spawned,
-            failed: failed.into_iter().map(|(id, err)| (id.into(), err.into())).collect(),
+            failed,
         }
     }
 }
@@ -204,7 +204,7 @@ prop_compose! {
     ) -> BatchCleanupResult {
         BatchCleanupResult {
             cleaned,
-            failed: failed.into_iter().map(|(id, err)| (id.into(), err.into())).collect(),
+            failed,
         }
     }
 }

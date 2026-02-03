@@ -44,7 +44,7 @@ where
 
 import Polysemy (Sem, Member, interpret, embed, send)
 import Polysemy.Embed (Embed)
-import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.:?), (.=))
+import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.=))
 import Data.Text (Text, unpack)
 import ExoMonad.Guest.HostCall (callHost, host_agent_cleanup, host_agent_cleanup_batch, host_agent_list, host_agent_spawn, host_agent_spawn_batch, HostResult (..), HostErrorDetails (..), ErrorContext (..), ResultKind (..))
 import GHC.Generics (Generic)

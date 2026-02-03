@@ -217,17 +217,16 @@ mod tests {
         let result: Result<MCPCallOutput, _> = serde_json::from_str(json);
 
         // Document actual behavior - if this fails, optional fields need defaults
-        if result.is_err() {
+        if let Ok(output) = result {
+            // If parsing succeeds, fields are truly optional
+            assert!(output.success);
+            assert!(output.result.is_none());
+            assert!(output.error.is_none());
+        } else {
             // If parsing fails, result/error are required (not truly optional)
             let json_with_nulls = r#"{"success": true, "result": null, "error": null}"#;
             let output: MCPCallOutput = serde_json::from_str(json_with_nulls).unwrap();
             assert!(output.success);
-        } else {
-            // If parsing succeeds, fields are truly optional
-            let output = result.unwrap();
-            assert!(output.success);
-            assert!(output.result.is_none());
-            assert!(output.error.is_none());
         }
     }
 

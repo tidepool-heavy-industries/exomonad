@@ -44,6 +44,7 @@ fn unix_enforce_singleton(pid_file: &Path) -> Result<PidGuard> {
     }
 
     // Open with read/write/create. We keep this file open in the guard.
+    #[allow(clippy::suspicious_open_options)]
     let mut file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -282,6 +283,7 @@ mod tests {
         let file1 = OpenOptions::new()
             .create(true)
             .write(true)
+            .truncate(false)
             .open(&pid_file)
             .unwrap();
         #[allow(deprecated)]
@@ -294,10 +296,7 @@ mod tests {
         let path_clone = pid_file.clone();
         let handle = std::thread::spawn(move || {
             // Should block or fail
-            match enforce_singleton(&path_clone) {
-                Ok(_) => true,
-                Err(_) => false,
-            }
+            enforce_singleton(&path_clone).is_ok()
         });
 
         // The other thread will try to lock. It will block or loop.

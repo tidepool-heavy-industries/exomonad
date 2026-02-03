@@ -11,7 +11,7 @@ where
 
 import ExoMonad.Guest.Records.FilePR (FilePRTools (..), filePRToolsHandler, filePRToolsSchema)
 import ExoMonad.Guest.Records.Ping (PingTools (..), pingToolsHandler, pingToolsSchema)
-import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema, ToolMode ((:-)))
+import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema)
 import GHC.Generics (Generic)
 
 -- | Tools available to the Dev role.

@@ -8,7 +8,7 @@ module ExoMonad.Guest.Records.Agent
   )
 where
 
-import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema, Handler, Schema, ToolMode ((:-)), mkHandler, mkSchema)
+import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema, ToolMode ((:-)), mkHandler, mkSchema)
 import ExoMonad.Guest.Tools.Agent (CleanupAgents, ListAgents, SpawnAgents)
 import GHC.Generics (Generic)
 
