@@ -71,6 +71,7 @@ enum Commands {
 // Hook Handler
 // ============================================================================
 
+#[tracing::instrument(skip(plugin, runtime), fields(event = ?event_type))]
 async fn handle_hook(
     plugin: &PluginManager,
     event_type: HookEventType,
@@ -85,7 +86,6 @@ async fn handle_hook(
         .context("Failed to read stdin")?;
 
     debug!(
-        event = ?event_type,
         runtime = ?runtime,
         payload_len = stdin_content.len(),
         "Received hook event"
@@ -151,6 +151,10 @@ async fn handle_hook(
 /// - MCP stdio: Logs to ~/.exomonad/logs/sidecar-TIMESTAMP.log
 /// - Other modes: Logs to stderr (preserves current behavior)
 fn init_logging(command: &Commands) {
+    let use_json = std::env::var("EXOMONAD_LOG_FORMAT")
+        .map(|v| v.eq_ignore_ascii_case("json"))
+        .unwrap_or(false);
+
     match command {
         Commands::McpStdio => {
             // File-based logging for stdio mode
@@ -170,26 +174,36 @@ fn init_logging(command: &Commands) {
                 .open(&log_file)
                 .expect("Failed to open log file");
 
-            tracing_subscriber::fmt()
+            let builder = tracing_subscriber::fmt()
                 .with_env_filter(
                     tracing_subscriber::EnvFilter::from_default_env()
                         .add_directive(tracing::Level::INFO.into()),
                 )
                 .with_writer(std::sync::Arc::new(file))
-                .with_ansi(false) // No ANSI colors in file
-                .init();
+                .with_ansi(false); // No ANSI colors in file
+
+            if use_json {
+                builder.json().init();
+            } else {
+                builder.init();
+            }
 
             eprintln!("MCP stdio logging to: {}", log_file.display());
         }
         _ => {
             // Stderr logging for other modes (existing behavior)
-            tracing_subscriber::fmt()
+            let builder = tracing_subscriber::fmt()
                 .with_env_filter(
                     tracing_subscriber::EnvFilter::from_default_env()
                         .add_directive(tracing::Level::INFO.into()),
                 )
-                .with_writer(std::io::stderr)
-                .init();
+                .with_writer(std::io::stderr);
+
+            if use_json {
+                builder.json().init();
+            } else {
+                builder.init();
+            }
         }
     }
 }

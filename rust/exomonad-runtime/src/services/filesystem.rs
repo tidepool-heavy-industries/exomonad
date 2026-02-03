@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
-use tracing::{debug, info};
 
 // ============================================================================
 // Service
@@ -95,10 +94,10 @@ impl FileSystemService {
     }
 
     /// Read a file.
+    #[tracing::instrument(skip(self))]
     pub async fn read_file(&self, input: &ReadFileInput) -> Result<ReadFileOutput> {
         let path = self.resolve_path(&input.path);
-        debug!(path = %path.display(), "Reading file");
-
+        
         let content = fs::read_to_string(&path)
             .await
             .with_context(|| format!("Failed to read file: {}", path.display()))?;
@@ -111,13 +110,6 @@ impl FileSystemService {
             (content, false)
         };
 
-        info!(
-            path = %path.display(),
-            bytes_read,
-            truncated,
-            "File read successfully"
-        );
-
         Ok(ReadFileOutput {
             content,
             bytes_read,
@@ -126,9 +118,9 @@ impl FileSystemService {
     }
 
     /// Write a file.
+    #[tracing::instrument(skip(self))]
     pub async fn write_file(&self, input: &WriteFileInput) -> Result<WriteFileOutput> {
         let path = self.resolve_path(&input.path);
-        debug!(path = %path.display(), "Writing file");
 
         if input.create_parents {
             if let Some(parent) = path.parent() {
@@ -145,12 +137,6 @@ impl FileSystemService {
         fs::write(&path, &input.content)
             .await
             .with_context(|| format!("Failed to write file: {}", path.display()))?;
-
-        info!(
-            path = %path.display(),
-            bytes_written,
-            "File written successfully"
-        );
 
         Ok(WriteFileOutput {
             bytes_written,
@@ -199,6 +185,7 @@ pub fn fs_read_file_host_fn(service: Arc<FileSystemService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<FileSystemService>>|
          -> Result<(), Error> {
+            let _span = tracing::info_span!("host_function", function = "fs_read_file").entered();
             let input: ReadFileInput = get_input(plugin, inputs[0])?;
 
             let service_arc = user_data.get()?;
@@ -228,6 +215,7 @@ pub fn fs_write_file_host_fn(service: Arc<FileSystemService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<FileSystemService>>|
          -> Result<(), Error> {
+            let _span = tracing::info_span!("host_function", function = "fs_write_file").entered();
             let input: WriteFileInput = get_input(plugin, inputs[0])?;
 
             let service_arc = user_data.get()?;

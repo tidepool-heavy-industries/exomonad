@@ -221,6 +221,7 @@ impl GitHubService {
     /// - Repository doesn't exist or is not accessible
     /// - Network request fails
     /// - Authentication fails
+    #[tracing::instrument(skip(self))]
     pub async fn list_issues(
         &self,
         repo: &Repo,
@@ -267,6 +268,7 @@ impl GitHubService {
             .collect())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get_issue(&self, repo: &Repo, number: u64) -> Result<Issue> {
         let issue = self
             .client
@@ -289,6 +291,7 @@ impl GitHubService {
         })
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn create_pr(&self, repo: &Repo, spec: CreatePRSpec) -> Result<PullRequest> {
         let pr = self
             .client
@@ -316,6 +319,7 @@ impl GitHubService {
         })
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn list_prs(
         &self,
         repo: &Repo,
@@ -363,14 +367,8 @@ impl GitHubService {
             .collect())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get_pr_for_branch(&self, repo: &Repo, head: &str) -> Result<Option<PullRequest>> {
-        tracing::info!(
-            "[GitHubService] Searching for PR with head={} in {}/{}",
-            head,
-            repo.owner,
-            repo.name
-        );
-
         let pulls_handler = self.client.pulls(repo.owner.as_str(), repo.name.as_str());
         let page = pulls_handler
             .list()
@@ -382,8 +380,8 @@ impl GitHubService {
         let pr = page.into_iter().next();
 
         match &pr {
-            Some(p) => tracing::info!("[GitHubService] Found PR #{} for branch {}", p.number, head),
-            None => tracing::info!("[GitHubService] No PR found for branch {}", head),
+            Some(p) => tracing::info!(number = p.number, head, "Found PR for branch"),
+            None => tracing::info!(head, "No PR found for branch"),
         }
 
         Ok(pr.map(|pr| PullRequest {
@@ -404,14 +402,15 @@ impl GitHubService {
         }))
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get_pr_review_comments(
         &self,
         _repo: &Repo,
         pr_number: u64,
     ) -> Result<Vec<ReviewComment>> {
-        tracing::info!(
-            "[GitHubService] Review comment checking is simplified - returning empty for PR #{}",
-            pr_number
+        tracing::debug!(
+            pr_number,
+            "Review comment checking is simplified - returning empty"
         );
         Ok(vec![])
     }
@@ -527,6 +526,7 @@ fn github_list_issues(
     outputs: &mut [Val],
     _user_data: UserData<()>,
 ) -> std::result::Result<(), Error> {
+    let _span = tracing::info_span!("host_function", function = "github_list_issues").entered();
     #[derive(Deserialize)]
     struct Input {
         repo: Repo,
@@ -555,6 +555,7 @@ fn github_get_issue(
     outputs: &mut [Val],
     _user_data: UserData<()>,
 ) -> std::result::Result<(), Error> {
+    let _span = tracing::info_span!("host_function", function = "github_get_issue").entered();
     #[derive(Deserialize)]
     struct Input {
         repo: Repo,
@@ -583,6 +584,7 @@ fn github_create_pr(
     outputs: &mut [Val],
     _user_data: UserData<()>,
 ) -> std::result::Result<(), Error> {
+    let _span = tracing::info_span!("host_function", function = "github_create_pr").entered();
     #[derive(Deserialize)]
     struct Input {
         repo: Repo,
@@ -611,6 +613,7 @@ fn github_list_prs(
     outputs: &mut [Val],
     _user_data: UserData<()>,
 ) -> std::result::Result<(), Error> {
+    let _span = tracing::info_span!("host_function", function = "github_list_prs").entered();
     #[derive(Deserialize)]
     struct Input {
         repo: Repo,
@@ -639,6 +642,7 @@ fn github_get_pr_for_branch(
     outputs: &mut [Val],
     _user_data: UserData<()>,
 ) -> std::result::Result<(), Error> {
+    let _span = tracing::info_span!("host_function", function = "github_get_pr_for_branch").entered();
     #[derive(Deserialize)]
     struct Input {
         repo: Repo,
@@ -667,6 +671,7 @@ fn github_get_pr_review_comments(
     outputs: &mut [Val],
     _user_data: UserData<()>,
 ) -> std::result::Result<(), Error> {
+    let _span = tracing::info_span!("host_function", function = "github_get_pr_review_comments").entered();
     #[derive(Deserialize)]
     struct Input {
         repo: Repo,
