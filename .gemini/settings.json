@@ -9,6 +9,7 @@
             "command": "/Users/inannamalick/.cargo/bin/exomonad-sidecar hook after-agent --runtime gemini",
             "timeout": 30000
           }
+          
         ]
       }
     ]
