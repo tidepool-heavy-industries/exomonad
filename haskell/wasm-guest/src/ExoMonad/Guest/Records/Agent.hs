@@ -9,13 +9,14 @@ module ExoMonad.Guest.Records.Agent
 where
 
 import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema, ToolMode ((:-)), mkHandler, mkSchema)
-import ExoMonad.Guest.Tools.Agent (CleanupAgents, ListAgents, SpawnAgents)
+import ExoMonad.Guest.Tools.Agent (CleanupAgents, CleanupMergedAgents, ListAgents, SpawnAgents)
 import GHC.Generics (Generic)
 
 -- | Agent control tools record.
 data AgentTools mode = AgentTools
   { spawnAgents :: mode :- SpawnAgents,
     cleanupAgents :: mode :- CleanupAgents,
+    cleanupMergedAgents :: mode :- CleanupMergedAgents,
     listAgents :: mode :- ListAgents
   }
   deriving (Generic)
@@ -26,6 +27,7 @@ agentToolsHandler =
   AgentTools
     { spawnAgents = mkHandler @SpawnAgents,
       cleanupAgents = mkHandler @CleanupAgents,
+      cleanupMergedAgents = mkHandler @CleanupMergedAgents,
       listAgents = mkHandler @ListAgents
     }
 
@@ -35,5 +37,6 @@ agentToolsSchema =
   AgentTools
     { spawnAgents = mkSchema @SpawnAgents,
       cleanupAgents = mkSchema @CleanupAgents,
+      cleanupMergedAgents = mkSchema @CleanupMergedAgents,
       listAgents = mkSchema @ListAgents
     }

@@ -3,11 +3,13 @@ module ExoMonad.Guest.Tools.Agent
   ( -- * Tool types
     SpawnAgents,
     CleanupAgents,
+    CleanupMergedAgents,
     ListAgents,
 
     -- * Argument types (exported for tests)
     SpawnAgentsArgs (..),
     CleanupAgentsArgs (..),
+    CleanupMergedAgentsArgs (..),
     ListAgentsArgs (..),
 
     -- * Re-export AgentType for use in other modules
@@ -144,6 +146,33 @@ instance MCPTool CleanupAgents where
   toolHandler args = do
     let force = maybe False id (caForce args)
     result <- runM $ AC.runAgentControl $ AC.cleanupAgents (caIssues args) force
+    pure $ successResult $ Aeson.toJSON result
+
+-- ============================================================================
+-- CleanupMergedAgents
+-- ============================================================================
+
+-- | Clean up agent worktrees for merged branches.
+data CleanupMergedAgents
+
+data CleanupMergedAgentsArgs = CleanupMergedAgentsArgs
+  deriving (Show, Eq, Generic)
+
+instance FromJSON CleanupMergedAgentsArgs where
+  parseJSON = Aeson.withObject "CleanupMergedAgentsArgs" $ \_ ->
+    pure CleanupMergedAgentsArgs
+
+instance MCPTool CleanupMergedAgents where
+  type ToolArgs CleanupMergedAgents = CleanupMergedAgentsArgs
+  toolName = "cleanup_merged_agents"
+  toolDescription = "Clean up agent worktrees whose branches have been merged to main"
+  toolSchema =
+    object
+      [ "type" .= ("object" :: Text),
+        "properties" .= object []
+      ]
+  toolHandler _args = do
+    result <- runM $ AC.runAgentControl AC.cleanupMergedAgents
     pure $ successResult $ Aeson.toJSON result
 
 -- ============================================================================

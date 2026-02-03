@@ -19,6 +19,7 @@ module ExoMonad.Guest.Effects.AgentControl
     spawnAgents,
     cleanupAgent,
     cleanupAgents,
+    cleanupMergedAgents,
     listAgents,
 
     -- * Interpreter
@@ -39,6 +40,7 @@ module ExoMonad.Guest.Effects.AgentControl
     SpawnAgentsInput (..),
     CleanupAgentInput (..),
     CleanupAgentsInput (..),
+    CleanupMergedAgentsInput (..),
   )
 where
 
@@ -46,7 +48,7 @@ import Polysemy (Sem, Member, interpret, embed, send)
 import Polysemy.Embed (Embed)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.=))
 import Data.Text (Text, unpack)
-import ExoMonad.Guest.HostCall (callHost, host_agent_cleanup, host_agent_cleanup_batch, host_agent_list, host_agent_spawn, host_agent_spawn_batch)
+import ExoMonad.Guest.HostCall (callHost, host_agent_cleanup, host_agent_cleanup_batch, host_agent_cleanup_merged, host_agent_list, host_agent_spawn, host_agent_spawn_batch)
 import ExoMonad.Guest.FFI (FFIBoundary (..), FFIResult (..), FFIError (..), ErrorContext (..), ErrorCode (..))
 import GHC.Generics (Generic)
 
@@ -304,6 +306,14 @@ instance FromJSON CleanupAgentsInput where
 
 instance FFIBoundary CleanupAgentsInput
 
+data CleanupMergedAgentsInput = CleanupMergedAgentsInput
+  deriving (Show, Generic)
+
+instance ToJSON CleanupMergedAgentsInput where
+  toJSON CleanupMergedAgentsInput = object []
+
+instance FFIBoundary CleanupMergedAgentsInput
+
 data ListAgentsInput = ListAgentsInput
   deriving (Show, Generic)
 
@@ -329,6 +339,8 @@ data AgentControl m a where
   CleanupAgent :: Text -> Bool -> AgentControl m (Either Text ())
   -- | Clean up multiple agents.
   CleanupAgents :: [Text] -> Bool -> AgentControl m BatchCleanupResult
+  -- | Clean up merged agents.
+  CleanupMergedAgents :: AgentControl m BatchCleanupResult
   -- | List all active agent worktrees.
   ListAgents :: AgentControl m (Either Text [AgentInfo])
 
@@ -344,6 +356,9 @@ cleanupAgent issueId force = send (CleanupAgent issueId force)
 
 cleanupAgents :: Member AgentControl r => [Text] -> Bool -> Sem r BatchCleanupResult
 cleanupAgents issueIds force = send (CleanupAgents issueIds force)
+
+cleanupMergedAgents :: Member AgentControl r => Sem r BatchCleanupResult
+cleanupMergedAgents = send CleanupMergedAgents
 
 listAgents :: Member AgentControl r => Sem r (Either Text [AgentInfo])
 listAgents = send ListAgents
@@ -391,6 +406,15 @@ runAgentControl = interpret $ \case
   CleanupAgents issueIds force -> embed $ do
     let input = CleanupAgentsInput issueIds force
     res <- callHost host_agent_cleanup_batch input
+    pure $ case res of
+      Left err ->
+        BatchCleanupResult
+          { cleaned = [],
+            cleanupFailed = [("", err)]
+          }
+      Right r -> r
+  CleanupMergedAgents -> embed $ do
+    res <- callHost host_agent_cleanup_merged CleanupMergedAgentsInput
     pure $ case res of
       Left err ->
         BatchCleanupResult
