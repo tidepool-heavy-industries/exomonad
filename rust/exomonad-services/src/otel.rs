@@ -187,7 +187,7 @@ impl ExternalService for OtelService {
             } => {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
+                    .unwrap_or_default()
                     .as_nanos() as u64;
 
                 let payload = TracesData {
@@ -211,7 +211,10 @@ impl ExternalService for OtelService {
                     }],
                 };
 
-                let url = self.endpoint.join("/v1/traces").unwrap();
+                let url = self.endpoint.join("/v1/traces").map_err(|e| ServiceError::Api {
+                    code: 500,
+                    message: format!("URL error: {}", e),
+                })?;
                 let mut builder = self.client.post(url).json(&payload);
                 for (k, v) in &self.headers {
                     builder = builder.header(k, v);
@@ -234,7 +237,7 @@ impl ExternalService for OtelService {
             } => {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
+                    .unwrap_or_default()
                     .as_nanos() as u64;
 
                 let payload = MetricsData {
@@ -259,7 +262,10 @@ impl ExternalService for OtelService {
                     }],
                 };
 
-                let url = self.endpoint.join("/v1/metrics").unwrap();
+                let url = self.endpoint.join("/v1/metrics").map_err(|e| ServiceError::Api {
+                    code: 500,
+                    message: format!("URL error: {}", e),
+                })?;
                 let mut builder = self.client.post(url).json(&payload);
                 for (k, v) in &self.headers {
                     builder = builder.header(k, v);

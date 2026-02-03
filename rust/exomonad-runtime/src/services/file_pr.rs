@@ -151,8 +151,11 @@ fn create_pr(input: &FilePRInput) -> Result<FilePROutput> {
     // Emit pr:filed event
     // Extract agent_id from branch name (format: gh-123/slug)
     if let Some(agent_id) = git::extract_agent_id(&head_branch) {
+        let agent_id = exomonad_ui_protocol::AgentId::try_from(agent_id)
+            .map_err(|e| anyhow::anyhow!("Invalid agent_id: {}", e))?;
+
         let event = exomonad_ui_protocol::AgentEvent::PrFiled {
-            agent_id: exomonad_ui_protocol::AgentId::try_from(agent_id).expect("Invalid agent_id"),
+            agent_id,
             pr_number,
             timestamp: zellij_events::now_iso8601(),
         };
