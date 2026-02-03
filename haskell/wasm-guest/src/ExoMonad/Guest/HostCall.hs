@@ -61,9 +61,9 @@ import Data.Word (Word64)
 import Extism.PDK.Memory (Memory, alloc, findMemory, free, load, memoryOffset)
 import GHC.Generics (Generic)
 
--- ============================================================================
+-- ============================================================================ 
 -- HostResult wrapper (matches Rust serde format)
--- ============================================================================
+-- ============================================================================ 
 
 -- | Result kind discriminator (strongly typed).
 -- Serialized to "Success" or "Error" at the JSON boundary.
@@ -92,7 +92,8 @@ data HostErrorDetails = HostErrorDetails
   deriving (Show, Eq, Generic)
 
 data ErrorContext = ErrorContext
-  { errorContextCommand :: Maybe Text,
+  {
+    errorContextCommand :: Maybe Text,
     errorContextExitCode :: Maybe Int,
     errorContextStderr :: Maybe Text,
     errorContextStdout :: Maybe Text,
@@ -109,12 +110,12 @@ instance (FromJSON a) => FromJSON (HostResult a) where
       ErrorKind -> HostError <$> v .: "payload"
 
 instance (ToJSON a) => ToJSON (HostResult a) where
-  toJSON (HostSuccess payload) =
+  toJSON (HostSuccess payload) = 
     object
       [ "kind" .= ("Success" :: Text),
         "payload" .= payload
       ]
-  toJSON (HostError details) =
+  toJSON (HostError details) = 
     object
       [ "kind" .= ("Error" :: Text),
         "payload" .= details
@@ -129,7 +130,7 @@ instance FromJSON HostErrorDetails where
       <*> v .:? "suggestion"
 
 instance ToJSON HostErrorDetails where
-  toJSON (HostErrorDetails msg code ctx sugg) =
+  toJSON (HostErrorDetails msg code ctx sugg) = 
     object
       [ "message" .= msg,
         "code" .= code,
@@ -148,7 +149,7 @@ instance FromJSON ErrorContext where
       <*> v .:? "working_dir"
 
 instance ToJSON ErrorContext where
-  toJSON (ErrorContext cmd code stderr stdout path dir) =
+  toJSON (ErrorContext cmd code stderr stdout path dir) = 
     object
       [ "command" .= cmd,
         "exit_code" .= code,
@@ -159,9 +160,9 @@ instance ToJSON ErrorContext where
       ]
 
 
--- ============================================================================
+-- ============================================================================ 
 -- Log Types (matches Rust LogPayload/LogLevel)
--- ============================================================================
+-- ============================================================================ 
 
 data LogLevel = Debug | Info | Warn | Error
   deriving (Show, Eq, Generic)
@@ -181,9 +182,9 @@ data LogPayload = LogPayload
 
 instance ToJSON LogPayload
 
--- ============================================================================
+-- ============================================================================ 
 -- Git host functions
--- ============================================================================
+-- ============================================================================ 
 foreign import ccall "git_get_branch" host_git_get_branch :: Word64 -> IO Word64
 
 foreign import ccall "git_get_worktree" host_git_get_worktree :: Word64 -> IO Word64
@@ -267,14 +268,14 @@ callHost rawFn request = do
             HostError details -> pure $ Left (formatError details)
 
 formatError :: HostErrorDetails -> String
-formatError details =
-  T.unpack $
+formatError details = 
+  T.unpack $ 
     "[" <> hostErrorCode details <> "] " <> hostErrorMessage details
       <> maybe "" (\s -> "\nSuggestion: " <> s) (hostErrorSuggestion details)
       <> maybe "" formatContext (hostErrorContext details)
 
 formatContext :: ErrorContext -> Text
-formatContext ctx =
+formatContext ctx = 
   "\nContext:"
     <> maybe "" (\c -> "\n  Command: " <> c) (errorContextCommand ctx)
     <> maybe "" (\e -> "\n  Exit Code: " <> T.pack (show e)) (errorContextExitCode ctx)

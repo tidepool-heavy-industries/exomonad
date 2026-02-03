@@ -832,14 +832,15 @@ project_dir = "../.."
                 );
             }
             AgentType::Gemini => {
-                // Create .gemini directory and write settings with SessionEnd hook
+                // Create .gemini directory and write settings with AfterAgent hook
+                // AfterAgent fires after each agent turn, SessionEnd only on exit
                 let gemini_dir = worktree_path.join(".gemini");
                 fs::create_dir_all(&gemini_dir).await?;
 
                 let settings_content = format!(
                     r###"{{
   "hooks": {{
-    "SessionEnd": [
+    "AfterAgent": [
       {{
         "hooks": [
           {{
@@ -858,7 +859,7 @@ project_dir = "../.."
                 fs::write(gemini_dir.join("settings.json"), settings_content).await?;
                 tracing::info!(
                     worktree = %worktree_path.display(),
-                    "Wrote .gemini/settings.json with SessionEnd hook"
+                    "Wrote .gemini/settings.json with AfterAgent hook"
                 );
             }
         }
