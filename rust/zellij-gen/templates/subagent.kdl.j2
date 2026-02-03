@@ -5,36 +5,7 @@ layout {
         }
         children
         pane size=1 borderless=true {
-            plugin location="file:~/.config/zellij/plugins/zjstatus.wasm" {
-                format_left   "{mode} #[fg=#2aa198,bold]{session}"
-                format_center "{tabs}"
-                format_right  "{command_git_branch} #[fg=#839496]{datetime}"
-
-                mode_normal        "#[bg=#2aa198,fg=#002b36,bold] NORMAL "
-                mode_locked        "#[bg=#d33682,fg=#002b36,bold] LOCKED "
-                mode_pane          "#[bg=#b58900,fg=#002b36,bold] PANE "
-                mode_tab           "#[bg=#859900,fg=#002b36,bold] TAB "
-                mode_scroll        "#[bg=#268bd2,fg=#002b36,bold] SCROLL "
-                mode_enter_search  "#[bg=#dc322f,fg=#002b36,bold] SEARCH "
-                mode_search        "#[bg=#dc322f,fg=#002b36,bold] SEARCH "
-                mode_resize        "#[bg=#b58900,fg=#002b36,bold] RESIZE "
-                mode_rename_tab    "#[bg=#859900,fg=#002b36,bold] RENAME "
-                mode_rename_pane   "#[bg=#859900,fg=#002b36,bold] RENAME "
-                mode_session       "#[bg=#cb4b16,fg=#002b36,bold] SESSION "
-                mode_move          "#[bg=#b58900,fg=#002b36,bold] MOVE "
-                mode_tmux          "#[bg=#d33682,fg=#002b36,bold] TMUX "
-
-                tab_normal   "#[fg=#839496] {index} {name} "
-                tab_active   "#[fg=#2aa198,bold] {index} {name} "
-
-                datetime        "#[fg=#839496]{format}"
-                datetime_format "%H:%M"
-
-                command_git_branch_command     "git rev-parse --abbrev-ref HEAD 2>/dev/null || echo ''"
-                command_git_branch_format      "#[fg=#859900] {stdout}"
-                command_git_branch_interval    "5"
-                command_git_branch_rendermode  "static"
-            }
+            {% include "includes/zjstatus.kdl.j2" %}
         }
     }
 

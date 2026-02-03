@@ -361,12 +361,15 @@ impl AgentControlService {
                 if name.starts_with(&prefix) {
                     // Parse the worktree name to extract slug and agent type
                     // Format: gh-{issue_id}-{slug}-{agent_suffix}
-                    let parts: Vec<&str> = name.splitn(4, '-').collect();
-                    let slug = parts.get(2).unwrap_or(&"");
-                    let agent_suffix = parts.get(3).unwrap_or(&"");
+                    // Split from right first since agent_suffix (claude/gemini) has no hyphens
+                    let (rest, agent_suffix) = name.rsplit_once('-').unwrap_or((name, ""));
+
+                    // Now extract slug from rest (which is "gh-{issue_id}-{slug}")
+                    // Skip past "gh-{issue_id}-" prefix
+                    let slug = rest.strip_prefix(&prefix).unwrap_or("");
 
                     // Determine agent type from suffix
-                    let agent_type = if *agent_suffix == "claude" {
+                    let agent_type = if agent_suffix == "claude" {
                         AgentType::Claude
                     } else {
                         AgentType::Gemini
@@ -1303,7 +1306,7 @@ mod tests {
     fn test_agent_type_display_name_truncates_long_slug() {
         let long_slug = "this-is-a-very-long-slug-that-should-be-truncated";
         let display = AgentType::Claude.display_name("123", long_slug);
-        // Should truncate to 20 chars: "this-is-a-very-long-" (exactly 20)
+        // Slug portion is truncated to 20 chars: "this-is-a-very-long-" (exactly 20)
         assert_eq!(display, "🤖 123-this-is-a-very-long-");
     }
 
