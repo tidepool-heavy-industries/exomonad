@@ -43,7 +43,7 @@ cat > .mcp.json << EOF
   "mcpServers": {
     "exomonad": {
       "type": "stdio",
-      "command": "exomonad-sidecar",
+      "command": "exomonad",
       "args": ["mcp-stdio"]
     }
   }

@@ -5,6 +5,7 @@ module ExoMonad.Guest.Records.Agent
   ( AgentTools (..),
     agentToolsHandler,
     agentToolsSchema,
+    agentTools, -- Convenience alias for handler
   )
 where
 
@@ -40,3 +41,7 @@ agentToolsSchema =
       cleanupMergedAgents = mkSchema @CleanupMergedAgents,
       listAgents = mkSchema @ListAgents
     }
+
+-- | Default handler instance for use in Role.hs
+agentTools :: AgentTools AsHandler
+agentTools = agentToolsHandler

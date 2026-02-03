@@ -1113,15 +1113,39 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0206175f82b8d6bf6652ff7d71a1e27fd2e4efde587fd368662814d6ec1d9ce0"
 
 [[package]]
+name = "exomonad"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "chrono",
+ "clap",
+ "duct",
+ "exomonad-runtime",
+ "exomonad-shared",
+ "exomonad-ui-protocol",
+ "nix",
+ "predicates",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "exomonad-repl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
  "crossterm 0.27.0",
+ "exomonad",
  "exomonad-runtime",
  "exomonad-shared",
- "exomonad-sidecar",
  "ratatui 0.26.3",
  "serde",
  "serde_json",
@@ -1185,30 +1209,6 @@ dependencies = [
  "strum",
  "tempfile",
  "thiserror 2.0.18",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "exomonad-sidecar"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "chrono",
- "clap",
- "duct",
- "exomonad-runtime",
- "exomonad-shared",
- "exomonad-ui-protocol",
- "nix",
- "predicates",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "toml 0.8.23",
  "tracing",
  "tracing-subscriber",
 ]

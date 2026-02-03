@@ -1,4 +1,4 @@
-//! CLI Integration Tests for exomonad-sidecar
+//! CLI Integration Tests for exomonad
 //!
 //! Tests CLI behavior including argument parsing and error handling.
 //! Full E2E WASM tests may fail if the WASM fixture is stale or incompatible
@@ -70,7 +70,7 @@ fn test_cli_hook_pre_tool_use() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let mut cmd = cargo_bin_cmd!("exomonad-sidecar");
+    let mut cmd = cargo_bin_cmd!("exomonad");
 
     let output = cmd
         .args(["hook", "pre-tool-use"])
@@ -113,7 +113,7 @@ fn test_cli_hook_with_minimal_input() -> Result<(), Box<dyn std::error::Error>> 
         return Ok(());
     }
 
-    let mut cmd = cargo_bin_cmd!("exomonad-sidecar");
+    let mut cmd = cargo_bin_cmd!("exomonad");
 
     let output = cmd
         .args(["hook", "pre-tool-use"])
@@ -139,7 +139,7 @@ fn test_cli_invalid_json_returns_error() -> Result<(), Box<dyn std::error::Error
         return Ok(());
     }
 
-    let mut cmd = cargo_bin_cmd!("exomonad-sidecar");
+    let mut cmd = cargo_bin_cmd!("exomonad");
 
     cmd.args(["hook", "pre-tool-use"])
         .write_stdin("not valid json")
@@ -158,7 +158,7 @@ fn test_cli_empty_stdin_returns_error() -> Result<(), Box<dyn std::error::Error>
         return Ok(());
     }
 
-    let mut cmd = cargo_bin_cmd!("exomonad-sidecar");
+    let mut cmd = cargo_bin_cmd!("exomonad");
 
     cmd.args(["hook", "pre-tool-use"])
         .write_stdin("")
@@ -183,7 +183,7 @@ fn test_cli_other_hook_types_passthrough() -> Result<(), Box<dyn std::error::Err
         return Ok(());
     }
 
-    let mut cmd = cargo_bin_cmd!("exomonad-sidecar");
+    let mut cmd = cargo_bin_cmd!("exomonad");
 
     // Post-tool-use should pass through (not implemented in WASM, uses default)
     let input = r#"{

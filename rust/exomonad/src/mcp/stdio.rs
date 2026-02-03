@@ -160,7 +160,7 @@ async fn handle_request(state: &McpState, request: JsonRpcRequest) -> JsonRpcRes
                     },
                 },
                 server_info: McpServerInfo {
-                    name: "exomonad-sidecar".to_string(),
+                    name: "exomonad".to_string(),
                     version: env!("CARGO_PKG_VERSION").to_string(),
                 },
             };

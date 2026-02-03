@@ -46,6 +46,8 @@ library wasm-guest-internal
     import:           shared
     hs-source-dirs:   src
     exposed-modules:
+        -- Top-level API
+        ExoMonad
         -- Tool infrastructure
         ExoMonad.Guest.Tool.Class
         ExoMonad.Guest.Tool.Mode
@@ -67,7 +69,15 @@ library wasm-guest-internal
         ExoMonad.Guest.FFI
         -- Types
         ExoMonad.Guest.Types
+        ExoMonad.Types
         ExoMonad.Guest.Parsers
+        -- New Tools
+        ExoMonad.Guest.Tools.Git
+        ExoMonad.Guest.Tools.GitHub
+        ExoMonad.Guest.Tools.File
+        ExoMonad.Guest.Records.Git
+        ExoMonad.Guest.Records.GitHub
+        ExoMonad.Guest.Records.File
         -- Role tools
         Dev.Tools
         TL.Tools
