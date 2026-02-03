@@ -91,24 +91,6 @@ async fn handle_hook(
         "Received hook event"
     );
 
-    // Emit HookReceived event
-    if let Ok(branch) = git::get_current_branch() {
-        if let Some(agent_id) = git::extract_agent_id(&branch) {
-            let event = exomonad_ui_protocol::AgentEvent::HookReceived {
-                agent_id,
-                hook_type: event_type.to_string(),
-                timestamp: zellij_events::now_iso8601(),
-            };
-            if let Err(e) = zellij_events::emit_event(&event) {
-                warn!("Failed to emit hook:received event: {}", e);
-            }
-        } else {
-            warn!("Could not extract agent_id from branch: {}", branch);
-        }
-    } else {
-        warn!("Could not determine current git branch for HookReceived event");
-    }
-
     // Parse the hook input and inject runtime
     let mut hook_input: HookInput =
         serde_json::from_str(&stdin_content).context("Failed to parse hook input")?;
@@ -226,17 +208,6 @@ fn init_logging(command: &Commands) {
     }
 }
 
-fn get_agent_id_from_env() -> String {
-    let branch = git::get_current_branch().unwrap_or_default();
-    git::extract_agent_id(&branch).unwrap_or_else(|| {
-        if branch.is_empty() {
-            "no-branch".to_string()
-        } else {
-            "unknown".to_string()
-        }
-    })
-}
-
 // ============================================================================
 // Main
 // ============================================================================
@@ -319,28 +290,7 @@ async fn main() -> Result<()> {
                 plugin: Arc::new(plugin),
             };
 
-            // Emit AgentStarted
-            let agent_id = get_agent_id_from_env();
-            let start_event = exomonad_ui_protocol::AgentEvent::AgentStarted {
-                agent_id: agent_id.clone(),
-                timestamp: zellij_events::now_iso8601(),
-            };
-            if let Err(e) = zellij_events::emit_event(&start_event) {
-                warn!("Failed to emit agent:started event: {}", e);
-            }
-
             mcp::stdio::run_stdio_server(state).await?;
-
-            // Emit AgentStopped
-            // Re-fetch branch as it might have changed
-            let stop_agent_id = get_agent_id_from_env();
-            let stop_event = exomonad_ui_protocol::AgentEvent::AgentStopped {
-                agent_id: stop_agent_id,
-                timestamp: zellij_events::now_iso8601(),
-            };
-            if let Err(e) = zellij_events::emit_event(&stop_event) {
-                warn!("Failed to emit agent:stopped event: {}", e);
-            }
         }
 
         Commands::Reply {

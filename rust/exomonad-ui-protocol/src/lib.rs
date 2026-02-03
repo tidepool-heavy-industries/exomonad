@@ -16,12 +16,6 @@ pub enum AgentEvent {
         reason: String,
         timestamp: String,
     },
-    #[serde(rename = "hook:received")]
-    HookReceived {
-        agent_id: String,
-        hook_type: String,
-        timestamp: String,
-    },
     #[serde(rename = "pr:filed")]
     PrFiled {
         agent_id: String,
