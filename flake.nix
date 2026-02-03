@@ -59,7 +59,6 @@
               let base = baseNameOf path; in
               type == "directory" ||
               base == "cabal.project.wasm" ||
-              base == "cabal.project.wasm.freeze" ||
               pkgs.lib.hasSuffix ".cabal" base ||
               pkgs.lib.hasSuffix ".hs" base ||
               pkgs.lib.hasSuffix ".hs-boot" base ||
@@ -79,7 +78,7 @@
             mkdir -p $HOME/.ghc-wasm/.cabal
             cat > $HOME/.ghc-wasm/.cabal/config <<EOF
 repository hackage.haskell.org
-  url: http://hackage.haskell.org/
+  url: https://hackage.haskell.org/
   secure: True
 
 library-profiling: False
@@ -107,7 +106,12 @@ EOF
 
           installPhase = ''
             mkdir -p $out
-            find dist-newstyle -name "wasm-guest-${role}.wasm" -exec cp {} $out/wasm-guest-${role}.wasm \;
+            wasm_file=$(find dist-newstyle -name "wasm-guest-${role}.wasm" -print -quit)
+            if [ -z "$wasm_file" ]; then
+              echo "Error: wasm-guest-${role}.wasm not found in dist-newstyle" >&2
+              exit 1
+            fi
+            cp "$wasm_file" "$out/wasm-guest-${role}.wasm"
           '';
         };
 
