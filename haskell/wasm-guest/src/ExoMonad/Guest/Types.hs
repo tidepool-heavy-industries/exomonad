@@ -163,19 +163,14 @@ data StopHookOutput = StopHookOutput
 
 instance ToJSON StopHookOutput where
   toJSON s =
-    -- Output Claude Code HookOutput format:
-    -- - "continue": true/false (not "decision")
-    -- - "stopReason": "..." (camelCase, not "reason")
-    let continueVal = case decision s of
-          Allow -> True
-          Block -> False
-    in case reason s of
-      Nothing -> object ["continue" .= continueVal]
-      Just r ->
-        object
-          [ "continue" .= continueVal,
-            "stopReason" .= r
-          ]
+    -- Output internal domain format. Rust edge translates to Claude/Gemini format.
+    -- Domain format: {"decision": "allow"/"block", "reason": "..."}
+    let decisionVal = case decision s of
+          Allow -> "allow" :: Text
+          Block -> "block"
+     in case reason s of
+          Nothing -> object ["decision" .= decisionVal]
+          Just r -> object ["decision" .= decisionVal, "reason" .= r]
 
 -- | Create an "allow" response for Stop hooks.
 allowStopResponse :: StopHookOutput

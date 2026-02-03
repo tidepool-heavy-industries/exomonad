@@ -98,7 +98,7 @@ pub struct HookInput {
 
 /// Common fields for all hook output types.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HookOutput {
+pub struct ClaudePreToolUseOutput {
     /// Whether to continue processing (default: true).
     #[serde(rename = "continue", default = "default_true")]
     pub continue_: bool,
@@ -124,7 +124,7 @@ pub struct HookOutput {
     pub hook_specific_output: Option<HookSpecificOutput>,
 }
 
-impl Default for HookOutput {
+impl Default for ClaudePreToolUseOutput {
     fn default() -> Self {
         Self {
             continue_: true, // Semantic default: allow continuation
@@ -251,7 +251,7 @@ pub enum PermissionDecision {
 // Builder helpers
 // ============================================================================
 
-impl HookOutput {
+impl ClaudePreToolUseOutput {
     /// Create an "allow" response for PreToolUse.
     pub fn pre_tool_use_allow(reason: Option<String>, modified_input: Option<Value>) -> Self {
         Self {
@@ -297,6 +297,101 @@ impl HookOutput {
     }
 }
 
+// ============================================================================
+// Internal Domain Types (from WASM, translated at edge)
+// ============================================================================
+
+/// Stop hook decision from WASM (domain type).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StopDecision {
+    /// Allow the agent to stop
+    Allow,
+    /// Block stopping, send reason as correction prompt
+    Block,
+}
+
+/// Internal stop hook output from WASM.
+/// This is the domain type that Haskell returns. Rust translates to runtime-specific format.
+#[derive(Debug, Clone, Deserialize)]
+pub struct InternalStopHookOutput {
+    /// Decision: allow or block
+    pub decision: StopDecision,
+    /// Reason for blocking (sent to agent as correction prompt)
+    pub reason: Option<String>,
+}
+
+impl InternalStopHookOutput {
+    /// Translate to Claude Code format.
+    pub fn to_claude(&self) -> ClaudeStopHookOutput {
+        match self.decision {
+            StopDecision::Allow => ClaudeStopHookOutput {
+                continue_: true,
+                stop_reason: None,
+            },
+            StopDecision::Block => ClaudeStopHookOutput {
+                continue_: false,
+                stop_reason: self.reason.clone(),
+            },
+        }
+    }
+
+    /// Translate to Gemini CLI format.
+    pub fn to_gemini(&self) -> GeminiStopHookOutput {
+        match self.decision {
+            StopDecision::Allow => GeminiStopHookOutput {
+                decision: GeminiStopDecision::Allow,
+                reason: None,
+            },
+            StopDecision::Block => GeminiStopHookOutput {
+                decision: GeminiStopDecision::Deny, // Gemini uses "deny" for retry
+                reason: self.reason.clone(),
+            },
+        }
+    }
+
+    /// Translate to runtime-specific format and serialize to JSON.
+    pub fn to_runtime_json(&self, runtime: &Runtime) -> String {
+        match runtime {
+            Runtime::Claude => serde_json::to_string(&self.to_claude())
+                .unwrap_or_else(|_| r#"{"continue":true}"#.to_string()),
+            Runtime::Gemini => serde_json::to_string(&self.to_gemini())
+                .unwrap_or_else(|_| r#"{"decision":"allow"}"#.to_string()),
+        }
+    }
+}
+
+/// Claude Code stop hook output format.
+#[derive(Debug, Clone, Serialize)]
+pub struct ClaudeStopHookOutput {
+    /// Whether to continue (true = allow stop, false = block)
+    #[serde(rename = "continue")]
+    pub continue_: bool,
+    /// Reason for blocking
+    #[serde(skip_serializing_if = "Option::is_none", rename = "stopReason")]
+    pub stop_reason: Option<String>,
+}
+
+/// Gemini CLI stop hook decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GeminiStopDecision {
+    /// Allow the agent to stop
+    Allow,
+    /// Deny and trigger retry with reason as correction prompt
+    Deny,
+}
+
+/// Gemini CLI stop hook output format.
+#[derive(Debug, Clone, Serialize)]
+pub struct GeminiStopHookOutput {
+    /// Decision: allow or deny (deny triggers retry with reason as correction prompt)
+    pub decision: GeminiStopDecision,
+    /// Reason sent to agent as correction prompt (when decision = deny)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,7 +416,7 @@ mod tests {
 
     #[test]
     fn test_hook_output_serialize() {
-        let output = HookOutput::pre_tool_use_allow(
+        let output = ClaudePreToolUseOutput::pre_tool_use_allow(
             Some("Allowed by ExoMonad".to_string()),
             Some(serde_json::json!({"file_path": "/tmp/safe.txt"})),
         );
@@ -332,12 +427,12 @@ mod tests {
     }
 
     // =========================================================================
-    // HookOutput comprehensive serialization tests
+    // ClaudePreToolUseOutput comprehensive serialization tests
     // =========================================================================
 
     #[test]
     fn test_hook_output_pre_tool_use_allow_format() {
-        let output = HookOutput::pre_tool_use_allow(Some("test reason".into()), None);
+        let output = ClaudePreToolUseOutput::pre_tool_use_allow(Some("test reason".into()), None);
         let json = serde_json::to_value(&output).unwrap();
 
         assert_eq!(json["continue"], true);
@@ -353,7 +448,7 @@ mod tests {
 
     #[test]
     fn test_hook_output_pre_tool_use_deny_format() {
-        let output = HookOutput::pre_tool_use_deny("not allowed".into());
+        let output = ClaudePreToolUseOutput::pre_tool_use_deny("not allowed".into());
         let json = serde_json::to_value(&output).unwrap();
 
         assert_eq!(json["continue"], true); // deny still continues, just blocks this tool
@@ -366,7 +461,7 @@ mod tests {
     #[test]
     fn test_hook_output_pre_tool_use_with_updated_input() {
         let modified = serde_json::json!({"file_path": "/safe/path.txt"});
-        let output = HookOutput::pre_tool_use_allow(None, Some(modified.clone()));
+        let output = ClaudePreToolUseOutput::pre_tool_use_allow(None, Some(modified.clone()));
         let json = serde_json::to_value(&output).unwrap();
 
         let specific = &json["hookSpecificOutput"];
@@ -375,7 +470,7 @@ mod tests {
 
     #[test]
     fn test_hook_output_block_format() {
-        let output = HookOutput::block("session terminated".into());
+        let output = ClaudePreToolUseOutput::block("session terminated".into());
         let json = serde_json::to_value(&output).unwrap();
 
         assert_eq!(json["continue"], false);
@@ -384,7 +479,7 @@ mod tests {
 
     #[test]
     fn test_hook_output_post_tool_use_format() {
-        let output = HookOutput::post_tool_use_allow(Some("additional context".into()));
+        let output = ClaudePreToolUseOutput::post_tool_use_allow(Some("additional context".into()));
         let json = serde_json::to_value(&output).unwrap();
 
         assert_eq!(json["continue"], true);
@@ -395,7 +490,7 @@ mod tests {
 
     #[test]
     fn test_hook_output_default() {
-        let output = HookOutput::default();
+        let output = ClaudePreToolUseOutput::default();
         let json = serde_json::to_value(&output).unwrap();
 
         // Default should have continue=true and no hook_specific_output

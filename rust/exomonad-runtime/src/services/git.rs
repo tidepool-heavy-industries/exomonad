@@ -258,7 +258,8 @@ impl GitService {
     }
 }
 
-fn parse_github_url(url: &str) -> Option<(String, String)> {
+/// Parse a GitHub URL (HTTPS or SSH) into (owner, repo) tuple.
+pub fn parse_github_url(url: &str) -> Option<(String, String)> {
     let cleaned = url
         .replace("git@github.com:", "https://github.com/")
         .replace(".git", "");

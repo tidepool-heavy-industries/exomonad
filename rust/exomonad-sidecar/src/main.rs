@@ -12,7 +12,10 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use exomonad_runtime::services::{git, zellij_events};
 use exomonad_runtime::{PluginManager, Services};
-use exomonad_shared::protocol::{HookEventType, HookInput, HookOutput, Runtime, ServiceRequest};
+use exomonad_shared::protocol::{
+    ClaudePreToolUseOutput, HookEventType, HookInput, InternalStopHookOutput, Runtime,
+    ServiceRequest,
+};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
@@ -127,6 +130,14 @@ async fn handle_hook(
 
     // Normalize CLI-specific hook types to internal abstractions before WASM.
     // Both Claude's Stop and Gemini's AfterAgent represent "main agent stop".
+    let is_stop_hook = matches!(
+        event_type,
+        HookEventType::Stop
+            | HookEventType::AfterAgent
+            | HookEventType::SubagentStop
+            | HookEventType::SessionEnd
+    );
+
     let normalized_event_name = match event_type {
         HookEventType::Stop | HookEventType::AfterAgent => "Stop",
         HookEventType::SubagentStop => "SubagentStop",
@@ -136,52 +147,67 @@ async fn handle_hook(
             // Pass through unhandled hooks with allow
             debug!(event = ?event_type, "Hook type not implemented in WASM, allowing");
             let output_json =
-                serde_json::to_string(&HookOutput::default()).context("Failed to serialize output")?;
+                serde_json::to_string(&ClaudePreToolUseOutput::default()).context("Failed to serialize output")?;
             println!("{}", output_json);
             return Ok(());
         }
     };
     hook_input.hook_event_name = normalized_event_name.to_string();
 
-    // Call WASM plugin
-    // hookHandler dispatches based on hiHookEventName for stop hooks
-    let output: HookOutput = plugin
-        .call("handle_pre_tool_use", &hook_input)
-        .await
-        .context("WASM handle_pre_tool_use failed")?;
+    // Handle stop hooks with runtime-specific output translation
+    if is_stop_hook {
+        // Call WASM and parse as internal domain type
+        let internal_output: InternalStopHookOutput = plugin
+            .call("handle_pre_tool_use", &hook_input)
+            .await
+            .context("WASM handle_pre_tool_use failed")?;
 
-    // Output response JSON to stdout
-    let output_json = serde_json::to_string(&output).context("Failed to serialize output")?;
-    println!("{}", output_json);
+        // Translate to runtime-specific format at the edge
+        let output_json = internal_output.to_runtime_json(&runtime);
+        println!("{}", output_json);
 
-    // Exit code based on output
-    if !output.continue_ {
-        // Emit StopHookBlocked event for SubagentStop hooks
-        if event_type == HookEventType::SubagentStop {
-            if let Ok(branch) = git::get_current_branch() {
-                if let Some(agent_id_str) = git::extract_agent_id(&branch) {
-                    let reason = output
-                        .stop_reason
-                        .clone()
-                        .unwrap_or_else(|| "Hook blocked agent stop".to_string());
-                    
-                    match exomonad_ui_protocol::AgentId::try_from(agent_id_str.clone()) {
-                        Ok(agent_id) => {
-                            let event = exomonad_ui_protocol::AgentEvent::StopHookBlocked {
-                                agent_id,
-                                reason,
-                                timestamp: zellij_events::now_iso8601(),
-                            };
-                            if let Err(e) = zellij_events::emit_event(&event) {
-                                warn!("Failed to emit stop_hook:blocked event: {}", e);
+        // Exit code and event emission based on decision
+        if internal_output.decision == exomonad_shared::protocol::StopDecision::Block {
+            // Emit StopHookBlocked event for SubagentStop hooks
+            if event_type == HookEventType::SubagentStop {
+                if let Ok(branch) = git::get_current_branch() {
+                    if let Some(agent_id_str) = git::extract_agent_id(&branch) {
+                        let reason = internal_output
+                            .reason
+                            .clone()
+                            .unwrap_or_else(|| "Hook blocked agent stop".to_string());
+
+                        match exomonad_ui_protocol::AgentId::try_from(agent_id_str.clone()) {
+                            Ok(agent_id) => {
+                                let event = exomonad_ui_protocol::AgentEvent::StopHookBlocked {
+                                    agent_id,
+                                    reason,
+                                    timestamp: zellij_events::now_iso8601(),
+                                };
+                                if let Err(e) = zellij_events::emit_event(&event) {
+                                    warn!("Failed to emit stop_hook:blocked event: {}", e);
+                                }
                             }
+                            Err(e) => warn!("Invalid agent_id in branch '{}': {}", agent_id_str, e),
                         }
-                        Err(e) => warn!("Invalid agent_id in branch '{}': {}", agent_id_str, e),
                     }
                 }
             }
+            std::process::exit(2);
         }
-        std::process::exit(2);
+    } else {
+        // Non-stop hooks: use existing ClaudePreToolUseOutput format
+        let output: ClaudePreToolUseOutput = plugin
+            .call("handle_pre_tool_use", &hook_input)
+            .await
+            .context("WASM handle_pre_tool_use failed")?;
+
+        let output_json = serde_json::to_string(&output).context("Failed to serialize output")?;
+        println!("{}", output_json);
+
+        if !output.continue_ {
+            std::process::exit(2);
+        }
     }
 
     Ok(())

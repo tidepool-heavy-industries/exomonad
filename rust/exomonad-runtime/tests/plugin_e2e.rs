@@ -4,7 +4,7 @@
 //! Requires a valid WASM fixture at tests/fixtures/wasm-guest.wasm
 
 use exomonad_runtime::{PluginManager, Services};
-use exomonad_shared::protocol::{HookInput, HookOutput};
+use exomonad_shared::protocol::{ClaudePreToolUseOutput, HookInput};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -71,7 +71,7 @@ async fn test_plugin_call_handle_pre_tool_use() {
     };
 
     let input = test_hook_input();
-    let result: Result<HookOutput, _> = plugin.call("handle_pre_tool_use", &input).await;
+    let result: Result<ClaudePreToolUseOutput, _> = plugin.call("handle_pre_tool_use", &input).await;
 
     match result {
         Ok(output) => {
@@ -167,7 +167,7 @@ async fn test_plugin_call_with_minimal_input() {
     )
     .expect("valid minimal input");
 
-    let result: Result<HookOutput, _> = plugin.call("handle_pre_tool_use", &input).await;
+    let result: Result<ClaudePreToolUseOutput, _> = plugin.call("handle_pre_tool_use", &input).await;
 
     match result {
         Ok(output) => {

@@ -22,7 +22,10 @@ use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
 // Re-export commonly used types
-pub use hook::{HookInput, HookOutput, HookSpecificOutput, PermissionDecision};
+pub use hook::{
+    ClaudePreToolUseOutput, ClaudeStopHookOutput, GeminiStopDecision, GeminiStopHookOutput,
+    HookInput, HookSpecificOutput, InternalStopHookOutput, PermissionDecision, StopDecision,
+};
 pub use mcp::{McpError, ToolDefinition};
 pub use service::{
     ChatMessage, ContentBlock, GitHubAuthorRef, GitHubDiscussionComment, GitHubIssueRef,

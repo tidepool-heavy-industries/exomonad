@@ -18,7 +18,9 @@ use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 use tracing::{debug, info, warn};
 
+use super::git::GitService;
 use super::github::{GitHubService, Repo};
+use super::local::LocalExecutor;
 use super::zellij_events;
 
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(60);
@@ -129,6 +131,21 @@ pub struct SpawnResult {
 
 impl FFIBoundary for SpawnResult {}
 
+/// Simplified PR info for agent listing.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AgentPrInfo {
+    /// PR number.
+    pub number: u64,
+    /// PR title.
+    pub title: String,
+    /// Web URL to the PR.
+    pub url: String,
+    /// PR state ("open", "closed", "merged").
+    pub state: String,
+}
+
+impl FFIBoundary for AgentPrInfo {}
+
 /// Information about an active agent.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentInfo {
@@ -140,6 +157,15 @@ pub struct AgentInfo {
     pub branch_name: String,
     /// Whether the worktree has uncommitted changes
     pub has_changes: bool,
+    /// Slug from worktree name (e.g., "fix-bug-in-parser")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slug: Option<String>,
+    /// Agent type ("claude" or "gemini")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_type: Option<String>,
+    /// Associated PR if one exists for this branch
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr: Option<AgentPrInfo>,
 }
 
 impl FFIBoundary for AgentInfo {}
@@ -172,14 +198,17 @@ pub struct AgentControlService {
     project_dir: PathBuf,
     /// GitHub service for fetching issues
     github: Option<GitHubService>,
+    /// Git service for repo info
+    git: GitService,
 }
 
 impl AgentControlService {
     /// Create a new agent control service.
-    pub fn new(project_dir: PathBuf, github: Option<GitHubService>) -> Self {
+    pub fn new(project_dir: PathBuf, github: Option<GitHubService>, git: GitService) -> Self {
         Self {
             project_dir,
             github,
+            git,
         }
     }
 
@@ -193,9 +222,13 @@ impl AgentControlService {
             .github_token()
             .and_then(|t| GitHubService::new(t).ok());
 
+        // Create git service with local executor
+        let git = GitService::new(Arc::new(LocalExecutor::new()));
+
         Ok(Self {
             project_dir,
             github,
+            git,
         })
     }
 
@@ -390,6 +423,9 @@ impl AgentControlService {
 
                     self.delete_worktree(path, force).await?;
 
+                    // Prune stale worktree references from git
+                    self.prune_worktrees().await?;
+
                     // Emit agent:stopped event
                     let agent_id = exomonad_ui_protocol::AgentId::try_from(format!("gh-{}", issue_id))
                         .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
@@ -493,23 +529,52 @@ impl AgentControlService {
                 if let (Some(path), Some(branch)) = (current_path.take(), current_branch.take()) {
                     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                         if name.starts_with("gh-") {
-                            // Parse: gh-{issue}-{slug}-{agent}
-                            // Extract issue ID (second component after 'gh-')
-                            let parts: Vec<&str> = name.splitn(4, '-').collect();
-                            let issue_id = parts.get(1).map(|s| s.to_string()).unwrap_or_default();
-
-                            // Note: We don't store agent type in AgentInfo yet,
-                            // but could add it if needed
+                            // Parse worktree name to extract issue_id, slug, agent_type
+                            let parsed = parse_worktree_name(name);
+                            let issue_id = parsed
+                                .as_ref()
+                                .map(|p| p.issue_id.to_string())
+                                .unwrap_or_else(|| {
+                                    // Fallback: extract issue ID manually
+                                    let parts: Vec<&str> = name.splitn(4, '-').collect();
+                                    parts.get(1).map(|s| s.to_string()).unwrap_or_default()
+                                });
 
                             let has_changes = self.has_uncommitted_changes(&path).await;
+
+                            // Extract slug and agent_type from parsed name
+                            let slug = parsed.as_ref().map(|p| p.slug.to_string());
+                            let agent_type = parsed
+                                .as_ref()
+                                .and_then(|p| p.agent_type.as_ref())
+                                .map(|t| t.suffix().to_string());
 
                             agents.push(AgentInfo {
                                 issue_id,
                                 worktree_path: path.to_string_lossy().to_string(),
                                 branch_name: branch,
                                 has_changes,
+                                slug,
+                                agent_type,
+                                pr: None, // PR lookup added below
                             });
                         }
+                    }
+                }
+            }
+        }
+
+        // Look up PRs for agents if GitHub service is available
+        if let Some(ref github) = self.github {
+            if let Some(repo) = self.get_repo_from_remote().await {
+                for agent in &mut agents {
+                    if let Ok(Some(pr)) = github.get_pr_for_branch(&repo, &agent.branch_name).await {
+                        agent.pr = Some(AgentPrInfo {
+                            number: pr.number,
+                            title: pr.title,
+                            url: pr.url,
+                            state: pr.state,
+                        });
                     }
                 }
             }
@@ -518,7 +583,21 @@ impl AgentControlService {
         Ok(agents)
     }
 
-    // ======================================================================== 
+    /// Get repo (owner/name) from project's git remote URL.
+    async fn get_repo_from_remote(&self) -> Option<Repo> {
+        let dir = self.project_dir.to_string_lossy();
+        let repo_info = self.git.get_repo_info("", &dir).await.ok()?;
+
+        let owner = repo_info.owner?;
+        let name = repo_info.name?;
+
+        Some(Repo {
+            owner: GithubOwner::from(owner.as_str()),
+            name: GithubRepo::from(name.as_str()),
+        })
+    }
+
+    // ========================================================================
     // Internal: Zellij
     // ======================================================================== 
 
@@ -807,6 +886,27 @@ impl AgentControlService {
             return Err(anyhow!("git worktree remove failed: {}", stderr));
         } else {
             info!(exit_code = ?result.status.code(), "git worktree remove successful");
+        }
+
+        Ok(())
+    }
+
+    /// Prune stale worktree references from git's internal tracking.
+    async fn prune_worktrees(&self) -> Result<()> {
+        info!("Pruning stale worktree references");
+
+        let result = Command::new("git")
+            .args(["worktree", "prune"])
+            .current_dir(&self.project_dir)
+            .output()
+            .await
+            .context("Failed to execute git worktree prune")?;
+
+        if !result.status.success() {
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            warn!(stderr = %stderr, "git worktree prune failed (non-fatal)");
+        } else {
+            info!("git worktree prune completed");
         }
 
         Ok(())

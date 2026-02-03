@@ -29,6 +29,7 @@ module ExoMonad.Guest.Effects.AgentControl
     AgentType (..),
     SpawnOptions (..),
     SpawnResult (..),
+    AgentPrInfo (..),
     AgentInfo (..),
     BatchSpawnResult (..),
     BatchCleanupResult (..),
@@ -46,7 +47,8 @@ where
 
 import Polysemy (Sem, Member, interpret, embed, send)
 import Polysemy.Embed (Embed)
-import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.=))
+import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.:?), (.=))
+import Data.Maybe (catMaybes)
 import Data.Text (Text, unpack)
 import ExoMonad.Guest.HostCall (callHost, host_agent_cleanup, host_agent_cleanup_batch, host_agent_cleanup_merged, host_agent_list, host_agent_spawn, host_agent_spawn_batch)
 import ExoMonad.Guest.FFI (FFIBoundary (..), FFIResult (..), FFIError (..), ErrorContext (..), ErrorCode (..))
@@ -132,12 +134,43 @@ instance ToJSON SpawnResult where
 
 instance FFIBoundary SpawnResult
 
+-- | Simplified PR info for agent listing.
+data AgentPrInfo = AgentPrInfo
+  { prNumber :: Int,
+    prTitle :: Text,
+    prUrl :: Text,
+    prState :: Text
+  }
+  deriving (Show, Eq, Generic)
+
+instance FromJSON AgentPrInfo where
+  parseJSON = withObject "AgentPrInfo" $ \v ->
+    AgentPrInfo
+      <$> v .: "number"
+      <*> v .: "title"
+      <*> v .: "url"
+      <*> v .: "state"
+
+instance ToJSON AgentPrInfo where
+  toJSON (AgentPrInfo n t u s) =
+    object
+      [ "number" .= n,
+        "title" .= t,
+        "url" .= u,
+        "state" .= s
+      ]
+
+instance FFIBoundary AgentPrInfo
+
 -- | Information about an active agent.
 data AgentInfo = AgentInfo
   { agentIssueId :: Text,
     agentWorktreePath :: Text,
     agentBranchName :: Text,
-    agentHasChanges :: Bool
+    agentHasChanges :: Bool,
+    agentSlug :: Maybe Text,
+    agentAgentType :: Maybe Text,
+    agentPr :: Maybe AgentPrInfo
   }
   deriving (Show, Eq, Generic)
 
@@ -148,15 +181,23 @@ instance FromJSON AgentInfo where
       <*> v .: "worktree_path"
       <*> v .: "branch_name"
       <*> v .: "has_changes"
+      <*> v .:? "slug"
+      <*> v .:? "agent_type"
+      <*> v .:? "pr"
 
 instance ToJSON AgentInfo where
-  toJSON (AgentInfo i w b h) =
-    object
+  toJSON (AgentInfo i w b h s at pr) =
+    object $
       [ "issue_id" .= i,
         "worktree_path" .= w,
         "branch_name" .= b,
         "has_changes" .= h
       ]
+        ++ catMaybes
+          [ ("slug" .=) <$> s,
+            ("agent_type" .=) <$> at,
+            ("pr" .=) <$> pr
+          ]
 
 instance FFIBoundary AgentInfo
 

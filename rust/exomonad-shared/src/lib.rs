@@ -37,6 +37,7 @@ pub use ffi::{ErrorCode, ErrorContext, FFIBoundary, FFIError, FFIResult};
 pub use hooks::HookConfig;
 pub use logging::{init_logging, init_logging_with_default};
 pub use protocol::{
-    HookEventType, HookInput, HookOutput, HookSpecificOutput, PermissionDecision, Runtime,
+    ClaudePreToolUseOutput, ClaudeStopHookOutput, GeminiStopHookOutput, HookEventType, HookInput,
+    HookSpecificOutput, InternalStopHookOutput, PermissionDecision, Runtime, StopDecision,
 };
 pub use util::{build_prompt, find_exomonad_binary, shell_quote};

@@ -31,8 +31,11 @@ instance Arbitrary SpawnOptions where
 instance Arbitrary SpawnResult where
   arbitrary = SpawnResult <$> arbText <*> arbText <*> arbText <*> arbText <*> arbText
 
+instance Arbitrary AgentPrInfo where
+  arbitrary = AgentPrInfo <$> arbitrary <*> arbText <*> arbText <*> arbText
+
 instance Arbitrary AgentInfo where
-  arbitrary = AgentInfo <$> arbText <*> arbText <*> arbText <*> arbitrary
+  arbitrary = AgentInfo <$> arbText <*> arbText <*> arbText <*> arbitrary <*> arbMaybeText <*> arbMaybeText <*> arbitrary
 
 instance Arbitrary BatchSpawnResult where
   arbitrary = BatchSpawnResult <$> listOf arbitrary <*> listOf ((,) <$> arbText <*> arbText)

@@ -170,17 +170,39 @@ prop_compose! {
 }
 
 prop_compose! {
+    fn arb_agent_pr_info()(
+        number in 1u64..10000,
+        title in "[A-Za-z ]+",
+        url in "https://github.com/[a-z]+/[a-z]+/pull/[0-9]+",
+        state in prop_oneof!["open", "closed", "merged"],
+    ) -> AgentPrInfo {
+        AgentPrInfo {
+            number,
+            title,
+            url,
+            state,
+        }
+    }
+}
+
+prop_compose! {
     fn arb_agent_info()(
         issue_id in "[0-9]+",
         worktree_path in "/tmp/worktrees/[a-z0-9-]+",
         branch_name in "gh-[0-9]+-[a-z0-9-]+",
         has_changes in any::<bool>(),
+        slug in proptest::option::of("[a-z0-9-]+"),
+        agent_type in proptest::option::of(prop_oneof!["claude", "gemini"]),
+        pr in proptest::option::of(arb_agent_pr_info()),
     ) -> AgentInfo {
         AgentInfo {
             issue_id,
             worktree_path,
             branch_name,
             has_changes,
+            slug,
+            agent_type,
+            pr,
         }
     }
 }
@@ -278,7 +300,7 @@ proptest! {
 
 mod cross_boundary_tests {
     use serde_json::Value;
-    use exomonad_shared::protocol::HookOutput;
+    use exomonad_shared::protocol::{InternalStopHookOutput, StopDecision};
 
     /// Test that emit_event can parse what Haskell Runtime.hs sends.
     /// Haskell sends: {"type": "agent:stopped", "agent_id": "...", "timestamp": "..."}
@@ -298,45 +320,45 @@ mod cross_boundary_tests {
         assert_eq!(event_type, Some("agent:stopped"));
     }
 
-    /// Test that HookOutput can parse what Haskell StopHookOutput sends.
-    /// Haskell now sends: {"continue": false, "stopReason": "..."}
-    /// (Aligned with Claude Code's HookOutput format)
+    /// Test that InternalStopHookOutput can parse what Haskell StopHookOutput sends.
+    /// Haskell now sends: {"decision": "block", "reason": "..."}
+    /// This is the internal domain format; Rust translates to Claude/Gemini at the edge.
     ///
     /// This test verifies the WASM/Rust boundary for stop hooks.
     #[test]
     fn test_hook_output_parses_stop_hook_format() {
-        // Haskell StopHookOutput now produces Claude Code HookOutput format:
-        let haskell_block_json = r#"{"continue": false, "stopReason": "You have uncommitted changes."}"#;
+        // Haskell StopHookOutput now produces internal domain format:
+        let haskell_block_json = r#"{"decision": "block", "reason": "You have uncommitted changes."}"#;
 
-        // Parse as HookOutput (what Rust main.rs expects)
-        let result: HookOutput = serde_json::from_str(haskell_block_json).unwrap();
+        // Parse as InternalStopHookOutput (the domain type from WASM)
+        let result: InternalStopHookOutput = serde_json::from_str(haskell_block_json).unwrap();
 
-        // The block decision MUST be preserved:
-        // - continue_ should be false
-        // - stop_reason should contain the reason
-        assert!(
-            !result.continue_,
-            "Block decision was lost! continue_ is true but should be false."
+        // The block decision MUST be preserved
+        assert_eq!(
+            result.decision,
+            StopDecision::Block,
+            "Block decision was lost!"
         );
         assert_eq!(
-            result.stop_reason.as_deref(),
+            result.reason.as_deref(),
             Some("You have uncommitted changes."),
             "Reason was not preserved"
         );
     }
 
-    /// Test that HookOutput correctly parses allow decision.
+    /// Test that InternalStopHookOutput correctly parses allow decision.
     #[test]
     fn test_hook_output_parses_allow_format() {
-        // Haskell StopHookOutput now produces Claude Code HookOutput format:
-        let haskell_allow_json = r#"{"continue": true}"#;
+        // Haskell StopHookOutput now produces internal domain format:
+        let haskell_allow_json = r#"{"decision": "allow"}"#;
 
-        let result: HookOutput = serde_json::from_str(haskell_allow_json).unwrap();
+        let result: InternalStopHookOutput = serde_json::from_str(haskell_allow_json).unwrap();
 
-        // Allow should mean continue_ = true
-        assert!(
-            result.continue_,
-            "Allow decision was lost! continue_ is false but should be true."
+        // Allow should mean decision = Allow
+        assert_eq!(
+            result.decision,
+            StopDecision::Allow,
+            "Allow decision was lost!"
         );
     }
 }

@@ -136,7 +136,7 @@ impl Services {
 
     fn with_executor(executor: Arc<dyn DockerExecutor>) -> Self {
         let secrets = Secrets::load();
-        let git = Arc::new(GitService::new(executor));
+        let git = Arc::new(GitService::new(executor.clone()));
 
         // GitHub service is optional - try secrets file first, then env var
         let github = secrets
@@ -148,6 +148,7 @@ impl Services {
         let agent_control = Arc::new(AgentControlService::new(
             project_dir.clone(),
             github.clone(),
+            GitService::new(executor.clone()),
         ));
 
         // Filesystem service for file read/write operations
