@@ -74,6 +74,9 @@ impl ratatui::backend::Backend for ZellijBackend {
                         // Different non-default style: reset before applying new style
                         // Optimizing this further would require complex diffing of ANSI codes,
                         // so a hard reset is safer and simpler for now.
+                        // Note: This may cause flicker or incorrect rendering for complex
+                        // modifier transitions (e.g. BOLD -> ITALIC), but it's a trade-off
+                        // for code simplicity and safety in this custom backend.
                         write!(buffer, "\x1b[0m").unwrap();
                     }
                     // Apply desired foreground/background colors
@@ -126,10 +129,15 @@ impl ratatui::backend::Backend for ZellijBackend {
         print!("\x1b[2J"); 
         Ok(()) 
     }
-    fn size(&self) -> Result<Size, std::io::Error> { Ok(Size::new(0, 0)) }
+    // In this WASM/Zellij backend we don't have direct access to the real terminal size here.
+    // The actual size is managed externally (the render loop resizes using rows/cols), but
+    // ratatui may still call `size()` for layout calculations. Returning a non-zero fallback
+    // avoids degenerate 0x0 layouts while keeping behavior predictable.
+    fn size(&self) -> Result<Size, std::io::Error> { Ok(Size::new(80, 24)) }
     fn window_size(&mut self) -> Result<WindowSize, std::io::Error> {
         Ok(WindowSize {
-            columns_rows: Size::new(0, 0),
+            columns_rows: Size::new(80, 24),
+            // Pixel dimensions are not known in this backend; 0x0 indicates "unknown".
             pixels: Size::new(0, 0),
         })
     }
@@ -398,7 +406,9 @@ impl ZellijPlugin for ExoMonadPlugin {
 
         if let Some(terminal) = &mut self.terminal {
             // Force size as we are in WASM and can't detect it reliably
-            if let Err(e) = terminal.resize(Rect::new(0, 0, cols as u16, rows as u16)) {
+            let width_u16 = if cols > u16::MAX as usize { u16::MAX } else { cols as u16 };
+            let height_u16 = if rows > u16::MAX as usize { u16::MAX } else { rows as u16 };
+            if let Err(e) = terminal.resize(Rect::new(0, 0, width_u16, height_u16)) {
                 eprintln!("Failed to resize terminal: {}", e);
                 return;
             }
@@ -430,6 +440,11 @@ impl ZellijPlugin for ExoMonadPlugin {
                 f.render_widget(p, chunks[0]);
 
                 // Events List
+                // NOTE: `self.events` is a VecDeque with oldest events at the front and newest at
+                // the back, with a capacity of 100 where the oldest entries are dropped first.
+                // We intentionally iterate in reverse and take the first 20 elements so that the
+                // 20 most recent events are shown with the newest at the top of the list. This
+                // "newest-first" ordering is the intended UX for the events view.
                 let event_items: Vec<ListItem> = self.events.iter().rev().take(20).map(|e| {
                     let (time, content, color) = match e {
                         AgentEvent::AgentStarted { agent_id, timestamp } => (timestamp, format!("{} started", agent_id), Color::Green),
@@ -453,12 +468,18 @@ impl ZellijPlugin for ExoMonadPlugin {
 
                 // Popup Overlay
                 if let Some((_, def, state)) = &self.active_popup {
-                    let popup_area = Rect::new(
-                        area.width / 4,
-                        area.height / 4,
-                        area.width / 2,
-                        area.height / 2,
-                    );
+                    let popup_area = if area.width < 4 || area.height < 4 {
+                        // On very small terminals, use the full area to avoid
+                        // creating a too-small or invalid popup rectangle.
+                        area
+                    } else {
+                        Rect::new(
+                            area.width / 4,
+                            area.height / 4,
+                            area.width / 2,
+                            area.height / 2,
+                        )
+                    };
                     
                     f.render_widget(Clear, popup_area);
                     
@@ -507,8 +528,13 @@ impl ZellijPlugin for ExoMonadPlugin {
                             }
                             Component::Textbox { label, id, placeholder, .. } => {
                                 let txt = state.get_text(id).unwrap_or("");
+                                // Show placeholder only if text is empty AND the field is NOT selected
                                 let display_txt = if txt.is_empty() {
-                                    placeholder.as_deref().unwrap_or("").to_string()
+                                    if is_selected {
+                                        "".to_string()
+                                    } else {
+                                        placeholder.as_deref().unwrap_or("").to_string()
+                                    }
                                 } else {
                                     txt.to_string()
                                 };

@@ -96,7 +96,7 @@ async fn handle_hook(
         if let Some(agent_id) = git::extract_agent_id(&branch) {
             let event = exomonad_ui_protocol::AgentEvent::HookReceived {
                 agent_id,
-                hook_type: format!("{:?}", event_type),
+                hook_type: event_type.to_string(),
                 timestamp: zellij_events::now_iso8601(),
             };
             if let Err(e) = zellij_events::emit_event(&event) {
@@ -310,7 +310,13 @@ async fn main() -> Result<()> {
 
             // Emit AgentStarted
             let branch = git::get_current_branch().unwrap_or_default();
-            let agent_id = git::extract_agent_id(&branch).unwrap_or_else(|| "unknown".to_string());
+            let agent_id = git::extract_agent_id(&branch).unwrap_or_else(|| {
+                if branch.is_empty() {
+                    "no-branch".to_string()
+                } else {
+                    "unknown".to_string()
+                }
+            });
             let start_event = exomonad_ui_protocol::AgentEvent::AgentStarted {
                 agent_id: agent_id.clone(),
                 timestamp: zellij_events::now_iso8601(),
@@ -322,56 +328,20 @@ async fn main() -> Result<()> {
             mcp::stdio::run_stdio_server(state).await?;
 
             // Emit AgentStopped
+            // Re-fetch branch as it might have changed
+            let stop_branch = git::get_current_branch().unwrap_or_default();
+            let stop_agent_id = git::extract_agent_id(&stop_branch).unwrap_or_else(|| {
+                if stop_branch.is_empty() {
+                    "no-branch".to_string()
+                } else {
+                    "unknown".to_string()
+                }
+            });
             let stop_event = exomonad_ui_protocol::AgentEvent::AgentStopped {
-                agent_id,
+                agent_id: stop_agent_id,
                 timestamp: zellij_events::now_iso8601(),
             };
             if let Err(e) = zellij_events::emit_event(&stop_event) {
                 warn!("Failed to emit agent:stopped event: {}", e);
             }
         }
-
-        Commands::Reply {
-            id,
-            payload,
-            cancel,
-        } => {
-            // Socket path env var or default
-            let socket_path = std::env::var("EXOMONAD_CONTROL_SOCKET")
-                .unwrap_or_else(|_| ".exomonad/sockets/control.sock".to_string());
-
-            debug!(socket = %socket_path, "Connecting to control socket");
-
-            let mut stream = UnixStream::connect(&socket_path).await.context(format!(
-                "Failed to connect to control socket at {}",
-                socket_path
-            ))?;
-
-            let parsed_payload = if let Some(p) = payload {
-                Some(serde_json::from_str(&p).context("Invalid JSON payload")?)
-            } else {
-                None
-            };
-
-            let request = ServiceRequest::UserInteraction {
-                request_id: id,
-                payload: parsed_payload,
-                cancel,
-            };
-
-            // NDJSON format: JSON + newline
-            let mut json = serde_json::to_vec(&request).context("Serialization failed")?;
-            json.push(b'\n');
-
-            stream
-                .write_all(&json)
-                .await
-                .context("Failed to write to socket")?;
-
-            // We don't necessarily wait for response here, it's a push notification
-            info!("Sent reply to control socket");
-        }
-    }
-
-    Ok(())
-}
