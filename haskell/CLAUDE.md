@@ -64,6 +64,16 @@ This codebase follows well-known CS patterns:
 - **Adapter pattern**: Interpreters adapt external APIs (HTTP, subprocess, sockets)
 - **Embedded DSL**: Haskell WASM as pure logic, hosted by Rust runtime
 
+## Role System Architecture
+
+The project implements an xmonad-style role system where users define their agent roles in Haskell.
+
+- **Role Definitions**: Located in `.exomonad/roles/`.
+- **Role Config**: Users define `RoleConfig` with a `Tools` record and `HookConfig`.
+- **Tool Records**: Servant-style records (`mode :- Tool`) used to compose tools.
+- **WASM Compilation**: Roles are compiled to WASM and loaded by the runtime.
+- **Library**: `haskell/wasm-guest` (exposed as `ExoMonad`) provides the SDK.
+
 ## Common Commands
 
 Build all:     `cabal build all`

@@ -8,8 +8,6 @@ dist-newstyle/
 .env.subagent
 
 .beads/
-.exomonad/*
-.exomonad/
 training-data/
 result/
 
