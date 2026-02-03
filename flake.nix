@@ -26,6 +26,7 @@
           curl
           git
           nodejs_20 # For quicktype codegen
+          wasmtime # For pre-compiling WASM modules
         ];
 
         # Haskell toolchain

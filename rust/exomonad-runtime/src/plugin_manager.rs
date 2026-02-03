@@ -122,7 +122,16 @@ impl PluginManager {
     }
 
     fn load_plugin(path: &PathBuf, services: &ValidatedServices) -> Result<Plugin> {
-        let manifest = Manifest::new([extism::Wasm::file(path)]);
+        let cwasm_path = path.with_extension("cwasm");
+        let wasm_source = if cwasm_path.exists() {
+            tracing::info!("Loading pre-compiled WASM plugin: {:?}", cwasm_path);
+            extism::Wasm::file(cwasm_path)
+        } else {
+            tracing::info!("Loading WASM plugin: {:?}", path);
+            extism::Wasm::file(path)
+        };
+
+        let manifest = Manifest::new([wasm_source]);
 
         // NOTE: Docker functions are NOT registered as WASM imports.
         // They are Rust implementation details used internally by Git/GitHub services.
