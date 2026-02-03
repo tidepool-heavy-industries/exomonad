@@ -62,13 +62,31 @@ pub struct DiffFile {
     pub deletions: u32,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PrState {
+    Open,
+    Closed,
+    Merged,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewStatus {
+    Pending,
+    Approved,
+    ChangesRequested,
+    Commented,
+    Dismissed,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GhPrStatusResult {
     pub exists: bool,
     pub url: Option<String>,
     pub number: Option<u32>,
-    pub state: Option<String>,         // "open", "closed", "merged"
-    pub review_status: Option<String>, // "pending", "approved", "changes_requested"
+    pub state: Option<PrState>,         // "open", "closed", "merged"
+    pub review_status: Option<ReviewStatus>, // "pending", "approved", "changes_requested"
     pub comments: Vec<PrComment>,
 }
 

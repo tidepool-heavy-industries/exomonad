@@ -1,42 +1,71 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::fmt;
+
+/// Agent identifier.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct AgentId(String);
+
+impl TryFrom<String> for AgentId {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        if s.is_empty() {
+            return Err("Agent ID cannot be empty".to_string());
+        }
+        Ok(Self(s))
+    }
+}
+
+impl From<AgentId> for String {
+    fn from(id: AgentId) -> String {
+        id.0
+    }
+}
+
+impl fmt::Display for AgentId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 /// Events broadcast by agent sidecars via Zellij pipes
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum AgentEvent {
     #[serde(rename = "agent:started")]
-    AgentStarted { agent_id: String, timestamp: String },
+    AgentStarted { agent_id: AgentId, timestamp: String },
     #[serde(rename = "agent:stopped")]
-    AgentStopped { agent_id: String, timestamp: String },
+    AgentStopped { agent_id: AgentId, timestamp: String },
     #[serde(rename = "stop_hook:blocked")]
     StopHookBlocked {
-        agent_id: String,
+        agent_id: AgentId,
         reason: String,
         timestamp: String,
     },
     #[serde(rename = "hook:received")]
     HookReceived {
-        agent_id: String,
+        agent_id: AgentId,
         hook_type: String,
         timestamp: String,
     },
     #[serde(rename = "pr:filed")]
     PrFiled {
-        agent_id: String,
+        agent_id: AgentId,
         pr_number: u64,
         timestamp: String,
     },
     #[serde(rename = "copilot:reviewed")]
     CopilotReviewed {
-        agent_id: String,
+        agent_id: AgentId,
         comment_count: u32,
         timestamp: String,
     },
     #[serde(rename = "agent:stuck")]
     AgentStuck {
-        agent_id: String,
+        agent_id: AgentId,
         failed_stop_count: u32,
         timestamp: String,
     },

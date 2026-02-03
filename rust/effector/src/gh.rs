@@ -1,4 +1,4 @@
-use crate::types::{GhPrCreateResult, GhPrStatusResult, PrComment};
+use crate::types::{GhPrCreateResult, GhPrStatusResult, PrComment, PrState, ReviewStatus};
 use anyhow::{Context, Result};
 use duct::cmd;
 use serde_json::Value;
@@ -45,14 +45,19 @@ pub fn pr_status(branch: Option<String>) -> Result<()> {
     let exists = true;
     let url = json["url"].as_str().map(|s| s.to_string());
     let number = json["number"].as_u64().map(|n| n as u32);
-    let state = json["state"].as_str().map(|s| s.to_lowercase());
+    let state = json["state"].as_str().and_then(|s| match s {
+        "OPEN" => Some(PrState::Open),
+        "CLOSED" => Some(PrState::Closed),
+        "MERGED" => Some(PrState::Merged),
+        _ => None,
+    });
 
     let review_status = match json["reviewDecision"].as_str() {
-        Some("REVIEW_REQUIRED") => Some("pending".to_string()),
-        Some("APPROVED") => Some("approved".to_string()),
-        Some("CHANGES_REQUESTED") => Some("changes_requested".to_string()),
-        Some(other) => Some(other.to_lowercase()),
-        None => None,
+        Some("REVIEW_REQUIRED") => Some(ReviewStatus::Pending),
+        Some("APPROVED") => Some(ReviewStatus::Approved),
+        Some("CHANGES_REQUESTED") => Some(ReviewStatus::ChangesRequested),
+        // Additional mappings if needed, or fallback
+        _ => None,
     };
 
     let mut comments = Vec::new();

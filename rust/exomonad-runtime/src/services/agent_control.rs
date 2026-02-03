@@ -286,7 +286,7 @@ impl AgentControlService {
 
             // Emit agent:started event
             let event = exomonad_ui_protocol::AgentEvent::AgentStarted {
-                agent_id: internal_name.clone(),
+                agent_id: exomonad_ui_protocol::AgentId::try_from(internal_name.clone()).expect("Invalid agent_id"),
                 timestamp: zellij_events::now_iso8601(),
             };
             if let Err(e) = zellij_events::emit_event(&event) {
@@ -387,7 +387,7 @@ impl AgentControlService {
 
                     // Emit agent:stopped event
                     let event = exomonad_ui_protocol::AgentEvent::AgentStopped {
-                        agent_id: format!("gh-{}", issue_id),
+                        agent_id: exomonad_ui_protocol::AgentId::try_from(format!("gh-{}", issue_id)).expect("Invalid agent_id"),
                         timestamp: zellij_events::now_iso8601(),
                     };
                     if let Err(e) = zellij_events::emit_event(&event) {

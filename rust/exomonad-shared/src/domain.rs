@@ -357,6 +357,62 @@ impl TryFrom<String> for Role {
 }
 
 // ============================================================================
+// GitHub States
+// ============================================================================
+
+/// State of an item (Issue/PR) - Open or Closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ItemState {
+    Open,
+    Closed,
+    Unknown,
+}
+
+impl fmt::Display for ItemState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Open => write!(f, "open"),
+            Self::Closed => write!(f, "closed"),
+            Self::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
+/// State of an item (Issue) in list - Uppercase (OPEN, CLOSED).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum UpperItemState {
+    Open,
+    Closed,
+    Unknown,
+}
+
+/// State of a Review (Pending, Approved, ChangesRequested, etc).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ReviewState {
+    Pending,
+    Approved,
+    ChangesRequested,
+    Dismissed,
+    Commented,
+}
+
+impl fmt::Display for ReviewState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            ReviewState::Pending => "PENDING",
+            ReviewState::Approved => "APPROVED",
+            ReviewState::ChangesRequested => "CHANGES_REQUESTED",
+            ReviewState::Dismissed => "DISMISSED",
+            ReviewState::Commented => "COMMENTED",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+// ============================================================================
 // Path Types
 // ============================================================================
 

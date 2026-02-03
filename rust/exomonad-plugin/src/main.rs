@@ -12,12 +12,12 @@ use ratatui::{
 mod protocol;
 use exomonad_ui_protocol::AgentEvent;
 use protocol::{
-    Component, ElementValue, PluginMessage, PopupDefinition, PopupState, VisibilityRule,
+    Component, ElementValue, PluginMessage, PluginState, PopupDefinition, PopupState, VisibilityRule,
 };
 
 #[derive(Default)]
 struct ExoMonadPlugin {
-    status_state: String,
+    status_state: PluginState,
     status_message: String,
     active_popup: Option<(String, PopupDefinition, PopupState)>,
     selected_index: usize,
@@ -172,7 +172,7 @@ fn color_to_ansi(color: Color, bg: bool) -> String {
 impl ZellijPlugin for ExoMonadPlugin {
     fn load(&mut self, _configuration: BTreeMap<String, String>) {
         subscribe(&[EventType::CustomMessage, EventType::Key]);
-        self.status_state = "IDLE".to_string();
+        self.status_state = PluginState::Idle;
         self.status_message = "Ready.".to_string();
         self.events = VecDeque::new();
         // Initialize terminal with ZellijBackend
@@ -195,7 +195,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                         return true; // Request re-render
                     }
                     Err(e) => {
-                        self.status_state = "ERROR".to_string();
+                        self.status_state = PluginState::Error;
                         self.status_message = format!("Invalid event payload: {}", e);
                         return true;
                     }
@@ -233,7 +233,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                             }
                         },
                         Err(e) => {
-                            self.status_state = "ERROR".to_string();
+                            self.status_state = PluginState::Error;
                             self.status_message = format!("Invalid payload: {}", e);
                             should_render = true;
                         }
@@ -374,7 +374,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                                     should_render = true;
                                 }
                                 Err(e) => {
-                                    self.status_state = "ERROR".to_string();
+                                    self.status_state = PluginState::Error;
                                     self.status_message = format!("Serialize failed: {}", e);
                                     should_render = true;
                                 }
@@ -418,9 +418,9 @@ impl ZellijPlugin for ExoMonadPlugin {
 
                 // Status Bar
                 let status_block = Block::default().borders(Borders::ALL).title("ExoMonad");
-                let status_color = match self.status_state.as_str() {
-                    "ERROR" => Color::Red,
-                    "THINKING" => Color::Yellow,
+                let status_color = match self.status_state {
+                    PluginState::Error => Color::Red,
+                    PluginState::Thinking => Color::Yellow,
                     _ => Color::Green,
                 };
                 
