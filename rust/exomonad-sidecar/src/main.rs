@@ -103,7 +103,7 @@ async fn handle_hook(
                 warn!("Failed to emit hook:received event: {}", e);
             }
         } else {
-             warn!("Could not extract agent_id from branch: {}", branch);
+            warn!("Could not extract agent_id from branch: {}", branch);
         }
     } else {
         warn!("Could not determine current git branch for HookReceived event");

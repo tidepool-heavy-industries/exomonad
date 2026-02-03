@@ -37,32 +37,81 @@ impl ratatui::backend::Backend for ZellijBackend {
     {
         use std::fmt::Write;
         let mut buffer = String::with_capacity(content.size_hint().0 * 10);
-        
+
+        // Track the currently active style to avoid redundant ANSI sequences.
+        let mut current_fg: Option<Color> = None;
+        let mut current_bg: Option<Color> = None;
+        let mut current_mod: Modifier = Modifier::empty();
+
         for (x, y, cell) in content {
             // Move cursor
             write!(buffer, "\x1b[{};{}H", y + 1, x + 1).unwrap();
-            
-            // FG
-            if cell.fg != Color::Reset {
-                 write!(buffer, "{}", color_to_ansi(cell.fg, false)).unwrap();
+
+            // Desired style for this cell
+            let desired_fg = if cell.fg == Color::Reset {
+                None
+            } else {
+                Some(cell.fg)
+            };
+            let desired_bg = if cell.bg == Color::Reset {
+                None
+            } else {
+                Some(cell.bg)
+            };
+            let desired_mod = cell.modifier;
+
+            if desired_fg != current_fg || desired_bg != current_bg || desired_mod != current_mod {
+                let desired_is_default =
+                    desired_fg.is_none() && desired_bg.is_none() && desired_mod.is_empty();
+                let current_is_default =
+                    current_fg.is_none() && current_bg.is_none() && current_mod.is_empty();
+
+                if desired_is_default {
+                    // Return to default style
+                    write!(buffer, "\x1b[0m").unwrap();
+                } else {
+                    if !current_is_default {
+                        // Different non-default style: reset before applying new style
+                        // Optimizing this further would require complex diffing of ANSI codes,
+                        // so a hard reset is safer and simpler for now.
+                        write!(buffer, "\x1b[0m").unwrap();
+                    }
+                    // Apply desired foreground/background colors
+                    if let Some(fg) = desired_fg {
+                        write!(buffer, "{}", color_to_ansi(fg, false)).unwrap();
+                    }
+                    if let Some(bg) = desired_bg {
+                        write!(buffer, "{}", color_to_ansi(bg, true)).unwrap();
+                    }
+                    // Apply desired modifiers
+                    if desired_mod.contains(Modifier::BOLD) {
+                        write!(buffer, "\x1b[1m").unwrap();
+                    }
+                    if desired_mod.contains(Modifier::UNDERLINED) {
+                        write!(buffer, "\x1b[4m").unwrap();
+                    }
+                    if desired_mod.contains(Modifier::REVERSED) {
+                        write!(buffer, "\x1b[7m").unwrap();
+                    }
+                    if desired_mod.contains(Modifier::DIM) {
+                        write!(buffer, "\x1b[2m").unwrap();
+                    }
+                    if desired_mod.contains(Modifier::ITALIC) {
+                        write!(buffer, "\x1b[3m").unwrap();
+                    }
+                }
+
+                current_fg = desired_fg;
+                current_bg = desired_bg;
+                current_mod = desired_mod;
             }
-            // BG
-            if cell.bg != Color::Reset {
-                 write!(buffer, "{}", color_to_ansi(cell.bg, true)).unwrap();
-            }
-            // Modifiers
-            if cell.modifier.contains(Modifier::BOLD) { write!(buffer, "\x1b[1m").unwrap(); }
-            if cell.modifier.contains(Modifier::UNDERLINED) { write!(buffer, "\x1b[4m").unwrap(); }
-            if cell.modifier.contains(Modifier::REVERSED) { write!(buffer, "\x1b[7m").unwrap(); }
-            if cell.modifier.contains(Modifier::DIM) { write!(buffer, "\x1b[2m").unwrap(); }
-            if cell.modifier.contains(Modifier::ITALIC) { write!(buffer, "\x1b[3m").unwrap(); }
-            
+
             write!(buffer, "{}", cell.symbol()).unwrap();
-            
-            // Reset for next char
-            write!(buffer, "\x1b[0m").unwrap();
         }
-        
+
+        // Ensure we leave the terminal in a default style state after drawing.
+        write!(buffer, "\x1b[0m").unwrap();
+
         use std::io::Write as IoWrite;
         std::io::stdout().write_all(buffer.as_bytes())?;
         std::io::stdout().flush()?;
@@ -342,7 +391,7 @@ impl ZellijPlugin for ExoMonadPlugin {
     fn render(&mut self, rows: usize, cols: usize) {
         // Initialize terminal if not already present (failsafe for load)
         if self.terminal.is_none() {
-             if let Ok(term) = Terminal::new(ZellijBackend) {
+            if let Ok(term) = Terminal::new(ZellijBackend) {
                 self.terminal = Some(term);
             }
         }
@@ -350,8 +399,8 @@ impl ZellijPlugin for ExoMonadPlugin {
         if let Some(terminal) = &mut self.terminal {
             // Force size as we are in WASM and can't detect it reliably
             if let Err(e) = terminal.resize(Rect::new(0, 0, cols as u16, rows as u16)) {
-                 eprintln!("Failed to resize terminal: {}", e);
-                 return;
+                eprintln!("Failed to resize terminal: {}", e);
+                return;
             }
 
             let res = terminal.draw(|f| {
