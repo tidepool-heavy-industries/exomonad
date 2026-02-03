@@ -257,9 +257,17 @@ fn file_pr_host_fn(
     outputs: &mut [Val],
     _user_data: UserData<()>,
 ) -> std::result::Result<(), Error> {
+    let _span = tracing::info_span!("host_function", function = "file_pr").entered();
     let input: FilePRInput = get_input(plugin, inputs[0])?;
+    tracing::info!(title = %input.title, "Filing PR");
 
     let result = file_pr(&input);
+
+    match &result {
+        Ok(pr) => tracing::info!(success = true, pr_url = %pr.pr_url, created = pr.created, "Completed"),
+        Err(e) => tracing::warn!(error = %e, "Failed"),
+    }
+
     let output: HostResult<FilePROutput> = match result {
         Ok(val) => HostResult::Success(val),
         Err(e) => map_error(e),

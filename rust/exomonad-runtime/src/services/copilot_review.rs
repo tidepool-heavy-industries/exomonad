@@ -342,9 +342,17 @@ fn wait_for_copilot_review_host_fn(
     outputs: &mut [Val],
     _user_data: UserData<()>,
 ) -> std::result::Result<(), Error> {
+    let _span = tracing::info_span!("host_function", function = "wait_for_copilot_review").entered();
     let input: WaitForCopilotReviewInput = get_input(plugin, inputs[0])?;
+    tracing::info!(pr_number = input.pr_number, timeout = input.timeout_secs, "Waiting for Copilot review");
 
     let result = wait_for_copilot_review(&input);
+
+    match &result {
+        Ok(out) => tracing::info!(success = true, status = %out.status, comment_count = out.comments.len(), "Completed"),
+        Err(e) => tracing::warn!(error = %e, "Failed"),
+    }
+
     let output: HostResult<CopilotReviewOutput> = result.into_ffi_result();
 
     outputs[0] = set_output(plugin, &output)?;
