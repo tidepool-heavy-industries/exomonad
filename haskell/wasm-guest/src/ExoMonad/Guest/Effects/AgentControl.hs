@@ -312,6 +312,9 @@ data CleanupMergedAgentsInput = CleanupMergedAgentsInput
 instance ToJSON CleanupMergedAgentsInput where
   toJSON CleanupMergedAgentsInput = object []
 
+instance FromJSON CleanupMergedAgentsInput where
+  parseJSON = withObject "CleanupMergedAgentsInput" $ \_ -> pure CleanupMergedAgentsInput
+
 instance FFIBoundary CleanupMergedAgentsInput
 
 data ListAgentsInput = ListAgentsInput
