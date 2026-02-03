@@ -3,7 +3,7 @@
 | Host Function | Argument Type (Haskell) | Return Type (Haskell) | Status | Test Location |
 |---|---|---|---|---|
 | **Git** | | | | |
-| `git_get_branch` | `GitHostInput` | `String` | 🔴 | |
+| `git_get_branch` | `GitHostInput` | `String` | 🟢 | `ffi_property_tests.rs` |
 | `git_get_worktree` | `GitHostInput` | `WorktreeInfo` | 🔴 | |
 | `git_get_dirty_files` | `GitHostInput` | `[String]` | 🔴 | |
 | `git_get_recent_commits` | `GitLogInput` | `[Commit]` | 🔴 | |
