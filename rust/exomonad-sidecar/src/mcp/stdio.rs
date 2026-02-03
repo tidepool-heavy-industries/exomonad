@@ -128,6 +128,20 @@ struct McpContent {
 }
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+fn to_json_value_or_internal_error<T: Serialize>(id: Value, data: T) -> JsonRpcResponse {
+    match serde_json::to_value(data) {
+        Ok(val) => JsonRpcResponse::success(id, val),
+        Err(e) => {
+            error!("Failed to serialize result: {}", e);
+            JsonRpcResponse::error(id, -32603, "Internal serialization error".into())
+        }
+    }
+}
+
+// ============================================================================
 // Request Handling
 // ============================================================================
 
@@ -150,7 +164,7 @@ async fn handle_request(state: &McpState, request: JsonRpcRequest) -> JsonRpcRes
                     version: env!("CARGO_PKG_VERSION").to_string(),
                 },
             };
-            JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
+            to_json_value_or_internal_error(id, result)
         }
 
         "notifications/initialized" => {
@@ -163,7 +177,7 @@ async fn handle_request(state: &McpState, request: JsonRpcRequest) -> JsonRpcRes
             Ok(tool_defs) => {
                 let mcp_tools: Vec<McpTool> = tool_defs.into_iter().map(McpTool::from).collect();
                 let result = McpToolsListResult { tools: mcp_tools };
-                JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
+                to_json_value_or_internal_error(id, result)
             }
             Err(e) => {
                 error!(error = %e, "Failed to get tool definitions");
@@ -195,7 +209,7 @@ async fn handle_request(state: &McpState, request: JsonRpcRequest) -> JsonRpcRes
                         }],
                         is_error: None,
                     };
-                    JsonRpcResponse::success(id, serde_json::to_value(mcp_result).unwrap())
+                    to_json_value_or_internal_error(id, mcp_result)
                 }
                 Err(e) => {
                     error!(tool = %tool_name, error = %e, "Tool execution failed");
@@ -206,7 +220,7 @@ async fn handle_request(state: &McpState, request: JsonRpcRequest) -> JsonRpcRes
                         }],
                         is_error: Some(true),
                     };
-                    JsonRpcResponse::success(id, serde_json::to_value(mcp_result).unwrap())
+                    to_json_value_or_internal_error(id, mcp_result)
                 }
             }
         }
