@@ -32,6 +32,8 @@ module ExoMonad.Guest.Effects.AgentControl
     BatchSpawnResult (..),
     BatchCleanupResult (..),
     HostResult (..),
+    HostErrorDetails (..),
+    ErrorContext (..),
     SpawnAgentInput (..),
     SpawnAgentsInput (..),
     CleanupAgentInput (..),
@@ -47,7 +49,7 @@ import Data.Text (Text)
 import Data.Text qualified
 import qualified Data.Text.Read as TR
 import Data.Word (Word64)
-import ExoMonad.Guest.HostCall (callHost, host_agent_cleanup, host_agent_cleanup_batch, host_agent_list, host_agent_spawn, host_agent_spawn_batch)
+import ExoMonad.Guest.HostCall (callHost, host_agent_cleanup, host_agent_cleanup_batch, host_agent_list, host_agent_spawn, host_agent_spawn_batch, HostResult(..), HostErrorDetails(..), ErrorContext(..))
 import GHC.Generics (Generic)
 import Data.Kind (Type)
 import Data.Maybe (fromMaybe)
@@ -182,34 +184,6 @@ instance ToJSON BatchCleanupResult where
       [ "cleaned" .= c,
         "failed" .= f
       ]
-
--- | Host result wrapper (matches Rust HostResult).
-data HostResult a
-  = Success a
-  | HostError Text
-  deriving (Show, Eq, Generic)
-
-instance (ToJSON a) => ToJSON (HostResult a) where
-  toJSON (Success payload) =
-    object
-      [ "kind" .= ("Success" :: Text),
-        "payload" .= payload
-      ]
-  toJSON (HostError msg) =
-    object
-      [ "kind" .= ("Error" :: Text),
-        "payload" .= object ["message" .= msg]
-      ]
-
-instance (FromJSON a) => FromJSON (HostResult a) where
-  parseJSON = withObject "HostResult" $ \v -> do
-    kind <- v .: "kind" :: (FromJSON (Maybe Text)) => Data.Aeson.Types.Parser Text
-    case kind of
-      "Success" -> Success <$> v .: "payload"
-      "Error" -> do
-        errObj <- v .: "payload"
-        HostError <$> (errObj .: "message")
-      _ -> fail "Unknown HostResult kind"
 
 -- ============================================================================
 -- Input types (for serialization to host)

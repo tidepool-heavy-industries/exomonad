@@ -5,6 +5,9 @@
 module ExoMonad.Guest.HostCall
   ( callHost,
     callHostVoid,
+    HostResult (..),
+    HostErrorDetails (..),
+    ErrorContext (..),
     -- Git
     host_git_get_branch,
     host_git_get_worktree,
@@ -43,7 +46,7 @@ module ExoMonad.Guest.HostCall
 where
 
 import Control.Exception (bracket)
-import Data.Aeson (FromJSON, ToJSON, eitherDecode, encode, (.:), (.:?), (.!=))
+import Data.Aeson (FromJSON, ToJSON (..), eitherDecode, encode, object, (.:), (.:?), (.!=), (.=))
 import qualified Data.Aeson as Aeson
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy (fromStrict, toStrict)
@@ -61,7 +64,7 @@ import GHC.Generics (Generic)
 -- ============================================================================
 
 data HostResult a = HostSuccess a | HostError HostErrorDetails
-  deriving (Show, Generic)
+  deriving (Show, Eq, Generic)
 
 data HostErrorDetails = HostErrorDetails
   { hostErrorMessage :: Text,
@@ -69,7 +72,7 @@ data HostErrorDetails = HostErrorDetails
     hostErrorContext :: Maybe ErrorContext,
     hostErrorSuggestion :: Maybe Text
   }
-  deriving (Show, Generic)
+  deriving (Show, Eq, Generic)
 
 data ErrorContext = ErrorContext
   { errorContextCommand :: Maybe Text,
@@ -79,7 +82,7 @@ data ErrorContext = ErrorContext
     errorContextFilePath :: Maybe Text,
     errorContextWorkingDir :: Maybe Text
   }
-  deriving (Show, Generic)
+  deriving (Show, Eq, Generic)
 
 instance (FromJSON a) => FromJSON (HostResult a) where
   parseJSON = Aeson.withObject "HostResult" $ \v -> do
@@ -89,6 +92,18 @@ instance (FromJSON a) => FromJSON (HostResult a) where
       "Error" -> HostError <$> v .: "payload"
       _ -> fail "Unknown kind"
 
+instance (ToJSON a) => ToJSON (HostResult a) where
+  toJSON (HostSuccess payload) =
+    object
+      [ "kind" .= ("Success" :: Text),
+        "payload" .= payload
+      ]
+  toJSON (HostError details) =
+    object
+      [ "kind" .= ("Error" :: Text),
+        "payload" .= details
+      ]
+
 instance FromJSON HostErrorDetails where
   parseJSON = Aeson.withObject "HostErrorDetails" $ \v ->
     HostErrorDetails
@@ -96,6 +111,15 @@ instance FromJSON HostErrorDetails where
       <*> v .:? "code" .!= "internal_error" -- Default for backward compatibility
       <*> v .:? "context"
       <*> v .:? "suggestion"
+
+instance ToJSON HostErrorDetails where
+  toJSON (HostErrorDetails msg code ctx sugg) =
+    object
+      [ "message" .= msg,
+        "code" .= code,
+        "context" .= ctx,
+        "suggestion" .= sugg
+      ]
 
 instance FromJSON ErrorContext where
   parseJSON = Aeson.withObject "ErrorContext" $ \v ->
@@ -106,6 +130,17 @@ instance FromJSON ErrorContext where
       <*> v .:? "stdout"
       <*> v .:? "file_path"
       <*> v .:? "working_dir"
+
+instance ToJSON ErrorContext where
+  toJSON (ErrorContext cmd code stderr stdout path dir) =
+    object
+      [ "command" .= cmd,
+        "exit_code" .= code,
+        "stderr" .= stderr,
+        "stdout" .= stdout,
+        "file_path" .= path,
+        "working_dir" .= dir
+      ]
 
 
 -- ============================================================================

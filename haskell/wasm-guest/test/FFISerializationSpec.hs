@@ -39,8 +39,14 @@ instance Arbitrary BatchSpawnResult where
 instance Arbitrary BatchCleanupResult where
   arbitrary = BatchCleanupResult <$> listOf arbText <*> listOf ((,) <$> arbText <*> arbText)
 
+instance Arbitrary ErrorContext where
+  arbitrary = ErrorContext <$> arbMaybeText <*> arbitrary <*> arbMaybeText <*> arbMaybeText <*> arbMaybeText <*> arbMaybeText
+
+instance Arbitrary HostErrorDetails where
+  arbitrary = HostErrorDetails <$> arbText <*> arbText <*> (Just <$> arbitrary) <*> arbMaybeText
+
 instance (Arbitrary a) => Arbitrary (HostResult a) where
-  arbitrary = oneof [Success <$> arbitrary, HostError <$> arbText]
+  arbitrary = oneof [HostSuccess <$> arbitrary, HostError <$> arbitrary]
 
 instance Arbitrary SpawnAgentInput where
   arbitrary = SpawnAgentInput <$> arbitrary <*> arbText <*> arbText <*> arbMaybeText <*> arbitrary
