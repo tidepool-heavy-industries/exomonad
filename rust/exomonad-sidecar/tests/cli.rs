@@ -218,4 +218,3 @@ fn test_cli_other_hook_types_passthrough() -> Result<(), Box<dyn std::error::Err
 
     Ok(())
 }
-

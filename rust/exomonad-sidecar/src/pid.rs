@@ -48,6 +48,7 @@ fn unix_enforce_singleton(pid_file: &Path) -> Result<PidGuard> {
         .read(true)
         .write(true)
         .create(true)
+        .truncate(false)
         .open(pid_file)
         .context("Failed to open PID file")?;
 
@@ -57,7 +58,10 @@ fn unix_enforce_singleton(pid_file: &Path) -> Result<PidGuard> {
     loop {
         // Try to acquire exclusive, non-blocking lock
         #[allow(deprecated)]
-        match nix::fcntl::flock(file.as_raw_fd(), nix::fcntl::FlockArg::LockExclusiveNonblock) {
+        match nix::fcntl::flock(
+            file.as_raw_fd(),
+            nix::fcntl::FlockArg::LockExclusiveNonblock,
+        ) {
             Ok(_) => {
                 // Lock acquired! We are the singleton.
                 break;
@@ -76,15 +80,15 @@ fn unix_enforce_singleton(pid_file: &Path) -> Result<PidGuard> {
                     // Safe cast to i32 (PID type in nix)
                     if let Ok(old_pid) = i32::try_from(old_pid_u32) {
                         let pid = Pid::from_raw(old_pid);
-                        
+
                         // Verify process identity if possible (rudimentary check via ps)
                         if is_sidecar_process(old_pid_u32) {
                             kill_process(pid, old_pid_u32)?;
                         } else {
                             warn!(pid = old_pid, "Process holding lock does not appear to be exomonad-sidecar (or cannot be verified). Waiting...");
-                            // We can't kill it safely if we don't know what it is. 
+                            // We can't kill it safely if we don't know what it is.
                             // But if it holds the lock on our PID file, it's likely relevant or a zombie.
-                            // However, flock locks are released on process termination. 
+                            // However, flock locks are released on process termination.
                             // If it's still holding the lock, it's alive.
                             // If check fails, maybe it's a false negative?
                             // Let's retry kill logic but be careful.
@@ -94,7 +98,7 @@ fn unix_enforce_singleton(pid_file: &Path) -> Result<PidGuard> {
                         }
                     }
                 }
-                
+
                 // Wait a bit before retrying lock
                 std::thread::sleep(std::time::Duration::from_millis(200));
             }
@@ -106,12 +110,13 @@ fn unix_enforce_singleton(pid_file: &Path) -> Result<PidGuard> {
 
     // We have the lock. Truncate and write our PID.
     file.set_len(0).context("Failed to truncate PID file")?;
-    file.seek(SeekFrom::Start(0)).context("Failed to seek PID file")?;
-    
+    file.seek(SeekFrom::Start(0))
+        .context("Failed to seek PID file")?;
+
     let current_pid = std::process::id();
     file.write_all(current_pid.to_string().as_bytes())
         .context("Failed to write to PID file")?;
-    
+
     info!(pid = current_pid, path = %pid_file.display(), "PID file locked and written");
 
     Ok(PidGuard {
@@ -134,7 +139,7 @@ fn is_sidecar_process(pid: u32) -> bool {
     match output {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout);
-            // Check for binary name. 
+            // Check for binary name.
             // process might be "target/debug/exomonad-sidecar" or just "exomonad-sidecar"
             stdout.contains("exomonad-sidecar")
         }
@@ -144,7 +149,10 @@ fn is_sidecar_process(pid: u32) -> bool {
 
 #[cfg(unix)]
 fn kill_process(pid: Pid, old_pid: u32) -> Result<()> {
-    info!(pid = old_pid, "Attempting to terminate existing sidecar process");
+    info!(
+        pid = old_pid,
+        "Attempting to terminate existing sidecar process"
+    );
 
     // Try SIGTERM
     match signal::kill(pid, Signal::SIGTERM) {
@@ -152,7 +160,7 @@ fn kill_process(pid: Pid, old_pid: u32) -> Result<()> {
             // Poll for exit
             let timeout = std::time::Duration::from_secs(5);
             let start = std::time::Instant::now();
-            
+
             while start.elapsed() < timeout {
                 if signal::kill(pid, None).is_err() {
                     info!(pid = old_pid, "Process terminated after SIGTERM");
@@ -161,11 +169,17 @@ fn kill_process(pid: Pid, old_pid: u32) -> Result<()> {
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
 
-            warn!(pid = old_pid, "Process still alive after SIGTERM timeout, sending SIGKILL");
+            warn!(
+                pid = old_pid,
+                "Process still alive after SIGTERM timeout, sending SIGKILL"
+            );
         }
         Err(nix::errno::Errno::ESRCH) => return Ok(()), // Already gone
         Err(nix::errno::Errno::EPERM) => {
-            warn!(pid = old_pid, "Permission denied when trying to kill process");
+            warn!(
+                pid = old_pid,
+                "Permission denied when trying to kill process"
+            );
             return Ok(()); // We can't do anything, loop will likely timeout on lock acquire
         }
         Err(e) => warn!(pid = old_pid, error = %e, "Failed to send SIGTERM"),
@@ -176,21 +190,27 @@ fn kill_process(pid: Pid, old_pid: u32) -> Result<()> {
         Ok(_) => {
             // Brief wait
             std::thread::sleep(std::time::Duration::from_millis(100));
-             if signal::kill(pid, None).is_ok() {
-                 anyhow::bail!("Failed to kill process {} with SIGKILL (still running)", old_pid);
-             }
-             info!(pid = old_pid, "Process terminated after SIGKILL");
-             Ok(())
+            if signal::kill(pid, None).is_ok() {
+                anyhow::bail!(
+                    "Failed to kill process {} with SIGKILL (still running)",
+                    old_pid
+                );
+            }
+            info!(pid = old_pid, "Process terminated after SIGKILL");
+            Ok(())
         }
-         Err(nix::errno::Errno::ESRCH) => Ok(()),
-         Err(nix::errno::Errno::EPERM) => {
-             warn!(pid = old_pid, "Permission denied when trying to kill process (SIGKILL)");
-             Ok(())
-         }
-         Err(e) => {
-             warn!(pid = old_pid, error = %e, "Failed to send SIGKILL");
-             Ok(()) // Loop will handle retry/timeout
-         }
+        Err(nix::errno::Errno::ESRCH) => Ok(()),
+        Err(nix::errno::Errno::EPERM) => {
+            warn!(
+                pid = old_pid,
+                "Permission denied when trying to kill process (SIGKILL)"
+            );
+            Ok(())
+        }
+        Err(e) => {
+            warn!(pid = old_pid, error = %e, "Failed to send SIGKILL");
+            Ok(()) // Loop will handle retry/timeout
+        }
     }
 }
 
@@ -217,13 +237,13 @@ impl Drop for PidGuard {
         // Since we held the lock exclusive, no one else should have written to it.
         // Unless they force deleted it.
         // We can just remove it.
-        
+
         // On Unix, we need to explicitly unlock? No, closing fd unlocks.
         // Drop of File closes fd.
-        
+
         // Remove file
         if self.path.exists() {
-             let _ = fs::remove_file(&self.path);
+            let _ = fs::remove_file(&self.path);
         }
     }
 }
@@ -247,7 +267,7 @@ mod tests {
 
         assert!(!pid_file.exists());
     }
-    
+
     #[cfg(unix)]
     #[test]
     fn test_lock_contention() {
@@ -255,27 +275,31 @@ mod tests {
         // This is complex to test in unit test without external binary.
         // We can simulate by flocking in the same process on a different fd?
         // flock is per-file-handle in Linux usually, checking nix behavior.
-        
+
         let dir = tempdir().unwrap();
         let pid_file = dir.path().join("contention.pid");
-        
-        let file1 = OpenOptions::new().create(true).write(true).open(&pid_file).unwrap();
+
+        let file1 = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(&pid_file)
+            .unwrap();
         #[allow(deprecated)]
         nix::fcntl::flock(file1.as_raw_fd(), nix::fcntl::FlockArg::LockExclusive).unwrap();
-        
+
         // Try to acquire in background thread? flock is process-associated on some systems (BSD/macOS)?
         // On Linux flock is associated with the file description (fd).
         // Let's try separate thread with separate opening.
-        
+
         let path_clone = pid_file.clone();
         let handle = std::thread::spawn(move || {
             // Should block or fail
-             match enforce_singleton(&path_clone) {
-                 Ok(_) => true,
-                 Err(_) => false,
-             }
+            match enforce_singleton(&path_clone) {
+                Ok(_) => true,
+                Err(_) => false,
+            }
         });
-        
+
         // The other thread will try to lock. It will block or loop.
         // Since we hold the lock and are "sidecar-like" (same process name), it might try to kill us?
         // Wait, current process IS "exomonad-sidecar" (or test binary).
@@ -283,12 +307,12 @@ mod tests {
         // The test runner name is usually different.
         // So `is_sidecar_process` will return false.
         // So it should just loop waiting.
-        
+
         std::thread::sleep(std::time::Duration::from_millis(500));
-        
+
         // Release lock
         drop(file1);
-        
+
         // Now thread should succeed
         assert!(handle.join().unwrap());
     }
