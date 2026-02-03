@@ -2,6 +2,8 @@
 
 Shared library for the exomonad workspace. Provides protocol types, HTTP socket client, and hook handling utilities.
 
+For details on configuration and filesystem paths, see [docs/CONFIG.md](../../docs/CONFIG.md).
+
 ## Module Overview
 
 | Module | File | Purpose |
