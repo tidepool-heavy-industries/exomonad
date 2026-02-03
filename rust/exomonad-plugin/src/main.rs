@@ -313,7 +313,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                     match key.bare_key {
                         BareKey::Esc => {
                             let _ = run_command(
-                                &["exomonad-sidecar", "reply", "--id", req_id, "--cancel"],
+                                &["exomonad", "reply", "--id", req_id, "--cancel"],
                                 BTreeMap::new(),
                             );
                             self.active_popup = None;
@@ -360,7 +360,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                                 Ok(json_values) => {
                                     let _ = run_command(
                                         &[
-                                            "exomonad-sidecar",
+                                            "exomonad",
                                             "reply",
                                             "--id",
                                             req_id,

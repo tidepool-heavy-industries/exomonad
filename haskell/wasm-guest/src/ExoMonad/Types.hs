@@ -14,11 +14,12 @@ where
 import Data.Text (Text)
 import ExoMonad.Guest.Types (HookInput, HookOutput, StopHookOutput, allowResponse, allowStopResponse)
 import GHC.Generics (Generic)
-import Polysemy (Sem)
+import Polysemy (Embed, Sem)
 
 -- | Effects available to hooks.
--- Hooks are kept IO-blind; only pure effects are allowed here.
-type HookEffects = '[]
+-- Currently allows arbitrary IO via Embed IO (required for Host Calls).
+-- Future versions may restrict this to specific effects (Git, GitHub, Log).
+type HookEffects = '[Embed IO]
 
 -- | Role configuration.
 -- Defines the role name, available tools, and lifecycle hooks.

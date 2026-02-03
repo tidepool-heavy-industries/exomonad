@@ -129,7 +129,7 @@ wasm role="tl":
     echo "[cache]" > ~/.exomonad/wasm-cache.toml
     echo "directory = '${HOME}/.exomonad/wasm-cache'" >> ~/.exomonad/wasm-cache.toml
     @echo ">>> Warming up cache..."
-    cd rust && cargo run -q -p exomonad-sidecar -- warmup ~/.exomonad/wasm/wasm-guest-{{role}}.wasm
+    cd rust && cargo run -q -p exomonad -- warmup ~/.exomonad/wasm/wasm-guest-{{role}}.wasm
     @echo ">>> Done: ~/.exomonad/wasm/wasm-guest-{{role}}.wasm (cached)"
 
 # Build both WASM guest plugins (tl + dev)
@@ -151,41 +151,41 @@ wasm-dev role="tl":
     echo "[cache]" > ~/.exomonad/wasm-cache.toml
     echo "directory = '${HOME}/.exomonad/wasm-cache'" >> ~/.exomonad/wasm-cache.toml
     @echo ">>> Warming up cache..."
-    cd rust && cargo run -q -p exomonad-sidecar -- warmup ~/.exomonad/wasm/wasm-guest-{{role}}.wasm
+    cd rust && cargo run -q -p exomonad -- warmup ~/.exomonad/wasm/wasm-guest-{{role}}.wasm
     @echo ">>> Done: ~/.exomonad/wasm/wasm-guest-{{role}}.wasm (cached)"
 
 # Install everything: Rust binaries + WASM plugins (uses release build)
 install-all:
     @echo ">>> [1/3] Building Rust binaries (release)..."
-    cd rust && cargo build --release -p exomonad-sidecar
+    cd rust && cargo build --release -p exomonad
     @echo ">>> [2/3] Installing binaries to ~/.cargo/bin/..."
     mkdir -p ~/.cargo/bin
-    cp rust/target/release/exomonad-sidecar ~/.cargo/bin/
+    cp rust/target/release/exomonad ~/.cargo/bin/
     @echo ">>> [3/3] Building and installing WASM plugins..."
     @just wasm-all
     @echo ">>> Done!"
     @echo ""
     @echo "Installed:"
-    @ls -lh ~/.cargo/bin/exomonad-sidecar
+    @ls -lh ~/.cargo/bin/exomonad
     @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
 
 # Install everything (fast dev build)
 install-all-dev:
     @echo ">>> [1/4] Building Rust sidecar (debug)..."
-    cd rust && cargo build -p exomonad-sidecar
+    cd rust && cargo build -p exomonad
     @echo ">>> [2/4] Building Zellij plugin (wasm32-wasip1)..."
     cd rust/exomonad-plugin && cargo build --target wasm32-wasip1
     @echo ">>> [3/4] Installing binaries..."
     mkdir -p ~/.cargo/bin
     mkdir -p ~/.config/zellij/plugins
-    cp rust/target/debug/exomonad-sidecar ~/.cargo/bin/
+    cp rust/target/debug/exomonad ~/.cargo/bin/
     cp rust/exomonad-plugin/target/wasm32-wasip1/debug/exomonad-plugin.wasm ~/.config/zellij/plugins/
     @echo ">>> [4/4] Building and installing Haskell WASM plugins..."
     @just wasm-all
     @echo ">>> Done!"
     @echo ""
     @echo "Installed:"
-    @ls -lh ~/.cargo/bin/exomonad-sidecar
+    @ls -lh ~/.cargo/bin/exomonad
     @ls -lh ~/.config/zellij/plugins/exomonad-plugin.wasm
     @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
 

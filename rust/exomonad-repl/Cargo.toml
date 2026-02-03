@@ -16,4 +16,4 @@ clap = { version = "4", features = ["derive", "env"] }
 
 exomonad-runtime = { path = "../exomonad-runtime" }
 exomonad-shared = { path = "../exomonad-shared" }
-exomonad-sidecar = { path = "../exomonad-sidecar" }
+exomonad = { path = "../exomonad" }

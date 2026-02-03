@@ -1,9 +1,9 @@
 [package]
-name = "exomonad-sidecar"
+name = "exomonad"
 version = "0.1.0"
 edition = "2021"
-description = "Sidecar binary: Rust host with Haskell WASM plugin for Claude Code hooks/MCP"
-default-run = "exomonad"
+description = "ExoMonad: Rust host with Haskell WASM plugin for Claude Code hooks/MCP"
+autobins = false
 
 [[bin]]
 name = "exomonad"

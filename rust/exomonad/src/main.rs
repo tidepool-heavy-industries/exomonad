@@ -6,7 +6,7 @@
 //!
 //! All IO is handled by Rust; Haskell WASM yields high-level semantic effects.
 
-use exomonad_sidecar::{config, mcp};
+use exomonad::{config, mcp};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -27,8 +27,8 @@ use tracing::{debug, info, warn};
 // ============================================================================
 
 #[derive(Parser)]
-#[command(name = "exomonad-sidecar")]
-#[command(about = "Rust sidecar with Haskell WASM plugin for Claude Code")]
+#[command(name = "exomonad")]
+#[command(about = "ExoMonad: Rust host with Haskell WASM plugin for agent orchestration")]
 #[command(version)]
 struct Cli {
     #[command(subcommand)]
