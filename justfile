@@ -123,6 +123,7 @@ wasm role="tl":
     @echo ">>> Installing to ~/.exomonad/wasm/..."
     mkdir -p ~/.exomonad/wasm
     rm -f ~/.exomonad/wasm/wasm-guest-{{role}}.wasm
+    cp result/wasm-guest-{{role}}.wasm ~/.exomonad/wasm/
     @echo ">>> Setting up WASM cache..."
     mkdir -p ~/.exomonad/wasm-cache
     echo "[cache]" > ~/.exomonad/wasm-cache.toml
