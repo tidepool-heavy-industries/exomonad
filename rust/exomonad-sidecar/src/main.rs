@@ -71,7 +71,7 @@ enum Commands {
 // Hook Handler
 // ============================================================================
 
-#[tracing::instrument(skip(plugin, runtime), fields(event = ?event_type))]
+#[tracing::instrument(skip(plugin, runtime, event_type), fields(event = ?event_type))]
 async fn handle_hook(
     plugin: &PluginManager,
     event_type: HookEventType,
