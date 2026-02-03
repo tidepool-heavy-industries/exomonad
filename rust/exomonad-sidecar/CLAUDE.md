@@ -29,7 +29,7 @@ Claude Code → exomonad-sidecar hook → WASM handle_pre_tool_use → HookOutpu
 
 For MCP tools:
 ```
-Claude Code → HTTP/stdio → exomonad-sidecar mcp → WASM handle_mcp_call → Result
+Claude Code → stdio → exomonad-sidecar mcp-stdio → WASM handle_mcp_call → Result
 ```
 
 ## CLI Usage
@@ -39,7 +39,6 @@ The sidecar auto-discovers WASM based on `.exomonad/config.toml`:
 ```bash
 # Config file specifies role, sidecar resolves ~/.exomonad/wasm/wasm-guest-{role}.wasm
 exomonad-sidecar hook pre-tool-use
-exomonad-sidecar mcp --port 7432
 exomonad-sidecar mcp-stdio
 ```
 
@@ -55,7 +54,7 @@ This will load `~/.exomonad/wasm/wasm-guest-tl.wasm`.
 
 ## MCP Server
 
-The MCP server provides Claude Code with tools via HTTP or stdio.
+The MCP server provides Claude Code with tools via stdio (JSON-RPC).
 
 ### Configuration
 
@@ -96,13 +95,6 @@ The spawn tools (`spawn_agents`, `cleanup_agents`, `list_agents`) require:
 - **GITHUB_TOKEN**: Environment variable for GitHub API access
 - **Git repository**: The project directory must be a git repository
 
-### Endpoints (HTTP mode)
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/mcp/tools` | GET | List available tools |
-| `/mcp/call` | POST | Execute a tool |
-| `/health` | GET | Health check |
 
 ## Environment Variables
 
@@ -176,12 +168,6 @@ cargo test -p exomonad-sidecar
 # E2E hook test (requires .exomonad/config.toml with role field and built WASM)
 echo '{"session_id":"test","hook_event_name":"PreToolUse","tool_name":"Write","transcript_path":"/tmp/t.jsonl","cwd":"/","permission_mode":"default"}' | \
   ./target/debug/exomonad-sidecar hook pre-tool-use
-
-# MCP server test
-./target/debug/exomonad-sidecar mcp --port 17432 &
-curl http://localhost:17432/health
-curl http://localhost:17432/mcp/tools
-pkill exomonad-sidecar
 ```
 
 ## Data Flow
@@ -213,11 +199,11 @@ Claude Code hook JSON (stdin)
 ```
 Claude Code MCP request
          ↓
-    exomonad-sidecar mcp (or mcp-stdio)
+    exomonad-sidecar mcp-stdio
          ↓
     Load WASM via config (role field)
          ↓
-    HTTP server receives POST /mcp/call (or stdio)
+    stdio receives JSON-RPC request
          ↓
     Call WASM handle_mcp_call
          ↓
@@ -229,7 +215,7 @@ Claude Code MCP request
          ↓
     Haskell returns MCPCallOutput
          ↓
-    HTTP response with result (or stdio output)
+    stdio JSON-RPC response
 ```
 
 ## Related Documentation

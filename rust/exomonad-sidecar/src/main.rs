@@ -45,17 +45,6 @@ enum Commands {
         runtime: Runtime,
     },
 
-    /// Start MCP HTTP server for Claude Code tools
-    Mcp {
-        /// Port to listen on
-        #[arg(long, default_value = "7432")]
-        port: u16,
-
-        /// Project directory for git operations (defaults to current directory)
-        #[arg(long, env = "EXOMONAD_PROJECT_DIR")]
-        project_dir: Option<PathBuf>,
-    },
-
     /// Run as stdio MCP server (Claude Code spawns this)
     ///
     /// Reads config from .exomonad/config.toml in current directory.
@@ -254,35 +243,6 @@ async fn main() -> Result<()> {
             info!("WASM plugin loaded and initialized");
 
             handle_hook(&plugin, event, runtime).await?;
-        }
-
-        Commands::Mcp { port, project_dir } => {
-            let project_dir = project_dir.unwrap_or_else(|| {
-                std::env::current_dir().expect("Failed to get current directory")
-            });
-
-            info!(wasm = ?wasm_path, "Loading WASM plugin");
-
-            // Initialize and validate services
-            let services = Arc::new(
-                Services::new()
-                    .validate()
-                    .context("Failed to validate services")?,
-            );
-
-            // Load WASM plugin
-            let plugin = PluginManager::new(wasm_path, services.clone())
-                .await
-                .context("Failed to load WASM plugin")?;
-
-            info!(port, project_dir = %project_dir.display(), "Starting MCP server");
-
-            let state = mcp::McpState {
-                project_dir,
-                plugin: Arc::new(plugin),
-            };
-
-            mcp::run_server(state, port).await?;
         }
 
         Commands::McpStdio => {
