@@ -324,11 +324,18 @@ pub fn git_get_branch_host_fn(git_service: Arc<GitService>) -> Function {
                 return Err(Error::msg("git_get_branch: expected input argument"));
             }
             let Json(input): Json<GitHostInput> = plugin.memory_get_val(&inputs[0])?;
+            tracing::info!(dir = %input.working_dir, container = %input.container_id, "Getting git branch");
             
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(git.get_branch(&input.container_id, &input.working_dir))?;
+            
+            match &result {
+                Ok(branch) => tracing::info!(success = true, branch = %branch, "Completed"),
+                Err(e) => tracing::warn!(error = %e, "Failed"),
+            }
+
             let output: HostResult<String> = result.into_ffi_result();
 
             plugin.memory_set_val(&mut outputs[0], Json(output))?;
@@ -355,11 +362,18 @@ pub fn git_get_worktree_host_fn(git_service: Arc<GitService>) -> Function {
                 return Err(Error::msg("git_get_worktree: expected input argument"));
             }
             let Json(input): Json<GitHostInput> = plugin.memory_get_val(&inputs[0])?;
+            tracing::info!(dir = %input.working_dir, container = %input.container_id, "Getting git worktree");
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(git.get_worktree(&input.container_id, &input.working_dir))?;
+
+            match &result {
+                Ok(wt) => tracing::info!(success = true, path = %wt.path, branch = %wt.branch, "Completed"),
+                Err(e) => tracing::warn!(error = %e, "Failed"),
+            }
+
             let output: HostResult<WorktreeInfo> = result.into_ffi_result();
 
             plugin.memory_set_val(&mut outputs[0], Json(output))?;
@@ -386,11 +400,18 @@ pub fn git_get_dirty_files_host_fn(git_service: Arc<GitService>) -> Function {
                 return Err(Error::msg("git_get_dirty_files: expected input argument"));
             }
             let Json(input): Json<GitHostInput> = plugin.memory_get_val(&inputs[0])?;
+            tracing::info!(dir = %input.working_dir, container = %input.container_id, "Getting dirty files");
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(git.get_dirty_files(&input.container_id, &input.working_dir))?;
+            
+            match &result {
+                Ok(files) => tracing::info!(success = true, count = files.len(), "Completed"),
+                Err(e) => tracing::warn!(error = %e, "Failed"),
+            }
+
             let output: HostResult<Vec<String>> = result.into_ffi_result();
 
             plugin.memory_set_val(&mut outputs[0], Json(output))?;
@@ -419,6 +440,7 @@ pub fn git_get_recent_commits_host_fn(git_service: Arc<GitService>) -> Function 
                 ));
             }
             let Json(input): Json<GitLogInput> = plugin.memory_get_val(&inputs[0])?;
+            tracing::info!(dir = %input.working_dir, container = %input.container_id, limit = input.limit, "Getting recent commits");
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
@@ -428,6 +450,12 @@ pub fn git_get_recent_commits_host_fn(git_service: Arc<GitService>) -> Function 
                 &input.working_dir,
                 input.limit,
             ))?;
+
+            match &result {
+                Ok(commits) => tracing::info!(success = true, count = commits.len(), "Completed"),
+                Err(e) => tracing::warn!(error = %e, "Failed"),
+            }
+
             let output: HostResult<Vec<Commit>> = result.into_ffi_result();
 
             plugin.memory_set_val(&mut outputs[0], Json(output))?;
@@ -456,12 +484,19 @@ pub fn git_has_unpushed_commits_host_fn(git_service: Arc<GitService>) -> Functio
                 ));
             }
             let Json(input): Json<GitHostInput> = plugin.memory_get_val(&inputs[0])?;
+            tracing::info!(dir = %input.working_dir, container = %input.container_id, "Checking unpushed commits");
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result =
                 block_on(git.has_unpushed_commits(&input.container_id, &input.working_dir))?;
+
+            match &result {
+                Ok(has_unpushed) => tracing::info!(success = true, has_unpushed, "Completed"),
+                Err(e) => tracing::warn!(error = %e, "Failed"),
+            }
+
             let output: HostResult<bool> = result.into_ffi_result();
 
             plugin.memory_set_val(&mut outputs[0], Json(output))?;
@@ -488,11 +523,18 @@ pub fn git_get_remote_url_host_fn(git_service: Arc<GitService>) -> Function {
                 return Err(Error::msg("git_get_remote_url: expected input argument"));
             }
             let Json(input): Json<GitHostInput> = plugin.memory_get_val(&inputs[0])?;
+            tracing::info!(dir = %input.working_dir, container = %input.container_id, "Getting git remote URL");
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(git.get_remote_url(&input.container_id, &input.working_dir))?;
+
+            match &result {
+                Ok(url) => tracing::info!(success = true, url = %url, "Completed"),
+                Err(e) => tracing::warn!(error = %e, "Failed"),
+            }
+
             let output: HostResult<String> = result.into_ffi_result();
 
             plugin.memory_set_val(&mut outputs[0], Json(output))?;
@@ -519,11 +561,18 @@ pub fn git_get_repo_info_host_fn(git_service: Arc<GitService>) -> Function {
                 return Err(Error::msg("git_get_repo_info: expected input argument"));
             }
             let Json(input): Json<GitHostInput> = plugin.memory_get_val(&inputs[0])?;
+            tracing::info!(dir = %input.working_dir, container = %input.container_id, "Getting git repo info");
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(git.get_repo_info(&input.container_id, &input.working_dir))?;
+
+            match &result {
+                Ok(info) => tracing::info!(success = true, branch = %info.branch, owner = ?info.owner, name = ?info.name, "Completed"),
+                Err(e) => tracing::warn!(error = %e, "Failed"),
+            }
+
             let output: HostResult<RepoInfo> = result.into_ffi_result();
 
             plugin.memory_set_val(&mut outputs[0], Json(output))?;

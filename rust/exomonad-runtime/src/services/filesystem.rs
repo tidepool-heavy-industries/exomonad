@@ -181,7 +181,6 @@ fn block_on<F: std::future::Future>(future: F) -> Result<F::Output, Error> {
     }
 }
 
-/// Create the fs_read_file host function.
 pub fn fs_read_file_host_fn(service: Arc<FileSystemService>) -> Function {
     Function::new(
         "fs_read_file",
@@ -195,6 +194,7 @@ pub fn fs_read_file_host_fn(service: Arc<FileSystemService>) -> Function {
          -> Result<(), Error> {
             let _span = tracing::info_span!("host_function", function = "fs_read_file").entered();
             let input: ReadFileInput = get_input(plugin, inputs[0])?;
+            tracing::info!(path = %input.path, max_bytes = input.max_bytes, "Reading file");
 
             let service_arc = user_data.get()?;
             let service = service_arc
@@ -202,6 +202,12 @@ pub fn fs_read_file_host_fn(service: Arc<FileSystemService>) -> Function {
                 .map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(service.read_file(&input))?;
+
+            match &result {
+                Ok(out) => tracing::info!(success = true, bytes_read = out.bytes_read, truncated = out.truncated, "Completed"),
+                Err(e) => tracing::warn!(error = %e, "Failed"),
+            }
+
             let output: HostResult<ReadFileOutput> = result.into_ffi_result();
 
             outputs[0] = set_output(plugin, &output)?;
@@ -211,7 +217,6 @@ pub fn fs_read_file_host_fn(service: Arc<FileSystemService>) -> Function {
     .with_namespace("env")
 }
 
-/// Create the fs_write_file host function.
 pub fn fs_write_file_host_fn(service: Arc<FileSystemService>) -> Function {
     Function::new(
         "fs_write_file",
@@ -225,6 +230,7 @@ pub fn fs_write_file_host_fn(service: Arc<FileSystemService>) -> Function {
          -> Result<(), Error> {
             let _span = tracing::info_span!("host_function", function = "fs_write_file").entered();
             let input: WriteFileInput = get_input(plugin, inputs[0])?;
+            tracing::info!(path = %input.path, bytes = input.content.len(), create_parents = input.create_parents, "Writing file");
 
             let service_arc = user_data.get()?;
             let service = service_arc
@@ -232,6 +238,12 @@ pub fn fs_write_file_host_fn(service: Arc<FileSystemService>) -> Function {
                 .map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(service.write_file(&input))?;
+
+            match &result {
+                Ok(out) => tracing::info!(success = true, bytes_written = out.bytes_written, "Completed"),
+                Err(e) => tracing::warn!(error = %e, "Failed"),
+            }
+
             let output: HostResult<WriteFileOutput> = result.into_ffi_result();
 
             outputs[0] = set_output(plugin, &output)?;
