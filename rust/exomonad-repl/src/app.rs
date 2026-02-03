@@ -1,4 +1,4 @@
-use exomonad_sidecar::mcp::ToolDefinition;
+use exomonad::mcp::ToolDefinition;
 use tuirealm::terminal::{CrosstermTerminalAdapter, TerminalBridge};
 use tuirealm::{Application, NoUserEvent, Update};
 

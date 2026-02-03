@@ -5,7 +5,7 @@ use exomonad_shared::{PathError, Role, WasmPath};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
-use tracing::{debug, info};
+use tracing::debug;
 
 /// Configuration validation errors.
 #[derive(Debug, Error)]

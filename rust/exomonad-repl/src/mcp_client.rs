@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use exomonad_runtime::{PluginManager, Services};
-use exomonad_sidecar::mcp::{tools, McpState, ToolDefinition};
+use exomonad::mcp::{tools, McpState, ToolDefinition};
 use std::path::PathBuf;
 use std::sync::Arc;
 

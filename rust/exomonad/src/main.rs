@@ -376,7 +376,7 @@ async fn main() -> Result<()> {
             };
 
             let pid_file = project_dir.join(".exomonad/sidecar.pid");
-            let _pid_guard = exomonad_sidecar::pid::PidGuard::new(&pid_file)?;
+            let _pid_guard = exomonad::pid::PidGuard::new(&pid_file)?;
 
             info!(wasm = ?wasm_path, "Loading WASM plugin");
 
