@@ -7,7 +7,7 @@ use crate::services::github;
 use crate::services::log;
 use crate::services::ValidatedServices;
 use anyhow::{Context, Result};
-use extism::{Manifest, Plugin};
+use extism::{Manifest, Plugin, PluginBuilder};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -163,7 +163,30 @@ impl PluginManager {
         // Copilot review functions (1 function) - poll for Copilot review comments
         functions.extend(copilot_review::register_host_functions());
 
-        Plugin::new(&manifest, functions, true).context("Failed to create plugin")
+        let mut builder = PluginBuilder::new(manifest)
+            .with_functions(functions)
+            .with_wasi(true);
+
+        // Try to enable WASM caching if config exists
+        match std::env::var("HOME") {
+            Ok(home) => {
+                let cache_config = PathBuf::from(home).join(".exomonad/wasm-cache.toml");
+                if cache_config.exists() {
+                    tracing::info!("Using WASM cache config: {:?}", cache_config);
+                    builder = builder.with_cache_config(cache_config);
+                } else {
+                    tracing::debug!(
+                        "WASM cache disabled: config file not found at {:?}",
+                        cache_config
+                    );
+                }
+            }
+            Err(_) => {
+                tracing::debug!("WASM cache disabled: HOME environment variable is not set");
+            }
+        }
+
+        builder.build().context("Failed to create plugin")
     }
 
     /// Reload the plugin to clear memory/state.
