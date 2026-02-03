@@ -3,9 +3,9 @@ use zellij_tile::prelude::*;
 use ratatui::{
     backend::WindowSize,
     layout::{Constraint, Direction, Layout, Rect, Size, Position},
-    style::{Color, Modifier, Style, Stylize},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Clear, Wrap},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Clear},
     Terminal,
 };
 
@@ -23,6 +23,7 @@ struct ExoMonadPlugin {
     selected_index: usize,
     sub_index: usize,
     events: VecDeque<AgentEvent>,
+    terminal: Option<Terminal<ZellijBackend>>,
 }
 
 register_plugin!(ExoMonadPlugin);
@@ -97,7 +98,7 @@ fn color_to_ansi(color: Color, bg: bool) -> String {
         Color::Blue => format!("\x1b[{}m", 34 + layer_offset),
         Color::Magenta => format!("\x1b[{}m", 35 + layer_offset),
         Color::Cyan => format!("\x1b[{}m", 36 + layer_offset),
-        Color::Gray => format!("\x1b[{}m", 90 + layer_offset), // Bright Black
+        Color::Gray => format!("\x1b[{}m", 37 + layer_offset), // Standard Gray/White
         Color::DarkGray => format!("\x1b[{}m", 90 + layer_offset),
         Color::LightRed => format!("\x1b[{}m", 91 + layer_offset),
         Color::LightGreen => format!("\x1b[{}m", 92 + layer_offset),
@@ -117,6 +118,10 @@ impl ZellijPlugin for ExoMonadPlugin {
         self.status_state = "IDLE".to_string();
         self.status_message = "Ready.".to_string();
         self.events = VecDeque::new();
+        // Initialize terminal with ZellijBackend
+        if let Ok(term) = Terminal::new(ZellijBackend) {
+            self.terminal = Some(term);
+        }
     }
 
     fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
@@ -335,173 +340,191 @@ impl ZellijPlugin for ExoMonadPlugin {
     }
 
     fn render(&mut self, rows: usize, cols: usize) {
-        let mut terminal = Terminal::new(ZellijBackend).unwrap();
-        // Force size as we are in WASM and can't detect it reliably
-        terminal.resize(Rect::new(0, 0, cols as u16, rows as u16)).unwrap();
+        // Initialize terminal if not already present (failsafe for load)
+        if self.terminal.is_none() {
+             if let Ok(term) = Terminal::new(ZellijBackend) {
+                self.terminal = Some(term);
+            }
+        }
 
-        terminal.draw(|f| {
-            let area = f.area();
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3), // Status bar
-                    Constraint::Min(0),    // Events
-                ])
-                .split(area);
+        if let Some(terminal) = &mut self.terminal {
+            // Force size as we are in WASM and can't detect it reliably
+            if let Err(e) = terminal.resize(Rect::new(0, 0, cols as u16, rows as u16)) {
+                 eprintln!("Failed to resize terminal: {}", e);
+                 return;
+            }
 
-            // Status Bar
-            let status_block = Block::default().borders(Borders::ALL).title("ExoMonad");
-            let status_color = match self.status_state.as_str() {
-                "ERROR" => Color::Red,
-                "THINKING" => Color::Yellow,
-                _ => Color::Green,
-            };
-            
-            let status_text = Line::from(vec![
-                Span::styled(format!("[{}] ", self.status_state), Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
-                Span::raw(&self.status_message),
-            ]);
-            
-            let p = Paragraph::new(status_text).block(status_block);
-            f.render_widget(p, chunks[0]);
+            let res = terminal.draw(|f| {
+                let area = f.area();
+                let chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Length(3), // Status bar
+                        Constraint::Min(0),    // Events
+                    ])
+                    .split(area);
 
-            // Events List
-            let event_items: Vec<ListItem> = self.events.iter().rev().take(20).map(|e| {
-                let (time, content, color) = match e {
-                    AgentEvent::AgentStarted { agent_id, timestamp } => (timestamp, format!("{} started", agent_id), Color::Green),
-                    AgentEvent::AgentStopped { agent_id, timestamp } => (timestamp, format!("{} done", agent_id), Color::Blue),
-                    AgentEvent::StopHookBlocked { agent_id, reason, timestamp } => (timestamp, format!("{} blocked: {}", agent_id, reason), Color::Red),
-                    AgentEvent::HookReceived { agent_id, hook_type, timestamp } => (timestamp, format!("{} hook: {}", agent_id, hook_type), Color::Cyan),
-                    AgentEvent::PrFiled { agent_id, pr_number, timestamp } => (timestamp, format!("{} PR #{}", agent_id, pr_number), Color::Magenta),
-                    AgentEvent::CopilotReviewed { agent_id, comment_count, timestamp } => (timestamp, format!("{} copilot: {} comments", agent_id, comment_count), Color::Yellow),
-                    AgentEvent::AgentStuck { agent_id, failed_stop_count, timestamp } => (timestamp, format!("{} ⚠ STUCK ({} failed stops)", agent_id, failed_stop_count), Color::Red),
+                // Status Bar
+                let status_block = Block::default().borders(Borders::ALL).title("ExoMonad");
+                let status_color = match self.status_state.as_str() {
+                    "ERROR" => Color::Red,
+                    "THINKING" => Color::Yellow,
+                    _ => Color::Green,
                 };
                 
-                ListItem::new(Line::from(vec![
-                    Span::styled(format!("{} ", format_timestamp(time)), Style::default().fg(Color::DarkGray)),
-                    Span::styled(content, Style::default().fg(color)),
-                ]))
-            }).collect();
+                let status_text = Line::from(vec![
+                    Span::styled(format!("[{}] ", self.status_state), Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+                    Span::raw(&self.status_message),
+                ]);
+                
+                let p = Paragraph::new(status_text).block(status_block);
+                f.render_widget(p, chunks[0]);
 
-            let events_list = List::new(event_items)
-                .block(Block::default().borders(Borders::ALL).title("Events"));
-            f.render_widget(events_list, chunks[1]);
+                // Events List
+                let event_items: Vec<ListItem> = self.events.iter().rev().take(20).map(|e| {
+                    let (time, content, color) = match e {
+                        AgentEvent::AgentStarted { agent_id, timestamp } => (timestamp, format!("{} started", agent_id), Color::Green),
+                        AgentEvent::AgentStopped { agent_id, timestamp } => (timestamp, format!("{} done", agent_id), Color::Blue),
+                        AgentEvent::StopHookBlocked { agent_id, reason, timestamp } => (timestamp, format!("{} blocked: {}", agent_id, reason), Color::Red),
+                        AgentEvent::HookReceived { agent_id, hook_type, timestamp } => (timestamp, format!("{} hook: {}", agent_id, hook_type), Color::Cyan),
+                        AgentEvent::PrFiled { agent_id, pr_number, timestamp } => (timestamp, format!("{} PR #{}", agent_id, pr_number), Color::Magenta),
+                        AgentEvent::CopilotReviewed { agent_id, comment_count, timestamp } => (timestamp, format!("{} copilot: {} comments", agent_id, comment_count), Color::Yellow),
+                        AgentEvent::AgentStuck { agent_id, failed_stop_count, timestamp } => (timestamp, format!("{} ⚠ STUCK ({} failed stops)", agent_id, failed_stop_count), Color::Red),
+                    };
+                    
+                    ListItem::new(Line::from(vec![
+                        Span::styled(format!("{} ", format_timestamp(time)), Style::default().fg(Color::DarkGray)),
+                        Span::styled(content, Style::default().fg(color)),
+                    ]))
+                }).collect();
 
-            // Popup Overlay
-            if let Some((_, def, state)) = &self.active_popup {
-                let popup_area = Rect::new(
-                    area.width / 4,
-                    area.height / 4,
-                    area.width / 2,
-                    area.height / 2,
-                );
-                
-                f.render_widget(Clear, popup_area);
-                
-                let block = Block::default()
-                    .title(def.title.as_str())
-                    .borders(Borders::ALL)
-                    .style(Style::default().bg(Color::DarkGray));
-                
-                let inner_area = block.inner(popup_area);
-                f.render_widget(block, popup_area);
-                
-                let layout = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([Constraint::Min(0), Constraint::Length(2)]) // Content + Help
-                    .split(inner_area);
-                
-                let mut content_items = Vec::new();
-                
-                for (i, comp) in def.components.iter().enumerate() {
-                     if let Some(rule) = comp.visible_when() {
-                        if !evaluate_visibility(rule, state) {
-                            continue;
-                        }
-                    }
+                let events_list = List::new(event_items)
+                    .block(Block::default().borders(Borders::ALL).title("Events"));
+                f.render_widget(events_list, chunks[1]);
 
-                    let is_selected = i == self.selected_index;
-                    let style = if is_selected { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default() };
-                    let prefix = if is_selected { "> " } else { "  " };
-
-                    match comp {
-                        Component::Text { content, .. } => {
-                             content_items.push(ListItem::new(Line::from(vec![
-                                Span::styled(prefix, style),
-                                Span::styled(content.clone(), style),
-                             ])));
-                        }
-                        Component::Checkbox { id, label, .. } => {
-                             let checked = match state.values.get(id) {
-                                Some(ElementValue::Boolean(true)) => "[x]",
-                                _ => "[ ]",
-                            };
-                            content_items.push(ListItem::new(Line::from(vec![
-                                Span::styled(format!("{}{}: ", prefix, checked), style),
-                                Span::styled(label.clone(), style),
-                            ])));
-                        }
-                        Component::Textbox { label, id, placeholder, .. } => {
-                             let txt = state.get_text(id).unwrap_or("");
-                             let display_txt = if txt.is_empty() {
-                                 placeholder.as_deref().unwrap_or("").to_string()
-                             } else {
-                                 txt.to_string()
-                             };
-                             content_items.push(ListItem::new(Line::from(vec![
-                                Span::styled(format!("{}{}: ", prefix, label), style),
-                                Span::styled(format!("[{}]", display_txt), if is_selected { style.bg(Color::Blue) } else { style }),
-                             ])));
-                        }
-                        Component::Slider { label, id, min, max, .. } => {
-                             let val = state.get_number(id).unwrap_or(*min);
-                             content_items.push(ListItem::new(Line::from(vec![
-                                Span::styled(format!("{}{}: {:.1} ({:.1}-{:.1})", prefix, label, val, min, max), style),
-                             ])));
-                        }
-                         Component::Choice { id, label, options, .. } => {
-                            let idx = match state.values.get(id) {
-                                Some(ElementValue::Choice(i)) => *i,
-                                _ => 0,
-                            };
-                            let val = options.get(idx).map(|s| s.as_str()).unwrap_or("?");
-                            content_items.push(ListItem::new(Line::from(vec![
-                                Span::styled(format!("{}{}: <{}>", prefix, label, val), style),
-                            ])));
-                        }
-                        Component::Multiselect { label, id, options, .. } => {
-                             content_items.push(ListItem::new(Line::from(vec![
-                                Span::styled(format!("{}{}:", prefix, label), style),
-                            ])));
-                             if let Some(ElementValue::MultiChoice(vals)) = state.values.get(id) {
-                                for (j, opt) in options.iter().enumerate() {
-                                    let is_opt_selected = is_selected && j == self.sub_index;
-                                    let sub_prefix = if is_opt_selected { "    >> " } else { "       " };
-                                    let checked = if *vals.get(j).unwrap_or(&false) { "[x]" } else { "[ ]" };
-                                    
-                                    let opt_style = if is_opt_selected { Style::default().fg(Color::Yellow) } else { Style::default() };
-                                    content_items.push(ListItem::new(Line::from(vec![
-                                        Span::styled(format!("{}{}{}", sub_prefix, checked, opt), opt_style),
-                                    ])));
-                                }
+                // Popup Overlay
+                if let Some((_, def, state)) = &self.active_popup {
+                    let popup_area = Rect::new(
+                        area.width / 4,
+                        area.height / 4,
+                        area.width / 2,
+                        area.height / 2,
+                    );
+                    
+                    f.render_widget(Clear, popup_area);
+                    
+                    let block = Block::default()
+                        .title(def.title.as_str())
+                        .borders(Borders::ALL)
+                        .style(Style::default().bg(Color::DarkGray));
+                    
+                    let inner_area = block.inner(popup_area);
+                    f.render_widget(block, popup_area);
+                    
+                    let layout = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Min(0), Constraint::Length(2)]) // Content + Help
+                        .split(inner_area);
+                    
+                    let mut content_items = Vec::new();
+                    
+                    for (i, comp) in def.components.iter().enumerate() {
+                        if let Some(rule) = comp.visible_when() {
+                            if !evaluate_visibility(rule, state) {
+                                continue;
                             }
                         }
-                         Component::Group { label, .. } => {
-                            content_items.push(ListItem::new(Line::from(vec![
-                                Span::styled(format!("{}--- {} ---", prefix, label), Style::default().add_modifier(Modifier::UNDERLINED)),
-                            ])));
+
+                        let is_selected = i == self.selected_index;
+                        let style = if is_selected { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default() };
+                        let prefix = if is_selected { "> " } else { "  " };
+
+                        match comp {
+                            Component::Text { content, .. } => {
+                                content_items.push(ListItem::new(Line::from(vec![
+                                    Span::styled(prefix, style),
+                                    Span::styled(content.clone(), style),
+                                ])));
+                            }
+                            Component::Checkbox { id, label, .. } => {
+                                let checked = match state.values.get(id) {
+                                    Some(ElementValue::Boolean(true)) => "[x]",
+                                    _ => "[ ]",
+                                };
+                                content_items.push(ListItem::new(Line::from(vec![
+                                    Span::styled(format!("{}{}: ", prefix, checked), style),
+                                    Span::styled(label.clone(), style),
+                                ])));
+                            }
+                            Component::Textbox { label, id, placeholder, .. } => {
+                                let txt = state.get_text(id).unwrap_or("");
+                                let display_txt = if txt.is_empty() {
+                                    placeholder.as_deref().unwrap_or("").to_string()
+                                } else {
+                                    txt.to_string()
+                                };
+                                
+                                let cursor_char = if is_selected { "|" } else { "" };
+                                
+                                content_items.push(ListItem::new(Line::from(vec![
+                                    Span::styled(format!("{}{}: ", prefix, label), style),
+                                    Span::styled(format!("[{}{}]", display_txt, cursor_char), if is_selected { style.bg(Color::Blue) } else { style }),
+                                ])));
+                            }
+                            Component::Slider { label, id, min, max, .. } => {
+                                let val = state.get_number(id).unwrap_or(*min);
+                                content_items.push(ListItem::new(Line::from(vec![
+                                    Span::styled(format!("{}{}: {:.1} ({:.1}-{:.1})", prefix, label, val, min, max), style),
+                                ])));
+                            }
+                            Component::Choice { id, label, options, .. } => {
+                                let idx = match state.values.get(id) {
+                                    Some(ElementValue::Choice(i)) => *i,
+                                    _ => 0,
+                                };
+                                let val = options.get(idx).map(|s| s.as_str()).unwrap_or("?");
+                                content_items.push(ListItem::new(Line::from(vec![
+                                    Span::styled(format!("{}{}: <{}>", prefix, label, val), style),
+                                ])));
+                            }
+                            Component::Multiselect { label, id, options, .. } => {
+                                content_items.push(ListItem::new(Line::from(vec![
+                                    Span::styled(format!("{}{}:", prefix, label), style),
+                                ])));
+                                if let Some(ElementValue::MultiChoice(vals)) = state.values.get(id) {
+                                    for (j, opt) in options.iter().enumerate() {
+                                        let is_opt_selected = is_selected && j == self.sub_index;
+                                        let sub_prefix = if is_opt_selected { "    >> " } else { "       " };
+                                        let checked = if *vals.get(j).unwrap_or(&false) { "[x]" } else { "[ ]" };
+                                        
+                                        let opt_style = if is_opt_selected { Style::default().fg(Color::Yellow) } else { Style::default() };
+                                        content_items.push(ListItem::new(Line::from(vec![
+                                            Span::styled(format!("{}{}{}", sub_prefix, checked, opt), opt_style),
+                                        ])));
+                                    }
+                                }
+                            }
+                            Component::Group { label, .. } => {
+                                content_items.push(ListItem::new(Line::from(vec![
+                                    Span::styled(format!("{}--- {} ---", prefix, label), Style::default().add_modifier(Modifier::UNDERLINED)),
+                                ])));
+                            }
                         }
                     }
+                    
+                    let content_list = List::new(content_items).block(Block::default());
+                    f.render_widget(content_list, layout[0]);
+                    
+                    let help_text = Paragraph::new("Ctrl+S: Submit  Esc: Cancel  Enter/Space: Toggle  Arrows: Move")
+                        .style(Style::default().fg(Color::Gray));
+                    f.render_widget(help_text, layout[1]);
                 }
-                
-                let content_list = List::new(content_items).block(Block::default());
-                f.render_widget(content_list, layout[0]);
-                
-                let help_text = Paragraph::new("Ctrl+S: Submit | Esc: Cancel | Enter/Space: Toggle | Arrows: Navigate")
-                    .style(Style::default().fg(Color::Gray));
-                f.render_widget(help_text, layout[1]);
+            });
+
+            if let Err(e) = res {
+                eprintln!("Render failed: {}", e);
             }
-        }).unwrap();
+        }
     }
 }
 

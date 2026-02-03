@@ -102,7 +102,11 @@ async fn handle_hook(
             if let Err(e) = zellij_events::emit_event(&event) {
                 warn!("Failed to emit hook:received event: {}", e);
             }
+        } else {
+             warn!("Could not extract agent_id from branch: {}", branch);
         }
+    } else {
+        warn!("Could not determine current git branch for HookReceived event");
     }
 
     // Parse the hook input and inject runtime
