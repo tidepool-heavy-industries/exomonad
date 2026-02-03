@@ -42,6 +42,10 @@ module ExoMonad.Guest.HostCall
     host_file_pr,
     -- Copilot Review
     host_wait_for_copilot_review,
+    -- Shared types
+    HostResult (..),
+    HostErrorDetails (..),
+    ResultKind (..),
   )
 where
 
@@ -62,6 +66,21 @@ import GHC.Generics (Generic)
 -- ============================================================================
 -- HostResult wrapper (matches Rust serde format)
 -- ============================================================================
+
+-- | Result kind discriminator (strongly typed).
+-- Serialized to "Success" or "Error" at the JSON boundary.
+data ResultKind = SuccessKind | ErrorKind
+  deriving (Show, Eq, Generic)
+
+instance ToJSON ResultKind where
+  toJSON SuccessKind = Aeson.String "Success"
+  toJSON ErrorKind = Aeson.String "Error"
+
+instance FromJSON ResultKind where
+  parseJSON = Aeson.withText "ResultKind" $ \case
+    "Success" -> pure SuccessKind
+    "Error" -> pure ErrorKind
+    other -> fail $ "Unknown ResultKind: " <> T.unpack other
 
 data HostResult a = HostSuccess a | HostError HostErrorDetails
   deriving (Show, Eq, Generic)
@@ -87,10 +106,9 @@ data ErrorContext = ErrorContext
 instance (FromJSON a) => FromJSON (HostResult a) where
   parseJSON = Aeson.withObject "HostResult" $ \v -> do
     kind <- v .: "kind"
-    case kind :: Text of
-      "Success" -> HostSuccess <$> v .: "payload"
-      "Error" -> HostError <$> v .: "payload"
-      _ -> fail "Unknown kind"
+    case kind of
+      SuccessKind -> HostSuccess <$> v .: "payload"
+      ErrorKind -> HostError <$> v .: "payload"
 
 instance (ToJSON a) => ToJSON (HostResult a) where
   toJSON (HostSuccess payload) =

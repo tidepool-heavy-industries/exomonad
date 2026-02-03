@@ -4,6 +4,7 @@
 
 module ExoMonad.Guest.Effects.StopHook
   ( runStopHookChecks,
+    ReviewStatus (..),
   )
 where
 
@@ -100,8 +101,25 @@ instance ToJSON WaitForCopilotReviewInput where
         "poll_interval_secs" .= wcrPollIntervalSecs i
       ]
 
+-- | Copilot review status (strongly typed).
+-- Serialized to "reviewed", "pending", or "timeout" at the JSON boundary.
+data ReviewStatus = Reviewed | Pending | Timeout
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON ReviewStatus where
+  toJSON Reviewed = Aeson.String "reviewed"
+  toJSON Pending = Aeson.String "pending"
+  toJSON Timeout = Aeson.String "timeout"
+
+instance FromJSON ReviewStatus where
+  parseJSON = Aeson.withText "ReviewStatus" $ \case
+    "reviewed" -> pure Reviewed
+    "pending" -> pure Pending
+    "timeout" -> pure Timeout
+    other -> fail $ "Unknown review status: " <> T.unpack other
+
 data CopilotReviewOutput = CopilotReviewOutput
-  { croStatus :: Text, -- "reviewed", "pending", "timeout"
+  { croStatus :: ReviewStatus,
     croComments :: [CopilotComment]
   }
   deriving stock (Show, Generic)
@@ -196,15 +214,15 @@ checkReviewComments _repo pr = do
     Left err -> pure $ blockStopResponse $ "Failed to wait for Copilot review: " <> T.pack err
     Right reviewOutput ->
       case croStatus reviewOutput of
-        "timeout" ->
+        Timeout ->
           pure $
             blockStopResponse $
               "Copilot hasn't reviewed PR #"
                 <> T.pack (show (prNumber pr))
                 <> " yet. Wait for Copilot review or check if Copilot is enabled for this repo."
-        "reviewed" ->
+        Reviewed ->
           if null (croComments reviewOutput)
-            then pure allowStopResponse -- Copilot reviewed with no comments - good to go
+            then pure allowStopResponse
             else
               pure $
                 blockStopResponse $
@@ -213,7 +231,9 @@ checkReviewComments _repo pr = do
                     <> " comment(s) on PR #"
                     <> T.pack (show (prNumber pr))
                     <> ". Address them, commit, push, then stop again."
-        _ ->
+        Pending ->
           pure $
             blockStopResponse $
-              "Unexpected Copilot review status: " <> croStatus reviewOutput
+              "Copilot review is still pending for PR #"
+                <> T.pack (show (prNumber pr))
+                <> ". Wait for review to complete."

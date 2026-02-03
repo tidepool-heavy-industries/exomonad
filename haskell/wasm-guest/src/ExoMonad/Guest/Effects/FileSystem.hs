@@ -25,7 +25,6 @@ module ExoMonad.Guest.Effects.FileSystem
     ReadFileOutput (..),
     WriteFileInput (..),
     WriteFileOutput (..),
-    HostResult (..),
   )
 where
 
@@ -35,7 +34,7 @@ import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.=))
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
 import Data.Text qualified
-import ExoMonad.Guest.HostCall (callHost, host_fs_read_file, host_fs_write_file)
+import ExoMonad.Guest.HostCall (callHost, host_fs_read_file, host_fs_write_file, HostResult (..), HostErrorDetails (errorMessage))
 import GHC.Generics (Generic)
 import Prelude hiding (readFile, writeFile)
 import Data.Kind (Type)
@@ -117,22 +116,6 @@ instance ToJSON WriteFileOutput where
         "path" .= p
       ]
 
--- | Host result wrapper (matches Rust HostResult).
-data HostResult a
-  = Success a
-  | HostError Text
-  deriving (Show, Eq, Generic)
-
-instance (FromJSON a) => FromJSON (HostResult a) where
-  parseJSON = withObject "HostResult" $ \v -> do
-    kind <- v .: "kind" :: Parser Text
-    case kind of
-      "Success" -> Success <$> v .: "payload"
-      "Error" -> do
-        errObj <- v .: "payload"
-        HostError <$> (errObj .: "message")
-      _ -> fail "Unknown HostResult kind"
-
 -- ============================================================================
 -- Effect type
 -- ============================================================================
@@ -163,13 +146,13 @@ runFileSystem = interpret $ \case
     res <- callHost host_fs_read_file input
     pure $ case res of
       Left err -> Left (Data.Text.pack err)
-      Right (Success r) -> Right r
-      Right (HostError msg) -> Left msg
+      Right (HostSuccess r) -> Right r
+      Right (HostError details) -> Left (errorMessage details)
   WriteFileOp path content createParents -> embed $ do
     let input = WriteFileInput path content createParents
     res <- callHost host_fs_write_file input
     pure $ case res of
       Left err -> Left (Data.Text.pack err)
-      Right (Success r) -> Right r
-      Right (HostError msg) -> Left msg
+      Right (HostSuccess r) -> Right r
+      Right (HostError details) -> Left (errorMessage details)
 

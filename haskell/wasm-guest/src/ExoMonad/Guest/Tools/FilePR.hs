@@ -9,7 +9,7 @@ import Data.Aeson (FromJSON, ToJSON, Value, object, withObject, (.:), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as T
-import ExoMonad.Guest.HostCall (LogLevel (..), LogPayload (..), callHost, callHostVoid, host_file_pr, host_log_error, host_log_info)
+import ExoMonad.Guest.HostCall (LogLevel (..), LogPayload (..), callHost, callHostVoid, host_file_pr, host_log_error, host_log_info, HostResult (..), HostErrorDetails (errorMessage))
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)
 
@@ -72,22 +72,6 @@ instance ToJSON FilePROutput where
         "created" .= c
       ]
 
--- | Host result wrapper (matches Rust HostResult).
-data HostResult a
-  = Success a
-  | HostError Text
-  deriving (Show, Eq, Generic)
-
-instance (FromJSON a) => FromJSON (HostResult a) where
-  parseJSON = withObject "HostResult" $ \v -> do
-    kind <- v .: "kind"
-    case (kind :: Text) of
-      "Success" -> Success <$> v .: "payload"
-      "Error" -> do
-        errObj <- v .: "payload"
-        HostError <$> (errObj .: "message")
-      _ -> fail "Unknown HostResult kind"
-
 instance MCPTool FilePR where
   type ToolArgs FilePR = FilePRArgs
   toolName = "file_pr"
@@ -127,9 +111,9 @@ instance MCPTool FilePR where
       Left err -> do
         callHostVoid host_log_error (LogPayload Error ("FilePR: callHost failed: " <> T.pack err) Nothing)
         pure $ errorResult (T.pack err)
-      Right (Success output) -> do
+      Right (HostSuccess output) -> do
         callHostVoid host_log_info (LogPayload Info ("FilePR: Success - PR #" <> T.pack (show $ fpoNumber output)) Nothing)
         pure $ successResult (Aeson.toJSON output)
-      Right (HostError msg) -> do
-        callHostVoid host_log_error (LogPayload Error ("FilePR: Host error: " <> msg) Nothing)
-        pure $ errorResult msg
+      Right (HostError details) -> do
+        callHostVoid host_log_error (LogPayload Error ("FilePR: Host error: " <> errorMessage details) Nothing)
+        pure $ errorResult (errorMessage details)

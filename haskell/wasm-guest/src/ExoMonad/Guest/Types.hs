@@ -7,6 +7,7 @@ module ExoMonad.Guest.Types
     HookInput (..),
     HookOutput (..),
     HookSpecificOutput (..),
+    HookEventType (..),
     StopHookOutput (..),
     StopDecision (..),
     allowResponse,
@@ -18,6 +19,7 @@ where
 import Data.Aeson (FromJSON, ToJSON, Value, object, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Text (Text)
+import Data.Text qualified as T
 import GHC.Generics (Generic)
 
 -- ============================================================================
@@ -41,10 +43,27 @@ instance FromJSON MCPCallInput where
 -- Hook Types (matches Rust protocol.rs)
 -- ============================================================================
 
+-- | Hook event type (strongly typed).
+-- Serialized to "SessionEnd", "SubagentStop", or "PreToolUse" at the JSON boundary.
+data HookEventType = SessionEnd | SubagentStop | PreToolUse
+  deriving (Show, Eq, Generic)
+
+instance ToJSON HookEventType where
+  toJSON SessionEnd = Aeson.String "SessionEnd"
+  toJSON SubagentStop = Aeson.String "SubagentStop"
+  toJSON PreToolUse = Aeson.String "PreToolUse"
+
+instance FromJSON HookEventType where
+  parseJSON = Aeson.withText "HookEventType" $ \case
+    "SessionEnd" -> pure SessionEnd
+    "SubagentStop" -> pure SubagentStop
+    "PreToolUse" -> pure PreToolUse
+    other -> fail $ "Unknown hook event type: " <> T.unpack other
+
 -- | Input for a hook event.
 data HookInput = HookInput
   { hiSessionId :: Text,
-    hiHookEventName :: Text,
+    hiHookEventName :: HookEventType,
     hiToolName :: Maybe Text,
     hiToolInput :: Maybe Value,
     hiStopHookActive :: Maybe Bool

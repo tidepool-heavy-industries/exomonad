@@ -28,7 +28,7 @@ import ExoMonad.Guest.HostCall (LogLevel (..), LogPayload (..), callHostVoid, ho
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), toMCPFormat)
 import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
-import ExoMonad.Guest.Types (HookInput (..), MCPCallInput (..), StopHookOutput (..), StopDecision (..), allowResponse)
+import ExoMonad.Guest.Types (HookInput (..), HookEventType (..), MCPCallInput (..), StopHookOutput (..), StopDecision (..), allowResponse)
 import Extism.PDK (input, output)
 import Foreign.C.Types (CInt (..))
 import System.Directory (getCurrentDirectory)
@@ -76,13 +76,17 @@ hookHandler = do
       output (BSL.toStrict $ Aeson.encode errResp)
       pure 1
     Right hookInput -> do
-      let hookName = hiHookEventName hookInput
+      let hookType = hiHookEventName hookInput
+      let hookName = case hookType of
+            SessionEnd -> "SessionEnd"
+            SubagentStop -> "SubagentStop"
+            PreToolUse -> "PreToolUse"
       callHostVoid host_log_info (LogPayload Info ("Hook received: " <> hookName) Nothing)
 
-      case hookName of
-        "SessionEnd" -> handleStopHook hookName
-        "SubagentStop" -> handleStopHook hookName
-        _ -> do
+      case hookType of
+        SessionEnd -> handleStopHook hookName
+        SubagentStop -> handleStopHook hookName
+        PreToolUse -> do
           callHostVoid host_log_info (LogPayload Info ("Allowing hook: " <> hookName) Nothing)
           let resp = allowResponse Nothing
           output (BSL.toStrict $ Aeson.encode resp)

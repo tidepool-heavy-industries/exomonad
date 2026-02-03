@@ -34,6 +34,7 @@ module ExoMonad.Guest.Effects.AgentControl
     HostResult (..),
     HostErrorDetails (..),
     ErrorContext (..),
+    ResultKind (..),
     SpawnAgentInput (..),
     SpawnAgentsInput (..),
     CleanupAgentInput (..),
@@ -49,7 +50,7 @@ import Data.Text (Text)
 import Data.Text qualified
 import qualified Data.Text.Read as TR
 import Data.Word (Word64)
-import ExoMonad.Guest.HostCall (callHost, host_agent_cleanup, host_agent_cleanup_batch, host_agent_list, host_agent_spawn, host_agent_spawn_batch, HostResult(..), HostErrorDetails(..), ErrorContext(..))
+import ExoMonad.Guest.HostCall (callHost, host_agent_cleanup, host_agent_cleanup_batch, host_agent_list, host_agent_spawn, host_agent_spawn_batch, HostResult (..), HostErrorDetails (..), ErrorContext (..), ResultKind (..))
 import GHC.Generics (Generic)
 import Data.Kind (Type)
 import Data.Maybe (fromMaybe)
