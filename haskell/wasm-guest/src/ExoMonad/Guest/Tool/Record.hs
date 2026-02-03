@@ -38,7 +38,7 @@ import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), MCPTool (..), ToolDefinition (..), errorResult)
-import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema, Handler (..), Schema (..), ToolMode ((:-)))
+import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema, Handler (..), Schema (..))
 import GHC.Generics
 
 -- ============================================================================

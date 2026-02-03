@@ -52,13 +52,10 @@ import Data.Aeson (FromJSON, ToJSON (..), eitherDecode, encode, object, (.:), (.
 import qualified Data.Aeson as Aeson
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy (fromStrict, toStrict)
-import Data.HashMap.Strict (HashMap)
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
-import qualified Data.Text.Encoding.Error as T
 import Data.Word (Word64)
-import Extism.PDK.Memory (Memory, alloc, findMemory, free, load, memoryOffset)
+import Extism.PDK.Memory (alloc, findMemory, free, load, memoryOffset)
 import GHC.Generics (Generic)
 
 -- ============================================================================ 

@@ -68,8 +68,7 @@ exomonad/
 │   ├── exomonad-shared/         # Protocol types
 │   └── exomonad-hub/            # Metrics (legacy)
 ├── tools/                     # Root-level analysis tools
-├── docs/                      # Documentation
-└── plans/                     # Design documents
+└── docs/                      # Documentation
 ```
 
 ## Essential Commands
@@ -330,5 +329,3 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | exomonad mcp
 - `rust/exomonad/CLAUDE.md` - Hook/MCP forwarding
 
 **For detailed questions:** Follow the CLAUDE.md link tree based on your task (see CLAUDE.md "When to Read Which CLAUDE.md" table).
-
-**Design documents:** `plans/` directory contains RFCs and architecture decisions.

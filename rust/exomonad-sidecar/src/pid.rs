@@ -48,7 +48,7 @@ fn unix_enforce_singleton(pid_file: &Path) -> Result<PidGuard> {
         .read(true)
         .write(true)
         .create(true)
-        .truncate(false)
+        .truncate(true)
         .open(pid_file)
         .context("Failed to open PID file")?;
 
@@ -282,6 +282,7 @@ mod tests {
         let file1 = OpenOptions::new()
             .create(true)
             .write(true)
+            .truncate(true)
             .open(&pid_file)
             .unwrap();
         #[allow(deprecated)]
@@ -294,10 +295,7 @@ mod tests {
         let path_clone = pid_file.clone();
         let handle = std::thread::spawn(move || {
             // Should block or fail
-            match enforce_singleton(&path_clone) {
-                Ok(_) => true,
-                Err(_) => false,
-            }
+            enforce_singleton(&path_clone).is_ok()
         });
 
         // The other thread will try to lock. It will block or loop.
