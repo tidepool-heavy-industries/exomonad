@@ -26,6 +26,7 @@ pub enum CommandError {
 #[derive(Debug, Error)]
 #[error("{message}")]
 pub struct TimeoutError {
+    /// Human-readable description of the timeout.
     pub message: String,
 }
 
@@ -36,6 +37,9 @@ pub type HostError = FFIError;
 
 /// Trait to convert results (e.g. anyhow::Result) into FFIResult.
 pub trait IntoFFIResult<T> {
+    /// Convert this value into an `FFIResult`, mapping any error into an `FFIError`
+    /// according to the implementing type (for example, turning `Ok` into `Success`
+    /// and `Err` into an error with an appropriate `ErrorCode` and `ErrorContext`).
     fn into_ffi_result(self) -> FFIResult<T>;
 }
 

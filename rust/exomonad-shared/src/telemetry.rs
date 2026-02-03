@@ -58,6 +58,7 @@ pub enum TelemetryEvent {
     },
 }
 
+/// Decision made by a hook handler regarding a specific event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HookDecision {
