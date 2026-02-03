@@ -5,7 +5,7 @@
 
 use crate::common::CommandError;
 use crate::services::docker::DockerExecutor;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::future::Future;
 use std::pin::Pin;
 use std::process::Stdio;
