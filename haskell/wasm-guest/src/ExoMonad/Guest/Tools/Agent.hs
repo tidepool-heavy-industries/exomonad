@@ -78,7 +78,7 @@ instance MCPTool SpawnAgents where
               "worktree_dir"
                 .= object
                   [ "type" .= ("string" :: Text),
-                    "description" .= ("Base directory for worktrees (default: ./worktrees)" :: Text)
+                    "description" .= ("Base directory for worktrees (default: .exomonad/worktrees)" :: Text)
                   ],
               "agent_type"
                 .= object

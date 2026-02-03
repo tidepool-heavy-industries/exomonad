@@ -217,7 +217,7 @@ impl AgentControlService {
             let worktree_dir = options
                 .worktree_dir
                 .clone()
-                .unwrap_or_else(|| "./worktrees".to_string());
+                .unwrap_or_else(|| ".exomonad/worktrees".to_string());
             let worktree_path = self
                 .project_dir
                 .join(&worktree_dir)
