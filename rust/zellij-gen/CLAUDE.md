@@ -85,6 +85,8 @@ curl -sL "https://github.com/vdbulcke/ghost/releases/latest/download/ghost.wasm"
 curl -sL "https://github.com/karimould/zellij-forgot/releases/latest/download/zellij_forgot.wasm" -o zellij_forgot.wasm
 ```
 
+**Security note:** These commands download plugins from `releases/latest` URLs without checksum verification. For production environments, consider pinning to specific versioned releases and verifying checksums. The plugins run with access to your terminal session.
+
 ## Color Scheme: Solarized Dark
 
 | Role | Color | Hex | Usage |
