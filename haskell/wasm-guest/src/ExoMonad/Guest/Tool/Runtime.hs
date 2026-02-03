@@ -160,12 +160,14 @@ hookHandler = do
       let hookType = hiHookEventName hookInput
       let hookName = case hookType of
             SessionEnd -> "SessionEnd"
+            Stop -> "Stop"
             SubagentStop -> "SubagentStop"
             PreToolUse -> "PreToolUse"
       callHostVoid host_log_info (LogPayload Info ("Hook received: " <> hookName) Nothing)
 
       case hookType of
         SessionEnd -> handleStopHook hookName
+        Stop -> handleStopHook hookName
         SubagentStop -> handleStopHook hookName
         PreToolUse -> do
           callHostVoid host_log_info (LogPayload Info ("Allowing hook: " <> hookName) Nothing)

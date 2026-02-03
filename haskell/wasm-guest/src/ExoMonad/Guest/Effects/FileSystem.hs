@@ -31,13 +31,10 @@ where
 import Polysemy (Sem, Member, interpret, embed, send)
 import Polysemy.Embed (Embed)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.=))
-import Data.Aeson.Types (Parser)
 import Data.Text (Text)
-import Data.Text qualified
-import ExoMonad.Guest.HostCall (callHost, host_fs_read_file, host_fs_write_file, HostResult (..), HostErrorDetails (..))
+import ExoMonad.Guest.HostCall (callHost, host_fs_read_file, host_fs_write_file)
 import GHC.Generics (Generic)
 import Prelude hiding (readFile, writeFile)
-import Data.Kind (Type)
 
 -- ============================================================================
 -- Types (match Rust filesystem.rs)
@@ -156,16 +153,8 @@ runFileSystem :: (Member (Embed IO) r) => Sem (FileSystem ': r) a -> Sem r a
 runFileSystem = interpret $ \case
   ReadFileOp path maxBytes -> embed $ do
     let input = ReadFileInput path maxBytes
-    res <- callHost host_fs_read_file input
-    pure $ case res of
-      Left err -> Left (Data.Text.pack err)
-      Right (HostSuccess r) -> Right r
-      Right (HostError details) -> Left (hostErrorMessage details)
+    callHost host_fs_read_file input
   WriteFileOp path content createParents -> embed $ do
     let input = WriteFileInput path content createParents
-    res <- callHost host_fs_write_file input
-    pure $ case res of
-      Left err -> Left (Data.Text.pack err)
-      Right (HostSuccess r) -> Right r
-      Right (HostError details) -> Left (hostErrorMessage details)
+    callHost host_fs_write_file input
 

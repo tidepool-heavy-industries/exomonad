@@ -9,7 +9,7 @@ import Data.Aeson (FromJSON, ToJSON, Value, object, withObject, (.:), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as T
-import ExoMonad.Guest.HostCall (LogLevel (..), LogPayload (..), callHost, callHostVoid, host_file_pr, host_log_error, host_log_info, HostResult (..), HostErrorDetails (..))
+import ExoMonad.Guest.HostCall (LogLevel (..), LogPayload (..), callHost, callHostVoid, host_file_pr, host_log_error, host_log_info)
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)
 
@@ -104,16 +104,13 @@ instance MCPTool FilePR where
     -- Log before calling host
     callHostVoid host_log_info (LogPayload Info "FilePR: Calling host_file_pr" Nothing)
 
-    result <- callHost host_file_pr input :: IO (Either String (HostResult FilePROutput))
+    result <- callHost host_file_pr input
 
     -- Log the result
     case result of
       Left err -> do
-        callHostVoid host_log_error (LogPayload Error ("FilePR: callHost failed: " <> T.pack err) Nothing)
-        pure $ errorResult (T.pack err)
-      Right (HostSuccess output) -> do
+        callHostVoid host_log_error (LogPayload Error ("FilePR: callHost failed: " <> err) Nothing)
+        pure $ errorResult err
+      Right output -> do
         callHostVoid host_log_info (LogPayload Info ("FilePR: Success - PR #" <> T.pack (show $ fpoNumber output)) Nothing)
         pure $ successResult (Aeson.toJSON output)
-      Right (HostError details) -> do
-        callHostVoid host_log_error (LogPayload Error ("FilePR: Host error: " <> hostErrorMessage details) Nothing)
-        pure $ errorResult (hostErrorMessage details)

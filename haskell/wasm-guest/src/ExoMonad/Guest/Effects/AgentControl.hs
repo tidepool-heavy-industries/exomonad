@@ -45,15 +45,9 @@ where
 import Polysemy (Sem, Member, interpret, embed, send)
 import Polysemy.Embed (Embed)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.:?), (.=))
-import Data.Aeson.Types (Parser)
 import Data.Text (Text)
-import Data.Text qualified
-import qualified Data.Text.Read as TR
-import Data.Word (Word64)
 import ExoMonad.Guest.HostCall (callHost, host_agent_cleanup, host_agent_cleanup_batch, host_agent_list, host_agent_spawn, host_agent_spawn_batch, HostResult (..), HostErrorDetails (..), ErrorContext (..), ResultKind (..))
 import GHC.Generics (Generic)
-import Data.Kind (Type)
-import Data.Maybe (fromMaybe)
 
 -- ============================================================================
 -- Types (match Rust agent_control.rs)
@@ -74,11 +68,12 @@ instance FromJSON AgentType where
     other -> fail $ "Invalid agent type: " <> Data.Text.unpack other
 
 -- | Options for spawning an agent.
+-- agentType is non-optional; default (Gemini) is applied at the tool layer.
 data SpawnOptions = SpawnOptions
   { owner :: Text,
     repo :: Text,
     worktreeDir :: Maybe Text,
-    agentType :: Maybe AgentType
+    agentType :: AgentType
   }
   deriving (Show, Eq, Generic)
 
@@ -191,7 +186,7 @@ instance ToJSON BatchCleanupResult where
 -- ============================================================================
 
 data SpawnAgentInput = SpawnAgentInput
-  { saiIssueId :: Word64,
+  { saiIssueId :: Text,  -- Rust parses to u64
     saiOwner :: Text,
     saiRepo :: Text,
     saiWorktreeDir :: Maybe Text,
@@ -323,31 +318,19 @@ listAgents = send ListAgents
 -- Interpreter
 -- ============================================================================
 
--- | Parse an issue ID from text to Word64.
-parseIssueId :: Text -> Either Text Word64
-parseIssueId t = case TR.decimal t of
-  Right (n, "") -> Right n
-  _ -> Left $ "Invalid issue ID: " <> t
-
 -- | Interpret AgentControl by calling Rust host functions.
 runAgentControl :: (Member (Embed IO) r) => Sem (AgentControl ': r) a -> Sem r a
 runAgentControl = interpret $ \case
   SpawnAgent issueId opts -> embed $ do
-    case parseIssueId issueId of
-      Left err -> pure $ Left err
-      Right issueIdNum -> do
-        let input =
-              SpawnAgentInput
-                { saiIssueId = issueIdNum,
-                  saiOwner = owner opts,
-                  saiRepo = repo opts,
-                  saiWorktreeDir = worktreeDir opts,
-                  saiAgentType = fromMaybe Gemini (agentType opts)
-                }
-        res <- callHost host_agent_spawn input
-        pure $ case res of
-          Left err -> Left (Data.Text.pack err)
-          Right r -> Right r
+    let input =
+          SpawnAgentInput
+            { saiIssueId = issueId,  -- Rust parses to u64
+              saiOwner = owner opts,
+              saiRepo = repo opts,
+              saiWorktreeDir = worktreeDir opts,
+              saiAgentType = agentType opts
+            }
+    callHost host_agent_spawn input
   SpawnAgents issueIds opts -> embed $ do
     let input =
           SpawnAgentsInput
@@ -355,21 +338,21 @@ runAgentControl = interpret $ \case
               sasOwner = owner opts,
               sasRepo = repo opts,
               sasWorktreeDir = worktreeDir opts,
-              sasAgentType = fromMaybe Gemini (agentType opts)
+              sasAgentType = agentType opts
             }
     res <- callHost host_agent_spawn_batch input
     pure $ case res of
       Left err ->
         BatchSpawnResult
           { spawned = [],
-            spawnFailed = [("", Data.Text.pack err)]
+            spawnFailed = [("", err)]
           }
       Right r -> r
   CleanupAgent issueId force -> embed $ do
     let input = CleanupAgentInput issueId force
     res <- callHost host_agent_cleanup input
     pure $ case res of
-      Left err -> Left (Data.Text.pack err)
+      Left err -> Left err
       Right () -> Right ()
   CleanupAgents issueIds force -> embed $ do
     let input = CleanupAgentsInput issueIds force
@@ -378,12 +361,12 @@ runAgentControl = interpret $ \case
       Left err ->
         BatchCleanupResult
           { cleaned = [],
-            cleanupFailed = [("", Data.Text.pack err)]
+            cleanupFailed = [("", err)]
           }
       Right r -> r
   ListAgents -> embed $ do
     res <- callHost host_agent_list ListAgentsInput
     pure $ case res of
-      Left err -> Left (Data.Text.pack err)
+      Left err -> Left err
       Right agents -> Right agents
 

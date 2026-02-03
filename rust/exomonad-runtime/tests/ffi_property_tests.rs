@@ -382,7 +382,7 @@ fn arb_agent_type() -> BoxedStrategy<AgentType> {
 
 prop_compose! {
     fn arb_spawn_agent_input()(
-        issue_id in arb_issue_number(),
+        issue_id in (1u64..1000000).prop_map(|n| n.to_string()),
         owner in arb_github_owner(),
         repo in arb_github_repo(),
         worktree_dir in proptest::option::of("[a-z0-9/_-]{1,50}"),

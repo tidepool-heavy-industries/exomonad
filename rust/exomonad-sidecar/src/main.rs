@@ -114,21 +114,30 @@ async fn handle_hook(
         serde_json::from_str(&stdin_content).context("Failed to parse hook input")?;
     hook_input.runtime = Some(runtime);
 
-    // Call WASM plugin
-    // hookHandler dispatches based on hiHookEventName for stop hooks
-    let output: HookOutput = match event_type {
-        HookEventType::PreToolUse | HookEventType::SessionEnd | HookEventType::SubagentStop => {
-            plugin
-                .call("handle_pre_tool_use", &hook_input)
-                .await
-                .context("WASM handle_pre_tool_use failed")?
-        }
+    // Normalize CLI-specific hook types to internal abstractions before WASM.
+    // Both Claude's Stop and Gemini's AfterAgent represent "main agent stop".
+    let normalized_event_name = match event_type {
+        HookEventType::Stop | HookEventType::AfterAgent => "Stop",
+        HookEventType::SubagentStop => "SubagentStop",
+        HookEventType::SessionEnd => "SessionEnd",
+        HookEventType::PreToolUse => "PreToolUse",
         _ => {
-            // For now, other hook types pass through with allow
+            // Pass through unhandled hooks with allow
             debug!(event = ?event_type, "Hook type not implemented in WASM, allowing");
-            HookOutput::default()
+            let output_json =
+                serde_json::to_string(&HookOutput::default()).context("Failed to serialize output")?;
+            println!("{}", output_json);
+            return Ok(());
         }
     };
+    hook_input.hook_event_name = normalized_event_name.to_string();
+
+    // Call WASM plugin
+    // hookHandler dispatches based on hiHookEventName for stop hooks
+    let output: HookOutput = plugin
+        .call("handle_pre_tool_use", &hook_input)
+        .await
+        .context("WASM handle_pre_tool_use failed")?;
 
     // Output response JSON to stdout
     let output_json = serde_json::to_string(&output).context("Failed to serialize output")?;

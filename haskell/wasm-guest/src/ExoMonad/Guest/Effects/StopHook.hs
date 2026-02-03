@@ -161,7 +161,7 @@ runStopHookChecks = do
   -- Check 1: Uncommitted changes
   dirtyResult <- callHost host_git_get_dirty_files hostInput
   case dirtyResult of
-    Left err -> pure $ blockStopResponse $ "Failed to check dirty files: " <> T.pack err
+    Left err -> pure $ blockStopResponse $ "Failed to check dirty files: " <> err
     Right dirtyFiles ->
       if not (null (dirtyFiles :: [Text]))
         then pure $ blockStopResponse "You have uncommitted changes. Commit them with a message describing your work."
@@ -172,12 +172,12 @@ checkUnpushedCommits hostInput = do
   -- Get repo info (branch + GitHub owner/name)
   repoResult <- callHost host_git_get_repo_info hostInput
   case repoResult of
-    Left err -> pure $ blockStopResponse $ "Failed to get repo info: " <> T.pack err
+    Left err -> pure $ blockStopResponse $ "Failed to get repo info: " <> err
     Right repoInfo -> do
       -- Check for unpushed commits
       unpushedResult <- callHost host_git_has_unpushed_commits hostInput
       case unpushedResult of
-        Left err -> pure $ blockStopResponse $ "Failed to check unpushed commits: " <> T.pack err
+        Left err -> pure $ blockStopResponse $ "Failed to check unpushed commits: " <> err
         Right hasUnpushed ->
           if hasUnpushed
             then pure $ blockStopResponse $ "Your commits aren't pushed. Push with: git push -u origin " <> branch repoInfo
@@ -195,7 +195,7 @@ checkPRFiled repoInfo = do
       -- Check for PR
       prResult <- callHost host_github_get_pr_for_branch prInput
       case prResult of
-        Left err -> pure $ blockStopResponse $ "Failed to check for PR: " <> T.pack err
+        Left err -> pure $ blockStopResponse $ "Failed to check for PR: " <> err
         Right Nothing -> pure $ blockStopResponse "No PR filed for this branch. Use the file_pr tool to create a PR and wait for Copilot review."
         Right (Just pr) -> checkReviewComments repo pr
 
@@ -211,7 +211,7 @@ checkReviewComments _repo pr = do
 
   reviewResult <- callHost host_wait_for_copilot_review waitInput
   case reviewResult of
-    Left err -> pure $ blockStopResponse $ "Failed to wait for Copilot review: " <> T.pack err
+    Left err -> pure $ blockStopResponse $ "Failed to wait for Copilot review: " <> err
     Right reviewOutput ->
       case croStatus reviewOutput of
         Timeout ->

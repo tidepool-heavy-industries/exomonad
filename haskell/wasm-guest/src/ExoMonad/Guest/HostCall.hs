@@ -243,7 +243,8 @@ foreign import ccall "wait_for_copilot_review" host_wait_for_copilot_review :: W
 
 -- | Call a host function with automatic JSON serialization/deserialization.
 -- Request uses aeson (ToJSON), response uses aeson (FromJSON) to handle HostResult wrapper.
-callHost :: (ToJSON req, FromJSON resp) => (Word64 -> IO Word64) -> req -> IO (Either String resp)
+-- Returns Either Text for errors (no String conversion needed at call sites).
+callHost :: (ToJSON req, FromJSON resp) => (Word64 -> IO Word64) -> req -> IO (Either Text resp)
 callHost rawFn request = do
   -- Allocate request with automatic JSON encoding via Aeson
   reqMem <- alloc (toStrict (encode request))
@@ -260,19 +261,18 @@ callHost rawFn request = do
 
       -- Decode with aeson (to handle Rust's serde format)
       case respBytes of
-        Left loadErr -> pure $ Left ("Load error: " ++ loadErr)
+        Left loadErr -> pure $ Left ("Load error: " <> T.pack loadErr)
         Right bytes -> case eitherDecode (fromStrict bytes) of
-          Left decodeErr -> pure $ Left ("JSON decode error: " ++ decodeErr)
+          Left decodeErr -> pure $ Left ("JSON decode error: " <> T.pack decodeErr)
           Right result -> case result of
             HostSuccess val -> pure $ Right val
             HostError details -> pure $ Left (formatError details)
 
-formatError :: HostErrorDetails -> String
-formatError details = 
-  T.unpack $ 
-    "[" <> hostErrorCode details <> "] " <> hostErrorMessage details
-      <> maybe "" (\s -> "\nSuggestion: " <> s) (hostErrorSuggestion details)
-      <> maybe "" formatContext (hostErrorContext details)
+formatError :: HostErrorDetails -> Text
+formatError details =
+  "[" <> hostErrorCode details <> "] " <> hostErrorMessage details
+    <> maybe "" (\s -> "\nSuggestion: " <> s) (hostErrorSuggestion details)
+    <> maybe "" formatContext (hostErrorContext details)
 
 formatContext :: ErrorContext -> Text
 formatContext ctx = 

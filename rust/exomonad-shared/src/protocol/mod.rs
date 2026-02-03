@@ -48,7 +48,8 @@ pub enum Runtime {
     Gemini,
 }
 
-/// Hook event type for Claude Code hooks.
+/// Hook event type for CLI hooks.
+/// Includes both Claude-specific and Gemini-specific hook types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, strum::Display)]
 #[strum(serialize_all = "kebab-case")]
 pub enum HookEventType {
@@ -58,7 +59,7 @@ pub enum HookEventType {
     PostToolUse,
     /// When a notification is shown
     Notification,
-    /// When Claude Code wants to stop
+    /// When Claude Code wants to stop (main agent)
     Stop,
     /// When a subagent (Task tool) starts
     SubagentStart,
@@ -74,4 +75,6 @@ pub enum HookEventType {
     PermissionRequest,
     /// When user submits a prompt
     UserPromptSubmit,
+    /// Gemini: After agent finishes (equivalent to Claude's Stop for main agent)
+    AfterAgent,
 }

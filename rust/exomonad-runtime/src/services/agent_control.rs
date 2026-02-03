@@ -983,7 +983,7 @@ use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct SpawnAgentInput {
-    pub issue_id: IssueNumber,
+    pub issue_id: String,  // Parsed to IssueNumber in host function
     pub owner: GithubOwner,
     pub repo: GithubRepo,
     pub worktree_dir: Option<String>,
@@ -1055,6 +1055,10 @@ pub fn spawn_agent_host_fn(service: Arc<AgentControlService>) -> Function {
             let _span = tracing::info_span!("host_function", function = "agent_spawn").entered();
             let input: SpawnAgentInput = get_input(plugin, inputs[0])?;
 
+            // Parse issue ID at the edge (Haskell sends string, Rust validates)
+            let issue_number = IssueNumber::try_from(input.issue_id.clone())
+                .map_err(|e| Error::msg(format!("Invalid issue ID '{}': {}", input.issue_id, e)))?;
+
             let service_arc = user_data.get()?;
             let service = service_arc
                 .lock()
@@ -1067,7 +1071,7 @@ pub fn spawn_agent_host_fn(service: Arc<AgentControlService>) -> Function {
                 agent_type: input.agent_type,
             };
 
-            let result = block_on(service.spawn_agent(input.issue_id, &options))?;
+            let result = block_on(service.spawn_agent(issue_number, &options))?;
             let output: HostResult<SpawnResult> = result.into();
 
             outputs[0] = set_output(plugin, &output)?;
