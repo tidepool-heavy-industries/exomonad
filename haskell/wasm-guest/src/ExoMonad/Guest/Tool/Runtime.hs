@@ -124,7 +124,7 @@ mcpHandlerRecord handlers = do
       callHostVoid host_log_error (LogPayload Error ("MCP parse error: " <> T.pack err) Nothing)
       let resp = MCPCallOutput False Nothing (Just $ "Parse error: " <> T.pack err)
       output (BSL.toStrict $ Aeson.encode resp)
-      pure 1
+      pure 0
     Right mcpCall -> do
       callHostVoid host_log_info (LogPayload Info ("Dispatching tool: " <> toolName mcpCall) Nothing)
 
@@ -134,7 +134,7 @@ mcpHandlerRecord handlers = do
         callHostVoid host_log_error (LogPayload Error ("Tool failed: " <> fromMaybe "No error message" (mcpError resp)) Nothing)
 
       output (BSL.toStrict $ Aeson.encode resp)
-      if success resp then pure 0 else pure 1
+      pure 0
 
 -- | List tools handler - returns all tool definitions for a record type.
 listHandlerRecord :: forall tools. (ReifyRecord tools) => IO CInt
@@ -227,4 +227,4 @@ wrapHandler action = do
             , mcpError = Just $ T.pack ("Exception in WASM handler: " <> show err)
             }
       output (BSL.toStrict $ Aeson.encode resp)
-      pure 1
+      pure 0

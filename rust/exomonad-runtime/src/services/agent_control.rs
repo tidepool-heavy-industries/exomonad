@@ -916,17 +916,17 @@ When done, commit your changes and create a pull request."###,
     fn escape_for_shell_command(s: &str) -> String {
         // Replace ' with '\'' (end quote, escaped quote, start quote)
         let escaped = s.replace('"', r"'\''");
-        format!("'{{}}"", escaped)
+        format!("'{{}}'", escaped)
     }
 
     /// Escape a string for use inside a KDL string literal.
     /// KDL strings use backslash escaping: \n for newline, \\ for backslash, \" for quote.
     fn escape_for_kdl(s: &str) -> String {
-        s.replace('\\', r"\\\\")
-            .replace('"', r"\\\"")
-            .replace('\n', r"\\n")
-            .replace('\r', r"\\r")
-            .replace('\t', r"\\t")
+        s.replace('\\', "\\\\") // Replace backslash with double backslash
+         .replace('"', "\\\"")  // Replace quote with escaped quote
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t")
     }
 }
 
