@@ -6,10 +6,10 @@
           {
             "name": "stop-check",
             "type": "command",
-            "FIXME": "Use portable exomonad-sidecar command instead of absolute path",
             "command": "/Users/inannamalick/.cargo/bin/exomonad-sidecar hook after-agent --runtime gemini",
             "timeout": 30000
           }
+          
         ]
       }
     ]

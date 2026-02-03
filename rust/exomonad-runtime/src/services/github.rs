@@ -630,11 +630,17 @@ fn github_list_issues(
     }
 
     let input: Input = get_input(plugin, inputs[0])?;
+    tracing::info!(owner = %input.repo.owner, repo = %input.repo.name, "Listing issues");
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;
 
     let result = block_on(service.list_issues(&input.repo, input.filter.as_ref()))?;
+
+    match &result {
+        Ok(issues) => tracing::info!(success = true, count = issues.len(), "Completed"),
+        Err(e) => tracing::warn!(error = %e, "Failed"),
+    }
 
     let output = match result {
         Ok(issues) => HostResult::Success(issues),
@@ -659,11 +665,17 @@ fn github_get_issue(
     }
 
     let input: Input = get_input(plugin, inputs[0])?;
+    tracing::info!(owner = %input.repo.owner, repo = %input.repo.name, number = input.number, "Getting issue");
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;
 
     let result = block_on(service.get_issue(&input.repo, input.number))?;
+
+    match &result {
+        Ok(_) => tracing::info!(success = true, "Completed"),
+        Err(e) => tracing::warn!(error = %e, "Failed"),
+    }
 
     let output = match result {
         Ok(issue) => HostResult::Success(issue),
@@ -688,11 +700,17 @@ fn github_create_pr(
     }
 
     let input: Input = get_input(plugin, inputs[0])?;
+    tracing::info!(owner = %input.repo.owner, repo = %input.repo.name, title = %input.spec.title, "Creating PR");
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;
 
     let result = block_on(service.create_pr(&input.repo, input.spec))?;
+
+    match &result {
+        Ok(pr) => tracing::info!(success = true, number = pr.number, "Completed"),
+        Err(e) => tracing::warn!(error = %e, "Failed"),
+    }
 
     let output = match result {
         Ok(pr) => HostResult::Success(pr),
@@ -717,11 +735,17 @@ fn github_list_prs(
     }
 
     let input: Input = get_input(plugin, inputs[0])?;
+    tracing::info!(owner = %input.repo.owner, repo = %input.repo.name, "Listing PRs");
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;
 
     let result = block_on(service.list_prs(&input.repo, input.filter.as_ref()))?;
+
+    match &result {
+        Ok(prs) => tracing::info!(success = true, count = prs.len(), "Completed"),
+        Err(e) => tracing::warn!(error = %e, "Failed"),
+    }
 
     let output = match result {
         Ok(prs) => HostResult::Success(prs),
@@ -746,11 +770,17 @@ fn github_get_pr_for_branch(
     }
 
     let input: Input = get_input(plugin, inputs[0])?;
+    tracing::info!(owner = %input.repo.owner, repo = %input.repo.name, head = %input.head, "Getting PR for branch");
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;
 
     let result = block_on(service.get_pr_for_branch(&input.repo, &input.head))?;
+
+    match &result {
+        Ok(opt_pr) => tracing::info!(success = true, found = opt_pr.is_some(), "Completed"),
+        Err(e) => tracing::warn!(error = %e, "Failed"),
+    }
 
     let output = match result {
         Ok(pr) => HostResult::Success(pr),
@@ -775,11 +805,17 @@ fn github_get_pr_review_comments(
     }
 
     let input: Input = get_input(plugin, inputs[0])?;
+    tracing::info!(owner = %input.repo.owner, repo = %input.repo.name, pr_number = input.pr_number, "Getting PR review comments");
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
         .map_err(|e| Error::msg(e.to_string()))?;
 
     let result = block_on(service.get_pr_review_comments(&input.repo, input.pr_number))?;
+
+    match &result {
+        Ok(comments) => tracing::info!(success = true, count = comments.len(), "Completed"),
+        Err(e) => tracing::warn!(error = %e, "Failed"),
+    }
 
     let output = match result {
         Ok(comments) => HostResult::Success(comments),

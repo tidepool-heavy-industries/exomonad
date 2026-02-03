@@ -848,7 +848,7 @@ impl AgentControlService {
         // Write config.toml with role = "dev" for spawned agents
         let config_content = r###"# Agent config (auto-generated)
 role = "dev"
-project_dir = "../.."
+project_dir = "../../.."
 "###;
         fs::write(exomonad_dir.join("config.toml"), config_content).await?;
         tracing::info!(
@@ -1139,6 +1139,7 @@ pub fn spawn_agent_host_fn(service: Arc<AgentControlService>) -> Function {
          -> Result<(), Error> {
             let _span = tracing::info_span!("host_function", function = "agent_spawn").entered();
             let input: SpawnAgentInput = get_input(plugin, inputs[0])?;
+            tracing::info!(issue_id = %input.issue_id, agent_type = ?input.agent_type, "Spawning agent");
 
             // Parse issue ID at the edge (Haskell sends string, Rust validates)
             let issue_number = IssueNumber::try_from(input.issue_id.clone())
@@ -1157,6 +1158,12 @@ pub fn spawn_agent_host_fn(service: Arc<AgentControlService>) -> Function {
             };
 
             let result = block_on(service.spawn_agent(issue_number, &options))?;
+            
+            match &result {
+                Ok(_) => tracing::info!(success = true, "Completed"),
+                Err(e) => tracing::warn!(error = %e, "Failed"),
+            }
+
             let output: HostResult<SpawnResult> = result.into_ffi_result();
 
             outputs[0] = set_output(plugin, &output)?;
@@ -1179,6 +1186,7 @@ pub fn spawn_agents_host_fn(service: Arc<AgentControlService>) -> Function {
          -> Result<(), Error> {
             let _span = tracing::info_span!("host_function", function = "agent_spawn_batch").entered();
             let input: SpawnAgentsInput = get_input(plugin, inputs[0])?;
+            tracing::info!(count = input.issue_ids.len(), agent_type = ?input.agent_type, "Spawning batch agents");
 
             let service_arc = user_data.get()?;
             let service = service_arc
@@ -1193,6 +1201,10 @@ pub fn spawn_agents_host_fn(service: Arc<AgentControlService>) -> Function {
             };
 
             let result = block_on(service.spawn_agents(&input.issue_ids, &options))?;
+
+            // BatchSpawnResult is not a Result, it's a struct returned successfully
+            tracing::info!(success = true, spawned = result.spawned.len(), failed = result.failed.len(), "Completed");
+
             let output = HostResult::Success(result);
 
             outputs[0] = set_output(plugin, &output)?;
@@ -1215,6 +1227,7 @@ pub fn cleanup_agent_host_fn(service: Arc<AgentControlService>) -> Function {
          -> Result<(), Error> {
             let _span = tracing::info_span!("host_function", function = "agent_cleanup").entered();
             let input: CleanupAgentInput = get_input(plugin, inputs[0])?;
+            tracing::info!(issue_id = %input.issue_id, force = input.force, "Cleaning up agent");
 
             let service_arc = user_data.get()?;
             let service = service_arc
@@ -1222,6 +1235,12 @@ pub fn cleanup_agent_host_fn(service: Arc<AgentControlService>) -> Function {
                 .map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(service.cleanup_agent(&input.issue_id, input.force))?;
+            
+            match &result {
+                Ok(_) => tracing::info!(success = true, "Completed"),
+                Err(e) => tracing::warn!(error = %e, "Failed"),
+            }
+
             let output: HostResult<()> = result.into_ffi_result();
 
             outputs[0] = set_output(plugin, &output)?;
@@ -1244,6 +1263,7 @@ pub fn cleanup_agents_host_fn(service: Arc<AgentControlService>) -> Function {
          -> Result<(), Error> {
             let _span = tracing::info_span!("host_function", function = "agent_cleanup_batch").entered();
             let input: CleanupAgentsInput = get_input(plugin, inputs[0])?;
+            tracing::info!(count = input.issue_ids.len(), force = input.force, "Cleaning up batch agents");
 
             let service_arc = user_data.get()?;
             let service = service_arc
@@ -1251,6 +1271,10 @@ pub fn cleanup_agents_host_fn(service: Arc<AgentControlService>) -> Function {
                 .map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(service.cleanup_agents(&input.issue_ids, input.force))?;
+
+            // BatchCleanupResult is a success type, errors are inside it
+            tracing::info!(success = true, cleaned = result.cleaned.len(), failed = result.failed.len(), "Completed");
+            
             let output = HostResult::Success(result);
 
             outputs[0] = set_output(plugin, &output)?;
@@ -1273,6 +1297,7 @@ pub fn cleanup_merged_agents_host_fn(service: Arc<AgentControlService>) -> Funct
          -> Result<(), Error> {
             let _span = tracing::info_span!("host_function", function = "agent_cleanup_merged").entered();
             // No input needed, but we might receive an empty object
+            tracing::info!("Cleaning up merged agents");
             
             let service_arc = user_data.get()?;
             let service = service_arc
@@ -1280,6 +1305,12 @@ pub fn cleanup_merged_agents_host_fn(service: Arc<AgentControlService>) -> Funct
                 .map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(service.cleanup_merged_agents())?;
+
+            match &result {
+                Ok(res) => tracing::info!(success = true, cleaned = res.cleaned.len(), failed = res.failed.len(), "Completed"),
+                Err(e) => tracing::warn!(error = %e, "Failed"),
+            }
+
             let output: HostResult<BatchCleanupResult> = result.into_ffi_result();
 
             outputs[0] = set_output(plugin, &output)?;
@@ -1301,12 +1332,20 @@ pub fn list_agents_host_fn(service: Arc<AgentControlService>) -> Function {
          user_data: UserData<Arc<AgentControlService>>|
          -> Result<(), Error> {
             let _span = tracing::info_span!("host_function", function = "agent_list").entered();
+            tracing::info!("Listing agents");
+
             let service_arc = user_data.get()?;
             let service = service_arc
                 .lock()
                 .map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(service.list_agents())?;
+
+            match &result {
+                Ok(agents) => tracing::info!(success = true, count = agents.len(), "Completed"),
+                Err(e) => tracing::warn!(error = %e, "Failed"),
+            }
+
             let output: HostResult<Vec<AgentInfo>> = result.into_ffi_result();
 
             outputs[0] = set_output(plugin, &output)?;
