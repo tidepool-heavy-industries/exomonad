@@ -6,6 +6,7 @@ module ExoMonad.Guest.Records.GitHub
   ( GitHubTools (..),
     githubToolsHandler,
     githubToolsSchema,
+    githubTools, -- Convenience alias for handler
   )
 where
 
@@ -35,3 +36,7 @@ githubToolsSchema =
       getIssue = mkSchema @GitHubGetIssue,
       listPRs = mkSchema @GitHubListPRs
     }
+
+-- | Default handler instance for use in Role.hs
+githubTools :: GitHubTools AsHandler
+githubTools = githubToolsHandler

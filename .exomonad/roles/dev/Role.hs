@@ -18,9 +18,9 @@ config =
     { roleName = "dev",
       tools =
         Tools
-          { git = gitToolsHandler,
-            github = githubToolsHandler,
-            fs = fileToolsHandler
+          { git = gitTools,
+            github = githubTools,
+            fs = fileTools
           },
       hooks = defaultHooks
     }

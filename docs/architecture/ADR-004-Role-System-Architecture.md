@@ -51,26 +51,54 @@ Users create role definitions in `.exomonad/roles/<role>/Role.hs`:
 module Role (config) where
 import ExoMonad
 
+-- User defines their tool composition
+data Tools mode = Tools
+  { git :: GitTools mode
+  , github :: GitHubTools mode
+  } deriving Generic
+
 config :: RoleConfig (Tools AsHandler)
 config = RoleConfig
   { roleName = "dev"
-  , tools = Tools { git = gitToolsHandler, ... }
+  , tools = Tools
+      { git = gitTools      -- Pre-built handler record
+      , github = githubTools
+      }
   , hooks = defaultHooks
   }
 ```
 
-### 4. Directory Structure
+### 4. Shared Code
 
-*   `.exomonad/roles/`: Source for user roles.
-*   `.exomonad/flake.nix`: Nix flake to build roles into WASM.
-*   `.exomonad/config.toml`: Project-wide defaults.
-*   `.exomonad/config.local.toml`: Local overrides (gitignored).
+A shared library directory `.exomonad/lib/` allows code reuse across roles.
+*   Roles can import modules from `lib/` (e.g., `import Common`).
+*   This is useful for shared hooks or custom tool logic.
 
-### 5. Runtime Loading
+### 5. Directory Structure
 
-The ExoMonad sidecar (Rust) will:
-1.  Read `config.local.toml` (or `config.toml`) to determine the active role.
-2.  Load the corresponding WASM module (e.g., `wasm/wasm-guest-<role>.wasm`).
+```
+.exomonad/
+├── flake.nix              # Git-tracked: builds roles
+├── lib/                   # Git-tracked: shared code
+├── roles/                 # Git-tracked: role definitions
+├── config.toml            # Git-tracked: project defaults
+├── config.local.toml      # Gitignored: local overrides
+├── wasm/                  # Gitignored: build outputs (in main repo only)
+└── .gitignore
+```
+
+### 6. Secrets Management
+
+Secrets are managed entirely by the Rust host (ExoMonad binary), not the Haskell WASM guest.
+*   Secrets file: `~/.exomonad/secrets/` (global to user).
+*   Haskell code does not handle secrets directly; they are injected by the host into tool execution where necessary (transparently).
+
+### 7. Runtime Loading
+
+The ExoMonad binary (`exomonad`) will:
+1.  Read `config.local.toml` to determine the active `role` and `wasm_path`.
+    *   `wasm_path` must be absolute (pointing to the main repo's `wasm/` dir).
+2.  Load the corresponding WASM module (e.g., `<wasm_path>/wasm-guest-<role>.wasm`).
 3.  Initialize the role via FFI.
 
 ## Consequences
@@ -83,7 +111,7 @@ The ExoMonad sidecar (Rust) will:
 
 ### Negative
 *   **Complexity**: Requires Haskell toolchain (or Nix) to build roles.
-*   **Compilation Time**: Changing a role requires recompilation.
+*   **Compilation Time**: Changing a role requires recompilation via `exomonad --recompile`.
 
 ## Alternatives Considered
 

@@ -28,7 +28,7 @@ Claude Code (hook or MCP call)
 
 | Component | Purpose |
 |-----------|---------|
-| **exomonad-sidecar** | Rust binary with WASM plugin support (hooks + MCP) |
+| **exomonad** (prev. exomonad-sidecar) | Rust binary with WASM plugin support (hooks + MCP) |
 | **exomonad-runtime** | WASM plugin loading + host functions |
 | **wasm-guest** | Haskell WASM plugin (pure logic, no I/O) |
 
@@ -39,8 +39,8 @@ Claude Code (hook or MCP call)
 ```
 Human in Zellij session
     └── Claude Code (main tab, role=tl)
-            ├── MCP server: exomonad-sidecar mcp-stdio
-            ├── WASM: ~/.exomonad/wasm/wasm-guest-tl.wasm
+            ├── MCP server: exomonad mcp-stdio
+            ├── WASM: ~/.exomonad/wasm/wasm-guest-tl.wasm (loaded via config.local.toml)
             └── spawn_agents creates:
                 ├── Tab gh-433 (worktree, role=dev, auto-starts Claude)
                 ├── Tab gh-456 (worktree, role=dev, auto-starts Claude)
@@ -49,8 +49,8 @@ Human in Zellij session
 
 Each agent:
 - Runs in isolated git worktree (`.exomonad/worktrees/gh-{issue}-{title}-{agent}/`)
-- Has own `.exomonad/config.toml` (role="dev")
-- Has own `.mcp.json` (no --wasm, config-based resolution)
+- Has own `.exomonad/config.local.toml` (role="dev", wasm_path="...")
+- Has own `.mcp.json` (pointing to `exomonad mcp-stdio`)
 - Gets full issue context via agent-specific CLI argument:
   - `claude --prompt '...'` for Claude agents
   - `gemini --prompt-interactive '...'` for Gemini agents
@@ -62,6 +62,7 @@ Each agent:
 ```
 rust/CLAUDE.md  ← YOU ARE HERE (router)
 ├── exomonad-sidecar/CLAUDE.md  ← MCP + Hook handler via WASM (CORE)
+│   • Binary: exomonad (internal crate name: exomonad-sidecar)
 │   • hook subcommand: handles CC hooks via WASM
 │   • mcp subcommand: MCP HTTP server via WASM
 │   • mcp-stdio subcommand: MCP stdio server for Claude Code
@@ -100,7 +101,7 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 
 | Crate | Type | Purpose |
 |-------|------|---------|
-| [exomonad-sidecar](exomonad-sidecar/CLAUDE.md) | Binary | MCP + Hook handler via WASM |
+| [exomonad-sidecar](exomonad-sidecar/CLAUDE.md) | Binary (`exomonad`) | MCP + Hook handler via WASM |
 | [exomonad-runtime](exomonad-runtime/CLAUDE.md) | Library | WASM plugin loading + host functions |
 | [effector](effector/CLAUDE.md) | Binary | Stateless IO executor |
 | [exomonad-shared](exomonad-shared/CLAUDE.md) | Library | Shared types, protocols |
@@ -115,7 +116,7 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 ### Building
 ```bash
 cargo build --release                    # Build all crates
-cargo build -p exomonad-sidecar          # Build sidecar only
+cargo build -p exomonad-sidecar          # Build exomonad binary
 cargo test                               # Run all tests
 
 # Build WASM plugin (requires nix develop .#wasm)
@@ -125,23 +126,22 @@ nix develop .#wasm -c wasm32-wasi-cabal build --project-file=cabal.project.wasm 
 ### Running
 ```bash
 # MCP stdio server (Claude Code spawns this)
-exomonad-sidecar mcp-stdio
+exomonad mcp-stdio
 
 # MCP HTTP server (for testing)
-exomonad-sidecar mcp --port 7432
+exomonad mcp --port 7432
 
 # Handle Claude Code hook
-echo '{"hook_event_name":"PreToolUse",...}' | exomonad-sidecar hook pre-tool-use
+echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
 ```
 
-**Note:** WASM plugin path is auto-resolved from `.exomonad/config.toml`'s `role` field (defaults to `dev`).
+**Note:** WASM plugin path is auto-resolved from `.exomonad/config.local.toml`'s `wasm_path` field.
 
 ### Environment Variables
 | Variable | Used By | Purpose |
 |----------|---------|---------|
 | `GITHUB_TOKEN` | services | GitHub API access |
 | `RUST_LOG` | all | Tracing log level |
-| `EXOMONAD_WASM_PATH` | (deprecated) | **DEPRECATED** - Use `.exomonad/config.toml` with `role` field |
 
 ## MCP Tools
 
@@ -220,20 +220,14 @@ Add to `.mcp.json` in project root:
 {
   "mcpServers": {
     "exomonad": {
-      "command": "exomonad-sidecar",
+      "command": "exomonad",
       "args": ["mcp-stdio"]
     }
   }
 }
 ```
 
-And ensure `.exomonad/config.toml` exists with the `role` field:
-```toml
-role = "dev"  # or "tl", "pm", etc.
-project_dir = "."
-```
-
-The sidecar will load `~/.exomonad/wasm/wasm-guest-{role}.wasm` automatically.
+And ensure `.exomonad/config.toml` and/or `config.local.toml` exists.
 
 ## Testing
 
@@ -243,10 +237,10 @@ cargo test -p exomonad-sidecar          # Sidecar tests only
 cargo test -p exomonad-runtime          # Runtime tests only
 
 # E2E test with WASM
-./target/debug/exomonad-sidecar mcp --port 17432 &
+./target/debug/exomonad mcp --port 17432 &
 curl http://localhost:17432/health
 curl http://localhost:17432/mcp/tools
-pkill exomonad-sidecar
+pkill exomonad
 ```
 
 ## Design Decisions
@@ -258,7 +252,7 @@ pkill exomonad-sidecar
 | Local Zellij orchestration | Git worktrees + Zellij tabs, no Docker containers |
 | Extism runtime | Mature WASM runtime with host function support |
 | KDL layouts | Declarative tab creation with proper environment inheritance |
-| Config-based WASM resolution | `role` field in `.exomonad/config.toml` replaces `--wasm` flag |
+| Config-based WASM resolution | `role` field in `.exomonad/config.local.toml` |
 
 ## Related Documentation
 

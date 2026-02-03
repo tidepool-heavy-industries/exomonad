@@ -6,6 +6,7 @@ module ExoMonad.Guest.Records.Git
   ( GitTools (..),
     gitToolsHandler,
     gitToolsSchema,
+    gitTools, -- Convenience alias for handler
   )
 where
 
@@ -36,3 +37,7 @@ gitToolsSchema =
       status = mkSchema @GitStatus,
       log = mkSchema @GitLog
     }
+
+-- | Default handler instance for use in Role.hs
+gitTools :: GitTools AsHandler
+gitTools = gitToolsHandler

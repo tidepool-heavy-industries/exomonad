@@ -19,10 +19,10 @@ config =
     { roleName = "tl",
       tools =
         Tools
-          { git = gitToolsHandler,
-            github = githubToolsHandler,
-            fs = fileToolsHandler,
-            agents = agentToolsHandler
+          { git = gitTools,
+            github = githubTools,
+            fs = fileTools,
+            agents = agentTools
           },
       hooks = defaultHooks
     }

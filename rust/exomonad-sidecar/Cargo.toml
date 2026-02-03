@@ -3,6 +3,11 @@ name = "exomonad-sidecar"
 version = "0.1.0"
 edition = "2021"
 description = "Sidecar binary: Rust host with Haskell WASM plugin for Claude Code hooks/MCP"
+default-run = "exomonad"
+
+[[bin]]
+name = "exomonad"
+path = "src/main.rs"
 
 [dependencies]
 exomonad-runtime = { path = "../exomonad-runtime" }
