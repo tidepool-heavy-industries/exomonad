@@ -44,11 +44,12 @@ fn unix_enforce_singleton(pid_file: &Path) -> Result<PidGuard> {
     }
 
     // Open with read/write/create. We keep this file open in the guard.
+    #[allow(clippy::suspicious_open_options)]
     let mut file = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
-        .truncate(true)
+        .truncate(false)
         .open(pid_file)
         .context("Failed to open PID file")?;
 
@@ -282,7 +283,7 @@ mod tests {
         let file1 = OpenOptions::new()
             .create(true)
             .write(true)
-            .truncate(true)
+            .truncate(false)
             .open(&pid_file)
             .unwrap();
         #[allow(deprecated)]
