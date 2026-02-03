@@ -285,8 +285,10 @@ impl AgentControlService {
             .await?;
 
             // Emit agent:started event
+            let agent_id = exomonad_ui_protocol::AgentId::try_from(internal_name.clone())
+                .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
             let event = exomonad_ui_protocol::AgentEvent::AgentStarted {
-                agent_id: exomonad_ui_protocol::AgentId::try_from(internal_name.clone()).expect("Invalid agent_id"),
+                agent_id,
                 timestamp: zellij_events::now_iso8601(),
             };
             if let Err(e) = zellij_events::emit_event(&event) {
@@ -381,8 +383,10 @@ impl AgentControlService {
                     self.delete_worktree(path, force).await?;
 
                     // Emit agent:stopped event
+                    let agent_id = exomonad_ui_protocol::AgentId::try_from(format!("gh-{}", issue_id))
+                        .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
                     let event = exomonad_ui_protocol::AgentEvent::AgentStopped {
-                        agent_id: exomonad_ui_protocol::AgentId::try_from(format!("gh-{}", issue_id)).expect("Invalid agent_id"),
+                        agent_id,
                         timestamp: zellij_events::now_iso8601(),
                     };
                     if let Err(e) = zellij_events::emit_event(&event) {
@@ -562,7 +566,7 @@ impl AgentControlService {
                 "action",
                 "new-tab",
                 "--layout",
-                layout_file.to_str().unwrap(),
+                layout_file.to_str().ok_or_else(|| anyhow!("Invalid layout file path (utf8 error)"))?,
             ])
             .output()
             .await
@@ -672,7 +676,7 @@ impl AgentControlService {
                     "add",
                     "-b",
                     branch,
-                    path.to_str().unwrap(),
+                    path.to_str().ok_or_else(|| anyhow!("Invalid worktree path (utf8 error)"))?,
                     "origin/main",
                 ])
                 .current_dir(&self.project_dir)
@@ -695,7 +699,7 @@ impl AgentControlService {
                 debug!("Branch already exists, creating worktree without -b");
                 let fallback_result = timeout(GIT_TIMEOUT, async {
                     Command::new("git")
-                        .args(["worktree", "add", path.to_str().unwrap(), branch])
+                        .args(["worktree", "add", path.to_str().ok_or_else(|| anyhow!("Invalid worktree path (utf8 error)"))?, branch])
                         .current_dir(&self.project_dir)
                         .output()
                         .await
@@ -740,7 +744,7 @@ impl AgentControlService {
         if force {
             args.push("--force");
         }
-        args.push(path.to_str().unwrap());
+        args.push(path.to_str().ok_or_else(|| anyhow!("Invalid worktree path (utf8 error)"))?);
 
         let result = timeout(GIT_TIMEOUT, async {
             Command::new("git")

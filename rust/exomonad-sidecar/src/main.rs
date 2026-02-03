@@ -99,14 +99,19 @@ async fn handle_hook(
 
     // Emit HookReceived event
     if let Ok(branch) = git::get_current_branch() {
-        if let Some(agent_id) = git::extract_agent_id(&branch) {
-            let event = exomonad_ui_protocol::AgentEvent::HookReceived {
-                agent_id: exomonad_ui_protocol::AgentId::try_from(agent_id).expect("Invalid agent_id"),
-                hook_type: event_type.to_string(),
-                timestamp: zellij_events::now_iso8601(),
-            };
-            if let Err(e) = zellij_events::emit_event(&event) {
-                warn!("Failed to emit hook:received event: {}", e);
+        if let Some(agent_id_str) = git::extract_agent_id(&branch) {
+            match exomonad_ui_protocol::AgentId::try_from(agent_id_str.clone()) {
+                Ok(agent_id) => {
+                    let event = exomonad_ui_protocol::AgentEvent::HookReceived {
+                        agent_id,
+                        hook_type: event_type.to_string(),
+                        timestamp: zellij_events::now_iso8601(),
+                    };
+                    if let Err(e) = zellij_events::emit_event(&event) {
+                        warn!("Failed to emit hook:received event: {}", e);
+                    }
+                }
+                Err(e) => warn!("Invalid agent_id in branch '{}': {}", agent_id_str, e),
             }
         } else {
             warn!("Could not extract agent_id from branch: {}", branch);
@@ -154,18 +159,24 @@ async fn handle_hook(
         // Emit StopHookBlocked event for SubagentStop hooks
         if event_type == HookEventType::SubagentStop {
             if let Ok(branch) = git::get_current_branch() {
-                if let Some(agent_id) = git::extract_agent_id(&branch) {
+                if let Some(agent_id_str) = git::extract_agent_id(&branch) {
                     let reason = output
                         .stop_reason
                         .clone()
                         .unwrap_or_else(|| "Hook blocked agent stop".to_string());
-                    let event = exomonad_ui_protocol::AgentEvent::StopHookBlocked {
-                        agent_id: exomonad_ui_protocol::AgentId::try_from(agent_id).expect("Invalid agent_id"),
-                        reason,
-                        timestamp: zellij_events::now_iso8601(),
-                    };
-                    if let Err(e) = zellij_events::emit_event(&event) {
-                        warn!("Failed to emit stop_hook:blocked event: {}", e);
+                    
+                    match exomonad_ui_protocol::AgentId::try_from(agent_id_str.clone()) {
+                        Ok(agent_id) => {
+                            let event = exomonad_ui_protocol::AgentEvent::StopHookBlocked {
+                                agent_id,
+                                reason,
+                                timestamp: zellij_events::now_iso8601(),
+                            };
+                            if let Err(e) = zellij_events::emit_event(&event) {
+                                warn!("Failed to emit stop_hook:blocked event: {}", e);
+                            }
+                        }
+                        Err(e) => warn!("Invalid agent_id in branch '{}': {}", agent_id_str, e),
                     }
                 }
             }
@@ -191,37 +202,60 @@ fn init_logging(command: &Commands) {
     match command {
         Commands::McpStdio => {
             // File-based logging for stdio mode
-            let home_dir = std::env::var("HOME").expect("HOME environment variable not set");
-            let log_dir = PathBuf::from(home_dir).join(".exomonad").join("logs");
+            // Try to set up file logging, fallback to stderr (or nothing if really broken) if it fails
+            let setup_file_logging = || -> Result<PathBuf, String> {
+                let home_dir = std::env::var("HOME").map_err(|_| "HOME environment variable not set".to_string())?;
+                let log_dir = PathBuf::from(home_dir).join(".exomonad").join("logs");
 
-            // Create log directory if it doesn't exist
-            std::fs::create_dir_all(&log_dir).expect("Failed to create log directory");
+                // Create log directory if it doesn't exist
+                std::fs::create_dir_all(&log_dir).map_err(|e| format!("Failed to create log directory: {}", e))?;
 
-            // Generate timestamped filename
-            let timestamp = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S");
-            let log_file = log_dir.join(format!("sidecar-{}.log", timestamp));
+                // Generate timestamped filename
+                let timestamp = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S");
+                let log_file = log_dir.join(format!("sidecar-{}.log", timestamp));
 
-            let file = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log_file)
-                .expect("Failed to open log file");
+                let file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&log_file)
+                    .map_err(|e| format!("Failed to open log file: {}", e))?;
 
-            let builder = tracing_subscriber::fmt()
-                .with_env_filter(
-                    tracing_subscriber::EnvFilter::from_default_env()
-                        .add_directive(tracing::Level::INFO.into()),
-                )
-                .with_writer(std::sync::Arc::new(file))
-                .with_ansi(false); // No ANSI colors in file
+                let builder = tracing_subscriber::fmt()
+                    .with_env_filter(
+                        tracing_subscriber::EnvFilter::from_default_env()
+                            .add_directive(tracing::Level::INFO.into()),
+                    )
+                    .with_writer(std::sync::Arc::new(file))
+                    .with_ansi(false); // No ANSI colors in file
 
-            if use_json {
-                builder.json().init();
-            } else {
-                builder.init();
+                if use_json {
+                    builder.json().init();
+                } else {
+                    builder.init();
+                }
+                
+                Ok(log_file)
+            };
+
+            match setup_file_logging() {
+                Ok(log_file) => eprintln!("MCP stdio logging to: {}", log_file.display()),
+                Err(e) => {
+                    eprintln!("Failed to setup file logging for MCP stdio: {}. Falling back to stderr.", e);
+                    // Fallback to stderr
+                    let builder = tracing_subscriber::fmt()
+                        .with_env_filter(
+                            tracing_subscriber::EnvFilter::from_default_env()
+                                .add_directive(tracing::Level::INFO.into()),
+                        )
+                        .with_writer(std::io::stderr);
+
+                    if use_json {
+                        builder.json().init();
+                    } else {
+                        builder.init();
+                    }
+                }
             }
-
-            eprintln!("MCP stdio logging to: {}", log_file.display());
         }
         _ => {
             // Stderr logging for other modes (existing behavior)
@@ -311,7 +345,7 @@ async fn main() -> Result<()> {
                 project_dir_ref.clone()
             } else {
                 std::env::current_dir()
-                    .expect("Failed to get current directory")
+                    .context("Failed to get current directory")?
                     .join(project_dir_ref)
             };
 
@@ -339,12 +373,17 @@ async fn main() -> Result<()> {
 
             // Emit AgentStarted
             let agent_id = get_agent_id_from_env();
-            let start_event = exomonad_ui_protocol::AgentEvent::AgentStarted {
-                agent_id: exomonad_ui_protocol::AgentId::try_from(agent_id.clone()).expect("Invalid agent_id"),
-                timestamp: zellij_events::now_iso8601(),
-            };
-            if let Err(e) = zellij_events::emit_event(&start_event) {
-                warn!("Failed to emit agent:started event: {}", e);
+            match exomonad_ui_protocol::AgentId::try_from(agent_id.clone()) {
+                Ok(id) => {
+                    let start_event = exomonad_ui_protocol::AgentEvent::AgentStarted {
+                        agent_id: id,
+                        timestamp: zellij_events::now_iso8601(),
+                    };
+                    if let Err(e) = zellij_events::emit_event(&start_event) {
+                        warn!("Failed to emit agent:started event: {}", e);
+                    }
+                }
+                Err(e) => warn!("Invalid agent_id '{}': {}", agent_id, e),
             }
 
             mcp::stdio::run_stdio_server(state).await?;
@@ -352,12 +391,17 @@ async fn main() -> Result<()> {
             // Emit AgentStopped
             // Re-fetch branch as it might have changed
             let stop_agent_id = get_agent_id_from_env();
-            let stop_event = exomonad_ui_protocol::AgentEvent::AgentStopped {
-                agent_id: exomonad_ui_protocol::AgentId::try_from(stop_agent_id).expect("Invalid agent_id"),
-                timestamp: zellij_events::now_iso8601(),
-            };
-            if let Err(e) = zellij_events::emit_event(&stop_event) {
-                warn!("Failed to emit agent:stopped event: {}", e);
+            match exomonad_ui_protocol::AgentId::try_from(stop_agent_id.clone()) {
+                Ok(id) => {
+                    let stop_event = exomonad_ui_protocol::AgentEvent::AgentStopped {
+                        agent_id: id,
+                        timestamp: zellij_events::now_iso8601(),
+                    };
+                    if let Err(e) = zellij_events::emit_event(&stop_event) {
+                        warn!("Failed to emit agent:stopped event: {}", e);
+                    }
+                }
+                Err(e) => warn!("Invalid agent_id '{}': {}", stop_agent_id, e),
             }
         }
 
