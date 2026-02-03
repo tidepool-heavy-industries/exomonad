@@ -127,7 +127,7 @@ where
 {
     let state: Arc<Mutex<Option<(I, O)>>> = Arc::new(Mutex::new(None));
     let host_fn = host_fn_factory(state.clone());
-    let mut plugin = build_test_plugin(host_fn);
+    let plugin = build_test_plugin(host_fn);
     
     let mut runner = TestRunner::new(Config::with_cases(10));
     
@@ -201,7 +201,7 @@ where
             let inner_arc = &*inner_arc_guard;
             
             // 2. Lock the inner mutex
-            let mut guard = inner_arc.lock().unwrap();
+            let guard = inner_arc.lock().unwrap();
             
             let (expected_input, output_val) = (*guard).as_ref().expect("State not set by test runner");
             
