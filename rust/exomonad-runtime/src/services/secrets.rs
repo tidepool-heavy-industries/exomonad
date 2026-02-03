@@ -16,15 +16,25 @@ impl Secrets {
     /// Load secrets from ~/.exomonad/secrets.
     ///
     /// Falls back to environment variables if file doesn't exist.
+    /// Also exports loaded secrets to environment so host functions can access them.
     pub fn load() -> Self {
         let home = std::env::var("HOME").unwrap_or_default();
         let secrets_path = PathBuf::from(home).join(".exomonad/secrets");
 
         if let Ok(content) = std::fs::read_to_string(&secrets_path) {
             tracing::info!(path = %secrets_path.display(), "Loaded secrets");
-            Self {
-                values: parse_env_file(&content),
+            let values = parse_env_file(&content);
+
+            // Export secrets to environment so host functions can access them
+            // Only set if not already present (env var takes precedence)
+            for (key, value) in &values {
+                if std::env::var(key).is_err() {
+                    std::env::set_var(key, value);
+                    tracing::debug!(key = %key, "Exported secret to environment");
+                }
             }
+
+            Self { values }
         } else {
             tracing::debug!(
                 path = %secrets_path.display(),

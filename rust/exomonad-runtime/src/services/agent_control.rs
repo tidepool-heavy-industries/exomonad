@@ -963,12 +963,7 @@ project_dir = "../.."
 
 ## Description
 
-{body}
-
-## Instructions
-
-You are working on this GitHub issue in an isolated worktree.
-When done, commit your changes and create a pull request."###,
+{body}"###,
             issue_id = issue_id,
             title = title,
             branch = branch,
@@ -1384,7 +1379,8 @@ mod tests {
         assert!(prompt.contains("**Branch:** `gh-123/fix`"));
         assert!(prompt.contains("Description"));
         assert!(prompt.contains("https://github.com/owner/repo/issues/123"));
-        assert!(prompt.contains("When done, commit your changes and create a pull request."));
+        // Stop hooks now handle commit/PR creation - no explicit instruction needed
+        assert!(!prompt.contains("When done, commit"));
     }
 
     #[test]
