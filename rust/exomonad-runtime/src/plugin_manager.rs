@@ -46,7 +46,7 @@ use tracing;
 /// use std::sync::Arc;
 ///
 /// # async fn example() -> anyhow::Result<()> {
-/// let services = Arc::new(Services::new_local()?.validate()?);
+/// let services = Arc::new(Services::new().validate()?);
 /// let manager = PluginManager::new(
 ///     PathBuf::from("wasm-guest.wasm"),
 ///     services

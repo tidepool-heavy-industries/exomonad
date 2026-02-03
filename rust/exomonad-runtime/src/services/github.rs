@@ -193,8 +193,8 @@ impl FFIBoundary for ReviewComment {}
 /// let github = GitHubService::new("ghp_...".to_string())?;
 ///
 /// let repo = Repo {
-///     owner: GithubOwner::new("anthropics")?,
-///     name: GithubRepo::new("exomonad")?,
+///     owner: GithubOwner::from("anthropics"),
+///     name: GithubRepo::from("exomonad"),
 /// };
 ///
 /// let issues = github.list_issues(&repo, None).await?;

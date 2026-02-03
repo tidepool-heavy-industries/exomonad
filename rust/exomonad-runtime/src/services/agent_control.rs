@@ -1354,9 +1354,11 @@ mod tests {
 
     #[test]
     fn test_escape_for_shell_command_with_quote() {
+        // Standard shell escaping: end quote, escaped quote, start quote
+        // 'user'\''s issue' = 'user' + \' + 's issue'
         assert_eq!(
             AgentControlService::escape_for_shell_command("user's issue"),
-            r"'user'\'s issue'"
+            r"'user'\''s issue'"
         );
     }
 

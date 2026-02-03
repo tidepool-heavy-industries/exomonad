@@ -105,7 +105,13 @@ mod tests {
         let executor = LocalExecutor::new();
         let result = executor.exec("ignored", "/tmp", &["pwd"]).await;
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().trim(), "/tmp");
+        // macOS: /tmp is a symlink to /private/tmp, so pwd returns /private/tmp
+        let output = result.unwrap();
+        assert!(
+            output.trim().ends_with("/tmp"),
+            "Expected path ending in /tmp, got: {}",
+            output.trim()
+        );
     }
 
     #[tokio::test]
