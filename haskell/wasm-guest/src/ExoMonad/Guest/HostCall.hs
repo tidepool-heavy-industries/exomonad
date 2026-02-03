@@ -35,6 +35,7 @@ module ExoMonad.Guest.HostCall
     host_agent_spawn_batch,
     host_agent_cleanup,
     host_agent_cleanup_batch,
+    host_agent_cleanup_merged,
     host_agent_list,
     -- Filesystem
     host_fs_read_file,
@@ -136,6 +137,8 @@ foreign import ccall "agent_spawn_batch" host_agent_spawn_batch :: Word64 -> IO 
 foreign import ccall "agent_cleanup" host_agent_cleanup :: Word64 -> IO Word64
 
 foreign import ccall "agent_cleanup_batch" host_agent_cleanup_batch :: Word64 -> IO Word64
+
+foreign import ccall "agent_cleanup_merged" host_agent_cleanup_merged :: Word64 -> IO Word64
 
 foreign import ccall "agent_list" host_agent_list :: Word64 -> IO Word64
 

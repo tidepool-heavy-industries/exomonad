@@ -430,6 +430,35 @@ impl AgentControlService {
         result
     }
 
+    /// Clean up agents whose branches have been merged into main.
+    #[tracing::instrument(skip(self))]
+    pub async fn cleanup_merged_agents(&self) -> Result<BatchCleanupResult> {
+        // Fetch origin/main to ensure we have latest state
+        self.fetch_origin().await?;
+
+        let agents = self.list_agents().await?;
+        let mut to_cleanup = Vec::new();
+
+        for agent in agents {
+            // Check if branch is merged into origin/main
+            // We ignore errors here (e.g. if branch doesn't exist) and just don't cleanup
+            if self.is_branch_merged(&agent.branch_name).await.unwrap_or(false) {
+                info!(issue_id = %agent.issue_id, branch = %agent.branch_name, "Branch is merged, marking for cleanup");
+                to_cleanup.push(agent.issue_id);
+            }
+        }
+
+        if to_cleanup.is_empty() {
+            return Ok(BatchCleanupResult {
+                cleaned: Vec::new(),
+                failed: Vec::new(),
+            });
+        }
+
+        // Clean them up (force=false for safety - don't delete if uncommitted changes in worktree)
+        Ok(self.cleanup_agents(&to_cleanup, false).await)
+    }
+
     // ======================================================================== 
     // List Agents
     // ======================================================================== 
@@ -781,6 +810,17 @@ impl AgentControlService {
         }
 
         Ok(())
+    }
+
+    async fn is_branch_merged(&self, branch: &str) -> Result<bool> {
+        let result = Command::new("git")
+            .args(["merge-base", "--is-ancestor", branch, "origin/main"])
+            .current_dir(&self.project_dir)
+            .output()
+            .await
+            .context("Failed to check if branch is merged")?;
+        
+        Ok(result.status.success())
     }
 
     async fn has_uncommitted_changes(&self, worktree_path: &Path) -> bool {
@@ -1225,6 +1265,35 @@ pub fn cleanup_agents_host_fn(service: Arc<AgentControlService>) -> Function {
     .with_namespace("env")
 }
 
+pub fn cleanup_merged_agents_host_fn(service: Arc<AgentControlService>) -> Function {
+    Function::new(
+        "agent_cleanup_merged",
+        [ValType::I64],
+        [ValType::I64],
+        UserData::new(service),
+        |plugin: &mut CurrentPlugin,
+         _inputs: &[Val],
+         outputs: &mut [Val],
+         user_data: UserData<Arc<AgentControlService>>|
+         -> Result<(), Error> {
+            let _span = tracing::info_span!("host_function", function = "agent_cleanup_merged").entered();
+            // No input needed, but we might receive an empty object
+            
+            let service_arc = user_data.get()?;
+            let service = service_arc
+                .lock()
+                .map_err(|_| Error::msg("Poisoned lock"))?;
+
+            let result = block_on(service.cleanup_merged_agents())?;
+            let output: HostResult<BatchCleanupResult> = result.into_ffi_result();
+
+            outputs[0] = set_output(plugin, &output)?;
+            Ok(())
+        },
+    )
+    .with_namespace("env")
+}
+
 pub fn list_agents_host_fn(service: Arc<AgentControlService>) -> Function {
     Function::new(
         "agent_list",
@@ -1259,6 +1328,7 @@ pub fn register_host_functions(service: Arc<AgentControlService>) -> Vec<Functio
         spawn_agents_host_fn(service.clone()),
         cleanup_agent_host_fn(service.clone()),
         cleanup_agents_host_fn(service.clone()),
+        cleanup_merged_agents_host_fn(service.clone()),
         list_agents_host_fn(service),
     ]
 }
