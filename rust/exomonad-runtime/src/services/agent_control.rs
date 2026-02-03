@@ -848,7 +848,7 @@ impl AgentControlService {
         // Write config.toml with role = "dev" for spawned agents
         let config_content = r###"# Agent config (auto-generated)
 role = "dev"
-project_dir = "../.."
+project_dir = "../../.."
 "###;
         fs::write(exomonad_dir.join("config.toml"), config_content).await?;
         tracing::info!(
