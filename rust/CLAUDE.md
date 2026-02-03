@@ -48,7 +48,7 @@ Human in Zellij session
 ```
 
 Each agent:
-- Runs in isolated git worktree (`worktrees/gh-{issue}-{title}-{agent}/`)
+- Runs in isolated git worktree (`.exomonad/worktrees/gh-{issue}-{title}-{agent}/`)
 - Has own `.exomonad/config.toml` (role="dev")
 - Has own `.mcp.json` (no --wasm, config-based resolution)
 - Gets full issue context via agent-specific CLI argument:

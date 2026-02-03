@@ -76,7 +76,7 @@ defaultWorktreeConfig :: FilePath -> WorktreeConfig
 defaultWorktreeConfig repoRoot =
   WorktreeConfig
     { repoRoot = repoRoot,
-      worktreeDir = ".worktrees",
+      worktreeDir = ".exomonad/worktrees",
       targetBranch = "main",
       quiet = True
     }

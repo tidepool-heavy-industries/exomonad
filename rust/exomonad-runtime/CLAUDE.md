@@ -79,7 +79,7 @@ Methods:
 
 **Spawn flow:**
 1. Fetch issue from GitHub API
-2. Create git worktree: `worktrees/gh-{issue}-{slug}-{agent}/`
+2. Create git worktree: `.exomonad/worktrees/gh-{issue}-{slug}-{agent}/`
 3. Create branch: `gh-{issue}/{slug}-{agent}`
 4. Write `.exomonad/config.toml` (role="dev") and `.mcp.json`
 5. Build initial prompt with full issue context

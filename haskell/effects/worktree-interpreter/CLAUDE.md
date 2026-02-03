@@ -83,7 +83,7 @@ result <- runM
 ```haskell
 data WorktreeConfig = WorktreeConfig
   { wcRepoRoot :: FilePath      -- Git repository root
-  , wcWorktreeDir :: FilePath   -- Where to create worktrees (default: .worktrees/)
+  , wcWorktreeDir :: FilePath   -- Where to create worktrees (default: .exomonad/worktrees/)
   }
 
 defaultWorktreeConfig :: FilePath -> WorktreeConfig

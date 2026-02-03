@@ -384,7 +384,7 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 | `list_agents` | List active agent worktrees |
 
 **How spawn_agents works:**
-1. Creates git worktree: `worktrees/gh-{issue}-{title}-{agent}/`
+1. Creates git worktree: `.exomonad/worktrees/gh-{issue}-{title}-{agent}/`
 2. Creates branch: `gh-{issue}/{title}-{agent}`
 3. Writes `.exomonad/config.toml` (role="dev") and `.mcp.json` (no --wasm!)
 4. Builds initial prompt with full issue context
