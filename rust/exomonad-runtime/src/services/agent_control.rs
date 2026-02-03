@@ -869,7 +869,7 @@ project_dir = "../.."
           {{
             "name": "stop-check",
             "type": "command",
-            "command": "{} hook subagent-stop",
+            "command": "{} hook after-agent --runtime gemini",
             "timeout": 30000
           }}
         ]
