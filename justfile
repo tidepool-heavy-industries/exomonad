@@ -118,11 +118,11 @@ install-hooks:
 
 # Build WASM guest and install to ~/.exomonad/wasm/
 wasm role="tl":
-    @echo ">>> Building wasm-guest-{{role}}..."
-    nix develop .#wasm -c wasm32-wasi-cabal build --project-file=cabal.project.wasm wasm-guest-{{role}}
+    @echo ">>> Building wasm-guest-{{role}} via Nix..."
+    nix build .#wasm-guest-{{role}}
     @echo ">>> Installing to ~/.exomonad/wasm/..."
     mkdir -p ~/.exomonad/wasm
-    cp dist-newstyle/build/wasm32-wasi/ghc-*/wasm-guest-*/x/wasm-guest-{{role}}/build/wasm-guest-{{role}}/wasm-guest-{{role}}.wasm ~/.exomonad/wasm/
+    cp result/wasm-guest-{{role}}.wasm ~/.exomonad/wasm/
     @echo ">>> Done: ~/.exomonad/wasm/wasm-guest-{{role}}.wasm"
 
 # Build WASM guest (only tl exists currently)
