@@ -3,7 +3,7 @@
 // Uses `gh api` to check for Copilot review comments on a PR.
 // Blocks until comments are found or timeout is reached.
 
-use crate::common::{HostResult, IntoFFIResult, FFIBoundary};
+use crate::common::{FFIBoundary, HostResult, IntoFFIResult};
 use crate::services::git;
 use anyhow::{Context, Result};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
@@ -59,7 +59,6 @@ impl FFIBoundary for CopilotComment {}
 // ============================================================================
 // Service
 // ============================================================================
-
 
 /// Get repo owner/name from git remote
 fn get_repo_info() -> Result<(String, String)> {
@@ -255,7 +254,10 @@ pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<Copi
                             }
                         }
                         Err(e) => {
-                            warn!("Invalid agent_id in branch '{}', skipping event: {}", branch, e);
+                            warn!(
+                                "Invalid agent_id in branch '{}', skipping event: {}",
+                                branch, e
+                            );
                         }
                     }
                 }
@@ -286,7 +288,10 @@ pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<Copi
                             }
                         }
                         Err(e) => {
-                            warn!("Invalid agent_id in branch '{}', skipping event: {}", branch, e);
+                            warn!(
+                                "Invalid agent_id in branch '{}', skipping event: {}",
+                                branch, e
+                            );
                         }
                     }
                 }
@@ -356,14 +361,21 @@ fn wait_for_copilot_review_host_fn(
     outputs: &mut [Val],
     _user_data: UserData<()>,
 ) -> std::result::Result<(), Error> {
-    let _span = tracing::info_span!("host_function", function = "wait_for_copilot_review").entered();
+    let _span =
+        tracing::info_span!("host_function", function = "wait_for_copilot_review").entered();
     let input: WaitForCopilotReviewInput = get_input(plugin, inputs[0])?;
-    tracing::info!(pr_number = input.pr_number, timeout = input.timeout_secs, "Waiting for Copilot review");
+    tracing::info!(
+        pr_number = input.pr_number,
+        timeout = input.timeout_secs,
+        "Waiting for Copilot review"
+    );
 
     let result = wait_for_copilot_review(&input);
 
     match &result {
-        Ok(out) => tracing::info!(success = true, status = %out.status, comment_count = out.comments.len(), "Completed"),
+        Ok(out) => {
+            tracing::info!(success = true, status = %out.status, comment_count = out.comments.len(), "Completed")
+        }
         Err(e) => tracing::warn!(error = %e, "Failed"),
     }
 

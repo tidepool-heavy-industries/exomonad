@@ -1,4 +1,4 @@
-use crate::common::{ErrorCode, HostResult, FFIBoundary};
+use crate::common::{ErrorCode, FFIBoundary, HostResult};
 use anyhow::{anyhow, Result};
 use exomonad_shared::{GithubOwner, GithubRepo};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
@@ -268,14 +268,12 @@ impl GitHubService {
             }
         }
 
-        let page = timeout(API_TIMEOUT, builder.send())
-            .await
-            .map_err(|_| {
-                anyhow!(
-                    "GitHub API list_issues timed out after {}s",
-                    API_TIMEOUT.as_secs()
-                )
-            })??;
+        let page = timeout(API_TIMEOUT, builder.send()).await.map_err(|_| {
+            anyhow!(
+                "GitHub API list_issues timed out after {}s",
+                API_TIMEOUT.as_secs()
+            )
+        })??;
 
         let issues = timeout(API_TIMEOUT, self.client.all_pages(page))
             .await
@@ -417,14 +415,12 @@ impl GitHubService {
             }
         }
 
-        let page = timeout(API_TIMEOUT, builder.send())
-            .await
-            .map_err(|_| {
-                anyhow!(
-                    "GitHub API list_prs timed out after {}s",
-                    API_TIMEOUT.as_secs()
-                )
-            })??;
+        let page = timeout(API_TIMEOUT, builder.send()).await.map_err(|_| {
+            anyhow!(
+                "GitHub API list_prs timed out after {}s",
+                API_TIMEOUT.as_secs()
+            )
+        })??;
         // For PRs, we might not want all pages if a limit was set, but octocrab's list() returns a Page.
         // If limit was set, we used per_page.
 
@@ -527,7 +523,7 @@ fn map_error<T>(e: anyhow::Error) -> HostResult<T> {
     } else {
         ErrorCode::InternalError
     };
-    
+
     HostResult::error(msg, code, None, None)
 }
 
@@ -762,7 +758,8 @@ fn github_get_pr_for_branch(
     outputs: &mut [Val],
     _user_data: UserData<()>,
 ) -> std::result::Result<(), Error> {
-    let _span = tracing::info_span!("host_function", function = "github_get_pr_for_branch").entered();
+    let _span =
+        tracing::info_span!("host_function", function = "github_get_pr_for_branch").entered();
     #[derive(Deserialize)]
     struct Input {
         repo: Repo,
@@ -797,7 +794,8 @@ fn github_get_pr_review_comments(
     outputs: &mut [Val],
     _user_data: UserData<()>,
 ) -> std::result::Result<(), Error> {
-    let _span = tracing::info_span!("host_function", function = "github_get_pr_review_comments").entered();
+    let _span =
+        tracing::info_span!("host_function", function = "github_get_pr_review_comments").entered();
     #[derive(Deserialize)]
     struct Input {
         repo: Repo,

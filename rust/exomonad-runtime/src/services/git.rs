@@ -1,4 +1,4 @@
-use crate::common::{HostResult, IntoFFIResult, FFIBoundary};
+use crate::common::{FFIBoundary, HostResult, IntoFFIResult};
 use crate::services::docker::DockerExecutor;
 use anyhow::{Context, Result};
 use duct::cmd;
@@ -326,12 +326,12 @@ pub fn git_get_branch_host_fn(git_service: Arc<GitService>) -> Function {
             }
             let Json(input): Json<GitHostInput> = plugin.memory_get_val(&inputs[0])?;
             tracing::info!(dir = %input.working_dir, container = %input.container_id, "Getting git branch");
-            
+
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(git.get_branch(&input.container_id, &input.working_dir))?;
-            
+
             match &result {
                 Ok(branch) => tracing::info!(success = true, branch = %branch, "Completed"),
                 Err(e) => tracing::warn!(error = %e, "Failed"),
@@ -407,7 +407,7 @@ pub fn git_get_dirty_files_host_fn(git_service: Arc<GitService>) -> Function {
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(git.get_dirty_files(&input.container_id, &input.working_dir))?;
-            
+
             match &result {
                 Ok(files) => tracing::info!(success = true, count = files.len(), "Completed"),
                 Err(e) => tracing::warn!(error = %e, "Failed"),

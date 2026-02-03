@@ -146,8 +146,8 @@ async fn handle_hook(
         _ => {
             // Pass through unhandled hooks with allow
             debug!(event = ?event_type, "Hook type not implemented in WASM, allowing");
-            let output_json =
-                serde_json::to_string(&ClaudePreToolUseOutput::default()).context("Failed to serialize output")?;
+            let output_json = serde_json::to_string(&ClaudePreToolUseOutput::default())
+                .context("Failed to serialize output")?;
             println!("{}", output_json);
             return Ok(());
         }
@@ -230,11 +230,13 @@ fn init_logging(command: &Commands) {
             // File-based logging for stdio mode
             // Try to set up file logging, fallback to stderr (or nothing if really broken) if it fails
             let setup_file_logging = || -> Result<PathBuf, String> {
-                let home_dir = std::env::var("HOME").map_err(|_| "HOME environment variable not set".to_string())?;
+                let home_dir = std::env::var("HOME")
+                    .map_err(|_| "HOME environment variable not set".to_string())?;
                 let log_dir = PathBuf::from(home_dir).join(".exomonad").join("logs");
 
                 // Create log directory if it doesn't exist
-                std::fs::create_dir_all(&log_dir).map_err(|e| format!("Failed to create log directory: {}", e))?;
+                std::fs::create_dir_all(&log_dir)
+                    .map_err(|e| format!("Failed to create log directory: {}", e))?;
 
                 // Generate timestamped filename
                 let timestamp = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S");
@@ -259,14 +261,17 @@ fn init_logging(command: &Commands) {
                 } else {
                     builder.init();
                 }
-                
+
                 Ok(log_file)
             };
 
             match setup_file_logging() {
                 Ok(log_file) => eprintln!("MCP stdio logging to: {}", log_file.display()),
                 Err(e) => {
-                    eprintln!("Failed to setup file logging for MCP stdio: {}. Falling back to stderr.", e);
+                    eprintln!(
+                        "Failed to setup file logging for MCP stdio: {}. Falling back to stderr.",
+                        e
+                    );
                     // Fallback to stderr
                     let builder = tracing_subscriber::fmt()
                         .with_env_filter(

@@ -38,7 +38,15 @@ pub fn emit_event(event: &AgentEvent) -> Result<()> {
 
 async fn emit_with_timeout(plugin_path: String, json: String) {
     let child_result = Command::new("zellij")
-        .args(["pipe", "--plugin", &plugin_path, "--name", "exomonad-events", "--", &json])
+        .args([
+            "pipe",
+            "--plugin",
+            &plugin_path,
+            "--name",
+            "exomonad-events",
+            "--",
+            &json,
+        ])
         .spawn();
 
     let mut child = match child_result {
@@ -59,7 +67,10 @@ async fn emit_with_timeout(plugin_path: String, json: String) {
             warn!("[ZellijEvents] zellij pipe wait error: {}", e);
         }
         Err(_) => {
-            warn!("[ZellijEvents] zellij pipe timed out after {:?}, killing", PIPE_TIMEOUT);
+            warn!(
+                "[ZellijEvents] zellij pipe timed out after {:?}, killing",
+                PIPE_TIMEOUT
+            );
             let _ = child.kill().await;
         }
     }

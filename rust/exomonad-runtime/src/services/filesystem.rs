@@ -3,7 +3,7 @@
 //! Provides file read/write operations for hooks and MCP tools that need
 //! to access file contents (e.g., reading transcript files, writing context).
 
-use crate::common::{HostResult, IntoFFIResult, FFIBoundary};
+use crate::common::{FFIBoundary, HostResult, IntoFFIResult};
 use anyhow::{Context, Result};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
 use serde::{Deserialize, Serialize};
@@ -105,7 +105,7 @@ impl FileSystemService {
     #[tracing::instrument(skip(self))]
     pub async fn read_file(&self, input: &ReadFileInput) -> Result<ReadFileOutput> {
         let path = self.resolve_path(&input.path);
-        
+
         let content = fs::read_to_string(&path)
             .await
             .with_context(|| format!("Failed to read file: {}", path.display()))?;
@@ -204,7 +204,12 @@ pub fn fs_read_file_host_fn(service: Arc<FileSystemService>) -> Function {
             let result = block_on(service.read_file(&input))?;
 
             match &result {
-                Ok(out) => tracing::info!(success = true, bytes_read = out.bytes_read, truncated = out.truncated, "Completed"),
+                Ok(out) => tracing::info!(
+                    success = true,
+                    bytes_read = out.bytes_read,
+                    truncated = out.truncated,
+                    "Completed"
+                ),
                 Err(e) => tracing::warn!(error = %e, "Failed"),
             }
 

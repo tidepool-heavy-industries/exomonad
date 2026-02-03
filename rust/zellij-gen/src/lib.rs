@@ -96,7 +96,7 @@ pub fn generate_main_layout(tabs: Vec<AgentTabParams>) -> Result<String, askama:
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_generate_agent_layout() {
         let params = AgentTabParams {

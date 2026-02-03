@@ -36,9 +36,15 @@ impl fmt::Display for AgentId {
 #[serde(tag = "type")]
 pub enum AgentEvent {
     #[serde(rename = "agent:started")]
-    AgentStarted { agent_id: AgentId, timestamp: String },
+    AgentStarted {
+        agent_id: AgentId,
+        timestamp: String,
+    },
     #[serde(rename = "agent:stopped")]
-    AgentStopped { agent_id: AgentId, timestamp: String },
+    AgentStopped {
+        agent_id: AgentId,
+        timestamp: String,
+    },
     #[serde(rename = "stop_hook:blocked")]
     StopHookBlocked {
         agent_id: AgentId,

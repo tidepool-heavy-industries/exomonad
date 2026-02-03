@@ -215,10 +215,7 @@ impl Component<Msg, NoUserEvent> for Form {
             }) => {
                 if let Some(schema) = &self.schema {
                     if let Some(prop) = schema.properties.get(self.focused_idx) {
-                        let val = self
-                            .values
-                            .entry(prop.name.clone())
-                            .or_default();
+                        let val = self.values.entry(prop.name.clone()).or_default();
                         val.push(c);
                     }
                 }

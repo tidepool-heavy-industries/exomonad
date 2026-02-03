@@ -217,10 +217,13 @@ impl ExternalService for OtelService {
                     }],
                 };
 
-                let url = self.endpoint.join("/v1/traces").map_err(|e| ServiceError::Api {
-                    code: 500,
-                    message: format!("URL error: {}", e),
-                })?;
+                let url = self
+                    .endpoint
+                    .join("/v1/traces")
+                    .map_err(|e| ServiceError::Api {
+                        code: 500,
+                        message: format!("URL error: {}", e),
+                    })?;
                 let mut builder = self.client.post(url).json(&payload);
                 for (k, v) in &self.headers {
                     builder = builder.header(k, v);
@@ -274,10 +277,13 @@ impl ExternalService for OtelService {
                     }],
                 };
 
-                let url = self.endpoint.join("/v1/metrics").map_err(|e| ServiceError::Api {
-                    code: 500,
-                    message: format!("URL error: {}", e),
-                })?;
+                let url = self
+                    .endpoint
+                    .join("/v1/metrics")
+                    .map_err(|e| ServiceError::Api {
+                        code: 500,
+                        message: format!("URL error: {}", e),
+                    })?;
                 let mut builder = self.client.post(url).json(&payload);
                 for (k, v) in &self.headers {
                     builder = builder.header(k, v);

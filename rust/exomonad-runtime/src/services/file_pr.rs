@@ -3,7 +3,7 @@
 // Uses `gh pr create` / `gh pr view` for idempotent PR management.
 // Returns immediately with PR URL and number.
 
-use crate::common::{ErrorCode, HostResult, FFIBoundary};
+use crate::common::{ErrorCode, FFIBoundary, HostResult};
 use crate::services::git;
 use anyhow::{Context, Result};
 use duct::cmd;
@@ -163,7 +163,10 @@ fn create_pr(input: &FilePRInput) -> Result<FilePROutput> {
                 }
             }
             Err(e) => {
-                warn!("Invalid agent_id in branch '{}', skipping event: {}", head_branch, e);
+                warn!(
+                    "Invalid agent_id in branch '{}', skipping event: {}",
+                    head_branch, e
+                );
             }
         }
     }
@@ -271,7 +274,9 @@ fn file_pr_host_fn(
     let result = file_pr(&input);
 
     match &result {
-        Ok(pr) => tracing::info!(success = true, pr_url = %pr.pr_url, created = pr.created, "Completed"),
+        Ok(pr) => {
+            tracing::info!(success = true, pr_url = %pr.pr_url, created = pr.created, "Completed")
+        }
         Err(e) => tracing::warn!(error = %e, "Failed"),
     }
 

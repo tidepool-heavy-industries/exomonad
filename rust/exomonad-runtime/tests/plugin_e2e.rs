@@ -71,7 +71,8 @@ async fn test_plugin_call_handle_pre_tool_use() {
     };
 
     let input = test_hook_input();
-    let result: Result<ClaudePreToolUseOutput, _> = plugin.call("handle_pre_tool_use", &input).await;
+    let result: Result<ClaudePreToolUseOutput, _> =
+        plugin.call("handle_pre_tool_use", &input).await;
 
     match result {
         Ok(output) => {
@@ -167,7 +168,8 @@ async fn test_plugin_call_with_minimal_input() {
     )
     .expect("valid minimal input");
 
-    let result: Result<ClaudePreToolUseOutput, _> = plugin.call("handle_pre_tool_use", &input).await;
+    let result: Result<ClaudePreToolUseOutput, _> =
+        plugin.call("handle_pre_tool_use", &input).await;
 
     match result {
         Ok(output) => {

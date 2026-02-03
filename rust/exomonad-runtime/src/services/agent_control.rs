@@ -1,13 +1,13 @@
 //! High-level agent control service.
-//! 
+//!
 //! Provides semantic operations for agent lifecycle management:
 //! - SpawnAgent: Create worktree, write context, open Zellij tab
 //! - CleanupAgent: Close tab, delete worktree
 //! - ListAgents: List active agent worktrees
-//! 
+//!
 //! These are high-level effects exposed to Haskell WASM, not granular operations.
 
-use crate::common::{HostResult, IntoFFIResult, TimeoutError, FFIBoundary};
+use crate::common::{FFIBoundary, HostResult, IntoFFIResult, TimeoutError};
 use anyhow::{anyhow, Context, Result};
 use exomonad_shared::{GithubOwner, GithubRepo, IssueNumber};
 use serde::{Deserialize, Serialize};
@@ -27,12 +27,12 @@ const SPAWN_TIMEOUT: Duration = Duration::from_secs(60);
 const GIT_TIMEOUT: Duration = Duration::from_secs(30);
 const ZELLIJ_TIMEOUT: Duration = Duration::from_secs(30);
 
-// ============================================================================ 
+// ============================================================================
 // Types
-// ============================================================================ 
+// ============================================================================
 
 /// Agent type for spawned agents.
-/// 
+///
 /// Determines which CLI tool to use when spawning an agent in a Zellij tab.
 /// Each type has different command names and prompt flags.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -43,7 +43,7 @@ pub enum AgentType {
     Claude,
 
     /// Gemini CLI (spawns with `gemini --prompt-interactive '...'`).
-    /// 
+    ///
     /// Default agent type.
     #[default]
     Gemini,
@@ -188,9 +188,9 @@ pub struct BatchCleanupResult {
 
 impl FFIBoundary for BatchCleanupResult {}
 
-// ============================================================================ 
+// ============================================================================
 // Service
-// ============================================================================ 
+// ============================================================================
 
 /// Agent control service for high-level agent lifecycle management.
 pub struct AgentControlService {
@@ -232,12 +232,12 @@ impl AgentControlService {
         })
     }
 
-    // ======================================================================== 
+    // ========================================================================
     // Spawn Agent
-    // ======================================================================== 
+    // ========================================================================
 
     /// Spawn an agent for a GitHub issue.
-    /// 
+    ///
     /// This is the high-level semantic operation that:
     /// 1. Fetches issue from GitHub
     /// 2. Creates git worktree from origin/main
@@ -291,7 +291,8 @@ impl AgentControlService {
             self.create_worktree(&worktree_path, &branch_name).await?;
 
             // Write config files (no INITIAL_CONTEXT.md)
-            self.write_context_files(&worktree_path, options.agent_type).await?;
+            self.write_context_files(&worktree_path, options.agent_type)
+                .await?;
 
             // Build initial prompt
             let issue_url = format!(
@@ -387,9 +388,9 @@ impl AgentControlService {
         result
     }
 
-    // ======================================================================== 
+    // ========================================================================
     // Cleanup Agent
-    // ======================================================================== 
+    // ========================================================================
 
     /// Clean up an agent (close Zellij tab, delete worktree).
     #[tracing::instrument(skip(self))]
@@ -427,8 +428,9 @@ impl AgentControlService {
                     self.prune_worktrees().await?;
 
                     // Emit agent:stopped event
-                    let agent_id = exomonad_ui_protocol::AgentId::try_from(format!("gh-{}", issue_id))
-                        .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
+                    let agent_id =
+                        exomonad_ui_protocol::AgentId::try_from(format!("gh-{}", issue_id))
+                            .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
                     let event = exomonad_ui_protocol::AgentEvent::AgentStopped {
                         agent_id,
                         timestamp: zellij_events::now_iso8601(),
@@ -437,7 +439,7 @@ impl AgentControlService {
                         warn!("Failed to emit agent:stopped event: {}", e);
                     }
 
-                    return Ok(())
+                    return Ok(());
                 }
             }
         }
@@ -478,7 +480,11 @@ impl AgentControlService {
         for agent in agents {
             // Check if branch is merged into origin/main
             // We ignore errors here (e.g. if branch doesn't exist) and just don't cleanup
-            if self.is_branch_merged(&agent.branch_name).await.unwrap_or(false) {
+            if self
+                .is_branch_merged(&agent.branch_name)
+                .await
+                .unwrap_or(false)
+            {
                 info!(issue_id = %agent.issue_id, branch = %agent.branch_name, "Branch is merged, marking for cleanup");
                 to_cleanup.push(agent.issue_id);
             }
@@ -495,9 +501,9 @@ impl AgentControlService {
         Ok(self.cleanup_agents(&to_cleanup, false).await)
     }
 
-    // ======================================================================== 
+    // ========================================================================
     // List Agents
-    // ======================================================================== 
+    // ========================================================================
 
     /// List all active agent worktrees.
     #[tracing::instrument(skip(self))]
@@ -568,7 +574,8 @@ impl AgentControlService {
         if let Some(ref github) = self.github {
             if let Some(repo) = self.get_repo_from_remote().await {
                 for agent in &mut agents {
-                    if let Ok(Some(pr)) = github.get_pr_for_branch(&repo, &agent.branch_name).await {
+                    if let Ok(Some(pr)) = github.get_pr_for_branch(&repo, &agent.branch_name).await
+                    {
                         agent.pr = Some(AgentPrInfo {
                             number: pr.number,
                             title: pr.title,
@@ -599,7 +606,7 @@ impl AgentControlService {
 
     // ========================================================================
     // Internal: Zellij
-    // ======================================================================== 
+    // ========================================================================
 
     fn check_zellij_env(&self) -> Result<String> {
         std::env::var("ZELLIJ_SESSION_NAME")
@@ -655,7 +662,13 @@ impl AgentControlService {
         let temp_dir = std::env::temp_dir();
         let safe_filename: String = name
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
         let layout_file = temp_dir.join(format!("zellij-tab-{}.kdl", safe_filename));
         tokio::fs::write(&layout_file, &layout_content)
@@ -682,7 +695,9 @@ impl AgentControlService {
                 "action",
                 "new-tab",
                 "--layout",
-                layout_file.to_str().ok_or_else(|| anyhow!("Invalid layout file path (utf8 error)"))?,
+                layout_file
+                    .to_str()
+                    .ok_or_else(|| anyhow!("Invalid layout file path (utf8 error)"))?,
             ])
             .output()
             .await
@@ -737,9 +752,9 @@ impl AgentControlService {
         Ok(())
     }
 
-    // ======================================================================== 
+    // ========================================================================
     // Internal: Git Worktree
-    // ======================================================================== 
+    // ========================================================================
 
     #[tracing::instrument(skip(self))]
     async fn fetch_origin(&self) -> Result<()> {
@@ -774,7 +789,7 @@ impl AgentControlService {
     async fn create_worktree(&self, path: &Path, branch: &str) -> Result<()> {
         if path.exists() {
             info!(path = %path.display(), "Worktree already exists, reusing");
-            return Ok(())
+            return Ok(());
         }
 
         if let Some(parent) = path.parent() {
@@ -792,7 +807,8 @@ impl AgentControlService {
                     "add",
                     "-b",
                     branch,
-                    path.to_str().ok_or_else(|| anyhow!("Invalid worktree path (utf8 error)"))?,
+                    path.to_str()
+                        .ok_or_else(|| anyhow!("Invalid worktree path (utf8 error)"))?,
                     "origin/main",
                 ])
                 .current_dir(&self.project_dir)
@@ -803,7 +819,10 @@ impl AgentControlService {
         .await
         .map_err(|_| {
             anyhow::Error::new(TimeoutError {
-                message: format!("git worktree add timed out after {}s", GIT_TIMEOUT.as_secs()),
+                message: format!(
+                    "git worktree add timed out after {}s",
+                    GIT_TIMEOUT.as_secs()
+                ),
             })
         })??;
 
@@ -815,7 +834,13 @@ impl AgentControlService {
                 debug!("Branch already exists, creating worktree without -b");
                 let fallback_result = timeout(GIT_TIMEOUT, async {
                     Command::new("git")
-                        .args(["worktree", "add", path.to_str().ok_or_else(|| anyhow!("Invalid worktree path (utf8 error)"))?, branch])
+                        .args([
+                            "worktree",
+                            "add",
+                            path.to_str()
+                                .ok_or_else(|| anyhow!("Invalid worktree path (utf8 error)"))?,
+                            branch,
+                        ])
                         .current_dir(&self.project_dir)
                         .output()
                         .await
@@ -851,7 +876,7 @@ impl AgentControlService {
     async fn delete_worktree(&self, path: &Path, force: bool) -> Result<()> {
         if !path.exists() {
             debug!(path = %path.display(), "Worktree doesn't exist");
-            return Ok(())
+            return Ok(());
         }
 
         info!(path = %path.display(), force, "Running git worktree remove");
@@ -860,7 +885,10 @@ impl AgentControlService {
         if force {
             args.push("--force");
         }
-        args.push(path.to_str().ok_or_else(|| anyhow!("Invalid worktree path (utf8 error)"))?);
+        args.push(
+            path.to_str()
+                .ok_or_else(|| anyhow!("Invalid worktree path (utf8 error)"))?,
+        );
 
         let result = timeout(GIT_TIMEOUT, async {
             Command::new("git")
@@ -919,7 +947,7 @@ impl AgentControlService {
             .output()
             .await
             .context("Failed to check if branch is merged")?;
-        
+
         Ok(result.status.success())
     }
 
@@ -936,9 +964,9 @@ impl AgentControlService {
         }
     }
 
-    // ======================================================================== 
+    // ========================================================================
     // Internal: Context Files
-    // ======================================================================== 
+    // ========================================================================
 
     async fn write_context_files(&self, worktree_path: &Path, agent_type: AgentType) -> Result<()> {
         // Create .exomonad directory
@@ -1043,9 +1071,9 @@ project_dir = "../../.."
         Ok(())
     }
 
-    // ======================================================================== 
+    // ========================================================================
     // Internal: Prompt Building
-    // ======================================================================== 
+    // ========================================================================
 
     /// Build the initial prompt for a spawned agent.
     fn build_initial_prompt(
@@ -1073,10 +1101,10 @@ project_dir = "../../.."
     }
 
     /// Escape a string for safe use in shell command with single quotes.
-    /// 
+    ///
     /// Wraps the string in single quotes and escapes any embedded single quotes.
     /// This is suitable for: sh -c "claude --prompt '...'"
-    /// 
+    ///
     /// Example: "user's issue" -> "'user'\''s issue'"
     fn escape_for_shell_command(s: &str) -> String {
         // Replace ' with '\'' (end quote, escaped quote, start quote)
@@ -1095,9 +1123,9 @@ project_dir = "../../.."
     }
 }
 
-// ============================================================================ 
+// ============================================================================
 // Helpers
-// ============================================================================ 
+// ============================================================================
 
 /// Create a URL-safe slug from a title.
 fn slugify(title: &str) -> String {
@@ -1152,7 +1180,7 @@ fn parse_worktree_name(name: &str) -> Option<ParsedWorktreeName<'_>> {
 
 // ============================================================================
 // Host Functions for WASM
-// ============================================================================ 
+// ============================================================================
 
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
 
@@ -1160,7 +1188,7 @@ use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct SpawnAgentInput {
-    pub issue_id: String,  // Parsed to IssueNumber in host function
+    pub issue_id: String, // Parsed to IssueNumber in host function
     pub owner: GithubOwner,
     pub repo: GithubRepo,
     pub worktree_dir: Option<String>,
@@ -1258,7 +1286,7 @@ pub fn spawn_agent_host_fn(service: Arc<AgentControlService>) -> Function {
             };
 
             let result = block_on(service.spawn_agent(issue_number, &options))?;
-            
+
             match &result {
                 Ok(_) => tracing::info!(success = true, "Completed"),
                 Err(e) => tracing::warn!(error = %e, "Failed"),
@@ -1335,7 +1363,7 @@ pub fn cleanup_agent_host_fn(service: Arc<AgentControlService>) -> Function {
                 .map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(service.cleanup_agent(&input.issue_id, input.force))?;
-            
+
             match &result {
                 Ok(_) => tracing::info!(success = true, "Completed"),
                 Err(e) => tracing::warn!(error = %e, "Failed"),
@@ -1361,9 +1389,14 @@ pub fn cleanup_agents_host_fn(service: Arc<AgentControlService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<AgentControlService>>|
          -> Result<(), Error> {
-            let _span = tracing::info_span!("host_function", function = "agent_cleanup_batch").entered();
+            let _span =
+                tracing::info_span!("host_function", function = "agent_cleanup_batch").entered();
             let input: CleanupAgentsInput = get_input(plugin, inputs[0])?;
-            tracing::info!(count = input.issue_ids.len(), force = input.force, "Cleaning up batch agents");
+            tracing::info!(
+                count = input.issue_ids.len(),
+                force = input.force,
+                "Cleaning up batch agents"
+            );
 
             let service_arc = user_data.get()?;
             let service = service_arc
@@ -1373,8 +1406,13 @@ pub fn cleanup_agents_host_fn(service: Arc<AgentControlService>) -> Function {
             let result = block_on(service.cleanup_agents(&input.issue_ids, input.force))?;
 
             // BatchCleanupResult is a success type, errors are inside it
-            tracing::info!(success = true, cleaned = result.cleaned.len(), failed = result.failed.len(), "Completed");
-            
+            tracing::info!(
+                success = true,
+                cleaned = result.cleaned.len(),
+                failed = result.failed.len(),
+                "Completed"
+            );
+
             let output = HostResult::Success(result);
 
             outputs[0] = set_output(plugin, &output)?;
@@ -1395,10 +1433,11 @@ pub fn cleanup_merged_agents_host_fn(service: Arc<AgentControlService>) -> Funct
          outputs: &mut [Val],
          user_data: UserData<Arc<AgentControlService>>|
          -> Result<(), Error> {
-            let _span = tracing::info_span!("host_function", function = "agent_cleanup_merged").entered();
+            let _span =
+                tracing::info_span!("host_function", function = "agent_cleanup_merged").entered();
             // No input needed, but we might receive an empty object
             tracing::info!("Cleaning up merged agents");
-            
+
             let service_arc = user_data.get()?;
             let service = service_arc
                 .lock()
@@ -1407,7 +1446,12 @@ pub fn cleanup_merged_agents_host_fn(service: Arc<AgentControlService>) -> Funct
             let result = block_on(service.cleanup_merged_agents())?;
 
             match &result {
-                Ok(res) => tracing::info!(success = true, cleaned = res.cleaned.len(), failed = res.failed.len(), "Completed"),
+                Ok(res) => tracing::info!(
+                    success = true,
+                    cleaned = res.cleaned.len(),
+                    failed = res.failed.len(),
+                    "Completed"
+                ),
                 Err(e) => tracing::warn!(error = %e, "Failed"),
             }
 

@@ -85,7 +85,7 @@ pub struct GhPrStatusResult {
     pub exists: bool,
     pub url: Option<String>,
     pub number: Option<u32>,
-    pub state: Option<PrState>,         // "open", "closed", "merged"
+    pub state: Option<PrState>,              // "open", "closed", "merged"
     pub review_status: Option<ReviewStatus>, // "pending", "approved", "changes_requested"
     pub comments: Vec<PrComment>,
 }

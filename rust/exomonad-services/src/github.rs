@@ -143,7 +143,7 @@ impl GitHubService {
                         .get("state")
                         .and_then(|s| s.as_str())
                         .unwrap_or("PENDING");
-                    
+
                     let state = match state_str {
                         "PENDING" => ReviewState::Pending,
                         "SUBMITTED" => ReviewState::Commented, // Map SUBMITTED to Commented as closest match? Or assume SUBMITTED means it's a comment.
@@ -690,10 +690,13 @@ impl ExternalService for GitHubService {
                     title: pr.title.unwrap_or_default(),
                     body: pr.body.unwrap_or_default(),
                     author: pr.user.map(|u| u.login).unwrap_or_else(|| "unknown".into()),
-                    url: pr.html_url.ok_or_else(|| ServiceError::Api {
-                        code: 500,
-                        message: "PR has no URL".to_string(),
-                    })?.to_string(),
+                    url: pr
+                        .html_url
+                        .ok_or_else(|| ServiceError::Api {
+                            code: 500,
+                            message: "PR has no URL".to_string(),
+                        })?
+                        .to_string(),
                     state: pr.state.map(state_to_item_state).unwrap_or(ItemState::Open),
                     head_ref_name: pr.head.ref_field,
                     base_ref_name: pr.base.ref_field,
@@ -767,10 +770,13 @@ impl ExternalService for GitHubService {
                     title: pr.title.unwrap_or_default(),
                     body: pr.body.unwrap_or_default(),
                     author: pr.user.map(|u| u.login).unwrap_or_else(|| "unknown".into()),
-                    url: pr.html_url.ok_or_else(|| ServiceError::Api {
-                        code: 500,
-                        message: "PR has no URL".to_string(),
-                    })?.to_string(),
+                    url: pr
+                        .html_url
+                        .ok_or_else(|| ServiceError::Api {
+                            code: 500,
+                            message: "PR has no URL".to_string(),
+                        })?
+                        .to_string(),
                     state: pr.state.map(state_to_item_state).unwrap_or(ItemState::Open),
                     head_ref_name: pr.head.ref_field,
                     base_ref_name: pr.base.ref_field,

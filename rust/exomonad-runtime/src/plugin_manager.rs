@@ -67,13 +67,13 @@ pub struct PluginManager {
     /// Uses RwLock to allow concurrent reads (though in practice we always need write
     /// access for calls). The Plugin itself is not Send, so we use spawn_blocking.
     plugin: Arc<RwLock<Plugin>>,
-    
+
     /// Path to the WASM module (kept for reloading).
     path: PathBuf,
-    
+
     /// Services (kept for reloading).
     services: Arc<ValidatedServices>,
-    
+
     /// Number of calls made to this plugin.
     call_count: Arc<std::sync::atomic::AtomicUsize>,
 }
@@ -193,17 +193,20 @@ impl PluginManager {
     async fn reload(&self) -> Result<()> {
         let path = self.path.clone();
         let services = self.services.clone();
-        
-        let new_plugin = tokio::task::spawn_blocking(move || {
-            Self::load_plugin(&path, &services)
-        }).await??;
 
-        let mut lock = self.plugin.write().map_err(|e| anyhow::anyhow!("Plugin lock poisoned: {}", e))?;
+        let new_plugin =
+            tokio::task::spawn_blocking(move || Self::load_plugin(&path, &services)).await??;
+
+        let mut lock = self
+            .plugin
+            .write()
+            .map_err(|e| anyhow::anyhow!("Plugin lock poisoned: {}", e))?;
         *lock = new_plugin;
-        
+
         // Reset counter
-        self.call_count.store(0, std::sync::atomic::Ordering::SeqCst);
-        
+        self.call_count
+            .store(0, std::sync::atomic::Ordering::SeqCst);
+
         Ok(())
     }
 
@@ -271,15 +274,20 @@ impl PluginManager {
         O: for<'de> Deserialize<'de> + Send + 'static,
     {
         // Check if we need to reload (every 100 calls) to mitigate memory leaks
-        let count = self.call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let count = self
+            .call_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if count >= 100 {
-            tracing::info!("Reloading WASM plugin to clear memory (call count: {})", count);
+            tracing::info!(
+                "Reloading WASM plugin to clear memory (call count: {})",
+                count
+            );
             if let Err(e) = self.reload().await {
                 tracing::error!("Failed to reload plugin: {}", e);
                 // Continue with existing plugin if reload fails
             }
         }
-    
+
         let plugin_lock = self.plugin.clone();
         let function_name = function.to_string();
         let input_data = serde_json::to_vec(input)?;

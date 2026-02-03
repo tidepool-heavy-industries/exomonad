@@ -93,6 +93,19 @@ executable wasm-guest-tl
     import:           shared
     hs-source-dirs:   src
     main-is:          TL/Main.hs
+    other-modules:
+        TL.Tools
+        ExoMonad.Guest.Effects.AgentControl
+        ExoMonad.Guest.Effects.StopHook
+        ExoMonad.Guest.FFI
+        ExoMonad.Guest.HostCall
+        ExoMonad.Guest.Records.Agent
+        ExoMonad.Guest.Tool.Class
+        ExoMonad.Guest.Tool.Mode
+        ExoMonad.Guest.Tool.Record
+        ExoMonad.Guest.Tool.Runtime
+        ExoMonad.Guest.Tools.Agent
+        ExoMonad.Guest.Types
     build-depends:
         wasm-guest:wasm-guest-internal,
         extism-pdk ^>= 1.2.0.0
@@ -116,6 +129,20 @@ executable wasm-guest-dev
     import:           shared
     hs-source-dirs:   src
     main-is:          Dev/Main.hs
+    other-modules:
+        Dev.Tools
+        ExoMonad.Guest.Effects.StopHook
+        ExoMonad.Guest.FFI
+        ExoMonad.Guest.HostCall
+        ExoMonad.Guest.Records.FilePR
+        ExoMonad.Guest.Records.Ping
+        ExoMonad.Guest.Tool.Class
+        ExoMonad.Guest.Tool.Mode
+        ExoMonad.Guest.Tool.Record
+        ExoMonad.Guest.Tool.Runtime
+        ExoMonad.Guest.Tools.FilePR
+        ExoMonad.Guest.Tools.Ping
+        ExoMonad.Guest.Types
     build-depends:
         wasm-guest:wasm-guest-internal,
         extism-pdk ^>= 1.2.0.0

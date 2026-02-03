@@ -1,6 +1,4 @@
-pub use exomonad_shared::ffi::{
-    ErrorCode, ErrorContext, FFIError, FFIResult, FFIBoundary,
-};
+pub use exomonad_shared::ffi::{ErrorCode, ErrorContext, FFIBoundary, FFIError, FFIResult};
 use thiserror::Error;
 
 /// Error type for command execution failures.
@@ -16,10 +14,7 @@ pub enum CommandError {
     },
     /// The command failed to launch (e.g., binary not found).
     #[error("Failed to execute '{command}': {message}")]
-    LaunchFailed {
-        command: String,
-        message: String,
-    },
+    LaunchFailed { command: String, message: String },
 }
 
 /// Error type for operation timeouts.
@@ -82,7 +77,10 @@ impl<T> IntoFFIResult<T> for anyhow::Result<T> {
                         }
                         CommandError::LaunchFailed { command, message } => {
                             return FFIResult::Error(FFIError {
-                                message: format!("Failed to launch command '{}': {}", command, message),
+                                message: format!(
+                                    "Failed to launch command '{}': {}",
+                                    command, message
+                                ),
                                 code: ErrorCode::IoError,
                                 context: Some(ErrorContext {
                                     command: Some(command.clone()),
@@ -101,7 +99,8 @@ impl<T> IntoFFIResult<T> for anyhow::Result<T> {
                         code: ErrorCode::Timeout,
                         context: None,
                         suggestion: Some(
-                            "Try increasing the timeout or checking network connection.".to_string(),
+                            "Try increasing the timeout or checking network connection."
+                                .to_string(),
                         ),
                     });
                 }
@@ -113,7 +112,8 @@ impl<T> IntoFFIResult<T> for anyhow::Result<T> {
                         code: ErrorCode::Timeout,
                         context: None,
                         suggestion: Some(
-                            "Try increasing the timeout or checking network connection.".to_string(),
+                            "Try increasing the timeout or checking network connection."
+                                .to_string(),
                         ),
                     });
                 }
@@ -129,4 +129,3 @@ impl<T> IntoFFIResult<T> for anyhow::Result<T> {
         }
     }
 }
-

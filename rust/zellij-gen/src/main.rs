@@ -81,7 +81,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Sanitize tab name for filename (ASCII-safe, consistent with agent_control.rs)
                 let safe_name: String = tab_name
                     .chars()
-                    .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+                    .map(|c| {
+                        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                            c
+                        } else {
+                            '-'
+                        }
+                    })
                     .collect();
                 PathBuf::from(OUTPUT_DIR).join(format!("{}.kdl", safe_name))
             });

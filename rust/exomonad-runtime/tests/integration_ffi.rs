@@ -1,13 +1,18 @@
-use extism::{Plugin, Manifest, Wasm, Function, Val, ValType, UserData};
 use exomonad_runtime::common::HostResult;
-use exomonad_runtime::services::agent_control::{SpawnAgentsInput, BatchSpawnResult, SpawnResult, AgentType};
+use exomonad_runtime::services::agent_control::{
+    AgentType, BatchSpawnResult, SpawnAgentsInput, SpawnResult,
+};
+use extism::{Function, Manifest, Plugin, UserData, Val, ValType, Wasm};
 use serde_json::json;
 
 #[test]
 fn test_agent_spawn_batch_roundtrip() {
     let wasm_path = "tests/fixtures/wasm-guest.wasm";
     if !std::path::Path::new(wasm_path).exists() {
-        panic!("WASM fixture not found at {}. Build it with 'just wasm'.", wasm_path);
+        panic!(
+            "WASM fixture not found at {}. Build it with 'just wasm'.",
+            wasm_path
+        );
     }
 
     let wasm = Wasm::file(wasm_path);
@@ -23,8 +28,9 @@ fn test_agent_spawn_batch_roundtrip() {
             // Deserialize input
             let mem = plugin.memory_from_val(&inputs[0]).unwrap();
             let bytes = plugin.memory_bytes(mem).unwrap();
-            
-            let input: SpawnAgentsInput = serde_json::from_slice(bytes).expect("Failed to deserialize SpawnAgentsInput");
+
+            let input: SpawnAgentsInput =
+                serde_json::from_slice(bytes).expect("Failed to deserialize SpawnAgentsInput");
 
             // Verify input
             assert_eq!(input.issue_ids, vec!["123".to_string()]);
@@ -43,13 +49,14 @@ fn test_agent_spawn_batch_roundtrip() {
                 }],
                 failed: vec![],
             });
-            
+
             let out_bytes = serde_json::to_vec(&result).unwrap();
             let out_mem = plugin.memory_new(out_bytes).unwrap();
             outputs[0] = Val::I64(out_mem.offset() as i64);
             Ok(())
-        }
-    ).with_namespace("env");
+        },
+    )
+    .with_namespace("env");
 
     let dummy_fn = |name: &str| {
         Function::new(
@@ -60,20 +67,20 @@ fn test_agent_spawn_batch_roundtrip() {
             |_plugin, _inputs, outputs, _user_data| {
                 outputs[0] = Val::I64(0);
                 Ok(())
-            }
-        ).with_namespace("env")
+            },
+        )
+        .with_namespace("env")
     };
-    
+
     let dummy_void_fn = |name: &str| {
         Function::new(
             name,
             [ValType::I64],
             [],
             UserData::new(()),
-            |_plugin, _inputs, _outputs, _user_data| {
-                Ok(())
-            }
-        ).with_namespace("env")
+            |_plugin, _inputs, _outputs, _user_data| Ok(()),
+        )
+        .with_namespace("env")
     };
 
     let functions = vec![
@@ -118,29 +125,36 @@ fn test_agent_spawn_batch_roundtrip() {
         "repo": "repo",
         "agent_type": "gemini"
     });
-    
+
     let mcp_input = json!({
         "toolName": "spawn_agents",
         "toolArgs": tool_args
     });
-    
+
     let input_bytes = serde_json::to_vec(&mcp_input).unwrap();
-    let res: Vec<u8> = plugin.call("handle_mcp_call", input_bytes).expect("WASM call failed");
-    
+    let res: Vec<u8> = plugin
+        .call("handle_mcp_call", input_bytes)
+        .expect("WASM call failed");
+
     let res_json: serde_json::Value = serde_json::from_slice(&res).unwrap();
-    
+
     // Check success
     assert_eq!(res_json["success"], true, "MCP call failed: {:?}", res_json);
-    
+
     // Check result
     let result = &res_json["result"];
     let batch_result: BatchSpawnResult = serde_json::from_value(result.clone()).unwrap();
-    
+
     if batch_result.spawned.is_empty() {
         println!("Batch result failed: {:?}", batch_result.failed);
     }
 
-    assert_eq!(batch_result.spawned.len(), 1, "Spawned list is empty, failures: {:?}", batch_result.failed);
+    assert_eq!(
+        batch_result.spawned.len(),
+        1,
+        "Spawned list is empty, failures: {:?}",
+        batch_result.failed
+    );
     assert_eq!(batch_result.spawned[0].branch_name, "gh-123/fix");
     assert_eq!(batch_result.spawned[0].agent_type, "gemini");
 }

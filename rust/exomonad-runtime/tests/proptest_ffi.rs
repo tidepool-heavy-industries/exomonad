@@ -1,7 +1,7 @@
-use proptest::prelude::*;
 use exomonad_runtime::common::{ErrorCode, ErrorContext, HostError, HostResult};
 use exomonad_runtime::services::agent_control::*;
 use exomonad_shared::{GithubOwner, GithubRepo, IssueNumber};
+use proptest::prelude::*;
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
@@ -27,10 +27,7 @@ prop_compose! {
 }
 
 fn arb_agent_type() -> BoxedStrategy<AgentType> {
-    prop_oneof![
-        Just(AgentType::Claude),
-        Just(AgentType::Gemini),
-    ].boxed()
+    prop_oneof![Just(AgentType::Claude), Just(AgentType::Gemini),].boxed()
 }
 
 fn arb_error_code() -> BoxedStrategy<ErrorCode> {
@@ -44,7 +41,8 @@ fn arb_error_code() -> BoxedStrategy<ErrorCode> {
         Just(ErrorCode::InternalError),
         Just(ErrorCode::Timeout),
         Just(ErrorCode::AlreadyExists),
-    ].boxed()
+    ]
+    .boxed()
 }
 
 prop_compose! {
@@ -237,7 +235,8 @@ fn arb_host_result<T: std::fmt::Debug + Clone + Serialize + for<'de> Deserialize
     prop_oneof![
         strategy.prop_map(HostResult::Success),
         arb_host_error().prop_map(HostResult::Error),
-    ].boxed()
+    ]
+    .boxed()
 }
 
 // ============================================================================
@@ -299,8 +298,8 @@ proptest! {
 // The JSON strings here match exactly what the Haskell code generates.
 
 mod cross_boundary_tests {
-    use serde_json::Value;
     use exomonad_shared::protocol::{InternalStopHookOutput, StopDecision};
+    use serde_json::Value;
 
     /// Test that emit_event can parse what Haskell Runtime.hs sends.
     /// Haskell sends: {"type": "agent:stopped", "agent_id": "...", "timestamp": "..."}
@@ -312,7 +311,11 @@ mod cross_boundary_tests {
 
         // Should parse as a generic Value (which is what emit_event now expects)
         let result: Result<Value, _> = serde_json::from_str(haskell_json);
-        assert!(result.is_ok(), "Failed to parse Haskell emit_event payload: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to parse Haskell emit_event payload: {:?}",
+            result.err()
+        );
 
         // Verify we can extract the event type
         let payload = result.unwrap();
@@ -328,7 +331,8 @@ mod cross_boundary_tests {
     #[test]
     fn test_hook_output_parses_stop_hook_format() {
         // Haskell StopHookOutput now produces internal domain format:
-        let haskell_block_json = r#"{"decision": "block", "reason": "You have uncommitted changes."}"#;
+        let haskell_block_json =
+            r#"{"decision": "block", "reason": "You have uncommitted changes."}"#;
 
         // Parse as InternalStopHookOutput (the domain type from WASM)
         let result: InternalStopHookOutput = serde_json::from_str(haskell_block_json).unwrap();
