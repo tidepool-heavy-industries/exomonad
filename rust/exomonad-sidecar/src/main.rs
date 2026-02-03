@@ -95,7 +95,7 @@ async fn handle_hook(
     if let Ok(branch) = git::get_current_branch() {
         if let Some(agent_id) = git::extract_agent_id(&branch) {
             let event = exomonad_ui_protocol::AgentEvent::HookReceived {
-                agent_id,
+                agent_id: exomonad_ui_protocol::AgentId::try_from(agent_id).expect("Invalid agent_id"),
                 hook_type: event_type.to_string(),
                 timestamp: zellij_events::now_iso8601(),
             };
@@ -154,7 +154,7 @@ async fn handle_hook(
                         .clone()
                         .unwrap_or_else(|| "Hook blocked agent stop".to_string());
                     let event = exomonad_ui_protocol::AgentEvent::StopHookBlocked {
-                        agent_id,
+                        agent_id: exomonad_ui_protocol::AgentId::try_from(agent_id).expect("Invalid agent_id"),
                         reason,
                         timestamp: zellij_events::now_iso8601(),
                     };
@@ -331,7 +331,7 @@ async fn main() -> Result<()> {
             // Emit AgentStarted
             let agent_id = get_agent_id_from_env();
             let start_event = exomonad_ui_protocol::AgentEvent::AgentStarted {
-                agent_id: agent_id.clone(),
+                agent_id: exomonad_ui_protocol::AgentId::try_from(agent_id.clone()).expect("Invalid agent_id"),
                 timestamp: zellij_events::now_iso8601(),
             };
             if let Err(e) = zellij_events::emit_event(&start_event) {
@@ -344,7 +344,7 @@ async fn main() -> Result<()> {
             // Re-fetch branch as it might have changed
             let stop_agent_id = get_agent_id_from_env();
             let stop_event = exomonad_ui_protocol::AgentEvent::AgentStopped {
-                agent_id: stop_agent_id,
+                agent_id: exomonad_ui_protocol::AgentId::try_from(stop_agent_id).expect("Invalid agent_id"),
                 timestamp: zellij_events::now_iso8601(),
             };
             if let Err(e) = zellij_events::emit_event(&stop_event) {

@@ -238,7 +238,7 @@ pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<Copi
             if let Ok(branch) = git::get_current_branch() {
                 if let Some(agent_id) = git::extract_agent_id(&branch) {
                     let event = exomonad_ui_protocol::AgentEvent::CopilotReviewed {
-                        agent_id,
+                        agent_id: exomonad_ui_protocol::AgentId::try_from(agent_id).expect("Invalid agent_id"),
                         comment_count: comments.len() as u32,
                         timestamp: zellij_events::now_iso8601(),
                     };
@@ -262,7 +262,7 @@ pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<Copi
             if let Ok(branch) = git::get_current_branch() {
                 if let Some(agent_id) = git::extract_agent_id(&branch) {
                     let event = exomonad_ui_protocol::AgentEvent::CopilotReviewed {
-                        agent_id,
+                        agent_id: exomonad_ui_protocol::AgentId::try_from(agent_id).expect("Invalid agent_id"),
                         comment_count: 0,
                         timestamp: zellij_events::now_iso8601(),
                     };

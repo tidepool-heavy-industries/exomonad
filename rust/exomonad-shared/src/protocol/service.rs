@@ -2,7 +2,7 @@
 //!
 //! Types for external service integrations (LLM, GitHub, Observability, User Interaction).
 
-use crate::domain::{GithubOwner, GithubRepo};
+use crate::domain::{GithubOwner, GithubRepo, ItemState, ReviewState, UpperItemState};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -57,7 +57,7 @@ pub enum ServiceRequest {
         #[serde(skip_serializing_if = "Option::is_none")]
         body: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        state: Option<String>,
+        state: Option<ItemState>,
         #[serde(skip_serializing_if = "Option::is_none")]
         labels: Option<Vec<String>>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -177,7 +177,7 @@ pub enum ServiceResponse {
         number: u32,
         title: String,
         body: String,
-        state: String,
+        state: ItemState,
         labels: Vec<String>,
         url: String,
         author: String,
@@ -193,7 +193,7 @@ pub enum ServiceResponse {
         body: String,
         author: String,
         url: String,
-        state: String,
+        state: ItemState,
         head_ref_name: String,
         base_ref_name: String,
         created_at: String,
@@ -288,7 +288,7 @@ pub struct GitHubIssueRef {
     pub number: u32,
     pub title: String,
     pub body: String,
-    pub state: String,
+    pub state: UpperItemState,
     pub url: String,
     pub author: GitHubAuthorRef,
     pub labels: Vec<GitHubLabelRef>,
@@ -312,7 +312,7 @@ pub struct GitHubAuthorRef {
 pub struct GitHubPRRef {
     pub number: u32,
     pub title: String,
-    pub state: String,
+    pub state: ItemState,
     pub url: String,
 }
 
@@ -322,7 +322,7 @@ pub struct GitHubReviewComment {
     pub body: String,
     pub path: String,
     pub line: Option<u32>,
-    pub state: String,
+    pub state: ReviewState,
     pub created_at: String,
 }
 
@@ -389,7 +389,7 @@ mod tests {
             number: 42,
             title: "Fix the bug".into(),
             body: "It's broken".into(),
-            state: "open".into(),
+            state: ItemState::Open,
             labels: vec!["bug".into(), "critical".into()],
             url: "https://github.com/octocat/hello-world/issues/42".into(),
             author: "octocat".into(),
@@ -483,7 +483,7 @@ mod tests {
             body: "This adds X".into(),
             author: "octocat".into(),
             url: "https://github.com/octocat/hello-world/pull/99".into(),
-            state: "open".into(),
+            state: ItemState::Open,
             head_ref_name: "feature-branch".into(),
             base_ref_name: "main".into(),
             created_at: "2024-01-15T10:00:00Z".into(),
@@ -500,7 +500,7 @@ mod tests {
                 body: "Approved".into(),
                 path: "src/main.rs".into(),
                 line: Some(42),
-                state: "APPROVED".into(),
+                state: ReviewState::Approved,
                 created_at: "2024-01-15T12:00:00Z".into(),
             }],
         };
@@ -524,7 +524,7 @@ mod tests {
                 assert_eq!(labels, vec!["enhancement"]);
                 assert_eq!(comments.len(), 1);
                 assert_eq!(reviews.len(), 1);
-                assert_eq!(reviews[0].state, "APPROVED");
+                assert_eq!(reviews[0].state, ReviewState::Approved);
             }
             _ => panic!("Wrong variant"),
         }
@@ -637,7 +637,7 @@ mod tests {
                     number: 1,
                     title: "Bug".into(),
                     body: "b".into(),
-                    state: "OPEN".into(),
+                    state: UpperItemState::Open,
                     url: "u".into(),
                     author: GitHubAuthorRef {
                         login: "a".into(),
@@ -650,7 +650,7 @@ mod tests {
                     number: 2,
                     title: "Feature".into(),
                     body: "b".into(),
-                    state: "CLOSED".into(),
+                    state: UpperItemState::Closed,
                     url: "u".into(),
                     author: GitHubAuthorRef {
                         login: "a".into(),
@@ -667,7 +667,7 @@ mod tests {
             ServiceResponse::GitHubIssues { issues } => {
                 assert_eq!(issues.len(), 2);
                 assert_eq!(issues[0].number, 1);
-                assert_eq!(issues[1].state, "CLOSED");
+                assert_eq!(issues[1].state, UpperItemState::Closed);
             }
             _ => panic!("Wrong variant"),
         }
@@ -681,7 +681,7 @@ mod tests {
                 body: "Changes requested".into(),
                 path: "lib.rs".into(),
                 line: None,
-                state: "CHANGES_REQUESTED".into(),
+                state: ReviewState::ChangesRequested,
                 created_at: "2024-01-15T10:00:00Z".into(),
             }],
         };
@@ -690,7 +690,7 @@ mod tests {
         match parsed {
             ServiceResponse::GitHubReviews { reviews } => {
                 assert_eq!(reviews.len(), 1);
-                assert_eq!(reviews[0].state, "CHANGES_REQUESTED");
+                assert_eq!(reviews[0].state, ReviewState::ChangesRequested);
                 assert_eq!(reviews[0].line, None);
             }
             _ => panic!("Wrong variant"),
@@ -760,7 +760,7 @@ mod tests {
             number: 1,
             title: "t".into(),
             body: "b".into(),
-            state: "open".into(),
+            state: ItemState::Open,
             labels: vec![],
             url: "u".into(),
             author: "a".into(),
@@ -791,7 +791,7 @@ mod tests {
             body: "b".into(),
             author: "a".into(),
             url: "u".into(),
-            state: "open".into(),
+            state: ItemState::Open,
             head_ref_name: "h".into(),
             base_ref_name: "main".into(),
             created_at: "2024-01-01T00:00:00Z".into(),

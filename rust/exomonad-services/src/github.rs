@@ -1,5 +1,6 @@
 use crate::{ExternalService, ServiceError};
 use async_trait::async_trait;
+use exomonad_shared::domain::{ItemState, ReviewState, UpperItemState};
 use exomonad_shared::protocol::{
     GitHubAuthorRef, GitHubDiscussionComment, GitHubLabelRef, GitHubPRRef, GitHubReviewComment,
 };
@@ -138,11 +139,20 @@ impl GitHubService {
                         .get("line")
                         .and_then(|l| l.as_u64())
                         .map(|u| u as u32);
-                    let state = comment
+                    let state_str = comment
                         .get("state")
                         .and_then(|s| s.as_str())
-                        .unwrap_or("PENDING")
-                        .to_string();
+                        .unwrap_or("PENDING");
+                    
+                    let state = match state_str {
+                        "PENDING" => ReviewState::Pending,
+                        "SUBMITTED" => ReviewState::Commented, // Map SUBMITTED to Commented as closest match? Or assume SUBMITTED means it's a comment.
+                        "APPROVED" => ReviewState::Approved,
+                        "CHANGES_REQUESTED" => ReviewState::ChangesRequested,
+                        "DISMISSED" => ReviewState::Dismissed,
+                        _ => ReviewState::Commented, // Default fallback
+                    };
+
                     let created_at = comment
                         .get("createdAt")
                         .and_then(|d| d.as_str())
@@ -165,19 +175,19 @@ impl GitHubService {
     }
 }
 
-fn state_to_string(state: octocrab::models::IssueState) -> String {
+fn state_to_item_state(state: octocrab::models::IssueState) -> ItemState {
     match state {
-        octocrab::models::IssueState::Open => "open".to_string(),
-        octocrab::models::IssueState::Closed => "closed".to_string(),
-        _ => "unknown".to_string(),
+        octocrab::models::IssueState::Open => ItemState::Open,
+        octocrab::models::IssueState::Closed => ItemState::Closed,
+        _ => ItemState::Unknown,
     }
 }
 
-fn issue_state_to_upper_string(state: octocrab::models::IssueState) -> String {
+fn issue_state_to_upper_item_state(state: octocrab::models::IssueState) -> UpperItemState {
     match state {
-        octocrab::models::IssueState::Open => "OPEN".to_string(),
-        octocrab::models::IssueState::Closed => "CLOSED".to_string(),
-        _ => "UNKNOWN".to_string(),
+        octocrab::models::IssueState::Open => UpperItemState::Open,
+        octocrab::models::IssueState::Closed => UpperItemState::Closed,
+        _ => UpperItemState::Unknown,
     }
 }
 
@@ -231,7 +241,7 @@ impl ExternalService for GitHubService {
                     number: issue.number as u32,
                     title: issue.title,
                     body: issue.body.unwrap_or_default(),
-                    state: state_to_string(issue.state),
+                    state: state_to_item_state(issue.state),
                     labels: issue.labels.into_iter().map(|l| l.name).collect(),
                     url: issue.html_url.to_string(),
                     author: issue.user.login.clone(),
@@ -262,7 +272,7 @@ impl ExternalService for GitHubService {
                     number: issue.number as u32,
                     title: issue.title,
                     body: issue.body.unwrap_or_default(),
-                    state: state_to_string(issue.state),
+                    state: state_to_item_state(issue.state),
                     labels: issue.labels.into_iter().map(|l| l.name).collect(),
                     url: issue.html_url.to_string(),
                     author: issue.user.login.clone(),
@@ -310,7 +320,7 @@ impl ExternalService for GitHubService {
                         number: i.number as u32,
                         title: i.title,
                         body: i.body.unwrap_or_default(),
-                        state: issue_state_to_upper_string(i.state),
+                        state: issue_state_to_upper_item_state(i.state),
                         url: i.html_url.to_string(),
                         author: GitHubAuthorRef {
                             login: i.user.login,
@@ -347,13 +357,13 @@ impl ExternalService for GitHubService {
                     builder = builder.body(b);
                 }
                 if let Some(ref s) = state {
-                    let s_enum = match s.as_str() {
-                        "open" => octocrab::models::IssueState::Open,
-                        "closed" => octocrab::models::IssueState::Closed,
-                        _ => {
+                    let s_enum = match s {
+                        ItemState::Open => octocrab::models::IssueState::Open,
+                        ItemState::Closed => octocrab::models::IssueState::Closed,
+                        ItemState::Unknown => {
                             return Err(ServiceError::Api {
                                 code: 400,
-                                message: format!("Invalid state: {}", s),
+                                message: "Cannot update issue state to 'unknown'".to_string(),
                             })
                         }
                     };
@@ -375,7 +385,7 @@ impl ExternalService for GitHubService {
                     number: issue.number as u32,
                     title: issue.title,
                     body: issue.body.unwrap_or_default(),
-                    state: state_to_string(issue.state),
+                    state: state_to_item_state(issue.state),
                     labels: issue.labels.into_iter().map(|l| l.name).collect(),
                     url: issue.html_url.to_string(),
                     author: issue.user.login.clone(),
@@ -480,7 +490,7 @@ impl ExternalService for GitHubService {
                     .map(|pr| GitHubPRRef {
                         number: pr.number as u32,
                         title: pr.title.unwrap_or_default(),
-                        state: state_to_string(
+                        state: state_to_item_state(
                             pr.state.unwrap_or(octocrab::models::IssueState::Open),
                         ),
                         url: pr.html_url.map(|u| u.to_string()).unwrap_or_default(),
@@ -681,7 +691,7 @@ impl ExternalService for GitHubService {
                     body: pr.body.unwrap_or_default(),
                     author: pr.user.map(|u| u.login).unwrap_or_else(|| "unknown".into()),
                     url: pr.html_url.expect("PR has no URL").to_string(),
-                    state: state_to_string(pr.state.expect("PR has no state")),
+                    state: state_to_item_state(pr.state.expect("PR has no state")),
                     head_ref_name: pr.head.ref_field,
                     base_ref_name: pr.base.ref_field,
                     created_at: pr.created_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
@@ -755,7 +765,7 @@ impl ExternalService for GitHubService {
                     body: pr.body.unwrap_or_default(),
                     author: pr.user.map(|u| u.login).unwrap_or_else(|| "unknown".into()),
                     url: pr.html_url.expect("PR has no URL").to_string(),
-                    state: state_to_string(pr.state.expect("PR has no state")),
+                    state: state_to_item_state(pr.state.expect("PR has no state")),
                     head_ref_name: pr.head.ref_field,
                     base_ref_name: pr.base.ref_field,
                     created_at: pr.created_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
