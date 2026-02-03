@@ -58,8 +58,6 @@ import ExoMonad.Guest.FFI
 import Extism.PDK.Memory (alloc, findMemory, free, load, memoryOffset)
 import GHC.Generics (Generic)
 
-instance FFIBoundary Value
-
 -- ============================================================================ 
 -- Log Types (matches Rust LogPayload/LogLevel)
 -- ============================================================================ 

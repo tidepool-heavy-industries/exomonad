@@ -150,3 +150,22 @@ impl FFIBoundary for String {}
 impl FFIBoundary for bool {}
 impl<T: FFIBoundary> FFIBoundary for Vec<T> {}
 impl<T: FFIBoundary> FFIBoundary for Option<T> {}
+
+// Primitive FFIBoundary impls to match Haskell-side instances and
+// allow simple types like () / Int / Word64 across the FFI boundary.
+impl FFIBoundary for () {}
+
+// Signed integers (Haskell Int typically maps to a machine-sized int;
+// we provide common widths explicitly).
+impl FFIBoundary for i32 {}
+impl FFIBoundary for i64 {}
+impl FFIBoundary for isize {}
+impl FFIBoundary for i8 {}
+impl FFIBoundary for i16 {}
+
+// Unsigned integers (Haskell Word64).
+impl FFIBoundary for u64 {}
+impl FFIBoundary for u32 {}
+impl FFIBoundary for usize {}
+impl FFIBoundary for u8 {}
+impl FFIBoundary for u16 {}

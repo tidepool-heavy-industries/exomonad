@@ -11,6 +11,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Data.Word (Word64)
+import Data.Aeson (Value)
 
 -- | Error codes matching Rust side
 data ErrorCode 
@@ -118,3 +119,4 @@ instance FFIBoundary Bool
 instance FFIBoundary Int
 instance FFIBoundary Word64
 instance FFIBoundary ()
+instance FFIBoundary Value
