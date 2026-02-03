@@ -152,7 +152,7 @@ instance ToJSON StopDecision where
   toJSON Block = Aeson.String "block"
 
 -- | Output for Stop hooks (SessionEnd, SubagentStop).
--- Uses the simplified {"decision": "block", "reason": "..."} format.
+-- Uses Claude Code's HookOutput format: {"continue": bool, "stopReason": "..."}
 data StopHookOutput = StopHookOutput
   { decision :: StopDecision,
     reason :: Maybe Text
@@ -161,12 +161,18 @@ data StopHookOutput = StopHookOutput
 
 instance ToJSON StopHookOutput where
   toJSON s =
-    case reason s of
-      Nothing -> object ["decision" .= decision s]
+    -- Output Claude Code HookOutput format:
+    -- - "continue": true/false (not "decision")
+    -- - "stopReason": "..." (camelCase, not "reason")
+    let continueVal = case decision s of
+          Allow -> True
+          Block -> False
+    in case reason s of
+      Nothing -> object ["continue" .= continueVal]
       Just r ->
         object
-          [ "decision" .= decision s,
-            "reason" .= r
+          [ "continue" .= continueVal,
+            "stopReason" .= r
           ]
 
 -- | Create an "allow" response for Stop hooks.

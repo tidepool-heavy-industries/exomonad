@@ -269,3 +269,74 @@ proptest! {
         roundtrip(val);
     }
 }
+
+// ============================================================================
+// Cross-Boundary Contract Tests
+// ============================================================================
+// These tests verify that Rust can parse JSON that Haskell produces.
+// The JSON strings here match exactly what the Haskell code generates.
+
+mod cross_boundary_tests {
+    use serde_json::Value;
+    use exomonad_shared::protocol::HookOutput;
+
+    /// Test that emit_event can parse what Haskell Runtime.hs sends.
+    /// Haskell sends: {"type": "agent:stopped", "agent_id": "...", "timestamp": "..."}
+    /// Rust now accepts flat objects and extracts "type" as event_type.
+    #[test]
+    fn test_emit_event_parses_haskell_format() {
+        // This is exactly what Haskell Runtime.hs line 110-114 produces:
+        let haskell_json = r#"{"type": "agent:stopped", "agent_id": "gh-123-gemini", "timestamp": "2026-02-03T00:00:00Z"}"#;
+
+        // Should parse as a generic Value (which is what emit_event now expects)
+        let result: Result<Value, _> = serde_json::from_str(haskell_json);
+        assert!(result.is_ok(), "Failed to parse Haskell emit_event payload: {:?}", result.err());
+
+        // Verify we can extract the event type
+        let payload = result.unwrap();
+        let event_type = payload.get("type").and_then(|v| v.as_str());
+        assert_eq!(event_type, Some("agent:stopped"));
+    }
+
+    /// Test that HookOutput can parse what Haskell StopHookOutput sends.
+    /// Haskell now sends: {"continue": false, "stopReason": "..."}
+    /// (Aligned with Claude Code's HookOutput format)
+    ///
+    /// This test verifies the WASM/Rust boundary for stop hooks.
+    #[test]
+    fn test_hook_output_parses_stop_hook_format() {
+        // Haskell StopHookOutput now produces Claude Code HookOutput format:
+        let haskell_block_json = r#"{"continue": false, "stopReason": "You have uncommitted changes."}"#;
+
+        // Parse as HookOutput (what Rust main.rs expects)
+        let result: HookOutput = serde_json::from_str(haskell_block_json).unwrap();
+
+        // The block decision MUST be preserved:
+        // - continue_ should be false
+        // - stop_reason should contain the reason
+        assert!(
+            !result.continue_,
+            "Block decision was lost! continue_ is true but should be false."
+        );
+        assert_eq!(
+            result.stop_reason.as_deref(),
+            Some("You have uncommitted changes."),
+            "Reason was not preserved"
+        );
+    }
+
+    /// Test that HookOutput correctly parses allow decision.
+    #[test]
+    fn test_hook_output_parses_allow_format() {
+        // Haskell StopHookOutput now produces Claude Code HookOutput format:
+        let haskell_allow_json = r#"{"continue": true}"#;
+
+        let result: HookOutput = serde_json::from_str(haskell_allow_json).unwrap();
+
+        // Allow should mean continue_ = true
+        assert!(
+            result.continue_,
+            "Allow decision was lost! continue_ is false but should be true."
+        );
+    }
+}

@@ -117,23 +117,24 @@ pub fn emit_event_host_fn<S: HasLogService + Send + Sync + 'static>(services: Ar
         [],
         UserData::new(services),
         |plugin, inputs, _outputs, user_data| {
-            #[derive(Deserialize)]
-            struct EventPayload {
-                event_type: String,
-                data: Value,
-            }
-
             let services = user_data.get()?;
             let services = services.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             if inputs.is_empty() {
                 return Err(Error::msg("No inputs provided"));
             }
-            let Json(payload): Json<EventPayload> = plugin.memory_get_val(&inputs[0])?;
 
-            services
-                .log_service()
-                .emit_event(&payload.event_type, &payload.data);
+            // Accept flat event object from Haskell.
+            // Expected format: {"type": "event_name", "field1": "...", "field2": "..."}
+            // The "type" field becomes event_type, entire object becomes data.
+            let Json(payload): Json<Value> = plugin.memory_get_val(&inputs[0])?;
+
+            let event_type = payload
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+
+            services.log_service().emit_event(event_type, &payload);
             Ok(())
         },
     )

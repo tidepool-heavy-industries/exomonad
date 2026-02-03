@@ -34,7 +34,7 @@ import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.=))
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
 import Data.Text qualified
-import ExoMonad.Guest.HostCall (callHost, host_fs_read_file, host_fs_write_file, HostResult (..), HostErrorDetails (errorMessage))
+import ExoMonad.Guest.HostCall (callHost, host_fs_read_file, host_fs_write_file, HostResult (..), HostErrorDetails (..))
 import GHC.Generics (Generic)
 import Prelude hiding (readFile, writeFile)
 import Data.Kind (Type)
@@ -147,12 +147,12 @@ runFileSystem = interpret $ \case
     pure $ case res of
       Left err -> Left (Data.Text.pack err)
       Right (HostSuccess r) -> Right r
-      Right (HostError details) -> Left (errorMessage details)
+      Right (HostError details) -> Left (hostErrorMessage details)
   WriteFileOp path content createParents -> embed $ do
     let input = WriteFileInput path content createParents
     res <- callHost host_fs_write_file input
     pure $ case res of
       Left err -> Left (Data.Text.pack err)
       Right (HostSuccess r) -> Right r
-      Right (HostError details) -> Left (errorMessage details)
+      Right (HostError details) -> Left (hostErrorMessage details)
 

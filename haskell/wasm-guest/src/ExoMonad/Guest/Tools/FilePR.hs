@@ -9,7 +9,7 @@ import Data.Aeson (FromJSON, ToJSON, Value, object, withObject, (.:), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as T
-import ExoMonad.Guest.HostCall (LogLevel (..), LogPayload (..), callHost, callHostVoid, host_file_pr, host_log_error, host_log_info, HostResult (..), HostErrorDetails (errorMessage))
+import ExoMonad.Guest.HostCall (LogLevel (..), LogPayload (..), callHost, callHostVoid, host_file_pr, host_log_error, host_log_info, HostResult (..), HostErrorDetails (..))
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)
 
@@ -115,5 +115,5 @@ instance MCPTool FilePR where
         callHostVoid host_log_info (LogPayload Info ("FilePR: Success - PR #" <> T.pack (show $ fpoNumber output)) Nothing)
         pure $ successResult (Aeson.toJSON output)
       Right (HostError details) -> do
-        callHostVoid host_log_error (LogPayload Error ("FilePR: Host error: " <> errorMessage details) Nothing)
-        pure $ errorResult (errorMessage details)
+        callHostVoid host_log_error (LogPayload Error ("FilePR: Host error: " <> hostErrorMessage details) Nothing)
+        pure $ errorResult (hostErrorMessage details)

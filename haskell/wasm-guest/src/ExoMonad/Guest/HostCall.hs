@@ -42,9 +42,7 @@ module ExoMonad.Guest.HostCall
     host_file_pr,
     -- Copilot Review
     host_wait_for_copilot_review,
-    -- Shared types
-    HostResult (..),
-    HostErrorDetails (..),
+    -- Shared types (also exported above, but grouped here for clarity)
     ResultKind (..),
   )
 where
