@@ -123,11 +123,10 @@ wasm role="tl":
     @echo ">>> Installing to ~/.exomonad/wasm/..."
     mkdir -p ~/.exomonad/wasm
     rm -f ~/.exomonad/wasm/wasm-guest-{{role}}.wasm
-    cp result/wasm-guest-{{role}}.wasm ~/.exomonad/wasm/
     @echo ">>> Setting up WASM cache..."
     mkdir -p ~/.exomonad/wasm-cache
     echo "[cache]" > ~/.exomonad/wasm-cache.toml
-    echo "directory = '$HOME/.exomonad/wasm-cache'" >> ~/.exomonad/wasm-cache.toml
+    echo "directory = '${HOME}/.exomonad/wasm-cache'" >> ~/.exomonad/wasm-cache.toml
     @echo ">>> Warming up cache..."
     cd rust && cargo run -q -p exomonad-sidecar -- warmup ~/.exomonad/wasm/wasm-guest-{{role}}.wasm
     @echo ">>> Done: ~/.exomonad/wasm/wasm-guest-{{role}}.wasm (cached)"
@@ -149,7 +148,7 @@ wasm-dev role="tl":
     @echo ">>> Setting up WASM cache..."
     mkdir -p ~/.exomonad/wasm-cache
     echo "[cache]" > ~/.exomonad/wasm-cache.toml
-    echo "directory = '$HOME/.exomonad/wasm-cache'" >> ~/.exomonad/wasm-cache.toml
+    echo "directory = '${HOME}/.exomonad/wasm-cache'" >> ~/.exomonad/wasm-cache.toml
     @echo ">>> Warming up cache..."
     cd rust && cargo run -q -p exomonad-sidecar -- warmup ~/.exomonad/wasm/wasm-guest-{{role}}.wasm
     @echo ">>> Done: ~/.exomonad/wasm/wasm-guest-{{role}}.wasm (cached)"
