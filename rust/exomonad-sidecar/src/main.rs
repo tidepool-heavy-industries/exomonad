@@ -309,6 +309,9 @@ async fn main() -> Result<()> {
                     .join(project_dir_ref)
             };
 
+            let pid_file = project_dir.join(".exomonad/sidecar.pid");
+            let _pid_guard = exomonad_sidecar::pid::PidGuard::new(&pid_file)?;
+
             info!(wasm = ?wasm_path, "Loading WASM plugin");
 
             // Initialize and validate services (secrets loaded from ~/.exomonad/secrets)

@@ -38,9 +38,11 @@ pub struct FilePROutput {
 
 fn map_error(e: anyhow::Error) -> HostResult<FilePROutput> {
     let msg = e.to_string();
-    let code = if msg.contains("not on a branch") || msg.contains("not a git repository") {
-        ErrorCode::GitError
-    } else if msg.contains("no remote") || msg.contains("No remote") {
+    let code = if msg.contains("not on a branch")
+        || msg.contains("not a git repository")
+        || msg.contains("no remote")
+        || msg.contains("No remote")
+    {
         ErrorCode::GitError
     } else if msg.contains("gh auth") || msg.contains("not logged") {
         ErrorCode::NotAuthenticated

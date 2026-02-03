@@ -19,6 +19,9 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 toml = "0.8"
 
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true, features = ["signal", "fs"] }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 assert_cmd = "2.0"
