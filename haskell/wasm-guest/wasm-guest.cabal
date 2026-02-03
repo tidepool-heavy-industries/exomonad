@@ -100,6 +100,25 @@ executable wasm-guest-tl
             -optl-Wl,--export=handle_list_tools
             -optl-Wl,--allow-undefined
 
+-- Dev role executable (subagent tools)
+executable wasm-guest-dev
+    import:           shared
+    hs-source-dirs:   src
+    main-is:          Dev/Main.hs
+    build-depends:
+        wasm-guest:wasm-guest-internal,
+        extism-pdk ^>= 1.2.0.0
+
+    if arch(wasm32)
+        ghc-options:
+            -no-hs-main
+            -optl-mexec-model=reactor
+            -optl-Wl,--export=hs_init
+            -optl-Wl,--export=handle_mcp_call
+            -optl-Wl,--export=handle_pre_tool_use
+            -optl-Wl,--export=handle_list_tools
+            -optl-Wl,--allow-undefined
+
 test-suite ffi-serialization-tests
   type: exitcode-stdio-1.0
   main-is: FFISerializationSpec.hs

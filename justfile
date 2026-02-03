@@ -125,9 +125,10 @@ wasm role="tl":
     cp result/wasm-guest-{{role}}.wasm ~/.exomonad/wasm/
     @echo ">>> Done: ~/.exomonad/wasm/wasm-guest-{{role}}.wasm"
 
-# Build WASM guest (only tl exists currently)
+# Build both WASM guest plugins (tl + dev)
 wasm-all:
     @just wasm tl
+    @just wasm dev
     @echo ">>> Installed to ~/.exomonad/wasm/:"
     @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
 

@@ -530,34 +530,33 @@ impl AgentControlService {
                 "Executing zellij action new-tab"
             );
 
-            // Create tab with layout (spawn in background, don't wait for agent to finish)
-            let mut child = Command::new("zellij")
+            // Create tab with layout - wait for zellij action to complete before deleting temp file
+            // Note: zellij action new-tab returns quickly after reading the layout,
+            // it doesn't wait for the spawned pane command to finish
+            let output = Command::new("zellij")
                 .args([
                     "action",
                     "new-tab",
                     "--layout",
                     layout_file.to_str().unwrap(),
                 ])
-                .spawn()
-                .context("Failed to spawn zellij")?;
+                .output()
+                .await
+                .context("Failed to run zellij")?;
 
-            // Wait briefly to ensure zellij action completes, but not for the agent inside
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-            // Clean up temp file
+            // Clean up temp file after zellij has read it
             let _ = tokio::fs::remove_file(&layout_file).await;
 
-            // Check if zellij command failed immediately
-            if let Ok(Some(status)) = child.try_wait() {
-                if !status.success() {
-                    return Err(anyhow!(
-                        "zellij new-tab failed with status: {} (layout file was: {})",
-                        status,
-                        layout_file.display()
-                    ));
-                }
+            // Check if zellij command failed
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(anyhow!(
+                    "zellij new-tab failed with status: {} (stderr: {}, layout file was: {})",
+                    output.status,
+                    stderr,
+                    layout_file.display()
+                ));
             }
-            // If still running or completed successfully, we're good
         }
 
         Ok(())
