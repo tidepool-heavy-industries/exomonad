@@ -907,18 +907,18 @@ When done, commit your changes and create a pull request."###,
     /// Wraps the string in single quotes and escapes any embedded single quotes.
     /// This is suitable for: sh -c "claude --prompt '...'"
     /// 
-    /// Example: "user's issue" -> "'user'\'s issue'"
+    /// Example: "user's issue" -> "'user'\''s issue'"
     fn escape_for_shell_command(s: &str) -> String {
         // Replace ' with '\'' (end quote, escaped quote, start quote)
-        let escaped = s.replace('\'', r"'\'");
+        let escaped = s.replace('\'', r"'\''");
         format!("'{}'", escaped)
     }
 
     /// Escape a string for use inside a KDL string literal.
     /// KDL strings use backslash escaping: \n for newline, \\ for backslash, \" for quote.
     fn escape_for_kdl(s: &str) -> String {
-        s.replace('\\', "\\\\") // Replace backslash with double backslash
-         .replace('"', "\\\"")  // Replace quote with escaped quote
+        s.replace('\\', "\\\\")
+            .replace('"', "\\\"")
             .replace('\n', "\\n")
             .replace('\r', "\\r")
             .replace('\t', "\\t")
