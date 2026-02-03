@@ -221,8 +221,8 @@ impl AgentControlService {
             let worktree_path = self
                 .project_dir
                 .join(&worktree_dir)
-                .join(format!("gh-{}-{}-{{}}", issue_id, slug, agent_suffix));
-            let branch_name = format!("gh-{}/{}-{{}}", issue_id, slug, agent_suffix);
+                .join(format!("gh-{}-{}-{}", issue_id, slug, agent_suffix));
+            let branch_name = format!("gh-{}/{}-{}", issue_id, slug, agent_suffix);
 
             // Fetch origin/main
             self.fetch_origin().await?;
@@ -253,7 +253,8 @@ impl AgentControlService {
             );
 
             // Open Zellij tab with agent command and initial prompt
-            let tab_name = format!("gh-{}-{{}}", issue_id, agent_suffix);
+            let tab_slug = slugify_short(&issue.title, 15);
+            let tab_name = format!("gh-{}-{}-{}", issue_id, tab_slug, agent_suffix);
             self.new_zellij_tab(
                 &tab_name,
                 &worktree_path,
@@ -341,8 +342,13 @@ impl AgentControlService {
                     let parts: Vec<&str> = name.rsplitn(2, '-').collect();
                     let agent_suffix = parts.first().unwrap_or(&"");
 
-                    // Close Zellij tab with correct agent suffix
-                    let tab_name = format!("gh-{}-{{}}", issue_id, agent_suffix);
+                    // Extract slug to reconstruct tab name
+                    let gh_issue_slug = parts.get(1).unwrap_or(&"");
+                    let slug = gh_issue_slug.strip_prefix(&prefix).unwrap_or("");
+                    let short_slug = truncate_slug(slug, 15);
+
+                    // Close Zellij tab with correct agent suffix and short slug
+                    let tab_name = format!("gh-{}-{}-{}", issue_id, short_slug, agent_suffix);
                     if let Err(e) = self.close_zellij_tab(&tab_name).await {
                         warn!(tab_name, error = %e, "Failed to close Zellij tab (may not exist)");
                     }
@@ -915,8 +921,8 @@ When done, commit your changes and create a pull request."###,
     /// Example: "user's issue" -> "'user'\'s issue'"
     fn escape_for_shell_command(s: &str) -> String {
         // Replace ' with '\'' (end quote, escaped quote, start quote)
-        let escaped = s.replace('"', r"'\''");
-        format!("'{{}}'", escaped)
+        let escaped = s.replace('\'', r"'\'");
+        format!("'{}'", escaped)
     }
 
     /// Escape a string for use inside a KDL string literal.
@@ -948,6 +954,27 @@ fn slugify(title: &str) -> String {
         .chars()
         .take(50)
         .collect()
+}
+
+/// Create a short URL-safe slug from a title.
+fn slugify_short(title: &str, max_chars: usize) -> String {
+    let slug = slugify(title);
+    truncate_slug(&slug, max_chars)
+}
+
+/// Truncate a slug to a maximum number of characters, trying to break at a hyphen.
+fn truncate_slug(slug: &str, max_chars: usize) -> String {
+    if slug.len() <= max_chars {
+        return slug.to_string();
+    }
+
+    let truncated: String = slug.chars().take(max_chars).collect();
+    if let Some(last_hyphen) = truncated.rfind('-') {
+        if last_hyphen > 0 {
+            return truncated[..last_hyphen].trim_end_matches('-').to_string();
+        }
+    }
+    truncated.trim_end_matches('-').to_string()
 }
 
 // ============================================================================ 
@@ -1195,6 +1222,22 @@ mod tests {
         assert_eq!(slugify("Fix the Bug"), "fix-the-bug");
         assert_eq!(slugify("Add new feature!"), "add-new-feature");
         assert_eq!(slugify("CamelCase"), "camelcase");
+    }
+
+    #[test]
+    fn test_slugify_short() {
+        assert_eq!(slugify_short("Fix the Bug", 15), "fix-the-bug");
+        assert_eq!(slugify_short("Extremely long title that should be truncated", 15), "extremely-long");
+        assert_eq!(slugify_short("short", 15), "short");
+    }
+
+    #[test]
+    fn test_truncate_slug() {
+        assert_eq!(truncate_slug("fix-the-bug", 15), "fix-the-bug");
+        assert_eq!(truncate_slug("extremely-long-title", 15), "extremely-long");
+        assert_eq!(truncate_slug("extremely-long-title", 10), "extremely");
+        assert_eq!(truncate_slug("no-hyphens-here", 5), "no");
+        assert_eq!(truncate_slug("abc", 10), "abc");
     }
 
     #[test]
