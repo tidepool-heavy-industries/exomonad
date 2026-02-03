@@ -1,9 +1,13 @@
 use crate::common::{ErrorCode, HostResult};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use exomonad_shared::{GithubOwner, GithubRepo};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
 use octocrab::{models, params, Octocrab, OctocrabBuilder};
 use serde::{Deserialize, Serialize};
+use tokio::time::{timeout, Duration};
+use tracing::info;
+
+const API_TIMEOUT: Duration = Duration::from_secs(30);
 
 // ============================================================================
 // Types
@@ -227,6 +231,9 @@ impl GitHubService {
         repo: &Repo,
         filter: Option<&IssueFilter>,
     ) -> Result<Vec<Issue>> {
+        let repo_name = format!("{}/{}", repo.owner, repo.name);
+        info!(repo = %repo_name, "GitHub API: Listing issues");
+
         let issues_handler = self.client.issues(repo.owner.as_str(), repo.name.as_str());
         let mut builder = issues_handler.list();
 
@@ -247,8 +254,29 @@ impl GitHubService {
             }
         }
 
-        let page = builder.send().await?;
-        let issues = self.client.all_pages(page).await?;
+        let page = timeout(API_TIMEOUT, builder.send())
+            .await
+            .map_err(|_| {
+                anyhow!(
+                    "GitHub API list_issues timed out after {}s",
+                    API_TIMEOUT.as_secs()
+                )
+            })??;
+
+        let issues = timeout(API_TIMEOUT, self.client.all_pages(page))
+            .await
+            .map_err(|_| {
+                anyhow!(
+                    "GitHub API all_pages timed out after {}s",
+                    API_TIMEOUT.as_secs()
+                )
+            })??;
+
+        info!(
+            repo = %repo_name,
+            count = issues.len(),
+            "GitHub API: List issues successful"
+        );
 
         Ok(issues
             .into_iter()
@@ -270,11 +298,24 @@ impl GitHubService {
 
     #[tracing::instrument(skip(self))]
     pub async fn get_issue(&self, repo: &Repo, number: u64) -> Result<Issue> {
-        let issue = self
-            .client
-            .issues(repo.owner.as_str(), repo.name.as_str())
-            .get(number)
-            .await?;
+        let repo_name = format!("{}/{}", repo.owner, repo.name);
+        info!(repo = %repo_name, number, "GitHub API: Get issue");
+
+        let issue = timeout(
+            API_TIMEOUT,
+            self.client
+                .issues(repo.owner.as_str(), repo.name.as_str())
+                .get(number),
+        )
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "GitHub API get_issue timed out after {}s",
+                API_TIMEOUT.as_secs()
+            )
+        })??;
+
+        info!(repo = %repo_name, number, "GitHub API: Get issue successful");
 
         Ok(Issue {
             number: issue.number,
@@ -293,13 +334,30 @@ impl GitHubService {
 
     #[tracing::instrument(skip(self))]
     pub async fn create_pr(&self, repo: &Repo, spec: CreatePRSpec) -> Result<PullRequest> {
-        let pr = self
-            .client
-            .pulls(repo.owner.as_str(), repo.name.as_str())
-            .create(spec.title, spec.head, spec.base)
-            .body(spec.body)
-            .send()
-            .await?;
+        let repo_name = format!("{}/{}", repo.owner, repo.name);
+        info!(repo = %repo_name, title = %spec.title, "GitHub API: Create PR");
+
+        let pr = timeout(
+            API_TIMEOUT,
+            self.client
+                .pulls(repo.owner.as_str(), repo.name.as_str())
+                .create(spec.title, spec.head, spec.base)
+                .body(spec.body)
+                .send(),
+        )
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "GitHub API create_pr timed out after {}s",
+                API_TIMEOUT.as_secs()
+            )
+        })??;
+
+        info!(
+            repo = %repo_name,
+            number = pr.number,
+            "GitHub API: Create PR successful"
+        );
 
         Ok(PullRequest {
             number: pr.number,
@@ -325,6 +383,9 @@ impl GitHubService {
         repo: &Repo,
         filter: Option<&PRFilter>,
     ) -> Result<Vec<PullRequest>> {
+        let repo_name = format!("{}/{}", repo.owner, repo.name);
+        info!(repo = %repo_name, "GitHub API: List PRs");
+
         let pulls_handler = self.client.pulls(repo.owner.as_str(), repo.name.as_str());
         let mut builder = pulls_handler.list();
 
@@ -342,9 +403,21 @@ impl GitHubService {
             }
         }
 
-        let page = builder.send().await?;
+        let page = timeout(API_TIMEOUT, builder.send())
+            .await
+            .map_err(|_| {
+                anyhow!(
+                    "GitHub API list_prs timed out after {}s",
+                    API_TIMEOUT.as_secs()
+                )
+            })??;
         // For PRs, we might not want all pages if a limit was set, but octocrab's list() returns a Page.
         // If limit was set, we used per_page.
+
+        info!(
+            repo = %repo_name,
+            "GitHub API: List PRs successful (page 1)"
+        );
 
         Ok(page
             .into_iter()
@@ -370,12 +443,21 @@ impl GitHubService {
     #[tracing::instrument(skip(self))]
     pub async fn get_pr_for_branch(&self, repo: &Repo, head: &str) -> Result<Option<PullRequest>> {
         let pulls_handler = self.client.pulls(repo.owner.as_str(), repo.name.as_str());
-        let page = pulls_handler
-            .list()
-            .state(params::State::Open)
-            .head(format!("{}:{}", repo.owner, head))
-            .send()
-            .await?;
+        let page = timeout(
+            API_TIMEOUT,
+            pulls_handler
+                .list()
+                .state(params::State::Open)
+                .head(format!("{}:{}", repo.owner, head))
+                .send(),
+        )
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "GitHub API get_pr_for_branch timed out after {}s",
+                API_TIMEOUT.as_secs()
+            )
+        })??;
 
         let pr = page.into_iter().next();
 

@@ -149,6 +149,16 @@ impl<T> From<anyhow::Error> for HostResult<T> {
             }
         }
 
+        // Check for timeout
+        if e.to_string().to_lowercase().contains("timed out") {
+             return HostResult::Error(HostError {
+                message: format!("Operation timed out: {}", e),
+                code: ErrorCode::Timeout,
+                context: None,
+                suggestion: Some("Try increasing the timeout or checking network connection.".to_string()),
+            });
+        }
+
         // Default to InternalError
         HostResult::Error(HostError {
             message: e.to_string(),
