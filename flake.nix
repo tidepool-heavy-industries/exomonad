@@ -49,6 +49,68 @@
           zellij
         ];
 
+        # WASM build infrastructure
+        makeWasmGuest = role: hash: pkgs.stdenv.mkDerivation {
+          pname = "wasm-guest-${role}";
+          version = "0.1.0.0";
+          src = pkgs.lib.cleanSourceWith {
+            src = ./.;
+            filter = path: type:
+              let base = baseNameOf path; in
+              type == "directory" ||
+              base == "cabal.project.wasm" ||
+              base == "cabal.project.wasm.freeze" ||
+              pkgs.lib.hasSuffix ".cabal" base ||
+              pkgs.lib.hasSuffix ".hs" base ||
+              pkgs.lib.hasSuffix ".hs-boot" base ||
+              base == "LICENSE" ||
+              base == "Setup.hs";
+          };
+          nativeBuildInputs = [ wasmPkgs.all_9_12 pkgs.wizer pkgs.cacert pkgs.curl ];
+
+          outputHashAlgo = "sha256";
+          outputHashMode = "recursive";
+          outputHash = hash;
+
+          buildPhase = ''
+            export HOME=$TMPDIR
+            export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
+
+            mkdir -p $HOME/.ghc-wasm/.cabal
+            cat > $HOME/.ghc-wasm/.cabal/config <<EOF
+repository hackage.haskell.org
+  url: http://hackage.haskell.org/
+  secure: True
+
+library-profiling: False
+executable-profiling: False
+shared: True
+executable-dynamic: False
+EOF
+
+            # Rename cabal.project temporarily to avoid interference
+            if [ -f cabal.project ]; then mv cabal.project cabal.project.native; fi
+            if [ -f cabal.project.freeze ]; then mv cabal.project.freeze cabal.project.freeze.native; fi
+
+            # Remove head.hackage from the project file to avoid network errors
+            cp cabal.project.wasm cabal.project.offline
+            sed -i '/repository head.hackage/,/secure: True/d' cabal.project.offline
+
+            wasm32-wasi-cabal update
+            wasm32-wasi-cabal build -v --project-file=cabal.project.offline wasm-guest-${role} --only-dependencies --enable-shared --enable-static --disable-tests --disable-benchmarks
+            wasm32-wasi-cabal build -v --project-file=cabal.project.offline wasm-guest-${role} --enable-shared --enable-static --disable-tests --disable-benchmarks
+
+            # Restore cabal.project
+            if [ -f cabal.project.native ]; then mv cabal.project.native cabal.project; fi
+            if [ -f cabal.project.freeze.native ]; then mv cabal.project.freeze.native cabal.project.freeze; fi
+          '';
+
+          installPhase = ''
+            mkdir -p $out
+            find dist-newstyle -name "wasm-guest-${role}.wasm" -exec cp {} $out/wasm-guest-${role}.wasm \;
+          '';
+        };
+
       in {
         devShells = {
           # Default: Full development environment
@@ -127,10 +189,14 @@
         };
 
         # Allow `nix build` to produce a simple check
-        packages.default = pkgs.writeShellScriptBin "exomonad-env-check" ''
-          echo "ExoMonad environment check"
-          echo "Run 'nix develop' to enter the development shell"
-        '';
+        packages = {
+          default = pkgs.writeShellScriptBin "exomonad-env-check" ''
+            echo "ExoMonad environment check"
+            echo "Run 'nix develop' to enter the development shell"
+          '';
+          wasm-guest-tl = makeWasmGuest "tl" "sha256-A46JDaQk96P66u/EWNQTe/u/T8UH8Y9jtsRce0bkYmI=";
+          wasm-guest-dev = makeWasmGuest "dev" "sha256-I2wvYxVz4WCbiDU1QbEl7rUBAeLYoK5m6/YZDSpP+8w=";
+        };
       }
     );
 }

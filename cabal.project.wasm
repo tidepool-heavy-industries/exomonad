@@ -9,6 +9,16 @@ packages:
     haskell/wasm-guest
     haskell/vendor/polysemy
 
+-- Global settings for static-only build
+-- Note: 'shared: True' is REQUIRED for Template Haskell (GHC 9.12 WASM)
+-- The external interpreter (dyld.mjs) requires dynamic interfaces (.dyn_hi)
+-- to run TH splices, even if the final executable is static.
+shared: True
+executable-dynamic: False
+
+package *
+  ghc-options: -O1
+
 -- 2. Repository Management - head.hackage for patched libraries
 repository head.hackage
   url: https://ghc.gitlab.haskell.org/head.hackage/
