@@ -23,7 +23,7 @@ instance FromJSON PingArgs where
 instance MCPTool Ping where
   type ToolArgs Ping = PingArgs
   toolName = "ping"
-  toolDescription = "Verify WASM guest is responsive (returns pong)"
+  toolDescription = "Verify that the WASM guest environment is active and responsive. Returns 'pong' if successful. Use this as a health check."
   toolSchema =
     object
       [ "type" .= ("object" :: Text),

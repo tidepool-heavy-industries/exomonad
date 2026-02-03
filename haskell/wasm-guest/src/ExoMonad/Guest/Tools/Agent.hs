@@ -54,7 +54,7 @@ instance FromJSON SpawnAgentsArgs where
 instance MCPTool SpawnAgents where
   type ToolArgs SpawnAgents = SpawnAgentsArgs
   toolName = "spawn_agents"
-  toolDescription = "Spawn agents (Claude/Gemini) for GitHub issues in isolated worktrees"
+  toolDescription = "Spawn AI agents (Claude or Gemini) to work on GitHub issues in isolated git worktrees. Each agent gets its own branch and Zellij tab. Requires issue numbers and optionally specify agent_type (claude/gemini)."
   toolSchema =
     object
       [ "type" .= ("object" :: Text),
@@ -65,28 +65,28 @@ instance MCPTool SpawnAgents where
                 .= object
                   [ "type" .= ("array" :: Text),
                     "items" .= object ["type" .= ("string" :: Text)],
-                    "description" .= ("GitHub issue numbers to spawn agents for" :: Text)
+                    "description" .= ("List of GitHub issue numbers (as strings) to spawn agents for" :: Text)
                   ],
               "owner"
                 .= object
                   [ "type" .= ("string" :: Text),
-                    "description" .= ("GitHub repository owner" :: Text)
+                    "description" .= ("GitHub repository owner (e.g., 'tidepool-heavy-industries')" :: Text)
                   ],
               "repo"
                 .= object
                   [ "type" .= ("string" :: Text),
-                    "description" .= ("GitHub repository name" :: Text)
+                    "description" .= ("GitHub repository name (e.g., 'exomonad')" :: Text)
                   ],
               "worktree_dir"
                 .= object
                   [ "type" .= ("string" :: Text),
-                    "description" .= ("Base directory for worktrees (default: .exomonad/worktrees)" :: Text)
+                    "description" .= ("Base directory for worktrees (default: .exomonad/worktrees). Only change if you know what you are doing." :: Text)
                   ],
               "agent_type"
                 .= object
                   [ "type" .= ("string" :: Text),
                     "enum" .= (["claude", "gemini"] :: [Text]),
-                    "description" .= ("Agent type (default: gemini)" :: Text)
+                    "description" .= ("The type of AI agent to spawn. Defaults to 'gemini'." :: Text)
                   ]
             ]
       ]
@@ -123,7 +123,7 @@ instance FromJSON CleanupAgentsArgs where
 instance MCPTool CleanupAgents where
   type ToolArgs CleanupAgents = CleanupAgentsArgs
   toolName = "cleanup_agents"
-  toolDescription = "Clean up agent worktrees and close their Zellij tabs"
+  toolDescription = "Clean up specific agent worktrees and close their associated Zellij tabs. Use this when a task is completed or abandoned. Requires the issue number(s) to cleanup."
   toolSchema =
     object
       [ "type" .= ("object" :: Text),
@@ -134,12 +134,12 @@ instance MCPTool CleanupAgents where
                 .= object
                   [ "type" .= ("array" :: Text),
                     "items" .= object ["type" .= ("string" :: Text)],
-                    "description" .= ("Issue IDs to clean up" :: Text)
+                    "description" .= ("List of issue IDs (as strings) to clean up" :: Text)
                   ],
               "force"
                 .= object
                   [ "type" .= ("boolean" :: Text),
-                    "description" .= ("Force deletion even if worktree has uncommitted changes (default: false)" :: Text)
+                    "description" .= ("Force deletion even if worktree has uncommitted changes. Defaults to false (safe mode)." :: Text)
                   ]
             ]
       ]
@@ -165,7 +165,7 @@ instance FromJSON CleanupMergedAgentsArgs where
 instance MCPTool CleanupMergedAgents where
   type ToolArgs CleanupMergedAgents = CleanupMergedAgentsArgs
   toolName = "cleanup_merged_agents"
-  toolDescription = "Clean up agent worktrees whose branches have been merged to main"
+  toolDescription = "Clean up all agent worktrees whose corresponding git branches have been merged into the main branch. This helps reclaim disk space and remove cluttered tabs. No arguments required."
   toolSchema =
     object
       [ "type" .= ("object" :: Text),
@@ -192,7 +192,7 @@ instance FromJSON ListAgentsArgs where
 instance MCPTool ListAgents where
   type ToolArgs ListAgents = ListAgentsArgs
   toolName = "list_agents"
-  toolDescription = "List active agent worktrees"
+  toolDescription = "List all currently active agent worktrees and their status. Returns a list of agents with their issue ID, branch name, and worktree path. Useful for checking what is currently running."
   toolSchema =
     object
       [ "type" .= ("object" :: Text),

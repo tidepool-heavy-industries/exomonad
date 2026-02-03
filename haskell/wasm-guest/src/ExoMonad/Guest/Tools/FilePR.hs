@@ -86,7 +86,7 @@ instance FFIBoundary FilePROutput
 instance MCPTool FilePR where
   type ToolArgs FilePR = FilePRArgs
   toolName = "file_pr"
-  toolDescription = "Create or update a pull request for the current branch"
+  toolDescription = "Create or update a pull request for the current git branch. Automatically detects if a PR already exists. Returns the PR URL and number. Use this to submit your changes for review."
   toolSchema =
     object
       [ "type" .= ("object" :: Text),
@@ -96,12 +96,12 @@ instance MCPTool FilePR where
             [ "title"
                 .= object
                   [ "type" .= ("string" :: Text),
-                    "description" .= ("PR title" :: Text)
+                    "description" .= ("The title of the pull request" :: Text)
                   ],
               "body"
                 .= object
                   [ "type" .= ("string" :: Text),
-                    "description" .= ("PR body/description" :: Text)
+                    "description" .= ("The body/description of the pull request (markdown supported)" :: Text)
                   ]
             ]
       ]
