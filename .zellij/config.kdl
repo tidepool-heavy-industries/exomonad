@@ -7,3 +7,51 @@ on_force_close "quit"
 
 // Optional: Disable mouse mode for better terminal compatibility
 mouse_mode false
+
+// Plugin keybindings
+keybinds {
+    shared_except "locked" {
+        // Room: Quick tab switcher (fuzzy search tabs)
+        // Ctrl+Space - fast access for switching between agent tabs
+        bind "Ctrl Space" {
+            LaunchOrFocusPlugin "file:~/.config/zellij/plugins/room.wasm" {
+                floating true
+                ignore_case true
+                quick_jump true
+            }
+        }
+
+        // Ghost: Floating command terminal
+        // Ctrl+\ - quick terminal for git status, gh commands, etc.
+        bind "Ctrl \\" {
+            LaunchOrFocusPlugin "file:~/.config/zellij/plugins/ghost.wasm" {
+                floating true
+                shell "zsh"
+                shell_flag "-ic"
+            }
+        }
+
+        // Zellij Forgot: Keybind cheatsheet
+        // Ctrl+/ - standard help key
+        bind "Ctrl /" {
+            LaunchOrFocusPlugin "file:~/.config/zellij/plugins/zellij_forgot.wasm" {
+                floating true
+                // Custom keybinds to remember (in addition to auto-loaded Zellij binds)
+                "Room (tab switch)" "Ctrl+Space"
+                "Ghost (terminal)" "Ctrl+\\"
+                "Help (this)" "Ctrl+/"
+                "---" "---"
+                "New pane" "Ctrl+p n"
+                "Close pane" "Ctrl+p x"
+                "New tab" "Ctrl+t"
+                "Close tab" "Ctrl+t x"
+                "Toggle float" "Ctrl+p w"
+                "Fullscreen" "Ctrl+p f"
+                "---" "---"
+                "Scroll up" "Ctrl+s, PgUp"
+                "Scroll down" "Ctrl+s, PgDn"
+                "Search" "Ctrl+s, /"
+            }
+        }
+    }
+}

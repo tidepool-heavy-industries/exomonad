@@ -1,25 +1,15 @@
 layout {
     default_tab_template {
+        pane size=1 borderless=true {
+            plugin location="zellij:tab-bar"
+        }
         children
         pane size=1 borderless=true {
-            plugin location="zellij:compact-bar"
+            {% include "includes/zjstatus.kdl.j2" %}
         }
     }
 
 {% for tab in agent_tabs %}
 {{ tab }}
 {% endfor %}
-
-    tab name="Infrastructure" {
-        pane split_direction="horizontal" {
-            pane name="Control Server" size="60%" {
-                command "docker"
-                args "logs" "-f" "exomonad-control-server"
-            }
-            pane name="Status" {
-                command "bash"
-                args "-c" "watch -c -n5 'docker ps --format \"table {{"{{"}}.Names{{"}}"}}\\t{{"{{"}}.Status{{"}}"}}\\t{{"{{"}}.Ports{{"}}"}}\" --filter name=exomonad'"
-            }
-        }
-    }
 }

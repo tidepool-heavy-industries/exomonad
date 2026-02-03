@@ -49,7 +49,7 @@ pub enum AgentType {
 
 impl AgentType {
     /// Get the CLI command for this agent type.
-    /// 
+    ///
     /// Returns "claude" or "gemini".
     fn command(&self) -> &'static str {
         match self {
@@ -59,7 +59,7 @@ impl AgentType {
     }
 
     /// Get the prompt flag for this agent type.
-    /// 
+    ///
     /// Claude uses `--prompt`, Gemini uses `--prompt-interactive`.
     fn prompt_flag(&self) -> &'static str {
         match self {
@@ -69,13 +69,32 @@ impl AgentType {
     }
 
     /// Get the suffix for tab/worktree names (lowercase).
-    /// 
+    ///
     /// Used to construct unique tab/worktree names (e.g., "gh-123-title-claude").
     fn suffix(&self) -> &'static str {
         match self {
             AgentType::Claude => "claude",
             AgentType::Gemini => "gemini",
         }
+    }
+
+    /// Get the emoji for this agent type.
+    ///
+    /// Used for visual differentiation in Zellij tabs.
+    fn emoji(&self) -> &'static str {
+        match self {
+            AgentType::Claude => "🤖",
+            AgentType::Gemini => "💎",
+        }
+    }
+
+    /// Generate a display name for Zellij tabs.
+    ///
+    /// Format: "{emoji} {issue_id}-{short_slug}"
+    /// The slug is truncated to 20 chars for readability.
+    fn display_name(&self, issue_id: &str, slug: &str) -> String {
+        let short_slug: String = slug.chars().take(20).collect();
+        format!("{} {}-{}", self.emoji(), issue_id, short_slug)
     }
 }
 
@@ -253,9 +272,12 @@ impl AgentControlService {
             );
 
             // Open Zellij tab with agent command and initial prompt
-            let tab_name = format!("gh-{}-{}-{}", issue_id, slug, agent_suffix);
+            // Use display_name for the Zellij tab (emoji + short format)
+            // Keep internal_name for worktree/branch consistency
+            let internal_name = format!("gh-{}-{}-{}", issue_id, slug, agent_suffix);
+            let display_name = options.agent_type.display_name(&issue_id, &slug);
             self.new_zellij_tab(
-                &tab_name,
+                &display_name,
                 &worktree_path,
                 options.agent_type,
                 Some(&initial_prompt),
@@ -264,7 +286,7 @@ impl AgentControlService {
 
             // Emit agent:started event
             let event = exomonad_ui_protocol::AgentEvent::AgentStarted {
-                agent_id: tab_name.clone(),
+                agent_id: internal_name.clone(),
                 timestamp: zellij_events::now_iso8601(),
             };
             if let Err(e) = zellij_events::emit_event(&event) {
@@ -274,7 +296,7 @@ impl AgentControlService {
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
                 worktree_path: worktree_path.to_string_lossy().to_string(),
                 branch_name,
-                tab_name,
+                tab_name: internal_name,
                 issue_title: issue.title,
                 agent_type: options.agent_type.suffix().to_string(),
             })
@@ -337,9 +359,28 @@ impl AgentControlService {
             let path = Path::new(&agent.worktree_path);
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                 if name.starts_with(&prefix) {
-                    // Close Zellij tab with the full worktree name (which is also the tab name)
-                    if let Err(e) = self.close_zellij_tab(name).await {
-                        warn!(tab_name = name, error = %e, "Failed to close Zellij tab (may not exist)");
+                    // Parse the worktree name to extract slug and agent type
+                    // Format: gh-{issue_id}-{slug}-{agent_suffix}
+                    // Split from right first since agent_suffix (claude/gemini) has no hyphens
+                    let (rest, agent_suffix) = name.rsplit_once('-').unwrap_or((name, ""));
+
+                    // Now extract slug from rest (which is "gh-{issue_id}-{slug}")
+                    // Skip past "gh-{issue_id}-" prefix
+                    let slug = rest.strip_prefix(&prefix).unwrap_or("");
+
+                    // Determine agent type from suffix
+                    let agent_type = if agent_suffix == "claude" {
+                        AgentType::Claude
+                    } else {
+                        AgentType::Gemini
+                    };
+
+                    // Construct the display name (tab name)
+                    let display_name = agent_type.display_name(issue_id, slug);
+
+                    // Close Zellij tab with the display name
+                    if let Err(e) = self.close_zellij_tab(&display_name).await {
+                        warn!(tab_name = %display_name, error = %e, "Failed to close Zellij tab (may not exist)");
                     }
 
                     self.delete_worktree(path, force).await?;
@@ -460,103 +501,90 @@ impl AgentControlService {
     ) -> Result<()> {
         info!(name, cwd = %cwd.display(), agent_type = ?agent_type, "Creating Zellij tab");
 
-        {
-            let cmd = agent_type.command();
-            // Build full command with optional prompt
-            let full_command = match prompt {
-                Some(p) => {
-                    let escaped_prompt = Self::escape_for_shell_command(p);
-                    debug!(
-                        tab_name = name,
-                        agent_type = ?agent_type,
-                        prompt_length = p.len(),
-                        "Spawning agent with CLI prompt"
-                    );
-                    format!("{} {} {}", cmd, agent_type.prompt_flag(), escaped_prompt)
-                }
-                None => cmd.to_string(),
-            };
-
-            // Escape the command for KDL string literal (escape backslashes, quotes, newlines)
-            let kdl_escaped_command = Self::escape_for_kdl(&full_command);
-
-            // Generate KDL layout with full tab template and command pane
-            // Use login shell to ensure PATH is loaded (gemini, claude, etc.)
-            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-            let layout_content = format!(
-                r###"layout {{
-    default_tab_template {{
-        pane size=1 borderless=true {{
-            plugin location="zellij:tab-bar"
-        }}
-        children
-        pane size=1 borderless=true {{
-            plugin location="zellij:status-bar"
-        }}
-    }}
-    tab name="{name}" {{
-        pane command="{shell}" {{
-            args "-l" "-c" "{cmd}"
-            cwd "{cwd}"
-            close_on_exit true
-        }}
-        pane size=3 borderless=true {{
-            plugin location="file:~/.config/zellij/plugins/exomonad-plugin.wasm"
-        }}
-    }}
-}}"###,
-                name = name,
-                shell = shell,
-                cmd = kdl_escaped_command,
-                cwd = cwd.display()
-            );
-
-            // Write to temporary file
-            let temp_dir = std::env::temp_dir();
-            let layout_file = temp_dir.join(format!("zellij-tab-{}.kdl", name));
-            tokio::fs::write(&layout_file, &layout_content)
-                .await
-                .context("Failed to write temporary layout file")?;
-
-            debug!(
-                layout_file = %layout_file.display(),
-                "Generated temporary Zellij layout"
-            );
-
-            // Log the command we're about to execute
-            debug!(
-                name,
-                layout_file = %layout_file.display(),
-                "Executing zellij action new-tab"
-            );
-
-            // Create tab with layout - wait for zellij action to complete before deleting temp file
-            // Note: zellij action new-tab returns quickly after reading the layout,
-            // it doesn't wait for the spawned pane command to finish
-            let output = Command::new("zellij")
-                .args([
-                    "action",
-                    "new-tab",
-                    "--layout",
-                    layout_file.to_str().unwrap(),
-                ])
-                .output()
-                .await
-                .context("Failed to run zellij")?;
-
-            // Clean up temp file after zellij has read it
-            let _ = tokio::fs::remove_file(&layout_file).await;
-
-            // Check if zellij command failed
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(anyhow!(
-                    "zellij new-tab failed with status: {} (stderr: {}, layout file was: {})",
-                    output.status,
-                    stderr,
-                    layout_file.display()
-                ));
+        let cmd = agent_type.command();
+        // Build full command with optional prompt
+        let full_command = match prompt {
+            Some(p) => {
+                let escaped_prompt = Self::escape_for_shell_command(p);
+                debug!(
+                    tab_name = name,
+                    agent_type = ?agent_type,
+                    prompt_length = p.len(),
+                    "Spawning agent with CLI prompt"
+                );
+                format!("{} {} {}", cmd, agent_type.prompt_flag(), escaped_prompt)
             }
+            None => cmd.to_string(),
+        };
+
+        // Escape the command for KDL string literal (escape backslashes, quotes, newlines)
+        let kdl_escaped_command = Self::escape_for_kdl(&full_command);
+
+        // Use login shell to ensure PATH is loaded (gemini, claude, etc.)
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+
+        // Generate layout using zellij-gen library (includes zjstatus with Solarized Dark)
+        let params = zellij_gen::AgentTabParams {
+            tab_name: name,
+            pane_name: "Agent",
+            command: &kdl_escaped_command,
+            cwd,
+            shell: &shell,
+            focus: true,
+        };
+
+        let layout_content = zellij_gen::generate_agent_layout(&params)
+            .context("Failed to generate Zellij layout")?;
+
+        // Write to temporary file (sanitize name for filename - no emoji/spaces)
+        let temp_dir = std::env::temp_dir();
+        let safe_filename: String = name
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .collect();
+        let layout_file = temp_dir.join(format!("zellij-tab-{}.kdl", safe_filename));
+        tokio::fs::write(&layout_file, &layout_content)
+            .await
+            .context("Failed to write temporary layout file")?;
+
+        debug!(
+            layout_file = %layout_file.display(),
+            "Generated temporary Zellij layout"
+        );
+
+        // Log the command we're about to execute
+        debug!(
+            name,
+            layout_file = %layout_file.display(),
+            "Executing zellij action new-tab"
+        );
+
+        // Create tab with layout - wait for zellij action to complete before deleting temp file
+        // Note: zellij action new-tab returns quickly after reading the layout,
+        // it doesn't wait for the spawned pane command to finish
+        let output = Command::new("zellij")
+            .args([
+                "action",
+                "new-tab",
+                "--layout",
+                layout_file.to_str().unwrap(),
+            ])
+            .output()
+            .await
+            .context("Failed to run zellij")?;
+
+        // Clean up temp file after zellij has read it
+        let _ = tokio::fs::remove_file(&layout_file).await;
+
+        // Check if zellij command failed
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!(
+                "zellij new-tab failed with status: {} (stderr: {}, layout file was: {})",
+                output.status,
+                stderr,
+                layout_file.display()
+            ));
         }
 
         Ok(())
@@ -1254,6 +1282,32 @@ mod tests {
     #[test]
     fn test_agent_type_default() {
         assert_eq!(AgentType::default(), AgentType::Gemini);
+    }
+
+    #[test]
+    fn test_agent_type_emoji() {
+        assert_eq!(AgentType::Claude.emoji(), "🤖");
+        assert_eq!(AgentType::Gemini.emoji(), "💎");
+    }
+
+    #[test]
+    fn test_agent_type_display_name() {
+        assert_eq!(
+            AgentType::Claude.display_name("473", "refactor-polish"),
+            "🤖 473-refactor-polish"
+        );
+        assert_eq!(
+            AgentType::Gemini.display_name("123", "fix-bug"),
+            "💎 123-fix-bug"
+        );
+    }
+
+    #[test]
+    fn test_agent_type_display_name_truncates_long_slug() {
+        let long_slug = "this-is-a-very-long-slug-that-should-be-truncated";
+        let display = AgentType::Claude.display_name("123", long_slug);
+        // Slug portion is truncated to 20 chars: "this-is-a-very-long-" (exactly 20)
+        assert_eq!(display, "🤖 123-this-is-a-very-long-");
     }
 
     #[test]

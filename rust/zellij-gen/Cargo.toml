@@ -4,6 +4,14 @@ version = "0.1.0"
 edition = "2021"
 description = "Generate Zellij layouts for ExoMonad agents"
 
+[lib]
+name = "zellij_gen"
+path = "src/lib.rs"
+
+[[bin]]
+name = "zellij-gen"
+path = "src/main.rs"
+
 [dependencies]
 askama = "0.12"
 clap = { version = "4", features = ["derive"] }
