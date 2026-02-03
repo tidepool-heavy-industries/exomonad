@@ -187,7 +187,13 @@ impl ExternalService for OtelService {
             } => {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
+                    .map_err(|e| {
+                        warn!("SystemTime error (clock skew?): {}", e);
+                        ServiceError::Api {
+                            code: 500,
+                            message: format!("SystemTime error: {}", e),
+                        }
+                    })?
                     .as_nanos() as u64;
 
                 let payload = TracesData {
@@ -211,7 +217,10 @@ impl ExternalService for OtelService {
                     }],
                 };
 
-                let url = self.endpoint.join("/v1/traces").unwrap();
+                let url = self.endpoint.join("/v1/traces").map_err(|e| ServiceError::Api {
+                    code: 500,
+                    message: format!("URL error: {}", e),
+                })?;
                 let mut builder = self.client.post(url).json(&payload);
                 for (k, v) in &self.headers {
                     builder = builder.header(k, v);
@@ -234,7 +243,13 @@ impl ExternalService for OtelService {
             } => {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
+                    .map_err(|e| {
+                        warn!("SystemTime error (clock skew?): {}", e);
+                        ServiceError::Api {
+                            code: 500,
+                            message: format!("SystemTime error: {}", e),
+                        }
+                    })?
                     .as_nanos() as u64;
 
                 let payload = MetricsData {
@@ -259,7 +274,10 @@ impl ExternalService for OtelService {
                     }],
                 };
 
-                let url = self.endpoint.join("/v1/metrics").unwrap();
+                let url = self.endpoint.join("/v1/metrics").map_err(|e| ServiceError::Api {
+                    code: 500,
+                    message: format!("URL error: {}", e),
+                })?;
                 let mut builder = self.client.post(url).json(&payload);
                 for (k, v) in &self.headers {
                     builder = builder.header(k, v);
@@ -310,6 +328,28 @@ mod tests {
         match service.call(req).await.unwrap() {
             ServiceResponse::OtelAck => {}
             _ => panic!("Wrong response type"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_otel_url_error() {
+        // A "cannot-be-a-base" URL (like "mailto:user@example.com") will make join() fail
+        let endpoint = Url::parse("mailto:user@example.com").unwrap();
+        let service = OtelService::new(endpoint, HashMap::new());
+
+        let req = ServiceRequest::OtelMetric {
+            name: "test-metric".into(),
+            value: 1.0,
+            labels: HashMap::new(),
+        };
+
+        let result = service.call(req).await;
+        match result {
+            Err(ServiceError::Api { code, message }) => {
+                assert_eq!(code, 500);
+                assert!(message.contains("URL error"));
+            }
+            _ => panic!("Expected URL error, got {:?}", result),
         }
     }
 }
