@@ -178,6 +178,7 @@ impl AgentControlService {
     /// 2. Creates git worktree from origin/main
     /// 3. Writes context files (.exomonad/config.toml, INITIAL_CONTEXT.md, .mcp.json)
     /// 4. Opens Zellij tab with claude command
+    #[tracing::instrument(skip(self, options), fields(issue_id = %issue_number.as_u64()))]
     pub async fn spawn_agent(
         &self,
         issue_number: IssueNumber,
@@ -194,7 +195,7 @@ impl AgentControlService {
 
         // Fetch issue from GitHub
         let issue_id = issue_number.as_u64().to_string();
-        info!(issue_id, "Fetching issue from GitHub");
+        debug!(issue_id, "Fetching issue from GitHub");
         let repo = Repo {
             owner: options.owner.clone(),
             name: options.repo.clone(),
@@ -236,7 +237,7 @@ impl AgentControlService {
             &issue_url,
         );
 
-        tracing::info!(
+        debug!(
             issue_id,
             prompt_length = initial_prompt.len(),
             "Built initial prompt for agent"
@@ -271,6 +272,7 @@ impl AgentControlService {
     }
 
     /// Spawn multiple agents.
+    #[tracing::instrument(skip(self, options))]
     pub async fn spawn_agents(
         &self,
         issue_ids: &[String],
@@ -306,6 +308,7 @@ impl AgentControlService {
     // ========================================================================
 
     /// Clean up an agent (close Zellij tab, delete worktree).
+    #[tracing::instrument(skip(self))]
     pub async fn cleanup_agent(&self, issue_id: &str, force: bool) -> Result<()> {
         // Find and delete worktree first (to extract agent type from path)
         let agents = self.list_agents().await?;
@@ -345,6 +348,7 @@ impl AgentControlService {
     }
 
     /// Clean up multiple agents.
+    #[tracing::instrument(skip(self))]
     pub async fn cleanup_agents(&self, issue_ids: &[String], force: bool) -> BatchCleanupResult {
         let mut result = BatchCleanupResult {
             cleaned: Vec::new(),
@@ -369,6 +373,7 @@ impl AgentControlService {
     // ========================================================================
 
     /// List all active agent worktrees.
+    #[tracing::instrument(skip(self))]
     pub async fn list_agents(&self) -> Result<Vec<AgentInfo>> {
         let output = Command::new("git")
             .args(["worktree", "list", "--porcelain"])
@@ -431,6 +436,7 @@ impl AgentControlService {
             .context("Not running inside a Zellij session (ZELLIJ_SESSION_NAME not set)")
     }
 
+    #[tracing::instrument(skip(self, prompt))]
     async fn new_zellij_tab(
         &self,
         name: &str,
@@ -446,7 +452,7 @@ impl AgentControlService {
             let full_command = match prompt {
                 Some(p) => {
                     let escaped_prompt = Self::escape_for_shell_command(p);
-                    tracing::info!(
+                    debug!(
                         tab_name = name,
                         agent_type = ?agent_type,
                         prompt_length = p.len(),
@@ -498,13 +504,13 @@ impl AgentControlService {
                 .await
                 .context("Failed to write temporary layout file")?;
 
-            tracing::debug!(
+            debug!(
                 layout_file = %layout_file.display(),
                 "Generated temporary Zellij layout"
             );
 
             // Log the command we're about to execute
-            info!(
+            debug!(
                 name,
                 layout_file = %layout_file.display(),
                 "Executing zellij action new-tab"
@@ -543,6 +549,7 @@ impl AgentControlService {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     async fn close_zellij_tab(&self, name: &str) -> Result<()> {
         debug!(name, "Closing Zellij tab");
 
@@ -564,6 +571,7 @@ impl AgentControlService {
     // Internal: Git Worktree
     // ========================================================================
 
+    #[tracing::instrument(skip(self))]
     async fn fetch_origin(&self) -> Result<()> {
         info!("Fetching origin/main");
 
@@ -582,6 +590,7 @@ impl AgentControlService {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     async fn create_worktree(&self, path: &Path, branch: &str) -> Result<()> {
         if path.exists() {
             info!(path = %path.display(), "Worktree already exists, reusing");
@@ -633,6 +642,7 @@ impl AgentControlService {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     async fn delete_worktree(&self, path: &Path, force: bool) -> Result<()> {
         if !path.exists() {
             debug!(path = %path.display(), "Worktree doesn't exist");
@@ -935,6 +945,7 @@ pub fn spawn_agent_host_fn(service: Arc<AgentControlService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<AgentControlService>>|
          -> Result<(), Error> {
+            let _span = tracing::info_span!("host_function", function = "agent_spawn").entered();
             let input: SpawnAgentInput = get_input(plugin, inputs[0])?;
 
             let service_arc = user_data.get()?;
@@ -970,6 +981,7 @@ pub fn spawn_agents_host_fn(service: Arc<AgentControlService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<AgentControlService>>|
          -> Result<(), Error> {
+            let _span = tracing::info_span!("host_function", function = "agent_spawn_batch").entered();
             let input: SpawnAgentsInput = get_input(plugin, inputs[0])?;
 
             let service_arc = user_data.get()?;
@@ -1005,6 +1017,7 @@ pub fn cleanup_agent_host_fn(service: Arc<AgentControlService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<AgentControlService>>|
          -> Result<(), Error> {
+            let _span = tracing::info_span!("host_function", function = "agent_cleanup").entered();
             let input: CleanupAgentInput = get_input(plugin, inputs[0])?;
 
             let service_arc = user_data.get()?;
@@ -1033,6 +1046,7 @@ pub fn cleanup_agents_host_fn(service: Arc<AgentControlService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<AgentControlService>>|
          -> Result<(), Error> {
+            let _span = tracing::info_span!("host_function", function = "agent_cleanup_batch").entered();
             let input: CleanupAgentsInput = get_input(plugin, inputs[0])?;
 
             let service_arc = user_data.get()?;
@@ -1061,6 +1075,7 @@ pub fn list_agents_host_fn(service: Arc<AgentControlService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<AgentControlService>>|
          -> Result<(), Error> {
+            let _span = tracing::info_span!("host_function", function = "agent_list").entered();
             let service_arc = user_data.get()?;
             let service = service_arc
                 .lock()

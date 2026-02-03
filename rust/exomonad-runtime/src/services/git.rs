@@ -132,12 +132,14 @@ impl GitService {
         Self { docker }
     }
 
+    #[tracing::instrument(skip(self), fields(cmd = ?args))]
     async fn exec_git(&self, container: &str, dir: &str, args: &[&str]) -> Result<String> {
         let mut cmd = vec!["git"];
         cmd.extend_from_slice(args);
         self.docker.exec(container, dir, &cmd).await
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get_branch(&self, container: &str, dir: &str) -> Result<String> {
         let output = self
             .exec_git(container, dir, &["rev-parse", "--abbrev-ref", "HEAD"])
@@ -145,6 +147,7 @@ impl GitService {
         Ok(output.trim().to_string())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get_worktree(&self, container: &str, dir: &str) -> Result<WorktreeInfo> {
         let path = self
             .exec_git(container, dir, &["rev-parse", "--show-toplevel"])
@@ -156,6 +159,7 @@ impl GitService {
         })
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get_dirty_files(&self, container: &str, dir: &str) -> Result<Vec<String>> {
         let output = self
             .exec_git(container, dir, &["status", "--porcelain"])
@@ -163,6 +167,7 @@ impl GitService {
         Ok(output.lines().map(|l| l.to_string()).collect())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get_recent_commits(
         &self,
         container: &str,
@@ -193,13 +198,8 @@ impl GitService {
         Ok(commits)
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn has_unpushed_commits(&self, container: &str, dir: &str) -> Result<bool> {
-        tracing::info!(
-            "[GitService] Checking for unpushed commits in container={} dir={}",
-            container,
-            dir
-        );
-
         let output = self
             .exec_git(
                 container,
@@ -211,42 +211,31 @@ impl GitService {
         match output {
             Ok(count_str) => {
                 let count = count_str.trim().parse::<u32>().unwrap_or(0);
-                tracing::info!("[GitService] Unpushed commits count: {}", count);
+                tracing::debug!(count, "Unpushed commits count");
                 Ok(count > 0)
             }
             Err(e) => {
                 tracing::warn!(
-                    "[GitService] Failed to check unpushed commits: {}. Assuming no upstream.",
-                    e
+                    error = %e,
+                    "Failed to check unpushed commits. Assuming no upstream."
                 );
                 Ok(false)
             }
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get_remote_url(&self, container: &str, dir: &str) -> Result<String> {
-        tracing::info!(
-            "[GitService] Getting remote URL in container={} dir={}",
-            container,
-            dir
-        );
-
         let output = self
             .exec_git(container, dir, &["remote", "get-url", "origin"])
             .await?;
 
         let url = output.trim().to_string();
-        tracing::info!("[GitService] Remote URL: {}", url);
         Ok(url)
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get_repo_info(&self, container: &str, dir: &str) -> Result<RepoInfo> {
-        tracing::info!(
-            "[GitService] Getting repo info in container={} dir={}",
-            container,
-            dir
-        );
-
         let branch = self.get_branch(container, dir).await?;
         let remote_url = self.get_remote_url(container, dir).await.ok();
 
@@ -254,13 +243,6 @@ impl GitService {
             .as_ref()
             .and_then(|url| parse_github_url(url))
             .unzip();
-
-        tracing::info!(
-            "[GitService] Repo info: branch={}, owner={:?}, name={:?}",
-            branch,
-            owner,
-            name
-        );
 
         Ok(RepoInfo {
             branch,
@@ -326,28 +308,18 @@ pub fn git_get_branch_host_fn(git_service: Arc<GitService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<GitService>>|
          -> Result<(), Error> {
-            tracing::info!("[git_get_branch] Starting host function call");
+            let _span = tracing::info_span!("host_function", function = "git_get_branch").entered();
 
             if inputs.is_empty() {
                 return Err(Error::msg("git_get_branch: expected input argument"));
             }
             let Json(input): Json<GitHostInput> = plugin.memory_get_val(&inputs[0])?;
-            tracing::debug!(
-                "[git_get_branch] Input: workingDir={}, containerId={}",
-                input.working_dir,
-                input.container_id
-            );
-
+            
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(git.get_branch(&input.container_id, &input.working_dir))?;
             let output: HostResult<String> = result.into();
-
-            // Debug: log the JSON we're about to send
-            let json_str = serde_json::to_string(&output)
-                .map_err(|e| Error::msg(format!("JSON serialization failed: {}", e)))?;
-            tracing::info!("[git_get_branch] Returning JSON: {}", json_str);
 
             plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
@@ -367,7 +339,7 @@ pub fn git_get_worktree_host_fn(git_service: Arc<GitService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<GitService>>|
          -> Result<(), Error> {
-            tracing::info!("[git_get_worktree] Starting host function call");
+            let _span = tracing::info_span!("host_function", function = "git_get_worktree").entered();
 
             if inputs.is_empty() {
                 return Err(Error::msg("git_get_worktree: expected input argument"));
@@ -398,7 +370,7 @@ pub fn git_get_dirty_files_host_fn(git_service: Arc<GitService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<GitService>>|
          -> Result<(), Error> {
-            tracing::info!("[git_get_dirty_files] Starting host function call");
+            let _span = tracing::info_span!("host_function", function = "git_get_dirty_files").entered();
 
             if inputs.is_empty() {
                 return Err(Error::msg("git_get_dirty_files: expected input argument"));
@@ -429,7 +401,7 @@ pub fn git_get_recent_commits_host_fn(git_service: Arc<GitService>) -> Function 
          outputs: &mut [Val],
          user_data: UserData<Arc<GitService>>|
          -> Result<(), Error> {
-            tracing::info!("[git_get_recent_commits] Starting host function call");
+            let _span = tracing::info_span!("host_function", function = "git_get_recent_commits").entered();
 
             if inputs.is_empty() {
                 return Err(Error::msg(
@@ -466,7 +438,7 @@ pub fn git_has_unpushed_commits_host_fn(git_service: Arc<GitService>) -> Functio
          outputs: &mut [Val],
          user_data: UserData<Arc<GitService>>|
          -> Result<(), Error> {
-            tracing::info!("[git_has_unpushed_commits] Starting host function call");
+            let _span = tracing::info_span!("host_function", function = "git_has_unpushed_commits").entered();
 
             if inputs.is_empty() {
                 return Err(Error::msg(
@@ -500,7 +472,7 @@ pub fn git_get_remote_url_host_fn(git_service: Arc<GitService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<GitService>>|
          -> Result<(), Error> {
-            tracing::info!("[git_get_remote_url] Starting host function call");
+            let _span = tracing::info_span!("host_function", function = "git_get_remote_url").entered();
 
             if inputs.is_empty() {
                 return Err(Error::msg("git_get_remote_url: expected input argument"));
@@ -531,7 +503,7 @@ pub fn git_get_repo_info_host_fn(git_service: Arc<GitService>) -> Function {
          outputs: &mut [Val],
          user_data: UserData<Arc<GitService>>|
          -> Result<(), Error> {
-            tracing::info!("[git_get_repo_info] Starting host function call");
+            let _span = tracing::info_span!("host_function", function = "git_get_repo_info").entered();
 
             if inputs.is_empty() {
                 return Err(Error::msg("git_get_repo_info: expected input argument"));

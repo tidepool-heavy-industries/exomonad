@@ -211,6 +211,7 @@ impl PluginManager {
     /// - Empty WASM responses are treated as JSON `null`
     /// - Function names are not validated at compile time (runtime error if function doesn't exist)
     /// - Consider using typed wrapper methods (e.g., `handle_mcp_call()`) for type safety
+    #[tracing::instrument(skip(self, input), fields(function = %function))]
     pub async fn call<I, O>(&self, function: &str, input: &I) -> Result<O>
     where
         I: Serialize + Send + Sync + 'static,
