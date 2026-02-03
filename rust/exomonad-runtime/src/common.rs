@@ -94,7 +94,7 @@ pub struct HostError {
 }
 
 /// Standardized result envelope for all host functions.
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", content = "payload")]
 pub enum HostResult<T> {
     Success(T),
@@ -115,7 +115,7 @@ impl<T> From<anyhow::Error> for HostResult<T> {
                     // Heuristically map command failures: git commands -> GitError, others -> IoError.
                     let inferred_code = {
                         let trimmed = command.trim_start();
-                        if trimmed == "git" || trimmed.starts_with("git ") {
+                        if trimmed.starts_with("git ") {
                             ErrorCode::GitError
                         } else {
                             ErrorCode::IoError
@@ -136,7 +136,7 @@ impl<T> From<anyhow::Error> for HostResult<T> {
                     });
                 }
                 CommandError::LaunchFailed { command, message } => {
-                     return HostResult::Error(HostError {
+                    return HostResult::Error(HostError {
                         message: format!("Failed to launch command '{}': {}", command, message),
                         code: ErrorCode::IoError,
                         context: Some(ErrorContext {
