@@ -1,16 +1,20 @@
 //! Zellij event emission service.
 //!
 //! Broadcasts agent lifecycle events to the Zellij plugin sidebar via pipe.
+//! Uses tokio::spawn for non-blocking fire-and-forget with timeout.
 
 use anyhow::{Context, Result};
-use duct::cmd;
 use exomonad_ui_protocol::AgentEvent;
-use tracing::debug;
+use std::time::Duration;
+use tokio::process::Command;
+use tracing::{debug, warn};
+
+const PIPE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Emit an agent event to the Zellij plugin sidebar via pipe.
 ///
-/// Events are broadcast to all plugins subscribed to the `exomonad-events` pipe.
-/// The sidebar plugin will render these events in real-time.
+/// Non-blocking: spawns a tokio task that handles the subprocess with timeout.
+/// Returns immediately. Errors are logged, not propagated.
 pub fn emit_event(event: &AgentEvent) -> Result<()> {
     // Check if we're in a Zellij session
     if std::env::var("ZELLIJ_SESSION_NAME").is_err() {
@@ -19,27 +23,46 @@ pub fn emit_event(event: &AgentEvent) -> Result<()> {
     }
 
     let json = serde_json::to_string(event).context("Failed to serialize event")?;
-
-    debug!("[ZellijEvents] Emitting event: {}", json);
-
-    // Use --plugin flag to auto-launch the plugin if not running
-    // This prevents hanging when no plugin is subscribed to the pipe
-    let plugin_path = format!("file:{}",
-        std::env::var("HOME")
-            .unwrap_or_else(|_| "/Users/inannamalick".to_string())
-        + "/.config/zellij/plugins/exomonad-plugin.wasm"
+    let plugin_path = format!(
+        "file:{}/.config/zellij/plugins/exomonad-plugin.wasm",
+        std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string())
     );
 
-    cmd!(
-        "zellij", "pipe",
-        "--plugin", &plugin_path,
-        "--name", "exomonad-events",
-        "--", &json
-    )
-    .start()
-    .context("Failed to spawn zellij pipe")?;
+    debug!("[ZellijEvents] Spawning async emit: {}", json);
+
+    // Fire and forget: spawn task, don't await
+    tokio::spawn(emit_with_timeout(plugin_path, json));
 
     Ok(())
+}
+
+async fn emit_with_timeout(plugin_path: String, json: String) {
+    let child_result = Command::new("zellij")
+        .args(["pipe", "--plugin", &plugin_path, "--name", "exomonad-events", "--", &json])
+        .spawn();
+
+    let mut child = match child_result {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("[ZellijEvents] Failed to spawn zellij pipe: {}", e);
+            return;
+        }
+    };
+
+    match tokio::time::timeout(PIPE_TIMEOUT, child.wait()).await {
+        Ok(Ok(status)) => {
+            if !status.success() {
+                warn!("[ZellijEvents] zellij pipe exited with status: {}", status);
+            }
+        }
+        Ok(Err(e)) => {
+            warn!("[ZellijEvents] zellij pipe wait error: {}", e);
+        }
+        Err(_) => {
+            warn!("[ZellijEvents] zellij pipe timed out after {:?}, killing", PIPE_TIMEOUT);
+            let _ = child.kill().await;
+        }
+    }
 }
 
 /// Helper to get current timestamp in ISO 8601 format.

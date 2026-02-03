@@ -122,6 +122,7 @@ wasm role="tl":
     nix build .#wasm-guest-{{role}}
     @echo ">>> Installing to ~/.exomonad/wasm/..."
     mkdir -p ~/.exomonad/wasm
+    rm -f ~/.exomonad/wasm/wasm-guest-{{role}}.wasm
     cp result/wasm-guest-{{role}}.wasm ~/.exomonad/wasm/
     @echo ">>> Done: ~/.exomonad/wasm/wasm-guest-{{role}}.wasm"
 

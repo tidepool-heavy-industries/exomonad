@@ -484,24 +484,24 @@ impl AgentControlService {
             // Use login shell to ensure PATH is loaded (gemini, claude, etc.)
             let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
             let layout_content = format!(
-                r###"layout {{ 
-    default_tab_template {{ 
-        pane size=1 borderless=true {{ 
-            plugin location=\"zellij:tab-bar\"
+                r###"layout {{
+    default_tab_template {{
+        pane size=1 borderless=true {{
+            plugin location="zellij:tab-bar"
         }}
         children
-        pane size=1 borderless=true {{ 
-            plugin location=\"zellij:status-bar\"
+        pane size=1 borderless=true {{
+            plugin location="zellij:status-bar"
         }}
     }}
-    tab name=\"{name}\" {{ 
-        pane command=\"{shell}\" {{ 
-            args \"-l\" \"-c\" \"{cmd}\" 
-            cwd \"{cwd}\" 
+    tab name="{name}" {{
+        pane command="{shell}" {{
+            args "-l" "-c" "{cmd}"
+            cwd "{cwd}"
             close_on_exit true
         }}
-        pane size=3 borderless=true {{ 
-            plugin location=\"file:~/.config/zellij/plugins/exomonad-plugin.wasm\"
+        pane size=3 borderless=true {{
+            plugin location="file:~/.config/zellij/plugins/exomonad-plugin.wasm"
         }}
     }}
 }}"###,
