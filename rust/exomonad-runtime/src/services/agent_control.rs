@@ -221,8 +221,8 @@ impl AgentControlService {
             let worktree_path = self
                 .project_dir
                 .join(&worktree_dir)
-                .join(format!("gh-{}-{}-{{}}", issue_id, slug, agent_suffix));
-            let branch_name = format!("gh-{}/{}-{{}}", issue_id, slug, agent_suffix);
+                .join(format!("gh-{}-{}-{}", issue_id, slug, agent_suffix));
+            let branch_name = format!("gh-{}/{}-{}", issue_id, slug, agent_suffix);
 
             // Fetch origin/main
             self.fetch_origin().await?;
@@ -253,7 +253,7 @@ impl AgentControlService {
             );
 
             // Open Zellij tab with agent command and initial prompt
-            let tab_name = format!("gh-{}-{{}}", issue_id, agent_suffix);
+            let tab_name = format!("gh-{}-{}-{}", issue_id, slug, agent_suffix);
             self.new_zellij_tab(
                 &tab_name,
                 &worktree_path,
@@ -337,14 +337,9 @@ impl AgentControlService {
             let path = Path::new(&agent.worktree_path);
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                 if name.starts_with(&prefix) {
-                    // Extract agent suffix from worktree name: gh-{issue}-{slug}-{agent}
-                    let parts: Vec<&str> = name.rsplitn(2, '-').collect();
-                    let agent_suffix = parts.first().unwrap_or(&"");
-
-                    // Close Zellij tab with correct agent suffix
-                    let tab_name = format!("gh-{}-{{}}", issue_id, agent_suffix);
-                    if let Err(e) = self.close_zellij_tab(&tab_name).await {
-                        warn!(tab_name, error = %e, "Failed to close Zellij tab (may not exist)");
+                    // Close Zellij tab with the full worktree name (which is also the tab name)
+                    if let Err(e) = self.close_zellij_tab(name).await {
+                        warn!(tab_name = name, error = %e, "Failed to close Zellij tab (may not exist)");
                     }
 
                     self.delete_worktree(path, force).await?;
@@ -915,8 +910,8 @@ When done, commit your changes and create a pull request."###,
     /// Example: "user's issue" -> "'user'\'s issue'"
     fn escape_for_shell_command(s: &str) -> String {
         // Replace ' with '\'' (end quote, escaped quote, start quote)
-        let escaped = s.replace('"', r"'\''");
-        format!("'{{}}'", escaped)
+        let escaped = s.replace('\'', r"'\'");
+        format!("'{}'", escaped)
     }
 
     /// Escape a string for use inside a KDL string literal.
