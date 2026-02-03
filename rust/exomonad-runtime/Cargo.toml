@@ -17,6 +17,7 @@ chrono = "0.4"
 duct = { workspace = true }
 exomonad-shared = { path = "../exomonad-shared" }
 exomonad-ui-protocol = { path = "../exomonad-ui-protocol" }
+zellij-gen = { path = "../zellij-gen" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

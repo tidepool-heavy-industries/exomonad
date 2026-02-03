@@ -1150,6 +1150,7 @@ dependencies = [
  "tokio",
  "tracing",
  "wiremock 0.5.22",
+ "zellij-gen",
 ]
 
 [[package]]
