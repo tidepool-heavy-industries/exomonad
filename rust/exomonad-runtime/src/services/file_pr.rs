@@ -3,13 +3,15 @@
 // Uses `gh pr create` / `gh pr view` for idempotent PR management.
 // Returns immediately with PR URL and number.
 
+use crate::common::{ErrorCode, HostResult};
+use crate::services::git;
 use anyhow::{Context, Result};
 use duct::cmd;
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
-use super::{git, zellij_events};
+use super::zellij_events;
 
 // ============================================================================
 // Types
@@ -34,44 +36,21 @@ pub struct FilePROutput {
 // Host Output Wrapper
 // ============================================================================
 
-#[derive(Serialize)]
-#[serde(tag = "kind", content = "payload")]
-enum HostResult<T> {
-    Success(T),
-    Error(HostError),
-}
+fn map_error(e: anyhow::Error) -> HostResult<FilePROutput> {
+    let msg = e.to_string();
+    let code = if msg.contains("not on a branch") || msg.contains("not a git repository") {
+        ErrorCode::GitError
+    } else if msg.contains("no remote") || msg.contains("No remote") {
+        ErrorCode::GitError
+    } else if msg.contains("gh auth") || msg.contains("not logged") {
+        ErrorCode::NotAuthenticated
+    } else if msg.contains("already exists") {
+        ErrorCode::AlreadyExists
+    } else {
+        ErrorCode::InternalError
+    };
 
-#[derive(Serialize)]
-struct HostError {
-    message: String,
-    code: String,
-}
-
-impl<T> From<Result<T>> for HostResult<T> {
-    fn from(res: Result<T>) -> Self {
-        match res {
-            Ok(val) => HostResult::Success(val),
-            Err(e) => {
-                let msg = e.to_string();
-                let code =
-                    if msg.contains("not on a branch") || msg.contains("not a git repository") {
-                        "not_git_repo"
-                    } else if msg.contains("no remote") || msg.contains("No remote") {
-                        "no_remote"
-                    } else if msg.contains("gh auth") || msg.contains("not logged") {
-                        "not_authenticated"
-                    } else if msg.contains("already exists") {
-                        "pr_exists"
-                    } else {
-                        "internal_error"
-                    };
-                HostResult::Error(HostError {
-                    message: msg,
-                    code: code.to_string(),
-                })
-            }
-        }
-    }
+    HostResult::error(msg, code, None, None)
 }
 
 // ============================================================================
@@ -275,7 +254,10 @@ fn file_pr_host_fn(
     let input: FilePRInput = get_input(plugin, inputs[0])?;
 
     let result = file_pr(&input);
-    let output: HostResult<FilePROutput> = result.into();
+    let output: HostResult<FilePROutput> = match result {
+        Ok(val) => HostResult::Success(val),
+        Err(e) => map_error(e),
+    };
 
     outputs[0] = set_output(plugin, &output)?;
     Ok(())
@@ -287,15 +269,15 @@ mod tests {
 
     #[test]
     fn test_host_error_codes() {
-        let err: HostResult<()> = Err(anyhow::anyhow!("not on a branch")).into();
+        let err: HostResult<FilePROutput> = map_error(anyhow::anyhow!("not on a branch"));
         match err {
-            HostResult::Error(e) => assert_eq!(e.code, "not_git_repo"),
+            HostResult::Error(e) => assert_eq!(e.code, ErrorCode::GitError),
             _ => panic!("Expected error"),
         }
 
-        let err: HostResult<()> = Err(anyhow::anyhow!("gh auth login required")).into();
+        let err: HostResult<FilePROutput> = map_error(anyhow::anyhow!("gh auth login required"));
         match err {
-            HostResult::Error(e) => assert_eq!(e.code, "not_authenticated"),
+            HostResult::Error(e) => assert_eq!(e.code, ErrorCode::NotAuthenticated),
             _ => panic!("Expected error"),
         }
     }

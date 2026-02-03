@@ -5,6 +5,9 @@
 module ExoMonad.Guest.HostCall
   ( callHost,
     callHostVoid,
+    HostResult (..),
+    HostErrorDetails (..),
+    ErrorContext (..),
     -- Git
     host_git_get_branch,
     host_git_get_worktree,
@@ -43,7 +46,7 @@ module ExoMonad.Guest.HostCall
 where
 
 import Control.Exception (bracket)
-import Data.Aeson (FromJSON, ToJSON, eitherDecode, encode, (.:))
+import Data.Aeson (FromJSON, ToJSON (..), eitherDecode, encode, object, (.:), (.:?), (.!=), (.=))
 import qualified Data.Aeson as Aeson
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy (fromStrict, toStrict)
@@ -61,10 +64,25 @@ import GHC.Generics (Generic)
 -- ============================================================================
 
 data HostResult a = HostSuccess a | HostError HostErrorDetails
-  deriving (Show, Generic)
+  deriving (Show, Eq, Generic)
 
-data HostErrorDetails = HostErrorDetails {errorMessage :: Text}
-  deriving (Show, Generic)
+data HostErrorDetails = HostErrorDetails
+  { hostErrorMessage :: Text,
+    hostErrorCode :: Text,
+    hostErrorContext :: Maybe ErrorContext,
+    hostErrorSuggestion :: Maybe Text
+  }
+  deriving (Show, Eq, Generic)
+
+data ErrorContext = ErrorContext
+  { errorContextCommand :: Maybe Text,
+    errorContextExitCode :: Maybe Int,
+    errorContextStderr :: Maybe Text,
+    errorContextStdout :: Maybe Text,
+    errorContextFilePath :: Maybe Text,
+    errorContextWorkingDir :: Maybe Text
+  }
+  deriving (Show, Eq, Generic)
 
 instance (FromJSON a) => FromJSON (HostResult a) where
   parseJSON = Aeson.withObject "HostResult" $ \v -> do
@@ -74,9 +92,56 @@ instance (FromJSON a) => FromJSON (HostResult a) where
       "Error" -> HostError <$> v .: "payload"
       _ -> fail "Unknown kind"
 
+instance (ToJSON a) => ToJSON (HostResult a) where
+  toJSON (HostSuccess payload) =
+    object
+      [ "kind" .= ("Success" :: Text),
+        "payload" .= payload
+      ]
+  toJSON (HostError details) =
+    object
+      [ "kind" .= ("Error" :: Text),
+        "payload" .= details
+      ]
+
 instance FromJSON HostErrorDetails where
   parseJSON = Aeson.withObject "HostErrorDetails" $ \v ->
-    HostErrorDetails <$> v .: "message"
+    HostErrorDetails
+      <$> v .: "message"
+      <*> v .:? "code" .!= "internal_error" -- Default for backward compatibility
+      <*> v .:? "context"
+      <*> v .:? "suggestion"
+
+instance ToJSON HostErrorDetails where
+  toJSON (HostErrorDetails msg code ctx sugg) =
+    object
+      [ "message" .= msg,
+        "code" .= code,
+        "context" .= ctx,
+        "suggestion" .= sugg
+      ]
+
+instance FromJSON ErrorContext where
+  parseJSON = Aeson.withObject "ErrorContext" $ \v ->
+    ErrorContext
+      <$> v .:? "command"
+      <*> v .:? "exit_code"
+      <*> v .:? "stderr"
+      <*> v .:? "stdout"
+      <*> v .:? "file_path"
+      <*> v .:? "working_dir"
+
+instance ToJSON ErrorContext where
+  toJSON (ErrorContext cmd code stderr stdout path dir) =
+    object
+      [ "command" .= cmd,
+        "exit_code" .= code,
+        "stderr" .= stderr,
+        "stdout" .= stdout,
+        "file_path" .= path,
+        "working_dir" .= dir
+      ]
+
 
 -- ============================================================================
 -- Log Types (matches Rust LogPayload/LogLevel)
@@ -183,7 +248,24 @@ callHost rawFn request = do
           Left decodeErr -> pure $ Left ("JSON decode error: " ++ decodeErr)
           Right result -> case result of
             HostSuccess val -> pure $ Right val
-            HostError (HostErrorDetails msg) -> pure $ Left (T.unpack msg)
+            HostError details -> pure $ Left (formatError details)
+
+formatError :: HostErrorDetails -> String
+formatError details =
+  T.unpack $
+    "[" <> hostErrorCode details <> "] " <> hostErrorMessage details
+      <> maybe "" (\s -> "\nSuggestion: " <> s) (hostErrorSuggestion details)
+      <> maybe "" formatContext (hostErrorContext details)
+
+formatContext :: ErrorContext -> Text
+formatContext ctx =
+  "\nContext:"
+    <> maybe "" (\c -> "\n  Command: " <> c) (errorContextCommand ctx)
+    <> maybe "" (\e -> "\n  Exit Code: " <> T.pack (show e)) (errorContextExitCode ctx)
+    <> maybe "" (\s -> "\n  Stderr: " <> s) (errorContextStderr ctx)
+    <> maybe "" (\s -> "\n  Stdout: " <> s) (errorContextStdout ctx)
+    <> maybe "" (\p -> "\n  File: " <> p) (errorContextFilePath ctx)
+    <> maybe "" (\w -> "\n  Working Dir: " <> w) (errorContextWorkingDir ctx)
 
 -- | Call a host function that returns void (fire-and-forget, e.g., logging)
 callHostVoid :: (ToJSON req) => (Word64 -> IO ()) -> req -> IO ()

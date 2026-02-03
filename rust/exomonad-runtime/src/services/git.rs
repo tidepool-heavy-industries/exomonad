@@ -1,3 +1,4 @@
+use crate::common::{HostResult};
 use crate::services::docker::DockerExecutor;
 use anyhow::{Context, Result};
 use duct::cmd;
@@ -301,29 +302,6 @@ struct GitLogInput {
     #[serde(rename = "containerId")]
     container_id: String,
     limit: u32,
-}
-
-#[derive(Serialize)]
-#[serde(tag = "kind", content = "payload")]
-enum HostResult<T> {
-    Success(T),
-    Error(HostError),
-}
-
-#[derive(Serialize)]
-struct HostError {
-    message: String,
-}
-
-impl<T> From<Result<T>> for HostResult<T> {
-    fn from(res: Result<T>) -> Self {
-        match res {
-            Ok(val) => HostResult::Success(val),
-            Err(e) => HostResult::Error(HostError {
-                message: e.to_string(),
-            }),
-        }
-    }
 }
 
 fn block_on<F: std::future::Future>(future: F) -> Result<F::Output, Error> {

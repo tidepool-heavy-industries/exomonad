@@ -3,6 +3,8 @@
 // Uses `gh api` to check for Copilot review comments on a PR.
 // Blocks until comments are found or timeout is reached.
 
+use crate::common::HostResult;
+use crate::services::git;
 use anyhow::{Context, Result};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
 use serde::{Deserialize, Serialize};
@@ -11,7 +13,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
-use super::{git, zellij_events};
+use super::zellij_events;
 
 // ============================================================================
 // Types
@@ -36,7 +38,7 @@ fn default_poll_interval() -> u64 {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CopilotReviewOutput {
-    pub status: String, // "reviewed", "pending", "timeout"
+    pub status: String,
     pub comments: Vec<CopilotComment>,
 }
 
@@ -49,47 +51,9 @@ pub struct CopilotComment {
 }
 
 // ============================================================================
-// Host Output Wrapper
+// Service
 // ============================================================================
 
-#[derive(Serialize)]
-#[serde(tag = "kind", content = "payload")]
-enum HostResult<T> {
-    Success(T),
-    Error(HostError),
-}
-
-#[derive(Serialize)]
-struct HostError {
-    message: String,
-    code: String,
-}
-
-impl<T> From<Result<T>> for HostResult<T> {
-    fn from(res: Result<T>) -> Self {
-        match res {
-            Ok(val) => HostResult::Success(val),
-            Err(e) => {
-                let msg = e.to_string();
-                let code = if msg.contains("404") || msg.contains("not found") {
-                    "pr_not_found"
-                } else if msg.contains("401") || msg.contains("403") {
-                    "not_authorized"
-                } else {
-                    "internal_error"
-                };
-                HostResult::Error(HostError {
-                    message: msg,
-                    code: code.to_string(),
-                })
-            }
-        }
-    }
-}
-
-// ============================================================================
-// Implementation
-// ============================================================================
 
 /// Get repo owner/name from git remote
 fn get_repo_info() -> Result<(String, String)> {

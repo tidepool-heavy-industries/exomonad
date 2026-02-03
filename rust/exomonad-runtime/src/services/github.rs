@@ -1,3 +1,4 @@
+use crate::common::{ErrorCode, HostResult};
 use anyhow::Result;
 use exomonad_shared::{GithubOwner, GithubRepo};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
@@ -420,34 +421,19 @@ impl GitHubService {
 // Host Functions
 // ============================================================================
 
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "kind", content = "payload")]
-enum GitHubHostOutput<T> {
-    Success(T),
-    Error(GitHubHostError),
-}
-
-#[derive(Serialize, Deserialize)]
-struct GitHubHostError {
-    message: String,
-    code: String,
-}
-
-fn map_error(e: anyhow::Error) -> GitHubHostError {
+fn map_error<T>(e: anyhow::Error) -> HostResult<T> {
     let msg = e.to_string();
     let code = if msg.contains("403") || msg.contains("rate limit") {
-        "rate_limited"
+        ErrorCode::NetworkError // Or a specific RateLimited code if we add one
     } else if msg.contains("404") {
-        "not_found"
+        ErrorCode::NotFound
     } else if msg.contains("401") {
-        "unauthorized"
+        ErrorCode::NotAuthenticated
     } else {
-        "internal_error"
+        ErrorCode::InternalError
     };
-    GitHubHostError {
-        message: msg,
-        code: code.to_string(),
-    }
+    
+    HostResult::error(msg, code, None, None)
 }
 
 // Helper functions for Extism memory access (Pattern A: memory handles)
@@ -555,8 +541,8 @@ fn github_list_issues(
     let result = block_on(service.list_issues(&input.repo, input.filter.as_ref()))?;
 
     let output = match result {
-        Ok(issues) => GitHubHostOutput::Success(issues),
-        Err(e) => GitHubHostOutput::Error(map_error(e)),
+        Ok(issues) => HostResult::Success(issues),
+        Err(e) => map_error(e),
     };
 
     outputs[0] = set_output(plugin, &output)?;
@@ -583,8 +569,8 @@ fn github_get_issue(
     let result = block_on(service.get_issue(&input.repo, input.number))?;
 
     let output = match result {
-        Ok(issue) => GitHubHostOutput::Success(issue),
-        Err(e) => GitHubHostOutput::Error(map_error(e)),
+        Ok(issue) => HostResult::Success(issue),
+        Err(e) => map_error(e),
     };
 
     outputs[0] = set_output(plugin, &output)?;
@@ -611,8 +597,8 @@ fn github_create_pr(
     let result = block_on(service.create_pr(&input.repo, input.spec))?;
 
     let output = match result {
-        Ok(pr) => GitHubHostOutput::Success(pr),
-        Err(e) => GitHubHostOutput::Error(map_error(e)),
+        Ok(pr) => HostResult::Success(pr),
+        Err(e) => map_error(e),
     };
 
     outputs[0] = set_output(plugin, &output)?;
@@ -639,8 +625,8 @@ fn github_list_prs(
     let result = block_on(service.list_prs(&input.repo, input.filter.as_ref()))?;
 
     let output = match result {
-        Ok(prs) => GitHubHostOutput::Success(prs),
-        Err(e) => GitHubHostOutput::Error(map_error(e)),
+        Ok(prs) => HostResult::Success(prs),
+        Err(e) => map_error(e),
     };
 
     outputs[0] = set_output(plugin, &output)?;
@@ -667,8 +653,8 @@ fn github_get_pr_for_branch(
     let result = block_on(service.get_pr_for_branch(&input.repo, &input.head))?;
 
     let output = match result {
-        Ok(pr) => GitHubHostOutput::Success(pr),
-        Err(e) => GitHubHostOutput::Error(map_error(e)),
+        Ok(pr) => HostResult::Success(pr),
+        Err(e) => map_error(e),
     };
 
     outputs[0] = set_output(plugin, &output)?;
@@ -695,8 +681,8 @@ fn github_get_pr_review_comments(
     let result = block_on(service.get_pr_review_comments(&input.repo, input.pr_number))?;
 
     let output = match result {
-        Ok(comments) => GitHubHostOutput::Success(comments),
-        Err(e) => GitHubHostOutput::Error(map_error(e)),
+        Ok(comments) => HostResult::Success(comments),
+        Err(e) => map_error(e),
     };
 
     outputs[0] = set_output(plugin, &output)?;
