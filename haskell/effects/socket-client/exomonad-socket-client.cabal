@@ -4,7 +4,7 @@ version:            0.1.0.0
 synopsis:           Unix socket client for ExoMonad effects
 license:            MIT
 author:             Tidepool Heavy Industries
-maintainer:         engineering@tidepool.li
+maintainer:         engineering@exomonad.io
 category:           Network
 build-type:         Simple
 

@@ -146,7 +146,7 @@ mod tests {
     fn mcp_call_input_preserves_tool_args() {
         let args = json!({
             "owner": "exomonad",
-            "repo": "tidepool",
+            "repo": "exomonad",
             "number": 42
         });
 
