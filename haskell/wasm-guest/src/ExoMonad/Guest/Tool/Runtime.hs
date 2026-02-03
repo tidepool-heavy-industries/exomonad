@@ -80,7 +80,7 @@ testHandler = do
           res <- callHost @req @resp hostFn req
           case res of
             Left err -> do
-              output (BSL.toStrict $ Aeson.encode $ TestResult @Value False Nothing (Just $ "Host call error: " ++ err))
+              output (BSL.toStrict $ Aeson.encode $ TestResult @Value False Nothing (Just $ "Host call error: " ++ T.unpack err))
               pure 1
             Right successVal -> do
               output (BSL.toStrict $ Aeson.encode $ TestResult @resp True (Just successVal) Nothing)
