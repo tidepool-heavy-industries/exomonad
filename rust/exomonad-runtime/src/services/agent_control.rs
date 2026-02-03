@@ -359,28 +359,23 @@ impl AgentControlService {
             let path = Path::new(&agent.worktree_path);
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                 if name.starts_with(&prefix) {
-                    // Parse the worktree name to extract slug and agent type
-                    // Format: gh-{issue_id}-{slug}-{agent_suffix}
-                    // Split from right first since agent_suffix (claude/gemini) has no hyphens
-                    let (rest, agent_suffix) = name.rsplit_once('-').unwrap_or((name, ""));
-
-                    // Now extract slug from rest (which is "gh-{issue_id}-{slug}")
-                    // Skip past "gh-{issue_id}-" prefix
-                    let slug = rest.strip_prefix(&prefix).unwrap_or("");
-
-                    // Determine agent type from suffix
-                    let agent_type = if agent_suffix == "claude" {
-                        AgentType::Claude
-                    } else {
-                        AgentType::Gemini
-                    };
-
-                    // Construct the display name (tab name)
-                    let display_name = agent_type.display_name(issue_id, slug);
-
-                    // Close Zellij tab with the display name
-                    if let Err(e) = self.close_zellij_tab(&display_name).await {
-                        warn!(tab_name = %display_name, error = %e, "Failed to close Zellij tab (may not exist)");
+                    // Parse the worktree name using helper function
+                    if let Some(parsed) = parse_worktree_name(name) {
+                        // Close Zellij tab with the display name (if agent type is known)
+                        match parsed.agent_type {
+                            Some(agent_type) => {
+                                let display_name = agent_type.display_name(issue_id, parsed.slug);
+                                if let Err(e) = self.close_zellij_tab(&display_name).await {
+                                    warn!(tab_name = %display_name, error = %e, "Failed to close Zellij tab (may not exist)");
+                                }
+                            }
+                            None => {
+                                warn!(
+                                    worktree_name = %name,
+                                    "Unknown agent suffix in worktree name; skipping Zellij tab close"
+                                );
+                            }
+                        }
                     }
 
                     self.delete_worktree(path, force).await?;
@@ -973,7 +968,42 @@ fn slugify(title: &str) -> String {
         .collect()
 }
 
-// ============================================================================ 
+/// Parsed components of a worktree name.
+#[derive(Debug, PartialEq)]
+struct ParsedWorktreeName<'a> {
+    issue_id: &'a str,
+    slug: &'a str,
+    agent_type: Option<AgentType>,
+}
+
+/// Parse a worktree name into its components.
+/// Format: gh-{issue_id}-{slug}-{agent_suffix}
+/// Returns None if the name doesn't match the expected format.
+fn parse_worktree_name(name: &str) -> Option<ParsedWorktreeName<'_>> {
+    // Must start with "gh-"
+    let rest = name.strip_prefix("gh-")?;
+
+    // Split to get issue_id
+    let (issue_id, rest) = rest.split_once('-')?;
+
+    // Split from right to get agent_suffix (claude/gemini have no hyphens)
+    let (slug, agent_suffix) = rest.rsplit_once('-')?;
+
+    // Parse agent type
+    let agent_type = match agent_suffix {
+        "claude" => Some(AgentType::Claude),
+        "gemini" => Some(AgentType::Gemini),
+        _ => None,
+    };
+
+    Some(ParsedWorktreeName {
+        issue_id,
+        slug,
+        agent_type,
+    })
+}
+
+// ============================================================================
 // Host Functions for WASM
 // ============================================================================ 
 
@@ -1323,5 +1353,51 @@ mod tests {
         // Invalid agent type should fail at parse boundary
         let invalid = serde_json::from_str::<AgentType>("\"invalid\"");
         assert!(invalid.is_err());
+    }
+
+    #[test]
+    fn test_parse_worktree_name_claude() {
+        let parsed = super::parse_worktree_name("gh-123-fix-bug-claude").unwrap();
+        assert_eq!(parsed.issue_id, "123");
+        assert_eq!(parsed.slug, "fix-bug");
+        assert_eq!(parsed.agent_type, Some(AgentType::Claude));
+    }
+
+    #[test]
+    fn test_parse_worktree_name_gemini() {
+        let parsed = super::parse_worktree_name("gh-456-add-feature-gemini").unwrap();
+        assert_eq!(parsed.issue_id, "456");
+        assert_eq!(parsed.slug, "add-feature");
+        assert_eq!(parsed.agent_type, Some(AgentType::Gemini));
+    }
+
+    #[test]
+    fn test_parse_worktree_name_slug_with_hyphens() {
+        // Slug can contain hyphens
+        let parsed = super::parse_worktree_name("gh-789-fix-the-big-bug-claude").unwrap();
+        assert_eq!(parsed.issue_id, "789");
+        assert_eq!(parsed.slug, "fix-the-big-bug");
+        assert_eq!(parsed.agent_type, Some(AgentType::Claude));
+    }
+
+    #[test]
+    fn test_parse_worktree_name_unknown_suffix() {
+        // Unknown agent suffix returns None for agent_type
+        let parsed = super::parse_worktree_name("gh-123-test-unknown").unwrap();
+        assert_eq!(parsed.issue_id, "123");
+        assert_eq!(parsed.slug, "test");
+        assert_eq!(parsed.agent_type, None);
+    }
+
+    #[test]
+    fn test_parse_worktree_name_invalid_format() {
+        // Missing prefix
+        assert!(super::parse_worktree_name("123-test-claude").is_none());
+
+        // No hyphens after gh-
+        assert!(super::parse_worktree_name("gh-nohyphens").is_none());
+
+        // Only gh- prefix
+        assert!(super::parse_worktree_name("gh-123").is_none());
     }
 }
