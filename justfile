@@ -119,7 +119,7 @@ install-hooks:
 # Build WASM guest and install to ~/.exomonad/wasm/
 wasm role="tl":
     @echo ">>> Building wasm-guest-{{role}}..."
-    ./scripts/recompile-role.sh {{role}}
+    ./scripts/recompile-role.sh "{{role}}"
     @echo ">>> Installing to ~/.exomonad/wasm/..."
     mkdir -p ~/.exomonad/wasm
     rm -f ~/.exomonad/wasm/wasm-guest-{{role}}.wasm
@@ -141,7 +141,7 @@ wasm-all:
 
 # Build WASM guest (same as wasm now)
 wasm-dev role="tl":
-    @just wasm {{role}}
+    @just wasm "{{role}}"
 
 # Install everything: Rust binaries + WASM plugins (uses release build)
 install-all:

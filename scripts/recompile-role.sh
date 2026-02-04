@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-ROLE=$1
+ROLE="${1:-}"
 if [ -z "$ROLE" ]; then
   echo "Usage: $0 <role>"
   exit 1
