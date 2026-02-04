@@ -402,7 +402,7 @@ async fn main() -> Result<()> {
             // and forwards them to the UIService to resolve pending host function calls.
             let socket_path = std::env::var("EXOMONAD_CONTROL_SOCKET")
                 .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from(".exomonad/sockets/control.sock"));
+                .unwrap_or_else(|_| project_dir.join(".exomonad/sockets/control.sock"));
             
             if let Some(parent) = socket_path.parent() {
                 let _ = std::fs::create_dir_all(parent);
@@ -419,6 +419,7 @@ async fn main() -> Result<()> {
             // CancellationToken for graceful shutdown
             let cancel_token = tokio_util::sync::CancellationToken::new();
             let cancel_token_clone = cancel_token.clone();
+            let socket_path_clone = socket_path.clone();
 
             // Spawn background task for socket
             let socket_task = tokio::spawn(async move {
@@ -446,7 +447,7 @@ async fn main() -> Result<()> {
                 }
                 
                 // Cleanup socket file on shutdown
-                if let Err(e) = std::fs::remove_file(&socket_path) {
+                if let Err(e) = std::fs::remove_file(&socket_path_clone) {
                     warn!("Failed to remove socket file: {}", e);
                 }
             });
@@ -476,7 +477,10 @@ async fn main() -> Result<()> {
             
             // Signal socket listener to stop
             cancel_token.cancel();
-            let _ = socket_task.await;
+            match socket_task.await {
+                Ok(_) => debug!("Socket listener shut down cleanly"),
+                Err(e) => warn!("Socket listener task failed: {}", e),
+            }
 
             // Propagate MCP result
             mcp_result?;
@@ -571,25 +575,34 @@ async fn handle_socket_client(stream: &mut tokio::net::UnixStream, ui_service: A
         match reader.read_line(&mut line).await {
             Ok(0) => break, // EOF
             Ok(_) => {
-                if let Ok(req) = serde_json::from_str::<ServiceRequest>(&line) {
-                    if let ServiceRequest::UserInteraction { request_id, payload, cancel } = req {
-                        let result = if cancel {
-                            exomonad_ui_protocol::PopupResult {
-                                button: "cancel".to_string(),
-                                values: serde_json::json!({}),
-                                time_spent_seconds: None,
+                match serde_json::from_str::<ServiceRequest>(&line) {
+                    Ok(req) => {
+                        if let ServiceRequest::UserInteraction { request_id, payload, cancel } = req {
+                            let result = if cancel {
+                                exomonad_ui_protocol::PopupResult {
+                                    button: "cancel".to_string(),
+                                    values: serde_json::json!({}),
+                                    time_spent_seconds: None,
+                                }
+                            } else {
+                                exomonad_ui_protocol::PopupResult {
+                                    button: "submit".to_string(),
+                                    values: payload.unwrap_or(serde_json::json!({})),
+                                    time_spent_seconds: None,
+                                }
+                            };
+                            
+                            if let Err(e) = ui_service.handle_reply(&request_id, result) {
+                                warn!("Failed to handle reply: {}", e);
                             }
-                        } else {
-                            exomonad_ui_protocol::PopupResult {
-                                button: "submit".to_string(),
-                                values: payload.unwrap_or(serde_json::json!({})),
-                                time_spent_seconds: None,
-                            }
-                        };
-                        
-                        if let Err(e) = ui_service.handle_reply(&request_id, result) {
-                            warn!("Failed to handle reply: {}", e);
                         }
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Failed to parse ServiceRequest from Zellij socket: {} (line: {})",
+                            e,
+                            line.trim_end()
+                        );
                     }
                 }
             }

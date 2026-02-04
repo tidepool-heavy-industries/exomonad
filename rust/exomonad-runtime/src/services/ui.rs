@@ -26,6 +26,7 @@ impl UIService {
     pub async fn show_popup(&self, definition: PopupDefinition) -> Result<PopupResult> {
         let request_id = uuid::Uuid::new_v4().to_string();
         let (tx, rx) = oneshot::channel();
+        let title = definition.title.clone();
 
         // Register pending request
         {
@@ -55,6 +56,7 @@ impl UIService {
             
         if !status.success() {
             // Clean up if sending failed
+            tracing::warn!(%status, %request_id, "Failed to send message to Zellij plugin; zellij might not be running or in PATH");
             let mut pending = self.pending_requests.lock().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
             pending.remove(&request_id);
             return Err(anyhow::anyhow!("zellij action message failed with status {}", status));
@@ -71,11 +73,16 @@ impl UIService {
                 // Timeout occurred
                 let mut pending = self.pending_requests.lock().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
                 pending.remove(&request_id);
-                Err(anyhow::anyhow!("Popup request timed out after 10 minutes"))
+                Err(anyhow::anyhow!("Popup request '{}' ({}) timed out after 10 minutes", title, request_id))
             }
         }
     }
 
+    /// Handles a reply from the UI (Zellij plugin).
+    ///
+    /// Note: A rare race condition exists where a timeout might occur just as a reply arrives.
+    /// In this case, the timeout will be returned to the caller, and the late reply will be
+    /// logged and ignored since the request_id has been removed from pending_requests.
     pub fn handle_reply(&self, request_id: &str, result: PopupResult) -> Result<()> {
         let mut pending = self.pending_requests.lock().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
         

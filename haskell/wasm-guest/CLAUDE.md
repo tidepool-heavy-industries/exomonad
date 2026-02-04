@@ -42,7 +42,7 @@ The `UI` effect allows agents to request structured input from the human user vi
 
 ```haskell
 data UI m a where
-  ShowPopup :: PopupDefinition -> UI m PopupResult
+  ShowPopup :: PopupDefinition -> UI m (Either T.Text PopupResult)
 ```
 
 **Popup Definition:**
@@ -64,6 +64,7 @@ data Component
 ```haskell
 import ExoMonad.Guest.Effects.UI
 import ExoMonad.Guest.TUI
+import qualified Data.Text as T
 
 askConfirmation :: Member UI r => Sem r Bool
 askConfirmation = do
@@ -75,7 +76,13 @@ askConfirmation = do
             ]
         }
   result <- showPopup def
-  -- Parse result...
+  case result of
+    Left err -> do
+      -- Handle failure to show popup
+      pure False
+    Right popupResult -> do
+      -- Parse result (e.g. check values)
+      pure (button popupResult == "submit")
 ```
 
 **Note:** Due to cross-compilation limitations with Template Haskell in GHC 9.12 WASM backend, the `UI` effect uses manually written smart constructors and interpreters instead of `makeSem`.

@@ -14,7 +14,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import GHC.Generics (Generic)
 import ExoMonad.Guest.FFI (FFIBoundary)
-import Data.Word (Word)
+import Data.Word (Word32)
 
 -- | Popup definition matches Rust PopupDefinition
 data PopupDefinition = PopupDefinition
@@ -80,21 +80,21 @@ data Component
       { id :: Text
       , label :: Text
       , placeholder :: Maybe Text
-      , rows :: Maybe Word
+      , rows :: Maybe Word32
       , visible_when :: Maybe VisibilityRule
       }
   | ChoiceComponent
       { id :: Text
       , label :: Text
       , options :: [Text]
-      , choiceDefault :: Maybe Word
+      , choiceDefault :: Maybe Word32
       , visible_when :: Maybe VisibilityRule
       }
   | MultiselectComponent
       { id :: Text
       , label :: Text
       , options :: [Text]
-      , multiselectDefault :: Maybe Word
+      , multiselectDefault :: Maybe Word32
       , visible_when :: Maybe VisibilityRule
       }
   | GroupComponent
@@ -167,5 +167,5 @@ visibleWhen rule c = case c of
   CheckboxComponent i l d _ -> CheckboxComponent i l d (Just rule)
   TextboxComponent i l ph r _ -> TextboxComponent i l ph r (Just rule)
   ChoiceComponent i l o d _ -> ChoiceComponent i l o d (Just rule)
-  MultiselectComponent i l o _ -> MultiselectComponent i l o (Just rule)
+  MultiselectComponent i l o d _ -> MultiselectComponent i l o d (Just rule)
   GroupComponent i l _ -> GroupComponent i l (Just rule)
