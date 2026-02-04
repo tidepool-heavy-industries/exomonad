@@ -8,6 +8,7 @@ use crate::services::git;
 use anyhow::{Context, Result};
 use duct::cmd;
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
+use extism_convert::Json;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
@@ -241,14 +242,6 @@ fn get_input<T: serde::de::DeserializeOwned>(
     Ok(serde_json::from_slice(bytes)?)
 }
 
-fn set_output<T: Serialize>(
-    plugin: &mut CurrentPlugin,
-    data: &T,
-) -> std::result::Result<Val, Error> {
-    let json = serde_json::to_vec(data)?;
-    let handle = plugin.memory_new(json)?;
-    Ok(plugin.memory_to_val(handle))
-}
 
 pub fn register_host_functions() -> Vec<Function> {
     vec![Function::new(
@@ -285,7 +278,7 @@ fn file_pr_host_fn(
         Err(e) => map_error(e),
     };
 
-    outputs[0] = set_output(plugin, &output)?;
+    plugin.memory_set_val(&mut outputs[0], Json(output))?;
     Ok(())
 }
 

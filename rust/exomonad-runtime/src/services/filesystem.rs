@@ -6,6 +6,7 @@
 use crate::common::{FFIBoundary, HostResult, IntoFFIResult};
 use anyhow::{Context, Result};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
+use extism_convert::Json;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -168,11 +169,6 @@ fn get_input<T: serde::de::DeserializeOwned>(
     Ok(serde_json::from_slice(bytes)?)
 }
 
-fn set_output<T: Serialize>(plugin: &mut CurrentPlugin, data: &T) -> Result<Val, Error> {
-    let json = serde_json::to_vec(data)?;
-    let handle = plugin.memory_new(json)?;
-    Ok(plugin.memory_to_val(handle))
-}
 
 fn block_on<F: std::future::Future>(future: F) -> Result<F::Output, Error> {
     match tokio::runtime::Handle::try_current() {
@@ -215,7 +211,7 @@ pub fn fs_read_file_host_fn(service: Arc<FileSystemService>) -> Function {
 
             let output: HostResult<ReadFileOutput> = result.into_ffi_result();
 
-            outputs[0] = set_output(plugin, &output)?;
+            plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
         },
     )
@@ -251,7 +247,7 @@ pub fn fs_write_file_host_fn(service: Arc<FileSystemService>) -> Function {
 
             let output: HostResult<WriteFileOutput> = result.into_ffi_result();
 
-            outputs[0] = set_output(plugin, &output)?;
+            plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
         },
     )

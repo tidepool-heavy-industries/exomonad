@@ -10,6 +10,7 @@
 use crate::common::{FFIBoundary, HostResult, IntoFFIResult, TimeoutError};
 use anyhow::{anyhow, Context, Result};
 use exomonad_shared::{GithubOwner, GithubRepo, IssueNumber};
+use extism_convert::Json;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -984,6 +985,34 @@ project_dir = "../../.."
             "Wrote .exomonad/config.toml with role=dev"
         );
 
+        // Create symlink to origin's wasm directory
+        // Worktree is at: {project}/.exomonad/worktrees/gh-xxx/
+        // Symlink at:     {project}/.exomonad/worktrees/gh-xxx/.exomonad/wasm
+        // Target:         {project}/.exomonad/wasm
+        // Relative path:  ../../../wasm (up to gh-xxx, up to worktrees, up to .exomonad, then wasm)
+        let wasm_link = exomonad_dir.join("wasm");
+        let wasm_target = Path::new("../../../wasm");
+        if !wasm_link.exists() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::symlink;
+                symlink(wasm_target, &wasm_link)
+                    .context("Failed to create wasm symlink")?;
+                tracing::info!(
+                    worktree = %worktree_path.display(),
+                    target = %wasm_target.display(),
+                    "Created .exomonad/wasm symlink"
+                );
+            }
+            #[cfg(not(unix))]
+            {
+                tracing::warn!(
+                    worktree = %worktree_path.display(),
+                    "Symlinks not supported on this platform, skipping wasm symlink"
+                );
+            }
+        }
+
         // Write .mcp.json (no --wasm argument, config file handles WASM path)
         let sidecar_path = std::env::current_exe()
             .ok()
@@ -1239,11 +1268,6 @@ fn get_input<T: serde::de::DeserializeOwned>(
     Ok(serde_json::from_slice(bytes)?)
 }
 
-fn set_output<T: Serialize>(plugin: &mut CurrentPlugin, data: &T) -> Result<Val, Error> {
-    let json = serde_json::to_vec(data)?;
-    let handle = plugin.memory_new(json)?;
-    Ok(plugin.memory_to_val(handle))
-}
 
 fn block_on<F: std::future::Future>(future: F) -> Result<F::Output, Error> {
     match tokio::runtime::Handle::try_current() {
@@ -1294,7 +1318,7 @@ pub fn spawn_agent_host_fn(service: Arc<AgentControlService>) -> Function {
 
             let output: HostResult<SpawnResult> = result.into_ffi_result();
 
-            outputs[0] = set_output(plugin, &output)?;
+            plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
         },
     )
@@ -1335,7 +1359,7 @@ pub fn spawn_agents_host_fn(service: Arc<AgentControlService>) -> Function {
 
             let output = HostResult::Success(result);
 
-            outputs[0] = set_output(plugin, &output)?;
+            plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
         },
     )
@@ -1371,7 +1395,7 @@ pub fn cleanup_agent_host_fn(service: Arc<AgentControlService>) -> Function {
 
             let output: HostResult<()> = result.into_ffi_result();
 
-            outputs[0] = set_output(plugin, &output)?;
+            plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
         },
     )
@@ -1415,7 +1439,7 @@ pub fn cleanup_agents_host_fn(service: Arc<AgentControlService>) -> Function {
 
             let output = HostResult::Success(result);
 
-            outputs[0] = set_output(plugin, &output)?;
+            plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
         },
     )
@@ -1457,7 +1481,7 @@ pub fn cleanup_merged_agents_host_fn(service: Arc<AgentControlService>) -> Funct
 
             let output: HostResult<BatchCleanupResult> = result.into_ffi_result();
 
-            outputs[0] = set_output(plugin, &output)?;
+            plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
         },
     )
@@ -1492,7 +1516,7 @@ pub fn list_agents_host_fn(service: Arc<AgentControlService>) -> Function {
 
             let output: HostResult<Vec<AgentInfo>> = result.into_ffi_result();
 
-            outputs[0] = set_output(plugin, &output)?;
+            plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())
         },
     )

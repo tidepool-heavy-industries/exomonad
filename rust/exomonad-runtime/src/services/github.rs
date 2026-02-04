@@ -2,6 +2,7 @@ use crate::common::{ErrorCode, FFIBoundary, HostResult};
 use anyhow::{anyhow, Result};
 use exomonad_shared::{GithubOwner, GithubRepo};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
+use extism_convert::Json;
 use octocrab::{models, params, Octocrab, OctocrabBuilder};
 use serde::{Deserialize, Serialize};
 use tokio::time::{timeout, Duration};
@@ -540,14 +541,6 @@ fn get_input<T: serde::de::DeserializeOwned>(
     Ok(serde_json::from_slice(bytes)?)
 }
 
-fn set_output<T: Serialize>(
-    plugin: &mut CurrentPlugin,
-    data: &T,
-) -> std::result::Result<Val, Error> {
-    let json = serde_json::to_vec(data)?;
-    let handle = plugin.memory_new(json)?;
-    Ok(plugin.memory_to_val(handle))
-}
 
 fn block_on<F: std::future::Future>(future: F) -> std::result::Result<F::Output, Error> {
     match tokio::runtime::Handle::try_current() {
@@ -643,7 +636,7 @@ fn github_list_issues(
         Err(e) => map_error(e),
     };
 
-    outputs[0] = set_output(plugin, &output)?;
+    plugin.memory_set_val(&mut outputs[0], Json(output))?;
     Ok(())
 }
 
@@ -678,7 +671,7 @@ fn github_get_issue(
         Err(e) => map_error(e),
     };
 
-    outputs[0] = set_output(plugin, &output)?;
+    plugin.memory_set_val(&mut outputs[0], Json(output))?;
     Ok(())
 }
 
@@ -713,7 +706,7 @@ fn github_create_pr(
         Err(e) => map_error(e),
     };
 
-    outputs[0] = set_output(plugin, &output)?;
+    plugin.memory_set_val(&mut outputs[0], Json(output))?;
     Ok(())
 }
 
@@ -748,7 +741,7 @@ fn github_list_prs(
         Err(e) => map_error(e),
     };
 
-    outputs[0] = set_output(plugin, &output)?;
+    plugin.memory_set_val(&mut outputs[0], Json(output))?;
     Ok(())
 }
 
@@ -784,7 +777,7 @@ fn github_get_pr_for_branch(
         Err(e) => map_error(e),
     };
 
-    outputs[0] = set_output(plugin, &output)?;
+    plugin.memory_set_val(&mut outputs[0], Json(output))?;
     Ok(())
 }
 
@@ -820,7 +813,7 @@ fn github_get_pr_review_comments(
         Err(e) => map_error(e),
     };
 
-    outputs[0] = set_output(plugin, &output)?;
+    plugin.memory_set_val(&mut outputs[0], Json(output))?;
     Ok(())
 }
 
