@@ -8,3 +8,10 @@ sockets/
 logs/
 result
 result-*
+
+# Role build artifacts
+roles/*/dist/
+roles/*/gen/
+
+# Runtime state
+sidecar.pid

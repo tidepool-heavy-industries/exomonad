@@ -6,7 +6,8 @@ module Role (config, Tools) where
 import ExoMonad
 
 data Tools mode = Tools
-  { agents :: AgentTools mode
+  { agents :: AgentTools mode,
+    popups :: PopupTools mode
   }
   deriving (Generic)
 
@@ -16,7 +17,8 @@ config =
     { roleName = "tl",
       tools =
         Tools
-          { agents = agentTools
+          { agents = agentTools,
+            popups = popupTools
           },
       hooks = defaultHooks
     }

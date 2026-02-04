@@ -44,6 +44,8 @@ module ExoMonad.Guest.HostCall
     host_file_pr,
     -- Copilot Review
     host_wait_for_copilot_review,
+    -- Popup
+    host_show_popup,
   )
 where
 
@@ -152,6 +154,9 @@ foreign import ccall "file_pr" host_file_pr :: Word64 -> IO Word64
 
 -- Copilot Review host function (poll for Copilot review comments)
 foreign import ccall "wait_for_copilot_review" host_wait_for_copilot_review :: Word64 -> IO Word64
+
+-- Popup host function (show interactive popup and wait for response)
+foreign import ccall "show_popup" host_show_popup :: Word64 -> IO Word64
 
 -- | Call a host function with automatic JSON serialization/deserialization.
 -- Request uses FFIBoundary, response uses FFIBoundary to handle FFIResult wrapper.

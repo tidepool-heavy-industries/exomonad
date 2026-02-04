@@ -181,9 +181,9 @@ EOF
 {-# LANGUAGE TypeApplications #-}
 module Main where
 
-import Foreign.C.Types (CInt)
+import Foreign.C.Types (CInt(..))
 import ExoMonad.Guest.Tool.Runtime (hookHandler, listHandlerRecord, mcpHandlerRecord, wrapHandler)
-import ExoMonad.Guest.Tool.Mode (AsSchema)
+-- AsSchema not needed when using @Tools type application
 import Role (config, Tools)
 import ExoMonad.Types (RoleConfig(..))
 
@@ -195,7 +195,7 @@ handle_mcp_call :: IO CInt
 handle_mcp_call = wrapHandler $ mcpHandlerRecord (tools config)
 
 handle_list_tools :: IO CInt
-handle_list_tools = wrapHandler $ listHandlerRecord @(Tools AsSchema)
+handle_list_tools = wrapHandler $ listHandlerRecord @Tools
 
 handle_pre_tool_use :: IO CInt
 handle_pre_tool_use = wrapHandler $ hookHandler (hooks config)
