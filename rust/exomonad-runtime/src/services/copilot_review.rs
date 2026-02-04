@@ -89,93 +89,133 @@ fn get_repo_info() -> Result<(String, String)> {
     Ok((info.owner.login, info.name))
 }
 
-/// Fetch PR review comments using gh api
+/// Fetch PR review comments using gh api, filtering for current commit and unresolved threads
 fn fetch_pr_comments(owner: &str, repo: &str, pr_number: u64) -> Result<Vec<CopilotComment>> {
-    // 1. Get current PR head SHA to filter out outdated comments
-    let head_output = Command::new("gh")
-        .args([
-            "pr",
-            "view",
-            &pr_number.to_string(),
-            "--json",
-            "headRefOid",
-            "--template",
-            "{{.headRefOid}}",
-        ])
-        .output()
-        .context("Failed to get PR head SHA")?;
-
-    if !head_output.status.success() {
-        let stderr = String::from_utf8_lossy(&head_output.stderr);
-        anyhow::bail!("Failed to get PR head SHA: {}", stderr.trim());
-    }
-
-    let head_sha = String::from_utf8_lossy(&head_output.stdout).trim().to_string();
-    debug!("[CopilotReview] PR #{} head SHA: {}", pr_number, head_sha);
-
-    let endpoint = format!("/repos/{}/{}/pulls/{}/comments", owner, repo, pr_number);
-
-    debug!("[CopilotReview] Fetching comments from: {}", endpoint);
+    // 1. Get current PR head SHA and unresolved threads via GraphQL
+    // This allows us to filter by both commit SHA and resolution status in one call
+    let query = r#"
+        query($owner: String!, $repo: String!, $pr: Int!) {
+          repository(owner: $owner, name: $repo) {
+            pullRequest(number: $pr) {
+              headRefOid
+              reviewThreads(first: 100) {
+                nodes {
+                  isResolved
+                  comments(first: 100) {
+                    nodes {
+                      commit { oid }
+                      path
+                      line
+                      body
+                      diffHunk
+                      author { login }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+    "#;
 
     let output = Command::new("gh")
-        .args(["api", &endpoint])
+        .args([
+            "api",
+            "graphql",
+            "-f",
+            &format!("query={}", query),
+            "-f",
+            &format!("owner={}", owner),
+            "-f",
+            &format!("repo={}", repo),
+            "-F",
+            &format!("pr={}", pr_number),
+        ])
         .output()
-        .context("Failed to execute gh api for PR comments")?;
+        .context("Failed to execute gh api graphql for PR comments")?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("Failed to fetch PR comments: {}", stderr.trim());
+        anyhow::bail!("Failed to fetch PR comments via GraphQL: {}", stderr.trim());
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // Parse the comments - GitHub API returns array of comment objects
     #[derive(Deserialize)]
-    struct PRComment {
+    struct GraphQLResponse {
+        data: GraphQLData,
+    }
+    #[derive(Deserialize)]
+    struct GraphQLData {
+        repository: GraphQLRepo,
+    }
+    #[derive(Deserialize)]
+    struct GraphQLRepo {
+        pullRequest: GraphQLPR,
+    }
+    #[derive(Deserialize)]
+    struct GraphQLPR {
+        headRefOid: String,
+        reviewThreads: GraphQLThreads,
+    }
+    #[derive(Deserialize)]
+    struct GraphQLThreads {
+        nodes: Vec<GraphQLThread>,
+    }
+    #[derive(Deserialize)]
+    struct GraphQLThread {
+        isResolved: bool,
+        comments: GraphQLComments,
+    }
+    #[derive(Deserialize)]
+    struct GraphQLComments {
+        nodes: Vec<GraphQLComment>,
+    }
+    #[derive(Deserialize)]
+    struct GraphQLComment {
+        commit: GraphQLCommit,
         path: String,
-        #[serde(default)]
         line: Option<u64>,
         body: String,
-        #[serde(default)]
-        diff_hunk: Option<String>,
-        user: CommentUser,
-        commit_id: String,
+        diffHunk: String,
+        author: GraphQLAuthor,
     }
-
     #[derive(Deserialize)]
-    struct CommentUser {
+    struct GraphQLCommit {
+        oid: String,
+    }
+    #[derive(Deserialize)]
+    struct GraphQLAuthor {
         login: String,
-        #[serde(rename = "type")]
-        user_type: Option<String>,
     }
 
-    let comments: Vec<PRComment> =
-        serde_json::from_str(&stdout).context("Failed to parse PR comments JSON")?;
+    let response: GraphQLResponse =
+        serde_json::from_str(&stdout).context("Failed to parse GraphQL response")?;
 
-    // Filter for Copilot comments that are on the latest commit
-    let copilot_comments: Vec<CopilotComment> = comments
-        .into_iter()
-        .filter(|c| is_copilot_comment(&c.user.login, c.user.user_type.as_deref()))
-        .filter(|c| {
-            let is_current = c.commit_id == head_sha;
-            if !is_current {
-                debug!(
-                    "[CopilotReview] Skipping outdated comment on commit {} (head is {})",
-                    c.commit_id, head_sha
-                );
+    let head_sha = response.data.repository.pullRequest.headRefOid;
+    let mut copilot_comments = Vec::new();
+
+    for thread in response.data.repository.pullRequest.reviewThreads.nodes {
+        // Skip resolved threads
+        if thread.isResolved {
+            continue;
+        }
+
+        for comment in thread.comments.nodes {
+            // Filter for Copilot comments on the latest commit
+            if is_copilot_comment(&comment.author.login, None) && comment.commit.oid == head_sha {
+                copilot_comments.push(CopilotComment {
+                    path: comment.path,
+                    line: comment.line,
+                    body: comment.body,
+                    diff_hunk: Some(comment.diffHunk),
+                });
             }
-            is_current
-        })
-        .map(|c| CopilotComment {
-            path: c.path,
-            line: c.line,
-            body: c.body,
-            diff_hunk: c.diff_hunk,
-        })
-        .collect();
+        }
+    }
 
     debug!(
-        "[CopilotReview] Found {} current Copilot comments",
+        "[CopilotReview] Found {} unresolved current Copilot comments",
         copilot_comments.len()
     );
 
