@@ -36,12 +36,12 @@ data VisibilityRule
   deriving (Show, Eq, Generic)
 
 instance ToJSON VisibilityRule where
-  toJSON (Checked id) = Aeson.String id
-  toJSON (Equals map) = toJSON map
-  toJSON (GreaterThan id val) = object ["id" .= id, "min_value" .= val]
-  toJSON (LessThan id val) = object ["id" .= id, "max_value" .= val]
-  toJSON (CountEquals id count) = object ["id" .= id, "exact_count" .= count]
-  toJSON (CountGreaterThan id count) = object ["id" .= id, "min_count" .= count]
+  toJSON (Checked elementId) = Aeson.String elementId
+  toJSON (Equals ruleMap) = toJSON ruleMap
+  toJSON (GreaterThan elementId val) = object ["id" .= elementId, "min_value" .= val]
+  toJSON (LessThan elementId val) = object ["id" .= elementId, "max_value" .= val]
+  toJSON (CountEquals elementId count) = object ["id" .= elementId, "exact_count" .= count]
+  toJSON (CountGreaterThan elementId count) = object ["id" .= elementId, "min_count" .= count]
 
 instance FromJSON VisibilityRule where
   parseJSON v = 
@@ -103,13 +103,13 @@ data Component
   deriving (Show, Eq, Generic)
 
 instance ToJSON Component where
-  toJSON (TextComponent id content vw) = object ["type" .= ("text" :: Text), "id" .= id, "content" .= content, "visible_when" .= vw]
-  toJSON (SliderComponent id label min max def vw) = object ["type" .= ("slider" :: Text), "id" .= id, "label" .= label, "min" .= min, "max" .= max, "default" .= def, "visible_when" .= vw]
-  toJSON (CheckboxComponent id label def vw) = object ["type" .= ("checkbox" :: Text), "id" .= id, "label" .= label, "default" .= def, "visible_when" .= vw]
-  toJSON (TextboxComponent id label ph rows vw) = object ["type" .= ("textbox" :: Text), "id" .= id, "label" .= label, "placeholder" .= ph, "rows" .= rows, "visible_when" .= vw]
-  toJSON (ChoiceComponent id label opts def vw) = object ["type" .= ("choice" :: Text), "id" .= id, "label" .= label, "options" .= opts, "default" .= def, "visible_when" .= vw]
-  toJSON (MultiselectComponent id label opts vw) = object ["type" .= ("multiselect" :: Text), "id" .= id, "label" .= label, "options" .= opts, "visible_when" .= vw]
-  toJSON (GroupComponent id label vw) = object ["type" .= ("group" :: Text), "id" .= id, "label" .= label, "visible_when" .= vw]
+  toJSON (TextComponent elementId content vw) = object ["type" .= ("text" :: Text), "id" .= elementId, "content" .= content, "visible_when" .= vw]
+  toJSON (SliderComponent elementId label minVal maxVal def vw) = object ["type" .= ("slider" :: Text), "id" .= elementId, "label" .= label, "min" .= minVal, "max" .= maxVal, "default" .= def, "visible_when" .= vw]
+  toJSON (CheckboxComponent elementId label def vw) = object ["type" .= ("checkbox" :: Text), "id" .= elementId, "label" .= label, "default" .= def, "visible_when" .= vw]
+  toJSON (TextboxComponent elementId label ph rows vw) = object ["type" .= ("textbox" :: Text), "id" .= elementId, "label" .= label, "placeholder" .= ph, "rows" .= rows, "visible_when" .= vw]
+  toJSON (ChoiceComponent elementId label opts def vw) = object ["type" .= ("choice" :: Text), "id" .= elementId, "label" .= label, "options" .= opts, "default" .= def, "visible_when" .= vw]
+  toJSON (MultiselectComponent elementId label opts vw) = object ["type" .= ("multiselect" :: Text), "id" .= elementId, "label" .= label, "options" .= opts, "visible_when" .= vw]
+  toJSON (GroupComponent elementId label vw) = object ["type" .= ("group" :: Text), "id" .= elementId, "label" .= label, "visible_when" .= vw]
 
 instance FromJSON Component where
   parseJSON = Aeson.withObject "Component" $ \v -> do
@@ -137,25 +137,25 @@ instance FFIBoundary PopupResult
 
 -- | Helper to define components easily
 text :: Text -> Text -> Component
-text id content = TextComponent id content Nothing
+text elementId content = TextComponent elementId content Nothing
 
 slider :: Text -> Text -> Float -> Float -> Float -> Component
-slider id label min max def = SliderComponent id label min max def Nothing
+slider elementId label minVal maxVal def = SliderComponent elementId label minVal maxVal def Nothing
 
 checkbox :: Text -> Text -> Bool -> Component
-checkbox id label def = CheckboxComponent id label def Nothing
+checkbox elementId label def = CheckboxComponent elementId label def Nothing
 
 textbox :: Text -> Text -> Maybe Text -> Component
-textbox id label ph = TextboxComponent id label ph Nothing Nothing
+textbox elementId label ph = TextboxComponent elementId label ph Nothing Nothing
 
 choice :: Text -> Text -> [Text] -> Component
-choice id label opts = ChoiceComponent id label opts (Just 0) Nothing
+choice elementId label opts = ChoiceComponent elementId label opts (Just 0) Nothing
 
 multiselect :: Text -> Text -> [Text] -> Component
-multiselect id label opts = MultiselectComponent id label opts Nothing
+multiselect elementId label opts = MultiselectComponent elementId label opts Nothing
 
 group :: Text -> Text -> Component
-group id label = GroupComponent id label Nothing
+group elementId label = GroupComponent elementId label Nothing
 
 -- | With visibility modifier
 visibleWhen :: VisibilityRule -> Component -> Component

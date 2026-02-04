@@ -55,16 +55,23 @@ impl UIService {
             
         if !status.success() {
             // Clean up if sending failed
-            let mut pending = self.pending_requests.lock().unwrap();
+            let mut pending = self.pending_requests.lock().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
             pending.remove(&request_id);
             return Err(anyhow::anyhow!("zellij action message failed with status {}", status));
         }
 
-        // Wait for response
-        match rx.await {
-            Ok(result) => Ok(result),
-            Err(_) => {
+        // Wait for response with timeout (10 minutes)
+        match tokio::time::timeout(std::time::Duration::from_secs(600), rx).await {
+            Ok(Ok(result)) => Ok(result),
+            Ok(Err(_)) => {
+                // Sender dropped (channel closed) without sending value
                 Err(anyhow::anyhow!("Popup request cancelled or lost"))
+            }
+            Err(_) => {
+                // Timeout occurred
+                let mut pending = self.pending_requests.lock().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+                pending.remove(&request_id);
+                Err(anyhow::anyhow!("Popup request timed out after 10 minutes"))
             }
         }
     }
@@ -92,11 +99,11 @@ fn block_on<F: std::future::Future>(future: F) -> Result<F::Output, Error> {
     match tokio::runtime::Handle::try_current() {
         Ok(handle) => Ok(handle.block_on(future)),
         Err(_) => {
-            // If no runtime available (e.g. running in thread pool), create a temporary one
-             match tokio::runtime::Runtime::new() {
-                Ok(rt) => Ok(rt.block_on(future)),
-                Err(e) => Err(Error::msg(format!("Failed to create temporary runtime: {}", e))),
-             }
+            // Extism host functions are expected to run inside an existing Tokio runtime.
+            // Do not create a new runtime here; instead, surface an explicit error.
+            Err(Error::msg(
+                "block_on called without a current Tokio runtime; a runtime must be provided by the host",
+            ))
         }
     }
 }
@@ -138,4 +145,51 @@ pub fn ui_show_popup_host_fn(ui_service: Arc<UIService>) -> Function {
         },
     )
     .with_namespace("env")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_handle_reply_unknown_request() {
+        let service = UIService::new();
+        // Should return Ok even if request is unknown
+        let result = service.handle_reply(
+            "unknown-id",
+            PopupResult {
+                button: "cancel".into(),
+                values: serde_json::Value::Null,
+                time_spent_seconds: None,
+            },
+        );
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_handle_reply_success() {
+        let service = UIService::new();
+        let request_id = "test-req-1";
+        let (tx, rx) = oneshot::channel();
+
+        // Manually insert a pending request
+        {
+            let mut pending = service.pending_requests.lock().unwrap();
+            pending.insert(request_id.to_string(), tx);
+        }
+
+        // Handle reply
+        let reply = PopupResult {
+            button: "submit".into(),
+            values: serde_json::json!({"foo": "bar"}),
+            time_spent_seconds: Some(1.5),
+        };
+        
+        let handle_result = service.handle_reply(request_id, reply.clone());
+        assert!(handle_result.is_ok());
+
+        // Verify receiver got the reply
+        let received = rx.await.unwrap();
+        assert_eq!(received, reply);
+    }
 }

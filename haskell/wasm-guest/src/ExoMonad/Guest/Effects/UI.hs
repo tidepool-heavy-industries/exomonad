@@ -21,6 +21,9 @@ module ExoMonad.Guest.Effects.UI
 where
 
 import qualified Data.Text as T
+import ExoMonad.Guest.HostCall (callHost, host_ui_show_popup)
+import ExoMonad.Guest.TUI (PopupDefinition (..), PopupResult (..))
+import Polysemy (Embed, Member, Sem, embed, interpret, send)
 
 -- | UI Effect
 data UI m a where
