@@ -116,43 +116,45 @@ install-hooks:
     @echo "Installed: pre-push"
     @echo "Done. Use 'git push --no-verify' to bypass in emergencies."
 
-# Build WASM guest and install to ~/.exomonad/wasm/
+# Build WASM guest and install to .exomonad/wasm/
 wasm role="tl":
     @echo ">>> Building wasm-guest-{{role}} via Nix..."
-    nix build .#wasm-guest-{{role}}
-    @echo ">>> Installing to ~/.exomonad/wasm/..."
-    mkdir -p ~/.exomonad/wasm
-    rm -f ~/.exomonad/wasm/wasm-guest-{{role}}.wasm
-    cp result/wasm-guest-{{role}}.wasm ~/.exomonad/wasm/
+    nix build .exomonad#{{role}}
+    @echo ">>> Installing to .exomonad/wasm/..."
+    mkdir -p .exomonad/wasm
+    rm -f .exomonad/wasm/wasm-guest-{{role}}.wasm
+    cp result/wasm-guest-{{role}}.wasm .exomonad/wasm/
     @echo ">>> Setting up WASM cache..."
-    mkdir -p ~/.exomonad/wasm-cache
-    echo "[cache]" > ~/.exomonad/wasm-cache.toml
-    echo "directory = '${HOME}/.exomonad/wasm-cache'" >> ~/.exomonad/wasm-cache.toml
+    mkdir -p .exomonad/wasm-cache
+    echo "[cache]" > .exomonad/wasm-cache.toml
+    echo "directory = '${PWD}/.exomonad/wasm-cache'" >> .exomonad/wasm-cache.toml
     @echo ">>> Warming up cache..."
-    cd rust && cargo run -q -p exomonad -- warmup ~/.exomonad/wasm/wasm-guest-{{role}}.wasm
-    @echo ">>> Done: ~/.exomonad/wasm/wasm-guest-{{role}}.wasm (cached)"
+    cd rust && cargo run -q -p exomonad -- warmup ../.exomonad/wasm/wasm-guest-{{role}}.wasm
+    @echo ">>> Done: .exomonad/wasm/wasm-guest-{{role}}.wasm (cached)"
+    @rm result
 
 # Build both WASM guest plugins (tl + dev)
 wasm-all:
     @just wasm tl
     @just wasm dev
-    @echo ">>> Installed to ~/.exomonad/wasm/:"
-    @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
+    @echo ">>> Installed to .exomonad/wasm/:"
+    @ls -lh .exomonad/wasm/wasm-guest-*.wasm
 
 # Build WASM guest using local shell (no hash updates needed, impure)
 wasm-dev role="tl":
     @echo ">>> Building wasm-guest-{{role}} (Impure/Dev Mode)..."
-    nix develop .#wasm --command bash -c "\
+    nix develop .#wasm --command bash -c " \
         wasm32-wasi-cabal build --project-file=cabal.project.wasm wasm-guest-{{role}} && \
-        mkdir -p ~/.exomonad/wasm && \
-        cp \$(find dist-newstyle -name wasm-guest-{{role}}.wasm -type f | head -n 1) ~/.exomonad/wasm/"
+        mkdir -p .exomonad/wasm && \
+        cp \
+$(find dist-newstyle -name wasm-guest-{{role}}.wasm -type f | head -n 1) .exomonad/wasm/"
     @echo ">>> Setting up WASM cache..."
-    mkdir -p ~/.exomonad/wasm-cache
-    echo "[cache]" > ~/.exomonad/wasm-cache.toml
-    echo "directory = '${HOME}/.exomonad/wasm-cache'" >> ~/.exomonad/wasm-cache.toml
+    mkdir -p .exomonad/wasm-cache
+    echo "[cache]" > .exomonad/wasm-cache.toml
+    echo "directory = '${PWD}/.exomonad/wasm-cache'" >> .exomonad/wasm-cache.toml
     @echo ">>> Warming up cache..."
-    cd rust && cargo run -q -p exomonad -- warmup ~/.exomonad/wasm/wasm-guest-{{role}}.wasm
-    @echo ">>> Done: ~/.exomonad/wasm/wasm-guest-{{role}}.wasm (cached)"
+    cd rust && cargo run -q -p exomonad -- warmup ../.exomonad/wasm/wasm-guest-{{role}}.wasm
+    @echo ">>> Done: .exomonad/wasm/wasm-guest-{{role}}.wasm (cached)"
 
 # Install everything: Rust binaries + WASM plugins (uses release build)
 install-all:
@@ -167,7 +169,7 @@ install-all:
     @echo ""
     @echo "Installed:"
     @ls -lh ~/.cargo/bin/exomonad
-    @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
+    @ls -lh .exomonad/wasm/wasm-guest-*.wasm
 
 # Install everything (fast dev build)
 install-all-dev:
@@ -187,7 +189,7 @@ install-all-dev:
     @echo "Installed:"
     @ls -lh ~/.cargo/bin/exomonad
     @ls -lh ~/.config/zellij/plugins/exomonad-plugin.wasm
-    @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
+    @ls -lh .exomonad/wasm/wasm-guest-*.wasm
 
 # Clean build artifacts
 clean:

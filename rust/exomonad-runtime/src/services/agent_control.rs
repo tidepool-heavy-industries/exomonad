@@ -1,10 +1,10 @@
 //! High-level agent control service.
-//!
+//! 
 //! Provides semantic operations for agent lifecycle management:
 //! - SpawnAgent: Create worktree, write context, open Zellij tab
 //! - CleanupAgent: Close tab, delete worktree
 //! - ListAgents: List active agent worktrees
-//!
+//! 
 //! These are high-level effects exposed to Haskell WASM, not granular operations.
 
 use crate::common::{FFIBoundary, HostResult, IntoFFIResult, TimeoutError};
@@ -27,9 +27,9 @@ const SPAWN_TIMEOUT: Duration = Duration::from_secs(60);
 const GIT_TIMEOUT: Duration = Duration::from_secs(30);
 const ZELLIJ_TIMEOUT: Duration = Duration::from_secs(30);
 
-// ============================================================================
+// ============================================================================ 
 // Types
-// ============================================================================
+// ============================================================================ 
 
 /// Agent type for spawned agents.
 ///
@@ -96,7 +96,7 @@ impl AgentType {
     /// The slug is truncated to 20 chars for readability.
     fn display_name(&self, issue_id: &str, slug: &str) -> String {
         let short_slug: String = slug.chars().take(20).collect();
-        format!("{} {}-{}", self.emoji(), issue_id, short_slug)
+        format!("{} {}-", self.emoji(), issue_id, short_slug)
     }
 }
 
@@ -188,9 +188,9 @@ pub struct BatchCleanupResult {
 
 impl FFIBoundary for BatchCleanupResult {}
 
-// ============================================================================
+// ============================================================================ 
 // Service
-// ============================================================================
+// ============================================================================ 
 
 /// Agent control service for high-level agent lifecycle management.
 pub struct AgentControlService {
@@ -232,9 +232,9 @@ impl AgentControlService {
         })
     }
 
-    // ========================================================================
+    // ======================================================================== 
     // Spawn Agent
-    // ========================================================================
+    // ======================================================================== 
 
     /// Spawn an agent for a GitHub issue.
     ///
@@ -281,8 +281,8 @@ impl AgentControlService {
             let worktree_path = self
                 .project_dir
                 .join(&worktree_dir)
-                .join(format!("gh-{}-{}-{}", issue_id, slug, agent_suffix));
-            let branch_name = format!("gh-{}/{}-{}", issue_id, slug, agent_suffix);
+                .join(format!("gh-{}-{}-", issue_id, slug, agent_suffix));
+            let branch_name = format!("gh-{}/{}-", issue_id, slug, agent_suffix);
 
             // Fetch origin/main
             self.fetch_origin().await?;
@@ -316,7 +316,7 @@ impl AgentControlService {
             // Open Zellij tab with agent command and initial prompt
             // Use display_name for the Zellij tab (emoji + short format)
             // Keep internal_name for worktree/branch consistency
-            let internal_name = format!("gh-{}-{}-{}", issue_id, slug, agent_suffix);
+            let internal_name = format!("gh-{}-{}-", issue_id, slug, agent_suffix);
             let display_name = options.agent_type.display_name(&issue_id, &slug);
             self.new_zellij_tab(
                 &display_name,
@@ -388,9 +388,9 @@ impl AgentControlService {
         result
     }
 
-    // ========================================================================
+    // ======================================================================== 
     // Cleanup Agent
-    // ========================================================================
+    // ======================================================================== 
 
     /// Clean up an agent (close Zellij tab, delete worktree).
     #[tracing::instrument(skip(self))]
@@ -439,7 +439,7 @@ impl AgentControlService {
                         warn!("Failed to emit agent:stopped event: {}", e);
                     }
 
-                    return Ok(());
+                    return Ok(())
                 }
             }
         }
@@ -501,9 +501,9 @@ impl AgentControlService {
         Ok(self.cleanup_agents(&to_cleanup, false).await)
     }
 
-    // ========================================================================
+    // ======================================================================== 
     // List Agents
-    // ========================================================================
+    // ======================================================================== 
 
     /// List all active agent worktrees.
     #[tracing::instrument(skip(self))]
@@ -604,9 +604,9 @@ impl AgentControlService {
         })
     }
 
-    // ========================================================================
+    // ======================================================================== 
     // Internal: Zellij
-    // ========================================================================
+    // ======================================================================== 
 
     fn check_zellij_env(&self) -> Result<String> {
         std::env::var("ZELLIJ_SESSION_NAME")
@@ -634,7 +634,7 @@ impl AgentControlService {
                     prompt_length = p.len(),
                     "Spawning agent with CLI prompt"
                 );
-                format!("{} {} {}", cmd, agent_type.prompt_flag(), escaped_prompt)
+                format!("{} {} ", cmd, agent_type.prompt_flag(), escaped_prompt)
             }
             None => cmd.to_string(),
         };
@@ -752,9 +752,9 @@ impl AgentControlService {
         Ok(())
     }
 
-    // ========================================================================
+    // ======================================================================== 
     // Internal: Git Worktree
-    // ========================================================================
+    // ======================================================================== 
 
     #[tracing::instrument(skip(self))]
     async fn fetch_origin(&self) -> Result<()> {
@@ -789,7 +789,7 @@ impl AgentControlService {
     async fn create_worktree(&self, path: &Path, branch: &str) -> Result<()> {
         if path.exists() {
             info!(path = %path.display(), "Worktree already exists, reusing");
-            return Ok(());
+            return Ok(())
         }
 
         if let Some(parent) = path.parent() {
@@ -807,7 +807,7 @@ impl AgentControlService {
                     "add",
                     "-b",
                     branch,
-                    path.to_str()
+                    path.to_str() 
                         .ok_or_else(|| anyhow!("Invalid worktree path (utf8 error)"))?,
                     "origin/main",
                 ])
@@ -876,7 +876,7 @@ impl AgentControlService {
     async fn delete_worktree(&self, path: &Path, force: bool) -> Result<()> {
         if !path.exists() {
             debug!(path = %path.display(), "Worktree doesn't exist");
-            return Ok(());
+            return Ok(())
         }
 
         info!(path = %path.display(), force, "Running git worktree remove");
@@ -964,9 +964,9 @@ impl AgentControlService {
         }
     }
 
-    // ========================================================================
+    // ======================================================================== 
     // Internal: Context Files
-    // ========================================================================
+    // ======================================================================== 
 
     async fn write_context_files(&self, worktree_path: &Path, agent_type: AgentType) -> Result<()> {
         // Create .exomonad directory
@@ -1071,9 +1071,9 @@ project_dir = "../../.."
         Ok(())
     }
 
-    // ========================================================================
+    // ======================================================================== 
     // Internal: Prompt Building
-    // ========================================================================
+    // ======================================================================== 
 
     /// Build the initial prompt for a spawned agent.
     fn build_initial_prompt(
@@ -1105,10 +1105,10 @@ project_dir = "../../.."
     /// Wraps the string in single quotes and escapes any embedded single quotes.
     /// This is suitable for: sh -c "claude --prompt '...'"
     ///
-    /// Example: "user's issue" -> "'user'\''s issue'"
+    /// Example: "user's issue" -> "'user'\'s issue'"
     fn escape_for_shell_command(s: &str) -> String {
         // Replace ' with '\'' (end quote, escaped quote, start quote)
-        let escaped = s.replace('\'', r"'\''");
+        let escaped = s.replace('"', r"'\''");
         format!("'{}'", escaped)
     }
 
@@ -1123,9 +1123,9 @@ project_dir = "../../.."
     }
 }
 
-// ============================================================================
+// ============================================================================ 
 // Helpers
-// ============================================================================
+// ============================================================================ 
 
 /// Create a URL-safe slug from a title.
 fn slugify(title: &str) -> String {
@@ -1178,9 +1178,9 @@ fn parse_worktree_name(name: &str) -> Option<ParsedWorktreeName<'_>> {
     })
 }
 
-// ============================================================================
+// ============================================================================ 
 // Host Functions for WASM
-// ============================================================================
+// ============================================================================ 
 
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
 
@@ -1533,10 +1533,10 @@ mod tests {
     #[test]
     fn test_escape_for_shell_command_with_quote() {
         // Standard shell escaping: end quote, escaped quote, start quote
-        // 'user'\''s issue' = 'user' + \' + 's issue'
+        // 'user'\'s issue' = 'user' + \' + 's issue'
         assert_eq!(
             AgentControlService::escape_for_shell_command("user's issue"),
-            r"'user'\''s issue'"
+            r"'user'\'s issue'"
         );
     }
 

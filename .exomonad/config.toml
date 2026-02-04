@@ -1,2 +1,3 @@
-default_role = "tl"
-agent_role = "dev"
+# Agent config (auto-generated)
+role = "dev"
+project_dir = "."

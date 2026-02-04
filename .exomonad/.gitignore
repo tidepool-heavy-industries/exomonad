@@ -1,8 +1,11 @@
 # Local config
 config.local.toml
+secrets
 
 # Build artifacts
 wasm/
+wasm-cache/
+wasm-cache.toml
 worktrees/
 sockets/
 logs/

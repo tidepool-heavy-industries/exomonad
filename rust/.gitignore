@@ -1,4 +1,5 @@
 target/*
+exomonad-plugin/target/
 
 # Frontend build artifacts
 exomonad-hub/frontend/node_modules/

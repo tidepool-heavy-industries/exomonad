@@ -1,6 +1,6 @@
 //! Configuration discovery from .exomonad/config.toml and config.local.toml
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use exomonad_shared::{PathError, Role, WasmPath};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -71,6 +71,12 @@ impl Config {
         let local_path = PathBuf::from(".exomonad/config.local.toml");
         let global_path = PathBuf::from(".exomonad/config.toml");
 
+        if !local_path.exists() && !global_path.exists() {
+            bail!(
+                "No .exomonad/config.toml or config.local.toml found.\n\                 Create .exomonad/config.toml with:\n\                 default_role = \"dev\"\n\                 agent_role = \"dev\""
+            );
+        }
+
         let local_raw = if local_path.exists() {
             Self::load_raw(&local_path)?
         } else {
@@ -83,11 +89,12 @@ impl Config {
             RawConfig::default()
         };
 
-        // Resolve role: local.role > global.default_role
+        // Resolve role: local.role > global.default_role > global.role
         let role = local_raw
             .role
             .or(global_raw.default_role)
-            .ok_or_else(|| anyhow::anyhow!("No active role defined. Please set 'role' in .exomonad/config.local.toml or 'default_role' in .exomonad/config.toml"))?;
+            .or(global_raw.role)
+            .ok_or_else(|| anyhow::anyhow!("No active role defined. Please set 'role' or 'default_role' in .exomonad/config.toml"))?;
 
         // Resolve project_dir: global.project_dir > "."
         let project_dir = global_raw
@@ -145,8 +152,9 @@ impl Config {
             return Ok(over.join(format!("wasm-guest-{}.wasm", self.role)));
         }
 
-        let home = std::env::var("HOME").map_err(|_| ConfigError::HomeNotSet)?;
-        Ok(PathBuf::from(home)
+        // Default to project-local .exomonad/wasm
+        Ok(self
+            .project_dir
             .join(".exomonad/wasm")
             .join(format!("wasm-guest-{}.wasm", self.role)))
     }
