@@ -1,7 +1,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Role (config) where
+module Role (config, Tools(..)) where
 
 import ExoMonad
 import qualified Hooks

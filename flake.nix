@@ -130,63 +130,6 @@ EOF
           '';
         };
 
-        # 2. Guest Builder (Pure Derivation)
-        # Rebuilds when source changes, using pre-built deps from mkWasmDeps.
-        # No network access, no hash required.
-        mkWasmGuest = role: deps: pkgs.stdenv.mkDerivation {
-          pname = "wasm-guest-${role}";
-          version = "0.1.0.0";
-          
-          # Use full source, but filter out git/build artifacts
-          src = pkgs.lib.cleanSourceWith {
-            src = ./.;
-            filter = path: type:
-              let base = baseNameOf path; in
-              type == "directory" ||
-              base == "cabal.project.wasm" ||
-              pkgs.lib.hasSuffix ".cabal" base ||
-              pkgs.lib.hasSuffix ".hs" base ||
-              pkgs.lib.hasSuffix ".hs-boot" base ||
-              base == "LICENSE";
-          };
-
-          nativeBuildInputs = [ wasmPkgs.all_9_12 pkgs.wizer ];
-
-          buildPhase = ''
-            ${cabalConfig}
-
-            echo "Restoring dependencies from store..."
-            rm -rf $HOME/.ghc-wasm
-            cp -r ${deps}/ghc-wasm $HOME/.ghc-wasm
-            chmod -R u+w $HOME/.ghc-wasm
-
-            # Setup project files
-            cp cabal.project.wasm cabal.project.offline
-            sed -i '/repository head.hackage/,/secure: True/d' cabal.project.offline
-
-            echo "Building ${role}..."
-            
-            # Debug: List available packages to verify cache restoration
-            echo "Listing cached packages:"
-            find $HOME/.ghc-wasm -name "*.tar.gz" | head -n 20 || echo "No tarballs found!"
-
-            # Build offline using the restored dependencies
-            # We remove --offline because it sometimes prevents using the local cache if index state checks fail
-            # The build is sandboxed anyway, so network access will fail if it tries.
-            wasm32-wasi-cabal build --project-file=cabal.project.offline wasm-guest-${role}
-          '';
-
-          installPhase = ''
-            mkdir -p $out
-            wasm_file=$(find dist-newstyle -name "wasm-guest-${role}.wasm" -print -quit)
-            if [ -z "$wasm_file" ]; then
-              echo "Error: wasm-guest-${role}.wasm not found in dist-newstyle" >&2
-              exit 1
-            fi
-            cp "$wasm_file" "$out/wasm-guest-${role}.wasm"
-          '';
-        };
-
       in {
         devShells = {
           # Default: Full development environment
@@ -277,10 +220,6 @@ EOF
           
           # Expose deps derivation so we can build it directly to check hash
           wasm-deps = deps;
-          
-          # Guest binaries (no explicit hashes needed here!)
-          wasm-guest-tl = mkWasmGuest "tl" deps;
-          wasm-guest-dev = mkWasmGuest "dev" deps;
         };
       }
     );
