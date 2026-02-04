@@ -178,7 +178,7 @@ hookHandler = do
           pure 0
   where
     handleStopHook :: Text -> IO CInt
-    handleStopHook hookName = do
+    handleStopHook _hookName = do
       -- Extract agent ID from current working directory (e.g., "gh-453-gemini")
       cwd <- getCurrentDirectory
       let agentId = T.pack $ takeFileName cwd

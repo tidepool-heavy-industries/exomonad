@@ -32,6 +32,7 @@ import Polysemy (Sem, Member, interpret, embed, send)
 import Polysemy.Embed (Embed)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.=))
 import Data.Text (Text)
+import Data.Text qualified as T
 import ExoMonad.HostCall (callHost, host_fs_read_file, host_fs_write_file)
 import ExoMonad.FFI (FFIBoundary)
 import GHC.Generics (Generic)
@@ -157,12 +158,36 @@ writeFile path content createParents = send (WriteFileOp path content createPare
 -- Interpreter
 -- ============================================================================
 
+-- | Basic path sanitization to enforce a filesystem sandbox:
+--   - Reject absolute paths (starting with '/')
+--   - Reject any parent-directory components ("..")
+--   - Reject empty or all-whitespace paths
+sanitizePath :: Text -> Either Text Text
+sanitizePath rawPath =
+  let p = T.strip rawPath
+   in if T.null p
+        then Left "Empty paths are not allowed"
+        else
+          if T.isPrefixOf "/" p
+            then Left "Absolute paths are not allowed"
+            else
+              let segments = T.splitOn "/" p
+               in if any (== "..") segments
+                    then Left "Parent directory components ('..') are not allowed"
+                    else Right p
+
 -- | Interpret FileSystem by calling Rust host functions.
 runFileSystem :: (Member (Embed IO) r) => Sem (FileSystem ': r) a -> Sem r a
 runFileSystem = interpret $ \case
-  ReadFileOp path maxBytes -> embed $ do
-    let input = ReadFileInput path maxBytes
-    callHost host_fs_read_file input
-  WriteFileOp path content createParents -> embed $ do
-    let input = WriteFileInput path content createParents
-    callHost host_fs_write_file input
+  ReadFileOp path maxBytes ->
+    case sanitizePath path of
+      Left err -> pure (Left err)
+      Right safePath -> embed $ do
+        let input = ReadFileInput safePath maxBytes
+        callHost host_fs_read_file input
+  WriteFileOp path content createParents ->
+    case sanitizePath path of
+      Left err -> pure (Left err)
+      Right safePath -> embed $ do
+        let input = WriteFileInput safePath content createParents
+        callHost host_fs_write_file input

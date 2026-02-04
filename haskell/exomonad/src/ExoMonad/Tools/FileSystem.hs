@@ -78,7 +78,7 @@ instance MCPTool ReadFile where
 -- ============================================================================
 
 data FileTools mode = FileTools
-  { readFile :: mode :- ReadFile
+  { fsReadFile :: mode :- ReadFile
   }
   deriving (Generic)
 
@@ -86,5 +86,5 @@ data FileTools mode = FileTools
 fileTools :: FileTools AsHandler
 fileTools =
   FileTools
-    { readFile = mkHandler @ReadFile
+    { fsReadFile = mkHandler @ReadFile
     }

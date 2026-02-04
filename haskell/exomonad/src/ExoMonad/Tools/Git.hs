@@ -132,7 +132,7 @@ instance MCPTool GitLog where
 data GitTools mode = GitTools
   { branch :: mode :- GitBranch,
     status :: mode :- GitStatus,
-    log :: mode :- GitLog
+    gitLog :: mode :- GitLog
   }
   deriving (Generic)
 
@@ -142,5 +142,5 @@ gitTools =
   GitTools
     { branch = mkHandler @GitBranch,
       status = mkHandler @GitStatus,
-      log = mkHandler @GitLog
+      gitLog = mkHandler @GitLog
     }
