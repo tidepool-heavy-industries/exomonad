@@ -92,7 +92,7 @@ test-suite ffi-serialization-tests
   c-sources: test/cbits/stubs.c
   build-depends:
       base
-    , wasm-guest:wasm-guest-internal
+    , wasm-guest
     , QuickCheck
     , aeson
     , hspec

@@ -7,12 +7,25 @@ if [ -z "$ROLE" ]; then
   exit 1
 fi
 
+# Validate ROLE (prevent path traversal/injection)
+if [[ ! "$ROLE" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+  echo "Error: Invalid role name '$ROLE'. Must match ^[a-zA-Z0-9_-]+$"
+  exit 1
+fi
+
 # Locate root
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 ROLE_DIR="$ROOT_DIR/.exomonad/roles/$ROLE"
 GEN_DIR="$ROLE_DIR/gen"
 DIST_DIR="$ROLE_DIR/dist"
+
+# Cleanup trap
+PROJ_FILE="cabal.project.role-$ROLE"
+cleanup() {
+  rm -f "$PROJ_FILE"
+}
+trap cleanup EXIT
 
 if [ ! -d "$ROLE_DIR" ]; then
   echo "Error: Role directory $ROLE_DIR not found"
@@ -107,7 +120,6 @@ executable wasm-guest-$ROLE
 EOF
 
 # Create temporary project file in ROOT
-PROJ_FILE="cabal.project.role-$ROLE"
 cat > "$PROJ_FILE" <<EOF
 import: cabal.project.wasm
 packages: .exomonad/roles/$ROLE/gen
@@ -118,13 +130,11 @@ cd "$ROOT_DIR"
 
 # Check if wasm32-wasi-cabal is available
 # Use --project-file=... (relative to current dir which is ROOT)
-BUILD_CMD="wasm32-wasi-cabal build --project-file=$PROJ_FILE wasm-guest-$ROLE"
-
 if ! command -v wasm32-wasi-cabal &> /dev/null; then
     echo "wasm32-wasi-cabal not found. Running via 'nix develop .#wasm'..."
-    nix develop .#wasm --command bash -c "$BUILD_CMD"
+    nix develop .#wasm --command wasm32-wasi-cabal build --project-file="$PROJ_FILE" "wasm-guest-$ROLE"
 else
-    $BUILD_CMD
+    wasm32-wasi-cabal build --project-file="$PROJ_FILE" "wasm-guest-$ROLE"
 fi
 
 # Find and copy artifact
@@ -132,12 +142,9 @@ fi
 WASM_FILE=$(find dist-newstyle -name "wasm-guest-$ROLE.wasm" -type f | head -n 1)
 if [ -z "$WASM_FILE" ]; then
     echo "Error: Build failed, no WASM file found."
-    rm "$PROJ_FILE"
     exit 1
 fi
 
 cp "$WASM_FILE" "$DIST_DIR/wasm-guest-$ROLE.wasm"
 echo "Build complete: $DIST_DIR/wasm-guest-$ROLE.wasm"
 
-# Cleanup
-rm "$PROJ_FILE"
