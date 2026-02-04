@@ -8,13 +8,19 @@ module ExoMonad.Types
     HookConfig (..),
     HookEffects,
     defaultHooks,
+    -- * Re-exports for hook authoring
+    HookInput (..),
+    Sem,
+    allowStopResponse,
+    blockStopResponse,
+    StopHookOutput (..),
   )
 where
 
 import Data.Text (Text)
-import ExoMonad.Guest.Types (HookInput, HookOutput, StopHookOutput, allowResponse, allowStopResponse)
+import ExoMonad.Guest.Types (HookInput (..), HookOutput, StopHookOutput (..), allowResponse, allowStopResponse, blockStopResponse)
 import GHC.Generics (Generic)
-import Polysemy (Embed, Sem)
+import Polysemy (Embed, Sem, Members)
 
 -- | Effects available to hooks.
 -- Currently allows arbitrary IO via Embed IO (required for Host Calls).
