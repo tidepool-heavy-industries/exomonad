@@ -75,7 +75,8 @@ impl Config {
             bail!(
                 "No .exomonad/config.toml or config.local.toml found.\n\
                  Create .exomonad/config.toml with:\n\
-                 default_role = \"dev\""
+                 default_role = \"dev\"\n\
+                 agent_role = \"dev\""
             );
         }
 

@@ -992,6 +992,10 @@ impl AgentControlService {
 
         // Determine absolute WASM path
         let origin_wasm_path = self.project_dir.join(".exomonad/wasm");
+        fs::create_dir_all(&origin_wasm_path)
+            .await
+            .context("Failed to create .exomonad/wasm directory")?;
+
         let abs_wasm_path = origin_wasm_path
             .canonicalize()
             .context("Failed to canonicalize .exomonad/wasm path")?;

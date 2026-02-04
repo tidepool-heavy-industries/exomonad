@@ -140,10 +140,18 @@ fn is_sidecar_process(pid: u32) -> bool {
     match output {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout);
-            // Check for binary name.
-            // process might be "target/debug/exomonad" or "exomonad"
-            // Also keep "exomonad-sidecar" for backward compatibility/safety
-            stdout.contains("exomonad") || stdout.contains("exomonad-sidecar")
+            // `ps -o command=` prints the full command; the first token is the executable path.
+            // We extract its basename and compare it exactly to the expected binary names.
+            stdout
+                .lines()
+                .filter_map(|line| {
+                    let token = line.split_whitespace().next()?;
+                    let file_name = std::path::Path::new(token).file_name()?;
+                    file_name.to_str()
+                })
+                .next()
+                .map(|name| name == "exomonad" || name == "exomonad-sidecar")
+                .unwrap_or(false)
         }
         Err(_) => false, // Cannot verify
     }

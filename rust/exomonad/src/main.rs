@@ -77,7 +77,8 @@ enum Commands {
 
     /// Recompile the WASM plugin for a specific role
     Recompile {
-        /// The role to compile (e.g., dev, tl)
+        /// The role to compile (valid values: dev, tl, pm)
+        #[arg(value_parser = ["dev", "tl", "pm"])]
         role: String,
     },
 }
@@ -508,24 +509,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::Warmup { path } => {
-            // Warmup uses explicit path, might not strictly need config unless it needs secrets/services?
-            // "Initialize services (required for PluginManager)" -> Services load secrets.
-            // But PluginManager::new(path, ...) uses path.
-            // Let's see if we need config. The original code did load config.
-            // But Warmup takes `path: PathBuf`.
-            // So it overrides the config's wasm path.
-            // However, Services::new() loads secrets from ~/.exomonad/secrets, independent of config.toml.
-            // But Services::new() validation might depend on something? No.
-            // So Warmup technically doesn't need config.toml.
-            // But strict config discovery was top-level.
-            // Let's assume Warmup *should* work even if config.toml is broken?
-            // Actually, usually warmup is run in a valid environment.
-            // But since it takes an explicit path, let's NOT enforce config load here if possible.
-            // However, Services might need project context?
-            // Services::new() checks env vars or defaults.
-            // Let's keep it safe and NOT load config for Warmup if we don't need it.
-            // Oh wait, `Commands::Warmup` logic uses `path`.
-            
+            // Warmup uses an explicit WASM path and does not require loading project config.
             info!(path = %path.display(), "Warming up WASM plugin cache...");
 
             // Initialize services (required for PluginManager)
@@ -573,11 +557,81 @@ async fn main() -> Result<()> {
             let result_link = exomonad_dir.join("result");
             let target_path = wasm_dir.join(format!("wasm-guest-{}.wasm", role));
 
-            // Copy the result file
-            std::fs::copy(&result_link, &target_path).context(format!(
-                "Failed to copy build result to {}",
-                target_path.display()
-            ))?;
+            // Determine what the result symlink points to and locate the actual .wasm file.
+            let result_meta = std::fs::metadata(&result_link).with_context(|| {
+                format!(
+                    "Failed to stat build result at {}. Expected a file or directory produced by `nix build .#{}.`",
+                    result_link.display(),
+                    role
+                )
+            })?;
+
+            // Resolve the source .wasm file:
+            // - If `result` is a file, use it directly.
+            // - If `result` is a directory, search for a .wasm file in `result/bin` first,
+            //   then directly under `result/` as a fallback.
+            let source_wasm = if result_meta.is_file() {
+                result_link.clone()
+            } else if result_meta.is_dir() {
+                // Collect candidate .wasm files from expected locations.
+                let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+
+                let bin_dir = result_link.join("bin");
+                if bin_dir.exists() {
+                    for entry in std::fs::read_dir(&bin_dir)
+                        .with_context(|| format!("Failed to read {}", bin_dir.display()))?
+                    {
+                        let entry = entry.with_context(|| {
+                            format!("Failed to read entry in {}", bin_dir.display())
+                        })?;
+                        let path = entry.path();
+                        if path.extension().and_then(|s| s.to_str()) == Some("wasm") {
+                            candidates.push(path);
+                        }
+                    }
+                }
+
+                if candidates.is_empty() {
+                    for entry in std::fs::read_dir(&result_link).with_context(|| {
+                        format!("Failed to read {}", result_link.display())
+                    })? {
+                        let entry = entry.with_context(|| {
+                            format!("Failed to read entry in {}", result_link.display())
+                        })?;
+                        let path = entry.path();
+                        if path.extension().and_then(|s| s.to_str()) == Some("wasm") {
+                            candidates.push(path);
+                        }
+                    }
+                }
+
+                candidates
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "nix build for role '{}' produced a directory at {}, but no .wasm file was found in {} or {}",
+                            role,
+                            result_link.display(),
+                            bin_dir.display(),
+                            result_link.display()
+                        )
+                    })?
+            } else {
+                anyhow::bail!(
+                    "Build result at {} is neither a file nor a directory",
+                    result_link.display()
+                );
+            };
+
+            // Copy the resolved .wasm file into the wasm/ directory.
+            std::fs::copy(&source_wasm, &target_path).with_context(|| {
+                format!(
+                    "Failed to copy build result from {} to {}",
+                    source_wasm.display(),
+                    target_path.display()
+                )
+            })?;
 
             info!(
                 "Successfully recompiled role '{}' to {}",
