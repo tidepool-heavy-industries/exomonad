@@ -32,7 +32,7 @@ data MyTools mode = MyTools
   } deriving Generic
 
 -- 2. Define Configuration
-config :: RoleConfig MyTools
+config :: RoleConfig (MyTools AsHandler)
 config = RoleConfig
   { roleName = "my-role"
   , tools = MyTools

@@ -35,7 +35,12 @@ data ReadFileArgs = ReadFileArgs
   { path :: Text,
     maxBytes :: Maybe Int
   }
-  deriving (Show, Eq, Generic, ToJSON)
+instance ToJSON ReadFileArgs where
+  toJSON (ReadFileArgs p m) =
+    object
+      [ "path" .= p
+      , "max_bytes" .= m
+      ]
 
 instance FromJSON ReadFileArgs where
   parseJSON = Aeson.withObject "ReadFileArgs" $ \v ->

@@ -49,7 +49,7 @@ type HookEffects = '[Embed IO]
 type StopOutput = StopHookOutput
 
 data HookConfig = HookConfig
-  { preToolUse :: HookInput -> Sem HookEffects PreToolUseOutput,
+  { preToolUse :: HookInput -> Sem HookEffects HookOutput,
     onStop :: HookInput -> Sem HookEffects StopOutput,
     onSubagentStop :: HookInput -> Sem HookEffects StopOutput
   }
@@ -58,7 +58,7 @@ data HookConfig = HookConfig
 defaultHooks :: HookConfig
 defaultHooks =
   HookConfig
-    { preToolUse = \_ -> pure $ PreToolUseOutput "allow" Nothing Nothing,
+    { preToolUse = \_ -> pure $ allowResponse Nothing,
       onStop = \_ -> pure allowStopResponse,
       onSubagentStop = \_ -> pure allowStopResponse
     }

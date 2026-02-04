@@ -16,13 +16,14 @@ module ExoMonad.Tools.Git
   )
 where
 
-import Data.Aeson (FromJSON (..), ToJSON, object, (.=))
+import Data.Aeson (FromJSON (..), ToJSON, object, (.=), (.:?))
 import Data.Aeson qualified as Aeson
 import Data.Text (Text)
+import Data.Maybe (fromMaybe)
 import ExoMonad.Tool.Class (MCPTool (..), successResult, errorResult)
 import ExoMonad.Tool.Mode (ToolMode (..), AsHandler, mkHandler)
 import ExoMonad.HostCall (callHost, host_git_get_branch, host_git_get_dirty_files, host_git_get_recent_commits)
-import ExoMonad.FFI (FFIBoundary)
+import ExoMonad.FFI (FFIBoundary, GitHostInput (..), GitLogInput (..), Commit (..))
 import GHC.Generics (Generic)
 import Prelude hiding (log)
 
@@ -49,8 +50,8 @@ instance MCPTool GitBranch where
         "properties" .= object []
       ]
   toolHandler _ = do
-    -- Using empty object as input since host expects something
-    res <- callHost @GitBranchArgs @Text host_git_get_branch GitBranchArgs
+    let input = GitHostInput { workingDir = ".", containerId = "local" }
+    res <- callHost @GitHostInput @Text host_git_get_branch input
     case res of
       Left err -> pure $ errorResult err
       Right branch -> pure $ successResult $ Aeson.String branch
@@ -78,8 +79,8 @@ instance MCPTool GitStatus where
         "properties" .= object []
       ]
   toolHandler _ = do
-    -- Using empty object as input
-    res <- callHost @GitStatusArgs @[Text] host_git_get_dirty_files GitStatusArgs
+    let input = GitHostInput { workingDir = ".", containerId = "local" }
+    res <- callHost @GitHostInput @[Text] host_git_get_dirty_files input
     case res of
       Left err -> pure $ errorResult err
       Right files -> pure $ successResult $ Aeson.toJSON files
@@ -90,10 +91,12 @@ instance MCPTool GitStatus where
 data GitLog
 
 data GitLogArgs = GitLogArgs
+  { limit :: Maybe Int }
   deriving (Show, Eq, Generic, ToJSON)
 
 instance FromJSON GitLogArgs where
-  parseJSON = Aeson.withObject "GitLogArgs" $ \_ -> pure GitLogArgs
+  parseJSON = Aeson.withObject "GitLogArgs" $ \v ->
+    GitLogArgs <$> v .:? "limit"
 
 instance FFIBoundary GitLogArgs
 
@@ -104,11 +107,20 @@ instance MCPTool GitLog where
   toolSchema =
     object
       [ "type" .= ("object" :: Text),
-        "properties" .= object []
+        "properties" .= object
+          [ "limit" .= object
+            [ "type" .= ("integer" :: Text)
+            , "description" .= ("Number of commits to return (default: 10)" :: Text)
+            ]
+          ]
       ]
-  toolHandler _ = do
-    -- Using empty object as input
-    res <- callHost @GitLogArgs @[Text] host_git_get_recent_commits GitLogArgs
+  toolHandler args = do
+    let input = GitLogInput
+          { gliWorkingDir = "."
+          , gliContainerId = "local"
+          , gliLimit = fromMaybe 10 (limit args)
+          }
+    res <- callHost @GitLogInput @[Commit] host_git_get_recent_commits input
     case res of
       Left err -> pure $ errorResult err
       Right commits -> pure $ successResult $ Aeson.toJSON commits

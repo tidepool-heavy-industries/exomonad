@@ -13,7 +13,7 @@ import Data.Aeson (FromJSON, ToJSON, object, (.:), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as T
-import ExoMonad.FFI (FFIBoundary)
+import ExoMonad.FFI (FFIBoundary, GitHostInput (..))
 import ExoMonad.HostCall
   ( callHost,
     host_git_get_dirty_files,
@@ -28,15 +28,6 @@ import GHC.Generics (Generic)
 -- ============================================================================
 -- Types
 -- ============================================================================
-
-data GitHostInput = GitHostInput
-  { workingDir :: Text,
-    containerId :: Text
-  }
-  deriving stock (Show, Generic)
-  deriving anyclass (ToJSON, FromJSON)
-
-instance FFIBoundary GitHostInput
 
 -- Removed GitHostOutput wrapper - host functions now return T directly
 

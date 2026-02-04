@@ -20,8 +20,6 @@ import Control.Exception (SomeException, try)
 import Control.Monad (unless)
 import Data.Aeson qualified as Aeson
 import Data.Aeson (FromJSON, ToJSON, Value, (.:), (.=), withObject)
-import Data.Aeson.Key qualified as Key
-import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as BSL
 import Data.Maybe (fromMaybe)

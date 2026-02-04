@@ -120,3 +120,71 @@ instance FFIBoundary Int
 instance FFIBoundary Word64
 instance FFIBoundary ()
 instance FFIBoundary Value
+
+-- | Git host input (standard for most git ops).
+data GitHostInput = GitHostInput
+  { workingDir :: Text,
+    containerId :: Text
+  }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON GitHostInput where
+  toJSON (GitHostInput w c) =
+    object ["workingDir" .= w, "containerId" .= c]
+
+instance FromJSON GitHostInput where
+  parseJSON = withObject "GitHostInput" $ \v ->
+    GitHostInput
+      <$> v .: "workingDir"
+      <*> v .: "containerId"
+
+instance FFIBoundary GitHostInput
+
+-- | Git log input (with limit).
+data GitLogInput = GitLogInput
+  { gliWorkingDir :: Text,
+    gliContainerId :: Text,
+    gliLimit :: Int
+  }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON GitLogInput where
+  toJSON (GitLogInput w c l) =
+    object ["workingDir" .= w, "containerId" .= c, "limit" .= l]
+
+instance FromJSON GitLogInput where
+  parseJSON = withObject "GitLogInput" $ \v ->
+    GitLogInput
+      <$> v .: "workingDir"
+      <*> v .: "containerId"
+      <*> v .: "limit"
+
+instance FFIBoundary GitLogInput
+
+-- | Git commit info.
+data Commit = Commit
+  { commitHash :: Text,
+    commitMessage :: Text,
+    commitAuthor :: Text,
+    commitDate :: Text
+  }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON Commit where
+  toJSON (Commit h m a d) =
+    object
+      [ "hash" .= h,
+        "message" .= m,
+        "author" .= a,
+        "date" .= d
+      ]
+
+instance FromJSON Commit where
+  parseJSON = withObject "Commit" $ \v ->
+    Commit
+      <$> v .: "hash"
+      <*> v .: "message"
+      <*> v .: "author"
+      <*> v .: "date"
+
+instance FFIBoundary Commit
