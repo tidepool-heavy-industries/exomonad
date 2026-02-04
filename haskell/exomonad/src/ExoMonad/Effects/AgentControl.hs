@@ -438,7 +438,7 @@ runAgentControl = interpret $ \case
       Left err ->
         BatchSpawnResult
           { spawned = [],
-            spawnFailed = [("", err)]
+            spawnFailed = [(id, err) | id <- issueIds]
           }
       Right r -> r
   CleanupAgent issueId force -> embed $ do
@@ -454,7 +454,7 @@ runAgentControl = interpret $ \case
       Left err ->
         BatchCleanupResult
           { cleaned = [],
-            cleanupFailed = [("", err)]
+            cleanupFailed = [(id, err) | id <- issueIds]
           }
       Right r -> r
   CleanupMergedAgents -> embed $ do
@@ -463,7 +463,7 @@ runAgentControl = interpret $ \case
       Left err ->
         BatchCleanupResult
           { cleaned = [],
-            cleanupFailed = [("", err)]
+            cleanupFailed = [("<merged-check-failed>", err)]
           }
       Right r -> r
   ListAgents -> embed $ do

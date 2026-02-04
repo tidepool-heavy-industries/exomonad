@@ -218,17 +218,16 @@ hookHandler = do
       pure 0
 
 -- | Wrap a handler with exception handling.
+--
+-- This is used for multiple WASM entrypoints (MCP calls, hooks, etc.),
+-- so it must not emit protocol-specific JSON on exceptions. Instead, it
+-- just returns a non-zero exit code to signal failure and leaves it to
+-- the caller/host to handle the error appropriately.
 wrapHandler :: IO CInt -> IO CInt
 wrapHandler action = do
   res <- try @SomeException action
   case res of
     Right code -> pure code
-    Left err -> do
-      -- Return proper MCPCallOutput format
-      let resp = MCPCallOutput
-            { success = False
-            , result = Nothing
-            , mcpError = Just $ T.pack ("Exception in WASM handler: " <> show err)
-            }
-      output (BSL.toStrict $ Aeson.encode resp)
-      pure 0
+    Left _err -> do
+      -- Do not emit MCP-specific JSON here; simply signal failure via exit code.
+      pure 1

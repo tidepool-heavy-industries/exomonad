@@ -233,7 +233,10 @@ checkUnpushedCommits hostInput = do
         Left err -> pure $ blockStopResponse $ "Failed to check unpushed commits: " <> err
         Right hasUnpushed ->
           if hasUnpushed
-            then pure $ blockStopResponse $ "Your commits aren't pushed. Push with: git push -u origin " <> branch repoInfo
+            then
+              pure $
+                blockStopResponse $
+                  "Your commits aren't pushed. Push with: git push -u origin HEAD. Current branch: " <> branch repoInfo
             else checkPRFiled repoInfo
 
 checkPRFiled :: RepoInfo -> IO StopHookOutput
