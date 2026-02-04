@@ -151,12 +151,15 @@ fn fetch_pr_comments(owner: &str, repo: &str, pr_number: u64) -> Result<Vec<Copi
     }
     #[derive(Deserialize)]
     struct GraphQLRepo {
-        pullRequest: GraphQLPR,
+        #[serde(rename = "pullRequest")]
+        pull_request: GraphQLPR,
     }
     #[derive(Deserialize)]
     struct GraphQLPR {
-        headRefOid: String,
-        reviewThreads: GraphQLThreads,
+        #[serde(rename = "headRefOid")]
+        head_ref_oid: String,
+        #[serde(rename = "reviewThreads")]
+        review_threads: GraphQLThreads,
     }
     #[derive(Deserialize)]
     struct GraphQLThreads {
@@ -164,7 +167,8 @@ fn fetch_pr_comments(owner: &str, repo: &str, pr_number: u64) -> Result<Vec<Copi
     }
     #[derive(Deserialize)]
     struct GraphQLThread {
-        isResolved: bool,
+        #[serde(rename = "isResolved")]
+        is_resolved: bool,
         comments: GraphQLComments,
     }
     #[derive(Deserialize)]
@@ -177,7 +181,8 @@ fn fetch_pr_comments(owner: &str, repo: &str, pr_number: u64) -> Result<Vec<Copi
         path: String,
         line: Option<u64>,
         body: String,
-        diffHunk: String,
+        #[serde(rename = "diffHunk")]
+        diff_hunk: String,
         author: GraphQLAuthor,
     }
     #[derive(Deserialize)]
@@ -192,40 +197,23 @@ fn fetch_pr_comments(owner: &str, repo: &str, pr_number: u64) -> Result<Vec<Copi
     let response: GraphQLResponse =
         serde_json::from_str(&stdout).context("Failed to parse GraphQL response")?;
 
-    let head_sha = response.data.repository.pullRequest.headRefOid;
+    let head_sha = response.data.repository.pull_request.head_ref_oid;
     let mut copilot_comments = Vec::new();
 
-    info!("[CopilotReview] Filtering comments against head SHA: {}", head_sha);
+    for thread in response.data.repository.pull_request.review_threads.nodes {
+        // Skip resolved threads
+        if thread.is_resolved {
+            continue;
+        }
 
-    for thread in response.data.repository.pullRequest.reviewThreads.nodes {
-        let is_resolved = thread.isResolved;
-        
         for comment in thread.comments.nodes {
-            let author = &comment.author.login;
-            let comment_oid = &comment.commit.oid;
-            let is_copilot = is_copilot_comment(author, None);
-            let is_current = comment_oid == &head_sha;
-
-            if is_copilot {
-                info!(
-                    "[CopilotReview] Checking comment by {}: resolved={}, current={} (commit={})",
-                    author, is_resolved, is_current, comment_oid
-                );
-            }
-
-            // Skip resolved threads
-            if is_resolved {
-                continue;
-            }
-
             // Filter for Copilot comments on the latest commit
-            if is_copilot && is_current {
-                info!("[CopilotReview] Adding unresolved Copilot comment on current commit");
+            if is_copilot_comment(&comment.author.login, None) && comment.commit.oid == head_sha {
                 copilot_comments.push(CopilotComment {
                     path: comment.path,
                     line: comment.line,
                     body: comment.body,
-                    diff_hunk: Some(comment.diffHunk),
+                    diff_hunk: Some(comment.diff_hunk),
                 });
             }
         }
