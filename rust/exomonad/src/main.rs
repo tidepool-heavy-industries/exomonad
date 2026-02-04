@@ -74,6 +74,51 @@ enum Commands {
         /// Path to the WASM file
         path: PathBuf,
     },
+
+    /// Recompile the WASM plugin for a specific role
+    Recompile {
+        /// The role to compile (e.g., dev, tl)
+        role: String,
+    },
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+fn find_exomonad_dir() -> Result<PathBuf> {
+    let mut current = std::env::current_dir()?;
+    loop {
+        let candidate = current.join(".exomonad");
+        if candidate.exists() && candidate.is_dir() {
+            return Ok(candidate);
+        }
+        if !current.pop() {
+            break;
+        }
+    }
+    anyhow::bail!("No .exomonad directory found in current or parent directories")
+}
+
+fn load_config() -> Result<config::ValidatedConfig> {
+    // Discover config (strictly)
+    let raw_config = config::Config::discover().context(
+        "Failed to load config. Ensure .exomonad/config.toml or .exomonad/config.local.toml exists.",
+    )?;
+
+    // Validate config (exits early with helpful error if invalid)
+    let config = raw_config
+        .validate()
+        .map_err(|e| anyhow::anyhow!("Config validation failed: {}", e))?;
+
+    let wasm_path = config.wasm_path_buf();
+    info!(
+        role = ?config.role(),
+        wasm_path = %wasm_path.display(),
+        "Loaded and validated config"
+    );
+
+    Ok(config)
 }
 
 // ============================================================================
@@ -328,27 +373,10 @@ async fn main() -> Result<()> {
     // Initialize logging based on command type
     init_logging(&cli.command);
 
-    // Discover config (or use default)
-    let raw_config = config::Config::discover().unwrap_or_else(|e| {
-        debug!(error = %e, "No config found, using defaults");
-        config::Config::default()
-    });
-
-    // Validate config (exits early with helpful error if invalid)
-    let config = raw_config
-        .validate()
-        .map_err(|e| anyhow::anyhow!("Config validation failed: {}", e))?;
-
-    let wasm_path = config.wasm_path_buf();
-
-    info!(
-        role = ?config.role(),
-        wasm_path = %wasm_path.display(),
-        "Loaded and validated config"
-    );
-
     match cli.command {
         Commands::Hook { event, runtime } => {
+            let config = load_config()?;
+            let wasm_path = config.wasm_path_buf();
             info!(wasm = ?wasm_path, "Loading WASM plugin");
 
             // Initialize and validate services
@@ -369,6 +397,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::McpStdio => {
+            let config = load_config()?;
             // stdio MCP server - Claude Code spawns this process
             // Use config already loaded above
             let project_dir_ref = config.project_dir();
@@ -383,6 +412,7 @@ async fn main() -> Result<()> {
             let pid_file = project_dir.join(".exomonad/sidecar.pid");
             let _pid_guard = exomonad::pid::PidGuard::new(&pid_file)?;
 
+            let wasm_path = config.wasm_path_buf();
             info!(wasm = ?wasm_path, "Loading WASM plugin");
 
             // Initialize and validate services (secrets loaded from ~/.exomonad/secrets)
@@ -478,6 +508,24 @@ async fn main() -> Result<()> {
         }
 
         Commands::Warmup { path } => {
+            // Warmup uses explicit path, might not strictly need config unless it needs secrets/services?
+            // "Initialize services (required for PluginManager)" -> Services load secrets.
+            // But PluginManager::new(path, ...) uses path.
+            // Let's see if we need config. The original code did load config.
+            // But Warmup takes `path: PathBuf`.
+            // So it overrides the config's wasm path.
+            // However, Services::new() loads secrets from ~/.exomonad/secrets, independent of config.toml.
+            // But Services::new() validation might depend on something? No.
+            // So Warmup technically doesn't need config.toml.
+            // But strict config discovery was top-level.
+            // Let's assume Warmup *should* work even if config.toml is broken?
+            // Actually, usually warmup is run in a valid environment.
+            // But since it takes an explicit path, let's NOT enforce config load here if possible.
+            // However, Services might need project context?
+            // Services::new() checks env vars or defaults.
+            // Let's keep it safe and NOT load config for Warmup if we don't need it.
+            // Oh wait, `Commands::Warmup` logic uses `path`.
+            
             info!(path = %path.display(), "Warming up WASM plugin cache...");
 
             // Initialize services (required for PluginManager)
@@ -493,6 +541,49 @@ async fn main() -> Result<()> {
                 .context("Failed to load WASM plugin")?;
 
             info!("WASM plugin warmed up successfully");
+        }
+
+        Commands::Recompile { role } => {
+            // 1. Find .exomonad/ (walk up if needed)
+            let exomonad_dir = find_exomonad_dir()?;
+
+            // 2. Verify flake.nix exists
+            let flake_path = exomonad_dir.join("flake.nix");
+            if !flake_path.exists() {
+                anyhow::bail!("No .exomonad/flake.nix found");
+            }
+
+            // 3. Run nix build
+            info!("Building role: {}", role);
+            let status = std::process::Command::new("nix")
+                .args(["build", &format!(".#{}", role)])
+                .current_dir(&exomonad_dir)
+                .status()
+                .context("Failed to run nix build")?;
+
+            if !status.success() {
+                anyhow::bail!("nix build failed for role '{}'", role);
+            }
+
+            // 4. Copy result to wasm/
+            let wasm_dir = exomonad_dir.join("wasm");
+            std::fs::create_dir_all(&wasm_dir).context("Failed to create wasm directory")?;
+
+            // The build result is a symlink named 'result' in exomonad_dir
+            let result_link = exomonad_dir.join("result");
+            let target_path = wasm_dir.join(format!("wasm-guest-{}.wasm", role));
+
+            // Copy the result file
+            std::fs::copy(&result_link, &target_path).context(format!(
+                "Failed to copy build result to {}",
+                target_path.display()
+            ))?;
+
+            info!(
+                "Successfully recompiled role '{}' to {}",
+                role,
+                target_path.display()
+            );
         }
     }
 

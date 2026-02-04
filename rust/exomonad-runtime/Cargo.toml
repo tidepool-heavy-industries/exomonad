@@ -18,6 +18,7 @@ duct = { workspace = true }
 exomonad-shared = { path = "../exomonad-shared" }
 exomonad-ui-protocol = { path = "../exomonad-ui-protocol" }
 zellij-gen = { path = "../zellij-gen" }
+toml = "0.8"
 
 [dev-dependencies]
 tempfile = { workspace = true }

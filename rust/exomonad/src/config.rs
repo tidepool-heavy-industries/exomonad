@@ -1,6 +1,6 @@
 //! Configuration discovery from .exomonad/config.toml and config.local.toml
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use exomonad_shared::{PathError, Role, WasmPath};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -70,6 +70,14 @@ impl Config {
     pub fn discover() -> Result<Self> {
         let local_path = PathBuf::from(".exomonad/config.local.toml");
         let global_path = PathBuf::from(".exomonad/config.toml");
+
+        if !local_path.exists() && !global_path.exists() {
+            bail!(
+                "No .exomonad/config.toml or config.local.toml found.\n\
+                 Create .exomonad/config.toml with:\n\
+                 default_role = \"dev\""
+            );
+        }
 
         let local_raw = if local_path.exists() {
             Self::load_raw(&local_path)?
@@ -141,14 +149,13 @@ impl Config {
 
     /// Resolve absolute WASM path based on role and overrides.
     fn resolve_wasm_path(&self) -> Result<PathBuf, ConfigError> {
-        if let Some(ref over) = self.wasm_path_override {
-            return Ok(over.join(format!("wasm-guest-{}.wasm", self.role)));
-        }
+        let base_dir = if let Some(ref over) = self.wasm_path_override {
+            over.clone()
+        } else {
+            PathBuf::from(".exomonad/wasm")
+        };
 
-        let home = std::env::var("HOME").map_err(|_| ConfigError::HomeNotSet)?;
-        Ok(PathBuf::from(home)
-            .join(".exomonad/wasm")
-            .join(format!("wasm-guest-{}.wasm", self.role)))
+        Ok(base_dir.join(format!("wasm-guest-{}.wasm", self.role)))
     }
 }
 
