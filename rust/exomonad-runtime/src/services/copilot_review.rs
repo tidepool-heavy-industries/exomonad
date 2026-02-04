@@ -195,15 +195,32 @@ fn fetch_pr_comments(owner: &str, repo: &str, pr_number: u64) -> Result<Vec<Copi
     let head_sha = response.data.repository.pullRequest.headRefOid;
     let mut copilot_comments = Vec::new();
 
-    for thread in response.data.repository.pullRequest.reviewThreads.nodes {
-        // Skip resolved threads
-        if thread.isResolved {
-            continue;
-        }
+    info!("[CopilotReview] Filtering comments against head SHA: {}", head_sha);
 
+    for thread in response.data.repository.pullRequest.reviewThreads.nodes {
+        let is_resolved = thread.isResolved;
+        
         for comment in thread.comments.nodes {
+            let author = &comment.author.login;
+            let comment_oid = &comment.commit.oid;
+            let is_copilot = is_copilot_comment(author, None);
+            let is_current = comment_oid == &head_sha;
+
+            if is_copilot {
+                info!(
+                    "[CopilotReview] Checking comment by {}: resolved={}, current={} (commit={})",
+                    author, is_resolved, is_current, comment_oid
+                );
+            }
+
+            // Skip resolved threads
+            if is_resolved {
+                continue;
+            }
+
             // Filter for Copilot comments on the latest commit
-            if is_copilot_comment(&comment.author.login, None) && comment.commit.oid == head_sha {
+            if is_copilot && is_current {
+                info!("[CopilotReview] Adding unresolved Copilot comment on current commit");
                 copilot_comments.push(CopilotComment {
                     path: comment.path,
                     line: comment.line,
