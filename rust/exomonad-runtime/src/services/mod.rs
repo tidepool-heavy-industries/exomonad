@@ -9,7 +9,6 @@ pub mod local;
 pub mod log;
 pub mod secrets;
 pub mod zellij_events;
-pub mod ui;
 
 pub use self::agent_control::{
     AgentControlService, AgentInfo, BatchCleanupResult, BatchSpawnResult, SpawnOptions, SpawnResult,
@@ -21,7 +20,6 @@ use self::github::GitHubService;
 use self::local::LocalExecutor;
 use self::log::{HasLogService, LogService};
 pub use self::secrets::Secrets;
-use self::ui::UIService;
 use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
@@ -108,9 +106,6 @@ pub struct Services {
 
     /// File I/O operations (read, write).
     pub filesystem: Arc<FileSystemService>,
-
-    /// UI operations (popup, etc.).
-    pub ui: Arc<UIService>,
 }
 
 /// Validated services wrapper.
@@ -159,16 +154,12 @@ impl Services {
         // Filesystem service for file read/write operations
         let filesystem = Arc::new(FileSystemService::new(project_dir));
 
-        // UI service for interactive popups
-        let ui = Arc::new(UIService::new());
-
         Self {
             log: LogService,
             git,
             github,
             agent_control,
             filesystem,
-            ui,
         }
     }
 }
@@ -264,11 +255,6 @@ impl ValidatedServices {
     /// Get the filesystem service.
     pub fn filesystem(&self) -> &Arc<FileSystemService> {
         &self.0.filesystem
-    }
-
-    /// Get the UI service.
-    pub fn ui(&self) -> &Arc<UIService> {
-        &self.0.ui
     }
 
     /// Get a reference to the inner Services.

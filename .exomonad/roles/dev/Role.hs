@@ -1,24 +1,26 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Role (config, Tools(..)) where
+module Role (config) where
 
 import ExoMonad
 
--- User defines their tool record by COMPOSING framework records
 data Tools mode = Tools
-  { git :: GitTools mode        -- Nested record, NOT individual tools!
-  , github :: GitHubTools mode  -- Nested record
-  , fs :: FileTools mode        -- Nested record
-  } deriving Generic
+  { git :: GitTools mode,
+    github :: GitHubTools mode,
+    fs :: FileTools mode
+  }
+  deriving (Generic)
 
 config :: RoleConfig (Tools AsHandler)
-config = RoleConfig
-  { roleName = "dev"
-  , tools = Tools
-      { git = gitTools          -- Use pre-built framework value
-      , github = githubTools    -- Use pre-built framework value
-      , fs = fileTools          -- Use pre-built framework value
-      }
-  , hooks = defaultHooks
-  }
+config =
+  RoleConfig
+    { roleName = "dev",
+      tools =
+        Tools
+          { git = gitTools,
+            github = githubTools,
+            fs = fileTools
+          },
+      hooks = defaultHooks
+    }

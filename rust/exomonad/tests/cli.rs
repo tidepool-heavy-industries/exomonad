@@ -6,9 +6,7 @@
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
-use std::fs;
 use std::path::PathBuf;
-use tempfile::tempdir;
 
 fn wasm_fixture_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -49,30 +47,6 @@ fn wasm_loaded_ok(stderr: &str) -> bool {
     stderr.contains("WASM plugin loaded and initialized")
 }
 
-/// Helper to setup a test environment with config.local.toml
-fn setup_test_env(wasm_fixture: &PathBuf) -> Result<tempfile::TempDir, Box<dyn std::error::Error>> {
-    let dir = tempdir()?;
-    let exomonad_dir = dir.path().join(".exomonad");
-    fs::create_dir(&exomonad_dir)?;
-
-    // Create a directory for WASM artifacts
-    let wasm_dir = dir.path().join("wasm");
-    fs::create_dir(&wasm_dir)?;
-
-    // Copy fixture to expected name (wasm-guest-{role}.wasm)
-    // We use role="dev" in the config below
-    fs::copy(wasm_fixture, wasm_dir.join("wasm-guest-dev.wasm"))?;
-
-    let config = format!(
-        r#"role = "dev"
-wasm_path = "{}""#,
-        wasm_dir.display()
-    );
-    fs::write(exomonad_dir.join("config.local.toml"), config)?;
-
-    Ok(dir)
-}
-
 #[test]
 fn test_cli_missing_wasm_file_errors() -> Result<(), Box<dyn std::error::Error>> {
     // This test is no longer applicable with config-based WASM resolution
@@ -96,11 +70,9 @@ fn test_cli_hook_pre_tool_use() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let dir = setup_test_env(&wasm_path)?;
     let mut cmd = cargo_bin_cmd!("exomonad");
 
     let output = cmd
-        .current_dir(dir.path())
         .args(["hook", "pre-tool-use"])
         .write_stdin(test_hook_json())
         .output()
@@ -141,11 +113,9 @@ fn test_cli_hook_with_minimal_input() -> Result<(), Box<dyn std::error::Error>> 
         return Ok(());
     }
 
-    let dir = setup_test_env(&wasm_path)?;
     let mut cmd = cargo_bin_cmd!("exomonad");
 
     let output = cmd
-        .current_dir(dir.path())
         .args(["hook", "pre-tool-use"])
         .write_stdin(minimal_hook_json())
         .output()
@@ -169,11 +139,9 @@ fn test_cli_invalid_json_returns_error() -> Result<(), Box<dyn std::error::Error
         return Ok(());
     }
 
-    let dir = setup_test_env(&wasm_path)?;
     let mut cmd = cargo_bin_cmd!("exomonad");
 
-    cmd.current_dir(dir.path())
-        .args(["hook", "pre-tool-use"])
+    cmd.args(["hook", "pre-tool-use"])
         .write_stdin("not valid json")
         .assert()
         .failure()
@@ -190,11 +158,9 @@ fn test_cli_empty_stdin_returns_error() -> Result<(), Box<dyn std::error::Error>
         return Ok(());
     }
 
-    let dir = setup_test_env(&wasm_path)?;
     let mut cmd = cargo_bin_cmd!("exomonad");
 
-    cmd.current_dir(dir.path())
-        .args(["hook", "pre-tool-use"])
+    cmd.args(["hook", "pre-tool-use"])
         .write_stdin("")
         .assert()
         .failure();
@@ -217,7 +183,6 @@ fn test_cli_other_hook_types_passthrough() -> Result<(), Box<dyn std::error::Err
         return Ok(());
     }
 
-    let dir = setup_test_env(&wasm_path)?;
     let mut cmd = cargo_bin_cmd!("exomonad");
 
     // Post-tool-use should pass through (not implemented in WASM, uses default)
@@ -230,7 +195,6 @@ fn test_cli_other_hook_types_passthrough() -> Result<(), Box<dyn std::error::Err
     }"#;
 
     let output = cmd
-        .current_dir(dir.path())
         .args(["hook", "post-tool-use"])
         .write_stdin(input)
         .output()

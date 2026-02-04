@@ -15,11 +15,9 @@ thiserror = { workspace = true }
 octocrab = "0.32"
 chrono = "0.4"
 duct = { workspace = true }
-uuid = { workspace = true }
 exomonad-shared = { path = "../exomonad-shared" }
 exomonad-ui-protocol = { path = "../exomonad-ui-protocol" }
 zellij-gen = { path = "../zellij-gen" }
-toml = "0.8"
 
 [dev-dependencies]
 tempfile = { workspace = true }

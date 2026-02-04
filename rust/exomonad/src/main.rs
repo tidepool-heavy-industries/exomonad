@@ -74,52 +74,6 @@ enum Commands {
         /// Path to the WASM file
         path: PathBuf,
     },
-
-    /// Recompile the WASM plugin for a specific role
-    Recompile {
-        /// The role to compile (valid values: dev, tl, pm)
-        #[arg(value_parser = ["dev", "tl", "pm"])]
-        role: String,
-    },
-}
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-fn find_exomonad_dir() -> Result<PathBuf> {
-    let mut current = std::env::current_dir()?;
-    loop {
-        let candidate = current.join(".exomonad");
-        if candidate.exists() && candidate.is_dir() {
-            return Ok(candidate);
-        }
-        if !current.pop() {
-            break;
-        }
-    }
-    anyhow::bail!("No .exomonad directory found in current or parent directories")
-}
-
-fn load_config() -> Result<config::ValidatedConfig> {
-    // Discover config (strictly)
-    let raw_config = config::Config::discover().context(
-        "Failed to load config. Ensure .exomonad/config.toml or .exomonad/config.local.toml exists.",
-    )?;
-
-    // Validate config (exits early with helpful error if invalid)
-    let config = raw_config
-        .validate()
-        .map_err(|e| anyhow::anyhow!("Config validation failed: {}", e))?;
-
-    let wasm_path = config.wasm_path_buf();
-    info!(
-        role = ?config.role(),
-        wasm_path = %wasm_path.display(),
-        "Loaded and validated config"
-    );
-
-    Ok(config)
 }
 
 // ============================================================================
@@ -374,10 +328,27 @@ async fn main() -> Result<()> {
     // Initialize logging based on command type
     init_logging(&cli.command);
 
+    // Discover config (or use default)
+    let raw_config = config::Config::discover().unwrap_or_else(|e| {
+        debug!(error = %e, "No config found, using defaults");
+        config::Config::default()
+    });
+
+    // Validate config (exits early with helpful error if invalid)
+    let config = raw_config
+        .validate()
+        .map_err(|e| anyhow::anyhow!("Config validation failed: {}", e))?;
+
+    let wasm_path = config.wasm_path_buf();
+
+    info!(
+        role = ?config.role(),
+        wasm_path = %wasm_path.display(),
+        "Loaded and validated config"
+    );
+
     match cli.command {
         Commands::Hook { event, runtime } => {
-            let config = load_config()?;
-            let wasm_path = config.wasm_path_buf();
             info!(wasm = ?wasm_path, "Loading WASM plugin");
 
             // Initialize and validate services
@@ -398,7 +369,6 @@ async fn main() -> Result<()> {
         }
 
         Commands::McpStdio => {
-            let config = load_config()?;
             // stdio MCP server - Claude Code spawns this process
             // Use config already loaded above
             let project_dir_ref = config.project_dir();
@@ -413,7 +383,6 @@ async fn main() -> Result<()> {
             let pid_file = project_dir.join(".exomonad/sidecar.pid");
             let _pid_guard = exomonad::pid::PidGuard::new(&pid_file)?;
 
-            let wasm_path = config.wasm_path_buf();
             info!(wasm = ?wasm_path, "Loading WASM plugin");
 
             // Initialize and validate services (secrets loaded from ~/.exomonad/secrets)
@@ -427,61 +396,6 @@ async fn main() -> Result<()> {
             let plugin = PluginManager::new(wasm_path, services.clone())
                 .await
                 .context("Failed to load WASM plugin")?;
-
-            // Start control socket listener for UI replies
-            // This listens for "reply" commands from the zellij plugin/sidecar CLI
-            // and forwards them to the UIService to resolve pending host function calls.
-            let socket_path = std::env::var("EXOMONAD_CONTROL_SOCKET")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| project_dir.join(".exomonad/sockets/control.sock"));
-            
-            if let Some(parent) = socket_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            if socket_path.exists() {
-                let _ = std::fs::remove_file(&socket_path);
-            }
-            
-            let listener = tokio::net::UnixListener::bind(&socket_path)
-                .context("Failed to bind control socket")?;
-                
-            let ui_service = services.ui().clone();
-            
-            // CancellationToken for graceful shutdown
-            let cancel_token = tokio_util::sync::CancellationToken::new();
-            let cancel_token_clone = cancel_token.clone();
-            let socket_path_clone = socket_path.clone();
-
-            // Spawn background task for socket
-            let socket_task = tokio::spawn(async move {
-                loop {
-                    tokio::select! {
-                        _ = cancel_token_clone.cancelled() => {
-                            info!("Shutting down control socket listener");
-                            break;
-                        }
-                        result = listener.accept() => {
-                            match result {
-                                Ok((mut stream, _addr)) => {
-                                    let ui_service = ui_service.clone();
-                                    tokio::spawn(async move {
-                                        handle_socket_client(&mut stream, ui_service).await;
-                                    });
-                                }
-                                Err(e) => {
-                                    warn!("Accept failed: {}", e);
-                                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                // Cleanup socket file on shutdown
-                if let Err(e) = std::fs::remove_file(&socket_path_clone) {
-                    warn!("Failed to remove socket file: {}", e);
-                }
-            });
 
             let state = mcp::McpState {
                 project_dir,
@@ -503,18 +417,7 @@ async fn main() -> Result<()> {
                 Err(e) => warn!("Invalid agent_id '{}': {}", agent_id, e),
             }
 
-            // Run MCP server
-            let mcp_result = mcp::stdio::run_stdio_server(state).await;
-            
-            // Signal socket listener to stop
-            cancel_token.cancel();
-            match socket_task.await {
-                Ok(_) => debug!("Socket listener shut down cleanly"),
-                Err(e) => warn!("Socket listener task failed: {}", e),
-            }
-
-            // Propagate MCP result
-            mcp_result?;
+            mcp::stdio::run_stdio_server(state).await?;
 
             // Emit AgentStopped
             // Re-fetch branch as it might have changed
@@ -575,7 +478,6 @@ async fn main() -> Result<()> {
         }
 
         Commands::Warmup { path } => {
-            // Warmup uses an explicit WASM path and does not require loading project config.
             info!(path = %path.display(), "Warming up WASM plugin cache...");
 
             // Initialize services (required for PluginManager)
@@ -592,169 +494,7 @@ async fn main() -> Result<()> {
 
             info!("WASM plugin warmed up successfully");
         }
-
-        Commands::Recompile { role } => {
-            // 1. Find .exomonad/ (walk up if needed)
-            let exomonad_dir = find_exomonad_dir()?;
-
-            // 2. Verify flake.nix exists
-            let flake_path = exomonad_dir.join("flake.nix");
-            if !flake_path.exists() {
-                anyhow::bail!("No .exomonad/flake.nix found");
-            }
-
-            // 3. Run nix build
-            info!("Building role: {}", role);
-            let status = std::process::Command::new("nix")
-                .args(["build", &format!(".#{}", role)])
-                .current_dir(&exomonad_dir)
-                .status()
-                .context("Failed to run nix build")?;
-
-            if !status.success() {
-                anyhow::bail!("nix build failed for role '{}'", role);
-            }
-
-            // 4. Copy result to wasm/
-            let wasm_dir = exomonad_dir.join("wasm");
-            std::fs::create_dir_all(&wasm_dir).context("Failed to create wasm directory")?;
-
-            // The build result is a symlink named 'result' in exomonad_dir
-            let result_link = exomonad_dir.join("result");
-            let target_path = wasm_dir.join(format!("wasm-guest-{}.wasm", role));
-
-            // Determine what the result symlink points to and locate the actual .wasm file.
-            let result_meta = std::fs::metadata(&result_link).with_context(|| {
-                format!(
-                    "Failed to stat build result at {}. Expected a file or directory produced by `nix build .#{}.`",
-                    result_link.display(),
-                    role
-                )
-            })?;
-
-            // Resolve the source .wasm file:
-            // - If `result` is a file, use it directly.
-            // - If `result` is a directory, search for a .wasm file in `result/bin` first,
-            //   then directly under `result/` as a fallback.
-            let source_wasm = if result_meta.is_file() {
-                result_link.clone()
-            } else if result_meta.is_dir() {
-                // Collect candidate .wasm files from expected locations.
-                let mut candidates: Vec<std::path::PathBuf> = Vec::new();
-
-                let bin_dir = result_link.join("bin");
-                if bin_dir.exists() {
-                    for entry in std::fs::read_dir(&bin_dir)
-                        .with_context(|| format!("Failed to read {}", bin_dir.display()))?
-                    {
-                        let entry = entry.with_context(|| {
-                            format!("Failed to read entry in {}", bin_dir.display())
-                        })?;
-                        let path = entry.path();
-                        if path.extension().and_then(|s| s.to_str()) == Some("wasm") {
-                            candidates.push(path);
-                        }
-                    }
-                }
-
-                if candidates.is_empty() {
-                    for entry in std::fs::read_dir(&result_link).with_context(|| {
-                        format!("Failed to read {}", result_link.display())
-                    })? {
-                        let entry = entry.with_context(|| {
-                            format!("Failed to read entry in {}", result_link.display())
-                        })?;
-                        let path = entry.path();
-                        if path.extension().and_then(|s| s.to_str()) == Some("wasm") {
-                            candidates.push(path);
-                        }
-                    }
-                }
-
-                candidates
-                    .into_iter()
-                    .next()
-                    .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "nix build for role '{}' produced a directory at {}, but no .wasm file was found in {} or {}",
-                            role,
-                            result_link.display(),
-                            bin_dir.display(),
-                            result_link.display()
-                        )
-                    })?
-            } else {
-                anyhow::bail!(
-                    "Build result at {} is neither a file nor a directory",
-                    result_link.display()
-                );
-            };
-
-            // Copy the resolved .wasm file into the wasm/ directory.
-            std::fs::copy(&source_wasm, &target_path).with_context(|| {
-                format!(
-                    "Failed to copy build result from {} to {}",
-                    source_wasm.display(),
-                    target_path.display()
-                )
-            })?;
-
-            info!(
-                "Successfully recompiled role '{}' to {}",
-                role,
-                target_path.display()
-            );
-        }
     }
 
     Ok(())
-}
-
-async fn handle_socket_client(stream: &mut tokio::net::UnixStream, ui_service: Arc<exomonad_runtime::services::ui::UIService>) {
-    use tokio::io::{AsyncBufReadExt, BufReader};
-    let mut reader = BufReader::new(stream);
-    let mut line = String::new();
-    
-    loop {
-        line.clear();
-        match reader.read_line(&mut line).await {
-            Ok(0) => break, // EOF
-            Ok(_) => {
-                match serde_json::from_str::<ServiceRequest>(&line) {
-                    Ok(req) => {
-                        if let ServiceRequest::UserInteraction { request_id, payload, cancel } = req {
-                            let result = if cancel {
-                                exomonad_ui_protocol::PopupResult {
-                                    button: "cancel".to_string(),
-                                    values: serde_json::json!({}),
-                                    time_spent_seconds: None,
-                                }
-                            } else {
-                                exomonad_ui_protocol::PopupResult {
-                                    button: "submit".to_string(),
-                                    values: payload.unwrap_or(serde_json::json!({})),
-                                    time_spent_seconds: None,
-                                }
-                            };
-                            
-                            if let Err(e) = ui_service.handle_reply(&request_id, result) {
-                                warn!("Failed to handle reply: {}", e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Failed to parse ServiceRequest from Zellij socket: {} (line: {})",
-                            e,
-                            line.trim_end()
-                        );
-                    }
-                }
-            }
-            Err(e) => {
-                warn!("Read error: {}", e);
-                break;
-            }
-        }
-    }
 }

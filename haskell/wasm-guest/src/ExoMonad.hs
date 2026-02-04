@@ -7,7 +7,6 @@ module ExoMonad
     module ExoMonad.Guest.Records.GitHub,
     module ExoMonad.Guest.Records.File,
     module ExoMonad.Guest.Records.Agent,
-    module ExoMonad.Guest.Records.Popup,
 
     -- * Mode System
     module ExoMonad.Guest.Tool.Mode,
@@ -21,7 +20,6 @@ import ExoMonad.Guest.Records.Agent
 import ExoMonad.Guest.Records.File
 import ExoMonad.Guest.Records.Git
 import ExoMonad.Guest.Records.GitHub
-import ExoMonad.Guest.Records.Popup
 import ExoMonad.Guest.Tool.Mode
 import ExoMonad.Types
 import GHC.Generics (Generic)

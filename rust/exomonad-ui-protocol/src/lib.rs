@@ -356,7 +356,7 @@ impl PopupState {
 }
 
 /// JSON result containing all form values
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PopupResult {
     pub button: String, // "submit" or "decline"
     pub values: Value,
