@@ -8,9 +8,9 @@ module ExoMonad.Guest.Tools.Popup where
 
 import Data.Aeson (ToJSON (..), Value, object, (.=))
 import Data.Text (Text)
-import ExoMonad.Guest.Effects.UI (PopupDefinition (..), PopupResult, UI, showPopup)
+import ExoMonad.Guest.Effects.UI (PopupDefinition (..), PopupResult, UI, showPopup, runUI)
 import ExoMonad.Guest.Tool.Class
-import Polysemy (Member, Sem)
+import Polysemy (Member, Sem, runM)
 
 -- | Popup tool marker
 data Popup
@@ -49,8 +49,9 @@ instance MCPTool Popup where
     ]
   
   toolHandler args = do
-    handleMCP @UI $ do
+    result <- runM $ runUI $ do
       res <- showPopup args
       case res of
         Left err -> pure $ object ["error" .= err]
-        Right result -> pure $ toJSON result
+        Right r -> pure $ toJSON r
+    pure $ successResult result
