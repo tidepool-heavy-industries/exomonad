@@ -91,6 +91,28 @@ fn get_repo_info() -> Result<(String, String)> {
 
 /// Fetch PR review comments using gh api
 fn fetch_pr_comments(owner: &str, repo: &str, pr_number: u64) -> Result<Vec<CopilotComment>> {
+    // 1. Get current PR head SHA to filter out outdated comments
+    let head_output = Command::new("gh")
+        .args([
+            "pr",
+            "view",
+            &pr_number.to_string(),
+            "--json",
+            "headRefOid",
+            "--template",
+            "{{.headRefOid}}",
+        ])
+        .output()
+        .context("Failed to get PR head SHA")?;
+
+    if !head_output.status.success() {
+        let stderr = String::from_utf8_lossy(&head_output.stderr);
+        anyhow::bail!("Failed to get PR head SHA: {}", stderr.trim());
+    }
+
+    let head_sha = String::from_utf8_lossy(&head_output.stdout).trim().to_string();
+    debug!("[CopilotReview] PR #{} head SHA: {}", pr_number, head_sha);
+
     let endpoint = format!("/repos/{}/{}/pulls/{}/comments", owner, repo, pr_number);
 
     debug!("[CopilotReview] Fetching comments from: {}", endpoint);
@@ -117,6 +139,7 @@ fn fetch_pr_comments(owner: &str, repo: &str, pr_number: u64) -> Result<Vec<Copi
         #[serde(default)]
         diff_hunk: Option<String>,
         user: CommentUser,
+        commit_id: String,
     }
 
     #[derive(Deserialize)]
@@ -129,11 +152,20 @@ fn fetch_pr_comments(owner: &str, repo: &str, pr_number: u64) -> Result<Vec<Copi
     let comments: Vec<PRComment> =
         serde_json::from_str(&stdout).context("Failed to parse PR comments JSON")?;
 
-    // Filter for Copilot comments
-    // Copilot appears as "github-actions[bot]" or "copilot" user, or type "Bot"
+    // Filter for Copilot comments that are on the latest commit
     let copilot_comments: Vec<CopilotComment> = comments
         .into_iter()
         .filter(|c| is_copilot_comment(&c.user.login, c.user.user_type.as_deref()))
+        .filter(|c| {
+            let is_current = c.commit_id == head_sha;
+            if !is_current {
+                debug!(
+                    "[CopilotReview] Skipping outdated comment on commit {} (head is {})",
+                    c.commit_id, head_sha
+                );
+            }
+            is_current
+        })
         .map(|c| CopilotComment {
             path: c.path,
             line: c.line,
@@ -143,7 +175,7 @@ fn fetch_pr_comments(owner: &str, repo: &str, pr_number: u64) -> Result<Vec<Copi
         .collect();
 
     debug!(
-        "[CopilotReview] Found {} Copilot comments",
+        "[CopilotReview] Found {} current Copilot comments",
         copilot_comments.len()
     );
 
