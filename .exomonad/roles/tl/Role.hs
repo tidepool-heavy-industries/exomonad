@@ -14,7 +14,7 @@ data Tools mode = Tools
   , agents :: AgentTools mode   -- TL adds agent orchestration
   } deriving Generic
 
-config :: RoleConfig Tools
+config :: RoleConfig (Tools AsHandler)
 config = RoleConfig
   { roleName = "tl"
   , tools = Tools

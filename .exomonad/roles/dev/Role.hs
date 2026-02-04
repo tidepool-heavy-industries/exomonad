@@ -12,7 +12,7 @@ data Tools mode = Tools
   , fs :: FileTools mode        -- Nested record
   } deriving Generic
 
-config :: RoleConfig Tools
+config :: RoleConfig (Tools AsHandler)
 config = RoleConfig
   { roleName = "dev"
   , tools = Tools
