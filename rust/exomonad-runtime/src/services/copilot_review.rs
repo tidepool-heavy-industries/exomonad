@@ -200,15 +200,29 @@ fn fetch_pr_comments(owner: &str, repo: &str, pr_number: u64) -> Result<Vec<Copi
     let head_sha = response.data.repository.pull_request.head_ref_oid;
     let mut copilot_comments = Vec::new();
 
+    info!("[CopilotReview] PR head SHA: {}", head_sha);
+
     for thread in response.data.repository.pull_request.review_threads.nodes {
-        // Skip resolved threads
+        info!("[CopilotReview] Thread isResolved: {}", thread.is_resolved);
+        
         if thread.is_resolved {
             continue;
         }
 
         for comment in thread.comments.nodes {
+            let author = &comment.author.login;
+            let commit_oid = &comment.commit.oid;
+            let is_copilot = is_copilot_comment(author, None);
+            let is_current = commit_oid == &head_sha;
+
+            info!(
+                "[CopilotReview] Comment by {}: is_copilot={}, is_current={} (commit={})",
+                author, is_copilot, is_current, commit_oid
+            );
+
             // Filter for Copilot comments on the latest commit
-            if is_copilot_comment(&comment.author.login, None) && comment.commit.oid == head_sha {
+            if is_copilot && is_current {
+                info!("[CopilotReview] Adding comment to list");
                 copilot_comments.push(CopilotComment {
                     path: comment.path,
                     line: comment.line,
@@ -219,7 +233,7 @@ fn fetch_pr_comments(owner: &str, repo: &str, pr_number: u64) -> Result<Vec<Copi
         }
     }
 
-    debug!(
+    info!(
         "[CopilotReview] Found {} unresolved current Copilot comments",
         copilot_comments.len()
     );
@@ -314,7 +328,7 @@ pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<Copi
         let comments = fetch_pr_comments(&owner, &repo, input.pr_number)?;
 
         if !comments.is_empty() {
-            info!("[CopilotReview] Found {} Copilot comments", comments.len());
+            info!("[CopilotReview] Found {} active Copilot comments", comments.len());
 
             // Emit copilot:reviewed event
             if let Ok(branch) = git::get_current_branch() {
