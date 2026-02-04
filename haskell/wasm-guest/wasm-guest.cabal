@@ -33,6 +33,7 @@ common shared
         aeson,
         polysemy >= 1.9,
         unordered-containers,
+        containers,
         time,
         directory,
         filepath
@@ -57,19 +58,23 @@ library
         ExoMonad.Guest.Tools.Ping
         ExoMonad.Guest.Tools.Agent
         ExoMonad.Guest.Tools.FilePR
+        ExoMonad.Guest.Tools.Popup
         -- Tool records
         ExoMonad.Guest.Records.Ping
         ExoMonad.Guest.Records.Agent
         ExoMonad.Guest.Records.FilePR
+        ExoMonad.Guest.Records.Popup
         -- Effects (for internal composition)
         ExoMonad.Guest.Effects.AgentControl
         ExoMonad.Guest.Effects.FileSystem
         ExoMonad.Guest.Effects.StopHook
+        ExoMonad.Guest.Effects.UI
         ExoMonad.Guest.HostCall
         ExoMonad.Guest.FFI
         -- Types
         ExoMonad.Guest.Types
         ExoMonad.Types
+        ExoMonad.Guest.TUI
         ExoMonad.Guest.Parsers
         -- New Tools
         ExoMonad.Guest.Tools.Git
