@@ -6,11 +6,11 @@
 
 module ExoMonad.Guest.Tools.Popup where
 
-import Data.Aeson (ToJSON (..), object, (.=))
+import Data.Aeson (ToJSON (..), Value, object, (.=))
 import Data.Text (Text)
-import ExoMonad.Guest.Effects.UI (PopupDefinition, PopupResult, showPopup, runUI)
+import ExoMonad.Guest.Effects.UI (PopupDefinition (..), PopupResult, UI, showPopup)
 import ExoMonad.Guest.Tool.Class
-import Polysemy (runM)
+import Polysemy (Member, Sem)
 
 -- | Popup tool marker
 data Popup
@@ -48,10 +48,9 @@ instance MCPTool Popup where
     , "required" .= (["title", "components"] :: [Text])
     ]
   
-handler :: (Member UI r) => PopupInput -> Sem r Value
-handler (PopupInput title components) = do
-  let definition = PopupDefinition title components
-  res <- showPopup definition
-  case res of
-    Left err -> pure $ object ["error" .= err]
-    Right result -> pure $ toJSON result
+  toolHandler args = do
+    handleMCP @UI $ do
+      res <- showPopup args
+      case res of
+        Left err -> pure $ object ["error" .= err]
+        Right result -> pure $ toJSON result
