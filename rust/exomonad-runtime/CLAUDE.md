@@ -101,20 +101,6 @@ Methods:
 
 **Implementation:** tokio::fs for async file I/O.
 
-### UIService
-
-Methods:
-- `show_popup(definition)`: Display interactive form in Zellij, wait for user input.
-
-**Implementation:**
-1. Generates unique request ID.
-2. Sends `Popup` message to Zellij plugin via `zellij action message`.
-3. Stores `oneshot::Sender` in pending requests map.
-4. Waits for reply from `exomonad-sidecar reply` (triggered by Zellij plugin).
-5. Returns `PopupResult` to WASM.
-
-**Architecture:** Async request/response over decoupled channels (Zellij pipe -> Sidecar -> Control Socket -> Runtime).
-
 ### LogService
 
 Methods:
@@ -155,9 +141,6 @@ PluginManager::load_plugin registers 25+ host functions from all services:
 **Filesystem (2 functions):**
 - `fs_read_file`
 - `fs_write_file`
-
-**UI (1 function):**
-- `ui_show_popup` - Display TUI form and wait for result
 
 **Log (3 functions):**
 - `log_info`

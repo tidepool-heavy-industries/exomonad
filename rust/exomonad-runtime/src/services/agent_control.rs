@@ -968,60 +968,27 @@ impl AgentControlService {
     // Internal: Context Files
     // ========================================================================
 
-    async fn get_agent_role(&self) -> String {
-        let config_path = self.project_dir.join(".exomonad/config.toml");
-        if let Ok(content) = fs::read_to_string(&config_path).await {
-            if let Ok(table) = content.parse::<toml::Table>() {
-                if let Some(val) = table.get("agent_role") {
-                    if let Some(s) = val.as_str() {
-                        return s.to_string();
-                    }
-                }
-            }
-        }
-        "dev".to_string()
-    }
-
     async fn write_context_files(&self, worktree_path: &Path, agent_type: AgentType) -> Result<()> {
         // Create .exomonad directory
         let exomonad_dir = worktree_path.join(".exomonad");
         fs::create_dir_all(&exomonad_dir).await?;
 
-        // Determine agent role
-        let agent_role = self.get_agent_role().await;
-
-        // Determine absolute WASM path
-        let origin_wasm_path = self.project_dir.join(".exomonad/wasm");
-        fs::create_dir_all(&origin_wasm_path)
-            .await
-            .context("Failed to create .exomonad/wasm directory")?;
-
-        let abs_wasm_path = origin_wasm_path
-            .canonicalize()
-            .context("Failed to canonicalize .exomonad/wasm path")?;
-
-        // Write config.local.toml
-        let config_content = format!(
-            r###"# Agent config (auto-generated)
-role = "{}"
-wasm_path = "{}"
-"###,
-            agent_role,
-            abs_wasm_path.display()
-        );
-
-        fs::write(exomonad_dir.join("config.local.toml"), config_content).await?;
+        // Write config.toml with role = "dev" for spawned agents
+        let config_content = r###"# Agent config (auto-generated)
+role = "dev"
+project_dir = "../../.."
+"###;
+        fs::write(exomonad_dir.join("config.toml"), config_content).await?;
         tracing::info!(
             worktree = %worktree_path.display(),
-            "Wrote .exomonad/config.local.toml with role={} and wasm_path",
-            agent_role
+            "Wrote .exomonad/config.toml with role=dev"
         );
 
         // Write .mcp.json (no --wasm argument, config file handles WASM path)
         let sidecar_path = std::env::current_exe()
             .ok()
             .and_then(|p| p.to_str().map(String::from))
-            .unwrap_or_else(|| "exomonad".to_string());
+            .unwrap_or_else(|| "exomonad-sidecar".to_string());
 
         let mcp_content = format!(
             r###"{{

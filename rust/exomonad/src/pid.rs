@@ -86,7 +86,7 @@ fn unix_enforce_singleton(pid_file: &Path) -> Result<PidGuard> {
                         if is_sidecar_process(old_pid_u32) {
                             kill_process(pid, old_pid_u32)?;
                         } else {
-                            warn!(pid = old_pid, "Process holding lock does not appear to be exomonad (or cannot be verified). Waiting...");
+                            warn!(pid = old_pid, "Process holding lock does not appear to be exomonad-sidecar (or cannot be verified). Waiting...");
                             // We can't kill it safely if we don't know what it is.
                             // But if it holds the lock on our PID file, it's likely relevant or a zombie.
                             // However, flock locks are released on process termination.
@@ -140,18 +140,9 @@ fn is_sidecar_process(pid: u32) -> bool {
     match output {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout);
-            // `ps -o command=` prints the full command; the first token is the executable path.
-            // We extract its basename and compare it exactly to the expected binary names.
-            stdout
-                .lines()
-                .filter_map(|line| {
-                    let token = line.split_whitespace().next()?;
-                    let file_name = std::path::Path::new(token).file_name()?;
-                    file_name.to_str()
-                })
-                .next()
-                .map(|name| name == "exomonad" || name == "exomonad-sidecar")
-                .unwrap_or(false)
+            // Check for binary name.
+            // process might be "target/debug/exomonad-sidecar" or just "exomonad-sidecar"
+            stdout.contains("exomonad-sidecar")
         }
         Err(_) => false, // Cannot verify
     }

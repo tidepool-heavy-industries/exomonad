@@ -130,7 +130,191 @@ EOF
           '';
         };
 
+        # Hash for dependencies ONLY. Update this if you change .cabal files.
+        deps = mkWasmDeps "sha256-RnjX41sAfU2dcynOHMCI+XulTnEB4FRJMehQZD5cgtA=";
+
+        # 2. Guest Builder (Pure Derivation)
+        # Rebuilds when source changes, using pre-built deps from mkWasmDeps.
+        # No network access, no hash required.
+        mkWasmGuest = role: deps: pkgs.stdenv.mkDerivation {
+          pname = "wasm-guest-${role}";
+          version = "0.1.0.0";
+          
+          # Use full source, but filter out git/build artifacts
+          src = pkgs.lib.cleanSourceWith {
+            src = ./.;
+            filter = path: type:
+              let base = baseNameOf path; in
+              type == "directory" ||
+              base == "cabal.project.wasm" ||
+              pkgs.lib.hasSuffix ".cabal" base ||
+              pkgs.lib.hasSuffix ".hs" base ||
+              pkgs.lib.hasSuffix ".hs-boot" base ||
+              base == "LICENSE";
+          };
+
+          nativeBuildInputs = [ wasmPkgs.all_9_12 pkgs.wizer ];
+
+          buildPhase = ''
+            ${cabalConfig}
+
+            echo "Restoring dependencies from store..."
+            rm -rf $HOME/.ghc-wasm
+            cp -r ${deps}/ghc-wasm $HOME/.ghc-wasm
+            chmod -R u+w $HOME/.ghc-wasm
+
+            # Setup project files
+            cp cabal.project.wasm cabal.project.offline
+            sed -i '/repository head.hackage/,/secure: True/d' cabal.project.offline
+
+            echo "Building ${role}..."
+            
+            # Debug: List available packages to verify cache restoration
+            echo "Listing cached packages:"
+            find $HOME/.ghc-wasm -name "*.tar.gz" | head -n 20 || echo "No tarballs found!"
+
+            # Build offline using the restored dependencies
+            # We remove --offline because it sometimes prevents using the local cache if index state checks fail
+            # The build is sandboxed anyway, so network access will fail if it tries.
+            wasm32-wasi-cabal build --project-file=cabal.project.offline wasm-guest-${role}
+          '';
+
+          installPhase = ''
+            mkdir -p $out
+            wasm_file=$(find dist-newstyle -name "wasm-guest-${role}.wasm" -print -quit)
+            if [ -z "$wasm_file" ]; then
+              echo "Error: wasm-guest-${role}.wasm not found in dist-newstyle" >&2
+              exit 1
+            fi
+            cp "$wasm_file" "$out/wasm-guest-${role}.wasm"
+          '';
+        };
+
+        # 3. User Role Builder
+        mkWasmRole = { name, src, libSrc ? null }: pkgs.stdenv.mkDerivation {
+          pname = "wasm-guest-${name}";
+          version = "0.1.0.0";
+          
+          dontUnpack = true;
+          
+          nativeBuildInputs = [ wasmPkgs.all_9_12 pkgs.wizer ];
+          
+          buildPhase = ''
+            ${cabalConfig}
+            
+            # 1. Setup Exomonad sources (libs)
+            mkdir -p build
+            cd build
+            
+            # Copy exomonad haskell sources
+            # We use the same filtering as mkWasmGuest to avoid unnecessary rebuilds
+            cp -r ${pkgs.lib.cleanSourceWith {
+                src = ./.;
+                filter = path: type:
+                  let base = baseNameOf path; in
+                  type == "directory" ||
+                  base == "cabal.project.wasm" ||
+                  pkgs.lib.hasSuffix ".cabal" base ||
+                  pkgs.lib.hasSuffix ".hs" base ||
+                  pkgs.lib.hasSuffix ".hs-boot" base ||
+                  base == "LICENSE";
+              }}/* .
+            
+            chmod -R u+w .
+
+            # 2. Setup User sources
+            mkdir -p roles/${name}
+            cp -r ${src}/* roles/${name}/
+            
+            # Setup Lib if provided
+            ${if libSrc != null then ''
+              mkdir -p lib
+              cp -r ${libSrc}/* lib/
+            '' else ""}
+            
+            # 3. Generate .cabal file for the role
+            cat > roles/${name}/${name}.cabal <<EOF
+cabal-version: 3.4
+name: ${name}
+version: 0.1.0.0
+build-type: Simple
+
+common shared
+    default-language: GHC2021
+    default-extensions:
+        AllowAmbiguousTypes
+        DataKinds
+        DeriveAnyClass
+        DeriveGeneric
+        DerivingStrategies
+        FlexibleContexts
+        FlexibleInstances
+        ForeignFunctionInterface
+        GADTs
+        LambdaCase
+        OverloadedStrings
+        ScopedTypeVariables
+        TypeApplications
+        TypeFamilies
+        TypeOperators
+        UndecidableInstances
+    build-depends:
+        base >= 4.16 && < 5,
+        bytestring,
+        text,
+        aeson,
+        polysemy >= 1.9,
+        unordered-containers,
+        time,
+        directory,
+        filepath
+
+    if !arch(wasm32)
+        build-depends: polysemy-plugin >= 0.4
+
+executable wasm-guest-${name}
+    import: shared
+    hs-source-dirs: . ${if libSrc != null then "../../lib" else ""}
+    main-is: Role.hs
+    ghc-options: -no-hs-main -optl-mexec-model=reactor -optl-Wl,--export=hs_init -optl-Wl,--export=handle_mcp_call -optl-Wl,--export=handle_pre_tool_use -optl-Wl,--export=handle_list_tools -optl-Wl,--allow-undefined
+    build-depends:
+        base,
+        wasm-guest:wasm-guest-internal,
+        extism-pdk
+EOF
+            
+            # 4. Generate cabal.project
+            # We need to append the new package to the project
+            cp cabal.project.wasm cabal.project.offline
+            
+            sed -i '/repository head.hackage/,/secure: True/d' cabal.project.offline
+            echo "" >> cabal.project.offline
+            echo "packages: roles/${name}/${name}.cabal" >> cabal.project.offline
+            
+            echo "Restoring dependencies from store..."
+            rm -rf $HOME/.ghc-wasm
+            cp -r ${deps}/ghc-wasm $HOME/.ghc-wasm
+            chmod -R u+w $HOME/.ghc-wasm
+            
+            echo "Building ${name}..."
+            wasm32-wasi-cabal build --project-file=cabal.project.offline wasm-guest-${name}
+          '';
+          
+          installPhase = ''
+            mkdir -p $out
+            wasm_file=$(find dist-newstyle -name "wasm-guest-${name}.wasm" -print -quit)
+            if [ -z "$wasm_file" ]; then
+              echo "Error: wasm-guest-${name}.wasm not found in dist-newstyle" >&2
+              exit 1
+            fi
+            cp "$wasm_file" "$out/wasm-guest-${name}.wasm"
+          '';
+        };
+
       in {
+        lib = {
+          inherit mkWasmRole;
+        };
         devShells = {
           # Default: Full development environment
           default = pkgs.mkShell {
@@ -208,11 +392,7 @@ EOF
         };
 
         # Build Outputs
-        packages = let
-          # Hash for dependencies ONLY. Update this if you change .cabal files.
-          # Nix will tell you the new hash if it mismatches.
-          deps = mkWasmDeps "sha256-RnjX41sAfU2dcynOHMCI+XulTnEB4FRJMehQZD5cgtA=";
-        in {
+        packages = {
           default = pkgs.writeShellScriptBin "exomonad-env-check" ''
             echo "ExoMonad environment check"
             echo "Run 'nix develop' to enter the development shell"
@@ -220,6 +400,10 @@ EOF
           
           # Expose deps derivation so we can build it directly to check hash
           wasm-deps = deps;
+          
+          # Guest binaries (no explicit hashes needed here!)
+          wasm-guest-tl = mkWasmGuest "tl" deps;
+          wasm-guest-dev = mkWasmGuest "dev" deps;
         };
       }
     );

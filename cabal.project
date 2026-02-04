@@ -1,5 +1,4 @@
 packages:
-    haskell/exomonad
     haskell/dsl/core
     haskell/protocol/wire-types
     haskell/effects/socket-client

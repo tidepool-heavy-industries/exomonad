@@ -18,4 +18,3 @@ docker/claude-agent/orchestrator.pub
 .gemini-clipboard/
 .mcp.json
 result
-rust/exomonad-plugin/target/

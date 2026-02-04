@@ -323,30 +323,30 @@ pub struct InternalStopHookOutput {
 
 impl InternalStopHookOutput {
     /// Translate to Claude Code format.
-    ///
-    /// Reference: <https://code.claude.com/docs/en/hooks#stop-decision-control>
-    ///
-    /// - Allow: returns `{}` (empty JSON, allows stop)
-    /// - Block: returns `{"decision": "block", "reason": "..."}` (prevents stop, continues working)
     pub fn to_claude(&self) -> ClaudeStopHookOutput {
         match self.decision {
-            StopDecision::Allow => ClaudeStopHookOutput::allow(),
-            StopDecision::Block => ClaudeStopHookOutput::block_optional(self.reason.clone()),
+            StopDecision::Allow => ClaudeStopHookOutput {
+                continue_: true,
+                stop_reason: None,
+            },
+            StopDecision::Block => ClaudeStopHookOutput {
+                continue_: false,
+                stop_reason: self.reason.clone(),
+            },
         }
     }
 
     /// Translate to Gemini CLI format.
-    ///
-    /// Reference: <https://geminicli.com/docs/hooks/reference/#afteragent>
-    ///
-    /// - Allow: `decision=allow, continue=true` (let agent stop normally)
-    /// - Block: `decision=deny, reason=..., continue=true` (retry with reason as prompt)
-    ///
-    /// Note: `continue=false` would kill the session immediately, which we never want.
     pub fn to_gemini(&self) -> GeminiStopHookOutput {
         match self.decision {
-            StopDecision::Allow => GeminiStopHookOutput::allow(),
-            StopDecision::Block => GeminiStopHookOutput::deny_optional(self.reason.clone()),
+            StopDecision::Allow => GeminiStopHookOutput {
+                decision: GeminiStopDecision::Allow,
+                reason: None,
+            },
+            StopDecision::Block => GeminiStopHookOutput {
+                decision: GeminiStopDecision::Deny, // Gemini uses "deny" for retry
+                reason: self.reason.clone(),
+            },
         }
     }
 
@@ -361,85 +361,18 @@ impl InternalStopHookOutput {
     }
 }
 
-/// Claude Code Stop/SubagentStop hook output format.
-///
-/// Reference: <https://code.claude.com/docs/en/hooks#stop>
-///
-/// # Decision Control
-/// - `decision: "block"` - prevents Claude from stopping, keeps it running for retry
-/// - `reason` - required when decision is "block", tells Claude why to continue
-///
-/// # Universal Fields (from common output)
-/// Reference: <https://code.claude.com/docs/en/hooks#json-output>
-/// - `continue: false` - stops Claude entirely (different from blocking!)
-/// - `stopReason` - shown to user when continue is false
+/// Claude Code stop hook output format.
 #[derive(Debug, Clone, Serialize)]
 pub struct ClaudeStopHookOutput {
-    /// Decision: "block" to prevent Claude from stopping. Omit to allow stop.
-    /// Reference: <https://code.claude.com/docs/en/hooks#stop-decision-control>
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub decision: Option<String>,
-
-    /// Required when decision is "block". Tells Claude why it should continue.
-    /// Reference: <https://code.claude.com/docs/en/hooks#stop-decision-control>
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-
-    /// Universal field: if false, stops Claude entirely (takes precedence).
-    /// Reference: <https://code.claude.com/docs/en/hooks#json-output>
-    #[serde(rename = "continue", skip_serializing_if = "Option::is_none")]
-    pub continue_: Option<bool>,
-
-    /// Universal field: message shown to user when continue is false.
-    /// Reference: <https://code.claude.com/docs/en/hooks#json-output>
+    /// Whether to continue (true = allow stop, false = block)
+    #[serde(rename = "continue")]
+    pub continue_: bool,
+    /// Reason for blocking
     #[serde(skip_serializing_if = "Option::is_none", rename = "stopReason")]
     pub stop_reason: Option<String>,
 }
 
-impl ClaudeStopHookOutput {
-    /// Allow Claude to stop normally.
-    ///
-    /// Returns empty JSON `{}` which allows the stop to proceed.
-    /// Reference: <https://code.claude.com/docs/en/hooks#stop-decision-control>
-    pub fn allow() -> Self {
-        Self {
-            decision: None,
-            reason: None,
-            continue_: None,
-            stop_reason: None,
-        }
-    }
-
-    /// Block Claude from stopping and provide a reason to continue.
-    ///
-    /// Returns `{"decision": "block", "reason": "..."}`.
-    /// Reference: <https://code.claude.com/docs/en/hooks#stop-decision-control>
-    pub fn block(reason: impl Into<String>) -> Self {
-        Self {
-            decision: Some("block".to_string()),
-            reason: Some(reason.into()),
-            continue_: None,
-            stop_reason: None,
-        }
-    }
-
-    /// Block with an optional reason (for internal use when reason may be None).
-    pub(crate) fn block_optional(reason: Option<String>) -> Self {
-        Self {
-            decision: Some("block".to_string()),
-            reason,
-            continue_: None,
-            stop_reason: None,
-        }
-    }
-}
-
 /// Gemini CLI stop hook decision.
-///
-/// Reference: <https://geminicli.com/docs/hooks/reference/#afteragent>
-///
-/// - `Allow`: Let the agent stop normally
-/// - `Deny`: Reject the response and force a retry (reason becomes correction prompt)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GeminiStopDecision {
@@ -449,66 +382,14 @@ pub enum GeminiStopDecision {
     Deny,
 }
 
-/// Gemini CLI AfterAgent hook output format.
-///
-/// Reference: <https://geminicli.com/docs/hooks/reference/#afteragent>
-///
-/// # Fields
-/// - `decision`: Set to "deny" to reject the response and force a retry.
-/// - `reason`: Required if denied. Sent to agent as correction prompt.
-/// - `continue_`: Set to false to stop the session without retrying.
-///
-/// Reference for common fields: <https://geminicli.com/docs/hooks/reference/#common-output-fields>
+/// Gemini CLI stop hook output format.
 #[derive(Debug, Clone, Serialize)]
 pub struct GeminiStopHookOutput {
-    /// Decision: "allow" or "deny".
-    /// Reference: <https://geminicli.com/docs/hooks/reference/#afteragent>
+    /// Decision: allow or deny (deny triggers retry with reason as correction prompt)
     pub decision: GeminiStopDecision,
-
-    /// Reason sent to agent as correction prompt (required when decision = deny).
-    /// Reference: <https://geminicli.com/docs/hooks/reference/#afteragent>
+    /// Reason sent to agent as correction prompt (when decision = deny)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-
-    /// Controls agent loop flow. Set to false to stop session without retrying.
-    /// When decision is "deny" and continue is true, the agent retries with reason as prompt.
-    /// Reference: <https://geminicli.com/docs/hooks/reference/#common-output-fields>
-    #[serde(rename = "continue")]
-    pub continue_: bool,
-}
-
-impl GeminiStopHookOutput {
-    /// Allow the agent to stop normally.
-    ///
-    /// Reference: <https://geminicli.com/docs/hooks/reference/#afteragent>
-    pub fn allow() -> Self {
-        Self {
-            decision: GeminiStopDecision::Allow,
-            reason: None,
-            continue_: true,
-        }
-    }
-
-    /// Deny the stop and force a retry with the given reason as correction prompt.
-    ///
-    /// The reason is sent to the agent as a new prompt to request a correction.
-    /// Reference: <https://geminicli.com/docs/hooks/reference/#afteragent>
-    pub fn deny(reason: impl Into<String>) -> Self {
-        Self {
-            decision: GeminiStopDecision::Deny,
-            reason: Some(reason.into()),
-            continue_: true, // Keep session alive for retry
-        }
-    }
-
-    /// Deny with an optional reason (for internal use when reason may be None).
-    pub(crate) fn deny_optional(reason: Option<String>) -> Self {
-        Self {
-            decision: GeminiStopDecision::Deny,
-            reason,
-            continue_: true,
-        }
-    }
 }
 
 #[cfg(test)]

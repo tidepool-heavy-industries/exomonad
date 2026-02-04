@@ -5,7 +5,6 @@ use crate::services::filesystem;
 use crate::services::git;
 use crate::services::github;
 use crate::services::log;
-use crate::services::ui;
 use crate::services::ValidatedServices;
 use anyhow::{Context, Result};
 use extism::{Manifest, Plugin, PluginBuilder};
@@ -163,9 +162,6 @@ impl PluginManager {
 
         // Copilot review functions (1 function) - poll for Copilot review comments
         functions.extend(copilot_review::register_host_functions());
-
-        // UI functions (1 function) - interactive popup
-        functions.push(ui::ui_show_popup_host_fn(services.ui().clone()));
 
         let mut builder = PluginBuilder::new(manifest)
             .with_functions(functions)

@@ -6,9 +6,5 @@ wasm/
 worktrees/
 sockets/
 logs/
-*.pid
 result
 result-*
-.exomonad-*
-roles/*/dist
-roles/*/gen

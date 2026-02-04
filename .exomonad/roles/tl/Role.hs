@@ -1,27 +1,28 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Role (config, Tools(..)) where
+module Role (config) where
 
 import ExoMonad
-import qualified Hooks
 
--- TL has more tool groups than dev
 data Tools mode = Tools
-  { git :: GitTools mode
-  , github :: GitHubTools mode
-  , fs :: FileTools mode
-  , agents :: AgentTools mode   -- TL adds agent orchestration
-  } deriving Generic
+  { git :: GitTools mode,
+    github :: GitHubTools mode,
+    fs :: FileTools mode,
+    agents :: AgentTools mode
+  }
+  deriving (Generic)
 
 config :: RoleConfig (Tools AsHandler)
-config = RoleConfig
-  { roleName = "tl"
-  , tools = Tools
-      { git = gitTools
-      , github = githubTools
-      , fs = fileTools
-      , agents = agentTools
-      }
-  , hooks = Hooks.tlHooks
-  }
+config =
+  RoleConfig
+    { roleName = "tl",
+      tools =
+        Tools
+          { git = gitTools,
+            github = githubTools,
+            fs = fileTools,
+            agents = agentTools
+          },
+      hooks = defaultHooks
+    }
