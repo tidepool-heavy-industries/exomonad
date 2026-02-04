@@ -48,6 +48,10 @@ instance MCPTool Popup where
     , "required" .= (["title", "components"] :: [Text])
     ]
   
-  toolHandler def = do
-    res <- runM . runUI $ showPopup def
-    pure $ successResult $ toJSON res
+handler :: (Member UI r) => PopupInput -> Sem r Value
+handler (PopupInput title components) = do
+  let definition = PopupDefinition title components
+  res <- showPopup definition
+  case res of
+    Left err -> pure $ object ["error" .= err]
+    Right result -> pure $ toJSON result

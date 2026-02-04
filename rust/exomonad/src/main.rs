@@ -400,7 +400,10 @@ async fn main() -> Result<()> {
             // Start control socket listener for UI replies
             // This listens for "reply" commands from the zellij plugin/sidecar CLI
             // and forwards them to the UIService to resolve pending host function calls.
-            let socket_path = PathBuf::from(".exomonad/sockets/control.sock");
+            let socket_path = std::env::var("EXOMONAD_CONTROL_SOCKET")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from(".exomonad/sockets/control.sock"));
+            
             if let Some(parent) = socket_path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
@@ -413,60 +416,38 @@ async fn main() -> Result<()> {
                 
             let ui_service = services.ui().clone();
             
+            // CancellationToken for graceful shutdown
+            let cancel_token = tokio_util::sync::CancellationToken::new();
+            let cancel_token_clone = cancel_token.clone();
+
             // Spawn background task for socket
-            tokio::spawn(async move {
+            let socket_task = tokio::spawn(async move {
                 loop {
-                    match listener.accept().await {
-                        Ok((mut stream, _addr)) => {
-                            let ui_service = ui_service.clone();
-                            tokio::spawn(async move {
-                                use tokio::io::{AsyncBufReadExt, BufReader};
-                                let mut reader = BufReader::new(&mut stream);
-                                let mut line = String::new();
-                                
-                                loop {
-                                    line.clear();
-                                    match reader.read_line(&mut line).await {
-                                        Ok(0) => break, // EOF
-                                        Ok(_) => {
-                                            if let Ok(req) = serde_json::from_str::<ServiceRequest>(&line) {
-                                                match req {
-                                                    ServiceRequest::UserInteraction { request_id, payload, cancel } => {
-                                                        let result = if cancel {
-                                                            exomonad_ui_protocol::PopupResult {
-                                                                button: "cancel".to_string(),
-                                                                values: serde_json::json!({}),
-                                                                time_spent_seconds: None,
-                                                            }
-                                                        } else {
-                                                            exomonad_ui_protocol::PopupResult {
-                                                                button: "submit".to_string(),
-                                                                values: payload.unwrap_or(serde_json::json!({})),
-                                                                time_spent_seconds: None,
-                                                            }
-                                                        };
-                                                        
-                                                        if let Err(e) = ui_service.handle_reply(&request_id, result) {
-                                                            warn!("Failed to handle reply: {}", e);
-                                                        }
-                                                    }
-                                                    _ => {}
-                                                }
-                                            }
-                                        }
-                                        Err(e) => {
-                                            warn!("Read error: {}", e);
-                                            break;
-                                        }
-                                    }
-                                }
-                            });
+                    tokio::select! {
+                        _ = cancel_token_clone.cancelled() => {
+                            info!("Shutting down control socket listener");
+                            break;
                         }
-                        Err(e) => {
-                            warn!("Accept failed: {}", e);
-                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        result = listener.accept() => {
+                            match result {
+                                Ok((mut stream, _addr)) => {
+                                    let ui_service = ui_service.clone();
+                                    tokio::spawn(async move {
+                                        handle_socket_client(&mut stream, ui_service).await;
+                                    });
+                                }
+                                Err(e) => {
+                                    warn!("Accept failed: {}", e);
+                                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                                }
+                            }
                         }
                     }
+                }
+                
+                // Cleanup socket file on shutdown
+                if let Err(e) = std::fs::remove_file(&socket_path) {
+                    warn!("Failed to remove socket file: {}", e);
                 }
             });
 
@@ -490,7 +471,15 @@ async fn main() -> Result<()> {
                 Err(e) => warn!("Invalid agent_id '{}': {}", agent_id, e),
             }
 
-            mcp::stdio::run_stdio_server(state).await?;
+            // Run MCP server
+            let mcp_result = mcp::stdio::run_stdio_server(state).await;
+            
+            // Signal socket listener to stop
+            cancel_token.cancel();
+            let _ = socket_task.await;
+
+            // Propagate MCP result
+            mcp_result?;
 
             // Emit AgentStopped
             // Re-fetch branch as it might have changed
@@ -570,4 +559,44 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn handle_socket_client(stream: &mut tokio::net::UnixStream, ui_service: Arc<exomonad_runtime::services::ui::UIService>) {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    
+    loop {
+        line.clear();
+        match reader.read_line(&mut line).await {
+            Ok(0) => break, // EOF
+            Ok(_) => {
+                if let Ok(req) = serde_json::from_str::<ServiceRequest>(&line) {
+                    if let ServiceRequest::UserInteraction { request_id, payload, cancel } = req {
+                        let result = if cancel {
+                            exomonad_ui_protocol::PopupResult {
+                                button: "cancel".to_string(),
+                                values: serde_json::json!({}),
+                                time_spent_seconds: None,
+                            }
+                        } else {
+                            exomonad_ui_protocol::PopupResult {
+                                button: "submit".to_string(),
+                                values: payload.unwrap_or(serde_json::json!({})),
+                                time_spent_seconds: None,
+                            }
+                        };
+                        
+                        if let Err(e) = ui_service.handle_reply(&request_id, result) {
+                            warn!("Failed to handle reply: {}", e);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Read error: {}", e);
+                break;
+            }
+        }
+    }
 }

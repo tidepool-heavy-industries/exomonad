@@ -27,10 +27,10 @@ import Polysemy (Embed, Member, Sem, embed, interpret, send)
 
 -- | UI Effect
 data UI m a where
-  ShowPopup :: PopupDefinition -> UI m PopupResult
+  ShowPopup :: PopupDefinition -> UI m (Either T.Text PopupResult)
 
 -- | Smart constructor (manual implementation to avoid TH issues in WASM)
-showPopup :: Member UI r => PopupDefinition -> Sem r PopupResult
+showPopup :: Member UI r => PopupDefinition -> Sem r (Either T.Text PopupResult)
 showPopup def = send (ShowPopup def)
 
 -- | Interpret UI effect via host calls
@@ -40,5 +40,5 @@ runUI = interpret $ \case
     embed $ do
       res <- callHost host_ui_show_popup def
       case res of
-        Left err -> error $ "UI Error: " <> T.unpack err
-        Right val -> pure val
+        Left err -> pure (Left err)
+        Right val -> pure (Right val)

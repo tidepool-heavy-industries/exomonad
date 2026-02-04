@@ -14,6 +14,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import GHC.Generics (Generic)
 import ExoMonad.Guest.FFI (FFIBoundary)
+import Data.Word (Word)
 
 -- | Popup definition matches Rust PopupDefinition
 data PopupDefinition = PopupDefinition
@@ -79,20 +80,21 @@ data Component
       { id :: Text
       , label :: Text
       , placeholder :: Maybe Text
-      , rows :: Maybe Int
+      , rows :: Maybe Word
       , visible_when :: Maybe VisibilityRule
       }
   | ChoiceComponent
       { id :: Text
       , label :: Text
       , options :: [Text]
-      , choiceDefault :: Maybe Int
+      , choiceDefault :: Maybe Word
       , visible_when :: Maybe VisibilityRule
       }
   | MultiselectComponent
       { id :: Text
       , label :: Text
       , options :: [Text]
+      , multiselectDefault :: Maybe Word
       , visible_when :: Maybe VisibilityRule
       }
   | GroupComponent
@@ -108,7 +110,7 @@ instance ToJSON Component where
   toJSON (CheckboxComponent elementId label def vw) = object ["type" .= ("checkbox" :: Text), "id" .= elementId, "label" .= label, "default" .= def, "visible_when" .= vw]
   toJSON (TextboxComponent elementId label ph rows vw) = object ["type" .= ("textbox" :: Text), "id" .= elementId, "label" .= label, "placeholder" .= ph, "rows" .= rows, "visible_when" .= vw]
   toJSON (ChoiceComponent elementId label opts def vw) = object ["type" .= ("choice" :: Text), "id" .= elementId, "label" .= label, "options" .= opts, "default" .= def, "visible_when" .= vw]
-  toJSON (MultiselectComponent elementId label opts vw) = object ["type" .= ("multiselect" :: Text), "id" .= elementId, "label" .= label, "options" .= opts, "visible_when" .= vw]
+  toJSON (MultiselectComponent elementId label opts def vw) = object ["type" .= ("multiselect" :: Text), "id" .= elementId, "label" .= label, "options" .= opts, "default" .= def, "visible_when" .= vw]
   toJSON (GroupComponent elementId label vw) = object ["type" .= ("group" :: Text), "id" .= elementId, "label" .= label, "visible_when" .= vw]
 
 instance FromJSON Component where
@@ -120,7 +122,7 @@ instance FromJSON Component where
       "checkbox" -> CheckboxComponent <$> v .: "id" <*> v .: "label" <*> v .: "default" <*> v .:? "visible_when"
       "textbox" -> TextboxComponent <$> v .: "id" <*> v .: "label" <*> v .:? "placeholder" <*> v .:? "rows" <*> v .:? "visible_when"
       "choice" -> ChoiceComponent <$> v .: "id" <*> v .: "label" <*> v .: "options" <*> v .:? "default" <*> v .:? "visible_when"
-      "multiselect" -> MultiselectComponent <$> v .: "id" <*> v .: "label" <*> v .: "options" <*> v .:? "visible_when"
+      "multiselect" -> MultiselectComponent <$> v .: "id" <*> v .: "label" <*> v .: "options" <*> v .:? "default" <*> v .:? "visible_when"
       "group" -> GroupComponent <$> v .: "id" <*> v .: "label" <*> v .:? "visible_when"
       _ -> fail $ "Unknown component type: " ++ T.unpack t
 
@@ -152,7 +154,7 @@ choice :: Text -> Text -> [Text] -> Component
 choice elementId label opts = ChoiceComponent elementId label opts (Just 0) Nothing
 
 multiselect :: Text -> Text -> [Text] -> Component
-multiselect elementId label opts = MultiselectComponent elementId label opts Nothing
+multiselect elementId label opts = MultiselectComponent elementId label opts Nothing Nothing
 
 group :: Text -> Text -> Component
 group elementId label = GroupComponent elementId label Nothing
