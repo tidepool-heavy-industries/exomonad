@@ -133,65 +133,10 @@ EOF
         # Hash for dependencies ONLY. Update this if you change .cabal files.
         deps = mkWasmDeps "sha256-RnjX41sAfU2dcynOHMCI+XulTnEB4FRJMehQZD5cgtA=";
 
-        # 2. Guest Builder (Pure Derivation)
-        # Rebuilds when source changes, using pre-built deps from mkWasmDeps.
-        # No network access, no hash required.
-        mkWasmGuest = role: deps: pkgs.stdenv.mkDerivation {
-          pname = "wasm-guest-${role}";
-          version = "0.1.0.0";
-          
-          # Use full source, but filter out git/build artifacts
-          src = pkgs.lib.cleanSourceWith {
-            src = ./.;
-            filter = path: type:
-              let base = baseNameOf path; in
-              type == "directory" ||
-              base == "cabal.project.wasm" ||
-              pkgs.lib.hasSuffix ".cabal" base ||
-              pkgs.lib.hasSuffix ".hs" base ||
-              pkgs.lib.hasSuffix ".hs-boot" base ||
-              base == "LICENSE";
-          };
-
-          nativeBuildInputs = [ wasmPkgs.all_9_12 pkgs.wizer ];
-
-          buildPhase = ''
-            ${cabalConfig}
-
-            echo "Restoring dependencies from store..."
-            rm -rf $HOME/.ghc-wasm
-            cp -r ${deps}/ghc-wasm $HOME/.ghc-wasm
-            chmod -R u+w $HOME/.ghc-wasm
-
-            # Setup project files
-            cp cabal.project.wasm cabal.project.offline
-            sed -i '/repository head.hackage/,/secure: True/d' cabal.project.offline
-
-            echo "Building ${role}..."
-            
-            # Debug: List available packages to verify cache restoration
-            echo "Listing cached packages:"
-            find $HOME/.ghc-wasm -name "*.tar.gz" | head -n 20 || echo "No tarballs found!"
-
-            # Build offline using the restored dependencies
-            # We remove --offline because it sometimes prevents using the local cache if index state checks fail
-            # The build is sandboxed anyway, so network access will fail if it tries.
-            wasm32-wasi-cabal build --project-file=cabal.project.offline wasm-guest-${role}
-          '';
-
-          installPhase = ''
-            mkdir -p $out
-            wasm_file=$(find dist-newstyle -name "wasm-guest-${role}.wasm" -print -quit)
-            if [ -z "$wasm_file" ]; then
-              echo "Error: wasm-guest-${role}.wasm not found in dist-newstyle" >&2
-              exit 1
-            fi
-            cp "$wasm_file" "$out/wasm-guest-${role}.wasm"
-          '';
-        };
-
-        # 3. User Role Builder
-        mkWasmRole = { name, src, libSrc ? null }: pkgs.stdenv.mkDerivation {
+        # 2. User Role Builder
+        # Builds role WASM from user-defined Role.hs in .exomonad/roles/.
+        # mkWasmGuest (internal role builder) was removed per issue #508.
+        mkWasmRole = { name, src, libSrc }: pkgs.stdenv.mkDerivation {
           pname = "wasm-guest-${name}";
           version = "0.1.0.0";
           
@@ -225,14 +170,41 @@ EOF
             # 2. Setup User sources
             mkdir -p roles/${name}
             cp -r ${src}/* roles/${name}/
-            
-            # Setup Lib if provided
-            ${if libSrc != null then ''
-              mkdir -p lib
-              cp -r ${libSrc}/* lib/
-            '' else ""}
-            
-            # 3. Generate .cabal file for the role
+
+            # Setup Lib sources (shared across roles)
+            mkdir -p lib
+            cp -r ${libSrc}/* lib/
+
+            # 3. Generate Main.hs with WASM exports
+            cat > roles/${name}/Main.hs <<'MAIN_EOF'
+{-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE TypeApplications #-}
+module Main where
+
+import Foreign.C.Types (CInt)
+import ExoMonad.Guest.Tool.Runtime (hookHandler, listHandlerRecord, mcpHandlerRecord, wrapHandler)
+import ExoMonad.Guest.Tool.Mode (AsSchema)
+import Role (config, Tools)
+import ExoMonad.Types (RoleConfig(..))
+
+foreign export ccall handle_mcp_call :: IO CInt
+foreign export ccall handle_list_tools :: IO CInt
+foreign export ccall handle_pre_tool_use :: IO CInt
+
+handle_mcp_call :: IO CInt
+handle_mcp_call = wrapHandler $ mcpHandlerRecord (tools config)
+
+handle_list_tools :: IO CInt
+handle_list_tools = wrapHandler $ listHandlerRecord @(Tools AsSchema)
+
+handle_pre_tool_use :: IO CInt
+handle_pre_tool_use = wrapHandler $ hookHandler (hooks config)
+
+main :: IO ()
+main = pure ()
+MAIN_EOF
+
+            # 4. Generate .cabal file for the role
             cat > roles/${name}/${name}.cabal <<EOF
 cabal-version: 3.4
 name: ${name}
@@ -274,16 +246,17 @@ common shared
 
 executable wasm-guest-${name}
     import: shared
-    hs-source-dirs: . ${if libSrc != null then "../../lib" else ""}
-    main-is: Role.hs
+    hs-source-dirs: . ../../lib
+    main-is: Main.hs
+    other-modules: Role
     ghc-options: -no-hs-main -optl-mexec-model=reactor -optl-Wl,--export=hs_init -optl-Wl,--export=handle_mcp_call -optl-Wl,--export=handle_pre_tool_use -optl-Wl,--export=handle_list_tools -optl-Wl,--allow-undefined
     build-depends:
         base,
         wasm-guest:wasm-guest-internal,
         extism-pdk
 EOF
-            
-            # 4. Generate cabal.project
+
+            # 5. Generate cabal.project
             # We need to append the new package to the project
             cp cabal.project.wasm cabal.project.offline
             
@@ -397,13 +370,12 @@ EOF
             echo "ExoMonad environment check"
             echo "Run 'nix develop' to enter the development shell"
           '';
-          
+
           # Expose deps derivation so we can build it directly to check hash
           wasm-deps = deps;
-          
-          # Guest binaries (no explicit hashes needed here!)
-          wasm-guest-tl = mkWasmGuest "tl" deps;
-          wasm-guest-dev = mkWasmGuest "dev" deps;
+
+          # Role WASM binaries are now built from .exomonad/flake.nix using mkWasmRole.
+          # See issue #508 for the role system architecture.
         };
       }
     );

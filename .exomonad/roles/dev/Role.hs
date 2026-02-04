@@ -1,14 +1,13 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Role (config) where
+module Role (config, Tools) where
 
 import ExoMonad
+import StopHook (devHooks)
 
 data Tools mode = Tools
-  { git :: GitTools mode,
-    github :: GitHubTools mode,
-    fs :: FileTools mode
+  { pr :: FilePRTools mode
   }
   deriving (Generic)
 
@@ -18,9 +17,7 @@ config =
     { roleName = "dev",
       tools =
         Tools
-          { git = gitTools,
-            github = githubTools,
-            fs = fileTools
+          { pr = filePRTools
           },
-      hooks = defaultHooks
+      hooks = devHooks
     }

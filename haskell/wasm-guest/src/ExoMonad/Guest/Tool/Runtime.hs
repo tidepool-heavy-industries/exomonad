@@ -26,19 +26,20 @@ import Data.Proxy (Proxy (..))
 import Data.Text qualified as T
 import Data.Text (Text)
 import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
-import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
 import ExoMonad.Guest.HostCall
+import ExoMonad.Types (HookConfig (..))
 import ExoMonad.Guest.FFI (FFIBoundary)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), toMCPFormat)
 import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
-import ExoMonad.Guest.Types (HookInput (..), HookEventType (..), MCPCallInput (..), StopHookOutput (..), StopDecision (..), allowResponse)
+import ExoMonad.Guest.Types (HookInput (..), HookEventType (..), MCPCallInput (..), StopHookOutput (..), StopDecision (..), HookOutput, allowResponse)
 import Extism.PDK (input, output)
 import Foreign.C.Types (CInt (..))
 import GHC.Generics (Generic)
 import System.Directory (getCurrentDirectory)
 import System.FilePath (takeFileName)
 import Data.Word (Word64)
+import Polysemy (Embed, Sem, runM)
 
 -- | Test handler - allows calling any host function directly for property testing.
 testHandler :: IO CInt
@@ -146,10 +147,13 @@ listHandlerRecord = do
 
 -- | Hook handler - handles PreToolUse, SessionEnd, and SubagentStop hooks.
 --
--- For stop hooks (SessionEnd, SubagentStop), runs the stop hook checks
--- that verify uncommitted changes, unpushed commits, PR status, etc.
-hookHandler :: IO CInt
-hookHandler = do
+-- Takes a HookConfig to determine hook behavior. The HookConfig comes from
+-- user-defined Role.hs files, allowing roles to customize their hook logic.
+--
+-- For stop hooks (SessionEnd, SubagentStop), uses onStop/onSubagentStop from config.
+-- For PreToolUse, uses preToolUse from config.
+hookHandler :: HookConfig -> IO CInt
+hookHandler config = do
   inp <- input @ByteString
   case Aeson.eitherDecodeStrict inp of
     Left err -> do
@@ -167,17 +171,19 @@ hookHandler = do
       callHostVoid host_log_info (LogPayload Info ("Hook received: " <> hookName) Nothing)
 
       case hookType of
-        SessionEnd -> handleStopHook hookName
-        Stop -> handleStopHook hookName
-        SubagentStop -> handleStopHook hookName
-        PreToolUse -> do
-          callHostVoid host_log_info (LogPayload Info ("Allowing hook: " <> hookName) Nothing)
-          let resp = allowResponse Nothing
-          output (BSL.toStrict $ Aeson.encode resp)
-          pure 0
+        SessionEnd -> handleStopHook hookInput (onStop config)
+        Stop -> handleStopHook hookInput (onStop config)
+        SubagentStop -> handleStopHook hookInput (onSubagentStop config)
+        PreToolUse -> handlePreToolUse hookInput (preToolUse config)
   where
-    handleStopHook :: Text -> IO CInt
-    handleStopHook hookName = do
+    handlePreToolUse :: HookInput -> (HookInput -> Sem '[Embed IO] HookOutput) -> IO CInt
+    handlePreToolUse hookInput hook = do
+      result <- runM $ hook hookInput
+      output (BSL.toStrict $ Aeson.encode result)
+      pure 0
+
+    handleStopHook :: HookInput -> (HookInput -> Sem '[Embed IO] StopHookOutput) -> IO CInt
+    handleStopHook hookInput hook = do
       -- Extract agent ID from current working directory (e.g., "gh-453-gemini")
       cwd <- getCurrentDirectory
       let agentId = T.pack $ takeFileName cwd
@@ -198,8 +204,8 @@ hookHandler = do
             ]
       callHostVoid host_emit_event event
 
-      -- Run stop hook validation checks
-      result <- runStopHookChecks
+      -- Run the hook from config (using Polysemy effects)
+      result <- runM $ hook hookInput
 
       -- Log the decision
       case decision result of

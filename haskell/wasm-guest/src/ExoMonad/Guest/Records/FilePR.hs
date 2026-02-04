@@ -3,6 +3,7 @@ module ExoMonad.Guest.Records.FilePR
   ( FilePRTools (..),
     filePRToolsHandler,
     filePRToolsSchema,
+    filePRTools, -- Convenience alias for handler
   )
 where
 
@@ -23,3 +24,7 @@ filePRToolsHandler = FilePRTools {filePR = mkHandler @FilePR}
 -- | FilePR tools schema.
 filePRToolsSchema :: FilePRTools AsSchema
 filePRToolsSchema = FilePRTools {filePR = mkSchema @FilePR}
+
+-- | Default handler instance for use in Role.hs
+filePRTools :: FilePRTools AsHandler
+filePRTools = filePRToolsHandler

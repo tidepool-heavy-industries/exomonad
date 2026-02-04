@@ -46,28 +46,8 @@ common shared
 
 -- Internal library with shared tool infrastructure
 library wasm-guest-internal
-    visibility:       public
-    default-language: GHC2021
-    default-extensions:
-        AllowAmbiguousTypes
-        DataKinds
-        DeriveAnyClass
-        DeriveGeneric
-        DerivingStrategies
-        FlexibleContexts
-        FlexibleInstances
-        ForeignFunctionInterface
-        GADTs
-        LambdaCase
-        OverloadedStrings
-        ScopedTypeVariables
-        TypeApplications
-        TypeFamilies
-        TypeOperators
-        UndecidableInstances
-        ImportQualifiedPost
-        ExplicitNamespaces
     import:           shared
+    visibility:       public
     hs-source-dirs:   src
     exposed-modules:
         -- Top-level API
@@ -95,26 +75,8 @@ library wasm-guest-internal
         ExoMonad.Guest.Types
         ExoMonad.Guest.Parsers
         ExoMonad.Types
-        -- New Tools
-        ExoMonad.Guest.Tools.Git
-        ExoMonad.Guest.Tools.GitHub
-        ExoMonad.Guest.Tools.File
-        ExoMonad.Guest.Records.Git
-        ExoMonad.Guest.Records.GitHub
-        ExoMonad.Guest.Records.File
-        -- Role tools
-        Dev.Tools
-        TL.Tools
+    -- Additional dependencies (shared stanza provides common deps)
     build-depends:
-        base >= 4.16 && < 5,
-        bytestring,
-        text,
-        aeson,
-        polysemy >= 1.9,
-        unordered-containers,
-        time,
-        directory,
-        filepath,
         extism-pdk ^>= 1.2.0.0
 
     -- Polysemy plugin doesn't work with WASM cross-compilation
