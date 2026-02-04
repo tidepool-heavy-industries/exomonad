@@ -1,10 +1,8 @@
-# Local config
 config.local.toml
-
-# Build artifacts
 wasm/
 worktrees/
 sockets/
 logs/
+*.pid
 result
-result-*
+.exomonad-*
