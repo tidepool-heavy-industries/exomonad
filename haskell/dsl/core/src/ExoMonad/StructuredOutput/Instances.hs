@@ -16,8 +16,9 @@ module ExoMonad.StructuredOutput.Instances
   )
 where
 
-import Data.Aeson (Value (..))
-import ExoMonad.StructuredOutput.Class (GStructuredOutput (..), StructuredOutput (..))
+import Data.Aeson (FromJSON (..), ToJSON (..), Value (..))
+import Data.Text qualified as T
+import ExoMonad.StructuredOutput.Class (ExoMonadDefault (..), GStructuredOutput (..), HasJSONSchema (..), StructuredOutput (..), formatDiagnostic)
 import ExoMonad.StructuredOutput.Error (expectedArray, expectedNumber, expectedString, typeMismatch)
 import GHC.Generics (Rep, from, to)
 
