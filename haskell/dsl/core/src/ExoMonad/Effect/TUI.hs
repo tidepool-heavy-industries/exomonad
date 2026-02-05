@@ -11,39 +11,25 @@
 
 -- | TUI effect for showing popup forms and waiting for user responses.
 --
--- This effect uses the popup-tui pattern: send a complete PopupDefinition,
--- receive a PopupResult with all form values. No streaming interactions.
+-- Uses the popup-tui pattern: send a complete 'PopupDefinition',
+-- receive a 'PopupResult' with all form values. No streaming interactions.
 --
 -- == Example Usage
 --
 -- @
--- data TeachGraphUI mode = TeachGraphUI
---   { showConfigForm :: mode :- LogicNode
---       :@ Input TeachQuery
---       :@ UsesEffects '[TUI, State FormState]
---       :@ Goto "runExploration" ExplorationConfig
---       :@ Goto Exit CancelledResult
---   ...
---   }
---
--- handleShowConfigForm :: Members '[TUI, State FormState] r
---   => TeachQuery
---   -> Sem r (GotoChoice '["runExploration", Exit] ...)
--- handleShowConfigForm query = do
+-- configureExploration :: Member TUI r => Sem r (Maybe ExplorationConfig)
+-- configureExploration = do
 --   result <- showUI $ PopupDefinition
 --     { pdTitle = "Configure Exploration"
 --     , pdComponents =
---         [ mkComponent "budget" (Slider "Budget" 10 100 50) Nothing
---         , mkComponent "includeTests" (Checkbox "Include test files" False) Nothing
+--         [ mkSlider "budget" "Budget" 10 100 50 Nothing
+--         , mkCheckbox "includeTests" "Include test files" False Nothing
 --         ]
 --     }
 --   case result.prButton of
---     "submit" -> ... return $ gotoChoice \@"runExploration" config
---     _ -> return $ gotoChoice \@Exit (Left CancelledResult)
+--     "submit" -> pure $ Just (parseConfig result.prValues)
+--     _        -> pure Nothing
 -- @
---
--- The TUI effect is **graph-first**: graphs define the state machine structure,
--- and TUI effect provides I/O primitives used within node handlers.
 module ExoMonad.Effect.TUI
   ( -- * TUI Effect
     TUI (..),

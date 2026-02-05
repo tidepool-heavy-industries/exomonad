@@ -26,7 +26,6 @@ module ExoMonad.Effect.Types
     RequestInput (..), -- Export constructors for makeSem
     Log (..),
     LogLevel (..),
-    QuestionUI (..),
     DecisionLog (..),
     TUI (..),
 
@@ -90,7 +89,6 @@ module ExoMonad.Effect.Types
     LLMHooks (..),
     noHooks,
     InputHandler (..),
-    QuestionHandler,
 
     -- * Tool Dispatcher Type
     ToolDispatcher,
@@ -108,7 +106,6 @@ module ExoMonad.Effect.Types
     runLog,
     runChatHistory,
     runRequestInput,
-    runQuestionUI,
     runDecisionLogPure,
 
     -- * TUI Effect Operations
@@ -133,13 +130,6 @@ module ExoMonad.Effect.Types
     Role (..),
     ThinkingContent (..),
     RedactedThinking (..),
-
-    -- * Question DSL (re-exports from ExoMonad.Question)
-    Question (..),
-    Answer (..),
-    ItemDisposition (..),
-    Choice (..),
-    ChoiceOption (..),
 
     -- * Polysemy Compatibility (breaks import cycle with ExoMonad.Prelude)
     Eff,
@@ -181,7 +171,6 @@ import ExoMonad.Effect.TUI
     TUI (..),
     showUI,
   )
-import ExoMonad.Question (Answer (..), Choice (..), ChoiceOption (..), ItemDisposition (..), Question (..))
 import ExoMonad.StructuredOutput (StructuredOutput (..), formatDiagnostic)
 import Lens.Micro.TH (makeLenses)
 import Polysemy (Embed, Member, Sem, embed, interpret, makeSem)
@@ -629,21 +618,6 @@ runRequestInput handler = interpret $ \case
   RequestCustom tag payload -> embed $ handler.ihCustom tag payload
 
 -- ══════════════════════════════════════════════════════════════
--- QUESTION UI EFFECT
--- ══════════════════════════════════════════════════════════════
-
-data QuestionUI m a where
-  AskQuestion :: Question -> QuestionUI m Answer
-
-makeSem ''QuestionUI
-
-type QuestionHandler = Question -> IO Answer
-
-runQuestionUI :: (Member (Embed IO) r) => QuestionHandler -> Sem (QuestionUI ': r) a -> Sem r a
-runQuestionUI handler = interpret $ \case
-  AskQuestion q -> embed $ handler q
-
--- ══════════════════════════════════════════════════════════════
 -- DECISION LOG EFFECT
 -- ══════════════════════════════════════════════════════════════
 
@@ -658,30 +632,20 @@ runDecisionLogPure = interpret $ \case
   RecordDecision _ -> pure ()
 
 -- ══════════════════════════════════════════════════════════════
--- RETURN EFFECT (graph termination)
+-- RETURN EFFECT
 -- ══════════════════════════════════════════════════════════════
 
--- | Return effect - terminates graph execution with a value.
+-- | Return effect - terminates execution with a value.
 --
--- Replaces the pattern of @Goto Exit result@ with a semantically clearer
--- effect that explicitly terminates the current graph/node execution.
+-- Use 'returnValue' to exit a computation with a typed result.
+-- Useful for MCP tool handlers that need to return structured output.
 --
 -- @
--- -- Instead of:
--- gRoute :: mode :- LogicNode :@ UsesEffects '[Goto Exit Response]
--- routeHandler result = pure $ gotoExit result
---
--- -- Use:
--- gRoute :: mode :- LogicNode :@ UsesEffects '[Return Response]
--- routeHandler result = returnValue result
+-- findCallers :: Args -> Sem (Return Result ': r) Result
+-- findCallers args = do
+--   result <- computeResult args
+--   returnValue result
 -- @
---
--- The Return effect is particularly useful for single-node graphs (MCP tools)
--- where Entry/Exit ceremony is overhead. With Return, the node simply
--- returns its result directly.
---
--- Note: The effect result type is @a@ (not @()@), so computations using
--- Return have the value type as their overall result type.
 data Return (a :: Type) m b where
   ReturnValue :: a -> Return a m a
 

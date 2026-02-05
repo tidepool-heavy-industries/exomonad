@@ -101,8 +101,7 @@ allEffectMeta =
     EffectMeta "Time" Internal Blocking, -- GetCurrentTime
     EffectMeta "ChatHistory" Internal Blocking, -- GetHistory/AppendMessages
     EffectMeta "Emit" Yielded FireAndForget, -- EmitEvent for observability
-    EffectMeta "RequestInput" Yielded Blocking, -- RequestChoice/RequestText (user input)
-    EffectMeta "QuestionUI" Yielded Blocking -- AskQuestion (structured questions)
+    EffectMeta "RequestInput" Yielded Blocking -- RequestChoice/RequestText (user input)
   ]
 
 -- | Convert EffectCategory to Text for codegen.
