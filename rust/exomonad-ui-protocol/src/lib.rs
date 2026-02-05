@@ -45,6 +45,37 @@ pub enum AgentEvent {
         agent_id: AgentId,
         timestamp: String,
     },
+    #[serde(rename = "agent:thinking")]
+    AgentThinking {
+        agent_id: AgentId,
+        timestamp: String,
+    },
+    #[serde(rename = "agent:output")]
+    AgentOutput {
+        agent_id: AgentId,
+        output: String,
+        timestamp: String,
+    },
+    #[serde(rename = "agent:error")]
+    AgentError {
+        agent_id: AgentId,
+        message: String,
+        timestamp: String,
+    },
+    #[serde(rename = "tool:call")]
+    ToolCall {
+        agent_id: AgentId,
+        tool: String,
+        input: String,
+        timestamp: String,
+    },
+    #[serde(rename = "tool:result")]
+    ToolResult {
+        agent_id: AgentId,
+        tool: String,
+        result: String,
+        timestamp: String,
+    },
     #[serde(rename = "stop_hook:blocked")]
     StopHookBlocked {
         agent_id: AgentId,

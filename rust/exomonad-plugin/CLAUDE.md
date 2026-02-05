@@ -38,11 +38,30 @@ The plugin maintains and displays agent status:
 | State | Description |
 |-------|-------------|
 | IDLE | Agent ready for input |
-| RUNNING | Agent processing request |
-| WAITING | Agent waiting for user input |
+| RUNNING | Agent processing request (LLM or tool) |
+| THINKING | Agent is currently thinking (extended thinking) |
+| WAITING | Agent waiting for user input via popup |
 | ERROR | Agent encountered an error |
 
 **Implementation:** Status bar shows `[EXOMONAD: <state>] <message>`
+
+## Agent Event Stream
+
+The plugin displays a scrollable list of recent agent events:
+
+| Event | Display Format |
+|-------|----------------|
+| agent:started | `<agent_id> started` |
+| agent:stopped | `<agent_id> done` |
+| agent:thinking | `<agent_id> thinking...` |
+| agent:output | `<agent_id>: <output>` |
+| agent:error | `<agent_id> error: <message>` |
+| tool:call | `<agent_id> tool: <tool>(<input>)` |
+| tool:result | `<agent_id> tool: <tool> -> <result>` |
+| hook:received | `<agent_id> hook: <hook_type>` |
+| pr:filed | `<agent_id> PR #<number>` |
+| agent:stuck | `<agent_id> ⚠ STUCK` |
+
 
 ## Popup Rendering
 
