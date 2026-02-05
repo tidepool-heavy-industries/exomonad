@@ -61,8 +61,11 @@ module ExoMonad.Effects.Worktree
   )
 where
 
+import Data.Aeson (FromJSON, ToJSON)
 import Data.Kind (Type)
+import Data.String (IsString)
 import ExoMonad.StructuredOutput (StructuredOutput)
+import GHC.Generics (Generic)
 import Polysemy (Member, Sem, makeSem)
 
 -- ════════════════════════════════════════════════════════════════════════════

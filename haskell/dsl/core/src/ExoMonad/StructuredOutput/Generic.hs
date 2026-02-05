@@ -28,6 +28,7 @@ where
 import Data.Aeson (Value (..))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
+import Data.Text qualified as T
 import ExoMonad.Schema (JSONSchema (..), SchemaType (..), emptySchema, objectSchema)
 import ExoMonad.StructuredOutput.Class (GStructuredOutput (..), StructuredOptions (..), StructuredOutput (..), SumEncoding (..))
 import ExoMonad.StructuredOutput.Error (ParseDiagnostic (..), expectedObject, missingField, typeMismatch)

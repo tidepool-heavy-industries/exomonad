@@ -57,7 +57,10 @@ module ExoMonad.Effects.Zellij
   )
 where
 
+import Data.Aeson (FromJSON, ToJSON)
 import Data.Kind (Type)
+import Data.String (IsString)
+import GHC.Generics (Generic)
 import Polysemy (Member, Sem, makeSem)
 
 -- ════════════════════════════════════════════════════════════════════════════

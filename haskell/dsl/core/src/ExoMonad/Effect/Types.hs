@@ -43,12 +43,11 @@ module ExoMonad.Effect.Types
     randomInt,
     randomDouble,
     getCurrentTime,
-    emit,
+    emitEvent,
     requestChoice,
     requestText,
     requestTextWithPhoto,
     requestCustom,
-    requestQuestion,
     logMsg,
     logMsgWith,
     logTrace,
@@ -86,7 +85,6 @@ module ExoMonad.Effect.Types
     TurnResult (..),
     TurnParseResult (..),
     ToolInvocation (..),
-    TurnOutcome (..),
     ToolResult (..),
     LLMConfig (..),
     LLMHooks (..),
@@ -183,14 +181,14 @@ import ExoMonad.Effect.TUI
   )
 import ExoMonad.Question (Answer (..), Choice (..), ChoiceOption (..), ItemDisposition (..), Question (..))
 import ExoMonad.StructuredOutput (StructuredOutput (..), formatDiagnostic)
-import GHC.Show (Show (..))
 import Lens.Micro.TH (makeLenses)
 import Polysemy (Embed, Member, Sem, embed, interpret, makeSem)
 import Polysemy.Error (Error, catch, throw)
 import Polysemy.Internal (send)
 import Polysemy.State (State, get, gets, modify, put, runState)
 import System.Random (randomRIO)
-import Prelude hiding (State, get, gets, modify, modifyIORef, newIORef, put, readIORef, runState, toList, writeIORef)
+import Data.Text qualified as T
+import Prelude hiding (State, get, gets, modify, modifyIORef, newIORef, put, readIORef, runState, writeIORef)
 import Prelude qualified as P
 
 -- | Compatibility type aliases - these break the import cycle with ExoMonad.Prelude
@@ -234,19 +232,16 @@ runTime = interpret $ \case
   GetCurrentTime -> embed Time.getCurrentTime
 
 -- ══════════════════════════════════════════════════════════════
--- LLM EFFECT
+-- LLM EFFECT TYPES (must be defined before GADT for TH staging)
 -- ══════════════════════════════════════════════════════════════
 
--- | The LLM effect runs a complete turn with template and tools
-data LLM m a where
-  RunTurnOp ::
-    Text -> -- System prompt
-    NonEmpty ContentBlock -> -- User content
-    Value -> -- Output schema
-    [Value] -> -- Tool definitions
-    LLM m (TurnResult Value)
-
-makeSem ''LLM
+-- | Record of a tool invocation
+data ToolInvocation = ToolInvocation
+  { tiName :: Text,
+    tiInput :: Value,
+    tiOutput :: Value
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- | Result of running an LLM turn
 data TurnResult output = TurnResult
@@ -268,27 +263,30 @@ data TurnParseResult output
       }
   deriving (Show, Eq, Functor)
 
--- | Record of a tool invocation
-data ToolInvocation = ToolInvocation
-  { tiName :: Text,
-    tiInput :: Value,
-    tiOutput :: Value
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+-- ══════════════════════════════════════════════════════════════
+-- LLM EFFECT
+-- ══════════════════════════════════════════════════════════════
+
+-- | The LLM effect runs a complete turn with template and tools
+data LLM m a where
+  RunTurnOp ::
+    Text -> -- System prompt
+    NonEmpty ContentBlock -> -- User content
+    Value -> -- Output schema
+    [Value] -> -- Tool definitions
+    LLM m (TurnResult Value)
+
+makeSem ''LLM
 
 -- | Result of executing a tool
 data ToolResult
   = ToolSuccess Value
   | ToolBreak Text
+  deriving stock (Generic)
 
-instance Show ToolResult where
-  show (ToolSuccess val) = "ToolSuccess " <> P.show val
-  show (ToolBreak reason) = "ToolBreak " <> P.show reason
+deriving stock instance Show ToolResult
 
-instance Eq ToolResult where
-  (ToolSuccess v1) == (ToolSuccess v2) = v1 == v2
-  (ToolBreak t1) == (ToolBreak t2) = t1 == t2
-  _ == _ = False
+deriving stock instance Eq ToolResult
 
 -- | LLM configuration
 data LLMConfig = LLMConfig
@@ -503,7 +501,7 @@ llmCallEitherWithTools ::
   Sem effs (Either Text output)
 llmCallEitherWithTools systemPrompt userInput schema tools =
   catch
-    (Right . trOutput <$> llmCallWithTools @output systemPrompt userInput schema tools)
+    (Right . (.trOutput) <$> llmCallWithTools @output systemPrompt userInput schema tools)
     (\e -> pure $ Left $ T.pack $ show e)
 
 -- | Deprecated in favor of llmCallWithTools
@@ -517,7 +515,7 @@ llmCallStructuredWithTools ::
   Sem effs (Either LlmError output)
 llmCallStructuredWithTools systemPrompt userInput schema tools =
   catch
-    (Right . trOutput <$> llmCallWithTools @output systemPrompt userInput schema tools)
+    (Right . (.trOutput) <$> llmCallWithTools @output systemPrompt userInput schema tools)
     (\e -> pure $ Left e)
 
 -- ══════════════════════════════════════════════════════════════

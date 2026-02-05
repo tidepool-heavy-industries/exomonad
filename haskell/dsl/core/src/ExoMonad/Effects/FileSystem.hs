@@ -53,6 +53,7 @@ import Data.Text (Text)
 import ExoMonad.Path
 import GHC.Generics (Generic)
 import Polysemy (Member, Sem, makeSem)
+import Prelude hiding (readFileText, writeFileText)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ERRORS

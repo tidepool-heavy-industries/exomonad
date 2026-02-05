@@ -24,6 +24,7 @@ module ExoMonad.Path
   )
 where
 
+import Control.Monad.Catch (MonadThrow)
 import Data.Text qualified as T
 import Path
 

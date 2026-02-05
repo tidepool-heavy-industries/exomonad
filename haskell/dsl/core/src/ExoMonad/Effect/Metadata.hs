@@ -30,7 +30,7 @@ module ExoMonad.Effect.Metadata
   )
 where
 
-import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, (.=))
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withText, (.=))
 import Data.Map.Strict (Map)
 import GHC.Generics (Generic)
 

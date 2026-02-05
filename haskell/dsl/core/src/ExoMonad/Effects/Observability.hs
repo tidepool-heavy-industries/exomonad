@@ -36,8 +36,8 @@ module ExoMonad.Effects.Observability
   )
 where
 
-import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.=))
-import Data.Aeson qualified as Aeson
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, withText, (.:), (.=))
+import Data.Aeson.Types (Parser)
 import Data.Kind (Type)
 import Polysemy (Member, Sem, makeSem)
 
@@ -101,7 +101,7 @@ instance ToJSON ExoMonadEvent where
 
 instance FromJSON ExoMonadEvent where
   parseJSON = withObject "ExoMonadEvent" $ \v -> do
-    eventType <- v .: "type" :: Aeson.Parser Text
+    eventType <- v .: "type" :: Parser Text
     case eventType of
       "llm_call" ->
         LLMCallEvent
@@ -137,7 +137,7 @@ instance ToJSON SpanKind where
   toJSON SpanServer = "server"
 
 instance FromJSON SpanKind where
-  parseJSON = Aeson.withText "SpanKind" $ \case
+  parseJSON = withText "SpanKind" $ \case
     "internal" -> pure SpanInternal
     "client" -> pure SpanClient
     "server" -> pure SpanServer

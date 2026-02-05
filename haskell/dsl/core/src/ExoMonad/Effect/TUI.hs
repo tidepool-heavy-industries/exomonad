@@ -1,6 +1,8 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -66,29 +68,20 @@ module ExoMonad.Effect.TUI
   )
 where
 
-import Data.Aeson (FromJSON, ToJSON)
+import Control.Applicative ((<|>))
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.:?), (.=))
+import Data.Aeson qualified as A
+import Data.Aeson.KeyMap qualified as KM
+import Data.Text qualified as T
+import GHC.Generics (Generic)
 import Polysemy (Member, Sem, makeSem)
-
--- ══════════════════════════════════════════════════════════════
--- TUI EFFECT
--- ══════════════════════════════════════════════════════════════
-
--- | TUI effect for showing popup forms and waiting for user responses.
---
--- Uses the popup-tui pattern: send PopupDefinition, receive PopupResult.
--- No streaming interactions or dynamic updates.
-data TUI m a where
-  -- | Show a popup and block until the user submits or cancels.
-  --   Returns the form result with button pressed and all component values.
-  ShowUI :: PopupDefinition -> TUI m PopupResult
-
-makeSem ''TUI
 
 -- ══════════════════════════════════════════════════════════════
 -- PROTOCOL TYPES (popup-tui pattern)
 -- ══════════════════════════════════════════════════════════════
 --
--- These types define the popup form specification and result protocol.
+-- These types MUST be defined before the GADT for TH staging.
+-- They define the popup form specification and result protocol.
 -- They must match the Rust types exactly for JSON serialization.
 
 -- | Complete popup definition sent to the TUI sidebar.
@@ -98,7 +91,7 @@ data PopupDefinition = PopupDefinition
     -- | Flat list of form components
     pdComponents :: [Component]
   }
-  deriving (Show, Eq, Generic)
+  deriving stock (Show, Eq, Generic)
 
 -- | A single form component with optional visibility rule.
 data Component = Component
@@ -109,7 +102,7 @@ data Component = Component
     -- | Optional visibility condition
     cVisibleWhen :: Maybe VisibilityRule
   }
-  deriving (Show, Eq, Generic)
+  deriving stock (Show, Eq, Generic)
 
 -- | Component type specifications.
 data ComponentSpec
@@ -148,7 +141,7 @@ data ComponentSpec
     Group
       { csGroupLabel :: Text
       }
-  deriving (Show, Eq, Generic)
+  deriving stock (Show, Eq, Generic)
 
 -- | Visibility rules for conditional component display.
 --
@@ -167,7 +160,7 @@ data VisibilityRule
     CountEquals {vrId :: Text, vrExactCount :: Int}
   | -- | Show if multiselect has > N items selected
     CountGreaterThan {vrId :: Text, vrMinCount :: Int}
-  deriving (Show, Eq, Generic)
+  deriving stock (Show, Eq, Generic)
 
 -- | Result returned when user submits or cancels the popup.
 data PopupResult = PopupResult
@@ -178,7 +171,22 @@ data PopupResult = PopupResult
     -- | Time spent interacting with popup in seconds
     prTimeSpent :: Maybe Double
   }
-  deriving (Show, Eq, Generic)
+  deriving stock (Show, Eq, Generic)
+
+-- ══════════════════════════════════════════════════════════════
+-- TUI EFFECT
+-- ══════════════════════════════════════════════════════════════
+
+-- | TUI effect for showing popup forms and waiting for user responses.
+--
+-- Uses the popup-tui pattern: send PopupDefinition, receive PopupResult.
+-- No streaming interactions or dynamic updates.
+data TUI m a where
+  -- | Show a popup and block until the user submits or cancels.
+  --   Returns the form result with button pressed and all component values.
+  ShowUI :: PopupDefinition -> TUI m PopupResult
+
+makeSem ''TUI
 
 -- ══════════════════════════════════════════════════════════════
 -- COMPONENT CONSTRUCTORS (Helpers)

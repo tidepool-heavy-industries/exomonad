@@ -156,11 +156,14 @@ requestDie prompt dice =
     NE.map (\d -> (dieFace d, d)) dice
   where
     dieFace :: Int -> Text
-    dieFace n
-      | n >= 1 && n <= 6 = T.singleton (faces !! (n - 1)) <> " " <> T.pack (show n)
-      | otherwise = T.pack (show n)
-    faces :: [Char]
-    faces = "⚀⚁⚂⚃⚄⚅"
+    dieFace n = case n of
+      1 -> "⚀ 1"
+      2 -> "⚁ 2"
+      3 -> "⚂ 3"
+      4 -> "⚃ 4"
+      5 -> "⚄ 5"
+      6 -> "⚅ 6"
+      _ -> T.pack (show n)
 
 -- | Simple multi-choice with "Select all that apply" style.
 --
