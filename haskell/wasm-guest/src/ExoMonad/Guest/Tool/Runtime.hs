@@ -199,7 +199,7 @@ hookHandler config = do
       let agentId = fromMaybe "unknown" maybeAgentId
 
       -- Log that stop hook was called
-      callHostVoid host_log_info (LogPayload Info ("Stop hook firing for agent: " <> agentId) Nothing)
+      callHostVoid host_log_info (LogPayload Info ("Stop hook execution for agent: " <> agentId) Nothing)
 
       -- Emit AgentStopped event BEFORE running checks
       -- Only emit if we have a valid agent ID to avoid empty ID logs
