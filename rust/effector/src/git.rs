@@ -99,7 +99,7 @@ pub fn parse_diff(numstat_output: &str, name_status_output: &str) -> GitDiffResu
     for line in numstat_output.lines() {
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() >= 3 {
-            // Binary files show "-" for additions/deletions
+            // Binary files show "-" for additions/deletions; any parse errors default to 0
             let additions: u32 = parts[0].parse().unwrap_or(0);
             let deletions: u32 = parts[1].parse().unwrap_or(0);
             let path = parts[2].to_string();
