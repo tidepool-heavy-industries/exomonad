@@ -970,47 +970,68 @@ impl AgentControlService {
     // ========================================================================
 
     async fn write_context_files(&self, worktree_path: &Path, agent_type: AgentType) -> Result<()> {
+        use std::os::unix::fs::symlink;
+
         // Create .exomonad directory
         let exomonad_dir = worktree_path.join(".exomonad");
         fs::create_dir_all(&exomonad_dir).await?;
 
-        // Write config.toml with role = "dev" for spawned agents
+        // Write config.toml with agent_role = "dev" for spawned agents
         let config_content = r###"# Agent config (auto-generated)
-role = "dev"
+agent_role = "dev"
 project_dir = "../../.."
 "###;
         fs::write(exomonad_dir.join("config.toml"), config_content).await?;
         tracing::info!(
             worktree = %worktree_path.display(),
-            "Wrote .exomonad/config.toml with role=dev"
+            "Wrote .exomonad/config.toml with agent_role=dev"
         );
 
-        // Create symlink to origin's wasm directory
+        // Create symlinks for shared resources back to root .exomonad
         // Worktree is at: {project}/.exomonad/worktrees/gh-xxx/
-        // Symlink at:     {project}/.exomonad/worktrees/gh-xxx/.exomonad/wasm
-        // Target:         {project}/.exomonad/wasm
-        // Relative path:  ../../../wasm (up to gh-xxx, up to worktrees, up to .exomonad, then wasm)
-        let wasm_link = exomonad_dir.join("wasm");
-        let wasm_target = Path::new("../../../wasm");
-        if !wasm_link.exists() {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::symlink;
-                symlink(wasm_target, &wasm_link).context("Failed to create wasm symlink")?;
-                tracing::info!(
-                    worktree = %worktree_path.display(),
-                    target = %wasm_target.display(),
-                    "Created .exomonad/wasm symlink"
-                );
+        // Symlinks at:    {project}/.exomonad/worktrees/gh-xxx/.exomonad/{name}
+        // Target:         {project}/.exomonad/{name}
+        // Relative path:  ../../../{name} (up to gh-xxx, up to worktrees, up to .exomonad, then {name})
+        let symlinks = [
+            ("wasm", "../../../wasm"),
+            ("roles", "../../../roles"),
+            ("lib", "../../../lib"),
+            ("flake.nix", "../../../flake.nix"),
+            ("flake.lock", "../../../flake.lock"),
+        ];
+
+        for (name, target) in symlinks {
+            let link_path = exomonad_dir.join(name);
+            let target_path = Path::new(target);
+
+            // Remove existing directory/file if it's not a symlink (cleanup old duplicates)
+            if link_path.exists() && !link_path.is_symlink() {
+                if link_path.is_dir() {
+                    fs::remove_dir_all(&link_path).await.ok();
+                    tracing::debug!(name = %name, "Removed existing directory for symlink");
+                } else if link_path.is_file() {
+                    fs::remove_file(&link_path).await.ok();
+                    tracing::debug!(name = %name, "Removed existing file for symlink");
+                }
             }
-            #[cfg(not(unix))]
-            {
-                tracing::warn!(
-                    worktree = %worktree_path.display(),
-                    "Symlinks not supported on this platform, skipping wasm symlink"
-                );
+
+            if !link_path.exists() {
+                if let Err(e) = symlink(target_path, &link_path) {
+                    tracing::warn!(
+                        name = %name,
+                        target = %target,
+                        error = %e,
+                        "Failed to create symlink"
+                    );
+                } else {
+                    tracing::debug!(name = %name, target = %target, "Created symlink");
+                }
             }
         }
+
+        // Write .gitignore for worktree-specific ignores
+        let gitignore_content = "# Auto-generated for worktree\nresult\n";
+        fs::write(exomonad_dir.join(".gitignore"), gitignore_content).await?;
 
         // Write .mcp.json (no --wasm argument, config file handles WASM path)
         let sidecar_path = std::env::current_exe()
