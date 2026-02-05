@@ -459,7 +459,7 @@ impl GitHubService {
             pulls_handler
                 .list()
                 .state(params::State::All)
-                .head(format!("{}:{}", repo.owner, head))
+                .head(head)
                 .send(),
         )
         .await
