@@ -2,9 +2,9 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -59,16 +59,16 @@ module ExoMonad.LLM.Effect
   )
 where
 
-import Polysemy (Sem, Member, makeSem)
-import Polysemy.Internal (send)
-import Data.Kind (Type)
 import Data.Aeson (Value)
+import Data.Kind (Type)
 import Data.Proxy (Proxy (..))
 import ExoMonad.LLM.Tools (ToolRecord (..), toolSchemaToAnthropicTool)
 import ExoMonad.LLM.Types
 import ExoMonad.Schema (schemaToValue)
 import ExoMonad.StructuredOutput (StructuredOutput (..))
 import ExoMonad.Tool.Wire (anthropicToolToJSON)
+import Polysemy (Member, Sem, makeSem)
+import Polysemy.Internal (send)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT TYPE
@@ -167,4 +167,3 @@ callNoTools cfg sys usr =
         sys
         usr
         schema
-

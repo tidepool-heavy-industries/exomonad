@@ -336,7 +336,6 @@ fn get_input<T: serde::de::DeserializeOwned>(
     Ok(serde_json::from_slice(bytes)?)
 }
 
-
 pub fn register_host_functions() -> Vec<Function> {
     vec![Function::new(
         "wait_for_copilot_review",

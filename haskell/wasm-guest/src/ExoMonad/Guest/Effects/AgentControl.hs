@@ -45,14 +45,14 @@ module ExoMonad.Guest.Effects.AgentControl
   )
 where
 
-import Polysemy (Sem, Member, interpret, embed, send)
-import Polysemy.Embed (Embed)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.:?), (.=))
 import Data.Maybe (catMaybes)
 import Data.Text (Text, unpack)
+import ExoMonad.Guest.FFI (ErrorCode (..), ErrorContext (..), FFIBoundary (..), FFIError (..), FFIResult (..))
 import ExoMonad.Guest.HostCall (callHost, host_agent_cleanup, host_agent_cleanup_batch, host_agent_cleanup_merged, host_agent_list, host_agent_spawn, host_agent_spawn_batch)
-import ExoMonad.Guest.FFI (FFIBoundary (..), FFIResult (..), FFIError (..), ErrorContext (..), ErrorCode (..))
 import GHC.Generics (Generic)
+import Polysemy (Member, Sem, embed, interpret, send)
+import Polysemy.Embed (Embed)
 
 -- ============================================================================
 -- Types (match Rust agent_control.rs)
@@ -250,7 +250,7 @@ instance FFIBoundary BatchCleanupResult
 -- ============================================================================
 
 data SpawnAgentInput = SpawnAgentInput
-  { saiIssueId :: Text,  -- Rust parses to u64
+  { saiIssueId :: Text, -- Rust parses to u64
     saiOwner :: Text,
     saiRepo :: Text,
     saiWorktreeDir :: Maybe Text,
@@ -267,6 +267,7 @@ instance ToJSON SpawnAgentInput where
         "worktree_dir" .= w,
         "agent_type" .= a
       ]
+
 instance FromJSON SpawnAgentInput where
   parseJSON = withObject "SpawnAgentInput" $ \v ->
     SpawnAgentInput
@@ -296,6 +297,7 @@ instance ToJSON SpawnAgentsInput where
         "worktree_dir" .= w,
         "agent_type" .= a
       ]
+
 instance FromJSON SpawnAgentsInput where
   parseJSON = withObject "SpawnAgentsInput" $ \v ->
     SpawnAgentsInput
@@ -319,6 +321,7 @@ instance ToJSON CleanupAgentInput where
       [ "issue_id" .= i,
         "force" .= f
       ]
+
 instance FromJSON CleanupAgentInput where
   parseJSON = withObject "CleanupAgentInput" $ \v ->
     CleanupAgentInput
@@ -339,6 +342,7 @@ instance ToJSON CleanupAgentsInput where
       [ "issue_ids" .= is,
         "force" .= f
       ]
+
 instance FromJSON CleanupAgentsInput where
   parseJSON = withObject "CleanupAgentsInput" $ \v ->
     CleanupAgentsInput
@@ -389,22 +393,22 @@ data AgentControl m a where
   ListAgents :: AgentControl m (Either Text [AgentInfo])
 
 -- Smart constructors (manually written - makeSem doesn't work with WASM cross-compilation)
-spawnAgent :: Member AgentControl r => Text -> SpawnOptions -> Sem r (Either Text SpawnResult)
+spawnAgent :: (Member AgentControl r) => Text -> SpawnOptions -> Sem r (Either Text SpawnResult)
 spawnAgent issueId opts = send (SpawnAgent issueId opts)
 
-spawnAgents :: Member AgentControl r => [Text] -> SpawnOptions -> Sem r BatchSpawnResult
+spawnAgents :: (Member AgentControl r) => [Text] -> SpawnOptions -> Sem r BatchSpawnResult
 spawnAgents issueIds opts = send (SpawnAgents issueIds opts)
 
-cleanupAgent :: Member AgentControl r => Text -> Bool -> Sem r (Either Text ())
+cleanupAgent :: (Member AgentControl r) => Text -> Bool -> Sem r (Either Text ())
 cleanupAgent issueId force = send (CleanupAgent issueId force)
 
-cleanupAgents :: Member AgentControl r => [Text] -> Bool -> Sem r BatchCleanupResult
+cleanupAgents :: (Member AgentControl r) => [Text] -> Bool -> Sem r BatchCleanupResult
 cleanupAgents issueIds force = send (CleanupAgents issueIds force)
 
-cleanupMergedAgents :: Member AgentControl r => Sem r BatchCleanupResult
+cleanupMergedAgents :: (Member AgentControl r) => Sem r BatchCleanupResult
 cleanupMergedAgents = send CleanupMergedAgents
 
-listAgents :: Member AgentControl r => Sem r (Either Text [AgentInfo])
+listAgents :: (Member AgentControl r) => Sem r (Either Text [AgentInfo])
 listAgents = send ListAgents
 
 -- ============================================================================
@@ -417,7 +421,7 @@ runAgentControl = interpret $ \case
   SpawnAgent issueId opts -> embed $ do
     let input =
           SpawnAgentInput
-            { saiIssueId = issueId,  -- Rust parses to u64
+            { saiIssueId = issueId, -- Rust parses to u64
               saiOwner = owner opts,
               saiRepo = repo opts,
               saiWorktreeDir = worktreeDir opts,
@@ -471,4 +475,3 @@ runAgentControl = interpret $ \case
     pure $ case res of
       Left err -> Left err
       Right agents -> Right agents
-

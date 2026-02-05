@@ -2,9 +2,9 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
 
 -- | Observability effect for structured logging and tracing.
@@ -36,10 +36,10 @@ module ExoMonad.Effects.Observability
   )
 where
 
-import Polysemy (Sem, Member, makeSem)
-import Data.Kind (Type)
-import Data.Aeson (Value, ToJSON (..), FromJSON (..), object, (.=), (.:), withObject)
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.=))
 import Data.Aeson qualified as Aeson
+import Data.Kind (Type)
+import Polysemy (Member, Sem, makeSem)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EVENT TYPES
@@ -209,4 +209,3 @@ withSpan name kind attrs action = do
   result <- action
   endSpan False []
   pure result
-

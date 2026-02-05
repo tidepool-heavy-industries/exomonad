@@ -8,12 +8,12 @@ module ExoMonad.Git.Interpreter
   )
 where
 
-import Polysemy (Sem, interpret)
 import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Effects.Git (Git (..), WorktreeInfo)
-import ExoMonad.Path (Path, Rel, File, toFilePath)
-import System.FilePath (takeFileName, splitDirectories)
+import ExoMonad.Path (File, Path, Rel, toFilePath)
+import Polysemy (Sem, interpret)
+import System.FilePath (splitDirectories, takeFileName)
 
 -- | Run Git effects with pure handlers (for testing).
 runGit ::

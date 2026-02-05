@@ -39,13 +39,12 @@ module ExoMonad.Template.DependencyTree
   )
 where
 
-import Prelude hiding (many, (<|>))
-
 import Control.Monad (foldM)
 import System.Directory (doesFileExist)
 import System.FilePath (normalise, takeDirectory, takeFileName, (</>))
 import Text.Parsec
 import Text.Parsec.Text (Parser)
+import Prelude hiding (many, (<|>))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONFIGURATION

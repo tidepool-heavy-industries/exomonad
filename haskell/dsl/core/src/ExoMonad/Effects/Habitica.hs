@@ -2,9 +2,9 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
 
 -- | Habitica integration effect for Polysemy.
@@ -48,10 +48,6 @@ module ExoMonad.Effects.Habitica
   )
 where
 
-import Prelude hiding (Down)
-
-import Polysemy (Sem, Member, interpret, makeSem)
-import Polysemy.Error (Error, throw)
 import ExoMonad.Effect (Log, logInfo)
 import ExoMonad.Habitica
   ( ChecklistItemId (..),
@@ -67,6 +63,9 @@ import ExoMonad.Habitica
     UserInfo (..),
     UserStats (..),
   )
+import Polysemy (Member, Sem, interpret, makeSem)
+import Polysemy.Error (Error, throw)
+import Prelude hiding (Down)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT
@@ -120,4 +119,3 @@ taskTypeText Habits = "Habits"
 taskTypeText Dailys = "Dailys"
 taskTypeText Todos = "Todos"
 taskTypeText Rewards = "Rewards"
-

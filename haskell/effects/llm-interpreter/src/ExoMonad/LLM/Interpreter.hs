@@ -39,8 +39,6 @@ module ExoMonad.LLM.Interpreter
   )
 where
 
-import Polysemy (Sem, Member, interpret, embed)
-import Polysemy.Embed (Embed)
 import Data.Aeson (Value, fromJSON, toJSON)
 import Data.Aeson qualified as Aeson
 import Data.List.NonEmpty (NonEmpty (..))
@@ -66,6 +64,8 @@ import ExoMonad.Effects.SocketClient
     sendRequest,
   )
 import ExoMonad.LLM.Interpreter.Types
+import Polysemy (Member, Sem, embed, interpret)
+import Polysemy.Embed (Embed)
 import PyF (fmt)
 
 -- ════════════════════════════════════════════════════════════════════════════

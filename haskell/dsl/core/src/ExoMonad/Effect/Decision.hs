@@ -12,7 +12,6 @@ module ExoMonad.Effect.Decision
   )
 where
 
-import Polysemy (Sem, Member)
 import Data.Aeson (ToJSON (..), toJSON)
 import Data.Aeson qualified as A
 import Data.Aeson.Key qualified as Key
@@ -22,6 +21,7 @@ import Data.Time (diffUTCTime)
 import ExoMonad.Effect.Decision.Types
 import ExoMonad.Effect.TUI
 import ExoMonad.Effect.Types (DecisionLog, Log, Time, getCurrentTime, logInfoWith, recordDecision)
+import Polysemy (Member, Sem)
 
 -- | Request a decision from the user via the TUI.
 --

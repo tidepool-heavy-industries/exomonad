@@ -6,12 +6,12 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StrictData #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE PolyKinds #-}
 
 -- | Unified logging effect for ExoMonad.
 --
@@ -73,17 +73,16 @@ module ExoMonad.Effect.Log
   )
 where
 
-import Prelude hiding (Reader, local)
-
-import Polysemy (Sem, Member, interpret, embed, makeSem)
-import Polysemy.Reader (Reader, local)
-import Polysemy.Embed (Embed)
-import Data.Kind (Type)
 import Data.Aeson (ToJSON (..), Value, toJSON)
+import Data.Kind (Type)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
 import Data.Time (UTCTime)
+import Polysemy (Member, Sem, embed, interpret, makeSem)
+import Polysemy.Embed (Embed)
+import Polysemy.Reader (Reader, local)
 import System.IO (stderr)
+import Prelude hiding (Reader, local)
 
 -- | Log severity levels
 data LogLevel = Trace | Debug | Info | Warn | Error
@@ -171,7 +170,6 @@ runLog minLevel = interpret $ \case
 -- ══════════════════════════════════════════════════════════════
 -- DOMAIN EVENT TYPES
 -- ══════════════════════════════════════════════════════════════
-
 
 -- | Graph transition info.
 --

@@ -1,0 +1,1 @@
+{"rustc":2521486367560511196,"features":"[\"std\"]","declared_features":"[\"default\", \"std\"]","target":2631083010158187912,"profile":8276155916380437441,"path":849872443386908970,"deps":[],"local":[{"CheckDepInfo":{"dep_info":"debug/.fingerprint/colorsys-e03b35e9b3cea25d/dep-lib-colorsys","checksum":false}}],"rustflags":[],"config":2069994364910194474,"compile_kind":0}

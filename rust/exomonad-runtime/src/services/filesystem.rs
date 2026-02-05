@@ -169,7 +169,6 @@ fn get_input<T: serde::de::DeserializeOwned>(
     Ok(serde_json::from_slice(bytes)?)
 }
 
-
 fn block_on<F: std::future::Future>(future: F) -> Result<F::Output, Error> {
     match tokio::runtime::Handle::try_current() {
         Ok(handle) => Ok(handle.block_on(future)),

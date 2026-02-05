@@ -25,8 +25,6 @@ module ExoMonad.GitHub.Interpreter
 where
 
 import Control.Lens ((^?))
-import Polysemy (Sem, Member, interpret, embed)
-import Polysemy.Embed (Embed)
 import Data.Aeson (Value (..), fromJSON, toJSON)
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Lens (key, _String)
@@ -63,6 +61,8 @@ import ExoMonad.Effects.SocketClient
     SocketConfig (..),
     sendRequest,
   )
+import Polysemy (Member, Sem, embed, interpret)
+import Polysemy.Embed (Embed)
 import System.Directory (doesFileExist)
 
 -- ════════════════════════════════════════════════════════════════════════════

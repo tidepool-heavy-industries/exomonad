@@ -1,0 +1,3 @@
+cargo:rerun-if-changed=curl
+cargo:rustc-check-cfg=cfg(libcurl_vendored,link_libnghttp2,link_libz,link_openssl,)
+cargo:rustc-flags=-l curl

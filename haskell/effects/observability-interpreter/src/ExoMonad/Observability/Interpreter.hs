@@ -56,9 +56,6 @@ where
 
 import Control.Exception (SomeException, try)
 import Control.Monad (void, when)
-import Polysemy (Sem, Member, interpret, embed, intercept)
-import Polysemy.Embed (Embed)
-import Polysemy.Internal (send)
 import Data.Aeson (encode, object, toJSON, (.=))
 import Data.ByteString qualified as BS
 import Data.ByteString.Base64 qualified as B64
@@ -82,6 +79,9 @@ import ExoMonad.Effects.SocketClient
   )
 import ExoMonad.Observability.Types
 import Network.HTTP.Req
+import Polysemy (Member, Sem, embed, intercept, interpret)
+import Polysemy.Embed (Embed)
+import Polysemy.Internal (send)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- LOKI HTTP CLIENT
@@ -456,4 +456,3 @@ interposeWithLLMTracing = intercept $ \case
     endSpan isError []
 
     pure result
-

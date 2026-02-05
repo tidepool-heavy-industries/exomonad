@@ -35,8 +35,6 @@ where
 
 import Control.Exception (SomeException, try)
 import Control.Lens ((^?))
-import Polysemy (Sem, Member, interpret, embed)
-import Polysemy.Embed (Embed)
 import Data.Aeson
   ( FromJSON (..),
     ToJSON (..),
@@ -77,6 +75,8 @@ import Network.HTTP.Client
   )
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Network.HTTP.Types.Status (statusCode)
+import Polysemy (Member, Sem, embed, interpret)
+import Polysemy.Embed (Embed)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONFIGURATION

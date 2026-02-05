@@ -17,7 +17,6 @@ module ExoMonad.Guest.Tools.Agent
   )
 where
 
-import Polysemy (runM)
 import Data.Aeson (FromJSON, object, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Maybe (fromMaybe)
@@ -25,6 +24,7 @@ import Data.Text (Text)
 import ExoMonad.Guest.Effects.AgentControl qualified as AC
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)
+import Polysemy (runM)
 
 -- ============================================================================
 -- SpawnAgents
@@ -96,7 +96,7 @@ instance MCPTool SpawnAgents where
             { AC.owner = saOwner args,
               AC.repo = saRepo args,
               AC.worktreeDir = saWorktreeDir args,
-              AC.agentType = fromMaybe AC.Gemini (saAgentType args)  -- Default applied at edge
+              AC.agentType = fromMaybe AC.Gemini (saAgentType args) -- Default applied at edge
             }
     result <- runM $ AC.runAgentControl $ AC.spawnAgents (saIssues args) opts
     pure $ successResult $ Aeson.toJSON result

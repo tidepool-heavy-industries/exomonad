@@ -2,9 +2,9 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
 
 -- | FileSystem effect for basic file operations.
@@ -47,12 +47,12 @@ module ExoMonad.Effects.FileSystem
   )
 where
 
-import ExoMonad.Path
-import Polysemy (Sem, Member, makeSem)
-import Data.Kind (Type)
 import Data.Aeson (FromJSON, ToJSON)
+import Data.Kind (Type)
 import Data.Text (Text)
+import ExoMonad.Path
 import GHC.Generics (Generic)
+import Polysemy (Member, Sem, makeSem)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ERRORS

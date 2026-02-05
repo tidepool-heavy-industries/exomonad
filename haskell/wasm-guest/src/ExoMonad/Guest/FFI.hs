@@ -4,17 +4,16 @@
 
 module ExoMonad.Guest.FFI where
 
-import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.:?), (.=), (.!=), eitherDecode, encode)
-import qualified Data.Aeson as Aeson
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, eitherDecode, encode, object, withObject, (.!=), (.:), (.:?), (.=))
+import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy (ByteString)
 import Data.Text (Text)
-import qualified Data.Text as T
-import GHC.Generics (Generic)
+import Data.Text qualified as T
 import Data.Word (Word64)
-import Data.Aeson (Value)
+import GHC.Generics (Generic)
 
 -- | Error codes matching Rust side
-data ErrorCode 
+data ErrorCode
   = NotFound
   | NotAuthenticated
   | GitError
@@ -27,42 +26,44 @@ data ErrorCode
   deriving (Show, Eq, Generic)
 
 instance ToJSON ErrorCode where
-  toJSON = Aeson.genericToJSON Aeson.defaultOptions { Aeson.constructorTagModifier = Aeson.camelTo2 '_' }
+  toJSON = Aeson.genericToJSON Aeson.defaultOptions {Aeson.constructorTagModifier = Aeson.camelTo2 '_'}
 
 instance FromJSON ErrorCode where
-  parseJSON = Aeson.genericParseJSON Aeson.defaultOptions { Aeson.constructorTagModifier = Aeson.camelTo2 '_' }
+  parseJSON = Aeson.genericParseJSON Aeson.defaultOptions {Aeson.constructorTagModifier = Aeson.camelTo2 '_'}
 
 -- | Rich context for debugging errors.
 data ErrorContext = ErrorContext
-  { errorContextCommand :: Maybe Text
-  , errorContextExitCode :: Maybe Int
-  , errorContextStderr :: Maybe Text
-  , errorContextStdout :: Maybe Text
-  , errorContextFilePath :: Maybe Text
-  , errorContextWorkingDir :: Maybe Text
-  } deriving (Show, Eq, Generic)
+  { errorContextCommand :: Maybe Text,
+    errorContextExitCode :: Maybe Int,
+    errorContextStderr :: Maybe Text,
+    errorContextStdout :: Maybe Text,
+    errorContextFilePath :: Maybe Text,
+    errorContextWorkingDir :: Maybe Text
+  }
+  deriving (Show, Eq, Generic)
 
 instance ToJSON ErrorContext where
-  toJSON = Aeson.genericToJSON Aeson.defaultOptions { Aeson.fieldLabelModifier = Aeson.camelTo2 '_' . drop 12, Aeson.omitNothingFields = True }
+  toJSON = Aeson.genericToJSON Aeson.defaultOptions {Aeson.fieldLabelModifier = Aeson.camelTo2 '_' . drop 12, Aeson.omitNothingFields = True}
 
 instance FromJSON ErrorContext where
-  parseJSON = Aeson.genericParseJSON Aeson.defaultOptions { Aeson.fieldLabelModifier = Aeson.camelTo2 '_' . drop 12 }
+  parseJSON = Aeson.genericParseJSON Aeson.defaultOptions {Aeson.fieldLabelModifier = Aeson.camelTo2 '_' . drop 12}
 
 -- | Structured error returned to the WASM guest.
 data FFIError = FFIError
-  { feMessage :: Text
-  , feCode :: ErrorCode
-  , feContext :: Maybe ErrorContext
-  , feSuggestion :: Maybe Text
-  } deriving (Show, Eq, Generic)
+  { feMessage :: Text,
+    feCode :: ErrorCode,
+    feContext :: Maybe ErrorContext,
+    feSuggestion :: Maybe Text
+  }
+  deriving (Show, Eq, Generic)
 
 instance ToJSON FFIError where
-  toJSON (FFIError msg code ctx sugg) = 
+  toJSON (FFIError msg code ctx sugg) =
     object
-      [ "message" .= msg
-      , "code" .= code
-      , "context" .= ctx
-      , "suggestion" .= sugg
+      [ "message" .= msg,
+        "code" .= code,
+        "context" .= ctx,
+        "suggestion" .= sugg
       ]
 
 instance FromJSON FFIError where
@@ -78,15 +79,15 @@ data FFIResult a = FFISuccess a | FFIErrorResult FFIError
   deriving (Show, Eq, Generic)
 
 instance (ToJSON a) => ToJSON (FFIResult a) where
-  toJSON (FFISuccess payload) = 
+  toJSON (FFISuccess payload) =
     object
-      [ "kind" .= ("Success" :: Text)
-      , "payload" .= payload
+      [ "kind" .= ("Success" :: Text),
+        "payload" .= payload
       ]
-  toJSON (FFIErrorResult err) = 
+  toJSON (FFIErrorResult err) =
     object
-      [ "kind" .= ("Error" :: Text)
-      , "payload" .= err
+      [ "kind" .= ("Error" :: Text),
+        "payload" .= err
       ]
 
 instance (FromJSON a) => FromJSON (FFIResult a) where
@@ -103,20 +104,28 @@ class (ToJSON a, FromJSON a) => FFIBoundary a where
   toFFI = encode
 
   fromFFI :: ByteString -> Either FFIError a
-  fromFFI bs = 
+  fromFFI bs =
     case eitherDecode bs of
       Left err -> Left $ FFIError (T.pack err) InternalError Nothing (Just "JSON decode failed")
-      Right res -> 
+      Right res ->
         case res of
           FFISuccess val -> Right val
           FFIErrorResult err -> Left err
 
 instance (FFIBoundary a) => FFIBoundary [a]
+
 instance (FFIBoundary a) => FFIBoundary (Maybe a)
+
 instance (FFIBoundary a) => FFIBoundary (FFIResult a)
+
 instance FFIBoundary Text
+
 instance FFIBoundary Bool
+
 instance FFIBoundary Int
+
 instance FFIBoundary Word64
+
 instance FFIBoundary ()
+
 instance FFIBoundary Value

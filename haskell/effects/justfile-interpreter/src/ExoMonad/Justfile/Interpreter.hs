@@ -8,14 +8,14 @@ module ExoMonad.Justfile.Interpreter
 where
 
 import Control.Exception (SomeException, try)
-import Polysemy (Sem, Member, interpret, embed)
-import Polysemy.Embed (Embed)
 import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Effects.Justfile
   ( JustResult (..),
     Justfile (..),
   )
+import Polysemy (Member, Sem, embed, interpret)
+import Polysemy.Embed (Embed)
 import System.Exit (ExitCode (..))
 import System.Process (readProcessWithExitCode)
 

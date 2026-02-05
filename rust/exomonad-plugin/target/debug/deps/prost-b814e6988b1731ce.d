@@ -1,0 +1,10 @@
+/Users/inannamalick/hangars/tidepool/repo/.exomonad/worktrees/gh-521-error-ux-claude/rust/exomonad-plugin/target/debug/deps/prost-b814e6988b1731ce.d: /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prost-0.11.9/src/lib.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prost-0.11.9/src/error.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prost-0.11.9/src/message.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prost-0.11.9/src/types.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prost-0.11.9/src/encoding.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prost-0.11.9/src/../README.md
+
+/Users/inannamalick/hangars/tidepool/repo/.exomonad/worktrees/gh-521-error-ux-claude/rust/exomonad-plugin/target/debug/deps/libprost-b814e6988b1731ce.rmeta: /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prost-0.11.9/src/lib.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prost-0.11.9/src/error.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prost-0.11.9/src/message.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prost-0.11.9/src/types.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prost-0.11.9/src/encoding.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prost-0.11.9/src/../README.md
+
+/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prost-0.11.9/src/lib.rs:
+/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prost-0.11.9/src/error.rs:
+/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prost-0.11.9/src/message.rs:
+/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prost-0.11.9/src/types.rs:
+/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prost-0.11.9/src/encoding.rs:
+/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/prost-0.11.9/src/../README.md:

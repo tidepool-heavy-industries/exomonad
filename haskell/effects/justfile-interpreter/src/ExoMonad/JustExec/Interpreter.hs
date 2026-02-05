@@ -8,14 +8,14 @@ module ExoMonad.JustExec.Interpreter
 where
 
 import Control.Exception (SomeException, try)
-import Polysemy (Sem, Member, interpret, embed)
-import Polysemy.Embed (Embed)
 import Data.Aeson (eitherDecode)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import ExoMonad.Effects.JustExec (ExecResult (..), JustExec (..))
+import Polysemy (Member, Sem, embed, interpret)
+import Polysemy.Embed (Embed)
 import System.Exit (ExitCode (..))
 import System.Process (readProcessWithExitCode)
 

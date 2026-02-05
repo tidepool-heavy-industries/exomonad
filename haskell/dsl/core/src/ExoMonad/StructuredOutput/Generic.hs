@@ -25,8 +25,6 @@ module ExoMonad.StructuredOutput.Generic
   )
 where
 
-import Lens.Micro ((%~), _1)
-import Lens.Micro.GHC (each)
 import Data.Aeson (Value (..))
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
@@ -35,6 +33,8 @@ import ExoMonad.StructuredOutput.Class (GStructuredOutput (..), StructuredOption
 import ExoMonad.StructuredOutput.Error (ParseDiagnostic (..), expectedObject, missingField, typeMismatch)
 import ExoMonad.StructuredOutput.Prefix (detectPrefix, makeStripPrefix)
 import GHC.Generics
+import Lens.Micro ((%~), _1)
+import Lens.Micro.GHC (each)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- DATATYPE WRAPPER (M1 D)

@@ -2,9 +2,9 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
 
 -- | UI effect for user interface interactions.
@@ -57,12 +57,12 @@ module ExoMonad.Effects.UI
   )
 where
 
-import Polysemy (Sem, Member, makeSem)
-import Data.Kind (Type)
 import Data.ByteString (ByteString)
+import Data.Kind (Type)
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
+import Polysemy (Member, Sem, makeSem)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CHOICE METADATA
@@ -167,4 +167,3 @@ requestDie prompt dice =
 -- Alias for 'requestMultiChoice'.
 selectMultiple :: (Member UI r) => Text -> NonEmpty (Text, a) -> Sem r [a]
 selectMultiple = requestMultiChoice
-

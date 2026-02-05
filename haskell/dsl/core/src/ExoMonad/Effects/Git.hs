@@ -2,9 +2,9 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
 
 -- | Git effect for querying repository state.
@@ -38,10 +38,10 @@ module ExoMonad.Effects.Git
   )
 where
 
-import ExoMonad.Path (Path, Abs, Rel, File, Dir, toFilePathText)
-import Polysemy (Sem, Member, makeSem)
-import Data.Kind (Type)
 import Data.Aeson (ToJSON (..), object, (.=))
+import Data.Kind (Type)
+import ExoMonad.Path (Abs, Dir, File, Path, Rel, toFilePathText)
+import Polysemy (Member, Sem, makeSem)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES

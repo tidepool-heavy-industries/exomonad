@@ -2,9 +2,9 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
 
 -- | TUI effect for showing popup forms and waiting for user responses.
@@ -66,8 +66,8 @@ module ExoMonad.Effect.TUI
   )
 where
 
-import Polysemy (Sem, Member, makeSem)
 import Data.Aeson (FromJSON, ToJSON)
+import Polysemy (Member, Sem, makeSem)
 
 -- ══════════════════════════════════════════════════════════════
 -- TUI EFFECT

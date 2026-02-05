@@ -2,13 +2,13 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE KindSignatures #-}
 
 -- | JustExec effect for structured recipe execution.
 --
@@ -35,14 +35,14 @@ module ExoMonad.Effects.JustExec
   )
 where
 
-import Polysemy (Sem, Member, interpret, makeSem)
-import Data.Kind (Type)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.:?), (.=))
+import Data.Kind (Type)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Effect.Log (Log, logInfo)
 import GHC.Generics (Generic)
+import Polysemy (Member, Sem, interpret, makeSem)
 
 -- | Result of running a recipe execution.
 --
@@ -81,4 +81,3 @@ runJustExecStub = interpret $ \case
   ExecRecipe recipe args -> do
     logInfo $ "[JustExec:stub] ExecRecipe called: " <> recipe <> " " <> T.intercalate " " args
     pure $ ExecResult "" "" 0
-

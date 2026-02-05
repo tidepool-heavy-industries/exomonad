@@ -9,9 +9,9 @@ module ExoMonad.Middleware.Logging
 where
 
 import Data.Aeson (encode)
-import qualified Data.ByteString.Lazy as BL
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
+import Data.ByteString.Lazy qualified as BL
+import Data.Text qualified as T
+import Data.Text.Encoding qualified as T
 import ExoMonad.Effect.Log
 import ExoMonad.Effects.GitHub
 import ExoMonad.LLM.Effect
