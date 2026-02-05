@@ -414,4 +414,216 @@ mod tests {
             _ => panic!("Wrong response type"),
         }
     }
+
+    // === Error path tests ===
+
+    #[tokio::test]
+    async fn test_529_retry_once_then_success() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let mock_server = MockServer::start().await;
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let call_count_clone = call_count.clone();
+
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .respond_with(move |_req: &wiremock::Request| {
+                let count = call_count_clone.fetch_add(1, Ordering::SeqCst);
+                if count == 0 {
+                    // First call: return 529
+                    ResponseTemplate::new(529)
+                } else {
+                    // Second call: return success
+                    ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                        "content": [{"type": "text", "text": "Success!"}],
+                        "stop_reason": "end_turn",
+                        "usage": {"input_tokens": 10, "output_tokens": 5}
+                    }))
+                }
+            })
+            .mount(&mock_server)
+            .await;
+
+        let service =
+            AnthropicService::with_base_url("test-key".into(), mock_server.uri().parse().unwrap());
+
+        let req = ServiceRequest::AnthropicChat {
+            model: "claude-3-opus".into(),
+            messages: vec![ChatMessage {
+                role: "user".into(),
+                content: "Hi".into(),
+            }],
+            max_tokens: 100,
+            tools: None,
+            system: None,
+            thinking: None,
+        };
+
+        let resp = service.call(req).await;
+        assert!(resp.is_ok());
+        assert_eq!(call_count.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn test_529_retry_exhausted() {
+        let mock_server = MockServer::start().await;
+
+        // Always return 529
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .respond_with(ResponseTemplate::new(529))
+            .mount(&mock_server)
+            .await;
+
+        let service =
+            AnthropicService::with_base_url("test-key".into(), mock_server.uri().parse().unwrap());
+
+        let req = ServiceRequest::AnthropicChat {
+            model: "claude-3-opus".into(),
+            messages: vec![ChatMessage {
+                role: "user".into(),
+                content: "Hi".into(),
+            }],
+            max_tokens: 100,
+            tools: None,
+            system: None,
+            thinking: None,
+        };
+
+        let resp = service.call(req).await;
+        assert!(resp.is_err());
+        match resp.unwrap_err() {
+            ServiceError::RateLimited { .. } => {} // Expected
+            other => panic!("Expected RateLimited error, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_api_error_400() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("Bad request"))
+            .mount(&mock_server)
+            .await;
+
+        let service =
+            AnthropicService::with_base_url("test-key".into(), mock_server.uri().parse().unwrap());
+
+        let req = ServiceRequest::AnthropicChat {
+            model: "claude-3-opus".into(),
+            messages: vec![],
+            max_tokens: 100,
+            tools: None,
+            system: None,
+            thinking: None,
+        };
+
+        let resp = service.call(req).await;
+        assert!(resp.is_err());
+        match resp.unwrap_err() {
+            ServiceError::Api { code, message } => {
+                assert_eq!(code, 400);
+                assert!(message.contains("Bad request"));
+            }
+            other => panic!("Expected Api error, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_api_error_500() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("Internal server error"))
+            .mount(&mock_server)
+            .await;
+
+        let service =
+            AnthropicService::with_base_url("test-key".into(), mock_server.uri().parse().unwrap());
+
+        let req = ServiceRequest::AnthropicChat {
+            model: "claude-3-opus".into(),
+            messages: vec![],
+            max_tokens: 100,
+            tools: None,
+            system: None,
+            thinking: None,
+        };
+
+        let resp = service.call(req).await;
+        assert!(resp.is_err());
+        match resp.unwrap_err() {
+            ServiceError::Api { code, .. } => {
+                assert_eq!(code, 500);
+            }
+            other => panic!("Expected Api error, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_api_error_401_unauthorized() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("Unauthorized"))
+            .mount(&mock_server)
+            .await;
+
+        let service =
+            AnthropicService::with_base_url("invalid-key".into(), mock_server.uri().parse().unwrap());
+
+        let req = ServiceRequest::AnthropicChat {
+            model: "claude-3-opus".into(),
+            messages: vec![],
+            max_tokens: 100,
+            tools: None,
+            system: None,
+            thinking: None,
+        };
+
+        let resp = service.call(req).await;
+        assert!(resp.is_err());
+        match resp.unwrap_err() {
+            ServiceError::Api { code, .. } => {
+                assert_eq!(code, 401);
+            }
+            other => panic!("Expected Api error, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_malformed_json_response() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("not valid json"))
+            .mount(&mock_server)
+            .await;
+
+        let service =
+            AnthropicService::with_base_url("test-key".into(), mock_server.uri().parse().unwrap());
+
+        let req = ServiceRequest::AnthropicChat {
+            model: "claude-3-opus".into(),
+            messages: vec![],
+            max_tokens: 100,
+            tools: None,
+            system: None,
+            thinking: None,
+        };
+
+        let resp = service.call(req).await;
+        assert!(resp.is_err());
+        // Should be an HTTP error (deserialization failed)
+        match resp.unwrap_err() {
+            ServiceError::Http(_) => {} // Expected
+            other => panic!("Expected Http error (from json parse), got {:?}", other),
+        }
+    }
 }

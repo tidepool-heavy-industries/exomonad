@@ -881,4 +881,164 @@ mod tests {
             _ => panic!("Wrong response type"),
         }
     }
+
+    // === Error path tests ===
+
+    #[tokio::test]
+    async fn test_github_issue_not_found_404() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/owner/repo/issues/999"))
+            .respond_with(
+                ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                    "message": "Not Found",
+                    "documentation_url": "https://docs.github.com"
+                })),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let service =
+            GitHubService::with_base_url("token".into(), mock_server.uri().parse().unwrap());
+
+        let req = ServiceRequest::GitHubGetIssue {
+            owner: "owner".into(),
+            repo: "repo".into(),
+            number: 999,
+            include_comments: false,
+        };
+
+        let resp = service.call(req).await;
+        assert!(resp.is_err());
+        match resp.unwrap_err() {
+            ServiceError::Api { code: _, message } => {
+                // Octocrab wraps the error, so we check for message content
+                assert!(message.len() > 0);
+            }
+            other => panic!("Expected Api error, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_github_server_error_500() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/owner/repo/issues/1"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("Internal Server Error"))
+            .mount(&mock_server)
+            .await;
+
+        let service =
+            GitHubService::with_base_url("token".into(), mock_server.uri().parse().unwrap());
+
+        let req = ServiceRequest::GitHubGetIssue {
+            owner: "owner".into(),
+            repo: "repo".into(),
+            number: 1,
+            include_comments: false,
+        };
+
+        let resp = service.call(req).await;
+        assert!(resp.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_github_list_issues_empty() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/repos/owner/repo/issues"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&mock_server)
+            .await;
+
+        let service =
+            GitHubService::with_base_url("token".into(), mock_server.uri().parse().unwrap());
+
+        let req = ServiceRequest::GitHubListIssues {
+            owner: "owner".into(),
+            repo: "repo".into(),
+            state: None,
+            labels: vec![],
+        };
+
+        match service.call(req).await {
+            Ok(ServiceResponse::GitHubIssues { issues }) => {
+                assert!(issues.is_empty());
+            }
+            Ok(other) => panic!("Wrong response type: {:?}", other),
+            Err(e) => panic!("Unexpected error: {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_github_list_prs_invalid_state() {
+        let service = GitHubService::new("token".into());
+
+        let req = ServiceRequest::GitHubListPullRequests {
+            owner: "owner".into(),
+            repo: "repo".into(),
+            state: Some("invalid_state".into()),
+            limit: None,
+        };
+
+        let resp = service.call(req).await;
+        assert!(resp.is_err());
+        match resp.unwrap_err() {
+            ServiceError::Api { code, message } => {
+                assert_eq!(code, 400);
+                assert!(message.contains("Invalid state"));
+            }
+            other => panic!("Expected Api error, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_github_update_issue_unknown_state() {
+        let service = GitHubService::new("token".into());
+
+        let req = ServiceRequest::GitHubUpdateIssue {
+            owner: "owner".into(),
+            repo: "repo".into(),
+            number: 1,
+            title: None,
+            body: None,
+            state: Some(ItemState::Unknown),
+            labels: None,
+            assignees: None,
+        };
+
+        let resp = service.call(req).await;
+        assert!(resp.is_err());
+        match resp.unwrap_err() {
+            ServiceError::Api { code, message } => {
+                assert_eq!(code, 400);
+                assert!(message.contains("unknown"));
+            }
+            other => panic!("Expected Api error, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_github_remove_assignee_not_implemented() {
+        let service = GitHubService::new("token".into());
+
+        let req = ServiceRequest::GitHubRemoveIssueAssignee {
+            owner: "owner".into(),
+            repo: "repo".into(),
+            number: 1,
+            assignee: "user".into(),
+        };
+
+        let resp = service.call(req).await;
+        assert!(resp.is_err());
+        match resp.unwrap_err() {
+            ServiceError::Api { code, .. } => {
+                assert_eq!(code, 501); // Not Implemented
+            }
+            other => panic!("Expected Api error with 501, got {:?}", other),
+        }
+    }
 }

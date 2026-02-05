@@ -1067,6 +1067,7 @@ dependencies = [
  "anyhow",
  "clap",
  "duct",
+ "proptest",
  "regex",
  "serde",
  "serde_json",
