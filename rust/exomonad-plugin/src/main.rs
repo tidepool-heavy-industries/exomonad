@@ -10,7 +10,7 @@ use ratatui::{
 };
 
 mod protocol;
-use exomonad_ui_protocol::AgentEvent;
+use exomonad_ui_protocol::{AgentEvent, CoordinatorAgentState, StateUpdate};
 use protocol::{
     Component, ElementValue, PluginMessage, PluginState, PopupDefinition, PopupState, VisibilityRule,
 };
@@ -24,6 +24,8 @@ struct ExoMonadPlugin {
     sub_index: usize,
     events: VecDeque<AgentEvent>,
     terminal: Option<Terminal<ZellijBackend>>,
+    /// Agent state from the coordinator plugin.
+    coordinator_agents: Vec<CoordinatorAgentState>,
 }
 
 register_plugin!(ExoMonadPlugin);
@@ -202,6 +204,24 @@ impl ZellijPlugin for ExoMonadPlugin {
                 }
             }
         }
+
+        // Handle coordinator state updates
+        if pipe_message.name == "exomonad-coordinator-state" {
+            if let Some(payload) = pipe_message.payload {
+                match serde_json::from_str::<StateUpdate>(&payload) {
+                    Ok(StateUpdate::FullState { agents }) => {
+                        self.coordinator_agents = agents;
+                        return true; // Request re-render
+                    }
+                    Err(e) => {
+                        self.status_state = PluginState::Error;
+                        self.status_message = format!("Invalid coordinator state: {}", e);
+                        return true;
+                    }
+                }
+            }
+        }
+
         false
     }
 

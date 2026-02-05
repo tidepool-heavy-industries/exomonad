@@ -142,37 +142,50 @@ wasm-all:
 
 # Install everything: Rust binaries + WASM plugins (uses release build)
 install-all:
-    @echo ">>> [1/3] Building Rust binaries (release)..."
+    @echo ">>> [1/5] Building Rust binaries (release)..."
     cd rust && cargo build --release -p exomonad
-    @echo ">>> [2/3] Installing binaries to ~/.cargo/bin/..."
-    mkdir -p ~/.cargo/bin
-    cp rust/target/release/exomonad ~/.cargo/bin/
-    @echo ">>> [3/3] Building and installing WASM plugins..."
-    @just wasm-all
-    @echo ">>> Done!"
-    @echo ""
-    @echo "Installed:"
-    @ls -lh ~/.cargo/bin/exomonad
-    @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
-
-# Install everything (fast dev build)
-install-all-dev:
-    @echo ">>> [1/4] Building Rust sidecar (debug)..."
-    cd rust && cargo build -p exomonad
-    @echo ">>> [2/4] Building Zellij plugin (wasm32-wasip1)..."
-    cd rust/exomonad-plugin && cargo build --target wasm32-wasip1
-    @echo ">>> [3/4] Installing binaries..."
+    @echo ">>> [2/5] Building Zellij plugin (wasm32-wasip1, release)..."
+    cd rust/exomonad-plugin && cargo build --release --target wasm32-wasip1
+    @echo ">>> [3/5] Building coordinator plugin (wasm32-wasip1, release)..."
+    cd rust/exomonad-coordinator && cargo build --release --target wasm32-wasip1
+    @echo ">>> [4/5] Installing binaries..."
     mkdir -p ~/.cargo/bin
     mkdir -p ~/.config/zellij/plugins
-    cp rust/target/debug/exomonad ~/.cargo/bin/
-    cp rust/exomonad-plugin/target/wasm32-wasip1/debug/exomonad-plugin.wasm ~/.config/zellij/plugins/
-    @echo ">>> [4/4] Building and installing Haskell WASM plugins..."
+    cp rust/target/release/exomonad ~/.cargo/bin/
+    cp rust/exomonad-plugin/target/wasm32-wasip1/release/exomonad-plugin.wasm ~/.config/zellij/plugins/
+    cp rust/exomonad-coordinator/target/wasm32-wasip1/release/exomonad-coordinator.wasm ~/.config/zellij/plugins/
+    @echo ">>> [5/5] Building and installing WASM plugins..."
     @just wasm-all
     @echo ">>> Done!"
     @echo ""
     @echo "Installed:"
     @ls -lh ~/.cargo/bin/exomonad
     @ls -lh ~/.config/zellij/plugins/exomonad-plugin.wasm
+    @ls -lh ~/.config/zellij/plugins/exomonad-coordinator.wasm
+    @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
+
+# Install everything (fast dev build)
+install-all-dev:
+    @echo ">>> [1/4] Building Rust sidecar (debug)..."
+    cd rust && cargo build -p exomonad
+    @echo ">>> [2/5] Building Zellij plugin (wasm32-wasip1)..."
+    cd rust/exomonad-plugin && cargo build --target wasm32-wasip1
+    @echo ">>> [3/5] Building coordinator plugin (wasm32-wasip1)..."
+    cd rust/exomonad-coordinator && cargo build --target wasm32-wasip1
+    @echo ">>> [4/5] Installing binaries..."
+    mkdir -p ~/.cargo/bin
+    mkdir -p ~/.config/zellij/plugins
+    cp rust/target/debug/exomonad ~/.cargo/bin/
+    cp rust/exomonad-plugin/target/wasm32-wasip1/debug/exomonad-plugin.wasm ~/.config/zellij/plugins/
+    cp rust/exomonad-coordinator/target/wasm32-wasip1/debug/exomonad-coordinator.wasm ~/.config/zellij/plugins/
+    @echo ">>> [5/5] Building and installing Haskell WASM plugins..."
+    @just wasm-all
+    @echo ">>> Done!"
+    @echo ""
+    @echo "Installed:"
+    @ls -lh ~/.cargo/bin/exomonad
+    @ls -lh ~/.config/zellij/plugins/exomonad-plugin.wasm
+    @ls -lh ~/.config/zellij/plugins/exomonad-coordinator.wasm
     @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
 
 # Clean build artifacts

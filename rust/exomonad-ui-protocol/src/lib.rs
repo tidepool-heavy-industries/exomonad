@@ -364,6 +364,55 @@ pub struct PopupResult {
     pub time_spent_seconds: Option<f64>, // Time user spent interacting with popup
 }
 
+// ============================================================================
+// Coordinator State Updates
+// ============================================================================
+
+/// Agent lifecycle status from the coordinator plugin.
+///
+/// Pushed from coordinator -> UI plugin via pipe_message_to_plugin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "phase")]
+pub enum CoordinatorAgentStatus {
+    /// Effector running setup (worktree + config).
+    #[serde(rename = "setting_up")]
+    SettingUp,
+    /// Command pane opening.
+    #[serde(rename = "pane_opening")]
+    PaneOpening,
+    /// Agent running in pane.
+    #[serde(rename = "running")]
+    Running { pane_id: u32 },
+    /// Cleanup in progress.
+    #[serde(rename = "cleaning")]
+    Cleaning,
+    /// Agent exited.
+    #[serde(rename = "completed")]
+    Completed { exit_code: i32 },
+    /// Setup or execution failed.
+    #[serde(rename = "failed")]
+    Failed { error: String },
+}
+
+/// Agent state from the coordinator.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CoordinatorAgentState {
+    pub id: String,
+    pub worktree_path: String,
+    pub branch: String,
+    pub agent_type: String,
+    pub status: CoordinatorAgentStatus,
+}
+
+/// State update pushed from coordinator to UI plugin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum StateUpdate {
+    /// Full state snapshot (all agents).
+    #[serde(rename = "coordinator:state")]
+    FullState { agents: Vec<CoordinatorAgentState> },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

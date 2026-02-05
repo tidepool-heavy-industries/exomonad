@@ -18,3 +18,15 @@ docker/claude-agent/orchestrator.pub
 .gemini-clipboard/
 .mcp.json
 result
+
+# WASM freeze files
+cabal.project.wasm.freeze
+
+# Local exomonad state (symlinks, sockets, logs, per-crate config)
+.exomonad/wasm
+rust/.exomonad/
+rust/exomonad/.exomonad/
+
+# Standalone Rust crate build artifacts (outside workspace target/)
+rust/exomonad-plugin/target/
+rust/exomonad-coordinator/target/
