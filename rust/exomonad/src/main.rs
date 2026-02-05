@@ -21,6 +21,7 @@ use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 use tracing::{debug, info, warn};
+use tracing_subscriber::prelude::*;
 
 // ============================================================================
 // CLI Types
@@ -218,92 +219,73 @@ async fn handle_hook(
 // ============================================================================
 
 /// Initialize logging based on the command mode.
-/// - MCP stdio: Logs to ~/.exomonad/logs/sidecar-TIMESTAMP.log
-/// - Other modes: Logs to stderr (preserves current behavior)
-fn init_logging(command: &Commands) {
+/// - MCP stdio: Logs to .exomonad/logs/sidecar.log (rolling)
+/// - Other modes: Logs to stderr + .exomonad/logs/sidecar.log (rolling)
+fn init_logging(command: &Commands) -> Option<tracing_appender::non_blocking::WorkerGuard> {
     let use_json = std::env::var("EXOMONAD_LOG_FORMAT")
         .map(|v| v.eq_ignore_ascii_case("json"))
         .unwrap_or(false);
 
+    let log_dir = PathBuf::from(".exomonad/logs");
+    if let Err(e) = std::fs::create_dir_all(&log_dir) {
+        eprintln!("Failed to create log directory .exomonad/logs: {}", e);
+    }
+
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "sidecar.log");
+    let (non_blocking_file, guard) = tracing_appender::non_blocking(file_appender);
+
+    let env_filter = tracing_subscriber::EnvFilter::from_default_env()
+        .add_directive(tracing::Level::INFO.into());
+
+    let registry = tracing_subscriber::registry().with(env_filter);
+
     match command {
         Commands::McpStdio => {
-            // File-based logging for stdio mode
-            // Try to set up file logging, fallback to stderr (or nothing if really broken) if it fails
-            let setup_file_logging = || -> Result<PathBuf, String> {
-                let home_dir = std::env::var("HOME")
-                    .map_err(|_| "HOME environment variable not set".to_string())?;
-                let log_dir = PathBuf::from(home_dir).join(".exomonad").join("logs");
-
-                // Create log directory if it doesn't exist
-                std::fs::create_dir_all(&log_dir)
-                    .map_err(|e| format!("Failed to create log directory: {}", e))?;
-
-                // Generate timestamped filename
-                let timestamp = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S");
-                let log_file = log_dir.join(format!("sidecar-{}.log", timestamp));
-
-                let file = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&log_file)
-                    .map_err(|e| format!("Failed to open log file: {}", e))?;
-
-                let builder = tracing_subscriber::fmt()
-                    .with_env_filter(
-                        tracing_subscriber::EnvFilter::from_default_env()
-                            .add_directive(tracing::Level::INFO.into()),
+            if use_json {
+                registry
+                    .with(
+                        tracing_subscriber::fmt::layer()
+                            .json()
+                            .with_writer(non_blocking_file)
+                            .with_ansi(false),
                     )
-                    .with_writer(std::sync::Arc::new(file))
-                    .with_ansi(false); // No ANSI colors in file
-
-                if use_json {
-                    builder.json().init();
-                } else {
-                    builder.init();
-                }
-
-                Ok(log_file)
-            };
-
-            match setup_file_logging() {
-                Ok(log_file) => eprintln!("MCP stdio logging to: {}", log_file.display()),
-                Err(e) => {
-                    eprintln!(
-                        "Failed to setup file logging for MCP stdio: {}. Falling back to stderr.",
-                        e
-                    );
-                    // Fallback to stderr
-                    let builder = tracing_subscriber::fmt()
-                        .with_env_filter(
-                            tracing_subscriber::EnvFilter::from_default_env()
-                                .add_directive(tracing::Level::INFO.into()),
-                        )
-                        .with_writer(std::io::stderr);
-
-                    if use_json {
-                        builder.json().init();
-                    } else {
-                        builder.init();
-                    }
-                }
+                    .init();
+            } else {
+                registry
+                    .with(
+                        tracing_subscriber::fmt::layer()
+                            .with_writer(non_blocking_file)
+                            .with_ansi(false),
+                    )
+                    .init();
             }
+            eprintln!("MCP stdio logging to .exomonad/logs/sidecar.log");
         }
         _ => {
-            // Stderr logging for other modes (existing behavior)
-            let builder = tracing_subscriber::fmt()
-                .with_env_filter(
-                    tracing_subscriber::EnvFilter::from_default_env()
-                        .add_directive(tracing::Level::INFO.into()),
-                )
-                .with_writer(std::io::stderr);
-
             if use_json {
-                builder.json().init();
+                registry
+                    .with(
+                        tracing_subscriber::fmt::layer()
+                            .json()
+                            .with_writer(non_blocking_file)
+                            .with_ansi(false),
+                    )
+                    .with(tracing_subscriber::fmt::layer().json().with_writer(std::io::stderr))
+                    .init();
             } else {
-                builder.init();
+                registry
+                    .with(
+                        tracing_subscriber::fmt::layer()
+                            .with_writer(non_blocking_file)
+                            .with_ansi(false),
+                    )
+                    .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+                    .init();
             }
         }
     }
+
+    Some(guard)
 }
 
 fn get_agent_id_from_env() -> String {
@@ -326,7 +308,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Initialize logging based on command type
-    init_logging(&cli.command);
+    let _guard = init_logging(&cli.command);
 
     // Discover config (or use default)
     let raw_config = config::Config::discover().unwrap_or_else(|e| {
