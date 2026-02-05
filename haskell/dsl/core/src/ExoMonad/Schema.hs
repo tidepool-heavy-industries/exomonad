@@ -63,6 +63,7 @@ where
 
 import Data.Aeson (Value (..), object, (.=))
 import Data.Map.Strict qualified as Map
+import Data.Text qualified as T
 import ExoMonad.Schema.TH
   ( FieldMapping (..),
     FieldMappingPartial,
