@@ -118,8 +118,6 @@ async fn handle_hook(
         }
     }
 
-    info!("Hook stdin: {}", stdin_content);
-
     // Parse the hook input and inject runtime
     let mut hook_input: HookInput =
         serde_json::from_str(&stdin_content).context("Failed to parse hook input")?;

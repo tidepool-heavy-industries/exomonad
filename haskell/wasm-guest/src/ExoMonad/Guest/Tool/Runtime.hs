@@ -171,12 +171,6 @@ hookHandler config = do
             SubagentStop -> "SubagentStop"
             PreToolUse -> "PreToolUse"
       callHostVoid host_log_info (LogPayload Info ("Hook received: " <> hookName) Nothing)
-      
-      -- Debug HookInput
-      let debugMsg = "HookInput debug: session=[" <> hiSessionId hookInput 
-                  <> "], agent=[" <> fromMaybe "None" (hiAgentId hookInput)
-                  <> "], cwd=[" <> hiCwd hookInput <> "]"
-      callHostVoid host_log_info (LogPayload Info debugMsg Nothing)
 
       case hookType of
         SessionEnd -> handleStopHook hookInput (onStop config)
@@ -198,8 +192,12 @@ hookHandler config = do
                          (let sid = hiSessionId hookInput in if T.null sid then Nothing else Just sid)
       let agentId = fromMaybe "unknown" maybeAgentId
 
+      -- Get current timestamp in ISO8601 format
+      now <- getCurrentTime
+      let timestamp = T.pack $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%QZ" now
+
       -- Log that stop hook was called
-      callHostVoid host_log_info (LogPayload Info ("Stop hook execution for agent: " <> agentId) Nothing)
+      callHostVoid host_log_info (LogPayload Info ("Stop hook firing for agent: " <> agentId) Nothing)
 
       -- Emit AgentStopped event BEFORE running checks
       -- Only emit if we have a valid agent ID to avoid empty ID logs
