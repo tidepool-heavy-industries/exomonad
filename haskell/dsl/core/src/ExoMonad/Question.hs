@@ -20,7 +20,8 @@ module ExoMonad.Question
   )
 where
 
-import Data.Aeson (FromJSON, ToJSON, Value)
+import Control.Applicative ((<|>))
+import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), object, withObject, (.!=), (.:), (.:?), (.=))
 
 -- | Where an item goes
 data ItemDisposition

@@ -44,6 +44,7 @@ module ExoMonad.StructuredOutput.Class
 where
 
 import Data.Aeson (Value)
+import Data.Text qualified as T
 import Data.Type.Bool (type (&&))
 import GHC.Generics (C, D, K1, M1, R, Rep, S, U1, V1, from, to, (:*:), (:+:))
 import GHC.TypeLits (ErrorMessage (..), Symbol, TypeError)
