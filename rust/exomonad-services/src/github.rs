@@ -458,6 +458,7 @@ impl ExternalService for GitHubService {
                 repo,
                 state,
                 limit,
+                head,
             } => {
                 let state_enum = match state.as_deref() {
                     Some("open") => octocrab::params::State::Open,
@@ -472,18 +473,22 @@ impl ExternalService for GitHubService {
                     }
                 };
 
-                let page = self
-                    .client
-                    .pulls(owner, repo)
+                let owner_str: String = owner.into();
+                let repo_str: String = repo.into();
+                let handler = self.client.pulls(&owner_str, &repo_str);
+                let mut builder = handler
                     .list()
                     .state(state_enum)
-                    .per_page(limit.unwrap_or(30) as u8)
-                    .send()
-                    .await
-                    .map_err(|e| ServiceError::Api {
-                        code: 500,
-                        message: e.to_string(),
-                    })?;
+                    .per_page(limit.unwrap_or(30) as u8);
+
+                if let Some(ref head_branch) = head {
+                    builder = builder.head(head_branch.clone());
+                }
+
+                let page = builder.send().await.map_err(|e| ServiceError::Api {
+                    code: 500,
+                    message: e.to_string(),
+                })?;
 
                 let prs = page
                     .into_iter()
@@ -494,6 +499,8 @@ impl ExternalService for GitHubService {
                             pr.state.unwrap_or(octocrab::models::IssueState::Open),
                         ),
                         url: pr.html_url.map(|u| u.to_string()).unwrap_or_default(),
+                        head_ref_name: pr.head.ref_field,
+                        base_ref_name: pr.base.ref_field,
                     })
                     .collect();
 
@@ -982,6 +989,7 @@ mod tests {
             repo: "repo".into(),
             state: Some("invalid_state".into()),
             limit: None,
+            head: None,
         };
 
         let resp = service.call(req).await;

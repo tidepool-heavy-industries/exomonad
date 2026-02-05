@@ -16,6 +16,7 @@ octocrab = "0.32"
 chrono = "0.4"
 duct = { workspace = true }
 exomonad-shared = { path = "../exomonad-shared" }
+exomonad-services = { path = "../exomonad-services" }
 exomonad-ui-protocol = { path = "../exomonad-ui-protocol" }
 zellij-gen = { path = "../zellij-gen" }
 

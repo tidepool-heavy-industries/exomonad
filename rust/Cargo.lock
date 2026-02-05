@@ -1172,6 +1172,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "duct",
+ "exomonad-services",
  "exomonad-shared",
  "exomonad-ui-protocol",
  "extism",

@@ -19,10 +19,7 @@ Stateless IO executor that runs in agent containers and returns structured JSON.
 ### Git
 - `effector git status [--cwd <path>]`: Get git status as JSON.
 - `effector git diff [--cwd <path>] [--staged]`: Get git diff as JSON.
-
-### GitHub (gh)
-- `effector gh pr-status [--branch <name>]`: Get PR status as JSON.
-- `effector gh pr-create --title <title> --body <body> [--base <branch>]`: Create PR and return JSON.
+- `effector git ls-files [--cwd <path>] [args...]`: List tracked files as JSON.
 
 ## Integration
 
