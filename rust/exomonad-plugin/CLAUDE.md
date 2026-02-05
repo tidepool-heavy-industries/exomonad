@@ -59,9 +59,10 @@ The plugin displays a scrollable list of recent agent events:
 | tool:call | `<agent_id> tool: <tool>(<input>)` |
 | tool:result | `<agent_id> tool: <tool> -> <result>` |
 | hook:received | `<agent_id> hook: <hook_type>` |
+| stop_hook:blocked | `<agent_id> blocked: <reason>` |
 | pr:filed | `<agent_id> PR #<number>` |
-| agent:stuck | `<agent_id> ⚠ STUCK` |
-
+| copilot:reviewed | `<agent_id> copilot: <comment_count> comments` |
+| agent:stuck | `<agent_id> ⚠ STUCK ({failed_stop_count} failed stops)` |
 
 ## Popup Rendering
 

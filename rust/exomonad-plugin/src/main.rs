@@ -437,41 +437,67 @@ impl ExoMonadPlugin {
                 true
             }
             BareKey::Down | BareKey::Char('j') => {
-                if self.selected_index < def.components.len().saturating_sub(1) {
-                    self.selected_index += 1;
+                if let Some(new_idx) = find_next_visible(def, state, self.selected_index, 1) {
+                    self.selected_index = new_idx;
                     self.sub_index = 0;
                     true
                 } else { false }
             }
             BareKey::Up | BareKey::Char('k') => {
-                if self.selected_index > 0 {
-                    self.selected_index -= 1;
+                if let Some(new_idx) = find_next_visible(def, state, self.selected_index, -1) {
+                    self.selected_index = new_idx;
                     self.sub_index = 0;
                     true
                 } else { false }
             }
             BareKey::Char(' ') | BareKey::Enter => {
                 if let Some(comp) = def.components.get(self.selected_index) {
-                    match comp {
-                        Component::Checkbox { id, .. } => {
-                            if let Some(ElementValue::Boolean(b)) = state.values.get_mut(id) { *b = !*b; }
+                    if comp.visible_when().map(|r| evaluate_visibility(r, state)).unwrap_or(true) {
+                        match comp {
+                            Component::Checkbox { id, .. } => {
+                                if let Some(ElementValue::Boolean(b)) = state.values.get_mut(id) { *b = !*b; }
+                            }
+                            Component::Choice { id, options, .. } => {
+                                if !options.is_empty() {
+                                    if let Some(ElementValue::Choice(idx)) = state.values.get_mut(id) { *idx = (*idx + 1) % options.len(); }
+                                }
+                            }
+                            _ => {}
                         }
-                        Component::Choice { id, options, .. } => {
-                            if let Some(ElementValue::Choice(idx)) = state.values.get_mut(id) { *idx = (*idx + 1) % options.len(); }
-                        }
-                        _ => {}
                     }
                 }
                 true
             }
             BareKey::Char('s') if key.has_modifiers(&[KeyModifier::Ctrl]) => {
-                if let Ok(json_values) = serde_json::to_string(&state.to_json_values()) {
-                    let _ = run_command(&["exomonad", "reply", "--id", req_id, "--payload", &json_values], BTreeMap::new());
-                    self.active_popup = None;
-                    true
-                } else { false }
+                match serde_json::to_string(&state.to_json_values()) {
+                    Ok(json_values) => {
+                        let _ = run_command(&["exomonad", "reply", "--id", req_id, "--payload", &json_values], BTreeMap::new());
+                        self.active_popup = None;
+                        true
+                    }
+                    Err(e) => {
+                        self.status_state = PluginState::Error;
+                        self.status_message = format!("Failed to serialize reply payload: {}", e);
+                        true
+                    }
+                }
             }
             _ => false,
+        }
+    }
+}
+
+fn find_next_visible(def: &PopupDefinition, state: &PopupState, current: usize, delta: i32) -> Option<usize> {
+    let mut new_index = current as i32;
+    loop {
+        new_index += delta;
+        if new_index < 0 || new_index >= def.components.len() as i32 {
+            return None;
+        }
+        if let Some(comp) = def.components.get(new_index as usize) {
+            if comp.visible_when().map(|r| evaluate_visibility(r, state)).unwrap_or(true) {
+                return Some(new_index as usize);
+            }
         }
     }
 }
@@ -485,8 +511,15 @@ fn format_timestamp(timestamp: &str) -> String {
 }
 
 fn truncate_str(s: &str, max_len: usize) -> String {
-    if s.len() > max_len {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
+    let char_count = s.chars().count();
+    if char_count > max_len {
+        if max_len <= 3 {
+            return s.chars().take(max_len).collect();
+        }
+        let take_len = max_len - 3;
+        let mut truncated: String = s.chars().take(take_len).collect();
+        truncated.push_str("...");
+        truncated
     } else {
         s.to_string()
     }
@@ -501,7 +534,12 @@ fn evaluate_visibility(rule: &VisibilityRule, state: &PopupState) -> bool {
                     match val {
                         ElementValue::Choice(idx) => idx.to_string() == *expected,
                         ElementValue::Text(s) => s == expected,
-                        ElementValue::Number(n) => (n - expected.parse::<f32>().unwrap_or(0.0)).abs() < f32::EPSILON,
+                        ElementValue::Number(n) => {
+                            match expected.parse::<f32>() {
+                                Ok(expected_num) => (n - expected_num).abs() < f32::EPSILON,
+                                Err(_) => false,
+                            }
+                        }
                         ElementValue::Boolean(b) => b.to_string() == *expected,
                         _ => false,
                     }
