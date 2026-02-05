@@ -96,7 +96,10 @@ async fn check_existing_pr_async(
     repo: &str,
     head_branch: &str,
 ) -> Result<Option<(String, u64, String, String)>> {
-    info!("[FilePR] Checking for existing PR for branch: {}", head_branch);
+    info!(
+        "[FilePR] Checking for existing PR for branch: {}",
+        head_branch
+    );
 
     // GitHub API expects head in format "owner:branch" for cross-fork PRs,
     // or just "branch" for same-repo PRs. We use "owner:branch" for consistency.
@@ -110,9 +113,10 @@ async fn check_existing_pr_async(
         head: Some(head_filter),
     };
 
-    let response = github.call(req).await.map_err(|e| {
-        anyhow::anyhow!("GitHub API error checking for existing PR: {}", e)
-    })?;
+    let response = github
+        .call(req)
+        .await
+        .map_err(|e| anyhow::anyhow!("GitHub API error checking for existing PR: {}", e))?;
 
     match response {
         ServiceResponse::GitHubPullRequests { pull_requests } => {
@@ -156,9 +160,10 @@ async fn create_pr_async(
         base: base_branch.clone(),
     };
 
-    let response = github.call(req).await.map_err(|e| {
-        anyhow::anyhow!("GitHub API error creating PR: {}", e)
-    })?;
+    let response = github
+        .call(req)
+        .await
+        .map_err(|e| anyhow::anyhow!("GitHub API error creating PR: {}", e))?;
 
     match response {
         ServiceResponse::GitHubPR {
@@ -218,8 +223,7 @@ async fn file_pr_async(input: &FilePRInput) -> Result<FilePROutput> {
     info!("[FilePR] Current branch: {}", head_branch);
 
     // Create GitHub service from environment
-    let github = GitHubService::from_env()
-        .context("GITHUB_TOKEN not set or invalid")?;
+    let github = GitHubService::from_env().context("GITHUB_TOKEN not set or invalid")?;
 
     // First check if PR already exists for current branch
     if let Some((url, number, head, base)) =
@@ -250,8 +254,7 @@ pub fn file_pr(input: &FilePRInput) -> Result<FilePROutput> {
         Ok(handle) => handle.block_on(file_pr_async(input)),
         Err(_) => {
             // Create a new runtime for this call
-            let rt = tokio::runtime::Runtime::new()
-                .context("Failed to create tokio runtime")?;
+            let rt = tokio::runtime::Runtime::new().context("Failed to create tokio runtime")?;
             rt.block_on(file_pr_async(input))
         }
     }

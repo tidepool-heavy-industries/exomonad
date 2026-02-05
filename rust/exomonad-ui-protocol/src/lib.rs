@@ -379,7 +379,11 @@ mod tests {
         }"#;
         let parsed: Component = serde_json::from_str(json).unwrap();
         match parsed {
-            Component::Text { id, content, visible_when } => {
+            Component::Text {
+                id,
+                content,
+                visible_when,
+            } => {
                 assert_eq!(id, "info");
                 assert_eq!(content, "This is informational text");
                 assert!(visible_when.is_none());
@@ -400,7 +404,14 @@ mod tests {
         }"#;
         let parsed: Component = serde_json::from_str(json).unwrap();
         match parsed {
-            Component::Slider { id, label, min, max, default, visible_when } => {
+            Component::Slider {
+                id,
+                label,
+                min,
+                max,
+                default,
+                visible_when,
+            } => {
                 assert_eq!(id, "confidence");
                 assert_eq!(label, "Confidence Level");
                 assert_eq!(min, 0.0);
@@ -422,7 +433,12 @@ mod tests {
         }"#;
         let parsed: Component = serde_json::from_str(json).unwrap();
         match parsed {
-            Component::Checkbox { id, label, default, visible_when } => {
+            Component::Checkbox {
+                id,
+                label,
+                default,
+                visible_when,
+            } => {
                 assert_eq!(id, "agree");
                 assert_eq!(label, "I agree to the terms");
                 assert!(!default);
@@ -443,7 +459,13 @@ mod tests {
         }"#;
         let parsed: Component = serde_json::from_str(json).unwrap();
         match parsed {
-            Component::Textbox { id, label, placeholder, rows, visible_when } => {
+            Component::Textbox {
+                id,
+                label,
+                placeholder,
+                rows,
+                visible_when,
+            } => {
                 assert_eq!(id, "notes");
                 assert_eq!(label, "Additional Notes");
                 assert_eq!(placeholder, Some("Enter notes here...".to_string()));
@@ -465,7 +487,13 @@ mod tests {
         }"#;
         let parsed: Component = serde_json::from_str(json).unwrap();
         match parsed {
-            Component::Choice { id, label, options, default, visible_when } => {
+            Component::Choice {
+                id,
+                label,
+                options,
+                default,
+                visible_when,
+            } => {
                 assert_eq!(id, "color");
                 assert_eq!(label, "Choose a color");
                 assert_eq!(options, vec!["Red", "Green", "Blue"]);
@@ -486,7 +514,13 @@ mod tests {
         }"#;
         let parsed: Component = serde_json::from_str(json).unwrap();
         match parsed {
-            Component::Multiselect { id, label, options, default, visible_when } => {
+            Component::Multiselect {
+                id,
+                label,
+                options,
+                default,
+                visible_when,
+            } => {
                 assert_eq!(id, "features");
                 assert_eq!(label, "Select features");
                 assert_eq!(options, vec!["Feature A", "Feature B", "Feature C"]);
@@ -506,7 +540,11 @@ mod tests {
         }"#;
         let parsed: Component = serde_json::from_str(json).unwrap();
         match parsed {
-            Component::Group { id, label, visible_when } => {
+            Component::Group {
+                id,
+                label,
+                visible_when,
+            } => {
                 assert_eq!(id, "advanced");
                 assert_eq!(label, "Advanced Settings");
                 assert!(visible_when.is_none());
@@ -690,7 +728,10 @@ mod tests {
             }],
         };
         let state = PopupState::new(&definition);
-        assert_eq!(state.get_multichoice("multi1"), Some(&[false, false, false][..]));
+        assert_eq!(
+            state.get_multichoice("multi1"),
+            Some(&[false, false, false][..])
+        );
     }
 
     // === Getter/setter tests ===
@@ -784,10 +825,16 @@ mod tests {
             }],
         };
         let mut state = PopupState::new(&definition);
-        assert_eq!(state.get_multichoice("opts"), Some(&[false, false, false][..]));
+        assert_eq!(
+            state.get_multichoice("opts"),
+            Some(&[false, false, false][..])
+        );
 
         state.set_multichoice("opts", vec![true, false, true]);
-        assert_eq!(state.get_multichoice("opts"), Some(&[true, false, true][..]));
+        assert_eq!(
+            state.get_multichoice("opts"),
+            Some(&[true, false, true][..])
+        );
     }
 
     // === Component helper method tests ===

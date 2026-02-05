@@ -224,22 +224,40 @@ mod tests {
 
     #[test]
     fn test_classify_type_error() {
-        assert_eq!(classify_error_type("Couldn't match type 'Int' with 'String'"), "type-error");
+        assert_eq!(
+            classify_error_type("Couldn't match type 'Int' with 'String'"),
+            "type-error"
+        );
         assert_eq!(classify_error_type("Expected type: Int"), "type-error");
-        assert_eq!(classify_error_type("No instance for (Show Foo)"), "type-error");
-        assert_eq!(classify_error_type("Ambiguous type variable 'a'"), "type-error");
-        assert_eq!(classify_error_type("Couldn't match expected type 'Bool'"), "type-error");
+        assert_eq!(
+            classify_error_type("No instance for (Show Foo)"),
+            "type-error"
+        );
+        assert_eq!(
+            classify_error_type("Ambiguous type variable 'a'"),
+            "type-error"
+        );
+        assert_eq!(
+            classify_error_type("Couldn't match expected type 'Bool'"),
+            "type-error"
+        );
     }
 
     #[test]
     fn test_classify_scope_error() {
         assert_eq!(classify_error_type("Not in scope: 'foo'"), "scope-error");
-        assert_eq!(classify_error_type("Variable not in scope: bar"), "scope-error");
+        assert_eq!(
+            classify_error_type("Variable not in scope: bar"),
+            "scope-error"
+        );
     }
 
     #[test]
     fn test_classify_parse_error() {
-        assert_eq!(classify_error_type("parse error on input '='"), "parse-error");
+        assert_eq!(
+            classify_error_type("parse error on input '='"),
+            "parse-error"
+        );
     }
 
     #[test]

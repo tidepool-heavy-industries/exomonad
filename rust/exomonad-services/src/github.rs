@@ -897,12 +897,10 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/repos/owner/repo/issues/999"))
-            .respond_with(
-                ResponseTemplate::new(404).set_body_json(serde_json::json!({
-                    "message": "Not Found",
-                    "documentation_url": "https://docs.github.com"
-                })),
-            )
+            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                "message": "Not Found",
+                "documentation_url": "https://docs.github.com"
+            })))
             .mount(&mock_server)
             .await;
 

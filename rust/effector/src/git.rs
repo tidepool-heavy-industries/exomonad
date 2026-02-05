@@ -182,7 +182,8 @@ mod tests {
     #[test]
     fn test_status_dirty_files() {
         // Ordinary changed file: "1 <XY> ..." where Y != '.'
-        let output = "# branch.head main\n1 .M N... 100644 100644 100644 abc123 def456 src/lib.rs\n";
+        let output =
+            "# branch.head main\n1 .M N... 100644 100644 100644 abc123 def456 src/lib.rs\n";
         let result = parse_status(output);
         assert!(result.dirty.contains(&"src/lib.rs".to_string()));
         assert!(result.staged.is_empty());
@@ -191,7 +192,8 @@ mod tests {
     #[test]
     fn test_status_staged_files() {
         // Staged file: "1 <XY> ..." where X != '.'
-        let output = "# branch.head main\n1 M. N... 100644 100644 100644 abc123 def456 src/lib.rs\n";
+        let output =
+            "# branch.head main\n1 M. N... 100644 100644 100644 abc123 def456 src/lib.rs\n";
         let result = parse_status(output);
         assert!(result.staged.contains(&"src/lib.rs".to_string()));
         assert!(result.dirty.is_empty());
@@ -200,7 +202,8 @@ mod tests {
     #[test]
     fn test_status_staged_and_dirty() {
         // Both staged and dirty: "1 MM ..."
-        let output = "# branch.head main\n1 MM N... 100644 100644 100644 abc123 def456 src/lib.rs\n";
+        let output =
+            "# branch.head main\n1 MM N... 100644 100644 100644 abc123 def456 src/lib.rs\n";
         let result = parse_status(output);
         assert!(result.staged.contains(&"src/lib.rs".to_string()));
         assert!(result.dirty.contains(&"src/lib.rs".to_string()));
@@ -229,7 +232,8 @@ mod tests {
         // Unmerged entry: "u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>"
         // parts[8] = path in our parsing (starting from 0)
         // 0:u 1:UU 2:N... 3:100644 4:100644 5:100644 6:100644 7:abc 8:conflicted.rs
-        let output = "# branch.head main\nu UU N... 100644 100644 100644 100644 abc conflicted.rs\n";
+        let output =
+            "# branch.head main\nu UU N... 100644 100644 100644 100644 abc conflicted.rs\n";
         let result = parse_status(output);
         assert!(result.dirty.contains(&"conflicted.rs".to_string()));
     }
@@ -271,7 +275,11 @@ mod tests {
         assert_eq!(result.additions, 13);
         assert_eq!(result.deletions, 6);
 
-        let lib = result.files.iter().find(|f| f.path == "src/lib.rs").unwrap();
+        let lib = result
+            .files
+            .iter()
+            .find(|f| f.path == "src/lib.rs")
+            .unwrap();
         assert_eq!(lib.additions, 10);
         assert_eq!(lib.deletions, 5);
         assert_eq!(lib.status, "modified");

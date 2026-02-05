@@ -349,10 +349,7 @@ mod tests {
 
     #[test]
     fn test_jsonrpc_response_success() {
-        let response = JsonRpcResponse::success(
-            Value::Number(42.into()),
-            json!({"status": "ok"}),
-        );
+        let response = JsonRpcResponse::success(Value::Number(42.into()), json!({"status": "ok"}));
         assert_eq!(response.jsonrpc, "2.0");
         assert_eq!(response.id, Value::Number(42.into()));
         assert!(response.result.is_some());
@@ -361,11 +358,8 @@ mod tests {
 
     #[test]
     fn test_jsonrpc_response_error() {
-        let response = JsonRpcResponse::error(
-            Value::Number(1.into()),
-            -32700,
-            "Parse error".to_string(),
-        );
+        let response =
+            JsonRpcResponse::error(Value::Number(1.into()), -32700, "Parse error".to_string());
         assert_eq!(response.jsonrpc, "2.0");
         assert_eq!(response.id, Value::Number(1.into()));
         assert!(response.result.is_none());

@@ -276,7 +276,10 @@ mod tests {
         };
 
         let layout = generate_agent_layout(&params).unwrap();
-        assert!(layout.contains("zjstatus.wasm"), "Layout should include zjstatus plugin");
+        assert!(
+            layout.contains("zjstatus.wasm"),
+            "Layout should include zjstatus plugin"
+        );
     }
 
     #[test]
@@ -291,7 +294,10 @@ mod tests {
         };
 
         let layout = generate_agent_layout(&params).unwrap();
-        assert!(layout.contains("exomonad-plugin.wasm"), "Layout should include exomonad plugin");
+        assert!(
+            layout.contains("exomonad-plugin.wasm"),
+            "Layout should include exomonad plugin"
+        );
     }
 
     #[test]
@@ -306,7 +312,10 @@ mod tests {
         };
 
         let layout = generate_agent_layout(&params).unwrap();
-        assert!(layout.contains("close_on_exit true"), "Layout should include close_on_exit true");
+        assert!(
+            layout.contains("close_on_exit true"),
+            "Layout should include close_on_exit true"
+        );
     }
 
     #[test]
@@ -362,7 +371,11 @@ mod tests {
             };
 
             let layout = generate_agent_layout(&params).unwrap();
-            assert!(layout.contains(shell), "Layout should contain shell: {}", shell);
+            assert!(
+                layout.contains(shell),
+                "Layout should contain shell: {}",
+                shell
+            );
         }
     }
 

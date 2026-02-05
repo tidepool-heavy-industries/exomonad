@@ -240,7 +240,10 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             ConfigError::ProjectDirNotFound { path } => {
-                assert_eq!(path, PathBuf::from("/nonexistent/path/that/should/not/exist"));
+                assert_eq!(
+                    path,
+                    PathBuf::from("/nonexistent/path/that/should/not/exist")
+                );
             }
             other => panic!("Expected ProjectDirNotFound, got {:?}", other),
         }
@@ -332,6 +335,9 @@ mod tests {
         let validated = config.validate().unwrap();
         assert_eq!(validated.project_dir(), &project_dir);
         assert_eq!(validated.role(), Role::Dev);
-        assert!(validated.wasm_path_buf().to_string_lossy().contains("wasm-guest-dev.wasm"));
+        assert!(validated
+            .wasm_path_buf()
+            .to_string_lossy()
+            .contains("wasm-guest-dev.wasm"));
     }
 }

@@ -574,8 +574,10 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let service =
-            AnthropicService::with_base_url("invalid-key".into(), mock_server.uri().parse().unwrap());
+        let service = AnthropicService::with_base_url(
+            "invalid-key".into(),
+            mock_server.uri().parse().unwrap(),
+        );
 
         let req = ServiceRequest::AnthropicChat {
             model: "claude-3-opus".into(),
