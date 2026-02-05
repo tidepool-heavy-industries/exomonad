@@ -219,73 +219,109 @@ async fn handle_hook(
 // ============================================================================
 
 /// Initialize logging based on the command mode.
-/// - MCP stdio: Logs to .exomonad/logs/sidecar.log (rolling)
-/// - Other modes: Logs to stderr + .exomonad/logs/sidecar.log (rolling)
+/// - MCP stdio: Logs to .exomonad/logs/sidecar.log.YYYY-MM-DD (rolling)
+/// - Other modes: Logs to stderr + .exomonad/logs/sidecar.log.YYYY-MM-DD (rolling)
 fn init_logging(command: &Commands) -> Option<tracing_appender::non_blocking::WorkerGuard> {
     let use_json = std::env::var("EXOMONAD_LOG_FORMAT")
         .map(|v| v.eq_ignore_ascii_case("json"))
         .unwrap_or(false);
 
     let log_dir = PathBuf::from(".exomonad/logs");
+    let mut file_logging_enabled = true;
     if let Err(e) = std::fs::create_dir_all(&log_dir) {
-        eprintln!("Failed to create log directory .exomonad/logs: {}", e);
+        eprintln!(
+            "Failed to create log directory .exomonad/logs: {}. Falling back to stderr-only logging.",
+            e
+        );
+        file_logging_enabled = false;
     }
-
-    let file_appender = tracing_appender::rolling::daily(&log_dir, "sidecar.log");
-    let (non_blocking_file, guard) = tracing_appender::non_blocking(file_appender);
 
     let env_filter = tracing_subscriber::EnvFilter::from_default_env()
         .add_directive(tracing::Level::INFO.into());
 
     let registry = tracing_subscriber::registry().with(env_filter);
 
-    match command {
-        Commands::McpStdio => {
-            if use_json {
-                registry
-                    .with(
-                        tracing_subscriber::fmt::layer()
-                            .json()
-                            .with_writer(non_blocking_file)
-                            .with_ansi(false),
-                    )
-                    .init();
-            } else {
-                registry
-                    .with(
-                        tracing_subscriber::fmt::layer()
-                            .with_writer(non_blocking_file)
-                            .with_ansi(false),
-                    )
-                    .init();
-            }
-            eprintln!("MCP stdio logging to .exomonad/logs/sidecar.log");
+    let (nb, guard) = if file_logging_enabled {
+        let file_appender = tracing_appender::rolling::daily(&log_dir, "sidecar.log");
+        let (nb, g) = tracing_appender::non_blocking(file_appender);
+        (Some(nb), Some(g))
+    } else {
+        (None, None)
+    };
+
+    match (command, nb, use_json) {
+        // MCP stdio with File Logging
+        (Commands::McpStdio, Some(nb), true) => {
+            registry
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .json()
+                        .with_writer(nb)
+                        .with_ansi(false),
+                )
+                .init();
+            eprintln!("MCP stdio logging to .exomonad/logs/sidecar.log.YYYY-MM-DD (daily rotation)");
         }
-        _ => {
-            if use_json {
-                registry
-                    .with(
-                        tracing_subscriber::fmt::layer()
-                            .json()
-                            .with_writer(non_blocking_file)
-                            .with_ansi(false),
-                    )
-                    .with(tracing_subscriber::fmt::layer().json().with_writer(std::io::stderr))
-                    .init();
-            } else {
-                registry
-                    .with(
-                        tracing_subscriber::fmt::layer()
-                            .with_writer(non_blocking_file)
-                            .with_ansi(false),
-                    )
-                    .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
-                    .init();
-            }
+        (Commands::McpStdio, Some(nb), false) => {
+            registry
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .with_writer(nb)
+                        .with_ansi(false),
+                )
+                .init();
+            eprintln!("MCP stdio logging to .exomonad/logs/sidecar.log.YYYY-MM-DD (daily rotation)");
+        }
+
+        // MCP stdio without File Logging (fallback to stderr)
+        (Commands::McpStdio, None, true) => {
+            registry
+                .with(tracing_subscriber::fmt::layer().json().with_writer(std::io::stderr))
+                .init();
+        }
+        (Commands::McpStdio, None, false) => {
+            registry
+                .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+                .init();
+        }
+
+        // Other commands with File Logging
+        (_, Some(nb), true) => {
+            registry
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .json()
+                        .with_writer(nb)
+                        .with_ansi(false),
+                )
+                .with(tracing_subscriber::fmt::layer().json().with_writer(std::io::stderr))
+                .init();
+        }
+        (_, Some(nb), false) => {
+            registry
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .with_writer(nb)
+                        .with_ansi(false),
+                )
+                .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+                .init();
+        }
+
+        // Other commands without File Logging
+        (_, None, true) => {
+            registry
+                .with(tracing_subscriber::fmt::layer().json().with_writer(std::io::stderr))
+                .init();
+        }
+        (_, None, false) => {
+            registry
+                .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+                .init();
         }
     }
 
-    Some(guard)
+    guard
 }
 
 fn get_agent_id_from_env() -> String {
