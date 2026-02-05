@@ -1063,24 +1063,44 @@ project_dir = "../../.."
                     r###"{{
   "enableAllProjectMcpServers": true,
   "hooks": {{
+    "PreToolUse": [
+      {{
+        "hooks": [
+          {{
+            "type": "command",
+            "command": "{sidecar} hook pre-tool-use"
+          }}
+        ]
+      }}
+    ],
     "SubagentStop": [
       {{
         "hooks": [
           {{
             "type": "command",
-            "command": "{} hook subagent-stop"
+            "command": "{sidecar} hook subagent-stop"
+          }}
+        ]
+      }}
+    ],
+    "SessionEnd": [
+      {{
+        "hooks": [
+          {{
+            "type": "command",
+            "command": "{sidecar} hook session-end"
           }}
         ]
       }}
     ]
   }}
 }} "###,
-                    sidecar_path
+                    sidecar = sidecar_path
                 );
                 fs::write(claude_dir.join("settings.local.json"), settings_content).await?;
                 tracing::info!(
                     worktree = %worktree_path.display(),
-                    "Wrote .claude/settings.local.json with SubagentStop hook"
+                    "Wrote .claude/settings.local.json with PreToolUse, SubagentStop, SessionEnd hooks"
                 );
             }
             AgentType::Gemini => {
