@@ -46,11 +46,15 @@ No `--wasm` argument needed! The `role` field in `.exomonad/config.toml` determi
 
 **Example `.exomonad/config.toml`:**
 ```toml
-role = "tl"
+default_role = "tl"
 project_dir = "."
 ```
 
 This will load `~/.exomonad/wasm/wasm-guest-tl.wasm`.
+
+**Config hierarchy:**
+- `config.toml` uses `default_role` (project-wide default)
+- `config.local.toml` uses `role` (worktree-specific override)
 
 ## MCP Server
 
@@ -71,7 +75,7 @@ Add `.mcp.json` to your project root:
 }
 ```
 
-**Note:** The WASM plugin path is auto-resolved from `.exomonad/config.toml`'s `role` field.
+**Note:** The WASM plugin path is auto-resolved from the config's role (from `config.local.toml`) or default_role (from `config.toml`).
 
 ### Available Tools
 
@@ -101,7 +105,7 @@ The spawn tools (`spawn_agents`, `cleanup_agents`, `list_agents`) require:
 | Variable | Required | Purpose |
 |----------|----------|---------|
 | `RUST_LOG` | No | Tracing log level |
-| `EXOMONAD_WASM_PATH` | No | **DEPRECATED** - Use `.exomonad/config.toml` with `role` field instead |
+| `EXOMONAD_WASM_PATH` | No | **DEPRECATED** - Use `.exomonad/config.toml` with `default_role` field instead |
 
 ## Effect Boundary (WASM)
 
@@ -165,7 +169,7 @@ nix develop .#wasm -c wasm32-wasi-cabal build --project-file=cabal.project.wasm 
 # Unit tests
 cargo test -p exomonad-sidecar
 
-# E2E hook test (requires .exomonad/config.toml with role field and built WASM)
+# E2E hook test (requires .exomonad/config.toml with default_role field and built WASM)
 echo '{"session_id":"test","hook_event_name":"PreToolUse","tool_name":"Write","transcript_path":"/tmp/t.jsonl","cwd":"/","permission_mode":"default"}' | \
   ./target/debug/exomonad-sidecar hook pre-tool-use
 ```

@@ -49,7 +49,7 @@ Human in Zellij session
 
 Each agent:
 - Runs in isolated git worktree (`.exomonad/worktrees/gh-{issue}-{title}-{agent}/`)
-- Has own `.exomonad/config.local.toml` (role="dev", wasm_path="...")
+- Has own `.exomonad/config.toml` (default_role="dev")
 - Has own `.mcp.json` (pointing to `exomonad mcp-stdio`)
 - Gets full issue context via agent-specific CLI argument:
   - `claude --prompt '...'` for Claude agents
