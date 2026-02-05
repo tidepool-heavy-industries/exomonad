@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PluginState {
     Idle,
+    Running,
     Thinking,
+    Waiting,
     Error,
 }
 
@@ -22,7 +24,9 @@ impl std::fmt::Display for PluginState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PluginState::Idle => write!(f, "IDLE"),
+            PluginState::Running => write!(f, "RUNNING"),
             PluginState::Thinking => write!(f, "THINKING"),
+            PluginState::Waiting => write!(f, "WAITING"),
             PluginState::Error => write!(f, "ERROR"),
         }
     }
