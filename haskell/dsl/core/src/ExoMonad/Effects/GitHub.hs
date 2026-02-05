@@ -53,8 +53,6 @@ module ExoMonad.Effects.GitHub
 
     -- * Types - Core
     Repo (..),
-    authorLogin,
-    authorName,
     defaultRepo,
     Author (..),
     Comment (..),

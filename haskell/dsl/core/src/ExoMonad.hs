@@ -47,7 +47,6 @@ where
 import Data.Aeson (Value, toJSON)
 import Data.Kind (Type)
 import ExoMonad.Effect
-import ExoMonad.Prelude (Eff)
 import Polysemy (Member, Sem)
 import Prelude hiding (State)
 

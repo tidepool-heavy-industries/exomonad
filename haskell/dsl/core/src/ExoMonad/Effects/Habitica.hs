@@ -21,14 +21,6 @@ module ExoMonad.Effects.Habitica
     scoreTask,
     getTasks,
 
-    -- * Try Variants (return Either instead of crashing)
-    fetchTodosTry,
-    addChecklistItemTry,
-    createTodoTry,
-    getUserTry,
-    scoreTaskTry,
-    getTasksTry,
-
     -- * Re-exported Types
     TaskType (..),
     Direction (..),

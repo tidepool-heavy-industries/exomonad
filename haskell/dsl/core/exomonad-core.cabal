@@ -48,6 +48,8 @@ library
       exposed-modules:
         -- Unified re-export module
         ExoMonad.Effects
+        -- Native-only utilities
+        ExoMonad.Path
         -- Native-only tooling
         ExoMonad.Schema
         ExoMonad.Schema.TH

@@ -76,6 +76,7 @@ import ExoMonad.Effects.LLMProvider
     ContentBlock (..),
     LLMComplete,
     LLMError (..),
+    LLMProvider (..),
     SProvider (SAnthropic),
     ThinkingBudget (..),
     completeTry,
@@ -132,14 +133,14 @@ defaultInterpretConfig =
 --   $ yourEffectfulCode
 -- @
 runLLMCall ::
-  (Member LLMComplete es, Member (Embed IO) es) =>
+  (Member (LLMComplete 'Anthropic) es, Member (Embed IO) es) =>
   Sem (LLMCall ': es) a ->
   Sem es a
 runLLMCall = runLLMCallWith defaultInterpretConfig
 
 -- | Run the LLMCall effect with custom configuration.
 runLLMCallWith ::
-  (Member LLMComplete es, Member (Embed IO) es) =>
+  (Member (LLMComplete 'Anthropic) es, Member (Embed IO) es) =>
   InterpretConfig ->
   Sem (LLMCall ': es) a ->
   Sem es a
@@ -168,7 +169,7 @@ runLLMCallWith interpCfg = interpret $ \case
 -- | Run the LLMCall effect with tool support.
 runLLMCallWithTools ::
   forall tools es a.
-  ( Member LLMComplete es,
+  ( Member (LLMComplete 'Anthropic) es,
     Member (Embed IO) es,
     ToolRecord tools
   ) =>
@@ -208,7 +209,7 @@ runLLMCallWithTools toolRecord = interpret $ \case
 -- | Run with tool loop support.
 runToolLoop ::
   forall tools out es.
-  ( Member LLMComplete es,
+  ( Member (LLMComplete 'Anthropic) es,
     Member (Embed IO) es,
     StructuredOutput out,
     ToolRecord tools
@@ -292,7 +293,7 @@ formatToolResults results originalMsg =
 -- | Parse response as structured output with nudge retries.
 parseResponse ::
   forall out es.
-  ( Member LLMComplete es,
+  ( Member (LLMComplete 'Anthropic) es,
     Member (Embed IO) es,
     StructuredOutput out
   ) =>
@@ -337,7 +338,7 @@ parseResponse nudgesLeft cfg userMsg toolSchemas response = do
 -- | Run with nudge retries for schema conformance.
 runWithNudge ::
   forall out es.
-  ( Member LLMComplete es,
+  ( Member (LLMComplete 'Anthropic) es,
     Member (Embed IO) es,
     StructuredOutput out
   ) =>
@@ -387,7 +388,7 @@ runWithNudge nudgesLeft cfg userMsg toolSchemas = do
 -- | Send a nudge message and retry.
 nudgeAndRetry ::
   forall out es.
-  ( Member LLMComplete es,
+  ( Member (LLMComplete 'Anthropic) es,
     Member (Embed IO) es,
     StructuredOutput out
   ) =>
