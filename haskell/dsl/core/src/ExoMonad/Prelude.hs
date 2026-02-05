@@ -9,8 +9,6 @@ module ExoMonad.Prelude
     Member,
     send,
     interpret,
-    sendM,
-    LastMember,
 
     -- * ExoMonad Effects
     LLM,
@@ -116,22 +114,3 @@ import Prelude hiding
 
 -- | Alias for Polysemy's 'Sem' to maintain compatibility
 type Eff = Sem
-
--- | Compatibility alias for @'Member' ('Embed' m)@ to mimic the traditional
---   @LastMember@ constraint from earlier versions.
---
---   This is a temporary shim to preserve the old API surface while the
---   codebase migrates to using @Member (Embed m)@ directly. New code
---   should prefer the more explicit @Member (Embed m) r@ constraint.
---   This alias may be deprecated and removed in a future major release.
-type LastMember m r = Member (Embed m) r
-
--- | Compatibility alias for 'embed' to mimic the traditional @sendM@ helper
---   from earlier versions.
---
---   This is a temporary shim to preserve the old API surface while the
---   codebase migrates to using 'embed' directly. New code should prefer
---   calling 'embed' rather than 'sendM'. This alias may be deprecated and
---   removed in a future major release.
-sendM :: (Member (Embed m) r) => m a -> Sem r a
-sendM = embed

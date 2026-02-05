@@ -1,8 +1,7 @@
 -- | Core types for typed LLM invocation.
 --
 -- This module provides the building blocks for type-safe LLM calls
--- within tool handlers. Unlike the graph machinery, these types are
--- standalone and can be used directly.
+-- within tool handlers.
 --
 -- = Design
 --

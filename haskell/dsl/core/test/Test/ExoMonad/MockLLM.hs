@@ -5,7 +5,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeOperators #-}
 
--- | Mock LLM interpreters for testing graph logic without real LLM calls.
+-- | Mock LLM interpreters for testing without real LLM calls.
 --
 -- This module provides several mock interpreters for the LLM effect:
 --
@@ -22,9 +22,9 @@
 --     result.status \`shouldBe\` "ok"
 --
 --   it "verifies prompts sent" $ do
---     let (requests, _) = run $ runMockLLMCapture (object []) $ runGraph handlers input
+--     let (requests, _) = run $ runMockLLMCapture (object []) myComputation
 --     case requests of
---       (req:_) -> req.lrSystemPrompt \`shouldContain\` "classify"
+--       (req:_) -> req.lrSystemPrompt \`shouldContain\` "expected text"
 --       []      -> expectationFailure "expected at least one request"
 -- @
 module Test.ExoMonad.MockLLM
@@ -178,10 +178,10 @@ runMockLLMMatched matchers defaultOutput = interpret $ \case
 -- passed to the LLM during a computation.
 --
 -- @
--- let (requests, result) = run $ runMockLLMCapture (object []) $ runGraph handlers input
+-- let (requests, result) = run $ runMockLLMCapture (object []) myComputation
 -- length requests \`shouldBe\` 2
 -- case requests of
---   (req:_) -> req.lrSystemPrompt \`shouldContain\` "classify"
+--   (req:_) -> req.lrSystemPrompt \`shouldContain\` "expected text"
 --   []      -> expectationFailure "expected at least one request"
 -- @
 runMockLLMCapture ::

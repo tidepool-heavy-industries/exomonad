@@ -16,13 +16,12 @@
 -- | Unified logging effect for ExoMonad.
 --
 -- This module provides a single 'Log' effect that all logging dispatches to.
--- Domain-specific helpers (graph transitions, LLM calls, state changes) emit
--- structured fields that interpreters can format as JSON or human-readable.
+-- Domain-specific helpers (LLM calls, state changes) emit structured fields
+-- that interpreters can format as JSON or human-readable.
 --
 -- == Greppable Patterns
 --
 -- @
--- grep "GRAPH" latest.log        # Transitions
 -- grep "STATE\\." latest.log     # State changes
 -- grep "LLM\\." latest.log       # LLM calls
 -- grep "ERROR" latest.log        # Errors
@@ -52,14 +51,12 @@ module ExoMonad.Effect.Log
     logErrorWith,
 
     -- * Domain Event Types
-    GraphTransitionInfo (..),
     StateSnapshotInfo (..),
     LLMRequestInfo (..),
     LLMResponseInfo (..),
     ErrorContextInfo (..),
 
     -- * Domain Event Helpers
-    logGraph,
     logState,
     logLLMRequest,
     logLLMResponse,
@@ -171,19 +168,6 @@ runLog minLevel = interpret $ \case
 -- DOMAIN EVENT TYPES
 -- ══════════════════════════════════════════════════════════════
 
--- | Graph transition info.
---
--- Logged automatically by instrumented dispatch.
-data GraphTransitionInfo = GraphTransitionInfo
-  { fromNode :: Text,
-    toNode :: Text,
-    -- | Input to next handler (JSON-encoded)
-    payload :: Value
-  }
-  deriving (Show, Generic)
-
-instance ToJSON GraphTransitionInfo
-
 -- | State snapshot with diff info.
 --
 -- Logged after each transition for changed fields.
@@ -250,24 +234,6 @@ instance ToJSON ErrorContextInfo
 -- ══════════════════════════════════════════════════════════════
 -- DOMAIN EVENT HELPERS
 -- ══════════════════════════════════════════════════════════════
-
--- | Log a graph transition.
---
--- Produces greppable output like: @GRAPH entry → classify@
---
--- @
--- logGraph GraphTransitionInfo
---   { fromNode = "entry"
---   , toNode = "classify"
---   , payload = toJSON input
---   }
--- @
-logGraph :: (Member Log effs) => GraphTransitionInfo -> Sem effs ()
-logGraph info =
-  logInfoWith
-    ("GRAPH " <> info.fromNode <> " → " <> info.toNode)
-    [ ("payload", info.payload)
-    ]
 
 -- | Log a state field change.
 logState :: (Member Log effs) => StateSnapshotInfo -> Sem effs ()

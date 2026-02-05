@@ -84,7 +84,6 @@ import ExoMonad.Effects.LLMProvider
 import ExoMonad.LLM.Effect (LLMCall (..))
 import ExoMonad.LLM.Tools (ToolDispatchError (..), ToolRecord (dispatchTool))
 import ExoMonad.LLM.Types
-import ExoMonad.Prelude (LastMember)
 import ExoMonad.StructuredOutput (StructuredOutput (..), formatDiagnostic)
 import Polysemy (Member, Sem, embed, interpret)
 import Polysemy.Embed (Embed)

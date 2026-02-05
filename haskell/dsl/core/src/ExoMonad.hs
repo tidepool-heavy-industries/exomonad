@@ -116,7 +116,7 @@ type AgentM s evt extra = Eff (extra ++ BaseEffects s evt)
 -- at the interpretation boundary. This enables WASM compilation where
 -- IO is provided by the host environment.
 --
--- Interpreters like @runRandom@ require @LastMember IO effs@, but that constraint
+-- Interpreters like @runRandom@ require @Member (Embed IO) effs@, but that constraint
 -- applies to the /remaining/ stack after interpretation, not the agent's
 -- visible stack.
 type BaseEffects s evt =

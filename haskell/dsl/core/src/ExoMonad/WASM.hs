@@ -2,12 +2,8 @@
 -- Module: ExoMonad.WASM
 -- Description: Minimal re-exports for WASM builds
 --
--- This module provides a minimal surface area for WASM builds, excluding:
--- - Documentation generators (Mermaid, Docs)
--- - Example graphs (Graph.Example)
--- - Dev-only types (Anthropic.Types, Question, Tool, Schema, Delta)
---
--- Expected savings: ~500 KB in WASM binary size.
+-- This module provides a minimal surface area for WASM builds, excluding
+-- native-only modules like documentation generators and dev-only types.
 --
 -- Usage in WASM packages:
 -- @

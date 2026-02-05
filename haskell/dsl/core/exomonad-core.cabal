@@ -135,7 +135,7 @@ library
         TypeOperators
         QuasiQuotes
         TemplateHaskell
-        -- Graph DSL type-level programming extensions
+        -- Type-level programming extensions
         AllowAmbiguousTypes
         FlexibleContexts
         FlexibleInstances
@@ -148,7 +148,7 @@ library
 
 -- test-llm executable moved to exomonad-platform (requires HTTP client)
 
-test-suite graph-validation-tests
+test-suite exomonad-core-tests
     import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          Spec.hs

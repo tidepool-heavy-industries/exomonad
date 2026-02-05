@@ -29,7 +29,7 @@ module ExoMonad.Effect.Types
     DecisionLog (..),
     TUI (..),
 
-    -- * Return Effect (graph termination)
+    -- * Return Effect
     Return (..),
     returnValue,
     runReturn,
@@ -78,7 +78,7 @@ module ExoMonad.Effect.Types
     withImages,
 
     -- * LLM Error Types
-    LlmError (..),
+    CallError (..),
 
     -- * Result Types
     TurnResult (..),
@@ -131,10 +131,8 @@ module ExoMonad.Effect.Types
     ThinkingContent (..),
     RedactedThinking (..),
 
-    -- * Polysemy Compatibility (breaks import cycle with ExoMonad.Prelude)
+    -- * Polysemy Compatibility
     Eff,
-    LastMember,
-    sendM,
   )
 where
 
@@ -164,6 +162,7 @@ import ExoMonad.Effect.Decision.Types
     DecisionContext (..),
     DecisionTrace (..),
   )
+import ExoMonad.LLM.Types (CallError (..))
 import ExoMonad.Effect.Log
 import ExoMonad.Effect.TUI
   ( PopupDefinition (..),
@@ -181,13 +180,8 @@ import System.Random (randomRIO)
 import Prelude hiding (State, get, gets, modify, modifyIORef, newIORef, put, readIORef, runState, writeIORef)
 import Prelude qualified as P
 
--- | Compatibility type aliases - these break the import cycle with ExoMonad.Prelude
+-- | Compatibility alias for Polysemy's Sem
 type Eff = Sem
-
-type LastMember m r = Member (Embed m) r
-
-sendM :: (Member (Embed m) r) => m a -> Sem r a
-sendM = embed
 
 -- ══════════════════════════════════════════════════════════════
 -- STATE EFFECT
@@ -384,10 +378,10 @@ toolErrorToText = \case
 withImages :: Text -> [ImageSource] -> NonEmpty ContentBlock
 withImages text images = Text {text = text} :| map Image images
 
--- | Run a turn and throw LlmError on failure.
+-- | Run a turn and throw CallError on failure.
 runTurn ::
   forall output effs.
-  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  (Member LLM effs, Member (Error CallError) effs, StructuredOutput output) =>
   Text ->
   Text ->
   Value ->
@@ -398,7 +392,7 @@ runTurn systemPrompt userAction =
 
 runTurnContent ::
   forall output effs.
-  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  (Member LLM effs, Member (Error CallError) effs, StructuredOutput output) =>
   Text ->
   NonEmpty ContentBlock ->
   Value ->
@@ -411,12 +405,12 @@ runTurnContent systemPrompt userContent schema tools = do
     Right parsed -> pure tr {trOutput = parsed}
     Left diag ->
       throw $
-        LlmParseFailed (formatDiagnostic diag)
+        CallParseFailed (formatDiagnostic diag)
 
--- | Make an LLM call that throws LlmError on failure.
+-- | Make an LLM call that throws CallError on failure.
 llmCall ::
   forall output effs.
-  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  (Member LLM effs, Member (Error CallError) effs, StructuredOutput output) =>
   Text ->
   Text ->
   Value ->
@@ -425,10 +419,10 @@ llmCall systemPrompt userInput schema = do
   tr <- runTurn @output systemPrompt userInput schema []
   pure tr.trOutput
 
--- | Make an LLM call with tool support, throwing LlmError on failure.
+-- | Make an LLM call with tool support, throwing CallError on failure.
 llmCallWithTools ::
   forall output effs.
-  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  (Member LLM effs, Member (Error CallError) effs, StructuredOutput output) =>
   Text ->
   Text ->
   Value ->
@@ -436,30 +430,10 @@ llmCallWithTools ::
   Sem effs (TurnResult output)
 llmCallWithTools = runTurn @output
 
--- | Structured error type for LLM call failures.
-data LlmError
-  = -- | Rate limit hit, retry later
-    LlmRateLimited
-  | -- | Request timed out
-    LlmTimeout
-  | -- | Input too long for context window
-    LlmContextTooLong
-  | -- | Schema parsing failed (includes error message)
-    LlmParseFailed Text
-  | -- | Turn was broken by tool (unexpected)
-    LlmTurnBroken Text
-  | -- | Network/connection failure
-    LlmNetworkError Text
-  | -- | Invalid API key
-    LlmUnauthorized
-  | -- | Other errors with message
-    LlmOther Text
-  deriving (Show, Eq, Generic, FromJSON, ToJSON)
-
 -- | Deprecated in favor of llmCall
 llmCallEither ::
   forall output effs.
-  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  (Member LLM effs, Member (Error CallError) effs, StructuredOutput output) =>
   Text ->
   Text ->
   Value ->
@@ -472,11 +446,11 @@ llmCallEither systemPrompt userInput schema =
 -- | Deprecated in favor of llmCall
 llmCallStructured ::
   forall output effs.
-  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  (Member LLM effs, Member (Error CallError) effs, StructuredOutput output) =>
   Text ->
   Text ->
   Value ->
-  Sem effs (Either LlmError output)
+  Sem effs (Either CallError output)
 llmCallStructured systemPrompt userInput schema =
   catch
     (Right <$> llmCall @output systemPrompt userInput schema)
@@ -485,7 +459,7 @@ llmCallStructured systemPrompt userInput schema =
 -- | Deprecated in favor of llmCallWithTools
 llmCallEitherWithTools ::
   forall output effs.
-  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  (Member LLM effs, Member (Error CallError) effs, StructuredOutput output) =>
   Text ->
   Text ->
   Value ->
@@ -499,12 +473,12 @@ llmCallEitherWithTools systemPrompt userInput schema tools =
 -- | Deprecated in favor of llmCallWithTools
 llmCallStructuredWithTools ::
   forall output effs.
-  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  (Member LLM effs, Member (Error CallError) effs, StructuredOutput output) =>
   Text ->
   Text ->
   Value ->
   [Value] ->
-  Sem effs (Either LlmError output)
+  Sem effs (Either CallError output)
 llmCallStructuredWithTools systemPrompt userInput schema tools =
   catch
     (Right . (.trOutput) <$> llmCallWithTools @output systemPrompt userInput schema tools)
