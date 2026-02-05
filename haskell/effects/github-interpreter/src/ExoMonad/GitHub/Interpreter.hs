@@ -63,6 +63,7 @@ import ExoMonad.Effects.SocketClient
   )
 import Polysemy (Member, Sem, embed, interpret)
 import Polysemy.Embed (Embed)
+import Polysemy.Error (Error, throw)
 import System.Directory (doesFileExist)
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -88,27 +89,36 @@ defaultGitHubConfig =
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Run GitHub effects using the socket client.
-runGitHubIO :: (Member (Embed IO) r) => GitHubConfig -> Sem (GitHub ': r) a -> Sem r a
+--
+-- Errors from the socket client are thrown via the 'Error GitHubError' effect.
+runGitHubIO :: (Member (Embed IO) r, Member (Error GitHubError) r) => GitHubConfig -> Sem (GitHub ': r) a -> Sem r a
 runGitHubIO (GitHubSocketConfig path) = interpret $ \case
   -- Issue operations
-  CreateIssue input -> embed $ socketCreateIssue path input
-  UpdateIssue (Repo repo) num input -> embed $ socketUpdateIssue path repo num input
-  CloseIssue (Repo repo) num -> embed $ socketCloseIssue path repo num
-  ReopenIssue (Repo repo) num -> embed $ socketReopenIssue path repo num
-  AddIssueLabel (Repo repo) num label -> embed $ socketAddIssueLabel path repo num label
-  RemoveIssueLabel (Repo repo) num label -> embed $ socketRemoveIssueLabel path repo num label
-  AddIssueAssignee (Repo repo) num assignee -> embed $ socketAddIssueAssignee path repo num assignee
-  RemoveIssueAssignee (Repo repo) num assignee -> embed $ socketRemoveIssueAssignee path repo num assignee
-  GetIssue (Repo repo) num includeComments -> embed $ socketGetIssue path repo num includeComments
-  ListIssues (Repo repo) filt -> embed $ socketListIssues path repo filt
+  CreateIssue input -> embedEither $ socketCreateIssue path input
+  UpdateIssue (Repo repo) num input -> embedEither $ socketUpdateIssue path repo num input
+  CloseIssue (Repo repo) num -> embedEither $ socketCloseIssue path repo num
+  ReopenIssue (Repo repo) num -> embedEither $ socketReopenIssue path repo num
+  AddIssueLabel (Repo repo) num label -> embedEither $ socketAddIssueLabel path repo num label
+  RemoveIssueLabel (Repo repo) num label -> embedEither $ socketRemoveIssueLabel path repo num label
+  AddIssueAssignee (Repo repo) num assignee -> embedEither $ socketAddIssueAssignee path repo num assignee
+  RemoveIssueAssignee (Repo repo) num assignee -> embedEither $ socketRemoveIssueAssignee path repo num assignee
+  GetIssue (Repo repo) num includeComments -> embedEither $ socketGetIssue path repo num includeComments
+  ListIssues (Repo repo) filt -> embedEither $ socketListIssues path repo filt
   -- PR operations
-  CreatePR spec -> embed $ socketCreatePR path spec
-  GetPullRequest (Repo repo) num includeDetails -> embed $ socketGetPR path repo num includeDetails
-  ListPullRequests (Repo repo) filt -> embed $ socketListPullRequests path repo filt
-  GetPullRequestReviews (Repo repo) num -> embed $ socketGetPullRequestReviews path repo num
-  GetDiscussion (Repo repo) num -> embed $ socketGetDiscussion path repo num
+  CreatePR spec -> embedEither $ socketCreatePR path spec
+  GetPullRequest (Repo repo) num includeDetails -> embedEither $ socketGetPR path repo num includeDetails
+  ListPullRequests (Repo repo) filt -> embedEither $ socketListPullRequests path repo filt
+  GetPullRequestReviews (Repo repo) num -> embedEither $ socketGetPullRequestReviews path repo num
+  GetDiscussion (Repo repo) num -> embedEither $ socketGetDiscussion path repo num
   -- Auth
   CheckAuth -> embed $ socketCheckAuth path
+  where
+    embedEither :: (Member (Embed IO) r', Member (Error GitHubError) r') => IO (Either GitHubError a') -> Sem r' a'
+    embedEither action = do
+      result <- embed action
+      case result of
+        Left err -> throw err
+        Right val -> pure val
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SOCKET FUNCTIONS

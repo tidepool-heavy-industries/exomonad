@@ -439,7 +439,6 @@ eventToLabels job event =
       span = Nothing -- Filled in by interpreter
     }
   where
-    eventType (GraphTransition {}) = "graph_transition"
     eventType (LLMCallEvent {}) = "llm_call"
     eventType (UserActionEvent {}) = "user_action"
     eventType (EffectExecutionEvent {}) = "effect_execution"

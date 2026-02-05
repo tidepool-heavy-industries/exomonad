@@ -63,7 +63,9 @@ test-suite llm-interpreter-tests
         text >= 2.0 && < 3,
         vector >= 0.13 && < 1,
         hspec >= 2.10 && < 3,
-        aeson-pretty >= 0.8 && < 1
+        aeson-pretty >= 0.8 && < 1,
+        polysemy >= 1.9,
+        polysemy-plugin >= 0.4
     build-tool-depends:
         hspec-discover:hspec-discover >= 2.10 && < 3
     ghc-options: -threaded -rtsopts -with-rtsopts=-N

@@ -120,19 +120,6 @@ export OTLP_USER="123456"
 export OTLP_TOKEN="glc_..."
 ```
 
-## LLM Tracing via Interposition
-
-Transparently trace LLM calls without modifying effect stack:
-
-```haskell
-import ExoMonad.Observability.Interpreter (interposeWithLLMTracing)
-
--- Wrap any LLM computation with automatic tracing
-tracedProgram = interposeWithLLMTracing myProgram
-
--- LLM calls now automatically emit spans to Tempo
-```
-
 ## Key Modules
 
 | Module | Purpose |

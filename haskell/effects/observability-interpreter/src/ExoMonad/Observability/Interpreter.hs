@@ -27,13 +27,6 @@ module ExoMonad.Observability.Interpreter
     runObservabilityWithContext,
     runObservabilityWithConfig,
 
-    -- * Tracing via Interposition
-
-    -- | Use @interpose@-based tracing to transparently wrap effects without
-    -- removing them from the stack. This enables composable tracing that can
-    -- be added or removed without changing the effect stack type.
-    interposeWithLLMTracing,
-
     -- * Configuration
     LokiConfig (..),
     OTLPConfig (..),
@@ -63,14 +56,7 @@ import Data.IORef (modifyIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
-import ExoMonad.Effect.Types (LLM (..), TurnOutcome (..))
-import ExoMonad.Effects.Observability
-  ( Observability (..),
-    SpanAttribute (..),
-    SpanKind (..),
-    endSpan,
-    startSpan,
-  )
+import ExoMonad.Effects.Observability (Observability (..))
 import ExoMonad.Effects.SocketClient
   ( ServiceRequest (..),
     ServiceResponse (..),
@@ -79,9 +65,8 @@ import ExoMonad.Effects.SocketClient
   )
 import ExoMonad.Observability.Types
 import Network.HTTP.Req
-import Polysemy (Member, Sem, embed, intercept, interpret)
+import Polysemy (Member, Sem, embed, interpret)
 import Polysemy.Embed (Embed)
-import Polysemy.Internal (send)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- LOKI HTTP CLIENT
@@ -396,63 +381,3 @@ runObservabilityWithConfig ctx config = interpret $ \case
                 }
          in newS : rest
 
--- ════════════════════════════════════════════════════════════════════════════
--- TRACING VIA INTERPOSITION
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Intercept LLM effects and wrap them in spans.
---
--- This uses Polysemy's @intercept@ to transparently trace LLM calls
--- without removing the LLM effect from the stack. The original effect is
--- re-sent after wrapping, so the actual LLM handler elsewhere in the stack
--- still executes the call.
---
--- = The Interpose Pattern
---
--- Unlike @interpret@ which removes an effect from the stack, @intercept@
--- intercepts effects while leaving them in place:
---
--- @
--- -- interpret: removes effect, handles completely
--- interpret :: (e a -> Sem r a) -> Sem (e ': r) a -> Sem r a
---
--- -- intercept: intercepts effect, can re-send it
--- intercept :: Member e r => (e a -> Sem r a) -> Sem r a -> Sem r a
--- @
---
--- = Usage
---
--- Add tracing to any computation that uses LLM effects:
---
--- @
--- -- Without tracing
--- result <- runLLM config $ myAgent input
---
--- -- With tracing (just wrap the computation)
--- result <- runLLM config $ interposeWithLLMTracing $ myAgent input
--- @
-interposeWithLLMTracing ::
-  (Member LLM r, Member Observability r) =>
-  Sem r a ->
-  Sem r a
-interposeWithLLMTracing = intercept $ \case
-  op@(RunTurnOp systemPrompt _userContent _schema tools) -> do
-    -- Start span before LLM call
-    _ <-
-      startSpan
-        "llm:turn"
-        SpanClient
-        [ AttrText "llm.system_prompt_length" (T.pack $ show $ T.length systemPrompt),
-          AttrInt "llm.tool_count" (fromIntegral $ length tools)
-        ]
-
-    -- Re-send the original effect to the actual handler
-    result <- send op
-
-    -- End span after LLM call completes
-    let isError = case result of
-          TurnBroken _ -> True
-          _ -> False
-    endSpan isError []
-
-    pure result
