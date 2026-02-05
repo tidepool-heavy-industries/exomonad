@@ -284,43 +284,7 @@ Human in Zellij session
 
 Ask the specialist directly instead of guessing. They have authoritative knowledge about Claude Code internals, hook lifecycle, and best practices.
 
-In `.claude/settings.local.json`:
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "exomonad-sidecar hook pre-tool-use"
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "exomonad-sidecar hook session-end"
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "exomonad-sidecar hook subagent-stop"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
+Hook configuration is **auto-generated per worktree** by `write_context_files()` in `agent_control.rs` during `spawn_agents`. Each spawned Claude agent gets `.claude/settings.local.json` with PreToolUse, SubagentStop, and SessionEnd hooks. Gemini agents get `.gemini/settings.json` with AfterAgent hooks. Do not manually create hook settings — they are generated at spawn time.
 
 **MCP server configuration (`.mcp.json`):**
 ```json
@@ -328,7 +292,7 @@ In `.claude/settings.local.json`:
   "mcpServers": {
     "exomonad": {
       "type": "stdio",
-      "command": "exomonad-sidecar",
+      "command": "exomonad",
       "args": ["mcp-stdio"]
     }
   }
@@ -360,12 +324,12 @@ just install-all
 # Individual commands:
 just wasm tl   # Build and install TL WASM plugin
 just wasm dev  # Build and install dev WASM plugin
-cd rust && cargo build --release -p exomonad-sidecar  # Build sidecar
+cd rust && cargo build --release -p exomonad  # Build sidecar
 ```
 
 **What `just install-all-dev` does:**
-1. Builds exomonad-sidecar (debug mode, fast incremental builds)
-2. Copies binary to `~/.cargo/bin/exomonad-sidecar`
+1. Builds exomonad (debug mode, fast incremental builds)
+2. Copies binary to `~/.cargo/bin/exomonad`
 3. Builds both WASM plugins (dev and tl) using nix
 4. Installs to `~/.exomonad/wasm/wasm-guest-{dev,tl}.wasm`
 
