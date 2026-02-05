@@ -1,2 +1,2 @@
-default_role = "tl"
-agent_role = "dev"
+role = "dev"
+project_dir = "."

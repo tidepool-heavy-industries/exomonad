@@ -39,19 +39,13 @@ pub fn get_current_branch() -> Result<String> {
 /// assert_eq!(extract_agent_id("main"), None);
 /// ```
 pub fn extract_agent_id(s: &str) -> Option<String> {
-    if !s.starts_with("gh-") {
-        return None;
-    }
-    let rest = &s[3..];
-    // Split by '/' first (branch convention)
-    if let Some(id) = rest.split('/').next() {
+    // Look for "gh-" prefix anywhere in the string (component or branch name)
+    if let Some(idx) = s.find("gh-") {
+        let rest = &s[idx + 3..];
+        // The ID is the alphanumeric part following "gh-"
+        let id: String = rest.chars().take_while(|c| c.is_alphanumeric()).collect();
         if !id.is_empty() {
-            // Also split by '-' (worktree convention)
-            if let Some(id_final) = id.split('-').next() {
-                if !id_final.is_empty() {
-                    return Some(format!("gh-{}", id_final));
-                }
-            }
+            return Some(format!("gh-{}", id));
         }
     }
     None

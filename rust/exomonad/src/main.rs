@@ -102,24 +102,31 @@ async fn handle_hook(
 
     // Emit HookReceived event
     let agent_id_str = get_agent_id_from_env();
-    match exomonad_ui_protocol::AgentId::try_from(agent_id_str.clone()) {
-        Ok(agent_id) => {
-            let event = exomonad_ui_protocol::AgentEvent::HookReceived {
-                agent_id,
-                hook_type: event_type.to_string(),
-                timestamp: zellij_events::now_iso8601(),
-            };
-            if let Err(e) = zellij_events::emit_event(&event) {
-                warn!("Failed to emit hook:received event: {}", e);
+    if agent_id_str != "unknown" {
+        match exomonad_ui_protocol::AgentId::try_from(agent_id_str.clone()) {
+            Ok(agent_id) => {
+                let event = exomonad_ui_protocol::AgentEvent::HookReceived {
+                    agent_id,
+                    hook_type: event_type.to_string(),
+                    timestamp: zellij_events::now_iso8601(),
+                };
+                if let Err(e) = zellij_events::emit_event(&event) {
+                    warn!("Failed to emit hook:received event: {}", e);
+                }
             }
+            Err(e) => warn!("Invalid agent_id '{}': {}", agent_id_str, e),
         }
-        Err(e) => warn!("Invalid agent_id '{}': {}", agent_id_str, e),
     }
 
     // Parse the hook input and inject runtime
     let mut hook_input: HookInput =
         serde_json::from_str(&stdin_content).context("Failed to parse hook input")?;
     hook_input.runtime = Some(runtime);
+    hook_input.agent_id = if agent_id_str != "unknown" {
+        Some(agent_id_str.clone())
+    } else {
+        None
+    };
 
     // Normalize CLI-specific hook types to internal abstractions before WASM.
     // Both Claude's Stop and Gemini's AfterAgent represent "main agent stop".
@@ -149,6 +156,23 @@ async fn handle_hook(
 
     // Handle stop hooks with runtime-specific output translation
     if is_stop_hook {
+        // Emit AgentStopped event BEFORE calling WASM (matching previous behavior)
+        // Only emit if we have a valid agent ID
+        if agent_id_str != "unknown" {
+            match exomonad_ui_protocol::AgentId::try_from(agent_id_str.clone()) {
+                Ok(agent_id) => {
+                    let event = exomonad_ui_protocol::AgentEvent::AgentStopped {
+                        agent_id,
+                        timestamp: zellij_events::now_iso8601(),
+                    };
+                    if let Err(e) = zellij_events::emit_event(&event) {
+                        warn!("Failed to emit agent:stopped event: {}", e);
+                    }
+                }
+                Err(e) => warn!("Invalid agent_id '{}' for stop event: {}", agent_id_str, e),
+            }
+        }
+
         // Call WASM and parse as internal domain type
         let internal_output: InternalStopHookOutput = plugin
             .call("handle_pre_tool_use", &hook_input)
@@ -164,23 +188,25 @@ async fn handle_hook(
             // Emit StopHookBlocked event for SubagentStop hooks
             if event_type == HookEventType::SubagentStop {
                 let agent_id_str = get_agent_id_from_env();
-                let reason = internal_output
-                    .reason
-                    .clone()
-                    .unwrap_or_else(|| "Hook blocked agent stop".to_string());
+                if agent_id_str != "unknown" {
+                    let reason = internal_output
+                        .reason
+                        .clone()
+                        .unwrap_or_else(|| "Hook blocked agent stop".to_string());
 
-                match exomonad_ui_protocol::AgentId::try_from(agent_id_str.clone()) {
-                    Ok(agent_id) => {
-                        let event = exomonad_ui_protocol::AgentEvent::StopHookBlocked {
-                            agent_id,
-                            reason,
-                            timestamp: zellij_events::now_iso8601(),
-                        };
-                        if let Err(e) = zellij_events::emit_event(&event) {
-                            warn!("Failed to emit stop_hook:blocked event: {}", e);
+                    match exomonad_ui_protocol::AgentId::try_from(agent_id_str.clone()) {
+                        Ok(agent_id) => {
+                            let event = exomonad_ui_protocol::AgentEvent::StopHookBlocked {
+                                agent_id,
+                                reason,
+                                timestamp: zellij_events::now_iso8601(),
+                            };
+                            if let Err(e) = zellij_events::emit_event(&event) {
+                                warn!("Failed to emit stop_hook:blocked event: {}", e);
+                            }
                         }
+                        Err(e) => warn!("Invalid agent_id '{}': {}", agent_id_str, e),
                     }
-                    Err(e) => warn!("Invalid agent_id '{}': {}", agent_id_str, e),
                 }
             }
             std::process::exit(2);
@@ -304,11 +330,14 @@ fn get_agent_id_from_env() -> String {
         }
     }
 
-    // Try current directory name (worktree name)
+    // Try components of the current working directory path
     if let Ok(cwd) = std::env::current_dir() {
-        if let Some(name) = cwd.file_name().and_then(|n| n.to_str()) {
-            if let Some(id) = git::extract_agent_id(name) {
-                return id;
+        // Iterate through path components from right to left
+        for component in cwd.components().rev() {
+            if let Some(name) = component.as_os_str().to_str() {
+                if let Some(id) = git::extract_agent_id(name) {
+                    return id;
+                }
             }
         }
     }
@@ -403,17 +432,19 @@ async fn main() -> Result<()> {
 
             // Emit AgentStarted
             let agent_id = get_agent_id_from_env();
-            match exomonad_ui_protocol::AgentId::try_from(agent_id.clone()) {
-                Ok(id) => {
-                    let start_event = exomonad_ui_protocol::AgentEvent::AgentStarted {
-                        agent_id: id,
-                        timestamp: zellij_events::now_iso8601(),
-                    };
-                    if let Err(e) = zellij_events::emit_event(&start_event) {
-                        warn!("Failed to emit agent:started event: {}", e);
+            if agent_id != "unknown" {
+                match exomonad_ui_protocol::AgentId::try_from(agent_id.clone()) {
+                    Ok(id) => {
+                        let start_event = exomonad_ui_protocol::AgentEvent::AgentStarted {
+                            agent_id: id,
+                            timestamp: zellij_events::now_iso8601(),
+                        };
+                        if let Err(e) = zellij_events::emit_event(&start_event) {
+                            warn!("Failed to emit agent:started event: {}", e);
+                        }
                     }
+                    Err(e) => warn!("Invalid agent_id '{}': {}", agent_id, e),
                 }
-                Err(e) => warn!("Invalid agent_id '{}': {}", agent_id, e),
             }
 
             mcp::stdio::run_stdio_server(state).await?;
@@ -421,17 +452,19 @@ async fn main() -> Result<()> {
             // Emit AgentStopped
             // Re-fetch branch as it might have changed
             let stop_agent_id = get_agent_id_from_env();
-            match exomonad_ui_protocol::AgentId::try_from(stop_agent_id.clone()) {
-                Ok(id) => {
-                    let stop_event = exomonad_ui_protocol::AgentEvent::AgentStopped {
-                        agent_id: id,
-                        timestamp: zellij_events::now_iso8601(),
-                    };
-                    if let Err(e) = zellij_events::emit_event(&stop_event) {
-                        warn!("Failed to emit agent:stopped event: {}", e);
+            if stop_agent_id != "unknown" {
+                match exomonad_ui_protocol::AgentId::try_from(stop_agent_id.clone()) {
+                    Ok(id) => {
+                        let stop_event = exomonad_ui_protocol::AgentEvent::AgentStopped {
+                            agent_id: id,
+                            timestamp: zellij_events::now_iso8601(),
+                        };
+                        if let Err(e) = zellij_events::emit_event(&stop_event) {
+                            warn!("Failed to emit agent:stopped event: {}", e);
+                        }
                     }
+                    Err(e) => warn!("Invalid agent_id '{}': {}", stop_agent_id, e),
                 }
-                Err(e) => warn!("Invalid agent_id '{}': {}", stop_agent_id, e),
             }
         }
 

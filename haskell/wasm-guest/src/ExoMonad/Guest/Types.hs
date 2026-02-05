@@ -16,7 +16,7 @@ module ExoMonad.Guest.Types
   )
 where
 
-import Data.Aeson (FromJSON, ToJSON, Value, object, (.:), (.:?), (.=))
+import Data.Aeson (FromJSON, ToJSON, Value, object, (.:), (.:?), (.=), (.!=))
 import Data.Aeson qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -65,6 +65,8 @@ instance FromJSON HookEventType where
 -- | Input for a hook event.
 data HookInput = HookInput
   { hiSessionId :: Text,
+    hiAgentId :: Maybe Text,
+    hiCwd :: Text,
     hiHookEventName :: HookEventType,
     hiToolName :: Maybe Text,
     hiToolInput :: Maybe Value,
@@ -73,9 +75,11 @@ data HookInput = HookInput
   deriving (Show, Generic)
 
 instance FromJSON HookInput where
-  parseJSON = Aeson.withObject "HookInput" $ \v ->
+  parseJSON = withObject "HookInput" $ \v ->
     HookInput
       <$> v .: "session_id"
+      <*> v .:? "agent_id"
+      <*> v .:? "cwd" .!= ""
       <*> v .: "hook_event_name"
       <*> v .:? "tool_name"
       <*> v .:? "tool_input"

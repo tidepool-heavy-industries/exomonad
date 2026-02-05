@@ -13,8 +13,10 @@ module ExoMonad.Guest.Tool.Runtime
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Exception (SomeException, try)
 import Control.Monad (unless)
+import Data.Char (isAlphaNum)
 import Data.Aeson qualified as Aeson
 import Data.Aeson (FromJSON, ToJSON, Value, (.:), (.=), withObject)
 import Data.Aeson.Key qualified as Key
@@ -169,6 +171,12 @@ hookHandler config = do
             SubagentStop -> "SubagentStop"
             PreToolUse -> "PreToolUse"
       callHostVoid host_log_info (LogPayload Info ("Hook received: " <> hookName) Nothing)
+      
+      -- Debug HookInput
+      let debugMsg = "HookInput debug: session=" <> hiSessionId hookInput 
+                  <> ", agent=" <> fromMaybe "None" (hiAgentId hookInput)
+                  <> ", cwd=" <> hiCwd hookInput
+      callHostVoid host_log_info (LogPayload Debug debugMsg Nothing)
 
       case hookType of
         SessionEnd -> handleStopHook hookInput (onStop config)
@@ -184,25 +192,14 @@ hookHandler config = do
 
     handleStopHook :: HookInput -> (HookInput -> Sem '[Embed IO] StopHookOutput) -> IO CInt
     handleStopHook hookInput hook = do
-      -- Extract agent ID from current working directory (e.g., "gh-453-gemini")
-      cwd <- getCurrentDirectory
-      let agentId = T.pack $ takeFileName cwd
-
-      -- Get current timestamp in ISO8601 format
-      now <- getCurrentTime
-      let timestamp = T.pack $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%QZ" now
+      -- Try to get agent ID from protocol, then path, then session
+      let agentId = fromMaybe "" $
+            hiAgentId hookInput <|> 
+            extractAgentId (hiCwd hookInput) <|> 
+            Just (hiSessionId hookInput)
 
       -- Log that stop hook was called
       callHostVoid host_log_info (LogPayload Info ("Stop hook firing for agent: " <> agentId) Nothing)
-
-      -- Emit AgentStopped event BEFORE running checks
-      -- This ensures we see the event even if checks fail
-      let event = Aeson.object
-            [ "type" .= ("agent:stopped" :: Text)
-            , "agent_id" .= agentId
-            , "timestamp" .= timestamp
-            ]
-      callHostVoid host_emit_event event
 
       -- Run the hook from config (using Polysemy effects)
       result <- runM $ hook hookInput
@@ -221,6 +218,17 @@ hookHandler config = do
       -- Return the result to the hook caller
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
+
+-- | Extract agent ID (gh-{id}) from a string.
+extractAgentId :: Text -> Maybe Text
+extractAgentId s =
+  case T.breakOn "gh-" s of
+    (_, rest) | not (T.null rest) ->
+      let idPart = T.takeWhile isAlphaNum (T.drop 3 rest)
+      in if T.null idPart 
+         then Nothing 
+         else Just ("gh-" <> idPart)
+    _ -> Nothing
 
 -- | Wrap a handler with exception handling.
 wrapHandler :: IO CInt -> IO CInt

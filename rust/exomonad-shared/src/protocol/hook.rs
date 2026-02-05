@@ -18,6 +18,10 @@ use serde_json::Value;
 /// handler pick what it needs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookInput {
+    /// Agent ID (e.g. gh-123). Injected by Rust before WASM call.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+
     /// Session ID from Claude Code.
     pub session_id: SessionId,
 
