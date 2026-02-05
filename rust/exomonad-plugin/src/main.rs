@@ -322,6 +322,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                             );
                             self.active_popup = None;
                             self.status_state = PluginState::Idle;
+                            self.status_message = "Ready.".to_string();
                             should_render = true;
                         }
                         BareKey::Down | BareKey::Char('j') => {
@@ -377,6 +378,7 @@ impl ZellijPlugin for ExoMonadPlugin {
 
                                     self.active_popup = None;
                                     self.status_state = PluginState::Idle;
+                                    self.status_message = "Ready.".to_string();
                                     should_render = true;
                                 }
                                 Err(e) => {
@@ -426,7 +428,6 @@ impl ZellijPlugin for ExoMonadPlugin {
                 let status_block = Block::default().borders(Borders::ALL).title("ExoMonad");
                 let status_color = match self.status_state {
                     PluginState::Error => Color::Red,
-                    PluginState::Running => Color::Green,
                     PluginState::Thinking => Color::Yellow,
                     PluginState::Waiting => Color::Cyan,
                     PluginState::Idle => Color::Blue,
