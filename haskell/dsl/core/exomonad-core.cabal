@@ -57,7 +57,6 @@ library
         ExoMonad.StructuredOutput.Generic
         ExoMonad.StructuredOutput.Instances
         ExoMonad.StructuredOutput.Prefix
-        ExoMonad.Effects.Habitica
         ExoMonad.Effects.GitHub
         ExoMonad.Effects.Observability
         ExoMonad.Effects.UI
@@ -78,7 +77,6 @@ library
         ExoMonad.LLM.Tools.TH
         ExoMonad.Middleware.Logging
       build-depends:
-        exomonad-habitica,
         optparse-applicative >= 0.17 && < 1
     build-depends:
         base >= 4.17 && < 5,
