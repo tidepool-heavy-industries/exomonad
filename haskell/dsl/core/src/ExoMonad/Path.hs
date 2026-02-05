@@ -26,7 +26,6 @@ where
 
 import Data.Text qualified as T
 import Path
-import Relude
 
 type AbsFile = Path Abs File
 
