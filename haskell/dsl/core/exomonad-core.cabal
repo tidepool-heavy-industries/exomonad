@@ -55,7 +55,6 @@ library
         ExoMonad.StructuredOutput.Generic
         ExoMonad.StructuredOutput.Instances
         ExoMonad.StructuredOutput.Prefix
-        ExoMonad.Tool.Convert
         ExoMonad.Effects.Habitica
         ExoMonad.Effects.GitHub
         ExoMonad.Effects.Observability
