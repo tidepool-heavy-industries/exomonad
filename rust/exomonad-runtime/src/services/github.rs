@@ -458,7 +458,7 @@ impl GitHubService {
             API_TIMEOUT,
             pulls_handler
                 .list()
-                .state(params::State::Open)
+                .state(params::State::All)
                 .head(format!("{}:{}", repo.owner, head))
                 .send(),
         )

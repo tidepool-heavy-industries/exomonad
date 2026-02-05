@@ -96,7 +96,9 @@ instance FFIBoundary Repo
 data PullRequest = PullRequest
   { prNumber :: Int,
     prTitle :: Text,
-    prUrl :: Text
+    prUrl :: Text,
+    prState :: Text,
+    prMergedAt :: Maybe Text
   }
   deriving stock (Show, Generic)
 
@@ -106,13 +108,17 @@ instance FromJSON PullRequest where
       <$> v .: "number"
       <*> v .: "title"
       <*> v .: "url"
+      <*> v .: "state"
+      <*> v .: "merged_at"
 
 instance ToJSON PullRequest where
   toJSON p =
     object
       [ "number" .= prNumber p,
         "title" .= prTitle p,
-        "url" .= prUrl p
+        "url" .= prUrl p,
+        "state" .= prState p,
+        "merged_at" .= prMergedAt p
       ]
 
 instance FFIBoundary PullRequest
@@ -277,7 +283,14 @@ checkPRFiled repoInfo = do
       case prResult of
         Left err -> pure $ blockStopResponse $ "Failed to check for PR: " <> err
         Right Nothing -> pure $ blockStopResponse "No PR filed for this branch. Use the file_pr tool to create a PR and wait for Copilot review."
-        Right (Just pr) -> checkReviewComments repo' pr
+        Right (Just pr) ->
+          if isJust (prMergedAt pr) || prState pr == "closed"
+            then pure allowStopResponse -- PR is already merged or closed, allowing stop
+            else checkReviewComments repo' pr
+
+isJust :: Maybe a -> Bool
+isJust (Just _) = True
+isJust Nothing = False
 
 checkReviewComments :: Repo -> PullRequest -> IO StopHookOutput
 checkReviewComments _repo pr = do
