@@ -335,13 +335,18 @@ In `.claude/settings.local.json`:
 }
 ```
 
-**Note:** The WASM plugin path is auto-resolved from `.exomonad/config.toml`'s `role` field. Ensure you have a config file:
+**Note:** The WASM plugin path is auto-resolved from `.exomonad/config.toml`'s `default_role` field. Ensure you have a config file:
 ```toml
-role = "tl"  # or "dev", "pm", etc.
+default_role = "tl"  # or "dev", "pm", etc.
 project_dir = "."
 ```
 
 This will load `~/.exomonad/wasm/wasm-guest-tl.wasm` automatically.
+
+**Config hierarchy:**
+- `config.toml` uses `default_role` (project-wide default)
+- `config.local.toml` uses `role` (worktree-specific override)
+- Resolution: `local.role > global.default_role`
 
 ### Building
 
@@ -364,7 +369,7 @@ cd rust && cargo build --release -p exomonad-sidecar  # Build sidecar
 3. Builds both WASM plugins (dev and tl) using nix
 4. Installs to `~/.exomonad/wasm/wasm-guest-{dev,tl}.wasm`
 
-The sidecar auto-discovers WASM plugins based on `.exomonad/config.toml`'s `role` field.
+The sidecar auto-discovers WASM plugins based on `.exomonad/config.toml`'s `default_role` field (or `config.local.toml`'s `role` field if present).
 
 ### MCP Tools
 
@@ -386,7 +391,7 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 **How spawn_agents works:**
 1. Creates git worktree: `.exomonad/worktrees/gh-{issue}-{title}-{agent}/`
 2. Creates branch: `gh-{issue}/{title}-{agent}`
-3. Writes `.exomonad/config.toml` (role="dev") and `.mcp.json` (no --wasm!)
+3. Writes `.exomonad/config.toml` (default_role="dev") and `.mcp.json`
 4. Builds initial prompt with full issue context
 5. Creates Zellij tab using KDL layout with agent-specific command:
    - `claude --prompt '...'` for Claude agents
