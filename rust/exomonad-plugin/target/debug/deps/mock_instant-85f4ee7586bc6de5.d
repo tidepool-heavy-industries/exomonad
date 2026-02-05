@@ -1,8 +1,0 @@
-/Users/inannamalick/hangars/tidepool/repo/.exomonad/worktrees/gh-521-error-ux-claude/rust/exomonad-plugin/target/debug/deps/mock_instant-85f4ee7586bc6de5.d: /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mock_instant-0.6.0/src/lib.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mock_instant-0.6.0/src/macros.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mock_instant-0.6.0/src/thread_local.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mock_instant-0.6.0/src/global.rs
-
-/Users/inannamalick/hangars/tidepool/repo/.exomonad/worktrees/gh-521-error-ux-claude/rust/exomonad-plugin/target/debug/deps/libmock_instant-85f4ee7586bc6de5.rmeta: /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mock_instant-0.6.0/src/lib.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mock_instant-0.6.0/src/macros.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mock_instant-0.6.0/src/thread_local.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mock_instant-0.6.0/src/global.rs
-
-/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mock_instant-0.6.0/src/lib.rs:
-/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mock_instant-0.6.0/src/macros.rs:
-/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mock_instant-0.6.0/src/thread_local.rs:
-/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mock_instant-0.6.0/src/global.rs:

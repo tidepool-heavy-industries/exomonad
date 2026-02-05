@@ -1,9 +1,0 @@
-/Users/inannamalick/hangars/tidepool/repo/.exomonad/worktrees/gh-521-error-ux-claude/rust/exomonad-plugin/target/debug/deps/include_dir-70f37ba8d2219c6d.d: /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/include_dir-0.7.4/src/lib.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/include_dir-0.7.4/src/dir.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/include_dir-0.7.4/src/dir_entry.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/include_dir-0.7.4/src/file.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/include_dir-0.7.4/src/../README.md
-
-/Users/inannamalick/hangars/tidepool/repo/.exomonad/worktrees/gh-521-error-ux-claude/rust/exomonad-plugin/target/debug/deps/libinclude_dir-70f37ba8d2219c6d.rmeta: /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/include_dir-0.7.4/src/lib.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/include_dir-0.7.4/src/dir.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/include_dir-0.7.4/src/dir_entry.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/include_dir-0.7.4/src/file.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/include_dir-0.7.4/src/../README.md
-
-/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/include_dir-0.7.4/src/lib.rs:
-/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/include_dir-0.7.4/src/dir.rs:
-/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/include_dir-0.7.4/src/dir_entry.rs:
-/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/include_dir-0.7.4/src/file.rs:
-/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/include_dir-0.7.4/src/../README.md:

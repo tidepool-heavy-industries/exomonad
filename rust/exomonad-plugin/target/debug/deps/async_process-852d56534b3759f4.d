@@ -1,8 +1,0 @@
-/Users/inannamalick/hangars/tidepool/repo/.exomonad/worktrees/gh-521-error-ux-claude/rust/exomonad-plugin/target/debug/deps/async_process-852d56534b3759f4.d: /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/async-process-2.5.0/src/lib.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/async-process-2.5.0/src/unix.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/async-process-2.5.0/src/reaper/mod.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/async-process-2.5.0/src/reaper/signal.rs
-
-/Users/inannamalick/hangars/tidepool/repo/.exomonad/worktrees/gh-521-error-ux-claude/rust/exomonad-plugin/target/debug/deps/libasync_process-852d56534b3759f4.rmeta: /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/async-process-2.5.0/src/lib.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/async-process-2.5.0/src/unix.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/async-process-2.5.0/src/reaper/mod.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/async-process-2.5.0/src/reaper/signal.rs
-
-/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/async-process-2.5.0/src/lib.rs:
-/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/async-process-2.5.0/src/unix.rs:
-/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/async-process-2.5.0/src/reaper/mod.rs:
-/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/async-process-2.5.0/src/reaper/signal.rs:

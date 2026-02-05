@@ -1,8 +1,0 @@
-/Users/inannamalick/hangars/tidepool/repo/.exomonad/worktrees/gh-521-error-ux-claude/rust/exomonad-plugin/target/debug/deps/csscolorparser-ec43054cb5f7ae56.d: /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csscolorparser-0.6.2/src/lib.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csscolorparser-0.6.2/src/color.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csscolorparser-0.6.2/src/parser/mod.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csscolorparser-0.6.2/src/parser/named_colors.rs
-
-/Users/inannamalick/hangars/tidepool/repo/.exomonad/worktrees/gh-521-error-ux-claude/rust/exomonad-plugin/target/debug/deps/libcsscolorparser-ec43054cb5f7ae56.rmeta: /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csscolorparser-0.6.2/src/lib.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csscolorparser-0.6.2/src/color.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csscolorparser-0.6.2/src/parser/mod.rs /Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csscolorparser-0.6.2/src/parser/named_colors.rs
-
-/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csscolorparser-0.6.2/src/lib.rs:
-/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csscolorparser-0.6.2/src/color.rs:
-/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csscolorparser-0.6.2/src/parser/mod.rs:
-/Users/inannamalick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/csscolorparser-0.6.2/src/parser/named_colors.rs:
