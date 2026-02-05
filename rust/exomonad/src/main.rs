@@ -101,26 +101,19 @@ async fn handle_hook(
     );
 
     // Emit HookReceived event
-    if let Ok(branch) = git::get_current_branch() {
-        if let Some(agent_id_str) = git::extract_agent_id(&branch) {
-            match exomonad_ui_protocol::AgentId::try_from(agent_id_str.clone()) {
-                Ok(agent_id) => {
-                    let event = exomonad_ui_protocol::AgentEvent::HookReceived {
-                        agent_id,
-                        hook_type: event_type.to_string(),
-                        timestamp: zellij_events::now_iso8601(),
-                    };
-                    if let Err(e) = zellij_events::emit_event(&event) {
-                        warn!("Failed to emit hook:received event: {}", e);
-                    }
-                }
-                Err(e) => warn!("Invalid agent_id in branch '{}': {}", agent_id_str, e),
+    let agent_id_str = get_agent_id_from_env();
+    match exomonad_ui_protocol::AgentId::try_from(agent_id_str.clone()) {
+        Ok(agent_id) => {
+            let event = exomonad_ui_protocol::AgentEvent::HookReceived {
+                agent_id,
+                hook_type: event_type.to_string(),
+                timestamp: zellij_events::now_iso8601(),
+            };
+            if let Err(e) = zellij_events::emit_event(&event) {
+                warn!("Failed to emit hook:received event: {}", e);
             }
-        } else {
-            warn!("Could not extract agent_id from branch: {}", branch);
         }
-    } else {
-        warn!("Could not determine current git branch for HookReceived event");
+        Err(e) => warn!("Invalid agent_id '{}': {}", agent_id_str, e),
     }
 
     // Parse the hook input and inject runtime
@@ -170,27 +163,24 @@ async fn handle_hook(
         if internal_output.decision == exomonad_shared::protocol::StopDecision::Block {
             // Emit StopHookBlocked event for SubagentStop hooks
             if event_type == HookEventType::SubagentStop {
-                if let Ok(branch) = git::get_current_branch() {
-                    if let Some(agent_id_str) = git::extract_agent_id(&branch) {
-                        let reason = internal_output
-                            .reason
-                            .clone()
-                            .unwrap_or_else(|| "Hook blocked agent stop".to_string());
+                let agent_id_str = get_agent_id_from_env();
+                let reason = internal_output
+                    .reason
+                    .clone()
+                    .unwrap_or_else(|| "Hook blocked agent stop".to_string());
 
-                        match exomonad_ui_protocol::AgentId::try_from(agent_id_str.clone()) {
-                            Ok(agent_id) => {
-                                let event = exomonad_ui_protocol::AgentEvent::StopHookBlocked {
-                                    agent_id,
-                                    reason,
-                                    timestamp: zellij_events::now_iso8601(),
-                                };
-                                if let Err(e) = zellij_events::emit_event(&event) {
-                                    warn!("Failed to emit stop_hook:blocked event: {}", e);
-                                }
-                            }
-                            Err(e) => warn!("Invalid agent_id in branch '{}': {}", agent_id_str, e),
+                match exomonad_ui_protocol::AgentId::try_from(agent_id_str.clone()) {
+                    Ok(agent_id) => {
+                        let event = exomonad_ui_protocol::AgentEvent::StopHookBlocked {
+                            agent_id,
+                            reason,
+                            timestamp: zellij_events::now_iso8601(),
+                        };
+                        if let Err(e) = zellij_events::emit_event(&event) {
+                            warn!("Failed to emit stop_hook:blocked event: {}", e);
                         }
                     }
+                    Err(e) => warn!("Invalid agent_id '{}': {}", agent_id_str, e),
                 }
             }
             std::process::exit(2);
@@ -307,14 +297,23 @@ fn init_logging(command: &Commands) {
 }
 
 fn get_agent_id_from_env() -> String {
-    let branch = git::get_current_branch().unwrap_or_default();
-    git::extract_agent_id(&branch).unwrap_or_else(|| {
-        if branch.is_empty() {
-            "no-branch".to_string()
-        } else {
-            "unknown".to_string()
+    // Try branch first
+    if let Ok(branch) = git::get_current_branch() {
+        if let Some(id) = git::extract_agent_id(&branch) {
+            return id;
         }
-    })
+    }
+
+    // Try current directory name (worktree name)
+    if let Ok(cwd) = std::env::current_dir() {
+        if let Some(name) = cwd.file_name().and_then(|n| n.to_str()) {
+            if let Some(id) = git::extract_agent_id(name) {
+                return id;
+            }
+        }
+    }
+
+    "unknown".to_string()
 }
 
 // ============================================================================

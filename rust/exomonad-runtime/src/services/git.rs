@@ -25,9 +25,9 @@ pub fn get_current_branch() -> Result<String> {
     Ok(branch.to_string())
 }
 
-/// Extract agent ID from a branch name following gh-{number}/{slug} convention.
+/// Extract agent ID from a branch name following gh-{number}/{slug} or worktree name gh-{number}-{slug} convention.
 ///
-/// Returns the agent ID in the format "gh-{number}" if the branch follows the
+/// Returns the agent ID in the format "gh-{number}" if it matches the
 /// convention, or None if it doesn't match the expected pattern.
 ///
 /// # Examples
@@ -35,15 +35,26 @@ pub fn get_current_branch() -> Result<String> {
 /// ```
 /// # use exomonad_runtime::services::git::extract_agent_id;
 /// assert_eq!(extract_agent_id("gh-123/feat-add-sidebar"), Some("gh-123".to_string()));
+/// assert_eq!(extract_agent_id("gh-456-fix-bug"), Some("gh-456".to_string()));
 /// assert_eq!(extract_agent_id("main"), None);
-/// assert_eq!(extract_agent_id("gh-456"), Some("gh-456".to_string()));
 /// ```
-pub fn extract_agent_id(branch: &str) -> Option<String> {
-    branch
-        .strip_prefix("gh-")
-        .and_then(|s| s.split('/').next())
-        .filter(|id| !id.is_empty())
-        .map(|id| format!("gh-{}", id))
+pub fn extract_agent_id(s: &str) -> Option<String> {
+    if !s.starts_with("gh-") {
+        return None;
+    }
+    let rest = &s[3..];
+    // Split by '/' first (branch convention)
+    if let Some(id) = rest.split('/').next() {
+        if !id.is_empty() {
+            // Also split by '-' (worktree convention)
+            if let Some(id_final) = id.split('-').next() {
+                if !id_final.is_empty() {
+                    return Some(format!("gh-{}", id_final));
+                }
+            }
+        }
+    }
+    None
 }
 
 /// A git commit with metadata.
