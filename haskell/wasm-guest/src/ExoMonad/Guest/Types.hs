@@ -16,7 +16,7 @@ module ExoMonad.Guest.Types
   )
 where
 
-import Data.Aeson (FromJSON, ToJSON, Value, object, (.:), (.:?), (.=), (.!=))
+import Data.Aeson (FromJSON, ToJSON, Value, object, withObject, (.:), (.:?), (.=), (.!=))
 import Data.Aeson qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as T
