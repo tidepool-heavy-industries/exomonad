@@ -1,46 +1,98 @@
-# Single-stage Dockerfile for ExoMonad CI
-# Pre-builds all Haskell dependencies
+# ExoMonad CI Container - Prebaked at specific commit
+# Pre-builds Haskell + Rust dependencies for fast CI runs
+#
+# Rebuild when: major dep changes, toolchain upgrades, or weekly schedule
+# Trigger: workflow_dispatch on build-container.yml or weekly cron
+
 FROM haskell:9.12.2
+
+ARG GIT_REF=main
+ARG REPO_URL=https://github.com/tidepool-heavy-industries/exomonad.git
 
 WORKDIR /workspace
 
-# Install system dependencies and tools
+# ============================================================================
+# System dependencies
+# ============================================================================
 RUN apt-get update && apt-get install -y \
     git \
     curl \
     ca-certificates \
+    build-essential \
+    pkg-config \
     libgmp-dev \
     zlib1g-dev \
-    nodejs \
-    npm \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install just
+# ============================================================================
+# Tools
+# ============================================================================
+
+# just (task runner)
 RUN curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
 
-# Install hlint
+# hlint (Haskell linter)
 RUN curl -sSL https://github.com/ndmitchell/hlint/releases/download/v3.8/hlint-3.8-x86_64-linux.tar.gz | tar xz \
     && mv hlint-3.8/hlint /usr/local/bin/ \
     && rm -rf hlint-3.8
 
-# Copy all project files (needed for cabal to resolve dependencies)
-COPY . .
+# ============================================================================
+# Rust toolchain
+# ============================================================================
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
 
-# Update cabal index
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+
+# Rust components
+RUN rustup component add clippy rustfmt
+
+# WASM target for Zellij plugin
+RUN rustup target add wasm32-wasip1
+
+# ============================================================================
+# Clone repo at specific ref (instead of COPY)
+# ============================================================================
+# Try branch checkout first, fall back to SHA checkout for detached HEAD
+RUN git clone --depth 1 --branch ${GIT_REF} ${REPO_URL} /workspace \
+    || (git clone ${REPO_URL} /workspace && cd /workspace && git checkout ${GIT_REF})
+
+# Record the ref for debugging
+RUN git rev-parse HEAD > /workspace/.container-ref
+
+# ============================================================================
+# Haskell: Pre-build dependencies
+# ============================================================================
 RUN cabal update
 
-# Build everything once to populate cabal store with all dependencies
-# This is the expensive operation we're caching
-RUN cabal build all
+# Build all Haskell deps (expensive, cached in image)
+RUN cabal build all --only-dependencies -j4 || true
 
-# Clean up build artifacts but keep the cabal store
-# This keeps the container smaller while preserving cached dependencies
-RUN rm -rf dist-newstyle
+# ============================================================================
+# Rust: Pre-build dependencies
+# ============================================================================
+WORKDIR /workspace/rust
 
-# Set up working directory for CI runs
+# Build all Rust deps (expensive, cached in image)
+RUN cargo build --workspace --all-targets || true
+RUN cargo build -p exomonad-plugin --target wasm32-wasip1 || true
+
+# ============================================================================
+# Cleanup build artifacts (keep dep caches)
+# ============================================================================
+WORKDIR /workspace
+RUN rm -rf dist-newstyle .git
+
+# ============================================================================
+# Runtime setup
+# ============================================================================
 WORKDIR /build
 
-# When CI runs, it will:
-# 1. Mount the repo at /build
-# 2. Run cabal build (fast, deps already in ~/.cabal/store)
-# 3. Run tests
+# CI will:
+# 1. Pull this image
+# 2. Mount repo at /build
+# 3. Run cabal build (fast - deps in ~/.cabal/store)
+# 4. Run cargo build (fast - deps precompiled in rust/target)
+# 5. Run tests

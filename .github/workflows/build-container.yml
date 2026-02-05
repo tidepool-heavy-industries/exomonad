@@ -1,9 +1,15 @@
 name: Build CI Container
 
-# Manual-only to avoid burning credits on every cabal change
-# Rebuild when you add significant new dependencies
 on:
   workflow_dispatch:
+    inputs:
+      git_ref:
+        description: 'Git ref to prebake (branch, tag, or SHA)'
+        required: false
+        default: 'main'
+  schedule:
+    # Weekly rebuild to keep deps fresh (Sunday 3am UTC)
+    - cron: '0 3 * * 0'
 
 env:
   REGISTRY: ghcr.io
@@ -19,6 +25,15 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Get git ref for build
+        id: ref
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "ref=main" >> $GITHUB_OUTPUT
+          else
+            echo "ref=${{ github.event.inputs.git_ref || 'main' }}" >> $GITHUB_OUTPUT
+          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -47,8 +62,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GIT_REF=${{ steps.ref.outputs.ref }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-to: type=inline
 
       - name: Image digest
-        run: echo "Built image digest ${{ steps.meta.outputs.digest }}"
+        run: echo "Built image digest ${{ steps.meta.outputs.digest }} for ref ${{ steps.ref.outputs.ref }}"

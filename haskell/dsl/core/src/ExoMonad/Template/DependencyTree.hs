@@ -40,6 +40,10 @@ module ExoMonad.Template.DependencyTree
 where
 
 import Control.Monad (foldM)
+import Data.Map.Strict qualified as Map
+import Data.Set qualified as Set
+import Data.Text qualified as T
+import Data.Text.IO qualified as TIO
 import System.Directory (doesFileExist)
 import System.FilePath (normalise, takeDirectory, takeFileName, (</>))
 import Text.Parsec

@@ -260,7 +260,9 @@ fn init_logging(command: &Commands) -> Option<tracing_appender::non_blocking::Wo
                         .with_ansi(false),
                 )
                 .init();
-            eprintln!("MCP stdio logging to .exomonad/logs/sidecar.log.YYYY-MM-DD (daily rotation)");
+            eprintln!(
+                "MCP stdio logging to .exomonad/logs/sidecar.log.YYYY-MM-DD (daily rotation)"
+            );
         }
         (Commands::McpStdio, Some(nb), false) => {
             registry
@@ -270,13 +272,19 @@ fn init_logging(command: &Commands) -> Option<tracing_appender::non_blocking::Wo
                         .with_ansi(false),
                 )
                 .init();
-            eprintln!("MCP stdio logging to .exomonad/logs/sidecar.log.YYYY-MM-DD (daily rotation)");
+            eprintln!(
+                "MCP stdio logging to .exomonad/logs/sidecar.log.YYYY-MM-DD (daily rotation)"
+            );
         }
 
         // MCP stdio without File Logging (fallback to stderr)
         (Commands::McpStdio, None, true) => {
             registry
-                .with(tracing_subscriber::fmt::layer().json().with_writer(std::io::stderr))
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .json()
+                        .with_writer(std::io::stderr),
+                )
                 .init();
         }
         (Commands::McpStdio, None, false) => {
@@ -294,7 +302,11 @@ fn init_logging(command: &Commands) -> Option<tracing_appender::non_blocking::Wo
                         .with_writer(nb)
                         .with_ansi(false),
                 )
-                .with(tracing_subscriber::fmt::layer().json().with_writer(std::io::stderr))
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .json()
+                        .with_writer(std::io::stderr),
+                )
                 .init();
         }
         (_, Some(nb), false) => {
@@ -311,7 +323,11 @@ fn init_logging(command: &Commands) -> Option<tracing_appender::non_blocking::Wo
         // Other commands without File Logging
         (_, None, true) => {
             registry
-                .with(tracing_subscriber::fmt::layer().json().with_writer(std::io::stderr))
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .json()
+                        .with_writer(std::io::stderr),
+                )
                 .init();
         }
         (_, None, false) => {

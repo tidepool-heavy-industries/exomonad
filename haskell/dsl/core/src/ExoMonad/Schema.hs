@@ -63,6 +63,8 @@ where
 
 import Data.Aeson (Value (..), object, (.=))
 import Data.Map.Strict qualified as Map
+import Data.Maybe (fromMaybe)
+import Data.Text qualified as T
 import ExoMonad.Schema.TH
   ( FieldMapping (..),
     FieldMappingPartial,
@@ -183,19 +185,20 @@ deriveJSONSchema typeName = do
           | (idx, field) <- zip [0 ..] fields
           ]
       let fieldInfo = [(nameBase name, typ) | (name, _, typ) <- fields]
+          -- Build props as [(Text, JSONSchema)] directly
           propsExpr =
             listE
-              [ tupE [litE (stringL fn), pure fs]
+              [ tupE [appE (varE 'T.pack) (litE (stringL fn)), pure fs]
               | ((fn, _), fs) <- zip fieldInfo fieldSchemas
               ]
-          -- Only require non-Maybe fields
+          -- Build required as [Text] directly
           reqExpr =
             listE
-              [ litE (stringL fn)
+              [ appE (varE 'T.pack) (litE (stringL fn))
               | (fn, typ) <- fieldInfo,
                 not (isMaybeType typ)
               ]
-      [|objectSchema (map (\(n, s) -> (T.pack n, s)) $propsExpr) (map T.pack $reqExpr)|]
+      [|objectSchema $propsExpr $reqExpr|]
 
     deriveEnum cons = do
       let names = [nameBase n | NormalC n [] <- cons]
@@ -211,11 +214,9 @@ deriveJSONSchema typeName = do
 deriveFieldSchema :: Name -> Name -> Int -> VarBangType -> Q Exp
 deriveFieldSchema _typeName _conName _fieldIdx (fieldName, _, fieldType) = do
   mDoc <- getDoc (DeclDoc fieldName)
-  desc <- case mDoc of
-    Just doc -> pure (T.pack doc)
-    Nothing -> pure ""
+  let descStr = fromMaybe "" mDoc
   baseSchema <- typeToSchemaExp fieldType
-  [|describeField desc $(pure baseSchema)|]
+  [|describeField (T.pack descStr) $(pure baseSchema)|]
 
 -- | Convert a Haskell type to a JSONSchema expression
 typeToSchemaExp :: TH.Type -> Q Exp

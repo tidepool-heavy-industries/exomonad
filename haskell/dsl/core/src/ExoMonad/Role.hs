@@ -6,7 +6,8 @@ module ExoMonad.Role
   )
 where
 
-import Data.Aeson (FromJSON, ToJSON)
+import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), withText)
+import Data.Text qualified as T
 
 -- | Agent role for access control and orchestration.
 data Role = Dev | TL | PM

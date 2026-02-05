@@ -45,9 +45,12 @@ common shared
         build-depends: polysemy-plugin >= 0.4
 
 -- Internal library with shared tool infrastructure
+-- Only buildable on WASM target (uses extism-pdk which requires WASM runtime)
 library wasm-guest-internal
     import:           shared
     visibility:       public
+    if !os(wasi)
+        buildable: False
     hs-source-dirs:   src
     exposed-modules:
         -- Top-level API
@@ -90,6 +93,9 @@ test-suite ffi-serialization-tests
   main-is: FFISerializationSpec.hs
   hs-source-dirs: test
   c-sources: test/cbits/stubs.c
+  -- Only buildable on WASM target
+  if !os(wasi)
+      buildable: False
   build-depends:
       base
     , wasm-guest

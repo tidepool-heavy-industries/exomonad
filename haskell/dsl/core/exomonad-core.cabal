@@ -48,8 +48,6 @@ library
       exposed-modules:
         -- Unified re-export module
         ExoMonad.Effects
-        -- Native-only effects (require subprocesses)
-        ExoMonad.Effect.LSP
         -- Native-only tooling
         ExoMonad.Schema
         ExoMonad.Schema.TH
@@ -186,7 +184,7 @@ test-suite graph-validation-tests
         directory,
         filepath,
         exomonad-core
-    hs-source-dirs:   test, test/golden/valid
+    hs-source-dirs:   test
     default-language: GHC2024
     default-extensions:
         DeriveAnyClass

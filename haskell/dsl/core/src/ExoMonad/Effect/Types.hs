@@ -142,6 +142,11 @@ module ExoMonad.Effect.Types
     ItemDisposition (..),
     Choice (..),
     ChoiceOption (..),
+
+    -- * Polysemy Compatibility (breaks import cycle with ExoMonad.Prelude)
+    Eff,
+    LastMember,
+    sendM,
   )
 where
 
@@ -176,18 +181,23 @@ import ExoMonad.Effect.TUI
     TUI (..),
     showUI,
   )
-import ExoMonad.Prelude (Eff, LastMember, sendM)
 import ExoMonad.Question (Answer (..), Choice (..), ChoiceOption (..), ItemDisposition (..), Question (..))
 import ExoMonad.StructuredOutput (StructuredOutput (..), formatDiagnostic)
 import GHC.Show (Show (..))
 import Lens.Micro.TH (makeLenses)
-import Polysemy (Member, Sem, embed, interpret, makeSem)
+import Polysemy (Embed, Member, Sem, embed, interpret, makeSem)
 import Polysemy.Error (Error, catch, throw)
 import Polysemy.Internal (send)
 import Polysemy.State (State, get, gets, modify, put, runState)
 import System.Random (randomRIO)
 import Prelude hiding (State, get, gets, modify, modifyIORef, newIORef, put, readIORef, runState, toList, writeIORef)
 import Prelude qualified as P
+
+-- | Compatibility type aliases - these break the import cycle with ExoMonad.Prelude
+type Eff = Sem
+type LastMember m r = Member (Embed m) r
+sendM :: (Member (Embed m) r) => m a -> Sem r a
+sendM = embed
 
 -- ══════════════════════════════════════════════════════════════
 -- STATE EFFECT

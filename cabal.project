@@ -49,3 +49,6 @@ source-repository-package
   type: git
   location: https://github.com/iand675/hs-opentelemetry
   subdir: api sdk exporters/otlp
+
+-- Force path to use os-string flag for GHC 9.12 compatibility
+constraints: path +os-string
