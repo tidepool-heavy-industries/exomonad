@@ -121,9 +121,9 @@ spec = do
     it "preserves field descriptions" $ do
       let schema = schemaToValue (jsonSchema @TestArgs)
 
-      -- Verify descriptions are set
+      -- Verify descriptions are set (Maybe fields get "(optional)" suffix)
       getPath ["properties", "name", "description"] schema `shouldBe` Just (String "The name")
-      getPath ["properties", "item_count", "description"] schema `shouldBe` Just (String "Number of items")
+      getPath ["properties", "item_count", "description"] schema `shouldBe` Just (String "Number of items (optional)")
       getPath ["properties", "is_flagged", "description"] schema `shouldBe` Just (String "A flag")
 
     it "correctly identifies required fields (non-Maybe fields)" $ do

@@ -54,4 +54,3 @@ runFileSystemIO = interpret $ \case
   FileExists path -> embed $ Dir.doesFileExist (toFilePath path)
   DirectoryExists path -> embed $ Dir.doesDirectoryExist (toFilePath path)
   ReadTextFile path -> embed $ TIO.readFile (toFilePath path)
-

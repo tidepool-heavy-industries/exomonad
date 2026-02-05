@@ -21,7 +21,8 @@ import Polysemy.Internal (send)
 logLLMCalls :: (Member LLMCall r, Member Log r) => Sem r a -> Sem r a
 logLLMCalls = intercept $ \case
   PerformLLMCall mdl maxTok (System sys) (User usr) schema -> do
-    logInfoWith "LLM Request"
+    logInfoWith
+      "LLM Request"
       [ ("model", toJSON $ modelToText mdl),
         ("system", toJSON sys),
         ("user", toJSON usr)
@@ -33,7 +34,8 @@ logLLMCalls = intercept $ \case
       Right _ -> logInfo "LLM Response: success"
     pure result
   PerformLLMCallWithTools mdl maxTok (System sys) (User usr) schema tools -> do
-    logInfoWith "LLM Request (with tools)"
+    logInfoWith
+      "LLM Request (with tools)"
       [ ("model", toJSON $ modelToText mdl),
         ("system", toJSON sys),
         ("user", toJSON usr),

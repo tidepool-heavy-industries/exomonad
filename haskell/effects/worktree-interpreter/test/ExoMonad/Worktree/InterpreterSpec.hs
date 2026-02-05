@@ -5,9 +5,7 @@ module ExoMonad.Worktree.InterpreterSpec (spec) where
 
 import Control.Exception (bracket)
 import Control.Monad (void)
-import Control.Monad.Freer (Eff, runM, sendM)
 import Data.Either (isLeft, isRight)
-import Data.OpenUnion (LastMember)
 import Data.Text qualified as T
 import ExoMonad.Effects.Worktree
   ( MergeResult (..),
@@ -22,6 +20,7 @@ import ExoMonad.Effects.Worktree
     withWorktree,
   )
 import ExoMonad.Worktree.Interpreter (defaultWorktreeConfig, runWorktreeIO)
+import Polysemy (Embed, Member, Sem, embed, runM)
 import System.Directory
   ( createDirectoryIfMissing,
     doesDirectoryExist,
@@ -299,6 +298,6 @@ spec = describe "Worktree Interpreter" $ do
 
       result `shouldBe` Right ()
 
--- | Helper to lift IO into Eff
-liftIO :: (LastMember IO effs) => IO a -> Eff effs a
-liftIO = sendM
+-- | Helper to lift IO into Sem
+liftIO :: (Member (Embed IO) r) => IO a -> Sem r a
+liftIO = embed

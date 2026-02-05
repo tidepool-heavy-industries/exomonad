@@ -154,11 +154,13 @@ import Data.Aeson (FromJSON, ToJSON, Value (..), encode)
 import Data.ByteString.Lazy qualified as LBS
 import Data.IORef (IORef, modifyIORef, newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
-import Data.Time (UTCTime)
-import Data.Time qualified as Time
 -- Re-exports from Anthropic.Types (pure types)
 -- Note: We import ToolUse but not ToolResult from Anthropic.Types
 -- because ExoMonad.Effect.Types defines its own ToolResult for tool dispatchers.
+
+import Data.Text qualified as T
+import Data.Time (UTCTime)
+import Data.Time qualified as Time
 import ExoMonad.Anthropic.Types
   ( ContentBlock (..),
     ImageSource (..),
@@ -187,13 +189,14 @@ import Polysemy.Error (Error, catch, throw)
 import Polysemy.Internal (send)
 import Polysemy.State (State, get, gets, modify, put, runState)
 import System.Random (randomRIO)
-import Data.Text qualified as T
 import Prelude hiding (State, get, gets, modify, modifyIORef, newIORef, put, readIORef, runState, writeIORef)
 import Prelude qualified as P
 
 -- | Compatibility type aliases - these break the import cycle with ExoMonad.Prelude
 type Eff = Sem
+
 type LastMember m r = Member (Embed m) r
+
 sendM :: (Member (Embed m) r) => m a -> Sem r a
 sendM = embed
 

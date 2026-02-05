@@ -36,9 +36,9 @@ import Control.Monad (forM)
 import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), object, withObject, withText, (.:), (.:?), (.=))
 import Data.Aeson.Key qualified as K
 import Data.Char (isUpper, toLower)
-import Data.Text qualified as T
 import Data.List (delete, foldl', head, intercalate, stripPrefix)
 import Data.Map.Strict qualified as Map
+import Data.Text qualified as T
 -- Import types for HasJSONSchema instance generation
 import ExoMonad.StructuredOutput.Class (HasJSONSchema (..), JSONSchema (..), SchemaType (..))
 import Language.Haskell.TH hiding (Type)

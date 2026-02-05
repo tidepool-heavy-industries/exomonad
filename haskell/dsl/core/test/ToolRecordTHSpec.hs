@@ -5,7 +5,6 @@
 -- | Tests for ToolRecord TH derivation.
 module ToolRecordTHSpec (spec) where
 
-import Control.Monad.Freer (Eff, run, runM)
 import Data.Aeson (FromJSON, ToJSON, Value (..), toJSON)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
@@ -13,6 +12,7 @@ import ExoMonad.LLM.Tools (ToolDispatchError (..), ToolRecord (..), ToolSchema (
 import ExoMonad.LLM.Tools.TH (Tool (..), deriveToolRecord)
 import ExoMonad.Schema (HasJSONSchema (..), deriveHasJSONSchema, schemaToValue)
 import GHC.Generics (Generic)
+import Polysemy (Embed, Member, Sem, embed, runM)
 import Test.Hspec
 
 -- Define tool input types
@@ -37,8 +37,8 @@ data LookupResult = LookupResult
 
 -- Tool record type
 data TestTools es = TestTools
-  { search :: SearchArgs -> Eff es SearchResult,
-    lookupById :: LookupArgs -> Eff es LookupResult
+  { search :: SearchArgs -> Sem es SearchResult,
+    lookupById :: LookupArgs -> Sem es LookupResult
   }
 
 -- Derive the ToolRecord instance using TH

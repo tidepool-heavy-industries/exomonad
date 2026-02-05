@@ -22,7 +22,6 @@ module ExoMonad.Effects
     module ExoMonad.Effects.Env,
     module ExoMonad.Effects.Git,
     module ExoMonad.Effects.GitHub,
-    module ExoMonad.Effects.Habitica,
     module ExoMonad.Effects.Justfile,
     module ExoMonad.Effects.Observability,
     module ExoMonad.Effects.Worktree,
@@ -34,7 +33,6 @@ import ExoMonad.Effects.Effector
 import ExoMonad.Effects.Env
 import ExoMonad.Effects.Git
 import ExoMonad.Effects.GitHub
-import ExoMonad.Effects.Habitica
 import ExoMonad.Effects.Justfile
 import ExoMonad.Effects.Observability
 import ExoMonad.Effects.Worktree

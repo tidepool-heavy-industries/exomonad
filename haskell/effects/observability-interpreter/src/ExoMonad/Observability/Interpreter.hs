@@ -380,4 +380,3 @@ runObservabilityWithConfig ctx config = interpret $ \case
                   attributes = s.attributes <> [attr]
                 }
          in newS : rest
-

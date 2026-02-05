@@ -21,7 +21,7 @@
 -- setupHandler = do
 --   result <- createDirectory "/path/to/.exomonad"
 --   case result of
---     Right () -> writeFileText "/path/to/.exomonad/config" "..."
+--     Right () -> writeTextFile "/path/to/.exomonad/config" "..."
 --     Left err -> pure (Left err)
 -- @
 --
@@ -35,12 +35,12 @@ module ExoMonad.Effects.FileSystem
 
     -- * Smart Constructors
     createDirectory,
-    writeFileText,
+    writeTextFile,
     copyFile,
     createSymlink,
     fileExists,
     directoryExists,
-    readFileText,
+    readTextFile,
 
     -- * Error Types
     FileSystemError (..),
@@ -52,8 +52,7 @@ import Data.Kind (Type)
 import Data.Text (Text)
 import ExoMonad.Path
 import GHC.Generics (Generic)
-import Polysemy (Member, Sem, makeSem)
-import Prelude hiding (readFileText, writeFileText)
+import Polysemy (makeSem)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ERRORS
@@ -92,7 +91,7 @@ data FileSystem m a where
     FileSystem m ()
   -- | Write text content to a file.
   -- Creates the file if it doesn't exist, overwrites if it does.
-  WriteFileText ::
+  WriteTextFile ::
     Path b File ->
     Text ->
     FileSystem m ()
@@ -119,7 +118,7 @@ data FileSystem m a where
     Path b Dir ->
     FileSystem m Bool
   -- | Read text content from a file.
-  ReadFileText ::
+  ReadTextFile ::
     Path b File ->
     FileSystem m Text
 
