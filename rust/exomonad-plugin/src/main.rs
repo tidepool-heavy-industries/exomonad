@@ -225,10 +225,14 @@ impl ZellijPlugin for ExoMonadPlugin {
                                 self.active_popup = Some((request_id, definition, state));
                                 self.selected_index = 0;
                                 self.sub_index = 0;
+                                self.status_state = PluginState::Waiting;
+                                self.status_message = "Waiting for input...".to_string();
                                 should_render = true;
                             }
                             PluginMessage::ClosePopup => {
                                 self.active_popup = None;
+                                self.status_state = PluginState::Idle;
+                                self.status_message = "Ready.".to_string();
                                 should_render = true;
                             }
                         },
@@ -312,11 +316,13 @@ impl ZellijPlugin for ExoMonadPlugin {
                     // Global/Navigation keys
                     match key.bare_key {
                         BareKey::Esc => {
-                            let _ = run_command(
+                            run_command(
                                 &["exomonad", "reply", "--id", req_id, "--cancel"],
                                 BTreeMap::new(),
                             );
                             self.active_popup = None;
+                            self.status_state = PluginState::Idle;
+                            self.status_message = "Ready.".to_string();
                             should_render = true;
                         }
                         BareKey::Down | BareKey::Char('j') => {
@@ -358,7 +364,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                         BareKey::Char('s') if key.has_modifiers(&[KeyModifier::Ctrl]) => {
                             match serde_json::to_string(&state.to_json_values()) {
                                 Ok(json_values) => {
-                                    let _ = run_command(
+                                    run_command(
                                         &[
                                             "exomonad",
                                             "reply",
@@ -371,6 +377,8 @@ impl ZellijPlugin for ExoMonadPlugin {
                                     );
 
                                     self.active_popup = None;
+                                    self.status_state = PluginState::Idle;
+                                    self.status_message = "Ready.".to_string();
                                     should_render = true;
                                 }
                                 Err(e) => {
@@ -421,7 +429,8 @@ impl ZellijPlugin for ExoMonadPlugin {
                 let status_color = match self.status_state {
                     PluginState::Error => Color::Red,
                     PluginState::Thinking => Color::Yellow,
-                    _ => Color::Green,
+                    PluginState::Waiting => Color::Cyan,
+                    PluginState::Idle => Color::Blue,
                 };
                 
                 let status_text = Line::from(vec![

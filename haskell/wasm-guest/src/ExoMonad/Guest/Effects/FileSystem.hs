@@ -28,13 +28,13 @@ module ExoMonad.Guest.Effects.FileSystem
   )
 where
 
-import Polysemy (Sem, Member, interpret, embed, send)
-import Polysemy.Embed (Embed)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.=))
 import Data.Text (Text)
-import ExoMonad.Guest.HostCall (callHost, host_fs_read_file, host_fs_write_file)
 import ExoMonad.Guest.FFI (FFIBoundary)
+import ExoMonad.Guest.HostCall (callHost, host_fs_read_file, host_fs_write_file)
 import GHC.Generics (Generic)
+import Polysemy (Member, Sem, embed, interpret, send)
+import Polysemy.Embed (Embed)
 import Prelude hiding (readFile, writeFile)
 
 -- ============================================================================
@@ -147,10 +147,10 @@ data FileSystem m a where
   WriteFileOp :: Text -> Text -> Bool -> FileSystem m (Either Text WriteFileOutput)
 
 -- Smart constructors (manually written - makeSem doesn't work with WASM cross-compilation)
-readFile :: Member FileSystem r => Text -> Int -> Sem r (Either Text ReadFileOutput)
+readFile :: (Member FileSystem r) => Text -> Int -> Sem r (Either Text ReadFileOutput)
 readFile path maxBytes = send (ReadFileOp path maxBytes)
 
-writeFile :: Member FileSystem r => Text -> Text -> Bool -> Sem r (Either Text WriteFileOutput)
+writeFile :: (Member FileSystem r) => Text -> Text -> Bool -> Sem r (Either Text WriteFileOutput)
 writeFile path content createParents = send (WriteFileOp path content createParents)
 
 -- ============================================================================
@@ -166,4 +166,3 @@ runFileSystem = interpret $ \case
   WriteFileOp path content createParents -> embed $ do
     let input = WriteFileInput path content createParents
     callHost host_fs_write_file input
-

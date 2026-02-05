@@ -2,9 +2,9 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
 
 -- | Worktree effect for managing git worktrees.
@@ -61,9 +61,9 @@ module ExoMonad.Effects.Worktree
   )
 where
 
-import Polysemy (Sem, Member, makeSem)
 import Data.Kind (Type)
 import ExoMonad.StructuredOutput (StructuredOutput)
+import Polysemy (Member, Sem, makeSem)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES
@@ -240,4 +240,3 @@ withWorktree spec action = do
       -- Always cleanup (best effort - ignore delete errors)
       _ <- deleteWorktree wtPath
       pure $ Right result
-

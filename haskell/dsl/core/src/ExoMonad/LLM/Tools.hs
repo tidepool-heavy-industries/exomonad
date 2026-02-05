@@ -54,7 +54,6 @@ module ExoMonad.LLM.Tools
   )
 where
 
-import Polysemy (Sem)
 import Data.Aeson (FromJSON, ToJSON, Value (..), fromJSON, toJSON)
 import Data.Aeson qualified as Aeson
 import Data.Aeson.KeyMap qualified as KM
@@ -64,6 +63,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Schema (HasJSONSchema (..), JSONSchema (..), SchemaType (..))
 import ExoMonad.Tool.Wire (AnthropicTool (..))
+import Polysemy (Sem)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TOOL SCHEMA TYPES

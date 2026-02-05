@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 pub enum PluginState {
     Idle,
     Thinking,
+    Waiting,
     Error,
 }
 
@@ -23,6 +24,7 @@ impl std::fmt::Display for PluginState {
         match self {
             PluginState::Idle => write!(f, "IDLE"),
             PluginState::Thinking => write!(f, "THINKING"),
+            PluginState::Waiting => write!(f, "WAITING"),
             PluginState::Error => write!(f, "ERROR"),
         }
     }

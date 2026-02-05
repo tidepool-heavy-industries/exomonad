@@ -5,9 +5,9 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
 
 module ExoMonad.Effects.Effector
@@ -28,9 +28,9 @@ module ExoMonad.Effects.Effector
   )
 where
 
-import Polysemy (Sem, Member, makeSem)
-import Data.Kind (Type)
 import Data.Aeson (FromJSON (..), ToJSON (..), withObject, (.:))
+import Data.Kind (Type)
+import Polysemy (Member, Sem, makeSem)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES: GitHub
@@ -138,4 +138,3 @@ data Effector m a where
   EffectorGitLsFiles :: FilePath -> [Text] -> Effector m [FilePath]
 
 makeSem ''Effector
-

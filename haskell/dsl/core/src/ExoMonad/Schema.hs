@@ -61,8 +61,6 @@ module ExoMonad.Schema
   )
 where
 
-import Prelude hiding ((??))
-
 import Data.Aeson (Value (..), object, (.=))
 import Data.Map.Strict qualified as Map
 import ExoMonad.Schema.TH
@@ -94,6 +92,7 @@ import ExoMonad.StructuredOutput.Class
   )
 import Language.Haskell.TH hiding (Type)
 import Language.Haskell.TH.Syntax qualified as TH
+import Prelude hiding ((??))
 
 -- | Empty schema of given type
 emptySchema :: SchemaType -> JSONSchema

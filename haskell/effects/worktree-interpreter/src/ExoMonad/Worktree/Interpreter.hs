@@ -33,8 +33,6 @@ module ExoMonad.Worktree.Interpreter
 where
 
 import Control.Exception (SomeException, try)
-import Polysemy (Sem, Member, interpret, embed)
-import Polysemy.Embed (Embed)
 import Data.List (isPrefixOf)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -46,6 +44,8 @@ import ExoMonad.Effects.Worktree
     WorktreeSpec (..),
   )
 import Numeric (showHex)
+import Polysemy (Member, Sem, embed, interpret)
+import Polysemy.Embed (Embed)
 import System.Directory (copyFile, createDirectoryIfMissing, doesDirectoryExist, removeDirectoryRecursive)
 import System.Exit (ExitCode (..))
 import System.FilePath (takeDirectory, (</>))

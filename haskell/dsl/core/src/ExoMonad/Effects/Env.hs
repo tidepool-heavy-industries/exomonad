@@ -2,9 +2,9 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
 
 -- | Env effect for reading environment variables.
@@ -16,10 +16,9 @@ module ExoMonad.Effects.Env
   )
 where
 
-import Prelude hiding (lookupEnv)
-
-import Polysemy (Sem, Member, makeSem)
 import Data.Text (Text)
+import Polysemy (Member, Sem, makeSem)
+import Prelude hiding (lookupEnv)
 
 -- | Env effect for reading environment variables.
 data Env m a where
@@ -31,4 +30,3 @@ makeSem ''Env
 -- | Lookup an environment variable (alias for getEnv).
 lookupEnv :: (Member Env r) => Text -> Sem r (Maybe Text)
 lookupEnv = getEnv
-

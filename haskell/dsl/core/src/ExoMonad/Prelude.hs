@@ -58,48 +58,16 @@ module ExoMonad.Prelude
 where
 
 -- Relude re-exports
-import Prelude hiding
-  ( -- Hide things that collide with ExoMonad DSL or are legacy
-    id,
-    trace,
-    -- We use Polysemy's State/Reader usually, but Relude's are fine if qualified.
-    -- However, we export our own 'State' effect.
-    State,
-    get,
-    put,
-    modify,
-    gets,
-  )
+
+-- Hide things that collide with ExoMonad DSL or are legacy
+
+-- We use Polysemy's State/Reader usually, but Relude's are fine if qualified.
+-- However, we export our own 'State' effect.
 
 -- Effect System
-import Polysemy (Sem, Member, interpret, send, embed, makeSem)
-import Polysemy.Embed (Embed)
-
--- | Alias for Polysemy's 'Sem' to maintain compatibility
-type Eff = Sem
-
--- | Compatibility alias for @'Member' ('Embed' m)@ to mimic the traditional
---   @LastMember@ constraint from earlier versions.
---
---   This is a temporary shim to preserve the old API surface while the
---   codebase migrates to using @Member (Embed m)@ directly. New code
---   should prefer the more explicit @Member (Embed m) r@ constraint.
---   This alias may be deprecated and removed in a future major release.
-type LastMember m r = Member (Embed m) r
-
--- | Compatibility alias for 'embed' to mimic the traditional @sendM@ helper
---   from earlier versions.
---
---   This is a temporary shim to preserve the old API surface while the
---   codebase migrates to using 'embed' directly. New code should prefer
---   calling 'embed' rather than 'sendM'. This alias may be deprecated and
---   removed in a future major release.
-sendM :: Member (Embed m) r => m a -> Sem r a
-sendM = embed
 
 -- JSON
 import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), object, (.:), (.:?), (.=))
-
 -- Qualified Imports (Standard)
 import Data.ByteString qualified as BS
 import Data.HashMap.Strict qualified as HM
@@ -108,7 +76,6 @@ import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Vector qualified as V
-
 -- ExoMonad Internal Imports
 import ExoMonad.Effect.Types
   ( Emit,
@@ -135,3 +102,36 @@ import ExoMonad.Effect.Types
     requestText,
     returnValue,
   )
+import Polysemy (Member, Sem, embed, interpret, makeSem, send)
+import Polysemy.Embed (Embed)
+import Prelude hiding
+  ( State,
+    get,
+    gets,
+    id,
+    modify,
+    put,
+    trace,
+  )
+
+-- | Alias for Polysemy's 'Sem' to maintain compatibility
+type Eff = Sem
+
+-- | Compatibility alias for @'Member' ('Embed' m)@ to mimic the traditional
+--   @LastMember@ constraint from earlier versions.
+--
+--   This is a temporary shim to preserve the old API surface while the
+--   codebase migrates to using @Member (Embed m)@ directly. New code
+--   should prefer the more explicit @Member (Embed m) r@ constraint.
+--   This alias may be deprecated and removed in a future major release.
+type LastMember m r = Member (Embed m) r
+
+-- | Compatibility alias for 'embed' to mimic the traditional @sendM@ helper
+--   from earlier versions.
+--
+--   This is a temporary shim to preserve the old API surface while the
+--   codebase migrates to using 'embed' directly. New code should prefer
+--   calling 'embed' rather than 'sendM'. This alias may be deprecated and
+--   removed in a future major release.
+sendM :: (Member (Embed m) r) => m a -> Sem r a
+sendM = embed

@@ -45,9 +45,6 @@ module Test.ExoMonad.MockLLM
   )
 where
 
-import Polysemy (Sem, Member, interpret, reinterpret, raise)
-import Polysemy.State (State, evalState, get, put)
-import Polysemy.Writer (Writer, runWriter, tell)
 import Data.Aeson (Value (..))
 import Data.Aeson.Key (fromText)
 import Data.Aeson.KeyMap qualified as KM
@@ -58,6 +55,9 @@ import ExoMonad.Effect.Types
     LLM (..),
     TurnResult (..),
   )
+import Polysemy (Member, Sem, interpret, raise, reinterpret)
+import Polysemy.State (State, evalState, get, put)
+import Polysemy.Writer (Writer, runWriter, tell)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES

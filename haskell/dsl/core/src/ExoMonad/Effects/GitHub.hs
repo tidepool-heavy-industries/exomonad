@@ -2,9 +2,9 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
 
 -- | GitHub integration effect
@@ -94,14 +94,14 @@ module ExoMonad.Effects.GitHub
 where
 
 import Control.Applicative ((<|>))
-import Polysemy (Sem, Member, interpret, makeSem)
-import Polysemy.Error (Error, throw)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.!=), (.:), (.:?), (.=))
 import Data.Text (Text)
 import Data.Text qualified
 import Data.Time (UTCTime)
 import ExoMonad.Effect (Log, logInfo)
 import GHC.Generics (Generic)
+import Polysemy (Member, Sem, interpret, makeSem)
+import Polysemy.Error (Error, throw)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ERROR TYPES

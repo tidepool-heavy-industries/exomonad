@@ -32,18 +32,17 @@ module ExoMonad.Schema.TH
   )
 where
 
-import Prelude hiding (head, (??))
-
 import Control.Monad (forM)
 import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), object, withObject, withText, (.:), (.:?), (.=))
 import Data.Aeson.Key qualified as K
 import Data.Char (isUpper, toLower)
-import Data.List (delete, head, intercalate, stripPrefix, foldl')
+import Data.List (delete, foldl', head, intercalate, stripPrefix)
 import Data.Map.Strict qualified as Map
 -- Import types for HasJSONSchema instance generation
 import ExoMonad.StructuredOutput.Class (HasJSONSchema (..), JSONSchema (..), SchemaType (..))
 import Language.Haskell.TH hiding (Type)
 import Language.Haskell.TH.Syntax qualified as TH
+import Prelude hiding (head, (??))
 
 -- | Options for MCP type derivation
 data MCPOptions = MCPOptions

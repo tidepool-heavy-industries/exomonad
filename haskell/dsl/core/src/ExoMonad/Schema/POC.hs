@@ -1,9 +1,9 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE QuasiQuotes #-}
 
 -- | POC for aeson-schemas integration.
 --
@@ -13,7 +13,7 @@ module ExoMonad.Schema.POC where
 import Data.Aeson (Value, encode)
 import Data.Aeson.Schema
 import Data.Text (Text)
-import qualified Data.Text.IO as TIO
+import Data.Text.IO qualified as TIO
 import Prelude hiding (get)
 
 -- | Define the schema for a Task Extraction result.

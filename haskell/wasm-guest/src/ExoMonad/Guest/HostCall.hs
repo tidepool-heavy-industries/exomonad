@@ -1,6 +1,6 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE PackageImports #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module ExoMonad.Guest.HostCall
   ( callHost,
@@ -51,19 +51,19 @@ where
 
 import Control.Exception (bracket)
 import Data.Aeson (FromJSON, ToJSON (..), Value, object, (.=))
-import qualified Data.Aeson as Aeson
+import Data.Aeson qualified as Aeson
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy (fromStrict, toStrict)
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Data.Word (Word64)
 import ExoMonad.Guest.FFI
 import Extism.PDK.Memory (alloc, findMemory, free, load, memoryOffset)
 import GHC.Generics (Generic)
 
--- ============================================================================ 
+-- ============================================================================
 -- Log Types (matches Rust LogPayload/LogLevel)
--- ============================================================================ 
+-- ============================================================================
 
 data LogLevel = Debug | Info | Warn | Error
   deriving (Show, Eq, Generic)
@@ -90,13 +90,14 @@ data LogPayload = LogPayload
   deriving (Show, Generic)
 
 instance ToJSON LogPayload
+
 instance FromJSON LogPayload
 
 instance FFIBoundary LogPayload
 
--- ============================================================================ 
+-- ============================================================================
 -- Git host functions
--- ============================================================================ 
+-- ============================================================================
 foreign import ccall "git_get_branch" host_git_get_branch :: Word64 -> IO Word64
 
 foreign import ccall "git_get_worktree" host_git_get_worktree :: Word64 -> IO Word64
@@ -178,20 +179,23 @@ callHost rawFn request = do
 
       case respBytes of
         Left loadErr -> pure $ Left ("Load error: " <> T.pack loadErr)
-        Right bytes -> 
-            -- Decode with FFIBoundary
-            case fromFFI (fromStrict bytes) of
-              Left err -> pure $ Left (formatFFIError err)
-              Right val -> pure $ Right val
+        Right bytes ->
+          -- Decode with FFIBoundary
+          case fromFFI (fromStrict bytes) of
+            Left err -> pure $ Left (formatFFIError err)
+            Right val -> pure $ Right val
 
 formatFFIError :: FFIError -> Text
 formatFFIError err =
-  "[" <> T.pack (show (feCode err)) <> "] " <> feMessage err
+  "["
+    <> T.pack (show (feCode err))
+    <> "] "
+    <> feMessage err
     <> maybe "" (\s -> "\nSuggestion: " <> s) (feSuggestion err)
     <> maybe "" formatContext (feContext err)
 
 formatContext :: ErrorContext -> Text
-formatContext ctx = 
+formatContext ctx =
   "\nContext:"
     <> maybe "" (\c -> "\n  Command: " <> c) (errorContextCommand ctx)
     <> maybe "" (\e -> "\n  Exit Code: " <> T.pack (show e)) (errorContextExitCode ctx)

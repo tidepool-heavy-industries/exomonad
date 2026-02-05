@@ -7,10 +7,10 @@ module ExoMonad.Env.Interpreter
   )
 where
 
-import Polysemy (Sem, Member, interpret, embed)
-import Polysemy.Embed (Embed)
 import Data.Text qualified as T
 import ExoMonad.Effects.Env (Env (..))
+import Polysemy (Member, Sem, embed, interpret)
+import Polysemy.Embed (Embed)
 import System.Environment (getEnvironment, lookupEnv)
 
 -- | Run Env effects using standard Haskell environment operations.

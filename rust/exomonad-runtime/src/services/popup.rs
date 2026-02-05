@@ -4,9 +4,9 @@
 
 use crate::common::{FFIBoundary, HostResult, IntoFFIResult};
 use anyhow::{Context, Result};
+use exomonad_ui_protocol::{PopupDefinition, PopupResult};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
 use extism_convert::Json;
-use exomonad_ui_protocol::{PopupDefinition, PopupResult};
 use serde::{Deserialize, Serialize};
 use std::process::{Command, Stdio};
 
@@ -80,8 +80,8 @@ impl PopupService {
                 .collect(),
         };
 
-        let json = serde_json::to_string(&definition)
-            .context("Failed to serialize popup definition")?;
+        let json =
+            serde_json::to_string(&definition).context("Failed to serialize popup definition")?;
 
         tracing::debug!(json = %json, "Sending popup to Zellij");
 
@@ -121,8 +121,8 @@ impl PopupService {
             anyhow::bail!("Popup response pipe failed: {}", stderr);
         }
 
-        let response_str = String::from_utf8(output.stdout)
-            .context("Invalid UTF-8 in popup response")?;
+        let response_str =
+            String::from_utf8(output.stdout).context("Invalid UTF-8 in popup response")?;
 
         tracing::debug!(response = %response_str, "Received popup response");
 

@@ -15,31 +15,31 @@ where
 
 import Control.Exception (SomeException, try)
 import Control.Monad (unless)
+import Data.Aeson (FromJSON, ToJSON, Value, withObject, (.:), (.=))
 import Data.Aeson qualified as Aeson
-import Data.Aeson (FromJSON, ToJSON, Value, (.:), (.=), withObject)
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as BSL
 import Data.Maybe (fromMaybe)
 import Data.Proxy (Proxy (..))
-import Data.Text qualified as T
 import Data.Text (Text)
-import Data.Time (getCurrentTime, formatTime, defaultTimeLocale)
-import ExoMonad.Guest.HostCall
-import ExoMonad.Types (HookConfig (..))
+import Data.Text qualified as T
+import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
+import Data.Word (Word64)
 import ExoMonad.Guest.FFI (FFIBoundary)
+import ExoMonad.Guest.HostCall
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), toMCPFormat)
 import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
-import ExoMonad.Guest.Types (HookInput (..), HookEventType (..), MCPCallInput (..), StopHookOutput (..), StopDecision (..), HookOutput, allowResponse)
+import ExoMonad.Guest.Types (HookEventType (..), HookInput (..), HookOutput, MCPCallInput (..), StopDecision (..), StopHookOutput (..), allowResponse)
+import ExoMonad.Types (HookConfig (..))
 import Extism.PDK (input, output)
 import Foreign.C.Types (CInt (..))
 import GHC.Generics (Generic)
+import Polysemy (Embed, Sem, runM)
 import System.Directory (getCurrentDirectory)
 import System.FilePath (takeFileName)
-import Data.Word (Word64)
-import Polysemy (Embed, Sem, runM)
 
 -- | Test handler - allows calling any host function directly for property testing.
 testHandler :: IO CInt
@@ -71,8 +71,10 @@ testHandler = do
       output (BSL.toStrict $ Aeson.encode $ TestResult @Value False Nothing (Just $ "Unknown function: " ++ T.unpack other))
       pure 1
 
-    callAndReturn :: forall req resp. (FFIBoundary req, FFIBoundary resp) 
-                  => (Word64 -> IO Word64) -> Value -> IO CInt
+    callAndReturn ::
+      forall req resp.
+      (FFIBoundary req, FFIBoundary resp) =>
+      (Word64 -> IO Word64) -> Value -> IO CInt
     callAndReturn hostFn val = do
       case Aeson.fromJSON val of
         Aeson.Error err -> do
@@ -197,11 +199,12 @@ hookHandler config = do
 
       -- Emit AgentStopped event BEFORE running checks
       -- This ensures we see the event even if checks fail
-      let event = Aeson.object
-            [ "type" .= ("agent:stopped" :: Text)
-            , "agent_id" .= agentId
-            , "timestamp" .= timestamp
-            ]
+      let event =
+            Aeson.object
+              [ "type" .= ("agent:stopped" :: Text),
+                "agent_id" .= agentId,
+                "timestamp" .= timestamp
+              ]
       callHostVoid host_emit_event event
 
       -- Run the hook from config (using Polysemy effects)
@@ -230,10 +233,11 @@ wrapHandler action = do
     Right code -> pure code
     Left err -> do
       -- Return proper MCPCallOutput format
-      let resp = MCPCallOutput
-            { success = False
-            , result = Nothing
-            , mcpError = Just $ T.pack ("Exception in WASM handler: " <> show err)
-            }
+      let resp =
+            MCPCallOutput
+              { success = False,
+                result = Nothing,
+                mcpError = Just $ T.pack ("Exception in WASM handler: " <> show err)
+              }
       output (BSL.toStrict $ Aeson.encode resp)
       pure 0

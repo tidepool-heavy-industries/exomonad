@@ -4,20 +4,20 @@
 
 module Main (main) where
 
-import Test.Hspec
-import Test.QuickCheck hiding (Success)
-import Data.Aeson (encode, decode, ToJSON, FromJSON)
-import qualified Data.ByteString.Lazy as BSL
-import qualified Data.Text as T
+import Data.Aeson (FromJSON, ToJSON, decode, encode)
+import Data.ByteString.Lazy qualified as BSL
+import Data.Text qualified as T
 import ExoMonad.Guest.Effects.AgentControl
 import ExoMonad.Guest.FFI
+import Test.Hspec
+import Test.QuickCheck hiding (Success)
 
 -- ============================================================================
 -- Arbitrary Instances
 -- ============================================================================
 
 arbText :: Gen T.Text
-arbText = T.pack <$> listOf1 (elements (['a'..'z'] ++ ['0'..'9'] ++ ['-']))
+arbText = T.pack <$> listOf1 (elements (['a' .. 'z'] ++ ['0' .. '9'] ++ ['-']))
 
 arbMaybeText :: Gen (Maybe T.Text)
 arbMaybeText = oneof [pure Nothing, Just <$> arbText]

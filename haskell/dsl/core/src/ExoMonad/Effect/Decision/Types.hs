@@ -13,8 +13,8 @@ where
 
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Time (UTCTime)
-import GHC.Generics (Generic)
 import ExoMonad.Effect.Log (LogFields)
+import GHC.Generics (Generic)
 
 -- | High-level decision outcomes for agent flows.
 --

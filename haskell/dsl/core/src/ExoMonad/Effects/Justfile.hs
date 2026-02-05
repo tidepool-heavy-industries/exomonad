@@ -2,9 +2,9 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
 
 -- | Justfile execution effect
@@ -23,13 +23,13 @@ module ExoMonad.Effects.Justfile
   )
 where
 
-import Polysemy (Sem, Member, interpret, makeSem)
-import Data.Kind (Type)
 import Data.Aeson (FromJSON, ToJSON)
+import Data.Kind (Type)
 import Data.Text (Text)
 import Data.Text qualified
 import ExoMonad.Effect (Log, logInfo)
 import GHC.Generics (Generic)
+import Polysemy (Member, Sem, interpret, makeSem)
 
 -- | Result of running a just recipe.
 data JustResult = JustResult
@@ -56,4 +56,3 @@ runJustfileStub = interpret $ \case
   RunRecipe recipe args -> do
     logInfo $ "[Justfile:stub] RunRecipe called: " <> recipe <> " " <> Data.Text.unwords args
     pure $ JustResult "" "" 0
-

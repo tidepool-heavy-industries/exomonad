@@ -996,8 +996,7 @@ project_dir = "../../.."
             #[cfg(unix)]
             {
                 use std::os::unix::fs::symlink;
-                symlink(wasm_target, &wasm_link)
-                    .context("Failed to create wasm symlink")?;
+                symlink(wasm_target, &wasm_link).context("Failed to create wasm symlink")?;
                 tracing::info!(
                     worktree = %worktree_path.display(),
                     target = %wasm_target.display(),
@@ -1267,7 +1266,6 @@ fn get_input<T: serde::de::DeserializeOwned>(
     let bytes = plugin.memory_bytes(handle)?;
     Ok(serde_json::from_slice(bytes)?)
 }
-
 
 fn block_on<F: std::future::Future>(future: F) -> Result<F::Output, Error> {
     match tokio::runtime::Handle::try_current() {

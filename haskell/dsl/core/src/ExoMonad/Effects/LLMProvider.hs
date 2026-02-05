@@ -2,9 +2,9 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -46,14 +46,14 @@ module ExoMonad.Effects.LLMProvider
   )
 where
 
-import Polysemy (Sem, Member, makeSem)
-import Polysemy.Internal (send)
-import Data.Kind (Type)
 import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Types qualified as AesonTypes
+import Data.Kind (Type)
 import ExoMonad.Effect.Types (LLMConfig, LlmError)
 import GHC.Generics (Generic)
+import Polysemy (Member, Sem, makeSem)
+import Polysemy.Internal (send)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PROVIDER TYPE (TYPE-LEVEL)
@@ -337,4 +337,3 @@ data LLMComplete (p :: LLMProvider) m a where
     LLMComplete p m (Either LLMError (LLMProviderResponse p))
 
 makeSem ''LLMComplete
-
