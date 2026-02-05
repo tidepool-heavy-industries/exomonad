@@ -18,7 +18,8 @@ where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), Value (..))
 import Data.Text qualified as T
-import ExoMonad.StructuredOutput.Class (ExoMonadDefault (..), GStructuredOutput (..), HasJSONSchema (..), StructuredOutput (..), formatDiagnostic)
+import Data.Vector qualified as V
+import ExoMonad.StructuredOutput.Class (ExoMonadDefault (..), GStructuredOutput (..), HasJSONSchema (..), JSONSchema (..), ParseDiagnostic (..), StructuredOutput (..), formatDiagnostic)
 import ExoMonad.StructuredOutput.Error (expectedArray, expectedNumber, expectedString, typeMismatch)
 import GHC.Generics (Rep, from, to)
 
