@@ -2,7 +2,6 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 mod cabal;
-mod gh;
 mod git;
 mod types;
 
@@ -23,10 +22,6 @@ enum Commands {
     Git {
         #[command(subcommand)]
         action: GitAction,
-    },
-    Gh {
-        #[command(subcommand)]
-        action: GhAction,
     },
 }
 
@@ -66,22 +61,6 @@ enum GitAction {
     },
 }
 
-#[derive(Subcommand)]
-enum GhAction {
-    PrStatus {
-        #[arg(long)]
-        branch: Option<String>,
-    },
-    PrCreate {
-        #[arg(long)]
-        title: String,
-        #[arg(long)]
-        body: String,
-        #[arg(long)]
-        base: Option<String>,
-    },
-}
-
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -94,10 +73,6 @@ fn main() -> Result<()> {
             GitAction::Status { cwd } => git::status(&cwd),
             GitAction::Diff { cwd, staged } => git::diff(&cwd, staged),
             GitAction::LsFiles { cwd, args } => git::ls_files(&cwd, args),
-        },
-        Commands::Gh { action } => match action {
-            GhAction::PrStatus { branch } => gh::pr_status(branch),
-            GhAction::PrCreate { title, body, base } => gh::pr_create(title, body, base),
         },
     }
 }

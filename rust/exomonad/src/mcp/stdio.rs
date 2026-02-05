@@ -292,3 +292,182 @@ pub async fn run_stdio_server(state: McpState) -> Result<()> {
     info!("stdin closed, shutting down");
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // === JSON-RPC parsing tests ===
+
+    #[test]
+    fn test_jsonrpc_parse_valid() {
+        let line = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#;
+        let request: JsonRpcRequest = serde_json::from_str(line).unwrap();
+        assert_eq!(request.method, "initialize");
+        assert_eq!(request.id, Some(Value::Number(1.into())));
+    }
+
+    #[test]
+    fn test_jsonrpc_parse_with_string_id() {
+        let line = r#"{"jsonrpc":"2.0","id":"abc-123","method":"tools/list"}"#;
+        let request: JsonRpcRequest = serde_json::from_str(line).unwrap();
+        assert_eq!(request.method, "tools/list");
+        assert_eq!(request.id, Some(Value::String("abc-123".to_string())));
+    }
+
+    #[test]
+    fn test_jsonrpc_parse_notification_no_id() {
+        let line = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
+        let request: JsonRpcRequest = serde_json::from_str(line).unwrap();
+        assert_eq!(request.method, "notifications/initialized");
+        assert!(request.id.is_none());
+    }
+
+    #[test]
+    fn test_jsonrpc_parse_with_params() {
+        let line = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git_branch","arguments":{}}}"#;
+        let request: JsonRpcRequest = serde_json::from_str(line).unwrap();
+        assert_eq!(request.method, "tools/call");
+        assert_eq!(request.params["name"], "git_branch");
+    }
+
+    #[test]
+    fn test_jsonrpc_parse_invalid() {
+        let line = "not valid json";
+        let result: Result<JsonRpcRequest, _> = serde_json::from_str(line);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_jsonrpc_parse_missing_method() {
+        let line = r#"{"jsonrpc":"2.0","id":1}"#;
+        let result: Result<JsonRpcRequest, _> = serde_json::from_str(line);
+        assert!(result.is_err());
+    }
+
+    // === JSON-RPC response tests ===
+
+    #[test]
+    fn test_jsonrpc_response_success() {
+        let response = JsonRpcResponse::success(Value::Number(42.into()), json!({"status": "ok"}));
+        assert_eq!(response.jsonrpc, "2.0");
+        assert_eq!(response.id, Value::Number(42.into()));
+        assert!(response.result.is_some());
+        assert!(response.error.is_none());
+    }
+
+    #[test]
+    fn test_jsonrpc_response_error() {
+        let response =
+            JsonRpcResponse::error(Value::Number(1.into()), -32700, "Parse error".to_string());
+        assert_eq!(response.jsonrpc, "2.0");
+        assert_eq!(response.id, Value::Number(1.into()));
+        assert!(response.result.is_none());
+        assert!(response.error.is_some());
+        let err = response.error.unwrap();
+        assert_eq!(err.code, -32700);
+        assert_eq!(err.message, "Parse error");
+    }
+
+    // === MCP type serialization tests ===
+
+    #[test]
+    fn test_mcp_initialize_result_serialization() {
+        let result = McpInitializeResult {
+            protocol_version: "2024-11-05".to_string(),
+            capabilities: McpCapabilities {
+                tools: McpToolsCapability {
+                    list_changed: false,
+                },
+            },
+            server_info: McpServerInfo {
+                name: "exomonad".to_string(),
+                version: "0.1.0".to_string(),
+            },
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"protocolVersion\":\"2024-11-05\""));
+        assert!(json.contains("\"serverInfo\""));
+        assert!(json.contains("\"capabilities\""));
+    }
+
+    #[test]
+    fn test_mcp_tool_from_definition() {
+        let def = ToolDefinition {
+            name: "test_tool".to_string(),
+            description: "A test tool".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {}
+            }),
+        };
+
+        let mcp_tool: McpTool = def.into();
+        assert_eq!(mcp_tool.name, "test_tool");
+        assert_eq!(mcp_tool.description, "A test tool");
+    }
+
+    #[test]
+    fn test_mcp_tools_list_result_serialization() {
+        let result = McpToolsListResult {
+            tools: vec![
+                McpTool {
+                    name: "tool1".to_string(),
+                    description: "First tool".to_string(),
+                    input_schema: json!({}),
+                },
+                McpTool {
+                    name: "tool2".to_string(),
+                    description: "Second tool".to_string(),
+                    input_schema: json!({}),
+                },
+            ],
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("tool1"));
+        assert!(json.contains("tool2"));
+        assert!(json.contains("inputSchema"));
+    }
+
+    #[test]
+    fn test_mcp_tool_call_result_success() {
+        let result = McpToolCallResult {
+            content: vec![McpContent {
+                content_type: "text".to_string(),
+                text: "Success!".to_string(),
+            }],
+            is_error: None,
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"type\":\"text\""));
+        assert!(json.contains("Success!"));
+        assert!(!json.contains("isError")); // Should be skipped when None
+    }
+
+    #[test]
+    fn test_mcp_tool_call_result_error() {
+        let result = McpToolCallResult {
+            content: vec![McpContent {
+                content_type: "text".to_string(),
+                text: "Error occurred".to_string(),
+            }],
+            is_error: Some(true),
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"isError\":true"));
+    }
+
+    // === Internal helper tests ===
+
+    #[test]
+    fn test_to_json_value_or_internal_error_success() {
+        let data = json!({"key": "value"});
+        let response = to_json_value_or_internal_error(Value::Number(1.into()), data);
+        assert!(response.result.is_some());
+        assert!(response.error.is_none());
+    }
+}

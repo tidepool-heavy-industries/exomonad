@@ -116,6 +116,9 @@ pub enum ServiceRequest {
         state: Option<String>, // open, closed, merged, all
         #[serde(skip_serializing_if = "Option::is_none")]
         limit: Option<u32>,
+        /// Filter by head branch (e.g., "feature/my-branch" or "owner:feature/my-branch")
+        #[serde(skip_serializing_if = "Option::is_none")]
+        head: Option<String>,
     },
     GitHubGetPullRequestReviews {
         owner: GithubOwner,
@@ -314,6 +317,10 @@ pub struct GitHubPRRef {
     pub title: String,
     pub state: ItemState,
     pub url: String,
+    #[serde(default)]
+    pub head_ref_name: String,
+    #[serde(default)]
+    pub base_ref_name: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

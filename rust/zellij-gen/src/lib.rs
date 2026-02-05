@@ -147,4 +147,259 @@ mod tests {
         assert!(layout.contains("tab name=\"Tab2\""));
         assert!(layout.contains("zjstatus.wasm"));
     }
+
+    // === Edge case tests ===
+
+    #[test]
+    fn test_tab_name_with_emoji() {
+        let params = AgentTabParams {
+            tab_name: "🤖 473-fix",
+            pane_name: "Agent",
+            command: "echo test",
+            cwd: Path::new("/tmp"),
+            shell: "/bin/zsh",
+            focus: true,
+        };
+
+        let layout = generate_agent_layout(&params).unwrap();
+        assert!(layout.contains("tab name=\"🤖 473-fix\""));
+    }
+
+    #[test]
+    fn test_tab_name_with_special_chars() {
+        let params = AgentTabParams {
+            tab_name: "Tab-123_test",
+            pane_name: "Agent",
+            command: "echo test",
+            cwd: Path::new("/tmp"),
+            shell: "/bin/zsh",
+            focus: true,
+        };
+
+        let layout = generate_agent_layout(&params).unwrap();
+        assert!(layout.contains("tab name=\"Tab-123_test\""));
+    }
+
+    #[test]
+    fn test_command_with_single_quotes() {
+        let params = AgentTabParams {
+            tab_name: "Test",
+            pane_name: "Agent",
+            command: "claude --prompt 'hello world'",
+            cwd: Path::new("/tmp"),
+            shell: "/bin/zsh",
+            focus: true,
+        };
+
+        let layout = generate_agent_layout(&params).unwrap();
+        assert!(layout.contains("claude --prompt 'hello world'"));
+    }
+
+    #[test]
+    fn test_command_with_double_quotes() {
+        let params = AgentTabParams {
+            tab_name: "Test",
+            pane_name: "Agent",
+            command: r#"echo "hello world""#,
+            cwd: Path::new("/tmp"),
+            shell: "/bin/zsh",
+            focus: true,
+        };
+
+        let layout = generate_agent_layout(&params).unwrap();
+        // Command should be in the layout (may need escaping depending on template)
+        assert!(layout.contains("echo"));
+        assert!(layout.contains("hello world"));
+    }
+
+    #[test]
+    fn test_cwd_with_spaces() {
+        let params = AgentTabParams {
+            tab_name: "Test",
+            pane_name: "Agent",
+            command: "echo test",
+            cwd: Path::new("/path/with spaces/project"),
+            shell: "/bin/zsh",
+            focus: true,
+        };
+
+        let layout = generate_agent_layout(&params).unwrap();
+        assert!(layout.contains("/path/with spaces/project"));
+    }
+
+    #[test]
+    fn test_focus_false() {
+        let params = AgentTabParams {
+            tab_name: "Test",
+            pane_name: "Agent",
+            command: "echo test",
+            cwd: Path::new("/tmp"),
+            shell: "/bin/zsh",
+            focus: false,
+        };
+
+        let layout = generate_agent_layout(&params).unwrap();
+        // When focus=false, the tab line should not have focus=true
+        // (KDL omits the attribute rather than setting it to false)
+        assert!(layout.contains("tab name=\"Test\" {"));
+        // But pane still has focus=true (inner pane focus, not tab focus)
+        assert!(layout.contains("pane name=\"Agent\" focus=true"));
+    }
+
+    #[test]
+    fn test_empty_pane_name() {
+        let params = AgentTabParams {
+            tab_name: "Test",
+            pane_name: "",
+            command: "echo test",
+            cwd: Path::new("/tmp"),
+            shell: "/bin/zsh",
+            focus: true,
+        };
+
+        let layout = generate_agent_layout(&params).unwrap();
+        // Should still generate valid KDL with empty name
+        assert!(layout.contains("pane name=\"\""));
+    }
+
+    // === Structure validation tests ===
+
+    #[test]
+    fn test_layout_has_zjstatus() {
+        let params = AgentTabParams {
+            tab_name: "Test",
+            pane_name: "Agent",
+            command: "echo test",
+            cwd: Path::new("/tmp"),
+            shell: "/bin/zsh",
+            focus: true,
+        };
+
+        let layout = generate_agent_layout(&params).unwrap();
+        assert!(
+            layout.contains("zjstatus.wasm"),
+            "Layout should include zjstatus plugin"
+        );
+    }
+
+    #[test]
+    fn test_layout_has_exomonad_plugin() {
+        let params = AgentTabParams {
+            tab_name: "Test",
+            pane_name: "Agent",
+            command: "echo test",
+            cwd: Path::new("/tmp"),
+            shell: "/bin/zsh",
+            focus: true,
+        };
+
+        let layout = generate_agent_layout(&params).unwrap();
+        assert!(
+            layout.contains("exomonad-plugin.wasm"),
+            "Layout should include exomonad plugin"
+        );
+    }
+
+    #[test]
+    fn test_layout_close_on_exit() {
+        let params = AgentTabParams {
+            tab_name: "Test",
+            pane_name: "Agent",
+            command: "echo test",
+            cwd: Path::new("/tmp"),
+            shell: "/bin/zsh",
+            focus: true,
+        };
+
+        let layout = generate_agent_layout(&params).unwrap();
+        assert!(
+            layout.contains("close_on_exit true"),
+            "Layout should include close_on_exit true"
+        );
+    }
+
+    #[test]
+    fn test_main_layout_multiple_tabs() {
+        let tabs = vec![
+            AgentTabParams {
+                tab_name: "Tab1",
+                pane_name: "P1",
+                command: "cmd1",
+                cwd: Path::new("/tmp/1"),
+                shell: "/bin/zsh",
+                focus: true,
+            },
+            AgentTabParams {
+                tab_name: "Tab2",
+                pane_name: "P2",
+                command: "cmd2",
+                cwd: Path::new("/tmp/2"),
+                shell: "/bin/zsh",
+                focus: false,
+            },
+            AgentTabParams {
+                tab_name: "Tab3",
+                pane_name: "P3",
+                command: "cmd3",
+                cwd: Path::new("/tmp/3"),
+                shell: "/bin/zsh",
+                focus: false,
+            },
+        ];
+
+        let layout = generate_main_layout(tabs).unwrap();
+
+        // All tabs should be present
+        assert!(layout.contains("tab name=\"Tab1\""));
+        assert!(layout.contains("tab name=\"Tab2\""));
+        assert!(layout.contains("tab name=\"Tab3\""));
+
+        // Should have zjstatus
+        assert!(layout.contains("zjstatus.wasm"));
+    }
+
+    #[test]
+    fn test_different_shells() {
+        for shell in ["/bin/bash", "/bin/zsh", "/usr/bin/fish"] {
+            let params = AgentTabParams {
+                tab_name: "Test",
+                pane_name: "Agent",
+                command: "echo test",
+                cwd: Path::new("/tmp"),
+                shell,
+                focus: true,
+            };
+
+            let layout = generate_agent_layout(&params).unwrap();
+            assert!(
+                layout.contains(shell),
+                "Layout should contain shell: {}",
+                shell
+            );
+        }
+    }
+
+    #[test]
+    fn test_long_command() {
+        let long_command = "claude --prompt 'This is a very long prompt that contains multiple sentences and should still be handled correctly by the layout generator without any truncation or issues'";
+        let params = AgentTabParams {
+            tab_name: "Test",
+            pane_name: "Agent",
+            command: long_command,
+            cwd: Path::new("/tmp"),
+            shell: "/bin/zsh",
+            focus: true,
+        };
+
+        let layout = generate_agent_layout(&params).unwrap();
+        assert!(layout.contains("very long prompt"));
+    }
+
+    #[test]
+    fn test_empty_tabs_list() {
+        let tabs: Vec<AgentTabParams> = vec![];
+        let layout = generate_main_layout(tabs).unwrap();
+        // Should still produce valid KDL with zjstatus
+        assert!(layout.contains("zjstatus.wasm"));
+    }
 }

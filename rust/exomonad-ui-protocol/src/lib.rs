@@ -368,10 +368,195 @@ pub struct PopupResult {
 mod tests {
     use super::*;
 
+    // === Component deserialization tests ===
+
+    #[test]
+    fn test_text_component_deser() {
+        let json = r#"{
+            "id": "info",
+            "type": "text",
+            "content": "This is informational text"
+        }"#;
+        let parsed: Component = serde_json::from_str(json).unwrap();
+        match parsed {
+            Component::Text {
+                id,
+                content,
+                visible_when,
+            } => {
+                assert_eq!(id, "info");
+                assert_eq!(content, "This is informational text");
+                assert!(visible_when.is_none());
+            }
+            _ => panic!("Expected Text component"),
+        }
+    }
+
+    #[test]
+    fn test_slider_component_deser() {
+        let json = r#"{
+            "id": "confidence",
+            "type": "slider",
+            "label": "Confidence Level",
+            "min": 0.0,
+            "max": 100.0,
+            "default": 75.5
+        }"#;
+        let parsed: Component = serde_json::from_str(json).unwrap();
+        match parsed {
+            Component::Slider {
+                id,
+                label,
+                min,
+                max,
+                default,
+                visible_when,
+            } => {
+                assert_eq!(id, "confidence");
+                assert_eq!(label, "Confidence Level");
+                assert_eq!(min, 0.0);
+                assert_eq!(max, 100.0);
+                assert_eq!(default, 75.5);
+                assert!(visible_when.is_none());
+            }
+            _ => panic!("Expected Slider component"),
+        }
+    }
+
+    #[test]
+    fn test_checkbox_component_deser() {
+        let json = r#"{
+            "id": "agree",
+            "type": "checkbox",
+            "label": "I agree to the terms",
+            "default": false
+        }"#;
+        let parsed: Component = serde_json::from_str(json).unwrap();
+        match parsed {
+            Component::Checkbox {
+                id,
+                label,
+                default,
+                visible_when,
+            } => {
+                assert_eq!(id, "agree");
+                assert_eq!(label, "I agree to the terms");
+                assert!(!default);
+                assert!(visible_when.is_none());
+            }
+            _ => panic!("Expected Checkbox component"),
+        }
+    }
+
+    #[test]
+    fn test_textbox_component_deser() {
+        let json = r#"{
+            "id": "notes",
+            "type": "textbox",
+            "label": "Additional Notes",
+            "placeholder": "Enter notes here...",
+            "rows": 3
+        }"#;
+        let parsed: Component = serde_json::from_str(json).unwrap();
+        match parsed {
+            Component::Textbox {
+                id,
+                label,
+                placeholder,
+                rows,
+                visible_when,
+            } => {
+                assert_eq!(id, "notes");
+                assert_eq!(label, "Additional Notes");
+                assert_eq!(placeholder, Some("Enter notes here...".to_string()));
+                assert_eq!(rows, Some(3));
+                assert!(visible_when.is_none());
+            }
+            _ => panic!("Expected Textbox component"),
+        }
+    }
+
+    #[test]
+    fn test_choice_component_deser() {
+        let json = r#"{
+            "id": "color",
+            "type": "choice",
+            "label": "Choose a color",
+            "options": ["Red", "Green", "Blue"],
+            "default": 1
+        }"#;
+        let parsed: Component = serde_json::from_str(json).unwrap();
+        match parsed {
+            Component::Choice {
+                id,
+                label,
+                options,
+                default,
+                visible_when,
+            } => {
+                assert_eq!(id, "color");
+                assert_eq!(label, "Choose a color");
+                assert_eq!(options, vec!["Red", "Green", "Blue"]);
+                assert_eq!(default, Some(1));
+                assert!(visible_when.is_none());
+            }
+            _ => panic!("Expected Choice component"),
+        }
+    }
+
+    #[test]
+    fn test_multiselect_component_deser() {
+        let json = r#"{
+            "id": "features",
+            "type": "multiselect",
+            "label": "Select features",
+            "options": ["Feature A", "Feature B", "Feature C"]
+        }"#;
+        let parsed: Component = serde_json::from_str(json).unwrap();
+        match parsed {
+            Component::Multiselect {
+                id,
+                label,
+                options,
+                default,
+                visible_when,
+            } => {
+                assert_eq!(id, "features");
+                assert_eq!(label, "Select features");
+                assert_eq!(options, vec!["Feature A", "Feature B", "Feature C"]);
+                assert!(default.is_none());
+                assert!(visible_when.is_none());
+            }
+            _ => panic!("Expected Multiselect component"),
+        }
+    }
+
+    #[test]
+    fn test_group_component_deser() {
+        let json = r#"{
+            "id": "advanced",
+            "type": "group",
+            "label": "Advanced Settings"
+        }"#;
+        let parsed: Component = serde_json::from_str(json).unwrap();
+        match parsed {
+            Component::Group {
+                id,
+                label,
+                visible_when,
+            } => {
+                assert_eq!(id, "advanced");
+                assert_eq!(label, "Advanced Settings");
+                assert!(visible_when.is_none());
+            }
+            _ => panic!("Expected Group component"),
+        }
+    }
+
+    // === Visibility rule tests ===
+
     #[test]
     fn test_component_with_visibility_deserialization() {
-        // Test visibility rule deserialization
-        // Checked variant matches a simple string
         let json = r#"{
             "id": "slider1",
             "type": "slider",
@@ -423,6 +608,281 @@ mod tests {
     }
 
     #[test]
+    fn test_visibility_rule_less_than() {
+        let json = r#"{"id": "s1", "max_value": 50.0}"#;
+        let rule: VisibilityRule = serde_json::from_str(json).unwrap();
+        match rule {
+            VisibilityRule::LessThan { id, max_value } => {
+                assert_eq!(id, "s1");
+                assert_eq!(max_value, 50.0);
+            }
+            _ => panic!("Expected LessThan"),
+        }
+    }
+
+    #[test]
+    fn test_visibility_rule_count_greater_than() {
+        let json = r#"{"id": "m1", "min_count": 1}"#;
+        let rule: VisibilityRule = serde_json::from_str(json).unwrap();
+        match rule {
+            VisibilityRule::CountGreaterThan { id, min_count } => {
+                assert_eq!(id, "m1");
+                assert_eq!(min_count, 1);
+            }
+            _ => panic!("Expected CountGreaterThan"),
+        }
+    }
+
+    // === PopupState initialization tests ===
+
+    #[test]
+    fn test_popup_state_slider_default() {
+        let definition = PopupDefinition {
+            title: "Test".to_string(),
+            components: vec![Component::Slider {
+                id: "slider1".to_string(),
+                label: "Test Slider".to_string(),
+                min: 0.0,
+                max: 100.0,
+                default: 42.5,
+                visible_when: None,
+            }],
+        };
+        let state = PopupState::new(&definition);
+        assert_eq!(state.get_number("slider1"), Some(42.5));
+    }
+
+    #[test]
+    fn test_popup_state_checkbox_default() {
+        let definition = PopupDefinition {
+            title: "Test".to_string(),
+            components: vec![Component::Checkbox {
+                id: "check1".to_string(),
+                label: "Test Checkbox".to_string(),
+                default: true,
+                visible_when: None,
+            }],
+        };
+        let state = PopupState::new(&definition);
+        assert_eq!(state.get_boolean("check1"), Some(true));
+    }
+
+    #[test]
+    fn test_popup_state_textbox_empty() {
+        let definition = PopupDefinition {
+            title: "Test".to_string(),
+            components: vec![Component::Textbox {
+                id: "text1".to_string(),
+                label: "Test Textbox".to_string(),
+                placeholder: Some("Enter text...".to_string()),
+                rows: None,
+                visible_when: None,
+            }],
+        };
+        let state = PopupState::new(&definition);
+        assert_eq!(state.get_text("text1"), Some(""));
+    }
+
+    #[test]
+    fn test_popup_state_choice_default() {
+        let definition = PopupDefinition {
+            title: "Test".to_string(),
+            components: vec![Component::Choice {
+                id: "choice1".to_string(),
+                label: "Test Choice".to_string(),
+                options: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+                default: Some(2),
+                visible_when: None,
+            }],
+        };
+        let state = PopupState::new(&definition);
+        assert_eq!(state.get_choice("choice1"), Some(2));
+    }
+
+    #[test]
+    fn test_popup_state_choice_no_default() {
+        let definition = PopupDefinition {
+            title: "Test".to_string(),
+            components: vec![Component::Choice {
+                id: "choice1".to_string(),
+                label: "Test Choice".to_string(),
+                options: vec!["A".to_string(), "B".to_string()],
+                default: None,
+                visible_when: None,
+            }],
+        };
+        let state = PopupState::new(&definition);
+        assert_eq!(state.get_choice("choice1"), Some(0)); // Defaults to 0 when None
+    }
+
+    #[test]
+    fn test_popup_state_multiselect_init() {
+        let definition = PopupDefinition {
+            title: "Test".to_string(),
+            components: vec![Component::Multiselect {
+                id: "multi1".to_string(),
+                label: "Test Multi".to_string(),
+                options: vec!["X".to_string(), "Y".to_string(), "Z".to_string()],
+                default: None,
+                visible_when: None,
+            }],
+        };
+        let state = PopupState::new(&definition);
+        assert_eq!(
+            state.get_multichoice("multi1"),
+            Some(&[false, false, false][..])
+        );
+    }
+
+    // === Getter/setter tests ===
+
+    #[test]
+    fn test_get_set_number() {
+        let definition = PopupDefinition {
+            title: "Test".to_string(),
+            components: vec![Component::Slider {
+                id: "num".to_string(),
+                label: "Number".to_string(),
+                min: 0.0,
+                max: 100.0,
+                default: 0.0,
+                visible_when: None,
+            }],
+        };
+        let mut state = PopupState::new(&definition);
+        assert_eq!(state.get_number("num"), Some(0.0));
+
+        state.set_number("num", 99.9);
+        assert_eq!(state.get_number("num"), Some(99.9));
+    }
+
+    #[test]
+    fn test_get_set_boolean() {
+        let definition = PopupDefinition {
+            title: "Test".to_string(),
+            components: vec![Component::Checkbox {
+                id: "flag".to_string(),
+                label: "Flag".to_string(),
+                default: false,
+                visible_when: None,
+            }],
+        };
+        let mut state = PopupState::new(&definition);
+        assert_eq!(state.get_boolean("flag"), Some(false));
+
+        state.set_boolean("flag", true);
+        assert_eq!(state.get_boolean("flag"), Some(true));
+    }
+
+    #[test]
+    fn test_get_set_text() {
+        let definition = PopupDefinition {
+            title: "Test".to_string(),
+            components: vec![Component::Textbox {
+                id: "txt".to_string(),
+                label: "Text".to_string(),
+                placeholder: None,
+                rows: None,
+                visible_when: None,
+            }],
+        };
+        let mut state = PopupState::new(&definition);
+        assert_eq!(state.get_text("txt"), Some(""));
+
+        state.set_text("txt", "Hello World".to_string());
+        assert_eq!(state.get_text("txt"), Some("Hello World"));
+    }
+
+    #[test]
+    fn test_get_set_choice() {
+        let definition = PopupDefinition {
+            title: "Test".to_string(),
+            components: vec![Component::Choice {
+                id: "sel".to_string(),
+                label: "Selection".to_string(),
+                options: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+                default: Some(0),
+                visible_when: None,
+            }],
+        };
+        let mut state = PopupState::new(&definition);
+        assert_eq!(state.get_choice("sel"), Some(0));
+
+        state.set_choice("sel", 2);
+        assert_eq!(state.get_choice("sel"), Some(2));
+    }
+
+    #[test]
+    fn test_get_set_multichoice() {
+        let definition = PopupDefinition {
+            title: "Test".to_string(),
+            components: vec![Component::Multiselect {
+                id: "opts".to_string(),
+                label: "Options".to_string(),
+                options: vec!["1".to_string(), "2".to_string(), "3".to_string()],
+                default: None,
+                visible_when: None,
+            }],
+        };
+        let mut state = PopupState::new(&definition);
+        assert_eq!(
+            state.get_multichoice("opts"),
+            Some(&[false, false, false][..])
+        );
+
+        state.set_multichoice("opts", vec![true, false, true]);
+        assert_eq!(
+            state.get_multichoice("opts"),
+            Some(&[true, false, true][..])
+        );
+    }
+
+    // === Component helper method tests ===
+
+    #[test]
+    fn test_component_id_method() {
+        let text = Component::Text {
+            id: "t1".to_string(),
+            content: "Hello".to_string(),
+            visible_when: None,
+        };
+        assert_eq!(text.id(), "t1");
+
+        let slider = Component::Slider {
+            id: "s1".to_string(),
+            label: "Slider".to_string(),
+            min: 0.0,
+            max: 100.0,
+            default: 50.0,
+            visible_when: None,
+        };
+        assert_eq!(slider.id(), "s1");
+    }
+
+    #[test]
+    fn test_component_visible_when_method() {
+        let component = Component::Checkbox {
+            id: "cb".to_string(),
+            label: "Check".to_string(),
+            default: false,
+            visible_when: Some(VisibilityRule::Checked("other".to_string())),
+        };
+        assert_eq!(
+            component.visible_when(),
+            Some(&VisibilityRule::Checked("other".to_string()))
+        );
+
+        let no_rule = Component::Text {
+            id: "t".to_string(),
+            content: "x".to_string(),
+            visible_when: None,
+        };
+        assert!(no_rule.visible_when().is_none());
+    }
+
+    // === JSON value serialization ===
+
+    #[test]
     fn test_to_json_values() {
         let mut values = HashMap::new();
         values.insert("num".to_string(), ElementValue::Number(42.0));
@@ -448,5 +908,61 @@ mod tests {
         assert_eq!(obj["choice"], 1);
         assert_eq!(obj["multi"][0], true);
         assert_eq!(obj["multi"][1], false);
+    }
+
+    // === AgentId tests ===
+
+    #[test]
+    fn test_agent_id_valid() {
+        let id: Result<AgentId, _> = "agent-123".to_string().try_into();
+        assert!(id.is_ok());
+        assert_eq!(id.unwrap().to_string(), "agent-123");
+    }
+
+    #[test]
+    fn test_agent_id_empty_rejected() {
+        let id: Result<AgentId, _> = "".to_string().try_into();
+        assert!(id.is_err());
+        assert!(id.unwrap_err().contains("empty"));
+    }
+
+    #[test]
+    fn test_agent_id_serialization_roundtrip() {
+        let id: AgentId = "test-agent".to_string().try_into().unwrap();
+        let json = serde_json::to_string(&id).unwrap();
+        assert_eq!(json, "\"test-agent\"");
+
+        let deserialized: AgentId = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.to_string(), "test-agent");
+    }
+
+    // === AgentEvent tests ===
+
+    #[test]
+    fn test_agent_event_serialization() {
+        let event = AgentEvent::AgentStarted {
+            agent_id: "agent-1".to_string().try_into().unwrap(),
+            timestamp: "2024-01-01T00:00:00Z".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"type\":\"agent:started\""));
+        assert!(json.contains("\"agent_id\":\"agent-1\""));
+    }
+
+    // === PopupResult tests ===
+
+    #[test]
+    fn test_popup_result_serialization() {
+        let result = PopupResult {
+            button: "submit".to_string(),
+            values: serde_json::json!({"name": "test"}),
+            time_spent_seconds: Some(5.5),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"button\":\"submit\""));
+        assert!(json.contains("\"time_spent_seconds\":5.5"));
+
+        let deserialized: PopupResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.button, "submit");
     }
 }

@@ -62,44 +62,54 @@ pub struct DiffFile {
     pub deletions: u32,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum PrState {
-    Open,
-    Closed,
-    Merged,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum ReviewStatus {
-    Pending,
-    Approved,
-    ChangesRequested,
-    Commented,
-    Dismissed,
-}
+    #[test]
+    fn test_cabal_build_result_roundtrip() {
+        let result = CabalBuildResult {
+            success: true,
+            errors: vec![BuildError {
+                file: "src/Lib.hs".to_string(),
+                line: 10,
+                column: 5,
+                message: "Type error".to_string(),
+                error_type: "type-error".to_string(),
+            }],
+            warnings: vec![BuildWarning {
+                file: "src/Main.hs".to_string(),
+                line: 20,
+                message: "Unused import".to_string(),
+            }],
+        };
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct GhPrStatusResult {
-    pub exists: bool,
-    pub url: Option<String>,
-    pub number: Option<u32>,
-    pub state: Option<PrState>,              // "open", "closed", "merged"
-    pub review_status: Option<ReviewStatus>, // "pending", "approved", "changes_requested"
-    pub comments: Vec<PrComment>,
-}
+        let json = serde_json::to_string(&result).unwrap();
+        let deserialized: CabalBuildResult = serde_json::from_str(&json).unwrap();
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct PrComment {
-    pub author: String,
-    pub body: String,
-    pub path: Option<String>, // for review comments
-    pub line: Option<u32>,
-}
+        assert_eq!(deserialized.success, true);
+        assert_eq!(deserialized.errors.len(), 1);
+        assert_eq!(deserialized.errors[0].file, "src/Lib.hs");
+        assert_eq!(deserialized.warnings.len(), 1);
+    }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct GhPrCreateResult {
-    pub url: String,
-    pub number: u32,
+    #[test]
+    fn test_git_status_result_roundtrip() {
+        let result = GitStatusResult {
+            branch: "main".to_string(),
+            dirty: vec!["file1.rs".to_string(), "file2.rs".to_string()],
+            staged: vec!["staged.rs".to_string()],
+            ahead: 3,
+            behind: 1,
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        let deserialized: GitStatusResult = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.branch, "main");
+        assert_eq!(deserialized.dirty.len(), 2);
+        assert_eq!(deserialized.staged.len(), 1);
+        assert_eq!(deserialized.ahead, 3);
+        assert_eq!(deserialized.behind, 1);
+    }
 }

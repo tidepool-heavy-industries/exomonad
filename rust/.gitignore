@@ -1,4 +1,10 @@
-target/*
+# Rust build artifacts
+target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Local config (created by tests or local runs)
+.exomonad/
 
 # Frontend build artifacts
 exomonad-hub/frontend/node_modules/

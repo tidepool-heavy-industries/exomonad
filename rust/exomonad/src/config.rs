@@ -178,3 +178,166 @@ impl Default for Config {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn setup_test_dir() -> TempDir {
+        TempDir::new().expect("Failed to create temp dir")
+    }
+
+    #[test]
+    fn test_raw_config_parse_local() {
+        let content = r#"
+            role = "dev"
+            wasm_path = "/custom/path"
+        "#;
+        let raw: RawConfig = toml::from_str(content).unwrap();
+        assert_eq!(raw.role, Some(Role::Dev));
+        assert_eq!(raw.wasm_path, Some(PathBuf::from("/custom/path")));
+    }
+
+    #[test]
+    fn test_raw_config_parse_global() {
+        let content = r#"
+            project_dir = "/my/project"
+            default_role = "tl"
+        "#;
+        let raw: RawConfig = toml::from_str(content).unwrap();
+        assert_eq!(raw.project_dir, Some(PathBuf::from("/my/project")));
+        assert_eq!(raw.default_role, Some(Role::TL));
+    }
+
+    #[test]
+    fn test_raw_config_empty() {
+        let raw: RawConfig = toml::from_str("").unwrap();
+        assert!(raw.role.is_none());
+        assert!(raw.default_role.is_none());
+        assert!(raw.project_dir.is_none());
+        assert!(raw.wasm_path.is_none());
+    }
+
+    #[test]
+    fn test_config_default() {
+        let config = Config::default();
+        assert_eq!(config.project_dir, PathBuf::from("."));
+        assert_eq!(config.role, Role::Dev);
+        assert!(config.wasm_path_override.is_none());
+    }
+
+    #[test]
+    fn test_config_validate_project_dir_not_found() {
+        let config = Config {
+            project_dir: PathBuf::from("/nonexistent/path/that/should/not/exist"),
+            role: Role::Dev,
+            wasm_path_override: None,
+        };
+
+        let result = config.validate();
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ConfigError::ProjectDirNotFound { path } => {
+                assert_eq!(
+                    path,
+                    PathBuf::from("/nonexistent/path/that/should/not/exist")
+                );
+            }
+            other => panic!("Expected ProjectDirNotFound, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_config_validate_project_dir_not_directory() {
+        let temp = setup_test_dir();
+        let file_path = temp.path().join("not_a_dir");
+        fs::write(&file_path, "content").unwrap();
+
+        let config = Config {
+            project_dir: file_path.clone(),
+            role: Role::Dev,
+            wasm_path_override: None,
+        };
+
+        let result = config.validate();
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ConfigError::ProjectDirNotDirectory { path } => {
+                assert_eq!(path, file_path);
+            }
+            other => panic!("Expected ProjectDirNotDirectory, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_config_resolve_wasm_path_with_override() {
+        let config = Config {
+            project_dir: PathBuf::from("."),
+            role: Role::TL,
+            wasm_path_override: Some(PathBuf::from("/custom/wasm")),
+        };
+
+        let path = config.resolve_wasm_path().unwrap();
+        assert_eq!(path, PathBuf::from("/custom/wasm/wasm-guest-tl.wasm"));
+    }
+
+    #[test]
+    fn test_config_resolve_wasm_path_default() {
+        let config = Config {
+            project_dir: PathBuf::from("."),
+            role: Role::Dev,
+            wasm_path_override: None,
+        };
+
+        // This test requires HOME to be set
+        if std::env::var("HOME").is_ok() {
+            let path = config.resolve_wasm_path().unwrap();
+            assert!(path.to_string_lossy().contains(".exomonad/wasm"));
+            assert!(path.to_string_lossy().contains("wasm-guest-dev.wasm"));
+        }
+    }
+
+    #[test]
+    fn test_config_error_display() {
+        let err = ConfigError::ProjectDirNotFound {
+            path: PathBuf::from("/test"),
+        };
+        assert!(err.to_string().contains("/test"));
+
+        let err = ConfigError::HomeNotSet;
+        assert!(err.to_string().contains("HOME"));
+
+        let err = ConfigError::MissingField {
+            field: "role".to_string(),
+        };
+        assert!(err.to_string().contains("role"));
+    }
+
+    #[test]
+    fn test_validated_config_accessors() {
+        let temp = setup_test_dir();
+        let project_dir = temp.path().to_path_buf();
+
+        // Create a mock WASM file
+        let wasm_dir = temp.path().join("wasm");
+        fs::create_dir_all(&wasm_dir).unwrap();
+        let wasm_file = wasm_dir.join("wasm-guest-dev.wasm");
+        fs::write(&wasm_file, b"mock wasm").unwrap();
+
+        let config = Config {
+            project_dir: project_dir.clone(),
+            role: Role::Dev,
+            wasm_path_override: Some(wasm_dir),
+        };
+
+        let validated = config.validate().unwrap();
+        assert_eq!(validated.project_dir(), &project_dir);
+        assert_eq!(validated.role(), Role::Dev);
+        assert!(validated
+            .wasm_path_buf()
+            .to_string_lossy()
+            .contains("wasm-guest-dev.wasm"));
+    }
+}

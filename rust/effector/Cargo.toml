@@ -15,3 +15,6 @@ regex = "1.12.2"
 [[bin]]
 name = "effector"
 path = "src/main.rs"
+
+[dev-dependencies]
+proptest = "1.0"
