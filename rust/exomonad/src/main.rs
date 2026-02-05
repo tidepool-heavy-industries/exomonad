@@ -118,6 +118,8 @@ async fn handle_hook(
         }
     }
 
+    info!("Hook stdin: {}", stdin_content);
+
     // Parse the hook input and inject runtime
     let mut hook_input: HookInput =
         serde_json::from_str(&stdin_content).context("Failed to parse hook input")?;
@@ -127,6 +129,13 @@ async fn handle_hook(
     } else {
         None
     };
+
+    // Ensure CWD is populated for identification
+    if hook_input.cwd.is_empty() {
+        if let Ok(cwd) = std::env::current_dir() {
+            hook_input.cwd = cwd.to_string_lossy().to_string();
+        }
+    }
 
     // Normalize CLI-specific hook types to internal abstractions before WASM.
     // Both Claude's Stop and Gemini's AfterAgent represent "main agent stop".

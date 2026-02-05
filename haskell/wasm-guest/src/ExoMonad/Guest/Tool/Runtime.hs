@@ -173,10 +173,10 @@ hookHandler config = do
       callHostVoid host_log_info (LogPayload Info ("Hook received: " <> hookName) Nothing)
       
       -- Debug HookInput
-      let debugMsg = "HookInput debug: session=" <> hiSessionId hookInput 
-                  <> ", agent=" <> fromMaybe "None" (hiAgentId hookInput)
-                  <> ", cwd=" <> hiCwd hookInput
-      callHostVoid host_log_info (LogPayload Debug debugMsg Nothing)
+      let debugMsg = "HookInput debug: session=[" <> hiSessionId hookInput 
+                  <> "], agent=[" <> fromMaybe "None" (hiAgentId hookInput)
+                  <> "], cwd=[" <> hiCwd hookInput <> "]"
+      callHostVoid host_log_info (LogPayload Info debugMsg Nothing)
 
       case hookType of
         SessionEnd -> handleStopHook hookInput (onStop config)
@@ -193,13 +193,23 @@ hookHandler config = do
     handleStopHook :: HookInput -> (HookInput -> Sem '[Embed IO] StopHookOutput) -> IO CInt
     handleStopHook hookInput hook = do
       -- Try to get agent ID from protocol, then path, then session
-      let agentId = fromMaybe "" $
-            hiAgentId hookInput <|> 
-            extractAgentId (hiCwd hookInput) <|> 
-            Just (hiSessionId hookInput)
+      let maybeAgentId = hiAgentId hookInput <|> 
+                         extractAgentId (hiCwd hookInput) <|> 
+                         (let sid = hiSessionId hookInput in if T.null sid then Nothing else Just sid)
+      let agentId = fromMaybe "unknown" maybeAgentId
 
       -- Log that stop hook was called
       callHostVoid host_log_info (LogPayload Info ("Stop hook firing for agent: " <> agentId) Nothing)
+
+      -- Emit AgentStopped event BEFORE running checks
+      -- Only emit if we have a valid agent ID to avoid empty ID logs
+      unless (T.null agentId || agentId == hiSessionId hookInput) $ do
+        let event = Aeson.object
+              [ "type" .= ("agent:stopped" :: Text)
+              , "agent_id" .= agentId
+              , "timestamp" .= timestamp
+              ]
+        callHostVoid host_emit_event event
 
       -- Run the hook from config (using Polysemy effects)
       result <- runM $ hook hookInput
