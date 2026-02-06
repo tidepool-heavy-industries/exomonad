@@ -1,17 +1,61 @@
 //! Popup service for WASM host functions.
 //!
-//! Shows interactive popup forms via Zellij pipes and returns user responses.
+//! Shows interactive popup choice lists via Zellij CLI pipes and returns user selection.
+//!
+//! Uses the Zellij CLI pipe mechanism:
+//! 1. `zellij pipe --plugin file:plugin.wasm --name exomonad:popup -- "request_id|title|item1,item2,item3"`
+//! 2. Plugin receives via `pipe()` with `PipeSource::Cli(pipe_id)` and payload
+//! 3. Plugin blocks CLI, shows popup UI
+//! 4. On submit, plugin calls `cli_pipe_output(&pipe_id, "request_id:selected_item")`
+//! 5. CLI receives response on stdout
 
 use crate::common::{FFIBoundary, HostResult, IntoFFIResult};
 use anyhow::{Context, Result};
-use exomonad_ui_protocol::{PopupDefinition, PopupResult};
+use exomonad_ui_protocol::transport;
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
 use extism_convert::Json;
 use serde::{Deserialize, Serialize};
+use std::io::Read;
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::time::Duration;
 
-// Re-export for host function registration
-pub use exomonad_ui_protocol::PopupDefinition as PopupDefinitionType;
+/// Timeout for waiting for popup response (5 minutes).
+const POPUP_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Default path to the Zellij plugin
+const DEFAULT_PLUGIN_PATH: &str = "~/.config/zellij/plugins/exomonad-plugin.wasm";
+
+/// Get the plugin path, checking it exists.
+/// Override with EXOMONAD_PLUGIN_PATH env var.
+///
+/// NOTE: Returns expanded path (file:/Users/...) because Zellij CLI does NOT expand tilde.
+/// This creates a separate plugin instance from KDL-loaded plugins (which use file:~/.config/...),
+/// but that's intentional for ephemeral popup use case.
+fn get_plugin_path() -> Result<String> {
+    let path = std::env::var("EXOMONAD_PLUGIN_PATH")
+        .unwrap_or_else(|_| DEFAULT_PLUGIN_PATH.to_string());
+
+    // Expand ~ to home directory (required for CLI commands - Zellij CLI doesn't expand ~)
+    let expanded = if path.starts_with("~/") {
+        if let Some(home) = dirs::home_dir() {
+            home.join(&path[2..]).to_string_lossy().to_string()
+        } else {
+            path.clone()
+        }
+    } else {
+        path.clone()
+    };
+
+    if !std::path::Path::new(&expanded).exists() {
+        anyhow::bail!(
+            "Zellij plugin not found at '{}'. Run 'just install-all' to install it.",
+            expanded
+        );
+    }
+
+    Ok(format!("file:{}", expanded))
+}
 
 // ============================================================================
 // Input/Output types for FFI
@@ -39,15 +83,6 @@ pub struct PopupOutput {
 
 impl FFIBoundary for PopupOutput {}
 
-impl From<PopupResult> for PopupOutput {
-    fn from(result: PopupResult) -> Self {
-        Self {
-            button: result.button,
-            values: result.values,
-        }
-    }
-}
-
 // ============================================================================
 // Popup Service
 // ============================================================================
@@ -63,79 +98,166 @@ impl PopupService {
 
     /// Show a popup and wait for user response.
     ///
-    /// Uses Zellij pipes for communication:
-    /// 1. Send popup definition to `exomonad:popup:request`
-    /// 2. Wait for response on `exomonad:popup:response`
+    /// Uses Zellij CLI pipe mechanism with simple payload format:
+    /// 1. `zellij pipe --plugin file:plugin.wasm --name exomonad:popup -- "request_id|title|item1,item2,item3"`
+    /// 2. Plugin receives via `pipe()` with `PipeSource::Cli(pipe_id)` and payload
+    /// 3. Plugin blocks CLI, shows popup UI, user interacts
+    /// 4. On submit, plugin calls `cli_pipe_output(&pipe_id, "request_id:selected_item")`
+    /// 5. This CLI command receives response on stdout and exits
     #[tracing::instrument(skip(self))]
     pub fn show_popup(&self, input: &PopupInput) -> Result<PopupOutput> {
         tracing::info!(title = %input.title, components = input.components.len(), "Showing popup");
 
-        // Convert to PopupDefinition format expected by Zellij plugin
-        let definition = PopupDefinition {
-            title: input.title.clone(),
-            components: input
-                .components
-                .iter()
-                .filter_map(|c| serde_json::from_value(c.clone()).ok())
-                .collect(),
-        };
+        // Generate unique request ID
+        let request_id = uuid::Uuid::new_v4().to_string();
 
-        let json =
-            serde_json::to_string(&definition).context("Failed to serialize popup definition")?;
+        // Extract choice items from components
+        let items = extract_choice_items(&input.components);
 
-        tracing::debug!(json = %json, "Sending popup to Zellij");
-
-        // Send to Zellij plugin via named pipe
-        let mut send_cmd = Command::new("zellij")
-            .args(["pipe", "--name", "exomonad:popup:request", "--"])
-            .arg(&json)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .context("Failed to spawn zellij pipe command")?;
-
-        let send_status = send_cmd.wait().context("Failed to wait for zellij pipe")?;
-        if !send_status.success() {
-            anyhow::bail!("zellij pipe command failed with status: {}", send_status);
+        if items.is_empty() {
+            anyhow::bail!("Popup must have at least one choice item");
         }
 
-        tracing::debug!("Waiting for popup response");
+        // Verify plugin exists
+        let plugin_path = get_plugin_path()?;
 
-        // Wait for response from Zellij plugin
-        // The response comes back on a named pipe
-        let recv_cmd = Command::new("zellij")
-            .args(["pipe", "--name", "exomonad:popup:response"])
+        // Build payload: "request_id|title|item1,item2,item3"
+        // Sanitize delimiters to avoid parsing issues
+        let safe_title = sanitize_payload_field(&input.title);
+        let safe_items: Vec<String> = items.iter().map(|s| sanitize_payload_field(s)).collect();
+        let payload = format!("{}|{}|{}", request_id, safe_title, safe_items.join(","));
+
+        tracing::debug!(
+            request_id = %request_id,
+            plugin = %plugin_path,
+            items = ?items,
+            "Sending popup request via zellij pipe --plugin"
+        );
+
+        // Use zellij pipe --plugin to send request and receive response on stdout.
+        // The plugin will call cli_pipe_output() to send the response back.
+        let mut child = Command::new("zellij")
+            .arg("pipe")
+            .arg("--plugin")
+            .arg(&plugin_path)
+            .arg("--name")
+            .arg(transport::POPUP_PIPE)
+            .arg("--")
+            .arg(&payload)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .context("Failed to spawn zellij pipe receive command")?;
+            .context("Failed to spawn zellij pipe command")?;
 
-        let output = recv_cmd
-            .wait_with_output()
-            .context("Failed to wait for popup response")?;
+        let (tx, rx) = mpsc::channel();
+        let mut stdout = child.stdout.take().expect("stdout was piped");
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("Popup response pipe failed: {}", stderr);
+        // Spawn thread to read stdout (blocks until plugin sends response)
+        std::thread::spawn(move || {
+            let mut buffer = Vec::new();
+            let result = stdout.read_to_end(&mut buffer);
+            let _ = tx.send((result, buffer));
+        });
+
+        tracing::debug!(request_id = %request_id, "Waiting for popup response (timeout: {:?})", POPUP_TIMEOUT);
+
+        // Wait for response with timeout
+        let response_str = match rx.recv_timeout(POPUP_TIMEOUT) {
+            Ok((Ok(_), buffer)) => {
+                let _ = child.wait();
+                String::from_utf8(buffer).context("Invalid UTF-8 in popup response")?
+            }
+            Ok((Err(e), _)) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(anyhow::Error::from(e).context("Failed to read popup response"));
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                tracing::warn!(request_id = %request_id, "Popup timed out after {:?}", POPUP_TIMEOUT);
+                let _ = child.kill();
+                let _ = child.wait();
+                anyhow::bail!("Popup timed out after {} seconds", POPUP_TIMEOUT.as_secs());
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                anyhow::bail!("Popup response channel disconnected unexpectedly");
+            }
+        };
+
+        tracing::debug!(request_id = %request_id, response = %response_str, "Received popup response");
+
+        // Parse response: "{request_id}:{selected_item}" or "{request_id}:CANCELLED"
+        let response_str = response_str.trim();
+        let (resp_request_id, selection) = response_str
+            .split_once(':')
+            .context("Invalid popup response format: expected 'request_id:selection'")?;
+
+        // Verify request_id matches
+        if resp_request_id != request_id {
+            tracing::warn!(
+                expected = %request_id,
+                received = %resp_request_id,
+                "Request ID mismatch in popup response"
+            );
         }
 
-        let response_str =
-            String::from_utf8(output.stdout).context("Invalid UTF-8 in popup response")?;
-
-        tracing::debug!(response = %response_str, "Received popup response");
-
-        let result: PopupResult =
-            serde_json::from_str(&response_str).context("Failed to parse popup response")?;
+        let (button, values) = if selection == "CANCELLED" {
+            ("cancel".to_string(), serde_json::json!({}))
+        } else {
+            (
+                "submit".to_string(),
+                serde_json::json!({"selected": selection}),
+            )
+        };
 
         tracing::info!(
-            button = %result.button,
+            request_id = %request_id,
+            button = %button,
             "Popup completed"
         );
 
-        Ok(result.into())
+        Ok(PopupOutput { button, values })
     }
+}
+
+/// Sanitize a string for use in the payload protocol.
+///
+/// Replaces delimiter characters (`|` and `,`) with safe alternatives
+/// to prevent parsing issues in the plugin.
+fn sanitize_payload_field(s: &str) -> String {
+    s.replace('|', "-").replace(',', ";")
+}
+
+/// Extract choice items from popup components.
+///
+/// Looks for Choice components and extracts their options.
+/// Falls back to text content from Text components if no Choice found.
+fn extract_choice_items(components: &[serde_json::Value]) -> Vec<String> {
+    for component in components {
+        // Look for Choice component with options
+        if component.get("type").and_then(|t| t.as_str()) == Some("choice") {
+            if let Some(options) = component.get("options").and_then(|o| o.as_array()) {
+                return options
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect();
+            }
+        }
+    }
+
+    // Fallback: collect text content from Text components as items
+    components
+        .iter()
+        .filter_map(|c| {
+            if c.get("type").and_then(|t| t.as_str()) == Some("text") {
+                c.get("content").and_then(|v| v.as_str().map(String::from))
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 impl Default for PopupService {
@@ -230,5 +352,77 @@ mod tests {
         let json = serde_json::to_string(&output).unwrap();
         let parsed: PopupOutput = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.button, "submit");
+    }
+
+    #[test]
+    fn test_extract_choice_items_from_choice_component() {
+        let components = vec![serde_json::json!({
+            "type": "choice",
+            "id": "action",
+            "label": "Select action",
+            "options": ["Option A", "Option B", "Option C"]
+        })];
+
+        let items = extract_choice_items(&components);
+        assert_eq!(items, vec!["Option A", "Option B", "Option C"]);
+    }
+
+    #[test]
+    fn test_extract_choice_items_fallback_to_text() {
+        let components = vec![
+            serde_json::json!({
+                "type": "text",
+                "id": "t1",
+                "content": "First Item"
+            }),
+            serde_json::json!({
+                "type": "text",
+                "id": "t2",
+                "content": "Second Item"
+            }),
+        ];
+
+        let items = extract_choice_items(&components);
+        assert_eq!(items, vec!["First Item", "Second Item"]);
+    }
+
+    #[test]
+    fn test_extract_choice_items_empty() {
+        let components: Vec<serde_json::Value> = vec![];
+        let items = extract_choice_items(&components);
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn test_extract_choice_items_prefers_choice_over_text() {
+        let components = vec![
+            serde_json::json!({
+                "type": "text",
+                "id": "header",
+                "content": "Please select:"
+            }),
+            serde_json::json!({
+                "type": "choice",
+                "id": "action",
+                "label": "Select action",
+                "options": ["A", "B"]
+            }),
+        ];
+
+        let items = extract_choice_items(&components);
+        // Should extract from choice component, not text
+        assert_eq!(items, vec!["A", "B"]);
+    }
+
+    #[test]
+    fn test_sanitize_payload_field() {
+        // Pipes replaced with dashes
+        assert_eq!(sanitize_payload_field("Select | Insert"), "Select - Insert");
+        // Commas replaced with semicolons
+        assert_eq!(sanitize_payload_field("A, B, C"), "A; B; C");
+        // Both
+        assert_eq!(sanitize_payload_field("X|Y,Z"), "X-Y;Z");
+        // Clean string unchanged
+        assert_eq!(sanitize_payload_field("Normal Text"), "Normal Text");
     }
 }

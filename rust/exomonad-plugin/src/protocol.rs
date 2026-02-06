@@ -1,9 +1,6 @@
-pub use exomonad_ui_protocol::{
-    Component, ElementValue, PopupDefinition, PopupState, VisibilityRule,
-};
 use serde::{Deserialize, Serialize};
 
-// Minimal Status Bar Protocol
+/// Plugin status state for the status bar display.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PluginState {
@@ -30,6 +27,10 @@ impl std::fmt::Display for PluginState {
     }
 }
 
+/// Messages received via CustomMessage for status updates.
+///
+/// Note: Popups are now handled via CLI pipe mechanism, not CustomMessage.
+/// Use `zellij pipe --plugin ... --name exomonad:popup --args ...` instead.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum PluginMessage {
@@ -37,11 +38,6 @@ pub enum PluginMessage {
     Status {
         state: PluginState,
         message: String,
-    },
-    #[serde(rename = "popup")]
-    Popup {
-        request_id: String,
-        definition: PopupDefinition,
     },
     #[serde(rename = "close_popup")]
     ClosePopup,

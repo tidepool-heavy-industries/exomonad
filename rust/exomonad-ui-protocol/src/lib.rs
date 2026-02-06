@@ -3,6 +3,38 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt;
 
+// ============================================================================
+// Transport Constants
+// ============================================================================
+
+/// Pipe names for popup communication between service and plugin.
+pub mod transport {
+    /// Pipe name for popup requests (used with zellij pipe --plugin)
+    pub const POPUP_PIPE: &str = "exomonad:popup";
+}
+
+// ============================================================================
+// Request/Response Envelopes
+// ============================================================================
+
+/// Request envelope sent from service to plugin via Zellij pipe.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PopupRequest {
+    /// Unique identifier for this popup request.
+    pub request_id: String,
+    /// The popup form definition.
+    pub definition: PopupDefinition,
+}
+
+/// Response envelope sent from plugin to service via Zellij pipe.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PopupResponse {
+    /// The request_id this response corresponds to.
+    pub request_id: String,
+    /// The result of the popup interaction.
+    pub result: PopupResult,
+}
+
 /// Agent identifier.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
@@ -1013,5 +1045,55 @@ mod tests {
 
         let deserialized: PopupResult = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.button, "submit");
+    }
+
+    // === Transport types tests ===
+
+    #[test]
+    fn test_popup_request_serialization() {
+        let request = super::PopupRequest {
+            request_id: "req-123".to_string(),
+            definition: PopupDefinition {
+                title: "Test Form".to_string(),
+                components: vec![Component::Text {
+                    id: "msg".to_string(),
+                    content: "Hello".to_string(),
+                    visible_when: None,
+                }],
+            },
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("\"request_id\":\"req-123\""));
+        assert!(json.contains("\"title\":\"Test Form\""));
+
+        let deserialized: super::PopupRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.request_id, "req-123");
+        assert_eq!(deserialized.definition.title, "Test Form");
+    }
+
+    #[test]
+    fn test_popup_response_serialization() {
+        let response = super::PopupResponse {
+            request_id: "req-456".to_string(),
+            result: PopupResult {
+                button: "submit".to_string(),
+                values: serde_json::json!({"name": "test"}),
+                time_spent_seconds: Some(10.0),
+            },
+        };
+
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"request_id\":\"req-456\""));
+        assert!(json.contains("\"button\":\"submit\""));
+
+        let deserialized: super::PopupResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.request_id, "req-456");
+        assert_eq!(deserialized.result.button, "submit");
+    }
+
+    #[test]
+    fn test_transport_constants() {
+        assert_eq!(super::transport::POPUP_PIPE, "exomonad:popup");
     }
 }

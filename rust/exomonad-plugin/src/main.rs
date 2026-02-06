@@ -10,18 +10,33 @@ use ratatui::{
 };
 
 mod protocol;
-use exomonad_ui_protocol::{AgentEvent, CoordinatorAgentState, StateUpdate};
-use protocol::{
-    Component, ElementValue, PluginMessage, PluginState, PopupDefinition, PopupState, VisibilityRule,
+use exomonad_ui_protocol::{
+    transport, AgentEvent, CoordinatorAgentState, StateUpdate,
 };
+use protocol::{PluginMessage, PluginState};
+
+/// Active popup state for simple choice lists.
+///
+/// Uses pipe-based communication: launched via `zellij pipe --plugin`,
+/// responds via `cli_pipe_output()`.
+struct ActivePopup {
+    /// CLI pipe ID for sending response back via cli_pipe_output()
+    pipe_id: String,
+    /// Request ID for correlation
+    request_id: String,
+    /// Title for the popup
+    title: String,
+    /// Choice items to display
+    items: Vec<String>,
+    /// Currently selected item index
+    selected_index: usize,
+}
 
 #[derive(Default)]
 struct ExoMonadPlugin {
     status_state: PluginState,
     status_message: String,
-    active_popup: Option<(String, PopupDefinition, PopupState)>,
-    selected_index: usize,
-    sub_index: usize,
+    active_popup: Option<ActivePopup>,
     events: VecDeque<AgentEvent>,
     terminal: Option<Terminal<ZellijBackend>>,
     /// Agent state from the coordinator plugin.
@@ -173,6 +188,7 @@ fn color_to_ansi(color: Color, bg: bool) -> String {
 
 impl ZellijPlugin for ExoMonadPlugin {
     fn load(&mut self, _configuration: BTreeMap<String, String>) {
+        request_permission(&[PermissionType::ReadCliPipes]);
         subscribe(&[EventType::CustomMessage, EventType::Key]);
         self.status_state = PluginState::Idle;
         self.status_message = "Ready.".to_string();
@@ -184,6 +200,63 @@ impl ZellijPlugin for ExoMonadPlugin {
     }
 
     fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
+        // Handle popup requests via CLI pipe:
+        // zellij pipe --plugin file:X.wasm --name exomonad:popup -- "request_id|title|item1,item2,item3"
+        if pipe_message.name == transport::POPUP_PIPE {
+            // Extract pipe_id from CLI source
+            let pipe_id = match &pipe_message.source {
+                PipeSource::Cli(id) => id.clone(),
+                _ => {
+                    self.status_state = PluginState::Error;
+                    self.status_message = "Popup must come from CLI pipe".to_string();
+                    return true;
+                }
+            };
+
+            // Parse payload: "request_id|title|item1,item2,item3"
+            let payload = pipe_message.payload.unwrap_or_default();
+            let parts: Vec<&str> = payload.splitn(3, '|').collect();
+
+            if parts.len() < 3 {
+                self.status_state = PluginState::Error;
+                self.status_message = "Invalid payload format".to_string();
+                cli_pipe_output(&pipe_id, "ERROR:Invalid payload format");
+                return true;
+            }
+
+            let request_id = parts[0].to_string();
+            let title = parts[1].to_string();
+            let items: Vec<String> = parts[2]
+                .split(',')
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect();
+
+            if items.is_empty() {
+                self.status_state = PluginState::Error;
+                self.status_message = "Popup items cannot be empty".to_string();
+                cli_pipe_output(&pipe_id, &format!("{}:ERROR:No items provided", request_id));
+                return true;
+            }
+
+            // Block CLI input while popup is active
+            block_cli_pipe_input(&pipe_id);
+
+            // CRITICAL: Make headless plugin visible as floating pane
+            show_self(true);
+
+            self.active_popup = Some(ActivePopup {
+                pipe_id,
+                request_id,
+                title,
+                items,
+                selected_index: 0,
+            });
+            self.status_state = PluginState::Waiting;
+            self.status_message = "Waiting for selection...".to_string();
+            return true; // Request re-render
+        }
+
         // Handle pipe messages from zellij pipe --name exomonad-events
         if pipe_message.name == "exomonad-events" {
             if let Some(payload) = pipe_message.payload {
@@ -237,18 +310,6 @@ impl ZellijPlugin for ExoMonadPlugin {
                                 self.status_message = message;
                                 should_render = true;
                             }
-                            PluginMessage::Popup {
-                                request_id,
-                                definition,
-                            } => {
-                                let state = PopupState::new(&definition);
-                                self.active_popup = Some((request_id, definition, state));
-                                self.selected_index = 0;
-                                self.sub_index = 0;
-                                self.status_state = PluginState::Waiting;
-                                self.status_message = "Waiting for input...".to_string();
-                                should_render = true;
-                            }
                             PluginMessage::ClosePopup => {
                                 self.active_popup = None;
                                 self.status_state = PluginState::Idle;
@@ -265,148 +326,42 @@ impl ZellijPlugin for ExoMonadPlugin {
                 }
             }
             Event::Key(key) => {
-                if let Some((req_id, def, state)) = &mut self.active_popup {
-                    if def.components.is_empty() {
+                if let Some(popup) = &mut self.active_popup {
+                    if popup.items.is_empty() {
                         return false;
                     }
 
-                    // Component interaction logic
-                    if let Some(comp) = def.components.get(self.selected_index) {
-                        match comp {
-                            Component::Textbox { id, .. } => {
-                                // Handle text input directly if it's a character
-                                if let BareKey::Char(c) = key.bare_key {
-                                    // Filter control characters, allow standard input
-                                    if !key.has_modifiers(&[KeyModifier::Ctrl, KeyModifier::Alt]) {
-                                        if let Some(ElementValue::Text(s)) =
-                                            state.values.get_mut(id)
-                                        {
-                                            s.push(c);
-                                            return true;
-                                        }
-                                    }
-                                } else if let BareKey::Backspace = key.bare_key {
-                                    if let Some(ElementValue::Text(s)) = state.values.get_mut(id) {
-                                        s.pop();
-                                        return true;
-                                    }
-                                }
-                            }
-                            Component::Slider { id, min, max, .. } => {
-                                if let BareKey::Left = key.bare_key {
-                                    if let Some(ElementValue::Number(v)) = state.values.get_mut(id)
-                                    {
-                                        *v = (*v - 1.0).max(*min);
-                                        return true;
-                                    }
-                                } else if let BareKey::Right = key.bare_key {
-                                    if let Some(ElementValue::Number(v)) = state.values.get_mut(id)
-                                    {
-                                        *v = (*v + 1.0).min(*max);
-                                        return true;
-                                    }
-                                }
-                            }
-                            Component::Multiselect { id, options, .. } => {
-                                if let BareKey::Left = key.bare_key {
-                                    if self.sub_index > 0 {
-                                        self.sub_index -= 1;
-                                        return true;
-                                    }
-                                } else if let BareKey::Right = key.bare_key {
-                                    if self.sub_index < options.len().saturating_sub(1) {
-                                        self.sub_index += 1;
-                                        return true;
-                                    }
-                                } else if let BareKey::Char(' ') = key.bare_key {
-                                    if let Some(ElementValue::MultiChoice(vec)) =
-                                        state.values.get_mut(id)
-                                    {
-                                        if let Some(val) = vec.get_mut(self.sub_index) {
-                                            *val = !*val;
-                                            return true;
-                                        }
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-
-                    // Global/Navigation keys
                     match key.bare_key {
                         BareKey::Esc => {
-                            run_command(
-                                &["exomonad", "reply", "--id", req_id, "--cancel"],
-                                BTreeMap::new(),
-                            );
-                            self.active_popup = None;
-                            self.status_state = PluginState::Idle;
-                            self.status_message = "Ready.".to_string();
-                            should_render = true;
+                            // Send cancel response: "{request_id}:CANCELLED"
+                            let response = format!("{}:CANCELLED", popup.request_id);
+                            cli_pipe_output(&popup.pipe_id, &response);
+                            unblock_cli_pipe_input(&popup.pipe_id);
+                            close_self(); // Destroy plugin pane after responding
                         }
                         BareKey::Down | BareKey::Char('j') => {
-                            if self.selected_index < def.components.len().saturating_sub(1) {
-                                self.selected_index += 1;
-                                self.sub_index = 0; // Reset sub-index on component change
+                            if popup.selected_index < popup.items.len().saturating_sub(1) {
+                                popup.selected_index += 1;
                                 should_render = true;
                             }
                         }
                         BareKey::Up | BareKey::Char('k') => {
-                            if self.selected_index > 0 {
-                                self.selected_index -= 1;
-                                self.sub_index = 0;
+                            if popup.selected_index > 0 {
+                                popup.selected_index -= 1;
                                 should_render = true;
                             }
                         }
-                        BareKey::Char(' ') | BareKey::Enter => {
-                            if let Some(comp) = def.components.get(self.selected_index) {
-                                match comp {
-                                    Component::Checkbox { id, .. } => {
-                                        if let Some(ElementValue::Boolean(b)) =
-                                            state.values.get_mut(id)
-                                        {
-                                            *b = !*b;
-                                        }
-                                    }
-                                    Component::Choice { id, options, .. } => {
-                                        if let Some(ElementValue::Choice(idx)) =
-                                            state.values.get_mut(id)
-                                        {
-                                            *idx = (*idx + 1) % options.len();
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            should_render = true;
-                        }
-                        BareKey::Char('s') if key.has_modifiers(&[KeyModifier::Ctrl]) => {
-                            match serde_json::to_string(&state.to_json_values()) {
-                                Ok(json_values) => {
-                                    run_command(
-                                        &[
-                                            "exomonad",
-                                            "reply",
-                                            "--id",
-                                            req_id,
-                                            "--payload",
-                                            &json_values,
-                                        ],
-                                        BTreeMap::new(),
-                                    );
-
-                                    self.active_popup = None;
-                                    self.status_state = PluginState::Idle;
-                                    self.status_message = "Ready.".to_string();
-                                    should_render = true;
-                                }
-                                Err(e) => {
-                                    self.status_state = PluginState::Error;
-                                    self.status_message = format!("Serialize failed: {}", e);
-                                    should_render = true;
-                                }
-                            }
+                        BareKey::Enter => {
+                            // Send submit response: "{request_id}:{selected_item}"
+                            let selected = popup
+                                .items
+                                .get(popup.selected_index)
+                                .cloned()
+                                .unwrap_or_default();
+                            let response = format!("{}:{}", popup.request_id, selected);
+                            cli_pipe_output(&popup.pipe_id, &response);
+                            unblock_cli_pipe_input(&popup.pipe_id);
+                            close_self(); // Destroy plugin pane after responding
                         }
                         _ => {}
                     }
@@ -488,11 +443,9 @@ impl ZellijPlugin for ExoMonadPlugin {
                     .block(Block::default().borders(Borders::ALL).title("Events"));
                 f.render_widget(events_list, chunks[1]);
 
-                // Popup Overlay
-                if let Some((_, def, state)) = &self.active_popup {
+                // Popup Overlay - Simple choice list
+                if let Some(popup) = &self.active_popup {
                     let popup_area = if area.width < 4 || area.height < 4 {
-                        // On very small terminals, use the full area to avoid
-                        // creating a too-small or invalid popup rectangle.
                         area
                     } else {
                         Rect::new(
@@ -502,117 +455,46 @@ impl ZellijPlugin for ExoMonadPlugin {
                             area.height / 2,
                         )
                     };
-                    
+
                     f.render_widget(Clear, popup_area);
-                    
+
                     let block = Block::default()
-                        .title(def.title.as_str())
+                        .title(popup.title.as_str())
                         .borders(Borders::ALL)
                         .style(Style::default().bg(Color::DarkGray));
-                    
+
                     let inner_area = block.inner(popup_area);
                     f.render_widget(block, popup_area);
-                    
+
                     let layout = Layout::default()
                         .direction(Direction::Vertical)
-                        .constraints([Constraint::Min(0), Constraint::Length(2)]) // Content + Help
+                        .constraints([Constraint::Min(0), Constraint::Length(1)])
                         .split(inner_area);
-                    
-                    let mut content_items = Vec::new();
-                    
-                    for (i, comp) in def.components.iter().enumerate() {
-                        if let Some(rule) = comp.visible_when() {
-                            if !evaluate_visibility(rule, state) {
-                                continue;
-                            }
-                        }
 
-                        let is_selected = i == self.selected_index;
-                        let style = if is_selected { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default() };
-                        let prefix = if is_selected { "> " } else { "  " };
+                    // Render choice items
+                    let items: Vec<ListItem> = popup
+                        .items
+                        .iter()
+                        .enumerate()
+                        .map(|(i, item)| {
+                            let is_selected = i == popup.selected_index;
+                            let style = if is_selected {
+                                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                            } else {
+                                Style::default()
+                            };
+                            let prefix = if is_selected { "> " } else { "  " };
+                            ListItem::new(Line::from(vec![
+                                Span::styled(prefix, style),
+                                Span::styled(item.clone(), style),
+                            ]))
+                        })
+                        .collect();
 
-                        match comp {
-                            Component::Text { content, .. } => {
-                                content_items.push(ListItem::new(Line::from(vec![
-                                    Span::styled(prefix, style),
-                                    Span::styled(content.clone(), style),
-                                ])));
-                            }
-                            Component::Checkbox { id, label, .. } => {
-                                let checked = match state.values.get(id) {
-                                    Some(ElementValue::Boolean(true)) => "[x]",
-                                    _ => "[ ]",
-                                };
-                                content_items.push(ListItem::new(Line::from(vec![
-                                    Span::styled(format!("{}{}: ", prefix, checked), style),
-                                    Span::styled(label.clone(), style),
-                                ])));
-                            }
-                            Component::Textbox { label, id, placeholder, .. } => {
-                                let txt = state.get_text(id).unwrap_or("");
-                                // Show placeholder only if text is empty AND the field is NOT selected
-                                let display_txt = if txt.is_empty() {
-                                    if is_selected {
-                                        "".to_string()
-                                    } else {
-                                        placeholder.as_deref().unwrap_or("").to_string()
-                                    }
-                                } else {
-                                    txt.to_string()
-                                };
-                                
-                                let cursor_char = if is_selected { "|" } else { "" };
-                                
-                                content_items.push(ListItem::new(Line::from(vec![
-                                    Span::styled(format!("{}{}: ", prefix, label), style),
-                                    Span::styled(format!("[{}{}]", display_txt, cursor_char), if is_selected { style.bg(Color::Blue) } else { style }),
-                                ])));
-                            }
-                            Component::Slider { label, id, min, max, .. } => {
-                                let val = state.get_number(id).unwrap_or(*min);
-                                content_items.push(ListItem::new(Line::from(vec![
-                                    Span::styled(format!("{}{}: {:.1} ({:.1}-{:.1})", prefix, label, val, min, max), style),
-                                ])));
-                            }
-                            Component::Choice { id, label, options, .. } => {
-                                let idx = match state.values.get(id) {
-                                    Some(ElementValue::Choice(i)) => *i,
-                                    _ => 0,
-                                };
-                                let val = options.get(idx).map(|s| s.as_str()).unwrap_or("?");
-                                content_items.push(ListItem::new(Line::from(vec![
-                                    Span::styled(format!("{}{}: <{}>", prefix, label, val), style),
-                                ])));
-                            }
-                            Component::Multiselect { label, id, options, .. } => {
-                                content_items.push(ListItem::new(Line::from(vec![
-                                    Span::styled(format!("{}{}:", prefix, label), style),
-                                ])));
-                                if let Some(ElementValue::MultiChoice(vals)) = state.values.get(id) {
-                                    for (j, opt) in options.iter().enumerate() {
-                                        let is_opt_selected = is_selected && j == self.sub_index;
-                                        let sub_prefix = if is_opt_selected { "    >> " } else { "       " };
-                                        let checked = if *vals.get(j).unwrap_or(&false) { "[x]" } else { "[ ]" };
-                                        
-                                        let opt_style = if is_opt_selected { Style::default().fg(Color::Yellow) } else { Style::default() };
-                                        content_items.push(ListItem::new(Line::from(vec![
-                                            Span::styled(format!("{}{}{}", sub_prefix, checked, opt), opt_style),
-                                        ])));
-                                    }
-                                }
-                            }
-                            Component::Group { label, .. } => {
-                                content_items.push(ListItem::new(Line::from(vec![
-                                    Span::styled(format!("{}--- {} ---", prefix, label), Style::default().add_modifier(Modifier::UNDERLINED)),
-                                ])));
-                            }
-                        }
-                    }
-                    
-                    let content_list = List::new(content_items).block(Block::default());
-                    f.render_widget(content_list, layout[0]);
-                    
-                    let help_text = Paragraph::new("Ctrl+S: Submit  Esc: Cancel  Enter/Space: Toggle  Arrows: Move")
+                    let list = List::new(items).block(Block::default());
+                    f.render_widget(list, layout[0]);
+
+                    let help_text = Paragraph::new("Enter: Select  Esc: Cancel  j/k or Arrows: Move")
                         .style(Style::default().fg(Color::Gray));
                     f.render_widget(help_text, layout[1]);
                 }
@@ -630,20 +512,5 @@ fn format_timestamp(timestamp: &str) -> String {
         datetime.format("%H:%M").to_string()
     } else {
         timestamp.chars().take(5).collect()
-    }
-}
-
-fn evaluate_visibility(rule: &VisibilityRule, state: &PopupState) -> bool {
-    match rule {
-        VisibilityRule::Checked(id) => state.get_boolean(id).unwrap_or(false),
-        VisibilityRule::Equals(map) => {
-            for (id, _expected) in map {
-                if let Some(_idx) = state.get_choice(id) {
-                    return true;
-                }
-            }
-            true
-        }
-        _ => true,
     }
 }
