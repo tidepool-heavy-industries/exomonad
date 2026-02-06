@@ -12,6 +12,7 @@ use anyhow::{anyhow, Context, Result};
 use exomonad_shared::{GithubOwner, GithubRepo, IssueNumber};
 use extism_convert::Json;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
@@ -93,11 +94,11 @@ impl AgentType {
 
     /// Generate a display name for Zellij tabs.
     ///
-    /// Format: "{emoji} {issue_id}-{short_slug}"
+    /// Format: "{emoji} gh-{issue_id}-{short_slug}"
     /// The slug is truncated to 20 chars for readability.
     fn display_name(&self, issue_id: &str, slug: &str) -> String {
         let short_slug: String = slug.chars().take(20).collect();
-        format!("{} {}-{}", self.emoji(), issue_id, short_slug)
+        format!("{} gh-{}-{}", self.emoji(), issue_id, short_slug)
     }
 }
 
@@ -147,17 +148,37 @@ pub struct AgentPrInfo {
 
 impl FFIBoundary for AgentPrInfo {}
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AgentStatus {
+    Running,
+    OrphanWorktree,
+    OrphanTab,
+}
+
+impl FFIBoundary for AgentStatus {}
+
 /// Information about an active agent.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentInfo {
     /// Issue ID (e.g., "123")
     pub issue_id: String,
+    /// Whether a Zellij tab exists for this agent
+    pub has_tab: bool,
+    /// Whether a git worktree exists for this agent
+    pub has_worktree: bool,
+    /// Whether the worktree has uncommitted changes (None if no worktree)
+    pub has_changes: Option<bool>,
+    /// Whether the worktree has unpushed commits (None if no worktree)
+    pub has_unpushed: Option<bool>,
+    /// Status of the agent
+    pub status: AgentStatus,
     /// Full path to worktree
-    pub worktree_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worktree_path: Option<String>,
     /// Git branch name
-    pub branch_name: String,
-    /// Whether the worktree has uncommitted changes
-    pub has_changes: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch_name: Option<String>,
     /// Slug from worktree name (e.g., "fix-bug-in-parser")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slug: Option<String>,
@@ -403,33 +424,36 @@ impl AgentControlService {
         let mut found = false;
 
         for agent in agents {
-            let path = Path::new(&agent.worktree_path);
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.starts_with(&prefix) {
-                    found = true;
-                    // Parse the worktree name using helper function
-                    if let Some(parsed) = parse_worktree_name(name) {
-                        // Close Zellij tab with the display name (if agent type is known)
-                        match parsed.agent_type {
-                            Some(agent_type) => {
-                                let display_name = agent_type.display_name(issue_id, parsed.slug);
-                                if let Err(e) = self.close_zellij_tab(&display_name).await {
-                                    warn!(tab_name = %display_name, error = %e, "Failed to close Zellij tab (may not exist)");
+            if let Some(ref worktree_path) = agent.worktree_path {
+                let path = Path::new(worktree_path);
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with(&prefix) {
+                        found = true;
+                        // Parse the worktree name using helper function
+                        if let Some(parsed) = parse_worktree_name(name) {
+                            // Close Zellij tab with the display name (if agent type is known)
+                            match parsed.agent_type {
+                                Some(agent_type) => {
+                                    let display_name =
+                                        agent_type.display_name(issue_id, parsed.slug);
+                                    if let Err(e) = self.close_zellij_tab(&display_name).await {
+                                        warn!(tab_name = %display_name, error = %e, "Failed to close Zellij tab (may not exist)");
+                                    }
+                                }
+                                None => {
+                                    warn!(
+                                        worktree_name = %name,
+                                        "Unknown agent suffix in worktree name; skipping Zellij tab close"
+                                    );
                                 }
                             }
-                            None => {
-                                warn!(
-                                    worktree_name = %name,
-                                    "Unknown agent suffix in worktree name; skipping Zellij tab close"
-                                );
-                            }
                         }
+
+                        self.delete_worktree(path, force).await?;
+
+                        // Prune stale worktree references from git
+                        self.prune_worktrees().await?;
                     }
-
-                    self.delete_worktree(path, force).await?;
-
-                    // Prune stale worktree references from git
-                    self.prune_worktrees().await?;
                 }
             }
         }
@@ -484,13 +508,11 @@ impl AgentControlService {
         for agent in agents {
             // Check if branch is merged into origin/main
             // We ignore errors here (e.g. if branch doesn't exist) and just don't cleanup
-            if self
-                .is_branch_merged(&agent.branch_name)
-                .await
-                .unwrap_or(false)
-            {
-                info!(issue_id = %agent.issue_id, branch = %agent.branch_name, "Branch is merged, marking for cleanup");
-                to_cleanup.push(agent.issue_id);
+            if let Some(ref branch_name) = agent.branch_name {
+                if self.is_branch_merged(branch_name).await.unwrap_or(false) {
+                    info!(issue_id = %agent.issue_id, branch = %branch_name, "Branch is merged, marking for cleanup");
+                    to_cleanup.push(agent.issue_id);
+                }
             }
         }
 
@@ -512,6 +534,7 @@ impl AgentControlService {
     /// List all active agent worktrees.
     #[tracing::instrument(skip(self))]
     pub async fn list_agents(&self) -> Result<Vec<AgentInfo>> {
+        // 1. Get all git worktrees
         let output = Command::new("git")
             .args(["worktree", "list", "--porcelain"])
             .current_dir(&self.project_dir)
@@ -525,7 +548,7 @@ impl AgentControlService {
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let mut agents = Vec::new();
+        let mut worktrees = HashMap::new();
 
         let mut current_path: Option<PathBuf> = None;
         let mut current_branch: Option<String> = None;
@@ -537,55 +560,106 @@ impl AgentControlService {
                 current_branch = Some(branch.to_string());
             } else if line.is_empty() {
                 if let (Some(path), Some(branch)) = (current_path.take(), current_branch.take()) {
-                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    let name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|s| s.to_string());
+                    if let Some(name) = name {
                         if name.starts_with("gh-") {
-                            // Parse worktree name to extract issue_id, slug, agent_type
-                            let parsed = parse_worktree_name(name);
-                            let issue_id = parsed
-                                .as_ref()
-                                .map(|p| p.issue_id.to_string())
-                                .unwrap_or_else(|| {
-                                    // Fallback: extract issue ID manually
-                                    let parts: Vec<&str> = name.splitn(4, '-').collect();
-                                    parts.get(1).map(|s| s.to_string()).unwrap_or_default()
-                                });
-
-                            let has_changes = self.has_uncommitted_changes(&path).await;
-
-                            // Extract slug and agent_type from parsed name
-                            let slug = parsed.as_ref().map(|p| p.slug.to_string());
-                            let agent_type = parsed
-                                .as_ref()
-                                .and_then(|p| p.agent_type.as_ref())
-                                .map(|t| t.suffix().to_string());
-
-                            agents.push(AgentInfo {
-                                issue_id,
-                                worktree_path: path.to_string_lossy().to_string(),
-                                branch_name: branch,
-                                has_changes,
-                                slug,
-                                agent_type,
-                                pr: None, // PR lookup added below
-                            });
+                            if let Some(parsed) = parse_worktree_name(&name) {
+                                worktrees.insert(
+                                    parsed.issue_id.to_string(),
+                                    (path, branch, name.to_string()),
+                                );
+                            } else {
+                                // Fallback for worktrees that don't match our exact pattern
+                                let parts: Vec<&str> = name.splitn(4, '-').collect();
+                                if let Some(issue_id) = parts.get(1) {
+                                    worktrees.insert(
+                                        issue_id.to_string(),
+                                        (path, branch, name.to_string()),
+                                    );
+                                }
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Look up PRs for agents if GitHub service is available
+        // 2. Get all Zellij tabs
+        let zellij_tabs = self.get_zellij_tabs().await.unwrap_or_default();
+        let mut tabs = HashSet::new();
+        for tab_name in zellij_tabs {
+            if let Some(issue_id) = self.extract_issue_id_from_tab_name(&tab_name) {
+                tabs.insert(issue_id);
+            }
+        }
+
+        // 3. Compute union of all issue IDs
+        let mut all_issues: HashSet<String> = worktrees.keys().cloned().collect();
+        all_issues.extend(tabs.iter().cloned());
+
+        let mut agents = Vec::new();
+
+        for issue_id in all_issues {
+            let has_worktree = worktrees.contains_key(&issue_id);
+            let has_tab = tabs.contains(&issue_id);
+
+            let status = match (has_tab, has_worktree) {
+                (true, true) => AgentStatus::Running,
+                (false, true) => AgentStatus::OrphanWorktree,
+                (true, false) => AgentStatus::OrphanTab,
+                (false, false) => continue, // Should not happen
+            };
+
+            let mut agent = AgentInfo {
+                issue_id: issue_id.clone(),
+                has_tab,
+                has_worktree,
+                status,
+                worktree_path: None,
+                branch_name: None,
+                has_changes: None,
+                has_unpushed: None,
+                slug: None,
+                agent_type: None,
+                pr: None,
+            };
+
+            if let Some((path, branch, name)) = worktrees.get(&issue_id) {
+                agent.worktree_path = Some(path.to_string_lossy().to_string());
+                agent.branch_name = Some(branch.clone());
+                agent.has_changes = Some(self.has_uncommitted_changes(path).await);
+                agent.has_unpushed = Some(
+                    self.git
+                        .has_unpushed_commits(&path.to_string_lossy())
+                        .await
+                        .unwrap_or(false),
+                );
+
+                if let Some(parsed) = parse_worktree_name(name) {
+                    agent.slug = Some(parsed.slug.to_string());
+                    agent.agent_type = parsed.agent_type.map(|t| t.suffix().to_string());
+                }
+            }
+
+            agents.push(agent);
+        }
+
+        // 4. Look up PRs for agents if GitHub service is available
         if let Some(ref github) = self.github {
             if let Some(repo) = self.get_repo_from_remote().await {
                 for agent in &mut agents {
-                    if let Ok(Some(pr)) = github.get_pr_for_branch(&repo, &agent.branch_name).await
-                    {
-                        agent.pr = Some(AgentPrInfo {
-                            number: pr.number,
-                            title: pr.title,
-                            url: pr.url,
-                            state: pr.state,
-                        });
+                    if let Some(ref branch) = agent.branch_name {
+                        if let Ok(Some(pr)) = github.get_pr_for_branch(&repo, branch).await {
+                            agent.pr = Some(AgentPrInfo {
+                                number: pr.number,
+                                title: pr.title,
+                                url: pr.url,
+                                state: pr.state,
+                            });
+                        }
                     }
                 }
             }
@@ -725,6 +799,43 @@ impl AgentControlService {
     }
 
     #[tracing::instrument(skip(self))]
+    async fn get_zellij_tabs(&self) -> Result<Vec<String>> {
+        debug!("Querying Zellij tab names");
+        let output = Command::new("zellij")
+            .args(["action", "query-tab-names"])
+            .output()
+            .await
+            .context("Failed to execute zellij action query-tab-names")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // If zellij is not running or other error, return empty list instead of failing
+            warn!(stderr = %stderr, "zellij query-tab-names failed, assuming no tabs");
+            return Ok(Vec::new());
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(stdout.lines().map(|s| s.to_string()).collect())
+    }
+
+    fn extract_issue_id_from_tab_name(&self, name: &str) -> Option<String> {
+        // Tab names are formatted as: "{emoji} gh-{issue_id}-{short_slug}"
+        // or potentially "{emoji} {issue_id}-{short_slug}" (old format)
+
+        let parts: Vec<&str> = name.split_whitespace().collect();
+        // Parts should be at least [emoji, "issue_id-slug"]
+        if parts.len() < 2 {
+            return None;
+        }
+
+        let identifier = parts[1];
+        if let Some(rest) = identifier.strip_prefix("gh-") {
+            rest.split('-').next().map(|s| s.to_string())
+        } else {
+            identifier.split('-').next().map(|s| s.to_string())
+        }
+    }
+
     async fn close_zellij_tab(&self, name: &str) -> Result<()> {
         info!(name, "Running zellij action close-tab");
 
@@ -1914,11 +2025,11 @@ mod tests {
     fn test_agent_type_display_name() {
         assert_eq!(
             AgentType::Claude.display_name("473", "refactor-polish"),
-            "🤖 473-refactor-polish"
+            "🤖 gh-473-refactor-polish"
         );
         assert_eq!(
             AgentType::Gemini.display_name("123", "fix-bug"),
-            "💎 123-fix-bug"
+            "💎 gh-123-fix-bug"
         );
     }
 
@@ -1927,7 +2038,33 @@ mod tests {
         let long_slug = "this-is-a-very-long-slug-that-should-be-truncated";
         let display = AgentType::Claude.display_name("123", long_slug);
         // Slug portion is truncated to 20 chars: "this-is-a-very-long-" (exactly 20)
-        assert_eq!(display, "🤖 123-this-is-a-very-long-");
+        assert_eq!(display, "🤖 gh-123-this-is-a-very-long-");
+    }
+
+    #[test]
+    fn test_extract_issue_id_from_tab_name() {
+        let service = AgentControlService::new(
+            PathBuf::from("/tmp"),
+            None,
+            GitService::new(Arc::new(LocalExecutor)),
+        );
+
+        assert_eq!(
+            service.extract_issue_id_from_tab_name("🤖 gh-473-refactor-polish"),
+            Some("473".to_string())
+        );
+        assert_eq!(
+            service.extract_issue_id_from_tab_name("💎 gh-123-fix-bug"),
+            Some("123".to_string())
+        );
+        // Old format
+        assert_eq!(
+            service.extract_issue_id_from_tab_name("🤖 473-refactor-polish"),
+            Some("473".to_string())
+        );
+        // Invalid formats
+        assert_eq!(service.extract_issue_id_from_tab_name("🤖"), None);
+        assert_eq!(service.extract_issue_id_from_tab_name("just-text"), None);
     }
 
     #[test]

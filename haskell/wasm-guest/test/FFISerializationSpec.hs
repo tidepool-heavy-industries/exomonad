@@ -34,8 +34,23 @@ instance Arbitrary SpawnResult where
 instance Arbitrary AgentPrInfo where
   arbitrary = AgentPrInfo <$> arbitrary <*> arbText <*> arbText <*> arbText
 
+instance Arbitrary AgentStatus where
+  arbitrary = elements [RUNNING, ORPHAN_WORKTREE, ORPHAN_TAB]
+
 instance Arbitrary AgentInfo where
-  arbitrary = AgentInfo <$> arbText <*> arbText <*> arbText <*> arbitrary <*> arbMaybeText <*> arbMaybeText <*> arbitrary
+  arbitrary =
+    AgentInfo
+      <$> arbText
+      <*> arbitrary
+      <*> arbitrary
+      <*> arbitrary
+      <*> arbitrary
+      <*> arbitrary
+      <*> arbMaybeText
+      <*> arbMaybeText
+      <*> arbMaybeText
+      <*> arbMaybeText
+      <*> arbitrary
 
 instance Arbitrary BatchSpawnResult where
   arbitrary = BatchSpawnResult <$> listOf arbitrary <*> listOf ((,) <$> arbText <*> arbText)

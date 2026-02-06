@@ -26,12 +26,12 @@
 | `agent_spawn_batch` | `SpawnAgentsInput` | `BatchSpawnResult` | 🟡 | `proptest_ffi.rs` (types only) |
 | `agent_cleanup` | `CleanupAgentInput` | `()` | 🟡 | `proptest_ffi.rs` (types only) |
 | `agent_cleanup_batch` | `CleanupAgentsInput` | `BatchCleanupResult` | 🟡 | `proptest_ffi.rs` (types only) |
-| `agent_list` | `ListAgentsInput` | `[AgentInfo]` | 🟡 | `proptest_ffi.rs` (types only) |
+| `agent_list` | `()` | `[AgentInfo]` | 🟢 | `proptest_ffi.rs`, `agent_control.rs` (unit tests) |
 | **Filesystem** | | | | |
 | `fs_read_file` | `ReadFileInput` | `ReadFileOutput` | 🟢 | `ffi_property_tests.rs` |
 | `fs_write_file` | `WriteFileInput` | `WriteFileOutput` | 🟢 | `ffi_property_tests.rs` |
 | **Other** | | | | |
-| `file_pr` | `FilePRInput` | `PR` | 🔴 | |
+| `file_pr` | `FilePRInput` | `FilePROutput` | 🟢 | `file_pr.rs` (octocrab) |
 | `wait_for_copilot_review` | `WaitForCopilotReviewInput` | `ReviewResult` | 🔴 | |
 
 ## Legend

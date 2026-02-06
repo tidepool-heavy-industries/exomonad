@@ -162,12 +162,23 @@ instance ToJSON AgentPrInfo where
 
 instance FFIBoundary AgentPrInfo
 
+data AgentStatus = RUNNING | ORPHAN_WORKTREE | ORPHAN_TAB
+  deriving (Show, Eq, Generic)
+
+instance FromJSON AgentStatus
+instance ToJSON AgentStatus
+instance FFIBoundary AgentStatus
+
 -- | Information about an active agent.
 data AgentInfo = AgentInfo
   { agentIssueId :: Text,
-    agentWorktreePath :: Text,
-    agentBranchName :: Text,
-    agentHasChanges :: Bool,
+    agentHasTab :: Bool,
+    agentHasWorktree :: Bool,
+    agentHasChanges :: Maybe Bool,
+    agentHasUnpushed :: Maybe Bool,
+    agentStatus :: AgentStatus,
+    agentWorktreePath :: Maybe Text,
+    agentBranchName :: Maybe Text,
     agentSlug :: Maybe Text,
     agentAgentType :: Maybe Text,
     agentPr :: Maybe AgentPrInfo
@@ -178,23 +189,31 @@ instance FromJSON AgentInfo where
   parseJSON = withObject "AgentInfo" $ \v ->
     AgentInfo
       <$> v .: "issue_id"
-      <*> v .: "worktree_path"
-      <*> v .: "branch_name"
-      <*> v .: "has_changes"
+      <*> v .: "has_tab"
+      <*> v .: "has_worktree"
+      <*> v .:? "has_changes"
+      <*> v .:? "has_unpushed"
+      <*> v .: "status"
+      <*> v .:? "worktree_path"
+      <*> v .:? "branch_name"
       <*> v .:? "slug"
       <*> v .:? "agent_type"
       <*> v .:? "pr"
 
 instance ToJSON AgentInfo where
-  toJSON (AgentInfo i w b h s at pr) =
+  toJSON (AgentInfo i ht hw hc hu st w b s at pr) =
     object $
       [ "issue_id" .= i,
-        "worktree_path" .= w,
-        "branch_name" .= b,
-        "has_changes" .= h
+        "has_tab" .= ht,
+        "has_worktree" .= hw,
+        "status" .= st
       ]
         ++ catMaybes
-          [ ("slug" .=) <$> s,
+          [ ("has_changes" .=) <$> hc,
+            ("has_unpushed" .=) <$> hu,
+            ("worktree_path" .=) <$> w,
+            ("branch_name" .=) <$> b,
+            ("slug" .=) <$> s,
             ("agent_type" .=) <$> at,
             ("pr" .=) <$> pr
           ]
