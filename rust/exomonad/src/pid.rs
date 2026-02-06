@@ -300,8 +300,8 @@ mod tests {
 
         // The other thread will try to lock. It will block or loop.
         // Since we hold the lock and are "sidecar-like" (same process name), it might try to kill us?
-        // Wait, current process IS "exomonad-sidecar" (or test binary).
-        // `is_sidecar_process` checks "exomonad-sidecar".
+        // Wait, current process IS "exomonad" (or legacy "exomonad-sidecar").
+        // `is_sidecar_process` checks for these names.
         // The test runner name is usually different.
         // So `is_sidecar_process` will return false.
         // So it should just loop waiting.

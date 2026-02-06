@@ -305,6 +305,6 @@ mod tests {
     }
 
     // Note: Full Services::validate() tests would require a tokio runtime
-    // and are better tested via integration tests (e.g., in exomonad-sidecar tests)
+    // and are better tested via integration tests (e.g., in exomonad tests)
     // where Services is constructed and validated in a real async context.
 }

@@ -1,6 +1,6 @@
 //! exomonad-shared: Shared types and utilities.
 //!
-//! This library provides protocol types shared between exomonad-sidecar
+//! This library provides protocol types shared between exomonad
 //! and other components.
 //!
 //! ## Modules

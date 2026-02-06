@@ -28,7 +28,7 @@ Claude Code (hook or MCP call)
 
 | Component | Purpose |
 |-----------|---------|
-| **exomonad** (prev. exomonad) | Rust binary with WASM plugin support (hooks + MCP) |
+| **exomonad** | Rust binary with WASM plugin support (hooks + MCP) |
 | **exomonad-runtime** | WASM plugin loading + host functions |
 | **wasm-guest** | Haskell WASM plugin (pure logic, no I/O) |
 
@@ -62,7 +62,7 @@ Each agent:
 ```
 rust/CLAUDE.md  ← YOU ARE HERE (router)
 ├── exomonad/CLAUDE.md  ← MCP + Hook handler via WASM (CORE)
-│   • Binary: exomonad (internal crate name: exomonad)
+│   • Binary: exomonad
 │   • hook subcommand: handles CC hooks via WASM
 │   • mcp subcommand: MCP HTTP server via WASM
 │   • mcp-stdio subcommand: MCP stdio server for Claude Code
@@ -116,7 +116,7 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 ### Building
 ```bash
 cargo build --release                    # Build all crates
-cargo build -p exomonad          # Build exomonad binary
+cargo build -p exomonad                  # Build exomonad binary
 cargo test                               # Run all tests
 
 # Build WASM plugin (requires nix develop .#wasm)
@@ -233,7 +233,7 @@ And ensure `.exomonad/config.toml` and/or `config.local.toml` exists.
 
 ```bash
 cargo test                              # All tests
-cargo test -p exomonad          # Sidecar tests only
+cargo test -p exomonad                  # Sidecar tests only
 cargo test -p exomonad-runtime          # Runtime tests only
 
 # E2E test with WASM
