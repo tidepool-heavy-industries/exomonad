@@ -167,8 +167,6 @@ ExoMonad/
 
 ## WASM Compatibility
 
-Modules are split for WASM compatibility:
+Modules are split for WASM builds:
 - Core types and effects work in WASM
-- Native-only modules (TH, file paths) excluded via `if !os(wasi)` in cabal
-
-See the cabal file for the exact split.
+- Native-only modules (TH, Generic derivation, file paths) excluded via `if !os(wasi)` in cabal

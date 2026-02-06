@@ -78,7 +78,6 @@ library wasm-guest-internal
         ExoMonad.Guest.FFI
         -- Types
         ExoMonad.Guest.Types
-        ExoMonad.Guest.Parsers
         ExoMonad.Types
     -- Additional dependencies (shared stanza provides common deps)
     build-depends:

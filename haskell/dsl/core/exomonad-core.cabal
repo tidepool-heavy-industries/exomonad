@@ -17,13 +17,10 @@ common warnings
 library
     import:           warnings
     exposed-modules:
-        ExoMonad.Prelude
         ExoMonad
-        ExoMonad.WASM
         ExoMonad.Platform
         ExoMonad.Effect
         ExoMonad.Effect.Log
-        ExoMonad.Effect.Metadata
         ExoMonad.Effect.Types
         ExoMonad.Effect.Decision
         ExoMonad.Effect.Decision.Types
@@ -64,7 +61,6 @@ library
         ExoMonad.Effects.Justfile
         ExoMonad.Effects.FileSystem
         ExoMonad.Effects.Zellij
-        ExoMonad.Template.DependencyTree
         -- Typed LLM DSL (native-only: requires LLMProvider effect)
         ExoMonad.LLM
         ExoMonad.LLM.Effect

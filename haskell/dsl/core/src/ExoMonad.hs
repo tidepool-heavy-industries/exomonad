@@ -17,7 +17,7 @@
 -- = Extensible Effects
 --
 -- Base effects are fixed for all agents. Agents can add domain-specific
--- effects (like Habitica, Obsidian) via the @extra@ type parameter.
+-- effects via the @extra@ type parameter.
 -- The runner provides interpreters for extra effects.
 --
 -- = Runners
