@@ -57,47 +57,6 @@ fn get_plugin_path() -> Result<String> {
     Ok(format!("file:{}", expanded))
 }
 
-/// Get the Zellij session name.
-///
-/// Tries in order:
-/// 1. ZELLIJ_SESSION_NAME environment variable
-/// 2. Parse output of `zellij list-sessions` for the first active session
-fn get_zellij_session() -> Result<String> {
-    // First try environment variable
-    if let Ok(session) = std::env::var("ZELLIJ_SESSION_NAME") {
-        tracing::debug!(session = %session, "Using ZELLIJ_SESSION_NAME from environment");
-        return Ok(session);
-    }
-
-    // Fall back to listing sessions and picking the first active one
-    tracing::debug!("ZELLIJ_SESSION_NAME not set, detecting from zellij list-sessions");
-    let output = Command::new("zellij")
-        .args(["list-sessions", "--short"])
-        .output()
-        .context("Failed to run zellij list-sessions")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("zellij list-sessions failed: {}", stderr);
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // list-sessions --short returns just session names, one per line
-    // We want the first active session (not EXITED)
-    for line in stdout.lines() {
-        let session = line.trim();
-        if !session.is_empty() && !session.contains("EXITED") {
-            tracing::info!(session = %session, "Detected Zellij session");
-            return Ok(session.to_string());
-        }
-    }
-
-    anyhow::bail!(
-        "No active Zellij session found. Make sure you're running inside Zellij. \
-         Sessions found: {}",
-        stdout.trim()
-    )
-}
 
 // ============================================================================
 // Input/Output types for FFI
@@ -130,12 +89,15 @@ impl FFIBoundary for PopupOutput {}
 // ============================================================================
 
 /// Popup service for showing interactive forms.
-pub struct PopupService;
+pub struct PopupService {
+    /// Zellij session name (from config, not detected).
+    zellij_session: String,
+}
 
 impl PopupService {
-    /// Create a new popup service.
-    pub fn new() -> Self {
-        Self
+    /// Create a new popup service with the specified Zellij session.
+    pub fn new(zellij_session: String) -> Self {
+        Self { zellij_session }
     }
 
     /// Show a popup and wait for user response.
@@ -160,9 +122,9 @@ impl PopupService {
             anyhow::bail!("Popup must have at least one choice item");
         }
 
-        // Verify plugin exists and detect session
+        // Verify plugin exists
         let plugin_path = get_plugin_path()?;
-        let session = get_zellij_session()?;
+        let session = &self.zellij_session;
 
         // Build payload: "request_id|title|item1,item2,item3"
         // Sanitize delimiters to avoid parsing issues
@@ -246,11 +208,15 @@ impl PopupService {
                 tracing::warn!(request_id = %request_id, "Popup timed out after {:?}", POPUP_TIMEOUT);
                 let _ = child.kill();
                 let _ = child.wait();
+                // Join stderr thread to avoid orphaned thread
+                let _ = stderr_handle.join();
                 anyhow::bail!("Popup timed out after {} seconds", POPUP_TIMEOUT.as_secs());
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 let _ = child.kill();
                 let _ = child.wait();
+                // Join stderr thread to avoid orphaned thread
+                let _ = stderr_handle.join();
                 anyhow::bail!("Popup response channel disconnected unexpectedly");
             }
         };
@@ -340,11 +306,6 @@ fn extract_choice_items(components: &[serde_json::Value]) -> Vec<String> {
         .collect()
 }
 
-impl Default for PopupService {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 // ============================================================================
 // Host Functions for WASM
@@ -362,12 +323,12 @@ fn get_input<T: serde::de::DeserializeOwned>(
 }
 
 /// Create the show_popup host function.
-pub fn show_popup_host_fn() -> Function {
+pub fn show_popup_host_fn(zellij_session: String) -> Function {
     Function::new(
         "show_popup",
         [ValType::I64],
         [ValType::I64],
-        UserData::new(PopupService::new()),
+        UserData::new(PopupService::new(zellij_session)),
         |plugin: &mut CurrentPlugin,
          inputs: &[Val],
          outputs: &mut [Val],
@@ -397,8 +358,8 @@ pub fn show_popup_host_fn() -> Function {
 }
 
 /// Register all popup host functions.
-pub fn register_host_functions() -> Vec<Function> {
-    vec![show_popup_host_fn()]
+pub fn register_host_functions(zellij_session: String) -> Vec<Function> {
+    vec![show_popup_host_fn(zellij_session)]
 }
 
 #[cfg(test)]

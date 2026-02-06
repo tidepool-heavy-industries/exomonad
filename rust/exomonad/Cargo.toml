@@ -14,6 +14,7 @@ exomonad-runtime = { path = "../exomonad-runtime" }
 exomonad-services = { path = "../exomonad-services" }
 exomonad-shared = { path = "../exomonad-shared" }
 exomonad-ui-protocol = { path = "../exomonad-ui-protocol" }
+zellij-gen = { path = "../zellij-gen" }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

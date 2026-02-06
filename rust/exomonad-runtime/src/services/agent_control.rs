@@ -222,6 +222,8 @@ pub struct AgentControlService {
     github: Option<GitHubService>,
     /// Git service for repo info
     git: GitService,
+    /// Zellij session name for event emission
+    zellij_session: Option<String>,
 }
 
 impl AgentControlService {
@@ -231,7 +233,14 @@ impl AgentControlService {
             project_dir,
             github,
             git,
+            zellij_session: None,
         }
+    }
+
+    /// Set the Zellij session name for event emission.
+    pub fn with_zellij_session(mut self, session: String) -> Self {
+        self.zellij_session = Some(session);
+        self
     }
 
     /// Create from environment (loads secrets from ~/.exomonad/secrets).
@@ -251,6 +260,7 @@ impl AgentControlService {
             project_dir,
             github,
             git,
+            zellij_session: None,
         })
     }
 
@@ -349,15 +359,17 @@ impl AgentControlService {
             )
             .await?;
 
-            // Emit agent:started event
-            let agent_id = exomonad_ui_protocol::AgentId::try_from(internal_name.clone())
-                .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
-            let event = exomonad_ui_protocol::AgentEvent::AgentStarted {
-                agent_id,
-                timestamp: zellij_events::now_iso8601(),
-            };
-            if let Err(e) = zellij_events::emit_event(&event) {
-                warn!("Failed to emit agent:started event: {}", e);
+            // Emit agent:started event (only if session is configured)
+            if let Some(ref session) = self.zellij_session {
+                let agent_id = exomonad_ui_protocol::AgentId::try_from(internal_name.clone())
+                    .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
+                let event = exomonad_ui_protocol::AgentEvent::AgentStarted {
+                    agent_id,
+                    timestamp: zellij_events::now_iso8601(),
+                };
+                if let Err(e) = zellij_events::emit_event(session, &event) {
+                    warn!("Failed to emit agent:started event: {}", e);
+                }
             }
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
@@ -459,15 +471,17 @@ impl AgentControlService {
         }
 
         if found {
-            // Emit agent:stopped event (once for the issue_id)
-            let agent_id = exomonad_ui_protocol::AgentId::try_from(format!("gh-{}", issue_id))
-                .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
-            let event = exomonad_ui_protocol::AgentEvent::AgentStopped {
-                agent_id,
-                timestamp: zellij_events::now_iso8601(),
-            };
-            if let Err(e) = zellij_events::emit_event(&event) {
-                warn!("Failed to emit agent:stopped event: {}", e);
+            // Emit agent:stopped event (once for the issue_id, only if session is configured)
+            if let Some(ref session) = self.zellij_session {
+                let agent_id = exomonad_ui_protocol::AgentId::try_from(format!("gh-{}", issue_id))
+                    .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
+                let event = exomonad_ui_protocol::AgentEvent::AgentStopped {
+                    agent_id,
+                    timestamp: zellij_events::now_iso8601(),
+                };
+                if let Err(e) = zellij_events::emit_event(session, &event) {
+                    warn!("Failed to emit agent:stopped event: {}", e);
+                }
             }
             Ok(())
         } else {

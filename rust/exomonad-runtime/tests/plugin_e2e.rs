@@ -39,7 +39,7 @@ async fn test_plugin_loads_and_initializes() {
     }
 
     let services = Arc::new(Services::new().validate().expect("services validation"));
-    let result = PluginManager::new(wasm_path, services).await;
+    let result = PluginManager::new(wasm_path, services, None).await;
 
     match result {
         Ok(_plugin) => {
@@ -62,7 +62,7 @@ async fn test_plugin_call_handle_pre_tool_use() {
     }
 
     let services = Arc::new(Services::new().validate().expect("services validation"));
-    let plugin = match PluginManager::new(wasm_path, services).await {
+    let plugin = match PluginManager::new(wasm_path, services, None).await {
         Ok(p) => p,
         Err(e) => {
             eprintln!("Plugin load failed (may need WASM rebuild): {}", e);
@@ -115,7 +115,7 @@ async fn test_plugin_call_handle_mcp_call() {
     }
 
     let services = Arc::new(Services::new().validate().expect("services validation"));
-    let plugin = match PluginManager::new(wasm_path, services).await {
+    let plugin = match PluginManager::new(wasm_path, services, None).await {
         Ok(p) => p,
         Err(e) => {
             eprintln!("Plugin load failed (may need WASM rebuild): {}", e);
@@ -148,7 +148,7 @@ async fn test_plugin_call_with_minimal_input() {
     }
 
     let services = Arc::new(Services::new().validate().expect("services validation"));
-    let plugin = match PluginManager::new(wasm_path, services).await {
+    let plugin = match PluginManager::new(wasm_path, services, None).await {
         Ok(p) => p,
         Err(e) => {
             eprintln!("Plugin load failed (may need WASM rebuild): {}", e);

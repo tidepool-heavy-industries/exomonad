@@ -238,25 +238,27 @@ pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<Copi
         if !comments.is_empty() {
             info!("[CopilotReview] Found {} Copilot comments", comments.len());
 
-            // Emit copilot:reviewed event
-            if let Ok(branch) = git::get_current_branch() {
-                if let Some(agent_id_str) = git::extract_agent_id(&branch) {
-                    match exomonad_ui_protocol::AgentId::try_from(agent_id_str) {
-                        Ok(agent_id) => {
-                            let event = exomonad_ui_protocol::AgentEvent::CopilotReviewed {
-                                agent_id,
-                                comment_count: comments.len() as u32,
-                                timestamp: zellij_events::now_iso8601(),
-                            };
-                            if let Err(e) = zellij_events::emit_event(&event) {
-                                warn!("Failed to emit copilot:reviewed event: {}", e);
+            // Emit copilot:reviewed event (only if in Zellij session)
+            if let Ok(session) = std::env::var("ZELLIJ_SESSION_NAME") {
+                if let Ok(branch) = git::get_current_branch() {
+                    if let Some(agent_id_str) = git::extract_agent_id(&branch) {
+                        match exomonad_ui_protocol::AgentId::try_from(agent_id_str) {
+                            Ok(agent_id) => {
+                                let event = exomonad_ui_protocol::AgentEvent::CopilotReviewed {
+                                    agent_id,
+                                    comment_count: comments.len() as u32,
+                                    timestamp: zellij_events::now_iso8601(),
+                                };
+                                if let Err(e) = zellij_events::emit_event(&session, &event) {
+                                    warn!("Failed to emit copilot:reviewed event: {}", e);
+                                }
                             }
-                        }
-                        Err(e) => {
-                            warn!(
-                                "Invalid agent_id in branch '{}', skipping event: {}",
-                                branch, e
-                            );
+                            Err(e) => {
+                                warn!(
+                                    "Invalid agent_id in branch '{}', skipping event: {}",
+                                    branch, e
+                                );
+                            }
                         }
                     }
                 }
@@ -272,25 +274,27 @@ pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<Copi
         if fetch_pr_reviews(&owner, &repo, input.pr_number)? {
             info!("[CopilotReview] Found Copilot review (no inline comments)");
 
-            // Emit copilot:reviewed event with 0 comments
-            if let Ok(branch) = git::get_current_branch() {
-                if let Some(agent_id_str) = git::extract_agent_id(&branch) {
-                    match exomonad_ui_protocol::AgentId::try_from(agent_id_str) {
-                        Ok(agent_id) => {
-                            let event = exomonad_ui_protocol::AgentEvent::CopilotReviewed {
-                                agent_id,
-                                comment_count: 0,
-                                timestamp: zellij_events::now_iso8601(),
-                            };
-                            if let Err(e) = zellij_events::emit_event(&event) {
-                                warn!("Failed to emit copilot:reviewed event: {}", e);
+            // Emit copilot:reviewed event with 0 comments (only if in Zellij session)
+            if let Ok(session) = std::env::var("ZELLIJ_SESSION_NAME") {
+                if let Ok(branch) = git::get_current_branch() {
+                    if let Some(agent_id_str) = git::extract_agent_id(&branch) {
+                        match exomonad_ui_protocol::AgentId::try_from(agent_id_str) {
+                            Ok(agent_id) => {
+                                let event = exomonad_ui_protocol::AgentEvent::CopilotReviewed {
+                                    agent_id,
+                                    comment_count: 0,
+                                    timestamp: zellij_events::now_iso8601(),
+                                };
+                                if let Err(e) = zellij_events::emit_event(&session, &event) {
+                                    warn!("Failed to emit copilot:reviewed event: {}", e);
+                                }
                             }
-                        }
-                        Err(e) => {
-                            warn!(
-                                "Invalid agent_id in branch '{}', skipping event: {}",
-                                branch, e
-                            );
+                            Err(e) => {
+                                warn!(
+                                    "Invalid agent_id in branch '{}', skipping event: {}",
+                                    branch, e
+                                );
+                            }
                         }
                     }
                 }

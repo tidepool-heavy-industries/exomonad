@@ -176,24 +176,26 @@ async fn create_pr_async(
             let pr_number = number as u64;
             info!("[FilePR] Created PR: {} (#{}) ", url, pr_number);
 
-            // Emit pr:filed event
-            if let Some(agent_id_str) = git::extract_agent_id(head_branch) {
-                match exomonad_ui_protocol::AgentId::try_from(agent_id_str) {
-                    Ok(agent_id) => {
-                        let event = exomonad_ui_protocol::AgentEvent::PrFiled {
-                            agent_id,
-                            pr_number,
-                            timestamp: zellij_events::now_iso8601(),
-                        };
-                        if let Err(e) = zellij_events::emit_event(&event) {
-                            warn!("Failed to emit pr:filed event: {}", e);
+            // Emit pr:filed event (only if in Zellij session)
+            if let Ok(session) = std::env::var("ZELLIJ_SESSION_NAME") {
+                if let Some(agent_id_str) = git::extract_agent_id(head_branch) {
+                    match exomonad_ui_protocol::AgentId::try_from(agent_id_str) {
+                        Ok(agent_id) => {
+                            let event = exomonad_ui_protocol::AgentEvent::PrFiled {
+                                agent_id,
+                                pr_number,
+                                timestamp: zellij_events::now_iso8601(),
+                            };
+                            if let Err(e) = zellij_events::emit_event(&session, &event) {
+                                warn!("Failed to emit pr:filed event: {}", e);
+                            }
                         }
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Invalid agent_id in branch '{}', skipping event: {}",
-                            head_branch, e
-                        );
+                        Err(e) => {
+                            warn!(
+                                "Invalid agent_id in branch '{}', skipping event: {}",
+                                head_branch, e
+                            );
+                        }
                     }
                 }
             }

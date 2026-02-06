@@ -9,6 +9,7 @@
 use exomonad::{config, mcp};
 
 use anyhow::{Context, Result};
+use std::os::unix::process::CommandExt;
 use clap::{Parser, Subcommand};
 use exomonad_runtime::services::{git, zellij_events};
 use exomonad_runtime::{PluginManager, Services};
@@ -58,6 +59,16 @@ enum Commands {
     /// Reads config from .exomonad/config.toml in current directory.
     /// Claude Code should configure this in .mcp.json with type: "stdio".
     McpStdio,
+
+    /// Initialize Zellij session for this project.
+    ///
+    /// Creates a new session with TL layout if none exists, or attaches to existing.
+    /// Session name is read from .exomonad/config.toml zellij_session field.
+    Init {
+        /// Optionally override session name (default: from config)
+        #[arg(long)]
+        session: Option<String>,
+    },
 
     /// Reply to a UI request (sent by Zellij plugin)
     Reply {
@@ -128,11 +139,12 @@ async fn emit_hook_span(
     }
 }
 
-#[tracing::instrument(skip(plugin, runtime, event_type), fields(event = ?event_type))]
+#[tracing::instrument(skip(plugin, runtime, event_type, zellij_session), fields(event = ?event_type))]
 async fn handle_hook(
     plugin: &PluginManager,
     event_type: HookEventType,
     runtime: Runtime,
+    zellij_session: &str,
 ) -> Result<()> {
     use std::io::Read;
 
@@ -165,7 +177,7 @@ async fn handle_hook(
                         hook_type: event_type.to_string(),
                         timestamp: zellij_events::now_iso8601(),
                     };
-                    if let Err(e) = zellij_events::emit_event(&event) {
+                    if let Err(e) = zellij_events::emit_event(zellij_session, &event) {
                         warn!("Failed to emit hook:received event: {}", e);
                     }
                 }
@@ -281,7 +293,7 @@ async fn handle_hook(
                                     reason,
                                     timestamp: zellij_events::now_iso8601(),
                                 };
-                                if let Err(e) = zellij_events::emit_event(&event) {
+                                if let Err(e) = zellij_events::emit_event(zellij_session, &event) {
                                     warn!("Failed to emit stop_hook:blocked event: {}", e);
                                 }
                             }
@@ -343,6 +355,85 @@ async fn handle_hook(
     }
 
     Ok(())
+}
+
+// ============================================================================
+// Init Command
+// ============================================================================
+
+/// Run the init command: create or attach to Zellij session.
+fn run_init(session_override: Option<String>) -> Result<()> {
+    // Preflight: warn if XDG_RUNTIME_DIR missing (SSH edge case)
+    if std::env::var("XDG_RUNTIME_DIR").is_err() {
+        eprintln!("Warning: XDG_RUNTIME_DIR not set. Zellij may fail to find sessions.");
+    }
+
+    // Resolve session: override takes priority, then config
+    let session = match session_override {
+        Some(s) => s,
+        None => {
+            let config = config::Config::discover()?;
+            config.zellij_session
+        }
+    };
+
+    // Check if session exists (and is not EXITED)
+    let output = std::process::Command::new("zellij")
+        .args(["list-sessions", "--short"])
+        .output()
+        .context("Failed to run zellij list-sessions")?;
+
+    let sessions = String::from_utf8_lossy(&output.stdout);
+    let session_exists = sessions
+        .lines()
+        .any(|line| line.trim() == session && !line.contains("EXITED"));
+
+    if session_exists {
+        // Attach to existing session
+        println!("Attaching to session: {}", session);
+        let err = std::process::Command::new("zellij")
+            .args(["attach", &session])
+            .exec(); // Replace current process
+        Err(err).context("Failed to exec zellij attach")
+    } else {
+        // Create new session with TL layout
+        println!("Creating session: {}", session);
+
+        let layout_path = generate_tl_layout()?;
+
+        // NOTE: Must use --new-session-with-layout, NOT --layout
+        // (attach --create --layout doesn't work reliably)
+        let err = std::process::Command::new("zellij")
+            .arg("--session")
+            .arg(&session)
+            .arg("--new-session-with-layout")
+            .arg(&layout_path)
+            .exec(); // Replace current process
+        Err(err).context("Failed to exec zellij with layout")
+    }
+}
+
+/// Generate a TL layout file for the init command.
+fn generate_tl_layout() -> Result<std::path::PathBuf> {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let cwd = std::env::current_dir()?;
+
+    let params = zellij_gen::AgentTabParams {
+        tab_name: "TL",
+        pane_name: "Main",
+        command: &shell, // Just start a shell, no specific command
+        cwd: &cwd,
+        shell: &shell,
+        focus: true,
+    };
+
+    let layout = zellij_gen::generate_agent_layout(&params)
+        .context("Failed to generate TL layout")?;
+
+    let layout_path = std::env::temp_dir().join("exomonad-tl-layout.kdl");
+    std::fs::write(&layout_path, layout)?;
+
+    Ok(layout_path)
 }
 
 // ============================================================================
@@ -523,14 +614,14 @@ async fn main() -> Result<()> {
                     .context("Failed to validate services")?,
             );
 
-            // Load WASM plugin
-            let plugin = PluginManager::new(wasm_path, services)
+            // Load WASM plugin (None = no extensible effects registry)
+            let plugin = PluginManager::new(wasm_path, services, None)
                 .await
                 .context("Failed to load WASM plugin")?;
 
             info!("WASM plugin loaded and initialized");
 
-            handle_hook(&plugin, event, runtime).await?;
+            handle_hook(&plugin, event, runtime, &config.zellij_session()).await?;
         }
 
         Commands::McpStdio => {
@@ -557,10 +648,15 @@ async fn main() -> Result<()> {
                     .context("Failed to validate services")?,
             );
 
-            // Load WASM plugin
-            let plugin = PluginManager::new(wasm_path, services.clone())
-                .await
-                .context("Failed to load WASM plugin")?;
+            // Load WASM plugin with Zellij session for popup support
+            let plugin = PluginManager::with_session(
+                wasm_path,
+                services.clone(),
+                None, // No extensible effects registry
+                Some(config.zellij_session().to_string()),
+            )
+            .await
+            .context("Failed to load WASM plugin")?;
 
             let state = mcp::McpState {
                 project_dir,
@@ -575,7 +671,7 @@ async fn main() -> Result<()> {
                         agent_id: id,
                         timestamp: zellij_events::now_iso8601(),
                     };
-                    if let Err(e) = zellij_events::emit_event(&start_event) {
+                    if let Err(e) = zellij_events::emit_event(&config.zellij_session(), &start_event) {
                         warn!("Failed to emit agent:started event: {}", e);
                     }
                 }
@@ -593,12 +689,16 @@ async fn main() -> Result<()> {
                         agent_id: id,
                         timestamp: zellij_events::now_iso8601(),
                     };
-                    if let Err(e) = zellij_events::emit_event(&stop_event) {
+                    if let Err(e) = zellij_events::emit_event(&config.zellij_session(), &stop_event) {
                         warn!("Failed to emit agent:stopped event: {}", e);
                     }
                 }
                 Err(e) => warn!("Invalid agent_id '{}': {}", stop_agent_id, e),
             }
+        }
+
+        Commands::Init { session } => {
+            run_init(session)?;
         }
 
         Commands::Reply {
@@ -653,7 +753,7 @@ async fn main() -> Result<()> {
             );
 
             // Load WASM plugin - this triggers compilation and caching
-            let _plugin = PluginManager::new(path, services)
+            let _plugin = PluginManager::new(path, services, None)
                 .await
                 .context("Failed to load WASM plugin")?;
 

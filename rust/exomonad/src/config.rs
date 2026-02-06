@@ -43,6 +43,9 @@ pub struct RawConfig {
 
     /// Absolute path to WASM artifacts.
     pub wasm_path: Option<PathBuf>,
+
+    /// Canonical Zellij session name for this project.
+    pub zellij_session: Option<String>,
 }
 
 /// Final resolved configuration.
@@ -51,6 +54,8 @@ pub struct Config {
     pub project_dir: PathBuf,
     pub role: Role,
     pub wasm_path_override: Option<PathBuf>,
+    /// Canonical Zellij session name (required after discovery).
+    pub zellij_session: String,
 }
 
 /// Validated configuration wrapper.
@@ -95,10 +100,23 @@ impl Config {
             .or(local_raw.project_dir)
             .unwrap_or_else(|| PathBuf::from("."));
 
+        // Resolve zellij_session: required field, hard error if missing
+        let zellij_session = local_raw
+            .zellij_session
+            .or(global_raw.zellij_session)
+            .map(sanitize_session_name)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "No Zellij session configured. Please add 'zellij_session = \"myproject\"' \
+                     to .exomonad/config.toml"
+                )
+            })?;
+
         Ok(Self {
             project_dir,
             role,
             wasm_path_override: local_raw.wasm_path,
+            zellij_session,
         })
     }
 
@@ -175,6 +193,11 @@ impl ValidatedConfig {
     pub fn wasm_path_buf(&self) -> PathBuf {
         self.wasm_path.as_path().to_path_buf()
     }
+
+    /// Get the Zellij session name.
+    pub fn zellij_session(&self) -> &str {
+        &self.config.zellij_session
+    }
 }
 
 impl Default for Config {
@@ -183,8 +206,16 @@ impl Default for Config {
             project_dir: PathBuf::from("."),
             role: Role::Dev,
             wasm_path_override: None,
+            zellij_session: "default".to_string(),
         }
     }
+}
+
+/// Sanitize session name per Zellij constraints.
+/// - Max 36 characters
+/// - Replace . with _ (dots cause issues)
+fn sanitize_session_name(name: String) -> String {
+    name.replace('.', "_").chars().take(36).collect()
 }
 
 #[cfg(test)]
@@ -242,6 +273,7 @@ mod tests {
             project_dir: PathBuf::from("/nonexistent/path/that/should/not/exist"),
             role: Role::Dev,
             wasm_path_override: None,
+            zellij_session: "test".to_string(),
         };
 
         let result = config.validate();
@@ -267,6 +299,7 @@ mod tests {
             project_dir: file_path.clone(),
             role: Role::Dev,
             wasm_path_override: None,
+            zellij_session: "test".to_string(),
         };
 
         let result = config.validate();
@@ -285,6 +318,7 @@ mod tests {
             project_dir: PathBuf::from("."),
             role: Role::TL,
             wasm_path_override: Some(PathBuf::from("/custom/wasm")),
+            zellij_session: "test".to_string(),
         };
 
         let path = config.resolve_wasm_path().unwrap();
@@ -297,6 +331,7 @@ mod tests {
             project_dir: PathBuf::from("."),
             role: Role::Dev,
             wasm_path_override: None,
+            zellij_session: "test".to_string(),
         };
 
         // This test requires HOME to be set
@@ -341,6 +376,7 @@ mod tests {
             project_dir: project_dir.clone(),
             role: Role::Dev,
             wasm_path_override: Some(wasm_dir),
+            zellij_session: "test".to_string(),
         };
 
         let validated = config.validate().unwrap();
@@ -350,5 +386,28 @@ mod tests {
             .wasm_path_buf()
             .to_string_lossy()
             .contains("wasm-guest-dev.wasm"));
+    }
+
+    #[test]
+    fn test_sanitize_session_name() {
+        // Dots replaced with underscores
+        assert_eq!(sanitize_session_name("my.project".to_string()), "my_project");
+
+        // Max 36 characters
+        let long_name = "a".repeat(50);
+        assert_eq!(sanitize_session_name(long_name).len(), 36);
+
+        // Clean name unchanged
+        assert_eq!(sanitize_session_name("tidepool".to_string()), "tidepool");
+    }
+
+    #[test]
+    fn test_raw_config_parse_with_zellij_session() {
+        let content = r#"
+            default_role = "tl"
+            zellij_session = "tidepool"
+        "#;
+        let raw: RawConfig = toml::from_str(content).unwrap();
+        assert_eq!(raw.zellij_session, Some("tidepool".to_string()));
     }
 }

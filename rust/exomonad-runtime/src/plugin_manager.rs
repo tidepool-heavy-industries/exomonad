@@ -1,3 +1,4 @@
+use crate::effects::{host_fn::yield_effect_host_fn, host_fn::YieldEffectContext, EffectRegistry};
 use crate::services::agent_control;
 use crate::services::copilot_review;
 use crate::services::file_pr;
@@ -50,7 +51,8 @@ use tracing;
 /// let services = Arc::new(Services::new().validate()?);
 /// let manager = PluginManager::new(
 ///     PathBuf::from("wasm-guest.wasm"),
-///     services
+///     services,
+///     None,  // No extensible effects registry
 /// ).await?;
 ///
 /// // Call WASM function with typed input/output
@@ -75,6 +77,12 @@ pub struct PluginManager {
     /// Services (kept for reloading).
     services: Arc<ValidatedServices>,
 
+    /// Optional effect registry for extensible effects (kept for reloading).
+    registry: Option<Arc<EffectRegistry>>,
+
+    /// Zellij session name for popup/event operations (kept for reloading).
+    zellij_session: Option<String>,
+
     /// Number of calls made to this plugin.
     call_count: Arc<std::sync::atomic::AtomicUsize>,
 }
@@ -86,6 +94,9 @@ impl PluginManager {
     ///
     /// * `path` - Path to the wasm32-wasi compiled WASM file
     /// * `services` - Validated service container (Git, GitHub, AgentControl, FileSystem, etc.)
+    /// * `registry` - Optional effect registry for extensible effects. If provided, the
+    ///   `yield_effect` host function will be registered, allowing WASM to call custom
+    ///   effect handlers.
     ///
     /// # Host Functions Registered
     ///
@@ -96,6 +107,7 @@ impl PluginManager {
     /// - **File PR (1)**: `file_pr` (create/update PRs via gh CLI)
     /// - **Copilot Review (1)**: `copilot_poll_review`
     /// - **Log (3)**: `log_info`, `log_error`, `emit_event`
+    /// - **Effects (1)**: `yield_effect` (only if registry is provided)
     ///
     /// # Errors
     ///
@@ -108,8 +120,22 @@ impl PluginManager {
     ///
     /// GHC RTS initialization (hs_init) is handled automatically by the Extism Haskell PDK
     /// when the module loads. No explicit initialization is needed.
-    pub async fn new(path: PathBuf, services: Arc<ValidatedServices>) -> Result<Self> {
-        let plugin = Self::load_plugin(&path, &services)?;
+    pub async fn new(
+        path: PathBuf,
+        services: Arc<ValidatedServices>,
+        registry: Option<Arc<EffectRegistry>>,
+    ) -> Result<Self> {
+        Self::with_session(path, services, registry, None).await
+    }
+
+    /// Load a WASM plugin with a Zellij session for popup/event operations.
+    pub async fn with_session(
+        path: PathBuf,
+        services: Arc<ValidatedServices>,
+        registry: Option<Arc<EffectRegistry>>,
+        zellij_session: Option<String>,
+    ) -> Result<Self> {
+        let plugin = Self::load_plugin(&path, &services, &registry, &zellij_session)?;
 
         // Note: GHC RTS initialization (hs_init) is handled automatically by the
         // Extism Haskell PDK when the WASM module is loaded. No explicit call needed.
@@ -118,11 +144,18 @@ impl PluginManager {
             plugin: Arc::new(RwLock::new(plugin)),
             path,
             services,
+            registry,
+            zellij_session,
             call_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         })
     }
 
-    fn load_plugin(path: &PathBuf, services: &ValidatedServices) -> Result<Plugin> {
+    fn load_plugin(
+        path: &PathBuf,
+        services: &ValidatedServices,
+        registry: &Option<Arc<EffectRegistry>>,
+        zellij_session: &Option<String>,
+    ) -> Result<Plugin> {
         let manifest = Manifest::new([extism::Wasm::file(path)]);
 
         // NOTE: Docker functions are NOT registered as WASM imports.
@@ -165,7 +198,19 @@ impl PluginManager {
         functions.extend(copilot_review::register_host_functions());
 
         // Popup functions (1 function) - show interactive popup
-        functions.extend(popup::register_host_functions());
+        // Requires zellij_session for targeting the correct session
+        if let Some(session) = zellij_session {
+            functions.extend(popup::register_host_functions(session.clone()));
+        }
+
+        // Extensible effects (1 function) - only if registry is provided
+        if let Some(reg) = registry {
+            tracing::debug!("Registering yield_effect host function for extensible effects");
+            let ctx = YieldEffectContext {
+                registry: reg.clone(),
+            };
+            functions.push(yield_effect_host_fn(ctx));
+        }
 
         let mut builder = PluginBuilder::new(manifest)
             .with_functions(functions)
@@ -195,9 +240,13 @@ impl PluginManager {
     async fn reload(&self) -> Result<()> {
         let path = self.path.clone();
         let services = self.services.clone();
+        let registry = self.registry.clone();
+        let zellij_session = self.zellij_session.clone();
 
-        let new_plugin =
-            tokio::task::spawn_blocking(move || Self::load_plugin(&path, &services)).await??;
+        let new_plugin = tokio::task::spawn_blocking(move || {
+            Self::load_plugin(&path, &services, &registry, &zellij_session)
+        })
+        .await??;
 
         let mut lock = self
             .plugin

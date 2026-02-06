@@ -107,6 +107,9 @@ pub struct Services {
 
     /// File I/O operations (read, write).
     pub filesystem: Arc<FileSystemService>,
+
+    /// Zellij session name for event emission (optional).
+    pub zellij_session: Option<String>,
 }
 
 /// Validated services wrapper.
@@ -155,7 +158,14 @@ impl Services {
             github,
             agent_control,
             filesystem,
+            zellij_session: None,
         }
+    }
+
+    /// Set the Zellij session name for event emission.
+    pub fn with_zellij_session(mut self, session: String) -> Self {
+        self.zellij_session = Some(session);
+        self
     }
 }
 
