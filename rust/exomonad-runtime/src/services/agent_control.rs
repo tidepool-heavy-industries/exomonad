@@ -304,6 +304,7 @@ impl AgentControlService {
                 &issue_id,
                 &issue.title,
                 &issue.body,
+                &issue.labels,
                 &branch_name,
                 &issue_url,
             );
@@ -399,11 +400,13 @@ impl AgentControlService {
         // Find and delete worktree first (to extract agent type from path)
         let agents = self.list_agents().await?;
         let prefix = format!("gh-{}-", issue_id);
+        let mut found = false;
 
         for agent in agents {
             let path = Path::new(&agent.worktree_path);
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                 if name.starts_with(&prefix) {
+                    found = true;
                     // Parse the worktree name using helper function
                     if let Some(parsed) = parse_worktree_name(name) {
                         // Close Zellij tab with the display name (if agent type is known)
@@ -427,25 +430,25 @@ impl AgentControlService {
 
                     // Prune stale worktree references from git
                     self.prune_worktrees().await?;
-
-                    // Emit agent:stopped event
-                    let agent_id =
-                        exomonad_ui_protocol::AgentId::try_from(format!("gh-{}", issue_id))
-                            .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
-                    let event = exomonad_ui_protocol::AgentEvent::AgentStopped {
-                        agent_id,
-                        timestamp: zellij_events::now_iso8601(),
-                    };
-                    if let Err(e) = zellij_events::emit_event(&event) {
-                        warn!("Failed to emit agent:stopped event: {}", e);
-                    }
-
-                    return Ok(());
                 }
             }
         }
 
-        Err(anyhow!("No worktree found for issue {}", issue_id))
+        if found {
+            // Emit agent:stopped event (once for the issue_id)
+            let agent_id = exomonad_ui_protocol::AgentId::try_from(format!("gh-{}", issue_id))
+                .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
+            let event = exomonad_ui_protocol::AgentEvent::AgentStopped {
+                agent_id,
+                timestamp: zellij_events::now_iso8601(),
+            };
+            if let Err(e) = zellij_events::emit_event(&event) {
+                warn!("Failed to emit agent:stopped event: {}", e);
+            }
+            Ok(())
+        } else {
+            Err(anyhow!("No worktree found for issue {}", issue_id))
+        }
     }
 
     /// Clean up multiple agents.
@@ -976,33 +979,54 @@ impl AgentControlService {
         let exomonad_dir = worktree_path.join(".exomonad");
         fs::create_dir_all(&exomonad_dir).await?;
 
+        // Calculate relative path back to project root
+        // worktree_path is {project_dir}/{rel_path}
+        // exomonad_dir is {project_dir}/{rel_path}/.exomonad
+        // We need {rel_path_to_root} = ../... to get from exomonad_dir to project_dir
+        let rel_path = worktree_path.strip_prefix(&self.project_dir).map_err(|e| {
+            warn!(
+                worktree_path = %worktree_path.display(),
+                project_dir = %self.project_dir.display(),
+                error = %e,
+                "worktree_path is not under project_dir"
+            );
+            anyhow!(
+                "Internal configuration error: worktree_path {:?} is not under project_dir {:?}",
+                worktree_path,
+                self.project_dir
+            )
+        })?;
+        let depth = rel_path.components().count();
+        let rel_to_root = "../".repeat(depth + 1);
+        let rel_to_root = rel_to_root.trim_end_matches('/');
+
         // Write config.toml with default_role = "dev" for spawned agents
-        let config_content = r###"# Agent config (auto-generated)
+        let config_content = format!(
+            r###"# Agent config (auto-generated)
 default_role = "dev"
-project_dir = "../../.."
-"###;
+project_dir = "{}"
+"###,
+            rel_to_root
+        );
         fs::write(exomonad_dir.join("config.toml"), config_content).await?;
         tracing::info!(
             worktree = %worktree_path.display(),
+            rel_to_root = %rel_to_root,
             "Wrote .exomonad/config.toml with default_role=dev"
         );
 
         // Create symlinks for shared resources back to root .exomonad
-        // Worktree is at: {project}/.exomonad/worktrees/gh-xxx/
-        // Symlinks at:    {project}/.exomonad/worktrees/gh-xxx/.exomonad/{name}
-        // Target:         {project}/.exomonad/{name}
-        // Relative path:  ../../../{name} (up to gh-xxx, up to worktrees, up to .exomonad, then {name})
         let symlinks = [
-            ("wasm", "../../../wasm"),
-            ("roles", "../../../roles"),
-            ("lib", "../../../lib"),
-            ("flake.nix", "../../../flake.nix"),
-            ("flake.lock", "../../../flake.lock"),
+            ("wasm", format!("{}/wasm", rel_to_root)),
+            ("roles", format!("{}/roles", rel_to_root)),
+            ("lib", format!("{}/lib", rel_to_root)),
+            ("flake.nix", format!("{}/flake.nix", rel_to_root)),
+            ("flake.lock", format!("{}/flake.lock", rel_to_root)),
         ];
 
         for (name, target) in symlinks {
             let link_path = exomonad_dir.join(name);
-            let target_path = Path::new(target);
+            let target_path = Path::new(&target);
 
             // Remove existing directory/file if it's not a symlink (cleanup old duplicates)
             if link_path.exists() && !link_path.is_symlink() {
@@ -1157,14 +1181,26 @@ project_dir = "../../.."
         issue_id: &str,
         title: &str,
         body: &str,
+        labels: &[String],
         branch: &str,
         issue_url: &str,
     ) -> String {
+        let labels_str = if labels.is_empty() {
+            "None".to_string()
+        } else {
+            labels
+                .iter()
+                .map(|l| format!("`{}`", l))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+
         format!(
             r###"# Issue #{issue_id}: {title}
 
 **Branch:** `{branch}`
 **Issue URL:** {issue_url}
+**Labels:** {labels_str}
 
 ## Description
 
@@ -1173,6 +1209,7 @@ project_dir = "../../.."
             title = title,
             branch = branch,
             issue_url = issue_url,
+            labels_str = labels_str,
             body = body,
         )
     }
@@ -1815,6 +1852,7 @@ mod tests {
             "123",
             "Fix the bug",
             "Description",
+            &["bug".to_string(), "priority".to_string()],
             "gh-123/fix",
             "https://github.com/owner/repo/issues/123",
         );
@@ -1823,8 +1861,23 @@ mod tests {
         assert!(prompt.contains("**Branch:** `gh-123/fix`"));
         assert!(prompt.contains("Description"));
         assert!(prompt.contains("https://github.com/owner/repo/issues/123"));
+        assert!(prompt.contains("**Labels:** `bug`, `priority`"));
         // Stop hooks now handle commit/PR creation - no explicit instruction needed
         assert!(!prompt.contains("When done, commit"));
+    }
+
+    #[test]
+    fn test_build_initial_prompt_no_labels() {
+        let prompt = AgentControlService::build_initial_prompt(
+            "123",
+            "Fix the bug",
+            "Description",
+            &[],
+            "gh-123/fix",
+            "https://github.com/owner/repo/issues/123",
+        );
+
+        assert!(prompt.contains("**Labels:** None"));
     }
 
     #[test]
