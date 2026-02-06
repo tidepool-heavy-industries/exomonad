@@ -30,8 +30,8 @@ cabal.project.wasm.dev
 .exomonad/worktrees/
 .exomonad/sockets/
 .exomonad/logs/
+.exomonad/wasm-cache
 .exomonad/wasm-cache.toml
-.exomonad/wasm-cache/
 .exomonad/sidecar.pid
 rust/.exomonad/
 rust/exomonad/.exomonad/
