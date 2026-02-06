@@ -1132,6 +1132,7 @@ dependencies = [
  "clap",
  "duct",
  "exomonad-runtime",
+ "exomonad-services",
  "exomonad-shared",
  "exomonad-ui-protocol",
  "nix",
@@ -1145,6 +1146,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

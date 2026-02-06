@@ -12,10 +12,14 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use exomonad_runtime::services::{git, zellij_events};
 use exomonad_runtime::{PluginManager, Services};
+use exomonad_services::otel::OtelService;
+use exomonad_services::ExternalService;
 use exomonad_shared::protocol::{
-    ClaudePreToolUseOutput, HookEventType, HookInput, InternalStopHookOutput, Runtime,
-    ServiceRequest,
+    ClaudePreToolUseOutput, HookEventType, HookInput, HookSpecificOutput, InternalStopHookOutput,
+    Runtime, ServiceRequest, StopDecision,
 };
+use exomonad_shared::ToolPermission;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
@@ -89,6 +93,12 @@ async fn handle_hook(
 ) -> Result<()> {
     use std::io::Read;
 
+    let otel = OtelService::from_env().ok();
+    let start_ns = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64;
+
     // Read hook payload from stdin
     let mut stdin_content = String::new();
     std::io::stdin()
@@ -150,6 +160,37 @@ async fn handle_hook(
             let output_json = serde_json::to_string(&ClaudePreToolUseOutput::default())
                 .context("Failed to serialize output")?;
             println!("{}", output_json);
+
+            // Emit OTel span for unhandled hook
+            if let Some(otel) = otel {
+                let end_ns = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos() as u64;
+
+                let mut attributes = HashMap::new();
+                attributes.insert("session.id".to_string(), hook_input.session_id.to_string());
+                attributes.insert("jsonl.file".to_string(), hook_input.transcript_path.clone());
+                if let Some(tid) = &hook_input.tool_use_id {
+                    attributes.insert("tool_use_id".to_string(), tid.clone());
+                }
+                attributes.insert("hook.type".to_string(), format!("{:?}", event_type));
+                attributes.insert("hook.runtime".to_string(), runtime.to_string());
+                attributes.insert("hook.decision".to_string(), "allow".to_string());
+
+                let req = ServiceRequest::OtelSpan {
+                    trace_id: uuid::Uuid::new_v4().simple().to_string(),
+                    span_id: uuid::Uuid::new_v4().simple().to_string()[..16].to_string(),
+                    name: format!("hook:{:?}", event_type),
+                    start_ns: Some(start_ns),
+                    end_ns: Some(end_ns),
+                    attributes: Some(attributes),
+                };
+                if let Err(e) = otel.call(req).await {
+                    warn!("Failed to emit OTel span: {}", e);
+                }
+            }
+
             return Ok(());
         }
     };
@@ -166,6 +207,45 @@ async fn handle_hook(
         // Translate to runtime-specific format at the edge
         let output_json = internal_output.to_runtime_json(&runtime);
         println!("{}", output_json);
+
+        let decision_str = match internal_output.decision {
+            StopDecision::Allow => "allow",
+            StopDecision::Block => "block",
+        };
+
+        // Emit OTel span
+        if let Some(otel) = otel {
+            let end_ns = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos() as u64;
+
+            let mut attributes = HashMap::new();
+            attributes.insert("session.id".to_string(), hook_input.session_id.to_string());
+            attributes.insert("jsonl.file".to_string(), hook_input.transcript_path.clone());
+            if let Some(tid) = &hook_input.tool_use_id {
+                attributes.insert("tool_use_id".to_string(), tid.clone());
+            }
+            attributes.insert("hook.type".to_string(), format!("{:?}", event_type));
+            attributes.insert("hook.runtime".to_string(), runtime.to_string());
+            attributes.insert("hook.decision".to_string(), decision_str.to_string());
+            attributes.insert("routing.decision".to_string(), decision_str.to_string());
+            if let Some(reason) = &internal_output.reason {
+                attributes.insert("routing.reason".to_string(), reason.clone());
+            }
+
+            let req = ServiceRequest::OtelSpan {
+                trace_id: uuid::Uuid::new_v4().simple().to_string(),
+                span_id: uuid::Uuid::new_v4().simple().to_string()[..16].to_string(),
+                name: format!("hook:{:?}", event_type),
+                start_ns: Some(start_ns),
+                end_ns: Some(end_ns),
+                attributes: Some(attributes),
+            };
+            if let Err(e) = otel.call(req).await {
+                warn!("Failed to emit OTel span: {}", e);
+            }
+        }
 
         // Exit code and event emission based on decision
         if internal_output.decision == exomonad_shared::protocol::StopDecision::Block {
@@ -205,6 +285,52 @@ async fn handle_hook(
 
         let output_json = serde_json::to_string(&output).context("Failed to serialize output")?;
         println!("{}", output_json);
+
+        let decision_str = if !output.continue_ {
+            "block"
+        } else {
+            match output.hook_specific_output {
+                Some(HookSpecificOutput::PreToolUse {
+                    permission_decision,
+                    ..
+                }) => match permission_decision {
+                    ToolPermission::Allow => "allow",
+                    ToolPermission::Deny => "deny",
+                    ToolPermission::Ask => "ask",
+                },
+                _ => "allow",
+            }
+        };
+
+        // Emit OTel span
+        if let Some(otel) = otel {
+            let end_ns = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos() as u64;
+
+            let mut attributes = HashMap::new();
+            attributes.insert("session.id".to_string(), hook_input.session_id.to_string());
+            attributes.insert("jsonl.file".to_string(), hook_input.transcript_path.clone());
+            if let Some(tid) = &hook_input.tool_use_id {
+                attributes.insert("tool_use_id".to_string(), tid.clone());
+            }
+            attributes.insert("hook.type".to_string(), format!("{:?}", event_type));
+            attributes.insert("hook.runtime".to_string(), runtime.to_string());
+            attributes.insert("hook.decision".to_string(), decision_str.to_string());
+
+            let req = ServiceRequest::OtelSpan {
+                trace_id: uuid::Uuid::new_v4().simple().to_string(),
+                span_id: uuid::Uuid::new_v4().simple().to_string()[..16].to_string(),
+                name: format!("hook:{:?}", event_type),
+                start_ns: Some(start_ns),
+                end_ns: Some(end_ns),
+                attributes: Some(attributes),
+            };
+            if let Err(e) = otel.call(req).await {
+                warn!("Failed to emit OTel span: {}", e);
+            }
+        }
 
         if !output.continue_ {
             std::process::exit(2);
