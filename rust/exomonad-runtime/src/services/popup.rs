@@ -18,7 +18,7 @@ pub use exomonad_ui_protocol::PopupDefinition as PopupDefinitionType;
 // ============================================================================
 
 /// Input for show_popup host function (matches Haskell PopupRequest).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PopupInput {
     /// Title displayed at the top of the popup.
     pub title: String,
@@ -29,7 +29,7 @@ pub struct PopupInput {
 impl FFIBoundary for PopupInput {}
 
 /// Output from show_popup host function (matches Haskell PopupResponse).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PopupOutput {
     /// Button clicked: "submit" or "cancel"
     pub button: String,

@@ -17,7 +17,7 @@ const API_TIMEOUT: Duration = Duration::from_secs(30);
 /// GitHub repository identifier.
 ///
 /// Uniquely identifies a repository by owner and name (e.g., "anthropics/exomonad").
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Repo {
     /// Repository owner (user or organization name).
     pub owner: GithubOwner,
@@ -31,7 +31,7 @@ impl FFIBoundary for Repo {}
 /// Filter criteria for listing GitHub issues.
 ///
 /// Used with [`GitHubService::list_issues()`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IssueFilter {
     /// Filter by issue state: "open", "closed", or "all".
     pub state: Option<String>,
@@ -45,7 +45,7 @@ impl FFIBoundary for IssueFilter {}
 /// Specification for creating a pull request.
 ///
 /// Used with [`GitHubService::create_pr()`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CreatePRSpec {
     /// PR title.
     pub title: String,
@@ -65,7 +65,7 @@ impl FFIBoundary for CreatePRSpec {}
 /// Filter criteria for listing pull requests.
 ///
 /// Used with [`GitHubService::list_prs()`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PRFilter {
     /// Filter by PR state: "open", "closed", or "all".
     pub state: Option<String>,
@@ -79,7 +79,7 @@ impl FFIBoundary for PRFilter {}
 /// A GitHub issue with metadata.
 ///
 /// Returned by [`GitHubService::list_issues()`] and [`GitHubService::get_issue()`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Issue {
     /// Issue number (unique within repository).
     pub number: u64,
@@ -108,7 +108,7 @@ impl FFIBoundary for Issue {}
 /// A GitHub pull request with metadata.
 ///
 /// Returned by [`GitHubService::list_prs()`] and [`GitHubService::get_pr_for_branch()`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PullRequest {
     /// PR number (unique within repository).
     pub number: u64,
@@ -146,7 +146,7 @@ impl FFIBoundary for PullRequest {}
 /// A review comment on a pull request.
 ///
 /// Returned by [`GitHubService::get_pr_review_comments()`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReviewComment {
     /// Comment ID (unique).
     pub id: u64,
@@ -167,7 +167,53 @@ pub struct ReviewComment {
     pub created_at: String,
 }
 
-impl FFIBoundary for ReviewComment {}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GithubListIssuesInput {
+    pub repo: Repo,
+    pub filter: Option<IssueFilter>,
+}
+
+impl FFIBoundary for GithubListIssuesInput {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GithubGetIssueInput {
+    pub repo: Repo,
+    pub number: u64,
+}
+
+impl FFIBoundary for GithubGetIssueInput {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GithubCreatePRInput {
+    pub repo: Repo,
+    pub spec: CreatePRSpec,
+}
+
+impl FFIBoundary for GithubCreatePRInput {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GithubListPRsInput {
+    pub repo: Repo,
+    pub filter: Option<PRFilter>,
+}
+
+impl FFIBoundary for GithubListPRsInput {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GithubGetPRForBranchInput {
+    pub repo: Repo,
+    pub head: String,
+}
+
+impl FFIBoundary for GithubGetPRForBranchInput {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GithubGetPRReviewCommentsInput {
+    pub repo: Repo,
+    pub pr_number: u64,
+}
+
+impl FFIBoundary for GithubGetPRReviewCommentsInput {}
 
 // ============================================================================
 // Service Implementation
@@ -611,13 +657,8 @@ fn github_list_issues(
     _user_data: UserData<()>,
 ) -> std::result::Result<(), Error> {
     let _span = tracing::info_span!("host_function", function = "github_list_issues").entered();
-    #[derive(Deserialize)]
-    struct Input {
-        repo: Repo,
-        filter: Option<IssueFilter>,
-    }
 
-    let input: Input = get_input(plugin, inputs[0])?;
+    let input: GithubListIssuesInput = get_input(plugin, inputs[0])?;
     tracing::info!(owner = %input.repo.owner, repo = %input.repo.name, "Listing issues");
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
@@ -646,13 +687,8 @@ fn github_get_issue(
     _user_data: UserData<()>,
 ) -> std::result::Result<(), Error> {
     let _span = tracing::info_span!("host_function", function = "github_get_issue").entered();
-    #[derive(Deserialize)]
-    struct Input {
-        repo: Repo,
-        number: u64,
-    }
 
-    let input: Input = get_input(plugin, inputs[0])?;
+    let input: GithubGetIssueInput = get_input(plugin, inputs[0])?;
     tracing::info!(owner = %input.repo.owner, repo = %input.repo.name, number = input.number, "Getting issue");
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
@@ -681,13 +717,8 @@ fn github_create_pr(
     _user_data: UserData<()>,
 ) -> std::result::Result<(), Error> {
     let _span = tracing::info_span!("host_function", function = "github_create_pr").entered();
-    #[derive(Deserialize)]
-    struct Input {
-        repo: Repo,
-        spec: CreatePRSpec,
-    }
 
-    let input: Input = get_input(plugin, inputs[0])?;
+    let input: GithubCreatePRInput = get_input(plugin, inputs[0])?;
     tracing::info!(owner = %input.repo.owner, repo = %input.repo.name, title = %input.spec.title, "Creating PR");
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
@@ -716,13 +747,8 @@ fn github_list_prs(
     _user_data: UserData<()>,
 ) -> std::result::Result<(), Error> {
     let _span = tracing::info_span!("host_function", function = "github_list_prs").entered();
-    #[derive(Deserialize)]
-    struct Input {
-        repo: Repo,
-        filter: Option<PRFilter>,
-    }
 
-    let input: Input = get_input(plugin, inputs[0])?;
+    let input: GithubListPRsInput = get_input(plugin, inputs[0])?;
     tracing::info!(owner = %input.repo.owner, repo = %input.repo.name, "Listing PRs");
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
@@ -752,13 +778,8 @@ fn github_get_pr_for_branch(
 ) -> std::result::Result<(), Error> {
     let _span =
         tracing::info_span!("host_function", function = "github_get_pr_for_branch").entered();
-    #[derive(Deserialize)]
-    struct Input {
-        repo: Repo,
-        head: String,
-    }
 
-    let input: Input = get_input(plugin, inputs[0])?;
+    let input: GithubGetPRForBranchInput = get_input(plugin, inputs[0])?;
     tracing::info!(owner = %input.repo.owner, repo = %input.repo.name, head = %input.head, "Getting PR for branch");
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())
@@ -788,13 +809,8 @@ fn github_get_pr_review_comments(
 ) -> std::result::Result<(), Error> {
     let _span =
         tracing::info_span!("host_function", function = "github_get_pr_review_comments").entered();
-    #[derive(Deserialize)]
-    struct Input {
-        repo: Repo,
-        pr_number: u64,
-    }
 
-    let input: Input = get_input(plugin, inputs[0])?;
+    let input: GithubGetPRReviewCommentsInput = get_input(plugin, inputs[0])?;
     tracing::info!(owner = %input.repo.owner, repo = %input.repo.name, pr_number = input.pr_number, "Getting PR review comments");
 
     let service = GitHubService::new(std::env::var("GITHUB_TOKEN").unwrap_or_default())

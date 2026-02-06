@@ -33,10 +33,10 @@ impl LogService {
     }
 }
 
-#[derive(Deserialize)]
-struct LogPayload {
-    message: String,
-    fields: Option<HashMap<String, String>>,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LogPayload {
+    pub message: String,
+    pub fields: Option<HashMap<String, String>>,
 }
 
 // We need a way to access LogService from UserData.

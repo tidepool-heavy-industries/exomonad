@@ -16,7 +16,7 @@ use serde_json::Value;
 /// This matches the JSON schema that Claude Code sends to hook commands.
 /// Fields vary by hook type - we capture them all and let the Haskell
 /// handler pick what it needs.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HookInput {
     /// Session ID from Claude Code.
     pub session_id: SessionId,
@@ -107,7 +107,7 @@ pub struct HookInput {
 // ============================================================================
 
 /// Common fields for all hook output types.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ClaudePreToolUseOutput {
     /// Whether to continue processing (default: true).
     #[serde(rename = "continue", default = "default_true")]
@@ -153,7 +153,7 @@ fn default_true() -> bool {
 /// Hook-specific output fields.
 ///
 /// The inner structure varies by hook type.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "hookEventName")]
 pub enum HookSpecificOutput {
     /// PreToolUse hook output.
@@ -234,7 +234,7 @@ pub enum HookSpecificOutput {
 }
 
 /// Permission decision for PermissionRequest hook.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "behavior")]
 pub enum PermissionDecision {
     /// Allow the tool call.
@@ -381,7 +381,7 @@ impl InternalStopHookOutput {
 }
 
 /// Claude Code stop hook output format.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ClaudeStopHookOutput {
     /// Whether to continue (true = allow stop, false = block)
     #[serde(rename = "continue")]
@@ -404,7 +404,7 @@ pub enum GeminiStopDecision {
 
 /// Gemini CLI stop hook output format.
 /// Ref: https://geminicli.com/docs/hooks/reference/#afteragent
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct GeminiStopHookOutput {
     /// Decision: allow or deny (deny triggers retry with reason as correction prompt)
     pub decision: GeminiStopDecision,
