@@ -12,7 +12,7 @@ use serde_json;
 #[test]
 fn test_memory_set_val_byte_layout() {
     // Goal: When host calls memory_set_val(Json(value)), what bytes appear in memory?
-    
+
     let wasm = r#"
         (module
           (import "env" "get_data" (func $get_data (result i64)))
@@ -28,34 +28,47 @@ fn test_memory_set_val_byte_layout() {
         [],
         [ValType::I64],
         UserData::new(()),
-        |plugin: &mut CurrentPlugin, _inputs: &[Val], outputs: &mut [Val], _user_data: UserData<()>| {
+        |plugin: &mut CurrentPlugin,
+         _inputs: &[Val],
+         outputs: &mut [Val],
+         _user_data: UserData<()>| {
             let value = "boundary-test";
             // This is what our host functions do
             plugin.memory_set_val(&mut outputs[0], Json(value))?;
             Ok(())
         },
-    ).with_namespace("env");
+    )
+    .with_namespace("env");
 
     let probe_fn = Function::new(
         "probe_data",
         [ValType::I64],
         [],
         UserData::new(()),
-        |plugin: &mut CurrentPlugin, inputs: &[Val], _outputs: &mut [Val], _user_data: UserData<()>| {
+        |plugin: &mut CurrentPlugin,
+         inputs: &[Val],
+         _outputs: &mut [Val],
+         _user_data: UserData<()>| {
             let handle = inputs[0].unwrap_i64();
-            let mem = plugin.memory_from_val(&Val::I64(handle)).expect("Invalid handle in probe");
-            let bytes = plugin.memory_bytes(mem).expect("Failed to get memory bytes");
+            let mem = plugin
+                .memory_from_val(&Val::I64(handle))
+                .expect("Invalid handle in probe");
+            let bytes = plugin
+                .memory_bytes(mem)
+                .expect("Failed to get memory bytes");
             println!("Probed bytes: {:?}", bytes);
             println!("Probed string: {}", String::from_utf8_lossy(bytes));
-            
+
             // Ground truth assertions
             assert_eq!(bytes, b"\"boundary-test\"");
             Ok(())
         },
-    ).with_namespace("env");
+    )
+    .with_namespace("env");
 
     let manifest = Manifest::new([Wasm::data(wasm)]);
-    let mut plugin = Plugin::new(&manifest, vec![host_fn, probe_fn], true).expect("Failed to build plugin");
+    let mut plugin =
+        Plugin::new(&manifest, vec![host_fn, probe_fn], true).expect("Failed to build plugin");
 
     // Call WASM function which calls our host functions
     plugin.call::<(), ()>("test", ()).expect("WASM call failed");
@@ -64,7 +77,7 @@ fn test_memory_set_val_byte_layout() {
 #[test]
 fn test_memory_get_val_roundtrip() {
     // Goal: Confirm that host's memory_get_val can read data allocated by host's memory_set_val.
-    
+
     let wasm = r#"
         (module
           (import "env" "get_data" (func $get_data (result i64)))
@@ -81,18 +94,25 @@ fn test_memory_get_val_roundtrip() {
         [],
         [ValType::I64],
         UserData::new(()),
-        |plugin: &mut CurrentPlugin, _inputs: &[Val], outputs: &mut [Val], _user_data: UserData<()>| {
+        |plugin: &mut CurrentPlugin,
+         _inputs: &[Val],
+         outputs: &mut [Val],
+         _user_data: UserData<()>| {
             plugin.memory_set_val(&mut outputs[0], Json("guest-data".to_string()))?;
             Ok(())
         },
-    ).with_namespace("env");
+    )
+    .with_namespace("env");
 
     let check_data_fn = Function::new(
         "check_data",
         [ValType::I64],
         [ValType::I64],
         UserData::new(()),
-        |plugin: &mut CurrentPlugin, inputs: &[Val], outputs: &mut [Val], _user_data: UserData<()>| {
+        |plugin: &mut CurrentPlugin,
+         inputs: &[Val],
+         outputs: &mut [Val],
+         _user_data: UserData<()>| {
             let Json(input): Json<String> = plugin.memory_get_val(&inputs[0])?;
             if input == "guest-data" {
                 outputs[0] = Val::I64(1);
@@ -101,23 +121,29 @@ fn test_memory_get_val_roundtrip() {
             }
             Ok(())
         },
-    ).with_namespace("env");
+    )
+    .with_namespace("env");
 
     let report_fn = Function::new(
         "report_result",
         [ValType::I64],
         [],
         UserData::new(()),
-        |_plugin: &mut CurrentPlugin, inputs: &[Val], _outputs: &mut [Val], _user_data: UserData<()>| {
+        |_plugin: &mut CurrentPlugin,
+         inputs: &[Val],
+         _outputs: &mut [Val],
+         _user_data: UserData<()>| {
             let result = inputs[0].unwrap_i64();
             println!("Reported result: {}", result);
             assert_eq!(result, 1);
             Ok(())
         },
-    ).with_namespace("env");
+    )
+    .with_namespace("env");
 
     let manifest = Manifest::new([Wasm::data(wasm)]);
-    let mut plugin = Plugin::new(&manifest, vec![get_data_fn, check_data_fn, report_fn], true).expect("Failed to build plugin");
+    let mut plugin = Plugin::new(&manifest, vec![get_data_fn, check_data_fn, report_fn], true)
+        .expect("Failed to build plugin");
 
     plugin.call::<(), ()>("test", ()).expect("WASM call failed");
 }
@@ -128,9 +154,9 @@ fn test_host_result_success_serialization() {
     let result: HostResult<String> = HostResult::Success("main".to_string());
     let json_bytes = serde_json::to_vec(&result).expect("Serialization failed");
     let json_str = String::from_utf8(json_bytes).expect("Invalid UTF-8");
-    
+
     println!("HostResult::Success JSON: {}", json_str);
-    
+
     // Exact layout match for Haskell's Aeson instance
     assert_eq!(json_str, r#"{"kind":"Success","payload":"main"}"#);
 }
@@ -138,7 +164,7 @@ fn test_host_result_success_serialization() {
 #[test]
 fn test_host_result_error_serialization() {
     use exomonad_runtime::common::{ErrorCode, FFIError};
-    
+
     let err = FFIError {
         message: "file not found".to_string(),
         code: ErrorCode::NotFound,
@@ -147,9 +173,9 @@ fn test_host_result_error_serialization() {
     };
     let result: HostResult<String> = HostResult::Error(err);
     let json_str = serde_json::to_string(&result).expect("Serialization failed");
-    
+
     println!("HostResult::Error JSON: {}", json_str);
-    
+
     // Exact layout match
     assert!(json_str.contains(r#""kind":"Error""#));
     assert!(json_str.contains(r#""message":"file not found""#));
@@ -161,7 +187,7 @@ fn test_host_result_error_serialization() {
 fn test_guest_sees_raw_json_no_prefix() {
     // Goal: When guest receives a handle from host, what does it see at that offset?
     // Does it see raw JSON or some length prefix?
-    
+
     let wasm = r#"
         (module
           (import "env" "get_data" (func $get_data (result i64)))
@@ -177,37 +203,43 @@ fn test_guest_sees_raw_json_no_prefix() {
         [],
         [ValType::I64],
         UserData::new(()),
-        |plugin: &mut CurrentPlugin, _inputs: &[Val], outputs: &mut [Val], _user_data: UserData<()>| {
+        |plugin: &mut CurrentPlugin,
+         _inputs: &[Val],
+         outputs: &mut [Val],
+         _user_data: UserData<()>| {
             let value = "1234567890"; // JSON: "1234567890" (12 bytes)
             plugin.memory_set_val(&mut outputs[0], Json(value))?;
             Ok(())
         },
-    ).with_namespace("env");
+    )
+    .with_namespace("env");
 
     let report_fn = Function::new(
         "report_first_8_bytes",
         [ValType::I64],
         [],
         UserData::new(()),
-        |plugin: &mut CurrentPlugin, inputs: &[Val], _outputs: &mut [Val], _user_data: UserData<()>| {
+        |plugin: &mut CurrentPlugin,
+         inputs: &[Val],
+         _outputs: &mut [Val],
+         _user_data: UserData<()>| {
             let handle = inputs[0].unwrap_i64();
             let mem = plugin.memory_from_val(&Val::I64(handle)).unwrap();
             let bytes = plugin.memory_bytes(mem).unwrap();
-            
+
             let first_8 = &bytes[0..8.min(bytes.len())];
             println!("First 8 bytes at handle: {:?}", first_8);
             println!("First 8 as string: {}", String::from_utf8_lossy(first_8));
-            
+
             assert_eq!(bytes[0], 34); // '"'
             Ok(())
         },
-    ).with_namespace("env");
+    )
+    .with_namespace("env");
 
     let manifest = Manifest::new([Wasm::data(wasm)]);
-    let mut plugin = Plugin::new(&manifest, vec![get_data_fn, report_fn], true).expect("Failed to build plugin");
+    let mut plugin =
+        Plugin::new(&manifest, vec![get_data_fn, report_fn], true).expect("Failed to build plugin");
 
-        plugin.call::<(), ()>("test", ()).expect("WASM call failed");
-
-    }
-
-    
+    plugin.call::<(), ()>("test", ()).expect("WASM call failed");
+}
