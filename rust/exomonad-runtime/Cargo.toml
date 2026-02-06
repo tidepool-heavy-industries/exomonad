@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+async-trait = { workspace = true }
 extism = "1.13"
 extism-convert = "1.13"
 tokio = { workspace = true }

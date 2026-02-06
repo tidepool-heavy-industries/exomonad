@@ -24,6 +24,7 @@ Results marshalled back through WASM → Haskell
 |--------|------|---------|
 | `plugin_manager` | plugin_manager.rs | Extism plugin loading, host function registration |
 | `services` | services/mod.rs | Service struct (Git, GitHub, AgentControl, FileSystem, Log) |
+| `effects` | effects/mod.rs | Extensible effects for external consumers |
 | `host_functions` | host_functions.rs | WASM import helpers (get_input, set_output, HostResult protocol) |
 
 ### Services Breakdown
@@ -155,6 +156,107 @@ PluginManager::load_plugin registers 25+ host functions from all services:
 **Copilot Review (1 function):**
 - `copilot_poll_review` - Poll for Copilot review comments
 
+**Extensible Effects (1 function):**
+- `yield_effect` - Dispatch to user-registered effect handlers
+
+## Extensible Effects System
+
+External consumers can define custom effects without forking exomonad.
+
+### Architecture
+
+```
+WASM Guest (Haskell)
+    │
+    │ yieldEffect "egregore.emit_signal" payload
+    ▼
+yield_effect host function
+    │
+    │ routes by namespace prefix
+    ▼
+EffectRegistry
+    ├── "git.*"       → GitHandler (builtin, future)
+    ├── "github.*"    → GitHubHandler (builtin, future)
+    └── "egregore.*"  → EgregoreHandler (user-provided)
+```
+
+### Key Types
+
+**EffectHandler trait** (`effects/mod.rs`):
+```rust
+#[async_trait]
+pub trait EffectHandler: Send + Sync {
+    fn namespace(&self) -> &str;
+    async fn handle(&self, effect_type: &str, payload: Value) -> EffectResult<Value>;
+}
+```
+
+**EffectError** (`effects/error.rs`):
+```rust
+pub enum EffectError {
+    NotFound { resource: String },
+    InvalidInput { message: String },
+    NetworkError { message: String },
+    PermissionDenied { message: String },
+    Timeout { message: String },
+    Custom { code: String, message: String, data: Option<Value> },
+}
+```
+
+**RuntimeBuilder** (`lib.rs`):
+```rust
+let runtime = RuntimeBuilder::new()
+    .with_effect_handler(MyHandler::new())
+    .with_wasm_path("plugin.wasm")
+    .build()
+    .await?;
+```
+
+### Haskell API
+
+From `ExoMonad.Guest.Effect`:
+```haskell
+yieldEffect :: (ToJSON req, FromJSON resp)
+            => Text -> req -> IO (Either EffectError resp)
+
+-- Example usage
+emitSignal :: EmitSignalReq -> IO (Either EffectError EmitSignalRes)
+emitSignal req = yieldEffect "egregore.emit_signal" req
+```
+
+### External Consumer Example
+
+```rust
+// egregore-mcp/src/main.rs
+use exomonad_runtime::{RuntimeBuilder, EffectHandler, EffectResult};
+
+struct EgregoreHandler { client: EgregoreClient }
+
+#[async_trait]
+impl EffectHandler for EgregoreHandler {
+    fn namespace(&self) -> &str { "egregore" }
+
+    async fn handle(&self, effect_type: &str, payload: Value) -> EffectResult<Value> {
+        match effect_type.strip_prefix("egregore.") {
+            Some("emit_signal") => self.emit_signal(payload).await,
+            _ => Err(EffectError::not_found(effect_type)),
+        }
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    RuntimeBuilder::new()
+        .with_effect_handler(EgregoreHandler::new())
+        .with_wasm_path("plugin.wasm")
+        .build()
+        .await
+        .unwrap()
+        .run_mcp_stdio()  // Future: MCP server entry point
+        .await;
+}
+```
+
 ## Effect Boundary
 
 | Haskell Effect | Host Function | Rust Implementation |
@@ -259,6 +361,9 @@ cargo test -p exomonad-runtime
 | Error codes | Structured error classification for client-side handling |
 | Optional GitHub | Graceful degradation when GITHUB_TOKEN is not available |
 | Secrets from file | ~/.exomonad/secrets for local development, env vars for CI |
+| Single yield_effect | One extensible entry point for custom effects, dispatched by namespace |
+| Async EffectHandler | Handlers can perform I/O operations naturally |
+| EffectError Custom variant | Extensible error type for domain-specific errors |
 
 ## Related Documentation
 

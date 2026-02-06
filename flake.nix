@@ -26,7 +26,13 @@
           curl
           git
           nodejs_20 # For quicktype codegen
+          protobuf  # For proto codegen (prost/proto3-suite)
         ];
+
+        # Proto3-suite code generator for Haskell
+        # Note: GHC 9.12 version has broken deps in nixpkgs, use GHC 9.6 for codegen
+        # Generated code is pure Haskell and works with any GHC version
+        proto3SuitePkg = pkgs.haskell.packages.ghc96.proto3-suite;
 
         # Haskell toolchain
         haskellPkgs = ghcVersion: with pkgs; [
@@ -297,7 +303,8 @@ EOF
               ++ haskellPkgs "ghc912"
               ++ rustPkgs
               ++ orchestrationPkgs
-              ++ [ pkgs.sqlite ];
+              ++ [ pkgs.sqlite ]
+              ++ [ proto3SuitePkg ];  # For compile-proto-file (Haskell proto codegen)
 
             shellHook = ''
               export PKG_CONFIG_PATH="${pkgs.zlib.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
@@ -317,7 +324,8 @@ EOF
               echo ""
               echo "Commands:"
               echo "  cabal build all      Build Haskell packages"
-              echo "  ./ide              Start Claude Code++ session"
+              echo "  just proto-gen       Generate proto code (Rust + Haskell)"
+              echo "  ./ide                Start Claude Code++ session"
               echo ""
               echo "Other shells:"
               echo "  nix develop .#wasm              WASM cross-compilation"

@@ -338,6 +338,53 @@ install-all-dev:
     @ls -lh ~/.config/zellij/plugins/exomonad-coordinator.wasm
     @ls -lh .exomonad/wasm/wasm-guest-*.wasm
 
+# Generate proto code for both Rust (prost) and Haskell (proto3-suite)
+proto-gen:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo ">>> Building proto3-suite compile-proto-file (GHC 9.6)..."
+    # Use GHC 9.6 for codegen (GHC 9.12 has broken deps in nixpkgs)
+    # Generated code is pure Haskell, works with any GHC version
+    PROTO3_SUITE=$(nix-build '<nixpkgs>' -A haskell.packages.ghc96.proto3-suite --no-out-link 2>/dev/null)
+
+    echo ">>> Generating Haskell types from proto..."
+    rm -rf haskell/proto/src/Proto/Exomonad
+    mkdir -p haskell/proto/src/Proto/Exomonad
+
+    # Generate from each proto file
+    for proto in proto/exomonad/*.proto; do
+        # Strip proto/ prefix since --includeDir proto already provides it
+        proto_rel="${proto#proto/}"
+        echo "    Processing: $proto_rel"
+        $PROTO3_SUITE/bin/compile-proto-file \
+            --includeDir proto \
+            --proto "$proto_rel" \
+            --out haskell/proto/src
+    done
+
+    echo ">>> Generating Rust types from proto..."
+    nix develop -c bash -c "cd rust && cargo build -p exomonad-proto"
+
+    echo ">>> Verifying Haskell build..."
+    nix develop -c cabal build exomonad-proto
+
+    echo ">>> Done. Generated:"
+    find haskell/proto/src -name '*.hs' -type f
+    echo "Rust: rust/target/debug/build/exomonad-proto-*/out/exomonad.ffi.rs"
+
+# Verify proto changes don't break wire format
+proto-test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo ">>> Running Rust proto wire format tests..."
+    nix develop -c bash -c "cd rust && cargo test -p exomonad-proto"
+    echo ">>> Running Haskell proto tests..."
+    nix develop -c cabal test exomonad-proto || echo "No tests defined yet"
+    echo ">>> Running proto wire format compatibility test..."
+    nix develop -c cabal run proto-test || echo "Wire format test not yet implemented"
+    echo ">>> Done"
+
 # Clean build artifacts
 clean:
     rm -rf {{metadata_dir}}

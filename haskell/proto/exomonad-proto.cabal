@@ -1,0 +1,54 @@
+cabal-version: 3.4
+name: exomonad-proto
+version: 0.1.0.0
+synopsis: Protocol buffer generated types for ExoMonad FFI boundary
+description:
+  This package provides generated types from proto/exomonad/*.proto.
+  Code generation is done via proto3-suite's compile-proto-file.
+
+  Generated types include:
+  - Message types with ToJSONPB/FromJSONPB instances
+  - Enum types with proper protobuf encoding
+  - Field accessors for all message fields
+
+  To regenerate:
+    just proto-gen
+
+  Wire format:
+  - Uses JSON via proto3-suite's JSONPB encoding
+  - Enum values use SCREAMING_SNAKE_CASE (e.g., ERROR_CODE_NOT_FOUND)
+  - See Proto.Compat for snake_case conversion to match prost
+
+build-type: Simple
+license: BSD-3-Clause
+license-file: ../../LICENSE
+
+library
+  default-language: GHC2021
+  default-extensions:
+    DataKinds
+    DeriveAnyClass
+    DeriveGeneric
+    DerivingStrategies
+    FlexibleInstances
+    GADTs
+    OverloadedStrings
+    TypeApplications
+  hs-source-dirs: src
+  exposed-modules:
+    ExoMonad.Ffi
+    ExoMonad.Common
+    ExoMonad.Hook
+    ExoMonad.Agent
+    ExoMonad.Popup
+    ExoMonad.Compat
+  build-depends:
+    base >= 4.16 && < 5,
+    proto3-runtime,
+    proto3-wire,
+    bytestring,
+    containers,
+    deepseq,
+    text >= 2.0,
+    aeson >= 2.0,
+    vector

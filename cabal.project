@@ -1,5 +1,6 @@
 packages:
     haskell/dsl/core
+    haskell/proto
     haskell/protocol/wire-types
     haskell/effects/socket-client
     haskell/effects/observability-interpreter
@@ -12,6 +13,7 @@ packages:
     haskell/effects/worktree-interpreter
     haskell/effects/zellij-interpreter
     haskell/vendor/ginger
+    haskell/vendor/proto3-runtime
     haskell/tools/training-generator
     haskell/wasm-guest
 
