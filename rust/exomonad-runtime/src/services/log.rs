@@ -1,3 +1,4 @@
+use crate::common::FFIBoundary;
 use extism::{Error, Function, UserData, ValType};
 use extism_convert::Json;
 use serde::{Deserialize, Serialize};
@@ -38,6 +39,8 @@ pub struct LogPayload {
     pub message: String,
     pub fields: Option<HashMap<String, String>>,
 }
+
+impl FFIBoundary for LogPayload {}
 
 // We need a way to access LogService from UserData.
 // Assuming we pass Arc<Services> as UserData.

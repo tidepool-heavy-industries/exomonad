@@ -167,6 +167,8 @@ pub struct ReviewComment {
     pub created_at: String,
 }
 
+impl FFIBoundary for ReviewComment {}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GithubListIssuesInput {
     pub repo: Repo,
