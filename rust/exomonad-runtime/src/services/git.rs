@@ -192,7 +192,7 @@ impl GitService {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn has_unpushed_commits(&self, dir: &str) -> Result<bool> {
+    pub async fn has_unpushed_commits(&self, dir: &str) -> Result<u32> {
         let output = self
             .exec_git(dir, &["rev-list", "--count", "@{upstream}..HEAD"])
             .await;
@@ -201,14 +201,14 @@ impl GitService {
             Ok(count_str) => {
                 let count = count_str.trim().parse::<u32>().unwrap_or(0);
                 tracing::debug!(count, "Unpushed commits count");
-                Ok(count > 0)
+                Ok(count)
             }
             Err(e) => {
                 tracing::warn!(
                     error = %e,
                     "Failed to check unpushed commits. Assuming no upstream."
                 );
-                Ok(false)
+                Ok(0)
             }
         }
     }
@@ -474,11 +474,11 @@ pub fn git_has_unpushed_commits_host_fn(git_service: Arc<GitService>) -> Functio
                 block_on(git.has_unpushed_commits(&input.working_dir))?;
 
             match &result {
-                Ok(has_unpushed) => tracing::info!(success = true, has_unpushed, "Completed"),
+                Ok(count) => tracing::info!(success = true, count, "Completed"),
                 Err(e) => tracing::warn!(error = %e, "Failed"),
             }
 
-            let output: HostResult<bool> = result.into_ffi_result();
+            let output: HostResult<u32> = result.into_ffi_result();
 
             plugin.memory_set_val(&mut outputs[0], Json(output))?;
             Ok(())

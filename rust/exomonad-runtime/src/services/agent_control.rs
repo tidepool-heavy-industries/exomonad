@@ -630,14 +630,15 @@ impl AgentControlService {
             if let Some((path, branch, name)) = worktrees.get(&issue_id) {
                 agent.worktree_path = Some(path.to_string_lossy().to_string());
                 agent.branch_name = Some(branch.clone());
-                agent.has_changes = Some(self.has_uncommitted_changes(path).await);
-                agent.has_unpushed = Some(
-                    self.git
-                        .has_unpushed_commits(&path.to_string_lossy())
-                        .await
-                        .unwrap_or(false),
-                );
-
+                                agent.has_changes = Some(self.has_uncommitted_changes(path).await);
+                                agent.has_unpushed = Some(
+                                    self.git
+                                        .has_unpushed_commits(&path.to_string_lossy())
+                                        .await
+                                        .unwrap_or(0)
+                                        > 0,
+                                );
+                
                 if let Some(parsed) = parse_worktree_name(name) {
                     agent.slug = Some(parsed.slug.to_string());
                     agent.agent_type = parsed.agent_type.map(|t| t.suffix().to_string());

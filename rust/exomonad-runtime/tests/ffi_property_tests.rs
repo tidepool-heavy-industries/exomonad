@@ -348,7 +348,7 @@ fn test_git_has_unpushed_commits_roundtrip() {
         arb_git_host_input(),
         "git_has_unpushed_commits",
         |state| stateful_host_fn("git_has_unpushed_commits", state),
-        |input| input.working_dir.len() % 2 == 0,
+        |input| if input.working_dir.len() % 2 == 0 { 0u32 } else { 1u32 },
     );
 }
 
