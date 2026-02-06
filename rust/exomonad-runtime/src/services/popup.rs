@@ -57,6 +57,48 @@ fn get_plugin_path() -> Result<String> {
     Ok(format!("file:{}", expanded))
 }
 
+/// Get the Zellij session name.
+///
+/// Tries in order:
+/// 1. ZELLIJ_SESSION_NAME environment variable
+/// 2. Parse output of `zellij list-sessions` for the first active session
+fn get_zellij_session() -> Result<String> {
+    // First try environment variable
+    if let Ok(session) = std::env::var("ZELLIJ_SESSION_NAME") {
+        tracing::debug!(session = %session, "Using ZELLIJ_SESSION_NAME from environment");
+        return Ok(session);
+    }
+
+    // Fall back to listing sessions and picking the first active one
+    tracing::debug!("ZELLIJ_SESSION_NAME not set, detecting from zellij list-sessions");
+    let output = Command::new("zellij")
+        .args(["list-sessions", "--short"])
+        .output()
+        .context("Failed to run zellij list-sessions")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("zellij list-sessions failed: {}", stderr);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // list-sessions --short returns just session names, one per line
+    // We want the first active session (not EXITED)
+    for line in stdout.lines() {
+        let session = line.trim();
+        if !session.is_empty() && !session.contains("EXITED") {
+            tracing::info!(session = %session, "Detected Zellij session");
+            return Ok(session.to_string());
+        }
+    }
+
+    anyhow::bail!(
+        "No active Zellij session found. Make sure you're running inside Zellij. \
+         Sessions found: {}",
+        stdout.trim()
+    )
+}
+
 // ============================================================================
 // Input/Output types for FFI
 // ============================================================================
@@ -118,8 +160,9 @@ impl PopupService {
             anyhow::bail!("Popup must have at least one choice item");
         }
 
-        // Verify plugin exists
+        // Verify plugin exists and detect session
         let plugin_path = get_plugin_path()?;
+        let session = get_zellij_session()?;
 
         // Build payload: "request_id|title|item1,item2,item3"
         // Sanitize delimiters to avoid parsing issues
@@ -130,13 +173,18 @@ impl PopupService {
         tracing::debug!(
             request_id = %request_id,
             plugin = %plugin_path,
+            session = %session,
             items = ?items,
             "Sending popup request via zellij pipe --plugin"
         );
 
         // Use zellij pipe --plugin to send request and receive response on stdout.
         // The plugin will call cli_pipe_output() to send the response back.
+        // We must specify --session explicitly because the MCP server process may not
+        // have ZELLIJ_SESSION_NAME in its environment.
         let mut child = Command::new("zellij")
+            .arg("--session")
+            .arg(&session)
             .arg("pipe")
             .arg("--plugin")
             .arg(&plugin_path)
@@ -152,8 +200,15 @@ impl PopupService {
 
         let (tx, rx) = mpsc::channel();
         let mut stdout = child.stdout.take().expect("stdout was piped");
+        let mut stderr = child.stderr.take().expect("stderr was piped");
 
         // Spawn thread to read stdout (blocks until plugin sends response)
+        let stderr_handle = std::thread::spawn(move || {
+            let mut buffer = Vec::new();
+            let _ = stderr.read_to_end(&mut buffer);
+            buffer
+        });
+
         std::thread::spawn(move || {
             let mut buffer = Vec::new();
             let result = stdout.read_to_end(&mut buffer);
@@ -166,11 +221,25 @@ impl PopupService {
         let response_str = match rx.recv_timeout(POPUP_TIMEOUT) {
             Ok((Ok(_), buffer)) => {
                 let _ = child.wait();
+                // Capture stderr for debugging
+                if let Ok(stderr_buf) = stderr_handle.join() {
+                    if !stderr_buf.is_empty() {
+                        let stderr_str = String::from_utf8_lossy(&stderr_buf);
+                        tracing::warn!(request_id = %request_id, stderr = %stderr_str, "zellij pipe stderr");
+                    }
+                }
                 String::from_utf8(buffer).context("Invalid UTF-8 in popup response")?
             }
             Ok((Err(e), _)) => {
                 let _ = child.kill();
                 let _ = child.wait();
+                // Capture stderr for debugging
+                if let Ok(stderr_buf) = stderr_handle.join() {
+                    if !stderr_buf.is_empty() {
+                        let stderr_str = String::from_utf8_lossy(&stderr_buf);
+                        tracing::error!(request_id = %request_id, stderr = %stderr_str, "zellij pipe failed");
+                    }
+                }
                 return Err(anyhow::Error::from(e).context("Failed to read popup response"));
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -186,13 +255,24 @@ impl PopupService {
             }
         };
 
-        tracing::debug!(request_id = %request_id, response = %response_str, "Received popup response");
+        tracing::info!(
+            request_id = %request_id,
+            response = %response_str,
+            response_len = response_str.len(),
+            response_bytes = ?response_str.as_bytes(),
+            "Received popup response"
+        );
 
         // Parse response: "{request_id}:{selected_item}" or "{request_id}:CANCELLED"
         let response_str = response_str.trim();
+
+        if response_str.is_empty() {
+            anyhow::bail!("Empty response from zellij pipe - plugin may have failed to load or respond");
+        }
+
         let (resp_request_id, selection) = response_str
             .split_once(':')
-            .context("Invalid popup response format: expected 'request_id:selection'")?;
+            .context(format!("Invalid popup response format: expected 'request_id:selection', got: {:?}", response_str))?;
 
         // Verify request_id matches
         if resp_request_id != request_id {
