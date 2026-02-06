@@ -226,7 +226,14 @@ runStopHookChecks = do
     Left err -> pure $ blockStopResponse $ "Failed to check dirty files: " <> err
     Right dirtyFiles ->
       if not (null (dirtyFiles :: [Text]))
-        then pure $ blockStopResponse "You have uncommitted changes. Commit them with a message describing your work."
+        then
+          let files = T.intercalate ", " dirtyFiles
+              msg =
+                "You have uncommitted changes in these files: "
+                  <> files
+                  <> "\n\nTo continue, please stage and commit them:\n"
+                  <> "git add -A && git commit -m \"Describe your work\""
+           in pure $ blockStopResponse msg
         else checkUnpushedCommits hostInput
 
 checkUnpushedCommits :: GitHostInput -> IO StopHookOutput
@@ -240,9 +247,20 @@ checkUnpushedCommits hostInput = do
       unpushedResult <- callHost host_git_has_unpushed_commits hostInput
       case unpushedResult of
         Left err -> pure $ blockStopResponse $ "Failed to check unpushed commits: " <> err
-        Right hasUnpushed ->
-          if hasUnpushed
-            then pure $ blockStopResponse $ "Your commits aren't pushed. Push with: git push -u origin " <> branch repoInfo
+        Right (unpushedCount :: Int) ->
+          if unpushedCount > 0
+            then
+              let b = branch repoInfo
+                  msg =
+                    "You have "
+                      <> T.pack (show unpushedCount)
+                      <> " unpushed commit(s) on branch '"
+                      <> b
+                      <> "'.\n"
+                      <> "Push them to GitHub with:\n"
+                      <> "git push -u origin "
+                      <> b
+               in pure $ blockStopResponse msg
             else checkPRFiled repoInfo
 
 checkPRFiled :: RepoInfo -> IO StopHookOutput
@@ -258,7 +276,11 @@ checkPRFiled repoInfo = do
       prResult <- callHost host_github_get_pr_for_branch prInput
       case prResult of
         Left err -> pure $ blockStopResponse $ "Failed to check for PR: " <> err
-        Right Nothing -> pure $ blockStopResponse "No PR filed for this branch. Use the file_pr tool to create a PR and wait for Copilot review."
+        Right Nothing ->
+          pure $
+            blockStopResponse $
+              "No PR filed for this branch. Use the file_pr tool to create a PR:\n"
+                <> "file_pr(title=\"Describe your work\", body=\"Detailed description of changes\")"
         Right (Just pr) -> checkReviewComments repo pr
 
 checkReviewComments :: Repo -> PullRequest -> IO StopHookOutput
@@ -283,19 +305,26 @@ checkReviewComments _repo pr = do
                 <> T.pack (show (prNumber pr))
                 <> " yet. Wait for Copilot review or check if Copilot is enabled for this repo."
         Reviewed ->
-          if null (croComments reviewOutput)
-            then pure allowStopResponse
-            else
-              pure $
-                blockStopResponse $
-                  "Copilot left "
-                    <> T.pack (show (length (croComments reviewOutput)))
-                    <> " comment(s) on PR #"
-                    <> T.pack (show (prNumber pr))
-                    <> ". Address them, commit, push, then stop again."
+          let comments = croComments reviewOutput
+           in if null comments
+                then pure allowStopResponse
+                else
+                  let formattedComments = T.unlines $ map formatComment comments
+                      msg =
+                        "Copilot left "
+                          <> T.pack (show (length comments))
+                          <> " comment(s) on PR #"
+                          <> T.pack (show (prNumber pr))
+                          <> ":\n\n"
+                          <> formattedComments
+                          <> "\nAddress these comments, commit, and push your changes."
+                   in pure $ blockStopResponse msg
         Pending ->
           pure $
             blockStopResponse $
               "Copilot review is still pending for PR #"
                 <> T.pack (show (prNumber pr))
                 <> ". Wait for review to complete."
+
+formatComment :: CopilotComment -> Text
+formatComment c = "- " <> ccPath c <> maybe "" (\l -> ":" <> T.pack (show l)) (ccLine c) <> ": " <> ccBody c

@@ -7,7 +7,7 @@
 | `git_get_worktree` | `GitHostInput` | `WorktreeInfo` | 🟢 | `ffi_property_tests.rs` |
 | `git_get_dirty_files` | `GitHostInput` | `[String]` | 🟢 | `ffi_property_tests.rs` |
 | `git_get_recent_commits` | `GitLogInput` | `[Commit]` | 🟢 | `ffi_property_tests.rs` |
-| `git_has_unpushed_commits` | `GitHostInput` | `Bool` | 🟢 | `ffi_property_tests.rs` |
+| `git_has_unpushed_commits` | `GitHostInput` | `Int` | 🟢 | `ffi_property_tests.rs` |
 | `git_get_remote_url` | `GitHostInput` | `String` | 🟢 | `ffi_property_tests.rs` |
 | `git_get_repo_info` | `GitHostInput` | `RepoInfo` | 🟢 | `ffi_property_tests.rs` |
 | **GitHub** | | | | |
