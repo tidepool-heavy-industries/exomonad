@@ -127,7 +127,7 @@ data SpanKind
     SpanInternal
   | -- | Outgoing request (LLM call, API call)
     SpanClient
-  | -- | Incoming request (graph entry)
+  | -- | Incoming request (tool handler entry)
     SpanServer
   deriving (Show, Eq, Generic)
 
@@ -185,7 +185,7 @@ makeSem ''Observability
 -- | Run an action within a span.
 --
 -- The span tracks the execution time and status of the action.
--- Span name should be descriptive (e.g., "graph:classify", "llm:call").
+-- Span name should be descriptive (e.g., "tool:search", "llm:call").
 --
 -- @
 -- withSpan "node:classify" SpanInternal [] $ do

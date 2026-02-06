@@ -26,11 +26,10 @@ module ExoMonad.Effect.Types
     RequestInput (..), -- Export constructors for makeSem
     Log (..),
     LogLevel (..),
-    QuestionUI (..),
     DecisionLog (..),
     TUI (..),
 
-    -- * Return Effect (graph termination)
+    -- * Return Effect
     Return (..),
     returnValue,
     runReturn,
@@ -79,7 +78,7 @@ module ExoMonad.Effect.Types
     withImages,
 
     -- * LLM Error Types
-    LlmError (..),
+    CallError (..),
 
     -- * Result Types
     TurnResult (..),
@@ -90,7 +89,6 @@ module ExoMonad.Effect.Types
     LLMHooks (..),
     noHooks,
     InputHandler (..),
-    QuestionHandler,
 
     -- * Tool Dispatcher Type
     ToolDispatcher,
@@ -108,7 +106,6 @@ module ExoMonad.Effect.Types
     runLog,
     runChatHistory,
     runRequestInput,
-    runQuestionUI,
     runDecisionLogPure,
 
     -- * TUI Effect Operations
@@ -134,17 +131,8 @@ module ExoMonad.Effect.Types
     ThinkingContent (..),
     RedactedThinking (..),
 
-    -- * Question DSL (re-exports from ExoMonad.Question)
-    Question (..),
-    Answer (..),
-    ItemDisposition (..),
-    Choice (..),
-    ChoiceOption (..),
-
-    -- * Polysemy Compatibility (breaks import cycle with ExoMonad.Prelude)
+    -- * Polysemy Compatibility
     Eff,
-    LastMember,
-    sendM,
   )
 where
 
@@ -174,6 +162,7 @@ import ExoMonad.Effect.Decision.Types
     DecisionContext (..),
     DecisionTrace (..),
   )
+import ExoMonad.LLM.Types (CallError (..))
 import ExoMonad.Effect.Log
 import ExoMonad.Effect.TUI
   ( PopupDefinition (..),
@@ -181,7 +170,6 @@ import ExoMonad.Effect.TUI
     TUI (..),
     showUI,
   )
-import ExoMonad.Question (Answer (..), Choice (..), ChoiceOption (..), ItemDisposition (..), Question (..))
 import ExoMonad.StructuredOutput (StructuredOutput (..), formatDiagnostic)
 import Lens.Micro.TH (makeLenses)
 import Polysemy (Embed, Member, Sem, embed, interpret, makeSem)
@@ -192,13 +180,8 @@ import System.Random (randomRIO)
 import Prelude hiding (State, get, gets, modify, modifyIORef, newIORef, put, readIORef, runState, writeIORef)
 import Prelude qualified as P
 
--- | Compatibility type aliases - these break the import cycle with ExoMonad.Prelude
+-- | Compatibility alias for Polysemy's Sem
 type Eff = Sem
-
-type LastMember m r = Member (Embed m) r
-
-sendM :: (Member (Embed m) r) => m a -> Sem r a
-sendM = embed
 
 -- ══════════════════════════════════════════════════════════════
 -- STATE EFFECT
@@ -395,10 +378,10 @@ toolErrorToText = \case
 withImages :: Text -> [ImageSource] -> NonEmpty ContentBlock
 withImages text images = Text {text = text} :| map Image images
 
--- | Run a turn and throw LlmError on failure.
+-- | Run a turn and throw CallError on failure.
 runTurn ::
   forall output effs.
-  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  (Member LLM effs, Member (Error CallError) effs, StructuredOutput output) =>
   Text ->
   Text ->
   Value ->
@@ -409,7 +392,7 @@ runTurn systemPrompt userAction =
 
 runTurnContent ::
   forall output effs.
-  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  (Member LLM effs, Member (Error CallError) effs, StructuredOutput output) =>
   Text ->
   NonEmpty ContentBlock ->
   Value ->
@@ -422,12 +405,12 @@ runTurnContent systemPrompt userContent schema tools = do
     Right parsed -> pure tr {trOutput = parsed}
     Left diag ->
       throw $
-        LlmParseFailed (formatDiagnostic diag)
+        CallParseFailed (formatDiagnostic diag)
 
--- | Make an LLM call that throws LlmError on failure.
+-- | Make an LLM call that throws CallError on failure.
 llmCall ::
   forall output effs.
-  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  (Member LLM effs, Member (Error CallError) effs, StructuredOutput output) =>
   Text ->
   Text ->
   Value ->
@@ -436,10 +419,10 @@ llmCall systemPrompt userInput schema = do
   tr <- runTurn @output systemPrompt userInput schema []
   pure tr.trOutput
 
--- | Make an LLM call with tool support, throwing LlmError on failure.
+-- | Make an LLM call with tool support, throwing CallError on failure.
 llmCallWithTools ::
   forall output effs.
-  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  (Member LLM effs, Member (Error CallError) effs, StructuredOutput output) =>
   Text ->
   Text ->
   Value ->
@@ -447,30 +430,10 @@ llmCallWithTools ::
   Sem effs (TurnResult output)
 llmCallWithTools = runTurn @output
 
--- | Structured error type for LLM call failures.
-data LlmError
-  = -- | Rate limit hit, retry later
-    LlmRateLimited
-  | -- | Request timed out
-    LlmTimeout
-  | -- | Input too long for context window
-    LlmContextTooLong
-  | -- | Schema parsing failed (includes error message)
-    LlmParseFailed Text
-  | -- | Turn was broken by tool (unexpected)
-    LlmTurnBroken Text
-  | -- | Network/connection failure
-    LlmNetworkError Text
-  | -- | Invalid API key
-    LlmUnauthorized
-  | -- | Other errors with message
-    LlmOther Text
-  deriving (Show, Eq, Generic, FromJSON, ToJSON)
-
 -- | Deprecated in favor of llmCall
 llmCallEither ::
   forall output effs.
-  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  (Member LLM effs, Member (Error CallError) effs, StructuredOutput output) =>
   Text ->
   Text ->
   Value ->
@@ -483,11 +446,11 @@ llmCallEither systemPrompt userInput schema =
 -- | Deprecated in favor of llmCall
 llmCallStructured ::
   forall output effs.
-  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  (Member LLM effs, Member (Error CallError) effs, StructuredOutput output) =>
   Text ->
   Text ->
   Value ->
-  Sem effs (Either LlmError output)
+  Sem effs (Either CallError output)
 llmCallStructured systemPrompt userInput schema =
   catch
     (Right <$> llmCall @output systemPrompt userInput schema)
@@ -496,7 +459,7 @@ llmCallStructured systemPrompt userInput schema =
 -- | Deprecated in favor of llmCallWithTools
 llmCallEitherWithTools ::
   forall output effs.
-  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  (Member LLM effs, Member (Error CallError) effs, StructuredOutput output) =>
   Text ->
   Text ->
   Value ->
@@ -510,12 +473,12 @@ llmCallEitherWithTools systemPrompt userInput schema tools =
 -- | Deprecated in favor of llmCallWithTools
 llmCallStructuredWithTools ::
   forall output effs.
-  (Member LLM effs, Member (Error LlmError) effs, StructuredOutput output) =>
+  (Member LLM effs, Member (Error CallError) effs, StructuredOutput output) =>
   Text ->
   Text ->
   Value ->
   [Value] ->
-  Sem effs (Either LlmError output)
+  Sem effs (Either CallError output)
 llmCallStructuredWithTools systemPrompt userInput schema tools =
   catch
     (Right . (.trOutput) <$> llmCallWithTools @output systemPrompt userInput schema tools)
@@ -629,21 +592,6 @@ runRequestInput handler = interpret $ \case
   RequestCustom tag payload -> embed $ handler.ihCustom tag payload
 
 -- ══════════════════════════════════════════════════════════════
--- QUESTION UI EFFECT
--- ══════════════════════════════════════════════════════════════
-
-data QuestionUI m a where
-  AskQuestion :: Question -> QuestionUI m Answer
-
-makeSem ''QuestionUI
-
-type QuestionHandler = Question -> IO Answer
-
-runQuestionUI :: (Member (Embed IO) r) => QuestionHandler -> Sem (QuestionUI ': r) a -> Sem r a
-runQuestionUI handler = interpret $ \case
-  AskQuestion q -> embed $ handler q
-
--- ══════════════════════════════════════════════════════════════
 -- DECISION LOG EFFECT
 -- ══════════════════════════════════════════════════════════════
 
@@ -658,30 +606,20 @@ runDecisionLogPure = interpret $ \case
   RecordDecision _ -> pure ()
 
 -- ══════════════════════════════════════════════════════════════
--- RETURN EFFECT (graph termination)
+-- RETURN EFFECT
 -- ══════════════════════════════════════════════════════════════
 
--- | Return effect - terminates graph execution with a value.
+-- | Return effect - terminates execution with a value.
 --
--- Replaces the pattern of @Goto Exit result@ with a semantically clearer
--- effect that explicitly terminates the current graph/node execution.
+-- Use 'returnValue' to exit a computation with a typed result.
+-- Useful for MCP tool handlers that need to return structured output.
 --
 -- @
--- -- Instead of:
--- gRoute :: mode :- LogicNode :@ UsesEffects '[Goto Exit Response]
--- routeHandler result = pure $ gotoExit result
---
--- -- Use:
--- gRoute :: mode :- LogicNode :@ UsesEffects '[Return Response]
--- routeHandler result = returnValue result
+-- findCallers :: Args -> Sem (Return Result ': r) Result
+-- findCallers args = do
+--   result <- computeResult args
+--   returnValue result
 -- @
---
--- The Return effect is particularly useful for single-node graphs (MCP tools)
--- where Entry/Exit ceremony is overhead. With Return, the node simply
--- returns its result directly.
---
--- Note: The effect result type is @a@ (not @()@), so computations using
--- Return have the value type as their overall result type.
 data Return (a :: Type) m b where
   ReturnValue :: a -> Return a m a
 

@@ -17,21 +17,15 @@ common warnings
 library
     import:           warnings
     exposed-modules:
-        ExoMonad.Prelude
-        Data.Stack
         ExoMonad
-        ExoMonad.WASM
         ExoMonad.Platform
         ExoMonad.Effect
-        ExoMonad.Effect.DevLog
         ExoMonad.Effect.Log
-        ExoMonad.Effect.Metadata
         ExoMonad.Effect.Types
         ExoMonad.Effect.Decision
         ExoMonad.Effect.Decision.Types
         ExoMonad.Effect.TUI
         ExoMonad.Effects.JustExec
-        ExoMonad.Role
         -- Types needed by WASM (no native dependencies)
         ExoMonad.Anthropic.Types
         ExoMonad.Tool.Wire
@@ -59,7 +53,6 @@ library
         ExoMonad.StructuredOutput.Prefix
         ExoMonad.Effects.GitHub
         ExoMonad.Effects.Observability
-        ExoMonad.Effects.UI
         ExoMonad.Effects.LLMProvider
         ExoMonad.Effects.Env
         ExoMonad.Effects.Git
@@ -68,14 +61,11 @@ library
         ExoMonad.Effects.Justfile
         ExoMonad.Effects.FileSystem
         ExoMonad.Effects.Zellij
-        ExoMonad.Question
-        ExoMonad.Template.DependencyTree
         -- Typed LLM DSL (native-only: requires LLMProvider effect)
         ExoMonad.LLM
         ExoMonad.LLM.Effect
         ExoMonad.LLM.Interpret
         ExoMonad.LLM.Tools.TH
-        ExoMonad.Middleware.Logging
       build-depends:
         optparse-applicative >= 0.17 && < 1
     build-depends:
@@ -141,7 +131,7 @@ library
         TypeOperators
         QuasiQuotes
         TemplateHaskell
-        -- Graph DSL type-level programming extensions
+        -- Type-level programming extensions
         AllowAmbiguousTypes
         FlexibleContexts
         FlexibleInstances
@@ -154,7 +144,7 @@ library
 
 -- test-llm executable moved to exomonad-platform (requires HTTP client)
 
-test-suite graph-validation-tests
+test-suite exomonad-core-tests
     import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          Spec.hs

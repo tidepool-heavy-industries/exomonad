@@ -1,88 +1,54 @@
 # Haskell Code Organization
 
-All Haskell packages live here, organized by architectural pattern.
+All Haskell packages live here.
 
 ## When to Read Which CLAUDE.md
 
 | I want to... | Read this |
 |--------------|-----------|
-| Understand graph DSL, handlers, annotations | `dsl/core/CLAUDE.md` |
-| Work on LLM-level teaching infrastructure | `dsl/teaching/CLAUDE.md` |
-| Add or modify an effect interpreter | `effects/CLAUDE.md` → `effects/{name}-interpreter/CLAUDE.md` |
-| Understand graph execution model | `runtime/CLAUDE.md` → `runtime/actor/CLAUDE.md` |
-| Work on WASM guest (MCP tools) | `wasm-guest/` (see `../rust/exomonad-sidecar/CLAUDE.md` for runtime) |
-| Work with LSP integration | `effects/lsp-interpreter/CLAUDE.md` |
-| Generate training data for FunctionGemma | `tools/training-generator/CLAUDE.md` |
+| Understand effect types, structured output | `dsl/core/CLAUDE.md` |
+| Add or modify an effect interpreter | `effects/CLAUDE.md` |
+| Work on WASM guest (MCP tools) | `wasm-guest/` |
 | Understand wire protocols | `protocol/CLAUDE.md` |
-| Work on dev tools (GHCi oracle, sleeptime) | `tools/CLAUDE.md` → `tools/{name}/CLAUDE.md` |
-
-**Navigation pattern**: Start at `haskell/CLAUDE.md`, drill into topic-specific docs.
-
-## Documentation Tree
-
-```
-haskell/CLAUDE.md  ← YOU ARE HERE (router)
-├── wasm-guest/  ← WASM plugin (MCP tools, hosted by Rust runtime)
-├── dsl/CLAUDE.md
-│   ├── core/CLAUDE.md  ← Graph DSL reference (detailed)
-│   └── teaching/CLAUDE.md  ← LLM-level teaching for FunctionGemma training
-├── effects/CLAUDE.md  ← Effect interpreter pattern
-│   ├── llm-interpreter/CLAUDE.md
-│   ├── lsp-interpreter/CLAUDE.md  ← Language Server Protocol
-│   ├── ghci-interpreter/CLAUDE.md
-│   ├── habitica/CLAUDE.md
-│   └── ...
-├── runtime/CLAUDE.md
-│   ├── actor/CLAUDE.md  ← Actor model (detailed)
-│   └── wasm/CLAUDE.md
-├── protocol/CLAUDE.md
-│   └── wire-types/CLAUDE.md
-└── tools/CLAUDE.md
-    ├── ghci-oracle/CLAUDE.md
-    ├── sleeptime/CLAUDE.md
-    └── training-generator/CLAUDE.md  ← FunctionGemma training data
-```
+| Generate training data | `tools/training-generator/CLAUDE.md` |
 
 ## Structure
 
-| Directory | Purpose | When to read |
-|-----------|---------|--------------|
-| `wasm-guest/` | WASM plugin with MCP tools (hosted by Rust runtime) | Adding/modifying MCP tools, effect handlers |
-| `dsl/` | Graph DSL (core) + LLM teaching infrastructure (teaching) | Defining graphs, handlers, templates; LLM-level training data capture |
-| `effects/` | Effect interpreters (HTTP, subprocess, etc.) | Adding/modifying external integrations |
-| `runtime/` | Execution backends (actor, WASM) | Understanding concurrent execution |
-| `protocol/` | Wire formats (native, WASM) | Client-server communication |
-| `tools/` | Standalone utilities | GHCi integration, log analysis, training data |
-| `vendor/` | Vendored dependencies | Rarely (freer-simple, ginger internals) |
+| Directory | Purpose |
+|-----------|---------|
+| `wasm-guest/` | WASM plugin with MCP tools (hosted by Rust runtime) |
+| `dsl/core/` | Effect types, structured output, LLM infrastructure |
+| `effects/` | Effect interpreters (LLM, Git, GitHub, Zellij, etc.) |
+| `protocol/` | Wire formats for native UI |
+| `tools/` | Standalone utilities (training data generation) |
+| `vendor/` | Vendored dependencies (ginger, polysemy) |
 
 ## Design Patterns
 
-This codebase follows well-known CS patterns:
-- **Interpreter pattern**: Effect types (abstract syntax) + interpreters (semantic actions)
-- **Algebraic effects**: Free monad over effect types, interpreted to IO
-- **Actor model**: Alternative execution backend (runtime/actor)
+- **Algebraic effects**: Polysemy effects interpreted to IO
 - **Adapter pattern**: Interpreters adapt external APIs (HTTP, subprocess, sockets)
 - **Embedded DSL**: Haskell WASM as pure logic, hosted by Rust runtime
 
-## Role System Architecture
+## Role System
 
-The project implements an xmonad-style role system where users define their agent roles in Haskell.
+Users define agent roles in Haskell, compiled to WASM:
 
-- **Role Definitions**: Located in `.exomonad/roles/`.
-- **Role Config**: Users define `RoleConfig` with a `Tools` record and `HookConfig`.
-- **Tool Records**: Servant-style records (`mode :- Tool`) used to compose tools.
-- **WASM Compilation**: Roles are compiled to WASM and loaded by the runtime.
-- **Library**: `haskell/wasm-guest` (exposed as `ExoMonad`) provides the SDK.
+- **Role Definitions**: User roles in `.exomonad/roles/`
+- **Tool Records**: Compose tools via `MCPTool` typeclass
+- **WASM Compilation**: Roles compiled to WASM, loaded by Rust sidecar
+- **Library**: `haskell/wasm-guest` provides the SDK
 
 ## Common Commands
 
-Build all:     `cabal build all`
-Run tests:     `cabal test all`
-Pre-commit:    `just pre-commit`
+```bash
+cabal build all      # Build everything
+cabal test all       # Run tests
+just pre-commit      # Run all checks
+```
 
 ## Adding New Effects
 
-1. Define effect type in `dsl/core/src/ExoMonad/Effect/Types.hs` (or Effects/*.hs)
+1. Define effect type in `dsl/core/src/ExoMonad/Effect/Types.hs` (or `Effects/*.hs`)
 2. Create interpreter package at `effects/{name}-interpreter/`
 3. Add to `cabal.project`
 4. Wire into `wasm-guest/` if needed for MCP tools (via host functions)

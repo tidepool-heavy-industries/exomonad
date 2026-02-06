@@ -50,7 +50,7 @@ import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), 
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Types qualified as AesonTypes
 import Data.Kind (Type)
-import ExoMonad.Effect.Types (LLMConfig, LlmError)
+import ExoMonad.Effect.Types (CallError, LLMConfig)
 import GHC.Generics (Generic)
 import Polysemy (Member, Sem, makeSem)
 import Polysemy.Internal (send)

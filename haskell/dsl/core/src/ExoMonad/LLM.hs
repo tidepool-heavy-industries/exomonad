@@ -1,8 +1,7 @@
 -- | Typed LLM invocation DSL.
 --
--- This module provides a typed, standalone API for making LLM calls from
--- within effectful code (e.g., tool handlers). Unlike the graph machinery,
--- this is designed for simple, one-shot LLM invocations.
+-- This module provides a typed API for making LLM calls from within
+-- effectful code (e.g., tool handlers).
 --
 -- = Design
 --

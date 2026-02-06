@@ -1,16 +1,7 @@
 -- | Pure template rendering for the typed LLM DSL.
 --
--- This module provides simple, pure template rendering that can be used
--- independently of the graph machinery. Templates are rendered from
--- context values directly, without requiring effects.
---
--- = Design
---
--- This is separate from graph template handling because:
---
--- 1. Graph templates require 'buildContext' (effectful context building)
--- 2. Standalone LLM calls just need pure rendering from a context value
--- 3. Templates are reusable for non-LLM purposes (GH issues, PRs, etc.)
+-- This module provides simple, pure template rendering from context values.
+-- Templates are reusable for LLM prompts, GitHub issues, PRs, etc.
 --
 -- = Usage
 --
