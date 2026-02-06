@@ -1,5 +1,5 @@
 use crate::common::{FFIBoundary, HostResult, IntoFFIResult};
-use crate::services::docker::DockerExecutor;
+use crate::services::docker::CommandExecutor;
 use anyhow::{Context, Result};
 use duct::cmd;
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
@@ -103,8 +103,7 @@ impl FFIBoundary for RepoInfo {}
 
 /// Git operations service.
 ///
-/// Executes git commands via the configured executor (local subprocess or Docker).
-/// All operations are asynchronous.
+/// Executes git commands via the configured executor.
 ///
 /// # Examples
 ///
@@ -117,48 +116,42 @@ impl FFIBoundary for RepoInfo {}
 /// let executor = Arc::new(LocalExecutor::new());
 /// let git = GitService::new(executor);
 ///
-/// // Get current branch
-/// let branch = git.get_branch("", ".").await?;
+/// let branch = git.get_branch(".").await?;
 /// println!("On branch: {}", branch);
 /// # Ok(())
 /// # }
 /// ```
 #[derive(Clone)]
 pub struct GitService {
-    docker: Arc<dyn DockerExecutor>,
+    executor: Arc<dyn CommandExecutor>,
 }
 
 impl GitService {
-    /// Create a new GitService with the given executor.
-    ///
-    /// # Arguments
-    ///
-    /// * `docker` - Executor for running git commands (LocalExecutor or DockerService)
-    pub fn new(docker: Arc<dyn DockerExecutor>) -> Self {
-        Self { docker }
+    pub fn new(executor: Arc<dyn CommandExecutor>) -> Self {
+        Self { executor }
     }
 
     #[tracing::instrument(skip(self), fields(cmd = ?args))]
-    async fn exec_git(&self, container: &str, dir: &str, args: &[&str]) -> Result<String> {
+    async fn exec_git(&self, dir: &str, args: &[&str]) -> Result<String> {
         let mut cmd = vec!["git"];
         cmd.extend_from_slice(args);
-        self.docker.exec(container, dir, &cmd).await
+        self.executor.exec(dir, &cmd).await
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn get_branch(&self, container: &str, dir: &str) -> Result<String> {
+    pub async fn get_branch(&self, dir: &str) -> Result<String> {
         let output = self
-            .exec_git(container, dir, &["rev-parse", "--abbrev-ref", "HEAD"])
+            .exec_git(dir, &["rev-parse", "--abbrev-ref", "HEAD"])
             .await?;
         Ok(output.trim().to_string())
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn get_worktree(&self, container: &str, dir: &str) -> Result<WorktreeInfo> {
+    pub async fn get_worktree(&self, dir: &str) -> Result<WorktreeInfo> {
         let path = self
-            .exec_git(container, dir, &["rev-parse", "--show-toplevel"])
+            .exec_git(dir, &["rev-parse", "--show-toplevel"])
             .await?;
-        let branch = self.get_branch(container, dir).await?;
+        let branch = self.get_branch(dir).await?;
         Ok(WorktreeInfo {
             path: path.trim().to_string(),
             branch,
@@ -166,24 +159,18 @@ impl GitService {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn get_dirty_files(&self, container: &str, dir: &str) -> Result<Vec<String>> {
+    pub async fn get_dirty_files(&self, dir: &str) -> Result<Vec<String>> {
         let output = self
-            .exec_git(container, dir, &["status", "--porcelain"])
+            .exec_git(dir, &["status", "--porcelain"])
             .await?;
         Ok(output.lines().map(|l| l.to_string()).collect())
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn get_recent_commits(
-        &self,
-        container: &str,
-        dir: &str,
-        n: u32,
-    ) -> Result<Vec<Commit>> {
+    pub async fn get_recent_commits(&self, dir: &str, n: u32) -> Result<Vec<Commit>> {
         let format = "%H|%an|%ad|%s";
         let output = self
             .exec_git(
-                container,
                 dir,
                 &["log", &format!("-n{}", n), &format!("--format={}", format)],
             )
@@ -205,13 +192,9 @@ impl GitService {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn has_unpushed_commits(&self, container: &str, dir: &str) -> Result<bool> {
+    pub async fn has_unpushed_commits(&self, dir: &str) -> Result<bool> {
         let output = self
-            .exec_git(
-                container,
-                dir,
-                &["rev-list", "--count", "@{upstream}..HEAD"],
-            )
+            .exec_git(dir, &["rev-list", "--count", "@{upstream}..HEAD"])
             .await;
 
         match output {
@@ -231,19 +214,17 @@ impl GitService {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn get_remote_url(&self, container: &str, dir: &str) -> Result<String> {
+    pub async fn get_remote_url(&self, dir: &str) -> Result<String> {
         let output = self
-            .exec_git(container, dir, &["remote", "get-url", "origin"])
+            .exec_git(dir, &["remote", "get-url", "origin"])
             .await?;
-
-        let url = output.trim().to_string();
-        Ok(url)
+        Ok(output.trim().to_string())
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn get_repo_info(&self, container: &str, dir: &str) -> Result<RepoInfo> {
-        let branch = self.get_branch(container, dir).await?;
-        let remote_url = self.get_remote_url(container, dir).await.ok();
+    pub async fn get_repo_info(&self, dir: &str) -> Result<RepoInfo> {
+        let branch = self.get_branch(dir).await?;
+        let remote_url = self.get_remote_url(dir).await.ok();
 
         let (owner, name) = remote_url
             .as_ref()
@@ -325,12 +306,12 @@ pub fn git_get_branch_host_fn(git_service: Arc<GitService>) -> Function {
                 return Err(Error::msg("git_get_branch: expected input argument"));
             }
             let Json(input): Json<GitHostInput> = plugin.memory_get_val(&inputs[0])?;
-            tracing::info!(dir = %input.working_dir, container = %input.container_id, "Getting git branch");
+            tracing::info!(dir = %input.working_dir, "Getting git branch");
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
-            let result = block_on(git.get_branch(&input.container_id, &input.working_dir))?;
+            let result = block_on(git.get_branch(&input.working_dir))?;
 
             match &result {
                 Ok(branch) => tracing::info!(success = true, branch = %branch, "Completed"),
@@ -363,12 +344,12 @@ pub fn git_get_worktree_host_fn(git_service: Arc<GitService>) -> Function {
                 return Err(Error::msg("git_get_worktree: expected input argument"));
             }
             let Json(input): Json<GitHostInput> = plugin.memory_get_val(&inputs[0])?;
-            tracing::info!(dir = %input.working_dir, container = %input.container_id, "Getting git worktree");
+            tracing::info!(dir = %input.working_dir, "Getting git worktree");
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
-            let result = block_on(git.get_worktree(&input.container_id, &input.working_dir))?;
+            let result = block_on(git.get_worktree(&input.working_dir))?;
 
             match &result {
                 Ok(wt) => tracing::info!(success = true, path = %wt.path, branch = %wt.branch, "Completed"),
@@ -401,12 +382,12 @@ pub fn git_get_dirty_files_host_fn(git_service: Arc<GitService>) -> Function {
                 return Err(Error::msg("git_get_dirty_files: expected input argument"));
             }
             let Json(input): Json<GitHostInput> = plugin.memory_get_val(&inputs[0])?;
-            tracing::info!(dir = %input.working_dir, container = %input.container_id, "Getting dirty files");
+            tracing::info!(dir = %input.working_dir, "Getting dirty files");
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
-            let result = block_on(git.get_dirty_files(&input.container_id, &input.working_dir))?;
+            let result = block_on(git.get_dirty_files(&input.working_dir))?;
 
             match &result {
                 Ok(files) => tracing::info!(success = true, count = files.len(), "Completed"),
@@ -441,13 +422,12 @@ pub fn git_get_recent_commits_host_fn(git_service: Arc<GitService>) -> Function 
                 ));
             }
             let Json(input): Json<GitLogInput> = plugin.memory_get_val(&inputs[0])?;
-            tracing::info!(dir = %input.working_dir, container = %input.container_id, limit = input.limit, "Getting recent commits");
+            tracing::info!(dir = %input.working_dir, limit = input.limit, "Getting recent commits");
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result = block_on(git.get_recent_commits(
-                &input.container_id,
                 &input.working_dir,
                 input.limit,
             ))?;
@@ -485,13 +465,13 @@ pub fn git_has_unpushed_commits_host_fn(git_service: Arc<GitService>) -> Functio
                 ));
             }
             let Json(input): Json<GitHostInput> = plugin.memory_get_val(&inputs[0])?;
-            tracing::info!(dir = %input.working_dir, container = %input.container_id, "Checking unpushed commits");
+            tracing::info!(dir = %input.working_dir, "Checking unpushed commits");
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
             let result =
-                block_on(git.has_unpushed_commits(&input.container_id, &input.working_dir))?;
+                block_on(git.has_unpushed_commits(&input.working_dir))?;
 
             match &result {
                 Ok(has_unpushed) => tracing::info!(success = true, has_unpushed, "Completed"),
@@ -524,12 +504,12 @@ pub fn git_get_remote_url_host_fn(git_service: Arc<GitService>) -> Function {
                 return Err(Error::msg("git_get_remote_url: expected input argument"));
             }
             let Json(input): Json<GitHostInput> = plugin.memory_get_val(&inputs[0])?;
-            tracing::info!(dir = %input.working_dir, container = %input.container_id, "Getting git remote URL");
+            tracing::info!(dir = %input.working_dir, "Getting git remote URL");
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
-            let result = block_on(git.get_remote_url(&input.container_id, &input.working_dir))?;
+            let result = block_on(git.get_remote_url(&input.working_dir))?;
 
             match &result {
                 Ok(url) => tracing::info!(success = true, url = %url, "Completed"),
@@ -562,12 +542,12 @@ pub fn git_get_repo_info_host_fn(git_service: Arc<GitService>) -> Function {
                 return Err(Error::msg("git_get_repo_info: expected input argument"));
             }
             let Json(input): Json<GitHostInput> = plugin.memory_get_val(&inputs[0])?;
-            tracing::info!(dir = %input.working_dir, container = %input.container_id, "Getting git repo info");
+            tracing::info!(dir = %input.working_dir, "Getting git repo info");
 
             let git_arc = user_data.get()?;
             let git = git_arc.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
-            let result = block_on(git.get_repo_info(&input.container_id, &input.working_dir))?;
+            let result = block_on(git.get_repo_info(&input.working_dir))?;
 
             match &result {
                 Ok(info) => tracing::info!(success = true, branch = %info.branch, owner = ?info.owner, name = ?info.name, "Completed"),
@@ -590,11 +570,11 @@ mod tests {
     use std::pin::Pin;
     use std::sync::Mutex;
 
-    struct MockDocker {
+    struct MockExecutor {
         responses: Mutex<Vec<Result<String>>>,
     }
 
-    impl MockDocker {
+    impl MockExecutor {
         fn new(responses: Vec<Result<String>>) -> Self {
             Self {
                 responses: Mutex::new(responses),
@@ -602,10 +582,9 @@ mod tests {
         }
     }
 
-    impl DockerExecutor for MockDocker {
+    impl CommandExecutor for MockExecutor {
         fn exec<'a>(
             &'a self,
-            _container: &'a str,
             _dir: &'a str,
             _cmd: &'a [&'a str],
         ) -> Pin<Box<dyn Future<Output = Result<String>> + Send + 'a>> {
@@ -616,20 +595,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_branch() {
-        let mock = Arc::new(MockDocker::new(vec![Ok("main\n".to_string())]));
+        let mock = Arc::new(MockExecutor::new(vec![Ok("main\n".to_string())]));
         let git = GitService::new(mock);
-        let branch = git.get_branch("c1", "/app").await.unwrap();
+        let branch = git.get_branch("/app").await.unwrap();
         assert_eq!(branch, "main");
     }
 
     #[tokio::test]
     async fn test_get_worktree() {
-        let mock = Arc::new(MockDocker::new(vec![
+        let mock = Arc::new(MockExecutor::new(vec![
             Ok("/app\n".to_string()),        // rev-parse --show-toplevel
             Ok("feature/123\n".to_string()), // rev-parse --abbrev-ref HEAD
         ]));
         let git = GitService::new(mock);
-        let wt = git.get_worktree("c1", "/app/src").await.unwrap();
+        let wt = git.get_worktree("/app/src").await.unwrap();
         assert_eq!(wt.path, "/app");
         assert_eq!(wt.branch, "feature/123");
     }
@@ -638,9 +617,9 @@ mod tests {
     async fn test_get_commits() {
         let log_output =
             "hash1|Author One|2023-01-01|Message 1\nhash2|Author Two|2023-01-02|Message 2\n";
-        let mock = Arc::new(MockDocker::new(vec![Ok(log_output.to_string())]));
+        let mock = Arc::new(MockExecutor::new(vec![Ok(log_output.to_string())]));
         let git = GitService::new(mock);
-        let commits = git.get_recent_commits("c1", "/app", 2).await.unwrap();
+        let commits = git.get_recent_commits("/app", 2).await.unwrap();
         assert_eq!(commits.len(), 2);
         assert_eq!(commits[0].hash, "hash1");
         assert_eq!(commits[1].message, "Message 2");

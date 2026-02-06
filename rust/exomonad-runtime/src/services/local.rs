@@ -1,10 +1,7 @@
-//! Local executor for running commands directly (without Docker).
-//!
-//! This implements the `DockerExecutor` trait but runs commands as local subprocesses.
-//! Used for local development where we don't need Docker container isolation.
+//! Local executor for running commands directly as subprocesses.
 
 use crate::common::CommandError;
-use crate::services::docker::DockerExecutor;
+use crate::services::docker::CommandExecutor;
 use anyhow::Result;
 use std::future::Future;
 use std::pin::Pin;
@@ -13,9 +10,6 @@ use tokio::process::Command;
 use tracing::{debug, trace};
 
 /// Local executor that runs commands directly via subprocess.
-///
-/// The `container` parameter in `DockerExecutor::exec` is ignored since
-/// we're running locally without container isolation.
 #[derive(Clone, Default)]
 pub struct LocalExecutor;
 
@@ -25,10 +19,9 @@ impl LocalExecutor {
     }
 }
 
-impl DockerExecutor for LocalExecutor {
+impl CommandExecutor for LocalExecutor {
     fn exec<'a>(
         &'a self,
-        _container: &'a str,
         dir: &'a str,
         cmd: &'a [&'a str],
     ) -> Pin<Box<dyn Future<Output = Result<String>> + Send + 'a>> {
@@ -95,7 +88,7 @@ mod tests {
     #[tokio::test]
     async fn test_local_executor_echo() {
         let executor = LocalExecutor::new();
-        let result = executor.exec("ignored", "/tmp", &["echo", "hello"]).await;
+        let result = executor.exec("/tmp", &["echo", "hello"]).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap().trim(), "hello");
     }
@@ -103,7 +96,7 @@ mod tests {
     #[tokio::test]
     async fn test_local_executor_pwd() {
         let executor = LocalExecutor::new();
-        let result = executor.exec("ignored", "/tmp", &["pwd"]).await;
+        let result = executor.exec("/tmp", &["pwd"]).await;
         assert!(result.is_ok());
         // macOS: /tmp is a symlink to /private/tmp, so pwd returns /private/tmp
         let output = result.unwrap();
@@ -117,9 +110,7 @@ mod tests {
     #[tokio::test]
     async fn test_local_executor_git_version() {
         let executor = LocalExecutor::new();
-        let result = executor
-            .exec("ignored", "/tmp", &["git", "--version"])
-            .await;
+        let result = executor.exec("/tmp", &["git", "--version"]).await;
         assert!(result.is_ok());
         assert!(result.unwrap().contains("git version"));
     }
@@ -128,7 +119,7 @@ mod tests {
     async fn test_local_executor_failure() {
         let executor = LocalExecutor::new();
         let result = executor
-            .exec("ignored", "/tmp", &["false"]) // `false` always exits 1
+            .exec("/tmp", &["false"]) // `false` always exits 1
             .await;
         assert!(result.is_err());
     }
@@ -136,7 +127,7 @@ mod tests {
     #[tokio::test]
     async fn test_local_executor_empty_command() {
         let executor = LocalExecutor::new();
-        let result = executor.exec("ignored", "/tmp", &[]).await;
+        let result = executor.exec("/tmp", &[]).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Empty command"));
     }

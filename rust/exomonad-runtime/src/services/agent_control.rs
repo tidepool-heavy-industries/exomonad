@@ -597,7 +597,7 @@ impl AgentControlService {
     /// Get repo (owner/name) from project's git remote URL.
     async fn get_repo_from_remote(&self) -> Option<Repo> {
         let dir = self.project_dir.to_string_lossy();
-        let repo_info = self.git.get_repo_info("", &dir).await.ok()?;
+        let repo_info = self.git.get_repo_info(&dir).await.ok()?;
 
         let owner = repo_info.owner?;
         let name = repo_info.name?;
@@ -1333,16 +1333,17 @@ mod coordinator {
 
     #[derive(Debug, Deserialize)]
     #[serde(tag = "status")]
-    #[allow(dead_code)]
     pub enum Response {
         #[serde(rename = "ok")]
         Ok {
-            request_id: String,
+            #[serde(rename = "request_id")]
+            _request_id: String,
             result: serde_json::Value,
         },
         #[serde(rename = "error")]
         Error {
-            request_id: String,
+            #[serde(rename = "request_id")]
+            _request_id: String,
             code: String,
             message: String,
         },

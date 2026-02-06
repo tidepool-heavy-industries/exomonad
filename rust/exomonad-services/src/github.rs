@@ -440,19 +440,6 @@ impl ExternalService for GitHubService {
                     })?;
                 Ok(ServiceResponse::OtelAck)
             }
-            ServiceRequest::GitHubRemoveIssueAssignee {
-                owner: _,
-                repo: _,
-                number: _,
-                assignee: _,
-            } => {
-                // FIXME: octocrab 0.38 seems to lack remove_assignees or I have the wrong name.
-                // Disabling for now to fix build.
-                return Err(ServiceError::Api {
-                    code: 501,
-                    message: "GitHubRemoveIssueAssignee not implemented in Rust service yet".into(),
-                });
-            }
             ServiceRequest::GitHubListPullRequests {
                 owner,
                 repo,
@@ -1027,24 +1014,4 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_github_remove_assignee_not_implemented() {
-        let service = GitHubService::new("token".into());
-
-        let req = ServiceRequest::GitHubRemoveIssueAssignee {
-            owner: "owner".into(),
-            repo: "repo".into(),
-            number: 1,
-            assignee: "user".into(),
-        };
-
-        let resp = service.call(req).await;
-        assert!(resp.is_err());
-        match resp.unwrap_err() {
-            ServiceError::Api { code, .. } => {
-                assert_eq!(code, 501); // Not Implemented
-            }
-            other => panic!("Expected Api error with 501, got {:?}", other),
-        }
-    }
 }

@@ -56,9 +56,6 @@ const HOOK_EVENTS: &[(&str, &str, bool)] = &[
 /// - Created before starting Claude Code
 /// - Cleaned up after session ends (including on error)
 pub struct HookConfig {
-    /// Path to the .claude directory (kept for potential future use)
-    #[allow(dead_code)]
-    claude_dir: PathBuf,
     /// Path to settings.local.json
     settings_path: PathBuf,
     /// Original content before our modifications (for cleanup)
@@ -144,7 +141,6 @@ impl HookConfig {
         );
 
         Ok(Self {
-            claude_dir,
             settings_path,
             original_content,
             created_file,

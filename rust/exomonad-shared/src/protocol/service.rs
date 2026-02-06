@@ -81,12 +81,6 @@ pub enum ServiceRequest {
         number: u32,
         assignee: String,
     },
-    GitHubRemoveIssueAssignee {
-        owner: GithubOwner,
-        repo: GithubRepo,
-        number: u32,
-        assignee: String,
-    },
     GitHubListIssues {
         owner: GithubOwner,
         repo: GithubRepo,

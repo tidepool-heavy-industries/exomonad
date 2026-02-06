@@ -13,7 +13,7 @@ Extism Plugin (Haskell WASM)
     ↓ calls host functions
 Services (Git, GitHub, AgentControl, FileSystem, Log)
     ↓ executes I/O
-Docker/Local Executor → git/gh/zellij/file operations
+CommandExecutor (LocalExecutor) → git/gh/zellij/file operations
     ↓
 Results marshalled back through WASM → Haskell
 ```
@@ -35,7 +35,7 @@ Results marshalled back through WASM → Haskell
 | AgentControlService | services/agent_control.rs | High-level agent lifecycle (spawn, cleanup, list) |
 | FileSystemService | services/filesystem.rs | File I/O (read, write) |
 | LogService | services/log.rs | Structured logging via tracing |
-| DockerService | services/docker.rs | Docker executor (container exec) |
+| CommandExecutor | services/docker.rs | Command executor trait |
 | LocalExecutor | services/local.rs | Local executor (direct subprocess) |
 | Secrets | services/secrets.rs | Load secrets from ~/.exomonad/secrets |
 
@@ -44,15 +44,15 @@ Results marshalled back through WASM → Haskell
 ### GitService
 
 Methods:
-- `get_branch(container, dir)`: Current git branch
-- `get_worktree(container, dir)`: Worktree info (path, branch)
-- `get_dirty_files(container, dir)`: Files with uncommitted changes
-- `get_recent_commits(container, dir, n)`: Recent commit log
-- `has_unpushed_commits(container, dir)`: Check for unpushed commits
-- `get_remote_url(container, dir)`: Git remote URL
-- `get_repo_info(container, dir)`: Branch + owner/name from remote
+- `get_branch(dir)`: Current git branch
+- `get_worktree(dir)`: Worktree info (path, branch)
+- `get_dirty_files(dir)`: Files with uncommitted changes
+- `get_recent_commits(dir, n)`: Recent commit log
+- `has_unpushed_commits(dir)`: Check for unpushed commits
+- `get_remote_url(dir)`: Git remote URL
+- `get_repo_info(dir)`: Branch + owner/name from remote
 
-**Implementation:** Calls `git` CLI via DockerExecutor (either DockerService or LocalExecutor).
+**Implementation:** Calls `git` CLI via CommandExecutor (LocalExecutor).
 
 ### GitHubService
 
@@ -216,28 +216,19 @@ Error:
 - `io_error` - File I/O error
 - `internal_error` - Unexpected error
 
-## Docker vs Local Execution
+## Command Execution
 
-The runtime supports two execution modes:
+All subprocess execution goes through the `CommandExecutor` trait:
 
-| Mode | Constructor | Use Case |
-|------|------------|----------|
-| Docker | `Services::new()` | Containerized environments |
-| Local | `Services::new_local()` | Local development (current default) |
-
-**DockerExecutor trait:**
 ```rust
-#[async_trait]
-pub trait DockerExecutor: Send + Sync {
-    async fn exec(&self, container: &str, dir: &str, cmd: &[&str]) -> Result<String>;
+pub trait CommandExecutor: Send + Sync {
+    fn exec(&self, dir: &str, cmd: &[&str]) -> Pin<Box<dyn Future<Output = Result<String>> + Send>>;
 }
 ```
 
-**Implementations:**
-- `DockerService`: `docker exec <container> sh -c "cd <dir> && <cmd>"`
-- `LocalExecutor`: `subprocess::run(<cmd>)` directly (no Docker)
+**Implementation:** `LocalExecutor` runs commands directly as subprocesses.
 
-**Note:** Docker functions are NOT exposed to WASM. They are internal implementation details used by GitService and others. Haskell calls high-level effects (GitGetBranch), Rust handles Docker vs Local internally.
+**Note:** Command execution is an internal implementation detail. Haskell calls high-level effects (GitGetBranch), Rust handles execution internally.
 
 ## Building
 
@@ -263,11 +254,11 @@ cargo test -p exomonad-runtime
 | Extism runtime | Mature WASM runtime with stable host function API, used in production |
 | High-level effects | SpawnAgent (not CreateWorktree+OpenTab) reduces WASM surface, encapsulates complexity |
 | Services struct | Centralized service lifecycle, easy dependency injection, clean separation |
-| LocalExecutor vs DockerExecutor | Support both local dev and containerized environments |
+| CommandExecutor trait | Abstraction for subprocess execution (currently LocalExecutor) |
 | HostResult envelope | Explicit success/error discrimination, no exceptions across WASM boundary |
 | Error codes | Structured error classification for client-side handling |
 | Optional GitHub | Graceful degradation when GITHUB_TOKEN is not available |
-| Secrets from file | ~/.exomonad/secrets for local development, env vars for CI/containers |
+| Secrets from file | ~/.exomonad/secrets for local development, env vars for CI |
 
 ## Related Documentation
 

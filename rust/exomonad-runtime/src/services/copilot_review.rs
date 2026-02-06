@@ -194,8 +194,6 @@ fn fetch_pr_reviews(owner: &str, repo: &str, pr_number: u64) -> Result<bool> {
     #[derive(Deserialize)]
     struct PRReview {
         user: ReviewUser,
-        #[allow(dead_code)]
-        state: String,
     }
 
     #[derive(Deserialize)]

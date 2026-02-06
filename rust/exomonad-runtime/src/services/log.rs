@@ -35,8 +35,6 @@ impl LogService {
 
 #[derive(Deserialize)]
 struct LogPayload {
-    #[allow(dead_code)]
-    level: LogLevel,
     message: String,
     fields: Option<HashMap<String, String>>,
 }

@@ -94,7 +94,6 @@ impl ServiceServer {
             | ServiceRequest::GitHubAddIssueLabel { .. }
             | ServiceRequest::GitHubRemoveIssueLabel { .. }
             | ServiceRequest::GitHubAddIssueAssignee { .. }
-            | ServiceRequest::GitHubRemoveIssueAssignee { .. }
             | ServiceRequest::GitHubCreatePR { .. }
             | ServiceRequest::GitHubGetPR { .. }
             | ServiceRequest::GitHubListPullRequests { .. }

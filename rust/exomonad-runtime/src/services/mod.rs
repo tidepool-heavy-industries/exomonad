@@ -14,7 +14,7 @@ pub mod zellij_events;
 pub use self::agent_control::{
     AgentControlService, AgentInfo, BatchCleanupResult, BatchSpawnResult, SpawnOptions, SpawnResult,
 };
-use self::docker::DockerExecutor;
+use self::docker::CommandExecutor;
 pub use self::filesystem::FileSystemService;
 use self::git::GitService;
 use self::github::GitHubService;
@@ -125,17 +125,11 @@ impl Services {
     /// Loads secrets from ~/.exomonad/secrets.
     pub fn new() -> Self {
         let local = LocalExecutor::new();
-        let local_arc: Arc<dyn DockerExecutor> = Arc::new(local);
+        let local_arc: Arc<dyn CommandExecutor> = Arc::new(local);
         Self::with_executor(local_arc)
     }
 
-    /// Deprecated: Use `new()` instead. All services now use local executor.
-    #[deprecated(since = "0.1.0", note = "Use `new()` instead - Docker mode removed")]
-    pub fn new_local() -> Self {
-        Self::new()
-    }
-
-    fn with_executor(executor: Arc<dyn DockerExecutor>) -> Self {
+    fn with_executor(executor: Arc<dyn CommandExecutor>) -> Self {
         let secrets = Secrets::load();
         let git = Arc::new(GitService::new(executor.clone()));
 
