@@ -1,0 +1,23 @@
+cabal-version:      3.4
+name:               exomonad-pdk
+version:            0.1.0.0
+synopsis:           Vendored Extism PDK for ExoMonad
+license:            MIT
+author:             ExoMonad Team
+maintainer:         maintainers@exomonad.io
+build-type:         Simple
+
+library
+    default-language: GHC2021
+    hs-source-dirs:   src
+    exposed-modules:
+        ExoMonad.PDK
+        ExoMonad.PDK.Memory
+        ExoMonad.PDK.Bindings
+    c-sources:        src/extism-pdk.c
+    build-depends:
+        base >= 4.16 && < 5,
+        bytestring,
+        text,
+        aeson
+    ghc-options: -Wall

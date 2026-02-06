@@ -172,22 +172,20 @@ impl PluginManager {
             .with_wasi(true);
 
         // Try to enable WASM caching if config exists
-        match std::env::var("HOME") {
-            Ok(home) => {
-                let cache_config = PathBuf::from(home).join(".exomonad/wasm-cache.toml");
-                if cache_config.exists() {
-                    tracing::info!("Using WASM cache config: {:?}", cache_config);
-                    builder = builder.with_cache_config(cache_config);
-                } else {
-                    tracing::debug!(
-                        "WASM cache disabled: config file not found at {:?}",
-                        cache_config
-                    );
-                }
+        let cache_config = PathBuf::from(".exomonad/wasm-cache.toml");
+        if cache_config.exists() {
+            tracing::info!("Using local WASM cache config: {:?}", cache_config);
+            builder = builder.with_cache_config(cache_config);
+        } else if let Ok(home) = std::env::var("HOME") {
+            let home_cache_config = PathBuf::from(home).join(".exomonad/wasm-cache.toml");
+            if home_cache_config.exists() {
+                tracing::info!("Using home WASM cache config: {:?}", home_cache_config);
+                builder = builder.with_cache_config(home_cache_config);
+            } else {
+                tracing::debug!("WASM cache disabled: no config found");
             }
-            Err(_) => {
-                tracing::debug!("WASM cache disabled: HOME environment variable is not set");
-            }
+        } else {
+            tracing::debug!("WASM cache disabled: no config found and HOME not set");
         }
 
         builder.build().context("Failed to create plugin")

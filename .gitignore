@@ -22,6 +22,9 @@ result
 # WASM freeze files
 cabal.project.wasm.freeze
 
+# Generated dev project file (incremental WASM builds)
+cabal.project.wasm.dev
+
 # Local exomonad state (symlinks, sockets, logs, per-crate config)
 .exomonad/wasm
 rust/.exomonad/
