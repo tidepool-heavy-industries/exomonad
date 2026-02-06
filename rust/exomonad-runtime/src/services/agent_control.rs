@@ -430,23 +430,21 @@ impl AgentControlService {
 
                     // Prune stale worktree references from git
                     self.prune_worktrees().await?;
-
-                    // Emit agent:stopped event
-                    let agent_id =
-                        exomonad_ui_protocol::AgentId::try_from(format!("gh-{}", issue_id))
-                            .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
-                    let event = exomonad_ui_protocol::AgentEvent::AgentStopped {
-                        agent_id,
-                        timestamp: zellij_events::now_iso8601(),
-                    };
-                    if let Err(e) = zellij_events::emit_event(&event) {
-                        warn!("Failed to emit agent:stopped event: {}", e);
-                    }
                 }
             }
         }
 
         if found {
+            // Emit agent:stopped event (once for the issue_id)
+            let agent_id = exomonad_ui_protocol::AgentId::try_from(format!("gh-{}", issue_id))
+                .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
+            let event = exomonad_ui_protocol::AgentEvent::AgentStopped {
+                agent_id,
+                timestamp: zellij_events::now_iso8601(),
+            };
+            if let Err(e) = zellij_events::emit_event(&event) {
+                warn!("Failed to emit agent:stopped event: {}", e);
+            }
             Ok(())
         } else {
             Err(anyhow!("No worktree found for issue {}", issue_id))
@@ -985,10 +983,20 @@ impl AgentControlService {
         // worktree_path is {project_dir}/{rel_path}
         // exomonad_dir is {project_dir}/{rel_path}/.exomonad
         // We need {rel_path_to_root} = ../... to get from exomonad_dir to project_dir
-        let depth = worktree_path
-            .strip_prefix(&self.project_dir)
-            .map(|p| p.components().count())
-            .unwrap_or(3); // Fallback to 3 if strip_prefix fails
+        let rel_path = worktree_path.strip_prefix(&self.project_dir).map_err(|e| {
+            warn!(
+                worktree_path = %worktree_path.display(),
+                project_dir = %self.project_dir.display(),
+                error = %e,
+                "worktree_path is not under project_dir"
+            );
+            anyhow!(
+                "Internal configuration error: worktree_path {:?} is not under project_dir {:?}",
+                worktree_path,
+                self.project_dir
+            )
+        })?;
+        let depth = rel_path.components().count();
         let rel_to_root = "../".repeat(depth + 1);
         let rel_to_root = rel_to_root.trim_end_matches('/');
 
@@ -1836,6 +1844,20 @@ mod tests {
         assert!(prompt.contains("**Labels:** `bug`, `priority`"));
         // Stop hooks now handle commit/PR creation - no explicit instruction needed
         assert!(!prompt.contains("When done, commit"));
+    }
+
+    #[test]
+    fn test_build_initial_prompt_no_labels() {
+        let prompt = AgentControlService::build_initial_prompt(
+            "123",
+            "Fix the bug",
+            "Description",
+            &[],
+            "gh-123/fix",
+            "https://github.com/owner/repo/issues/123",
+        );
+
+        assert!(prompt.contains("**Labels:** None"));
     }
 
     #[test]
