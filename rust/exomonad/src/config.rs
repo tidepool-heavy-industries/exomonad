@@ -145,10 +145,20 @@ impl Config {
             return Ok(over.join(format!("wasm-guest-{}.wasm", self.role)));
         }
 
+        let local_wasm_dir = PathBuf::from(".exomonad/wasm");
+        let wasm_name = format!("wasm-guest-{}.wasm", self.role);
+
+        if local_wasm_dir.exists() {
+            let path = local_wasm_dir.join(&wasm_name);
+            if path.exists() {
+                return Ok(path);
+            }
+        }
+
         let home = std::env::var("HOME").map_err(|_| ConfigError::HomeNotSet)?;
         Ok(PathBuf::from(home)
             .join(".exomonad/wasm")
-            .join(format!("wasm-guest-{}.wasm", self.role)))
+            .join(wasm_name))
     }
 }
 

@@ -8,6 +8,7 @@
 packages:
     haskell/wasm-guest
     haskell/vendor/polysemy
+    haskell/vendor/exomonad-pdk
 
 -- Global settings for static-only build
 -- Note: 'shared: True' is REQUIRED for Template Haskell (GHC 9.12 WASM)

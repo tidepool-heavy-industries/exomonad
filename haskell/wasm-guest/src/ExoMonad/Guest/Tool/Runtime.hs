@@ -2,7 +2,7 @@
 
 -- | Runtime handlers for WASM exports.
 --
--- Separated from TH.hs because these use Extism.PDK which cannot be
+-- Separated from TH.hs because these use ExoMonad.PDK which cannot be
 -- loaded by the TH external interpreter during cross-compilation.
 module ExoMonad.Guest.Tool.Runtime
   ( mcpHandlerRecord,
@@ -34,7 +34,7 @@ import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
 import ExoMonad.Guest.Types (HookEventType (..), HookInput (..), HookOutput, MCPCallInput (..), StopDecision (..), StopHookOutput (..), allowResponse)
 import ExoMonad.Types (HookConfig (..))
-import Extism.PDK (input, output)
+import ExoMonad.PDK (input, output)
 import Foreign.C.Types (CInt (..))
 import GHC.Generics (Generic)
 import Polysemy (Embed, Sem, runM)

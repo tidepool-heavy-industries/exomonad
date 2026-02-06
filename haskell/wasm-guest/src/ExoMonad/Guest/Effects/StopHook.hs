@@ -5,6 +5,7 @@
 module ExoMonad.Guest.Effects.StopHook
   ( runStopHookChecks,
     ReviewStatus (..),
+    GitHostInput (..),
   )
 where
 

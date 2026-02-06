@@ -58,7 +58,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Word (Word64)
 import ExoMonad.Guest.FFI
-import Extism.PDK.Memory (alloc, findMemory, free, load, memoryOffset)
+import ExoMonad.PDK.Memory (alloc, findMemory, free, load, memoryOffset)
 import GHC.Generics (Generic)
 
 -- ============================================================================

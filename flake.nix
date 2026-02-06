@@ -89,7 +89,8 @@ EOF
                 base == "haskell" || 
                 base == "wasm-guest" || 
                 base == "vendor" || 
-                base == "polysemy"
+                base == "polysemy" ||
+                base == "exomonad-pdk"
               ));
           };
 
@@ -162,6 +163,7 @@ EOF
                   pkgs.lib.hasSuffix ".cabal" base ||
                   pkgs.lib.hasSuffix ".hs" base ||
                   pkgs.lib.hasSuffix ".hs-boot" base ||
+                  pkgs.lib.hasSuffix ".c" base ||
                   base == "LICENSE";
               }}/* .
             
@@ -253,7 +255,7 @@ executable wasm-guest-${name}
     build-depends:
         base,
         wasm-guest:wasm-guest-internal,
-        extism-pdk
+        exomonad-pdk
 EOF
 
             # 5. Generate cabal.project

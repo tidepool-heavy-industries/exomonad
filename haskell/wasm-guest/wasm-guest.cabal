@@ -81,7 +81,7 @@ library wasm-guest-internal
         ExoMonad.Types
     -- Additional dependencies (shared stanza provides common deps)
     build-depends:
-        extism-pdk ^>= 1.2.0.0
+        exomonad-pdk
 
     -- Polysemy plugin doesn't work with WASM cross-compilation
     if !arch(wasm32)
