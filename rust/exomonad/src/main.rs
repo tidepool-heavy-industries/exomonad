@@ -1,4 +1,4 @@
-//! exomonad-sidecar: Rust host with Haskell WASM plugin.
+//! exomonad: Rust host with Haskell WASM plugin.
 //!
 //! This binary runs as a sidecar in each agent container, handling:
 //! - Claude Code hooks via WASM plugin

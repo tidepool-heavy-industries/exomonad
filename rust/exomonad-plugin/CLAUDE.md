@@ -118,11 +118,11 @@ cargo test -p exomonad-plugin
 # 1. Build plugin
 # 2. Copy to ~/.config/zellij/plugins/
 # 3. Start Zellij session
-# 4. Send CustomMessage via exomonad-sidecar
+# 4. Send CustomMessage via exomonad
 ```
 
 **Integration testing:**
-1. Run exomonad-sidecar with Haskell WASM
+1. Run exomonad with Haskell WASM
 2. Trigger RequestInput effect
 3. Verify popup renders correctly
 4. Interact with form (keyboard navigation)

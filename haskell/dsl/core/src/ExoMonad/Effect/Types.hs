@@ -162,7 +162,6 @@ import ExoMonad.Effect.Decision.Types
     DecisionContext (..),
     DecisionTrace (..),
   )
-import ExoMonad.LLM.Types (CallError (..))
 import ExoMonad.Effect.Log
 import ExoMonad.Effect.TUI
   ( PopupDefinition (..),
@@ -170,6 +169,7 @@ import ExoMonad.Effect.TUI
     TUI (..),
     showUI,
   )
+import ExoMonad.LLM.Types (CallError (..))
 import ExoMonad.StructuredOutput (StructuredOutput (..), formatDiagnostic)
 import Lens.Micro.TH (makeLenses)
 import Polysemy (Embed, Member, Sem, embed, interpret, makeSem)

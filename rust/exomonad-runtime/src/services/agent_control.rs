@@ -1291,9 +1291,7 @@ mod coordinator {
             force: bool,
         },
         #[serde(rename = "list")]
-        List {
-            request_id: String,
-        },
+        List { request_id: String },
     }
 
     #[derive(Debug, Deserialize)]
@@ -1328,10 +1326,13 @@ impl AgentControlService {
         agent_command: &str,
         project_dir: &str,
     ) -> Result<serde_json::Value> {
-        let request_id = format!("spawn-{}", std::time::SystemTime::now()
+        let request_id = format!(
+            "spawn-{}",
+            std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis())
-                .unwrap_or(0));
+                .unwrap_or(0)
+        );
         let sidecar_path = std::env::current_exe()
             .ok()
             .and_then(|p| p.to_str().map(String::from))
@@ -1361,10 +1362,13 @@ impl AgentControlService {
         agent_ids: &[String],
         force: bool,
     ) -> Result<serde_json::Value> {
-        let request_id = format!("cleanup-{}", std::time::SystemTime::now()
+        let request_id = format!(
+            "cleanup-{}",
+            std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis())
-                .unwrap_or(0));
+                .unwrap_or(0)
+        );
 
         let request = coordinator::Request::Cleanup {
             request_id,
@@ -1377,10 +1381,13 @@ impl AgentControlService {
 
     /// Send a list request to the coordinator plugin.
     pub async fn coordinator_list(&self) -> Result<serde_json::Value> {
-        let request_id = format!("list-{}", std::time::SystemTime::now()
+        let request_id = format!(
+            "list-{}",
+            std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis())
-                .unwrap_or(0));
+                .unwrap_or(0)
+        );
 
         let request = coordinator::Request::List { request_id };
 
@@ -1388,24 +1395,26 @@ impl AgentControlService {
     }
 
     /// Send a request to the coordinator plugin via `zellij pipe`.
-    async fn send_to_coordinator(&self, request: coordinator::Request) -> Result<serde_json::Value> {
-        let json = serde_json::to_string(&request)
-            .context("Failed to serialize coordinator request")?;
+    async fn send_to_coordinator(
+        &self,
+        request: coordinator::Request,
+    ) -> Result<serde_json::Value> {
+        let json =
+            serde_json::to_string(&request).context("Failed to serialize coordinator request")?;
 
         let plugin_path = format!(
             "file:{}/.config/zellij/plugins/exomonad-coordinator.wasm",
             std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string())
         );
 
-        info!("[Coordinator] Sending request via zellij pipe: {}", &json[..json.len().min(200)]);
+        info!(
+            "[Coordinator] Sending request via zellij pipe: {}",
+            &json[..json.len().min(200)]
+        );
 
         let output = timeout(SPAWN_TIMEOUT, async {
             Command::new("zellij")
-                .args([
-                    "pipe",
-                    "--plugin", &plugin_path,
-                    "--", &json,
-                ])
+                .args(["pipe", "--plugin", &plugin_path, "--", &json])
                 .output()
                 .await
                 .context("Failed to execute zellij pipe")
@@ -1419,10 +1428,13 @@ impl AgentControlService {
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        info!("[Coordinator] Response: {}", &stdout[..stdout.len().min(500)]);
+        info!(
+            "[Coordinator] Response: {}",
+            &stdout[..stdout.len().min(500)]
+        );
 
-        let response: coordinator::Response = serde_json::from_str(&stdout)
-            .context("Failed to parse coordinator response")?;
+        let response: coordinator::Response =
+            serde_json::from_str(&stdout).context("Failed to parse coordinator response")?;
 
         match response {
             coordinator::Response::Ok { result, .. } => Ok(result),

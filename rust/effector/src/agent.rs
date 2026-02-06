@@ -96,39 +96,62 @@ pub fn setup(
 
     // 1. Create worktree
     if wt_path.exists() {
-        eprintln!("[effector] Worktree already exists, reusing: {}", wt_path.display());
+        eprintln!(
+            "[effector] Worktree already exists, reusing: {}",
+            wt_path.display()
+        );
     } else {
         if let Some(parent) = wt_path.parent() {
             std::fs::create_dir_all(parent)
                 .context("Failed to create worktree parent directory")?;
         }
 
-        eprintln!("[effector] Creating worktree: git worktree add -b {} {} {}", branch, wt_path.display(), start_point);
-        let result = cmd("git", &["worktree", "add", "-b", branch, &wt_path.to_string_lossy(), start_point])
-            .dir(&project)
-            .stderr_to_stdout()
-            .unchecked()
-            .read();
+        eprintln!(
+            "[effector] Creating worktree: git worktree add -b {} {} {}",
+            branch,
+            wt_path.display(),
+            start_point
+        );
+        let result = cmd(
+            "git",
+            &[
+                "worktree",
+                "add",
+                "-b",
+                branch,
+                &wt_path.to_string_lossy(),
+                start_point,
+            ],
+        )
+        .dir(&project)
+        .stderr_to_stdout()
+        .unchecked()
+        .read();
 
         match result {
             Ok(output) if output.contains("already exists") => {
                 eprintln!("[effector] Branch already exists, creating worktree without -b");
-                cmd("git", &["worktree", "add", &wt_path.to_string_lossy(), branch])
-                    .dir(&project)
-                    .run()
-                    .context("git worktree add (fallback) failed")?;
+                cmd(
+                    "git",
+                    &["worktree", "add", &wt_path.to_string_lossy(), branch],
+                )
+                .dir(&project)
+                .run()
+                .context("git worktree add (fallback) failed")?;
             }
             Ok(_) => {}
             Err(e) => {
-                return print_error("worktree_failed", &format!("git worktree add failed: {}", e));
+                return print_error(
+                    "worktree_failed",
+                    &format!("git worktree add failed: {}", e),
+                );
             }
         }
     }
 
     // 2. Write .exomonad/config.toml
     let exomonad_dir = wt_path.join(".exomonad");
-    std::fs::create_dir_all(&exomonad_dir)
-        .context("Failed to create .exomonad directory")?;
+    std::fs::create_dir_all(&exomonad_dir).context("Failed to create .exomonad directory")?;
 
     let config_content = format!(
         "# Agent config (auto-generated)\ndefault_role = \"{}\"\nproject_dir = \"../../..\"\n",
@@ -136,7 +159,10 @@ pub fn setup(
     );
     std::fs::write(exomonad_dir.join("config.toml"), &config_content)
         .context("Failed to write config.toml")?;
-    eprintln!("[effector] Wrote .exomonad/config.toml (default_role={})", role);
+    eprintln!(
+        "[effector] Wrote .exomonad/config.toml (default_role={})",
+        role
+    );
 
     // 3. Create symlinks for shared resources
     // Worktree at: {project}/.exomonad/worktrees/gh-xxx/
@@ -165,7 +191,10 @@ pub fn setup(
 
         if !link_path.exists() {
             if let Err(e) = symlink(target_path, &link_path) {
-                eprintln!("[effector] Warning: Failed to create symlink {}: {}", name, e);
+                eprintln!(
+                    "[effector] Warning: Failed to create symlink {}: {}",
+                    name, e
+                );
             } else {
                 eprintln!("[effector] Created symlink: {} -> {}", name, target);
             }
@@ -189,16 +218,14 @@ pub fn setup(
 }}"#,
         sidecar_path
     );
-    std::fs::write(wt_path.join(".mcp.json"), &mcp_content)
-        .context("Failed to write .mcp.json")?;
+    std::fs::write(wt_path.join(".mcp.json"), &mcp_content).context("Failed to write .mcp.json")?;
     eprintln!("[effector] Wrote .mcp.json");
 
     // 6. Write agent-specific hook configuration
     let hook_settings_written = match agent_type {
         "claude" => {
             let claude_dir = wt_path.join(".claude");
-            std::fs::create_dir_all(&claude_dir)
-                .context("Failed to create .claude directory")?;
+            std::fs::create_dir_all(&claude_dir).context("Failed to create .claude directory")?;
 
             let settings_content = format!(
                 r#"{{
@@ -225,8 +252,7 @@ pub fn setup(
         }
         "gemini" => {
             let gemini_dir = wt_path.join(".gemini");
-            std::fs::create_dir_all(&gemini_dir)
-                .context("Failed to create .gemini directory")?;
+            std::fs::create_dir_all(&gemini_dir).context("Failed to create .gemini directory")?;
 
             let settings_content = format!(
                 r#"{{
@@ -260,7 +286,10 @@ pub fn setup(
             true
         }
         other => {
-            eprintln!("[effector] Warning: Unknown agent type '{}', skipping hook settings", other);
+            eprintln!(
+                "[effector] Warning: Unknown agent type '{}', skipping hook settings",
+                other
+            );
             false
         }
     };
@@ -282,7 +311,10 @@ pub fn teardown(project_dir: &str, worktree_path: &str, force: bool) -> Result<(
     let wt_path = project.join(worktree_path);
 
     if !wt_path.exists() {
-        return print_error("not_found", &format!("Worktree does not exist: {}", wt_path.display()));
+        return print_error(
+            "not_found",
+            &format!("Worktree does not exist: {}", wt_path.display()),
+        );
     }
 
     eprintln!("[effector] Removing worktree: {}", wt_path.display());
@@ -303,7 +335,10 @@ pub fn teardown(project_dir: &str, worktree_path: &str, force: bool) -> Result<(
 
     // Check if it actually worked by seeing if directory is gone
     if wt_path.exists() {
-        return print_error("remove_failed", &format!("git worktree remove failed: {}", result));
+        return print_error(
+            "remove_failed",
+            &format!("git worktree remove failed: {}", result),
+        );
     }
 
     // Prune stale references
@@ -336,9 +371,10 @@ pub fn fetch_origin(project_dir: &str) -> Result<()> {
             eprintln!("[effector] git fetch completed: {}", output.trim());
             print_success(serde_json::json!({ "fetched": true }))
         }
-        Err(e) => {
-            print_error("fetch_failed", &format!("git fetch origin main failed: {}", e))
-        }
+        Err(e) => print_error(
+            "fetch_failed",
+            &format!("git fetch origin main failed: {}", e),
+        ),
     }
 }
 
@@ -398,11 +434,14 @@ pub fn is_merged(project_dir: &str, branch: &str) -> Result<()> {
         .canonicalize()
         .context("Failed to resolve project directory")?;
 
-    let result = cmd("git", &["merge-base", "--is-ancestor", branch, "origin/main"])
-        .dir(&project)
-        .unchecked()
-        .run()
-        .context("Failed to run git merge-base")?;
+    let result = cmd(
+        "git",
+        &["merge-base", "--is-ancestor", branch, "origin/main"],
+    )
+    .dir(&project)
+    .unchecked()
+    .run()
+    .context("Failed to run git merge-base")?;
 
     print_success(IsMergedResult {
         merged: result.status.success(),

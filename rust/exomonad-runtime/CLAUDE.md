@@ -5,7 +5,7 @@ WASM plugin hosting and host functions. All MCP tools and hook logic routes thro
 ## Architecture
 
 ```
-Sidecar (exomonad-sidecar)
+Sidecar (exomonad)
     ↓
 PluginManager::load_plugin(wasm_path, services)
     ↓
@@ -271,7 +271,7 @@ cargo test -p exomonad-runtime
 
 ## Related Documentation
 
-- [exomonad-sidecar](../exomonad-sidecar/CLAUDE.md) - MCP server that uses this runtime
+- [exomonad](../exomonad/CLAUDE.md) - MCP server that uses this runtime
 - [wasm-guest](../../haskell/wasm-guest/) - Haskell plugin source
 - [exomonad-services](../exomonad-services/CLAUDE.md) - External service clients (Anthropic, Ollama, OTLP)
 - [Root CLAUDE.md](../../CLAUDE.md) - Project overview
