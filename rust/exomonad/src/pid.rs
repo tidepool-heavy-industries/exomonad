@@ -140,8 +140,7 @@ fn is_sidecar_process(pid: u32) -> bool {
     match output {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout);
-            // Match both current binary name and legacy name
-            stdout.contains("exomonad-sidecar") || stdout.contains("exomonad")
+            stdout.contains("exomonad")
         }
         Err(_) => false, // Cannot verify
     }
@@ -300,8 +299,8 @@ mod tests {
 
         // The other thread will try to lock. It will block or loop.
         // Since we hold the lock and are "sidecar-like" (same process name), it might try to kill us?
-        // Wait, current process IS "exomonad" (or legacy "exomonad-sidecar").
-        // `is_sidecar_process` checks for these names.
+        // Wait, current process IS "exomonad".
+        // `is_sidecar_process` checks for that name.
         // The test runner name is usually different.
         // So `is_sidecar_process` will return false.
         // So it should just loop waiting.
