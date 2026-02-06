@@ -183,21 +183,38 @@ prop_compose! {
     }
 }
 
+fn arb_agent_status() -> BoxedStrategy<AgentStatus> {
+    prop_oneof![
+        Just(AgentStatus::Running),
+        Just(AgentStatus::OrphanWorktree),
+        Just(AgentStatus::OrphanTab),
+    ]
+    .boxed()
+}
+
 prop_compose! {
     fn arb_agent_info()(
         issue_id in "[0-9]+",
-        worktree_path in "/tmp/worktrees/[a-z0-9-]+",
-        branch_name in "gh-[0-9]+-[a-z0-9-]+",
-        has_changes in any::<bool>(),
+        has_tab in any::<bool>(),
+        has_worktree in any::<bool>(),
+        has_changes in proptest::option::of(any::<bool>()),
+        has_unpushed in proptest::option::of(any::<bool>()),
+        status in arb_agent_status(),
+        worktree_path in proptest::option::of("/tmp/worktrees/[a-z0-9-]+"),
+        branch_name in proptest::option::of("gh-[0-9]+-[a-z0-9-]+"),
         slug in proptest::option::of("[a-z0-9-]+"),
         agent_type in proptest::option::of(prop_oneof!["claude", "gemini"]),
         pr in proptest::option::of(arb_agent_pr_info()),
     ) -> AgentInfo {
         AgentInfo {
             issue_id,
+            has_tab,
+            has_worktree,
+            has_changes,
+            has_unpushed,
+            status,
             worktree_path,
             branch_name,
-            has_changes,
             slug,
             agent_type,
             pr,
