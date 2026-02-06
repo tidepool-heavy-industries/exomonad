@@ -27,6 +27,12 @@ cabal.project.wasm.dev
 
 # Local exomonad state (symlinks, sockets, logs, per-crate config)
 .exomonad/wasm
+.exomonad/worktrees/
+.exomonad/sockets/
+.exomonad/logs/
+.exomonad/wasm-cache.toml
+.exomonad/wasm-cache/
+.exomonad/sidecar.pid
 rust/.exomonad/
 rust/exomonad/.exomonad/
 
