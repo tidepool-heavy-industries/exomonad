@@ -194,7 +194,11 @@ async fn handle_hook(
                     }
                 }
             }
-            std::process::exit(2);
+            // Exit 0 for both runtimes - decision is conveyed via JSON response.
+            // Refs:
+            // - Claude: https://docs.anthropic.com/en/docs/claude-code/hooks#stop-decision-control
+            // - Gemini: https://geminicli.com/docs/hooks/reference/#afteragent
+            //   (Exit 2 triggers "retry with stderr as feedback prompt" - not what we want)
         }
     } else {
         // Non-stop hooks: use existing ClaudePreToolUseOutput format
