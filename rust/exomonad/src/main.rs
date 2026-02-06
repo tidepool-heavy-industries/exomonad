@@ -85,6 +85,49 @@ enum Commands {
 // Hook Handler
 // ============================================================================
 
+async fn emit_hook_span(
+    otel: &OtelService,
+    trace_id: &str,
+    event_type: HookEventType,
+    runtime: Runtime,
+    hook_input: &HookInput,
+    decision_str: &str,
+    start_ns: u64,
+    extra_attributes: HashMap<String, String>,
+) {
+    let end_ns = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64;
+
+    let mut attributes = HashMap::new();
+    attributes.insert("session.id".to_string(), hook_input.session_id.to_string());
+    attributes.insert("jsonl.file".to_string(), hook_input.transcript_path.clone());
+    if let Some(tid) = &hook_input.tool_use_id {
+        attributes.insert("tool_use_id".to_string(), tid.clone());
+    }
+    attributes.insert("hook.type".to_string(), format!("{:?}", event_type));
+    attributes.insert("hook.runtime".to_string(), runtime.to_string());
+    attributes.insert("hook.decision".to_string(), decision_str.to_string());
+
+    for (k, v) in extra_attributes {
+        attributes.insert(k, v);
+    }
+
+    let req = ServiceRequest::OtelSpan {
+        trace_id: trace_id.to_string(),
+        span_id: uuid::Uuid::new_v4().simple().to_string()[..16].to_string(),
+        name: format!("hook:{:?}", event_type),
+        start_ns: Some(start_ns),
+        end_ns: Some(end_ns),
+        attributes: Some(attributes),
+    };
+
+    if let Err(e) = otel.call(req).await {
+        warn!("Failed to emit OTel span: {}", e);
+    }
+}
+
 #[tracing::instrument(skip(plugin, runtime, event_type), fields(event = ?event_type))]
 async fn handle_hook(
     plugin: &PluginManager,
@@ -94,6 +137,7 @@ async fn handle_hook(
     use std::io::Read;
 
     let otel = OtelService::from_env().ok();
+    let trace_id = uuid::Uuid::new_v4().simple().to_string();
     let start_ns = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -162,33 +206,18 @@ async fn handle_hook(
             println!("{}", output_json);
 
             // Emit OTel span for unhandled hook
-            if let Some(otel) = otel {
-                let end_ns = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos() as u64;
-
-                let mut attributes = HashMap::new();
-                attributes.insert("session.id".to_string(), hook_input.session_id.to_string());
-                attributes.insert("jsonl.file".to_string(), hook_input.transcript_path.clone());
-                if let Some(tid) = &hook_input.tool_use_id {
-                    attributes.insert("tool_use_id".to_string(), tid.clone());
-                }
-                attributes.insert("hook.type".to_string(), format!("{:?}", event_type));
-                attributes.insert("hook.runtime".to_string(), runtime.to_string());
-                attributes.insert("hook.decision".to_string(), "allow".to_string());
-
-                let req = ServiceRequest::OtelSpan {
-                    trace_id: uuid::Uuid::new_v4().simple().to_string(),
-                    span_id: uuid::Uuid::new_v4().simple().to_string()[..16].to_string(),
-                    name: format!("hook:{:?}", event_type),
-                    start_ns: Some(start_ns),
-                    end_ns: Some(end_ns),
-                    attributes: Some(attributes),
-                };
-                if let Err(e) = otel.call(req).await {
-                    warn!("Failed to emit OTel span: {}", e);
-                }
+            if let Some(otel) = &otel {
+                emit_hook_span(
+                    otel,
+                    &trace_id,
+                    event_type,
+                    runtime,
+                    &hook_input,
+                    "allow",
+                    start_ns,
+                    HashMap::new(),
+                )
+                .await;
             }
 
             return Ok(());
@@ -214,37 +243,24 @@ async fn handle_hook(
         };
 
         // Emit OTel span
-        if let Some(otel) = otel {
-            let end_ns = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos() as u64;
-
-            let mut attributes = HashMap::new();
-            attributes.insert("session.id".to_string(), hook_input.session_id.to_string());
-            attributes.insert("jsonl.file".to_string(), hook_input.transcript_path.clone());
-            if let Some(tid) = &hook_input.tool_use_id {
-                attributes.insert("tool_use_id".to_string(), tid.clone());
-            }
-            attributes.insert("hook.type".to_string(), format!("{:?}", event_type));
-            attributes.insert("hook.runtime".to_string(), runtime.to_string());
-            attributes.insert("hook.decision".to_string(), decision_str.to_string());
-            attributes.insert("routing.decision".to_string(), decision_str.to_string());
+        if let Some(otel) = &otel {
+            let mut extra_attributes = HashMap::new();
+            extra_attributes.insert("routing.decision".to_string(), decision_str.to_string());
             if let Some(reason) = &internal_output.reason {
-                attributes.insert("routing.reason".to_string(), reason.clone());
+                extra_attributes.insert("routing.reason".to_string(), reason.clone());
             }
 
-            let req = ServiceRequest::OtelSpan {
-                trace_id: uuid::Uuid::new_v4().simple().to_string(),
-                span_id: uuid::Uuid::new_v4().simple().to_string()[..16].to_string(),
-                name: format!("hook:{:?}", event_type),
-                start_ns: Some(start_ns),
-                end_ns: Some(end_ns),
-                attributes: Some(attributes),
-            };
-            if let Err(e) = otel.call(req).await {
-                warn!("Failed to emit OTel span: {}", e);
-            }
+            emit_hook_span(
+                otel,
+                &trace_id,
+                event_type,
+                runtime,
+                &hook_input,
+                decision_str,
+                start_ns,
+                extra_attributes,
+            )
+            .await;
         }
 
         // Exit code and event emission based on decision
@@ -303,33 +319,18 @@ async fn handle_hook(
         };
 
         // Emit OTel span
-        if let Some(otel) = otel {
-            let end_ns = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos() as u64;
-
-            let mut attributes = HashMap::new();
-            attributes.insert("session.id".to_string(), hook_input.session_id.to_string());
-            attributes.insert("jsonl.file".to_string(), hook_input.transcript_path.clone());
-            if let Some(tid) = &hook_input.tool_use_id {
-                attributes.insert("tool_use_id".to_string(), tid.clone());
-            }
-            attributes.insert("hook.type".to_string(), format!("{:?}", event_type));
-            attributes.insert("hook.runtime".to_string(), runtime.to_string());
-            attributes.insert("hook.decision".to_string(), decision_str.to_string());
-
-            let req = ServiceRequest::OtelSpan {
-                trace_id: uuid::Uuid::new_v4().simple().to_string(),
-                span_id: uuid::Uuid::new_v4().simple().to_string()[..16].to_string(),
-                name: format!("hook:{:?}", event_type),
-                start_ns: Some(start_ns),
-                end_ns: Some(end_ns),
-                attributes: Some(attributes),
-            };
-            if let Err(e) = otel.call(req).await {
-                warn!("Failed to emit OTel span: {}", e);
-            }
+        if let Some(otel) = &otel {
+            emit_hook_span(
+                otel,
+                &trace_id,
+                event_type,
+                runtime,
+                &hook_input,
+                decision_str,
+                start_ns,
+                HashMap::new(),
+            )
+            .await;
         }
 
         if !output.continue_ {
