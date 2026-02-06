@@ -27,6 +27,9 @@ cabal.project.wasm.freeze
 rust/.exomonad/
 rust/exomonad/.exomonad/
 
+# Temporary task files for worktree dispatch
+*.md.tmp
+
 # Standalone Rust crate build artifacts (outside workspace target/)
 rust/exomonad-plugin/target/
 rust/exomonad-coordinator/target/
