@@ -1,4 +1,10 @@
 {
+  "mcpServers": {
+    "exomonad": {
+      "command": "exomonad",
+      "args": ["mcp-stdio"]
+    }
+  },
   "hooks": {
     "AfterAgent": [
       {
@@ -14,4 +20,4 @@
       }
     ]
   }
-}
+} 
