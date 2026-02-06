@@ -1128,11 +1128,11 @@ project_dir = "{}"
 
         // Create symlinks for shared resources back to root .exomonad
         let symlinks = [
-            ("wasm", format!("{}/wasm", rel_to_root)),
-            ("roles", format!("{}/roles", rel_to_root)),
-            ("lib", format!("{}/lib", rel_to_root)),
-            ("flake.nix", format!("{}/flake.nix", rel_to_root)),
-            ("flake.lock", format!("{}/flake.lock", rel_to_root)),
+            ("wasm", format!("{}/.exomonad/wasm", rel_to_root)),
+            ("roles", format!("{}/.exomonad/roles", rel_to_root)),
+            ("lib", format!("{}/.exomonad/lib", rel_to_root)),
+            ("flake.nix", format!("{}/.exomonad/flake.nix", rel_to_root)),
+            ("flake.lock", format!("{}/.exomonad/flake.lock", rel_to_root)),
         ];
 
         for (name, target) in symlinks {
