@@ -1037,7 +1037,7 @@ project_dir = "../../.."
         let sidecar_path = std::env::current_exe()
             .ok()
             .and_then(|p| p.to_str().map(String::from))
-            .unwrap_or_else(|| "exomonad-sidecar".to_string());
+            .unwrap_or_else(|| "exomonad".to_string());
 
         let mcp_content = format!(
             r###"{{
@@ -1106,14 +1106,22 @@ project_dir = "../../.."
             AgentType::Gemini => {
                 // Create .gemini directory and write settings with AfterAgent hook
                 // AfterAgent fires after each agent turn, SessionEnd only on exit
+                // Ref: https://geminicli.com/docs/hooks/reference/#afteragent
                 let gemini_dir = worktree_path.join(".gemini");
                 fs::create_dir_all(&gemini_dir).await?;
 
                 let settings_content = format!(
                     r###"{{
+  "mcpServers": {{
+    "exomonad": {{
+      "command": "{}",
+      "args": ["mcp-stdio"]
+    }}
+  }},
   "hooks": {{
     "AfterAgent": [
       {{
+        "matcher": "AfterAgent",
         "hooks": [
           {{
             "name": "stop-check",
@@ -1126,7 +1134,7 @@ project_dir = "../../.."
     ]
   }}
 }} "###,
-                    sidecar_path
+                    sidecar_path, sidecar_path
                 );
                 fs::write(gemini_dir.join("settings.json"), settings_content).await?;
                 tracing::info!(
@@ -1327,7 +1335,7 @@ impl AgentControlService {
         let sidecar_path = std::env::current_exe()
             .ok()
             .and_then(|p| p.to_str().map(String::from))
-            .unwrap_or_else(|| "exomonad-sidecar".to_string());
+            .unwrap_or_else(|| "exomonad".to_string());
 
         let request = coordinator::Request::Spawn {
             request_id: request_id.clone(),

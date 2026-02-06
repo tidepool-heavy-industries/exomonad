@@ -11,7 +11,7 @@ This document details the configuration files, filesystem paths, and loading mec
 
 *   **Location:** Project root (`$PROJECT_ROOT/.exomonad/config.toml`)
 *   **Purpose:** Defines the agent role and project context. Used by the Rust sidecar to determine which WASM plugin to load.
-*   **Loaded By:** `rust/exomonad-sidecar/src/config.rs`
+*   **Loaded By:** `rust/exomonad/src/config.rs`
 *   **Schema:**
     ```toml
     # Role determines the WASM plugin: ~/.exomonad/wasm/wasm-guest-{role}.wasm
@@ -47,7 +47,7 @@ This document details the configuration files, filesystem paths, and loading mec
     {
       "mcpServers": {
         "exomonad": {
-          "command": "exomonad-sidecar", // or absolute path
+          "command": "exomonad", // or absolute path
           "args": ["mcp-stdio"]
         }
       }
@@ -119,7 +119,7 @@ Located in the user's home directory.
 *   **Socket Paths:** Most Haskell interpreters default to `.exomonad/sockets/control.sock` relative to CWD. If the CWD is not the project root (e.g., inside a deep subdirectory), this will fail unless `EXOMONAD_CONTROL_SOCKET` env var is set.
 *   **Hardcoded Fallbacks:**
     *   `rust/exomonad-services/src/bin/service-server.rs`: defaults to `.exomonad/sockets/services.sock`.
-    *   `rust/exomonad-sidecar/src/main.rs`: defaults to `.exomonad/sockets/control.sock`.
+    *   `rust/exomonad/src/main.rs`: defaults to `.exomonad/sockets/control.sock`.
 
 ### 4.3 Hardcoded Paths to Configurable
 *   The default worktree directory `.exomonad/worktrees` is hardcoded in `agent_control.rs` (though customizable via API).

@@ -1,4 +1,4 @@
-# exomonad-sidecar
+# exomonad
 
 Unified sidecar binary: Rust host with Haskell WASM plugin.
 
@@ -7,7 +7,7 @@ Unified sidecar binary: Rust host with Haskell WASM plugin.
 **All logic is in Haskell WASM. Rust handles I/O only.**
 
 ```
-Claude Code → exomonad-sidecar [hook|mcp|mcp-stdio]
+Claude Code → exomonad [hook|mcp|mcp-stdio]
                      ↓
               Load WASM via config (role field)
                      ↓
@@ -22,14 +22,14 @@ Claude Code → exomonad-sidecar [hook|mcp|mcp-stdio]
 
 For Claude Code hooks:
 ```
-Claude Code → exomonad-sidecar hook → WASM handle_pre_tool_use → HookOutput
+Claude Code → exomonad hook → WASM handle_pre_tool_use → HookOutput
 ```
 
 ### MCP Mode
 
 For MCP tools:
 ```
-Claude Code → stdio → exomonad-sidecar mcp-stdio → WASM handle_mcp_call → Result
+Claude Code → stdio → exomonad mcp-stdio → WASM handle_mcp_call → Result
 ```
 
 ## CLI Usage
@@ -38,8 +38,8 @@ The sidecar auto-discovers WASM based on `.exomonad/config.toml`:
 
 ```bash
 # Config file specifies role, sidecar resolves ~/.exomonad/wasm/wasm-guest-{role}.wasm
-exomonad-sidecar hook pre-tool-use
-exomonad-sidecar mcp-stdio
+exomonad hook pre-tool-use
+exomonad mcp-stdio
 ```
 
 No `--wasm` argument needed! The `role` field in `.exomonad/config.toml` determines which WASM plugin to load.
@@ -68,7 +68,7 @@ Add `.mcp.json` to your project root:
 {
   "mcpServers": {
     "exomonad": {
-      "command": "exomonad-sidecar",
+      "command": "exomonad",
       "args": ["mcp-stdio"]
     }
   }
@@ -157,7 +157,7 @@ Haskell WASM calls these host functions (high-level semantic effects):
 
 ```bash
 # Build sidecar
-cargo build -p exomonad-sidecar
+cargo build -p exomonad
 
 # Build WASM plugin (requires nix develop .#wasm)
 nix develop .#wasm -c wasm32-wasi-cabal build --project-file=cabal.project.wasm wasm-guest
@@ -167,11 +167,11 @@ nix develop .#wasm -c wasm32-wasi-cabal build --project-file=cabal.project.wasm 
 
 ```bash
 # Unit tests
-cargo test -p exomonad-sidecar
+cargo test -p exomonad
 
 # E2E hook test (requires .exomonad/config.toml with default_role field and built WASM)
 echo '{"session_id":"test","hook_event_name":"PreToolUse","tool_name":"Write","transcript_path":"/tmp/t.jsonl","cwd":"/","permission_mode":"default"}' | \
-  ./target/debug/exomonad-sidecar hook pre-tool-use
+  ./target/debug/exomonad hook pre-tool-use
 ```
 
 ## Data Flow
@@ -180,7 +180,7 @@ echo '{"session_id":"test","hook_event_name":"PreToolUse","tool_name":"Write","t
 ```
 Claude Code hook JSON (stdin)
          ↓
-    exomonad-sidecar hook pre-tool-use
+    exomonad hook pre-tool-use
          ↓
     Load WASM via config (role field)
          ↓
@@ -203,7 +203,7 @@ Claude Code hook JSON (stdin)
 ```
 Claude Code MCP request
          ↓
-    exomonad-sidecar mcp-stdio
+    exomonad mcp-stdio
          ↓
     Load WASM via config (role field)
          ↓

@@ -1,0 +1,179 @@
+# Task: Audit Gemini CLI Integration Against Official Docs
+
+## Goal
+
+Walk every Gemini integration point in the codebase. Compare each against the official Gemini CLI documentation. Fix mismatches. Add inline reference links as comments so future developers can trace decisions back to authoritative sources.
+
+## Reference Documentation
+
+These are the canonical sources. Open and read each one:
+
+- **Hooks overview**: https://geminicli.com/docs/hooks/
+- **Hooks reference (schemas, exit codes)**: https://geminicli.com/docs/hooks/reference/
+- **Writing hooks**: https://geminicli.com/docs/hooks/writing-hooks/
+- **Best practices**: https://geminicli.com/docs/hooks/best-practices/
+- **Configuration**: https://geminicli.com/docs/get-started/configuration/
+- **GitHub source**: https://github.com/google-gemini/gemini-cli
+
+## Integration Points to Audit
+
+### 1. Hook Settings Generation
+
+**File:** `rust/exomonad-runtime/src/services/agent_control.rs` (lines ~1106-1136)
+
+When spawning a Gemini agent, `write_context_files()` generates `.gemini/settings.json` with an `AfterAgent` hook.
+
+**Verify against docs:**
+- Is the `settings.json` structure correct? (`hooks.AfterAgent[].hooks[]`)
+- Is `"type": "command"` the right hook type?
+- Is `"timeout": 30000` a valid field? What's the default?
+- Is `"name": "stop-check"` used correctly?
+- Does the `matcher` field apply to AfterAgent? Should we add one?
+
+**Also in:** `rust/effector/src/agent.rs` (lines ~231-252) — duplicate generation logic.
+
+**Add comments with links to:** hooks reference page, settings.json schema.
+
+### 2. AfterAgent Hook Input Schema
+
+**File:** `rust/exomonad-shared/src/protocol/hook.rs` — `HookInput` struct
+**File:** `rust/exomonad-shared/src/protocol/mod.rs` — `HookEventType` enum
+
+The Rust code reads stdin JSON when `exomonad hook after-agent` runs. Gemini CLI sends:
+```json
+{
+  "session_id": "...",
+  "transcript_path": "...",
+  "cwd": "...",
+  "hook_event_name": "AfterAgent",
+  "prompt": "...",
+  "prompt_response": "...",
+  "stop_hook_active": true/false
+}
+```
+
+**Verify against docs:**
+- Does `HookInput` have all the fields Gemini sends for AfterAgent?
+- Is `stop_hook_active` handled? (Prevents infinite retry loops)
+- Are there Gemini-specific fields we're missing?
+- Does our `HookEventType::AfterAgent` variant exist and parse correctly?
+
+**Add comments with links to:** AfterAgent input schema from hooks reference.
+
+### 3. AfterAgent Hook Output Schema
+
+**File:** `rust/exomonad-shared/src/protocol/hook.rs` — `GeminiStopHookOutput`, `GeminiStopDecision`
+
+Current output format:
+```json
+{"decision": "allow"}
+// or
+{"decision": "deny", "reason": "You have uncommitted changes..."}
+```
+
+**Verify against docs:**
+- Is `{"decision": "allow|deny", "reason": "..."}` the correct output format?
+- Are there other fields we should include? (`continue`, `systemMessage`, `suppressOutput`, `hookSpecificOutput`?)
+- What about `clearContext` in `hookSpecificOutput`?
+
+**Add comments with links to:** AfterAgent output schema from hooks reference.
+
+### 4. Exit Code Semantics
+
+**File:** `rust/exomonad-shared/src/commands/hook.rs` — `handle_hook()` function
+
+**Critical question:** Gemini CLI uses exit codes to determine behavior:
+- Exit 0: Success, parse stdout JSON
+- Exit 2: Block/retry — stderr becomes the correction prompt for AfterAgent
+- Other: Warning, CLI continues
+
+**Verify:** Does our code use exit code 2 when blocking? Or does it exit 0 with `{"decision": "deny"}`? If exit 0, does Gemini actually respect the JSON deny, or does it only retry on exit 2?
+
+This is the most likely source of a behavioral mismatch. Read the hooks reference carefully.
+
+**Add comments with links to:** exit code behavior table from hooks reference.
+
+### 5. `--prompt-interactive` CLI Flag
+
+**File:** `rust/exomonad-runtime/src/services/agent_control.rs` — prompt building / command generation
+**File:** `rust/zellij-gen/src/lib.rs` — KDL layout command
+
+Spawned Gemini agents are launched with `gemini --prompt-interactive '...'`.
+
+**Verify against docs:**
+- Is `--prompt-interactive` a real flag? (It is — starts with prompt, continues interactive)
+- Are there other relevant flags? (`--sandbox`, `--yolo`, `--no-extensions`?)
+- Is there a max prompt length?
+- How does shell escaping work for the prompt argument?
+
+**Add comments with links to:** CLI usage docs.
+
+### 6. Runtime Discrimination
+
+**File:** `rust/exomonad-shared/src/protocol/mod.rs` — `Runtime` enum (Claude | Gemini)
+**File:** `rust/exomonad-shared/src/protocol/hook.rs` — `InternalStopHookOutput::to_gemini()`, `to_stdout()`
+
+The Rust code translates internal stop hook decisions to runtime-specific formats before writing to stdout.
+
+**Verify:**
+- Is the Claude→Gemini translation correct?
+- `StopDecision::Block` → `GeminiStopDecision::Deny` — is "deny" the right string?
+- Is the fallback JSON (`{"decision":"allow"}`) correct?
+
+### 7. Stale Binary Name
+
+**Files with `exomonad-sidecar` fallback:**
+- `rust/exomonad-runtime/src/services/agent_control.rs:1040` — `.mcp.json` generation
+- `rust/exomonad-runtime/src/services/agent_control.rs:1330` — Gemini hook command (WRONG: falls back to `exomonad-sidecar`, should be `exomonad`)
+- `.gemini/settings.json:9` — hardcoded path `/Users/inannamalick/.cargo/bin/exomonad-sidecar`
+
+**Fix:** Update fallback strings to `"exomonad"`. Update `.gemini/settings.json` to use `exomonad` (not absolute path).
+
+### 8. Gemini MCP Support
+
+**File:** `.gemini/settings.json` (project root)
+**File:** `GEMINI.md`
+
+Gemini uses MCP tools via HTTP transport to control-server. But spawned Gemini agents get `.mcp.json` with stdio transport (`exomonad mcp-stdio`).
+
+**Verify:** Does Gemini CLI support stdio MCP servers via `.mcp.json`? Or does it only support the `settings.json` `mcpServers` format? Check the Gemini CLI configuration docs.
+
+## Comment Style
+
+When adding reference links, use this pattern:
+
+**Rust:**
+```rust
+// AfterAgent hook output format.
+// Ref: https://geminicli.com/docs/hooks/reference/#afteragent
+pub struct GeminiStopHookOutput {
+```
+
+**Haskell:**
+```haskell
+-- | Gemini CLI stop hook decision.
+-- Ref: https://geminicli.com/docs/hooks/reference/#afteragent
+data StopDecision = Allow | Block
+```
+
+Keep comments concise. One `Ref:` link per integration point. Don't add links to code that doesn't touch Gemini.
+
+## Verification
+
+```bash
+# Build and test after changes
+cd rust && cargo build && cargo test
+
+# Grep to confirm reference links were added
+grep -r "geminicli.com" --include="*.rs" --include="*.hs" rust/ haskell/
+
+# Verify no remaining stale binary names in Gemini paths
+grep -r "exomonad-sidecar" --include="*.json" .gemini/
+```
+
+## Out of Scope
+
+- Fixing the WASM boundary / exit 137 bug (that's `vendor-pdk` worktree)
+- Changing Claude hook integration
+- Adding new Gemini features
+- Rewriting the spawn flow (that's `spawn-audit` worktree)

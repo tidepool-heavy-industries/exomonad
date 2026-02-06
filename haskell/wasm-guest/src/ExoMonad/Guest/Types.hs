@@ -63,12 +63,16 @@ instance FromJSON HookEventType where
     other -> fail $ "Unknown hook event type: " <> T.unpack other
 
 -- | Input for a hook event.
+-- Ref: https://geminicli.com/docs/hooks/reference/#afteragent
 data HookInput = HookInput
   { hiSessionId :: Text,
     hiHookEventName :: HookEventType,
     hiToolName :: Maybe Text,
     hiToolInput :: Maybe Value,
-    hiStopHookActive :: Maybe Bool
+    hiStopHookActive :: Maybe Bool,
+    hiPrompt :: Maybe Text,
+    hiPromptResponse :: Maybe Text,
+    hiTimestamp :: Maybe Text
   }
   deriving (Show, Generic)
 
@@ -80,6 +84,9 @@ instance FromJSON HookInput where
       <*> v .:? "tool_name"
       <*> v .:? "tool_input"
       <*> v .:? "stop_hook_active"
+      <*> v .:? "prompt"
+      <*> v .:? "prompt_response"
+      <*> v .:? "timestamp"
 
 -- | Output from a hook handler.
 data HookOutput = HookOutput

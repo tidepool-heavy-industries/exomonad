@@ -90,6 +90,16 @@ pub struct HookInput {
     /// Session end reason (SessionEnd).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+
+    /// Agent's response text (AfterAgent).
+    /// Ref: https://geminicli.com/docs/hooks/reference/#afteragent
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_response: Option<String>,
+
+    /// Event timestamp.
+    /// Ref: https://geminicli.com/docs/hooks/reference/#afteragent
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<String>,
 }
 
 // ============================================================================
@@ -337,15 +347,24 @@ impl InternalStopHookOutput {
     }
 
     /// Translate to Gemini CLI format.
+    /// Ref: https://geminicli.com/docs/hooks/reference/#afteragent
     pub fn to_gemini(&self) -> GeminiStopHookOutput {
         match self.decision {
             StopDecision::Allow => GeminiStopHookOutput {
                 decision: GeminiStopDecision::Allow,
                 reason: None,
+                continue_: true,
+                clear_context: None,
+                system_message: None,
+                suppress_output: None,
             },
             StopDecision::Block => GeminiStopHookOutput {
                 decision: GeminiStopDecision::Deny, // Gemini uses "deny" for retry
                 reason: self.reason.clone(),
+                continue_: true,
+                clear_context: None,
+                system_message: None,
+                suppress_output: None,
             },
         }
     }
@@ -373,6 +392,7 @@ pub struct ClaudeStopHookOutput {
 }
 
 /// Gemini CLI stop hook decision.
+/// Ref: https://geminicli.com/docs/hooks/reference/#afteragent
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GeminiStopDecision {
@@ -383,6 +403,7 @@ pub enum GeminiStopDecision {
 }
 
 /// Gemini CLI stop hook output format.
+/// Ref: https://geminicli.com/docs/hooks/reference/#afteragent
 #[derive(Debug, Clone, Serialize)]
 pub struct GeminiStopHookOutput {
     /// Decision: allow or deny (deny triggers retry with reason as correction prompt)
@@ -390,6 +411,18 @@ pub struct GeminiStopHookOutput {
     /// Reason sent to agent as correction prompt (when decision = deny)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Whether to continue the session (false = exit)
+    #[serde(rename = "continue", default = "default_true")]
+    pub continue_: bool,
+    /// Whether to clear conversation context
+    #[serde(skip_serializing_if = "Option::is_none", rename = "clearContext")]
+    pub clear_context: Option<bool>,
+    /// System message to show to user
+    #[serde(skip_serializing_if = "Option::is_none", rename = "systemMessage")]
+    pub system_message: Option<String>,
+    /// Whether to suppress CLI output
+    #[serde(skip_serializing_if = "Option::is_none", rename = "suppressOutput")]
+    pub suppress_output: Option<bool>,
 }
 
 #[cfg(test)]

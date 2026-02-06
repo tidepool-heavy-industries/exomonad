@@ -230,9 +230,16 @@ pub fn setup(
 
             let settings_content = format!(
                 r#"{{
+  "mcpServers": {{
+    "exomonad": {{
+      "command": "{}",
+      "args": ["mcp-stdio"]
+    }}
+  }},
   "hooks": {{
     "AfterAgent": [
       {{
+        "matcher": "AfterAgent",
         "hooks": [
           {{
             "name": "stop-check",
@@ -245,11 +252,11 @@ pub fn setup(
     ]
   }}
 }}"#,
-                sidecar_path
+                sidecar_path, sidecar_path
             );
             std::fs::write(gemini_dir.join("settings.json"), &settings_content)
                 .context("Failed to write gemini settings")?;
-            eprintln!("[effector] Wrote .gemini/settings.json (AfterAgent hook)");
+            eprintln!("[effector] Wrote .gemini/settings.json (AfterAgent hook). Ref: https://geminicli.com/docs/hooks/reference/#afteragent");
             true
         }
         other => {
