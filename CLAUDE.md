@@ -305,7 +305,9 @@ default_role = "tl"  # or "dev", "pm", etc.
 project_dir = "."
 ```
 
-This will load `~/.exomonad/wasm/wasm-guest-tl.wasm` automatically.
+WASM plugins are searched in order:
+1. `.exomonad/wasm/wasm-guest-tl.wasm` (project-local, preferred)
+2. `~/.exomonad/wasm/wasm-guest-tl.wasm` (home directory fallback)
 
 **Config hierarchy:**
 - `config.toml` uses `default_role` (project-wide default)
@@ -321,17 +323,24 @@ just install-all-dev
 # Or install release build (optimized, slower compile)
 just install-all
 
-# Individual commands:
-just wasm tl   # Build and install TL WASM plugin
-just wasm dev  # Build and install dev WASM plugin
-cd rust && cargo build --release -p exomonad  # Build sidecar
+# Incremental WASM builds (faster, uses cabal's incremental compilation)
+just wasm-deps       # One-time: fetch WASM dependencies
+just wasm-dev tl     # Incremental build (~7s no-change rebuilds)
+just wasm-dev dev
+
+# Hermetic WASM builds (slower, fully reproducible via nix)
+just wasm tl
+just wasm dev
+
+# Rust sidecar only
+cd rust && cargo build -p exomonad
 ```
 
 **What `just install-all-dev` does:**
 1. Builds exomonad (debug mode, fast incremental builds)
 2. Copies binary to `~/.cargo/bin/exomonad`
 3. Builds both WASM plugins (dev and tl) using nix
-4. Installs to `~/.exomonad/wasm/wasm-guest-{dev,tl}.wasm`
+4. Installs to `.exomonad/wasm/wasm-guest-{dev,tl}.wasm`
 
 The sidecar auto-discovers WASM plugins based on `.exomonad/config.toml`'s `default_role` field (or `config.local.toml`'s `role` field if present).
 

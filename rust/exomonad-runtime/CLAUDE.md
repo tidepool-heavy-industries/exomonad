@@ -35,7 +35,7 @@ Results marshalled back through WASM → Haskell
 | AgentControlService | services/agent_control.rs | High-level agent lifecycle (spawn, cleanup, list) |
 | FileSystemService | services/filesystem.rs | File I/O (read, write) |
 | LogService | services/log.rs | Structured logging via tracing |
-| CommandExecutor | services/docker.rs | Command executor trait |
+| CommandExecutor | services/docker.rs | Command executor trait (file is a historical name) |
 | LocalExecutor | services/local.rs | Local executor (direct subprocess) |
 | Secrets | services/secrets.rs | Load secrets from ~/.exomonad/secrets |
 

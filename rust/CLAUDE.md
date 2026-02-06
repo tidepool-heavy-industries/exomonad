@@ -135,7 +135,7 @@ exomonad mcp --port 7432
 echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
 ```
 
-**Note:** WASM plugin path is auto-resolved from `.exomonad/config.local.toml`'s `wasm_path` field.
+**Note:** WASM plugin path is auto-resolved from config: `.exomonad/config.toml`'s `default_role` field (or `config.local.toml`'s `role` field for worktree overrides). Searches `.exomonad/wasm/` (project-local) first, then `~/.exomonad/wasm/`.
 
 ### Environment Variables
 | Variable | Used By | Purpose |
