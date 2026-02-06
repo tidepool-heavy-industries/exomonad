@@ -844,7 +844,7 @@ mod edge_case_tests {
     /// Test with various unicode characters including emoji and non-latin scripts.
     #[test]
     fn test_unicode_roundtrip() {
-        let unicode_content = "Hello 🌍! こんいちは! Привет! 🦀";
+        let unicode_content = "Hello 🌍! こんにちは! Привет! 🦀";
         let input = WriteFileInput {
             path: "unicode.txt".to_string(),
             content: unicode_content.to_string(),
@@ -882,7 +882,7 @@ mod edge_case_tests {
     /// Test error propagation for missing required fields.
     #[test]
     fn test_missing_required_field_error() {
-        let json = r#"{"owner": "anthropics"}"#; // repo is missing
+        let json = r#"{"owner": "anthropics"}"#; // name field is missing
         let result: Result<Repo, _> = serde_json::from_str(json);
         assert!(result.is_err());
     }
