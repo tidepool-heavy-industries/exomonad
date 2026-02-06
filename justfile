@@ -294,6 +294,11 @@ install-all:
     cp rust/target/release/exomonad ~/.cargo/bin/
     cp rust/exomonad-plugin/target/wasm32-wasip1/release/exomonad-plugin.wasm ~/.config/zellij/plugins/
     cp rust/exomonad-coordinator/target/wasm32-wasip1/release/exomonad-coordinator.wasm ~/.config/zellij/plugins/
+    @# macOS: remove quarantine and ad-hoc sign to avoid sandbox/Gatekeeper issues
+    @if [ "$(uname)" = "Darwin" ]; then \
+        xattr -d com.apple.quarantine ~/.cargo/bin/exomonad 2>/dev/null || true; \
+        codesign -s - -f ~/.cargo/bin/exomonad 2>/dev/null || true; \
+    fi
     @echo ">>> [5/5] Building and installing WASM plugins..."
     @just wasm-all
     @echo ">>> Done!"
@@ -318,6 +323,11 @@ install-all-dev:
     cp rust/target/debug/exomonad ~/.cargo/bin/
     cp rust/exomonad-plugin/target/wasm32-wasip1/debug/exomonad-plugin.wasm ~/.config/zellij/plugins/
     cp rust/exomonad-coordinator/target/wasm32-wasip1/debug/exomonad-coordinator.wasm ~/.config/zellij/plugins/
+    @# macOS: remove quarantine and ad-hoc sign to avoid sandbox/Gatekeeper issues
+    @if [ "$(uname)" = "Darwin" ]; then \
+        xattr -d com.apple.quarantine ~/.cargo/bin/exomonad 2>/dev/null || true; \
+        codesign -s - -f ~/.cargo/bin/exomonad 2>/dev/null || true; \
+    fi
     @echo ">>> [5/5] Building and installing Haskell WASM plugins..."
     @just wasm-all
     @echo ">>> Done!"
