@@ -16,8 +16,8 @@ pub enum ConfigError {
     #[error("project directory is not a directory: {path}")]
     ProjectDirNotDirectory { path: PathBuf },
 
-    #[error("HOME environment variable not set")]
-    HomeNotSet,
+    #[error("WASM plugin not found: {path} (did you run `just wasm-dev {role}`?)")]
+    WasmNotFound { path: PathBuf, role: String },
 
     #[error("WASM plugin validation failed: {0}")]
     WasmValidation(#[from] PathError),
@@ -147,18 +147,16 @@ impl Config {
 
         let local_wasm_dir = PathBuf::from(".exomonad/wasm");
         let wasm_name = format!("wasm-guest-{}.wasm", self.role);
+        let path = local_wasm_dir.join(&wasm_name);
 
-        if local_wasm_dir.exists() {
-            let path = local_wasm_dir.join(&wasm_name);
-            if path.exists() {
-                return Ok(path);
-            }
+        if path.exists() {
+            Ok(path)
+        } else {
+            Err(ConfigError::WasmNotFound {
+                path,
+                role: format!("{}", self.role),
+            })
         }
-
-        let home = std::env::var("HOME").map_err(|_| ConfigError::HomeNotSet)?;
-        Ok(PathBuf::from(home)
-            .join(".exomonad/wasm")
-            .join(wasm_name))
     }
 }
 
@@ -316,8 +314,11 @@ mod tests {
         };
         assert!(err.to_string().contains("/test"));
 
-        let err = ConfigError::HomeNotSet;
-        assert!(err.to_string().contains("HOME"));
+        let err = ConfigError::WasmNotFound {
+            path: PathBuf::from(".exomonad/wasm/wasm-guest-tl.wasm"),
+            role: "tl".to_string(),
+        };
+        assert!(err.to_string().contains("wasm-guest-tl.wasm"));
 
         let err = ConfigError::MissingField {
             field: "role".to_string(),

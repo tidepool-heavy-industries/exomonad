@@ -14,7 +14,7 @@ This document details the configuration files, filesystem paths, and loading mec
 *   **Loaded By:** `rust/exomonad/src/config.rs`
 *   **Schema:**
     ```toml
-    # Role determines the WASM plugin: ~/.exomonad/wasm/wasm-guest-{role}.wasm
+    # Role determines the WASM plugin: .exomonad/wasm/wasm-guest-{role}.wasm
     role = "dev" | "tl" | "pm" 
 
     # Base project directory for git operations (default: ".")
@@ -23,7 +23,7 @@ This document details the configuration files, filesystem paths, and loading mec
 *   **Validation:**
     *   Checks if `project_dir` exists and is a directory.
     *   Warns if `project_dir` is not a git repository.
-    *   Validates that the corresponding WASM plugin exists at `~/.exomonad/wasm/`.
+    *   Validates that the corresponding WASM plugin exists at `.exomonad/wasm/`.
 
 ### 1.2 Secrets (`~/.exomonad/secrets`)
 
@@ -123,7 +123,7 @@ Located in the user's home directory.
 
 ### 4.3 Hardcoded Paths to Configurable
 *   The default worktree directory `.exomonad/worktrees` is hardcoded in `agent_control.rs` (though customizable via API).
-*   The WASM directory `~/.exomonad/wasm` is hardcoded in `config.rs`.
+*   The WASM directory `.exomonad/wasm` is hardcoded in `config.rs`.
 
 ### 4.4 Recommendations
 1.  **Implement Permission Check:** Add a check in `secrets.rs` to warn or fail if `~/.exomonad/secrets` is world-readable.

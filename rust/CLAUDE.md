@@ -40,7 +40,7 @@ Claude Code (hook or MCP call)
 Human in Zellij session
     └── Claude Code (main tab, role=tl)
             ├── MCP server: exomonad mcp-stdio
-            ├── WASM: ~/.exomonad/wasm/wasm-guest-tl.wasm (loaded via config.local.toml)
+            ├── WASM: .exomonad/wasm/wasm-guest-tl.wasm (loaded via config)
             └── spawn_agents creates:
                 ├── Tab gh-433 (worktree, role=dev, auto-starts Claude)
                 ├── Tab gh-456 (worktree, role=dev, auto-starts Claude)
@@ -135,7 +135,7 @@ exomonad mcp --port 7432
 echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
 ```
 
-**Note:** WASM plugin path is auto-resolved from config: `.exomonad/config.toml`'s `default_role` field (or `config.local.toml`'s `role` field for worktree overrides). Searches `.exomonad/wasm/` (project-local) first, then `~/.exomonad/wasm/`.
+**Note:** WASM plugin path is auto-resolved from config: `.exomonad/config.toml`'s `default_role` field (or `config.local.toml`'s `role` field for worktree overrides). WASM is loaded from `.exomonad/wasm/wasm-guest-{role}.wasm`.
 
 ### Environment Variables
 | Variable | Used By | Purpose |

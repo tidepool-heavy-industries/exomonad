@@ -305,9 +305,7 @@ default_role = "tl"  # or "dev", "pm", etc.
 project_dir = "."
 ```
 
-WASM plugins are searched in order:
-1. `.exomonad/wasm/wasm-guest-tl.wasm` (project-local, preferred)
-2. `~/.exomonad/wasm/wasm-guest-tl.wasm` (home directory fallback)
+WASM plugins are loaded from project-local `.exomonad/wasm/wasm-guest-{role}.wasm`.
 
 **Config hierarchy:**
 - `config.toml` uses `default_role` (project-wide default)

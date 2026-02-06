@@ -302,7 +302,7 @@ install-all:
     @ls -lh ~/.cargo/bin/exomonad
     @ls -lh ~/.config/zellij/plugins/exomonad-plugin.wasm
     @ls -lh ~/.config/zellij/plugins/exomonad-coordinator.wasm
-    @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
+    @ls -lh .exomonad/wasm/wasm-guest-*.wasm
 
 # Install everything (fast dev build)
 install-all-dev:
@@ -326,7 +326,7 @@ install-all-dev:
     @ls -lh ~/.cargo/bin/exomonad
     @ls -lh ~/.config/zellij/plugins/exomonad-plugin.wasm
     @ls -lh ~/.config/zellij/plugins/exomonad-coordinator.wasm
-    @ls -lh ~/.exomonad/wasm/wasm-guest-*.wasm
+    @ls -lh .exomonad/wasm/wasm-guest-*.wasm
 
 # Clean build artifacts
 clean:

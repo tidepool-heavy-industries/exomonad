@@ -37,7 +37,7 @@ Claude Code → stdio → exomonad mcp-stdio → WASM handle_mcp_call → Result
 The sidecar auto-discovers WASM based on `.exomonad/config.toml`:
 
 ```bash
-# Config file specifies role, resolves .exomonad/wasm/wasm-guest-{role}.wasm (local) or ~/.exomonad/wasm/ (fallback)
+# Config file specifies role, resolves .exomonad/wasm/wasm-guest-{role}.wasm
 exomonad hook pre-tool-use
 exomonad mcp-stdio
 ```
@@ -50,7 +50,7 @@ default_role = "tl"
 project_dir = "."
 ```
 
-This will load `.exomonad/wasm/wasm-guest-tl.wasm` (project-local) or `~/.exomonad/wasm/wasm-guest-tl.wasm` (fallback).
+This will load `.exomonad/wasm/wasm-guest-tl.wasm`.
 
 **Config hierarchy:**
 - `config.toml` uses `default_role` (project-wide default)

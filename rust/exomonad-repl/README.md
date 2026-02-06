@@ -5,7 +5,7 @@ Interactive TUI for testing MCP tools without needing a full Claude session.
 ## Usage
 
 ```bash
-cargo run -p exomonad-repl -- --wasm ~/.exomonad/wasm/wasm-guest-dev.wasm
+cargo run -p exomonad-repl -- --wasm .exomonad/wasm/wasm-guest-dev.wasm
 ```
 
 ## Keybindings
