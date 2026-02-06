@@ -20,7 +20,7 @@ use super::zellij_events;
 // Types
 // ============================================================================
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct WaitForCopilotReviewInput {
     pub pr_number: u64,
     #[serde(default = "default_timeout")]
@@ -39,7 +39,7 @@ fn default_poll_interval() -> u64 {
     30
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CopilotReviewOutput {
     pub status: String,
     pub comments: Vec<CopilotComment>,
@@ -47,7 +47,7 @@ pub struct CopilotReviewOutput {
 
 impl FFIBoundary for CopilotReviewOutput {}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CopilotComment {
     pub path: String,
     pub line: Option<u64>,

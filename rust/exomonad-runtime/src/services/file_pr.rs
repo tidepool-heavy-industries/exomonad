@@ -20,7 +20,7 @@ use super::zellij_events;
 // Types
 // ============================================================================
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct FilePRInput {
     pub title: String,
     pub body: String,
@@ -28,7 +28,7 @@ pub struct FilePRInput {
 
 impl FFIBoundary for FilePRInput {}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FilePROutput {
     pub pr_url: String,
     pub pr_number: u64,

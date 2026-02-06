@@ -257,23 +257,23 @@ pub fn parse_github_url(url: &str) -> Option<(String, String)> {
 
 // Host Function Types
 
-#[derive(Deserialize, Serialize)]
-struct GitHostInput {
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct GitHostInput {
     #[serde(rename = "workingDir")]
-    working_dir: String,
+    pub working_dir: String,
     #[serde(rename = "containerId")]
-    container_id: String,
+    pub container_id: String,
 }
 
 impl FFIBoundary for GitHostInput {}
 
-#[derive(Deserialize, Serialize)]
-struct GitLogInput {
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct GitLogInput {
     #[serde(rename = "workingDir")]
-    working_dir: String,
+    pub working_dir: String,
     #[serde(rename = "containerId")]
-    container_id: String,
-    limit: u32,
+    pub container_id: String,
+    pub limit: u32,
 }
 
 impl FFIBoundary for GitLogInput {}
