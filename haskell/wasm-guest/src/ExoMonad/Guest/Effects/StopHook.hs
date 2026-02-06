@@ -251,10 +251,16 @@ checkUnpushedCommits hostInput = do
           if unpushedCount > 0
             then
               let b = branch repoInfo
+                  commitWord =
+                    if unpushedCount == 1
+                      then "commit"
+                      else "commits"
                   msg =
                     "You have "
                       <> T.pack (show unpushedCount)
-                      <> " unpushed commit(s) on branch '"
+                      <> " unpushed "
+                      <> commitWord
+                      <> " on branch '"
                       <> b
                       <> "'.\n"
                       <> "Push them to GitHub with:\n"
