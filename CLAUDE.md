@@ -98,7 +98,7 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 │   ├── protocol/CLAUDE.md      ← Wire formats
 │   └── tools/CLAUDE.md         ← Dev tools (ghci-oracle, sleeptime, training-generator)
 ├── rust/CLAUDE.md             ← Rust workspace overview (sidecar, runtime, services)
-│   ├── exomonad-sidecar/CLAUDE.md  ← MCP server + hook handler (WASM host)
+│   ├── exomonad/CLAUDE.md  ← MCP server + hook handler (WASM host)
 │   ├── exomonad-runtime/CLAUDE.md  ← WASM plugin loading + host functions
 │   ├── exomonad-shared/CLAUDE.md   ← Shared types and protocols
 │   ├── exomonad-services/CLAUDE.md ← External service clients (Anthropic, GitHub, etc.)
@@ -113,7 +113,7 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 
 | I want to... | Read this |
 |--------------|-----------|
-| Understand MCP tool architecture | `rust/exomonad-sidecar/CLAUDE.md` |
+| Understand MCP tool architecture | `rust/exomonad/CLAUDE.md` |
 | Work on WASM host functions | `rust/exomonad-runtime/CLAUDE.md` |
 | Understand shared protocol types | `rust/exomonad-shared/CLAUDE.md` |
 | Work with external service clients | `rust/exomonad-services/CLAUDE.md` |
@@ -239,7 +239,7 @@ Human-driven Claude Code sessions augmented with ExoMonad. **Not headless automa
 
 ```
 Human in Zellij session
-    └── Claude Code + exomonad-sidecar (Rust + Haskell WASM)
+    └── Claude Code + exomonad (Rust + Haskell WASM)
             ├── MCP tools via WASM (git_branch, spawn_agents, etc.)
             └── Spawn agents:
                 ├── worktree: ./agents/issue-123
@@ -254,7 +254,7 @@ Human in Zellij session
 ```
 1. User asks question in Claude Code
 2. Claude plans to call MCP tool (e.g., spawn_agents, git_branch)
-3. Claude Code sends request to exomonad-sidecar (stdio)
+3. Claude Code sends request to exomonad (stdio)
 4. Rust calls WASM handle_mcp_call
 5. Haskell dispatches to tool handler
 6. Handler yields effects (GitGetBranch, SpawnAgent, etc.)
@@ -266,7 +266,7 @@ Human in Zellij session
 ```
 1. Claude Code wants to call Write tool
 2. Generates hook JSON on stdin
-3. exomonad-sidecar hook pre-tool-use reads stdin
+3. exomonad hook pre-tool-use reads stdin
 4. Calls WASM handle_pre_tool_use
 5. Haskell logic decides allow/deny
 6. Returns HookOutput to stdout
@@ -522,6 +522,6 @@ withLSPSession "/path/to/project" $ \session -> do
 ## References
 
 - [haskell/dsl/core/CLAUDE.md](haskell/dsl/core/CLAUDE.md) - Graph DSL reference
-- [rust/exomonad-sidecar/CLAUDE.md](rust/exomonad-sidecar/CLAUDE.md) - MCP server + WASM host
+- [rust/exomonad/CLAUDE.md](rust/exomonad/CLAUDE.md) - MCP server + WASM host
 - [freer-simple](https://hackage.haskell.org/package/freer-simple) - Effect system
 - [Anthropic tool use](https://docs.anthropic.com/en/docs/tool-use)

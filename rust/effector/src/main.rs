@@ -82,7 +82,7 @@ enum AgentAction {
         role: String,
         #[arg(long, default_value = "claude")]
         agent_type: String,
-        #[arg(long, default_value = "exomonad-sidecar")]
+        #[arg(long, default_value = "exomonad")]
         sidecar_path: String,
     },
     /// Remove agent worktree and prune references.
