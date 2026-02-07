@@ -74,6 +74,13 @@ library wasm-guest-internal
         ExoMonad.Guest.Effects.AgentControl
         ExoMonad.Guest.Effects.FileSystem
         ExoMonad.Guest.Effects.StopHook
+        -- Extensible effects (for external consumers)
+        ExoMonad.Guest.Effect
+        -- Effect typeclass and namespace-based effects
+        ExoMonad.Effect.Class
+        ExoMonad.Effects.Git
+        ExoMonad.Effects.GitHub
+        ExoMonad.Effects.Log
         ExoMonad.Guest.HostCall
         ExoMonad.Guest.FFI
         -- Types
@@ -81,7 +88,9 @@ library wasm-guest-internal
         ExoMonad.Types
     -- Additional dependencies (shared stanza provides common deps)
     build-depends:
-        exomonad-pdk
+        exomonad-pdk,
+        exomonad-proto,
+        proto3-runtime
 
     -- Polysemy plugin doesn't work with WASM cross-compilation
     if !arch(wasm32)

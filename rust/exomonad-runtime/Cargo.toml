@@ -21,12 +21,19 @@ dirs = "5.0"
 exomonad-shared = { path = "../exomonad-shared" }
 exomonad-services = { path = "../exomonad-services" }
 exomonad-ui-protocol = { path = "../exomonad-ui-protocol" }
+exomonad-proto = { path = "../exomonad-proto", features = ["effects"] }
+prost = { workspace = true }
 zellij-gen = { path = "../zellij-gen" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 wiremock = "0.5"
 proptest = "1.4"
+
+[build-dependencies]
+prost-build = "0.13"
+prost-types = "0.13"
+prost = "0.13"
 
 [lib]
 path = "src/lib.rs"

@@ -1,0 +1,24 @@
+syntax = "proto3";
+package exomonad.effects;
+
+import "effects/effect_error.proto";
+
+// Envelope for all effect requests across the WASM boundary.
+// Replaces per-effect host functions with a single yield_effect entry point.
+message EffectEnvelope {
+  // Fully-qualified effect type (e.g., "git.get_branch", "github.list_issues").
+  string effect_type = 1;
+  // Protobuf-encoded request payload (decoded by the handler).
+  bytes payload = 2;
+}
+
+// Response envelope for effect results.
+// Uses oneof for success/error discrimination.
+message EffectResponse {
+  oneof result {
+    // Protobuf-encoded response payload.
+    bytes payload = 1;
+    // Structured error.
+    EffectError error = 2;
+  }
+}

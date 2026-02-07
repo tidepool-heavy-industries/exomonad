@@ -16,7 +16,7 @@ impl McpClient {
                 .context("Failed to validate services")?,
         );
 
-        let plugin = PluginManager::new(wasm_path, services.clone())
+        let plugin = PluginManager::new(wasm_path, services.clone(), None)
             .await
             .context("Failed to load WASM plugin")?;
 

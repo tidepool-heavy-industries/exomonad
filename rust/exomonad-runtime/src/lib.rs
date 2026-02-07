@@ -80,9 +80,9 @@
 //! #[async_trait]
 //! impl EffectHandler for MyHandler {
 //!     fn namespace(&self) -> &str { "my_domain" }
-//!     async fn handle(&self, effect_type: &str, payload: Value) -> EffectResult<Value> {
-//!         // Handle effects like "my_domain.do_thing"
-//!         Ok(serde_json::json!({"done": true}))
+//!     async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
+//!         // Decode proto request, handle, encode proto response
+//!         todo!()
 //!     }
 //! }
 //!
@@ -95,11 +95,13 @@
 
 pub mod common;
 pub mod effects;
+pub mod handlers;
 pub mod plugin_manager;
 pub mod services;
 
 pub use common::{ErrorCode, ErrorContext, HostError, HostResult};
 pub use effects::{EffectError, EffectHandler, EffectRegistry, EffectResult};
+pub use handlers::{GitHandler, GitHubHandler, LogHandler};
 pub use plugin_manager::PluginManager;
 pub use services::Services;
 
@@ -137,6 +139,44 @@ impl RuntimeBuilder {
             wasm_path: None,
             services: None,
         }
+    }
+
+    /// Register builtin effect handlers (git, github, log).
+    ///
+    /// This registers handlers for the core namespaces:
+    /// - `git.*` - Git operations (get_branch, get_status, etc.)
+    /// - `github.*` - GitHub API (list_issues, create_pr, etc.)
+    /// - `log.*` - Logging (info, error, emit_event)
+    ///
+    /// # Arguments
+    ///
+    /// * `services` - Validated services for the handlers to use
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let services = Arc::new(Services::new().validate()?);
+    /// let runtime = RuntimeBuilder::new()
+    ///     .with_builtin_handlers(&services)
+    ///     .with_wasm_path("plugin.wasm")
+    ///     .build()
+    ///     .await?;
+    /// ```
+    pub fn with_builtin_handlers(mut self, services: &Arc<services::ValidatedServices>) -> Self {
+        // Register git handler
+        self.registry
+            .register_owned(handlers::GitHandler::new(services.git().clone()));
+
+        // Register github handler if available
+        if let Some(github) = services.github() {
+            self.registry
+                .register_owned(handlers::GitHubHandler::new(github.clone()));
+        }
+
+        // Register log handler
+        self.registry.register_owned(handlers::LogHandler::new());
+
+        self
     }
 
     /// Register a custom effect handler.
@@ -265,12 +305,12 @@ impl Runtime {
 
     /// Dispatch an effect to the appropriate handler.
     ///
-    /// This is a convenience method that delegates to the registry.
+    /// Payload and response are protobuf-encoded bytes.
     pub async fn dispatch_effect(
         &self,
         effect_type: &str,
-        payload: serde_json::Value,
-    ) -> EffectResult<serde_json::Value> {
+        payload: &[u8],
+    ) -> EffectResult<Vec<u8>> {
         self.registry.dispatch(effect_type, payload).await
     }
 }

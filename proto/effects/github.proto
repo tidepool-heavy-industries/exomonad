@@ -1,0 +1,236 @@
+syntax = "proto3";
+package exomonad.effects.github;
+
+// GitHub effects for repository, issue, and PR operations.
+
+// ============================================================================
+// Common types
+// ============================================================================
+
+// Issue or PR state filter.
+enum IssueState {
+  ISSUE_STATE_UNSPECIFIED = 0;
+  ISSUE_STATE_OPEN = 1;
+  ISSUE_STATE_CLOSED = 2;
+  ISSUE_STATE_ALL = 3;
+}
+
+// Pull request review state.
+enum ReviewState {
+  REVIEW_STATE_UNSPECIFIED = 0;
+  REVIEW_STATE_APPROVED = 1;
+  REVIEW_STATE_CHANGES_REQUESTED = 2;
+  REVIEW_STATE_COMMENTED = 3;
+  REVIEW_STATE_PENDING = 4;
+}
+
+// GitHub user info.
+message User {
+  string login = 1;
+  int64 id = 2;
+  string avatar_url = 3;
+}
+
+// GitHub label.
+message Label {
+  string name = 1;
+  string color = 2;
+  string description = 3;
+}
+
+// ============================================================================
+// ListIssues - List repository issues
+// ============================================================================
+
+message ListIssuesRequest {
+  // Repository owner.
+  string owner = 1;
+  // Repository name.
+  string repo = 2;
+  // State filter (default: open).
+  IssueState state = 3;
+  // Filter by labels (comma-separated).
+  repeated string labels = 4;
+  // Maximum number to return (default: 30).
+  int32 limit = 5;
+}
+
+message Issue {
+  int32 number = 1;
+  string title = 2;
+  string body = 3;
+  IssueState state = 4;
+  User author = 5;
+  repeated Label labels = 6;
+  int64 created_at = 7;
+  int64 updated_at = 8;
+  int32 comments_count = 9;
+}
+
+message ListIssuesResponse {
+  repeated Issue issues = 1;
+}
+
+// ============================================================================
+// GetIssue - Get single issue with details
+// ============================================================================
+
+message GetIssueRequest {
+  string owner = 1;
+  string repo = 2;
+  int32 number = 3;
+  // Include issue comments.
+  bool include_comments = 4;
+}
+
+message IssueComment {
+  int64 id = 1;
+  User author = 2;
+  string body = 3;
+  int64 created_at = 4;
+}
+
+message GetIssueResponse {
+  Issue issue = 1;
+  repeated IssueComment comments = 2;
+}
+
+// ============================================================================
+// ListPullRequests - List repository PRs
+// ============================================================================
+
+message ListPullRequestsRequest {
+  string owner = 1;
+  string repo = 2;
+  // State filter (default: open).
+  IssueState state = 3;
+  // Maximum number to return (default: 30).
+  int32 limit = 4;
+}
+
+message PullRequest {
+  int32 number = 1;
+  string title = 2;
+  string body = 3;
+  IssueState state = 4;
+  User author = 5;
+  // Source branch.
+  string head_ref = 6;
+  // Target branch.
+  string base_ref = 7;
+  // True if PR is merged.
+  bool merged = 8;
+  // True if PR is a draft.
+  bool draft = 9;
+  repeated Label labels = 10;
+  int64 created_at = 11;
+  int64 updated_at = 12;
+}
+
+message ListPullRequestsResponse {
+  repeated PullRequest pull_requests = 1;
+}
+
+// ============================================================================
+// GetPullRequest - Get single PR with details
+// ============================================================================
+
+message GetPullRequestRequest {
+  string owner = 1;
+  string repo = 2;
+  int32 number = 3;
+  // Include PR review comments.
+  bool include_reviews = 4;
+}
+
+message Review {
+  int64 id = 1;
+  User author = 2;
+  ReviewState state = 3;
+  string body = 4;
+  int64 submitted_at = 5;
+}
+
+message GetPullRequestResponse {
+  PullRequest pull_request = 1;
+  repeated Review reviews = 2;
+}
+
+// ============================================================================
+// GetPullRequestForBranch - Find PR for a branch
+// ============================================================================
+
+message GetPullRequestForBranchRequest {
+  string owner = 1;
+  string repo = 2;
+  string branch = 3;
+}
+
+message GetPullRequestForBranchResponse {
+  // Null if no PR exists for the branch.
+  PullRequest pull_request = 1;
+  bool found = 2;
+}
+
+// ============================================================================
+// CreatePullRequest - Create a new PR
+// ============================================================================
+
+message CreatePullRequestRequest {
+  string owner = 1;
+  string repo = 2;
+  string title = 3;
+  string body = 4;
+  // Source branch.
+  string head = 5;
+  // Target branch (default: main).
+  string base = 6;
+  // Create as draft.
+  bool draft = 7;
+}
+
+message CreatePullRequestResponse {
+  PullRequest pull_request = 1;
+  string url = 2;
+}
+
+// ============================================================================
+// GetPullRequestReviewComments - Get inline review comments
+// ============================================================================
+
+message GetPullRequestReviewCommentsRequest {
+  string owner = 1;
+  string repo = 2;
+  int32 number = 3;
+}
+
+message ReviewComment {
+  int64 id = 1;
+  User author = 2;
+  string body = 3;
+  // File path the comment is on.
+  string path = 4;
+  // Line number in the diff.
+  int32 line = 5;
+  // Side of diff (LEFT or RIGHT).
+  string side = 6;
+  int64 created_at = 7;
+}
+
+message GetPullRequestReviewCommentsResponse {
+  repeated ReviewComment comments = 1;
+}
+
+// ============================================================================
+// Service definition
+// ============================================================================
+
+service GitHubEffects {
+  rpc ListIssues(ListIssuesRequest) returns (ListIssuesResponse);
+  rpc GetIssue(GetIssueRequest) returns (GetIssueResponse);
+  rpc ListPullRequests(ListPullRequestsRequest) returns (ListPullRequestsResponse);
+  rpc GetPullRequest(GetPullRequestRequest) returns (GetPullRequestResponse);
+  rpc GetPullRequestForBranch(GetPullRequestForBranchRequest) returns (GetPullRequestForBranchResponse);
+  rpc CreatePullRequest(CreatePullRequestRequest) returns (CreatePullRequestResponse);
+  rpc GetPullRequestReviewComments(GetPullRequestReviewCommentsRequest) returns (GetPullRequestReviewCommentsResponse);
+}

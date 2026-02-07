@@ -60,7 +60,7 @@ pub struct Commit {
     /// Author name and email (e.g., "John Doe <john@example.com>").
     pub author: String,
 
-    /// Commit date in ISO 8601 format.
+    /// Commit date as Unix timestamp (seconds since epoch).
     pub date: String,
 }
 
@@ -172,7 +172,7 @@ impl GitService {
         let output = self
             .exec_git(
                 dir,
-                &["log", &format!("-n{}", n), &format!("--format={}", format)],
+                &["log", &format!("-n{}", n), &format!("--format={}", format), "--date=unix"],
             )
             .await?;
 

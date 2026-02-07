@@ -9,14 +9,21 @@ haskell/proto/
 ├── exomonad-proto.cabal
 ├── CLAUDE.md
 └── src/
-    └── Proto/
-        ├── Compat.hs           # Wire format compatibility layer
-        └── Exomonad/
-            ├── Ffi.hs          # Generated from ffi.proto
-            ├── Common.hs       # Generated from common.proto
-            ├── Hook.hs         # Generated from hook.proto
-            ├── Agent.hs        # Generated from agent.proto
-            └── Popup.hs        # Generated from popup.proto
+    ├── ExoMonad/
+    │   ├── Compat.hs       # Wire format compatibility layer (JSON)
+    │   ├── Ffi.hs          # Generated from ffi.proto
+    │   ├── Common.hs       # Generated from common.proto
+    │   ├── Hook.hs         # Generated from hook.proto
+    │   ├── Agent.hs        # Generated from agent.proto
+    │   └── Popup.hs        # Generated from popup.proto
+    └── Effects/
+        ├── EffectError.hs   # Generated from effects/effect_error.proto
+        ├── Envelope.hs      # Generated from effects/envelope.proto
+        ├── Git.hs           # Generated from effects/git.proto
+        ├── Github.hs        # Generated from effects/github.proto
+        ├── Log.hs           # Generated from effects/log.proto
+        ├── Fs.hs            # Generated from effects/fs.proto
+        └── Agent.hs         # Generated from effects/agent.proto
 ```
 
 ## Code Generation
@@ -33,68 +40,56 @@ Generated files include:
 - `ToJSONPB`/`FromJSONPB` instances for JSON serialization
 - `Message` instances for protobuf binary encoding
 
-## Wire Format Compatibility
+Post-processing strips gRPC service code (not compatible with WASM) and handles macOS case-insensitive filesystem issues.
 
-proto3-suite uses SCREAMING_SNAKE_CASE for enum JSON values, but prost+serde uses snake_case. The `Proto.Compat` module provides conversion:
+## Two Wire Formats
 
-```haskell
-import Proto.Compat (toWireJSON, fromWireJSON)
+### Core Types (ExoMonad.*) — JSON
 
--- Encode for Rust consumption (converts to snake_case)
-toWireJSON :: ToJSONPB a => a -> ByteString
-
--- Decode from Rust (converts from snake_case)
-fromWireJSON :: FromJSONPB a => ByteString -> Either String a
-```
-
-### Enum Conversion
+Core FFI types use JSON via JSONPB. The `ExoMonad.Compat` module handles enum format conversion between proto3-suite (SCREAMING_SNAKE_CASE) and prost+serde (snake_case).
 
 ```haskell
-import Proto.Compat (protoToWire, wireToProto)
-
--- SCREAMING_SNAKE_CASE -> snake_case
-protoToWire "ERROR_CODE_NOT_FOUND" == "not_found"
-
--- snake_case -> SCREAMING_SNAKE_CASE (with prefix)
-wireToProto "ERROR_CODE" "not_found" == "ERROR_CODE_NOT_FOUND"
+import ExoMonad.Compat (toWireJSON, fromWireJSON)
 ```
+
+### Effect Types (Effects.*) — Protobuf Binary
+
+Effect types use native protobuf binary encoding via `Proto3.Suite.Class`:
+
+```haskell
+import Proto3.Suite.Class (toLazyByteString, fromByteString)
+
+-- Encode: Message a => a -> BL.ByteString
+let bytes = toLazyByteString request
+
+-- Decode: Message a => B.ByteString -> Either ParseError a
+case fromByteString bytes of
+  Right response -> ...
+  Left err -> ...
+```
+
+Effects are dispatched through `EffectEnvelope` (wraps request with effect_type string) and `EffectResponse` (wraps response or error). See `ExoMonad.Guest.Effect` for the encoding layer.
 
 ## WASM Integration
 
-This package is included in WASM builds via `cabal.project.wasm`:
+Included in WASM builds via `cabal.project.wasm`:
 
 ```cabal
 packages:
     haskell/proto
     haskell/wasm-guest
+    haskell/vendor/proto3-runtime
     ...
 ```
 
 Dependencies:
-- `proto3-suite` (runtime)
-- `proto3-wire` (binary encoding)
-- `aeson` (JSON integration)
-
-## Usage in wasm-guest
-
-```haskell
--- Import generated types
-import Proto.Exomonad.Ffi (ErrorCode(..), FfiError(..), ErrorContext(..))
-import Proto.Compat (toWireJSON)
-
--- Use with wire format conversion
-mkError :: Text -> ErrorCode -> ByteString
-mkError msg code = toWireJSON $ FfiError
-    { ffiErrorMessage = msg
-    , ffiErrorCode = code
-    , ffiErrorContext = Nothing
-    , ffiErrorSuggestion = Nothing
-    }
-```
+- `proto3-runtime` (vendored, provides Proto3.Suite.Class and JSONPB)
+- `proto3-wire` (protobuf wire encoding, from hackage)
+- `aeson` (JSON integration for core types)
 
 ## Module Reference
 
-### Proto.Exomonad.Ffi
+### ExoMonad.Ffi
 
 Core FFI types:
 - `ErrorCode` - Error classification enum
@@ -102,7 +97,7 @@ Core FFI types:
 - `FfiError` - Structured error message
 - `FfiResult` - Success/error envelope
 
-### Proto.Exomonad.Common
+### ExoMonad.Common
 
 Shared primitives:
 - `SessionId` - Session identifier
@@ -112,7 +107,7 @@ Shared primitives:
 - `FilePath`, `DirectoryPath` - Path wrappers
 - `IssueRef`, `PullRequestRef` - GitHub references
 
-### Proto.Exomonad.Hook
+### ExoMonad.Hook
 
 Claude Code hooks:
 - `HookType` - Hook event type enum
@@ -124,7 +119,7 @@ Claude Code hooks:
 - `SubagentStopInput/Output` - Subagent stop hook
 - `HookInput/Output` - Generic envelopes
 
-### Proto.Exomonad.Agent
+### ExoMonad.Agent
 
 Agent management:
 - `AgentType` - Claude/Gemini enum
@@ -134,7 +129,7 @@ Agent management:
 - `WorktreeInfo` - Git worktree state
 - Batch operations: `SpawnAgentsRequest`, `CleanupAgentsRequest`, etc.
 
-### Proto.Exomonad.Popup
+### ExoMonad.Popup
 
 UI popup protocol:
 - `PopupDefinition` - Dialog specification
@@ -142,13 +137,47 @@ UI popup protocol:
 - Component types: `TextInput`, `Checkbox`, `Button`, etc.
 - `FormSubmission`, `PopupResponse` - User interaction
 
-### Proto.Compat
+### ExoMonad.Compat
 
-Wire format compatibility:
+Wire format compatibility (JSON only):
 - `toWireJSON` - Encode with snake_case enums
 - `fromWireJSON` - Decode from snake_case
 - `protoToWire` - SCREAMING_SNAKE → snake_case
 - `wireToProto` - snake_case → SCREAMING_SNAKE
+
+### Effects.Envelope
+
+Binary wire envelope:
+- `EffectEnvelope` - `{ effectEnvelopeEffectType :: Text, effectEnvelopePayload :: ByteString }`
+- `EffectResponse` - `{ effectResponseResult :: Maybe EffectResponseResult }`
+- `EffectResponseResult` - `EffectResponseResultPayload ByteString | EffectResponseResultError EffectError`
+
+### Effects.EffectError
+
+Unified error type:
+- `EffectError` - `{ effectErrorKind :: Maybe EffectErrorKind }`
+- `EffectErrorKind` - Sum type: NotFound, InvalidInput, NetworkError, PermissionDenied, Timeout, Custom
+
+### Effects.Git
+
+Git operations (proto-generated request/response types):
+- `GetBranchRequest/Response`, `GetStatusRequest/Response`
+- `GetCommitsRequest/Response`, `HasUnpushedCommitsRequest/Response`
+- `GetRemoteUrlRequest/Response`, `GetRepoInfoRequest/Response`
+- `GetWorktreeRequest/Response`
+
+### Effects.Github
+
+GitHub API operations (proto-generated):
+- `ListIssuesRequest/Response`, `GetIssueRequest/Response`
+- `ListPullRequestsRequest/Response`, `GetPullRequestRequest/Response`
+- `GetPullRequestForBranchRequest/Response`, `CreatePullRequestRequest/Response`
+
+### Effects.Log
+
+Logging operations (proto-generated):
+- `InfoRequest`, `ErrorRequest`, `DebugRequest`, `WarnRequest` → `LogResponse`
+- `EmitEventRequest` → `EmitEventResponse`
 
 ## Build Commands
 
@@ -165,7 +194,7 @@ just proto-test
 
 ## Dependencies
 
-- `proto3-suite >= 0.9.4` - GHC 9.12 compatible
+- `proto3-runtime` (vendored, GHC 9.12 compatible subset of proto3-suite)
 - `proto3-wire` - Protobuf wire encoding
 - `aeson >= 2.0` - JSON integration
 - `text >= 2.0` - Text handling

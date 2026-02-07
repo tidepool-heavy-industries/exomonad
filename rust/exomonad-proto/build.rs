@@ -1,6 +1,21 @@
 use std::io::Result;
+use std::path::Path;
 
 fn main() -> Result<()> {
+    // ========================================================================
+    // Part 1: Core exomonad types (ffi, common, hook, agent, popup)
+    // ========================================================================
+    compile_core_protos()?;
+
+    // ========================================================================
+    // Part 2: Effect message types
+    // ========================================================================
+    compile_effect_protos()?;
+
+    Ok(())
+}
+
+fn compile_core_protos() -> Result<()> {
     let mut config = prost_build::Config::new();
 
     // Add serde derives for JSON compatibility
@@ -70,9 +85,6 @@ fn main() -> Result<()> {
         );
     }
 
-    // ========================================================================
-    // Compile all proto files
-    // ========================================================================
     // Collect all proto files that exist
     let proto_files: Vec<&str> = [
         "../../proto/exomonad/ffi.proto",
@@ -82,10 +94,39 @@ fn main() -> Result<()> {
         "../../proto/exomonad/popup.proto",
     ]
     .into_iter()
-    .filter(|path| std::path::Path::new(path).exists())
+    .filter(|path| Path::new(path).exists())
     .collect();
 
     config.compile_protos(&proto_files, &["../../proto/"])?;
+
+    Ok(())
+}
+
+fn compile_effect_protos() -> Result<()> {
+    let mut config = prost_build::Config::new();
+
+    // Effect types use protobuf binary encoding (not JSON).
+    // No serde derives needed.
+
+    // Map exomonad.common types to the already-generated core module
+    // to avoid re-generating them without serde derives.
+    config.extern_path(".exomonad.common", "crate::common");
+
+    // Collect effect proto files
+    let effect_proto_files: Vec<&str> = [
+        "../../proto/effects/effect_error.proto",
+        "../../proto/effects/envelope.proto",
+        "../../proto/effects/git.proto",
+        "../../proto/effects/github.proto",
+        "../../proto/effects/fs.proto",
+        "../../proto/effects/agent.proto",
+        "../../proto/effects/log.proto",
+    ]
+    .into_iter()
+    .filter(|path| Path::new(path).exists())
+    .collect();
+
+    config.compile_protos(&effect_proto_files, &["../../proto/", "../../proto/effects/"])?;
 
     Ok(())
 }

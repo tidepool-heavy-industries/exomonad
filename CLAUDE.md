@@ -86,6 +86,7 @@ Navigate to the right docs for your task:
 
 ```
 CLAUDE.md  ← YOU ARE HERE (project overview)
+├── proto/CLAUDE.md    ← Protocol buffers (FFI boundary types)
 ├── haskell/CLAUDE.md  ← Haskell package organization
 │   ├── dsl/core/CLAUDE.md      ← Graph DSL reference (START HERE for handlers)
 │   ├── dsl/teaching/CLAUDE.md  ← LLM-level teaching for FunctionGemma training
@@ -113,6 +114,7 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 
 | I want to... | Read this |
 |--------------|-----------|
+| Add FFI boundary types | `proto/CLAUDE.md` |
 | Understand MCP tool architecture | `rust/exomonad/CLAUDE.md` |
 | Work on WASM host functions | `rust/exomonad-runtime/CLAUDE.md` |
 | Understand shared protocol types | `rust/exomonad-shared/CLAUDE.md` |

@@ -4,11 +4,13 @@
 -- Usage: wasm32-wasi-cabal build --project-file=cabal.project.wasm <target>
 -- -------------------------------------------------------------------------
 
--- 1. Packages for WASM build (wasm-guest + vendored polysemy)
+-- 1. Packages for WASM build (wasm-guest + proto + vendored deps)
 packages:
     haskell/wasm-guest
+    haskell/proto
     haskell/vendor/polysemy
     haskell/vendor/exomonad-pdk
+    haskell/vendor/proto3-runtime
 
 -- Global settings for static-only build
 -- Note: 'shared: True' is REQUIRED for Template Haskell (GHC 9.12 WASM)

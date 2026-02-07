@@ -61,8 +61,8 @@ impl ratatui::backend::Backend for ZellijBackend {
         let mut current_mod: Modifier = Modifier::empty();
 
         for (x, y, cell) in content {
-            // Move cursor
-            write!(buffer, "\x1b[{};{}H", y + 1, x + 1).unwrap();
+            // Move cursor (write! to String is infallible)
+            let _ = write!(buffer, "\x1b[{};{}H", y + 1, x + 1);
 
             // Desired style for this cell
             let desired_fg = if cell.fg == Color::Reset {
@@ -85,39 +85,34 @@ impl ratatui::backend::Backend for ZellijBackend {
 
                 if desired_is_default {
                     // Return to default style
-                    write!(buffer, "\x1b[0m").unwrap();
+                    let _ = write!(buffer, "\x1b[0m");
                 } else {
                     if !current_is_default {
                         // Different non-default style: reset before applying new style
-                        // Optimizing this further would require complex diffing of ANSI codes,
-                        // so a hard reset is safer and simpler for now.
-                        // Note: This may cause flicker or incorrect rendering for complex
-                        // modifier transitions (e.g. BOLD -> ITALIC), but it's a trade-off
-                        // for code simplicity and safety in this custom backend.
-                        write!(buffer, "\x1b[0m").unwrap();
+                        let _ = write!(buffer, "\x1b[0m");
                     }
                     // Apply desired foreground/background colors
                     if let Some(fg) = desired_fg {
-                        write!(buffer, "{}", color_to_ansi(fg, false)).unwrap();
+                        let _ = write!(buffer, "{}", color_to_ansi(fg, false));
                     }
                     if let Some(bg) = desired_bg {
-                        write!(buffer, "{}", color_to_ansi(bg, true)).unwrap();
+                        let _ = write!(buffer, "{}", color_to_ansi(bg, true));
                     }
                     // Apply desired modifiers
                     if desired_mod.contains(Modifier::BOLD) {
-                        write!(buffer, "\x1b[1m").unwrap();
+                        let _ = write!(buffer, "\x1b[1m");
                     }
                     if desired_mod.contains(Modifier::UNDERLINED) {
-                        write!(buffer, "\x1b[4m").unwrap();
+                        let _ = write!(buffer, "\x1b[4m");
                     }
                     if desired_mod.contains(Modifier::REVERSED) {
-                        write!(buffer, "\x1b[7m").unwrap();
+                        let _ = write!(buffer, "\x1b[7m");
                     }
                     if desired_mod.contains(Modifier::DIM) {
-                        write!(buffer, "\x1b[2m").unwrap();
+                        let _ = write!(buffer, "\x1b[2m");
                     }
                     if desired_mod.contains(Modifier::ITALIC) {
-                        write!(buffer, "\x1b[3m").unwrap();
+                        let _ = write!(buffer, "\x1b[3m");
                     }
                 }
 
@@ -126,11 +121,11 @@ impl ratatui::backend::Backend for ZellijBackend {
                 current_mod = desired_mod;
             }
 
-            write!(buffer, "{}", cell.symbol()).unwrap();
+            let _ = write!(buffer, "{}", cell.symbol());
         }
 
         // Ensure we leave the terminal in a default style state after drawing.
-        write!(buffer, "\x1b[0m").unwrap();
+        let _ = write!(buffer, "\x1b[0m");
 
         use std::io::Write as IoWrite;
         std::io::stdout().write_all(buffer.as_bytes())?;
@@ -443,18 +438,10 @@ impl ZellijPlugin for ExoMonadPlugin {
                     .block(Block::default().borders(Borders::ALL).title("Events"));
                 f.render_widget(events_list, chunks[1]);
 
-                // Popup Overlay - Simple choice list
+                // Popup - Full pane rendering (plugin is shown via show_self(true) as dedicated floating pane)
                 if let Some(popup) = &self.active_popup {
-                    let popup_area = if area.width < 4 || area.height < 4 {
-                        area
-                    } else {
-                        Rect::new(
-                            area.width / 4,
-                            area.height / 4,
-                            area.width / 2,
-                            area.height / 2,
-                        )
-                    };
+                    // Use full area since this is a dedicated popup pane, not an overlay
+                    let popup_area = area;
 
                     f.render_widget(Clear, popup_area);
 

@@ -1,105 +1,62 @@
-//! Host function for WASM to yield effects to extension handlers.
+//! Host function for WASM to yield effects via protobuf binary encoding.
 //!
-//! This module provides `yield_effect`, the single entry point for WASM guests
-//! to invoke extension effects. Unlike builtin host functions (git_get_branch, etc.),
-//! this function routes to user-registered effect handlers based on namespace.
+//! The WASM guest sends an `EffectEnvelope` (protobuf) containing the effect type
+//! and payload bytes. The host dispatches to the appropriate handler and returns
+//! an `EffectResponse` (protobuf) with either payload bytes or an error.
 
 use super::{EffectError, EffectRegistry};
-use crate::common::{ErrorCode, FFIError, FFIResult};
+use exomonad_proto::effects::error as proto_error;
+use exomonad_proto::effects::{EffectEnvelope, EffectResponse};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
-use extism_convert::Json;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use prost::Message;
 use std::sync::Arc;
 
-/// Request structure for yield_effect host function.
-///
-/// The WASM guest serializes this to JSON and passes it to the host.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EffectRequest {
-    /// Full effect type including namespace (e.g., "egregore.emit_signal").
-    #[serde(rename = "$type")]
-    pub effect_type: String,
+/// Convert runtime EffectError to proto EffectError.
+fn to_proto_error(err: &EffectError) -> proto_error::EffectError {
+    use proto_error::effect_error::Kind;
 
-    /// Effect-specific payload (everything except $type).
-    #[serde(flatten)]
-    pub payload: Value,
-}
-
-/// Convert EffectError to FFIError for compatibility with existing error handling.
-impl From<EffectError> for FFIError {
-    fn from(err: EffectError) -> Self {
-        match err {
-            EffectError::NotFound { resource } => FFIError {
-                message: format!("Not found: {}", resource),
-                code: ErrorCode::NotFound,
-                context: None,
-                suggestion: None,
-            },
-            EffectError::InvalidInput { message } => FFIError {
-                message,
-                code: ErrorCode::InvalidInput,
-                context: None,
-                suggestion: None,
-            },
-            EffectError::NetworkError { message } => FFIError {
-                message,
-                code: ErrorCode::NetworkError,
-                context: None,
-                suggestion: None,
-            },
-            EffectError::PermissionDenied { message } => FFIError {
-                message,
-                code: ErrorCode::NotAuthenticated,
-                context: None,
-                suggestion: None,
-            },
-            EffectError::Timeout { message } => FFIError {
-                message,
-                code: ErrorCode::Timeout,
-                context: None,
-                suggestion: None,
-            },
-            EffectError::Custom { code, message, .. } => FFIError {
-                message: format!("[{}] {}", code, message),
-                code: ErrorCode::InternalError,
-                context: None,
-                suggestion: None,
-            },
+    let kind = match err {
+        EffectError::NotFound { resource } => Kind::NotFound(proto_error::NotFound {
+            resource: resource.clone(),
+        }),
+        EffectError::InvalidInput { message } => Kind::InvalidInput(proto_error::InvalidInput {
+            message: message.clone(),
+        }),
+        EffectError::NetworkError { message } => Kind::NetworkError(proto_error::NetworkError {
+            message: message.clone(),
+        }),
+        EffectError::PermissionDenied { message } => {
+            Kind::PermissionDenied(proto_error::PermissionDenied {
+                message: message.clone(),
+            })
         }
-    }
+        EffectError::Timeout { message } => Kind::Timeout(proto_error::Timeout {
+            message: message.clone(),
+        }),
+        EffectError::Custom { code, message, .. } => Kind::Custom(proto_error::Custom {
+            code: code.clone(),
+            message: message.clone(),
+            data: Vec::new(),
+        }),
+    };
+
+    proto_error::EffectError { kind: Some(kind) }
 }
 
 /// User data for the yield_effect host function.
-///
-/// Contains the effect registry for dispatching effects to handlers.
 pub struct YieldEffectContext {
     pub registry: Arc<EffectRegistry>,
 }
 
 /// Create the yield_effect host function.
 ///
-/// This function is registered with the Extism plugin and called by WASM guests
-/// to invoke extension effects.
-///
 /// # Protocol
 ///
-/// 1. WASM guest calls `yield_effect(ptr)` where ptr points to JSON `EffectRequest`
-/// 2. Host deserializes request, extracts effect_type and payload
+/// 1. WASM guest calls `yield_effect(ptr)` where ptr points to protobuf `EffectEnvelope`
+/// 2. Host decodes envelope, extracts effect_type and payload bytes
 /// 3. Host dispatches to registry by namespace prefix
-/// 4. Handler executes async, returns result
-/// 5. Host serializes `FFIResult<Value>` and returns ptr to WASM
-///
-/// # Example
-///
-/// ```rust,ignore
-/// let registry = Arc::new(EffectRegistry::new());
-/// let ctx = YieldEffectContext {
-///     registry: registry.clone(),
-/// };
-/// let host_fn = yield_effect_host_fn(ctx);
-/// // Register with Extism plugin builder
-/// ```
+/// 4. Handler processes binary payload, returns binary response
+/// 5. Host wraps in `EffectResponse` and returns protobuf bytes to WASM
 pub fn yield_effect_host_fn(context: YieldEffectContext) -> Function {
     Function::new(
         "yield_effect",
@@ -132,11 +89,16 @@ fn yield_effect_impl(
         return Err(Error::msg("yield_effect: expected input argument"));
     }
 
-    // Parse the effect request using Json wrapper
-    let Json(request): Json<EffectRequest> = plugin.memory_get_val(&inputs[0])?;
+    // Read raw bytes from WASM memory
+    let input_bytes = plugin.memory_get_val::<Vec<u8>>(&inputs[0])?;
+
+    // Decode the envelope
+    let envelope = EffectEnvelope::decode(input_bytes.as_slice())
+        .map_err(|e| Error::msg(format!("Failed to decode EffectEnvelope: {}", e)))?;
 
     tracing::debug!(
-        effect_type = %request.effect_type,
+        effect_type = %envelope.effect_type,
+        payload_bytes = envelope.payload.len(),
         "yield_effect: dispatching"
     );
 
@@ -144,21 +106,28 @@ fn yield_effect_impl(
     let ctx = user_data.get()?;
     let ctx_lock = ctx.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
-    // Block on the async dispatch (we're in a sync host function)
+    // Block on the async dispatch
     let result = block_on(
         ctx_lock
             .registry
-            .dispatch(&request.effect_type, request.payload),
+            .dispatch(&envelope.effect_type, &envelope.payload),
     )?;
 
-    // Convert to FFIResult for consistency with other host functions
-    let response: FFIResult<Value> = match result {
-        Ok(value) => FFIResult::Success(value),
-        Err(err) => FFIResult::Error(err.into()),
+    // Build EffectResponse
+    let response = match result {
+        Ok(payload) => EffectResponse {
+            result: Some(exomonad_proto::effects::error::effect_response::Result::Payload(payload)),
+        },
+        Err(err) => EffectResponse {
+            result: Some(exomonad_proto::effects::error::effect_response::Result::Error(
+                to_proto_error(&err),
+            )),
+        },
     };
 
-    // Set output using Json wrapper
-    plugin.memory_set_val(&mut outputs[0], Json(response))?;
+    // Encode and return
+    let response_bytes = response.encode_to_vec();
+    plugin.memory_set_val(&mut outputs[0], response_bytes)?;
 
     Ok(())
 }
@@ -168,19 +137,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_effect_request_parse() {
-        let json = r#"{"$type": "test.do_thing", "arg1": "value1", "arg2": 42}"#;
-        let req: EffectRequest = serde_json::from_str(json).unwrap();
-        assert_eq!(req.effect_type, "test.do_thing");
-        assert_eq!(req.payload["arg1"], "value1");
-        assert_eq!(req.payload["arg2"], 42);
+    fn test_envelope_roundtrip() {
+        let envelope = EffectEnvelope {
+            effect_type: "git.get_branch".to_string(),
+            payload: vec![10, 1, 46], // protobuf for working_dir = "."
+        };
+
+        let bytes = envelope.encode_to_vec();
+        let decoded = EffectEnvelope::decode(bytes.as_slice()).unwrap();
+
+        assert_eq!(decoded.effect_type, "git.get_branch");
+        assert_eq!(decoded.payload, vec![10, 1, 46]);
     }
 
     #[test]
-    fn test_effect_error_to_ffi() {
-        let effect_err = EffectError::not_found("resource/123");
-        let ffi_err: FFIError = effect_err.into();
-        assert_eq!(ffi_err.code, ErrorCode::NotFound);
-        assert!(ffi_err.message.contains("123"));
+    fn test_error_response_roundtrip() {
+        let err = EffectError::not_found("resource/123");
+        let proto_err = to_proto_error(&err);
+
+        let response = EffectResponse {
+            result: Some(exomonad_proto::effects::error::effect_response::Result::Error(proto_err)),
+        };
+
+        let bytes = response.encode_to_vec();
+        let decoded = EffectResponse::decode(bytes.as_slice()).unwrap();
+
+        match decoded.result {
+            Some(exomonad_proto::effects::error::effect_response::Result::Error(e)) => {
+                match e.kind {
+                    Some(proto_error::effect_error::Kind::NotFound(nf)) => {
+                        assert!(nf.resource.contains("123"));
+                    }
+                    _ => panic!("Expected NotFound"),
+                }
+            }
+            _ => panic!("Expected Error response"),
+        }
     }
 }

@@ -9,6 +9,8 @@ default = []
 # Enable all proto modules (common, hook, agent, popup)
 # Use this once all proto files are created
 full = []
+# Enable effect types (requires full because agent.proto imports common.Role)
+effects = ["full"]
 
 [dependencies]
 prost = { workspace = true }

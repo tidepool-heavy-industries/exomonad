@@ -3,21 +3,15 @@ name: exomonad-proto
 version: 0.1.0.0
 synopsis: Protocol buffer generated types for ExoMonad FFI boundary
 description:
-  This package provides generated types from proto/exomonad/*.proto.
-  Code generation is done via proto3-suite's compile-proto-file.
+  Generated types from proto/exomonad/*.proto and proto/effects/*.proto.
+  Code generation via proto3-suite's compile-proto-file.
 
-  Generated types include:
-  - Message types with ToJSONPB/FromJSONPB instances
-  - Enum types with proper protobuf encoding
-  - Field accessors for all message fields
+  Two categories:
+  - Core types (ExoMonad.*): FFI boundary, hooks, agents — JSON wire format
+  - Effect types (Effects.*): Git, GitHub, Log, etc. — protobuf binary wire format
 
   To regenerate:
     just proto-gen
-
-  Wire format:
-  - Uses JSON via proto3-suite's JSONPB encoding
-  - Enum values use SCREAMING_SNAKE_CASE (e.g., ERROR_CODE_NOT_FOUND)
-  - See Proto.Compat for snake_case conversion to match prost
 
 build-type: Simple
 license: BSD-3-Clause
@@ -36,12 +30,20 @@ library
     TypeApplications
   hs-source-dirs: src
   exposed-modules:
-    -- Generated from proto files (run `just proto-gen-haskell` to regenerate)
+    -- Generated from proto files (run `just proto-gen` to regenerate)
     ExoMonad.Ffi
     ExoMonad.Common
     ExoMonad.Hook
     ExoMonad.Agent
     ExoMonad.Popup
+    -- Generated effect types (from proto/effects/*.proto)
+    Effects.EffectError
+    Effects.Envelope
+    Effects.Git
+    Effects.Github
+    Effects.Log
+    Effects.Fs
+    Effects.Agent
     -- Hand-written compatibility layer
     ExoMonad.Compat
   build-depends:

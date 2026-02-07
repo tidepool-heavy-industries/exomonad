@@ -6,12 +6,19 @@ Single source of truth for types that cross the Rust/Haskell WASM boundary.
 
 ```
 proto/
-└── exomonad/
-    ├── ffi.proto       # Core FFI types (ErrorCode, FfiError, FfiResult)
-    ├── common.proto    # Shared primitives (SessionId, Role, etc.)
-    ├── hook.proto      # Claude Code hook types
-    ├── agent.proto     # Agent management types
-    └── popup.proto     # UI popup types
+├── exomonad/           # Core boundary types
+│   ├── ffi.proto       # Core FFI types (ErrorCode, FfiError, FfiResult)
+│   ├── common.proto    # Shared primitives (SessionId, Role, etc.)
+│   ├── hook.proto      # Claude Code hook types
+│   ├── agent.proto     # Agent management types (legacy)
+│   └── popup.proto     # UI popup types
+└── effects/            # Extensible effects system (namespace-based)
+    ├── effect_error.proto  # Unified effect error type
+    ├── git.proto           # git.* effects
+    ├── github.proto        # github.* effects
+    ├── fs.proto            # fs.* effects
+    ├── agent.proto         # agent.* effects
+    └── log.proto           # log.* effects
 ```
 
 ## Codegen
@@ -20,10 +27,11 @@ Both Rust and Haskell types are generated from `.proto` files:
 
 | Language | Generator | Output |
 |----------|-----------|--------|
-| Rust | `prost-build` | `rust/exomonad-proto/` (build.rs) |
-| Haskell | `proto3-suite compile-proto-file` | `haskell/proto/src/Proto/` (via just) |
+| Rust (core) | `prost-build` | `rust/exomonad-proto/` (build.rs) |
+| Rust (effects) | `prost-build` + `exomonad-runtime/build.rs` | Typed effect traits + binary dispatch |
+| Haskell | `proto3-suite compile-proto-file` | `haskell/proto/src/` (via generate.sh) |
 
-**Generate both:**
+**Generate Haskell types:**
 ```bash
 just proto-gen
 ```
@@ -32,54 +40,45 @@ just proto-gen
 
 Uses `proto3-suite` (GHC 9.12 compatible):
 - `compile-proto-file` generates pure Haskell code
-- Types include `ToJSONPB`/`FromJSONPB` instances
+- Types include `Message`, `ToJSONPB`/`FromJSONPB`, `Named`, `HasDefault` instances
 - Compatible with WASM builds
+- Post-processing strips gRPC service code (not compatible with WASM)
+- Handles macOS case-insensitive filesystem for module paths
 
 ### Rust Codegen
 
-Uses `prost-build` in `build.rs`:
-- Generated at build time
-- Output in `OUT_DIR` (not checked in)
-- JSON wire format via serde derives
+Two build.rs files:
+- **`exomonad-proto/build.rs`**: Compiles all proto files with prost-build
+- **`exomonad-runtime/build.rs`**: Generates typed effect traits (`GitEffects`, `GitHubEffects`, etc.) and binary dispatch functions from proto service definitions
 
-## Wire Format
+## Wire Formats
 
-Types use JSON for cross-language compatibility (not protobuf binary):
+Two wire formats are in use:
 
-### Enum Serialization
+### Core Types (exomonad/) — JSON
 
-**Rust (prost + serde):** snake_case
-```json
-{"code": "not_found"}
+Core FFI types use JSON via proto3-suite's JSONPB encoding for cross-language compatibility.
+
+**Enum Serialization:**
+- **Rust (prost + serde):** snake_case (`"not_found"`)
+- **Haskell (proto3-suite):** SCREAMING_SNAKE_CASE (`"ERROR_CODE_NOT_FOUND"`)
+- **Compatibility:** Use `ExoMonad.Compat` module to convert between formats
+
+### Effects (effects/) — Protobuf Binary
+
+Effect types use protobuf binary encoding via `EffectEnvelope`/`EffectResponse`:
+
+```
+Haskell: runEffect @GitGetBranch req
+  → EffectEnvelope { effect_type="git.get_branch", payload=encode(req) }
+  → protobuf binary bytes via yield_effect host function
+  → Rust: EffectEnvelope::decode → dispatch → encode response
+  → EffectResponse { result: Payload(bytes) | Error(EffectError) }
 ```
 
-**Haskell (proto3-suite):** SCREAMING_SNAKE_CASE
-```json
-{"code": "ERROR_CODE_NOT_FOUND"}
-```
-
-**Compatibility:** Use `Proto.Compat` module to convert between formats:
-```haskell
-import Proto.Compat (toWireJSON, fromWireJSON, protoToWire)
-
--- Converts SCREAMING_SNAKE_CASE to snake_case
-protoToWire "ERROR_CODE_NOT_FOUND" == "not_found"
-```
-
-### Optional Fields
-
-Both sides omit `None` values:
-```json
-{"message": "error", "code": "not_found"}
-```
-(context and suggestion omitted when None)
-
-### Oneof Encoding
-
-Proto `oneof` fields use nested objects:
-```json
-{"result": {"successPayload": "..."}}
-```
+Both sides use proto-generated types with native protobuf `Message` encode/decode:
+- **Haskell:** `Proto3.Suite.Class.toLazyByteString` / `fromByteString`
+- **Rust:** `prost::Message::encode_to_vec` / `decode`
 
 ## Proto File Reference
 
@@ -136,6 +135,70 @@ UI popup protocol:
 - `PopupResponse`: Response envelope
 - `VisibilityRule`: Conditional display
 
+## Effects Proto Reference
+
+The `effects/` directory defines the extensible effects system. Each file defines effects for a namespace (e.g., `git.proto` defines `git.get_branch`, `git.get_status`, etc.). Proto `service` definitions are used by Rust codegen to generate typed traits and dispatch functions.
+
+### effects/envelope.proto
+
+Wire envelope for the single `yield_effect` host function:
+- `EffectEnvelope`: `{ effect_type: string, payload: bytes }` — wraps effect requests
+- `EffectResponse`: `oneof { payload: bytes, error: EffectError }` — wraps responses
+
+### effects/effect_error.proto
+
+Unified error type for all effects:
+- `EffectError` (oneof): NotFound, InvalidInput, NetworkError, PermissionDenied, Timeout, Custom
+- `EffectResult`: Success/error envelope for effect responses
+
+### effects/git.proto
+
+Git operations (`git.*` namespace):
+- `GetBranch`: Current branch info
+- `GetStatus`: Dirty/staged/untracked files
+- `GetCommits`: Recent commit history
+- `HasUnpushedCommits`: Check for unpushed commits
+- `GetRemoteUrl`: Remote URL
+- `GetRepoInfo`: Branch + owner/name
+- `GetWorktree`: Worktree info
+
+### effects/github.proto
+
+GitHub API operations (`github.*` namespace):
+- `ListIssues`: List repository issues
+- `GetIssue`: Get issue with comments
+- `ListPullRequests`: List PRs
+- `GetPullRequest`: Get PR with reviews
+- `GetPullRequestForBranch`: Find PR for branch
+- `CreatePullRequest`: Create new PR
+- `GetPullRequestReviewComments`: Get inline comments
+
+### effects/fs.proto
+
+Filesystem operations (`fs.*` namespace):
+- `ReadFile`: Read file contents
+- `WriteFile`: Write file contents
+- `FileExists`: Check file existence
+- `ListDirectory`: List directory entries
+- `DeleteFile`: Delete file/directory
+
+### effects/agent.proto
+
+Agent lifecycle (`agent.*` namespace):
+- `Spawn`: Spawn single agent
+- `SpawnBatch`: Spawn multiple agents
+- `Cleanup`: Clean up single agent
+- `CleanupBatch`: Clean up multiple agents
+- `CleanupMerged`: Clean up agents with merged branches
+- `List`: List active agents
+
+### effects/log.proto
+
+Logging and events (`log.*` namespace):
+- `Log`: Generic log with level
+- `Debug`, `Info`, `Warn`, `Error`: Convenience methods
+- `EmitEvent`: Emit structured event
+
 ## Usage
 
 ### Rust
@@ -187,6 +250,8 @@ just proto-test  # Run wire format compatibility tests
 
 ## Migration Status
 
+### Core Types (exomonad/) — JSON wire format
+
 | Proto File | Rust | Haskell | Wire Tests |
 |------------|------|---------|------------|
 | ffi.proto | ✅ | ✅ | ✅ |
@@ -195,8 +260,21 @@ just proto-test  # Run wire format compatibility tests
 | agent.proto | ✅ | ✅ | Pending |
 | popup.proto | ✅ | ✅ | Pending |
 
+### Effects Types (effects/) — Protobuf binary wire format
+
+| Proto File | Rust Handler | Haskell Effect | Wire Tests |
+|------------|--------------|----------------|------------|
+| envelope.proto | ✅ | ✅ | Pending |
+| effect_error.proto | ✅ | ✅ | Pending |
+| git.proto | ✅ | ✅ | Pending |
+| github.proto | ✅ | ✅ | Pending |
+| log.proto | ✅ | ✅ | Pending |
+| fs.proto | ✅ | Pending | Pending |
+| agent.proto | ✅ | Pending | Pending |
+
 ## Related Files
 
 - `haskell/proto/CLAUDE.md` - Haskell proto package details
 - `rust/exomonad-proto/CLAUDE.md` - Rust proto crate details
-- `haskell/wasm-guest/src/ExoMonad/Guest/FFI.hs` - FFI boundary (to be migrated)
+- `haskell/wasm-guest/src/ExoMonad/Effect/Class.hs` - Effect typeclass (Message constraints)
+- `haskell/wasm-guest/src/ExoMonad/Guest/Effect.hs` - Binary envelope encoding/decoding
