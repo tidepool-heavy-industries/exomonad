@@ -29,7 +29,8 @@ Claude Code (hook or MCP call)
 | Component | Purpose |
 |-----------|---------|
 | **exomonad** | Rust binary with WASM plugin support (hooks + MCP) |
-| **exomonad-runtime** | WASM plugin loading + host functions |
+| **exomonad-core** | Framework: EffectHandler trait, EffectRegistry, RuntimeBuilder, PluginManager, MCP server |
+| **exomonad-contrib** | Built-in handlers (Git, GitHub, Agent, FS, Log, Popup, FilePR, Copilot) + services |
 | **wasm-guest** | Haskell WASM plugin (pure logic, no I/O) |
 
 ### Deployment
@@ -61,16 +62,22 @@ Each agent:
 
 ```
 rust/CLAUDE.md  ← YOU ARE HERE (router)
-├── exomonad/CLAUDE.md  ← MCP + Hook handler via WASM (CORE)
+├── exomonad/CLAUDE.md  ← MCP + Hook handler via WASM (BINARY)
 │   • Binary: exomonad
 │   • hook subcommand: handles CC hooks via WASM
-│   • mcp subcommand: MCP HTTP server via WASM
 │   • mcp-stdio subcommand: MCP stdio server for Claude Code
 │
-├── exomonad-runtime/CLAUDE.md  ← WASM plugin loading + host functions
-│   • PluginManager: loads WASM, routes calls
-│   • Services: Git, GitHub, AgentControl, FileSystem
-│   • Host functions: git_*, github_*, agent_*, fs_*
+├── exomonad-core/  ← Framework (publishable library)
+│   • EffectHandler trait, EffectRegistry, RuntimeBuilder, Runtime
+│   • PluginManager (single host fn: yield_effect)
+│   • MCP stdio server (reusable)
+│   • Protocol types (re-exported from exomonad-shared)
+│
+├── exomonad-contrib/  ← Built-in handlers + services (publishable library)
+│   • Handlers: GitHandler, GitHubHandler, LogHandler, AgentHandler,
+│     FsHandler, PopupHandler, FilePRHandler, CopilotHandler
+│   • Services: GitService, GitHubService, AgentControlService, etc.
+│   • register_builtin_handlers() for composing into RuntimeBuilder
 │
 ├── effector/CLAUDE.md  ← Stateless IO executor
 │   • Cabal/Git/GH operations
@@ -102,7 +109,9 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 | Crate | Type | Purpose |
 |-------|------|---------|
 | [exomonad](exomonad/CLAUDE.md) | Binary (`exomonad`) | MCP + Hook handler via WASM |
-| [exomonad-runtime](exomonad-runtime/CLAUDE.md) | Library | WASM plugin loading + host functions |
+| exomonad-core | Library | Framework: EffectHandler, EffectRegistry, RuntimeBuilder, MCP server |
+| exomonad-contrib | Library | Built-in handlers (Git, GitHub, Agent, etc.) + services |
+| exomonad-proto | Library | Proto-generated types (prost) for FFI + effects |
 | [effector](effector/CLAUDE.md) | Binary | Stateless IO executor |
 | [exomonad-shared](exomonad-shared/CLAUDE.md) | Library | Shared types, protocols |
 | [exomonad-services](exomonad-services/CLAUDE.md) | Library | External service clients |
@@ -160,58 +169,39 @@ All tools are implemented in Haskell WASM and executed via host functions:
 | `cleanup_agents` | Close Zellij tabs and delete worktrees |
 | `list_agents` | List active agent worktrees |
 
-## Host Functions (Effect Boundary)
+## Effect System
 
-Rust host functions exposed to WASM:
+All WASM↔Rust communication flows through a single `yield_effect` host function. The Haskell guest sends protobuf-encoded `EffectEnvelope` messages, and the `EffectRegistry` dispatches to the appropriate handler by namespace prefix.
 
-### FFI Boundary
+```
+Haskell: runEffect @GitGetBranch request
+    ↓ protobuf encode → EffectEnvelope { effect_type: "git.get_branch", payload: ... }
+    ↓ yield_effect host function
+    ↓ EffectRegistry::dispatch("git.get_branch", payload)
+    ↓ GitHandler::handle(...)
+    ↓ EffectResponse { payload | error }
+    ↓ protobuf decode
+Haskell: Either EffectError GetBranchResponse
+```
 
-Unified trait/typeclass for WASM/Rust communication.
+### Built-in Handlers (exomonad-contrib)
 
-**Rust:** `FFIBoundary` trait in `exomonad-shared`.
-**Haskell:** `FFIBoundary` typeclass in `ExoMonad.Guest.FFI`.
-
-**Contract:**
-- All host function inputs/outputs must implement `FFIBoundary`.
-- Serialization: JSON (via `serde` in Rust, `aeson` in Haskell).
-- Error Handling: `FFIResult` envelope (Success/Error).
-  - Rust returns `FFIResult<T>`.
-  - Haskell receives `Either FFIError T`.
-
-### Git Effects
-| Effect | Host Function | Implementation |
-|--------|---------------|----------------|
-| `GitGetBranch` | `git_get_branch` | git subprocess |
-| `GitGetDirtyFiles` | `git_get_dirty_files` | git subprocess |
-| `GitGetRecentCommits` | `git_get_recent_commits` | git subprocess |
-
-### GitHub Effects
-| Effect | Host Function | Implementation |
-|--------|---------------|----------------|
-| `GitHubListIssues` | `github_list_issues` | HTTP API |
-| `GitHubGetIssue` | `github_get_issue` | HTTP API |
-| `GitHubListPRs` | `github_list_prs` | HTTP API |
-
-### Agent Control Effects (High-Level)
-| Effect | Host Function | Implementation |
-|--------|---------------|----------------|
-| `SpawnAgent` | `agent_spawn` | GitHub API + git worktree + Zellij KDL layout |
-| `SpawnAgents` | `agent_spawn_batch` | Batch version of SpawnAgent |
-| `CleanupAgent` | `agent_cleanup` | Zellij close + git worktree remove |
-| `CleanupAgents` | `agent_cleanup_batch` | Batch version of CleanupAgent |
-| `ListAgents` | `agent_list` | git worktree list |
+| Namespace | Handler | Effects |
+|-----------|---------|---------|
+| `git.*` | GitHandler | get_branch, get_status, get_recent_commits, get_worktree, has_unpushed_commits, get_remote_url, get_repo_info |
+| `github.*` | GitHubHandler | list_issues, get_issue, create_pr, list_prs, get_pr_for_branch, get_pr_review_comments |
+| `log.*` | LogHandler | info, error, emit_event |
+| `agent.*` | AgentHandler | spawn, spawn_batch, cleanup, cleanup_batch, cleanup_merged, list |
+| `fs.*` | FsHandler | read_file, write_file |
+| `popup.*` | PopupHandler | show_popup |
+| `file_pr.*` | FilePRHandler | file_pr |
+| `copilot.*` | CopilotHandler | wait_for_copilot_review |
 
 **Zellij Integration:**
 - Uses declarative KDL layouts (not CLI flags)
 - Includes tab-bar and status-bar plugins (native UI)
 - Wraps command in shell (`sh -c "claude"`) for environment inheritance
 - Sets `close_on_exit true` for automatic cleanup
-
-### Filesystem Effects
-| Effect | Host Function | Implementation |
-|--------|---------------|----------------|
-| `ReadFile` | `fs_read_file` | tokio::fs |
-| `WriteFile` | `fs_write_file` | tokio::fs |
 
 ## Configuration
 
@@ -232,15 +222,11 @@ And ensure `.exomonad/config.toml` and/or `config.local.toml` exists.
 ## Testing
 
 ```bash
-cargo test                              # All tests
-cargo test -p exomonad                  # Sidecar tests only
-cargo test -p exomonad-runtime          # Runtime tests only
-
-# E2E test with WASM
-./target/debug/exomonad mcp --port 17432 &
-curl http://localhost:17432/health
-curl http://localhost:17432/mcp/tools
-pkill exomonad
+cargo test --workspace                  # All tests
+cargo test -p exomonad                  # Binary tests only
+cargo test -p exomonad-core             # Framework tests only
+cargo test -p exomonad-contrib          # Handler + service tests
+cargo test -p exomonad-proto            # Wire format compatibility tests
 ```
 
 ## Design Decisions
@@ -248,6 +234,9 @@ pkill exomonad
 | Decision | Rationale |
 |----------|-----------|
 | 100% WASM routing | All logic in Haskell, Rust handles I/O only |
+| Single `yield_effect` host fn | One entry point, all effects dispatched by namespace via EffectRegistry |
+| Protobuf binary encoding | Type-safe FFI boundary, generated types on both sides |
+| core/contrib split | External consumers can embed the framework without built-in handlers |
 | High-level effects | `SpawnAgent` not `CreateWorktree + OpenTab` |
 | Local Zellij orchestration | Git worktrees + Zellij tabs, no Docker containers |
 | Extism runtime | Mature WASM runtime with host function support |

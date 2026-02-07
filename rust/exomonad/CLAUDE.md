@@ -109,49 +109,22 @@ The spawn tools (`spawn_agents`, `cleanup_agents`, `list_agents`) require:
 
 ## Effect Boundary (WASM)
 
-Haskell WASM calls these host functions (high-level semantic effects):
+All effects flow through a single `yield_effect` host function using protobuf binary encoding. Haskell calls `runEffect @EffectType request`, which encodes an `EffectEnvelope` and dispatches to the appropriate handler in the `EffectRegistry` by namespace prefix.
 
-### Git Effects
-| Effect | Host Function | Rust implements via |
-|--------|---------------|---------------------|
-| `GitGetBranch` | `git_get_branch` | local git subprocess |
-| `GitGetWorktree` | `git_get_worktree` | local git subprocess |
-| `GitGetDirtyFiles` | `git_get_dirty_files` | local git subprocess |
-| `GitGetRecentCommits` | `git_get_recent_commits` | local git subprocess |
+### Registered Handlers
 
-### GitHub Effects
-| Effect | Host Function | Rust implements via |
-|--------|---------------|---------------------|
-| `GitHubListIssues` | `github_list_issues` | HTTP API |
-| `GitHubGetIssue` | `github_get_issue` | HTTP API |
-| `GitHubCreatePR` | `github_create_pr` | HTTP API |
-| `GitHubListPRs` | `github_list_prs` | HTTP API |
+| Namespace | Handler | Implementation |
+|-----------|---------|----------------|
+| `git.*` | GitHandler | git subprocess |
+| `github.*` | GitHubHandler | HTTP API |
+| `agent.*` | AgentHandler | GitHub API + git worktree + Zellij |
+| `fs.*` | FsHandler | tokio::fs |
+| `log.*` | LogHandler | tracing |
+| `popup.*` | PopupHandler | Zellij plugin IPC |
+| `file_pr.*` | FilePRHandler | gh CLI |
+| `copilot.*` | CopilotHandler | GitHub API polling |
 
-### Agent Control Effects (High-Level)
-| Effect | Host Function | Rust implements via |
-|--------|---------------|---------------------|
-| `SpawnAgent` | `agent_spawn` | GitHub API + git worktree + Zellij |
-| `SpawnAgents` | `agent_spawn_batch` | Batch version of spawn |
-| `CleanupAgent` | `agent_cleanup` | Zellij close + git worktree remove |
-| `CleanupAgents` | `agent_cleanup_batch` | Batch version of cleanup |
-| `ListAgents` | `agent_list` | git worktree list |
-
-### Filesystem Effects
-| Effect | Host Function | Rust implements via |
-|--------|---------------|---------------------|
-| `ReadFile` | `fs_read_file` | tokio::fs |
-| `WriteFile` | `fs_write_file` | tokio::fs |
-
-### Log Effects
-| Effect | Host Function | Rust implements via |
-|--------|---------------|---------------------|
-| `LogInfo` | `log_info` | tracing |
-| `LogError` | `log_error` | tracing |
-| `EmitEvent` | `emit_event` | event bus |
-
-**NOT exposed to Haskell** (Rust internals):
-- HTTP client implementation details
-- Subprocess management
+All handlers are registered by `exomonad_contrib::register_builtin_handlers()`.
 
 ## Building
 
@@ -224,5 +197,6 @@ Claude Code MCP request
 
 ## Related Documentation
 
-- **[exomonad-runtime](../exomonad-runtime/)** - Plugin loading and host functions
+- **[exomonad-core](../exomonad-core/)** - Framework: EffectHandler, RuntimeBuilder, PluginManager, MCP server
+- **[exomonad-contrib](../exomonad-contrib/)** - Built-in handlers and services
 - **[wasm-guest](../../haskell/wasm-guest/)** - Haskell WASM plugin source

@@ -34,7 +34,7 @@ let params = AgentTabParams {
 let layout = generate_agent_layout(&params)?;
 ```
 
-**Integration:** `exomonad-runtime` uses this library to generate layouts for spawned agents.
+**Integration:** `exomonad-contrib` uses this library to generate layouts for spawned agents.
 
 ## CLI Usage
 
@@ -165,7 +165,7 @@ cargo test -p zellij-gen
 
 ## Related Documentation
 
-- [exomonad-runtime](../exomonad-runtime/CLAUDE.md) - Uses this library for agent spawning
+- [exomonad-contrib](../exomonad-contrib/) - Uses this library for agent spawning
 - [zjstatus](https://github.com/dj95/zjstatus) - Status bar plugin
 - [room](https://github.com/rvcas/room) - Tab switcher plugin
 - [ghost](https://github.com/vdbulcke/ghost) - Floating terminal plugin

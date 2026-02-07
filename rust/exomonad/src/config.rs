@@ -326,7 +326,7 @@ mod tests {
     }
 
     #[test]
-    fn test_config_resolve_wasm_path_default() {
+    fn test_config_resolve_wasm_path_default_missing() {
         let config = Config {
             project_dir: PathBuf::from("."),
             role: Role::Dev,
@@ -334,11 +334,14 @@ mod tests {
             zellij_session: "test".to_string(),
         };
 
-        // This test requires HOME to be set
-        if std::env::var("HOME").is_ok() {
-            let path = config.resolve_wasm_path().unwrap();
-            assert!(path.to_string_lossy().contains(".exomonad/wasm"));
-            assert!(path.to_string_lossy().contains("wasm-guest-dev.wasm"));
+        // Without the WASM file on disk, resolve returns WasmNotFound
+        let err = config.resolve_wasm_path().unwrap_err();
+        match err {
+            ConfigError::WasmNotFound { path, role } => {
+                assert!(path.to_string_lossy().contains("wasm-guest-dev.wasm"));
+                assert_eq!(role, "dev");
+            }
+            other => panic!("Expected WasmNotFound, got: {:?}", other),
         }
     }
 

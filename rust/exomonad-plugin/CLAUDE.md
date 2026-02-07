@@ -170,5 +170,5 @@ let result = PopupResult {
 
 - [exomonad-ui-protocol](../exomonad-ui-protocol/CLAUDE.md) - Shared protocol types
 - [Zellij Plugin API](https://zellij.dev/documentation/plugins.html) - Zellij plugin docs
-- [exomonad-runtime](../exomonad-runtime/CLAUDE.md) - Runtime that orchestrates plugin communication
+- [exomonad-contrib](../exomonad-contrib/) - Handlers that orchestrate plugin communication
 - [Root CLAUDE.md](../../CLAUDE.md) - Project overview

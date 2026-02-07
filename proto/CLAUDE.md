@@ -28,7 +28,7 @@ Both Rust and Haskell types are generated from `.proto` files:
 | Language | Generator | Output |
 |----------|-----------|--------|
 | Rust (core) | `prost-build` | `rust/exomonad-proto/` (build.rs) |
-| Rust (effects) | `prost-build` + `exomonad-runtime/build.rs` | Typed effect traits + binary dispatch |
+| Rust (effects) | `prost-build` + `exomonad-core/build.rs` | Typed effect traits + binary dispatch |
 | Haskell | `proto3-suite compile-proto-file` | `haskell/proto/src/` (via generate.sh) |
 
 **Generate Haskell types:**
@@ -49,7 +49,7 @@ Uses `proto3-suite` (GHC 9.12 compatible):
 
 Two build.rs files:
 - **`exomonad-proto/build.rs`**: Compiles all proto files with prost-build
-- **`exomonad-runtime/build.rs`**: Generates typed effect traits (`GitEffects`, `GitHubEffects`, etc.) and binary dispatch functions from proto service definitions
+- **`exomonad-core/build.rs`**: Generates typed effect traits (`GitEffects`, `GitHubEffects`, etc.) and binary dispatch functions from proto service definitions
 
 ## Wire Formats
 

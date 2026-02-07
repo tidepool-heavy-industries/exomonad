@@ -70,7 +70,8 @@ fn compile_core_protos() -> Result<()> {
     // value checks for string and numeric fields to omit defaults.
     // ========================================================================
 
-    // Skip serializing empty strings for context/detail fields
+    // Skip serializing empty/default fields and default to empty on deserialize.
+    // Proto3 scalars use empty string / 0 as default, so omitting them is safe.
     for field in [
         "ErrorContext.command",
         "ErrorContext.stderr",
@@ -81,9 +82,15 @@ fn compile_core_protos() -> Result<()> {
     ] {
         config.field_attribute(
             &format!(".exomonad.ffi.{}", field),
-            "#[serde(skip_serializing_if = \"String::is_empty\")]",
+            "#[serde(default, skip_serializing_if = \"String::is_empty\")]",
         );
     }
+
+    // Skip serializing None context and default to None on deserialize
+    config.field_attribute(
+        ".exomonad.ffi.FfiError.context",
+        "#[serde(default, skip_serializing_if = \"Option::is_none\")]",
+    );
 
     // Collect all proto files that exist
     let proto_files: Vec<&str> = [

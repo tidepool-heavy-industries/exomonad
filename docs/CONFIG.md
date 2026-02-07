@@ -30,7 +30,7 @@ This document details the configuration files, filesystem paths, and loading mec
 *   **Location:** User home (`~/.exomonad/secrets`)
 *   **Purpose:** Stores sensitive API keys and tokens.
 *   **Format:** KEY=VALUE (like `.env`)
-*   **Loaded By:** `rust/exomonad-runtime/src/services/secrets.rs`
+*   **Loaded By:** `rust/exomonad-contrib/src/services/secrets.rs`
 *   **Keys:**
     *   `GITHUB_TOKEN`: GitHub API token.
     *   `ANTHROPIC_API_KEY`: Anthropic API key.
@@ -60,7 +60,7 @@ This document details the configuration files, filesystem paths, and loading mec
     *   Claude: `.claude/settings.local.json`
     *   Gemini: `.gemini/settings.json`
 *   **Purpose:** Configures CLI hooks (e.g., `PreToolUse`, `SubagentStop`, `AfterAgent`).
-*   **Managed By:** `rust/exomonad-runtime/src/services/agent_control.rs` writes these when spawning sub-agents.
+*   **Managed By:** `rust/exomonad-contrib/src/services/agent_control.rs` writes these when spawning sub-agents.
 
 ## 2. Filesystem Paths
 

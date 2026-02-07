@@ -60,16 +60,16 @@ fn error_code_json_parse() {
     );
 }
 
-/// Test that ErrorContext serializes correctly, omitting None fields.
+/// Test that ErrorContext serializes correctly, omitting empty/default fields.
 #[test]
 fn error_context_json_format() {
     let ctx = ErrorContext {
-        command: Some("git status".into()),
-        exit_code: Some(1),
-        stderr: Some("error: not a git repository".into()),
-        stdout: None,
-        file_path: None,
-        working_dir: Some("/tmp/test".into()),
+        command: "git status".into(),
+        exit_code: 1,
+        stderr: "error: not a git repository".into(),
+        stdout: String::new(),
+        file_path: String::new(),
+        working_dir: "/tmp/test".into(),
     };
 
     let json = serde_json::to_value(&ctx).unwrap();
@@ -80,7 +80,7 @@ fn error_context_json_format() {
     assert_eq!(json["stderr"], "error: not a git repository");
     assert_eq!(json["working_dir"], "/tmp/test");
 
-    // Verify None fields are omitted
+    // Verify empty fields are omitted (skip_serializing_if)
     assert!(!json.as_object().unwrap().contains_key("stdout"));
     assert!(!json.as_object().unwrap().contains_key("file_path"));
 }
@@ -92,7 +92,7 @@ fn ffi_error_json_format() {
         message: "File not found".into(),
         code: ErrorCode::NotFound as i32,
         context: None,
-        suggestion: Some("Check that the file exists".into()),
+        suggestion: "Check that the file exists".into(),
     };
 
     let json = serde_json::to_value(&err).unwrap();
@@ -111,14 +111,14 @@ fn ffi_error_roundtrip() {
         message: "Git operation failed".into(),
         code: ErrorCode::GitError as i32,
         context: Some(ErrorContext {
-            command: Some("git push".into()),
-            exit_code: Some(128),
-            stderr: Some("fatal: rejected".into()),
-            stdout: None,
-            file_path: None,
-            working_dir: Some("/repo".into()),
+            command: "git push".into(),
+            exit_code: 128,
+            stderr: "fatal: rejected".into(),
+            stdout: String::new(),
+            file_path: String::new(),
+            working_dir: "/repo".into(),
         }),
-        suggestion: Some("Pull before pushing".into()),
+        suggestion: "Pull before pushing".into(),
     };
 
     let json = serde_json::to_string(&original).unwrap();

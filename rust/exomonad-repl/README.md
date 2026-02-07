@@ -21,6 +21,6 @@ cargo run -p exomonad-repl -- --wasm .exomonad/wasm/wasm-guest-dev.wasm
 ## Architecture
 
 - **tuirealm**: TUI framework
-- **exomonad-runtime**: Loads and runs WASM plugin
+- **exomonad-core**: Loads and runs WASM plugin via RuntimeBuilder
 - **exomonad**: Reuses MCP routing and tool execution logic
 - **schema_parser**: Dynamically generates form fields from JSON schema

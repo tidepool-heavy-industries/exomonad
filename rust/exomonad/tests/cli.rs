@@ -9,10 +9,10 @@ use predicates::prelude::*;
 use std::path::PathBuf;
 
 fn wasm_fixture_path() -> PathBuf {
+    // CLI E2E tests require a built WASM plugin AND config-based resolution.
+    // These tests skip when the fixture doesn't exist.
+    // For E2E testing, use `just wasm-dev tl` + `exomonad hook pre-tool-use` directly.
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("exomonad-runtime")
         .join("tests")
         .join("fixtures")
         .join("wasm-guest.wasm")

@@ -173,6 +173,6 @@ cargo test -p exomonad-services
 
 ## Related Documentation
 
-- [exomonad-runtime](../exomonad-runtime/CLAUDE.md) - Uses these services via dependency injection
+- [exomonad-contrib](../exomonad-contrib/) - Uses these services via dependency injection
 - [exomonad-shared](../exomonad-shared/CLAUDE.md) - Protocol types (ServiceRequest, ServiceResponse)
 - [Root CLAUDE.md](../../CLAUDE.md) - Project overview

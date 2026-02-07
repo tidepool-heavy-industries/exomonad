@@ -98,9 +98,10 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 │   │   └── actor/CLAUDE.md     ← Actor model details
 │   ├── protocol/CLAUDE.md      ← Wire formats
 │   └── tools/CLAUDE.md         ← Dev tools (ghci-oracle, sleeptime, training-generator)
-├── rust/CLAUDE.md             ← Rust workspace overview (sidecar, runtime, services)
-│   ├── exomonad/CLAUDE.md  ← MCP server + hook handler (WASM host)
-│   ├── exomonad-runtime/CLAUDE.md  ← WASM plugin loading + host functions
+├── rust/CLAUDE.md             ← Rust workspace overview (sidecar, core, contrib, services)
+│   ├── exomonad/CLAUDE.md  ← MCP server + hook handler (binary)
+│   ├── exomonad-core/      ← Framework: EffectHandler, EffectRegistry, RuntimeBuilder, MCP server
+│   ├── exomonad-contrib/   ← Built-in handlers (Git, GitHub, Agent, etc.) + services
 │   ├── exomonad-shared/CLAUDE.md   ← Shared types and protocols
 │   ├── exomonad-services/CLAUDE.md ← External service clients (Anthropic, GitHub, etc.)
 │   ├── exomonad-ui-protocol/CLAUDE.md ← Popup UI protocol types
@@ -116,7 +117,8 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 |--------------|-----------|
 | Add FFI boundary types | `proto/CLAUDE.md` |
 | Understand MCP tool architecture | `rust/exomonad/CLAUDE.md` |
-| Work on WASM host functions | `rust/exomonad-runtime/CLAUDE.md` |
+| Work on effect handlers or services | `rust/exomonad-contrib/` |
+| Extend the effect framework | `rust/exomonad-core/` |
 | Understand shared protocol types | `rust/exomonad-shared/CLAUDE.md` |
 | Work with external service clients | `rust/exomonad-services/CLAUDE.md` |
 | Modify popup UI protocol | `rust/exomonad-ui-protocol/CLAUDE.md` |
