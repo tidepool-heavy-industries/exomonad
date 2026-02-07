@@ -6,7 +6,7 @@
 -- prost with serde generates snake_case (e.g., not_found).
 --
 -- This module provides conversions for JSON wire format compatibility.
-module Exomonad.Compat
+module ExoMonad.Compat
   ( toWireJSON
   , fromWireJSON
   , toWireJSONPB

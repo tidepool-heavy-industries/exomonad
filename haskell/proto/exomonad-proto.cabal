@@ -36,11 +36,13 @@ library
     TypeApplications
   hs-source-dirs: src
   exposed-modules:
+    -- Generated from proto files (run `just proto-gen-haskell` to regenerate)
     ExoMonad.Ffi
     ExoMonad.Common
     ExoMonad.Hook
     ExoMonad.Agent
     ExoMonad.Popup
+    -- Hand-written compatibility layer
     ExoMonad.Compat
   build-depends:
     base >= 4.16 && < 5,
