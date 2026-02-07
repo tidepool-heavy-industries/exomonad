@@ -1,33 +1,10 @@
 //! Configuration discovery from .exomonad/config.toml and config.local.toml
 
 use anyhow::{Context, Result};
-use exomonad_shared::{PathError, Role, WasmPath};
+use exomonad_shared::Role;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
-use thiserror::Error;
 use tracing::debug;
-
-/// Configuration validation errors.
-#[derive(Debug, Error)]
-pub enum ConfigError {
-    #[error("project directory does not exist: {path}")]
-    ProjectDirNotFound { path: PathBuf },
-
-    #[error("project directory is not a directory: {path}")]
-    ProjectDirNotDirectory { path: PathBuf },
-
-    #[error("WASM plugin not found: {path} (did you run `just wasm-dev {role}`?)")]
-    WasmNotFound { path: PathBuf, role: String },
-
-    #[error("WASM plugin validation failed: {0}")]
-    WasmValidation(#[from] PathError),
-
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
-
-    #[error("required config field '{field}' is missing")]
-    MissingField { field: String },
-}
 
 /// Raw configuration from file (supports both config.toml and config.local.toml fields).
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -41,9 +18,6 @@ pub struct RawConfig {
     /// Project-wide default role.
     pub default_role: Option<Role>,
 
-    /// Absolute path to WASM artifacts.
-    pub wasm_path: Option<PathBuf>,
-
     /// Canonical Zellij session name for this project.
     pub zellij_session: Option<String>,
 }
@@ -53,36 +27,34 @@ pub struct RawConfig {
 pub struct Config {
     pub project_dir: PathBuf,
     pub role: Role,
-    pub wasm_path_override: Option<PathBuf>,
     /// Canonical Zellij session name (required after discovery).
     pub zellij_session: String,
-}
-
-/// Validated configuration wrapper.
-#[derive(Debug, Clone)]
-pub struct ValidatedConfig {
-    config: Config,
-    wasm_path: WasmPath,
 }
 
 impl Config {
     /// Discover configuration by merging local and global project config.
     ///
+    /// Searches upward from CWD for `.exomonad/config.toml`.
+    ///
     /// Resolution Order:
-    /// 1. config.local.toml (role, wasm_path)
+    /// 1. config.local.toml (role)
     /// 2. config.toml (default_role, project_dir)
     /// 3. Environment defaults
     pub fn discover() -> Result<Self> {
-        let local_path = PathBuf::from(".exomonad/config.local.toml");
-        let global_path = PathBuf::from(".exomonad/config.toml");
+        let project_root = find_project_root()?;
+
+        let local_path = project_root.join(".exomonad/config.local.toml");
+        let global_path = project_root.join(".exomonad/config.toml");
 
         let local_raw = if local_path.exists() {
+            debug!(path = %local_path.display(), "Loaded local config");
             Self::load_raw(&local_path)?
         } else {
             RawConfig::default()
         };
 
         let global_raw = if global_path.exists() {
+            debug!(path = %global_path.display(), "Loaded global config");
             Self::load_raw(&global_path)?
         } else {
             RawConfig::default()
@@ -94,11 +66,18 @@ impl Config {
             .or(global_raw.default_role)
             .ok_or_else(|| anyhow::anyhow!("No active role defined. Please set 'role' in .exomonad/config.local.toml or 'default_role' in .exomonad/config.toml"))?;
 
-        // Resolve project_dir: global.project_dir > "."
+        // Resolve project_dir: global.project_dir > project_root
         let project_dir = global_raw
             .project_dir
             .or(local_raw.project_dir)
-            .unwrap_or_else(|| PathBuf::from("."));
+            .map(|p| {
+                if p.is_absolute() {
+                    p
+                } else {
+                    project_root.join(p)
+                }
+            })
+            .unwrap_or(project_root);
 
         // Resolve zellij_session: required field, hard error if missing
         let zellij_session = local_raw
@@ -115,7 +94,6 @@ impl Config {
         Ok(Self {
             project_dir,
             role,
-            wasm_path_override: local_raw.wasm_path,
             zellij_session,
         })
     }
@@ -130,74 +108,6 @@ impl Config {
 
         Ok(config)
     }
-
-    /// Validate configuration and return a ValidatedConfig.
-    pub fn validate(self) -> Result<ValidatedConfig, ConfigError> {
-        // Check project_dir exists
-        if !self.project_dir.exists() {
-            return Err(ConfigError::ProjectDirNotFound {
-                path: self.project_dir.clone(),
-            });
-        }
-
-        // Check project_dir is a directory
-        if !self.project_dir.is_dir() {
-            return Err(ConfigError::ProjectDirNotDirectory {
-                path: self.project_dir.clone(),
-            });
-        }
-
-        // Resolve and validate WASM path
-        let wasm_path_buf = self.resolve_wasm_path()?;
-        let wasm_path = WasmPath::try_from(wasm_path_buf)?;
-
-        Ok(ValidatedConfig {
-            config: self,
-            wasm_path,
-        })
-    }
-
-    /// Resolve absolute WASM path based on role and overrides.
-    fn resolve_wasm_path(&self) -> Result<PathBuf, ConfigError> {
-        if let Some(ref over) = self.wasm_path_override {
-            return Ok(over.join(format!("wasm-guest-{}.wasm", self.role)));
-        }
-
-        let local_wasm_dir = PathBuf::from(".exomonad/wasm");
-        let wasm_name = format!("wasm-guest-{}.wasm", self.role);
-        let path = local_wasm_dir.join(&wasm_name);
-
-        if path.exists() {
-            Ok(path)
-        } else {
-            Err(ConfigError::WasmNotFound {
-                path,
-                role: format!("{}", self.role),
-            })
-        }
-    }
-}
-
-impl ValidatedConfig {
-    /// Get the validated project directory.
-    pub fn project_dir(&self) -> &PathBuf {
-        &self.config.project_dir
-    }
-
-    /// Get the validated role.
-    pub fn role(&self) -> Role {
-        self.config.role
-    }
-
-    /// Get the WASM path as a PathBuf.
-    pub fn wasm_path_buf(&self) -> PathBuf {
-        self.wasm_path.as_path().to_path_buf()
-    }
-
-    /// Get the Zellij session name.
-    pub fn zellij_session(&self) -> &str {
-        &self.config.zellij_session
-    }
 }
 
 impl Default for Config {
@@ -205,9 +115,25 @@ impl Default for Config {
         Self {
             project_dir: PathBuf::from("."),
             role: Role::Dev,
-            wasm_path_override: None,
             zellij_session: "default".to_string(),
         }
+    }
+}
+
+/// Walk up from CWD to find the project root containing `.exomonad/config.toml`.
+fn find_project_root() -> Result<PathBuf> {
+    let start = std::env::current_dir()?;
+    let mut current = start.as_path();
+    loop {
+        if current.join(".exomonad/config.toml").exists() {
+            return Ok(current.to_path_buf());
+        }
+        current = current.parent().ok_or_else(|| {
+            anyhow::anyhow!(
+                "No .exomonad/config.toml found from {} upward",
+                start.display()
+            )
+        })?;
     }
 }
 
@@ -221,22 +147,14 @@ fn sanitize_session_name(name: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    use tempfile::TempDir;
-
-    fn setup_test_dir() -> TempDir {
-        TempDir::new().expect("Failed to create temp dir")
-    }
 
     #[test]
     fn test_raw_config_parse_local() {
         let content = r#"
             role = "dev"
-            wasm_path = "/custom/path"
         "#;
         let raw: RawConfig = toml::from_str(content).unwrap();
         assert_eq!(raw.role, Some(Role::Dev));
-        assert_eq!(raw.wasm_path, Some(PathBuf::from("/custom/path")));
     }
 
     #[test]
@@ -256,7 +174,6 @@ mod tests {
         assert!(raw.role.is_none());
         assert!(raw.default_role.is_none());
         assert!(raw.project_dir.is_none());
-        assert!(raw.wasm_path.is_none());
     }
 
     #[test]
@@ -264,137 +181,15 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.project_dir, PathBuf::from("."));
         assert_eq!(config.role, Role::Dev);
-        assert!(config.wasm_path_override.is_none());
-    }
-
-    #[test]
-    fn test_config_validate_project_dir_not_found() {
-        let config = Config {
-            project_dir: PathBuf::from("/nonexistent/path/that/should/not/exist"),
-            role: Role::Dev,
-            wasm_path_override: None,
-            zellij_session: "test".to_string(),
-        };
-
-        let result = config.validate();
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            ConfigError::ProjectDirNotFound { path } => {
-                assert_eq!(
-                    path,
-                    PathBuf::from("/nonexistent/path/that/should/not/exist")
-                );
-            }
-            other => panic!("Expected ProjectDirNotFound, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn test_config_validate_project_dir_not_directory() {
-        let temp = setup_test_dir();
-        let file_path = temp.path().join("not_a_dir");
-        fs::write(&file_path, "content").unwrap();
-
-        let config = Config {
-            project_dir: file_path.clone(),
-            role: Role::Dev,
-            wasm_path_override: None,
-            zellij_session: "test".to_string(),
-        };
-
-        let result = config.validate();
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            ConfigError::ProjectDirNotDirectory { path } => {
-                assert_eq!(path, file_path);
-            }
-            other => panic!("Expected ProjectDirNotDirectory, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn test_config_resolve_wasm_path_with_override() {
-        let config = Config {
-            project_dir: PathBuf::from("."),
-            role: Role::TL,
-            wasm_path_override: Some(PathBuf::from("/custom/wasm")),
-            zellij_session: "test".to_string(),
-        };
-
-        let path = config.resolve_wasm_path().unwrap();
-        assert_eq!(path, PathBuf::from("/custom/wasm/wasm-guest-tl.wasm"));
-    }
-
-    #[test]
-    fn test_config_resolve_wasm_path_default_missing() {
-        let config = Config {
-            project_dir: PathBuf::from("."),
-            role: Role::Dev,
-            wasm_path_override: None,
-            zellij_session: "test".to_string(),
-        };
-
-        // Without the WASM file on disk, resolve returns WasmNotFound
-        let err = config.resolve_wasm_path().unwrap_err();
-        match err {
-            ConfigError::WasmNotFound { path, role } => {
-                assert!(path.to_string_lossy().contains("wasm-guest-dev.wasm"));
-                assert_eq!(role, "dev");
-            }
-            other => panic!("Expected WasmNotFound, got: {:?}", other),
-        }
-    }
-
-    #[test]
-    fn test_config_error_display() {
-        let err = ConfigError::ProjectDirNotFound {
-            path: PathBuf::from("/test"),
-        };
-        assert!(err.to_string().contains("/test"));
-
-        let err = ConfigError::WasmNotFound {
-            path: PathBuf::from(".exomonad/wasm/wasm-guest-tl.wasm"),
-            role: "tl".to_string(),
-        };
-        assert!(err.to_string().contains("wasm-guest-tl.wasm"));
-
-        let err = ConfigError::MissingField {
-            field: "role".to_string(),
-        };
-        assert!(err.to_string().contains("role"));
-    }
-
-    #[test]
-    fn test_validated_config_accessors() {
-        let temp = setup_test_dir();
-        let project_dir = temp.path().to_path_buf();
-
-        // Create a mock WASM file
-        let wasm_dir = temp.path().join("wasm");
-        fs::create_dir_all(&wasm_dir).unwrap();
-        let wasm_file = wasm_dir.join("wasm-guest-dev.wasm");
-        fs::write(&wasm_file, b"mock wasm").unwrap();
-
-        let config = Config {
-            project_dir: project_dir.clone(),
-            role: Role::Dev,
-            wasm_path_override: Some(wasm_dir),
-            zellij_session: "test".to_string(),
-        };
-
-        let validated = config.validate().unwrap();
-        assert_eq!(validated.project_dir(), &project_dir);
-        assert_eq!(validated.role(), Role::Dev);
-        assert!(validated
-            .wasm_path_buf()
-            .to_string_lossy()
-            .contains("wasm-guest-dev.wasm"));
     }
 
     #[test]
     fn test_sanitize_session_name() {
         // Dots replaced with underscores
-        assert_eq!(sanitize_session_name("my.project".to_string()), "my_project");
+        assert_eq!(
+            sanitize_session_name("my.project".to_string()),
+            "my_project"
+        );
 
         // Max 36 characters
         let long_name = "a".repeat(50);

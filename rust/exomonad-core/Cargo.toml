@@ -17,6 +17,7 @@ thiserror = { workspace = true }
 exomonad-shared = { path = "../exomonad-shared" }
 exomonad-proto = { path = "../exomonad-proto", features = ["effects"] }
 prost = { workspace = true }
+sha2 = "0.10"
 
 [dev-dependencies]
 async-trait = { workspace = true }

@@ -6,10 +6,12 @@ Unified sidecar binary: Rust host with Haskell WASM plugin.
 
 **All logic is in Haskell WASM. Rust handles I/O only.**
 
+WASM is embedded in the binary at compile time via `include_bytes!`. No file paths, no discovery, no symlinks. The binary IS the WASM.
+
 ```
 Claude Code → exomonad [hook|mcp|mcp-stdio]
                      ↓
-              Load WASM via config (role field)
+              Embedded WASM (selected by role from config)
                      ↓
               WASM plugin (Haskell)
                      ↓ yields effects
@@ -34,15 +36,12 @@ Claude Code → stdio → exomonad mcp-stdio → WASM handle_mcp_call → Result
 
 ## CLI Usage
 
-The sidecar auto-discovers WASM based on `.exomonad/config.toml`:
+WASM is embedded in the binary. The `role` field in `.exomonad/config.toml` selects which embedded WASM plugin to use:
 
 ```bash
-# Config file specifies role, resolves .exomonad/wasm/wasm-guest-{role}.wasm
 exomonad hook pre-tool-use
 exomonad mcp-stdio
 ```
-
-No `--wasm` argument needed! The `role` field in `.exomonad/config.toml` determines which WASM plugin to load.
 
 **Example `.exomonad/config.toml`:**
 ```toml
@@ -50,11 +49,11 @@ default_role = "tl"
 project_dir = "."
 ```
 
-This will load `.exomonad/wasm/wasm-guest-tl.wasm`.
-
 **Config hierarchy:**
 - `config.toml` uses `default_role` (project-wide default)
 - `config.local.toml` uses `role` (worktree-specific override)
+
+To update WASM: rebuild the Rust binary with `just install-all-dev`. The `build.rs` copies WASM files into the binary via `include_bytes!`, so WASM and binary are always in sync.
 
 ## MCP Server
 
@@ -74,8 +73,6 @@ Add `.mcp.json` to your project root:
   }
 }
 ```
-
-**Note:** The WASM plugin path is auto-resolved from the config's role (from `config.local.toml`) or default_role (from `config.toml`).
 
 ### Available Tools
 
@@ -105,7 +102,6 @@ The spawn tools (`spawn_agents`, `cleanup_agents`, `list_agents`) require:
 | Variable | Required | Purpose |
 |----------|----------|---------|
 | `RUST_LOG` | No | Tracing log level |
-| `EXOMONAD_WASM_PATH` | No | **DEPRECATED** - Use `.exomonad/config.toml` with `default_role` field instead |
 
 ## Effect Boundary (WASM)
 
@@ -128,12 +124,15 @@ All handlers are registered by `exomonad_contrib::register_builtin_handlers()`.
 
 ## Building
 
-```bash
-# Build sidecar
-cargo build -p exomonad
+WASM must be built before Rust, since the Rust binary embeds WASM at compile time:
 
-# Build WASM plugin (requires nix develop .#wasm)
-nix develop .#wasm -c wasm32-wasi-cabal build --project-file=cabal.project.wasm wasm-guest
+```bash
+# Full install (recommended): builds WASM, then Rust, installs everything
+just install-all-dev
+
+# Or manually:
+just wasm-all                    # Build WASM plugins first
+cargo build -p exomonad          # Then build Rust (embeds WASM via build.rs)
 ```
 
 ## Testing
@@ -142,7 +141,7 @@ nix develop .#wasm -c wasm32-wasi-cabal build --project-file=cabal.project.wasm 
 # Unit tests
 cargo test -p exomonad
 
-# E2E hook test (requires .exomonad/config.toml with default_role field and built WASM)
+# E2E hook test (binary has embedded WASM)
 echo '{"session_id":"test","hook_event_name":"PreToolUse","tool_name":"Write","transcript_path":"/tmp/t.jsonl","cwd":"/","permission_mode":"default"}' | \
   ./target/debug/exomonad hook pre-tool-use
 ```
@@ -155,7 +154,7 @@ Claude Code hook JSON (stdin)
          ↓
     exomonad hook pre-tool-use
          ↓
-    Load WASM via config (role field)
+    Use embedded WASM (role from config)
          ↓
     Parse HookInput
          ↓
@@ -178,7 +177,7 @@ Claude Code MCP request
          ↓
     exomonad mcp-stdio
          ↓
-    Load WASM via config (role field)
+    Use embedded WASM (role from config)
          ↓
     stdio receives JSON-RPC request
          ↓

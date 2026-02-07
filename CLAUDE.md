@@ -303,13 +303,11 @@ Hook configuration is **auto-generated per worktree** by `write_context_files()`
 }
 ```
 
-**Note:** The WASM plugin path is auto-resolved from `.exomonad/config.toml`'s `default_role` field. Ensure you have a config file:
+**Note:** WASM is embedded in the Rust binary at compile time via `include_bytes!`. The `role` field in config selects which embedded plugin to use. Ensure you have a config file:
 ```toml
-default_role = "tl"  # or "dev", "pm", etc.
+default_role = "tl"  # or "dev"
 project_dir = "."
 ```
-
-WASM plugins are loaded from project-local `.exomonad/wasm/wasm-guest-{role}.wasm`.
 
 **Config hierarchy:**
 - `config.toml` uses `default_role` (project-wide default)
@@ -325,12 +323,7 @@ just install-all-dev
 # Or install release build (optimized, slower compile)
 just install-all
 
-# Incremental WASM builds (faster, uses cabal's incremental compilation)
-just wasm-deps       # One-time: fetch WASM dependencies
-just wasm-dev tl     # Incremental build (~7s no-change rebuilds)
-just wasm-dev dev
-
-# Hermetic WASM builds (slower, fully reproducible via nix)
+# WASM builds (hermetic via nix)
 just wasm tl
 just wasm dev
 
@@ -339,12 +332,12 @@ cd rust && cargo build -p exomonad
 ```
 
 **What `just install-all-dev` does:**
-1. Builds exomonad (debug mode, fast incremental builds)
-2. Copies binary to `~/.cargo/bin/exomonad`
-3. Builds both WASM plugins (dev and tl) using nix
-4. Installs to `.exomonad/wasm/wasm-guest-{dev,tl}.wasm`
+1. Builds both WASM plugins (tl and dev) via nix
+2. Builds exomonad Rust binary (debug mode, embeds WASM via `build.rs` + `include_bytes!`)
+3. Copies binary to `~/.cargo/bin/exomonad`
+4. Builds and installs Zellij plugins
 
-The sidecar auto-discovers WASM plugins based on `.exomonad/config.toml`'s `default_role` field (or `config.local.toml`'s `role` field if present).
+WASM and binary are always in sync — the binary IS the WASM. To update WASM, rebuild the Rust binary.
 
 ### MCP Tools
 
@@ -378,7 +371,7 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 - ✅ 100% WASM routing (all logic in Haskell, Rust handles I/O only)
 - ✅ MCP stdio server for Claude Code
 - ✅ Hook forwarding via WASM
-- ✅ Config-based WASM path resolution (no CLI arguments)
+- ✅ Embedded WASM (compile-time `include_bytes!`, no file paths)
 - ✅ spawn_agents: Git worktrees + Zellij KDL layouts
 - ✅ Proper Zellij tab creation with full UI (tab-bar, status-bar)
 - ✅ Shell-wrapped commands for environment inheritance

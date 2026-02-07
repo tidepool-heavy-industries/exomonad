@@ -30,7 +30,7 @@ pub mod util;
 // Re-export commonly used types at crate root
 pub use domain::{
     AbsolutePath, DomainError, GithubOwner, GithubRepo, IssueNumber, PathError, Role, SessionId,
-    ToolName, ToolPermission, WasmPath,
+    ToolName, ToolPermission,
 };
 pub use error::{ExoMonadError, Result};
 pub use ffi::{ErrorCode, ErrorContext, FFIBoundary, FFIError, FFIResult};

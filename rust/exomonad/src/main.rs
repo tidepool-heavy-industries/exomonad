@@ -1,10 +1,10 @@
-//! exomonad: Rust host with Haskell WASM plugin.
+//! exomonad: Rust host with embedded Haskell WASM plugin.
 //!
 //! This binary runs as a sidecar in each agent container, handling:
 //! - Claude Code hooks via WASM plugin
 //! - MCP tools via local Rust implementation
 //!
-//! All IO is handled by Rust; Haskell WASM yields high-level semantic effects.
+//! WASM plugins are embedded at compile time. No file paths to resolve.
 
 use exomonad::config;
 
@@ -36,7 +36,7 @@ use tracing_subscriber::prelude::*;
 
 #[derive(Parser)]
 #[command(name = "exomonad")]
-#[command(about = "ExoMonad: Rust host with Haskell WASM plugin for agent orchestration")]
+#[command(about = "ExoMonad: Rust host with embedded Haskell WASM plugin for agent orchestration")]
 #[command(version)]
 struct Cli {
     #[command(subcommand)]
@@ -88,12 +88,6 @@ enum Commands {
         /// Cancel the request
         #[arg(long)]
         cancel: bool,
-    },
-
-    /// Warmup the WASM plugin cache
-    Warmup {
-        /// Path to the WASM file
-        path: PathBuf,
     },
 }
 
@@ -480,122 +474,72 @@ fn generate_tl_layout() -> Result<std::path::PathBuf> {
 // ============================================================================
 
 /// Initialize logging based on the command mode.
-/// - MCP stdio: Logs to .exomonad/logs/sidecar.log.YYYY-MM-DD (rolling)
-/// - Other modes: Logs to stderr + .exomonad/logs/sidecar.log.YYYY-MM-DD (rolling)
+///
+/// Two independent axes composed via Option layers:
+/// - **File layer**: Always present if .exomonad/logs/ is writable (rolling daily)
+/// - **Stderr layer**: Present for non-MCP commands (MCP uses stdio, stderr would corrupt it)
+///
+/// JSON formatting controlled by EXOMONAD_LOG_FORMAT=json.
 fn init_logging(command: &Commands) -> Option<tracing_appender::non_blocking::WorkerGuard> {
     let use_json = std::env::var("EXOMONAD_LOG_FORMAT")
         .map(|v| v.eq_ignore_ascii_case("json"))
         .unwrap_or(false);
+    let is_mcp = matches!(command, Commands::McpStdio);
 
     let log_dir = PathBuf::from(".exomonad/logs");
-    let mut file_logging_enabled = true;
-    if let Err(e) = std::fs::create_dir_all(&log_dir) {
-        eprintln!(
-            "Failed to create log directory .exomonad/logs: {}. Falling back to stderr-only logging.",
-            e
-        );
-        file_logging_enabled = false;
+    let file_ok = std::fs::create_dir_all(&log_dir).is_ok();
+    if !file_ok {
+        eprintln!("Failed to create .exomonad/logs/. Falling back to stderr-only logging.");
     }
 
     let env_filter = tracing_subscriber::EnvFilter::from_default_env()
         .add_directive(tracing::Level::INFO.into());
 
-    let registry = tracing_subscriber::registry().with(env_filter);
-
-    let (nb, guard) = if file_logging_enabled {
-        let file_appender = tracing_appender::rolling::daily(&log_dir, "sidecar.log");
-        let (nb, g) = tracing_appender::non_blocking(file_appender);
-        (Some(nb), Some(g))
+    // File layer (Option — absent if dir creation failed)
+    let (file_layer_plain, file_layer_json, guard) = if file_ok {
+        let appender = tracing_appender::rolling::daily(&log_dir, "sidecar.log");
+        let (nb, g) = tracing_appender::non_blocking(appender);
+        if use_json {
+            let layer = tracing_subscriber::fmt::layer()
+                .json()
+                .with_writer(nb)
+                .with_ansi(false);
+            (None, Some(layer), Some(g))
+        } else {
+            let layer = tracing_subscriber::fmt::layer()
+                .with_writer(nb)
+                .with_ansi(false);
+            (Some(layer), None, Some(g))
+        }
     } else {
-        (None, None)
+        (None, None, None)
     };
 
-    match (command, nb, use_json) {
-        // MCP stdio with File Logging
-        (Commands::McpStdio, Some(nb), true) => {
-            registry
-                .with(
-                    tracing_subscriber::fmt::layer()
-                        .json()
-                        .with_writer(nb)
-                        .with_ansi(false),
-                )
-                .init();
-            eprintln!(
-                "MCP stdio logging to .exomonad/logs/sidecar.log.YYYY-MM-DD (daily rotation)"
-            );
-        }
-        (Commands::McpStdio, Some(nb), false) => {
-            registry
-                .with(
-                    tracing_subscriber::fmt::layer()
-                        .with_writer(nb)
-                        .with_ansi(false),
-                )
-                .init();
-            eprintln!(
-                "MCP stdio logging to .exomonad/logs/sidecar.log.YYYY-MM-DD (daily rotation)"
-            );
-        }
+    // Stderr layer (Option — absent for MCP stdio to avoid corrupting JSON-RPC)
+    let (stderr_layer_plain, stderr_layer_json) = if is_mcp && file_ok {
+        // MCP with file logging: no stderr needed
+        (None, None)
+    } else if use_json {
+        let layer = tracing_subscriber::fmt::layer()
+            .json()
+            .with_writer(std::io::stderr);
+        (None, Some(layer))
+    } else {
+        let layer = tracing_subscriber::fmt::layer()
+            .with_writer(std::io::stderr);
+        (Some(layer), None)
+    };
 
-        // MCP stdio without File Logging (fallback to stderr)
-        (Commands::McpStdio, None, true) => {
-            registry
-                .with(
-                    tracing_subscriber::fmt::layer()
-                        .json()
-                        .with_writer(std::io::stderr),
-                )
-                .init();
-        }
-        (Commands::McpStdio, None, false) => {
-            registry
-                .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
-                .init();
-        }
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(file_layer_plain)
+        .with(file_layer_json)
+        .with(stderr_layer_plain)
+        .with(stderr_layer_json)
+        .init();
 
-        // Other commands with File Logging
-        (_, Some(nb), true) => {
-            registry
-                .with(
-                    tracing_subscriber::fmt::layer()
-                        .json()
-                        .with_writer(nb)
-                        .with_ansi(false),
-                )
-                .with(
-                    tracing_subscriber::fmt::layer()
-                        .json()
-                        .with_writer(std::io::stderr),
-                )
-                .init();
-        }
-        (_, Some(nb), false) => {
-            registry
-                .with(
-                    tracing_subscriber::fmt::layer()
-                        .with_writer(nb)
-                        .with_ansi(false),
-                )
-                .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
-                .init();
-        }
-
-        // Other commands without File Logging
-        (_, None, true) => {
-            registry
-                .with(
-                    tracing_subscriber::fmt::layer()
-                        .json()
-                        .with_writer(std::io::stderr),
-                )
-                .init();
-        }
-        (_, None, false) => {
-            registry
-                .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
-                .init();
-        }
+    if is_mcp && file_ok {
+        eprintln!("MCP stdio logging to .exomonad/logs/sidecar.log.YYYY-MM-DD (daily rotation)");
     }
 
     guard
@@ -624,28 +568,21 @@ async fn main() -> Result<()> {
     let _guard = init_logging(&cli.command);
 
     // Discover config (or use default)
-    let raw_config = config::Config::discover().unwrap_or_else(|e| {
+    let config = config::Config::discover().unwrap_or_else(|e| {
         debug!(error = %e, "No config found, using defaults");
         config::Config::default()
     });
 
-    // Validate config (exits early with helpful error if invalid)
-    let config = raw_config
-        .validate()
-        .map_err(|e| anyhow::anyhow!("Config validation failed: {}", e))?;
-
-    let wasm_path = config.wasm_path_buf();
-
+    // Load embedded WASM for the configured role
+    let wasm_bytes = exomonad::wasm::get(config.role)?;
     info!(
-        role = ?config.role(),
-        wasm_path = %wasm_path.display(),
-        "Loaded and validated config"
+        role = ?config.role,
+        wasm_size = wasm_bytes.len(),
+        "Using embedded WASM"
     );
 
     match cli.command {
         Commands::Hook { event, runtime } => {
-            info!(wasm = ?wasm_path, "Loading WASM plugin");
-
             // Initialize and validate services
             let services = Arc::new(
                 Services::new()
@@ -654,29 +591,25 @@ async fn main() -> Result<()> {
             );
 
             // Build runtime with all effect handlers
-            let rt = build_runtime(&wasm_path, &services, Some(config.zellij_session().to_string())).await?;
+            let rt = build_runtime(wasm_bytes, &services, Some(config.zellij_session.clone())).await?;
 
             info!("WASM plugin loaded and initialized");
 
-            handle_hook(rt.plugin_manager(), event, runtime, &config.zellij_session()).await?;
+            handle_hook(rt.plugin_manager(), event, runtime, &config.zellij_session).await?;
         }
 
         Commands::McpStdio => {
             // stdio MCP server - Claude Code spawns this process
-            // Use config already loaded above
-            let project_dir_ref = config.project_dir();
-            let project_dir = if project_dir_ref.is_absolute() {
-                project_dir_ref.clone()
+            let project_dir = if config.project_dir.is_absolute() {
+                config.project_dir.clone()
             } else {
                 std::env::current_dir()
                     .context("Failed to get current directory")?
-                    .join(project_dir_ref)
+                    .join(&config.project_dir)
             };
 
             let pid_file = project_dir.join(".exomonad/sidecar.pid");
             let _pid_guard = exomonad::pid::PidGuard::new(&pid_file)?;
-
-            info!(wasm = ?wasm_path, "Loading WASM plugin");
 
             // Initialize and validate services (secrets loaded from ~/.exomonad/secrets)
             let services = Arc::new(
@@ -686,7 +619,7 @@ async fn main() -> Result<()> {
             );
 
             // Build runtime with all effect handlers + Zellij session for popup support
-            let rt = build_runtime(&wasm_path, &services, Some(config.zellij_session().to_string())).await?;
+            let rt = build_runtime(wasm_bytes, &services, Some(config.zellij_session.clone())).await?;
             let state = rt.into_mcp_state(project_dir);
 
             // Emit AgentStarted
@@ -697,7 +630,7 @@ async fn main() -> Result<()> {
                         agent_id: id,
                         timestamp: zellij_events::now_iso8601(),
                     };
-                    if let Err(e) = zellij_events::emit_event(&config.zellij_session(), &start_event) {
+                    if let Err(e) = zellij_events::emit_event(&config.zellij_session, &start_event) {
                         warn!("Failed to emit agent:started event: {}", e);
                     }
                 }
@@ -715,7 +648,7 @@ async fn main() -> Result<()> {
                         agent_id: id,
                         timestamp: zellij_events::now_iso8601(),
                     };
-                    if let Err(e) = zellij_events::emit_event(&config.zellij_session(), &stop_event) {
+                    if let Err(e) = zellij_events::emit_event(&config.zellij_session, &stop_event) {
                         warn!("Failed to emit agent:stopped event: {}", e);
                     }
                 }
@@ -767,22 +700,6 @@ async fn main() -> Result<()> {
             // We don't necessarily wait for response here, it's a push notification
             info!("Sent reply to control socket");
         }
-
-        Commands::Warmup { path } => {
-            info!(path = %path.display(), "Warming up WASM plugin cache...");
-
-            // Initialize services
-            let services = Arc::new(
-                Services::new()
-                    .validate()
-                    .context("Failed to validate services")?,
-            );
-
-            // Build runtime — this triggers WASM compilation and caching
-            let _rt = build_runtime(&path, &services, None).await?;
-
-            info!("WASM plugin warmed up successfully");
-        }
     }
 
     Ok(())
@@ -790,11 +707,11 @@ async fn main() -> Result<()> {
 
 /// Build a Runtime with all effect handlers registered.
 async fn build_runtime(
-    wasm_path: &PathBuf,
+    wasm_bytes: &[u8],
     services: &Arc<exomonad_contrib::ValidatedServices>,
     zellij_session: Option<String>,
 ) -> Result<Runtime> {
-    let mut builder = RuntimeBuilder::new().with_wasm_path(wasm_path);
+    let mut builder = RuntimeBuilder::new().with_wasm_bytes(wasm_bytes.to_vec());
 
     if let Some(session) = zellij_session {
         builder = builder.with_zellij_session(session);

@@ -21,7 +21,7 @@
 //! let runtime = RuntimeBuilder::new()
 //!     .with_effect_handler(GitHandler::new(services.git().clone()))
 //!     .with_effect_handler(LogHandler::new())
-//!     .with_wasm_path("plugin.wasm")
+//!     .with_wasm_bytes(wasm_bytes)
 //!     .build()
 //!     .await?;
 //! ```

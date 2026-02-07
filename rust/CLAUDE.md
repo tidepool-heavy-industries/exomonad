@@ -41,7 +41,7 @@ Claude Code (hook or MCP call)
 Human in Zellij session
     └── Claude Code (main tab, role=tl)
             ├── MCP server: exomonad mcp-stdio
-            ├── WASM: .exomonad/wasm/wasm-guest-tl.wasm (loaded via config)
+            ├── WASM: embedded in binary (role=tl selected via config)
             └── spawn_agents creates:
                 ├── Tab gh-433 (worktree, role=dev, auto-starts Claude)
                 ├── Tab gh-456 (worktree, role=dev, auto-starts Claude)
@@ -144,7 +144,7 @@ exomonad mcp --port 7432
 echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
 ```
 
-**Note:** WASM plugin path is auto-resolved from config: `.exomonad/config.toml`'s `default_role` field (or `config.local.toml`'s `role` field for worktree overrides). WASM is loaded from `.exomonad/wasm/wasm-guest-{role}.wasm`.
+**Note:** WASM is embedded in the binary at compile time. The `role` field in config selects which embedded plugin to use. To update WASM, rebuild with `just install-all-dev`.
 
 ### Environment Variables
 | Variable | Used By | Purpose |
@@ -241,7 +241,7 @@ cargo test -p exomonad-proto            # Wire format compatibility tests
 | Local Zellij orchestration | Git worktrees + Zellij tabs, no Docker containers |
 | Extism runtime | Mature WASM runtime with host function support |
 | KDL layouts | Declarative tab creation with proper environment inheritance |
-| Config-based WASM resolution | `role` field in `.exomonad/config.local.toml` |
+| Embedded WASM | `include_bytes!` at compile time, role selects which blob |
 
 ## Related Documentation
 

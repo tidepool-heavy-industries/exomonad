@@ -1,6 +1,6 @@
 use crate::{ExternalService, ServiceError};
 use async_trait::async_trait;
-use exomonad_shared::domain::{ItemState, ReviewState, UpperItemState};
+use exomonad_shared::domain::{ItemState, ReviewState};
 use exomonad_shared::protocol::{
     GitHubAuthorRef, GitHubDiscussionComment, GitHubLabelRef, GitHubPRRef, GitHubReviewComment,
 };
@@ -183,13 +183,6 @@ fn state_to_item_state(state: octocrab::models::IssueState) -> ItemState {
     }
 }
 
-fn issue_state_to_upper_item_state(state: octocrab::models::IssueState) -> UpperItemState {
-    match state {
-        octocrab::models::IssueState::Open => UpperItemState::Open,
-        octocrab::models::IssueState::Closed => UpperItemState::Closed,
-        _ => UpperItemState::Unknown,
-    }
-}
 
 #[async_trait]
 impl ExternalService for GitHubService {
@@ -320,7 +313,7 @@ impl ExternalService for GitHubService {
                         number: i.number as u32,
                         title: i.title,
                         body: i.body.unwrap_or_default(),
-                        state: issue_state_to_upper_item_state(i.state),
+                        state: state_to_item_state(i.state),
                         url: i.html_url.to_string(),
                         author: GitHubAuthorRef {
                             login: i.user.login,
@@ -406,7 +399,7 @@ impl ExternalService for GitHubService {
                         code: 500,
                         message: e.to_string(),
                     })?;
-                Ok(ServiceResponse::OtelAck) // Simple ack
+                Ok(ServiceResponse::Ack) // Simple ack
             }
             ServiceRequest::GitHubRemoveIssueLabel {
                 owner,
@@ -422,7 +415,7 @@ impl ExternalService for GitHubService {
                         code: 500,
                         message: e.to_string(),
                     })?;
-                Ok(ServiceResponse::OtelAck)
+                Ok(ServiceResponse::Ack)
             }
             ServiceRequest::GitHubAddIssueAssignee {
                 owner,
@@ -438,7 +431,7 @@ impl ExternalService for GitHubService {
                         code: 500,
                         message: e.to_string(),
                     })?;
-                Ok(ServiceResponse::OtelAck)
+                Ok(ServiceResponse::Ack)
             }
             ServiceRequest::GitHubListPullRequests {
                 owner,

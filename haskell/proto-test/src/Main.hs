@@ -92,6 +92,8 @@ main = do
       testDecodeRustCustomError,
       -- Cross-language: varint boundary (128-byte payload)
       testDecodeRustVarintBoundary128,
+      -- Cross-language: large payload (reproduces production decode failure)
+      testDecodeRustLargeSpawnBatchError,
       -- Symmetry: Haskell-encoded bytes match Rust reference
       testHaskellEncodingMatchesRust,
       testHaskellGetBranchEncodingMatchesRust,
@@ -481,6 +483,37 @@ testDecodeRustVarintBoundary128 = do
             ("payload_len=" ++ show (BS.length p))
         other ->
           pure $ Fail "decode_rust_varint_128" ("Expected Payload, got: " ++ show other)
+
+-- ============================================================================
+-- Cross-language: large payload (reproduces production decode failure)
+-- ============================================================================
+
+-- Rust: EffectResponse { Payload(SpawnBatchResponse { errors: [<377-byte string>] }) }
+-- Outer message: 383 bytes total (tag + 2-byte varint + 380 payload)
+-- Inner SpawnBatchResponse: 380 bytes (tag + 2-byte varint + 377 string)
+testDecodeRustLargeSpawnBatchError :: IO TestResult
+testDecodeRustLargeSpawnBatchError = do
+  -- Construct the 383-byte message from known Rust output
+  let header = pack [0x0a, 0xfc, 0x02] -- field 1, LEN, varint 380
+  let innerHeader = pack [0x12, 0xf9, 0x02] -- field 2, LEN, varint 377
+  let errorStr = "Issue 539: git worktree add failed: Preparing worktree (checking out 'gh-539/improve-stop-hook-error-messages-with-specific-com-gemini')\nfatal: '/Users/inannamalick/hangars/tidepool/repo/.exomonad/worktrees/gh-539-improve-stop-hook-error-messages-with-specific-com-gemini' is a missing but already registered worktree;\nuse 'git worktree prune' to remove stale worktree entries\n"
+  let rustBytes = header <> innerHeader <> errorStr
+  case fromByteString rustBytes of
+    Left err ->
+      pure $ Fail "decode_rust_large_spawn_batch_error" ("Outer decode failed: " ++ show err ++ " bytes_len=" ++ show (BS.length rustBytes))
+    Right (decoded :: EffectResponse) ->
+      case effectResponseResult decoded of
+        Just (EffectResponseResultPayload innerBytes) ->
+          case fromByteString innerBytes of
+            Left err ->
+              pure $ Fail "decode_rust_large_spawn_batch_error" ("Inner decode failed: " ++ show err)
+            Right (inner :: SpawnBatchResponse) ->
+              assert
+                "decode_rust_large_spawn_batch_error"
+                (V.length (spawnBatchResponseErrors inner) == 1)
+                ("errors=" ++ show (V.length (spawnBatchResponseErrors inner)))
+        other ->
+          pure $ Fail "decode_rust_large_spawn_batch_error" ("Expected Payload, got: " ++ show other)
 
 -- ============================================================================
 -- Symmetry: verify Haskell-encoded bytes match Rust reference

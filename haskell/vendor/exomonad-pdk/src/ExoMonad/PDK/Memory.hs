@@ -58,19 +58,18 @@ readBytes offs len = readLoop extismLoadU8 extismLoadU64 (offs + len) offs []
 readInputBytes :: InputLength -> IO B.ByteString
 readInputBytes len = readLoop extismInputLoadU8 extismInputLoadU64 len 0 []
 
--- | Internal loop for reading bytes efficiently
+-- | Internal loop for reading bytes.
+--
+-- Reads byte-by-byte using the u8 function only. The u64 optimization
+-- caused alignment issues on wasm32 (poke of Word64 to unaligned Ptr
+-- produced garbled bytes, breaking protobuf varint parsing).
 readLoop :: (Word64 -> IO Word8) -> (Word64 -> IO Word64) -> Word64 -> Word64 -> [B.ByteString] -> IO B.ByteString
-readLoop f1 f8 total index acc =
+readLoop f1 _f8 total index acc =
   if index >= total
     then return $ B.concat . reverse $ acc
     else do
-      if total - index >= 8
-        then do
-          u <- f8 index
-          readLoop f1 f8 total (index + 8) (word64ToBS u : acc)
-        else do
-          b <- f1 index
-          readLoop f1 f8 total (index + 1) (B.singleton b : acc)
+      b <- f1 index
+      readLoop f1 _f8 total (index + 1) (B.singleton b : acc)
 
 -- | Helper to convert Word64 to ByteString (little-endian)
 word64ToBS :: Word64 -> B.ByteString

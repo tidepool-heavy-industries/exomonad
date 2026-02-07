@@ -237,7 +237,7 @@ impl ExternalService for OtelService {
                     });
                 }
 
-                Ok(ServiceResponse::OtelAck)
+                Ok(ServiceResponse::Ack)
             }
             ServiceRequest::OtelMetric {
                 name,
@@ -297,7 +297,7 @@ impl ExternalService for OtelService {
                     });
                 }
 
-                Ok(ServiceResponse::OtelAck)
+                Ok(ServiceResponse::Ack)
             }
             _ => panic!("Invalid request type for OtelService"),
         }
@@ -332,7 +332,7 @@ mod tests {
         };
 
         match service.call(req).await.unwrap() {
-            ServiceResponse::OtelAck => {}
+            ServiceResponse::Ack => {}
             _ => panic!("Wrong response type"),
         }
     }

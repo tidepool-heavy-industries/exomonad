@@ -143,8 +143,8 @@ yieldEffect effectType request = do
                         <> TL.pack (show respLen)
                         <> " loaded_bytes="
                         <> TL.pack (show (BS.length bytes))
-                        <> " first_bytes=["
-                        <> TL.pack (showHexBytes (BS.take 32 bytes))
+                        <> " all_bytes=["
+                        <> TL.pack (showHexBytes bytes)
                         <> "] error="
                         <> TL.pack (show parseErr)
                     )

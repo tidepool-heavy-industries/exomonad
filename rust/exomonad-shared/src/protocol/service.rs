@@ -2,7 +2,7 @@
 //!
 //! Types for external service integrations (LLM, GitHub, Observability, User Interaction).
 
-use crate::domain::{GithubOwner, GithubRepo, ItemState, ReviewState, UpperItemState};
+use crate::domain::{GithubOwner, GithubRepo, ItemState, ReviewState};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -221,9 +221,9 @@ pub enum ServiceResponse {
         user: Option<String>,
     },
 
-    // Observability
-    #[serde(rename = "OtelAckResponse")]
-    OtelAck,
+    // Generic acknowledgment (label/assignee operations, OTLP export, etc.)
+    #[serde(rename = "AckResponse", alias = "OtelAckResponse")]
+    Ack,
 
     // Error
     #[serde(rename = "ErrorResponse")]
@@ -285,7 +285,7 @@ pub struct GitHubIssueRef {
     pub number: u32,
     pub title: String,
     pub body: String,
-    pub state: UpperItemState,
+    pub state: ItemState,
     pub url: String,
     pub author: GitHubAuthorRef,
     pub labels: Vec<GitHubLabelRef>,
@@ -638,7 +638,7 @@ mod tests {
                     number: 1,
                     title: "Bug".into(),
                     body: "b".into(),
-                    state: UpperItemState::Open,
+                    state: ItemState::Open,
                     url: "u".into(),
                     author: GitHubAuthorRef {
                         login: "a".into(),
@@ -651,7 +651,7 @@ mod tests {
                     number: 2,
                     title: "Feature".into(),
                     body: "b".into(),
-                    state: UpperItemState::Closed,
+                    state: ItemState::Closed,
                     url: "u".into(),
                     author: GitHubAuthorRef {
                         login: "a".into(),
@@ -668,7 +668,7 @@ mod tests {
             ServiceResponse::GitHubIssues { issues } => {
                 assert_eq!(issues.len(), 2);
                 assert_eq!(issues[0].number, 1);
-                assert_eq!(issues[1].state, UpperItemState::Closed);
+                assert_eq!(issues[1].state, ItemState::Closed);
             }
             _ => panic!("Wrong variant"),
         }

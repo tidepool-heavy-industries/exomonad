@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use exomonad_shared::domain::ItemState;
 use exomonad_shared::{FFIBoundary, GithubOwner, GithubRepo};
 use octocrab::{models, params, Octocrab, OctocrabBuilder};
 use serde::{Deserialize, Serialize};
@@ -6,6 +7,18 @@ use tokio::time::{timeout, Duration};
 use tracing::info;
 
 const API_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn octocrab_issue_state(state: models::IssueState) -> ItemState {
+    match state {
+        models::IssueState::Open => ItemState::Open,
+        models::IssueState::Closed => ItemState::Closed,
+        _ => ItemState::Unknown,
+    }
+}
+
+fn octocrab_optional_issue_state(state: Option<models::IssueState>) -> ItemState {
+    state.map(octocrab_issue_state).unwrap_or(ItemState::Unknown)
+}
 
 // ============================================================================
 // Types
@@ -87,8 +100,8 @@ pub struct Issue {
     /// Issue body (markdown description).
     pub body: String,
 
-    /// Issue state ("open" or "closed").
-    pub state: String,
+    /// Issue state.
+    pub state: ItemState,
 
     /// Web URL to the issue.
     pub url: String,
@@ -101,6 +114,20 @@ pub struct Issue {
 }
 
 impl FFIBoundary for Issue {}
+
+impl From<models::issues::Issue> for Issue {
+    fn from(i: models::issues::Issue) -> Self {
+        Self {
+            number: i.number,
+            title: i.title,
+            body: i.body.unwrap_or_default(),
+            state: octocrab_issue_state(i.state),
+            url: i.html_url.to_string(),
+            author: i.user.login,
+            labels: i.labels.into_iter().map(|l| l.name).collect(),
+        }
+    }
+}
 
 /// A GitHub pull request with metadata.
 ///
@@ -116,8 +143,8 @@ pub struct PullRequest {
     /// PR body (markdown description).
     pub body: String,
 
-    /// PR state ("open", "closed", or "merged").
-    pub state: String,
+    /// PR state.
+    pub state: ItemState,
 
     /// Web URL to the PR.
     pub url: String,
@@ -139,6 +166,23 @@ pub struct PullRequest {
 }
 
 impl FFIBoundary for PullRequest {}
+
+impl From<models::pulls::PullRequest> for PullRequest {
+    fn from(pr: models::pulls::PullRequest) -> Self {
+        Self {
+            number: pr.number,
+            title: pr.title.unwrap_or_default(),
+            body: pr.body.unwrap_or_default(),
+            state: octocrab_optional_issue_state(pr.state),
+            url: pr.html_url.map(|u| u.to_string()).unwrap_or_default(),
+            author: pr.user.map(|u| u.login).unwrap_or_else(|| "unknown".into()),
+            head_ref: pr.head.ref_field,
+            base_ref: pr.base.ref_field,
+            created_at: pr.created_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
+            merged_at: pr.merged_at.map(|t| t.to_rfc3339()),
+        }
+    }
+}
 
 /// A review comment on a pull request.
 ///
@@ -336,22 +380,7 @@ impl GitHubService {
             "GitHub API: List issues successful"
         );
 
-        Ok(issues
-            .into_iter()
-            .map(|i| Issue {
-                number: i.number,
-                title: i.title,
-                body: i.body.unwrap_or_default(),
-                state: match i.state {
-                    models::IssueState::Open => "open".to_string(),
-                    models::IssueState::Closed => "closed".to_string(),
-                    _ => "unknown".to_string(),
-                },
-                url: i.html_url.to_string(),
-                author: i.user.login,
-                labels: i.labels.into_iter().map(|l| l.name).collect(),
-            })
-            .collect())
+        Ok(issues.into_iter().map(Issue::from).collect())
     }
 
     #[tracing::instrument(skip(self))]
@@ -375,19 +404,7 @@ impl GitHubService {
 
         info!(repo = %repo_name, number, "GitHub API: Get issue successful");
 
-        Ok(Issue {
-            number: issue.number,
-            title: issue.title,
-            body: issue.body.unwrap_or_default(),
-            state: match issue.state {
-                models::IssueState::Open => "open".to_string(),
-                models::IssueState::Closed => "closed".to_string(),
-                _ => "unknown".to_string(),
-            },
-            url: issue.html_url.to_string(),
-            author: issue.user.login,
-            labels: issue.labels.into_iter().map(|l| l.name).collect(),
-        })
+        Ok(Issue::from(issue))
     }
 
     #[tracing::instrument(skip(self))]
@@ -417,22 +434,7 @@ impl GitHubService {
             "GitHub API: Create PR successful"
         );
 
-        Ok(PullRequest {
-            number: pr.number,
-            title: pr.title.unwrap_or_default(),
-            body: pr.body.unwrap_or_default(),
-            state: match pr.state {
-                Some(models::IssueState::Open) => "open".to_string(),
-                Some(models::IssueState::Closed) => "closed".to_string(),
-                _ => "unknown".to_string(),
-            },
-            url: pr.html_url.map(|u| u.to_string()).unwrap_or_default(),
-            author: pr.user.map(|u| u.login).unwrap_or_else(|| "unknown".into()),
-            head_ref: pr.head.ref_field,
-            base_ref: pr.base.ref_field,
-            created_at: pr.created_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
-            merged_at: pr.merged_at.map(|t| t.to_rfc3339()),
-        })
+        Ok(PullRequest::from(pr))
     }
 
     #[tracing::instrument(skip(self))]
@@ -475,25 +477,7 @@ impl GitHubService {
             "GitHub API: List PRs successful (page 1)"
         );
 
-        Ok(page
-            .into_iter()
-            .map(|pr| PullRequest {
-                number: pr.number,
-                title: pr.title.unwrap_or_default(),
-                body: pr.body.unwrap_or_default(),
-                state: match pr.state {
-                    Some(models::IssueState::Open) => "open".to_string(),
-                    Some(models::IssueState::Closed) => "closed".to_string(),
-                    _ => "unknown".to_string(),
-                },
-                url: pr.html_url.map(|u| u.to_string()).unwrap_or_default(),
-                author: pr.user.map(|u| u.login).unwrap_or_else(|| "unknown".into()),
-                head_ref: pr.head.ref_field,
-                base_ref: pr.base.ref_field,
-                created_at: pr.created_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
-                merged_at: pr.merged_at.map(|t| t.to_rfc3339()),
-            })
-            .collect())
+        Ok(page.into_iter().map(PullRequest::from).collect())
     }
 
     #[tracing::instrument(skip(self))]
@@ -522,22 +506,7 @@ impl GitHubService {
             None => tracing::info!(head, "No PR found for branch"),
         }
 
-        Ok(pr.map(|pr| PullRequest {
-            number: pr.number,
-            title: pr.title.unwrap_or_default(),
-            body: pr.body.unwrap_or_default(),
-            state: match pr.state {
-                Some(models::IssueState::Open) => "open".to_string(),
-                Some(models::IssueState::Closed) => "closed".to_string(),
-                _ => "unknown".to_string(),
-            },
-            url: pr.html_url.map(|u| u.to_string()).unwrap_or_default(),
-            author: pr.user.map(|u| u.login).unwrap_or_else(|| "unknown".into()),
-            head_ref: pr.head.ref_field,
-            base_ref: pr.base.ref_field,
-            created_at: pr.created_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
-            merged_at: pr.merged_at.map(|t| t.to_rfc3339()),
-        }))
+        Ok(pr.map(PullRequest::from))
     }
 
     #[tracing::instrument(skip(self))]

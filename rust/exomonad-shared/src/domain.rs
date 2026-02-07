@@ -29,192 +29,78 @@ pub enum DomainError {
 }
 
 // ============================================================================
-// Session Identifiers
+// Validated String Macro
 // ============================================================================
 
-/// Session identifier (non-empty string).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct SessionId(String);
+/// Generate a validated non-empty string newtype with standard impls.
+///
+/// Provides: TryFrom<String>, From<&str>, From<T> for String, Display,
+/// as_str(), and serde support via try_from/into.
+macro_rules! validated_string {
+    ($(#[doc = $doc:expr])* $name:ident, $field:expr) => {
+        $(#[doc = $doc])*
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[serde(try_from = "String", into = "String")]
+        pub struct $name(String);
 
-impl TryFrom<String> for SessionId {
-    type Error = DomainError;
+        impl TryFrom<String> for $name {
+            type Error = DomainError;
 
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        if s.is_empty() {
-            return Err(DomainError::Empty {
-                field: "session_id",
-            });
+            fn try_from(s: String) -> Result<Self, Self::Error> {
+                if s.is_empty() {
+                    return Err(DomainError::Empty { field: $field });
+                }
+                Ok(Self(s))
+            }
         }
-        Ok(Self(s))
-    }
+
+        impl From<$name> for String {
+            fn from(val: $name) -> String {
+                val.0
+            }
+        }
+
+        impl From<&str> for $name {
+            fn from(s: &str) -> Self {
+                Self(s.to_string())
+            }
+        }
+
+        impl $name {
+            /// Get the value as a string slice.
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+    };
 }
 
-impl From<SessionId> for String {
-    fn from(id: SessionId) -> String {
-        id.0
-    }
-}
+// ============================================================================
+// String Newtypes
+// ============================================================================
 
+validated_string!(#[doc = "Session identifier (non-empty string)."] SessionId, "session_id");
+validated_string!(#[doc = "Tool name identifier (non-empty string)."] ToolName, "tool_name");
+validated_string!(#[doc = "GitHub repository owner (non-empty string)."] GithubOwner, "github_owner");
+validated_string!(#[doc = "GitHub repository name (non-empty string)."] GithubRepo, "github_repo");
+
+#[cfg(test)]
 impl SessionId {
-    /// Get the session ID as a string slice.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
     /// Create from &str (unchecked, for tests).
-    #[cfg(test)]
     pub fn from_str_unchecked(s: &str) -> Self {
         Self(s.to_string())
     }
 }
 
-impl From<&str> for SessionId {
-    fn from(s: &str) -> Self {
-        Self(s.to_string())
-    }
-}
-
-impl fmt::Display for SessionId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
 // ============================================================================
-// Tool Names
+// GitHub Issue Number
 // ============================================================================
-
-/// Tool name identifier (non-empty string).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct ToolName(String);
-
-impl TryFrom<String> for ToolName {
-    type Error = DomainError;
-
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        if s.is_empty() {
-            return Err(DomainError::Empty { field: "tool_name" });
-        }
-        Ok(Self(s))
-    }
-}
-
-impl From<ToolName> for String {
-    fn from(name: ToolName) -> String {
-        name.0
-    }
-}
-
-impl ToolName {
-    /// Get the tool name as a string slice.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<&str> for ToolName {
-    fn from(s: &str) -> Self {
-        Self(s.to_string())
-    }
-}
-
-impl fmt::Display for ToolName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-// ============================================================================
-// GitHub Identifiers
-// ============================================================================
-
-/// GitHub repository owner (non-empty string).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct GithubOwner(String);
-
-impl TryFrom<String> for GithubOwner {
-    type Error = DomainError;
-
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        if s.is_empty() {
-            return Err(DomainError::Empty {
-                field: "github_owner",
-            });
-        }
-        Ok(Self(s))
-    }
-}
-
-impl From<GithubOwner> for String {
-    fn from(owner: GithubOwner) -> String {
-        owner.0
-    }
-}
-
-impl GithubOwner {
-    /// Get the owner name as a string slice.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<&str> for GithubOwner {
-    fn from(s: &str) -> Self {
-        Self(s.to_string())
-    }
-}
-
-impl fmt::Display for GithubOwner {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-/// GitHub repository name (non-empty string).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct GithubRepo(String);
-
-impl TryFrom<String> for GithubRepo {
-    type Error = DomainError;
-
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        if s.is_empty() {
-            return Err(DomainError::Empty {
-                field: "github_repo",
-            });
-        }
-        Ok(Self(s))
-    }
-}
-
-impl From<GithubRepo> for String {
-    fn from(repo: GithubRepo) -> String {
-        repo.0
-    }
-}
-
-impl GithubRepo {
-    /// Get the repo name as a string slice.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<&str> for GithubRepo {
-    fn from(s: &str) -> Self {
-        Self(s.to_string())
-    }
-}
-
-impl fmt::Display for GithubRepo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
 
 /// GitHub issue number (positive integer).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -361,8 +247,10 @@ impl TryFrom<String> for Role {
 // ============================================================================
 
 /// State of an item (Issue/PR) - Open or Closed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+///
+/// Deserializes case-insensitively to handle both lowercase API responses
+/// and SCREAMING_SNAKE_CASE from GitHub's GraphQL API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ItemState {
     Open,
     Closed,
@@ -379,13 +267,18 @@ impl fmt::Display for ItemState {
     }
 }
 
-/// State of an item (Issue) in list - Uppercase (OPEN, CLOSED).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum UpperItemState {
-    Open,
-    Closed,
-    Unknown,
+impl<'de> Deserialize<'de> for ItemState {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match s.to_lowercase().as_str() {
+            "open" => Ok(Self::Open),
+            "closed" => Ok(Self::Closed),
+            _ => Ok(Self::Unknown),
+        }
+    }
 }
 
 /// State of a Review (Pending, Approved, ChangesRequested, etc).
@@ -427,11 +320,11 @@ pub enum PathError {
     #[error("path does not exist: {path}")]
     NotFound { path: PathBuf },
 
-    #[error("path is not a file: {path}")]
-    NotFile { path: PathBuf },
-
-    #[error("path does not have .wasm extension: {path}")]
-    InvalidWasmExtension { path: PathBuf },
+    #[error("I/O error for path {path}: {source}")]
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
 }
 
 /// Absolute path (must be absolute).
@@ -474,57 +367,6 @@ impl AsRef<Path> for AbsolutePath {
 }
 
 impl fmt::Display for AbsolutePath {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0.display())
-    }
-}
-
-/// WASM path (must exist, be a file, and have .wasm extension).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct WasmPath(PathBuf);
-
-impl TryFrom<PathBuf> for WasmPath {
-    type Error = PathError;
-
-    fn try_from(p: PathBuf) -> Result<Self, Self::Error> {
-        if !p.exists() {
-            return Err(PathError::NotFound { path: p });
-        }
-        if !p.is_file() {
-            return Err(PathError::NotFile { path: p });
-        }
-        if p.extension().and_then(|e| e.to_str()) != Some("wasm") {
-            return Err(PathError::InvalidWasmExtension { path: p });
-        }
-        Ok(Self(p))
-    }
-}
-
-impl From<WasmPath> for PathBuf {
-    fn from(p: WasmPath) -> PathBuf {
-        p.0
-    }
-}
-
-impl WasmPath {
-    /// Get the path as a Path reference.
-    pub fn as_path(&self) -> &Path {
-        &self.0
-    }
-
-    /// Convert to PathBuf (consumes self).
-    pub fn into_path_buf(self) -> PathBuf {
-        self.0
-    }
-}
-
-impl AsRef<Path> for WasmPath {
-    fn as_ref(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl fmt::Display for WasmPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0.display())
     }
@@ -642,6 +484,24 @@ mod tests {
     }
 
     #[test]
+    fn test_item_state_case_insensitive() {
+        // lowercase
+        let s: ItemState = serde_json::from_str("\"open\"").unwrap();
+        assert_eq!(s, ItemState::Open);
+
+        // UPPERCASE
+        let s: ItemState = serde_json::from_str("\"OPEN\"").unwrap();
+        assert_eq!(s, ItemState::Open);
+
+        let s: ItemState = serde_json::from_str("\"CLOSED\"").unwrap();
+        assert_eq!(s, ItemState::Closed);
+
+        // Unknown
+        let s: ItemState = serde_json::from_str("\"something_else\"").unwrap();
+        assert_eq!(s, ItemState::Unknown);
+    }
+
+    #[test]
     fn test_serde_roundtrip() {
         // SessionId
         let id = SessionId::try_from("test-session".to_string()).unwrap();
@@ -674,38 +534,5 @@ mod tests {
 
         // Test as_ref
         let _: &Path = abs.as_ref();
-    }
-
-    #[test]
-    fn test_wasm_path() {
-        use std::fs;
-        use tempfile::tempdir;
-
-        let dir = tempdir().unwrap();
-
-        // Create a valid .wasm file
-        let wasm_file = dir.path().join("test.wasm");
-        fs::write(&wasm_file, b"fake wasm").unwrap();
-
-        let wasm = WasmPath::try_from(wasm_file.clone()).unwrap();
-        assert_eq!(wasm.as_path(), wasm_file.as_path());
-
-        // Non-existent file
-        let missing = dir.path().join("missing.wasm");
-        let result = WasmPath::try_from(missing);
-        assert!(matches!(result, Err(PathError::NotFound { .. })));
-
-        // Directory instead of file
-        let result = WasmPath::try_from(dir.path().to_path_buf());
-        assert!(matches!(result, Err(PathError::NotFile { .. })));
-
-        // Wrong extension
-        let wrong_ext = dir.path().join("test.txt");
-        fs::write(&wrong_ext, b"not wasm").unwrap();
-        let result = WasmPath::try_from(wrong_ext);
-        assert!(matches!(
-            result,
-            Err(PathError::InvalidWasmExtension { .. })
-        ));
     }
 }

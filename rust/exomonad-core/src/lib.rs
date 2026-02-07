@@ -39,7 +39,7 @@
 //!
 //! let runtime = RuntimeBuilder::new()
 //!     .with_effect_handler(MyHandler)
-//!     .with_wasm_path("plugin.wasm")
+//!     .with_wasm_bytes(wasm_bytes)
 //!     .build()
 //!     .await?;
 //!
@@ -73,13 +73,13 @@ use std::sync::Arc;
 ///
 /// let runtime = RuntimeBuilder::new()
 ///     .with_effect_handler(MyCustomHandler::new())
-///     .with_wasm_path("path/to/plugin.wasm")
+///     .with_wasm_bytes(wasm_bytes)
 ///     .build()
 ///     .await?;
 /// ```
 pub struct RuntimeBuilder {
     registry: EffectRegistry,
-    wasm_path: Option<PathBuf>,
+    wasm_bytes: Option<Vec<u8>>,
     zellij_session: Option<String>,
 }
 
@@ -88,7 +88,7 @@ impl RuntimeBuilder {
     pub fn new() -> Self {
         Self {
             registry: EffectRegistry::new(),
-            wasm_path: None,
+            wasm_bytes: None,
             zellij_session: None,
         }
     }
@@ -107,9 +107,9 @@ impl RuntimeBuilder {
         self
     }
 
-    /// Set the path to the WASM plugin.
-    pub fn with_wasm_path(mut self, path: impl Into<PathBuf>) -> Self {
-        self.wasm_path = Some(path.into());
+    /// Set the WASM plugin bytes (embedded at compile time).
+    pub fn with_wasm_bytes(mut self, bytes: Vec<u8>) -> Self {
+        self.wasm_bytes = Some(bytes);
         self
     }
 
@@ -134,21 +134,20 @@ impl RuntimeBuilder {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - WASM path is not set
+    /// - WASM bytes are not set
     /// - WASM plugin loading fails
     pub async fn build(self) -> anyhow::Result<Runtime> {
-        let wasm_path = self
-            .wasm_path
-            .ok_or_else(|| anyhow::anyhow!("WASM path not set"))?;
+        let wasm_bytes = self
+            .wasm_bytes
+            .ok_or_else(|| anyhow::anyhow!("WASM bytes not set"))?;
 
         let registry = Arc::new(self.registry);
         let plugin_manager =
-            PluginManager::new(wasm_path.clone(), registry.clone(), self.zellij_session).await?;
+            PluginManager::new(&wasm_bytes, registry.clone(), self.zellij_session).await?;
 
         Ok(Runtime {
             plugin_manager,
             registry,
-            wasm_path,
         })
     }
 }
@@ -166,9 +165,6 @@ pub struct Runtime {
 
     /// Effect registry for custom effect dispatch.
     pub registry: Arc<EffectRegistry>,
-
-    /// Path to the WASM plugin.
-    pub wasm_path: PathBuf,
 }
 
 impl Runtime {

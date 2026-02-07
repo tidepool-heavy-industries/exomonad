@@ -8,7 +8,7 @@ members = [
     "exomonad",
     "exomonad-core",
     "exomonad-contrib",
-    "exomonad-repl",
+
     "effector",
     "zellij-gen",
 ]

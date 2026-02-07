@@ -300,3 +300,44 @@ instance (HsJSONPB.ToJSON WaitForCopilotReviewResponse) where
   toEncoding = HsJSONPB.toAesonEncoding
 instance (HsJSONPB.FromJSON WaitForCopilotReviewResponse) where
   parseJSON = HsJSONPB.parseJSONPB
+newtype CopilotEffects request response
+  = CopilotEffects {copilotEffectsWaitForCopilotReview :: ((((request 'HsGRPC.Normal) Effects.Copilot.WaitForCopilotReviewRequest) Effects.Copilot.WaitForCopilotReviewResponse)
+                                                           -> (Hs.IO ((response 'HsGRPC.Normal) Effects.Copilot.WaitForCopilotReviewResponse)))}
+  deriving (Hs.Generic)
+copilotEffectsServer ::
+  ((CopilotEffects HsGRPC.ServerRequest) HsGRPC.ServerResponse)
+  -> HsGRPC.ServiceOptions -> (Hs.IO ())
+copilotEffectsServer
+  CopilotEffects {copilotEffectsWaitForCopilotReview}
+  (ServiceOptions serverHost serverPort useCompression
+                  userAgentPrefix userAgentSuffix initialMetadata sslConfig logger
+                  serverMaxReceiveMessageLength serverMaxMetadataSize)
+  = HsGRPC.serverLoop
+      HsGRPC.defaultOptions
+        {HsGRPC.optNormalHandlers = [HsGRPC.UnaryHandler
+                                       (HsGRPC.MethodName
+                                          "/exomonad.effects.copilot.CopilotEffects/WaitForCopilotReview")
+                                       (HsGRPC.convertGeneratedServerHandler
+                                          copilotEffectsWaitForCopilotReview)],
+         HsGRPC.optClientStreamHandlers = [],
+         HsGRPC.optServerStreamHandlers = [],
+         HsGRPC.optBiDiStreamHandlers = [], optServerHost = serverHost,
+         optServerPort = serverPort, optUseCompression = useCompression,
+         optUserAgentPrefix = userAgentPrefix,
+         optUserAgentSuffix = userAgentSuffix,
+         optInitialMetadata = initialMetadata, optSSLConfig = sslConfig,
+         optLogger = logger,
+         optMaxReceiveMessageLength = serverMaxReceiveMessageLength,
+         optMaxMetadataSize = serverMaxMetadataSize}
+copilotEffectsClient ::
+  HsGRPC.Client
+  -> (Hs.IO ((CopilotEffects HsGRPC.ClientRequest) HsGRPC.ClientResult))
+copilotEffectsClient client
+  = Hs.pure CopilotEffects
+      <*>
+        (Hs.pure (HsGRPC.clientRequest client)
+           <*>
+             HsGRPC.clientRegisterMethod
+               client
+               (HsGRPC.MethodName
+                  "/exomonad.effects.copilot.CopilotEffects/WaitForCopilotReview"))

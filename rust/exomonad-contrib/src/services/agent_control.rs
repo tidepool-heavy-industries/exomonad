@@ -10,6 +10,7 @@
 use anyhow::{anyhow, Context, Result};
 use exomonad_core::common::TimeoutError;
 use exomonad_shared::ffi::FFIBoundary;
+use exomonad_shared::domain::ItemState;
 use exomonad_shared::{GithubOwner, GithubRepo, IssueNumber};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -51,46 +52,40 @@ pub enum AgentType {
     Gemini,
 }
 
+/// Static metadata for each agent type, replacing per-method match dispatch.
+struct AgentMetadata {
+    command: &'static str,
+    prompt_flag: &'static str,
+    suffix: &'static str,
+    emoji: &'static str,
+}
+
+const CLAUDE_META: AgentMetadata = AgentMetadata {
+    command: "claude",
+    prompt_flag: "--prompt",
+    suffix: "claude",
+    emoji: "\u{1F916}", // 🤖
+};
+
+const GEMINI_META: AgentMetadata = AgentMetadata {
+    command: "gemini",
+    prompt_flag: "--prompt-interactive",
+    suffix: "gemini",
+    emoji: "\u{1F48E}", // 💎
+};
+
 impl AgentType {
-    /// Get the CLI command for this agent type.
-    ///
-    /// Returns "claude" or "gemini".
-    fn command(&self) -> &'static str {
+    fn meta(&self) -> &'static AgentMetadata {
         match self {
-            AgentType::Claude => "claude",
-            AgentType::Gemini => "gemini",
+            AgentType::Claude => &CLAUDE_META,
+            AgentType::Gemini => &GEMINI_META,
         }
     }
 
-    /// Get the prompt flag for this agent type.
-    ///
-    /// Claude uses `--prompt`, Gemini uses `--prompt-interactive`.
-    fn prompt_flag(&self) -> &'static str {
-        match self {
-            AgentType::Claude => "--prompt",
-            AgentType::Gemini => "--prompt-interactive",
-        }
-    }
-
-    /// Get the suffix for tab/worktree names (lowercase).
-    ///
-    /// Used to construct unique tab/worktree names (e.g., "gh-123-title-claude").
-    fn suffix(&self) -> &'static str {
-        match self {
-            AgentType::Claude => "claude",
-            AgentType::Gemini => "gemini",
-        }
-    }
-
-    /// Get the emoji for this agent type.
-    ///
-    /// Used for visual differentiation in Zellij tabs.
-    fn emoji(&self) -> &'static str {
-        match self {
-            AgentType::Claude => "🤖",
-            AgentType::Gemini => "💎",
-        }
-    }
+    fn command(&self) -> &'static str { self.meta().command }
+    fn prompt_flag(&self) -> &'static str { self.meta().prompt_flag }
+    fn suffix(&self) -> &'static str { self.meta().suffix }
+    fn emoji(&self) -> &'static str { self.meta().emoji }
 
     /// Generate a display name for Zellij tabs.
     ///
@@ -142,8 +137,8 @@ pub struct AgentPrInfo {
     pub title: String,
     /// Web URL to the PR.
     pub url: String,
-    /// PR state ("open", "closed", "merged").
-    pub state: String,
+    /// PR state.
+    pub state: ItemState,
 }
 
 impl FFIBoundary for AgentPrInfo {}
@@ -1145,14 +1140,8 @@ project_dir = "{}"
 
         // Create symlinks for shared resources back to root .exomonad
         let symlinks = [
-            ("wasm", format!("{}/.exomonad/wasm", rel_to_root)),
             ("roles", format!("{}/.exomonad/roles", rel_to_root)),
             ("lib", format!("{}/.exomonad/lib", rel_to_root)),
-            ("flake.nix", format!("{}/.exomonad/flake.nix", rel_to_root)),
-            (
-                "flake.lock",
-                format!("{}/.exomonad/flake.lock", rel_to_root),
-            ),
         ];
 
         for (name, target) in symlinks {

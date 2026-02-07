@@ -814,7 +814,59 @@ mod binary {
         print_hex("EffectResponse(Payload(128 bytes))", &boundary_bytes[..5]); // Just first 5 bytes
         println!("  total_len={}", boundary_bytes.len());
 
+        // 10. Large error string in SpawnBatchResponse (reproduces production decode failure)
+        // Error string is ~377 bytes, causing 2-byte varint in both inner and outer messages
+        let long_error = "Issue 539: git worktree add failed: Preparing worktree (checking out 'gh-539/improve-stop-hook-error-messages-with-specific-com-gemini')\nfatal: '/Users/inannamalick/hangars/tidepool/repo/.exomonad/worktrees/gh-539-improve-stop-hook-error-messages-with-specific-com-gemini' is a missing but already registered worktree;\nuse 'git worktree prune' to remove stale worktree entries\n";
+        let large_batch = SpawnBatchResponse {
+            agents: vec![],
+            errors: vec![long_error.into()],
+        };
+        let large_inner = large_batch.encode_to_vec();
+        let large_wrapped = EffectResponse {
+            result: Some(ResponseResult::Payload(large_inner.clone())),
+        };
+        let large_bytes = large_wrapped.encode_to_vec();
+        print_hex("SpawnBatchResponse(large error)", &large_inner);
+        print_hex("EffectResponse(Payload(large SpawnBatchResponse))", &large_bytes[..32]);
+        println!("  inner_len={} outer_len={}", large_inner.len(), large_bytes.len());
+
         println!("\n=== End Reference Bytes ===\n");
+    }
+
+    /// Verify that a large SpawnBatchResponse (with long error string) roundtrips correctly.
+    /// Reproduces the production decode failure where varint parsing failed at offset 349.
+    #[test]
+    fn spawn_batch_large_error_roundtrip() {
+        use exomonad_proto::effects::agent::SpawnBatchResponse;
+
+        let long_error = "Issue 539: git worktree add failed: Preparing worktree (checking out 'gh-539/improve-stop-hook-error-messages-with-specific-com-gemini')\nfatal: '/Users/inannamalick/hangars/tidepool/repo/.exomonad/worktrees/gh-539-improve-stop-hook-error-messages-with-specific-com-gemini' is a missing but already registered worktree;\nuse 'git worktree prune' to remove stale worktree entries\n";
+
+        let resp = SpawnBatchResponse {
+            agents: vec![],
+            errors: vec![long_error.into()],
+        };
+
+        // Inner roundtrip
+        let inner_bytes = resp.encode_to_vec();
+        let decoded = SpawnBatchResponse::decode(inner_bytes.as_slice()).unwrap();
+        assert_eq!(decoded.errors.len(), 1);
+        assert_eq!(decoded.errors[0], long_error);
+
+        // Wrapped in EffectResponse (the actual wire format)
+        let wrapped = EffectResponse {
+            result: Some(ResponseResult::Payload(inner_bytes)),
+        };
+        let outer_bytes = wrapped.encode_to_vec();
+        assert_eq!(outer_bytes.len(), 383);
+
+        let outer_decoded = EffectResponse::decode(outer_bytes.as_slice()).unwrap();
+        match outer_decoded.result {
+            Some(ResponseResult::Payload(payload)) => {
+                let inner_decoded = SpawnBatchResponse::decode(payload.as_slice()).unwrap();
+                assert_eq!(inner_decoded.errors[0], long_error);
+            }
+            other => panic!("Expected Payload, got {:?}", other),
+        }
     }
 
     fn print_hex(label: &str, bytes: &[u8]) {

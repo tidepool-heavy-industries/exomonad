@@ -13,29 +13,29 @@ use async_trait::async_trait;
 use exomonad_core::{EffectError, EffectHandler, EffectResult, RuntimeBuilder};
 use prost::Message;
 use serde_json::{json, Value};
-use std::path::PathBuf;
 
 // ============================================================================
 // Test Infrastructure
 // ============================================================================
 
-fn wasm_binary_path() -> PathBuf {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+fn wasm_binary_bytes() -> Vec<u8> {
+    let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let path = manifest.join("../../.exomonad/wasm/wasm-guest-tl.wasm");
     assert!(
         path.exists(),
         "WASM binary not found at {path:?}. Build with `just wasm-dev tl`."
     );
-    path
+    std::fs::read(&path).expect("Failed to read WASM binary")
 }
 
 async fn build_test_runtime() -> exomonad_core::Runtime {
+    let wasm_bytes = wasm_binary_bytes();
     RuntimeBuilder::new()
         .with_effect_handler(MockGitHandler)
         .with_effect_handler(MockLogHandler)
         .with_effect_handler(MockAgentHandler)
         .with_effect_handler(MockFsHandler)
-        .with_wasm_path(wasm_binary_path())
+        .with_wasm_bytes(wasm_bytes)
         .build()
         .await
         .expect("Failed to build runtime with WASM plugin")
@@ -426,10 +426,11 @@ async fn wasm_large_response_roundtrip() {
         }
     }
 
+    let wasm_bytes = wasm_binary_bytes();
     let runtime = RuntimeBuilder::new()
         .with_effect_handler(LargeResponseAgentHandler)
         .with_effect_handler(MockLogHandler)
-        .with_wasm_path(wasm_binary_path())
+        .with_wasm_bytes(wasm_bytes)
         .build()
         .await
         .expect("Failed to build runtime");
@@ -459,9 +460,10 @@ async fn wasm_large_response_roundtrip() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn wasm_unhandled_effect_returns_error() {
     // Build runtime with only log handler — agent effects will fail
+    let wasm_bytes = wasm_binary_bytes();
     let runtime = RuntimeBuilder::new()
         .with_effect_handler(MockLogHandler)
-        .with_wasm_path(wasm_binary_path())
+        .with_wasm_bytes(wasm_bytes)
         .build()
         .await
         .expect("Failed to build runtime");

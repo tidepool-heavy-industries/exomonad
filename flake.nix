@@ -327,7 +327,7 @@ EOF
               echo "  just proto-gen       Generate proto code (Rust + Haskell)"
               echo ""
               echo "Other shells:"
-              echo "  nix develop .#wasm              WASM cross-compilation"
+              echo "  nix develop .#wasm   WASM cross-compilation"
               echo ""
             '';
           };
@@ -357,20 +357,6 @@ EOF
             '';
           };
 
-          # Minimal: Just Haskell + HLS for quick edits
-          minimal = pkgs.mkShell {
-            packages = commonPkgs ++ haskellPkgs "ghc912";
-
-            shellHook = ''
-              export PKG_CONFIG_PATH="${pkgs.zlib.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
-              export NIX_GHC_LIBDIR="$(ghc --print-libdir)"
-
-              echo "ExoMonad Minimal Shell (Haskell only)"
-              echo "  GHC: $(ghc --numeric-version)"
-              echo "  HLS: available"
-              echo ""
-            '';
-          };
         };
 
         # Build Outputs
@@ -383,8 +369,17 @@ EOF
           # Expose deps derivation so we can build it directly to check hash
           wasm-deps = deps;
 
-          # Role WASM binaries are now built from .exomonad/flake.nix using mkWasmRole.
-          # See issue #508 for the role system architecture.
+          # Role WASM binaries built from .exomonad/roles/ using mkWasmRole
+          tl = mkWasmRole {
+            name = "tl";
+            src = ./.exomonad/roles/tl;
+            libSrc = ./.exomonad/lib;
+          };
+          dev = mkWasmRole {
+            name = "dev";
+            src = ./.exomonad/roles/dev;
+            libSrc = ./.exomonad/lib;
+          };
         };
       }
     );

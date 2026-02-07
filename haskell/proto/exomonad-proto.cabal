@@ -47,6 +47,7 @@ library
     Effects.Popup
     Effects.FilePr
     Effects.Copilot
+    Effects.Egregore
     -- Hand-written compatibility layer
     ExoMonad.Compat
   build-depends:
