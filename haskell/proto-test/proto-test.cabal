@@ -1,9 +1,11 @@
 cabal-version: 3.4
 name: proto-test
 version: 0.1.0.0
-synopsis: Wire format compatibility tests for proto3-suite
+synopsis: Cross-language wire format tests (proto3-suite ↔ prost)
 description:
-  Tests to verify proto3-suite JSON output matches prost+serde output.
+  Verifies that proto3-suite (Haskell) and prost (Rust) produce
+  compatible protobuf binary encodings for the effect system types.
+  Uses known-good hex bytes from Rust test suite as reference.
 build-type: Simple
 license: BSD-3-Clause
 license-file: ../../LICENSE
@@ -14,9 +16,8 @@ executable proto-test
   main-is: Main.hs
   build-depends:
     base >= 4.16 && < 5,
-    proto3-suite >= 0.9.4,
+    exomonad-proto,
+    proto3-runtime,
     proto3-wire,
     bytestring,
-    text >= 2.0,
-    aeson >= 2.0,
-    aeson-pretty
+    vector

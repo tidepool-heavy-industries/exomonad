@@ -128,6 +128,11 @@ fn yield_effect_impl(
 
     // Encode and return
     let response_bytes = response.encode_to_vec();
+    tracing::debug!(
+        response_len = response_bytes.len(),
+        first_bytes = ?&response_bytes[..response_bytes.len().min(32)],
+        "yield_effect: encoding response"
+    );
     plugin.memory_set_val(&mut outputs[0], response_bytes)?;
 
     Ok(())
@@ -136,6 +141,7 @@ fn yield_effect_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use exomonad_proto::effects::error::effect_response::Result as ResponseResult;
 
     #[test]
     fn test_envelope_roundtrip() {
@@ -157,22 +163,194 @@ mod tests {
         let proto_err = to_proto_error(&err);
 
         let response = EffectResponse {
-            result: Some(exomonad_proto::effects::error::effect_response::Result::Error(proto_err)),
+            result: Some(ResponseResult::Error(proto_err)),
         };
 
         let bytes = response.encode_to_vec();
         let decoded = EffectResponse::decode(bytes.as_slice()).unwrap();
 
         match decoded.result {
-            Some(exomonad_proto::effects::error::effect_response::Result::Error(e)) => {
-                match e.kind {
-                    Some(proto_error::effect_error::Kind::NotFound(nf)) => {
-                        assert!(nf.resource.contains("123"));
-                    }
-                    _ => panic!("Expected NotFound"),
+            Some(ResponseResult::Error(e)) => match e.kind {
+                Some(proto_error::effect_error::Kind::NotFound(nf)) => {
+                    assert!(nf.resource.contains("123"));
                 }
-            }
+                _ => panic!("Expected NotFound"),
+            },
             _ => panic!("Expected Error response"),
         }
+    }
+
+    #[test]
+    fn test_payload_response_binary_roundtrip() {
+        let payload = vec![1, 2, 3, 4, 5];
+        let response = EffectResponse {
+            result: Some(ResponseResult::Payload(payload.clone())),
+        };
+
+        let bytes = response.encode_to_vec();
+        let decoded = EffectResponse::decode(bytes.as_slice()).unwrap();
+
+        match decoded.result {
+            Some(ResponseResult::Payload(p)) => assert_eq!(p, payload),
+            _ => panic!("Expected Payload response, got {:?}", decoded.result),
+        }
+    }
+
+    #[test]
+    fn test_empty_payload_response() {
+        let response = EffectResponse {
+            result: Some(ResponseResult::Payload(vec![])),
+        };
+
+        let bytes = response.encode_to_vec();
+        assert!(
+            !bytes.is_empty(),
+            "Empty payload response must still produce non-empty wire bytes"
+        );
+
+        let decoded = EffectResponse::decode(bytes.as_slice()).unwrap();
+
+        match decoded.result {
+            Some(ResponseResult::Payload(p)) => assert!(p.is_empty()),
+            _ => panic!("Expected Payload response, got {:?}", decoded.result),
+        }
+    }
+
+    #[test]
+    fn test_spawn_response_in_envelope() {
+        use exomonad_proto::effects::agent::{AgentInfo, SpawnResponse};
+
+        let agent_info = AgentInfo {
+            id: "gh-123-claude".into(),
+            issue: "123".into(),
+            worktree_path: "/tmp/worktrees/gh-123".into(),
+            branch_name: "gh-123/fix-bug".into(),
+            agent_type: 1, // CLAUDE
+            role: 1,       // DEV
+            status: 1,     // RUNNING
+            zellij_tab: "123-fix-bug".into(),
+            error: String::new(),
+            pr_number: 0,
+            pr_url: String::new(),
+        };
+
+        let spawn_resp = SpawnResponse {
+            agent: Some(agent_info),
+        };
+        let inner_bytes = spawn_resp.encode_to_vec();
+
+        let response = EffectResponse {
+            result: Some(ResponseResult::Payload(inner_bytes.clone())),
+        };
+
+        let wire_bytes = response.encode_to_vec();
+        let decoded = EffectResponse::decode(wire_bytes.as_slice()).unwrap();
+
+        match decoded.result {
+            Some(ResponseResult::Payload(p)) => {
+                let decoded_spawn = SpawnResponse::decode(p.as_slice()).unwrap();
+                let agent = decoded_spawn.agent.unwrap();
+                assert_eq!(agent.id, "gh-123-claude");
+                assert_eq!(agent.issue, "123");
+                assert_eq!(agent.branch_name, "gh-123/fix-bug");
+                assert_eq!(agent.status, 1);
+            }
+            _ => panic!("Expected Payload response"),
+        }
+    }
+
+    #[test]
+    fn test_error_response_all_variants() {
+        let variants: Vec<EffectError> = vec![
+            EffectError::not_found("missing/resource"),
+            EffectError::invalid_input("bad field"),
+            EffectError::network_error("connection refused"),
+            EffectError::permission_denied("no access"),
+            EffectError::timeout("30s exceeded"),
+            EffectError::custom("custom.code", "custom msg"),
+        ];
+
+        for err in &variants {
+            let proto_err = to_proto_error(err);
+            let response = EffectResponse {
+                result: Some(ResponseResult::Error(proto_err)),
+            };
+
+            let bytes = response.encode_to_vec();
+            let decoded = EffectResponse::decode(bytes.as_slice()).unwrap();
+
+            match (&decoded.result, err) {
+                (Some(ResponseResult::Error(e)), EffectError::NotFound { resource }) => {
+                    match &e.kind {
+                        Some(proto_error::effect_error::Kind::NotFound(nf)) => {
+                            assert_eq!(&nf.resource, resource);
+                        }
+                        other => panic!("Expected NotFound, got {:?}", other),
+                    }
+                }
+                (Some(ResponseResult::Error(e)), EffectError::InvalidInput { message }) => {
+                    match &e.kind {
+                        Some(proto_error::effect_error::Kind::InvalidInput(ii)) => {
+                            assert_eq!(&ii.message, message);
+                        }
+                        other => panic!("Expected InvalidInput, got {:?}", other),
+                    }
+                }
+                (Some(ResponseResult::Error(e)), EffectError::NetworkError { message }) => {
+                    match &e.kind {
+                        Some(proto_error::effect_error::Kind::NetworkError(ne)) => {
+                            assert_eq!(&ne.message, message);
+                        }
+                        other => panic!("Expected NetworkError, got {:?}", other),
+                    }
+                }
+                (Some(ResponseResult::Error(e)), EffectError::PermissionDenied { message }) => {
+                    match &e.kind {
+                        Some(proto_error::effect_error::Kind::PermissionDenied(pd)) => {
+                            assert_eq!(&pd.message, message);
+                        }
+                        other => panic!("Expected PermissionDenied, got {:?}", other),
+                    }
+                }
+                (Some(ResponseResult::Error(e)), EffectError::Timeout { message }) => {
+                    match &e.kind {
+                        Some(proto_error::effect_error::Kind::Timeout(t)) => {
+                            assert_eq!(&t.message, message);
+                        }
+                        other => panic!("Expected Timeout, got {:?}", other),
+                    }
+                }
+                (Some(ResponseResult::Error(e)), EffectError::Custom { code, message, .. }) => {
+                    match &e.kind {
+                        Some(proto_error::effect_error::Kind::Custom(c)) => {
+                            assert_eq!(&c.code, code);
+                            assert_eq!(&c.message, message);
+                        }
+                        other => panic!("Expected Custom, got {:?}", other),
+                    }
+                }
+                (result, err) => panic!("Mismatch: result={:?}, err={:?}", result, err),
+            }
+        }
+    }
+
+    /// Verify raw wire bytes for a payload response match protobuf spec.
+    ///
+    /// For `EffectResponse { payload: b"hello" }`:
+    /// - Field 1, wire type 2 (LEN) → tag byte = (1 << 3) | 2 = 0x0a
+    /// - Varint length of "hello" = 5
+    /// - Payload bytes: [104, 101, 108, 108, 111]
+    #[test]
+    fn test_response_byte_inspection() {
+        let response = EffectResponse {
+            result: Some(ResponseResult::Payload(b"hello".to_vec())),
+        };
+
+        let bytes = response.encode_to_vec();
+
+        assert_eq!(bytes[0], 0x0a, "Field 1 LEN tag");
+        assert_eq!(bytes[1], 5, "Varint length of 'hello'");
+        assert_eq!(&bytes[2..7], b"hello", "Payload bytes");
+        assert_eq!(bytes.len(), 7, "Total encoded length");
     }
 }

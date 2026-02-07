@@ -264,13 +264,13 @@ just proto-test  # Run wire format compatibility tests
 
 | Proto File | Rust Handler | Haskell Effect | Wire Tests |
 |------------|--------------|----------------|------------|
-| envelope.proto | ✅ | ✅ | Pending |
-| effect_error.proto | ✅ | ✅ | Pending |
-| git.proto | ✅ | ✅ | Pending |
-| github.proto | ✅ | ✅ | Pending |
-| log.proto | ✅ | ✅ | Pending |
-| fs.proto | ✅ | Pending | Pending |
-| agent.proto | ✅ | Pending | Pending |
+| envelope.proto | ✅ | ✅ | ✅ |
+| effect_error.proto | ✅ | ✅ | ✅ |
+| git.proto | ✅ | ✅ | ✅ |
+| github.proto | ✅ | ✅ | ✅ |
+| log.proto | ✅ | ✅ | ✅ |
+| fs.proto | ✅ | Pending | ✅ |
+| agent.proto | ✅ | ✅ | ✅ |
 
 ## Related Files
 

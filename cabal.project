@@ -16,6 +16,7 @@ packages:
     haskell/vendor/proto3-runtime
     haskell/tools/training-generator
     haskell/wasm-guest
+    haskell/proto-test
 
 -- Disabled packages:
 -- (none currently)

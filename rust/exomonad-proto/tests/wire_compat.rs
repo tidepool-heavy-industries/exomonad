@@ -126,3 +126,703 @@ fn ffi_error_roundtrip() {
 
     assert_eq!(original, parsed);
 }
+
+// ============================================================================
+// Protobuf binary roundtrip tests (effects system)
+// ============================================================================
+//
+// These tests verify that protobuf binary encoding via prost roundtrips
+// correctly. The hex bytes from these tests serve as cross-language reference
+// values for the Haskell proto3-suite decoder tests.
+
+#[cfg(feature = "effects")]
+mod binary {
+    use exomonad_proto::effects::error::{
+        self as proto_error, effect_response::Result as ResponseResult, EffectEnvelope,
+        EffectError, EffectResponse,
+    };
+    use prost::Message;
+
+    // ========================================================================
+    // Envelope
+    // ========================================================================
+
+    #[test]
+    fn effect_envelope_binary_roundtrip() {
+        let envelope = EffectEnvelope {
+            effect_type: "git.get_branch".into(),
+            payload: vec![10, 1, 46], // GetBranchRequest { working_dir: "." }
+        };
+
+        let bytes = envelope.encode_to_vec();
+        let decoded = EffectEnvelope::decode(bytes.as_slice()).unwrap();
+
+        assert_eq!(decoded.effect_type, "git.get_branch");
+        assert_eq!(decoded.payload, vec![10, 1, 46]);
+    }
+
+    // ========================================================================
+    // EffectResponse: payload variants
+    // ========================================================================
+
+    #[test]
+    fn effect_response_payload_binary() {
+        let inner = b"response-payload-bytes";
+        let response = EffectResponse {
+            result: Some(ResponseResult::Payload(inner.to_vec())),
+        };
+
+        let bytes = response.encode_to_vec();
+        let decoded = EffectResponse::decode(bytes.as_slice()).unwrap();
+
+        match decoded.result {
+            Some(ResponseResult::Payload(p)) => assert_eq!(p, inner),
+            other => panic!("Expected Payload, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn effect_response_error_binary() {
+        let response = EffectResponse {
+            result: Some(ResponseResult::Error(EffectError {
+                kind: Some(proto_error::effect_error::Kind::NotFound(
+                    proto_error::NotFound {
+                        resource: "handler/unknown".into(),
+                    },
+                )),
+            })),
+        };
+
+        let bytes = response.encode_to_vec();
+        let decoded = EffectResponse::decode(bytes.as_slice()).unwrap();
+
+        match decoded.result {
+            Some(ResponseResult::Error(e)) => match e.kind {
+                Some(proto_error::effect_error::Kind::NotFound(nf)) => {
+                    assert_eq!(nf.resource, "handler/unknown");
+                }
+                other => panic!("Expected NotFound, got {:?}", other),
+            },
+            other => panic!("Expected Error, got {:?}", other),
+        }
+    }
+
+    // ========================================================================
+    // Agent effects
+    // ========================================================================
+
+    #[test]
+    fn spawn_request_binary_roundtrip() {
+        use exomonad_proto::effects::agent::SpawnRequest;
+
+        let req = SpawnRequest {
+            issue: "433".into(),
+            owner: "anthropics".into(),
+            repo: "tidepool".into(),
+            agent_type: 1, // CLAUDE
+            role: 1,       // DEV
+            worktree_dir: ".exomonad/worktrees".into(),
+        };
+
+        let bytes = req.encode_to_vec();
+        let decoded = SpawnRequest::decode(bytes.as_slice()).unwrap();
+
+        assert_eq!(decoded.issue, "433");
+        assert_eq!(decoded.owner, "anthropics");
+        assert_eq!(decoded.repo, "tidepool");
+        assert_eq!(decoded.agent_type, 1);
+        assert_eq!(decoded.role, 1);
+        assert_eq!(decoded.worktree_dir, ".exomonad/worktrees");
+    }
+
+    #[test]
+    fn spawn_response_binary_roundtrip() {
+        use exomonad_proto::effects::agent::{AgentInfo, SpawnResponse};
+
+        let resp = SpawnResponse {
+            agent: Some(AgentInfo {
+                id: "gh-433-claude".into(),
+                issue: "433".into(),
+                worktree_path: "/tmp/worktrees/gh-433-fix-build-claude".into(),
+                branch_name: "gh-433/fix-build".into(),
+                agent_type: 1, // CLAUDE
+                role: 1,       // DEV
+                status: 1,     // RUNNING
+                zellij_tab: "433-fix-build".into(),
+                error: String::new(),
+                pr_number: 0,
+                pr_url: String::new(),
+            }),
+        };
+
+        let bytes = resp.encode_to_vec();
+        let decoded = SpawnResponse::decode(bytes.as_slice()).unwrap();
+
+        let agent = decoded.agent.unwrap();
+        assert_eq!(agent.id, "gh-433-claude");
+        assert_eq!(agent.issue, "433");
+        assert_eq!(agent.worktree_path, "/tmp/worktrees/gh-433-fix-build-claude");
+        assert_eq!(agent.branch_name, "gh-433/fix-build");
+        assert_eq!(agent.agent_type, 1);
+        assert_eq!(agent.role, 1);
+        assert_eq!(agent.status, 1);
+        assert_eq!(agent.zellij_tab, "433-fix-build");
+    }
+
+    #[test]
+    fn spawn_batch_response_binary() {
+        use exomonad_proto::effects::agent::{AgentInfo, SpawnBatchResponse};
+
+        let resp = SpawnBatchResponse {
+            agents: vec![
+                AgentInfo {
+                    id: "gh-1-claude".into(),
+                    issue: "1".into(),
+                    worktree_path: "/w/1".into(),
+                    branch_name: "gh-1/a".into(),
+                    agent_type: 1,
+                    role: 1,
+                    status: 1,
+                    zellij_tab: "1-a".into(),
+                    error: String::new(),
+                    pr_number: 0,
+                    pr_url: String::new(),
+                },
+                AgentInfo {
+                    id: "gh-2-gemini".into(),
+                    issue: "2".into(),
+                    worktree_path: "/w/2".into(),
+                    branch_name: "gh-2/b".into(),
+                    agent_type: 2, // GEMINI
+                    role: 1,
+                    status: 1,
+                    zellij_tab: "2-b".into(),
+                    error: String::new(),
+                    pr_number: 0,
+                    pr_url: String::new(),
+                },
+            ],
+            errors: vec!["issue 3: not found".into()],
+        };
+
+        let bytes = resp.encode_to_vec();
+        let decoded = SpawnBatchResponse::decode(bytes.as_slice()).unwrap();
+
+        assert_eq!(decoded.agents.len(), 2);
+        assert_eq!(decoded.agents[0].id, "gh-1-claude");
+        assert_eq!(decoded.agents[1].agent_type, 2);
+        assert_eq!(decoded.errors, vec!["issue 3: not found"]);
+    }
+
+    #[test]
+    fn list_response_binary_roundtrip() {
+        use exomonad_proto::effects::agent::{AgentInfo, ListResponse};
+
+        let resp = ListResponse {
+            agents: vec![AgentInfo {
+                id: "gh-10-claude".into(),
+                issue: "10".into(),
+                worktree_path: "/worktrees/10".into(),
+                branch_name: "gh-10/feature".into(),
+                agent_type: 1,
+                role: 2, // TL
+                status: 2, // STOPPED
+                zellij_tab: String::new(),
+                error: String::new(),
+                pr_number: 42,
+                pr_url: "https://github.com/org/repo/pull/42".into(),
+            }],
+        };
+
+        let bytes = resp.encode_to_vec();
+        let decoded = ListResponse::decode(bytes.as_slice()).unwrap();
+
+        let agent = &decoded.agents[0];
+        assert_eq!(agent.pr_number, 42);
+        assert_eq!(agent.pr_url, "https://github.com/org/repo/pull/42");
+        assert_eq!(agent.status, 2);
+    }
+
+    #[test]
+    fn cleanup_response_binary_roundtrip() {
+        use exomonad_proto::effects::agent::CleanupResponse;
+
+        let resp = CleanupResponse {
+            success: true,
+            error: String::new(),
+        };
+
+        let bytes = resp.encode_to_vec();
+        let decoded = CleanupResponse::decode(bytes.as_slice()).unwrap();
+
+        assert!(decoded.success);
+        assert!(decoded.error.is_empty());
+    }
+
+    // ========================================================================
+    // Git effects
+    // ========================================================================
+
+    #[test]
+    fn git_get_branch_binary_roundtrip() {
+        use exomonad_proto::effects::git::{GetBranchRequest, GetBranchResponse};
+
+        let req = GetBranchRequest {
+            working_dir: ".".into(),
+        };
+        let bytes = req.encode_to_vec();
+        let decoded = GetBranchRequest::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.working_dir, ".");
+
+        let resp = GetBranchResponse {
+            branch: "main".into(),
+            detached: false,
+        };
+        let bytes = resp.encode_to_vec();
+        let decoded = GetBranchResponse::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.branch, "main");
+        assert!(!decoded.detached);
+    }
+
+    // ========================================================================
+    // GitHub effects
+    // ========================================================================
+
+    #[test]
+    fn github_get_issue_binary_roundtrip() {
+        use exomonad_proto::effects::github::{GetIssueRequest, GetIssueResponse, Issue};
+
+        let req = GetIssueRequest {
+            owner: "anthropics".into(),
+            repo: "tidepool".into(),
+            number: 433,
+            include_comments: true,
+        };
+        let bytes = req.encode_to_vec();
+        let decoded = GetIssueRequest::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.number, 433);
+        assert!(decoded.include_comments);
+
+        let resp = GetIssueResponse {
+            issue: Some(Issue {
+                number: 433,
+                title: "Fix FFI decode".into(),
+                body: "The EffectResponse decode fails".into(),
+                state: 1, // OPEN
+                author: None,
+                labels: vec![],
+                created_at: 1700000000,
+                updated_at: 1700001000,
+                comments_count: 3,
+            }),
+            comments: vec![],
+        };
+        let bytes = resp.encode_to_vec();
+        let decoded = GetIssueResponse::decode(bytes.as_slice()).unwrap();
+        let issue = decoded.issue.unwrap();
+        assert_eq!(issue.number, 433);
+        assert_eq!(issue.title, "Fix FFI decode");
+    }
+
+    // ========================================================================
+    // Log effects
+    // ========================================================================
+
+    #[test]
+    fn log_info_binary_roundtrip() {
+        use exomonad_proto::effects::log::{InfoRequest, LogResponse};
+
+        let req = InfoRequest {
+            message: "Agent started".into(),
+            fields: b"{\"issue\":433}".to_vec(),
+        };
+        let bytes = req.encode_to_vec();
+        let decoded = InfoRequest::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.message, "Agent started");
+        assert_eq!(decoded.fields, b"{\"issue\":433}");
+
+        let resp = LogResponse { success: true };
+        let bytes = resp.encode_to_vec();
+        let decoded = LogResponse::decode(bytes.as_slice()).unwrap();
+        assert!(decoded.success);
+    }
+
+    // ========================================================================
+    // Filesystem effects
+    // ========================================================================
+
+    #[test]
+    fn fs_read_file_binary_roundtrip() {
+        use exomonad_proto::effects::fs::{ReadFileRequest, ReadFileResponse};
+
+        let req = ReadFileRequest {
+            path: "/tmp/test.txt".into(),
+            max_bytes: 1024,
+            offset: 0,
+        };
+        let bytes = req.encode_to_vec();
+        let decoded = ReadFileRequest::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.path, "/tmp/test.txt");
+        assert_eq!(decoded.max_bytes, 1024);
+
+        let resp = ReadFileResponse {
+            content: "hello world".into(),
+            bytes_read: 11,
+            truncated: false,
+            total_size: 11,
+        };
+        let bytes = resp.encode_to_vec();
+        let decoded = ReadFileResponse::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.content, "hello world");
+        assert_eq!(decoded.bytes_read, 11);
+    }
+
+    // ========================================================================
+    // Varint boundary edge cases
+    // ========================================================================
+
+    /// Test that payloads crossing varint length boundaries encode/decode correctly.
+    ///
+    /// Protobuf varints: 0-127 = 1 byte, 128-16383 = 2 bytes, 16384+ = 3 bytes.
+    /// EffectResponse wraps the payload in a LEN field, so the varint encodes
+    /// the payload length. If the varint encoding differs between prost and
+    /// proto3-suite, payloads near these boundaries would fail.
+    #[test]
+    fn varint_boundary_127_bytes() {
+        // Exactly 127 bytes → 1-byte varint length
+        let payload = vec![0x42u8; 127];
+        let response = EffectResponse {
+            result: Some(ResponseResult::Payload(payload.clone())),
+        };
+        let bytes = response.encode_to_vec();
+        // tag(1 byte) + varint_len(1 byte) + payload(127 bytes) = 129
+        assert_eq!(bytes.len(), 129, "127-byte payload should produce 129 wire bytes");
+        assert_eq!(bytes[0], 0x0a, "Field 1 LEN tag");
+        assert_eq!(bytes[1], 127, "1-byte varint for length 127");
+
+        let decoded = EffectResponse::decode(bytes.as_slice()).unwrap();
+        match decoded.result {
+            Some(ResponseResult::Payload(p)) => assert_eq!(p, payload),
+            other => panic!("Expected Payload, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn varint_boundary_128_bytes() {
+        // Exactly 128 bytes → 2-byte varint length (first multi-byte varint)
+        let payload = vec![0x42u8; 128];
+        let response = EffectResponse {
+            result: Some(ResponseResult::Payload(payload.clone())),
+        };
+        let bytes = response.encode_to_vec();
+        // tag(1) + varint_len(2) + payload(128) = 131
+        assert_eq!(bytes.len(), 131, "128-byte payload should produce 131 wire bytes");
+        assert_eq!(bytes[0], 0x0a, "Field 1 LEN tag");
+        // 128 as varint = [0x80, 0x01]
+        assert_eq!(bytes[1], 0x80, "First byte of 2-byte varint");
+        assert_eq!(bytes[2], 0x01, "Second byte of 2-byte varint");
+
+        let decoded = EffectResponse::decode(bytes.as_slice()).unwrap();
+        match decoded.result {
+            Some(ResponseResult::Payload(p)) => assert_eq!(p, payload),
+            other => panic!("Expected Payload, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn varint_boundary_16384_bytes() {
+        // Exactly 16384 bytes → 3-byte varint length
+        let payload = vec![0x42u8; 16384];
+        let response = EffectResponse {
+            result: Some(ResponseResult::Payload(payload.clone())),
+        };
+        let bytes = response.encode_to_vec();
+        // tag(1) + varint_len(3) + payload(16384) = 16388
+        assert_eq!(bytes.len(), 16388, "16384-byte payload should produce 16388 wire bytes");
+        assert_eq!(bytes[0], 0x0a, "Field 1 LEN tag");
+        // 16384 as varint = [0x80, 0x80, 0x01]
+        assert_eq!(bytes[1], 0x80, "First byte of 3-byte varint");
+        assert_eq!(bytes[2], 0x80, "Second byte of 3-byte varint");
+        assert_eq!(bytes[3], 0x01, "Third byte of 3-byte varint");
+
+        let decoded = EffectResponse::decode(bytes.as_slice()).unwrap();
+        match decoded.result {
+            Some(ResponseResult::Payload(p)) => assert_eq!(p.len(), 16384),
+            other => panic!("Expected Payload, got {:?}", other),
+        }
+    }
+
+    // ========================================================================
+    // Comprehensive response type roundtrips (all FFI boundary types)
+    // ========================================================================
+
+    #[test]
+    fn git_get_status_binary_roundtrip() {
+        use exomonad_proto::effects::git::{GetStatusRequest, GetStatusResponse};
+
+        let req = GetStatusRequest { working_dir: "/repo".into() };
+        let bytes = req.encode_to_vec();
+        assert_eq!(GetStatusRequest::decode(bytes.as_slice()).unwrap().working_dir, "/repo");
+
+        let resp = GetStatusResponse {
+            dirty_files: vec!["src/main.rs".into(), "Cargo.toml".into()],
+            staged_files: vec!["README.md".into()],
+            untracked_files: vec![],
+        };
+        let bytes = resp.encode_to_vec();
+        let decoded = GetStatusResponse::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.dirty_files.len(), 2);
+        assert_eq!(decoded.staged_files, vec!["README.md"]);
+        assert!(decoded.untracked_files.is_empty());
+    }
+
+    #[test]
+    fn git_get_commits_binary_roundtrip() {
+        use exomonad_proto::effects::git::{Commit, GetCommitsResponse};
+
+        let resp = GetCommitsResponse {
+            commits: vec![
+                Commit {
+                    sha: "abc123def456".into(),
+                    short_sha: "abc123d".into(),
+                    message: "fix: resolve FFI decode error".into(),
+                    author: "dev".into(),
+                    author_email: "dev@example.com".into(),
+                    timestamp: 1700000000,
+                },
+            ],
+        };
+        let bytes = resp.encode_to_vec();
+        let decoded = GetCommitsResponse::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.commits[0].sha, "abc123def456");
+        assert_eq!(decoded.commits[0].timestamp, 1700000000);
+    }
+
+    #[test]
+    fn git_has_unpushed_binary_roundtrip() {
+        use exomonad_proto::effects::git::HasUnpushedCommitsResponse;
+
+        let resp = HasUnpushedCommitsResponse { has_unpushed: true, count: 3 };
+        let bytes = resp.encode_to_vec();
+        let decoded = HasUnpushedCommitsResponse::decode(bytes.as_slice()).unwrap();
+        assert!(decoded.has_unpushed);
+        assert_eq!(decoded.count, 3);
+    }
+
+    #[test]
+    fn git_get_repo_info_binary_roundtrip() {
+        use exomonad_proto::effects::git::GetRepoInfoResponse;
+
+        let resp = GetRepoInfoResponse {
+            branch: "main".into(),
+            owner: "anthropics".into(),
+            name: "tidepool".into(),
+        };
+        let bytes = resp.encode_to_vec();
+        let decoded = GetRepoInfoResponse::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.owner, "anthropics");
+        assert_eq!(decoded.name, "tidepool");
+    }
+
+    #[test]
+    fn github_list_issues_binary_roundtrip() {
+        use exomonad_proto::effects::github::{Issue, Label, ListIssuesResponse};
+
+        let resp = ListIssuesResponse {
+            issues: vec![Issue {
+                number: 1,
+                title: "Bug".into(),
+                body: "Description".into(),
+                state: 1,
+                author: None,
+                labels: vec![Label {
+                    name: "bug".into(),
+                    color: "d73a4a".into(),
+                    description: "Something isn't working".into(),
+                }],
+                created_at: 1700000000,
+                updated_at: 1700001000,
+                comments_count: 0,
+            }],
+        };
+        let bytes = resp.encode_to_vec();
+        let decoded = ListIssuesResponse::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.issues[0].title, "Bug");
+        assert_eq!(decoded.issues[0].labels[0].name, "bug");
+        assert_eq!(decoded.issues[0].labels[0].color, "d73a4a");
+    }
+
+    #[test]
+    fn agent_cleanup_batch_binary_roundtrip() {
+        use exomonad_proto::effects::agent::CleanupBatchResponse;
+
+        let resp = CleanupBatchResponse {
+            cleaned: vec!["1".into(), "2".into()],
+            failed: vec!["3".into()],
+            errors: vec!["issue 3: worktree has changes".into()],
+        };
+        let bytes = resp.encode_to_vec();
+        let decoded = CleanupBatchResponse::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.cleaned, vec!["1", "2"]);
+        assert_eq!(decoded.failed, vec!["3"]);
+    }
+
+    #[test]
+    fn log_emit_event_binary_roundtrip() {
+        use exomonad_proto::effects::log::EmitEventResponse;
+
+        let resp = EmitEventResponse { event_id: "evt-abc-123".into() };
+        let bytes = resp.encode_to_vec();
+        let decoded = EmitEventResponse::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.event_id, "evt-abc-123");
+    }
+
+    #[test]
+    fn fs_write_file_binary_roundtrip() {
+        use exomonad_proto::effects::fs::WriteFileResponse;
+
+        let resp = WriteFileResponse { bytes_written: 1024, path: "/tmp/out.txt".into() };
+        let bytes = resp.encode_to_vec();
+        let decoded = WriteFileResponse::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.bytes_written, 1024);
+        assert_eq!(decoded.path, "/tmp/out.txt");
+    }
+
+    // ========================================================================
+    // Hex byte extraction for cross-language tests
+    // ========================================================================
+
+    /// Produces reference hex bytes for the Haskell decode tests.
+    ///
+    /// Run with `cargo test -p exomonad-proto --features effects -- --nocapture cross_language_hex`
+    /// to see the hex output, then paste into Haskell test literals.
+    #[test]
+    fn cross_language_hex_reference() {
+        use exomonad_proto::effects::agent::{AgentInfo, SpawnBatchResponse, SpawnResponse};
+        use exomonad_proto::effects::git::GetBranchResponse;
+        use exomonad_proto::effects::log::LogResponse;
+
+        println!("\n=== Cross-Language Hex Reference Bytes ===\n");
+
+        // 1. EffectResponse with simple payload
+        let simple = EffectResponse {
+            result: Some(ResponseResult::Payload(b"hello".to_vec())),
+        };
+        print_hex("EffectResponse(Payload(hello))", &simple.encode_to_vec());
+
+        // 2. EffectResponse wrapping GetBranchResponse
+        let branch_resp = GetBranchResponse { branch: "main".into(), detached: false };
+        let branch_inner = branch_resp.encode_to_vec();
+        let branch_wrapped = EffectResponse {
+            result: Some(ResponseResult::Payload(branch_inner.clone())),
+        };
+        print_hex("GetBranchResponse(main)", &branch_inner);
+        print_hex("EffectResponse(Payload(GetBranchResponse))", &branch_wrapped.encode_to_vec());
+
+        // 3. EffectResponse wrapping LogResponse
+        let log_resp = LogResponse { success: true };
+        let log_inner = log_resp.encode_to_vec();
+        let log_wrapped = EffectResponse {
+            result: Some(ResponseResult::Payload(log_inner.clone())),
+        };
+        print_hex("LogResponse(true)", &log_inner);
+        print_hex("EffectResponse(Payload(LogResponse))", &log_wrapped.encode_to_vec());
+
+        // 4. EffectResponse wrapping SpawnResponse with full AgentInfo
+        let spawn_resp = SpawnResponse {
+            agent: Some(AgentInfo {
+                id: "a1".into(),
+                issue: "1".into(),
+                worktree_path: "/w".into(),
+                branch_name: "b".into(),
+                agent_type: 1,
+                role: 1,
+                status: 1,
+                zellij_tab: "t".into(),
+                error: String::new(),
+                pr_number: 0,
+                pr_url: String::new(),
+            }),
+        };
+        let spawn_inner = spawn_resp.encode_to_vec();
+        let spawn_wrapped = EffectResponse {
+            result: Some(ResponseResult::Payload(spawn_inner.clone())),
+        };
+        print_hex("SpawnResponse(a1)", &spawn_inner);
+        print_hex("EffectResponse(Payload(SpawnResponse))", &spawn_wrapped.encode_to_vec());
+
+        // 5. EffectResponse with NotFound error
+        let error_resp = EffectResponse {
+            result: Some(ResponseResult::Error(EffectError {
+                kind: Some(proto_error::effect_error::Kind::NotFound(
+                    proto_error::NotFound { resource: "test".into() },
+                )),
+            })),
+        };
+        print_hex("EffectResponse(Error(NotFound(test)))", &error_resp.encode_to_vec());
+
+        // 6. EffectResponse with Custom error (common in agent handler failures)
+        let custom_err = EffectResponse {
+            result: Some(ResponseResult::Error(EffectError {
+                kind: Some(proto_error::effect_error::Kind::Custom(
+                    proto_error::Custom {
+                        code: "agent_error".into(),
+                        message: "spawn timed out".into(),
+                        data: vec![],
+                    },
+                )),
+            })),
+        };
+        print_hex("EffectResponse(Error(Custom(agent_error)))", &custom_err.encode_to_vec());
+
+        // 7. SpawnBatchResponse with agents + errors
+        let batch = SpawnBatchResponse {
+            agents: vec![AgentInfo {
+                id: "gh-1-claude".into(),
+                issue: "1".into(),
+                worktree_path: "/w/1".into(),
+                branch_name: "gh-1/a".into(),
+                agent_type: 1,
+                role: 1,
+                status: 1,
+                zellij_tab: "1-a".into(),
+                error: String::new(),
+                pr_number: 0,
+                pr_url: String::new(),
+            }],
+            errors: vec!["issue 2: failed".into()],
+        };
+        let batch_inner = batch.encode_to_vec();
+        let batch_wrapped = EffectResponse {
+            result: Some(ResponseResult::Payload(batch_inner.clone())),
+        };
+        print_hex("SpawnBatchResponse(1 agent, 1 error)", &batch_inner);
+        print_hex("EffectResponse(Payload(SpawnBatchResponse))", &batch_wrapped.encode_to_vec());
+
+        // 8. EffectEnvelope
+        let envelope = EffectEnvelope {
+            effect_type: "agent.spawn".into(),
+            payload: vec![10, 1, 49],
+        };
+        print_hex("EffectEnvelope(agent.spawn)", &envelope.encode_to_vec());
+
+        // 9. Varint boundary: 128-byte payload (2-byte varint)
+        let boundary = EffectResponse {
+            result: Some(ResponseResult::Payload(vec![0x42; 128])),
+        };
+        let boundary_bytes = boundary.encode_to_vec();
+        print_hex("EffectResponse(Payload(128 bytes))", &boundary_bytes[..5]); // Just first 5 bytes
+        println!("  total_len={}", boundary_bytes.len());
+
+        println!("\n=== End Reference Bytes ===\n");
+    }
+
+    fn print_hex(label: &str, bytes: &[u8]) {
+        let hex: String = bytes
+            .iter()
+            .map(|b| format!("0x{:02x}", b))
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("{label}: [{hex}]");
+    }
+}
