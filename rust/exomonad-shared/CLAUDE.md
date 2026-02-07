@@ -58,8 +58,8 @@ Strongly typed wrappers for string identifiers with validation at the edge:
 
 Types that must match exactly between Rust and Haskell WASM (FFI):
 
-- `FfiResult<T>` - Result type for FFI calls
-- `FfiError` - Detailed error information (code, message, context)
+- `FFIResult<T>` - Result type for FFI calls
+- `FFIError` - Detailed error information (code, message, context)
 - `ErrorCode` - Stable error codes across the FFI boundary
 
 ## Re-exports
@@ -67,10 +67,10 @@ Types that must match exactly between Rust and Haskell WASM (FFI):
 The crate root re-exports commonly used types:
 
 ```rust
-pub use domain::*;
+pub use domain::{SessionId, ToolName, Role, GithubOwner, GithubRepo, IssueNumber, ToolPermission, AbsolutePath};
 pub use error::{ExoMonadError, Result};
-pub use ffi::{ErrorCode, ErrorContext, FfiError, FfiResult};
-pub use protocol::*;
+pub use ffi::{ErrorCode, ErrorContext, FFIError, FFIResult};
+pub use protocol::{HookInput, HookEventType, HookSpecificOutput, PermissionDecision, Runtime};
 pub use logging::{init_logging, init_logging_with_default};
 pub use util::{shell_quote, find_exomonad_binary};
 ```
@@ -80,9 +80,13 @@ pub use util::{shell_quote, find_exomonad_binary};
 ```rust
 use exomonad_shared::{SessionId, ToolName, ToolPermission};
 
-let session = SessionId::try_from("session-123".to_string())?;
-let tool = ToolName::try_from("git_branch".to_string())?;
-let perm = ToolPermission::Allow;
+fn main() -> exomonad_shared::Result<()> {
+    let session = SessionId::try_from("session-123".to_string())?;
+    let tool = ToolName::try_from("git_branch".to_string())?;
+    let perm = ToolPermission::Allow;
+    
+    Ok(())
+}
 ```
 
 ## Testing
