@@ -72,6 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 cwd: &cwd,
                 shell: &shell,
                 focus: true,
+                close_on_exit: true,
             };
 
             let layout = generate_agent_layout(&params)?;

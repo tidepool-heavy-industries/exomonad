@@ -70,6 +70,9 @@ enum Commands {
         /// Optionally override session name (default: from config)
         #[arg(long)]
         session: Option<String>,
+        /// Delete existing session and create fresh (use after binary/layout updates)
+        #[arg(long)]
+        recreate: bool,
     },
 
     /// Reply to a UI request (sent by Zellij plugin)
@@ -364,7 +367,14 @@ async fn handle_hook(
 // ============================================================================
 
 /// Run the init command: create or attach to Zellij session.
-fn run_init(session_override: Option<String>) -> Result<()> {
+///
+/// Three-way session handling:
+/// - Session alive → attach
+/// - Session EXITED → delete stale state, create fresh from layout
+/// - No session → create fresh from layout
+///
+/// With `--recreate`: delete any existing session (even alive), then create fresh.
+fn run_init(session_override: Option<String>, recreate: bool) -> Result<()> {
     // Preflight: warn if XDG_RUNTIME_DIR missing (SSH edge case)
     if std::env::var("XDG_RUNTIME_DIR").is_err() {
         eprintln!("Warning: XDG_RUNTIME_DIR not set. Zellij may fail to find sessions.");
@@ -379,43 +389,69 @@ fn run_init(session_override: Option<String>) -> Result<()> {
         }
     };
 
-    // Check if session exists (and is not EXITED)
+    // Query existing sessions
     let output = std::process::Command::new("zellij")
         .args(["list-sessions", "--short"])
         .output()
         .context("Failed to run zellij list-sessions")?;
 
-    let sessions = String::from_utf8_lossy(&output.stdout);
-    let session_exists = sessions
-        .lines()
-        .any(|line| line.trim() == session && !line.contains("EXITED"));
+    let sessions_str = String::from_utf8_lossy(&output.stdout);
 
-    if session_exists {
-        // Attach to existing session
-        println!("Attaching to session: {}", session);
+    // `zellij list-sessions --short` outputs lines like:
+    //   "my-session" (alive) or "my-session (EXITED ...)" (dead)
+    let session_alive = sessions_str
+        .lines()
+        .any(|l| l.trim() == session);
+    let session_exited = sessions_str
+        .lines()
+        .any(|l| l.starts_with(&session) && l.contains("EXITED"));
+
+    if recreate && (session_alive || session_exited) {
+        eprintln!("Deleting session (--recreate): {}", session);
+        let status = std::process::Command::new("zellij")
+            .args(["delete-session", &session])
+            .status()
+            .context("Failed to run zellij delete-session")?;
+        if !status.success() {
+            eprintln!("Warning: zellij delete-session exited with {}", status);
+        }
+    } else if session_alive {
+        // Attach to running session
+        eprintln!("Attaching to session: {}", session);
         let err = std::process::Command::new("zellij")
             .args(["attach", &session])
-            .exec(); // Replace current process
-        Err(err).context("Failed to exec zellij attach")
-    } else {
-        // Create new session with TL layout
-        println!("Creating session: {}", session);
-
-        let layout_path = generate_tl_layout()?;
-
-        // NOTE: Must use --new-session-with-layout, NOT --layout
-        // (attach --create --layout doesn't work reliably)
-        let err = std::process::Command::new("zellij")
-            .arg("--session")
-            .arg(&session)
-            .arg("--new-session-with-layout")
-            .arg(&layout_path)
-            .exec(); // Replace current process
-        Err(err).context("Failed to exec zellij with layout")
+            .exec();
+        return Err(err).context("Failed to exec zellij attach");
+    } else if session_exited {
+        // Kill stale serialized state to prevent resurrection
+        eprintln!("Cleaning up exited session: {}", session);
+        let status = std::process::Command::new("zellij")
+            .args(["delete-session", &session])
+            .status()
+            .context("Failed to run zellij delete-session")?;
+        if !status.success() {
+            eprintln!("Warning: zellij delete-session exited with {}", status);
+        }
     }
+
+    // Create fresh session from layout
+    eprintln!("Creating session: {}", session);
+    let layout_path = generate_tl_layout()?;
+
+    let err = std::process::Command::new("zellij")
+        .arg("--session")
+        .arg(&session)
+        .arg("--new-session-with-layout")
+        .arg(&layout_path)
+        .exec();
+    Err(err).context("Failed to exec zellij with layout")
 }
 
 /// Generate a TL layout file for the init command.
+///
+/// Uses `nix develop` to provide the development environment (GHC, Cabal, Rust, etc.).
+/// The template wraps this in a login shell (`$SHELL -l -c ...`) so profile-installed
+/// tools like `claude` remain available via PATH inheritance.
 fn generate_tl_layout() -> Result<std::path::PathBuf> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let cwd = std::env::current_dir()?;
@@ -423,10 +459,11 @@ fn generate_tl_layout() -> Result<std::path::PathBuf> {
     let params = zellij_gen::AgentTabParams {
         tab_name: "TL",
         pane_name: "Main",
-        command: &shell, // Just start a shell, no specific command
+        command: "nix develop",
         cwd: &cwd,
         shell: &shell,
         focus: true,
+        close_on_exit: false,
     };
 
     let layout = zellij_gen::generate_agent_layout(&params)
@@ -686,8 +723,8 @@ async fn main() -> Result<()> {
             }
         }
 
-        Commands::Init { session } => {
-            run_init(session)?;
+        Commands::Init { session, recreate } => {
+            run_init(session, recreate)?;
         }
 
         Commands::Reply {

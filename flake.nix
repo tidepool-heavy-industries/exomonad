@@ -325,7 +325,6 @@ EOF
               echo "Commands:"
               echo "  cabal build all      Build Haskell packages"
               echo "  just proto-gen       Generate proto code (Rust + Haskell)"
-              echo "  ./ide                Start Claude Code++ session"
               echo ""
               echo "Other shells:"
               echo "  nix develop .#wasm              WASM cross-compilation"

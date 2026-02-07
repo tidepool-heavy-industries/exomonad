@@ -71,7 +71,6 @@ in pkgs.mkShell {
     echo ""
     echo "Commands:"
     echo "  cabal build all      Build Haskell packages"
-    echo "  ./ide              Start Claude Code++ session"
     echo ""
     echo "NOTE: For flakes with more shells, use: nix develop"
     echo ""

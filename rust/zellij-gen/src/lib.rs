@@ -20,6 +20,9 @@ pub struct AgentTabParams<'a> {
     pub shell: &'a str,
     /// Whether this tab should be focused
     pub focus: bool,
+    /// Whether the pane should close when the command exits.
+    /// True for short-lived agents, false for interactive sessions.
+    pub close_on_exit: bool,
 }
 
 /// Template for an agent tab with interaction pane and status plugin.
@@ -32,6 +35,7 @@ struct AgentTab {
     cwd: String,
     shell: String,
     focus: bool,
+    close_on_exit: bool,
 }
 
 /// Template for a single subagent layout (wraps agent tab with zjstatus).
@@ -61,6 +65,7 @@ pub fn generate_agent_layout(params: &AgentTabParams) -> Result<String, askama::
         cwd: params.cwd.display().to_string(),
         shell: params.shell.to_string(),
         focus: params.focus,
+        close_on_exit: params.close_on_exit,
     }
     .render()?;
 
@@ -82,6 +87,7 @@ pub fn generate_main_layout(tabs: Vec<AgentTabParams>) -> Result<String, askama:
                 cwd: params.cwd.display().to_string(),
                 shell: params.shell.to_string(),
                 focus: params.focus,
+                close_on_exit: params.close_on_exit,
             }
             .render()
         })
@@ -106,6 +112,7 @@ mod tests {
             cwd: Path::new("/tmp/test"),
             shell: "/bin/zsh",
             focus: true,
+            close_on_exit: true,
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -130,6 +137,7 @@ mod tests {
                 cwd: Path::new("/tmp/1"),
                 shell: "/bin/zsh",
                 focus: true,
+                close_on_exit: true,
             },
             AgentTabParams {
                 tab_name: "Tab2",
@@ -138,6 +146,7 @@ mod tests {
                 cwd: Path::new("/tmp/2"),
                 shell: "/bin/zsh",
                 focus: false,
+                close_on_exit: true,
             },
         ];
 
@@ -159,6 +168,7 @@ mod tests {
             cwd: Path::new("/tmp"),
             shell: "/bin/zsh",
             focus: true,
+            close_on_exit: true,
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -174,6 +184,7 @@ mod tests {
             cwd: Path::new("/tmp"),
             shell: "/bin/zsh",
             focus: true,
+            close_on_exit: true,
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -189,6 +200,7 @@ mod tests {
             cwd: Path::new("/tmp"),
             shell: "/bin/zsh",
             focus: true,
+            close_on_exit: true,
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -204,6 +216,7 @@ mod tests {
             cwd: Path::new("/tmp"),
             shell: "/bin/zsh",
             focus: true,
+            close_on_exit: true,
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -221,6 +234,7 @@ mod tests {
             cwd: Path::new("/path/with spaces/project"),
             shell: "/bin/zsh",
             focus: true,
+            close_on_exit: true,
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -236,6 +250,7 @@ mod tests {
             cwd: Path::new("/tmp"),
             shell: "/bin/zsh",
             focus: false,
+            close_on_exit: true,
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -255,6 +270,7 @@ mod tests {
             cwd: Path::new("/tmp"),
             shell: "/bin/zsh",
             focus: true,
+            close_on_exit: true,
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -273,6 +289,7 @@ mod tests {
             cwd: Path::new("/tmp"),
             shell: "/bin/zsh",
             focus: true,
+            close_on_exit: true,
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -291,6 +308,7 @@ mod tests {
             cwd: Path::new("/tmp"),
             shell: "/bin/zsh",
             focus: true,
+            close_on_exit: true,
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -309,6 +327,7 @@ mod tests {
             cwd: Path::new("/tmp"),
             shell: "/bin/zsh",
             focus: true,
+            close_on_exit: true,
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -328,6 +347,7 @@ mod tests {
                 cwd: Path::new("/tmp/1"),
                 shell: "/bin/zsh",
                 focus: true,
+                close_on_exit: true,
             },
             AgentTabParams {
                 tab_name: "Tab2",
@@ -336,6 +356,7 @@ mod tests {
                 cwd: Path::new("/tmp/2"),
                 shell: "/bin/zsh",
                 focus: false,
+                close_on_exit: true,
             },
             AgentTabParams {
                 tab_name: "Tab3",
@@ -344,6 +365,7 @@ mod tests {
                 cwd: Path::new("/tmp/3"),
                 shell: "/bin/zsh",
                 focus: false,
+                close_on_exit: true,
             },
         ];
 
@@ -368,6 +390,7 @@ mod tests {
                 cwd: Path::new("/tmp"),
                 shell,
                 focus: true,
+                close_on_exit: true,
             };
 
             let layout = generate_agent_layout(&params).unwrap();
@@ -389,6 +412,7 @@ mod tests {
             cwd: Path::new("/tmp"),
             shell: "/bin/zsh",
             focus: true,
+            close_on_exit: true,
         };
 
         let layout = generate_agent_layout(&params).unwrap();

@@ -717,8 +717,8 @@ impl AgentControlService {
         info!(name, cwd = %cwd.display(), agent_type = ?agent_type, "Creating Zellij tab");
 
         let cmd = agent_type.command();
-        // Build full command with optional prompt
-        let full_command = match prompt {
+        // Build full command with optional prompt, wrapped in nix develop for toolchain
+        let agent_command = match prompt {
             Some(p) => {
                 let escaped_prompt = Self::escape_for_shell_command(p);
                 debug!(
@@ -731,6 +731,7 @@ impl AgentControlService {
             }
             None => cmd.to_string(),
         };
+        let full_command = format!("nix develop -c {}", agent_command);
 
         // Escape the command for KDL string literal (escape backslashes, quotes, newlines)
         let kdl_escaped_command = Self::escape_for_kdl(&full_command);
@@ -746,6 +747,7 @@ impl AgentControlService {
             cwd,
             shell: &shell,
             focus: true,
+            close_on_exit: true,
         };
 
         let layout_content = zellij_gen::generate_agent_layout(&params)
