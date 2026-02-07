@@ -1,3 +1,12 @@
+//! UI protocol and types for ExoMonad TUI integration.
+//!
+//! This crate defines the communication protocol between the ExoMonad host/plugin
+//! and the TUI sidebar/coordinator. It includes message types for:
+//!
+//! - **Popup UI**: Rendered via Zellij WASM plugins
+//! - **Telemetry**: Real-time progress and logs
+//! - **Control**: Commands for agent lifecycle management
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;

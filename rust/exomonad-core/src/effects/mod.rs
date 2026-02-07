@@ -91,6 +91,7 @@ pub struct EffectRegistry {
 }
 
 impl EffectRegistry {
+    /// Create a new empty effect registry.
     pub fn new() -> Self {
         Self {
             handlers: HashMap::new(),
@@ -114,7 +115,7 @@ impl EffectRegistry {
         self.handlers.insert(namespace, handler);
     }
 
-    /// Register a handler, taking ownership.
+    /// Register a handler, taking ownership and wrapping it in an Arc.
     pub fn register_owned(&mut self, handler: impl EffectHandler + 'static) {
         self.register(Arc::new(handler));
     }

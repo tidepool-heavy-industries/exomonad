@@ -19,6 +19,7 @@ pub struct GitHandler {
 }
 
 impl GitHandler {
+    /// Create a new Git effect handler.
     pub fn new(service: Arc<GitService>) -> Self {
         Self { service }
     }

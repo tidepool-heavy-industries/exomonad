@@ -2,6 +2,12 @@
 name = "exomonad-services"
 version = "0.1.0"
 edition = "2021"
+description = "External service clients and integrations for ExoMonad"
+license = "BSD-3-Clause"
+repository = "https://github.com/tidepool-heavy-industries/exomonad"
+homepage = "https://github.com/tidepool-heavy-industries/exomonad"
+keywords = ["agent", "mcp", "automation", "wasm"]
+categories = ["development-tools"]
 
 [dependencies]
 async-trait = "0.1"
@@ -20,7 +26,7 @@ octocrab = "0.38"
 ollama-rs = "0.2"
 
 # Shared types
-exomonad-shared = { path = "../exomonad-shared" }
+exomonad-shared = { path = "../exomonad-shared", version = "0.1.0" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

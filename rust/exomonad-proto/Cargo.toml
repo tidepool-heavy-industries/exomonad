@@ -3,6 +3,11 @@ name = "exomonad-proto"
 version = "0.1.0"
 edition = "2024"
 description = "Protocol buffer generated types for ExoMonad FFI boundary"
+license = "BSD-3-Clause"
+repository = "https://github.com/tidepool-heavy-industries/exomonad"
+homepage = "https://github.com/tidepool-heavy-industries/exomonad"
+keywords = ["agent", "mcp", "automation", "wasm"]
+categories = ["development-tools"]
 links = "exomonad_effects_proto"
 
 [features]
@@ -19,4 +24,4 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 [build-dependencies]
-prost-build = "0.13"
+prost-build = "0.14"

@@ -3,6 +3,11 @@ name = "exomonad-core"
 version = "0.1.0"
 edition = "2021"
 description = "ExoMonad core framework: effect system, WASM plugin hosting, MCP server"
+license = "BSD-3-Clause"
+repository = "https://github.com/tidepool-heavy-industries/exomonad"
+homepage = "https://github.com/tidepool-heavy-industries/exomonad"
+keywords = ["agent", "mcp", "automation", "wasm"]
+categories = ["development-tools"]
 
 [dependencies]
 async-trait = { workspace = true }
@@ -14,8 +19,8 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
-exomonad-shared = { path = "../exomonad-shared" }
-exomonad-proto = { path = "../exomonad-proto", features = ["effects"] }
+exomonad-shared = { path = "../exomonad-shared", version = "0.1.0" }
+exomonad-proto = { path = "../exomonad-proto", version = "0.1.0", features = ["effects"] }
 prost = { workspace = true }
 sha2 = "0.10"
 
@@ -29,8 +34,8 @@ tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [build-dependencies]
-prost-types = "0.13"
-prost = "0.13"
+prost-types = "0.14"
+prost = "0.14"
 
 [lib]
 path = "src/lib.rs"

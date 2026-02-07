@@ -45,10 +45,14 @@ fn to_proto_error(err: &EffectError) -> proto_error::EffectError {
 
 /// User data for the yield_effect host function.
 pub struct YieldEffectContext {
+    /// Effect registry for dispatching semantic effects.
     pub registry: Arc<EffectRegistry>,
 }
 
 /// Create the yield_effect host function.
+///
+/// This host function is registered with the Extism WASM plugin and
+/// serves as the single entry point for all semantic effects (git, fs, etc.).
 ///
 /// # Protocol
 ///

@@ -92,12 +92,12 @@ pub struct HookInput {
     pub reason: Option<String>,
 
     /// Agent's response text (AfterAgent).
-    /// Ref: https://geminicli.com/docs/hooks/reference/#afteragent
+    /// Ref: <https://geminicli.com/docs/hooks/reference/#afteragent>
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_response: Option<String>,
 
     /// Event timestamp.
-    /// Ref: https://geminicli.com/docs/hooks/reference/#afteragent
+    /// Ref: <https://geminicli.com/docs/hooks/reference/#afteragent>
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timestamp: Option<String>,
 }
@@ -347,7 +347,7 @@ impl InternalStopHookOutput {
     }
 
     /// Translate to Gemini CLI format.
-    /// Ref: https://geminicli.com/docs/hooks/reference/#afteragent
+    /// Ref: <https://geminicli.com/docs/hooks/reference/#afteragent>
     pub fn to_gemini(&self) -> GeminiStopHookOutput {
         match self.decision {
             StopDecision::Allow => GeminiStopHookOutput {
@@ -392,7 +392,7 @@ pub struct ClaudeStopHookOutput {
 }
 
 /// Gemini CLI stop hook decision.
-/// Ref: https://geminicli.com/docs/hooks/reference/#afteragent
+/// Ref: <https://geminicli.com/docs/hooks/reference/#afteragent>
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GeminiStopDecision {
@@ -403,7 +403,7 @@ pub enum GeminiStopDecision {
 }
 
 /// Gemini CLI stop hook output format.
-/// Ref: https://geminicli.com/docs/hooks/reference/#afteragent
+/// Ref: <https://geminicli.com/docs/hooks/reference/#afteragent>
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct GeminiStopHookOutput {
     /// Decision: allow or deny (deny triggers retry with reason as correction prompt)

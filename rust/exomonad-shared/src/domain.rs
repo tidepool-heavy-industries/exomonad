@@ -246,14 +246,17 @@ impl TryFrom<String> for Role {
 // GitHub States
 // ============================================================================
 
-/// State of an item (Issue/PR) - Open or Closed.
+/// State of an item (Issue/PR) - Open, Closed, or Unknown.
 ///
 /// Deserializes case-insensitively to handle both lowercase API responses
 /// and SCREAMING_SNAKE_CASE from GitHub's GraphQL API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ItemState {
+    /// Item is currently open.
     Open,
+    /// Item is closed or merged.
     Closed,
+    /// State could not be determined.
     Unknown,
 }
 
@@ -281,14 +284,31 @@ impl<'de> Deserialize<'de> for ItemState {
     }
 }
 
-/// State of a Review (Pending, Approved, ChangesRequested, etc).
+/// State of an item (Issue) in list - Uppercase (OPEN, CLOSED, UNKNOWN).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum UpperItemState {
+    /// Item is currently open.
+    Open,
+    /// Item is closed or merged.
+    Closed,
+    /// State could not be determined.
+    Unknown,
+}
+
+/// State of a GitHub Review.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ReviewState {
+    /// Review is pending.
     Pending,
+    /// Review is approved.
     Approved,
+    /// Changes were requested.
     ChangesRequested,
+    /// Review was dismissed.
     Dismissed,
+    /// Comment was left without explicit approval/request.
     Commented,
 }
 

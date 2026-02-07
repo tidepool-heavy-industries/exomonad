@@ -3,6 +3,11 @@ name = "exomonad"
 version = "0.1.0"
 edition = "2021"
 description = "ExoMonad: Rust host with Haskell WASM plugin for Claude Code hooks/MCP"
+license = "BSD-3-Clause"
+repository = "https://github.com/tidepool-heavy-industries/exomonad"
+homepage = "https://github.com/tidepool-heavy-industries/exomonad"
+keywords = ["agent", "mcp", "automation", "wasm"]
+categories = ["development-tools"]
 autobins = false
 
 [[bin]]
@@ -10,12 +15,12 @@ name = "exomonad"
 path = "src/main.rs"
 
 [dependencies]
-exomonad-core = { path = "../exomonad-core" }
-exomonad-contrib = { path = "../exomonad-contrib" }
-exomonad-services = { path = "../exomonad-services" }
-exomonad-shared = { path = "../exomonad-shared" }
-exomonad-ui-protocol = { path = "../exomonad-ui-protocol" }
-zellij-gen = { path = "../zellij-gen" }
+exomonad-core = { path = "../exomonad-core", version = "0.1.0" }
+exomonad-contrib = { path = "../exomonad-contrib", version = "0.1.0" }
+exomonad-services = { path = "../exomonad-services", version = "0.1.0" }
+exomonad-shared = { path = "../exomonad-shared", version = "0.1.0" }
+exomonad-ui-protocol = { path = "../exomonad-ui-protocol", version = "0.1.0" }
+zellij-gen = { path = "../zellij-gen", version = "0.1.0" }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

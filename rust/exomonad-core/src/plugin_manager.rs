@@ -28,9 +28,11 @@ use std::sync::{Arc, RwLock};
 /// ```
 #[derive(Clone)]
 pub struct PluginManager {
+    /// The underlying Extism plugin instance.
     plugin: Arc<RwLock<Plugin>>,
     content_hash: String,
     registry: Arc<EffectRegistry>,
+    /// Optional Zellij session name for event emission.
     zellij_session: Option<String>,
 }
 
