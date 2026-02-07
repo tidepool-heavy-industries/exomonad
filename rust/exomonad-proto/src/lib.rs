@@ -15,13 +15,8 @@
 //!
 //! ### Effect types (effects/)
 //! Effect types use protobuf binary encoding (prost Message).
-//! - `envelope.proto` - EffectEnvelope + EffectResponse wire types
-//! - `effect_error.proto` - Unified effect error type
-//! - `git.proto` - Git operations
-//! - `github.proto` - GitHub API
-//! - `fs.proto` - Filesystem operations
-//! - `agent.proto` - Agent control
-//! - `log.proto` - Logging and events
+//! Modules are auto-generated from `proto/effects/*.proto` at build time.
+//! Each `.proto` file with a `service` definition gets its own module.
 
 pub mod ffi {
     include!(concat!(env!("OUT_DIR"), "/exomonad.ffi.rs"));
@@ -56,43 +51,14 @@ pub mod popup {
 ///
 /// Effect types use protobuf binary encoding (not JSON).
 /// Encode/decode via `prost::Message` trait.
+///
+/// Sub-modules are generated from `proto/effects/*.proto` — see
+/// `build.rs` `generate_effect_module_declarations()`.
 #[cfg(feature = "effects")]
 pub mod effects {
-    /// Effect error and envelope types.
-    ///
-    /// Contains both error types (EffectError, NotFound, etc.) and
-    /// envelope types (EffectEnvelope, EffectResponse) since they
-    /// share the `exomonad.effects` package.
-    pub mod error {
-        include!(concat!(env!("OUT_DIR"), "/exomonad.effects.rs"));
-    }
+    include!(concat!(env!("OUT_DIR"), "/effect_modules.rs"));
 
-    /// Git effect types.
-    pub mod git {
-        include!(concat!(env!("OUT_DIR"), "/exomonad.effects.git.rs"));
-    }
-
-    /// GitHub effect types.
-    pub mod github {
-        include!(concat!(env!("OUT_DIR"), "/exomonad.effects.github.rs"));
-    }
-
-    /// Filesystem effect types.
-    pub mod fs {
-        include!(concat!(env!("OUT_DIR"), "/exomonad.effects.fs.rs"));
-    }
-
-    /// Agent control effect types.
-    pub mod agent {
-        include!(concat!(env!("OUT_DIR"), "/exomonad.effects.agent.rs"));
-    }
-
-    /// Logging effect types.
-    pub mod log {
-        include!(concat!(env!("OUT_DIR"), "/exomonad.effects.log.rs"));
-    }
-
-    // Re-export common effect types
+    // Re-export common effect types (stable framework API)
     pub use error::{Custom, EffectError, EffectEnvelope, EffectResponse, InvalidInput, NetworkError, NotFound, PermissionDenied, Timeout};
 }
 

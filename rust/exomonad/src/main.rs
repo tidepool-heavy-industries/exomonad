@@ -6,18 +6,20 @@
 //!
 //! All IO is handled by Rust; Haskell WASM yields high-level semantic effects.
 
-use exomonad::{config, mcp};
+use exomonad::config;
 
 use anyhow::{Context, Result};
 use std::os::unix::process::CommandExt;
 use clap::{Parser, Subcommand};
-use exomonad_runtime::services::{git, zellij_events};
-use exomonad_runtime::{PluginManager, Services};
+use exomonad_contrib::services::{git, zellij_events};
+use exomonad_contrib::Services;
+use exomonad_core::mcp;
+use exomonad_core::{PluginManager, Runtime, RuntimeBuilder};
 use exomonad_services::otel::OtelService;
 use exomonad_services::ExternalService;
 use exomonad_shared::protocol::{
     ClaudePreToolUseOutput, HookEventType, HookInput, HookSpecificOutput, InternalStopHookOutput,
-    Runtime, ServiceRequest, StopDecision,
+    Runtime as HookRuntime, ServiceRequest, StopDecision,
 };
 use exomonad_shared::ToolPermission;
 use std::collections::HashMap;
@@ -51,7 +53,7 @@ enum Commands {
 
         /// The runtime environment (Claude or Gemini)
         #[arg(long, default_value = "claude")]
-        runtime: Runtime,
+        runtime: HookRuntime,
     },
 
     /// Run as stdio MCP server (Claude Code spawns this)
@@ -100,7 +102,7 @@ async fn emit_hook_span(
     otel: &OtelService,
     trace_id: &str,
     event_type: HookEventType,
-    runtime: Runtime,
+    runtime: HookRuntime,
     hook_input: &HookInput,
     decision_str: &str,
     start_ns: u64,
@@ -143,7 +145,7 @@ async fn emit_hook_span(
 async fn handle_hook(
     plugin: &PluginManager,
     event_type: HookEventType,
-    runtime: Runtime,
+    runtime: HookRuntime,
     zellij_session: &str,
 ) -> Result<()> {
     use std::io::Read;
@@ -614,14 +616,12 @@ async fn main() -> Result<()> {
                     .context("Failed to validate services")?,
             );
 
-            // Load WASM plugin (None = no extensible effects registry)
-            let plugin = PluginManager::new(wasm_path, services, None)
-                .await
-                .context("Failed to load WASM plugin")?;
+            // Build runtime with all effect handlers
+            let rt = build_runtime(&wasm_path, &services, Some(config.zellij_session().to_string())).await?;
 
             info!("WASM plugin loaded and initialized");
 
-            handle_hook(&plugin, event, runtime, &config.zellij_session()).await?;
+            handle_hook(rt.plugin_manager(), event, runtime, &config.zellij_session()).await?;
         }
 
         Commands::McpStdio => {
@@ -648,20 +648,9 @@ async fn main() -> Result<()> {
                     .context("Failed to validate services")?,
             );
 
-            // Load WASM plugin with Zellij session for popup support
-            let plugin = PluginManager::with_session(
-                wasm_path,
-                services.clone(),
-                None, // No extensible effects registry
-                Some(config.zellij_session().to_string()),
-            )
-            .await
-            .context("Failed to load WASM plugin")?;
-
-            let state = mcp::McpState {
-                project_dir,
-                plugin: Arc::new(plugin),
-            };
+            // Build runtime with all effect handlers + Zellij session for popup support
+            let rt = build_runtime(&wasm_path, &services, Some(config.zellij_session().to_string())).await?;
+            let state = rt.into_mcp_state(project_dir);
 
             // Emit AgentStarted
             let agent_id = get_agent_id_from_env();
@@ -745,21 +734,36 @@ async fn main() -> Result<()> {
         Commands::Warmup { path } => {
             info!(path = %path.display(), "Warming up WASM plugin cache...");
 
-            // Initialize services (required for PluginManager)
+            // Initialize services
             let services = Arc::new(
                 Services::new()
                     .validate()
                     .context("Failed to validate services")?,
             );
 
-            // Load WASM plugin - this triggers compilation and caching
-            let _plugin = PluginManager::new(path, services, None)
-                .await
-                .context("Failed to load WASM plugin")?;
+            // Build runtime — this triggers WASM compilation and caching
+            let _rt = build_runtime(&path, &services, None).await?;
 
             info!("WASM plugin warmed up successfully");
         }
     }
 
     Ok(())
+}
+
+/// Build a Runtime with all effect handlers registered.
+async fn build_runtime(
+    wasm_path: &PathBuf,
+    services: &Arc<exomonad_contrib::ValidatedServices>,
+    zellij_session: Option<String>,
+) -> Result<Runtime> {
+    let mut builder = RuntimeBuilder::new().with_wasm_path(wasm_path);
+
+    if let Some(session) = zellij_session {
+        builder = builder.with_zellij_session(session);
+    }
+
+    builder = exomonad_contrib::register_builtin_handlers(builder, services);
+
+    builder.build().await.context("Failed to build runtime")
 }

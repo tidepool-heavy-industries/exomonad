@@ -1,4 +1,4 @@
-use exomonad::mcp::ToolDefinition;
+use exomonad_core::mcp::ToolDefinition;
 use tui_realm_stdlib::Input;
 use tuirealm::command::{Cmd, CmdResult};
 use tuirealm::event::{Key, KeyEvent};

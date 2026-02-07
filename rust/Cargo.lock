@@ -1152,7 +1152,8 @@ dependencies = [
  "chrono",
  "clap",
  "duct",
- "exomonad-runtime",
+ "exomonad-contrib",
+ "exomonad-core",
  "exomonad-services",
  "exomonad-shared",
  "exomonad-ui-protocol",
@@ -1169,6 +1170,54 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "zellij-gen",
+]
+
+[[package]]
+name = "exomonad-contrib"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "dirs",
+ "duct",
+ "exomonad-core",
+ "exomonad-proto",
+ "exomonad-services",
+ "exomonad-shared",
+ "exomonad-ui-protocol",
+ "octocrab 0.32.0",
+ "proptest",
+ "prost 0.13.5",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+ "wiremock 0.5.22",
+ "zellij-gen",
+]
+
+[[package]]
+name = "exomonad-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "exomonad-proto",
+ "exomonad-shared",
+ "extism",
+ "extism-convert",
+ "prost 0.13.5",
+ "prost-types",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1189,7 +1238,8 @@ dependencies = [
  "clap",
  "crossterm 0.27.0",
  "exomonad",
- "exomonad-runtime",
+ "exomonad-contrib",
+ "exomonad-core",
  "exomonad-shared",
  "ratatui 0.26.3",
  "serde",
@@ -1197,37 +1247,6 @@ dependencies = [
  "tokio",
  "tui-realm-stdlib",
  "tuirealm",
-]
-
-[[package]]
-name = "exomonad-runtime"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "dirs",
- "duct",
- "exomonad-proto",
- "exomonad-services",
- "exomonad-shared",
- "exomonad-ui-protocol",
- "extism",
- "extism-convert",
- "octocrab 0.32.0",
- "proptest",
- "prost 0.13.5",
- "prost-build",
- "prost-types",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
- "wiremock 0.5.22",
- "zellij-gen",
 ]
 
 [[package]]

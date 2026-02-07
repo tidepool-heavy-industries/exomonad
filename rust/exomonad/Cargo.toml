@@ -10,7 +10,8 @@ name = "exomonad"
 path = "src/main.rs"
 
 [dependencies]
-exomonad-runtime = { path = "../exomonad-runtime" }
+exomonad-core = { path = "../exomonad-core" }
+exomonad-contrib = { path = "../exomonad-contrib" }
 exomonad-services = { path = "../exomonad-services" }
 exomonad-shared = { path = "../exomonad-shared" }
 exomonad-ui-protocol = { path = "../exomonad-ui-protocol" }

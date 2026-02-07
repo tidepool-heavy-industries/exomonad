@@ -1,0 +1,36 @@
+syntax = "proto3";
+package exomonad.effects.file_pr;
+
+// File PR effects for creating/updating GitHub pull requests.
+
+// ============================================================================
+// FilePR - Create or find existing PR for current branch
+// ============================================================================
+
+message FilePrRequest {
+  // PR title.
+  string title = 1;
+  // PR body/description.
+  string body = 2;
+}
+
+message FilePrResponse {
+  // URL of the PR.
+  string pr_url = 1;
+  // PR number.
+  int64 pr_number = 2;
+  // Head branch name.
+  string head_branch = 3;
+  // Base branch name.
+  string base_branch = 4;
+  // True if newly created, false if already existed.
+  bool created = 5;
+}
+
+// ============================================================================
+// Service definition
+// ============================================================================
+
+service FilePrEffects {
+  rpc FilePr(FilePrRequest) returns (FilePrResponse);
+}

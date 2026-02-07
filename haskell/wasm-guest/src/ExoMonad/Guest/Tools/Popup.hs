@@ -1,3 +1,5 @@
+{-# LANGUAGE TypeApplications #-}
+
 -- | Simple flexible popup MCP tool.
 --
 -- One flexible popup tool - theory-of-mind emerges from how I use it, not from schema complexity.
@@ -15,10 +17,12 @@ where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, withText, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
+import Data.ByteString.Lazy qualified as BL
 import Data.Text (Text)
 import Data.Text qualified as T
-import ExoMonad.Guest.FFI (FFIBoundary)
-import ExoMonad.Guest.HostCall (callHost, host_show_popup)
+import Data.Text.Lazy qualified as TL
+import Effects.Popup qualified as PP
+import ExoMonad.Effects.Popup (showPopup)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), errorResult, successResult)
 import GHC.Generics (Generic)
 
@@ -111,80 +115,6 @@ instance FromJSON PopupResponse where
       <$> v .: "button"
       <*> v .: "values"
 
-instance FFIBoundary PopupResponse
-
--- ============================================================================
--- Request type sent to host function
--- ============================================================================
-
--- | Request type for the host function (matches Rust PopupDefinition).
-data PopupRequest = PopupRequest
-  { prqTitle :: Text,
-    prqComponents :: [PopupComponent]
-  }
-  deriving (Show, Eq, Generic)
-
-instance ToJSON PopupRequest where
-  toJSON (PopupRequest title comps) =
-    object
-      [ "title" .= title,
-        "components" .= comps
-      ]
-
--- Not needed since we only serialize (toFFI), but FFIBoundary requires FromJSON
-instance FromJSON PopupRequest where
-  parseJSON = withObject "PopupRequest" $ \v ->
-    PopupRequest
-      <$> v .: "title"
-      <*> v .: "components"
-
-instance FFIBoundary PopupRequest
-
--- | Component in the format expected by Rust (flat with "type" field).
-data PopupComponent = PopupComponent
-  { pcType :: Text,
-    pcId :: Text,
-    pcLabel :: Maybe Text,
-    pcContent :: Maybe Text,
-    pcOptions :: Maybe [Text],
-    pcDefault :: Maybe Value,
-    pcPlaceholder :: Maybe Text,
-    pcMin :: Maybe Double,
-    pcMax :: Maybe Double,
-    pcRows :: Maybe Int
-  }
-  deriving (Show, Eq, Generic)
-
-instance ToJSON PopupComponent where
-  toJSON (PopupComponent ty cid lbl cont opts def ph mn mx rows) =
-    object $
-      [ "type" .= ty,
-        "id" .= cid
-      ]
-        ++ maybe [] (\l -> ["label" .= l]) lbl
-        ++ maybe [] (\c -> ["content" .= c]) cont
-        ++ maybe [] (\o -> ["options" .= o]) opts
-        ++ maybe [] (\d -> ["default" .= d]) def
-        ++ maybe [] (\p -> ["placeholder" .= p]) ph
-        ++ maybe [] (\m -> ["min" .= m]) mn
-        ++ maybe [] (\m -> ["max" .= m]) mx
-        ++ maybe [] (\r -> ["rows" .= r]) rows
-
--- Not needed since we only serialize, but FFIBoundary requires FromJSON
-instance FromJSON PopupComponent where
-  parseJSON = withObject "PopupComponent" $ \v ->
-    PopupComponent
-      <$> v .: "type"
-      <*> v .: "id"
-      <*> v .:? "label"
-      <*> v .:? "content"
-      <*> v .:? "options"
-      <*> v .:? "default"
-      <*> v .:? "placeholder"
-      <*> v .:? "min"
-      <*> v .:? "max"
-      <*> v .:? "rows"
-
 -- ============================================================================
 -- Conversion helpers
 -- ============================================================================
@@ -203,28 +133,30 @@ elementTypeToText = \case
 generateId :: Int -> PopupElementType -> Text
 generateId idx ty = elementTypeToText ty <> "_" <> T.pack (show idx)
 
--- | Convert PopupArgs to PopupRequest (host function format).
-toPopupRequest :: PopupArgs -> PopupRequest
-toPopupRequest args =
-  PopupRequest
-    { prqTitle = maybe "" id (paTitle args),
-      prqComponents = zipWith convertElement [0 ..] (paElements args)
+-- | Convert PopupArgs to the proto ShowPopupRequest.
+-- The components are serialized as JSON bytes in the proto message
+-- because the proto schema uses a bytes field for flexible component data.
+toShowPopupRequest :: PopupArgs -> PP.ShowPopupRequest
+toShowPopupRequest args =
+  PP.ShowPopupRequest
+    { PP.showPopupRequestTitle = TL.fromStrict (maybe "" id (paTitle args)),
+      PP.showPopupRequestComponents = BL.toStrict $ Aeson.encode (zipWith convertElement [0 ..] (paElements args))
     }
   where
-    convertElement :: Int -> PopupElement -> PopupComponent
+    convertElement :: Int -> PopupElement -> Value
     convertElement idx el =
-      PopupComponent
-        { pcType = elementTypeToText (peType el),
-          pcId = maybe (generateId idx (peType el)) id (peId el),
-          pcLabel = peLabel el,
-          pcContent = peContent el,
-          pcOptions = peOptions el,
-          pcDefault = peDefault el,
-          pcPlaceholder = pePlaceholder el,
-          pcMin = peMin el,
-          pcMax = peMax el,
-          pcRows = peRows el
-        }
+      object $
+        [ "type" .= elementTypeToText (peType el),
+          "id" .= maybe (generateId idx (peType el)) id (peId el)
+        ]
+          ++ maybe [] (\l -> ["label" .= l]) (peLabel el)
+          ++ maybe [] (\c -> ["content" .= c]) (peContent el)
+          ++ maybe [] (\o -> ["options" .= o]) (peOptions el)
+          ++ maybe [] (\d -> ["default" .= d]) (peDefault el)
+          ++ maybe [] (\p -> ["placeholder" .= p]) (pePlaceholder el)
+          ++ maybe [] (\m -> ["min" .= m]) (peMin el)
+          ++ maybe [] (\m -> ["max" .= m]) (peMax el)
+          ++ maybe [] (\r -> ["rows" .= r]) (peRows el)
 
 -- ============================================================================
 -- MCPTool instance
@@ -310,8 +242,16 @@ instance MCPTool Popup where
         "required" .= (["elements"] :: [Text])
       ]
   toolHandler args = do
-    let request = toPopupRequest args
-    result <- callHost host_show_popup request :: IO (Either Text PopupResponse)
+    let request = toShowPopupRequest args
+    result <- showPopup request
     case result of
-      Left err -> pure $ errorResult err
-      Right resp -> pure $ successResult $ Aeson.toJSON resp
+      Left err -> pure $ errorResult (T.pack (show err))
+      Right resp ->
+        -- The response contains the button clicked and form values as JSON bytes
+        let responseJson = Aeson.decode (BL.fromStrict (PP.showPopupResponseValues resp))
+            button = TL.toStrict (PP.showPopupResponseButton resp)
+         in case responseJson of
+              Just vals ->
+                pure $ successResult $ Aeson.toJSON $ PopupResponse button vals
+              Nothing ->
+                pure $ successResult $ Aeson.toJSON $ PopupResponse button (object [])

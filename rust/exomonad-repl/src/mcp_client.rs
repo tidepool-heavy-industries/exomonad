@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
-use exomonad::mcp::{tools, McpState, ToolDefinition};
-use exomonad_runtime::{PluginManager, Services};
+use exomonad_core::mcp::{tools, McpState, ToolDefinition};
+use exomonad_core::RuntimeBuilder;
+use exomonad_contrib::services::Services;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -16,17 +17,14 @@ impl McpClient {
                 .context("Failed to validate services")?,
         );
 
-        let plugin = PluginManager::new(wasm_path, services.clone(), None)
-            .await
-            .context("Failed to load WASM plugin")?;
+        let builder = RuntimeBuilder::new().with_wasm_path(&wasm_path);
+        let builder = exomonad_contrib::register_builtin_handlers(builder, &services);
+        let runtime = builder.build().await.context("Failed to build runtime")?;
 
         let project_dir = std::env::current_dir().context("Failed to get current directory")?;
 
         Ok(Self {
-            state: McpState {
-                project_dir,
-                plugin: Arc::new(plugin),
-            },
+            state: runtime.into_mcp_state(project_dir),
         })
     }
 

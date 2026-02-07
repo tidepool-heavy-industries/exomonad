@@ -4,12 +4,13 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 
 -- | High-level agent control effects.
 --
 -- These effects provide semantic operations for agent lifecycle management.
--- The Rust host handles all I/O (git, zellij, filesystem).
+-- The Rust host handles all I/O (git, zellij, filesystem) via yield_effect.
 module ExoMonad.Guest.Effects.AgentControl
   ( -- * Effect type
     AgentControl (..),
@@ -33,29 +34,26 @@ module ExoMonad.Guest.Effects.AgentControl
     AgentInfo (..),
     BatchSpawnResult (..),
     BatchCleanupResult (..),
-    FFIResult (..),
-    FFIError (..),
-    ErrorContext (..),
-    ErrorCode (..),
-    SpawnAgentInput (..),
-    SpawnAgentsInput (..),
-    CleanupAgentInput (..),
-    CleanupAgentsInput (..),
-    CleanupMergedAgentsInput (..),
+    AgentStatus (..),
   )
 where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.:?), (.=))
 import Data.Maybe (catMaybes)
-import Data.Text (Text, unpack)
-import ExoMonad.Guest.FFI (ErrorCode (..), ErrorContext (..), FFIBoundary (..), FFIError (..), FFIResult (..))
-import ExoMonad.Guest.HostCall (callHost, host_agent_cleanup, host_agent_cleanup_batch, host_agent_cleanup_merged, host_agent_list, host_agent_spawn, host_agent_spawn_batch)
+import Data.Text (Text)
+import Data.Text qualified as T
+import Data.Text.Lazy qualified as TL
+import Data.Vector qualified as V
+import Effects.Agent qualified as PA
+import ExoMonad.Common (Role (..))
+import ExoMonad.Effects.Agent qualified as Agent
 import GHC.Generics (Generic)
+import Proto3.Suite.Types (Enumerated (..))
 import Polysemy (Member, Sem, embed, interpret, send)
 import Polysemy.Embed (Embed)
 
 -- ============================================================================
--- Types (match Rust agent_control.rs)
+-- Types (maintained for backward compatibility with callers)
 -- ============================================================================
 
 -- | Agent type for spawned agents.
@@ -70,12 +68,9 @@ instance FromJSON AgentType where
   parseJSON = withText "AgentType" $ \case
     "claude" -> pure Claude
     "gemini" -> pure Gemini
-    other -> fail $ "Invalid agent type: " <> unpack other
-
-instance FFIBoundary AgentType
+    other -> fail $ "Invalid agent type: " <> T.unpack other
 
 -- | Options for spawning an agent.
--- agentType is non-optional; default (Gemini) is applied at the tool layer.
 data SpawnOptions = SpawnOptions
   { owner :: Text,
     repo :: Text,
@@ -100,8 +95,6 @@ instance FromJSON SpawnOptions where
       <*> v .: "repo"
       <*> v .: "worktree_dir"
       <*> v .: "agent_type"
-
-instance FFIBoundary SpawnOptions
 
 -- | Result of spawning an agent.
 data SpawnResult = SpawnResult
@@ -132,8 +125,6 @@ instance ToJSON SpawnResult where
         "agent_type" .= a
       ]
 
-instance FFIBoundary SpawnResult
-
 -- | Simplified PR info for agent listing.
 data AgentPrInfo = AgentPrInfo
   { prNumber :: Int,
@@ -160,14 +151,11 @@ instance ToJSON AgentPrInfo where
         "state" .= s
       ]
 
-instance FFIBoundary AgentPrInfo
-
 data AgentStatus = RUNNING | ORPHAN_WORKTREE | ORPHAN_TAB
   deriving (Show, Eq, Generic)
 
 instance FromJSON AgentStatus
 instance ToJSON AgentStatus
-instance FFIBoundary AgentStatus
 
 -- | Information about an active agent.
 data AgentInfo = AgentInfo
@@ -218,8 +206,6 @@ instance ToJSON AgentInfo where
             ("pr" .=) <$> pr
           ]
 
-instance FFIBoundary AgentInfo
-
 -- | Result of batch spawn operation.
 data BatchSpawnResult = BatchSpawnResult
   { spawned :: [SpawnResult],
@@ -239,8 +225,6 @@ instance ToJSON BatchSpawnResult where
       [ "spawned" .= s,
         "failed" .= f
       ]
-
-instance FFIBoundary BatchSpawnResult
 
 -- | Result of batch cleanup operation.
 data BatchCleanupResult = BatchCleanupResult
@@ -262,153 +246,17 @@ instance ToJSON BatchCleanupResult where
         "failed" .= f
       ]
 
-instance FFIBoundary BatchCleanupResult
-
--- ============================================================================
--- Input types (for serialization to host)
--- ============================================================================
-
-data SpawnAgentInput = SpawnAgentInput
-  { saiIssueId :: Text, -- Rust parses to u64
-    saiOwner :: Text,
-    saiRepo :: Text,
-    saiWorktreeDir :: Maybe Text,
-    saiAgentType :: AgentType
-  }
-  deriving (Show, Eq, Generic)
-
-instance ToJSON SpawnAgentInput where
-  toJSON (SpawnAgentInput i o r w a) =
-    object
-      [ "issue_id" .= i,
-        "owner" .= o,
-        "repo" .= r,
-        "worktree_dir" .= w,
-        "agent_type" .= a
-      ]
-
-instance FromJSON SpawnAgentInput where
-  parseJSON = withObject "SpawnAgentInput" $ \v ->
-    SpawnAgentInput
-      <$> v .: "issue_id"
-      <*> v .: "owner"
-      <*> v .: "repo"
-      <*> v .: "worktree_dir"
-      <*> v .: "agent_type"
-
-instance FFIBoundary SpawnAgentInput
-
-data SpawnAgentsInput = SpawnAgentsInput
-  { sasIssueIds :: [Text],
-    sasOwner :: Text,
-    sasRepo :: Text,
-    sasWorktreeDir :: Maybe Text,
-    sasAgentType :: AgentType
-  }
-  deriving (Show, Eq, Generic)
-
-instance ToJSON SpawnAgentsInput where
-  toJSON (SpawnAgentsInput is o r w a) =
-    object
-      [ "issue_ids" .= is,
-        "owner" .= o,
-        "repo" .= r,
-        "worktree_dir" .= w,
-        "agent_type" .= a
-      ]
-
-instance FromJSON SpawnAgentsInput where
-  parseJSON = withObject "SpawnAgentsInput" $ \v ->
-    SpawnAgentsInput
-      <$> v .: "issue_ids"
-      <*> v .: "owner"
-      <*> v .: "repo"
-      <*> v .: "worktree_dir"
-      <*> v .: "agent_type"
-
-instance FFIBoundary SpawnAgentsInput
-
-data CleanupAgentInput = CleanupAgentInput
-  { caiIssueId :: Text,
-    caiForce :: Bool
-  }
-  deriving (Show, Eq, Generic)
-
-instance ToJSON CleanupAgentInput where
-  toJSON (CleanupAgentInput i f) =
-    object
-      [ "issue_id" .= i,
-        "force" .= f
-      ]
-
-instance FromJSON CleanupAgentInput where
-  parseJSON = withObject "CleanupAgentInput" $ \v ->
-    CleanupAgentInput
-      <$> v .: "issue_id"
-      <*> v .: "force"
-
-instance FFIBoundary CleanupAgentInput
-
-data CleanupAgentsInput = CleanupAgentsInput
-  { casIssueIds :: [Text],
-    casForce :: Bool
-  }
-  deriving (Show, Eq, Generic)
-
-instance ToJSON CleanupAgentsInput where
-  toJSON (CleanupAgentsInput is f) =
-    object
-      [ "issue_ids" .= is,
-        "force" .= f
-      ]
-
-instance FromJSON CleanupAgentsInput where
-  parseJSON = withObject "CleanupAgentsInput" $ \v ->
-    CleanupAgentsInput
-      <$> v .: "issue_ids"
-      <*> v .: "force"
-
-instance FFIBoundary CleanupAgentsInput
-
-data CleanupMergedAgentsInput = CleanupMergedAgentsInput
-  deriving (Show, Generic)
-
-instance ToJSON CleanupMergedAgentsInput where
-  toJSON CleanupMergedAgentsInput = object []
-
-instance FromJSON CleanupMergedAgentsInput where
-  parseJSON = withObject "CleanupMergedAgentsInput" $ \_ -> pure CleanupMergedAgentsInput
-
-instance FFIBoundary CleanupMergedAgentsInput
-
-data ListAgentsInput = ListAgentsInput
-  deriving (Show, Generic)
-
-instance ToJSON ListAgentsInput where
-  toJSON ListAgentsInput = object []
-
-instance FromJSON ListAgentsInput where
-  parseJSON = withObject "ListAgentsInput" $ \_ -> pure ListAgentsInput
-
-instance FFIBoundary ListAgentsInput
-
 -- ============================================================================
 -- Effect type
 -- ============================================================================
 
 -- | Agent control effect for high-level agent lifecycle management.
 data AgentControl m a where
-  -- | Spawn an agent for a GitHub issue.
   SpawnAgent :: Text -> SpawnOptions -> AgentControl m (Either Text SpawnResult)
-  -- | Spawn multiple agents.
   SpawnAgents :: [Text] -> SpawnOptions -> AgentControl m BatchSpawnResult
-  -- | Clean up an agent (close tab, delete worktree).
   CleanupAgent :: Text -> Bool -> AgentControl m (Either Text ())
-  -- | Clean up multiple agents.
   CleanupAgents :: [Text] -> Bool -> AgentControl m BatchCleanupResult
-  -- | Clean up merged agents.
   CleanupMergedAgents :: AgentControl m BatchCleanupResult
-  -- | List all active agent worktrees.
   ListAgents :: AgentControl m (Either Text [AgentInfo])
 
 -- Smart constructors (manually written - makeSem doesn't work with WASM cross-compilation)
@@ -431,66 +279,154 @@ listAgents :: (Member AgentControl r) => Sem r (Either Text [AgentInfo])
 listAgents = send ListAgents
 
 -- ============================================================================
--- Interpreter
+-- Interpreter (uses yield_effect via Effect typeclass)
 -- ============================================================================
 
--- | Interpret AgentControl by calling Rust host functions.
+-- | Interpret AgentControl by calling Rust host via yield_effect.
 runAgentControl :: (Member (Embed IO) r) => Sem (AgentControl ': r) a -> Sem r a
 runAgentControl = interpret $ \case
   SpawnAgent issueId opts -> embed $ do
-    let input =
-          SpawnAgentInput
-            { saiIssueId = issueId, -- Rust parses to u64
-              saiOwner = owner opts,
-              saiRepo = repo opts,
-              saiWorktreeDir = worktreeDir opts,
-              saiAgentType = agentType opts
+    let req =
+          PA.SpawnRequest
+            { PA.spawnRequestIssue = TL.fromStrict issueId,
+              PA.spawnRequestOwner = TL.fromStrict (owner opts),
+              PA.spawnRequestRepo = TL.fromStrict (repo opts),
+              PA.spawnRequestAgentType = Enumerated (Right (toProtoAgentType (agentType opts))),
+              PA.spawnRequestRole = Enumerated (Right RoleROLE_UNSPECIFIED),
+              PA.spawnRequestWorktreeDir = maybe "" TL.fromStrict (worktreeDir opts)
             }
-    callHost host_agent_spawn input
+    result <- Agent.spawnAgent req
+    pure $ case result of
+      Left err -> Left (T.pack (show err))
+      Right resp -> case PA.spawnResponseAgent resp of
+        Nothing -> Left "Spawn succeeded but no agent info returned"
+        Just info -> Right (protoAgentInfoToSpawnResult info)
   SpawnAgents issueIds opts -> embed $ do
-    let input =
-          SpawnAgentsInput
-            { sasIssueIds = issueIds,
-              sasOwner = owner opts,
-              sasRepo = repo opts,
-              sasWorktreeDir = worktreeDir opts,
-              sasAgentType = agentType opts
+    let req =
+          PA.SpawnBatchRequest
+            { PA.spawnBatchRequestIssues = V.fromList (map TL.fromStrict issueIds),
+              PA.spawnBatchRequestOwner = TL.fromStrict (owner opts),
+              PA.spawnBatchRequestRepo = TL.fromStrict (repo opts),
+              PA.spawnBatchRequestAgentType = Enumerated (Right (toProtoAgentType (agentType opts))),
+              PA.spawnBatchRequestRole = Enumerated (Right RoleROLE_UNSPECIFIED),
+              PA.spawnBatchRequestWorktreeDir = maybe "" TL.fromStrict (worktreeDir opts)
             }
-    res <- callHost host_agent_spawn_batch input
-    pure $ case res of
+    result <- Agent.spawnBatch req
+    pure $ case result of
       Left err ->
         BatchSpawnResult
           { spawned = [],
-            spawnFailed = [("", err)]
+            spawnFailed = [("", T.pack (show err))]
           }
-      Right r -> r
+      Right resp ->
+        BatchSpawnResult
+          { spawned = map protoAgentInfoToSpawnResult (V.toList (PA.spawnBatchResponseAgents resp)),
+            spawnFailed = map (\e -> ("", TL.toStrict e)) (V.toList (PA.spawnBatchResponseErrors resp))
+          }
   CleanupAgent issueId force -> embed $ do
-    let input = CleanupAgentInput issueId force
-    res <- callHost host_agent_cleanup input
-    pure $ case res of
-      Left err -> Left err
-      Right () -> Right ()
+    let req =
+          PA.CleanupRequest
+            { PA.cleanupRequestIssue = TL.fromStrict issueId,
+              PA.cleanupRequestForce = force
+            }
+    result <- Agent.cleanupAgent req
+    pure $ case result of
+      Left err -> Left (T.pack (show err))
+      Right resp ->
+        if PA.cleanupResponseSuccess resp
+          then Right ()
+          else Left (TL.toStrict (PA.cleanupResponseError resp))
   CleanupAgents issueIds force -> embed $ do
-    let input = CleanupAgentsInput issueIds force
-    res <- callHost host_agent_cleanup_batch input
-    pure $ case res of
+    let req =
+          PA.CleanupBatchRequest
+            { PA.cleanupBatchRequestIssues = V.fromList (map TL.fromStrict issueIds),
+              PA.cleanupBatchRequestForce = force
+            }
+    result <- Agent.cleanupBatch req
+    pure $ case result of
       Left err ->
         BatchCleanupResult
           { cleaned = [],
-            cleanupFailed = [("", err)]
+            cleanupFailed = [("", T.pack (show err))]
           }
-      Right r -> r
+      Right resp ->
+        BatchCleanupResult
+          { cleaned = map TL.toStrict (V.toList (PA.cleanupBatchResponseCleaned resp)),
+            cleanupFailed = zip
+              (map TL.toStrict (V.toList (PA.cleanupBatchResponseFailed resp)))
+              (map TL.toStrict (V.toList (PA.cleanupBatchResponseErrors resp)))
+          }
   CleanupMergedAgents -> embed $ do
-    res <- callHost host_agent_cleanup_merged CleanupMergedAgentsInput
-    pure $ case res of
+    let req = PA.CleanupMergedRequest {PA.cleanupMergedRequestIssues = V.empty}
+    result <- Agent.cleanupMerged req
+    pure $ case result of
       Left err ->
         BatchCleanupResult
           { cleaned = [],
-            cleanupFailed = [("", err)]
+            cleanupFailed = [("", T.pack (show err))]
           }
-      Right r -> r
+      Right resp ->
+        BatchCleanupResult
+          { cleaned = map TL.toStrict (V.toList (PA.cleanupMergedResponseCleaned resp)),
+            cleanupFailed = zip
+              (map TL.toStrict (V.toList (PA.cleanupMergedResponseSkipped resp)))
+              (map TL.toStrict (V.toList (PA.cleanupMergedResponseErrors resp)))
+          }
   ListAgents -> embed $ do
-    res <- callHost host_agent_list ListAgentsInput
-    pure $ case res of
-      Left err -> Left err
-      Right agents -> Right agents
+    let req =
+          PA.ListRequest
+            { PA.listRequestFilterStatus = Enumerated (Right PA.AgentStatusAGENT_STATUS_UNSPECIFIED),
+              PA.listRequestFilterRole = Enumerated (Right RoleROLE_UNSPECIFIED)
+            }
+    result <- Agent.listAgents req
+    pure $ case result of
+      Left err -> Left (T.pack (show err))
+      Right resp -> Right (map protoAgentInfoToAgentInfo (V.toList (PA.listResponseAgents resp)))
+
+-- ============================================================================
+-- Conversion helpers
+-- ============================================================================
+
+toProtoAgentType :: AgentType -> PA.AgentType
+toProtoAgentType Claude = PA.AgentTypeAGENT_TYPE_CLAUDE
+toProtoAgentType Gemini = PA.AgentTypeAGENT_TYPE_GEMINI
+
+protoAgentInfoToSpawnResult :: PA.AgentInfo -> SpawnResult
+protoAgentInfoToSpawnResult info =
+  SpawnResult
+    { worktreePath = TL.toStrict (PA.agentInfoWorktreePath info),
+      branchName = TL.toStrict (PA.agentInfoBranchName info),
+      tabName = TL.toStrict (PA.agentInfoZellijTab info),
+      issueTitle = TL.toStrict (PA.agentInfoIssue info),
+      agentTypeResult = case PA.agentInfoAgentType info of
+        Enumerated (Right PA.AgentTypeAGENT_TYPE_CLAUDE) -> "claude"
+        Enumerated (Right PA.AgentTypeAGENT_TYPE_GEMINI) -> "gemini"
+        _ -> "unknown"
+    }
+
+protoAgentInfoToAgentInfo :: PA.AgentInfo -> AgentInfo
+protoAgentInfoToAgentInfo info =
+  AgentInfo
+    { agentIssueId = TL.toStrict (PA.agentInfoIssue info),
+      agentHasTab = not (TL.null (PA.agentInfoZellijTab info)),
+      agentHasWorktree = not (TL.null (PA.agentInfoWorktreePath info)),
+      agentHasChanges = Nothing,
+      agentHasUnpushed = Nothing,
+      agentStatus = RUNNING,
+      agentWorktreePath = let p = TL.toStrict (PA.agentInfoWorktreePath info) in if T.null p then Nothing else Just p,
+      agentBranchName = let b = TL.toStrict (PA.agentInfoBranchName info) in if T.null b then Nothing else Just b,
+      agentSlug = Nothing,
+      agentAgentType = Just $ case PA.agentInfoAgentType info of
+        Enumerated (Right PA.AgentTypeAGENT_TYPE_CLAUDE) -> "claude"
+        Enumerated (Right PA.AgentTypeAGENT_TYPE_GEMINI) -> "gemini"
+        _ -> "unknown",
+      agentPr = let prNum = fromIntegral (PA.agentInfoPrNumber info)
+                    prUrl = TL.toStrict (PA.agentInfoPrUrl info)
+                 in if prNum == 0 then Nothing
+                    else Just AgentPrInfo
+                      { prNumber = prNum,
+                        prTitle = "",
+                        prUrl = prUrl,
+                        prState = "open"
+                      }
+    }

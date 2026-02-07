@@ -14,21 +14,20 @@ module ExoMonad.Guest.Tool.Runtime
 where
 
 import Control.Exception (SomeException, try)
-import Control.Monad (unless)
+import Control.Monad (unless, void)
 import Data.Aeson (FromJSON, ToJSON, Value, withObject, (.:), (.=))
 import Data.Aeson qualified as Aeson
-import Data.Aeson.Key qualified as Key
-import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as BSL
 import Data.Maybe (fromMaybe)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Lazy qualified as TL
 import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
-import Data.Word (Word64)
-import ExoMonad.Guest.FFI (FFIBoundary)
-import ExoMonad.Guest.HostCall
+import Effects.Log qualified as Log
+import ExoMonad.Effect.Class (runEffect_)
+import ExoMonad.Effects.Log (LogInfo, LogError, LogEmitEvent)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), toMCPFormat)
 import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
@@ -41,7 +40,20 @@ import Polysemy (Embed, Sem, runM)
 import System.Directory (getCurrentDirectory)
 import System.FilePath (takeFileName)
 
+-- | Helper for fire-and-forget logging via yield_effect.
+logInfo_ :: Text -> IO ()
+logInfo_ msg = void $ runEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict msg, Log.infoRequestFields = ""})
+
+logError_ :: Text -> IO ()
+logError_ msg = void $ runEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = TL.fromStrict msg, Log.errorRequestFields = ""})
+
+emitEvent_ :: Value -> IO ()
+emitEvent_ val = void $ runEffect_ @LogEmitEvent (Log.EmitEventRequest {Log.emitEventRequestEventType = "custom", Log.emitEventRequestPayload = BSL.toStrict (Aeson.encode val), Log.emitEventRequestTimestamp = 0})
+
 -- | Test handler - allows calling any host function directly for property testing.
+-- Note: testHandler is kept as a passthrough for backward compatibility.
+-- In the new architecture, all effects go through yield_effect, so this
+-- handler is primarily useful for integration testing the effect system.
 testHandler :: IO CInt
 testHandler = do
   inp <- input @ByteString
@@ -49,46 +61,11 @@ testHandler = do
     Left err -> do
       output (BSL.toStrict $ Aeson.encode $ TestResult @Value False Nothing (Just $ "JSON decode error: " ++ err))
       pure 1
-    Right (TestCall func payload) -> do
-      dispatch func payload
-  where
-    dispatch :: Text -> Value -> IO CInt
-    dispatch "git_get_branch" val = callAndReturn @Value @Value host_git_get_branch val
-    dispatch "git_get_worktree" val = callAndReturn @Value @Value host_git_get_worktree val
-    dispatch "git_get_dirty_files" val = callAndReturn @Value @Value host_git_get_dirty_files val
-    dispatch "git_get_recent_commits" val = callAndReturn @Value @Value host_git_get_recent_commits val
-    dispatch "git_has_unpushed_commits" val = callAndReturn @Value @Value host_git_has_unpushed_commits val
-    dispatch "git_get_remote_url" val = callAndReturn @Value @Value host_git_get_remote_url val
-    dispatch "git_get_repo_info" val = callAndReturn @Value @Value host_git_get_repo_info val
-    dispatch "agent_spawn" val = callAndReturn @Value @Value host_agent_spawn val
-    dispatch "agent_spawn_batch" val = callAndReturn @Value @Value host_agent_spawn_batch val
-    dispatch "agent_cleanup" val = callAndReturn @Value @Value host_agent_cleanup val
-    dispatch "agent_cleanup_batch" val = callAndReturn @Value @Value host_agent_cleanup_batch val
-    dispatch "agent_list" val = callAndReturn @Value @Value host_agent_list val
-    dispatch "fs_read_file" val = callAndReturn @Value @Value host_fs_read_file val
-    dispatch "fs_write_file" val = callAndReturn @Value @Value host_fs_write_file val
-    dispatch other _ = do
-      output (BSL.toStrict $ Aeson.encode $ TestResult @Value False Nothing (Just $ "Unknown function: " ++ T.unpack other))
+    Right (TestCall _func _payload) -> do
+      -- Test dispatch is no longer supported via direct host functions.
+      -- Tests should use runEffect directly.
+      output (BSL.toStrict $ Aeson.encode $ TestResult @Value False Nothing (Just $ "testHandler dispatch removed: use runEffect directly"))
       pure 1
-
-    callAndReturn ::
-      forall req resp.
-      (FFIBoundary req, FFIBoundary resp) =>
-      (Word64 -> IO Word64) -> Value -> IO CInt
-    callAndReturn hostFn val = do
-      case Aeson.fromJSON val of
-        Aeson.Error err -> do
-          output (BSL.toStrict $ Aeson.encode $ TestResult @Value False Nothing (Just $ "Argument decode error: " ++ err))
-          pure 1
-        Aeson.Success req -> do
-          res <- callHost @req @resp hostFn req
-          case res of
-            Left err -> do
-              output (BSL.toStrict $ Aeson.encode $ TestResult @Value False Nothing (Just $ "Host call error: " ++ T.unpack err))
-              pure 1
-            Right successVal -> do
-              output (BSL.toStrict $ Aeson.encode $ TestResult @resp True (Just successVal) Nothing)
-              pure 0
 
 -- | Input structure for testHandler
 data TestCall = TestCall
@@ -125,17 +102,17 @@ mcpHandlerRecord handlers = do
   inp <- input @ByteString
   case Aeson.eitherDecodeStrict inp of
     Left err -> do
-      callHostVoid host_log_error (LogPayload Error ("MCP parse error: " <> T.pack err) Nothing)
+      logError_ ("MCP parse error: " <> T.pack err)
       let resp = MCPCallOutput False Nothing (Just $ "Parse error: " <> T.pack err)
       output (BSL.toStrict $ Aeson.encode resp)
       pure 0
     Right mcpCall -> do
-      callHostVoid host_log_info (LogPayload Info ("Dispatching tool: " <> toolName mcpCall) Nothing)
+      logInfo_ ("Dispatching tool: " <> toolName mcpCall)
 
       resp <- dispatchRecord handlers (toolName mcpCall) (toolArgs mcpCall)
 
       unless (success resp) $
-        callHostVoid host_log_error (LogPayload Error ("Tool failed: " <> fromMaybe "No error message" (mcpError resp)) Nothing)
+        logError_ ("Tool failed: " <> fromMaybe "No error message" (mcpError resp))
 
       output (BSL.toStrict $ Aeson.encode resp)
       pure 0
@@ -159,7 +136,7 @@ hookHandler config = do
   inp <- input @ByteString
   case Aeson.eitherDecodeStrict inp of
     Left err -> do
-      callHostVoid host_log_error (LogPayload Error ("Hook parse error: " <> T.pack err) Nothing)
+      logError_ ("Hook parse error: " <> T.pack err)
       let errResp = Aeson.object ["error" Aeson..= ("Parse error: " ++ err)]
       output (BSL.toStrict $ Aeson.encode errResp)
       pure 1
@@ -170,7 +147,7 @@ hookHandler config = do
             Stop -> "Stop"
             SubagentStop -> "SubagentStop"
             PreToolUse -> "PreToolUse"
-      callHostVoid host_log_info (LogPayload Info ("Hook received: " <> hookName) Nothing)
+      logInfo_ ("Hook received: " <> hookName)
 
       case hookType of
         SessionEnd -> handleStopHook hookInput (onStop config)
@@ -195,7 +172,7 @@ hookHandler config = do
       let timestamp = T.pack $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%QZ" now
 
       -- Log that stop hook was called
-      callHostVoid host_log_info (LogPayload Info ("Stop hook firing for agent: " <> agentId) Nothing)
+      logInfo_ ("Stop hook firing for agent: " <> agentId)
 
       -- Emit AgentStopped event BEFORE running checks
       -- This ensures we see the event even if checks fail
@@ -205,7 +182,7 @@ hookHandler config = do
                 "agent_id" .= agentId,
                 "timestamp" .= timestamp
               ]
-      callHostVoid host_emit_event event
+      emitEvent_ event
 
       -- Run the hook from config (using Polysemy effects)
       result <- runM $ hook hookInput
@@ -213,13 +190,13 @@ hookHandler config = do
       -- Log the decision
       case decision result of
         Allow ->
-          callHostVoid host_log_info (LogPayload Info ("Stop hook allowed for " <> agentId) Nothing)
+          logInfo_ ("Stop hook allowed for " <> agentId)
         Block ->
           case reason result of
             Just r ->
-              callHostVoid host_log_info (LogPayload Info ("Stop hook blocked for " <> agentId <> ": " <> r) Nothing)
+              logInfo_ ("Stop hook blocked for " <> agentId <> ": " <> r)
             Nothing ->
-              callHostVoid host_log_info (LogPayload Info ("Stop hook blocked for " <> agentId) Nothing)
+              logInfo_ ("Stop hook blocked for " <> agentId)
 
       -- Return the result to the hook caller
       output (BSL.toStrict $ Aeson.encode result)

@@ -14,6 +14,7 @@ anyhow = "1.0"
 tokio = { version = "1.35", features = ["full"] }
 clap = { version = "4", features = ["derive", "env"] }
 
-exomonad-runtime = { path = "../exomonad-runtime" }
+exomonad-core = { path = "../exomonad-core" }
+exomonad-contrib = { path = "../exomonad-contrib" }
 exomonad-shared = { path = "../exomonad-shared" }
 exomonad = { path = "../exomonad" }

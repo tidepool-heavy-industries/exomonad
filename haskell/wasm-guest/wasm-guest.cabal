@@ -81,8 +81,11 @@ library wasm-guest-internal
         ExoMonad.Effects.Git
         ExoMonad.Effects.GitHub
         ExoMonad.Effects.Log
-        ExoMonad.Guest.HostCall
-        ExoMonad.Guest.FFI
+        ExoMonad.Effects.Agent
+        ExoMonad.Effects.Fs
+        ExoMonad.Effects.Popup
+        ExoMonad.Effects.FilePR
+        ExoMonad.Effects.Copilot
         -- Types
         ExoMonad.Guest.Types
         ExoMonad.Types
@@ -90,31 +93,10 @@ library wasm-guest-internal
     build-depends:
         exomonad-pdk,
         exomonad-proto,
-        proto3-runtime
+        proto3-runtime,
+        vector
 
     -- Polysemy plugin doesn't work with WASM cross-compilation
     if !arch(wasm32)
         ghc-options: -fplugin=Polysemy.Plugin
 
-test-suite ffi-serialization-tests
-  type: exitcode-stdio-1.0
-  main-is: FFISerializationSpec.hs
-  hs-source-dirs: test
-  c-sources: test/cbits/stubs.c
-  -- Only buildable on WASM target
-  if !os(wasi)
-      buildable: False
-  build-depends:
-      base
-    , wasm-guest
-    , QuickCheck
-    , aeson
-    , hspec
-    , text
-    , bytestring
-  default-language: GHC2021
-  default-extensions:
-      OverloadedStrings
-      ScopedTypeVariables
-      DeriveGeneric
-      DeriveAnyClass

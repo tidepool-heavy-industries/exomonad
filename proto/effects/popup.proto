@@ -1,0 +1,30 @@
+syntax = "proto3";
+package exomonad.effects.popup;
+
+// Popup effects for interactive UI via Zellij plugin.
+
+// ============================================================================
+// ShowPopup - Show interactive popup and wait for response
+// ============================================================================
+
+message ShowPopupRequest {
+  // Title displayed at the top of the popup.
+  string title = 1;
+  // UI components as JSON array (choice lists, text inputs, etc.).
+  bytes components = 2;
+}
+
+message ShowPopupResponse {
+  // Button clicked: "submit" or "cancel".
+  string button = 1;
+  // Component values as JSON object.
+  bytes values = 2;
+}
+
+// ============================================================================
+// Service definition
+// ============================================================================
+
+service PopupEffects {
+  rpc ShowPopup(ShowPopupRequest) returns (ShowPopupResponse);
+}

@@ -44,6 +44,9 @@ library
     Effects.Log
     Effects.Fs
     Effects.Agent
+    Effects.Popup
+    Effects.FilePr
+    Effects.Copilot
     -- Hand-written compatibility layer
     ExoMonad.Compat
   build-depends:

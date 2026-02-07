@@ -3,6 +3,7 @@ name = "exomonad-proto"
 version = "0.1.0"
 edition = "2024"
 description = "Protocol buffer generated types for ExoMonad FFI boundary"
+links = "exomonad_effects_proto"
 
 [features]
 default = []

@@ -264,9 +264,11 @@ wasm-dev role="tl":
 
     echo ">>> [4/4] Installing..."
     mkdir -p .exomonad/wasm
-    WASM_FILE=$(find dist-newstyle -name "wasm-guest-${ROLE}.wasm" -print -quit)
-    if [ -z "$WASM_FILE" ]; then
-        echo "ERROR: wasm-guest-${ROLE}.wasm not found in dist-newstyle" >&2
+    WASM_FILE=$(nix develop .#wasm -c wasm32-wasi-cabal list-bin \
+        --project-file=cabal.project.wasm.dev \
+        "wasm-guest-${ROLE}" 2>/dev/null | tail -1)
+    if [ -z "$WASM_FILE" ] || [ ! -f "$WASM_FILE" ]; then
+        echo "ERROR: wasm-guest-${ROLE}.wasm not found (cabal list-bin returned: ${WASM_FILE})" >&2
         exit 1
     fi
     rm -f ".exomonad/wasm/wasm-guest-${ROLE}.wasm"
@@ -341,7 +343,7 @@ install-all-dev:
 # Regenerate Haskell proto types (requires nix develop shell)
 # Generated files are checked in - only run when protos change
 proto-gen-haskell:
-    nix develop -c ./proto-codegen/generate.sh
+    ./proto-codegen/generate.sh
 
 # Regenerate Rust proto types (part of normal cargo build)
 proto-gen-rust:
@@ -356,11 +358,12 @@ proto-test:
     #!/usr/bin/env bash
     set -euo pipefail
     echo ">>> Running Rust proto wire format tests..."
-    nix develop -c bash -c "cd rust && cargo test -p exomonad-proto"
+    cd rust && cargo test -p exomonad-proto
+    cd ..
     echo ">>> Running Haskell proto tests..."
-    nix develop -c cabal test exomonad-proto || echo "No tests defined yet"
+    cabal test exomonad-proto || echo "No tests defined yet"
     echo ">>> Running proto wire format compatibility test..."
-    nix develop -c cabal run proto-test || echo "Wire format test not yet implemented"
+    cabal run proto-test || echo "Wire format test not yet implemented"
     echo ">>> Done"
 
 # Clean build artifacts

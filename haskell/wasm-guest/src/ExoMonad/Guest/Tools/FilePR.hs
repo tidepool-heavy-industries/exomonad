@@ -1,3 +1,5 @@
+{-# LANGUAGE TypeApplications #-}
+
 -- | File PR tool - creates or updates a PR for the current branch.
 module ExoMonad.Guest.Tools.FilePR
   ( FilePR,
@@ -5,12 +7,17 @@ module ExoMonad.Guest.Tools.FilePR
   )
 where
 
-import Data.Aeson (FromJSON, ToJSON, Value, object, withObject, (.:), (.=))
+import Data.Aeson (FromJSON, Value, object, withObject, (.:), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as T
-import ExoMonad.Guest.FFI (FFIBoundary)
-import ExoMonad.Guest.HostCall (LogLevel (..), LogPayload (..), callHost, callHostVoid, host_file_pr, host_log_error, host_log_info)
+import Data.Text.Lazy qualified as TL
+import Effects.EffectError (EffectError (..))
+import Effects.FilePr qualified as FP
+import Effects.Log qualified as Log
+import ExoMonad.Effect.Class (runEffect, runEffect_)
+import ExoMonad.Effects.FilePR (FilePRFilePr)
+import ExoMonad.Effects.Log (LogInfo, LogError)
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)
 
@@ -30,29 +37,7 @@ instance FromJSON FilePRArgs where
       <$> v .: "title"
       <*> v .: "body"
 
--- | Input type for host function (matches Rust FilePRInput).
-data FilePRInput = FilePRInput
-  { fpiTitle :: Text,
-    fpiBody :: Text
-  }
-  deriving (Show, Generic)
-
-instance ToJSON FilePRInput where
-  toJSON (FilePRInput t b) =
-    object
-      [ "title" .= t,
-        "body" .= b
-      ]
-
-instance FromJSON FilePRInput where
-  parseJSON = withObject "FilePRInput" $ \v ->
-    FilePRInput
-      <$> v .: "title"
-      <*> v .: "body"
-
-instance FFIBoundary FilePRInput
-
--- | Output type from host function (matches Rust FilePROutput).
+-- | Output type for formatting the response.
 data FilePROutput = FilePROutput
   { fpoUrl :: Text,
     fpoNumber :: Int,
@@ -62,16 +47,7 @@ data FilePROutput = FilePROutput
   }
   deriving (Show, Eq, Generic)
 
-instance FromJSON FilePROutput where
-  parseJSON = withObject "FilePROutput" $ \v ->
-    FilePROutput
-      <$> v .: "pr_url"
-      <*> v .: "pr_number"
-      <*> v .: "head_branch"
-      <*> v .: "base_branch"
-      <*> v .: "created"
-
-instance ToJSON FilePROutput where
+instance Aeson.ToJSON FilePROutput where
   toJSON (FilePROutput u n h b c) =
     object
       [ "pr_url" .= u,
@@ -80,8 +56,6 @@ instance ToJSON FilePROutput where
         "base_branch" .= b,
         "created" .= c
       ]
-
-instance FFIBoundary FilePROutput
 
 instance MCPTool FilePR where
   type ToolArgs FilePR = FilePRArgs
@@ -106,22 +80,30 @@ instance MCPTool FilePR where
             ]
       ]
   toolHandler args = do
-    let input =
-          FilePRInput
-            { fpiTitle = fpTitle args,
-              fpiBody = fpBody args
+    let req =
+          FP.FilePrRequest
+            { FP.filePrRequestTitle = TL.fromStrict (fpTitle args),
+              FP.filePrRequestBody = TL.fromStrict (fpBody args)
             }
 
     -- Log before calling host
-    callHostVoid host_log_info (LogPayload Info "FilePR: Calling host_file_pr" Nothing)
+    _ <- runEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = "FilePR: Calling file_pr effect", Log.infoRequestFields = ""})
 
-    result <- callHost host_file_pr input
+    result <- runEffect @ExoMonad.Effects.FilePR.FilePRFilePr req
 
     -- Log the result
     case result of
       Left err -> do
-        callHostVoid host_log_error (LogPayload Error ("FilePR: callHost failed: " <> err) Nothing)
-        pure $ errorResult err
-      Right output -> do
-        callHostVoid host_log_info (LogPayload Info ("FilePR: Success - PR #" <> T.pack (show $ fpoNumber output)) Nothing)
+        _ <- runEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = TL.fromStrict ("FilePR: effect failed: " <> T.pack (show err)), Log.errorRequestFields = ""})
+        pure $ errorResult (T.pack (show err))
+      Right resp -> do
+        let output =
+              FilePROutput
+                { fpoUrl = TL.toStrict (FP.filePrResponsePrUrl resp),
+                  fpoNumber = fromIntegral (FP.filePrResponsePrNumber resp),
+                  fpoHeadBranch = TL.toStrict (FP.filePrResponseHeadBranch resp),
+                  fpoBaseBranch = TL.toStrict (FP.filePrResponseBaseBranch resp),
+                  fpoCreated = FP.filePrResponseCreated resp
+                }
+        _ <- runEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("FilePR: Success - PR #" <> T.pack (show $ fpoNumber output)), Log.infoRequestFields = ""})
         pure $ successResult (Aeson.toJSON output)
