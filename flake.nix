@@ -307,6 +307,13 @@ EOF
               ++ [ proto3SuitePkg ];  # For compile-proto-file (Haskell proto codegen)
 
             shellHook = ''
+              # nix mkShell overrides TMPDIR to /tmp/nix-shell.*, which breaks
+              # Zellij socket discovery (sockets live under macOS native TMPDIR).
+              # Restore native TMPDIR — devShells are interactive, not hermetic builds.
+              if [[ "$TMPDIR" == /tmp/nix-shell.* ]]; then
+                export TMPDIR="$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || echo /tmp)"
+              fi
+
               export PKG_CONFIG_PATH="${pkgs.zlib.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
               export NIX_GHC_LIBDIR="$(ghc --print-libdir)"
               export EXOMONAD_ROOT="$PWD"
