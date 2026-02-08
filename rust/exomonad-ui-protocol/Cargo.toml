@@ -2,6 +2,12 @@
 name = "exomonad-ui-protocol"
 version = "0.1.0"
 edition = "2021"
+description = "UI protocol and types for ExoMonad TUI integration"
+license = "BSD-3-Clause"
+repository = "https://github.com/tidepool-heavy-industries/exomonad"
+homepage = "https://github.com/tidepool-heavy-industries/exomonad"
+keywords = ["agent", "mcp", "automation", "wasm"]
+categories = ["development-tools"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

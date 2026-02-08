@@ -147,8 +147,3 @@ jobs:
         run: |
           . "$HOME/.cargo/env"
           cd rust && cargo test -p exomonad-shared --test protocol_golden
-
-      - name: Plugin E2E test
-        run: |
-          . "$HOME/.cargo/env"
-          cd rust && cargo test -p exomonad-runtime --test plugin_e2e -- --ignored || true

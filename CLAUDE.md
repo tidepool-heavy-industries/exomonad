@@ -102,6 +102,7 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 │   ├── exomonad/CLAUDE.md  ← MCP server + hook handler (binary)
 │   ├── exomonad-core/      ← Framework: EffectHandler, EffectRegistry, RuntimeBuilder, MCP server
 │   ├── exomonad-contrib/   ← Built-in handlers (Git, GitHub, Agent, etc.) + services
+│   ├── exomonad-proto/     ← Proto-generated types (prost) for FFI + effects
 │   ├── exomonad-shared/CLAUDE.md   ← Shared types and protocols
 │   ├── exomonad-services/CLAUDE.md ← External service clients (Anthropic, GitHub, etc.)
 │   ├── exomonad-ui-protocol/CLAUDE.md ← Popup UI protocol types

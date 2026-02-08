@@ -28,9 +28,10 @@ use std::sync::{Arc, RwLock};
 /// ```
 #[derive(Clone)]
 pub struct PluginManager {
+    /// The underlying Extism plugin instance.
     plugin: Arc<RwLock<Plugin>>,
     content_hash: String,
-    registry: Arc<EffectRegistry>,
+    /// Optional Zellij session name for event emission.
     zellij_session: Option<String>,
 }
 
@@ -54,7 +55,7 @@ impl PluginManager {
 
         // Single host function: yield_effect dispatches ALL effects via registry
         let ctx = YieldEffectContext {
-            registry: registry.clone(),
+            registry,
         };
         let functions = vec![yield_effect_host_fn(ctx)];
 
@@ -73,7 +74,6 @@ impl PluginManager {
         Ok(Self {
             plugin: Arc::new(RwLock::new(plugin)),
             content_hash: hash,
-            registry,
             zellij_session,
         })
     }

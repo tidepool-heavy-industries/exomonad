@@ -1,3 +1,10 @@
+//! Stateless IO executor for ExoMonad agents.
+//!
+//! `effector` is a standalone CLI tool that performs concrete IO operations
+//! (git, cabal, fs) on behalf of agents. It is designed to be called by
+//! the Haskell WASM guest or the Rust host when a stateless executor is
+//! preferred over long-lived handlers.
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 

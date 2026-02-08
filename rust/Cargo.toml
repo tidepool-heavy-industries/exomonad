@@ -8,7 +8,6 @@ members = [
     "exomonad",
     "exomonad-core",
     "exomonad-contrib",
-
     "effector",
     "zellij-gen",
 ]
@@ -16,7 +15,7 @@ members = [
 [workspace.dependencies]
 anyhow = "1"
 async-trait = "0.1"
-prost = "0.13"
+prost = "0.14"
 axum = { version = "0.7", features = ["macros"] }
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }

@@ -34,8 +34,11 @@ pub struct McpState {
 /// Tool definition for MCP discovery.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDefinition {
+    /// Unique name of the tool (e.g., "git_branch").
     pub name: String,
+    /// Human-readable description of what the tool does.
     pub description: String,
+    /// JSON Schema for the tool's input arguments.
     #[serde(rename = "inputSchema")]
     pub input_schema: Value,
 }
