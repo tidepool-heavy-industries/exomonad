@@ -54,16 +54,14 @@ impl PluginManager {
         let manifest = Manifest::new([extism::Wasm::data(wasm_bytes.to_vec())]);
 
         // Single host function: yield_effect dispatches ALL effects via registry
-        let ctx = YieldEffectContext {
-            registry,
-        };
-        let functions = vec![yield_effect_host_fn(ctx)];
-
         tracing::info!(
             namespaces = ?registry.namespaces(),
             "Registering yield_effect with {} handler namespaces",
             registry.namespaces().len()
         );
+
+        let ctx = YieldEffectContext { registry };
+        let functions = vec![yield_effect_host_fn(ctx)];
 
         let plugin = PluginBuilder::new(manifest)
             .with_functions(functions)
