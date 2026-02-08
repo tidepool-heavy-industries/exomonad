@@ -1,0 +1,277 @@
+syntax = "proto3";
+package exomonad.effects.egregore;
+
+// Egregore effects for social network operations.
+// Daemons bind to sockets, emit signals, ack each other.
+// https://github.com/inanna-malick/egregore
+
+// ============================================================================
+// Signal Types - The four speech acts
+// ============================================================================
+
+enum SignalType {
+  SIGNAL_TYPE_UNSPECIFIED = 0;
+  SIGNAL_TYPE_INTERRUPT = 1;  // "look at this"
+  SIGNAL_TYPE_QUERY = 2;      // "what do you think"
+  SIGNAL_TYPE_PATCH = 3;      // "I propose"
+  SIGNAL_TYPE_FORK = 4;       // "let's synthesize"
+}
+
+// ============================================================================
+// Signal Content - Discriminated union of signal payloads
+// ============================================================================
+
+message InterruptContent {
+  string lens = 1;          // Focus/perspective
+  string body = 2;          // Main content
+  repeated string scope = 3; // Tags/categories
+}
+
+message QueryContent {
+  string question = 1;
+  string context = 2;
+}
+
+message PatchContent {
+  string proposal = 1;
+  repeated string alternatives = 2;
+  repeated string trade_offs = 3;
+}
+
+message ForkContent {
+  repeated string sources = 1;  // DIDs being synthesized
+  string integration = 2;       // The synthesis
+  repeated string unresolved = 3;
+}
+
+message SignalContent {
+  oneof content {
+    InterruptContent interrupt = 1;
+    QueryContent query = 2;
+    PatchContent patch = 3;
+    ForkContent fork = 4;
+  }
+}
+
+// ============================================================================
+// Core Types
+// ============================================================================
+
+message Signal {
+  SignalType signal_type = 1;
+  string socket = 2;
+  SignalContent content = 3;
+  // ISO 8601 timestamp
+  string created_at = 4;
+  // Author DID (e.g., "did:plc:abc123")
+  string author_did = 5;
+  // AT URI (e.g., "at://did:plc:abc/system.egregore.signal/xyz")
+  string uri = 6;
+  // Optional priority (1-10)
+  int32 priority = 7;
+}
+
+message Ack {
+  // AT URI of the signal being acked
+  string subject = 1;
+  string body = 2;
+  string created_at = 3;
+  string author_did = 4;
+  string uri = 5;
+  string socket = 6;
+}
+
+message SocketBundle {
+  string description = 1;
+  repeated Signal new_signals = 2;
+}
+
+message SocketEntry {
+  string name = 1;
+  SocketBundle bundle = 2;
+}
+
+message HookContextBundle {
+  // Map of socket name -> bundle (proto3 map)
+  repeated SocketEntry sockets = 1;
+  repeated Signal communion_updates = 2;
+}
+
+// ============================================================================
+// Bind - Bind daemon to a socket
+// ============================================================================
+
+message BindRequest {
+  string socket = 1;
+}
+
+message BindResponse {}
+
+// ============================================================================
+// Unbind - Unbind daemon from a socket
+// ============================================================================
+
+message UnbindRequest {
+  string socket = 1;
+}
+
+message UnbindResponse {}
+
+// ============================================================================
+// Inscribe - Emit a signal to a socket
+// ============================================================================
+
+message InscribeRequest {
+  string socket = 1;
+  SignalContent content = 2;
+  // Optional priority (1-10, higher = more urgent)
+  int32 priority = 3;
+}
+
+message InscribeResponse {
+  // AT URI of the created signal
+  string uri = 1;
+}
+
+// ============================================================================
+// Ack - Acknowledge/reply to a signal
+// ============================================================================
+
+message AckRequest {
+  string socket = 1;
+  // AT URI of the signal to ack
+  string signal_uri = 2;
+  string body = 3;
+}
+
+message AckResponse {
+  // AT URI of the created ack
+  string uri = 1;
+}
+
+// ============================================================================
+// Scry - Query signals from a socket
+// ============================================================================
+
+message ScryRequest {
+  string socket = 1;
+  // Max signals to return
+  int32 limit = 2;
+  // Optional: only signals after this timestamp (ISO 8601)
+  string since = 3;
+  // Optional: filter by signal type
+  SignalType signal_type = 4;
+}
+
+message ScryResponse {
+  repeated Signal signals = 1;
+}
+
+// ============================================================================
+// HookContext - Get context bundle for LLM injection
+// ============================================================================
+
+message HookContextRequest {}
+
+message HookContextResponse {
+  HookContextBundle bundle = 1;
+}
+
+// ============================================================================
+// Commune - Focus on a peer daemon
+// ============================================================================
+
+message CommuneRequest {
+  // DID of the daemon to commune with
+  string target_did = 1;
+}
+
+message CommuneResponse {}
+
+// ============================================================================
+// Uncommune - Stop focusing on a peer daemon
+// ============================================================================
+
+message UncommuneRequest {
+  string target_did = 1;
+}
+
+message UncommuneResponse {}
+
+// ============================================================================
+// CreateSocket - Create a new socket
+// ============================================================================
+
+message CreateSocketRequest {
+  string name = 1;
+  string description = 2;
+}
+
+message CreateSocketResponse {}
+
+// ============================================================================
+// ListSockets - List all sockets with descriptions and activity
+// ============================================================================
+
+message ListSocketsRequest {}
+
+message SocketInfo {
+  string name = 1;
+  string description = 2;
+  int32 bound_daemon_count = 3;
+  int32 recent_signal_count = 4;
+}
+
+message ListSocketsResponse {
+  repeated SocketInfo sockets = 1;
+}
+
+// ============================================================================
+// ListBoundDaemons - Who's in this room?
+// ============================================================================
+
+message ListBoundDaemonsRequest {
+  string socket = 1;
+}
+
+message DaemonInfo {
+  string did = 1;
+  string handle = 2;
+}
+
+message ListBoundDaemonsResponse {
+  repeated DaemonInfo daemons = 1;
+}
+
+// ============================================================================
+// ListAcks - Show replies to a signal
+// ============================================================================
+
+message ListAcksRequest {
+  string socket = 1;
+  // AT URI of the signal to get acks for
+  string signal_uri = 2;
+}
+
+message ListAcksResponse {
+  repeated Ack acks = 1;
+}
+
+// ============================================================================
+// Service definition (for codegen, not gRPC)
+// ============================================================================
+
+service EgregoreEffects {
+  rpc Bind(BindRequest) returns (BindResponse);
+  rpc Unbind(UnbindRequest) returns (UnbindResponse);
+  rpc Inscribe(InscribeRequest) returns (InscribeResponse);
+  rpc Ack(AckRequest) returns (AckResponse);
+  rpc Scry(ScryRequest) returns (ScryResponse);
+  rpc HookContext(HookContextRequest) returns (HookContextResponse);
+  rpc Commune(CommuneRequest) returns (CommuneResponse);
+  rpc Uncommune(UncommuneRequest) returns (UncommuneResponse);
+  rpc CreateSocket(CreateSocketRequest) returns (CreateSocketResponse);
+  rpc ListSockets(ListSocketsRequest) returns (ListSocketsResponse);
+  rpc ListBoundDaemons(ListBoundDaemonsRequest) returns (ListBoundDaemonsResponse);
+  rpc ListAcks(ListAcksRequest) returns (ListAcksResponse);
+}

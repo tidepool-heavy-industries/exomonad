@@ -1,0 +1,185 @@
+syntax = "proto3";
+package exomonad.effects.agent;
+
+import "exomonad/common.proto";
+
+// Agent control effects for spawning, monitoring, and cleanup.
+
+// ============================================================================
+// Common types
+// ============================================================================
+
+// Type of LLM agent.
+enum AgentType {
+  AGENT_TYPE_UNSPECIFIED = 0;
+  AGENT_TYPE_CLAUDE = 1;
+  AGENT_TYPE_GEMINI = 2;
+}
+
+// Agent execution status.
+enum AgentStatus {
+  AGENT_STATUS_UNSPECIFIED = 0;
+  AGENT_STATUS_RUNNING = 1;
+  AGENT_STATUS_STOPPED = 2;
+  AGENT_STATUS_FAILED = 3;
+  AGENT_STATUS_WAITING = 4;
+}
+
+// Information about a spawned agent.
+message AgentInfo {
+  // Unique identifier (issue number + agent type).
+  string id = 1;
+  // Issue number this agent is working on.
+  string issue = 2;
+  // Path to git worktree.
+  string worktree_path = 3;
+  // Git branch name.
+  string branch_name = 4;
+  // Agent type (Claude/Gemini).
+  AgentType agent_type = 5;
+  // Agent role (dev/tl/pm).
+  exomonad.common.Role role = 6;
+  // Current status.
+  AgentStatus status = 7;
+  // Zellij tab name (if running).
+  string zellij_tab = 8;
+  // Error message (if failed).
+  string error = 9;
+  // PR number if one was filed.
+  int32 pr_number = 10;
+  // PR URL if one was filed.
+  string pr_url = 11;
+}
+
+// ============================================================================
+// Spawn - Spawn a single agent
+// ============================================================================
+
+message SpawnRequest {
+  // GitHub issue number (e.g., "123").
+  string issue = 1;
+  // Repository owner.
+  string owner = 2;
+  // Repository name.
+  string repo = 3;
+  // Agent type (default: Claude).
+  AgentType agent_type = 4;
+  // Agent role (default: dev).
+  exomonad.common.Role role = 5;
+  // Base directory for worktrees (default: .exomonad/worktrees).
+  string worktree_dir = 6;
+}
+
+message SpawnResponse {
+  AgentInfo agent = 1;
+}
+
+// ============================================================================
+// SpawnBatch - Spawn multiple agents
+// ============================================================================
+
+message SpawnBatchRequest {
+  // Issue numbers to spawn agents for.
+  repeated string issues = 1;
+  // Repository owner.
+  string owner = 2;
+  // Repository name.
+  string repo = 3;
+  // Agent type (default: Claude).
+  AgentType agent_type = 4;
+  // Agent role (default: dev).
+  exomonad.common.Role role = 5;
+  // Base directory for worktrees.
+  string worktree_dir = 6;
+}
+
+message SpawnBatchResponse {
+  // Successfully spawned agents.
+  repeated AgentInfo agents = 1;
+  // Errors for failed spawns (parallel to issues list).
+  repeated string errors = 2;
+}
+
+// ============================================================================
+// Cleanup - Clean up a single agent
+// ============================================================================
+
+message CleanupRequest {
+  // Issue identifier to clean up.
+  string issue = 1;
+  // Force cleanup even with uncommitted changes.
+  bool force = 2;
+}
+
+message CleanupResponse {
+  // True if cleanup succeeded.
+  bool success = 1;
+  // Error message if cleanup failed.
+  string error = 2;
+}
+
+// ============================================================================
+// CleanupBatch - Clean up multiple agents
+// ============================================================================
+
+message CleanupBatchRequest {
+  // Issue identifiers to clean up.
+  repeated string issues = 1;
+  // Force cleanup even with uncommitted changes.
+  bool force = 2;
+}
+
+message CleanupBatchResponse {
+  // Successfully cleaned up issue IDs.
+  repeated string cleaned = 1;
+  // Failed issue IDs.
+  repeated string failed = 2;
+  // Error messages (parallel to failed list).
+  repeated string errors = 3;
+}
+
+// ============================================================================
+// CleanupMerged - Clean up agents whose branches are merged
+// ============================================================================
+
+message CleanupMergedRequest {
+  // Optional: only check specific issues.
+  repeated string issues = 1;
+}
+
+message CleanupMergedResponse {
+  // Cleaned up issue IDs.
+  repeated string cleaned = 1;
+  // Issues that still have open branches.
+  repeated string skipped = 2;
+  // Error messages for failures.
+  repeated string errors = 3;
+}
+
+// ============================================================================
+// List - List active agents
+// ============================================================================
+
+message ListRequest {
+  // Filter by status (optional).
+  AgentStatus filter_status = 1;
+  // Filter by role (optional).
+  exomonad.common.Role filter_role = 2;
+}
+
+message ListResponse {
+  repeated AgentInfo agents = 1;
+}
+
+// ============================================================================
+// Service definition
+// ============================================================================
+
+service AgentEffects {
+  rpc Spawn(SpawnRequest) returns (SpawnResponse);
+  rpc SpawnBatch(SpawnBatchRequest) returns (SpawnBatchResponse);
+  rpc Cleanup(CleanupRequest) returns (CleanupResponse);
+  rpc CleanupBatch(CleanupBatchRequest) returns (CleanupBatchResponse);
+  rpc CleanupMerged(CleanupMergedRequest) returns (CleanupMergedResponse);
+  rpc List(ListRequest) returns (ListResponse);
+}

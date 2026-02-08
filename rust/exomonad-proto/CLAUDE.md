@@ -9,6 +9,9 @@ rust/exomonad-proto/
 ├── Cargo.toml
 ├── CLAUDE.md
 ├── build.rs        # prost-build configuration
+├── proto/          # Vendored proto files (for crates.io publishing)
+│   ├── exomonad/   # Core types (ffi, common, hook, agent, popup)
+│   └── effects/    # Effect message types (git, github, agent, etc.)
 └── src/
     └── lib.rs      # Module declarations and re-exports
 ```
@@ -20,15 +23,17 @@ Generated code goes to `$OUT_DIR/exomonad.*.rs`.
 Types are generated at build time via `prost-build`:
 
 ```rust
-// build.rs
+// build.rs — uses vendored proto files within the crate
 config.compile_protos(&[
-    "../../proto/exomonad/ffi.proto",
-    "../../proto/exomonad/common.proto",
-    "../../proto/exomonad/hook.proto",
-    "../../proto/exomonad/agent.proto",
-    "../../proto/exomonad/popup.proto",
-], &["../../proto/"])?;
+    "proto/exomonad/ffi.proto",
+    "proto/exomonad/common.proto",
+    "proto/exomonad/hook.proto",
+    "proto/exomonad/agent.proto",
+    "proto/exomonad/popup.proto",
+], &["proto/"])?;
 ```
+
+Proto files are vendored into `proto/` (copied from the repo root `proto/` directory) so that `cargo publish` can include them in the crate tarball.
 
 ## JSON Wire Format
 

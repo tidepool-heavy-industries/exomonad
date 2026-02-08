@@ -1,0 +1,91 @@
+syntax = "proto3";
+package exomonad.effects.log;
+
+// Logging effects for structured logging and event emission.
+
+// ============================================================================
+// Log levels
+// ============================================================================
+
+enum LogLevel {
+  LOG_LEVEL_UNSPECIFIED = 0;
+  LOG_LEVEL_DEBUG = 1;
+  LOG_LEVEL_INFO = 2;
+  LOG_LEVEL_WARN = 3;
+  LOG_LEVEL_ERROR = 4;
+}
+
+// ============================================================================
+// Log - Emit a log message
+// ============================================================================
+
+message LogRequest {
+  // Log level.
+  LogLevel level = 1;
+  // Log message.
+  string message = 2;
+  // Structured fields as JSON.
+  bytes fields = 3;
+  // Optional target/module name.
+  string target = 4;
+}
+
+message LogResponse {
+  // True if log was successfully emitted.
+  bool success = 1;
+}
+
+// ============================================================================
+// Convenience messages for each level
+// ============================================================================
+
+message DebugRequest {
+  string message = 1;
+  bytes fields = 2;
+}
+
+message InfoRequest {
+  string message = 1;
+  bytes fields = 2;
+}
+
+message WarnRequest {
+  string message = 1;
+  bytes fields = 2;
+}
+
+message ErrorRequest {
+  string message = 1;
+  bytes fields = 2;
+}
+
+// ============================================================================
+// EmitEvent - Emit a structured event for the event bus
+// ============================================================================
+
+message EmitEventRequest {
+  // Event type (e.g., "agent.started", "tool.completed").
+  string event_type = 1;
+  // Event payload as JSON.
+  bytes payload = 2;
+  // Event timestamp (Unix milliseconds, 0 = now).
+  int64 timestamp = 3;
+}
+
+message EmitEventResponse {
+  // Event ID assigned by the system.
+  string event_id = 1;
+}
+
+// ============================================================================
+// Service definition
+// ============================================================================
+
+service LogEffects {
+  rpc Log(LogRequest) returns (LogResponse);
+  rpc Debug(DebugRequest) returns (LogResponse);
+  rpc Info(InfoRequest) returns (LogResponse);
+  rpc Warn(WarnRequest) returns (LogResponse);
+  rpc Error(ErrorRequest) returns (LogResponse);
+  rpc EmitEvent(EmitEventRequest) returns (EmitEventResponse);
+}

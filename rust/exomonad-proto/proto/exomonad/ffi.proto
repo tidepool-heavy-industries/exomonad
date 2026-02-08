@@ -1,0 +1,67 @@
+syntax = "proto3";
+package exomonad.ffi;
+
+// Standardized error code for programmatic handling across the FFI boundary.
+// Maps to Rust ErrorCode and Haskell FFIErrorCode.
+enum ErrorCode {
+  // Default/unspecified (proto3 requires 0 value)
+  ERROR_CODE_UNSPECIFIED = 0;
+  // Resource (file, issue, branch, etc.) does not exist.
+  ERROR_CODE_NOT_FOUND = 1;
+  // Missing or invalid credentials (e.g., GitHub token).
+  ERROR_CODE_NOT_AUTHENTICATED = 2;
+  // Git command failed (e.g., merge conflict, dirty working directory).
+  ERROR_CODE_GIT_ERROR = 3;
+  // File system operation failed (e.g., permission denied).
+  ERROR_CODE_IO_ERROR = 4;
+  // Network request failed (e.g., API unreachable).
+  ERROR_CODE_NETWORK_ERROR = 5;
+  // Invalid input parameters provided to the host function.
+  ERROR_CODE_INVALID_INPUT = 6;
+  // Unexpected internal error (bug in the host function or runtime).
+  ERROR_CODE_INTERNAL_ERROR = 7;
+  // Operation timed out.
+  ERROR_CODE_TIMEOUT = 8;
+  // Resource already exists (e.g., worktree path).
+  ERROR_CODE_ALREADY_EXISTS = 9;
+}
+
+// Rich context for debugging errors.
+message ErrorContext {
+  // The command that failed (e.g., "git worktree add ...").
+  string command = 1;
+  // Process exit code, if applicable.
+  int32 exit_code = 2;
+  // Standard error output from the command (truncated if necessary).
+  string stderr = 3;
+  // Standard output from the command (truncated if necessary).
+  string stdout = 4;
+  // Relevant file path.
+  string file_path = 5;
+  // Working directory where the operation was attempted.
+  string working_dir = 6;
+}
+
+// Structured error returned to the WASM guest.
+message FfiError {
+  // Human-readable summary of the error.
+  string message = 1;
+  // Programmatic error code.
+  ErrorCode code = 2;
+  // Rich context for debugging.
+  ErrorContext context = 3;
+  // Actionable suggestion for recovery.
+  string suggestion = 4;
+}
+
+// Standardized result envelope for all host functions.
+// Uses oneof for success/error discrimination.
+// Payload is JSON bytes since proto3 doesn't support generics.
+message FfiResult {
+  oneof result {
+    // JSON-encoded success value
+    bytes success_payload = 1;
+    // Structured error
+    FfiError error = 2;
+  }
+}

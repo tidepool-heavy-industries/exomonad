@@ -94,17 +94,17 @@ fn compile_core_protos() -> Result<()> {
 
     // Collect all proto files that exist
     let proto_files: Vec<&str> = [
-        "../../proto/exomonad/ffi.proto",
-        "../../proto/exomonad/common.proto",
-        "../../proto/exomonad/hook.proto",
-        "../../proto/exomonad/agent.proto",
-        "../../proto/exomonad/popup.proto",
+        "proto/exomonad/ffi.proto",
+        "proto/exomonad/common.proto",
+        "proto/exomonad/hook.proto",
+        "proto/exomonad/agent.proto",
+        "proto/exomonad/popup.proto",
     ]
     .into_iter()
     .filter(|path| Path::new(path).exists())
     .collect();
 
-    config.compile_protos(&proto_files, &["../../proto/"])?;
+    config.compile_protos(&proto_files, &["proto/"])?;
 
     Ok(())
 }
@@ -127,7 +127,7 @@ fn compile_effect_protos() -> Result<()> {
     config.file_descriptor_set_path(&descriptor_path);
 
     // Discover all proto files in the effects directory
-    let proto_dir = Path::new("../../proto/effects");
+    let proto_dir = Path::new("proto/effects");
     if !proto_dir.exists() {
         println!("cargo:warning=Proto effects directory not found, skipping");
         generate_empty_effect_modules(&out_dir)?;
@@ -141,7 +141,7 @@ fn compile_effect_protos() -> Result<()> {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("proto") {
                 Some(format!(
-                    "../../proto/effects/{}",
+                    "proto/effects/{}",
                     entry.file_name().to_string_lossy()
                 ))
             } else {
@@ -159,7 +159,7 @@ fn compile_effect_protos() -> Result<()> {
 
     config.compile_protos(
         &effect_proto_files,
-        &["../../proto/", "../../proto/effects/"],
+        &["proto/", "proto/effects/"],
     )?;
 
     // Communicate descriptor path to dependents (exomonad-core)
@@ -169,7 +169,7 @@ fn compile_effect_protos() -> Result<()> {
     generate_effect_module_declarations(&out_dir)?;
 
     // Rerun if proto files change
-    println!("cargo:rerun-if-changed=../../proto/effects/");
+    println!("cargo:rerun-if-changed=proto/effects/");
 
     Ok(())
 }
