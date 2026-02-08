@@ -2,36 +2,87 @@
 name = "exomonad-core"
 version = "0.1.0"
 edition = "2021"
-description = "ExoMonad core framework: effect system, WASM plugin hosting, MCP server"
+description = "ExoMonad core: effect system, WASM hosting, MCP server, built-in handlers, shared types"
 license = "BSD-3-Clause"
 repository = "https://github.com/tidepool-heavy-industries/exomonad"
 homepage = "https://github.com/tidepool-heavy-industries/exomonad"
 keywords = ["agent", "mcp", "automation", "wasm"]
 categories = ["development-tools"]
 
+[features]
+default = ["runtime"]
+runtime = [
+    "dep:async-trait",
+    "dep:anyhow",
+    "dep:clap",
+    "dep:duct",
+    "dep:prost",
+    "dep:strum",
+    "dep:tokio",
+    "dep:tracing",
+    "dep:tracing-subscriber",
+    "dep:uuid",
+    "dep:extism",
+    "dep:extism-convert",
+    "dep:sha2",
+    "dep:exomonad-proto",
+    "dep:shell-escape",
+    "dep:askama",
+    "dep:chrono",
+    "dep:dirs",
+    "dep:octocrab",
+    "dep:ollama-rs",
+    "dep:reqwest",
+    "dep:url",
+    "dep:thiserror",
+]
+
 [dependencies]
-async-trait = { workspace = true }
-extism = "1.13"
-extism-convert = "1.13"
-tokio = { workspace = true }
+# Always available (lightweight types for plugin consumers)
 serde = { workspace = true }
 serde_json = { workspace = true }
-tracing = { workspace = true }
-anyhow = { workspace = true }
-thiserror = { workspace = true }
-exomonad-shared = { path = "../exomonad-shared", version = "0.1.0" }
-exomonad-proto = { path = "../exomonad-proto", version = "0.1.0", features = ["effects"] }
-prost = { workspace = true }
-sha2 = "0.10"
+
+# Runtime feature: workspace deps
+async-trait = { workspace = true, optional = true }
+anyhow = { workspace = true, optional = true }
+clap = { workspace = true, optional = true }
+duct = { workspace = true, optional = true }
+prost = { workspace = true, optional = true }
+strum = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
+
+# Runtime feature: core framework
+extism = { version = "1.13", optional = true }
+extism-convert = { version = "1.13", optional = true }
+sha2 = { version = "0.10", optional = true }
+
+# Runtime feature: shared types
+exomonad-proto = { path = "../exomonad-proto", version = "0.1.0", features = ["effects"], optional = true }
+shell-escape = { version = "0.1", optional = true }
+
+# Runtime feature: handlers and services
+askama = { version = "0.12", optional = true }
+chrono = { version = "0.4", optional = true }
+dirs = { version = "5.0", optional = true }
+octocrab = { version = "0.38", optional = true }
+ollama-rs = { version = "0.2", optional = true }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false, optional = true }
+url = { version = "2", optional = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }
 exomonad-proto = { path = "../exomonad-proto", version = "0.1.0", features = ["effects"] }
 prost = { workspace = true }
+proptest = "1.4"
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
+wiremock = "0.6"
 
 [build-dependencies]
 prost-types = "0.14"

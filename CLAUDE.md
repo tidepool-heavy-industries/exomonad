@@ -98,15 +98,11 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 │   │   └── actor/CLAUDE.md     ← Actor model details
 │   ├── protocol/CLAUDE.md      ← Wire formats
 │   └── tools/CLAUDE.md         ← Dev tools (ghci-oracle, sleeptime, training-generator)
-├── rust/CLAUDE.md             ← Rust workspace overview (sidecar, core, contrib)
+├── rust/CLAUDE.md             ← Rust workspace overview (3 crates)
 │   ├── exomonad/CLAUDE.md  ← MCP server + hook handler (binary)
-│   ├── exomonad-core/      ← Framework: EffectHandler, EffectRegistry, RuntimeBuilder, MCP server
-│   ├── exomonad-contrib/   ← Built-in handlers, services, and external clients
+│   ├── exomonad-core/      ← Unified library: framework, handlers, services, protocol, UI types
 │   ├── exomonad-proto/     ← Proto-generated types (prost) for FFI + effects
-│   ├── exomonad-shared/CLAUDE.md   ← Shared types and protocols
-│   ├── exomonad-ui-protocol/CLAUDE.md ← Popup UI protocol types
-│   ├── exomonad-plugin/CLAUDE.md   ← Zellij WASM plugin (status + popups)
-│   └── zellij-gen/CLAUDE.md        ← KDL layout generator
+│   └── exomonad-plugin/CLAUDE.md   ← Zellij WASM plugin (status + popups)
 └── tools/CLAUDE.md             ← Root-level tools (micro-gastown, blast-radius)
 ```
 
@@ -116,13 +112,12 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 |--------------|-----------|
 | Add FFI boundary types | `proto/CLAUDE.md` |
 | Understand MCP tool architecture | `rust/exomonad/CLAUDE.md` |
-| Work on effect handlers or services | `rust/exomonad-contrib/` |
-| Extend the effect framework | `rust/exomonad-core/` |
-| Understand shared protocol types | `rust/exomonad-shared/CLAUDE.md` |
-| Work with external service clients | `rust/exomonad-contrib/` (services/external/) |
-| Modify popup UI protocol | `rust/exomonad-ui-protocol/CLAUDE.md` |
+| Work on effect handlers or services | `rust/exomonad-core/` (handlers/, services/) |
+| Extend the effect framework | `rust/exomonad-core/` (effects/) |
+| Understand shared protocol types | `rust/exomonad-core/` (protocol/) |
+| Work with external service clients | `rust/exomonad-core/` (services/external/) |
+| Modify popup UI protocol | `rust/exomonad-core/` (ui_protocol.rs) |
 | Work on Zellij plugin | `rust/exomonad-plugin/CLAUDE.md` |
-| Modify KDL layout generation | `rust/zellij-gen/CLAUDE.md` |
 | Define a graph, handlers, annotations | `haskell/dsl/core/CLAUDE.md` |
 | Work on LLM-level teaching infrastructure | `haskell/dsl/teaching/CLAUDE.md` |
 | Add or modify an effect interpreter | `haskell/effects/CLAUDE.md` |

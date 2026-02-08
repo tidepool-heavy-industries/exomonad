@@ -1,5 +1,5 @@
 use anyhow::Result;
-use exomonad_shared::Role;
+use exomonad_core::Role;
 
 static EMBEDDED_TL: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/wasm-guest-tl.wasm"));
 static EMBEDDED_DEV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/wasm-guest-dev.wasm"));

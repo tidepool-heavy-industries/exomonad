@@ -29,8 +29,8 @@ Claude Code (hook or MCP call)
 | Component | Purpose |
 |-----------|---------|
 | **exomonad** | Rust binary with WASM plugin support (hooks + MCP) |
-| **exomonad-core** | Framework: EffectHandler trait, EffectRegistry, RuntimeBuilder, PluginManager, MCP server |
-| **exomonad-contrib** | Built-in handlers (Git, GitHub, Agent, FS, Log, Popup, FilePR, Copilot) + services |
+| **exomonad-core** | Everything: framework, handlers, services, protocol types, UI protocol |
+| **exomonad-proto** | Proto-generated types (prost) for FFI + effects |
 | **wasm-guest** | Haskell WASM plugin (pure logic, no I/O) |
 
 ### Deployment
@@ -67,34 +67,25 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 │   • hook subcommand: handles CC hooks via WASM
 │   • mcp-stdio subcommand: MCP stdio server for Claude Code
 │
-├── exomonad-core/  ← Framework (publishable library)
-│   • EffectHandler trait, EffectRegistry, RuntimeBuilder, Runtime
+├── exomonad-core/  ← Unified library (publishable)
+│   • Framework: EffectHandler trait, EffectRegistry, RuntimeBuilder, Runtime
 │   • PluginManager (single host fn: yield_effect)
 │   • MCP stdio server (reusable)
-│   • Protocol types (re-exported from exomonad-shared)
-│
-├── exomonad-contrib/  ← Built-in handlers + services (publishable library)
+│   • Protocol types (hook, mcp, service)
 │   • Handlers: GitHandler, GitHubHandler, LogHandler, AgentHandler,
 │     FsHandler, PopupHandler, FilePRHandler, CopilotHandler
 │   • Services: GitService, GitHubService, AgentControlService, etc.
 │   • External service clients: Anthropic, GitHub, Ollama, OTLP
-│   • register_builtin_handlers() for composing into RuntimeBuilder
+│   • UI protocol types (lightweight, available without runtime feature)
+│   • Layout generation (KDL layouts for Zellij)
 │
-├── exomonad-shared/CLAUDE.md  ← Shared types and utilities
-│   • protocol.rs: HookInput, HookOutput, MCPCallInput, MCPCallOutput
-│   • commands/hook.rs: handle_hook() implementation
+├── exomonad-proto/  ← Proto-generated types (prost)
+│   • FFI boundary types
+│   • Effect request/response messages
 │
-├── exomonad-ui-protocol/CLAUDE.md  ← Popup UI protocol types
-│   • PopupDefinition, Component, VisibilityRule
-│   • Shared between Haskell WASM and Zellij plugin
-│
-├── exomonad-plugin/CLAUDE.md  ← Zellij WASM plugin
-│   • Status display and popup UI rendering
-│   • Built separately (wasm32-wasi target)
-│
-└── zellij-gen/CLAUDE.md  ← KDL layout generator
-    • Generates Zellij layouts with baked-in commands
-    • Solves environment variable propagation
+└── exomonad-plugin/CLAUDE.md  ← Zellij WASM plugin (built separately)
+    • Status display and popup UI rendering
+    • Depends on exomonad-core (default-features=false, ui_protocol only)
 ```
 
 ## Workspace Members
@@ -102,14 +93,18 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 | Crate | Type | Purpose |
 |-------|------|---------|
 | [exomonad](exomonad/CLAUDE.md) | Binary (`exomonad`) | MCP + Hook handler via WASM |
-| exomonad-core | Library | Framework: EffectHandler, EffectRegistry, RuntimeBuilder, MCP server |
-| exomonad-contrib | Library | Built-in handlers (Git, GitHub, Agent, etc.) + services + external clients |
+| exomonad-core | Library | Framework, handlers, services, protocol types, UI protocol |
 | exomonad-proto | Library | Proto-generated types (prost) for FFI + effects |
-| [exomonad-shared](exomonad-shared/CLAUDE.md) | Library | Shared types, protocols |
-| [exomonad-ui-protocol](exomonad-ui-protocol/CLAUDE.md) | Library | Popup UI protocol types |
-| [zellij-gen](zellij-gen/CLAUDE.md) | Binary | KDL layout generator |
 
-**Note:** [exomonad-plugin](exomonad-plugin/CLAUDE.md) is built separately (wasm32-wasi target for Zellij) and not a workspace member.
+**Note:** [exomonad-plugin](exomonad-plugin/CLAUDE.md) is built separately (wasm32-wasi target for Zellij) and not a workspace member. It depends on `exomonad-core` with `default-features = false` to get only the lightweight `ui_protocol` types.
+
+### Feature Flags (exomonad-core)
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `runtime` | Yes | Full runtime: WASM hosting, effect handlers, MCP server, services |
+
+Without `runtime`: only `ui_protocol` module is available (serde + serde_json deps only). Used by `exomonad-plugin` which targets wasm32-wasi.
 
 ## Quick Reference
 
@@ -178,7 +173,7 @@ Haskell: runEffect @GitGetBranch request
 Haskell: Either EffectError GetBranchResponse
 ```
 
-### Built-in Handlers (exomonad-contrib)
+### Built-in Handlers
 
 | Namespace | Handler | Effects |
 |-----------|---------|---------|
@@ -220,8 +215,7 @@ All commands run from repo root:
 ```bash
 cargo test --workspace                  # All tests
 cargo test -p exomonad                  # Binary tests only
-cargo test -p exomonad-core             # Framework tests only
-cargo test -p exomonad-contrib          # Handler + service tests
+cargo test -p exomonad-core             # All library tests (framework + handlers + services)
 cargo test -p exomonad-proto            # Wire format compatibility tests
 ```
 
@@ -232,7 +226,7 @@ cargo test -p exomonad-proto            # Wire format compatibility tests
 | 100% WASM routing | All logic in Haskell, Rust handles I/O only |
 | Single `yield_effect` host fn | One entry point, all effects dispatched by namespace via EffectRegistry |
 | Protobuf binary encoding | Type-safe FFI boundary, generated types on both sides |
-| core/contrib split | External consumers can embed the framework without built-in handlers |
+| `runtime` feature flag | Plugin consumers get lightweight types without heavy deps |
 | High-level effects | `SpawnAgent` not `CreateWorktree + OpenTab` |
 | Local Zellij orchestration | Git worktrees + Zellij tabs, no Docker containers |
 | Extism runtime | Mature WASM runtime with host function support |

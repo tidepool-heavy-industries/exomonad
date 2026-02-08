@@ -26,7 +26,7 @@
 //! External consumers implement [`EffectHandler`] for their domain:
 //!
 //! ```rust,ignore
-//! use exomonad_core::effects::{EffectHandler, EffectError, EffectResult};
+//! use crate::effects::{EffectHandler, EffectError, EffectResult};
 //! use async_trait::async_trait;
 //!
 //! struct EgregoreHandler { /* ... */ }

@@ -1,4 +1,4 @@
-pub use exomonad_shared::ffi::{ErrorCode, ErrorContext, FFIBoundary, FFIError, FFIResult};
+pub use crate::ffi::{ErrorCode, ErrorContext, FFIBoundary, FFIError, FFIResult};
 use thiserror::Error;
 
 /// Error type for command execution failures.

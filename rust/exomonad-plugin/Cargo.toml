@@ -13,4 +13,4 @@ chrono = "0.4"
 # NOTE: default-features are disabled for WASM / non-native-terminal compatibility.
 # The custom ZellijBackend does not rely on ratatui's terminal-specific default features.
 ratatui = { version = "0.29", default-features = false }
-exomonad-ui-protocol = { path = "../exomonad-ui-protocol" }
+exomonad-core = { path = "../exomonad-core", default-features = false }

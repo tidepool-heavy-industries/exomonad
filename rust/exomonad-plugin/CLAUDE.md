@@ -131,7 +131,7 @@ cargo test -p exomonad-plugin
 ## Design Notes
 
 - **Single plugin**: Handles both status bar and popups (not separate plugins)
-- **Protocol types**: Uses exomonad-ui-protocol for shared PopupDefinition types
+- **Protocol types**: Uses exomonad-core (default-features=false) for shared ui_protocol types
 - **Event subscription**: CustomMessage for data, Key for interaction
 - **WASM target**: wasm32-wasi (Zellij plugin API requirement)
 - **Stateful**: Maintains popup state across render cycles
@@ -168,7 +168,6 @@ let result = PopupResult {
 
 ## Related Documentation
 
-- [exomonad-ui-protocol](../exomonad-ui-protocol/CLAUDE.md) - Shared protocol types
+- [exomonad-core](../exomonad-core/) - Shared ui_protocol types (used with default-features=false)
 - [Zellij Plugin API](https://zellij.dev/documentation/plugins.html) - Zellij plugin docs
-- [exomonad-contrib](../exomonad-contrib/) - Handlers that orchestrate plugin communication
 - [Root CLAUDE.md](../../CLAUDE.md) - Project overview

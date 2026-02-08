@@ -1,7 +1,7 @@
 //! Configuration discovery from .exomonad/config.toml and config.local.toml
 
 use anyhow::{Context, Result};
-use exomonad_shared::Role;
+use exomonad_core::Role;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use tracing::debug;

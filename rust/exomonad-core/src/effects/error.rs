@@ -23,8 +23,8 @@ use serde_json::Value;
 ///
 /// # Example
 ///
-/// ```rust
-/// use exomonad_core::effects::EffectError;
+/// ```rust,ignore
+/// use crate::effects::EffectError;
 ///
 /// fn find_entity(id: &str) -> Result<(), EffectError> {
 ///     // Simulate a lookup that fails

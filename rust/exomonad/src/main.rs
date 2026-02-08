@@ -10,17 +10,15 @@ use exomonad::config;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use exomonad_contrib::services::external::otel::OtelService;
-use exomonad_contrib::services::external::ExternalService;
-use exomonad_contrib::services::{git, zellij_events};
-use exomonad_contrib::Services;
 use exomonad_core::mcp;
-use exomonad_core::{PluginManager, Runtime, RuntimeBuilder};
-use exomonad_shared::protocol::{
+use exomonad_core::protocol::{Runtime as HookRuntime, ServiceRequest};
+use exomonad_core::services::external::otel::OtelService;
+use exomonad_core::services::external::ExternalService;
+use exomonad_core::services::{git, zellij_events};
+use exomonad_core::{
     ClaudePreToolUseOutput, HookEventType, HookInput, HookSpecificOutput, InternalStopHookOutput,
-    Runtime as HookRuntime, ServiceRequest, StopDecision,
+    PluginManager, Runtime, RuntimeBuilder, Services, StopDecision, ToolPermission,
 };
-use exomonad_shared::ToolPermission;
 use std::collections::HashMap;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
@@ -170,9 +168,9 @@ async fn handle_hook(
     // Emit HookReceived event
     if let Ok(branch) = git::get_current_branch() {
         if let Some(agent_id_str) = git::extract_agent_id(&branch) {
-            match exomonad_ui_protocol::AgentId::try_from(agent_id_str.clone()) {
+            match exomonad_core::ui_protocol::AgentId::try_from(agent_id_str.clone()) {
                 Ok(agent_id) => {
-                    let event = exomonad_ui_protocol::AgentEvent::HookReceived {
+                    let event = exomonad_core::ui_protocol::AgentEvent::HookReceived {
                         agent_id,
                         hook_type: event_type.to_string(),
                         timestamp: zellij_events::now_iso8601(),
@@ -276,7 +274,7 @@ async fn handle_hook(
         }
 
         // Exit code and event emission based on decision
-        if internal_output.decision == exomonad_shared::protocol::StopDecision::Block {
+        if internal_output.decision == StopDecision::Block {
             // Emit StopHookBlocked event for SubagentStop hooks
             if event_type == HookEventType::SubagentStop {
                 if let Ok(branch) = git::get_current_branch() {
@@ -286,13 +284,14 @@ async fn handle_hook(
                             .clone()
                             .unwrap_or_else(|| "Hook blocked agent stop".to_string());
 
-                        match exomonad_ui_protocol::AgentId::try_from(agent_id_str.clone()) {
+                        match exomonad_core::ui_protocol::AgentId::try_from(agent_id_str.clone()) {
                             Ok(agent_id) => {
-                                let event = exomonad_ui_protocol::AgentEvent::StopHookBlocked {
-                                    agent_id,
-                                    reason,
-                                    timestamp: zellij_events::now_iso8601(),
-                                };
+                                let event =
+                                    exomonad_core::ui_protocol::AgentEvent::StopHookBlocked {
+                                        agent_id,
+                                        reason,
+                                        timestamp: zellij_events::now_iso8601(),
+                                    };
                                 if let Err(e) = zellij_events::emit_event(zellij_session, &event) {
                                     warn!("Failed to emit stop_hook:blocked event: {}", e);
                                 }
@@ -449,7 +448,7 @@ fn generate_tl_layout() -> Result<std::path::PathBuf> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let cwd = std::env::current_dir()?;
 
-    let params = zellij_gen::AgentTabParams {
+    let params = exomonad_core::layout::AgentTabParams {
         tab_name: "TL",
         pane_name: "Main",
         command: "nix develop",
@@ -459,8 +458,8 @@ fn generate_tl_layout() -> Result<std::path::PathBuf> {
         close_on_exit: false,
     };
 
-    let layout =
-        zellij_gen::generate_agent_layout(&params).context("Failed to generate TL layout")?;
+    let layout = exomonad_core::layout::generate_agent_layout(&params)
+        .context("Failed to generate TL layout")?;
 
     let layout_path = std::env::temp_dir().join("exomonad-tl-layout.kdl");
     std::fs::write(&layout_path, layout)?;
@@ -622,9 +621,9 @@ async fn main() -> Result<()> {
 
             // Emit AgentStarted
             let agent_id = get_agent_id_from_env();
-            match exomonad_ui_protocol::AgentId::try_from(agent_id.clone()) {
+            match exomonad_core::ui_protocol::AgentId::try_from(agent_id.clone()) {
                 Ok(id) => {
-                    let start_event = exomonad_ui_protocol::AgentEvent::AgentStarted {
+                    let start_event = exomonad_core::ui_protocol::AgentEvent::AgentStarted {
                         agent_id: id,
                         timestamp: zellij_events::now_iso8601(),
                     };
@@ -641,9 +640,9 @@ async fn main() -> Result<()> {
             // Emit AgentStopped
             // Re-fetch branch as it might have changed
             let stop_agent_id = get_agent_id_from_env();
-            match exomonad_ui_protocol::AgentId::try_from(stop_agent_id.clone()) {
+            match exomonad_core::ui_protocol::AgentId::try_from(stop_agent_id.clone()) {
                 Ok(id) => {
-                    let stop_event = exomonad_ui_protocol::AgentEvent::AgentStopped {
+                    let stop_event = exomonad_core::ui_protocol::AgentEvent::AgentStopped {
                         agent_id: id,
                         timestamp: zellij_events::now_iso8601(),
                     };
@@ -707,10 +706,10 @@ async fn main() -> Result<()> {
 /// Build a Runtime with all effect handlers registered.
 async fn build_runtime(
     wasm_bytes: &[u8],
-    services: &Arc<exomonad_contrib::ValidatedServices>,
+    services: &Arc<exomonad_core::ValidatedServices>,
 ) -> Result<Runtime> {
     let builder = RuntimeBuilder::new().with_wasm_bytes(wasm_bytes.to_vec());
-    let builder = exomonad_contrib::register_builtin_handlers(builder, services);
+    let builder = exomonad_core::register_builtin_handlers(builder, services);
 
     builder.build().await.context("Failed to build runtime")
 }

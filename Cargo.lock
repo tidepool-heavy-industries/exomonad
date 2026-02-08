@@ -892,10 +892,7 @@ dependencies = [
  "chrono",
  "clap",
  "duct",
- "exomonad-contrib",
  "exomonad-core",
- "exomonad-shared",
- "exomonad-ui-protocol",
  "nix",
  "predicates",
  "serde",
@@ -908,37 +905,6 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "uuid",
- "zellij-gen",
-]
-
-[[package]]
-name = "exomonad-contrib"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "dirs",
- "duct",
- "exomonad-core",
- "exomonad-proto",
- "exomonad-shared",
- "exomonad-ui-protocol",
- "octocrab",
- "ollama-rs",
- "proptest",
- "prost",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "url",
- "uuid",
- "wiremock",
- "zellij-gen",
 ]
 
 [[package]]
@@ -946,21 +912,34 @@ name = "exomonad-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "askama",
  "async-trait",
+ "chrono",
+ "clap",
+ "dirs",
+ "duct",
  "exomonad-proto",
- "exomonad-shared",
  "extism",
  "extism-convert",
+ "octocrab",
+ "ollama-rs",
+ "proptest",
  "prost",
  "prost-types",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",
+ "shell-escape",
+ "strum",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
+ "uuid",
+ "wiremock",
 ]
 
 [[package]]
@@ -969,31 +948,6 @@ version = "0.1.0"
 dependencies = [
  "prost",
  "prost-build",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "exomonad-shared"
-version = "0.1.0"
-dependencies = [
- "clap",
- "duct",
- "exomonad-proto",
- "serde",
- "serde_json",
- "shell-escape",
- "strum",
- "tempfile",
- "thiserror 2.0.18",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "exomonad-ui-protocol"
-version = "0.1.0"
-dependencies = [
  "serde",
  "serde_json",
 ]
@@ -4988,14 +4942,6 @@ dependencies = [
  "quote",
  "syn",
  "synstructure",
-]
-
-[[package]]
-name = "zellij-gen"
-version = "0.1.0"
-dependencies = [
- "askama",
- "clap",
 ]
 
 [[package]]

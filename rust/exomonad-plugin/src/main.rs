@@ -10,7 +10,7 @@ use ratatui::{
 };
 
 mod protocol;
-use exomonad_ui_protocol::{
+use exomonad_core::ui_protocol::{
     transport, AgentEvent, CoordinatorAgentState, StateUpdate,
 };
 use protocol::{PluginMessage, PluginState};

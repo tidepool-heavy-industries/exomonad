@@ -2,12 +2,8 @@
 resolver = "2"
 members = [
     "rust/exomonad-proto",
-    "rust/exomonad-shared",
-    "rust/exomonad-ui-protocol",
-    "rust/exomonad",
     "rust/exomonad-core",
-    "rust/exomonad-contrib",
-    "rust/zellij-gen",
+    "rust/exomonad",
 ]
 
 [workspace.dependencies]

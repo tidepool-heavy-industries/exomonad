@@ -1,11 +1,4 @@
-//! ExoMonad Core: Type-safe effect system and WASM plugin hosting.
-//!
-//! This crate provides the framework for building LLM agent runtimes with:
-//!
-//! - **Effect system**: [`EffectHandler`] trait, [`EffectRegistry`] for dispatch
-//! - **WASM hosting**: [`PluginManager`] for Haskell WASM plugins via Extism
-//! - **MCP server**: Reusable stdio MCP server
-//! - **Runtime builder**: [`RuntimeBuilder`] for composing handlers into a runtime
+//! ExoMonad Core: effect system, WASM hosting, MCP server, built-in handlers, shared types.
 //!
 //! # Architecture
 //!
@@ -18,8 +11,15 @@
 //!     │
 //!     │ EffectRegistry::dispatch by namespace
 //!     ▼
-//! EffectHandler implementations (git, github, custom, ...)
+//! EffectHandler implementations (git, github, agent, fs, ...)
 //! ```
+//!
+//! # Features
+//!
+//! - **`runtime`** (default): Full runtime with WASM hosting, effect handlers, MCP server,
+//!   and all service integrations. This is what the `exomonad` binary uses.
+//! - Without `runtime`: Only lightweight UI protocol types (`ui_protocol` module).
+//!   Used by `exomonad-plugin` (Zellij WASM target) which can't link heavy native deps.
 //!
 //! # Usage
 //!
@@ -42,26 +42,97 @@
 //!     .with_wasm_bytes(wasm_bytes)
 //!     .build()
 //!     .await?;
-//!
-//! // Run as MCP stdio server
-//! exomonad_core::mcp::stdio::run_stdio_server(runtime.into_mcp_state()).await?;
 //! ```
 
+// === Always available (lightweight types for plugin consumers) ===
+pub mod ui_protocol;
+
+// === Framework (requires runtime feature) ===
+#[cfg(feature = "runtime")]
 pub mod common;
+#[cfg(feature = "runtime")]
 pub mod effects;
+#[cfg(feature = "runtime")]
 pub mod mcp;
+#[cfg(feature = "runtime")]
 pub mod plugin_manager;
 
+// === Shared types and utilities (requires runtime feature) ===
+#[cfg(feature = "runtime")]
+pub mod domain;
+#[cfg(feature = "runtime")]
+pub mod error;
+#[cfg(feature = "runtime")]
+pub mod ffi;
+#[cfg(feature = "runtime")]
+pub mod hooks;
+#[cfg(feature = "runtime")]
+pub mod logging;
+#[cfg(feature = "runtime")]
+pub mod protocol;
+#[cfg(feature = "runtime")]
+pub mod util;
+
+// === Handlers and services (requires runtime feature) ===
+#[cfg(feature = "runtime")]
+pub mod handlers;
+#[cfg(feature = "runtime")]
+pub mod layout;
+#[cfg(feature = "runtime")]
+pub mod services;
+
+// --- Framework re-exports ---
+#[cfg(feature = "runtime")]
 pub use common::{ErrorCode, ErrorContext, HostError, HostResult};
+#[cfg(feature = "runtime")]
 pub use effects::{EffectError, EffectHandler, EffectRegistry, EffectResult};
+#[cfg(feature = "runtime")]
 pub use plugin_manager::PluginManager;
 
-// Re-export protocol types from shared (part of the framework API)
-pub use exomonad_shared::domain;
-pub use exomonad_shared::ffi;
-pub use exomonad_shared::protocol;
+// --- Shared type re-exports ---
+#[cfg(feature = "runtime")]
+pub use domain::{
+    AbsolutePath, DomainError, GithubOwner, GithubRepo, IssueNumber, PathError, Role, SessionId,
+    ToolName, ToolPermission,
+};
+#[cfg(feature = "runtime")]
+pub use error::{ExoMonadError, Result};
+#[cfg(feature = "runtime")]
+pub use ffi::{
+    ErrorCode as FFIErrorCode, ErrorContext as FFIErrorContext, FFIBoundary, FFIError, FFIResult,
+};
+#[cfg(feature = "runtime")]
+pub use hooks::HookConfig;
+#[cfg(feature = "runtime")]
+pub use logging::{init_logging, init_logging_with_default};
+#[cfg(feature = "runtime")]
+pub use protocol::{
+    ClaudePreToolUseOutput, ClaudeStopHookOutput, GeminiStopHookOutput, HookEventType, HookInput,
+    HookSpecificOutput, InternalStopHookOutput, PermissionDecision, Runtime as ProtocolRuntime,
+    StopDecision,
+};
+#[cfg(feature = "runtime")]
+pub use util::{build_prompt, find_exomonad_binary, shell_quote};
 
+// --- Handler re-exports ---
+#[cfg(feature = "runtime")]
+pub use handlers::{
+    AgentHandler, CopilotHandler, FilePRHandler, FsHandler, GitHandler, GitHubHandler, LogHandler,
+    PopupHandler,
+};
+#[cfg(feature = "runtime")]
+pub use services::{Services, ValidatedServices};
+
+/// Prelude module for convenient imports.
+#[cfg(feature = "runtime")]
+pub mod prelude {
+    pub use crate::handlers::*;
+    pub use crate::services::{Services, ValidatedServices};
+}
+
+#[cfg(feature = "runtime")]
 use std::path::PathBuf;
+#[cfg(feature = "runtime")]
 use std::sync::Arc;
 
 /// Builder for constructing a runtime with custom effect handlers.
@@ -77,11 +148,13 @@ use std::sync::Arc;
 ///     .build()
 ///     .await?;
 /// ```
+#[cfg(feature = "runtime")]
 pub struct RuntimeBuilder {
     registry: EffectRegistry,
     wasm_bytes: Option<Vec<u8>>,
 }
 
+#[cfg(feature = "runtime")]
 impl RuntimeBuilder {
     /// Create a new runtime builder with an empty effect registry.
     pub fn new() -> Self {
@@ -143,6 +216,7 @@ impl RuntimeBuilder {
     }
 }
 
+#[cfg(feature = "runtime")]
 impl Default for RuntimeBuilder {
     fn default() -> Self {
         Self::new()
@@ -150,6 +224,7 @@ impl Default for RuntimeBuilder {
 }
 
 /// Configured runtime with WASM plugin and effect handlers.
+#[cfg(feature = "runtime")]
 pub struct Runtime {
     /// WASM plugin manager for calling guest functions.
     pub plugin_manager: PluginManager,
@@ -158,6 +233,7 @@ pub struct Runtime {
     pub registry: Arc<EffectRegistry>,
 }
 
+#[cfg(feature = "runtime")]
 impl Runtime {
     /// Get a reference to the plugin manager.
     pub fn plugin_manager(&self) -> &PluginManager {
@@ -185,4 +261,37 @@ impl Runtime {
             plugin: Arc::new(self.plugin_manager),
         }
     }
+}
+
+/// Register all built-in handlers with a RuntimeBuilder.
+#[cfg(feature = "runtime")]
+pub fn register_builtin_handlers(
+    builder: RuntimeBuilder,
+    services: &Arc<ValidatedServices>,
+) -> RuntimeBuilder {
+    let mut builder = builder;
+
+    builder = builder.with_effect_handler(handlers::GitHandler::new(services.git().clone()));
+
+    if let Some(github) = services.github() {
+        builder = builder.with_effect_handler(handlers::GitHubHandler::new(github.clone()));
+    }
+
+    builder = builder.with_effect_handler(handlers::LogHandler::new());
+
+    builder = builder.with_effect_handler(handlers::AgentHandler::new(
+        services.agent_control().clone(),
+    ));
+
+    builder = builder.with_effect_handler(handlers::FsHandler::new(services.filesystem().clone()));
+
+    if let Some(session) = services.zellij_session() {
+        builder = builder.with_effect_handler(handlers::PopupHandler::new(session.to_string()));
+    }
+
+    builder = builder.with_effect_handler(handlers::FilePRHandler::new());
+
+    builder = builder.with_effect_handler(handlers::CopilotHandler::new());
+
+    builder
 }

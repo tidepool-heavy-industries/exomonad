@@ -120,7 +120,7 @@ All effects flow through a single `yield_effect` host function using protobuf bi
 | `file_pr.*` | FilePRHandler | gh CLI |
 | `copilot.*` | CopilotHandler | GitHub API polling |
 
-All handlers are registered by `exomonad_contrib::register_builtin_handlers()`.
+All handlers are registered by `exomonad_core::register_builtin_handlers()`.
 
 ## Building
 
@@ -196,6 +196,5 @@ Claude Code MCP request
 
 ## Related Documentation
 
-- **[exomonad-core](../exomonad-core/)** - Framework: EffectHandler, RuntimeBuilder, PluginManager, MCP server
-- **[exomonad-contrib](../exomonad-contrib/)** - Built-in handlers and services
+- **[exomonad-core](../exomonad-core/)** - Framework, handlers, services, protocol types, UI protocol
 - **[wasm-guest](../../haskell/wasm-guest/)** - Haskell WASM plugin source
