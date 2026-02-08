@@ -47,6 +47,7 @@
         # Rust toolchain (latest stable for edition 2024 support)
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
           extensions = [ "rust-src" "rust-analyzer" ];
+          targets = [ "wasm32-wasip1" ];
         };
         rustPkgs = [ rustToolchain ];
 

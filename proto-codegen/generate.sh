@@ -60,7 +60,7 @@ find haskell/proto/src -name '*.hs' | while read -r f; do
     perl -i -0pe 's/import Network\.GRPC\.HighLevel\.\S+.*?(?=\n(?:import |newtype |data |class ))//gs' "$f"
     # Remove everything from the service record to end of file
     # (service records are always at the end, after all message types)
-    perl -i -0pe 's/\ndata \w+Effects request response\b.*\z/\n/s' "$f"
+    perl -i -0pe 's/\n(?:data|newtype) \w+Effects request response\b.*\z/\n/s' "$f"
 
     # Fix module names: Exomonad -> ExoMonad (proto3-suite lowercases)
     sed -i.bak 's/Exomonad\./ExoMonad./g' "$f"

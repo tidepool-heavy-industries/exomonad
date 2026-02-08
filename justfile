@@ -119,11 +119,11 @@ install-hooks:
 # Build WASM role and install to .exomonad/wasm/
 wasm role="tl":
     @echo ">>> Building wasm-guest-{{role}}..."
-    nix build .#{{role}}
+    nix develop .#wasm --command wasm32-wasi-cabal build --project-file=cabal.project.wasm wasm-guest-{{role}}
     @echo ">>> Installing to .exomonad/wasm/..."
     mkdir -p .exomonad/wasm
     rm -f .exomonad/wasm/wasm-guest-{{role}}.wasm
-    cp result/wasm-guest-{{role}}.wasm .exomonad/wasm/
+    cp $(find dist-newstyle -name "wasm-guest-{{role}}.wasm" -type f -print -quit) .exomonad/wasm/wasm-guest-{{role}}.wasm
     @echo ">>> Done: .exomonad/wasm/wasm-guest-{{role}}.wasm"
 
 # Build both WASM role plugins (tl + dev)
@@ -132,6 +132,12 @@ wasm-all:
     @just wasm dev
     @echo ">>> Installed to .exomonad/wasm/:"
     @ls -lh .exomonad/wasm/wasm-guest-*.wasm
+
+# One-time WASM build environment setup (populates cabal package index)
+wasm-setup:
+    @echo ">>> Setting up WASM build environment (one-time)..."
+    nix develop .#wasm --command wasm32-wasi-cabal update --project-file=cabal.project.wasm
+    @echo ">>> Done. You can now run: just wasm-all"
 
 # Internal: shared install logic for release/dev builds.
 _install profile:
@@ -148,14 +154,8 @@ _install profile:
         LABEL="debug"
     fi
 
-    if [ -f .exomonad/wasm/wasm-guest-tl.wasm ] && [ -f .exomonad/wasm/wasm-guest-dev.wasm ]; then
-        echo ">>> [1/5] WASM plugins already exist, skipping nix build"
-        echo "    (to rebuild: just wasm-all)"
-        ls -lh .exomonad/wasm/wasm-guest-*.wasm
-    else
-        echo ">>> [1/5] Building Haskell WASM plugins..."
-        just wasm-all
-    fi
+    echo ">>> [1/5] Building Haskell WASM plugins (cabal cached if unchanged)..."
+    just wasm-all
 
     echo ">>> [2/5] Building Rust binary (${LABEL}, embeds WASM)..."
     cd rust && cargo build ${CARGO_FLAGS} -p exomonad

@@ -65,13 +65,11 @@ library wasm-guest-internal
         ExoMonad.Guest.Tools.Agent
         ExoMonad.Guest.Tools.FilePR
         ExoMonad.Guest.Tools.Popup
-        ExoMonad.Guest.Tools.Egregore
         -- Tool records
         ExoMonad.Guest.Records.Ping
         ExoMonad.Guest.Records.Agent
         ExoMonad.Guest.Records.FilePR
         ExoMonad.Guest.Records.Popup
-        ExoMonad.Guest.Records.Egregore
         -- Effects (for internal composition)
         ExoMonad.Guest.Effects.AgentControl
         ExoMonad.Guest.Effects.FileSystem
@@ -88,7 +86,6 @@ library wasm-guest-internal
         ExoMonad.Effects.Popup
         ExoMonad.Effects.FilePR
         ExoMonad.Effects.Copilot
-        ExoMonad.Effects.Egregore
         -- Types
         ExoMonad.Guest.Types
         ExoMonad.Types
