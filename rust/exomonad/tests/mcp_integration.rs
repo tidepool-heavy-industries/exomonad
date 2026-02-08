@@ -1144,7 +1144,7 @@ fn mcp_all_tools_have_descriptions() {
         let name = tool["name"].as_str().unwrap_or("<unnamed>");
         let desc = tool["description"]
             .as_str()
-            .expect(&format!("Tool '{}' should have string description", name));
+            .unwrap_or_else(|| panic!("Tool '{}' should have string description", name));
         assert!(!desc.is_empty(), "Tool '{}' has empty description", name);
     }
 

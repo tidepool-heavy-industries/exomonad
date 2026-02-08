@@ -215,21 +215,16 @@ impl TryFrom<String> for ToolPermission {
 // ============================================================================
 
 /// Agent role (dev, tl, pm).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
     /// Developer role.
+    #[default]
     Dev,
     /// Tech lead role.
     TL,
     /// Product manager role.
     PM,
-}
-
-impl Default for Role {
-    fn default() -> Self {
-        Self::Dev
-    }
 }
 
 impl fmt::Display for Role {

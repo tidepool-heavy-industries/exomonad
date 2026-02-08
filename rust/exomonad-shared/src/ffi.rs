@@ -10,6 +10,7 @@ pub trait FFIBoundary: Serialize + DeserializeOwned + Send + Sync + 'static {
     ///
     /// This allows for "Parse, don't validate" at the boundary layer, but
     /// still provides a standard way to enforce domain invariants.
+    #[allow(clippy::result_large_err)]
     fn validate(&self) -> Result<(), FFIError> {
         Ok(())
     }
@@ -21,7 +22,7 @@ pub trait FFIBoundary: Serialize + DeserializeOwned + Send + Sync + 'static {
 }
 
 /// Standardized error code for programmatic handling across the FFI boundary.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     /// Resource (file, issue, branch, etc.) does not exist.
@@ -37,17 +38,12 @@ pub enum ErrorCode {
     /// Invalid input parameters provided to the host function.
     InvalidInput,
     /// Unexpected internal error (bug in the host function or runtime).
+    #[default]
     InternalError,
     /// Operation timed out.
     Timeout,
     /// Resource already exists (e.g., worktree path).
     AlreadyExists,
-}
-
-impl Default for ErrorCode {
-    fn default() -> Self {
-        Self::InternalError
-    }
 }
 
 /// Rich context for debugging errors.

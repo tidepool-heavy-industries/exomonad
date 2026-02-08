@@ -120,7 +120,7 @@ fn parse_services(fds: &prost_types::FileDescriptorSet) -> Vec<ServiceDef> {
             let service_name = service.name.as_deref().unwrap_or("");
 
             // Extract namespace from package (e.g., "exomonad.effects.git" -> "git")
-            let namespace = package.split('.').last().unwrap_or("").to_string();
+            let namespace = package.split('.').next_back().unwrap_or("").to_string();
             if namespace.is_empty() || namespace == "effects" {
                 continue;
             }

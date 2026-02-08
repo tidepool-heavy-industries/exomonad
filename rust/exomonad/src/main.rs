@@ -95,6 +95,7 @@ enum Commands {
 // Hook Handler
 // ============================================================================
 
+#[allow(clippy::too_many_arguments)]
 async fn emit_hook_span(
     otel: &OtelService,
     trace_id: &str,

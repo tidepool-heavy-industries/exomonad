@@ -898,7 +898,7 @@ mod tests {
         match resp.unwrap_err() {
             ServiceError::Api { code: _, message } => {
                 // Octocrab wraps the error, so we check for message content
-                assert!(message.len() > 0);
+                assert!(!message.is_empty());
             }
             other => panic!("Expected Api error, got {:?}", other),
         }

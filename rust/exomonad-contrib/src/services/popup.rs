@@ -34,9 +34,9 @@ fn get_plugin_path() -> Result<String> {
         std::env::var("EXOMONAD_PLUGIN_PATH").unwrap_or_else(|_| DEFAULT_PLUGIN_PATH.to_string());
 
     // Expand ~ to home directory (required for CLI commands - Zellij CLI doesn't expand ~)
-    let expanded = if path.starts_with("~/") {
+    let expanded = if let Some(rest) = path.strip_prefix("~/") {
         if let Some(home) = dirs::home_dir() {
-            home.join(&path[2..]).to_string_lossy().to_string()
+            home.join(rest).to_string_lossy().to_string()
         } else {
             path.clone()
         }
@@ -138,7 +138,7 @@ impl PopupService {
         // have ZELLIJ_SESSION_NAME in its environment.
         let mut child = Command::new("zellij")
             .arg("--session")
-            .arg(&session)
+            .arg(session)
             .arg("pipe")
             .arg("--plugin")
             .arg(&plugin_path)

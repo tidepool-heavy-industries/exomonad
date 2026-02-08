@@ -81,7 +81,7 @@ fn compile_core_protos() -> Result<()> {
         "FfiError.suggestion",
     ] {
         config.field_attribute(
-            &format!(".exomonad.ffi.{}", field),
+            format!(".exomonad.ffi.{}", field),
             "#[serde(default, skip_serializing_if = \"String::is_empty\")]",
         );
     }
@@ -157,10 +157,7 @@ fn compile_effect_protos() -> Result<()> {
         return Ok(());
     }
 
-    config.compile_protos(
-        &effect_proto_files,
-        &["proto/", "proto/effects/"],
-    )?;
+    config.compile_protos(&effect_proto_files, &["proto/", "proto/effects/"])?;
 
     // Communicate descriptor path to dependents (exomonad-core)
     println!("cargo:EFFECTS_DESCRIPTOR={}", descriptor_path);
@@ -192,12 +189,12 @@ fn generate_effect_module_declarations(out_dir: &str) -> Result<()> {
 
         // Match "exomonad.effects.<namespace>.rs" (sub-namespace modules)
         // Skip "exomonad.effects.rs" (base package — handled as `error` module)
-        if let Some(rest) = name.strip_prefix("exomonad.effects.") {
-            if let Some(module_name) = rest.strip_suffix(".rs") {
-                if !module_name.is_empty() && !module_name.contains('.') {
-                    modules.push(module_name.to_string());
-                }
-            }
+        if let Some(rest) = name.strip_prefix("exomonad.effects.")
+            && let Some(module_name) = rest.strip_suffix(".rs")
+            && !module_name.is_empty()
+            && !module_name.contains('.')
+        {
+            modules.push(module_name.to_string());
         }
     }
 

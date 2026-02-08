@@ -39,9 +39,11 @@ rust/exomonad/.exomonad/
 # Temporary task files for worktree dispatch
 *.md.tmp
 
+# Cargo workspace build artifacts
+/target/
+
 # Standalone Rust crate build artifacts (outside workspace target/)
 rust/exomonad-plugin/target/
-rust/exomonad-coordinator/target/
 
 # Integration test build artifacts
 tests/integration/external-consumer/result
