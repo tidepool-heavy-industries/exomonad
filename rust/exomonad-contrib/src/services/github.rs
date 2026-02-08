@@ -17,7 +17,9 @@ fn octocrab_issue_state(state: models::IssueState) -> ItemState {
 }
 
 fn octocrab_optional_issue_state(state: Option<models::IssueState>) -> ItemState {
-    state.map(octocrab_issue_state).unwrap_or(ItemState::Unknown)
+    state
+        .map(octocrab_issue_state)
+        .unwrap_or(ItemState::Unknown)
 }
 
 // ============================================================================

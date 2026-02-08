@@ -1,6 +1,7 @@
 pub mod agent_control;
 pub mod copilot_review;
 pub mod docker;
+pub mod external;
 pub mod file_pr;
 pub mod filesystem;
 pub mod git;

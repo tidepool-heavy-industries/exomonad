@@ -1,4 +1,4 @@
-use crate::{ExternalService, ServiceError};
+use super::{ExternalService, ServiceError};
 use async_trait::async_trait;
 use exomonad_shared::protocol::{ServiceRequest, ServiceResponse};
 use reqwest::{Client, Url};
@@ -201,7 +201,7 @@ impl ExternalService for OtelService {
                         resource: Resource { attributes: vec![] },
                         scope_spans: vec![ScopeSpan {
                             scope: InstrumentationScope {
-                                name: "exomonad-services".into(),
+                                name: "exomonad".into(),
                                 version: "0.1.0".into(),
                             },
                             spans: vec![Span {
@@ -260,7 +260,7 @@ impl ExternalService for OtelService {
                         resource: Resource { attributes: vec![] },
                         scope_metrics: vec![ScopeMetric {
                             scope: InstrumentationScope {
-                                name: "exomonad-services".into(),
+                                name: "exomonad".into(),
                                 version: "0.1.0".into(),
                             },
                             metrics: vec![Metric {

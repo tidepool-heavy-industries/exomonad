@@ -4,7 +4,7 @@
 //!
 //! - **Effect system**: [`EffectHandler`] trait, [`EffectRegistry`] for dispatch
 //! - **WASM hosting**: [`PluginManager`] for Haskell WASM plugins via Extism
-//! - **MCP server**: Reusable stdio MCP server for Claude Code integration
+//! - **MCP server**: Reusable stdio MCP server
 //! - **Runtime builder**: [`RuntimeBuilder`] for composing handlers into a runtime
 //!
 //! # Architecture
@@ -57,9 +57,9 @@ pub use effects::{EffectError, EffectHandler, EffectRegistry, EffectResult};
 pub use plugin_manager::PluginManager;
 
 // Re-export protocol types from shared (part of the framework API)
-pub use exomonad_shared::protocol;
 pub use exomonad_shared::domain;
 pub use exomonad_shared::ffi;
+pub use exomonad_shared::protocol;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -80,7 +80,6 @@ use std::sync::Arc;
 pub struct RuntimeBuilder {
     registry: EffectRegistry,
     wasm_bytes: Option<Vec<u8>>,
-    zellij_session: Option<String>,
 }
 
 impl RuntimeBuilder {
@@ -89,7 +88,6 @@ impl RuntimeBuilder {
         Self {
             registry: EffectRegistry::new(),
             wasm_bytes: None,
-            zellij_session: None,
         }
     }
 
@@ -110,12 +108,6 @@ impl RuntimeBuilder {
     /// Set the WASM plugin bytes (embedded at compile time).
     pub fn with_wasm_bytes(mut self, bytes: Vec<u8>) -> Self {
         self.wasm_bytes = Some(bytes);
-        self
-    }
-
-    /// Set the Zellij session name for popup/event operations.
-    pub fn with_zellij_session(mut self, session: impl Into<String>) -> Self {
-        self.zellij_session = Some(session.into());
         self
     }
 
@@ -142,8 +134,7 @@ impl RuntimeBuilder {
             .ok_or_else(|| anyhow::anyhow!("WASM bytes not set"))?;
 
         let registry = Arc::new(self.registry);
-        let plugin_manager =
-            PluginManager::new(&wasm_bytes, registry.clone(), self.zellij_session).await?;
+        let plugin_manager = PluginManager::new(&wasm_bytes, registry.clone()).await?;
 
         Ok(Runtime {
             plugin_manager,

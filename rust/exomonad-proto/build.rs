@@ -157,7 +157,10 @@ fn compile_effect_protos() -> Result<()> {
         return Ok(());
     }
 
-    config.compile_protos(&effect_proto_files, &["../../proto/", "../../proto/effects/"])?;
+    config.compile_protos(
+        &effect_proto_files,
+        &["../../proto/", "../../proto/effects/"],
+    )?;
 
     // Communicate descriptor path to dependents (exomonad-core)
     println!("cargo:EFFECTS_DESCRIPTOR={}", descriptor_path);
@@ -203,7 +206,10 @@ fn generate_effect_module_declarations(out_dir: &str) -> Result<()> {
     let path = format!("{}/effect_modules.rs", out_dir);
     let mut file = std::fs::File::create(&path)?;
 
-    writeln!(file, "// Generated from proto/effects/*.proto — do not edit.")?;
+    writeln!(
+        file,
+        "// Generated from proto/effects/*.proto — do not edit."
+    )?;
     writeln!(file)?;
 
     // Base package types (effect_error.proto + envelope.proto → exomonad.effects.rs)

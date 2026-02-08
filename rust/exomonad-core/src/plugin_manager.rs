@@ -31,8 +31,6 @@ pub struct PluginManager {
     /// The underlying Extism plugin instance.
     plugin: Arc<RwLock<Plugin>>,
     content_hash: String,
-    /// Optional Zellij session name for event emission.
-    zellij_session: Option<String>,
 }
 
 impl PluginManager {
@@ -42,12 +40,7 @@ impl PluginManager {
     ///
     /// * `wasm_bytes` - WASM binary content (embedded at compile time)
     /// * `registry` - Effect registry for dispatching all effects
-    /// * `zellij_session` - Optional Zellij session name (stored for handler access)
-    pub async fn new(
-        wasm_bytes: &[u8],
-        registry: Arc<EffectRegistry>,
-        zellij_session: Option<String>,
-    ) -> Result<Self> {
+    pub async fn new(wasm_bytes: &[u8], registry: Arc<EffectRegistry>) -> Result<Self> {
         let hash = sha256_short(wasm_bytes);
         tracing::info!(size = wasm_bytes.len(), hash = %hash, "Loading embedded WASM plugin");
 
@@ -72,18 +65,12 @@ impl PluginManager {
         Ok(Self {
             plugin: Arc::new(RwLock::new(plugin)),
             content_hash: hash,
-            zellij_session,
         })
     }
 
     /// Get the SHA256 content hash of the loaded WASM binary (first 12 hex chars).
     pub fn content_hash(&self) -> &str {
         &self.content_hash
-    }
-
-    /// Get the Zellij session name (if configured).
-    pub fn zellij_session(&self) -> Option<&str> {
-        self.zellij_session.as_deref()
     }
 
     /// Call a WASM guest function with typed input/output marshalling.

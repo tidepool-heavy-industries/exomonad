@@ -4,7 +4,6 @@
 //! structured error handling.
 
 use std::io;
-use std::path::PathBuf;
 use thiserror::Error;
 
 /// All error types that can occur in exomonad operations.
@@ -25,44 +24,9 @@ pub enum ExoMonadError {
     #[error("I/O error: {0}")]
     Io(#[source] io::Error),
 
-    // ---- Socket errors (for control envelope) ----
-    /// Failed to connect to control server via Unix socket.
-    #[error("failed to connect to control server at {path}: {source}")]
-    UnixConnect {
-        path: PathBuf,
-        #[source]
-        source: io::Error,
-    },
-
-    /// Failed to configure socket options.
-    #[error("failed to configure socket: {source}")]
-    SocketConfig {
-        #[source]
-        source: io::Error,
-    },
-
-    /// Failed to write to socket.
-    #[error("failed to write to socket: {source}")]
-    SocketWrite {
-        #[source]
-        source: io::Error,
-    },
-
-    /// Failed to read from socket.
-    #[error("failed to read from socket: {source}")]
-    SocketRead {
-        #[source]
-        source: io::Error,
-    },
-
-    // ---- MCP errors ----
     /// MCP server error.
     #[error("MCP server error: {0}")]
     McpServer(String),
-
-    /// Health check error.
-    #[error("health check error: {0}")]
-    HealthCheck(String),
 }
 
 /// Result type alias using ExoMonadError.

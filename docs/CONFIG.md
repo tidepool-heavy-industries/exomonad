@@ -118,7 +118,6 @@ Located in the user's home directory.
 *   **Rust vs Haskell:** Rust has a defined "Config" concept. Haskell treats config as "parameters passed to interpreters".
 *   **Socket Paths:** Most Haskell interpreters default to `.exomonad/sockets/control.sock` relative to CWD. If the CWD is not the project root (e.g., inside a deep subdirectory), this will fail unless `EXOMONAD_CONTROL_SOCKET` env var is set.
 *   **Hardcoded Fallbacks:**
-    *   `rust/exomonad-services/src/bin/service-server.rs`: defaults to `.exomonad/sockets/services.sock`.
     *   `rust/exomonad/src/main.rs`: defaults to `.exomonad/sockets/control.sock`.
 
 ### 4.3 Hardcoded Paths to Configurable

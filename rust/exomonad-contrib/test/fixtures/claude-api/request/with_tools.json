@@ -1,0 +1,27 @@
+{
+  "model": "claude-3-opus-20240229",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is the weather?"
+    }
+  ],
+  "max_tokens": 1024,
+  "tools": [
+    {
+      "name": "get_weather",
+      "description": "Get weather for a location",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "location": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "location"
+        ]
+      }
+    }
+  ]
+}

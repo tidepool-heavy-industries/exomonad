@@ -1,6 +1,6 @@
 # GitHub Interpreter - Socket Client (Rust/Octocrab)
 
-Interprets the `GitHub` effect by communicating with the Rust `exomonad-services` backend via Unix Domain Socket. The Rust side uses Octocrab for REST and GraphQL queries against the GitHub API.
+Interprets the `GitHub` effect by communicating with the Rust `exomonad-contrib` backend via Unix Domain Socket. The Rust side uses Octocrab for REST and GraphQL queries against the GitHub API.
 
 ## When to Read This
 
@@ -30,7 +30,7 @@ Read this if you're:
                                        │ Unix Socket (NDJSON)
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ Rust Service (exomonad-services)                                     │
+│ Rust Service (exomonad-contrib)                                      │
 │   Octocrab REST + GraphQL → GitHub API                               │
 │   (authenticated via GITHUB_TOKEN)                                   │
 └─────────────────────────────────────────────────────────────────────┘

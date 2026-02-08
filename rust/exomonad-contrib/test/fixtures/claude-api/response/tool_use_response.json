@@ -1,0 +1,21 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "I will check the weather."
+    },
+    {
+      "type": "tool_use",
+      "id": "toolu_01234",
+      "name": "get_weather",
+      "input": {
+        "location": "San Francisco"
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "usage": {
+    "input_tokens": 20,
+    "output_tokens": 30
+  }
+}

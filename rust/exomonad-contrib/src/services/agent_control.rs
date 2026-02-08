@@ -9,8 +9,8 @@
 
 use anyhow::{anyhow, Context, Result};
 use exomonad_core::common::TimeoutError;
-use exomonad_shared::ffi::FFIBoundary;
 use exomonad_shared::domain::ItemState;
+use exomonad_shared::ffi::FFIBoundary;
 use exomonad_shared::{GithubOwner, GithubRepo, IssueNumber};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -82,10 +82,18 @@ impl AgentType {
         }
     }
 
-    fn command(&self) -> &'static str { self.meta().command }
-    fn prompt_flag(&self) -> &'static str { self.meta().prompt_flag }
-    fn suffix(&self) -> &'static str { self.meta().suffix }
-    fn emoji(&self) -> &'static str { self.meta().emoji }
+    fn command(&self) -> &'static str {
+        self.meta().command
+    }
+    fn prompt_flag(&self) -> &'static str {
+        self.meta().prompt_flag
+    }
+    fn suffix(&self) -> &'static str {
+        self.meta().suffix
+    }
+    fn emoji(&self) -> &'static str {
+        self.meta().emoji
+    }
 
     /// Generate a display name for Zellij tabs.
     ///

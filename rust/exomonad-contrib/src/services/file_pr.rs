@@ -3,10 +3,10 @@
 // Uses octocrab (GitHub API) for idempotent PR management.
 // Returns immediately with PR URL and number.
 
+use super::external::{ExternalGitHubService as GitHubService, ExternalService};
 use crate::services::git::{self, parse_github_url};
 use anyhow::{Context, Result};
 use duct::cmd;
-use exomonad_services::{ExternalService, GitHubService};
 use exomonad_shared::protocol::{ServiceRequest, ServiceResponse};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};

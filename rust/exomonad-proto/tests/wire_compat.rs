@@ -138,8 +138,8 @@ fn ffi_error_roundtrip() {
 #[cfg(feature = "effects")]
 mod binary {
     use exomonad_proto::effects::error::{
-        self as proto_error, effect_response::Result as ResponseResult, EffectEnvelope,
-        EffectError, EffectResponse,
+        self as proto_error, EffectEnvelope, EffectError, EffectResponse,
+        effect_response::Result as ResponseResult,
     };
     use prost::Message;
 
@@ -261,7 +261,10 @@ mod binary {
         let agent = decoded.agent.unwrap();
         assert_eq!(agent.id, "gh-433-claude");
         assert_eq!(agent.issue, "433");
-        assert_eq!(agent.worktree_path, "/tmp/worktrees/gh-433-fix-build-claude");
+        assert_eq!(
+            agent.worktree_path,
+            "/tmp/worktrees/gh-433-fix-build-claude"
+        );
         assert_eq!(agent.branch_name, "gh-433/fix-build");
         assert_eq!(agent.agent_type, 1);
         assert_eq!(agent.role, 1);
@@ -325,7 +328,7 @@ mod binary {
                 worktree_path: "/worktrees/10".into(),
                 branch_name: "gh-10/feature".into(),
                 agent_type: 1,
-                role: 2, // TL
+                role: 2,   // TL
                 status: 2, // STOPPED
                 zellij_tab: String::new(),
                 error: String::new(),
@@ -496,7 +499,11 @@ mod binary {
         };
         let bytes = response.encode_to_vec();
         // tag(1 byte) + varint_len(1 byte) + payload(127 bytes) = 129
-        assert_eq!(bytes.len(), 129, "127-byte payload should produce 129 wire bytes");
+        assert_eq!(
+            bytes.len(),
+            129,
+            "127-byte payload should produce 129 wire bytes"
+        );
         assert_eq!(bytes[0], 0x0a, "Field 1 LEN tag");
         assert_eq!(bytes[1], 127, "1-byte varint for length 127");
 
@@ -516,7 +523,11 @@ mod binary {
         };
         let bytes = response.encode_to_vec();
         // tag(1) + varint_len(2) + payload(128) = 131
-        assert_eq!(bytes.len(), 131, "128-byte payload should produce 131 wire bytes");
+        assert_eq!(
+            bytes.len(),
+            131,
+            "128-byte payload should produce 131 wire bytes"
+        );
         assert_eq!(bytes[0], 0x0a, "Field 1 LEN tag");
         // 128 as varint = [0x80, 0x01]
         assert_eq!(bytes[1], 0x80, "First byte of 2-byte varint");
@@ -538,7 +549,11 @@ mod binary {
         };
         let bytes = response.encode_to_vec();
         // tag(1) + varint_len(3) + payload(16384) = 16388
-        assert_eq!(bytes.len(), 16388, "16384-byte payload should produce 16388 wire bytes");
+        assert_eq!(
+            bytes.len(),
+            16388,
+            "16384-byte payload should produce 16388 wire bytes"
+        );
         assert_eq!(bytes[0], 0x0a, "Field 1 LEN tag");
         // 16384 as varint = [0x80, 0x80, 0x01]
         assert_eq!(bytes[1], 0x80, "First byte of 3-byte varint");
@@ -560,9 +575,16 @@ mod binary {
     fn git_get_status_binary_roundtrip() {
         use exomonad_proto::effects::git::{GetStatusRequest, GetStatusResponse};
 
-        let req = GetStatusRequest { working_dir: "/repo".into() };
+        let req = GetStatusRequest {
+            working_dir: "/repo".into(),
+        };
         let bytes = req.encode_to_vec();
-        assert_eq!(GetStatusRequest::decode(bytes.as_slice()).unwrap().working_dir, "/repo");
+        assert_eq!(
+            GetStatusRequest::decode(bytes.as_slice())
+                .unwrap()
+                .working_dir,
+            "/repo"
+        );
 
         let resp = GetStatusResponse {
             dirty_files: vec!["src/main.rs".into(), "Cargo.toml".into()],
@@ -581,16 +603,14 @@ mod binary {
         use exomonad_proto::effects::git::{Commit, GetCommitsResponse};
 
         let resp = GetCommitsResponse {
-            commits: vec![
-                Commit {
-                    sha: "abc123def456".into(),
-                    short_sha: "abc123d".into(),
-                    message: "fix: resolve FFI decode error".into(),
-                    author: "dev".into(),
-                    author_email: "dev@example.com".into(),
-                    timestamp: 1700000000,
-                },
-            ],
+            commits: vec![Commit {
+                sha: "abc123def456".into(),
+                short_sha: "abc123d".into(),
+                message: "fix: resolve FFI decode error".into(),
+                author: "dev".into(),
+                author_email: "dev@example.com".into(),
+                timestamp: 1700000000,
+            }],
         };
         let bytes = resp.encode_to_vec();
         let decoded = GetCommitsResponse::decode(bytes.as_slice()).unwrap();
@@ -602,7 +622,10 @@ mod binary {
     fn git_has_unpushed_binary_roundtrip() {
         use exomonad_proto::effects::git::HasUnpushedCommitsResponse;
 
-        let resp = HasUnpushedCommitsResponse { has_unpushed: true, count: 3 };
+        let resp = HasUnpushedCommitsResponse {
+            has_unpushed: true,
+            count: 3,
+        };
         let bytes = resp.encode_to_vec();
         let decoded = HasUnpushedCommitsResponse::decode(bytes.as_slice()).unwrap();
         assert!(decoded.has_unpushed);
@@ -671,7 +694,9 @@ mod binary {
     fn log_emit_event_binary_roundtrip() {
         use exomonad_proto::effects::log::EmitEventResponse;
 
-        let resp = EmitEventResponse { event_id: "evt-abc-123".into() };
+        let resp = EmitEventResponse {
+            event_id: "evt-abc-123".into(),
+        };
         let bytes = resp.encode_to_vec();
         let decoded = EmitEventResponse::decode(bytes.as_slice()).unwrap();
         assert_eq!(decoded.event_id, "evt-abc-123");
@@ -681,7 +706,10 @@ mod binary {
     fn fs_write_file_binary_roundtrip() {
         use exomonad_proto::effects::fs::WriteFileResponse;
 
-        let resp = WriteFileResponse { bytes_written: 1024, path: "/tmp/out.txt".into() };
+        let resp = WriteFileResponse {
+            bytes_written: 1024,
+            path: "/tmp/out.txt".into(),
+        };
         let bytes = resp.encode_to_vec();
         let decoded = WriteFileResponse::decode(bytes.as_slice()).unwrap();
         assert_eq!(decoded.bytes_written, 1024);
@@ -711,13 +739,19 @@ mod binary {
         print_hex("EffectResponse(Payload(hello))", &simple.encode_to_vec());
 
         // 2. EffectResponse wrapping GetBranchResponse
-        let branch_resp = GetBranchResponse { branch: "main".into(), detached: false };
+        let branch_resp = GetBranchResponse {
+            branch: "main".into(),
+            detached: false,
+        };
         let branch_inner = branch_resp.encode_to_vec();
         let branch_wrapped = EffectResponse {
             result: Some(ResponseResult::Payload(branch_inner.clone())),
         };
         print_hex("GetBranchResponse(main)", &branch_inner);
-        print_hex("EffectResponse(Payload(GetBranchResponse))", &branch_wrapped.encode_to_vec());
+        print_hex(
+            "EffectResponse(Payload(GetBranchResponse))",
+            &branch_wrapped.encode_to_vec(),
+        );
 
         // 3. EffectResponse wrapping LogResponse
         let log_resp = LogResponse { success: true };
@@ -726,7 +760,10 @@ mod binary {
             result: Some(ResponseResult::Payload(log_inner.clone())),
         };
         print_hex("LogResponse(true)", &log_inner);
-        print_hex("EffectResponse(Payload(LogResponse))", &log_wrapped.encode_to_vec());
+        print_hex(
+            "EffectResponse(Payload(LogResponse))",
+            &log_wrapped.encode_to_vec(),
+        );
 
         // 4. EffectResponse wrapping SpawnResponse with full AgentInfo
         let spawn_resp = SpawnResponse {
@@ -749,17 +786,25 @@ mod binary {
             result: Some(ResponseResult::Payload(spawn_inner.clone())),
         };
         print_hex("SpawnResponse(a1)", &spawn_inner);
-        print_hex("EffectResponse(Payload(SpawnResponse))", &spawn_wrapped.encode_to_vec());
+        print_hex(
+            "EffectResponse(Payload(SpawnResponse))",
+            &spawn_wrapped.encode_to_vec(),
+        );
 
         // 5. EffectResponse with NotFound error
         let error_resp = EffectResponse {
             result: Some(ResponseResult::Error(EffectError {
                 kind: Some(proto_error::effect_error::Kind::NotFound(
-                    proto_error::NotFound { resource: "test".into() },
+                    proto_error::NotFound {
+                        resource: "test".into(),
+                    },
                 )),
             })),
         };
-        print_hex("EffectResponse(Error(NotFound(test)))", &error_resp.encode_to_vec());
+        print_hex(
+            "EffectResponse(Error(NotFound(test)))",
+            &error_resp.encode_to_vec(),
+        );
 
         // 6. EffectResponse with Custom error (common in agent handler failures)
         let custom_err = EffectResponse {
@@ -773,7 +818,10 @@ mod binary {
                 )),
             })),
         };
-        print_hex("EffectResponse(Error(Custom(agent_error)))", &custom_err.encode_to_vec());
+        print_hex(
+            "EffectResponse(Error(Custom(agent_error)))",
+            &custom_err.encode_to_vec(),
+        );
 
         // 7. SpawnBatchResponse with agents + errors
         let batch = SpawnBatchResponse {
@@ -797,7 +845,10 @@ mod binary {
             result: Some(ResponseResult::Payload(batch_inner.clone())),
         };
         print_hex("SpawnBatchResponse(1 agent, 1 error)", &batch_inner);
-        print_hex("EffectResponse(Payload(SpawnBatchResponse))", &batch_wrapped.encode_to_vec());
+        print_hex(
+            "EffectResponse(Payload(SpawnBatchResponse))",
+            &batch_wrapped.encode_to_vec(),
+        );
 
         // 8. EffectEnvelope
         let envelope = EffectEnvelope {
@@ -827,8 +878,15 @@ mod binary {
         };
         let large_bytes = large_wrapped.encode_to_vec();
         print_hex("SpawnBatchResponse(large error)", &large_inner);
-        print_hex("EffectResponse(Payload(large SpawnBatchResponse))", &large_bytes[..32]);
-        println!("  inner_len={} outer_len={}", large_inner.len(), large_bytes.len());
+        print_hex(
+            "EffectResponse(Payload(large SpawnBatchResponse))",
+            &large_bytes[..32],
+        );
+        println!(
+            "  inner_len={} outer_len={}",
+            large_inner.len(),
+            large_bytes.len()
+        );
 
         println!("\n=== End Reference Bytes ===\n");
     }

@@ -1,6 +1,6 @@
-//! MCP (Model Context Protocol) server for Claude Code integration.
+//! MCP (Model Context Protocol) server.
 //!
-//! Implements JSON-RPC over stdin/stdout for Claude Code's native MCP support.
+//! Implements JSON-RPC over stdin/stdout for MCP client integration.
 //! All tool logic is in Haskell WASM. This module handles JSON-RPC transport
 //! and forwards tool calls to the WASM plugin via handle_mcp_call.
 

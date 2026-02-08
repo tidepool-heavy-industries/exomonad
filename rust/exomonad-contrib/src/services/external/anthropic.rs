@@ -1,4 +1,4 @@
-use crate::{ExternalService, ServiceError};
+use super::{ExternalService, ServiceError};
 use async_trait::async_trait;
 use exomonad_shared::protocol::{
     ChatMessage, ContentBlock, ServiceRequest, ServiceResponse, StopReason, Tool, Usage,
@@ -169,13 +169,10 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn get_fixture_path(subpath: &str) -> PathBuf {
-        let root = std::env::current_dir().unwrap();
-        // Handle running from workspace root or crate root
-        if root.ends_with("exomonad-services") {
-            root.join("../../test/fixtures/claude-api").join(subpath)
-        } else {
-            root.join("test/fixtures/claude-api").join(subpath)
-        }
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        PathBuf::from(manifest_dir)
+            .join("test/fixtures/claude-api")
+            .join(subpath)
     }
 
     fn load_fixture(subpath: &str) -> serde_json::Value {

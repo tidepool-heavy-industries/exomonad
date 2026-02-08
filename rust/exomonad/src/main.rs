@@ -9,20 +9,20 @@
 use exomonad::config;
 
 use anyhow::{Context, Result};
-use std::os::unix::process::CommandExt;
 use clap::{Parser, Subcommand};
+use exomonad_contrib::services::external::otel::OtelService;
+use exomonad_contrib::services::external::ExternalService;
 use exomonad_contrib::services::{git, zellij_events};
 use exomonad_contrib::Services;
 use exomonad_core::mcp;
 use exomonad_core::{PluginManager, Runtime, RuntimeBuilder};
-use exomonad_services::otel::OtelService;
-use exomonad_services::ExternalService;
 use exomonad_shared::protocol::{
     ClaudePreToolUseOutput, HookEventType, HookInput, HookSpecificOutput, InternalStopHookOutput,
     Runtime as HookRuntime, ServiceRequest, StopDecision,
 };
 use exomonad_shared::ToolPermission;
 use std::collections::HashMap;
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
@@ -393,9 +393,7 @@ fn run_init(session_override: Option<String>, recreate: bool) -> Result<()> {
 
     // `zellij list-sessions --short` outputs lines like:
     //   "my-session" (alive) or "my-session (EXITED ...)" (dead)
-    let session_alive = sessions_str
-        .lines()
-        .any(|l| l.trim() == session);
+    let session_alive = sessions_str.lines().any(|l| l.trim() == session);
     let session_exited = sessions_str
         .lines()
         .any(|l| l.starts_with(&session) && l.contains("EXITED"));
@@ -460,8 +458,8 @@ fn generate_tl_layout() -> Result<std::path::PathBuf> {
         close_on_exit: false,
     };
 
-    let layout = zellij_gen::generate_agent_layout(&params)
-        .context("Failed to generate TL layout")?;
+    let layout =
+        zellij_gen::generate_agent_layout(&params).context("Failed to generate TL layout")?;
 
     let layout_path = std::env::temp_dir().join("exomonad-tl-layout.kdl");
     std::fs::write(&layout_path, layout)?;
@@ -525,8 +523,7 @@ fn init_logging(command: &Commands) -> Option<tracing_appender::non_blocking::Wo
             .with_writer(std::io::stderr);
         (None, Some(layer))
     } else {
-        let layer = tracing_subscriber::fmt::layer()
-            .with_writer(std::io::stderr);
+        let layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
         (Some(layer), None)
     };
 
@@ -591,7 +588,7 @@ async fn main() -> Result<()> {
             );
 
             // Build runtime with all effect handlers
-            let rt = build_runtime(wasm_bytes, &services, Some(config.zellij_session.clone())).await?;
+            let rt = build_runtime(wasm_bytes, &services).await?;
 
             info!("WASM plugin loaded and initialized");
 
@@ -619,7 +616,7 @@ async fn main() -> Result<()> {
             );
 
             // Build runtime with all effect handlers + Zellij session for popup support
-            let rt = build_runtime(wasm_bytes, &services, Some(config.zellij_session.clone())).await?;
+            let rt = build_runtime(wasm_bytes, &services).await?;
             let state = rt.into_mcp_state(project_dir);
 
             // Emit AgentStarted
@@ -630,7 +627,8 @@ async fn main() -> Result<()> {
                         agent_id: id,
                         timestamp: zellij_events::now_iso8601(),
                     };
-                    if let Err(e) = zellij_events::emit_event(&config.zellij_session, &start_event) {
+                    if let Err(e) = zellij_events::emit_event(&config.zellij_session, &start_event)
+                    {
                         warn!("Failed to emit agent:started event: {}", e);
                     }
                 }
@@ -709,15 +707,9 @@ async fn main() -> Result<()> {
 async fn build_runtime(
     wasm_bytes: &[u8],
     services: &Arc<exomonad_contrib::ValidatedServices>,
-    zellij_session: Option<String>,
 ) -> Result<Runtime> {
-    let mut builder = RuntimeBuilder::new().with_wasm_bytes(wasm_bytes.to_vec());
-
-    if let Some(session) = zellij_session {
-        builder = builder.with_zellij_session(session);
-    }
-
-    builder = exomonad_contrib::register_builtin_handlers(builder, services);
+    let builder = RuntimeBuilder::new().with_wasm_bytes(wasm_bytes.to_vec());
+    let builder = exomonad_contrib::register_builtin_handlers(builder, services);
 
     builder.build().await.context("Failed to build runtime")
 }

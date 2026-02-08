@@ -124,9 +124,11 @@ fn yield_effect_impl(
             result: Some(exomonad_proto::effects::error::effect_response::Result::Payload(payload)),
         },
         Err(err) => EffectResponse {
-            result: Some(exomonad_proto::effects::error::effect_response::Result::Error(
-                to_proto_error(&err),
-            )),
+            result: Some(
+                exomonad_proto::effects::error::effect_response::Result::Error(to_proto_error(
+                    &err,
+                )),
+            ),
         },
     };
 

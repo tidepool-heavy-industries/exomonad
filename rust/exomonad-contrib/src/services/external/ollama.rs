@@ -1,4 +1,4 @@
-use crate::{ExternalService, ServiceError};
+use super::{ExternalService, ServiceError};
 use async_trait::async_trait;
 use exomonad_shared::protocol::{ServiceRequest, ServiceResponse};
 use ollama_rs::generation::completion::request::GenerationRequest;

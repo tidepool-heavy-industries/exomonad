@@ -18,12 +18,14 @@ tracing = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 chrono = "0.4"
-octocrab = "0.32"
+octocrab = "0.38"
 duct = { workspace = true }
 uuid = { version = "1.0", features = ["v4"] }
 dirs = "5.0"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+url = "2"
+ollama-rs = "0.2"
 exomonad-core = { path = "../exomonad-core", version = "0.1.0" }
-exomonad-services = { path = "../exomonad-services", version = "0.1.0" }
 exomonad-shared = { path = "../exomonad-shared", version = "0.1.0" }
 exomonad-proto = { path = "../exomonad-proto", version = "0.1.0", features = ["effects"] }
 exomonad-ui-protocol = { path = "../exomonad-ui-protocol", version = "0.1.0" }
@@ -32,7 +34,7 @@ zellij-gen = { path = "../zellij-gen", version = "0.1.0" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-wiremock = "0.5"
+wiremock = "0.6"
 proptest = "1.4"
 
 [lib]

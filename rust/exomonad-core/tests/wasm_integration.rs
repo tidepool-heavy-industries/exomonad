@@ -185,9 +185,7 @@ impl EffectHandler for MockAgentHandler {
                 errors: vec![],
             }
             .encode_to_vec()),
-            _ => Err(EffectError::not_found(format!(
-                "mock_agent/{effect_type}"
-            ))),
+            _ => Err(EffectError::not_found(format!("mock_agent/{effect_type}"))),
         }
     }
 }
@@ -419,9 +417,7 @@ async fn wasm_large_response_roundtrip() {
                     );
                     Ok(bytes)
                 }
-                _ => Err(EffectError::not_found(format!(
-                    "large_agent/{effect_type}"
-                ))),
+                _ => Err(EffectError::not_found(format!("large_agent/{effect_type}"))),
             }
         }
     }

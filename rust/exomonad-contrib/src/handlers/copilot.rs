@@ -5,7 +5,7 @@
 use crate::services::copilot_review;
 use async_trait::async_trait;
 use exomonad_core::effects::{
-    dispatch_copilot_effect, EffectError, EffectHandler, EffectResult, CopilotEffects,
+    dispatch_copilot_effect, CopilotEffects, EffectError, EffectHandler, EffectResult,
 };
 use exomonad_proto::effects::copilot::*;
 

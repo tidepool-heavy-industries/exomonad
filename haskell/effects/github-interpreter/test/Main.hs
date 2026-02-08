@@ -246,4 +246,4 @@ main = hspec $ do
           comment.rcState `shouldBe` ReviewCommented -- Default when missing
 
 -- GraphQL parsing is now handled on the Rust side (Octocrab).
--- See rust/exomonad-services/src/github.rs for review thread fetching.
+-- See rust/exomonad-contrib/src/services/external/github.rs for review thread fetching.

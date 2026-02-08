@@ -77,6 +77,7 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 │   • Handlers: GitHandler, GitHubHandler, LogHandler, AgentHandler,
 │     FsHandler, PopupHandler, FilePRHandler, CopilotHandler
 │   • Services: GitService, GitHubService, AgentControlService, etc.
+│   • External service clients: Anthropic, GitHub, Ollama, OTLP
 │   • register_builtin_handlers() for composing into RuntimeBuilder
 │
 ├── effector/CLAUDE.md  ← Stateless IO executor
@@ -86,10 +87,6 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 ├── exomonad-shared/CLAUDE.md  ← Shared types and utilities
 │   • protocol.rs: HookInput, HookOutput, MCPCallInput, MCPCallOutput
 │   • commands/hook.rs: handle_hook() implementation
-│
-├── exomonad-services/CLAUDE.md  ← External service clients (Library)
-│   • Anthropic, GitHub, Ollama, OTLP
-│   • ExternalService trait implementations
 │
 ├── exomonad-ui-protocol/CLAUDE.md  ← Popup UI protocol types
 │   • PopupDefinition, Component, VisibilityRule
@@ -110,11 +107,10 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 |-------|------|---------|
 | [exomonad](exomonad/CLAUDE.md) | Binary (`exomonad`) | MCP + Hook handler via WASM |
 | exomonad-core | Library | Framework: EffectHandler, EffectRegistry, RuntimeBuilder, MCP server |
-| exomonad-contrib | Library | Built-in handlers (Git, GitHub, Agent, etc.) + services |
+| exomonad-contrib | Library | Built-in handlers (Git, GitHub, Agent, etc.) + services + external clients |
 | exomonad-proto | Library | Proto-generated types (prost) for FFI + effects |
 | [effector](effector/CLAUDE.md) | Binary | Stateless IO executor |
 | [exomonad-shared](exomonad-shared/CLAUDE.md) | Library | Shared types, protocols |
-| [exomonad-services](exomonad-services/CLAUDE.md) | Library | External service clients |
 | [exomonad-ui-protocol](exomonad-ui-protocol/CLAUDE.md) | Library | Popup UI protocol types |
 | [zellij-gen](zellij-gen/CLAUDE.md) | Binary | KDL layout generator |
 

@@ -4,7 +4,6 @@ members = [
     "exomonad-proto",
     "exomonad-shared",
     "exomonad-ui-protocol",
-    "exomonad-services",
     "exomonad",
     "exomonad-core",
     "exomonad-contrib",

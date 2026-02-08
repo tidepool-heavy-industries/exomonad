@@ -473,11 +473,7 @@ fn mcp_tool_call_cleanup_agents() {
     if !has_jsonrpc_error {
         let result = &resp["result"];
         let content = &result["content"];
-        assert!(
-            content.is_array(),
-            "Expected content array, got: {}",
-            resp
-        );
+        assert!(content.is_array(), "Expected content array, got: {}", resp);
     }
 
     proc.shutdown();
@@ -489,22 +485,14 @@ fn mcp_tool_call_cleanup_merged_agents() {
     let dir = setup_test_dir();
     let mut proc = spawn_initialized(dir.path());
 
-    let resp = proc.call(tool_call_request(
-        5,
-        "cleanup_merged_agents",
-        json!({}),
-    ));
+    let resp = proc.call(tool_call_request(5, "cleanup_merged_agents", json!({})));
 
     // Fresh repo has no merged branches — should succeed with empty result
     let has_jsonrpc_error = resp.get("error").is_some() && !resp["error"].is_null();
     if !has_jsonrpc_error {
         let result = &resp["result"];
         let content = &result["content"];
-        assert!(
-            content.is_array(),
-            "Expected content array, got: {}",
-            resp
-        );
+        assert!(content.is_array(), "Expected content array, got: {}", resp);
     }
 
     proc.shutdown();
@@ -516,11 +504,7 @@ fn mcp_invalid_tool_returns_error() {
     let dir = setup_test_dir();
     let mut proc = spawn_initialized(dir.path());
 
-    let resp = proc.call(tool_call_request(
-        7,
-        "nonexistent_tool_xyz",
-        json!({}),
-    ));
+    let resp = proc.call(tool_call_request(7, "nonexistent_tool_xyz", json!({})));
 
     assert_tool_error(&resp);
 
@@ -888,7 +872,10 @@ fn mcp_large_numeric_id() {
         "params": {}
     }));
 
-    assert_eq!(resp["id"], 999999999, "Response should echo large numeric ID");
+    assert_eq!(
+        resp["id"], 999999999,
+        "Response should echo large numeric ID"
+    );
 
     proc.shutdown();
 }
@@ -1000,11 +987,7 @@ fn mcp_alternating_errors_and_successes() {
         assert_tool_success(&resp);
 
         // Error (unknown tool)
-        let resp = proc.call(tool_call_request(
-            61 + i * 2,
-            "nonexistent",
-            json!({}),
-        ));
+        let resp = proc.call(tool_call_request(61 + i * 2, "nonexistent", json!({})));
         assert_tool_error(&resp);
     }
 
@@ -1125,7 +1108,10 @@ fn mcp_spawn_agents_schema_has_required_fields() {
         .expect("spawn_agents should be in tool list");
 
     let schema = &spawn["inputSchema"];
-    assert_eq!(schema["type"], "object", "inputSchema type should be object");
+    assert_eq!(
+        schema["type"], "object",
+        "inputSchema type should be object"
+    );
 
     // Check required fields
     let required = schema["required"]
@@ -1159,11 +1145,7 @@ fn mcp_all_tools_have_descriptions() {
         let desc = tool["description"]
             .as_str()
             .expect(&format!("Tool '{}' should have string description", name));
-        assert!(
-            !desc.is_empty(),
-            "Tool '{}' has empty description",
-            name
-        );
+        assert!(!desc.is_empty(), "Tool '{}' has empty description", name);
     }
 
     proc.shutdown();
@@ -1213,7 +1195,10 @@ fn mcp_clean_shutdown() {
 
     // Close stdin → server should exit cleanly
     let status = proc.shutdown();
-    assert!(status.success(), "Server should exit with status 0 on stdin close");
+    assert!(
+        status.success(),
+        "Server should exit with status 0 on stdin close"
+    );
 }
 
 /// Double initialize doesn't crash (idempotent server startup).
@@ -1230,8 +1215,7 @@ fn mcp_double_initialize() {
 
     // Both should return same server info
     assert_eq!(
-        resp1["result"]["serverInfo"],
-        resp2["result"]["serverInfo"],
+        resp1["result"]["serverInfo"], resp2["result"]["serverInfo"],
         "Double initialize should return same serverInfo"
     );
 
@@ -1251,7 +1235,10 @@ fn mcp_tool_call_before_initialize() {
     let has_jsonrpc_error = resp.get("error").is_some() && !resp["error"].is_null();
     if has_jsonrpc_error {
         // If it errors, it should be a structured error, not a crash
-        assert!(resp["error"]["code"].is_number(), "Error should have numeric code");
+        assert!(
+            resp["error"]["code"].is_number(),
+            "Error should have numeric code"
+        );
     } else {
         // If it succeeds, should be normal tool response
         assert!(resp["result"].is_object(), "Expected result object");

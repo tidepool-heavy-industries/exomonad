@@ -1,4 +1,4 @@
-use crate::{ExternalService, ServiceError};
+use super::{ExternalService, ServiceError};
 use async_trait::async_trait;
 use exomonad_shared::domain::{ItemState, ReviewState};
 use exomonad_shared::protocol::{
@@ -182,7 +182,6 @@ fn state_to_item_state(state: octocrab::models::IssueState) -> ItemState {
         _ => ItemState::Unknown,
     }
 }
-
 
 #[async_trait]
 impl ExternalService for GitHubService {
@@ -1006,5 +1005,4 @@ mod tests {
             other => panic!("Expected Api error, got {:?}", other),
         }
     }
-
 }

@@ -85,10 +85,26 @@ macro_rules! validated_string {
 // String Newtypes
 // ============================================================================
 
-validated_string!(#[doc = "Session identifier (non-empty string)."] SessionId, "session_id");
-validated_string!(#[doc = "Tool name identifier (non-empty string)."] ToolName, "tool_name");
-validated_string!(#[doc = "GitHub repository owner (non-empty string)."] GithubOwner, "github_owner");
-validated_string!(#[doc = "GitHub repository name (non-empty string)."] GithubRepo, "github_repo");
+validated_string!(
+    #[doc = "Session identifier (non-empty string)."]
+    SessionId,
+    "session_id"
+);
+validated_string!(
+    #[doc = "Tool name identifier (non-empty string)."]
+    ToolName,
+    "tool_name"
+);
+validated_string!(
+    #[doc = "GitHub repository owner (non-empty string)."]
+    GithubOwner,
+    "github_owner"
+);
+validated_string!(
+    #[doc = "GitHub repository name (non-empty string)."]
+    GithubRepo,
+    "github_repo"
+);
 
 #[cfg(test)]
 impl SessionId {
@@ -282,18 +298,6 @@ impl<'de> Deserialize<'de> for ItemState {
             _ => Ok(Self::Unknown),
         }
     }
-}
-
-/// State of an item (Issue) in list - Uppercase (OPEN, CLOSED, UNKNOWN).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum UpperItemState {
-    /// Item is currently open.
-    Open,
-    /// Item is closed or merged.
-    Closed,
-    /// State could not be determined.
-    Unknown,
 }
 
 /// State of a GitHub Review.

@@ -20,7 +20,6 @@ pub mod domain;
 pub mod error;
 pub mod ffi;
 pub mod protocol;
-pub mod telemetry;
 
 // Utilities
 pub mod hooks;

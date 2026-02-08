@@ -124,10 +124,9 @@ impl EffectRegistry {
     ///
     /// Routes based on namespace prefix extracted from the effect type.
     pub async fn dispatch(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
-        let namespace = effect_type
-            .split('.')
-            .next()
-            .ok_or_else(|| EffectError::invalid_input("Effect type must contain namespace prefix"))?;
+        let namespace = effect_type.split('.').next().ok_or_else(|| {
+            EffectError::invalid_input("Effect type must contain namespace prefix")
+        })?;
 
         let handler = self
             .handlers
@@ -193,10 +192,7 @@ mod tests {
         registry.register_owned(TestHandler::new("test"));
 
         let payload = b"hello";
-        let result = registry
-            .dispatch("test.do_thing", payload)
-            .await
-            .unwrap();
+        let result = registry.dispatch("test.do_thing", payload).await.unwrap();
 
         assert_eq!(result, payload);
     }
@@ -205,9 +201,7 @@ mod tests {
     async fn test_registry_not_found() {
         let registry = EffectRegistry::new();
 
-        let result = registry
-            .dispatch("unknown.effect", &[])
-            .await;
+        let result = registry.dispatch("unknown.effect", &[]).await;
 
         assert!(result.is_err());
         if let Err(EffectError::NotFound { resource }) = result {

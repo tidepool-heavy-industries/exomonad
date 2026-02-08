@@ -59,7 +59,10 @@ pub mod effects {
     include!(concat!(env!("OUT_DIR"), "/effect_modules.rs"));
 
     // Re-export common effect types (stable framework API)
-    pub use error::{Custom, EffectError, EffectEnvelope, EffectResponse, InvalidInput, NetworkError, NotFound, PermissionDenied, Timeout};
+    pub use error::{
+        Custom, EffectEnvelope, EffectError, EffectResponse, InvalidInput, NetworkError, NotFound,
+        PermissionDenied, Timeout,
+    };
 }
 
 // Re-export common types at crate root for convenience

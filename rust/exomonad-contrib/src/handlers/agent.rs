@@ -49,18 +49,15 @@ fn parse_issue_number(issue: &str) -> EffectResult<IssueNumber> {
     let n: u64 = issue
         .parse()
         .map_err(|_| EffectError::invalid_input(format!("Invalid issue number: {}", issue)))?;
-    IssueNumber::try_from(n)
-        .map_err(|e| EffectError::invalid_input(e.to_string()))
+    IssueNumber::try_from(n).map_err(|e| EffectError::invalid_input(e.to_string()))
 }
 
 fn parse_owner(owner: &str) -> EffectResult<GithubOwner> {
-    GithubOwner::try_from(owner.to_string())
-        .map_err(|e| EffectError::invalid_input(e.to_string()))
+    GithubOwner::try_from(owner.to_string()).map_err(|e| EffectError::invalid_input(e.to_string()))
 }
 
 fn parse_repo(repo: &str) -> EffectResult<GithubRepo> {
-    GithubRepo::try_from(repo.to_string())
-        .map_err(|e| EffectError::invalid_input(e.to_string()))
+    GithubRepo::try_from(repo.to_string()).map_err(|e| EffectError::invalid_input(e.to_string()))
 }
 
 #[async_trait]
@@ -212,9 +209,7 @@ fn service_info_to_proto(info: &AgentInfo) -> exomonad_proto::effects::agent::Ag
 
     let status = match info.status {
         crate::services::agent_control::AgentStatus::Running => AgentStatus::Running as i32,
-        crate::services::agent_control::AgentStatus::OrphanWorktree => {
-            AgentStatus::Stopped as i32
-        }
+        crate::services::agent_control::AgentStatus::OrphanWorktree => AgentStatus::Stopped as i32,
         crate::services::agent_control::AgentStatus::OrphanTab => AgentStatus::Stopped as i32,
     };
 

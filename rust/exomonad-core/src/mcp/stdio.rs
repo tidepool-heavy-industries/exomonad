@@ -1,7 +1,7 @@
-//! stdio MCP transport for Claude Code.
+//! stdio MCP transport.
 //!
 //! Implements JSON-RPC over stdin/stdout for the MCP protocol.
-//! Claude Code spawns this process and communicates via stdio.
+//! The MCP client spawns this process and communicates via stdio.
 
 use super::{tools, McpState, ToolDefinition};
 use anyhow::{Context, Result};

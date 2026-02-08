@@ -40,8 +40,9 @@ impl PopupEffects for PopupHandler {
         let components: Vec<serde_json::Value> = if req.components.is_empty() {
             Vec::new()
         } else {
-            serde_json::from_slice(&req.components)
-                .map_err(|e| EffectError::invalid_input(format!("Invalid components JSON: {}", e)))?
+            serde_json::from_slice(&req.components).map_err(|e| {
+                EffectError::invalid_input(format!("Invalid components JSON: {}", e))
+            })?
         };
 
         let input = PopupInput {
@@ -55,8 +56,9 @@ impl PopupEffects for PopupHandler {
             .show_popup(&input)
             .map_err(|e| EffectError::custom("popup_error", e.to_string()))?;
 
-        let values_bytes = serde_json::to_vec(&output.values)
-            .map_err(|e| EffectError::custom("popup_error", format!("Failed to serialize values: {}", e)))?;
+        let values_bytes = serde_json::to_vec(&output.values).map_err(|e| {
+            EffectError::custom("popup_error", format!("Failed to serialize values: {}", e))
+        })?;
 
         Ok(ShowPopupResponse {
             button: output.button,
