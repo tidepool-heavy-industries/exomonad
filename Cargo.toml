@@ -1,14 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
-    "exomonad-proto",
-    "exomonad-shared",
-    "exomonad-ui-protocol",
-    "exomonad",
-    "exomonad-core",
-    "exomonad-contrib",
-    "effector",
-    "zellij-gen",
+    "rust/exomonad-proto",
+    "rust/exomonad-shared",
+    "rust/exomonad-ui-protocol",
+    "rust/exomonad",
+    "rust/exomonad-core",
+    "rust/exomonad-contrib",
+    "rust/zellij-gen",
 ]
 
 [workspace.dependencies]

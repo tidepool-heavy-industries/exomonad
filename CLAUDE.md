@@ -106,8 +106,7 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 │   ├── exomonad-shared/CLAUDE.md   ← Shared types and protocols
 │   ├── exomonad-ui-protocol/CLAUDE.md ← Popup UI protocol types
 │   ├── exomonad-plugin/CLAUDE.md   ← Zellij WASM plugin (status + popups)
-│   ├── zellij-gen/CLAUDE.md        ← KDL layout generator
-│   └── effector/CLAUDE.md          ← Stateless IO executor
+│   └── zellij-gen/CLAUDE.md        ← KDL layout generator
 └── tools/CLAUDE.md             ← Root-level tools (micro-gastown, blast-radius)
 ```
 
@@ -124,7 +123,6 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 | Modify popup UI protocol | `rust/exomonad-ui-protocol/CLAUDE.md` |
 | Work on Zellij plugin | `rust/exomonad-plugin/CLAUDE.md` |
 | Modify KDL layout generation | `rust/zellij-gen/CLAUDE.md` |
-| Work on stateless IO executor | `rust/effector/CLAUDE.md` |
 | Define a graph, handlers, annotations | `haskell/dsl/core/CLAUDE.md` |
 | Work on LLM-level teaching infrastructure | `haskell/dsl/teaching/CLAUDE.md` |
 | Add or modify an effect interpreter | `haskell/effects/CLAUDE.md` |
@@ -328,7 +326,7 @@ just wasm tl
 just wasm dev
 
 # Rust sidecar only
-cd rust && cargo build -p exomonad
+cargo build -p exomonad
 ```
 
 **What `just install-all-dev` does:**
@@ -454,9 +452,10 @@ Task tracking via GitHub Issues.
 ## Building & Testing
 
 ```bash
-cabal build all            # Build everything
+cabal build all            # Build Haskell
+cargo test --workspace     # Rust tests (from repo root)
 just pre-commit            # Run all checks
-cabal test all             # Run tests
+cabal test all             # Haskell tests
 ```
 
 ## Architecture

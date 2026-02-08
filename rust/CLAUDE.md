@@ -80,10 +80,6 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 │   • External service clients: Anthropic, GitHub, Ollama, OTLP
 │   • register_builtin_handlers() for composing into RuntimeBuilder
 │
-├── effector/CLAUDE.md  ← Stateless IO executor
-│   • Cabal/Git/GH operations
-│   • Returns structured JSON
-│
 ├── exomonad-shared/CLAUDE.md  ← Shared types and utilities
 │   • protocol.rs: HookInput, HookOutput, MCPCallInput, MCPCallOutput
 │   • commands/hook.rs: handle_hook() implementation
@@ -109,7 +105,6 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 | exomonad-core | Library | Framework: EffectHandler, EffectRegistry, RuntimeBuilder, MCP server |
 | exomonad-contrib | Library | Built-in handlers (Git, GitHub, Agent, etc.) + services + external clients |
 | exomonad-proto | Library | Proto-generated types (prost) for FFI + effects |
-| [effector](effector/CLAUDE.md) | Binary | Stateless IO executor |
 | [exomonad-shared](exomonad-shared/CLAUDE.md) | Library | Shared types, protocols |
 | [exomonad-ui-protocol](exomonad-ui-protocol/CLAUDE.md) | Library | Popup UI protocol types |
 | [zellij-gen](zellij-gen/CLAUDE.md) | Binary | KDL layout generator |
@@ -119,10 +114,13 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 ## Quick Reference
 
 ### Building
+
+All `cargo` commands run from the repo root (workspace `Cargo.toml` lives there):
+
 ```bash
 cargo build --release                    # Build all crates
 cargo build -p exomonad                  # Build exomonad binary
-cargo test                               # Run all tests
+cargo test --workspace                   # Run all tests
 
 # Build WASM plugin (requires nix develop .#wasm)
 nix develop .#wasm -c wasm32-wasi-cabal build --project-file=cabal.project.wasm wasm-guest
@@ -216,6 +214,8 @@ Add to `.mcp.json` in project root:
 And ensure `.exomonad/config.toml` and/or `config.local.toml` exists.
 
 ## Testing
+
+All commands run from repo root:
 
 ```bash
 cargo test --workspace                  # All tests

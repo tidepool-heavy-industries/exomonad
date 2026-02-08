@@ -86,12 +86,12 @@ show-sha:
 # Format all code (Haskell + Rust)
 fmt:
     cd haskell && ormolu --mode inplace --ghc-opt -XImportQualifiedPost $(find . -name '*.hs' -not -path './vendor/*')
-    cd rust && cargo fmt
+    cargo fmt --all
 
 # Check formatting (no changes, exit 1 if unformatted)
 fmt-check:
     cd haskell && ormolu --mode check --ghc-opt -XImportQualifiedPost $(find . -name '*.hs' -not -path './vendor/*')
-    cd rust && cargo fmt --check
+    cargo fmt --all --check
 
 # Lint Haskell code
 lint:
@@ -100,11 +100,11 @@ lint:
 # Run all tests
 test:
     cabal test all
-    cd rust && cargo test
+    cargo test --workspace
 
 # Run fast tests only (for pre-push hook)
 test-fast:
-    cd rust && cargo test --workspace
+    cargo test --workspace
 
 # Pre-push checks (formatting + fast tests)
 pre-push: fmt-check test-fast
@@ -154,27 +154,21 @@ _install profile:
         LABEL="debug"
     fi
 
-    echo ">>> [1/5] Building Haskell WASM plugins (cabal cached if unchanged)..."
+    echo ">>> [1/4] Building Haskell WASM plugins (cabal cached if unchanged)..."
     just wasm-all
 
-    echo ">>> [2/5] Building Rust binary (${LABEL}, embeds WASM)..."
-    cd rust && cargo build ${CARGO_FLAGS} -p exomonad
-    cd ..
+    echo ">>> [2/4] Building Rust binary (${LABEL}, embeds WASM)..."
+    cargo build ${CARGO_FLAGS} -p exomonad
 
-    echo ">>> [3/5] Building Zellij plugin (wasm32-wasip1, ${LABEL})..."
+    echo ">>> [3/4] Building Zellij plugin (wasm32-wasip1, ${LABEL})..."
     cd rust/exomonad-plugin && cargo build ${CARGO_FLAGS} --target wasm32-wasip1
     cd ../..
 
-    echo ">>> [4/5] Building coordinator plugin (wasm32-wasip1, ${LABEL})..."
-    cd rust/exomonad-coordinator && cargo build ${CARGO_FLAGS} --target wasm32-wasip1
-    cd ../..
-
-    echo ">>> [5/5] Installing binaries..."
+    echo ">>> [4/4] Installing binaries..."
     mkdir -p ~/.cargo/bin
     mkdir -p ~/.config/zellij/plugins
-    cp "rust/target/${TARGET_DIR}/exomonad" ~/.cargo/bin/
+    cp "target/${TARGET_DIR}/exomonad" ~/.cargo/bin/
     cp "rust/exomonad-plugin/target/wasm32-wasip1/${TARGET_DIR}/exomonad-plugin.wasm" ~/.config/zellij/plugins/
-    cp "rust/exomonad-coordinator/target/wasm32-wasip1/${TARGET_DIR}/exomonad-coordinator.wasm" ~/.config/zellij/plugins/
 
     # macOS: remove quarantine and ad-hoc sign to avoid sandbox/Gatekeeper issues
     if [ "$(uname)" = "Darwin" ]; then
@@ -187,7 +181,6 @@ _install profile:
     echo "Installed:"
     ls -lh ~/.cargo/bin/exomonad
     ls -lh ~/.config/zellij/plugins/exomonad-plugin.wasm
-    ls -lh ~/.config/zellij/plugins/exomonad-coordinator.wasm
     ls -lh .exomonad/wasm/wasm-guest-*.wasm
 
 # Install everything: Rust binaries + WASM plugins (release build)
@@ -203,7 +196,7 @@ proto-gen-haskell:
 
 # Regenerate Rust proto types (part of normal cargo build)
 proto-gen-rust:
-    cd rust && cargo build -p exomonad-proto
+    cargo build -p exomonad-proto
 
 # Full proto regeneration
 proto-gen: proto-gen-haskell proto-gen-rust
@@ -214,8 +207,7 @@ proto-test:
     #!/usr/bin/env bash
     set -euo pipefail
     echo ">>> Running Rust proto wire format tests..."
-    cd rust && cargo test -p exomonad-proto
-    cd ..
+    cargo test -p exomonad-proto
     echo ">>> Running Haskell proto tests..."
     cabal test exomonad-proto || echo "No tests defined yet"
     echo ">>> Running proto wire format compatibility test..."
