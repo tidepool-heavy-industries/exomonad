@@ -14,6 +14,7 @@ default = ["runtime"]
 runtime = [
     "dep:async-trait",
     "dep:anyhow",
+    "dep:libc",
     "dep:clap",
     "dep:duct",
     "dep:prost",
@@ -46,6 +47,7 @@ serde_json = { workspace = true }
 # Runtime feature: workspace deps
 async-trait = { workspace = true, optional = true }
 anyhow = { workspace = true, optional = true }
+libc = { version = "0.2", optional = true }
 clap = { workspace = true, optional = true }
 duct = { workspace = true, optional = true }
 prost = { workspace = true, optional = true }
