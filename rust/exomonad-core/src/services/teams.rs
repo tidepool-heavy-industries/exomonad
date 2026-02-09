@@ -117,7 +117,10 @@ impl TeamsService {
         let lock_path = config_path.with_extension("json.lock");
 
         if !config_path.exists() {
-            debug!(team_name, "Team config does not exist, skipping unregistration");
+            debug!(
+                team_name,
+                "Team config does not exist, skipping unregistration"
+            );
             return Ok(());
         }
 
@@ -179,7 +182,10 @@ impl TeamsService {
         let mut retries = 0;
         while lock_path.exists() {
             if retries >= max_retries {
-                return Err(anyhow!("Timed out waiting for team config lock: {}", lock_path.display()));
+                return Err(anyhow!(
+                    "Timed out waiting for team config lock: {}",
+                    lock_path.display()
+                ));
             }
             sleep(Duration::from_millis(100)).await;
             retries += 1;
@@ -236,16 +242,17 @@ mod tests {
 
         // Mock home dir by overriding TeamsService methods or just test the logic with paths
         // Since we can't easily mock dirs::home_dir() in a clean way without refactoring,
-        // we'll test register_agent logic by manually calling the inner parts or 
+        // we'll test register_agent logic by manually calling the inner parts or
         // just assume it works if we can't easily mock home.
-        
+
         // Let's refactor TeamsService slightly to accept a base dir for testing if we wanted,
         // but for now let's just test that it correctly modifies a config file.
-        
-        let mut config: TeamConfig = serde_json::from_str(&fs::read_to_string(&config_path).await?)?;
+
+        let mut config: TeamConfig =
+            serde_json::from_str(&fs::read_to_string(&config_path).await?)?;
         let worktree_path = Path::new("/tmp/worktree");
         let joined_at = 123456789;
-        
+
         config.members.push(TeamMember {
             agent_id: format!("{}@{}", agent_name, team_name),
             name: agent_name.to_string(),
@@ -259,10 +266,10 @@ mod tests {
             color: "#ffffff".to_string(),
             prompt: "test prompt".to_string(),
         });
-        
+
         let content = serde_json::to_string_pretty(&config)?;
         fs::write(&config_path, content).await?;
-        
+
         let read_back: TeamConfig = serde_json::from_str(&fs::read_to_string(&config_path).await?)?;
         assert_eq!(read_back.members.len(), 1);
         assert_eq!(read_back.members[0].name, agent_name);

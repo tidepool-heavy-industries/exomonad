@@ -92,6 +92,8 @@ library wasm-guest-internal
         -- Types
         ExoMonad.Guest.Types
         ExoMonad.Types
+        -- Permissions
+        ExoMonad.Permissions
     -- Additional dependencies (shared stanza provides common deps)
     build-depends:
         exomonad-pdk,

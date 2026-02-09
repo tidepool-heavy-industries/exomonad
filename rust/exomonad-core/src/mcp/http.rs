@@ -3,10 +3,10 @@
 //! Implements JSON-RPC over HTTP using axum. Reuses the same `handle_request`
 //! dispatch logic as the stdio transport.
 
+use super::stdio::{handle_request, JsonRpcRequest, JsonRpcResponse};
 use super::McpState;
-use super::stdio::{JsonRpcRequest, JsonRpcResponse, handle_request};
 use anyhow::Result;
-use axum::{Json, Router, extract::State};
+use axum::{extract::State, Json, Router};
 use serde_json::json;
 use std::sync::Arc;
 use tokio::net::TcpListener;

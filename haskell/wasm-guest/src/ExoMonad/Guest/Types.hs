@@ -11,6 +11,7 @@ module ExoMonad.Guest.Types
     StopHookOutput (..),
     StopDecision (..),
     allowResponse,
+    denyResponse,
     allowStopResponse,
     blockStopResponse,
   )
@@ -143,6 +144,23 @@ allowResponse reason =
           PreToolUseOutput
             { permissionDecision = "allow",
               permissionDecisionReason = reason,
+              updatedInput = Nothing
+            }
+    }
+
+-- | Create a "deny" response for PreToolUse hooks.
+denyResponse :: Text -> HookOutput
+denyResponse msg =
+  HookOutput
+    { continue_ = False,
+      stopReason = Just msg,
+      suppressOutput = Nothing,
+      systemMessage = Nothing,
+      hookSpecificOutput =
+        Just $
+          PreToolUseOutput
+            { permissionDecision = "deny",
+              permissionDecisionReason = Just msg,
               updatedInput = Nothing
             }
     }

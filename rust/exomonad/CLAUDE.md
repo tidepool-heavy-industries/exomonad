@@ -15,7 +15,7 @@ Two WASM loading modes:
 Claude Code → exomonad mcp-stdio → Embedded WASM → effects → I/O
 
 # HTTP mode (multi-agent, hot-reloadable WASM)
-N agents → exomonad serve --port 7432 → File WASM (auto-reload) → effects → I/O
+N agents → exomonad serve → Unix socket (.exomonad/server.sock) → File WASM (auto-reload) → effects → I/O
 ```
 
 ### Hook Mode
@@ -36,7 +36,8 @@ Claude Code → stdio → exomonad mcp-stdio → WASM handle_mcp_call → Result
 
 For multi-agent scenarios — one server, all agents connect:
 ```
-exomonad serve --port 7432
+exomonad serve [--socket PATH]
+    ├── Unix socket at .exomonad/server.sock (default)
     ├── POST /mcp → JSON-RPC (same dispatch as stdio)
     ├── GET /health → version info
     └── WASM hot-reloaded on mtime change per tool call
@@ -47,10 +48,20 @@ exomonad serve --port 7432
 ```bash
 exomonad hook pre-tool-use        # Handle Claude Code hook
 exomonad mcp-stdio                # Stdio MCP server (single session)
-exomonad serve [--port PORT]      # HTTP MCP server (multi-agent, hot reload)
+exomonad serve [--socket PATH]    # Unix socket MCP server (multi-agent, hot reload)
 exomonad recompile [--role ROLE]  # Build WASM from Haskell source
-exomonad init [--session NAME]    # Initialize Zellij session
+exomonad init [--session NAME]    # Initialize Zellij session (Server tab + TL tab)
 ```
+
+### Init Command
+
+`exomonad init` creates a two-tab Zellij session:
+- **Server tab**: Runs `exomonad serve --socket .exomonad/server.sock` (stays open on exit)
+- **TL tab**: Runs `nix develop` for the dev environment (focused by default)
+
+It also writes `.mcp.json` pointing the TL role to the unix socket endpoint (`unix://<abs-path>/tl/mcp`).
+
+Use `--recreate` to delete an existing session and create fresh (e.g., after binary updates).
 
 **Example `.exomonad/config.toml`:**
 ```toml

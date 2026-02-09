@@ -39,6 +39,8 @@ runtime = [
     "dep:thiserror",
     "dep:axum",
     "dep:tower-http",
+    "dep:rmcp",
+    "dep:futures-util",
 ]
 
 [dependencies]
@@ -82,6 +84,10 @@ url = { version = "2", optional = true }
 # Runtime feature: HTTP transport
 axum = { version = "0.8", optional = true }
 tower-http = { version = "0.6", features = ["cors"], optional = true }
+
+# Runtime feature: MCP SDK
+rmcp = { version = "0.14", features = ["server", "transport-io", "transport-streamable-http-server"], optional = true }
+futures-util = { version = "0.3", optional = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }

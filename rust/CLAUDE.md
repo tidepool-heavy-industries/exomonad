@@ -126,8 +126,8 @@ nix develop .#wasm -c wasm32-wasi-cabal build --project-file=cabal.project.wasm 
 # MCP stdio server (Claude Code spawns this)
 exomonad mcp-stdio
 
-# MCP HTTP server (for testing)
-exomonad mcp --port 7432
+# MCP HTTP server on Unix socket (for testing)
+exomonad serve
 
 # Handle Claude Code hook
 echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use

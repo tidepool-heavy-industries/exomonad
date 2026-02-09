@@ -326,8 +326,8 @@ just wasm dev
 # Rust sidecar only
 cargo build -p exomonad
 
-# Hot reload workflow (HTTP serve mode)
-exomonad serve --port 7432    # Start HTTP server, loads WASM from file
+# Hot reload workflow (HTTP serve mode, Unix socket)
+exomonad serve                # Start server on .exomonad/server.sock
 # ... edit .exomonad/roles/tl/Role.hs ...
 exomonad recompile --role tl  # Rebuild WASM via nix, copy to .exomonad/wasm/
 # Next tool call picks up new WASM automatically

@@ -218,9 +218,9 @@ impl RuntimeBuilder {
         let plugin_manager = if let Some(path) = self.wasm_path {
             PluginManager::from_file(&path, registry.clone()).await?
         } else {
-            let wasm_bytes = self
-                .wasm_bytes
-                .ok_or_else(|| anyhow::anyhow!("WASM bytes not set — provide either wasm_bytes or wasm_path"))?;
+            let wasm_bytes = self.wasm_bytes.ok_or_else(|| {
+                anyhow::anyhow!("WASM bytes not set — provide either wasm_bytes or wasm_path")
+            })?;
             PluginManager::new(&wasm_bytes, registry.clone()).await?
         };
 
@@ -274,6 +274,7 @@ impl Runtime {
         mcp::McpState {
             project_dir,
             plugin: Arc::new(self.plugin_manager),
+            role: None,
         }
     }
 }

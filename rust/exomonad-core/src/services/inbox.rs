@@ -58,7 +58,7 @@ where
     };
 
     let mut fl: libc::flock = unsafe { std::mem::zeroed() };
-    fl.l_type = lock_type as i16;
+    fl.l_type = lock_type;
     fl.l_whence = libc::SEEK_SET as i16;
     fl.l_start = 0;
     fl.l_len = 0; // Lock entire file
@@ -74,7 +74,7 @@ where
     let result = f();
 
     // Unlock
-    fl.l_type = libc::F_UNLCK as i16;
+    fl.l_type = libc::F_UNLCK;
     unsafe { libc::fcntl(fd, libc::F_SETLK, &fl) };
 
     result
@@ -304,11 +304,7 @@ mod tests {
             let path = Arc::clone(&path);
             handles.push(thread::spawn(move || {
                 for i in 0..msgs_per_thread {
-                    let msg = create_message(
-                        format!("thread-{}", t),
-                        format!("msg-{}", i),
-                        None,
-                    );
+                    let msg = create_message(format!("thread-{}", t), format!("msg-{}", i), None);
                     append_message(&path, &msg).unwrap();
                 }
             }));

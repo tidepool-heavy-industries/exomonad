@@ -10,7 +10,7 @@ use exomonad::config;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use exomonad_core::mcp;
+use exomonad_core::mcp::handler::ExomonadHandler;
 use exomonad_core::protocol::{Runtime as HookRuntime, ServiceRequest};
 use exomonad_core::services::external::otel::OtelService;
 use exomonad_core::services::external::ExternalService;
@@ -19,6 +19,7 @@ use exomonad_core::{
     ClaudePreToolUseOutput, HookEventType, HookInput, HookSpecificOutput, InternalStopHookOutput,
     PluginManager, Runtime, RuntimeBuilder, Services, StopDecision, ToolPermission,
 };
+use rmcp::ServiceExt;
 use std::collections::HashMap;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
@@ -84,10 +85,11 @@ enum Commands {
     ///
     /// Loads WASM from file path (not embedded) with hot reload on change.
     /// All MCP tools work identically to stdio mode.
+    /// Listens on a Unix socket (default: .exomonad/server.sock).
     Serve {
-        /// Port to listen on (default: 7432, override via EXOMONAD_PORT env var)
+        /// Unix socket path (default: .exomonad/server.sock, relative to project_dir)
         #[arg(long)]
-        port: Option<u16>,
+        socket: Option<String>,
     },
 
     /// Reply to a UI request (sent by Zellij plugin)
@@ -385,20 +387,27 @@ async fn handle_hook(
 /// - No session → create fresh from layout
 ///
 /// With `--recreate`: delete any existing session (even alive), then create fresh.
+///
+/// On fresh creation, writes `.mcp.json` for the TL role pointing to the
+/// unix socket endpoint at `/tl/mcp`.
 fn run_init(session_override: Option<String>, recreate: bool) -> Result<()> {
     // Preflight: warn if XDG_RUNTIME_DIR missing (SSH edge case)
     if std::env::var("XDG_RUNTIME_DIR").is_err() {
         eprintln!("Warning: XDG_RUNTIME_DIR not set. Zellij may fail to find sessions.");
     }
 
-    // Resolve session: override takes priority, then config
-    let session = match session_override {
-        Some(s) => s,
-        None => {
-            let config = config::Config::discover()?;
-            config.zellij_session
-        }
+    // Resolve config
+    let config = config::Config::discover()?;
+    let session = session_override.unwrap_or(config.zellij_session);
+
+    let project_dir = if config.project_dir.is_absolute() {
+        config.project_dir.clone()
+    } else {
+        std::env::current_dir()?.join(&config.project_dir)
     };
+
+    let socket_rel = ".exomonad/server.sock";
+    let socket_abs = project_dir.join(socket_rel);
 
     // Query existing sessions
     let output = std::process::Command::new("zellij")
@@ -443,9 +452,12 @@ fn run_init(session_override: Option<String>, recreate: bool) -> Result<()> {
         }
     }
 
+    // Write .mcp.json for TL role pointing to unix socket
+    write_tl_mcp_json(&project_dir, &socket_abs)?;
+
     // Create fresh session from layout
     eprintln!("Creating session: {}", session);
-    let layout_path = generate_tl_layout()?;
+    let layout_path = generate_tl_layout(socket_rel)?;
 
     let err = std::process::Command::new("zellij")
         .arg("--session")
@@ -456,27 +468,60 @@ fn run_init(session_override: Option<String>, recreate: bool) -> Result<()> {
     Err(err).context("Failed to exec zellij with layout")
 }
 
-/// Generate a TL layout file for the init command.
+/// Write `.mcp.json` for the TL role, pointing to the unix socket MCP endpoint.
+fn write_tl_mcp_json(project_dir: &std::path::Path, socket_path: &std::path::Path) -> Result<()> {
+    let mcp_json_path = project_dir.join(".mcp.json");
+
+    let mcp_config = serde_json::json!({
+        "mcpServers": {
+            "exomonad": {
+                "url": format!("unix://{}/tl/mcp", socket_path.display())
+            }
+        }
+    });
+
+    let content = serde_json::to_string_pretty(&mcp_config)?;
+    std::fs::write(&mcp_json_path, &content)
+        .with_context(|| format!("Failed to write {}", mcp_json_path.display()))?;
+
+    eprintln!("Wrote {}", mcp_json_path.display());
+    Ok(())
+}
+
+/// Generate a two-tab TL layout: Server tab + TL tab.
 ///
-/// Uses `nix develop` to provide the development environment (GHC, Cabal, Rust, etc.).
-/// The template wraps this in a login shell (`$SHELL -l -c ...`) so profile-installed
-/// tools like `claude` remain available via PATH inheritance.
-fn generate_tl_layout() -> Result<std::path::PathBuf> {
+/// Tab 1 "Server": runs `exomonad serve` on unix socket, stays open on exit.
+/// Tab 2 "TL": runs `nix develop` for the dev environment, focused by default.
+fn generate_tl_layout(socket_path: &str) -> Result<std::path::PathBuf> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let cwd = std::env::current_dir()?;
 
-    let params = exomonad_core::layout::AgentTabParams {
-        tab_name: "TL",
-        pane_name: "Main",
-        command: "nix develop",
-        cwd: &cwd,
-        shell: &shell,
-        focus: true,
-        close_on_exit: false,
-        env: HashMap::new(),
-    };
+    let serve_command = format!("exomonad serve --socket {}", socket_path);
 
-    let layout = exomonad_core::layout::generate_agent_layout(&params)
+    let tabs = vec![
+        exomonad_core::layout::AgentTabParams {
+            tab_name: "Server",
+            pane_name: "exomonad-serve",
+            command: &serve_command,
+            cwd: &cwd,
+            shell: &shell,
+            focus: false,
+            close_on_exit: false,
+            env: HashMap::new(),
+        },
+        exomonad_core::layout::AgentTabParams {
+            tab_name: "TL",
+            pane_name: "Main",
+            command: "nix develop",
+            cwd: &cwd,
+            shell: &shell,
+            focus: true,
+            close_on_exit: false,
+            env: HashMap::new(),
+        },
+    ];
+
+    let layout = exomonad_core::layout::generate_main_layout(tabs)
         .context("Failed to generate TL layout")?;
 
     let layout_path = std::env::temp_dir().join("exomonad-tl-layout.kdl");
@@ -572,6 +617,138 @@ fn get_agent_id_from_env() -> String {
 }
 
 // ============================================================================
+// Per-Role MCP Service
+// ============================================================================
+
+/// Build a `StreamableHttpService` for a specific role.
+///
+/// Each role gets its own MCP endpoint with filtered tools:
+/// - "tl": all WASM tools + get_agent_messages + answer_question
+/// - "dev": WASM tools minus spawn_agents/cleanup_agents/list_agents
+fn build_role_mcp_service(
+    base_state: &exomonad_core::mcp::McpState,
+    role: &str,
+    ct: tokio_util::sync::CancellationToken,
+) -> rmcp::transport::streamable_http_server::StreamableHttpService<ExomonadHandler> {
+    let mut role_state = base_state.clone();
+    role_state.role = Some(role.to_string());
+    let role_state = Arc::new(role_state);
+    let role_str = role.to_string();
+
+    let mcp_config = rmcp::transport::streamable_http_server::StreamableHttpServerConfig {
+        cancellation_token: ct,
+        ..Default::default()
+    };
+
+    rmcp::transport::streamable_http_server::StreamableHttpService::new(
+        {
+            let state = role_state.clone();
+            move || {
+                let state = state.clone();
+                let role_str = role_str.clone();
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    // Hot reload: check if WASM changed before creating handler
+                    match state.plugin.reload_if_changed().await {
+                        Ok(true) => info!(role = %role_str, "WASM hot-reloaded for new session"),
+                        Ok(false) => {}
+                        Err(e) => warn!(role = %role_str, error = %e, "WASM reload check failed"),
+                    }
+                    ExomonadHandler::build((*state).clone()).await
+                })
+                .map_err(std::io::Error::other)
+            }
+        },
+        rmcp::transport::streamable_http_server::session::local::LocalSessionManager::default()
+            .into(),
+        mcp_config,
+    )
+}
+
+// ============================================================================
+// Unix Socket Helpers
+// ============================================================================
+
+/// Remove a stale Unix socket left behind by a crashed server.
+///
+/// Reads server.pid to get the PID of the previous server. If the process is
+/// dead (signal 0 fails), removes the socket file so we can rebind. If the
+/// process is still alive, bail with a clear error.
+fn cleanup_stale_socket(
+    socket_path: &std::path::Path,
+    server_pid_path: &std::path::Path,
+) -> Result<()> {
+    if !server_pid_path.exists() {
+        // No PID file — socket is orphaned, safe to remove
+        info!(socket = %socket_path.display(), "Removing orphaned socket (no server.pid)");
+        std::fs::remove_file(socket_path)?;
+        return Ok(());
+    }
+
+    let pid_content =
+        std::fs::read_to_string(server_pid_path).context("Failed to read server.pid")?;
+    let pid_json: serde_json::Value =
+        serde_json::from_str(&pid_content).context("Failed to parse server.pid as JSON")?;
+
+    let old_pid = pid_json["pid"]
+        .as_u64()
+        .context("server.pid missing 'pid' field")?;
+
+    // Check if the process is still alive via kill(pid, 0)
+    #[cfg(unix)]
+    {
+        use nix::sys::signal;
+        use nix::unistd::Pid;
+
+        let pid = Pid::from_raw(old_pid as i32);
+        match signal::kill(pid, None) {
+            Ok(_) => {
+                // Process is alive
+                anyhow::bail!(
+                    "Another exomonad server (PID {}) is already running on socket {}.\n\
+                     Kill it first or remove the socket manually.",
+                    old_pid,
+                    socket_path.display()
+                );
+            }
+            Err(nix::errno::Errno::ESRCH) => {
+                // Process is dead — clean up stale files
+                info!(
+                    old_pid,
+                    socket = %socket_path.display(),
+                    "Previous server is dead, removing stale socket"
+                );
+                std::fs::remove_file(socket_path)?;
+                let _ = std::fs::remove_file(server_pid_path);
+            }
+            Err(nix::errno::Errno::EPERM) => {
+                // Process exists but we can't signal it (different user)
+                anyhow::bail!(
+                    "Another process (PID {}) owns the socket {} but we lack permission to check it.\n\
+                     Remove the socket manually if you're sure no server is running.",
+                    old_pid,
+                    socket_path.display()
+                );
+            }
+            Err(e) => {
+                warn!(error = %e, "Unexpected error checking PID liveness, removing socket anyway");
+                std::fs::remove_file(socket_path)?;
+                let _ = std::fs::remove_file(server_pid_path);
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        warn!("PID liveness check not supported on this platform, removing socket");
+        std::fs::remove_file(socket_path)?;
+        let _ = std::fs::remove_file(server_pid_path);
+    }
+
+    Ok(())
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -601,16 +778,14 @@ async fn main() -> Result<()> {
     }
 
     // Handle serve before embedded WASM loading (serve uses file-based WASM, not embedded)
-    if let Commands::Serve { port } = &cli.command {
+    if let Commands::Serve { socket } = &cli.command {
         let project_dir = if config.project_dir.is_absolute() {
             config.project_dir.clone()
         } else {
             std::env::current_dir()?.join(&config.project_dir)
         };
 
-        let port = port
-            .or_else(|| std::env::var("EXOMONAD_PORT").ok().and_then(|p| p.parse().ok()))
-            .unwrap_or(7432);
+        let socket_path = project_dir.join(socket.as_deref().unwrap_or(".exomonad/server.sock"));
 
         let role_name = config.role.to_string();
         let wasm_path = project_dir.join(format!(".exomonad/wasm/wasm-guest-{}.wasm", role_name));
@@ -622,12 +797,23 @@ async fn main() -> Result<()> {
             );
         }
 
+        // Clean up stale socket if previous server died without cleanup
+        let server_pid_path = project_dir.join(".exomonad/server.pid");
+        if socket_path.exists() {
+            cleanup_stale_socket(&socket_path, &server_pid_path)?;
+        }
+
         info!(
             wasm_path = %wasm_path.display(),
-            port,
+            socket = %socket_path.display(),
             role = %role_name,
             "Starting HTTP MCP server with file-based WASM (hot reload enabled)"
         );
+
+        // Ensure parent directory exists for socket
+        if let Some(parent) = socket_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
 
         // Initialize services
         let services = Arc::new(
@@ -642,31 +828,65 @@ async fn main() -> Result<()> {
         let builder = exomonad_core::register_builtin_handlers(builder, &services);
         let rt = builder.build().await.context("Failed to build runtime")?;
 
-        let state = rt.into_mcp_state(project_dir.clone());
+        let base_state = rt.into_mcp_state(project_dir.clone());
 
-        // Write server.pid for client discovery
+        // Write server.pid for client discovery and stale socket detection
         let pid_info = serde_json::json!({
             "pid": std::process::id(),
-            "port": port,
+            "socket_path": socket_path.to_string_lossy(),
             "role": role_name,
         });
-        let server_pid_path = project_dir.join(".exomonad/server.pid");
         if let Some(parent) = server_pid_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(&server_pid_path, serde_json::to_string_pretty(&pid_info)?)?;
         info!(path = %server_pid_path.display(), "Wrote server.pid");
 
-        // Run HTTP server (blocks until shutdown)
-        let result = mcp::http::run_http_server(state, port).await;
+        // Build per-role MCP services: /tl/mcp gets orchestration tools, /dev/mcp gets agent tools
+        let ct = tokio_util::sync::CancellationToken::new();
 
-        // Clean up server.pid on shutdown
+        let tl_service = build_role_mcp_service(&base_state, "tl", ct.clone());
+        let dev_service = build_role_mcp_service(&base_state, "dev", ct.clone());
+
+        // Health endpoint alongside MCP
+        let health_handler = || async {
+            axum::Json(serde_json::json!({
+                "status": "ok",
+                "version": env!("CARGO_PKG_VERSION")
+            }))
+        };
+
+        let app = axum::Router::new()
+            .route("/health", axum::routing::get(health_handler))
+            .nest_service("/tl/mcp", tl_service)
+            .nest_service("/dev/mcp", dev_service);
+
+        let listener = tokio::net::UnixListener::bind(&socket_path)?;
+        info!(socket = %socket_path.display(), "HTTP MCP server listening on Unix socket (rmcp StreamableHttp)");
+
+        // Run with graceful shutdown
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                tokio::signal::ctrl_c()
+                    .await
+                    .expect("failed to install ctrl-c handler");
+                info!("Received ctrl-c, initiating graceful shutdown");
+                ct.cancel();
+            })
+            .await?;
+
+        // Clean up socket file and server.pid on shutdown
+        if socket_path.exists() {
+            let _ = std::fs::remove_file(&socket_path);
+            info!(socket = %socket_path.display(), "Cleaned up Unix socket");
+        }
         if server_pid_path.exists() {
             let _ = std::fs::remove_file(&server_pid_path);
             info!("Cleaned up server.pid");
         }
 
-        return result;
+        info!("HTTP MCP server shut down");
+        return Ok(());
     }
 
     // Load embedded WASM for the configured role
@@ -736,7 +956,19 @@ async fn main() -> Result<()> {
                 Err(e) => warn!("Invalid agent_id '{}': {}", agent_id, e),
             }
 
-            mcp::stdio::run_stdio_server(state).await?;
+            let handler = ExomonadHandler::build(state)
+                .await
+                .context("Failed to build MCP handler")?;
+            info!("MCP handler built, starting stdio server");
+
+            let server = handler
+                .serve(rmcp::transport::stdio())
+                .await
+                .map_err(|e| anyhow::anyhow!("MCP stdio server failed to start: {}", e))?;
+            server
+                .waiting()
+                .await
+                .map_err(|e| anyhow::anyhow!("MCP stdio server error: {}", e))?;
 
             // Emit AgentStopped
             // Re-fetch branch as it might have changed

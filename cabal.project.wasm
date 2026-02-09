@@ -14,6 +14,7 @@ packages:
     haskell/vendor/proto3-wire
     .exomonad/roles/tl
     .exomonad/roles/dev
+    .exomonad/roles/unified
 
 -- Global settings for static-only build
 -- Note: 'shared: True' is REQUIRED for Template Haskell (GHC 9.12 WASM)

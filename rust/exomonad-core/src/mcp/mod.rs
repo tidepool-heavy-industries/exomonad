@@ -8,6 +8,9 @@ pub mod stdio;
 pub mod tools;
 
 #[cfg(feature = "runtime")]
+pub mod handler;
+
+#[cfg(feature = "runtime")]
 pub mod http;
 
 use crate::PluginManager;
@@ -28,6 +31,9 @@ pub struct McpState {
     /// WASM plugin for routing tool calls through Haskell.
     /// All tool calls are routed through handle_mcp_call in WASM.
     pub plugin: Arc<PluginManager>,
+    /// Role for this MCP endpoint (e.g. "tl" or "dev").
+    /// Controls which tools are exposed. None means all tools.
+    pub role: Option<String>,
 }
 
 // ============================================================================

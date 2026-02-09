@@ -68,11 +68,6 @@ impl AgentEffects for AgentHandler {
             owner: parse_owner(&req.owner)?,
             repo: parse_repo(&req.repo)?,
             agent_type: convert_agent_type(req.agent_type()),
-            worktree_dir: if req.worktree_dir.is_empty() {
-                None
-            } else {
-                Some(req.worktree_dir.clone())
-            },
             subrepo: if req.subrepo.is_empty() {
                 None
             } else {
@@ -109,11 +104,6 @@ impl AgentEffects for AgentHandler {
                 owner: parse_owner(&req.owner)?,
                 repo: parse_repo(&req.repo)?,
                 agent_type,
-                worktree_dir: if req.worktree_dir.is_empty() {
-                    None
-                } else {
-                    Some(req.worktree_dir.clone())
-                },
                 subrepo: if req.subrepo.is_empty() {
                     None
                 } else {
@@ -138,7 +128,11 @@ impl AgentEffects for AgentHandler {
             Some(req.subrepo.as_str())
         };
 
-        match self.service.cleanup_agent(&req.issue, req.force, subrepo).await {
+        match self
+            .service
+            .cleanup_agent(&req.issue, req.force, subrepo)
+            .await
+        {
             Ok(_) => Ok(CleanupResponse {
                 success: true,
                 error: String::new(),
@@ -157,7 +151,10 @@ impl AgentEffects for AgentHandler {
             Some(req.subrepo.as_str())
         };
 
-        let result = self.service.cleanup_agents(&req.issues, req.force, subrepo).await;
+        let result = self
+            .service
+            .cleanup_agents(&req.issues, req.force, subrepo)
+            .await;
 
         let failed_ids: Vec<String> = result.failed.iter().map(|(id, _)| id.clone()).collect();
         let errors: Vec<String> = result.failed.iter().map(|(_, err)| err.clone()).collect();
@@ -220,8 +217,8 @@ fn spawn_result_to_proto(
     exomonad_proto::effects::agent::AgentInfo {
         id: format!("{}-{}", issue, result.agent_type),
         issue: issue.to_string(),
-        worktree_path: result.worktree_path.clone(),
-        branch_name: result.branch_name.clone(),
+        worktree_path: result.agent_dir.clone(),
+        branch_name: String::new(),
         agent_type: if result.agent_type == "claude" {
             AgentType::Claude as i32
         } else {
@@ -245,15 +242,14 @@ fn service_info_to_proto(info: &AgentInfo) -> exomonad_proto::effects::agent::Ag
 
     let status = match info.status {
         crate::services::agent_control::AgentStatus::Running => AgentStatus::Running as i32,
-        crate::services::agent_control::AgentStatus::OrphanWorktree => AgentStatus::Stopped as i32,
-        crate::services::agent_control::AgentStatus::OrphanTab => AgentStatus::Stopped as i32,
+        crate::services::agent_control::AgentStatus::Stopped => AgentStatus::Stopped as i32,
     };
 
     exomonad_proto::effects::agent::AgentInfo {
         id: info.issue_id.clone(),
         issue: info.issue_id.clone(),
-        worktree_path: info.worktree_path.clone().unwrap_or_default(),
-        branch_name: info.branch_name.clone().unwrap_or_default(),
+        worktree_path: info.agent_dir.clone().unwrap_or_default(),
+        branch_name: String::new(),
         agent_type,
         role: 0,
         status,

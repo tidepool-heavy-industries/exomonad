@@ -19,17 +19,49 @@ use tracing::{debug, error, info};
 /// Input for WASM handle_mcp_call function.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct MCPCallInput {
+pub struct MCPCallInput {
     tool_name: String,
     tool_args: Value,
 }
 
+impl MCPCallInput {
+    pub fn new(tool_name: String, tool_args: Value) -> Self {
+        Self {
+            tool_name,
+            tool_args,
+        }
+    }
+}
+
 /// Output from WASM handle_mcp_call function.
 #[derive(Debug, Deserialize)]
-struct MCPCallOutput {
-    success: bool,
-    result: Option<Value>,
-    error: Option<String>,
+pub struct MCPCallOutput {
+    pub success: bool,
+    pub result: Option<Value>,
+    pub error: Option<String>,
+}
+
+#[cfg(feature = "runtime")]
+impl MCPCallOutput {
+    /// Convert to rmcp `CallToolResult`.
+    pub fn into_call_tool_result(self) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
+        if self.success {
+            let text = self
+                .result
+                .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
+                .unwrap_or_default();
+            Ok(rmcp::model::CallToolResult::success(vec![
+                rmcp::model::Content::text(text),
+            ]))
+        } else {
+            let error_text = self
+                .error
+                .unwrap_or_else(|| "Unknown WASM error".to_string());
+            Ok(rmcp::model::CallToolResult::error(vec![
+                rmcp::model::Content::text(error_text),
+            ]))
+        }
+    }
 }
 
 // ============================================================================
@@ -125,17 +157,17 @@ pub fn tl_messaging_tool_definitions() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition {
             name: "get_agent_messages".to_string(),
-            description: "Read notes and pending questions from agent outboxes. Scans all agent worktrees (or a specific agent) for messages.".to_string(),
+            description: "Read notes and pending questions from agent outboxes. Scans all agents (or a specific agent) for messages.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "agent_id": {
                         "type": "string",
-                        "description": "Filter to a specific agent worktree name. If omitted, reads from all agents."
+                        "description": "Filter to a specific agent directory name. If omitted, reads from all agents."
                     },
                     "subrepo": {
                         "type": "string",
-                        "description": "Subrepo path (e.g. 'egregore/') to scope worktree scanning."
+                        "description": "Subrepo path (e.g. 'egregore/') to scope agent scanning."
                     }
                 }
             }),
@@ -148,7 +180,7 @@ pub fn tl_messaging_tool_definitions() -> Vec<ToolDefinition> {
                 "properties": {
                     "agent_id": {
                         "type": "string",
-                        "description": "The agent worktree name (e.g. 'gh-42-fix-bug-claude')."
+                        "description": "The agent directory name (e.g. 'gh-42-fix-bug-claude')."
                     },
                     "question_id": {
                         "type": "string",
@@ -194,9 +226,8 @@ async fn execute_get_agent_messages(state: &McpState, args: Value) -> Result<Val
     );
 
     if let Some(agent_id) = agent_id {
-        // Read from a specific agent
-        let worktree_dir = resolve_worktree_path(&state.project_dir, subrepo, agent_id);
-        let messages = messaging::read_agent_outbox(&worktree_dir)
+        let agent_dir = resolve_agent_path(&state.project_dir, subrepo, agent_id);
+        let messages = messaging::read_agent_outbox(&agent_dir)
             .await
             .map_err(|e| anyhow!("Failed to read agent outbox: {}", e))?;
 
@@ -206,7 +237,6 @@ async fn execute_get_agent_messages(state: &McpState, args: Value) -> Result<Val
             "messages": messages,
         }))
     } else {
-        // Scan all agents
         let results = messaging::scan_all_agent_messages(&state.project_dir, subrepo)
             .await
             .map_err(|e| anyhow!("Failed to scan agent messages: {}", e))?;
@@ -241,7 +271,7 @@ async fn execute_answer_question(state: &McpState, args: Value) -> Result<Value>
         .ok_or_else(|| anyhow!("answer is required"))?;
     let subrepo = args.get("subrepo").and_then(|v| v.as_str());
 
-    let worktree_dir = resolve_worktree_path(&state.project_dir, subrepo, agent_id);
+    let agent_dir = resolve_agent_path(&state.project_dir, subrepo, agent_id);
 
     info!(
         agent = %agent_id,
@@ -249,7 +279,7 @@ async fn execute_answer_question(state: &McpState, args: Value) -> Result<Value>
         "Answering question"
     );
 
-    messaging::write_agent_answer(&worktree_dir, question_id, answer)
+    messaging::write_agent_answer(&agent_dir, question_id, answer)
         .await
         .map_err(|e| anyhow!("Failed to write answer: {}", e))?;
 
@@ -261,8 +291,8 @@ async fn execute_answer_question(state: &McpState, args: Value) -> Result<Value>
     }))
 }
 
-/// Resolve the path to an agent's worktree directory.
-fn resolve_worktree_path(
+/// Resolve the path to an agent's directory.
+pub fn resolve_agent_path(
     project_dir: &std::path::Path,
     subrepo: Option<&str>,
     agent_id: &str,
@@ -271,7 +301,7 @@ fn resolve_worktree_path(
         Some(sub) => project_dir.join(sub),
         None => project_dir.to_path_buf(),
     };
-    base.join(".exomonad").join("worktrees").join(agent_id)
+    base.join(".exomonad").join("agents").join(agent_id)
 }
 
 #[cfg(test)]

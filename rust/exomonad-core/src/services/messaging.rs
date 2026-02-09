@@ -1,8 +1,8 @@
 //! Mailbox-based messaging service for agent↔TL communication.
 //!
-//! Messages flow through JSONL files in the agent's worktree:
-//! - `{worktree}/.exomonad/messages/outbox.jsonl` — agent writes, TL reads
-//! - `{worktree}/.exomonad/messages/inbox.jsonl` — TL writes, agent reads
+//! Messages flow through JSONL files in the agent's directory:
+//! - `{agent_dir}/.exomonad/messages/outbox.jsonl` — agent writes, TL reads
+//! - `{agent_dir}/.exomonad/messages/inbox.jsonl` — TL writes, agent reads
 //!
 //! Notes are fire-and-forget. Questions block until the TL writes an answer
 //! to the agent's inbox.
@@ -59,16 +59,16 @@ pub struct InboxAnswer {
     pub timestamp: String,
 }
 
-/// Messaging service for a single agent worktree.
+/// Messaging service for a single agent directory.
 pub struct MessagingService {
     messages_dir: PathBuf,
 }
 
 impl MessagingService {
-    /// Create a service rooted at a worktree directory.
-    pub fn new(worktree_dir: &Path) -> Self {
+    /// Create a service rooted at an agent directory.
+    pub fn new(agent_dir: &Path) -> Self {
         Self {
-            messages_dir: worktree_dir.join(".exomonad").join("messages"),
+            messages_dir: agent_dir.join(".exomonad").join("messages"),
         }
     }
 
@@ -199,9 +199,9 @@ impl MessagingService {
 // TL-side operations (read agent messages, answer questions)
 // ============================================================================
 
-/// Read all outbox messages from an agent worktree.
-pub async fn read_agent_outbox(worktree_dir: &Path) -> Result<Vec<OutboxMessage>, MessagingError> {
-    let outbox = worktree_dir
+/// Read all outbox messages from an agent directory.
+pub async fn read_agent_outbox(agent_dir: &Path) -> Result<Vec<OutboxMessage>, MessagingError> {
+    let outbox = agent_dir
         .join(".exomonad")
         .join("messages")
         .join("outbox.jsonl");
@@ -231,11 +231,11 @@ pub async fn read_agent_outbox(worktree_dir: &Path) -> Result<Vec<OutboxMessage>
 
 /// Write an answer to an agent's inbox.
 pub async fn write_agent_answer(
-    worktree_dir: &Path,
+    agent_dir: &Path,
     question_id: &str,
     answer: &str,
 ) -> Result<(), MessagingError> {
-    let messages_dir = worktree_dir.join(".exomonad").join("messages");
+    let messages_dir = agent_dir.join(".exomonad").join("messages");
     tokio::fs::create_dir_all(&messages_dir).await?;
 
     let inbox = messages_dir.join("inbox.jsonl");
@@ -248,7 +248,7 @@ pub async fn write_agent_answer(
     let mut line = serde_json::to_string(&entry)?;
     line.push('\n');
 
-    tracing::info!(question_id = %question_id, worktree = %worktree_dir.display(), "Writing answer to agent inbox");
+    tracing::info!(question_id = %question_id, agent_dir = %agent_dir.display(), "Writing answer to agent inbox");
 
     tokio::fs::OpenOptions::new()
         .create(true)
@@ -261,22 +261,22 @@ pub async fn write_agent_answer(
     Ok(())
 }
 
-/// Scan all agent worktrees and collect their outbox messages.
+/// Scan all agent directories and collect their outbox messages.
 pub async fn scan_all_agent_messages(
     project_dir: &Path,
     subrepo: Option<&str>,
 ) -> Result<Vec<(String, Vec<OutboxMessage>)>, MessagingError> {
-    let worktrees_dir = match subrepo {
-        Some(sub) => project_dir.join(sub).join(".exomonad").join("worktrees"),
-        None => project_dir.join(".exomonad").join("worktrees"),
+    let agents_dir = match subrepo {
+        Some(sub) => project_dir.join(sub).join(".exomonad").join("agents"),
+        None => project_dir.join(".exomonad").join("agents"),
     };
 
-    if !worktrees_dir.exists() {
+    if !agents_dir.exists() {
         return Ok(Vec::new());
     }
 
     let mut results = Vec::new();
-    let mut entries = tokio::fs::read_dir(&worktrees_dir).await?;
+    let mut entries = tokio::fs::read_dir(&agents_dir).await?;
 
     while let Some(entry) = entries.next_entry().await? {
         if !entry.file_type().await?.is_dir() {
@@ -284,9 +284,9 @@ pub async fn scan_all_agent_messages(
         }
 
         let agent_id = entry.file_name().to_string_lossy().to_string();
-        let worktree_path = entry.path();
+        let agent_path = entry.path();
 
-        match read_agent_outbox(&worktree_path).await {
+        match read_agent_outbox(&agent_path).await {
             Ok(messages) if !messages.is_empty() => {
                 results.push((agent_id, messages));
             }
@@ -392,11 +392,11 @@ mod tests {
     async fn test_scan_all_with_agents() {
         let dir = TempDir::new().unwrap();
 
-        // Create a fake agent worktree with a message
+        // Create a fake agent directory with a message
         let agent_dir = dir
             .path()
             .join(".exomonad")
-            .join("worktrees")
+            .join("agents")
             .join("gh-42-fix-bug-claude");
         let svc = MessagingService::new(&agent_dir);
         svc.send_note("found the bug").await.unwrap();

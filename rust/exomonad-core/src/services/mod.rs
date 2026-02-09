@@ -150,7 +150,6 @@ impl Services {
         let agent_control = Arc::new(AgentControlService::new(
             project_dir.clone(),
             github.clone(),
-            GitService::new(executor.clone()),
         ));
 
         // Filesystem service for file read/write operations

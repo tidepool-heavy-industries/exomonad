@@ -55,6 +55,26 @@ Shared code across roles lives in `.exomonad/lib/` (e.g., `StopHook.hs`).
 5. Rust binary embeds WASM at compile time (`include_bytes!`) for stdio mode
 6. HTTP serve mode (`exomonad serve`) loads from file path with hot reload on mtime change
 
+### Unified WASM (HTTP-Native)
+
+For the HTTP server mode (`exomonad serve`), a unified WASM module contains all roles:
+
+```
+.exomonad/roles/unified/
+├── AllRoles.hs     # Role registry: Map Text SomeRoleConfig
+├── TLRole.hs       # TL role config (re-exported under unique module name)
+├── DevRole.hs      # Dev role config (uses httpDevHooks with permission cascade)
+├── Main.hs         # FFI exports that read role from input JSON
+└── unified.cabal   # Package definition
+```
+
+Key types:
+- `AllRoles.SomeRoleConfig` — captures dispatch, listing, and hook capabilities for any role
+- `AllRoles.lookupRole` — look up role by name from the registry
+- `ExoMonad.Permissions` — typed permission ADTs for the three-tier cascade
+
+The unified WASM is additive — individual tl/dev packages still build independently.
+
 ### Role Anatomy
 
 Each role is a `RoleConfig` selecting from pre-built tool records:

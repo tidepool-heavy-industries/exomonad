@@ -111,7 +111,9 @@ impl PluginManager {
             .with_context(|| format!("Failed to stat WASM file: {}", path.display()))?;
 
         let stored_mtime = {
-            let guard = self.last_mtime.read()
+            let guard = self
+                .last_mtime
+                .read()
                 .map_err(|e| anyhow::anyhow!("mtime lock poisoned: {}", e))?;
             *guard
         };
@@ -123,7 +125,9 @@ impl PluginManager {
         // File changed — reload
         let start = Instant::now();
         let old_hash = {
-            let guard = self.content_hash.read()
+            let guard = self
+                .content_hash
+                .read()
                 .map_err(|e| anyhow::anyhow!("hash lock poisoned: {}", e))?;
             guard.clone()
         };
@@ -143,17 +147,23 @@ impl PluginManager {
 
         // Atomic swap
         {
-            let mut plugin_guard = self.plugin.write()
+            let mut plugin_guard = self
+                .plugin
+                .write()
                 .map_err(|e| anyhow::anyhow!("plugin lock poisoned: {}", e))?;
             *plugin_guard = new_plugin;
         }
         {
-            let mut hash_guard = self.content_hash.write()
+            let mut hash_guard = self
+                .content_hash
+                .write()
                 .map_err(|e| anyhow::anyhow!("hash lock poisoned: {}", e))?;
             *hash_guard = new_hash.clone();
         }
         {
-            let mut mtime_guard = self.last_mtime.write()
+            let mut mtime_guard = self
+                .last_mtime
+                .write()
                 .map_err(|e| anyhow::anyhow!("mtime lock poisoned: {}", e))?;
             *mtime_guard = Some(current_mtime);
         }
@@ -173,7 +183,8 @@ impl PluginManager {
 
     /// Get the SHA256 content hash of the loaded WASM binary (first 12 hex chars).
     pub fn content_hash(&self) -> String {
-        self.content_hash.read()
+        self.content_hash
+            .read()
             .map(|g| g.clone())
             .unwrap_or_else(|_| "unknown".to_string())
     }
