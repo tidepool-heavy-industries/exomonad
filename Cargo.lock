@@ -922,6 +922,7 @@ dependencies = [
  "extism",
  "extism-convert",
  "libc",
+ "nix",
  "octocrab",
  "ollama-rs",
  "proptest",
