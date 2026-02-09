@@ -26,8 +26,11 @@ message SendNoteResponse {
 message SendQuestionRequest {
   // Question content (plain text).
   string question = 1;
+  // Reserved for the removed context field to preserve wire compatibility.
+  reserved 2;
+  reserved "context";
   // Team name for delivery.
-  string team_name = 2;
+  string team_name = 3;
 }
 
 message SendQuestionResponse {

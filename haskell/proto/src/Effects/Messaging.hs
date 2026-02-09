@@ -168,7 +168,7 @@ instance (HsProtobuf.Message SendQuestionRequest) where
            ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
               sendQuestionRequestQuestion))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 2)
+           (HsProtobuf.FieldNumber 3)
            ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
               sendQuestionRequestTeamName))
   decodeMessage _
@@ -180,29 +180,29 @@ instance (HsProtobuf.Message SendQuestionRequest) where
         <*>
           ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
              (HsProtobuf.at
-                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 2)))
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 3)))
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
          (HsProtobufAST.Prim HsProtobufAST.String)
          (HsProtobufAST.Single "question") [] "",
        HsProtobufAST.DotProtoField
-         (HsProtobuf.FieldNumber 2)
+         (HsProtobuf.FieldNumber 3)
          (HsProtobufAST.Prim HsProtobufAST.String)
          (HsProtobufAST.Single "team_name") [] ""]
 instance (HsJSONPB.ToJSONPB SendQuestionRequest) where
-  toJSONPB (SendQuestionRequest f1 f2)
+  toJSONPB (SendQuestionRequest f1 f3)
     = HsJSONPB.object
         ["question"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "team_name"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
-  toEncodingPB (SendQuestionRequest f1 f2)
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
+  toEncodingPB (SendQuestionRequest f1 f3)
     = HsJSONPB.pairs
         ["question"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "team_name"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
 instance (HsJSONPB.FromJSONPB SendQuestionRequest) where
   parseJSONPB
     = HsJSONPB.withObject
