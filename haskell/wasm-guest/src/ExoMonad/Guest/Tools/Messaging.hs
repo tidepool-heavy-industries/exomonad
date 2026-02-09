@@ -27,11 +27,12 @@ import GHC.Generics (Generic)
 -- Note
 -- ============================================================================
 
--- | Fire-and-forget note from agent to TL.
+-- | Fire-and-forget note from agent to TL. Delivered via Teams inbox.
 data Note
 
 data NoteArgs = NoteArgs
-  { naContent :: Text
+  { naContent :: Text,
+    naTeamName :: Text
   }
   deriving (Show, Eq, Generic)
 
@@ -39,27 +40,32 @@ instance FromJSON NoteArgs where
   parseJSON = Aeson.withObject "NoteArgs" $ \v ->
     NoteArgs
       <$> v .: "content"
+      <*> v .: "team_name"
 
 instance MCPTool Note where
   type ToolArgs Note = NoteArgs
   toolName = "note"
-  toolDescription = "Send a fire-and-forget note to the TL (e.g. FYI updates, progress reports)"
+  toolDescription = "Send a fire-and-forget note to the TL (e.g. FYI updates, progress reports). Delivered via Teams inbox."
   toolSchema =
     object
       [ "type" .= ("object" :: Text),
-        "required" .= (["content"] :: [Text]),
+        "required" .= (["content", "team_name"] :: [Text]),
         "properties"
           .= object
             [ "content"
                 .= object
                   [ "type" .= ("string" :: Text),
                     "description" .= ("Note content to send to the TL" :: Text)
+                  ],
+              "team_name"
+                .= object
+                  [ "type" .= ("string" :: Text),
+                    "description" .= ("The team name to send the note to" :: Text)
                   ]
             ]
       ]
   toolHandler args = do
-    let req = M.SendNoteRequest {M.sendNoteRequestContent = TL.fromStrict (naContent args)}
-    result <- Messaging.sendNote req
+    result <- Messaging.sendNote (naContent args) (naTeamName args)
     case result of
       Left err -> pure $ errorResult (TL.toStrict $ "Messaging effect failed: " <> TL.pack (show err))
       Right _resp -> pure $ successResult $ object ["ack" .= True]
@@ -68,12 +74,12 @@ instance MCPTool Note where
 -- Question
 -- ============================================================================
 
--- | Blocking question from agent to TL. Waits for the TL's answer.
+-- | Blocking question from agent to TL. Waits for the TL's answer. Delivered via Teams inbox.
 data Question
 
 data QuestionArgs = QuestionArgs
   { qaContent :: Text,
-    qaContext :: Maybe Text
+    qaTeamName :: Text
   }
   deriving (Show, Eq, Generic)
 
@@ -81,16 +87,16 @@ instance FromJSON QuestionArgs where
   parseJSON = Aeson.withObject "QuestionArgs" $ \v ->
     QuestionArgs
       <$> v .: "content"
-      <*> v .:? "context"
+      <*> v .: "team_name"
 
 instance MCPTool Question where
   type ToolArgs Question = QuestionArgs
   toolName = "question"
-  toolDescription = "Ask the TL a question and block until answered"
+  toolDescription = "Ask the TL a question and block until answered. Delivered via Teams inbox."
   toolSchema =
     object
       [ "type" .= ("object" :: Text),
-        "required" .= (["content"] :: [Text]),
+        "required" .= (["content", "team_name"] :: [Text]),
         "properties"
           .= object
             [ "content"
@@ -98,20 +104,15 @@ instance MCPTool Question where
                   [ "type" .= ("string" :: Text),
                     "description" .= ("Question to ask the TL" :: Text)
                   ],
-              "context"
+              "team_name"
                 .= object
                   [ "type" .= ("string" :: Text),
-                    "description" .= ("Optional additional context for the TL" :: Text)
+                    "description" .= ("The team name to send the question to" :: Text)
                   ]
             ]
       ]
   toolHandler args = do
-    let req =
-          M.SendQuestionRequest
-            { M.sendQuestionRequestContent = TL.fromStrict (qaContent args),
-              M.sendQuestionRequestContext = maybe "" TL.fromStrict (qaContext args)
-            }
-    result <- Messaging.sendQuestion req
+    result <- Messaging.sendQuestion (qaContent args) (qaTeamName args)
     case result of
       Left err -> pure $ errorResult (TL.toStrict $ "Messaging effect failed: " <> TL.pack (show err))
       Right resp -> pure $ successResult $ object ["answer" .= TL.toStrict (M.sendQuestionResponseAnswer resp)]

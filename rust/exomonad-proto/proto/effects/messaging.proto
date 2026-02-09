@@ -10,6 +10,8 @@ package exomonad.effects.messaging;
 message SendNoteRequest {
   // Note content (plain text).
   string content = 1;
+  // Team name for delivery.
+  string team_name = 2;
 }
 
 message SendNoteResponse {
@@ -23,9 +25,9 @@ message SendNoteResponse {
 
 message SendQuestionRequest {
   // Question content (plain text).
-  string content = 1;
-  // Optional additional context for the TL.
-  string context = 2;
+  string question = 1;
+  // Team name for delivery.
+  string team_name = 2;
 }
 
 message SendQuestionResponse {
