@@ -31,12 +31,48 @@ All Haskell packages live here.
 
 ## Role System
 
-Users define agent roles in Haskell, compiled to WASM:
+The xmonad pattern for LLM agents: users define agent roles in Haskell, compiled to WASM.
 
-- **Role Definitions**: User roles in `.exomonad/roles/`
-- **Tool Records**: Compose tools via `MCPTool` typeclass
-- **WASM Compilation**: Roles compiled to WASM, loaded by Rust sidecar
-- **Library**: `haskell/wasm-guest` provides the SDK
+### Directory Structure
+
+```
+.exomonad/roles/<role>/
+├── Role.hs          # User-authored: tool composition + hook config (TRACKED)
+├── Main.hs          # Generated: FFI exports wiring Role.config to WASM entry points (GITIGNORED)
+├── <role>.cabal     # Generated: cabal package with WASM linker flags (GITIGNORED)
+├── gen/             # Generated: alternate scaffolding for cabal.project.wasm (GITIGNORED)
+└── dist/            # Build output: compiled .wasm artifact (GITIGNORED)
+```
+
+Shared code across roles lives in `.exomonad/lib/` (e.g., `StopHook.hs`).
+
+### How It Works
+
+1. User writes `Role.hs` — a `RoleConfig` record selecting tools and hooks
+2. `cabal.project.wasm` lists `.exomonad/roles/tl` and `.exomonad/roles/dev` as packages
+3. `just wasm <role>` (or `exomonad recompile --role <role>`) builds via nix + wasm32-wasi-cabal
+4. Build output lands in `dist/`, then gets copied to `.exomonad/wasm/wasm-guest-<role>.wasm`
+5. Rust binary embeds WASM at compile time (`include_bytes!`) for stdio mode
+6. HTTP serve mode (`exomonad serve`) loads from file path with hot reload on mtime change
+
+### Role Anatomy
+
+Each role is a `RoleConfig` selecting from pre-built tool records:
+
+```haskell
+-- .exomonad/roles/tl/Role.hs
+data Tools mode = Tools
+  { agents :: AgentTools mode   -- spawn_agents, cleanup_agents, list_agents
+  , popups :: PopupTools mode   -- popup UI
+  } deriving Generic
+
+config :: RoleConfig (Tools AsHandler)
+config = RoleConfig { roleName = "tl", tools = Tools { ... }, hooks = defaultHooks }
+```
+
+The `mode` parameter enables the same record for both schema generation (`AsSchema`) and handler dispatch (`AsHandler`). See ADR-004 for the full design rationale.
+
+- **Library**: `haskell/wasm-guest` provides the SDK (`ExoMonad.Guest.Tool.Runtime`)
 
 ## Common Commands
 

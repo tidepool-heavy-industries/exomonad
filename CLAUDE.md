@@ -296,7 +296,10 @@ Hook configuration is **auto-generated per worktree** by `write_context_files()`
 }
 ```
 
-**Note:** WASM is embedded in the Rust binary at compile time via `include_bytes!`. The `role` field in config selects which embedded plugin to use. Ensure you have a config file:
+**Two WASM loading modes:**
+- **Embedded** (`include_bytes!`): WASM compiled into binary. Used by `exomonad mcp-stdio` and `exomonad hook`. Role selected via config.
+- **File-based** (`from_file`): WASM loaded from `.exomonad/wasm/`. Used by `exomonad serve`. Enables hot reload — mtime checked per tool call, new WASM swapped in transparently.
+
 ```toml
 default_role = "tl"  # or "dev"
 project_dir = "."
@@ -322,6 +325,12 @@ just wasm dev
 
 # Rust sidecar only
 cargo build -p exomonad
+
+# Hot reload workflow (HTTP serve mode)
+exomonad serve --port 7432    # Start HTTP server, loads WASM from file
+# ... edit .exomonad/roles/tl/Role.hs ...
+exomonad recompile --role tl  # Rebuild WASM via nix, copy to .exomonad/wasm/
+# Next tool call picks up new WASM automatically
 ```
 
 **What `just install-all-dev` does:**
@@ -330,7 +339,14 @@ cargo build -p exomonad
 3. Copies binary to `~/.cargo/bin/exomonad`
 4. Builds and installs Zellij plugins
 
-WASM and binary are always in sync — the binary IS the WASM. To update WASM, rebuild the Rust binary.
+**WASM build pipeline:**
+1. User-authored `Role.hs` in `.exomonad/roles/<role>/` defines tool composition
+2. Generated `Main.hs` and `<role>.cabal` provide FFI scaffolding (gitignored)
+3. `cabal.project.wasm` lists role packages alongside `wasm-guest` SDK
+4. `just wasm <role>` builds via `nix develop .#wasm -c wasm32-wasi-cabal build ...`
+5. Compiled WASM copied to `.exomonad/wasm/wasm-guest-<role>.wasm`
+6. For embedded mode: `build.rs` copies WASM into Rust binary via `include_bytes!`
+7. For serve mode: HTTP server loads directly from `.exomonad/wasm/` with hot reload
 
 ### MCP Tools
 

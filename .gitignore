@@ -33,6 +33,14 @@ cabal.project.wasm.dev
 .exomonad/wasm-cache
 .exomonad/wasm-cache.toml
 .exomonad/sidecar.pid
+.exomonad/server.pid
+
+# Role build artifacts (gen/ = generated scaffolding, dist/ = compiled WASM)
+# Source files (Role.hs, lib/) are tracked — see ADR-004
+.exomonad/roles/*/gen/
+.exomonad/roles/*/dist/
+.exomonad/roles/*/Main.hs
+.exomonad/roles/*/*.cabal
 rust/.exomonad/
 rust/exomonad/.exomonad/
 
