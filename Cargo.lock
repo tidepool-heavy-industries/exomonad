@@ -921,6 +921,7 @@ dependencies = [
  "exomonad-proto",
  "extism",
  "extism-convert",
+ "nix",
  "octocrab",
  "ollama-rs",
  "proptest",
