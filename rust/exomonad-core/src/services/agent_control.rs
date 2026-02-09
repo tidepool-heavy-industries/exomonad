@@ -120,6 +120,8 @@ pub struct SpawnOptions {
     /// Sub-repository path relative to project_dir (e.g., "egregore/").
     /// When set, git worktree operations target this directory instead of project_dir.
     pub subrepo: Option<String>,
+    /// Optional Claude Code Team name to register the agent in.
+    pub team_name: Option<String>,
 }
 
 /// Result of spawning an agent.
@@ -382,11 +384,35 @@ impl AgentControlService {
             // Keep internal_name for worktree/branch consistency
             let internal_name = format!("gh-{}-{}-{}", issue_id, slug, agent_suffix);
             let display_name = options.agent_type.display_name(&issue_id, &slug);
+
+            // Discover and register in Claude Code Team if applicable
+            let team_name = options.team_name.clone().or_else(|| std::env::var("CLAUDE_TEAM_NAME").ok());
+            if let Some(ref team) = team_name {
+                info!(team_name = %team, agent_name = %internal_name, "Registering agent in Claude Code Team");
+                if let Err(e) = super::teams::TeamsService::register_agent(
+                    team,
+                    &internal_name,
+                    &worktree_path,
+                    &issue.body,
+                ).await {
+                    warn!(error = %e, "Failed to register agent in Claude Code Team (non-fatal)");
+                }
+            }
+
+            let mut env_vars = HashMap::new();
+            if let Some(ref team) = team_name {
+                env_vars.insert("EXOMONAD_TEAM_NAME".to_string(), team.clone());
+                env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
+                // Also set CLAUDE_TEAM_NAME so the child agent knows its context
+                env_vars.insert("CLAUDE_TEAM_NAME".to_string(), team.clone());
+            }
+
             self.new_zellij_tab(
                 &display_name,
                 &worktree_path,
                 options.agent_type,
                 Some(&initial_prompt),
+                env_vars,
             )
             .await?;
 
@@ -493,6 +519,12 @@ impl AgentControlService {
                         }
 
                         self.delete_worktree(path, force, subrepo).await?;
+
+                        // Unregister from Claude Code Teams if applicable
+                        info!(agent_name = %name, "Unregistering agent from Claude Code Teams");
+                        if let Err(e) = super::teams::TeamsService::unregister_agent_from_all_teams(name).await {
+                            warn!(error = %e, "Failed to unregister agent from Claude Code Teams (non-fatal)");
+                        }
 
                         // Prune stale worktree references from git
                         self.prune_worktrees(subrepo).await?;
@@ -757,13 +789,14 @@ impl AgentControlService {
             .context("Not running inside a Zellij session (ZELLIJ_SESSION_NAME not set)")
     }
 
-    #[tracing::instrument(skip(self, prompt))]
+    #[tracing::instrument(skip(self, prompt, env_vars))]
     async fn new_zellij_tab(
         &self,
         name: &str,
         cwd: &Path,
         agent_type: AgentType,
         prompt: Option<&str>,
+        env_vars: HashMap<String, String>,
     ) -> Result<()> {
         info!(name, cwd = %cwd.display(), agent_type = ?agent_type, "Creating Zellij tab");
 
@@ -796,6 +829,7 @@ impl AgentControlService {
             shell: &shell,
             focus: true,
             close_on_exit: true,
+            env: env_vars,
         };
 
         let layout_content = crate::layout::generate_agent_layout(&params)
