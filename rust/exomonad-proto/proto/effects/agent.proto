@@ -115,6 +115,8 @@ message CleanupRequest {
   string issue = 1;
   // Force cleanup even with uncommitted changes.
   bool force = 2;
+  // Sub-repository path relative to project_dir.
+  string subrepo = 3;
 }
 
 message CleanupResponse {
@@ -133,6 +135,8 @@ message CleanupBatchRequest {
   repeated string issues = 1;
   // Force cleanup even with uncommitted changes.
   bool force = 2;
+  // Sub-repository path relative to project_dir.
+  string subrepo = 3;
 }
 
 message CleanupBatchResponse {
@@ -151,6 +155,8 @@ message CleanupBatchResponse {
 message CleanupMergedRequest {
   // Optional: only check specific issues.
   repeated string issues = 1;
+  // Sub-repository path relative to project_dir.
+  string subrepo = 2;
 }
 
 message CleanupMergedResponse {
@@ -171,6 +177,8 @@ message ListRequest {
   AgentStatus filter_status = 1;
   // Filter by role (optional).
   exomonad.common.Role filter_role = 2;
+  // Sub-repository path relative to project_dir.
+  string subrepo = 3;
 }
 
 message ListResponse {

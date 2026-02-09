@@ -864,7 +864,8 @@ instance (HsJSONPB.FromJSON SpawnBatchResponse) where
   parseJSON = HsJSONPB.parseJSONPB
 data CleanupRequest
   = CleanupRequest {cleanupRequestIssue :: Hs.Text,
-                    cleanupRequestForce :: Hs.Bool}
+                    cleanupRequestForce :: Hs.Bool,
+                    cleanupRequestSubrepo :: Hs.Text}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData CleanupRequest)
 instance (HsProtobuf.Named CleanupRequest) where
@@ -873,14 +874,20 @@ instance (HsProtobuf.HasDefault CleanupRequest)
 instance (HsProtobuf.Message CleanupRequest) where
   encodeMessage
     _
-    CleanupRequest {cleanupRequestIssue, cleanupRequestForce}
+    CleanupRequest {cleanupRequestIssue, cleanupRequestForce,
+                    cleanupRequestSubrepo}
     = Hs.mappend
+        (Hs.mappend
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 1)
+              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                 cleanupRequestIssue))
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 2) cleanupRequestForce))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 1)
+           (HsProtobuf.FieldNumber 3)
            ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              cleanupRequestIssue))
-        (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 2) cleanupRequestForce)
+              cleanupRequestSubrepo))
   decodeMessage _
     = Hs.pure CleanupRequest
         <*>
@@ -890,6 +897,10 @@ instance (HsProtobuf.Message CleanupRequest) where
         <*>
           HsProtobuf.at
             HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 2)
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 3)))
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
@@ -897,16 +908,24 @@ instance (HsProtobuf.Message CleanupRequest) where
          (HsProtobufAST.Single "issue") [] "",
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 2) (HsProtobufAST.Prim HsProtobufAST.Bool)
-         (HsProtobufAST.Single "force") [] ""]
+         (HsProtobufAST.Single "force") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 3)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "subrepo") [] ""]
 instance (HsJSONPB.ToJSONPB CleanupRequest) where
-  toJSONPB (CleanupRequest f1 f2)
+  toJSONPB (CleanupRequest f1 f2 f3)
     = HsJSONPB.object
         ["issue" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
-         "force" .= f2]
-  toEncodingPB (CleanupRequest f1 f2)
+         "force" .= f2,
+         "subrepo"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
+  toEncodingPB (CleanupRequest f1 f2 f3)
     = HsJSONPB.pairs
         ["issue" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
-         "force" .= f2]
+         "force" .= f2,
+         "subrepo"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
 instance (HsJSONPB.FromJSONPB CleanupRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -916,7 +935,10 @@ instance (HsJSONPB.FromJSONPB CleanupRequest) where
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
                      (obj .: "issue"))
-                <*> obj .: "force")
+                <*> obj .: "force"
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "subrepo")))
 instance (HsJSONPB.ToJSON CleanupRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding
@@ -983,7 +1005,8 @@ instance (HsJSONPB.FromJSON CleanupResponse) where
   parseJSON = HsJSONPB.parseJSONPB
 data CleanupBatchRequest
   = CleanupBatchRequest {cleanupBatchRequestIssues :: (Hs.Vector Hs.Text),
-                         cleanupBatchRequestForce :: Hs.Bool}
+                         cleanupBatchRequestForce :: Hs.Bool,
+                         cleanupBatchRequestSubrepo :: Hs.Text}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData CleanupBatchRequest)
 instance (HsProtobuf.Named CleanupBatchRequest) where
@@ -993,16 +1016,21 @@ instance (HsProtobuf.Message CleanupBatchRequest) where
   encodeMessage
     _
     CleanupBatchRequest {cleanupBatchRequestIssues,
-                         cleanupBatchRequestForce}
+                         cleanupBatchRequestForce, cleanupBatchRequestSubrepo}
     = Hs.mappend
+        (Hs.mappend
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 1)
+              ((Hs.coerce
+                  @(Hs.Vector Hs.Text)
+                  @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+                 cleanupBatchRequestIssues))
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 2) cleanupBatchRequestForce))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 1)
-           ((Hs.coerce
-               @(Hs.Vector Hs.Text)
-               @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
-              cleanupBatchRequestIssues))
-        (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 2) cleanupBatchRequestForce)
+           (HsProtobuf.FieldNumber 3)
+           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+              cleanupBatchRequestSubrepo))
   decodeMessage _
     = Hs.pure CleanupBatchRequest
         <*>
@@ -1014,6 +1042,10 @@ instance (HsProtobuf.Message CleanupBatchRequest) where
         <*>
           HsProtobuf.at
             HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 2)
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 3)))
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
@@ -1021,9 +1053,13 @@ instance (HsProtobuf.Message CleanupBatchRequest) where
          (HsProtobufAST.Single "issues") [] "",
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 2) (HsProtobufAST.Prim HsProtobufAST.Bool)
-         (HsProtobufAST.Single "force") [] ""]
+         (HsProtobufAST.Single "force") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 3)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "subrepo") [] ""]
 instance (HsJSONPB.ToJSONPB CleanupBatchRequest) where
-  toJSONPB (CleanupBatchRequest f1 f2)
+  toJSONPB (CleanupBatchRequest f1 f2 f3)
     = HsJSONPB.object
         ["issues"
            .=
@@ -1031,8 +1067,10 @@ instance (HsJSONPB.ToJSONPB CleanupBatchRequest) where
                  @(Hs.Vector Hs.Text)
                  @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
                 f1),
-         "force" .= f2]
-  toEncodingPB (CleanupBatchRequest f1 f2)
+         "force" .= f2,
+         "subrepo"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
+  toEncodingPB (CleanupBatchRequest f1 f2 f3)
     = HsJSONPB.pairs
         ["issues"
            .=
@@ -1040,7 +1078,9 @@ instance (HsJSONPB.ToJSONPB CleanupBatchRequest) where
                  @(Hs.Vector Hs.Text)
                  @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
                 f1),
-         "force" .= f2]
+         "force" .= f2,
+         "subrepo"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
 instance (HsJSONPB.FromJSONPB CleanupBatchRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -1052,7 +1092,10 @@ instance (HsJSONPB.FromJSONPB CleanupBatchRequest) where
                       @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text))
                       @(Hs.Vector Hs.Text))
                      (obj .: "issues"))
-                <*> obj .: "force")
+                <*> obj .: "force"
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "subrepo")))
 instance (HsJSONPB.ToJSON CleanupBatchRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding
@@ -1192,21 +1235,30 @@ instance (HsJSONPB.ToJSON CleanupBatchResponse) where
   toEncoding = HsJSONPB.toAesonEncoding
 instance (HsJSONPB.FromJSON CleanupBatchResponse) where
   parseJSON = HsJSONPB.parseJSONPB
-newtype CleanupMergedRequest
-  = CleanupMergedRequest {cleanupMergedRequestIssues :: (Hs.Vector Hs.Text)}
+data CleanupMergedRequest
+  = CleanupMergedRequest {cleanupMergedRequestIssues :: (Hs.Vector Hs.Text),
+                          cleanupMergedRequestSubrepo :: Hs.Text}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData CleanupMergedRequest)
 instance (HsProtobuf.Named CleanupMergedRequest) where
   nameOf _ = Hs.fromString "CleanupMergedRequest"
 instance (HsProtobuf.HasDefault CleanupMergedRequest)
 instance (HsProtobuf.Message CleanupMergedRequest) where
-  encodeMessage _ CleanupMergedRequest {cleanupMergedRequestIssues}
-    = (HsProtobuf.encodeMessageField
-         (HsProtobuf.FieldNumber 1)
-         ((Hs.coerce
-             @(Hs.Vector Hs.Text)
-             @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
-            cleanupMergedRequestIssues))
+  encodeMessage
+    _
+    CleanupMergedRequest {cleanupMergedRequestIssues,
+                          cleanupMergedRequestSubrepo}
+    = Hs.mappend
+        (HsProtobuf.encodeMessageField
+           (HsProtobuf.FieldNumber 1)
+           ((Hs.coerce
+               @(Hs.Vector Hs.Text)
+               @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+              cleanupMergedRequestIssues))
+        (HsProtobuf.encodeMessageField
+           (HsProtobuf.FieldNumber 2)
+           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+              cleanupMergedRequestSubrepo))
   decodeMessage _
     = Hs.pure CleanupMergedRequest
         <*>
@@ -1215,28 +1267,40 @@ instance (HsProtobuf.Message CleanupMergedRequest) where
               @(Hs.Vector Hs.Text))
              (HsProtobuf.at
                 HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)))
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 2)))
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
          (HsProtobufAST.Repeated HsProtobufAST.String)
-         (HsProtobufAST.Single "issues") [] ""]
+         (HsProtobufAST.Single "issues") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 2)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "subrepo") [] ""]
 instance (HsJSONPB.ToJSONPB CleanupMergedRequest) where
-  toJSONPB (CleanupMergedRequest f1)
+  toJSONPB (CleanupMergedRequest f1 f2)
     = HsJSONPB.object
         ["issues"
            .=
              ((Hs.coerce
                  @(Hs.Vector Hs.Text)
                  @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
-                f1)]
-  toEncodingPB (CleanupMergedRequest f1)
+                f1),
+         "subrepo"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
+  toEncodingPB (CleanupMergedRequest f1 f2)
     = HsJSONPB.pairs
         ["issues"
            .=
              ((Hs.coerce
                  @(Hs.Vector Hs.Text)
                  @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
-                f1)]
+                f1),
+         "subrepo"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
 instance (HsJSONPB.FromJSONPB CleanupMergedRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -1247,7 +1311,10 @@ instance (HsJSONPB.FromJSONPB CleanupMergedRequest) where
                   ((HsProtobuf.coerceOver
                       @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text))
                       @(Hs.Vector Hs.Text))
-                     (obj .: "issues")))
+                     (obj .: "issues"))
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "subrepo")))
 instance (HsJSONPB.ToJSON CleanupMergedRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding
@@ -1389,7 +1456,8 @@ instance (HsJSONPB.FromJSON CleanupMergedResponse) where
   parseJSON = HsJSONPB.parseJSONPB
 data ListRequest
   = ListRequest {listRequestFilterStatus :: (HsProtobuf.Enumerated Effects.Agent.AgentStatus),
-                 listRequestFilterRole :: (HsProtobuf.Enumerated ExoMonad.Common.Role)}
+                 listRequestFilterRole :: (HsProtobuf.Enumerated ExoMonad.Common.Role),
+                 listRequestSubrepo :: Hs.Text}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData ListRequest)
 instance (HsProtobuf.Named ListRequest) where
@@ -1398,12 +1466,18 @@ instance (HsProtobuf.HasDefault ListRequest)
 instance (HsProtobuf.Message ListRequest) where
   encodeMessage
     _
-    ListRequest {listRequestFilterStatus, listRequestFilterRole}
+    ListRequest {listRequestFilterStatus, listRequestFilterRole,
+                 listRequestSubrepo}
     = Hs.mappend
+        (Hs.mappend
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 1) listRequestFilterStatus)
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 2) listRequestFilterRole))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 1) listRequestFilterStatus)
-        (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 2) listRequestFilterRole)
+           (HsProtobuf.FieldNumber 3)
+           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+              listRequestSubrepo))
   decodeMessage _
     = Hs.pure ListRequest
         <*>
@@ -1412,6 +1486,10 @@ instance (HsProtobuf.Message ListRequest) where
         <*>
           HsProtobuf.at
             HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 2)
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 3)))
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
@@ -1424,19 +1502,32 @@ instance (HsProtobuf.Message ListRequest) where
             (HsProtobufAST.Named
                (HsProtobufAST.Dots
                   (HsProtobufAST.Path ("exomonad" Hs.:| ["common", "Role"])))))
-         (HsProtobufAST.Single "filter_role") [] ""]
+         (HsProtobufAST.Single "filter_role") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 3)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "subrepo") [] ""]
 instance (HsJSONPB.ToJSONPB ListRequest) where
-  toJSONPB (ListRequest f1 f2)
-    = HsJSONPB.object ["filter_status" .= f1, "filter_role" .= f2]
-  toEncodingPB (ListRequest f1 f2)
-    = HsJSONPB.pairs ["filter_status" .= f1, "filter_role" .= f2]
+  toJSONPB (ListRequest f1 f2 f3)
+    = HsJSONPB.object
+        ["filter_status" .= f1, "filter_role" .= f2,
+         "subrepo"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
+  toEncodingPB (ListRequest f1 f2 f3)
+    = HsJSONPB.pairs
+        ["filter_status" .= f1, "filter_role" .= f2,
+         "subrepo"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
 instance (HsJSONPB.FromJSONPB ListRequest) where
   parseJSONPB
     = HsJSONPB.withObject
         "ListRequest"
         (\ obj
            -> Hs.pure ListRequest <*> obj .: "filter_status"
-                <*> obj .: "filter_role")
+                <*> obj .: "filter_role"
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "subrepo")))
 instance (HsJSONPB.ToJSON ListRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding

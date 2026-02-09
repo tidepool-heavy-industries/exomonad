@@ -130,7 +130,13 @@ impl AgentEffects for AgentHandler {
     }
 
     async fn cleanup(&self, req: CleanupRequest) -> EffectResult<CleanupResponse> {
-        match self.service.cleanup_agent(&req.issue, req.force).await {
+        let subrepo = if req.subrepo.is_empty() {
+            None
+        } else {
+            Some(req.subrepo.as_str())
+        };
+
+        match self.service.cleanup_agent(&req.issue, req.force, subrepo).await {
             Ok(_) => Ok(CleanupResponse {
                 success: true,
                 error: String::new(),
@@ -143,7 +149,13 @@ impl AgentEffects for AgentHandler {
     }
 
     async fn cleanup_batch(&self, req: CleanupBatchRequest) -> EffectResult<CleanupBatchResponse> {
-        let result = self.service.cleanup_agents(&req.issues, req.force).await;
+        let subrepo = if req.subrepo.is_empty() {
+            None
+        } else {
+            Some(req.subrepo.as_str())
+        };
+
+        let result = self.service.cleanup_agents(&req.issues, req.force, subrepo).await;
 
         let failed_ids: Vec<String> = result.failed.iter().map(|(id, _)| id.clone()).collect();
         let errors: Vec<String> = result.failed.iter().map(|(_, err)| err.clone()).collect();
@@ -157,11 +169,17 @@ impl AgentEffects for AgentHandler {
 
     async fn cleanup_merged(
         &self,
-        _req: CleanupMergedRequest,
+        req: CleanupMergedRequest,
     ) -> EffectResult<CleanupMergedResponse> {
+        let subrepo = if req.subrepo.is_empty() {
+            None
+        } else {
+            Some(req.subrepo.as_str())
+        };
+
         let result = self
             .service
-            .cleanup_merged_agents()
+            .cleanup_merged_agents(&req.issues, subrepo)
             .await
             .map_err(|e| EffectError::custom("agent_error", e.to_string()))?;
 
@@ -175,10 +193,16 @@ impl AgentEffects for AgentHandler {
         })
     }
 
-    async fn list(&self, _req: ListRequest) -> EffectResult<ListResponse> {
+    async fn list(&self, req: ListRequest) -> EffectResult<ListResponse> {
+        let subrepo = if req.subrepo.is_empty() {
+            None
+        } else {
+            Some(req.subrepo.as_str())
+        };
+
         let infos = self
             .service
-            .list_agents()
+            .list_agents(subrepo)
             .await
             .map_err(|e| EffectError::custom("agent_error", e.to_string()))?;
 
