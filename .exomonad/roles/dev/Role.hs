@@ -7,7 +7,8 @@ import ExoMonad
 import StopHook (devHooks)
 
 data Tools mode = Tools
-  { pr :: FilePRTools mode
+  { pr :: FilePRTools mode,
+    messaging :: MessagingTools mode
   }
   deriving (Generic)
 
@@ -17,7 +18,8 @@ config =
     { roleName = "dev",
       tools =
         Tools
-          { pr = filePRTools
+          { pr = filePRTools,
+            messaging = messagingTools
           },
       hooks = devHooks
     }

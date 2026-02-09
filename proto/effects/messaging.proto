@@ -1,0 +1,43 @@
+syntax = "proto3";
+package exomonad.effects.messaging;
+
+// Agent↔TL messaging effects for inter-agent communication.
+
+// ============================================================================
+// SendNote - Fire-and-forget note from agent to TL
+// ============================================================================
+
+message SendNoteRequest {
+  // Note content (plain text).
+  string content = 1;
+}
+
+message SendNoteResponse {
+  // Acknowledgment that the note was received.
+  bool ack = 1;
+}
+
+// ============================================================================
+// SendQuestion - Blocking question from agent to TL
+// ============================================================================
+
+message SendQuestionRequest {
+  // Question content (plain text).
+  string content = 1;
+  // Optional additional context for the TL.
+  string context = 2;
+}
+
+message SendQuestionResponse {
+  // The TL's answer.
+  string answer = 1;
+}
+
+// ============================================================================
+// Service definition
+// ============================================================================
+
+service MessagingEffects {
+  rpc SendNote(SendNoteRequest) returns (SendNoteResponse);
+  rpc SendQuestion(SendQuestionRequest) returns (SendQuestionResponse);
+}

@@ -9,6 +9,7 @@ module ExoMonad
     module ExoMonad.Guest.Records.Agent,
     module ExoMonad.Guest.Records.FilePR,
     module ExoMonad.Guest.Records.Popup,
+    module ExoMonad.Guest.Records.Messaging,
 
     -- * Mode System
     module ExoMonad.Guest.Tool.Mode,
@@ -24,6 +25,7 @@ where
 import ExoMonad.Guest.Effect
 import ExoMonad.Guest.Records.Agent
 import ExoMonad.Guest.Records.FilePR
+import ExoMonad.Guest.Records.Messaging
 import ExoMonad.Guest.Records.Popup
 import ExoMonad.Guest.Tool.Class
 import ExoMonad.Guest.Tool.Mode
