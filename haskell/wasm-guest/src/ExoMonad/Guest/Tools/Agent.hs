@@ -118,7 +118,8 @@ data CleanupAgents
 
 data CleanupAgentsArgs = CleanupAgentsArgs
   { caIssues :: [Text],
-    caForce :: Maybe Bool
+    caForce :: Maybe Bool,
+    caSubrepo :: Maybe Text
   }
   deriving (Show, Eq, Generic)
 
@@ -127,6 +128,7 @@ instance FromJSON CleanupAgentsArgs where
     CleanupAgentsArgs
       <$> v .: "issues"
       <*> v .:? "force"
+      <*> v .:? "subrepo"
 
 instance MCPTool CleanupAgents where
   type ToolArgs CleanupAgents = CleanupAgentsArgs
@@ -148,12 +150,17 @@ instance MCPTool CleanupAgents where
                 .= object
                   [ "type" .= ("boolean" :: Text),
                     "description" .= ("Force deletion even if worktree has uncommitted changes (default: false)" :: Text)
+                  ],
+              "subrepo"
+                .= object
+                  [ "type" .= ("string" :: Text),
+                    "description" .= ("Sub-repository path relative to project dir" :: Text)
                   ]
             ]
       ]
   toolHandler args = do
     let force = maybe False id (caForce args)
-    result <- runM $ AC.runAgentControl $ AC.cleanupAgents (caIssues args) force
+    result <- runM $ AC.runAgentControl $ AC.cleanupAgents (caIssues args) force (caSubrepo args)
     pure $ successResult $ Aeson.toJSON result
 
 -- ============================================================================
@@ -164,11 +171,14 @@ instance MCPTool CleanupAgents where
 data CleanupMergedAgents
 
 data CleanupMergedAgentsArgs = CleanupMergedAgentsArgs
+  { cmaSubrepo :: Maybe Text
+  }
   deriving (Show, Eq, Generic)
 
 instance FromJSON CleanupMergedAgentsArgs where
-  parseJSON = Aeson.withObject "CleanupMergedAgentsArgs" $ \_ ->
-    pure CleanupMergedAgentsArgs
+  parseJSON = Aeson.withObject "CleanupMergedAgentsArgs" $ \v ->
+    CleanupMergedAgentsArgs
+      <$> v .:? "subrepo"
 
 instance MCPTool CleanupMergedAgents where
   type ToolArgs CleanupMergedAgents = CleanupMergedAgentsArgs
@@ -177,10 +187,17 @@ instance MCPTool CleanupMergedAgents where
   toolSchema =
     object
       [ "type" .= ("object" :: Text),
-        "properties" .= object []
+        "properties"
+          .= object
+            [ "subrepo"
+                .= object
+                  [ "type" .= ("string" :: Text),
+                    "description" .= ("Sub-repository path relative to project dir" :: Text)
+                  ]
+            ]
       ]
-  toolHandler _args = do
-    result <- runM $ AC.runAgentControl AC.cleanupMergedAgents
+  toolHandler args = do
+    result <- runM $ AC.runAgentControl $ AC.cleanupMergedAgents (cmaSubrepo args)
     pure $ successResult $ Aeson.toJSON result
 
 -- ============================================================================
@@ -191,11 +208,14 @@ instance MCPTool CleanupMergedAgents where
 data ListAgents
 
 data ListAgentsArgs = ListAgentsArgs
+  { laSubrepo :: Maybe Text
+  }
   deriving (Show, Eq, Generic)
 
 instance FromJSON ListAgentsArgs where
-  parseJSON = Aeson.withObject "ListAgentsArgs" $ \_ ->
-    pure ListAgentsArgs
+  parseJSON = Aeson.withObject "ListAgentsArgs" $ \v ->
+    ListAgentsArgs
+      <$> v .:? "subrepo"
 
 instance MCPTool ListAgents where
   type ToolArgs ListAgents = ListAgentsArgs
@@ -204,10 +224,17 @@ instance MCPTool ListAgents where
   toolSchema =
     object
       [ "type" .= ("object" :: Text),
-        "properties" .= object []
+        "properties"
+          .= object
+            [ "subrepo"
+                .= object
+                  [ "type" .= ("string" :: Text),
+                    "description" .= ("Sub-repository path relative to project dir" :: Text)
+                  ]
+            ]
       ]
-  toolHandler _args = do
-    result <- runM $ AC.runAgentControl AC.listAgents
+  toolHandler args = do
+    result <- runM $ AC.runAgentControl $ AC.listAgents (laSubrepo args)
     case result of
       Left err -> pure $ errorResult err
       Right agents -> pure $ successResult $ Aeson.toJSON agents

@@ -257,10 +257,10 @@ instance ToJSON BatchCleanupResult where
 data AgentControl m a where
   SpawnAgent :: Text -> SpawnOptions -> AgentControl m (Either Text SpawnResult)
   SpawnAgents :: [Text] -> SpawnOptions -> AgentControl m BatchSpawnResult
-  CleanupAgent :: Text -> Bool -> AgentControl m (Either Text ())
-  CleanupAgents :: [Text] -> Bool -> AgentControl m BatchCleanupResult
-  CleanupMergedAgents :: AgentControl m BatchCleanupResult
-  ListAgents :: AgentControl m (Either Text [AgentInfo])
+  CleanupAgent :: Text -> Bool -> Maybe Text -> AgentControl m (Either Text ())
+  CleanupAgents :: [Text] -> Bool -> Maybe Text -> AgentControl m BatchCleanupResult
+  CleanupMergedAgents :: Maybe Text -> AgentControl m BatchCleanupResult
+  ListAgents :: Maybe Text -> AgentControl m (Either Text [AgentInfo])
 
 -- Smart constructors (manually written - makeSem doesn't work with WASM cross-compilation)
 spawnAgent :: (Member AgentControl r) => Text -> SpawnOptions -> Sem r (Either Text SpawnResult)
@@ -269,17 +269,17 @@ spawnAgent issueId opts = send (SpawnAgent issueId opts)
 spawnAgents :: (Member AgentControl r) => [Text] -> SpawnOptions -> Sem r BatchSpawnResult
 spawnAgents issueIds opts = send (SpawnAgents issueIds opts)
 
-cleanupAgent :: (Member AgentControl r) => Text -> Bool -> Sem r (Either Text ())
-cleanupAgent issueId force = send (CleanupAgent issueId force)
+cleanupAgent :: (Member AgentControl r) => Text -> Bool -> Maybe Text -> Sem r (Either Text ())
+cleanupAgent issueId force subrepo = send (CleanupAgent issueId force subrepo)
 
-cleanupAgents :: (Member AgentControl r) => [Text] -> Bool -> Sem r BatchCleanupResult
-cleanupAgents issueIds force = send (CleanupAgents issueIds force)
+cleanupAgents :: (Member AgentControl r) => [Text] -> Bool -> Maybe Text -> Sem r BatchCleanupResult
+cleanupAgents issueIds force subrepo = send (CleanupAgents issueIds force subrepo)
 
-cleanupMergedAgents :: (Member AgentControl r) => Sem r BatchCleanupResult
-cleanupMergedAgents = send CleanupMergedAgents
+cleanupMergedAgents :: (Member AgentControl r) => Maybe Text -> Sem r BatchCleanupResult
+cleanupMergedAgents subrepo = send (CleanupMergedAgents subrepo)
 
-listAgents :: (Member AgentControl r) => Sem r (Either Text [AgentInfo])
-listAgents = send ListAgents
+listAgents :: (Member AgentControl r) => Maybe Text -> Sem r (Either Text [AgentInfo])
+listAgents subrepo = send (ListAgents subrepo)
 
 -- ============================================================================
 -- Interpreter (uses yield_effect via Effect typeclass)
@@ -328,11 +328,12 @@ runAgentControl = interpret $ \case
           { spawned = map protoAgentInfoToSpawnResult (V.toList (PA.spawnBatchResponseAgents resp)),
             spawnFailed = map (\e -> ("", TL.toStrict e)) (V.toList (PA.spawnBatchResponseErrors resp))
           }
-  CleanupAgent issueId force -> embed $ do
+  CleanupAgent issueId force subrepo -> embed $ do
     let req =
           PA.CleanupRequest
             { PA.cleanupRequestIssue = TL.fromStrict issueId,
-              PA.cleanupRequestForce = force
+              PA.cleanupRequestForce = force,
+              PA.cleanupRequestSubrepo = maybe "" TL.fromStrict subrepo
             }
     result <- Agent.cleanupAgent req
     pure $ case result of
@@ -341,11 +342,12 @@ runAgentControl = interpret $ \case
         if PA.cleanupResponseSuccess resp
           then Right ()
           else Left (TL.toStrict (PA.cleanupResponseError resp))
-  CleanupAgents issueIds force -> embed $ do
+  CleanupAgents issueIds force subrepo -> embed $ do
     let req =
           PA.CleanupBatchRequest
             { PA.cleanupBatchRequestIssues = V.fromList (map TL.fromStrict issueIds),
-              PA.cleanupBatchRequestForce = force
+              PA.cleanupBatchRequestForce = force,
+              PA.cleanupBatchRequestSubrepo = maybe "" TL.fromStrict subrepo
             }
     result <- Agent.cleanupBatch req
     pure $ case result of
@@ -361,8 +363,12 @@ runAgentControl = interpret $ \case
               (map TL.toStrict (V.toList (PA.cleanupBatchResponseFailed resp)))
               (map TL.toStrict (V.toList (PA.cleanupBatchResponseErrors resp)))
           }
-  CleanupMergedAgents -> embed $ do
-    let req = PA.CleanupMergedRequest {PA.cleanupMergedRequestIssues = V.empty}
+  CleanupMergedAgents subrepo -> embed $ do
+    let req =
+          PA.CleanupMergedRequest
+            { PA.cleanupMergedRequestIssues = V.empty,
+              PA.cleanupMergedRequestSubrepo = maybe "" TL.fromStrict subrepo
+            }
     result <- Agent.cleanupMerged req
     pure $ case result of
       Left err ->
@@ -377,11 +383,12 @@ runAgentControl = interpret $ \case
               (map TL.toStrict (V.toList (PA.cleanupMergedResponseSkipped resp)))
               (map TL.toStrict (V.toList (PA.cleanupMergedResponseErrors resp)))
           }
-  ListAgents -> embed $ do
+  ListAgents subrepo -> embed $ do
     let req =
           PA.ListRequest
             { PA.listRequestFilterStatus = Enumerated (Right PA.AgentStatusAGENT_STATUS_UNSPECIFIED),
-              PA.listRequestFilterRole = Enumerated (Right RoleROLE_UNSPECIFIED)
+              PA.listRequestFilterRole = Enumerated (Right RoleROLE_UNSPECIFIED),
+              PA.listRequestSubrepo = maybe "" TL.fromStrict subrepo
             }
     result <- Agent.listAgents req
     pure $ case result of

@@ -270,6 +270,29 @@ impl AgentControlService {
         })
     }
 
+    /// Resolve effective project dir for git operations.
+    /// When subrepo is set, git operations target project_dir/subrepo instead.
+    /// Validates that subrepo is relative and does not escape project_dir.
+    fn effective_project_dir(&self, subrepo: Option<&str>) -> Result<PathBuf> {
+        match subrepo {
+            Some(sub) => {
+                let sub_path = Path::new(sub);
+                if sub_path.is_absolute() {
+                    return Err(anyhow!("subrepo path must be relative: {}", sub));
+                }
+                for component in sub_path.components() {
+                    if matches!(component, std::path::Component::ParentDir) {
+                        return Err(anyhow!("subrepo path cannot contain '..': {}", sub));
+                    }
+                }
+                let dir = self.project_dir.join(sub);
+                info!(subrepo = %sub, effective_dir = %dir.display(), "Using subrepo for git operations");
+                Ok(dir)
+            }
+            None => Ok(self.project_dir.clone()),
+        }
+    }
+
     // ========================================================================
     // Spawn Agent
     // ========================================================================
@@ -295,15 +318,7 @@ impl AgentControlService {
             self.check_zellij_env()?;
 
             // Resolve effective project dir for git operations.
-            // When subrepo is set, git operations target project_dir/subrepo instead.
-            let effective_project_dir = match &options.subrepo {
-                Some(sub) => {
-                    let dir = self.project_dir.join(sub);
-                    info!(subrepo = %sub, effective_dir = %dir.display(), "Using subrepo for git operations");
-                    dir
-                }
-                None => self.project_dir.clone(),
-            };
+            let effective_project_dir = self.effective_project_dir(options.subrepo.as_deref())?;
 
             // Get GitHub service
             let github = self
@@ -445,9 +460,9 @@ impl AgentControlService {
 
     /// Clean up an agent (close Zellij tab, delete worktree).
     #[tracing::instrument(skip(self))]
-    pub async fn cleanup_agent(&self, issue_id: &str, force: bool) -> Result<()> {
+    pub async fn cleanup_agent(&self, issue_id: &str, force: bool, subrepo: Option<&str>) -> Result<()> {
         // Find and delete worktree first (to extract agent type from path)
-        let agents = self.list_agents().await?;
+        let agents = self.list_agents(subrepo).await?;
         let prefix = format!("gh-{}-", issue_id);
         let mut found = false;
 
@@ -477,10 +492,10 @@ impl AgentControlService {
                             }
                         }
 
-                        self.delete_worktree(path, force).await?;
+                        self.delete_worktree(path, force, subrepo).await?;
 
                         // Prune stale worktree references from git
-                        self.prune_worktrees().await?;
+                        self.prune_worktrees(subrepo).await?;
                     }
                 }
             }
@@ -507,14 +522,14 @@ impl AgentControlService {
 
     /// Clean up multiple agents.
     #[tracing::instrument(skip(self))]
-    pub async fn cleanup_agents(&self, issue_ids: &[String], force: bool) -> BatchCleanupResult {
+    pub async fn cleanup_agents(&self, issue_ids: &[String], force: bool, subrepo: Option<&str>) -> BatchCleanupResult {
         let mut result = BatchCleanupResult {
             cleaned: Vec::new(),
             failed: Vec::new(),
         };
 
         for issue_id in issue_ids {
-            match self.cleanup_agent(issue_id, force).await {
+            match self.cleanup_agent(issue_id, force, subrepo).await {
                 Ok(()) => result.cleaned.push(issue_id.clone()),
                 Err(e) => {
                     warn!(issue_id, error = %e, "Failed to cleanup agent");
@@ -528,18 +543,34 @@ impl AgentControlService {
 
     /// Clean up agents whose branches have been merged into main.
     #[tracing::instrument(skip(self))]
-    pub async fn cleanup_merged_agents(&self) -> Result<BatchCleanupResult> {
-        // Fetch origin/main to ensure we have latest state
-        self.fetch_origin().await?;
+    pub async fn cleanup_merged_agents(&self, issues: &[String], subrepo: Option<&str>) -> Result<BatchCleanupResult> {
+        // Resolve effective project dir for git operations.
+        let effective_project_dir = self.effective_project_dir(subrepo)?;
 
-        let agents = self.list_agents().await?;
+        // Fetch origin/main to ensure we have latest state
+        self.fetch_origin_in(&effective_project_dir).await?;
+
+        let agents = self.list_agents(subrepo).await?;
         let mut to_cleanup = Vec::new();
 
+        let issue_filter: Option<HashSet<&str>> = if issues.is_empty() {
+            None
+        } else {
+            Some(issues.iter().map(|s| s.as_str()).collect())
+        };
+
         for agent in agents {
+            // Filter by issues if provided
+            if let Some(ref filter) = issue_filter {
+                if !filter.contains(agent.issue_id.as_str()) {
+                    continue;
+                }
+            }
+
             // Check if branch is merged into origin/main
             // We ignore errors here (e.g. if branch doesn't exist) and just don't cleanup
             if let Some(ref branch_name) = agent.branch_name {
-                if self.is_branch_merged(branch_name).await.unwrap_or(false) {
+                if self.is_branch_merged_in(&effective_project_dir, branch_name).await.unwrap_or(false) {
                     info!(issue_id = %agent.issue_id, branch = %branch_name, "Branch is merged, marking for cleanup");
                     to_cleanup.push(agent.issue_id);
                 }
@@ -554,7 +585,7 @@ impl AgentControlService {
         }
 
         // Clean them up (force=false for safety - don't delete if uncommitted changes in worktree)
-        Ok(self.cleanup_agents(&to_cleanup, false).await)
+        Ok(self.cleanup_agents(&to_cleanup, false, subrepo).await)
     }
 
     // ========================================================================
@@ -563,11 +594,14 @@ impl AgentControlService {
 
     /// List all active agent worktrees.
     #[tracing::instrument(skip(self))]
-    pub async fn list_agents(&self) -> Result<Vec<AgentInfo>> {
+    pub async fn list_agents(&self, subrepo: Option<&str>) -> Result<Vec<AgentInfo>> {
+        // Resolve effective project dir for git operations.
+        let effective_project_dir = self.effective_project_dir(subrepo)?;
+
         // 1. Get all git worktrees
         let output = Command::new("git")
             .args(["worktree", "list", "--porcelain"])
-            .current_dir(&self.project_dir)
+            .current_dir(&effective_project_dir)
             .output()
             .await
             .context("Failed to execute git worktree list")?;
@@ -680,7 +714,7 @@ impl AgentControlService {
 
         // 4. Look up PRs for agents if GitHub service is available
         if let Some(ref github) = self.github {
-            if let Some(repo) = self.get_repo_from_remote().await {
+            if let Some(repo) = self.get_repo_from_remote(subrepo).await {
                 for agent in &mut agents {
                     if let Some(ref branch) = agent.branch_name {
                         if let Ok(Some(pr)) = github.get_pr_for_branch(&repo, branch).await {
@@ -700,8 +734,9 @@ impl AgentControlService {
     }
 
     /// Get repo (owner/name) from project's git remote URL.
-    async fn get_repo_from_remote(&self) -> Option<Repo> {
-        let dir = self.project_dir.to_string_lossy();
+    async fn get_repo_from_remote(&self, subrepo: Option<&str>) -> Option<Repo> {
+        let dir_buf = self.effective_project_dir(subrepo).ok()?;
+        let dir = dir_buf.to_string_lossy();
         let repo_info = self.git.get_repo_info(&dir).await.ok()?;
 
         let owner = repo_info.owner?;
@@ -905,11 +940,6 @@ impl AgentControlService {
     // ========================================================================
 
     #[tracing::instrument(skip(self))]
-    async fn fetch_origin(&self) -> Result<()> {
-        self.fetch_origin_in(&self.project_dir.clone()).await
-    }
-
-    #[tracing::instrument(skip(self))]
     async fn fetch_origin_in(&self, dir: &Path) -> Result<()> {
         info!(dir = %dir.display(), "Running git fetch origin main");
 
@@ -1026,7 +1056,7 @@ impl AgentControlService {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn delete_worktree(&self, path: &Path, force: bool) -> Result<()> {
+    async fn delete_worktree(&self, path: &Path, force: bool, subrepo: Option<&str>) -> Result<()> {
         if !path.exists() {
             debug!(path = %path.display(), "Worktree doesn't exist");
             return Ok(());
@@ -1043,10 +1073,12 @@ impl AgentControlService {
                 .ok_or_else(|| anyhow!("Invalid worktree path (utf8 error)"))?,
         );
 
+        let effective_project_dir = self.effective_project_dir(subrepo)?;
+
         let result = timeout(GIT_TIMEOUT, async {
             Command::new("git")
                 .args(&args)
-                .current_dir(&self.project_dir)
+                .current_dir(&effective_project_dir)
                 .output()
                 .await
                 .context("Failed to execute git worktree remove")
@@ -1073,12 +1105,14 @@ impl AgentControlService {
     }
 
     /// Prune stale worktree references from git's internal tracking.
-    async fn prune_worktrees(&self) -> Result<()> {
+    async fn prune_worktrees(&self, subrepo: Option<&str>) -> Result<()> {
         info!("Pruning stale worktree references");
+
+        let effective_project_dir = self.effective_project_dir(subrepo)?;
 
         let result = Command::new("git")
             .args(["worktree", "prune"])
-            .current_dir(&self.project_dir)
+            .current_dir(&effective_project_dir)
             .output()
             .await
             .context("Failed to execute git worktree prune")?;
@@ -1093,10 +1127,10 @@ impl AgentControlService {
         Ok(())
     }
 
-    async fn is_branch_merged(&self, branch: &str) -> Result<bool> {
+    async fn is_branch_merged_in(&self, dir: &Path, branch: &str) -> Result<bool> {
         let result = Command::new("git")
             .args(["merge-base", "--is-ancestor", branch, "origin/main"])
-            .current_dir(&self.project_dir)
+            .current_dir(dir)
             .output()
             .await
             .context("Failed to check if branch is merged")?;
