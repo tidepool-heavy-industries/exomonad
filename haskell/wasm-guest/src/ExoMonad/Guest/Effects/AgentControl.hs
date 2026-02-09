@@ -75,17 +75,19 @@ data SpawnOptions = SpawnOptions
   { owner :: Text,
     repo :: Text,
     worktreeDir :: Maybe Text,
-    agentType :: AgentType
+    agentType :: AgentType,
+    subrepo :: Maybe Text
   }
   deriving (Show, Eq, Generic)
 
 instance ToJSON SpawnOptions where
-  toJSON (SpawnOptions o r w a) =
+  toJSON (SpawnOptions o r w a s) =
     object
       [ "owner" .= o,
         "repo" .= r,
         "worktree_dir" .= w,
-        "agent_type" .= a
+        "agent_type" .= a,
+        "subrepo" .= s
       ]
 
 instance FromJSON SpawnOptions where
@@ -95,6 +97,7 @@ instance FromJSON SpawnOptions where
       <*> v .: "repo"
       <*> v .: "worktree_dir"
       <*> v .: "agent_type"
+      <*> v .:? "subrepo"
 
 -- | Result of spawning an agent.
 data SpawnResult = SpawnResult
@@ -293,7 +296,8 @@ runAgentControl = interpret $ \case
               PA.spawnRequestRepo = TL.fromStrict (repo opts),
               PA.spawnRequestAgentType = Enumerated (Right (toProtoAgentType (agentType opts))),
               PA.spawnRequestRole = Enumerated (Right RoleROLE_UNSPECIFIED),
-              PA.spawnRequestWorktreeDir = maybe "" TL.fromStrict (worktreeDir opts)
+              PA.spawnRequestWorktreeDir = maybe "" TL.fromStrict (worktreeDir opts),
+              PA.spawnRequestSubrepo = maybe "" TL.fromStrict (subrepo opts)
             }
     result <- Agent.spawnAgent req
     pure $ case result of
@@ -309,7 +313,8 @@ runAgentControl = interpret $ \case
               PA.spawnBatchRequestRepo = TL.fromStrict (repo opts),
               PA.spawnBatchRequestAgentType = Enumerated (Right (toProtoAgentType (agentType opts))),
               PA.spawnBatchRequestRole = Enumerated (Right RoleROLE_UNSPECIFIED),
-              PA.spawnBatchRequestWorktreeDir = maybe "" TL.fromStrict (worktreeDir opts)
+              PA.spawnBatchRequestWorktreeDir = maybe "" TL.fromStrict (worktreeDir opts),
+              PA.spawnBatchRequestSubrepo = maybe "" TL.fromStrict (subrepo opts)
             }
     result <- Agent.spawnBatch req
     pure $ case result of

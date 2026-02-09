@@ -68,6 +68,9 @@ message SpawnRequest {
   exomonad.common.Role role = 5;
   // Base directory for worktrees (default: .exomonad/worktrees).
   string worktree_dir = 6;
+  // Sub-repository path relative to project_dir (e.g., "egregore/").
+  // When set, git worktree operations target this directory instead of project_dir.
+  string subrepo = 7;
 }
 
 message SpawnResponse {
@@ -91,6 +94,9 @@ message SpawnBatchRequest {
   exomonad.common.Role role = 5;
   // Base directory for worktrees.
   string worktree_dir = 6;
+  // Sub-repository path relative to project_dir (e.g., "egregore/").
+  // When set, git worktree operations target this directory instead of project_dir.
+  string subrepo = 7;
 }
 
 message SpawnBatchResponse {

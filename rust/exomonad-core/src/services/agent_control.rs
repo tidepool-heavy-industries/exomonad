@@ -117,6 +117,9 @@ pub struct SpawnOptions {
     /// Agent type (Claude or Gemini)
     #[serde(default)]
     pub agent_type: AgentType,
+    /// Sub-repository path relative to project_dir (e.g., "egregore/").
+    /// When set, git worktree operations target this directory instead of project_dir.
+    pub subrepo: Option<String>,
 }
 
 /// Result of spawning an agent.
@@ -291,6 +294,17 @@ impl AgentControlService {
             // Validate we're in Zellij
             self.check_zellij_env()?;
 
+            // Resolve effective project dir for git operations.
+            // When subrepo is set, git operations target project_dir/subrepo instead.
+            let effective_project_dir = match &options.subrepo {
+                Some(sub) => {
+                    let dir = self.project_dir.join(sub);
+                    info!(subrepo = %sub, effective_dir = %dir.display(), "Using subrepo for git operations");
+                    dir
+                }
+                None => self.project_dir.clone(),
+            };
+
             // Get GitHub service
             let github = self
                 .github
@@ -313,20 +327,19 @@ impl AgentControlService {
                 .worktree_dir
                 .clone()
                 .unwrap_or_else(|| ".exomonad/worktrees".to_string());
-            let worktree_path = self
-                .project_dir
+            let worktree_path = effective_project_dir
                 .join(&worktree_dir)
                 .join(format!("gh-{}-{}-{}", issue_id, slug, agent_suffix));
             let branch_name = format!("gh-{}/{}-{}", issue_id, slug, agent_suffix);
 
             // Fetch origin/main
-            self.fetch_origin().await?;
+            self.fetch_origin_in(&effective_project_dir).await?;
 
             // Create worktree
-            self.create_worktree(&worktree_path, &branch_name).await?;
+            self.create_worktree_in(&effective_project_dir, &worktree_path, &branch_name).await?;
 
             // Write config files (no INITIAL_CONTEXT.md)
-            self.write_context_files(&worktree_path, options.agent_type)
+            self.write_context_files_in(&effective_project_dir, &worktree_path, options.agent_type)
                 .await?;
 
             // Build initial prompt
@@ -893,12 +906,17 @@ impl AgentControlService {
 
     #[tracing::instrument(skip(self))]
     async fn fetch_origin(&self) -> Result<()> {
-        info!("Running git fetch origin main");
+        self.fetch_origin_in(&self.project_dir.clone()).await
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn fetch_origin_in(&self, dir: &Path) -> Result<()> {
+        info!(dir = %dir.display(), "Running git fetch origin main");
 
         let result = timeout(GIT_TIMEOUT, async {
             Command::new("git")
                 .args(["fetch", "origin", "main"])
-                .current_dir(&self.project_dir)
+                .current_dir(dir)
                 .output()
                 .await
                 .context("Failed to execute git fetch")
@@ -921,7 +939,7 @@ impl AgentControlService {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn create_worktree(&self, path: &Path, branch: &str) -> Result<()> {
+    async fn create_worktree_in(&self, dir: &Path, path: &Path, branch: &str) -> Result<()> {
         if path.exists() {
             info!(path = %path.display(), "Worktree already exists, reusing");
             return Ok(());
@@ -933,7 +951,7 @@ impl AgentControlService {
                 .context("Failed to create worktree parent directory")?;
         }
 
-        info!(path = %path.display(), branch, "Running git worktree add");
+        info!(path = %path.display(), branch, dir = %dir.display(), "Running git worktree add");
 
         let result = timeout(GIT_TIMEOUT, async {
             Command::new("git")
@@ -946,7 +964,7 @@ impl AgentControlService {
                         .ok_or_else(|| anyhow!("Invalid worktree path (utf8 error)"))?,
                     "origin/main",
                 ])
-                .current_dir(&self.project_dir)
+                .current_dir(dir)
                 .output()
                 .await
                 .context("Failed to execute git worktree add")
@@ -976,7 +994,7 @@ impl AgentControlService {
                                 .ok_or_else(|| anyhow!("Invalid worktree path (utf8 error)"))?,
                             branch,
                         ])
-                        .current_dir(&self.project_dir)
+                        .current_dir(dir)
                         .output()
                         .await
                         .context("Failed to execute git worktree add (fallback)")
@@ -1103,28 +1121,33 @@ impl AgentControlService {
     // Internal: Context Files
     // ========================================================================
 
-    async fn write_context_files(&self, worktree_path: &Path, agent_type: AgentType) -> Result<()> {
+    async fn write_context_files_in(
+        &self,
+        effective_dir: &Path,
+        worktree_path: &Path,
+        agent_type: AgentType,
+    ) -> Result<()> {
         use std::os::unix::fs::symlink;
 
         // Create .exomonad directory
         let exomonad_dir = worktree_path.join(".exomonad");
         fs::create_dir_all(&exomonad_dir).await?;
 
-        // Calculate relative path back to project root
-        // worktree_path is {project_dir}/{rel_path}
-        // exomonad_dir is {project_dir}/{rel_path}/.exomonad
-        // We need {rel_path_to_root} = ../... to get from exomonad_dir to project_dir
-        let rel_path = worktree_path.strip_prefix(&self.project_dir).map_err(|e| {
+        // Calculate relative path back to effective project root
+        // worktree_path is {effective_dir}/{rel_path}
+        // exomonad_dir is {effective_dir}/{rel_path}/.exomonad
+        // We need {rel_path_to_root} = ../... to get from exomonad_dir to effective_dir
+        let rel_path = worktree_path.strip_prefix(effective_dir).map_err(|e| {
             warn!(
                 worktree_path = %worktree_path.display(),
-                project_dir = %self.project_dir.display(),
+                effective_dir = %effective_dir.display(),
                 error = %e,
-                "worktree_path is not under project_dir"
+                "worktree_path is not under effective_dir"
             );
             anyhow!(
-                "Internal configuration error: worktree_path {:?} is not under project_dir {:?}",
+                "Internal configuration error: worktree_path {:?} is not under effective_dir {:?}",
                 worktree_path,
-                self.project_dir
+                effective_dir
             )
         })?;
         let depth = rel_path.components().count();

@@ -38,7 +38,8 @@ data SpawnAgentsArgs = SpawnAgentsArgs
     saOwner :: Text,
     saRepo :: Text,
     saWorktreeDir :: Maybe Text,
-    saAgentType :: Maybe AC.AgentType
+    saAgentType :: Maybe AC.AgentType,
+    saSubrepo :: Maybe Text
   }
   deriving (Show, Eq, Generic)
 
@@ -50,6 +51,7 @@ instance FromJSON SpawnAgentsArgs where
       <*> v .: "repo"
       <*> v .:? "worktree_dir"
       <*> v .:? "agent_type"
+      <*> v .:? "subrepo"
 
 instance MCPTool SpawnAgents where
   type ToolArgs SpawnAgents = SpawnAgentsArgs
@@ -87,6 +89,11 @@ instance MCPTool SpawnAgents where
                   [ "type" .= ("string" :: Text),
                     "enum" .= (["claude", "gemini"] :: [Text]),
                     "description" .= ("Agent type (default: gemini)" :: Text)
+                  ],
+              "subrepo"
+                .= object
+                  [ "type" .= ("string" :: Text),
+                    "description" .= ("Sub-repository path relative to project dir (e.g. \"egregore/\"). Git worktree operations target this directory." :: Text)
                   ]
             ]
       ]
@@ -96,7 +103,8 @@ instance MCPTool SpawnAgents where
             { AC.owner = saOwner args,
               AC.repo = saRepo args,
               AC.worktreeDir = saWorktreeDir args,
-              AC.agentType = fromMaybe AC.Gemini (saAgentType args) -- Default applied at edge
+              AC.agentType = fromMaybe AC.Gemini (saAgentType args),
+              AC.subrepo = saSubrepo args
             }
     result <- runM $ AC.runAgentControl $ AC.spawnAgents (saIssues args) opts
     pure $ successResult $ Aeson.toJSON result

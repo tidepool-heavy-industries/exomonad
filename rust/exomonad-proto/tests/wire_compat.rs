@@ -222,6 +222,7 @@ mod binary {
             agent_type: 1, // CLAUDE
             role: 1,       // DEV
             worktree_dir: ".exomonad/worktrees".into(),
+            subrepo: String::new(),
         };
 
         let bytes = req.encode_to_vec();

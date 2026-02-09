@@ -73,6 +73,11 @@ impl AgentEffects for AgentHandler {
             } else {
                 Some(req.worktree_dir.clone())
             },
+            subrepo: if req.subrepo.is_empty() {
+                None
+            } else {
+                Some(req.subrepo.clone())
+            },
         };
 
         let result = self
@@ -107,6 +112,11 @@ impl AgentEffects for AgentHandler {
                     None
                 } else {
                     Some(req.worktree_dir.clone())
+                },
+                subrepo: if req.subrepo.is_empty() {
+                    None
+                } else {
+                    Some(req.subrepo.clone())
                 },
             };
 

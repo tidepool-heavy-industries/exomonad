@@ -371,7 +371,8 @@ data SpawnRequest
                   spawnRequestRepo :: Hs.Text,
                   spawnRequestAgentType :: (HsProtobuf.Enumerated Effects.Agent.AgentType),
                   spawnRequestRole :: (HsProtobuf.Enumerated ExoMonad.Common.Role),
-                  spawnRequestWorktreeDir :: Hs.Text}
+                  spawnRequestWorktreeDir :: Hs.Text,
+                  spawnRequestSubrepo :: Hs.Text}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData SpawnRequest)
 instance (HsProtobuf.Named SpawnRequest) where
@@ -382,32 +383,37 @@ instance (HsProtobuf.Message SpawnRequest) where
     _
     SpawnRequest {spawnRequestIssue, spawnRequestOwner,
                   spawnRequestRepo, spawnRequestAgentType, spawnRequestRole,
-                  spawnRequestWorktreeDir}
+                  spawnRequestWorktreeDir, spawnRequestSubrepo}
     = Hs.mappend
         (Hs.mappend
            (Hs.mappend
               (Hs.mappend
                  (Hs.mappend
+                    (Hs.mappend
+                       (HsProtobuf.encodeMessageField
+                          (HsProtobuf.FieldNumber 1)
+                          ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                             spawnRequestIssue))
+                       (HsProtobuf.encodeMessageField
+                          (HsProtobuf.FieldNumber 2)
+                          ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                             spawnRequestOwner)))
                     (HsProtobuf.encodeMessageField
-                       (HsProtobuf.FieldNumber 1)
+                       (HsProtobuf.FieldNumber 3)
                        ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                          spawnRequestIssue))
-                    (HsProtobuf.encodeMessageField
-                       (HsProtobuf.FieldNumber 2)
-                       ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                          spawnRequestOwner)))
+                          spawnRequestRepo)))
                  (HsProtobuf.encodeMessageField
-                    (HsProtobuf.FieldNumber 3)
-                    ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                       spawnRequestRepo)))
+                    (HsProtobuf.FieldNumber 4) spawnRequestAgentType))
               (HsProtobuf.encodeMessageField
-                 (HsProtobuf.FieldNumber 4) spawnRequestAgentType))
+                 (HsProtobuf.FieldNumber 5) spawnRequestRole))
            (HsProtobuf.encodeMessageField
-              (HsProtobuf.FieldNumber 5) spawnRequestRole))
+              (HsProtobuf.FieldNumber 6)
+              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                 spawnRequestWorktreeDir)))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 6)
+           (HsProtobuf.FieldNumber 7)
            ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              spawnRequestWorktreeDir))
+              spawnRequestSubrepo))
   decodeMessage _
     = Hs.pure SpawnRequest
         <*>
@@ -432,6 +438,10 @@ instance (HsProtobuf.Message SpawnRequest) where
           ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
              (HsProtobuf.at
                 HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 6)))
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 7)))
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
@@ -460,24 +470,32 @@ instance (HsProtobuf.Message SpawnRequest) where
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 6)
          (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "worktree_dir") [] ""]
+         (HsProtobufAST.Single "worktree_dir") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 7)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "subrepo") [] ""]
 instance (HsJSONPB.ToJSONPB SpawnRequest) where
-  toJSONPB (SpawnRequest f1 f2 f3 f4 f5 f6)
+  toJSONPB (SpawnRequest f1 f2 f3 f4 f5 f6 f7)
     = HsJSONPB.object
         ["issue" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "owner" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
          "repo" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3),
          "agent_type" .= f4, "role" .= f5,
          "worktree_dir"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f6)]
-  toEncodingPB (SpawnRequest f1 f2 f3 f4 f5 f6)
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f6),
+         "subrepo"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f7)]
+  toEncodingPB (SpawnRequest f1 f2 f3 f4 f5 f6 f7)
     = HsJSONPB.pairs
         ["issue" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "owner" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
          "repo" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3),
          "agent_type" .= f4, "role" .= f5,
          "worktree_dir"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f6)]
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f6),
+         "subrepo"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f7)]
 instance (HsJSONPB.FromJSONPB SpawnRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -497,7 +515,10 @@ instance (HsJSONPB.FromJSONPB SpawnRequest) where
                 <*> obj .: "role"
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "worktree_dir")))
+                     (obj .: "worktree_dir"))
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "subrepo")))
 instance (HsJSONPB.ToJSON SpawnRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding
@@ -571,7 +592,8 @@ data SpawnBatchRequest
                        spawnBatchRequestRepo :: Hs.Text,
                        spawnBatchRequestAgentType :: (HsProtobuf.Enumerated Effects.Agent.AgentType),
                        spawnBatchRequestRole :: (HsProtobuf.Enumerated ExoMonad.Common.Role),
-                       spawnBatchRequestWorktreeDir :: Hs.Text}
+                       spawnBatchRequestWorktreeDir :: Hs.Text,
+                       spawnBatchRequestSubrepo :: Hs.Text}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData SpawnBatchRequest)
 instance (HsProtobuf.Named SpawnBatchRequest) where
@@ -582,34 +604,40 @@ instance (HsProtobuf.Message SpawnBatchRequest) where
     _
     SpawnBatchRequest {spawnBatchRequestIssues, spawnBatchRequestOwner,
                        spawnBatchRequestRepo, spawnBatchRequestAgentType,
-                       spawnBatchRequestRole, spawnBatchRequestWorktreeDir}
+                       spawnBatchRequestRole, spawnBatchRequestWorktreeDir,
+                       spawnBatchRequestSubrepo}
     = Hs.mappend
         (Hs.mappend
            (Hs.mappend
               (Hs.mappend
                  (Hs.mappend
+                    (Hs.mappend
+                       (HsProtobuf.encodeMessageField
+                          (HsProtobuf.FieldNumber 1)
+                          ((Hs.coerce
+                              @(Hs.Vector Hs.Text)
+                              @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+                             spawnBatchRequestIssues))
+                       (HsProtobuf.encodeMessageField
+                          (HsProtobuf.FieldNumber 2)
+                          ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                             spawnBatchRequestOwner)))
                     (HsProtobuf.encodeMessageField
-                       (HsProtobuf.FieldNumber 1)
-                       ((Hs.coerce
-                           @(Hs.Vector Hs.Text)
-                           @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
-                          spawnBatchRequestIssues))
-                    (HsProtobuf.encodeMessageField
-                       (HsProtobuf.FieldNumber 2)
+                       (HsProtobuf.FieldNumber 3)
                        ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                          spawnBatchRequestOwner)))
+                          spawnBatchRequestRepo)))
                  (HsProtobuf.encodeMessageField
-                    (HsProtobuf.FieldNumber 3)
-                    ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                       spawnBatchRequestRepo)))
+                    (HsProtobuf.FieldNumber 4) spawnBatchRequestAgentType))
               (HsProtobuf.encodeMessageField
-                 (HsProtobuf.FieldNumber 4) spawnBatchRequestAgentType))
+                 (HsProtobuf.FieldNumber 5) spawnBatchRequestRole))
            (HsProtobuf.encodeMessageField
-              (HsProtobuf.FieldNumber 5) spawnBatchRequestRole))
+              (HsProtobuf.FieldNumber 6)
+              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                 spawnBatchRequestWorktreeDir)))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 6)
+           (HsProtobuf.FieldNumber 7)
            ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              spawnBatchRequestWorktreeDir))
+              spawnBatchRequestSubrepo))
   decodeMessage _
     = Hs.pure SpawnBatchRequest
         <*>
@@ -636,6 +664,10 @@ instance (HsProtobuf.Message SpawnBatchRequest) where
           ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
              (HsProtobuf.at
                 HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 6)))
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 7)))
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
@@ -664,9 +696,13 @@ instance (HsProtobuf.Message SpawnBatchRequest) where
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 6)
          (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "worktree_dir") [] ""]
+         (HsProtobufAST.Single "worktree_dir") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 7)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "subrepo") [] ""]
 instance (HsJSONPB.ToJSONPB SpawnBatchRequest) where
-  toJSONPB (SpawnBatchRequest f1 f2 f3 f4 f5 f6)
+  toJSONPB (SpawnBatchRequest f1 f2 f3 f4 f5 f6 f7)
     = HsJSONPB.object
         ["issues"
            .=
@@ -678,8 +714,10 @@ instance (HsJSONPB.ToJSONPB SpawnBatchRequest) where
          "repo" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3),
          "agent_type" .= f4, "role" .= f5,
          "worktree_dir"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f6)]
-  toEncodingPB (SpawnBatchRequest f1 f2 f3 f4 f5 f6)
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f6),
+         "subrepo"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f7)]
+  toEncodingPB (SpawnBatchRequest f1 f2 f3 f4 f5 f6 f7)
     = HsJSONPB.pairs
         ["issues"
            .=
@@ -691,7 +729,9 @@ instance (HsJSONPB.ToJSONPB SpawnBatchRequest) where
          "repo" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3),
          "agent_type" .= f4, "role" .= f5,
          "worktree_dir"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f6)]
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f6),
+         "subrepo"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f7)]
 instance (HsJSONPB.FromJSONPB SpawnBatchRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -713,7 +753,10 @@ instance (HsJSONPB.FromJSONPB SpawnBatchRequest) where
                 <*> obj .: "role"
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "worktree_dir")))
+                     (obj .: "worktree_dir"))
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "subrepo")))
 instance (HsJSONPB.ToJSON SpawnBatchRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding
