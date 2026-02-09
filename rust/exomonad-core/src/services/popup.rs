@@ -82,60 +82,91 @@ pub struct PopupOutput {
 
 /// Popup service for showing interactive forms.
 pub struct PopupService {
-    /// Zellij session name (from config, not detected).
-    zellij_session: String,
+    /// Zellij session name (optional).
+    zellij_session: Option<String>,
 }
 
 impl PopupService {
     /// Create a new popup service with the specified Zellij session.
-    pub fn new(zellij_session: String) -> Self {
+    pub fn new(zellij_session: Option<String>) -> Self {
         Self { zellij_session }
     }
 
     /// Show a popup and wait for user response.
     ///
-    /// Uses Zellij CLI pipe mechanism with simple payload format:
-    /// 1. `zellij pipe --plugin file:plugin.wasm --name exomonad:popup -- "request_id|title|item1,item2,item3"`
-    /// 2. Plugin receives via `pipe()` with `PipeSource::Cli(pipe_id)` and payload
-    /// 3. Plugin blocks CLI, shows popup UI, user interacts
-    /// 4. On submit, plugin calls `cli_pipe_output(&pipe_id, "request_id:selected_item")`
-    /// 5. This CLI command receives response on stdout and exits
+    /// If a Zellij session is available, uses the Zellij CLI pipe mechanism.
+    /// On failure or if no session is available, falls back to a terminal prompt via /dev/tty.
     #[tracing::instrument(skip(self))]
     pub fn show_popup(&self, input: &PopupInput) -> Result<PopupOutput> {
         tracing::info!(title = %input.title, components = input.components.len(), "Showing popup");
 
+        // Prefer configured Zellij session; otherwise, try environment variable.
+        let zellij_session = self
+            .zellij_session
+            .clone()
+            .or_else(|| std::env::var("ZELLIJ_SESSION_NAME").ok());
+
+        if let Some(session) = zellij_session {
+            match self.show_zellij_popup(&session, input) {
+                Ok(output) => return Ok(output),
+                Err(err) => {
+                    tracing::warn!(
+                        %err,
+                        session = %session,
+                        "Zellij popup failed, falling back to terminal prompt"
+                    );
+                }
+            }
+        } else {
+            tracing::warn!("No Zellij session found, falling back to terminal prompt");
+        }
+
+        // Fallback: terminal-based popup.
+        self.show_terminal_popup(input)
+    }
+
+    /// Show popup via Zellij pipe to exomonad-plugin.
+    fn show_zellij_popup(&self, session: &str, input: &PopupInput) -> Result<PopupOutput> {
         // Generate unique request ID
         let request_id = uuid::Uuid::new_v4().to_string();
 
-        // Extract choice items from components
-        let items = extract_choice_items(&input.components);
+        // Check if we should use structured JSON payload
+        // We use JSON if we can successfully parse components into the UI protocol types
+        let components_res: Result<Vec<crate::ui_protocol::Component>, _> =
+            serde_json::from_value(serde_json::Value::Array(input.components.clone()));
 
-        if items.is_empty() {
-            anyhow::bail!("Popup must have at least one choice item");
-        }
+        let payload = if let Ok(components) = components_res {
+            let request = crate::ui_protocol::PopupRequest {
+                request_id: request_id.clone(),
+                definition: crate::ui_protocol::PopupDefinition {
+                    title: input.title.clone(),
+                    components,
+                },
+            };
+            serde_json::to_string(&request).context("Failed to serialize PopupRequest")?
+        } else {
+            // Fallback: Build legacy payload: "request_id|title|item1,item2,item3"
+            let items = extract_choice_items(&input.components);
+            if items.is_empty() {
+                anyhow::bail!("Popup must have at least one choice item for Zellij display");
+            }
+
+            let safe_title = sanitize_payload_field(&input.title);
+            let safe_items: Vec<String> = items.iter().map(|s| sanitize_payload_field(s)).collect();
+            format!("{}|{}|{}", request_id, safe_title, safe_items.join(","))
+        };
 
         // Verify plugin exists
         let plugin_path = get_plugin_path()?;
-        let session = &self.zellij_session;
-
-        // Build payload: "request_id|title|item1,item2,item3"
-        // Sanitize delimiters to avoid parsing issues
-        let safe_title = sanitize_payload_field(&input.title);
-        let safe_items: Vec<String> = items.iter().map(|s| sanitize_payload_field(s)).collect();
-        let payload = format!("{}|{}|{}", request_id, safe_title, safe_items.join(","));
 
         tracing::debug!(
             request_id = %request_id,
             plugin = %plugin_path,
             session = %session,
-            items = ?items,
             "Sending popup request via zellij pipe --plugin"
         );
 
         // Use zellij pipe --plugin to send request and receive response on stdout.
-        // The plugin will call cli_pipe_output() to send the response back.
-        // We must specify --session explicitly because the MCP server process may not
-        // have ZELLIJ_SESSION_NAME in its environment.
         let mut child = Command::new("zellij")
             .arg("--session")
             .arg(session)
@@ -187,39 +218,19 @@ impl PopupService {
             Ok((Err(e), _)) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                // Capture stderr for debugging
-                if let Ok(stderr_buf) = stderr_handle.join() {
-                    if !stderr_buf.is_empty() {
-                        let stderr_str = String::from_utf8_lossy(&stderr_buf);
-                        tracing::error!(request_id = %request_id, stderr = %stderr_str, "zellij pipe failed");
-                    }
-                }
                 return Err(anyhow::Error::from(e).context("Failed to read popup response"));
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                tracing::warn!(request_id = %request_id, "Popup timed out after {:?}", POPUP_TIMEOUT);
                 let _ = child.kill();
                 let _ = child.wait();
-                // Join stderr thread to avoid orphaned thread
-                let _ = stderr_handle.join();
                 anyhow::bail!("Popup timed out after {} seconds", POPUP_TIMEOUT.as_secs());
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                // Join stderr thread to avoid orphaned thread
-                let _ = stderr_handle.join();
                 anyhow::bail!("Popup response channel disconnected unexpectedly");
             }
         };
-
-        tracing::info!(
-            request_id = %request_id,
-            response = %response_str,
-            response_len = response_str.len(),
-            response_bytes = ?response_str.as_bytes(),
-            "Received popup response"
-        );
 
         // Parse response: "{request_id}:{selected_item}" or "{request_id}:CANCELLED"
         let response_str = response_str.trim();
@@ -235,13 +246,8 @@ impl PopupService {
             response_str
         ))?;
 
-        // Verify request_id matches
         if resp_request_id != request_id {
-            tracing::warn!(
-                expected = %request_id,
-                received = %resp_request_id,
-                "Request ID mismatch in popup response"
-            );
+            tracing::warn!(expected = %request_id, received = %resp_request_id, "Request ID mismatch");
         }
 
         let (button, values) = if selection == "CANCELLED" {
@@ -253,13 +259,63 @@ impl PopupService {
             )
         };
 
-        tracing::info!(
-            request_id = %request_id,
-            button = %button,
-            "Popup completed"
-        );
-
         Ok(PopupOutput { button, values })
+    }
+
+    /// Fallback: Show simple terminal prompt if not in Zellij.
+    fn show_terminal_popup(&self, input: &PopupInput) -> Result<PopupOutput> {
+        use std::fs::OpenOptions;
+        use std::io::{BufRead, BufReader, Write};
+
+        let items = extract_choice_items(&input.components);
+        if items.is_empty() {
+            anyhow::bail!("Popup must have at least one choice item");
+        }
+
+        // Open /dev/tty for direct interactive I/O, bypassing stdio.
+        // This prevents corrupting JSON-RPC streams in MCP mode.
+        let mut tty_out = OpenOptions::new()
+            .write(true)
+            .open("/dev/tty")
+            .context("Failed to open /dev/tty for output")?;
+        let tty_in = OpenOptions::new()
+            .read(true)
+            .open("/dev/tty")
+            .context("Failed to open /dev/tty for input")?;
+        let mut tty_reader = BufReader::new(tty_in);
+
+        writeln!(tty_out, "\n=== {} ===", input.title)?;
+        for (i, item) in items.iter().enumerate() {
+            writeln!(tty_out, "  {}. {}", i + 1, item)?;
+        }
+        writeln!(tty_out, "  c. CANCEL")?;
+
+        loop {
+            write!(tty_out, "\nSelect an option (1-{}): ", items.len())?;
+            tty_out.flush()?;
+
+            let mut buf = String::new();
+            tty_reader.read_line(&mut buf)?;
+            let choice = buf.trim().to_lowercase();
+
+            if choice == "c" || choice == "cancel" {
+                return Ok(PopupOutput {
+                    button: "cancel".to_string(),
+                    values: serde_json::json!({}),
+                });
+            }
+
+            if let Ok(idx) = choice.parse::<usize>() {
+                if idx > 0 && idx <= items.len() {
+                    return Ok(PopupOutput {
+                        button: "submit".to_string(),
+                        values: serde_json::json!({ "selected": items[idx - 1] }),
+                    });
+                }
+            }
+
+            writeln!(tty_out, "Invalid selection, try again.")?;
+        }
     }
 }
 

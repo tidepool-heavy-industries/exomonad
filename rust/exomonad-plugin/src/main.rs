@@ -10,9 +10,7 @@ use ratatui::{
 };
 
 mod protocol;
-use exomonad_core::ui_protocol::{
-    transport, AgentEvent, CoordinatorAgentState, StateUpdate,
-};
+use exomonad_core::ui_protocol::{self, transport, AgentEvent, CoordinatorAgentState, StateUpdate};
 use protocol::{PluginMessage, PluginState};
 
 /// Active popup state for simple choice lists.
@@ -208,8 +206,58 @@ impl ZellijPlugin for ExoMonadPlugin {
                 }
             };
 
-            // Parse payload: "request_id|title|item1,item2,item3"
+            // Parse payload: JSON or "request_id|title|item1,item2,item3"
             let payload = pipe_message.payload.unwrap_or_default();
+            let trimmed_payload = payload.trim_start();
+
+            if trimmed_payload.starts_with('{') {
+                // Structured JSON payload (PopupRequest)
+                match serde_json::from_str::<ui_protocol::PopupRequest>(trimmed_payload) {
+                    Ok(req) => {
+                        let items: Vec<String> = req
+                            .definition
+                            .components
+                            .iter()
+                            .filter_map(|c| match c {
+                                ui_protocol::Component::Choice { options, .. } => {
+                                    Some(options.clone())
+                                }
+                                _ => None,
+                            })
+                            .flatten()
+                            .collect();
+
+                        if items.is_empty() {
+                            self.status_state = PluginState::Error;
+                            self.status_message = "JSON popup must have at least one choice component".to_string();
+                            // Don't include ':' to avoid misinterpretation as successful selection
+                            cli_pipe_output(&pipe_id, &format!("ERROR_NO_ITEMS:{}", req.request_id));
+                            return true;
+                        }
+
+                        block_cli_pipe_input(&pipe_id);
+                        show_self(true);
+                        self.active_popup = Some(ActivePopup {
+                            pipe_id,
+                            request_id: req.request_id,
+                            title: req.definition.title,
+                            items,
+                            selected_index: 0,
+                        });
+                        self.status_state = PluginState::Waiting;
+                        self.status_message = "Waiting for selection...".to_string();
+                        return true;
+                    }
+                    Err(e) => {
+                        self.status_state = PluginState::Error;
+                        self.status_message = format!("Invalid JSON popup: {}", e);
+                        // Avoid ':' to prevent host misinterpretation
+                        cli_pipe_output(&pipe_id, &format!("ERROR_INVALID_JSON_{}", e));
+                        return true;
+                    }
+                }
+            }
+
             let parts: Vec<&str> = payload.splitn(3, '|').collect();
 
             if parts.len() < 3 {
