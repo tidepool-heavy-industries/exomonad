@@ -179,7 +179,7 @@ async fn create_pr_async(
 }
 
 /// Main file_pr async implementation.
-async fn file_pr_async(input: &FilePRInput) -> Result<FilePROutput> {
+pub async fn file_pr_async(input: &FilePRInput) -> Result<FilePROutput> {
     info!("[FilePR] Starting file_pr operation (octocrab)");
 
     // Get owner/repo from git remote

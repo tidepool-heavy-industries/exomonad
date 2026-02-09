@@ -768,7 +768,6 @@ impl AgentControlService {
         info!(name, cwd = %cwd.display(), agent_type = ?agent_type, "Creating Zellij tab");
 
         let cmd = agent_type.command();
-        // Build full command with optional prompt, wrapped in nix develop for toolchain
         let agent_command = match prompt {
             Some(p) => {
                 let escaped_prompt = Self::escape_for_shell_command(p);
@@ -782,10 +781,8 @@ impl AgentControlService {
             }
             None => cmd.to_string(),
         };
-        let full_command = format!("nix develop -c {}", agent_command);
-
         // Escape the command for KDL string literal (escape backslashes, quotes, newlines)
-        let kdl_escaped_command = Self::escape_for_kdl(&full_command);
+        let kdl_escaped_command = Self::escape_for_kdl(&agent_command);
 
         // Use login shell to ensure PATH is loaded (gemini, claude, etc.)
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
@@ -1161,8 +1158,6 @@ impl AgentControlService {
         worktree_path: &Path,
         agent_type: AgentType,
     ) -> Result<()> {
-        use std::os::unix::fs::symlink;
-
         // Create .exomonad directory
         let exomonad_dir = worktree_path.join(".exomonad");
         fs::create_dir_all(&exomonad_dir).await?;
@@ -1202,41 +1197,6 @@ project_dir = "{}"
             rel_to_root = %rel_to_root,
             "Wrote .exomonad/config.toml with default_role=dev"
         );
-
-        // Create symlinks for shared resources back to root .exomonad
-        let symlinks = [
-            ("roles", format!("{}/.exomonad/roles", rel_to_root)),
-            ("lib", format!("{}/.exomonad/lib", rel_to_root)),
-        ];
-
-        for (name, target) in symlinks {
-            let link_path = exomonad_dir.join(name);
-            let target_path = Path::new(&target);
-
-            // Remove existing directory/file if it's not a symlink (cleanup old duplicates)
-            if link_path.exists() && !link_path.is_symlink() {
-                if link_path.is_dir() {
-                    fs::remove_dir_all(&link_path).await.ok();
-                    tracing::debug!(name = %name, "Removed existing directory for symlink");
-                } else if link_path.is_file() {
-                    fs::remove_file(&link_path).await.ok();
-                    tracing::debug!(name = %name, "Removed existing file for symlink");
-                }
-            }
-
-            if !link_path.exists() {
-                if let Err(e) = symlink(target_path, &link_path) {
-                    tracing::warn!(
-                        name = %name,
-                        target = %target,
-                        error = %e,
-                        "Failed to create symlink"
-                    );
-                } else {
-                    tracing::debug!(name = %name, target = %target, "Created symlink");
-                }
-            }
-        }
 
         // Write .gitignore for worktree-specific ignores
         let gitignore_content = "# Auto-generated for worktree\nresult\n";

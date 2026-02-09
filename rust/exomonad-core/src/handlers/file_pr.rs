@@ -46,7 +46,8 @@ impl FilePrEffects for FilePRHandler {
             body: req.body,
         };
 
-        let output = file_pr::file_pr(&input)
+        let output = file_pr::file_pr_async(&input)
+            .await
             .map_err(|e| EffectError::custom("file_pr_error", e.to_string()))?;
 
         Ok(FilePrResponse {
