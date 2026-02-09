@@ -12,6 +12,7 @@ pub mod log;
 pub mod messaging;
 pub mod popup;
 pub mod secrets;
+pub mod teams;
 pub mod zellij_events;
 
 pub use self::agent_control::{
