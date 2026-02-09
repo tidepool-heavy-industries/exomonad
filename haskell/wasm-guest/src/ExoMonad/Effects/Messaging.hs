@@ -31,6 +31,8 @@ module ExoMonad.Effects.Messaging
   )
 where
 
+import Data.Text (Text)
+import Data.Text.Lazy qualified as TL
 import Effects.EffectError (EffectError)
 import Effects.Messaging
 import ExoMonad.Effect.Class (Effect (..), runEffect)
@@ -57,8 +59,18 @@ instance Effect MessagingSendQuestion where
 -- Smart constructors
 -- ============================================================================
 
-sendNote :: SendNoteRequest -> IO (Either EffectError SendNoteResponse)
-sendNote = runEffect @MessagingSendNote
+sendNote :: Text -> Text -> IO (Either EffectError SendNoteResponse)
+sendNote content teamName =
+  runEffect @MessagingSendNote $
+    SendNoteRequest
+      { sendNoteRequestContent = TL.fromStrict content,
+        sendNoteRequestTeamName = TL.fromStrict teamName
+      }
 
-sendQuestion :: SendQuestionRequest -> IO (Either EffectError SendQuestionResponse)
-sendQuestion = runEffect @MessagingSendQuestion
+sendQuestion :: Text -> Text -> IO (Either EffectError SendQuestionResponse)
+sendQuestion question teamName =
+  runEffect @MessagingSendQuestion $
+    SendQuestionRequest
+      { sendQuestionRequestQuestion = TL.fromStrict question,
+        sendQuestionRequestTeamName = TL.fromStrict teamName
+      }
