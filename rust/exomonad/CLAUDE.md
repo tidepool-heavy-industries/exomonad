@@ -6,18 +6,16 @@ Unified sidecar binary: Rust host with Haskell WASM plugin.
 
 **All logic is in Haskell WASM. Rust handles I/O only.**
 
-WASM is embedded in the binary at compile time via `include_bytes!`. No file paths, no discovery, no symlinks. The binary IS the WASM.
+Two WASM loading modes:
+- **Embedded** (`include_bytes!`): WASM compiled into binary, used by `mcp-stdio` and `hook`
+- **File-based** (`from_file`): WASM loaded from `.exomonad/wasm/`, used by `serve`, enables hot reload
 
 ```
-Claude Code → exomonad [hook|mcp|mcp-stdio]
-                     ↓
-              Embedded WASM (selected by role from config)
-                     ↓
-              WASM plugin (Haskell)
-                     ↓ yields effects
-              Rust host functions execute I/O
-                     ↓
-              Result returned via WASM
+# Stdio mode (single session, embedded WASM)
+Claude Code → exomonad mcp-stdio → Embedded WASM → effects → I/O
+
+# HTTP mode (multi-agent, hot-reloadable WASM)
+N agents → exomonad serve --port 7432 → File WASM (auto-reload) → effects → I/O
 ```
 
 ### Hook Mode
@@ -27,20 +25,31 @@ For Claude Code hooks:
 Claude Code → exomonad hook → WASM handle_pre_tool_use → HookOutput
 ```
 
-### MCP Mode
+### MCP Stdio Mode
 
-For MCP tools:
+For single-session MCP tools:
 ```
 Claude Code → stdio → exomonad mcp-stdio → WASM handle_mcp_call → Result
 ```
 
+### MCP HTTP Mode (Singleton Server)
+
+For multi-agent scenarios — one server, all agents connect:
+```
+exomonad serve --port 7432
+    ├── POST /mcp → JSON-RPC (same dispatch as stdio)
+    ├── GET /health → version info
+    └── WASM hot-reloaded on mtime change per tool call
+```
+
 ## CLI Usage
 
-WASM is embedded in the binary. The `role` field in `.exomonad/config.toml` selects which embedded WASM plugin to use:
-
 ```bash
-exomonad hook pre-tool-use
-exomonad mcp-stdio
+exomonad hook pre-tool-use        # Handle Claude Code hook
+exomonad mcp-stdio                # Stdio MCP server (single session)
+exomonad serve [--port PORT]      # HTTP MCP server (multi-agent, hot reload)
+exomonad recompile [--role ROLE]  # Build WASM from Haskell source
+exomonad init [--session NAME]    # Initialize Zellij session
 ```
 
 **Example `.exomonad/config.toml`:**

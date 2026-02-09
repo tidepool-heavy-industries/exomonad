@@ -7,6 +7,10 @@
 //!
 //! The default test role is `tl`, which provides: spawn_agents, cleanup_agents,
 //! cleanup_merged_agents, list_agents, popup.
+//!
+//! Each test spawns a full exomonad subprocess with ~4MB WASM loading, so we limit
+//! concurrency to avoid resource exhaustion when `cargo test` runs all 38+ tests
+//! in parallel. The SUBPROCESS_SEMAPHORE caps concurrent spawns.
 
 #![allow(deprecated)] // cargo_bin function — no macro alternative that returns PathBuf
 
@@ -15,8 +19,55 @@ use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tempfile::TempDir;
+
+/// Limits concurrent subprocess spawns to avoid resource exhaustion.
+/// Each exomonad process loads ~4MB of WASM, so 38 simultaneous processes
+/// can exceed system limits (file descriptors, memory, CPU for WASM compilation).
+const MAX_CONCURRENT_SUBPROCESSES: usize = 8;
+
+fn subprocess_semaphore() -> &'static Semaphore {
+    static INSTANCE: OnceLock<Semaphore> = OnceLock::new();
+    INSTANCE.get_or_init(|| Semaphore::new(MAX_CONCURRENT_SUBPROCESSES))
+}
+
+/// Simple counting semaphore using a mutex + condvar.
+struct Semaphore {
+    state: Mutex<usize>,
+    condvar: std::sync::Condvar,
+    max: usize,
+}
+
+impl Semaphore {
+    fn new(max: usize) -> Self {
+        Self {
+            state: Mutex::new(0),
+            condvar: std::sync::Condvar::new(),
+            max,
+        }
+    }
+
+    fn acquire(&self) -> SemaphoreGuard<'_> {
+        let mut count = self.state.lock().unwrap();
+        while *count >= self.max {
+            count = self.condvar.wait(count).unwrap();
+        }
+        *count += 1;
+        SemaphoreGuard(self)
+    }
+}
+
+struct SemaphoreGuard<'a>(&'a Semaphore);
+
+impl Drop for SemaphoreGuard<'_> {
+    fn drop(&mut self) {
+        let mut count = self.0.state.lock().unwrap();
+        *count -= 1;
+        self.0.condvar.notify_one();
+    }
+}
 
 // ============================================================================
 // McpProcess — subprocess lifecycle helper
@@ -27,11 +78,15 @@ struct McpProcess {
     stdin: Option<ChildStdin>,
     response_rx: Receiver<String>,
     stderr_rx: Receiver<String>,
+    _semaphore_guard: SemaphoreGuard<'static>,
 }
 
 impl McpProcess {
     /// Spawn `exomonad mcp-stdio` in the given working directory.
+    /// Blocks until a semaphore slot is available to limit concurrent subprocesses.
     fn spawn(work_dir: &std::path::Path) -> Self {
+        let guard = subprocess_semaphore().acquire();
+
         let mut child = Command::new(cargo_bin("exomonad"))
             .args(["mcp-stdio"])
             .current_dir(work_dir)
@@ -84,6 +139,7 @@ impl McpProcess {
             stdin: Some(stdin),
             response_rx: rx,
             stderr_rx: err_rx,
+            _semaphore_guard: guard,
         }
     }
 

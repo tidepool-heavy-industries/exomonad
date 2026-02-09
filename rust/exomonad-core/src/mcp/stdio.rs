@@ -15,17 +15,17 @@ use tracing::{debug, error, info};
 // ============================================================================
 
 #[derive(Debug, Deserialize)]
-struct JsonRpcRequest {
+pub(crate) struct JsonRpcRequest {
     #[allow(dead_code)]
     jsonrpc: String,
-    id: Option<Value>,
-    method: String,
+    pub(crate) id: Option<Value>,
+    pub(crate) method: String,
     #[serde(default)]
-    params: Value,
+    pub(crate) params: Value,
 }
 
 #[derive(Debug, Serialize)]
-struct JsonRpcResponse {
+pub(crate) struct JsonRpcResponse {
     jsonrpc: &'static str,
     id: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -35,7 +35,7 @@ struct JsonRpcResponse {
 }
 
 #[derive(Debug, Serialize)]
-struct JsonRpcError {
+pub(crate) struct JsonRpcError {
     code: i32,
     message: String,
 }
@@ -145,7 +145,7 @@ fn to_json_value_or_internal_error<T: Serialize>(id: Value, data: T) -> JsonRpcR
 // Request Handling
 // ============================================================================
 
-async fn handle_request(state: &McpState, request: JsonRpcRequest) -> JsonRpcResponse {
+pub(crate) async fn handle_request(state: &McpState, request: JsonRpcRequest) -> JsonRpcResponse {
     let id = request.id.clone().unwrap_or(Value::Null);
 
     debug!(method = %request.method, "Handling MCP request");

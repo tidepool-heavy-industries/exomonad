@@ -90,11 +90,11 @@ impl MessagingEffects for MessagingHandler {
         let tl_inbox = inbox_dir.join("team-lead.json");
         let my_inbox = inbox_dir.join(format!("{}.json", agent_id));
 
-        let text = format!("[QUESTION] {}", req.content);
+        let text = format!("[QUESTION] {}", req.question);
         let msg = TeamsMessage {
             from: agent_id.clone(),
             text,
-            summary: req.content.chars().take(50).collect(),
+            summary: req.question.chars().take(50).collect(),
             timestamp: Utc::now().to_rfc3339(),
             color: "green".to_string(),
             read: false,

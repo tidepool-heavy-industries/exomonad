@@ -73,6 +73,23 @@ enum Commands {
         recreate: bool,
     },
 
+    /// Recompile WASM plugin from Haskell source
+    Recompile {
+        /// Role to build (default: from config, usually "tl")
+        #[arg(long)]
+        role: Option<String>,
+    },
+
+    /// Run singleton HTTP MCP server (all agents connect to this)
+    ///
+    /// Loads WASM from file path (not embedded) with hot reload on change.
+    /// All MCP tools work identically to stdio mode.
+    Serve {
+        /// Port to listen on (default: 7432, override via EXOMONAD_PORT env var)
+        #[arg(long)]
+        port: Option<u16>,
+    },
+
     /// Reply to a UI request (sent by Zellij plugin)
     Reply {
         /// Request ID
@@ -456,6 +473,7 @@ fn generate_tl_layout() -> Result<std::path::PathBuf> {
         shell: &shell,
         focus: true,
         close_on_exit: false,
+        env: HashMap::new(),
     };
 
     let layout = exomonad_core::layout::generate_agent_layout(&params)
@@ -482,7 +500,7 @@ fn init_logging(command: &Commands) -> Option<tracing_appender::non_blocking::Wo
     let use_json = std::env::var("EXOMONAD_LOG_FORMAT")
         .map(|v| v.eq_ignore_ascii_case("json"))
         .unwrap_or(false);
-    let is_mcp = matches!(command, Commands::McpStdio);
+    let is_mcp = matches!(command, Commands::McpStdio | Commands::Serve { .. });
 
     let log_dir = PathBuf::from(".exomonad/logs");
     let file_ok = std::fs::create_dir_all(&log_dir).is_ok();
@@ -569,6 +587,87 @@ async fn main() -> Result<()> {
         debug!(error = %e, "No config found, using defaults");
         config::Config::default()
     });
+
+    // Handle recompile before WASM loading (recompile builds WASM, doesn't need it)
+    if let Commands::Recompile { role } = &cli.command {
+        let default_role = config.role.to_string();
+        let role_str = role.as_deref().unwrap_or(&default_role);
+        let project_dir = if config.project_dir.is_absolute() {
+            config.project_dir.clone()
+        } else {
+            std::env::current_dir()?.join(&config.project_dir)
+        };
+        return exomonad::recompile::run_recompile(role_str, &project_dir).await;
+    }
+
+    // Handle serve before embedded WASM loading (serve uses file-based WASM, not embedded)
+    if let Commands::Serve { port } = &cli.command {
+        let project_dir = if config.project_dir.is_absolute() {
+            config.project_dir.clone()
+        } else {
+            std::env::current_dir()?.join(&config.project_dir)
+        };
+
+        let port = port
+            .or_else(|| std::env::var("EXOMONAD_PORT").ok().and_then(|p| p.parse().ok()))
+            .unwrap_or(7432);
+
+        let role_name = config.role.to_string();
+        let wasm_path = project_dir.join(format!(".exomonad/wasm/wasm-guest-{}.wasm", role_name));
+
+        if !wasm_path.exists() {
+            anyhow::bail!(
+                "WASM file not found: {}\nRun `exomonad recompile` first to build it.",
+                wasm_path.display()
+            );
+        }
+
+        info!(
+            wasm_path = %wasm_path.display(),
+            port,
+            role = %role_name,
+            "Starting HTTP MCP server with file-based WASM (hot reload enabled)"
+        );
+
+        // Initialize services
+        let services = Arc::new(
+            Services::new()
+                .with_zellij_session(config.zellij_session.clone())
+                .validate()
+                .context("Failed to validate services")?,
+        );
+
+        // Build runtime with file-based WASM loading (enables hot reload)
+        let builder = RuntimeBuilder::new().with_wasm_path(wasm_path);
+        let builder = exomonad_core::register_builtin_handlers(builder, &services);
+        let rt = builder.build().await.context("Failed to build runtime")?;
+
+        let state = rt.into_mcp_state(project_dir.clone());
+
+        // Write server.pid for client discovery
+        let pid_info = serde_json::json!({
+            "pid": std::process::id(),
+            "port": port,
+            "role": role_name,
+        });
+        let server_pid_path = project_dir.join(".exomonad/server.pid");
+        if let Some(parent) = server_pid_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&server_pid_path, serde_json::to_string_pretty(&pid_info)?)?;
+        info!(path = %server_pid_path.display(), "Wrote server.pid");
+
+        // Run HTTP server (blocks until shutdown)
+        let result = mcp::http::run_http_server(state, port).await;
+
+        // Clean up server.pid on shutdown
+        if server_pid_path.exists() {
+            let _ = std::fs::remove_file(&server_pid_path);
+            info!("Cleaned up server.pid");
+        }
+
+        return result;
+    }
 
     // Load embedded WASM for the configured role
     let wasm_bytes = exomonad::wasm::get(config.role)?;
@@ -700,6 +799,9 @@ async fn main() -> Result<()> {
             // We don't necessarily wait for response here, it's a push notification
             info!("Sent reply to control socket");
         }
+
+        Commands::Recompile { .. } => unreachable!("handled before WASM loading"),
+        Commands::Serve { .. } => unreachable!("handled before WASM loading"),
     }
 
     Ok(())

@@ -781,6 +781,33 @@ impl AgentControlService {
     }
 
     // ========================================================================
+    // Internal: Server Discovery
+    // ========================================================================
+
+    /// Read the HTTP server port from `.exomonad/server.pid` if it exists and is valid.
+    fn read_server_port(project_dir: &Path) -> Option<u16> {
+        let pid_path = project_dir.join(".exomonad/server.pid");
+        let content = std::fs::read_to_string(&pid_path).ok()?;
+        let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
+
+        let pid = parsed.get("pid")?.as_u64()? as u32;
+        let port = parsed.get("port")?.as_u64()? as u16;
+
+        // Verify the process is still alive (kill(pid, 0) checks existence)
+        #[cfg(unix)]
+        {
+            use nix::sys::signal;
+            use nix::unistd::Pid;
+            if signal::kill(Pid::from_raw(pid as i32), None).is_err() {
+                debug!(pid, "server.pid exists but process is dead, ignoring");
+                return None;
+            }
+        }
+
+        Some(port)
+    }
+
+    // ========================================================================
     // Internal: Zellij
     // ========================================================================
 
@@ -1236,23 +1263,40 @@ project_dir = "{}"
         let gitignore_content = "# Auto-generated for worktree\nresult\n";
         fs::write(exomonad_dir.join(".gitignore"), gitignore_content).await?;
 
-        // Write .mcp.json (no --wasm argument, config file handles WASM path)
+        // Sidecar binary path (used for hooks regardless of MCP transport mode)
         let sidecar_path = std::env::current_exe()
             .ok()
             .and_then(|p| p.to_str().map(String::from))
             .unwrap_or_else(|| "exomonad".to_string());
 
-        let mcp_content = format!(
-            r###"{{
+        // Write .mcp.json — prefer HTTP server if running, fall back to stdio
+        let mcp_content = if let Some(port) = Self::read_server_port(effective_dir) {
+            info!(port, "HTTP server detected, writing HTTP .mcp.json for spawned agent");
+            format!(
+                r###"{{
+  "mcpServers": {{
+    "exomonad": {{
+      "type": "sse",
+      "url": "http://localhost:{}/mcp"
+    }}
+  }}
+}}"###,
+                port
+            )
+        } else {
+            info!("No HTTP server detected, writing stdio .mcp.json for spawned agent");
+            format!(
+                r###"{{
   "mcpServers": {{
     "exomonad": {{
       "command": "{}",
       "args": ["mcp-stdio"]
     }}
   }}
-}} "###,
-            sidecar_path
-        );
+}}"###,
+                sidecar_path
+            )
+        };
         fs::write(worktree_path.join(".mcp.json"), mcp_content).await?;
 
         // Write agent-specific hook configuration

@@ -7,6 +7,9 @@
 pub mod stdio;
 pub mod tools;
 
+#[cfg(feature = "runtime")]
+pub mod http;
+
 use crate::PluginManager;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

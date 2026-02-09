@@ -152,6 +152,7 @@ use std::sync::Arc;
 pub struct RuntimeBuilder {
     registry: EffectRegistry,
     wasm_bytes: Option<Vec<u8>>,
+    wasm_path: Option<PathBuf>,
 }
 
 #[cfg(feature = "runtime")]
@@ -161,6 +162,7 @@ impl RuntimeBuilder {
         Self {
             registry: EffectRegistry::new(),
             wasm_bytes: None,
+            wasm_path: None,
         }
     }
 
@@ -184,6 +186,15 @@ impl RuntimeBuilder {
         self
     }
 
+    /// Set a WASM file path for runtime loading with hot reload support.
+    ///
+    /// When set, the plugin will be loaded from this file instead of embedded bytes,
+    /// and `PluginManager::reload_if_changed()` can detect file modifications.
+    pub fn with_wasm_path(mut self, path: PathBuf) -> Self {
+        self.wasm_path = Some(path);
+        self
+    }
+
     /// Get a reference to the effect registry.
     pub fn registry(&self) -> &EffectRegistry {
         &self.registry
@@ -202,12 +213,16 @@ impl RuntimeBuilder {
     /// - WASM bytes are not set
     /// - WASM plugin loading fails
     pub async fn build(self) -> anyhow::Result<Runtime> {
-        let wasm_bytes = self
-            .wasm_bytes
-            .ok_or_else(|| anyhow::anyhow!("WASM bytes not set"))?;
-
         let registry = Arc::new(self.registry);
-        let plugin_manager = PluginManager::new(&wasm_bytes, registry.clone()).await?;
+
+        let plugin_manager = if let Some(path) = self.wasm_path {
+            PluginManager::from_file(&path, registry.clone()).await?
+        } else {
+            let wasm_bytes = self
+                .wasm_bytes
+                .ok_or_else(|| anyhow::anyhow!("WASM bytes not set — provide either wasm_bytes or wasm_path"))?;
+            PluginManager::new(&wasm_bytes, registry.clone()).await?
+        };
 
         Ok(Runtime {
             plugin_manager,
