@@ -14,11 +14,11 @@ use exomonad_proto::effects::popup::*;
 /// Handles all effects in the `popup.*` namespace by delegating to
 /// the generated `dispatch_popup_effect` function.
 pub struct PopupHandler {
-    zellij_session: String,
+    zellij_session: Option<String>,
 }
 
 impl PopupHandler {
-    pub fn new(zellij_session: String) -> Self {
+    pub fn new(zellij_session: Option<String>) -> Self {
         Self { zellij_session }
     }
 }

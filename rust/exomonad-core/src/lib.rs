@@ -285,9 +285,9 @@ pub fn register_builtin_handlers(
 
     builder = builder.with_effect_handler(handlers::FsHandler::new(services.filesystem().clone()));
 
-    if let Some(session) = services.zellij_session() {
-        builder = builder.with_effect_handler(handlers::PopupHandler::new(session.to_string()));
-    }
+    builder = builder.with_effect_handler(handlers::PopupHandler::new(
+        services.zellij_session().map(|s| s.to_string()),
+    ));
 
     builder = builder.with_effect_handler(handlers::FilePRHandler::new());
 
