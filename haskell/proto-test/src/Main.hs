@@ -97,7 +97,13 @@ main = do
       -- Symmetry: Haskell-encoded bytes match Rust reference
       testHaskellEncodingMatchesRust,
       testHaskellGetBranchEncodingMatchesRust,
-      testHaskellLogResponseEncodingMatchesRust
+      testHaskellLogResponseEncodingMatchesRust,
+      -- Symmetry: error encoding matches Rust
+      testHaskellNotFoundErrorEncodingMatchesRust,
+      testHaskellCustomErrorEncodingMatchesRust,
+      -- Edge case: empty payload in oneof
+      testDecodeRustEmptyPayload,
+      testHaskellEmptyPayloadMatchesRust
     ]
 
 -- ============================================================================
@@ -555,6 +561,107 @@ testHaskellLogResponseEncodingMatchesRust = do
   let rustBytes = pack [0x08, 0x01]
   assert
     "haskell_log_response_encoding_matches_rust"
+    (haskellBytes == rustBytes)
+    ( "Haskell: " ++ show (BS.unpack haskellBytes)
+        ++ " vs Rust: " ++ show (BS.unpack rustBytes)
+    )
+
+-- ============================================================================
+-- Symmetry: error encoding matches Rust
+-- ============================================================================
+
+-- Rust: EffectResponse { Error(NotFound { resource: "test" }) }
+-- Hex: [0x12, 0x08, 0x0a, 0x06, 0x0a, 0x04, 0x74, 0x65, 0x73, 0x74]
+testHaskellNotFoundErrorEncodingMatchesRust :: IO TestResult
+testHaskellNotFoundErrorEncodingMatchesRust = do
+  let resp =
+        EffectResponse
+          { effectResponseResult =
+              Just
+                ( EffectResponseResultError
+                    EffectError
+                      { effectErrorKind =
+                          Just (EffectErrorKindNotFound (NotFound {notFoundResource = "test"}))
+                      }
+                )
+          }
+  let haskellBytes = BL.toStrict (toLazyByteString resp)
+  let rustBytes = pack [0x12, 0x08, 0x0a, 0x06, 0x0a, 0x04, 0x74, 0x65, 0x73, 0x74]
+  assert
+    "haskell_not_found_error_encoding_matches_rust"
+    (haskellBytes == rustBytes)
+    ( "Haskell: " ++ show (BS.unpack haskellBytes)
+        ++ " vs Rust: " ++ show (BS.unpack rustBytes)
+    )
+
+-- Rust: EffectResponse { Error(Custom { code: "agent_error", message: "spawn timed out" }) }
+-- Hex from cross_language_hex_reference
+testHaskellCustomErrorEncodingMatchesRust :: IO TestResult
+testHaskellCustomErrorEncodingMatchesRust = do
+  let resp =
+        EffectResponse
+          { effectResponseResult =
+              Just
+                ( EffectResponseResultError
+                    EffectError
+                      { effectErrorKind =
+                          Just
+                            ( EffectErrorKindCustom
+                                Custom
+                                  { customCode = "agent_error",
+                                    customMessage = "spawn timed out",
+                                    customData = ""
+                                  }
+                            )
+                      }
+                )
+          }
+  let haskellBytes = BL.toStrict (toLazyByteString resp)
+  let rustBytes =
+        pack
+          [ 0x12, 0x20, 0x32, 0x1e, 0x0a, 0x0b, 0x61, 0x67,
+            0x65, 0x6e, 0x74, 0x5f, 0x65, 0x72, 0x72, 0x6f,
+            0x72, 0x12, 0x0f, 0x73, 0x70, 0x61, 0x77, 0x6e,
+            0x20, 0x74, 0x69, 0x6d, 0x65, 0x64, 0x20, 0x6f,
+            0x75, 0x74
+          ]
+  assert
+    "haskell_custom_error_encoding_matches_rust"
+    (haskellBytes == rustBytes)
+    ( "Haskell: " ++ show (BS.unpack haskellBytes)
+        ++ " vs Rust: " ++ show (BS.unpack rustBytes)
+    )
+
+-- ============================================================================
+-- Edge case: empty payload in oneof
+-- ============================================================================
+
+-- Rust: EffectResponse { Payload(vec![]) } → [0x0a, 0x00]
+-- This is a critical edge case: empty bytes in a oneof must still be present
+-- on the wire (tag + length=0), otherwise it looks like "no result set".
+testDecodeRustEmptyPayload :: IO TestResult
+testDecodeRustEmptyPayload = do
+  let rustBytes = pack [0x0a, 0x00]
+  case fromByteString rustBytes of
+    Left err ->
+      pure $ Fail "decode_rust_empty_payload" ("Decode failed: " ++ show err)
+    Right (decoded :: EffectResponse) ->
+      case effectResponseResult decoded of
+        Just (EffectResponseResultPayload p) ->
+          assert "decode_rust_empty_payload" (BS.null p) ("Expected empty, got " ++ show (BS.length p) ++ " bytes")
+        other ->
+          pure $ Fail "decode_rust_empty_payload" ("Expected Payload, got: " ++ show other)
+
+testHaskellEmptyPayloadMatchesRust :: IO TestResult
+testHaskellEmptyPayloadMatchesRust = do
+  let resp =
+        EffectResponse
+          { effectResponseResult = Just (EffectResponseResultPayload "")
+          }
+  let haskellBytes = BL.toStrict (toLazyByteString resp)
+  let rustBytes = pack [0x0a, 0x00]
+  assert
+    "haskell_empty_payload_matches_rust"
     (haskellBytes == rustBytes)
     ( "Haskell: " ++ show (BS.unpack haskellBytes)
         ++ " vs Rust: " ++ show (BS.unpack rustBytes)

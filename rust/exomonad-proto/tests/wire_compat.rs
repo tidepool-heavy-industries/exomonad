@@ -928,6 +928,17 @@ mod binary {
         }
     }
 
+    /// Verify empty payload encoding for cross-language test.
+    #[test]
+    fn empty_payload_hex_reference() {
+        let response = EffectResponse {
+            result: Some(ResponseResult::Payload(vec![])),
+        };
+        let bytes = response.encode_to_vec();
+        // Empty bytes in oneof: tag(0x0a) + len(0x00)
+        assert_eq!(bytes, vec![0x0a, 0x00], "Empty payload wire bytes");
+    }
+
     fn print_hex(label: &str, bytes: &[u8]) {
         let hex: String = bytes
             .iter()

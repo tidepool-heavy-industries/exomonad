@@ -59,7 +59,7 @@ import Effects.Envelope
     EffectResponse (..),
     EffectResponseResult (..),
   )
-import ExoMonad.PDK.Memory (alloc, findMemory, free, load, memoryLength, memoryOffset)
+import ExoMonad.PDK.Memory (alloc, findMemory, free, load, memoryOffset)
 import Proto3.Suite.Class (Message, fromByteString, toLazyByteString)
 
 -- ============================================================================
@@ -120,7 +120,6 @@ yieldEffect effectType request = do
 
     -- Read response from WASM memory
     respMem <- findMemory respOffset
-    let respLen = memoryLength respMem
     bracket (pure respMem) free $ \_ -> do
       respBytes <- (load respMem :: IO (Either String ByteString))
 
@@ -137,15 +136,9 @@ yieldEffect effectType request = do
                     "decode_error"
                     ( "effect="
                         <> effectType
-                        <> " offset="
-                        <> TL.pack (show respOffset)
-                        <> " extism_length="
-                        <> TL.pack (show respLen)
-                        <> " loaded_bytes="
+                        <> " bytes="
                         <> TL.pack (show (BS.length bytes))
-                        <> " all_bytes=["
-                        <> TL.pack (showHexBytes bytes)
-                        <> "] error="
+                        <> " error="
                         <> TL.pack (show parseErr)
                     )
             Right (EffectResponse (Just (EffectResponseResultPayload payloadBytes))) ->
@@ -160,9 +153,7 @@ yieldEffect effectType request = do
                             <> effectType
                             <> " payload_bytes="
                             <> TL.pack (show (BS.length payloadBytes))
-                            <> " first_bytes=["
-                            <> TL.pack (showHexBytes (BS.take 32 payloadBytes))
-                            <> "] error="
+                            <> " error="
                             <> TL.pack (show innerErr)
                         )
                 Right resp ->
@@ -206,13 +197,3 @@ mkCustomError code msg =
               }
     }
 
--- | Format bytes as hex string for diagnostics (e.g., "0a 05 68 65 6c").
-showHexBytes :: ByteString -> String
-showHexBytes bs = unwords [showHex2 b | b <- BS.unpack bs]
-  where
-    showHex2 b =
-      let (hi, lo) = b `divMod` 16
-       in [hexDigit hi, hexDigit lo]
-    hexDigit n
-      | n < 10 = toEnum (fromEnum '0' + fromIntegral n)
-      | otherwise = toEnum (fromEnum 'a' + fromIntegral n - 10)

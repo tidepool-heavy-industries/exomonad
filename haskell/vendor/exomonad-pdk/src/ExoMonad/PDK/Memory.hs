@@ -50,26 +50,29 @@ alloc bs = do
   writeBytes offs len bs
   return mem
 
--- | Read bytes from Memory
+-- | Read bytes from Memory using direct byte packing.
+-- Previously used B.concat of singleton ByteStrings which caused issues
+-- with proto3-wire's decoder on wasm32.
 readBytes :: MemoryOffset -> MemoryLength -> IO B.ByteString
-readBytes offs len = readLoop extismLoadU8 extismLoadU64 (offs + len) offs []
+readBytes offs len = do
+  bytes <- readBytesLoop extismLoadU8 offs (fromIntegral len) 0 []
+  return $ B.pack (reverse bytes)
 
--- | Read input bytes
+-- | Read input bytes using direct byte packing.
 readInputBytes :: InputLength -> IO B.ByteString
-readInputBytes len = readLoop extismInputLoadU8 extismInputLoadU64 len 0 []
+readInputBytes len = do
+  bytes <- readBytesLoop extismInputLoadU8 0 (fromIntegral len) 0 []
+  return $ B.pack (reverse bytes)
 
--- | Internal loop for reading bytes.
---
--- Reads byte-by-byte using the u8 function only. The u64 optimization
--- caused alignment issues on wasm32 (poke of Word64 to unaligned Ptr
--- produced garbled bytes, breaking protobuf varint parsing).
-readLoop :: (Word64 -> IO Word8) -> (Word64 -> IO Word64) -> Word64 -> Word64 -> [B.ByteString] -> IO B.ByteString
-readLoop f1 _f8 total index acc =
-  if index >= total
-    then return $ B.concat . reverse $ acc
-    else do
-      b <- f1 index
-      readLoop f1 _f8 total (index + 1) (B.singleton b : acc)
+-- | Read bytes one at a time into a list of Word8, then pack into ByteString.
+-- This avoids the B.concat-of-singletons approach which produced ByteStrings
+-- that proto3-wire couldn't parse on wasm32.
+readBytesLoop :: (Word64 -> IO Word8) -> Word64 -> Int -> Int -> [Word8] -> IO [Word8]
+readBytesLoop f1 baseOff total index acc
+  | index >= total = return acc
+  | otherwise = do
+      b <- f1 (baseOff + fromIntegral index)
+      readBytesLoop f1 baseOff total (index + 1) (b : acc)
 
 -- | Helper to convert Word64 to ByteString (little-endian)
 word64ToBS :: Word64 -> B.ByteString

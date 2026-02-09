@@ -168,54 +168,28 @@ decodeWire0 cl z finish bstr = drloop bstr z
       drloop rest2 (cl xs (FieldNumber fn) res)
 {-# INLINE decodeWire0 #-}
 
-eitherUncons :: B.ByteString -> Either String (Word8, B.ByteString)
-eitherUncons = maybe (Left "failed to parse varint128") Right . B.uncons
-
+-- | Loop-based varint decoder using bitwise OR and clearBit.
+-- Replaces the original unrolled version which used (+) and (- 0x80).
+-- The original produced wrong Word64 shift results on GHC wasm32
+-- (e.g., 2 `shiftL` 7 gave 512 instead of 256). This loop-based
+-- version using (.|.) and clearBit is proven correct on wasm32.
 takeVarInt :: B.ByteString -> Either String (Word64, B.ByteString)
-takeVarInt !bs =
-  case B.uncons bs of
-     Nothing -> Right (0, B.empty)
-     Just (w1, r1) -> do
-       if w1 < 128 then return (fromIntegral w1, r1) else do
-        let val1 = fromIntegral (w1 - 0x80)
-
-        (w2,r2) <- eitherUncons r1
-        if w2 < 128 then return (val1 + (fromIntegral w2 `shiftL` 7), r2) else do
-         let val2 = (val1 + (fromIntegral (w2 - 0x80) `shiftL` 7))
-
-         (w3,r3) <- eitherUncons r2
-         if w3 < 128 then return (val2 + (fromIntegral w3 `shiftL` 14), r3) else do
-          let val3 = (val2 + (fromIntegral (w3 - 0x80) `shiftL` 14))
-
-          (w4,r4) <- eitherUncons r3
-          if w4 < 128 then return (val3 + (fromIntegral w4 `shiftL` 21), r4) else do
-           let val4 = (val3 + (fromIntegral (w4 - 0x80) `shiftL` 21))
-
-           (w5,r5) <- eitherUncons r4
-           if w5 < 128 then return (val4 + (fromIntegral w5 `shiftL` 28), r5) else do
-            let val5 = (val4 + (fromIntegral (w5 - 0x80) `shiftL` 28))
-
-            (w6,r6) <- eitherUncons r5
-            if w6 < 128 then return (val5 + (fromIntegral w6 `shiftL` 35), r6) else do
-             let val6 = (val5 + (fromIntegral (w6 - 0x80) `shiftL` 35))
-
-             (w7,r7) <- eitherUncons r6
-             if w7 < 128 then return (val6 + (fromIntegral w7 `shiftL` 42), r7) else do
-              let val7 = (val6 + (fromIntegral (w7 - 0x80) `shiftL` 42))
-
-              (w8,r8) <- eitherUncons r7
-              if w8 < 128 then return (val7 + (fromIntegral w8 `shiftL` 49), r8) else do
-               let val8 = (val7 + (fromIntegral (w8 - 0x80) `shiftL` 49))
-
-               (w9,r9) <- eitherUncons r8
-               if w9 < 128 then return (val8 + (fromIntegral w9 `shiftL` 56), r9) else do
-                let val9 = (val8 + (fromIntegral (w9 - 0x80) `shiftL` 56))
-
-                (w10,r10) <- eitherUncons r9
-                if w10 < 128 then return (val9 + (fromIntegral w10 `shiftL` 63), r10) else do
-
-                 Left ("failed to parse varint128: too big; " ++ show val6)
-{-# INLINE takeVarInt #-}
+takeVarInt !bs = go 0 0 bs (0 :: Int)
+  where
+    go :: Word64 -> Int -> B.ByteString -> Int -> Either String (Word64, B.ByteString)
+    go !acc !shift !b !count
+      | count >= 10 = Left $ "failed to parse varint128: too big; " ++ show acc
+      | otherwise = case B.uncons b of
+          Nothing
+            | count == 0 -> Right (0, B.empty)
+            | otherwise  -> Left "failed to parse varint128: unexpected end of input"
+          Just (w, rest)
+            | testBit w 7 ->
+                let !val = fromIntegral (clearBit w 7) `shiftL` shift
+                in go (acc .|. val) (shift + 7) rest (count + 1)
+            | otherwise ->
+                let !val = fromIntegral w `shiftL` shift
+                in Right (acc .|. val, rest)
 
 
 gwireType :: Word8 -> Either String WireType
