@@ -3,13 +3,16 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::RwLock;
+
+#[cfg(unix)]
+use std::os::unix::io::{AsRawFd, RawFd};
 
 /// Global lock to ensure thread-safety within the same process.
 /// `fcntl` advisory locks are per-process, so we need this for multi-threaded access.
-static INBOX_LOCK: Mutex<()> = Mutex::new(());
+/// Use an `RwLock` so concurrent readers can proceed without blocking each other.
+static INBOX_LOCK: RwLock<()> = RwLock::new(());
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InboxMessage {
@@ -43,6 +46,7 @@ pub fn inbox_path(team_name: &str, agent_name: &str) -> PathBuf {
 ///
 /// Uses `F_SETLKW` for blocking wait on lock acquisition.
 /// Lock is released when the file is closed (or explicitly unlocked).
+#[cfg(unix)]
 fn with_lock<F, T>(fd: RawFd, exclusive: bool, f: F) -> Result<T>
 where
     F: FnOnce() -> Result<T>,
@@ -76,18 +80,34 @@ where
     result
 }
 
+#[cfg(not(unix))]
+fn with_lock<F, T>(_fd: i32, _exclusive: bool, f: F) -> Result<T>
+where
+    F: FnOnce() -> Result<T>,
+{
+    // On non-unix targets, we just execute the closure without fcntl locking.
+    // In a real production environment, we'd implement Windows-specific locking.
+    f()
+}
+
 /// Read all messages from the inbox. Return empty vec if file missing or empty.
 pub fn read_inbox(path: &Path) -> Result<Vec<InboxMessage>> {
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-
     let _thread_lock = INBOX_LOCK
-        .lock()
-        .map_err(|e| anyhow!("Mutex poisoned: {}", e))?;
+        .read()
+        .map_err(|e| anyhow!("RwLock poisoned: {}", e))?;
 
-    let mut file = File::open(path)?;
-    with_lock(file.as_raw_fd(), false, || {
+    let mut file = match File::open(path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e.into()),
+    };
+
+    #[cfg(unix)]
+    let fd = file.as_raw_fd();
+    #[cfg(not(unix))]
+    let fd = 0;
+
+    with_lock(fd, false, || {
         file.seek(SeekFrom::Start(0))?;
         let mut content = String::new();
         file.read_to_string(&mut content)?;
@@ -107,8 +127,8 @@ pub fn append_message(path: &Path, message: &InboxMessage) -> Result<()> {
     }
 
     let _thread_lock = INBOX_LOCK
-        .lock()
-        .map_err(|e| anyhow!("Mutex poisoned: {}", e))?;
+        .write()
+        .map_err(|e| anyhow!("RwLock poisoned: {}", e))?;
 
     let mut file = OpenOptions::new()
         .read(true)
@@ -116,7 +136,12 @@ pub fn append_message(path: &Path, message: &InboxMessage) -> Result<()> {
         .create(true)
         .open(path)?;
 
-    with_lock(file.as_raw_fd(), true, || {
+    #[cfg(unix)]
+    let fd = file.as_raw_fd();
+    #[cfg(not(unix))]
+    let fd = 0;
+
+    with_lock(fd, true, || {
         file.seek(SeekFrom::Start(0))?;
         let mut content = String::new();
         file.read_to_string(&mut content)?;
@@ -146,17 +171,22 @@ pub fn read_unread(path: &Path) -> Result<Vec<InboxMessage>> {
 
 /// Set `read = true` on all messages in the inbox.
 pub fn mark_all_read(path: &Path) -> Result<()> {
-    if !path.exists() {
-        return Ok(());
-    }
-
     let _thread_lock = INBOX_LOCK
-        .lock()
-        .map_err(|e| anyhow!("Mutex poisoned: {}", e))?;
+        .write()
+        .map_err(|e| anyhow!("RwLock poisoned: {}", e))?;
 
-    let mut file = OpenOptions::new().read(true).write(true).open(path)?;
+    let mut file = match OpenOptions::new().read(true).write(true).open(path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e.into()),
+    };
 
-    with_lock(file.as_raw_fd(), true, || {
+    #[cfg(unix)]
+    let fd = file.as_raw_fd();
+    #[cfg(not(unix))]
+    let fd = 0;
+
+    with_lock(fd, true, || {
         file.seek(SeekFrom::Start(0))?;
         let mut content = String::new();
         file.read_to_string(&mut content)?;
