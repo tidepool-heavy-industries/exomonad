@@ -119,6 +119,7 @@ All effects flow through a single `yield_effect` host function using protobuf bi
 | `popup.*` | PopupHandler | Zellij plugin IPC |
 | `file_pr.*` | FilePRHandler | gh CLI |
 | `copilot.*` | CopilotHandler | GitHub API polling |
+| `messaging.*` | MessagingHandler | JSONL mailbox files (outbox/inbox) |
 
 All handlers are registered by `exomonad_core::register_builtin_handlers()`.
 

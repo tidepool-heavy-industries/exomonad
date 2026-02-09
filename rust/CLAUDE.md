@@ -143,20 +143,25 @@ echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
 
 ## MCP Tools
 
-All tools are implemented in Haskell WASM and executed via host functions:
+Most tools are implemented in Haskell WASM and executed via host functions.
+TL-side messaging tools are direct Rust handlers (bypass WASM).
 
-| Tool | Description |
-|------|-------------|
-| `git_branch` | Get current git branch |
-| `git_status` | Get dirty files |
-| `git_log` | Get recent commits |
-| `read_file` | Read file contents |
-| `github_list_issues` | List GitHub issues |
-| `github_get_issue` | Get single issue details |
-| `github_list_prs` | List GitHub pull requests |
-| `spawn_agents` | Create git worktrees + Zellij tabs, auto-start agents (Claude/Gemini) with KDL layout |
-| `cleanup_agents` | Close Zellij tabs and delete worktrees |
-| `list_agents` | List active agent worktrees |
+| Tool | Description | Implementation |
+|------|-------------|----------------|
+| `git_branch` | Get current git branch | WASM |
+| `git_status` | Get dirty files | WASM |
+| `git_log` | Get recent commits | WASM |
+| `read_file` | Read file contents | WASM |
+| `github_list_issues` | List GitHub issues | WASM |
+| `github_get_issue` | Get single issue details | WASM |
+| `github_list_prs` | List GitHub pull requests | WASM |
+| `spawn_agents` | Create git worktrees + Zellij tabs, auto-start agents | WASM |
+| `cleanup_agents` | Close Zellij tabs and delete worktrees | WASM |
+| `list_agents` | List active agent worktrees | WASM |
+| `note` | Send fire-and-forget note to TL (agent-side) | WASM |
+| `question` | Send blocking question to TL (agent-side) | WASM |
+| `get_agent_messages` | Read notes and questions from agent outboxes (TL-side) | Direct Rust |
+| `answer_question` | Answer a pending agent question (TL-side) | Direct Rust |
 
 ## Effect System
 
@@ -185,6 +190,7 @@ Haskell: Either EffectError GetBranchResponse
 | `popup.*` | PopupHandler | show_popup |
 | `file_pr.*` | FilePRHandler | file_pr |
 | `copilot.*` | CopilotHandler | wait_for_copilot_review |
+| `messaging.*` | MessagingHandler | send_note, send_question |
 
 **Zellij Integration:**
 - Uses declarative KDL layouts (not CLI flags)

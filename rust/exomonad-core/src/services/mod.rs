@@ -8,6 +8,7 @@ pub mod git;
 pub mod github;
 pub mod local;
 pub mod log;
+pub mod messaging;
 pub mod popup;
 pub mod secrets;
 pub mod zellij_events;

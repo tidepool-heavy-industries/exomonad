@@ -175,7 +175,16 @@ async fn handle_request(state: &McpState, request: JsonRpcRequest) -> JsonRpcRes
 
         "tools/list" => match tools::get_tool_definitions(state).await {
             Ok(tool_defs) => {
-                let mcp_tools: Vec<McpTool> = tool_defs.into_iter().map(McpTool::from).collect();
+                let mut mcp_tools: Vec<McpTool> =
+                    tool_defs.into_iter().map(McpTool::from).collect();
+
+                // Add direct Rust tools (TL-side messaging)
+                let direct_tools: Vec<McpTool> = tools::tl_messaging_tool_definitions()
+                    .into_iter()
+                    .map(McpTool::from)
+                    .collect();
+                mcp_tools.extend(direct_tools);
+
                 let result = McpToolsListResult { tools: mcp_tools };
                 to_json_value_or_internal_error(id, result)
             }
@@ -199,7 +208,14 @@ async fn handle_request(state: &McpState, request: JsonRpcRequest) -> JsonRpcRes
 
             info!(tool = %tool_name, "Executing tool");
 
-            match tools::execute_tool(state, tool_name, arguments).await {
+            // Route direct Rust tools before falling through to WASM
+            let tool_result = if tools::is_direct_rust_tool(tool_name) {
+                tools::execute_direct_tool(state, tool_name, arguments).await
+            } else {
+                tools::execute_tool(state, tool_name, arguments).await
+            };
+
+            match tool_result {
                 Ok(result) => {
                     let text = serde_json::to_string_pretty(&result).unwrap_or_default();
                     let mcp_result = McpToolCallResult {

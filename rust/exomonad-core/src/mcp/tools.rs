@@ -1,14 +1,16 @@
 //! MCP tool definitions and WASM execution.
 //!
-//! All tool logic is in Haskell WASM. This module provides:
+//! Most tool logic is in Haskell WASM. This module provides:
 //! - Tool schema discovery via WASM (handle_list_tools)
 //! - WASM routing for tool execution (handle_mcp_call)
+//! - Direct Rust tools for TL-side messaging (get_agent_messages, answer_question)
 
 use super::{McpState, ToolDefinition};
+use crate::services::messaging;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use tracing::{debug, error};
+use serde_json::{json, Value};
+use tracing::{debug, error, info};
 
 // ============================================================================
 // WASM MCP Types (matches Haskell Main.hs MCPCallInput/MCPCallOutput)
@@ -112,6 +114,164 @@ pub async fn execute_tool(state: &McpState, name: &str, args: Value) -> Result<V
             .error
             .unwrap_or_else(|| "Unknown WASM error".to_string())))
     }
+}
+
+// ============================================================================
+// Direct Rust Tools (TL-side messaging, bypass WASM)
+// ============================================================================
+
+/// Tool definitions for TL-side messaging tools (registered alongside WASM tools).
+pub fn tl_messaging_tool_definitions() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition {
+            name: "get_agent_messages".to_string(),
+            description: "Read notes and pending questions from agent outboxes. Scans all agent worktrees (or a specific agent) for messages.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "agent_id": {
+                        "type": "string",
+                        "description": "Filter to a specific agent worktree name. If omitted, reads from all agents."
+                    },
+                    "subrepo": {
+                        "type": "string",
+                        "description": "Subrepo path (e.g. 'egregore/') to scope worktree scanning."
+                    }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "answer_question".to_string(),
+            description: "Answer a pending question from an agent. Writes the answer to the agent's inbox, unblocking their send_question call.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "agent_id": {
+                        "type": "string",
+                        "description": "The agent worktree name (e.g. 'gh-42-fix-bug-claude')."
+                    },
+                    "question_id": {
+                        "type": "string",
+                        "description": "The question ID to answer (e.g. 'q-abc123')."
+                    },
+                    "answer": {
+                        "type": "string",
+                        "description": "The answer text."
+                    },
+                    "subrepo": {
+                        "type": "string",
+                        "description": "Subrepo path (e.g. 'egregore/') if agent is in a subrepo."
+                    }
+                },
+                "required": ["agent_id", "question_id", "answer"]
+            }),
+        },
+    ]
+}
+
+/// Check if a tool name is a direct Rust tool (not WASM).
+pub fn is_direct_rust_tool(name: &str) -> bool {
+    matches!(name, "get_agent_messages" | "answer_question")
+}
+
+/// Execute a direct Rust tool by name.
+pub async fn execute_direct_tool(state: &McpState, name: &str, args: Value) -> Result<Value> {
+    match name {
+        "get_agent_messages" => execute_get_agent_messages(state, args).await,
+        "answer_question" => execute_answer_question(state, args).await,
+        _ => Err(anyhow!("Unknown direct tool: {}", name)),
+    }
+}
+
+async fn execute_get_agent_messages(state: &McpState, args: Value) -> Result<Value> {
+    let agent_id = args.get("agent_id").and_then(|v| v.as_str());
+    let subrepo = args.get("subrepo").and_then(|v| v.as_str());
+
+    info!(
+        agent_id = ?agent_id,
+        subrepo = ?subrepo,
+        "Getting agent messages"
+    );
+
+    if let Some(agent_id) = agent_id {
+        // Read from a specific agent
+        let worktree_dir = resolve_worktree_path(&state.project_dir, subrepo, agent_id);
+        let messages = messaging::read_agent_outbox(&worktree_dir)
+            .await
+            .map_err(|e| anyhow!("Failed to read agent outbox: {}", e))?;
+
+        info!(agent = %agent_id, count = messages.len(), "Read agent messages");
+        Ok(json!({
+            "agent_id": agent_id,
+            "messages": messages,
+        }))
+    } else {
+        // Scan all agents
+        let results = messaging::scan_all_agent_messages(&state.project_dir, subrepo)
+            .await
+            .map_err(|e| anyhow!("Failed to scan agent messages: {}", e))?;
+
+        let agents: Vec<Value> = results
+            .into_iter()
+            .map(|(id, msgs)| {
+                json!({
+                    "agent_id": id,
+                    "messages": msgs,
+                })
+            })
+            .collect();
+
+        info!(agent_count = agents.len(), "Scanned all agent messages");
+        Ok(json!({ "agents": agents }))
+    }
+}
+
+async fn execute_answer_question(state: &McpState, args: Value) -> Result<Value> {
+    let agent_id = args
+        .get("agent_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("agent_id is required"))?;
+    let question_id = args
+        .get("question_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("question_id is required"))?;
+    let answer = args
+        .get("answer")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("answer is required"))?;
+    let subrepo = args.get("subrepo").and_then(|v| v.as_str());
+
+    let worktree_dir = resolve_worktree_path(&state.project_dir, subrepo, agent_id);
+
+    info!(
+        agent = %agent_id,
+        question_id = %question_id,
+        "Answering question"
+    );
+
+    messaging::write_agent_answer(&worktree_dir, question_id, answer)
+        .await
+        .map_err(|e| anyhow!("Failed to write answer: {}", e))?;
+
+    info!(agent = %agent_id, question_id = %question_id, "Answer written");
+    Ok(json!({
+        "status": "answered",
+        "agent_id": agent_id,
+        "question_id": question_id,
+    }))
+}
+
+/// Resolve the path to an agent's worktree directory.
+fn resolve_worktree_path(
+    project_dir: &std::path::Path,
+    subrepo: Option<&str>,
+    agent_id: &str,
+) -> std::path::PathBuf {
+    let base = match subrepo {
+        Some(sub) => project_dir.join(sub),
+        None => project_dir.to_path_buf(),
+    };
+    base.join(".exomonad").join("worktrees").join(agent_id)
 }
 
 #[cfg(test)]

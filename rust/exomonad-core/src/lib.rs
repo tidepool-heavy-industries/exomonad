@@ -118,7 +118,7 @@ pub use util::{build_prompt, find_exomonad_binary, shell_quote};
 #[cfg(feature = "runtime")]
 pub use handlers::{
     AgentHandler, CopilotHandler, FilePRHandler, FsHandler, GitHandler, GitHubHandler, LogHandler,
-    PopupHandler,
+    MessagingHandler, PopupHandler,
 };
 #[cfg(feature = "runtime")]
 pub use services::{Services, ValidatedServices};
@@ -292,6 +292,8 @@ pub fn register_builtin_handlers(
     builder = builder.with_effect_handler(handlers::FilePRHandler::new());
 
     builder = builder.with_effect_handler(handlers::CopilotHandler::new());
+
+    builder = builder.with_effect_handler(handlers::MessagingHandler::new());
 
     builder
 }
