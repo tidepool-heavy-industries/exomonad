@@ -6,6 +6,7 @@ pub mod file_pr;
 pub mod filesystem;
 pub mod git;
 pub mod github;
+pub mod inbox;
 pub mod local;
 pub mod log;
 pub mod messaging;
