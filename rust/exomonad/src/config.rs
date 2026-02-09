@@ -20,6 +20,10 @@ pub struct RawConfig {
 
     /// Canonical Zellij session name for this project.
     pub zellij_session: Option<String>,
+
+    /// Shell wrapper command for agent tabs (e.g., "nix develop -c").
+    /// Default: empty (no wrapping, agents use PATH directly).
+    pub shell_wrapper: Option<String>,
 }
 
 /// Final resolved configuration.
@@ -29,6 +33,8 @@ pub struct Config {
     pub role: Role,
     /// Canonical Zellij session name (required after discovery).
     pub zellij_session: String,
+    /// Shell wrapper for spawned agent commands. Empty = no wrapping.
+    pub shell_wrapper: String,
 }
 
 impl Config {
@@ -91,10 +97,17 @@ impl Config {
                 )
             })?;
 
+        // Resolve shell_wrapper: local > global > default
+        let shell_wrapper = local_raw
+            .shell_wrapper
+            .or(global_raw.shell_wrapper)
+            .unwrap_or_default();
+
         Ok(Self {
             project_dir,
             role,
             zellij_session,
+            shell_wrapper,
         })
     }
 
@@ -116,6 +129,7 @@ impl Default for Config {
             project_dir: PathBuf::from("."),
             role: Role::Dev,
             zellij_session: "default".to_string(),
+            shell_wrapper: String::new(),
         }
     }
 }
@@ -207,5 +221,26 @@ mod tests {
         "#;
         let raw: RawConfig = toml::from_str(content).unwrap();
         assert_eq!(raw.zellij_session, Some("tidepool".to_string()));
+    }
+
+    #[test]
+    fn test_raw_config_parse_shell_wrapper() {
+        let content = r#"
+            default_role = "tl"
+            zellij_session = "test"
+            shell_wrapper = "nix develop -c"
+        "#;
+        let raw: RawConfig = toml::from_str(content).unwrap();
+        assert_eq!(raw.shell_wrapper, Some("nix develop -c".to_string()));
+    }
+
+    #[test]
+    fn test_raw_config_no_shell_wrapper() {
+        let content = r#"
+            default_role = "tl"
+            zellij_session = "test"
+        "#;
+        let raw: RawConfig = toml::from_str(content).unwrap();
+        assert!(raw.shell_wrapper.is_none());
     }
 }

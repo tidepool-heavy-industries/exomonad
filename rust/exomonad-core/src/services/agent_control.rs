@@ -231,16 +231,24 @@ pub struct AgentControlService {
     git: GitService,
     /// Zellij session name for event emission
     zellij_session: Option<String>,
+    /// Shell wrapper for spawned agent commands
+    shell_wrapper: String,
 }
 
 impl AgentControlService {
     /// Create a new agent control service.
-    pub fn new(project_dir: PathBuf, github: Option<GitHubService>, git: GitService) -> Self {
+    pub fn new(
+        project_dir: PathBuf,
+        github: Option<GitHubService>,
+        git: GitService,
+        shell_wrapper: String,
+    ) -> Self {
         Self {
             project_dir,
             github,
             git,
             zellij_session: None,
+            shell_wrapper,
         }
     }
 
@@ -268,6 +276,7 @@ impl AgentControlService {
             github,
             git,
             zellij_session: None,
+            shell_wrapper: String::new(),
         })
     }
 
@@ -851,7 +860,11 @@ impl AgentControlService {
             }
             None => cmd.to_string(),
         };
-        let full_command = format!("nix develop -c {}", agent_command);
+        let full_command = if self.shell_wrapper.is_empty() {
+            agent_command
+        } else {
+            format!("{} {}", self.shell_wrapper, agent_command)
+        };
 
         // Escape the command for KDL string literal (escape backslashes, quotes, newlines)
         let kdl_escaped_command = Self::escape_for_kdl(&full_command);
@@ -1250,8 +1263,6 @@ impl AgentControlService {
         worktree_path: &Path,
         agent_type: AgentType,
     ) -> Result<()> {
-        use std::os::unix::fs::symlink;
-
         // Create .exomonad directory
         let exomonad_dir = worktree_path.join(".exomonad");
         fs::create_dir_all(&exomonad_dir).await?;
@@ -1292,40 +1303,8 @@ project_dir = "{}"
             "Wrote .exomonad/config.toml with default_role=dev"
         );
 
-        // Create symlinks for shared resources back to root .exomonad
-        let symlinks = [
-            ("roles", format!("{}/.exomonad/roles", rel_to_root)),
-            ("lib", format!("{}/.exomonad/lib", rel_to_root)),
-        ];
-
-        for (name, target) in symlinks {
-            let link_path = exomonad_dir.join(name);
-            let target_path = Path::new(&target);
-
-            // Remove existing directory/file if it's not a symlink (cleanup old duplicates)
-            if link_path.exists() && !link_path.is_symlink() {
-                if link_path.is_dir() {
-                    fs::remove_dir_all(&link_path).await.ok();
-                    tracing::debug!(name = %name, "Removed existing directory for symlink");
-                } else if link_path.is_file() {
-                    fs::remove_file(&link_path).await.ok();
-                    tracing::debug!(name = %name, "Removed existing file for symlink");
-                }
-            }
-
-            if !link_path.exists() {
-                if let Err(e) = symlink(target_path, &link_path) {
-                    tracing::warn!(
-                        name = %name,
-                        target = %target,
-                        error = %e,
-                        "Failed to create symlink"
-                    );
-                } else {
-                    tracing::debug!(name = %name, target = %target, "Created symlink");
-                }
-            }
-        }
+        // Note: roles/ and lib/ symlinks removed. Dev agents use embedded WASM
+        // via include_bytes! and don't need runtime role/lib resolution.
 
         // Write .gitignore for worktree-specific ignores
         let gitignore_content = "# Auto-generated for worktree\nresult\n";
@@ -1692,6 +1671,7 @@ mod tests {
             PathBuf::from("/tmp"),
             None,
             GitService::new(Arc::new(LocalExecutor)),
+            String::new(),
         );
 
         assert_eq!(
@@ -1792,6 +1772,7 @@ mod tests {
             PathBuf::from("/tmp"),
             None,
             GitService::new(Arc::new(LocalExecutor)),
+            String::new(),
         );
 
         // Path that doesn't exist should fail

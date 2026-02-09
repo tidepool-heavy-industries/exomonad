@@ -582,7 +582,7 @@ async fn main() -> Result<()> {
         Commands::Hook { event, runtime } => {
             // Initialize and validate services
             let services = Arc::new(
-                Services::new()
+                Services::new(config.shell_wrapper.clone())
                     .validate()
                     .context("Failed to validate services")?,
             );
@@ -610,7 +610,7 @@ async fn main() -> Result<()> {
 
             // Initialize and validate services (secrets loaded from ~/.exomonad/secrets)
             let services = Arc::new(
-                Services::new()
+                Services::new(config.shell_wrapper.clone())
                     .validate()
                     .context("Failed to validate services")?,
             );

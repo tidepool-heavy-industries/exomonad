@@ -111,6 +111,9 @@ pub struct Services {
 
     /// Zellij session name for event emission (optional).
     pub zellij_session: Option<String>,
+
+    /// Shell wrapper for spawned agent commands.
+    pub shell_wrapper: String,
 }
 
 /// Validated services wrapper.
@@ -127,13 +130,13 @@ impl Services {
     ///
     /// Commands run directly as subprocesses.
     /// Loads secrets from ~/.exomonad/secrets.
-    pub fn new() -> Self {
+    pub fn new(shell_wrapper: String) -> Self {
         let local = LocalExecutor::new();
         let local_arc: Arc<dyn CommandExecutor> = Arc::new(local);
-        Self::with_executor(local_arc)
+        Self::with_executor(local_arc, shell_wrapper)
     }
 
-    fn with_executor(executor: Arc<dyn CommandExecutor>) -> Self {
+    fn with_executor(executor: Arc<dyn CommandExecutor>, shell_wrapper: String) -> Self {
         let secrets = Secrets::load();
         let git = Arc::new(GitService::new(executor.clone()));
 
@@ -148,6 +151,7 @@ impl Services {
             project_dir.clone(),
             github.clone(),
             GitService::new(executor.clone()),
+            shell_wrapper.clone(),
         ));
 
         // Filesystem service for file read/write operations
@@ -160,6 +164,7 @@ impl Services {
             agent_control,
             filesystem,
             zellij_session: None,
+            shell_wrapper,
         }
     }
 
@@ -172,7 +177,7 @@ impl Services {
 
 impl Default for Services {
     fn default() -> Self {
-        Self::new()
+        Self::new(String::new())
     }
 }
 
