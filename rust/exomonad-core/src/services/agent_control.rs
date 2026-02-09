@@ -160,6 +160,7 @@ pub enum AgentStatus {
     Running,
     OrphanWorktree,
     OrphanTab,
+    Unknown,
 }
 
 impl FFIBoundary for AgentStatus {}
@@ -394,12 +395,24 @@ impl AgentControlService {
             if let Some(ref session) = self.zellij_session {
                 let agent_id = crate::ui_protocol::AgentId::try_from(internal_name.clone())
                     .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
+                
+                // Legacy started event
                 let event = crate::ui_protocol::AgentEvent::AgentStarted {
-                    agent_id,
+                    agent_id: agent_id.clone(),
                     timestamp: zellij_events::now_iso8601(),
                 };
                 if let Err(e) = zellij_events::emit_event(session, &event) {
                     warn!("Failed to emit agent:started event: {}", e);
+                }
+
+                // Rich status update
+                let status_event = crate::ui_protocol::AgentEvent::AgentStatusUpdate {
+                    agent_id,
+                    status: crate::ui_protocol::CoordinatorAgentStatus::Running { pane_id: 0 }, // We don't know pane_id here
+                    timestamp: zellij_events::now_iso8601(),
+                };
+                if let Err(e) = zellij_events::emit_event(session, &status_event) {
+                    warn!("Failed to emit agent:status_update event: {}", e);
                 }
             }
 
@@ -652,7 +665,15 @@ impl AgentControlService {
         }
 
         // 2. Get all Zellij tabs
-        let zellij_tabs = self.get_zellij_tabs().await.unwrap_or_default();
+        let zellij_tabs_result = self.get_zellij_tabs().await;
+        let (zellij_tabs, zellij_available) = match zellij_tabs_result {
+            Ok(tabs) => (tabs, true),
+            Err(e) => {
+                warn!(error = %e, "Zellij tab query failed — agent tab status will be unknown");
+                (Vec::new(), false)
+            }
+        };
+
         let mut tabs = HashSet::new();
         for tab_name in zellij_tabs {
             if let Some(issue_id) = self.extract_issue_id_from_tab_name(&tab_name) {
@@ -670,12 +691,54 @@ impl AgentControlService {
             let has_worktree = worktrees.contains_key(&issue_id);
             let has_tab = tabs.contains(&issue_id);
 
-            let status = match (has_tab, has_worktree) {
-                (true, true) => AgentStatus::Running,
-                (false, true) => AgentStatus::OrphanWorktree,
-                (true, false) => AgentStatus::OrphanTab,
-                (false, false) => continue, // Should not happen
+            let status = if !zellij_available && has_worktree {
+                // Can't determine tab status — report unknown
+                AgentStatus::Unknown
+            } else {
+                match (has_tab, has_worktree) {
+                    (true, true) => AgentStatus::Running,
+                    (false, true) => AgentStatus::OrphanWorktree,
+                    (true, false) => AgentStatus::OrphanTab,
+                    (false, false) => continue, // Should not happen
+                }
             };
+
+            // Emit status events for orphan states detected during listing
+            if let Some(ref session) = self.zellij_session {
+                match status {
+                    AgentStatus::OrphanWorktree => {
+                        let agent_id = crate::ui_protocol::AgentId::try_from(format!("gh-{}", issue_id))
+                            .unwrap_or_else(|_| {
+                                crate::ui_protocol::AgentId::try_from("unknown".to_string())
+                                    .unwrap()
+                            });
+                        let event = crate::ui_protocol::AgentEvent::AgentStatusUpdate {
+                            agent_id,
+                            status: crate::ui_protocol::CoordinatorAgentStatus::Completed {
+                                exit_code: -1,
+                            },
+                            timestamp: zellij_events::now_iso8601(),
+                        };
+                        let _ = zellij_events::emit_event(session, &event);
+                    }
+                    AgentStatus::OrphanTab => {
+                        let agent_id = crate::ui_protocol::AgentId::try_from(format!("gh-{}", issue_id))
+                            .unwrap_or_else(|_| {
+                                crate::ui_protocol::AgentId::try_from("unknown".to_string())
+                                    .unwrap()
+                            });
+                        let event = crate::ui_protocol::AgentEvent::AgentStatusUpdate {
+                            agent_id,
+                            status: crate::ui_protocol::CoordinatorAgentStatus::Failed {
+                                error: "Agent tab exists without worktree".into(),
+                            },
+                            timestamp: zellij_events::now_iso8601(),
+                        };
+                        let _ = zellij_events::emit_event(session, &event);
+                    }
+                    _ => {}
+                }
+            }
 
             let mut agent = AgentInfo {
                 issue_id: issue_id.clone(),
@@ -694,7 +757,13 @@ impl AgentControlService {
             if let Some((path, branch, name)) = worktrees.get(&issue_id) {
                 agent.worktree_path = Some(path.to_string_lossy().to_string());
                 agent.branch_name = Some(branch.clone());
-                agent.has_changes = Some(self.has_uncommitted_changes(path).await);
+                agent.has_changes = match self.has_uncommitted_changes(path).await {
+                    Ok(has) => Some(has),
+                    Err(e) => {
+                        warn!(error = %e, "Could not check uncommitted changes");
+                        None // Unknown — propagate uncertainty
+                    }
+                };
                 agent.has_unpushed = Some(
                     self.git
                         .has_unpushed_commits(&path.to_string_lossy())
@@ -877,9 +946,7 @@ impl AgentControlService {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            // If zellij is not running or other error, return empty list instead of failing
-            warn!(stderr = %stderr, "zellij query-tab-names failed, assuming no tabs");
-            return Ok(Vec::new());
+            return Err(anyhow!("zellij query-tab-names failed: {}", stderr));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1064,6 +1131,16 @@ impl AgentControlService {
 
         info!(path = %path.display(), force, "Running git worktree remove");
 
+        if !force {
+            let has_changes = self.has_uncommitted_changes(path).await.unwrap_or(true);
+            if has_changes {
+                return Err(anyhow!(
+                    "Worktree at {} has uncommitted changes; use force=true to delete",
+                    path.display()
+                ));
+            }
+        }
+
         let mut args = vec!["worktree", "remove"];
         if force {
             args.push("--force");
@@ -1138,17 +1215,29 @@ impl AgentControlService {
         Ok(result.status.success())
     }
 
-    async fn has_uncommitted_changes(&self, worktree_path: &Path) -> bool {
+    async fn has_uncommitted_changes(&self, worktree_path: &Path) -> Result<bool> {
         let output = Command::new("git")
             .args(["status", "--porcelain"])
             .current_dir(worktree_path)
             .output()
-            .await;
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to run git status in worktree: {}",
+                    worktree_path.display()
+                )
+            })?;
 
-        match output {
-            Ok(o) => !o.stdout.is_empty(),
-            Err(_) => false,
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow::anyhow!(
+                "git status failed in {}: {}",
+                worktree_path.display(),
+                stderr
+            ));
         }
+
+        Ok(!output.stdout.is_empty())
     }
 
     // ========================================================================
@@ -1682,5 +1771,31 @@ mod tests {
 
         // Only gh- prefix
         assert!(super::parse_worktree_name("gh-123").is_none());
+    }
+
+    #[test]
+    fn test_agent_status_serialization() {
+        use serde_json;
+
+        assert_eq!(serde_json::to_string(&AgentStatus::Running).unwrap(), "\"RUNNING\"");
+        assert_eq!(serde_json::to_string(&AgentStatus::OrphanWorktree).unwrap(), "\"ORPHAN_WORKTREE\"");
+        assert_eq!(serde_json::to_string(&AgentStatus::OrphanTab).unwrap(), "\"ORPHAN_TAB\"");
+        assert_eq!(serde_json::to_string(&AgentStatus::Unknown).unwrap(), "\"UNKNOWN\"");
+
+        let unknown: AgentStatus = serde_json::from_str("\"UNKNOWN\"").unwrap();
+        assert_eq!(unknown, AgentStatus::Unknown);
+    }
+
+    #[tokio::test]
+    async fn test_has_uncommitted_changes_error() {
+        let service = AgentControlService::new(
+            PathBuf::from("/tmp"),
+            None,
+            GitService::new(Arc::new(LocalExecutor)),
+        );
+
+        // Path that doesn't exist should fail
+        let result = service.has_uncommitted_changes(Path::new("/nonexistent/path/to/repo")).await;
+        assert!(result.is_err());
     }
 }

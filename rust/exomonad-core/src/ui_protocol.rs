@@ -98,6 +98,12 @@ pub enum AgentEvent {
         hook_type: String,
         timestamp: String,
     },
+    #[serde(rename = "agent:status_update")]
+    AgentStatusUpdate {
+        agent_id: AgentId,
+        status: CoordinatorAgentStatus,
+        timestamp: String,
+    },
     #[serde(rename = "pr:filed")]
     PrFiled {
         agent_id: AgentId,

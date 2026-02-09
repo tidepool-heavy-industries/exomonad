@@ -423,6 +423,17 @@ impl ZellijPlugin for ExoMonadPlugin {
                         AgentEvent::AgentStopped { agent_id, timestamp } => (timestamp, format!("{} done", agent_id), Color::Blue),
                         AgentEvent::StopHookBlocked { agent_id, reason, timestamp } => (timestamp, format!("{} blocked: {}", agent_id, reason), Color::Red),
                         AgentEvent::HookReceived { agent_id, hook_type, timestamp } => (timestamp, format!("{} hook: {}", agent_id, hook_type), Color::Cyan),
+                        AgentEvent::AgentStatusUpdate { agent_id, status, timestamp } => {
+                            let (msg, color) = match status {
+                                CoordinatorAgentStatus::SettingUp => ("setting up".to_string(), Color::Yellow),
+                                CoordinatorAgentStatus::PaneOpening => ("opening pane".to_string(), Color::Cyan),
+                                CoordinatorAgentStatus::Running { pane_id } => (format!("running (pane {})", pane_id), Color::Green),
+                                CoordinatorAgentStatus::Cleaning => ("cleaning up".to_string(), Color::Blue),
+                                CoordinatorAgentStatus::Completed { exit_code } => (format!("completed (exit {})", exit_code), Color::Gray),
+                                CoordinatorAgentStatus::Failed { error } => (format!("failed: {}", error), Color::Red),
+                            };
+                            (timestamp, format!("{} {}", agent_id, msg), color)
+                        },
                         AgentEvent::PrFiled { agent_id, pr_number, timestamp } => (timestamp, format!("{} PR #{}", agent_id, pr_number), Color::Magenta),
                         AgentEvent::CopilotReviewed { agent_id, comment_count, timestamp } => (timestamp, format!("{} copilot: {} comments", agent_id, comment_count), Color::Yellow),
                         AgentEvent::AgentStuck { agent_id, failed_stop_count, timestamp } => (timestamp, format!("{} ⚠ STUCK ({} failed stops)", agent_id, failed_stop_count), Color::Red),

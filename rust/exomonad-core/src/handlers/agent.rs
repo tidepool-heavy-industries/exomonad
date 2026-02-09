@@ -244,7 +244,8 @@ fn service_info_to_proto(info: &AgentInfo) -> exomonad_proto::effects::agent::Ag
     let status = match info.status {
         crate::services::agent_control::AgentStatus::Running => AgentStatus::Running as i32,
         crate::services::agent_control::AgentStatus::OrphanWorktree => AgentStatus::Stopped as i32,
-        crate::services::agent_control::AgentStatus::OrphanTab => AgentStatus::Stopped as i32,
+        crate::services::agent_control::AgentStatus::OrphanTab => AgentStatus::Failed as i32,
+        crate::services::agent_control::AgentStatus::Unknown => AgentStatus::Unspecified as i32,
     };
 
     exomonad_proto::effects::agent::AgentInfo {
@@ -259,5 +260,52 @@ fn service_info_to_proto(info: &AgentInfo) -> exomonad_proto::effects::agent::Ag
         error: String::new(),
         pr_number: info.pr.as_ref().map(|p| p.number as i32).unwrap_or(0),
         pr_url: info.pr.as_ref().map(|p| p.url.clone()).unwrap_or_default(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::agent_control::AgentStatus as ServiceStatus;
+    use exomonad_proto::effects::agent::AgentStatus as ProtoStatus;
+
+    #[test]
+    fn test_service_info_to_proto_status_mapping() {
+        let mut info = AgentInfo {
+            issue_id: "123".to_string(),
+            has_tab: true,
+            has_worktree: true,
+            status: ServiceStatus::Running,
+            worktree_path: None,
+            branch_name: None,
+            has_changes: None,
+            has_unpushed: None,
+            slug: None,
+            agent_type: None,
+            pr: None,
+        };
+
+        assert_eq!(
+            service_info_to_proto(&info).status,
+            ProtoStatus::Running as i32
+        );
+
+        info.status = ServiceStatus::OrphanWorktree;
+        assert_eq!(
+            service_info_to_proto(&info).status,
+            ProtoStatus::Stopped as i32
+        );
+
+        info.status = ServiceStatus::OrphanTab;
+        assert_eq!(
+            service_info_to_proto(&info).status,
+            ProtoStatus::Failed as i32
+        );
+
+        info.status = ServiceStatus::Unknown;
+        assert_eq!(
+            service_info_to_proto(&info).status,
+            ProtoStatus::Unspecified as i32
+        );
     }
 }
