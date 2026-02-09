@@ -8,13 +8,15 @@ use crate::effects::{
 use async_trait::async_trait;
 use chrono::Utc;
 use exomonad_proto::effects::messaging::*;
-use nix::fcntl::{Flock, FlockArg};
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::time::sleep;
+
+#[cfg(unix)]
+use nix::fcntl::{Flock, FlockArg};
 
 /// Teams message format used by Claude Code Teams.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,10 +119,11 @@ impl MessagingEffects for MessagingHandler {
             }
 
             let my_inbox_clone = my_inbox.clone();
-            if let Some(answer) = tokio::task::spawn_blocking(move || poll_inbox(&my_inbox_clone))
-                .await
-                .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
-                .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
+            if let Some(answer) =
+                tokio::task::spawn_blocking(move || consume_unread_from_inbox(&my_inbox_clone))
+                    .await
+                    .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
+                    .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
             {
                 return Ok(SendQuestionResponse {
                     answer: answer.text,
@@ -189,8 +192,10 @@ fn append_to_inbox(path: &Path, msg: TeamsMessage) -> anyhow::Result<()> {
         .create(true)
         .open(path)?;
 
-    // Lock file using RAII Flock
+    #[cfg(unix)]
     let mut locked_file = Flock::lock(file, FlockArg::LockExclusive).map_err(|(_, e)| e)?;
+    #[cfg(not(unix))]
+    let mut locked_file = file;
 
     let mut content = String::new();
     locked_file.read_to_string(&mut content)?;
@@ -198,41 +203,84 @@ fn append_to_inbox(path: &Path, msg: TeamsMessage) -> anyhow::Result<()> {
     let mut messages: Vec<TeamsMessage> = if content.is_empty() {
         Vec::new()
     } else {
-        serde_json::from_str(&content).unwrap_or_default()
+        serde_json::from_str(&content)?
     };
 
     messages.push(msg);
-
-    let new_content = serde_json::to_string(&messages)?;
-    locked_file.set_len(0)?;
-    locked_file.seek(SeekFrom::Start(0))?;
-    locked_file.write_all(new_content.as_bytes())?;
+    atomic_write(path, &messages, &mut locked_file)?;
 
     Ok(())
 }
 
-fn poll_inbox(path: &Path) -> anyhow::Result<Option<TeamsMessage>> {
+fn consume_unread_from_inbox(path: &Path) -> anyhow::Result<Option<TeamsMessage>> {
     if !path.exists() {
         return Ok(None);
     }
 
-    let file = OpenOptions::new().read(true).open(path)?;
+    let file = OpenOptions::new().read(true).write(true).open(path)?;
 
-    // Lock file even for polling
-    let mut locked_file = Flock::lock(file, FlockArg::LockShared).map_err(|(_, e)| e)?;
+    #[cfg(unix)]
+    let mut locked_file = Flock::lock(file, FlockArg::LockExclusive).map_err(|(_, e)| e)?;
+    #[cfg(not(unix))]
+    let mut locked_file = file;
 
     let mut content = String::new();
     locked_file.read_to_string(&mut content)?;
-    let messages: Vec<TeamsMessage> = serde_json::from_str(&content).unwrap_or_default();
+    let mut messages: Vec<TeamsMessage> = serde_json::from_str(&content)?;
 
     // Find first unread message
-    for msg in messages {
+    let mut found_idx = None;
+    for (idx, msg) in messages.iter().enumerate() {
         if !msg.read {
-            return Ok(Some(msg));
+            found_idx = Some(idx);
+            break;
         }
     }
 
+    if let Some(idx) = found_idx {
+        let msg = messages[idx].clone();
+        messages[idx].read = true;
+        atomic_write(path, &messages, &mut locked_file)?;
+        return Ok(Some(msg));
+    }
+
     Ok(None)
+}
+
+/// Helper for atomic write to avoid corruption on crash.
+/// Writes to .tmp then renames.
+fn atomic_write(
+    path: &Path,
+    messages: &[TeamsMessage],
+    #[allow(unused_variables)] locked_file: &mut std::fs::File,
+) -> anyhow::Result<()> {
+    let new_content = serde_json::to_string(messages)?;
+
+    let tmp_path = path.with_extension("tmp");
+    let mut tmp_file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&tmp_path)?;
+
+    tmp_file.write_all(new_content.as_bytes())?;
+    tmp_file.sync_all()?;
+
+    // Perform the rename. On Unix, this is atomic.
+    std::fs::rename(tmp_path, path)?;
+
+    // After rename, the original file handle `locked_file` is still pointing to the old inode
+    // (on Unix). We should probably also truncate/write to the original file to keep it in sync
+    // or just rely on rename and accept that the next opener gets the new file.
+    // However, if we want to be strictly correct with the lock, we should write to the locked file.
+    // But Claude Teams logic might expect the file to be replaced.
+    // For now, let's also write to the locked file to ensure anyone holding the lock sees the update.
+    locked_file.set_len(0)?;
+    locked_file.seek(SeekFrom::Start(0))?;
+    locked_file.write_all(new_content.as_bytes())?;
+    locked_file.sync_all()?;
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -241,7 +289,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     #[test]
-    fn test_append_and_poll() {
+    fn test_append_and_consume() {
         let tmp = NamedTempFile::new().unwrap();
         let path = tmp.path();
 
@@ -256,12 +304,31 @@ mod tests {
 
         append_to_inbox(path, msg.clone()).unwrap();
 
-        let polled = poll_inbox(path).unwrap().unwrap();
-        assert_eq!(polled.text, "hello");
-        assert_eq!(polled.from, "agent");
+        let consumed = consume_unread_from_inbox(path).unwrap().unwrap();
+        assert_eq!(consumed.text, "hello");
+        assert_eq!(consumed.from, "agent");
 
-        // Second poll should still find it because we didn't mark it as read
-        let polled2 = poll_inbox(path).unwrap().unwrap();
-        assert_eq!(polled2.text, "hello");
+        // Second poll should be None because it was marked as read
+        let polled2 = consume_unread_from_inbox(path).unwrap();
+        assert!(polled2.is_none());
+    }
+
+    #[test]
+    fn test_parse_failure_propagation() {
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path();
+        std::fs::write(path, "invalid json").unwrap();
+
+        let msg = TeamsMessage {
+            from: "a".to_string(),
+            text: "t".to_string(),
+            summary: "s".to_string(),
+            timestamp: "now".to_string(),
+            color: "c".to_string(),
+            read: false,
+        };
+
+        let result = append_to_inbox(path, msg);
+        assert!(result.is_err());
     }
 }
