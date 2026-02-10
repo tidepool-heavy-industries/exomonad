@@ -41,3 +41,4 @@ tempfile = { workspace = true }
 assert_cmd = "2.0"
 duct = { workspace = true }
 predicates = "3.0"
+reqwest = { version = "0.12", features = ["blocking", "json"] }

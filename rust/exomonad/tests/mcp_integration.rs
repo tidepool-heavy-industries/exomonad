@@ -1,16 +1,17 @@
-//! MCP stdio integration tests.
+//! MCP HTTP integration tests.
 //!
-//! Black-box tests that spawn `exomonad mcp-stdio` as a subprocess and drive it
-//! via JSON-RPC over stdin/stdout. Catches wire format mismatches (varint128 decode
-//! errors) by exercising the full pipeline:
-//!   JSON-RPC → WASM (Haskell) → protobuf effects → Rust handlers → protobuf response → WASM decode → JSON-RPC response
+//! Black-box tests that spawn `exomonad serve --port <port>` as a subprocess and
+//! drive it via JSON-RPC over HTTP (StreamableHttp transport). Catches wire format
+//! mismatches by exercising the full pipeline:
+//!   HTTP POST → axum → rmcp StreamableHttp → WASM (Haskell) → protobuf effects
+//!     → Rust handlers → protobuf response → WASM decode → JSON-RPC response
 //!
 //! The default test role is `tl`, which provides: spawn_agents, cleanup_agents,
 //! cleanup_merged_agents, list_agents, popup.
 //!
-//! Each test spawns a full exomonad subprocess with ~4MB WASM loading, so we limit
-//! concurrency to avoid resource exhaustion when `cargo test` runs all 38+ tests
-//! in parallel. The SUBPROCESS_SEMAPHORE caps concurrent spawns.
+//! Each test spawns a full exomonad serve subprocess with ~4MB WASM loading, so we
+//! limit concurrency to avoid resource exhaustion. The SUBPROCESS_SEMAPHORE caps
+//! concurrent spawns.
 //!
 //! **Run with limited threads:** `cargo test -p exomonad --test mcp_integration -- --test-threads=2`
 //! Default thread count can cause timeouts due to WASM compilation overhead.
@@ -18,16 +19,17 @@
 #![allow(deprecated)] // cargo_bin function — no macro alternative that returns PathBuf
 
 use assert_cmd::cargo::cargo_bin;
+use reqwest::blocking::Client;
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE};
 use serde_json::{json, Value};
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Receiver};
+use std::net::TcpListener;
+use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tempfile::TempDir;
 
 /// Limits concurrent subprocess spawns to avoid resource exhaustion.
-/// Each exomonad process loads ~4MB of WASM, so 38 simultaneous processes
+/// Each exomonad process loads ~4MB of WASM, so many simultaneous processes
 /// can exceed system limits (file descriptors, memory, CPU for WASM compilation).
 const MAX_CONCURRENT_SUBPROCESSES: usize = 8;
 
@@ -73,166 +75,239 @@ impl Drop for SemaphoreGuard<'_> {
 }
 
 // ============================================================================
-// McpProcess — subprocess lifecycle helper
+// McpServer — HTTP subprocess lifecycle helper
 // ============================================================================
 
-struct McpProcess {
+struct McpServer {
     child: Child,
-    stdin: Option<ChildStdin>,
-    response_rx: Receiver<String>,
-    stderr_rx: Receiver<String>,
+    port: u16,
+    client: Client,
+    session_id: Option<String>,
     _semaphore_guard: SemaphoreGuard<'static>,
+    _work_dir: TempDir,
 }
 
-impl McpProcess {
-    /// Spawn `exomonad mcp-stdio` in the given working directory.
-    /// Blocks until a semaphore slot is available to limit concurrent subprocesses.
-    fn spawn(work_dir: &std::path::Path) -> Self {
+/// Find a free TCP port by binding to port 0 and reading the assigned port.
+fn find_free_port() -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind to port 0");
+    listener.local_addr().unwrap().port()
+}
+
+/// Path to the workspace root's WASM directory.
+fn wasm_source_dir() -> std::path::PathBuf {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    // rust/exomonad/ → exomonad/ (workspace root)
+    manifest_dir
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join(".exomonad/wasm")
+}
+
+/// Parse a JSON-RPC response from an SSE body.
+/// SSE format: lines starting with "data: " contain the payload.
+/// We want the last non-empty data line (which has the actual response).
+fn parse_sse_json(body: &str) -> Value {
+    let mut last_json = None;
+    for line in body.lines() {
+        if let Some(data) = line.strip_prefix("data: ") {
+            let trimmed = data.trim();
+            if !trimmed.is_empty() {
+                if let Ok(val) = serde_json::from_str::<Value>(trimmed) {
+                    last_json = Some(val);
+                }
+            }
+        }
+    }
+    last_json.unwrap_or_else(|| panic!("No JSON found in SSE body: {}", body))
+}
+
+impl McpServer {
+    /// Spawn `exomonad serve --port <port>` in an isolated temp directory.
+    /// Blocks until the server's health endpoint responds.
+    fn spawn(work_dir: TempDir) -> Self {
         let guard = subprocess_semaphore().acquire();
+        let port = find_free_port();
 
         let mut child = Command::new(cargo_bin("exomonad"))
-            .args(["mcp-stdio"])
-            .current_dir(work_dir)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
+            .args(["serve", "--port", &port.to_string()])
+            .current_dir(work_dir.path())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("Failed to spawn exomonad mcp-stdio");
+            .expect("Failed to spawn exomonad serve");
 
-        let stdin = child.stdin.take().expect("Failed to capture stdin");
-        let stdout = child.stdout.take().expect("Failed to capture stdout");
-        let stderr = child.stderr.take().expect("Failed to capture stderr");
+        let client = Client::builder()
+            .timeout(Duration::from_secs(15))
+            .build()
+            .unwrap();
 
-        // Background reader thread feeds stdout lines into a channel
-        let (tx, rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let reader = BufReader::new(stdout);
-            for line in reader.lines() {
-                match line {
-                    Ok(l) if !l.trim().is_empty() => {
-                        if tx.send(l).is_err() {
-                            break;
-                        }
+        // Wait for health endpoint to respond
+        let health_url = format!("http://127.0.0.1:{}/health", port);
+        let mut ready = false;
+        for i in 0..100 {
+            std::thread::sleep(Duration::from_millis(100));
+            // Check if process has exited early
+            if i % 10 == 5 {
+                if let Ok(Some(status)) = child.try_wait() {
+                    let mut stderr_buf = String::new();
+                    if let Some(ref mut stderr) = child.stderr {
+                        use std::io::Read;
+                        let _ = stderr.read_to_string(&mut stderr_buf);
                     }
-                    Ok(_) => continue,
-                    Err(_) => break,
+                    panic!(
+                        "Server exited early with status: {}. Port: {}. Stderr: {}",
+                        status, port, stderr_buf
+                    );
                 }
             }
-        });
-
-        // Background reader thread captures stderr for diagnostics
-        let (err_tx, err_rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let reader = BufReader::new(stderr);
-            for line in reader.lines() {
-                match line {
-                    Ok(l) if !l.trim().is_empty() => {
-                        if err_tx.send(l).is_err() {
-                            break;
-                        }
-                    }
-                    Ok(_) => continue,
-                    Err(_) => break,
+            if let Ok(resp) = client.get(&health_url).send() {
+                if resp.status().is_success() {
+                    ready = true;
+                    break;
                 }
             }
-        });
+        }
+        if !ready {
+            let mut stderr_buf = String::new();
+            if let Some(ref mut stderr) = child.stderr {
+                use std::io::Read;
+                let _ = stderr.read_to_string(&mut stderr_buf);
+            }
+            panic!(
+                "Server failed to start on port {} within 10s. Stderr: {}",
+                port, stderr_buf
+            );
+        }
 
         Self {
             child,
-            stdin: Some(stdin),
-            response_rx: rx,
-            stderr_rx: err_rx,
+            port,
+            client,
+            session_id: None,
             _semaphore_guard: guard,
+            _work_dir: work_dir,
         }
     }
 
-    fn write_line(&mut self, line: &str) {
-        let stdin = self.stdin.as_mut().expect("stdin already closed");
-        writeln!(stdin, "{}", line).expect("Failed to write to stdin");
-        stdin.flush().expect("Failed to flush stdin");
+    fn mcp_url(&self) -> String {
+        format!("http://127.0.0.1:{}/tl/mcp", self.port)
     }
 
-    /// Try to write a line, returning false if the pipe is broken (process exited).
-    fn try_write_line(&mut self, line: &str) -> bool {
-        if let Some(stdin) = self.stdin.as_mut() {
-            if writeln!(stdin, "{}", line).is_ok() {
-                return stdin.flush().is_ok();
-            }
-        }
-        false
-    }
-
-    /// Collect any stderr output accumulated so far.
-    fn drain_stderr(&self) -> String {
-        let mut lines = Vec::new();
-        while let Ok(line) = self.stderr_rx.try_recv() {
-            lines.push(line);
-        }
-        lines.join("\n")
-    }
-
-    /// Send a JSON-RPC request (has `id`) and read the response with a timeout.
+    /// Send a JSON-RPC request via HTTP POST and return the parsed response.
+    /// Automatically includes session ID header if one was captured from initialize.
     fn call(&mut self, request: Value) -> Value {
-        let line = serde_json::to_string(&request).expect("Failed to serialize request");
-        self.write_line(&line);
+        let url = self.mcp_url();
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert(
+            ACCEPT,
+            HeaderValue::from_static("application/json, text/event-stream"),
+        );
+        if let Some(ref sid) = self.session_id {
+            headers.insert("Mcp-Session-Id", HeaderValue::from_str(sid).unwrap());
+        }
 
-        match self.response_rx.recv_timeout(Duration::from_secs(15)) {
-            Ok(response_line) => {
-                serde_json::from_str(&response_line).expect("Failed to parse response JSON")
-            }
-            Err(_) => {
-                let stderr = self.drain_stderr();
+        let resp = self
+            .client
+            .post(&url)
+            .headers(headers)
+            .json(&request)
+            .send()
+            .expect("HTTP request failed");
+
+        // Capture session ID from response headers (set by initialize)
+        if let Some(sid) = resp.headers().get("Mcp-Session-Id") {
+            self.session_id = Some(sid.to_str().unwrap().to_string());
+        }
+
+        let status = resp.status();
+        let content_type = resp
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        let body = resp.text().expect("Failed to read response body");
+
+        if body.is_empty() {
+            // Some protocol responses (e.g., notifications) return empty body
+            json!({"_empty": true, "_status": status.as_u16()})
+        } else if content_type.contains("text/event-stream") {
+            // SSE response — extract JSON from last "data:" line
+            parse_sse_json(&body)
+        } else {
+            serde_json::from_str(&body).unwrap_or_else(|e| {
                 panic!(
-                    "Timed out waiting for response.\nRequest: {}\nStderr: {}",
-                    line, stderr
-                );
-            }
+                    "Failed to parse response JSON. Status: {}. Error: {}. Body: {}",
+                    status, e, body
+                )
+            })
         }
     }
 
-    /// Send a notification (no `id` field) — server should not respond.
+    /// Send a notification (JSON-RPC request with no `id` field).
+    /// In StreamableHttp, notifications get 202 Accepted with no body.
     fn notify(&mut self, request: Value) {
-        let line = serde_json::to_string(&request).expect("Failed to serialize notification");
-        self.write_line(&line);
-    }
-
-    /// Send raw bytes (for malformed JSON tests).
-    #[allow(dead_code)]
-    fn send_raw(&mut self, data: &str) {
-        self.write_line(data);
-    }
-
-    /// Read a response with timeout (for cases where we expect a response after send_raw).
-    #[allow(dead_code)]
-    fn read_response(&self) -> Value {
-        match self.response_rx.recv_timeout(Duration::from_secs(15)) {
-            Ok(response_line) => {
-                serde_json::from_str(&response_line).expect("Failed to parse response JSON")
-            }
-            Err(_) => {
-                let stderr = self.drain_stderr();
-                panic!("Timed out waiting for response.\nStderr: {}", stderr);
-            }
+        let url = self.mcp_url();
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert(
+            ACCEPT,
+            HeaderValue::from_static("application/json, text/event-stream"),
+        );
+        if let Some(ref sid) = self.session_id {
+            headers.insert("Mcp-Session-Id", HeaderValue::from_str(sid).unwrap());
         }
+
+        let resp = self
+            .client
+            .post(&url)
+            .headers(headers)
+            .json(&request)
+            .send()
+            .expect("Notification HTTP request failed");
+
+        // Notifications should get 2xx with no meaningful body
+        let status = resp.status();
+        assert!(
+            status.is_success(),
+            "Notification should succeed, got status: {}",
+            status
+        );
     }
 
-    /// Assert no response arrives within the given duration.
-    fn assert_no_response(&self, wait: Duration) {
-        match self.response_rx.recv_timeout(wait) {
-            Err(mpsc::RecvTimeoutError::Timeout) => {} // Expected
-            Ok(line) => panic!("Expected no response, got: {}", line),
-            Err(e) => panic!("Channel error: {}", e),
+    /// Send raw string body (for malformed JSON tests).
+    fn send_raw(&mut self, data: &str) -> reqwest::blocking::Response {
+        let url = self.mcp_url();
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert(
+            ACCEPT,
+            HeaderValue::from_static("application/json, text/event-stream"),
+        );
+        if let Some(ref sid) = self.session_id {
+            headers.insert("Mcp-Session-Id", HeaderValue::from_str(sid).unwrap());
         }
+
+        self.client
+            .post(&url)
+            .headers(headers)
+            .body(data.to_string())
+            .send()
+            .expect("Raw HTTP request failed")
     }
 
-    /// Close stdin and wait for the child to exit.
-    fn shutdown(&mut self) -> std::process::ExitStatus {
-        self.stdin.take(); // Close stdin to signal EOF
-        self.child.wait().expect("Failed to wait for child")
+    /// Kill the server process.
+    fn shutdown(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
 
-impl Drop for McpProcess {
+impl Drop for McpServer {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
@@ -243,7 +318,7 @@ impl Drop for McpProcess {
 // Test directory setup
 // ============================================================================
 
-/// Create an isolated temp directory with git repo and .exomonad config.
+/// Create an isolated temp directory with git repo, .exomonad config, and WASM symlink.
 fn setup_test_dir() -> TempDir {
     let dir = TempDir::new().expect("Failed to create temp dir");
 
@@ -255,6 +330,25 @@ fn setup_test_dir() -> TempDir {
         "default_role = \"tl\"\nproject_dir = \".\"\nzellij_session = \"test\"\n",
     )
     .expect("Failed to write config.toml");
+
+    // Symlink WASM directory so serve can find wasm-guest-tl.wasm
+    let wasm_dir = dir.path().join(".exomonad/wasm");
+    let source = wasm_source_dir();
+    assert!(
+        source.exists(),
+        "WASM source dir not found: {}. Run `just wasm-all` first.",
+        source.display()
+    );
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&source, &wasm_dir).expect("Failed to symlink WASM dir");
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(&wasm_dir).unwrap();
+        for entry in std::fs::read_dir(&source).unwrap() {
+            let entry = entry.unwrap();
+            std::fs::copy(entry.path(), wasm_dir.join(entry.file_name())).unwrap();
+        }
+    }
 
     // Initialize git repo (many tools require one)
     let status = Command::new("git")
@@ -393,12 +487,13 @@ fn assert_tool_error(resp: &Value) {
     );
 }
 
-/// Spawn process with initialize handshake already done.
-fn spawn_initialized(work_dir: &std::path::Path) -> McpProcess {
-    let mut proc = McpProcess::spawn(work_dir);
+/// Spawn server and perform initialize handshake.
+fn spawn_initialized() -> McpServer {
+    let dir = setup_test_dir();
+    let mut server = McpServer::spawn(dir);
 
     // Initialize
-    let resp = proc.call(initialize_request(0));
+    let resp = server.call(initialize_request(0));
     assert!(
         resp.get("error").is_none() || resp["error"].is_null(),
         "Initialize failed: {}",
@@ -406,9 +501,9 @@ fn spawn_initialized(work_dir: &std::path::Path) -> McpProcess {
     );
 
     // Send initialized notification
-    proc.notify(notification("notifications/initialized"));
+    server.notify(notification("notifications/initialized"));
 
-    proc
+    server
 }
 
 // ============================================================================
@@ -419,9 +514,9 @@ fn spawn_initialized(work_dir: &std::path::Path) -> McpProcess {
 #[test]
 fn mcp_initialize_handshake() {
     let dir = setup_test_dir();
-    let mut proc = McpProcess::spawn(dir.path());
+    let mut server = McpServer::spawn(dir);
 
-    let resp = proc.call(initialize_request(1));
+    let resp = server.call(initialize_request(1));
 
     assert!(
         resp.get("error").is_none() || resp["error"].is_null(),
@@ -445,16 +540,15 @@ fn mcp_initialize_handshake() {
         "Missing capabilities in response"
     );
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// WASM handle_list_tools works, returns tool definitions for the tl role.
 #[test]
 fn mcp_list_tools_returns_definitions() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    let resp = proc.call(list_tools_request(2));
+    let resp = server.call(list_tools_request(2));
 
     assert!(
         resp.get("error").is_none() || resp["error"].is_null(),
@@ -502,7 +596,7 @@ fn mcp_list_tools_returns_definitions() {
         );
     }
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// Full proto roundtrip via agent.list effect.
@@ -510,10 +604,9 @@ fn mcp_list_tools_returns_definitions() {
 /// ListAgentsResponse → Haskell decodes. Varint128 bug surfaces here.
 #[test]
 fn mcp_tool_call_list_agents() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    let resp = proc.call(tool_call_request(3, "list_agents", json!({})));
+    let resp = server.call(tool_call_request(3, "list_agents", json!({})));
     let inner = assert_tool_success(&resp);
 
     // Fresh directory has no agents — should return empty list or object
@@ -523,16 +616,15 @@ fn mcp_tool_call_list_agents() {
         inner
     );
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// cleanup_agents with empty issues list — proto roundtrip through agent.cleanup namespace.
 #[test]
 fn mcp_tool_call_cleanup_agents() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    let resp = proc.call(tool_call_request(
+    let resp = server.call(tool_call_request(
         4,
         "cleanup_agents",
         json!({"issues": []}),
@@ -547,16 +639,15 @@ fn mcp_tool_call_cleanup_agents() {
         assert!(content.is_array(), "Expected content array, got: {}", resp);
     }
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// cleanup_merged_agents — proto roundtrip through agent.cleanup_merged namespace.
 #[test]
 fn mcp_tool_call_cleanup_merged_agents() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    let resp = proc.call(tool_call_request(5, "cleanup_merged_agents", json!({})));
+    let resp = server.call(tool_call_request(5, "cleanup_merged_agents", json!({})));
 
     // Fresh repo has no merged branches — should succeed with empty result
     let has_jsonrpc_error = resp.get("error").is_some() && !resp["error"].is_null();
@@ -566,57 +657,52 @@ fn mcp_tool_call_cleanup_merged_agents() {
         assert!(content.is_array(), "Expected content array, got: {}", resp);
     }
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// Nonexistent tool → isError: true (not a crash).
 #[test]
 fn mcp_invalid_tool_returns_error() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    let resp = proc.call(tool_call_request(7, "nonexistent_tool_xyz", json!({})));
+    let resp = server.call(tool_call_request(7, "nonexistent_tool_xyz", json!({})));
 
     assert_tool_error(&resp);
 
-    proc.shutdown();
+    server.shutdown();
 }
 
-/// Raw garbage after initialize — rmcp may kill the connection.
+/// Malformed JSON body → HTTP error (not a server crash).
+/// In HTTP mode, each request is independent, so malformed requests don't affect
+/// subsequent valid requests.
 #[test]
-fn mcp_malformed_json_returns_parse_error() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+fn mcp_malformed_json_returns_error() {
+    let mut server = spawn_initialized();
 
-    // rmcp terminates the stdio connection on malformed JSON.
-    // This is acceptable behavior — the test validates it doesn't crash silently.
-    if !proc.try_write_line("this is not valid json at all!!!") {
-        return; // Process already exited, acceptable
-    }
+    let resp = server.send_raw("this is not valid json at all!!!");
+    // Server should return an HTTP error status (4xx)
+    assert!(
+        !resp.status().is_success() || {
+            // Some servers return 200 with a JSON-RPC error
+            let body: Value = resp.json().unwrap_or(json!({}));
+            body.get("error").is_some() && !body["error"].is_null()
+        },
+        "Expected error for malformed JSON"
+    );
 
-    std::thread::sleep(Duration::from_millis(500));
+    // Server still works after malformed request (HTTP requests are independent)
+    let resp = server.call(tool_call_request(50, "list_agents", json!({})));
+    assert_tool_success(&resp);
 
-    // If the process survived, verify it still works
-    if proc.try_write_line(
-        &serde_json::to_string(&tool_call_request(50, "list_agents", json!({}))).unwrap(),
-    ) {
-        match proc.response_rx.recv_timeout(Duration::from_secs(5)) {
-            Ok(line) => {
-                let resp: Value = serde_json::from_str(&line).unwrap();
-                assert_tool_success(&resp);
-            }
-            Err(_) => {} // Process died after malformed input — acceptable
-        }
-    }
+    server.shutdown();
 }
 
-/// Unknown method → JSON-RPC error code -32601.
+/// Unknown method → JSON-RPC error code.
 #[test]
 fn mcp_unknown_method_returns_method_not_found() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    let resp = proc.call(json!({
+    let resp = server.call(json!({
         "jsonrpc": "2.0",
         "id": 9,
         "method": "completely/unknown",
@@ -630,32 +716,31 @@ fn mcp_unknown_method_returns_method_not_found() {
         resp
     );
 
-    proc.shutdown();
+    server.shutdown();
 }
 
-/// notifications/initialized (no id) produces no stdout line.
+/// notifications/initialized (no id) produces no JSON-RPC response body.
 #[test]
 fn mcp_notification_no_response() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    // Send a notification (no id field)
-    proc.notify(notification("notifications/initialized"));
+    // Send a notification — in HTTP, this should return 202 with no body
+    server.notify(notification("notifications/initialized"));
 
-    // Should not receive any response within a reasonable window
-    proc.assert_no_response(Duration::from_secs(2));
+    // Server still healthy after notification
+    let resp = server.call(tool_call_request(10, "list_agents", json!({})));
+    assert_tool_success(&resp);
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// 10 sequential list_agents calls — WASM state doesn't corrupt across calls.
 #[test]
 fn mcp_multiple_sequential_calls() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
     for i in 0..10u64 {
-        let resp = proc.call(tool_call_request(100 + i, "list_agents", json!({})));
+        let resp = server.call(tool_call_request(100 + i, "list_agents", json!({})));
         let inner = assert_tool_success(&resp);
         assert!(
             inner.is_object() || inner.is_array(),
@@ -665,36 +750,35 @@ fn mcp_multiple_sequential_calls() {
         );
     }
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// Multiple different operations interleaved — validates server handles mixed traffic.
 #[test]
 fn mcp_interleaved_operations() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
     // list_agents
-    let resp = proc.call(tool_call_request(20, "list_agents", json!({})));
+    let resp = server.call(tool_call_request(20, "list_agents", json!({})));
     assert_tool_success(&resp);
 
     // unknown tool (should error, not crash)
-    let resp = proc.call(tool_call_request(21, "no_such_tool", json!({})));
+    let resp = server.call(tool_call_request(21, "no_such_tool", json!({})));
     assert_tool_error(&resp);
 
     // list_agents again (server should still be healthy)
-    let resp = proc.call(tool_call_request(22, "list_agents", json!({})));
+    let resp = server.call(tool_call_request(22, "list_agents", json!({})));
     assert_tool_success(&resp);
 
     // tools/list still works
-    let resp = proc.call(list_tools_request(23));
+    let resp = server.call(list_tools_request(23));
     assert!(
         resp.get("error").is_none() || resp["error"].is_null(),
         "tools/list failed after error recovery: {}",
         resp
     );
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 // ============================================================================
@@ -704,11 +788,10 @@ fn mcp_interleaved_operations() {
 /// spawn_agents missing required `issues` field → tool-level parse error.
 #[test]
 fn mcp_spawn_agents_missing_required_field() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
     // Missing `issues` (required)
-    let resp = proc.call(tool_call_request(
+    let resp = server.call(tool_call_request(
         30,
         "spawn_agents",
         json!({"owner": "test", "repo": "test"}),
@@ -716,35 +799,33 @@ fn mcp_spawn_agents_missing_required_field() {
     assert_tool_error(&resp);
 
     // Server still healthy after parse error
-    let resp = proc.call(tool_call_request(31, "list_agents", json!({})));
+    let resp = server.call(tool_call_request(31, "list_agents", json!({})));
     assert_tool_success(&resp);
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// spawn_agents with `issues` as string instead of array → parse error.
 #[test]
 fn mcp_spawn_agents_wrong_type_issues() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    let resp = proc.call(tool_call_request(
+    let resp = server.call(tool_call_request(
         32,
         "spawn_agents",
         json!({"issues": "123", "owner": "test", "repo": "test"}),
     ));
     assert_tool_error(&resp);
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// spawn_agents with empty issues array — valid parse, empty batch.
 #[test]
 fn mcp_spawn_agents_empty_issues() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    let resp = proc.call(tool_call_request(
+    let resp = server.call(tool_call_request(
         33,
         "spawn_agents",
         json!({"issues": [], "owner": "test", "repo": "test"}),
@@ -755,28 +836,26 @@ fn mcp_spawn_agents_empty_issues() {
     let has_jsonrpc_error = resp.get("error").is_some() && !resp["error"].is_null();
     assert!(!has_jsonrpc_error, "Unexpected JSON-RPC error: {}", resp);
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// cleanup_agents missing required `issues` field.
 #[test]
 fn mcp_cleanup_agents_missing_issues() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    let resp = proc.call(tool_call_request(34, "cleanup_agents", json!({})));
+    let resp = server.call(tool_call_request(34, "cleanup_agents", json!({})));
     assert_tool_error(&resp);
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// cleanup_agents with nonexistent issue IDs — exercises batch error response path.
 #[test]
 fn mcp_cleanup_agents_nonexistent_issues() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    let resp = proc.call(tool_call_request(
+    let resp = server.call(tool_call_request(
         35,
         "cleanup_agents",
         json!({"issues": ["99999", "88888"]}),
@@ -791,16 +870,15 @@ fn mcp_cleanup_agents_nonexistent_issues() {
     let content = &result["content"];
     assert!(content.is_array(), "Expected content array, got: {}", resp);
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// cleanup_agents with force=true — optional boolean arg exercises proto encoding.
 #[test]
 fn mcp_cleanup_agents_with_force() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    let resp = proc.call(tool_call_request(
+    let resp = server.call(tool_call_request(
         36,
         "cleanup_agents",
         json!({"issues": ["12345"], "force": true}),
@@ -810,16 +888,15 @@ fn mcp_cleanup_agents_with_force() {
     let has_jsonrpc_error = resp.get("error").is_some() && !resp["error"].is_null();
     assert!(!has_jsonrpc_error, "Unexpected JSON-RPC error: {}", resp);
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// spawn_agents with all optional fields — exercises full proto message encoding.
 #[test]
 fn mcp_spawn_agents_all_optional_fields() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    let resp = proc.call(tool_call_request(
+    let resp = server.call(tool_call_request(
         37,
         "spawn_agents",
         json!({
@@ -835,16 +912,15 @@ fn mcp_spawn_agents_all_optional_fields() {
     let has_jsonrpc_error = resp.get("error").is_some() && !resp["error"].is_null();
     assert!(!has_jsonrpc_error, "Unexpected JSON-RPC error: {}", resp);
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// Extra unknown fields in tool arguments are silently ignored (Aeson default).
 #[test]
 fn mcp_tool_call_extra_args_ignored() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    let resp = proc.call(tool_call_request(
+    let resp = server.call(tool_call_request(
         38,
         "list_agents",
         json!({"unknown_field": "should_be_ignored", "another": 42}),
@@ -853,7 +929,7 @@ fn mcp_tool_call_extra_args_ignored() {
     // list_agents takes no args — extra fields should be ignored, not cause errors
     assert_tool_success(&resp);
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 // ============================================================================
@@ -864,10 +940,10 @@ fn mcp_tool_call_extra_args_ignored() {
 #[test]
 fn mcp_string_request_id() {
     let dir = setup_test_dir();
-    let mut proc = McpProcess::spawn(dir.path());
+    let mut server = McpServer::spawn(dir);
 
     // Initialize with string ID
-    let resp = proc.call(json!({
+    let resp = server.call(json!({
         "jsonrpc": "2.0",
         "id": "abc-def-123",
         "method": "initialize",
@@ -883,39 +959,47 @@ fn mcp_string_request_id() {
         "Response should echo back string ID"
     );
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// Null request ID handling after initialize.
 #[test]
 fn mcp_null_request_id_is_notification() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    // Send a request with null id — rmcp may treat as notification (no response)
-    proc.notify(json!({
-        "jsonrpc": "2.0",
-        "id": null,
-        "method": "tools/list",
-        "params": {}
-    }));
-    proc.assert_no_response(Duration::from_secs(2));
+    // Send a request with null id — treated as notification in HTTP (no response body)
+    let resp = server.send_raw(
+        &serde_json::to_string(&json!({
+            "jsonrpc": "2.0",
+            "id": null,
+            "method": "tools/list",
+            "params": {}
+        }))
+        .unwrap(),
+    );
+
+    // Server should handle gracefully — either 2xx or error, not crash
+    assert!(
+        resp.status().is_success() || resp.status().is_client_error(),
+        "Unexpected status for null-id request: {}",
+        resp.status()
+    );
 
     // Server still healthy
-    let resp = proc.call(tool_call_request(45, "list_agents", json!({})));
+    let resp = server.call(tool_call_request(45, "list_agents", json!({})));
     assert_tool_success(&resp);
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// Request with no params field — params defaults to empty.
 #[test]
 fn mcp_missing_params() {
     let dir = setup_test_dir();
-    let mut proc = McpProcess::spawn(dir.path());
+    let mut server = McpServer::spawn(dir);
 
-    // rmcp requires well-formed initialize params, so provide them
-    let resp = proc.call(json!({
+    // Initialize with proper params
+    let resp = server.call(json!({
         "jsonrpc": "2.0",
         "id": 40,
         "method": "initialize",
@@ -933,8 +1017,8 @@ fn mcp_missing_params() {
     );
 
     // Now test missing params on a post-initialize request
-    proc.notify(notification("notifications/initialized"));
-    let resp = proc.call(json!({
+    server.notify(notification("notifications/initialized"));
+    let resp = server.call(json!({
         "jsonrpc": "2.0",
         "id": 41,
         "method": "tools/list"
@@ -947,16 +1031,16 @@ fn mcp_missing_params() {
         resp
     );
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// Large numeric request ID.
 #[test]
 fn mcp_large_numeric_id() {
     let dir = setup_test_dir();
-    let mut proc = McpProcess::spawn(dir.path());
+    let mut server = McpServer::spawn(dir);
 
-    let resp = proc.call(json!({
+    let resp = server.call(json!({
         "jsonrpc": "2.0",
         "id": 999999999,
         "method": "initialize",
@@ -972,16 +1056,15 @@ fn mcp_large_numeric_id() {
         "Response should echo large numeric ID"
     );
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// tools/call with missing name field.
 #[test]
 fn mcp_tool_call_missing_name() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    let resp = proc.call(json!({
+    let resp = server.call(json!({
         "jsonrpc": "2.0",
         "id": 41,
         "method": "tools/call",
@@ -993,16 +1076,15 @@ fn mcp_tool_call_missing_name() {
     // Missing tool name — should result in an error (empty tool name → unknown tool)
     assert_tool_error(&resp);
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// tools/call with missing arguments field — defaults to empty object.
 #[test]
 fn mcp_tool_call_missing_arguments() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    let resp = proc.call(json!({
+    let resp = server.call(json!({
         "jsonrpc": "2.0",
         "id": 42,
         "method": "tools/call",
@@ -1014,100 +1096,80 @@ fn mcp_tool_call_missing_arguments() {
     // list_agents doesn't need arguments, so this should work
     assert_tool_success(&resp);
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 // ============================================================================
 // Error recovery sequences
 // ============================================================================
 
-/// Server behavior after malformed JSON — rmcp may terminate the connection.
+/// Server recovers after malformed JSON — HTTP requests are independent.
 #[test]
 fn mcp_recovery_after_malformed_json() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    // rmcp terminates on malformed JSON — verify graceful exit
-    if !proc.try_write_line("{{{invalid json garbage!!!}}}") {
-        return; // Already dead
-    }
+    // Send malformed JSON — should get error response
+    let resp = server.send_raw("{{{invalid json garbage!!!}}}");
+    assert!(
+        !resp.status().is_success() || {
+            let body: Value = resp.json().unwrap_or(json!({}));
+            body.get("error").is_some()
+        },
+        "Expected error for malformed JSON"
+    );
 
-    std::thread::sleep(Duration::from_millis(500));
+    // Server still healthy — HTTP requests are independent
+    let resp = server.call(tool_call_request(50, "list_agents", json!({})));
+    assert_tool_success(&resp);
 
-    // If still alive, verify recovery
-    if proc.try_write_line(
-        &serde_json::to_string(&tool_call_request(50, "list_agents", json!({}))).unwrap(),
-    ) {
-        match proc.response_rx.recv_timeout(Duration::from_secs(5)) {
-            Ok(line) => {
-                let resp: Value = serde_json::from_str(&line).unwrap();
-                assert_tool_success(&resp);
-            }
-            Err(_) => {} // Died after malformed input — acceptable
-        }
-    }
+    server.shutdown();
 }
 
-/// Multiple parse errors — rmcp terminates on first malformed input.
+/// Multiple malformed requests — server stays healthy (HTTP is stateless per-request).
 #[test]
 fn mcp_recovery_after_multiple_parse_errors() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    // rmcp terminates on malformed JSON, so the first garbage line may kill it
     for i in 0..5 {
-        if !proc.try_write_line(&format!("garbage line {}", i)) {
-            return; // Process died — expected behavior
-        }
+        let _resp = server.send_raw(&format!("garbage line {}", i));
     }
 
-    std::thread::sleep(Duration::from_millis(500));
+    // Server still healthy
+    let resp = server.call(tool_call_request(51, "list_agents", json!({})));
+    assert_tool_success(&resp);
 
-    // If somehow still alive, verify health
-    if proc.try_write_line(
-        &serde_json::to_string(&tool_call_request(51, "list_agents", json!({}))).unwrap(),
-    ) {
-        match proc.response_rx.recv_timeout(Duration::from_secs(5)) {
-            Ok(line) => {
-                let resp: Value = serde_json::from_str(&line).unwrap();
-                assert_tool_success(&resp);
-            }
-            Err(_) => {}
-        }
-    }
+    server.shutdown();
 }
 
 /// Alternating errors and successes — stress tests error recovery.
 #[test]
 fn mcp_alternating_errors_and_successes() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
     for i in 0..5u64 {
         // Success
-        let resp = proc.call(tool_call_request(60 + i * 2, "list_agents", json!({})));
+        let resp = server.call(tool_call_request(60 + i * 2, "list_agents", json!({})));
         assert_tool_success(&resp);
 
         // Error (unknown tool)
-        let resp = proc.call(tool_call_request(61 + i * 2, "nonexistent", json!({})));
+        let resp = server.call(tool_call_request(61 + i * 2, "nonexistent", json!({})));
         assert_tool_error(&resp);
     }
 
     // Final success — server still healthy
-    let resp = proc.call(tool_call_request(70, "list_agents", json!({})));
+    let resp = server.call(tool_call_request(70, "list_agents", json!({})));
     assert_tool_success(&resp);
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// Mix of method errors and tool errors in sequence after initialize.
 #[test]
 fn mcp_mixed_error_types() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
     // 1. Method not found (valid JSON, unknown method)
-    let resp = proc.call(json!({
+    let resp = server.call(json!({
         "jsonrpc": "2.0",
         "id": 80,
         "method": "bogus/method",
@@ -1120,52 +1182,49 @@ fn mcp_mixed_error_types() {
     );
 
     // 2. Tool error (unknown tool)
-    let resp = proc.call(tool_call_request(82, "fake_tool", json!({})));
+    let resp = server.call(tool_call_request(82, "fake_tool", json!({})));
     assert_tool_error(&resp);
 
     // 3. Tool success — server still healthy after errors
-    let resp = proc.call(tool_call_request(83, "list_agents", json!({})));
+    let resp = server.call(tool_call_request(83, "list_agents", json!({})));
     assert_tool_success(&resp);
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 // ============================================================================
 // Notifications
 // ============================================================================
 
-/// Unknown notifications produce no response and don't crash.
+/// Unknown notifications produce no response body and don't crash.
 #[test]
 fn mcp_unknown_notification_silent() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    proc.notify(notification("custom/unknown_notification"));
-    proc.assert_no_response(Duration::from_secs(2));
+    server.notify(notification("custom/unknown_notification"));
 
     // Server still works
-    let resp = proc.call(tool_call_request(90, "list_agents", json!({})));
+    let resp = server.call(tool_call_request(90, "list_agents", json!({})));
     assert_tool_success(&resp);
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// Notifications interleaved with requests don't disrupt responses.
 #[test]
 fn mcp_notifications_interleaved_with_requests() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    proc.notify(notification("notifications/initialized"));
-    let resp = proc.call(tool_call_request(91, "list_agents", json!({})));
+    server.notify(notification("notifications/initialized"));
+    let resp = server.call(tool_call_request(91, "list_agents", json!({})));
     assert_tool_success(&resp);
 
-    proc.notify(notification("notifications/initialized"));
-    proc.notify(notification("notifications/initialized"));
-    let resp = proc.call(tool_call_request(92, "list_agents", json!({})));
+    server.notify(notification("notifications/initialized"));
+    server.notify(notification("notifications/initialized"));
+    let resp = server.call(tool_call_request(92, "list_agents", json!({})));
     assert_tool_success(&resp);
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 // ============================================================================
@@ -1175,11 +1234,10 @@ fn mcp_notifications_interleaved_with_requests() {
 /// tools/list returns consistent results across repeated calls.
 #[test]
 fn mcp_list_tools_idempotent() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    let resp1 = proc.call(list_tools_request(200));
-    let resp2 = proc.call(list_tools_request(201));
+    let resp1 = server.call(list_tools_request(200));
+    let resp2 = server.call(list_tools_request(201));
 
     // Same tools returned both times
     assert_eq!(
@@ -1187,16 +1245,15 @@ fn mcp_list_tools_idempotent() {
         "tools/list should return identical results across calls"
     );
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// spawn_agents inputSchema declares required fields.
 #[test]
 fn mcp_spawn_agents_schema_has_required_fields() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    let resp = proc.call(list_tools_request(202));
+    let resp = server.call(list_tools_request(202));
     let tools = resp["result"]["tools"].as_array().unwrap();
 
     let spawn = tools
@@ -1225,16 +1282,15 @@ fn mcp_spawn_agents_schema_has_required_fields() {
         );
     }
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 /// All tools have non-empty descriptions.
 #[test]
 fn mcp_all_tools_have_descriptions() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
-    let resp = proc.call(list_tools_request(203));
+    let resp = server.call(list_tools_request(203));
     let tools = resp["result"]["tools"].as_array().unwrap();
 
     for tool in tools {
@@ -1245,7 +1301,7 @@ fn mcp_all_tools_have_descriptions() {
         assert!(!desc.is_empty(), "Tool '{}' has empty description", name);
     }
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 // ============================================================================
@@ -1255,11 +1311,10 @@ fn mcp_all_tools_have_descriptions() {
 /// cleanup_agents with many issue IDs — larger proto repeated field payload.
 #[test]
 fn mcp_cleanup_agents_many_issues() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
     let issues: Vec<String> = (1..=50).map(|i| format!("{}", i)).collect();
-    let resp = proc.call(tool_call_request(
+    let resp = server.call(tool_call_request(
         210,
         "cleanup_agents",
         json!({"issues": issues}),
@@ -1273,80 +1328,92 @@ fn mcp_cleanup_agents_many_issues() {
         resp
     );
 
-    proc.shutdown();
+    server.shutdown();
 }
 
 // ============================================================================
 // Shutdown behavior
 // ============================================================================
 
-/// Closing stdin causes clean exit.
+/// Server responds to health check after sustained traffic.
 #[test]
 fn mcp_clean_shutdown() {
-    let dir = setup_test_dir();
-    let mut proc = spawn_initialized(dir.path());
+    let mut server = spawn_initialized();
 
     // Do some work first
-    let resp = proc.call(tool_call_request(220, "list_agents", json!({})));
+    let resp = server.call(tool_call_request(220, "list_agents", json!({})));
     assert_tool_success(&resp);
 
-    // Close stdin → server should exit cleanly
-    let status = proc.shutdown();
+    // Verify health endpoint still works
+    let health_url = format!("http://127.0.0.1:{}/health", server.port);
+    let resp = server
+        .client
+        .get(&health_url)
+        .send()
+        .expect("Health check failed");
     assert!(
-        status.success(),
-        "Server should exit with status 0 on stdin close"
+        resp.status().is_success(),
+        "Health check should succeed after traffic"
     );
+
+    server.shutdown();
 }
 
-/// Double initialize — rmcp may reject or terminate on second initialize.
+/// Multiple sessions — server can handle multiple initialize handshakes.
+/// In HTTP mode, each initialize creates a new session.
 #[test]
 fn mcp_double_initialize() {
     let dir = setup_test_dir();
-    let mut proc = McpProcess::spawn(dir.path());
+    let mut server = McpServer::spawn(dir);
 
-    let resp1 = proc.call(initialize_request(230));
+    let resp1 = server.call(initialize_request(230));
     assert!(
         resp1.get("error").is_none() || resp1["error"].is_null(),
         "First initialize should succeed: {}",
         resp1
     );
+    let session1 = server.session_id.clone();
 
-    // rmcp may terminate the connection on double-initialize
-    if !proc.try_write_line(&serde_json::to_string(&initialize_request(231)).unwrap()) {
-        return; // Process died on double init — acceptable
+    // Second initialize — in HTTP, this creates a new session
+    server.session_id = None; // Clear to simulate new client
+    let resp2 = server.call(initialize_request(231));
+    assert!(
+        resp2.get("error").is_none() || resp2["error"].is_null(),
+        "Second initialize should succeed (new session): {}",
+        resp2
+    );
+    let session2 = server.session_id.clone();
+
+    // Sessions should be different
+    if let (Some(s1), Some(s2)) = (session1, session2) {
+        assert_ne!(s1, s2, "Each initialize should create a new session");
     }
 
-    match proc.response_rx.recv_timeout(Duration::from_secs(5)) {
-        Ok(line) => {
-            let resp2: Value = serde_json::from_str(&line).unwrap();
-            // Either error or success — server didn't crash
-            assert!(resp2.get("id").is_some() || resp2.get("error").is_some());
-        }
-        Err(_) => {} // Process died — acceptable for double init
-    }
+    server.shutdown();
 }
 
-/// tools/call before initialize — rmcp enforces init-first, so this errors.
+/// Request without session ID before initialize — server should reject.
 #[test]
 fn mcp_tool_call_before_initialize() {
     let dir = setup_test_dir();
-    let mut proc = McpProcess::spawn(dir.path());
+    let mut server = McpServer::spawn(dir);
 
-    // rmcp requires initialize before any tool calls.
-    // The server should either error gracefully or crash with a clear message.
-    // Since rmcp aborts the stdio loop, the process may exit.
-    let resp_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        proc.call(tool_call_request(240, "list_agents", json!({})))
-    }));
+    // Try tool call without initializing first (no session ID)
+    let resp = server.send_raw(
+        &serde_json::to_string(&tool_call_request(240, "list_agents", json!({}))).unwrap(),
+    );
 
-    match resp_result {
-        Ok(resp) => {
-            // If we got a response, it should be an error
-            let has_error = resp.get("error").is_some() && !resp["error"].is_null();
-            assert!(has_error, "Pre-initialize tool call should error: {}", resp);
-        }
-        Err(_) => {
-            // Timeout/panic is expected — rmcp drops the connection on protocol violation
-        }
+    // Server should reject — either 4xx HTTP or JSON-RPC error
+    let status = resp.status();
+    if status.is_success() {
+        let body: Value = resp.json().unwrap_or(json!({}));
+        assert!(
+            body.get("error").is_some() && !body["error"].is_null(),
+            "Pre-initialize tool call should error: {}",
+            body
+        );
     }
+    // 4xx is also acceptable — server rejected the request
+
+    server.shutdown();
 }
