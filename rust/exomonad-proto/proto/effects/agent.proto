@@ -119,6 +119,8 @@ message SpawnGeminiTeammateRequest {
   AgentType agent_type = 3;
   // Sub-repository path relative to project_dir (e.g., "egregore/").
   string subrepo = 4;
+  // Claude Code Teams team name (resolved from KV store).
+  string team_name = 5;
 }
 
 message SpawnGeminiTeammateResponse {

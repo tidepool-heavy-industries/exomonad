@@ -201,15 +201,11 @@ pub async fn scan_all_agent_messages_teams(
     let mut by_sender: std::collections::HashMap<String, Vec<TeamsMessage>> =
         std::collections::HashMap::new();
     for msg in messages {
-        by_sender
-            .entry(msg.from.clone())
-            .or_default()
-            .push(msg);
+        by_sender.entry(msg.from.clone()).or_default().push(msg);
     }
 
     Ok(by_sender.into_iter().collect())
 }
-
 
 #[cfg(test)]
 mod tests {

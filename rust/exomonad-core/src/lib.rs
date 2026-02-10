@@ -313,12 +313,15 @@ pub fn register_builtin_handlers(
 
     builder = builder.with_effect_handler(handlers::CopilotHandler::new());
 
-    builder = builder.with_effect_handler(handlers::MessagingHandler::new());
+    let question_registry = Arc::new(services::questions::QuestionRegistry::new());
+
+    builder = builder.with_effect_handler(
+        handlers::MessagingHandler::new().with_question_registry(question_registry.clone()),
+    );
 
     let project_dir = std::env::current_dir().unwrap_or_default();
     builder = builder.with_effect_handler(handlers::KvHandler::new(project_dir));
 
-    let question_registry = Arc::new(services::questions::QuestionRegistry::new());
     builder = builder.with_effect_handler(handlers::TeamsHandler::new(question_registry.clone()));
 
     (builder, question_registry)

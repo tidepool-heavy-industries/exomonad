@@ -2,25 +2,43 @@
 //!
 //! Uses proto-generated types from `exomonad_proto::effects::messaging`.
 //! Inbox operations delegate to `services::inbox` (single code path).
+//!
+//! Handles both directions:
+//! - **Agent→TL**: `send_note`, `send_question` (written by agents)
+//! - **TL→Agent**: `get_agent_messages`, `answer_question` (called by TL)
 
 use crate::effects::{
     dispatch_messaging_effect, EffectError, EffectHandler, EffectResult, MessagingEffects,
 };
 use crate::services::inbox;
+use crate::services::messaging;
+use crate::services::questions::QuestionRegistry;
 use async_trait::async_trait;
 use exomonad_proto::effects::messaging::*;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
+use tracing::info;
 
 /// Messaging effect handler.
 ///
-/// Handles `messaging.send_note` and `messaging.send_question` effects
-/// by reading/writing JSON inbox files in the Teams directory via `services::inbox`.
-pub struct MessagingHandler;
+/// Handles all `messaging.*` effects by reading/writing JSON inbox files
+/// in the Teams directory. The `QuestionRegistry` bridges `answer_question`
+/// (TL-side) with `send_question` (agent-side) for immediate unblocking.
+pub struct MessagingHandler {
+    question_registry: Option<Arc<QuestionRegistry>>,
+}
 
 impl MessagingHandler {
     pub fn new() -> Self {
-        Self
+        Self {
+            question_registry: None,
+        }
+    }
+
+    pub fn with_question_registry(mut self, registry: Arc<QuestionRegistry>) -> Self {
+        self.question_registry = Some(registry);
+        self
     }
 }
 
@@ -102,10 +120,8 @@ impl MessagingEffects for MessagingHandler {
             if let Some(answer) = unread.into_iter().next() {
                 // Mark as read
                 let my_inbox_mark = inbox::inbox_path(&team_name, &get_agent_id());
-                let _ = tokio::task::spawn_blocking(move || {
-                    inbox::mark_all_read(&my_inbox_mark)
-                })
-                .await;
+                let _ =
+                    tokio::task::spawn_blocking(move || inbox::mark_all_read(&my_inbox_mark)).await;
 
                 return Ok(SendQuestionResponse {
                     answer: answer.text,
@@ -114,6 +130,120 @@ impl MessagingEffects for MessagingHandler {
 
             sleep(interval).await;
         }
+    }
+
+    async fn get_agent_messages(
+        &self,
+        req: GetAgentMessagesRequest,
+    ) -> EffectResult<GetAgentMessagesResponse> {
+        let team_name = if req.team_name.is_empty() {
+            get_team_name()?
+        } else {
+            req.team_name.clone()
+        };
+
+        info!(agent_id = %req.agent_id, team = %team_name, "Getting agent messages");
+
+        if !req.agent_id.is_empty() {
+            // Read specific agent's inbox
+            let messages = messaging::read_agent_inbox(&team_name, &req.agent_id)
+                .await
+                .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
+
+            info!(agent = %req.agent_id, count = messages.len(), "Read agent messages from Teams inbox");
+
+            let agent_msgs = AgentMessages {
+                agent_id: req.agent_id,
+                messages: messages
+                    .into_iter()
+                    .map(|m| AgentMessage {
+                        from: m.from,
+                        text: m.text,
+                        summary: m.summary,
+                        timestamp: m.timestamp,
+                        read: m.read,
+                    })
+                    .collect(),
+            };
+
+            Ok(GetAgentMessagesResponse {
+                agents: vec![agent_msgs],
+                warning: String::new(),
+            })
+        } else {
+            // Read all agent messages from TL inbox
+            let results = messaging::scan_all_agent_messages_teams(&team_name)
+                .await
+                .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
+
+            let agents: Vec<AgentMessages> = results
+                .into_iter()
+                .map(|(id, msgs)| AgentMessages {
+                    agent_id: id,
+                    messages: msgs
+                        .into_iter()
+                        .map(|m| AgentMessage {
+                            from: m.from,
+                            text: m.text,
+                            summary: m.summary,
+                            timestamp: m.timestamp,
+                            read: m.read,
+                        })
+                        .collect(),
+                })
+                .collect();
+
+            info!(
+                agent_count = agents.len(),
+                "Scanned all agent messages from Teams inboxes"
+            );
+
+            Ok(GetAgentMessagesResponse {
+                agents,
+                warning: String::new(),
+            })
+        }
+    }
+
+    async fn answer_question(
+        &self,
+        req: AnswerQuestionRequest,
+    ) -> EffectResult<AnswerQuestionResponse> {
+        let team_name = if req.team_name.is_empty() {
+            get_team_name()?
+        } else {
+            req.team_name.clone()
+        };
+
+        info!(
+            agent = %req.agent_id,
+            question_id = %req.question_id,
+            team = %team_name,
+            "Answering question via Teams inbox"
+        );
+
+        messaging::write_to_agent_inbox(&team_name, &req.agent_id, &req.answer)
+            .await
+            .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
+
+        // Resolve the oneshot channel so send_question unblocks immediately.
+        if let Some(ref registry) = self.question_registry {
+            let resolved = registry.resolve(&req.question_id, req.answer.clone());
+            info!(
+                agent = %req.agent_id,
+                question_id = %req.question_id,
+                resolved,
+                "Resolved question via QuestionRegistry"
+            );
+        }
+
+        info!(agent = %req.agent_id, question_id = %req.question_id, "Answer written to Teams inbox");
+
+        Ok(AnswerQuestionResponse {
+            status: "answered".to_string(),
+            agent_id: req.agent_id,
+            question_id: req.question_id,
+        })
     }
 }
 

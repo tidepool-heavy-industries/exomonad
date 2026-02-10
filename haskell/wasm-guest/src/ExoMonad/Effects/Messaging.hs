@@ -18,13 +18,21 @@
 --   pure ()
 -- @
 module ExoMonad.Effects.Messaging
-  ( -- * Effect Types
+  ( -- * Effect Types (Agent→TL)
     MessagingSendNote,
     MessagingSendQuestion,
 
-    -- * Smart Constructors
+    -- * Effect Types (TL→Agent)
+    MessagingGetAgentMessages,
+    MessagingAnswerQuestion,
+
+    -- * Smart Constructors (Agent→TL)
     sendNote,
     sendQuestion,
+
+    -- * Smart Constructors (TL→Agent)
+    getAgentMessages,
+    answerQuestion,
 
     -- * Re-exported proto types
     module Effects.Messaging,
@@ -38,7 +46,7 @@ import Effects.Messaging
 import ExoMonad.Effect.Class (Effect (..), runEffect)
 
 -- ============================================================================
--- Effect phantom types + instances
+-- Effect phantom types + instances (Agent→TL)
 -- ============================================================================
 
 data MessagingSendNote
@@ -56,7 +64,25 @@ instance Effect MessagingSendQuestion where
   effectId = "messaging.send_question"
 
 -- ============================================================================
--- Smart constructors
+-- Effect phantom types + instances (TL→Agent)
+-- ============================================================================
+
+data MessagingGetAgentMessages
+
+instance Effect MessagingGetAgentMessages where
+  type Input MessagingGetAgentMessages = GetAgentMessagesRequest
+  type Output MessagingGetAgentMessages = GetAgentMessagesResponse
+  effectId = "messaging.get_agent_messages"
+
+data MessagingAnswerQuestion
+
+instance Effect MessagingAnswerQuestion where
+  type Input MessagingAnswerQuestion = AnswerQuestionRequest
+  type Output MessagingAnswerQuestion = AnswerQuestionResponse
+  effectId = "messaging.answer_question"
+
+-- ============================================================================
+-- Smart constructors (Agent→TL)
 -- ============================================================================
 
 sendNote :: Text -> Text -> IO (Either EffectError SendNoteResponse)
@@ -73,4 +99,28 @@ sendQuestion question teamName =
     SendQuestionRequest
       { sendQuestionRequestQuestion = TL.fromStrict question,
         sendQuestionRequestTeamName = TL.fromStrict teamName
+      }
+
+-- ============================================================================
+-- Smart constructors (TL→Agent)
+-- ============================================================================
+
+-- | Read messages from agent outboxes. Empty agent_id reads all agents.
+getAgentMessages :: Text -> Text -> IO (Either EffectError GetAgentMessagesResponse)
+getAgentMessages agentId teamName =
+  runEffect @MessagingGetAgentMessages $
+    GetAgentMessagesRequest
+      { getAgentMessagesRequestAgentId = TL.fromStrict agentId,
+        getAgentMessagesRequestTeamName = TL.fromStrict teamName
+      }
+
+-- | Answer a pending question from an agent.
+answerQuestion :: Text -> Text -> Text -> Text -> IO (Either EffectError AnswerQuestionResponse)
+answerQuestion agentId questionId answer teamName =
+  runEffect @MessagingAnswerQuestion $
+    AnswerQuestionRequest
+      { answerQuestionRequestAgentId = TL.fromStrict agentId,
+        answerQuestionRequestQuestionId = TL.fromStrict questionId,
+        answerQuestionRequestAnswer = TL.fromStrict answer,
+        answerQuestionRequestTeamName = TL.fromStrict teamName
       }

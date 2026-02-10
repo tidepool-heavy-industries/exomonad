@@ -5,9 +5,6 @@
             cwd "{{ cwd }}"
             start_suspended false
 {% if close_on_exit %}            close_on_exit true
-{% endif %}{% if !env.is_empty() %}            env {
-{% for (key, value) in env %}                {{ key }} "{{ value }}"
-{% endfor %}            }
 {% endif %}        }
         pane size=3 borderless=true {
             plugin location="file:~/.config/zellij/plugins/exomonad-plugin.wasm"

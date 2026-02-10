@@ -73,6 +73,7 @@ library wasm-guest-internal
         ExoMonad.Guest.Records.FilePR
         ExoMonad.Guest.Records.Popup
         ExoMonad.Guest.Records.Messaging
+        ExoMonad.Guest.Records.TLMessaging
         ExoMonad.Guest.Records.Teams
         -- Effects (for internal composition)
         ExoMonad.Guest.Effects.AgentControl

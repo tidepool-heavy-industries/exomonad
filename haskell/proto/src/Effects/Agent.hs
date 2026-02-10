@@ -866,7 +866,8 @@ data SpawnGeminiTeammateRequest
   = SpawnGeminiTeammateRequest {spawnGeminiTeammateRequestName :: Hs.Text,
                                 spawnGeminiTeammateRequestPrompt :: Hs.Text,
                                 spawnGeminiTeammateRequestAgentType :: (HsProtobuf.Enumerated Effects.Agent.AgentType),
-                                spawnGeminiTeammateRequestSubrepo :: Hs.Text}
+                                spawnGeminiTeammateRequestSubrepo :: Hs.Text,
+                                spawnGeminiTeammateRequestTeamName :: Hs.Text}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData SpawnGeminiTeammateRequest)
 instance (HsProtobuf.Named SpawnGeminiTeammateRequest) where
@@ -878,24 +879,30 @@ instance (HsProtobuf.Message SpawnGeminiTeammateRequest) where
     SpawnGeminiTeammateRequest {spawnGeminiTeammateRequestName,
                                 spawnGeminiTeammateRequestPrompt,
                                 spawnGeminiTeammateRequestAgentType,
-                                spawnGeminiTeammateRequestSubrepo}
+                                spawnGeminiTeammateRequestSubrepo,
+                                spawnGeminiTeammateRequestTeamName}
     = Hs.mappend
         (Hs.mappend
            (Hs.mappend
+              (Hs.mappend
+                 (HsProtobuf.encodeMessageField
+                    (HsProtobuf.FieldNumber 1)
+                    ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                       spawnGeminiTeammateRequestName))
+                 (HsProtobuf.encodeMessageField
+                    (HsProtobuf.FieldNumber 2)
+                    ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                       spawnGeminiTeammateRequestPrompt)))
               (HsProtobuf.encodeMessageField
-                 (HsProtobuf.FieldNumber 1)
-                 ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                    spawnGeminiTeammateRequestName))
-              (HsProtobuf.encodeMessageField
-                 (HsProtobuf.FieldNumber 2)
-                 ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                    spawnGeminiTeammateRequestPrompt)))
+                 (HsProtobuf.FieldNumber 3) spawnGeminiTeammateRequestAgentType))
            (HsProtobuf.encodeMessageField
-              (HsProtobuf.FieldNumber 3) spawnGeminiTeammateRequestAgentType))
+              (HsProtobuf.FieldNumber 4)
+              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                 spawnGeminiTeammateRequestSubrepo)))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 4)
+           (HsProtobuf.FieldNumber 5)
            ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              spawnGeminiTeammateRequestSubrepo))
+              spawnGeminiTeammateRequestTeamName))
   decodeMessage _
     = Hs.pure SpawnGeminiTeammateRequest
         <*>
@@ -913,6 +920,10 @@ instance (HsProtobuf.Message SpawnGeminiTeammateRequest) where
           ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
              (HsProtobuf.at
                 HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 4)))
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 5)))
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
@@ -930,22 +941,30 @@ instance (HsProtobuf.Message SpawnGeminiTeammateRequest) where
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 4)
          (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "subrepo") [] ""]
+         (HsProtobufAST.Single "subrepo") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 5)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "team_name") [] ""]
 instance (HsJSONPB.ToJSONPB SpawnGeminiTeammateRequest) where
-  toJSONPB (SpawnGeminiTeammateRequest f1 f2 f3 f4)
+  toJSONPB (SpawnGeminiTeammateRequest f1 f2 f3 f4 f5)
     = HsJSONPB.object
         ["name" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "prompt" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
          "agent_type" .= f3,
          "subrepo"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f4)]
-  toEncodingPB (SpawnGeminiTeammateRequest f1 f2 f3 f4)
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f4),
+         "team_name"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f5)]
+  toEncodingPB (SpawnGeminiTeammateRequest f1 f2 f3 f4 f5)
     = HsJSONPB.pairs
         ["name" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "prompt" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
          "agent_type" .= f3,
          "subrepo"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f4)]
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f4),
+         "team_name"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f5)]
 instance (HsJSONPB.FromJSONPB SpawnGeminiTeammateRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -961,7 +980,10 @@ instance (HsJSONPB.FromJSONPB SpawnGeminiTeammateRequest) where
                 <*> obj .: "agent_type"
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "subrepo")))
+                     (obj .: "subrepo"))
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "team_name")))
 instance (HsJSONPB.ToJSON SpawnGeminiTeammateRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding

@@ -95,9 +95,7 @@ impl TeamsEffects for TeamsHandler {
 
         let content = tokio::fs::read_to_string(&task_path)
             .await
-            .map_err(|e| {
-                EffectError::not_found(format!("task/{}: {}", req.task_id, e))
-            })?;
+            .map_err(|e| EffectError::not_found(format!("task/{}: {}", req.task_id, e)))?;
 
         let mut task: TaskFile = serde_json::from_str(&content).map_err(|e| {
             EffectError::custom("teams_error", format!("Failed to parse task file: {}", e))
@@ -149,9 +147,11 @@ impl TeamsEffects for TeamsHandler {
             EffectError::custom("teams_error", format!("Failed to serialize task: {}", e))
         })?;
 
-        tokio::fs::write(&task_path, new_content).await.map_err(|e| {
-            EffectError::custom("teams_error", format!("Failed to write task file: {}", e))
-        })?;
+        tokio::fs::write(&task_path, new_content)
+            .await
+            .map_err(|e| {
+                EffectError::custom("teams_error", format!("Failed to write task file: {}", e))
+            })?;
 
         tracing::info!(
             task_id = %req.task_id,
@@ -179,9 +179,7 @@ impl TeamsEffects for TeamsHandler {
 
         let content = tokio::fs::read_to_string(&task_path)
             .await
-            .map_err(|e| {
-                EffectError::not_found(format!("task/{}: {}", req.task_id, e))
-            })?;
+            .map_err(|e| EffectError::not_found(format!("task/{}: {}", req.task_id, e)))?;
 
         let mut task: TaskFile = serde_json::from_str(&content).map_err(|e| {
             EffectError::custom("teams_error", format!("Failed to parse task file: {}", e))
@@ -192,10 +190,7 @@ impl TeamsEffects for TeamsHandler {
             return Ok(CompleteTaskResponse {
                 success: false,
                 task: Some(task.to_proto()),
-                error: format!(
-                    "Task owned by '{}', not '{}'",
-                    task.owner, agent_id
-                ),
+                error: format!("Task owned by '{}', not '{}'", task.owner, agent_id),
             });
         }
 
@@ -205,9 +200,11 @@ impl TeamsEffects for TeamsHandler {
             EffectError::custom("teams_error", format!("Failed to serialize task: {}", e))
         })?;
 
-        tokio::fs::write(&task_path, new_content).await.map_err(|e| {
-            EffectError::custom("teams_error", format!("Failed to write task file: {}", e))
-        })?;
+        tokio::fs::write(&task_path, new_content)
+            .await
+            .map_err(|e| {
+                EffectError::custom("teams_error", format!("Failed to write task file: {}", e))
+            })?;
 
         // Report completion to TL inbox
         let team_name_clone = team_name.clone();
@@ -295,9 +292,7 @@ impl TeamsEffects for TeamsHandler {
 
         let content = tokio::fs::read_to_string(&task_path)
             .await
-            .map_err(|e| {
-                EffectError::not_found(format!("task/{}: {}", req.task_id, e))
-            })?;
+            .map_err(|e| EffectError::not_found(format!("task/{}: {}", req.task_id, e)))?;
 
         let task: TaskFile = serde_json::from_str(&content).map_err(|e| {
             EffectError::custom("teams_error", format!("Failed to parse task file: {}", e))
@@ -308,21 +303,14 @@ impl TeamsEffects for TeamsHandler {
         })
     }
 
-    async fn report_status(
-        &self,
-        req: ReportStatusRequest,
-    ) -> EffectResult<ReportStatusResponse> {
+    async fn report_status(&self, req: ReportStatusRequest) -> EffectResult<ReportStatusResponse> {
         let team_name = get_team_name()?;
         let agent_id = get_agent_id();
 
         tracing::info!(agent = %agent_id, "Reporting status to TL");
 
         let tl_inbox = inbox::inbox_path(&team_name, "team-lead");
-        let msg = inbox::create_message(
-            agent_id,
-            req.content,
-            None,
-        );
+        let msg = inbox::create_message(agent_id, req.content, None);
 
         tokio::task::spawn_blocking(move || inbox::append_message(&tl_inbox, &msg))
             .await
@@ -332,10 +320,7 @@ impl TeamsEffects for TeamsHandler {
         Ok(ReportStatusResponse { ack: true })
     }
 
-    async fn ask_question(
-        &self,
-        req: AskQuestionRequest,
-    ) -> EffectResult<AskQuestionResponse> {
+    async fn ask_question(&self, req: AskQuestionRequest) -> EffectResult<AskQuestionResponse> {
         let team_name = get_team_name()?;
         let agent_id = get_agent_id();
 

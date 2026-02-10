@@ -126,10 +126,11 @@ wasm role="tl":
     cp $(find dist-newstyle -name "wasm-guest-{{role}}.wasm" -type f -print -quit) .exomonad/wasm/wasm-guest-{{role}}.wasm
     @echo ">>> Done: .exomonad/wasm/wasm-guest-{{role}}.wasm"
 
-# Build both WASM role plugins (tl + dev)
+# Build all WASM role plugins (tl + dev + unified)
 wasm-all:
     @just wasm tl
     @just wasm dev
+    @just wasm unified
     @echo ">>> Installed to .exomonad/wasm/:"
     @ls -lh .exomonad/wasm/wasm-guest-*.wasm
 

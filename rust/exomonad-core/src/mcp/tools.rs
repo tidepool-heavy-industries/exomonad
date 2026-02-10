@@ -15,16 +15,21 @@ use tracing::{debug, error};
 // ============================================================================
 
 /// Input for WASM handle_mcp_call function.
+///
+/// The `role` field is always present at the WASM boundary — the server knows
+/// which role it's serving (from the route: `/tl/mcp`, `/dev/mcp`, `/agents/{name}/mcp`).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MCPCallInput {
+    role: String,
     tool_name: String,
     tool_args: Value,
 }
 
 impl MCPCallInput {
-    pub fn new(tool_name: String, tool_args: Value) -> Self {
+    pub fn new(role: String, tool_name: String, tool_args: Value) -> Self {
         Self {
+            role,
             tool_name,
             tool_args,
         }
@@ -68,19 +73,19 @@ impl MCPCallOutput {
 
 /// Get all available tool definitions from WASM plugin.
 ///
-/// Calls handle_list_tools in Haskell WASM, which returns the tool schemas
-/// defined in ExoMonad.Guest.Tools. This is the single source of truth.
+/// Calls handle_list_tools in Haskell WASM with the role, which returns
+/// only the tool schemas for that role. This is the single source of truth.
 pub async fn get_tool_definitions(state: &McpState) -> Result<Vec<ToolDefinition>> {
-    debug!("Fetching tool definitions from WASM");
+    let role = state.role.as_deref().unwrap_or("tl");
+    debug!(role = %role, "Fetching tool definitions from WASM");
 
-    // handle_list_tools takes no input (empty object)
     let tools: Vec<ToolDefinition> = state
         .plugin
-        .call("handle_list_tools", &())
+        .call("handle_list_tools", &serde_json::json!({"role": role}))
         .await
         .context("WASM handle_list_tools failed")?;
 
-    debug!(count = tools.len(), "Got tool definitions from WASM");
+    debug!(count = tools.len(), role = %role, "Got tool definitions from WASM");
     Ok(tools)
 }
 
@@ -95,7 +100,9 @@ pub async fn get_tool_definitions(state: &McpState) -> Result<Vec<ToolDefinition
 pub async fn execute_tool(state: &McpState, name: &str, args: Value) -> Result<Value> {
     debug!(tool = %name, "Routing tool call through WASM");
 
+    let role = state.role.as_deref().unwrap_or("tl");
     let input = MCPCallInput {
+        role: role.to_string(),
         tool_name: name.to_string(),
         tool_args: args,
     };
@@ -154,12 +161,14 @@ mod tests {
     #[test]
     fn mcp_call_input_serializes_camel_case() {
         let input = MCPCallInput {
+            role: "tl".to_string(),
             tool_name: "git_branch".to_string(),
             tool_args: json!({"path": "/tmp"}),
         };
         let json = serde_json::to_string(&input).unwrap();
 
         // Verify camelCase serialization
+        assert!(json.contains("\"role\""), "Expected role in JSON");
         assert!(json.contains("toolName"), "Expected toolName in JSON");
         assert!(json.contains("toolArgs"), "Expected toolArgs in JSON");
 
@@ -183,6 +192,7 @@ mod tests {
         });
 
         let input = MCPCallInput {
+            role: "tl".to_string(),
             tool_name: "github_get_issue".to_string(),
             tool_args: args.clone(),
         };
@@ -265,6 +275,7 @@ mod tests {
     #[test]
     fn mcp_call_input_empty_args() {
         let input = MCPCallInput {
+            role: "tl".to_string(),
             tool_name: "list_agents".to_string(),
             tool_args: json!({}),
         };
@@ -277,6 +288,7 @@ mod tests {
     #[test]
     fn mcp_call_input_nested_args() {
         let input = MCPCallInput {
+            role: "tl".to_string(),
             tool_name: "spawn_agents".to_string(),
             tool_args: json!({
                 "issues": ["1", "2", "3"],

@@ -10,6 +10,7 @@ module HttpDevHooks
   )
 where
 
+import Data.Aeson qualified as Aeson
 import Data.Maybe (fromMaybe)
 import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
 import ExoMonad.Guest.Types (HookInput (..), HookOutput, allowResponse, denyResponse, postToolUseResponse)
@@ -41,7 +42,7 @@ httpDevHooks =
 permissionCascade :: HookInput -> Sem HookEffects HookOutput
 permissionCascade hookInput = do
   let tool = fromMaybe "" (hiToolName hookInput)
-      args = fromMaybe (error "unreachable: PreToolUse without tool_input") (hiToolInput hookInput)
+      args = fromMaybe (Aeson.Object mempty) (hiToolInput hookInput)
   case checkAgentPermissions "dev" tool args of
     Allowed -> pure (allowResponse Nothing)
     Escalate -> pure (allowResponse (Just "escalation-needed"))

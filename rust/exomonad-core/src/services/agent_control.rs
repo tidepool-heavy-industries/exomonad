@@ -483,7 +483,10 @@ impl AgentControlService {
     /// No per-agent directories or MCP configs — agents share the repo's config.
     /// State lives in Teams config.json + Zellij tab only.
     #[tracing::instrument(skip(self, options), fields(name = %options.name))]
-    pub async fn spawn_gemini_teammate(&self, options: &SpawnGeminiTeammateOptions) -> Result<SpawnResult> {
+    pub async fn spawn_gemini_teammate(
+        &self,
+        options: &SpawnGeminiTeammateOptions,
+    ) -> Result<SpawnResult> {
         info!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_gemini_teammate");
 
         let result = timeout(SPAWN_TIMEOUT, async {
@@ -708,7 +711,8 @@ impl AgentControlService {
         }
 
         // Remove per-agent config directory (.exomonad/agents/{name}/)
-        let agent_config_dir = self.project_dir
+        let agent_config_dir = self
+            .project_dir
             .join(".exomonad")
             .join("agents")
             .join(identifier);
@@ -849,9 +853,7 @@ impl AgentControlService {
                 // Teammate tabs: "{emoji} {name}" where name is the human-readable part.
                 // Issue tabs: "{emoji} gh-{issue_id}-{slug}"
                 // We check if any tab matches by scanning for the member name in tab names.
-                let has_tab = zellij_tabs.iter().any(|tab| {
-                    tab.contains(&member.name)
-                });
+                let has_tab = zellij_tabs.iter().any(|tab| tab.contains(&member.name));
 
                 let status = if has_tab {
                     AgentStatus::Running
@@ -946,8 +948,21 @@ impl AgentControlService {
             }
             None => cmd.to_string(),
         };
+
+        // Prepend env vars to command (Zellij KDL doesn't support pane-level env blocks)
+        let env_prefix = env_vars
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, shell_escape::escape(v.into())))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let full_command = if env_prefix.is_empty() {
+            agent_command
+        } else {
+            format!("{} {}", env_prefix, agent_command)
+        };
+
         // Escape the command for KDL string literal (escape backslashes, quotes, newlines)
-        let kdl_escaped_command = Self::escape_for_kdl(&agent_command);
+        let kdl_escaped_command = Self::escape_for_kdl(&full_command);
 
         // Use login shell to ensure PATH is loaded (gemini, claude, etc.)
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
@@ -961,7 +976,6 @@ impl AgentControlService {
             shell: &shell,
             focus: true,
             close_on_exit: true,
-            env: env_vars,
         };
 
         let layout_content = crate::layout::generate_agent_layout(&params)
@@ -1104,9 +1118,7 @@ impl AgentControlService {
         agent_type: AgentType,
     ) -> Result<()> {
         let port = Self::read_server_port(effective_dir).ok_or_else(|| {
-            anyhow::anyhow!(
-                "No MCP server running. Start one with `exomonad serve --port <port>`."
-            )
+            anyhow::anyhow!("No MCP server running. Start one with `exomonad serve --port <port>`.")
         })?;
 
         match agent_type {
@@ -1127,16 +1139,22 @@ impl AgentControlService {
             }
             AgentType::Gemini => {
                 // Gemini CLI uses "httpUrl" for streamable HTTP.
-                info!(port, "Writing .gemini/settings.json for Gemini agent");
+                // Per-agent endpoint includes agent name for identity routing.
+                let agent_name = agent_dir
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown");
+                info!(port, agent_name = %agent_name, "Writing .gemini/settings.json for Gemini agent");
                 let gemini_content = format!(
                     r###"{{
   "mcpServers": {{
     "exomonad": {{
-      "httpUrl": "http://localhost:{}/mcp"
+      "httpUrl": "http://localhost:{port}/agents/{name}/mcp"
     }}
   }}
 }}"###,
-                    port
+                    port = port,
+                    name = agent_name,
                 );
                 let gemini_dir = agent_dir.join(".gemini");
                 fs::create_dir_all(&gemini_dir).await?;

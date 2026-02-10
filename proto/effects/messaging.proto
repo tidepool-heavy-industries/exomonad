@@ -39,10 +39,74 @@ message SendQuestionResponse {
 }
 
 // ============================================================================
+// GetAgentMessages - TL reads messages from agent outboxes
+// ============================================================================
+
+message GetAgentMessagesRequest {
+  // Filter to a specific agent. Empty string means all agents.
+  string agent_id = 1;
+  // Team name for inbox lookup.
+  string team_name = 2;
+}
+
+message AgentMessage {
+  // Sender name.
+  string from = 1;
+  // Message content.
+  string text = 2;
+  // Short summary.
+  string summary = 3;
+  // ISO 8601 timestamp.
+  string timestamp = 4;
+  // Whether the message has been read.
+  bool read = 5;
+}
+
+message AgentMessages {
+  // Agent identifier.
+  string agent_id = 1;
+  // Messages from this agent.
+  repeated AgentMessage messages = 2;
+}
+
+message GetAgentMessagesResponse {
+  // Messages grouped by agent.
+  repeated AgentMessages agents = 1;
+  // Warning message (e.g. no team configured).
+  string warning = 2;
+}
+
+// ============================================================================
+// AnswerQuestion - TL answers a pending question from an agent
+// ============================================================================
+
+message AnswerQuestionRequest {
+  // Agent who asked the question.
+  string agent_id = 1;
+  // Question ID to answer.
+  string question_id = 2;
+  // Answer text.
+  string answer = 3;
+  // Team name for inbox lookup.
+  string team_name = 4;
+}
+
+message AnswerQuestionResponse {
+  // Status of the answer (e.g. "answered").
+  string status = 1;
+  // Agent who was answered.
+  string agent_id = 2;
+  // Question that was answered.
+  string question_id = 3;
+}
+
+// ============================================================================
 // Service definition
 // ============================================================================
 
 service MessagingEffects {
   rpc SendNote(SendNoteRequest) returns (SendNoteResponse);
   rpc SendQuestion(SendQuestionRequest) returns (SendQuestionResponse);
+  rpc GetAgentMessages(GetAgentMessagesRequest) returns (GetAgentMessagesResponse);
+  rpc AnswerQuestion(AnswerQuestionRequest) returns (AnswerQuestionResponse);
 }

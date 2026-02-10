@@ -134,6 +134,7 @@ pub fn append_message(path: &Path, message: &InboxMessage) -> Result<()> {
         .read(true)
         .write(true)
         .create(true)
+        .truncate(false)
         .open(path)?;
 
     #[cfg(unix)]

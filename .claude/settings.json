@@ -1,2 +1,15 @@
 {
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "TeamCreate",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "exomonad hook post-tool-use"
+          }
+        ]
+      }
+    ]
+  }
 }

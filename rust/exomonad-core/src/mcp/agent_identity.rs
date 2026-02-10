@@ -59,10 +59,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_local_scope() {
-        let result = with_agent_id("test-agent".to_string(), async {
-            get_agent_id()
-        })
-        .await;
+        let result = with_agent_id("test-agent".to_string(), async { get_agent_id() }).await;
         assert_eq!(result, "test-agent");
     }
 

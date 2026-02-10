@@ -97,10 +97,7 @@ impl Config {
             })?;
 
         // Resolve port: local > global > default (7432)
-        let port = local_raw
-            .port
-            .or(global_raw.port)
-            .unwrap_or(7432);
+        let port = local_raw.port.or(global_raw.port).unwrap_or(7432);
 
         Ok(Self {
             project_dir,

@@ -8,10 +8,10 @@ pub mod git;
 pub mod github;
 pub mod inbox;
 pub mod local;
-pub mod questions;
 pub mod log;
 pub mod messaging;
 pub mod popup;
+pub mod questions;
 pub mod secrets;
 pub mod teams;
 pub mod zellij_events;
@@ -179,8 +179,7 @@ impl Services {
     pub fn with_mcp_server_port(mut self, port: u16) -> Self {
         let project_dir = std::env::current_dir().unwrap_or_default();
         let github = self.github.clone();
-        let mut acs = AgentControlService::new(project_dir, github)
-            .with_mcp_server_port(port);
+        let mut acs = AgentControlService::new(project_dir, github).with_mcp_server_port(port);
         if let Some(ref session) = self.zellij_session {
             acs = acs.with_zellij_session(session.clone());
         }

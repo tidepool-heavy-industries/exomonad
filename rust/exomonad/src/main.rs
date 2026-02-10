@@ -220,6 +220,7 @@ async fn handle_hook(
         HookEventType::SubagentStop => "SubagentStop",
         HookEventType::SessionEnd => "SessionEnd",
         HookEventType::PreToolUse => "PreToolUse",
+        HookEventType::PostToolUse => "PostToolUse",
         _ => {
             // Pass through unhandled hooks with allow
             debug!(event = ?event_type, "Hook type not implemented in WASM, allowing");
@@ -466,7 +467,6 @@ fn generate_tl_layout(port: u16) -> Result<std::path::PathBuf> {
             shell: &shell,
             focus: false,
             close_on_exit: false,
-            env: HashMap::new(),
         },
         exomonad_core::layout::AgentTabParams {
             tab_name: "TL",
@@ -476,7 +476,6 @@ fn generate_tl_layout(port: u16) -> Result<std::path::PathBuf> {
             shell: &shell,
             focus: true,
             close_on_exit: false,
-            env: HashMap::new(),
         },
     ];
 
@@ -653,7 +652,18 @@ async fn main() -> Result<()> {
         };
 
         let role_name = config.role.to_string();
-        let wasm_path = project_dir.join(format!(".exomonad/wasm/wasm-guest-{}.wasm", role_name));
+        // Prefer unified WASM (contains all roles, role selection per-call).
+        // Fall back to per-role WASM for backwards compatibility.
+        let unified_path = project_dir.join(".exomonad/wasm/wasm-guest-unified.wasm");
+        let wasm_path = if unified_path.exists() {
+            info!("Using unified WASM (all roles in one module)");
+            unified_path
+        } else {
+            let fallback =
+                project_dir.join(format!(".exomonad/wasm/wasm-guest-{}.wasm", role_name));
+            info!(role = %role_name, "Unified WASM not found, falling back to per-role WASM");
+            fallback
+        };
 
         if !wasm_path.exists() {
             anyhow::bail!(
@@ -731,25 +741,28 @@ async fn main() -> Result<()> {
         // The handler extracts agent name from the path and sets it as
         // the task-local identity before forwarding to the dev MCP service.
         let agent_dev_service = dev_service.clone();
-        let agent_handler = move |
-            axum::extract::Path(agent_name): axum::extract::Path<String>,
-            request: axum::extract::Request,
-        | {
+        let agent_handler = move |axum::extract::Path(agent_name): axum::extract::Path<String>,
+                                  request: axum::extract::Request| {
             let service = agent_dev_service.clone();
             async move {
                 tracing::info!(agent = %agent_name, "Routing agent MCP request");
-                exomonad_core::mcp::agent_identity::with_agent_id(
-                    agent_name,
-                    async move { service.handle(request).await },
-                )
+                exomonad_core::mcp::agent_identity::with_agent_id(agent_name, async move {
+                    service.handle(request).await
+                })
                 .await
             }
         };
 
         let app = axum::Router::new()
             .route("/health", axum::routing::get(health_handler))
-            .route("/agents/{name}/mcp", axum::routing::any(agent_handler.clone()))
-            .route("/agents/{name}/mcp/{*rest}", axum::routing::any(agent_handler))
+            .route(
+                "/agents/{name}/mcp",
+                axum::routing::any(agent_handler.clone()),
+            )
+            .route(
+                "/agents/{name}/mcp/{*rest}",
+                axum::routing::any(agent_handler),
+            )
             .nest_service("/tl/mcp", tl_service)
             .nest_service("/dev/mcp", dev_service)
             .layer(TraceLayer::new_for_http());
@@ -886,8 +899,7 @@ async fn build_runtime(
     services: &Arc<exomonad_core::ValidatedServices>,
 ) -> Result<Runtime> {
     let builder = RuntimeBuilder::new().with_wasm_bytes(wasm_bytes.to_vec());
-    let (builder, _question_registry) =
-        exomonad_core::register_builtin_handlers(builder, services);
+    let (builder, _question_registry) = exomonad_core::register_builtin_handlers(builder, services);
 
     builder.build().await.context("Failed to build runtime")
 }

@@ -4,7 +4,6 @@
 //! consistent styling across all agent tabs.
 
 use askama::Template;
-use std::collections::HashMap;
 use std::path::Path;
 
 /// Parameters for generating an agent tab.
@@ -24,8 +23,6 @@ pub struct AgentTabParams<'a> {
     /// Whether the pane should close when the command exits.
     /// True for short-lived agents, false for interactive sessions.
     pub close_on_exit: bool,
-    /// Environment variables to set in the agent pane.
-    pub env: HashMap<String, String>,
 }
 
 /// Template for an agent tab with interaction pane and status plugin.
@@ -39,7 +36,6 @@ struct AgentTab {
     shell: String,
     focus: bool,
     close_on_exit: bool,
-    env: HashMap<String, String>,
 }
 
 /// Template for a single subagent layout (wraps agent tab with zjstatus).
@@ -70,7 +66,6 @@ pub fn generate_agent_layout(params: &AgentTabParams) -> Result<String, askama::
         shell: params.shell.to_string(),
         focus: params.focus,
         close_on_exit: params.close_on_exit,
-        env: params.env.clone(),
     }
     .render()?;
 
@@ -93,7 +88,6 @@ pub fn generate_main_layout(tabs: Vec<AgentTabParams>) -> Result<String, askama:
                 shell: params.shell.to_string(),
                 focus: params.focus,
                 close_on_exit: params.close_on_exit,
-                env: params.env.clone(),
             }
             .render()
         })
@@ -119,7 +113,6 @@ mod tests {
             shell: "/bin/zsh",
             focus: true,
             close_on_exit: true,
-            env: HashMap::new(),
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -145,7 +138,6 @@ mod tests {
                 shell: "/bin/zsh",
                 focus: true,
                 close_on_exit: true,
-                env: HashMap::new(),
             },
             AgentTabParams {
                 tab_name: "Tab2",
@@ -155,7 +147,6 @@ mod tests {
                 shell: "/bin/zsh",
                 focus: false,
                 close_on_exit: true,
-                env: HashMap::new(),
             },
         ];
 
@@ -178,7 +169,6 @@ mod tests {
             shell: "/bin/zsh",
             focus: true,
             close_on_exit: true,
-            env: HashMap::new(),
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -195,7 +185,6 @@ mod tests {
             shell: "/bin/zsh",
             focus: true,
             close_on_exit: true,
-            env: HashMap::new(),
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -212,7 +201,6 @@ mod tests {
             shell: "/bin/zsh",
             focus: true,
             close_on_exit: true,
-            env: HashMap::new(),
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -229,7 +217,6 @@ mod tests {
             shell: "/bin/zsh",
             focus: true,
             close_on_exit: true,
-            env: HashMap::new(),
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -248,7 +235,6 @@ mod tests {
             shell: "/bin/zsh",
             focus: true,
             close_on_exit: true,
-            env: HashMap::new(),
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -265,7 +251,6 @@ mod tests {
             shell: "/bin/zsh",
             focus: false,
             close_on_exit: true,
-            env: HashMap::new(),
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -286,7 +271,6 @@ mod tests {
             shell: "/bin/zsh",
             focus: true,
             close_on_exit: true,
-            env: HashMap::new(),
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -306,7 +290,6 @@ mod tests {
             shell: "/bin/zsh",
             focus: true,
             close_on_exit: true,
-            env: HashMap::new(),
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -326,7 +309,6 @@ mod tests {
             shell: "/bin/zsh",
             focus: true,
             close_on_exit: true,
-            env: HashMap::new(),
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -346,7 +328,6 @@ mod tests {
             shell: "/bin/zsh",
             focus: true,
             close_on_exit: true,
-            env: HashMap::new(),
         };
 
         let layout = generate_agent_layout(&params).unwrap();
@@ -367,7 +348,6 @@ mod tests {
                 shell: "/bin/zsh",
                 focus: true,
                 close_on_exit: true,
-                env: HashMap::new(),
             },
             AgentTabParams {
                 tab_name: "Tab2",
@@ -377,7 +357,6 @@ mod tests {
                 shell: "/bin/zsh",
                 focus: false,
                 close_on_exit: true,
-                env: HashMap::new(),
             },
             AgentTabParams {
                 tab_name: "Tab3",
@@ -387,7 +366,6 @@ mod tests {
                 shell: "/bin/zsh",
                 focus: false,
                 close_on_exit: true,
-                env: HashMap::new(),
             },
         ];
 
@@ -413,7 +391,6 @@ mod tests {
                 shell,
                 focus: true,
                 close_on_exit: true,
-                env: HashMap::new(),
             };
 
             let layout = generate_agent_layout(&params).unwrap();
@@ -436,7 +413,6 @@ mod tests {
             shell: "/bin/zsh",
             focus: true,
             close_on_exit: true,
-            env: HashMap::new(),
         };
 
         let layout = generate_agent_layout(&params).unwrap();

@@ -6,8 +6,8 @@ use crate::effects::{
     dispatch_agent_effect, AgentEffects, EffectError, EffectHandler, EffectResult,
 };
 use crate::services::agent_control::{
-    AgentControlService, AgentInfo, AgentType as ServiceAgentType, SpawnOptions,
-    SpawnGeminiTeammateOptions,
+    AgentControlService, AgentInfo, AgentType as ServiceAgentType, SpawnGeminiTeammateOptions,
+    SpawnOptions,
 };
 use crate::{GithubOwner, GithubRepo, IssueNumber};
 use async_trait::async_trait;
@@ -135,7 +135,11 @@ impl AgentEffects for AgentHandler {
             } else {
                 Some(req.subrepo.clone())
             },
-            team_name: None,
+            team_name: if req.team_name.is_empty() {
+                None
+            } else {
+                Some(req.team_name.clone())
+            },
         };
 
         let result = self
@@ -277,7 +281,15 @@ fn teammate_result_to_proto(
         },
         role: 0,
         status: AgentStatus::Running as i32,
-        zellij_tab: format!("{} {}", if result.agent_type == "claude" { "\u{1F916}" } else { "\u{1F48E}" }, name),
+        zellij_tab: format!(
+            "{} {}",
+            if result.agent_type == "claude" {
+                "\u{1F916}"
+            } else {
+                "\u{1F48E}"
+            },
+            name
+        ),
         error: String::new(),
         pr_number: 0,
         pr_url: String::new(),

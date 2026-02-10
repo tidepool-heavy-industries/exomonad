@@ -124,8 +124,11 @@ impl EffectRegistry {
     ///
     /// Routes based on namespace prefix extracted from the effect type.
     pub async fn dispatch(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
-        let namespace = effect_type.split('.').next().ok_or_else(|| {
-            EffectError::invalid_input("Effect type must contain namespace prefix")
+        let (namespace, _) = effect_type.split_once('.').ok_or_else(|| {
+            EffectError::invalid_input(format!(
+                "Effect type '{}' must contain namespace prefix (e.g. 'git.get_branch')",
+                effect_type
+            ))
         })?;
 
         let handler = self
