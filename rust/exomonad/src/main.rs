@@ -381,8 +381,6 @@ async fn handle_hook(
 ///
 /// With `--recreate`: delete any existing session (even alive), then create fresh.
 ///
-/// On fresh creation, writes `.mcp.json` for the TL role pointing to the
-/// unix socket endpoint at `/tl/mcp`.
 fn run_init(session_override: Option<String>, recreate: bool, port: u16) -> Result<()> {
     // Preflight: warn if XDG_RUNTIME_DIR missing (SSH edge case)
     if std::env::var("XDG_RUNTIME_DIR").is_err() {
@@ -392,12 +390,6 @@ fn run_init(session_override: Option<String>, recreate: bool, port: u16) -> Resu
     // Resolve config
     let config = config::Config::discover()?;
     let session = session_override.unwrap_or(config.zellij_session);
-
-    let project_dir = if config.project_dir.is_absolute() {
-        config.project_dir.clone()
-    } else {
-        std::env::current_dir()?.join(&config.project_dir)
-    };
 
     // Query existing sessions
     let output = std::process::Command::new("zellij")
@@ -442,9 +434,6 @@ fn run_init(session_override: Option<String>, recreate: bool, port: u16) -> Resu
         }
     }
 
-    // Write .mcp.json for TL role pointing to HTTP server
-    write_tl_mcp_json(&project_dir, port)?;
-
     // Create fresh session from layout
     eprintln!("Creating session: {}", session);
     let layout_path = generate_tl_layout(port)?;
@@ -456,26 +445,6 @@ fn run_init(session_override: Option<String>, recreate: bool, port: u16) -> Resu
         .arg(&layout_path)
         .exec();
     Err(err).context("Failed to exec zellij with layout")
-}
-
-/// Write `.mcp.json` for the TL role, pointing to the HTTP MCP endpoint.
-fn write_tl_mcp_json(project_dir: &std::path::Path, port: u16) -> Result<()> {
-    let mcp_json_path = project_dir.join(".mcp.json");
-
-    let mcp_config = serde_json::json!({
-        "mcpServers": {
-            "exomonad": {
-                "url": format!("http://localhost:{}/tl/mcp", port)
-            }
-        }
-    });
-
-    let content = serde_json::to_string_pretty(&mcp_config)?;
-    std::fs::write(&mcp_json_path, &content)
-        .with_context(|| format!("Failed to write {}", mcp_json_path.display()))?;
-
-    eprintln!("Wrote {}", mcp_json_path.display());
-    Ok(())
 }
 
 /// Generate a two-tab TL layout: Server tab + TL tab.

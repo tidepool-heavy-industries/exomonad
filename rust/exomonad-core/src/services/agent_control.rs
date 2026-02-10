@@ -207,15 +207,6 @@ pub struct BatchSpawnResult {
 
 impl FFIBoundary for BatchSpawnResult {}
 
-/// Server connection info discovered from server.pid.
-#[derive(Debug, Clone)]
-enum ServerInfo {
-    /// Unix socket path
-    Socket(String),
-    /// HTTP port
-    Http(u16),
-}
-
 /// Result of batch cleanup operation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BatchCleanupResult {
@@ -800,9 +791,8 @@ impl AgentControlService {
     // Internal: Server Discovery
     // ========================================================================
 
-    /// Read server.pid and extract the socket path if available.
-    /// Falls back to reading the port for HTTP mode.
-    fn read_server_info(project_dir: &Path) -> Option<ServerInfo> {
+    /// Read server.pid and extract the HTTP port.
+    fn read_server_port(project_dir: &Path) -> Option<u16> {
         let pid_path = project_dir.join(".exomonad/server.pid");
         let content = std::fs::read_to_string(&pid_path).ok()?;
         let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
@@ -820,15 +810,10 @@ impl AgentControlService {
             }
         }
 
-        // Check for socket path first (unix socket mode), then port (HTTP mode)
-        if let Some(socket) = parsed.get("socket").and_then(|v| v.as_str()) {
-            Some(ServerInfo::Socket(socket.to_string()))
-        } else {
-            parsed
-                .get("port")
-                .and_then(|v| v.as_u64())
-                .map(|port| ServerInfo::Http(port as u16))
-        }
+        parsed
+            .get("port")
+            .and_then(|v| v.as_u64())
+            .map(|port| port as u16)
     }
 
     // ========================================================================
@@ -1024,97 +1009,48 @@ impl AgentControlService {
     /// Write MCP config for the agent directory.
     ///
     /// Claude agents get `.mcp.json`. Gemini agents get `.gemini/settings.json`.
-    /// Prefers Unix socket if server.pid has a socket path, falls back to HTTP,
-    /// then to stdio mode.
+    /// Requires a running HTTP server (`exomonad serve --port <port>`).
     async fn write_agent_mcp_config(
         &self,
         effective_dir: &Path,
         agent_dir: &Path,
         agent_type: AgentType,
     ) -> Result<()> {
-        let server_info = Self::read_server_info(effective_dir);
+        let port = Self::read_server_port(effective_dir).ok_or_else(|| {
+            anyhow::anyhow!(
+                "No MCP server running. Start one with `exomonad serve --port <port>`."
+            )
+        })?;
 
         match agent_type {
             AgentType::Claude => {
-                let sidecar_path = std::env::current_exe()
-                    .ok()
-                    .and_then(|p| p.to_str().map(String::from))
-                    .unwrap_or_else(|| "exomonad".to_string());
-
-                let mcp_content = match server_info {
-                    Some(ServerInfo::Socket(socket_path)) => {
-                        info!(socket = %socket_path, "Unix socket server detected, writing socket .mcp.json");
-                        format!(
-                            r###"{{
+                info!(port, "Writing HTTP .mcp.json for Claude agent");
+                let mcp_content = format!(
+                    r###"{{
   "mcpServers": {{
     "exomonad": {{
-      "url": "unix://{}/dev/mcp"
-    }}
-  }}
-}}"###,
-                            socket_path
-                        )
-                    }
-                    Some(ServerInfo::Http(port)) => {
-                        info!(port, "HTTP server detected, writing HTTP .mcp.json");
-                        format!(
-                            r###"{{
-  "mcpServers": {{
-    "exomonad": {{
-      "type": "sse",
       "url": "http://localhost:{}/mcp"
     }}
   }}
 }}"###,
-                            port
-                        )
-                    }
-                    None => {
-                        info!("No server detected, writing stdio .mcp.json");
-                        format!(
-                            r###"{{
-  "mcpServers": {{
-    "exomonad": {{
-      "command": "{}",
-      "args": ["mcp-stdio"]
-    }}
-  }}
-}}"###,
-                            sidecar_path
-                        )
-                    }
-                };
+                    port
+                );
                 fs::write(agent_dir.join(".mcp.json"), mcp_content).await?;
                 info!(agent_dir = %agent_dir.display(), "Wrote .mcp.json for Claude agent");
             }
             AgentType::Gemini => {
-                // Gemini CLI uses "httpUrl" for streamable HTTP, "url" for SSE.
-                // Our rmcp server speaks streamable HTTP.
-                let gemini_content = match server_info {
-                    Some(ServerInfo::Socket(_)) => {
-                        return Err(anyhow::anyhow!(
-                            "Gemini CLI does not support unix socket MCP servers. Use `exomonad serve --port <port>` instead."
-                        ));
-                    }
-                    Some(ServerInfo::Http(port)) => {
-                        info!(port, "HTTP server detected, writing .gemini/settings.json");
-                        format!(
-                            r###"{{
+                // Gemini CLI uses "httpUrl" for streamable HTTP.
+                info!(port, "Writing .gemini/settings.json for Gemini agent");
+                let gemini_content = format!(
+                    r###"{{
   "mcpServers": {{
     "exomonad": {{
       "httpUrl": "http://localhost:{}/mcp"
     }}
   }}
 }}"###,
-                            port
-                        )
-                    }
-                    None => {
-                        return Err(anyhow::anyhow!(
-                            "No MCP server running. Gemini agents require an HTTP server. Start one with `exomonad serve --port <port>`."
-                        ));
-                    }
-                };
+                    port
+                );
                 let gemini_dir = agent_dir.join(".gemini");
                 fs::create_dir_all(&gemini_dir).await?;
                 fs::write(gemini_dir.join("settings.json"), gemini_content).await?;

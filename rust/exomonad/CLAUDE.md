@@ -56,10 +56,10 @@ exomonad init [--session NAME]    # Initialize Zellij session (Server tab + TL t
 ### Init Command
 
 `exomonad init` creates a two-tab Zellij session:
-- **Server tab**: Runs `exomonad serve --socket .exomonad/server.sock` (stays open on exit)
+- **Server tab**: Runs `exomonad serve --port <port>` (stays open on exit)
 - **TL tab**: Runs `nix develop` for the dev environment (focused by default)
 
-It also writes `.mcp.json` pointing the TL role to the unix socket endpoint (`unix://<abs-path>/tl/mcp`).
+MCP config is managed by the CLI tools (`claude mcp add` / `gemini mcp add`), not by `exomonad init`.
 
 Use `--recreate` to delete an existing session and create fresh (e.g., after binary updates).
 
@@ -81,17 +81,13 @@ The MCP server provides Claude Code with tools via stdio (JSON-RPC).
 
 ### Configuration
 
-Add `.mcp.json` to your project root:
+Use CLI-native config commands:
+```bash
+# Claude Code
+claude mcp add exomonad -- exomonad mcp-stdio
 
-```json
-{
-  "mcpServers": {
-    "exomonad": {
-      "command": "exomonad",
-      "args": ["mcp-stdio"]
-    }
-  }
-}
+# Gemini CLI (HTTP mode only)
+gemini mcp add --transport http exomonad http://localhost:7432/mcp
 ```
 
 ### Available Tools

@@ -7,7 +7,7 @@ This directory simulates an external repo consuming exomonad as infrastructure.
 ```
 .
 ├── flake.nix                    # Consumes exomonad.lib.mkWasmRole
-├── .mcp.json                    # MCP server config for Claude
+├── .mcp.json                    # MCP server config (managed by `claude mcp add`)
 ├── .exomonad/
 │   ├── config.toml              # Role config (default_role = "test")
 │   ├── lib/
@@ -63,7 +63,7 @@ claude
 #    - Try calling the ping tool to verify the pipeline works
 ```
 
-The `.mcp.json` configures Claude to use exomonad as an MCP server. The `ping` tool is a minimal proof that the full pipeline works: Claude → MCP → Rust sidecar → WASM → Haskell handler.
+MCP config (via `claude mcp add exomonad -- exomonad mcp-stdio`) tells Claude to use exomonad as an MCP server. The `ping` tool is a minimal proof that the full pipeline works: Claude → MCP → Rust sidecar → WASM → Haskell handler.
 
 ## Quick Validation
 

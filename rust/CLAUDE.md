@@ -51,7 +51,7 @@ Human in Zellij session
 Each agent:
 - Runs in isolated git worktree (`.exomonad/worktrees/gh-{issue}-{title}-{agent}/`)
 - Has own `.exomonad/config.toml` (default_role="dev")
-- Has own `.mcp.json` (pointing to `exomonad mcp-stdio`)
+- Has own MCP config (`.mcp.json` for Claude, `.gemini/settings.json` for Gemini) pointing to HTTP server
 - Gets full issue context via agent-specific CLI argument:
   - `claude --prompt '...'` for Claude agents
   - `gemini --prompt-interactive '...'` for Gemini agents
@@ -203,16 +203,13 @@ Haskell: Either EffectError GetBranchResponse
 
 ## Configuration
 
-Add to `.mcp.json` in project root:
-```json
-{
-  "mcpServers": {
-    "exomonad": {
-      "command": "exomonad",
-      "args": ["mcp-stdio"]
-    }
-  }
-}
+Use CLI-native config commands to register the MCP server:
+```bash
+# Claude Code
+claude mcp add exomonad -- exomonad mcp-stdio
+
+# Gemini CLI (HTTP mode only)
+gemini mcp add --transport http exomonad http://localhost:7432/mcp
 ```
 
 And ensure `.exomonad/config.toml` and/or `config.local.toml` exists.

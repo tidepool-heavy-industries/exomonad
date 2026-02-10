@@ -289,17 +289,15 @@ Ask the specialist directly instead of guessing. They have authoritative knowled
 
 Hook configuration is **auto-generated per worktree** by `write_context_files()` in `agent_control.rs` during `spawn_agents`. Each spawned Claude agent gets `.claude/settings.local.json` with PreToolUse, SubagentStop, and SessionEnd hooks. Gemini agents get `.gemini/settings.json` with AfterAgent hooks. Do not manually create hook settings — they are generated at spawn time.
 
-**MCP server configuration (`.mcp.json`):**
-```json
-{
-  "mcpServers": {
-    "exomonad": {
-      "type": "stdio",
-      "command": "exomonad",
-      "args": ["mcp-stdio"]
-    }
-  }
-}
+**MCP server configuration:** Use CLI-native config commands:
+```bash
+# Claude Code
+claude mcp add exomonad -- exomonad mcp-stdio
+# or for HTTP mode:
+claude mcp add --transport http exomonad http://localhost:7432/mcp
+
+# Gemini CLI
+gemini mcp add --transport http exomonad http://localhost:7432/mcp
 ```
 
 **Two WASM loading modes:**
@@ -375,7 +373,7 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 **How spawn_agents works:**
 1. Creates git worktree: `.exomonad/worktrees/gh-{issue}-{title}-{agent}/`
 2. Creates branch: `gh-{issue}/{title}-{agent}`
-3. Writes `.exomonad/config.toml` (default_role="dev") and `.mcp.json`
+3. Writes `.exomonad/config.toml` (default_role="dev") and MCP config (`.mcp.json` for Claude, `.gemini/settings.json` for Gemini)
 4. Builds initial prompt with full issue context
 5. Creates Zellij tab using KDL layout with agent-specific command:
    - `claude --prompt '...'` for Claude agents

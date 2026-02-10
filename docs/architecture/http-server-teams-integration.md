@@ -120,7 +120,7 @@ Gemini agents slot into the model via:
 2. **ExoMonad pretool hooks**: Gemini's pretool hook fires before each tool call
 3. **Yolo mode + policy layer**: Gemini runs fast, ExoMonad mediates permissions
 4. **Teams messaging bridge**: Gemini's notes/questions flow through inbox system
-5. **Unix socket `.mcp.json`**: all agents share the singleton server
+5. **HTTP MCP config**: all agents share the singleton server
 
 ### Zellij UI Model
 

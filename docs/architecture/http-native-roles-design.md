@@ -27,18 +27,18 @@ Agents avoid conflicts through task assignment and communication, not filesystem
 ```
 .exomonad/
 ├── server.sock           # Unix domain socket (MCP server listens here)
-├── server.pid            # JSON: {"pid": 12345, "socket": "/abs/path/.exomonad/server.sock"}
+├── server.pid            # JSON: {"pid": 12345, "port": 7432}
 ├── wasm/                 # Compiled WASM modules
 └── config.toml           # Project config (default_role, etc.)
 ```
 
-Client `.mcp.json` configuration:
+MCP configuration is managed by CLI tools (`claude mcp add` / `gemini mcp add`).
+Spawned agents get HTTP config auto-generated pointing to the server:
 ```json
 {
   "mcpServers": {
     "exomonad": {
-      "type": "sse",
-      "url": "unix:///abs/path/to/project/.exomonad/server.sock"
+      "url": "http://localhost:7432/mcp"
     }
   }
 }
@@ -233,7 +233,7 @@ When the TL edits `Role.hs` and recompiles:
 - `just wasm` builds one artifact
 - Hot reload updates all roles atomically
 - Stop hooks check task completion + committed work + PR status
-- `.mcp.json` points to unix socket
+- MCP config managed by CLI tools, spawned agents get HTTP config auto-generated
 
 ### Phase 2: Permission Cascade
 - Implement `permissionCascade` in preToolUse
