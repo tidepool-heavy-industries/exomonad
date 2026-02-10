@@ -19,6 +19,12 @@ The repository should be kept clean of dead code, placeholders, and half-done he
 
 Always prefer failure to an undocumented heuristic or fallback.
 
+### SINGLE CODE PATH
+
+Never maintain two code paths that do the same thing. Redundant paths cause bug risk — fixes applied to one path get missed on the other. If there's a "debug mode" or "legacy mode" that duplicates a primary path, cut it.
+
+Concrete example: `exomonad serve` (HTTP) is the only MCP transport. There is no stdio MCP mode. One server, all agents connect to it.
+
 ### CROSSCUTTING RULES
 
 When you learn something that applies to a crosscutting context (a programming language, a tool like git worktrees, a pattern that spans directories), **create or update a `.claude/rules/*.md` file** rather than documenting it in a directory-specific CLAUDE.md.
@@ -362,6 +368,7 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 | `github_get_issue` | Get single issue details |
 | `github_list_prs` | List GitHub pull requests |
 | `spawn_agents` | Spawn agents (Claude/Gemini) in Zellij tabs with isolated git worktrees |
+| `spawn_gemini_teammate` | Spawn a named Gemini teammate with a direct prompt (no GitHub issue required) |
 | `cleanup_agents` | Clean up agent worktrees and close Zellij tabs |
 | `list_agents` | List active agent worktrees |
 
@@ -389,6 +396,8 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 - ✅ Zellij plugin (exomonad-plugin) for status display and popup UI
 - ✅ KDL layout generation (zellij-gen) for proper environment inheritance
 - ✅ Stop hook logic (SubagentStop, SessionEnd) - validates uncommitted changes, unpushed commits, PR status, Copilot review
+- ✅ Claude Code Teams integration (synthetic teammate registration via `spawn_gemini_teammate`)
+- ✅ Gemini MCP wiring (`.gemini/settings.json` with server URL on spawn)
 
 ---
 

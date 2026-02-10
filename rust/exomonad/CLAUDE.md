@@ -106,15 +106,18 @@ Add `.mcp.json` to your project root:
 | `github_get_issue` | Get single issue details | `owner`, `repo`, `number` |
 | `github_list_prs` | List GitHub pull requests | `owner`, `repo`, `state?`, `limit?` |
 | `spawn_agents` | Spawn agents in Zellij tabs | `issues[]`, `owner`, `repo`, `worktree_dir?` |
+| `spawn_gemini_teammate` | Spawn named Gemini teammate | `name`, `prompt`, `agent_type?`, `subrepo?` |
 | `cleanup_agents` | Clean up agent worktrees | `issues[]`, `force?` |
 | `list_agents` | List active agent worktrees | (none) |
 
 ### Spawn Tools Requirements
 
-The spawn tools (`spawn_agents`, `cleanup_agents`, `list_agents`) require:
+The spawn tools (`spawn_agents`, `spawn_gemini_teammate`, `cleanup_agents`, `list_agents`) require:
 - **Zellij session**: Must be running inside a Zellij terminal multiplexer
 - **GITHUB_TOKEN**: Environment variable for GitHub API access
 - **Git repository**: The project directory must be a git repository
+- **Teams registration**: `spawn_gemini_teammate` registers agents in Claude Code Teams config (`~/.claude/teams/`)
+- **Gemini MCP config**: Gemini agents get `.gemini/settings.json` (not `.mcp.json`) pointing to the ExoMonad server
 
 
 ## Environment Variables

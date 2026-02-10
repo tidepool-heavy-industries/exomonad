@@ -107,6 +107,25 @@ message SpawnBatchResponse {
 }
 
 // ============================================================================
+// SpawnGeminiTeammate - Spawn a named Gemini teammate with a direct prompt (no GitHub issue)
+// ============================================================================
+
+message SpawnGeminiTeammateRequest {
+  // Human-readable name (e.g., "mcp-hardener").
+  string name = 1;
+  // Initial prompt/instructions for the agent.
+  string prompt = 2;
+  // Agent type (default: Gemini).
+  AgentType agent_type = 3;
+  // Sub-repository path relative to project_dir (e.g., "egregore/").
+  string subrepo = 4;
+}
+
+message SpawnGeminiTeammateResponse {
+  AgentInfo agent = 1;
+}
+
+// ============================================================================
 // Cleanup - Clean up a single agent
 // ============================================================================
 
@@ -192,6 +211,7 @@ message ListResponse {
 service AgentEffects {
   rpc Spawn(SpawnRequest) returns (SpawnResponse);
   rpc SpawnBatch(SpawnBatchRequest) returns (SpawnBatchResponse);
+  rpc SpawnGeminiTeammate(SpawnGeminiTeammateRequest) returns (SpawnGeminiTeammateResponse);
   rpc Cleanup(CleanupRequest) returns (CleanupResponse);
   rpc CleanupBatch(CleanupBatchRequest) returns (CleanupBatchResponse);
   rpc CleanupMerged(CleanupMergedRequest) returns (CleanupMergedResponse);

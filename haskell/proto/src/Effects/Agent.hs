@@ -862,6 +862,175 @@ instance (HsJSONPB.ToJSON SpawnBatchResponse) where
   toEncoding = HsJSONPB.toAesonEncoding
 instance (HsJSONPB.FromJSON SpawnBatchResponse) where
   parseJSON = HsJSONPB.parseJSONPB
+data SpawnGeminiTeammateRequest
+  = SpawnGeminiTeammateRequest {spawnGeminiTeammateRequestName :: Hs.Text,
+                                spawnGeminiTeammateRequestPrompt :: Hs.Text,
+                                spawnGeminiTeammateRequestAgentType :: (HsProtobuf.Enumerated Effects.Agent.AgentType),
+                                spawnGeminiTeammateRequestSubrepo :: Hs.Text}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData SpawnGeminiTeammateRequest)
+instance (HsProtobuf.Named SpawnGeminiTeammateRequest) where
+  nameOf _ = Hs.fromString "SpawnGeminiTeammateRequest"
+instance (HsProtobuf.HasDefault SpawnGeminiTeammateRequest)
+instance (HsProtobuf.Message SpawnGeminiTeammateRequest) where
+  encodeMessage
+    _
+    SpawnGeminiTeammateRequest {spawnGeminiTeammateRequestName,
+                                spawnGeminiTeammateRequestPrompt,
+                                spawnGeminiTeammateRequestAgentType,
+                                spawnGeminiTeammateRequestSubrepo}
+    = Hs.mappend
+        (Hs.mappend
+           (Hs.mappend
+              (HsProtobuf.encodeMessageField
+                 (HsProtobuf.FieldNumber 1)
+                 ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                    spawnGeminiTeammateRequestName))
+              (HsProtobuf.encodeMessageField
+                 (HsProtobuf.FieldNumber 2)
+                 ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                    spawnGeminiTeammateRequestPrompt)))
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 3) spawnGeminiTeammateRequestAgentType))
+        (HsProtobuf.encodeMessageField
+           (HsProtobuf.FieldNumber 4)
+           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+              spawnGeminiTeammateRequestSubrepo))
+  decodeMessage _
+    = Hs.pure SpawnGeminiTeammateRequest
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)))
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 2)))
+        <*>
+          HsProtobuf.at
+            HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 3)
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 4)))
+  dotProto _
+    = [HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 1)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "name") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 2)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "prompt") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 3)
+         (HsProtobufAST.Prim
+            (HsProtobufAST.Named (HsProtobufAST.Single "AgentType")))
+         (HsProtobufAST.Single "agent_type") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 4)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "subrepo") [] ""]
+instance (HsJSONPB.ToJSONPB SpawnGeminiTeammateRequest) where
+  toJSONPB (SpawnGeminiTeammateRequest f1 f2 f3 f4)
+    = HsJSONPB.object
+        ["name" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
+         "prompt" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
+         "agent_type" .= f3,
+         "subrepo"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f4)]
+  toEncodingPB (SpawnGeminiTeammateRequest f1 f2 f3 f4)
+    = HsJSONPB.pairs
+        ["name" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
+         "prompt" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
+         "agent_type" .= f3,
+         "subrepo"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f4)]
+instance (HsJSONPB.FromJSONPB SpawnGeminiTeammateRequest) where
+  parseJSONPB
+    = HsJSONPB.withObject
+        "SpawnGeminiTeammateRequest"
+        (\ obj
+           -> Hs.pure SpawnGeminiTeammateRequest
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "name"))
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "prompt"))
+                <*> obj .: "agent_type"
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "subrepo")))
+instance (HsJSONPB.ToJSON SpawnGeminiTeammateRequest) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON SpawnGeminiTeammateRequest) where
+  parseJSON = HsJSONPB.parseJSONPB
+newtype SpawnGeminiTeammateResponse
+  = SpawnGeminiTeammateResponse {spawnGeminiTeammateResponseAgent :: (Hs.Maybe Effects.Agent.AgentInfo)}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData SpawnGeminiTeammateResponse)
+instance (HsProtobuf.Named SpawnGeminiTeammateResponse) where
+  nameOf _ = Hs.fromString "SpawnGeminiTeammateResponse"
+instance (HsProtobuf.HasDefault SpawnGeminiTeammateResponse)
+instance (HsProtobuf.Message SpawnGeminiTeammateResponse) where
+  encodeMessage
+    _
+    SpawnGeminiTeammateResponse {spawnGeminiTeammateResponseAgent}
+    = (HsProtobuf.encodeMessageField
+         (HsProtobuf.FieldNumber 1)
+         ((Hs.coerce
+             @(Hs.Maybe Effects.Agent.AgentInfo)
+             @(HsProtobuf.Nested Effects.Agent.AgentInfo))
+            spawnGeminiTeammateResponseAgent))
+  decodeMessage _
+    = Hs.pure SpawnGeminiTeammateResponse
+        <*>
+          ((HsProtobuf.coerceOver
+              @(HsProtobuf.Nested Effects.Agent.AgentInfo)
+              @(Hs.Maybe Effects.Agent.AgentInfo))
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)))
+  dotProto _
+    = [HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 1)
+         (HsProtobufAST.Prim
+            (HsProtobufAST.Named (HsProtobufAST.Single "AgentInfo")))
+         (HsProtobufAST.Single "agent") [] ""]
+instance (HsJSONPB.ToJSONPB SpawnGeminiTeammateResponse) where
+  toJSONPB (SpawnGeminiTeammateResponse f1)
+    = HsJSONPB.object
+        ["agent"
+           .=
+             ((Hs.coerce
+                 @(Hs.Maybe Effects.Agent.AgentInfo)
+                 @(HsProtobuf.Nested Effects.Agent.AgentInfo))
+                f1)]
+  toEncodingPB (SpawnGeminiTeammateResponse f1)
+    = HsJSONPB.pairs
+        ["agent"
+           .=
+             ((Hs.coerce
+                 @(Hs.Maybe Effects.Agent.AgentInfo)
+                 @(HsProtobuf.Nested Effects.Agent.AgentInfo))
+                f1)]
+instance (HsJSONPB.FromJSONPB SpawnGeminiTeammateResponse) where
+  parseJSONPB
+    = HsJSONPB.withObject
+        "SpawnGeminiTeammateResponse"
+        (\ obj
+           -> Hs.pure SpawnGeminiTeammateResponse
+                <*>
+                  ((HsProtobuf.coerceOver
+                      @(HsProtobuf.Nested Effects.Agent.AgentInfo)
+                      @(Hs.Maybe Effects.Agent.AgentInfo))
+                     (obj .: "agent")))
+instance (HsJSONPB.ToJSON SpawnGeminiTeammateResponse) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON SpawnGeminiTeammateResponse) where
+  parseJSON = HsJSONPB.parseJSONPB
 data CleanupRequest
   = CleanupRequest {cleanupRequestIssue :: Hs.Text,
                     cleanupRequestForce :: Hs.Bool,

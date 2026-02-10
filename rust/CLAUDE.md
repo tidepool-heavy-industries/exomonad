@@ -140,6 +140,8 @@ echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
 |----------|---------|---------|
 | `GITHUB_TOKEN` | services | GitHub API access |
 | `RUST_LOG` | all | Tracing log level |
+| `EXOMONAD_TEAM_NAME` | messaging, tasks | Team name for Claude Code Teams integration |
+| `EXOMONAD_AGENT_ID` | messaging, tasks | Agent identity within the team |
 
 ## MCP Tools
 
@@ -156,12 +158,13 @@ TL-side messaging tools are direct Rust handlers (bypass WASM).
 | `github_get_issue` | Get single issue details | WASM |
 | `github_list_prs` | List GitHub pull requests | WASM |
 | `spawn_agents` | Create git worktrees + Zellij tabs, auto-start agents | WASM |
+| `spawn_gemini_teammate` | Spawn named Gemini teammate with direct prompt, writes `.gemini/settings.json` | WASM |
 | `cleanup_agents` | Close Zellij tabs and delete worktrees | WASM |
 | `list_agents` | List active agent worktrees | WASM |
 | `note` | Send fire-and-forget note to TL (agent-side) | WASM |
 | `question` | Send blocking question to TL (agent-side) | WASM |
-| `get_agent_messages` | Read notes and questions from agent outboxes (TL-side) | Direct Rust |
-| `answer_question` | Answer a pending agent question (TL-side) | Direct Rust |
+| `get_agent_messages` | Read notes and questions from Teams inboxes (TL-side) | Direct Rust |
+| `answer_question` | Answer a pending agent question via Teams inbox (TL-side) | Direct Rust |
 
 ## Effect System
 
@@ -185,7 +188,7 @@ Haskell: Either EffectError GetBranchResponse
 | `git.*` | GitHandler | get_branch, get_status, get_recent_commits, get_worktree, has_unpushed_commits, get_remote_url, get_repo_info |
 | `github.*` | GitHubHandler | list_issues, get_issue, create_pr, list_prs, get_pr_for_branch, get_pr_review_comments |
 | `log.*` | LogHandler | info, error, emit_event |
-| `agent.*` | AgentHandler | spawn, spawn_batch, cleanup, cleanup_batch, cleanup_merged, list |
+| `agent.*` | AgentHandler | spawn, spawn_batch, spawn_gemini_teammate, cleanup, cleanup_batch, cleanup_merged, list |
 | `fs.*` | FsHandler | read_file, write_file |
 | `popup.*` | PopupHandler | show_popup |
 | `file_pr.*` | FilePRHandler | file_pr |

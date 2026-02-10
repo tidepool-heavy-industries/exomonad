@@ -18,6 +18,7 @@ module ExoMonad.Guest.Effects.AgentControl
     -- * Smart constructors
     spawnAgent,
     spawnAgents,
+    spawnGeminiTeammate,
     cleanupAgent,
     cleanupAgents,
     cleanupMergedAgents,
@@ -257,6 +258,7 @@ instance ToJSON BatchCleanupResult where
 data AgentControl m a where
   SpawnAgent :: Text -> SpawnOptions -> AgentControl m (Either Text SpawnResult)
   SpawnAgents :: [Text] -> SpawnOptions -> AgentControl m BatchSpawnResult
+  SpawnGeminiTeammate :: Text -> Text -> AgentType -> Maybe Text -> AgentControl m (Either Text SpawnResult)
   CleanupAgent :: Text -> Bool -> Maybe Text -> AgentControl m (Either Text ())
   CleanupAgents :: [Text] -> Bool -> Maybe Text -> AgentControl m BatchCleanupResult
   CleanupMergedAgents :: Maybe Text -> AgentControl m BatchCleanupResult
@@ -268,6 +270,9 @@ spawnAgent issueId opts = send (SpawnAgent issueId opts)
 
 spawnAgents :: (Member AgentControl r) => [Text] -> SpawnOptions -> Sem r BatchSpawnResult
 spawnAgents issueIds opts = send (SpawnAgents issueIds opts)
+
+spawnGeminiTeammate :: (Member AgentControl r) => Text -> Text -> AgentType -> Maybe Text -> Sem r (Either Text SpawnResult)
+spawnGeminiTeammate name prompt agentTy subrepo = send (SpawnGeminiTeammate name prompt agentTy subrepo)
 
 cleanupAgent :: (Member AgentControl r) => Text -> Bool -> Maybe Text -> Sem r (Either Text ())
 cleanupAgent issueId force subrepo = send (CleanupAgent issueId force subrepo)
@@ -328,6 +333,20 @@ runAgentControl = interpret $ \case
           { spawned = map protoAgentInfoToSpawnResult (V.toList (PA.spawnBatchResponseAgents resp)),
             spawnFailed = map (\e -> ("", TL.toStrict e)) (V.toList (PA.spawnBatchResponseErrors resp))
           }
+  SpawnGeminiTeammate name prompt agentTy subrepo -> embed $ do
+    let req =
+          PA.SpawnGeminiTeammateRequest
+            { PA.spawnGeminiTeammateRequestName = TL.fromStrict name,
+              PA.spawnGeminiTeammateRequestPrompt = TL.fromStrict prompt,
+              PA.spawnGeminiTeammateRequestAgentType = Enumerated (Right (toProtoAgentType agentTy)),
+              PA.spawnGeminiTeammateRequestSubrepo = maybe "" TL.fromStrict subrepo
+            }
+    result <- Agent.spawnGeminiTeammate req
+    pure $ case result of
+      Left err -> Left (T.pack (show err))
+      Right resp -> case PA.spawnGeminiTeammateResponseAgent resp of
+        Nothing -> Left "SpawnGeminiTeammate succeeded but no agent info returned"
+        Just info -> Right (protoAgentInfoToSpawnResult info)
   CleanupAgent issueId force subrepo -> embed $ do
     let req =
           PA.CleanupRequest

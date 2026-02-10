@@ -2,12 +2,14 @@
 module ExoMonad.Guest.Tools.Agent
   ( -- * Tool types
     SpawnAgents,
+    SpawnGeminiTeammate,
     CleanupAgents,
     CleanupMergedAgents,
     ListAgents,
 
     -- * Argument types (exported for tests)
     SpawnAgentsArgs (..),
+    SpawnGeminiTeammateArgs (..),
     CleanupAgentsArgs (..),
     CleanupMergedAgentsArgs (..),
     ListAgentsArgs (..),
@@ -108,6 +110,69 @@ instance MCPTool SpawnAgents where
             }
     result <- runM $ AC.runAgentControl $ AC.spawnAgents (saIssues args) opts
     pure $ successResult $ Aeson.toJSON result
+
+-- ============================================================================
+-- SpawnGeminiTeammate
+-- ============================================================================
+
+-- | Spawn a named agent teammate with a direct prompt (no GitHub issue required).
+data SpawnGeminiTeammate
+
+data SpawnGeminiTeammateArgs = SpawnGeminiTeammateArgs
+  { stName :: Text,
+    stPrompt :: Text,
+    stAgentType :: Maybe AC.AgentType,
+    stSubrepo :: Maybe Text
+  }
+  deriving (Show, Eq, Generic)
+
+instance FromJSON SpawnGeminiTeammateArgs where
+  parseJSON = Aeson.withObject "SpawnGeminiTeammateArgs" $ \v ->
+    SpawnGeminiTeammateArgs
+      <$> v .: "name"
+      <*> v .: "prompt"
+      <*> v .:? "agent_type"
+      <*> v .:? "subrepo"
+
+instance MCPTool SpawnGeminiTeammate where
+  type ToolArgs SpawnGeminiTeammate = SpawnGeminiTeammateArgs
+  toolName = "spawn_gemini_teammate"
+  toolDescription = "Spawn a named Gemini teammate with a direct prompt (no GitHub issue required)"
+  toolSchema =
+    object
+      [ "type" .= ("object" :: Text),
+        "required" .= (["name", "prompt"] :: [Text]),
+        "properties"
+          .= object
+            [ "name"
+                .= object
+                  [ "type" .= ("string" :: Text),
+                    "description" .= ("Human-readable name for the teammate (e.g. \"mcp-hardener\")" :: Text)
+                  ],
+              "prompt"
+                .= object
+                  [ "type" .= ("string" :: Text),
+                    "description" .= ("Initial prompt/instructions for the agent" :: Text)
+                  ],
+              "agent_type"
+                .= object
+                  [ "type" .= ("string" :: Text),
+                    "enum" .= (["claude", "gemini"] :: [Text]),
+                    "description" .= ("Agent type (default: gemini)" :: Text)
+                  ],
+              "subrepo"
+                .= object
+                  [ "type" .= ("string" :: Text),
+                    "description" .= ("Sub-repository path relative to project dir (e.g. \"egregore/\")" :: Text)
+                  ]
+            ]
+      ]
+  toolHandler args = do
+    let agentTy = fromMaybe AC.Gemini (stAgentType args)
+    result <- runM $ AC.runAgentControl $ AC.spawnGeminiTeammate (stName args) (stPrompt args) agentTy (stSubrepo args)
+    case result of
+      Left err -> pure $ errorResult err
+      Right spawnResult -> pure $ successResult $ Aeson.toJSON spawnResult
 
 -- ============================================================================
 -- CleanupAgents

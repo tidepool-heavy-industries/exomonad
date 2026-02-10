@@ -118,6 +118,22 @@ pub struct SpawnOptions {
     pub team_name: Option<String>,
 }
 
+/// Options for spawning a named teammate (no GitHub issue required).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpawnGeminiTeammateOptions {
+    /// Human-readable name (e.g., "mcp-hardener")
+    pub name: String,
+    /// Initial prompt/instructions
+    pub prompt: String,
+    /// Agent type (Claude or Gemini)
+    #[serde(default)]
+    pub agent_type: AgentType,
+    /// Sub-repository path relative to project_dir
+    pub subrepo: Option<String>,
+    /// Optional Claude Code Team name to register the agent in.
+    pub team_name: Option<String>,
+}
+
 /// Result of spawning an agent.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SpawnResult {
@@ -452,6 +468,108 @@ impl AgentControlService {
         }
 
         result
+    }
+
+    // ========================================================================
+    // Spawn Teammate (prompt-driven, no GitHub issue)
+    // ========================================================================
+
+    /// Spawn a named teammate with a direct prompt.
+    ///
+    /// Unlike `spawn_agent`, this does not require a GitHub issue or create a worktree.
+    /// The agent runs from the effective project directory with its own agent dir for config.
+    #[tracing::instrument(skip(self, options), fields(name = %options.name))]
+    pub async fn spawn_gemini_teammate(&self, options: &SpawnGeminiTeammateOptions) -> Result<SpawnResult> {
+        info!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_gemini_teammate");
+
+        let result = timeout(SPAWN_TIMEOUT, async {
+            self.check_zellij_env()?;
+
+            let effective_project_dir = self.effective_project_dir(options.subrepo.as_deref())?;
+
+            let agent_suffix = options.agent_type.suffix();
+            let internal_name = format!("{}-{}", options.name, agent_suffix);
+
+            // Create agent directory
+            let agent_dir = effective_project_dir
+                .join(".exomonad")
+                .join("agents")
+                .join(&internal_name);
+            fs::create_dir_all(&agent_dir).await?;
+            info!(agent_dir = %agent_dir.display(), "Created agent directory");
+
+            // Write .mcp.json for the agent
+            self.write_agent_mcp_config(&effective_project_dir, &agent_dir, options.agent_type)
+                .await?;
+
+            // Zellij display name
+            let display_name = format!("{} {}", options.agent_type.emoji(), options.name);
+
+            // Discover and register in Claude Code Team if applicable
+            let team_name = options
+                .team_name
+                .clone()
+                .or_else(|| std::env::var("CLAUDE_TEAM_NAME").ok());
+            if let Some(ref team) = team_name {
+                info!(team_name = %team, agent_name = %internal_name, "Registering teammate in Claude Code Team");
+                if let Err(e) = super::teams::TeamsService::register_agent(
+                    team,
+                    &internal_name,
+                    &effective_project_dir,
+                    &options.prompt,
+                )
+                .await
+                {
+                    warn!(error = %e, "Failed to register teammate in Claude Code Team (non-fatal)");
+                }
+            }
+
+            let mut env_vars = HashMap::new();
+            if let Some(ref team) = team_name {
+                env_vars.insert("EXOMONAD_TEAM_NAME".to_string(), team.clone());
+                env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
+                env_vars.insert("CLAUDE_TEAM_NAME".to_string(), team.clone());
+            }
+
+            // Open Zellij tab with cwd = effective_project_dir
+            self.new_zellij_tab(
+                &display_name,
+                &effective_project_dir,
+                options.agent_type,
+                Some(&options.prompt),
+                env_vars,
+            )
+            .await?;
+
+            // Emit agent:started event
+            if let Some(ref session) = self.zellij_session {
+                let agent_id = crate::ui_protocol::AgentId::try_from(internal_name.clone())
+                    .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
+                let event = crate::ui_protocol::AgentEvent::AgentStarted {
+                    agent_id,
+                    timestamp: zellij_events::now_iso8601(),
+                };
+                if let Err(e) = zellij_events::emit_event(session, &event) {
+                    warn!("Failed to emit agent:started event: {}", e);
+                }
+            }
+
+            Ok::<SpawnResult, anyhow::Error>(SpawnResult {
+                agent_dir: agent_dir.to_string_lossy().to_string(),
+                tab_name: internal_name,
+                issue_title: options.name.clone(),
+                agent_type: options.agent_type.suffix().to_string(),
+            })
+        })
+        .await
+        .map_err(|_| {
+            let msg = format!("spawn_gemini_teammate timed out after {}s", SPAWN_TIMEOUT.as_secs());
+            warn!(name = %options.name, error = %msg, "spawn_gemini_teammate timed out");
+            anyhow::Error::new(TimeoutError { message: msg })
+        })??;
+
+        info!(name = %options.name, "spawn_gemini_teammate completed successfully");
+        Ok(result)
     }
 
     // ========================================================================
@@ -903,39 +1021,44 @@ impl AgentControlService {
     // Internal: Agent Config Files
     // ========================================================================
 
-    /// Write .mcp.json to the agent directory.
+    /// Write MCP config for the agent directory.
     ///
+    /// Claude agents get `.mcp.json`. Gemini agents get `.gemini/settings.json`.
     /// Prefers Unix socket if server.pid has a socket path, falls back to HTTP,
     /// then to stdio mode.
     async fn write_agent_mcp_config(
         &self,
         effective_dir: &Path,
         agent_dir: &Path,
-        _agent_type: AgentType,
+        agent_type: AgentType,
     ) -> Result<()> {
-        let sidecar_path = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.to_str().map(String::from))
-            .unwrap_or_else(|| "exomonad".to_string());
+        let server_info = Self::read_server_info(effective_dir);
 
-        let mcp_content = match Self::read_server_info(effective_dir) {
-            Some(ServerInfo::Socket(socket_path)) => {
-                info!(socket = %socket_path, "Unix socket server detected, writing socket .mcp.json");
-                format!(
-                    r###"{{
+        match agent_type {
+            AgentType::Claude => {
+                let sidecar_path = std::env::current_exe()
+                    .ok()
+                    .and_then(|p| p.to_str().map(String::from))
+                    .unwrap_or_else(|| "exomonad".to_string());
+
+                let mcp_content = match server_info {
+                    Some(ServerInfo::Socket(socket_path)) => {
+                        info!(socket = %socket_path, "Unix socket server detected, writing socket .mcp.json");
+                        format!(
+                            r###"{{
   "mcpServers": {{
     "exomonad": {{
       "url": "unix://{}/dev/mcp"
     }}
   }}
 }}"###,
-                    socket_path
-                )
-            }
-            Some(ServerInfo::Http(port)) => {
-                info!(port, "HTTP server detected, writing HTTP .mcp.json");
-                format!(
-                    r###"{{
+                            socket_path
+                        )
+                    }
+                    Some(ServerInfo::Http(port)) => {
+                        info!(port, "HTTP server detected, writing HTTP .mcp.json");
+                        format!(
+                            r###"{{
   "mcpServers": {{
     "exomonad": {{
       "type": "sse",
@@ -943,13 +1066,13 @@ impl AgentControlService {
     }}
   }}
 }}"###,
-                    port
-                )
-            }
-            None => {
-                info!("No server detected, writing stdio .mcp.json");
-                format!(
-                    r###"{{
+                            port
+                        )
+                    }
+                    None => {
+                        info!("No server detected, writing stdio .mcp.json");
+                        format!(
+                            r###"{{
   "mcpServers": {{
     "exomonad": {{
       "command": "{}",
@@ -957,13 +1080,52 @@ impl AgentControlService {
     }}
   }}
 }}"###,
-                    sidecar_path
-                )
+                            sidecar_path
+                        )
+                    }
+                };
+                fs::write(agent_dir.join(".mcp.json"), mcp_content).await?;
+                info!(agent_dir = %agent_dir.display(), "Wrote .mcp.json for Claude agent");
             }
-        };
-        fs::write(agent_dir.join(".mcp.json"), mcp_content).await?;
-
-        info!(agent_dir = %agent_dir.display(), "Wrote .mcp.json for agent");
+            AgentType::Gemini => {
+                let gemini_content = match server_info {
+                    Some(ServerInfo::Socket(socket_path)) => {
+                        info!(socket = %socket_path, "Unix socket server detected, writing .gemini/settings.json");
+                        format!(
+                            r###"{{
+  "mcpServers": {{
+    "exomonad": {{
+      "url": "unix://{}/dev/mcp"
+    }}
+  }}
+}}"###,
+                            socket_path
+                        )
+                    }
+                    Some(ServerInfo::Http(port)) => {
+                        info!(port, "HTTP server detected, writing .gemini/settings.json");
+                        format!(
+                            r###"{{
+  "mcpServers": {{
+    "exomonad": {{
+      "url": "http://localhost:{}/mcp"
+    }}
+  }}
+}}"###,
+                            port
+                        )
+                    }
+                    None => {
+                        warn!("No server detected for Gemini agent — Gemini CLI does not support stdio MCP. Agent will have no MCP tools.");
+                        return Ok(());
+                    }
+                };
+                let gemini_dir = agent_dir.join(".gemini");
+                fs::create_dir_all(&gemini_dir).await?;
+                fs::write(gemini_dir.join("settings.json"), gemini_content).await?;
+                info!(agent_dir = %agent_dir.display(), "Wrote .gemini/settings.json for Gemini agent");
+            }
+        }
         Ok(())
     }
 

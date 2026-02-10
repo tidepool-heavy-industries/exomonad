@@ -7,6 +7,7 @@ use crate::effects::{
 };
 use crate::services::agent_control::{
     AgentControlService, AgentInfo, AgentType as ServiceAgentType, SpawnOptions,
+    SpawnGeminiTeammateOptions,
 };
 use crate::{GithubOwner, GithubRepo, IssueNumber};
 use async_trait::async_trait;
@@ -121,6 +122,33 @@ impl AgentEffects for AgentHandler {
         Ok(SpawnBatchResponse { agents, errors })
     }
 
+    async fn spawn_gemini_teammate(
+        &self,
+        req: SpawnGeminiTeammateRequest,
+    ) -> EffectResult<SpawnGeminiTeammateResponse> {
+        let options = SpawnGeminiTeammateOptions {
+            name: req.name.clone(),
+            prompt: req.prompt.clone(),
+            agent_type: convert_agent_type(req.agent_type()),
+            subrepo: if req.subrepo.is_empty() {
+                None
+            } else {
+                Some(req.subrepo.clone())
+            },
+            team_name: None,
+        };
+
+        let result = self
+            .service
+            .spawn_gemini_teammate(&options)
+            .await
+            .map_err(|e| EffectError::custom("agent_error", e.to_string()))?;
+
+        Ok(SpawnGeminiTeammateResponse {
+            agent: Some(teammate_result_to_proto(&req.name, &result)),
+        })
+    }
+
     async fn cleanup(&self, req: CleanupRequest) -> EffectResult<CleanupResponse> {
         let subrepo = if req.subrepo.is_empty() {
             None
@@ -227,6 +255,29 @@ fn spawn_result_to_proto(
         role: 0,
         status: AgentStatus::Running as i32,
         zellij_tab: result.tab_name.clone(),
+        error: String::new(),
+        pr_number: 0,
+        pr_url: String::new(),
+    }
+}
+
+fn teammate_result_to_proto(
+    name: &str,
+    result: &crate::services::agent_control::SpawnResult,
+) -> exomonad_proto::effects::agent::AgentInfo {
+    exomonad_proto::effects::agent::AgentInfo {
+        id: result.tab_name.clone(),
+        issue: String::new(),
+        worktree_path: String::new(),
+        branch_name: String::new(),
+        agent_type: if result.agent_type == "claude" {
+            AgentType::Claude as i32
+        } else {
+            AgentType::Gemini as i32
+        },
+        role: 0,
+        status: AgentStatus::Running as i32,
+        zellij_tab: format!("{} {}", if result.agent_type == "claude" { "\u{1F916}" } else { "\u{1F48E}" }, name),
         error: String::new(),
         pr_number: 0,
         pr_url: String::new(),
