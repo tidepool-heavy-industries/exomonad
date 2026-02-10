@@ -12,6 +12,7 @@ module ExoMonad.Guest.Types
     StopDecision (..),
     allowResponse,
     denyResponse,
+    postToolUseResponse,
     allowStopResponse,
     blockStopResponse,
   )
@@ -46,7 +47,7 @@ instance FromJSON MCPCallInput where
 
 -- | Hook event type (internal abstractions only).
 -- Rust normalizes CLI-specific types (Claude Stop, Gemini AfterAgent) to these.
-data HookEventType = SessionEnd | Stop | SubagentStop | PreToolUse
+data HookEventType = SessionEnd | Stop | SubagentStop | PreToolUse | PostToolUse
   deriving (Show, Eq, Generic)
 
 instance ToJSON HookEventType where
@@ -54,6 +55,7 @@ instance ToJSON HookEventType where
   toJSON Stop = Aeson.String "Stop"
   toJSON SubagentStop = Aeson.String "SubagentStop"
   toJSON PreToolUse = Aeson.String "PreToolUse"
+  toJSON PostToolUse = Aeson.String "PostToolUse"
 
 instance FromJSON HookEventType where
   parseJSON = Aeson.withText "HookEventType" $ \case
@@ -61,6 +63,7 @@ instance FromJSON HookEventType where
     "Stop" -> pure Stop
     "SubagentStop" -> pure SubagentStop
     "PreToolUse" -> pure PreToolUse
+    "PostToolUse" -> pure PostToolUse
     other -> fail $ "Unknown hook event type: " <> T.unpack other
 
 -- | Input for a hook event.
@@ -73,7 +76,8 @@ data HookInput = HookInput
     hiStopHookActive :: Maybe Bool,
     hiPrompt :: Maybe Text,
     hiPromptResponse :: Maybe Text,
-    hiTimestamp :: Maybe Text
+    hiTimestamp :: Maybe Text,
+    hiToolResponse :: Maybe Value
   }
   deriving (Show, Generic)
 
@@ -88,6 +92,7 @@ instance FromJSON HookInput where
       <*> v .:? "prompt"
       <*> v .:? "prompt_response"
       <*> v .:? "timestamp"
+      <*> v .:? "tool_response"
 
 -- | Output from a hook handler.
 data HookOutput = HookOutput
@@ -114,10 +119,13 @@ instance ToJSON HookOutput where
 -- | Hook-specific output (varies by hook type).
 data HookSpecificOutput
   = PreToolUseOutput
-  { permissionDecision :: Text,
-    permissionDecisionReason :: Maybe Text,
-    updatedInput :: Maybe Value
-  }
+      { permissionDecision :: Text,
+        permissionDecisionReason :: Maybe Text,
+        updatedInput :: Maybe Value
+      }
+  | PostToolUseOutput
+      { additionalContext :: Maybe Text
+      }
   deriving (Show, Generic)
 
 instance ToJSON HookSpecificOutput where
@@ -129,6 +137,13 @@ instance ToJSON HookSpecificOutput where
           "permissionDecision" .= decision,
           "permissionDecisionReason" .= reason,
           "updatedInput" .= updated
+        ]
+  toJSON (PostToolUseOutput ctx) =
+    Aeson.object $
+      filter
+        ((/= Aeson.Null) . snd)
+        [ "hookEventName" .= ("PostToolUse" :: Text),
+          "additionalContext" .= ctx
         ]
 
 -- | Create an "allow" response for PreToolUse hooks.
@@ -163,6 +178,17 @@ denyResponse msg =
               permissionDecisionReason = Just msg,
               updatedInput = Nothing
             }
+    }
+
+-- | Create a response for PostToolUse hooks with optional additional context.
+postToolUseResponse :: Maybe Text -> HookOutput
+postToolUseResponse ctx =
+  HookOutput
+    { continue_ = True,
+      stopReason = Nothing,
+      suppressOutput = Nothing,
+      systemMessage = Nothing,
+      hookSpecificOutput = Just $ PostToolUseOutput {additionalContext = ctx}
     }
 
 -- ============================================================================

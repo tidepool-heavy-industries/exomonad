@@ -147,6 +147,7 @@ hookHandler config = do
             Stop -> "Stop"
             SubagentStop -> "SubagentStop"
             PreToolUse -> "PreToolUse"
+            PostToolUse -> "PostToolUse"
       logInfo_ ("Hook received: " <> hookName)
 
       case hookType of
@@ -154,6 +155,7 @@ hookHandler config = do
         Stop -> handleStopHook hookInput (onStop config)
         SubagentStop -> handleStopHook hookInput (onSubagentStop config)
         PreToolUse -> handlePreToolUse hookInput (preToolUse config)
+        PostToolUse -> handlePreToolUse hookInput (postToolUse config)
   where
     handlePreToolUse :: HookInput -> (HookInput -> Sem '[Embed IO] HookOutput) -> IO CInt
     handlePreToolUse hookInput hook = do

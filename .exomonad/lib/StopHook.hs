@@ -12,7 +12,7 @@ module StopHook
 where
 
 import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
-import ExoMonad.Guest.Types (allowResponse)
+import ExoMonad.Guest.Types (allowResponse, postToolUseResponse)
 import ExoMonad.Types (HookConfig (..))
 import Polysemy (embed)
 
@@ -25,6 +25,7 @@ devHooks :: HookConfig
 devHooks =
   HookConfig
     { preToolUse = \_ -> pure (allowResponse Nothing),
+      postToolUse = \_ -> pure (postToolUseResponse Nothing),
       onStop = \_ -> embed runStopHookChecks,
       onSubagentStop = \_ -> embed runStopHookChecks
     }

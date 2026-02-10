@@ -12,7 +12,7 @@ module ExoMonad.Types
 where
 
 import Data.Text (Text)
-import ExoMonad.Guest.Types (HookInput, HookOutput, StopHookOutput, allowResponse, allowStopResponse)
+import ExoMonad.Guest.Types (HookInput, HookOutput, StopHookOutput, allowResponse, allowStopResponse, postToolUseResponse)
 import GHC.Generics (Generic)
 import Polysemy (Embed, Sem)
 
@@ -34,6 +34,8 @@ data RoleConfig tools = RoleConfig
 data HookConfig = HookConfig
   { -- | Called before any tool use. Can allow, block, or modify the tool call.
     preToolUse :: HookInput -> Sem HookEffects HookOutput,
+    -- | Called after any tool use. Can inject additional context into the conversation.
+    postToolUse :: HookInput -> Sem HookEffects HookOutput,
     -- | Called when the agent stops (e.g. /stop or session end).
     onStop :: HookInput -> Sem HookEffects StopHookOutput,
     -- | Called when a sub-agent stops.
@@ -45,6 +47,7 @@ defaultHooks :: HookConfig
 defaultHooks =
   HookConfig
     { preToolUse = \_ -> pure (allowResponse Nothing),
+      postToolUse = \_ -> pure (postToolUseResponse Nothing),
       onStop = \_ -> pure allowStopResponse,
       onSubagentStop = \_ -> pure allowStopResponse
     }

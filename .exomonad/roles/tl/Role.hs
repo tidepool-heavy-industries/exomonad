@@ -4,6 +4,7 @@
 module Role (config, Tools) where
 
 import ExoMonad
+import PostToolUseHook (teamCreateHook)
 
 data Tools mode = Tools
   { agents :: AgentTools mode,
@@ -20,5 +21,5 @@ config =
           { agents = agentTools,
             popups = popupTools
           },
-      hooks = defaultHooks
+      hooks = defaultHooks {postToolUse = teamCreateHook}
     }

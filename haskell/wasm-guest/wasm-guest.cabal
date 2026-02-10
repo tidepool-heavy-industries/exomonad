@@ -92,6 +92,7 @@ library wasm-guest-internal
         ExoMonad.Effects.Copilot
         ExoMonad.Effects.Messaging
         ExoMonad.Effects.Teams
+        ExoMonad.Effects.KV
         -- Types
         ExoMonad.Guest.Types
         ExoMonad.Types

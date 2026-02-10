@@ -48,6 +48,7 @@ library
     Effects.FilePr
     Effects.Copilot
     Effects.Egregore
+    Effects.Kv
     Effects.Messaging
     Effects.Teams
     -- Hand-written compatibility layer

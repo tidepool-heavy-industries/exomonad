@@ -117,8 +117,8 @@ pub use util::{build_prompt, find_exomonad_binary, shell_quote};
 // --- Handler re-exports ---
 #[cfg(feature = "runtime")]
 pub use handlers::{
-    AgentHandler, CopilotHandler, FilePRHandler, FsHandler, GitHandler, GitHubHandler, LogHandler,
-    MessagingHandler, PopupHandler, TeamsHandler,
+    AgentHandler, CopilotHandler, FilePRHandler, FsHandler, GitHandler, GitHubHandler, KvHandler,
+    LogHandler, MessagingHandler, PopupHandler, TeamsHandler,
 };
 #[cfg(feature = "runtime")]
 pub use services::{Services, ValidatedServices};
@@ -314,6 +314,9 @@ pub fn register_builtin_handlers(
     builder = builder.with_effect_handler(handlers::CopilotHandler::new());
 
     builder = builder.with_effect_handler(handlers::MessagingHandler::new());
+
+    let project_dir = std::env::current_dir().unwrap_or_default();
+    builder = builder.with_effect_handler(handlers::KvHandler::new(project_dir));
 
     let question_registry = Arc::new(services::questions::QuestionRegistry::new());
     builder = builder.with_effect_handler(handlers::TeamsHandler::new(question_registry.clone()));

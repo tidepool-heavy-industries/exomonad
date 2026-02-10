@@ -23,7 +23,7 @@ pub async fn run_recompile(role: &str, project_dir: &Path) -> Result<()> {
             "-c",
             "wasm32-wasi-cabal",
             "build",
-            &"--project-file=cabal.project.wasm".to_string(),
+            "--project-file=cabal.project.wasm",
             &format!("wasm-guest-{role}"),
         ])
         .current_dir(project_dir)

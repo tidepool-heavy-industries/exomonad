@@ -12,7 +12,7 @@ where
 
 import Data.Maybe (fromMaybe)
 import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
-import ExoMonad.Guest.Types (HookInput (..), HookOutput, allowResponse, denyResponse)
+import ExoMonad.Guest.Types (HookInput (..), HookOutput, allowResponse, denyResponse, postToolUseResponse)
 import ExoMonad.Permissions (PermissionCheck (..), checkAgentPermissions)
 import ExoMonad.Types (HookConfig (..), HookEffects)
 import Polysemy (Sem, embed)
@@ -25,6 +25,7 @@ httpDevHooks :: HookConfig
 httpDevHooks =
   HookConfig
     { preToolUse = permissionCascade,
+      postToolUse = \_ -> pure (postToolUseResponse Nothing),
       onStop = \_ -> embed runStopHookChecks,
       onSubagentStop = \_ -> embed runStopHookChecks
     }
