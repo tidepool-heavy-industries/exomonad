@@ -20,6 +20,9 @@ pub struct RawConfig {
 
     /// Canonical Zellij session name for this project.
     pub zellij_session: Option<String>,
+
+    /// TCP port for the HTTP MCP server.
+    pub port: Option<u16>,
 }
 
 /// Final resolved configuration.
@@ -29,6 +32,8 @@ pub struct Config {
     pub role: Role,
     /// Canonical Zellij session name (required after discovery).
     pub zellij_session: String,
+    /// TCP port for the HTTP MCP server (default: 7432).
+    pub port: u16,
 }
 
 impl Config {
@@ -91,10 +96,17 @@ impl Config {
                 )
             })?;
 
+        // Resolve port: local > global > default (7432)
+        let port = local_raw
+            .port
+            .or(global_raw.port)
+            .unwrap_or(7432);
+
         Ok(Self {
             project_dir,
             role,
             zellij_session,
+            port,
         })
     }
 
@@ -116,6 +128,7 @@ impl Default for Config {
             project_dir: PathBuf::from("."),
             role: Role::Dev,
             zellij_session: "default".to_string(),
+            port: 7432,
         }
     }
 }

@@ -216,8 +216,7 @@ async fn build_tool_router(state: &McpState) -> Result<ToolRouter<ExomonadHandle
 // Direct Rust Tool Routes
 // ============================================================================
 
-fn register_get_agent_messages(router: &mut ToolRouter<ExomonadHandler>, state: &McpState) {
-    let project_dir = state.project_dir.clone();
+fn register_get_agent_messages(router: &mut ToolRouter<ExomonadHandler>, _state: &McpState) {
     let tool = Tool::new(
         "get_agent_messages",
         "Read notes and pending questions from agent outboxes. Scans all agents (or a specific agent) for messages.",
@@ -237,7 +236,6 @@ fn register_get_agent_messages(router: &mut ToolRouter<ExomonadHandler>, state: 
     );
 
     router.add_route(ToolRoute::new_dyn(tool, move |ctx| {
-        let project_dir = project_dir.clone();
         async move {
             let agent_id = ctx
                 .arguments
@@ -245,58 +243,62 @@ fn register_get_agent_messages(router: &mut ToolRouter<ExomonadHandler>, state: 
                 .and_then(|a| a.get("agent_id"))
                 .and_then(|v| v.as_str())
                 .map(String::from);
-            let subrepo = ctx
-                .arguments
-                .as_ref()
-                .and_then(|a| a.get("subrepo"))
-                .and_then(|v| v.as_str())
-                .map(String::from);
 
-            info!(agent_id = ?agent_id, subrepo = ?subrepo, "Getting agent messages");
+            // Try Teams inbox first (unified path), fall back to legacy .exomonad/agents/
+            let team_name = get_team_name().ok();
 
-            let result = if let Some(ref agent_id) = agent_id {
-                let agent_dir =
-                    tools::resolve_agent_path(&project_dir, subrepo.as_deref(), agent_id);
-                let messages = messaging::read_agent_outbox(&agent_dir)
-                    .await
-                    .map_err(|e| {
-                        rmcp::ErrorData::internal_error(
-                            format!("Failed to read agent outbox: {}", e),
-                            None,
-                        )
-                    })?;
+            info!(agent_id = ?agent_id, team = ?team_name, "Getting agent messages");
 
-                info!(agent = %agent_id, count = messages.len(), "Read agent messages");
-                json!({ "agent_id": agent_id, "messages": messages })
+            if let Some(ref team) = team_name {
+                // Unified path: read from Teams inboxes
+                let result = if let Some(ref agent_id) = agent_id {
+                    let messages = messaging::read_agent_inbox(team, agent_id)
+                        .await
+                        .map_err(|e| {
+                            rmcp::ErrorData::internal_error(
+                                format!("Failed to read agent inbox: {}", e),
+                                None,
+                            )
+                        })?;
+
+                    info!(agent = %agent_id, count = messages.len(), "Read agent messages from Teams inbox");
+                    json!({ "agent_id": agent_id, "messages": messages })
+                } else {
+                    // Read TL inbox to see all messages from agents
+                    let results = messaging::scan_all_agent_messages_teams(team)
+                        .await
+                        .map_err(|e| {
+                            rmcp::ErrorData::internal_error(
+                                format!("Failed to scan agent messages: {}", e),
+                                None,
+                            )
+                        })?;
+
+                    let agents: Vec<Value> = results
+                        .into_iter()
+                        .map(|(id, msgs)| json!({ "agent_id": id, "messages": msgs }))
+                        .collect();
+
+                    info!(agent_count = agents.len(), "Scanned all agent messages from Teams inboxes");
+                    json!({ "agents": agents })
+                };
+
+                Ok(CallToolResult::success(vec![Content::text(
+                    serde_json::to_string_pretty(&result).unwrap_or_default(),
+                )]))
             } else {
-                let results = messaging::scan_all_agent_messages(&project_dir, subrepo.as_deref())
-                    .await
-                    .map_err(|e| {
-                        rmcp::ErrorData::internal_error(
-                            format!("Failed to scan agent messages: {}", e),
-                            None,
-                        )
-                    })?;
-
-                let agents: Vec<Value> = results
-                    .into_iter()
-                    .map(|(id, msgs)| json!({ "agent_id": id, "messages": msgs }))
-                    .collect();
-
-                info!(agent_count = agents.len(), "Scanned all agent messages");
-                json!({ "agents": agents })
-            };
-
-            Ok(CallToolResult::success(vec![Content::text(
-                serde_json::to_string_pretty(&result).unwrap_or_default(),
-            )]))
+                // No team configured — return empty (legacy .exomonad/agents/ path removed)
+                info!("No team name configured, returning empty messages");
+                Ok(CallToolResult::success(vec![Content::text(
+                    json!({"agents": [], "warning": "No EXOMONAD_TEAM_NAME or CLAUDE_TEAM_NAME set. Configure a team to enable messaging."}).to_string(),
+                )]))
+            }
         }
         .boxed()
     }));
 }
 
-fn register_answer_question(router: &mut ToolRouter<ExomonadHandler>, state: &McpState) {
-    let project_dir = state.project_dir.clone();
+fn register_answer_question(router: &mut ToolRouter<ExomonadHandler>, _state: &McpState) {
     let tool = Tool::new(
         "answer_question",
         "Answer a pending question from an agent. Writes the answer to the agent's inbox, unblocking their send_question call.",
@@ -325,7 +327,6 @@ fn register_answer_question(router: &mut ToolRouter<ExomonadHandler>, state: &Mc
     );
 
     router.add_route(ToolRoute::new_dyn(tool, move |ctx| {
-        let project_dir = project_dir.clone();
         async move {
             let args = ctx.arguments.as_ref();
 
@@ -341,19 +342,21 @@ fn register_answer_question(router: &mut ToolRouter<ExomonadHandler>, state: &Mc
                 .and_then(|a| a.get("answer"))
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| rmcp::ErrorData::invalid_params("answer is required", None))?;
-            let subrepo = args.and_then(|a| a.get("subrepo")).and_then(|v| v.as_str());
 
-            let agent_dir = tools::resolve_agent_path(&project_dir, subrepo, agent_id);
+            let team_name = get_team_name()?;
 
-            info!(agent = %agent_id, question_id = %question_id, "Answering question");
+            info!(agent = %agent_id, question_id = %question_id, team = %team_name, "Answering question via Teams inbox");
 
-            messaging::write_agent_answer(&agent_dir, question_id, answer)
+            messaging::write_to_agent_inbox(&team_name, agent_id, answer)
                 .await
                 .map_err(|e| {
-                    rmcp::ErrorData::internal_error(format!("Failed to write answer: {}", e), None)
+                    rmcp::ErrorData::internal_error(
+                        format!("Failed to write answer to Teams inbox: {}", e),
+                        None,
+                    )
                 })?;
 
-            info!(agent = %agent_id, question_id = %question_id, "Answer written");
+            info!(agent = %agent_id, question_id = %question_id, "Answer written to Teams inbox");
 
             let result = json!({
                 "status": "answered",

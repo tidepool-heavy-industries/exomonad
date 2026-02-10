@@ -215,29 +215,30 @@ pub async fn execute_direct_tool(state: &McpState, name: &str, args: Value) -> R
     }
 }
 
-async fn execute_get_agent_messages(state: &McpState, args: Value) -> Result<Value> {
+async fn execute_get_agent_messages(_state: &McpState, args: Value) -> Result<Value> {
     let agent_id = args.get("agent_id").and_then(|v| v.as_str());
-    let subrepo = args.get("subrepo").and_then(|v| v.as_str());
+
+    let team_name = get_team_name_from_env()
+        .ok_or_else(|| anyhow!("No EXOMONAD_TEAM_NAME or CLAUDE_TEAM_NAME set"))?;
 
     info!(
         agent_id = ?agent_id,
-        subrepo = ?subrepo,
-        "Getting agent messages"
+        team = %team_name,
+        "Getting agent messages from Teams inbox"
     );
 
     if let Some(agent_id) = agent_id {
-        let agent_dir = resolve_agent_path(&state.project_dir, subrepo, agent_id);
-        let messages = messaging::read_agent_outbox(&agent_dir)
+        let messages = messaging::read_agent_inbox(&team_name, agent_id)
             .await
-            .map_err(|e| anyhow!("Failed to read agent outbox: {}", e))?;
+            .map_err(|e| anyhow!("Failed to read agent inbox: {}", e))?;
 
-        info!(agent = %agent_id, count = messages.len(), "Read agent messages");
+        info!(agent = %agent_id, count = messages.len(), "Read agent messages from Teams inbox");
         Ok(json!({
             "agent_id": agent_id,
             "messages": messages,
         }))
     } else {
-        let results = messaging::scan_all_agent_messages(&state.project_dir, subrepo)
+        let results = messaging::scan_all_agent_messages_teams(&team_name)
             .await
             .map_err(|e| anyhow!("Failed to scan agent messages: {}", e))?;
 
@@ -251,12 +252,12 @@ async fn execute_get_agent_messages(state: &McpState, args: Value) -> Result<Val
             })
             .collect();
 
-        info!(agent_count = agents.len(), "Scanned all agent messages");
+        info!(agent_count = agents.len(), "Scanned all agent messages from Teams inboxes");
         Ok(json!({ "agents": agents }))
     }
 }
 
-async fn execute_answer_question(state: &McpState, args: Value) -> Result<Value> {
+async fn execute_answer_question(_state: &McpState, args: Value) -> Result<Value> {
     let agent_id = args
         .get("agent_id")
         .and_then(|v| v.as_str())
@@ -269,21 +270,22 @@ async fn execute_answer_question(state: &McpState, args: Value) -> Result<Value>
         .get("answer")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow!("answer is required"))?;
-    let subrepo = args.get("subrepo").and_then(|v| v.as_str());
 
-    let agent_dir = resolve_agent_path(&state.project_dir, subrepo, agent_id);
+    let team_name = get_team_name_from_env()
+        .ok_or_else(|| anyhow!("No EXOMONAD_TEAM_NAME or CLAUDE_TEAM_NAME set"))?;
 
     info!(
         agent = %agent_id,
         question_id = %question_id,
-        "Answering question"
+        team = %team_name,
+        "Answering question via Teams inbox"
     );
 
-    messaging::write_agent_answer(&agent_dir, question_id, answer)
+    messaging::write_to_agent_inbox(&team_name, agent_id, answer)
         .await
-        .map_err(|e| anyhow!("Failed to write answer: {}", e))?;
+        .map_err(|e| anyhow!("Failed to write answer to Teams inbox: {}", e))?;
 
-    info!(agent = %agent_id, question_id = %question_id, "Answer written");
+    info!(agent = %agent_id, question_id = %question_id, "Answer written to Teams inbox");
     Ok(json!({
         "status": "answered",
         "agent_id": agent_id,
@@ -291,17 +293,11 @@ async fn execute_answer_question(state: &McpState, args: Value) -> Result<Value>
     }))
 }
 
-/// Resolve the path to an agent's directory.
-pub fn resolve_agent_path(
-    project_dir: &std::path::Path,
-    subrepo: Option<&str>,
-    agent_id: &str,
-) -> std::path::PathBuf {
-    let base = match subrepo {
-        Some(sub) => project_dir.join(sub),
-        None => project_dir.to_path_buf(),
-    };
-    base.join(".exomonad").join("agents").join(agent_id)
+/// Get team name from environment variables.
+fn get_team_name_from_env() -> Option<String> {
+    std::env::var("EXOMONAD_TEAM_NAME")
+        .or_else(|_| std::env::var("CLAUDE_TEAM_NAME"))
+        .ok()
 }
 
 #[cfg(test)]

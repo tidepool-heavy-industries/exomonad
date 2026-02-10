@@ -97,8 +97,19 @@ pub async fn run_http_server(state: McpState, port: u16) -> Result<()> {
 }
 
 async fn shutdown_signal() {
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to install ctrl-c handler");
-    info!("Received ctrl-c, initiating graceful shutdown");
+    let ctrl_c = tokio::signal::ctrl_c();
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => info!("Received SIGINT, initiating graceful shutdown"),
+        _ = terminate => info!("Received SIGTERM, initiating graceful shutdown"),
+    }
 }

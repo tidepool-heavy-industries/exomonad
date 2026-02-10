@@ -18,6 +18,7 @@ path = "src/main.rs"
 exomonad-core = { path = "../exomonad-core", version = "0.1.0" }
 rmcp = { version = "0.14", features = ["server", "transport-io", "transport-streamable-http-server"] }
 axum = { version = "0.8" }
+tower-http = { workspace = true }
 tokio-util = { version = "0.7" }
 clap = { workspace = true }
 serde = { workspace = true }
