@@ -1088,19 +1088,13 @@ impl AgentControlService {
                 info!(agent_dir = %agent_dir.display(), "Wrote .mcp.json for Claude agent");
             }
             AgentType::Gemini => {
+                // Gemini CLI uses "httpUrl" for streamable HTTP, "url" for SSE.
+                // Our rmcp server speaks streamable HTTP.
                 let gemini_content = match server_info {
-                    Some(ServerInfo::Socket(socket_path)) => {
-                        info!(socket = %socket_path, "Unix socket server detected, writing .gemini/settings.json");
-                        format!(
-                            r###"{{
-  "mcpServers": {{
-    "exomonad": {{
-      "url": "unix://{}/dev/mcp"
-    }}
-  }}
-}}"###,
-                            socket_path
-                        )
+                    Some(ServerInfo::Socket(_)) => {
+                        return Err(anyhow::anyhow!(
+                            "Gemini CLI does not support unix socket MCP servers. Use `exomonad serve --port <port>` instead."
+                        ));
                     }
                     Some(ServerInfo::Http(port)) => {
                         info!(port, "HTTP server detected, writing .gemini/settings.json");
@@ -1108,7 +1102,7 @@ impl AgentControlService {
                             r###"{{
   "mcpServers": {{
     "exomonad": {{
-      "url": "http://localhost:{}/mcp"
+      "httpUrl": "http://localhost:{}/mcp"
     }}
   }}
 }}"###,
@@ -1116,8 +1110,9 @@ impl AgentControlService {
                         )
                     }
                     None => {
-                        warn!("No server detected for Gemini agent — Gemini CLI does not support stdio MCP. Agent will have no MCP tools.");
-                        return Ok(());
+                        return Err(anyhow::anyhow!(
+                            "No MCP server running. Gemini agents require an HTTP server. Start one with `exomonad serve --port <port>`."
+                        ));
                     }
                 };
                 let gemini_dir = agent_dir.join(".gemini");
