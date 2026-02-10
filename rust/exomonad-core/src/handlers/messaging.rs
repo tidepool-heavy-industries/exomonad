@@ -17,7 +17,6 @@ use async_trait::async_trait;
 use exomonad_proto::effects::messaging::*;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::sleep;
 use tracing::info;
 
 /// Messaging effect handler.
@@ -26,25 +25,12 @@ use tracing::info;
 /// in the Teams directory. The `QuestionRegistry` bridges `answer_question`
 /// (TL-side) with `send_question` (agent-side) for immediate unblocking.
 pub struct MessagingHandler {
-    question_registry: Option<Arc<QuestionRegistry>>,
+    question_registry: Arc<QuestionRegistry>,
 }
 
 impl MessagingHandler {
-    pub fn new() -> Self {
-        Self {
-            question_registry: None,
-        }
-    }
-
-    pub fn with_question_registry(mut self, registry: Arc<QuestionRegistry>) -> Self {
-        self.question_registry = Some(registry);
-        self
-    }
-}
-
-impl Default for MessagingHandler {
-    fn default() -> Self {
-        Self::new()
+    pub fn new(question_registry: Arc<QuestionRegistry>) -> Self {
+        Self { question_registry }
     }
 }
 
@@ -83,12 +69,17 @@ impl MessagingEffects for MessagingHandler {
     async fn send_question(&self, req: SendQuestionRequest) -> EffectResult<SendQuestionResponse> {
         let team_name = get_team_name()?;
         let agent_id = get_agent_id();
-        let tl_inbox = inbox::inbox_path(&team_name, "team-lead");
-        let my_inbox = inbox::inbox_path(&team_name, &agent_id);
 
-        let text = format!("[QUESTION] {}", req.question);
+        info!(agent = %agent_id, "Sending question to TL");
+
+        // Register in QuestionRegistry for oneshot wakeup
+        let (question_id, rx) = self.question_registry.register();
+
+        // Send question to TL inbox with question_id for correlation
+        let tl_inbox = inbox::inbox_path(&team_name, "team-lead");
+        let text = format!("[QUESTION q_id={}] {}", question_id, req.question);
         let msg = inbox::create_message(
-            agent_id,
+            agent_id.clone(),
             text,
             Some(req.question.chars().take(50).collect()),
         );
@@ -98,37 +89,36 @@ impl MessagingEffects for MessagingHandler {
             .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
             .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
 
-        // Poll for answer
+        // Await answer with 5 minute timeout (no polling)
         let timeout = Duration::from_secs(300);
-        let interval = Duration::from_secs(5);
-        let start = std::time::Instant::now();
-
-        loop {
-            if start.elapsed() >= timeout {
-                return Err(EffectError::custom(
+        match tokio::time::timeout(timeout, rx).await {
+            Ok(Ok(answer)) => {
+                info!(
+                    agent = %agent_id,
+                    question_id = %question_id,
+                    "Answer received via MessagingHandler"
+                );
+                Ok(SendQuestionResponse { answer })
+            }
+            Ok(Err(_)) => {
+                self.question_registry.cancel(&question_id);
+                Err(EffectError::custom(
                     "messaging_error",
-                    format!("Question timed out after {}s", timeout.as_secs()),
-                ));
+                    "Question channel closed unexpectedly",
+                ))
             }
-
-            let my_inbox_clone = my_inbox.clone();
-            let unread = tokio::task::spawn_blocking(move || inbox::read_unread(&my_inbox_clone))
-                .await
-                .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
-                .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
-
-            if let Some(answer) = unread.into_iter().next() {
-                // Mark as read
-                let my_inbox_mark = inbox::inbox_path(&team_name, &get_agent_id());
-                let _ =
-                    tokio::task::spawn_blocking(move || inbox::mark_all_read(&my_inbox_mark)).await;
-
-                return Ok(SendQuestionResponse {
-                    answer: answer.text,
-                });
+            Err(_) => {
+                self.question_registry.cancel(&question_id);
+                info!(
+                    agent = %agent_id,
+                    question_id = %question_id,
+                    "Question timed out after 300s"
+                );
+                Err(EffectError::timeout(format!(
+                    "send_question({}) timed out after 300s",
+                    question_id
+                )))
             }
-
-            sleep(interval).await;
         }
     }
 
@@ -227,15 +217,13 @@ impl MessagingEffects for MessagingHandler {
             .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
 
         // Resolve the oneshot channel so send_question unblocks immediately.
-        if let Some(ref registry) = self.question_registry {
-            let resolved = registry.resolve(&req.question_id, req.answer.clone());
-            info!(
-                agent = %req.agent_id,
-                question_id = %req.question_id,
-                resolved,
-                "Resolved question via QuestionRegistry"
-            );
-        }
+        let resolved = self.question_registry.resolve(&req.question_id, req.answer.clone());
+        info!(
+            agent = %req.agent_id,
+            question_id = %req.question_id,
+            resolved,
+            "Resolved question via QuestionRegistry"
+        );
 
         info!(agent = %req.agent_id, question_id = %req.question_id, "Answer written to Teams inbox");
 

@@ -17,6 +17,7 @@
 //! ```
 
 pub mod agent;
+pub mod coordination;
 pub mod copilot;
 pub mod file_pr;
 pub mod fs;
@@ -29,6 +30,7 @@ pub mod popup;
 pub mod teams;
 
 pub use agent::AgentHandler;
+pub use coordination::CoordinationHandler;
 pub use copilot::CopilotHandler;
 pub use file_pr::FilePRHandler;
 pub use fs::FsHandler;

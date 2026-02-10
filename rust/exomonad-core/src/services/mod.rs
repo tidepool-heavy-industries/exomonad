@@ -1,4 +1,5 @@
 pub mod agent_control;
+pub mod coordination;
 pub mod copilot_review;
 pub mod docker;
 pub mod external;

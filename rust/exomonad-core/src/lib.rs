@@ -315,14 +315,15 @@ pub fn register_builtin_handlers(
 
     let question_registry = Arc::new(services::questions::QuestionRegistry::new());
 
-    builder = builder.with_effect_handler(
-        handlers::MessagingHandler::new().with_question_registry(question_registry.clone()),
-    );
+    builder = builder.with_effect_handler(handlers::MessagingHandler::new(question_registry.clone()));
 
     let project_dir = std::env::current_dir().unwrap_or_default();
     builder = builder.with_effect_handler(handlers::KvHandler::new(project_dir));
 
     builder = builder.with_effect_handler(handlers::TeamsHandler::new(question_registry.clone()));
+
+    let coordination_service = Arc::new(services::coordination::CoordinationService::new());
+    builder = builder.with_effect_handler(handlers::CoordinationHandler::new(coordination_service));
 
     (builder, question_registry)
 }

@@ -1,0 +1,114 @@
+syntax = "proto3";
+package exomonad.effects.coordination;
+
+// Coordination effects for task management and agent messaging.
+//
+// Tool signatures mirror Claude Code Teams primitives (TaskCreate, TaskUpdate, etc.)
+// to leverage model training transfer. Backend is ExoMonad's in-process state,
+// not the Teams filesystem protocol.
+
+// ============================================================================
+// Common types
+// ============================================================================
+
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  TASK_STATUS_PENDING = 1;
+  TASK_STATUS_IN_PROGRESS = 2;
+  TASK_STATUS_COMPLETED = 3;
+}
+
+message Task {
+  string id = 1;
+  string subject = 2;
+  string description = 3;
+  TaskStatus status = 4;
+  string owner = 5;
+  repeated string blocked_by = 6;
+}
+
+message AgentMessage {
+  string from = 1;
+  string text = 2;
+  string summary = 3;
+  string timestamp = 4;
+  bool read = 5;
+}
+
+// ============================================================================
+// Task CRUD
+// ============================================================================
+
+message CreateTaskRequest {
+  string subject = 1;
+  string description = 2;
+  string owner = 3;
+  repeated string blocked_by = 4;
+}
+
+message CreateTaskResponse {
+  string task_id = 1;
+}
+
+message UpdateTaskRequest {
+  string task_id = 1;
+  TaskStatus status = 2;
+  string owner = 3;
+  string description = 4;
+  string subject = 5;
+}
+
+message UpdateTaskResponse {
+  bool success = 1;
+}
+
+message ListTasksRequest {
+  TaskStatus filter_status = 1;
+}
+
+message ListTasksResponse {
+  repeated Task tasks = 1;
+}
+
+message GetTaskRequest {
+  string task_id = 1;
+}
+
+message GetTaskResponse {
+  Task task = 1;
+}
+
+// ============================================================================
+// Messaging
+// ============================================================================
+
+message SendMessageRequest {
+  string from = 1;
+  string text = 2;
+  string summary = 3;
+}
+
+message SendMessageResponse {
+  bool success = 1;
+}
+
+message GetMessagesRequest {
+  bool unread_only = 1;
+}
+
+message GetMessagesResponse {
+  repeated AgentMessage messages = 1;
+}
+
+// ============================================================================
+// Service definition (used by Rust codegen for typed effect traits)
+// ============================================================================
+
+service CoordinationEffects {
+  rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
+  rpc UpdateTask(UpdateTaskRequest) returns (UpdateTaskResponse);
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
+  rpc GetTask(GetTaskRequest) returns (GetTaskResponse);
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+  rpc GetMessages(GetMessagesRequest) returns (GetMessagesResponse);
+}

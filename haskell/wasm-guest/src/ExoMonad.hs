@@ -12,12 +12,16 @@ module ExoMonad
     module ExoMonad.Guest.Records.Messaging,
     module ExoMonad.Guest.Records.TLMessaging,
     module ExoMonad.Guest.Records.Teams,
+    module ExoMonad.Guest.Records.Coordination,
 
     -- * Mode System
     module ExoMonad.Guest.Tool.Mode,
 
     -- * Extensible Effects
     module ExoMonad.Guest.Effect,
+
+    -- * SpawnSpec compiler
+    module ExoMonad.Guest.SpawnSpec.Types,
 
     -- * Re-exports
     Generic,
@@ -31,6 +35,8 @@ import ExoMonad.Guest.Records.Messaging
 import ExoMonad.Guest.Records.Popup
 import ExoMonad.Guest.Records.TLMessaging
 import ExoMonad.Guest.Records.Teams
+import ExoMonad.Guest.Records.Coordination
+import ExoMonad.Guest.SpawnSpec.Types as ExoMonad.Guest.SpawnSpec.Types
 import ExoMonad.Guest.Tool.Class
 import ExoMonad.Guest.Tool.Mode
 import ExoMonad.Types
