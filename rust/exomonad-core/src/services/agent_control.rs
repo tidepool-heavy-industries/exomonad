@@ -174,6 +174,39 @@ pub enum AgentStatus {
 
 impl FFIBoundary for AgentStatus {}
 
+/// Workspace topology for an agent — how it relates to the project directory.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Topology {
+    /// Unknown or legacy agent.
+    #[default]
+    Unspecified,
+    /// Agent works in an isolated git worktree.
+    WorktreePerAgent,
+    /// Agent shares the project directory.
+    SharedDir,
+}
+
+impl Topology {
+    /// Convert from proto i32 representation.
+    pub fn from_proto(value: i32) -> Self {
+        match value {
+            1 => Topology::WorktreePerAgent,
+            2 => Topology::SharedDir,
+            _ => Topology::Unspecified,
+        }
+    }
+
+    /// Convert to proto i32 representation.
+    pub fn to_proto(self) -> i32 {
+        match self {
+            Topology::Unspecified => 0,
+            Topology::WorktreePerAgent => 1,
+            Topology::SharedDir => 2,
+        }
+    }
+}
+
 /// Information about an active agent.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentInfo {
@@ -183,6 +216,9 @@ pub struct AgentInfo {
     pub has_tab: bool,
     /// Status of the agent
     pub status: AgentStatus,
+    /// Workspace topology.
+    #[serde(default)]
+    pub topology: Topology,
     /// Path to agent directory (.exomonad/agents/{agent_id}/)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_dir: Option<String>,
@@ -870,10 +906,19 @@ impl AgentControlService {
                     None
                 };
 
+                // Infer topology: agents with worktree dirs are WorktreePerAgent,
+                // named teammates (no issue prefix) are SharedDir.
+                let topology = if member.name.starts_with("gh-") {
+                    Topology::WorktreePerAgent
+                } else {
+                    Topology::SharedDir
+                };
+
                 AgentInfo {
                     issue_id: member.name.clone(),
                     has_tab,
                     status,
+                    topology,
                     agent_dir: None,
                     slug: None,
                     agent_type,

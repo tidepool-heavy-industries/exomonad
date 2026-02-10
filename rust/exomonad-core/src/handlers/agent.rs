@@ -246,6 +246,8 @@ fn spawn_result_to_proto(
     issue: &str,
     result: &crate::services::agent_control::SpawnResult,
 ) -> exomonad_proto::effects::agent::AgentInfo {
+    use crate::services::agent_control::Topology;
+
     exomonad_proto::effects::agent::AgentInfo {
         id: format!("{}-{}", issue, result.agent_type),
         issue: issue.to_string(),
@@ -262,7 +264,7 @@ fn spawn_result_to_proto(
         error: String::new(),
         pr_number: 0,
         pr_url: String::new(),
-        topology: 0,
+        topology: Topology::WorktreePerAgent.to_proto(),
     }
 }
 
@@ -270,6 +272,8 @@ fn teammate_result_to_proto(
     name: &str,
     result: &crate::services::agent_control::SpawnResult,
 ) -> exomonad_proto::effects::agent::AgentInfo {
+    use crate::services::agent_control::Topology;
+
     exomonad_proto::effects::agent::AgentInfo {
         id: result.tab_name.clone(),
         issue: String::new(),
@@ -294,7 +298,7 @@ fn teammate_result_to_proto(
         error: String::new(),
         pr_number: 0,
         pr_url: String::new(),
-        topology: 0,
+        topology: Topology::SharedDir.to_proto(),
     }
 }
 
@@ -322,6 +326,6 @@ fn service_info_to_proto(info: &AgentInfo) -> exomonad_proto::effects::agent::Ag
         error: String::new(),
         pr_number: info.pr.as_ref().map(|p| p.number as i32).unwrap_or(0),
         pr_url: info.pr.as_ref().map(|p| p.url.clone()).unwrap_or_default(),
-        topology: 0,
+        topology: info.topology.to_proto(),
     }
 }

@@ -238,7 +238,7 @@ mod tests {
             error: String::new(),
             pr_number: 0,
             pr_url: String::new(),
-            topology: 0,
+            topology: 1, // WORKTREE_PER_AGENT
         };
 
         let spawn_resp = SpawnResponse {
