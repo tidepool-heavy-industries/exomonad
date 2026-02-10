@@ -6,20 +6,33 @@
 module ExoMonad.Guest.Effects.StopHook
   ( runStopHookChecks,
     ReviewStatus (..),
+
+    -- * Agent identity helpers
+    getAgentId,
+    getTeamName,
+
+    -- * Lifecycle messaging
+    sendLifecycleNote,
   )
 where
 
+import Data.Aeson (ToJSON (..), encode, object, (.=))
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Encoding qualified as TE
 import Data.Text.Lazy qualified as TL
+import Data.Text.Lazy.Encoding qualified as TLE
 import Data.Vector qualified as V
 import Effects.Copilot qualified as Copilot
 import Effects.Git qualified as Git
 import Effects.Github qualified as GH
 import ExoMonad.Effects.Copilot (waitForCopilotReview)
-import ExoMonad.Effects.Git (getRepoInfo, getStatus, hasUnpushedCommits)
+import ExoMonad.Effects.Git (getBranch, getRepoInfo, getStatus, hasUnpushedCommits)
 import ExoMonad.Effects.GitHub (getPullRequestForBranch)
-import ExoMonad.Guest.Types (StopHookOutput, allowStopResponse, blockStopResponse)
+import ExoMonad.Effects.Messaging (sendNote)
+import ExoMonad.Guest.Types (StopDecision (..), StopHookOutput (..), allowStopResponse, blockStopResponse)
+import GHC.Generics (Generic)
+import System.Environment (lookupEnv)
 
 -- ============================================================================
 -- Types
@@ -35,6 +48,20 @@ data ReviewStatus = Reviewed | Pending | Timeout
 
 runStopHookChecks :: IO StopHookOutput
 runStopHookChecks = do
+  result <- runStopHookChecksInner
+  -- Send lifecycle note based on outcome
+  case result of
+    out@(StopHookOutput Allow _) -> do
+      sendLifecycleNote "agent_completed" [("summary", "All checks passed: clean tree, pushed, PR filed, Copilot approved")]
+      pure out
+    out@(StopHookOutput Block (Just reason)) -> do
+      sendLifecycleNote "agent_blocked" [("reason", reason)]
+      pure out
+    out -> pure out
+
+-- | Inner check logic (separated so we can wrap with lifecycle messaging).
+runStopHookChecksInner :: IO StopHookOutput
+runStopHookChecksInner = do
   -- Check 1: Uncommitted changes
   dirtyResult <- getStatus (Git.GetStatusRequest {Git.getStatusRequestWorkingDir = "."})
   case dirtyResult of
@@ -178,3 +205,54 @@ formatComment c =
     <> (let l = Copilot.copilotCommentLine c in if l == 0 then "" else ":" <> T.pack (show l))
     <> ": "
     <> TL.toStrict (Copilot.copilotCommentBody c)
+
+-- ============================================================================
+-- Agent Identity Helpers
+-- ============================================================================
+
+-- | Read the agent's identity from EXOMONAD_AGENT_ID env var.
+getAgentId :: IO (Maybe Text)
+getAgentId = fmap (fmap T.pack) (lookupEnv "EXOMONAD_AGENT_ID")
+
+-- | Read the team name from EXOMONAD_TEAM_NAME env var.
+getTeamName :: IO (Maybe Text)
+getTeamName = fmap (fmap T.pack) (lookupEnv "EXOMONAD_TEAM_NAME")
+
+-- ============================================================================
+-- Lifecycle Messaging
+-- ============================================================================
+
+-- | Send a structured lifecycle note to the TL via Teams inbox.
+--
+-- The note content is JSON-structured so the TL can parse it programmatically.
+-- If team name or agent ID is not available, the note is silently skipped.
+sendLifecycleNote :: Text -> [(Text, Text)] -> IO ()
+sendLifecycleNote noteType fields = do
+  mTeam <- getTeamName
+  mAgent <- getAgentId
+  case (mTeam, mAgent) of
+    (Just team, Just agent) -> do
+      -- Get current branch for context
+      branchName <- getCurrentBranch
+      let jsonFields =
+            [ ("\"type\": \"" <> noteType <> "\""),
+              ("\"agent_id\": \"" <> agent <> "\""),
+              ("\"branch\": \"" <> branchName <> "\"")
+            ]
+              <> map (\(k, v) -> "\"" <> k <> "\": \"" <> escapeJson v <> "\"") fields
+          jsonContent = "{" <> T.intercalate ", " jsonFields <> "}"
+      _ <- sendNote jsonContent team
+      pure ()
+    _ -> pure () -- No team context, skip messaging
+
+-- | Get the current git branch name, defaulting to "unknown" on error.
+getCurrentBranch :: IO Text
+getCurrentBranch = do
+  result <- getBranch (Git.GetBranchRequest {Git.getBranchRequestWorkingDir = "."})
+  case result of
+    Right resp -> pure $ TL.toStrict (Git.getBranchResponseBranch resp)
+    Left _ -> pure "unknown"
+
+-- | Escape JSON string content (minimal: backslash and double-quote).
+escapeJson :: Text -> Text
+escapeJson = T.replace "\\" "\\\\" . T.replace "\"" "\\\"" . T.replace "\n" "\\n"

@@ -23,7 +23,37 @@ Always prefer failure to an undocumented heuristic or fallback.
 
 Never maintain two code paths that do the same thing. Redundant paths cause bug risk — fixes applied to one path get missed on the other. If there's a "debug mode" or "legacy mode" that duplicates a primary path, cut it.
 
-Concrete example: `exomonad serve` (HTTP) is the only MCP transport. There is no stdio MCP mode. One server, all agents connect to it.
+Concrete example: if you find two code paths doing the same dispatch (e.g., "direct Rust tools" alongside WASM routing), delete the redundant one.
+
+### SESSION ENTRY POINT
+
+**`exomonad init` is THE entry point for development sessions.** It creates a Zellij session with:
+- **Server tab**: Runs `exomonad serve --port 7432` (the HTTP MCP server, required for all tool calls)
+- **TL tab**: Runs `nix develop` (where you launch `claude` or work directly)
+
+The server must be running before Claude Code or Gemini can use MCP tools. Without it, every tool call fails. `exomonad init` ensures this by making the server tab part of the session layout.
+
+```bash
+cd exomonad/                  # Run from the project root
+exomonad init                 # Creates Zellij session, starts server
+# Then in the TL tab:
+claude                        # MCP tools available immediately
+```
+
+Use `--recreate` to tear down and rebuild the session (e.g., after binary updates).
+Use `--port` to override the default port (7432).
+
+MCP registration is separate — use `claude mcp add` / `gemini mcp add` once per project:
+```bash
+claude mcp add --transport http exomonad http://localhost:7432/tl/mcp
+gemini mcp add --transport http exomonad http://localhost:7432/tl/mcp
+```
+
+### ALL MCP TOOLS AND HOOKS MUST BE DEFINED IN HASKELL DSL
+
+**Never add direct Rust MCP tools.** All MCP tools and hooks are defined in Haskell WASM — tool schemas, argument parsing, dispatch logic, everything. Rust is the I/O runtime: it executes effects that the Haskell DSL yields. If a new tool needs new I/O capabilities, add a new effect handler in Rust and a corresponding effect type in Haskell. The tool itself lives in `haskell/wasm-guest/src/ExoMonad/Guest/Tools/`.
+
+This is the entire architectural premise. Haskell WASM is the single source of truth for tool definitions. Rust never defines tool schemas, never parses tool arguments, never contains tool logic.
 
 ### CROSSCUTTING RULES
 
@@ -233,7 +263,7 @@ Human-driven Claude Code sessions augmented with ExoMonad. **Not headless automa
 - Hosts WASM plugin via Extism
 - Executes all effects (git, GitHub API, filesystem, Zellij)
 - Owns the process lifecycle
-- MCP server (stdio mode for Claude Code)
+- MCP server (HTTP, started by `exomonad init`)
 
 **Worktrees + Zellij = Isolation/Multiplexing**
 - Git worktrees for code isolation (no Docker containers)
@@ -289,15 +319,10 @@ Ask the specialist directly instead of guessing. They have authoritative knowled
 
 Hook configuration is **auto-generated per worktree** by `write_context_files()` in `agent_control.rs` during `spawn_agents`. Each spawned Claude agent gets `.claude/settings.local.json` with PreToolUse, SubagentStop, and SessionEnd hooks. Gemini agents get `.gemini/settings.json` with AfterAgent hooks. Do not manually create hook settings — they are generated at spawn time.
 
-**MCP server configuration:** Use CLI-native config commands:
+**MCP server configuration:** Use CLI-native config commands (one-time setup):
 ```bash
-# Claude Code
-claude mcp add exomonad -- exomonad mcp-stdio
-# or for HTTP mode:
-claude mcp add --transport http exomonad http://localhost:7432/mcp
-
-# Gemini CLI
-gemini mcp add --transport http exomonad http://localhost:7432/mcp
+claude mcp add --transport http exomonad http://localhost:7432/tl/mcp
+gemini mcp add --transport http exomonad http://localhost:7432/tl/mcp
 ```
 
 **Two WASM loading modes:**
@@ -369,11 +394,19 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 | `spawn_gemini_teammate` | Spawn a named Gemini teammate with a direct prompt (no GitHub issue required) |
 | `cleanup_agents` | Clean up agent worktrees and close Zellij tabs |
 | `list_agents` | List active agent worktrees |
+| `claim_task` | Claim a task from the shared task list (Teams) |
+| `complete_task` | Mark a task as completed (Teams) |
+| `list_tasks` | List tasks from the shared task list (Teams) |
+| `get_task` | Get task details by ID (Teams) |
+| `report_status` | Report agent status to the team (Teams) |
+| `ask_question` | Ask a question to the team lead (Teams) |
+| `get_agent_messages` | Read notes and questions from agent outboxes (TL messaging) |
+| `answer_question` | Answer a pending question from an agent (TL messaging) |
 
 **How spawn_agents works:**
 1. Creates git worktree: `.exomonad/worktrees/gh-{issue}-{title}-{agent}/`
 2. Creates branch: `gh-{issue}/{title}-{agent}`
-3. Writes `.exomonad/config.toml` (default_role="dev") and MCP config (`.mcp.json` for Claude, `.gemini/settings.json` for Gemini)
+3. Writes `.exomonad/config.toml` (default_role="dev") and CLI-native MCP config (`.gemini/settings.json` for Gemini agents)
 4. Builds initial prompt with full issue context
 5. Creates Zellij tab using KDL layout with agent-specific command:
    - `claude --prompt '...'` for Claude agents

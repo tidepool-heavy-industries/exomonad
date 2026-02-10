@@ -671,20 +671,23 @@ async fn main() -> Result<()> {
             "Starting HTTP MCP server with file-based WASM (hot reload enabled)"
         );
 
-        // Initialize services
+        // Initialize services (with MCP server port for per-agent endpoint URLs)
         let services = Arc::new(
             Services::new()
                 .with_zellij_session(config.zellij_session.clone())
+                .with_mcp_server_port(port)
                 .validate()
                 .context("Failed to validate services")?,
         );
 
         // Build runtime with file-based WASM loading (enables hot reload)
         let builder = RuntimeBuilder::new().with_wasm_path(wasm_path);
-        let builder = exomonad_core::register_builtin_handlers(builder, &services);
+        let (builder, question_registry) =
+            exomonad_core::register_builtin_handlers(builder, &services);
         let rt = builder.build().await.context("Failed to build runtime")?;
 
-        let base_state = rt.into_mcp_state(project_dir.clone());
+        let mut base_state = rt.into_mcp_state(project_dir.clone());
+        base_state.question_registry = Some(question_registry);
 
         // Write server.pid for client discovery
         let pid_info = serde_json::json!({
@@ -723,8 +726,30 @@ async fn main() -> Result<()> {
             }
         };
 
+        // Per-agent MCP route: /agents/{name}/mcp
+        // Each Gemini agent's settings.json points to its own URL.
+        // The handler extracts agent name from the path and sets it as
+        // the task-local identity before forwarding to the dev MCP service.
+        let agent_dev_service = dev_service.clone();
+        let agent_handler = move |
+            axum::extract::Path(agent_name): axum::extract::Path<String>,
+            request: axum::extract::Request,
+        | {
+            let service = agent_dev_service.clone();
+            async move {
+                tracing::info!(agent = %agent_name, "Routing agent MCP request");
+                exomonad_core::mcp::agent_identity::with_agent_id(
+                    agent_name,
+                    async move { service.handle(request).await },
+                )
+                .await
+            }
+        };
+
         let app = axum::Router::new()
             .route("/health", axum::routing::get(health_handler))
+            .route("/agents/{name}/mcp", axum::routing::any(agent_handler.clone()))
+            .route("/agents/{name}/mcp/{*rest}", axum::routing::any(agent_handler))
             .nest_service("/tl/mcp", tl_service)
             .nest_service("/dev/mcp", dev_service)
             .layer(TraceLayer::new_for_http());
@@ -861,7 +886,8 @@ async fn build_runtime(
     services: &Arc<exomonad_core::ValidatedServices>,
 ) -> Result<Runtime> {
     let builder = RuntimeBuilder::new().with_wasm_bytes(wasm_bytes.to_vec());
-    let builder = exomonad_core::register_builtin_handlers(builder, services);
+    let (builder, _question_registry) =
+        exomonad_core::register_builtin_handlers(builder, services);
 
     builder.build().await.context("Failed to build runtime")
 }

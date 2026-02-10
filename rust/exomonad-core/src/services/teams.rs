@@ -51,7 +51,7 @@ impl TeamsService {
     pub async fn register_agent(
         team_name: &str,
         agent_name: &str,
-        worktree_path: &Path,
+        cwd: &Path,
         issue_body: &str,
     ) -> Result<()> {
         let config_path = Self::get_team_config_path(team_name)?;
@@ -87,7 +87,7 @@ impl TeamsService {
                 backend_type: "tmux".to_string(),
                 tmux_pane_id: "".to_string(),
                 joined_at,
-                cwd: worktree_path.to_string_lossy().to_string(),
+                cwd: cwd.to_string_lossy().to_string(),
                 subscriptions: vec![],
                 color,
                 prompt,
@@ -110,6 +110,30 @@ impl TeamsService {
 
         Self::release_lock(&lock_path).await;
         result
+    }
+
+    /// Read-only check: get a specific member from config.json by name.
+    pub async fn get_member(team_name: &str, agent_name: &str) -> Result<Option<TeamMember>> {
+        let config_path = Self::get_team_config_path(team_name)?;
+        if !config_path.exists() {
+            return Ok(None);
+        }
+        let content = fs::read_to_string(&config_path).await?;
+        let config: TeamConfig =
+            serde_json::from_str(&content).context("Failed to parse team config.json")?;
+        Ok(config.members.into_iter().find(|m| m.name == agent_name))
+    }
+
+    /// Read-only: list all members from config.json.
+    pub async fn list_members(team_name: &str) -> Result<Vec<TeamMember>> {
+        let config_path = Self::get_team_config_path(team_name)?;
+        if !config_path.exists() {
+            return Ok(Vec::new());
+        }
+        let content = fs::read_to_string(&config_path).await?;
+        let config: TeamConfig =
+            serde_json::from_str(&content).context("Failed to parse team config.json")?;
+        Ok(config.members)
     }
 
     pub async fn unregister_agent(team_name: &str, agent_name: &str) -> Result<()> {
@@ -250,7 +274,7 @@ mod tests {
 
         let mut config: TeamConfig =
             serde_json::from_str(&fs::read_to_string(&config_path).await?)?;
-        let worktree_path = Path::new("/tmp/worktree");
+        let cwd = Path::new("/tmp/worktree");
         let joined_at = 123456789;
 
         config.members.push(TeamMember {
@@ -261,7 +285,7 @@ mod tests {
             backend_type: "tmux".to_string(),
             tmux_pane_id: "".to_string(),
             joined_at,
-            cwd: worktree_path.to_string_lossy().to_string(),
+            cwd: cwd.to_string_lossy().to_string(),
             subscriptions: vec![],
             color: "#ffffff".to_string(),
             prompt: "test prompt".to_string(),

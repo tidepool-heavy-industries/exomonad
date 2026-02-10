@@ -87,7 +87,7 @@ Use CLI-native config commands:
 claude mcp add exomonad -- exomonad mcp-stdio
 
 # Gemini CLI (HTTP mode only)
-gemini mcp add --transport http exomonad http://localhost:7432/mcp
+gemini mcp add --transport http exomonad http://localhost:7432/tl/mcp
 ```
 
 ### Available Tools
@@ -105,6 +105,14 @@ gemini mcp add --transport http exomonad http://localhost:7432/mcp
 | `spawn_gemini_teammate` | Spawn named Gemini teammate | `name`, `prompt`, `agent_type?`, `subrepo?` |
 | `cleanup_agents` | Clean up agent worktrees | `issues[]`, `force?` |
 | `list_agents` | List active agent worktrees | (none) |
+| `claim_task` | Claim a task from shared task list | `task_id` |
+| `complete_task` | Mark task as completed | `task_id` |
+| `list_tasks` | List tasks from shared task list | (none) |
+| `get_task` | Get task details by ID | `task_id` |
+| `report_status` | Report agent status to team | `status`, `details?` |
+| `ask_question` | Ask question to team lead | `question` |
+| `get_agent_messages` | Read notes/questions from agents | `agent_id?` |
+| `answer_question` | Answer pending agent question | `agent_id`, `question_id`, `answer` |
 
 ### Spawn Tools Requirements
 
@@ -138,7 +146,8 @@ All effects flow through a single `yield_effect` host function using protobuf bi
 | `popup.*` | PopupHandler | Zellij plugin IPC |
 | `file_pr.*` | FilePRHandler | gh CLI |
 | `copilot.*` | CopilotHandler | GitHub API polling |
-| `messaging.*` | MessagingHandler | JSONL mailbox files (outbox/inbox) |
+| `messaging.*` | MessagingHandler | Teams inbox files (JSON) |
+| `teams.*` | TeamsHandler | Task files + Teams inbox (JSON) |
 
 All handlers are registered by `exomonad_core::register_builtin_handlers()`.
 

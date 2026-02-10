@@ -25,6 +25,7 @@ pub mod github;
 pub mod log;
 pub mod messaging;
 pub mod popup;
+pub mod teams;
 
 pub use agent::AgentHandler;
 pub use copilot::CopilotHandler;
@@ -35,3 +36,4 @@ pub use github::GitHubHandler;
 pub use log::LogHandler;
 pub use messaging::MessagingHandler;
 pub use popup::PopupHandler;
+pub use teams::TeamsHandler;

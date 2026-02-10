@@ -8,6 +8,9 @@ pub mod stdio;
 pub mod tools;
 
 #[cfg(feature = "runtime")]
+pub mod agent_identity;
+
+#[cfg(feature = "runtime")]
 pub mod handler;
 
 #[cfg(feature = "runtime")]
@@ -18,6 +21,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
+
+#[cfg(feature = "runtime")]
+use crate::services::questions::QuestionRegistry;
 
 // ============================================================================
 // State
@@ -34,6 +40,9 @@ pub struct McpState {
     /// Role for this MCP endpoint (e.g. "tl" or "dev").
     /// Controls which tools are exposed. None means all tools.
     pub role: Option<String>,
+    /// Shared question registry for resolving ask_question/answer_question bridges.
+    #[cfg(feature = "runtime")]
+    pub question_registry: Option<Arc<QuestionRegistry>>,
 }
 
 // ============================================================================

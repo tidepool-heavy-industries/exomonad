@@ -4,7 +4,7 @@
 //! layer to our WASM plugin dispatch. Tools are registered dynamically at startup
 //! from two sources:
 //! - WASM tools (discovered via `handle_list_tools`, dispatched via `handle_mcp_call`)
-//! - Direct Rust tools (`get_agent_messages`, `answer_question`)
+//! - Direct Rust tools (TL-only: `get_agent_messages`, `answer_question`)
 
 use super::tools::{self, MCPCallInput, MCPCallOutput};
 use super::McpState;
@@ -196,13 +196,6 @@ async fn build_tool_router(state: &McpState) -> Result<ToolRouter<ExomonadHandle
         register_answer_question(&mut router, state);
     }
 
-    // 3. Direct Rust tools (dev-only: Teams task list participation)
-    if is_dev {
-        register_get_tasks(&mut router);
-        register_claim_task(&mut router);
-        register_complete_task(&mut router);
-    }
-
     info!(
         total = router.list_all().len(),
         role = ?state.role,
@@ -298,7 +291,8 @@ fn register_get_agent_messages(router: &mut ToolRouter<ExomonadHandler>, _state:
     }));
 }
 
-fn register_answer_question(router: &mut ToolRouter<ExomonadHandler>, _state: &McpState) {
+fn register_answer_question(router: &mut ToolRouter<ExomonadHandler>, state: &McpState) {
+    let question_registry = state.question_registry.clone();
     let tool = Tool::new(
         "answer_question",
         "Answer a pending question from an agent. Writes the answer to the agent's inbox, unblocking their send_question call.",
@@ -327,6 +321,7 @@ fn register_answer_question(router: &mut ToolRouter<ExomonadHandler>, _state: &M
     );
 
     router.add_route(ToolRoute::new_dyn(tool, move |ctx| {
+        let question_registry = question_registry.clone();
         async move {
             let args = ctx.arguments.as_ref();
 
@@ -356,6 +351,12 @@ fn register_answer_question(router: &mut ToolRouter<ExomonadHandler>, _state: &M
                     )
                 })?;
 
+            // Resolve the oneshot channel so ask_question unblocks immediately.
+            if let Some(ref registry) = question_registry {
+                let resolved = registry.resolve(question_id, answer.to_string());
+                info!(agent = %agent_id, question_id = %question_id, resolved, "Resolved question via QuestionRegistry");
+            }
+
             info!(agent = %agent_id, question_id = %question_id, "Answer written to Teams inbox");
 
             let result = json!({
@@ -372,10 +373,6 @@ fn register_answer_question(router: &mut ToolRouter<ExomonadHandler>, _state: &M
     }));
 }
 
-// ============================================================================
-// Dev-Role Tools: Teams Task List Participation
-// ============================================================================
-
 /// Get the team name from environment (set by spawn_agents).
 fn get_team_name() -> Result<String, rmcp::ErrorData> {
     std::env::var("EXOMONAD_TEAM_NAME")
@@ -386,191 +383,6 @@ fn get_team_name() -> Result<String, rmcp::ErrorData> {
                 None,
             )
         })
-}
-
-/// Get the tasks directory for a team.
-fn get_tasks_dir(team_name: &str) -> Result<std::path::PathBuf, rmcp::ErrorData> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| rmcp::ErrorData::internal_error("Could not find home directory", None))?;
-    Ok(home.join(".claude").join("tasks").join(team_name))
-}
-
-fn register_get_tasks(router: &mut ToolRouter<ExomonadHandler>) {
-    let tool = Tool::new(
-        "get_tasks",
-        "List all tasks from the team's task list. Returns task IDs, subjects, status, owner, and dependencies.",
-        to_json_object(json!({
-            "type": "object",
-            "properties": {}
-        })),
-    );
-
-    router.add_route(ToolRoute::new_dyn(tool, move |_ctx| {
-        async move {
-            let team_name = get_team_name()?;
-            let tasks_dir = get_tasks_dir(&team_name)?;
-
-            if !tasks_dir.exists() {
-                return Ok(CallToolResult::success(vec![Content::text(
-                    json!({"tasks": []}).to_string(),
-                )]));
-            }
-
-            let mut tasks = Vec::new();
-            let mut entries = tokio::fs::read_dir(&tasks_dir).await.map_err(|e| {
-                rmcp::ErrorData::internal_error(format!("Failed to read tasks dir: {}", e), None)
-            })?;
-
-            while let Some(entry) = entries.next_entry().await.map_err(|e| {
-                rmcp::ErrorData::internal_error(format!("Failed to read dir entry: {}", e), None)
-            })? {
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                    continue;
-                }
-                match tokio::fs::read_to_string(&path).await {
-                    Ok(content) => match serde_json::from_str::<Value>(&content) {
-                        Ok(task) => tasks.push(task),
-                        Err(e) => {
-                            debug!(path = %path.display(), error = %e, "Skipping malformed task file");
-                        }
-                    },
-                    Err(e) => {
-                        debug!(path = %path.display(), error = %e, "Skipping unreadable task file");
-                    }
-                }
-            }
-
-            info!(team = %team_name, count = tasks.len(), "Listed tasks");
-
-            Ok(CallToolResult::success(vec![Content::text(
-                serde_json::to_string_pretty(&json!({"tasks": tasks})).unwrap_or_default(),
-            )]))
-        }
-        .boxed()
-    }));
-}
-
-fn register_claim_task(router: &mut ToolRouter<ExomonadHandler>) {
-    let tool = Tool::new(
-        "claim_task",
-        "Claim a task by setting yourself as the owner. Uses your agent ID from the environment.",
-        to_json_object(json!({
-            "type": "object",
-            "properties": {
-                "task_id": {
-                    "type": "string",
-                    "description": "The task ID to claim (e.g. '1', '2')."
-                }
-            },
-            "required": ["task_id"]
-        })),
-    );
-
-    router.add_route(ToolRoute::new_dyn(tool, move |ctx| {
-        async move {
-            let task_id = ctx
-                .arguments
-                .as_ref()
-                .and_then(|a| a.get("task_id"))
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| rmcp::ErrorData::invalid_params("task_id is required", None))?
-                .to_string();
-
-            let agent_id = std::env::var("EXOMONAD_AGENT_ID").unwrap_or_else(|_| "unknown".into());
-            let team_name = get_team_name()?;
-            let task_path = get_tasks_dir(&team_name)?.join(format!("{}.json", task_id));
-
-            if !task_path.exists() {
-                return Err(rmcp::ErrorData::invalid_params(
-                    format!("Task {} not found", task_id),
-                    None,
-                ));
-            }
-
-            let content = tokio::fs::read_to_string(&task_path).await.map_err(|e| {
-                rmcp::ErrorData::internal_error(format!("Failed to read task: {}", e), None)
-            })?;
-            let mut task: Value = serde_json::from_str(&content).map_err(|e| {
-                rmcp::ErrorData::internal_error(format!("Failed to parse task: {}", e), None)
-            })?;
-
-            task["owner"] = json!(agent_id);
-            task["status"] = json!("in_progress");
-
-            let updated = serde_json::to_string_pretty(&task).unwrap_or_default();
-            tokio::fs::write(&task_path, &updated).await.map_err(|e| {
-                rmcp::ErrorData::internal_error(format!("Failed to write task: {}", e), None)
-            })?;
-
-            info!(task_id = %task_id, agent = %agent_id, "Task claimed");
-
-            Ok(CallToolResult::success(vec![Content::text(
-                json!({"status": "claimed", "task_id": task_id, "owner": agent_id}).to_string(),
-            )]))
-        }
-        .boxed()
-    }));
-}
-
-fn register_complete_task(router: &mut ToolRouter<ExomonadHandler>) {
-    let tool = Tool::new(
-        "complete_task",
-        "Mark a task as completed.",
-        to_json_object(json!({
-            "type": "object",
-            "properties": {
-                "task_id": {
-                    "type": "string",
-                    "description": "The task ID to complete (e.g. '1', '2')."
-                }
-            },
-            "required": ["task_id"]
-        })),
-    );
-
-    router.add_route(ToolRoute::new_dyn(tool, move |ctx| {
-        async move {
-            let task_id = ctx
-                .arguments
-                .as_ref()
-                .and_then(|a| a.get("task_id"))
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| rmcp::ErrorData::invalid_params("task_id is required", None))?
-                .to_string();
-
-            let team_name = get_team_name()?;
-            let task_path = get_tasks_dir(&team_name)?.join(format!("{}.json", task_id));
-
-            if !task_path.exists() {
-                return Err(rmcp::ErrorData::invalid_params(
-                    format!("Task {} not found", task_id),
-                    None,
-                ));
-            }
-
-            let content = tokio::fs::read_to_string(&task_path).await.map_err(|e| {
-                rmcp::ErrorData::internal_error(format!("Failed to read task: {}", e), None)
-            })?;
-            let mut task: Value = serde_json::from_str(&content).map_err(|e| {
-                rmcp::ErrorData::internal_error(format!("Failed to parse task: {}", e), None)
-            })?;
-
-            task["status"] = json!("completed");
-
-            let updated = serde_json::to_string_pretty(&task).unwrap_or_default();
-            tokio::fs::write(&task_path, &updated).await.map_err(|e| {
-                rmcp::ErrorData::internal_error(format!("Failed to write task: {}", e), None)
-            })?;
-
-            info!(task_id = %task_id, "Task completed");
-
-            Ok(CallToolResult::success(vec![Content::text(
-                json!({"status": "completed", "task_id": task_id}).to_string(),
-            )]))
-        }
-        .boxed()
-    }));
 }
 
 // ============================================================================

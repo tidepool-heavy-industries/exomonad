@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "exomonad": {
-      "command": "/Users/inannamalick/.cargo/bin/exomonad",
-      "args": ["mcp-stdio"]
+      "url": "http://localhost:7432/tl/mcp",
+      "type": "http"
     }
   },
   "hooks": {
@@ -20,4 +20,4 @@
       }
     ]
   }
-} 
+}

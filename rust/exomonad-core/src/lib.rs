@@ -118,7 +118,7 @@ pub use util::{build_prompt, find_exomonad_binary, shell_quote};
 #[cfg(feature = "runtime")]
 pub use handlers::{
     AgentHandler, CopilotHandler, FilePRHandler, FsHandler, GitHandler, GitHubHandler, LogHandler,
-    MessagingHandler, PopupHandler,
+    MessagingHandler, PopupHandler, TeamsHandler,
 };
 #[cfg(feature = "runtime")]
 pub use services::{Services, ValidatedServices};
@@ -275,16 +275,20 @@ impl Runtime {
             project_dir,
             plugin: Arc::new(self.plugin_manager),
             role: None,
+            question_registry: None,
         }
     }
 }
 
 /// Register all built-in handlers with a RuntimeBuilder.
+///
+/// The returned `Arc<QuestionRegistry>` is shared between the TeamsHandler (which
+/// awaits answers) and MCP tools (which resolve questions via `answer_question`).
 #[cfg(feature = "runtime")]
 pub fn register_builtin_handlers(
     builder: RuntimeBuilder,
     services: &Arc<ValidatedServices>,
-) -> RuntimeBuilder {
+) -> (RuntimeBuilder, Arc<services::questions::QuestionRegistry>) {
     let mut builder = builder;
 
     builder = builder.with_effect_handler(handlers::GitHandler::new(services.git().clone()));
@@ -311,5 +315,8 @@ pub fn register_builtin_handlers(
 
     builder = builder.with_effect_handler(handlers::MessagingHandler::new());
 
-    builder
+    let question_registry = Arc::new(services::questions::QuestionRegistry::new());
+    builder = builder.with_effect_handler(handlers::TeamsHandler::new(question_registry.clone()));
+
+    (builder, question_registry)
 }

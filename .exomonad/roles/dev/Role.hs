@@ -8,7 +8,7 @@ import StopHook (devHooks)
 
 data Tools mode = Tools
   { pr :: FilePRTools mode,
-    messaging :: MessagingTools mode
+    teams :: TeamsTools mode
   }
   deriving (Generic)
 
@@ -19,7 +19,7 @@ config =
       tools =
         Tools
           { pr = filePRTools,
-            messaging = messagingTools
+            teams = teamsTools
           },
       hooks = devHooks
     }

@@ -1,11 +1,12 @@
 //! High-level agent control service.
 //!
 //! Provides semantic operations for agent lifecycle management:
-//! - SpawnAgent: Create worktree, write context, open Zellij tab
-//! - CleanupAgent: Close tab, delete worktree
-//! - ListAgents: List active agent worktrees
+//! - SpawnAgent: Register in Teams config.json, open Zellij tab
+//! - CleanupAgent: Close tab, unregister from config.json
+//! - ListAgents: List agents from config.json + Zellij tab liveness
 //!
-//! These are high-level effects exposed to Haskell WASM, not granular operations.
+//! Source of truth for agent existence: Teams config.json + Zellij tabs.
+//! No per-agent directories or MCP configs — agents share the repo's config.
 
 use crate::common::TimeoutError;
 use crate::domain::ItemState;
@@ -228,6 +229,8 @@ pub struct AgentControlService {
     github: Option<GitHubService>,
     /// Zellij session name for event emission
     zellij_session: Option<String>,
+    /// MCP server port for per-agent endpoint URLs (set when running `exomonad serve`).
+    mcp_server_port: Option<u16>,
 }
 
 impl AgentControlService {
@@ -237,12 +240,19 @@ impl AgentControlService {
             project_dir,
             github,
             zellij_session: None,
+            mcp_server_port: None,
         }
     }
 
     /// Set the Zellij session name for event emission.
     pub fn with_zellij_session(mut self, session: String) -> Self {
         self.zellij_session = Some(session);
+        self
+    }
+
+    /// Set the MCP server port for per-agent endpoint URL generation.
+    pub fn with_mcp_server_port(mut self, port: u16) -> Self {
+        self.mcp_server_port = Some(port);
         self
     }
 
@@ -260,6 +270,7 @@ impl AgentControlService {
             project_dir,
             github,
             zellij_session: None,
+            mcp_server_port: None,
         })
     }
 
@@ -467,8 +478,10 @@ impl AgentControlService {
 
     /// Spawn a named teammate with a direct prompt.
     ///
-    /// Unlike `spawn_agent`, this does not require a GitHub issue or create a worktree.
-    /// The agent runs from the effective project directory with its own agent dir for config.
+    /// Idempotent on teammate name: if already running, returns existing info.
+    /// If config entry exists but Zellij tab is dead, cleans stale entry and respawns.
+    /// No per-agent directories or MCP configs — agents share the repo's config.
+    /// State lives in Teams config.json + Zellij tab only.
     #[tracing::instrument(skip(self, options), fields(name = %options.name))]
     pub async fn spawn_gemini_teammate(&self, options: &SpawnGeminiTeammateOptions) -> Result<SpawnResult> {
         info!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_gemini_teammate");
@@ -476,31 +489,84 @@ impl AgentControlService {
         let result = timeout(SPAWN_TIMEOUT, async {
             self.check_zellij_env()?;
 
+            // Fail fast: Gemini agents require MCP server port for settings.json.
+            let mcp_port = self.mcp_server_port.ok_or_else(|| {
+                anyhow!("MCP server port not set. Start server with `exomonad serve` before spawning agents.")
+            })?;
+
             let effective_project_dir = self.effective_project_dir(options.subrepo.as_deref())?;
 
             let agent_suffix = options.agent_type.suffix();
             let internal_name = format!("{}-{}", options.name, agent_suffix);
-
-            // Create agent directory
-            let agent_dir = effective_project_dir
-                .join(".exomonad")
-                .join("agents")
-                .join(&internal_name);
-            fs::create_dir_all(&agent_dir).await?;
-            info!(agent_dir = %agent_dir.display(), "Created agent directory");
-
-            // Write .mcp.json for the agent
-            self.write_agent_mcp_config(&effective_project_dir, &agent_dir, options.agent_type)
-                .await?;
-
-            // Zellij display name
             let display_name = format!("{} {}", options.agent_type.emoji(), options.name);
 
-            // Discover and register in Claude Code Team if applicable
+            // Discover team name
             let team_name = options
                 .team_name
                 .clone()
                 .or_else(|| std::env::var("CLAUDE_TEAM_NAME").ok());
+
+            // Idempotency check: Zellij tab alive + config entry
+            let tab_alive = self.is_zellij_tab_alive(&display_name).await;
+            let config_exists = match team_name {
+                Some(ref team) => super::teams::TeamsService::get_member(team, &internal_name)
+                    .await
+                    .ok()
+                    .flatten()
+                    .is_some(),
+                None => false,
+            };
+
+            info!(
+                name = %options.name,
+                tab_alive,
+                config_exists,
+                "Idempotency check"
+            );
+
+            match (config_exists, tab_alive) {
+                // Already running — return existing info
+                (true, true) => {
+                    info!(name = %options.name, "Teammate already running, returning existing");
+                    return Ok(SpawnResult {
+                        agent_dir: String::new(),
+                        tab_name: internal_name,
+                        issue_title: options.name.clone(),
+                        agent_type: options.agent_type.suffix().to_string(),
+                    });
+                }
+                // Stale config entry, tab is dead — clean up before respawn
+                (true, false) => {
+                    info!(name = %options.name, "Stale config entry (tab dead), cleaning before respawn");
+                    if let Some(ref team) = team_name {
+                        let _ = super::teams::TeamsService::unregister_agent(team, &internal_name).await;
+                    }
+                }
+                // Tab alive but no config — re-register
+                (false, true) => {
+                    info!(name = %options.name, "Tab alive but no config entry, re-registering");
+                    if let Some(ref team) = team_name {
+                        if let Err(e) = super::teams::TeamsService::register_agent(
+                            team,
+                            &internal_name,
+                            &effective_project_dir,
+                            &options.prompt,
+                        ).await {
+                            warn!(error = %e, "Failed to re-register teammate (non-fatal)");
+                        }
+                    }
+                    return Ok(SpawnResult {
+                        agent_dir: String::new(),
+                        tab_name: internal_name,
+                        issue_title: options.name.clone(),
+                        agent_type: options.agent_type.suffix().to_string(),
+                    });
+                }
+                // Fresh spawn
+                (false, false) => {}
+            }
+
+            // Register in Claude Code Team
             if let Some(ref team) = team_name {
                 info!(team_name = %team, agent_name = %internal_name, "Registering teammate in Claude Code Team");
                 if let Err(e) = super::teams::TeamsService::register_agent(
@@ -521,6 +587,37 @@ impl AgentControlService {
                 env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
                 env_vars.insert("CLAUDE_TEAM_NAME".to_string(), team.clone());
             }
+
+            // Write per-agent Gemini settings with MCP endpoint URL
+            let agent_config_dir = self.project_dir
+                .join(".exomonad")
+                .join("agents")
+                .join(&internal_name);
+            fs::create_dir_all(&agent_config_dir).await?;
+
+            let settings_path = agent_config_dir.join("settings.json");
+            let mcp_url = format!(
+                "http://localhost:{}/agents/{}/mcp",
+                mcp_port, internal_name
+            );
+            let settings = serde_json::json!({
+                "mcpServers": {
+                    "exomonad": {
+                        "httpUrl": mcp_url
+                    }
+                }
+            });
+            fs::write(&settings_path, serde_json::to_string_pretty(&settings)?).await?;
+            info!(
+                path = %settings_path.display(),
+                url = %mcp_url,
+                "Wrote per-agent Gemini settings"
+            );
+
+            env_vars.insert(
+                "GEMINI_CLI_SYSTEM_SETTINGS_PATH".to_string(),
+                settings_path.to_string_lossy().to_string(),
+            );
 
             // Open Zellij tab with cwd = effective_project_dir
             self.new_zellij_tab(
@@ -546,7 +643,7 @@ impl AgentControlService {
             }
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
-                agent_dir: agent_dir.to_string_lossy().to_string(),
+                agent_dir: String::new(),
                 tab_name: internal_name,
                 issue_title: options.name.clone(),
                 agent_type: options.agent_type.suffix().to_string(),
@@ -567,60 +664,69 @@ impl AgentControlService {
     // Cleanup Agent
     // ========================================================================
 
-    /// Clean up an agent (close Zellij tab, remove agent directory).
+    /// Clean up an agent by identifier (internal_name or issue_id).
+    ///
+    /// Kills the Zellij tab, unregisters from Teams config.json,
+    /// and removes per-agent config directory (`.exomonad/agents/{name}/`).
     #[tracing::instrument(skip(self))]
     pub async fn cleanup_agent(
         &self,
-        issue_id: &str,
+        identifier: &str,
         _force: bool,
         subrepo: Option<&str>,
     ) -> Result<()> {
+        let _effective_project_dir = self.effective_project_dir(subrepo)?;
+
+        // Find agent in list (which reads from config.json)
         let agents = self.list_agents(subrepo).await?;
-        let prefix = format!("gh-{}-", issue_id);
-        let mut found = false;
+        let agent = agents
+            .iter()
+            .find(|a| a.issue_id == identifier)
+            .ok_or_else(|| anyhow!("No agent found for identifier: {}", identifier))?;
 
-        for agent in agents {
-            if let Some(ref agent_dir) = agent.agent_dir {
-                let path = Path::new(agent_dir);
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name.starts_with(&prefix) {
-                        found = true;
+        info!(identifier, has_tab = agent.has_tab, "Cleaning up agent");
 
-                        // Close Zellij tab
-                        if let Some(parsed) = parse_agent_dir_name(name) {
-                            if let Some(agent_type) = parsed.agent_type {
-                                let display_name = agent_type.display_name(issue_id, parsed.slug);
-                                if let Err(e) = self.close_zellij_tab(&display_name).await {
-                                    warn!(tab_name = %display_name, error = %e, "Failed to close Zellij tab (may not exist)");
-                                }
-                            }
-                        }
-
-                        // Unregister from Claude Code Teams
-                        info!(agent_name = %name, "Unregistering agent from Claude Code Teams");
-                        if let Err(e) =
-                            super::teams::TeamsService::unregister_agent_from_all_teams(name).await
-                        {
-                            warn!(error = %e, "Failed to unregister agent from Claude Code Teams (non-fatal)");
-                        }
-
-                        // Remove agent directory
-                        if path.exists() {
-                            fs::remove_dir_all(path)
-                                .await
-                                .context("Failed to remove agent directory")?;
-                            info!(agent_dir = %path.display(), "Removed agent directory");
-                        }
+        // Close Zellij tab — try matching by agent name in tab list
+        if agent.has_tab {
+            let tabs = self.get_zellij_tabs().await.unwrap_or_default();
+            for tab in &tabs {
+                if tab.contains(identifier) || tab.contains(&agent.issue_id) {
+                    if let Err(e) = self.close_zellij_tab(tab).await {
+                        warn!(tab_name = %tab, error = %e, "Failed to close Zellij tab (may not exist)");
                     }
+                    break;
                 }
             }
         }
 
-        if found {
-            // Emit agent:stopped event
-            if let Some(ref session) = self.zellij_session {
-                let agent_id = crate::ui_protocol::AgentId::try_from(format!("gh-{}", issue_id))
-                    .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
+        // Unregister from Claude Code Teams
+        info!(agent_name = %identifier, "Unregistering agent from Claude Code Teams");
+        if let Err(e) =
+            super::teams::TeamsService::unregister_agent_from_all_teams(identifier).await
+        {
+            warn!(error = %e, "Failed to unregister agent from Claude Code Teams (non-fatal)");
+        }
+
+        // Remove per-agent config directory (.exomonad/agents/{name}/)
+        let agent_config_dir = self.project_dir
+            .join(".exomonad")
+            .join("agents")
+            .join(identifier);
+        if agent_config_dir.exists() {
+            if let Err(e) = fs::remove_dir_all(&agent_config_dir).await {
+                warn!(
+                    path = %agent_config_dir.display(),
+                    error = %e,
+                    "Failed to remove per-agent config dir (non-fatal)"
+                );
+            } else {
+                info!(path = %agent_config_dir.display(), "Removed per-agent config dir");
+            }
+        }
+
+        // Emit agent:stopped event
+        if let Some(ref session) = self.zellij_session {
+            if let Ok(agent_id) = crate::ui_protocol::AgentId::try_from(identifier.to_string()) {
                 let event = crate::ui_protocol::AgentEvent::AgentStopped {
                     agent_id,
                     timestamp: zellij_events::now_iso8601(),
@@ -629,10 +735,9 @@ impl AgentControlService {
                     warn!("Failed to emit agent:stopped event: {}", e);
                 }
             }
-            Ok(())
-        } else {
-            Err(anyhow!("No agent found for issue {}", issue_id))
         }
+
+        Ok(())
     }
 
     /// Clean up multiple agents.
@@ -708,81 +813,72 @@ impl AgentControlService {
     // List Agents
     // ========================================================================
 
-    /// List all active agents by scanning `.exomonad/agents/` directory.
+    /// List all active agents from Teams config.json + Zellij tab liveness.
+    ///
+    /// Source of truth is config.json members list. Zellij tab presence determines
+    /// Running vs Stopped status.
     #[tracing::instrument(skip(self))]
     pub async fn list_agents(&self, subrepo: Option<&str>) -> Result<Vec<AgentInfo>> {
-        let effective_project_dir = self.effective_project_dir(subrepo)?;
+        let _effective_project_dir = self.effective_project_dir(subrepo)?;
 
-        // 1. Scan .exomonad/agents/ for agent directories
-        let agents_dir = effective_project_dir.join(".exomonad").join("agents");
-        let mut agent_dirs: HashMap<String, (PathBuf, String)> = HashMap::new(); // issue_id -> (path, dir_name)
+        // Discover team name
+        let team_name = std::env::var("CLAUDE_TEAM_NAME")
+            .or_else(|_| std::env::var("EXOMONAD_TEAM_NAME"))
+            .ok();
 
-        if agents_dir.exists() {
-            let mut entries = fs::read_dir(&agents_dir).await?;
-            while let Some(entry) = entries.next_entry().await? {
-                if !entry.file_type().await?.is_dir() {
-                    continue;
+        let members = match team_name {
+            Some(ref team) => super::teams::TeamsService::list_members(team).await?,
+            None => {
+                debug!("No team name available, returning empty agent list");
+                return Ok(Vec::new());
+            }
+        };
+
+        // Get all Zellij tabs for liveness check
+        let zellij_tabs: HashSet<String> = self
+            .get_zellij_tabs()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+
+        let agents = members
+            .iter()
+            .map(|member| {
+                // Reconstruct display name to check tab liveness.
+                // Teammate tabs: "{emoji} {name}" where name is the human-readable part.
+                // Issue tabs: "{emoji} gh-{issue_id}-{slug}"
+                // We check if any tab matches by scanning for the member name in tab names.
+                let has_tab = zellij_tabs.iter().any(|tab| {
+                    tab.contains(&member.name)
+                });
+
+                let status = if has_tab {
+                    AgentStatus::Running
+                } else {
+                    AgentStatus::Stopped
+                };
+
+                // Extract agent type from internal_name suffix
+                let agent_type = if member.name.ends_with("-claude") {
+                    Some("claude".to_string())
+                } else if member.name.ends_with("-gemini") {
+                    Some("gemini".to_string())
+                } else {
+                    None
+                };
+
+                AgentInfo {
+                    issue_id: member.name.clone(),
+                    has_tab,
+                    status,
+                    agent_dir: None,
+                    slug: None,
+                    agent_type,
+                    pr: None,
                 }
-                let name = entry.file_name().to_string_lossy().to_string();
-                if name.starts_with("gh-") {
-                    if let Some(parsed) = parse_agent_dir_name(&name) {
-                        agent_dirs.insert(parsed.issue_id.to_string(), (entry.path(), name));
-                    }
-                }
-            }
-        }
-
-        // 2. Get all Zellij tabs
-        let zellij_tabs = self.get_zellij_tabs().await.unwrap_or_default();
-        let mut tabs = HashSet::new();
-        for tab_name in zellij_tabs {
-            if let Some(issue_id) = self.extract_issue_id_from_tab_name(&tab_name) {
-                tabs.insert(issue_id);
-            }
-        }
-
-        // 3. Compute union of all issue IDs
-        let mut all_issues: HashSet<String> = agent_dirs.keys().cloned().collect();
-        all_issues.extend(tabs.iter().cloned());
-
-        let mut agents = Vec::new();
-
-        for issue_id in all_issues {
-            let has_dir = agent_dirs.contains_key(&issue_id);
-            let has_tab = tabs.contains(&issue_id);
-
-            let status = if has_tab {
-                AgentStatus::Running
-            } else {
-                AgentStatus::Stopped
-            };
-
-            // Skip entries with neither a dir nor a tab
-            if !has_dir && !has_tab {
-                continue;
-            }
-
-            let mut agent = AgentInfo {
-                issue_id: issue_id.clone(),
-                has_tab,
-                status,
-                agent_dir: None,
-                slug: None,
-                agent_type: None,
-                pr: None,
-            };
-
-            if let Some((path, name)) = agent_dirs.get(&issue_id) {
-                agent.agent_dir = Some(path.to_string_lossy().to_string());
-
-                if let Some(parsed) = parse_agent_dir_name(name) {
-                    agent.slug = Some(parsed.slug.to_string());
-                    agent.agent_type = parsed.agent_type.map(|t| t.suffix().to_string());
-                }
-            }
-
-            agents.push(agent);
-        }
+            })
+            .collect();
 
         Ok(agents)
     }
@@ -953,22 +1049,13 @@ impl AgentControlService {
         Ok(stdout.lines().map(|s| s.to_string()).collect())
     }
 
-    fn extract_issue_id_from_tab_name(&self, name: &str) -> Option<String> {
-        // Tab names are formatted as: "{emoji} gh-{issue_id}-{short_slug}"
-        // or potentially "{emoji} {issue_id}-{short_slug}" (old format)
-
-        let parts: Vec<&str> = name.split_whitespace().collect();
-        // Parts should be at least [emoji, "issue_id-slug"]
-        if parts.len() < 2 {
-            return None;
-        }
-
-        let identifier = parts[1];
-        if let Some(rest) = identifier.strip_prefix("gh-") {
-            rest.split('-').next().map(|s| s.to_string())
-        } else {
-            identifier.split('-').next().map(|s| s.to_string())
-        }
+    /// Check if a Zellij tab with the given display name exists.
+    async fn is_zellij_tab_alive(&self, display_name: &str) -> bool {
+        self.get_zellij_tabs()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .any(|tab| tab == display_name)
     }
 
     async fn close_zellij_tab(&self, name: &str) -> Result<()> {
@@ -1142,43 +1229,31 @@ fn slugify(title: &str) -> String {
         .collect()
 }
 
-/// Parsed components of an agent directory name.
-#[derive(Debug, PartialEq)]
-struct ParsedAgentDirName<'a> {
-    issue_id: &'a str,
-    slug: &'a str,
-    agent_type: Option<AgentType>,
-}
-
-/// Parse an agent directory name into its components.
-/// Format: gh-{issue_id}-{slug}-{agent_suffix}
-/// Returns None if the name doesn't match the expected format.
-fn parse_agent_dir_name(name: &str) -> Option<ParsedAgentDirName<'_>> {
-    // Must start with "gh-"
-    let rest = name.strip_prefix("gh-")?;
-
-    // Split to get issue_id
-    let (issue_id, rest) = rest.split_once('-')?;
-
-    // Split from right to get agent_suffix (claude/gemini have no hyphens)
-    let (slug, agent_suffix) = rest.rsplit_once('-')?;
-
-    // Parse agent type
-    let agent_type = match agent_suffix {
-        "claude" => Some(AgentType::Claude),
-        "gemini" => Some(AgentType::Gemini),
-        _ => None,
-    };
-
-    Some(ParsedAgentDirName {
-        issue_id,
-        slug,
-        agent_type,
-    })
-}
-
 #[cfg(test)]
 mod tests {
+    // Legacy helpers used only by tests for issue-driven agent dir name parsing.
+    #[derive(Debug, PartialEq)]
+    struct ParsedAgentDirName<'a> {
+        issue_id: &'a str,
+        slug: &'a str,
+        agent_type: Option<super::AgentType>,
+    }
+
+    fn parse_agent_dir_name(name: &str) -> Option<ParsedAgentDirName<'_>> {
+        let rest = name.strip_prefix("gh-")?;
+        let (issue_id, rest) = rest.split_once('-')?;
+        let (slug, agent_suffix) = rest.rsplit_once('-')?;
+        let agent_type = match agent_suffix {
+            "claude" => Some(super::AgentType::Claude),
+            "gemini" => Some(super::AgentType::Gemini),
+            _ => None,
+        };
+        Some(ParsedAgentDirName {
+            issue_id,
+            slug,
+            agent_type,
+        })
+    }
     use super::*;
 
     #[test]
@@ -1293,28 +1368,6 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_issue_id_from_tab_name() {
-        let service = AgentControlService::new(PathBuf::from("/tmp"), None);
-
-        assert_eq!(
-            service.extract_issue_id_from_tab_name("🤖 gh-473-refactor-polish"),
-            Some("473".to_string())
-        );
-        assert_eq!(
-            service.extract_issue_id_from_tab_name("💎 gh-123-fix-bug"),
-            Some("123".to_string())
-        );
-        // Old format
-        assert_eq!(
-            service.extract_issue_id_from_tab_name("🤖 473-refactor-polish"),
-            Some("473".to_string())
-        );
-        // Invalid formats
-        assert_eq!(service.extract_issue_id_from_tab_name("🤖"), None);
-        assert_eq!(service.extract_issue_id_from_tab_name("just-text"), None);
-    }
-
-    #[test]
     fn test_agent_type_deserialization() {
         use serde_json;
 
@@ -1331,7 +1384,7 @@ mod tests {
 
     #[test]
     fn test_parse_agent_dir_name_claude() {
-        let parsed = super::parse_agent_dir_name("gh-123-fix-bug-claude").unwrap();
+        let parsed = parse_agent_dir_name("gh-123-fix-bug-claude").unwrap();
         assert_eq!(parsed.issue_id, "123");
         assert_eq!(parsed.slug, "fix-bug");
         assert_eq!(parsed.agent_type, Some(AgentType::Claude));
@@ -1339,7 +1392,7 @@ mod tests {
 
     #[test]
     fn test_parse_agent_dir_name_gemini() {
-        let parsed = super::parse_agent_dir_name("gh-456-add-feature-gemini").unwrap();
+        let parsed = parse_agent_dir_name("gh-456-add-feature-gemini").unwrap();
         assert_eq!(parsed.issue_id, "456");
         assert_eq!(parsed.slug, "add-feature");
         assert_eq!(parsed.agent_type, Some(AgentType::Gemini));
@@ -1347,7 +1400,7 @@ mod tests {
 
     #[test]
     fn test_parse_agent_dir_name_slug_with_hyphens() {
-        let parsed = super::parse_agent_dir_name("gh-789-fix-the-big-bug-claude").unwrap();
+        let parsed = parse_agent_dir_name("gh-789-fix-the-big-bug-claude").unwrap();
         assert_eq!(parsed.issue_id, "789");
         assert_eq!(parsed.slug, "fix-the-big-bug");
         assert_eq!(parsed.agent_type, Some(AgentType::Claude));
@@ -1355,7 +1408,7 @@ mod tests {
 
     #[test]
     fn test_parse_agent_dir_name_unknown_suffix() {
-        let parsed = super::parse_agent_dir_name("gh-123-test-unknown").unwrap();
+        let parsed = parse_agent_dir_name("gh-123-test-unknown").unwrap();
         assert_eq!(parsed.issue_id, "123");
         assert_eq!(parsed.slug, "test");
         assert_eq!(parsed.agent_type, None);
@@ -1363,8 +1416,8 @@ mod tests {
 
     #[test]
     fn test_parse_agent_dir_name_invalid_format() {
-        assert!(super::parse_agent_dir_name("123-test-claude").is_none());
-        assert!(super::parse_agent_dir_name("gh-nohyphens").is_none());
-        assert!(super::parse_agent_dir_name("gh-123").is_none());
+        assert!(parse_agent_dir_name("123-test-claude").is_none());
+        assert!(parse_agent_dir_name("gh-nohyphens").is_none());
+        assert!(parse_agent_dir_name("gh-123").is_none());
     }
 }

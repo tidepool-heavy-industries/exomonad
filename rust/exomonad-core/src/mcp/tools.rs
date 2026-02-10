@@ -1,16 +1,14 @@
 //! MCP tool definitions and WASM execution.
 //!
-//! Most tool logic is in Haskell WASM. This module provides:
+//! All tool logic is in Haskell WASM. This module provides:
 //! - Tool schema discovery via WASM (handle_list_tools)
 //! - WASM routing for tool execution (handle_mcp_call)
-//! - Direct Rust tools for TL-side messaging (get_agent_messages, answer_question)
 
 use super::{McpState, ToolDefinition};
-use crate::services::messaging;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use tracing::{debug, error, info};
+use serde_json::Value;
+use tracing::{debug, error};
 
 // ============================================================================
 // WASM MCP Types (matches Haskell Main.hs MCPCallInput/MCPCallOutput)
@@ -146,158 +144,6 @@ pub async fn execute_tool(state: &McpState, name: &str, args: Value) -> Result<V
             .error
             .unwrap_or_else(|| "Unknown WASM error".to_string())))
     }
-}
-
-// ============================================================================
-// Direct Rust Tools (TL-side messaging, bypass WASM)
-// ============================================================================
-
-/// Tool definitions for TL-side messaging tools (registered alongside WASM tools).
-pub fn tl_messaging_tool_definitions() -> Vec<ToolDefinition> {
-    vec![
-        ToolDefinition {
-            name: "get_agent_messages".to_string(),
-            description: "Read notes and pending questions from agent outboxes. Scans all agents (or a specific agent) for messages.".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "agent_id": {
-                        "type": "string",
-                        "description": "Filter to a specific agent directory name. If omitted, reads from all agents."
-                    },
-                    "subrepo": {
-                        "type": "string",
-                        "description": "Subrepo path (e.g. 'egregore/') to scope agent scanning."
-                    }
-                }
-            }),
-        },
-        ToolDefinition {
-            name: "answer_question".to_string(),
-            description: "Answer a pending question from an agent. Writes the answer to the agent's inbox, unblocking their send_question call.".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "agent_id": {
-                        "type": "string",
-                        "description": "The agent directory name (e.g. 'gh-42-fix-bug-claude')."
-                    },
-                    "question_id": {
-                        "type": "string",
-                        "description": "The question ID to answer (e.g. 'q-abc123')."
-                    },
-                    "answer": {
-                        "type": "string",
-                        "description": "The answer text."
-                    },
-                    "subrepo": {
-                        "type": "string",
-                        "description": "Subrepo path (e.g. 'egregore/') if agent is in a subrepo."
-                    }
-                },
-                "required": ["agent_id", "question_id", "answer"]
-            }),
-        },
-    ]
-}
-
-/// Check if a tool name is a direct Rust tool (not WASM).
-pub fn is_direct_rust_tool(name: &str) -> bool {
-    matches!(name, "get_agent_messages" | "answer_question")
-}
-
-/// Execute a direct Rust tool by name.
-pub async fn execute_direct_tool(state: &McpState, name: &str, args: Value) -> Result<Value> {
-    match name {
-        "get_agent_messages" => execute_get_agent_messages(state, args).await,
-        "answer_question" => execute_answer_question(state, args).await,
-        _ => Err(anyhow!("Unknown direct tool: {}", name)),
-    }
-}
-
-async fn execute_get_agent_messages(_state: &McpState, args: Value) -> Result<Value> {
-    let agent_id = args.get("agent_id").and_then(|v| v.as_str());
-
-    let team_name = get_team_name_from_env()
-        .ok_or_else(|| anyhow!("No EXOMONAD_TEAM_NAME or CLAUDE_TEAM_NAME set"))?;
-
-    info!(
-        agent_id = ?agent_id,
-        team = %team_name,
-        "Getting agent messages from Teams inbox"
-    );
-
-    if let Some(agent_id) = agent_id {
-        let messages = messaging::read_agent_inbox(&team_name, agent_id)
-            .await
-            .map_err(|e| anyhow!("Failed to read agent inbox: {}", e))?;
-
-        info!(agent = %agent_id, count = messages.len(), "Read agent messages from Teams inbox");
-        Ok(json!({
-            "agent_id": agent_id,
-            "messages": messages,
-        }))
-    } else {
-        let results = messaging::scan_all_agent_messages_teams(&team_name)
-            .await
-            .map_err(|e| anyhow!("Failed to scan agent messages: {}", e))?;
-
-        let agents: Vec<Value> = results
-            .into_iter()
-            .map(|(id, msgs)| {
-                json!({
-                    "agent_id": id,
-                    "messages": msgs,
-                })
-            })
-            .collect();
-
-        info!(agent_count = agents.len(), "Scanned all agent messages from Teams inboxes");
-        Ok(json!({ "agents": agents }))
-    }
-}
-
-async fn execute_answer_question(_state: &McpState, args: Value) -> Result<Value> {
-    let agent_id = args
-        .get("agent_id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow!("agent_id is required"))?;
-    let question_id = args
-        .get("question_id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow!("question_id is required"))?;
-    let answer = args
-        .get("answer")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow!("answer is required"))?;
-
-    let team_name = get_team_name_from_env()
-        .ok_or_else(|| anyhow!("No EXOMONAD_TEAM_NAME or CLAUDE_TEAM_NAME set"))?;
-
-    info!(
-        agent = %agent_id,
-        question_id = %question_id,
-        team = %team_name,
-        "Answering question via Teams inbox"
-    );
-
-    messaging::write_to_agent_inbox(&team_name, agent_id, answer)
-        .await
-        .map_err(|e| anyhow!("Failed to write answer to Teams inbox: {}", e))?;
-
-    info!(agent = %agent_id, question_id = %question_id, "Answer written to Teams inbox");
-    Ok(json!({
-        "status": "answered",
-        "agent_id": agent_id,
-        "question_id": question_id,
-    }))
-}
-
-/// Get team name from environment variables.
-fn get_team_name_from_env() -> Option<String> {
-    std::env::var("EXOMONAD_TEAM_NAME")
-        .or_else(|_| std::env::var("CLAUDE_TEAM_NAME"))
-        .ok()
 }
 
 #[cfg(test)]

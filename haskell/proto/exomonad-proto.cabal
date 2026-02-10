@@ -49,6 +49,7 @@ library
     Effects.Copilot
     Effects.Egregore
     Effects.Messaging
+    Effects.Teams
     -- Hand-written compatibility layer
     ExoMonad.Compat
   build-depends:

@@ -51,7 +51,7 @@ Human in Zellij session
 Each agent:
 - Runs in isolated git worktree (`.exomonad/worktrees/gh-{issue}-{title}-{agent}/`)
 - Has own `.exomonad/config.toml` (default_role="dev")
-- Has own MCP config (`.mcp.json` for Claude, `.gemini/settings.json` for Gemini) pointing to HTTP server
+- Has own CLI-native MCP config (`.gemini/settings.json` for Gemini agents) pointing to HTTP server
 - Gets full issue context via agent-specific CLI argument:
   - `claude --prompt '...'` for Claude agents
   - `gemini --prompt-interactive '...'` for Gemini agents
@@ -140,31 +140,54 @@ echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
 |----------|---------|---------|
 | `GITHUB_TOKEN` | services | GitHub API access |
 | `RUST_LOG` | all | Tracing log level |
-| `EXOMONAD_TEAM_NAME` | messaging, tasks | Team name for Claude Code Teams integration |
-| `EXOMONAD_AGENT_ID` | messaging, tasks | Agent identity within the team |
+| `EXOMONAD_TEAM_NAME` | messaging, teams | Team name for Claude Code Teams integration |
+| `CLAUDE_TEAM_NAME` | messaging, teams | Fallback team name (checked after EXOMONAD_TEAM_NAME) |
+| `EXOMONAD_AGENT_ID` | messaging, teams | Agent identity within the team (env var fallback) |
+| `GEMINI_CLI_SYSTEM_SETTINGS_PATH` | agent spawn | Points Gemini at per-agent settings.json |
+
+### Agent Identity
+
+In HTTP serve mode, multiple Gemini agents share one server process. Each agent hits a unique URL: `/agents/{name}/mcp`. The server extracts identity from the URL path and stores it in a tokio task-local via `mcp::agent_identity`.
+
+Resolution order in `mcp::agent_identity::get_agent_id()`:
+1. **Task-local** (HTTP mode): set by the `/agents/{name}/mcp` route handler
+2. **Env var** (stdio mode): `EXOMONAD_AGENT_ID` set in Zellij tab at spawn time
+3. **Directory name** (last resort): current working directory basename
+
+**Route layout:**
+- `/tl/mcp` — TL endpoint (all tools including orchestration)
+- `/dev/mcp` — generic dev endpoint (no agent identity)
+- `/agents/{name}/mcp` — per-agent endpoint (identity from URL path)
+
+At spawn time, `spawn_gemini_teammate` writes per-agent `settings.json` with `httpUrl: "http://localhost:{port}/agents/{name}/mcp"`. The URL IS the identity — unforgeable, visible in access logs.
 
 ## MCP Tools
 
-Most tools are implemented in Haskell WASM and executed via host functions.
-TL-side messaging tools are direct Rust handlers (bypass WASM).
+All tools are defined in Haskell WASM and executed via host functions.
 
-| Tool | Description | Implementation |
-|------|-------------|----------------|
-| `git_branch` | Get current git branch | WASM |
-| `git_status` | Get dirty files | WASM |
-| `git_log` | Get recent commits | WASM |
-| `read_file` | Read file contents | WASM |
-| `github_list_issues` | List GitHub issues | WASM |
-| `github_get_issue` | Get single issue details | WASM |
-| `github_list_prs` | List GitHub pull requests | WASM |
-| `spawn_agents` | Create git worktrees + Zellij tabs, auto-start agents | WASM |
-| `spawn_gemini_teammate` | Spawn named Gemini teammate with direct prompt, writes `.gemini/settings.json` | WASM |
-| `cleanup_agents` | Close Zellij tabs and delete worktrees | WASM |
-| `list_agents` | List active agent worktrees | WASM |
-| `note` | Send fire-and-forget note to TL (agent-side) | WASM |
-| `question` | Send blocking question to TL (agent-side) | WASM |
-| `get_agent_messages` | Read notes and questions from Teams inboxes (TL-side) | Direct Rust |
-| `answer_question` | Answer a pending agent question via Teams inbox (TL-side) | Direct Rust |
+| Tool | Description |
+|------|-------------|
+| `git_branch` | Get current git branch |
+| `git_status` | Get dirty files |
+| `git_log` | Get recent commits |
+| `read_file` | Read file contents |
+| `github_list_issues` | List GitHub issues |
+| `github_get_issue` | Get single issue details |
+| `github_list_prs` | List GitHub pull requests |
+| `spawn_agents` | Create git worktrees + Zellij tabs, auto-start agents |
+| `spawn_gemini_teammate` | Spawn named Gemini teammate with direct prompt, writes `.gemini/settings.json` |
+| `cleanup_agents` | Close Zellij tabs and delete worktrees |
+| `list_agents` | List active agent worktrees |
+| `note` | Send fire-and-forget note to TL (agent-side) |
+| `question` | Send blocking question to TL (agent-side) |
+| `claim_task` | Claim a task from shared task list (Teams) |
+| `complete_task` | Mark task as completed (Teams) |
+| `list_tasks` | List tasks from shared task list (Teams) |
+| `get_task` | Get task details by ID (Teams) |
+| `report_status` | Report agent status to team (Teams) |
+| `ask_question` | Ask question to team lead (Teams) |
+| `get_agent_messages` | Read notes/questions from agents (TL messaging) |
+| `answer_question` | Answer pending agent question (TL messaging) |
 
 ## Effect System
 
@@ -194,6 +217,7 @@ Haskell: Either EffectError GetBranchResponse
 | `file_pr.*` | FilePRHandler | file_pr |
 | `copilot.*` | CopilotHandler | wait_for_copilot_review |
 | `messaging.*` | MessagingHandler | send_note, send_question |
+| `teams.*` | TeamsHandler | claim_task, complete_task, list_tasks, get_task, report_status, ask_question |
 
 **Zellij Integration:**
 - Uses declarative KDL layouts (not CLI flags)
@@ -209,7 +233,7 @@ Use CLI-native config commands to register the MCP server:
 claude mcp add exomonad -- exomonad mcp-stdio
 
 # Gemini CLI (HTTP mode only)
-gemini mcp add --transport http exomonad http://localhost:7432/mcp
+gemini mcp add --transport http exomonad http://localhost:7432/tl/mcp
 ```
 
 And ensure `.exomonad/config.toml` and/or `config.local.toml` exists.
