@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use super::github::{GitHubService, Repo};
 use super::zellij_events;
@@ -658,8 +658,8 @@ impl AgentControlService {
                 settings_path.to_string_lossy().to_string(),
             );
 
-            // Open Zellij tab with cwd = effective_project_dir
-            self.new_zellij_tab(
+            // Open Zellij pane with cwd = effective_project_dir
+            self.new_zellij_pane(
                 &display_name,
                 &effective_project_dir,
                 options.agent_type,
@@ -1095,6 +1095,92 @@ impl AgentControlService {
             ));
         }
 
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self, prompt, env_vars))]
+    async fn new_zellij_pane(
+        &self,
+        name: &str,
+        cwd: &Path,
+        agent_type: AgentType,
+        prompt: Option<&str>,
+        env_vars: HashMap<String, String>,
+    ) -> Result<()> {
+        info!(name, cwd = %cwd.display(), agent_type = ?agent_type, "Creating Zellij pane");
+
+        let cmd = agent_type.command();
+        let agent_command = match prompt {
+            Some(p) => {
+                let escaped_prompt = Self::escape_for_shell_command(p);
+                debug!(
+                    pane_name = name,
+                    agent_type = ?agent_type,
+                    prompt_length = p.len(),
+                    "Spawning agent with CLI prompt"
+                );
+                format!("{} {} {}", cmd, agent_type.prompt_flag(), escaped_prompt)
+            }
+            None => cmd.to_string(),
+        };
+
+        // Prepend env vars
+        let env_prefix = env_vars
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, shell_escape::escape(v.into())))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let full_command = if env_prefix.is_empty() {
+            agent_command
+        } else {
+            format!("{} {}", env_prefix, agent_command)
+        };
+
+        // Wrap in nix develop shell if flake.nix exists in cwd
+        let full_command = if cwd.join("flake.nix").exists() {
+            info!("Wrapping agent command in nix develop shell");
+            let escaped = full_command.replace('\'', "'\\''");
+            format!("nix develop -c sh -c '{}'", escaped)
+        } else {
+            full_command
+        };
+
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+
+        // Use zellij action new-pane to create pane in current tab
+        let output = Command::new("zellij")
+            .args([
+                "action",
+                "new-pane",
+                "--name",
+                name,
+                "--cwd",
+                &cwd.display().to_string(),
+                "--close-on-exit",
+                "--",
+                &shell,
+                "-l",
+                "-c",
+                &full_command,
+            ])
+            .output()
+            .await
+            .context("Failed to run zellij")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            error!(
+                name,
+                exit_code = output.status.code(),
+                stderr = %stderr,
+                stdout = %stdout,
+                "zellij action new-pane failed"
+            );
+            anyhow::bail!("zellij action new-pane failed: {}", stderr);
+        }
+
+        info!(name, "Successfully created Zellij pane");
         Ok(())
     }
 

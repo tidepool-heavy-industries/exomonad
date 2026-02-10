@@ -1,7 +1,7 @@
+use chrono::Utc;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::RwLock;
-use chrono::Utc;
 
 /// In-memory coordination state. Lives in Arc on the MCP server.
 pub struct CoordinationService {
@@ -45,10 +45,16 @@ impl CoordinationService {
         }
     }
 
-    pub async fn create_task(&self, subject: String, description: String, owner: String, blocked_by: Vec<String>) -> String {
+    pub async fn create_task(
+        &self,
+        subject: String,
+        description: String,
+        owner: String,
+        blocked_by: Vec<String>,
+    ) -> String {
         let id_num = self.next_task_id.fetch_add(1, Ordering::SeqCst);
         let task_id = format!("task-{}", id_num);
-        
+
         let task = Task {
             id: task_id.clone(),
             subject,
@@ -63,7 +69,14 @@ impl CoordinationService {
         task_id
     }
 
-    pub async fn update_task(&self, task_id: String, status: Option<TaskStatus>, owner: Option<String>, description: Option<String>, subject: Option<String>) -> bool {
+    pub async fn update_task(
+        &self,
+        task_id: String,
+        status: Option<TaskStatus>,
+        owner: Option<String>,
+        description: Option<String>,
+        subject: Option<String>,
+    ) -> bool {
         let mut tasks = self.tasks.write().await;
         if let Some(task) = tasks.get_mut(&task_id) {
             if let Some(s) = status {
@@ -86,7 +99,8 @@ impl CoordinationService {
 
     pub async fn list_tasks(&self, filter_status: Option<TaskStatus>) -> Vec<Task> {
         let tasks = self.tasks.read().await;
-        tasks.values()
+        tasks
+            .values()
             .filter(|t| filter_status.map_or(true, |fs| t.status == fs))
             .cloned()
             .collect()
@@ -139,12 +153,14 @@ mod tests {
     #[tokio::test]
     async fn test_create_and_get_task() {
         let service = CoordinationService::new();
-        let task_id = service.create_task(
-            "Test Subject".to_string(),
-            "Test Description".to_string(),
-            "owner1".to_string(),
-            vec!["blocker1".to_string()]
-        ).await;
+        let task_id = service
+            .create_task(
+                "Test Subject".to_string(),
+                "Test Description".to_string(),
+                "owner1".to_string(),
+                vec!["blocker1".to_string()],
+            )
+            .await;
 
         assert_eq!(task_id, "task-1");
 
@@ -159,20 +175,24 @@ mod tests {
     #[tokio::test]
     async fn test_update_task_status() {
         let service = CoordinationService::new();
-        let task_id = service.create_task(
-            "Test".to_string(),
-            "Desc".to_string(),
-            "owner".to_string(),
-            vec![]
-        ).await;
+        let task_id = service
+            .create_task(
+                "Test".to_string(),
+                "Desc".to_string(),
+                "owner".to_string(),
+                vec![],
+            )
+            .await;
 
-        let success = service.update_task(
-            task_id.clone(),
-            Some(TaskStatus::InProgress),
-            None,
-            None,
-            None
-        ).await;
+        let success = service
+            .update_task(
+                task_id.clone(),
+                Some(TaskStatus::InProgress),
+                None,
+                None,
+                None,
+            )
+            .await;
 
         assert!(success);
 
@@ -183,9 +203,15 @@ mod tests {
     #[tokio::test]
     async fn test_list_tasks_with_filter() {
         let service = CoordinationService::new();
-        service.create_task("T1".to_string(), "D1".to_string(), "O1".to_string(), vec![]).await;
-        let t2_id = service.create_task("T2".to_string(), "D2".to_string(), "O2".to_string(), vec![]).await;
-        service.update_task(t2_id, Some(TaskStatus::Completed), None, None, None).await;
+        service
+            .create_task("T1".to_string(), "D1".to_string(), "O1".to_string(), vec![])
+            .await;
+        let t2_id = service
+            .create_task("T2".to_string(), "D2".to_string(), "O2".to_string(), vec![])
+            .await;
+        service
+            .update_task(t2_id, Some(TaskStatus::Completed), None, None, None)
+            .await;
 
         let all_tasks = service.list_tasks(None).await;
         assert_eq!(all_tasks.len(), 2);
@@ -202,8 +228,16 @@ mod tests {
     #[tokio::test]
     async fn test_send_and_get_messages() {
         let service = CoordinationService::new();
-        service.send_message("alice".to_string(), "hello".to_string(), "greeting".to_string()).await;
-        service.send_message("bob".to_string(), "hi".to_string(), "response".to_string()).await;
+        service
+            .send_message(
+                "alice".to_string(),
+                "hello".to_string(),
+                "greeting".to_string(),
+            )
+            .await;
+        service
+            .send_message("bob".to_string(), "hi".to_string(), "response".to_string())
+            .await;
 
         let messages = service.get_messages(false).await;
         assert_eq!(messages.len(), 2);
@@ -214,7 +248,13 @@ mod tests {
     #[tokio::test]
     async fn test_messages_marked_read() {
         let service = CoordinationService::new();
-        service.send_message("alice".to_string(), "hello".to_string(), "greeting".to_string()).await;
+        service
+            .send_message(
+                "alice".to_string(),
+                "hello".to_string(),
+                "greeting".to_string(),
+            )
+            .await;
 
         let messages = service.get_messages(true).await;
         assert_eq!(messages.len(), 1);

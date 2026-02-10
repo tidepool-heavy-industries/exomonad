@@ -121,7 +121,6 @@ mod tests {
         assert!(layout.contains("tab name=\"🤖 473-test\""));
         assert!(layout.contains("focus=true"));
         assert!(layout.contains("zjstatus.wasm"));
-        assert!(layout.contains("exomonad-plugin.wasm"));
         assert!(layout.contains("/bin/zsh"));
         assert!(layout.contains("claude --prompt 'test'"));
         assert!(layout.contains("/tmp/test"));
@@ -296,25 +295,6 @@ mod tests {
         assert!(
             layout.contains("zjstatus.wasm"),
             "Layout should include zjstatus plugin"
-        );
-    }
-
-    #[test]
-    fn test_layout_has_exomonad_plugin() {
-        let params = AgentTabParams {
-            tab_name: "Test",
-            pane_name: "Agent",
-            command: "echo test",
-            cwd: Path::new("/tmp"),
-            shell: "/bin/zsh",
-            focus: true,
-            close_on_exit: true,
-        };
-
-        let layout = generate_agent_layout(&params).unwrap();
-        assert!(
-            layout.contains("exomonad-plugin.wasm"),
-            "Layout should include exomonad plugin"
         );
     }
 

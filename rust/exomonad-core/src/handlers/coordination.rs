@@ -1,4 +1,6 @@
-use crate::effects::{EffectHandler, EffectResult, dispatch_coordination_effect, CoordinationEffects};
+use crate::effects::{
+    dispatch_coordination_effect, CoordinationEffects, EffectHandler, EffectResult,
+};
 use crate::services::coordination::{CoordinationService, TaskStatus as ServiceTaskStatus};
 use async_trait::async_trait;
 use exomonad_proto::effects::coordination::*;
@@ -56,29 +58,36 @@ fn to_proto_task(task: crate::services::coordination::Task) -> Task {
 #[async_trait]
 impl CoordinationEffects for CoordinationHandler {
     async fn create_task(&self, req: CreateTaskRequest) -> EffectResult<CreateTaskResponse> {
-        let task_id = self.service.create_task(
-            req.subject,
-            req.description,
-            req.owner,
-            req.blocked_by
-        ).await;
+        let task_id = self
+            .service
+            .create_task(req.subject, req.description, req.owner, req.blocked_by)
+            .await;
 
         Ok(CreateTaskResponse { task_id })
     }
 
     async fn update_task(&self, req: UpdateTaskRequest) -> EffectResult<UpdateTaskResponse> {
         let status = to_service_status(req.status());
-        let owner = if req.owner.is_empty() { None } else { Some(req.owner) };
-        let description = if req.description.is_empty() { None } else { Some(req.description) };
-        let subject = if req.subject.is_empty() { None } else { Some(req.subject) };
+        let owner = if req.owner.is_empty() {
+            None
+        } else {
+            Some(req.owner)
+        };
+        let description = if req.description.is_empty() {
+            None
+        } else {
+            Some(req.description)
+        };
+        let subject = if req.subject.is_empty() {
+            None
+        } else {
+            Some(req.subject)
+        };
 
-        let success = self.service.update_task(
-            req.task_id,
-            status,
-            owner,
-            description,
-            subject
-        ).await;
+        let success = self
+            .service
+            .update_task(req.task_id, status, owner, description, subject)
+            .await;
 
         Ok(UpdateTaskResponse { success })
     }
@@ -86,7 +95,7 @@ impl CoordinationEffects for CoordinationHandler {
     async fn list_tasks(&self, req: ListTasksRequest) -> EffectResult<ListTasksResponse> {
         let filter_status = to_service_status(req.filter_status());
         let tasks = self.service.list_tasks(filter_status).await;
-        
+
         Ok(ListTasksResponse {
             tasks: tasks.into_iter().map(to_proto_task).collect(),
         })
@@ -94,28 +103,33 @@ impl CoordinationEffects for CoordinationHandler {
 
     async fn get_task(&self, req: GetTaskRequest) -> EffectResult<GetTaskResponse> {
         let task = self.service.get_task(&req.task_id).await;
-        
+
         Ok(GetTaskResponse {
             task: task.map(to_proto_task),
         })
     }
 
     async fn send_message(&self, req: SendMessageRequest) -> EffectResult<SendMessageResponse> {
-        self.service.send_message(req.from, req.text, req.summary).await;
+        self.service
+            .send_message(req.from, req.text, req.summary)
+            .await;
         Ok(SendMessageResponse { success: true })
     }
 
     async fn get_messages(&self, req: GetMessagesRequest) -> EffectResult<GetMessagesResponse> {
         let messages = self.service.get_messages(req.unread_only).await;
-        
+
         Ok(GetMessagesResponse {
-            messages: messages.into_iter().map(|m| AgentMessage {
-                from: m.from,
-                text: m.text,
-                summary: m.summary,
-                timestamp: m.timestamp,
-                read: m.read,
-            }).collect(),
+            messages: messages
+                .into_iter()
+                .map(|m| AgentMessage {
+                    from: m.from,
+                    text: m.text,
+                    summary: m.summary,
+                    timestamp: m.timestamp,
+                    read: m.read,
+                })
+                .collect(),
         })
     }
 }

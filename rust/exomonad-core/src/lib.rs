@@ -315,7 +315,8 @@ pub fn register_builtin_handlers(
 
     let question_registry = Arc::new(services::questions::QuestionRegistry::new());
 
-    builder = builder.with_effect_handler(handlers::MessagingHandler::new(question_registry.clone()));
+    builder =
+        builder.with_effect_handler(handlers::MessagingHandler::new(question_registry.clone()));
 
     let project_dir = std::env::current_dir().unwrap_or_default();
     builder = builder.with_effect_handler(handlers::KvHandler::new(project_dir));

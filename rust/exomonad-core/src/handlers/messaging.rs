@@ -217,7 +217,9 @@ impl MessagingEffects for MessagingHandler {
             .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
 
         // Resolve the oneshot channel so send_question unblocks immediately.
-        let resolved = self.question_registry.resolve(&req.question_id, req.answer.clone());
+        let resolved = self
+            .question_registry
+            .resolve(&req.question_id, req.answer.clone());
         info!(
             agent = %req.agent_id,
             question_id = %req.question_id,
