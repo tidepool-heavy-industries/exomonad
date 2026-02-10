@@ -961,6 +961,16 @@ impl AgentControlService {
             format!("{} {}", env_prefix, agent_command)
         };
 
+        // Wrap in nix develop shell if flake.nix exists in cwd
+        let full_command = if cwd.join("flake.nix").exists() {
+            info!("Wrapping agent command in nix develop shell");
+            // Inner command needs single-quote escaping for the sh -c wrapper
+            let escaped = full_command.replace('\'', "'\\''");
+            format!("nix develop -c sh -c '{}'", escaped)
+        } else {
+            full_command
+        };
+
         // Escape the command for KDL string literal (escape backslashes, quotes, newlines)
         let kdl_escaped_command = Self::escape_for_kdl(&full_command);
 

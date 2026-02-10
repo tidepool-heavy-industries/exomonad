@@ -489,6 +489,76 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 - **Effects** (plural) = integrations/contrib (`ExoMonad.Effects.*`)
 - **Interpreter** = effect implementation (replaces "executor" terminology)
 
+## Tech Lead Praxis
+
+How to coordinate heterogeneous agent teams effectively. These are proven patterns from real sessions, not theory.
+
+### Intelligence Gradient
+
+Claude (Opus) reasons and coordinates. Gemini implements with clear instructions. The TL never implements directly — it decomposes, specs, spawns, reviews.
+
+**Cost model:** Opus tokens are 10-30x Gemini tokens. Every line of code the TL writes directly is expensive code. The TL's job is producing *specs* that make Gemini's output correct on the first try.
+
+### Spawn Prompt Structure
+
+Gemini agents are cheap junior devs. They execute pre-decomposed work, they don't decompose it. Every spawn prompt follows this structure:
+
+```
+1. READ FIRST        — List exact files to read (CLAUDE.md, source files, proto files)
+2. STEPS             — Numbered, each step = one concrete action with code snippets
+3. VERIFY            — Exact build/test commands with env vars (PROTOC path, etc.)
+4. DONE CRITERIA     — Acceptance tests: what "done" looks like
+5. BOUNDARY          — "Do NOT commit" / "Do NOT push" — TL controls merge
+```
+
+**Key rules:**
+- **One agent = one focused change.** If it touches >3 files or requires architectural decisions, split it.
+- **Include code snippets.** Don't describe what to write — show it. Gemini executes better from examples than descriptions.
+- **Include exact commands.** Not "run the tests" but `PROTOC=/nix/store/... cargo test --workspace`. Env vars, flags, paths — all explicit.
+- **Name the files.** Not "update the proto" but "edit `proto/effects/agent.proto` AND `rust/exomonad-proto/proto/effects/agent.proto`".
+
+### Parallelization
+
+Spawn multiple agents when tasks are independent (no file conflicts, no ordering dependency). Examples:
+- Proto plumbing (touches proto/, haskell/proto/, rust/) + nix shell wrapping (touches rust/services/) — independent, parallel.
+- Haskell tool changes + Rust handler changes — often dependent (proto-gen must run first), sequential.
+
+### Review Protocol
+
+When an agent reports done:
+1. `git diff --stat HEAD` — see what changed
+2. `diff` vendor copies (proto files must be byte-identical)
+3. Read the actual changes, not just the summary
+4. Run `cargo check` / `cargo test` yourself — don't trust "tests pass" claims
+5. Check for prost struct literal completeness (new fields must appear in ALL construction sites)
+
+### Anti-Patterns
+
+| Don't | Do Instead |
+|-------|------------|
+| Vague task: "implement the identity system" | Specific: "add `topology` field to 4 proto messages, regenerate, plumb defaults" |
+| Let agent make architectural decisions | Make the decision in the spec, agent executes |
+| Trust "it compiles" without verification | Run checks yourself from TL session |
+| Spawn in plan mode | Plan mode gates every write. Spawn in default mode with plan as context |
+| Give short directives ("go") | Full context in one shot: files, format, examples, commands |
+| Let agent claim unsourced constraints | Demand: "WHERE did you learn this? Show the code/docs" |
+
+### Agent Supervision
+
+Agents hallucinate confidently about infrastructure constraints. "axum nest_service doesn't support dynamic segments" — stated as fact, nearly steered a design decision, turned out to be wrong. **Always demand sources for infrastructure claims.**
+
+Agents overengineer when unsupervised. Given "add a route with a path extractor" an agent built a full tower middleware stack. **Specify the complexity budget:** "this is 10 lines in an existing function, not a new module."
+
+### Teams Strategy: Mirror Signatures, Own the Backend
+
+Claude Code Teams provides coordination primitives (TaskCreate, TaskUpdate, SendMessage) that Claude models are trained on. ExoMonad's strategy:
+
+- **Mirror the tool signatures** — same tool names, same arg shapes, same response shapes. The model's training transfers.
+- **Own the backend** — ExoMonad's singleton MCP server is the coordination bus. State lives there, not in `~/.claude/teams/` filesystem.
+- **Route around jank** — Teams' UX (idle spam, shutdown ceremony, plan mode death spiral) is tolerated for bus access. Our WASM layer is where compensating logic lives — typed, hot-reloadable, not buried in prompts.
+
+The bet: Anthropic iterates on Teams primitives, we get upgrades for free. When they don't fix something, the crash cage handles it.
+
 ## Task Tracking (GitHub)
 
 Task tracking via GitHub Issues.

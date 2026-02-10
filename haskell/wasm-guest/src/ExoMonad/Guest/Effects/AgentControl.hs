@@ -302,7 +302,8 @@ runAgentControl = interpret $ \case
               PA.spawnRequestAgentType = Enumerated (Right (toProtoAgentType (agentType opts))),
               PA.spawnRequestRole = Enumerated (Right RoleROLE_UNSPECIFIED),
               PA.spawnRequestWorktreeDir = maybe "" TL.fromStrict (worktreeDir opts),
-              PA.spawnRequestSubrepo = maybe "" TL.fromStrict (subrepo opts)
+              PA.spawnRequestSubrepo = maybe "" TL.fromStrict (subrepo opts),
+              PA.spawnRequestTopology = Enumerated (Right PA.WorkspaceTopologyWORKSPACE_TOPOLOGY_WORKTREE_PER_AGENT)
             }
     result <- Agent.spawnAgent req
     pure $ case result of
@@ -319,7 +320,8 @@ runAgentControl = interpret $ \case
               PA.spawnBatchRequestAgentType = Enumerated (Right (toProtoAgentType (agentType opts))),
               PA.spawnBatchRequestRole = Enumerated (Right RoleROLE_UNSPECIFIED),
               PA.spawnBatchRequestWorktreeDir = maybe "" TL.fromStrict (worktreeDir opts),
-              PA.spawnBatchRequestSubrepo = maybe "" TL.fromStrict (subrepo opts)
+              PA.spawnBatchRequestSubrepo = maybe "" TL.fromStrict (subrepo opts),
+              PA.spawnBatchRequestTopology = Enumerated (Right PA.WorkspaceTopologyWORKSPACE_TOPOLOGY_WORKTREE_PER_AGENT)
             }
     result <- Agent.spawnBatch req
     pure $ case result of
@@ -340,7 +342,8 @@ runAgentControl = interpret $ \case
               PA.spawnGeminiTeammateRequestPrompt = TL.fromStrict prompt,
               PA.spawnGeminiTeammateRequestAgentType = Enumerated (Right (toProtoAgentType agentTy)),
               PA.spawnGeminiTeammateRequestSubrepo = maybe "" TL.fromStrict subrepo,
-              PA.spawnGeminiTeammateRequestTeamName = maybe "" TL.fromStrict teamName
+              PA.spawnGeminiTeammateRequestTeamName = maybe "" TL.fromStrict teamName,
+              PA.spawnGeminiTeammateRequestTopology = Enumerated (Right PA.WorkspaceTopologyWORKSPACE_TOPOLOGY_SHARED_DIR)
             }
     result <- Agent.spawnGeminiTeammate req
     pure $ case result of

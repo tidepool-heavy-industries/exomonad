@@ -223,6 +223,7 @@ mod binary {
             role: 1,       // DEV
             worktree_dir: ".exomonad/worktrees".into(),
             subrepo: String::new(),
+            topology: 0,
         };
 
         let bytes = req.encode_to_vec();
@@ -253,6 +254,7 @@ mod binary {
                 error: String::new(),
                 pr_number: 0,
                 pr_url: String::new(),
+                topology: 0,
             }),
         };
 
@@ -291,6 +293,7 @@ mod binary {
                     error: String::new(),
                     pr_number: 0,
                     pr_url: String::new(),
+                    topology: 0,
                 },
                 AgentInfo {
                     id: "gh-2-gemini".into(),
@@ -304,6 +307,7 @@ mod binary {
                     error: String::new(),
                     pr_number: 0,
                     pr_url: String::new(),
+                    topology: 0,
                 },
             ],
             errors: vec!["issue 3: not found".into()],
@@ -335,6 +339,7 @@ mod binary {
                 error: String::new(),
                 pr_number: 42,
                 pr_url: "https://github.com/org/repo/pull/42".into(),
+                topology: 0,
             }],
         };
 
@@ -780,6 +785,7 @@ mod binary {
                 error: String::new(),
                 pr_number: 0,
                 pr_url: String::new(),
+                topology: 0,
             }),
         };
         let spawn_inner = spawn_resp.encode_to_vec();
@@ -838,6 +844,7 @@ mod binary {
                 error: String::new(),
                 pr_number: 0,
                 pr_url: String::new(),
+                topology: 0,
             }],
             errors: vec!["issue 2: failed".into()],
         };

@@ -25,6 +25,13 @@ enum AgentStatus {
   AGENT_STATUS_WAITING = 4;
 }
 
+// Topology of the workspace.
+enum WorkspaceTopology {
+  WORKSPACE_TOPOLOGY_UNSPECIFIED = 0;
+  WORKSPACE_TOPOLOGY_WORKTREE_PER_AGENT = 1;
+  WORKSPACE_TOPOLOGY_SHARED_DIR = 2;
+}
+
 // Information about a spawned agent.
 message AgentInfo {
   // Unique identifier (issue number + agent type).
@@ -49,6 +56,8 @@ message AgentInfo {
   int32 pr_number = 10;
   // PR URL if one was filed.
   string pr_url = 11;
+  // Workspace topology.
+  WorkspaceTopology topology = 12;
 }
 
 // ============================================================================
@@ -71,6 +80,8 @@ message SpawnRequest {
   // Sub-repository path relative to project_dir (e.g., "egregore/").
   // When set, git worktree operations target this directory instead of project_dir.
   string subrepo = 7;
+  // Workspace topology.
+  WorkspaceTopology topology = 8;
 }
 
 message SpawnResponse {
@@ -97,6 +108,8 @@ message SpawnBatchRequest {
   // Sub-repository path relative to project_dir (e.g., "egregore/").
   // When set, git worktree operations target this directory instead of project_dir.
   string subrepo = 7;
+  // Workspace topology.
+  WorkspaceTopology topology = 8;
 }
 
 message SpawnBatchResponse {
@@ -121,6 +134,8 @@ message SpawnGeminiTeammateRequest {
   string subrepo = 4;
   // Claude Code Teams team name (resolved from KV store).
   string team_name = 5;
+  // Workspace topology.
+  WorkspaceTopology topology = 6;
 }
 
 message SpawnGeminiTeammateResponse {

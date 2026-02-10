@@ -137,6 +137,52 @@ instance (HsJSONPB.ToJSON AgentStatus) where
 instance (HsJSONPB.FromJSON AgentStatus) where
   parseJSON = HsJSONPB.parseJSONPB
 instance (HsProtobuf.Finite AgentStatus)
+data WorkspaceTopology
+  = WorkspaceTopologyWORKSPACE_TOPOLOGY_UNSPECIFIED |
+    WorkspaceTopologyWORKSPACE_TOPOLOGY_WORKTREE_PER_AGENT |
+    WorkspaceTopologyWORKSPACE_TOPOLOGY_SHARED_DIR
+  deriving (Hs.Show, Hs.Eq, Hs.Generic, Hs.NFData)
+instance (HsProtobuf.Named WorkspaceTopology) where
+  nameOf _ = Hs.fromString "WorkspaceTopology"
+instance (HsProtobuf.HasDefault WorkspaceTopology)
+instance (Hs.Bounded WorkspaceTopology) where
+  minBound = WorkspaceTopologyWORKSPACE_TOPOLOGY_UNSPECIFIED
+  maxBound = WorkspaceTopologyWORKSPACE_TOPOLOGY_SHARED_DIR
+instance (Hs.Ord WorkspaceTopology) where
+  compare x y
+    = Hs.compare
+        (HsProtobuf.fromProtoEnum x) (HsProtobuf.fromProtoEnum y)
+instance (HsProtobuf.ProtoEnum WorkspaceTopology) where
+  toProtoEnumMay 0
+    = Hs.Just WorkspaceTopologyWORKSPACE_TOPOLOGY_UNSPECIFIED
+  toProtoEnumMay 1
+    = Hs.Just WorkspaceTopologyWORKSPACE_TOPOLOGY_WORKTREE_PER_AGENT
+  toProtoEnumMay 2
+    = Hs.Just WorkspaceTopologyWORKSPACE_TOPOLOGY_SHARED_DIR
+  toProtoEnumMay _ = Hs.Nothing
+  fromProtoEnum WorkspaceTopologyWORKSPACE_TOPOLOGY_UNSPECIFIED = 0
+  fromProtoEnum
+    WorkspaceTopologyWORKSPACE_TOPOLOGY_WORKTREE_PER_AGENT
+    = 1
+  fromProtoEnum WorkspaceTopologyWORKSPACE_TOPOLOGY_SHARED_DIR = 2
+instance (HsJSONPB.ToJSONPB WorkspaceTopology) where
+  toJSONPB x _ = HsJSONPB.enumFieldString x
+  toEncodingPB x _ = HsJSONPB.enumFieldEncoding x
+instance (HsJSONPB.FromJSONPB WorkspaceTopology) where
+  parseJSONPB (HsJSONPB.String "WORKSPACE_TOPOLOGY_UNSPECIFIED")
+    = Hs.pure WorkspaceTopologyWORKSPACE_TOPOLOGY_UNSPECIFIED
+  parseJSONPB
+    (HsJSONPB.String "WORKSPACE_TOPOLOGY_WORKTREE_PER_AGENT")
+    = Hs.pure WorkspaceTopologyWORKSPACE_TOPOLOGY_WORKTREE_PER_AGENT
+  parseJSONPB (HsJSONPB.String "WORKSPACE_TOPOLOGY_SHARED_DIR")
+    = Hs.pure WorkspaceTopologyWORKSPACE_TOPOLOGY_SHARED_DIR
+  parseJSONPB v = HsJSONPB.typeMismatch "WorkspaceTopology" v
+instance (HsJSONPB.ToJSON WorkspaceTopology) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON WorkspaceTopology) where
+  parseJSON = HsJSONPB.parseJSONPB
+instance (HsProtobuf.Finite WorkspaceTopology)
 data AgentInfo
   = AgentInfo {agentInfoId :: Hs.Text,
                agentInfoIssue :: Hs.Text,
@@ -148,7 +194,8 @@ data AgentInfo
                agentInfoZellijTab :: Hs.Text,
                agentInfoError :: Hs.Text,
                agentInfoPrNumber :: Hs.Int32,
-               agentInfoPrUrl :: Hs.Text}
+               agentInfoPrUrl :: Hs.Text,
+               agentInfoTopology :: (HsProtobuf.Enumerated Effects.Agent.WorkspaceTopology)}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData AgentInfo)
 instance (HsProtobuf.Named AgentInfo) where
@@ -160,7 +207,7 @@ instance (HsProtobuf.Message AgentInfo) where
     AgentInfo {agentInfoId, agentInfoIssue, agentInfoWorktreePath,
                agentInfoBranchName, agentInfoAgentType, agentInfoRole,
                agentInfoStatus, agentInfoZellijTab, agentInfoError,
-               agentInfoPrNumber, agentInfoPrUrl}
+               agentInfoPrNumber, agentInfoPrUrl, agentInfoTopology}
     = Hs.mappend
         (Hs.mappend
            (Hs.mappend
@@ -171,41 +218,45 @@ instance (HsProtobuf.Message AgentInfo) where
                           (Hs.mappend
                              (Hs.mappend
                                 (Hs.mappend
+                                   (Hs.mappend
+                                      (HsProtobuf.encodeMessageField
+                                         (HsProtobuf.FieldNumber 1)
+                                         ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                                            agentInfoId))
+                                      (HsProtobuf.encodeMessageField
+                                         (HsProtobuf.FieldNumber 2)
+                                         ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                                            agentInfoIssue)))
                                    (HsProtobuf.encodeMessageField
-                                      (HsProtobuf.FieldNumber 1)
+                                      (HsProtobuf.FieldNumber 3)
                                       ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                                         agentInfoId))
-                                   (HsProtobuf.encodeMessageField
-                                      (HsProtobuf.FieldNumber 2)
-                                      ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                                         agentInfoIssue)))
+                                         agentInfoWorktreePath)))
                                 (HsProtobuf.encodeMessageField
-                                   (HsProtobuf.FieldNumber 3)
+                                   (HsProtobuf.FieldNumber 4)
                                    ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                                      agentInfoWorktreePath)))
+                                      agentInfoBranchName)))
                              (HsProtobuf.encodeMessageField
-                                (HsProtobuf.FieldNumber 4)
-                                ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                                   agentInfoBranchName)))
+                                (HsProtobuf.FieldNumber 5) agentInfoAgentType))
                           (HsProtobuf.encodeMessageField
-                             (HsProtobuf.FieldNumber 5) agentInfoAgentType))
+                             (HsProtobuf.FieldNumber 6) agentInfoRole))
                        (HsProtobuf.encodeMessageField
-                          (HsProtobuf.FieldNumber 6) agentInfoRole))
+                          (HsProtobuf.FieldNumber 7) agentInfoStatus))
                     (HsProtobuf.encodeMessageField
-                       (HsProtobuf.FieldNumber 7) agentInfoStatus))
+                       (HsProtobuf.FieldNumber 8)
+                       ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                          agentInfoZellijTab)))
                  (HsProtobuf.encodeMessageField
-                    (HsProtobuf.FieldNumber 8)
+                    (HsProtobuf.FieldNumber 9)
                     ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                       agentInfoZellijTab)))
+                       agentInfoError)))
               (HsProtobuf.encodeMessageField
-                 (HsProtobuf.FieldNumber 9)
-                 ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                    agentInfoError)))
+                 (HsProtobuf.FieldNumber 10) agentInfoPrNumber))
            (HsProtobuf.encodeMessageField
-              (HsProtobuf.FieldNumber 10) agentInfoPrNumber))
+              (HsProtobuf.FieldNumber 11)
+              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                 agentInfoPrUrl)))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 11)
-           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) agentInfoPrUrl))
+           (HsProtobuf.FieldNumber 12) agentInfoTopology)
   decodeMessage _
     = Hs.pure AgentInfo
         <*>
@@ -248,6 +299,9 @@ instance (HsProtobuf.Message AgentInfo) where
           ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
              (HsProtobuf.at
                 HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 11)))
+        <*>
+          HsProtobuf.at
+            HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 12)
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
@@ -297,9 +351,14 @@ instance (HsProtobuf.Message AgentInfo) where
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 11)
          (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "pr_url") [] ""]
+         (HsProtobufAST.Single "pr_url") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 12)
+         (HsProtobufAST.Prim
+            (HsProtobufAST.Named (HsProtobufAST.Single "WorkspaceTopology")))
+         (HsProtobufAST.Single "topology") [] ""]
 instance (HsJSONPB.ToJSONPB AgentInfo) where
-  toJSONPB (AgentInfo f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11)
+  toJSONPB (AgentInfo f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12)
     = HsJSONPB.object
         ["id" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "issue" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
@@ -313,8 +372,9 @@ instance (HsJSONPB.ToJSONPB AgentInfo) where
          "error" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f9),
          "pr_number" .= f10,
          "pr_url"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f11)]
-  toEncodingPB (AgentInfo f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11)
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f11),
+         "topology" .= f12]
+  toEncodingPB (AgentInfo f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12)
     = HsJSONPB.pairs
         ["id" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "issue" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
@@ -328,7 +388,8 @@ instance (HsJSONPB.ToJSONPB AgentInfo) where
          "error" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f9),
          "pr_number" .= f10,
          "pr_url"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f11)]
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f11),
+         "topology" .= f12]
 instance (HsJSONPB.FromJSONPB AgentInfo) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -359,7 +420,8 @@ instance (HsJSONPB.FromJSONPB AgentInfo) where
                 <*> obj .: "pr_number"
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "pr_url")))
+                     (obj .: "pr_url"))
+                <*> obj .: "topology")
 instance (HsJSONPB.ToJSON AgentInfo) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding
@@ -372,7 +434,8 @@ data SpawnRequest
                   spawnRequestAgentType :: (HsProtobuf.Enumerated Effects.Agent.AgentType),
                   spawnRequestRole :: (HsProtobuf.Enumerated ExoMonad.Common.Role),
                   spawnRequestWorktreeDir :: Hs.Text,
-                  spawnRequestSubrepo :: Hs.Text}
+                  spawnRequestSubrepo :: Hs.Text,
+                  spawnRequestTopology :: (HsProtobuf.Enumerated Effects.Agent.WorkspaceTopology)}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData SpawnRequest)
 instance (HsProtobuf.Named SpawnRequest) where
@@ -383,37 +446,40 @@ instance (HsProtobuf.Message SpawnRequest) where
     _
     SpawnRequest {spawnRequestIssue, spawnRequestOwner,
                   spawnRequestRepo, spawnRequestAgentType, spawnRequestRole,
-                  spawnRequestWorktreeDir, spawnRequestSubrepo}
+                  spawnRequestWorktreeDir, spawnRequestSubrepo, spawnRequestTopology}
     = Hs.mappend
         (Hs.mappend
            (Hs.mappend
               (Hs.mappend
                  (Hs.mappend
                     (Hs.mappend
+                       (Hs.mappend
+                          (HsProtobuf.encodeMessageField
+                             (HsProtobuf.FieldNumber 1)
+                             ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                                spawnRequestIssue))
+                          (HsProtobuf.encodeMessageField
+                             (HsProtobuf.FieldNumber 2)
+                             ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                                spawnRequestOwner)))
                        (HsProtobuf.encodeMessageField
-                          (HsProtobuf.FieldNumber 1)
+                          (HsProtobuf.FieldNumber 3)
                           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                             spawnRequestIssue))
-                       (HsProtobuf.encodeMessageField
-                          (HsProtobuf.FieldNumber 2)
-                          ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                             spawnRequestOwner)))
+                             spawnRequestRepo)))
                     (HsProtobuf.encodeMessageField
-                       (HsProtobuf.FieldNumber 3)
-                       ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                          spawnRequestRepo)))
+                       (HsProtobuf.FieldNumber 4) spawnRequestAgentType))
                  (HsProtobuf.encodeMessageField
-                    (HsProtobuf.FieldNumber 4) spawnRequestAgentType))
+                    (HsProtobuf.FieldNumber 5) spawnRequestRole))
               (HsProtobuf.encodeMessageField
-                 (HsProtobuf.FieldNumber 5) spawnRequestRole))
+                 (HsProtobuf.FieldNumber 6)
+                 ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                    spawnRequestWorktreeDir)))
            (HsProtobuf.encodeMessageField
-              (HsProtobuf.FieldNumber 6)
+              (HsProtobuf.FieldNumber 7)
               ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                 spawnRequestWorktreeDir)))
+                 spawnRequestSubrepo)))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 7)
-           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              spawnRequestSubrepo))
+           (HsProtobuf.FieldNumber 8) spawnRequestTopology)
   decodeMessage _
     = Hs.pure SpawnRequest
         <*>
@@ -442,6 +508,9 @@ instance (HsProtobuf.Message SpawnRequest) where
           ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
              (HsProtobuf.at
                 HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 7)))
+        <*>
+          HsProtobuf.at
+            HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 8)
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
@@ -474,9 +543,14 @@ instance (HsProtobuf.Message SpawnRequest) where
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 7)
          (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "subrepo") [] ""]
+         (HsProtobufAST.Single "subrepo") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 8)
+         (HsProtobufAST.Prim
+            (HsProtobufAST.Named (HsProtobufAST.Single "WorkspaceTopology")))
+         (HsProtobufAST.Single "topology") [] ""]
 instance (HsJSONPB.ToJSONPB SpawnRequest) where
-  toJSONPB (SpawnRequest f1 f2 f3 f4 f5 f6 f7)
+  toJSONPB (SpawnRequest f1 f2 f3 f4 f5 f6 f7 f8)
     = HsJSONPB.object
         ["issue" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "owner" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
@@ -485,8 +559,9 @@ instance (HsJSONPB.ToJSONPB SpawnRequest) where
          "worktree_dir"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f6),
          "subrepo"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f7)]
-  toEncodingPB (SpawnRequest f1 f2 f3 f4 f5 f6 f7)
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f7),
+         "topology" .= f8]
+  toEncodingPB (SpawnRequest f1 f2 f3 f4 f5 f6 f7 f8)
     = HsJSONPB.pairs
         ["issue" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "owner" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
@@ -495,7 +570,8 @@ instance (HsJSONPB.ToJSONPB SpawnRequest) where
          "worktree_dir"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f6),
          "subrepo"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f7)]
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f7),
+         "topology" .= f8]
 instance (HsJSONPB.FromJSONPB SpawnRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -518,7 +594,8 @@ instance (HsJSONPB.FromJSONPB SpawnRequest) where
                      (obj .: "worktree_dir"))
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "subrepo")))
+                     (obj .: "subrepo"))
+                <*> obj .: "topology")
 instance (HsJSONPB.ToJSON SpawnRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding
@@ -593,7 +670,8 @@ data SpawnBatchRequest
                        spawnBatchRequestAgentType :: (HsProtobuf.Enumerated Effects.Agent.AgentType),
                        spawnBatchRequestRole :: (HsProtobuf.Enumerated ExoMonad.Common.Role),
                        spawnBatchRequestWorktreeDir :: Hs.Text,
-                       spawnBatchRequestSubrepo :: Hs.Text}
+                       spawnBatchRequestSubrepo :: Hs.Text,
+                       spawnBatchRequestTopology :: (HsProtobuf.Enumerated Effects.Agent.WorkspaceTopology)}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData SpawnBatchRequest)
 instance (HsProtobuf.Named SpawnBatchRequest) where
@@ -605,39 +683,42 @@ instance (HsProtobuf.Message SpawnBatchRequest) where
     SpawnBatchRequest {spawnBatchRequestIssues, spawnBatchRequestOwner,
                        spawnBatchRequestRepo, spawnBatchRequestAgentType,
                        spawnBatchRequestRole, spawnBatchRequestWorktreeDir,
-                       spawnBatchRequestSubrepo}
+                       spawnBatchRequestSubrepo, spawnBatchRequestTopology}
     = Hs.mappend
         (Hs.mappend
            (Hs.mappend
               (Hs.mappend
                  (Hs.mappend
                     (Hs.mappend
+                       (Hs.mappend
+                          (HsProtobuf.encodeMessageField
+                             (HsProtobuf.FieldNumber 1)
+                             ((Hs.coerce
+                                 @(Hs.Vector Hs.Text)
+                                 @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+                                spawnBatchRequestIssues))
+                          (HsProtobuf.encodeMessageField
+                             (HsProtobuf.FieldNumber 2)
+                             ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                                spawnBatchRequestOwner)))
                        (HsProtobuf.encodeMessageField
-                          (HsProtobuf.FieldNumber 1)
-                          ((Hs.coerce
-                              @(Hs.Vector Hs.Text)
-                              @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
-                             spawnBatchRequestIssues))
-                       (HsProtobuf.encodeMessageField
-                          (HsProtobuf.FieldNumber 2)
+                          (HsProtobuf.FieldNumber 3)
                           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                             spawnBatchRequestOwner)))
+                             spawnBatchRequestRepo)))
                     (HsProtobuf.encodeMessageField
-                       (HsProtobuf.FieldNumber 3)
-                       ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                          spawnBatchRequestRepo)))
+                       (HsProtobuf.FieldNumber 4) spawnBatchRequestAgentType))
                  (HsProtobuf.encodeMessageField
-                    (HsProtobuf.FieldNumber 4) spawnBatchRequestAgentType))
+                    (HsProtobuf.FieldNumber 5) spawnBatchRequestRole))
               (HsProtobuf.encodeMessageField
-                 (HsProtobuf.FieldNumber 5) spawnBatchRequestRole))
+                 (HsProtobuf.FieldNumber 6)
+                 ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                    spawnBatchRequestWorktreeDir)))
            (HsProtobuf.encodeMessageField
-              (HsProtobuf.FieldNumber 6)
+              (HsProtobuf.FieldNumber 7)
               ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                 spawnBatchRequestWorktreeDir)))
+                 spawnBatchRequestSubrepo)))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 7)
-           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              spawnBatchRequestSubrepo))
+           (HsProtobuf.FieldNumber 8) spawnBatchRequestTopology)
   decodeMessage _
     = Hs.pure SpawnBatchRequest
         <*>
@@ -668,6 +749,9 @@ instance (HsProtobuf.Message SpawnBatchRequest) where
           ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
              (HsProtobuf.at
                 HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 7)))
+        <*>
+          HsProtobuf.at
+            HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 8)
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
@@ -700,9 +784,14 @@ instance (HsProtobuf.Message SpawnBatchRequest) where
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 7)
          (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "subrepo") [] ""]
+         (HsProtobufAST.Single "subrepo") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 8)
+         (HsProtobufAST.Prim
+            (HsProtobufAST.Named (HsProtobufAST.Single "WorkspaceTopology")))
+         (HsProtobufAST.Single "topology") [] ""]
 instance (HsJSONPB.ToJSONPB SpawnBatchRequest) where
-  toJSONPB (SpawnBatchRequest f1 f2 f3 f4 f5 f6 f7)
+  toJSONPB (SpawnBatchRequest f1 f2 f3 f4 f5 f6 f7 f8)
     = HsJSONPB.object
         ["issues"
            .=
@@ -716,8 +805,9 @@ instance (HsJSONPB.ToJSONPB SpawnBatchRequest) where
          "worktree_dir"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f6),
          "subrepo"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f7)]
-  toEncodingPB (SpawnBatchRequest f1 f2 f3 f4 f5 f6 f7)
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f7),
+         "topology" .= f8]
+  toEncodingPB (SpawnBatchRequest f1 f2 f3 f4 f5 f6 f7 f8)
     = HsJSONPB.pairs
         ["issues"
            .=
@@ -731,7 +821,8 @@ instance (HsJSONPB.ToJSONPB SpawnBatchRequest) where
          "worktree_dir"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f6),
          "subrepo"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f7)]
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f7),
+         "topology" .= f8]
 instance (HsJSONPB.FromJSONPB SpawnBatchRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -756,7 +847,8 @@ instance (HsJSONPB.FromJSONPB SpawnBatchRequest) where
                      (obj .: "worktree_dir"))
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "subrepo")))
+                     (obj .: "subrepo"))
+                <*> obj .: "topology")
 instance (HsJSONPB.ToJSON SpawnBatchRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding
@@ -867,7 +959,8 @@ data SpawnGeminiTeammateRequest
                                 spawnGeminiTeammateRequestPrompt :: Hs.Text,
                                 spawnGeminiTeammateRequestAgentType :: (HsProtobuf.Enumerated Effects.Agent.AgentType),
                                 spawnGeminiTeammateRequestSubrepo :: Hs.Text,
-                                spawnGeminiTeammateRequestTeamName :: Hs.Text}
+                                spawnGeminiTeammateRequestTeamName :: Hs.Text,
+                                spawnGeminiTeammateRequestTopology :: (HsProtobuf.Enumerated Effects.Agent.WorkspaceTopology)}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData SpawnGeminiTeammateRequest)
 instance (HsProtobuf.Named SpawnGeminiTeammateRequest) where
@@ -880,29 +973,33 @@ instance (HsProtobuf.Message SpawnGeminiTeammateRequest) where
                                 spawnGeminiTeammateRequestPrompt,
                                 spawnGeminiTeammateRequestAgentType,
                                 spawnGeminiTeammateRequestSubrepo,
-                                spawnGeminiTeammateRequestTeamName}
+                                spawnGeminiTeammateRequestTeamName,
+                                spawnGeminiTeammateRequestTopology}
     = Hs.mappend
         (Hs.mappend
            (Hs.mappend
               (Hs.mappend
+                 (Hs.mappend
+                    (HsProtobuf.encodeMessageField
+                       (HsProtobuf.FieldNumber 1)
+                       ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                          spawnGeminiTeammateRequestName))
+                    (HsProtobuf.encodeMessageField
+                       (HsProtobuf.FieldNumber 2)
+                       ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                          spawnGeminiTeammateRequestPrompt)))
                  (HsProtobuf.encodeMessageField
-                    (HsProtobuf.FieldNumber 1)
-                    ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                       spawnGeminiTeammateRequestName))
-                 (HsProtobuf.encodeMessageField
-                    (HsProtobuf.FieldNumber 2)
-                    ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                       spawnGeminiTeammateRequestPrompt)))
+                    (HsProtobuf.FieldNumber 3) spawnGeminiTeammateRequestAgentType))
               (HsProtobuf.encodeMessageField
-                 (HsProtobuf.FieldNumber 3) spawnGeminiTeammateRequestAgentType))
+                 (HsProtobuf.FieldNumber 4)
+                 ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                    spawnGeminiTeammateRequestSubrepo)))
            (HsProtobuf.encodeMessageField
-              (HsProtobuf.FieldNumber 4)
+              (HsProtobuf.FieldNumber 5)
               ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                 spawnGeminiTeammateRequestSubrepo)))
+                 spawnGeminiTeammateRequestTeamName)))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 5)
-           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              spawnGeminiTeammateRequestTeamName))
+           (HsProtobuf.FieldNumber 6) spawnGeminiTeammateRequestTopology)
   decodeMessage _
     = Hs.pure SpawnGeminiTeammateRequest
         <*>
@@ -924,6 +1021,9 @@ instance (HsProtobuf.Message SpawnGeminiTeammateRequest) where
           ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
              (HsProtobuf.at
                 HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 5)))
+        <*>
+          HsProtobuf.at
+            HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 6)
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
@@ -945,9 +1045,14 @@ instance (HsProtobuf.Message SpawnGeminiTeammateRequest) where
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 5)
          (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "team_name") [] ""]
+         (HsProtobufAST.Single "team_name") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 6)
+         (HsProtobufAST.Prim
+            (HsProtobufAST.Named (HsProtobufAST.Single "WorkspaceTopology")))
+         (HsProtobufAST.Single "topology") [] ""]
 instance (HsJSONPB.ToJSONPB SpawnGeminiTeammateRequest) where
-  toJSONPB (SpawnGeminiTeammateRequest f1 f2 f3 f4 f5)
+  toJSONPB (SpawnGeminiTeammateRequest f1 f2 f3 f4 f5 f6)
     = HsJSONPB.object
         ["name" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "prompt" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
@@ -955,8 +1060,9 @@ instance (HsJSONPB.ToJSONPB SpawnGeminiTeammateRequest) where
          "subrepo"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f4),
          "team_name"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f5)]
-  toEncodingPB (SpawnGeminiTeammateRequest f1 f2 f3 f4 f5)
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f5),
+         "topology" .= f6]
+  toEncodingPB (SpawnGeminiTeammateRequest f1 f2 f3 f4 f5 f6)
     = HsJSONPB.pairs
         ["name" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "prompt" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
@@ -964,7 +1070,8 @@ instance (HsJSONPB.ToJSONPB SpawnGeminiTeammateRequest) where
          "subrepo"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f4),
          "team_name"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f5)]
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f5),
+         "topology" .= f6]
 instance (HsJSONPB.FromJSONPB SpawnGeminiTeammateRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -983,7 +1090,8 @@ instance (HsJSONPB.FromJSONPB SpawnGeminiTeammateRequest) where
                      (obj .: "subrepo"))
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "team_name")))
+                     (obj .: "team_name"))
+                <*> obj .: "topology")
 instance (HsJSONPB.ToJSON SpawnGeminiTeammateRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding

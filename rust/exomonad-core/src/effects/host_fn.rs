@@ -238,6 +238,7 @@ mod tests {
             error: String::new(),
             pr_number: 0,
             pr_url: String::new(),
+            topology: 0,
         };
 
         let spawn_resp = SpawnResponse {

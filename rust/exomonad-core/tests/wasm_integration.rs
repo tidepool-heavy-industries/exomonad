@@ -166,6 +166,7 @@ impl EffectHandler for MockAgentHandler {
                     error: String::new(),
                     pr_number: 0,
                     pr_url: String::new(),
+                    topology: 0,
                 };
                 Ok(SpawnBatchResponse {
                     agents: vec![agent],
@@ -395,6 +396,7 @@ async fn wasm_large_response_roundtrip() {
                             error: String::new(),
                             pr_number: 0,
                             pr_url: String::new(),
+                            topology: 0,
                         })
                         .collect();
 

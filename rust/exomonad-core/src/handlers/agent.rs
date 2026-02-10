@@ -262,6 +262,7 @@ fn spawn_result_to_proto(
         error: String::new(),
         pr_number: 0,
         pr_url: String::new(),
+        topology: 0,
     }
 }
 
@@ -293,6 +294,7 @@ fn teammate_result_to_proto(
         error: String::new(),
         pr_number: 0,
         pr_url: String::new(),
+        topology: 0,
     }
 }
 
@@ -320,5 +322,6 @@ fn service_info_to_proto(info: &AgentInfo) -> exomonad_proto::effects::agent::Ag
         error: String::new(),
         pr_number: info.pr.as_ref().map(|p| p.number as i32).unwrap_or(0),
         pr_url: info.pr.as_ref().map(|p| p.url.clone()).unwrap_or_default(),
+        topology: 0,
     }
 }

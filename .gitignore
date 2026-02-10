@@ -54,6 +54,9 @@ rust/exomonad/.exomonad/
 # Standalone Rust crate build artifacts (outside workspace target/)
 rust/exomonad-plugin/target/
 
+# Interagent communication artifacts (TL↔Codex design docs)
+interagent/
+
 # Integration test build artifacts
 tests/integration/external-consumer/result
 tests/integration/external-consumer/.exomonad/wasm/
