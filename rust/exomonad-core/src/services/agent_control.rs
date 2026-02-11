@@ -94,8 +94,7 @@ impl AgentType {
     /// Format: "{emoji} gh-{issue_id}-{short_slug}"
     /// The slug is truncated to 20 chars for readability.
     fn display_name(&self, issue_id: &str, slug: &str) -> String {
-        let short_slug: String = slug.chars().take(20).collect();
-        format!("{} gh-{}-{}", self.emoji(), issue_id, short_slug)
+        format!("{} gh-{}-{}", self.emoji(), issue_id, slug)
     }
 }
 
@@ -567,15 +566,18 @@ impl AgentControlService {
 
             let effective_project_dir = self.effective_project_dir(options.subrepo.as_deref())?;
 
+            // Sanitize name for internal use
+            let slug = slugify(&options.name);
             let agent_suffix = options.agent_type.suffix();
-            let internal_name = format!("{}-{}", options.name, agent_suffix);
-            let display_name = format!("{} {}", options.agent_type.emoji(), options.name);
+            let internal_name = format!("{}-{}", slug, agent_suffix);
+            let display_name = format!("{} {}", options.agent_type.emoji(), slug);
 
             // Idempotency check: if Zellij tab is alive, return existing info
             let tab_alive = self.is_zellij_tab_alive(&display_name).await;
 
             info!(
                 name = %options.name,
+                internal_name,
                 tab_alive,
                 "Idempotency check"
             );
@@ -607,7 +609,8 @@ impl AgentControlService {
                     .to_string()
             };
 
-            let branch_name = format!("{}/{}", base_branch, options.name);
+            // Use '-' separator to avoid directory/file conflicts in git refs
+            let branch_name = format!("{}-{}", base_branch, slug);
             let worktree_path = effective_project_dir
                 .join(".exomonad")
                 .join("worktrees")
@@ -666,8 +669,8 @@ impl AgentControlService {
                 );
             }
 
-            // Open Zellij pane with cwd = worktree_path
-            self.new_zellij_pane(
+            // Open Zellij tab with cwd = worktree_path (Heavy/Isolated agents get Tabs)
+            self.new_zellij_tab(
                 &display_name,
                 &worktree_path,
                 options.agent_type,
@@ -726,8 +729,10 @@ impl AgentControlService {
                 anyhow!("MCP server port not set. Start server with `exomonad serve` before spawning agents.")
             })?;
 
-            let internal_name = format!("{}-gemini", options.name);
-            let display_name = format!("{} {}", AgentType::Gemini.emoji(), options.name);
+            // Sanitize name for internal use
+            let slug = slugify(&options.name);
+            let internal_name = format!("{}-gemini", slug);
+            let display_name = format!("{} {}", AgentType::Gemini.emoji(), slug);
 
             // Idempotency: if pane is already alive, return existing info
             let tab_alive = self.is_zellij_tab_alive(&display_name).await;
@@ -828,7 +833,7 @@ impl AgentControlService {
         _force: bool,
         subrepo: Option<&str>,
     ) -> Result<()> {
-        let _effective_project_dir = self.effective_project_dir(subrepo)?;
+        let effective_project_dir = self.effective_project_dir(subrepo)?;
 
         // Find agent in list (which reads from config.json)
         let agents = self.list_agents(subrepo).await?;
@@ -838,6 +843,11 @@ impl AgentControlService {
             .ok_or_else(|| anyhow!("No agent found for identifier: {}", identifier))?;
 
         info!(identifier, has_tab = agent.has_tab, "Cleaning up agent");
+
+        // Reconstruct internal_name for paths (identifier + suffix)
+        // Zellij tabs display "identifier", but paths use "identifier-suffix"
+        let suffix = agent.agent_type.as_deref().unwrap_or("gemini");
+        let internal_name = format!("{}-{}", identifier, suffix);
 
         // Close Zellij tab — try matching by agent name in tab list
         if agent.has_tab {
@@ -852,12 +862,26 @@ impl AgentControlService {
             }
         }
 
+        // Remove temporary worker config directory (created by spawn_worker)
+        let tmp_agent_dir = PathBuf::from(format!("/tmp/exomonad-agents/{}", internal_name));
+        if tmp_agent_dir.exists() {
+            if let Err(e) = fs::remove_dir_all(&tmp_agent_dir).await {
+                warn!(
+                    path = %tmp_agent_dir.display(),
+                    error = %e,
+                    "Failed to remove temp agent config dir (non-fatal)"
+                );
+            } else {
+                info!(path = %tmp_agent_dir.display(), "Removed temp agent config dir");
+            }
+        }
+
         // Remove per-agent config directory (.exomonad/agents/{name}/)
         let agent_config_dir = self
             .project_dir
             .join(".exomonad")
             .join("agents")
-            .join(identifier);
+            .join(&internal_name);
         if agent_config_dir.exists() {
             if let Err(e) = fs::remove_dir_all(&agent_config_dir).await {
                 warn!(
@@ -871,11 +895,10 @@ impl AgentControlService {
         }
 
         // Remove git worktree if it exists
-        let worktree_path = self
-            .project_dir
+        let worktree_path = effective_project_dir
             .join(".exomonad")
             .join("worktrees")
-            .join(identifier);
+            .join(&internal_name);
         if worktree_path.exists() {
             info!(path = %worktree_path.display(), "Removing git worktree");
             let output = Command::new("git")
@@ -1639,11 +1662,10 @@ mod tests {
     }
 
     #[test]
-    fn test_agent_type_display_name_truncates_long_slug() {
+    fn test_agent_type_display_name_no_truncation() {
         let long_slug = "this-is-a-very-long-slug-that-should-be-truncated";
         let display = AgentType::Claude.display_name("123", long_slug);
-        // Slug portion is truncated to 20 chars: "this-is-a-very-long-" (exactly 20)
-        assert_eq!(display, "🤖 gh-123-this-is-a-very-long-");
+        assert_eq!(display, "🤖 gh-123-this-is-a-very-long-slug-that-should-be-truncated");
     }
 
     #[test]
