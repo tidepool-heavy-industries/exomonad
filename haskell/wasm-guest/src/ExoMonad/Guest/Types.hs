@@ -47,7 +47,7 @@ instance FromJSON MCPCallInput where
 
 -- | Hook event type (internal abstractions only).
 -- Rust normalizes CLI-specific types (Claude Stop, Gemini AfterAgent) to these.
-data HookEventType = SessionEnd | Stop | SubagentStop | PreToolUse | PostToolUse
+data HookEventType = SessionEnd | Stop | SubagentStop | PreToolUse | PostToolUse | WorkerExit
   deriving (Show, Eq, Generic)
 
 instance ToJSON HookEventType where
@@ -56,6 +56,7 @@ instance ToJSON HookEventType where
   toJSON SubagentStop = Aeson.String "SubagentStop"
   toJSON PreToolUse = Aeson.String "PreToolUse"
   toJSON PostToolUse = Aeson.String "PostToolUse"
+  toJSON WorkerExit = Aeson.String "WorkerExit"
 
 instance FromJSON HookEventType where
   parseJSON = Aeson.withText "HookEventType" $ \case
@@ -64,6 +65,7 @@ instance FromJSON HookEventType where
     "SubagentStop" -> pure SubagentStop
     "PreToolUse" -> pure PreToolUse
     "PostToolUse" -> pure PostToolUse
+    "WorkerExit" -> pure WorkerExit
     other -> fail $ "Unknown hook event type: " <> T.unpack other
 
 -- | Input for a hook event.

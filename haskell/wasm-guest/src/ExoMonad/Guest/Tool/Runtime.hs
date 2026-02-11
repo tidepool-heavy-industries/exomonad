@@ -28,6 +28,7 @@ import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
 import Effects.Log qualified as Log
 import ExoMonad.Effect.Class (runEffect_)
 import ExoMonad.Effects.Log (LogInfo, LogError, LogEmitEvent)
+import ExoMonad.Effects.Messaging (sendNote)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), toMCPFormat)
 import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
@@ -38,6 +39,7 @@ import Foreign.C.Types (CInt (..))
 import GHC.Generics (Generic)
 import Polysemy (Embed, Sem, runM)
 import System.Directory (getCurrentDirectory)
+import System.Environment (lookupEnv)
 import System.FilePath (takeFileName)
 
 -- | Helper for fire-and-forget logging via yield_effect.
@@ -148,6 +150,7 @@ hookHandler config = do
             SubagentStop -> "SubagentStop"
             PreToolUse -> "PreToolUse"
             PostToolUse -> "PostToolUse"
+            WorkerExit -> "WorkerExit"
       logInfo_ ("Hook received: " <> hookName)
 
       case hookType of
@@ -156,6 +159,7 @@ hookHandler config = do
         SubagentStop -> handleStopHook hookInput (onSubagentStop config)
         PreToolUse -> handlePreToolUse hookInput (preToolUse config)
         PostToolUse -> handlePreToolUse hookInput (postToolUse config)
+        WorkerExit -> handleWorkerExit hookInput
   where
     handlePreToolUse :: HookInput -> (HookInput -> Sem '[Embed IO] HookOutput) -> IO CInt
     handlePreToolUse hookInput hook = do
@@ -202,6 +206,26 @@ hookHandler config = do
 
       -- Return the result to the hook caller
       output (BSL.toStrict $ Aeson.encode result)
+      pure 0
+
+    handleWorkerExit :: HookInput -> IO CInt
+    handleWorkerExit _ = do
+      logInfo_ "WorkerExit hook firing"
+      maybeAgentId <- lookupEnv "EXOMONAD_AGENT_ID"
+      case maybeAgentId of
+        Just agentIdStr -> do
+            let agentId = T.pack agentIdStr
+            logInfo_ $ "Handling exit for agent: " <> agentId
+            
+            -- Send note to parent (Team Lead)
+            let message = "Worker " <> agentId <> " completed."
+            _ <- sendNote message
+            pure ()
+        Nothing -> do
+            logError_ "EXOMONAD_AGENT_ID not set in worker-exit hook"
+            pure ()
+
+      output (BSL.toStrict $ Aeson.encode $ allowResponse Nothing)
       pure 0
 
 -- | Wrap a handler with exception handling.

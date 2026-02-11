@@ -82,7 +82,7 @@ Each role is a `RoleConfig` selecting from pre-built tool records:
 ```haskell
 -- .exomonad/roles/tl/Role.hs
 data Tools mode = Tools
-  { spawn :: SpawnTools mode     -- spawn_subtree, spawn_leaf
+  { spawn :: SpawnTools mode     -- spawn_subtree, spawn_worker
   , popups :: PopupTools mode   -- popup UI
   } deriving Generic
 

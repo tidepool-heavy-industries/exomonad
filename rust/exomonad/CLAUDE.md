@@ -74,7 +74,7 @@ gemini mcp add --transport http exomonad http://localhost:7432/tl/mcp
 | `github_get_issue` | Get single issue details | `owner`, `repo`, `number` |
 | `github_list_prs` | List GitHub pull requests | `owner`, `repo`, `state?`, `limit?` |
 | `spawn_subtree` | Fork a worktree node off current branch for sub-problems needing further decomposition | `task`, `branch_name`, `agent_type?` |
-| `spawn_leaf` | Spawn agent for focused task in own worktree | `name`, `prompt`, `agent_type?` |
+| `spawn_worker` | Spawn agent for focused task in own worktree | `name`, `prompt`, `agent_type?` |
 | `get_agent_messages` | Read notes/questions from agents | `agent_id?` |
 | `answer_question` | Answer pending agent question | `agent_id`, `question_id`, `answer` |
 

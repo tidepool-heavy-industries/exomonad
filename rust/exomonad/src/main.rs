@@ -221,6 +221,7 @@ async fn handle_hook(
         HookEventType::SessionEnd => "SessionEnd",
         HookEventType::PreToolUse => "PreToolUse",
         HookEventType::PostToolUse => "PostToolUse",
+        HookEventType::WorkerExit => "WorkerExit",
         _ => {
             // Pass through unhandled hooks with allow
             debug!(event = ?event_type, "Hook type not implemented in WASM, allowing");

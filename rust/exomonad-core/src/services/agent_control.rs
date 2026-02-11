@@ -764,6 +764,15 @@ impl AgentControlService {
                     "exomonad": {
                         "httpUrl": mcp_url
                     }
+                },
+                "hooks": {
+                    "afterAgent": [
+                        {
+                            "type": "command",
+                            "command": "exomonad",
+                            "args": ["hook", "worker-exit", "--runtime", "gemini"]
+                        }
+                    ]
                 }
             });
             fs::write(&settings_path, serde_json::to_string_pretty(&settings)?).await?;

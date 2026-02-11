@@ -80,4 +80,6 @@ pub enum HookEventType {
     UserPromptSubmit,
     /// Gemini: After agent finishes (equivalent to Claude's Stop for main agent)
     AfterAgent,
+    /// Custom: Worker agent exit (sends completion note to parent)
+    WorkerExit,
 }
