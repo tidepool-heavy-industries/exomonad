@@ -287,8 +287,8 @@ Human in Zellij session
 ```
 1. User asks question in Claude Code
 2. Claude plans to call MCP tool (e.g., spawn_agents, git_branch)
-3. Claude Code sends request to exomonad (stdio)
-4. Rust calls WASM handle_mcp_call
+3. Claude Code sends request to exomonad (HTTP)
+4. exomonad serve calls WASM handle_mcp_call (Unified WASM)
 5. Haskell dispatches to tool handler
 6. Handler yields effects (GitGetBranch, SpawnAgent, etc.)
 7. Rust executes effects via host functions
@@ -326,8 +326,8 @@ gemini mcp add --transport http exomonad http://localhost:7432/tl/mcp
 ```
 
 **Two WASM loading modes:**
-- **Embedded** (`include_bytes!`): WASM compiled into binary. Used by `exomonad mcp-stdio` and `exomonad hook`. Role selected via config.
-- **File-based** (`from_file`): WASM loaded from `.exomonad/wasm/`. Used by `exomonad serve`. Enables hot reload — mtime checked per tool call, new WASM swapped in transparently.
+- **Embedded** (`include_bytes!`): WASM compiled into binary. Used by `exomonad hook`. Role selected via config.
+- **File-based** (`from_file`): Unified WASM loaded from `.exomonad/wasm/`. Used by `exomonad serve`. Contains all roles, selected per-call. Enables hot reload — mtime checked per tool call, new WASM swapped in transparently.
 
 ```toml
 default_role = "tl"  # or "dev"
@@ -349,8 +349,7 @@ just install-all-dev
 just install-all
 
 # WASM builds (hermetic via nix)
-just wasm tl
-just wasm dev
+just wasm-all
 
 # Rust sidecar only
 cargo build -p exomonad
@@ -416,7 +415,7 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 ### Status
 
 - ✅ 100% WASM routing (all logic in Haskell, Rust handles I/O only)
-- ✅ MCP stdio server for Claude Code
+- ✅ All MCP tools via WASM (no direct Rust tools)
 - ✅ Hook forwarding via WASM
 - ✅ Embedded WASM (compile-time `include_bytes!`, no file paths)
 - ✅ spawn_agents: Git worktrees + Zellij KDL layouts

@@ -65,12 +65,11 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 ├── exomonad/CLAUDE.md  ← MCP + Hook handler via WASM (BINARY)
 │   • Binary: exomonad
 │   • hook subcommand: handles CC hooks via WASM
-│   • mcp-stdio subcommand: MCP stdio server for Claude Code
 │
 ├── exomonad-core/  ← Unified library (publishable)
 │   • Framework: EffectHandler trait, EffectRegistry, RuntimeBuilder, Runtime
 │   • PluginManager (single host fn: yield_effect)
-│   • MCP stdio server (reusable)
+│   • MCP server implementation (reusable)
 │   • Protocol types (hook, mcp, service)
 │   • Handlers: GitHandler, GitHubHandler, LogHandler, AgentHandler,
 │     FsHandler, PopupHandler, FilePRHandler, CopilotHandler
@@ -123,10 +122,7 @@ nix develop .#wasm -c wasm32-wasi-cabal build --project-file=cabal.project.wasm 
 
 ### Running
 ```bash
-# MCP stdio server (Claude Code spawns this)
-exomonad mcp-stdio
-
-# MCP HTTP server on Unix socket (for testing)
+# MCP server (HTTP)
 exomonad serve
 
 # Handle Claude Code hook
@@ -147,19 +143,18 @@ echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
 
 ### Agent Identity
 
-In HTTP serve mode, multiple Gemini agents share one server process. Each agent hits a unique URL: `/agents/{name}/mcp`. The server extracts identity from the URL path and stores it in a tokio task-local via `mcp::agent_identity`.
+In HTTP serve mode, multiple agents share one server process. Each agent hits a unique URL: `/agents/{name}/mcp`. The server extracts identity from the URL path and stores it in a tokio task-local via `mcp::agent_identity`.
 
 Resolution order in `mcp::agent_identity::get_agent_id()`:
 1. **Task-local** (HTTP mode): set by the `/agents/{name}/mcp` route handler
-2. **Env var** (stdio mode): `EXOMONAD_AGENT_ID` set in Zellij tab at spawn time
-3. **Directory name** (last resort): current working directory basename
+2. **Directory name** (last resort): current working directory basename
 
 **Route layout:**
 - `/tl/mcp` — TL endpoint (all tools including orchestration)
 - `/dev/mcp` — generic dev endpoint (no agent identity)
 - `/agents/{name}/mcp` — per-agent endpoint (identity from URL path)
 
-At spawn time, `spawn_gemini_teammate` writes per-agent `settings.json` with `httpUrl: "http://localhost:{port}/agents/{name}/mcp"`. The URL IS the identity — unforgeable, visible in access logs.
+At spawn time, `spawn_agents` (via WASM) writes per-agent `settings.json` with `httpUrl: "http://localhost:{port}/agents/{name}/mcp"`. The URL IS the identity — unforgeable, visible in access logs.
 
 ## MCP Tools
 
@@ -230,7 +225,7 @@ Haskell: Either EffectError GetBranchResponse
 Use CLI-native config commands to register the MCP server:
 ```bash
 # Claude Code
-claude mcp add exomonad -- exomonad mcp-stdio
+claude mcp add --transport http exomonad http://localhost:7432/tl/mcp
 
 # Gemini CLI (HTTP mode only)
 gemini mcp add --transport http exomonad http://localhost:7432/tl/mcp

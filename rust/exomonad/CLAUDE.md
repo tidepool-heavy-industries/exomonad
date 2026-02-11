@@ -7,47 +7,21 @@ Unified sidecar binary: Rust host with Haskell WASM plugin.
 **All logic is in Haskell WASM. Rust handles I/O only.**
 
 Two WASM loading modes:
-- **Embedded** (`include_bytes!`): WASM compiled into binary, used by `mcp-stdio` and `hook`
-- **File-based** (`from_file`): WASM loaded from `.exomonad/wasm/`, used by `serve`, enables hot reload
+- **Embedded** (`include_bytes!`): WASM compiled into binary, used by `hook`
+- **File-based** (`from_file`): Unified WASM loaded from `.exomonad/wasm/`, used by `serve`. Contains all roles, selected per-call. Enables hot reload.
 
 ```
-# Stdio mode (single session, embedded WASM)
-Claude Code → exomonad mcp-stdio → Embedded WASM → effects → I/O
-
-# HTTP mode (multi-agent, hot-reloadable WASM)
-N agents → exomonad serve → Unix socket (.exomonad/server.sock) → File WASM (auto-reload) → effects → I/O
-```
-
-### Hook Mode
-
-For Claude Code hooks:
-```
+# Hook Mode (embedded WASM)
 Claude Code → exomonad hook → WASM handle_pre_tool_use → HookOutput
-```
 
-### MCP Stdio Mode
-
-For single-session MCP tools:
-```
-Claude Code → stdio → exomonad mcp-stdio → WASM handle_mcp_call → Result
-```
-
-### MCP HTTP Mode (Singleton Server)
-
-For multi-agent scenarios — one server, all agents connect:
-```
-exomonad serve [--socket PATH]
-    ├── Unix socket at .exomonad/server.sock (default)
-    ├── POST /mcp → JSON-RPC (same dispatch as stdio)
-    ├── GET /health → version info
-    └── WASM hot-reloaded on mtime change per tool call
+# HTTP mode (multi-agent, unified WASM)
+N agents → exomonad serve → Unix socket (.exomonad/server.sock) → Unified WASM (handles all roles) → effects → I/O
 ```
 
 ## CLI Usage
 
 ```bash
 exomonad hook pre-tool-use        # Handle Claude Code hook
-exomonad mcp-stdio                # Stdio MCP server (single session)
 exomonad serve [--socket PATH]    # Unix socket MCP server (multi-agent, hot reload)
 exomonad recompile [--role ROLE]  # Build WASM from Haskell source
 exomonad init [--session NAME]    # Initialize Zellij session (Server tab + TL tab)
@@ -77,14 +51,14 @@ To update WASM: rebuild the Rust binary with `just install-all-dev`. The `build.
 
 ## MCP Server
 
-The MCP server provides Claude Code with tools via stdio (JSON-RPC).
+The MCP server provides tools via HTTP (rmcp).
 
 ### Configuration
 
 Use CLI-native config commands:
 ```bash
 # Claude Code
-claude mcp add exomonad -- exomonad mcp-stdio
+claude mcp add --transport http exomonad http://localhost:7432/tl/mcp
 
 # Gemini CLI (HTTP mode only)
 gemini mcp add --transport http exomonad http://localhost:7432/tl/mcp
@@ -166,6 +140,8 @@ cargo build -p exomonad          # Then build Rust (embeds WASM via build.rs)
 
 ## Testing
 
+Integration tests use a shared server pattern (OnceLock singleton) to reduce startup overhead.
+
 ```bash
 # Unit tests
 cargo test -p exomonad
@@ -198,29 +174,6 @@ Claude Code hook JSON (stdin)
     Serialize and print to stdout
          ↓
     Claude Code receives response
-```
-
-### MCP Tool Flow
-```
-Claude Code MCP request
-         ↓
-    exomonad mcp-stdio
-         ↓
-    Use embedded WASM (role from config)
-         ↓
-    stdio receives JSON-RPC request
-         ↓
-    Call WASM handle_mcp_call
-         ↓
-    Haskell dispatchTool routes to handler
-         ↓
-    Handler yields effects (AgentControl, FileSystem, etc.)
-         ↓
-    Rust executes effects via host functions
-         ↓
-    Haskell returns MCPCallOutput
-         ↓
-    stdio JSON-RPC response
 ```
 
 ## Related Documentation
