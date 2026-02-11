@@ -14,6 +14,7 @@
 - [x] Per-agent MCP identity routing (`/agents/{name}/mcp`)
 - [x] Branch naming uses `.` separator (avoids git ref collisions, enables PR base detection)
 - [x] Integration tests for hierarchy + PR detection
+- [x] `wait_for_event` — blocking synchronization for worker completion via direct server signaling
 
 ### Known Gaps (Acceptable for Phase 1)
 - **Rebase notification** — handled via prompting. Parent sends `note` to siblings after merge; they rebase manually. No tooling needed.

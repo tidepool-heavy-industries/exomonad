@@ -1174,7 +1174,7 @@ impl AgentControlService {
         // Generate layout using zellij-gen library (includes zjstatus with Solarized Dark)
         let params = crate::layout::AgentTabParams {
             tab_name: name,
-            pane_name: "Agent",
+            pane_name: name,
             command: &kdl_escaped_command,
             cwd,
             shell: &shell,
@@ -1243,6 +1243,12 @@ impl AgentControlService {
                 layout_file.display()
             ));
         }
+
+        // Explicitly rename pane to ensure it matches display_name exactly
+        let _ = Command::new("zellij")
+            .args(["action", "rename-pane", name])
+            .output()
+            .await;
 
         Ok(())
     }
@@ -1328,6 +1334,12 @@ impl AgentControlService {
             );
             anyhow::bail!("zellij action new-pane failed: {}", stderr);
         }
+
+        // Explicitly rename pane to ensure it's visible in the UI
+        let _ = Command::new("zellij")
+            .args(["action", "rename-pane", name])
+            .output()
+            .await;
 
         info!(name, "Successfully created Zellij pane");
         Ok(())
