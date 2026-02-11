@@ -137,10 +137,20 @@ checkPRFiled repoInfo = do
             Right prResp ->
               if not (GH.getPullRequestForBranchResponseFound prResp)
                 then
-                  pure $
+                  let baseBranch = detectBaseBranch branchName
+                      baseHint = if baseBranch /= "main"
+                        then ", base_branch=\"" <> baseBranch <> "\""
+                        else ""
+                   in pure $
                     blockStopResponse $
-                      "No PR filed for this branch. Use the file_pr tool to create a PR:\n"
-                        <> "file_pr(title=\"Describe your work\", body=\"Detailed description of changes\")"
+                      "No PR filed for branch '"
+                        <> branchName
+                        <> "'. Target: "
+                        <> baseBranch
+                        <> "\nUse the file_pr tool to create a PR:\n"
+                        <> "file_pr(title=\"Describe your work\", body=\"Detailed description of changes\""
+                        <> baseHint
+                        <> ")"
                 else case GH.getPullRequestForBranchResponsePullRequest prResp of
                   Nothing ->
                     pure $ blockStopResponse "PR found but no details available"
@@ -201,6 +211,18 @@ formatComment c =
     <> (let l = Copilot.copilotCommentLine c in if l == 0 then "" else ":" <> T.pack (show l))
     <> ": "
     <> TL.toStrict (Copilot.copilotCommentBody c)
+
+-- ============================================================================
+-- Branch Convention Helpers
+-- ============================================================================
+
+-- | Detect the parent branch from branch naming convention.
+-- "parent/child" targets "parent". No slash means "main".
+detectBaseBranch :: Text -> Text
+detectBaseBranch branch =
+  case T.breakOnEnd "/" branch of
+    ("", _) -> "main"
+    (prefix, _) -> T.dropEnd 1 prefix -- strip trailing "/"
 
 -- ============================================================================
 -- Agent Identity Helpers
