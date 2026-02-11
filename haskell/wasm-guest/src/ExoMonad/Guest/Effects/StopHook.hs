@@ -15,6 +15,7 @@ module ExoMonad.Guest.Effects.StopHook
   )
 where
 
+import Control.Monad (void)
 import Data.Aeson (ToJSON (..), encode, object, (.=))
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -23,15 +24,28 @@ import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Encoding qualified as TLE
 import Data.Vector qualified as V
 import Effects.Copilot qualified as Copilot
+import Effects.FilePr qualified as FP
 import Effects.Git qualified as Git
 import Effects.Github qualified as GH
+import Effects.Log qualified as Log
+import ExoMonad.Effect.Class (runEffect_)
 import ExoMonad.Effects.Copilot (waitForCopilotReview)
+import ExoMonad.Effects.FilePR (filePR)
 import ExoMonad.Effects.Git (getBranch, getRepoInfo, getStatus, hasUnpushedCommits)
 import ExoMonad.Effects.GitHub (getPullRequestForBranch)
+import ExoMonad.Effects.Log (LogInfo)
 import ExoMonad.Effects.Messaging (sendNote)
 import ExoMonad.Guest.Types (StopDecision (..), StopHookOutput (..), allowStopResponse, blockStopResponse)
 import GHC.Generics (Generic)
 import System.Environment (lookupEnv)
+
+-- ============================================================================
+-- Helpers
+-- ============================================================================
+
+-- | Helper for fire-and-forget logging via yield_effect.
+logInfo_ :: Text -> IO ()
+logInfo_ msg = void $ runEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict msg, Log.infoRequestFields = ""})
 
 -- ============================================================================
 -- Types
@@ -136,26 +150,44 @@ checkPRFiled repoInfo = do
             Left err -> pure $ blockStopResponse $ "Failed to check for PR: " <> T.pack (show err)
             Right prResp ->
               if not (GH.getPullRequestForBranchResponseFound prResp)
-                then
-                  let baseBranch = detectBaseBranch branchName
-                      baseHint = if baseBranch /= "main"
-                        then ", base_branch=\"" <> baseBranch <> "\""
-                        else ""
-                   in pure $
-                    blockStopResponse $
-                      "No PR filed for branch '"
-                        <> branchName
-                        <> "'. Target: "
-                        <> baseBranch
-                        <> "\nUse the file_pr tool to create a PR:\n"
-                        <> "file_pr(title=\"Describe your work\", body=\"Detailed description of changes\""
-                        <> baseHint
-                        <> ")"
+                then autoFilePR branchName
                 else case GH.getPullRequestForBranchResponsePullRequest prResp of
                   Nothing ->
                     pure $ blockStopResponse "PR found but no details available"
                   Just pr ->
                     checkReviewComments pr
+
+autoFilePR :: Text -> IO StopHookOutput
+autoFilePR branchName = do
+  logInfo_ ("No PR found for " <> branchName <> ", auto-filing...")
+
+  -- Construct PR title/body
+  mAgentId <- getAgentId
+  let agentLabel = maybe "" (\aid -> "Agent " <> aid <> ": ") mAgentId
+      prTitle = agentLabel <> "Work on " <> branchName
+      prBody = "Auto-filed by ExoMonad stop hook on session end."
+      baseBranch = detectBaseBranch branchName
+
+  let fpReq =
+        FP.FilePrRequest
+          { FP.filePrRequestTitle = TL.fromStrict prTitle,
+            FP.filePrRequestBody = TL.fromStrict prBody,
+            FP.filePrRequestBaseBranch = TL.fromStrict baseBranch
+          }
+
+  fpResult <- filePR fpReq
+  case fpResult of
+    Left err -> pure $ blockStopResponse $ "Failed to auto-file PR: " <> T.pack (show err)
+    Right fpResp -> do
+      let prNum = FP.filePrResponsePrNumber fpResp
+          prUrl = TL.toStrict (FP.filePrResponsePrUrl fpResp)
+      logInfo_ ("Auto-filed PR #" <> T.pack (show prNum) <> ": " <> prUrl)
+
+      pure $
+        blockStopResponse $
+          "PR #"
+            <> T.pack (show prNum)
+            <> " has been auto-filed. Please wait for Copilot review to complete before stopping."
 
 checkReviewComments :: GH.PullRequest -> IO StopHookOutput
 checkReviewComments pr = do
@@ -217,11 +249,14 @@ formatComment c =
 -- ============================================================================
 
 -- | Detect the parent branch from branch naming convention.
--- "parent/child" targets "parent". No slash means "main".
+-- "parent/child" or "parent.child" targets "parent". No separator means "main".
 detectBaseBranch :: Text -> Text
 detectBaseBranch branch =
   case T.breakOnEnd "/" branch of
-    ("", _) -> "main"
+    ("", _) ->
+      case T.breakOnEnd "." branch of
+        ("", _) -> "main"
+        (prefix, _) -> T.dropEnd 1 prefix -- strip trailing "."
     (prefix, _) -> T.dropEnd 1 prefix -- strip trailing "/"
 
 -- ============================================================================
