@@ -89,16 +89,14 @@ sendNote :: Text -> IO (Either EffectError SendNoteResponse)
 sendNote content =
   runEffect @MessagingSendNote $
     SendNoteRequest
-      { sendNoteRequestContent = TL.fromStrict content,
-        sendNoteRequestTeamName = ""
+      { sendNoteRequestContent = TL.fromStrict content
       }
 
 sendQuestion :: Text -> IO (Either EffectError SendQuestionResponse)
 sendQuestion question =
   runEffect @MessagingSendQuestion $
     SendQuestionRequest
-      { sendQuestionRequestQuestion = TL.fromStrict question,
-        sendQuestionRequestTeamName = ""
+      { sendQuestionRequestQuestion = TL.fromStrict question
       }
 
 -- ============================================================================
@@ -106,12 +104,12 @@ sendQuestion question =
 -- ============================================================================
 
 -- | Read messages from agent outboxes. Empty agent_id reads all agents.
-getAgentMessages :: Text -> IO (Either EffectError GetAgentMessagesResponse)
-getAgentMessages agentId =
+getAgentMessages :: Text -> Int -> IO (Either EffectError GetAgentMessagesResponse)
+getAgentMessages agentId timeoutSecs =
   runEffect @MessagingGetAgentMessages $
     GetAgentMessagesRequest
       { getAgentMessagesRequestAgentId = TL.fromStrict agentId,
-        getAgentMessagesRequestTeamName = ""
+        getAgentMessagesRequestTimeoutSecs = fromIntegral timeoutSecs
       }
 
 -- | Answer a pending question from an agent.
@@ -121,6 +119,5 @@ answerQuestion agentId questionId answer =
     AnswerQuestionRequest
       { answerQuestionRequestAgentId = TL.fromStrict agentId,
         answerQuestionRequestQuestionId = TL.fromStrict questionId,
-        answerQuestionRequestAnswer = TL.fromStrict answer,
-        answerQuestionRequestTeamName = ""
+        answerQuestionRequestAnswer = TL.fromStrict answer
       }

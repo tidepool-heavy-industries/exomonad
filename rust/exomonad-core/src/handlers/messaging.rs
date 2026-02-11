@@ -130,23 +130,53 @@ impl MessagingEffects for MessagingHandler {
         &self,
         req: GetAgentMessagesRequest,
     ) -> EffectResult<GetAgentMessagesResponse> {
-        info!(agent_id = %req.agent_id, "Getting agent messages");
+        let timeout_secs = req.timeout_secs;
+        info!(agent_id = %req.agent_id, timeout_secs, "Getting agent messages");
 
-        if !req.agent_id.is_empty() {
-            // Read specific agent's messages from TL inbox (messages FROM this agent)
-            let tl_inbox = inbox::inbox_path(&self.project_dir, "team-lead");
-            let all_messages = tokio::task::spawn_blocking(move || inbox::read_unread(&tl_inbox))
+        let tl_inbox = inbox::inbox_path(&self.project_dir, "team-lead");
+
+        // If timeout > 0, use long-polling
+        let all_messages = if timeout_secs > 0 {
+            let timeout = Duration::from_secs(timeout_secs as u64);
+            let interval = Duration::from_secs(2); // Poll every 2 seconds
+
+            info!("Starting long-poll for {}s", timeout_secs);
+            let start = std::time::Instant::now();
+
+            let tl_inbox_clone = tl_inbox.clone();
+            let messages = tokio::task::spawn_blocking(move || {
+                inbox::poll_unread(&tl_inbox_clone, timeout, interval)
+            })
+            .await
+            .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
+            .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
+
+            info!(
+                "Long-poll returned {} messages after {:.1}s",
+                messages.len(),
+                start.elapsed().as_secs_f64()
+            );
+            messages
+        } else {
+            // Immediate return (existing behavior)
+            tokio::task::spawn_blocking(move || inbox::read_unread(&tl_inbox))
                 .await
                 .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
-                .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
+                .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
+        };
 
+        if !req.agent_id.is_empty() {
             // Filter to messages from the requested agent
             let agent_messages: Vec<_> = all_messages
                 .into_iter()
                 .filter(|m| m.from == req.agent_id)
                 .collect();
 
-            info!(agent = %req.agent_id, count = agent_messages.len(), "Read agent messages");
+            info!(
+                agent = %req.agent_id,
+                count = agent_messages.len(),
+                "Read agent messages"
+            );
 
             let agent_msgs = AgentMessages {
                 agent_id: req.agent_id,
@@ -167,13 +197,6 @@ impl MessagingEffects for MessagingHandler {
                 warning: String::new(),
             })
         } else {
-            // Read all messages from TL inbox, grouped by sender
-            let tl_inbox = inbox::inbox_path(&self.project_dir, "team-lead");
-            let all_messages = tokio::task::spawn_blocking(move || inbox::read_unread(&tl_inbox))
-                .await
-                .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
-                .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
-
             // Group messages by sender
             let mut grouped: std::collections::HashMap<String, Vec<inbox::InboxMessage>> =
                 std::collections::HashMap::new();

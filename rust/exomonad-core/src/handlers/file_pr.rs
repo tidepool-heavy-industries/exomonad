@@ -41,9 +41,16 @@ impl EffectHandler for FilePRHandler {
 #[async_trait]
 impl FilePrEffects for FilePRHandler {
     async fn file_pr(&self, req: FilePrRequest) -> EffectResult<FilePrResponse> {
+        let base_branch = if req.base_branch.is_empty() {
+            None
+        } else {
+            Some(req.base_branch.clone())
+        };
+
         let input = FilePRInput {
             title: req.title,
             body: req.body,
+            base_branch,
         };
 
         let output = file_pr::file_pr_async(&input)

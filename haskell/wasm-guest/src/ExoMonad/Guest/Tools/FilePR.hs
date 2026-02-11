@@ -7,7 +7,7 @@ module ExoMonad.Guest.Tools.FilePR
   )
 where
 
-import Data.Aeson (FromJSON, Value, object, withObject, (.:), (.=))
+import Data.Aeson (FromJSON, Value, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -27,7 +27,8 @@ data FilePR
 -- | Arguments for file_pr tool.
 data FilePRArgs = FilePRArgs
   { fpTitle :: Text,
-    fpBody :: Text
+    fpBody :: Text,
+    fpBaseBranch :: Maybe Text
   }
   deriving (Show, Eq, Generic)
 
@@ -36,6 +37,7 @@ instance FromJSON FilePRArgs where
     FilePRArgs
       <$> v .: "title"
       <*> v .: "body"
+      <*> v .:? "base_branch"
 
 -- | Output type for formatting the response.
 data FilePROutput = FilePROutput
@@ -76,6 +78,11 @@ instance MCPTool FilePR where
                 .= object
                   [ "type" .= ("string" :: Text),
                     "description" .= ("PR body/description" :: Text)
+                  ],
+              "base_branch"
+                .= object
+                  [ "type" .= ("string" :: Text),
+                    "description" .= ("Target branch for the PR. Auto-detected from branch naming if omitted." :: Text)
                   ]
             ]
       ]
@@ -83,7 +90,8 @@ instance MCPTool FilePR where
     let req =
           FP.FilePrRequest
             { FP.filePrRequestTitle = TL.fromStrict (fpTitle args),
-              FP.filePrRequestBody = TL.fromStrict (fpBody args)
+              FP.filePrRequestBody = TL.fromStrict (fpBody args),
+              FP.filePrRequestBaseBranch = maybe "" TL.fromStrict (fpBaseBranch args)
             }
 
     -- Log before calling host

@@ -10,8 +10,8 @@ package exomonad.effects.messaging;
 message SendNoteRequest {
   // Note content (plain text).
   string content = 1;
-  // Team name for delivery.
-  string team_name = 2;
+  reserved 2;
+  reserved "team_name";
 }
 
 message SendNoteResponse {
@@ -29,8 +29,8 @@ message SendQuestionRequest {
   // Reserved for the removed context field to preserve wire compatibility.
   reserved 2;
   reserved "context";
-  // Team name for delivery.
-  string team_name = 3;
+  reserved 3;
+  reserved "team_name";
 }
 
 message SendQuestionResponse {
@@ -45,8 +45,10 @@ message SendQuestionResponse {
 message GetAgentMessagesRequest {
   // Filter to a specific agent. Empty string means all agents.
   string agent_id = 1;
-  // Team name for inbox lookup.
-  string team_name = 2;
+  reserved 2;
+  reserved "team_name";
+  // Long-poll timeout in seconds (0 = immediate return, default).
+  int32 timeout_secs = 3;
 }
 
 message AgentMessage {
@@ -87,8 +89,8 @@ message AnswerQuestionRequest {
   string question_id = 2;
   // Answer text.
   string answer = 3;
-  // Team name for inbox lookup.
-  string team_name = 4;
+  reserved 4;
+  reserved "team_name";
 }
 
 message AnswerQuestionResponse {

@@ -46,59 +46,39 @@ import qualified Unsafe.Coerce as Hs
 
 
 
-data SendNoteRequest
-  = SendNoteRequest {sendNoteRequestContent :: Hs.Text,
-                     sendNoteRequestTeamName :: Hs.Text}
+newtype SendNoteRequest
+  = SendNoteRequest {sendNoteRequestContent :: Hs.Text}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData SendNoteRequest)
 instance (HsProtobuf.Named SendNoteRequest) where
   nameOf _ = Hs.fromString "SendNoteRequest"
 instance (HsProtobuf.HasDefault SendNoteRequest)
 instance (HsProtobuf.Message SendNoteRequest) where
-  encodeMessage
-    _
-    SendNoteRequest {sendNoteRequestContent, sendNoteRequestTeamName}
-    = Hs.mappend
-        (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 1)
-           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              sendNoteRequestContent))
-        (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 2)
-           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              sendNoteRequestTeamName))
+  encodeMessage _ SendNoteRequest {sendNoteRequestContent}
+    = (HsProtobuf.encodeMessageField
+         (HsProtobuf.FieldNumber 1)
+         ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+            sendNoteRequestContent))
   decodeMessage _
     = Hs.pure SendNoteRequest
         <*>
           ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
              (HsProtobuf.at
                 HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)))
-        <*>
-          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-             (HsProtobuf.at
-                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 2)))
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
          (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "content") [] "",
-       HsProtobufAST.DotProtoField
-         (HsProtobuf.FieldNumber 2)
-         (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "team_name") [] ""]
+         (HsProtobufAST.Single "content") [] ""]
 instance (HsJSONPB.ToJSONPB SendNoteRequest) where
-  toJSONPB (SendNoteRequest f1 f2)
+  toJSONPB (SendNoteRequest f1)
     = HsJSONPB.object
         ["content"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
-         "team_name"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
-  toEncodingPB (SendNoteRequest f1 f2)
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1)]
+  toEncodingPB (SendNoteRequest f1)
     = HsJSONPB.pairs
         ["content"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
-         "team_name"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1)]
 instance (HsJSONPB.FromJSONPB SendNoteRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -107,10 +87,7 @@ instance (HsJSONPB.FromJSONPB SendNoteRequest) where
            -> Hs.pure SendNoteRequest
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "content"))
-                <*>
-                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "team_name")))
+                     (obj .: "content")))
 instance (HsJSONPB.ToJSON SendNoteRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding
@@ -149,60 +126,39 @@ instance (HsJSONPB.ToJSON SendNoteResponse) where
   toEncoding = HsJSONPB.toAesonEncoding
 instance (HsJSONPB.FromJSON SendNoteResponse) where
   parseJSON = HsJSONPB.parseJSONPB
-data SendQuestionRequest
-  = SendQuestionRequest {sendQuestionRequestQuestion :: Hs.Text,
-                         sendQuestionRequestTeamName :: Hs.Text}
+newtype SendQuestionRequest
+  = SendQuestionRequest {sendQuestionRequestQuestion :: Hs.Text}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData SendQuestionRequest)
 instance (HsProtobuf.Named SendQuestionRequest) where
   nameOf _ = Hs.fromString "SendQuestionRequest"
 instance (HsProtobuf.HasDefault SendQuestionRequest)
 instance (HsProtobuf.Message SendQuestionRequest) where
-  encodeMessage
-    _
-    SendQuestionRequest {sendQuestionRequestQuestion,
-                         sendQuestionRequestTeamName}
-    = Hs.mappend
-        (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 1)
-           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              sendQuestionRequestQuestion))
-        (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 3)
-           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              sendQuestionRequestTeamName))
+  encodeMessage _ SendQuestionRequest {sendQuestionRequestQuestion}
+    = (HsProtobuf.encodeMessageField
+         (HsProtobuf.FieldNumber 1)
+         ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+            sendQuestionRequestQuestion))
   decodeMessage _
     = Hs.pure SendQuestionRequest
         <*>
           ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
              (HsProtobuf.at
                 HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)))
-        <*>
-          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-             (HsProtobuf.at
-                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 3)))
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
          (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "question") [] "",
-       HsProtobufAST.DotProtoField
-         (HsProtobuf.FieldNumber 3)
-         (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "team_name") [] ""]
+         (HsProtobufAST.Single "question") [] ""]
 instance (HsJSONPB.ToJSONPB SendQuestionRequest) where
-  toJSONPB (SendQuestionRequest f1 f3)
+  toJSONPB (SendQuestionRequest f1)
     = HsJSONPB.object
         ["question"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
-         "team_name"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
-  toEncodingPB (SendQuestionRequest f1 f3)
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1)]
+  toEncodingPB (SendQuestionRequest f1)
     = HsJSONPB.pairs
         ["question"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
-         "team_name"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1)]
 instance (HsJSONPB.FromJSONPB SendQuestionRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -211,10 +167,7 @@ instance (HsJSONPB.FromJSONPB SendQuestionRequest) where
            -> Hs.pure SendQuestionRequest
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "question"))
-                <*>
-                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "team_name")))
+                     (obj .: "question")))
 instance (HsJSONPB.ToJSON SendQuestionRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding
@@ -269,7 +222,7 @@ instance (HsJSONPB.FromJSON SendQuestionResponse) where
   parseJSON = HsJSONPB.parseJSONPB
 data GetAgentMessagesRequest
   = GetAgentMessagesRequest {getAgentMessagesRequestAgentId :: Hs.Text,
-                             getAgentMessagesRequestTeamName :: Hs.Text}
+                             getAgentMessagesRequestTimeoutSecs :: Hs.Int32}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData GetAgentMessagesRequest)
 instance (HsProtobuf.Named GetAgentMessagesRequest) where
@@ -279,16 +232,14 @@ instance (HsProtobuf.Message GetAgentMessagesRequest) where
   encodeMessage
     _
     GetAgentMessagesRequest {getAgentMessagesRequestAgentId,
-                             getAgentMessagesRequestTeamName}
+                             getAgentMessagesRequestTimeoutSecs}
     = Hs.mappend
         (HsProtobuf.encodeMessageField
            (HsProtobuf.FieldNumber 1)
            ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
               getAgentMessagesRequestAgentId))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 2)
-           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              getAgentMessagesRequestTeamName))
+           (HsProtobuf.FieldNumber 3) getAgentMessagesRequestTimeoutSecs)
   decodeMessage _
     = Hs.pure GetAgentMessagesRequest
         <*>
@@ -296,31 +247,27 @@ instance (HsProtobuf.Message GetAgentMessagesRequest) where
              (HsProtobuf.at
                 HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)))
         <*>
-          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-             (HsProtobuf.at
-                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 2)))
+          HsProtobuf.at
+            HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 3)
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
          (HsProtobufAST.Prim HsProtobufAST.String)
          (HsProtobufAST.Single "agent_id") [] "",
        HsProtobufAST.DotProtoField
-         (HsProtobuf.FieldNumber 2)
-         (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "team_name") [] ""]
+         (HsProtobuf.FieldNumber 3) (HsProtobufAST.Prim HsProtobufAST.Int32)
+         (HsProtobufAST.Single "timeout_secs") [] ""]
 instance (HsJSONPB.ToJSONPB GetAgentMessagesRequest) where
-  toJSONPB (GetAgentMessagesRequest f1 f2)
+  toJSONPB (GetAgentMessagesRequest f1 f3)
     = HsJSONPB.object
         ["agent_id"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
-         "team_name"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
-  toEncodingPB (GetAgentMessagesRequest f1 f2)
+         "timeout_secs" .= f3]
+  toEncodingPB (GetAgentMessagesRequest f1 f3)
     = HsJSONPB.pairs
         ["agent_id"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
-         "team_name"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
+         "timeout_secs" .= f3]
 instance (HsJSONPB.FromJSONPB GetAgentMessagesRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -330,9 +277,7 @@ instance (HsJSONPB.FromJSONPB GetAgentMessagesRequest) where
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
                      (obj .: "agent_id"))
-                <*>
-                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "team_name")))
+                <*> obj .: "timeout_secs")
 instance (HsJSONPB.ToJSON GetAgentMessagesRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding
@@ -634,8 +579,7 @@ instance (HsJSONPB.FromJSON GetAgentMessagesResponse) where
 data AnswerQuestionRequest
   = AnswerQuestionRequest {answerQuestionRequestAgentId :: Hs.Text,
                            answerQuestionRequestQuestionId :: Hs.Text,
-                           answerQuestionRequestAnswer :: Hs.Text,
-                           answerQuestionRequestTeamName :: Hs.Text}
+                           answerQuestionRequestAnswer :: Hs.Text}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData AnswerQuestionRequest)
 instance (HsProtobuf.Named AnswerQuestionRequest) where
@@ -645,27 +589,21 @@ instance (HsProtobuf.Message AnswerQuestionRequest) where
   encodeMessage
     _
     AnswerQuestionRequest {answerQuestionRequestAgentId,
-                           answerQuestionRequestQuestionId, answerQuestionRequestAnswer,
-                           answerQuestionRequestTeamName}
+                           answerQuestionRequestQuestionId, answerQuestionRequestAnswer}
     = Hs.mappend
         (Hs.mappend
-           (Hs.mappend
-              (HsProtobuf.encodeMessageField
-                 (HsProtobuf.FieldNumber 1)
-                 ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                    answerQuestionRequestAgentId))
-              (HsProtobuf.encodeMessageField
-                 (HsProtobuf.FieldNumber 2)
-                 ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                    answerQuestionRequestQuestionId)))
            (HsProtobuf.encodeMessageField
-              (HsProtobuf.FieldNumber 3)
+              (HsProtobuf.FieldNumber 1)
               ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-                 answerQuestionRequestAnswer)))
+                 answerQuestionRequestAgentId))
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 2)
+              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                 answerQuestionRequestQuestionId)))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 4)
+           (HsProtobuf.FieldNumber 3)
            ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              answerQuestionRequestTeamName))
+              answerQuestionRequestAnswer))
   decodeMessage _
     = Hs.pure AnswerQuestionRequest
         <*>
@@ -680,10 +618,6 @@ instance (HsProtobuf.Message AnswerQuestionRequest) where
           ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
              (HsProtobuf.at
                 HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 3)))
-        <*>
-          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-             (HsProtobuf.at
-                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 4)))
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
@@ -696,30 +630,22 @@ instance (HsProtobuf.Message AnswerQuestionRequest) where
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 3)
          (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "answer") [] "",
-       HsProtobufAST.DotProtoField
-         (HsProtobuf.FieldNumber 4)
-         (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "team_name") [] ""]
+         (HsProtobufAST.Single "answer") [] ""]
 instance (HsJSONPB.ToJSONPB AnswerQuestionRequest) where
-  toJSONPB (AnswerQuestionRequest f1 f2 f3 f4)
+  toJSONPB (AnswerQuestionRequest f1 f2 f3)
     = HsJSONPB.object
         ["agent_id"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "question_id"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
-         "answer" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3),
-         "team_name"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f4)]
-  toEncodingPB (AnswerQuestionRequest f1 f2 f3 f4)
+         "answer" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
+  toEncodingPB (AnswerQuestionRequest f1 f2 f3)
     = HsJSONPB.pairs
         ["agent_id"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "question_id"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
-         "answer" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3),
-         "team_name"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f4)]
+         "answer" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
 instance (HsJSONPB.FromJSONPB AnswerQuestionRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -734,10 +660,7 @@ instance (HsJSONPB.FromJSONPB AnswerQuestionRequest) where
                      (obj .: "question_id"))
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "answer"))
-                <*>
-                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "team_name")))
+                     (obj .: "answer")))
 instance (HsJSONPB.ToJSON AnswerQuestionRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding

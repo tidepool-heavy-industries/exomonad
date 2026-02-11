@@ -123,7 +123,8 @@ data GetAgentMessages
 
 data GetAgentMessagesArgs = GetAgentMessagesArgs
   { gaAgentId :: Maybe Text,
-    gaSubrepo :: Maybe Text
+    gaSubrepo :: Maybe Text,
+    gaTimeoutSecs :: Maybe Int
   }
   deriving (Show, Eq, Generic)
 
@@ -132,6 +133,7 @@ instance FromJSON GetAgentMessagesArgs where
     GetAgentMessagesArgs
       <$> v .:? "agent_id"
       <*> v .:? "subrepo"
+      <*> v .:? "timeout_secs"
 
 instance MCPTool GetAgentMessages where
   type ToolArgs GetAgentMessages = GetAgentMessagesArgs
@@ -151,12 +153,18 @@ instance MCPTool GetAgentMessages where
                 .= object
                   [ "type" .= ("string" :: Text),
                     "description" .= ("Subrepo path (e.g. 'egregore/') to scope agent scanning." :: Text)
+                  ],
+              "timeout_secs"
+                .= object
+                  [ "type" .= ("integer" :: Text),
+                    "description" .= ("Long-poll timeout in seconds. 0 or omitted for immediate return." :: Text)
                   ]
             ]
       ]
   toolHandler args = do
     let agentId = maybe "" id (gaAgentId args)
-    result <- Messaging.getAgentMessages agentId
+    let timeoutSecs = maybe 0 id (gaTimeoutSecs args)
+    result <- Messaging.getAgentMessages agentId timeoutSecs
     case result of
       Left err -> pure $ errorResult (TL.toStrict $ "Messaging effect failed: " <> TL.pack (show err))
       Right resp ->

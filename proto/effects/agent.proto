@@ -82,6 +82,10 @@ message SpawnRequest {
   string subrepo = 7;
   // Workspace topology.
   WorkspaceTopology topology = 8;
+  // Branch to create worktree from (default: main).
+  string base_branch = 9;
+  // Inline prompt context (alternative to issue body).
+  string context = 10;
 }
 
 message SpawnResponse {
@@ -132,10 +136,12 @@ message SpawnGeminiTeammateRequest {
   AgentType agent_type = 3;
   // Sub-repository path relative to project_dir (e.g., "egregore/").
   string subrepo = 4;
-  // Claude Code Teams team name (resolved from KV store).
-  string team_name = 5;
+  reserved 5;
+  reserved "team_name";
   // Workspace topology.
   WorkspaceTopology topology = 6;
+  // Branch to create worktree from (default: current branch).
+  string base_branch = 7;
 }
 
 message SpawnGeminiTeammateResponse {

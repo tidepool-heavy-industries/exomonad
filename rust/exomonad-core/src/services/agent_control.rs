@@ -112,6 +112,8 @@ pub struct SpawnOptions {
     /// Sub-repository path relative to project_dir (e.g., "egregore/").
     /// When set, the agent's project context targets this directory instead of project_dir.
     pub subrepo: Option<String>,
+    /// Base branch to branch off of (default: "main").
+    pub base_branch: Option<String>,
 }
 
 /// Options for spawning a named teammate (no GitHub issue required).
@@ -126,6 +128,8 @@ pub struct SpawnGeminiTeammateOptions {
     pub agent_type: AgentType,
     /// Sub-repository path relative to project_dir
     pub subrepo: Option<String>,
+    /// Base branch to branch off of (defaults to current branch).
+    pub base_branch: Option<String>,
 }
 
 /// Result of spawning an agent.
@@ -373,13 +377,62 @@ impl AgentControlService {
             let agent_suffix = options.agent_type.suffix();
             let internal_name = format!("gh-{}-{}-{}", issue_id, slug, agent_suffix);
 
-            // Create agent directory
-            let agent_dir = effective_project_dir
+            // Determine base branch
+            let base = options.base_branch.as_deref().unwrap_or("main");
+            let branch_name = if base == "main" {
+                format!("gh-{}/{}-{}", issue_id, slug, agent_suffix)
+            } else {
+                format!("{}/{}-{}", base, slug, agent_suffix)
+            };
+
+            // Create worktree
+            let worktree_path = effective_project_dir
                 .join(".exomonad")
-                .join("agents")
+                .join("worktrees")
                 .join(&internal_name);
-            fs::create_dir_all(&agent_dir).await?;
-            info!(agent_dir = %agent_dir.display(), "Created agent directory");
+
+            // Clean up existing worktree if it exists (idempotency)
+            if worktree_path.exists() {
+                info!(path = %worktree_path.display(), "Removing existing worktree for idempotency");
+                let _ = Command::new("git")
+                    .args(["worktree", "remove", "--force", &worktree_path.to_string_lossy()])
+                    .current_dir(&effective_project_dir)
+                    .output()
+                    .await;
+            }
+
+            info!(
+                base_branch = %base,
+                branch_name = %branch_name,
+                worktree_path = %worktree_path.display(),
+                "Creating git worktree"
+            );
+
+            // Create the worktree
+            // git worktree add -b <new_branch> <path> <start_point>
+            let output = Command::new("git")
+                .args([
+                    "worktree",
+                    "add",
+                    "-b",
+                    &branch_name,
+                    &worktree_path.to_string_lossy(),
+                    base,
+                ])
+                .current_dir(&effective_project_dir)
+                .output()
+                .await
+                .context("Failed to create git worktree")?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                error!(stderr = %stderr, "git worktree add failed");
+                return Err(anyhow!("git worktree add failed: {}", stderr));
+            }
+            info!(worktree_path = %worktree_path.display(), "Git worktree created successfully");
+
+            // Use worktree path as agent_dir
+            let agent_dir = worktree_path;
 
             // Write .mcp.json for the agent
             self.write_agent_mcp_config(&effective_project_dir, &agent_dir, options.agent_type)
@@ -410,10 +463,10 @@ impl AgentControlService {
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
 
-            // Open Zellij tab with cwd = project_dir (not a worktree)
+            // Open Zellij tab with cwd = worktree_path
             self.new_zellij_tab(
                 &display_name,
-                &effective_project_dir,
+                &agent_dir, // Use worktree path
                 options.agent_type,
                 Some(&initial_prompt),
                 env_vars,
@@ -525,6 +578,7 @@ impl AgentControlService {
 
             if tab_alive {
                 info!(name = %options.name, "Teammate already running, returning existing");
+                // TODO: Return actual worktree path if possible, but for now empty is fine as it's just info
                 return Ok(SpawnResult {
                     agent_dir: String::new(),
                     tab_name: internal_name,
@@ -533,14 +587,71 @@ impl AgentControlService {
                 });
             }
 
+            // Determine base branch
+            let base_branch = if let Some(ref b) = options.base_branch {
+                b.clone()
+            } else {
+                // Default to current branch
+                let current_branch_output = Command::new("git")
+                    .args(["rev-parse", "--abbrev-ref", "HEAD"])
+                    .current_dir(&effective_project_dir)
+                    .output()
+                    .await
+                    .context("Failed to get current branch")?;
+                String::from_utf8_lossy(&current_branch_output.stdout)
+                    .trim()
+                    .to_string()
+            };
+
+            let branch_name = format!("{}/{}", base_branch, options.name);
+            let worktree_path = effective_project_dir
+                .join(".exomonad")
+                .join("worktrees")
+                .join(&internal_name);
+
+            // Clean up existing worktree if it exists
+            if worktree_path.exists() {
+                info!(path = %worktree_path.display(), "Removing existing worktree for idempotency");
+                let _ = Command::new("git")
+                    .args(["worktree", "remove", "--force", &worktree_path.to_string_lossy()])
+                    .current_dir(&effective_project_dir)
+                    .output()
+                    .await;
+            }
+
+            info!(
+                base_branch = %base_branch,
+                branch_name = %branch_name,
+                worktree_path = %worktree_path.display(),
+                "Creating git worktree"
+            );
+
+            let output = Command::new("git")
+                .args([
+                    "worktree",
+                    "add",
+                    "-b",
+                    &branch_name,
+                    &worktree_path.to_string_lossy(),
+                    &base_branch,
+                ])
+                .current_dir(&effective_project_dir)
+                .output()
+                .await
+                .context("Failed to create git worktree")?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                error!(stderr = %stderr, "git worktree add failed");
+                return Err(anyhow!("git worktree add failed: {}", stderr));
+            }
+
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
 
             // Write per-agent Gemini settings with MCP endpoint URL
-            let agent_config_dir = self.project_dir
-                .join(".exomonad")
-                .join("agents")
-                .join(&internal_name);
+            // We write this into the worktree
+            let agent_config_dir = worktree_path.join(".gemini");
             fs::create_dir_all(&agent_config_dir).await?;
 
             let settings_path = agent_config_dir.join("settings.json");
@@ -567,10 +678,10 @@ impl AgentControlService {
                 settings_path.to_string_lossy().to_string(),
             );
 
-            // Open Zellij pane with cwd = effective_project_dir
+            // Open Zellij pane with cwd = worktree_path
             self.new_zellij_pane(
                 &display_name,
-                &effective_project_dir,
+                &worktree_path,
                 options.agent_type,
                 Some(&options.prompt),
                 env_vars,
@@ -662,6 +773,41 @@ impl AgentControlService {
                 );
             } else {
                 info!(path = %agent_config_dir.display(), "Removed per-agent config dir");
+            }
+        }
+
+        // Remove git worktree if it exists
+        let worktree_path = self
+            .project_dir
+            .join(".exomonad")
+            .join("worktrees")
+            .join(identifier);
+        if worktree_path.exists() {
+            info!(path = %worktree_path.display(), "Removing git worktree");
+            let output = Command::new("git")
+                .args(["worktree", "remove", "--force", &worktree_path.to_string_lossy()])
+                .current_dir(&self.project_dir)
+                .output()
+                .await;
+            match output {
+                Ok(o) if o.status.success() => {
+                    info!(path = %worktree_path.display(), "Git worktree removed");
+                }
+                Ok(o) => {
+                    let stderr = String::from_utf8_lossy(&o.stderr);
+                    warn!(
+                        path = %worktree_path.display(),
+                        stderr = %stderr,
+                        "git worktree remove failed (non-fatal)"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        path = %worktree_path.display(),
+                        error = %e,
+                        "Failed to run git worktree remove (non-fatal)"
+                    );
+                }
             }
         }
 

@@ -5,6 +5,8 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
+use std::thread;
+use std::time::{Duration, Instant};
 
 #[cfg(unix)]
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -165,6 +167,35 @@ pub fn append_message(path: &Path, message: &InboxMessage) -> Result<()> {
 pub fn read_unread(path: &Path) -> Result<Vec<InboxMessage>> {
     let messages = read_inbox(path)?;
     Ok(messages.into_iter().filter(|m| !m.read).collect())
+}
+
+/// Poll for unread messages with timeout.
+/// Returns immediately if unread messages exist.
+/// Otherwise polls at interval until messages appear or timeout expires.
+pub fn poll_unread(
+    path: &Path,
+    timeout: Duration,
+    interval: Duration,
+) -> Result<Vec<InboxMessage>> {
+    let start = Instant::now();
+
+    loop {
+        let messages = read_unread(path)?;
+        if !messages.is_empty() {
+            return Ok(messages);
+        }
+
+        if start.elapsed() >= timeout {
+            return Ok(Vec::new());
+        }
+
+        let remaining = timeout.saturating_sub(start.elapsed());
+        let sleep_time = interval.min(remaining);
+        if sleep_time.is_zero() {
+            return Ok(Vec::new());
+        }
+        thread::sleep(sleep_time);
+    }
 }
 
 /// Set `read = true` on all messages in the inbox.
@@ -332,5 +363,45 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         let decoded: InboxMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(msg, decoded);
+    }
+
+    #[test]
+    fn test_poll_unread_returns_immediately_with_messages() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("inbox.json");
+
+        let msg = create_message("agent".to_string(), "hello".to_string(), None);
+        append_message(&path, &msg).unwrap();
+
+        let start = std::time::Instant::now();
+        let messages = poll_unread(
+            &path,
+            Duration::from_secs(10),
+            Duration::from_millis(100),
+        )
+        .unwrap();
+
+        assert_eq!(messages.len(), 1);
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "Should return immediately when messages exist"
+        );
+    }
+
+    #[test]
+    fn test_poll_unread_times_out_empty() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("inbox.json");
+
+        let start = std::time::Instant::now();
+        let messages = poll_unread(
+            &path,
+            Duration::from_millis(200),
+            Duration::from_millis(50),
+        )
+        .unwrap();
+
+        assert!(messages.is_empty());
+        assert!(start.elapsed() >= Duration::from_millis(200));
     }
 }

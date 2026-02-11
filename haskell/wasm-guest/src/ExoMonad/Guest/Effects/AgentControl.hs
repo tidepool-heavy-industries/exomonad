@@ -19,6 +19,8 @@ module ExoMonad.Guest.Effects.AgentControl
     spawnAgent,
     spawnAgents,
     spawnGeminiTeammate,
+    spawnSubtree,
+    spawnLeaf,
     cleanupAgent,
     cleanupAgents,
     cleanupMergedAgents,
@@ -259,6 +261,8 @@ data AgentControl m a where
   SpawnAgent :: Text -> SpawnOptions -> AgentControl m (Either Text SpawnResult)
   SpawnAgents :: [Text] -> SpawnOptions -> AgentControl m BatchSpawnResult
   SpawnGeminiTeammate :: Text -> Text -> AgentType -> Maybe Text -> AgentControl m (Either Text SpawnResult)
+  SpawnSubtreeC :: Text -> Text -> Maybe Text -> AgentType -> AgentControl m (Either Text SpawnResult)
+  SpawnLeafC :: Text -> Text -> AgentType -> AgentControl m (Either Text SpawnResult)
   CleanupAgent :: Text -> Bool -> Maybe Text -> AgentControl m (Either Text ())
   CleanupAgents :: [Text] -> Bool -> Maybe Text -> AgentControl m BatchCleanupResult
   CleanupMergedAgents :: Maybe Text -> AgentControl m BatchCleanupResult
@@ -273,6 +277,12 @@ spawnAgents issueIds opts = send (SpawnAgents issueIds opts)
 
 spawnGeminiTeammate :: (Member AgentControl r) => Text -> Text -> AgentType -> Maybe Text -> Sem r (Either Text SpawnResult)
 spawnGeminiTeammate name prompt agentTy subrepo = send (SpawnGeminiTeammate name prompt agentTy subrepo)
+
+spawnSubtree :: (Member AgentControl r) => Text -> Text -> Maybe Text -> AgentType -> Sem r (Either Text SpawnResult)
+spawnSubtree task branchName context agentTy = send (SpawnSubtreeC task branchName context agentTy)
+
+spawnLeaf :: (Member AgentControl r) => Text -> Text -> AgentType -> Sem r (Either Text SpawnResult)
+spawnLeaf name prompt agentTy = send (SpawnLeafC name prompt agentTy)
 
 cleanupAgent :: (Member AgentControl r) => Text -> Bool -> Maybe Text -> Sem r (Either Text ())
 cleanupAgent issueId force subrepo = send (CleanupAgent issueId force subrepo)
@@ -303,7 +313,9 @@ runAgentControl = interpret $ \case
               PA.spawnRequestRole = Enumerated (Right RoleROLE_UNSPECIFIED),
               PA.spawnRequestWorktreeDir = maybe "" TL.fromStrict (worktreeDir opts),
               PA.spawnRequestSubrepo = maybe "" TL.fromStrict (subrepo opts),
-              PA.spawnRequestTopology = Enumerated (Right PA.WorkspaceTopologyWORKSPACE_TOPOLOGY_WORKTREE_PER_AGENT)
+              PA.spawnRequestTopology = Enumerated (Right PA.WorkspaceTopologyWORKSPACE_TOPOLOGY_WORKTREE_PER_AGENT),
+              PA.spawnRequestBaseBranch = "",
+              PA.spawnRequestContext = ""
             }
     result <- Agent.spawnAgent req
     pure $ case result of
@@ -342,14 +354,48 @@ runAgentControl = interpret $ \case
               PA.spawnGeminiTeammateRequestPrompt = TL.fromStrict prompt,
               PA.spawnGeminiTeammateRequestAgentType = Enumerated (Right (toProtoAgentType agentTy)),
               PA.spawnGeminiTeammateRequestSubrepo = maybe "" TL.fromStrict subrepo,
-              PA.spawnGeminiTeammateRequestTeamName = "",
-              PA.spawnGeminiTeammateRequestTopology = Enumerated (Right PA.WorkspaceTopologyWORKSPACE_TOPOLOGY_SHARED_DIR)
+              PA.spawnGeminiTeammateRequestTopology = Enumerated (Right PA.WorkspaceTopologyWORKSPACE_TOPOLOGY_SHARED_DIR),
+              PA.spawnGeminiTeammateRequestBaseBranch = ""
             }
     result <- Agent.spawnGeminiTeammate req
     pure $ case result of
       Left err -> Left (T.pack (show err))
       Right resp -> case PA.spawnGeminiTeammateResponseAgent resp of
         Nothing -> Left "SpawnGeminiTeammate succeeded but no agent info returned"
+        Just info -> Right (protoAgentInfoToSpawnResult info)
+  SpawnSubtreeC task branchName context agentTy -> embed $ do
+    -- SpawnSubtree reuses SpawnGeminiTeammate proto with base_branch set
+    -- The branch will be created off the current branch
+    let req =
+          PA.SpawnGeminiTeammateRequest
+            { PA.spawnGeminiTeammateRequestName = TL.fromStrict branchName,
+              PA.spawnGeminiTeammateRequestPrompt = TL.fromStrict (maybe task (\c -> task <> "\n\n" <> c) context),
+              PA.spawnGeminiTeammateRequestAgentType = Enumerated (Right (toProtoAgentType agentTy)),
+              PA.spawnGeminiTeammateRequestSubrepo = "",
+              PA.spawnGeminiTeammateRequestTopology = Enumerated (Right PA.WorkspaceTopologyWORKSPACE_TOPOLOGY_WORKTREE_PER_AGENT),
+              PA.spawnGeminiTeammateRequestBaseBranch = ""
+            }
+    result <- Agent.spawnGeminiTeammate req
+    pure $ case result of
+      Left err -> Left (T.pack (show err))
+      Right resp -> case PA.spawnGeminiTeammateResponseAgent resp of
+        Nothing -> Left "SpawnSubtree succeeded but no agent info returned"
+        Just info -> Right (protoAgentInfoToSpawnResult info)
+  SpawnLeafC name prompt agentTy -> embed $ do
+    let req =
+          PA.SpawnGeminiTeammateRequest
+            { PA.spawnGeminiTeammateRequestName = TL.fromStrict name,
+              PA.spawnGeminiTeammateRequestPrompt = TL.fromStrict prompt,
+              PA.spawnGeminiTeammateRequestAgentType = Enumerated (Right (toProtoAgentType agentTy)),
+              PA.spawnGeminiTeammateRequestSubrepo = "",
+              PA.spawnGeminiTeammateRequestTopology = Enumerated (Right PA.WorkspaceTopologyWORKSPACE_TOPOLOGY_WORKTREE_PER_AGENT),
+              PA.spawnGeminiTeammateRequestBaseBranch = ""
+            }
+    result <- Agent.spawnGeminiTeammate req
+    pure $ case result of
+      Left err -> Left (T.pack (show err))
+      Right resp -> case PA.spawnGeminiTeammateResponseAgent resp of
+        Nothing -> Left "SpawnLeaf succeeded but no agent info returned"
         Just info -> Right (protoAgentInfoToSpawnResult info)
   CleanupAgent issueId force subrepo -> embed $ do
     let req =

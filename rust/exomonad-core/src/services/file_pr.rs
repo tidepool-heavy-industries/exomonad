@@ -21,6 +21,7 @@ use super::zellij_events;
 pub struct FilePRInput {
     pub title: String,
     pub body: String,
+    pub base_branch: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -35,6 +36,22 @@ pub struct FilePROutput {
 // ============================================================================
 // Git Helpers (synchronous)
 // ============================================================================
+
+/// Detect the base branch for a PR.
+/// Priority: explicit > convention (strip last / segment) > "main"
+fn detect_base_branch(head: &str, explicit: Option<&str>) -> String {
+    if let Some(base) = explicit {
+        if !base.is_empty() {
+            return base.to_string();
+        }
+    }
+    // Convention: branch "parent/child" targets "parent"
+    if let Some(pos) = head.rfind('/') {
+        head[..pos].to_string()
+    } else {
+        "main".to_string()
+    }
+}
 
 /// Get the git remote URL for origin.
 fn get_remote_url() -> Result<String> {
@@ -114,8 +131,8 @@ async fn create_pr_async(
     info!("[FilePR] Creating new PR: {}", input.title);
     info!("[FilePR] Head branch: {}", head_branch);
 
-    // Default base branch to main
-    let base_branch = "main".to_string();
+    let base_branch = detect_base_branch(head_branch, input.base_branch.as_deref());
+    info!("[FilePR] Base branch: {}", base_branch);
 
     let req = ServiceRequest::GitHubCreatePR {
         owner: owner.into(),
@@ -245,5 +262,29 @@ mod tests {
         // HTTPS URL without .git
         let result = parse_github_url("https://github.com/owner/repo");
         assert_eq!(result, Some(("owner".to_string(), "repo".to_string())));
+    }
+
+    #[test]
+    fn test_detect_base_branch_explicit() {
+        assert_eq!(
+            detect_base_branch("feature/my-work", Some("develop")),
+            "develop"
+        );
+    }
+
+    #[test]
+    fn test_detect_base_branch_convention() {
+        assert_eq!(detect_base_branch("main/subtask/leaf", None), "main/subtask");
+        assert_eq!(detect_base_branch("feature/my-work", None), "feature");
+    }
+
+    #[test]
+    fn test_detect_base_branch_no_slash() {
+        assert_eq!(detect_base_branch("my-branch", None), "main");
+    }
+
+    #[test]
+    fn test_detect_base_branch_empty_explicit() {
+        assert_eq!(detect_base_branch("feature/work", Some("")), "feature");
     }
 }

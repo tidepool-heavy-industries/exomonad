@@ -48,7 +48,8 @@ import qualified Unsafe.Coerce as Hs
 
 data FilePrRequest
   = FilePrRequest {filePrRequestTitle :: Hs.Text,
-                   filePrRequestBody :: Hs.Text}
+                   filePrRequestBody :: Hs.Text,
+                   filePrRequestBaseBranch :: Hs.Text}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData FilePrRequest)
 instance (HsProtobuf.Named FilePrRequest) where
@@ -57,16 +58,22 @@ instance (HsProtobuf.HasDefault FilePrRequest)
 instance (HsProtobuf.Message FilePrRequest) where
   encodeMessage
     _
-    FilePrRequest {filePrRequestTitle, filePrRequestBody}
+    FilePrRequest {filePrRequestTitle, filePrRequestBody,
+                   filePrRequestBaseBranch}
     = Hs.mappend
+        (Hs.mappend
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 1)
+              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                 filePrRequestTitle))
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 2)
+              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                 filePrRequestBody)))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 1)
+           (HsProtobuf.FieldNumber 3)
            ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              filePrRequestTitle))
-        (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 2)
-           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              filePrRequestBody))
+              filePrRequestBaseBranch))
   decodeMessage _
     = Hs.pure FilePrRequest
         <*>
@@ -77,6 +84,10 @@ instance (HsProtobuf.Message FilePrRequest) where
           ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
              (HsProtobuf.at
                 HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 2)))
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 3)))
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
@@ -85,16 +96,24 @@ instance (HsProtobuf.Message FilePrRequest) where
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 2)
          (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "body") [] ""]
+         (HsProtobufAST.Single "body") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 3)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "base_branch") [] ""]
 instance (HsJSONPB.ToJSONPB FilePrRequest) where
-  toJSONPB (FilePrRequest f1 f2)
+  toJSONPB (FilePrRequest f1 f2 f3)
     = HsJSONPB.object
         ["title" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
-         "body" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
-  toEncodingPB (FilePrRequest f1 f2)
+         "body" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
+         "base_branch"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
+  toEncodingPB (FilePrRequest f1 f2 f3)
     = HsJSONPB.pairs
         ["title" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
-         "body" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
+         "body" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
+         "base_branch"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
 instance (HsJSONPB.FromJSONPB FilePrRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -106,7 +125,10 @@ instance (HsJSONPB.FromJSONPB FilePrRequest) where
                      (obj .: "title"))
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "body")))
+                     (obj .: "body"))
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "base_branch")))
 instance (HsJSONPB.ToJSON FilePrRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding

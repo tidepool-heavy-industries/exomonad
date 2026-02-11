@@ -224,6 +224,8 @@ mod binary {
             worktree_dir: ".exomonad/worktrees".into(),
             subrepo: String::new(),
             topology: 0,
+            base_branch: String::new(),
+            context: String::new(),
         };
 
         let bytes = req.encode_to_vec();

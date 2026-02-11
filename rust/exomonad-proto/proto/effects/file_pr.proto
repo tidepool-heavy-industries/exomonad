@@ -12,6 +12,8 @@ message FilePrRequest {
   string title = 1;
   // PR body/description.
   string body = 2;
+  // Target branch (default: auto-detect from branch naming convention).
+  string base_branch = 3;
 }
 
 message FilePrResponse {
