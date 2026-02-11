@@ -4,15 +4,15 @@
 
 ```
 main
- └── gh-42/feature          (root subtree)
-      ├── gh-42/feature/auth    (child subtree)
-      │    ├── gh-42/feature/auth/middleware  (leaf)
-      │    └── gh-42/feature/auth/tests       (leaf)
-      └── gh-42/feature/api     (child subtree)
-           └── gh-42/feature/api/endpoints    (leaf)
+ └── gh-42.feature          (root subtree)
+      ├── gh-42.feature.auth    (child subtree)
+      │    ├── gh-42.feature.auth.middleware  (worker)
+      │    └── gh-42.feature.auth.tests       (worker)
+      └── gh-42.feature.api     (child subtree)
+           └── gh-42.feature.api.endpoints    (worker)
 ```
 
-PRs always target parent branch, not main. The branch tree mirrors the task tree.
+PRs always target parent branch, not main. The branch tree mirrors the task tree. Branch naming uses `.` as hierarchy separator to avoid git collisions.
 
 ## Child Completion Flow
 

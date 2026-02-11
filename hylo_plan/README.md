@@ -4,10 +4,9 @@ Recursive agent tree where each node is a worktree + agent session. Unfold (deco
 
 ## Core Model
 
-```
 seed (branch, task)
   → decompose into non-overlapping subtasks
-    → spawn subtree nodes (can further decompose) or leaf nodes (execute and finish)
+    → spawn subtree nodes (can further decompose) or worker nodes (execute and finish)
       → children work, bubble messages up to parent
         → children file PRs against parent branch
           → Copilot + CI first-pass review
@@ -15,13 +14,12 @@ seed (branch, task)
               → merge, notify siblings to rebase
                 → repeat until parent's work is done
                   → parent files PR against its parent
-```
 
 ## Node Types
 
-**Worktree node** (Claude): Has coordination tools (`spawn_subtree`, `spawn_leaf`, messaging, PR lifecycle). Can decompose further. Owns a branch + worktree. Runs event-driven idle loop via long-poll `get_messages`.
+**Worktree node** (Claude): Has coordination tools (`spawn_subtree`, `spawn_worker`, messaging, PR lifecycle). Can decompose further. Owns a branch + worktree. Branch naming uses `.` hierarchy (e.g. `main.feature`). Runs event-driven idle loop via long-poll `get_messages`.
 
-**Leaf node** (Gemini): No spawn tools. Executes bounded task in parent's worktree or own worktree. Works and exits. Cheap, disposable.
+**Worker node** (Gemini): No spawn tools. Executes bounded task in parent's worktree (in-place). Works and exits. Cheap, disposable.
 
 **Researcher** (either): Deep research task. Gets a tmp dir, can clone repos, read code. No write access to the tree. v0.1 = ping human to paste into Gemini.
 
@@ -32,7 +30,7 @@ All nodes use native builtins (Bash, Write, Read, etc). ExoMonad provides coordi
 ```
 Every node:      Claude/Gemini + native builtins + jj/git
 Worktree nodes:  + exomonad spawn/message/task/PR tools
-Leaf nodes:      no spawn tools, that's it
+Worker nodes:    no spawn tools, that's it
 ```
 
 ## Key Design Decisions
@@ -42,7 +40,7 @@ Leaf nodes:      no spawn tools, that's it
 - **Copilot + CI as first-pass filter.** Parent only reviews PRs that pass mechanical bar. Zero marginal cost for most iteration.
 - **jj for rebase propagation.** Agents use jj directly. Automatic rebasing when siblings merge into parent branch.
 - **Long-poll messaging.** `get_messages` blocks until message or timeout (5m). One tool call per idle period.
-- **Tool descriptions encode the base case.** `spawn_subtree` vs `spawn_leaf` teaches the agent when to unfold vs execute.
+- **Tool descriptions encode the base case.** `spawn_subtree` vs `spawn_worker` teaches the agent when to unfold vs execute.
 - **Intelligence gradient at every level.** Claude reasons about decomposition. Gemini executes. Copilot reviews mechanically. Parent reviews architecturally.
 
 ## Coordination Architecture
