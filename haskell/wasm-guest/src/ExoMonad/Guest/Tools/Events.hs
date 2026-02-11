@@ -8,7 +8,7 @@ module ExoMonad.Guest.Tools.Events
   , NotifyCompletion (..)
   ) where
 
-import Data.Aeson (FromJSON, ToJSON, object, (.=))
+import Data.Aeson (FromJSON (..), ToJSON (..), object, (.=), genericParseJSON, genericToJSON, defaultOptions, fieldLabelModifier, camelTo2)
 import Data.Text (Text, pack)
 import Data.Text.Lazy qualified as TL
 import Data.Vector qualified as V
@@ -25,8 +25,10 @@ data WaitForEventArgs = WaitForEventArgs
   , wfeTimeoutSecs :: Int
   } deriving (Generic, Show)
 
-instance FromJSON WaitForEventArgs
-instance ToJSON WaitForEventArgs
+instance FromJSON WaitForEventArgs where
+  parseJSON = genericParseJSON defaultOptions { fieldLabelModifier = camelTo2 '_' . drop 3 }
+instance ToJSON WaitForEventArgs where
+  toJSON = genericToJSON defaultOptions { fieldLabelModifier = camelTo2 '_' . drop 3 }
 
 instance MCPTool WaitForEvent where
   type ToolArgs WaitForEvent = WaitForEventArgs
@@ -71,8 +73,10 @@ data NotifyCompletionArgs = NotifyCompletionArgs
   , ncMessage :: Text
   } deriving (Generic, Show)
 
-instance FromJSON NotifyCompletionArgs
-instance ToJSON NotifyCompletionArgs
+instance FromJSON NotifyCompletionArgs where
+  parseJSON = genericParseJSON defaultOptions { fieldLabelModifier = camelTo2 '_' . drop 2 }
+instance ToJSON NotifyCompletionArgs where
+  toJSON = genericToJSON defaultOptions { fieldLabelModifier = camelTo2 '_' . drop 2 }
 
 instance MCPTool NotifyCompletion where
   type ToolArgs NotifyCompletion = NotifyCompletionArgs
