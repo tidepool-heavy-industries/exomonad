@@ -119,7 +119,7 @@ install-hooks:
 # Build WASM role and install to .exomonad/wasm/
 wasm role="tl":
     @echo ">>> Building wasm-guest-{{role}}..."
-    nix develop .#wasm --command wasm32-wasi-cabal build --project-file=cabal.project.wasm wasm-guest-{{role}}
+    nix develop .#wasm --command bash -c 'export PATH=$PWD/.gemini/tmp/bin:$PATH; wasm32-wasi-cabal build --project-file=cabal.project.wasm wasm-guest-{{role}}'
     @echo ">>> Installing to .exomonad/wasm/..."
     mkdir -p .exomonad/wasm
     rm -f .exomonad/wasm/wasm-guest-{{role}}.wasm
@@ -137,7 +137,7 @@ wasm-all:
 # One-time WASM build environment setup (populates cabal package index)
 wasm-setup:
     @echo ">>> Setting up WASM build environment (one-time)..."
-    nix develop .#wasm --command wasm32-wasi-cabal update --project-file=cabal.project.wasm
+    nix develop .#wasm --command bash -c 'export PATH=$PWD/.gemini/tmp/bin:$PATH; wasm32-wasi-cabal update --project-file=cabal.project.wasm'
     @echo ">>> Done. You can now run: just wasm-all"
 
 # Internal: shared install logic for release/dev builds.

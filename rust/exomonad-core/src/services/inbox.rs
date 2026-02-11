@@ -52,9 +52,9 @@ where
     F: FnOnce() -> Result<T>,
 {
     let lock_type = if exclusive {
-        libc::F_WRLCK
+        libc::F_WRLCK as i16
     } else {
-        libc::F_RDLCK
+        libc::F_RDLCK as i16
     };
 
     let mut fl: libc::flock = unsafe { std::mem::zeroed() };
@@ -74,7 +74,7 @@ where
     let result = f();
 
     // Unlock
-    fl.l_type = libc::F_UNLCK;
+    fl.l_type = libc::F_UNLCK as i16;
     unsafe { libc::fcntl(fd, libc::F_SETLK, &fl) };
 
     result
