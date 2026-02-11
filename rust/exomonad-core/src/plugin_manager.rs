@@ -224,7 +224,8 @@ impl PluginManager {
 
 /// Build an Extism plugin from WASM bytes with yield_effect host function.
 fn build_plugin(wasm_bytes: &[u8], registry: &Arc<EffectRegistry>) -> Result<Plugin> {
-    let manifest = Manifest::new([extism::Wasm::data(wasm_bytes.to_vec())]);
+    let manifest = Manifest::new([extism::Wasm::data(wasm_bytes.to_vec())])
+        .with_allowed_env(Some(vec!["EXOMONAD_AGENT_ID".to_string()]));
 
     tracing::info!(
         namespaces = ?registry.namespaces(),

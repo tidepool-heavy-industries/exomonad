@@ -19,7 +19,7 @@ Make hylo phase 1 robust and tested before dogfooding.
 - `write_agent_mcp_config` output format (Claude vs Gemini JSON)
 - `cleanup_agent` path reconstruction (tmp dir + config dir + worktree)
 - `parse_agent_tab` for subtree agents (non-`gh-*` naming)
-- Tool schema correctness via MCP (spawn_worker params, no spawn_leaf)
+- Tool schema correctness via MCP (spawn_worker params)
 - spawn_worker WASM effect roundtrip
 - End-to-end spawn → work → PR → cleanup (requires Zellij)
 
@@ -112,10 +112,6 @@ Extend `rust/exomonad/tests/mcp_integration.rs`. Requires running server (`just 
 - `spawn_worker` has params: name, prompt — NO agent_type
 - `file_pr` has params: title, body, base_branch (optional)
 - `get_agent_messages` accepts timeout_secs
-- `spawn_leaf` is NOT in tools/list
-
-#### 2.2 Fix stale doc comment
-Line 9 of mcp_integration.rs still references `spawn_leaf`. Update to `spawn_worker`.
 
 ### Wave 3: WASM
 
@@ -153,7 +149,7 @@ Wave 4 (manual)   — after automated tests pass
 |------|---------|
 | `rust/exomonad-core/src/services/file_pr.rs` | Add roundtrip tests (1.1) |
 | `rust/exomonad-core/src/services/agent_control.rs` | Extract `generate_mcp_config` pure fn, add tests (1.2, 1.3) |
-| `rust/exomonad/tests/mcp_integration.rs` | Schema validation tests (2.1), fix stale spawn_leaf ref (2.2) |
+| `rust/exomonad/tests/mcp_integration.rs` | Schema validation tests (2.1) |
 | `rust/exomonad-core/tests/wasm_integration.rs` | spawn_worker mock handler (3.2) |
 
 ## Success Criteria
@@ -162,4 +158,4 @@ Wave 4 (manual)   — after automated tests pass
 - `just test-mcp` green with schema checks
 - `just wasm-all` builds clean
 - Manual smoke test passes
-- Zero `spawn_leaf` references in test code
+

@@ -20,14 +20,7 @@
 - **spawn_worker registration** — workers don't appear in `list_agents`. Ephemeral by design for now.
 - **Depth limit** — convention only, no enforcement. Tool descriptions guide the agent.
 
-### Stale Docs
-These reference old `spawn_leaf` naming and `/` branch convention:
-- `hylo_plan/README.md`
-- `hylo_plan/tools.md`
-- `hylo_plan/phase-1.md`
-- `hylo_plan/pr-lifecycle.md`
 
-Update after dogfooding confirms the model works.
 
 ## Phase 2: Plan AFTER Dogfooding
 

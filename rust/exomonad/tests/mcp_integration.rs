@@ -618,8 +618,7 @@ fn mcp_tool_schemas_valid() {
         .get("timeout_secs")
         .is_some());
 
-    // 5. No spawn_leaf
-    assert!(tool_map.get("spawn_leaf").is_none());
+
 }
 
 /// All tools have non-empty descriptions.

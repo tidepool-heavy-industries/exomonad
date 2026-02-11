@@ -20,7 +20,7 @@ import Data.ByteString.Lazy qualified as BSL
 import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..))
-import ExoMonad.Guest.Tool.Runtime (wrapHandler)
+import ExoMonad.Guest.Tool.Runtime (wrapHandler, handleWorkerExit)
 import ExoMonad.Guest.Types (HookInput (..), HookEventType (..))
 import ExoMonad.PDK (input, output)
 import ExoMonad.Types (HookConfig (..))
@@ -145,6 +145,7 @@ dispatchHook cfg hookInput =
       result <- runM $ postToolUse cfg hookInput
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
+    WorkerExit -> handleWorkerExit hookInput
   where
     runStopHook hook = do
       result <- runM $ hook hookInput

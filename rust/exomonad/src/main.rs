@@ -155,6 +155,7 @@ async fn handle_hook(
     event_type: HookEventType,
     runtime: HookRuntime,
     zellij_session: &str,
+    role: exomonad_core::Role,
 ) -> Result<()> {
     use std::io::Read;
 
@@ -249,11 +250,18 @@ async fn handle_hook(
     };
     hook_input.hook_event_name = normalized_event_name.to_string();
 
+    // Create role-aware input for unified WASM
+    let mut hook_input_value =
+        serde_json::to_value(&hook_input).context("Failed to serialize hook input")?;
+    if let serde_json::Value::Object(ref mut map) = hook_input_value {
+        map.insert("role".to_string(), serde_json::json!(role));
+    }
+
     // Handle stop hooks with runtime-specific output translation
     if is_stop_hook {
         // Call WASM and parse as internal domain type
         let internal_output: InternalStopHookOutput = plugin
-            .call("handle_pre_tool_use", &hook_input)
+            .call("handle_pre_tool_use", &hook_input_value)
             .await
             .context("WASM handle_pre_tool_use failed")?;
 
@@ -324,7 +332,7 @@ async fn handle_hook(
     } else {
         // Non-stop hooks: use existing ClaudePreToolUseOutput format
         let output: ClaudePreToolUseOutput = plugin
-            .call("handle_pre_tool_use", &hook_input)
+            .call("handle_pre_tool_use", &hook_input_value)
             .await
             .context("WASM handle_pre_tool_use failed")?;
 
@@ -852,7 +860,7 @@ async fn main() -> Result<()> {
 
             info!("WASM plugin loaded and initialized");
 
-            handle_hook(rt.plugin_manager(), event, runtime, &config.zellij_session).await?;
+            handle_hook(rt.plugin_manager(), event, runtime, &config.zellij_session, config.role).await?;
         }
 
         Commands::Init { session, recreate } => {

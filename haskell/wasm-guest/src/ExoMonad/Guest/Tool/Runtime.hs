@@ -8,6 +8,7 @@ module ExoMonad.Guest.Tool.Runtime
   ( mcpHandlerRecord,
     listHandlerRecord,
     hookHandler,
+    handleWorkerExit,
     testHandler,
     wrapHandler,
   )
@@ -208,25 +209,25 @@ hookHandler config = do
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
 
-    handleWorkerExit :: HookInput -> IO CInt
-    handleWorkerExit _ = do
-      logInfo_ "WorkerExit hook firing"
-      maybeAgentId <- lookupEnv "EXOMONAD_AGENT_ID"
-      case maybeAgentId of
-        Just agentIdStr -> do
-            let agentId = T.pack agentIdStr
-            logInfo_ $ "Handling exit for agent: " <> agentId
-            
-            -- Send note to parent (Team Lead)
-            let message = "Worker " <> agentId <> " completed."
-            _ <- sendNote message
-            pure ()
-        Nothing -> do
-            logError_ "EXOMONAD_AGENT_ID not set in worker-exit hook"
-            pure ()
+handleWorkerExit :: HookInput -> IO CInt
+handleWorkerExit _ = do
+  logInfo_ "WorkerExit hook firing"
+  maybeAgentId <- lookupEnv "EXOMONAD_AGENT_ID"
+  case maybeAgentId of
+    Just agentIdStr -> do
+        let agentId = T.pack agentIdStr
+        logInfo_ $ "Handling exit for agent: " <> agentId
+        
+        -- Send note to parent (Team Lead)
+        let message = "Worker " <> agentId <> " completed."
+        _ <- sendNote message
+        pure ()
+    Nothing -> do
+        logError_ "EXOMONAD_AGENT_ID not set in worker-exit hook"
+        pure ()
 
-      output (BSL.toStrict $ Aeson.encode $ allowResponse Nothing)
-      pure 0
+  output (BSL.toStrict $ Aeson.encode $ allowResponse Nothing)
+  pure 0
 
 -- | Wrap a handler with exception handling.
 wrapHandler :: IO CInt -> IO CInt
