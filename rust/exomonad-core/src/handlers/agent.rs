@@ -319,7 +319,7 @@ fn teammate_result_to_proto(
         error: String::new(),
         pr_number: 0,
         pr_url: String::new(),
-        topology: Topology::SharedDir.to_proto(),
+        topology: Topology::WorktreePerAgent.to_proto(),
     }
 }
 

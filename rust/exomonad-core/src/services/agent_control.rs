@@ -836,25 +836,39 @@ impl AgentControlService {
     ) -> Result<()> {
         let effective_project_dir = self.effective_project_dir(subrepo)?;
 
-        // Find agent in list (which reads from config.json)
-        let agents = self.list_agents(subrepo).await?;
-        let agent = agents
-            .iter()
-            .find(|a| a.issue_id == identifier)
-            .ok_or_else(|| anyhow!("No agent found for identifier: {}", identifier))?;
+        // Try to find agent in list (for metadata and tab matching).
+        // Failure here is non-fatal to allow cleaning up worker panes (invisible to list_agents).
+        let agents = self.list_agents(subrepo).await.unwrap_or_default();
+        let agent = agents.iter().find(|a| a.issue_id == identifier);
 
-        info!(identifier, has_tab = agent.has_tab, "Cleaning up agent");
+        info!(
+            identifier,
+            found = agent.is_some(),
+            "Initiating cleanup_agent"
+        );
 
-        // Reconstruct internal_name for paths (identifier + suffix)
-        // Zellij tabs display "identifier", but paths use "identifier-suffix"
-        let suffix = agent.agent_type.as_deref().unwrap_or("gemini");
+        // Reconstruct names for paths and exact tab matching.
+        // If agent not found, assume gemini worker (Phase 1 convention).
+        let (suffix, display_name) = match agent {
+            Some(a) => {
+                let s = a.agent_type.as_deref().unwrap_or("gemini");
+                let emoji = if s == "claude" {
+                    AgentType::Claude.emoji()
+                } else {
+                    AgentType::Gemini.emoji()
+                };
+                (s, Some(format!("{} {}", emoji, identifier)))
+            }
+            None => ("gemini", None),
+        };
+
         let internal_name = format!("{}-{}", identifier, suffix);
 
-        // Close Zellij tab — try matching by agent name in tab list
-        if agent.has_tab {
+        // Close Zellij tab if found in list
+        if let Some(target_tab) = display_name {
             let tabs = self.get_zellij_tabs().await.unwrap_or_default();
             for tab in &tabs {
-                if tab.contains(identifier) || tab.contains(&agent.issue_id) {
+                if tab == &target_tab {
                     if let Err(e) = self.close_zellij_tab(tab).await {
                         warn!(tab_name = %tab, error = %e, "Failed to close Zellij tab (may not exist)");
                     }
@@ -1503,11 +1517,9 @@ fn parse_agent_tab(tab_name: &str) -> Option<AgentInfo> {
         return None;
     };
 
-    let topology = if rest.starts_with("gh-") {
-        Topology::WorktreePerAgent
-    } else {
-        Topology::SharedDir
-    };
+    // All discovered agent tabs currently use isolated worktrees.
+    // SharedDir is reserved for worker panes, which are invisible to tab discovery.
+    let topology = Topology::WorktreePerAgent;
 
     Some(AgentInfo {
         issue_id: rest.to_string(),
@@ -1755,7 +1767,7 @@ mod tests {
         let info = parse_agent_tab("🤖 auth-service").unwrap();
         assert_eq!(info.issue_id, "auth-service");
         assert_eq!(info.agent_type, Some("claude".to_string()));
-        assert_eq!(info.topology, Topology::SharedDir);
+        assert_eq!(info.topology, Topology::WorktreePerAgent);
     }
 
     #[test]
