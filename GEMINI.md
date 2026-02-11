@@ -79,3 +79,4 @@ The Haskell codebase adheres to a set of core principles designed for maximum sa
 - Implemented TUI-interactive MCP tools (confirm_action, select_option, request_guidance) in haskell/control-server. Verified via mock TUI logic. Committed changes.
 - Documented macOS arm64 requirement: binaries in `runtime/bin` (`exomonad-control-server`, `exomonad`, `tui-sidebar`) must be ad-hoc signed (`codesign -s -`) to avoid `Killed: 9` errors.
 - Refactored subagent spawning to pass environment variables directly through the Docker API instead of writing `.env` files, resolving environment contamination and shadowing issues.
+- Implemented `wait_for_event` and `notify_completion` tools, enabling reliable blocking synchronization for worker agents via in-memory event queues and direct server signaling.

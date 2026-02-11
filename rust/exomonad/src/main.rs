@@ -762,6 +762,27 @@ async fn main() -> Result<()> {
             }
         };
 
+        // Event notification endpoint
+        let event_queue = services.event_queue().clone();
+                    let events_handler = move |body: axum::body::Bytes| {
+                    let queue = event_queue.clone();
+                    async move {
+                        use prost::Message;
+                        use exomonad_proto::effects::events::NotifyEventRequest;
+                        
+                        match NotifyEventRequest::decode(body) {                    Ok(req) => {
+                        if let Some(event) = req.event {
+                            queue.notify_event(&req.session_id, event).await;
+                            (axum::http::StatusCode::OK, "OK")
+                        } else {
+                            (axum::http::StatusCode::BAD_REQUEST, "Missing event")
+                        }
+                    }
+                    Err(_) => (axum::http::StatusCode::BAD_REQUEST, "Invalid protobuf"),
+                }
+            }
+        };
+
         let app = axum::Router::new()
             .route("/health", axum::routing::get(health_handler))
             .route(
@@ -772,6 +793,7 @@ async fn main() -> Result<()> {
                 "/agents/{name}/mcp/{*rest}",
                 axum::routing::any(agent_handler),
             )
+            .route("/events", axum::routing::post(events_handler))
             .nest_service("/tl/mcp", tl_service)
             .nest_service("/dev/mcp", dev_service)
             .layer(TraceLayer::new_for_http());

@@ -67,6 +67,7 @@ library wasm-guest-internal
         ExoMonad.Guest.Tools.Messaging
         ExoMonad.Guest.Tools.Coordination
         ExoMonad.Guest.Tools.Spawn
+        ExoMonad.Guest.Tools.Events
         -- SpawnSpec compiler
         ExoMonad.Guest.SpawnSpec.Types
         ExoMonad.Guest.SpawnSpec.Zones
@@ -96,6 +97,7 @@ library wasm-guest-internal
         ExoMonad.Effects.Popup
         ExoMonad.Effects.FilePR
         ExoMonad.Effects.Copilot
+        ExoMonad.Effects.Events
         ExoMonad.Effects.Messaging
         ExoMonad.Effects.KV
         -- Types

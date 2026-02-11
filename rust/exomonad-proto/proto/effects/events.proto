@@ -1,0 +1,43 @@
+syntax = "proto3";
+package exomonad.effects.events;
+
+message WaitForEventRequest {
+  repeated string types = 1;  // e.g. ["worker_complete"]
+  int32 timeout_secs = 2;
+}
+
+message WaitForEventResponse {
+  Event event = 1;
+}
+
+message NotifyEventRequest {
+  string session_id = 1;
+  Event event = 2;
+}
+
+message NotifyEventResponse {
+  bool success = 1;
+}
+
+message Event {
+  oneof event_type {
+    WorkerComplete worker_complete = 1;
+    Timeout timeout = 2;
+  }
+}
+
+message WorkerComplete {
+  string worker_id = 1;
+  string status = 2;
+  repeated string changes = 3;
+  string message = 4;
+}
+
+message Timeout {
+  int32 timeout_secs = 1;
+}
+
+service EventEffects {
+  rpc WaitForEvent(WaitForEventRequest) returns (WaitForEventResponse);
+  rpc NotifyEvent(NotifyEventRequest) returns (NotifyEventResponse);
+}

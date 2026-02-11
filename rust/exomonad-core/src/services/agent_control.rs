@@ -470,6 +470,12 @@ impl AgentControlService {
 
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
+            if let Some(ref session) = self.zellij_session {
+                env_vars.insert("EXOMONAD_SESSION_ID".to_string(), session.clone());
+            }
+            if let Some(port) = self.mcp_server_port {
+                env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
+            }
 
             // Open Zellij tab with cwd = worktree_path
             self.new_zellij_tab(
@@ -656,6 +662,12 @@ impl AgentControlService {
 
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
+            if let Some(ref session) = self.zellij_session {
+                env_vars.insert("EXOMONAD_SESSION_ID".to_string(), session.clone());
+            }
+            if let Some(port) = self.mcp_server_port {
+                env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
+            }
 
             // Write per-agent MCP config into the worktree
             self.write_agent_mcp_config(&effective_project_dir, &worktree_path, options.agent_type)
@@ -749,6 +761,12 @@ impl AgentControlService {
 
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
+            if let Some(ref session) = self.zellij_session {
+                env_vars.insert("EXOMONAD_SESSION_ID".to_string(), session.clone());
+            }
+            if let Some(port) = self.mcp_server_port {
+                env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
+            }
 
             // Write Gemini settings to temp dir (not in worktree — worker has no worktree)
             let tmp_agent_dir = PathBuf::from(format!("/tmp/exomonad-agents/{}", internal_name));

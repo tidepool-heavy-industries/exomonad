@@ -117,8 +117,8 @@ pub use util::{build_prompt, find_exomonad_binary, shell_quote};
 // --- Handler re-exports ---
 #[cfg(feature = "runtime")]
 pub use handlers::{
-    AgentHandler, CopilotHandler, FilePRHandler, FsHandler, GitHandler, GitHubHandler, KvHandler,
-    LogHandler, MessagingHandler, PopupHandler,
+    AgentHandler, CoordinationHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler,
+    GitHandler, GitHubHandler, KvHandler, LogHandler, MessagingHandler, PopupHandler,
 };
 #[cfg(feature = "runtime")]
 pub use services::{Services, ValidatedServices};
@@ -312,6 +312,16 @@ pub fn register_builtin_handlers(
     builder = builder.with_effect_handler(handlers::FilePRHandler::new());
 
     builder = builder.with_effect_handler(handlers::CopilotHandler::new());
+
+    let remote_port = std::env::var("EXOMONAD_SERVER_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok());
+
+    builder = builder.with_effect_handler(handlers::EventHandler::new(
+        services.event_queue().clone(),
+        remote_port,
+        services.zellij_session().map(|s| s.to_string()),
+    ));
 
     let question_registry = Arc::new(services::questions::QuestionRegistry::new());
 

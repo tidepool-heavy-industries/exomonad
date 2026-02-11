@@ -51,6 +51,7 @@ library
     Effects.Kv
     Effects.Messaging
     Effects.Coordination
+    Effects.Events
     -- Hand-written compatibility layer
     ExoMonad.Compat
   build-depends:

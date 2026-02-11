@@ -2,6 +2,7 @@ pub mod agent_control;
 pub mod coordination;
 pub mod copilot_review;
 pub mod docker;
+pub mod event_queue;
 pub mod external;
 pub mod file_pr;
 pub mod filesystem;
@@ -19,6 +20,7 @@ pub use self::agent_control::{
     AgentControlService, AgentInfo, BatchCleanupResult, BatchSpawnResult, SpawnOptions, SpawnResult,
 };
 use self::docker::CommandExecutor;
+pub use self::event_queue::EventQueue;
 pub use self::filesystem::FileSystemService;
 use self::git::GitService;
 use self::github::GitHubService;
@@ -109,6 +111,9 @@ pub struct Services {
     /// High-level agent lifecycle operations (spawn, cleanup, list).
     pub agent_control: Arc<AgentControlService>,
 
+    /// Event queue for wait_for_event blocking calls.
+    pub event_queue: Arc<EventQueue>,
+
     /// File I/O operations (read, write).
     pub filesystem: Arc<FileSystemService>,
 
@@ -152,6 +157,9 @@ impl Services {
             github.clone(),
         ));
 
+        // Event queue for blocking wait calls
+        let event_queue = Arc::new(EventQueue::new());
+
         // Filesystem service for file read/write operations
         let filesystem = Arc::new(FileSystemService::new(project_dir));
 
@@ -160,6 +168,7 @@ impl Services {
             git,
             github,
             agent_control,
+            event_queue,
             filesystem,
             zellij_session: None,
         }
@@ -273,6 +282,11 @@ impl ValidatedServices {
     /// Get the agent control service.
     pub fn agent_control(&self) -> &Arc<AgentControlService> {
         &self.0.agent_control
+    }
+
+    /// Get the event queue service.
+    pub fn event_queue(&self) -> &Arc<EventQueue> {
+        &self.0.event_queue
     }
 
     /// Get the filesystem service.

@@ -26,8 +26,11 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
+import Data.Vector qualified as V
+import Effects.Events qualified as ProtoEvents
 import Effects.Log qualified as Log
 import ExoMonad.Effect.Class (runEffect_)
+import ExoMonad.Effects.Events qualified as Events
 import ExoMonad.Effects.Log (LogInfo, LogError, LogEmitEvent)
 import ExoMonad.Effects.Messaging (sendNote)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), toMCPFormat)
@@ -213,17 +216,32 @@ handleWorkerExit :: HookInput -> IO CInt
 handleWorkerExit _ = do
   logInfo_ "WorkerExit hook firing"
   maybeAgentId <- lookupEnv "EXOMONAD_AGENT_ID"
-  case maybeAgentId of
-    Just agentIdStr -> do
+  maybeSessionId <- lookupEnv "EXOMONAD_SESSION_ID"
+
+  case (maybeAgentId, maybeSessionId) of
+    (Just agentIdStr, Just sessionIdStr) -> do
         let agentId = T.pack agentIdStr
-        logInfo_ $ "Handling exit for agent: " <> agentId
+        let sessionId = T.pack sessionIdStr
+        logInfo_ $ "Handling exit for agent: " <> agentId <> " session: " <> sessionId
         
-        -- Send note to parent (Team Lead)
-        let message = "Worker " <> agentId <> " completed."
-        _ <- sendNote message
-        pure ()
-    Nothing -> do
-        logError_ "EXOMONAD_AGENT_ID not set in worker-exit hook"
+        -- Create the completion event
+        let event = ProtoEvents.Event
+              { ProtoEvents.eventEventType = Just $ ProtoEvents.EventEventTypeWorkerComplete $ ProtoEvents.WorkerComplete
+                  { ProtoEvents.workerCompleteWorkerId = TL.fromStrict agentId
+                  , ProtoEvents.workerCompleteStatus = "success" -- TODO: differentiate success/error
+                  , ProtoEvents.workerCompleteChanges = V.empty -- TODO: capture changes
+                  , ProtoEvents.workerCompleteMessage = "Worker completed"
+                  }
+              }
+              
+        -- Send event
+        res <- Events.notifyEvent sessionId event
+        case res of
+            Left err -> logError_ ("Failed to notify completion: " <> T.pack (show err))
+            Right _ -> logInfo_ "Completion notified"
+            
+    _ -> do
+        logError_ "EXOMONAD_AGENT_ID or EXOMONAD_SESSION_ID not set in worker-exit hook"
         pure ()
 
   output (BSL.toStrict $ Aeson.encode $ allowResponse Nothing)
