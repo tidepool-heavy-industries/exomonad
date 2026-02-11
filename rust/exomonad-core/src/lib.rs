@@ -288,7 +288,11 @@ impl Runtime {
 pub fn register_builtin_handlers(
     builder: RuntimeBuilder,
     services: &Arc<ValidatedServices>,
-) -> (RuntimeBuilder, Arc<services::questions::QuestionRegistry>) {
+) -> (
+    RuntimeBuilder,
+    Arc<services::questions::QuestionRegistry>,
+    Arc<services::event_queue::EventQueue>,
+) {
     let mut builder = builder;
 
     builder = builder.with_effect_handler(handlers::GitHandler::new(services.git().clone()));
@@ -317,8 +321,10 @@ pub fn register_builtin_handlers(
         .ok()
         .and_then(|s| s.parse().ok());
 
+    let event_queue = Arc::new(services::event_queue::EventQueue::new());
+
     builder = builder.with_effect_handler(handlers::EventHandler::new(
-        services.event_queue().clone(),
+        event_queue.clone(),
         remote_port,
         services.zellij_session().map(|s| s.to_string()),
     ));
@@ -337,5 +343,5 @@ pub fn register_builtin_handlers(
     let coordination_service = Arc::new(services::coordination::CoordinationService::new());
     builder = builder.with_effect_handler(handlers::CoordinationHandler::new(coordination_service));
 
-    (builder, question_registry)
+    (builder, question_registry, event_queue)
 }

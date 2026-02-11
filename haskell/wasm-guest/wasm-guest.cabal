@@ -38,7 +38,8 @@ common shared
         containers,
         time,
         directory,
-        filepath
+        filepath,
+        process
 
     -- Polysemy plugin doesn't work with WASM cross-compilation (GHC #14335)
     if !arch(wasm32)

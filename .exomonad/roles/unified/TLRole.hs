@@ -15,7 +15,8 @@ data Tools mode = Tools
     popups :: PopupTools mode,
     messaging :: TLMessagingTools mode,
     coordination :: CoordinationTools mode,
-    pr :: FilePRTools mode
+    pr :: FilePRTools mode,
+    events :: EventTools mode
   }
   deriving (Generic)
 
@@ -29,7 +30,8 @@ config =
             popups = popupTools,
             messaging = tlMessagingTools,
             coordination = coordinationTools,
-            pr = filePRTools
+            pr = filePRTools,
+            events = eventTools
           },
       hooks = defaultHooks
     }

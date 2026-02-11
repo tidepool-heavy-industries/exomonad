@@ -470,9 +470,8 @@ impl AgentControlService {
 
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-            if let Some(ref session) = self.zellij_session {
-                env_vars.insert("EXOMONAD_SESSION_ID".to_string(), session.clone());
-            }
+            let session_id = self.zellij_session.as_deref().unwrap_or("default");
+            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), session_id.to_string());
             if let Some(port) = self.mcp_server_port {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
             }
@@ -662,9 +661,8 @@ impl AgentControlService {
 
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-            if let Some(ref session) = self.zellij_session {
-                env_vars.insert("EXOMONAD_SESSION_ID".to_string(), session.clone());
-            }
+            let session_id = self.zellij_session.as_deref().unwrap_or("default");
+            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), session_id.to_string());
             if let Some(port) = self.mcp_server_port {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
             }
@@ -761,9 +759,8 @@ impl AgentControlService {
 
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-            if let Some(ref session) = self.zellij_session {
-                env_vars.insert("EXOMONAD_SESSION_ID".to_string(), session.clone());
-            }
+            let session_id = self.zellij_session.as_deref().unwrap_or("default");
+            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), session_id.to_string());
             if let Some(port) = self.mcp_server_port {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
             }

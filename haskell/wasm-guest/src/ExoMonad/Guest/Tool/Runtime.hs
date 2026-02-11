@@ -45,6 +45,8 @@ import Polysemy (Embed, Sem, runM)
 import System.Directory (getCurrentDirectory)
 import System.Environment (lookupEnv)
 import System.FilePath (takeFileName)
+import System.Process (readProcessWithExitCode)
+import System.Exit (ExitCode(..))
 
 -- | Helper for fire-and-forget logging via yield_effect.
 logInfo_ :: Text -> IO ()
@@ -223,23 +225,30 @@ handleWorkerExit _ = do
         let agentId = T.pack agentIdStr
         let sessionId = T.pack sessionIdStr
         logInfo_ $ "Handling exit for agent: " <> agentId <> " session: " <> sessionId
-        
+
+        -- Get git diff for changes
+        (exitCode, stdout, _) <- readProcessWithExitCode "git" ["diff", "--stat", "HEAD"] ""
+
+        let changes = case exitCode of
+              ExitSuccess -> V.fromList $ map TL.fromStrict $ T.lines (T.pack stdout)
+              _ -> V.empty
+
         -- Create the completion event
         let event = ProtoEvents.Event
               { ProtoEvents.eventEventType = Just $ ProtoEvents.EventEventTypeWorkerComplete $ ProtoEvents.WorkerComplete
                   { ProtoEvents.workerCompleteWorkerId = TL.fromStrict agentId
-                  , ProtoEvents.workerCompleteStatus = "success" -- TODO: differentiate success/error
-                  , ProtoEvents.workerCompleteChanges = V.empty -- TODO: capture changes
-                  , ProtoEvents.workerCompleteMessage = "Worker completed"
+                  , ProtoEvents.workerCompleteStatus = "success"
+                  , ProtoEvents.workerCompleteChanges = changes
+                  , ProtoEvents.workerCompleteMessage = "Worker " <> TL.fromStrict agentId <> " completed"
                   }
               }
-              
+
         -- Send event
         res <- Events.notifyEvent sessionId event
         case res of
             Left err -> logError_ ("Failed to notify completion: " <> T.pack (show err))
             Right _ -> logInfo_ "Completion notified"
-            
+
     _ -> do
         logError_ "EXOMONAD_AGENT_ID or EXOMONAD_SESSION_ID not set in worker-exit hook"
         pure ()

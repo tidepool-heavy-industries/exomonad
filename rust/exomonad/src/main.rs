@@ -701,7 +701,7 @@ async fn main() -> Result<()> {
 
         // Build runtime with file-based WASM loading (enables hot reload)
         let builder = RuntimeBuilder::new().with_wasm_path(wasm_path);
-        let (builder, question_registry) =
+        let (builder, question_registry, event_queue) =
             exomonad_core::register_builtin_handlers(builder, &services);
         let rt = builder.build().await.context("Failed to build runtime")?;
 
@@ -763,11 +763,10 @@ async fn main() -> Result<()> {
         };
 
         // Event notification endpoint
-        let event_queue = services.event_queue().clone();
-                    let events_handler = move |body: axum::body::Bytes| {
-                    let queue = event_queue.clone();
-                    async move {
-                        use prost::Message;
+        let events_handler = move |body: axum::body::Bytes| {
+            let queue = event_queue.clone();
+            async move {
+                use prost::Message;
                         use exomonad_proto::effects::events::NotifyEventRequest;
                         
                         match NotifyEventRequest::decode(body) {                    Ok(req) => {
@@ -943,7 +942,8 @@ async fn build_runtime(
     services: &Arc<exomonad_core::ValidatedServices>,
 ) -> Result<Runtime> {
     let builder = RuntimeBuilder::new().with_wasm_bytes(wasm_bytes.to_vec());
-    let (builder, _question_registry) = exomonad_core::register_builtin_handlers(builder, services);
+    let (builder, _question_registry, _event_queue) =
+        exomonad_core::register_builtin_handlers(builder, services);
 
     builder.build().await.context("Failed to build runtime")
 }
