@@ -501,7 +501,7 @@ fn mcp_list_tools_returns_definitions() {
         .filter_map(|t| t["name"].as_str())
         .collect();
 
-    for expected in &["spawn_subtree", "spawn_leaf", "get_agent_messages"] {
+    for expected in &["spawn_subtree", "spawn_worker", "get_agent_messages"] {
         assert!(
             tool_names.contains(expected),
             "Missing expected tool '{}'. Found: {:?}",

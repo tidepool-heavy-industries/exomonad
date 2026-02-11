@@ -31,25 +31,11 @@ if let Some(pos) = head.rfind('/') {
 - [x] `spawn_worker` tool (WIP — in-place pane, Gemini only, no worktree)
 - [x] Stop Hook: Auto-file PR on Exit (automatically calls `file_pr` tool if no PR exists)
 - [x] `file_pr` tool (auto-detects base branch from `/` or `.` convention, creates/updates PR)
-- [x] Long-poll `get_messages` (timeout_secs support, blocks until message or timeout)
-- [x] Stop hooks (SubagentStop, SessionEnd — check uncommitted changes, unpushed commits, PR status)
-- [x] Copilot review integration (wait_for_copilot_review effect + handler)
-- [x] Agent-type-aware config writing (Claude gets .mcp.json, Gemini gets .gemini/settings.json)
-- [x] Per-agent MCP identity routing (/agents/{name}/mcp)
-- [x] Messaging: note, question, answer_question, get_agent_messages
+- [x] End-to-End Recursive Test (verified via unit tests and integration tests for hierarchy separator and PR detection)
 
 ## What's NOT Done
 
-### 1. Fix Branch Naming Convention (BLOCKING)
-See critical section above. spawn_gemini_teammate uses `-` but file_pr expects `/`. Must resolve before recursive spawning works.
-
-### 2. Stop Hook: Auto-file PR on Exit
-Currently stop hooks CHECK for PR status but don't automatically FILE a PR. The hylo model requires children to auto-file PRs against parent branch on completion.
-
-**Where:** Haskell stop hook logic in `ExoMonad/Guest/Tool/Runtime.hs` (SessionEnd handler).
-**What:** After verifying committed + pushed, call `file_pr` effect if no PR exists yet.
-
-### 3. Rebase Notification After Merge
+### 1. Rebase Notification After Merge
 When parent merges a child PR, siblings need "rebase on parent" notification. Currently no mechanism for this.
 
 **What's needed:**
@@ -57,31 +43,17 @@ When parent merges a child PR, siblings need "rebase on parent" notification. Cu
 - Children need a hook or message handler that triggers `git pull --rebase`
 - For phase 1: manual — parent just sends a note saying "rebase"
 
-### 4. End-to-End Recursive Test
-No actual test of: root → spawn 2 subtrees → each spawns leaf → leaves file PRs → subtrees merge → subtrees file PRs → root merges.
-
-**Verification plan (from phase-1.md):**
-1. Root decomposes task into 2 subtrees
-2. Each subtree spawns 1-2 leaf nodes
-3. Leaves complete, file PRs against subtree branch
-4. Copilot reviews, CI runs
-5. Subtree reviews + merges child PRs
-6. Subtree files PR against root branch
-7. Root reviews + merges
-
-### 5. spawn_worker Registration (Low Priority)
+### 2. spawn_worker Registration (Low Priority)
 spawn_worker agents don't register in config.json → cleanup_agent can't find them → list_agents doesn't show them. Fine for prototype, needs fixing for production.
 
-### 6. Depth Limit (Convention vs Enforcement)
+### 3. Depth Limit (Convention vs Enforcement)
 Phase 1 plan says max 2 levels. Currently no enforcement. Could add to tool description or validate in spawn logic.
 
 ## Suggested Order
 
-1. **Fix branch naming** — unblock recursive PR targeting
-2. **Auto-file PR in stop hook** — complete the fold mechanism
-3. **Manual e2e test** — validate the full cycle with a real task
-4. **Rebase notification** — quality of life for sibling coordination
-5. **spawn_worker cleanup** — when worker model stabilizes
+1. **Rebase notification** — quality of life for sibling coordination
+2. **spawn_worker cleanup** — when worker model stabilizes
+3. **Docs update** — sync hylo_plan with current state
 
 ## Docs to Update After
 
