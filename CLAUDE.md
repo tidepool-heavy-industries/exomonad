@@ -273,12 +273,13 @@ Human-driven Claude Code sessions augmented with ExoMonad. **Not headless automa
 ```
 Human in Zellij session
     └── Claude Code + exomonad (Rust + Haskell WASM)
-            ├── MCP tools via WASM (git_branch, spawn_agents, etc.)
-            └── Spawn agents:
-                ├── worktree: ./agents/issue-123
-                │   └── Zellij tab: "123-fix-bug"
-                └── worktree: ./agents/issue-456
-                    └── Zellij tab: "456-add-feature"
+            ├── MCP tools via WASM (spawn_subtree, spawn_worker, file_pr, etc.)
+            └── Hylo agent tree:
+                ├── worktree: main/feature-a (TL role, can spawn children)
+                │   ├── worker: rust-impl (Gemini, in-place pane)
+                │   └── worker: haskell-impl (Gemini, in-place pane)
+                └── worktree: main/feature-b (TL role)
+                    └── ...
 ```
 
 ### Data Flow
@@ -286,7 +287,7 @@ Human in Zellij session
 **MCP Tool Call:**
 ```
 1. User asks question in Claude Code
-2. Claude plans to call MCP tool (e.g., spawn_agents, git_branch)
+2. Claude plans to call MCP tool (e.g., spawn_subtree, file_pr)
 3. Claude Code sends request to exomonad (HTTP)
 4. exomonad serve calls WASM handle_mcp_call (Unified WASM)
 5. Haskell dispatches to tool handler
@@ -317,7 +318,7 @@ Human in Zellij session
 
 Ask the specialist directly instead of guessing. They have authoritative knowledge about Claude Code internals, hook lifecycle, and best practices.
 
-Hook configuration is **auto-generated per worktree** by `write_context_files()` in `agent_control.rs` during `spawn_agents`. Each spawned Claude agent gets `.claude/settings.local.json` with PreToolUse, SubagentStop, and SessionEnd hooks. Gemini agents get `.gemini/settings.json` with AfterAgent hooks. Do not manually create hook settings — they are generated at spawn time.
+Hook configuration is **auto-generated per worktree** by `write_context_files()` in `agent_control.rs` during agent spawning. Each spawned Claude agent gets `.claude/settings.local.json` with PreToolUse, SubagentStop, and SessionEnd hooks. Gemini agents get `.gemini/settings.json` with AfterAgent hooks. Do not manually create hook settings — they are generated at spawn time.
 
 **MCP server configuration:** Use CLI-native config commands (one-time setup):
 ```bash
@@ -325,9 +326,8 @@ claude mcp add --transport http exomonad http://localhost:7432/tl/mcp
 gemini mcp add --transport http exomonad http://localhost:7432/tl/mcp
 ```
 
-**Two WASM loading modes:**
-- **Embedded** (`include_bytes!`): WASM compiled into binary. Used by `exomonad hook`. Role selected via config.
-- **File-based** (`from_file`): Unified WASM loaded from `.exomonad/wasm/`. Used by `exomonad serve`. Contains all roles, selected per-call. Enables hot reload — mtime checked per tool call, new WASM swapped in transparently.
+**WASM loading:**
+Unified WASM loaded from `.exomonad/wasm/wasm-guest-unified.wasm`. Used by both `exomonad hook` and `exomonad serve`. Contains all roles, selected per-call. In serve mode, hot reload checks mtime per tool call.
 
 ```toml
 default_role = "tl"  # or "dev"
@@ -362,8 +362,8 @@ exomonad recompile --role tl  # Rebuild WASM via nix, copy to .exomonad/wasm/
 ```
 
 **What `just install-all-dev` does:**
-1. Builds both WASM plugins (tl and dev) via nix
-2. Builds exomonad Rust binary (debug mode, embeds WASM via `build.rs` + `include_bytes!`)
+1. Builds unified WASM plugin via nix
+2. Builds exomonad Rust binary (debug mode)
 3. Copies binary to `~/.cargo/bin/exomonad`
 4. Builds and installs Zellij plugins
 
@@ -373,8 +373,7 @@ exomonad recompile --role tl  # Rebuild WASM via nix, copy to .exomonad/wasm/
 3. `cabal.project.wasm` lists role packages alongside `wasm-guest` SDK
 4. `just wasm <role>` builds via `nix develop .#wasm -c wasm32-wasi-cabal build ...`
 5. Compiled WASM copied to `.exomonad/wasm/wasm-guest-<role>.wasm`
-6. For embedded mode: `build.rs` copies WASM into Rust binary via `include_bytes!`
-7. For serve mode: HTTP server loads directly from `.exomonad/wasm/` with hot reload
+6. Both `exomonad hook` and `exomonad serve` load WASM from `.exomonad/wasm/` at runtime
 
 ### MCP Tools
 
@@ -389,30 +388,28 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 | `github_list_issues` | List GitHub issues |
 | `github_get_issue` | Get single issue details |
 | `github_list_prs` | List GitHub pull requests |
-| `spawn_agents` | Spawn agents (Claude/Gemini) in Zellij tabs with isolated git worktrees |
-| `spawn_gemini_teammate` | Spawn a named Gemini teammate with a direct prompt (no GitHub issue required) |
-| `cleanup_agents` | Clean up agent worktrees and close Zellij tabs |
-| `list_agents` | List active agent worktrees |
-| `get_agent_messages` | Read notes and questions from agent outboxes (TL messaging) |
+| `spawn_subtree` | Fork a worktree node off your current branch for sub-problems that may need further decomposition |
+| `spawn_worker` | Spawn a Gemini agent for a focused task in the current worktree (no branch) |
+| `get_agent_messages` | Read notes and questions from agent outboxes (TL messaging, supports long-poll) |
 | `answer_question` | Answer a pending question from an agent (TL messaging) |
+| `file_pr` | Create or update a PR for the current branch (auto-detects base branch from naming convention) |
 
-**How spawn_agents works:**
-1. Creates git worktree: `.exomonad/worktrees/gh-{issue}-{title}-{agent}/`
-2. Creates branch: `gh-{issue}/{title}-{agent}`
-3. Writes `.exomonad/config.toml` (default_role="dev") and CLI-native MCP config (`.gemini/settings.json` for Gemini agents)
-4. Builds initial prompt with full issue context
-5. Creates Zellij tab using KDL layout with agent-specific command:
-   - `claude --prompt '...'` for Claude agents
-   - `gemini --prompt-interactive '...'` for Gemini agents
-6. Tab auto-closes when agent exits (`close_on_exit true`)
+**How spawn works (hylo model):**
+1. `spawn_subtree`: Creates git worktree branching off the current branch
+2. Branch naming: `{parent_branch}/{name}` — enables auto-detection of PR base branch
+3. Writes per-agent MCP config pointing to HTTP server
+4. Creates Zellij tab with agent-specific command
+5. `spawn_subtree` agents get TL role (can spawn their own children)
+6. `spawn_worker`: Runs Gemini in a Zellij pane in the parent's worktree (no branch, no worktree)
+7. PRs target parent branch, not main — merged via recursive fold
 
 ### Status
 
 - ✅ 100% WASM routing (all logic in Haskell, Rust handles I/O only)
 - ✅ All MCP tools via WASM (no direct Rust tools)
 - ✅ Hook forwarding via WASM
-- ✅ Embedded WASM (compile-time `include_bytes!`, no file paths)
-- ✅ spawn_agents: Git worktrees + Zellij KDL layouts
+- ✅ Unified file-based WASM (single module for all roles, hot reload in serve mode)
+- ✅ Hylo spawn model: spawn_subtree (worktree isolation) + spawn_worker (in-place pane)
 - ✅ Proper Zellij tab creation with full UI (tab-bar, status-bar)
 - ✅ Shell-wrapped commands for environment inheritance
 - ✅ GitHub API integration with token from ~/.exomonad/secrets

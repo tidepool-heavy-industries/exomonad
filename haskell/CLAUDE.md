@@ -52,12 +52,12 @@ Shared code across roles lives in `.exomonad/lib/` (e.g., `StopHook.hs`).
 2. `cabal.project.wasm` lists `.exomonad/roles/tl` and `.exomonad/roles/dev` as packages
 3. `just wasm <role>` (or `exomonad recompile --role <role>`) builds via nix + wasm32-wasi-cabal
 4. Build output lands in `dist/`, then gets copied to `.exomonad/wasm/wasm-guest-<role>.wasm`
-5. Rust binary embeds WASM at compile time (`include_bytes!`) for stdio mode
-6. HTTP serve mode (`exomonad serve`) loads from file path with hot reload on mtime change
+5. WASM loaded from file by Rust binary at runtime (both hooks and serve mode)
+6. In serve mode, hot reload checks mtime per tool call
 
-### Unified WASM (HTTP-Native)
+### Unified WASM
 
-For the HTTP server mode (`exomonad serve`), a unified WASM module contains all roles:
+The unified WASM module is the primary build target, containing all roles:
 
 ```
 .exomonad/roles/unified/
@@ -82,7 +82,7 @@ Each role is a `RoleConfig` selecting from pre-built tool records:
 ```haskell
 -- .exomonad/roles/tl/Role.hs
 data Tools mode = Tools
-  { agents :: AgentTools mode   -- spawn_agents, cleanup_agents, list_agents
+  { spawn :: SpawnTools mode     -- spawn_subtree, spawn_leaf
   , popups :: PopupTools mode   -- popup UI
   } deriving Generic
 

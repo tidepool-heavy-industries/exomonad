@@ -7,7 +7,7 @@ use crate::effects::{
 };
 use crate::services::agent_control::{
     AgentControlService, AgentInfo, AgentType as ServiceAgentType, SpawnGeminiTeammateOptions,
-    SpawnOptions,
+    SpawnOptions, SpawnWorkerOptions,
 };
 use crate::{GithubOwner, GithubRepo, IssueNumber};
 use async_trait::async_trait;
@@ -157,6 +157,23 @@ impl AgentEffects for AgentHandler {
         })
     }
 
+    async fn spawn_worker(&self, req: SpawnWorkerRequest) -> EffectResult<SpawnWorkerResponse> {
+        let options = SpawnWorkerOptions {
+            name: req.name.clone(),
+            prompt: req.prompt.clone(),
+        };
+
+        let result = self
+            .service
+            .spawn_worker(&options)
+            .await
+            .map_err(|e| EffectError::custom("agent_error", e.to_string()))?;
+
+        Ok(SpawnWorkerResponse {
+            agent: Some(worker_result_to_proto(&req.name, &result)),
+        })
+    }
+
     async fn cleanup(&self, req: CleanupRequest) -> EffectResult<CleanupResponse> {
         let subrepo = if req.subrepo.is_empty() {
             None
@@ -299,6 +316,28 @@ fn teammate_result_to_proto(
             },
             name
         ),
+        error: String::new(),
+        pr_number: 0,
+        pr_url: String::new(),
+        topology: Topology::SharedDir.to_proto(),
+    }
+}
+
+fn worker_result_to_proto(
+    name: &str,
+    result: &crate::services::agent_control::SpawnResult,
+) -> exomonad_proto::effects::agent::AgentInfo {
+    use crate::services::agent_control::Topology;
+
+    exomonad_proto::effects::agent::AgentInfo {
+        id: result.tab_name.clone(),
+        issue: String::new(),
+        worktree_path: String::new(),
+        branch_name: String::new(),
+        agent_type: AgentType::Gemini as i32,
+        role: 0,
+        status: AgentStatus::Running as i32,
+        zellij_tab: format!("\u{1F48E} {}", name),
         error: String::new(),
         pr_number: 0,
         pr_url: String::new(),

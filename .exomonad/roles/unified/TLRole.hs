@@ -11,7 +11,7 @@ module TLRole (config, Tools) where
 import ExoMonad
 
 data Tools mode = Tools
-  { agents :: AgentTools mode,
+  { spawn :: SpawnTools mode,
     popups :: PopupTools mode,
     messaging :: TLMessagingTools mode,
     coordination :: CoordinationTools mode
@@ -24,7 +24,7 @@ config =
     { roleName = "tl",
       tools =
         Tools
-          { agents = agentTools,
+          { spawn = spawnTools,
             popups = popupTools,
             messaging = tlMessagingTools,
             coordination = coordinationTools

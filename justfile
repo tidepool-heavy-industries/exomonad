@@ -126,10 +126,8 @@ wasm role="tl":
     cp $(find dist-newstyle -name "wasm-guest-{{role}}.wasm" -type f -print -quit) .exomonad/wasm/wasm-guest-{{role}}.wasm
     @echo ">>> Done: .exomonad/wasm/wasm-guest-{{role}}.wasm"
 
-# Build all WASM role plugins (tl + dev + unified)
+# Build unified WASM plugin (contains all roles)
 wasm-all:
-    @just wasm tl
-    @just wasm dev
     @just wasm unified
     @echo ">>> Installed to .exomonad/wasm/:"
     @ls -lh .exomonad/wasm/wasm-guest-*.wasm
@@ -158,7 +156,7 @@ _install profile:
     echo ">>> [1/4] Building Haskell WASM plugins (cabal cached if unchanged)..."
     just wasm-all
 
-    echo ">>> [2/4] Building Rust binary (${LABEL}, embeds WASM)..."
+    echo ">>> [2/4] Building Rust binary (${LABEL})..."
     cargo build ${CARGO_FLAGS} -p exomonad
 
     echo ">>> [3/4] Building Zellij plugin (wasm32-wasip1, ${LABEL})..."
@@ -214,6 +212,10 @@ proto-test:
     echo ">>> Running proto wire format compatibility test..."
     cabal run proto-test || echo "Wire format test not yet implemented"
     echo ">>> Done"
+
+# Run MCP integration tests (starts server, runs tests, cleans up)
+test-mcp *args:
+    ./scripts/test-mcp-integration.sh {{args}}
 
 # Clean build artifacts
 clean:

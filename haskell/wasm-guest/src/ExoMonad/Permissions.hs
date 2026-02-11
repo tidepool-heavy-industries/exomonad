@@ -79,10 +79,8 @@ data TLPermission
     TLCloseIssue
   | -- | Delete a branch that has been merged
     TLDeleteMergedBranch BranchName
-  | -- | Spawn sub-agents
+  | -- | Spawn sub-agents (spawn_subtree, spawn_worker)
     TLSpawnAgents
-  | -- | Clean up agent worktrees
-    TLCleanupAgents
   | -- | Show popup UI
     TLShowPopup
   deriving (Show, Eq)

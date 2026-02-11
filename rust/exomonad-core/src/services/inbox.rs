@@ -374,12 +374,8 @@ mod tests {
         append_message(&path, &msg).unwrap();
 
         let start = std::time::Instant::now();
-        let messages = poll_unread(
-            &path,
-            Duration::from_secs(10),
-            Duration::from_millis(100),
-        )
-        .unwrap();
+        let messages =
+            poll_unread(&path, Duration::from_secs(10), Duration::from_millis(100)).unwrap();
 
         assert_eq!(messages.len(), 1);
         assert!(
@@ -394,12 +390,8 @@ mod tests {
         let path = dir.path().join("inbox.json");
 
         let start = std::time::Instant::now();
-        let messages = poll_unread(
-            &path,
-            Duration::from_millis(200),
-            Duration::from_millis(50),
-        )
-        .unwrap();
+        let messages =
+            poll_unread(&path, Duration::from_millis(200), Duration::from_millis(50)).unwrap();
 
         assert!(messages.is_empty());
         assert!(start.elapsed() >= Duration::from_millis(200));

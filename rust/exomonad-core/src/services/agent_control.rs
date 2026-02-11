@@ -132,6 +132,15 @@ pub struct SpawnGeminiTeammateOptions {
     pub base_branch: Option<String>,
 }
 
+/// Options for spawning a worker agent in the current worktree (no branch/worktree).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpawnWorkerOptions {
+    /// Human-readable name for the worker
+    pub name: String,
+    /// Implementation instructions
+    pub prompt: String,
+}
+
 /// Result of spawning an agent.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SpawnResult {
@@ -556,11 +565,6 @@ impl AgentControlService {
         let result = timeout(SPAWN_TIMEOUT, async {
             self.check_zellij_env()?;
 
-            // Fail fast: Gemini agents require MCP server port for settings.json.
-            let mcp_port = self.mcp_server_port.ok_or_else(|| {
-                anyhow!("MCP server port not set. Start server with `exomonad serve` before spawning agents.")
-            })?;
-
             let effective_project_dir = self.effective_project_dir(options.subrepo.as_deref())?;
 
             let agent_suffix = options.agent_type.suffix();
@@ -649,34 +653,18 @@ impl AgentControlService {
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
 
-            // Write per-agent Gemini settings with MCP endpoint URL
-            // We write this into the worktree
-            let agent_config_dir = worktree_path.join(".gemini");
-            fs::create_dir_all(&agent_config_dir).await?;
+            // Write per-agent MCP config into the worktree
+            self.write_agent_mcp_config(&effective_project_dir, &worktree_path, options.agent_type)
+                .await?;
 
-            let settings_path = agent_config_dir.join("settings.json");
-            let mcp_url = format!(
-                "http://localhost:{}/agents/{}/mcp",
-                mcp_port, internal_name
-            );
-            let settings = serde_json::json!({
-                "mcpServers": {
-                    "exomonad": {
-                        "httpUrl": mcp_url
-                    }
-                }
-            });
-            fs::write(&settings_path, serde_json::to_string_pretty(&settings)?).await?;
-            info!(
-                path = %settings_path.display(),
-                url = %mcp_url,
-                "Wrote per-agent Gemini settings"
-            );
-
-            env_vars.insert(
-                "GEMINI_CLI_SYSTEM_SETTINGS_PATH".to_string(),
-                settings_path.to_string_lossy().to_string(),
-            );
+            // For Gemini agents, point at worktree settings via env var
+            if options.agent_type == AgentType::Gemini {
+                let settings_path = worktree_path.join(".gemini").join("settings.json");
+                env_vars.insert(
+                    "GEMINI_CLI_SYSTEM_SETTINGS_PATH".to_string(),
+                    settings_path.to_string_lossy().to_string(),
+                );
+            }
 
             // Open Zellij pane with cwd = worktree_path
             self.new_zellij_pane(
@@ -716,6 +704,112 @@ impl AgentControlService {
         })??;
 
         info!(name = %options.name, "spawn_gemini_teammate completed successfully");
+        Ok(result)
+    }
+
+    // ========================================================================
+    // Spawn Worker (in-place, no worktree)
+    // ========================================================================
+
+    /// Spawn a worker agent in the parent's working directory.
+    ///
+    /// Workers run as Gemini agents in a Zellij pane within the current tab.
+    /// No git branch or worktree is created — the worker shares the parent's worktree.
+    #[tracing::instrument(skip(self, options), fields(name = %options.name))]
+    pub async fn spawn_worker(&self, options: &SpawnWorkerOptions) -> Result<SpawnResult> {
+        info!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_worker");
+
+        let result = timeout(SPAWN_TIMEOUT, async {
+            self.check_zellij_env()?;
+
+            let mcp_port = self.mcp_server_port.ok_or_else(|| {
+                anyhow!("MCP server port not set. Start server with `exomonad serve` before spawning agents.")
+            })?;
+
+            let internal_name = format!("{}-gemini", options.name);
+            let display_name = format!("{} {}", AgentType::Gemini.emoji(), options.name);
+
+            // Idempotency: if pane is already alive, return existing info
+            let tab_alive = self.is_zellij_tab_alive(&display_name).await;
+            if tab_alive {
+                info!(name = %options.name, "Worker already running, returning existing");
+                return Ok(SpawnResult {
+                    agent_dir: String::new(),
+                    tab_name: internal_name,
+                    issue_title: options.name.clone(),
+                    agent_type: "gemini".to_string(),
+                });
+            }
+
+            let mut env_vars = HashMap::new();
+            env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
+
+            // Write Gemini settings to temp dir (not in worktree — worker has no worktree)
+            let tmp_agent_dir = PathBuf::from(format!("/tmp/exomonad-agents/{}", internal_name));
+            fs::create_dir_all(&tmp_agent_dir).await?;
+
+            let settings_path = tmp_agent_dir.join("settings.json");
+            let mcp_url = format!(
+                "http://localhost:{}/agents/{}/mcp",
+                mcp_port, internal_name
+            );
+            let settings = serde_json::json!({
+                "mcpServers": {
+                    "exomonad": {
+                        "httpUrl": mcp_url
+                    }
+                }
+            });
+            fs::write(&settings_path, serde_json::to_string_pretty(&settings)?).await?;
+            info!(
+                path = %settings_path.display(),
+                url = %mcp_url,
+                "Wrote worker Gemini settings to temp dir"
+            );
+
+            env_vars.insert(
+                "GEMINI_CLI_SYSTEM_SETTINGS_PATH".to_string(),
+                settings_path.to_string_lossy().to_string(),
+            );
+
+            // Spawn pane in current tab, cwd = project_dir (parent's worktree)
+            self.new_zellij_pane(
+                &display_name,
+                &self.project_dir,
+                AgentType::Gemini,
+                Some(&options.prompt),
+                env_vars,
+            )
+            .await?;
+
+            // Emit agent:started event
+            if let Some(ref session) = self.zellij_session {
+                let agent_id = crate::ui_protocol::AgentId::try_from(internal_name.clone())
+                    .map_err(|e| anyhow!("Invalid agent_id: {}", e))?;
+                let event = crate::ui_protocol::AgentEvent::AgentStarted {
+                    agent_id,
+                    timestamp: zellij_events::now_iso8601(),
+                };
+                if let Err(e) = zellij_events::emit_event(session, &event) {
+                    warn!("Failed to emit agent:started event: {}", e);
+                }
+            }
+
+            Ok::<SpawnResult, anyhow::Error>(SpawnResult {
+                agent_dir: String::new(),
+                tab_name: internal_name,
+                issue_title: options.name.clone(),
+                agent_type: "gemini".to_string(),
+            })
+        })
+        .await
+        .map_err(|_| {
+            let msg = format!("spawn_worker timed out after {}s", SPAWN_TIMEOUT.as_secs());
+            warn!(name = %options.name, error = %msg, "spawn_worker timed out");
+            anyhow::Error::new(TimeoutError { message: msg })
+        })??;
+
+        info!(name = %options.name, "spawn_worker completed successfully");
         Ok(result)
     }
 
@@ -785,7 +879,12 @@ impl AgentControlService {
         if worktree_path.exists() {
             info!(path = %worktree_path.display(), "Removing git worktree");
             let output = Command::new("git")
-                .args(["worktree", "remove", "--force", &worktree_path.to_string_lossy()])
+                .args([
+                    "worktree",
+                    "remove",
+                    "--force",
+                    &worktree_path.to_string_lossy(),
+                ])
                 .current_dir(&self.project_dir)
                 .output()
                 .await;

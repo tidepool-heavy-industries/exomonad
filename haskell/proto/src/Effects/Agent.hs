@@ -1937,3 +1937,132 @@ instance (HsJSONPB.ToJSON ListResponse) where
   toEncoding = HsJSONPB.toAesonEncoding
 instance (HsJSONPB.FromJSON ListResponse) where
   parseJSON = HsJSONPB.parseJSONPB
+data SpawnWorkerRequest
+  = SpawnWorkerRequest {spawnWorkerRequestName :: Hs.Text,
+                        spawnWorkerRequestPrompt :: Hs.Text}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData SpawnWorkerRequest)
+instance (HsProtobuf.Named SpawnWorkerRequest) where
+  nameOf _ = Hs.fromString "SpawnWorkerRequest"
+instance (HsProtobuf.HasDefault SpawnWorkerRequest)
+instance (HsProtobuf.Message SpawnWorkerRequest) where
+  encodeMessage
+    _
+    SpawnWorkerRequest {spawnWorkerRequestName,
+                        spawnWorkerRequestPrompt}
+    = Hs.mappend
+        (HsProtobuf.encodeMessageField
+           (HsProtobuf.FieldNumber 1)
+           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+              spawnWorkerRequestName))
+        (HsProtobuf.encodeMessageField
+           (HsProtobuf.FieldNumber 2)
+           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+              spawnWorkerRequestPrompt))
+  decodeMessage _
+    = Hs.pure SpawnWorkerRequest
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)))
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 2)))
+  dotProto _
+    = [HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 1)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "name") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 2)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "prompt") [] ""]
+instance (HsJSONPB.ToJSONPB SpawnWorkerRequest) where
+  toJSONPB (SpawnWorkerRequest f1 f2)
+    = HsJSONPB.object
+        ["name" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
+         "prompt" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
+  toEncodingPB (SpawnWorkerRequest f1 f2)
+    = HsJSONPB.pairs
+        ["name" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
+         "prompt" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
+instance (HsJSONPB.FromJSONPB SpawnWorkerRequest) where
+  parseJSONPB
+    = HsJSONPB.withObject
+        "SpawnWorkerRequest"
+        (\ obj
+           -> Hs.pure SpawnWorkerRequest
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "name"))
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "prompt")))
+instance (HsJSONPB.ToJSON SpawnWorkerRequest) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON SpawnWorkerRequest) where
+  parseJSON = HsJSONPB.parseJSONPB
+newtype SpawnWorkerResponse
+  = SpawnWorkerResponse {spawnWorkerResponseAgent :: (Hs.Maybe Effects.Agent.AgentInfo)}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData SpawnWorkerResponse)
+instance (HsProtobuf.Named SpawnWorkerResponse) where
+  nameOf _ = Hs.fromString "SpawnWorkerResponse"
+instance (HsProtobuf.HasDefault SpawnWorkerResponse)
+instance (HsProtobuf.Message SpawnWorkerResponse) where
+  encodeMessage _ SpawnWorkerResponse {spawnWorkerResponseAgent}
+    = (HsProtobuf.encodeMessageField
+         (HsProtobuf.FieldNumber 1)
+         ((Hs.coerce
+             @(Hs.Maybe Effects.Agent.AgentInfo)
+             @(HsProtobuf.Nested Effects.Agent.AgentInfo))
+            spawnWorkerResponseAgent))
+  decodeMessage _
+    = Hs.pure SpawnWorkerResponse
+        <*>
+          ((HsProtobuf.coerceOver
+              @(HsProtobuf.Nested Effects.Agent.AgentInfo)
+              @(Hs.Maybe Effects.Agent.AgentInfo))
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)))
+  dotProto _
+    = [HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 1)
+         (HsProtobufAST.Prim
+            (HsProtobufAST.Named (HsProtobufAST.Single "AgentInfo")))
+         (HsProtobufAST.Single "agent") [] ""]
+instance (HsJSONPB.ToJSONPB SpawnWorkerResponse) where
+  toJSONPB (SpawnWorkerResponse f1)
+    = HsJSONPB.object
+        ["agent"
+           .=
+             ((Hs.coerce
+                 @(Hs.Maybe Effects.Agent.AgentInfo)
+                 @(HsProtobuf.Nested Effects.Agent.AgentInfo))
+                f1)]
+  toEncodingPB (SpawnWorkerResponse f1)
+    = HsJSONPB.pairs
+        ["agent"
+           .=
+             ((Hs.coerce
+                 @(Hs.Maybe Effects.Agent.AgentInfo)
+                 @(HsProtobuf.Nested Effects.Agent.AgentInfo))
+                f1)]
+instance (HsJSONPB.FromJSONPB SpawnWorkerResponse) where
+  parseJSONPB
+    = HsJSONPB.withObject
+        "SpawnWorkerResponse"
+        (\ obj
+           -> Hs.pure SpawnWorkerResponse
+                <*>
+                  ((HsProtobuf.coerceOver
+                      @(HsProtobuf.Nested Effects.Agent.AgentInfo)
+                      @(Hs.Maybe Effects.Agent.AgentInfo))
+                     (obj .: "agent")))
+instance (HsJSONPB.ToJSON SpawnWorkerResponse) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON SpawnWorkerResponse) where
+  parseJSON = HsJSONPB.parseJSONPB

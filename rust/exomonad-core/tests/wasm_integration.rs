@@ -139,7 +139,7 @@ impl EffectHandler for MockLogHandler {
     }
 }
 
-/// Returns empty/populated agent responses.
+/// Returns mock agent spawn responses.
 struct MockAgentHandler;
 
 #[async_trait]
@@ -152,34 +152,23 @@ impl EffectHandler for MockAgentHandler {
         use exomonad_proto::effects::agent::*;
 
         match effect_type {
-            "agent.list" => Ok(ListResponse { agents: vec![] }.encode_to_vec()),
-            "agent.spawn_batch" => {
+            "agent.spawn_gemini_teammate" => {
                 let agent = AgentInfo {
-                    id: "gh-999-test-claude".into(),
-                    issue: "999".into(),
+                    id: "test-subtree-claude".into(),
+                    issue: String::new(),
                     worktree_path: "/tmp/test-worktree".into(),
-                    branch_name: "gh-999/test-feature".into(),
+                    branch_name: "main/test-subtree".into(),
                     agent_type: 1,
                     role: 1,
                     status: 1,
-                    zellij_tab: "999-test".into(),
+                    zellij_tab: "test-subtree".into(),
                     error: String::new(),
                     pr_number: 0,
                     pr_url: String::new(),
                     topology: 1, // WORKTREE_PER_AGENT
                 };
-                Ok(SpawnBatchResponse {
-                    agents: vec![agent],
-                    errors: vec![],
-                }
-                .encode_to_vec())
+                Ok(SpawnGeminiTeammateResponse { agent: Some(agent) }.encode_to_vec())
             }
-            "agent.cleanup_batch" => Ok(CleanupBatchResponse {
-                cleaned: vec![],
-                failed: vec![],
-                errors: vec![],
-            }
-            .encode_to_vec()),
             "agent.cleanup_merged" => Ok(CleanupMergedResponse {
                 cleaned: vec![],
                 skipped: vec![],
@@ -235,83 +224,20 @@ async fn wasm_list_tools_returns_definitions() {
 
     let tool_names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
 
-    // The tl role exposes agent management + popup tools
+    // The tl role exposes spawn + popup + messaging + coordination tools
     assert!(
-        tool_names.contains(&"list_agents"),
-        "Missing list_agents in {tool_names:?}"
+        tool_names.contains(&"spawn_subtree"),
+        "Missing spawn_subtree in {tool_names:?}"
     );
     assert!(
-        tool_names.contains(&"spawn_agents"),
-        "Missing spawn_agents in {tool_names:?}"
-    );
-    assert!(
-        tool_names.contains(&"cleanup_agents"),
-        "Missing cleanup_agents in {tool_names:?}"
+        tool_names.contains(&"spawn_leaf"),
+        "Missing spawn_leaf in {tool_names:?}"
     );
 }
 
-/// Spawn with multiple issues — exercises a larger SpawnBatchResponse.
-///
-/// A larger response means more protobuf bytes, testing the WASM memory
-/// boundary more aggressively (the production bug is a truncation error).
+/// spawn_subtree roundtrip: tool → agent.spawn_gemini_teammate effect → mock response.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn wasm_spawn_multiple_agents_roundtrip() {
-    let runtime = build_test_runtime().await;
-
-    let input = json!({
-        "toolName": "spawn_agents",
-        "toolArgs": {
-            "issues": ["100", "200", "300"],
-            "owner": "test-owner",
-            "repo": "test-repo"
-        }
-    });
-
-    let output: Value = runtime
-        .plugin_manager()
-        .call("handle_mcp_call", &input)
-        .await
-        .expect("handle_mcp_call failed for spawn_agents with 3 issues");
-
-    assert_eq!(
-        output["success"], true,
-        "spawn_agents with 3 issues should succeed: {output:#}"
-    );
-}
-
-/// Agent list effect roundtrip: list_agents tool → agent.list effect → mock response.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn wasm_list_agents_roundtrip() {
-    let runtime = build_test_runtime().await;
-
-    let input = json!({
-        "toolName": "list_agents",
-        "toolArgs": {}
-    });
-
-    let output: Value = runtime
-        .plugin_manager()
-        .call("handle_mcp_call", &input)
-        .await
-        .expect("handle_mcp_call failed for list_agents");
-
-    assert_eq!(
-        output["success"], true,
-        "list_agents should succeed: {output:#}"
-    );
-}
-
-/// The critical path: spawn_agents tool → agent.spawn_batch effect → mock response.
-///
-/// This exercises the exact code path that fails in production with:
-/// `BinaryError "failed to parse varint128: not enough bytes"`
-///
-/// If this test passes with mock handlers, the protobuf encoding is correct
-/// and the bug is in the real AgentHandler's response or an environmental factor.
-/// If it fails, we've reproduced the decode error and can inspect the diagnostic output.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn wasm_spawn_agents_roundtrip() {
-    // Enable tracing to capture diagnostic output from yield_effect
+async fn wasm_spawn_subtree_roundtrip() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter("exomonad_core=debug")
         .with_test_writer()
@@ -320,11 +246,10 @@ async fn wasm_spawn_agents_roundtrip() {
     let runtime = build_test_runtime().await;
 
     let input = json!({
-        "toolName": "spawn_agents",
+        "toolName": "spawn_subtree",
         "toolArgs": {
-            "issues": ["999"],
-            "owner": "test-owner",
-            "repo": "test-repo"
+            "task": "Implement feature X",
+            "branch_name": "feature-x"
         }
     });
 
@@ -332,113 +257,24 @@ async fn wasm_spawn_agents_roundtrip() {
         .plugin_manager()
         .call("handle_mcp_call", &input)
         .await
-        .expect("handle_mcp_call failed for spawn_agents");
+        .expect("handle_mcp_call failed for spawn_subtree");
 
-    // If this assertion fails, check the tracing output for diagnostic bytes
     assert_eq!(
         output["success"], true,
-        "spawn_agents should succeed with mock handler: {output:#}"
-    );
-
-    // Verify the mock agent data flows through correctly
-    let result_str = output["result"].to_string();
-    assert!(
-        result_str.contains("999") || result_str.contains("gh-999"),
-        "Expected issue 999 in result: {result_str}"
+        "spawn_subtree should succeed with mock handler: {output:#}"
     );
 }
 
-/// Large response test: exercises WASM memory boundary with realistic payload sizes.
-///
-/// Production spawn_agents with real GitHub data produces responses with long
-/// worktree paths, branch names, and error messages. This tests the pipeline
-/// with a response that's larger than typical test payloads.
+/// spawn_leaf roundtrip: tool → agent.spawn_gemini_teammate effect → mock response.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn wasm_large_response_roundtrip() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter("exomonad_core=debug")
-        .with_test_writer()
-        .try_init();
-
-    // Use a custom handler that returns a large SpawnBatchResponse
-    struct LargeResponseAgentHandler;
-
-    #[async_trait]
-    impl EffectHandler for LargeResponseAgentHandler {
-        fn namespace(&self) -> &str {
-            "agent"
-        }
-
-        async fn handle(&self, effect_type: &str, _payload: &[u8]) -> EffectResult<Vec<u8>> {
-            use exomonad_proto::effects::agent::*;
-
-            match effect_type {
-                "agent.spawn_batch" => {
-                    // Create 5 agents with long, realistic field values
-                    let agents: Vec<AgentInfo> = (1..=5)
-                        .map(|i| AgentInfo {
-                            id: format!(
-                                "gh-{i}-implement-comprehensive-ffi-wire-compatibility-test-coverage-claude"
-                            ),
-                            issue: format!("{i}"),
-                            worktree_path: format!(
-                                "/Users/developer/hangars/project/repo/.exomonad/worktrees/gh-{i}-implement-comprehensive-ffi-wire-compatibility-test-coverage-claude"
-                            ),
-                            branch_name: format!(
-                                "gh-{i}/implement-comprehensive-ffi-wire-compatibility-test-coverage"
-                            ),
-                            agent_type: 1,
-                            role: 1,
-                            status: 1,
-                            zellij_tab: format!(
-                                "{i}-implement-comprehensive-ffi-wire-compatibility-test"
-                            ),
-                            error: String::new(),
-                            pr_number: 0,
-                            pr_url: String::new(),
-                            topology: 1, // WORKTREE_PER_AGENT
-                        })
-                        .collect();
-
-                    let errors: Vec<String> = (6..=8)
-                        .map(|i| {
-                            format!(
-                                "Issue {i}: spawn_agent timed out after 60s: \
-                                 zellij new-tab failed with status: exit status: 1 \
-                                 (stderr: Error: session 'main' not found, \
-                                 layout file was: /tmp/exomonad-layout-{i}.kdl)"
-                            )
-                        })
-                        .collect();
-
-                    let resp = SpawnBatchResponse { agents, errors };
-                    let bytes = prost::Message::encode_to_vec(&resp);
-                    eprintln!(
-                        "Large response: {} bytes, wrapped in EffectResponse",
-                        bytes.len()
-                    );
-                    Ok(bytes)
-                }
-                _ => Err(EffectError::not_found(format!("large_agent/{effect_type}"))),
-            }
-        }
-    }
-
-    let wasm_bytes = wasm_binary_bytes();
-    let runtime = RuntimeBuilder::new()
-        .with_effect_handler(LargeResponseAgentHandler)
-        .with_effect_handler(MockLogHandler)
-        .with_wasm_bytes(wasm_bytes)
-        .build()
-        .await
-        .expect("Failed to build runtime");
+async fn wasm_spawn_leaf_roundtrip() {
+    let runtime = build_test_runtime().await;
 
     let input = json!({
-        "toolName": "spawn_agents",
+        "toolName": "spawn_leaf",
         "toolArgs": {
-            "issues": ["1", "2", "3", "4", "5", "6", "7", "8"],
-            "owner": "test-owner",
-            "repo": "test-repo"
+            "name": "rust-impl",
+            "prompt": "Implement the Rust side of feature X"
         }
     });
 
@@ -446,11 +282,11 @@ async fn wasm_large_response_roundtrip() {
         .plugin_manager()
         .call("handle_mcp_call", &input)
         .await
-        .expect("handle_mcp_call failed for large spawn_agents response");
+        .expect("handle_mcp_call failed for spawn_leaf");
 
     assert_eq!(
         output["success"], true,
-        "spawn_agents with large response should succeed: {output:#}"
+        "spawn_leaf should succeed with mock handler: {output:#}"
     );
 }
 
@@ -467,8 +303,11 @@ async fn wasm_unhandled_effect_returns_error() {
         .expect("Failed to build runtime");
 
     let input = json!({
-        "toolName": "list_agents",
-        "toolArgs": {}
+        "toolName": "spawn_subtree",
+        "toolArgs": {
+            "task": "test",
+            "branch_name": "test-branch"
+        }
     });
 
     let output: Value = runtime
@@ -480,6 +319,6 @@ async fn wasm_unhandled_effect_returns_error() {
     // The tool should report failure (agent handler not registered)
     assert_eq!(
         output["success"], false,
-        "list_agents should fail without agent handler: {output:#}"
+        "spawn_subtree should fail without agent handler: {output:#}"
     );
 }

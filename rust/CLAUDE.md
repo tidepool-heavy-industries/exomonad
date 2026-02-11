@@ -41,22 +41,25 @@ Claude Code (hook or MCP call)
 Human in Zellij session
     └── Claude Code (main tab, role=tl)
             ├── MCP server: exomonad mcp-stdio
-            ├── WASM: embedded in binary (role=tl selected via config)
-            └── spawn_agents creates:
-                ├── Tab gh-433 (worktree, role=dev, auto-starts Claude)
-                ├── Tab gh-456 (worktree, role=dev, auto-starts Claude)
-                └── ... (one tab per spawned agent)
+            ├── WASM: loaded from .exomonad/wasm/ at runtime
+            └── spawn_subtree / spawn_worker creates:
+                ├── Tab subtree-1 (worktree off current branch, role=tl)
+                ├── Pane worker-a (in-place, Gemini, role=dev)
+                └── ... (recursive tree of worktrees + workers)
 ```
 
-Each agent:
-- Runs in isolated git worktree (`.exomonad/worktrees/gh-{issue}-{title}-{agent}/`)
-- Has own `.exomonad/config.toml` (default_role="dev")
-- Has own CLI-native MCP config (`.gemini/settings.json` for Gemini agents) pointing to HTTP server
-- Gets full issue context via agent-specific CLI argument:
-  - `claude --prompt '...'` for Claude agents
-  - `gemini --prompt-interactive '...'` for Gemini agents
-- Runs in Zellij tab with native UI (tab-bar, status-bar)
-- Auto-closes when agent exits
+Each subtree agent:
+- Runs in isolated git worktree branching off the parent's current branch
+- Branch naming: `{parent_branch}/{name}` — enables auto-detection of PR base branch
+- Has own CLI-native MCP config pointing to HTTP server
+- Gets TL role (can spawn their own children)
+- PRs target parent branch, not main — merged via recursive fold
+- Runs in Zellij tab with native UI, auto-closes on exit
+
+Each worker agent:
+- Runs in a Zellij pane in the parent's worktree (no branch, no worktree)
+- Always Gemini — lightweight, focused execution
+- MCP config via temp dir + `GEMINI_CLI_SYSTEM_SETTINGS_PATH` env var
 
 ## Documentation Tree
 
@@ -129,7 +132,7 @@ exomonad serve
 echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
 ```
 
-**Note:** WASM is embedded in the binary at compile time. The `role` field in config selects which embedded plugin to use. To update WASM, rebuild with `just install-all-dev`.
+**Note:** WASM is loaded from `.exomonad/wasm/` at runtime. To update WASM, run `just wasm-all` or `exomonad recompile --role unified`.
 
 ### Environment Variables
 | Variable | Used By | Purpose |
@@ -152,7 +155,7 @@ Resolution order in `mcp::agent_identity::get_agent_id()`:
 - `/dev/mcp` — generic dev endpoint (no agent identity)
 - `/agents/{name}/mcp` — per-agent endpoint (identity from URL path)
 
-At spawn time, `spawn_agents` (via WASM) writes per-agent `settings.json` with `httpUrl: "http://localhost:{port}/agents/{name}/mcp"`. The URL IS the identity — unforgeable, visible in access logs.
+At spawn time, `spawn_subtree`/`spawn_worker` (via WASM) writes per-agent MCP config with the agent's endpoint URL. The URL IS the identity — unforgeable, visible in access logs.
 
 ## MCP Tools
 
@@ -167,13 +170,12 @@ All tools are defined in Haskell WASM and executed via host functions.
 | `github_list_issues` | List GitHub issues |
 | `github_get_issue` | Get single issue details |
 | `github_list_prs` | List GitHub pull requests |
-| `spawn_agents` | Create git worktrees + Zellij tabs, auto-start agents |
-| `spawn_gemini_teammate` | Spawn named Gemini teammate with direct prompt, writes `.gemini/settings.json` |
-| `cleanup_agents` | Close Zellij tabs and delete worktrees |
-| `list_agents` | List active agent worktrees |
+| `spawn_subtree` | Fork a worktree node off current branch for sub-problems needing further decomposition |
+| `spawn_worker` | Spawn Gemini agent for focused task in current worktree (no branch) |
+| `file_pr` | Create/update PR for current branch (auto-detects base branch from naming) |
 | `note` | Send fire-and-forget note to TL (agent-side) |
 | `question` | Send blocking question to TL (agent-side) |
-| `get_agent_messages` | Read notes/questions from agents (TL messaging) |
+| `get_agent_messages` | Read notes/questions from agents (TL messaging, supports long-poll) |
 | `answer_question` | Answer pending agent question (TL messaging) |
 
 ## Effect System
@@ -198,7 +200,7 @@ Haskell: Either EffectError GetBranchResponse
 | `git.*` | GitHandler | get_branch, get_status, get_recent_commits, get_worktree, has_unpushed_commits, get_remote_url, get_repo_info |
 | `github.*` | GitHubHandler | list_issues, get_issue, create_pr, list_prs, get_pr_for_branch, get_pr_review_comments |
 | `log.*` | LogHandler | info, error, emit_event |
-| `agent.*` | AgentHandler | spawn, spawn_batch, spawn_gemini_teammate, cleanup, cleanup_batch, cleanup_merged, list |
+| `agent.*` | AgentHandler | spawn_gemini_teammate, cleanup_merged |
 | `fs.*` | FsHandler | read_file, write_file |
 | `popup.*` | PopupHandler | show_popup |
 | `file_pr.*` | FilePRHandler | file_pr |
@@ -247,7 +249,7 @@ cargo test -p exomonad-proto            # Wire format compatibility tests
 | Local Zellij orchestration | Git worktrees + Zellij tabs, no Docker containers |
 | Extism runtime | Mature WASM runtime with host function support |
 | KDL layouts | Declarative tab creation with proper environment inheritance |
-| Embedded WASM | `include_bytes!` at compile time, role selects which blob |
+| File-based unified WASM | Single WASM for all roles, loaded from disk, hot reload in serve mode |
 
 ## Related Documentation
 

@@ -6,13 +6,11 @@ Unified sidecar binary: Rust host with Haskell WASM plugin.
 
 **All logic is in Haskell WASM. Rust handles I/O only.**
 
-Two WASM loading modes:
-- **Embedded** (`include_bytes!`): WASM compiled into binary, used by `hook`
-- **File-based** (`from_file`): Unified WASM loaded from `.exomonad/wasm/`, used by `serve`. Contains all roles, selected per-call. Enables hot reload.
+WASM is loaded from `.exomonad/wasm/wasm-guest-unified.wasm` at runtime. For hooks, the binary reads WASM from disk. For `exomonad serve`, the server loads WASM with hot reload on mtime change.
 
 ```
-# Hook Mode (embedded WASM)
-Claude Code → exomonad hook → WASM handle_pre_tool_use → HookOutput
+# Hook mode (file-based WASM)
+Claude Code → exomonad hook → WASM from .exomonad/wasm/ → handle_pre_tool_use → HookOutput
 
 # HTTP mode (multi-agent, unified WASM)
 N agents → exomonad serve → Unix socket (.exomonad/server.sock) → Unified WASM (handles all roles) → effects → I/O
@@ -47,7 +45,7 @@ project_dir = "."
 - `config.toml` uses `default_role` (project-wide default)
 - `config.local.toml` uses `role` (worktree-specific override)
 
-To update WASM: rebuild the Rust binary with `just install-all-dev`. The `build.rs` copies WASM files into the binary via `include_bytes!`, so WASM and binary are always in sync.
+To update WASM, run `just wasm-all` or `exomonad recompile --role unified`.
 
 ## MCP Server
 
@@ -75,20 +73,10 @@ gemini mcp add --transport http exomonad http://localhost:7432/tl/mcp
 | `github_list_issues` | List GitHub issues | `owner`, `repo`, `state?`, `labels?` |
 | `github_get_issue` | Get single issue details | `owner`, `repo`, `number` |
 | `github_list_prs` | List GitHub pull requests | `owner`, `repo`, `state?`, `limit?` |
-| `spawn_agents` | Spawn agents in Zellij tabs | `issues[]`, `owner`, `repo`, `worktree_dir?` |
-| `spawn_gemini_teammate` | Spawn named Gemini teammate | `name`, `prompt`, `agent_type?`, `subrepo?` |
-| `cleanup_agents` | Clean up agent worktrees | `issues[]`, `force?` |
-| `list_agents` | List active agent worktrees | (none) |
+| `spawn_subtree` | Fork a worktree node off current branch for sub-problems needing further decomposition | `task`, `branch_name`, `agent_type?` |
+| `spawn_leaf` | Spawn agent for focused task in own worktree | `name`, `prompt`, `agent_type?` |
 | `get_agent_messages` | Read notes/questions from agents | `agent_id?` |
 | `answer_question` | Answer pending agent question | `agent_id`, `question_id`, `answer` |
-
-### Spawn Tools Requirements
-
-The spawn tools (`spawn_agents`, `spawn_gemini_teammate`, `cleanup_agents`, `list_agents`) require:
-- **Zellij session**: Must be running inside a Zellij terminal multiplexer
-- **GITHUB_TOKEN**: Environment variable for GitHub API access
-- **Git repository**: The project directory must be a git repository
-- **Gemini MCP config**: Gemini agents get `.gemini/settings.json` (not `.mcp.json`) pointing to the ExoMonad server
 
 
 ## Environment Variables
@@ -119,26 +107,27 @@ All handlers are registered by `exomonad_core::register_builtin_handlers()`.
 
 ## Building
 
-WASM must be built before Rust, since the Rust binary embeds WASM at compile time:
+WASM must be built before running hooks or serve mode:
 
 ```bash
 # Full install (recommended): builds WASM, then Rust, installs everything
 just install-all-dev
 
 # Or manually:
-just wasm-all                    # Build WASM plugins first
-cargo build -p exomonad          # Then build Rust (embeds WASM via build.rs)
+just wasm-all                    # Build unified WASM plugin
+cargo build -p exomonad          # Build Rust binary
 ```
 
 ## Testing
-
-Integration tests use a shared server pattern (OnceLock singleton) to reduce startup overhead.
 
 ```bash
 # Unit tests
 cargo test -p exomonad
 
-# E2E hook test (binary has embedded WASM)
+# MCP integration tests (wrapper script manages server lifecycle)
+just test-mcp
+
+# E2E hook test (requires WASM built via `just wasm-all`)
 echo '{"session_id":"test","hook_event_name":"PreToolUse","tool_name":"Write","transcript_path":"/tmp/t.jsonl","cwd":"/","permission_mode":"default"}' | \
   ./target/debug/exomonad hook pre-tool-use
 ```
@@ -151,7 +140,7 @@ Claude Code hook JSON (stdin)
          ↓
     exomonad hook pre-tool-use
          ↓
-    Use embedded WASM (role from config)
+    Load WASM from .exomonad/wasm/wasm-guest-unified.wasm
          ↓
     Parse HookInput
          ↓

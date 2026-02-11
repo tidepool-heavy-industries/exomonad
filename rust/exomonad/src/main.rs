@@ -4,7 +4,7 @@
 //! - Claude Code hooks via WASM plugin
 //! - MCP tools via local Rust implementation
 //!
-//! WASM plugins are embedded at compile time. No file paths to resolve.
+//! WASM plugins are loaded from file.
 
 use exomonad::config;
 
@@ -815,12 +815,25 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Load embedded WASM for hook command (the only remaining embedded WASM user)
-    let wasm_bytes = exomonad::wasm::get(config.role)?;
+    // Load WASM for hook command from file (no longer embedded)
+    let project_dir = if config.project_dir.is_absolute() {
+        config.project_dir.clone()
+    } else {
+        std::env::current_dir()?.join(&config.project_dir)
+    };
+
+    let wasm_path = project_dir.join(".exomonad/wasm/wasm-guest-unified.wasm");
+    if !wasm_path.exists() {
+        anyhow::bail!(
+            "WASM file not found: {}\nRun `just wasm-all` or `just install-all-dev` first.",
+            wasm_path.display()
+        );
+    }
+    let wasm_bytes = std::fs::read(&wasm_path).context("Failed to read WASM file")?;
     info!(
-        role = ?config.role,
+        wasm_path = %wasm_path.display(),
         wasm_size = wasm_bytes.len(),
-        "Using embedded WASM"
+        "Using file-based WASM for hook"
     );
 
     match cli.command {
@@ -834,7 +847,7 @@ async fn main() -> Result<()> {
             );
 
             // Build runtime with all effect handlers
-            let rt = build_runtime(wasm_bytes, &services).await?;
+            let rt = build_runtime(&wasm_bytes, &services).await?;
 
             info!("WASM plugin loaded and initialized");
 

@@ -1,8 +1,9 @@
 //! CLI Integration Tests for exomonad
 //!
 //! Tests CLI behavior including argument parsing and error handling.
-//! With embedded WASM, the binary always has WASM available — no fixture files needed.
-//! E2E tests may fail if the embedded WASM is incompatible with current host function
+//! Hooks load WASM from `.exomonad/wasm/` on disk. Tests run from repo root
+//! where WASM is pre-built, so no fixture setup is needed.
+//! E2E tests may fail if the WASM is incompatible with current host function
 //! protocols — these are marked as lenient.
 
 use assert_cmd::cargo::cargo_bin_cmd;
@@ -35,7 +36,8 @@ fn minimal_hook_json() -> String {
 /// Check if output indicates WASM loaded successfully
 fn wasm_loaded_ok(stderr: &str) -> bool {
     stderr.contains("WASM plugin loaded and initialized")
-        || stderr.contains("Loading embedded WASM plugin")
+        || stderr.contains("Loaded WASM for hook")
+        || stderr.contains("Using file-based WASM for hook")
 }
 
 #[test]

@@ -6,7 +6,6 @@ module ExoMonad
     module ExoMonad.Guest.Tool.Class,
 
     -- * Tool Records
-    module ExoMonad.Guest.Records.Agent,
     module ExoMonad.Guest.Records.FilePR,
     module ExoMonad.Guest.Records.Popup,
     module ExoMonad.Guest.Records.Messaging,
@@ -29,7 +28,6 @@ module ExoMonad
 where
 
 import ExoMonad.Guest.Effect
-import ExoMonad.Guest.Records.Agent
 import ExoMonad.Guest.Records.FilePR
 import ExoMonad.Guest.Records.Messaging
 import ExoMonad.Guest.Records.Popup

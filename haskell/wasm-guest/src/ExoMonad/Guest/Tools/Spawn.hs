@@ -1,9 +1,9 @@
--- | Hylo spawn primitives: spawn_subtree and spawn_leaf.
+-- | Hylo spawn primitives: spawn_subtree and spawn_worker.
 module ExoMonad.Guest.Tools.Spawn
   ( SpawnSubtree,
-    SpawnLeaf,
+    SpawnWorker,
     SpawnSubtreeArgs (..),
-    SpawnLeafArgs (..),
+    SpawnWorkerArgs (..),
   )
 where
 
@@ -79,28 +79,26 @@ instance MCPTool SpawnSubtree where
       Right spawnResult -> pure $ successResult $ Aeson.toJSON spawnResult
 
 -- ============================================================================
--- SpawnLeaf
+-- SpawnWorker
 -- ============================================================================
 
-data SpawnLeaf
+data SpawnWorker
 
-data SpawnLeafArgs = SpawnLeafArgs
-  { slName :: Text,
-    slPrompt :: Text,
-    slAgentType :: Maybe AC.AgentType
+data SpawnWorkerArgs = SpawnWorkerArgs
+  { swName :: Text,
+    swPrompt :: Text
   }
   deriving (Show, Eq, Generic)
 
-instance FromJSON SpawnLeafArgs where
-  parseJSON = withObject "SpawnLeafArgs" $ \v ->
-    SpawnLeafArgs
+instance FromJSON SpawnWorkerArgs where
+  parseJSON = withObject "SpawnWorkerArgs" $ \v ->
+    SpawnWorkerArgs
       <$> v .: "name"
       <*> v .: "prompt"
-      <*> v .:? "agent_type"
 
-instance MCPTool SpawnLeaf where
-  type ToolArgs SpawnLeaf = SpawnLeafArgs
-  toolName = "spawn_leaf"
+instance MCPTool SpawnWorker where
+  type ToolArgs SpawnWorker = SpawnWorkerArgs
+  toolName = "spawn_worker"
   toolDescription = "Spawn an agent for a focused, bounded task. Use when the work is concrete enough to execute without further decomposition. The child works and exits."
   toolSchema =
     object
@@ -117,18 +115,11 @@ instance MCPTool SpawnLeaf where
                 .= object
                   [ "type" .= ("string" :: Text),
                     "description" .= ("Implementation instructions for the agent" :: Text)
-                  ],
-              "agent_type"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "enum" .= (["claude", "gemini"] :: [Text]),
-                    "description" .= ("Agent type (default: gemini)" :: Text)
                   ]
             ]
       ]
   toolHandler args = do
-    let agentTy = fromMaybe AC.Gemini (slAgentType args)
-    result <- runM $ AC.runAgentControl $ AC.spawnLeaf (slName args) (slPrompt args) agentTy
+    result <- runM $ AC.runAgentControl $ AC.spawnWorker (swName args) (swPrompt args)
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> pure $ successResult $ Aeson.toJSON spawnResult

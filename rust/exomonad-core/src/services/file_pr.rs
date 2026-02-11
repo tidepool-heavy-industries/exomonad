@@ -274,7 +274,10 @@ mod tests {
 
     #[test]
     fn test_detect_base_branch_convention() {
-        assert_eq!(detect_base_branch("main/subtask/leaf", None), "main/subtask");
+        assert_eq!(
+            detect_base_branch("main/subtask/leaf", None),
+            "main/subtask"
+        );
         assert_eq!(detect_base_branch("feature/my-work", None), "feature");
     }
 

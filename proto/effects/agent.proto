@@ -228,6 +228,21 @@ message ListResponse {
 }
 
 // ============================================================================
+// SpawnWorker - Spawn a worker agent in the current worktree (no branch/worktree)
+// ============================================================================
+
+message SpawnWorkerRequest {
+  // Human-readable name for the worker.
+  string name = 1;
+  // Implementation instructions for the agent.
+  string prompt = 2;
+}
+
+message SpawnWorkerResponse {
+  AgentInfo agent = 1;
+}
+
+// ============================================================================
 // Service definition
 // ============================================================================
 
@@ -235,6 +250,7 @@ service AgentEffects {
   rpc Spawn(SpawnRequest) returns (SpawnResponse);
   rpc SpawnBatch(SpawnBatchRequest) returns (SpawnBatchResponse);
   rpc SpawnGeminiTeammate(SpawnGeminiTeammateRequest) returns (SpawnGeminiTeammateResponse);
+  rpc SpawnWorker(SpawnWorkerRequest) returns (SpawnWorkerResponse);
   rpc Cleanup(CleanupRequest) returns (CleanupResponse);
   rpc CleanupBatch(CleanupBatchRequest) returns (CleanupBatchResponse);
   rpc CleanupMerged(CleanupMergedRequest) returns (CleanupMergedResponse);
