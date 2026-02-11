@@ -1,12 +1,9 @@
 //! High-level agent control service.
 //!
 //! Provides semantic operations for agent lifecycle management:
-//! - SpawnAgent: Register in Teams config.json, open Zellij tab
-//! - CleanupAgent: Close tab, unregister from config.json
-//! - ListAgents: List agents from config.json + Zellij tab liveness
-//!
-//! Source of truth for agent existence: Teams config.json + Zellij tabs.
-//! No per-agent directories or MCP configs — agents share the repo's config.
+//! - SpawnAgent: Create agent directory, open Zellij tab
+//! - CleanupAgent: Close tab, remove per-agent config
+//! - ListAgents: Discover from Zellij tabs (source of truth for running agents)
 
 use crate::common::TimeoutError;
 use crate::domain::ItemState;
@@ -115,8 +112,6 @@ pub struct SpawnOptions {
     /// Sub-repository path relative to project_dir (e.g., "egregore/").
     /// When set, the agent's project context targets this directory instead of project_dir.
     pub subrepo: Option<String>,
-    /// Optional Claude Code Team name to register the agent in.
-    pub team_name: Option<String>,
 }
 
 /// Options for spawning a named teammate (no GitHub issue required).
@@ -131,8 +126,6 @@ pub struct SpawnGeminiTeammateOptions {
     pub agent_type: AgentType,
     /// Sub-repository path relative to project_dir
     pub subrepo: Option<String>,
-    /// Optional Claude Code Team name to register the agent in.
-    pub team_name: Option<String>,
 }
 
 /// Result of spawning an agent.
@@ -414,26 +407,8 @@ impl AgentControlService {
             // Zellij display name (emoji + short format)
             let display_name = options.agent_type.display_name(&issue_id, &slug);
 
-            // Discover and register in Claude Code Team if applicable
-            let team_name = options.team_name.clone().or_else(|| std::env::var("CLAUDE_TEAM_NAME").ok());
-            if let Some(ref team) = team_name {
-                info!(team_name = %team, agent_name = %internal_name, "Registering agent in Claude Code Team");
-                if let Err(e) = super::teams::TeamsService::register_agent(
-                    team,
-                    &internal_name,
-                    &effective_project_dir,
-                    &issue.body,
-                ).await {
-                    warn!(error = %e, "Failed to register agent in Claude Code Team (non-fatal)");
-                }
-            }
-
             let mut env_vars = HashMap::new();
-            if let Some(ref team) = team_name {
-                env_vars.insert("EXOMONAD_TEAM_NAME".to_string(), team.clone());
-                env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-                env_vars.insert("CLAUDE_TEAM_NAME".to_string(), team.clone());
-            }
+            env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
 
             // Open Zellij tab with cwd = project_dir (not a worktree)
             self.new_zellij_tab(
@@ -539,93 +514,27 @@ impl AgentControlService {
             let internal_name = format!("{}-{}", options.name, agent_suffix);
             let display_name = format!("{} {}", options.agent_type.emoji(), options.name);
 
-            // Discover team name
-            let team_name = options
-                .team_name
-                .clone()
-                .or_else(|| std::env::var("CLAUDE_TEAM_NAME").ok());
-
-            // Idempotency check: Zellij tab alive + config entry
+            // Idempotency check: if Zellij tab is alive, return existing info
             let tab_alive = self.is_zellij_tab_alive(&display_name).await;
-            let config_exists = match team_name {
-                Some(ref team) => super::teams::TeamsService::get_member(team, &internal_name)
-                    .await
-                    .ok()
-                    .flatten()
-                    .is_some(),
-                None => false,
-            };
 
             info!(
                 name = %options.name,
                 tab_alive,
-                config_exists,
                 "Idempotency check"
             );
 
-            match (config_exists, tab_alive) {
-                // Already running — return existing info
-                (true, true) => {
-                    info!(name = %options.name, "Teammate already running, returning existing");
-                    return Ok(SpawnResult {
-                        agent_dir: String::new(),
-                        tab_name: internal_name,
-                        issue_title: options.name.clone(),
-                        agent_type: options.agent_type.suffix().to_string(),
-                    });
-                }
-                // Stale config entry, tab is dead — clean up before respawn
-                (true, false) => {
-                    info!(name = %options.name, "Stale config entry (tab dead), cleaning before respawn");
-                    if let Some(ref team) = team_name {
-                        let _ = super::teams::TeamsService::unregister_agent(team, &internal_name).await;
-                    }
-                }
-                // Tab alive but no config — re-register
-                (false, true) => {
-                    info!(name = %options.name, "Tab alive but no config entry, re-registering");
-                    if let Some(ref team) = team_name {
-                        if let Err(e) = super::teams::TeamsService::register_agent(
-                            team,
-                            &internal_name,
-                            &effective_project_dir,
-                            &options.prompt,
-                        ).await {
-                            warn!(error = %e, "Failed to re-register teammate (non-fatal)");
-                        }
-                    }
-                    return Ok(SpawnResult {
-                        agent_dir: String::new(),
-                        tab_name: internal_name,
-                        issue_title: options.name.clone(),
-                        agent_type: options.agent_type.suffix().to_string(),
-                    });
-                }
-                // Fresh spawn
-                (false, false) => {}
-            }
-
-            // Register in Claude Code Team
-            if let Some(ref team) = team_name {
-                info!(team_name = %team, agent_name = %internal_name, "Registering teammate in Claude Code Team");
-                if let Err(e) = super::teams::TeamsService::register_agent(
-                    team,
-                    &internal_name,
-                    &effective_project_dir,
-                    &options.prompt,
-                )
-                .await
-                {
-                    warn!(error = %e, "Failed to register teammate in Claude Code Team (non-fatal)");
-                }
+            if tab_alive {
+                info!(name = %options.name, "Teammate already running, returning existing");
+                return Ok(SpawnResult {
+                    agent_dir: String::new(),
+                    tab_name: internal_name,
+                    issue_title: options.name.clone(),
+                    agent_type: options.agent_type.suffix().to_string(),
+                });
             }
 
             let mut env_vars = HashMap::new();
-            if let Some(ref team) = team_name {
-                env_vars.insert("EXOMONAD_TEAM_NAME".to_string(), team.clone());
-                env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-                env_vars.insert("CLAUDE_TEAM_NAME".to_string(), team.clone());
-            }
+            env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
 
             // Write per-agent Gemini settings with MCP endpoint URL
             let agent_config_dir = self.project_dir
@@ -738,14 +647,6 @@ impl AgentControlService {
             }
         }
 
-        // Unregister from Claude Code Teams
-        info!(agent_name = %identifier, "Unregistering agent from Claude Code Teams");
-        if let Err(e) =
-            super::teams::TeamsService::unregister_agent_from_all_teams(identifier).await
-        {
-            warn!(error = %e, "Failed to unregister agent from Claude Code Teams (non-fatal)");
-        }
-
         // Remove per-agent config directory (.exomonad/agents/{name}/)
         let agent_config_dir = self
             .project_dir
@@ -853,79 +754,17 @@ impl AgentControlService {
     // List Agents
     // ========================================================================
 
-    /// List all active agents from Teams config.json + Zellij tab liveness.
+    /// List all active agents by scanning Zellij tabs.
     ///
-    /// Source of truth is config.json members list. Zellij tab presence determines
-    /// Running vs Stopped status.
+    /// Zellij tabs ARE the source of truth for running agents.
+    /// Agent tabs have emoji prefixes (🤖/💎) followed by agent names.
     #[tracing::instrument(skip(self))]
     pub async fn list_agents(&self, subrepo: Option<&str>) -> Result<Vec<AgentInfo>> {
         let _effective_project_dir = self.effective_project_dir(subrepo)?;
 
-        // Discover team name
-        let team_name = std::env::var("CLAUDE_TEAM_NAME")
-            .or_else(|_| std::env::var("EXOMONAD_TEAM_NAME"))
-            .ok();
+        let tabs = self.get_zellij_tabs().await.unwrap_or_default();
 
-        let members = match team_name {
-            Some(ref team) => super::teams::TeamsService::list_members(team).await?,
-            None => {
-                debug!("No team name available, returning empty agent list");
-                return Ok(Vec::new());
-            }
-        };
-
-        // Get all Zellij tabs for liveness check
-        let zellij_tabs: HashSet<String> = self
-            .get_zellij_tabs()
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .collect();
-
-        let agents = members
-            .iter()
-            .map(|member| {
-                // Reconstruct display name to check tab liveness.
-                // Teammate tabs: "{emoji} {name}" where name is the human-readable part.
-                // Issue tabs: "{emoji} gh-{issue_id}-{slug}"
-                // We check if any tab matches by scanning for the member name in tab names.
-                let has_tab = zellij_tabs.iter().any(|tab| tab.contains(&member.name));
-
-                let status = if has_tab {
-                    AgentStatus::Running
-                } else {
-                    AgentStatus::Stopped
-                };
-
-                // Extract agent type from internal_name suffix
-                let agent_type = if member.name.ends_with("-claude") {
-                    Some("claude".to_string())
-                } else if member.name.ends_with("-gemini") {
-                    Some("gemini".to_string())
-                } else {
-                    None
-                };
-
-                // Infer topology: agents with worktree dirs are WorktreePerAgent,
-                // named teammates (no issue prefix) are SharedDir.
-                let topology = if member.name.starts_with("gh-") {
-                    Topology::WorktreePerAgent
-                } else {
-                    Topology::SharedDir
-                };
-
-                AgentInfo {
-                    issue_id: member.name.clone(),
-                    has_tab,
-                    status,
-                    topology,
-                    agent_dir: None,
-                    slug: None,
-                    agent_type,
-                    pr: None,
-                }
-            })
-            .collect();
+        let agents: Vec<AgentInfo> = tabs.iter().filter_map(|tab| parse_agent_tab(tab)).collect();
 
         Ok(agents)
     }
@@ -1264,16 +1103,21 @@ impl AgentControlService {
 
         match agent_type {
             AgentType::Claude => {
-                info!(port, "Writing HTTP .mcp.json for Claude agent");
+                let agent_name = agent_dir
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown");
+                info!(port, agent_name = %agent_name, "Writing HTTP .mcp.json for Claude agent");
                 let mcp_content = format!(
                     r###"{{
   "mcpServers": {{
     "exomonad": {{
-      "url": "http://localhost:{}/mcp"
+      "url": "http://localhost:{port}/agents/{name}/mcp"
     }}
   }}
 }}"###,
-                    port
+                    port = port,
+                    name = agent_name,
                 );
                 fs::write(agent_dir.join(".mcp.json"), mcp_content).await?;
                 info!(agent_dir = %agent_dir.display(), "Wrote .mcp.json for Claude agent");
@@ -1371,6 +1215,37 @@ impl AgentControlService {
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/// Parse a Zellij tab name into AgentInfo if it matches agent tab format.
+///
+/// Agent tabs: "{emoji} {agent_name}" where emoji is 🤖 (Claude) or 💎 (Gemini).
+fn parse_agent_tab(tab_name: &str) -> Option<AgentInfo> {
+    // Agent tabs start with an emoji prefix
+    let (emoji, rest) = if tab_name.starts_with("🤖 ") {
+        ("claude", tab_name.strip_prefix("🤖 ")?)
+    } else if tab_name.starts_with("💎 ") {
+        ("gemini", tab_name.strip_prefix("💎 ")?)
+    } else {
+        return None;
+    };
+
+    let topology = if rest.starts_with("gh-") {
+        Topology::WorktreePerAgent
+    } else {
+        Topology::SharedDir
+    };
+
+    Some(AgentInfo {
+        issue_id: rest.to_string(),
+        has_tab: true,
+        status: AgentStatus::Running,
+        topology,
+        agent_dir: None,
+        slug: None,
+        agent_type: Some(emoji.to_string()),
+        pr: None,
+    })
+}
 
 /// Create a URL-safe slug from a title.
 fn slugify(title: &str) -> String {

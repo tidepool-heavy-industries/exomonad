@@ -85,20 +85,20 @@ instance Effect MessagingAnswerQuestion where
 -- Smart constructors (Agent→TL)
 -- ============================================================================
 
-sendNote :: Text -> Text -> IO (Either EffectError SendNoteResponse)
-sendNote content teamName =
+sendNote :: Text -> IO (Either EffectError SendNoteResponse)
+sendNote content =
   runEffect @MessagingSendNote $
     SendNoteRequest
       { sendNoteRequestContent = TL.fromStrict content,
-        sendNoteRequestTeamName = TL.fromStrict teamName
+        sendNoteRequestTeamName = ""
       }
 
-sendQuestion :: Text -> Text -> IO (Either EffectError SendQuestionResponse)
-sendQuestion question teamName =
+sendQuestion :: Text -> IO (Either EffectError SendQuestionResponse)
+sendQuestion question =
   runEffect @MessagingSendQuestion $
     SendQuestionRequest
       { sendQuestionRequestQuestion = TL.fromStrict question,
-        sendQuestionRequestTeamName = TL.fromStrict teamName
+        sendQuestionRequestTeamName = ""
       }
 
 -- ============================================================================
@@ -106,21 +106,21 @@ sendQuestion question teamName =
 -- ============================================================================
 
 -- | Read messages from agent outboxes. Empty agent_id reads all agents.
-getAgentMessages :: Text -> Text -> IO (Either EffectError GetAgentMessagesResponse)
-getAgentMessages agentId teamName =
+getAgentMessages :: Text -> IO (Either EffectError GetAgentMessagesResponse)
+getAgentMessages agentId =
   runEffect @MessagingGetAgentMessages $
     GetAgentMessagesRequest
       { getAgentMessagesRequestAgentId = TL.fromStrict agentId,
-        getAgentMessagesRequestTeamName = TL.fromStrict teamName
+        getAgentMessagesRequestTeamName = ""
       }
 
 -- | Answer a pending question from an agent.
-answerQuestion :: Text -> Text -> Text -> Text -> IO (Either EffectError AnswerQuestionResponse)
-answerQuestion agentId questionId answer teamName =
+answerQuestion :: Text -> Text -> Text -> IO (Either EffectError AnswerQuestionResponse)
+answerQuestion agentId questionId answer =
   runEffect @MessagingAnswerQuestion $
     AnswerQuestionRequest
       { answerQuestionRequestAgentId = TL.fromStrict agentId,
         answerQuestionRequestQuestionId = TL.fromStrict questionId,
         answerQuestionRequestAnswer = TL.fromStrict answer,
-        answerQuestionRequestTeamName = TL.fromStrict teamName
+        answerQuestionRequestTeamName = ""
       }

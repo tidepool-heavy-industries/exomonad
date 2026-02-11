@@ -118,7 +118,7 @@ pub use util::{build_prompt, find_exomonad_binary, shell_quote};
 #[cfg(feature = "runtime")]
 pub use handlers::{
     AgentHandler, CopilotHandler, FilePRHandler, FsHandler, GitHandler, GitHubHandler, KvHandler,
-    LogHandler, MessagingHandler, PopupHandler, TeamsHandler,
+    LogHandler, MessagingHandler, PopupHandler,
 };
 #[cfg(feature = "runtime")]
 pub use services::{Services, ValidatedServices};
@@ -282,7 +282,7 @@ impl Runtime {
 
 /// Register all built-in handlers with a RuntimeBuilder.
 ///
-/// The returned `Arc<QuestionRegistry>` is shared between the TeamsHandler (which
+/// The returned `Arc<QuestionRegistry>` is shared between the MessagingHandler (which
 /// awaits answers) and MCP tools (which resolve questions via `answer_question`).
 #[cfg(feature = "runtime")]
 pub fn register_builtin_handlers(
@@ -315,13 +315,14 @@ pub fn register_builtin_handlers(
 
     let question_registry = Arc::new(services::questions::QuestionRegistry::new());
 
-    builder =
-        builder.with_effect_handler(handlers::MessagingHandler::new(question_registry.clone()));
-
     let project_dir = std::env::current_dir().unwrap_or_default();
-    builder = builder.with_effect_handler(handlers::KvHandler::new(project_dir));
 
-    builder = builder.with_effect_handler(handlers::TeamsHandler::new(question_registry.clone()));
+    builder = builder.with_effect_handler(handlers::MessagingHandler::new(
+        question_registry.clone(),
+        project_dir.clone(),
+    ));
+
+    builder = builder.with_effect_handler(handlers::KvHandler::new(project_dir));
 
     let coordination_service = Arc::new(services::coordination::CoordinationService::new());
     builder = builder.with_effect_handler(handlers::CoordinationHandler::new(coordination_service));

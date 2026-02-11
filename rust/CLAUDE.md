@@ -136,9 +136,7 @@ echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
 |----------|---------|---------|
 | `GITHUB_TOKEN` | services | GitHub API access |
 | `RUST_LOG` | all | Tracing log level |
-| `EXOMONAD_TEAM_NAME` | messaging, teams | Team name for Claude Code Teams integration |
-| `CLAUDE_TEAM_NAME` | messaging, teams | Fallback team name (checked after EXOMONAD_TEAM_NAME) |
-| `EXOMONAD_AGENT_ID` | messaging, teams | Agent identity within the team (env var fallback) |
+| `EXOMONAD_AGENT_ID` | messaging | Agent identity (env var fallback) |
 | `GEMINI_CLI_SYSTEM_SETTINGS_PATH` | agent spawn | Points Gemini at per-agent settings.json |
 
 ### Agent Identity
@@ -175,12 +173,6 @@ All tools are defined in Haskell WASM and executed via host functions.
 | `list_agents` | List active agent worktrees |
 | `note` | Send fire-and-forget note to TL (agent-side) |
 | `question` | Send blocking question to TL (agent-side) |
-| `claim_task` | Claim a task from shared task list (Teams) |
-| `complete_task` | Mark task as completed (Teams) |
-| `list_tasks` | List tasks from shared task list (Teams) |
-| `get_task` | Get task details by ID (Teams) |
-| `report_status` | Report agent status to team (Teams) |
-| `ask_question` | Ask question to team lead (Teams) |
 | `get_agent_messages` | Read notes/questions from agents (TL messaging) |
 | `answer_question` | Answer pending agent question (TL messaging) |
 
@@ -212,7 +204,6 @@ Haskell: Either EffectError GetBranchResponse
 | `file_pr.*` | FilePRHandler | file_pr |
 | `copilot.*` | CopilotHandler | wait_for_copilot_review |
 | `messaging.*` | MessagingHandler | send_note, send_question |
-| `teams.*` | TeamsHandler | claim_task, complete_task, list_tasks, get_task, report_status, ask_question |
 
 **Zellij Integration:**
 - Uses declarative KDL layouts (not CLI flags)

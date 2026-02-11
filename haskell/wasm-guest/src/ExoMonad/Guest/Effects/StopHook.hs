@@ -9,7 +9,6 @@ module ExoMonad.Guest.Effects.StopHook
 
     -- * Agent identity helpers
     getAgentId,
-    getTeamName,
 
     -- * Lifecycle messaging
     sendLifecycleNote,
@@ -144,8 +143,7 @@ checkPRFiled repoInfo = do
                         <> "file_pr(title=\"Describe your work\", body=\"Detailed description of changes\")"
                 else case GH.getPullRequestForBranchResponsePullRequest prResp of
                   Nothing ->
-                    pure $
-                      blockStopResponse "PR found but no details available"
+                    pure $ blockStopResponse "PR found but no details available"
                   Just pr ->
                     checkReviewComments pr
 
@@ -194,9 +192,7 @@ checkReviewComments pr = do
                     <> T.pack (show prNum)
                     <> ". Wait for review to complete."
             _ ->
-              pure $
-                blockStopResponse $
-                  "Unknown review status: " <> status
+              pure $ blockStopResponse $ "Unknown review status: " <> status
 
 formatComment :: Copilot.CopilotComment -> Text
 formatComment c =
@@ -214,36 +210,31 @@ formatComment c =
 getAgentId :: IO (Maybe Text)
 getAgentId = fmap (fmap T.pack) (lookupEnv "EXOMONAD_AGENT_ID")
 
--- | Read the team name from EXOMONAD_TEAM_NAME env var.
-getTeamName :: IO (Maybe Text)
-getTeamName = fmap (fmap T.pack) (lookupEnv "EXOMONAD_TEAM_NAME")
-
 -- ============================================================================
 -- Lifecycle Messaging
 -- ============================================================================
 
--- | Send a structured lifecycle note to the TL via Teams inbox.
+-- | Send a structured lifecycle note to the TL.
 --
 -- The note content is JSON-structured so the TL can parse it programmatically.
--- If team name or agent ID is not available, the note is silently skipped.
+-- If agent ID is not available, the note is silently skipped.
 sendLifecycleNote :: Text -> [(Text, Text)] -> IO ()
 sendLifecycleNote noteType fields = do
-  mTeam <- getTeamName
   mAgent <- getAgentId
-  case (mTeam, mAgent) of
-    (Just team, Just agent) -> do
+  case mAgent of
+    Just agent -> do
       -- Get current branch for context
       branchName <- getCurrentBranch
       let jsonFields =
-            [ ("\"type\": \"" <> noteType <> "\""),
-              ("\"agent_id\": \"" <> agent <> "\""),
-              ("\"branch\": \"" <> branchName <> "\"")
-            ]
+              [ ("\"type\": \"" <> noteType <> "\""),
+                ("\"agent_id\": \"" <> agent <> "\""),
+                ("\"branch\": \"" <> branchName <> "\"")
+              ]
               <> map (\(k, v) -> "\"" <> k <> "\": \"" <> escapeJson v <> "\"") fields
           jsonContent = "{" <> T.intercalate ", " jsonFields <> "}"
-      _ <- sendNote jsonContent team
+      _ <- sendNote jsonContent
       pure ()
-    _ -> pure () -- No team context, skip messaging
+    _ -> pure () -- No agent context, skip messaging
 
 -- | Get the current git branch name, defaulting to "unknown" on error.
 getCurrentBranch :: IO Text

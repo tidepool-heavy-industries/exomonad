@@ -66,7 +66,6 @@ library wasm-guest-internal
         ExoMonad.Guest.Tools.FilePR
         ExoMonad.Guest.Tools.Popup
         ExoMonad.Guest.Tools.Messaging
-        ExoMonad.Guest.Tools.Teams
         ExoMonad.Guest.Tools.Coordination
         -- SpawnSpec compiler
         ExoMonad.Guest.SpawnSpec.Types
@@ -79,7 +78,6 @@ library wasm-guest-internal
         ExoMonad.Guest.Records.Popup
         ExoMonad.Guest.Records.Messaging
         ExoMonad.Guest.Records.TLMessaging
-        ExoMonad.Guest.Records.Teams
         ExoMonad.Guest.Records.Coordination
         -- Effects (for internal composition)
         ExoMonad.Guest.Effects.AgentControl
@@ -99,7 +97,6 @@ library wasm-guest-internal
         ExoMonad.Effects.FilePR
         ExoMonad.Effects.Copilot
         ExoMonad.Effects.Messaging
-        ExoMonad.Effects.Teams
         ExoMonad.Effects.KV
         -- Types
         ExoMonad.Guest.Types

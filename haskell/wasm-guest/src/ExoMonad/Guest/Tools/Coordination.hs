@@ -28,8 +28,6 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Vector qualified as V
-import Effects.Kv qualified as KV
-import ExoMonad.Effects.KV (kvGet)
 import ExoMonad.Guest.Effects.Coordination qualified as Coordination
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)
@@ -330,8 +328,7 @@ instance MCPTool SendCoordMessage where
             ]
       ]
   toolHandler args = do
-    teamName <- resolveTeamName
-    let from = fromMaybe "agent" teamName
+    let from = "agent"
         summary = fromMaybe "" (smSummary args)
     result <- Coordination.sendMessage from (smText args) summary
     case result of
@@ -391,11 +388,3 @@ messageToJson m =
 -- ============================================================================
 -- Helpers
 -- ============================================================================
-
--- | Resolve team name from KV store (set by PostToolUse hook on TeamCreate).
-resolveTeamName :: IO (Maybe Text)
-resolveTeamName = do
-  resp <- kvGet KV.GetRequest {KV.getRequestKey = "current_team"}
-  pure $ case resp of
-    Right r | KV.getResponseFound r -> Just (TL.toStrict (KV.getResponseValue r))
-    _ -> Nothing

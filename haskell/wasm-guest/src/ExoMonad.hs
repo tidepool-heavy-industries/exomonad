@@ -11,7 +11,6 @@ module ExoMonad
     module ExoMonad.Guest.Records.Popup,
     module ExoMonad.Guest.Records.Messaging,
     module ExoMonad.Guest.Records.TLMessaging,
-    module ExoMonad.Guest.Records.Teams,
     module ExoMonad.Guest.Records.Coordination,
 
     -- * Mode System
@@ -34,7 +33,6 @@ import ExoMonad.Guest.Records.FilePR
 import ExoMonad.Guest.Records.Messaging
 import ExoMonad.Guest.Records.Popup
 import ExoMonad.Guest.Records.TLMessaging
-import ExoMonad.Guest.Records.Teams
 import ExoMonad.Guest.Records.Coordination
 import ExoMonad.Guest.SpawnSpec.Types as ExoMonad.Guest.SpawnSpec.Types
 import ExoMonad.Guest.Tool.Class

@@ -27,7 +27,6 @@ pub mod kv;
 pub mod log;
 pub mod messaging;
 pub mod popup;
-pub mod teams;
 
 pub use agent::AgentHandler;
 pub use coordination::CoordinationHandler;
@@ -40,4 +39,3 @@ pub use kv::KvHandler;
 pub use log::LogHandler;
 pub use messaging::MessagingHandler;
 pub use popup::PopupHandler;
-pub use teams::TeamsHandler;

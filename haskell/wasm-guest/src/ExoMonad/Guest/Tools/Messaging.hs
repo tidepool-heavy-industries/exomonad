@@ -30,8 +30,6 @@ import Data.Text (Text)
 import Data.Text.Lazy qualified as TL
 import Effects.Messaging qualified as M
 import Data.Vector qualified as V
-import Effects.Kv qualified as KV
-import ExoMonad.Effects.KV (kvGet)
 import ExoMonad.Effects.Messaging qualified as Messaging
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)
@@ -40,12 +38,11 @@ import GHC.Generics (Generic)
 -- Note
 -- ============================================================================
 
--- | Fire-and-forget note from agent to TL. Delivered via Teams inbox.
+-- | Fire-and-forget note from agent to TL.
 data Note
 
 data NoteArgs = NoteArgs
-  { naContent :: Text,
-    naTeamName :: Text
+  { naContent :: Text
   }
   deriving (Show, Eq, Generic)
 
@@ -53,32 +50,26 @@ instance FromJSON NoteArgs where
   parseJSON = Aeson.withObject "NoteArgs" $ \v ->
     NoteArgs
       <$> v .: "content"
-      <*> v .: "team_name"
 
 instance MCPTool Note where
   type ToolArgs Note = NoteArgs
   toolName = "note"
-  toolDescription = "Send a fire-and-forget note to the TL (e.g. FYI updates, progress reports). Delivered via Teams inbox."
+  toolDescription = "Send a fire-and-forget note to the TL (e.g. FYI updates, progress reports)."
   toolSchema =
     object
       [ "type" .= ("object" :: Text),
-        "required" .= (["content", "team_name"] :: [Text]),
+        "required" .= (["content"] :: [Text]),
         "properties"
           .= object
             [ "content"
                 .= object
                   [ "type" .= ("string" :: Text),
                     "description" .= ("Note content to send to the TL" :: Text)
-                  ],
-              "team_name"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "description" .= ("The team name to send the note to" :: Text)
                   ]
             ]
       ]
   toolHandler args = do
-    result <- Messaging.sendNote (naContent args) (naTeamName args)
+    result <- Messaging.sendNote (naContent args)
     case result of
       Left err -> pure $ errorResult (TL.toStrict $ "Messaging effect failed: " <> TL.pack (show err))
       Right _resp -> pure $ successResult $ object ["ack" .= True]
@@ -87,12 +78,11 @@ instance MCPTool Note where
 -- Question
 -- ============================================================================
 
--- | Blocking question from agent to TL. Waits for the TL's answer. Delivered via Teams inbox.
+-- | Blocking question from agent to TL. Waits for the TL's answer.
 data Question
 
 data QuestionArgs = QuestionArgs
-  { qaContent :: Text,
-    qaTeamName :: Text
+  { qaContent :: Text
   }
   deriving (Show, Eq, Generic)
 
@@ -100,32 +90,26 @@ instance FromJSON QuestionArgs where
   parseJSON = Aeson.withObject "QuestionArgs" $ \v ->
     QuestionArgs
       <$> v .: "content"
-      <*> v .: "team_name"
 
 instance MCPTool Question where
   type ToolArgs Question = QuestionArgs
   toolName = "question"
-  toolDescription = "Ask the TL a question and block until answered. Delivered via Teams inbox."
+  toolDescription = "Ask the TL a question and block until answered."
   toolSchema =
     object
       [ "type" .= ("object" :: Text),
-        "required" .= (["content", "team_name"] :: [Text]),
+        "required" .= (["content"] :: [Text]),
         "properties"
           .= object
             [ "content"
                 .= object
                   [ "type" .= ("string" :: Text),
                     "description" .= ("Question to ask the TL" :: Text)
-                  ],
-              "team_name"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "description" .= ("The team name to send the question to" :: Text)
                   ]
             ]
       ]
   toolHandler args = do
-    result <- Messaging.sendQuestion (qaContent args) (qaTeamName args)
+    result <- Messaging.sendQuestion (qaContent args)
     case result of
       Left err -> pure $ errorResult (TL.toStrict $ "Messaging effect failed: " <> TL.pack (show err))
       Right resp -> pure $ successResult $ object ["answer" .= TL.toStrict (M.sendQuestionResponseAnswer resp)]
@@ -171,10 +155,8 @@ instance MCPTool GetAgentMessages where
             ]
       ]
   toolHandler args = do
-    teamName <- resolveTeamName
     let agentId = maybe "" id (gaAgentId args)
-        team = maybe "" id teamName
-    result <- Messaging.getAgentMessages agentId team
+    result <- Messaging.getAgentMessages agentId
     case result of
       Left err -> pure $ errorResult (TL.toStrict $ "Messaging effect failed: " <> TL.pack (show err))
       Right resp ->
@@ -259,9 +241,7 @@ instance MCPTool AnswerQuestion where
             ]
       ]
   toolHandler args = do
-    teamName <- resolveTeamName
-    let team = maybe "" id teamName
-    result <- Messaging.answerQuestion (aqAgentId args) (aqQuestionId args) (aqAnswer args) team
+    result <- Messaging.answerQuestion (aqAgentId args) (aqQuestionId args) (aqAnswer args)
     case result of
       Left err -> pure $ errorResult (TL.toStrict $ "Messaging effect failed: " <> TL.pack (show err))
       Right resp ->
@@ -276,10 +256,3 @@ instance MCPTool AnswerQuestion where
 -- Helpers
 -- ============================================================================
 
--- | Resolve team name from KV store (set by PostToolUse hook on TeamCreate).
-resolveTeamName :: IO (Maybe Text)
-resolveTeamName = do
-  resp <- kvGet KV.GetRequest {KV.getRequestKey = "current_team"}
-  pure $ case resp of
-    Right r | KV.getResponseFound r -> Just (TL.toStrict (KV.getResponseValue r))
-    _ -> Nothing

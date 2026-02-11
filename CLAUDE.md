@@ -393,12 +393,6 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 | `spawn_gemini_teammate` | Spawn a named Gemini teammate with a direct prompt (no GitHub issue required) |
 | `cleanup_agents` | Clean up agent worktrees and close Zellij tabs |
 | `list_agents` | List active agent worktrees |
-| `claim_task` | Claim a task from the shared task list (Teams) |
-| `complete_task` | Mark a task as completed (Teams) |
-| `list_tasks` | List tasks from the shared task list (Teams) |
-| `get_task` | Get task details by ID (Teams) |
-| `report_status` | Report agent status to the team (Teams) |
-| `ask_question` | Ask a question to the team lead (Teams) |
 | `get_agent_messages` | Read notes and questions from agent outboxes (TL messaging) |
 | `answer_question` | Answer a pending question from an agent (TL messaging) |
 
@@ -426,7 +420,6 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 - ✅ Zellij plugin (exomonad-plugin) for status display and popup UI
 - ✅ KDL layout generation (zellij-gen) for proper environment inheritance
 - ✅ Stop hook logic (SubagentStop, SessionEnd) - validates uncommitted changes, unpushed commits, PR status, Copilot review
-- ✅ Claude Code Teams integration (synthetic teammate registration via `spawn_gemini_teammate`)
 - ✅ Gemini MCP wiring (`.gemini/settings.json` with server URL on spawn)
 
 ---
@@ -547,16 +540,6 @@ When an agent reports done:
 Agents hallucinate confidently about infrastructure constraints. "axum nest_service doesn't support dynamic segments" — stated as fact, nearly steered a design decision, turned out to be wrong. **Always demand sources for infrastructure claims.**
 
 Agents overengineer when unsupervised. Given "add a route with a path extractor" an agent built a full tower middleware stack. **Specify the complexity budget:** "this is 10 lines in an existing function, not a new module."
-
-### Teams Strategy: Mirror Signatures, Own the Backend
-
-Claude Code Teams provides coordination primitives (TaskCreate, TaskUpdate, SendMessage) that Claude models are trained on. ExoMonad's strategy:
-
-- **Mirror the tool signatures** — same tool names, same arg shapes, same response shapes. The model's training transfers.
-- **Own the backend** — ExoMonad's singleton MCP server is the coordination bus. State lives there, not in `~/.claude/teams/` filesystem.
-- **Route around jank** — Teams' UX (idle spam, shutdown ceremony, plan mode death spiral) is tolerated for bus access. Our WASM layer is where compensating logic lives — typed, hot-reloadable, not buried in prompts.
-
-The bet: Anthropic iterates on Teams primitives, we get upgrades for free. When they don't fix something, the crash cage handles it.
 
 ## Task Tracking (GitHub)
 

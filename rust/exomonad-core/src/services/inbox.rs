@@ -31,15 +31,12 @@ fn default_color() -> String {
     "blue".to_string()
 }
 
-/// Resolve `~/.claude/teams/{team}/inboxes/{agent}.json`.
-pub fn inbox_path(team_name: &str, agent_name: &str) -> PathBuf {
-    let mut path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    path.push(".claude");
-    path.push("teams");
-    path.push(team_name);
-    path.push("inboxes");
-    path.push(format!("{}.json", agent_name));
-    path
+/// Resolve `{project_dir}/.exomonad/messages/{agent}.json`.
+pub fn inbox_path(project_dir: &Path, agent_name: &str) -> PathBuf {
+    project_dir
+        .join(".exomonad")
+        .join("messages")
+        .join(format!("{}.json", agent_name))
 }
 
 /// Helper to wrap file operations with fcntl advisory locking.
@@ -235,9 +232,11 @@ mod tests {
 
     #[test]
     fn test_inbox_path() {
-        let path = inbox_path("myteam", "myagent");
-        assert!(path.to_string_lossy().contains("myteam"));
-        assert!(path.to_string_lossy().contains("myagent.json"));
+        let path = inbox_path(Path::new("/project"), "myagent");
+        assert_eq!(
+            path,
+            PathBuf::from("/project/.exomonad/messages/myagent.json")
+        );
     }
 
     #[test]

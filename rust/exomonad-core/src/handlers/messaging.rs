@@ -11,10 +11,10 @@ use crate::effects::{
     dispatch_messaging_effect, EffectError, EffectHandler, EffectResult, MessagingEffects,
 };
 use crate::services::inbox;
-use crate::services::messaging;
 use crate::services::questions::QuestionRegistry;
 use async_trait::async_trait;
 use exomonad_proto::effects::messaging::*;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::info;
@@ -22,15 +22,19 @@ use tracing::info;
 /// Messaging effect handler.
 ///
 /// Handles all `messaging.*` effects by reading/writing JSON inbox files
-/// in the Teams directory. The `QuestionRegistry` bridges `answer_question`
+/// in `.exomonad/messages/`. The `QuestionRegistry` bridges `answer_question`
 /// (TL-side) with `send_question` (agent-side) for immediate unblocking.
 pub struct MessagingHandler {
     question_registry: Arc<QuestionRegistry>,
+    project_dir: PathBuf,
 }
 
 impl MessagingHandler {
-    pub fn new(question_registry: Arc<QuestionRegistry>) -> Self {
-        Self { question_registry }
+    pub fn new(question_registry: Arc<QuestionRegistry>, project_dir: PathBuf) -> Self {
+        Self {
+            question_registry,
+            project_dir,
+        }
     }
 }
 
@@ -48,9 +52,8 @@ impl EffectHandler for MessagingHandler {
 #[async_trait]
 impl MessagingEffects for MessagingHandler {
     async fn send_note(&self, req: SendNoteRequest) -> EffectResult<SendNoteResponse> {
-        let team_name = get_team_name()?;
         let agent_id = get_agent_id();
-        let tl_inbox = inbox::inbox_path(&team_name, "team-lead");
+        let tl_inbox = inbox::inbox_path(&self.project_dir, "team-lead");
 
         let msg = inbox::create_message(
             agent_id,
@@ -58,7 +61,8 @@ impl MessagingEffects for MessagingHandler {
             Some(req.content.chars().take(50).collect()),
         );
 
-        tokio::task::spawn_blocking(move || inbox::append_message(&tl_inbox, &msg))
+        let tl_inbox_clone = tl_inbox.clone();
+        tokio::task::spawn_blocking(move || inbox::append_message(&tl_inbox_clone, &msg))
             .await
             .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
             .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
@@ -67,7 +71,6 @@ impl MessagingEffects for MessagingHandler {
     }
 
     async fn send_question(&self, req: SendQuestionRequest) -> EffectResult<SendQuestionResponse> {
-        let team_name = get_team_name()?;
         let agent_id = get_agent_id();
 
         info!(agent = %agent_id, "Sending question to TL");
@@ -76,7 +79,7 @@ impl MessagingEffects for MessagingHandler {
         let (question_id, rx) = self.question_registry.register();
 
         // Send question to TL inbox with question_id for correlation
-        let tl_inbox = inbox::inbox_path(&team_name, "team-lead");
+        let tl_inbox = inbox::inbox_path(&self.project_dir, "team-lead");
         let text = format!("[QUESTION q_id={}] {}", question_id, req.question);
         let msg = inbox::create_message(
             agent_id.clone(),
@@ -84,14 +87,15 @@ impl MessagingEffects for MessagingHandler {
             Some(req.question.chars().take(50).collect()),
         );
 
-        tokio::task::spawn_blocking(move || inbox::append_message(&tl_inbox, &msg))
+        let tl_inbox_clone = tl_inbox.clone();
+        tokio::task::spawn_blocking(move || inbox::append_message(&tl_inbox_clone, &msg))
             .await
             .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
             .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
 
         // Await answer with 5 minute timeout (no polling)
-        let timeout = Duration::from_secs(300);
-        match tokio::time::timeout(timeout, rx).await {
+        let timeout_dur = Duration::from_secs(300);
+        match tokio::time::timeout(timeout_dur, rx).await {
             Ok(Ok(answer)) => {
                 info!(
                     agent = %agent_id,
@@ -126,30 +130,32 @@ impl MessagingEffects for MessagingHandler {
         &self,
         req: GetAgentMessagesRequest,
     ) -> EffectResult<GetAgentMessagesResponse> {
-        let team_name = if req.team_name.is_empty() {
-            get_team_name()?
-        } else {
-            req.team_name.clone()
-        };
-
-        info!(agent_id = %req.agent_id, team = %team_name, "Getting agent messages");
+        info!(agent_id = %req.agent_id, "Getting agent messages");
 
         if !req.agent_id.is_empty() {
-            // Read specific agent's inbox
-            let messages = messaging::read_agent_inbox(&team_name, &req.agent_id)
+            // Read specific agent's messages from TL inbox (messages FROM this agent)
+            let tl_inbox = inbox::inbox_path(&self.project_dir, "team-lead");
+            let all_messages = tokio::task::spawn_blocking(move || inbox::read_unread(&tl_inbox))
                 .await
+                .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
                 .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
 
-            info!(agent = %req.agent_id, count = messages.len(), "Read agent messages from Teams inbox");
+            // Filter to messages from the requested agent
+            let agent_messages: Vec<_> = all_messages
+                .into_iter()
+                .filter(|m| m.from == req.agent_id)
+                .collect();
+
+            info!(agent = %req.agent_id, count = agent_messages.len(), "Read agent messages");
 
             let agent_msgs = AgentMessages {
                 agent_id: req.agent_id,
-                messages: messages
+                messages: agent_messages
                     .into_iter()
                     .map(|m| AgentMessage {
                         from: m.from,
                         text: m.text,
-                        summary: m.summary,
+                        summary: m.summary.unwrap_or_default(),
                         timestamp: m.timestamp,
                         read: m.read,
                     })
@@ -161,12 +167,21 @@ impl MessagingEffects for MessagingHandler {
                 warning: String::new(),
             })
         } else {
-            // Read all agent messages from TL inbox
-            let results = messaging::scan_all_agent_messages_teams(&team_name)
+            // Read all messages from TL inbox, grouped by sender
+            let tl_inbox = inbox::inbox_path(&self.project_dir, "team-lead");
+            let all_messages = tokio::task::spawn_blocking(move || inbox::read_unread(&tl_inbox))
                 .await
+                .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
                 .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
 
-            let agents: Vec<AgentMessages> = results
+            // Group messages by sender
+            let mut grouped: std::collections::HashMap<String, Vec<inbox::InboxMessage>> =
+                std::collections::HashMap::new();
+            for msg in all_messages {
+                grouped.entry(msg.from.clone()).or_default().push(msg);
+            }
+
+            let agents: Vec<AgentMessages> = grouped
                 .into_iter()
                 .map(|(id, msgs)| AgentMessages {
                     agent_id: id,
@@ -175,7 +190,7 @@ impl MessagingEffects for MessagingHandler {
                         .map(|m| AgentMessage {
                             from: m.from,
                             text: m.text,
-                            summary: m.summary,
+                            summary: m.summary.unwrap_or_default(),
                             timestamp: m.timestamp,
                             read: m.read,
                         })
@@ -183,10 +198,7 @@ impl MessagingEffects for MessagingHandler {
                 })
                 .collect();
 
-            info!(
-                agent_count = agents.len(),
-                "Scanned all agent messages from Teams inboxes"
-            );
+            info!(agent_count = agents.len(), "Scanned all agent messages");
 
             Ok(GetAgentMessagesResponse {
                 agents,
@@ -199,21 +211,23 @@ impl MessagingEffects for MessagingHandler {
         &self,
         req: AnswerQuestionRequest,
     ) -> EffectResult<AnswerQuestionResponse> {
-        let team_name = if req.team_name.is_empty() {
-            get_team_name()?
-        } else {
-            req.team_name.clone()
-        };
-
         info!(
             agent = %req.agent_id,
             question_id = %req.question_id,
-            team = %team_name,
-            "Answering question via Teams inbox"
+            "Answering question"
         );
 
-        messaging::write_to_agent_inbox(&team_name, &req.agent_id, &req.answer)
+        // Write answer to agent's inbox
+        let agent_inbox = inbox::inbox_path(&self.project_dir, &req.agent_id);
+        let msg = inbox::create_message(
+            "team-lead".to_string(),
+            req.answer.clone(),
+            Some(format!("Answer to {}", req.question_id)),
+        );
+
+        tokio::task::spawn_blocking(move || inbox::append_message(&agent_inbox, &msg))
             .await
+            .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
             .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
 
         // Resolve the oneshot channel so send_question unblocks immediately.
@@ -227,46 +241,12 @@ impl MessagingEffects for MessagingHandler {
             "Resolved question via QuestionRegistry"
         );
 
-        info!(agent = %req.agent_id, question_id = %req.question_id, "Answer written to Teams inbox");
-
         Ok(AnswerQuestionResponse {
             status: "answered".to_string(),
             agent_id: req.agent_id,
             question_id: req.question_id,
         })
     }
-}
-
-fn get_team_name() -> Result<String, EffectError> {
-    if let Ok(name) = std::env::var("EXOMONAD_TEAM_NAME") {
-        return Ok(name);
-    }
-    if let Ok(name) = std::env::var("CLAUDE_TEAM_NAME") {
-        return Ok(name);
-    }
-
-    let config_path = std::env::current_dir()
-        .unwrap_or_default()
-        .join(".exomonad")
-        .join("config.toml");
-
-    if config_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&config_path) {
-            for line in content.lines() {
-                let line = line.trim();
-                if line.starts_with("team_name") {
-                    if let Some(val) = line.split('=').nth(1) {
-                        return Ok(val.trim().trim_matches('"').trim_matches('\'').to_string());
-                    }
-                }
-            }
-        }
-    }
-
-    Err(EffectError::custom(
-        "messaging_error",
-        "EXOMONAD_TEAM_NAME or CLAUDE_TEAM_NAME not set and no team_name in .exomonad/config.toml",
-    ))
 }
 
 fn get_agent_id() -> String {
@@ -276,13 +256,16 @@ fn get_agent_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use tempfile::TempDir;
 
     #[test]
     fn test_inbox_path_uses_service() {
-        let path = inbox::inbox_path("myteam", "myagent");
-        assert!(path.to_string_lossy().contains("myteam"));
-        assert!(path.to_string_lossy().contains("myagent.json"));
+        let path = inbox::inbox_path(Path::new("/project"), "myagent");
+        assert_eq!(
+            path,
+            PathBuf::from("/project/.exomonad/messages/myagent.json")
+        );
     }
 
     #[test]

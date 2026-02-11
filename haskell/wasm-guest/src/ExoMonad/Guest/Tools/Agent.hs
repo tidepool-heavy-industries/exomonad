@@ -23,9 +23,6 @@ import Data.Aeson (FromJSON, object, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import Data.Text.Lazy qualified as TL
-import Effects.Kv qualified as KV
-import ExoMonad.Effects.KV (kvGet)
 import ExoMonad.Guest.Effects.AgentControl qualified as AC
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)
@@ -172,19 +169,10 @@ instance MCPTool SpawnGeminiTeammate where
       ]
   toolHandler args = do
     let agentTy = fromMaybe AC.Gemini (stAgentType args)
-    teamName <- resolveTeamName
-    result <- runM $ AC.runAgentControl $ AC.spawnGeminiTeammate (stName args) (stPrompt args) agentTy (stSubrepo args) teamName
+    result <- runM $ AC.runAgentControl $ AC.spawnGeminiTeammate (stName args) (stPrompt args) agentTy (stSubrepo args)
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> pure $ successResult $ Aeson.toJSON spawnResult
-
--- | Resolve team name from KV store (set by PostToolUse hook on TeamCreate).
-resolveTeamName :: IO (Maybe Text)
-resolveTeamName = do
-  resp <- kvGet KV.GetRequest {KV.getRequestKey = "current_team"}
-  pure $ case resp of
-    Right r | KV.getResponseFound r -> Just (TL.toStrict (KV.getResponseValue r))
-    _ -> Nothing
 
 -- ============================================================================
 -- CleanupAgents

@@ -10,11 +10,9 @@ pub mod github;
 pub mod inbox;
 pub mod local;
 pub mod log;
-pub mod messaging;
 pub mod popup;
 pub mod questions;
 pub mod secrets;
-pub mod teams;
 pub mod zellij_events;
 
 pub use self::agent_control::{

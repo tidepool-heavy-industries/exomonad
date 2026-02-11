@@ -9,7 +9,6 @@
 module TLRole (config, Tools) where
 
 import ExoMonad
-import PostToolUseHook (teamCreateHook)
 
 data Tools mode = Tools
   { agents :: AgentTools mode,
@@ -30,5 +29,5 @@ config =
             messaging = tlMessagingTools,
             coordination = coordinationTools
           },
-      hooks = defaultHooks {postToolUse = teamCreateHook}
+      hooks = defaultHooks
     }

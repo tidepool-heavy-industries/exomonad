@@ -74,7 +74,6 @@ impl AgentEffects for AgentHandler {
             } else {
                 Some(req.subrepo.clone())
             },
-            team_name: None,
         };
 
         let result = self
@@ -110,7 +109,6 @@ impl AgentEffects for AgentHandler {
                 } else {
                     Some(req.subrepo.clone())
                 },
-                team_name: None,
             };
 
             match self.service.spawn_agent(issue_number, &options).await {
@@ -134,11 +132,6 @@ impl AgentEffects for AgentHandler {
                 None
             } else {
                 Some(req.subrepo.clone())
-            },
-            team_name: if req.team_name.is_empty() {
-                None
-            } else {
-                Some(req.team_name.clone())
             },
         };
 
