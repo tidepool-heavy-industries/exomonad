@@ -14,6 +14,20 @@ Plan mode gates every file write with approval. Never spawn implementation agent
 ### Fewer messages, more context per message
 Agents that get short directives ("go") tend to drift. Agents that get full context in one shot (files, format, examples) produce better first attempts.
 
+## Implementation Status
+
+### spawn_gemini_teammate — Production Ready ✅
+Audit complete (2026-02-11). All GEMINI_NOTES issues resolved:
+- Branch naming uses `-` separator (no git collision risk)
+- Names slugified for filesystem/git safety
+- Cleanup reconstructs internal_name properly, removes all artifacts
+- Agent-type-aware config: Claude gets `.mcp.json`, Gemini gets `.gemini/settings.json`
+- Both use per-agent endpoints (`/agents/{name}/mcp`) for identity
+- Tabs vs Panes distinction consistent (subtree → Tab for isolation, worker → Pane for lightweight)
+- Subrepo support integrated into cleanup path resolution
+
+**spawn_worker is WIP** — no config.json registration (ephemeral/prototype only).
+
 ## Open Design Questions
 
 ### Per-agent identity flow

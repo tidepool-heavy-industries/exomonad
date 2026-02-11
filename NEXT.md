@@ -1,63 +1,41 @@
-# Hylo Model: Next Steps
+# Hylo Model: Status & Next Steps
 
-## Critical: Branch Naming / PR Base Detection Conflict
+## Phase 1: COMPLETE — Ready to Dogfood
 
-**`spawn_gemini_teammate` uses `-` separator** (line 613 of agent_control.rs):
-```
-branch_name = format!("{}-{}", base_branch, slug)
-# Example: main-my-feature
-```
+### What's Working
+- [x] `spawn_subtree` — worktree off current branch, TL role, Claude/Gemini support
+- [x] `spawn_worker` — in-place Gemini pane, no worktree (WIP, functional)
+- [x] `file_pr` — auto-detects base branch from `.` hierarchy convention
+- [x] Stop hook auto-files PR on exit if none exists
+- [x] Long-poll `get_messages` with timeout
+- [x] Messaging: `note`, `question`, `answer_question`
+- [x] Copilot review integration
+- [x] Agent-type-aware config (Claude: `.mcp.json`, Gemini: `.gemini/settings.json`)
+- [x] Per-agent MCP identity routing (`/agents/{name}/mcp`)
+- [x] Branch naming uses `.` separator (avoids git ref collisions, enables PR base detection)
+- [x] Integration tests for hierarchy + PR detection
 
-**`file_pr` auto-detection uses `/` separator** (file_pr.rs:48-50):
-```rust
-if let Some(pos) = head.rfind('/') {
-    head[..pos].to_string()  // "parent/child" → "parent"
-}
-```
+### Known Gaps (Acceptable for Phase 1)
+- **Rebase notification** — handled via prompting. Parent sends `note` to siblings after merge; they rebase manually. No tooling needed.
+- **spawn_worker registration** — workers don't appear in `list_agents`. Ephemeral by design for now.
+- **Depth limit** — convention only, no enforcement. Tool descriptions guide the agent.
 
-**These don't match.** A branch named `main-my-feature` won't auto-detect `main` as base — it'll fall through to the `"main"` default, which happens to be correct only at the root level. At depth >1 it silently breaks.
+### Stale Docs
+These reference old `spawn_leaf` naming and `/` branch convention:
+- `hylo_plan/README.md`
+- `hylo_plan/tools.md`
+- `hylo_plan/phase-1.md`
+- `hylo_plan/pr-lifecycle.md`
 
-**Fix options:**
-1. Switch branch naming back to `/` — the git collision concern (GEMINI_NOTES #5) was about `base/foo` conflicting with `base/foo/bar`. This is only a problem if both exist simultaneously. With worktree-per-agent, they shouldn't conflict since git refs can have `/`.
-2. Change `file_pr` detection to use `-` — but ambiguous (`main-feature-sub` could split as `main-feature` + `sub` or `main` + `feature-sub`).
-3. Store base_branch explicitly in agent metadata — most robust, but heavier.
+Update after dogfooding confirms the model works.
 
-**Recommendation:** Option 1. Use `/` separator in branch names. The git collision was a real concern for `base/foo` + `base/foo/bar` existing as both branch and directory, but this is solvable: slugify the leaf segment so it never looks like a path component of another branch. Test with actual recursive spawning.
+## Phase 2: Plan AFTER Dogfooding
 
-## What's Done (Phase 1 Checklist)
-
-- [x] `spawn_subtree` tool (creates worktree off current branch, TL role, both Claude/Gemini)
-- [x] Fix branch naming convention (uses `.` separator to avoid git collisions and unblock `file_pr` detection)
-- [x] `spawn_worker` tool (WIP — in-place pane, Gemini only, no worktree)
-- [x] Stop Hook: Auto-file PR on Exit (automatically calls `file_pr` tool if no PR exists)
-- [x] `file_pr` tool (auto-detects base branch from `/` or `.` convention, creates/updates PR)
-- [x] End-to-End Recursive Test (verified via unit tests and integration tests for hierarchy separator and PR detection)
-
-## What's NOT Done
-
-### 1. Rebase Notification After Merge
-When parent merges a child PR, siblings need "rebase on parent" notification. Currently no mechanism for this.
-
-**What's needed:**
-- After merge, parent sends message to remaining children via `note` tool
-- Children need a hook or message handler that triggers `git pull --rebase`
-- For phase 1: manual — parent just sends a note saying "rebase"
-
-### 2. spawn_worker Registration (Low Priority)
-spawn_worker agents don't register in config.json → cleanup_agent can't find them → list_agents doesn't show them. Fine for prototype, needs fixing for production.
-
-### 3. Depth Limit (Convention vs Enforcement)
-Phase 1 plan says max 2 levels. Currently no enforcement. Could add to tool description or validate in spawn logic.
-
-## Suggested Order
-
-1. **Rebase notification** — quality of life for sibling coordination
-2. **spawn_worker cleanup** — when worker model stabilizes
-3. **Docs update** — sync hylo_plan with current state
-
-## Docs to Update After
-
-- `hylo_plan/README.md` — still references `spawn_leaf`, uses `/` branch naming
-- `hylo_plan/tools.md` — still shows `spawn_leaf` spec
-- `hylo_plan/phase-1.md` — still references `spawn_leaf`, old branch convention
-- `hylo_plan/pr-lifecycle.md` — branch examples use `/` (which may be correct after fix)
+Do not plan phase 2 until real usage reveals what matters. Candidate topics to evaluate based on experience:
+- jj migration (automatic rebase propagation)
+- Automated rebase notification (post-merge hook)
+- spawn_worker lifecycle (registration, cleanup, tracking)
+- Depth limits (if agents recurse too deep in practice)
+- Cloud MCP server
+- Researcher node type (read-only, no write access to tree)
+- Agent evolution / learned facts

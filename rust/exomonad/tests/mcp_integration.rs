@@ -6,7 +6,7 @@
 //!   HTTP POST → axum → rmcp StreamableHttp → WASM (Haskell) → protobuf effects
 //!     → Rust handlers → protobuf response → WASM decode → JSON-RPC response
 //!
-//! The unified WASM provides: spawn_subtree, spawn_leaf, popup,
+//! The unified WASM provides: spawn_subtree, spawn_worker, popup,
 //! get_agent_messages, answer_question, get_agent_messages.
 //!
 //! Tests expect a running server on the port specified by MCP_TEST_PORT.
@@ -571,6 +571,55 @@ fn mcp_spawn_subtree_schema_has_required_fields() {
             required_names
         );
     }
+}
+
+/// Verify all tool schemas match expected structure.
+#[test]
+fn mcp_tool_schemas_valid() {
+    let mut client = shared_session().lock().unwrap();
+
+    let resp = client.call(list_tools_request(204));
+    let tools = resp["result"]["tools"].as_array().unwrap();
+
+    let tool_map: std::collections::HashMap<&str, &Value> = tools
+        .iter()
+        .filter_map(|t| t["name"].as_str().map(|n| (n, t)))
+        .collect();
+
+    // 1. spawn_subtree
+    let subtree = tool_map
+        .get("spawn_subtree")
+        .expect("spawn_subtree missing");
+    let props = &subtree["inputSchema"]["properties"];
+    assert!(props.get("task").is_some());
+    assert!(props.get("branch_name").is_some());
+    assert!(props.get("context").is_some());
+    assert!(props.get("agent_type").is_some());
+
+    // 2. spawn_worker
+    let worker = tool_map.get("spawn_worker").expect("spawn_worker missing");
+    let props = &worker["inputSchema"]["properties"];
+    assert!(props.get("name").is_some());
+    assert!(props.get("prompt").is_some());
+    assert!(props.get("agent_type").is_none()); // NO agent_type for worker
+
+    // 3. file_pr
+    let file_pr = tool_map.get("file_pr").expect("file_pr missing");
+    let props = &file_pr["inputSchema"]["properties"];
+    assert!(props.get("title").is_some());
+    assert!(props.get("body").is_some());
+    assert!(props.get("base_branch").is_some());
+
+    // 4. get_agent_messages
+    let msg = tool_map
+        .get("get_agent_messages")
+        .expect("get_agent_messages missing");
+    assert!(msg["inputSchema"]["properties"]
+        .get("timeout_secs")
+        .is_some());
+
+    // 5. No spawn_leaf
+    assert!(tool_map.get("spawn_leaf").is_none());
 }
 
 /// All tools have non-empty descriptions.

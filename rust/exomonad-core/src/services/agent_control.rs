@@ -609,8 +609,9 @@ impl AgentControlService {
                     .to_string()
             };
 
-            // Use '-' separator to avoid directory/file conflicts in git refs
-            let branch_name = format!("{}-{}", base_branch, slug);
+            // Use '.' separator to avoid directory/file conflicts in git refs
+            // and avoid ambiguity with '-' word separators in slugs.
+            let branch_name = format!("{}.{}", base_branch, slug);
             let worktree_path = effective_project_dir
                 .join(".exomonad")
                 .join("worktrees")
@@ -1369,14 +1370,33 @@ impl AgentControlService {
             anyhow::anyhow!("No MCP server running. Start one with `exomonad serve --port <port>`.")
         })?;
 
+        let agent_name = agent_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+
+        let mcp_content = Self::generate_mcp_config(agent_name, port, agent_type);
+
         match agent_type {
             AgentType::Claude => {
-                let agent_name = agent_dir
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unknown");
-                info!(port, agent_name = %agent_name, "Writing HTTP .mcp.json for Claude agent");
-                let mcp_content = format!(
+                fs::write(agent_dir.join(".mcp.json"), mcp_content).await?;
+                info!(agent_dir = %agent_dir.display(), "Wrote .mcp.json for Claude agent");
+            }
+            AgentType::Gemini => {
+                let gemini_dir = agent_dir.join(".gemini");
+                fs::create_dir_all(&gemini_dir).await?;
+                fs::write(gemini_dir.join("settings.json"), mcp_content).await?;
+                info!(agent_dir = %agent_dir.display(), "Wrote .gemini/settings.json for Gemini agent");
+            }
+        }
+        Ok(())
+    }
+
+    /// Generate MCP configuration JSON for an agent.
+    fn generate_mcp_config(name: &str, port: u16, agent_type: AgentType) -> String {
+        match agent_type {
+            AgentType::Claude => {
+                format!(
                     r###"{{
   "mcpServers": {{
     "exomonad": {{
@@ -1385,20 +1405,11 @@ impl AgentControlService {
   }}
 }}"###,
                     port = port,
-                    name = agent_name,
-                );
-                fs::write(agent_dir.join(".mcp.json"), mcp_content).await?;
-                info!(agent_dir = %agent_dir.display(), "Wrote .mcp.json for Claude agent");
+                    name = name,
+                )
             }
             AgentType::Gemini => {
-                // Gemini CLI uses "httpUrl" for streamable HTTP.
-                // Per-agent endpoint includes agent name for identity routing.
-                let agent_name = agent_dir
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unknown");
-                info!(port, agent_name = %agent_name, "Writing .gemini/settings.json for Gemini agent");
-                let gemini_content = format!(
+                format!(
                     r###"{{
   "mcpServers": {{
     "exomonad": {{
@@ -1407,15 +1418,10 @@ impl AgentControlService {
   }}
 }}"###,
                     port = port,
-                    name = agent_name,
-                );
-                let gemini_dir = agent_dir.join(".gemini");
-                fs::create_dir_all(&gemini_dir).await?;
-                fs::write(gemini_dir.join("settings.json"), gemini_content).await?;
-                info!(agent_dir = %agent_dir.display(), "Wrote .gemini/settings.json for Gemini agent");
+                    name = name,
+                )
             }
         }
-        Ok(())
     }
 
     // ========================================================================
@@ -1720,5 +1726,48 @@ mod tests {
         assert!(parse_agent_dir_name("123-test-claude").is_none());
         assert!(parse_agent_dir_name("gh-nohyphens").is_none());
         assert!(parse_agent_dir_name("gh-123").is_none());
+    }
+
+    #[test]
+    fn test_claude_mcp_config_format() {
+        let config = AgentControlService::generate_mcp_config("test-claude", 7432, AgentType::Claude);
+        let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
+        assert_eq!(
+            parsed["mcpServers"]["exomonad"]["url"],
+            "http://localhost:7432/agents/test-claude/mcp"
+        );
+        assert!(parsed["mcpServers"]["exomonad"].get("httpUrl").is_none());
+    }
+
+    #[test]
+    fn test_gemini_mcp_config_format() {
+        let config = AgentControlService::generate_mcp_config("test-gemini", 7432, AgentType::Gemini);
+        let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
+        assert_eq!(
+            parsed["mcpServers"]["exomonad"]["httpUrl"],
+            "http://localhost:7432/agents/test-gemini/mcp"
+        );
+        assert!(parsed["mcpServers"]["exomonad"].get("url").is_none());
+    }
+
+    #[test]
+    fn test_parse_agent_tab_subtree_claude() {
+        let info = parse_agent_tab("🤖 auth-service").unwrap();
+        assert_eq!(info.issue_id, "auth-service");
+        assert_eq!(info.agent_type, Some("claude".to_string()));
+        assert_eq!(info.topology, Topology::SharedDir);
+    }
+
+    #[test]
+    fn test_parse_agent_tab_subtree_gemini() {
+        let info = parse_agent_tab("💎 data-migration").unwrap();
+        assert_eq!(info.issue_id, "data-migration");
+        assert_eq!(info.agent_type, Some("gemini".to_string()));
+    }
+
+    #[test]
+    fn test_parse_agent_tab_not_agent() {
+        assert!(parse_agent_tab("Server").is_none());
+        assert!(parse_agent_tab("TL").is_none());
     }
 }

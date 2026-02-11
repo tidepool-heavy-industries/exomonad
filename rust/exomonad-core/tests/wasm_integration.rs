@@ -175,6 +175,23 @@ impl EffectHandler for MockAgentHandler {
                 errors: vec![],
             }
             .encode_to_vec()),
+            "agent.spawn_worker" => {
+                let agent = AgentInfo {
+                    id: "test-worker-gemini".into(),
+                    issue: String::new(),
+                    worktree_path: String::new(), // Shared dir
+                    branch_name: String::new(),
+                    agent_type: 2, // GEMINI
+                    role: 0,
+                    status: 1,
+                    zellij_tab: "test-worker".into(),
+                    error: String::new(),
+                    pr_number: 0,
+                    pr_url: String::new(),
+                    topology: 2, // SHARED_DIR
+                };
+                Ok(SpawnWorkerResponse { agent: Some(agent) }.encode_to_vec())
+            }
             _ => Err(EffectError::not_found(format!("mock_agent/{effect_type}"))),
         }
     }
@@ -230,8 +247,8 @@ async fn wasm_list_tools_returns_definitions() {
         "Missing spawn_subtree in {tool_names:?}"
     );
     assert!(
-        tool_names.contains(&"spawn_leaf"),
-        "Missing spawn_leaf in {tool_names:?}"
+        tool_names.contains(&"spawn_worker"),
+        "Missing spawn_worker in {tool_names:?}"
     );
 }
 
@@ -265,13 +282,13 @@ async fn wasm_spawn_subtree_roundtrip() {
     );
 }
 
-/// spawn_leaf roundtrip: tool → agent.spawn_gemini_teammate effect → mock response.
+/// spawn_worker roundtrip: tool → agent.spawn_worker effect → mock response.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn wasm_spawn_leaf_roundtrip() {
+async fn wasm_spawn_worker_roundtrip() {
     let runtime = build_test_runtime().await;
 
     let input = json!({
-        "toolName": "spawn_leaf",
+        "toolName": "spawn_worker",
         "toolArgs": {
             "name": "rust-impl",
             "prompt": "Implement the Rust side of feature X"
@@ -282,11 +299,11 @@ async fn wasm_spawn_leaf_roundtrip() {
         .plugin_manager()
         .call("handle_mcp_call", &input)
         .await
-        .expect("handle_mcp_call failed for spawn_leaf");
+        .expect("handle_mcp_call failed for spawn_worker");
 
     assert_eq!(
         output["success"], true,
-        "spawn_leaf should succeed with mock handler: {output:#}"
+        "spawn_worker should succeed with mock handler: {output:#}"
     );
 }
 

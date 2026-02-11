@@ -38,19 +38,22 @@ pub struct FilePROutput {
 // ============================================================================
 
 /// Detect the base branch for a PR.
-/// Priority: explicit > convention (strip last / segment) > "main"
+/// Priority: explicit > convention (strip last / segment) > convention (strip last - segment) > "main"
 fn detect_base_branch(head: &str, explicit: Option<&str>) -> String {
     if let Some(base) = explicit {
         if !base.is_empty() {
             return base.to_string();
         }
     }
-    // Convention: branch "parent/child" targets "parent"
+    // Convention 1: branch "parent/child" targets "parent" (Standard Git)
     if let Some(pos) = head.rfind('/') {
-        head[..pos].to_string()
-    } else {
-        "main".to_string()
+        return head[..pos].to_string();
     }
+    // Convention 2: branch "parent.child" targets "parent" (ExoMonad Subtrees)
+    if let Some(pos) = head.rfind('.') {
+        return head[..pos].to_string();
+    }
+    "main".to_string()
 }
 
 /// Get the git remote URL for origin.
@@ -274,11 +277,36 @@ mod tests {
 
     #[test]
     fn test_detect_base_branch_convention() {
+        // Slash convention
         assert_eq!(
             detect_base_branch("main/subtask/leaf", None),
             "main/subtask"
         );
         assert_eq!(detect_base_branch("feature/my-work", None), "feature");
+
+        // Dot convention (ExoMonad subtrees)
+        assert_eq!(detect_base_branch("main.my-feature", None), "main");
+        assert_eq!(detect_base_branch("parent.child.grandchild", None), "parent.child");
+    }
+
+    #[test]
+    fn test_branch_naming_roundtrip_root() {
+        let branch = format!("{}.{}", "main", "auth-service");
+        assert_eq!(detect_base_branch(&branch, None), "main");
+    }
+
+    #[test]
+    fn test_branch_naming_roundtrip_nested() {
+        let branch = format!("{}.{}", "main.auth-service", "middleware");
+        assert_eq!(detect_base_branch(&branch, None), "main.auth-service");
+    }
+
+    #[test]
+    fn test_branch_naming_roundtrip_deep() {
+        assert_eq!(
+            detect_base_branch("main.feature.sub.leaf", None),
+            "main.feature.sub"
+        );
     }
 
     #[test]
