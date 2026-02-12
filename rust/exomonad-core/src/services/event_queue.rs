@@ -4,6 +4,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{oneshot, Mutex};
+use tracing::{debug, info};
 
 type SessionId = String;
 
@@ -53,21 +54,26 @@ impl EventQueue {
     }
 
     pub async fn notify_event(&self, session_id: &str, event: Event) {
+        info!(session_id = %session_id, "EventQueue: notify_event appending to queue");
         // Append to queue
         {
             let mut queues = self.queues.lock().await;
-            queues
-                .entry(session_id.to_string())
-                .or_default()
-                .push_back(event.clone());
+            let queue = queues.entry(session_id.to_string()).or_default();
+            queue.push_back(event.clone());
+            info!(session_id = %session_id, queue_len = queue.len(), "EventQueue: event appended");
         }
 
         // Wake ONE waiting call (if any)
         let mut wakers = self.wakers.lock().await;
         if let Some(waiters) = wakers.get_mut(session_id) {
             if let Some(tx) = waiters.pop() {
+                info!(session_id = %session_id, "EventQueue: waking a waiter");
                 let _ = tx.send(event);
+            } else {
+                debug!(session_id = %session_id, "EventQueue: no waiters to wake");
             }
+        } else {
+            debug!(session_id = %session_id, "EventQueue: no waiter list for session");
         }
     }
 

@@ -51,6 +51,12 @@ impl EffectHandler for EventHandler {
 impl EventEffects for EventHandler {
     async fn wait_for_event(&self, req: WaitForEventRequest) -> EffectResult<WaitForEventResponse> {
         let session_id = self.session_id.as_deref().unwrap_or("default");
+        tracing::info!(
+            session_id = %session_id,
+            types = ?req.types,
+            timeout_secs = req.timeout_secs,
+            "wait_for_event called"
+        );
 
         // Use a default timeout of 300s if not specified or 0
         let timeout_secs = if req.timeout_secs <= 0 {
@@ -71,6 +77,12 @@ impl EventEffects for EventHandler {
     }
 
     async fn notify_event(&self, req: NotifyEventRequest) -> EffectResult<NotifyEventResponse> {
+        tracing::info!(
+            session_id = %req.session_id,
+            has_event = req.event.is_some(),
+            remote = self.remote_url.is_some(),
+            "notify_event called"
+        );
         if let Some(ref url) = self.remote_url {
             // Forward to server
             let client = reqwest::Client::new();
