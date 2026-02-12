@@ -111,6 +111,10 @@ struct HookQueryParams {
     event: HookEventType,
     runtime: HookRuntime,
     role: Option<String>,
+    /// Agent identity (forwarded from caller's env).
+    agent_id: Option<String>,
+    /// TL session ID for event routing (forwarded from caller's env).
+    session_id: Option<String>,
 }
 
 /// Server-side hook handler state, shared across requests.
@@ -285,6 +289,12 @@ async fn handle_hook_inner(
         serde_json::to_value(&hook_input).context("Failed to serialize hook input")?;
     if let serde_json::Value::Object(ref mut map) = hook_input_value {
         map.insert("role".to_string(), serde_json::json!(role));
+        if let Some(ref agent_id) = params.agent_id {
+            map.insert("agent_id".to_string(), serde_json::json!(agent_id));
+        }
+        if let Some(ref session_id) = params.session_id {
+            map.insert("exomonad_session_id".to_string(), serde_json::json!(session_id));
+        }
     }
 
     if is_stop_hook {
@@ -836,10 +846,17 @@ async fn main() -> Result<()> {
             use std::time::Duration;
 
             let port = config.port;
-            let url = format!(
+            let mut url = format!(
                 "http://127.0.0.1:{}/hook?event={}&runtime={}",
                 port, event, runtime
             );
+            // Forward agent identity env vars so the server can inject them into WASM calls
+            if let Ok(agent_id) = std::env::var("EXOMONAD_AGENT_ID") {
+                url.push_str(&format!("&agent_id={}", agent_id));
+            }
+            if let Ok(session_id) = std::env::var("EXOMONAD_SESSION_ID") {
+                url.push_str(&format!("&session_id={}", session_id));
+            }
 
             let mut body = String::new();
             std::io::stdin()

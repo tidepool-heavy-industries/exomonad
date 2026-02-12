@@ -322,7 +322,7 @@ Human in Zellij session
 
 Ask the specialist directly instead of guessing. They have authoritative knowledge about Claude Code internals, hook lifecycle, and best practices.
 
-Hook configuration is **auto-generated per worktree** by `write_context_files()` in `agent_control.rs` during agent spawning. Each spawned Claude agent gets `.claude/settings.local.json` with PreToolUse, SubagentStop, and SessionEnd hooks. Gemini agents get `.gemini/settings.json` with AfterAgent hooks. Do not manually create hook settings — they are generated at spawn time.
+Hook configuration is **auto-generated per worktree** by `write_context_files()` in `agent_control.rs` during agent spawning. Each spawned Claude agent gets `.claude/settings.local.json` with PreToolUse, SubagentStop, and SessionEnd hooks. Gemini agents get a settings.json written to a temp directory, pointed to via the `GEMINI_CLI_SYSTEM_SETTINGS_PATH` env var (NOT `.gemini/settings.json` — that's the user's global config). Do not manually create hook settings — they are generated at spawn time.
 
 **MCP server configuration:** Use CLI-native config commands (one-time setup):
 ```bash
@@ -445,7 +445,7 @@ Use cases:
 - ✅ Zellij plugin (exomonad-plugin) for status display and popup UI
 - ✅ KDL layout generation (zellij-gen) for proper environment inheritance
 - ✅ Stop hook logic (SubagentStop, SessionEnd) - validates uncommitted changes, unpushed commits, PR status, Copilot review
-- ✅ Gemini MCP wiring (`.gemini/settings.json` with server URL on spawn)
+- ✅ Gemini MCP wiring (`GEMINI_CLI_SYSTEM_SETTINGS_PATH` env var pointing to per-agent settings on spawn)
 - ✅ EventQueue with blocking wait (zero-polling worker coordination)
 - ✅ wait_for_event + notify_completion MCP tools
 

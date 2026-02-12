@@ -79,7 +79,11 @@ data HookInput = HookInput
     hiPrompt :: Maybe Text,
     hiPromptResponse :: Maybe Text,
     hiTimestamp :: Maybe Text,
-    hiToolResponse :: Maybe Value
+    hiToolResponse :: Maybe Value,
+    -- | Agent identity, injected by server from hook query params.
+    hiAgentId :: Maybe Text,
+    -- | TL session ID for event routing, injected by server from hook query params.
+    hiExomonadSessionId :: Maybe Text
   }
   deriving (Show, Generic)
 
@@ -95,6 +99,8 @@ instance FromJSON HookInput where
       <*> v .:? "prompt_response"
       <*> v .:? "timestamp"
       <*> v .:? "tool_response"
+      <*> v .:? "agent_id"
+      <*> v .:? "exomonad_session_id"
 
 -- | Output from a hook handler.
 data HookOutput = HookOutput

@@ -43,7 +43,6 @@ import Foreign.C.Types (CInt (..))
 import GHC.Generics (Generic)
 import Polysemy (Embed, Sem, runM)
 import System.Directory (getCurrentDirectory)
-import System.Environment (lookupEnv)
 import System.FilePath (takeFileName)
 import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
@@ -215,15 +214,13 @@ hookHandler config = do
       pure 0
 
 handleWorkerExit :: HookInput -> IO CInt
-handleWorkerExit _ = do
+handleWorkerExit hookInput = do
   logInfo_ "WorkerExit hook firing"
-  maybeAgentId <- lookupEnv "EXOMONAD_AGENT_ID"
-  maybeSessionId <- lookupEnv "EXOMONAD_SESSION_ID"
+  let maybeAgentId = hiAgentId hookInput
+  let maybeSessionId = hiExomonadSessionId hookInput
 
   case (maybeAgentId, maybeSessionId) of
-    (Just agentIdStr, Just sessionIdStr) -> do
-        let agentId = T.pack agentIdStr
-        let sessionId = T.pack sessionIdStr
+    (Just agentId, Just sessionId) -> do
         logInfo_ $ "Handling exit for agent: " <> agentId <> " session: " <> sessionId
 
         -- Get git diff for changes
@@ -250,7 +247,7 @@ handleWorkerExit _ = do
             Right _ -> logInfo_ "Completion notified"
 
     _ -> do
-        logError_ "EXOMONAD_AGENT_ID or EXOMONAD_SESSION_ID not set in worker-exit hook"
+        logError_ "agent_id or exomonad_session_id missing from hook input"
         pure ()
 
   output (BSL.toStrict $ Aeson.encode $ allowResponse Nothing)

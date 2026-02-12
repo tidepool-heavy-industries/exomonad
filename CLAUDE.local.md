@@ -21,7 +21,7 @@ Audit complete (2026-02-11). All GEMINI_NOTES issues resolved:
 - Branch naming uses `-` separator (no git collision risk)
 - Names slugified for filesystem/git safety
 - Cleanup reconstructs internal_name properly, removes all artifacts
-- Agent-type-aware config: Claude gets `.mcp.json`, Gemini gets `.gemini/settings.json`
+- Agent-type-aware config: Claude gets `.mcp.json`, Gemini gets settings via `GEMINI_CLI_SYSTEM_SETTINGS_PATH` env var
 - Both use per-agent endpoints (`/agents/{name}/mcp`) for identity
 - Tabs vs Panes distinction consistent (subtree → Tab for isolation, worker → Pane for lightweight)
 - Subrepo support integrated into cleanup path resolution
