@@ -177,6 +177,8 @@ All tools are defined in Haskell WASM and executed via host functions.
 | `question` | Send blocking question to TL (agent-side) |
 | `get_agent_messages` | Read notes/questions from agents (TL messaging, supports long-poll) |
 | `answer_question` | Answer pending agent question (TL messaging) |
+| `wait_for_event` | Block until a matching event occurs or timeout expires |
+| `notify_completion` | Notify TL that this worker has completed |
 
 ## Effect System
 
@@ -206,6 +208,7 @@ Haskell: Either EffectError GetBranchResponse
 | `file_pr.*` | FilePRHandler | file_pr |
 | `copilot.*` | CopilotHandler | wait_for_copilot_review |
 | `messaging.*` | MessagingHandler | send_note, send_question |
+| `events.*` | EventHandler | wait_for_event, notify_event |
 
 **Zellij Integration:**
 - Uses declarative KDL layouts (not CLI flags)
