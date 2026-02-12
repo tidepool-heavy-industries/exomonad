@@ -781,11 +781,16 @@ impl AgentControlService {
                     }
                 },
                 "hooks": {
-                    "afterAgent": [
+                    "after-agent": [
                         {
-                            "type": "command",
-                            "command": "exomonad",
-                            "args": ["hook", "worker-exit", "--runtime", "gemini"]
+                            "matcher": "*",
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "exomonad",
+                                    "args": ["hook", "worker-exit", "--runtime", "gemini"]
+                                }
+                            ]
                         }
                     ]
                 }

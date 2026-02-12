@@ -6,9 +6,9 @@
     }
   },
   "hooks": {
-    // Gemini CLI uses PascalCase for hook events (e.g. AfterAgent, BeforeTool).
-    // Lifecycle hooks like AfterAgent require a wildcard matcher "*".
-    "AfterAgent": [
+    // Gemini CLI uses kebab-case for hook events (e.g. after-agent).
+    // Lifecycle hooks like after-agent require a wildcard matcher "*".
+    "after-agent": [
       {
         "matcher": "*",
         "hooks": [
