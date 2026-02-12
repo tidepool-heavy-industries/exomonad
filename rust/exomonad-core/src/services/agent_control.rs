@@ -781,7 +781,7 @@ impl AgentControlService {
                     }
                 },
                 "hooks": {
-                    "after-agent": [
+                    "AfterAgent": [
                         {
                             "matcher": "*",
                             "hooks": [
