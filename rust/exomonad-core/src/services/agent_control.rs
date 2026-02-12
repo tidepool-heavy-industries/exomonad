@@ -721,13 +721,36 @@ impl AgentControlService {
         Ok(result)
     }
 
-    // ========================================================================
-    // Spawn Worker (in-place, no worktree)
-    // ========================================================================
-
-    /// Spawn a worker agent in the parent's working directory.
+    /// Generate settings.json content for a Gemini worker.
     ///
-    /// Workers run as Gemini agents in a Zellij pane within the current tab.
+    /// Constructs the JSON configuration including MCP server connection and lifecycle hooks.
+    /// Note: Gemini hooks must be PascalCase (e.g. AfterAgent).
+    pub(crate) fn generate_gemini_settings(mcp_url: &str) -> serde_json::Value {
+        serde_json::json!({
+            "mcpServers": {
+                "exomonad": {
+                    "httpUrl": mcp_url
+                }
+            },
+            "hooks": {
+                "AfterAgent": [
+                    {
+                        "matcher": "*",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "exomonad",
+                                "args": ["hook", "worker-exit", "--runtime", "gemini"]
+                            }
+                        ]
+                    }
+                ]
+            }
+        })
+    }
+
+    /// Spawn a Gemini worker agent (Phase 2/3).
+    ///
     /// No git branch or worktree is created — the worker shares the parent's worktree.
     #[tracing::instrument(skip(self, options), fields(name = %options.name))]
     pub async fn spawn_worker(&self, options: &SpawnWorkerOptions) -> Result<SpawnResult> {
@@ -774,27 +797,7 @@ impl AgentControlService {
                 "http://localhost:{}/agents/{}/mcp",
                 mcp_port, internal_name
             );
-            let settings = serde_json::json!({
-                "mcpServers": {
-                    "exomonad": {
-                        "httpUrl": mcp_url
-                    }
-                },
-                "hooks": {
-                    "AfterAgent": [
-                        {
-                            "matcher": "*",
-                            "hooks": [
-                                {
-                                    "type": "command",
-                                    "command": "exomonad",
-                                    "args": ["hook", "worker-exit", "--runtime", "gemini"]
-                                }
-                            ]
-                        }
-                    ]
-                }
-            });
+            let settings = Self::generate_gemini_settings(&mcp_url);
             fs::write(&settings_path, serde_json::to_string_pretty(&settings)?).await?;
             info!(
                 path = %settings_path.display(),
@@ -1822,5 +1825,40 @@ mod tests {
     fn test_parse_agent_tab_not_agent() {
         assert!(parse_agent_tab("Server").is_none());
         assert!(parse_agent_tab("TL").is_none());
+    }
+
+    #[test]
+    fn test_gemini_settings_schema_compliance() {
+        let settings = AgentControlService::generate_gemini_settings("http://example.com/mcp");
+        
+        // Assertions based on manual schema validation
+        
+        // 1. Hooks must strictly use PascalCase (AfterAgent), not kebab-case (after-agent) or camelCase (afterAgent).
+        assert!(settings["hooks"].get("AfterAgent").is_some(), "hooks.AfterAgent is missing");
+        assert!(settings["hooks"].get("after-agent").is_none(), "Found invalid kebab-case 'after-agent'");
+        assert!(settings["hooks"].get("afterAgent").is_none(), "Found invalid camelCase 'afterAgent'");
+
+        // 2. The hook structure must match the array of matcher/hooks objects
+        let after_agent = &settings["hooks"]["AfterAgent"];
+        assert!(after_agent.is_array(), "hooks.AfterAgent must be an array");
+        
+        let first_rule = &after_agent[0];
+        assert_eq!(first_rule["matcher"], "*", "AfterAgent matcher must be wildcard '*'");
+        
+        let hooks_list = &first_rule["hooks"];
+        assert!(hooks_list.is_array(), "hooks list inside rule must be an array");
+        
+        let command_hook = &hooks_list[0];
+        assert_eq!(command_hook["type"], "command", "Hook type must be 'command'");
+        assert_eq!(command_hook["command"], "exomonad", "Hook command must be 'exomonad'");
+        
+        // 3. Verify arguments use the kebab-case CLI flag as expected by exomonad binary
+        let args: Vec<&str> = command_hook["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(args, vec!["hook", "worker-exit", "--runtime", "gemini"]);
     }
 }
