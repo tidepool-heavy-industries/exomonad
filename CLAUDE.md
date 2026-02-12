@@ -393,6 +393,8 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 | `get_agent_messages` | Read notes and questions from agent outboxes (TL messaging, supports long-poll) |
 | `answer_question` | Answer a pending question from an agent (TL messaging) |
 | `file_pr` | Create or update a PR for the current branch (auto-detects base branch from naming convention) |
+| `wait_for_event` | Block until a matching event occurs (e.g., worker completion) |
+| `notify_completion` | Notify TL that this worker has completed (called by workers on exit) |
 
 **How spawn works (hylo model):**
 1. `spawn_subtree`: Creates git worktree branching off the current branch
@@ -402,6 +404,28 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 5. `spawn_subtree` agents get TL role (can spawn their own children)
 6. `spawn_worker`: Runs Gemini in a Zellij pane in the parent's worktree (no branch, no worktree)
 7. PRs target parent branch, not main — merged via recursive fold
+
+### Parallel Worker Coordination
+
+The TL can spawn multiple workers in parallel and use `wait_for_event` to coordinate completion:
+
+Example workflow:
+- Spawn 3 workers in parallel
+- Call `wait_for_event types=["worker_complete"] timeout_secs=300`
+- Returns immediately when any worker completes
+- Repeat for remaining workers
+
+How it works:
+1. Each spawned worker gets `EXOMONAD_SESSION_ID` env var (parent's session ID)
+2. When worker exits, `handleWorkerExit` hook calls `notify_completion`
+3. Notification goes to EventQueue indexed by session_id
+4. TL's `wait_for_event` call wakes immediately and returns the event
+5. Zero token waste - no polling loops, just blocking wait
+
+Use cases:
+- Parallel implementation tasks (3+ workers on independent changes)
+- Fan-out/fan-in patterns (spawn many, wait for all, aggregate results)
+- Progress monitoring (spawn long-running task, periodically check with timeout)
 
 ### Status
 
@@ -418,6 +442,8 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 - ✅ KDL layout generation (zellij-gen) for proper environment inheritance
 - ✅ Stop hook logic (SubagentStop, SessionEnd) - validates uncommitted changes, unpushed commits, PR status, Copilot review
 - ✅ Gemini MCP wiring (`.gemini/settings.json` with server URL on spawn)
+- ✅ EventQueue with blocking wait (zero-polling worker coordination)
+- ✅ wait_for_event + notify_completion MCP tools
 
 ---
 
