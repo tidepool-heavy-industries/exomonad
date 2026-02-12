@@ -1,10 +1,10 @@
 //! Integration test for wait_for_event tool via WASM.
 
 use async_trait::async_trait;
-use exomonad_core::{EffectHandler, EffectResult, RuntimeBuilder};
-use exomonad_core::services::EventQueue;
 use exomonad_core::handlers::EventHandler;
-use exomonad_proto::effects::events::{Event, event::EventType, WorkerComplete};
+use exomonad_core::services::EventQueue;
+use exomonad_core::{EffectHandler, EffectResult, RuntimeBuilder};
+use exomonad_proto::effects::events::{event::EventType, Event, WorkerComplete};
 use prost::Message;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -24,7 +24,9 @@ fn wasm_binary_bytes() -> Vec<u8> {
 struct MockLogHandler;
 #[async_trait]
 impl EffectHandler for MockLogHandler {
-    fn namespace(&self) -> &str { "log" }
+    fn namespace(&self) -> &str {
+        "log"
+    }
     async fn handle(&self, _type: &str, _payload: &[u8]) -> EffectResult<Vec<u8>> {
         use exomonad_proto::effects::log::LogResponse;
         Ok(LogResponse { success: true }.encode_to_vec())
@@ -35,7 +37,7 @@ impl EffectHandler for MockLogHandler {
 async fn test_wait_for_event_roundtrip() {
     let wasm_bytes = wasm_binary_bytes();
     let event_queue = Arc::new(EventQueue::new());
-    
+
     // Real EventHandler (no remote, default session "default")
     let event_handler = EventHandler::new(event_queue.clone(), None, Some("default".to_string()));
 
@@ -51,7 +53,7 @@ async fn test_wait_for_event_roundtrip() {
     let queue_clone = event_queue.clone();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(100)).await;
-        
+
         let event = Event {
             event_type: Some(EventType::WorkerComplete(WorkerComplete {
                 worker_id: "test-worker".to_string(),
@@ -60,7 +62,7 @@ async fn test_wait_for_event_roundtrip() {
                 message: "Done".to_string(),
             })),
         };
-        
+
         queue_clone.notify_event("default", event).await;
     });
 
@@ -82,10 +84,10 @@ async fn test_wait_for_event_roundtrip() {
     println!("Tool output: {:#}", output);
 
     assert_eq!(output["success"], true);
-    
+
     let result = &output["result"];
     let event = &result["event"];
-    
+
     // Check event structure (JSON representation of protobuf)
     let event_type = &event["event_type"];
     assert!(event_type["worker_complete"].is_object());

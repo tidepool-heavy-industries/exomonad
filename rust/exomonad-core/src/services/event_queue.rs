@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use exomonad_proto::effects::events::{Event, event::EventType};
+use exomonad_proto::effects::events::{event::EventType, Event};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
@@ -56,7 +56,10 @@ impl EventQueue {
         // Append to queue
         {
             let mut queues = self.queues.lock().await;
-            queues.entry(session_id.to_string()).or_default().push_back(event.clone());
+            queues
+                .entry(session_id.to_string())
+                .or_default()
+                .push_back(event.clone());
         }
 
         // Wake ONE waiting call (if any)
@@ -87,7 +90,7 @@ impl EventQueue {
     fn timeout_event(timeout_secs: i32) -> Event {
         Event {
             event_type: Some(EventType::Timeout(
-                exomonad_proto::effects::events::Timeout { timeout_secs }
+                exomonad_proto::effects::events::Timeout { timeout_secs },
             )),
         }
     }
@@ -113,12 +116,18 @@ mod tests {
                     status: "success".to_string(),
                     changes: vec![],
                     message: "done".to_string(),
-                }
+                },
             )),
         };
 
         queue.notify_event("session1", event.clone()).await;
-        let result = queue.wait_for_event("session1", &["worker_complete".to_string()], Duration::from_secs(1)).await;
+        let result = queue
+            .wait_for_event(
+                "session1",
+                &["worker_complete".to_string()],
+                Duration::from_secs(1),
+            )
+            .await;
         assert!(result.is_ok());
     }
 
@@ -128,7 +137,13 @@ mod tests {
         let queue_clone = queue.clone();
 
         let handle = tokio::spawn(async move {
-            queue_clone.wait_for_event("session2", &["worker_complete".to_string()], Duration::from_secs(5)).await
+            queue_clone
+                .wait_for_event(
+                    "session2",
+                    &["worker_complete".to_string()],
+                    Duration::from_secs(5),
+                )
+                .await
         });
 
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -140,7 +155,7 @@ mod tests {
                     status: "success".to_string(),
                     changes: vec![],
                     message: "done".to_string(),
-                }
+                },
             )),
         };
         queue.notify_event("session2", event).await;

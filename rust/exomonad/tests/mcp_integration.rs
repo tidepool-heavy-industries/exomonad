@@ -617,8 +617,6 @@ fn mcp_tool_schemas_valid() {
     assert!(msg["inputSchema"]["properties"]
         .get("timeout_secs")
         .is_some());
-
-
 }
 
 /// All tools have non-empty descriptions.

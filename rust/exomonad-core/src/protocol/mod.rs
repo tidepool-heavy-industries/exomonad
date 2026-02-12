@@ -24,7 +24,8 @@ use serde::{Deserialize, Serialize};
 // Re-export commonly used types
 pub use hook::{
     ClaudePreToolUseOutput, ClaudeStopHookOutput, GeminiStopDecision, GeminiStopHookOutput,
-    HookInput, HookSpecificOutput, InternalStopHookOutput, PermissionDecision, StopDecision,
+    HookEnvelope, HookInput, HookSpecificOutput, InternalStopHookOutput, PermissionDecision,
+    StopDecision,
 };
 pub use mcp::{McpError, ToolDefinition};
 pub use service::{
@@ -53,8 +54,9 @@ pub enum Runtime {
 
 /// Hook event type for CLI hooks.
 /// Includes both Claude-specific and Gemini-specific hook types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, strum::Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, strum::Display, Serialize, Deserialize)]
 #[strum(serialize_all = "kebab-case")]
+#[serde(rename_all = "kebab-case")]
 pub enum HookEventType {
     /// Before tool execution (can allow/deny/modify)
     PreToolUse,

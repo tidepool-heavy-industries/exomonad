@@ -301,11 +301,15 @@ Human in Zellij session
 1. Claude Code wants to call Write tool
 2. Generates hook JSON on stdin
 3. exomonad hook pre-tool-use reads stdin
-4. Calls WASM handle_pre_tool_use
-5. Haskell logic decides allow/deny
-6. Returns HookOutput to stdout
-7. Claude Code proceeds or blocks
+4. HTTP POST to localhost:{port}/hook (thin client, no WASM)
+5. Server calls WASM handle_pre_tool_use (in-process)
+6. Haskell logic decides allow/deny
+7. Server returns HookEnvelope { stdout, exit_code }
+8. CLI prints stdout, exits with exit_code
+9. Claude Code proceeds or blocks
 ```
+
+**Fail-open:** If the server is unreachable, `exomonad hook` prints `{"continue":true}` and exits 0.
 
 ### Configuration
 

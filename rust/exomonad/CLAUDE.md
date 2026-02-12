@@ -6,15 +6,17 @@ Unified sidecar binary: Rust host with Haskell WASM plugin.
 
 **All logic is in Haskell WASM. Rust handles I/O only.**
 
-WASM is loaded from `.exomonad/wasm/wasm-guest-unified.wasm` at runtime. For hooks, the binary reads WASM from disk. For `exomonad serve`, the server loads WASM with hot reload on mtime change.
+WASM is loaded from `.exomonad/wasm/wasm-guest-unified.wasm` at runtime by `exomonad serve`. The `exomonad hook` command is a thin HTTP client that forwards hook events to the running server — it does NOT load WASM itself.
 
 ```
-# Hook mode (file-based WASM)
-Claude Code → exomonad hook → WASM from .exomonad/wasm/ → handle_pre_tool_use → HookOutput
+# Hook mode (thin HTTP client → server)
+Claude Code → exomonad hook → HTTP POST localhost:{port}/hook → server WASM → HookEnvelope → stdout
 
 # HTTP mode (multi-agent, unified WASM)
-N agents → exomonad serve → Unix socket (.exomonad/server.sock) → Unified WASM (handles all roles) → effects → I/O
+N agents → exomonad serve → TCP (default: localhost:7432) → Unified WASM (handles all roles) → effects → I/O
 ```
+
+**Fail-open:** If the server is unreachable when a hook fires, `exomonad hook` prints `{"continue":true}` and exits 0. This prevents blocking the human's session.
 
 ## CLI Usage
 
@@ -127,7 +129,7 @@ cargo test -p exomonad
 # MCP integration tests (wrapper script manages server lifecycle)
 just test-mcp
 
-# E2E hook test (requires WASM built via `just wasm-all`)
+# E2E hook test (requires running server: exomonad serve)
 echo '{"session_id":"test","hook_event_name":"PreToolUse","tool_name":"Write","transcript_path":"/tmp/t.jsonl","cwd":"/","permission_mode":"default"}' | \
   ./target/debug/exomonad hook pre-tool-use
 ```
@@ -138,21 +140,21 @@ echo '{"session_id":"test","hook_event_name":"PreToolUse","tool_name":"Write","t
 ```
 Claude Code hook JSON (stdin)
          ↓
-    exomonad hook pre-tool-use
+    exomonad hook pre-tool-use (thin HTTP client)
          ↓
-    Load WASM from .exomonad/wasm/wasm-guest-unified.wasm
+    HTTP POST localhost:{port}/hook?event=pre-tool-use&runtime=claude
          ↓
-    Parse HookInput
+    Server: parse HookInput from body
          ↓
-    Call WASM handle_pre_tool_use
+    Server: call WASM handle_pre_tool_use (in-process)
          ↓
     Haskell yields effects (GitGetBranch, LogInfo, etc.)
          ↓
-    Rust executes effects via host functions
+    Server executes effects via host functions (in-process)
          ↓
-    Haskell returns HookOutput
+    Server returns HookEnvelope { stdout, exit_code }
          ↓
-    Serialize and print to stdout
+    CLI prints stdout, exits with exit_code
          ↓
     Claude Code receives response
 ```

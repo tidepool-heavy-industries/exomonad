@@ -286,7 +286,10 @@ mod tests {
 
         // Dot convention (ExoMonad subtrees)
         assert_eq!(detect_base_branch("main.my-feature", None), "main");
-        assert_eq!(detect_base_branch("parent.child.grandchild", None), "parent.child");
+        assert_eq!(
+            detect_base_branch("parent.child.grandchild", None),
+            "parent.child"
+        );
     }
 
     #[test]

@@ -425,6 +425,20 @@ pub struct GeminiStopHookOutput {
     pub suppress_output: Option<bool>,
 }
 
+// ============================================================================
+// Hook Envelope (server ↔ CLI wire type)
+// ============================================================================
+
+/// Wire type for the `/hook` HTTP endpoint.
+/// Server returns this; CLI prints `stdout` and exits with `exit_code`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HookEnvelope {
+    /// The JSON string to print to stdout (consumed by Claude Code / Gemini CLI).
+    pub stdout: String,
+    /// Process exit code (0 = success, 2 = block).
+    pub exit_code: i32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

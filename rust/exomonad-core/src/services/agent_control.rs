@@ -1472,6 +1472,19 @@ impl AgentControlService {
     "exomonad": {{
       "httpUrl": "http://localhost:{port}/agents/{name}/mcp"
     }}
+  }},
+  "hooks": {{
+    "AfterAgent": [
+      {{
+        "matcher": "*",
+        "hooks": [
+          {{
+            "type": "command",
+            "command": "exomonad hook after-agent --runtime gemini"
+          }}
+        ]
+      }}
+    ]
   }}
 }}"###,
                     port = port,
@@ -1726,7 +1739,10 @@ mod tests {
     fn test_agent_type_display_name_no_truncation() {
         let long_slug = "this-is-a-very-long-slug-that-should-be-truncated";
         let display = AgentType::Claude.display_name("123", long_slug);
-        assert_eq!(display, "🤖 gh-123-this-is-a-very-long-slug-that-should-be-truncated");
+        assert_eq!(
+            display,
+            "🤖 gh-123-this-is-a-very-long-slug-that-should-be-truncated"
+        );
     }
 
     #[test]
@@ -1785,7 +1801,8 @@ mod tests {
 
     #[test]
     fn test_claude_mcp_config_format() {
-        let config = AgentControlService::generate_mcp_config("test-claude", 7432, AgentType::Claude);
+        let config =
+            AgentControlService::generate_mcp_config("test-claude", 7432, AgentType::Claude);
         let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
         assert_eq!(
             parsed["mcpServers"]["exomonad"]["url"],
@@ -1796,13 +1813,23 @@ mod tests {
 
     #[test]
     fn test_gemini_mcp_config_format() {
-        let config = AgentControlService::generate_mcp_config("test-gemini", 7432, AgentType::Gemini);
+        let config =
+            AgentControlService::generate_mcp_config("test-gemini", 7432, AgentType::Gemini);
         let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
         assert_eq!(
             parsed["mcpServers"]["exomonad"]["httpUrl"],
             "http://localhost:7432/agents/test-gemini/mcp"
         );
         assert!(parsed["mcpServers"]["exomonad"].get("url").is_none());
+
+        // Check hooks
+        let after_agent = &parsed["hooks"]["AfterAgent"];
+        assert!(after_agent.is_array());
+        let hooks_list = &after_agent[0]["hooks"];
+        assert_eq!(
+            hooks_list[0]["command"],
+            "exomonad hook after-agent --runtime gemini"
+        );
     }
 
     #[test]
@@ -1829,35 +1856,53 @@ mod tests {
     #[test]
     fn test_gemini_settings_schema_compliance() {
         let settings = AgentControlService::generate_gemini_settings("http://example.com/mcp");
-        
+
         // Assertions based on manual schema validation
-        
+
         // 1. Hooks must strictly use PascalCase (AfterAgent), not kebab-case (after-agent) or camelCase (afterAgent).
-        assert!(settings["hooks"].get("AfterAgent").is_some(), "hooks.AfterAgent is missing");
-        assert!(settings["hooks"].get("after-agent").is_none(), "Found invalid kebab-case 'after-agent'");
-        assert!(settings["hooks"].get("afterAgent").is_none(), "Found invalid camelCase 'afterAgent'");
+        assert!(
+            settings["hooks"].get("AfterAgent").is_some(),
+            "hooks.AfterAgent is missing"
+        );
+        assert!(
+            settings["hooks"].get("after-agent").is_none(),
+            "Found invalid kebab-case 'after-agent'"
+        );
+        assert!(
+            settings["hooks"].get("afterAgent").is_none(),
+            "Found invalid camelCase 'afterAgent'"
+        );
 
         // 2. The hook structure must match the array of matcher/hooks objects
         let after_agent = &settings["hooks"]["AfterAgent"];
         assert!(after_agent.is_array(), "hooks.AfterAgent must be an array");
-        
+
         let first_rule = &after_agent[0];
-        assert_eq!(first_rule["matcher"], "*", "AfterAgent matcher must be wildcard '*'");
-        
+        assert_eq!(
+            first_rule["matcher"], "*",
+            "AfterAgent matcher must be wildcard '*'"
+        );
+
         let hooks_list = &first_rule["hooks"];
-        assert!(hooks_list.is_array(), "hooks list inside rule must be an array");
-        
+        assert!(
+            hooks_list.is_array(),
+            "hooks list inside rule must be an array"
+        );
+
         let command_hook = &hooks_list[0];
-        assert_eq!(command_hook["type"], "command", "Hook type must be 'command'");
-        assert_eq!(command_hook["command"], "exomonad", "Hook command must be 'exomonad'");
-        
-        // 3. Verify arguments use the kebab-case CLI flag as expected by exomonad binary
-        let args: Vec<&str> = command_hook["args"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
-        assert_eq!(args, vec!["hook", "worker-exit", "--runtime", "gemini"]);
+        assert_eq!(
+            command_hook["type"], "command",
+            "Hook type must be 'command'"
+        );
+        assert_eq!(
+            command_hook["command"], "exomonad hook worker-exit --runtime gemini",
+            "Hook command mismatch"
+        );
+
+        // 3. Verify no args array is present (command string used)
+        assert!(
+            command_hook.get("args").is_none(),
+            "args should not be present when using command string"
+        );
     }
 }

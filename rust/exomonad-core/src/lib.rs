@@ -107,9 +107,9 @@ pub use hooks::HookConfig;
 pub use logging::{init_logging, init_logging_with_default};
 #[cfg(feature = "runtime")]
 pub use protocol::{
-    ClaudePreToolUseOutput, ClaudeStopHookOutput, GeminiStopHookOutput, HookEventType, HookInput,
-    HookSpecificOutput, InternalStopHookOutput, PermissionDecision, Runtime as ProtocolRuntime,
-    StopDecision,
+    ClaudePreToolUseOutput, ClaudeStopHookOutput, GeminiStopHookOutput, HookEnvelope,
+    HookEventType, HookInput, HookSpecificOutput, InternalStopHookOutput, PermissionDecision,
+    Runtime as ProtocolRuntime, StopDecision,
 };
 #[cfg(feature = "runtime")]
 pub use util::{build_prompt, find_exomonad_binary, shell_quote};

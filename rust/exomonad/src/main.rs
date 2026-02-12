@@ -1,10 +1,10 @@
 //! exomonad: Rust host with embedded Haskell WASM plugin.
 //!
 //! This binary runs as a sidecar in each agent container, handling:
-//! - Claude Code hooks via WASM plugin
-//! - MCP tools via local Rust implementation
+//! - Claude Code hooks via HTTP forwarding to the server
+//! - MCP tools via WASM plugin (server-side)
 //!
-//! WASM plugins are loaded from file.
+//! WASM plugins are loaded from file (server-side only).
 
 use exomonad::config;
 
@@ -16,8 +16,8 @@ use exomonad_core::services::external::otel::OtelService;
 use exomonad_core::services::external::ExternalService;
 use exomonad_core::services::{git, zellij_events};
 use exomonad_core::{
-    ClaudePreToolUseOutput, HookEventType, HookInput, HookSpecificOutput, InternalStopHookOutput,
-    PluginManager, Runtime, RuntimeBuilder, Services, StopDecision, ToolPermission,
+    ClaudePreToolUseOutput, HookEnvelope, HookEventType, HookInput, HookSpecificOutput,
+    InternalStopHookOutput, PluginManager, RuntimeBuilder, Services, StopDecision, ToolPermission,
 };
 use std::collections::HashMap;
 use std::os::unix::process::CommandExt;
@@ -44,7 +44,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Handle a Claude Code hook event via WASM plugin
+    /// Handle a Claude Code hook event (thin HTTP client → server)
     Hook {
         /// The hook event type to handle
         #[arg(value_enum)]
@@ -102,8 +102,25 @@ enum Commands {
 }
 
 // ============================================================================
-// Hook Handler
+// Server-side Hook Handler
 // ============================================================================
+
+/// Query parameters for the `/hook` endpoint.
+#[derive(Debug, serde::Deserialize)]
+struct HookQueryParams {
+    event: HookEventType,
+    runtime: HookRuntime,
+    role: Option<String>,
+}
+
+/// Server-side hook handler state, shared across requests.
+#[derive(Clone)]
+struct HookState {
+    plugin: Arc<PluginManager>,
+    otel: Option<Arc<OtelService>>,
+    zellij_session: String,
+    default_role: exomonad_core::Role,
+}
 
 #[allow(clippy::too_many_arguments)]
 async fn emit_hook_span(
@@ -149,36 +166,54 @@ async fn emit_hook_span(
     }
 }
 
-#[tracing::instrument(skip(plugin, runtime, event_type, zellij_session), fields(event = ?event_type))]
-async fn handle_hook(
-    plugin: &PluginManager,
-    event_type: HookEventType,
-    runtime: HookRuntime,
-    zellij_session: &str,
-    role: exomonad_core::Role,
-) -> Result<()> {
-    use std::io::Read;
+/// Handle a hook request server-side. All WASM, OTel, and Zellij logic runs here.
+async fn handle_hook_request(
+    axum::extract::Query(params): axum::extract::Query<HookQueryParams>,
+    axum::extract::State(state): axum::extract::State<HookState>,
+    body: String,
+) -> axum::Json<HookEnvelope> {
+    match handle_hook_inner(&params, &state, &body).await {
+        Ok(envelope) => axum::Json(envelope),
+        Err(e) => {
+            warn!(error = %e, "Hook handler failed, returning allow");
+            axum::Json(HookEnvelope {
+                stdout: r#"{"continue":true}"#.to_string(),
+                exit_code: 0,
+            })
+        }
+    }
+}
 
-    let otel = OtelService::from_env().ok();
+async fn handle_hook_inner(
+    params: &HookQueryParams,
+    state: &HookState,
+    body: &str,
+) -> Result<HookEnvelope> {
+    let event_type = params.event;
+    let runtime = params.runtime;
+    let role = params
+        .role
+        .as_deref()
+        .and_then(|r| match r {
+            "tl" | "TL" => Some(exomonad_core::Role::TL),
+            "dev" | "Dev" => Some(exomonad_core::Role::Dev),
+            _ => None,
+        })
+        .unwrap_or(state.default_role);
+
     let trace_id = uuid::Uuid::new_v4().simple().to_string();
     let start_ns = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos() as u64;
 
-    // Read hook payload from stdin
-    let mut stdin_content = String::new();
-    std::io::stdin()
-        .read_to_string(&mut stdin_content)
-        .context("Failed to read stdin")?;
-
     debug!(
         runtime = ?runtime,
-        payload_len = stdin_content.len(),
-        "Received hook event"
+        payload_len = body.len(),
+        "Received hook event via HTTP"
     );
 
-    // Emit HookReceived event
+    // Emit HookReceived Zellij event
     if let Ok(branch) = git::get_current_branch() {
         if let Some(agent_id_str) = git::extract_agent_id(&branch) {
             match exomonad_core::ui_protocol::AgentId::try_from(agent_id_str.clone()) {
@@ -188,26 +223,21 @@ async fn handle_hook(
                         hook_type: event_type.to_string(),
                         timestamp: zellij_events::now_iso8601(),
                     };
-                    if let Err(e) = zellij_events::emit_event(zellij_session, &event) {
+                    if let Err(e) = zellij_events::emit_event(&state.zellij_session, &event) {
                         warn!("Failed to emit hook:received event: {}", e);
                     }
                 }
                 Err(e) => warn!("Invalid agent_id in branch '{}': {}", agent_id_str, e),
             }
-        } else {
-            warn!("Could not extract agent_id from branch: {}", branch);
         }
-    } else {
-        warn!("Could not determine current git branch for HookReceived event");
     }
 
-    // Parse the hook input and inject runtime
+    // Parse and inject runtime
     let mut hook_input: HookInput =
-        serde_json::from_str(&stdin_content).context("Failed to parse hook input")?;
+        serde_json::from_str(body).context("Failed to parse hook input")?;
     hook_input.runtime = Some(runtime);
 
     // Normalize CLI-specific hook types to internal abstractions before WASM.
-    // Both Claude's Stop and Gemini's AfterAgent represent "main agent stop".
     let is_stop_hook = matches!(
         event_type,
         HookEventType::Stop
@@ -224,14 +254,11 @@ async fn handle_hook(
         HookEventType::PostToolUse => "PostToolUse",
         HookEventType::WorkerExit => "WorkerExit",
         _ => {
-            // Pass through unhandled hooks with allow
             debug!(event = ?event_type, "Hook type not implemented in WASM, allowing");
             let output_json = serde_json::to_string(&ClaudePreToolUseOutput::default())
                 .context("Failed to serialize output")?;
-            println!("{}", output_json);
 
-            // Emit OTel span for unhandled hook
-            if let Some(otel) = &otel {
+            if let Some(ref otel) = state.otel {
                 emit_hook_span(
                     otel,
                     &trace_id,
@@ -245,7 +272,10 @@ async fn handle_hook(
                 .await;
             }
 
-            return Ok(());
+            return Ok(HookEnvelope {
+                stdout: output_json,
+                exit_code: 0,
+            });
         }
     };
     hook_input.hook_event_name = normalized_event_name.to_string();
@@ -257,31 +287,26 @@ async fn handle_hook(
         map.insert("role".to_string(), serde_json::json!(role));
     }
 
-    // Handle stop hooks with runtime-specific output translation
     if is_stop_hook {
-        // Call WASM and parse as internal domain type
-        let internal_output: InternalStopHookOutput = plugin
+        let internal_output: InternalStopHookOutput = state
+            .plugin
             .call("handle_pre_tool_use", &hook_input_value)
             .await
             .context("WASM handle_pre_tool_use failed")?;
 
-        // Translate to runtime-specific format at the edge
         let output_json = internal_output.to_runtime_json(&runtime);
-        println!("{}", output_json);
 
         let decision_str = match internal_output.decision {
             StopDecision::Allow => "allow",
             StopDecision::Block => "block",
         };
 
-        // Emit OTel span
-        if let Some(otel) = &otel {
+        if let Some(ref otel) = state.otel {
             let mut extra_attributes = HashMap::new();
             extra_attributes.insert("routing.decision".to_string(), decision_str.to_string());
             if let Some(reason) = &internal_output.reason {
                 extra_attributes.insert("routing.reason".to_string(), reason.clone());
             }
-
             emit_hook_span(
                 otel,
                 &trace_id,
@@ -295,49 +320,46 @@ async fn handle_hook(
             .await;
         }
 
-        // Exit code and event emission based on decision
-        if internal_output.decision == StopDecision::Block {
-            // Emit StopHookBlocked event for SubagentStop hooks
-            if event_type == HookEventType::SubagentStop {
-                if let Ok(branch) = git::get_current_branch() {
-                    if let Some(agent_id_str) = git::extract_agent_id(&branch) {
-                        let reason = internal_output
-                            .reason
-                            .clone()
-                            .unwrap_or_else(|| "Hook blocked agent stop".to_string());
-
-                        match exomonad_core::ui_protocol::AgentId::try_from(agent_id_str.clone()) {
-                            Ok(agent_id) => {
-                                let event =
-                                    exomonad_core::ui_protocol::AgentEvent::StopHookBlocked {
-                                        agent_id,
-                                        reason,
-                                        timestamp: zellij_events::now_iso8601(),
-                                    };
-                                if let Err(e) = zellij_events::emit_event(zellij_session, &event) {
-                                    warn!("Failed to emit stop_hook:blocked event: {}", e);
-                                }
+        // Emit StopHookBlocked Zellij event
+        if internal_output.decision == StopDecision::Block
+            && event_type == HookEventType::SubagentStop
+        {
+            if let Ok(branch) = git::get_current_branch() {
+                if let Some(agent_id_str) = git::extract_agent_id(&branch) {
+                    let reason = internal_output
+                        .reason
+                        .clone()
+                        .unwrap_or_else(|| "Hook blocked agent stop".to_string());
+                    match exomonad_core::ui_protocol::AgentId::try_from(agent_id_str.clone()) {
+                        Ok(agent_id) => {
+                            let event = exomonad_core::ui_protocol::AgentEvent::StopHookBlocked {
+                                agent_id,
+                                reason,
+                                timestamp: zellij_events::now_iso8601(),
+                            };
+                            if let Err(e) = zellij_events::emit_event(&state.zellij_session, &event)
+                            {
+                                warn!("Failed to emit stop_hook:blocked event: {}", e);
                             }
-                            Err(e) => warn!("Invalid agent_id in branch '{}': {}", agent_id_str, e),
                         }
+                        Err(e) => warn!("Invalid agent_id in branch '{}': {}", agent_id_str, e),
                     }
                 }
             }
-            // Exit 0 for both runtimes - decision is conveyed via JSON response.
-            // Refs:
-            // - Claude: https://docs.anthropic.com/en/docs/claude-code/hooks#stop-decision-control
-            // - Gemini: https://geminicli.com/docs/hooks/reference/#afteragent
-            //   (Exit 2 triggers "retry with stderr as feedback prompt" - not what we want)
         }
+
+        Ok(HookEnvelope {
+            stdout: output_json,
+            exit_code: 0,
+        })
     } else {
-        // Non-stop hooks: use existing ClaudePreToolUseOutput format
-        let output: ClaudePreToolUseOutput = plugin
+        let output: ClaudePreToolUseOutput = state
+            .plugin
             .call("handle_pre_tool_use", &hook_input_value)
             .await
             .context("WASM handle_pre_tool_use failed")?;
 
         let output_json = serde_json::to_string(&output).context("Failed to serialize output")?;
-        println!("{}", output_json);
 
         let decision_str = if !output.continue_ {
             "block"
@@ -355,8 +377,7 @@ async fn handle_hook(
             }
         };
 
-        // Emit OTel span
-        if let Some(otel) = &otel {
+        if let Some(ref otel) = state.otel {
             emit_hook_span(
                 otel,
                 &trace_id,
@@ -370,12 +391,13 @@ async fn handle_hook(
             .await;
         }
 
-        if !output.continue_ {
-            std::process::exit(2);
-        }
-    }
+        let exit_code = if output.continue_ { 0 } else { 2 };
 
-    Ok(())
+        Ok(HookEnvelope {
+            stdout: output_json,
+            exit_code,
+        })
+    }
 }
 
 // ============================================================================
@@ -639,249 +661,264 @@ async fn main() -> Result<()> {
         config::Config::default()
     });
 
-    // Handle recompile before WASM loading (recompile builds WASM, doesn't need it)
-    if let Commands::Recompile { role } = &cli.command {
-        let default_role = config.role.to_string();
-        let role_str = role.as_deref().unwrap_or(&default_role);
-        let project_dir = if config.project_dir.is_absolute() {
-            config.project_dir.clone()
-        } else {
-            std::env::current_dir()?.join(&config.project_dir)
-        };
-        return exomonad::recompile::run_recompile(role_str, &project_dir).await;
-    }
-
-    // Handle serve before embedded WASM loading (serve uses file-based WASM, not embedded)
-    if let Commands::Serve { port } = &cli.command {
-        let port = port.unwrap_or(config.port);
-        let project_dir = if config.project_dir.is_absolute() {
-            config.project_dir.clone()
-        } else {
-            std::env::current_dir()?.join(&config.project_dir)
-        };
-
-        let role_name = config.role.to_string();
-        // Prefer unified WASM (contains all roles, role selection per-call).
-        // Fall back to per-role WASM for backwards compatibility.
-        let unified_path = project_dir.join(".exomonad/wasm/wasm-guest-unified.wasm");
-        let wasm_path = if unified_path.exists() {
-            info!("Using unified WASM (all roles in one module)");
-            unified_path
-        } else {
-            let fallback =
-                project_dir.join(format!(".exomonad/wasm/wasm-guest-{}.wasm", role_name));
-            info!(role = %role_name, "Unified WASM not found, falling back to per-role WASM");
-            fallback
-        };
-
-        if !wasm_path.exists() {
-            anyhow::bail!(
-                "WASM file not found: {}\nRun `exomonad recompile` first to build it.",
-                wasm_path.display()
-            );
-        }
-
-        let server_pid_path = project_dir.join(".exomonad/server.pid");
-
-        info!(
-            wasm_path = %wasm_path.display(),
-            port = %port,
-            role = %role_name,
-            "Starting HTTP MCP server with file-based WASM (hot reload enabled)"
-        );
-
-        // Initialize services (with MCP server port for per-agent endpoint URLs)
-        let services = Arc::new(
-            Services::new()
-                .with_zellij_session(config.zellij_session.clone())
-                .with_mcp_server_port(port)
-                .validate()
-                .context("Failed to validate services")?,
-        );
-
-        // Build runtime with file-based WASM loading (enables hot reload)
-        let builder = RuntimeBuilder::new().with_wasm_path(wasm_path);
-        let (builder, question_registry, event_queue) =
-            exomonad_core::register_builtin_handlers(builder, &services);
-        let rt = builder.build().await.context("Failed to build runtime")?;
-
-        let mut base_state = rt.into_mcp_state(project_dir.clone());
-        base_state.question_registry = Some(question_registry);
-
-        // Write server.pid for client discovery
-        let pid_info = serde_json::json!({
-            "pid": std::process::id(),
-            "port": port,
-            "role": role_name,
-        });
-        if let Some(parent) = server_pid_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&server_pid_path, serde_json::to_string_pretty(&pid_info)?)?;
-        info!(path = %server_pid_path.display(), "Wrote server.pid");
-
-        // Build per-role MCP services: /tl/mcp gets orchestration tools, /dev/mcp gets agent tools
-        let ct = tokio_util::sync::CancellationToken::new();
-
-        let tl_service = build_role_mcp_service(&base_state, "tl", ct.clone());
-        let dev_service = build_role_mcp_service(&base_state, "dev", ct.clone());
-
-        // Health endpoint alongside MCP — captures state for runtime introspection
-        let health_plugin = base_state.plugin.clone();
-        let health_role = role_name.clone();
-        let health_port = port;
-        let health_handler = move || {
-            let plugin = health_plugin.clone();
-            let role = health_role.clone();
-            async move {
-                let wasm_hash = plugin.content_hash();
-                axum::Json(serde_json::json!({
-                    "status": "ok",
-                    "version": env!("CARGO_PKG_VERSION"),
-                    "port": health_port,
-                    "role": role,
-                    "wasm_hash": wasm_hash,
-                }))
-            }
-        };
-
-        // Per-agent MCP route: /agents/{name}/mcp
-        // Each Gemini agent's settings.json points to its own URL.
-        // The handler extracts agent name from the path and sets it as
-        // the task-local identity before forwarding to the dev MCP service.
-        let agent_dev_service = dev_service.clone();
-        let agent_handler = move |axum::extract::Path(agent_name): axum::extract::Path<String>,
-                                  request: axum::extract::Request| {
-            let service = agent_dev_service.clone();
-            async move {
-                tracing::info!(agent = %agent_name, "Routing agent MCP request");
-                exomonad_core::mcp::agent_identity::with_agent_id(agent_name, async move {
-                    service.handle(request).await
-                })
-                .await
-            }
-        };
-
-        // Event notification endpoint
-        let events_handler = move |body: axum::body::Bytes| {
-            let queue = event_queue.clone();
-            async move {
-                use prost::Message;
-                        use exomonad_proto::effects::events::NotifyEventRequest;
-                        
-                        match NotifyEventRequest::decode(body) {                    Ok(req) => {
-                        if let Some(event) = req.event {
-                            queue.notify_event(&req.session_id, event).await;
-                            (axum::http::StatusCode::OK, "OK")
-                        } else {
-                            (axum::http::StatusCode::BAD_REQUEST, "Missing event")
-                        }
-                    }
-                    Err(_) => (axum::http::StatusCode::BAD_REQUEST, "Invalid protobuf"),
-                }
-            }
-        };
-
-        let app = axum::Router::new()
-            .route("/health", axum::routing::get(health_handler))
-            .route(
-                "/agents/{name}/mcp",
-                axum::routing::any(agent_handler.clone()),
-            )
-            .route(
-                "/agents/{name}/mcp/{*rest}",
-                axum::routing::any(agent_handler),
-            )
-            .route("/events", axum::routing::post(events_handler))
-            .nest_service("/tl/mcp", tl_service)
-            .nest_service("/dev/mcp", dev_service)
-            .layer(TraceLayer::new_for_http());
-
-        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-        let listener = tokio::net::TcpListener::bind(addr).await.map_err(|e| {
-            if e.kind() == std::io::ErrorKind::AddrInUse {
-                anyhow::anyhow!(
-                    "Port {} is already in use. Is another exomonad serve running?\n\
-                     Check with: lsof -i :{}\n\
-                     Or use --port to pick a different port.",
-                    port,
-                    port
-                )
-            } else {
-                anyhow::anyhow!("Failed to bind to port {}: {}", port, e)
-            }
-        })?;
-        info!(port = %port, "HTTP MCP server listening on TCP (rmcp StreamableHttp)");
-
-        // Run with graceful shutdown on SIGINT or SIGTERM
-        axum::serve(listener, app)
-            .with_graceful_shutdown(async move {
-                let ctrl_c = tokio::signal::ctrl_c();
-                #[cfg(unix)]
-                let terminate = async {
-                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                        .expect("failed to install SIGTERM handler")
-                        .recv()
-                        .await;
-                };
-                #[cfg(not(unix))]
-                let terminate = std::future::pending::<()>();
-
-                tokio::select! {
-                    _ = ctrl_c => info!("Received SIGINT, initiating graceful shutdown"),
-                    _ = terminate => info!("Received SIGTERM, initiating graceful shutdown"),
-                }
-                ct.cancel();
-            })
-            .await?;
-
-        // Clean up server.pid on shutdown
-        if server_pid_path.exists() {
-            let _ = std::fs::remove_file(&server_pid_path);
-            info!("Cleaned up server.pid");
-        }
-
-        info!("HTTP MCP server shut down");
-        return Ok(());
-    }
-
-    // Load WASM for hook command from file (no longer embedded)
-    let project_dir = if config.project_dir.is_absolute() {
-        config.project_dir.clone()
-    } else {
-        std::env::current_dir()?.join(&config.project_dir)
-    };
-
-    let wasm_path = project_dir.join(".exomonad/wasm/wasm-guest-unified.wasm");
-    if !wasm_path.exists() {
-        anyhow::bail!(
-            "WASM file not found: {}\nRun `just wasm-all` or `just install-all-dev` first.",
-            wasm_path.display()
-        );
-    }
-    let wasm_bytes = std::fs::read(&wasm_path).context("Failed to read WASM file")?;
-    info!(
-        wasm_path = %wasm_path.display(),
-        wasm_size = wasm_bytes.len(),
-        "Using file-based WASM for hook"
-    );
-
     match cli.command {
-        Commands::Hook { event, runtime } => {
-            // Initialize and validate services
+        Commands::Recompile { ref role } => {
+            let default_role = config.role.to_string();
+            let role_str = role.as_deref().unwrap_or(&default_role);
+            let project_dir = if config.project_dir.is_absolute() {
+                config.project_dir.clone()
+            } else {
+                std::env::current_dir()?.join(&config.project_dir)
+            };
+            return exomonad::recompile::run_recompile(role_str, &project_dir).await;
+        }
+
+        Commands::Serve { port } => {
+            let port = port.unwrap_or(config.port);
+            let project_dir = if config.project_dir.is_absolute() {
+                config.project_dir.clone()
+            } else {
+                std::env::current_dir()?.join(&config.project_dir)
+            };
+
+            let role_name = config.role.to_string();
+            // Prefer unified WASM (contains all roles, role selection per-call).
+            // Fall back to per-role WASM for backwards compatibility.
+            let unified_path = project_dir.join(".exomonad/wasm/wasm-guest-unified.wasm");
+            let wasm_path = if unified_path.exists() {
+                info!("Using unified WASM (all roles in one module)");
+                unified_path
+            } else {
+                let fallback =
+                    project_dir.join(format!(".exomonad/wasm/wasm-guest-{}.wasm", role_name));
+                info!(role = %role_name, "Unified WASM not found, falling back to per-role WASM");
+                fallback
+            };
+
+            if !wasm_path.exists() {
+                anyhow::bail!(
+                    "WASM file not found: {}\nRun `exomonad recompile` first to build it.",
+                    wasm_path.display()
+                );
+            }
+
+            let server_pid_path = project_dir.join(".exomonad/server.pid");
+
+            info!(
+                wasm_path = %wasm_path.display(),
+                port = %port,
+                role = %role_name,
+                "Starting HTTP MCP server with file-based WASM (hot reload enabled)"
+            );
+
+            // Initialize services (with MCP server port for per-agent endpoint URLs)
             let services = Arc::new(
                 Services::new()
                     .with_zellij_session(config.zellij_session.clone())
+                    .with_mcp_server_port(port)
                     .validate()
                     .context("Failed to validate services")?,
             );
 
-            // Build runtime with all effect handlers
-            let rt = build_runtime(&wasm_bytes, &services).await?;
+            // Build runtime with file-based WASM loading (enables hot reload)
+            let builder = RuntimeBuilder::new().with_wasm_path(wasm_path);
+            let (builder, question_registry, event_queue) =
+                exomonad_core::register_builtin_handlers(builder, &services);
+            let rt = builder.build().await.context("Failed to build runtime")?;
 
-            info!("WASM plugin loaded and initialized");
+            let mut base_state = rt.into_mcp_state(project_dir.clone());
+            base_state.question_registry = Some(question_registry);
 
-            handle_hook(rt.plugin_manager(), event, runtime, &config.zellij_session, config.role).await?;
+            // Write server.pid for client discovery
+            let pid_info = serde_json::json!({
+                "pid": std::process::id(),
+                "port": port,
+                "role": role_name,
+            });
+            if let Some(parent) = server_pid_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&server_pid_path, serde_json::to_string_pretty(&pid_info)?)?;
+            info!(path = %server_pid_path.display(), "Wrote server.pid");
+
+            // Build per-role MCP services
+            let ct = tokio_util::sync::CancellationToken::new();
+
+            let tl_service = build_role_mcp_service(&base_state, "tl", ct.clone());
+            let dev_service = build_role_mcp_service(&base_state, "dev", ct.clone());
+
+            // Health endpoint
+            let health_plugin = base_state.plugin.clone();
+            let health_role = role_name.clone();
+            let health_port = port;
+            let health_handler = move || {
+                let plugin = health_plugin.clone();
+                let role = health_role.clone();
+                async move {
+                    let wasm_hash = plugin.content_hash();
+                    axum::Json(serde_json::json!({
+                        "status": "ok",
+                        "version": env!("CARGO_PKG_VERSION"),
+                        "port": health_port,
+                        "role": role,
+                        "wasm_hash": wasm_hash,
+                    }))
+                }
+            };
+
+            // Per-agent MCP route: /agents/{name}/mcp
+            let agent_dev_service = dev_service.clone();
+            let agent_handler =
+                move |axum::extract::Path(agent_name): axum::extract::Path<String>,
+                      request: axum::extract::Request| {
+                    let service = agent_dev_service.clone();
+                    async move {
+                        tracing::info!(agent = %agent_name, "Routing agent MCP request");
+                        exomonad_core::mcp::agent_identity::with_agent_id(agent_name, async move {
+                            service.handle(request).await
+                        })
+                        .await
+                    }
+                };
+
+            // Event notification endpoint
+            let events_handler = move |body: axum::body::Bytes| {
+                let queue = event_queue.clone();
+                async move {
+                    use exomonad_proto::effects::events::NotifyEventRequest;
+                    use prost::Message;
+
+                    match NotifyEventRequest::decode(body) {
+                        Ok(req) => {
+                            if let Some(event) = req.event {
+                                queue.notify_event(&req.session_id, event).await;
+                                (axum::http::StatusCode::OK, "OK")
+                            } else {
+                                (axum::http::StatusCode::BAD_REQUEST, "Missing event")
+                            }
+                        }
+                        Err(_) => (axum::http::StatusCode::BAD_REQUEST, "Invalid protobuf"),
+                    }
+                }
+            };
+
+            // Hook handler state (shared OtelService created once)
+            let hook_state = HookState {
+                plugin: base_state.plugin.clone(),
+                otel: OtelService::from_env().ok().map(Arc::new),
+                zellij_session: config.zellij_session.clone(),
+                default_role: config.role,
+            };
+
+            let app = axum::Router::new()
+                .route("/health", axum::routing::get(health_handler))
+                .route(
+                    "/hook",
+                    axum::routing::post(handle_hook_request).with_state(hook_state),
+                )
+                .route(
+                    "/agents/{name}/mcp",
+                    axum::routing::any(agent_handler.clone()),
+                )
+                .route(
+                    "/agents/{name}/mcp/{*rest}",
+                    axum::routing::any(agent_handler),
+                )
+                .route("/events", axum::routing::post(events_handler))
+                .nest_service("/tl/mcp", tl_service)
+                .nest_service("/dev/mcp", dev_service)
+                .layer(TraceLayer::new_for_http());
+
+            let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+            let listener = tokio::net::TcpListener::bind(addr).await.map_err(|e| {
+                if e.kind() == std::io::ErrorKind::AddrInUse {
+                    anyhow::anyhow!(
+                        "Port {} is already in use. Is another exomonad serve running?\n\
+                         Check with: lsof -i :{}\n\
+                         Or use --port to pick a different port.",
+                        port,
+                        port
+                    )
+                } else {
+                    anyhow::anyhow!("Failed to bind to port {}: {}", port, e)
+                }
+            })?;
+            info!(port = %port, "HTTP MCP server listening on TCP (rmcp StreamableHttp)");
+
+            // Run with graceful shutdown on SIGINT or SIGTERM
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async move {
+                    let ctrl_c = tokio::signal::ctrl_c();
+                    #[cfg(unix)]
+                    let terminate = async {
+                        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                            .expect("failed to install SIGTERM handler")
+                            .recv()
+                            .await;
+                    };
+                    #[cfg(not(unix))]
+                    let terminate = std::future::pending::<()>();
+
+                    tokio::select! {
+                        _ = ctrl_c => info!("Received SIGINT, initiating graceful shutdown"),
+                        _ = terminate => info!("Received SIGTERM, initiating graceful shutdown"),
+                    }
+                    ct.cancel();
+                })
+                .await?;
+
+            // Clean up server.pid on shutdown
+            if server_pid_path.exists() {
+                let _ = std::fs::remove_file(&server_pid_path);
+                info!("Cleaned up server.pid");
+            }
+
+            info!("HTTP MCP server shut down");
+        }
+
+        Commands::Hook { event, runtime } => {
+            use std::io::Read;
+            use std::time::Duration;
+
+            let port = config.port;
+            let url = format!(
+                "http://127.0.0.1:{}/hook?event={}&runtime={}",
+                port, event, runtime
+            );
+
+            let mut body = String::new();
+            std::io::stdin()
+                .read_to_string(&mut body)
+                .context("Failed to read stdin")?;
+
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(10))
+                .build()?;
+
+            let resp = match client
+                .post(&url)
+                .header("content-type", "application/json")
+                .body(body)
+                .send()
+                .await
+            {
+                Ok(r) if r.status().is_success() => r.json::<HookEnvelope>().await?,
+                Ok(r) => {
+                    eprintln!("exomonad hook: server returned {}", r.status());
+                    println!(r#"{{"continue":true}}"#);
+                    return Ok(());
+                }
+                Err(e) => {
+                    eprintln!("exomonad hook: server unreachable: {}", e);
+                    println!(r#"{{"continue":true}}"#);
+                    return Ok(());
+                }
+            };
+
+            print!("{}", resp.stdout);
+            if resp.exit_code != 0 {
+                std::process::exit(resp.exit_code);
+            }
         }
 
         Commands::Init { session, recreate } => {
@@ -925,25 +962,9 @@ async fn main() -> Result<()> {
                 .await
                 .context("Failed to write to socket")?;
 
-            // We don't necessarily wait for response here, it's a push notification
             info!("Sent reply to control socket");
         }
-
-        Commands::Recompile { .. } => unreachable!("handled before WASM loading"),
-        Commands::Serve { .. } => unreachable!("handled before WASM loading"),
     }
 
     Ok(())
-}
-
-/// Build a Runtime with all effect handlers registered.
-async fn build_runtime(
-    wasm_bytes: &[u8],
-    services: &Arc<exomonad_core::ValidatedServices>,
-) -> Result<Runtime> {
-    let builder = RuntimeBuilder::new().with_wasm_bytes(wasm_bytes.to_vec());
-    let (builder, _question_registry, _event_queue) =
-        exomonad_core::register_builtin_handlers(builder, services);
-
-    builder.build().await.context("Failed to build runtime")
 }

@@ -1,10 +1,9 @@
 //! CLI Integration Tests for exomonad
 //!
-//! Tests CLI behavior including argument parsing and error handling.
-//! Hooks load WASM from `.exomonad/wasm/` on disk. Tests run from repo root
-//! where WASM is pre-built, so no fixture setup is needed.
-//! E2E tests may fail if the WASM is incompatible with current host function
-//! protocols — these are marked as lenient.
+//! Tests CLI behavior for the thin HTTP hook client.
+//! `exomonad hook` is now a thin HTTP forwarder to the server. When the server
+//! is unreachable, it fails open (prints `{"continue":true}` and exits 0).
+//! Full E2E tests require a running server — see `tests/mcp_integration.rs`.
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
@@ -33,129 +32,86 @@ fn minimal_hook_json() -> String {
     .to_string()
 }
 
-/// Check if output indicates WASM loaded successfully
-fn wasm_loaded_ok(stderr: &str) -> bool {
-    stderr.contains("WASM plugin loaded and initialized")
-        || stderr.contains("Loaded WASM for hook")
-        || stderr.contains("Using file-based WASM for hook")
-}
-
+/// When the server is not running, hook should fail open: exit 0, print allow JSON.
 #[test]
-fn test_cli_hook_pre_tool_use() -> Result<(), Box<dyn std::error::Error>> {
-    let mut cmd = cargo_bin_cmd!("exomonad");
-
-    let output = cmd
-        .args(["hook", "pre-tool-use"])
-        .write_stdin(test_hook_json())
-        .output()
-        .expect("Failed to execute command");
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    // Verify WASM loads successfully (tests host function registration)
-    assert!(
-        wasm_loaded_ok(&stderr),
-        "WASM should load successfully. Stderr: {}",
-        stderr
-    );
-
-    // Full E2E success depends on WASM/Rust protocol compatibility
-    // If the WASM is stale, the call may fail - that's OK for unit tests
-    if output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            stdout.contains("\"continue\""),
-            "Expected continue field in output"
-        );
-    } else {
-        eprintln!(
-            "Note: WASM call failed (may need rebuild via `just install-all-dev`). Stderr: {}",
-            stderr
-        );
-    }
-
-    Ok(())
-}
-
-#[test]
-fn test_cli_hook_with_minimal_input() -> Result<(), Box<dyn std::error::Error>> {
-    let mut cmd = cargo_bin_cmd!("exomonad");
-
-    let output = cmd
-        .args(["hook", "pre-tool-use"])
-        .write_stdin(minimal_hook_json())
-        .output()
-        .expect("Failed to execute command");
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        wasm_loaded_ok(&stderr),
-        "WASM should load successfully. Stderr: {}",
-        stderr
-    );
-
-    Ok(())
-}
-
-#[test]
-fn test_cli_invalid_json_returns_error() -> Result<(), Box<dyn std::error::Error>> {
+fn test_hook_fails_open_when_server_unreachable() -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = cargo_bin_cmd!("exomonad");
 
     cmd.args(["hook", "pre-tool-use"])
-        .write_stdin("not valid json")
+        .write_stdin(test_hook_json())
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("parse"));
+        .success()
+        .stdout(predicate::str::contains(r#"{"continue":true}"#))
+        .stderr(predicate::str::contains("server"));
 
     Ok(())
 }
 
+/// Minimal input also fails open when server is unreachable.
 #[test]
-fn test_cli_empty_stdin_returns_error() -> Result<(), Box<dyn std::error::Error>> {
+fn test_hook_minimal_input_fails_open() -> Result<(), Box<dyn std::error::Error>> {
+    let mut cmd = cargo_bin_cmd!("exomonad");
+
+    cmd.args(["hook", "pre-tool-use"])
+        .write_stdin(minimal_hook_json())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#"{"continue":true}"#));
+
+    Ok(())
+}
+
+/// Empty stdin still fails open (server gets empty body, returns error, client allows).
+#[test]
+fn test_hook_empty_stdin_fails_open() -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = cargo_bin_cmd!("exomonad");
 
     cmd.args(["hook", "pre-tool-use"])
         .write_stdin("")
         .assert()
-        .failure();
+        .success()
+        .stdout(predicate::str::contains(r#"{"continue":true}"#));
 
     Ok(())
 }
 
+/// Invalid JSON still fails open.
 #[test]
-fn test_cli_other_hook_types_passthrough() -> Result<(), Box<dyn std::error::Error>> {
+fn test_hook_invalid_json_fails_open() -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = cargo_bin_cmd!("exomonad");
 
-    // Post-tool-use should pass through (not implemented in WASM, uses default)
-    let input = r#"{
-        "session_id": "s",
-        "hook_event_name": "PostToolUse",
-        "transcript_path": "/tmp/t.jsonl",
-        "cwd": "/",
-        "permission_mode": "default"
-    }"#;
+    cmd.args(["hook", "pre-tool-use"])
+        .write_stdin("not valid json")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#"{"continue":true}"#));
 
-    let output = cmd
-        .args(["hook", "post-tool-use"])
-        .write_stdin(input)
-        .output()
-        .expect("Failed to execute command");
+    Ok(())
+}
 
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        wasm_loaded_ok(&stderr),
-        "WASM should load successfully. Stderr: {}",
-        stderr
-    );
-
-    // Post-tool-use uses default (doesn't call WASM), should succeed
-    if output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            stdout.contains("\"continue\":true"),
-            "Default should allow continuation"
-        );
+/// Different hook types all work as thin client.
+#[test]
+fn test_hook_other_event_types_fail_open() -> Result<(), Box<dyn std::error::Error>> {
+    for event in &["post-tool-use", "stop", "session-end", "subagent-stop"] {
+        let mut cmd = cargo_bin_cmd!("exomonad");
+        cmd.args(["hook", event])
+            .write_stdin(minimal_hook_json())
+            .assert()
+            .success()
+            .stdout(predicate::str::contains(r#"{"continue":true}"#));
     }
+
+    Ok(())
+}
+
+/// Subcommand is required (no more Option<Commands> fallback).
+#[test]
+fn test_no_subcommand_shows_help() -> Result<(), Box<dyn std::error::Error>> {
+    let mut cmd = cargo_bin_cmd!("exomonad");
+
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("Usage"));
 
     Ok(())
 }

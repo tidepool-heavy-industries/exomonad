@@ -22,7 +22,11 @@ pub struct EventHandler {
 }
 
 impl EventHandler {
-    pub fn new(queue: Arc<EventQueue>, remote_port: Option<u16>, session_id: Option<String>) -> Self {
+    pub fn new(
+        queue: Arc<EventQueue>,
+        remote_port: Option<u16>,
+        session_id: Option<String>,
+    ) -> Self {
         let remote_url = remote_port.map(|port| format!("http://127.0.0.1:{}/events", port));
         Self {
             queue,
@@ -47,20 +51,23 @@ impl EffectHandler for EventHandler {
 impl EventEffects for EventHandler {
     async fn wait_for_event(&self, req: WaitForEventRequest) -> EffectResult<WaitForEventResponse> {
         let session_id = self.session_id.as_deref().unwrap_or("default");
-        
-        // Use a default timeout of 300s if not specified or 0
-        let timeout_secs = if req.timeout_secs <= 0 { 300 } else { req.timeout_secs as u64 };
-        
-        let event = self.queue.wait_for_event(
-            session_id,
-            &req.types,
-            Duration::from_secs(timeout_secs)
-        ).await
-        .map_err(|e| crate::effects::EffectError::custom("events.wait_failed", e.to_string()))?;
 
-        Ok(WaitForEventResponse {
-            event: Some(event),
-        })
+        // Use a default timeout of 300s if not specified or 0
+        let timeout_secs = if req.timeout_secs <= 0 {
+            300
+        } else {
+            req.timeout_secs as u64
+        };
+
+        let event = self
+            .queue
+            .wait_for_event(session_id, &req.types, Duration::from_secs(timeout_secs))
+            .await
+            .map_err(|e| {
+                crate::effects::EffectError::custom("events.wait_failed", e.to_string())
+            })?;
+
+        Ok(WaitForEventResponse { event: Some(event) })
     }
 
     async fn notify_event(&self, req: NotifyEventRequest) -> EffectResult<NotifyEventResponse> {
@@ -68,17 +75,21 @@ impl EventEffects for EventHandler {
             // Forward to server
             let client = reqwest::Client::new();
             let body = req.encode_to_vec();
-            
-            let resp = client.post(url)
+
+            let resp = client
+                .post(url)
                 .body(body)
                 .send()
                 .await
                 .map_err(|e| crate::effects::EffectError::network_error(e.to_string()))?;
-                
+
             if !resp.status().is_success() {
-                return Err(crate::effects::EffectError::network_error(format!("Server returned {}", resp.status())));
+                return Err(crate::effects::EffectError::network_error(format!(
+                    "Server returned {}",
+                    resp.status()
+                )));
             }
-            
+
             Ok(NotifyEventResponse { success: true })
         } else {
             // Local handling
