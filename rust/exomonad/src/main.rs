@@ -766,6 +766,21 @@ async fn main() -> Result<()> {
                 }
             };
 
+            // Per-agent MCP route: /agents/{name}/mcp
+            let agent_dev_service = dev_service.clone();
+            let agent_handler =
+                move |axum::extract::Path(agent_name): axum::extract::Path<String>,
+                      request: axum::extract::Request| {
+                    let service = agent_dev_service.clone();
+                    async move {
+                        tracing::info!(agent = %agent_name, "Routing agent MCP request");
+                        exomonad_core::mcp::agent_identity::with_agent_id(agent_name, async move {
+                            service.handle(request).await
+                        })
+                        .await
+                    }
+                };
+
             // Event notification endpoint
             let events_handler = move |body: axum::body::Bytes| {
                 let queue = event_queue.clone();
@@ -800,6 +815,14 @@ async fn main() -> Result<()> {
                 .route(
                     "/hook",
                     axum::routing::post(handle_hook_request).with_state(hook_state),
+                )
+                .route(
+                    "/agents/{name}/mcp",
+                    axum::routing::any(agent_handler.clone()),
+                )
+                .route(
+                    "/agents/{name}/mcp/{*rest}",
+                    axum::routing::any(agent_handler),
                 )
                 .route("/events", axum::routing::post(events_handler))
                 .nest_service("/tl/mcp", tl_service)

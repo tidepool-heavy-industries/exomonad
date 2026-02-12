@@ -59,7 +59,7 @@ Each subtree agent:
 Each worker agent:
 - Runs in a Zellij pane in the parent's worktree (no branch, no worktree)
 - Always Gemini — lightweight, focused execution
-- Uses committed `.gemini/settings.json` (points to `/dev/mcp`)
+- MCP config via temp dir + `GEMINI_CLI_SYSTEM_SETTINGS_PATH` env var
 
 ## Documentation Tree
 
@@ -140,21 +140,22 @@ echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
 | `GITHUB_TOKEN` | services | GitHub API access |
 | `RUST_LOG` | all | Tracing log level |
 | `EXOMONAD_AGENT_ID` | messaging | Agent identity (env var fallback) |
+| `GEMINI_CLI_SYSTEM_SETTINGS_PATH` | agent spawn | Points Gemini at per-agent settings.json |
 
 ### Agent Identity
 
-In HTTP serve mode, multiple agents share one server process.
+In HTTP serve mode, multiple agents share one server process. Each agent hits a unique URL: `/agents/{name}/mcp`. The server extracts identity from the URL path and stores it in a tokio task-local via `mcp::agent_identity`.
+
+Resolution order in `mcp::agent_identity::get_agent_id()`:
+1. **Task-local** (HTTP mode): set by the `/agents/{name}/mcp` route handler
+2. **Directory name** (last resort): current working directory basename
 
 **Route layout:**
 - `/tl/mcp` — TL endpoint (all tools including orchestration)
-- `/dev/mcp` — dev endpoint (worker tools, no orchestration)
+- `/dev/mcp` — generic dev endpoint (no agent identity)
+- `/agents/{name}/mcp` — per-agent endpoint (identity from URL path)
 
-Workers use `/dev/mcp` via the committed `.gemini/settings.json`. Subtrees get per-agent MCP config written at spawn time pointing to `/agents/{name}/mcp` (used for agent identity in messaging).
-
-Agent identity resolution in `mcp::agent_identity::get_agent_id()`:
-1. **Task-local** (HTTP mode): set by per-agent route handler (subtrees only)
-2. **`EXOMONAD_AGENT_ID` env var**: set at spawn time for all agents
-3. **Directory name** (last resort): current working directory basename
+At spawn time, `spawn_subtree`/`spawn_worker` (via WASM) writes per-agent MCP config with the agent's endpoint URL. The URL IS the identity — unforgeable, visible in access logs.
 
 ## MCP Tools
 
