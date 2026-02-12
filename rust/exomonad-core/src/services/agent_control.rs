@@ -739,8 +739,7 @@ impl AgentControlService {
                         "hooks": [
                             {
                                 "type": "command",
-                                "command": "exomonad",
-                                "args": ["hook", "worker-exit", "--runtime", "gemini"]
+                                "command": "exomonad hook worker-exit --runtime gemini"
                             }
                         ]
                     }
