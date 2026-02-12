@@ -87,6 +87,8 @@ library wasm-guest-internal
         ExoMonad.Guest.Effects.Coordination
         ExoMonad.Guest.Effects.FileSystem
         ExoMonad.Guest.Effects.StopHook
+        -- Proto helpers
+        ExoMonad.Guest.Proto
         -- Extensible effects (for external consumers)
         ExoMonad.Guest.Effect
         -- Effect typeclass and namespace-based effects

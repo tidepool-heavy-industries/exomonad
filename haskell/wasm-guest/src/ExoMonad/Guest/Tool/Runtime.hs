@@ -23,7 +23,6 @@ import Data.Maybe (fromMaybe)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Text.Lazy qualified as TL
 import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
 import Data.Vector qualified as V
 import Effects.Events qualified as ProtoEvents
@@ -32,6 +31,7 @@ import ExoMonad.Effect.Class (runEffect_)
 import ExoMonad.Effects.Events qualified as Events
 import ExoMonad.Effects.Log (LogInfo, LogError, LogEmitEvent)
 import ExoMonad.Effects.Messaging (sendNote)
+import ExoMonad.Guest.Proto (fromText)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), toMCPFormat)
 import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
@@ -45,10 +45,10 @@ import System.FilePath (takeFileName)
 
 -- | Helper for fire-and-forget logging via yield_effect.
 logInfo_ :: Text -> IO ()
-logInfo_ msg = void $ runEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict msg, Log.infoRequestFields = ""})
+logInfo_ msg = void $ runEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = fromText msg, Log.infoRequestFields = ""})
 
 logError_ :: Text -> IO ()
-logError_ msg = void $ runEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = TL.fromStrict msg, Log.errorRequestFields = ""})
+logError_ msg = void $ runEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = fromText msg, Log.errorRequestFields = ""})
 
 emitEvent_ :: Value -> IO ()
 emitEvent_ val = void $ runEffect_ @LogEmitEvent (Log.EmitEventRequest {Log.emitEventRequestEventType = "custom", Log.emitEventRequestPayload = BSL.toStrict (Aeson.encode val), Log.emitEventRequestTimestamp = 0})
@@ -176,10 +176,10 @@ handleWorkerExit hookInput = do
         let event = ProtoEvents.Event
               { ProtoEvents.eventEventId = 0
               , ProtoEvents.eventEventType = Just $ ProtoEvents.EventEventTypeWorkerComplete $ ProtoEvents.WorkerComplete
-                  { ProtoEvents.workerCompleteWorkerId = TL.fromStrict agentId
+                  { ProtoEvents.workerCompleteWorkerId = fromText agentId
                   , ProtoEvents.workerCompleteStatus = "success"
                   , ProtoEvents.workerCompleteChanges = V.empty
-                  , ProtoEvents.workerCompleteMessage = "Worker " <> TL.fromStrict agentId <> " completed"
+                  , ProtoEvents.workerCompleteMessage = "Worker " <> fromText agentId <> " completed"
                   }
               }
 

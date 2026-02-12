@@ -40,10 +40,10 @@ module ExoMonad.Effects.Messaging
 where
 
 import Data.Text (Text)
-import Data.Text.Lazy qualified as TL
 import Effects.EffectError (EffectError)
 import Effects.Messaging
 import ExoMonad.Effect.Class (Effect (..), runEffect)
+import ExoMonad.Guest.Proto (fromText)
 
 -- ============================================================================
 -- Effect phantom types + instances (Agent→TL)
@@ -89,14 +89,14 @@ sendNote :: Text -> IO (Either EffectError SendNoteResponse)
 sendNote content =
   runEffect @MessagingSendNote $
     SendNoteRequest
-      { sendNoteRequestContent = TL.fromStrict content
+      { sendNoteRequestContent = fromText content
       }
 
 sendQuestion :: Text -> IO (Either EffectError SendQuestionResponse)
 sendQuestion question =
   runEffect @MessagingSendQuestion $
     SendQuestionRequest
-      { sendQuestionRequestQuestion = TL.fromStrict question
+      { sendQuestionRequestQuestion = fromText question
       }
 
 -- ============================================================================
@@ -108,7 +108,7 @@ getAgentMessages :: Text -> Int -> IO (Either EffectError GetAgentMessagesRespon
 getAgentMessages agentId timeoutSecs =
   runEffect @MessagingGetAgentMessages $
     GetAgentMessagesRequest
-      { getAgentMessagesRequestAgentId = TL.fromStrict agentId,
+      { getAgentMessagesRequestAgentId = fromText agentId,
         getAgentMessagesRequestTimeoutSecs = fromIntegral timeoutSecs
       }
 
@@ -117,7 +117,7 @@ answerQuestion :: Text -> Text -> Text -> IO (Either EffectError AnswerQuestionR
 answerQuestion agentId questionId answer =
   runEffect @MessagingAnswerQuestion $
     AnswerQuestionRequest
-      { answerQuestionRequestAgentId = TL.fromStrict agentId,
-        answerQuestionRequestQuestionId = TL.fromStrict questionId,
-        answerQuestionRequestAnswer = TL.fromStrict answer
+      { answerQuestionRequestAgentId = fromText agentId,
+        answerQuestionRequestQuestionId = fromText questionId,
+        answerQuestionRequestAnswer = fromText answer
       }

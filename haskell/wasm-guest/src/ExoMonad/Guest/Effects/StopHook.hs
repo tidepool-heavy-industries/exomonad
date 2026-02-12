@@ -41,6 +41,22 @@ import GHC.Generics (Generic)
 import System.Environment (lookupEnv)
 
 -- ============================================================================
+-- Check Pipeline
+-- ============================================================================
+
+data CheckResult = CheckPass | CheckBlock Text
+
+type StopCheck = IO CheckResult
+
+runChecks :: [StopCheck] -> IO CheckResult
+runChecks [] = pure CheckPass
+runChecks (c:cs) = do
+  r <- c
+  case r of
+    CheckBlock reason -> pure (CheckBlock reason)
+    CheckPass -> runChecks cs
+
+-- ============================================================================
 -- Helpers
 -- ============================================================================
 
@@ -76,10 +92,16 @@ runStopHookChecks = do
 -- | Inner check logic (separated so we can wrap with lifecycle messaging).
 runStopHookChecksInner :: IO StopHookOutput
 runStopHookChecksInner = do
-  -- Check 1: Uncommitted changes
+  result <- runChecks [checkDirtyFiles, checkUnpushedCommits, checkPRFiled]
+  case result of
+    CheckPass -> pure allowStopResponse
+    CheckBlock reason -> pure (blockStopResponse reason)
+
+checkDirtyFiles :: StopCheck
+checkDirtyFiles = do
   dirtyResult <- getStatus (Git.GetStatusRequest {Git.getStatusRequestWorkingDir = "."})
   case dirtyResult of
-    Left err -> pure $ blockStopResponse $ "Failed to check dirty files: " <> T.pack (show err)
+    Left err -> pure $ CheckBlock $ "Failed to check dirty files: " <> T.pack (show err)
     Right resp ->
       let dirtyFiles = V.toList (Git.getStatusResponseDirtyFiles resp)
        in if not (null dirtyFiles)
@@ -90,21 +112,19 @@ runStopHookChecksInner = do
                       <> files
                       <> "\n\nTo continue, please stage and commit them:\n"
                       <> "git add -A && git commit -m \"Describe your work\""
-               in pure $ blockStopResponse msg
-            else checkUnpushedCommits
+               in pure $ CheckBlock msg
+            else pure CheckPass
 
-checkUnpushedCommits :: IO StopHookOutput
+checkUnpushedCommits :: StopCheck
 checkUnpushedCommits = do
-  -- Get repo info (branch + GitHub owner/name)
   repoResult <- getRepoInfo (Git.GetRepoInfoRequest {Git.getRepoInfoRequestWorkingDir = "."})
   case repoResult of
-    Left err -> pure $ blockStopResponse $ "Failed to get repo info: " <> T.pack (show err)
+    Left err -> pure $ CheckBlock $ "Failed to get repo info: " <> T.pack (show err)
     Right repoInfo -> do
       let branchName = TL.toStrict (Git.getRepoInfoResponseBranch repoInfo)
-      -- Check for unpushed commits
       unpushedResult <- hasUnpushedCommits (Git.HasUnpushedCommitsRequest {Git.hasUnpushedCommitsRequestWorkingDir = ".", Git.hasUnpushedCommitsRequestRemote = "origin"})
       case unpushedResult of
-        Left err -> pure $ blockStopResponse $ "Failed to check unpushed commits: " <> T.pack (show err)
+        Left err -> pure $ CheckBlock $ "Failed to check unpushed commits: " <> T.pack (show err)
         Right unpushedResp ->
           let unpushedCount = fromIntegral (Git.hasUnpushedCommitsResponseCount unpushedResp) :: Int
            in if unpushedCount > 0
@@ -124,99 +144,98 @@ checkUnpushedCommits = do
                           <> "Push them to GitHub with:\n"
                           <> "git push -u origin "
                           <> branchName
-                   in pure $ blockStopResponse msg
-                else checkPRFiled repoInfo
+                   in pure $ CheckBlock msg
+                else pure CheckPass
 
-checkPRFiled :: Git.GetRepoInfoResponse -> IO StopHookOutput
-checkPRFiled repoInfo = do
-  let repoOwner = TL.toStrict (Git.getRepoInfoResponseOwner repoInfo)
-      repoName = TL.toStrict (Git.getRepoInfoResponseName repoInfo)
-      branchName = TL.toStrict (Git.getRepoInfoResponseBranch repoInfo)
+checkPRFiled :: StopCheck
+checkPRFiled = do
+  repoResult <- getRepoInfo (Git.GetRepoInfoRequest {Git.getRepoInfoRequestWorkingDir = "."})
+  case repoResult of
+    Left err -> pure $ CheckBlock $ "Failed to get repo info: " <> T.pack (show err)
+    Right repoInfo -> do
+      let repoOwner = TL.toStrict (Git.getRepoInfoResponseOwner repoInfo)
+          repoName = TL.toStrict (Git.getRepoInfoResponseName repoInfo)
+          branchName = TL.toStrict (Git.getRepoInfoResponseBranch repoInfo)
+      if T.null repoOwner
+        then pure $ CheckBlock "Could not determine GitHub owner from remote URL"
+        else if T.null repoName
+          then pure $ CheckBlock "Could not determine GitHub repo name from remote URL"
+          else do
+            let prInput =
+                  GH.GetPullRequestForBranchRequest
+                    { GH.getPullRequestForBranchRequestOwner = TL.fromStrict repoOwner,
+                      GH.getPullRequestForBranchRequestRepo = TL.fromStrict repoName,
+                      GH.getPullRequestForBranchRequestBranch = TL.fromStrict branchName
+                    }
+            prResult <- getPullRequestForBranch prInput
+            case prResult of
+              Left err -> pure $ CheckBlock $ "Failed to check for PR: " <> T.pack (show err)
+              Right prResp ->
+                if not (GH.getPullRequestForBranchResponseFound prResp)
+                  then do
+                    autoResult <- autoFilePR branchName
+                    case autoResult of
+                      Left msg -> pure $ CheckBlock msg
+                      Right _ -> pure CheckPass
+                  else case GH.getPullRequestForBranchResponsePullRequest prResp of
+                    Nothing -> pure $ CheckBlock "PR found but no details available"
+                    Just pr -> do
+                      reviewResult <- checkReviewCommentsInner pr
+                      case reviewResult of
+                        Left msg -> pure $ CheckBlock msg
+                        Right () -> pure CheckPass
 
-  if T.null repoOwner
-    then pure $ blockStopResponse "Could not determine GitHub owner from remote URL"
-    else
-      if T.null repoName
-        then pure $ blockStopResponse "Could not determine GitHub repo name from remote URL"
-        else do
-          let prInput =
-                GH.GetPullRequestForBranchRequest
-                  { GH.getPullRequestForBranchRequestOwner = TL.fromStrict repoOwner,
-                    GH.getPullRequestForBranchRequestRepo = TL.fromStrict repoName,
-                    GH.getPullRequestForBranchRequestBranch = TL.fromStrict branchName
-                  }
-
-          prResult <- getPullRequestForBranch prInput
-          case prResult of
-            Left err -> pure $ blockStopResponse $ "Failed to check for PR: " <> T.pack (show err)
-            Right prResp ->
-              if not (GH.getPullRequestForBranchResponseFound prResp)
-                then autoFilePR branchName
-                else case GH.getPullRequestForBranchResponsePullRequest prResp of
-                  Nothing ->
-                    pure $ blockStopResponse "PR found but no details available"
-                  Just pr ->
-                    checkReviewComments pr
-
-autoFilePR :: Text -> IO StopHookOutput
+autoFilePR :: Text -> IO (Either Text ())
 autoFilePR branchName = do
   logInfo_ ("No PR found for " <> branchName <> ", auto-filing...")
-
-  -- Construct PR title/body
   mAgentId <- getAgentId
   let agentLabel = maybe "" (\aid -> "Agent " <> aid <> ": ") mAgentId
       prTitle = agentLabel <> "Work on " <> branchName
       prBody = "Auto-filed by ExoMonad stop hook on session end."
       baseBranch = detectBaseBranch branchName
-
   let fpReq =
         FP.FilePrRequest
           { FP.filePrRequestTitle = TL.fromStrict prTitle,
             FP.filePrRequestBody = TL.fromStrict prBody,
             FP.filePrRequestBaseBranch = TL.fromStrict baseBranch
           }
-
   fpResult <- filePR fpReq
   case fpResult of
-    Left err -> pure $ blockStopResponse $ "Failed to auto-file PR: " <> T.pack (show err)
+    Left err -> pure $ Left $ "Failed to auto-file PR: " <> T.pack (show err)
     Right fpResp -> do
       let prNum = FP.filePrResponsePrNumber fpResp
           prUrl = TL.toStrict (FP.filePrResponsePrUrl fpResp)
       logInfo_ ("Auto-filed PR #" <> T.pack (show prNum) <> ": " <> prUrl)
+      pure $ Left $
+        "PR #"
+          <> T.pack (show prNum)
+          <> " has been auto-filed. Please wait for Copilot review to complete before stopping."
 
-      pure $
-        blockStopResponse $
-          "PR #"
-            <> T.pack (show prNum)
-            <> " has been auto-filed. Please wait for Copilot review to complete before stopping."
-
-checkReviewComments :: GH.PullRequest -> IO StopHookOutput
-checkReviewComments pr = do
+checkReviewCommentsInner :: GH.PullRequest -> IO (Either Text ())
+checkReviewCommentsInner pr = do
   let prNum = fromIntegral (GH.pullRequestNumber pr) :: Int
-  -- Wait for Copilot to review the PR (polls with 30s interval, 5 min timeout)
   let waitInput =
         Copilot.WaitForCopilotReviewRequest
-          { Copilot.waitForCopilotReviewRequestPrNumber = fromIntegral prNum,
-            Copilot.waitForCopilotReviewRequestTimeoutSecs = 300, -- 5 minutes
+          {
+            Copilot.waitForCopilotReviewRequestPrNumber = fromIntegral prNum,
+            Copilot.waitForCopilotReviewRequestTimeoutSecs = 300,
             Copilot.waitForCopilotReviewRequestPollIntervalSecs = 30
           }
-
   reviewResult <- waitForCopilotReview waitInput
   case reviewResult of
-    Left err -> pure $ blockStopResponse $ "Failed to wait for Copilot review: " <> T.pack (show err)
+    Left err -> pure $ Left $ "Failed to wait for Copilot review: " <> T.pack (show err)
     Right reviewOutput ->
       let status = TL.toStrict (Copilot.waitForCopilotReviewResponseStatus reviewOutput)
        in case status of
             "timeout" ->
-              pure $
-                blockStopResponse $
-                  "Copilot hasn't reviewed PR #"
-                    <> T.pack (show prNum)
-                    <> " yet. Wait for Copilot review or check if Copilot is enabled for this repo."
+              pure $ Left $
+                "Copilot hasn't reviewed PR #"
+                  <> T.pack (show prNum)
+                  <> " yet. Wait for Copilot review or check if Copilot is enabled for this repo."
             "reviewed" ->
               let comments = V.toList (Copilot.waitForCopilotReviewResponseComments reviewOutput)
                in if null comments
-                    then pure allowStopResponse
+                    then pure $ Right ()
                     else
                       let formattedComments = T.unlines $ map formatComment comments
                           msg =
@@ -227,15 +246,14 @@ checkReviewComments pr = do
                               <> ":\n\n"
                               <> formattedComments
                               <> "\nAddress these comments, commit, and push your changes."
-                       in pure $ blockStopResponse msg
+                       in pure $ Left msg
             "pending" ->
-              pure $
-                blockStopResponse $
-                  "Copilot review is still pending for PR #"
-                    <> T.pack (show prNum)
-                    <> ". Wait for review to complete."
+              pure $ Left $
+                "Copilot review is still pending for PR #"
+                  <> T.pack (show prNum)
+                  <> ". Wait for review to complete."
             _ ->
-              pure $ blockStopResponse $ "Unknown review status: " <> status
+              pure $ Left $ "Unknown review status: " <> status
 
 formatComment :: Copilot.CopilotComment -> Text
 formatComment c =
@@ -284,7 +302,7 @@ sendLifecycleNote noteType fields = do
       -- Get current branch for context
       branchName <- getCurrentBranch
       let baseFields =
-            [ "type" .= noteType
+            ["type" .= noteType
             , "agent_id" .= agent
             , "branch" .= branchName
             ]

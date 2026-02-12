@@ -31,9 +31,9 @@ where
 
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Text.Lazy qualified as TL
 import Effects.EffectError (EffectError)
 import ExoMonad.Effects.Fs qualified as Fs
+import ExoMonad.Guest.Proto (fromText, toText)
 import GHC.Generics (Generic)
 import Polysemy (Member, Sem, embed, interpret, send)
 import Polysemy.Embed (Embed)
@@ -101,7 +101,7 @@ runFileSystem = interpret $ \case
   ReadFileOp path maxBytes -> embed $ do
     let req =
           Fs.ReadFileRequest
-            { Fs.readFileRequestPath = TL.fromStrict path,
+            { Fs.readFileRequestPath = fromText path,
               Fs.readFileRequestMaxBytes = fromIntegral maxBytes,
               Fs.readFileRequestOffset = 0
             }
@@ -111,15 +111,15 @@ runFileSystem = interpret $ \case
       Right resp ->
         Right
           ReadFileOutput
-            { rfoContent = TL.toStrict (Fs.readFileResponseContent resp),
+            { rfoContent = toText (Fs.readFileResponseContent resp),
               rfoBytesRead = fromIntegral (Fs.readFileResponseBytesRead resp),
               rfoTruncated = Fs.readFileResponseTruncated resp
             }
   WriteFileOp path content createParents -> embed $ do
     let req =
           Fs.WriteFileRequest
-            { Fs.writeFileRequestPath = TL.fromStrict path,
-              Fs.writeFileRequestContent = TL.fromStrict content,
+            { Fs.writeFileRequestPath = fromText path,
+              Fs.writeFileRequestContent = fromText content,
               Fs.writeFileRequestCreateParents = createParents,
               Fs.writeFileRequestAppend = False
             }
@@ -130,7 +130,7 @@ runFileSystem = interpret $ \case
         Right
           WriteFileOutput
             { wfoBytesWritten = fromIntegral (Fs.writeFileResponseBytesWritten resp),
-              wfoPath = TL.toStrict (Fs.writeFileResponsePath resp)
+              wfoPath = toText (Fs.writeFileResponsePath resp)
             }
 
 -- | Convert EffectError to Text for backward compatibility.

@@ -70,10 +70,8 @@ instance MCPTool Note where
             ]
       ]
   toolHandler args = do
-    result <- Messaging.sendNote (naContent args)
-    case result of
-      Left err -> pure $ errorResult (T.pack (show err))
-      Right _resp -> pure $ successResult $ object ["ack" .= True]
+    liftEffect (Messaging.sendNote (naContent args)) $ \_ ->
+      object ["ack" .= True]
 
 -- ============================================================================
 -- Question
@@ -110,10 +108,8 @@ instance MCPTool Question where
             ]
       ]
   toolHandler args = do
-    result <- Messaging.sendQuestion (qaContent args)
-    case result of
-      Left err -> pure $ errorResult (T.pack (show err))
-      Right resp -> pure $ successResult $ object ["answer" .= TL.toStrict (M.sendQuestionResponseAnswer resp)]
+    liftEffect (Messaging.sendQuestion (qaContent args)) $ \resp ->
+      object ["answer" .= TL.toStrict (M.sendQuestionResponseAnswer resp)]
 
 -- ============================================================================
 -- GetAgentMessages (TL-side)
@@ -165,17 +161,13 @@ instance MCPTool GetAgentMessages where
   toolHandler args = do
     let agentId = maybe "" id (gaAgentId args)
     let timeoutSecs = maybe 0 id (gaTimeoutSecs args)
-    result <- Messaging.getAgentMessages agentId timeoutSecs
-    case result of
-      Left err -> pure $ errorResult (T.pack (show err))
-      Right resp ->
-        let agents = V.toList (M.getAgentMessagesResponseAgents resp)
-            warning = TL.toStrict (M.getAgentMessagesResponseWarning resp)
-            agentsJson = map agentMsgsToJson agents
-            resultJson = object $
-              ["agents" .= agentsJson]
-              <> ["warning" .= warning | not (warning == "")]
-         in pure $ successResult resultJson
+    liftEffect (Messaging.getAgentMessages agentId timeoutSecs) $ \resp ->
+      let agents = V.toList (M.getAgentMessagesResponseAgents resp)
+          warning = TL.toStrict (M.getAgentMessagesResponseWarning resp)
+          agentsJson = map agentMsgsToJson agents
+       in object $
+            ["agents" .= agentsJson]
+            <> ["warning" .= warning | not (warning == "")]
 
 agentMsgsToJson :: M.AgentMessages -> Value
 agentMsgsToJson am =
@@ -250,16 +242,12 @@ instance MCPTool AnswerQuestion where
             ]
       ]
   toolHandler args = do
-    result <- Messaging.answerQuestion (aqAgentId args) (aqQuestionId args) (aqAnswer args)
-    case result of
-      Left err -> pure $ errorResult (T.pack (show err))
-      Right resp ->
-        pure $ successResult $
-          object
-            [ "status" .= TL.toStrict (M.answerQuestionResponseStatus resp),
-              "agent_id" .= TL.toStrict (M.answerQuestionResponseAgentId resp),
-              "question_id" .= TL.toStrict (M.answerQuestionResponseQuestionId resp)
-            ]
+    liftEffect (Messaging.answerQuestion (aqAgentId args) (aqQuestionId args) (aqAnswer args)) $ \resp ->
+      object
+        [ "status" .= TL.toStrict (M.answerQuestionResponseStatus resp),
+          "agent_id" .= TL.toStrict (M.answerQuestionResponseAgentId resp),
+          "question_id" .= TL.toStrict (M.answerQuestionResponseQuestionId resp)
+        ]
 
 -- ============================================================================
 -- Helpers

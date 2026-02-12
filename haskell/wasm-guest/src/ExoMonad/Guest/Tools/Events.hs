@@ -14,7 +14,7 @@ import Data.Text.Lazy qualified as TL
 import Data.Vector qualified as V
 import Effects.Events qualified as Proto
 import ExoMonad.Effects.Events qualified as Events
-import ExoMonad.Guest.Tool.Class (MCPTool (..), successResult, errorResult)
+import ExoMonad.Guest.Tool.Class (MCPTool (..), liftEffect, errorResult, successResult)
 import GHC.Generics (Generic)
 
 -- | Wait for event tool
@@ -132,7 +132,5 @@ instance MCPTool NotifyCompletion where
               , Proto.workerCompleteMessage = TL.fromStrict (ncMessage args)
               }
           }
-    result <- Events.notifyEvent (ncSessionId args) event
-    case result of
-      Left err -> pure $ errorResult $ pack (show err)
-      Right _ -> pure $ successResult $ object ["success" .= True]
+    liftEffect (Events.notifyEvent (ncSessionId args) event) $ \_ ->
+      object ["success" .= True]

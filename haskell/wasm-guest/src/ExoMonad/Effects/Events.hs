@@ -10,8 +10,8 @@ module ExoMonad.Effects.Events
 
 import Effects.Events qualified as Proto
 import ExoMonad.Effect.Class (Effect (..), runEffect, EffectError)
+import ExoMonad.Guest.Proto (fromText)
 import Data.Text (Text)
-import Data.Text.Lazy qualified as TL
 import Data.Vector qualified as V
 import Data.Word (Word64)
 
@@ -28,7 +28,7 @@ waitForEvent :: [Text] -> Int -> Word64 -> IO (Either EffectError Proto.WaitForE
 waitForEvent types timeout afterEventId =
   runEffect @EventsWaitForEvent $
     Proto.WaitForEventRequest
-      { Proto.waitForEventRequestTypes = V.fromList (map TL.fromStrict types)
+      { Proto.waitForEventRequestTypes = V.fromList (map fromText types)
       , Proto.waitForEventRequestTimeoutSecs = fromIntegral timeout
       , Proto.waitForEventRequestAfterEventId = afterEventId
       }
@@ -46,6 +46,6 @@ notifyEvent :: Text -> Proto.Event -> IO (Either EffectError Proto.NotifyEventRe
 notifyEvent sessionId event =
   runEffect @EventsNotifyEvent $
     Proto.NotifyEventRequest
-      { Proto.notifyEventRequestSessionId = TL.fromStrict sessionId
+      { Proto.notifyEventRequestSessionId = fromText sessionId
       , Proto.notifyEventRequestEvent = Just event
       }

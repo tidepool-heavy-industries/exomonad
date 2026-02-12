@@ -92,10 +92,8 @@ instance MCPTool CreateTask where
         description = fromMaybe "" (ctDescription args)
         owner = fromMaybe "" (ctOwner args)
         blockedBy = fromMaybe [] (ctBlockedBy args)
-    result <- Coordination.createTask subject description owner blockedBy
-    case result of
-      Left err -> pure $ errorResult (T.pack (show err))
-      Right resp -> pure $ successResult $ object ["task_id" .= TL.toStrict (Coordination.createTaskResponseTaskId resp)]
+    liftEffect (Coordination.createTask subject description owner blockedBy) $ \resp ->
+      object ["task_id" .= TL.toStrict (Coordination.createTaskResponseTaskId resp)]
 
 -- ============================================================================
 -- UpdateTask
@@ -223,12 +221,8 @@ instance MCPTool ListTasks where
       ]
   toolHandler args = do
     let status = maybe Coordination.TaskStatusTASK_STATUS_UNSPECIFIED (unwrapEnum . parseStatus) (ltStatus args)
-    result <- Coordination.listTasks status
-    case result of
-      Left err -> pure $ errorResult (T.pack (show err))
-      Right resp ->
-        let tasks = V.toList (Coordination.listTasksResponseTasks resp)
-         in pure $ successResult $ Aeson.toJSON (map taskToJson tasks)
+    liftEffect (Coordination.listTasks status) $ \resp ->
+      Aeson.toJSON (map taskToJson (V.toList (Coordination.listTasksResponseTasks resp)))
 
 taskToJson :: Coordination.Task -> Value
 taskToJson t =
@@ -330,10 +324,8 @@ instance MCPTool SendCoordMessage where
   toolHandler args = do
     let from = "agent" -- TODO: pass real agent identity from MCP session context
         summary = fromMaybe "" (smSummary args)
-    result <- Coordination.sendMessage from (smText args) summary
-    case result of
-      Left err -> pure $ errorResult (T.pack (show err))
-      Right resp -> pure $ successResult $ object ["success" .= Coordination.sendMessageResponseSuccess resp]
+    liftEffect (Coordination.sendMessage from (smText args) summary) $ \resp ->
+      object ["success" .= Coordination.sendMessageResponseSuccess resp]
 
 -- ============================================================================
 -- GetCoordMessages
@@ -368,12 +360,8 @@ instance MCPTool GetCoordMessages where
       ]
   toolHandler args = do
     let unreadOnly = fromMaybe False (gmUnreadOnly args)
-    result <- Coordination.getMessages unreadOnly
-    case result of
-      Left err -> pure $ errorResult (T.pack (show err))
-      Right resp ->
-        let messages = V.toList (Coordination.getMessagesResponseMessages resp)
-         in pure $ successResult $ Aeson.toJSON (map messageToJson messages)
+    liftEffect (Coordination.getMessages unreadOnly) $ \resp ->
+      Aeson.toJSON (map messageToJson (V.toList (Coordination.getMessagesResponseMessages resp)))
 
 messageToJson :: Coordination.AgentMessage -> Value
 messageToJson m =

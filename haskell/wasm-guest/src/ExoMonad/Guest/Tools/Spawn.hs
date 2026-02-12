@@ -1,14 +1,19 @@
--- | Hylo spawn primitives: spawn_subtree and spawn_worker.
+-- | Hylo spawn primitives: spawn_subtree, spawn_worker, spawn_workers.
 module ExoMonad.Guest.Tools.Spawn
   ( SpawnSubtree,
     SpawnWorker,
+    SpawnWorkers,
     SpawnSubtreeArgs (..),
     SpawnWorkerArgs (..),
+    SpawnWorkersArgs (..),
+    WorkerSpec (..),
   )
 where
 
+import Control.Monad (forM)
 import Data.Aeson (FromJSON, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
+import Data.Either (partitionEithers)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import ExoMonad.Guest.Effects.AgentControl qualified as AC
@@ -123,3 +128,76 @@ instance MCPTool SpawnWorker where
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> pure $ successResult $ Aeson.toJSON spawnResult
+
+-- ============================================================================
+-- SpawnWorkers (batch)
+-- ============================================================================
+
+data SpawnWorkers
+
+data WorkerSpec = WorkerSpec
+  { wsName :: Text,
+    wsPrompt :: Text
+  }
+  deriving (Show, Eq, Generic)
+
+instance FromJSON WorkerSpec where
+  parseJSON = withObject "WorkerSpec" $ \v ->
+    WorkerSpec
+      <$> v .: "name"
+      <*> v .: "prompt"
+
+data SpawnWorkersArgs = SpawnWorkersArgs
+  { swsSpecs :: [WorkerSpec]
+  }
+  deriving (Show, Eq, Generic)
+
+instance FromJSON SpawnWorkersArgs where
+  parseJSON = withObject "SpawnWorkersArgs" $ \v ->
+    SpawnWorkersArgs <$> v .: "specs"
+
+instance MCPTool SpawnWorkers where
+  type ToolArgs SpawnWorkers = SpawnWorkersArgs
+  toolName = "spawn_workers"
+  toolDescription = "Spawn multiple worker agents in one call. Each gets a Zellij pane in the current worktree."
+  toolSchema =
+    object
+      [ "type" .= ("object" :: Text),
+        "required" .= (["specs"] :: [Text]),
+        "properties"
+          .= object
+            [ "specs"
+                .= object
+                  [ "type" .= ("array" :: Text),
+                    "description" .= ("Array of worker specifications" :: Text),
+                    "items"
+                      .= object
+                        [ "type" .= ("object" :: Text),
+                          "required" .= (["name", "prompt"] :: [Text]),
+                          "properties"
+                            .= object
+                              [ "name"
+                                  .= object
+                                    [ "type" .= ("string" :: Text),
+                                      "description" .= ("Human-readable name for the leaf agent" :: Text)
+                                    ],
+                                "prompt"
+                                  .= object
+                                    [ "type" .= ("string" :: Text),
+                                      "description" .= ("Implementation instructions for the agent" :: Text)
+                                    ]
+                              ]
+                        ]
+                  ]
+            ]
+      ]
+  toolHandler args = do
+    results <- forM (swsSpecs args) $ \spec ->
+      runM $ AC.runAgentControl $ AC.spawnWorker (wsName spec) (wsPrompt spec)
+    let (errs, successes) = partitionEithers results
+    pure $
+      successResult $
+        object
+          [ "spawned" .= map Aeson.toJSON successes,
+            "errors" .= map Aeson.String errs
+          ]

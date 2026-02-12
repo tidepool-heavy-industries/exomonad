@@ -31,9 +31,9 @@ where
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.=), (.:))
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Text.Lazy qualified as TL
 import Effects.Agent qualified as PA
 import ExoMonad.Effects.Agent qualified as Agent
+import ExoMonad.Guest.Proto (fromText, toText)
 import GHC.Generics (Generic)
 import Polysemy (Member, Sem, embed, interpret, send)
 import Polysemy.Embed (Embed)
@@ -112,8 +112,8 @@ runAgentControl = interpret $ \case
   SpawnSubtreeC task branchName context agentTy -> embed $ do
     let req =
           PA.SpawnGeminiTeammateRequest
-            { PA.spawnGeminiTeammateRequestName = TL.fromStrict branchName,
-              PA.spawnGeminiTeammateRequestPrompt = TL.fromStrict (maybe task (\c -> task <> "\n\n" <> c) context),
+            { PA.spawnGeminiTeammateRequestName = fromText branchName,
+              PA.spawnGeminiTeammateRequestPrompt = fromText (maybe task (\c -> task <> "\n\n" <> c) context),
               PA.spawnGeminiTeammateRequestAgentType = Enumerated (Right (toProtoAgentType agentTy)),
               PA.spawnGeminiTeammateRequestSubrepo = "",
               PA.spawnGeminiTeammateRequestTopology = Enumerated (Right PA.WorkspaceTopologyWORKSPACE_TOPOLOGY_WORKTREE_PER_AGENT),
@@ -128,8 +128,8 @@ runAgentControl = interpret $ \case
   SpawnWorkerC name prompt -> embed $ do
     let req =
           PA.SpawnWorkerRequest
-            { PA.spawnWorkerRequestName = TL.fromStrict name,
-              PA.spawnWorkerRequestPrompt = TL.fromStrict prompt
+            { PA.spawnWorkerRequestName = fromText name,
+              PA.spawnWorkerRequestPrompt = fromText prompt
             }
     result <- Agent.spawnWorker req
     pure $ case result of
@@ -149,10 +149,10 @@ toProtoAgentType Gemini = PA.AgentTypeAGENT_TYPE_GEMINI
 protoAgentInfoToSpawnResult :: PA.AgentInfo -> SpawnResult
 protoAgentInfoToSpawnResult info =
   SpawnResult
-    { worktreePath = TL.toStrict (PA.agentInfoWorktreePath info),
-      branchName = TL.toStrict (PA.agentInfoBranchName info),
-      tabName = TL.toStrict (PA.agentInfoZellijTab info),
-      issueTitle = TL.toStrict (PA.agentInfoIssue info),
+    { worktreePath = toText (PA.agentInfoWorktreePath info),
+      branchName = toText (PA.agentInfoBranchName info),
+      tabName = toText (PA.agentInfoZellijTab info),
+      issueTitle = toText (PA.agentInfoIssue info),
       agentTypeResult = case PA.agentInfoAgentType info of
         Enumerated (Right PA.AgentTypeAGENT_TYPE_CLAUDE) -> "claude"
         Enumerated (Right PA.AgentTypeAGENT_TYPE_GEMINI) -> "gemini"

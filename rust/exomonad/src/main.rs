@@ -254,7 +254,7 @@ async fn handle_hook_inner(
         HookEventType::Stop | HookEventType::AfterAgent => "Stop",
         HookEventType::SubagentStop => "SubagentStop",
         HookEventType::SessionEnd => "SessionEnd",
-        HookEventType::PreToolUse => "PreToolUse",
+        HookEventType::PreToolUse | HookEventType::BeforeTool => "PreToolUse",
         HookEventType::PostToolUse => "PostToolUse",
         HookEventType::WorkerExit => "WorkerExit",
         _ => {

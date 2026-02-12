@@ -19,6 +19,7 @@ module ExoMonad.Guest.Tool.Class
     MCPCallOutput (..),
     successResult,
     errorResult,
+    liftEffect,
 
     -- * Type-level list append
     type (:++),
@@ -88,6 +89,14 @@ successResult v = MCPCallOutput True (Just v) Nothing
 -- | Create an error result.
 errorResult :: Text -> MCPCallOutput
 errorResult msg = MCPCallOutput False Nothing (Just msg)
+
+-- | Lift an effectful action that returns Either into MCPCallOutput.
+liftEffect :: (Show e) => IO (Either e a) -> (a -> Value) -> IO MCPCallOutput
+liftEffect action transform = do
+  result <- action
+  case result of
+    Left err -> pure $ errorResult (T.pack (show err))
+    Right resp -> pure $ successResult (transform resp)
 
 -- ============================================================================
 -- MCPTool Typeclass

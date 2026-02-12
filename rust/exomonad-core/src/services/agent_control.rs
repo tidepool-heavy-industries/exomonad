@@ -743,6 +743,17 @@ impl AgentControlService {
                 }
             },
             "hooks": {
+                "BeforeTool": [
+                    {
+                        "matcher": "*",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": "exomonad hook before-tool --runtime gemini"
+                            }
+                        ]
+                    }
+                ],
                 "AfterAgent": [
                     {
                         "matcher": "*",
@@ -1484,6 +1495,17 @@ impl AgentControlService {
     }}
   }},
   "hooks": {{
+    "BeforeTool": [
+      {{
+        "matcher": "*",
+        "hooks": [
+          {{
+            "type": "command",
+            "command": "exomonad hook before-tool --runtime gemini"
+          }}
+        ]
+      }}
+    ],
     "AfterAgent": [
       {{
         "matcher": "*",
@@ -1833,6 +1855,14 @@ mod tests {
         assert!(parsed["mcpServers"]["exomonad"].get("url").is_none());
 
         // Check hooks
+        let before_tool = &parsed["hooks"]["BeforeTool"];
+        assert!(before_tool.is_array());
+        let bt_hooks = &before_tool[0]["hooks"];
+        assert_eq!(
+            bt_hooks[0]["command"],
+            "exomonad hook before-tool --runtime gemini"
+        );
+
         let after_agent = &parsed["hooks"]["AfterAgent"];
         assert!(after_agent.is_array());
         let hooks_list = &after_agent[0]["hooks"];
@@ -1869,10 +1899,14 @@ mod tests {
 
         // Assertions based on manual schema validation
 
-        // 1. Hooks must strictly use PascalCase (AfterAgent), not kebab-case (after-agent) or camelCase (afterAgent).
+        // 1. Hooks must strictly use PascalCase, not kebab-case or camelCase.
         assert!(
             settings["hooks"].get("AfterAgent").is_some(),
             "hooks.AfterAgent is missing"
+        );
+        assert!(
+            settings["hooks"].get("BeforeTool").is_some(),
+            "hooks.BeforeTool is missing"
         );
         assert!(
             settings["hooks"].get("after-agent").is_none(),
