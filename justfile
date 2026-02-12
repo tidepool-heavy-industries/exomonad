@@ -217,6 +217,10 @@ proto-test:
 test-mcp *args:
     ./scripts/test-mcp-integration.sh {{args}}
 
+# Validate Gemini settings against schema
+validate-settings:
+    nix-shell -p python3Packages.jsonschema --run "python3 scripts/validate_json.py .gemini/settings.json schema/gemini-cli/settings.schema.json"
+
 # Clean build artifacts
 clean:
     rm -rf {{metadata_dir}}

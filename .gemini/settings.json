@@ -6,9 +6,7 @@
     }
   },
   "hooks": {
-    // Gemini CLI uses kebab-case for hook events (e.g. after-agent).
-    // Lifecycle hooks like after-agent require a wildcard matcher "*".
-    "after-agent": [
+    "AfterAgent": [
       {
         "matcher": "*",
         "hooks": [
