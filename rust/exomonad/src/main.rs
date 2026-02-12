@@ -10,7 +10,7 @@ use exomonad::config;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use exomonad_core::mcp::handler::ExomonadHandler;
+use exomonad_core::mcp::server::McpServer;
 use exomonad_core::protocol::{Runtime as HookRuntime, ServiceRequest};
 use exomonad_core::services::external::otel::OtelService;
 use exomonad_core::services::external::ExternalService;
@@ -587,64 +587,6 @@ fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
 }
 
 // ============================================================================
-// Per-Role MCP Service
-// ============================================================================
-
-/// Build a `StreamableHttpService` for a specific role.
-///
-/// Each role gets its own MCP endpoint with filtered tools:
-/// - "tl": all WASM tools + get_agent_messages + answer_question
-/// - "dev": WASM tools minus spawn_agents/cleanup_agents/list_agents
-fn build_role_mcp_service(
-    base_state: &exomonad_core::mcp::McpState,
-    role: &str,
-    ct: tokio_util::sync::CancellationToken,
-) -> rmcp::transport::streamable_http_server::StreamableHttpService<ExomonadHandler> {
-    let mut role_state = base_state.clone();
-    role_state.role = Some(role.to_string());
-    let role_state = Arc::new(role_state);
-    let role_str = role.to_string();
-
-    let mcp_config = rmcp::transport::streamable_http_server::StreamableHttpServerConfig {
-        cancellation_token: ct,
-        ..Default::default()
-    };
-
-    rmcp::transport::streamable_http_server::StreamableHttpService::new(
-        {
-            let state = role_state.clone();
-            move || {
-                let state = state.clone();
-                let role_str = role_str.clone();
-                // rmcp's handler factory is sync (FnMut() -> Result<T>), but our
-                // ExomonadHandler::build and WASM reload are async. block_in_place
-                // moves this closure off the tokio worker thread so block_on is safe.
-                let rt = tokio::runtime::Handle::current();
-                tokio::task::block_in_place(|| {
-                    rt.block_on(async {
-                        // Hot reload: check if WASM changed before creating handler
-                        match state.plugin.reload_if_changed().await {
-                            Ok(true) => {
-                                info!(role = %role_str, "WASM hot-reloaded for new session")
-                            }
-                            Ok(false) => {}
-                            Err(e) => {
-                                warn!(role = %role_str, error = %e, "WASM reload check failed")
-                            }
-                        }
-                        ExomonadHandler::build((*state).clone()).await
-                    })
-                })
-                .map_err(std::io::Error::other)
-            }
-        },
-        rmcp::transport::streamable_http_server::session::local::LocalSessionManager::default()
-            .into(),
-        mcp_config,
-    )
-}
-
-// ============================================================================
 // Main
 // ============================================================================
 
@@ -741,11 +683,32 @@ async fn main() -> Result<()> {
             std::fs::write(&server_pid_path, serde_json::to_string_pretty(&pid_info)?)?;
             info!(path = %server_pid_path.display(), "Wrote server.pid");
 
-            // Build per-role MCP services
-            let ct = tokio_util::sync::CancellationToken::new();
+            // Build per-role MCP servers
+            let mut tl_state = base_state.clone();
+            tl_state.role = Some("tl".to_string());
+            let tl_server = McpServer::new(tl_state);
 
-            let tl_service = build_role_mcp_service(&base_state, "tl", ct.clone());
-            let dev_service = build_role_mcp_service(&base_state, "dev", ct.clone());
+            let mut dev_state = base_state.clone();
+            dev_state.role = Some("dev".to_string());
+            let dev_server = McpServer::new(dev_state);
+
+            // TL handler
+            let tl_handler = {
+                let s = tl_server.clone();
+                move |headers: axum::http::HeaderMap, body: axum::extract::Json<serde_json::Value>| {
+                    let s = s.clone();
+                    async move { s.handle(headers, body).await }
+                }
+            };
+
+            // Dev handler
+            let dev_handler = {
+                let s = dev_server.clone();
+                move |headers: axum::http::HeaderMap, body: axum::extract::Json<serde_json::Value>| {
+                    let s = s.clone();
+                    async move { s.handle(headers, body).await }
+                }
+            };
 
             // Health endpoint
             let health_plugin = base_state.plugin.clone();
@@ -767,19 +730,19 @@ async fn main() -> Result<()> {
             };
 
             // Per-agent MCP route: /agents/{name}/mcp
-            let agent_dev_service = dev_service.clone();
-            let agent_handler =
+            let agent_handler = {
+                let s = dev_server.clone();
                 move |axum::extract::Path(agent_name): axum::extract::Path<String>,
-                      request: axum::extract::Request| {
-                    let service = agent_dev_service.clone();
+                      headers: axum::http::HeaderMap,
+                      body: axum::extract::Json<serde_json::Value>| {
+                    let s = s.clone();
                     async move {
-                        tracing::info!(agent = %agent_name, "Routing agent MCP request");
                         exomonad_core::mcp::agent_identity::with_agent_id(agent_name, async move {
-                            service.handle(request).await
-                        })
-                        .await
+                            s.handle(headers, body).await
+                        }).await
                     }
-                };
+                }
+            };
 
             // Event notification endpoint
             let events_handler = move |body: axum::body::Bytes| {
@@ -816,17 +779,10 @@ async fn main() -> Result<()> {
                     "/hook",
                     axum::routing::post(handle_hook_request).with_state(hook_state),
                 )
-                .route(
-                    "/agents/{name}/mcp",
-                    axum::routing::any(agent_handler.clone()),
-                )
-                .route(
-                    "/agents/{name}/mcp/{*rest}",
-                    axum::routing::any(agent_handler),
-                )
+                .route("/tl/mcp", axum::routing::post(tl_handler))
+                .route("/dev/mcp", axum::routing::post(dev_handler))
+                .route("/agents/{name}/mcp", axum::routing::post(agent_handler.clone()))
                 .route("/events", axum::routing::post(events_handler))
-                .nest_service("/tl/mcp", tl_service)
-                .nest_service("/dev/mcp", dev_service)
                 .layer(TraceLayer::new_for_http());
 
             let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
@@ -843,7 +799,7 @@ async fn main() -> Result<()> {
                     anyhow::anyhow!("Failed to bind to port {}: {}", port, e)
                 }
             })?;
-            info!(port = %port, "HTTP MCP server listening on TCP (rmcp StreamableHttp)");
+            info!(port = %port, "HTTP MCP server listening on TCP (custom JSON-RPC)");
 
             // Run with graceful shutdown on SIGINT or SIGTERM
             axum::serve(listener, app)
@@ -863,7 +819,6 @@ async fn main() -> Result<()> {
                         _ = ctrl_c => info!("Received SIGINT, initiating graceful shutdown"),
                         _ = terminate => info!("Received SIGTERM, initiating graceful shutdown"),
                     }
-                    ct.cancel();
                 })
                 .await?;
 

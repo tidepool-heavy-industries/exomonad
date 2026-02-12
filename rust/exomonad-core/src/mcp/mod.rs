@@ -1,15 +1,15 @@
 //! MCP (Model Context Protocol) server.
 //!
 //! All tool logic is in Haskell WASM. This module handles MCP transport
-//! (via rmcp StreamableHttp) and forwards tool calls to the WASM plugin.
+//! (plain JSON-RPC over HTTP) and forwards tool calls to the WASM plugin.
 
 pub mod tools;
 
 #[cfg(feature = "runtime")]
-pub mod agent_identity;
+pub mod server;
 
 #[cfg(feature = "runtime")]
-pub mod handler;
+pub mod agent_identity;
 
 use crate::PluginManager;
 use serde::{Deserialize, Serialize};

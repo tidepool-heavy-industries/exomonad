@@ -16,10 +16,8 @@ path = "src/main.rs"
 
 [dependencies]
 exomonad-core = { path = "../exomonad-core", version = "0.1.0" }
-rmcp = { version = "0.14", features = ["server", "transport-io", "transport-streamable-http-server"] }
 axum = { version = "0.8" }
 tower-http = { workspace = true }
-tokio-util = { version = "0.7" }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -38,11 +36,11 @@ exomonad-proto = { path = "../exomonad-proto", version = "0.1.0", features = ["e
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["signal", "fs"] }
 
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 assert_cmd = "2.0"
 duct = { workspace = true }
 predicates = "3.0"
-reqwest = { version = "0.12", features = ["blocking"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }

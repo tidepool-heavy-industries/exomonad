@@ -7,7 +7,7 @@
 use super::{McpState, ToolDefinition};
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use tracing::{debug, error};
 
 // ============================================================================
@@ -44,25 +44,19 @@ pub struct MCPCallOutput {
     pub error: Option<String>,
 }
 
-#[cfg(feature = "runtime")]
 impl MCPCallOutput {
-    /// Convert to rmcp `CallToolResult`.
-    pub fn into_call_tool_result(self) -> Result<rmcp::model::CallToolResult, rmcp::ErrorData> {
+    /// Convert to a JSON value suitable for a JSON-RPC result.
+    /// Used by our custom MCP server (replaces rmcp's CallToolResult).
+    pub fn into_json_rpc_result(self) -> Value {
         if self.success {
             let text = self
                 .result
                 .map(|v| serde_json::to_string_pretty(&v).unwrap_or_default())
                 .unwrap_or_default();
-            Ok(rmcp::model::CallToolResult::success(vec![
-                rmcp::model::Content::text(text),
-            ]))
+            json!({"content": [{"type": "text", "text": text}]})
         } else {
-            let error_text = self
-                .error
-                .unwrap_or_else(|| "Unknown WASM error".to_string());
-            Ok(rmcp::model::CallToolResult::error(vec![
-                rmcp::model::Content::text(error_text),
-            ]))
+            let err = self.error.unwrap_or_else(|| "Unknown error".to_string());
+            json!({"content": [{"type": "text", "text": err}], "isError": true})
         }
     }
 }

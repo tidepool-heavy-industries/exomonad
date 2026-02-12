@@ -17,7 +17,7 @@
 //! **Run with:** `just test-mcp`
 
 use reqwest::blocking::Client;
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE};
+use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
 use serde_json::{json, Value};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -43,22 +43,6 @@ struct McpClient {
     session_id: Option<String>,
 }
 
-/// Parse a JSON-RPC response from an SSE body.
-fn parse_sse_json(body: &str) -> Value {
-    let mut last_json = None;
-    for line in body.lines() {
-        if let Some(data) = line.strip_prefix("data: ") {
-            let trimmed = data.trim();
-            if !trimmed.is_empty() {
-                if let Ok(val) = serde_json::from_str::<Value>(trimmed) {
-                    last_json = Some(val);
-                }
-            }
-        }
-    }
-    last_json.unwrap_or_else(|| panic!("No JSON found in SSE body: {}", body))
-}
-
 impl McpClient {
     fn new(port: u16) -> Self {
         let client = Client::builder()
@@ -81,10 +65,6 @@ impl McpClient {
         let url = self.mcp_url();
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        headers.insert(
-            ACCEPT,
-            HeaderValue::from_static("application/json, text/event-stream"),
-        );
         if let Some(ref sid) = self.session_id {
             headers.insert("Mcp-Session-Id", HeaderValue::from_str(sid).unwrap());
         }
@@ -102,18 +82,10 @@ impl McpClient {
         }
 
         let status = resp.status();
-        let content_type = resp
-            .headers()
-            .get(CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("")
-            .to_string();
         let body = resp.text().expect("Failed to read response body");
 
         if body.is_empty() {
             json!({"_empty": true, "_status": status.as_u16()})
-        } else if content_type.contains("text/event-stream") {
-            parse_sse_json(&body)
         } else {
             serde_json::from_str(&body).unwrap_or_else(|e| {
                 panic!(
@@ -129,10 +101,6 @@ impl McpClient {
         let url = self.mcp_url();
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        headers.insert(
-            ACCEPT,
-            HeaderValue::from_static("application/json, text/event-stream"),
-        );
         if let Some(ref sid) = self.session_id {
             headers.insert("Mcp-Session-Id", HeaderValue::from_str(sid).unwrap());
         }
@@ -158,10 +126,6 @@ impl McpClient {
         let url = self.mcp_url();
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        headers.insert(
-            ACCEPT,
-            HeaderValue::from_static("application/json, text/event-stream"),
-        );
         if let Some(ref sid) = self.session_id {
             headers.insert("Mcp-Session-Id", HeaderValue::from_str(sid).unwrap());
         }
