@@ -48,7 +48,8 @@ import qualified Unsafe.Coerce as Hs
 
 data WaitForEventRequest
   = WaitForEventRequest {waitForEventRequestTypes :: (Hs.Vector Hs.Text),
-                         waitForEventRequestTimeoutSecs :: Hs.Int32}
+                         waitForEventRequestTimeoutSecs :: Hs.Int32,
+                         waitForEventRequestAfterEventId :: Hs.Word64}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData WaitForEventRequest)
 instance (HsProtobuf.Named WaitForEventRequest) where
@@ -58,16 +59,19 @@ instance (HsProtobuf.Message WaitForEventRequest) where
   encodeMessage
     _
     WaitForEventRequest {waitForEventRequestTypes,
-                         waitForEventRequestTimeoutSecs}
+                         waitForEventRequestTimeoutSecs, waitForEventRequestAfterEventId}
     = Hs.mappend
+        (Hs.mappend
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 1)
+              ((Hs.coerce
+                  @(Hs.Vector Hs.Text)
+                  @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
+                 waitForEventRequestTypes))
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 2) waitForEventRequestTimeoutSecs))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 1)
-           ((Hs.coerce
-               @(Hs.Vector Hs.Text)
-               @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
-              waitForEventRequestTypes))
-        (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 2) waitForEventRequestTimeoutSecs)
+           (HsProtobuf.FieldNumber 3) waitForEventRequestAfterEventId)
   decodeMessage _
     = Hs.pure WaitForEventRequest
         <*>
@@ -79,6 +83,9 @@ instance (HsProtobuf.Message WaitForEventRequest) where
         <*>
           HsProtobuf.at
             HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 2)
+        <*>
+          HsProtobuf.at
+            HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 3)
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
@@ -86,9 +93,13 @@ instance (HsProtobuf.Message WaitForEventRequest) where
          (HsProtobufAST.Single "types") [] "",
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 2) (HsProtobufAST.Prim HsProtobufAST.Int32)
-         (HsProtobufAST.Single "timeout_secs") [] ""]
+         (HsProtobufAST.Single "timeout_secs") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 3)
+         (HsProtobufAST.Prim HsProtobufAST.UInt64)
+         (HsProtobufAST.Single "after_event_id") [] ""]
 instance (HsJSONPB.ToJSONPB WaitForEventRequest) where
-  toJSONPB (WaitForEventRequest f1 f2)
+  toJSONPB (WaitForEventRequest f1 f2 f3)
     = HsJSONPB.object
         ["types"
            .=
@@ -96,8 +107,8 @@ instance (HsJSONPB.ToJSONPB WaitForEventRequest) where
                  @(Hs.Vector Hs.Text)
                  @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
                 f1),
-         "timeout_secs" .= f2]
-  toEncodingPB (WaitForEventRequest f1 f2)
+         "timeout_secs" .= f2, "after_event_id" .= f3]
+  toEncodingPB (WaitForEventRequest f1 f2 f3)
     = HsJSONPB.pairs
         ["types"
            .=
@@ -105,7 +116,7 @@ instance (HsJSONPB.ToJSONPB WaitForEventRequest) where
                  @(Hs.Vector Hs.Text)
                  @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text)))
                 f1),
-         "timeout_secs" .= f2]
+         "timeout_secs" .= f2, "after_event_id" .= f3]
 instance (HsJSONPB.FromJSONPB WaitForEventRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -117,7 +128,8 @@ instance (HsJSONPB.FromJSONPB WaitForEventRequest) where
                       @(HsProtobuf.UnpackedVec (HsProtobuf.String Hs.Text))
                       @(Hs.Vector Hs.Text))
                      (obj .: "types"))
-                <*> obj .: "timeout_secs")
+                <*> obj .: "timeout_secs"
+                <*> obj .: "after_event_id")
 instance (HsJSONPB.ToJSON WaitForEventRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding
@@ -306,35 +318,42 @@ instance (HsJSONPB.ToJSON NotifyEventResponse) where
   toEncoding = HsJSONPB.toAesonEncoding
 instance (HsJSONPB.FromJSON NotifyEventResponse) where
   parseJSON = HsJSONPB.parseJSONPB
-newtype Event
-  = Event {eventEventType :: (Hs.Maybe EventEventType)}
+data Event
+  = Event {eventEventId :: Hs.Word64,
+           eventEventType :: (Hs.Maybe EventEventType)}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData Event)
 instance (HsProtobuf.Named Event) where
   nameOf _ = Hs.fromString "Event"
 instance (HsProtobuf.HasDefault Event)
 instance (HsProtobuf.Message Event) where
-  encodeMessage _ Event {eventEventType}
-    = (case eventEventType of
-         Hs.Nothing -> Hs.mempty
-         Hs.Just x
-           -> case x of
-                EventEventTypeWorkerComplete y
-                  -> HsProtobuf.encodeMessageField
-                       (HsProtobuf.FieldNumber 1)
-                       ((Hs.coerce
-                           @(Hs.Maybe Effects.Events.WorkerComplete)
-                           @(HsProtobuf.Nested Effects.Events.WorkerComplete))
-                          (Hs.Just y))
-                EventEventTypeTimeout y
-                  -> HsProtobuf.encodeMessageField
-                       (HsProtobuf.FieldNumber 2)
-                       ((Hs.coerce
-                           @(Hs.Maybe Effects.Events.Timeout)
-                           @(HsProtobuf.Nested Effects.Events.Timeout))
-                          (Hs.Just y)))
+  encodeMessage _ Event {eventEventId, eventEventType}
+    = Hs.mappend
+        (HsProtobuf.encodeMessageField
+           (HsProtobuf.FieldNumber 3) eventEventId)
+        (case eventEventType of
+           Hs.Nothing -> Hs.mempty
+           Hs.Just x
+             -> case x of
+                  EventEventTypeWorkerComplete y
+                    -> HsProtobuf.encodeMessageField
+                         (HsProtobuf.FieldNumber 1)
+                         ((Hs.coerce
+                             @(Hs.Maybe Effects.Events.WorkerComplete)
+                             @(HsProtobuf.Nested Effects.Events.WorkerComplete))
+                            (Hs.Just y))
+                  EventEventTypeTimeout y
+                    -> HsProtobuf.encodeMessageField
+                         (HsProtobuf.FieldNumber 2)
+                         ((Hs.coerce
+                             @(Hs.Maybe Effects.Events.Timeout)
+                             @(HsProtobuf.Nested Effects.Events.Timeout))
+                            (Hs.Just y)))
   decodeMessage _
     = Hs.pure Event
+        <*>
+          HsProtobuf.at
+            HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 3)
         <*>
           HsProtobuf.oneof
             Hs.Nothing
@@ -352,11 +371,16 @@ instance (HsProtobuf.Message Event) where
                       @(HsProtobuf.Nested Effects.Events.Timeout)
                       @(Hs.Maybe Effects.Events.Timeout))
                      HsProtobuf.decodeMessageField))]
-  dotProto _ = []
+  dotProto _
+    = [HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 3)
+         (HsProtobufAST.Prim HsProtobufAST.UInt64)
+         (HsProtobufAST.Single "event_id") [] ""]
 instance (HsJSONPB.ToJSONPB Event) where
-  toJSONPB (Event f1_or_f2)
+  toJSONPB (Event f3 f1_or_f2)
     = HsJSONPB.object
-        [(let
+        ["event_id" .= f3,
+         (let
             encodeEvent_type
               = (case f1_or_f2 of
                    Hs.Just (EventEventTypeWorkerComplete f1)
@@ -370,9 +394,10 @@ instance (HsJSONPB.ToJSONPB Event) where
                         options
                   else
                       encodeEvent_type options))]
-  toEncodingPB (Event f1_or_f2)
+  toEncodingPB (Event f3 f1_or_f2)
     = HsJSONPB.pairs
-        [(let
+        ["event_id" .= f3,
+         (let
             encodeEvent_type
               = (case f1_or_f2 of
                    Hs.Just (EventEventTypeWorkerComplete f1)
@@ -391,7 +416,7 @@ instance (HsJSONPB.FromJSONPB Event) where
     = HsJSONPB.withObject
         "Event"
         (\ obj
-           -> Hs.pure Event
+           -> Hs.pure Event <*> obj .: "event_id"
                 <*>
                   (let
                      parseEvent_type parseObj

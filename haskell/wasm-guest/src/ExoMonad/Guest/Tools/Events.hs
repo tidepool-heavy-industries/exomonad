@@ -23,6 +23,7 @@ data WaitForEvent = WaitForEvent
 data WaitForEventArgs = WaitForEventArgs
   { wfeTypes :: [Text]
   , wfeTimeoutSecs :: Int
+  , wfeAfterEventId :: Maybe Int
   } deriving (Generic, Show)
 
 instance FromJSON WaitForEventArgs where
@@ -51,15 +52,25 @@ instance MCPTool WaitForEvent where
             , "default" .= (300 :: Int)
             , "description" .= ("Timeout in seconds" :: Text)
             ]
+        , "after_event_id" .= object
+            [
+              "type" .= ("number" :: Text)
+            , "default" .= (0 :: Int)
+            , "description" .= ("Only return events with ID greater than this value (cursor for skipping stale events)" :: Text)
+            ]
         ]
     , "required" .= (["types"] :: [Text])
     ]
   toolHandler args = do
-    result <- Events.waitForEvent (wfeTypes args) (wfeTimeoutSecs args)
+    let cursor = maybe 0 fromIntegral (wfeAfterEventId args)
+    result <- Events.waitForEvent (wfeTypes args) (wfeTimeoutSecs args) cursor
     case result of
       Left err -> pure $ errorResult $ pack (show err)
       Right resp -> case Proto.waitForEventResponseEvent resp of
-        Just event -> pure $ successResult $ object ["event" .= event]
+        Just event -> pure $ successResult $ object
+          [ "event" .= event
+          , "event_id" .= Proto.eventEventId event
+          ]
         Nothing -> pure $ errorResult "No event in response"
 
 -- | Notify completion tool (for workers to call on exit)
@@ -112,8 +123,8 @@ instance MCPTool NotifyCompletion where
     ]
   toolHandler args = do
     let event = Proto.Event
-          {
-            Proto.eventEventType = Just $ Proto.EventEventTypeWorkerComplete $ Proto.WorkerComplete
+          { Proto.eventEventId = 0
+          , Proto.eventEventType = Just $ Proto.EventEventTypeWorkerComplete $ Proto.WorkerComplete
               {
                 Proto.workerCompleteWorkerId = TL.fromStrict (ncWorkerId args)
               , Proto.workerCompleteStatus = TL.fromStrict (ncStatus args)

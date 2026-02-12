@@ -656,13 +656,6 @@ async fn main() -> Result<()> {
 
             let server_pid_path = project_dir.join(".exomonad/server.pid");
 
-            info!(
-                wasm_path = %wasm_path.display(),
-                port = %port,
-                role = %role_name,
-                "Starting HTTP MCP server with file-based WASM (hot reload enabled)"
-            );
-
             // Initialize services (with MCP server port for per-agent endpoint URLs)
             let services = Arc::new(
                 Services::new()
@@ -670,6 +663,14 @@ async fn main() -> Result<()> {
                     .with_mcp_server_port(port)
                     .validate()
                     .context("Failed to validate services")?,
+            );
+
+            info!(
+                wasm_path = %wasm_path.display(),
+                port = %port,
+                role = %role_name,
+                event_session_id = %services.event_session_id(),
+                "Starting HTTP MCP server with file-based WASM (hot reload enabled)"
             );
 
             // Build runtime with file-based WASM loading (enables hot reload)

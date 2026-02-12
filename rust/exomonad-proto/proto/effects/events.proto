@@ -2,8 +2,9 @@ syntax = "proto3";
 package exomonad.effects.events;
 
 message WaitForEventRequest {
-  repeated string types = 1;  // e.g. ["worker_complete"]
+  repeated string types = 1;
   int32 timeout_secs = 2;
+  uint64 after_event_id = 3;  // Skip events with id <= this value. 0 means no filtering.
 }
 
 message WaitForEventResponse {
@@ -20,6 +21,7 @@ message NotifyEventResponse {
 }
 
 message Event {
+  uint64 event_id = 3;  // Monotonically increasing ID assigned by EventQueue
   oneof event_type {
     WorkerComplete worker_complete = 1;
     Timeout timeout = 2;

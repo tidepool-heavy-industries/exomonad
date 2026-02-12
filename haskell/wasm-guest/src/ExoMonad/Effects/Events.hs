@@ -13,6 +13,7 @@ import ExoMonad.Effect.Class (Effect (..), runEffect, EffectError)
 import Data.Text (Text)
 import Data.Text.Lazy qualified as TL
 import Data.Vector qualified as V
+import Data.Word (Word64)
 
 -- | Wait for event effect
 data EventsWaitForEvent
@@ -23,12 +24,13 @@ instance Effect EventsWaitForEvent where
   effectId = "events.wait_for_event"
 
 -- | Smart constructor for wait_for_event
-waitForEvent :: [Text] -> Int -> IO (Either EffectError Proto.WaitForEventResponse)
-waitForEvent types timeout =
+waitForEvent :: [Text] -> Int -> Word64 -> IO (Either EffectError Proto.WaitForEventResponse)
+waitForEvent types timeout afterEventId =
   runEffect @EventsWaitForEvent $
     Proto.WaitForEventRequest
       { Proto.waitForEventRequestTypes = V.fromList (map TL.fromStrict types)
       , Proto.waitForEventRequestTimeoutSecs = fromIntegral timeout
+      , Proto.waitForEventRequestAfterEventId = afterEventId
       }
 
 -- | Notify event effect

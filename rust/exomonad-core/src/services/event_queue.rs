@@ -11,6 +11,7 @@ type SessionId = String;
 pub struct EventQueue {
     queues: Arc<Mutex<HashMap<SessionId, VecDeque<Event>>>>,
     wakers: Arc<Mutex<HashMap<SessionId, Vec<oneshot::Sender<Event>>>>>,
+    next_id: Arc<Mutex<u64>>,
 }
 
 impl EventQueue {
@@ -18,6 +19,7 @@ impl EventQueue {
         Self {
             queues: Arc::new(Mutex::new(HashMap::new())),
             wakers: Arc::new(Mutex::new(HashMap::new())),
+            next_id: Arc::new(Mutex::new(1)),
         }
     }
 
@@ -26,12 +28,13 @@ impl EventQueue {
         session_id: &str,
         types: &[String],
         timeout: Duration,
+        after_event_id: u64,
     ) -> Result<Event> {
         // Check queue first (might already have event)
         {
             let mut queues = self.queues.lock().await;
             if let Some(queue) = queues.get_mut(session_id) {
-                if let Some(event) = Self::find_matching(queue, types) {
+                if let Some(event) = Self::find_matching(queue, types, after_event_id) {
                     return Ok(event);
                 }
             }
@@ -46,15 +49,24 @@ impl EventQueue {
 
         // Await with timeout
         match tokio::time::timeout(timeout, rx).await {
-            Ok(Ok(event)) if Self::matches_type(&event, types) => Ok(event),
+            Ok(Ok(event)) if (after_event_id == 0 || event.event_id > after_event_id) && Self::matches_type(&event, types) => Ok(event),
             Ok(Ok(_)) => Err(anyhow!("received non-matching event")),
             Err(_) => Ok(Self::timeout_event(timeout.as_secs() as i32)),
             Ok(Err(_)) => Err(anyhow!("waker channel closed")),
         }
     }
 
-    pub async fn notify_event(&self, session_id: &str, event: Event) {
-        info!(session_id = %session_id, "EventQueue: notify_event appending to queue");
+    pub async fn notify_event(&self, session_id: &str, mut event: Event) {
+        // Assign monotonic event ID
+        let id = {
+            let mut next = self.next_id.lock().await;
+            let id = *next;
+            *next += 1;
+            id
+        };
+        event.event_id = id;
+
+        info!(session_id = %session_id, event_id = id, "EventQueue: notify_event appending to queue");
         // Append to queue
         {
             let mut queues = self.queues.lock().await;
@@ -77,8 +89,10 @@ impl EventQueue {
         }
     }
 
-    fn find_matching(queue: &mut VecDeque<Event>, types: &[String]) -> Option<Event> {
-        let pos = queue.iter().position(|e| Self::matches_type(e, types))?;
+    fn find_matching(queue: &mut VecDeque<Event>, types: &[String], after_event_id: u64) -> Option<Event> {
+        let pos = queue.iter().position(|e| {
+            (after_event_id == 0 || e.event_id > after_event_id) && Self::matches_type(e, types)
+        })?;
         queue.remove(pos)
     }
 
@@ -95,6 +109,7 @@ impl EventQueue {
 
     fn timeout_event(timeout_secs: i32) -> Event {
         Event {
+            event_id: 0,
             event_type: Some(EventType::Timeout(
                 exomonad_proto::effects::events::Timeout { timeout_secs },
             )),
@@ -116,6 +131,7 @@ mod tests {
     async fn test_notify_then_wait() {
         let queue = EventQueue::new();
         let event = Event {
+            event_id: 0,
             event_type: Some(EventType::WorkerComplete(
                 exomonad_proto::effects::events::WorkerComplete {
                     worker_id: "test".to_string(),
@@ -132,6 +148,7 @@ mod tests {
                 "session1",
                 &["worker_complete".to_string()],
                 Duration::from_secs(1),
+                0,
             )
             .await;
         assert!(result.is_ok());
@@ -148,6 +165,7 @@ mod tests {
                     "session2",
                     &["worker_complete".to_string()],
                     Duration::from_secs(5),
+                    0,
                 )
                 .await
         });
@@ -155,6 +173,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let event = Event {
+            event_id: 0,
             event_type: Some(EventType::WorkerComplete(
                 exomonad_proto::effects::events::WorkerComplete {
                     worker_id: "test2".to_string(),
@@ -168,5 +187,40 @@ mod tests {
 
         let result = handle.await.unwrap();
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_cursor_filtering() {
+        let queue = EventQueue::new();
+        
+        let event1 = Event {
+            event_id: 0, // Will be assigned by queue
+            event_type: Some(EventType::WorkerComplete(exomonad_proto::effects::events::WorkerComplete {
+                worker_id: "worker-1".to_string(),
+                status: "success".to_string(),
+                changes: vec![],
+                message: "first".to_string(),
+            })),
+        };
+        let event2 = Event {
+            event_id: 0,
+            event_type: Some(EventType::WorkerComplete(exomonad_proto::effects::events::WorkerComplete {
+                worker_id: "worker-2".to_string(),
+                status: "success".to_string(),
+                changes: vec![],
+                message: "second".to_string(),
+            })),
+        };
+        
+        queue.notify_event("s1", event1).await;
+        queue.notify_event("s1", event2).await;
+        
+        // Without cursor: gets first event (id=1)
+        let result = queue.wait_for_event("s1", &["worker_complete".to_string()], Duration::from_secs(1), 0).await.unwrap();
+        assert_eq!(result.event_id, 1);
+        
+        // With cursor=1: skips first, gets second (id=2)
+        let result = queue.wait_for_event("s1", &["worker_complete".to_string()], Duration::from_secs(1), 1).await.unwrap();
+        assert_eq!(result.event_id, 2);
     }
 }

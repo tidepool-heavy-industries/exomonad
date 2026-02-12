@@ -94,7 +94,7 @@ instance MCPTool CreateTask where
         blockedBy = fromMaybe [] (ctBlockedBy args)
     result <- Coordination.createTask subject description owner blockedBy
     case result of
-      Left err -> pure $ errorResult (TL.toStrict $ "Coordination effect failed: " <> TL.pack (show err))
+      Left err -> pure $ errorResult (T.pack (show err))
       Right resp -> pure $ successResult $ object ["task_id" .= TL.toStrict (Coordination.createTaskResponseTaskId resp)]
 
 -- ============================================================================
@@ -165,7 +165,7 @@ instance MCPTool UpdateTask where
     -- returns a Task if found.
     getRes <- Coordination.getTask (utTaskId args)
     case getRes of
-      Left err -> pure $ errorResult (TL.toStrict $ "Coordination effect failed (get): " <> TL.pack (show err))
+      Left err -> pure $ errorResult (T.pack (show err))
       Right getResp -> case Coordination.getTaskResponseTask getResp of
         Nothing -> pure $ errorResult $ "Task not found: " <> utTaskId args
         Just task -> do
@@ -176,7 +176,7 @@ instance MCPTool UpdateTask where
           
           res <- Coordination.updateTask (utTaskId args) (unwrapEnum status) owner description subject
           case res of
-            Left err -> pure $ errorResult (TL.toStrict $ "Coordination effect failed (update): " <> TL.pack (show err))
+            Left err -> pure $ errorResult (T.pack (show err))
             Right resp -> pure $ successResult $ object ["success" .= Coordination.updateTaskResponseSuccess resp]
 
 parseStatus :: Text -> Coordination.Enumerated Coordination.TaskStatus
@@ -225,7 +225,7 @@ instance MCPTool ListTasks where
     let status = maybe Coordination.TaskStatusTASK_STATUS_UNSPECIFIED (unwrapEnum . parseStatus) (ltStatus args)
     result <- Coordination.listTasks status
     case result of
-      Left err -> pure $ errorResult (TL.toStrict $ "Coordination effect failed: " <> TL.pack (show err))
+      Left err -> pure $ errorResult (T.pack (show err))
       Right resp ->
         let tasks = V.toList (Coordination.listTasksResponseTasks resp)
          in pure $ successResult $ Aeson.toJSON (map taskToJson tasks)
@@ -282,7 +282,7 @@ instance MCPTool GetTask where
   toolHandler args = do
     result <- Coordination.getTask (gtTaskId args)
     case result of
-      Left err -> pure $ errorResult (TL.toStrict $ "Coordination effect failed: " <> TL.pack (show err))
+      Left err -> pure $ errorResult (T.pack (show err))
       Right resp -> case Coordination.getTaskResponseTask resp of
         Nothing -> pure $ errorResult $ "Task not found: " <> gtTaskId args
         Just task -> pure $ successResult $ taskToJson task
@@ -328,11 +328,11 @@ instance MCPTool SendCoordMessage where
             ]
       ]
   toolHandler args = do
-    let from = "agent"
+    let from = "agent" -- TODO: pass real agent identity from MCP session context
         summary = fromMaybe "" (smSummary args)
     result <- Coordination.sendMessage from (smText args) summary
     case result of
-      Left err -> pure $ errorResult (TL.toStrict $ "Coordination effect failed: " <> TL.pack (show err))
+      Left err -> pure $ errorResult (T.pack (show err))
       Right resp -> pure $ successResult $ object ["success" .= Coordination.sendMessageResponseSuccess resp]
 
 -- ============================================================================
@@ -370,7 +370,7 @@ instance MCPTool GetCoordMessages where
     let unreadOnly = fromMaybe False (gmUnreadOnly args)
     result <- Coordination.getMessages unreadOnly
     case result of
-      Left err -> pure $ errorResult (TL.toStrict $ "Coordination effect failed: " <> TL.pack (show err))
+      Left err -> pure $ errorResult (T.pack (show err))
       Right resp ->
         let messages = V.toList (Coordination.getMessagesResponseMessages resp)
          in pure $ successResult $ Aeson.toJSON (map messageToJson messages)

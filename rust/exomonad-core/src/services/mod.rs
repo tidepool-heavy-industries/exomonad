@@ -30,6 +30,7 @@ pub use self::secrets::Secrets;
 use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
+use uuid::Uuid;
 
 /// Errors that can occur during services validation.
 ///
@@ -119,6 +120,10 @@ pub struct Services {
 
     /// Zellij session name for event emission (optional).
     pub zellij_session: Option<String>,
+
+    /// Server-generated UUID for event routing between TL and workers.
+    /// Decoupled from zellij_session so event routing works regardless of Zellij.
+    pub event_session_id: String,
 }
 
 /// Validated services wrapper.
@@ -171,6 +176,7 @@ impl Services {
             event_queue,
             filesystem,
             zellij_session: None,
+            event_session_id: Uuid::new_v4().to_string(),
         }
     }
 
@@ -187,7 +193,9 @@ impl Services {
     pub fn with_mcp_server_port(mut self, port: u16) -> Self {
         let project_dir = std::env::current_dir().unwrap_or_default();
         let github = self.github.clone();
-        let mut acs = AgentControlService::new(project_dir, github).with_mcp_server_port(port);
+        let mut acs = AgentControlService::new(project_dir, github)
+            .with_mcp_server_port(port)
+            .with_event_session_id(self.event_session_id.clone());
         if let Some(ref session) = self.zellij_session {
             acs = acs.with_zellij_session(session.clone());
         }
@@ -297,6 +305,11 @@ impl ValidatedServices {
     /// Get the Zellij session name (if configured).
     pub fn zellij_session(&self) -> Option<&str> {
         self.0.zellij_session.as_deref()
+    }
+
+    /// Get the event session ID (server-generated UUID).
+    pub fn event_session_id(&self) -> &str {
+        &self.0.event_session_id
     }
 
     /// Get a reference to the inner Services.

@@ -55,6 +55,7 @@ impl EventEffects for EventHandler {
             session_id = %session_id,
             types = ?req.types,
             timeout_secs = req.timeout_secs,
+            after_event_id = req.after_event_id,
             "wait_for_event called"
         );
 
@@ -67,7 +68,7 @@ impl EventEffects for EventHandler {
 
         let event = self
             .queue
-            .wait_for_event(session_id, &req.types, Duration::from_secs(timeout_secs))
+            .wait_for_event(session_id, &req.types, Duration::from_secs(timeout_secs), req.after_event_id)
             .await
             .map_err(|e| {
                 crate::effects::EffectError::custom("events.wait_failed", e.to_string())

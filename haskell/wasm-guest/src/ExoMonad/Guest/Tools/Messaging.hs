@@ -27,6 +27,7 @@ where
 import Data.Aeson (FromJSON, Value, object, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Effects.Messaging qualified as M
 import Data.Vector qualified as V
@@ -71,7 +72,7 @@ instance MCPTool Note where
   toolHandler args = do
     result <- Messaging.sendNote (naContent args)
     case result of
-      Left err -> pure $ errorResult (TL.toStrict $ "Messaging effect failed: " <> TL.pack (show err))
+      Left err -> pure $ errorResult (T.pack (show err))
       Right _resp -> pure $ successResult $ object ["ack" .= True]
 
 -- ============================================================================
@@ -111,7 +112,7 @@ instance MCPTool Question where
   toolHandler args = do
     result <- Messaging.sendQuestion (qaContent args)
     case result of
-      Left err -> pure $ errorResult (TL.toStrict $ "Messaging effect failed: " <> TL.pack (show err))
+      Left err -> pure $ errorResult (T.pack (show err))
       Right resp -> pure $ successResult $ object ["answer" .= TL.toStrict (M.sendQuestionResponseAnswer resp)]
 
 -- ============================================================================
@@ -166,7 +167,7 @@ instance MCPTool GetAgentMessages where
     let timeoutSecs = maybe 0 id (gaTimeoutSecs args)
     result <- Messaging.getAgentMessages agentId timeoutSecs
     case result of
-      Left err -> pure $ errorResult (TL.toStrict $ "Messaging effect failed: " <> TL.pack (show err))
+      Left err -> pure $ errorResult (T.pack (show err))
       Right resp ->
         let agents = V.toList (M.getAgentMessagesResponseAgents resp)
             warning = TL.toStrict (M.getAgentMessagesResponseWarning resp)
@@ -251,7 +252,7 @@ instance MCPTool AnswerQuestion where
   toolHandler args = do
     result <- Messaging.answerQuestion (aqAgentId args) (aqQuestionId args) (aqAnswer args)
     case result of
-      Left err -> pure $ errorResult (TL.toStrict $ "Messaging effect failed: " <> TL.pack (show err))
+      Left err -> pure $ errorResult (T.pack (show err))
       Right resp ->
         pure $ successResult $
           object

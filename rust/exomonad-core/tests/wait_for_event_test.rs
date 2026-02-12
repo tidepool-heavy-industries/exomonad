@@ -55,6 +55,7 @@ async fn test_wait_for_event_roundtrip() {
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let event = Event {
+            event_id: 0,
             event_type: Some(EventType::WorkerComplete(WorkerComplete {
                 worker_id: "test-worker".to_string(),
                 status: "success".to_string(),

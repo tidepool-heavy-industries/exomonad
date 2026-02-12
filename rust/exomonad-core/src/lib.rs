@@ -326,7 +326,7 @@ pub fn register_builtin_handlers(
     builder = builder.with_effect_handler(handlers::EventHandler::new(
         event_queue.clone(),
         remote_port,
-        services.zellij_session().map(|s| s.to_string()),
+        Some(services.event_session_id().to_string()),
     ));
 
     let question_registry = Arc::new(services::questions::QuestionRegistry::new());

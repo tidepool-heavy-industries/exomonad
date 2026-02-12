@@ -17,6 +17,7 @@ where
 
 import Control.Monad (void)
 import Data.Aeson (ToJSON (..), encode, object, (.=))
+import Data.Aeson.Key qualified as Key
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
@@ -282,13 +283,13 @@ sendLifecycleNote noteType fields = do
     Just agent -> do
       -- Get current branch for context
       branchName <- getCurrentBranch
-      let jsonFields =
-              [ ("\"type\": \"" <> noteType <> "\""),
-                ("\"agent_id\": \"" <> agent <> "\""),
-                ("\"branch\": \"" <> branchName <> "\"")
-              ]
-              <> map (\(k, v) -> "\"" <> k <> "\": \"" <> escapeJson v <> "\"") fields
-          jsonContent = "{" <> T.intercalate ", " jsonFields <> "}"
+      let baseFields =
+            [ "type" .= noteType
+            , "agent_id" .= agent
+            , "branch" .= branchName
+            ]
+          extraFields = map (\(k, v) -> Key.fromText k .= v) fields
+          jsonContent = TL.toStrict $ TLE.decodeUtf8 $ encode $ object (baseFields <> extraFields)
       _ <- sendNote jsonContent
       pure ()
     _ -> pure () -- No agent context, skip messaging
@@ -300,7 +301,3 @@ getCurrentBranch = do
   case result of
     Right resp -> pure $ TL.toStrict (Git.getBranchResponseBranch resp)
     Left _ -> pure "unknown"
-
--- | Escape JSON string content (minimal: backslash and double-quote).
-escapeJson :: Text -> Text
-escapeJson = T.replace "\\" "\\\\" . T.replace "\"" "\\\"" . T.replace "\n" "\\n"

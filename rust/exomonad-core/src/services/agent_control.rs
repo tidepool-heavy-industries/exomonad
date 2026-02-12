@@ -270,6 +270,8 @@ pub struct AgentControlService {
     github: Option<GitHubService>,
     /// Zellij session name for event emission
     zellij_session: Option<String>,
+    /// Server-generated UUID for event routing (EXOMONAD_SESSION_ID env var).
+    event_session_id: Option<String>,
     /// MCP server port for per-agent endpoint URLs (set when running `exomonad serve`).
     mcp_server_port: Option<u16>,
 }
@@ -281,6 +283,7 @@ impl AgentControlService {
             project_dir,
             github,
             zellij_session: None,
+            event_session_id: None,
             mcp_server_port: None,
         }
     }
@@ -288,6 +291,12 @@ impl AgentControlService {
     /// Set the Zellij session name for event emission.
     pub fn with_zellij_session(mut self, session: String) -> Self {
         self.zellij_session = Some(session);
+        self
+    }
+
+    /// Set the event session ID for worker coordination.
+    pub fn with_event_session_id(mut self, id: String) -> Self {
+        self.event_session_id = Some(id);
         self
     }
 
@@ -311,6 +320,7 @@ impl AgentControlService {
             project_dir,
             github,
             zellij_session: None,
+            event_session_id: None,
             mcp_server_port: None,
         })
     }
@@ -470,7 +480,7 @@ impl AgentControlService {
 
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-            let session_id = self.zellij_session.as_deref().unwrap_or("default");
+            let session_id = self.event_session_id.as_deref().unwrap_or("default");
             env_vars.insert("EXOMONAD_SESSION_ID".to_string(), session_id.to_string());
             if let Some(port) = self.mcp_server_port {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
@@ -661,7 +671,7 @@ impl AgentControlService {
 
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-            let session_id = self.zellij_session.as_deref().unwrap_or("default");
+            let session_id = self.event_session_id.as_deref().unwrap_or("default");
             env_vars.insert("EXOMONAD_SESSION_ID".to_string(), session_id.to_string());
             if let Some(port) = self.mcp_server_port {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
@@ -781,7 +791,7 @@ impl AgentControlService {
 
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-            let session_id = self.zellij_session.as_deref().unwrap_or("default");
+            let session_id = self.event_session_id.as_deref().unwrap_or("default");
             env_vars.insert("EXOMONAD_SESSION_ID".to_string(), session_id.to_string());
             if let Some(port) = self.mcp_server_port {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());

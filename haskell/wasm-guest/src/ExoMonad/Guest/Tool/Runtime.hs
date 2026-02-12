@@ -9,14 +9,13 @@ module ExoMonad.Guest.Tool.Runtime
     listHandlerRecord,
     hookHandler,
     handleWorkerExit,
-    testHandler,
     wrapHandler,
   )
 where
 
 import Control.Exception (SomeException, try)
 import Control.Monad (unless, void)
-import Data.Aeson (FromJSON, ToJSON, Value, withObject, (.:), (.=))
+import Data.Aeson (Value, (.=))
 import Data.Aeson qualified as Aeson
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as BSL
@@ -40,7 +39,6 @@ import ExoMonad.Guest.Types (HookEventType (..), HookInput (..), HookOutput, MCP
 import ExoMonad.Types (HookConfig (..))
 import ExoMonad.PDK (input, output)
 import Foreign.C.Types (CInt (..))
-import GHC.Generics (Generic)
 import Polysemy (Embed, Sem, runM)
 import System.Directory (getCurrentDirectory)
 import System.FilePath (takeFileName)
@@ -54,52 +52,6 @@ logError_ msg = void $ runEffect_ @LogError (Log.ErrorRequest {Log.errorRequestM
 
 emitEvent_ :: Value -> IO ()
 emitEvent_ val = void $ runEffect_ @LogEmitEvent (Log.EmitEventRequest {Log.emitEventRequestEventType = "custom", Log.emitEventRequestPayload = BSL.toStrict (Aeson.encode val), Log.emitEventRequestTimestamp = 0})
-
--- | Test handler - allows calling any host function directly for property testing.
--- Note: testHandler is kept as a passthrough for backward compatibility.
--- In the new architecture, all effects go through yield_effect, so this
--- handler is primarily useful for integration testing the effect system.
-testHandler :: IO CInt
-testHandler = do
-  inp <- input @ByteString
-  case Aeson.eitherDecodeStrict inp of
-    Left err -> do
-      output (BSL.toStrict $ Aeson.encode $ TestResult @Value False Nothing (Just $ "JSON decode error: " ++ err))
-      pure 1
-    Right (TestCall _func _payload) -> do
-      -- Test dispatch is no longer supported via direct host functions.
-      -- Tests should use runEffect directly.
-      output (BSL.toStrict $ Aeson.encode $ TestResult @Value False Nothing (Just $ "testHandler dispatch removed: use runEffect directly"))
-      pure 1
-
--- | Input structure for testHandler
-data TestCall = TestCall
-  { functionName :: Text,
-    args :: Value
-  }
-  deriving (Show, Generic)
-
-instance FromJSON TestCall where
-  parseJSON = withObject "TestCall" $ \v ->
-    TestCall
-      <$> v .: "function"
-      <*> v .: "args"
-
--- | Output structure for testHandler
-data TestResult a = TestResult
-  { successTest :: Bool,
-    resultTest :: Maybe a,
-    errorTest :: Maybe String
-  }
-  deriving (Show, Generic)
-
-instance (ToJSON a) => ToJSON (TestResult a) where
-  toJSON (TestResult s r e) =
-    Aeson.object
-      [ "success" .= s,
-        "result" .= r,
-        "error" .= e
-      ]
 
 -- | MCP call handler - dispatches to tools based on a record.
 mcpHandlerRecord :: forall tools. (DispatchRecord tools) => tools AsHandler -> IO CInt
@@ -172,9 +124,9 @@ hookHandler config = do
 
     handleStopHook :: HookInput -> (HookInput -> Sem '[Embed IO] StopHookOutput) -> IO CInt
     handleStopHook hookInput hook = do
-      -- Extract agent ID from current working directory (e.g., "gh-453-gemini")
+      -- Extract agent ID from hook input or fallback to current working directory (e.g., "gh-453-gemini")
       cwd <- getCurrentDirectory
-      let agentId = T.pack $ takeFileName cwd
+      let agentId = fromMaybe (T.pack $ takeFileName cwd) (hiAgentId hookInput)
 
       -- Get current timestamp in ISO8601 format
       now <- getCurrentTime
@@ -221,26 +173,21 @@ handleWorkerExit hookInput = do
     (Just agentId, Just sessionId) -> do
         logInfo_ $ "Handling exit for agent: " <> agentId <> " session: " <> sessionId
 
-        -- TODO: use git effect instead of subprocess (WASI can't spawn processes)
-        let changes = V.empty
-
-        -- Create the completion event
         let event = ProtoEvents.Event
-              { ProtoEvents.eventEventType = Just $ ProtoEvents.EventEventTypeWorkerComplete $ ProtoEvents.WorkerComplete
+              { ProtoEvents.eventEventId = 0
+              , ProtoEvents.eventEventType = Just $ ProtoEvents.EventEventTypeWorkerComplete $ ProtoEvents.WorkerComplete
                   { ProtoEvents.workerCompleteWorkerId = TL.fromStrict agentId
                   , ProtoEvents.workerCompleteStatus = "success"
-                  , ProtoEvents.workerCompleteChanges = changes
+                  , ProtoEvents.workerCompleteChanges = V.empty
                   , ProtoEvents.workerCompleteMessage = "Worker " <> TL.fromStrict agentId <> " completed"
                   }
               }
 
-        -- Send event
-        logInfo_ $ "About to call Events.notifyEvent for session: " <> sessionId
         res <- try @SomeException (Events.notifyEvent sessionId event)
         case res of
             Left exc -> logError_ ("notifyEvent threw exception: " <> T.pack (show exc))
             Right (Left err) -> logError_ ("Failed to notify completion: " <> T.pack (show err))
-            Right (Right _) -> logInfo_ "Completion notified"
+            Right (Right _) -> logInfo_ ("Completion notified for " <> agentId)
 
     _ -> do
         logError_ "agent_id or exomonad_session_id missing from hook input"
