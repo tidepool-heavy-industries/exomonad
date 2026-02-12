@@ -44,8 +44,6 @@ import GHC.Generics (Generic)
 import Polysemy (Embed, Sem, runM)
 import System.Directory (getCurrentDirectory)
 import System.FilePath (takeFileName)
-import System.Process (readProcessWithExitCode)
-import System.Exit (ExitCode(..))
 
 -- | Helper for fire-and-forget logging via yield_effect.
 logInfo_ :: Text -> IO ()
@@ -223,12 +221,8 @@ handleWorkerExit hookInput = do
     (Just agentId, Just sessionId) -> do
         logInfo_ $ "Handling exit for agent: " <> agentId <> " session: " <> sessionId
 
-        -- Get git diff for changes
-        (exitCode, stdout, _) <- readProcessWithExitCode "git" ["diff", "--stat", "HEAD"] ""
-
-        let changes = case exitCode of
-              ExitSuccess -> V.fromList $ map TL.fromStrict $ T.lines (T.pack stdout)
-              _ -> V.empty
+        -- TODO: use git effect instead of subprocess (WASI can't spawn processes)
+        let changes = V.empty
 
         -- Create the completion event
         let event = ProtoEvents.Event
@@ -241,10 +235,12 @@ handleWorkerExit hookInput = do
               }
 
         -- Send event
-        res <- Events.notifyEvent sessionId event
+        logInfo_ $ "About to call Events.notifyEvent for session: " <> sessionId
+        res <- try @SomeException (Events.notifyEvent sessionId event)
         case res of
-            Left err -> logError_ ("Failed to notify completion: " <> T.pack (show err))
-            Right _ -> logInfo_ "Completion notified"
+            Left exc -> logError_ ("notifyEvent threw exception: " <> T.pack (show exc))
+            Right (Left err) -> logError_ ("Failed to notify completion: " <> T.pack (show err))
+            Right (Right _) -> logInfo_ "Completion notified"
 
     _ -> do
         logError_ "agent_id or exomonad_session_id missing from hook input"

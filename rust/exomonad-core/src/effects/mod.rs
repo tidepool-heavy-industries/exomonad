@@ -136,7 +136,7 @@ impl EffectRegistry {
             .get(namespace)
             .ok_or_else(|| EffectError::not_found(format!("handler/{}", namespace)))?;
 
-        tracing::debug!(
+        tracing::info!(
             effect_type = %effect_type,
             namespace = %namespace,
             payload_bytes = payload.len(),

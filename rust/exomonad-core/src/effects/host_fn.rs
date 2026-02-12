@@ -101,7 +101,7 @@ fn yield_effect_impl(
     let envelope = EffectEnvelope::decode(input_bytes.as_slice())
         .map_err(|e| Error::msg(format!("Failed to decode EffectEnvelope: {}", e)))?;
 
-    tracing::debug!(
+    tracing::info!(
         effect_type = %envelope.effect_type,
         payload_bytes = envelope.payload.len(),
         "yield_effect: dispatching"
@@ -117,6 +117,19 @@ fn yield_effect_impl(
             .registry
             .dispatch(&envelope.effect_type, &envelope.payload),
     )?;
+
+    match &result {
+        Ok(payload) => tracing::info!(
+            effect_type = %envelope.effect_type,
+            response_bytes = payload.len(),
+            "yield_effect: dispatch succeeded"
+        ),
+        Err(err) => tracing::error!(
+            effect_type = %envelope.effect_type,
+            error = %err,
+            "yield_effect: dispatch failed"
+        ),
+    }
 
     // Build EffectResponse
     let response = match result {
