@@ -721,33 +721,6 @@ impl AgentControlService {
         Ok(result)
     }
 
-    /// Generate settings.json content for a Gemini worker.
-    ///
-    /// Constructs the JSON configuration including MCP server connection and lifecycle hooks.
-    /// Note: Gemini hooks must be PascalCase (e.g. AfterAgent).
-    pub(crate) fn generate_gemini_settings(mcp_url: &str) -> serde_json::Value {
-        serde_json::json!({
-            "mcpServers": {
-                "exomonad": {
-                    "httpUrl": mcp_url
-                }
-            },
-            "hooks": {
-                "AfterAgent": [
-                    {
-                        "matcher": "*",
-                        "hooks": [
-                            {
-                                "type": "command",
-                                "command": "exomonad hook worker-exit --runtime gemini"
-                            }
-                        ]
-                    }
-                ]
-            }
-        })
-    }
-
     /// Spawn a Gemini worker agent (Phase 2/3).
     ///
     /// No git branch or worktree is created — the worker shares the parent's worktree.
@@ -757,10 +730,6 @@ impl AgentControlService {
 
         let result = timeout(SPAWN_TIMEOUT, async {
             self.check_zellij_env()?;
-
-            let mcp_port = self.mcp_server_port.ok_or_else(|| {
-                anyhow!("MCP server port not set. Start server with `exomonad serve` before spawning agents.")
-            })?;
 
             // Sanitize name for internal use
             let slug = slugify(&options.name);
@@ -787,27 +756,8 @@ impl AgentControlService {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
             }
 
-            // Write Gemini settings to temp dir (not in worktree — worker has no worktree)
-            let tmp_agent_dir = PathBuf::from(format!("/tmp/exomonad-agents/{}", internal_name));
-            fs::create_dir_all(&tmp_agent_dir).await?;
-
-            let settings_path = tmp_agent_dir.join("settings.json");
-            let mcp_url = format!(
-                "http://localhost:{}/agents/{}/mcp",
-                mcp_port, internal_name
-            );
-            let settings = Self::generate_gemini_settings(&mcp_url);
-            fs::write(&settings_path, serde_json::to_string_pretty(&settings)?).await?;
-            info!(
-                path = %settings_path.display(),
-                url = %mcp_url,
-                "Wrote worker Gemini settings to temp dir"
-            );
-
-            env_vars.insert(
-                "GEMINI_CLI_SYSTEM_SETTINGS_PATH".to_string(),
-                settings_path.to_string_lossy().to_string(),
-            );
+            // Workers use the committed .gemini/settings.json (points to /dev/mcp).
+            // No per-agent config needed — workers don't use agent identity.
 
             // Spawn pane in current tab, cwd = project_dir (parent's worktree)
             self.new_zellij_pane(
@@ -905,20 +855,6 @@ impl AgentControlService {
                     }
                     break;
                 }
-            }
-        }
-
-        // Remove temporary worker config directory (created by spawn_worker)
-        let tmp_agent_dir = PathBuf::from(format!("/tmp/exomonad-agents/{}", internal_name));
-        if tmp_agent_dir.exists() {
-            if let Err(e) = fs::remove_dir_all(&tmp_agent_dir).await {
-                warn!(
-                    path = %tmp_agent_dir.display(),
-                    error = %e,
-                    "Failed to remove temp agent config dir (non-fatal)"
-                );
-            } else {
-                info!(path = %tmp_agent_dir.display(), "Removed temp agent config dir");
             }
         }
 
@@ -1449,20 +1385,22 @@ impl AgentControlService {
         Ok(())
     }
 
-    /// Generate MCP configuration JSON for an agent.
-    fn generate_mcp_config(name: &str, port: u16, agent_type: AgentType) -> String {
+    /// Generate MCP configuration JSON for a subtree agent.
+    ///
+    /// Subtrees get TL role (can spawn children). Agent identity comes from
+    /// the `EXOMONAD_AGENT_ID` env var set at spawn time, not from the URL.
+    fn generate_mcp_config(_name: &str, port: u16, agent_type: AgentType) -> String {
         match agent_type {
             AgentType::Claude => {
                 format!(
                     r###"{{
   "mcpServers": {{
     "exomonad": {{
-      "url": "http://localhost:{port}/agents/{name}/mcp"
+      "url": "http://localhost:{port}/tl/mcp"
     }}
   }}
 }}"###,
                     port = port,
-                    name = name,
                 )
             }
             AgentType::Gemini => {
@@ -1470,7 +1408,7 @@ impl AgentControlService {
                     r###"{{
   "mcpServers": {{
     "exomonad": {{
-      "httpUrl": "http://localhost:{port}/agents/{name}/mcp"
+      "httpUrl": "http://localhost:{port}/tl/mcp"
     }}
   }},
   "hooks": {{
@@ -1488,7 +1426,6 @@ impl AgentControlService {
   }}
 }}"###,
                     port = port,
-                    name = name,
                 )
             }
         }
@@ -1806,7 +1743,7 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
         assert_eq!(
             parsed["mcpServers"]["exomonad"]["url"],
-            "http://localhost:7432/agents/test-claude/mcp"
+            "http://localhost:7432/tl/mcp"
         );
         assert!(parsed["mcpServers"]["exomonad"].get("httpUrl").is_none());
     }
@@ -1818,7 +1755,7 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
         assert_eq!(
             parsed["mcpServers"]["exomonad"]["httpUrl"],
-            "http://localhost:7432/agents/test-gemini/mcp"
+            "http://localhost:7432/tl/mcp"
         );
         assert!(parsed["mcpServers"]["exomonad"].get("url").is_none());
 
@@ -1851,58 +1788,5 @@ mod tests {
     fn test_parse_agent_tab_not_agent() {
         assert!(parse_agent_tab("Server").is_none());
         assert!(parse_agent_tab("TL").is_none());
-    }
-
-    #[test]
-    fn test_gemini_settings_schema_compliance() {
-        let settings = AgentControlService::generate_gemini_settings("http://example.com/mcp");
-
-        // Assertions based on manual schema validation
-
-        // 1. Hooks must strictly use PascalCase (AfterAgent), not kebab-case (after-agent) or camelCase (afterAgent).
-        assert!(
-            settings["hooks"].get("AfterAgent").is_some(),
-            "hooks.AfterAgent is missing"
-        );
-        assert!(
-            settings["hooks"].get("after-agent").is_none(),
-            "Found invalid kebab-case 'after-agent'"
-        );
-        assert!(
-            settings["hooks"].get("afterAgent").is_none(),
-            "Found invalid camelCase 'afterAgent'"
-        );
-
-        // 2. The hook structure must match the array of matcher/hooks objects
-        let after_agent = &settings["hooks"]["AfterAgent"];
-        assert!(after_agent.is_array(), "hooks.AfterAgent must be an array");
-
-        let first_rule = &after_agent[0];
-        assert_eq!(
-            first_rule["matcher"], "*",
-            "AfterAgent matcher must be wildcard '*'"
-        );
-
-        let hooks_list = &first_rule["hooks"];
-        assert!(
-            hooks_list.is_array(),
-            "hooks list inside rule must be an array"
-        );
-
-        let command_hook = &hooks_list[0];
-        assert_eq!(
-            command_hook["type"], "command",
-            "Hook type must be 'command'"
-        );
-        assert_eq!(
-            command_hook["command"], "exomonad hook worker-exit --runtime gemini",
-            "Hook command mismatch"
-        );
-
-        // 3. Verify no args array is present (command string used)
-        assert!(
-            command_hook.get("args").is_none(),
-            "args should not be present when using command string"
-        );
     }
 }

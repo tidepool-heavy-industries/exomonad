@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "exomonad": {
+      "httpUrl": "http://localhost:7432/dev/mcp"
+    }
+  },
+  "hooks": {
+    "AfterAgent": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "exomonad hook worker-exit --runtime gemini"
+          }
+        ]
+      }
+    ]
+  }
+}

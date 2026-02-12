@@ -406,7 +406,7 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 3. Writes per-agent MCP config pointing to HTTP server
 4. Creates Zellij tab with agent-specific command
 5. `spawn_subtree` agents get TL role (can spawn their own children)
-6. `spawn_worker`: Runs Gemini in a Zellij pane in the parent's worktree (no branch, no worktree)
+6. `spawn_worker`: Runs Gemini in a Zellij pane in the parent's worktree (no branch, no worktree). Uses committed `.gemini/settings.json` (points to `/dev/mcp`).
 7. PRs target parent branch, not main — merged via recursive fold
 
 ### Parallel Worker Coordination
