@@ -49,17 +49,18 @@ Human in Zellij session
 ```
 
 Each subtree agent:
-- Runs in isolated git worktree branching off the parent's current branch
-- Branch naming: `{parent_branch}/{name}` — enables auto-detection of PR base branch
-- Has own CLI-native MCP config pointing to HTTP server
-- Gets TL role (can spawn their own children)
+- Runs in isolated git worktree at `.exomonad/worktrees/{slug}/`
+- Branch naming: `{parent_branch}.{slug}` (dot separator for hierarchy)
+- Gets `.mcp.json` with `{"type": "http", "url": "..."}` pointing to per-agent endpoint
+- Claude-only, gets TL role (can spawn workers, depth-capped at 2)
+- Session ID = birth-branch (immutable, deterministic). Root TL = "root".
 - PRs target parent branch, not main — merged via recursive fold
-- Runs in Zellij tab with native UI, auto-closes on exit
+- Runs in Zellij tab with `claude 'task'` (positional arg), auto-closes on exit
 
 Each worker agent:
 - Runs in a Zellij pane in the parent's worktree (no branch, no worktree)
 - Always Gemini — lightweight, focused execution
-- MCP config via temp dir + `GEMINI_CLI_SYSTEM_SETTINGS_PATH` env var
+- MCP config in `.exomonad/agents/{name}/settings.json`, pointed via `GEMINI_CLI_SYSTEM_SETTINGS_PATH`
 
 ## Documentation Tree
 
@@ -170,15 +171,15 @@ All tools are defined in Haskell WASM and executed via host functions.
 | `github_list_issues` | List GitHub issues |
 | `github_get_issue` | Get single issue details |
 | `github_list_prs` | List GitHub pull requests |
-| `spawn_subtree` | Fork a worktree node off current branch for sub-problems needing further decomposition |
-| `spawn_worker` | Spawn Gemini agent for focused task in current worktree (no branch) |
+| `spawn_subtree` | Fork a worktree node off current branch (Claude-only, creates `.exomonad/worktrees/{slug}/`) |
+| `spawn_worker` | Spawn Gemini agent as pane in current worktree (config in `.exomonad/agents/{name}/`) |
 | `file_pr` | Create/update PR for current branch (auto-detects base branch from naming) |
 | `note` | Send fire-and-forget note to TL (agent-side) |
 | `question` | Send blocking question to TL (agent-side) |
 | `get_agent_messages` | Read notes/questions from agents (TL messaging, supports long-poll) |
 | `answer_question` | Answer pending agent question (TL messaging) |
 | `wait_for_event` | Block until a matching event occurs or timeout expires |
-| `notify_completion` | Notify TL that this worker has completed |
+| `notify_parent` | Notify parent session of completion (server resolves routing automatically) |
 
 ## Effect System
 
