@@ -61,8 +61,8 @@ impl PopupService {
 
     /// Show a popup and wait for user response.
     ///
-    /// If a Zellij session is available, uses the Zellij CLI pipe mechanism.
-    /// On failure or if no session is available, falls back to a terminal prompt via /dev/tty.
+    /// Requires a Zellij session — uses the CLI pipe mechanism to communicate
+    /// with the pre-loaded exomonad-plugin floating pane.
     #[tracing::instrument(skip(self))]
     pub fn show_popup(&self, input: &PopupInput) -> Result<PopupOutput> {
         tracing::info!(title = %input.title, components = input.components.len(), "Showing popup");
@@ -74,23 +74,10 @@ impl PopupService {
 
         tracing::info!(session = ?zellij_session, configured = ?self.zellij_session, "Popup session resolution");
 
-        if let Some(session) = zellij_session {
-            match self.show_zellij_popup(&session, input) {
-                Ok(output) => return Ok(output),
-                Err(err) => {
-                    tracing::warn!(
-                        %err,
-                        session = %session,
-                        "Zellij popup failed, falling back to terminal prompt"
-                    );
-                }
-            }
-        } else {
-            tracing::warn!("No Zellij session found, falling back to terminal prompt");
-        }
+        let session = zellij_session
+            .context("No Zellij session available — popup requires a Zellij session")?;
 
-        // Fallback: terminal-based popup.
-        self.show_terminal_popup(input)
+        self.show_zellij_popup(&session, input)
     }
 
     /// Show popup via Zellij pipe to exomonad-plugin.
@@ -164,10 +151,10 @@ impl PopupService {
         let child_id = child.id();
         tracing::info!(request_id = %request_id, pid = child_id, "[Popup] zellij pipe spawned successfully");
 
-        let (tx, rx) = mpsc::channel();
-        let mut stdout = child.stdout.take().expect("stdout was piped");
+        let stdout = child.stdout.take().expect("stdout was piped");
         let mut stderr = child.stderr.take().expect("stderr was piped");
 
+        // Read stderr in background (diagnostic only)
         let req_id_stderr = request_id.clone();
         let stderr_handle = std::thread::spawn(move || {
             let mut buffer = Vec::new();
@@ -175,33 +162,36 @@ impl PopupService {
             if !buffer.is_empty() {
                 tracing::info!(request_id = %req_id_stderr, stderr = %String::from_utf8_lossy(&buffer), "[Popup] zellij pipe stderr");
             }
-            buffer
         });
 
+        // Read exactly one line from stdout. The plugin sends a single response
+        // line via cli_pipe_output, so we don't need to wait for process exit.
+        // Using read_to_end would block until the zellij pipe process exits,
+        // which may not happen promptly after unblock_cli_pipe_input.
+        let (tx, rx) = mpsc::channel();
         let req_id_stdout = request_id.clone();
         std::thread::spawn(move || {
-            let mut buffer = Vec::new();
-            let result = stdout.read_to_end(&mut buffer);
-            tracing::info!(request_id = %req_id_stdout, bytes = buffer.len(), ok = result.is_ok(), "[Popup] stdout read complete");
-            let _ = tx.send((result, buffer));
+            use std::io::BufRead;
+            let mut reader = std::io::BufReader::new(stdout);
+            let mut line = String::new();
+            let result = reader.read_line(&mut line);
+            tracing::info!(request_id = %req_id_stdout, bytes = line.len(), ok = result.is_ok(), "[Popup] stdout line read complete");
+            let _ = tx.send(result.map(|_| line));
         });
 
         tracing::info!(request_id = %request_id, timeout_secs = POPUP_TIMEOUT.as_secs(), "[Popup] Waiting for response...");
 
-        // Wait for response with timeout
+        // Wait for the single response line with timeout
         let response_str = match rx.recv_timeout(POPUP_TIMEOUT) {
-            Ok((Ok(_), buffer)) => {
-                tracing::info!(request_id = %request_id, bytes = buffer.len(), "[Popup] Got response from channel");
+            Ok(Ok(line)) => {
+                tracing::info!(request_id = %request_id, bytes = line.len(), "[Popup] Got response");
+                // Kill the pipe process — we have what we need
+                let _ = child.kill();
                 let _ = child.wait();
-                if let Ok(stderr_buf) = stderr_handle.join() {
-                    if !stderr_buf.is_empty() {
-                        let stderr_str = String::from_utf8_lossy(&stderr_buf);
-                        tracing::warn!(request_id = %request_id, stderr = %stderr_str, "zellij pipe stderr");
-                    }
-                }
-                String::from_utf8(buffer).context("Invalid UTF-8 in popup response")?
+                let _ = stderr_handle.join();
+                line
             }
-            Ok((Err(e), _)) => {
+            Ok(Err(e)) => {
                 tracing::error!(request_id = %request_id, err = %e, "[Popup] stdout read failed");
                 let _ = child.kill();
                 let _ = child.wait();
@@ -251,61 +241,6 @@ impl PopupService {
         Ok(PopupOutput { button, values })
     }
 
-    /// Fallback: Show simple terminal prompt if not in Zellij.
-    fn show_terminal_popup(&self, input: &PopupInput) -> Result<PopupOutput> {
-        use std::fs::OpenOptions;
-        use std::io::{BufRead, BufReader, Write};
-
-        let items = extract_choice_items(&input.components);
-        if items.is_empty() {
-            anyhow::bail!("Popup must have at least one choice item");
-        }
-
-        // Open /dev/tty for direct interactive I/O, bypassing stdio.
-        // This prevents corrupting JSON-RPC streams in MCP mode.
-        let mut tty_out = OpenOptions::new()
-            .write(true)
-            .open("/dev/tty")
-            .context("Failed to open /dev/tty for output")?;
-        let tty_in = OpenOptions::new()
-            .read(true)
-            .open("/dev/tty")
-            .context("Failed to open /dev/tty for input")?;
-        let mut tty_reader = BufReader::new(tty_in);
-
-        writeln!(tty_out, "\n=== {} ===", input.title)?;
-        for (i, item) in items.iter().enumerate() {
-            writeln!(tty_out, "  {}. {}", i + 1, item)?;
-        }
-        writeln!(tty_out, "  c. CANCEL")?;
-
-        loop {
-            write!(tty_out, "\nSelect an option (1-{}): ", items.len())?;
-            tty_out.flush()?;
-
-            let mut buf = String::new();
-            tty_reader.read_line(&mut buf)?;
-            let choice = buf.trim().to_lowercase();
-
-            if choice == "c" || choice == "cancel" {
-                return Ok(PopupOutput {
-                    button: "cancel".to_string(),
-                    values: serde_json::json!({}),
-                });
-            }
-
-            if let Ok(idx) = choice.parse::<usize>() {
-                if idx > 0 && idx <= items.len() {
-                    return Ok(PopupOutput {
-                        button: "submit".to_string(),
-                        values: serde_json::json!({ "selected": items[idx - 1] }),
-                    });
-                }
-            }
-
-            writeln!(tty_out, "Invalid selection, try again.")?;
-        }
-    }
 }
 
 /// Sanitize a string for use in the payload protocol.

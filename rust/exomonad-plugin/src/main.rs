@@ -189,8 +189,6 @@ impl ZellijPlugin for ExoMonadPlugin {
         self.status_state = PluginState::Idle;
         self.status_message = "Ready.".to_string();
         self.events = VecDeque::new();
-        // Start hidden — show_self(true) is called when a popup arrives
-        hide_self();
         // Initialize terminal with ZellijBackend
         if let Ok(term) = Terminal::new(ZellijBackend) {
             self.terminal = Some(term);
@@ -236,13 +234,13 @@ impl ZellijPlugin for ExoMonadPlugin {
                             self.status_state = PluginState::Error;
                             self.status_message = "JSON popup must have at least one choice component".to_string();
                             // Don't include ':' to avoid misinterpretation as successful selection
-                            cli_pipe_output(&pipe_id, &format!("ERROR_NO_ITEMS:{}", req.request_id));
+                            cli_pipe_output(&pipe_id, &format!("ERROR_NO_ITEMS:{}\n", req.request_id));
                             unblock_cli_pipe_input(&pipe_id);
                             return true;
                         }
 
                         block_cli_pipe_input(&pipe_id);
-                        show_self(true);
+                        show_self(true); // Toggle floating layer visible
                         self.active_popup = Some(ActivePopup {
                             pipe_id,
                             request_id: req.request_id,
@@ -257,8 +255,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                     Err(e) => {
                         self.status_state = PluginState::Error;
                         self.status_message = format!("Invalid JSON popup: {}", e);
-                        // Avoid ':' to prevent host misinterpretation
-                        cli_pipe_output(&pipe_id, &format!("ERROR_INVALID_JSON_{}", e));
+                        cli_pipe_output(&pipe_id, &format!("ERROR_INVALID_JSON_{}\n", e));
                         unblock_cli_pipe_input(&pipe_id);
                         return true;
                     }
@@ -270,7 +267,7 @@ impl ZellijPlugin for ExoMonadPlugin {
             if parts.len() < 3 {
                 self.status_state = PluginState::Error;
                 self.status_message = "Invalid payload format".to_string();
-                cli_pipe_output(&pipe_id, "ERROR:Invalid payload format");
+                cli_pipe_output(&pipe_id, "ERROR:Invalid payload format\n");
                 unblock_cli_pipe_input(&pipe_id);
                 return true;
             }
@@ -286,17 +283,13 @@ impl ZellijPlugin for ExoMonadPlugin {
             if items.is_empty() {
                 self.status_state = PluginState::Error;
                 self.status_message = "Popup items cannot be empty".to_string();
-                cli_pipe_output(&pipe_id, &format!("{}:ERROR:No items provided", request_id));
+                cli_pipe_output(&pipe_id, &format!("{}:ERROR:No items provided\n", request_id));
                 unblock_cli_pipe_input(&pipe_id);
                 return true;
             }
 
-            // Block CLI input while popup is active
             block_cli_pipe_input(&pipe_id);
-
-            // CRITICAL: Make headless plugin visible as floating pane
-            show_self(true);
-
+            show_self(true); // Toggle floating layer visible
             self.active_popup = Some(ActivePopup {
                 pipe_id,
                 request_id,
@@ -385,7 +378,7 @@ impl ZellijPlugin for ExoMonadPlugin {
 
                     match key.bare_key {
                         BareKey::Esc => {
-                            let response = format!("{}:CANCELLED", popup.request_id);
+                            let response = format!("{}:CANCELLED\n", popup.request_id);
                             cli_pipe_output(&popup.pipe_id, &response);
                             unblock_cli_pipe_input(&popup.pipe_id);
                             // Drop mutable borrow before clearing state
@@ -408,7 +401,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                                 .get(popup.selected_index)
                                 .cloned()
                                 .unwrap_or_default();
-                            let response = format!("{}:{}", popup.request_id, selected);
+                            let response = format!("{}:{}\n", popup.request_id, selected);
                             cli_pipe_output(&popup.pipe_id, &response);
                             unblock_cli_pipe_input(&popup.pipe_id);
                             // Drop mutable borrow before clearing state
@@ -417,12 +410,12 @@ impl ZellijPlugin for ExoMonadPlugin {
                     }
                 }
 
-                // Dismiss after Esc/Enter: clear state, hide pane, suppress render
+                // Dismiss after Esc/Enter: clear popup state, re-render as idle status
                 if matches!(key.bare_key, BareKey::Esc | BareKey::Enter) && self.active_popup.is_some() {
-                    // Pipe already responded above while popup was still borrowed
                     self.active_popup = None;
-                    hide_self();
-                    return false;
+                    self.status_state = PluginState::Idle;
+                    self.status_message = "Ready.".to_string();
+                    should_render = true;
                 }
             }
             _ => {}
