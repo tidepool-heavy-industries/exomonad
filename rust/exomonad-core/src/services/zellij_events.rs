@@ -21,10 +21,8 @@ const PIPE_TIMEOUT: Duration = Duration::from_secs(5);
 /// * `event` - The agent event to emit
 pub fn emit_event(session: &str, event: &AgentEvent) -> Result<()> {
     let json = serde_json::to_string(event).context("Failed to serialize event")?;
-    let plugin_path = format!(
-        "file:{}/.config/zellij/plugins/exomonad-plugin.wasm",
-        std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string())
-    );
+    let plugin_path = crate::layout::resolve_plugin_path()
+        .context("Zellij plugin not found. Run 'just install-all' to install it.")?;
 
     debug!(
         "[ZellijEvents] Spawning async emit to session {}: {}",

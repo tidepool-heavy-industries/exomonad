@@ -9,6 +9,7 @@
 //! 4. On submit, plugin calls `cli_pipe_output(&pipe_id, "request_id:selected_item")`
 //! 5. CLI receives response on stdout
 
+use crate::layout::resolve_plugin_path;
 use crate::ui_protocol::transport;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -19,40 +20,6 @@ use std::time::Duration;
 
 /// Timeout for waiting for popup response (5 minutes).
 const POPUP_TIMEOUT: Duration = Duration::from_secs(300);
-
-/// Default path to the Zellij plugin
-const DEFAULT_PLUGIN_PATH: &str = "~/.config/zellij/plugins/exomonad-plugin.wasm";
-
-/// Get the plugin path, checking it exists.
-/// Override with EXOMONAD_PLUGIN_PATH env var.
-///
-/// NOTE: Returns expanded path (file:/Users/...) because Zellij CLI does NOT expand tilde.
-/// This creates a separate plugin instance from KDL-loaded plugins (which use file:~/.config/...),
-/// but that's intentional for ephemeral popup use case.
-fn get_plugin_path() -> Result<String> {
-    let path =
-        std::env::var("EXOMONAD_PLUGIN_PATH").unwrap_or_else(|_| DEFAULT_PLUGIN_PATH.to_string());
-
-    // Expand ~ to home directory (required for CLI commands - Zellij CLI doesn't expand ~)
-    let expanded = if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            home.join(rest).to_string_lossy().to_string()
-        } else {
-            path.clone()
-        }
-    } else {
-        path.clone()
-    };
-
-    if !std::path::Path::new(&expanded).exists() {
-        anyhow::bail!(
-            "Zellij plugin not found at '{}'. Run 'just install-all' to install it.",
-            expanded
-        );
-    }
-
-    Ok(format!("file:{}", expanded))
-}
 
 // ============================================================================
 // Input/Output types
@@ -100,11 +67,12 @@ impl PopupService {
     pub fn show_popup(&self, input: &PopupInput) -> Result<PopupOutput> {
         tracing::info!(title = %input.title, components = input.components.len(), "Showing popup");
 
-        // Prefer configured Zellij session; otherwise, try environment variable.
         let zellij_session = self
             .zellij_session
             .clone()
             .or_else(|| std::env::var("ZELLIJ_SESSION_NAME").ok());
+
+        tracing::info!(session = ?zellij_session, configured = ?self.zellij_session, "Popup session resolution");
 
         if let Some(session) = zellij_session {
             match self.show_zellij_popup(&session, input) {
@@ -127,15 +95,14 @@ impl PopupService {
 
     /// Show popup via Zellij pipe to exomonad-plugin.
     fn show_zellij_popup(&self, session: &str, input: &PopupInput) -> Result<PopupOutput> {
-        // Generate unique request ID
         let request_id = uuid::Uuid::new_v4().to_string();
+        tracing::info!(request_id = %request_id, session = %session, "[Popup] Starting zellij popup flow");
 
-        // Check if we should use structured JSON payload
-        // We use JSON if we can successfully parse components into the UI protocol types
         let components_res: Result<Vec<crate::ui_protocol::Component>, _> =
             serde_json::from_value(serde_json::Value::Array(input.components.clone()));
 
         let payload = if let Ok(components) = components_res {
+            tracing::info!(request_id = %request_id, count = components.len(), "[Popup] Using JSON payload path");
             let request = crate::ui_protocol::PopupRequest {
                 request_id: request_id.clone(),
                 definition: crate::ui_protocol::PopupDefinition {
@@ -145,7 +112,7 @@ impl PopupService {
             };
             serde_json::to_string(&request).context("Failed to serialize PopupRequest")?
         } else {
-            // Fallback: Build legacy payload: "request_id|title|item1,item2,item3"
+            tracing::info!(request_id = %request_id, err = ?components_res.unwrap_err(), "[Popup] JSON parse failed, using legacy payload path");
             let items = extract_choice_items(&input.components);
             if items.is_empty() {
                 anyhow::bail!("Popup must have at least one choice item for Zellij display");
@@ -156,17 +123,28 @@ impl PopupService {
             format!("{}|{}|{}", request_id, safe_title, safe_items.join(","))
         };
 
-        // Verify plugin exists
-        let plugin_path = get_plugin_path()?;
+        tracing::info!(request_id = %request_id, payload_len = payload.len(), "[Popup] Payload built: {}", &payload[..payload.len().min(200)]);
 
-        tracing::debug!(
-            request_id = %request_id,
-            plugin = %plugin_path,
-            session = %session,
-            "Sending popup request via zellij pipe --plugin"
-        );
+        let plugin_path = match resolve_plugin_path() {
+            Some(p) => {
+                tracing::info!(request_id = %request_id, path = %p, "[Popup] Plugin path resolved");
+                p
+            }
+            None => {
+                tracing::error!(request_id = %request_id, "[Popup] Plugin WASM not found!");
+                anyhow::bail!("Zellij plugin not found. Run 'just install-all' to install it.");
+            }
+        };
 
-        // Use zellij pipe --plugin to send request and receive response on stdout.
+        let cmd_args = vec![
+            "--session".to_string(), session.to_string(),
+            "pipe".to_string(),
+            "--plugin".to_string(), plugin_path.clone(),
+            "--name".to_string(), transport::POPUP_PIPE.to_string(),
+            "--".to_string(), payload.clone(),
+        ];
+        tracing::info!(request_id = %request_id, "[Popup] Spawning: zellij {}", cmd_args.join(" "));
+
         let mut child = Command::new("zellij")
             .arg("--session")
             .arg(session)
@@ -183,30 +161,38 @@ impl PopupService {
             .spawn()
             .context("Failed to spawn zellij pipe command")?;
 
+        let child_id = child.id();
+        tracing::info!(request_id = %request_id, pid = child_id, "[Popup] zellij pipe spawned successfully");
+
         let (tx, rx) = mpsc::channel();
         let mut stdout = child.stdout.take().expect("stdout was piped");
         let mut stderr = child.stderr.take().expect("stderr was piped");
 
-        // Spawn thread to read stdout (blocks until plugin sends response)
+        let req_id_stderr = request_id.clone();
         let stderr_handle = std::thread::spawn(move || {
             let mut buffer = Vec::new();
             let _ = stderr.read_to_end(&mut buffer);
+            if !buffer.is_empty() {
+                tracing::info!(request_id = %req_id_stderr, stderr = %String::from_utf8_lossy(&buffer), "[Popup] zellij pipe stderr");
+            }
             buffer
         });
 
+        let req_id_stdout = request_id.clone();
         std::thread::spawn(move || {
             let mut buffer = Vec::new();
             let result = stdout.read_to_end(&mut buffer);
+            tracing::info!(request_id = %req_id_stdout, bytes = buffer.len(), ok = result.is_ok(), "[Popup] stdout read complete");
             let _ = tx.send((result, buffer));
         });
 
-        tracing::debug!(request_id = %request_id, "Waiting for popup response (timeout: {:?})", POPUP_TIMEOUT);
+        tracing::info!(request_id = %request_id, timeout_secs = POPUP_TIMEOUT.as_secs(), "[Popup] Waiting for response...");
 
         // Wait for response with timeout
         let response_str = match rx.recv_timeout(POPUP_TIMEOUT) {
             Ok((Ok(_), buffer)) => {
+                tracing::info!(request_id = %request_id, bytes = buffer.len(), "[Popup] Got response from channel");
                 let _ = child.wait();
-                // Capture stderr for debugging
                 if let Ok(stderr_buf) = stderr_handle.join() {
                     if !stderr_buf.is_empty() {
                         let stderr_str = String::from_utf8_lossy(&stderr_buf);
@@ -216,16 +202,19 @@ impl PopupService {
                 String::from_utf8(buffer).context("Invalid UTF-8 in popup response")?
             }
             Ok((Err(e), _)) => {
+                tracing::error!(request_id = %request_id, err = %e, "[Popup] stdout read failed");
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(anyhow::Error::from(e).context("Failed to read popup response"));
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
+                tracing::error!(request_id = %request_id, timeout_secs = POPUP_TIMEOUT.as_secs(), pid = child_id, "[Popup] TIMED OUT — killing zellij pipe process");
                 let _ = child.kill();
                 let _ = child.wait();
                 anyhow::bail!("Popup timed out after {} seconds", POPUP_TIMEOUT.as_secs());
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
+                tracing::error!(request_id = %request_id, "[Popup] Channel disconnected — stdout thread died");
                 let _ = child.kill();
                 let _ = child.wait();
                 anyhow::bail!("Popup response channel disconnected unexpectedly");

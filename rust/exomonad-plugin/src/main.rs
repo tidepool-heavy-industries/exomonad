@@ -189,6 +189,8 @@ impl ZellijPlugin for ExoMonadPlugin {
         self.status_state = PluginState::Idle;
         self.status_message = "Ready.".to_string();
         self.events = VecDeque::new();
+        // Start hidden — show_self(true) is called when a popup arrives
+        hide_self();
         // Initialize terminal with ZellijBackend
         if let Ok(term) = Terminal::new(ZellijBackend) {
             self.terminal = Some(term);
@@ -383,11 +385,10 @@ impl ZellijPlugin for ExoMonadPlugin {
 
                     match key.bare_key {
                         BareKey::Esc => {
-                            // Send cancel response: "{request_id}:CANCELLED"
                             let response = format!("{}:CANCELLED", popup.request_id);
                             cli_pipe_output(&popup.pipe_id, &response);
                             unblock_cli_pipe_input(&popup.pipe_id);
-                            hide_self(); // Destroy plugin pane after responding
+                            // Drop mutable borrow before clearing state
                         }
                         BareKey::Down | BareKey::Char('j') => {
                             if popup.selected_index < popup.items.len().saturating_sub(1) {
@@ -402,7 +403,6 @@ impl ZellijPlugin for ExoMonadPlugin {
                             }
                         }
                         BareKey::Enter => {
-                            // Send submit response: "{request_id}:{selected_item}"
                             let selected = popup
                                 .items
                                 .get(popup.selected_index)
@@ -411,10 +411,18 @@ impl ZellijPlugin for ExoMonadPlugin {
                             let response = format!("{}:{}", popup.request_id, selected);
                             cli_pipe_output(&popup.pipe_id, &response);
                             unblock_cli_pipe_input(&popup.pipe_id);
-                            hide_self(); // Destroy plugin pane after responding
+                            // Drop mutable borrow before clearing state
                         }
                         _ => {}
                     }
+                }
+
+                // Dismiss after Esc/Enter: clear state, hide pane, suppress render
+                if matches!(key.bare_key, BareKey::Esc | BareKey::Enter) && self.active_popup.is_some() {
+                    // Pipe already responded above while popup was still borrowed
+                    self.active_popup = None;
+                    hide_self();
+                    return false;
                 }
             }
             _ => {}

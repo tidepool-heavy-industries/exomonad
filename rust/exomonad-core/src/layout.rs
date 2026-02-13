@@ -6,6 +6,31 @@
 use askama::Template;
 use std::path::Path;
 
+/// Resolve the exomonad-plugin WASM path to an absolute `file:` URL.
+///
+/// Uses `EXOMONAD_PLUGIN_PATH` env var or the default install location.
+/// Returns the expanded absolute path (e.g., `file:/home/user/.config/zellij/plugins/exomonad-plugin.wasm`).
+/// Both the KDL layout and the popup service must use this same path so Zellij
+/// routes pipe messages to the pre-loaded instance instead of spawning a second one.
+pub fn resolve_plugin_path() -> Option<String> {
+    let raw = std::env::var("EXOMONAD_PLUGIN_PATH")
+        .unwrap_or_else(|_| "~/.config/zellij/plugins/exomonad-plugin.wasm".to_string());
+
+    let expanded = if let Some(rest) = raw.strip_prefix("~/") {
+        dirs::home_dir()
+            .map(|home| home.join(rest).to_string_lossy().to_string())
+            .unwrap_or(raw.clone())
+    } else {
+        raw.clone()
+    };
+
+    if std::path::Path::new(&expanded).exists() {
+        Some(format!("file:{}", expanded))
+    } else {
+        None
+    }
+}
+
 /// Parameters for generating an agent tab.
 pub struct AgentTabParams<'a> {
     /// Display name for the tab (e.g., "🤖 473-refactor")
@@ -43,6 +68,7 @@ struct AgentTab {
 #[template(path = "subagent.kdl.j2", escape = "none")]
 struct SubagentLayout {
     agent_tab: String,
+    plugin_path: Option<String>,
 }
 
 /// Template for the main layout with multiple agent tabs.
@@ -50,6 +76,7 @@ struct SubagentLayout {
 #[template(path = "main.kdl.j2", escape = "none")]
 struct MainLayout {
     agent_tabs: Vec<String>,
+    plugin_path: Option<String>,
 }
 
 /// Generate a complete layout for a single agent tab with zjstatus.
@@ -57,7 +84,6 @@ struct MainLayout {
 /// Returns a KDL layout string ready to write to a file and pass to
 /// `zellij action new-tab --layout <path>`.
 pub fn generate_agent_layout(params: &AgentTabParams) -> Result<String, askama::Error> {
-    // Render the agent tab
     let tab = AgentTab {
         tab_name: params.tab_name.to_string(),
         pane_name: params.pane_name.to_string(),
@@ -69,8 +95,11 @@ pub fn generate_agent_layout(params: &AgentTabParams) -> Result<String, askama::
     }
     .render()?;
 
-    // Wrap in subagent layout (includes zjstatus)
-    SubagentLayout { agent_tab: tab }.render()
+    SubagentLayout {
+        agent_tab: tab,
+        plugin_path: resolve_plugin_path(),
+    }
+    .render()
 }
 
 /// Generate a complete layout with multiple agent tabs and zjstatus.
@@ -95,6 +124,7 @@ pub fn generate_main_layout(tabs: Vec<AgentTabParams>) -> Result<String, askama:
 
     MainLayout {
         agent_tabs: rendered_tabs?,
+        plugin_path: resolve_plugin_path(),
     }
     .render()
 }
@@ -405,5 +435,63 @@ mod tests {
         let layout = generate_main_layout(tabs).unwrap();
         // Should still produce valid KDL with zjstatus
         assert!(layout.contains("zjstatus.wasm"));
+    }
+
+    #[test]
+    fn test_main_layout_includes_plugin_when_path_set() {
+        let layout = MainLayout {
+            agent_tabs: vec![],
+            plugin_path: Some("file:/home/test/.config/zellij/plugins/exomonad-plugin.wasm".to_string()),
+        }
+        .render()
+        .unwrap();
+
+        assert!(
+            layout.contains("exomonad-plugin.wasm"),
+            "Layout should include pre-loaded plugin pane"
+        );
+        assert!(
+            layout.contains("file:/home/test/.config/zellij/plugins/exomonad-plugin.wasm"),
+            "Layout should use absolute path for plugin"
+        );
+    }
+
+    #[test]
+    fn test_main_layout_omits_plugin_when_path_none() {
+        let layout = MainLayout {
+            agent_tabs: vec![],
+            plugin_path: None,
+        }
+        .render()
+        .unwrap();
+
+        assert!(
+            !layout.contains("exomonad-plugin"),
+            "Layout should not include plugin pane when path is None"
+        );
+    }
+
+    #[test]
+    fn test_subagent_layout_includes_plugin() {
+        let tab = AgentTab {
+            tab_name: "Test".to_string(),
+            pane_name: "Agent".to_string(),
+            command: "echo test".to_string(),
+            cwd: "/tmp".to_string(),
+            shell: "/bin/zsh".to_string(),
+            focus: true,
+            close_on_exit: true,
+        }
+        .render()
+        .unwrap();
+
+        let layout = SubagentLayout {
+            agent_tab: tab,
+            plugin_path: Some("file:/home/test/.config/zellij/plugins/exomonad-plugin.wasm".to_string()),
+        }
+        .render()
+        .unwrap();
+
+        assert!(layout.contains("exomonad-plugin.wasm"));
     }
 }

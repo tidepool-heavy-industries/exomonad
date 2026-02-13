@@ -7,6 +7,13 @@ layout {
         pane size=1 borderless=true {
             {% include "includes/zjstatus.kdl.j2" %}
         }
+{% if let Some(path) = plugin_path %}
+        floating_panes {
+            pane {
+                plugin location="{{ path }}"
+            }
+        }
+{% endif %}
     }
 
 {% for tab in agent_tabs %}
