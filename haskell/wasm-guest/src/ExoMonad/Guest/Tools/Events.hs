@@ -9,20 +9,19 @@ module ExoMonad.Guest.Tools.Events
   ) where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), object, (.=), genericParseJSON, genericToJSON, defaultOptions, fieldLabelModifier, camelTo2, Value)
+import Data.Aeson qualified as Aeson
+import Data.ByteString qualified as BS
+import Data.ByteString.Lazy qualified as BSL
 import Data.Text (Text, pack)
 import Data.Text.Lazy qualified as TL
 import Data.Vector qualified as V
+import Data.Word (Word8)
 import Effects.Events qualified as Proto
 import ExoMonad.Effects.Events qualified as Events
-import ExoMonad.Guest.Tool.Class (MCPTool (..), liftEffect, errorResult, successResult, WasmResult(..), EffectRequest(..), MCPCallOutput)
-import ExoMonad.Guest.Continuations (newContinuationId, storeContinuation)
 import ExoMonad.Guest.Proto (fromText)
+import ExoMonad.Guest.Tool.Class (MCPTool (..), liftEffect, errorResult, successResult, EffectRequest(..), MCPCallOutput, suspend)
 import GHC.Generics (Generic)
-import Proto3.Suite.Class (toLazyByteString, fromByteString, Message)
-import Data.ByteString.Lazy qualified as BSL
-import Data.ByteString qualified as BS
-import Data.Word (Word8)
-import Data.Aeson qualified as Aeson
+import Proto3.Suite.Class (toLazyByteString, fromByteString)
 
 -- | Wait for event tool
 data WaitForEvent = WaitForEvent
@@ -81,36 +80,27 @@ instance MCPTool WaitForEvent where
           ]
         Nothing -> pure $ errorResult "No event in response"
 
-  toolHandlerAsync args = do
-    kId <- newContinuationId
-
-    let continuation :: Value -> IO (WasmResult MCPCallOutput)
-        continuation val = case Aeson.fromJSON val of
-          Aeson.Error err ->
-            pure $ Done $ errorResult $ "Failed to parse result bytes: " <> pack err
-          Aeson.Success (bytes :: [Word8]) ->
-            case fromByteString (BS.pack bytes) of
-              Left err ->
-                pure $ Done $ errorResult $ "Failed to decode protobuf response: " <> pack (show err)
-              Right (resp :: Proto.WaitForEventResponse) ->
-                case Proto.waitForEventResponseEvent resp of
-                  Just event -> pure $ Done $ successResult $ object
-                    [ "event" .= event
-                    , "event_id" .= Proto.eventEventId event
-                    ]
-                  Nothing -> pure $ Done $ errorResult "No event in response"
-
-    storeContinuation kId continuation
-
+  toolHandlerEff args = do
     let cursor = maybe 0 fromIntegral (wfeAfterEventId args)
-    let req = Proto.WaitForEventRequest
+        req = Proto.WaitForEventRequest
           { Proto.waitForEventRequestTypes = V.fromList (map fromText (wfeTypes args))
           , Proto.waitForEventRequestTimeoutSecs = fromIntegral (wfeTimeoutSecs args)
           , Proto.waitForEventRequestAfterEventId = cursor
           }
-    let payloadBytes = BSL.unpack (toLazyByteString req)
-
-    pure $ Suspend kId (EffectRequest "events.wait_for_event" (toJSON payloadBytes))
+        payloadBytes = BSL.unpack (toLazyByteString req)
+    resultValue <- suspend (EffectRequest "events.wait_for_event" (Aeson.toJSON payloadBytes))
+    case Aeson.fromJSON resultValue of
+      Aeson.Success (bytes :: [Word8]) ->
+        case fromByteString (BS.pack bytes) of
+          Right (resp :: Proto.WaitForEventResponse) ->
+            case Proto.waitForEventResponseEvent resp of
+              Just event -> pure $ successResult $ object
+                [ "event" .= event
+                , "event_id" .= Proto.eventEventId event
+                ]
+              Nothing -> pure $ errorResult "No event in response"
+          Left err -> pure $ errorResult $ "Failed to decode protobuf: " <> pack (show err)
+      Aeson.Error err -> pure $ errorResult $ "Failed to parse result: " <> pack err
 
 -- | Notify completion tool (for workers to call on exit)
 data NotifyCompletion = NotifyCompletion

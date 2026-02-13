@@ -37,6 +37,7 @@ where
 import Data.Aeson (FromJSON)
 import Data.Kind (Type)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), ToolDefinition, WasmResult (..), mkToolDef)
+import ExoMonad.Guest.Tool.Suspend (runToolEff)
 
 -- ============================================================================
 -- Mode Class
@@ -111,4 +112,4 @@ newtype Handler tool = Handler {runHandler :: ToolArgs tool -> IO (WasmResult MC
 --   }
 -- @
 mkHandler :: forall t. (MCPTool t, FromJSON (ToolArgs t)) => Handler t
-mkHandler = Handler (toolHandlerAsync @t)
+mkHandler = Handler (\args -> runToolEff (toolHandlerEff @t args))
