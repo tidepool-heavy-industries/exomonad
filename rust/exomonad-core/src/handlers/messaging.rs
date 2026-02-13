@@ -12,6 +12,7 @@ use crate::effects::{
 };
 use crate::services::inbox;
 use crate::services::questions::QuestionRegistry;
+use crate::services::zellij_events;
 use async_trait::async_trait;
 use exomonad_proto::effects::messaging::*;
 use std::path::PathBuf;
@@ -56,7 +57,7 @@ impl MessagingEffects for MessagingHandler {
         let tl_inbox = inbox::inbox_path(&self.project_dir, "team-lead");
 
         let msg = inbox::create_message(
-            agent_id,
+            agent_id.clone(),
             req.content.clone(),
             Some(req.content.chars().take(50).collect()),
         );
@@ -66,6 +67,11 @@ impl MessagingEffects for MessagingHandler {
             .await
             .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
             .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
+
+        // Push message text into parent's Claude Code pane via Zellij plugin
+        let tab_name = resolve_parent_tab_name();
+        let formatted = format!("[note from {}] {}", agent_id, req.content);
+        zellij_events::inject_input(&tab_name, &formatted);
 
         Ok(SendNoteResponse { ack: true })
     }
@@ -92,6 +98,14 @@ impl MessagingEffects for MessagingHandler {
             .await
             .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
             .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
+
+        // Push question text into parent's Claude Code pane via Zellij plugin
+        let tab_name = resolve_parent_tab_name();
+        let formatted = format!(
+            "[question from {}, q_id={}] {}",
+            agent_id, question_id, req.question
+        );
+        zellij_events::inject_input(&tab_name, &formatted);
 
         // Await answer with 5 minute timeout (no polling)
         let timeout_dur = Duration::from_secs(300);
@@ -274,6 +288,41 @@ impl MessagingEffects for MessagingHandler {
 
 fn get_agent_id() -> String {
     crate::mcp::agent_identity::get_agent_id()
+}
+
+/// Resolve the Zellij tab name of the parent agent.
+///
+/// Uses the same identity model as `events.rs:notify_parent`:
+/// - Workers (agent_id ends with `-gemini`): parent is derived from EXOMONAD_SESSION_ID
+/// - Subtree agents: parent is one dot-level up in branch hierarchy
+/// - Root agents (no dots): parent is the TL tab
+fn resolve_parent_tab_name() -> String {
+    let agent_id = get_agent_id();
+    let session_id = std::env::var("EXOMONAD_SESSION_ID").unwrap_or_default();
+
+    if agent_id.ends_with("-gemini") {
+        // Worker: session_id is parent's session ID
+        if session_id.contains('.') {
+            // Parent is a subtree agent — extract slug from last dot segment
+            let slug = session_id.rsplit_once('.').map(|(_, s)| s).unwrap_or(&session_id);
+            format!("\u{1F916} {}", slug)
+        } else {
+            "TL".to_string()
+        }
+    } else {
+        // Subtree agent: parent is one level up
+        if let Some((parent, _)) = session_id.rsplit_once('.') {
+            if parent.contains('.') {
+                // Grandparent exists — parent is also a subtree
+                let slug = parent.rsplit_once('.').map(|(_, s)| s).unwrap_or(parent);
+                format!("\u{1F916} {}", slug)
+            } else {
+                "TL".to_string()
+            }
+        } else {
+            "TL".to_string()
+        }
+    }
 }
 
 #[cfg(test)]

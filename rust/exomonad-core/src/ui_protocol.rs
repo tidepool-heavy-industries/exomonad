@@ -20,6 +20,9 @@ use std::fmt;
 pub mod transport {
     /// Pipe name for popup requests (used with zellij pipe --plugin)
     pub const POPUP_PIPE: &str = "exomonad:popup";
+
+    /// Pipe name for injecting text input into a target pane via the plugin.
+    pub const INJECT_INPUT_PIPE: &str = "exomonad:inject-input";
 }
 
 // ============================================================================
