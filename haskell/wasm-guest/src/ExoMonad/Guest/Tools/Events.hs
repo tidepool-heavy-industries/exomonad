@@ -101,6 +101,7 @@ instance MCPTool WaitForEvent where
               Nothing -> pure $ errorResult "No event in response"
           Left err -> pure $ errorResult $ "Failed to decode protobuf: " <> pack (show err)
       Aeson.Error err -> pure $ errorResult $ "Failed to parse result: " <> pack err
+
 -- | Notify parent tool (for workers/subtrees to call on completion)
 data NotifyParent = NotifyParent
 
