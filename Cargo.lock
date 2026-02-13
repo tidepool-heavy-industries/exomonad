@@ -947,6 +947,7 @@ dependencies = [
  "duct",
  "exomonad-core",
  "exomonad-proto",
+ "futures-util",
  "nix",
  "predicates",
  "prost",

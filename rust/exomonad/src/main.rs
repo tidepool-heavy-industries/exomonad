@@ -25,6 +25,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
+use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::{debug, info, warn};
 use tracing_subscriber::prelude::*;
@@ -784,19 +785,40 @@ async fn main() -> Result<()> {
                 default_role: config.role,
             };
 
+            // Minimal SSE handler for MCP Streamable HTTP protocol compatibility.
+            // Gemini CLI sends GET to establish an SSE event stream during initialization.
+            // Returns Content-Type: text/event-stream with keep-alive pings.
+            let sse_handler = || async {
+                let stream = futures_util::stream::pending::<Result<axum::response::sse::Event, std::convert::Infallible>>();
+                axum::response::sse::Sse::new(stream).keep_alive(
+                    axum::response::sse::KeepAlive::new()
+                        .interval(std::time::Duration::from_secs(15))
+                        .text("keep-alive"),
+                )
+            };
+
+            let cors = CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any);
+
             let app = axum::Router::new()
                 .route("/health", axum::routing::get(health_handler))
                 .route(
                     "/hook",
                     axum::routing::post(handle_hook_request).with_state(hook_state),
                 )
-                .route("/tl/mcp", axum::routing::post(tl_handler))
-                .route("/dev/mcp", axum::routing::post(dev_handler))
-                .route("/agents/{name}/mcp", axum::routing::post(agent_handler.clone()))
+                .route("/tl/mcp", axum::routing::post(tl_handler).get(sse_handler))
+                .route("/dev/mcp", axum::routing::post(dev_handler).get(sse_handler))
+                .route(
+                    "/agents/{name}/mcp",
+                    axum::routing::post(agent_handler.clone()).get(sse_handler),
+                )
                 .route("/events", axum::routing::post(events_handler))
+                .layer(cors)
                 .layer(TraceLayer::new_for_http());
 
-            let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+            let addr = std::net::SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, port));
             let listener = tokio::net::TcpListener::bind(addr).await.map_err(|e| {
                 if e.kind() == std::io::ErrorKind::AddrInUse {
                     anyhow::anyhow!(
@@ -810,7 +832,7 @@ async fn main() -> Result<()> {
                     anyhow::anyhow!("Failed to bind to port {}: {}", port, e)
                 }
             })?;
-            info!(port = %port, "HTTP MCP server listening on TCP (custom JSON-RPC)");
+            info!(port = %port, addr = %addr, "HTTP MCP server listening on TCP (dual-stack)");
 
             // Run with graceful shutdown on SIGINT or SIGTERM
             axum::serve(listener, app)
