@@ -155,7 +155,7 @@ impl McpServer {
 
         let input = MCPCallInput::new(role, tool_name.clone(), args);
 
-        let output: MCPCallOutput = match plugin.call("handle_mcp_call", &input).await {
+        let output: MCPCallOutput = match plugin.call_async("handle_mcp_call", &input).await {
             Ok(o) => o,
             Err(e) => {
                 tracing::error!(tool = %tool_name, error = %e, "WASM call failed");

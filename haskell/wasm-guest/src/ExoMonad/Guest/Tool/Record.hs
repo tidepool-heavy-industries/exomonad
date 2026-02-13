@@ -37,7 +37,7 @@ import Data.Kind (Type)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Data.Text qualified as T
-import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), MCPTool (..), ToolDefinition (..), errorResult)
+import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), MCPTool (..), ToolDefinition (..), WasmResult (..), errorResult)
 import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema, Handler (..), Schema (..))
 import GHC.Generics
 
@@ -48,14 +48,14 @@ import GHC.Generics
 -- | Dispatch tool calls through a record.
 class DispatchRecord (tools :: Type -> Type) where
   -- | Dispatch a tool call by name.
-  dispatchRecord :: tools AsHandler -> Text -> Value -> IO MCPCallOutput
+  dispatchRecord :: tools AsHandler -> Text -> Value -> IO (WasmResult MCPCallOutput)
 
 instance (Generic (tools AsHandler), GDispatchTool (Rep (tools AsHandler))) => DispatchRecord tools where
   dispatchRecord handlers name args = gDispatch (from handlers) name args
 
 -- | Generic dispatch implementation.
 class GDispatchTool (f :: Type -> Type) where
-  gDispatch :: f p -> Text -> Value -> IO MCPCallOutput
+  gDispatch :: f p -> Text -> Value -> IO (WasmResult MCPCallOutput)
 
 -- Datatype metadata: unwrap
 instance (GDispatchTool f) => GDispatchTool (M1 D meta f) where
@@ -68,10 +68,13 @@ instance (GDispatchTool f) => GDispatchTool (M1 C meta f) where
 -- Product: try left, then right
 instance (GDispatchTool left, GDispatchTool right) => GDispatchTool (left :*: right) where
   gDispatch (l :*: r) name args = do
-    result <- gDispatch l name args
-    case mcpError result of
-      Just err | "Unknown tool:" `T.isPrefixOf` err -> gDispatch r name args
-      _ -> pure result
+    res <- gDispatch l name args
+    case res of
+      Done output ->
+        case mcpError output of
+          Just err | "Unknown tool:" `T.isPrefixOf` err -> gDispatch r name args
+          _ -> pure res
+      Suspend _ _ -> pure res
 
 -- Selector (field with Handler): check if tool name matches, dispatch if so
 instance
@@ -81,8 +84,8 @@ instance
   gDispatch (M1 (K1 (Handler handler))) name args
     | name == toolName @tool = case Aeson.fromJSON args of
         Aeson.Success a -> handler a
-        Aeson.Error e -> pure $ errorResult $ "Parse error for " <> name <> ": " <> T.pack e
-    | otherwise = pure $ errorResult $ "Unknown tool: " <> name
+        Aeson.Error e -> pure $ Done $ errorResult $ "Parse error for " <> name <> ": " <> T.pack e
+    | otherwise = pure $ Done $ errorResult $ "Unknown tool: " <> name
 
 -- Nested sub-record: recurse into it
 instance

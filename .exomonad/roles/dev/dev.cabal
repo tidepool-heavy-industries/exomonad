@@ -43,7 +43,7 @@ executable wasm-guest-dev
     other-modules:
         Role
         StopHook
-    ghc-options: -no-hs-main -optl-mexec-model=reactor -optl-Wl,--export=hs_init -optl-Wl,--export=handle_mcp_call -optl-Wl,--export=handle_pre_tool_use -optl-Wl,--export=handle_list_tools -optl-Wl,--allow-undefined
+    ghc-options: -no-hs-main -optl-mexec-model=reactor -optl-Wl,--export=hs_init -optl-Wl,--export=handle_mcp_call -optl-Wl,--export=handle_pre_tool_use -optl-Wl,--export=handle_list_tools -optl-Wl,--export=resume -optl-Wl,--allow-undefined
     build-depends:
         base,
         wasm-guest:wasm-guest-internal,

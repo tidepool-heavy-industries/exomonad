@@ -19,8 +19,8 @@ import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as BSL
 import Data.Text (Text)
 import Data.Text qualified as T
-import ExoMonad.Guest.Tool.Class (MCPCallOutput (..))
-import ExoMonad.Guest.Tool.Runtime (wrapHandler, handleWorkerExit)
+import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), WasmResult (..))
+import ExoMonad.Guest.Tool.Runtime (wrapHandler, resumeHandler, handleWorkerExit)
 import ExoMonad.Guest.Types (HookInput (..), HookEventType (..))
 import ExoMonad.PDK (input, output)
 import ExoMonad.Types (HookConfig (..))
@@ -30,6 +30,7 @@ import Polysemy (runM)
 foreign export ccall handle_mcp_call :: IO CInt
 foreign export ccall handle_list_tools :: IO CInt
 foreign export ccall handle_pre_tool_use :: IO CInt
+foreign export ccall resume :: IO CInt
 
 -- | Input for role-aware MCP calls: { "role": "dev", "toolName": "...", "toolArgs": {...} }
 data RoleAwareMCPInput = RoleAwareMCPInput
@@ -152,9 +153,13 @@ dispatchHook cfg hookInput =
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
 
--- | Output an error in MCPCallOutput format.
+-- | Output an error in WasmResult MCPCallOutput format.
 outputError :: Text -> IO ()
-outputError msg = output (BSL.toStrict $ Aeson.encode $ MCPCallOutput False Nothing (Just msg))
+outputError msg = output (BSL.toStrict $ Aeson.encode $ Done $ MCPCallOutput False Nothing (Just msg))
+
+-- | Resume a suspended continuation.
+resume :: IO CInt
+resume = wrapHandler resumeHandler
 
 main :: IO ()
 main = pure ()

@@ -381,24 +381,22 @@ exomonad recompile --role tl  # Rebuild WASM via nix, copy to .exomonad/wasm/
 
 ### MCP Tools
 
-All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/Tools.hs`):
+All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/Tools/`):
 
 | Tool | Description |
 |------|-------------|
-| `git_branch` | Get current git branch |
-| `git_status` | Get dirty files |
-| `git_log` | Get recent commits |
-| `read_file` | Read file contents |
-| `github_list_issues` | List GitHub issues |
-| `github_get_issue` | Get single issue details |
-| `github_list_prs` | List GitHub pull requests |
 | `spawn_subtree` | Fork a worktree node off your current branch for sub-problems that may need further decomposition |
 | `spawn_workers` | Spawn multiple worker agents in one call (batch) |
-| `get_agent_messages` | Read notes and questions from agent outboxes (TL messaging, supports long-poll) |
-| `answer_question` | Answer a pending question from an agent (TL messaging) |
 | `file_pr` | Create or update a PR for the current branch (auto-detects base branch from naming convention) |
-| `wait_for_event` | Block until a matching event occurs (e.g., worker completion) |
+| `popup` | Display interactive popup UI in Zellij (choices, text input, sliders) |
+| `note` | Send a note to the TL agent (dev role messaging) |
+| `question` | Ask the TL agent a question and wait for answer (dev role messaging) |
+| `get_agent_messages` | Read notes and questions from agent outboxes (TL role, supports long-poll) |
+| `answer_question` | Answer a pending question from an agent (TL role messaging) |
+| `wait_for_event` | Block until a matching event occurs (e.g., worker completion). Uses trampoline architecture for non-blocking execution. |
 | `notify_completion` | Notify TL that this worker has completed (called by workers on exit) |
+
+**Note**: Git operations (`git status`, `git log`, etc.) and GitHub operations (`gh pr list`, etc.) are handled via the Bash tool with `git` and `gh` commands, not MCP tools.
 
 **How spawn works (hylo model):**
 1. `spawn_subtree`: Creates git worktree branching off the current branch

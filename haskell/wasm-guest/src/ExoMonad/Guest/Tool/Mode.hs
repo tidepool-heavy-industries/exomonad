@@ -36,7 +36,7 @@ where
 
 import Data.Aeson (FromJSON)
 import Data.Kind (Type)
-import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), ToolDefinition, mkToolDef)
+import ExoMonad.Guest.Tool.Class (MCPCallOutput, MCPTool (..), ToolDefinition, WasmResult (..), mkToolDef)
 
 -- ============================================================================
 -- Mode Class
@@ -93,7 +93,7 @@ instance ToolMode AsHandler where
 --
 -- This newtype preserves the phantom tool type, allowing Generic
 -- traversal to access the MCPTool constraint for dispatch.
-newtype Handler tool = Handler {runHandler :: ToolArgs tool -> IO MCPCallOutput}
+newtype Handler tool = Handler {runHandler :: ToolArgs tool -> IO (WasmResult MCPCallOutput)}
 
 -- ============================================================================
 -- Handler Construction
@@ -111,4 +111,4 @@ newtype Handler tool = Handler {runHandler :: ToolArgs tool -> IO MCPCallOutput}
 --   }
 -- @
 mkHandler :: forall t. (MCPTool t, FromJSON (ToolArgs t)) => Handler t
-mkHandler = Handler (toolHandler @t)
+mkHandler = Handler (toolHandlerAsync @t)

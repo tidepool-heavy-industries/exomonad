@@ -28,7 +28,7 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
-import ExoMonad.Guest.Tool.Class (MCPCallOutput, ToolDefinition, toMCPFormat)
+import ExoMonad.Guest.Tool.Class (MCPCallOutput, ToolDefinition, WasmResult, toMCPFormat)
 import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
 import ExoMonad.Types (HookConfig (..), RoleConfig (..))
@@ -40,7 +40,7 @@ import qualified TLRole
 -- | Captured role capabilities (avoids existential field name restriction).
 data RoleCapabilities = RoleCapabilities
   { -- | Dispatch a tool call by name through this role's handlers.
-    rcDispatch :: Text -> Value -> IO MCPCallOutput,
+    rcDispatch :: Text -> Value -> IO (WasmResult MCPCallOutput),
     -- | List all tool definitions for this role (raw).
     rcListTools :: [ToolDefinition],
     -- | Get hook config for this role.
@@ -65,7 +65,7 @@ mkSomeRoleConfig cfg =
       }
 
 -- | Dispatch a tool call for this role.
-roleDispatch :: SomeRoleConfig -> Text -> Value -> IO MCPCallOutput
+roleDispatch :: SomeRoleConfig -> Text -> Value -> IO (WasmResult MCPCallOutput)
 roleDispatch (SomeRoleConfig caps) = rcDispatch caps
 
 -- | List tool definitions for this role.

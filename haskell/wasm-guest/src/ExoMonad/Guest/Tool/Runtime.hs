@@ -9,6 +9,7 @@ module ExoMonad.Guest.Tool.Runtime
     listHandlerRecord,
     hookHandler,
     handleWorkerExit,
+    resumeHandler,
     wrapHandler,
   )
 where
@@ -32,14 +33,16 @@ import ExoMonad.Effects.Events qualified as Events
 import ExoMonad.Effects.Log (LogInfo, LogError, LogEmitEvent)
 import ExoMonad.Effects.Messaging (sendNote)
 import ExoMonad.Guest.Proto (fromText)
-import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), toMCPFormat)
+import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), toMCPFormat, WasmResult (..))
 import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
 import ExoMonad.Guest.Types (HookEventType (..), HookInput (..), HookOutput, MCPCallInput (..), StopDecision (..), StopHookOutput (..), allowResponse)
+import ExoMonad.Guest.Continuations (retrieveContinuation)
 import ExoMonad.Types (HookConfig (..))
 import ExoMonad.PDK (input, output)
 import Foreign.C.Types (CInt (..))
 import Polysemy (Embed, Sem, runM)
+import Data.Aeson.Types (parseMaybe)
 import System.Directory (getCurrentDirectory)
 import System.FilePath (takeFileName)
 
@@ -60,19 +63,64 @@ mcpHandlerRecord handlers = do
   case Aeson.eitherDecodeStrict inp of
     Left err -> do
       logError_ ("MCP parse error: " <> T.pack err)
-      let resp = MCPCallOutput False Nothing (Just $ "Parse error: " <> T.pack err)
+      let resp = Done $ MCPCallOutput False Nothing (Just $ "Parse error: " <> T.pack err)
       output (BSL.toStrict $ Aeson.encode resp)
       pure 0
     Right mcpCall -> do
       logInfo_ ("Dispatching tool: " <> toolName mcpCall)
 
-      resp <- dispatchRecord handlers (toolName mcpCall) (toolArgs mcpCall)
+      result <- dispatchRecord handlers (toolName mcpCall) (toolArgs mcpCall)
 
-      unless (success resp) $
-        logError_ ("Tool failed: " <> fromMaybe "No error message" (mcpError resp))
+      case result of
+        Done resp ->
+          unless (success resp) $
+            logError_ ("Tool failed: " <> fromMaybe "No error message" (mcpError resp))
+        Suspend _ _ ->
+          logInfo_ ("Tool suspended: " <> toolName mcpCall)
 
+      output (BSL.toStrict $ Aeson.encode result)
+      pure 0
+
+-- | Resume handler - resumes a suspended computation.
+resumeHandler :: IO CInt
+resumeHandler = do
+  inp <- input @ByteString
+  case Aeson.eitherDecodeStrict inp of
+    Left err -> do
+      logError_ ("Resume parse error: " <> T.pack err)
+      let resp = Done $ MCPCallOutput False Nothing (Just $ "Resume parse error: " <> T.pack err)
       output (BSL.toStrict $ Aeson.encode resp)
       pure 0
+    Right val -> do
+       case parseResumeInput val of
+         Left err -> do
+           logError_ ("Resume input error: " <> err)
+           let resp = Done $ MCPCallOutput False Nothing (Just $ "Resume input error: " <> err)
+           output (BSL.toStrict $ Aeson.encode resp)
+           pure 0
+         Right (k, res) -> do
+           mCont <- retrieveContinuation k
+           case mCont of
+             Nothing -> do
+               logError_ ("Continuation not found: " <> k)
+               let resp = Done $ MCPCallOutput False Nothing (Just $ "Continuation not found: " <> k)
+               output (BSL.toStrict $ Aeson.encode resp)
+               pure 0
+             Just cont -> do
+               logInfo_ ("Resuming continuation: " <> k)
+               -- Execute the continuation
+               -- Note: The continuation is responsible for handling exceptions if needed
+               newResult <- cont res
+               output (BSL.toStrict $ Aeson.encode newResult)
+               pure 0
+
+parseResumeInput :: Value -> Either Text (Text, Value)
+parseResumeInput val = flip (maybe (Left "Invalid input format")) (parseMaybe parser val) Right
+  where
+    parser = Aeson.withObject "ResumeInput" $ \o -> do
+      k <- o Aeson..: "continuation_id"
+      res <- o Aeson..: "result"
+      pure (k, res)
 
 -- | List tools handler - returns all tool definitions for a record type.
 listHandlerRecord :: forall tools. (ReifyRecord tools) => IO CInt
@@ -204,7 +252,7 @@ wrapHandler action = do
     Right code -> pure code
     Left err -> do
       -- Return proper MCPCallOutput format
-      let resp =
+      let resp = Done $
             MCPCallOutput
               { success = False,
                 result = Nothing,

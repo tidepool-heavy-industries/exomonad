@@ -17,6 +17,8 @@ module ExoMonad.Guest.Tool.Class
 
     -- * Result types
     MCPCallOutput (..),
+    WasmResult (..),
+    EffectRequest (..),
     successResult,
     errorResult,
     liftEffect,
@@ -31,6 +33,7 @@ import Data.Aeson qualified as Aeson
 import Data.Kind (Type)
 import Data.Text (Text)
 import Data.Text qualified as T
+import GHC.Generics (Generic)
 
 -- ============================================================================
 -- Tool Definition (for MCP discovery)
@@ -99,6 +102,35 @@ liftEffect action transform = do
     Right resp -> pure $ successResult (transform resp)
 
 -- ============================================================================
+-- Async / Suspension Types
+-- ============================================================================
+
+-- | Effect request for suspension.
+data EffectRequest = EffectRequest
+  { erType :: Text
+  , erPayload :: Value
+  }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON EffectRequest where
+  toJSON (EffectRequest t p) = object ["type" .= t, "payload" .= p]
+
+-- | Async result from WASM execution.
+data WasmResult a
+  = Done a
+  | Suspend Text EffectRequest
+  deriving (Show, Eq, Generic)
+
+instance (ToJSON a) => ToJSON (WasmResult a) where
+  toJSON (Done val) = object ["tag" .= ("done" :: Text), "result" .= val]
+  toJSON (Suspend k eff) =
+    object
+      [ "tag" .= ("suspend" :: Text),
+        "continuation_id" .= k,
+        "effect" .= eff
+      ]
+
+-- ============================================================================
 -- MCPTool Typeclass
 -- ============================================================================
 
@@ -121,6 +153,10 @@ class MCPTool (t :: Type) where
   -- | Handler that executes the tool.
   toolHandler :: ToolArgs t -> IO MCPCallOutput
 
+  -- | Async handler that can suspend. Defaults to wrapping toolHandler.
+  toolHandlerAsync :: ToolArgs t -> IO (WasmResult MCPCallOutput)
+  toolHandlerAsync args = Done <$> toolHandler @t args
+
 -- ============================================================================
 -- DispatchTools Typeclass
 -- ============================================================================
@@ -130,14 +166,14 @@ class MCPTool (t :: Type) where
 -- Derived automatically from a type-level list of tools.
 class DispatchTools (tools :: [Type]) where
   -- | Dispatch a tool call by name.
-  dispatch :: Text -> Value -> IO MCPCallOutput
+  dispatch :: Text -> Value -> IO (WasmResult MCPCallOutput)
 
   -- | Get all tool definitions for MCP discovery.
   toolDefs :: [ToolDefinition]
 
 -- Base case: empty list
 instance DispatchTools '[] where
-  dispatch name _ = pure $ errorResult $ "Unknown tool: " <> name
+  dispatch name _ = pure $ Done $ errorResult $ "Unknown tool: " <> name
   toolDefs = []
 
 -- Inductive case: cons
@@ -148,8 +184,8 @@ instance
   dispatch name args
     | name == toolName @t =
         case Aeson.fromJSON args of
-          Aeson.Success a -> toolHandler @t a
-          Aeson.Error e -> pure $ errorResult $ "Parse error for " <> name <> ": " <> T.pack e
+          Aeson.Success a -> toolHandlerAsync @t a
+          Aeson.Error e -> pure $ Done $ errorResult $ "Parse error for " <> name <> ": " <> T.pack e
     | otherwise = dispatch @ts name args
   toolDefs = mkToolDef @t : toolDefs @ts
 

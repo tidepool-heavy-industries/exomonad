@@ -16,6 +16,24 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::{Instant, SystemTime};
 
+/// Result from WASM execution, supporting suspension.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "tag", rename_all = "snake_case")]
+pub enum WasmResult<T> {
+    Done { result: T },
+    Suspend {
+        continuation_id: String,
+        effect: EffectRequest,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EffectRequest {
+    #[serde(rename = "type")]
+    pub effect_type: String,
+    pub payload: serde_json::Value,
+}
+
 /// Manages the lifecycle of a Haskell WASM plugin.
 ///
 /// Loads a WASM module and registers a single host function (`yield_effect`)
@@ -219,6 +237,70 @@ impl PluginManager {
 
         let output: O = serde_json::from_slice(&result_bytes)?;
         Ok(output)
+    }
+
+    /// Call a WASM guest function with trampoline support for async effects.
+    ///
+    /// Releases the plugin lock during async effect execution.
+    pub async fn call_async<I, O>(&self, function: &str, input: &I) -> Result<O>
+    where
+        I: Serialize + Send + Sync + 'static,
+        O: for<'de> Deserialize<'de> + Send + 'static,
+    {
+        let mut current_input = serde_json::to_vec(input)?;
+        let mut current_function = function.to_string();
+
+        loop {
+            // Acquire lock, call WASM, release lock
+            let wasm_result: WasmResult<O> = {
+                let plugin_lock = self.plugin.clone();
+                let func = current_function.clone();
+                let data = current_input.clone();
+                let result_bytes = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
+                    let mut plugin = plugin_lock
+                        .write()
+                        .map_err(|e| anyhow::anyhow!("Plugin lock poisoned: {}", e))?;
+                    plugin.call::<&[u8], Vec<u8>>(&func, &data)
+                })
+                .await??;
+
+                if result_bytes.is_empty() {
+                    return Err(anyhow::anyhow!("Empty result from WASM in async call"));
+                }
+                serde_json::from_slice(&result_bytes)?
+            };
+            // Lock is RELEASED here
+
+            match wasm_result {
+                WasmResult::Done { result } => return Ok(result),
+                WasmResult::Suspend { continuation_id, effect } => {
+                    // Execute the async effect WITHOUT holding the lock
+                    
+                    // Convert payload (Value) to bytes
+                    let payload_bytes: Vec<u8> = serde_json::from_value(effect.payload)
+                        .context("Failed to parse effect payload as byte array")?;
+
+                    tracing::info!(
+                        effect_type = %effect.effect_type,
+                        continuation_id = %continuation_id,
+                        payload_len = payload_bytes.len(),
+                        "Handling suspended effect"
+                    );
+
+                    let effect_result = self.registry
+                        .dispatch(&effect.effect_type, &payload_bytes)
+                        .await?;
+
+                    // Set up resume call
+                    current_function = "resume".to_string();
+                    current_input = serde_json::to_vec(&serde_json::json!({
+                        "continuation_id": continuation_id,
+                        "result": effect_result,
+                    }))?;
+                    // Loop back → re-acquire lock → call resume
+                }
+            }
+        }
     }
 }
 

@@ -104,7 +104,7 @@ pub async fn execute_tool(state: &McpState, name: &str, args: Value) -> Result<V
     // Log before calling WASM
     debug!(tool = %name, "Calling WASM handle_mcp_call");
 
-    let call_result = state.plugin.call("handle_mcp_call", &input).await;
+    let call_result = state.plugin.call_async("handle_mcp_call", &input).await;
 
     // Log raw result before deserialization
     match &call_result {
