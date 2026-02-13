@@ -1717,6 +1717,7 @@ impl AgentControlService {
                     r###"{{
   "mcpServers": {{
     "exomonad": {{
+      "type": "http",
       "url": "http://localhost:{port}/agents/{name}/mcp"
     }}
   }}
