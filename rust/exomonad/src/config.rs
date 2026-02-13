@@ -26,6 +26,12 @@ pub struct RawConfig {
 
     /// Base directory for worktrees (default: .exomonad/worktrees).
     pub worktree_base: Option<PathBuf>,
+
+    /// Shell command to wrap environment (e.g. "nix develop"). TL tab runs this as shell.
+    pub shell_command: Option<String>,
+
+    /// WASM directory override (default: ~/.exomonad/wasm/).
+    pub wasm_dir: Option<PathBuf>,
 }
 
 /// Final resolved configuration.
@@ -39,6 +45,10 @@ pub struct Config {
     pub port: u16,
     /// Base directory for worktrees.
     pub worktree_base: PathBuf,
+    /// Shell command to wrap environment (e.g. "nix develop").
+    pub shell_command: Option<String>,
+    /// Resolved WASM directory.
+    pub wasm_dir: PathBuf,
 }
 
 impl Config {
@@ -70,11 +80,11 @@ impl Config {
             RawConfig::default()
         };
 
-        // Resolve role: local.role > global.default_role
+        // Resolve role: local.role > global.default_role > TL
         let role = local_raw
             .role
             .or(global_raw.default_role)
-            .ok_or_else(|| anyhow::anyhow!("No active role defined. Please set 'role' in .exomonad/config.local.toml or 'default_role' in .exomonad/config.toml"))?;
+            .unwrap_or(Role::TL);
 
         // Resolve project_dir: global.project_dir > project_root
         let project_dir = global_raw
@@ -89,17 +99,18 @@ impl Config {
             })
             .unwrap_or_else(|| project_root.clone());
 
-        // Resolve zellij_session: required field, hard error if missing
+        // Resolve zellij_session: config > directory name
         let zellij_session = local_raw
             .zellij_session
             .or(global_raw.zellij_session)
-            .map(sanitize_session_name)
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "No Zellij session configured. Please add 'zellij_session = \"myproject\"' \
-                     to .exomonad/config.toml"
-                )
-            })?;
+            .unwrap_or_else(|| {
+                project_root
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("exomonad")
+                    .to_string()
+            });
+        let zellij_session = sanitize_session_name(zellij_session);
 
         // Resolve port: local > global > default (7432)
         let port = local_raw.port.or(global_raw.port).unwrap_or(7432);
@@ -117,12 +128,30 @@ impl Config {
             })
             .unwrap_or_else(|| project_root.join(".exomonad/worktrees"));
 
+        // Resolve shell_command: local > global
+        let shell_command = local_raw.shell_command.or(global_raw.shell_command);
+
+        // Resolve wasm_dir: config > ~/.exomonad/wasm/
+        let wasm_dir = global_raw
+            .wasm_dir
+            .or(local_raw.wasm_dir)
+            .map(|p| {
+                if p.is_absolute() {
+                    p
+                } else {
+                    project_root.join(p)
+                }
+            })
+            .unwrap_or_else(global_wasm_dir);
+
         Ok(Self {
             project_dir,
             role,
             zellij_session,
             port,
             worktree_base,
+            shell_command,
+            wasm_dir,
         })
     }
 
@@ -142,15 +171,18 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             project_dir: PathBuf::from("."),
-            role: Role::Dev,
+            role: Role::TL,
             zellij_session: "default".to_string(),
             port: 7432,
             worktree_base: PathBuf::from(".exomonad/worktrees"),
+            shell_command: None,
+            wasm_dir: global_wasm_dir(),
         }
     }
 }
 
 /// Walk up from CWD to find the project root containing `.exomonad/config.toml`.
+/// Falls back to CWD if not found (bootstrap case).
 fn find_project_root() -> Result<PathBuf> {
     let start = std::env::current_dir()?;
     let mut current = start.as_path();
@@ -158,13 +190,22 @@ fn find_project_root() -> Result<PathBuf> {
         if current.join(".exomonad/config.toml").exists() {
             return Ok(current.to_path_buf());
         }
-        current = current.parent().ok_or_else(|| {
-            anyhow::anyhow!(
-                "No .exomonad/config.toml found from {} upward",
-                start.display()
-            )
-        })?;
+        match current.parent() {
+            Some(parent) => current = parent,
+            None => {
+                debug!("No .exomonad/config.toml found, using CWD as project root");
+                return Ok(start);
+            }
+        }
     }
+}
+
+/// Global WASM directory: ~/.exomonad/wasm/
+pub fn global_wasm_dir() -> PathBuf {
+    std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(".exomonad/wasm")
 }
 
 /// Sanitize session name per Zellij constraints.
@@ -210,7 +251,7 @@ mod tests {
     fn test_config_default() {
         let config = Config::default();
         assert_eq!(config.project_dir, PathBuf::from("."));
-        assert_eq!(config.role, Role::Dev);
+        assert_eq!(config.role, Role::TL);
     }
 
     #[test]

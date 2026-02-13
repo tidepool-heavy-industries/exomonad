@@ -41,11 +41,17 @@ Use `--recreate` to delete an existing session and create fresh (e.g., after bin
 ```toml
 default_role = "tl"
 project_dir = "."
+shell_command = "nix develop"  # optional: environment wrapper for TL tab + server
+wasm_dir = ".exomonad/wasm"    # optional: override WASM location (default: ~/.exomonad/wasm/)
 ```
+
+**Bootstrap:** `exomonad init` auto-creates `.exomonad/config.toml` and `.gitignore` entries if missing. Works in any project directory.
 
 **Config hierarchy:**
 - `config.toml` uses `default_role` (project-wide default)
 - `config.local.toml` uses `role` (worktree-specific override)
+
+**WASM resolution:** `wasm_dir` in config > `~/.exomonad/wasm/` (global default, installed by `just install-all`)
 
 To update WASM, run `just wasm-all` or `exomonad recompile --role unified`.
 
@@ -76,7 +82,7 @@ gemini mcp add --transport http exomonad http://localhost:7432/tl/mcp
 | `github_get_issue` | Get single issue details | `owner`, `repo`, `number` |
 | `github_list_prs` | List GitHub pull requests | `owner`, `repo`, `state?`, `limit?` |
 | `spawn_subtree` | Fork a worktree node off current branch (Claude-only, `.exomonad/worktrees/`) | `task`, `branch_name` |
-| `spawn_worker` | Spawn Gemini pane in isolated worktree (worktree in `.exomonad/worktrees/`, config in `.exomonad/agents/`) | `name`, `prompt` |
+| `spawn_worker` | Spawn Gemini pane in current worktree (config in `.exomonad/agents/`) | `name`, `prompt` |
 | `get_agent_messages` | Read notes/questions from agents | `agent_id?` |
 | `answer_question` | Answer pending agent question | `agent_id`, `question_id`, `answer` |
 

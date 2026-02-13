@@ -166,8 +166,10 @@ _install profile:
     echo ">>> [4/4] Installing binaries..."
     mkdir -p ~/.cargo/bin
     mkdir -p ~/.config/zellij/plugins
+    mkdir -p ~/.exomonad/wasm
     cp "target/${TARGET_DIR}/exomonad" ~/.cargo/bin/
     cp "rust/exomonad-plugin/target/wasm32-wasip1/${TARGET_DIR}/exomonad-plugin.wasm" ~/.config/zellij/plugins/
+    cp .exomonad/wasm/wasm-guest-*.wasm ~/.exomonad/wasm/
 
     # macOS: remove quarantine and ad-hoc sign to avoid sandbox/Gatekeeper issues
     if [ "$(uname)" = "Darwin" ]; then

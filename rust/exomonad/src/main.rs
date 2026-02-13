@@ -431,6 +431,28 @@ fn run_init(session_override: Option<String>, recreate: bool, port: u16) -> Resu
         eprintln!("Warning: XDG_RUNTIME_DIR not set. Zellij may fail to find sessions.");
     }
 
+    // Bootstrap: create .exomonad/config.toml if missing
+    let cwd = std::env::current_dir()?;
+    let config_path = cwd.join(".exomonad/config.toml");
+    if !config_path.exists() {
+        let dirname = cwd
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("project");
+        eprintln!("Bootstrapping .exomonad/config.toml");
+        std::fs::create_dir_all(cwd.join(".exomonad"))?;
+        std::fs::write(
+            &config_path,
+            format!(
+                "default_role = \"tl\"\nzellij_session = \"{}\"\n",
+                dirname
+            ),
+        )?;
+
+        // Add gitignore entries
+        ensure_gitignore(&cwd)?;
+    }
+
     // Resolve config
     let config = config::Config::discover()?;
     let session = session_override.unwrap_or(config.zellij_session);
@@ -480,7 +502,7 @@ fn run_init(session_override: Option<String>, recreate: bool, port: u16) -> Resu
 
     // Create fresh session from layout
     eprintln!("Creating session: {}", session);
-    let layout_path = generate_tl_layout(port)?;
+    let layout_path = generate_tl_layout(port, config.shell_command.as_deref())?;
 
     let err = std::process::Command::new("zellij")
         .arg("--session")
@@ -491,15 +513,53 @@ fn run_init(session_override: Option<String>, recreate: bool, port: u16) -> Resu
     Err(err).context("Failed to exec zellij with layout")
 }
 
+/// Ensure .gitignore has entries for .exomonad/ (track config, ignore the rest).
+fn ensure_gitignore(project_dir: &std::path::Path) -> Result<()> {
+    let gitignore_path = project_dir.join(".gitignore");
+    let content = if gitignore_path.exists() {
+        std::fs::read_to_string(&gitignore_path)?
+    } else {
+        String::new()
+    };
+
+    let has_ignore = content.lines().any(|l| l.trim() == ".exomonad/*");
+    let has_negate = content.lines().any(|l| l.trim() == "!.exomonad/config.toml");
+    if has_ignore && has_negate {
+        return Ok(());
+    }
+
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&gitignore_path)?;
+    use std::io::Write;
+    if !content.is_empty() && !content.ends_with('\n') {
+        writeln!(file)?;
+    }
+    writeln!(file, "# ExoMonad - track config, ignore runtime artifacts")?;
+    writeln!(file, ".exomonad/*")?;
+    writeln!(file, "!.exomonad/config.toml")?;
+
+    eprintln!("Updated .gitignore with .exomonad/ entries");
+    Ok(())
+}
+
 /// Generate a two-tab TL layout: Server tab + TL tab.
 ///
 /// Tab 1 "Server": runs `exomonad serve` on TCP port, stays open on exit.
-/// Tab 2 "TL": runs `nix develop` for the dev environment, focused by default.
-fn generate_tl_layout(port: u16) -> Result<std::path::PathBuf> {
+/// Tab 2 "TL": runs shell_command (or $SHELL) for the dev environment, focused by default.
+fn generate_tl_layout(port: u16, shell_command: Option<&str>) -> Result<std::path::PathBuf> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let cwd = std::env::current_dir()?;
 
-    let serve_command = format!("exomonad serve --port {}", port);
+    // Server tab: wrap serve command in shell_command if configured
+    let serve_command = match shell_command {
+        Some(sc) => format!("{} -c 'exomonad serve --port {}'", sc, port),
+        None => format!("exomonad serve --port {}", port),
+    };
+
+    // TL tab: use shell_command if configured, else $SHELL
+    let tl_command = shell_command.unwrap_or(&shell);
 
     let tabs = vec![
         exomonad_core::layout::AgentTabParams {
@@ -514,7 +574,7 @@ fn generate_tl_layout(port: u16) -> Result<std::path::PathBuf> {
         exomonad_core::layout::AgentTabParams {
             tab_name: "TL",
             pane_name: "Main",
-            command: "nix develop",
+            command: tl_command,
             cwd: &cwd,
             shell: &shell,
             focus: true,
@@ -636,16 +696,17 @@ async fn main() -> Result<()> {
             };
 
             let role_name = config.role.to_string();
+            let wasm_dir = config.wasm_dir.clone();
+
             // Prefer unified WASM (contains all roles, role selection per-call).
             // Fall back to per-role WASM for backwards compatibility.
-            let unified_path = project_dir.join(".exomonad/wasm/wasm-guest-unified.wasm");
+            let unified_path = wasm_dir.join("wasm-guest-unified.wasm");
             let wasm_path = if unified_path.exists() {
-                info!("Using unified WASM (all roles in one module)");
+                info!(dir = %wasm_dir.display(), "Using unified WASM (all roles in one module)");
                 unified_path
             } else {
-                let fallback =
-                    project_dir.join(format!(".exomonad/wasm/wasm-guest-{}.wasm", role_name));
-                info!(role = %role_name, "Unified WASM not found, falling back to per-role WASM");
+                let fallback = wasm_dir.join(format!("wasm-guest-{}.wasm", role_name));
+                info!(role = %role_name, dir = %wasm_dir.display(), "Unified WASM not found, falling back to per-role WASM");
                 fallback
             };
 
