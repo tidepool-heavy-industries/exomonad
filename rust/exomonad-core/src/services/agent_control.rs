@@ -876,10 +876,6 @@ impl AgentControlService {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
             }
 
-            // Write .mcp.json in worktree root (for MCP server discovery)
-            self.write_agent_mcp_config(&self.project_dir, &worktree_path, AgentType::Gemini)
-                .await?;
-
             // Write Gemini settings to worker config dir
             let agent_config_dir = self.project_dir
                 .join(".exomonad")
@@ -1299,7 +1295,7 @@ impl AgentControlService {
     ///
     /// Discovery process:
     /// 1. Scan {worktree_base}/ for subtree agents (isolated worktrees)
-    /// 2. Scan {project_dir}/.exomonad/agents/ for worker agents (shared worktree)
+    /// 2. Scan {project_dir}/.exomonad/agents/ for worker agents (config dirs; worktrees at worktree_base)
     /// 3. Verify liveness by checking Zellij tabs/panes
     #[tracing::instrument(skip(self))]
     pub async fn list_agents(&self) -> Result<Vec<AgentInfo>> {
@@ -1349,7 +1345,7 @@ impl AgentControlService {
             }
         }
 
-        // 3. Scan root .exomonad/agents for workers
+        // 3. Scan root .exomonad/agents for workers (config dirs; worktrees at worktree_base)
         let root_agents_dir = self.project_dir.join(".exomonad/agents");
         if root_agents_dir.exists() {
             self.scan_workers(&root_agents_dir, &tabs, &mut agents).await?;
@@ -1377,12 +1373,14 @@ impl AgentControlService {
                     let has_tab = tabs.iter().any(|t| t == &display_name);
                     let status = if has_tab { AgentStatus::Running } else { AgentStatus::Stopped };
 
+                    // agent_dir points to the worktree (actual working directory)
+                    let worktree_dir = self.worktree_base.join(name);
                     agents.push(AgentInfo {
                         issue_id: name.to_string(),
                         has_tab,
                         status,
                         topology: Topology::WorktreePerAgent,
-                        agent_dir: Some(path.to_string_lossy().to_string()),
+                        agent_dir: Some(worktree_dir.to_string_lossy().to_string()),
                         slug: Some(base_name.to_string()),
                         agent_type: Some("gemini".to_string()),
                         pr: None,

@@ -216,6 +216,19 @@ handleWorkerExit hookInput config = do
   logInfo_ "WorkerExit hook firing — running stop hook pipeline"
   let maybeAgentId = hiAgentId hookInput
 
+  -- Emit AgentStopped event (mirrors handleStopHook behavior)
+  cwd <- getCurrentDirectory
+  let agentId = fromMaybe (T.pack $ takeFileName cwd) maybeAgentId
+  now <- getCurrentTime
+  let timestamp = T.pack $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%QZ" now
+  let event =
+        Aeson.object
+          [ "type" .= ("agent:stopped" :: Text),
+            "agent_id" .= agentId,
+            "timestamp" .= timestamp
+          ]
+  emitEvent_ event
+
   -- Run the stop hook checks (dirty files, push, PR, Copilot review)
   result <- runM $ onStop config hookInput
 
