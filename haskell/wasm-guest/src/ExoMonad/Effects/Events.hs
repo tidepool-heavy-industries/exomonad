@@ -4,8 +4,10 @@
 module ExoMonad.Effects.Events
   ( EventsWaitForEvent
   , EventsNotifyEvent
+  , EventsNotifyParent
   , waitForEvent
   , notifyEvent
+  , notifyParent
   ) where
 
 import Effects.Events qualified as Proto
@@ -48,4 +50,21 @@ notifyEvent sessionId event =
     Proto.NotifyEventRequest
       { Proto.notifyEventRequestSessionId = fromText sessionId
       , Proto.notifyEventRequestEvent = Just event
+      }
+
+-- | Notify parent effect
+data EventsNotifyParent
+
+instance Effect EventsNotifyParent where
+  type Input EventsNotifyParent = Proto.NotifyParentRequest
+  type Output EventsNotifyParent = Proto.NotifyParentResponse
+  effectId = "events.notify_parent"
+
+-- | Smart constructor for notify_parent
+notifyParent :: Text -> Text -> IO (Either EffectError Proto.NotifyParentResponse)
+notifyParent status message =
+  runEffect @EventsNotifyParent $
+    Proto.NotifyParentRequest
+      { Proto.notifyParentRequestStatus = fromText status
+      , Proto.notifyParentRequestMessage = fromText message
       }

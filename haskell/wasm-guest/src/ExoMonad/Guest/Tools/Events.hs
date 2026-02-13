@@ -5,7 +5,7 @@
 
 module ExoMonad.Guest.Tools.Events
   ( WaitForEvent (..)
-  , NotifyCompletion (..)
+  , NotifyParent (..)
   ) where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), object, (.=), genericParseJSON, genericToJSON, defaultOptions, fieldLabelModifier, camelTo2, Value)
@@ -102,42 +102,30 @@ instance MCPTool WaitForEvent where
           Left err -> pure $ errorResult $ "Failed to decode protobuf: " <> pack (show err)
       Aeson.Error err -> pure $ errorResult $ "Failed to parse result: " <> pack err
 
--- | Notify completion tool (for workers to call on exit)
-data NotifyCompletion = NotifyCompletion
+-- | Notify parent tool (for workers/subtrees to call on completion)
+data NotifyParent = NotifyParent
 
-data NotifyCompletionArgs = NotifyCompletionArgs
+data NotifyParentArgs = NotifyParentArgs
   {
-    ncSessionId :: Text
-  , ncWorkerId :: Text
-  , ncStatus :: Text
-  , ncMessage :: Text
+    npStatus :: Text
+  , npMessage :: Text
   } deriving (Generic, Show)
 
-instance FromJSON NotifyCompletionArgs where
+instance FromJSON NotifyParentArgs where
   parseJSON = genericParseJSON defaultOptions { fieldLabelModifier = camelTo2 '_' . drop 2 }
-instance ToJSON NotifyCompletionArgs where
+instance ToJSON NotifyParentArgs where
   toJSON = genericToJSON defaultOptions { fieldLabelModifier = camelTo2 '_' . drop 2 }
 
-instance MCPTool NotifyCompletion where
-  type ToolArgs NotifyCompletion = NotifyCompletionArgs
-  toolName = "notify_completion"
-  toolDescription = "Notify TL that this worker has completed (called by workers on exit)"
+instance MCPTool NotifyParent where
+  type ToolArgs NotifyParent = NotifyParentArgs
+  toolName = "notify_parent"
+  toolDescription = "Notify your parent session that you have completed. Resolves worker ID and routing automatically."
   toolSchema = object
     [
       "type" .= ("object" :: Text)
     , "properties" .= object
         [
-          "session_id" .= object
-            [
-              "type" .= ("string" :: Text)
-            , "description" .= ("TL session ID" :: Text)
-            ]
-        , "worker_id" .= object
-            [
-              "type" .= ("string" :: Text)
-            , "description" .= ("This worker's ID" :: Text)
-            ]
-        , "status" .= object
+          "status" .= object
             [
               "type" .= ("string" :: Text)
             , "description" .= ("Completion status (success/failure)" :: Text)
@@ -148,18 +136,8 @@ instance MCPTool NotifyCompletion where
             , "description" .= ("Completion message" :: Text)
             ]
         ]
-    , "required" .= (["session_id", "worker_id", "status", "message"] :: [Text])
+    , "required" .= (["status", "message"] :: [Text])
     ]
   toolHandler args = do
-    let event = Proto.Event
-          { Proto.eventEventId = 0
-          , Proto.eventEventType = Just $ Proto.EventEventTypeWorkerComplete $ Proto.WorkerComplete
-              {
-                Proto.workerCompleteWorkerId = TL.fromStrict (ncWorkerId args)
-              , Proto.workerCompleteStatus = TL.fromStrict (ncStatus args)
-              , Proto.workerCompleteChanges = V.empty
-              , Proto.workerCompleteMessage = TL.fromStrict (ncMessage args)
-              }
-          }
-    liftEffect (Events.notifyEvent (ncSessionId args) event) $ \_ ->
+    liftEffect (Events.notifyParent (npStatus args) (npMessage args)) $ \_ ->
       object ["success" .= True]

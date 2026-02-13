@@ -215,30 +215,22 @@ handleWorkerExit :: HookInput -> IO CInt
 handleWorkerExit hookInput = do
   logInfo_ "WorkerExit hook firing"
   let maybeAgentId = hiAgentId hookInput
-  let maybeSessionId = hiExomonadSessionId hookInput
 
-  case (maybeAgentId, maybeSessionId) of
-    (Just agentId, Just sessionId) -> do
-        logInfo_ $ "Handling exit for agent: " <> agentId <> " session: " <> sessionId
+  case maybeAgentId of
+    Just agentId -> do
+        logInfo_ $ "Handling exit for agent: " <> agentId
 
-        let event = ProtoEvents.Event
-              { ProtoEvents.eventEventId = 0
-              , ProtoEvents.eventEventType = Just $ ProtoEvents.EventEventTypeWorkerComplete $ ProtoEvents.WorkerComplete
-                  { ProtoEvents.workerCompleteWorkerId = fromText agentId
-                  , ProtoEvents.workerCompleteStatus = "success"
-                  , ProtoEvents.workerCompleteChanges = V.empty
-                  , ProtoEvents.workerCompleteMessage = "Worker " <> fromText agentId <> " completed"
-                  }
-              }
+        let status = "success"
+        let message = "Worker " <> agentId <> " completed"
 
-        res <- try @SomeException (Events.notifyEvent sessionId event)
+        res <- try @SomeException (Events.notifyParent status message)
         case res of
-            Left exc -> logError_ ("notifyEvent threw exception: " <> T.pack (show exc))
-            Right (Left err) -> logError_ ("Failed to notify completion: " <> T.pack (show err))
+            Left exc -> logError_ ("notifyParent threw exception: " <> T.pack (show exc))
+            Right (Left err) -> logError_ ("Failed to notify completion to parent: " <> T.pack (show err))
             Right (Right _) -> logInfo_ ("Completion notified for " <> agentId)
 
-    _ -> do
-        logError_ "agent_id or exomonad_session_id missing from hook input"
+    Nothing -> do
+        logError_ "agent_id missing from hook input"
         pure ()
 
   output (BSL.toStrict $ Aeson.encode $ allowResponse Nothing)

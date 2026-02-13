@@ -23,6 +23,9 @@ pub struct RawConfig {
 
     /// TCP port for the HTTP MCP server.
     pub port: Option<u16>,
+
+    /// Base directory for worktrees (default: .exomonad/worktrees).
+    pub worktree_base: Option<PathBuf>,
 }
 
 /// Final resolved configuration.
@@ -34,6 +37,8 @@ pub struct Config {
     pub zellij_session: String,
     /// TCP port for the HTTP MCP server (default: 7432).
     pub port: u16,
+    /// Base directory for worktrees.
+    pub worktree_base: PathBuf,
 }
 
 impl Config {
@@ -82,7 +87,7 @@ impl Config {
                     project_root.join(p)
                 }
             })
-            .unwrap_or(project_root);
+            .unwrap_or_else(|| project_root.clone());
 
         // Resolve zellij_session: required field, hard error if missing
         let zellij_session = local_raw
@@ -99,11 +104,25 @@ impl Config {
         // Resolve port: local > global > default (7432)
         let port = local_raw.port.or(global_raw.port).unwrap_or(7432);
 
+        // Resolve worktree_base: global > local > default (.exomonad/worktrees)
+        let worktree_base = global_raw
+            .worktree_base
+            .or(local_raw.worktree_base)
+            .map(|p| {
+                if p.is_absolute() {
+                    p
+                } else {
+                    project_root.join(p)
+                }
+            })
+            .unwrap_or_else(|| project_root.join(".exomonad/worktrees"));
+
         Ok(Self {
             project_dir,
             role,
             zellij_session,
             port,
+            worktree_base,
         })
     }
 
@@ -126,6 +145,7 @@ impl Default for Config {
             role: Role::Dev,
             zellij_session: "default".to_string(),
             port: 7432,
+            worktree_base: PathBuf::from(".exomonad/worktrees"),
         }
     }
 }

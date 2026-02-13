@@ -39,7 +39,21 @@ message Timeout {
   int32 timeout_secs = 1;
 }
 
+// ============================================================================
+// NotifyParent - Notify parent session of worker completion
+// ============================================================================
+
+message NotifyParentRequest {
+  string status = 1;    // "success" | "failure"
+  string message = 2;   // completion message
+}
+
+message NotifyParentResponse {
+  bool ack = 1;
+}
+
 service EventEffects {
   rpc WaitForEvent(WaitForEventRequest) returns (WaitForEventResponse);
   rpc NotifyEvent(NotifyEventRequest) returns (NotifyEventResponse);
+  rpc NotifyParent(NotifyParentRequest) returns (NotifyParentResponse);
 }

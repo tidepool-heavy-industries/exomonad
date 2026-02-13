@@ -27,9 +27,7 @@ data SpawnSubtree
 
 data SpawnSubtreeArgs = SpawnSubtreeArgs
   { ssTask :: Text,
-    ssBranchName :: Text,
-    ssContext :: Maybe Text,
-    ssAgentType :: Maybe AC.AgentType
+    ssBranchName :: Text
   }
   deriving (Show, Eq, Generic)
 
@@ -38,8 +36,6 @@ instance FromJSON SpawnSubtreeArgs where
     SpawnSubtreeArgs
       <$> v .: "task"
       <*> v .: "branch_name"
-      <*> v .:? "context"
-      <*> v .:? "agent_type"
 
 instance MCPTool SpawnSubtree where
   type ToolArgs SpawnSubtree = SpawnSubtreeArgs
@@ -60,23 +56,11 @@ instance MCPTool SpawnSubtree where
                 .= object
                   [ "type" .= ("string" :: Text),
                     "description" .= ("Branch name suffix (will be prefixed with current branch)" :: Text)
-                  ],
-              "context"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "description" .= ("Additional context to pass to the child agent" :: Text)
-                  ],
-              "agent_type"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "enum" .= (["claude", "gemini"] :: [Text]),
-                    "description" .= ("Agent type (default: claude)" :: Text)
                   ]
             ]
       ]
   toolHandler args = do
-    let agentTy = fromMaybe AC.Claude (ssAgentType args)
-    result <- runM $ AC.runAgentControl $ AC.spawnSubtree (ssTask args) (ssBranchName args) (ssContext args) agentTy
+    result <- runM $ AC.runAgentControl $ AC.spawnSubtree (ssTask args) (ssBranchName args)
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> pure $ successResult $ Aeson.toJSON spawnResult

@@ -140,6 +140,15 @@ pub struct SpawnWorkerOptions {
     pub prompt: String,
 }
 
+/// Options for spawning a subtree agent (isolated worktree).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpawnSubtreeOptions {
+    /// Full task/prompt for the agent.
+    pub task: String,
+    /// Branch name suffix.
+    pub branch_name: String,
+}
+
 /// Result of spawning an agent.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SpawnResult {
@@ -263,9 +272,12 @@ impl FFIBoundary for BatchCleanupResult {}
 // ============================================================================
 
 /// Agent control service for high-level agent lifecycle management.
+#[derive(Clone)]
 pub struct AgentControlService {
     /// Project root directory
     project_dir: PathBuf,
+    /// Base directory for worktrees (default: .exomonad/worktrees)
+    worktree_base: PathBuf,
     /// GitHub service for fetching issues
     github: Option<GitHubService>,
     /// Zellij session name for event emission
@@ -279,13 +291,21 @@ pub struct AgentControlService {
 impl AgentControlService {
     /// Create a new agent control service.
     pub fn new(project_dir: PathBuf, github: Option<GitHubService>) -> Self {
+        let worktree_base = project_dir.join(".exomonad/worktrees");
         Self {
             project_dir,
+            worktree_base,
             github,
             zellij_session: None,
             event_session_id: None,
             mcp_server_port: None,
         }
+    }
+
+    /// Set the worktree base directory.
+    pub fn with_worktree_base(mut self, base: PathBuf) -> Self {
+        self.worktree_base = base;
+        self
     }
 
     /// Set the Zellij session name for event emission.
@@ -317,7 +337,8 @@ impl AgentControlService {
             .and_then(|t| GitHubService::new(t).ok());
 
         Ok(Self {
-            project_dir,
+            project_dir: project_dir.clone(),
+            worktree_base: project_dir.join(".exomonad/worktrees"),
             github,
             zellij_session: None,
             event_session_id: None,
@@ -404,10 +425,7 @@ impl AgentControlService {
             };
 
             // Create worktree
-            let worktree_path = effective_project_dir
-                .join(".exomonad")
-                .join("worktrees")
-                .join(&internal_name);
+            let worktree_path = self.worktree_base.join(&internal_name);
 
             // Clean up existing worktree if it exists (idempotency)
             if worktree_path.exists() {
@@ -627,10 +645,7 @@ impl AgentControlService {
             // Use '.' separator to avoid directory/file conflicts in git refs
             // and avoid ambiguity with '-' word separators in slugs.
             let branch_name = format!("{}.{}", base_branch, slug);
-            let worktree_path = effective_project_dir
-                .join(".exomonad")
-                .join("worktrees")
-                .join(&internal_name);
+            let worktree_path = self.worktree_base.join(&internal_name);
 
             // Clean up existing worktree if it exists
             if worktree_path.exists() {
@@ -808,11 +823,14 @@ impl AgentControlService {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
             }
 
-            // Write Gemini settings to temp dir (not in worktree — worker has no worktree)
-            let tmp_agent_dir = PathBuf::from(format!("/tmp/exomonad-agents/{}", internal_name));
-            fs::create_dir_all(&tmp_agent_dir).await?;
+            // Write Gemini settings to worker config dir in project root
+            let agent_config_dir = self.project_dir
+                .join(".exomonad")
+                .join("agents")
+                .join(&internal_name);
+            fs::create_dir_all(&agent_config_dir).await?;
 
-            let settings_path = tmp_agent_dir.join("settings.json");
+            let settings_path = agent_config_dir.join("settings.json");
             let mcp_url = format!(
                 "http://localhost:{}/agents/{}/mcp",
                 mcp_port, internal_name
@@ -822,7 +840,7 @@ impl AgentControlService {
             info!(
                 path = %settings_path.display(),
                 url = %mcp_url,
-                "Wrote worker Gemini settings to temp dir"
+                "Wrote worker Gemini settings to agent config dir"
             );
 
             env_vars.insert(
@@ -871,6 +889,140 @@ impl AgentControlService {
         Ok(result)
     }
 
+    /// Spawn a subtree agent (Claude-only) in a new git worktree.
+    #[tracing::instrument(skip(self, options), fields(branch_name = %options.branch_name))]
+    pub async fn spawn_subtree(&self, options: &SpawnSubtreeOptions) -> Result<SpawnResult> {
+        info!(branch_name = %options.branch_name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_subtree");
+
+        let result = timeout(SPAWN_TIMEOUT, async {
+            self.check_zellij_env()?;
+
+            // Depth check: session_id is the birth-branch.
+            let session_id = self.event_session_id.as_deref().unwrap_or("root");
+            let depth = if session_id == "root" {
+                0
+            } else {
+                session_id.chars().filter(|&c| c == '.').count() + 1
+            };
+
+            if depth >= 2 {
+                return Err(anyhow!("Subtree depth limit reached (max 2). Current session: {}, depth: {}", session_id, depth));
+            }
+
+            // Resolve effective project dir (subtree always spawns from current project root)
+            let effective_project_dir = &self.project_dir;
+
+            // Sanitize branch name for internal use
+            let slug = slugify(&options.branch_name);
+            let internal_name = format!("{}-claude", slug);
+            let display_name = format!("{} {}", AgentType::Claude.emoji(), slug);
+
+            // Idempotency check: if Zellij tab is alive, return existing info
+            let tab_alive = self.is_zellij_tab_alive(&display_name).await;
+            if tab_alive {
+                info!(slug = %slug, "Subtree already running, returning existing");
+                return Ok(SpawnResult {
+                    agent_dir: String::new(),
+                    tab_name: internal_name,
+                    issue_title: options.branch_name.clone(),
+                    agent_type: "claude".to_string(),
+                });
+            }
+
+            // Get current branch for base
+            let current_branch_output = Command::new("git")
+                .args(["rev-parse", "--abbrev-ref", "HEAD"])
+                .current_dir(effective_project_dir)
+                .output()
+                .await
+                .context("Failed to get current branch")?;
+            let current_branch = String::from_utf8_lossy(&current_branch_output.stdout)
+                .trim()
+                .to_string();
+
+            // Branch: {current_branch}.{slug}
+            let branch_name = format!("{}.{}", current_branch, slug);
+            
+            // Worktree location: {worktree_base}/{slug}
+            let worktree_path = self.worktree_base.join(&slug);
+
+            // Clean up existing worktree if it exists
+            if worktree_path.exists() {
+                info!(path = %worktree_path.display(), "Removing existing worktree for idempotency");
+                let _ = Command::new("git")
+                    .args(["worktree", "remove", "--force", &worktree_path.to_string_lossy()])
+                    .current_dir(effective_project_dir)
+                    .output()
+                    .await;
+            }
+
+            info!(
+                base_branch = %current_branch,
+                branch_name = %branch_name,
+                worktree_path = %worktree_path.display(),
+                "Creating git worktree for subtree"
+            );
+
+            let output = Command::new("git")
+                .args([
+                    "worktree",
+                    "add",
+                    "-b",
+                    &branch_name,
+                    &worktree_path.to_string_lossy(),
+                    &current_branch,
+                ])
+                .current_dir(effective_project_dir)
+                .output()
+                .await
+                .context("Failed to create git worktree")?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                error!(stderr = %stderr, "git worktree add failed");
+                return Err(anyhow!("git worktree add failed: {}", stderr));
+            }
+
+            let mut env_vars = HashMap::new();
+            env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
+            // Session ID = birth-branch (the new branch name)
+            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), branch_name.clone());
+            if let Some(port) = self.mcp_server_port {
+                env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
+            }
+
+            // Write .mcp.json in worktree root
+            self.write_agent_mcp_config(effective_project_dir, &worktree_path, AgentType::Claude)
+                .await?;
+
+            // Open Zellij tab with cwd = worktree_path
+            self.new_zellij_tab(
+                &display_name,
+                &worktree_path,
+                AgentType::Claude,
+                Some(&options.task),
+                env_vars,
+            )
+            .await?;
+
+            Ok::<SpawnResult, anyhow::Error>(SpawnResult {
+                agent_dir: worktree_path.to_string_lossy().to_string(),
+                tab_name: internal_name,
+                issue_title: options.branch_name.clone(),
+                agent_type: "claude".to_string(),
+            })
+        })
+        .await
+        .map_err(|_| {
+            let msg = format!("spawn_subtree timed out after {}s", SPAWN_TIMEOUT.as_secs());
+            warn!(branch_name = %options.branch_name, error = %msg, "spawn_subtree timed out");
+            anyhow::Error::new(TimeoutError { message: msg })
+        })??;
+
+        info!(branch_name = %options.branch_name, "spawn_subtree completed successfully");
+        Ok(result)
+    }
+
     // ========================================================================
     // Cleanup Agent
     // ========================================================================
@@ -884,13 +1036,10 @@ impl AgentControlService {
         &self,
         identifier: &str,
         _force: bool,
-        subrepo: Option<&str>,
     ) -> Result<()> {
-        let effective_project_dir = self.effective_project_dir(subrepo)?;
-
         // Try to find agent in list (for metadata and tab matching).
         // Failure here is non-fatal to allow cleaning up worker panes (invisible to list_agents).
-        let agents = self.list_agents(subrepo).await.unwrap_or_default();
+        let agents = self.list_agents().await.unwrap_or_default();
         let agent = agents.iter().find(|a| a.issue_id == identifier);
 
         info!(
@@ -962,10 +1111,7 @@ impl AgentControlService {
         }
 
         // Remove git worktree if it exists
-        let worktree_path = effective_project_dir
-            .join(".exomonad")
-            .join("worktrees")
-            .join(&internal_name);
+        let worktree_path = self.worktree_base.join(&internal_name);
         if worktree_path.exists() {
             info!(path = %worktree_path.display(), "Removing git worktree");
             let output = Command::new("git")
@@ -1030,7 +1176,7 @@ impl AgentControlService {
         };
 
         for issue_id in issue_ids {
-            match self.cleanup_agent(issue_id, force, subrepo).await {
+            match self.cleanup_agent(issue_id, force).await {
                 Ok(()) => result.cleaned.push(issue_id.clone()),
                 Err(e) => {
                     warn!(issue_id, error = %e, "Failed to cleanup agent");
@@ -1052,7 +1198,7 @@ impl AgentControlService {
         issues: &[String],
         subrepo: Option<&str>,
     ) -> Result<BatchCleanupResult> {
-        let agents = self.list_agents(subrepo).await?;
+        let agents = self.list_agents().await?;
         let mut to_cleanup = Vec::new();
 
         let issue_filter: Option<HashSet<&str>> = if issues.is_empty() {
@@ -1089,19 +1235,102 @@ impl AgentControlService {
     // List Agents
     // ========================================================================
 
-    /// List all active agents by scanning Zellij tabs.
+    /// List all active agents by scanning the filesystem and verifying with Zellij.
     ///
-    /// Zellij tabs ARE the source of truth for running agents.
-    /// Agent tabs have emoji prefixes (🤖/💎) followed by agent names.
+    /// Discovery process:
+    /// 1. Scan {worktree_base}/ for subtree agents (isolated worktrees)
+    /// 2. Scan {project_dir}/.exomonad/agents/ for worker agents (shared worktree)
+    /// 3. Verify liveness by checking Zellij tabs/panes
     #[tracing::instrument(skip(self))]
-    pub async fn list_agents(&self, subrepo: Option<&str>) -> Result<Vec<AgentInfo>> {
-        let _effective_project_dir = self.effective_project_dir(subrepo)?;
+    pub async fn list_agents(&self) -> Result<Vec<AgentInfo>> {
+        let mut agents = Vec::new();
 
+        // Get all Zellij tabs for liveness check
         let tabs = self.get_zellij_tabs().await.unwrap_or_default();
 
-        let agents: Vec<AgentInfo> = tabs.iter().filter_map(|tab| parse_agent_tab(tab)).collect();
+        // 1. Scan worktree_base for subtree agents
+        if self.worktree_base.exists() {
+            let mut entries = fs::read_dir(&self.worktree_base).await?;
+            while let Some(entry) = entries.next_entry().await? {
+                if entry.file_type().await?.is_dir() {
+                    let path = entry.path();
+                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    
+                    // Check for .mcp.json (Claude) or .gemini/settings.json (Gemini)
+                    let is_claude = path.join(".mcp.json").exists();
+                    let is_gemini = path.join(".gemini/settings.json").exists();
+                    
+                    if is_claude || is_gemini {
+                        let agent_type = if is_claude { "claude" } else { "gemini" };
+                        let emoji = if is_claude { AgentType::Claude.emoji() } else { AgentType::Gemini.emoji() };
+                        let display_name = format!("{} {}", emoji, name);
+                        
+                        let has_tab = tabs.iter().any(|t| t == &display_name);
+                        let status = if has_tab { AgentStatus::Running } else { AgentStatus::Stopped };
+
+                        agents.push(AgentInfo {
+                            issue_id: name.to_string(),
+                            has_tab,
+                            status,
+                            topology: Topology::WorktreePerAgent,
+                            agent_dir: Some(path.to_string_lossy().to_string()),
+                            slug: Some(name.to_string()),
+                            agent_type: Some(agent_type.to_string()),
+                            pr: None,
+                        });
+
+                        // 2. Scan subtree's .exomonad/agents for workers
+                        let subtree_agents_dir = path.join(".exomonad/agents");
+                        if subtree_agents_dir.exists() {
+                            self.scan_workers(&subtree_agents_dir, &tabs, &mut agents).await?;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Scan root .exomonad/agents for workers
+        let root_agents_dir = self.project_dir.join(".exomonad/agents");
+        if root_agents_dir.exists() {
+            self.scan_workers(&root_agents_dir, &tabs, &mut agents).await?;
+        }
 
         Ok(agents)
+    }
+
+    /// Helper to scan a directory for worker agents.
+    async fn scan_workers(&self, dir: &Path, tabs: &[String], agents: &mut Vec<AgentInfo>) -> Result<()> {
+        let mut entries = fs::read_dir(dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            if entry.file_type().await?.is_dir() {
+                let path = entry.path();
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                
+                // Workers are currently Gemini-only
+                if name.ends_with("-gemini") {
+                    let base_name = name.strip_suffix("-gemini").unwrap_or(name);
+                    let display_name = format!("{} {}", AgentType::Gemini.emoji(), base_name);
+                    
+                    // Liveness: for workers, they might be panes in a tab.
+                    // Currently list_agents only sees tabs. Zellij doesn't easily query pane names across tabs.
+                    // For now, if it's in a tab list, it's running.
+                    let has_tab = tabs.iter().any(|t| t == &display_name);
+                    let status = if has_tab { AgentStatus::Running } else { AgentStatus::Stopped };
+
+                    agents.push(AgentInfo {
+                        issue_id: name.to_string(),
+                        has_tab,
+                        status,
+                        topology: Topology::SharedDir,
+                        agent_dir: Some(path.to_string_lossy().to_string()),
+                        slug: Some(base_name.to_string()),
+                        agent_type: Some("gemini".to_string()),
+                        pr: None,
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 
     // ========================================================================
@@ -1586,39 +1815,6 @@ impl AgentControlService {
             .replace('\r', "\\r")
             .replace('\t', "\\t")
     }
-}
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-/// Parse a Zellij tab name into AgentInfo if it matches agent tab format.
-///
-/// Agent tabs: "{emoji} {agent_name}" where emoji is 🤖 (Claude) or 💎 (Gemini).
-fn parse_agent_tab(tab_name: &str) -> Option<AgentInfo> {
-    // Agent tabs start with an emoji prefix
-    let (emoji, rest) = if tab_name.starts_with("🤖 ") {
-        ("claude", tab_name.strip_prefix("🤖 ")?)
-    } else if tab_name.starts_with("💎 ") {
-        ("gemini", tab_name.strip_prefix("💎 ")?)
-    } else {
-        return None;
-    };
-
-    // All discovered agent tabs currently use isolated worktrees.
-    // SharedDir is reserved for worker panes, which are invisible to tab discovery.
-    let topology = Topology::WorktreePerAgent;
-
-    Some(AgentInfo {
-        issue_id: rest.to_string(),
-        has_tab: true,
-        status: AgentStatus::Running,
-        topology,
-        agent_dir: None,
-        slug: None,
-        agent_type: Some(emoji.to_string()),
-        pr: None,
-    })
 }
 
 /// Create a URL-safe slug from a title.

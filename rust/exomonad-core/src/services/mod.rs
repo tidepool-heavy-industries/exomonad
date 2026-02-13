@@ -186,16 +186,22 @@ impl Services {
         self
     }
 
+    /// Set the worktree base directory.
+    pub fn with_worktree_base(mut self, base: PathBuf) -> Self {
+        let mut acs = (*self.agent_control).clone();
+        acs = acs.with_worktree_base(base);
+        self.agent_control = Arc::new(acs);
+        self
+    }
+
     /// Set the MCP server port for per-agent endpoint URL generation.
     ///
     /// Propagates to AgentControlService which writes per-agent Gemini settings
     /// pointing to `http://localhost:{port}/agents/{name}/mcp`.
     pub fn with_mcp_server_port(mut self, port: u16) -> Self {
-        let project_dir = std::env::current_dir().unwrap_or_default();
-        let github = self.github.clone();
-        let mut acs = AgentControlService::new(project_dir, github)
-            .with_mcp_server_port(port)
-            .with_event_session_id(self.event_session_id.clone());
+        let mut acs = (*self.agent_control).clone();
+        acs = acs.with_mcp_server_port(port)
+                 .with_event_session_id(self.event_session_id.clone());
         if let Some(ref session) = self.zellij_session {
             acs = acs.with_zellij_session(session.clone());
         }

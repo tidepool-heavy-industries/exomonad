@@ -7,7 +7,7 @@ use crate::effects::{
 };
 use crate::services::agent_control::{
     AgentControlService, AgentInfo, AgentType as ServiceAgentType, SpawnGeminiTeammateOptions,
-    SpawnOptions, SpawnWorkerOptions,
+    SpawnOptions, SpawnSubtreeOptions, SpawnWorkerOptions,
 };
 use crate::{GithubOwner, GithubRepo, IssueNumber};
 use async_trait::async_trait;
@@ -174,16 +174,27 @@ impl AgentEffects for AgentHandler {
         })
     }
 
-    async fn cleanup(&self, req: CleanupRequest) -> EffectResult<CleanupResponse> {
-        let subrepo = if req.subrepo.is_empty() {
-            None
-        } else {
-            Some(req.subrepo.as_str())
+    async fn spawn_subtree(&self, req: SpawnSubtreeRequest) -> EffectResult<SpawnSubtreeResponse> {
+        let options = SpawnSubtreeOptions {
+            task: req.task.clone(),
+            branch_name: req.branch_name.clone(),
         };
 
+        let result = self
+            .service
+            .spawn_subtree(&options)
+            .await
+            .map_err(|e| EffectError::custom("agent_error", e.to_string()))?;
+
+        Ok(SpawnSubtreeResponse {
+            agent: Some(subtree_result_to_proto(&req.branch_name, &result)),
+        })
+    }
+
+    async fn cleanup(&self, req: CleanupRequest) -> EffectResult<CleanupResponse> {
         match self
             .service
-            .cleanup_agent(&req.issue, req.force, subrepo)
+            .cleanup_agent(&req.issue, req.force)
             .await
         {
             Ok(_) => Ok(CleanupResponse {
@@ -245,16 +256,10 @@ impl AgentEffects for AgentHandler {
         })
     }
 
-    async fn list(&self, req: ListRequest) -> EffectResult<ListResponse> {
-        let subrepo = if req.subrepo.is_empty() {
-            None
-        } else {
-            Some(req.subrepo.as_str())
-        };
-
+    async fn list(&self, _req: ListRequest) -> EffectResult<ListResponse> {
         let infos = self
             .service
-            .list_agents(subrepo)
+            .list_agents()
             .await
             .map_err(|e| EffectError::custom("agent_error", e.to_string()))?;
 
@@ -342,6 +347,28 @@ fn worker_result_to_proto(
         pr_number: 0,
         pr_url: String::new(),
         topology: Topology::SharedDir.to_proto(),
+    }
+}
+
+fn subtree_result_to_proto(
+    branch_name: &str,
+    result: &crate::services::agent_control::SpawnResult,
+) -> exomonad_proto::effects::agent::AgentInfo {
+    use crate::services::agent_control::Topology;
+
+    exomonad_proto::effects::agent::AgentInfo {
+        id: result.tab_name.clone(),
+        issue: String::new(),
+        worktree_path: result.agent_dir.clone(),
+        branch_name: branch_name.to_string(),
+        agent_type: AgentType::Claude as i32,
+        role: 0,
+        status: AgentStatus::Running as i32,
+        zellij_tab: format!("\u{1F916} {}", branch_name),
+        error: String::new(),
+        pr_number: 0,
+        pr_url: String::new(),
+        topology: Topology::WorktreePerAgent.to_proto(),
     }
 }
 

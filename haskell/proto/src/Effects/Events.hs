@@ -599,3 +599,108 @@ instance (HsJSONPB.ToJSON Timeout) where
   toEncoding = HsJSONPB.toAesonEncoding
 instance (HsJSONPB.FromJSON Timeout) where
   parseJSON = HsJSONPB.parseJSONPB
+data NotifyParentRequest
+  = NotifyParentRequest {notifyParentRequestStatus :: Hs.Text,
+                         notifyParentRequestMessage :: Hs.Text}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData NotifyParentRequest)
+instance (HsProtobuf.Named NotifyParentRequest) where
+  nameOf _ = Hs.fromString "NotifyParentRequest"
+instance (HsProtobuf.HasDefault NotifyParentRequest)
+instance (HsProtobuf.Message NotifyParentRequest) where
+  encodeMessage
+    _
+    NotifyParentRequest {notifyParentRequestStatus,
+                         notifyParentRequestMessage}
+    = Hs.mappend
+        (HsProtobuf.encodeMessageField
+           (HsProtobuf.FieldNumber 1)
+           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+              notifyParentRequestStatus))
+        (HsProtobuf.encodeMessageField
+           (HsProtobuf.FieldNumber 2)
+           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+              notifyParentRequestMessage))
+  decodeMessage _
+    = Hs.pure NotifyParentRequest
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)))
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 2)))
+  dotProto _
+    = [HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 1)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "status") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 2)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "message") [] ""]
+instance (HsJSONPB.ToJSONPB NotifyParentRequest) where
+  toJSONPB (NotifyParentRequest f1 f2)
+    = HsJSONPB.object
+        ["status"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
+         "message"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
+  toEncodingPB (NotifyParentRequest f1 f2)
+    = HsJSONPB.pairs
+        ["status"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
+         "message"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
+instance (HsJSONPB.FromJSONPB NotifyParentRequest) where
+  parseJSONPB
+    = HsJSONPB.withObject
+        "NotifyParentRequest"
+        (\ obj
+           -> Hs.pure NotifyParentRequest
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "status"))
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "message")))
+instance (HsJSONPB.ToJSON NotifyParentRequest) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON NotifyParentRequest) where
+  parseJSON = HsJSONPB.parseJSONPB
+newtype NotifyParentResponse
+  = NotifyParentResponse {notifyParentResponseAck :: Hs.Bool}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData NotifyParentResponse)
+instance (HsProtobuf.Named NotifyParentResponse) where
+  nameOf _ = Hs.fromString "NotifyParentResponse"
+instance (HsProtobuf.HasDefault NotifyParentResponse)
+instance (HsProtobuf.Message NotifyParentResponse) where
+  encodeMessage _ NotifyParentResponse {notifyParentResponseAck}
+    = (HsProtobuf.encodeMessageField
+         (HsProtobuf.FieldNumber 1) notifyParentResponseAck)
+  decodeMessage _
+    = Hs.pure NotifyParentResponse
+        <*>
+          HsProtobuf.at
+            HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)
+  dotProto _
+    = [HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 1) (HsProtobufAST.Prim HsProtobufAST.Bool)
+         (HsProtobufAST.Single "ack") [] ""]
+instance (HsJSONPB.ToJSONPB NotifyParentResponse) where
+  toJSONPB (NotifyParentResponse f1) = HsJSONPB.object ["ack" .= f1]
+  toEncodingPB (NotifyParentResponse f1)
+    = HsJSONPB.pairs ["ack" .= f1]
+instance (HsJSONPB.FromJSONPB NotifyParentResponse) where
+  parseJSONPB
+    = HsJSONPB.withObject
+        "NotifyParentResponse"
+        (\ obj -> Hs.pure NotifyParentResponse <*> obj .: "ack")
+instance (HsJSONPB.ToJSON NotifyParentResponse) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON NotifyParentResponse) where
+  parseJSON = HsJSONPB.parseJSONPB
