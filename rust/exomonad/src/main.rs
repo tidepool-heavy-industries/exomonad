@@ -249,6 +249,7 @@ async fn handle_hook_inner(
             | HookEventType::AfterAgent
             | HookEventType::SubagentStop
             | HookEventType::SessionEnd
+            | HookEventType::WorkerExit
     );
 
     let normalized_event_name = match event_type {

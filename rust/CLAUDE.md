@@ -58,8 +58,10 @@ Each subtree agent:
 - Runs in Zellij tab with `claude 'task'` (positional arg), auto-closes on exit
 
 Each worker agent:
-- Runs in a Zellij pane in the parent's worktree (no branch, no worktree)
+- Runs in a Zellij pane in an isolated worktree (own branch for PR filing)
 - Always Gemini — lightweight, focused execution
+- Branch naming: `{parent_branch}.{slug}` (dot separator, same as subtree)
+- Stop hook pipeline: dirty files → push → PR → Copilot review → notifyParent
 - MCP config in `.exomonad/agents/{name}/settings.json`, pointed via `GEMINI_CLI_SYSTEM_SETTINGS_PATH`
 
 ## Documentation Tree
