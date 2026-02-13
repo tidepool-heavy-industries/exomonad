@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use zellij_tile::prelude::*;
 use ratatui::{
     backend::WindowSize,
@@ -57,6 +57,12 @@ struct ExoMonadPlugin {
     terminal: Option<Terminal<ZellijBackend>>,
     /// Agent state from the coordinator plugin.
     coordinator_agents: Vec<CoordinatorAgentState>,
+    /// Tab position → tab name mapping, rebuilt from TabUpdate events.
+    tab_names: HashMap<usize, String>,
+    /// Cached pane manifest from last PaneUpdate event.
+    pane_manifest_cache: Option<PaneManifest>,
+    /// Tab name → terminal pane ID mapping, rebuilt when either tab or pane data updates.
+    tab_pane_map: HashMap<String, u32>,
 }
 
 register_plugin!(ExoMonadPlugin);
@@ -197,13 +203,40 @@ fn color_to_ansi(color: Color, bg: bool) -> String {
     }
 }
 
+impl ExoMonadPlugin {
+    /// Rebuild tab_pane_map by correlating tab_names (from TabUpdate) with
+    /// pane_manifest_cache (from PaneUpdate). For each tab, picks the first
+    /// non-plugin, non-floating, non-exited terminal pane.
+    fn rebuild_tab_pane_map(&mut self) {
+        self.tab_pane_map.clear();
+        let manifest = match &self.pane_manifest_cache {
+            Some(m) => m,
+            None => return,
+        };
+        for (tab_pos, panes) in &manifest.panes {
+            if let Some(tab_name) = self.tab_names.get(tab_pos) {
+                if let Some(pane) = panes.iter().find(|p| !p.is_plugin && !p.is_floating && !p.exited) {
+                    self.tab_pane_map.insert(tab_name.clone(), pane.id);
+                }
+            }
+        }
+    }
+}
+
 impl ZellijPlugin for ExoMonadPlugin {
     fn load(&mut self, _configuration: BTreeMap<String, String>) {
         request_permission(&[
             PermissionType::ReadCliPipes,
             PermissionType::ChangeApplicationState,
+            PermissionType::WriteToStdin,
+            PermissionType::ReadApplicationState,
         ]);
-        subscribe(&[EventType::CustomMessage, EventType::Key]);
+        subscribe(&[
+            EventType::CustomMessage,
+            EventType::Key,
+            EventType::TabUpdate,
+            EventType::PaneUpdate,
+        ]);
         self.status_state = PluginState::Idle;
         self.status_message = "Ready.".to_string();
         self.events = VecDeque::new();
@@ -320,6 +353,50 @@ impl ZellijPlugin for ExoMonadPlugin {
             return true; // Request re-render
         }
 
+        // Handle inject-input requests: write text into a target pane resolved by tab name
+        if pipe_message.name == transport::INJECT_INPUT_PIPE {
+            if let Some(payload) = pipe_message.payload {
+                match serde_json::from_str::<serde_json::Value>(&payload) {
+                    Ok(val) => {
+                        let tab_name = match val["tab_name"].as_str() {
+                            Some(t) => t,
+                            None => {
+                                eprintln!("[exomonad-plugin] inject-input: missing 'tab_name' string field");
+                                return true;
+                            }
+                        };
+                        let text = match val["text"].as_str() {
+                            Some(t) => t,
+                            None => {
+                                eprintln!("[exomonad-plugin] inject-input: missing 'text' string field");
+                                return true;
+                            }
+                        };
+
+                        if let Some(&pane_id) = self.tab_pane_map.get(tab_name) {
+                            const ENTER_KEY: u8 = 13;
+                            write_chars_to_pane_id(text, PaneId::Terminal(pane_id));
+                            write_to_pane_id(vec![ENTER_KEY], PaneId::Terminal(pane_id));
+                        } else {
+                            eprintln!(
+                                "[exomonad-plugin] inject-input: tab '{}' not found in pane map ({} entries)",
+                                tab_name,
+                                self.tab_pane_map.len()
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[exomonad-plugin] inject-input: invalid JSON: {}", e);
+                    }
+                }
+            }
+            // Unblock CLI pipe if from CLI source
+            if let PipeSource::Cli(id) = &pipe_message.source {
+                unblock_cli_pipe_input(id);
+            }
+            return true;
+        }
+
         // Handle pipe messages from zellij pipe --name exomonad-events
         if pipe_message.name == "exomonad-events" {
             if let Some(payload) = pipe_message.payload {
@@ -388,6 +465,18 @@ impl ZellijPlugin for ExoMonadPlugin {
                         }
                     }
                 }
+            }
+            Event::TabUpdate(tab_infos) => {
+                self.tab_names.clear();
+                for tab in &tab_infos {
+                    self.tab_names.insert(tab.position, tab.name.clone());
+                }
+                self.rebuild_tab_pane_map();
+            }
+            Event::PaneUpdate(pane_manifest) => {
+                // Store raw pane data and rebuild the tab_name → pane_id map
+                self.pane_manifest_cache = Some(pane_manifest);
+                self.rebuild_tab_pane_map();
             }
             Event::Key(key) => {
                 if let Some(popup) = &mut self.active_popup {

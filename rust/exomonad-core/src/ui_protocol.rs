@@ -16,10 +16,13 @@ use std::fmt;
 // Transport Constants
 // ============================================================================
 
-/// Pipe names for popup communication between service and plugin.
+/// Pipe names for service-plugin communication via Zellij pipes.
 pub mod transport {
     /// Pipe name for popup requests (used with zellij pipe --plugin)
     pub const POPUP_PIPE: &str = "exomonad:popup";
+
+    /// Pipe name for injecting text input into a target pane via the plugin.
+    pub const INJECT_INPUT_PIPE: &str = "exomonad:inject-input";
 }
 
 // ============================================================================
