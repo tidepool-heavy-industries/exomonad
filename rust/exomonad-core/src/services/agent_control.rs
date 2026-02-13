@@ -995,6 +995,9 @@ impl AgentControlService {
             self.write_agent_mcp_config(effective_project_dir, &worktree_path, AgentType::Claude)
                 .await?;
 
+            // Write .claude/settings.local.json with stop hooks
+            self.write_claude_hook_config(&worktree_path).await?;
+
             // Open Zellij tab with cwd = worktree_path
             self.new_zellij_tab(
                 &display_name,
@@ -1673,6 +1676,60 @@ impl AgentControlService {
     // Internal: Agent Config Files
     // ========================================================================
 
+    /// Write Claude Code hook configuration for a subtree agent.
+    ///
+    /// Creates `.claude/settings.local.json` with hooks that forward to
+    /// `exomonad hook <event>` for stop validation and permission checks.
+    async fn write_claude_hook_config(&self, worktree_path: &Path) -> Result<()> {
+        let claude_dir = worktree_path.join(".claude");
+        fs::create_dir_all(&claude_dir).await?;
+
+        let settings = Self::generate_claude_hook_settings();
+        let content = serde_json::to_string_pretty(&settings)
+            .context("Failed to serialize Claude hook settings")?;
+
+        fs::write(claude_dir.join("settings.local.json"), content).await?;
+        info!(worktree = %worktree_path.display(), "Wrote .claude/settings.local.json with stop hooks");
+        Ok(())
+    }
+
+    /// Generate settings.local.json content for a Claude subtree agent.
+    ///
+    /// Includes hooks for stop validation (SubagentStop, SessionEnd) and
+    /// permission forwarding (PreToolUse, PostToolUse).
+    fn generate_claude_hook_settings() -> serde_json::Value {
+        serde_json::json!({
+            "hooks": {
+                "PreToolUse": [{
+                    "matcher": "*",
+                    "hooks": [{
+                        "type": "command",
+                        "command": "exomonad hook pre-tool-use"
+                    }]
+                }],
+                "PostToolUse": [{
+                    "matcher": "*",
+                    "hooks": [{
+                        "type": "command",
+                        "command": "exomonad hook post-tool-use"
+                    }]
+                }],
+                "SubagentStop": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": "exomonad hook subagent-stop"
+                    }]
+                }],
+                "SessionEnd": [{
+                    "hooks": [{
+                        "type": "command",
+                        "command": "exomonad hook session-end"
+                    }]
+                }]
+            }
+        })
+    }
+
     /// Write MCP config for the agent directory.
     ///
     /// Claude agents get `.mcp.json`. Gemini agents get `.gemini/settings.json`.
@@ -1941,7 +1998,7 @@ mod tests {
 
     #[test]
     fn test_agent_type_prompt_flag() {
-        assert_eq!(AgentType::Claude.prompt_flag(), "--prompt");
+        assert_eq!(AgentType::Claude.prompt_flag(), "");
         assert_eq!(AgentType::Gemini.prompt_flag(), "--prompt-interactive");
     }
 
@@ -2076,6 +2133,47 @@ mod tests {
         assert_eq!(
             hooks_list[0]["command"],
             "exomonad hook after-agent --runtime gemini"
+        );
+    }
+
+    #[test]
+    fn test_claude_hook_settings_format() {
+        let settings = AgentControlService::generate_claude_hook_settings();
+
+        // PreToolUse has matcher
+        let pre_tool = &settings["hooks"]["PreToolUse"];
+        assert!(pre_tool.is_array());
+        assert_eq!(pre_tool[0]["matcher"], "*");
+        assert_eq!(
+            pre_tool[0]["hooks"][0]["command"],
+            "exomonad hook pre-tool-use"
+        );
+
+        // PostToolUse has matcher
+        let post_tool = &settings["hooks"]["PostToolUse"];
+        assert!(post_tool.is_array());
+        assert_eq!(post_tool[0]["matcher"], "*");
+        assert_eq!(
+            post_tool[0]["hooks"][0]["command"],
+            "exomonad hook post-tool-use"
+        );
+
+        // SubagentStop has no matcher
+        let subagent_stop = &settings["hooks"]["SubagentStop"];
+        assert!(subagent_stop.is_array());
+        assert!(subagent_stop[0].get("matcher").is_none());
+        assert_eq!(
+            subagent_stop[0]["hooks"][0]["command"],
+            "exomonad hook subagent-stop"
+        );
+
+        // SessionEnd has no matcher
+        let session_end = &settings["hooks"]["SessionEnd"];
+        assert!(session_end.is_array());
+        assert!(session_end[0].get("matcher").is_none());
+        assert_eq!(
+            session_end[0]["hooks"][0]["command"],
+            "exomonad hook session-end"
         );
     }
 

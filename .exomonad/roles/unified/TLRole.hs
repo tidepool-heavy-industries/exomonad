@@ -9,6 +9,10 @@
 module TLRole (config, Tools) where
 
 import ExoMonad
+import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
+import ExoMonad.Guest.Types (allowResponse, postToolUseResponse)
+import ExoMonad.Types (HookConfig (..))
+import Control.Monad.Freer (send)
 
 data Tools mode = Tools
   { spawn :: SpawnTools mode,
@@ -31,5 +35,11 @@ config =
             pr = filePRTools,
             events = eventTools
           },
-      hooks = defaultHooks
+      hooks =
+        HookConfig
+          { preToolUse = \_ -> pure (allowResponse Nothing),
+            postToolUse = \_ -> pure (postToolUseResponse Nothing),
+            onStop = \_ -> send runStopHookChecks,
+            onSubagentStop = \_ -> send runStopHookChecks
+          }
     }

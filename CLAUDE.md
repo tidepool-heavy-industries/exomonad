@@ -455,7 +455,7 @@ Use cases:
 - ✅ Configurable worktree_base in config.toml
 - ✅ Split spawn_subtree (Claude worktree+tab) / spawn_workers (Gemini panes)
 - 🔧 Inter-agent messaging (note/question/answer) — code exists, needs async conversion for question tool
-- 🔧 Stop hooks for subtree agents (notify_parent on exit not yet wired)
+- ✅ Stop hooks for subtree agents (settings.local.json written at spawn, TL role runs stop checks)
 
 ---
 
