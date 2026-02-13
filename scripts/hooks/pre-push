@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-push hook: Verify formatting and run fast tests before pushing
+# Pre-push hook: Verify formatting, tests, and WASM build before pushing
 #
 # To install: just install-hooks
 # To bypass (emergency): git push --no-verify
@@ -28,11 +28,11 @@ if ! just fmt-check; then
 fi
 
 echo ""
-echo ">>> Running fast tests..."
-if ! just test-fast; then
+echo ">>> Running verify (Rust tests + WASM build)..."
+if ! just verify; then
     echo ""
-    echo "ERROR: Tests failed!"
-    echo "Fix the failing tests before pushing."
+    echo "ERROR: Verification failed!"
+    echo "Fix the issues before pushing."
     exit 1
 fi
 

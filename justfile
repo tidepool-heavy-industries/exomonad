@@ -102,12 +102,24 @@ test:
     cabal test all
     cargo test --workspace
 
-# Run fast tests only (for pre-push hook)
+# Run fast tests only (Rust unit tests)
 test-fast:
-    cargo test --workspace
+    cargo test --workspace --lib
 
-# Pre-push checks (formatting + fast tests)
-pre-push: fmt-check test-fast
+# Verify everything builds and passes (Rust tests + WASM)
+verify:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo ">>> [1/3] Rust unit tests..."
+    cargo test --workspace --lib
+    echo ">>> [2/3] Rust check (all targets)..."
+    cargo check --workspace --all-targets
+    echo ">>> [3/3] WASM build..."
+    just wasm-all
+    echo ">>> All checks passed."
+
+# Pre-push checks (formatting + verify)
+pre-push: fmt-check verify
 
 # Install git hooks (symlinks scripts/hooks/* to .git/hooks/)
 install-hooks:
