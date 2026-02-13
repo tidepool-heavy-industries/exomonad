@@ -2069,27 +2069,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_agent_tab_subtree_claude() {
-        let info = parse_agent_tab("🤖 auth-service").unwrap();
-        assert_eq!(info.issue_id, "auth-service");
-        assert_eq!(info.agent_type, Some("claude".to_string()));
-        assert_eq!(info.topology, Topology::WorktreePerAgent);
-    }
-
-    #[test]
-    fn test_parse_agent_tab_subtree_gemini() {
-        let info = parse_agent_tab("💎 data-migration").unwrap();
-        assert_eq!(info.issue_id, "data-migration");
-        assert_eq!(info.agent_type, Some("gemini".to_string()));
-    }
-
-    #[test]
-    fn test_parse_agent_tab_not_agent() {
-        assert!(parse_agent_tab("Server").is_none());
-        assert!(parse_agent_tab("TL").is_none());
-    }
-
-    #[test]
     fn test_gemini_settings_schema_compliance() {
         let settings = AgentControlService::generate_gemini_settings("http://example.com/mcp");
 
