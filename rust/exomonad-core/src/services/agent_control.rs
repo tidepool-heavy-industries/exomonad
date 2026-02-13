@@ -56,7 +56,7 @@ struct AgentMetadata {
 
 const CLAUDE_META: AgentMetadata = AgentMetadata {
     command: "claude",
-    prompt_flag: "--prompt",
+    prompt_flag: "",
     suffix: "claude",
     emoji: "\u{1F916}", // 🤖
 };
@@ -1392,7 +1392,12 @@ impl AgentControlService {
                     prompt_length = p.len(),
                     "Spawning agent with CLI prompt"
                 );
-                format!("{} {} {}", cmd, agent_type.prompt_flag(), escaped_prompt)
+                let flag = agent_type.prompt_flag();
+                if flag.is_empty() {
+                    format!("{} {}", cmd, escaped_prompt)
+                } else {
+                    format!("{} {} {}", cmd, flag, escaped_prompt)
+                }
             }
             None => cmd.to_string(),
         };
@@ -1528,7 +1533,12 @@ impl AgentControlService {
                     prompt_length = p.len(),
                     "Spawning agent with CLI prompt"
                 );
-                format!("{} {} {}", cmd, agent_type.prompt_flag(), escaped_prompt)
+                let flag = agent_type.prompt_flag();
+                if flag.is_empty() {
+                    format!("{} {}", cmd, escaped_prompt)
+                } else {
+                    format!("{} {} {}", cmd, flag, escaped_prompt)
+                }
             }
             None => cmd.to_string(),
         };
