@@ -2066,3 +2066,134 @@ instance (HsJSONPB.ToJSON SpawnWorkerResponse) where
   toEncoding = HsJSONPB.toAesonEncoding
 instance (HsJSONPB.FromJSON SpawnWorkerResponse) where
   parseJSON = HsJSONPB.parseJSONPB
+data SpawnSubtreeRequest
+  = SpawnSubtreeRequest {spawnSubtreeRequestTask :: Hs.Text,
+                         spawnSubtreeRequestBranchName :: Hs.Text}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData SpawnSubtreeRequest)
+instance (HsProtobuf.Named SpawnSubtreeRequest) where
+  nameOf _ = Hs.fromString "SpawnSubtreeRequest"
+instance (HsProtobuf.HasDefault SpawnSubtreeRequest)
+instance (HsProtobuf.Message SpawnSubtreeRequest) where
+  encodeMessage
+    _
+    SpawnSubtreeRequest {spawnSubtreeRequestTask,
+                         spawnSubtreeRequestBranchName}
+    = Hs.mappend
+        (HsProtobuf.encodeMessageField
+           (HsProtobuf.FieldNumber 1)
+           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+              spawnSubtreeRequestTask))
+        (HsProtobuf.encodeMessageField
+           (HsProtobuf.FieldNumber 2)
+           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+              spawnSubtreeRequestBranchName))
+  decodeMessage _
+    = Hs.pure SpawnSubtreeRequest
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)))
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 2)))
+  dotProto _
+    = [HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 1)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "task") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 2)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "branch_name") [] ""]
+instance (HsJSONPB.ToJSONPB SpawnSubtreeRequest) where
+  toJSONPB (SpawnSubtreeRequest f1 f2)
+    = HsJSONPB.object
+        ["task" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
+         "branch_name"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
+  toEncodingPB (SpawnSubtreeRequest f1 f2)
+    = HsJSONPB.pairs
+        ["task" .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
+         "branch_name"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
+instance (HsJSONPB.FromJSONPB SpawnSubtreeRequest) where
+  parseJSONPB
+    = HsJSONPB.withObject
+        "SpawnSubtreeRequest"
+        (\ obj
+           -> Hs.pure SpawnSubtreeRequest
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "task"))
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "branch_name")))
+instance (HsJSONPB.ToJSON SpawnSubtreeRequest) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON SpawnSubtreeRequest) where
+  parseJSON = HsJSONPB.parseJSONPB
+newtype SpawnSubtreeResponse
+  = SpawnSubtreeResponse {spawnSubtreeResponseAgent :: (Hs.Maybe Effects.Agent.AgentInfo)}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+instance (Hs.NFData SpawnSubtreeResponse)
+instance (HsProtobuf.Named SpawnSubtreeResponse) where
+  nameOf _ = Hs.fromString "SpawnSubtreeResponse"
+instance (HsProtobuf.HasDefault SpawnSubtreeResponse)
+instance (HsProtobuf.Message SpawnSubtreeResponse) where
+  encodeMessage _ SpawnSubtreeResponse {spawnSubtreeResponseAgent}
+    = (HsProtobuf.encodeMessageField
+         (HsProtobuf.FieldNumber 1)
+         ((Hs.coerce
+             @(Hs.Maybe Effects.Agent.AgentInfo)
+             @(HsProtobuf.Nested Effects.Agent.AgentInfo))
+            spawnSubtreeResponseAgent))
+  decodeMessage _
+    = Hs.pure SpawnSubtreeResponse
+        <*>
+          ((HsProtobuf.coerceOver
+              @(HsProtobuf.Nested Effects.Agent.AgentInfo)
+              @(Hs.Maybe Effects.Agent.AgentInfo))
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 1)))
+  dotProto _
+    = [HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 1)
+         (HsProtobufAST.Prim
+            (HsProtobufAST.Named (HsProtobufAST.Single "AgentInfo")))
+         (HsProtobufAST.Single "agent") [] ""]
+instance (HsJSONPB.ToJSONPB SpawnSubtreeResponse) where
+  toJSONPB (SpawnSubtreeResponse f1)
+    = HsJSONPB.object
+        ["agent"
+           .=
+             ((Hs.coerce
+                 @(Hs.Maybe Effects.Agent.AgentInfo)
+                 @(HsProtobuf.Nested Effects.Agent.AgentInfo))
+                f1)]
+  toEncodingPB (SpawnSubtreeResponse f1)
+    = HsJSONPB.pairs
+        ["agent"
+           .=
+             ((Hs.coerce
+                 @(Hs.Maybe Effects.Agent.AgentInfo)
+                 @(HsProtobuf.Nested Effects.Agent.AgentInfo))
+                f1)]
+instance (HsJSONPB.FromJSONPB SpawnSubtreeResponse) where
+  parseJSONPB
+    = HsJSONPB.withObject
+        "SpawnSubtreeResponse"
+        (\ obj
+           -> Hs.pure SpawnSubtreeResponse
+                <*>
+                  ((HsProtobuf.coerceOver
+                      @(HsProtobuf.Nested Effects.Agent.AgentInfo)
+                      @(Hs.Maybe Effects.Agent.AgentInfo))
+                     (obj .: "agent")))
+instance (HsJSONPB.ToJSON SpawnSubtreeResponse) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+instance (HsJSONPB.FromJSON SpawnSubtreeResponse) where
+  parseJSON = HsJSONPB.parseJSONPB

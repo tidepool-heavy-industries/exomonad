@@ -114,4 +114,70 @@ impl EventEffects for EventHandler {
             }
         }
     }
+
+    async fn notify_parent(&self, req: NotifyParentRequest) -> EffectResult<NotifyParentResponse> {
+        let session_id = self.session_id.as_deref().unwrap_or("root");
+        let agent_id = crate::mcp::agent_identity::get_agent_id();
+
+        // Identity model:
+        // - Subtree agents: session_id is their own branch name (e.g. "main.feature-a").
+        //   Their parent is one level up (e.g. "main" -> "root").
+        // - Workers: session_id is already their parent's session ID.
+        let parent_session_id = if agent_id.ends_with("-gemini") {
+            // Worker: session_id is inherited from parent
+            session_id.to_string()
+        } else {
+            // Subtree agent: session_id is own branch, parent is parent branch
+            if let Some((parent, _)) = session_id.rsplit_once('.') {
+                parent.to_string()
+            } else {
+                "root".to_string()
+            }
+        };
+
+        tracing::info!(
+            agent_id = %agent_id,
+            session_id = %session_id,
+            parent_session_id = %parent_session_id,
+            status = %req.status,
+            "notify_parent: routing completion to parent"
+        );
+
+        let event = Event {
+            event_id: 0, // Assigned by EventQueue
+            event_type: Some(event::EventType::WorkerComplete(WorkerComplete {
+                worker_id: agent_id,
+                status: req.status,
+                message: req.message,
+                changes: Vec::new(),
+            })),
+        };
+
+        if let Some(ref url) = self.remote_url {
+            let forward_req = NotifyEventRequest {
+                session_id: parent_session_id,
+                event: Some(event),
+            };
+            let client = reqwest::Client::new();
+            let body = forward_req.encode_to_vec();
+
+            let resp = client
+                .post(url)
+                .body(body)
+                .send()
+                .await
+                .map_err(|e| crate::effects::EffectError::network_error(e.to_string()))?;
+
+            if !resp.status().is_success() {
+                return Err(crate::effects::EffectError::network_error(format!(
+                    "Server returned {} during parent notification",
+                    resp.status()
+                )));
+            }
+        } else {
+            self.queue.notify_event(&parent_session_id, event).await;
+        }
+
+        Ok(NotifyParentResponse { ack: true })
+    }
 }

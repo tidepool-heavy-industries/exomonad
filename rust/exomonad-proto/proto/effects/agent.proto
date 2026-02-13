@@ -243,6 +243,21 @@ message SpawnWorkerResponse {
 }
 
 // ============================================================================
+// SpawnSubtree - Spawn a subtree agent (Claude-only) in a new git worktree
+// ============================================================================
+
+message SpawnSubtreeRequest {
+  // Full prompt/instructions (collapsed task+context).
+  string task = 1;
+  // Branch name suffix (e.g., "feature-a").
+  string branch_name = 2;
+}
+
+message SpawnSubtreeResponse {
+  AgentInfo agent = 1;
+}
+
+// ============================================================================
 // Service definition
 // ============================================================================
 
@@ -251,6 +266,7 @@ service AgentEffects {
   rpc SpawnBatch(SpawnBatchRequest) returns (SpawnBatchResponse);
   rpc SpawnGeminiTeammate(SpawnGeminiTeammateRequest) returns (SpawnGeminiTeammateResponse);
   rpc SpawnWorker(SpawnWorkerRequest) returns (SpawnWorkerResponse);
+  rpc SpawnSubtree(SpawnSubtreeRequest) returns (SpawnSubtreeResponse);
   rpc Cleanup(CleanupRequest) returns (CleanupResponse);
   rpc CleanupBatch(CleanupBatchRequest) returns (CleanupBatchResponse);
   rpc CleanupMerged(CleanupMergedRequest) returns (CleanupMergedResponse);

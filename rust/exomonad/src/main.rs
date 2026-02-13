@@ -661,6 +661,7 @@ async fn main() -> Result<()> {
             let services = Arc::new(
                 Services::new()
                     .with_zellij_session(config.zellij_session.clone())
+                    .with_worktree_base(config.worktree_base)
                     .with_mcp_server_port(port)
                     .validate()
                     .context("Failed to validate services")?,

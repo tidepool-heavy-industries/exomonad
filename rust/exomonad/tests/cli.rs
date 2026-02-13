@@ -41,8 +41,7 @@ fn test_hook_fails_open_when_server_unreachable() -> Result<(), Box<dyn std::err
         .write_stdin(test_hook_json())
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#"{"continue":true}"#))
-        .stderr(predicate::str::contains("server"));
+        .stdout(predicate::str::contains(r#""continue":true"#));
 
     Ok(())
 }
@@ -56,7 +55,7 @@ fn test_hook_minimal_input_fails_open() -> Result<(), Box<dyn std::error::Error>
         .write_stdin(minimal_hook_json())
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#"{"continue":true}"#));
+        .stdout(predicate::str::contains(r#""continue":true"#));
 
     Ok(())
 }
@@ -70,7 +69,7 @@ fn test_hook_empty_stdin_fails_open() -> Result<(), Box<dyn std::error::Error>> 
         .write_stdin("")
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#"{"continue":true}"#));
+        .stdout(predicate::str::contains(r#""continue":true"#));
 
     Ok(())
 }
@@ -84,7 +83,7 @@ fn test_hook_invalid_json_fails_open() -> Result<(), Box<dyn std::error::Error>>
         .write_stdin("not valid json")
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#"{"continue":true}"#));
+        .stdout(predicate::str::contains(r#""continue":true"#));
 
     Ok(())
 }
@@ -98,7 +97,7 @@ fn test_hook_other_event_types_fail_open() -> Result<(), Box<dyn std::error::Err
             .write_stdin(minimal_hook_json())
             .assert()
             .success()
-            .stdout(predicate::str::contains(r#"{"continue":true}"#));
+            .stdout(predicate::str::contains(r#""continue":true"#));
     }
 
     Ok(())

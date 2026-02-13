@@ -21,11 +21,11 @@ All Haskell packages live here.
 | `effects/` | Effect interpreters (LLM, Git, GitHub, Zellij, etc.) |
 | `protocol/` | Wire formats for native UI |
 | `tools/` | Standalone utilities (training data generation) |
-| `vendor/` | Vendored dependencies (ginger, polysemy) |
+| `vendor/` | Vendored dependencies (ginger, polysemy, freer-simple) |
 
 ## Design Patterns
 
-- **Algebraic effects**: Polysemy effects interpreted to IO
+- **Algebraic effects**: Polysemy (DSL/effects) and freer-simple (WASM guest) interpreted to IO
 - **Adapter pattern**: Interpreters adapt external APIs (HTTP, subprocess, sockets)
 - **Embedded DSL**: Haskell WASM as pure logic, hosted by Rust runtime
 

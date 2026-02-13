@@ -91,12 +91,12 @@ instance ToJSON SpawnResult where
 
 -- | Agent control effect for spawning agents.
 data AgentControl a where
-  SpawnSubtreeC :: Text -> Text -> Maybe Text -> AgentType -> AgentControl (Either Text SpawnResult)
+  SpawnSubtreeC :: Text -> Text -> AgentControl (Either Text SpawnResult)
   SpawnWorkerC :: Text -> Text -> AgentControl (Either Text SpawnResult)
 
 -- Smart constructors (manually written - makeSem doesn't work with WASM cross-compilation)
-spawnSubtree :: (Member AgentControl r) => Text -> Text -> Maybe Text -> AgentType -> Eff r (Either Text SpawnResult)
-spawnSubtree task branchName context agentTy = send (SpawnSubtreeC task branchName context agentTy)
+spawnSubtree :: (Member AgentControl r) => Text -> Text -> Eff r (Either Text SpawnResult)
+spawnSubtree task branchName = send (SpawnSubtreeC task branchName)
 
 spawnWorker :: (Member AgentControl r) => Text -> Text -> Eff r (Either Text SpawnResult)
 spawnWorker name prompt = send (SpawnWorkerC name prompt)
@@ -108,20 +108,16 @@ spawnWorker name prompt = send (SpawnWorkerC name prompt)
 -- | Interpret AgentControl by calling Rust host via yield_effect.
 runAgentControl :: (LastMember IO r) => Eff (AgentControl ': r) a -> Eff r a
 runAgentControl = interpret $ \case
-  SpawnSubtreeC task branchName context agentTy -> sendM $ do
+  SpawnSubtreeC task branchName -> sendM $ do
     let req =
-          PA.SpawnGeminiTeammateRequest
-            { PA.spawnGeminiTeammateRequestName = fromText branchName,
-              PA.spawnGeminiTeammateRequestPrompt = fromText (maybe task (\c -> task <> "\n\n" <> c) context),
-              PA.spawnGeminiTeammateRequestAgentType = Enumerated (Right (toProtoAgentType agentTy)),
-              PA.spawnGeminiTeammateRequestSubrepo = "",
-              PA.spawnGeminiTeammateRequestTopology = Enumerated (Right PA.WorkspaceTopologyWORKSPACE_TOPOLOGY_WORKTREE_PER_AGENT),
-              PA.spawnGeminiTeammateRequestBaseBranch = ""
+          PA.SpawnSubtreeRequest
+            { PA.spawnSubtreeRequestTask = fromText task,
+              PA.spawnSubtreeRequestBranchName = fromText branchName
             }
-    result <- Agent.spawnGeminiTeammate req
+    result <- Agent.spawnSubtree req
     pure $ case result of
       Left err -> Left (T.pack (show err))
-      Right resp -> case PA.spawnGeminiTeammateResponseAgent resp of
+      Right resp -> case PA.spawnSubtreeResponseAgent resp of
         Nothing -> Left "SpawnSubtree succeeded but no agent info returned"
         Just info -> Right (protoAgentInfoToSpawnResult info)
   SpawnWorkerC name prompt -> sendM $ do

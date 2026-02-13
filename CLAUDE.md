@@ -385,27 +385,30 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 
 | Tool | Description |
 |------|-------------|
-| `spawn_subtree` | Fork a worktree node off your current branch for sub-problems that may need further decomposition |
-| `spawn_workers` | Spawn multiple worker agents in one call (batch) |
+| `spawn_subtree` | Fork a worktree node off your current branch (Claude-only). Creates isolated git worktree + Zellij tab. |
+| `spawn_workers` | Spawn multiple Gemini worker agents as panes in the current worktree (batch) |
 | `file_pr` | Create or update a PR for the current branch (auto-detects base branch from naming convention) |
 | `popup` | Display interactive popup UI in Zellij (choices, text input, sliders) |
 | `note` | Send a note to the TL agent (dev role messaging) |
-| `question` | Ask the TL agent a question and wait for answer (dev role messaging) |
+| `question` | Ask the TL agent a question and wait for answer (dev role messaging). Uses trampoline (suspend/resume). |
 | `get_agent_messages` | Read notes and questions from agent outboxes (TL role, supports long-poll) |
 | `answer_question` | Answer a pending question from an agent (TL role messaging) |
 | `wait_for_event` | Block until a matching event occurs (e.g., worker completion). Uses trampoline architecture for non-blocking execution. |
-| `notify_completion` | Notify TL that this worker has completed (called by workers on exit) |
+| `notify_parent` | Notify parent session that you have completed. Server resolves routing automatically. |
 
 **Note**: Git operations (`git status`, `git log`, etc.) and GitHub operations (`gh pr list`, etc.) are handled via the Bash tool with `git` and `gh` commands, not MCP tools.
 
 **How spawn works (hylo model):**
-1. `spawn_subtree`: Creates git worktree branching off the current branch
-2. Branch naming: `{parent_branch}/{name}` — enables auto-detection of PR base branch
-3. Writes per-agent MCP config pointing to HTTP server
-4. Creates Zellij tab with agent-specific command
-5. `spawn_subtree` agents get TL role (can spawn their own children)
+1. `spawn_subtree`: Creates git worktree at `.exomonad/worktrees/{slug}/` branching off current branch
+2. Branch naming: `{parent_branch}.{slug}` (dot separator) — enables auto-detection of PR base branch
+3. Writes `.mcp.json` with `{"type": "http", "url": "..."}` in worktree root
+4. Creates Zellij tab with `claude 'task prompt'` (positional arg, not --prompt flag)
+5. `spawn_subtree` agents are Claude-only, get TL role (can spawn workers, depth-capped at 2)
 6. `spawn_worker`: Runs Gemini in a Zellij pane in the parent's worktree (no branch, no worktree)
-7. PRs target parent branch, not main — merged via recursive fold
+7. Worker config lives in `.exomonad/agents/{name}/` (not /tmp/)
+8. PRs target parent branch, not main — merged via recursive fold
+9. Identity: birth-branch as session ID (immutable, deterministic). Root TL = "root".
+10. Filesystem IS the registry — scan `.exomonad/worktrees/` and `.exomonad/agents/` to discover agents
 
 ### Parallel Worker Coordination
 
@@ -418,11 +421,12 @@ Example workflow:
 - Repeat for remaining workers
 
 How it works:
-1. Each spawned worker gets `EXOMONAD_SESSION_ID` env var (parent's session ID)
-2. When worker exits, `handleWorkerExit` hook calls `notify_completion`
-3. Notification goes to EventQueue indexed by session_id
-4. TL's `wait_for_event` call wakes immediately and returns the event
-5. Zero token waste - no polling loops, just blocking wait
+1. Each spawned worker gets `EXOMONAD_SESSION_ID` env var (birth-branch of parent)
+2. When worker exits, `handleWorkerExit` hook calls `notify_parent`
+3. Server resolves parent session from caller's identity (no explicit session_id needed)
+4. Notification goes to EventQueue indexed by parent's session_id
+5. TL's `wait_for_event` call wakes immediately and returns the event
+6. Zero token waste - no polling loops, just blocking wait
 
 Use cases:
 - Parallel implementation tasks (3+ workers on independent changes)
@@ -445,7 +449,13 @@ Use cases:
 - ✅ Stop hook logic (SubagentStop, SessionEnd) - validates uncommitted changes, unpushed commits, PR status, Copilot review
 - ✅ Gemini MCP wiring (`GEMINI_CLI_SYSTEM_SETTINGS_PATH` env var pointing to per-agent settings on spawn)
 - ✅ EventQueue with blocking wait (zero-polling worker coordination)
-- ✅ wait_for_event + notify_completion MCP tools
+- ✅ wait_for_event + notify_parent MCP tools
+- ✅ Nested worktree layout (.exomonad/worktrees/, .exomonad/agents/)
+- ✅ Filesystem-based agent registry (no separate state file)
+- ✅ Configurable worktree_base in config.toml
+- ✅ Split spawn_subtree (Claude worktree+tab) / spawn_workers (Gemini panes)
+- 🔧 Inter-agent messaging (note/question/answer) — code exists, needs async conversion for question tool
+- ✅ Stop hooks for subtree agents (settings.local.json written at spawn, TL role runs stop checks)
 
 ---
 

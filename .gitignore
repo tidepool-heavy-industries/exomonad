@@ -39,6 +39,9 @@ cabal.project.wasm.dev
 # Role build artifacts (gen/ and dist/ are build intermediates)
 .exomonad/roles/*/gen/
 .exomonad/roles/*/dist/
+# Per-worktree MCP config (auto-generated at spawn time)
+.mcp.json
+
 rust/.exomonad/
 rust/exomonad/.exomonad/
 

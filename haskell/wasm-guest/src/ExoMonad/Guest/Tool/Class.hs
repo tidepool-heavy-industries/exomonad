@@ -23,11 +23,18 @@ module ExoMonad.Guest.Tool.Class
     errorResult,
     liftEffect,
 
+    -- * Coroutine suspension
+    SuspendYield,
+    ToolEffects,
+    suspend,
+
     -- * Type-level list append
     type (:++),
   )
 where
 
+import Control.Monad.Freer (Eff, Member, sendM)
+import Control.Monad.Freer.Coroutine (Yield, yield)
 import Data.Aeson (FromJSON, ToJSON, Value, object, (.=))
 import Data.Aeson qualified as Aeson
 import Data.Kind (Type)
@@ -102,6 +109,21 @@ liftEffect action transform = do
     Right resp -> pure $ successResult (transform resp)
 
 -- ============================================================================
+-- Coroutine Suspension
+-- ============================================================================
+
+-- | Yield type for tool handlers: yield an EffectRequest, receive a Value back.
+type SuspendYield = Yield EffectRequest Value
+
+-- | Effect row for tool handlers that can suspend.
+type ToolEffects = '[SuspendYield, IO]
+
+-- | Suspend execution, yielding an effect request to the host.
+-- Returns the result value when resumed.
+suspend :: Member SuspendYield effs => EffectRequest -> Eff effs Value
+suspend req = yield req id
+
+-- ============================================================================
 -- Async / Suspension Types
 -- ============================================================================
 
@@ -150,12 +172,13 @@ class MCPTool (t :: Type) where
   -- | JSON Schema for the input.
   toolSchema :: Value
 
-  -- | Handler that executes the tool.
+  -- | Handler that executes the tool (synchronous).
   toolHandler :: ToolArgs t -> IO MCPCallOutput
 
-  -- | Async handler that can suspend. Defaults to wrapping toolHandler.
-  toolHandlerAsync :: ToolArgs t -> IO (WasmResult MCPCallOutput)
-  toolHandlerAsync args = Done <$> toolHandler @t args
+  -- | Effectful handler that can suspend via coroutine yield.
+  -- Defaults to wrapping the synchronous toolHandler.
+  toolHandlerEff :: ToolArgs t -> Eff ToolEffects MCPCallOutput
+  toolHandlerEff args = sendM (toolHandler @t args)
 
 -- ============================================================================
 -- DispatchTools Typeclass
@@ -184,7 +207,7 @@ instance
   dispatch name args
     | name == toolName @t =
         case Aeson.fromJSON args of
-          Aeson.Success a -> toolHandlerAsync @t a
+          Aeson.Success a -> Done <$> toolHandler @t a
           Aeson.Error e -> pure $ Done $ errorResult $ "Parse error for " <> name <> ": " <> T.pack e
     | otherwise = dispatch @ts name args
   toolDefs = mkToolDef @t : toolDefs @ts

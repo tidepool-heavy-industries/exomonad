@@ -34,6 +34,10 @@ import Data.Vector qualified as V
 import ExoMonad.Effects.Messaging qualified as Messaging
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)
+import Data.ByteString qualified as BS
+import Data.ByteString.Lazy qualified as BSL
+import Proto3.Suite.Class (toLazyByteString, fromByteString)
+import Data.Word (Word8)
 
 -- ============================================================================
 -- Note
@@ -110,6 +114,20 @@ instance MCPTool Question where
   toolHandler args = do
     liftEffect (Messaging.sendQuestion (qaContent args)) $ \resp ->
       object ["answer" .= TL.toStrict (M.sendQuestionResponseAnswer resp)]
+
+  toolHandlerEff args = do
+    let req = M.SendQuestionRequest
+          { M.sendQuestionRequestQuestion = TL.fromStrict (qaContent args)
+          }
+        payloadBytes = BSL.unpack (toLazyByteString req)
+    resultValue <- suspend (EffectRequest "messaging.send_question" (Aeson.toJSON payloadBytes))
+    case Aeson.fromJSON resultValue of
+      Aeson.Success (bytes :: [Word8]) ->
+        case fromByteString (BS.pack bytes) of
+          Right (resp :: M.SendQuestionResponse) ->
+            pure $ successResult $ object ["answer" .= TL.toStrict (M.sendQuestionResponseAnswer resp)]
+          Left err -> pure $ errorResult $ "Failed to decode response: " <> T.pack (show err)
+      Aeson.Error err -> pure $ errorResult $ "Failed to parse result: " <> T.pack err
 
 -- ============================================================================
 -- GetAgentMessages (TL-side)
