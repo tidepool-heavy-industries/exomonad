@@ -41,11 +41,17 @@ Use `--recreate` to delete an existing session and create fresh (e.g., after bin
 ```toml
 default_role = "tl"
 project_dir = "."
+shell_command = "nix develop"  # optional: environment wrapper for TL tab + server
+wasm_dir = ".exomonad/wasm"    # optional: override WASM location (default: ~/.exomonad/wasm/)
 ```
+
+**Bootstrap:** `exomonad init` auto-creates `.exomonad/config.toml` and `.gitignore` entries if missing. Works in any project directory.
 
 **Config hierarchy:**
 - `config.toml` uses `default_role` (project-wide default)
 - `config.local.toml` uses `role` (worktree-specific override)
+
+**WASM resolution:** `wasm_dir` in config > `~/.exomonad/wasm/` (global default, installed by `just install-all`)
 
 To update WASM, run `just wasm-all` or `exomonad recompile --role unified`.
 

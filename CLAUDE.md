@@ -331,17 +331,22 @@ gemini mcp add --transport http exomonad http://localhost:7432/tl/mcp
 ```
 
 **WASM loading:**
-Unified WASM loaded from `.exomonad/wasm/wasm-guest-unified.wasm`. Used by both `exomonad hook` and `exomonad serve`. Contains all roles, selected per-call. In serve mode, hot reload checks mtime per tool call.
+Resolved from `wasm_dir` config field, falling back to `~/.exomonad/wasm/` (global default, installed by `just install-all`). Contains all roles, selected per-call. In serve mode, hot reload checks mtime per tool call.
+
+**Bootstrap:** `exomonad init` auto-creates `.exomonad/config.toml` and `.gitignore` entries if missing. Works in any project directory — no pre-existing setup required.
 
 ```toml
 default_role = "tl"  # or "dev"
 project_dir = "."
+shell_command = "nix develop"  # optional: environment wrapper for TL tab + server
+wasm_dir = ".exomonad/wasm"    # optional: override WASM location (default: ~/.exomonad/wasm/)
 ```
 
 **Config hierarchy:**
 - `config.toml` uses `default_role` (project-wide default)
 - `config.local.toml` uses `role` (worktree-specific override)
 - Resolution: `local.role > global.default_role`
+- WASM: `wasm_dir` in config > `~/.exomonad/wasm/`
 
 ### Building
 
