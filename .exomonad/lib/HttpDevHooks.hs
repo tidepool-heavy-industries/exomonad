@@ -10,13 +10,17 @@ module HttpDevHooks
   )
 where
 
+import Control.Monad (void)
+import Control.Monad.Freer (Eff, send)
 import Data.Aeson qualified as Aeson
 import Data.Maybe (fromMaybe)
+import Data.Text.Lazy qualified as TL
+import Data.Text.Lazy.Encoding qualified as TLE
+import ExoMonad.Effects.Log qualified as Log
 import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
 import ExoMonad.Guest.Types (HookInput (..), HookOutput, allowResponse, denyResponse, postToolUseResponse)
 import ExoMonad.Permissions (PermissionCheck (..), checkAgentPermissions)
 import ExoMonad.Types (HookConfig (..), HookEffects)
-import Control.Monad.Freer (Eff, send)
 
 -- | Hook config for HTTP-native dev agents.
 --
@@ -43,6 +47,11 @@ permissionCascade :: HookInput -> Eff HookEffects HookOutput
 permissionCascade hookInput = do
   let tool = fromMaybe "" (hiToolName hookInput)
       args = fromMaybe (Aeson.Object mempty) (hiToolInput hookInput)
+      argsJson = TLE.decodeUtf8 $ Aeson.encode args
+  send $ void $ Log.logInfo $ Log.InfoRequest
+    { Log.infoRequestMessage = "[BeforeTool] tool=" <> TL.fromStrict tool <> " input=" <> argsJson
+    , Log.infoRequestFields = ""
+    }
   case checkAgentPermissions "dev" tool args of
     Allowed -> pure (allowResponse Nothing)
     Escalate -> pure (allowResponse (Just "escalation-needed"))
