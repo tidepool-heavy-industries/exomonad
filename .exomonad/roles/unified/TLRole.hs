@@ -14,7 +14,6 @@ data Tools mode = Tools
   { spawn :: SpawnTools mode,
     popups :: PopupTools mode,
     messaging :: TLMessagingTools mode,
-    coordination :: CoordinationTools mode,
     pr :: FilePRTools mode,
     events :: EventTools mode
   }
@@ -29,7 +28,6 @@ config =
           { spawn = spawnTools,
             popups = popupTools,
             messaging = tlMessagingTools,
-            coordination = coordinationTools,
             pr = filePRTools,
             events = eventTools
           },

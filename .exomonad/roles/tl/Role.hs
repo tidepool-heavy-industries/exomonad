@@ -9,7 +9,6 @@ data Tools mode = Tools
   { spawn :: SpawnTools mode,
     popups :: PopupTools mode,
     messaging :: TLMessagingTools mode,
-    coordination :: CoordinationTools mode,
     events :: EventTools mode
   }
   deriving (Generic)
@@ -23,7 +22,6 @@ config =
           { spawn = spawnTools,
             popups = popupTools,
             messaging = tlMessagingTools,
-            coordination = coordinationTools,
             events = eventTools
           },
       hooks = defaultHooks

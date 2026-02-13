@@ -25,9 +25,8 @@ The guest exports MCP tools that agents can call. These are defined in `ExoMonad
 
 ### Other Tools
 
-- `git_branch`, `git_status`, `git_log`
-- `github_list_issues`, `github_get_issue`
-- `spawn_subtree`, `spawn_worker`
-- `read_file`, `write_file`
+- `spawn_subtree`, `spawn_workers`
 - `file_pr`
-- `note`, `question`
+- `popup`
+- `note`, `question` (dev role)
+- `get_agent_messages`, `answer_question` (TL role)

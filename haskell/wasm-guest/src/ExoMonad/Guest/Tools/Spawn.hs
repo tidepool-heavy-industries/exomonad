@@ -1,10 +1,8 @@
--- | Hylo spawn primitives: spawn_subtree, spawn_worker, spawn_workers.
+-- | Hylo spawn primitives: spawn_subtree, spawn_workers.
 module ExoMonad.Guest.Tools.Spawn
   ( SpawnSubtree,
-    SpawnWorker,
     SpawnWorkers,
     SpawnSubtreeArgs (..),
-    SpawnWorkerArgs (..),
     SpawnWorkersArgs (..),
     WorkerSpec (..),
   )
@@ -79,52 +77,6 @@ instance MCPTool SpawnSubtree where
   toolHandler args = do
     let agentTy = fromMaybe AC.Claude (ssAgentType args)
     result <- runM $ AC.runAgentControl $ AC.spawnSubtree (ssTask args) (ssBranchName args) (ssContext args) agentTy
-    case result of
-      Left err -> pure $ errorResult err
-      Right spawnResult -> pure $ successResult $ Aeson.toJSON spawnResult
-
--- ============================================================================
--- SpawnWorker
--- ============================================================================
-
-data SpawnWorker
-
-data SpawnWorkerArgs = SpawnWorkerArgs
-  { swName :: Text,
-    swPrompt :: Text
-  }
-  deriving (Show, Eq, Generic)
-
-instance FromJSON SpawnWorkerArgs where
-  parseJSON = withObject "SpawnWorkerArgs" $ \v ->
-    SpawnWorkerArgs
-      <$> v .: "name"
-      <*> v .: "prompt"
-
-instance MCPTool SpawnWorker where
-  type ToolArgs SpawnWorker = SpawnWorkerArgs
-  toolName = "spawn_worker"
-  toolDescription = "Spawn an agent for a focused, bounded task. Use when the work is concrete enough to execute without further decomposition. The child works and exits."
-  toolSchema =
-    object
-      [ "type" .= ("object" :: Text),
-        "required" .= (["name", "prompt"] :: [Text]),
-        "properties"
-          .= object
-            [ "name"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "description" .= ("Human-readable name for the leaf agent" :: Text)
-                  ],
-              "prompt"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "description" .= ("Implementation instructions for the agent" :: Text)
-                  ]
-            ]
-      ]
-  toolHandler args = do
-    result <- runM $ AC.runAgentControl $ AC.spawnWorker (swName args) (swPrompt args)
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> pure $ successResult $ Aeson.toJSON spawnResult

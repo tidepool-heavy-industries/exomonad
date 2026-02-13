@@ -393,7 +393,7 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 | `github_get_issue` | Get single issue details |
 | `github_list_prs` | List GitHub pull requests |
 | `spawn_subtree` | Fork a worktree node off your current branch for sub-problems that may need further decomposition |
-| `spawn_worker` | Spawn a Gemini agent for a focused task in the current worktree (no branch) |
+| `spawn_workers` | Spawn multiple worker agents in one call (batch) |
 | `get_agent_messages` | Read notes and questions from agent outboxes (TL messaging, supports long-poll) |
 | `answer_question` | Answer a pending question from an agent (TL messaging) |
 | `file_pr` | Create or update a PR for the current branch (auto-detects base branch from naming convention) |

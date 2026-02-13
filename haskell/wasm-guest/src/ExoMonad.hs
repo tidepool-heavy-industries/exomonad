@@ -10,7 +10,6 @@ module ExoMonad
     module ExoMonad.Guest.Records.Popup,
     module ExoMonad.Guest.Records.Messaging,
     module ExoMonad.Guest.Records.TLMessaging,
-    module ExoMonad.Guest.Records.Coordination,
     module ExoMonad.Guest.Records.Events,
     module ExoMonad.Guest.Records.Spawn,
 
@@ -33,7 +32,6 @@ import ExoMonad.Guest.Records.FilePR
 import ExoMonad.Guest.Records.Messaging
 import ExoMonad.Guest.Records.Popup
 import ExoMonad.Guest.Records.TLMessaging
-import ExoMonad.Guest.Records.Coordination
 import ExoMonad.Guest.Records.Events
 import ExoMonad.Guest.Records.Spawn
 import ExoMonad.Guest.SpawnSpec.Types as ExoMonad.Guest.SpawnSpec.Types
