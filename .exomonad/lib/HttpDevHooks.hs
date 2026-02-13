@@ -16,7 +16,7 @@ import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
 import ExoMonad.Guest.Types (HookInput (..), HookOutput, allowResponse, denyResponse, postToolUseResponse)
 import ExoMonad.Permissions (PermissionCheck (..), checkAgentPermissions)
 import ExoMonad.Types (HookConfig (..), HookEffects)
-import Polysemy (Sem, embed)
+import Control.Monad.Freer (Eff, send)
 
 -- | Hook config for HTTP-native dev agents.
 --
@@ -27,8 +27,8 @@ httpDevHooks =
   HookConfig
     { preToolUse = permissionCascade,
       postToolUse = \_ -> pure (postToolUseResponse Nothing),
-      onStop = \_ -> embed runStopHookChecks,
-      onSubagentStop = \_ -> embed runStopHookChecks
+      onStop = \_ -> send runStopHookChecks,
+      onSubagentStop = \_ -> send runStopHookChecks
     }
 
 -- | Three-tier permission cascade for preToolUse hooks.
@@ -39,7 +39,7 @@ httpDevHooks =
 -- 1. Agent's own permission set (auto-approve)
 -- 2. Escalate to TL (auto-approve within TL scope)
 -- 3. Escalate to human (popup in Zellij)
-permissionCascade :: HookInput -> Sem HookEffects HookOutput
+permissionCascade :: HookInput -> Eff HookEffects HookOutput
 permissionCascade hookInput = do
   let tool = fromMaybe "" (hiToolName hookInput)
       args = fromMaybe (Aeson.Object mempty) (hiToolInput hookInput)

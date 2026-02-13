@@ -8,7 +8,7 @@
 packages:
     haskell/wasm-guest
     haskell/proto
-    haskell/vendor/polysemy
+    haskell/vendor/freer-simple
     haskell/vendor/exomonad-pdk
     haskell/vendor/proto3-runtime
     haskell/vendor/proto3-wire
@@ -32,6 +32,7 @@ repository head.hackage
   secure: True
 
 -- 3. WASM-specific configuration
+
 if arch(wasm32)
   -- COMPATIBILITY: Fix upstream 'time' package C99 compliance blocker.
   -- Forces Cabal to use patched version instead of boot library.
@@ -45,8 +46,5 @@ if arch(wasm32)
 -- 4. Allow newer to handle base version differences between GHC versions
 allow-newer: all
 
--- Note: polysemy uses build-type: Custom for doctests which requires threading.
--- WASM doesn't support threaded RTS. We removed polysemy-plugin from wasm-guest.cabal
--- to avoid cross-compilation issues (GHC #14335). If polysemy itself still fails to
--- build, we'll need to patch it via source-repository-package.
--- See: https://discourse.haskell.org/t/errors-while-building-polysemy-for-wasm/11149/2
+-- Note: freer-simple is vendored in haskell/vendor/freer-simple with GHC 9.12 patches.
+-- The official Hackage version has a download size mismatch and compatibility issues.

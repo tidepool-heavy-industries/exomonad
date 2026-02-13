@@ -25,7 +25,7 @@ import ExoMonad.Guest.Types (HookInput (..), HookEventType (..))
 import ExoMonad.PDK (input, output)
 import ExoMonad.Types (HookConfig (..))
 import Foreign.C.Types (CInt (..))
-import Polysemy (runM)
+import Control.Monad.Freer (runM)
 
 foreign export ccall handle_mcp_call :: IO CInt
 foreign export ccall handle_list_tools :: IO CInt

@@ -33,17 +33,13 @@ common shared
         bytestring,
         text,
         aeson,
-        polysemy >= 1.9,
+        freer-simple >= 1.2,
         unordered-containers,
         containers,
         time,
         directory,
         filepath,
         process
-
-    -- Polysemy plugin doesn't work with WASM cross-compilation (GHC #14335)
-    if !arch(wasm32)
-        build-depends: polysemy-plugin >= 0.4
 
 -- Internal library with shared tool infrastructure
 -- Only buildable on WASM target (uses extism-pdk which requires WASM runtime)
@@ -111,7 +107,3 @@ library wasm-guest-internal
         exomonad-proto,
         proto3-runtime,
         vector
-
-    -- Polysemy plugin doesn't work with WASM cross-compilation
-    if !arch(wasm32)
-        ghc-options: -fplugin=Polysemy.Plugin

@@ -17,7 +17,7 @@ import Data.Text (Text)
 import ExoMonad.Guest.Effects.AgentControl qualified as AC
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)
-import Polysemy (runM)
+import Control.Monad.Freer (runM)
 
 -- ============================================================================
 -- SpawnSubtree

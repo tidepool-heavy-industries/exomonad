@@ -28,15 +28,12 @@ common shared
         bytestring,
         text,
         aeson,
-        containers,
-        polysemy >= 1.9,
+        freer-simple >= 1.2,
         unordered-containers,
+        containers,
         time,
         directory,
         filepath
-
-    if !arch(wasm32)
-        build-depends: polysemy-plugin >= 0.4
 
 executable wasm-guest-unified
     import: shared

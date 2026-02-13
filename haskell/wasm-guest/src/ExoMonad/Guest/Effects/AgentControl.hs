@@ -35,8 +35,7 @@ import Effects.Agent qualified as PA
 import ExoMonad.Effects.Agent qualified as Agent
 import ExoMonad.Guest.Proto (fromText, toText)
 import GHC.Generics (Generic)
-import Polysemy (Member, Sem, embed, interpret, send)
-import Polysemy.Embed (Embed)
+import Control.Monad.Freer (Eff, Member, LastMember, interpret, send, sendM)
 import Proto3.Suite.Types (Enumerated (..))
 
 -- ============================================================================
@@ -91,15 +90,15 @@ instance ToJSON SpawnResult where
 -- ============================================================================
 
 -- | Agent control effect for spawning agents.
-data AgentControl m a where
-  SpawnSubtreeC :: Text -> Text -> Maybe Text -> AgentType -> AgentControl m (Either Text SpawnResult)
-  SpawnWorkerC :: Text -> Text -> AgentControl m (Either Text SpawnResult)
+data AgentControl a where
+  SpawnSubtreeC :: Text -> Text -> Maybe Text -> AgentType -> AgentControl (Either Text SpawnResult)
+  SpawnWorkerC :: Text -> Text -> AgentControl (Either Text SpawnResult)
 
 -- Smart constructors (manually written - makeSem doesn't work with WASM cross-compilation)
-spawnSubtree :: (Member AgentControl r) => Text -> Text -> Maybe Text -> AgentType -> Sem r (Either Text SpawnResult)
+spawnSubtree :: (Member AgentControl r) => Text -> Text -> Maybe Text -> AgentType -> Eff r (Either Text SpawnResult)
 spawnSubtree task branchName context agentTy = send (SpawnSubtreeC task branchName context agentTy)
 
-spawnWorker :: (Member AgentControl r) => Text -> Text -> Sem r (Either Text SpawnResult)
+spawnWorker :: (Member AgentControl r) => Text -> Text -> Eff r (Either Text SpawnResult)
 spawnWorker name prompt = send (SpawnWorkerC name prompt)
 
 -- ============================================================================
@@ -107,9 +106,9 @@ spawnWorker name prompt = send (SpawnWorkerC name prompt)
 -- ============================================================================
 
 -- | Interpret AgentControl by calling Rust host via yield_effect.
-runAgentControl :: (Member (Embed IO) r) => Sem (AgentControl ': r) a -> Sem r a
+runAgentControl :: (LastMember IO r) => Eff (AgentControl ': r) a -> Eff r a
 runAgentControl = interpret $ \case
-  SpawnSubtreeC task branchName context agentTy -> embed $ do
+  SpawnSubtreeC task branchName context agentTy -> sendM $ do
     let req =
           PA.SpawnGeminiTeammateRequest
             { PA.spawnGeminiTeammateRequestName = fromText branchName,
@@ -125,7 +124,7 @@ runAgentControl = interpret $ \case
       Right resp -> case PA.spawnGeminiTeammateResponseAgent resp of
         Nothing -> Left "SpawnSubtree succeeded but no agent info returned"
         Just info -> Right (protoAgentInfoToSpawnResult info)
-  SpawnWorkerC name prompt -> embed $ do
+  SpawnWorkerC name prompt -> sendM $ do
     let req =
           PA.SpawnWorkerRequest
             { PA.spawnWorkerRequestName = fromText name,

@@ -14,12 +14,12 @@ where
 import Data.Text (Text)
 import ExoMonad.Guest.Types (HookInput, HookOutput, StopHookOutput, allowResponse, allowStopResponse, postToolUseResponse)
 import GHC.Generics (Generic)
-import Polysemy (Embed, Sem)
+import Control.Monad.Freer (Eff)
 
 -- | Effects available to hooks.
--- Currently allows arbitrary IO via Embed IO (required for Host Calls).
+-- Currently allows arbitrary IO via IO (required for Host Calls).
 -- Future versions may restrict this to specific effects (Git, GitHub, Log).
-type HookEffects = '[Embed IO]
+type HookEffects = '[IO]
 
 -- | Role configuration.
 -- Defines the role name, available tools, and lifecycle hooks.
@@ -33,13 +33,13 @@ data RoleConfig tools = RoleConfig
 -- | Configuration for lifecycle hooks.
 data HookConfig = HookConfig
   { -- | Called before any tool use. Can allow, block, or modify the tool call.
-    preToolUse :: HookInput -> Sem HookEffects HookOutput,
+    preToolUse :: HookInput -> Eff HookEffects HookOutput,
     -- | Called after any tool use. Can inject additional context into the conversation.
-    postToolUse :: HookInput -> Sem HookEffects HookOutput,
+    postToolUse :: HookInput -> Eff HookEffects HookOutput,
     -- | Called when the agent stops (e.g. /stop or session end).
-    onStop :: HookInput -> Sem HookEffects StopHookOutput,
+    onStop :: HookInput -> Eff HookEffects StopHookOutput,
     -- | Called when a sub-agent stops.
-    onSubagentStop :: HookInput -> Sem HookEffects StopHookOutput
+    onSubagentStop :: HookInput -> Eff HookEffects StopHookOutput
   }
 
 -- | Default hooks that allow everything.

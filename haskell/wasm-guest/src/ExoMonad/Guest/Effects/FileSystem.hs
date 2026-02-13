@@ -35,8 +35,7 @@ import Effects.EffectError (EffectError)
 import ExoMonad.Effects.Fs qualified as Fs
 import ExoMonad.Guest.Proto (fromText, toText)
 import GHC.Generics (Generic)
-import Polysemy (Member, Sem, embed, interpret, send)
-import Polysemy.Embed (Embed)
+import Control.Monad.Freer (Eff, Member, LastMember, interpret, send, sendM)
 import Prelude hiding (readFile, writeFile)
 
 -- ============================================================================
@@ -78,17 +77,17 @@ data WriteFileOutput = WriteFileOutput
 -- ============================================================================
 
 -- | Filesystem effect for file operations.
-data FileSystem m a where
+data FileSystem a where
   -- | Read a file.
-  ReadFileOp :: Text -> Int -> FileSystem m (Either Text ReadFileOutput)
+  ReadFileOp :: Text -> Int -> FileSystem (Either Text ReadFileOutput)
   -- | Write a file.
-  WriteFileOp :: Text -> Text -> Bool -> FileSystem m (Either Text WriteFileOutput)
+  WriteFileOp :: Text -> Text -> Bool -> FileSystem (Either Text WriteFileOutput)
 
 -- Smart constructors (manually written - makeSem doesn't work with WASM cross-compilation)
-readFile :: (Member FileSystem r) => Text -> Int -> Sem r (Either Text ReadFileOutput)
+readFile :: (Member FileSystem r) => Text -> Int -> Eff r (Either Text ReadFileOutput)
 readFile path maxBytes = send (ReadFileOp path maxBytes)
 
-writeFile :: (Member FileSystem r) => Text -> Text -> Bool -> Sem r (Either Text WriteFileOutput)
+writeFile :: (Member FileSystem r) => Text -> Text -> Bool -> Eff r (Either Text WriteFileOutput)
 writeFile path content createParents = send (WriteFileOp path content createParents)
 
 -- ============================================================================
@@ -96,9 +95,9 @@ writeFile path content createParents = send (WriteFileOp path content createPare
 -- ============================================================================
 
 -- | Interpret FileSystem by calling Rust host via yield_effect.
-runFileSystem :: (Member (Embed IO) r) => Sem (FileSystem ': r) a -> Sem r a
+runFileSystem :: (LastMember IO r) => Eff (FileSystem ': r) a -> Eff r a
 runFileSystem = interpret $ \case
-  ReadFileOp path maxBytes -> embed $ do
+  ReadFileOp path maxBytes -> sendM $ do
     let req =
           Fs.ReadFileRequest
             { Fs.readFileRequestPath = fromText path,
@@ -115,7 +114,7 @@ runFileSystem = interpret $ \case
               rfoBytesRead = fromIntegral (Fs.readFileResponseBytesRead resp),
               rfoTruncated = Fs.readFileResponseTruncated resp
             }
-  WriteFileOp path content createParents -> embed $ do
+  WriteFileOp path content createParents -> sendM $ do
     let req =
           Fs.WriteFileRequest
             { Fs.writeFileRequestPath = fromText path,

@@ -41,7 +41,7 @@ import ExoMonad.Guest.Continuations (retrieveContinuation)
 import ExoMonad.Types (HookConfig (..))
 import ExoMonad.PDK (input, output)
 import Foreign.C.Types (CInt (..))
-import Polysemy (Embed, Sem, runM)
+import Control.Monad.Freer (Eff, runM)
 import Data.Aeson.Types (parseMaybe)
 import System.Directory (getCurrentDirectory)
 import System.FilePath (takeFileName)
@@ -164,13 +164,13 @@ hookHandler config = do
         PostToolUse -> handlePreToolUse hookInput (postToolUse config)
         WorkerExit -> handleWorkerExit hookInput
   where
-    handlePreToolUse :: HookInput -> (HookInput -> Sem '[Embed IO] HookOutput) -> IO CInt
+    handlePreToolUse :: HookInput -> (HookInput -> Eff '[IO] HookOutput) -> IO CInt
     handlePreToolUse hookInput hook = do
       result <- runM $ hook hookInput
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
 
-    handleStopHook :: HookInput -> (HookInput -> Sem '[Embed IO] StopHookOutput) -> IO CInt
+    handleStopHook :: HookInput -> (HookInput -> Eff '[IO] StopHookOutput) -> IO CInt
     handleStopHook hookInput hook = do
       -- Extract agent ID from hook input or fallback to current working directory (e.g., "gh-453-gemini")
       cwd <- getCurrentDirectory
@@ -193,7 +193,7 @@ hookHandler config = do
               ]
       emitEvent_ event
 
-      -- Run the hook from config (using Polysemy effects)
+      -- Run the hook from config (using Freer effects)
       result <- runM $ hook hookInput
 
       -- Log the decision
