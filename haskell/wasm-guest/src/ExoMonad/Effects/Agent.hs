@@ -12,6 +12,7 @@ module ExoMonad.Effects.Agent
     AgentSpawnGeminiTeammate,
     AgentSpawnWorker,
     AgentSpawnSubtree,
+    AgentSpawnLeafSubtree,
     AgentCleanup,
     AgentCleanupBatch,
     AgentCleanupMerged,
@@ -23,6 +24,7 @@ module ExoMonad.Effects.Agent
     spawnGeminiTeammate,
     spawnWorker,
     spawnSubtree,
+    spawnLeafSubtree,
     cleanupAgent,
     cleanupBatch,
     cleanupMerged,
@@ -76,6 +78,13 @@ instance Effect AgentSpawnSubtree where
   type Output AgentSpawnSubtree = SpawnSubtreeResponse
   effectId = "agent.spawn_subtree"
 
+data AgentSpawnLeafSubtree
+
+instance Effect AgentSpawnLeafSubtree where
+  type Input AgentSpawnLeafSubtree = SpawnLeafSubtreeRequest
+  type Output AgentSpawnLeafSubtree = SpawnLeafSubtreeResponse
+  effectId = "agent.spawn_leaf_subtree"
+
 data AgentCleanup
 
 instance Effect AgentCleanup where
@@ -122,6 +131,9 @@ spawnWorker = runEffect @AgentSpawnWorker
 
 spawnSubtree :: SpawnSubtreeRequest -> IO (Either EffectError SpawnSubtreeResponse)
 spawnSubtree = runEffect @AgentSpawnSubtree
+
+spawnLeafSubtree :: SpawnLeafSubtreeRequest -> IO (Either EffectError SpawnLeafSubtreeResponse)
+spawnLeafSubtree = runEffect @AgentSpawnLeafSubtree
 
 cleanupAgent :: CleanupRequest -> IO (Either EffectError CleanupResponse)
 cleanupAgent = runEffect @AgentCleanup

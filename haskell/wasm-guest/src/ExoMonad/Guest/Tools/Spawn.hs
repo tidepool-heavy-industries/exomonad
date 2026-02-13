@@ -1,8 +1,10 @@
 -- | Hylo spawn primitives: spawn_subtree, spawn_workers.
 module ExoMonad.Guest.Tools.Spawn
   ( SpawnSubtree,
+    SpawnLeafSubtree,
     SpawnWorkers,
     SpawnSubtreeArgs (..),
+    SpawnLeafSubtreeArgs (..),
     SpawnWorkersArgs (..),
     WorkerSpec (..),
   )
@@ -61,6 +63,52 @@ instance MCPTool SpawnSubtree where
       ]
   toolHandler args = do
     result <- runM $ AC.runAgentControl $ AC.spawnSubtree (ssTask args) (ssBranchName args)
+    case result of
+      Left err -> pure $ errorResult err
+      Right spawnResult -> pure $ successResult $ Aeson.toJSON spawnResult
+
+-- ============================================================================
+-- SpawnLeafSubtree
+-- ============================================================================
+
+data SpawnLeafSubtree
+
+data SpawnLeafSubtreeArgs = SpawnLeafSubtreeArgs
+  { slsTask :: Text,
+    slsBranchName :: Text
+  }
+  deriving (Show, Eq, Generic)
+
+instance FromJSON SpawnLeafSubtreeArgs where
+  parseJSON = withObject "SpawnLeafSubtreeArgs" $ \v ->
+    SpawnLeafSubtreeArgs
+      <$> v .: "task"
+      <*> v .: "branch_name"
+
+instance MCPTool SpawnLeafSubtree where
+  type ToolArgs SpawnLeafSubtree = SpawnLeafSubtreeArgs
+  toolName = "spawn_leaf_subtree"
+  toolDescription = "Fork a worktree for a Gemini leaf agent. Gets own branch for PR filing but cannot spawn children."
+  toolSchema =
+    object
+      [ "type" .= ("object" :: Text),
+        "required" .= (["task", "branch_name"] :: [Text]),
+        "properties"
+          .= object
+            [ "task"
+                .= object
+                  [ "type" .= ("string" :: Text),
+                    "description" .= ("Description of the sub-problem to solve" :: Text)
+                  ],
+              "branch_name"
+                .= object
+                  [ "type" .= ("string" :: Text),
+                    "description" .= ("Branch name suffix (will be prefixed with current branch)" :: Text)
+                  ]
+            ]
+      ]
+  toolHandler args = do
+    result <- runM $ AC.runAgentControl $ AC.spawnLeafSubtree (slsTask args) (slsBranchName args)
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> pure $ successResult $ Aeson.toJSON spawnResult

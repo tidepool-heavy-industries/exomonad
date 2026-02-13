@@ -191,6 +191,26 @@ impl AgentEffects for AgentHandler {
         })
     }
 
+    async fn spawn_leaf_subtree(
+        &self,
+        req: SpawnLeafSubtreeRequest,
+    ) -> EffectResult<SpawnLeafSubtreeResponse> {
+        let options = SpawnSubtreeOptions {
+            task: req.task.clone(),
+            branch_name: req.branch_name.clone(),
+        };
+
+        let result = self
+            .service
+            .spawn_leaf_subtree(&options)
+            .await
+            .map_err(|e| EffectError::custom("agent_error", e.to_string()))?;
+
+        Ok(SpawnLeafSubtreeResponse {
+            agent: Some(leaf_subtree_result_to_proto(&req.branch_name, &result)),
+        })
+    }
+
     async fn cleanup(&self, req: CleanupRequest) -> EffectResult<CleanupResponse> {
         match self
             .service
@@ -365,6 +385,40 @@ fn subtree_result_to_proto(
         role: 0,
         status: AgentStatus::Running as i32,
         zellij_tab: format!("\u{1F916} {}", branch_name),
+        error: String::new(),
+        pr_number: 0,
+        pr_url: String::new(),
+        topology: Topology::WorktreePerAgent.to_proto(),
+    }
+}
+
+fn leaf_subtree_result_to_proto(
+    branch_name: &str,
+    result: &crate::services::agent_control::SpawnResult,
+) -> exomonad_proto::effects::agent::AgentInfo {
+    use crate::services::agent_control::Topology;
+
+    let agent_type = if result.agent_type == "claude" {
+        AgentType::Claude
+    } else {
+        AgentType::Gemini
+    };
+
+    let emoji = if agent_type == AgentType::Claude {
+        "\u{1F916}"
+    } else {
+        "\u{1F48E}"
+    };
+
+    exomonad_proto::effects::agent::AgentInfo {
+        id: result.tab_name.clone(),
+        issue: String::new(),
+        worktree_path: result.agent_dir.clone(),
+        branch_name: branch_name.to_string(),
+        agent_type: agent_type as i32,
+        role: 0,
+        status: AgentStatus::Running as i32,
+        zellij_tab: format!("{} {}", emoji, branch_name),
         error: String::new(),
         pr_number: 0,
         pr_url: String::new(),

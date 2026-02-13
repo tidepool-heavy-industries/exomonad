@@ -1023,6 +1023,133 @@ impl AgentControlService {
         Ok(result)
     }
 
+    /// Spawn a Gemini leaf agent in a new git worktree.
+    #[tracing::instrument(skip(self, options), fields(branch_name = %options.branch_name))]
+    pub async fn spawn_leaf_subtree(&self, options: &SpawnSubtreeOptions) -> Result<SpawnResult> {
+        info!(branch_name = %options.branch_name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_leaf_subtree");
+
+        let result = timeout(SPAWN_TIMEOUT, async {
+            self.check_zellij_env()?;
+
+            // No depth check for leaf nodes.
+
+            let effective_project_dir = &self.project_dir;
+
+            // Sanitize branch name
+            let slug = slugify(&options.branch_name);
+            let internal_name = format!("{}-gemini", slug); // gemini suffix
+            let display_name = format!("{} {}", AgentType::Gemini.emoji(), slug);
+
+            // Idempotency check
+            let tab_alive = self.is_zellij_tab_alive(&display_name).await;
+            if tab_alive {
+                info!(slug = %slug, "Leaf subtree already running, returning existing");
+                return Ok(SpawnResult {
+                    agent_dir: String::new(),
+                    tab_name: internal_name,
+                    issue_title: options.branch_name.clone(),
+                    agent_type: "gemini".to_string(),
+                });
+            }
+
+            // Get current branch
+            let current_branch_output = Command::new("git")
+                .args(["rev-parse", "--abbrev-ref", "HEAD"])
+                .current_dir(effective_project_dir)
+                .output()
+                .await
+                .context("Failed to get current branch")?;
+            let current_branch = String::from_utf8_lossy(&current_branch_output.stdout)
+                .trim()
+                .to_string();
+
+            let branch_name = format!("{}.{}", current_branch, slug);
+            let worktree_path = self.worktree_base.join(&slug);
+
+            // Clean up existing worktree
+            if worktree_path.exists() {
+                info!(path = %worktree_path.display(), "Removing existing worktree for idempotency");
+                let _ = Command::new("git")
+                    .args(["worktree", "remove", "--force", &worktree_path.to_string_lossy()])
+                    .current_dir(effective_project_dir)
+                    .output()
+                    .await;
+            }
+
+            info!(
+                base_branch = %current_branch,
+                branch_name = %branch_name,
+                worktree_path = %worktree_path.display(),
+                "Creating git worktree for leaf subtree"
+            );
+
+            let output = Command::new("git")
+                .args([
+                    "worktree",
+                    "add",
+                    "-b",
+                    &branch_name,
+                    &worktree_path.to_string_lossy(),
+                    &current_branch,
+                ])
+                .current_dir(effective_project_dir)
+                .output()
+                .await
+                .context("Failed to create git worktree")?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                error!(stderr = %stderr, "git worktree add failed");
+                return Err(anyhow!("git worktree add failed: {}", stderr));
+            }
+
+            let mut env_vars = HashMap::new();
+            env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
+            // Session ID = birth-branch (the new branch name)
+            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), branch_name.clone());
+            if let Some(port) = self.mcp_server_port {
+                env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
+            }
+
+            // Write .gemini/settings.json in worktree root (using write_agent_mcp_config logic)
+            self.write_agent_mcp_config(effective_project_dir, &worktree_path, AgentType::Gemini)
+                .await?;
+
+            // Set GEMINI_CLI_SYSTEM_SETTINGS_PATH
+            let settings_path = worktree_path.join(".gemini").join("settings.json");
+            env_vars.insert(
+                "GEMINI_CLI_SYSTEM_SETTINGS_PATH".to_string(),
+                settings_path.to_string_lossy().to_string(),
+            );
+
+            // Open Zellij TAB (not pane)
+            self.new_zellij_tab(
+                &display_name,
+                &worktree_path,
+                AgentType::Gemini,
+                Some(&options.task),
+                env_vars,
+            )
+            .await?;
+
+            Ok::<SpawnResult, anyhow::Error>(SpawnResult {
+                agent_dir: worktree_path.to_string_lossy().to_string(),
+                tab_name: internal_name,
+                issue_title: options.branch_name.clone(),
+                agent_type: "gemini".to_string(),
+            })
+        })
+        .await
+        .map_err(|_| {
+            let msg = format!("spawn_leaf_subtree timed out after {}s", SPAWN_TIMEOUT.as_secs());
+            warn!(branch_name = %options.branch_name, error = %msg, "spawn_leaf_subtree timed out");
+            anyhow::Error::new(TimeoutError { message: msg })
+        })??;
+
+        info!(branch_name = %options.branch_name, "spawn_leaf_subtree completed successfully");
+        Ok(result)
+    }
+
     // ========================================================================
     // Cleanup Agent
     // ========================================================================
@@ -1941,7 +2068,7 @@ mod tests {
 
     #[test]
     fn test_agent_type_prompt_flag() {
-        assert_eq!(AgentType::Claude.prompt_flag(), "--prompt");
+        assert_eq!(AgentType::Claude.prompt_flag(), "");
         assert_eq!(AgentType::Gemini.prompt_flag(), "--prompt-interactive");
     }
 

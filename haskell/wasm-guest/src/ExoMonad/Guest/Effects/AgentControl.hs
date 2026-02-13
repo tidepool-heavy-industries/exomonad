@@ -17,6 +17,7 @@ module ExoMonad.Guest.Effects.AgentControl
 
     -- * Smart constructors
     spawnSubtree,
+    spawnLeafSubtree,
     spawnWorker,
 
     -- * Interpreter
@@ -92,11 +93,15 @@ instance ToJSON SpawnResult where
 -- | Agent control effect for spawning agents.
 data AgentControl a where
   SpawnSubtreeC :: Text -> Text -> AgentControl (Either Text SpawnResult)
+  SpawnLeafSubtreeC :: Text -> Text -> AgentControl (Either Text SpawnResult)
   SpawnWorkerC :: Text -> Text -> AgentControl (Either Text SpawnResult)
 
 -- Smart constructors (manually written - makeSem doesn't work with WASM cross-compilation)
 spawnSubtree :: (Member AgentControl r) => Text -> Text -> Eff r (Either Text SpawnResult)
 spawnSubtree task branchName = send (SpawnSubtreeC task branchName)
+
+spawnLeafSubtree :: (Member AgentControl r) => Text -> Text -> Eff r (Either Text SpawnResult)
+spawnLeafSubtree task branchName = send (SpawnLeafSubtreeC task branchName)
 
 spawnWorker :: (Member AgentControl r) => Text -> Text -> Eff r (Either Text SpawnResult)
 spawnWorker name prompt = send (SpawnWorkerC name prompt)
@@ -119,6 +124,18 @@ runAgentControl = interpret $ \case
       Left err -> Left (T.pack (show err))
       Right resp -> case PA.spawnSubtreeResponseAgent resp of
         Nothing -> Left "SpawnSubtree succeeded but no agent info returned"
+        Just info -> Right (protoAgentInfoToSpawnResult info)
+  SpawnLeafSubtreeC task branchName -> sendM $ do
+    let req =
+          PA.SpawnLeafSubtreeRequest
+            { PA.spawnLeafSubtreeRequestTask = fromText task,
+              PA.spawnLeafSubtreeRequestBranchName = fromText branchName
+            }
+    result <- Agent.spawnLeafSubtree req
+    pure $ case result of
+      Left err -> Left (T.pack (show err))
+      Right resp -> case PA.spawnLeafSubtreeResponseAgent resp of
+        Nothing -> Left "SpawnLeafSubtree succeeded but no agent info returned"
         Just info -> Right (protoAgentInfoToSpawnResult info)
   SpawnWorkerC name prompt -> sendM $ do
     let req =
