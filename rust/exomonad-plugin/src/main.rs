@@ -2,16 +2,34 @@ use std::collections::{BTreeMap, VecDeque};
 use zellij_tile::prelude::*;
 use ratatui::{
     backend::WindowSize,
-    layout::{Constraint, Direction, Layout, Rect, Size, Position},
+    layout::{Constraint, Direction, Layout, Rect, Size, Position, Alignment},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Clear},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Clear, Padding},
     Terminal,
 };
 
 mod protocol;
 use exomonad_core::ui_protocol::{self, transport, AgentEvent, CoordinatorAgentState, StateUpdate};
 use protocol::{PluginMessage, PluginState};
+
+// Solarized Dark Palette
+const COLOR_BASE03: Color = Color::Rgb(0, 43, 54);
+// const COLOR_BASE02: Color = Color::Rgb(7, 54, 66); // Unused for now
+const COLOR_BASE01: Color = Color::Rgb(88, 110, 117);
+// const COLOR_BASE00: Color = Color::Rgb(101, 123, 131); // Unused for now
+// const COLOR_BASE0: Color = Color::Rgb(131, 148, 150); // Unused for now
+const COLOR_BASE1: Color = Color::Rgb(147, 161, 161);
+// const COLOR_BASE2: Color = Color::Rgb(238, 232, 213); // Unused for now
+const COLOR_BASE3: Color = Color::Rgb(253, 246, 227);
+const COLOR_YELLOW: Color = Color::Rgb(181, 137, 0);
+const COLOR_ORANGE: Color = Color::Rgb(203, 75, 22);
+const COLOR_RED: Color = Color::Rgb(220, 50, 47);
+const COLOR_MAGENTA: Color = Color::Rgb(211, 54, 130);
+// const COLOR_VIOLET: Color = Color::Rgb(108, 113, 196); // Unused for now
+const COLOR_BLUE: Color = Color::Rgb(38, 139, 210);
+const COLOR_CYAN: Color = Color::Rgb(42, 161, 152);
+const COLOR_GREEN: Color = Color::Rgb(133, 153, 0);
 
 /// Active popup state for simple choice lists.
 ///
@@ -453,17 +471,30 @@ impl ZellijPlugin for ExoMonadPlugin {
                     .split(area);
 
                 // Status Bar
-                let status_block = Block::default().borders(Borders::ALL).title("ExoMonad");
-                let status_color = match self.status_state {
-                    PluginState::Error => Color::Red,
-                    PluginState::Thinking => Color::Yellow,
-                    PluginState::Waiting => Color::Cyan,
-                    PluginState::Idle => Color::Blue,
+                let status_block = Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(COLOR_BASE01))
+                    .title(" ExoMonad ")
+                    .title_style(Style::default().fg(COLOR_BASE1));
+                
+                let (status_color, status_icon) = match self.status_state {
+                    PluginState::Error => (COLOR_RED, "●"),
+                    PluginState::Thinking => (COLOR_YELLOW, "●"),
+                    PluginState::Waiting => (COLOR_ORANGE, "●"),
+                    PluginState::Idle => (COLOR_BLUE, "●"),
                 };
                 
+                let state_text = match self.status_state {
+                    PluginState::Idle => "IDLE",
+                    PluginState::Thinking => "THINKING",
+                    PluginState::Waiting => "WAITING",
+                    PluginState::Error => "ERROR",
+                };
+
                 let status_text = Line::from(vec![
-                    Span::styled(format!("[{}] ", self.status_state), Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
-                    Span::raw(&self.status_message),
+                    Span::styled(format!(" {} ", status_icon), Style::default().fg(status_color)),
+                    Span::styled(format!("{}  ", state_text), Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+                    Span::styled(&self.status_message, Style::default().fg(COLOR_BASE1)),
                 ]);
                 
                 let p = Paragraph::new(status_text).block(status_block);
@@ -477,23 +508,27 @@ impl ZellijPlugin for ExoMonadPlugin {
                 // "newest-first" ordering is the intended UX for the events view.
                 let event_items: Vec<ListItem> = self.events.iter().rev().take(20).map(|e| {
                     let (time, content, color) = match e {
-                        AgentEvent::AgentStarted { agent_id, timestamp } => (timestamp, format!("{} started", agent_id), Color::Green),
-                        AgentEvent::AgentStopped { agent_id, timestamp } => (timestamp, format!("{} done", agent_id), Color::Blue),
-                        AgentEvent::StopHookBlocked { agent_id, reason, timestamp } => (timestamp, format!("{} blocked: {}", agent_id, reason), Color::Red),
-                        AgentEvent::HookReceived { agent_id, hook_type, timestamp } => (timestamp, format!("{} hook: {}", agent_id, hook_type), Color::Cyan),
-                        AgentEvent::PrFiled { agent_id, pr_number, timestamp } => (timestamp, format!("{} PR #{}", agent_id, pr_number), Color::Magenta),
-                        AgentEvent::CopilotReviewed { agent_id, comment_count, timestamp } => (timestamp, format!("{} copilot: {} comments", agent_id, comment_count), Color::Yellow),
-                        AgentEvent::AgentStuck { agent_id, failed_stop_count, timestamp } => (timestamp, format!("{} ⚠ STUCK ({} failed stops)", agent_id, failed_stop_count), Color::Red),
+                        AgentEvent::AgentStarted { agent_id, timestamp } => (timestamp, format!("{} started", agent_id), COLOR_GREEN),
+                        AgentEvent::AgentStopped { agent_id, timestamp } => (timestamp, format!("{} done", agent_id), COLOR_BLUE),
+                        AgentEvent::StopHookBlocked { agent_id, reason, timestamp } => (timestamp, format!("{} blocked: {}", agent_id, reason), COLOR_RED),
+                        AgentEvent::HookReceived { agent_id, hook_type, timestamp } => (timestamp, format!("{} hook: {}", agent_id, hook_type), COLOR_CYAN),
+                        AgentEvent::PrFiled { agent_id, pr_number, timestamp } => (timestamp, format!("{} PR #{}", agent_id, pr_number), COLOR_MAGENTA),
+                        AgentEvent::CopilotReviewed { agent_id, comment_count, timestamp } => (timestamp, format!("{} copilot: {} comments", agent_id, comment_count), COLOR_YELLOW),
+                        AgentEvent::AgentStuck { agent_id, failed_stop_count, timestamp } => (timestamp, format!("{} ⚠ STUCK ({} failed stops)", agent_id, failed_stop_count), COLOR_RED),
                     };
                     
                     ListItem::new(Line::from(vec![
-                        Span::styled(format!("{} ", format_timestamp(time)), Style::default().fg(Color::DarkGray)),
+                        Span::styled(format!(" {} ", format_timestamp(time)), Style::default().fg(COLOR_BASE01)),
                         Span::styled(content, Style::default().fg(color)),
                     ]))
                 }).collect();
 
                 let events_list = List::new(event_items)
-                    .block(Block::default().borders(Borders::ALL).title("Events"));
+                    .block(Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(COLOR_BASE01))
+                        .title(" Events ")
+                        .title_style(Style::default().fg(COLOR_BASE1)));
                 f.render_widget(events_list, chunks[1]);
 
                 // Popup - Full pane rendering (plugin is shown via show_self(true) as dedicated floating pane)
@@ -504,16 +539,21 @@ impl ZellijPlugin for ExoMonadPlugin {
                     f.render_widget(Clear, popup_area);
 
                     let block = Block::default()
-                        .title(popup.title.as_str())
+                        .title(Line::from(vec![
+                            Span::styled(format!(" {} ", popup.title), Style::default().fg(COLOR_BASE3).add_modifier(Modifier::BOLD))
+                        ]))
+                        .title_alignment(Alignment::Center)
                         .borders(Borders::ALL)
-                        .style(Style::default().bg(Color::DarkGray));
+                        .border_style(Style::default().fg(COLOR_CYAN))
+                        .style(Style::default().bg(COLOR_BASE03))
+                        .padding(Padding::horizontal(1));
 
                     let inner_area = block.inner(popup_area);
                     f.render_widget(block, popup_area);
 
                     let layout = Layout::default()
                         .direction(Direction::Vertical)
-                        .constraints([Constraint::Min(0), Constraint::Length(1)])
+                        .constraints([Constraint::Min(0), Constraint::Length(2)]) // increased for better help text spacing
                         .split(inner_area);
 
                     // Render choice items
@@ -523,25 +563,43 @@ impl ZellijPlugin for ExoMonadPlugin {
                         .enumerate()
                         .map(|(i, item)| {
                             let is_selected = i == popup.selected_index;
-                            let style = if is_selected {
-                                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                            if is_selected {
+                                let style = Style::default().bg(COLOR_BLUE).fg(COLOR_BASE3).add_modifier(Modifier::BOLD);
+                                ListItem::new(Line::from(vec![
+                                    Span::raw(" "), // Padding
+                                    Span::raw(item.clone()),
+                                ])).style(style)
                             } else {
-                                Style::default()
-                            };
-                            let prefix = if is_selected { "> " } else { "  " };
-                            ListItem::new(Line::from(vec![
-                                Span::styled(prefix, style),
-                                Span::styled(item.clone(), style),
-                            ]))
+                                let style = Style::default().fg(COLOR_BASE1);
+                                ListItem::new(Line::from(vec![
+                                    Span::styled(format!("{}. ", i + 1), Style::default().fg(COLOR_BASE01)),
+                                    Span::styled(item.clone(), style),
+                                ]))
+                            }
                         })
                         .collect();
 
                     let list = List::new(items).block(Block::default());
                     f.render_widget(list, layout[0]);
 
-                    let help_text = Paragraph::new("Enter: Select  Esc: Cancel  j/k or Arrows: Move")
-                        .style(Style::default().fg(Color::Gray));
-                    f.render_widget(help_text, layout[1]);
+                    // Help text with separator
+                    let separator = Block::default().borders(Borders::TOP).border_style(Style::default().fg(COLOR_BASE01));
+                    let help_area = layout[1];
+                    f.render_widget(separator, help_area);
+                    
+                    // Render text inside the help area (offset by 1 due to border)
+                    let help_text_area = Rect { y: help_area.y + 1, height: 1, ..help_area };
+                    
+                    let key_style = Style::default().fg(COLOR_BASE1).add_modifier(Modifier::BOLD);
+                    let desc_style = Style::default().fg(COLOR_BASE01);
+                    
+                    let help_text = Line::from(vec![
+                        Span::styled("Enter", key_style), Span::styled(": Select  ", desc_style),
+                        Span::styled("Esc", key_style), Span::styled(": Cancel  ", desc_style),
+                        Span::styled("↑/↓/j/k", key_style), Span::styled(": Move", desc_style),
+                    ]);
+                    
+                    f.render_widget(Paragraph::new(help_text).alignment(Alignment::Center), help_text_area);
                 }
             });
 
