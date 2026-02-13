@@ -358,13 +358,25 @@ impl ZellijPlugin for ExoMonadPlugin {
             if let Some(payload) = pipe_message.payload {
                 match serde_json::from_str::<serde_json::Value>(&payload) {
                     Ok(val) => {
-                        let tab_name = val["tab_name"].as_str().unwrap_or("");
-                        let text = val["text"].as_str().unwrap_or("");
+                        let tab_name = match val["tab_name"].as_str() {
+                            Some(t) => t,
+                            None => {
+                                eprintln!("[exomonad-plugin] inject-input: missing 'tab_name' string field");
+                                return true;
+                            }
+                        };
+                        let text = match val["text"].as_str() {
+                            Some(t) => t,
+                            None => {
+                                eprintln!("[exomonad-plugin] inject-input: missing 'text' string field");
+                                return true;
+                            }
+                        };
 
                         if let Some(&pane_id) = self.tab_pane_map.get(tab_name) {
+                            const ENTER_KEY: u8 = 13;
                             write_chars_to_pane_id(text, PaneId::Terminal(pane_id));
-                            // Send Enter key to submit the input
-                            write_to_pane_id(vec![13], PaneId::Terminal(pane_id));
+                            write_to_pane_id(vec![ENTER_KEY], PaneId::Terminal(pane_id));
                         } else {
                             eprintln!(
                                 "[exomonad-plugin] inject-input: tab '{}' not found in pane map ({} entries)",

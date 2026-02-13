@@ -68,7 +68,7 @@ impl MessagingEffects for MessagingHandler {
             .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
             .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
 
-        // Push message text into parent's Claude Code pane via Zellij plugin
+        // Best-effort: push into parent's pane via Zellij plugin (inbox is source of truth)
         let tab_name = resolve_parent_tab_name();
         let formatted = format!("[note from {}] {}", agent_id, req.content);
         zellij_events::inject_input(&tab_name, &formatted);
@@ -99,7 +99,7 @@ impl MessagingEffects for MessagingHandler {
             .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
             .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
 
-        // Push question text into parent's Claude Code pane via Zellij plugin
+        // Best-effort: push into parent's pane via Zellij plugin (inbox is source of truth)
         let tab_name = resolve_parent_tab_name();
         let formatted = format!(
             "[question from {}, q_id={}] {}",
