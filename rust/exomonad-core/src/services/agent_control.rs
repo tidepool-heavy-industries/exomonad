@@ -56,7 +56,7 @@ struct AgentMetadata {
 
 const CLAUDE_META: AgentMetadata = AgentMetadata {
     command: "claude",
-    prompt_flag: "",
+    prompt_flag: "--prompt",
     suffix: "claude",
     emoji: "\u{1F916}", // 🤖
 };
@@ -131,7 +131,7 @@ pub struct SpawnGeminiTeammateOptions {
     pub base_branch: Option<String>,
 }
 
-/// Options for spawning a worker agent in an isolated worktree.
+/// Options for spawning a worker agent in the current worktree (no branch/worktree).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpawnWorkerOptions {
     /// Human-readable name for the worker
@@ -784,9 +784,9 @@ impl AgentControlService {
         })
     }
 
-    /// Spawn a Gemini worker agent in an isolated worktree.
+    /// Spawn a Gemini worker agent (Phase 2/3).
     ///
-    /// Creates a branch and worktree so the worker can file PRs via stop hooks.
+    /// No git branch or worktree is created — the worker shares the parent's worktree.
     #[tracing::instrument(skip(self, options), fields(name = %options.name))]
     pub async fn spawn_worker(&self, options: &SpawnWorkerOptions) -> Result<SpawnResult> {
         info!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_worker");
@@ -815,59 +815,6 @@ impl AgentControlService {
                 });
             }
 
-            // Get current branch for worktree base
-            let current_branch_output = Command::new("git")
-                .args(["rev-parse", "--abbrev-ref", "HEAD"])
-                .current_dir(&self.project_dir)
-                .output()
-                .await
-                .context("Failed to get current branch")?;
-            let current_branch = String::from_utf8_lossy(&current_branch_output.stdout)
-                .trim()
-                .to_string();
-
-            // Branch: {current_branch}.{slug} (dot separator for base-branch auto-detection)
-            let branch_name = format!("{}.{}", current_branch, slug);
-            let worktree_path = self.worktree_base.join(&internal_name);
-
-            // Clean up existing worktree if it exists (idempotency)
-            if worktree_path.exists() {
-                info!(path = %worktree_path.display(), "Removing existing worktree for idempotency");
-                let _ = Command::new("git")
-                    .args(["worktree", "remove", "--force", &worktree_path.to_string_lossy()])
-                    .current_dir(&self.project_dir)
-                    .output()
-                    .await;
-            }
-
-            info!(
-                base_branch = %current_branch,
-                branch_name = %branch_name,
-                worktree_path = %worktree_path.display(),
-                "Creating git worktree for worker"
-            );
-
-            let output = Command::new("git")
-                .args([
-                    "worktree",
-                    "add",
-                    "-b",
-                    &branch_name,
-                    &worktree_path.to_string_lossy(),
-                    &current_branch,
-                ])
-                .current_dir(&self.project_dir)
-                .output()
-                .await
-                .context("Failed to create git worktree")?;
-
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                error!(stderr = %stderr, "git worktree add failed");
-                return Err(anyhow!("git worktree add failed: {}", stderr));
-            }
-            info!(worktree_path = %worktree_path.display(), "Git worktree created for worker");
-
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
             let session_id = self.event_session_id.as_deref().unwrap_or("default");
@@ -876,7 +823,7 @@ impl AgentControlService {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
             }
 
-            // Write Gemini settings to worker config dir
+            // Write Gemini settings to worker config dir in project root
             let agent_config_dir = self.project_dir
                 .join(".exomonad")
                 .join("agents")
@@ -901,10 +848,10 @@ impl AgentControlService {
                 settings_path.to_string_lossy().to_string(),
             );
 
-            // Spawn pane in current tab, cwd = worktree_path (isolated)
+            // Spawn pane in current tab, cwd = project_dir (parent's worktree)
             self.new_zellij_pane(
                 &display_name,
-                &worktree_path,
+                &self.project_dir,
                 AgentType::Gemini,
                 Some(&options.prompt),
                 env_vars,
@@ -925,7 +872,7 @@ impl AgentControlService {
             }
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
-                agent_dir: worktree_path.to_string_lossy().to_string(),
+                agent_dir: String::new(),
                 tab_name: internal_name,
                 issue_title: options.name.clone(),
                 agent_type: "gemini".to_string(),
@@ -1047,9 +994,6 @@ impl AgentControlService {
             // Write .mcp.json in worktree root
             self.write_agent_mcp_config(effective_project_dir, &worktree_path, AgentType::Claude)
                 .await?;
-
-            // Write .claude/settings.local.json with stop hooks
-            self.write_claude_hook_config(&worktree_path).await?;
 
             // Open Zellij tab with cwd = worktree_path
             self.new_zellij_tab(
@@ -1295,7 +1239,7 @@ impl AgentControlService {
     ///
     /// Discovery process:
     /// 1. Scan {worktree_base}/ for subtree agents (isolated worktrees)
-    /// 2. Scan {project_dir}/.exomonad/agents/ for worker agents (config dirs; worktrees at worktree_base)
+    /// 2. Scan {project_dir}/.exomonad/agents/ for worker agents (shared worktree)
     /// 3. Verify liveness by checking Zellij tabs/panes
     #[tracing::instrument(skip(self))]
     pub async fn list_agents(&self) -> Result<Vec<AgentInfo>> {
@@ -1345,7 +1289,7 @@ impl AgentControlService {
             }
         }
 
-        // 3. Scan root .exomonad/agents for workers (config dirs; worktrees at worktree_base)
+        // 3. Scan root .exomonad/agents for workers
         let root_agents_dir = self.project_dir.join(".exomonad/agents");
         if root_agents_dir.exists() {
             self.scan_workers(&root_agents_dir, &tabs, &mut agents).await?;
@@ -1373,14 +1317,12 @@ impl AgentControlService {
                     let has_tab = tabs.iter().any(|t| t == &display_name);
                     let status = if has_tab { AgentStatus::Running } else { AgentStatus::Stopped };
 
-                    // agent_dir points to the worktree (actual working directory)
-                    let worktree_dir = self.worktree_base.join(name);
                     agents.push(AgentInfo {
                         issue_id: name.to_string(),
                         has_tab,
                         status,
-                        topology: Topology::WorktreePerAgent,
-                        agent_dir: Some(worktree_dir.to_string_lossy().to_string()),
+                        topology: Topology::SharedDir,
+                        agent_dir: Some(path.to_string_lossy().to_string()),
                         slug: Some(base_name.to_string()),
                         agent_type: Some("gemini".to_string()),
                         pr: None,
@@ -1450,12 +1392,7 @@ impl AgentControlService {
                     prompt_length = p.len(),
                     "Spawning agent with CLI prompt"
                 );
-                let flag = agent_type.prompt_flag();
-                if flag.is_empty() {
-                    format!("{} {}", cmd, escaped_prompt)
-                } else {
-                    format!("{} {} {}", cmd, flag, escaped_prompt)
-                }
+                format!("{} {} {}", cmd, agent_type.prompt_flag(), escaped_prompt)
             }
             None => cmd.to_string(),
         };
@@ -1591,12 +1528,7 @@ impl AgentControlService {
                     prompt_length = p.len(),
                     "Spawning agent with CLI prompt"
                 );
-                let flag = agent_type.prompt_flag();
-                if flag.is_empty() {
-                    format!("{} {}", cmd, escaped_prompt)
-                } else {
-                    format!("{} {} {}", cmd, flag, escaped_prompt)
-                }
+                format!("{} {} {}", cmd, agent_type.prompt_flag(), escaped_prompt)
             }
             None => cmd.to_string(),
         };
@@ -1731,60 +1663,6 @@ impl AgentControlService {
     // Internal: Agent Config Files
     // ========================================================================
 
-    /// Write Claude Code hook configuration for a subtree agent.
-    ///
-    /// Creates `.claude/settings.local.json` with hooks that forward to
-    /// `exomonad hook <event>` for stop validation and permission checks.
-    async fn write_claude_hook_config(&self, worktree_path: &Path) -> Result<()> {
-        let claude_dir = worktree_path.join(".claude");
-        fs::create_dir_all(&claude_dir).await?;
-
-        let settings = Self::generate_claude_hook_settings();
-        let content = serde_json::to_string_pretty(&settings)
-            .context("Failed to serialize Claude hook settings")?;
-
-        fs::write(claude_dir.join("settings.local.json"), content).await?;
-        info!(worktree = %worktree_path.display(), "Wrote .claude/settings.local.json with stop hooks");
-        Ok(())
-    }
-
-    /// Generate settings.local.json content for a Claude subtree agent.
-    ///
-    /// Includes hooks for stop validation (SubagentStop, SessionEnd) and
-    /// permission forwarding (PreToolUse, PostToolUse).
-    fn generate_claude_hook_settings() -> serde_json::Value {
-        serde_json::json!({
-            "hooks": {
-                "PreToolUse": [{
-                    "matcher": "*",
-                    "hooks": [{
-                        "type": "command",
-                        "command": "exomonad hook pre-tool-use"
-                    }]
-                }],
-                "PostToolUse": [{
-                    "matcher": "*",
-                    "hooks": [{
-                        "type": "command",
-                        "command": "exomonad hook post-tool-use"
-                    }]
-                }],
-                "SubagentStop": [{
-                    "hooks": [{
-                        "type": "command",
-                        "command": "exomonad hook subagent-stop"
-                    }]
-                }],
-                "SessionEnd": [{
-                    "hooks": [{
-                        "type": "command",
-                        "command": "exomonad hook session-end"
-                    }]
-                }]
-            }
-        })
-    }
-
     /// Write MCP config for the agent directory.
     ///
     /// Claude agents get `.mcp.json`. Gemini agents get `.gemini/settings.json`.
@@ -1829,7 +1707,6 @@ impl AgentControlService {
                     r###"{{
   "mcpServers": {{
     "exomonad": {{
-      "type": "http",
       "url": "http://localhost:{port}/agents/{name}/mcp"
     }}
   }}
@@ -2053,7 +1930,7 @@ mod tests {
 
     #[test]
     fn test_agent_type_prompt_flag() {
-        assert_eq!(AgentType::Claude.prompt_flag(), "");
+        assert_eq!(AgentType::Claude.prompt_flag(), "--prompt");
         assert_eq!(AgentType::Gemini.prompt_flag(), "--prompt-interactive");
     }
 
@@ -2192,44 +2069,24 @@ mod tests {
     }
 
     #[test]
-    fn test_claude_hook_settings_format() {
-        let settings = AgentControlService::generate_claude_hook_settings();
+    fn test_parse_agent_tab_subtree_claude() {
+        let info = parse_agent_tab("🤖 auth-service").unwrap();
+        assert_eq!(info.issue_id, "auth-service");
+        assert_eq!(info.agent_type, Some("claude".to_string()));
+        assert_eq!(info.topology, Topology::WorktreePerAgent);
+    }
 
-        // PreToolUse has matcher
-        let pre_tool = &settings["hooks"]["PreToolUse"];
-        assert!(pre_tool.is_array());
-        assert_eq!(pre_tool[0]["matcher"], "*");
-        assert_eq!(
-            pre_tool[0]["hooks"][0]["command"],
-            "exomonad hook pre-tool-use"
-        );
+    #[test]
+    fn test_parse_agent_tab_subtree_gemini() {
+        let info = parse_agent_tab("💎 data-migration").unwrap();
+        assert_eq!(info.issue_id, "data-migration");
+        assert_eq!(info.agent_type, Some("gemini".to_string()));
+    }
 
-        // PostToolUse has matcher
-        let post_tool = &settings["hooks"]["PostToolUse"];
-        assert!(post_tool.is_array());
-        assert_eq!(post_tool[0]["matcher"], "*");
-        assert_eq!(
-            post_tool[0]["hooks"][0]["command"],
-            "exomonad hook post-tool-use"
-        );
-
-        // SubagentStop has no matcher
-        let subagent_stop = &settings["hooks"]["SubagentStop"];
-        assert!(subagent_stop.is_array());
-        assert!(subagent_stop[0].get("matcher").is_none());
-        assert_eq!(
-            subagent_stop[0]["hooks"][0]["command"],
-            "exomonad hook subagent-stop"
-        );
-
-        // SessionEnd has no matcher
-        let session_end = &settings["hooks"]["SessionEnd"];
-        assert!(session_end.is_array());
-        assert!(session_end[0].get("matcher").is_none());
-        assert_eq!(
-            session_end[0]["hooks"][0]["command"],
-            "exomonad hook session-end"
-        );
+    #[test]
+    fn test_parse_agent_tab_not_agent() {
+        assert!(parse_agent_tab("Server").is_none());
+        assert!(parse_agent_tab("TL").is_none());
     }
 
     #[test]
