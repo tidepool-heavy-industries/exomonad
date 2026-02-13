@@ -181,7 +181,10 @@ fn color_to_ansi(color: Color, bg: bool) -> String {
 
 impl ZellijPlugin for ExoMonadPlugin {
     fn load(&mut self, _configuration: BTreeMap<String, String>) {
-        request_permission(&[PermissionType::ReadCliPipes]);
+        request_permission(&[
+            PermissionType::ReadCliPipes,
+            PermissionType::ChangeApplicationState,
+        ]);
         subscribe(&[EventType::CustomMessage, EventType::Key]);
         self.status_state = PluginState::Idle;
         self.status_message = "Ready.".to_string();
@@ -232,6 +235,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                             self.status_message = "JSON popup must have at least one choice component".to_string();
                             // Don't include ':' to avoid misinterpretation as successful selection
                             cli_pipe_output(&pipe_id, &format!("ERROR_NO_ITEMS:{}", req.request_id));
+                            unblock_cli_pipe_input(&pipe_id);
                             return true;
                         }
 
@@ -253,6 +257,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                         self.status_message = format!("Invalid JSON popup: {}", e);
                         // Avoid ':' to prevent host misinterpretation
                         cli_pipe_output(&pipe_id, &format!("ERROR_INVALID_JSON_{}", e));
+                        unblock_cli_pipe_input(&pipe_id);
                         return true;
                     }
                 }
@@ -264,6 +269,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                 self.status_state = PluginState::Error;
                 self.status_message = "Invalid payload format".to_string();
                 cli_pipe_output(&pipe_id, "ERROR:Invalid payload format");
+                unblock_cli_pipe_input(&pipe_id);
                 return true;
             }
 
@@ -279,6 +285,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                 self.status_state = PluginState::Error;
                 self.status_message = "Popup items cannot be empty".to_string();
                 cli_pipe_output(&pipe_id, &format!("{}:ERROR:No items provided", request_id));
+                unblock_cli_pipe_input(&pipe_id);
                 return true;
             }
 
@@ -380,7 +387,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                             let response = format!("{}:CANCELLED", popup.request_id);
                             cli_pipe_output(&popup.pipe_id, &response);
                             unblock_cli_pipe_input(&popup.pipe_id);
-                            close_self(); // Destroy plugin pane after responding
+                            hide_self(); // Destroy plugin pane after responding
                         }
                         BareKey::Down | BareKey::Char('j') => {
                             if popup.selected_index < popup.items.len().saturating_sub(1) {
@@ -404,7 +411,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                             let response = format!("{}:{}", popup.request_id, selected);
                             cli_pipe_output(&popup.pipe_id, &response);
                             unblock_cli_pipe_input(&popup.pipe_id);
-                            close_self(); // Destroy plugin pane after responding
+                            hide_self(); // Destroy plugin pane after responding
                         }
                         _ => {}
                     }

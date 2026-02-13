@@ -140,31 +140,33 @@ cargo test -p exomonad-plugin
 
 ## Communication Protocol
 
-**Sidecar → Plugin (CustomMessage):**
-```rust
-let message = serde_json::to_string(&PluginMessage::Popup {
-    request_id: "req-123".to_string(),
-    definition: popup_def,
-})?;
+**Popups use Zellij CLI pipes (bidirectional, synchronous):**
 
+```
+Rust PopupService                              Zellij Plugin
+       │                                              │
+       ├─ zellij pipe --plugin file:X.wasm ──────────►│
+       │   --name exomonad:popup -- {JSON payload}     │
+       │                                              │
+       │   (CLI process blocks here)                  ├─ block_cli_pipe_input(&pipe_id)
+       │                                              ├─ show_self(true)
+       │                                              ├─ (user interacts)
+       │                                              │
+       │◄────────── cli_pipe_output(&pipe_id, resp) ──┤
+       │            unblock_cli_pipe_input(&pipe_id)   │
+       │                                              ├─ hide_self()
+       ├─ reads response from stdout                  │
+```
+
+Requires permissions: `ReadCliPipes`, `ChangeApplicationState`. Both are requested in `load()`. On first launch after a fresh install, the user must accept the permission prompt in the plugin pane.
+
+**Status updates use CustomMessage (one-way):**
+```rust
 pipe_message_to_plugin(
     MessageToPlugin::new("exomonad")
-        .with_payload(message)
+        .with_payload(serde_json::to_string(&PluginMessage::Status { ... })?)
 );
 ```
-
-**Plugin → Sidecar (via temporary file):**
-```rust
-let result = PopupResult {
-    button: "submit".to_string(),
-    values: state.to_json(),
-    time_spent_seconds: Some(12),
-};
-
-// Write to /tmp/exomonad-popup-result-<request_id>.json
-```
-
-**Note:** Communication is one-way (sidecar → plugin) via pipe, return data via temp file.
 
 ## Related Documentation
 
