@@ -162,7 +162,7 @@ hookHandler config = do
         SubagentStop -> handleStopHook hookInput (onSubagentStop config)
         PreToolUse -> handlePreToolUse hookInput (preToolUse config)
         PostToolUse -> handlePreToolUse hookInput (postToolUse config)
-        WorkerExit -> handleWorkerExit hookInput
+        WorkerExit -> handleWorkerExit hookInput config
   where
     handlePreToolUse :: HookInput -> (HookInput -> Eff '[IO] HookOutput) -> IO CInt
     handlePreToolUse hookInput hook = do
@@ -211,29 +211,45 @@ hookHandler config = do
       output (BSL.toStrict $ Aeson.encode result)
       pure 0
 
-handleWorkerExit :: HookInput -> IO CInt
-handleWorkerExit hookInput = do
-  logInfo_ "WorkerExit hook firing"
+handleWorkerExit :: HookInput -> HookConfig -> IO CInt
+handleWorkerExit hookInput config = do
+  logInfo_ "WorkerExit hook firing — running stop hook pipeline"
   let maybeAgentId = hiAgentId hookInput
 
+  -- Emit AgentStopped event (mirrors handleStopHook behavior)
+  cwd <- getCurrentDirectory
+  let agentId = fromMaybe (T.pack $ takeFileName cwd) maybeAgentId
+  now <- getCurrentTime
+  let timestamp = T.pack $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%QZ" now
+  let event =
+        Aeson.object
+          [ "type" .= ("agent:stopped" :: Text),
+            "agent_id" .= agentId,
+            "timestamp" .= timestamp
+          ]
+  emitEvent_ event
+
+  -- Run the stop hook checks (dirty files, push, PR, Copilot review)
+  result <- runM $ onStop config hookInput
+
+  -- Notify parent with outcome
   case maybeAgentId of
     Just agentId -> do
-        logInfo_ $ "Handling exit for agent: " <> agentId
-
-        let status = "success"
-        let message = "Worker " <> agentId <> " completed"
+        let (status, message) = case decision result of
+              Allow -> ("success", "Worker " <> agentId <> " completed — all checks passed")
+              Block -> ("blocked", "Worker " <> agentId <> " blocked: " <> fromMaybe "unknown reason" (reason result))
 
         res <- try @SomeException (Events.notifyParent status message)
         case res of
             Left exc -> logError_ ("notifyParent threw exception: " <> T.pack (show exc))
             Right (Left err) -> logError_ ("Failed to notify completion to parent: " <> T.pack (show err))
-            Right (Right _) -> logInfo_ ("Completion notified for " <> agentId)
+            Right (Right _) -> logInfo_ ("Completion notified for " <> agentId <> " with status: " <> status)
 
     Nothing -> do
         logError_ "agent_id missing from hook input"
         pure ()
 
-  output (BSL.toStrict $ Aeson.encode $ allowResponse Nothing)
+  output (BSL.toStrict $ Aeson.encode result)
   pure 0
 
 -- | Wrap a handler with exception handling.

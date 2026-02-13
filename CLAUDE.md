@@ -386,7 +386,7 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 | Tool | Description |
 |------|-------------|
 | `spawn_subtree` | Fork a worktree node off your current branch (Claude-only). Creates isolated git worktree + Zellij tab. |
-| `spawn_workers` | Spawn multiple Gemini worker agents as panes in the current worktree (batch) |
+| `spawn_workers` | Spawn multiple Gemini worker agents as panes in isolated worktrees (batch) |
 | `file_pr` | Create or update a PR for the current branch (auto-detects base branch from naming convention) |
 | `popup` | Display interactive popup UI in Zellij (choices, text input, sliders) |
 | `note` | Send a note to the TL agent (dev role messaging) |
@@ -404,7 +404,7 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 3. Writes `.mcp.json` with `{"type": "http", "url": "..."}` in worktree root
 4. Creates Zellij tab with `claude 'task prompt'` (positional arg, not --prompt flag)
 5. `spawn_subtree` agents are Claude-only, get TL role (can spawn workers, depth-capped at 2)
-6. `spawn_worker`: Runs Gemini in a Zellij pane in the parent's worktree (no branch, no worktree)
+6. `spawn_worker`: Runs Gemini in a Zellij pane in an isolated worktree (own branch for PR filing)
 7. Worker config lives in `.exomonad/agents/{name}/` (not /tmp/)
 8. PRs target parent branch, not main — merged via recursive fold
 9. Identity: birth-branch as session ID (immutable, deterministic). Root TL = "root".
@@ -453,7 +453,9 @@ Use cases:
 - ✅ Nested worktree layout (.exomonad/worktrees/, .exomonad/agents/)
 - ✅ Filesystem-based agent registry (no separate state file)
 - ✅ Configurable worktree_base in config.toml
-- ✅ Split spawn_subtree (Claude worktree+tab) / spawn_workers (Gemini panes)
+- ✅ Split spawn_subtree (Claude worktree+tab) / spawn_workers (Gemini panes+worktree)
+- ✅ Worker branch isolation (own worktree + branch for PR filing)
+- ✅ Worker stop hook pipeline (dirty files → push → PR → Copilot review → notifyParent)
 - 🔧 Inter-agent messaging (note/question/answer) — code exists, needs async conversion for question tool
 - ✅ Stop hooks for subtree agents (settings.local.json written at spawn, TL role runs stop checks)
 

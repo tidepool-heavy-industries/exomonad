@@ -131,7 +131,7 @@ pub struct SpawnGeminiTeammateOptions {
     pub base_branch: Option<String>,
 }
 
-/// Options for spawning a worker agent in the current worktree (no branch/worktree).
+/// Options for spawning a worker agent in an isolated worktree.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpawnWorkerOptions {
     /// Human-readable name for the worker
@@ -784,9 +784,9 @@ impl AgentControlService {
         })
     }
 
-    /// Spawn a Gemini worker agent (Phase 2/3).
+    /// Spawn a Gemini worker agent in an isolated worktree.
     ///
-    /// No git branch or worktree is created — the worker shares the parent's worktree.
+    /// Creates a branch and worktree so the worker can file PRs via stop hooks.
     #[tracing::instrument(skip(self, options), fields(name = %options.name))]
     pub async fn spawn_worker(&self, options: &SpawnWorkerOptions) -> Result<SpawnResult> {
         info!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_worker");
@@ -815,6 +815,59 @@ impl AgentControlService {
                 });
             }
 
+            // Get current branch for worktree base
+            let current_branch_output = Command::new("git")
+                .args(["rev-parse", "--abbrev-ref", "HEAD"])
+                .current_dir(&self.project_dir)
+                .output()
+                .await
+                .context("Failed to get current branch")?;
+            let current_branch = String::from_utf8_lossy(&current_branch_output.stdout)
+                .trim()
+                .to_string();
+
+            // Branch: {current_branch}.{slug} (dot separator for base-branch auto-detection)
+            let branch_name = format!("{}.{}", current_branch, slug);
+            let worktree_path = self.worktree_base.join(&internal_name);
+
+            // Clean up existing worktree if it exists (idempotency)
+            if worktree_path.exists() {
+                info!(path = %worktree_path.display(), "Removing existing worktree for idempotency");
+                let _ = Command::new("git")
+                    .args(["worktree", "remove", "--force", &worktree_path.to_string_lossy()])
+                    .current_dir(&self.project_dir)
+                    .output()
+                    .await;
+            }
+
+            info!(
+                base_branch = %current_branch,
+                branch_name = %branch_name,
+                worktree_path = %worktree_path.display(),
+                "Creating git worktree for worker"
+            );
+
+            let output = Command::new("git")
+                .args([
+                    "worktree",
+                    "add",
+                    "-b",
+                    &branch_name,
+                    &worktree_path.to_string_lossy(),
+                    &current_branch,
+                ])
+                .current_dir(&self.project_dir)
+                .output()
+                .await
+                .context("Failed to create git worktree")?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                error!(stderr = %stderr, "git worktree add failed");
+                return Err(anyhow!("git worktree add failed: {}", stderr));
+            }
+            info!(worktree_path = %worktree_path.display(), "Git worktree created for worker");
+
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
             let session_id = self.event_session_id.as_deref().unwrap_or("default");
@@ -823,7 +876,7 @@ impl AgentControlService {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
             }
 
-            // Write Gemini settings to worker config dir in project root
+            // Write Gemini settings to worker config dir
             let agent_config_dir = self.project_dir
                 .join(".exomonad")
                 .join("agents")
@@ -848,10 +901,10 @@ impl AgentControlService {
                 settings_path.to_string_lossy().to_string(),
             );
 
-            // Spawn pane in current tab, cwd = project_dir (parent's worktree)
+            // Spawn pane in current tab, cwd = worktree_path (isolated)
             self.new_zellij_pane(
                 &display_name,
-                &self.project_dir,
+                &worktree_path,
                 AgentType::Gemini,
                 Some(&options.prompt),
                 env_vars,
@@ -872,7 +925,7 @@ impl AgentControlService {
             }
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
-                agent_dir: String::new(),
+                agent_dir: worktree_path.to_string_lossy().to_string(),
                 tab_name: internal_name,
                 issue_title: options.name.clone(),
                 agent_type: "gemini".to_string(),
@@ -1242,7 +1295,7 @@ impl AgentControlService {
     ///
     /// Discovery process:
     /// 1. Scan {worktree_base}/ for subtree agents (isolated worktrees)
-    /// 2. Scan {project_dir}/.exomonad/agents/ for worker agents (shared worktree)
+    /// 2. Scan {project_dir}/.exomonad/agents/ for worker agents (config dirs; worktrees at worktree_base)
     /// 3. Verify liveness by checking Zellij tabs/panes
     #[tracing::instrument(skip(self))]
     pub async fn list_agents(&self) -> Result<Vec<AgentInfo>> {
@@ -1292,7 +1345,7 @@ impl AgentControlService {
             }
         }
 
-        // 3. Scan root .exomonad/agents for workers
+        // 3. Scan root .exomonad/agents for workers (config dirs; worktrees at worktree_base)
         let root_agents_dir = self.project_dir.join(".exomonad/agents");
         if root_agents_dir.exists() {
             self.scan_workers(&root_agents_dir, &tabs, &mut agents).await?;
@@ -1320,12 +1373,14 @@ impl AgentControlService {
                     let has_tab = tabs.iter().any(|t| t == &display_name);
                     let status = if has_tab { AgentStatus::Running } else { AgentStatus::Stopped };
 
+                    // agent_dir points to the worktree (actual working directory)
+                    let worktree_dir = self.worktree_base.join(name);
                     agents.push(AgentInfo {
                         issue_id: name.to_string(),
                         has_tab,
                         status,
-                        topology: Topology::SharedDir,
-                        agent_dir: Some(path.to_string_lossy().to_string()),
+                        topology: Topology::WorktreePerAgent,
+                        agent_dir: Some(worktree_dir.to_string_lossy().to_string()),
                         slug: Some(base_name.to_string()),
                         agent_type: Some("gemini".to_string()),
                         pr: None,
