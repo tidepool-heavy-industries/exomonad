@@ -225,7 +225,7 @@ handleWorkerExit hookInput = do
               "success" -> "Worker " <> agentId <> " completed successfully"
               other     -> "Worker " <> agentId <> " exited with status: " <> other
 
-        res <- try @SomeException (Events.notifyParent actualStatus statusMsg)
+        res <- try @SomeException (Events.notifyParent agentId actualStatus statusMsg)
         case res of
             Left exc -> logError_ ("notifyParent threw exception: " <> T.pack (show exc))
             Right (Left err) -> logError_ ("Failed to notify completion to parent: " <> T.pack (show err))

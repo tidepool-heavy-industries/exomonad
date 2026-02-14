@@ -158,7 +158,12 @@ impl EventEffects for EventHandler {
                 .clone()
                 .unwrap_or_else(|| "root".to_string())
         });
-        let agent_id = crate::mcp::agent_identity::get_agent_id();
+        // Prefer agent_id from the request (set by WASM caller) over task-local/env fallback
+        let agent_id = if req.agent_id.is_empty() {
+            crate::mcp::agent_identity::get_agent_id()
+        } else {
+            req.agent_id.clone()
+        };
 
         // Identity model:
         // - Subtree agents: session_id is their own branch name (e.g. "main.feature-a").

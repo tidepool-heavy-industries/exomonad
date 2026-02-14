@@ -61,10 +61,11 @@ instance Effect EventsNotifyParent where
   effectId = "events.notify_parent"
 
 -- | Smart constructor for notify_parent
-notifyParent :: Text -> Text -> IO (Either EffectError Proto.NotifyParentResponse)
-notifyParent status message =
+notifyParent :: Text -> Text -> Text -> IO (Either EffectError Proto.NotifyParentResponse)
+notifyParent agentId status message =
   runEffect @EventsNotifyParent $
     Proto.NotifyParentRequest
       { Proto.notifyParentRequestStatus = fromText status
       , Proto.notifyParentRequestMessage = fromText message
+      , Proto.notifyParentRequestAgentId = fromText agentId
       }

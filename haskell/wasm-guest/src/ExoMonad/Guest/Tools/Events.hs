@@ -139,5 +139,5 @@ instance MCPTool NotifyParent where
     , "required" .= (["status", "message"] :: [Text])
     ]
   toolHandler args = do
-    liftEffect (Events.notifyParent (npStatus args) (npMessage args)) $ \_ ->
+    liftEffect (Events.notifyParent "" (npStatus args) (npMessage args)) $ \_ ->
       object ["success" .= True]

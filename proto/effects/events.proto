@@ -46,6 +46,7 @@ message Timeout {
 message NotifyParentRequest {
   string status = 1;    // "success" | "failure"
   string message = 2;   // completion message
+  string agent_id = 3;  // identity of the notifying agent
 }
 
 message NotifyParentResponse {

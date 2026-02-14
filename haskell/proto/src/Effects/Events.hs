@@ -601,7 +601,8 @@ instance (HsJSONPB.FromJSON Timeout) where
   parseJSON = HsJSONPB.parseJSONPB
 data NotifyParentRequest
   = NotifyParentRequest {notifyParentRequestStatus :: Hs.Text,
-                         notifyParentRequestMessage :: Hs.Text}
+                         notifyParentRequestMessage :: Hs.Text,
+                         notifyParentRequestAgentId :: Hs.Text}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
 instance (Hs.NFData NotifyParentRequest)
 instance (HsProtobuf.Named NotifyParentRequest) where
@@ -611,16 +612,21 @@ instance (HsProtobuf.Message NotifyParentRequest) where
   encodeMessage
     _
     NotifyParentRequest {notifyParentRequestStatus,
-                         notifyParentRequestMessage}
+                         notifyParentRequestMessage, notifyParentRequestAgentId}
     = Hs.mappend
+        (Hs.mappend
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 1)
+              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                 notifyParentRequestStatus))
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 2)
+              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                 notifyParentRequestMessage)))
         (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 1)
+           (HsProtobuf.FieldNumber 3)
            ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              notifyParentRequestStatus))
-        (HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 2)
-           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              notifyParentRequestMessage))
+              notifyParentRequestAgentId))
   decodeMessage _
     = Hs.pure NotifyParentRequest
         <*>
@@ -631,6 +637,10 @@ instance (HsProtobuf.Message NotifyParentRequest) where
           ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
              (HsProtobuf.at
                 HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 2)))
+        <*>
+          ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+             (HsProtobuf.at
+                HsProtobuf.decodeMessageField (HsProtobuf.FieldNumber 3)))
   dotProto _
     = [HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 1)
@@ -639,20 +649,28 @@ instance (HsProtobuf.Message NotifyParentRequest) where
        HsProtobufAST.DotProtoField
          (HsProtobuf.FieldNumber 2)
          (HsProtobufAST.Prim HsProtobufAST.String)
-         (HsProtobufAST.Single "message") [] ""]
+         (HsProtobufAST.Single "message") [] "",
+       HsProtobufAST.DotProtoField
+         (HsProtobuf.FieldNumber 3)
+         (HsProtobufAST.Prim HsProtobufAST.String)
+         (HsProtobufAST.Single "agent_id") [] ""]
 instance (HsJSONPB.ToJSONPB NotifyParentRequest) where
-  toJSONPB (NotifyParentRequest f1 f2)
+  toJSONPB (NotifyParentRequest f1 f2 f3)
     = HsJSONPB.object
         ["status"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "message"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
-  toEncodingPB (NotifyParentRequest f1 f2)
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
+         "agent_id"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
+  toEncodingPB (NotifyParentRequest f1 f2 f3)
     = HsJSONPB.pairs
         ["status"
            .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
          "message"
-           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)]
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2),
+         "agent_id"
+           .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f3)]
 instance (HsJSONPB.FromJSONPB NotifyParentRequest) where
   parseJSONPB
     = HsJSONPB.withObject
@@ -664,7 +682,10 @@ instance (HsJSONPB.FromJSONPB NotifyParentRequest) where
                      (obj .: "status"))
                 <*>
                   ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
-                     (obj .: "message")))
+                     (obj .: "message"))
+                <*>
+                  ((HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                     (obj .: "agent_id")))
 instance (HsJSONPB.ToJSON NotifyParentRequest) where
   toJSON = HsJSONPB.toAesonValue
   toEncoding = HsJSONPB.toAesonEncoding
