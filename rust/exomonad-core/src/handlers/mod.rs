@@ -24,6 +24,7 @@ pub mod file_pr;
 pub mod fs;
 pub mod git;
 pub mod github;
+pub mod jj;
 pub mod kv;
 pub mod log;
 pub mod messaging;
@@ -38,6 +39,7 @@ pub use fs::FsHandler;
 
 pub use git::GitHandler;
 pub use github::GitHubHandler;
+pub use jj::JjHandler;
 pub use kv::KvHandler;
 pub use log::LogHandler;
 pub use messaging::MessagingHandler;
