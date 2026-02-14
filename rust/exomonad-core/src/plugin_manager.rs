@@ -20,7 +20,9 @@ use std::time::{Instant, SystemTime};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "tag", rename_all = "snake_case")]
 pub enum WasmResult<T> {
-    Done { result: T },
+    Done {
+        result: T,
+    },
     Suspend {
         continuation_id: String,
         effect: EffectRequest,
@@ -273,9 +275,12 @@ impl PluginManager {
 
             match wasm_result {
                 WasmResult::Done { result } => return Ok(result),
-                WasmResult::Suspend { continuation_id, effect } => {
+                WasmResult::Suspend {
+                    continuation_id,
+                    effect,
+                } => {
                     // Execute the async effect WITHOUT holding the lock
-                    
+
                     // Convert payload (Value) to bytes
                     let payload_bytes: Vec<u8> = serde_json::from_value(effect.payload)
                         .context("Failed to parse effect payload as byte array")?;
@@ -287,7 +292,8 @@ impl PluginManager {
                         "Handling suspended effect"
                     );
 
-                    let effect_result = self.registry
+                    let effect_result = self
+                        .registry
                         .dispatch(&effect.effect_type, &payload_bytes)
                         .await?;
 

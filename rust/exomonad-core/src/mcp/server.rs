@@ -1,15 +1,15 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tokio::time::Instant;
 use axum::extract::Json;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tokio::time::Instant;
 use uuid::Uuid;
 
-use super::McpState;
 use super::tools::{self, MCPCallInput, MCPCallOutput};
+use super::McpState;
 
 struct McpSession {
     plugin: Arc<crate::PluginManager>,
@@ -77,7 +77,10 @@ impl McpServer {
 
                 match m {
                     "tools/list" => self.handle_list_tools(&session_id, &id).await,
-                    "tools/call" => self.handle_call_tool(&session_id, &id, &body["params"]).await,
+                    "tools/call" => {
+                        self.handle_call_tool(&session_id, &id, &body["params"])
+                            .await
+                    }
                     _ => json_rpc_error(&id, -32601, "Method not found"),
                 }
             }
@@ -107,7 +110,10 @@ impl McpServer {
             last_active: Instant::now(),
         };
 
-        self.sessions.write().await.insert(session_id.clone(), session);
+        self.sessions
+            .write()
+            .await
+            .insert(session_id.clone(), session);
 
         let result = json!({
             "protocolVersion": "2024-11-05",
@@ -126,13 +132,17 @@ impl McpServer {
         let sessions = self.sessions.read().await;
         let session = sessions.get(session_id).unwrap(); // validated in handle()
 
-        let tools_json: Vec<Value> = session.tools.iter().map(|t| {
-            json!({
-                "name": t.name,
-                "description": t.description,
-                "inputSchema": t.input_schema,
+        let tools_json: Vec<Value> = session
+            .tools
+            .iter()
+            .map(|t| {
+                json!({
+                    "name": t.name,
+                    "description": t.description,
+                    "inputSchema": t.input_schema,
+                })
             })
-        }).collect();
+            .collect();
 
         json_rpc_response(id, session_id, json!({ "tools": tools_json }))
     }
@@ -183,7 +193,8 @@ fn json_rpc_response(id: &Value, session_id: &str, result: Value) -> Response {
             ("mcp-session-id", session_id),
         ],
         axum::Json(body),
-    ).into_response()
+    )
+        .into_response()
 }
 
 /// JSON-RPC error response (no session header needed).

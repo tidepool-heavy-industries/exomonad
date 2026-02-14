@@ -436,5 +436,4 @@ mod tests {
         // Should still produce valid KDL with zjstatus
         assert!(layout.contains("zjstatus.wasm"));
     }
-
 }

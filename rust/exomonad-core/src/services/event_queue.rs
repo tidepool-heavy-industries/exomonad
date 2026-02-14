@@ -49,7 +49,12 @@ impl EventQueue {
 
         // Await with timeout
         match tokio::time::timeout(timeout, rx).await {
-            Ok(Ok(event)) if (after_event_id == 0 || event.event_id > after_event_id) && Self::matches_type(&event, types) => Ok(event),
+            Ok(Ok(event))
+                if (after_event_id == 0 || event.event_id > after_event_id)
+                    && Self::matches_type(&event, types) =>
+            {
+                Ok(event)
+            }
             Ok(Ok(_)) => Err(anyhow!("received non-matching event")),
             Err(_) => Ok(Self::timeout_event(timeout.as_secs() as i32)),
             Ok(Err(_)) => Err(anyhow!("waker channel closed")),
@@ -89,7 +94,11 @@ impl EventQueue {
         }
     }
 
-    fn find_matching(queue: &mut VecDeque<Event>, types: &[String], after_event_id: u64) -> Option<Event> {
+    fn find_matching(
+        queue: &mut VecDeque<Event>,
+        types: &[String],
+        after_event_id: u64,
+    ) -> Option<Event> {
         let pos = queue.iter().position(|e| {
             (after_event_id == 0 || e.event_id > after_event_id) && Self::matches_type(e, types)
         })?;
@@ -192,35 +201,55 @@ mod tests {
     #[tokio::test]
     async fn test_cursor_filtering() {
         let queue = EventQueue::new();
-        
+
         let event1 = Event {
             event_id: 0, // Will be assigned by queue
-            event_type: Some(EventType::WorkerComplete(exomonad_proto::effects::events::WorkerComplete {
-                worker_id: "worker-1".to_string(),
-                status: "success".to_string(),
-                changes: vec![],
-                message: "first".to_string(),
-            })),
+            event_type: Some(EventType::WorkerComplete(
+                exomonad_proto::effects::events::WorkerComplete {
+                    worker_id: "worker-1".to_string(),
+                    status: "success".to_string(),
+                    changes: vec![],
+                    message: "first".to_string(),
+                },
+            )),
         };
         let event2 = Event {
             event_id: 0,
-            event_type: Some(EventType::WorkerComplete(exomonad_proto::effects::events::WorkerComplete {
-                worker_id: "worker-2".to_string(),
-                status: "success".to_string(),
-                changes: vec![],
-                message: "second".to_string(),
-            })),
+            event_type: Some(EventType::WorkerComplete(
+                exomonad_proto::effects::events::WorkerComplete {
+                    worker_id: "worker-2".to_string(),
+                    status: "success".to_string(),
+                    changes: vec![],
+                    message: "second".to_string(),
+                },
+            )),
         };
-        
+
         queue.notify_event("s1", event1).await;
         queue.notify_event("s1", event2).await;
-        
+
         // Without cursor: gets first event (id=1)
-        let result = queue.wait_for_event("s1", &["worker_complete".to_string()], Duration::from_secs(1), 0).await.unwrap();
+        let result = queue
+            .wait_for_event(
+                "s1",
+                &["worker_complete".to_string()],
+                Duration::from_secs(1),
+                0,
+            )
+            .await
+            .unwrap();
         assert_eq!(result.event_id, 1);
-        
+
         // With cursor=1: skips first, gets second (id=2)
-        let result = queue.wait_for_event("s1", &["worker_complete".to_string()], Duration::from_secs(1), 1).await.unwrap();
+        let result = queue
+            .wait_for_event(
+                "s1",
+                &["worker_complete".to_string()],
+                Duration::from_secs(1),
+                1,
+            )
+            .await
+            .unwrap();
         assert_eq!(result.event_id, 2);
     }
 }

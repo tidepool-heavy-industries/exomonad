@@ -304,7 +304,10 @@ fn resolve_parent_tab_name() -> String {
         // Worker: session_id is parent's session ID
         if session_id.contains('.') {
             // Parent is a subtree agent — extract slug from last dot segment
-            let slug = session_id.rsplit_once('.').map(|(_, s)| s).unwrap_or(&session_id);
+            let slug = session_id
+                .rsplit_once('.')
+                .map(|(_, s)| s)
+                .unwrap_or(&session_id);
             format!("\u{1F916} {}", slug)
         } else {
             "TL".to_string()

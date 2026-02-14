@@ -38,6 +38,23 @@ We're building greenfield LLM-operated infrastructure. Agents don't have a "lear
 
 The only gotcha: git repo stays in detached HEAD state. We never run raw `git` write commands — all writes go through `jj`.
 
+### Git Worktrees for Isolation (NOT jj Workspaces)
+
+**We keep `git worktree add` for agent isolation. We do NOT use `jj workspace add`.**
+
+Claude Code's `--resume --fork-session` depends on Git-aware session discovery:
+1. Sessions are stored per-directory in `~/.claude/projects/<slugified-path>/`
+2. `--resume` looks for a `.git` file/directory and aggregates sessions across all worktrees of the same repo
+3. `--fork-session` reads from parent's storage, writes to child's path-encoded directory
+
+`git worktree add` creates a `.git` FILE in the worktree pointing back to the main repo — this is what enables cross-worktree `--resume`. `jj workspace add` creates a `.jj` pointer but NO `.git` file, breaking session discovery.
+
+Therefore:
+- **`git worktree add`** = isolation layer (creates directory with `.git` file → Claude Code project identity)
+- **`jj` colocated** = operations layer (auto-rebase, conflicts-as-data, revsets, within those worktrees)
+
+jj sees the commits made via `git worktree add` and manages them through its colocated `.git` backend. The two coexist cleanly.
+
 ### Identity Model
 
 **Dual identity: bookmarks for hierarchy, Change IDs for tracking.**
@@ -45,40 +62,39 @@ The only gotcha: git repo stays in detached HEAD state. We never run raw `git` w
 - **Bookmarks** (branch pointers): Encode tree position for PR targeting and human readability. `main.feature.auth` → PR targets `main.feature`.
 - **Change IDs**: Durable agent identity. Survives rebases, squashes, amends. The orchestrator's database key for tracking agent state.
 
-Bookmarks and the commit graph are global to the shared `.jj` store. All workspaces see changes immediately — no fetch/sync needed between local workspaces.
+Bookmarks and the commit graph are global to the shared `.jj` store. All worktrees see changes immediately via jj's colocated git backend.
 
-### Workspace Lifecycle
+### Worktree Lifecycle
 
-**Spawning an agent workspace:**
+**Spawning an agent worktree:**
 ```bash
-# Create workspace on a parent bookmark
-jj workspace add --name agent-auth -r main.feature ../worktrees/auth
+# Create git worktree (gives .git file for Claude Code session discovery)
+git worktree add -b main.feature.auth ../worktrees/auth main.feature
 cd ../worktrees/auth
 
-# Start a new change for the agent
-jj new
+# jj sees this worktree via colocated .git backend
+# Agent uses jj commands for all VCS operations
+jj new   # start a new change
 
-# Optional: sparse patterns for workers
-jj sparse set --add src/auth/
+# Optional: sparse checkout for workers (via git sparse-checkout or jj sparse)
 ```
 
 **Cleanup:**
 ```bash
-jj workspace forget agent-auth
-# Commit history remains in op log. Full audit trail preserved.
+git worktree remove ../worktrees/auth
+# jj commit history remains in the shared store. Full audit trail preserved.
 ```
 
 ### Auto-Rebase Behavior
 
-When a parent commit is amended (e.g., sibling's PR merged):
-1. All descendants are rebased **in the commit graph instantly**
-2. Agent's workspace files on disk are NOT mutated mid-work
-3. Workspace becomes "stale"
-4. Agent runs `jj workspace update-stale` at a natural breakpoint to sync
-5. If rebase caused conflicts, they appear as conflict markers in files
-6. Agent can keep working — conflicts ride along as data
+When a parent bookmark moves (e.g., sibling's PR merged and `jj git fetch` runs):
+1. All descendant commits are rebased **in the commit graph instantly**
+2. Agent's worktree files on disk are NOT mutated mid-work
+3. Next `jj status` or `jj log` in the worktree reflects the new graph state
+4. If rebase caused conflicts, they appear as conflict markers in files
+5. Agent can keep working — conflicts ride along as data
 
-**This eliminates our entire stop-hook rebase check.** The agent just calls `update-stale` when convenient.
+**This eliminates our entire stop-hook rebase check.** The VCS handles propagation automatically.
 
 ### GitHub PR Workflow
 

@@ -124,11 +124,15 @@ impl PopupService {
         };
 
         let cmd_args = vec![
-            "--session".to_string(), session.to_string(),
+            "--session".to_string(),
+            session.to_string(),
             "pipe".to_string(),
-            "--plugin".to_string(), plugin_path.clone(),
-            "--name".to_string(), transport::POPUP_PIPE.to_string(),
-            "--".to_string(), payload.clone(),
+            "--plugin".to_string(),
+            plugin_path.clone(),
+            "--name".to_string(),
+            transport::POPUP_PIPE.to_string(),
+            "--".to_string(),
+            payload.clone(),
         ];
         tracing::info!(request_id = %request_id, "[Popup] Spawning: zellij {}", cmd_args.join(" "));
 
@@ -240,7 +244,6 @@ impl PopupService {
 
         Ok(PopupOutput { button, values })
     }
-
 }
 
 /// Sanitize a string for use in the payload protocol.

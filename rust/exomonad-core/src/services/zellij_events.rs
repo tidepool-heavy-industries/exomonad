@@ -134,7 +134,10 @@ async fn inject_with_timeout(session: String, plugin_path: String, payload: Stri
     let mut child = match child_result {
         Ok(c) => c,
         Err(e) => {
-            warn!("[ZellijEvents] Failed to spawn zellij pipe for inject: {}", e);
+            warn!(
+                "[ZellijEvents] Failed to spawn zellij pipe for inject: {}",
+                e
+            );
             return;
         }
     };

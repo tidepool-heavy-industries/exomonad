@@ -214,11 +214,7 @@ impl AgentEffects for AgentHandler {
     }
 
     async fn cleanup(&self, req: CleanupRequest) -> EffectResult<CleanupResponse> {
-        match self
-            .service
-            .cleanup_agent(&req.issue, req.force)
-            .await
-        {
+        match self.service.cleanup_agent(&req.issue, req.force).await {
             Ok(_) => Ok(CleanupResponse {
                 success: true,
                 error: String::new(),

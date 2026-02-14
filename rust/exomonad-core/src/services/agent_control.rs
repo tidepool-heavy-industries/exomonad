@@ -1226,11 +1226,7 @@ impl AgentControlService {
     /// Kills the Zellij tab, unregisters from Teams config.json,
     /// and removes per-agent config directory (`.exomonad/agents/{name}/`).
     #[tracing::instrument(skip(self))]
-    pub async fn cleanup_agent(
-        &self,
-        identifier: &str,
-        _force: bool,
-    ) -> Result<()> {
+    pub async fn cleanup_agent(&self, identifier: &str, _force: bool) -> Result<()> {
         // Try to find agent in list (for metadata and tab matching).
         // Failure here is non-fatal to allow cleaning up worker panes (invisible to list_agents).
         let agents = self.list_agents().await.unwrap_or_default();
@@ -1449,18 +1445,26 @@ impl AgentControlService {
                 if entry.file_type().await?.is_dir() {
                     let path = entry.path();
                     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                    
+
                     // Check for .mcp.json (Claude) or .gemini/settings.json (Gemini)
                     let is_claude = path.join(".mcp.json").exists();
                     let is_gemini = path.join(".gemini/settings.json").exists();
-                    
+
                     if is_claude || is_gemini {
                         let agent_type = if is_claude { "claude" } else { "gemini" };
-                        let emoji = if is_claude { AgentType::Claude.emoji() } else { AgentType::Gemini.emoji() };
+                        let emoji = if is_claude {
+                            AgentType::Claude.emoji()
+                        } else {
+                            AgentType::Gemini.emoji()
+                        };
                         let display_name = format!("{} {}", emoji, name);
-                        
+
                         let has_tab = tabs.iter().any(|t| t == &display_name);
-                        let status = if has_tab { AgentStatus::Running } else { AgentStatus::Stopped };
+                        let status = if has_tab {
+                            AgentStatus::Running
+                        } else {
+                            AgentStatus::Stopped
+                        };
 
                         agents.push(AgentInfo {
                             issue_id: name.to_string(),
@@ -1476,7 +1480,8 @@ impl AgentControlService {
                         // 2. Scan subtree's .exomonad/agents for workers
                         let subtree_agents_dir = path.join(".exomonad/agents");
                         if subtree_agents_dir.exists() {
-                            self.scan_workers(&subtree_agents_dir, &tabs, &mut agents).await?;
+                            self.scan_workers(&subtree_agents_dir, &tabs, &mut agents)
+                                .await?;
                         }
                     }
                 }
@@ -1486,30 +1491,40 @@ impl AgentControlService {
         // 3. Scan root .exomonad/agents for workers
         let root_agents_dir = self.project_dir.join(".exomonad/agents");
         if root_agents_dir.exists() {
-            self.scan_workers(&root_agents_dir, &tabs, &mut agents).await?;
+            self.scan_workers(&root_agents_dir, &tabs, &mut agents)
+                .await?;
         }
 
         Ok(agents)
     }
 
     /// Helper to scan a directory for worker agents.
-    async fn scan_workers(&self, dir: &Path, tabs: &[String], agents: &mut Vec<AgentInfo>) -> Result<()> {
+    async fn scan_workers(
+        &self,
+        dir: &Path,
+        tabs: &[String],
+        agents: &mut Vec<AgentInfo>,
+    ) -> Result<()> {
         let mut entries = fs::read_dir(dir).await?;
         while let Some(entry) = entries.next_entry().await? {
             if entry.file_type().await?.is_dir() {
                 let path = entry.path();
                 let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                
+
                 // Workers are currently Gemini-only
                 if name.ends_with("-gemini") {
                     let base_name = name.strip_suffix("-gemini").unwrap_or(name);
                     let display_name = format!("{} {}", AgentType::Gemini.emoji(), base_name);
-                    
+
                     // Liveness: for workers, they might be panes in a tab.
                     // Currently list_agents only sees tabs. Zellij doesn't easily query pane names across tabs.
                     // For now, if it's in a tab list, it's running.
                     let has_tab = tabs.iter().any(|t| t == &display_name);
-                    let status = if has_tab { AgentStatus::Running } else { AgentStatus::Stopped };
+                    let status = if has_tab {
+                        AgentStatus::Running
+                    } else {
+                        AgentStatus::Stopped
+                    };
 
                     agents.push(AgentInfo {
                         issue_id: name.to_string(),
@@ -1602,7 +1617,10 @@ impl AgentControlService {
                     prompt_length = p.len(),
                     "Spawning agent with session fork"
                 );
-                format!("{} --resume {} --fork-session -p {}", cmd, escaped_session, escaped_prompt)
+                format!(
+                    "{} --resume {} --fork-session -p {}",
+                    cmd, escaped_session, escaped_prompt
+                )
             }
             (Some(p), None) => {
                 let escaped_prompt = Self::escape_for_shell_command(p);
@@ -1731,8 +1749,6 @@ impl AgentControlService {
 
         Ok(())
     }
-
-
 
     #[tracing::instrument(skip(self))]
     async fn get_zellij_tabs(&self) -> Result<Vec<String>> {

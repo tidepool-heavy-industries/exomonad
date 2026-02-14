@@ -42,7 +42,10 @@ impl EventHandler {
         if agent_id.ends_with("-gemini") {
             // Worker: session_id is parent's session ID
             if session_id.contains('.') {
-                let slug = session_id.rsplit_once('.').map(|(_, s)| s).unwrap_or(session_id);
+                let slug = session_id
+                    .rsplit_once('.')
+                    .map(|(_, s)| s)
+                    .unwrap_or(session_id);
                 format!("\u{1F916} {}", slug)
             } else {
                 "TL".to_string()
@@ -95,7 +98,12 @@ impl EventEffects for EventHandler {
 
         let event = self
             .queue
-            .wait_for_event(session_id, &req.types, Duration::from_secs(timeout_secs), req.after_event_id)
+            .wait_for_event(
+                session_id,
+                &req.types,
+                Duration::from_secs(timeout_secs),
+                req.after_event_id,
+            )
             .await
             .map_err(|e| {
                 crate::effects::EffectError::custom("events.wait_failed", e.to_string())
@@ -219,12 +227,20 @@ fn format_parent_notification(agent_id: &str, status: &str, message: &str) -> St
         "success" => format!(
             "[CHILD COMPLETE: {}] {}",
             agent_id,
-            if message.is_empty() { "Task completed successfully." } else { message }
+            if message.is_empty() {
+                "Task completed successfully."
+            } else {
+                message
+            }
         ),
         "failure" => format!(
             "[CHILD FAILED: {}] {}",
             agent_id,
-            if message.is_empty() { "Task failed." } else { message }
+            if message.is_empty() {
+                "Task failed."
+            } else {
+                message
+            }
         ),
         _ => format!("[CHILD STATUS: {} - {}] {}", agent_id, status, message),
     }

@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use tokio::process::Command;
-use tracing::{info, error};
+use tracing::{error, info};
 
 pub struct MergePROutput {
     pub success: bool,
@@ -8,16 +8,34 @@ pub struct MergePROutput {
     pub jj_fetched: bool,
 }
 
-pub async fn merge_pr_async(pr_number: i64, strategy: &str, working_dir: &str) -> Result<MergePROutput> {
-    let dir = if working_dir.is_empty() { "." } else { working_dir };
-    let strat = if strategy.is_empty() { "squash" } else { strategy };
+pub async fn merge_pr_async(
+    pr_number: i64,
+    strategy: &str,
+    working_dir: &str,
+) -> Result<MergePROutput> {
+    let dir = if working_dir.is_empty() {
+        "."
+    } else {
+        working_dir
+    };
+    let strat = if strategy.is_empty() {
+        "squash"
+    } else {
+        strategy
+    };
 
     info!(pr_number, strategy = strat, working_dir = dir, "Merging PR");
 
     // Step 1: gh pr merge
     let strategy_flag = format!("--{}", strat);
     let output = Command::new("gh")
-        .args(["pr", "merge", &pr_number.to_string(), &strategy_flag, "--delete-branch"])
+        .args([
+            "pr",
+            "merge",
+            &pr_number.to_string(),
+            &strategy_flag,
+            "--delete-branch",
+        ])
         .current_dir(dir)
         .output()
         .await
@@ -61,7 +79,11 @@ pub async fn merge_pr_async(pr_number: i64, strategy: &str, working_dir: &str) -
 
     Ok(MergePROutput {
         success: true,
-        message: if merge_msg.is_empty() { format!("PR #{} merged via {}", pr_number, strat) } else { merge_msg },
+        message: if merge_msg.is_empty() {
+            format!("PR #{} merged via {}", pr_number, strat)
+        } else {
+            merge_msg
+        },
         jj_fetched,
     })
 }

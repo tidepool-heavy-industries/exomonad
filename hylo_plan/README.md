@@ -33,7 +33,7 @@ seed (branch, task)
 | **jj-first** (colocated mode) | Auto-rebase, conflicts-as-data, no staging area, immutable op log. Eliminates rebase hooks and uncommitted-changes checks. GitHub compatibility preserved via colocated `.git`. |
 | Session forking (`--resume --fork-session`) | Children inherit parent's full conversation context. Spawn prompts can be minimal. |
 | Dormant parents via Zellij STDIN injection | Parent is just a Claude session waiting for "user messages" that are actually system events. Zero token cost while dormant. |
-| jj workspaces as agent isolation | Each agent gets a jj workspace (replaces git worktrees). Sparse patterns limit worker blast radius. |
+| Git worktrees for isolation, jj for operations | `git worktree add` gives `.git` file required for Claude Code cross-worktree `--resume`. jj colocated handles all VCS operations within worktrees. |
 | Hybrid registry: filesystem + revsets | `.exomonad/` stores runtime metadata (pane IDs, config). jj revsets query VCS state (conflicts, branch relationships). |
 | Dual identity: bookmarks + Change IDs | Bookmarks encode tree hierarchy for PR targeting. Change IDs are durable tracking keys that survive rebases/squashes. |
 | Copilot as first-pass reviewer | Zero marginal cost. Children iterate autonomously with Copilot. Parent only reviews PRs that pass mechanical bar. |

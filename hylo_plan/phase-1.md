@@ -26,38 +26,37 @@ Get a working recursive decomposition → implementation → PR fold loop with t
 
 ### Wave 0: jj Foundation
 
-Set up jj as the VCS substrate. Everything else builds on this.
+Set up jj colocated mode as the VCS operations layer. Git worktrees remain the isolation layer (required for Claude Code `--fork-session` session discovery).
 
 **Deliverables:**
 1. **Colocated init** — `jj git init --colocate` in project root. `.jj` alongside `.git`. Verify GitHub Actions, `gh` CLI, Copilot all still work.
 2. **`.jjconfig.toml`** — Non-interactive pager, snapshot conflict markers, agent bookmark prefix.
 3. **jj effects** — New effect namespace `jj.*` in Haskell WASM + Rust handler. Core operations:
-   - `jj.workspace_add` — create workspace at path, rooted at revision
-   - `jj.workspace_forget` — remove workspace pointer (preserves history)
-   - `jj.workspace_update_stale` — sync working copy with graph
    - `jj.bookmark_create` — create bookmark at revision
    - `jj.git_push` — push bookmark to remote
-   - `jj.git_fetch` — fetch from remote
+   - `jj.git_fetch` — fetch from remote (triggers auto-rebase)
    - `jj.log` — query revsets, return JSON
-   - `jj.sparse_set` — set sparse patterns for workspace
-4. **Migrate `spawn_subtree`** — Replace `git worktree add` + `git checkout -b` with `jj workspace add --name {slug} -r {parent_bookmark}`. Agent spawns into jj workspace.
-5. **Migrate `spawn_workers`** — Each worker gets a jj workspace (not shared parent worktree). Sparse patterns restrict to relevant directories.
-6. **Remove git stop-hooks** — Delete rebase check and uncommitted changes check. jj handles both natively.
+   - `jj.new` — start a new change
+   - `jj.status` — working copy status including conflicts
+4. **Keep `git worktree add` for isolation** — `spawn_subtree` still uses `git worktree add` (gives `.git` file for Claude Code cross-worktree `--resume`). Agent uses `jj` commands within the worktree for all VCS operations.
+5. **Migrate workers to worktrees** — Each worker gets a git worktree (not shared parent directory). Sparse patterns restrict to relevant directories.
+6. **Remove git stop-hooks** — Delete rebase check and uncommitted changes check. jj handles both natively (auto-rebase, working copy = commit).
 
 **Files:**
 - `proto/effects/jj.proto` + vendored copy — new proto for jj effects
 - `haskell/wasm-guest/src/ExoMonad/Guest/Effects/Jj.hs` — jj effect types
 - `haskell/wasm-guest/src/ExoMonad/Effects/Jj.hs` — effect runner (yield_effect)
 - `rust/exomonad-core/src/handlers/jj.rs` — jj effect handler (subprocess calls)
-- `rust/exomonad-core/src/services/agent_control.rs` — migrate spawn to jj workspaces
 - `.jjconfig.toml` — repo configuration
 - `.exomonad/lib/StopHook.hs` — remove rebase/uncommitted checks
 
+**Key constraint:** `git worktree add` for isolation, `jj` for operations. The two coexist via colocated mode — jj reads/writes through the `.git` backend that git worktrees share.
+
 **Verification:**
 1. `jj git init --colocate` succeeds, `gh pr list` still works
-2. `spawn_subtree` creates jj workspace, agent starts in it
-3. Agent in workspace can commit (implicitly — working copy IS commit)
-4. `jj log -r 'visible_heads()'` shows agent's work
+2. `spawn_subtree` creates git worktree, agent uses `jj` commands within it
+3. `jj log -r 'visible_heads()'` from main repo shows agent's work across all worktrees
+4. `claude --resume <parent-id> --fork-session` works from child worktree (`.git` file enables session discovery)
 5. GitHub Actions CI still triggers on push
 
 ### Wave 1: Event Router (enables dormant parents)
