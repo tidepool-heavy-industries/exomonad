@@ -220,10 +220,12 @@ handleWorkerExit hookInput = do
     Just agentId -> do
         logInfo_ $ "Handling exit for agent: " <> agentId
 
-        let status = "success"
-        let message = "Worker " <> agentId <> " completed"
+        let actualStatus = fromMaybe "success" (hiExitStatus hookInput)
+        let statusMsg = case actualStatus of
+              "success" -> "Worker " <> agentId <> " completed successfully"
+              other     -> "Worker " <> agentId <> " exited with status: " <> other
 
-        res <- try @SomeException (Events.notifyParent status message)
+        res <- try @SomeException (Events.notifyParent actualStatus statusMsg)
         case res of
             Left exc -> logError_ ("notifyParent threw exception: " <> T.pack (show exc))
             Right (Left err) -> logError_ ("Failed to notify completion to parent: " <> T.pack (show err))

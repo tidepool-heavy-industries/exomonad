@@ -7,6 +7,7 @@
 //! WASM plugins are loaded from file (server-side only).
 
 use exomonad::config;
+use urlencoding::encode;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -15,6 +16,7 @@ use exomonad_core::protocol::{Runtime as HookRuntime, ServiceRequest};
 use exomonad_core::services::external::otel::OtelService;
 use exomonad_core::services::external::ExternalService;
 use exomonad_core::services::{git, zellij_events};
+
 use exomonad_core::{
     ClaudePreToolUseOutput, HookEnvelope, HookEventType, HookInput, HookSpecificOutput,
     InternalStopHookOutput, PluginManager, RuntimeBuilder, Services, StopDecision, ToolPermission,
@@ -302,10 +304,28 @@ async fn handle_hook_inner(
         }
     }
 
+    // Wrap WASM calls with agent identity task-locals so effect handlers
+    // (e.g. EventHandler::notify_parent) can resolve the correct session.
+    let agent_id_for_hook = params.agent_id.clone().unwrap_or_default();
+    let session_id_for_hook = params
+        .session_id
+        .clone()
+        .unwrap_or_else(|| "root".to_string());
+
     if is_stop_hook {
-        let internal_output: InternalStopHookOutput = state
-            .plugin
-            .call("handle_pre_tool_use", &hook_input_value)
+        let internal_output: InternalStopHookOutput =
+            exomonad_core::mcp::agent_identity::with_agent_id(
+                agent_id_for_hook.clone(),
+                exomonad_core::mcp::agent_identity::with_session_id(
+                    session_id_for_hook.clone(),
+                    async {
+                        state
+                            .plugin
+                            .call("handle_pre_tool_use", &hook_input_value)
+                            .await
+                    },
+                ),
+            )
             .await
             .context("WASM handle_pre_tool_use failed")?;
 
@@ -368,11 +388,17 @@ async fn handle_hook_inner(
             exit_code: 0,
         })
     } else {
-        let output: ClaudePreToolUseOutput = state
-            .plugin
-            .call("handle_pre_tool_use", &hook_input_value)
-            .await
-            .context("WASM handle_pre_tool_use failed")?;
+        let output: ClaudePreToolUseOutput = exomonad_core::mcp::agent_identity::with_agent_id(
+            agent_id_for_hook,
+            exomonad_core::mcp::agent_identity::with_session_id(session_id_for_hook, async {
+                state
+                    .plugin
+                    .call("handle_pre_tool_use", &hook_input_value)
+                    .await
+            }),
+        )
+        .await
+        .context("WASM handle_pre_tool_use failed")?;
 
         let output_json = serde_json::to_string(&output).context("Failed to serialize output")?;
 
@@ -967,10 +993,10 @@ async fn main() -> Result<()> {
             );
             // Forward agent identity env vars so the server can inject them into WASM calls
             if let Ok(agent_id) = std::env::var("EXOMONAD_AGENT_ID") {
-                url.push_str(&format!("&agent_id={}", agent_id));
+                url.push_str(&format!("&agent_id={}", encode(&agent_id)));
             }
             if let Ok(session_id) = std::env::var("EXOMONAD_SESSION_ID") {
-                url.push_str(&format!("&session_id={}", session_id));
+                url.push_str(&format!("&session_id={}", encode(&session_id)));
             }
 
             let mut body = String::new();
@@ -979,21 +1005,28 @@ async fn main() -> Result<()> {
                 .context("Failed to read stdin")?;
 
             let client = reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
+                .timeout(Duration::from_secs(30))
                 .build()?;
 
-            let resp = match client
+            debug!(url = %url, event = ?event, "Forwarding hook to server");
+
+            let response = client
                 .post(&url)
                 .header("content-type", "application/json")
                 .body(body)
                 .send()
-                .await
-            {
-                Ok(r) if r.status().is_success() => r.json::<HookEnvelope>().await?,
+                .await;
+
+            let resp = match response {
                 Ok(r) => {
-                    eprintln!("exomonad hook: server returned {}", r.status());
-                    println!(r#"{{"continue":true}}"#);
-                    return Ok(());
+                    debug!(status = %r.status(), "Hook forwarding response");
+                    if r.status().is_success() {
+                        r.json::<HookEnvelope>().await?
+                    } else {
+                        eprintln!("exomonad hook: server returned {}", r.status());
+                        println!(r#"{{"continue":true}}"#);
+                        return Ok(());
+                    }
                 }
                 Err(e) => {
                     eprintln!("exomonad hook: server unreachable: {}", e);

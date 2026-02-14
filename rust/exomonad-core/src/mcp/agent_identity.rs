@@ -11,7 +11,9 @@ use std::future::Future;
 
 tokio::task_local! {
     /// Task-local agent identity, set by the per-agent route handler.
-    static CURRENT_AGENT_ID: String;
+    pub static CURRENT_AGENT_ID: String;
+    /// Task-local session identity, set by the hook handler.
+    pub static CURRENT_SESSION_ID: String;
 }
 
 /// Run a future with a specific agent identity set in task-local storage.
@@ -21,6 +23,19 @@ where
     F: Future<Output = T>,
 {
     CURRENT_AGENT_ID.scope(agent_id, f).await
+}
+
+/// Run a future with a specific session identity set in task-local storage.
+pub async fn with_session_id<F, R>(session_id: String, f: F) -> R
+where
+    F: std::future::Future<Output = R>,
+{
+    CURRENT_SESSION_ID.scope(session_id, f).await
+}
+
+/// Get the current session identity from task-local storage.
+pub fn get_session_id() -> Option<String> {
+    CURRENT_SESSION_ID.try_with(|s| s.clone()).ok()
 }
 
 /// Get the current agent identity.

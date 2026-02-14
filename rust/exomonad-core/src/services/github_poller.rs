@@ -39,6 +39,11 @@ impl GitHubPoller {
     }
 
     pub async fn run(self) {
+        tracing::info!(
+            poll_interval_secs = self.poll_interval.as_secs(),
+            "GitHub poller started"
+        );
+
         let mut interval = tokio::time::interval(self.poll_interval);
         // First tick completes immediately
         interval.tick().await;
@@ -60,14 +65,57 @@ impl GitHubPoller {
 
         // 1. Scan worktrees for branches
         let branches = self.scan_worktrees().await?;
+        tracing::debug!(
+            worktree_count = branches.len(),
+            "Polling GitHub for PR updates"
+        );
+
         if branches.is_empty() {
             return Ok(());
         }
 
-        // 2. Find PRs for these branches
+        // 2. Fetch all open PRs
+        let endpoint = format!("/repos/{}/{}/pulls?state=open&per_page=100", owner, repo);
+        let output = Command::new("gh")
+            .args(["api", &endpoint, "--json", "number,head"])
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            warn!("Failed to fetch PRs: {}", stderr.trim());
+            return Ok(());
+        }
+
+        #[derive(Deserialize)]
+        struct PR {
+            number: u64,
+            head: Head,
+        }
+        #[derive(Deserialize)]
+        struct Head {
+            sha: String,
+            #[serde(rename = "ref")]
+            ref_name: String,
+        }
+
+        let prs: Vec<PR> =
+            serde_json::from_slice(&output.stdout).context("Failed to parse PRs JSON")?;
+
+        let mut pr_map = HashMap::new();
+        for pr in prs {
+            pr_map.insert(pr.head.ref_name.clone(), pr);
+        }
+
+        // 3. Match branches to PRs
         for branch in branches {
-            if let Err(e) = self.process_branch(&owner, &repo, &branch).await {
-                warn!("Failed to process branch {}: {}", branch, e);
+            if let Some(pr) = pr_map.get(&branch) {
+                if let Err(e) = self
+                    .process_pr(&owner, &repo, &branch, pr.number, &pr.head.sha)
+                    .await
+                {
+                    warn!("Failed to process branch {}: {}", branch, e);
+                }
             }
         }
 
@@ -144,46 +192,25 @@ impl GitHubPoller {
         Ok(branches)
     }
 
-    async fn process_branch(&self, owner: &str, repo: &str, branch: &str) -> Result<()> {
-        // Find PR number for branch
-        // gh api repos/{owner}/{repo}/pulls?head={owner}:{branch}&state=open
-        let endpoint = format!(
-            "/repos/{}/{}/pulls?head={}:{}&state=open",
-            owner, repo, owner, branch
-        );
-        let output = Command::new("gh").args(["api", &endpoint]).output().await?;
-
-        if !output.status.success() {
-            return Ok(()); // No PR or error
-        }
-
-        #[derive(Deserialize)]
-        struct PR {
-            number: u64,
-            head: Head,
-        }
-        #[derive(Deserialize)]
-        struct Head {
-            sha: String,
-        }
-
-        let prs: Vec<PR> = serde_json::from_slice(&output.stdout)?;
-        let pr = match prs.first() {
-            Some(pr) => pr,
-            None => return Ok(()), // No open PR
-        };
-
+    async fn process_pr(
+        &self,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+        pr_number: u64,
+        pr_sha: &str,
+    ) -> Result<()> {
         // Poll details
         let (copilot_comments, copilot_reviews) =
-            self.fetch_copilot_activity(owner, repo, pr.number).await?;
-        let ci_status = self.fetch_ci_status(owner, repo, &pr.head.sha).await?;
+            self.fetch_copilot_activity(owner, repo, pr_number).await?;
+        let ci_status = self.fetch_ci_status(owner, repo, pr_sha).await?;
 
         let copilot_count = copilot_comments.len() + copilot_reviews;
 
         // Check for state changes
         let mut state_guard = self.state.lock().await;
 
-        if let Some(old_state) = state_guard.get_mut(&pr.number) {
+        if let Some(old_state) = state_guard.get_mut(&pr_number) {
             // Check Copilot changes
             if copilot_count != old_state.last_copilot_comment_count {
                 if copilot_count > old_state.last_copilot_comment_count {
@@ -205,7 +232,7 @@ impl GitHubPoller {
         } else {
             // New PR tracked - do not emit, just store
             state_guard.insert(
-                pr.number,
+                pr_number,
                 PRState {
                     last_copilot_comment_count: copilot_count,
                     last_ci_status: ci_status,
@@ -362,7 +389,7 @@ impl GitHubPoller {
                 changes: vec![],
             })),
         };
-        self.event_queue.notify_event(branch, event).await;
+        self.event_queue.notify_event("root", event).await;
 
         // 2. Inject to Zellij
         // Extract slug: main.feature-a -> feature-a

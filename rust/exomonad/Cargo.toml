@@ -30,6 +30,7 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 toml = "0.8"
 uuid = { workspace = true }
+urlencoding = "2"
 prost = { workspace = true }
 exomonad-proto = { path = "../exomonad-proto", version = "0.1.0", features = ["effects"] }
 

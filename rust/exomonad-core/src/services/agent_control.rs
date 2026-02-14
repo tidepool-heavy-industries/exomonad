@@ -995,7 +995,7 @@ impl AgentControlService {
 
             // Branch: {current_branch}.{slug}
             let branch_name = format!("{}.{}", current_branch, slug);
-            
+
             // Worktree location: {worktree_base}/{slug}
             let worktree_path = self.worktree_base.join(&slug);
 

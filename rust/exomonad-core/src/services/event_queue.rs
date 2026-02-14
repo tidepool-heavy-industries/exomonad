@@ -4,7 +4,9 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{oneshot, Mutex};
-use tracing::{debug, info};
+use tracing::{info, warn};
+
+const MAX_QUEUE_SIZE: usize = 1000;
 
 type SessionId = String;
 
@@ -72,26 +74,35 @@ impl EventQueue {
         event.event_id = id;
 
         info!(session_id = %session_id, event_id = id, "EventQueue: notify_event appending to queue");
-        // Append to queue
-        {
-            let mut queues = self.queues.lock().await;
-            let queue = queues.entry(session_id.to_string()).or_default();
-            queue.push_back(event.clone());
-            info!(session_id = %session_id, queue_len = queue.len(), "EventQueue: event appended");
+
+        let mut queues = self.queues.lock().await;
+        let mut wakers = self.wakers.lock().await;
+
+        let queue = queues.entry(session_id.to_string()).or_default();
+
+        // Trim if over max size (drop oldest)
+        while queue.len() >= MAX_QUEUE_SIZE {
+            queue.pop_front();
+            warn!(
+                session_id,
+                "EventQueue trimmed oldest event (over {})", MAX_QUEUE_SIZE
+            );
         }
 
-        // Wake ONE waiting call (if any)
-        let mut wakers = self.wakers.lock().await;
-        if let Some(waiters) = wakers.get_mut(session_id) {
-            if let Some(tx) = waiters.pop() {
-                info!(session_id = %session_id, "EventQueue: waking a waiter");
-                let _ = tx.send(event);
-            } else {
-                debug!(session_id = %session_id, "EventQueue: no waiters to wake");
+        queue.push_back(event.clone());
+        info!(session_id = %session_id, queue_len = queue.len(), "EventQueue: event appended");
+
+        // Wake any waiters for this session
+        if let Some(waiters) = wakers.remove(session_id) {
+            for tx in waiters {
+                let _ = tx.send(event.clone());
             }
-        } else {
-            debug!(session_id = %session_id, "EventQueue: no waiter list for session");
         }
+    }
+
+    pub async fn queue_len(&self, session_id: &str) -> usize {
+        let queues = self.queues.lock().await;
+        queues.get(session_id).map_or(0, |q| q.len())
     }
 
     fn find_matching(
@@ -251,5 +262,28 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.event_id, 2);
+    }
+
+    #[tokio::test]
+    async fn test_queue_trim() {
+        let eq = EventQueue::new();
+        for i in 0..MAX_QUEUE_SIZE + 50 {
+            eq.notify_event(
+                "test",
+                Event {
+                    event_id: 0,
+                    event_type: Some(EventType::WorkerComplete(
+                        exomonad_proto::effects::events::WorkerComplete {
+                            worker_id: format!("worker-{}", i),
+                            status: "success".to_string(),
+                            changes: vec![],
+                            message: "test".to_string(),
+                        },
+                    )),
+                },
+            )
+            .await;
+        }
+        assert_eq!(eq.queue_len("test").await, MAX_QUEUE_SIZE);
     }
 }

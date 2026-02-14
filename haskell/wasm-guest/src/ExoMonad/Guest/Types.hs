@@ -83,7 +83,8 @@ data HookInput = HookInput
     -- | Agent identity, injected by server from hook query params.
     hiAgentId :: Maybe Text,
     -- | TL session ID for event routing, injected by server from hook query params.
-    hiExomonadSessionId :: Maybe Text
+    hiExomonadSessionId :: Maybe Text,
+    hiExitStatus :: Maybe Text
   }
   deriving (Show, Generic)
 
@@ -101,6 +102,7 @@ instance FromJSON HookInput where
       <*> v .:? "tool_response"
       <*> v .:? "agent_id"
       <*> v .:? "exomonad_session_id"
+      <*> v .:? "exit_status"
 
 -- | Output from a hook handler.
 data HookOutput = HookOutput

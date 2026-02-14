@@ -19,6 +19,7 @@ pub struct EventHandler {
     queue: Arc<EventQueue>,
     remote_url: Option<String>,
     session_id: Option<String>,
+    client: reqwest::Client,
 }
 
 impl EventHandler {
@@ -32,6 +33,7 @@ impl EventHandler {
             queue,
             remote_url,
             session_id,
+            client: reqwest::Client::new(),
         }
     }
 
@@ -121,10 +123,10 @@ impl EventEffects for EventHandler {
         );
         if let Some(ref url) = self.remote_url {
             // Forward to server
-            let client = reqwest::Client::new();
             let body = req.encode_to_vec();
 
-            let resp = client
+            let resp = self
+                .client
                 .post(url)
                 .body(body)
                 .send()
@@ -151,7 +153,11 @@ impl EventEffects for EventHandler {
     }
 
     async fn notify_parent(&self, req: NotifyParentRequest) -> EffectResult<NotifyParentResponse> {
-        let session_id = self.session_id.as_deref().unwrap_or("root");
+        let session_id = crate::mcp::agent_identity::get_session_id().unwrap_or_else(|| {
+            self.session_id
+                .clone()
+                .unwrap_or_else(|| "root".to_string())
+        });
         let agent_id = crate::mcp::agent_identity::get_agent_id();
 
         // Identity model:
@@ -193,10 +199,10 @@ impl EventEffects for EventHandler {
                 session_id: parent_session_id,
                 event: Some(event),
             };
-            let client = reqwest::Client::new();
             let body = forward_req.encode_to_vec();
 
-            let resp = client
+            let resp = self
+                .client
                 .post(url)
                 .body(body)
                 .send()
