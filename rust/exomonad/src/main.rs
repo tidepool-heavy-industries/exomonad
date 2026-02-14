@@ -295,7 +295,10 @@ async fn handle_hook_inner(
             map.insert("agent_id".to_string(), serde_json::json!(agent_id));
         }
         if let Some(ref session_id) = params.session_id {
-            map.insert("exomonad_session_id".to_string(), serde_json::json!(session_id));
+            map.insert(
+                "exomonad_session_id".to_string(),
+                serde_json::json!(session_id),
+            );
         }
     }
 
@@ -443,10 +446,7 @@ fn run_init(session_override: Option<String>, recreate: bool, port: u16) -> Resu
         std::fs::create_dir_all(cwd.join(".exomonad"))?;
         std::fs::write(
             &config_path,
-            format!(
-                "default_role = \"tl\"\nzellij_session = \"{}\"\n",
-                dirname
-            ),
+            format!("default_role = \"tl\"\nzellij_session = \"{}\"\n", dirname),
         )?;
 
         // Add gitignore entries
@@ -523,7 +523,9 @@ fn ensure_gitignore(project_dir: &std::path::Path) -> Result<()> {
     };
 
     let has_ignore = content.lines().any(|l| l.trim() == ".exomonad/*");
-    let has_negate = content.lines().any(|l| l.trim() == "!.exomonad/config.toml");
+    let has_negate = content
+        .lines()
+        .any(|l| l.trim() == "!.exomonad/config.toml");
     if has_ignore && has_negate {
         return Ok(());
     }
@@ -746,6 +748,13 @@ async fn main() -> Result<()> {
                 exomonad_core::register_builtin_handlers(builder, &services);
             let rt = builder.build().await.context("Failed to build runtime")?;
 
+            // Start background GitHub PR poller (watches agent PRs for Copilot reviews + CI status)
+            let poller = exomonad_core::services::github_poller::GitHubPoller::new(
+                event_queue.clone(),
+                project_dir.clone(),
+            );
+            tokio::spawn(async move { poller.run().await });
+
             let mut base_state = rt.into_mcp_state(project_dir.clone());
             base_state.question_registry = Some(question_registry);
 
@@ -761,6 +770,15 @@ async fn main() -> Result<()> {
             std::fs::write(&server_pid_path, serde_json::to_string_pretty(&pid_info)?)?;
             info!(path = %server_pid_path.display(), "Wrote server.pid");
 
+            // Start GitHub Poller (background service)
+            let poller = exomonad_core::services::github_poller::GitHubPoller::new(
+                services.event_queue().clone(),
+                project_dir.clone(),
+            );
+            tokio::spawn(async move {
+                poller.run().await;
+            });
+
             // Build per-role MCP servers
             let mut tl_state = base_state.clone();
             tl_state.role = Some("tl".to_string());
@@ -773,7 +791,8 @@ async fn main() -> Result<()> {
             // TL handler
             let tl_handler = {
                 let s = tl_server.clone();
-                move |headers: axum::http::HeaderMap, body: axum::extract::Json<serde_json::Value>| {
+                move |headers: axum::http::HeaderMap,
+                      body: axum::extract::Json<serde_json::Value>| {
                     let s = s.clone();
                     async move { s.handle(headers, body).await }
                 }
@@ -782,7 +801,8 @@ async fn main() -> Result<()> {
             // Dev handler
             let dev_handler = {
                 let s = dev_server.clone();
-                move |headers: axum::http::HeaderMap, body: axum::extract::Json<serde_json::Value>| {
+                move |headers: axum::http::HeaderMap,
+                      body: axum::extract::Json<serde_json::Value>| {
                     let s = s.clone();
                     async move { s.handle(headers, body).await }
                 }
@@ -817,7 +837,8 @@ async fn main() -> Result<()> {
                     async move {
                         exomonad_core::mcp::agent_identity::with_agent_id(agent_name, async move {
                             s.handle(headers, body).await
-                        }).await
+                        })
+                        .await
                     }
                 }
             };
@@ -855,7 +876,9 @@ async fn main() -> Result<()> {
             // Gemini CLI sends GET to establish an SSE event stream during initialization.
             // Returns Content-Type: text/event-stream with keep-alive pings.
             let sse_handler = || async {
-                let stream = futures_util::stream::pending::<Result<axum::response::sse::Event, std::convert::Infallible>>();
+                let stream = futures_util::stream::pending::<
+                    Result<axum::response::sse::Event, std::convert::Infallible>,
+                >();
                 axum::response::sse::Sse::new(stream).keep_alive(
                     axum::response::sse::KeepAlive::new()
                         .interval(std::time::Duration::from_secs(15))
@@ -875,7 +898,10 @@ async fn main() -> Result<()> {
                     axum::routing::post(handle_hook_request).with_state(hook_state),
                 )
                 .route("/tl/mcp", axum::routing::post(tl_handler).get(sse_handler))
-                .route("/dev/mcp", axum::routing::post(dev_handler).get(sse_handler))
+                .route(
+                    "/dev/mcp",
+                    axum::routing::post(dev_handler).get(sse_handler),
+                )
                 .route(
                     "/agents/{name}/mcp",
                     axum::routing::post(agent_handler.clone()).get(sse_handler),

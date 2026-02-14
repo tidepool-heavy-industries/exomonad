@@ -1,17 +1,18 @@
-use crate::effects::{dispatch_merge_pr_effect, EffectError, EffectHandler, EffectResult, MergePrEffects};
+use crate::effects::{
+    dispatch_merge_pr_effect, EffectError, EffectHandler, EffectResult, MergePrEffects,
+};
 use crate::services::merge_pr;
 use async_trait::async_trait;
 use exomonad_proto::effects::merge_pr::*;
 
+#[derive(Default)]
 pub struct MergePRHandler;
-
-impl MergePRHandler {
-    pub fn new() -> Self { Self }
-}
 
 #[async_trait]
 impl EffectHandler for MergePRHandler {
-    fn namespace(&self) -> &str { "merge_pr" }
+    fn namespace(&self) -> &str {
+        "merge_pr"
+    }
     async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
         dispatch_merge_pr_effect(self, effect_type, payload).await
     }

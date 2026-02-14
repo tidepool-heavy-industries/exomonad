@@ -8,6 +8,7 @@ pub mod file_pr;
 pub mod filesystem;
 pub mod git;
 pub mod github;
+pub mod github_poller;
 pub mod inbox;
 pub mod local;
 pub mod log;
@@ -201,8 +202,9 @@ impl Services {
     /// pointing to `http://localhost:{port}/agents/{name}/mcp`.
     pub fn with_mcp_server_port(mut self, port: u16) -> Self {
         let mut acs = (*self.agent_control).clone();
-        acs = acs.with_mcp_server_port(port)
-                 .with_event_session_id(self.event_session_id.clone());
+        acs = acs
+            .with_mcp_server_port(port)
+            .with_event_session_id(self.event_session_id.clone());
         if let Some(ref session) = self.zellij_session {
             acs = acs.with_zellij_session(session.clone());
         }

@@ -56,7 +56,12 @@ pub type EffectResult<T> = Result<T, EffectError>;
 
 // Generated typed effect traits (GitEffects, GitHubEffects, etc.)
 // and dispatch helpers (dispatch_git_effect, dispatch_github_effect, etc.)
-include!(concat!(env!("OUT_DIR"), "/effect_traits.rs"));
+mod generated {
+    #![allow(clippy::new_ret_no_self, clippy::wrong_self_convention)]
+    use super::*;
+    include!(concat!(env!("OUT_DIR"), "/effect_traits.rs"));
+}
+pub use generated::*;
 
 /// Trait for effect handlers - implemented per namespace.
 ///

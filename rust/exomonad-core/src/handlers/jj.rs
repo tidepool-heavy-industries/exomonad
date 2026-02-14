@@ -6,15 +6,10 @@ use crate::effects::{dispatch_jj_effect, EffectError, EffectHandler, EffectResul
 use async_trait::async_trait;
 use exomonad_proto::effects::jj::*;
 use tokio::process::Command;
-use tracing::{info, error};
+use tracing::{error, info};
 
+#[derive(Default)]
 pub struct JjHandler;
-
-impl JjHandler {
-    pub fn new() -> Self {
-        Self
-    }
-}
 
 #[async_trait]
 impl EffectHandler for JjHandler {
@@ -29,8 +24,15 @@ impl EffectHandler for JjHandler {
 
 #[async_trait]
 impl JjEffects for JjHandler {
-    async fn bookmark_create(&self, req: BookmarkCreateRequest) -> EffectResult<BookmarkCreateResponse> {
-        let working_dir = if req.working_dir.is_empty() { ".".to_string() } else { req.working_dir };
+    async fn bookmark_create(
+        &self,
+        req: BookmarkCreateRequest,
+    ) -> EffectResult<BookmarkCreateResponse> {
+        let working_dir = if req.working_dir.is_empty() {
+            ".".to_string()
+        } else {
+            req.working_dir
+        };
         let mut args = vec!["bookmark", "create", &req.name];
         if !req.revision.is_empty() {
             args.extend(["--revision", &req.revision]);
@@ -47,11 +49,17 @@ impl JjEffects for JjHandler {
             error!(stderr = %stderr, "jj bookmark create failed");
             return Err(EffectError::custom("jj_error", stderr.to_string()));
         }
-        Ok(BookmarkCreateResponse { change_id: String::new() })
+        Ok(BookmarkCreateResponse {
+            change_id: String::new(),
+        })
     }
 
     async fn git_push(&self, req: GitPushRequest) -> EffectResult<GitPushResponse> {
-        let working_dir = if req.working_dir.is_empty() { ".".to_string() } else { req.working_dir };
+        let working_dir = if req.working_dir.is_empty() {
+            ".".to_string()
+        } else {
+            req.working_dir
+        };
         info!(bookmark = %req.bookmark, "jj git push");
         let output = Command::new("jj")
             .args(["git", "push", "--bookmark", &req.bookmark])
@@ -62,12 +70,20 @@ impl JjEffects for JjHandler {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         Ok(GitPushResponse {
             success: output.status.success(),
-            message: if output.status.success() { String::new() } else { stderr },
+            message: if output.status.success() {
+                String::new()
+            } else {
+                stderr
+            },
         })
     }
 
     async fn git_fetch(&self, req: GitFetchRequest) -> EffectResult<GitFetchResponse> {
-        let working_dir = if req.working_dir.is_empty() { ".".to_string() } else { req.working_dir };
+        let working_dir = if req.working_dir.is_empty() {
+            ".".to_string()
+        } else {
+            req.working_dir
+        };
         info!("jj git fetch");
         let output = Command::new("jj")
             .args(["git", "fetch"])
@@ -78,13 +94,25 @@ impl JjEffects for JjHandler {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         Ok(GitFetchResponse {
             success: output.status.success(),
-            message: if output.status.success() { String::new() } else { stderr },
+            message: if output.status.success() {
+                String::new()
+            } else {
+                stderr
+            },
         })
     }
 
     async fn log(&self, req: LogRequest) -> EffectResult<LogResponse> {
-        let working_dir = if req.working_dir.is_empty() { ".".to_string() } else { req.working_dir };
-        let revset = if req.revset.is_empty() { " @".to_string() } else { req.revset };
+        let working_dir = if req.working_dir.is_empty() {
+            ".".to_string()
+        } else {
+            req.working_dir
+        };
+        let revset = if req.revset.is_empty() {
+            " @".to_string()
+        } else {
+            req.revset
+        };
         info!(revset = %revset, "jj log");
         // Use jj log with machine-readable template
         let template = r###"change_id ++ "	" ++ commit_id ++ "	" ++ description.first_line() ++ "	" ++ author.name() ++ "	" ++ parents.map(|p| p.commit_id()).join(",") ++ "	" ++ conflict ++ "	" ++ empty ++ "
@@ -110,7 +138,10 @@ impl JjEffects for JjHandler {
                     commit_id: parts.get(1).unwrap_or(&"").to_string(),
                     description: parts.get(2).unwrap_or(&"").to_string(),
                     author: parts.get(3).unwrap_or(&"").to_string(),
-                    parents: parts.get(4).map(|p| p.split(',').map(|s| s.to_string()).collect()).unwrap_or_default(),
+                    parents: parts
+                        .get(4)
+                        .map(|p| p.split(',').map(|s| s.to_string()).collect())
+                        .unwrap_or_default(),
                     is_conflicted: parts.get(5).unwrap_or(&"") == &"true",
                     is_empty: parts.get(6).unwrap_or(&"") == &"true",
                 }
@@ -120,7 +151,11 @@ impl JjEffects for JjHandler {
     }
 
     async fn new(&self, req: NewRequest) -> EffectResult<NewResponse> {
-        let working_dir = if req.working_dir.is_empty() { ".".to_string() } else { req.working_dir };
+        let working_dir = if req.working_dir.is_empty() {
+            ".".to_string()
+        } else {
+            req.working_dir
+        };
         let mut args = vec!["new"];
         if !req.revision.is_empty() {
             args.push(&req.revision);
@@ -136,11 +171,17 @@ impl JjEffects for JjHandler {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(EffectError::custom("jj_error", stderr.to_string()));
         }
-        Ok(NewResponse { change_id: String::new() })
+        Ok(NewResponse {
+            change_id: String::new(),
+        })
     }
 
     async fn status(&self, req: StatusRequest) -> EffectResult<StatusResponse> {
-        let working_dir = if req.working_dir.is_empty() { ".".to_string() } else { req.working_dir };
+        let working_dir = if req.working_dir.is_empty() {
+            ".".to_string()
+        } else {
+            req.working_dir
+        };
         info!("jj status");
         // Use jj status to get working copy info
         let output = Command::new("jj")
@@ -167,7 +208,9 @@ impl JjEffects for JjHandler {
             .output()
             .await
             .map_err(|e| EffectError::custom("jj_error", e.to_string()))?;
-        let change_id = String::from_utf8_lossy(&id_output.stdout).trim().to_string();
+        let change_id = String::from_utf8_lossy(&id_output.stdout)
+            .trim()
+            .to_string();
         Ok(StatusResponse {
             change_id,
             is_conflicted,

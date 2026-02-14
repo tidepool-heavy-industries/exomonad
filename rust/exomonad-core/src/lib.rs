@@ -118,7 +118,8 @@ pub use util::{build_prompt, find_exomonad_binary, shell_quote};
 #[cfg(feature = "runtime")]
 pub use handlers::{
     AgentHandler, CoordinationHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler,
-    GitHandler, GitHubHandler, JjHandler, KvHandler, LogHandler, MergePRHandler, MessagingHandler, PopupHandler,
+    GitHandler, GitHubHandler, JjHandler, KvHandler, LogHandler, MergePRHandler, MessagingHandler,
+    PopupHandler,
 };
 #[cfg(feature = "runtime")]
 pub use services::{Services, ValidatedServices};
@@ -297,7 +298,7 @@ pub fn register_builtin_handlers(
 
     builder = builder.with_effect_handler(handlers::GitHandler::new(services.git().clone()));
 
-    builder = builder.with_effect_handler(handlers::JjHandler::new());
+    builder = builder.with_effect_handler(handlers::JjHandler);
 
     if let Some(github) = services.github() {
         builder = builder.with_effect_handler(handlers::GitHubHandler::new(github.clone()));
@@ -317,7 +318,7 @@ pub fn register_builtin_handlers(
 
     builder = builder.with_effect_handler(handlers::FilePRHandler::new());
 
-    builder = builder.with_effect_handler(handlers::MergePRHandler::new());
+    builder = builder.with_effect_handler(handlers::MergePRHandler);
 
     builder = builder.with_effect_handler(handlers::CopilotHandler::new());
 

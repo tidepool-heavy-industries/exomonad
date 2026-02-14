@@ -101,7 +101,7 @@ impl CoordinationService {
         let tasks = self.tasks.read().await;
         tasks
             .values()
-            .filter(|t| filter_status.map_or(true, |fs| t.status == fs))
+            .filter(|t| filter_status.is_none_or(|fs| t.status == fs))
             .cloned()
             .collect()
     }
