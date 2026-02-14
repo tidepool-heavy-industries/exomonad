@@ -60,3 +60,6 @@ interagent/
 # Integration test build artifacts
 tests/integration/external-consumer/result
 tests/integration/external-consumer/.exomonad/wasm/
+
+# Jujutsu state
+.jj/

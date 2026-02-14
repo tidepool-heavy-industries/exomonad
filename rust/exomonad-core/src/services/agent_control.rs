@@ -788,7 +788,7 @@ impl AgentControlService {
 
     /// Spawn a Gemini worker agent (Phase 2/3).
     ///
-    /// No git branch or worktree is created — the worker shares the parent's worktree.
+    /// Creates a new git worktree and branch for isolation.
     #[tracing::instrument(skip(self, options), fields(name = %options.name))]
     pub async fn spawn_worker(&self, options: &SpawnWorkerOptions) -> Result<SpawnResult> {
         info!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_worker");
@@ -805,7 +805,7 @@ impl AgentControlService {
             let internal_name = format!("{}-gemini", slug);
             let display_name = format!("{} {}", AgentType::Gemini.emoji(), slug);
 
-            // Idempotency: if pane is already alive, return existing info
+            // Idempotency: if tab is already alive, return existing info
             let tab_alive = self.is_zellij_tab_alive(&display_name).await;
             if tab_alive {
                 info!(name = %options.name, "Worker already running, returning existing");
@@ -815,6 +815,57 @@ impl AgentControlService {
                     issue_title: options.name.clone(),
                     agent_type: "gemini".to_string(),
                 });
+            }
+
+            // Get current branch
+            let current_branch_output = Command::new("git")
+                .args(["rev-parse", "--abbrev-ref", "HEAD"])
+                .current_dir(&self.project_dir)
+                .output()
+                .await
+                .context("Failed to get current branch")?;
+            let current_branch = String::from_utf8_lossy(&current_branch_output.stdout)
+                .trim()
+                .to_string();
+
+            let branch_name = format!("{}.{}", current_branch, slug);
+            let worktree_path = self.worktree_base.join(&slug);
+
+            // Clean up existing worktree
+            if worktree_path.exists() {
+                info!(path = %worktree_path.display(), "Removing existing worktree for idempotency");
+                let _ = Command::new("git")
+                    .args(["worktree", "remove", "--force", &worktree_path.to_string_lossy()])
+                    .current_dir(&self.project_dir)
+                    .output()
+                    .await;
+            }
+
+            info!(
+                base_branch = %current_branch,
+                branch_name = %branch_name,
+                worktree_path = %worktree_path.display(),
+                "Creating git worktree for worker"
+            );
+
+            let output = Command::new("git")
+                .args([
+                    "worktree",
+                    "add",
+                    "-b",
+                    &branch_name,
+                    &worktree_path.to_string_lossy(),
+                    &current_branch,
+                ])
+                .current_dir(&self.project_dir)
+                .output()
+                .await
+                .context("Failed to create git worktree")?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                error!(stderr = %stderr, "git worktree add failed");
+                return Err(anyhow!("git worktree add failed: {}", stderr));
             }
 
             let mut env_vars = HashMap::new();
@@ -850,10 +901,10 @@ impl AgentControlService {
                 settings_path.to_string_lossy().to_string(),
             );
 
-            // Spawn pane in current tab, cwd = project_dir (parent's worktree)
-            self.new_zellij_pane(
+            // Open Zellij TAB (not pane) with cwd = worktree_path
+            self.new_zellij_tab(
                 &display_name,
-                &self.project_dir,
+                &worktree_path,
                 AgentType::Gemini,
                 Some(&options.prompt),
                 env_vars,
@@ -874,7 +925,7 @@ impl AgentControlService {
             }
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
-                agent_dir: String::new(),
+                agent_dir: worktree_path.to_string_lossy().to_string(),
                 tab_name: internal_name,
                 issue_title: options.name.clone(),
                 agent_type: "gemini".to_string(),
@@ -1681,102 +1732,7 @@ impl AgentControlService {
         Ok(())
     }
 
-    #[tracing::instrument(skip(self, prompt, env_vars))]
-    async fn new_zellij_pane(
-        &self,
-        name: &str,
-        cwd: &Path,
-        agent_type: AgentType,
-        prompt: Option<&str>,
-        env_vars: HashMap<String, String>,
-    ) -> Result<()> {
-        info!(name, cwd = %cwd.display(), agent_type = ?agent_type, "Creating Zellij pane");
 
-        let cmd = agent_type.command();
-        let agent_command = match prompt {
-            Some(p) => {
-                let escaped_prompt = Self::escape_for_shell_command(p);
-                debug!(
-                    pane_name = name,
-                    agent_type = ?agent_type,
-                    prompt_length = p.len(),
-                    "Spawning agent with CLI prompt"
-                );
-                let flag = agent_type.prompt_flag();
-                if flag.is_empty() {
-                    format!("{} {}", cmd, escaped_prompt)
-                } else {
-                    format!("{} {} {}", cmd, flag, escaped_prompt)
-                }
-            }
-            None => cmd.to_string(),
-        };
-
-        // Prepend env vars
-        let env_prefix = env_vars
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, shell_escape::escape(v.into())))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let full_command = if env_prefix.is_empty() {
-            agent_command
-        } else {
-            format!("{} {}", env_prefix, agent_command)
-        };
-
-        // Wrap in nix develop shell if flake.nix exists in cwd
-        let full_command = if cwd.join("flake.nix").exists() {
-            info!("Wrapping agent command in nix develop shell");
-            let escaped = full_command.replace('\'', "'\\''");
-            format!("nix develop -c sh -c '{}'", escaped)
-        } else {
-            full_command
-        };
-
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-
-        // Use zellij action new-pane to create pane in current tab
-        let output = Command::new("zellij")
-            .args([
-                "action",
-                "new-pane",
-                "--name",
-                name,
-                "--cwd",
-                &cwd.display().to_string(),
-                "--close-on-exit",
-                "--",
-                &shell,
-                "-l",
-                "-c",
-                &full_command,
-            ])
-            .output()
-            .await
-            .context("Failed to run zellij")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            error!(
-                name,
-                exit_code = output.status.code(),
-                stderr = %stderr,
-                stdout = %stdout,
-                "zellij action new-pane failed"
-            );
-            anyhow::bail!("zellij action new-pane failed: {}", stderr);
-        }
-
-        // Explicitly rename pane to ensure it's visible in the UI
-        let _ = Command::new("zellij")
-            .args(["action", "rename-pane", name])
-            .output()
-            .await;
-
-        info!(name, "Successfully created Zellij pane");
-        Ok(())
-    }
 
     #[tracing::instrument(skip(self))]
     async fn get_zellij_tabs(&self) -> Result<Vec<String>> {

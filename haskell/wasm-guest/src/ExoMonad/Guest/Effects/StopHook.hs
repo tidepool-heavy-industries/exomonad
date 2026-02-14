@@ -32,7 +32,7 @@ import Effects.Log qualified as Log
 import ExoMonad.Effect.Class (runEffect_)
 import ExoMonad.Effects.Copilot (waitForCopilotReview)
 import ExoMonad.Effects.FilePR (filePR)
-import ExoMonad.Effects.Git (getBranch, getRepoInfo, getStatus, hasUnpushedCommits)
+import ExoMonad.Effects.Git (getBranch, getRepoInfo)
 import ExoMonad.Effects.GitHub (getPullRequestForBranch)
 import ExoMonad.Effects.Log (LogInfo)
 import ExoMonad.Effects.Messaging (sendNote)
@@ -82,7 +82,7 @@ runStopHookChecks = do
   -- Send lifecycle note based on outcome
   case result of
     out@(StopHookOutput Allow _) -> do
-      sendLifecycleNote "agent_completed" [("summary", "All checks passed: clean tree, pushed, PR filed, Copilot approved")]
+      sendLifecycleNote "agent_completed" [("summary", "All checks passed: PR filed, Copilot approved")]
       pure out
     out@(StopHookOutput Block (Just reason)) -> do
       sendLifecycleNote "agent_blocked" [("reason", reason)]
@@ -92,60 +92,10 @@ runStopHookChecks = do
 -- | Inner check logic (separated so we can wrap with lifecycle messaging).
 runStopHookChecksInner :: IO StopHookOutput
 runStopHookChecksInner = do
-  result <- runChecks [checkDirtyFiles, checkUnpushedCommits, checkPRFiled]
+  result <- runChecks [checkPRFiled]
   case result of
     CheckPass -> pure allowStopResponse
     CheckBlock reason -> pure (blockStopResponse reason)
-
-checkDirtyFiles :: StopCheck
-checkDirtyFiles = do
-  dirtyResult <- getStatus (Git.GetStatusRequest {Git.getStatusRequestWorkingDir = "."})
-  case dirtyResult of
-    Left err -> pure $ CheckBlock $ "Failed to check dirty files: " <> T.pack (show err)
-    Right resp ->
-      let dirtyFiles = V.toList (Git.getStatusResponseDirtyFiles resp)
-       in if not (null dirtyFiles)
-            then
-              let files = T.intercalate ", " (map TL.toStrict dirtyFiles)
-                  msg =
-                    "You have uncommitted changes in these files: "
-                      <> files
-                      <> "\n\nTo continue, please stage and commit them:\n"
-                      <> "git add -A && git commit -m \"Describe your work\""
-               in pure $ CheckBlock msg
-            else pure CheckPass
-
-checkUnpushedCommits :: StopCheck
-checkUnpushedCommits = do
-  repoResult <- getRepoInfo (Git.GetRepoInfoRequest {Git.getRepoInfoRequestWorkingDir = "."})
-  case repoResult of
-    Left err -> pure $ CheckBlock $ "Failed to get repo info: " <> T.pack (show err)
-    Right repoInfo -> do
-      let branchName = TL.toStrict (Git.getRepoInfoResponseBranch repoInfo)
-      unpushedResult <- hasUnpushedCommits (Git.HasUnpushedCommitsRequest {Git.hasUnpushedCommitsRequestWorkingDir = ".", Git.hasUnpushedCommitsRequestRemote = "origin"})
-      case unpushedResult of
-        Left err -> pure $ CheckBlock $ "Failed to check unpushed commits: " <> T.pack (show err)
-        Right unpushedResp ->
-          let unpushedCount = fromIntegral (Git.hasUnpushedCommitsResponseCount unpushedResp) :: Int
-           in if unpushedCount > 0
-                then
-                  let commitWord =
-                        if unpushedCount == 1
-                          then "commit"
-                          else "commits"
-                      msg =
-                        "You have "
-                          <> T.pack (show unpushedCount)
-                          <> " unpushed "
-                          <> commitWord
-                          <> " on branch '"
-                          <> branchName
-                          <> "'.\n"
-                          <> "Push them to GitHub with:\n"
-                          <> "git push -u origin "
-                          <> branchName
-                   in pure $ CheckBlock msg
-                else pure CheckPass
 
 checkPRFiled :: StopCheck
 checkPRFiled = do

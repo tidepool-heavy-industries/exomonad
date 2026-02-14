@@ -1,0 +1,105 @@
+syntax = "proto3";
+package exomonad.effects.jj;
+
+// Jujutsu VCS effects for colocated mode operations.
+// All effects operate on a working directory.
+
+// ============================================================================
+// BookmarkCreate - Create a named bookmark at a revision
+// ============================================================================
+
+message BookmarkCreateRequest {
+  string name = 1;
+  string revision = 2;
+  string working_dir = 3;
+}
+
+message BookmarkCreateResponse {
+  string change_id = 1;
+}
+
+// ============================================================================
+// GitPush - Push a bookmark to remote
+// ============================================================================
+
+message GitPushRequest {
+  string bookmark = 1;
+  string working_dir = 2;
+}
+
+message GitPushResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// ============================================================================
+// GitFetch - Fetch from remote (triggers auto-rebase)
+// ============================================================================
+
+message GitFetchRequest {
+  string working_dir = 1;
+}
+
+message GitFetchResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// ============================================================================
+// Log - Query revsets, return structured entries
+// ============================================================================
+
+message LogRequest {
+  string revset = 1;
+  string working_dir = 2;
+}
+
+message LogEntry {
+  string change_id = 1;
+  string commit_id = 2;
+  string description = 3;
+  string author = 4;
+  repeated string parents = 5;
+  bool is_conflicted = 6;
+  bool is_empty = 7;
+}
+
+message LogResponse {
+  repeated LogEntry entries = 1;
+}
+
+// ============================================================================
+// New - Start a new change
+// ============================================================================
+
+message NewRequest {
+  string revision = 1;
+  string working_dir = 2;
+}
+
+message NewResponse {
+  string change_id = 1;
+}
+
+// ============================================================================
+// Status - Working copy status including conflicts
+// ============================================================================
+
+message StatusRequest {
+  string working_dir = 1;
+}
+
+message StatusResponse {
+  string change_id = 1;
+  bool is_conflicted = 2;
+  repeated string modified_files = 3;
+}
+
+service JjEffects {
+  rpc BookmarkCreate(BookmarkCreateRequest) returns (BookmarkCreateResponse);
+  rpc GitPush(GitPushRequest) returns (GitPushResponse);
+  rpc GitFetch(GitFetchRequest) returns (GitFetchResponse);
+  rpc Log(LogRequest) returns (LogResponse);
+  rpc New(NewRequest) returns (NewResponse);
+  rpc Status(StatusRequest) returns (StatusResponse);
+}
