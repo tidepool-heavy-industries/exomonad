@@ -27,6 +27,7 @@ pub mod github;
 pub mod jj;
 pub mod kv;
 pub mod log;
+pub mod merge_pr;
 pub mod messaging;
 pub mod popup;
 
@@ -42,5 +43,6 @@ pub use github::GitHubHandler;
 pub use jj::JjHandler;
 pub use kv::KvHandler;
 pub use log::LogHandler;
+pub use merge_pr::MergePRHandler;
 pub use messaging::MessagingHandler;
 pub use popup::PopupHandler;

@@ -11,6 +11,7 @@ pub mod github;
 pub mod inbox;
 pub mod local;
 pub mod log;
+pub mod merge_pr;
 pub mod popup;
 pub mod questions;
 pub mod secrets;

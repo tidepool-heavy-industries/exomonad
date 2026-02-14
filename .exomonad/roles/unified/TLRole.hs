@@ -1,5 +1,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeOperators #-}
 
 -- | TL role config re-exported under a unique module name for the unified WASM.
 --
@@ -10,6 +12,7 @@ module TLRole (config, Tools) where
 
 import ExoMonad
 import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
+import ExoMonad.Guest.Tools.MergePR (MergePR)
 import ExoMonad.Guest.Types (allowResponse, postToolUseResponse)
 import ExoMonad.Types (HookConfig (..))
 import Control.Monad.Freer (send)
@@ -19,6 +22,7 @@ data Tools mode = Tools
     popups :: PopupTools mode,
     messaging :: TLMessagingTools mode,
     pr :: FilePRTools mode,
+    mergePr :: mode :- MergePR,
     events :: EventTools mode
   }
   deriving (Generic)
@@ -33,6 +37,7 @@ config =
             popups = popupTools,
             messaging = tlMessagingTools,
             pr = filePRTools,
+            mergePr = mkHandler @MergePR,
             events = eventTools
           },
       hooks =

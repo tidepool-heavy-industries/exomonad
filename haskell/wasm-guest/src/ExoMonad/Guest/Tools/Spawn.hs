@@ -14,8 +14,8 @@ import Control.Monad (forM)
 import Data.Aeson (FromJSON, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Either (partitionEithers)
-import Data.Maybe (fromMaybe)
 import Data.Text (Text)
+import Data.Text qualified as T
 import ExoMonad.Guest.Effects.AgentControl qualified as AC
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)
@@ -128,7 +128,14 @@ data SpawnWorkers
 
 data WorkerSpec = WorkerSpec
   { wsName :: Text,
-    wsPrompt :: Text
+    wsTask :: Text,
+    wsReadFirst :: Maybe [Text],
+    wsSteps :: Maybe [Text],
+    wsVerify :: Maybe [Text],
+    wsDoneCriteria :: Maybe [Text],
+    wsBoundary :: Maybe [Text],
+    wsContext :: Maybe Text,
+    wsPrompt :: Maybe Text
   }
   deriving (Show, Eq, Generic)
 
@@ -136,7 +143,37 @@ instance FromJSON WorkerSpec where
   parseJSON = withObject "WorkerSpec" $ \v ->
     WorkerSpec
       <$> v .: "name"
-      <*> v .: "prompt"
+      <*> v .: "task"
+      <*> v .:? "read_first"
+      <*> v .:? "steps"
+      <*> v .:? "verify"
+      <*> v .:? "done_criteria"
+      <*> v .:? "boundary"
+      <*> v .:? "context"
+      <*> v .:? "prompt"
+
+-- | Assemble a structured WorkerSpec into a markdown prompt.
+renderWorkerPrompt :: WorkerSpec -> Text
+renderWorkerPrompt spec =
+  case wsPrompt spec of
+    Just p -> p  -- Raw prompt takes precedence (escape hatch)
+    Nothing -> T.intercalate "\n\n" $ filter (not . T.null)
+      [ "## Task: " <> wsTask spec
+      , renderSection "READ FIRST" (fmap (map ("- " <>)) (wsReadFirst spec))
+      , renderNumbered "STEPS" (wsSteps spec)
+      , renderSection "VERIFY" (fmap (map ("```\n" <>) . map (<> "\n```")) (wsVerify spec))
+      , renderSection "DONE CRITERIA" (fmap (map ("- " <>)) (wsDoneCriteria spec))
+      , renderSection "BOUNDARY" (fmap (map ("- " <>)) (wsBoundary spec))
+      , maybe "" (\c -> "### CONTEXT\n\n" <> c) (wsContext spec)
+      ]
+  where
+    renderSection _ Nothing = ""
+    renderSection _ (Just []) = ""
+    renderSection heading (Just items) = "### " <> heading <> "\n" <> T.intercalate "\n" items
+
+    renderNumbered _ Nothing = ""
+    renderNumbered _ (Just []) = ""
+    renderNumbered heading (Just items) = "### " <> heading <> "\n" <> T.intercalate "\n" (zipWith (\i s -> T.pack (show (i :: Int)) <> ". " <> s) [1..] items)
 
 data SpawnWorkersArgs = SpawnWorkersArgs
   { swsSpecs :: [WorkerSpec]
@@ -164,7 +201,7 @@ instance MCPTool SpawnWorkers where
                     "items"
                       .= object
                         [ "type" .= ("object" :: Text),
-                          "required" .= (["name", "prompt"] :: [Text]),
+                          "required" .= (["name", "task"] :: [Text]),
                           "properties"
                             .= object
                               [ "name"
@@ -172,10 +209,50 @@ instance MCPTool SpawnWorkers where
                                     [ "type" .= ("string" :: Text),
                                       "description" .= ("Human-readable name for the leaf agent" :: Text)
                                     ],
+                                "task"
+                                  .= object
+                                    [ "type" .= ("string" :: Text),
+                                      "description" .= ("Short description of the task" :: Text)
+                                    ],
+                                "read_first"
+                                  .= object
+                                    [ "type" .= ("array" :: Text),
+                                      "items" .= object ["type" .= ("string" :: Text)],
+                                      "description" .= ("Files the agent should read before starting" :: Text)
+                                    ],
+                                "steps"
+                                  .= object
+                                    [ "type" .= ("array" :: Text),
+                                      "items" .= object ["type" .= ("string" :: Text)],
+                                      "description" .= ("Numbered implementation steps" :: Text)
+                                    ],
+                                "verify"
+                                  .= object
+                                    [ "type" .= ("array" :: Text),
+                                      "items" .= object ["type" .= ("string" :: Text)],
+                                      "description" .= ("Commands to verify the work" :: Text)
+                                    ],
+                                "done_criteria"
+                                  .= object
+                                    [ "type" .= ("array" :: Text),
+                                      "items" .= object ["type" .= ("string" :: Text)],
+                                      "description" .= ("Acceptance criteria for completion" :: Text)
+                                    ],
+                                "boundary"
+                                  .= object
+                                    [ "type" .= ("array" :: Text),
+                                      "items" .= object ["type" .= ("string" :: Text)],
+                                      "description" .= ("Things the agent must NOT do" :: Text)
+                                    ],
+                                "context"
+                                  .= object
+                                    [ "type" .= ("string" :: Text),
+                                      "description" .= ("Freeform context: code snippets, examples, detailed specs" :: Text)
+                                    ],
                                 "prompt"
                                   .= object
                                     [ "type" .= ("string" :: Text),
-                                      "description" .= ("Implementation instructions for the agent" :: Text)
+                                      "description" .= ("Raw prompt (escape hatch). If provided, all other fields except name are ignored." :: Text)
                                     ]
                               ]
                         ]
@@ -184,7 +261,7 @@ instance MCPTool SpawnWorkers where
       ]
   toolHandler args = do
     results <- forM (swsSpecs args) $ \spec ->
-      runM $ AC.runAgentControl $ AC.spawnWorker (wsName spec) (wsPrompt spec)
+      runM $ AC.runAgentControl $ AC.spawnWorker (wsName spec) (renderWorkerPrompt spec)
     let (errs, successes) = partitionEithers results
     pure $
       successResult $

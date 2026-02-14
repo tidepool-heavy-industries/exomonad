@@ -2079,22 +2079,21 @@ instance (HsProtobuf.Message SpawnSubtreeRequest) where
   encodeMessage
     _
     SpawnSubtreeRequest {spawnSubtreeRequestTask,
-                         spawnSubtreeRequestBranchName,
-                         spawnSubtreeRequestParentSessionId}
-    = Hs.mconcat
-        [ HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 1)
-           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              spawnSubtreeRequestTask)
-        , HsProtobuf.encodeMessageField
-           (HsProtobuf.FieldNumber 2)
-           ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              spawnSubtreeRequestBranchName)
-        , HsProtobuf.encodeMessageField
+                         spawnSubtreeRequestBranchName, spawnSubtreeRequestParentSessionId}
+    = Hs.mappend
+        (Hs.mappend
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 1)
+              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                 spawnSubtreeRequestTask))
+           (HsProtobuf.encodeMessageField
+              (HsProtobuf.FieldNumber 2)
+              ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                 spawnSubtreeRequestBranchName)))
+        (HsProtobuf.encodeMessageField
            (HsProtobuf.FieldNumber 3)
            ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
-              spawnSubtreeRequestParentSessionId)
-        ]
+              spawnSubtreeRequestParentSessionId))
   decodeMessage _
     = Hs.pure SpawnSubtreeRequest
         <*>
@@ -2219,7 +2218,6 @@ instance (HsJSONPB.ToJSON SpawnSubtreeResponse) where
   toEncoding = HsJSONPB.toAesonEncoding
 instance (HsJSONPB.FromJSON SpawnSubtreeResponse) where
   parseJSON = HsJSONPB.parseJSONPB
-
 data SpawnLeafSubtreeRequest
   = SpawnLeafSubtreeRequest {spawnLeafSubtreeRequestTask :: Hs.Text,
                              spawnLeafSubtreeRequestBranchName :: Hs.Text}
@@ -2289,7 +2287,6 @@ instance (HsJSONPB.ToJSON SpawnLeafSubtreeRequest) where
   toEncoding = HsJSONPB.toAesonEncoding
 instance (HsJSONPB.FromJSON SpawnLeafSubtreeRequest) where
   parseJSON = HsJSONPB.parseJSONPB
-
 newtype SpawnLeafSubtreeResponse
   = SpawnLeafSubtreeResponse {spawnLeafSubtreeResponseAgent :: (Hs.Maybe Effects.Agent.AgentInfo)}
   deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
@@ -2298,7 +2295,9 @@ instance (HsProtobuf.Named SpawnLeafSubtreeResponse) where
   nameOf _ = Hs.fromString "SpawnLeafSubtreeResponse"
 instance (HsProtobuf.HasDefault SpawnLeafSubtreeResponse)
 instance (HsProtobuf.Message SpawnLeafSubtreeResponse) where
-  encodeMessage _ SpawnLeafSubtreeResponse {spawnLeafSubtreeResponseAgent}
+  encodeMessage
+    _
+    SpawnLeafSubtreeResponse {spawnLeafSubtreeResponseAgent}
     = (HsProtobuf.encodeMessageField
          (HsProtobuf.FieldNumber 1)
          ((Hs.coerce

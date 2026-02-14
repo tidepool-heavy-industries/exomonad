@@ -61,6 +61,7 @@ library wasm-guest-internal
         ExoMonad.Guest.Continuations
         -- Tools
         ExoMonad.Guest.Tools.FilePR
+        ExoMonad.Guest.Tools.MergePR
         ExoMonad.Guest.Tools.Popup
         ExoMonad.Guest.Tools.Messaging
         ExoMonad.Guest.Tools.Spawn
@@ -95,6 +96,7 @@ library wasm-guest-internal
         ExoMonad.Effects.Fs
         ExoMonad.Effects.Popup
         ExoMonad.Effects.FilePR
+        ExoMonad.Effects.MergePR
         ExoMonad.Effects.Copilot
         ExoMonad.Effects.Events
         ExoMonad.Effects.Messaging
