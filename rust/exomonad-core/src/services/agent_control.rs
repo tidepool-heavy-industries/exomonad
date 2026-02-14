@@ -147,6 +147,8 @@ pub struct SpawnSubtreeOptions {
     pub task: String,
     /// Branch name suffix.
     pub branch_name: String,
+    /// Parent Claude session ID for --resume --fork-session context inheritance.
+    pub parent_session_id: String,
 }
 
 /// Result of spawning an agent.
@@ -995,13 +997,27 @@ impl AgentControlService {
             self.write_agent_mcp_config(effective_project_dir, &worktree_path, AgentType::Claude)
                 .await?;
 
+            // Build task prompt with worktree context warning
+            let task_with_context = format!(
+                "You are now in worktree {} on branch {}. All file paths from your inherited context are STALE — use relative paths only and re-read files before editing.\n\n{}",
+                worktree_path.display(), branch_name, options.task
+            );
+
+            // Determine fork mode from parent_session_id
+            let fork_id = if options.parent_session_id.is_empty() {
+                None
+            } else {
+                Some(options.parent_session_id.as_str())
+            };
+
             // Open Zellij tab with cwd = worktree_path
-            self.new_zellij_tab(
+            self.new_zellij_tab_inner(
                 &display_name,
                 &worktree_path,
                 AgentType::Claude,
-                Some(&options.task),
+                Some(&task_with_context),
                 env_vars,
+                fork_id,
             )
             .await?;
 
@@ -1507,11 +1523,37 @@ impl AgentControlService {
         prompt: Option<&str>,
         env_vars: HashMap<String, String>,
     ) -> Result<()> {
-        info!(name, cwd = %cwd.display(), agent_type = ?agent_type, "Creating Zellij tab");
+        self.new_zellij_tab_inner(name, cwd, agent_type, prompt, env_vars, None)
+            .await
+    }
+
+    #[tracing::instrument(skip(self, prompt, env_vars, fork_session_id))]
+    async fn new_zellij_tab_inner(
+        &self,
+        name: &str,
+        cwd: &Path,
+        agent_type: AgentType,
+        prompt: Option<&str>,
+        env_vars: HashMap<String, String>,
+        fork_session_id: Option<&str>,
+    ) -> Result<()> {
+        info!(name, cwd = %cwd.display(), agent_type = ?agent_type, fork = fork_session_id.is_some(), "Creating Zellij tab");
 
         let cmd = agent_type.command();
-        let agent_command = match prompt {
-            Some(p) => {
+        let agent_command = match (prompt, fork_session_id) {
+            (Some(p), Some(session_id)) => {
+                // Fork mode: claude --resume <id> --fork-session -p '<task>'
+                let escaped_prompt = Self::escape_for_shell_command(p);
+                let escaped_session = Self::escape_for_shell_command(session_id);
+                debug!(
+                    tab_name = name,
+                    agent_type = ?agent_type,
+                    prompt_length = p.len(),
+                    "Spawning agent with session fork"
+                );
+                format!("{} --resume {} --fork-session -p {}", cmd, escaped_session, escaped_prompt)
+            }
+            (Some(p), None) => {
                 let escaped_prompt = Self::escape_for_shell_command(p);
                 debug!(
                     tab_name = name,
@@ -1526,7 +1568,7 @@ impl AgentControlService {
                     format!("{} {} {}", cmd, flag, escaped_prompt)
                 }
             }
-            None => cmd.to_string(),
+            _ => cmd.to_string(),
         };
 
         // Prepend env vars to command (Zellij KDL doesn't support pane-level env blocks)

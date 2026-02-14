@@ -178,6 +178,7 @@ impl AgentEffects for AgentHandler {
         let options = SpawnSubtreeOptions {
             task: req.task.clone(),
             branch_name: req.branch_name.clone(),
+            parent_session_id: req.parent_session_id.clone(),
         };
 
         let result = self
@@ -198,6 +199,7 @@ impl AgentEffects for AgentHandler {
         let options = SpawnSubtreeOptions {
             task: req.task.clone(),
             branch_name: req.branch_name.clone(),
+            parent_session_id: String::new(),
         };
 
         let result = self

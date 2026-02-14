@@ -251,6 +251,8 @@ message SpawnSubtreeRequest {
   string task = 1;
   // Branch name suffix (e.g., "feature-a").
   string branch_name = 2;
+  // Parent Claude session ID for --resume --fork-session context inheritance.
+  string parent_session_id = 3;
 }
 
 message SpawnSubtreeResponse {

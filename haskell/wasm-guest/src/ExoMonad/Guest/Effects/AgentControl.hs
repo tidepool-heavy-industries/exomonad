@@ -92,13 +92,13 @@ instance ToJSON SpawnResult where
 
 -- | Agent control effect for spawning agents.
 data AgentControl a where
-  SpawnSubtreeC :: Text -> Text -> AgentControl (Either Text SpawnResult)
+  SpawnSubtreeC :: Text -> Text -> Text -> AgentControl (Either Text SpawnResult)
   SpawnLeafSubtreeC :: Text -> Text -> AgentControl (Either Text SpawnResult)
   SpawnWorkerC :: Text -> Text -> AgentControl (Either Text SpawnResult)
 
 -- Smart constructors (manually written - makeSem doesn't work with WASM cross-compilation)
-spawnSubtree :: (Member AgentControl r) => Text -> Text -> Eff r (Either Text SpawnResult)
-spawnSubtree task branchName = send (SpawnSubtreeC task branchName)
+spawnSubtree :: (Member AgentControl r) => Text -> Text -> Text -> Eff r (Either Text SpawnResult)
+spawnSubtree task branchName parentSessionId = send (SpawnSubtreeC task branchName parentSessionId)
 
 spawnLeafSubtree :: (Member AgentControl r) => Text -> Text -> Eff r (Either Text SpawnResult)
 spawnLeafSubtree task branchName = send (SpawnLeafSubtreeC task branchName)
@@ -113,11 +113,12 @@ spawnWorker name prompt = send (SpawnWorkerC name prompt)
 -- | Interpret AgentControl by calling Rust host via yield_effect.
 runAgentControl :: (LastMember IO r) => Eff (AgentControl ': r) a -> Eff r a
 runAgentControl = interpret $ \case
-  SpawnSubtreeC task branchName -> sendM $ do
+  SpawnSubtreeC task branchName parentSessionId -> sendM $ do
     let req =
           PA.SpawnSubtreeRequest
             { PA.spawnSubtreeRequestTask = fromText task,
-              PA.spawnSubtreeRequestBranchName = fromText branchName
+              PA.spawnSubtreeRequestBranchName = fromText branchName,
+              PA.spawnSubtreeRequestParentSessionId = fromText parentSessionId
             }
     result <- Agent.spawnSubtree req
     pure $ case result of

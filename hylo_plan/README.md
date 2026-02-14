@@ -1,60 +1,99 @@
-# Hylomorphism Agent Swarm
+# Hylomorphism Agent Tree
 
-Recursive agent tree where each node is a worktree + agent session. Unfold (decompose tasks into subtrees) then fold (merge via PRs bubbling up).
+Recursive agent tree where each node is a worktree + Claude/Gemini session. **Unfold** (decompose tasks into subtrees via spec commits) then **fold** (merge via PRs bubbling up).
 
 ## Core Model
 
+```
 seed (branch, task)
-  → decompose into non-overlapping subtasks
-    → spawn subtree nodes (can further decompose) or worker nodes (execute and finish)
-      → children work, bubble messages up to parent
+  → parent writes type stubs / interfaces / tests / ADRs
+    → parent commits scaffold, spawns children (fork from that commit)
+      → children implement (or further decompose)
         → children file PRs against parent branch
-          → Copilot + CI first-pass review
-            → parent reviews PRs that pass mechanical bar
-              → merge, notify siblings to rebase
-                → repeat until parent's work is done
-                  → parent files PR against its parent
+          → Copilot reviews, child iterates autonomously
+            → child goes dormant when PR is green
+              → parent wakes, reviews PR (architectural fit)
+                → parent merges → siblings rebase (stop-hook checks)
+                  → repeat until all children merged
+                    → parent files PR against its parent
+```
 
 ## Node Types
 
-**Worktree node** (Claude): Has coordination tools (`spawn_subtree`, `spawn_worker`, messaging, PR lifecycle). Can decompose further. Owns a branch + worktree. Branch naming uses `.` hierarchy (e.g. `main.feature`). Runs event-driven idle loop via long-poll `get_messages`.
+**Subtree node** (Claude): Owns a branch + worktree. Has coordination tools (`spawn_subtree`, `spawn_workers`, messaging, PR lifecycle). Can decompose further. Runs event-driven: works actively during decomposition, then goes dormant waiting for child events delivered as synthetic user messages via Zellij STDIN injection.
 
-**Worker node** (Gemini): No spawn tools. Executes bounded task in parent's worktree (in-place). Works and exits. Cheap, disposable.
+**Worker node** (Gemini): No spawn tools. Executes bounded task in its own worktree branch. Files PR, iterates with Copilot, goes dormant when green. Cheap, disposable.
 
-**Researcher** (either): Deep research task. Gets a tmp dir, can clone repos, read code. No write access to the tree. v0.1 = ping human to paste into Gemini.
-
-## Every Node Is a Claude/Gemini Session
-
-All nodes use native builtins (Bash, Write, Read, etc). ExoMonad provides coordination tools on top. The worktree directory is the cage. The spawn prompt is the constraint. ExoMonad goes *around* the agent, not *inside* it.
-
-```
-Every node:      Claude/Gemini + native builtins + jj/git
-Worktree nodes:  + exomonad spawn/message/task/PR tools
-Worker nodes:    no spawn tools, that's it
-```
+**Human**: Can drop into any Zellij tab/pane to steer directly. Messages from children bubble up through the chain of command (child → parent → ... → root → human). Human is the ultimate escalation point but doesn't block execution.
 
 ## Key Design Decisions
 
-- **Worktrees, not Claude Teams** for isolation. Can migrate to Teams bus later as it matures.
-- **PRs as fold operation.** Child → parent branch targeting. GitHub PRs are reviewable, reversible, auditable.
-- **Copilot + CI as first-pass filter.** Parent only reviews PRs that pass mechanical bar. Zero marginal cost for most iteration.
-- **jj for rebase propagation.** Agents use jj directly. Automatic rebasing when siblings merge into parent branch.
-- **Long-poll messaging.** `get_messages` blocks until message or timeout (5m). One tool call per idle period.
-- **Tool descriptions encode the base case.** `spawn_subtree` vs `spawn_worker` teaches the agent when to unfold vs execute.
-- **Intelligence gradient at every level.** Claude reasons about decomposition. Gemini executes. Copilot reviews mechanically. Parent reviews architecturally.
+| Decision | Rationale |
+|----------|-----------|
+| Session forking (`--resume --fork-session`) | Children inherit parent's full conversation context. Spawn prompts can be minimal. |
+| Dormant parents via Zellij STDIN injection | Parent is just a Claude session waiting for "user messages" that are actually system events. Zero token cost while dormant. |
+| Git as distributed coordination substrate | Branches encode the task tree. PRs are the fold operation. Rebase propagates state. No separate coordination DB needed. |
+| Copilot as first-pass reviewer | Zero marginal cost. Children iterate autonomously with Copilot. Parent only reviews PRs that pass mechanical bar. |
+| Implicit event registration from spawn | Spawning a child automatically routes that child's lifecycle events to the parent. No explicit subscribe step. |
+| Stop-hook rebase checks | Before exiting, children check if parent branch moved. If so, rebase. Pull-based, no injection needed for rebase cascade. |
+| Chain of command messaging | Messages flow child → parent only. No grandchild → grandparent bypass. Parent decides what to escalate. Bounds message volume per node. |
+| Tool descriptions encode the recursion decision | "Use `spawn_subtree` when work needs further decomposition" vs "Use `spawn_workers` when work is concrete enough to execute directly." Agent's tool choice IS the anamorphism base case. |
+| Spec commit = types + markdown + tests | Parent writes type stubs (compiler-enforced interfaces), markdown (intent/context), and tests where feasible. Depth-dependent: deeper nodes may skip ADRs. |
+| Soft depth limits with human approval | No hard cap. Deeper spawning requires human approval (via chain of command escalation). |
 
-## Coordination Architecture
+## Event Delivery Architecture
 
-Single exomonad MCP server is the coordination bus. All nodes talk to it. It outlives any individual agent session. State lives there.
+```
+Child event (completion, question, PR ready)
+  → child's hook fires → HTTP to MCP server
+    → server resolves parent session from child identity
+      → server renders natural language message from structured template
+        → Zellij write-chars injects message into parent's pane
+          → parent Claude sees it as a "user message"
+            → parent processes, takes action, returns to dormant
 
-Messages flow child → parent only. Parent chooses what to forward upward. No grandchild → grandparent bypass. This bounds each node's message volume.
+GitHub events (Copilot review, CI status)
+  → polling loop checks PR status via GitHub API
+    → on change, renders natural language message
+      → Zellij write-chars injects into relevant node's pane
+```
 
-## Human's Role
+## Node Lifecycle
 
-Human supervises and converses with nodes (usually root, subnodes as needed). Root node can `ask_question` which bubbles up to human via TUI. Human is polled for advice, not blocking execution.
+```
+                    ┌─────────────┐
+                    │   ACTIVE    │ ← decomposing, writing specs
+                    │  (working)  │
+                    └──────┬──────┘
+                           │ spawns children, goes idle
+                    ┌──────▼──────┐
+                    │   DORMANT   │ ← waiting for events
+                    │  (idle)     │ ← zero token cost
+                    └──────┬──────┘
+                           │ event arrives (synthetic user msg)
+                    ┌──────▼──────┐
+                    │   ACTIVE    │ ← reviewing PR, answering question
+                    │ (reviewing) │
+                    └──────┬──────┘
+                           │ action complete, back to idle
+                    ┌──────▼──────┐
+                    │   DORMANT   │ ← or exits if all children merged
+                    └──────┬──────┘
+                           │ all children done
+                    ┌──────▼──────┐
+                    │   ACTIVE    │ ← files own PR upward
+                    │ (completing)│
+                    └──────┬──────┘
+                           │ PR green, goes dormant
+                    ┌──────▼──────┐
+                    │   DORMANT   │ ← waiting for parent to merge
+                    └─────────────┘
+```
 
 ## Files
 
-- [phase-1.md](phase-1.md) — Concrete implementation plan
-- [tools.md](tools.md) — Tool surface design
-- [pr-lifecycle.md](pr-lifecycle.md) — PR review and merge flow
+- [ADR-001: Event Delivery](adr-001-event-delivery.md) — Zellij STDIN injection as event bus
+- [ADR-002: Fold Protocol](adr-002-fold-protocol.md) — PR lifecycle, merge, rebase cascade
+- [ADR-003: Spec Commits](adr-003-spec-commits.md) — How parents decompose work for children
+- [tools.md](tools.md) — Complete tool surface with schemas
+- [phase-1.md](phase-1.md) — Implementation roadmap
