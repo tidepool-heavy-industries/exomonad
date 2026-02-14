@@ -181,7 +181,7 @@ _install profile:
     mkdir -p ~/.exomonad/wasm
     cp "target/${TARGET_DIR}/exomonad" ~/.cargo/bin/
     cp "rust/exomonad-plugin/target/wasm32-wasip1/${TARGET_DIR}/exomonad-plugin.wasm" ~/.config/zellij/plugins/
-    cp .exomonad/wasm/wasm-guest-*.wasm ~/.exomonad/wasm/
+    cp .exomonad/wasm/wasm-guest-unified.wasm ~/.exomonad/wasm/
 
     # macOS: remove quarantine and ad-hoc sign to avoid sandbox/Gatekeeper issues
     if [ "$(uname)" = "Darwin" ]; then
@@ -194,7 +194,7 @@ _install profile:
     echo "Installed:"
     ls -lh ~/.cargo/bin/exomonad
     ls -lh ~/.config/zellij/plugins/exomonad-plugin.wasm
-    ls -lh .exomonad/wasm/wasm-guest-*.wasm
+    ls -lh .exomonad/wasm/wasm-guest-unified.wasm
 
 # Install everything: Rust binaries + WASM plugins (release build)
 install-all: (_install "release")

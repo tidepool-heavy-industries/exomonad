@@ -558,8 +558,11 @@ fn generate_tl_layout(port: u16, shell_command: Option<&str>) -> Result<std::pat
         None => format!("exomonad serve --port {}", port),
     };
 
-    // TL tab: use shell_command if configured, else $SHELL
-    let tl_command = shell_command.unwrap_or(&shell);
+    // TL tab: shell wrapping claude --resume (user picks session interactively)
+    let tl_command = match shell_command {
+        Some(sc) => format!("{} -c 'claude --resume'", sc),
+        None => "claude --resume".to_string(),
+    };
 
     let tabs = vec![
         exomonad_core::layout::AgentTabParams {
@@ -574,7 +577,7 @@ fn generate_tl_layout(port: u16, shell_command: Option<&str>) -> Result<std::pat
         exomonad_core::layout::AgentTabParams {
             tab_name: "TL",
             pane_name: "Main",
-            command: tl_command,
+            command: &tl_command,
             cwd: &cwd,
             shell: &shell,
             focus: true,
