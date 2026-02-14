@@ -54,6 +54,7 @@
         # Orchestration tools
         orchestrationPkgs = with pkgs; [
           zellij
+          jujutsu  # jj
         ];
 
       in {
