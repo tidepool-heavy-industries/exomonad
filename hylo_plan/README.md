@@ -30,12 +30,14 @@ seed (branch, task)
 
 | Decision | Rationale |
 |----------|-----------|
+| **jj-first** (colocated mode) | Auto-rebase, conflicts-as-data, no staging area, immutable op log. Eliminates rebase hooks and uncommitted-changes checks. GitHub compatibility preserved via colocated `.git`. |
 | Session forking (`--resume --fork-session`) | Children inherit parent's full conversation context. Spawn prompts can be minimal. |
 | Dormant parents via Zellij STDIN injection | Parent is just a Claude session waiting for "user messages" that are actually system events. Zero token cost while dormant. |
-| Git as distributed coordination substrate | Branches encode the task tree. PRs are the fold operation. Rebase propagates state. No separate coordination DB needed. |
+| jj workspaces as agent isolation | Each agent gets a jj workspace (replaces git worktrees). Sparse patterns limit worker blast radius. |
+| Hybrid registry: filesystem + revsets | `.exomonad/` stores runtime metadata (pane IDs, config). jj revsets query VCS state (conflicts, branch relationships). |
+| Dual identity: bookmarks + Change IDs | Bookmarks encode tree hierarchy for PR targeting. Change IDs are durable tracking keys that survive rebases/squashes. |
 | Copilot as first-pass reviewer | Zero marginal cost. Children iterate autonomously with Copilot. Parent only reviews PRs that pass mechanical bar. |
 | Implicit event registration from spawn | Spawning a child automatically routes that child's lifecycle events to the parent. No explicit subscribe step. |
-| Stop-hook rebase checks | Before exiting, children check if parent branch moved. If so, rebase. Pull-based, no injection needed for rebase cascade. |
 | Chain of command messaging | Messages flow child → parent only. No grandchild → grandparent bypass. Parent decides what to escalate. Bounds message volume per node. |
 | Tool descriptions encode the recursion decision | "Use `spawn_subtree` when work needs further decomposition" vs "Use `spawn_workers` when work is concrete enough to execute directly." Agent's tool choice IS the anamorphism base case. |
 | Spec commit = types + markdown + tests | Parent writes type stubs (compiler-enforced interfaces), markdown (intent/context), and tests where feasible. Depth-dependent: deeper nodes may skip ADRs. |
@@ -93,7 +95,9 @@ GitHub events (Copilot review, CI status)
 ## Files
 
 - [ADR-001: Event Delivery](adr-001-event-delivery.md) — Zellij STDIN injection as event bus
-- [ADR-002: Fold Protocol](adr-002-fold-protocol.md) — PR lifecycle, merge, rebase cascade
+- [ADR-002: Fold Protocol](adr-002-fold-protocol.md) — PR lifecycle, merge, rebase cascade (jj-native)
 - [ADR-003: Spec Commits](adr-003-spec-commits.md) — How parents decompose work for children
+- [ADR-004: jj-First](adr-004-jj-first.md) — Jujutsu as primary VCS (colocated mode, conflicts-as-data, auto-rebase)
 - [tools.md](tools.md) — Complete tool surface with schemas
-- [phase-1.md](phase-1.md) — Implementation roadmap
+- [phase-1.md](phase-1.md) — Implementation roadmap (Wave 0: jj foundation)
+- [next_wave/](next_wave/) — Post-Phase-1 ideas (stream detection, etc.)

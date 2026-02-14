@@ -2,11 +2,13 @@
 
 ## Status
 
-Accepted
+Accepted (Updated: jj-first per ADR-004)
 
 ## Context
 
 The fold phase of the hylomorphism is children merging work back into the parent branch via PRs. This involves: child filing PRs, Copilot reviewing, child iterating, parent merging, and siblings rebasing.
+
+With jj (ADR-004), the rebase cascade and conflict handling become VCS primitives rather than orchestration logic we build.
 
 ## Decision
 
@@ -22,18 +24,21 @@ main
            └── main.feature.api.endpoints   (leaf worker)
 ```
 
-PRs always target the parent branch. Branch naming uses `.` as hierarchy separator. The branch name encodes the full path in the task tree.
+PRs always target the parent bookmark. Bookmark naming uses `.` as hierarchy separator. Each bookmark has a corresponding jj Change ID for durable tracking.
 
 ### Child Completion Flow
 
 ```
 1. Child completes implementation work
-2. Child commits, pushes, files PR against parent branch (via file_pr tool)
+2. Child creates bookmark, pushes, files PR against parent (via file_pr tool)
+   jj bookmark create feature/auth -r @-
+   jj git push --bookmark feature/auth
+   gh pr create --head feature/auth --base main.feature
 3. GitHub triggers Copilot review + CI automatically
 4. Child receives Copilot feedback (via GitHub poll → Zellij injection)
 5. Child iterates autonomously:
    a. Addresses Copilot comments
-   b. Pushes
+   b. Pushes (jj git push)
    c. Waits for next review
    d. Repeat until Copilot approves + CI passes
 6. Child goes dormant (PR is green, waiting for parent to merge)
@@ -53,21 +58,35 @@ Parent performs the merge, not the child. Parent has context about:
 
 After merge:
 1. Parent runs `gh pr merge <number> --squash` (or `--merge` for subtrees with history)
-2. Siblings detect parent branch movement on their next stop-hook check
-3. Parent checks: all children merged? → file own PR upward
-4. Or: spawn additional children if new work is discovered
+2. Parent runs `jj git fetch` to pull the merged state
+3. **jj auto-rebases all descendant commits in the graph** (siblings included)
+4. Sibling workspaces become "stale" — they sync on next `jj workspace update-stale`
+5. Parent checks: all children merged? → file own PR upward
+6. Or: spawn additional children if new work is discovered
 
-### Rebase Cascade
+### Rebase Cascade (jj-native)
 
-When child A's PR merges into the parent branch, siblings B and C are now behind.
+When child A's PR merges into the parent bookmark, siblings B and C need to rebase.
 
-**Detection:** Child stop-hook (runs at natural stopping points — session end, before exit). The hook:
-1. Fetches parent branch: `git fetch origin {parent_branch}`
-2. Checks if parent is ahead: `git rev-list HEAD..origin/{parent_branch} --count`
-3. If ahead: performs `git rebase origin/{parent_branch}`
-4. If conflict: child resolves autonomously using its code context. If unresolvable, sends question to parent.
+**With jj, this is automatic.** When parent runs `jj git fetch` after merging A's PR:
+1. jj detects the parent bookmark has moved
+2. All descendant commits (B, C) are auto-rebased in the commit graph
+3. If rebase causes conflicts, they're stored as data in the commit — **not a failure**
+4. Sibling workspaces become "stale" but are not disrupted mid-work
+5. Siblings call `jj workspace update-stale` at natural breakpoints to sync their working copy
+6. If conflicts exist after sync, agent resolves them (conflict markers in files, not a blocked state)
 
-**Why stop-hook, not continuous:** Children are actively working. Interrupting mid-task for a rebase is disruptive and may conflict with in-progress changes. Stop-hook is a natural breakpoint.
+**No stop-hook rebase check needed.** No fetch/rev-list/rebase logic. The VCS handles it.
+
+### Conflict Handling
+
+Conflicts are **data, not exceptions** in jj:
+
+- A conflicted commit is a valid commit. The agent can keep working.
+- Conflict markers use `snapshot` style (configured in `.jjconfig.toml`) — base, side A diff, side B snapshot. Highly parseable by LLMs.
+- Detection: `jj log -r 'conflicts()'` returns all conflicted commits
+- Resolution: agent edits files to resolve, commits normally
+- If agent can't resolve: sends question to parent via messaging
 
 ### Merge Strategy by Node Type
 
@@ -76,6 +95,8 @@ When child A's PR merges into the parent branch, siblings B and C are now behind
 | Worker (Gemini leaf) | Squash merge | Single logical change, clean history |
 | Subtree (Claude) | Merge commit | Preserves child PR history for debugging |
 | Root → main | Squash merge | Clean main branch history |
+
+jj handles squash merges cleanly: `jj git fetch` auto-abandons local commits whose changes are incorporated into the squashed parent.
 
 ### Review Token Economics
 
@@ -94,9 +115,9 @@ Parent only burns tokens on PRs that clear the mechanical bar. Most child ↔ Co
 
 **Child goes silent.** If no events from a child for configurable timeout (default 30m), parent gets a "[SILENT]" warning event. Can inspect child's tab directly or send a ping.
 
-**Merge conflict between siblings.** Indicates overlapping decomposition — a parent planning error. Parent arbitrates: may merge one sibling first, then rebase the other, providing guidance on conflict resolution.
+**Merge conflict between siblings.** jj stores the conflict as data. The sibling resolves it autonomously — it has full context of its own code. If the conflict is in code it doesn't own, it sends a question to parent. This is no longer a "parent planning error" — it's a normal event handled by the VCS.
 
-**Decomposition was wrong.** Parent realizes mid-fold that the split doesn't work. Can kill remaining children, re-decompose, spawn new subtrees. The fold is not committed until the parent merges upward.
+**Decomposition was wrong.** Parent realizes mid-fold that the split doesn't work. Can kill remaining children, re-decompose, spawn new subtrees. The fold is not committed until the parent merges upward. jj's operation log allows full rollback if needed (`jj op restore`).
 
 ## Consequences
 
@@ -104,9 +125,11 @@ Parent only burns tokens on PRs that clear the mechanical bar. Most child ↔ Co
 - GitHub is the audit trail (PRs, reviews, CI checks)
 - Copilot handles the mechanical review loop for free
 - Parents only wake for high-value decisions (architectural review, merge)
-- Standard git workflow — nothing proprietary in the merge mechanics
+- Rebase cascade is a VCS primitive, not orchestration code we maintain
+- Conflicts never block the tree — always stored as data
+- Full deterministic undo via jj operation log
 
 **Negative:**
 - Squash merges lose per-commit history within leaves
-- Stop-hook rebase means siblings may work on stale code briefly
 - GitHub API polling adds latency vs. webhooks (acceptable for v1)
+- Agents may occasionally hallucinate git commands instead of jj (mitigated: operations wrapped in effects)
