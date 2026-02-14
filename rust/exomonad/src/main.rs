@@ -774,13 +774,6 @@ async fn main() -> Result<()> {
                 exomonad_core::register_builtin_handlers(builder, &services);
             let rt = builder.build().await.context("Failed to build runtime")?;
 
-            // Start background GitHub PR poller (watches agent PRs for Copilot reviews + CI status)
-            let poller = exomonad_core::services::github_poller::GitHubPoller::new(
-                event_queue.clone(),
-                project_dir.clone(),
-            );
-            tokio::spawn(async move { poller.run().await });
-
             let mut base_state = rt.into_mcp_state(project_dir.clone());
             base_state.question_registry = Some(question_registry);
 

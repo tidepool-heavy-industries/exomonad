@@ -76,10 +76,7 @@ impl GitHubPoller {
 
         // 2. Fetch all open PRs
         let endpoint = format!("/repos/{}/{}/pulls?state=open&per_page=100", owner, repo);
-        let output = Command::new("gh")
-            .args(["api", &endpoint, "--json", "number,head"])
-            .output()
-            .await?;
+        let output = Command::new("gh").args(["api", &endpoint]).output().await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
