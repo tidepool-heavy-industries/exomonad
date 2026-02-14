@@ -159,11 +159,16 @@ impl EventEffects for EventHandler {
                 .unwrap_or_else(|| "root".to_string())
         });
         // Prefer agent_id from the request (set by WASM caller) over task-local/env fallback
-        let agent_id = if req.agent_id.is_empty() {
-            crate::mcp::agent_identity::get_agent_id()
+        let (agent_id, agent_id_source) = if req.agent_id.is_empty() {
+            (crate::mcp::agent_identity::get_agent_id(), "fallback")
         } else {
-            req.agent_id.clone()
+            (req.agent_id.clone(), "request")
         };
+        tracing::debug!(
+            agent_id = %agent_id,
+            source = agent_id_source,
+            "notify_parent: resolved agent_id"
+        );
 
         // Identity model:
         // - Subtree agents: session_id is their own branch name (e.g. "main.feature-a").
@@ -200,26 +205,26 @@ impl EventEffects for EventHandler {
         };
 
         if let Some(ref url) = self.remote_url {
+            tracing::debug!(url = %url, parent_session_id = %parent_session_id, "notify_parent: forwarding to remote server");
             let forward_req = NotifyEventRequest {
                 session_id: parent_session_id,
                 event: Some(event),
             };
             let body = forward_req.encode_to_vec();
 
-            let resp = self
-                .client
-                .post(url)
-                .body(body)
-                .send()
-                .await
-                .map_err(|e| crate::effects::EffectError::network_error(e.to_string()))?;
+            let resp = self.client.post(url).body(body).send().await.map_err(|e| {
+                tracing::error!(url = %url, error = %e, "notify_parent: remote forwarding failed");
+                crate::effects::EffectError::network_error(e.to_string())
+            })?;
 
             if !resp.status().is_success() {
+                tracing::error!(status = %resp.status(), "notify_parent: remote server returned error");
                 return Err(crate::effects::EffectError::network_error(format!(
                     "Server returned {} during parent notification",
                     resp.status()
                 )));
             }
+            tracing::debug!(status = %resp.status(), "notify_parent: remote forwarding succeeded");
         } else {
             self.queue.notify_event(&parent_session_id, event).await;
         }
@@ -227,6 +232,7 @@ impl EventEffects for EventHandler {
         // Inject natural-language notification into parent's Zellij pane
         let tab_name = self.resolve_parent_tab_name();
         let notification = format_parent_notification(&agent_id, &req.status, &req.message);
+        tracing::debug!(tab = %tab_name, chars = notification.len(), "notify_parent: injecting notification into parent pane");
         zellij_events::inject_input(&tab_name, &notification);
 
         Ok(NotifyParentResponse { ack: true })

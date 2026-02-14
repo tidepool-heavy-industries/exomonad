@@ -311,6 +311,12 @@ async fn handle_hook_inner(
         .session_id
         .clone()
         .unwrap_or_else(|| "root".to_string());
+    debug!(
+        agent_id = %agent_id_for_hook,
+        session_id = %session_id_for_hook,
+        agent_id_from_param = ?params.agent_id,
+        "Hook identity context"
+    );
 
     if is_stop_hook {
         let internal_output: InternalStopHookOutput =
