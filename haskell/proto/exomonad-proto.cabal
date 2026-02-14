@@ -52,6 +52,8 @@ library
     Effects.Messaging
     Effects.Coordination
     Effects.Events
+    Effects.Jj
+    Effects.MergePr
     -- Hand-written compatibility layer
     ExoMonad.Compat
   build-depends:
