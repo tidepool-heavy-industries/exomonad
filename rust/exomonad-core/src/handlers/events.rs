@@ -3,7 +3,7 @@
 //! Uses proto-generated types from `exomonad_proto::effects::events`.
 
 use crate::effects::{dispatch_events_effect, EffectHandler, EffectResult, EventEffects};
-use crate::services::EventQueue;
+use crate::services::{zellij_events, EventQueue};
 use async_trait::async_trait;
 use exomonad_proto::effects::events::*;
 use prost::Message;
@@ -32,6 +32,33 @@ impl EventHandler {
             queue,
             remote_url,
             session_id,
+        }
+    }
+
+    fn resolve_parent_tab_name(&self) -> String {
+        let session_id = self.session_id.as_deref().unwrap_or("");
+        let agent_id = crate::mcp::agent_identity::get_agent_id();
+
+        if agent_id.ends_with("-gemini") {
+            // Worker: session_id is parent's session ID
+            if session_id.contains('.') {
+                let slug = session_id.rsplit_once('.').map(|(_, s)| s).unwrap_or(session_id);
+                format!("\u{1F916} {}", slug)
+            } else {
+                "TL".to_string()
+            }
+        } else {
+            // Subtree agent: parent is one level up
+            if let Some((parent, _)) = session_id.rsplit_once('.') {
+                if parent.contains('.') {
+                    let slug = parent.rsplit_once('.').map(|(_, s)| s).unwrap_or(parent);
+                    format!("\u{1F916} {}", slug)
+                } else {
+                    "TL".to_string()
+                }
+            } else {
+                "TL".to_string()
+            }
         }
     }
 }
@@ -146,9 +173,9 @@ impl EventEffects for EventHandler {
         let event = Event {
             event_id: 0, // Assigned by EventQueue
             event_type: Some(event::EventType::WorkerComplete(WorkerComplete {
-                worker_id: agent_id,
-                status: req.status,
-                message: req.message,
+                worker_id: agent_id.clone(),
+                status: req.status.clone(),
+                message: req.message.clone(),
                 changes: Vec::new(),
             })),
         };
@@ -178,6 +205,27 @@ impl EventEffects for EventHandler {
             self.queue.notify_event(&parent_session_id, event).await;
         }
 
+        // Inject natural-language notification into parent's Zellij pane
+        let tab_name = self.resolve_parent_tab_name();
+        let notification = format_parent_notification(&agent_id, &req.status, &req.message);
+        zellij_events::inject_input(&tab_name, &notification);
+
         Ok(NotifyParentResponse { ack: true })
+    }
+}
+
+fn format_parent_notification(agent_id: &str, status: &str, message: &str) -> String {
+    match status {
+        "success" => format!(
+            "[CHILD COMPLETE: {}] {}",
+            agent_id,
+            if message.is_empty() { "Task completed successfully." } else { message }
+        ),
+        "failure" => format!(
+            "[CHILD FAILED: {}] {}",
+            agent_id,
+            if message.is_empty() { "Task failed." } else { message }
+        ),
+        _ => format!("[CHILD STATUS: {} - {}] {}", agent_id, status, message),
     }
 }

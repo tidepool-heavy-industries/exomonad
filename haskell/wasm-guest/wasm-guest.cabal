@@ -65,6 +65,7 @@ library wasm-guest-internal
         ExoMonad.Guest.Tools.Messaging
         ExoMonad.Guest.Tools.Spawn
         ExoMonad.Guest.Tools.Events
+        ExoMonad.Guest.Events.Templates
         -- SpawnSpec compiler
         ExoMonad.Guest.SpawnSpec.Types
         ExoMonad.Guest.SpawnSpec.Zones
