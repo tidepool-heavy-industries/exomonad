@@ -376,7 +376,7 @@ impl GitHubPoller {
             branch, status, message
         );
 
-        // 1. Queue Event
+        // 1. Queue event to owning agent (branch name IS the agent's session_id)
         let event = Event {
             event_id: 0,
             event_type: Some(EventType::WorkerComplete(WorkerComplete {
@@ -386,13 +386,30 @@ impl GitHubPoller {
                 changes: vec![],
             })),
         };
-        self.event_queue.notify_event("root", event).await;
+        self.event_queue.notify_event(branch, event).await;
 
-        // 2. Inject to Zellij
-        // Extract slug: main.feature-a -> feature-a
-        let slug = branch.rsplit_once('.').map(|(_, s)| s).unwrap_or(branch);
-        let tab_name = format!("\u{1F916} {}", slug); // Robot emoji
+        // 2. Inject actionable events to agent's Zellij pane
+        let agent_message = match status {
+            "copilot_review" => Some(format!(
+                "[Copilot Review Feedback]\n\
+                 The following review comments were left on your PR. \
+                 Read each comment, then address the issues raised.\n\n\
+                 {}",
+                message
+            )),
+            "failure" => Some(format!(
+                "[CI Failed]\n\
+                 CI checks failed on your branch ({branch}). \
+                 Investigate the failures and push a fix."
+            )),
+            // success, pending, etc. — non-actionable, don't interrupt the agent
+            _ => None,
+        };
 
-        zellij_events::inject_input(&tab_name, message);
+        if let Some(agent_message) = agent_message {
+            let slug = branch.rsplit_once('.').map(|(_, s)| s).unwrap_or(branch);
+            let tab_name = format!("\u{1F916} {}", slug);
+            zellij_events::inject_input(&tab_name, &agent_message);
+        }
     }
 }
