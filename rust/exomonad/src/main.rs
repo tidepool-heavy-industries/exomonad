@@ -263,10 +263,10 @@ async fn handle_hook_inner(
         HookEventType::PreToolUse | HookEventType::BeforeTool => HookDispatch::ToolUse,
         HookEventType::PostToolUse => HookDispatch::ToolUse,
         HookEventType::WorkerExit => HookDispatch::WorkerExit,
+        HookEventType::SessionStart => HookDispatch::ToolUse,
         HookEventType::Notification
         | HookEventType::SubagentStart
         | HookEventType::PreCompact
-        | HookEventType::SessionStart
         | HookEventType::PermissionRequest
         | HookEventType::UserPromptSubmit => {
             debug!(event = ?event_type, "Hook type not handled by WASM, allowing");
@@ -302,6 +302,7 @@ async fn handle_hook_inner(
         HookEventType::PreToolUse | HookEventType::BeforeTool => "PreToolUse",
         HookEventType::PostToolUse => "PostToolUse",
         HookEventType::WorkerExit => "WorkerExit",
+        HookEventType::SessionStart => "SessionStart",
         _ => unreachable!("passthrough events returned early above"),
     };
     hook_input.hook_event_name = normalized_event_name.to_string();
@@ -837,6 +838,9 @@ async fn main() -> Result<()> {
             let agent_control = Arc::new(agent_control);
 
             let event_queue = Arc::new(exomonad_core::services::event_queue::EventQueue::new());
+            let claude_session_registry = Arc::new(
+                exomonad_core::services::claude_session_registry::ClaudeSessionRegistry::new(),
+            );
 
             info!(
                 wasm_path = %wasm_path.display(),
@@ -860,6 +864,7 @@ async fn main() -> Result<()> {
                     "events".to_string(),
                     "messaging".to_string(),
                     "coordination".to_string(),
+                    "session".to_string(),
                 ]);
             builder = builder.with_handlers(exomonad_core::core_handlers(project_dir.clone()));
             builder = builder.with_handlers(exomonad_core::git_handlers(git, github));
@@ -870,6 +875,7 @@ async fn main() -> Result<()> {
                 project_dir.clone(),
                 remote_port,
                 Some(event_session_id),
+                claude_session_registry,
             );
             builder = builder.with_handlers(orch_handlers);
             let rt = builder.build().await.context("Failed to build runtime")?;

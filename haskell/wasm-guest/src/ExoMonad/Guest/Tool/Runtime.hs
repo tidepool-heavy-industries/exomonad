@@ -148,6 +148,7 @@ hookHandler config = do
     Right hookInput -> do
       let hookType = hiHookEventName hookInput
       let hookName = case hookType of
+            SessionStart -> "SessionStart"
             SessionEnd -> "SessionEnd"
             Stop -> "Stop"
             SubagentStop -> "SubagentStop"
@@ -157,6 +158,7 @@ hookHandler config = do
       logInfo_ ("Hook received: " <> hookName)
 
       case hookType of
+        SessionStart -> handleSessionStart hookInput (onSessionStart config)
         SessionEnd -> handleStopHook hookInput (onStop config)
         Stop -> handleStopHook hookInput (onStop config)
         SubagentStop -> handleStopHook hookInput (onSubagentStop config)
@@ -164,6 +166,12 @@ hookHandler config = do
         PostToolUse -> handlePreToolUse hookInput (postToolUse config)
         WorkerExit -> handleWorkerExit hookInput
   where
+    handleSessionStart :: HookInput -> (HookInput -> Eff '[IO] HookOutput) -> IO CInt
+    handleSessionStart hookInput hook = do
+      result <- runM $ hook hookInput
+      output (BSL.toStrict $ Aeson.encode result)
+      pure 0
+
     handlePreToolUse :: HookInput -> (HookInput -> Eff '[IO] HookOutput) -> IO CInt
     handlePreToolUse hookInput hook = do
       result <- runM $ hook hookInput

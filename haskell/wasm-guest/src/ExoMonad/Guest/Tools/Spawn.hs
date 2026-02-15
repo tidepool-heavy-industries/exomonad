@@ -29,8 +29,7 @@ data SpawnSubtree
 
 data SpawnSubtreeArgs = SpawnSubtreeArgs
   { ssTask :: Text,
-    ssBranchName :: Text,
-    ssParentSessionId :: Text
+    ssBranchName :: Text
   }
   deriving (Show, Eq, Generic)
 
@@ -39,7 +38,6 @@ instance FromJSON SpawnSubtreeArgs where
     SpawnSubtreeArgs
       <$> v .: "task"
       <*> v .: "branch_name"
-      <*> v .: "parent_session_id"
 
 instance MCPTool SpawnSubtree where
   type ToolArgs SpawnSubtree = SpawnSubtreeArgs
@@ -48,7 +46,7 @@ instance MCPTool SpawnSubtree where
   toolSchema =
     object
       [ "type" .= ("object" :: Text),
-        "required" .= (["task", "branch_name", "parent_session_id"] :: [Text]),
+        "required" .= (["task", "branch_name"] :: [Text]),
         "properties"
           .= object
             [ "task"
@@ -60,16 +58,11 @@ instance MCPTool SpawnSubtree where
                 .= object
                   [ "type" .= ("string" :: Text),
                     "description" .= ("Branch name suffix (will be prefixed with current branch)" :: Text)
-                  ],
-              "parent_session_id"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "description" .= ("Your CLAUDE_SESSION_ID (read from $CLAUDE_SESSION_ID env var). Enables context inheritance via --resume --fork-session." :: Text)
                   ]
             ]
       ]
   toolHandler args = do
-    result <- runM $ AC.runAgentControl $ AC.spawnSubtree (ssTask args) (ssBranchName args) (ssParentSessionId args)
+    result <- runM $ AC.runAgentControl $ AC.spawnSubtree (ssTask args) (ssBranchName args) ""
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> pure $ successResult $ Aeson.toJSON spawnResult

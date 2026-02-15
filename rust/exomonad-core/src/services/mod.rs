@@ -1,4 +1,5 @@
 pub mod agent_control;
+pub mod claude_session_registry;
 pub mod coordination;
 pub mod copilot_review;
 pub mod docker;

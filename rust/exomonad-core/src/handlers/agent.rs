@@ -9,10 +9,12 @@ use crate::services::agent_control::{
     AgentControlService, AgentInfo, AgentType as ServiceAgentType, SpawnGeminiTeammateOptions,
     SpawnOptions, SpawnSubtreeOptions, SpawnWorkerOptions,
 };
+use crate::services::claude_session_registry::ClaudeSessionRegistry;
 use crate::{GithubOwner, GithubRepo, IssueNumber};
 use async_trait::async_trait;
 use exomonad_proto::effects::agent::*;
 use std::sync::Arc;
+use tracing::info;
 
 /// Agent effect handler.
 ///
@@ -20,11 +22,20 @@ use std::sync::Arc;
 /// the generated `dispatch_agent_effect` function.
 pub struct AgentHandler {
     service: Arc<AgentControlService>,
+    claude_session_registry: Option<Arc<ClaudeSessionRegistry>>,
 }
 
 impl AgentHandler {
     pub fn new(service: Arc<AgentControlService>) -> Self {
-        Self { service }
+        Self {
+            service,
+            claude_session_registry: None,
+        }
+    }
+
+    pub fn with_claude_session_registry(mut self, reg: Arc<ClaudeSessionRegistry>) -> Self {
+        self.claude_session_registry = Some(reg);
+        self
     }
 }
 
@@ -175,10 +186,30 @@ impl AgentEffects for AgentHandler {
     }
 
     async fn spawn_subtree(&self, req: SpawnSubtreeRequest) -> EffectResult<SpawnSubtreeResponse> {
+        // Look up Claude session UUID from registry (overrides whatever WASM sent)
+        let parent_session_id = if let Some(ref registry) = self.claude_session_registry {
+            let registry_key =
+                crate::mcp::agent_identity::get_agent_id();
+            let key = if registry_key.is_empty() {
+                "root".to_string()
+            } else {
+                registry_key
+            };
+            let claude_uuid = registry.get(&key).await;
+            info!(
+                key = %key,
+                claude_uuid = ?claude_uuid,
+                "Looked up Claude session UUID for spawn_subtree"
+            );
+            claude_uuid.unwrap_or_default()
+        } else {
+            req.parent_session_id.clone()
+        };
+
         let options = SpawnSubtreeOptions {
             task: req.task.clone(),
             branch_name: req.branch_name.clone(),
-            parent_session_id: req.parent_session_id.clone(),
+            parent_session_id,
         };
 
         let result = self

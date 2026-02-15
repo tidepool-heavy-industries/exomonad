@@ -99,6 +99,7 @@ library wasm-guest-internal
         ExoMonad.Effects.MergePR
         ExoMonad.Effects.Copilot
         ExoMonad.Effects.Events
+        ExoMonad.Effects.Session
         ExoMonad.Effects.Messaging
         ExoMonad.Effects.KV
         -- Types

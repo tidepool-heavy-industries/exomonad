@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::effects::EffectHandler;
 use crate::services::agent_control::AgentControlService;
+use crate::services::claude_session_registry::ClaudeSessionRegistry;
 use crate::services::coordination::CoordinationService;
 use crate::services::event_queue::EventQueue;
 use crate::services::filesystem::FileSystemService;
@@ -13,7 +14,7 @@ use crate::services::questions::QuestionRegistry;
 use super::{
     AgentHandler, CoordinationHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler,
     GitHandler, GitHubHandler, JjHandler, KvHandler, LogHandler, MergePRHandler, MessagingHandler,
-    PopupHandler,
+    PopupHandler, SessionHandler,
 };
 
 /// Core handlers every consumer needs: logging, key-value store, filesystem.
@@ -62,12 +63,16 @@ pub fn orchestration_handlers(
     project_dir: PathBuf,
     remote_port: Option<u16>,
     session_id: Option<String>,
+    claude_session_registry: Arc<ClaudeSessionRegistry>,
 ) -> (Vec<Box<dyn EffectHandler>>, Arc<QuestionRegistry>) {
     let question_registry = Arc::new(QuestionRegistry::new());
     let coordination_service = Arc::new(CoordinationService::new());
 
     let handlers: Vec<Box<dyn EffectHandler>> = vec![
-        Box::new(AgentHandler::new(agent_control)),
+        Box::new(
+            AgentHandler::new(agent_control)
+                .with_claude_session_registry(claude_session_registry.clone()),
+        ),
         Box::new(PopupHandler::new(zellij_session)),
         Box::new(EventHandler::new(event_queue, remote_port, session_id)),
         Box::new(MessagingHandler::new(
@@ -75,6 +80,7 @@ pub fn orchestration_handlers(
             project_dir,
         )),
         Box::new(CoordinationHandler::new(coordination_service)),
+        Box::new(SessionHandler::new(claude_session_registry)),
     ];
 
     (handlers, question_registry)

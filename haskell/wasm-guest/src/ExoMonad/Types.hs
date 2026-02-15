@@ -8,12 +8,15 @@ module ExoMonad.Types
     HookConfig (..),
     HookEffects,
     defaultHooks,
+    defaultSessionStartHook,
   )
 where
 
-import Control.Monad.Freer (Eff)
+import Control.Monad (void)
+import Control.Monad.Freer (Eff, sendM)
 import Data.Text (Text)
-import ExoMonad.Guest.Types (HookInput, HookOutput, StopHookOutput, allowResponse, allowStopResponse, postToolUseResponse)
+import ExoMonad.Effects.Session qualified as Session
+import ExoMonad.Guest.Types (HookInput (..), HookOutput, StopHookOutput, allowResponse, allowStopResponse, postToolUseResponse)
 import GHC.Generics (Generic)
 
 -- | Effects available to hooks.
@@ -39,7 +42,9 @@ data HookConfig = HookConfig
     -- | Called when the agent stops (e.g. /stop or session end).
     onStop :: HookInput -> Eff HookEffects StopHookOutput,
     -- | Called when a sub-agent stops.
-    onSubagentStop :: HookInput -> Eff HookEffects StopHookOutput
+    onSubagentStop :: HookInput -> Eff HookEffects StopHookOutput,
+    -- | Called on session start. Default: registers Claude session ID for fork-session.
+    onSessionStart :: HookInput -> Eff HookEffects HookOutput
   }
 
 -- | Default hooks that allow everything.
@@ -49,5 +54,13 @@ defaultHooks =
     { preToolUse = \_ -> pure (allowResponse Nothing),
       postToolUse = \_ -> pure (postToolUseResponse Nothing),
       onStop = \_ -> pure allowStopResponse,
-      onSubagentStop = \_ -> pure allowStopResponse
+      onSubagentStop = \_ -> pure allowStopResponse,
+      onSessionStart = defaultSessionStartHook
     }
+
+-- | Default SessionStart hook: registers the Claude session UUID for fork-session support.
+defaultSessionStartHook :: HookInput -> Eff HookEffects HookOutput
+defaultSessionStartHook hookInput = do
+  let claudeUuid = hiSessionId hookInput
+  sendM $ void $ Session.registerClaudeSession claudeUuid
+  pure (allowResponse Nothing)

@@ -31,6 +31,7 @@ pub mod log;
 pub mod merge_pr;
 pub mod messaging;
 pub mod popup;
+pub mod session;
 
 pub use agent::AgentHandler;
 pub use coordination::CoordinationHandler;
@@ -48,3 +49,4 @@ pub use log::LogHandler;
 pub use merge_pr::MergePRHandler;
 pub use messaging::MessagingHandler;
 pub use popup::PopupHandler;
+pub use session::SessionHandler;

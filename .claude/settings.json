@@ -1,5 +1,15 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "exomonad hook session-start"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "TeamCreate",
