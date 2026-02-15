@@ -1009,6 +1009,14 @@ impl AgentControlService {
                     .await;
             }
 
+            // Clean up stale branch if it exists
+            info!(branch = %branch_name, "Deleting stale branch if exists");
+            let _ = Command::new("git")
+                .args(["branch", "-D", &branch_name])
+                .current_dir(effective_project_dir)
+                .output()
+                .await;
+
             info!(
                 base_branch = %current_branch,
                 branch_name = %branch_name,
@@ -1142,6 +1150,14 @@ impl AgentControlService {
                     .output()
                     .await;
             }
+
+            // Clean up stale branch if it exists
+            info!(branch = %branch_name, "Deleting stale branch if exists");
+            let _ = Command::new("git")
+                .args(["branch", "-D", &branch_name])
+                .current_dir(effective_project_dir)
+                .output()
+                .await;
 
             info!(
                 base_branch = %current_branch,
