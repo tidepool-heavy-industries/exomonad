@@ -993,6 +993,26 @@ impl AgentControlService {
                 return Err(anyhow!("git worktree add failed: {}", stderr));
             }
 
+            // Create jj bookmark pointing at the new branch
+            info!(branch = %branch_name, worktree = %worktree_path.display(), "Creating jj bookmark");
+            let jj_output = Command::new("jj")
+                .args(["bookmark", "create", &branch_name, "-r", "@"])
+                .current_dir(&worktree_path)
+                .output()
+                .await;
+            match jj_output {
+                Ok(o) if o.status.success() => {
+                    info!(branch = %branch_name, "jj bookmark created");
+                }
+                Ok(o) => {
+                    let stderr = String::from_utf8_lossy(&o.stderr);
+                    warn!(branch = %branch_name, stderr = %stderr, "jj bookmark create failed (non-fatal)");
+                }
+                Err(e) => {
+                    warn!(branch = %branch_name, error = %e, "Failed to run jj bookmark create (non-fatal)");
+                }
+            }
+
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
             // Session ID = birth-branch (the new branch name)
@@ -1135,6 +1155,26 @@ impl AgentControlService {
                 return Err(anyhow!("git worktree add failed: {}", stderr));
             }
 
+            // Create jj bookmark pointing at the new branch
+            info!(branch = %branch_name, worktree = %worktree_path.display(), "Creating jj bookmark");
+            let jj_output = Command::new("jj")
+                .args(["bookmark", "create", &branch_name, "-r", "@"])
+                .current_dir(&worktree_path)
+                .output()
+                .await;
+            match jj_output {
+                Ok(o) if o.status.success() => {
+                    info!(branch = %branch_name, "jj bookmark created");
+                }
+                Ok(o) => {
+                    let stderr = String::from_utf8_lossy(&o.stderr);
+                    warn!(branch = %branch_name, stderr = %stderr, "jj bookmark create failed (non-fatal)");
+                }
+                Err(e) => {
+                    warn!(branch = %branch_name, error = %e, "Failed to run jj bookmark create (non-fatal)");
+                }
+            }
+
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
             // Session ID = birth-branch (the new branch name)
@@ -1267,7 +1307,30 @@ impl AgentControlService {
 
         // Remove git worktree if it exists
         let worktree_path = self.worktree_base.join(&internal_name);
+        let mut worktree_branch: Option<String> = None;
         if worktree_path.exists() {
+            // Capture branch name before removing worktree (needed for jj bookmark cleanup)
+            if let Ok(branch_output) = Command::new("git")
+                .args([
+                    "-C",
+                    &worktree_path.to_string_lossy(),
+                    "rev-parse",
+                    "--abbrev-ref",
+                    "HEAD",
+                ])
+                .output()
+                .await
+            {
+                if branch_output.status.success() {
+                    let branch = String::from_utf8_lossy(&branch_output.stdout)
+                        .trim()
+                        .to_string();
+                    if !branch.is_empty() && branch != "HEAD" {
+                        worktree_branch = Some(branch);
+                    }
+                }
+            }
+
             info!(path = %worktree_path.display(), "Removing git worktree");
             let output = Command::new("git")
                 .args([
@@ -1297,6 +1360,28 @@ impl AgentControlService {
                         error = %e,
                         "Failed to run git worktree remove (non-fatal)"
                     );
+                }
+            }
+        }
+
+        // Delete jj bookmark if we captured the branch name
+        if let Some(ref branch) = worktree_branch {
+            info!(branch = %branch, "Deleting jj bookmark");
+            let jj_output = Command::new("jj")
+                .args(["bookmark", "delete", branch])
+                .current_dir(&self.project_dir)
+                .output()
+                .await;
+            match jj_output {
+                Ok(o) if o.status.success() => {
+                    info!(branch = %branch, "jj bookmark deleted");
+                }
+                Ok(o) => {
+                    let stderr = String::from_utf8_lossy(&o.stderr);
+                    warn!(branch = %branch, stderr = %stderr, "jj bookmark delete failed (non-fatal)");
+                }
+                Err(e) => {
+                    warn!(branch = %branch, error = %e, "Failed to run jj bookmark delete (non-fatal)");
                 }
             }
         }

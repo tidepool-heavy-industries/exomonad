@@ -98,5 +98,4 @@ mod tests {
             "command execution failed: git --version failed"
         );
     }
-
 }
