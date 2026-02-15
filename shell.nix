@@ -30,6 +30,7 @@ let
     haskell.compiler.ghc910
     cabal-install
     haskell-language-server
+    ormolu
     zlib
     zlib.dev
     pkg-config
