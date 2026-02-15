@@ -1,15 +1,12 @@
-# ExoMonad - Type-Safe LLM Agent Framework
+# ExoMonad
 
-A Haskell library for building LLM agents as typed state machines. Agents are IO-blind - they yield typed effects that runners interpret.
+Type-safe LLM agent orchestration. Haskell WASM defines all logic (tool schemas, handlers, decision trees). Rust executes I/O effects. Zellij provides isolation and multiplexing. Agents are IO-blind state machines that yield typed effects.
 
-## Two Audiences
+---
 
-This doc serves two audiences:
+## Rules
 
-1. **Using ExoMonad** - Building agents in consuming repos (urchin)
-2. **Developing ExoMonad** - Working on the framework itself
-
-### HUMAN STYLE OVERRIDES
+### Style
 
 ALWAYS update CLAUDE.md files when you make changes. Adding new documentation is critical, as is removing stale documentation.
 
@@ -19,19 +16,70 @@ The repository should be kept clean of dead code, placeholders, and half-done he
 
 Always prefer failure to an undocumented heuristic or fallback.
 
-### SINGLE CODE PATH
+### Single Code Path
 
 Never maintain two code paths that do the same thing. Redundant paths cause bug risk — fixes applied to one path get missed on the other. If there's a "debug mode" or "legacy mode" that duplicates a primary path, cut it.
 
-Concrete example: if you find two code paths doing the same dispatch (e.g., "direct Rust tools" alongside WASM routing), delete the redundant one.
+### All Tools and Hooks in Haskell WASM
 
-### SESSION ENTRY POINT
+**Never add direct Rust MCP tools.** All MCP tools and hooks are defined in Haskell WASM — tool schemas, argument parsing, dispatch logic, everything. Rust is the I/O runtime: it executes effects that the Haskell DSL yields. If a new tool needs new I/O capabilities, add a new effect handler in Rust and a corresponding effect type in Haskell. The tool itself lives in `haskell/wasm-guest/src/ExoMonad/Guest/Tools/`.
+
+This is the entire architectural premise. Haskell WASM is the single source of truth for tool definitions. Rust never defines tool schemas, never parses tool arguments, never contains tool logic.
+
+### Crosscutting Rules
+
+When you learn something that applies to a crosscutting context (a programming language, a tool like git worktrees, a pattern that spans directories), **create or update a `.claude/rules/*.md` file** rather than documenting it in a directory-specific CLAUDE.md.
+
+Examples: language idioms (`.claude/rules/haskell.md`, `.claude/rules/rust.md`), tool usage patterns (git, cabal, cargo, zellij), architectural patterns that span the codebase.
+
+Rules files use YAML frontmatter to scope when they load:
+```yaml
+---
+paths:
+  - "**/*.hs"
+---
+```
+
+### Logging
+
+Silent failures are unacceptable. When code shells out to subprocesses, calls external services, or crosses process/container boundaries, **log aggressively**:
+
+1. **Before the call**: Log what you're about to do (command, key parameters)
+2. **After the call**: Log exit code, status, response size
+3. **On error**: Log stderr, error messages, enough context to debug without reproducing
+4. **On success**: Log the result summary (e.g., `button=submit`, `items=5`)
+
+**Haskell pattern:**
+```haskell
+logInfo logger $ "[Component] Starting operation: " <> summary
+(exitCode, stdout, stderr) <- readProcessWithExitCode cmd args ""
+logInfo logger $ "[Component] Exit code: " <> T.pack (show exitCode)
+case exitCode of
+  ExitFailure code -> logError logger $ "[Component] FAILED: " <> T.pack stderr
+  ExitSuccess -> logInfo logger $ "[Component] Success: " <> resultSummary
+```
+
+**Rust pattern:**
+```rust
+tracing::info!("Executing: {} {}", cmd, args.join(" "));
+let status = Command::new(cmd).args(&args).status()?;
+tracing::info!("{} returned: {:?}", cmd, status);
+if !status.success() {
+    tracing::error!("{} failed with status: {}", cmd, status);
+}
+```
+
+---
+
+## Getting Started
+
+### Session Entry Point
 
 **`exomonad init` is THE entry point for development sessions.** It creates a Zellij session with:
 - **Server tab**: Runs `exomonad serve --port 7432` (the HTTP MCP server, required for all tool calls)
 - **TL tab**: Runs `nix develop` (where you launch `claude` or work directly)
 
-The server must be running before Claude Code or Gemini can use MCP tools. Without it, every tool call fails. `exomonad init` ensures this by making the server tab part of the session layout.
+The server must be running before Claude Code or Gemini can use MCP tools. Without it, every tool call fails.
 
 ```bash
 cd exomonad/                  # Run from the project root
@@ -43,82 +91,212 @@ claude                        # MCP tools available immediately
 Use `--recreate` to tear down and rebuild the session (e.g., after binary updates).
 Use `--port` to override the default port (7432).
 
-MCP registration is separate — use `claude mcp add` / `gemini mcp add` once per project:
+### MCP Registration
+
+One-time setup per project:
 ```bash
 claude mcp add --transport http exomonad http://localhost:7432/tl/mcp
 gemini mcp add --transport http exomonad http://localhost:7432/tl/mcp
 ```
 
-### ALL MCP TOOLS AND HOOKS MUST BE DEFINED IN HASKELL DSL
+### Building
 
-**Never add direct Rust MCP tools.** All MCP tools and hooks are defined in Haskell WASM — tool schemas, argument parsing, dispatch logic, everything. Rust is the I/O runtime: it executes effects that the Haskell DSL yields. If a new tool needs new I/O capabilities, add a new effect handler in Rust and a corresponding effect type in Haskell. The tool itself lives in `haskell/wasm-guest/src/ExoMonad/Guest/Tools/`.
+```bash
+# One-command install (recommended - uses debug build for fast iteration)
+just install-all-dev
 
-This is the entire architectural premise. Haskell WASM is the single source of truth for tool definitions. Rust never defines tool schemas, never parses tool arguments, never contains tool logic.
+# Or install release build (optimized, slower compile)
+just install-all
 
-### CROSSCUTTING RULES
+# WASM builds (hermetic via nix)
+just wasm-all
 
-When you learn something that applies to a crosscutting context (a programming language, a tool like git worktrees, a pattern that spans directories), **create or update a `.claude/rules/*.md` file** rather than documenting it in a directory-specific CLAUDE.md.
+# Rust sidecar only
+cargo build -p exomonad
 
-Examples of crosscutting concerns:
-- Language idioms (`.claude/rules/haskell.md`, `.claude/rules/rust.md`)
-- Tool usage patterns (git, cabal, cargo, zellij)
-- Architectural patterns that span the codebase
+# Hot reload workflow (HTTP serve mode)
+exomonad serve                # Start server
+# ... edit .exo/roles/tl/Role.hs ...
+exomonad recompile --role tl  # Rebuild WASM via nix, copy to .exo/wasm/
+# Next tool call picks up new WASM automatically
+```
 
-Rules files use YAML frontmatter to scope when they load:
-```yaml
+**What `just install-all-dev` does:**
+1. Builds unified WASM plugin via nix
+2. Builds exomonad Rust binary (debug mode)
+3. Copies binary to `~/.cargo/bin/exomonad`
+4. Builds and installs Zellij plugins
+
+**WASM build pipeline:**
+1. User-authored `Role.hs` in `.exo/roles/<role>/` defines tool composition
+2. Generated `Main.hs` and `<role>.cabal` provide FFI scaffolding (gitignored)
+3. `cabal.project.wasm` lists role packages alongside `wasm-guest` SDK
+4. `just wasm <role>` builds via `nix develop .#wasm -c wasm32-wasi-cabal build ...`
+5. Compiled WASM copied to `.exo/wasm/wasm-guest-<role>.wasm`
+6. Both `exomonad hook` and `exomonad serve` load WASM from `.exo/wasm/` at runtime
+
+### Configuration
+
+**Bootstrap:** `exomonad init` auto-creates `.exo/config.toml` and `.gitignore` entries if missing. Works in any project directory.
+
+```toml
+default_role = "tl"  # or "dev"
+project_dir = "."
+shell_command = "nix develop"  # optional: environment wrapper for TL tab + server
+wasm_dir = ".exo/wasm"    # optional: override WASM location (default: ~/.exo/wasm/)
+```
+
+**Config hierarchy:**
+- `config.toml` uses `default_role` (project-wide default)
+- `config.local.toml` uses `role` (worktree-specific override)
+- Resolution: `local.role > global.default_role`
+- WASM: `wasm_dir` in config > `~/.exo/wasm/`
+
+**Hook configuration** is auto-generated per worktree by `write_context_files()` in `agent_control.rs` during agent spawning. Each spawned Claude agent gets `.claude/settings.local.json` with PreToolUse, SubagentStop, and SessionEnd hooks. Gemini agents get settings via `GEMINI_CLI_SYSTEM_SETTINGS_PATH` env var (NOT `.gemini/settings.json`). Do not manually create hook settings.
+
+**Claude Code settings help:** We have a Claude Code configuration specialist (preloaded with official documentation) available as an oracle for hook syntax, settings structure, MCP setup, and debugging.
+
 ---
-paths:
-  - "**/*.hs"
+
+## Capabilities
+
+What you can do with exomonad right now, end-to-end.
+
+### Orchestration
+
+Spawn heterogeneous agent teams as a recursive tree:
+
+- **`spawn_subtree`** — Fork a Claude agent into its own git worktree + Zellij tab. Gets TL role (can spawn its own children). Depth-capped at 2.
+- **`spawn_leaf_subtree`** — Fork a Gemini agent into its own git worktree + Zellij tab. Gets dev role, files PR when done.
+- **`spawn_workers`** — Spawn multiple Gemini agents as Zellij panes in the parent's directory. Ephemeral (no branch, no worktree). Config in `.exo/agents/{name}/`.
+
+**Branch naming:** `{parent_branch}.{slug}` (dot separator). PRs target parent branch, not main — merged via recursive fold up the tree.
+
+**Identity:** Birth-branch as session ID (immutable, deterministic). Root TL = "root". Filesystem IS the registry — scan `.exo/worktrees/` and `.exo/agents/` to discover agents.
+
+### Coordination
+
+Zero-polling parallel worker coordination:
+
+1. TL spawns workers → calls `wait_for_event types=["worker_complete"] timeout_secs=300`
+2. Each worker gets `EXOMONAD_SESSION_ID` env var (parent's birth-branch)
+3. When worker exits, `handleWorkerExit` hook calls `notify_parent`
+4. Server resolves parent from caller identity, delivers to EventQueue
+5. TL's `wait_for_event` wakes immediately and returns the event
+
+Use cases: parallel implementation (3+ workers on independent changes), fan-out/fan-in, progress monitoring with timeout.
+
+### Messaging
+
+Inter-agent communication between TL and dev agents:
+
+- **`note`** — Dev sends async note to TL (fire-and-forget)
+- **`question`** — Dev asks TL a question and blocks until answer arrives (trampoline architecture via `suspend`/`resume`)
+- **`get_agent_messages`** — TL reads notes and questions from agent outboxes (supports long-poll)
+- **`answer_question`** — TL answers a pending question, unblocking the dev agent
+
+### PR Workflow
+
+- **`file_pr`** — Create or update a PR for the current branch. Auto-detects base branch from dot-separated naming convention.
+- **`merge_pr`** — Merge a child's PR (`gh pr merge` + `jj git fetch` for auto-rebase). TL role only.
+
+### Interactive UI
+
+- **`popup`** — Display interactive popup in Zellij (choices, text input, checkboxes, sliders, multiselect). Rendered by the exomonad-plugin.
+
+### Not Yet Built
+
+| Feature | Impact |
+|---------|--------|
+| **Event router** (Zellij STDIN injection for dormant parents) | TL must actively poll with `wait_for_event`. Cannot be woken while idle in a different tool call. |
+| **GitHub poller** (PR status → events) | TL must manually check PR/CI status. No automatic notification when CI passes or Copilot review completes. |
+
 ---
+
+## Architecture
+
+### Components
+
+```
+Human in Zellij session
+    └── Claude Code + exomonad (Rust + Haskell WASM)
+            ├── MCP tools via WASM (spawn_subtree, spawn_leaf_subtree, spawn_workers, file_pr, etc.)
+            └── Agent tree:
+                ├── worktree: main.feature-a (TL role, can spawn children)
+                │   ├── worker: rust-impl (Gemini, in-place pane)
+                │   └── worker: haskell-impl (Gemini, in-place pane)
+                └── worktree: main.feature-b (TL role)
+                    └── ...
 ```
 
-Keep rules files focused and concise. If a rule only applies to one directory, put it in that directory's CLAUDE.md instead.
+**Haskell WASM = Embedded DSL**
+- Defines tool schemas, handlers, decision logic
+- Yields typed effects (no I/O)
+- Compiled to WASM32-WASI, loaded via Extism
+- Single source of truth for MCP tools
+- Hot reload: serve mode checks mtime per tool call
 
-### AGGRESSIVE LOGGING
+**Rust = Runtime**
+- Hosts WASM plugin, executes all effects (git, GitHub API, filesystem, Zellij)
+- Owns the process lifecycle
+- MCP server (HTTP, started by `exomonad init`)
 
-Silent failures are unacceptable. When code shells out to subprocesses, calls external services, or crosses process/container boundaries, **log aggressively**:
+**Worktrees + Zellij = Isolation/Multiplexing**
+- Git worktrees for code isolation (no Docker containers)
+- Zellij tabs for Claude subtrees, panes for Gemini workers
+- Each agent = worktree + tab (or pane), managed by Rust runtime
 
-1. **Before the call**: Log what you're about to do (command, key parameters)
-2. **After the call**: Log exit code, status, response size
-3. **On error**: Log stderr, error messages, enough context to debug without reproducing
-4. **On success**: Log the result summary (e.g., `button=submit`, `items=5`)
+### Data Flows
 
-**Pattern for subprocess calls (Haskell):**
-```haskell
-logInfo logger $ "[Component] Starting operation: " <> summary
-logDebug logger $ "[Component] Full params: " <> T.pack (show params)
-
-(exitCode, stdout, stderr) <- readProcessWithExitCode cmd args ""
-
-logInfo logger $ "[Component] Exit code: " <> T.pack (show exitCode)
-unless (null stderr) $
-  logDebug logger $ "[Component] stderr: " <> T.pack (take 500 stderr)
-
-case exitCode of
-  ExitFailure code -> do
-    logError logger $ "[Component] FAILED: " <> T.pack stderr
-    -- handle error
-  ExitSuccess -> do
-    logInfo logger $ "[Component] Success: " <> resultSummary
-    -- handle success
+**MCP Tool Call:**
+```
+Claude Code → HTTP request → exomonad serve → WASM handle_mcp_call
+→ Haskell dispatches to tool handler → yields effects
+→ Rust executes effects via host functions → result returned
 ```
 
-**Pattern for subprocess calls (Rust):**
-```rust
-tracing::info!("Executing: {} {}", cmd, args.join(" "));
-let status = Command::new(cmd).args(&args).status()?;
-tracing::info!("{} returned: {:?}", cmd, status);
-if !status.success() {
-    tracing::error!("{} failed with status: {}", cmd, status);
-}
+**Hook Call:**
+```
+Claude Code → exomonad hook pre-tool-use (reads stdin JSON)
+→ HTTP POST to server → WASM handle_pre_tool_use
+→ Haskell decides allow/deny → HookEnvelope { stdout, exit_code }
+→ Claude Code proceeds or blocks
 ```
 
-The goal: when something fails, the logs should tell you exactly where and why without needing to add more logging and reproduce.
+**Session Start:**
+```
+Claude Code starts → exomonad hook session-start
+→ WASM yields SessionRegister effect with claude_session_id
+→ Server stores in ClaudeSessionRegistry
+→ spawn_subtree uses this ID for --fork-session
+```
 
+**Fail-open:** If the server is unreachable, `exomonad hook` prints `{"continue":true}` and exits 0.
+
+### MCP Tools Reference
+
+All tools implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/Tools/`):
+
+| Tool | Description |
+|------|-------------|
+| `spawn_subtree` | Fork Claude agent into worktree + Zellij tab (TL role, can spawn children) |
+| `spawn_leaf_subtree` | Fork Gemini agent into worktree + Zellij tab (dev role, files PR) |
+| `spawn_workers` | Spawn Gemini agents as Zellij panes (ephemeral, no worktree) |
+| `file_pr` | Create/update PR (auto-detects base branch from naming) |
+| `merge_pr` | Merge child PR (gh merge + jj fetch). TL role only |
+| `popup` | Interactive UI in Zellij (choices, text, sliders) |
+| `note` | Dev → TL async message |
+| `question` | Dev → TL blocking question (trampoline) |
+| `get_agent_messages` | TL reads agent outboxes (long-poll) |
+| `answer_question` | TL answers pending question |
+| `wait_for_event` | Block until event (e.g., worker_complete). Trampoline |
+| `notify_parent` | Signal completion to parent. Auto-routed by server |
+
+**Note**: Git operations (`git status`, `git log`, etc.) and GitHub operations (`gh pr list`, etc.) use the Bash tool with `git` and `gh` commands, not MCP tools.
+
+---
 
 ## Documentation Tree
-
-Navigate to the right docs for your task:
 
 ```
 CLAUDE.md  ← YOU ARE HERE (project overview)
@@ -139,8 +317,6 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 └── docs/audits/               ← Project audits and reports
 ```
 
-## When to Read Which CLAUDE.md
-
 | I want to... | Read this |
 |--------------|-----------|
 | Add FFI boundary types | `proto/CLAUDE.md` |
@@ -153,341 +329,21 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 | Work on Zellij plugin | `rust/exomonad-plugin/CLAUDE.md` |
 | Define a graph, handlers, annotations | `haskell/dsl/core/CLAUDE.md` |
 | Add or modify an effect interpreter | `haskell/effects/CLAUDE.md` |
-| Generate training data for FunctionGemma | `haskell/tools/training-generator/CLAUDE.md` |
 
 ---
 
-# Part 1: Using ExoMonad
+## Developing ExoMonad
 
-## Core Concepts
+### Package Inventory
 
-### Graphs
-Agents are defined as typed state machine graphs:
-- **Nodes**: LLM calls or pure logic
-- **Edges**: Derived from type annotations (data flow) or explicit `Goto` (control flow)
-- **Validation**: Compile-time via type families
+All Haskell packages live under `haskell/`. See `haskell/CLAUDE.md` for full details.
 
-```haskell
-data MyAgent mode = MyAgent
-  { entry    :: mode :- Entry Message
-  , classify :: mode :- LLMNode :@ Input Message :@ Schema Intent
-  , route    :: mode :- LogicNode :@ Input Intent :@ UsesEffects [Goto "handle" Message, Goto Exit Response]
-  , handle   :: mode :- LLMNode :@ Input Message :@ Schema Response
-  , exit     :: mode :- Exit Response
-  }
-```
-
-See `haskell/dsl/core/CLAUDE.md` for the full Graph DSL reference.
-
-### Effects
-Agents yield effects; runners interpret them:
-- `LLM` - Call language model with template + schema
-- `State s` - Read/write agent state
-- `Emit evt` - Emit events for logging/UI
-- `RequestInput` - Get user input (choices, text)
-- `Log` - Structured logging
-- `Time` - Current time (IO-blind)
-- `Memory s` - Persistent node-private state
-- `Goto target` - Transition to another node
-
-### Templates
-Jinja templates with compile-time validation:
-```haskell
-myTemplate :: TypedTemplate MyContext SourcePos
-myTemplate = $(typedTemplateFile ''MyContext "templates/my_prompt.jinja")
-```
-
-### Tools
-LLM-invocable actions via `ToolDef` typeclass:
-```haskell
-instance ToolDef MyTool where
-  toolName = "my_tool"
-  toolDescription = "Does something useful"
-  toolSchema = ... -- JSON Schema
-  toolExecute = ... -- Handler
-```
-
-## Running Agents
-
-### WASM (Production - Frozen)
-Compile to WASM.
-
-```bash
-just wasm tl
-```
-
-## Consuming Repos
-
-ExoMonad is a library. Agents live in separate repos:
-
-Example consuming repo with working agents:
-- Native and Cloudflare WIPs (both work e2e)
-- Agent definitions using Graph DSL
-- Templates and schemas
-
-### urchin (`~/exomonad-labs/urchin`)
-Context generation tooling for coding agents:
-- `urchin prime` - Generate context from git/GitHub/LSP for agent bootstrap
-- `urchin lsp` - LSP impact analysis for Haskell code
-
-## Sleeptime
-
-**Sleeptime** is the evolution pattern for agents:
-
-1. Agents run and produce logs/traces
-2. **Cron jobs in consuming repos** observe these runs
-3. Cron jobs file issues and PRs to improve the agent
-4. Changes: state fields, output schemas, templates, tools
-
-The cron jobs live in the consuming repo (urchin), not in exomonad itself. ExoMonad provides the infrastructure; consuming repos implement the evolution loop.
-
-## Claude Code++ Integration
-
-Human-driven Claude Code sessions augmented with ExoMonad. **Not headless automation** - humans interact via TTY; we add superpowers.
-
-### Architecture
-
-**Haskell WASM = Embedded DSL**
-- Defines tool schemas, handlers, decision logic
-- Yields typed effects (no I/O)
-- Compiled to WASM32-WASI
-- Single source of truth for MCP tools
-
-**Rust = Runtime**
-- Hosts WASM plugin via Extism
-- Executes all effects (git, GitHub API, filesystem, Zellij)
-- Owns the process lifecycle
-- MCP server (HTTP, started by `exomonad init`)
-
-**Worktrees + Zellij = Isolation/Multiplexing**
-- Git worktrees for code isolation (no Docker containers)
-- Zellij tabs within the enclosing session
-- Each agent = worktree + tab, managed by Rust runtime
-
-```
-Human in Zellij session
-    └── Claude Code + exomonad (Rust + Haskell WASM)
-            ├── MCP tools via WASM (spawn_subtree, spawn_leaf_subtree, spawn_workers, file_pr, etc.)
-            └── Hylo agent tree:
-                ├── worktree: main/feature-a (TL role, can spawn children)
-                │   ├── worker: rust-impl (Gemini, in-place pane)
-                │   └── worker: haskell-impl (Gemini, in-place pane)
-                └── worktree: main/feature-b (TL role)
-                    └── ...
-```
-
-### Data Flow
-
-**MCP Tool Call:**
-```
-1. User asks question in Claude Code
-2. Claude plans to call MCP tool (e.g., spawn_subtree, file_pr)
-3. Claude Code sends request to exomonad (HTTP)
-4. exomonad serve calls WASM handle_mcp_call (Unified WASM)
-5. Haskell dispatches to tool handler
-6. Handler yields effects (GitGetBranch, SpawnAgent, etc.)
-7. Rust executes effects via host functions
-8. Result returned to Claude Code
-```
-
-**Hook Call:**
-```
-1. Claude Code wants to call Write tool
-2. Generates hook JSON on stdin
-3. exomonad hook pre-tool-use reads stdin
-4. HTTP POST to localhost:{port}/hook (thin client, no WASM)
-5. Server calls WASM handle_pre_tool_use (in-process)
-6. Haskell logic decides allow/deny
-7. Server returns HookEnvelope { stdout, exit_code }
-8. CLI prints stdout, exits with exit_code
-9. Claude Code proceeds or blocks
-```
-
-**Session Start Hook:**
-```
-1. Claude Code starts (exomonad hook session-start)
-2. Server calls WASM handle_session_start
-3. Haskell yields SessionRegister effect with claude_session_id
-4. Server stores ID in in-memory ClaudeSessionRegistry
-5. Later, spawn_subtree uses this ID to enable --fork-session
-```
-
-**Fail-open:** If the server is unreachable, `exomonad hook` prints `{"continue":true}` and exits 0.
-
-### Configuration
-
-**Need help with Claude Code settings?** We have a Claude Code configuration specialist (preloaded with official documentation) available as an oracle. When you have questions about:
-- Hook configuration syntax (SessionStart, PreToolUse, etc.)
-- Settings file structure and scope (project vs local vs user)
-- MCP server setup
-- Environment variables and integration
-- Debugging hook execution
-
-Ask the specialist directly instead of guessing. They have authoritative knowledge about Claude Code internals, hook lifecycle, and best practices.
-
-Hook configuration is **auto-generated per worktree** by `write_context_files()` in `agent_control.rs` during agent spawning. Each spawned Claude agent gets `.claude/settings.local.json` with PreToolUse, SubagentStop, and SessionEnd hooks. Gemini agents get a settings.json written to a temp directory, pointed to via the `GEMINI_CLI_SYSTEM_SETTINGS_PATH` env var (NOT `.gemini/settings.json` — that's the user's global config). Do not manually create hook settings — they are generated at spawn time.
-
-**MCP server configuration:** Use CLI-native config commands (one-time setup):
-```bash
-claude mcp add --transport http exomonad http://localhost:7432/tl/mcp
-gemini mcp add --transport http exomonad http://localhost:7432/tl/mcp
-```
-
-**WASM loading:**
-Resolved from `wasm_dir` config field, falling back to `~/.exo/wasm/` (global default, installed by `just install-all`). Contains all roles, selected per-call. In serve mode, hot reload checks mtime per tool call.
-
-**Bootstrap:** `exomonad init` auto-creates `.exo/config.toml` and `.gitignore` entries if missing. Works in any project directory — no pre-existing setup required.
-
-```toml
-default_role = "tl"  # or "dev"
-project_dir = "."
-shell_command = "nix develop"  # optional: environment wrapper for TL tab + server
-wasm_dir = ".exo/wasm"    # optional: override WASM location (default: ~/.exo/wasm/)
-```
-
-**Config hierarchy:**
-- `config.toml` uses `default_role` (project-wide default)
-- `config.local.toml` uses `role` (worktree-specific override)
-- Resolution: `local.role > global.default_role`
-- WASM: `wasm_dir` in config > `~/.exo/wasm/`
-
-### Building
-
-```bash
-# One-command install (recommended - uses debug build for fast iteration)
-just install-all-dev
-
-# Or install release build (optimized, slower compile)
-just install-all
-
-# WASM builds (hermetic via nix)
-just wasm-all
-
-# Rust sidecar only
-cargo build -p exomonad
-
-# Hot reload workflow (HTTP serve mode, Unix socket)
-exomonad serve                # Start server on .exo/server.sock
-# ... edit .exo/roles/tl/Role.hs ...
-exomonad recompile --role tl  # Rebuild WASM via nix, copy to .exo/wasm/
-# Next tool call picks up new WASM automatically
-```
-
-**What `just install-all-dev` does:**
-1. Builds unified WASM plugin via nix
-2. Builds exomonad Rust binary (debug mode)
-3. Copies binary to `~/.cargo/bin/exomonad`
-4. Builds and installs Zellij plugins
-
-**WASM build pipeline:**
-1. User-authored `Role.hs` in `.exo/roles/<role>/` defines tool composition
-2. Generated `Main.hs` and `<role>.cabal` provide FFI scaffolding (gitignored)
-3. `cabal.project.wasm` lists role packages alongside `wasm-guest` SDK
-4. `just wasm <role>` builds via `nix develop .#wasm -c wasm32-wasi-cabal build ...`
-5. Compiled WASM copied to `.exo/wasm/wasm-guest-<role>.wasm`
-6. Both `exomonad hook` and `exomonad serve` load WASM from `.exo/wasm/` at runtime
-
-### MCP Tools
-
-All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/Tools/`):
-
-| Tool | Description |
-|------|-------------|
-| `spawn_subtree` | Fork a worktree node off your current branch (Claude-only). Creates isolated git worktree + Zellij tab. Auto-resolves parent session ID. |
-| `spawn_workers` | Spawn multiple ephemeral Gemini worker agents as panes in parent dir (no branch, no worktree) |
-| `spawn_leaf_subtree` | Spawn a Gemini agent in its own git worktree + branch + Zellij tab (isolated, files PR) |
-| `file_pr` | Create or update a PR for the current branch (auto-detects base branch from naming convention) |
-| `merge_pr` | Merge a child's PR (gh pr merge + jj git fetch for auto-rebase). TL role only. |
-| `popup` | Display interactive popup UI in Zellij (choices, text input, sliders) |
-| `note` | Send a note to the TL agent (dev role messaging) |
-| `question` | Ask the TL agent a question and wait for answer (dev role messaging). Uses trampoline (suspend/resume). |
-| `get_agent_messages` | Read notes and questions from agent outboxes (TL role, supports long-poll) |
-| `answer_question` | Answer a pending question from an agent (TL role messaging) |
-| `wait_for_event` | Block until a matching event occurs (e.g., worker completion). Uses trampoline architecture for non-blocking execution. |
-| `notify_parent` | Notify parent session that you have completed. Server resolves routing automatically. |
-
-**Note**: Git operations (`git status`, `git log`, etc.) and GitHub operations (`gh pr list`, etc.) are handled via the Bash tool with `git` and `gh` commands, not MCP tools.
-
-**How spawn works (hylo model):**
-1. `spawn_subtree`: Creates git worktree at `.exo/worktrees/{slug}/` branching off current branch
-2. Branch naming: `{parent_branch}.{slug}` (dot separator) — enables auto-detection of PR base branch
-3. Writes `.mcp.json` with `{"type": "http", "url": "..."}` in worktree root
-4. Creates Zellij tab with `claude 'task prompt'` (positional arg, not --prompt flag)
-5. `spawn_subtree` agents are Claude-only, get TL role (can spawn workers, depth-capped at 2)
-6. `spawn_leaf_subtree`: Like `spawn_subtree` but Gemini — own worktree + branch + tab, dev role, files PR
-7. `spawn_workers`: Runs Gemini in Zellij panes in the parent's directory (no branch, no worktree, ephemeral)
-8. Worker config lives in `.exo/agents/{name}/`
-9. PRs target parent branch, not main — merged via recursive fold
-10. Identity: birth-branch as session ID (immutable, deterministic). Root TL = "root".
-11. Filesystem IS the registry — scan `.exo/worktrees/` and `.exo/agents/` to discover agents
-
-### Parallel Worker Coordination
-
-The TL can spawn multiple workers in parallel and use `wait_for_event` to coordinate completion:
-
-Example workflow:
-- Spawn 3 workers in parallel
-- Call `wait_for_event types=["worker_complete"] timeout_secs=300`
-- Returns immediately when any worker completes
-- Repeat for remaining workers
-
-How it works:
-1. Each spawned worker gets `EXOMONAD_SESSION_ID` env var (birth-branch of parent)
-2. When worker exits, `handleWorkerExit` hook calls `notify_parent`
-3. Server resolves parent session from caller's identity (no explicit session_id needed)
-4. Notification goes to EventQueue indexed by parent's session_id
-5. TL's `wait_for_event` call wakes immediately and returns the event
-6. Zero token waste - no polling loops, just blocking wait
-
-Use cases:
-- Parallel implementation tasks (3+ workers on independent changes)
-- Fan-out/fan-in patterns (spawn many, wait for all, aggregate results)
-- Progress monitoring (spawn long-running task, periodically check with timeout)
-
-### Status
-
-- ✅ 100% WASM routing (all logic in Haskell, Rust handles I/O only)
-- ✅ All MCP tools via WASM (no direct Rust tools)
-- ✅ Hook forwarding via WASM
-- ✅ Unified file-based WASM (single module for all roles, hot reload in serve mode)
-- ✅ Hylo spawn model: spawn_subtree (Claude worktree+tab) + spawn_leaf_subtree (Gemini worktree+tab) + spawn_workers (Gemini panes, ephemeral)
-- ✅ Proper Zellij tab creation with full UI (tab-bar, status-bar)
-- ✅ Shell-wrapped commands for environment inheritance
-- ✅ GitHub API integration with token from ~/.exo/secrets
-- ✅ Auto-cleanup tabs on agent exit
-- ✅ Zellij plugin (exomonad-plugin) for status display and popup UI
-- ✅ KDL layout generation (zellij-gen) for proper environment inheritance
-- ✅ Stop hook logic (SubagentStop, SessionEnd) - validates PR status, Copilot review
-- ✅ Gemini MCP wiring (`GEMINI_CLI_SYSTEM_SETTINGS_PATH` env var pointing to per-agent settings on spawn)
-- ✅ EventQueue with blocking wait (zero-polling worker coordination)
-- ✅ wait_for_event + notify_parent MCP tools
-- ✅ Nested worktree layout (.exo/worktrees/, .exo/agents/)
-- ✅ Filesystem-based agent registry (no separate state file)
-- ✅ Configurable worktree_base in config.toml
-- ✅ Composable handler groups for library consumers (core_handlers, git_handlers, orchestration_handlers)
-- ✅ Embeddable McpServer (into_router, serve, McpStateBuilder)
-- ✅ Startup namespace validation (require_namespaces on RuntimeBuilder)
-- ✅ jj colocated mode + effects (jj.* namespace: bookmark_create, git_push, git_fetch, log, new, status)
-- ✅ merge_pr tool (gh pr merge + jj git fetch, wired into TL role)
-- ✅ notify_parent fires on agent exit (handleWorkerExit hook → events.notify_parent)
-- ✅ Inter-agent messaging (note/question/answer) — trampoline architecture for blocking question tool
-- 🔧 Event router (Zellij STDIN injection for dormant parents) — not built
-- 🔧 GitHub poller (PR status → events) — not built
-
----
-
-# Part 2: Developing ExoMonad
-
-## Package Inventory
-
-All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full details.
-
-### Core (`haskell/dsl/`)
+**Core (`haskell/dsl/`):**
 | Package | Purpose |
 |---------|---------|
 | `haskell/dsl/core` | Graph DSL, effects, templates, validation |
 
-### Effect Interpreters (`haskell/effects/`)
+**Effect Interpreters (`haskell/effects/`):**
 | Package | Purpose |
 |---------|---------|
 | `haskell/effects/llm-interpreter` | Anthropic/OpenAI API calls |
@@ -497,17 +353,17 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 | `haskell/effects/justfile-interpreter` | Justfile execution |
 | `haskell/effects/zellij-interpreter` | Zellij session management |
 
-### Integrations (`haskell/protocol/`)
+**Protocol (`haskell/protocol/`):**
 | Package | Purpose |
 |---------|---------|
 | `haskell/protocol/wire-types` | Native protocol types |
 
-### Tools (`haskell/tools/`)
+**Tools (`haskell/tools/`):**
 | Package | Purpose |
 |---------|---------|
 | `haskell/tools/training-generator` | Training data types for FunctionGemma |
 
-## Where Things Go
+### Where Things Go
 
 | Thing | Location |
 |-------|----------|
@@ -519,13 +375,59 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 | Agents (consuming repos) | Separate repo (urchin, etc.) |
 
 ### Naming Conventions
+
 - **Effect** (singular) = core infrastructure (`ExoMonad.Effect.*`)
 - **Effects** (plural) = integrations/contrib (`ExoMonad.Effects.*`)
 - **Interpreter** = effect implementation (replaces "executor" terminology)
 
+### Building & Testing
+
+```bash
+cabal build all            # Build Haskell
+cargo test --workspace     # Rust tests (from repo root)
+just pre-commit            # Run all checks
+cabal test all             # Haskell tests
+```
+
+### Task Tracking
+
+GitHub Issues. Branch naming: `gh-{number}/{description}`. Reference issue in commits (`[#123] ...`). Issues closed via PR merges (`Closes #123`).
+
+### Key Design Decisions
+
+1. **freer-simple for effects** — Reified continuations for WASM yield/resume
+2. **Typed Jinja templates** — Compile-time validation via ginger
+3. **OneOf sum type** — Fully typed dispatch without Dynamic
+4. **IO-blind agents** — All IO in runners, enables WASM + deterministic testing
+5. **Haskell WASM = embedded DSL** — All logic in Haskell, Rust handles I/O only
+
+### Code Smells: Data Flow Dead-Ends
+
+**The `_` prefix is a huge signal.** When you see `_someField` in a pattern match, it means data is being captured but ignored. This is almost always a data flow dead-end that needs fixing.
+
+```haskell
+-- BAD: Data captured but ignored
+ImplRequestRetry diagnosis _strategyFrom _strategyTo _failingTests -> do
+  let retryInput = originalInput { iiAttemptCount = count + 1 }
+  pure $ gotoChoice @"v3Impl" retryInput
+
+-- GOOD: Data flows to next node
+ImplRequestRetry diagnosis strategyFrom strategyTo failingTests -> do
+  let critiques = buildCritiquesFrom diagnosis strategyFrom strategyTo failingTests
+  let retryInput = originalInput
+        { iiAttemptCount = count + 1
+        , iiCritiqueList = Just critiques  -- Data flows forward
+        }
+  pure $ gotoChoice @"v3Impl" retryInput
+```
+
+When reviewing handlers, grep for `_` prefixes in pattern matches. Each one is a potential bug where exit types capture info that never reaches the next node.
+
+---
+
 ## Tech Lead Praxis
 
-How to coordinate heterogeneous agent teams effectively. These are proven patterns from real sessions, not theory.
+How to coordinate heterogeneous agent teams effectively. Proven patterns from real sessions.
 
 ### Intelligence Gradient
 
@@ -583,80 +485,50 @@ Agents hallucinate confidently about infrastructure constraints. "axum nest_serv
 
 Agents overengineer when unsupervised. Given "add a route with a path extractor" an agent built a full tower middleware stack. **Specify the complexity budget:** "this is 10 lines in an existing function, not a new module."
 
-## Task Tracking (GitHub)
+---
 
-Task tracking via GitHub Issues.
+## Agent DSL
 
-### Workflow
+ExoMonad is also a library for building LLM agents as typed state machines. Agents live in consuming repos (e.g., urchin). See `haskell/dsl/core/CLAUDE.md` for the full Graph DSL reference.
 
-1.  **Branching**: Use the `gh-{number}/{description}` naming convention for all task-related branches.
-2.  **Development**: Implement changes incrementally.
-3.  **Commits**: Reference issue number in commit messages (e.g. `[#123] ...`).
-4.  **Closing**: Issues are closed via PR merges ("Closes #123").
+### Core Concepts
 
-## Building & Testing
-
-```bash
-cabal build all            # Build Haskell
-cargo test --workspace     # Rust tests (from repo root)
-just pre-commit            # Run all checks
-cabal test all             # Haskell tests
-```
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      Agent Turn Loop                         │
-│                                                              │
-│  1. Build context (State → TemplateContext)                  │
-│  2. Render template (Jinja → prompt)                         │
-│  3. Call LLM (prompt + schema + tools → result)              │
-│  4. Apply structured output (result → State')                │
-│  5. Handle transitions (Goto → next node)                    │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Key Design Decisions
-
-1. **freer-simple for effects** - Reified continuations for WASM yield/resume
-2. **Typed Jinja templates** - Compile-time validation via ginger
-3. **OneOf sum type** - Fully typed dispatch without Dynamic
-4. **IO-blind agents** - All IO in runners, enables WASM + deterministic testing
-5. **Haskell WASM = embedded DSL** - All logic in Haskell, Rust handles I/O only
-
-
-### Code Smells: Data Flow Dead-Ends
-
-**The `_` prefix is a huge signal.** When you see `_someField` in a pattern match, it means data is being captured but ignored. This is almost always a data flow dead-end that needs fixing.
+**Graphs** — Agents are typed state machine graphs. Nodes are LLM calls or pure logic. Edges derived from type annotations or explicit `Goto`. Compile-time validation via type families.
 
 ```haskell
--- BAD: Data captured but ignored
-ImplRequestRetry diagnosis _strategyFrom _strategyTo _failingTests -> do
-  let retryInput = originalInput { iiAttemptCount = count + 1 }
-  pure $ gotoChoice @"v3Impl" retryInput
-
--- GOOD: Data flows to next node
-ImplRequestRetry diagnosis strategyFrom strategyTo failingTests -> do
-  let critiques = buildCritiquesFrom diagnosis strategyFrom strategyTo failingTests
-  let retryInput = originalInput
-        { iiAttemptCount = count + 1
-        , iiCritiqueList = Just critiques  -- Data flows forward
-        }
-  pure $ gotoChoice @"v3Impl" retryInput
+data MyAgent mode = MyAgent
+  { entry    :: mode :- Entry Message
+  , classify :: mode :- LLMNode :@ Input Message :@ Schema Intent
+  , route    :: mode :- LogicNode :@ Input Intent :@ UsesEffects [Goto "handle" Message, Goto Exit Response]
+  , handle   :: mode :- LLMNode :@ Input Message :@ Schema Response
+  , exit     :: mode :- Exit Response
+  }
 ```
 
-**When reviewing handlers, grep for `_` prefixes in pattern matches.** Each one is a potential bug where:
-- Exit types capture useful info that never reaches the next node
-- Template context is built but never rendered
-- Memory fields are written but never read
+**Effects** — Agents yield effects; runners interpret them: `LLM`, `State s`, `Emit evt`, `RequestInput`, `Log`, `Time`, `Memory s`, `Goto target`.
 
-The fix is usually: thread the data forward (via input fields, memory, or context) so downstream nodes/templates can use it.
+**Templates** — Jinja with compile-time validation via ginger:
+```haskell
+myTemplate :: TypedTemplate MyContext SourcePos
+myTemplate = $(typedTemplateFile ''MyContext "templates/my_prompt.jinja")
+```
 
+**Agent Turn Loop:**
+1. Build context (State → TemplateContext)
+2. Render template (Jinja → prompt)
+3. Call LLM (prompt + schema + tools → result)
+4. Apply structured output (result → State')
+5. Handle transitions (Goto → next node)
 
-## LSP Integration
+### Consuming Repos
 
-The `exomonad-lsp-interpreter` provides LSP for code intelligence:
+- **urchin** (`~/exomonad-labs/urchin`) — Context generation tooling: `urchin prime` (git/GitHub/LSP context), `urchin lsp` (impact analysis)
+
+### Sleeptime
+
+The evolution pattern for agents: agents run and produce traces → cron jobs in consuming repos observe runs → file issues and PRs to improve the agent (state fields, schemas, templates, tools). ExoMonad provides infrastructure; consuming repos implement the evolution loop.
+
+### LSP Integration
 
 ```haskell
 import ExoMonad.Effects.LSP
@@ -664,12 +536,13 @@ import ExoMonad.LSP.Interpreter (withLSPSession, runLSP)
 
 withLSPSession "/path/to/project" $ \session -> do
   info <- runLSP session $ hover doc pos
-  ...
 ```
+
+---
 
 ## References
 
-- [haskell/dsl/core/CLAUDE.md](haskell/dsl/core/CLAUDE.md) - Graph DSL reference
-- [rust/exomonad/CLAUDE.md](rust/exomonad/CLAUDE.md) - MCP server + WASM host
-- [freer-simple](https://hackage.haskell.org/package/freer-simple) - Effect system
+- [haskell/dsl/core/CLAUDE.md](haskell/dsl/core/CLAUDE.md) — Graph DSL reference
+- [rust/exomonad/CLAUDE.md](rust/exomonad/CLAUDE.md) — MCP server + WASM host
+- [freer-simple](https://hackage.haskell.org/package/freer-simple) — Effect system
 - [Anthropic tool use](https://docs.anthropic.com/en/docs/tool-use)
