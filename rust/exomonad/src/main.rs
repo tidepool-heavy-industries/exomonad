@@ -244,25 +244,32 @@ async fn handle_hook_inner(
         serde_json::from_str(body).context("Failed to parse hook input")?;
     hook_input.runtime = Some(runtime);
 
-    // Normalize CLI-specific hook types to internal abstractions before WASM.
-    let is_stop_hook = matches!(
-        event_type,
-        HookEventType::Stop
-            | HookEventType::AfterAgent
-            | HookEventType::SubagentStop
-            | HookEventType::SessionEnd
-            | HookEventType::WorkerExit
-    );
+    // Classify hook event into dispatch category. Exhaustive match ensures new
+    // event types get handled explicitly rather than silently falling through.
+    #[derive(Debug, Clone, Copy)]
+    enum HookDispatch {
+        /// Stop/lifecycle hooks: WASM returns InternalStopHookOutput (allow/block + reason)
+        Stop,
+        /// Tool hooks: WASM returns ClaudePreToolUseOutput (allow/deny/ask)
+        ToolUse,
+        /// Worker exit: WASM handles notifyParent as side effect, returns simple allow
+        WorkerExit,
+    }
 
-    let normalized_event_name = match event_type {
-        HookEventType::Stop | HookEventType::AfterAgent => "Stop",
-        HookEventType::SubagentStop => "SubagentStop",
-        HookEventType::SessionEnd => "SessionEnd",
-        HookEventType::PreToolUse | HookEventType::BeforeTool => "PreToolUse",
-        HookEventType::PostToolUse => "PostToolUse",
-        HookEventType::WorkerExit => "WorkerExit",
-        _ => {
-            debug!(event = ?event_type, "Hook type not implemented in WASM, allowing");
+    let dispatch = match event_type {
+        HookEventType::Stop | HookEventType::AfterAgent => HookDispatch::Stop,
+        HookEventType::SubagentStop => HookDispatch::Stop,
+        HookEventType::SessionEnd => HookDispatch::Stop,
+        HookEventType::PreToolUse | HookEventType::BeforeTool => HookDispatch::ToolUse,
+        HookEventType::PostToolUse => HookDispatch::ToolUse,
+        HookEventType::WorkerExit => HookDispatch::WorkerExit,
+        HookEventType::Notification
+        | HookEventType::SubagentStart
+        | HookEventType::PreCompact
+        | HookEventType::SessionStart
+        | HookEventType::PermissionRequest
+        | HookEventType::UserPromptSubmit => {
+            debug!(event = ?event_type, "Hook type not handled by WASM, allowing");
             let output_json = serde_json::to_string(&ClaudePreToolUseOutput::default())
                 .context("Failed to serialize output")?;
 
@@ -285,6 +292,17 @@ async fn handle_hook_inner(
                 exit_code: 0,
             });
         }
+    };
+
+    // Normalize event name for WASM dispatch
+    let normalized_event_name = match event_type {
+        HookEventType::Stop | HookEventType::AfterAgent => "Stop",
+        HookEventType::SubagentStop => "SubagentStop",
+        HookEventType::SessionEnd => "SessionEnd",
+        HookEventType::PreToolUse | HookEventType::BeforeTool => "PreToolUse",
+        HookEventType::PostToolUse => "PostToolUse",
+        HookEventType::WorkerExit => "WorkerExit",
+        _ => unreachable!("passthrough events returned early above"),
     };
     hook_input.hook_event_name = normalized_event_name.to_string();
 
@@ -318,132 +336,161 @@ async fn handle_hook_inner(
         "Hook identity context"
     );
 
-    if is_stop_hook {
-        let internal_output: InternalStopHookOutput =
-            exomonad_core::mcp::agent_identity::with_agent_id(
-                agent_id_for_hook.clone(),
-                exomonad_core::mcp::agent_identity::with_session_id(
-                    session_id_for_hook.clone(),
-                    async {
-                        state
-                            .plugin
-                            .call("handle_pre_tool_use", &hook_input_value)
-                            .await
-                    },
-                ),
+    match dispatch {
+        HookDispatch::WorkerExit => {
+            // WASM handles notifyParent as a side effect. We call it and return allow.
+            let _: serde_json::Value = exomonad_core::mcp::agent_identity::with_agent_id(
+                agent_id_for_hook,
+                exomonad_core::mcp::agent_identity::with_session_id(session_id_for_hook, async {
+                    state
+                        .plugin
+                        .call("handle_pre_tool_use", &hook_input_value)
+                        .await
+                }),
+            )
+            .await
+            .context("WASM handleWorkerExit failed")?;
+
+            Ok(HookEnvelope {
+                stdout: serde_json::to_string(&ClaudePreToolUseOutput::default())?,
+                exit_code: 0,
+            })
+        }
+
+        HookDispatch::Stop => {
+            let internal_output: InternalStopHookOutput =
+                exomonad_core::mcp::agent_identity::with_agent_id(
+                    agent_id_for_hook,
+                    exomonad_core::mcp::agent_identity::with_session_id(
+                        session_id_for_hook,
+                        async {
+                            state
+                                .plugin
+                                .call("handle_pre_tool_use", &hook_input_value)
+                                .await
+                        },
+                    ),
+                )
+                .await
+                .context("WASM handle_pre_tool_use (stop) failed")?;
+
+            let output_json = internal_output.to_runtime_json(&runtime);
+
+            let decision_str = match internal_output.decision {
+                StopDecision::Allow => "allow",
+                StopDecision::Block => "block",
+            };
+
+            if let Some(ref otel) = state.otel {
+                let mut extra_attributes = HashMap::new();
+                extra_attributes.insert("routing.decision".to_string(), decision_str.to_string());
+                if let Some(reason) = &internal_output.reason {
+                    extra_attributes.insert("routing.reason".to_string(), reason.clone());
+                }
+                emit_hook_span(
+                    otel,
+                    &trace_id,
+                    event_type,
+                    runtime,
+                    &hook_input,
+                    decision_str,
+                    start_ns,
+                    extra_attributes,
+                )
+                .await;
+            }
+
+            // Emit StopHookBlocked Zellij event
+            if internal_output.decision == StopDecision::Block
+                && event_type == HookEventType::SubagentStop
+            {
+                if let Ok(branch) = git::get_current_branch() {
+                    if let Some(agent_id_str) = git::extract_agent_id(&branch) {
+                        let reason = internal_output
+                            .reason
+                            .clone()
+                            .unwrap_or_else(|| "Hook blocked agent stop".to_string());
+                        match exomonad_core::ui_protocol::AgentId::try_from(agent_id_str.clone()) {
+                            Ok(agent_id) => {
+                                let event =
+                                    exomonad_core::ui_protocol::AgentEvent::StopHookBlocked {
+                                        agent_id,
+                                        reason,
+                                        timestamp: zellij_events::now_iso8601(),
+                                    };
+                                if let Err(e) =
+                                    zellij_events::emit_event(&state.zellij_session, &event)
+                                {
+                                    warn!("Failed to emit stop_hook:blocked event: {}", e);
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Invalid agent_id in branch '{}': {}", agent_id_str, e)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Ok(HookEnvelope {
+                stdout: output_json,
+                exit_code: 0,
+            })
+        }
+
+        HookDispatch::ToolUse => {
+            let output: ClaudePreToolUseOutput = exomonad_core::mcp::agent_identity::with_agent_id(
+                agent_id_for_hook,
+                exomonad_core::mcp::agent_identity::with_session_id(session_id_for_hook, async {
+                    state
+                        .plugin
+                        .call("handle_pre_tool_use", &hook_input_value)
+                        .await
+                }),
             )
             .await
             .context("WASM handle_pre_tool_use failed")?;
 
-        let output_json = internal_output.to_runtime_json(&runtime);
+            let output_json =
+                serde_json::to_string(&output).context("Failed to serialize output")?;
 
-        let decision_str = match internal_output.decision {
-            StopDecision::Allow => "allow",
-            StopDecision::Block => "block",
-        };
-
-        if let Some(ref otel) = state.otel {
-            let mut extra_attributes = HashMap::new();
-            extra_attributes.insert("routing.decision".to_string(), decision_str.to_string());
-            if let Some(reason) = &internal_output.reason {
-                extra_attributes.insert("routing.reason".to_string(), reason.clone());
-            }
-            emit_hook_span(
-                otel,
-                &trace_id,
-                event_type,
-                runtime,
-                &hook_input,
-                decision_str,
-                start_ns,
-                extra_attributes,
-            )
-            .await;
-        }
-
-        // Emit StopHookBlocked Zellij event
-        if internal_output.decision == StopDecision::Block
-            && event_type == HookEventType::SubagentStop
-        {
-            if let Ok(branch) = git::get_current_branch() {
-                if let Some(agent_id_str) = git::extract_agent_id(&branch) {
-                    let reason = internal_output
-                        .reason
-                        .clone()
-                        .unwrap_or_else(|| "Hook blocked agent stop".to_string());
-                    match exomonad_core::ui_protocol::AgentId::try_from(agent_id_str.clone()) {
-                        Ok(agent_id) => {
-                            let event = exomonad_core::ui_protocol::AgentEvent::StopHookBlocked {
-                                agent_id,
-                                reason,
-                                timestamp: zellij_events::now_iso8601(),
-                            };
-                            if let Err(e) = zellij_events::emit_event(&state.zellij_session, &event)
-                            {
-                                warn!("Failed to emit stop_hook:blocked event: {}", e);
-                            }
-                        }
-                        Err(e) => warn!("Invalid agent_id in branch '{}': {}", agent_id_str, e),
-                    }
+            let decision_str = if !output.continue_ {
+                "block"
+            } else {
+                match output.hook_specific_output {
+                    Some(HookSpecificOutput::PreToolUse {
+                        permission_decision,
+                        ..
+                    }) => match permission_decision {
+                        ToolPermission::Allow => "allow",
+                        ToolPermission::Deny => "deny",
+                        ToolPermission::Ask => "ask",
+                    },
+                    _ => "allow",
                 }
+            };
+
+            if let Some(ref otel) = state.otel {
+                emit_hook_span(
+                    otel,
+                    &trace_id,
+                    event_type,
+                    runtime,
+                    &hook_input,
+                    decision_str,
+                    start_ns,
+                    HashMap::new(),
+                )
+                .await;
             }
+
+            let exit_code = if output.continue_ { 0 } else { 2 };
+
+            Ok(HookEnvelope {
+                stdout: output_json,
+                exit_code,
+            })
         }
-
-        Ok(HookEnvelope {
-            stdout: output_json,
-            exit_code: 0,
-        })
-    } else {
-        let output: ClaudePreToolUseOutput = exomonad_core::mcp::agent_identity::with_agent_id(
-            agent_id_for_hook,
-            exomonad_core::mcp::agent_identity::with_session_id(session_id_for_hook, async {
-                state
-                    .plugin
-                    .call("handle_pre_tool_use", &hook_input_value)
-                    .await
-            }),
-        )
-        .await
-        .context("WASM handle_pre_tool_use failed")?;
-
-        let output_json = serde_json::to_string(&output).context("Failed to serialize output")?;
-
-        let decision_str = if !output.continue_ {
-            "block"
-        } else {
-            match output.hook_specific_output {
-                Some(HookSpecificOutput::PreToolUse {
-                    permission_decision,
-                    ..
-                }) => match permission_decision {
-                    ToolPermission::Allow => "allow",
-                    ToolPermission::Deny => "deny",
-                    ToolPermission::Ask => "ask",
-                },
-                _ => "allow",
-            }
-        };
-
-        if let Some(ref otel) = state.otel {
-            emit_hook_span(
-                otel,
-                &trace_id,
-                event_type,
-                runtime,
-                &hook_input,
-                decision_str,
-                start_ns,
-                HashMap::new(),
-            )
-            .await;
-        }
-
-        let exit_code = if output.continue_ { 0 } else { 2 };
-
-        Ok(HookEnvelope {
-            stdout: output_json,
-            exit_code,
-        })
     }
 }
 
