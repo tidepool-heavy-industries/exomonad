@@ -847,7 +847,20 @@ async fn main() -> Result<()> {
             );
 
             // Build runtime with handler groups
-            let mut builder = RuntimeBuilder::new().with_wasm_path(wasm_path);
+            let mut builder = RuntimeBuilder::new()
+                .with_wasm_path(wasm_path)
+                .require_namespaces(vec![
+                    "log".to_string(),
+                    "kv".to_string(),
+                    "fs".to_string(),
+                    "git".to_string(),
+                    "github".to_string(),
+                    "agent".to_string(),
+                    "popup".to_string(),
+                    "events".to_string(),
+                    "messaging".to_string(),
+                    "coordination".to_string(),
+                ]);
             builder = builder.with_handlers(exomonad_core::core_handlers(project_dir.clone()));
             builder = builder.with_handlers(exomonad_core::git_handlers(git, github));
             let (orch_handlers, question_registry) = exomonad_core::orchestration_handlers(

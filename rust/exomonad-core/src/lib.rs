@@ -155,6 +155,7 @@ pub struct RuntimeBuilder {
     registry: EffectRegistry,
     wasm_bytes: Option<Vec<u8>>,
     wasm_path: Option<PathBuf>,
+    required_namespaces: Option<Vec<String>>,
 }
 
 #[cfg(feature = "runtime")]
@@ -165,6 +166,7 @@ impl RuntimeBuilder {
             registry: EffectRegistry::new(),
             wasm_bytes: None,
             wasm_path: None,
+            required_namespaces: None,
         }
     }
 
@@ -207,6 +209,15 @@ impl RuntimeBuilder {
         self
     }
 
+    /// Require that these effect namespaces have registered handlers.
+    ///
+    /// If set, `build()` will fail if any namespace is missing from the registry.
+    /// This catches configuration errors early (e.g. forgetting to register git handlers).
+    pub fn require_namespaces(mut self, namespaces: Vec<String>) -> Self {
+        self.required_namespaces = Some(namespaces);
+        self
+    }
+
     /// Get a reference to the effect registry.
     pub fn registry(&self) -> &EffectRegistry {
         &self.registry
@@ -225,6 +236,24 @@ impl RuntimeBuilder {
     /// - WASM bytes are not set
     /// - WASM plugin loading fails
     pub async fn build(self) -> anyhow::Result<Runtime> {
+        // Validate required namespaces before loading WASM
+        if let Some(ref required) = self.required_namespaces {
+            let mut missing: Vec<_> = required
+                .iter()
+                .filter(|ns| !self.registry.has_handler(ns))
+                .collect();
+            if !missing.is_empty() {
+                missing.sort();
+                let mut registered = self.registry.namespaces();
+                registered.sort();
+                anyhow::bail!(
+                    "Missing effect handlers for namespaces: {:?}\nRegistered: {:?}",
+                    missing,
+                    registered
+                );
+            }
+        }
+
         let registry = Arc::new(self.registry);
 
         let plugin_manager = if let Some(path) = self.wasm_path {
@@ -288,6 +317,32 @@ impl Runtime {
             plugin: Arc::new(self.plugin_manager),
             role: None,
             question_registry: None,
+        }
+    }
+}
+
+#[cfg(all(test, feature = "runtime"))]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_namespace_validation_missing() {
+        let builder = RuntimeBuilder::new()
+            .require_namespaces(vec!["nonexistent".to_string()])
+            .with_wasm_bytes(vec![]); // dummy, won't get this far
+
+        let result = builder.build().await;
+
+        match result {
+            Ok(_) => panic!("Expected error but got Ok"),
+            Err(e) => {
+                let err = e.to_string();
+                assert!(
+                    err.contains("nonexistent"),
+                    "Error should mention missing namespace: {}",
+                    err
+                );
+            }
         }
     }
 }
