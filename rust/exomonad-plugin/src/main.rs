@@ -378,14 +378,13 @@ impl ZellijPlugin for ExoMonadPlugin {
                             }
                         };
 
-                        // Dedup: only the instance in the target tab should write
-                        let is_target_tab = self.own_tab_name.as_deref() == Some(tab_name);
-                        if !is_target_tab {
-                            // Not our tab — silently ignore
-                            if let PipeSource::Cli(id) = &pipe_message.source {
-                                unblock_cli_pipe_input(id);
+                        // Dedup: only the instance in the target tab should write.
+                        // If own_tab_name is None (before first PaneUpdate), fall through
+                        // to avoid silently dropping the message from all instances.
+                        if let Some(own_tab) = &self.own_tab_name {
+                            if own_tab != tab_name {
+                                return true;
                             }
-                            return true;
                         }
 
                         let text = match val["text"].as_str() {
