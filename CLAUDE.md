@@ -470,7 +470,7 @@ Use cases:
 - ✅ jj colocated mode + effects (jj.* namespace: bookmark_create, git_push, git_fetch, log, new, status)
 - ✅ merge_pr tool (gh pr merge + jj git fetch, wired into TL role)
 - ✅ notify_parent fires on agent exit (handleWorkerExit hook → events.notify_parent)
-- 🔧 Inter-agent messaging (note/question/answer) — code exists, needs async conversion for question tool
+- ✅ Inter-agent messaging (note/question/answer) — trampoline architecture for blocking question tool
 - 🔧 Event router (Zellij STDIN injection for dormant parents) — not built
 - 🔧 GitHub poller (PR status → events) — not built
 

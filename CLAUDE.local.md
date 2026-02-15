@@ -16,19 +16,4 @@ Agents that get short directives ("go") tend to drift. Agents that get full cont
 
 ## Implementation Status
 
-### spawn_gemini_teammate — Production Ready ✅
-Audit complete (2026-02-11). All GEMINI_NOTES issues resolved:
-- Branch naming uses `-` separator (no git collision risk)
-- Names slugified for filesystem/git safety
-- Cleanup reconstructs internal_name properly, removes all artifacts
-- Agent-type-aware config: Claude gets `.mcp.json`, Gemini gets settings via `GEMINI_CLI_SYSTEM_SETTINGS_PATH` env var
-- Both use per-agent endpoints (`/agents/{name}/mcp`) for identity
-- Tabs vs Panes distinction consistent (subtree → Tab for isolation, worker → Pane for lightweight)
-- Subrepo support integrated into cleanup path resolution
-
-**spawn_worker is WIP** — no config.json registration (ephemeral/prototype only).
-
-## Open Design Questions
-
-### Per-agent identity flow
-Each Gemini agent gets `.exo/agents/{name}/settings.json` pointing to `http://localhost:{port}/agents/{name}/mcp`. Server extracts identity from URL path param. Simple axum route, not middleware.
+All spawn tools production-ready: `spawn_subtree` (Claude worktree+tab), `spawn_leaf_subtree` (Gemini worktree+tab), `spawn_workers` (Gemini panes, ephemeral). Per-agent identity resolved via URL path param (`/agents/{name}/mcp`).
