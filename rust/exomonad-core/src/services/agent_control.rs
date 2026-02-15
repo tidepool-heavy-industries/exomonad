@@ -24,6 +24,31 @@ use super::zellij_events;
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(60);
 const ZELLIJ_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Push branch to remote so child PRs can reference it as base.
+/// Fails on real errors (no remote, network issues). Only tolerates
+/// "already up to date" (exit 0 with "Everything up-to-date" on stderr).
+async fn ensure_branch_pushed(branch: &str, project_dir: &Path) -> Result<()> {
+    info!(branch = %branch, "Pushing parent branch to remote for child PR base");
+    let output = Command::new("git")
+        .args(["push", "-u", "origin", branch])
+        .current_dir(project_dir)
+        .output()
+        .await
+        .context("Failed to execute git push")?;
+
+    if output.status.success() {
+        info!(branch = %branch, "Parent branch pushed to remote");
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(anyhow!(
+            "Failed to push parent branch '{}' to remote (child PRs need base on origin): {}",
+            branch,
+            stderr
+        ))
+    }
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -1005,6 +1030,9 @@ impl AgentControlService {
                 .trim()
                 .to_string();
 
+            // Push parent branch so child PRs can reference it as base
+            ensure_branch_pushed(&current_branch, effective_project_dir).await?;
+
             // Branch: {current_branch}.{slug}
             let branch_name = format!("{}.{}", current_branch, slug);
 
@@ -1151,6 +1179,9 @@ impl AgentControlService {
             let current_branch = String::from_utf8_lossy(&current_branch_output.stdout)
                 .trim()
                 .to_string();
+
+            // Push parent branch so child PRs can reference it as base
+            ensure_branch_pushed(&current_branch, effective_project_dir).await?;
 
             let branch_name = format!("{}.{}", current_branch, slug);
             let worktree_path = self.worktree_base.join(&slug);

@@ -321,4 +321,15 @@ mod tests {
     fn test_detect_base_branch_empty_explicit() {
         assert_eq!(detect_base_branch("feature/work", Some("")), "feature");
     }
+
+    #[test]
+    fn test_detect_base_branch_depth_4() {
+        // Exact branch from haskell-core-rs worktree plan
+        assert_eq!(
+            detect_base_branch("main.core-eval.optimize.inline.inline-coalg", None),
+            "main.core-eval.optimize.inline"
+        );
+        // Depth 5 (6 segments)
+        assert_eq!(detect_base_branch("main.a.b.c.d.e", None), "main.a.b.c.d");
+    }
 }
