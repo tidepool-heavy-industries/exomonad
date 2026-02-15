@@ -239,12 +239,14 @@ impl RuntimeBuilder {
     pub async fn build(self) -> anyhow::Result<Runtime> {
         // Validate required namespaces before loading WASM
         if let Some(ref required) = self.required_namespaces {
-            let missing: Vec<_> = required
+            let mut missing: Vec<_> = required
                 .iter()
                 .filter(|ns| !self.registry.has_handler(ns))
                 .collect();
             if !missing.is_empty() {
-                let registered = self.registry.namespaces();
+                missing.sort();
+                let mut registered = self.registry.namespaces();
+                registered.sort();
                 anyhow::bail!(
                     "Missing effect handlers for namespaces: {:?}\nRegistered: {:?}",
                     missing,
@@ -364,7 +366,7 @@ pub fn register_builtin_handlers(
     (builder, question_registry, event_queue)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "runtime"))]
 mod tests {
     use super::*;
 
