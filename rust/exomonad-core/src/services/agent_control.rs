@@ -805,7 +805,7 @@ impl AgentControlService {
             let internal_name = format!("{}-gemini", slug);
             let display_name = format!("{} {}", AgentType::Gemini.emoji(), slug);
 
-            // Idempotency: if tab is already alive, return existing info
+            // Idempotency: if pane is already alive, return existing info
             let tab_alive = self.is_zellij_tab_alive(&display_name).await;
             if tab_alive {
                 info!(name = %options.name, "Worker already running, returning existing");
@@ -815,57 +815,6 @@ impl AgentControlService {
                     issue_title: options.name.clone(),
                     agent_type: "gemini".to_string(),
                 });
-            }
-
-            // Get current branch
-            let current_branch_output = Command::new("git")
-                .args(["rev-parse", "--abbrev-ref", "HEAD"])
-                .current_dir(&self.project_dir)
-                .output()
-                .await
-                .context("Failed to get current branch")?;
-            let current_branch = String::from_utf8_lossy(&current_branch_output.stdout)
-                .trim()
-                .to_string();
-
-            let branch_name = format!("{}.{}", current_branch, slug);
-            let worktree_path = self.worktree_base.join(&slug);
-
-            // Clean up existing worktree
-            if worktree_path.exists() {
-                info!(path = %worktree_path.display(), "Removing existing worktree for idempotency");
-                let _ = Command::new("git")
-                    .args(["worktree", "remove", "--force", &worktree_path.to_string_lossy()])
-                    .current_dir(&self.project_dir)
-                    .output()
-                    .await;
-            }
-
-            info!(
-                base_branch = %current_branch,
-                branch_name = %branch_name,
-                worktree_path = %worktree_path.display(),
-                "Creating git worktree for worker"
-            );
-
-            let output = Command::new("git")
-                .args([
-                    "worktree",
-                    "add",
-                    "-b",
-                    &branch_name,
-                    &worktree_path.to_string_lossy(),
-                    &current_branch,
-                ])
-                .current_dir(&self.project_dir)
-                .output()
-                .await
-                .context("Failed to create git worktree")?;
-
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                error!(stderr = %stderr, "git worktree add failed");
-                return Err(anyhow!("git worktree add failed: {}", stderr));
             }
 
             let mut env_vars = HashMap::new();
@@ -901,10 +850,10 @@ impl AgentControlService {
                 settings_path.to_string_lossy().to_string(),
             );
 
-            // Open Zellij TAB (not pane) with cwd = worktree_path
-            self.new_zellij_tab(
+            // Spawn pane in current tab, cwd = project_dir (parent's worktree)
+            self.new_zellij_pane(
                 &display_name,
-                &worktree_path,
+                &self.project_dir,
                 AgentType::Gemini,
                 Some(&options.prompt),
                 env_vars,
@@ -925,7 +874,7 @@ impl AgentControlService {
             }
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
-                agent_dir: worktree_path.to_string_lossy().to_string(),
+                agent_dir: String::new(),
                 tab_name: internal_name,
                 issue_title: options.name.clone(),
                 agent_type: "gemini".to_string(),
@@ -1609,30 +1558,22 @@ impl AgentControlService {
             .await
     }
 
-    #[tracing::instrument(skip(self, prompt, env_vars, fork_session_id))]
-    async fn new_zellij_tab_inner(
-        &self,
-        name: &str,
-        cwd: &Path,
+    /// Build the full shell command string for an agent.
+    ///
+    /// Handles: agent CLI + prompt/flags → env var prefix → nix develop wrapping.
+    /// Used by both `new_zellij_tab_inner` (KDL layout) and `new_zellij_pane` (CLI).
+    fn build_agent_command(
         agent_type: AgentType,
         prompt: Option<&str>,
-        env_vars: HashMap<String, String>,
         fork_session_id: Option<&str>,
-    ) -> Result<()> {
-        info!(name, cwd = %cwd.display(), agent_type = ?agent_type, fork = fork_session_id.is_some(), "Creating Zellij tab");
-
+        env_vars: &HashMap<String, String>,
+        cwd: &Path,
+    ) -> String {
         let cmd = agent_type.command();
         let agent_command = match (prompt, fork_session_id) {
             (Some(p), Some(session_id)) => {
-                // Fork mode: claude --resume <id> --fork-session -p '<task>'
                 let escaped_prompt = Self::escape_for_shell_command(p);
                 let escaped_session = Self::escape_for_shell_command(session_id);
-                debug!(
-                    tab_name = name,
-                    agent_type = ?agent_type,
-                    prompt_length = p.len(),
-                    "Spawning agent with session fork"
-                );
                 format!(
                     "{} --resume {} --fork-session -p {}",
                     cmd, escaped_session, escaped_prompt
@@ -1640,12 +1581,6 @@ impl AgentControlService {
             }
             (Some(p), None) => {
                 let escaped_prompt = Self::escape_for_shell_command(p);
-                debug!(
-                    tab_name = name,
-                    agent_type = ?agent_type,
-                    prompt_length = p.len(),
-                    "Spawning agent with CLI prompt"
-                );
                 let flag = agent_type.prompt_flag();
                 if flag.is_empty() {
                     format!("{} {}", cmd, escaped_prompt)
@@ -1656,7 +1591,7 @@ impl AgentControlService {
             _ => cmd.to_string(),
         };
 
-        // Prepend env vars to command (Zellij KDL doesn't support pane-level env blocks)
+        // Prepend env vars
         let env_prefix = env_vars
             .iter()
             .map(|(k, v)| format!("{}={}", k, shell_escape::escape(v.into())))
@@ -1669,14 +1604,29 @@ impl AgentControlService {
         };
 
         // Wrap in nix develop shell if flake.nix exists in cwd
-        let full_command = if cwd.join("flake.nix").exists() {
+        if cwd.join("flake.nix").exists() {
             info!("Wrapping agent command in nix develop shell");
-            // Inner command needs single-quote escaping for the sh -c wrapper
             let escaped = full_command.replace('\'', "'\\''");
             format!("nix develop -c sh -c '{}'", escaped)
         } else {
             full_command
-        };
+        }
+    }
+
+    #[tracing::instrument(skip(self, prompt, env_vars, fork_session_id))]
+    async fn new_zellij_tab_inner(
+        &self,
+        name: &str,
+        cwd: &Path,
+        agent_type: AgentType,
+        prompt: Option<&str>,
+        env_vars: HashMap<String, String>,
+        fork_session_id: Option<&str>,
+    ) -> Result<()> {
+        info!(name, cwd = %cwd.display(), agent_type = ?agent_type, fork = fork_session_id.is_some(), "Creating Zellij tab");
+
+        let full_command =
+            Self::build_agent_command(agent_type, prompt, fork_session_id, &env_vars, cwd);
 
         // Escape the command for KDL string literal (escape backslashes, quotes, newlines)
         let kdl_escaped_command = Self::escape_for_kdl(&full_command);
@@ -1823,6 +1773,69 @@ impl AgentControlService {
             info!(exit_code = ?result.status.code(), "zellij close-tab successful");
         }
 
+        Ok(())
+    }
+
+    // ========================================================================
+    // Internal: Zellij Pane Creation
+    // ========================================================================
+
+    /// Create a new Zellij pane in the current tab (for workers).
+    ///
+    /// Unlike `new_zellij_tab` which creates a full tab with KDL layout,
+    /// this creates a lightweight pane in the current tab using `zellij action new-pane`.
+    async fn new_zellij_pane(
+        &self,
+        name: &str,
+        cwd: &Path,
+        agent_type: AgentType,
+        prompt: Option<&str>,
+        env_vars: HashMap<String, String>,
+    ) -> Result<()> {
+        info!(name, cwd = %cwd.display(), agent_type = ?agent_type, "Creating Zellij pane");
+
+        let full_command = Self::build_agent_command(agent_type, prompt, None, &env_vars, cwd);
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+
+        let output = Command::new("zellij")
+            .args([
+                "action",
+                "new-pane",
+                "--name",
+                name,
+                "--cwd",
+                &cwd.display().to_string(),
+                "--close-on-exit",
+                "--",
+                &shell,
+                "-l",
+                "-c",
+                &full_command,
+            ])
+            .output()
+            .await
+            .context("Failed to run zellij")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            error!(
+                name,
+                exit_code = output.status.code(),
+                stderr = %stderr,
+                stdout = %stdout,
+                "zellij action new-pane failed"
+            );
+            anyhow::bail!("zellij action new-pane failed: {}", stderr);
+        }
+
+        // Explicitly rename pane to ensure it's visible in the UI
+        let _ = Command::new("zellij")
+            .args(["action", "rename-pane", name])
+            .output()
+            .await;
+
+        info!(name, "Successfully created Zellij pane");
         Ok(())
     }
 
