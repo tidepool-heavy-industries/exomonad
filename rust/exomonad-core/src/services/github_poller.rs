@@ -23,8 +23,6 @@ pub struct GitHubPoller {
 struct PRState {
     last_copilot_comment_count: usize,
     last_ci_status: String,
-    #[allow(dead_code)]
-    branch_name: String,
 }
 
 impl GitHubPoller {
@@ -233,7 +231,6 @@ impl GitHubPoller {
                 PRState {
                     last_copilot_comment_count: copilot_count,
                     last_ci_status: ci_status,
-                    branch_name: branch.to_string(),
                 },
             );
         }

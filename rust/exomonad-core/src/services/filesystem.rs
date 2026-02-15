@@ -74,12 +74,6 @@ impl FileSystemService {
         Self { project_dir }
     }
 
-    /// Create from current working directory.
-    pub fn from_cwd() -> Result<Self> {
-        let project_dir = std::env::current_dir().context("Failed to get current directory")?;
-        Ok(Self { project_dir })
-    }
-
     /// Resolve a path (absolute or relative to project_dir).
     fn resolve_path(&self, path: &str) -> PathBuf {
         let p = PathBuf::from(path);

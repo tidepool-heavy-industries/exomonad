@@ -32,7 +32,7 @@ pub fn enforce_singleton(pid_file: &Path) -> Result<PidGuard> {
         warn!("PID enforcement is only supported on Unix systems");
         Ok(PidGuard {
             path: pid_file.to_path_buf(),
-            file: None,
+            _file: None,
         })
     }
 }
@@ -122,7 +122,7 @@ fn unix_enforce_singleton(pid_file: &Path) -> Result<PidGuard> {
 
     Ok(PidGuard {
         path: pid_file.to_path_buf(),
-        file: Some(file),
+        _file: Some(file),
     })
 }
 
@@ -217,10 +217,9 @@ fn kill_process(pid: Pid, old_pid: u32) -> Result<()> {
 pub struct PidGuard {
     path: PathBuf,
     #[cfg(unix)]
-    #[allow(dead_code)]
-    file: Option<File>, // Holds the lock (fd)
+    _file: Option<File>, // Holds the lock (fd)
     #[cfg(not(unix))]
-    file: Option<()>,
+    _file: Option<()>,
 }
 
 impl PidGuard {

@@ -179,12 +179,6 @@ impl RuntimeBuilder {
         self
     }
 
-    /// Register an Arc-wrapped effect handler.
-    pub fn with_effect_handler_arc(mut self, handler: Arc<dyn EffectHandler>) -> Self {
-        self.registry.register(handler);
-        self
-    }
-
     /// Register multiple effect handlers at once.
     ///
     /// Useful with handler group functions like `core_handlers()`, `git_handlers()`.
@@ -222,11 +216,6 @@ impl RuntimeBuilder {
     /// Get a reference to the effect registry.
     pub fn registry(&self) -> &EffectRegistry {
         &self.registry
-    }
-
-    /// Consume the builder and return the effect registry.
-    pub fn into_registry(self) -> EffectRegistry {
-        self.registry
     }
 
     /// Build the runtime with all configured handlers.
