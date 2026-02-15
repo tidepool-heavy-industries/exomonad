@@ -372,11 +372,6 @@ impl AbsolutePath {
     pub fn as_path(&self) -> &Path {
         &self.0
     }
-
-    /// Convert to PathBuf (consumes self).
-    pub fn into_path_buf(self) -> PathBuf {
-        self.0
-    }
 }
 
 impl AsRef<Path> for AbsolutePath {

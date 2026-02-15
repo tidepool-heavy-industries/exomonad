@@ -23,7 +23,6 @@ pub struct GitHubPoller {
 struct PRState {
     last_copilot_comment_count: usize,
     last_ci_status: String,
-    #[allow(dead_code)]
     branch_name: String,
 }
 

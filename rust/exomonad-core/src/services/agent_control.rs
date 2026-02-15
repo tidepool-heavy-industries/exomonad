@@ -204,15 +204,6 @@ pub enum Topology {
 }
 
 impl Topology {
-    /// Convert from proto i32 representation.
-    pub fn from_proto(value: i32) -> Self {
-        match value {
-            1 => Topology::WorktreePerAgent,
-            2 => Topology::SharedDir,
-            _ => Topology::Unspecified,
-        }
-    }
-
     /// Convert to proto i32 representation.
     pub fn to_proto(self) -> i32 {
         match self {
