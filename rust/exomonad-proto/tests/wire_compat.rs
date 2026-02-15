@@ -956,4 +956,479 @@ mod binary {
             .join(", ");
         println!("{label}: [{hex}]");
     }
+
+    // ========================================================================
+    // Jj effects
+    // ========================================================================
+
+    #[test]
+    fn jj_bookmark_create_binary_roundtrip() {
+        use exomonad_proto::effects::jj::{BookmarkCreateRequest, BookmarkCreateResponse};
+
+        let req = BookmarkCreateRequest {
+            name: "my-bookmark".into(),
+            revision: "@".into(),
+            working_dir: "/repo".into(),
+        };
+        let bytes = req.encode_to_vec();
+        let decoded = BookmarkCreateRequest::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.name, "my-bookmark");
+        assert_eq!(decoded.revision, "@");
+        assert_eq!(decoded.working_dir, "/repo");
+
+        let resp = BookmarkCreateResponse {
+            change_id: "abc123".into(),
+        };
+        let bytes = resp.encode_to_vec();
+        let decoded = BookmarkCreateResponse::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.change_id, "abc123");
+    }
+
+    #[test]
+    fn jj_git_push_binary_roundtrip() {
+        use exomonad_proto::effects::jj::{GitPushRequest, GitPushResponse};
+
+        let req = GitPushRequest {
+            bookmark: "main".into(),
+            working_dir: "/repo".into(),
+        };
+        let bytes = req.encode_to_vec();
+        let decoded = GitPushRequest::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.bookmark, "main");
+        assert_eq!(decoded.working_dir, "/repo");
+
+        let resp = GitPushResponse {
+            success: true,
+            message: "pushed 1 bookmark".into(),
+        };
+        let bytes = resp.encode_to_vec();
+        let decoded = GitPushResponse::decode(bytes.as_slice()).unwrap();
+        assert!(decoded.success);
+        assert_eq!(decoded.message, "pushed 1 bookmark");
+    }
+
+    #[test]
+    fn jj_git_fetch_binary_roundtrip() {
+        use exomonad_proto::effects::jj::{GitFetchRequest, GitFetchResponse};
+
+        let req = GitFetchRequest {
+            working_dir: "/repo".into(),
+        };
+        let bytes = req.encode_to_vec();
+        let decoded = GitFetchRequest::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.working_dir, "/repo");
+
+        let resp = GitFetchResponse {
+            success: true,
+            message: "fetched 3 commits".into(),
+        };
+        let bytes = resp.encode_to_vec();
+        let decoded = GitFetchResponse::decode(bytes.as_slice()).unwrap();
+        assert!(decoded.success);
+        assert_eq!(decoded.message, "fetched 3 commits");
+    }
+
+    #[test]
+    fn jj_log_binary_roundtrip() {
+        use exomonad_proto::effects::jj::{LogEntry, LogRequest, LogResponse};
+
+        let req = LogRequest {
+            revset: "..@".into(),
+            working_dir: "/repo".into(),
+        };
+        let bytes = req.encode_to_vec();
+        let decoded = LogRequest::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.revset, "..@");
+        assert_eq!(decoded.working_dir, "/repo");
+
+        let resp = LogResponse {
+            entries: vec![LogEntry {
+                change_id: "abc123".into(),
+                commit_id: "def456".into(),
+                description: "initial commit".into(),
+                author: "dev@example.com".into(),
+                parents: vec!["parent1".into(), "parent2".into()],
+                is_conflicted: false,
+                is_empty: true,
+            }],
+        };
+        let bytes = resp.encode_to_vec();
+        let decoded = LogResponse::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.entries.len(), 1);
+        let entry = &decoded.entries[0];
+        assert_eq!(entry.change_id, "abc123");
+        assert_eq!(entry.commit_id, "def456");
+        assert_eq!(entry.description, "initial commit");
+        assert_eq!(entry.parents, vec!["parent1", "parent2"]);
+        assert!(!entry.is_conflicted);
+        assert!(entry.is_empty);
+    }
+
+    #[test]
+    fn jj_new_binary_roundtrip() {
+        use exomonad_proto::effects::jj::{NewRequest, NewResponse};
+
+        let req = NewRequest {
+            revision: "@".into(),
+            working_dir: "/repo".into(),
+        };
+        let bytes = req.encode_to_vec();
+        let decoded = NewRequest::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.revision, "@");
+        assert_eq!(decoded.working_dir, "/repo");
+
+        let resp = NewResponse {
+            change_id: "xyz789".into(),
+        };
+        let bytes = resp.encode_to_vec();
+        let decoded = NewResponse::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.change_id, "xyz789");
+    }
+
+    #[test]
+    fn jj_status_binary_roundtrip() {
+        use exomonad_proto::effects::jj::{StatusRequest, StatusResponse};
+
+        let req = StatusRequest {
+            working_dir: "/repo".into(),
+        };
+        let bytes = req.encode_to_vec();
+        let decoded = StatusRequest::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.working_dir, "/repo");
+
+        let resp = StatusResponse {
+            change_id: "abc".into(),
+            is_conflicted: false,
+            modified_files: vec!["src/main.rs".into()],
+        };
+        let bytes = resp.encode_to_vec();
+        let decoded = StatusResponse::decode(bytes.as_slice()).unwrap();
+        assert_eq!(decoded.change_id, "abc");
+        assert!(!decoded.is_conflicted);
+        assert_eq!(decoded.modified_files, vec!["src/main.rs"]);
+    }
+}
+
+// ============================================================================
+// JSON wire format tests (core types with serde)
+// ============================================================================
+
+#[cfg(feature = "full")]
+mod json_full {
+    // ========================================================================
+    // Common types (JSON wire format)
+    // ========================================================================
+
+    #[test]
+    fn role_json_format() {
+        use exomonad_proto::common::Role;
+
+        assert_eq!(serde_json::to_string(&Role::Dev).unwrap(), "\"dev\"");
+        assert_eq!(serde_json::to_string(&Role::Tl).unwrap(), "\"tl\"");
+        assert_eq!(serde_json::to_string(&Role::Pm).unwrap(), "\"pm\"");
+        assert_eq!(
+            serde_json::to_string(&Role::Reviewer).unwrap(),
+            "\"reviewer\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Role::Unspecified).unwrap(),
+            "\"unspecified\""
+        );
+    }
+
+    #[test]
+    fn tool_permission_json_format() {
+        use exomonad_proto::common::ToolPermission;
+
+        assert_eq!(
+            serde_json::to_string(&ToolPermission::Allow).unwrap(),
+            "\"allow\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ToolPermission::Deny).unwrap(),
+            "\"deny\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ToolPermission::Ask).unwrap(),
+            "\"ask\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ToolPermission::Skip).unwrap(),
+            "\"skip\""
+        );
+    }
+
+    #[test]
+    fn session_id_json_roundtrip() {
+        use exomonad_proto::common::SessionId;
+
+        let original = SessionId {
+            value: "sess-abc-123".into(),
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: SessionId = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, parsed);
+    }
+
+    #[test]
+    fn git_branch_json_roundtrip() {
+        use exomonad_proto::common::GitBranch;
+
+        let original = GitBranch {
+            name: "main".into(),
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: GitBranch = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, parsed);
+    }
+
+    #[test]
+    fn git_commit_json_roundtrip() {
+        use exomonad_proto::common::GitCommit;
+
+        let original = GitCommit {
+            sha: "abc123def456".into(),
+            message: "fix: resolve bug".into(),
+            author: "dev".into(),
+            timestamp_unix: 1700000000,
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: GitCommit = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, parsed);
+    }
+
+    #[test]
+    fn issue_ref_json_roundtrip() {
+        use exomonad_proto::common::IssueRef;
+
+        let original = IssueRef {
+            owner: "org".into(),
+            repo: "repo".into(),
+            number: 42,
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: IssueRef = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, parsed);
+    }
+
+    // ========================================================================
+    // Hook types (JSON wire format)
+    // ========================================================================
+
+    #[test]
+    fn hook_type_json_format() {
+        use exomonad_proto::hook::HookType;
+
+        assert_eq!(
+            serde_json::to_string(&HookType::PreToolUse).unwrap(),
+            "\"pre_tool_use\""
+        );
+        assert_eq!(
+            serde_json::to_string(&HookType::SessionStart).unwrap(),
+            "\"session_start\""
+        );
+        assert_eq!(
+            serde_json::to_string(&HookType::SubagentStop).unwrap(),
+            "\"subagent_stop\""
+        );
+    }
+
+    #[test]
+    fn stop_decision_json_format() {
+        use exomonad_proto::hook::StopDecision;
+
+        assert_eq!(
+            serde_json::to_string(&StopDecision::Allow).unwrap(),
+            "\"allow\""
+        );
+        assert_eq!(
+            serde_json::to_string(&StopDecision::Block).unwrap(),
+            "\"block\""
+        );
+        assert_eq!(
+            serde_json::to_string(&StopDecision::Ask).unwrap(),
+            "\"ask\""
+        );
+    }
+
+    #[test]
+    fn pre_tool_use_input_json_roundtrip() {
+        use exomonad_proto::hook::PreToolUseInput;
+
+        let original = PreToolUseInput {
+            tool_name: "Write".into(),
+            tool_input: "{}".into(),
+            tool_use_id: "tu-1".into(),
+            session_id: None,
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: PreToolUseInput = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, parsed);
+    }
+
+    #[test]
+    fn hook_output_json_roundtrip() {
+        use exomonad_proto::hook::HookOutput;
+
+        let original = HookOutput {
+            r#continue: true,
+            stop_reason: String::new(),
+            suppress_output: false,
+            system_message: String::new(),
+            output: None,
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: HookOutput = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, parsed);
+    }
+
+    // ========================================================================
+    // Agent types (exomonad/ — JSON wire format)
+    // ========================================================================
+
+    #[test]
+    fn agent_type_json_format() {
+        use exomonad_proto::agent::AgentType;
+
+        assert_eq!(
+            serde_json::to_string(&AgentType::Claude).unwrap(),
+            "\"claude\""
+        );
+        assert_eq!(
+            serde_json::to_string(&AgentType::Gemini).unwrap(),
+            "\"gemini\""
+        );
+    }
+
+    #[test]
+    fn agent_status_json_format() {
+        use exomonad_proto::agent::AgentStatus;
+
+        assert_eq!(
+            serde_json::to_string(&AgentStatus::Running).unwrap(),
+            "\"running\""
+        );
+        assert_eq!(
+            serde_json::to_string(&AgentStatus::Stopped).unwrap(),
+            "\"stopped\""
+        );
+        assert_eq!(
+            serde_json::to_string(&AgentStatus::Failed).unwrap(),
+            "\"failed\""
+        );
+        assert_eq!(
+            serde_json::to_string(&AgentStatus::Waiting).unwrap(),
+            "\"waiting\""
+        );
+    }
+
+    #[test]
+    fn spawn_options_json_roundtrip() {
+        use exomonad_proto::agent::SpawnOptions;
+
+        let original = SpawnOptions {
+            agent_type: 1, // CLAUDE
+            role: 2,       // TL
+            initial_prompt: "implement feature X".into(),
+            branch_prefix: "gh-42".into(),
+            worktree_name: "feature-x".into(),
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: SpawnOptions = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, parsed);
+    }
+
+    #[test]
+    fn agent_info_json_roundtrip() {
+        use exomonad_proto::agent::AgentInfo;
+
+        let original = AgentInfo {
+            worktree_path: "/tmp/worktrees/feature-x".into(),
+            branch_name: "gh-42/feature-x".into(),
+            agent_type: 1,
+            role: 2,
+            status: 1,
+            zellij_tab: "42-feature-x".into(),
+            error: String::new(),
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: AgentInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, parsed);
+    }
+
+    #[test]
+    fn worktree_info_json_roundtrip() {
+        use exomonad_proto::agent::WorktreeInfo;
+
+        let original = WorktreeInfo {
+            path: "/home/dev/project/.exomonad/worktrees/feature".into(),
+            branch: "main.feature".into(),
+            head_commit: "abc123def456".into(),
+            is_dirty: true,
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: WorktreeInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, parsed);
+    }
+
+    // ========================================================================
+    // Popup types (JSON wire format)
+    // ========================================================================
+
+    #[test]
+    fn popup_definition_json_roundtrip() {
+        use exomonad_proto::popup::{PopupComponent, PopupDefinition, TextInput, popup_component};
+
+        let original = PopupDefinition {
+            id: "popup-1".into(),
+            title: "Enter details".into(),
+            components: vec![PopupComponent {
+                id: "name-input".into(),
+                component: Some(popup_component::Component::TextInput(TextInput {
+                    label: "Name".into(),
+                    placeholder: "Enter your name".into(),
+                    default_value: String::new(),
+                    required: true,
+                    max_length: 100,
+                })),
+            }],
+            submit_label: "Submit".into(),
+            cancel_label: "Cancel".into(),
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: PopupDefinition = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, parsed);
+    }
+
+    #[test]
+    fn form_submission_json_roundtrip() {
+        use exomonad_proto::popup::FormSubmission;
+        use std::collections::HashMap;
+
+        let mut values = HashMap::new();
+        values.insert("name-input".to_string(), "Alice".to_string());
+        values.insert("email-input".to_string(), "alice@example.com".to_string());
+
+        let original = FormSubmission {
+            popup_id: "popup-1".into(),
+            values,
+            cancelled: false,
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: FormSubmission = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, parsed);
+    }
+
+    #[test]
+    fn popup_error_json_roundtrip() {
+        use exomonad_proto::popup::PopupError;
+
+        let original = PopupError {
+            message: "Invalid input".into(),
+            component_id: "name-input".into(),
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: PopupError = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, parsed);
+    }
 }
