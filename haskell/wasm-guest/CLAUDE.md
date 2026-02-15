@@ -11,6 +11,7 @@ These are defined in `ExoMonad.Effects.*` and interpreted by the Rust host.
 - `GitHub`: GitHub API interactions (issues, PRs).
 - `Jj`: Jujutsu VCS operations (bookmark, push, fetch, log, new, status).
 - **`Events`**: Inter-agent synchronization (wait/notify).
+- **`Session`**: Session lifecycle management (register Claude session ID).
 - `Log`: Logging to the host console.
 - `FS`: File system access.
 - `Agent`: Agent lifecycle management.
@@ -36,3 +37,12 @@ The guest exports MCP tools that agents can call. These are defined in `ExoMonad
 - `popup`
 - `note`, `question` (dev role)
 - `get_agent_messages`, `answer_question` (TL role)
+
+## Hooks
+
+The guest handles hooks invoked by Claude Code:
+- **`onSessionStart`**: Captures Claude session ID and yields `SessionRegister` effect.
+- **`onPreToolUse`**: Validates tool calls (stops restricted tools).
+- **`onPostToolUse`**: Logs tool usage.
+- **`onSubagentStop`**: Validates child agent exit status.
+- **`onSessionEnd`**: Cleans up resources.

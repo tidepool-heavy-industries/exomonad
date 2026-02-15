@@ -19,7 +19,8 @@ proto/
     ├── fs.proto            # fs.* effects
     ├── agent.proto         # agent.* effects
     ├── jj.proto            # jj.* effects (Jujutsu VCS)
-    └── log.proto           # log.* effects
+    ├── log.proto           # log.* effects
+    └── session.proto       # session.* effects
 ```
 
 ## Codegen
@@ -203,6 +204,11 @@ Agent lifecycle (`agent.*` namespace):
 - `CleanupMerged`: Clean up agents with merged branches
 - `List`: List active agents
 
+### effects/session.proto
+
+Session management (`session.*` namespace):
+- `RegisterClaudeSession`: Register mapping between internal session ID and Claude UUID.
+
 ### effects/log.proto
 
 Logging and events (`log.*` namespace):
@@ -283,6 +289,7 @@ just proto-test  # Run wire format compatibility tests
 | fs.proto | ✅ | Pending | ✅ |
 | agent.proto | ✅ | ✅ | ✅ |
 | jj.proto | ✅ | ✅ | Pending |
+| session.proto | ✅ | ✅ | Pending |
 
 ## Related Files
 
