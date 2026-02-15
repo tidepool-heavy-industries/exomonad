@@ -20,7 +20,7 @@ Dockerize Claude Code sessions. Each container sees `/workspace/exomonad` regard
 ├─────────────────────────────────────────────────────────────────┤
 │  Shared Resources:                                               │
 │  ├── /repo/exomonad.git/        (bare repo)                     │
-│  ├── /.exomonad/worktrees/      (managed by host)               │
+│  ├── /.exo/worktrees/      (managed by host)               │
 │  │   ├── main/                                                  │
 │  │   ├── feat-x/                                                │
 │  │   └── feat-x-sub/                                            │
@@ -98,7 +98,7 @@ volumes:
   - ~/.cache/cabal:/root/.cache/cabal         # Build cache
 
   # Per-container (isolated)
-  - /.exomonad/worktrees/${BRANCH}:/workspace # Worktree
+  - /.exo/worktrees/${BRANCH}:/workspace # Worktree
 
   # NOT shared - travels with docker commit
   # ~/.claude/ lives inside container
@@ -189,10 +189,10 @@ exomonad container terminate <container-id>
 3. Fork operation:
    a. docker pause parent-123
    b. docker commit parent-123 → exomonad-dev:parent-123-checkpoint
-   c. git worktree add .exomonad/worktrees/feat-sub origin/parent-branch
+   c. git worktree add .exo/worktrees/feat-sub origin/parent-branch
    d. docker run \
         -e CLAUDE_CODE_OAUTH_TOKEN="..." \
-        -v .exomonad/worktrees/feat-sub:/workspace \
+        -v .exo/worktrees/feat-sub:/workspace \
         -v ~/.cache/cabal:/root/.cache/cabal \
         exomonad-dev:parent-123-checkpoint \
         --result-fifo /tmp/fifo-child \
@@ -345,7 +345,7 @@ typeDrivenDev task = do
 ## Open Questions
 
 1. **ExoMonad state persistence**: Where does orchestrator state live?
-   - Option: JSON file in `~/.exomonad/containers.json`
+   - Option: JSON file in `~/.exo/containers.json`
    - Option: SQLite database
    - Option: In-memory only (containers are ephemeral anyway)
 

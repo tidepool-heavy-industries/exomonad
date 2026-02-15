@@ -101,7 +101,7 @@ instance ToJSON Step
 
 -- | Reference to a persistent plan file.
 data PlanRef = PlanRef
-  { -- | must be under .exomonad/plans/
+  { -- | must be under .exo/plans/
     planPath :: Text,
     -- | optional heading to extract
     planSection :: Maybe Text

@@ -334,22 +334,22 @@ gemini mcp add --transport http exomonad http://localhost:7432/tl/mcp
 ```
 
 **WASM loading:**
-Resolved from `wasm_dir` config field, falling back to `~/.exomonad/wasm/` (global default, installed by `just install-all`). Contains all roles, selected per-call. In serve mode, hot reload checks mtime per tool call.
+Resolved from `wasm_dir` config field, falling back to `~/.exo/wasm/` (global default, installed by `just install-all`). Contains all roles, selected per-call. In serve mode, hot reload checks mtime per tool call.
 
-**Bootstrap:** `exomonad init` auto-creates `.exomonad/config.toml` and `.gitignore` entries if missing. Works in any project directory — no pre-existing setup required.
+**Bootstrap:** `exomonad init` auto-creates `.exo/config.toml` and `.gitignore` entries if missing. Works in any project directory — no pre-existing setup required.
 
 ```toml
 default_role = "tl"  # or "dev"
 project_dir = "."
 shell_command = "nix develop"  # optional: environment wrapper for TL tab + server
-wasm_dir = ".exomonad/wasm"    # optional: override WASM location (default: ~/.exomonad/wasm/)
+wasm_dir = ".exo/wasm"    # optional: override WASM location (default: ~/.exo/wasm/)
 ```
 
 **Config hierarchy:**
 - `config.toml` uses `default_role` (project-wide default)
 - `config.local.toml` uses `role` (worktree-specific override)
 - Resolution: `local.role > global.default_role`
-- WASM: `wasm_dir` in config > `~/.exomonad/wasm/`
+- WASM: `wasm_dir` in config > `~/.exo/wasm/`
 
 ### Building
 
@@ -367,9 +367,9 @@ just wasm-all
 cargo build -p exomonad
 
 # Hot reload workflow (HTTP serve mode, Unix socket)
-exomonad serve                # Start server on .exomonad/server.sock
-# ... edit .exomonad/roles/tl/Role.hs ...
-exomonad recompile --role tl  # Rebuild WASM via nix, copy to .exomonad/wasm/
+exomonad serve                # Start server on .exo/server.sock
+# ... edit .exo/roles/tl/Role.hs ...
+exomonad recompile --role tl  # Rebuild WASM via nix, copy to .exo/wasm/
 # Next tool call picks up new WASM automatically
 ```
 
@@ -380,12 +380,12 @@ exomonad recompile --role tl  # Rebuild WASM via nix, copy to .exomonad/wasm/
 4. Builds and installs Zellij plugins
 
 **WASM build pipeline:**
-1. User-authored `Role.hs` in `.exomonad/roles/<role>/` defines tool composition
+1. User-authored `Role.hs` in `.exo/roles/<role>/` defines tool composition
 2. Generated `Main.hs` and `<role>.cabal` provide FFI scaffolding (gitignored)
 3. `cabal.project.wasm` lists role packages alongside `wasm-guest` SDK
 4. `just wasm <role>` builds via `nix develop .#wasm -c wasm32-wasi-cabal build ...`
-5. Compiled WASM copied to `.exomonad/wasm/wasm-guest-<role>.wasm`
-6. Both `exomonad hook` and `exomonad serve` load WASM from `.exomonad/wasm/` at runtime
+5. Compiled WASM copied to `.exo/wasm/wasm-guest-<role>.wasm`
+6. Both `exomonad hook` and `exomonad serve` load WASM from `.exo/wasm/` at runtime
 
 ### MCP Tools
 
@@ -409,17 +409,17 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 **Note**: Git operations (`git status`, `git log`, etc.) and GitHub operations (`gh pr list`, etc.) are handled via the Bash tool with `git` and `gh` commands, not MCP tools.
 
 **How spawn works (hylo model):**
-1. `spawn_subtree`: Creates git worktree at `.exomonad/worktrees/{slug}/` branching off current branch
+1. `spawn_subtree`: Creates git worktree at `.exo/worktrees/{slug}/` branching off current branch
 2. Branch naming: `{parent_branch}.{slug}` (dot separator) — enables auto-detection of PR base branch
 3. Writes `.mcp.json` with `{"type": "http", "url": "..."}` in worktree root
 4. Creates Zellij tab with `claude 'task prompt'` (positional arg, not --prompt flag)
 5. `spawn_subtree` agents are Claude-only, get TL role (can spawn workers, depth-capped at 2)
 6. `spawn_leaf_subtree`: Like `spawn_subtree` but Gemini — own worktree + branch + tab, dev role, files PR
 7. `spawn_workers`: Runs Gemini in Zellij panes in the parent's directory (no branch, no worktree, ephemeral)
-8. Worker config lives in `.exomonad/agents/{name}/`
+8. Worker config lives in `.exo/agents/{name}/`
 9. PRs target parent branch, not main — merged via recursive fold
 10. Identity: birth-branch as session ID (immutable, deterministic). Root TL = "root".
-11. Filesystem IS the registry — scan `.exomonad/worktrees/` and `.exomonad/agents/` to discover agents
+11. Filesystem IS the registry — scan `.exo/worktrees/` and `.exo/agents/` to discover agents
 
 ### Parallel Worker Coordination
 
@@ -453,7 +453,7 @@ Use cases:
 - ✅ Hylo spawn model: spawn_subtree (Claude worktree+tab) + spawn_leaf_subtree (Gemini worktree+tab) + spawn_workers (Gemini panes, ephemeral)
 - ✅ Proper Zellij tab creation with full UI (tab-bar, status-bar)
 - ✅ Shell-wrapped commands for environment inheritance
-- ✅ GitHub API integration with token from ~/.exomonad/secrets
+- ✅ GitHub API integration with token from ~/.exo/secrets
 - ✅ Auto-cleanup tabs on agent exit
 - ✅ Zellij plugin (exomonad-plugin) for status display and popup UI
 - ✅ KDL layout generation (zellij-gen) for proper environment inheritance
@@ -461,7 +461,7 @@ Use cases:
 - ✅ Gemini MCP wiring (`GEMINI_CLI_SYSTEM_SETTINGS_PATH` env var pointing to per-agent settings on spawn)
 - ✅ EventQueue with blocking wait (zero-polling worker coordination)
 - ✅ wait_for_event + notify_parent MCP tools
-- ✅ Nested worktree layout (.exomonad/worktrees/, .exomonad/agents/)
+- ✅ Nested worktree layout (.exo/worktrees/, .exo/agents/)
 - ✅ Filesystem-based agent registry (no separate state file)
 - ✅ Configurable worktree_base in config.toml
 - ✅ Composable handler groups for library consumers (core_handlers, git_handlers, orchestration_handlers)

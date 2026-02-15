@@ -41,7 +41,7 @@ Claude Code (hook or MCP call)
 Human in Zellij session
     └── Claude Code (main tab, role=tl)
             ├── MCP server: exomonad mcp-stdio
-            ├── WASM: loaded from .exomonad/wasm/ at runtime
+            ├── WASM: loaded from .exo/wasm/ at runtime
             └── spawn_subtree / spawn_leaf_subtree / spawn_workers creates:
                 ├── Tab subtree-1 (Claude, worktree off current branch, role=tl)
                 ├── Tab leaf-1 (Gemini, worktree off current branch, role=dev)
@@ -50,7 +50,7 @@ Human in Zellij session
 ```
 
 Each subtree agent (`spawn_subtree`):
-- Runs in isolated git worktree at `.exomonad/worktrees/{slug}/`
+- Runs in isolated git worktree at `.exo/worktrees/{slug}/`
 - Branch naming: `{parent_branch}.{slug}` (dot separator for hierarchy)
 - Gets `.mcp.json` with `{"type": "http", "url": "..."}` pointing to per-agent endpoint
 - Claude-only, gets TL role (can spawn workers, depth-capped at 2)
@@ -66,7 +66,7 @@ Each leaf subtree agent (`spawn_leaf_subtree`):
 Each worker agent (`spawn_workers`):
 - Runs in a Zellij pane in the parent's directory (no branch, no worktree, ephemeral)
 - Always Gemini — lightweight, focused execution
-- MCP config in `.exomonad/agents/{name}/settings.json`, pointed via `GEMINI_CLI_SYSTEM_SETTINGS_PATH`
+- MCP config in `.exo/agents/{name}/settings.json`, pointed via `GEMINI_CLI_SYSTEM_SETTINGS_PATH`
 
 ## Documentation Tree
 
@@ -139,7 +139,7 @@ exomonad serve
 echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
 ```
 
-**Note:** WASM is loaded from `.exomonad/wasm/` at runtime. To update WASM, run `just wasm-all` or `exomonad recompile --role unified`.
+**Note:** WASM is loaded from `.exo/wasm/` at runtime. To update WASM, run `just wasm-all` or `exomonad recompile --role unified`.
 
 ### Environment Variables
 | Variable | Used By | Purpose |
@@ -177,7 +177,7 @@ All tools are defined in Haskell WASM and executed via host functions.
 | `github_list_issues` | List GitHub issues |
 | `github_get_issue` | Get single issue details |
 | `github_list_prs` | List GitHub pull requests |
-| `spawn_subtree` | Fork a worktree node off current branch (Claude-only, creates `.exomonad/worktrees/{slug}/`). Auto-resolves session ID for --fork-session. |
+| `spawn_subtree` | Fork a worktree node off current branch (Claude-only, creates `.exo/worktrees/{slug}/`) |
 | `spawn_leaf_subtree` | Spawn Gemini agent in own worktree + branch + tab (isolated, files PR) |
 | `spawn_workers` | Spawn ephemeral Gemini agents as panes in parent dir (no branch, no worktree) |
 | `file_pr` | Create/update PR for current branch (auto-detects base branch from naming) |
@@ -217,13 +217,9 @@ Haskell: Either EffectError GetBranchResponse
 | `file_pr.*` | FilePRHandler | file_pr |
 | `copilot.*` | CopilotHandler | wait_for_copilot_review |
 | `messaging.*` | MessagingHandler | send_note, send_question |
-| `events.*` | EventHandler | wait_for_event, notify_event, notify_parent |
-| `coordination.*` | CoordinationHandler | create_task, update_task, list_tasks, get_task, send_message, get_messages |
-| `kv.*` | KvHandler | get, set |
-| `session.*` | SessionHandler | register_claude_id |
+| `events.*` | EventHandler | wait_for_event, notify_event |
 | `jj.*` | JjHandler | bookmark_create, git_push, git_fetch, log, new, status |
 | `merge_pr.*` | MergePRHandler | merge_pr (gh pr merge + jj git fetch) |
-| `session.*` | SessionHandler | register_claude_id |
 
 **Zellij Integration:**
 - Uses declarative KDL layouts (not CLI flags)
@@ -242,7 +238,7 @@ claude mcp add --transport http exomonad http://localhost:7432/tl/mcp
 gemini mcp add --transport http exomonad http://localhost:7432/tl/mcp
 ```
 
-And ensure `.exomonad/config.toml` and/or `config.local.toml` exists.
+And ensure `.exo/config.toml` and/or `config.local.toml` exists.
 
 ## Testing
 

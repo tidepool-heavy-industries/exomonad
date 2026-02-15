@@ -12,19 +12,19 @@ exomonad init
     |
     +-- Starts server in dedicated Zellij tab
     |
-    +-- Unix socket server (.exomonad/server.sock)
+    +-- Unix socket server (.exo/server.sock)
     |   +-- MCP protocol (JSON-RPC over unix socket)
     |   +-- Per-session role assignment
     |
     +-- PluginManager (Arc<RwLock<Plugin>>)
-    |   +-- Unified WASM loaded from .exomonad/wasm/wasm-guest-unified.wasm
+    |   +-- Unified WASM loaded from .exo/wasm/wasm-guest-unified.wasm
     |   +-- Checked for mtime change on each tool call
     |   +-- Reloaded transparently if changed
     |
     +-- EffectRegistry (shared across all connections)
     |   +-- All built-in handlers (git, github, agent, messaging, etc.)
     |
-    +-- .exomonad/server.pid (JSON: {pid, socket})
+    +-- .exo/server.pid (JSON: {pid, socket})
         +-- Clients discover socket path from this file
         +-- Process liveness verified via kill(pid, 0)
 ```
@@ -49,7 +49,7 @@ Claude Code Teams handles agent lifecycle. Spawned Claude agents inherit the TL'
 1. Edit Haskell DSL (tools, effects, routing logic)
 2. exomonad recompile [--role unified]
    -> nix develop .#wasm -c wasm32-wasi-cabal build ...
-   -> copies .wasm to .exomonad/wasm/wasm-guest-unified.wasm
+   -> copies .wasm to .exo/wasm/wasm-guest-unified.wasm
 3. Next tool call -> server detects mtime change -> swaps WASM
    -> zero downtime, no agent restart
 ```
@@ -59,7 +59,7 @@ Claude Code Teams handles agent lifecycle. Spawned Claude agents inherit the TL'
 | Mode | When | WASM Source | Hot Reload |
 |------|------|------------|------------|
 | Embedded (`include_bytes!`) | `exomonad mcp-stdio` | Compiled into binary | No |
-| File-based (`from_file`) | `exomonad serve` | `.exomonad/wasm/` | Yes |
+| File-based (`from_file`) | `exomonad serve` | `.exo/wasm/` | Yes |
 
 Both modes share the same `PluginManager`, `EffectRegistry`, and handler stack.
 Stdio mode is preserved for single-session debugging. Unix socket mode is for multi-agent.
@@ -154,7 +154,7 @@ Zellij Session
 - [x] `GET /health` returns version info
 - [x] WASM loaded from file path at startup
 - [x] WASM auto-reloaded when file changes (mtime check per tool call)
-- [x] `exomonad recompile` builds WASM and copies to `.exomonad/wasm/`
+- [x] `exomonad recompile` builds WASM and copies to `.exo/wasm/`
 - [x] Running server picks up new WASM on next tool call after recompile
 - [x] Stdio mode still works unchanged
 - [x] PID file written for client discovery

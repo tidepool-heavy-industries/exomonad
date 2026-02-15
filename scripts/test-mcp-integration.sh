@@ -6,15 +6,15 @@ WORK_DIR=$(mktemp -d)
 trap 'kill "$SERVER_PID" 2>/dev/null; rm -rf "$WORK_DIR"' EXIT
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-WASM_SRC="$PROJECT_ROOT/.exomonad/wasm"
+WASM_SRC="$PROJECT_ROOT/.exo/wasm"
 if [ ! -d "$WASM_SRC" ]; then
     echo "WASM not built. Run: just wasm-all" >&2
     exit 1
 fi
 
-mkdir -p "$WORK_DIR/.exomonad"
-ln -s "$WASM_SRC" "$WORK_DIR/.exomonad/wasm"
-cat > "$WORK_DIR/.exomonad/config.toml" <<'EOF'
+mkdir -p "$WORK_DIR/.exo"
+ln -s "$WASM_SRC" "$WORK_DIR/.exo/wasm"
+cat > "$WORK_DIR/.exo/config.toml" <<'EOF'
 default_role = "tl"
 project_dir = "."
 zellij_session = "test"

@@ -10,7 +10,7 @@
 -- import ExoMonad.LLM.Types (LLMConfig(..), AnthropicSecrets(..))
 -- import ExoMonad.Effects.LLMProvider (LLMComplete, complete, SAnthropic, AnthropicConfig(..))
 --
--- config = LLMSocketConfig ".exomonad/sockets/service.sock"
+-- config = LLMSocketConfig ".exo/sockets/service.sock"
 --
 -- main = do
 --   env <- mkLLMEnv config

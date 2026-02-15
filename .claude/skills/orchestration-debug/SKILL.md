@@ -70,7 +70,7 @@ curl -sf http://localhost:7434
 echo $?  # 0 = healthy, non-zero = problem
 
 # Check control-server logs
-tail -f .exomonad/logs/control-server.log
+tail -f .exo/logs/control-server.log
 ```
 
 **Cause**: tui-sidebar has `depends_on: control-server: condition: process_healthy`
@@ -122,7 +122,7 @@ echo 'on_force_close "quit"' >> .zellij/config.kdl
 ps aux | grep haskell-language-server
 
 # Check control-server stderr
-cat .exomonad/logs/control-server.log | grep -i error
+cat .exo/logs/control-server.log | grep -i error
 ```
 
 **Cause**: HLS initialization takes longer than probe timeout (30s × 30 attempts = 15 min max)
@@ -150,7 +150,7 @@ pgrep -f "control-server|tui-sidebar|process-compose"
 
 | Log | Path |
 |-----|------|
-| process-compose | `.exomonad/logs/process-compose.log` |
+| process-compose | `.exo/logs/process-compose.log` |
 | control-server | stdout in process-compose TUI |
 | tui-sidebar | stdout in process-compose TUI |
 
@@ -173,7 +173,7 @@ If everything is broken:
 pkill -9 -f "control-server|tui-sidebar|process-compose|zellij"
 
 # 2. Clean runtime directories
-rm -rf .exomonad/sockets/* .exomonad/logs/*
+rm -rf .exo/sockets/* .exo/logs/*
 
 # 3. Verify ports are free
 lsof -i :7432,:7433,:7434,:8080

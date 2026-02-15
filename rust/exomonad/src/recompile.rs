@@ -3,7 +3,7 @@
 use anyhow::{bail, Context, Result};
 use std::path::Path;
 
-/// Build WASM for a role via nix and copy artifact to `.exomonad/wasm/`.
+/// Build WASM for a role via nix and copy artifact to `.exo/wasm/`.
 pub async fn run_recompile(role: &str, project_dir: &Path) -> Result<()> {
     // Preflight: check nix is available
     let nix_check = std::process::Command::new("nix").arg("--version").output();
@@ -46,8 +46,8 @@ pub async fn run_recompile(role: &str, project_dir: &Path) -> Result<()> {
 
     let wasm_path = find_wasm_artifact(&dist_dir, &artifact_name)?;
 
-    // Copy to .exomonad/wasm/
-    let dest_dir = project_dir.join(".exomonad/wasm");
+    // Copy to .exo/wasm/
+    let dest_dir = project_dir.join(".exo/wasm");
     std::fs::create_dir_all(&dest_dir)
         .with_context(|| format!("Failed to create {}", dest_dir.display()))?;
 
@@ -62,10 +62,7 @@ pub async fn run_recompile(role: &str, project_dir: &Path) -> Result<()> {
 
     let size = std::fs::metadata(&dest_path).map(|m| m.len()).unwrap_or(0);
 
-    println!(
-        "WASM built: .exomonad/wasm/{artifact_name} ({} bytes)",
-        size
-    );
+    println!("WASM built: .exo/wasm/{artifact_name} ({} bytes)", size);
 
     Ok(())
 }

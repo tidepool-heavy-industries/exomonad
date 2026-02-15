@@ -1,6 +1,6 @@
 //! Key-value storage effect handler for the `kv.*` namespace.
 //!
-//! Stores values as JSON files under `.exomonad/kv/{key}.json`.
+//! Stores values as JSON files under `.exo/kv/{key}.json`.
 //! Keys are validated to contain only alphanumeric characters, underscores, and hyphens.
 
 use crate::effects::{dispatch_kv_effect, EffectError, EffectHandler, EffectResult, KvEffects};
@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 /// Key-value storage effect handler.
 ///
-/// Persists values as individual JSON files under `.exomonad/kv/` in the project directory.
+/// Persists values as individual JSON files under `.exo/kv/` in the project directory.
 pub struct KvHandler {
     project_dir: PathBuf,
 }
@@ -23,7 +23,7 @@ impl KvHandler {
 
     /// Path to the KV storage directory.
     fn kv_dir(&self) -> PathBuf {
-        self.project_dir.join(".exomonad").join("kv")
+        self.project_dir.join(".exo").join("kv")
     }
 
     /// Path to a specific key's file.

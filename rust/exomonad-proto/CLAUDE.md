@@ -48,7 +48,7 @@ config.type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]");
 Enums use snake_case to match Haskell expectations:
 
 ```rust
-config.type_attribute(".exomonad.ffi.ErrorCode", "#[serde(rename_all = \"snake_case\")]");
+config.type_attribute(".exo.ffi.ErrorCode", "#[serde(rename_all = \"snake_case\")]");
 ```
 
 Example:

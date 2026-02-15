@@ -7,9 +7,9 @@ This document details the configuration files, filesystem paths, and loading mec
 
 ## 1. Configuration Files
 
-### 1.1 Project Configuration (`.exomonad/config.toml`)
+### 1.1 Project Configuration (`.exo/config.toml`)
 
-*   **Location:** Project root (`$PROJECT_ROOT/.exomonad/config.toml`)
+*   **Location:** Project root (`$PROJECT_ROOT/.exo/config.toml`)
 *   **Purpose:** Defines the agent role and project context. Used by the Rust sidecar to determine which WASM plugin to load.
 *   **Loaded By:** `rust/exomonad/src/config.rs`
 *   **Schema:**
@@ -23,11 +23,11 @@ This document details the configuration files, filesystem paths, and loading mec
 *   **Validation:**
     *   Checks if `project_dir` exists and is a directory.
     *   Warns if `project_dir` is not a git repository.
-    *   Validates that the corresponding WASM plugin exists at `.exomonad/wasm/`.
+    *   Validates that the corresponding WASM plugin exists at `.exo/wasm/`.
 
-### 1.2 Secrets (`~/.exomonad/secrets`)
+### 1.2 Secrets (`~/.exo/secrets`)
 
-*   **Location:** User home (`~/.exomonad/secrets`)
+*   **Location:** User home (`~/.exo/secrets`)
 *   **Purpose:** Stores sensitive API keys and tokens.
 *   **Format:** KEY=VALUE (like `.env`)
 *   **Loaded By:** `rust/exomonad-contrib/src/services/secrets.rs`
@@ -61,7 +61,7 @@ This document details the configuration files, filesystem paths, and loading mec
 
 ## 2. Filesystem Paths
 
-### 2.1 Runtime State (`.exomonad/`)
+### 2.1 Runtime State (`.exo/`)
 
 Located in the project root (or worktree root).
 
@@ -73,7 +73,7 @@ Located in the project root (or worktree root).
     *   Format: `gh-{issue_id}-{slug}-{agent_type}/`
 *   `sidecar.pid`: PID file for the running sidecar process.
 
-### 2.2 Global State (`~/.exomonad/`)
+### 2.2 Global State (`~/.exo/`)
 
 Located in the user's home directory.
 
@@ -99,7 +99,7 @@ Located in the user's home directory.
 *   **Implementation:**
     *   **No central config loading.**
     *   `ExoMonad.Env.Interpreter`: Direct wrapper around `System.Environment`.
-    *   `ExoMonad.GitHub.Interpreter`: Config is passed in via `GitHubConfig` type. Defaults to hardcoded relative socket path `.exomonad/sockets/control.sock`.
+    *   `ExoMonad.GitHub.Interpreter`: Config is passed in via `GitHubConfig` type. Defaults to hardcoded relative socket path `.exo/sockets/control.sock`.
     *   `ExoMonad.LLM.Interpreter`: Config passed via `LLMSocketConfig`.
     *   `ExoMonad.Habitica.Interpreter`: Requires manual construction of `HabiticaConfig`.
 *   **Secrets:** Haskell relies on the Rust sidecar to handle auth (via socket) OR expects secrets to be injected/present in ENV (if running in a context where it makes direct calls, though most calls go through sockets now).
@@ -107,20 +107,20 @@ Located in the user's home directory.
 ## 4. Findings & Recommendations
 
 ### 4.1 Missing Validation
-*   **Critical:** `~/.exomonad/secrets` is read without checking file permissions (e.g., ensuring 600).
+*   **Critical:** `~/.exo/secrets` is read without checking file permissions (e.g., ensuring 600).
 *   **Config:** `config.toml` parsing failures might panic or bubble up ungracefully in some edge cases (though `anyhow` context is used).
 
 ### 4.2 Inconsistencies
 *   **Rust vs Haskell:** Rust has a defined "Config" concept. Haskell treats config as "parameters passed to interpreters".
-*   **Socket Paths:** Most Haskell interpreters default to `.exomonad/sockets/control.sock` relative to CWD. If the CWD is not the project root (e.g., inside a deep subdirectory), this will fail unless `EXOMONAD_CONTROL_SOCKET` env var is set.
+*   **Socket Paths:** Most Haskell interpreters default to `.exo/sockets/control.sock` relative to CWD. If the CWD is not the project root (e.g., inside a deep subdirectory), this will fail unless `EXOMONAD_CONTROL_SOCKET` env var is set.
 *   **Hardcoded Fallbacks:**
-    *   `rust/exomonad/src/main.rs`: defaults to `.exomonad/sockets/control.sock`.
+    *   `rust/exomonad/src/main.rs`: defaults to `.exo/sockets/control.sock`.
 
 ### 4.3 Hardcoded Paths to Configurable
-*   The default worktree directory `.exomonad/worktrees` is hardcoded in `agent_control.rs` (though customizable via API).
-*   The WASM directory `.exomonad/wasm` is hardcoded in `config.rs`.
+*   The default worktree directory `.exo/worktrees` is hardcoded in `agent_control.rs` (though customizable via API).
+*   The WASM directory `.exo/wasm` is hardcoded in `config.rs`.
 
 ### 4.4 Recommendations
-1.  **Implement Permission Check:** Add a check in `secrets.rs` to warn or fail if `~/.exomonad/secrets` is world-readable.
+1.  **Implement Permission Check:** Add a check in `secrets.rs` to warn or fail if `~/.exo/secrets` is world-readable.
 2.  **Standardize Socket Resolution:** Create a shared library (or consistent logic) for resolving socket paths that handles `ENV > Absolute Path > Relative to Git Root` (finding the git root instead of just CWD).
 3.  **Haskell Config Module:** Consider creating a `ExoMonad.Config` module in Haskell that standardizes how environment variables and defaults are resolved, mirroring the Rust `config.rs` logic where applicable.

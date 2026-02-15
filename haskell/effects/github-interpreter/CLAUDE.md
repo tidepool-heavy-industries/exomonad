@@ -93,7 +93,7 @@ data GitHubConfig = GitHubConfig
 defaultGitHubConfig :: GitHubConfig
 ```
 
-The socket path defaults to `EXOMONAD_CONTROL_SOCKET` or `.exomonad/sockets/control.sock`.
+The socket path defaults to `EXOMONAD_CONTROL_SOCKET` or `.exo/sockets/control.sock`.
 
 ## Key Modules
 

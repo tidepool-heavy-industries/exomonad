@@ -6,7 +6,7 @@ Unified sidecar binary: Rust host with Haskell WASM plugin.
 
 **All logic is in Haskell WASM. Rust handles I/O only.**
 
-WASM is loaded from `.exomonad/wasm/wasm-guest-unified.wasm` at runtime by `exomonad serve`. The `exomonad hook` command is a thin HTTP client that forwards hook events to the running server — it does NOT load WASM itself.
+WASM is loaded from `.exo/wasm/wasm-guest-unified.wasm` at runtime by `exomonad serve`. The `exomonad hook` command is a thin HTTP client that forwards hook events to the running server — it does NOT load WASM itself.
 
 ```
 # Hook mode (thin HTTP client → server)
@@ -22,7 +22,7 @@ N agents → exomonad serve → TCP (default: localhost:7432) → Unified WASM (
 
 ```bash
 exomonad hook pre-tool-use        # Handle Claude Code hook
-exomonad serve [--port PORT]      # TCP MCP server (multi-agent, hot reload)
+exomonad serve [--socket PATH]    # Unix socket MCP server (multi-agent, hot reload)
 exomonad recompile [--role ROLE]  # Build WASM from Haskell source
 exomonad init [--session NAME]    # Initialize Zellij session (Server tab + TL tab)
 ```
@@ -37,21 +37,21 @@ MCP config is managed by the CLI tools (`claude mcp add` / `gemini mcp add`), no
 
 Use `--recreate` to delete an existing session and create fresh (e.g., after binary updates).
 
-**Example `.exomonad/config.toml`:**
+**Example `.exo/config.toml`:**
 ```toml
 default_role = "tl"
 project_dir = "."
 shell_command = "nix develop"  # optional: environment wrapper for TL tab + server
-wasm_dir = ".exomonad/wasm"    # optional: override WASM location (default: ~/.exomonad/wasm/)
+wasm_dir = ".exo/wasm"    # optional: override WASM location (default: ~/.exo/wasm/)
 ```
 
-**Bootstrap:** `exomonad init` auto-creates `.exomonad/config.toml` and `.gitignore` entries if missing. Works in any project directory.
+**Bootstrap:** `exomonad init` auto-creates `.exo/config.toml` and `.gitignore` entries if missing. Works in any project directory.
 
 **Config hierarchy:**
 - `config.toml` uses `default_role` (project-wide default)
 - `config.local.toml` uses `role` (worktree-specific override)
 
-**WASM resolution:** `wasm_dir` in config > `~/.exomonad/wasm/` (global default, installed by `just install-all`)
+**WASM resolution:** `wasm_dir` in config > `~/.exo/wasm/` (global default, installed by `just install-all`)
 
 To update WASM, run `just wasm-all` or `exomonad recompile --role unified`.
 
@@ -81,18 +81,10 @@ gemini mcp add --transport http exomonad http://localhost:7432/tl/mcp
 | `github_list_issues` | List GitHub issues | `owner`, `repo`, `state?`, `labels?` |
 | `github_get_issue` | Get single issue details | `owner`, `repo`, `number` |
 | `github_list_prs` | List GitHub pull requests | `owner`, `repo`, `state?`, `limit?` |
-| `spawn_subtree` | Fork a worktree node off current branch (Claude-only) | `task`, `branch_name` |
-| `spawn_leaf_subtree` | Spawn Gemini agent in own worktree (dev role) | `task`, `branch_name` |
-| `spawn_workers` | Spawn ephemeral Gemini workers as panes | `specs`: array of worker specs |
-| `file_pr` | Create/update PR for current branch | `title`, `body` |
-| `merge_pr` | Merge child PR (TL role only) | `pr_number` |
-| `popup` | Display interactive UI | `title`, `components` |
-| `note` | Send non-blocking note to TL | `content` |
-| `question` | Ask blocking question to TL | `content` |
+| `spawn_subtree` | Fork a worktree node off current branch (Claude-only, `.exo/worktrees/`) | `task`, `branch_name` |
+| `spawn_worker` | Spawn Gemini pane in current worktree (config in `.exo/agents/`) | `name`, `prompt` |
 | `get_agent_messages` | Read notes/questions from agents | `agent_id?` |
 | `answer_question` | Answer pending agent question | `agent_id`, `question_id`, `answer` |
-| `wait_for_event` | Block until event occurs | `types`, `timeout_secs`, `after_event_id` |
-| `notify_parent` | Notify parent session of completion | `status`, `message` |
 
 
 ## Environment Variables
@@ -116,14 +108,8 @@ All effects flow through a single `yield_effect` host function using protobuf bi
 | `log.*` | LogHandler | tracing |
 | `popup.*` | PopupHandler | Zellij plugin IPC |
 | `file_pr.*` | FilePRHandler | gh CLI |
-| `merge_pr.*` | MergePRHandler | gh pr merge + jj git fetch |
 | `copilot.*` | CopilotHandler | GitHub API polling |
 | `messaging.*` | MessagingHandler | Agent messaging files (JSON) |
-| `events.*` | EventHandler | EventQueue service + HTTP forward |
-| `jj.*` | JjHandler | jj subprocess |
-| `coordination.*` | CoordinationHandler | Task management service |
-| `kv.*` | KvHandler | JSON file storage |
-| `session.*` | SessionHandler | Claude session registry |
 
 Handlers are registered via composable group functions: `core_handlers()`, `git_handlers()`, `orchestration_handlers()`.
 
@@ -177,23 +163,6 @@ Claude Code hook JSON (stdin)
     CLI prints stdout, exits with exit_code
          ↓
     Claude Code receives response
-```
-
-**Session Start Flow:**
-```
-Claude Code hook session-start (stdin)
-         ↓
-    exomonad hook session-start (thin HTTP client)
-         ↓
-    HTTP POST localhost:{port}/hook?event=session-start&runtime=claude
-         ↓
-    Server: call WASM handle_session_start
-         ↓
-    Haskell yields SessionRegister effect
-         ↓
-    Server registers Claude session ID in memory (for spawn_subtree)
-         ↓
-    Server returns success
 ```
 
 ## Related Documentation

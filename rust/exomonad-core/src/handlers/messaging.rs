@@ -23,7 +23,7 @@ use tracing::info;
 /// Messaging effect handler.
 ///
 /// Handles all `messaging.*` effects by reading/writing JSON inbox files
-/// in `.exomonad/messages/`. The `QuestionRegistry` bridges `answer_question`
+/// in `.exo/messages/`. The `QuestionRegistry` bridges `answer_question`
 /// (TL-side) with `send_question` (agent-side) for immediate unblocking.
 pub struct MessagingHandler {
     question_registry: Arc<QuestionRegistry>,
@@ -337,10 +337,7 @@ mod tests {
     #[test]
     fn test_inbox_path_uses_service() {
         let path = inbox::inbox_path(Path::new("/project"), "myagent");
-        assert_eq!(
-            path,
-            PathBuf::from("/project/.exomonad/messages/myagent.json")
-        );
+        assert_eq!(path, PathBuf::from("/project/.exo/messages/myagent.json"));
     }
 
     #[test]

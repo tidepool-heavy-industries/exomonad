@@ -19,9 +19,9 @@
 --
 -- setupHandler :: Member FileSystem r => Sem r (Either FileSystemError ())
 -- setupHandler = do
---   result <- createDirectory "/path/to/.exomonad"
+--   result <- createDirectory "/path/to/.exo"
 --   case result of
---     Right () -> writeTextFile "/path/to/.exomonad/config" "..."
+--     Right () -> writeTextFile "/path/to/.exo/config" "..."
 --     Left err -> pure (Left err)
 -- @
 --

@@ -1,25 +1,35 @@
-//! Secret loading from ~/.exomonad/secrets.
+//! Secret loading from ~/.exo/secrets.
 //!
 //! Secrets are stored in a simple KEY=value format (like .env files).
-//! Single canonical location: ~/.exomonad/secrets
+//! Single canonical location: ~/.exo/secrets
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Loaded secrets from ~/.exomonad/secrets file.
+/// Loaded secrets from ~/.exo/secrets file.
 #[derive(Debug, Clone, Default)]
 pub struct Secrets {
     values: HashMap<String, String>,
 }
 
 impl Secrets {
-    /// Load secrets from ~/.exomonad/secrets.
+    /// Load secrets from ~/.exo/secrets (or legacy ~/.exomonad/secrets).
     ///
     /// Falls back to environment variables if file doesn't exist.
     /// Also exports loaded secrets to environment so host functions can access them.
     pub fn load() -> Self {
         let home = std::env::var("HOME").unwrap_or_default();
-        let secrets_path = PathBuf::from(home).join(".exomonad/secrets");
+        let exo_path = PathBuf::from(&home).join(".exo/secrets");
+        let legacy_path = PathBuf::from(&home).join(".exomonad/secrets");
+
+        let secrets_path = if exo_path.exists() {
+            exo_path
+        } else if legacy_path.exists() {
+            tracing::warn!("Using legacy secrets file: {}", legacy_path.display());
+            legacy_path
+        } else {
+            exo_path // default to new path for not-found error handling / assumption
+        };
 
         if let Ok(content) = std::fs::read_to_string(&secrets_path) {
             tracing::info!(path = %secrets_path.display(), "Loaded secrets");

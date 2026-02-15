@@ -45,7 +45,7 @@ data GitTools mode = GitTools
 
 ### 3. User Experience
 
-Users create role definitions in `.exomonad/roles/<role>/Role.hs`:
+Users create role definitions in `.exo/roles/<role>/Role.hs`:
 
 ```haskell
 module Role (config) where
@@ -70,14 +70,14 @@ config = RoleConfig
 
 ### 4. Shared Code
 
-A shared library directory `.exomonad/lib/` allows code reuse across roles.
+A shared library directory `.exo/lib/` allows code reuse across roles.
 *   Roles can import modules from `lib/` (e.g., `import Common`).
 *   This is useful for shared hooks or custom tool logic.
 
 ### 5. Directory Structure
 
 ```
-.exomonad/
+.exo/
 ├── flake.nix              # Git-tracked: builds roles
 ├── lib/                   # Git-tracked: shared code
 ├── roles/                 # Git-tracked: role definitions
@@ -90,7 +90,7 @@ A shared library directory `.exomonad/lib/` allows code reuse across roles.
 ### 6. Secrets Management
 
 Secrets are managed entirely by the Rust host (ExoMonad binary), not the Haskell WASM guest.
-*   Secrets file: `~/.exomonad/secrets/` (global to user).
+*   Secrets file: `~/.exo/secrets/` (global to user).
 *   Haskell code does not handle secrets directly; they are injected by the host into tool execution where necessary (transparently).
 
 ### 7. Runtime Loading

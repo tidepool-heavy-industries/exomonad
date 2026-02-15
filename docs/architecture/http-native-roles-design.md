@@ -22,10 +22,10 @@ Agents avoid conflicts through task assignment and communication, not filesystem
 
 ### 2. Unix Socket Server
 
-**Decision: Server listens on `.exomonad/server.sock`. No TCP ports.**
+**Decision: Server listens on `.exo/server.sock`. No TCP ports.**
 
 ```
-.exomonad/
+.exo/
 ├── server.sock           # Unix domain socket (MCP server listens here)
 ├── server.pid            # JSON: {"pid": 12345, "port": 7432}
 ├── wasm/                 # Compiled WASM modules
@@ -44,7 +44,7 @@ Spawned agents get HTTP config auto-generated pointing to the server:
 }
 ```
 
-**Liveness check**: Clients read `.exomonad/server.pid`, verify PID is alive via `kill(pid, 0)`, then connect to the socket. If PID is stale, the human runs `exomonad init` to start a fresh server.
+**Liveness check**: Clients read `.exo/server.pid`, verify PID is alive via `kill(pid, 0)`, then connect to the socket. If PID is stale, the human runs `exomonad init` to start a fresh server.
 
 ### 3. Server Lifecycle
 
@@ -227,7 +227,7 @@ When the TL edits `Role.hs` and recompiles:
 ## Migration Path
 
 ### Phase 1: Unix Socket Server + Unified WASM + Per-Session Roles (Current Sprint)
-- `exomonad init` starts server on `.exomonad/server.sock`
+- `exomonad init` starts server on `.exo/server.sock`
 - Unified WASM with `AllRoles.hs` containing all role configs
 - Role established per-session (TL via Claude Code Teams, dev via Gemini connection)
 - `just wasm` builds one artifact
