@@ -29,7 +29,7 @@ use thiserror::Error;
 
 /// Errors that can occur during services validation.
 ///
-/// These errors are returned by [`Services::validate()`] when validating
+/// These errors are returned by [`validate_git()`] and [`validate_gh_cli()`] when validating
 /// service prerequisites (executables, paths, etc.).
 #[derive(Debug, Error)]
 pub enum ServicesError {
