@@ -1,0 +1,74 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use crate::effects::EffectHandler;
+use crate::services::agent_control::AgentControlService;
+use crate::services::coordination::CoordinationService;
+use crate::services::event_queue::EventQueue;
+use crate::services::filesystem::FileSystemService;
+use crate::services::git::GitService;
+use crate::services::github::GitHubService;
+use crate::services::questions::QuestionRegistry;
+
+use super::{
+    AgentHandler, CoordinationHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler,
+    GitHandler, GitHubHandler, JjHandler, KvHandler, LogHandler, MergePRHandler, MessagingHandler,
+    PopupHandler,
+};
+
+/// Core handlers every consumer needs: logging, key-value store, filesystem.
+pub fn core_handlers(project_dir: PathBuf) -> Vec<Box<dyn EffectHandler>> {
+    vec![
+        Box::new(LogHandler::new()),
+        Box::new(KvHandler::new(project_dir.clone())),
+        Box::new(FsHandler::new(Arc::new(FileSystemService::new(project_dir)))),
+    ]
+}
+
+/// Git and GitHub handlers for dev tooling.
+///
+/// Includes: git, jj, github, file_pr, merge_pr, copilot.
+/// `github` is optional — if None, GitHubHandler is not registered.
+pub fn git_handlers(
+    git: Arc<GitService>,
+    github: Option<GitHubService>,
+) -> Vec<Box<dyn EffectHandler>> {
+    let mut handlers: Vec<Box<dyn EffectHandler>> = vec![
+        Box::new(GitHandler::new(git)),
+        Box::new(JjHandler),
+        Box::new(FilePRHandler::new()),
+        Box::new(MergePRHandler),
+        Box::new(CopilotHandler::new()),
+    ];
+    if let Some(gh) = github {
+        handlers.push(Box::new(GitHubHandler::new(gh)));
+    } else {
+        tracing::warn!("GitHub service not available; 'github' namespace handlers will not be registered.");
+    }
+    handlers
+}
+
+/// Orchestration handlers for agent spawning, messaging, events, popups.
+///
+/// Returns the handlers AND the QuestionRegistry (shared with MCP for answer_question).
+pub fn orchestration_handlers(
+    agent_control: Arc<AgentControlService>,
+    event_queue: Arc<EventQueue>,
+    zellij_session: Option<String>,
+    project_dir: PathBuf,
+    remote_port: Option<u16>,
+    session_id: Option<String>,
+) -> (Vec<Box<dyn EffectHandler>>, Arc<QuestionRegistry>) {
+    let question_registry = Arc::new(QuestionRegistry::new());
+    let coordination_service = Arc::new(CoordinationService::new());
+
+    let handlers: Vec<Box<dyn EffectHandler>> = vec![
+        Box::new(AgentHandler::new(agent_control)),
+        Box::new(PopupHandler::new(zellij_session)),
+        Box::new(EventHandler::new(event_queue, remote_port, session_id)),
+        Box::new(MessagingHandler::new(question_registry.clone(), project_dir)),
+        Box::new(CoordinationHandler::new(coordination_service)),
+    ];
+
+    (handlers, question_registry)
+}

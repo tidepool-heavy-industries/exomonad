@@ -125,6 +125,11 @@ impl EffectRegistry {
         self.register(Arc::new(handler));
     }
 
+    /// Register a boxed effect handler.
+    pub fn register_boxed(&mut self, handler: Box<dyn EffectHandler>) {
+        self.register(Arc::from(handler));
+    }
+
     /// Dispatch an effect to the appropriate handler.
     ///
     /// Routes based on namespace prefix extracted from the effect type.
