@@ -21,7 +21,9 @@ pub fn core_handlers(project_dir: PathBuf) -> Vec<Box<dyn EffectHandler>> {
     vec![
         Box::new(LogHandler::new()),
         Box::new(KvHandler::new(project_dir.clone())),
-        Box::new(FsHandler::new(Arc::new(FileSystemService::new(project_dir)))),
+        Box::new(FsHandler::new(Arc::new(FileSystemService::new(
+            project_dir,
+        )))),
     ]
 }
 
@@ -43,7 +45,9 @@ pub fn git_handlers(
     if let Some(gh) = github {
         handlers.push(Box::new(GitHubHandler::new(gh)));
     } else {
-        tracing::warn!("GitHub service not available; 'github' namespace handlers will not be registered.");
+        tracing::warn!(
+            "GitHub service not available; 'github' namespace handlers will not be registered."
+        );
     }
     handlers
 }
@@ -66,7 +70,10 @@ pub fn orchestration_handlers(
         Box::new(AgentHandler::new(agent_control)),
         Box::new(PopupHandler::new(zellij_session)),
         Box::new(EventHandler::new(event_queue, remote_port, session_id)),
-        Box::new(MessagingHandler::new(question_registry.clone(), project_dir)),
+        Box::new(MessagingHandler::new(
+            question_registry.clone(),
+            project_dir,
+        )),
         Box::new(CoordinationHandler::new(coordination_service)),
     ];
 
