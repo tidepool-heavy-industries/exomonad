@@ -42,13 +42,14 @@ Human in Zellij session
     └── Claude Code (main tab, role=tl)
             ├── MCP server: exomonad mcp-stdio
             ├── WASM: loaded from .exomonad/wasm/ at runtime
-            └── spawn_subtree / spawn_worker creates:
-                ├── Tab subtree-1 (worktree off current branch, role=tl)
-                ├── Pane worker-a (in-place, Gemini, role=dev)
+            └── spawn_subtree / spawn_leaf_subtree / spawn_workers creates:
+                ├── Tab subtree-1 (Claude, worktree off current branch, role=tl)
+                ├── Tab leaf-1 (Gemini, worktree off current branch, role=dev)
+                ├── Pane worker-a (Gemini, in parent dir, ephemeral, role=dev)
                 └── ... (recursive tree of worktrees + workers)
 ```
 
-Each subtree agent:
+Each subtree agent (`spawn_subtree`):
 - Runs in isolated git worktree at `.exomonad/worktrees/{slug}/`
 - Branch naming: `{parent_branch}.{slug}` (dot separator for hierarchy)
 - Gets `.mcp.json` with `{"type": "http", "url": "..."}` pointing to per-agent endpoint
@@ -57,8 +58,13 @@ Each subtree agent:
 - PRs target parent branch, not main — merged via recursive fold
 - Runs in Zellij tab with `claude 'task'` (positional arg), auto-closes on exit
 
-Each worker agent:
-- Runs in a Zellij pane in the parent's worktree (no branch, no worktree)
+Each leaf subtree agent (`spawn_leaf_subtree`):
+- Same worktree isolation as `spawn_subtree` (own branch, own directory)
+- Gemini — dev role (no spawn tools)
+- Runs in Zellij tab, files PR against parent branch
+
+Each worker agent (`spawn_workers`):
+- Runs in a Zellij pane in the parent's directory (no branch, no worktree, ephemeral)
 - Always Gemini — lightweight, focused execution
 - MCP config in `.exomonad/agents/{name}/settings.json`, pointed via `GEMINI_CLI_SYSTEM_SETTINGS_PATH`
 
@@ -156,7 +162,7 @@ Resolution order in `mcp::agent_identity::get_agent_id()`:
 - `/dev/mcp` — generic dev endpoint (no agent identity)
 - `/agents/{name}/mcp` — per-agent endpoint (identity from URL path)
 
-At spawn time, `spawn_subtree`/`spawn_worker` (via WASM) writes per-agent MCP config with the agent's endpoint URL. The URL IS the identity — unforgeable, visible in access logs.
+At spawn time, `spawn_subtree`/`spawn_leaf_subtree`/`spawn_workers` (via WASM) writes per-agent MCP config with the agent's endpoint URL. The URL IS the identity — unforgeable, visible in access logs.
 
 ## MCP Tools
 
@@ -172,7 +178,8 @@ All tools are defined in Haskell WASM and executed via host functions.
 | `github_get_issue` | Get single issue details |
 | `github_list_prs` | List GitHub pull requests |
 | `spawn_subtree` | Fork a worktree node off current branch (Claude-only, creates `.exomonad/worktrees/{slug}/`) |
-| `spawn_worker` | Spawn Gemini agent as pane in current worktree (config in `.exomonad/agents/{name}/`) |
+| `spawn_leaf_subtree` | Spawn Gemini agent in own worktree + branch + tab (isolated, files PR) |
+| `spawn_workers` | Spawn ephemeral Gemini agents as panes in parent dir (no branch, no worktree) |
 | `file_pr` | Create/update PR for current branch (auto-detects base branch from naming) |
 | `note` | Send fire-and-forget note to TL (agent-side) |
 | `question` | Send blocking question to TL (agent-side) |
@@ -210,6 +217,7 @@ Haskell: Either EffectError GetBranchResponse
 | `copilot.*` | CopilotHandler | wait_for_copilot_review |
 | `messaging.*` | MessagingHandler | send_note, send_question |
 | `events.*` | EventHandler | wait_for_event, notify_event |
+| `jj.*` | JjHandler | bookmark_create, git_push, git_fetch, log, new, status |
 
 **Zellij Integration:**
 - Uses declarative KDL layouts (not CLI flags)

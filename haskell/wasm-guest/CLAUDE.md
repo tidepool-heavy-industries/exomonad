@@ -9,6 +9,7 @@ These are defined in `ExoMonad.Effects.*` and interpreted by the Rust host.
 
 - `Git`: Git operations (branch, status, log, etc.)
 - `GitHub`: GitHub API interactions (issues, PRs).
+- `Jj`: Jujutsu VCS operations (bookmark, push, fetch, log, new, status).
 - **`Events`**: Inter-agent synchronization (wait/notify).
 - `Log`: Logging to the host console.
 - `FS`: File system access.
@@ -23,9 +24,14 @@ The guest exports MCP tools that agents can call. These are defined in `ExoMonad
 - **`wait_for_event`**: Blocks until a specific event type occurs (e.g., `worker_complete`) or a timeout is reached. Useful for orchestration agents waiting for sub-tasks. Bundled in `EventTools` record (TL role only).
 - **`notify_parent`**: Used by worker/subtree agents to signal completion to their parent. Available as a bare field in both TL and dev roles.
 
+### Spawn Tools (`ExoMonad.Guest.Tools.Spawn`)
+
+- **`spawn_subtree`**: Fork a Claude agent in a new git worktree + Zellij tab (TL role, can further decompose).
+- **`spawn_leaf_subtree`**: Fork a Gemini agent in a new git worktree + Zellij tab (dev role, isolated, files PR).
+- **`spawn_workers`**: Spawn ephemeral Gemini agents as panes in the parent directory (no branch, no worktree).
+
 ### Other Tools
 
-- `spawn_subtree`, `spawn_workers`
 - `file_pr`
 - `popup`
 - `note`, `question` (dev role)

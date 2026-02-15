@@ -273,7 +273,7 @@ Human-driven Claude Code sessions augmented with ExoMonad. **Not headless automa
 ```
 Human in Zellij session
     └── Claude Code + exomonad (Rust + Haskell WASM)
-            ├── MCP tools via WASM (spawn_subtree, spawn_worker, file_pr, etc.)
+            ├── MCP tools via WASM (spawn_subtree, spawn_leaf_subtree, spawn_workers, file_pr, etc.)
             └── Hylo agent tree:
                 ├── worktree: main/feature-a (TL role, can spawn children)
                 │   ├── worker: rust-impl (Gemini, in-place pane)
@@ -391,7 +391,8 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 | Tool | Description |
 |------|-------------|
 | `spawn_subtree` | Fork a worktree node off your current branch (Claude-only). Creates isolated git worktree + Zellij tab. |
-| `spawn_workers` | Spawn multiple Gemini worker agents as panes in the current worktree (batch) |
+| `spawn_workers` | Spawn multiple ephemeral Gemini worker agents as panes in parent dir (no branch, no worktree) |
+| `spawn_leaf_subtree` | Spawn a Gemini agent in its own git worktree + branch + Zellij tab (isolated, files PR) |
 | `file_pr` | Create or update a PR for the current branch (auto-detects base branch from naming convention) |
 | `popup` | Display interactive popup UI in Zellij (choices, text input, sliders) |
 | `note` | Send a note to the TL agent (dev role messaging) |
@@ -409,11 +410,12 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 3. Writes `.mcp.json` with `{"type": "http", "url": "..."}` in worktree root
 4. Creates Zellij tab with `claude 'task prompt'` (positional arg, not --prompt flag)
 5. `spawn_subtree` agents are Claude-only, get TL role (can spawn workers, depth-capped at 2)
-6. `spawn_worker`: Runs Gemini in a Zellij pane in the parent's worktree (no branch, no worktree)
-7. Worker config lives in `.exomonad/agents/{name}/` (not /tmp/)
-8. PRs target parent branch, not main — merged via recursive fold
-9. Identity: birth-branch as session ID (immutable, deterministic). Root TL = "root".
-10. Filesystem IS the registry — scan `.exomonad/worktrees/` and `.exomonad/agents/` to discover agents
+6. `spawn_leaf_subtree`: Like `spawn_subtree` but Gemini — own worktree + branch + tab, dev role, files PR
+7. `spawn_workers`: Runs Gemini in Zellij panes in the parent's directory (no branch, no worktree, ephemeral)
+8. Worker config lives in `.exomonad/agents/{name}/`
+9. PRs target parent branch, not main — merged via recursive fold
+10. Identity: birth-branch as session ID (immutable, deterministic). Root TL = "root".
+11. Filesystem IS the registry — scan `.exomonad/worktrees/` and `.exomonad/agents/` to discover agents
 
 ### Parallel Worker Coordination
 
@@ -444,23 +446,29 @@ Use cases:
 - ✅ All MCP tools via WASM (no direct Rust tools)
 - ✅ Hook forwarding via WASM
 - ✅ Unified file-based WASM (single module for all roles, hot reload in serve mode)
-- ✅ Hylo spawn model: spawn_subtree (worktree isolation) + spawn_worker (in-place pane)
+- ✅ Hylo spawn model: spawn_subtree (Claude worktree+tab) + spawn_leaf_subtree (Gemini worktree+tab) + spawn_workers (Gemini panes, ephemeral)
 - ✅ Proper Zellij tab creation with full UI (tab-bar, status-bar)
 - ✅ Shell-wrapped commands for environment inheritance
 - ✅ GitHub API integration with token from ~/.exomonad/secrets
 - ✅ Auto-cleanup tabs on agent exit
 - ✅ Zellij plugin (exomonad-plugin) for status display and popup UI
 - ✅ KDL layout generation (zellij-gen) for proper environment inheritance
-- ✅ Stop hook logic (SubagentStop, SessionEnd) - validates uncommitted changes, unpushed commits, PR status, Copilot review
+- ✅ Stop hook logic (SubagentStop, SessionEnd) - validates PR status, Copilot review
 - ✅ Gemini MCP wiring (`GEMINI_CLI_SYSTEM_SETTINGS_PATH` env var pointing to per-agent settings on spawn)
 - ✅ EventQueue with blocking wait (zero-polling worker coordination)
 - ✅ wait_for_event + notify_parent MCP tools
 - ✅ Nested worktree layout (.exomonad/worktrees/, .exomonad/agents/)
 - ✅ Filesystem-based agent registry (no separate state file)
 - ✅ Configurable worktree_base in config.toml
-- ✅ Split spawn_subtree (Claude worktree+tab) / spawn_workers (Gemini panes)
+- ✅ Composable handler groups for library consumers (core_handlers, git_handlers, orchestration_handlers)
+- ✅ Embeddable McpServer (into_router, serve, McpStateBuilder)
+- ✅ Startup namespace validation (require_namespaces on RuntimeBuilder)
+- ✅ jj colocated mode + effects (jj.* namespace: bookmark_create, git_push, git_fetch, log, new, status)
 - 🔧 Inter-agent messaging (note/question/answer) — code exists, needs async conversion for question tool
 - 🔧 Stop hooks for subtree agents (notify_parent on exit not yet wired)
+- 🔧 Event router (Zellij STDIN injection for dormant parents) — not built
+- 🔧 merge_pr tool — not built
+- 🔧 GitHub poller (PR status → events) — not built
 
 ---
 

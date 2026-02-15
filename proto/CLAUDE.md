@@ -18,6 +18,7 @@ proto/
     ├── github.proto        # github.* effects
     ├── fs.proto            # fs.* effects
     ├── agent.proto         # agent.* effects
+    ├── jj.proto            # jj.* effects (Jujutsu VCS)
     └── log.proto           # log.* effects
 ```
 
@@ -173,6 +174,16 @@ GitHub API operations (`github.*` namespace):
 - `CreatePullRequest`: Create new PR
 - `GetPullRequestReviewComments`: Get inline comments
 
+### effects/jj.proto
+
+Jujutsu VCS operations (`jj.*` namespace):
+- `BookmarkCreate`: Create bookmark at revision
+- `GitPush`: Push bookmark to remote
+- `GitFetch`: Fetch from remote (triggers auto-rebase)
+- `Log`: Query revsets, return JSON
+- `New`: Start a new change
+- `Status`: Working copy status including conflicts
+
 ### effects/fs.proto
 
 Filesystem operations (`fs.*` namespace):
@@ -271,6 +282,7 @@ just proto-test  # Run wire format compatibility tests
 | log.proto | ✅ | ✅ | ✅ |
 | fs.proto | ✅ | Pending | ✅ |
 | agent.proto | ✅ | ✅ | ✅ |
+| jj.proto | ✅ | ✅ | Pending |
 
 ## Related Files
 

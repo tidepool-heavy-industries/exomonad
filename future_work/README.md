@@ -1,6 +1,6 @@
-# Next Wave
+# Future Work
 
-Ideas that are post-Phase-1 but worth not forgetting. Each file is a self-contained sketch.
+Ideas worth not forgetting. Each file is a self-contained sketch.
 
 | Idea | File | Summary |
 |------|------|---------|
