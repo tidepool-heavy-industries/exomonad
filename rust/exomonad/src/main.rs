@@ -822,7 +822,20 @@ async fn main() -> Result<()> {
             );
 
             // Build runtime with file-based WASM loading (enables hot reload)
-            let builder = RuntimeBuilder::new().with_wasm_path(wasm_path);
+            let builder = RuntimeBuilder::new()
+                .with_wasm_path(wasm_path)
+                .require_namespaces(vec![
+                    "log".to_string(),
+                    "kv".to_string(),
+                    "fs".to_string(),
+                    "git".to_string(),
+                    "github".to_string(),
+                    "agent".to_string(),
+                    "popup".to_string(),
+                    "events".to_string(),
+                    "messaging".to_string(),
+                    "coordination".to_string(),
+                ]);
             let (builder, question_registry, event_queue) =
                 exomonad_core::register_builtin_handlers(builder, &services);
             let rt = builder.build().await.context("Failed to build runtime")?;
