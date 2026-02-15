@@ -24,7 +24,6 @@ pub use self::agent_control::{
 pub use self::event_queue::EventQueue;
 pub use self::filesystem::FileSystemService;
 pub use self::secrets::Secrets;
-use std::path::PathBuf;
 use thiserror::Error;
 
 /// Errors that can occur during services validation.
@@ -33,14 +32,6 @@ use thiserror::Error;
 /// service prerequisites (executables, paths, etc.).
 #[derive(Debug, Error)]
 pub enum ServicesError {
-    /// Current working directory could not be determined.
-    #[error("failed to get current directory: {0}")]
-    CurrentDirFailed(String),
-
-    /// Specified working directory does not exist or is inaccessible.
-    #[error("working directory does not exist: {path}")]
-    WorkingDirNotFound { path: PathBuf },
-
     /// Git executable not found on PATH (required for git operations).
     #[error("git executable not found on PATH")]
     GitNotFound,
@@ -101,12 +92,6 @@ mod tests {
             "gh CLI not found on PATH (required when GitHub service is enabled)"
         );
 
-        let err = ServicesError::CurrentDirFailed("permission denied".to_string());
-        assert_eq!(
-            err.to_string(),
-            "failed to get current directory: permission denied"
-        );
-
         let err = ServicesError::CommandFailed("git --version failed".to_string());
         assert_eq!(
             err.to_string(),
@@ -114,7 +99,4 @@ mod tests {
         );
     }
 
-    // Note: Full Services::validate() tests would require a tokio runtime
-    // and are better tested via integration tests (e.g., in exomonad tests)
-    // where Services is constructed and validated in a real async context.
 }

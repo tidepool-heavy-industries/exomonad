@@ -23,25 +23,26 @@
 //!
 //! # Usage
 //!
+//! External consumers pick handler groups and add custom domain handlers:
+//!
 //! ```rust,ignore
-//! use exomonad_core::{RuntimeBuilder, EffectHandler, EffectResult};
-//! use async_trait::async_trait;
+//! use exomonad_core::{RuntimeBuilder, core_handlers, git_handlers, EffectHandler, EffectResult};
+//! use exomonad_core::mcp::{McpServer, McpState};
 //!
-//! struct MyHandler;
+//! // Pick only the handler groups you need
+//! let mut builder = RuntimeBuilder::new()
+//!     .with_wasm_path(wasm_path)
+//!     .with_handlers(core_handlers(project_dir.clone()))
+//!     .with_handlers(git_handlers(git, github));
 //!
-//! #[async_trait]
-//! impl EffectHandler for MyHandler {
-//!     fn namespace(&self) -> &str { "my_domain" }
-//!     async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
-//!         todo!()
-//!     }
-//! }
+//! // Add custom domain handlers
+//! builder = builder.with_effect_handler(MyDomainHandler::new());
 //!
-//! let runtime = RuntimeBuilder::new()
-//!     .with_effect_handler(MyHandler)
-//!     .with_wasm_bytes(wasm_bytes)
-//!     .build()
-//!     .await?;
+//! let rt = builder.build().await?;
+//!
+//! // Embed MCP server
+//! let state = McpState::builder(Arc::new(rt.plugin_manager), project_dir).build();
+//! McpServer::new(state).serve(addr).await?;
 //! ```
 
 // === Always available (lightweight types for plugin consumers) ===
@@ -310,7 +311,7 @@ impl Runtime {
         self.registry.dispatch(effect_type, payload).await
     }
 
-    /// Convert into MCP state for running the stdio server.
+    /// Convert into MCP state for running the MCP server.
     pub fn into_mcp_state(self, project_dir: PathBuf) -> mcp::McpState {
         mcp::McpState {
             project_dir,

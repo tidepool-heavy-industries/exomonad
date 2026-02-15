@@ -111,7 +111,7 @@ All effects flow through a single `yield_effect` host function using protobuf bi
 | `copilot.*` | CopilotHandler | GitHub API polling |
 | `messaging.*` | MessagingHandler | Agent messaging files (JSON) |
 
-All handlers are registered by `exomonad_core::register_builtin_handlers()`.
+Handlers are registered via composable group functions: `core_handlers()`, `git_handlers()`, `orchestration_handlers()`.
 
 ## Building
 
