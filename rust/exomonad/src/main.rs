@@ -19,7 +19,7 @@ use exomonad_core::services::{git, zellij_events};
 
 use exomonad_core::{
     ClaudePreToolUseOutput, HookEnvelope, HookEventType, HookInput, HookSpecificOutput,
-    InternalStopHookOutput, PluginManager, RuntimeBuilder, Services, StopDecision, ToolPermission,
+    InternalStopHookOutput, PluginManager, RuntimeBuilder, StopDecision, ToolPermission,
 };
 use std::collections::HashMap;
 use std::os::unix::process::CommandExt;
@@ -803,26 +803,51 @@ async fn main() -> Result<()> {
 
             let server_pid_path = project_dir.join(".exomonad/server.pid");
 
-            // Initialize services (with MCP server port for per-agent endpoint URLs)
-            let services = Arc::new(
-                Services::new()
-                    .with_zellij_session(config.zellij_session.clone())
-                    .with_worktree_base(config.worktree_base)
-                    .with_mcp_server_port(port)
-                    .validate()
-                    .context("Failed to validate services")?,
-            );
+            let remote_port = std::env::var("EXOMONAD_SERVER_PORT")
+                .ok()
+                .and_then(|s| s.parse().ok());
+
+            // Validate prerequisites
+            exomonad_core::services::validate_git().context("Failed to validate git")?;
+
+            let secrets = exomonad_core::services::secrets::Secrets::load();
+            let executor: Arc<dyn exomonad_core::services::docker::CommandExecutor> =
+                Arc::new(exomonad_core::services::local::LocalExecutor::new());
+            let git = Arc::new(exomonad_core::services::git::GitService::new(executor));
+            let github = secrets
+                .github_token()
+                .and_then(|t| exomonad_core::services::github::GitHubService::new(t).ok());
+
+            if github.is_some() {
+                exomonad_core::services::validate_gh_cli().context("Failed to validate gh CLI")?;
+            }
+
+            let project_dir_for_services = project_dir.clone();
+            let mut agent_control =
+                exomonad_core::services::agent_control::AgentControlService::new(
+                    project_dir_for_services.clone(),
+                    github.clone(),
+                );
+            agent_control = agent_control
+                .with_worktree_base(config.worktree_base)
+                .with_mcp_server_port(port);
+            let event_session_id = uuid::Uuid::new_v4().to_string();
+            agent_control = agent_control.with_event_session_id(event_session_id.clone());
+            agent_control = agent_control.with_zellij_session(config.zellij_session.clone());
+            let agent_control = Arc::new(agent_control);
+
+            let event_queue = Arc::new(exomonad_core::services::event_queue::EventQueue::new());
 
             info!(
                 wasm_path = %wasm_path.display(),
                 port = %port,
                 role = %role_name,
-                event_session_id = %services.event_session_id(),
+                event_session_id = %event_session_id,
                 "Starting HTTP MCP server with file-based WASM (hot reload enabled)"
             );
 
-            // Build runtime with file-based WASM loading (enables hot reload)
-            let builder = RuntimeBuilder::new()
+            // Build runtime with handler groups
+            let mut builder = RuntimeBuilder::new()
                 .with_wasm_path(wasm_path)
                 .require_namespaces(vec![
                     "log".to_string(),
@@ -836,8 +861,17 @@ async fn main() -> Result<()> {
                     "messaging".to_string(),
                     "coordination".to_string(),
                 ]);
-            let (builder, question_registry, event_queue) =
-                exomonad_core::register_builtin_handlers(builder, &services);
+            builder = builder.with_handlers(exomonad_core::core_handlers(project_dir.clone()));
+            builder = builder.with_handlers(exomonad_core::git_handlers(git, github));
+            let (orch_handlers, question_registry) = exomonad_core::orchestration_handlers(
+                agent_control.clone(),
+                event_queue.clone(),
+                Some(config.zellij_session.clone()),
+                project_dir.clone(),
+                remote_port,
+                Some(event_session_id),
+            );
+            builder = builder.with_handlers(orch_handlers);
             let rt = builder.build().await.context("Failed to build runtime")?;
 
             let mut base_state = rt.into_mcp_state(project_dir.clone());
@@ -857,7 +891,7 @@ async fn main() -> Result<()> {
 
             // Start GitHub Poller (background service)
             let poller = exomonad_core::services::github_poller::GitHubPoller::new(
-                services.event_queue().clone(),
+                event_queue.clone(),
                 project_dir.clone(),
             );
             tokio::spawn(async move {

@@ -981,6 +981,7 @@ dependencies = [
  "exomonad-proto",
  "extism",
  "extism-convert",
+ "futures-util",
  "libc",
  "nix",
  "octocrab",
