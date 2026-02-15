@@ -1,21 +1,22 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module ExoMonad.Guest.Continuations
-  ( Continuation
-  , newContinuationId
-  , storeContinuation
-  , retrieveContinuation
-  ) where
+  ( Continuation,
+    newContinuationId,
+    storeContinuation,
+    retrieveContinuation,
+  )
+where
 
 import Data.Aeson (Value)
-import Data.IORef (IORef, newIORef, readIORef, modifyIORef')
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Unique (newUnique, hashUnique)
-import System.IO.Unsafe (unsafePerformIO)
+import Data.Unique (hashUnique, newUnique)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput, WasmResult)
+import System.IO.Unsafe (unsafePerformIO)
 
 -- | A continuation takes a Value (result from effect) and returns the next step (WasmResult).
 type Continuation = Value -> IO (WasmResult MCPCallOutput)

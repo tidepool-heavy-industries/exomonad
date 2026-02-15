@@ -29,13 +29,13 @@ module ExoMonad.Guest.Effects.FileSystem
   )
 where
 
+import Control.Monad.Freer (Eff, LastMember, Member, interpret, send, sendM)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effects.EffectError (EffectError)
 import ExoMonad.Effects.Fs qualified as Fs
 import ExoMonad.Guest.Proto (fromText, toText)
 import GHC.Generics (Generic)
-import Control.Monad.Freer (Eff, Member, LastMember, interpret, send, sendM)
 import Prelude hiding (readFile, writeFile)
 
 -- ============================================================================

@@ -11,9 +11,9 @@
 module Main where
 
 import Data.ByteString (ByteString)
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as BL
-import qualified Data.Vector as V
+import Data.ByteString qualified as BS
+import Data.ByteString.Lazy qualified as BL
+import Data.Vector qualified as V
 import Data.Word (Word8)
 import Effects.Agent
   ( AgentInfo (..),
@@ -123,8 +123,9 @@ testEncodeDecodeEffectEnvelope = do
     Right (decoded :: EffectEnvelope) ->
       assert
         "encode_decode_envelope"
-        (effectEnvelopeEffectType decoded == "git.get_branch"
-           && effectEnvelopePayload decoded == pack [10, 1, 46])
+        ( effectEnvelopeEffectType decoded == "git.get_branch"
+            && effectEnvelopePayload decoded == pack [10, 1, 46]
+        )
         "Fields did not roundtrip"
 
 testEncodeDecodeEffectResponsePayload :: IO TestResult
@@ -195,10 +196,33 @@ testDecodeRustEffectResponseSpawn :: IO TestResult
 testDecodeRustEffectResponseSpawn = do
   let rustBytes =
         pack
-          [ 0x0a, 0x19, 0x0a, 0x17, 0x0a, 0x02, 0x61, 0x31,
-            0x12, 0x01, 0x31, 0x1a, 0x02, 0x2f, 0x77, 0x22,
-            0x01, 0x62, 0x28, 0x01, 0x30, 0x01, 0x38, 0x01,
-            0x42, 0x01, 0x74
+          [ 0x0a,
+            0x19,
+            0x0a,
+            0x17,
+            0x0a,
+            0x02,
+            0x61,
+            0x31,
+            0x12,
+            0x01,
+            0x31,
+            0x1a,
+            0x02,
+            0x2f,
+            0x77,
+            0x22,
+            0x01,
+            0x62,
+            0x28,
+            0x01,
+            0x30,
+            0x01,
+            0x38,
+            0x01,
+            0x42,
+            0x01,
+            0x74
           ]
   case fromByteString rustBytes of
     Left err ->
@@ -240,9 +264,24 @@ testDecodeRustEffectEnvelope :: IO TestResult
 testDecodeRustEffectEnvelope = do
   let rustBytes =
         pack
-          [ 0x0a, 0x0b, 0x61, 0x67, 0x65, 0x6e, 0x74, 0x2e,
-            0x73, 0x70, 0x61, 0x77, 0x6e, 0x12, 0x03, 0x0a,
-            0x01, 0x31
+          [ 0x0a,
+            0x0b,
+            0x61,
+            0x67,
+            0x65,
+            0x6e,
+            0x74,
+            0x2e,
+            0x73,
+            0x70,
+            0x61,
+            0x77,
+            0x6e,
+            0x12,
+            0x03,
+            0x0a,
+            0x01,
+            0x31
           ]
   case fromByteString rustBytes of
     Left err ->
@@ -250,8 +289,9 @@ testDecodeRustEffectEnvelope = do
     Right (decoded :: EffectEnvelope) ->
       assert
         "decode_rust_envelope"
-        (effectEnvelopeEffectType decoded == "agent.spawn"
-           && effectEnvelopePayload decoded == pack [0x0a, 0x01, 0x31])
+        ( effectEnvelopeEffectType decoded == "agent.spawn"
+            && effectEnvelopePayload decoded == pack [0x0a, 0x01, 0x31]
+        )
         ("effect_type: " ++ show (effectEnvelopeEffectType decoded))
 
 -- ============================================================================
@@ -270,8 +310,9 @@ testDecodeRustGetBranchResponse = do
     Right (decoded :: GetBranchResponse) ->
       assert
         "decode_rust_get_branch"
-        (getBranchResponseBranch decoded == "main"
-           && not (getBranchResponseDetached decoded))
+        ( getBranchResponseBranch decoded == "main"
+            && not (getBranchResponseDetached decoded)
+        )
         ("branch=" ++ show (getBranchResponseBranch decoded))
 
 -- Rust: LogResponse { success: true }
@@ -294,9 +335,30 @@ testDecodeRustSpawnResponse :: IO TestResult
 testDecodeRustSpawnResponse = do
   let rustBytes =
         pack
-          [ 0x0a, 0x17, 0x0a, 0x02, 0x61, 0x31, 0x12, 0x01,
-            0x31, 0x1a, 0x02, 0x2f, 0x77, 0x22, 0x01, 0x62,
-            0x28, 0x01, 0x30, 0x01, 0x38, 0x01, 0x42, 0x01,
+          [ 0x0a,
+            0x17,
+            0x0a,
+            0x02,
+            0x61,
+            0x31,
+            0x12,
+            0x01,
+            0x31,
+            0x1a,
+            0x02,
+            0x2f,
+            0x77,
+            0x22,
+            0x01,
+            0x62,
+            0x28,
+            0x01,
+            0x30,
+            0x01,
+            0x38,
+            0x01,
+            0x42,
+            0x01,
             0x74
           ]
   case fromByteString rustBytes of
@@ -308,10 +370,12 @@ testDecodeRustSpawnResponse = do
         Just agent ->
           assert
             "decode_rust_spawn_response"
-            (agentInfoId agent == "a1" && agentInfoIssue agent == "1"
-               && agentInfoWorktreePath agent == "/w"
-               && agentInfoBranchName agent == "b"
-               && agentInfoZellijTab agent == "t")
+            ( agentInfoId agent == "a1"
+                && agentInfoIssue agent == "1"
+                && agentInfoWorktreePath agent == "/w"
+                && agentInfoBranchName agent == "b"
+                && agentInfoZellijTab agent == "t"
+            )
             ("id=" ++ show (agentInfoId agent))
 
 -- Rust: SpawnBatchResponse { agents: [AgentInfo{...}], errors: ["issue 2: failed"] }
@@ -320,14 +384,66 @@ testDecodeRustSpawnBatchResponse :: IO TestResult
 testDecodeRustSpawnBatchResponse = do
   let rustBytes =
         pack
-          [ 0x0a, 0x29, 0x0a, 0x0b, 0x67, 0x68, 0x2d, 0x31,
-            0x2d, 0x63, 0x6c, 0x61, 0x75, 0x64, 0x65, 0x12,
-            0x01, 0x31, 0x1a, 0x04, 0x2f, 0x77, 0x2f, 0x31,
-            0x22, 0x06, 0x67, 0x68, 0x2d, 0x31, 0x2f, 0x61,
-            0x28, 0x01, 0x30, 0x01, 0x38, 0x01, 0x42, 0x03,
-            0x31, 0x2d, 0x61, 0x12, 0x0f, 0x69, 0x73, 0x73,
-            0x75, 0x65, 0x20, 0x32, 0x3a, 0x20, 0x66, 0x61,
-            0x69, 0x6c, 0x65, 0x64
+          [ 0x0a,
+            0x29,
+            0x0a,
+            0x0b,
+            0x67,
+            0x68,
+            0x2d,
+            0x31,
+            0x2d,
+            0x63,
+            0x6c,
+            0x61,
+            0x75,
+            0x64,
+            0x65,
+            0x12,
+            0x01,
+            0x31,
+            0x1a,
+            0x04,
+            0x2f,
+            0x77,
+            0x2f,
+            0x31,
+            0x22,
+            0x06,
+            0x67,
+            0x68,
+            0x2d,
+            0x31,
+            0x2f,
+            0x61,
+            0x28,
+            0x01,
+            0x30,
+            0x01,
+            0x38,
+            0x01,
+            0x42,
+            0x03,
+            0x31,
+            0x2d,
+            0x61,
+            0x12,
+            0x0f,
+            0x69,
+            0x73,
+            0x73,
+            0x75,
+            0x65,
+            0x20,
+            0x32,
+            0x3a,
+            0x20,
+            0x66,
+            0x61,
+            0x69,
+            0x6c,
+            0x65,
+            0x64
           ]
   case fromByteString rustBytes of
     Left err ->
@@ -337,12 +453,15 @@ testDecodeRustSpawnBatchResponse = do
           errors = spawnBatchResponseErrors decoded
        in assert
             "decode_rust_spawn_batch"
-            (V.length agents == 1
-               && agentInfoId (V.head agents) == "gh-1-claude"
-               && V.length errors == 1
-               && V.head errors == "issue 2: failed")
-            ( "agents=" ++ show (V.length agents)
-                ++ ", errors=" ++ show (V.toList errors)
+            ( V.length agents == 1
+                && agentInfoId (V.head agents) == "gh-1-claude"
+                && V.length errors == 1
+                && V.head errors == "issue 2: failed"
+            )
+            ( "agents="
+                ++ show (V.length agents)
+                ++ ", errors="
+                ++ show (V.toList errors)
             )
 
 -- ============================================================================
@@ -397,14 +516,68 @@ testDecodeRustWrappedSpawnBatch :: IO TestResult
 testDecodeRustWrappedSpawnBatch = do
   let rustBytes =
         pack
-          [ 0x0a, 0x3c, 0x0a, 0x29, 0x0a, 0x0b, 0x67, 0x68,
-            0x2d, 0x31, 0x2d, 0x63, 0x6c, 0x61, 0x75, 0x64,
-            0x65, 0x12, 0x01, 0x31, 0x1a, 0x04, 0x2f, 0x77,
-            0x2f, 0x31, 0x22, 0x06, 0x67, 0x68, 0x2d, 0x31,
-            0x2f, 0x61, 0x28, 0x01, 0x30, 0x01, 0x38, 0x01,
-            0x42, 0x03, 0x31, 0x2d, 0x61, 0x12, 0x0f, 0x69,
-            0x73, 0x73, 0x75, 0x65, 0x20, 0x32, 0x3a, 0x20,
-            0x66, 0x61, 0x69, 0x6c, 0x65, 0x64
+          [ 0x0a,
+            0x3c,
+            0x0a,
+            0x29,
+            0x0a,
+            0x0b,
+            0x67,
+            0x68,
+            0x2d,
+            0x31,
+            0x2d,
+            0x63,
+            0x6c,
+            0x61,
+            0x75,
+            0x64,
+            0x65,
+            0x12,
+            0x01,
+            0x31,
+            0x1a,
+            0x04,
+            0x2f,
+            0x77,
+            0x2f,
+            0x31,
+            0x22,
+            0x06,
+            0x67,
+            0x68,
+            0x2d,
+            0x31,
+            0x2f,
+            0x61,
+            0x28,
+            0x01,
+            0x30,
+            0x01,
+            0x38,
+            0x01,
+            0x42,
+            0x03,
+            0x31,
+            0x2d,
+            0x61,
+            0x12,
+            0x0f,
+            0x69,
+            0x73,
+            0x73,
+            0x75,
+            0x65,
+            0x20,
+            0x32,
+            0x3a,
+            0x20,
+            0x66,
+            0x61,
+            0x69,
+            0x6c,
+            0x65,
+            0x64
           ]
   case fromByteString rustBytes of
     Left err ->
@@ -441,11 +614,40 @@ testDecodeRustCustomError :: IO TestResult
 testDecodeRustCustomError = do
   let rustBytes =
         pack
-          [ 0x12, 0x20, 0x32, 0x1e, 0x0a, 0x0b, 0x61, 0x67,
-            0x65, 0x6e, 0x74, 0x5f, 0x65, 0x72, 0x72, 0x6f,
-            0x72, 0x12, 0x0f, 0x73, 0x70, 0x61, 0x77, 0x6e,
-            0x20, 0x74, 0x69, 0x6d, 0x65, 0x64, 0x20, 0x6f,
-            0x75, 0x74
+          [ 0x12,
+            0x20,
+            0x32,
+            0x1e,
+            0x0a,
+            0x0b,
+            0x61,
+            0x67,
+            0x65,
+            0x6e,
+            0x74,
+            0x5f,
+            0x65,
+            0x72,
+            0x72,
+            0x6f,
+            0x72,
+            0x12,
+            0x0f,
+            0x73,
+            0x70,
+            0x61,
+            0x77,
+            0x6e,
+            0x20,
+            0x74,
+            0x69,
+            0x6d,
+            0x65,
+            0x64,
+            0x20,
+            0x6f,
+            0x75,
+            0x74
           ]
   case fromByteString rustBytes of
     Left err ->
@@ -538,32 +740,38 @@ testHaskellEncodingMatchesRust = do
   assert
     "haskell_encoding_matches_rust"
     (haskellBytes == rustBytes)
-    ( "Haskell: " ++ show (BS.unpack haskellBytes)
-        ++ " vs Rust: " ++ show (BS.unpack rustBytes)
+    ( "Haskell: "
+        ++ show (BS.unpack haskellBytes)
+        ++ " vs Rust: "
+        ++ show (BS.unpack rustBytes)
     )
 
 testHaskellGetBranchEncodingMatchesRust :: IO TestResult
 testHaskellGetBranchEncodingMatchesRust = do
-  let resp = GetBranchResponse { getBranchResponseBranch = "main", getBranchResponseDetached = False }
+  let resp = GetBranchResponse {getBranchResponseBranch = "main", getBranchResponseDetached = False}
   let haskellBytes = BL.toStrict (toLazyByteString resp)
   let rustBytes = pack [0x0a, 0x04, 0x6d, 0x61, 0x69, 0x6e]
   assert
     "haskell_get_branch_encoding_matches_rust"
     (haskellBytes == rustBytes)
-    ( "Haskell: " ++ show (BS.unpack haskellBytes)
-        ++ " vs Rust: " ++ show (BS.unpack rustBytes)
+    ( "Haskell: "
+        ++ show (BS.unpack haskellBytes)
+        ++ " vs Rust: "
+        ++ show (BS.unpack rustBytes)
     )
 
 testHaskellLogResponseEncodingMatchesRust :: IO TestResult
 testHaskellLogResponseEncodingMatchesRust = do
-  let resp = LogResponse { logResponseSuccess = True }
+  let resp = LogResponse {logResponseSuccess = True}
   let haskellBytes = BL.toStrict (toLazyByteString resp)
   let rustBytes = pack [0x08, 0x01]
   assert
     "haskell_log_response_encoding_matches_rust"
     (haskellBytes == rustBytes)
-    ( "Haskell: " ++ show (BS.unpack haskellBytes)
-        ++ " vs Rust: " ++ show (BS.unpack rustBytes)
+    ( "Haskell: "
+        ++ show (BS.unpack haskellBytes)
+        ++ " vs Rust: "
+        ++ show (BS.unpack rustBytes)
     )
 
 -- ============================================================================
@@ -590,8 +798,10 @@ testHaskellNotFoundErrorEncodingMatchesRust = do
   assert
     "haskell_not_found_error_encoding_matches_rust"
     (haskellBytes == rustBytes)
-    ( "Haskell: " ++ show (BS.unpack haskellBytes)
-        ++ " vs Rust: " ++ show (BS.unpack rustBytes)
+    ( "Haskell: "
+        ++ show (BS.unpack haskellBytes)
+        ++ " vs Rust: "
+        ++ show (BS.unpack rustBytes)
     )
 
 -- Rust: EffectResponse { Error(Custom { code: "agent_error", message: "spawn timed out" }) }
@@ -619,17 +829,48 @@ testHaskellCustomErrorEncodingMatchesRust = do
   let haskellBytes = BL.toStrict (toLazyByteString resp)
   let rustBytes =
         pack
-          [ 0x12, 0x20, 0x32, 0x1e, 0x0a, 0x0b, 0x61, 0x67,
-            0x65, 0x6e, 0x74, 0x5f, 0x65, 0x72, 0x72, 0x6f,
-            0x72, 0x12, 0x0f, 0x73, 0x70, 0x61, 0x77, 0x6e,
-            0x20, 0x74, 0x69, 0x6d, 0x65, 0x64, 0x20, 0x6f,
-            0x75, 0x74
+          [ 0x12,
+            0x20,
+            0x32,
+            0x1e,
+            0x0a,
+            0x0b,
+            0x61,
+            0x67,
+            0x65,
+            0x6e,
+            0x74,
+            0x5f,
+            0x65,
+            0x72,
+            0x72,
+            0x6f,
+            0x72,
+            0x12,
+            0x0f,
+            0x73,
+            0x70,
+            0x61,
+            0x77,
+            0x6e,
+            0x20,
+            0x74,
+            0x69,
+            0x6d,
+            0x65,
+            0x64,
+            0x20,
+            0x6f,
+            0x75,
+            0x74
           ]
   assert
     "haskell_custom_error_encoding_matches_rust"
     (haskellBytes == rustBytes)
-    ( "Haskell: " ++ show (BS.unpack haskellBytes)
-        ++ " vs Rust: " ++ show (BS.unpack rustBytes)
+    ( "Haskell: "
+        ++ show (BS.unpack haskellBytes)
+        ++ " vs Rust: "
+        ++ show (BS.unpack rustBytes)
     )
 
 -- ============================================================================
@@ -663,6 +904,8 @@ testHaskellEmptyPayloadMatchesRust = do
   assert
     "haskell_empty_payload_matches_rust"
     (haskellBytes == rustBytes)
-    ( "Haskell: " ++ show (BS.unpack haskellBytes)
-        ++ " vs Rust: " ++ show (BS.unpack rustBytes)
+    ( "Haskell: "
+        ++ show (BS.unpack haskellBytes)
+        ++ " vs Rust: "
+        ++ show (BS.unpack rustBytes)
     )

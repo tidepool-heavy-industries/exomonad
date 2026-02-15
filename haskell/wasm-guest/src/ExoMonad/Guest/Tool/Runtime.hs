@@ -16,8 +16,10 @@ where
 
 import Control.Exception (SomeException, try)
 import Control.Monad (unless, void)
+import Control.Monad.Freer (Eff, runM)
 import Data.Aeson (Value, (.=))
 import Data.Aeson qualified as Aeson
+import Data.Aeson.Types (parseMaybe)
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as BSL
 import Data.Maybe (fromMaybe)
@@ -30,19 +32,17 @@ import Effects.Events qualified as ProtoEvents
 import Effects.Log qualified as Log
 import ExoMonad.Effect.Class (runEffect_)
 import ExoMonad.Effects.Events qualified as Events
-import ExoMonad.Effects.Log (LogInfo, LogError, LogEmitEvent)
+import ExoMonad.Effects.Log (LogEmitEvent, LogError, LogInfo)
 import ExoMonad.Effects.Messaging (sendNote)
+import ExoMonad.Guest.Continuations (retrieveContinuation)
 import ExoMonad.Guest.Proto (fromText)
-import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), toMCPFormat, WasmResult (..))
+import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), WasmResult (..), toMCPFormat)
 import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
 import ExoMonad.Guest.Types (HookEventType (..), HookInput (..), HookOutput, MCPCallInput (..), StopDecision (..), StopHookOutput (..), allowResponse)
-import ExoMonad.Guest.Continuations (retrieveContinuation)
-import ExoMonad.Types (HookConfig (..))
 import ExoMonad.PDK (input, output)
+import ExoMonad.Types (HookConfig (..))
 import Foreign.C.Types (CInt (..))
-import Control.Monad.Freer (Eff, runM)
-import Data.Aeson.Types (parseMaybe)
 import System.Directory (getCurrentDirectory)
 import System.FilePath (takeFileName)
 
@@ -92,27 +92,27 @@ resumeHandler = do
       output (BSL.toStrict $ Aeson.encode resp)
       pure 0
     Right val -> do
-       case parseResumeInput val of
-         Left err -> do
-           logError_ ("Resume input error: " <> err)
-           let resp = Done $ MCPCallOutput False Nothing (Just $ "Resume input error: " <> err)
-           output (BSL.toStrict $ Aeson.encode resp)
-           pure 0
-         Right (k, res) -> do
-           mCont <- retrieveContinuation k
-           case mCont of
-             Nothing -> do
-               logError_ ("Continuation not found: " <> k)
-               let resp = Done $ MCPCallOutput False Nothing (Just $ "Continuation not found: " <> k)
-               output (BSL.toStrict $ Aeson.encode resp)
-               pure 0
-             Just cont -> do
-               logInfo_ ("Resuming continuation: " <> k)
-               -- Execute the continuation
-               -- Note: The continuation is responsible for handling exceptions if needed
-               newResult <- cont res
-               output (BSL.toStrict $ Aeson.encode newResult)
-               pure 0
+      case parseResumeInput val of
+        Left err -> do
+          logError_ ("Resume input error: " <> err)
+          let resp = Done $ MCPCallOutput False Nothing (Just $ "Resume input error: " <> err)
+          output (BSL.toStrict $ Aeson.encode resp)
+          pure 0
+        Right (k, res) -> do
+          mCont <- retrieveContinuation k
+          case mCont of
+            Nothing -> do
+              logError_ ("Continuation not found: " <> k)
+              let resp = Done $ MCPCallOutput False Nothing (Just $ "Continuation not found: " <> k)
+              output (BSL.toStrict $ Aeson.encode resp)
+              pure 0
+            Just cont -> do
+              logInfo_ ("Resuming continuation: " <> k)
+              -- Execute the continuation
+              -- Note: The continuation is responsible for handling exceptions if needed
+              newResult <- cont res
+              output (BSL.toStrict $ Aeson.encode newResult)
+              pure 0
 
 parseResumeInput :: Value -> Either Text (Text, Value)
 parseResumeInput val = flip (maybe (Left "Invalid input format")) (parseMaybe parser val) Right
@@ -218,22 +218,21 @@ handleWorkerExit hookInput = do
 
   case maybeAgentId of
     Just agentId -> do
-        logInfo_ $ "Handling exit for agent: " <> agentId
+      logInfo_ $ "Handling exit for agent: " <> agentId
 
-        let actualStatus = fromMaybe "success" (hiExitStatus hookInput)
-        let statusMsg = case actualStatus of
-              "success" -> "Worker " <> agentId <> " completed successfully"
-              other     -> "Worker " <> agentId <> " exited with status: " <> other
+      let actualStatus = fromMaybe "success" (hiExitStatus hookInput)
+      let statusMsg = case actualStatus of
+            "success" -> "Worker " <> agentId <> " completed successfully"
+            other -> "Worker " <> agentId <> " exited with status: " <> other
 
-        res <- try @SomeException (Events.notifyParent agentId actualStatus statusMsg)
-        case res of
-            Left exc -> logError_ ("notifyParent threw exception: " <> T.pack (show exc))
-            Right (Left err) -> logError_ ("Failed to notify completion to parent: " <> T.pack (show err))
-            Right (Right _) -> logInfo_ ("Completion notified for " <> agentId)
-
+      res <- try @SomeException (Events.notifyParent agentId actualStatus statusMsg)
+      case res of
+        Left exc -> logError_ ("notifyParent threw exception: " <> T.pack (show exc))
+        Right (Left err) -> logError_ ("Failed to notify completion to parent: " <> T.pack (show err))
+        Right (Right _) -> logInfo_ ("Completion notified for " <> agentId)
     Nothing -> do
-        logError_ "agent_id missing from hook input"
-        pure ()
+      logError_ "agent_id missing from hook input"
+      pure ()
 
   output (BSL.toStrict $ Aeson.encode $ allowResponse Nothing)
   pure 0
@@ -246,11 +245,12 @@ wrapHandler action = do
     Right code -> pure code
     Left err -> do
       -- Return proper MCPCallOutput format
-      let resp = Done $
-            MCPCallOutput
-              { success = False,
-                result = Nothing,
-                mcpError = Just $ T.pack ("Exception in WASM handler: " <> show err)
-              }
+      let resp =
+            Done $
+              MCPCallOutput
+                { success = False,
+                  result = Nothing,
+                  mcpError = Just $ T.pack ("Exception in WASM handler: " <> show err)
+                }
       output (BSL.toStrict $ Aeson.encode resp)
       pure 0

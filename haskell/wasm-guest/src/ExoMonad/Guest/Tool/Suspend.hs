@@ -3,16 +3,16 @@
 -- Converts @Eff ToolEffects@ computations into @IO (WasmResult MCPCallOutput)@,
 -- storing continuations for suspended computations.
 module ExoMonad.Guest.Tool.Suspend
-  ( runToolEff
-  ) where
+  ( runToolEff,
+  )
+where
 
-import Control.Monad.Freer (runM)
+import Control.Monad.Freer (Eff, runM)
 import Control.Monad.Freer.Coroutine (Status, runC)
 import Control.Monad.Freer.Coroutine qualified as C
 import Data.Aeson (Value)
 import ExoMonad.Guest.Continuations (newContinuationId, storeContinuation)
 import ExoMonad.Guest.Tool.Class (EffectRequest, MCPCallOutput, ToolEffects, WasmResult (..))
-import Control.Monad.Freer (Eff)
 
 -- | Run an effectful tool handler, converting to WasmResult.
 -- Handles both immediate completion and suspension with continuation storage.

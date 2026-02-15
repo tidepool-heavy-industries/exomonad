@@ -1,7 +1,7 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE DeriveGeneric #-}
 
 module ExoMonad.Guest.Tools.MergePR
   ( MergePR,
@@ -17,8 +17,8 @@ import Data.Text.Lazy qualified as TL
 import Effects.Log qualified as Log
 import Effects.MergePr qualified as MP
 import ExoMonad.Effect.Class (runEffect, runEffect_)
+import ExoMonad.Effects.Log (LogError, LogInfo)
 import ExoMonad.Effects.MergePR (MergePRMergePr)
-import ExoMonad.Effects.Log (LogInfo, LogError)
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)
 

@@ -4,11 +4,12 @@
 {-# LANGUAGE TypeFamilies #-}
 
 module ExoMonad.Guest.Tools.Events
-  ( WaitForEvent (..)
-  , NotifyParent (..)
-  ) where
+  ( WaitForEvent (..),
+    NotifyParent (..),
+  )
+where
 
-import Data.Aeson (FromJSON (..), ToJSON (..), object, (.=), genericParseJSON, genericToJSON, defaultOptions, fieldLabelModifier, camelTo2, Value)
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, camelTo2, defaultOptions, fieldLabelModifier, genericParseJSON, genericToJSON, object, (.=))
 import Data.Aeson qualified as Aeson
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as BSL
@@ -19,54 +20,56 @@ import Data.Word (Word8)
 import Effects.Events qualified as Proto
 import ExoMonad.Effects.Events qualified as Events
 import ExoMonad.Guest.Proto (fromText)
-import ExoMonad.Guest.Tool.Class (MCPTool (..), liftEffect, errorResult, successResult, EffectRequest(..), MCPCallOutput, suspend)
+import ExoMonad.Guest.Tool.Class (EffectRequest (..), MCPCallOutput, MCPTool (..), errorResult, liftEffect, successResult, suspend)
 import GHC.Generics (Generic)
-import Proto3.Suite.Class (toLazyByteString, fromByteString)
+import Proto3.Suite.Class (fromByteString, toLazyByteString)
 
 -- | Wait for event tool
 data WaitForEvent = WaitForEvent
 
 data WaitForEventArgs = WaitForEventArgs
-  { wfeTypes :: [Text]
-  , wfeTimeoutSecs :: Int
-  , wfeAfterEventId :: Maybe Int
-  } deriving (Generic, Show)
+  { wfeTypes :: [Text],
+    wfeTimeoutSecs :: Int,
+    wfeAfterEventId :: Maybe Int
+  }
+  deriving (Generic, Show)
 
 instance FromJSON WaitForEventArgs where
-  parseJSON = genericParseJSON defaultOptions { fieldLabelModifier = camelTo2 '_' . drop 3 }
+  parseJSON = genericParseJSON defaultOptions {fieldLabelModifier = camelTo2 '_' . drop 3}
+
 instance ToJSON WaitForEventArgs where
-  toJSON = genericToJSON defaultOptions { fieldLabelModifier = camelTo2 '_' . drop 3 }
+  toJSON = genericToJSON defaultOptions {fieldLabelModifier = camelTo2 '_' . drop 3}
 
 instance MCPTool WaitForEvent where
   type ToolArgs WaitForEvent = WaitForEventArgs
   toolName = "wait_for_event"
   toolDescription = "Block until a matching event occurs or timeout expires. Returns worker completion events."
-  toolSchema = object
-    [
-      "type" .= ("object" :: Text)
-    , "properties" .= object
-        [
-          "types" .= object
-            [
-              "type" .= ("array" :: Text)
-            , "items" .= object ["type" .= ("string" :: Text)]
-            , "description" .= ("Event types to wait for (e.g. [\"worker_complete\"])" :: Text)
-            ]
-        , "timeout_secs" .= object
-            [
-              "type" .= ("number" :: Text)
-            , "default" .= (300 :: Int)
-            , "description" .= ("Timeout in seconds" :: Text)
-            ]
-        , "after_event_id" .= object
-            [
-              "type" .= ("number" :: Text)
-            , "default" .= (0 :: Int)
-            , "description" .= ("Only return events with ID greater than this value (cursor for skipping stale events)" :: Text)
-            ]
-        ]
-    , "required" .= (["types"] :: [Text])
-    ]
+  toolSchema =
+    object
+      [ "type" .= ("object" :: Text),
+        "properties"
+          .= object
+            [ "types"
+                .= object
+                  [ "type" .= ("array" :: Text),
+                    "items" .= object ["type" .= ("string" :: Text)],
+                    "description" .= ("Event types to wait for (e.g. [\"worker_complete\"])" :: Text)
+                  ],
+              "timeout_secs"
+                .= object
+                  [ "type" .= ("number" :: Text),
+                    "default" .= (300 :: Int),
+                    "description" .= ("Timeout in seconds" :: Text)
+                  ],
+              "after_event_id"
+                .= object
+                  [ "type" .= ("number" :: Text),
+                    "default" .= (0 :: Int),
+                    "description" .= ("Only return events with ID greater than this value (cursor for skipping stale events)" :: Text)
+                  ]
+            ],
+        "required" .= (["types"] :: [Text])
+      ]
   toolHandler args = do
     -- Synchronous fallback (blocking)
     let cursor = maybe 0 fromIntegral (wfeAfterEventId args)
@@ -74,19 +77,23 @@ instance MCPTool WaitForEvent where
     case result of
       Left err -> pure $ errorResult $ pack (show err)
       Right resp -> case Proto.waitForEventResponseEvent resp of
-        Just event -> pure $ successResult $ object
-          [ "event" .= event
-          , "event_id" .= Proto.eventEventId event
-          ]
+        Just event ->
+          pure $
+            successResult $
+              object
+                [ "event" .= event,
+                  "event_id" .= Proto.eventEventId event
+                ]
         Nothing -> pure $ errorResult "No event in response"
 
   toolHandlerEff args = do
     let cursor = maybe 0 fromIntegral (wfeAfterEventId args)
-        req = Proto.WaitForEventRequest
-          { Proto.waitForEventRequestTypes = V.fromList (map fromText (wfeTypes args))
-          , Proto.waitForEventRequestTimeoutSecs = fromIntegral (wfeTimeoutSecs args)
-          , Proto.waitForEventRequestAfterEventId = cursor
-          }
+        req =
+          Proto.WaitForEventRequest
+            { Proto.waitForEventRequestTypes = V.fromList (map fromText (wfeTypes args)),
+              Proto.waitForEventRequestTimeoutSecs = fromIntegral (wfeTimeoutSecs args),
+              Proto.waitForEventRequestAfterEventId = cursor
+            }
         payloadBytes = BSL.unpack (toLazyByteString req)
     resultValue <- suspend (EffectRequest "events.wait_for_event" (Aeson.toJSON payloadBytes))
     case Aeson.fromJSON resultValue of
@@ -94,10 +101,13 @@ instance MCPTool WaitForEvent where
         case fromByteString (BS.pack bytes) of
           Right (resp :: Proto.WaitForEventResponse) ->
             case Proto.waitForEventResponseEvent resp of
-              Just event -> pure $ successResult $ object
-                [ "event" .= event
-                , "event_id" .= Proto.eventEventId event
-                ]
+              Just event ->
+                pure $
+                  successResult $
+                    object
+                      [ "event" .= event,
+                        "event_id" .= Proto.eventEventId event
+                      ]
               Nothing -> pure $ errorResult "No event in response"
           Left err -> pure $ errorResult $ "Failed to decode protobuf: " <> pack (show err)
       Aeson.Error err -> pure $ errorResult $ "Failed to parse result: " <> pack err
@@ -106,39 +116,40 @@ instance MCPTool WaitForEvent where
 data NotifyParent = NotifyParent
 
 data NotifyParentArgs = NotifyParentArgs
-  {
-    npStatus :: Text
-  , npMessage :: Text
-  } deriving (Generic, Show)
+  { npStatus :: Text,
+    npMessage :: Text
+  }
+  deriving (Generic, Show)
 
 instance FromJSON NotifyParentArgs where
-  parseJSON = genericParseJSON defaultOptions { fieldLabelModifier = camelTo2 '_' . drop 2 }
+  parseJSON = genericParseJSON defaultOptions {fieldLabelModifier = camelTo2 '_' . drop 2}
+
 instance ToJSON NotifyParentArgs where
-  toJSON = genericToJSON defaultOptions { fieldLabelModifier = camelTo2 '_' . drop 2 }
+  toJSON = genericToJSON defaultOptions {fieldLabelModifier = camelTo2 '_' . drop 2}
 
 instance MCPTool NotifyParent where
   type ToolArgs NotifyParent = NotifyParentArgs
   toolName = "notify_parent"
   toolDescription = "Notify your parent session that you have completed. Resolves worker ID and routing automatically."
-  toolSchema = object
-    [
-      "type" .= ("object" :: Text)
-    , "properties" .= object
-        [
-          "status" .= object
-            [
-              "type" .= ("string" :: Text)
-            , "enum" .= (["success", "failure"] :: [Text])
-            , "description" .= ("Completion status (success/failure)" :: Text)
-            ]
-        , "message" .= object
-            [
-              "type" .= ("string" :: Text)
-            , "description" .= ("Summary of work done (on success) or what went wrong (on failure)" :: Text)
-            ]
-        ]
-    , "required" .= (["status", "message"] :: [Text])
-    ]
+  toolSchema =
+    object
+      [ "type" .= ("object" :: Text),
+        "properties"
+          .= object
+            [ "status"
+                .= object
+                  [ "type" .= ("string" :: Text),
+                    "enum" .= (["success", "failure"] :: [Text]),
+                    "description" .= ("Completion status (success/failure)" :: Text)
+                  ],
+              "message"
+                .= object
+                  [ "type" .= ("string" :: Text),
+                    "description" .= ("Summary of work done (on success) or what went wrong (on failure)" :: Text)
+                  ]
+            ],
+        "required" .= (["status", "message"] :: [Text])
+      ]
   toolHandler args = do
     liftEffect (Events.notifyParent "" (npStatus args) (npMessage args)) $ \_ ->
       object ["success" .= True]

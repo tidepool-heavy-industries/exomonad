@@ -26,18 +26,18 @@ where
 
 import Data.Aeson (FromJSON, Value, object, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
+import Data.ByteString qualified as BS
+import Data.ByteString.Lazy qualified as BSL
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
-import Effects.Messaging qualified as M
 import Data.Vector qualified as V
+import Data.Word (Word8)
+import Effects.Messaging qualified as M
 import ExoMonad.Effects.Messaging qualified as Messaging
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)
-import Data.ByteString qualified as BS
-import Data.ByteString.Lazy qualified as BSL
-import Proto3.Suite.Class (toLazyByteString, fromByteString)
-import Data.Word (Word8)
+import Proto3.Suite.Class (fromByteString, toLazyByteString)
 
 -- ============================================================================
 -- Note
@@ -116,9 +116,10 @@ instance MCPTool Question where
       object ["answer" .= TL.toStrict (M.sendQuestionResponseAnswer resp)]
 
   toolHandlerEff args = do
-    let req = M.SendQuestionRequest
-          { M.sendQuestionRequestQuestion = TL.fromStrict (qaContent args)
-          }
+    let req =
+          M.SendQuestionRequest
+            { M.sendQuestionRequestQuestion = TL.fromStrict (qaContent args)
+            }
         payloadBytes = BSL.unpack (toLazyByteString req)
     resultValue <- suspend (EffectRequest "messaging.send_question" (Aeson.toJSON payloadBytes))
     case Aeson.fromJSON resultValue of
@@ -185,7 +186,7 @@ instance MCPTool GetAgentMessages where
           agentsJson = map agentMsgsToJson agents
        in object $
             ["agents" .= agentsJson]
-            <> ["warning" .= warning | not (warning == "")]
+              <> ["warning" .= warning | not (warning == "")]
 
 agentMsgsToJson :: M.AgentMessages -> Value
 agentMsgsToJson am =
@@ -270,4 +271,3 @@ instance MCPTool AnswerQuestion where
 -- ============================================================================
 -- Helpers
 -- ============================================================================
-

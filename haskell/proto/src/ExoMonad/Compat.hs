@@ -7,42 +7,43 @@
 --
 -- This module provides conversions for JSON wire format compatibility.
 module ExoMonad.Compat
-  ( toWireJSON
-  , fromWireJSON
-  , toWireJSONPB
-  , fromWireJSONPB
-  , protoToWire
-  , wireToProto
-  ) where
+  ( toWireJSON,
+    fromWireJSON,
+    toWireJSONPB,
+    fromWireJSONPB,
+    protoToWire,
+    wireToProto,
+  )
+where
 
-import qualified Data.Aeson as Aeson
-import qualified Data.ByteString.Lazy as LBS
-import qualified Data.Char as Char
-import qualified Data.Text as T
+import Data.Aeson qualified as Aeson
+import Data.ByteString.Lazy qualified as LBS
+import Data.Char qualified as Char
 import Data.Text (Text)
-import Proto3.Suite.JSONPB (FromJSONPB(..), ToJSONPB(..), Options(..), defaultOptions)
-import qualified Proto3.Suite.JSONPB as JSONPB
+import Data.Text qualified as T
+import Proto3.Suite.JSONPB (FromJSONPB (..), Options (..), ToJSONPB (..), defaultOptions)
+import Proto3.Suite.JSONPB qualified as JSONPB
 
 -- | Convert proto3-suite value to JSON with snake_case enums for wire compatibility.
-toWireJSON :: ToJSONPB a => a -> LBS.ByteString
+toWireJSON :: (ToJSONPB a) => a -> LBS.ByteString
 toWireJSON = transformEnums protoToWire . JSONPB.encode defaultOptions
 
 -- | Parse JSON with snake_case enums back to proto3-suite value.
-fromWireJSON :: FromJSONPB a => LBS.ByteString -> Either String a
+fromWireJSON :: (FromJSONPB a) => LBS.ByteString -> Either String a
 fromWireJSON bs = do
   val <- Aeson.eitherDecode bs
   let transformed = transformEnumsValue wireToProtoValue val
   JSONPB.eitherDecode (Aeson.encode transformed)
 
 -- | Like toWireJSON but returns Aeson.Value.
-toWireJSONPB :: ToJSONPB a => a -> Aeson.Value
+toWireJSONPB :: (ToJSONPB a) => a -> Aeson.Value
 toWireJSONPB a = transformEnumsValue protoToWireValue (JSONPB.toAesonValue a)
 
 -- | Like fromWireJSON but takes Aeson.Value.
-fromWireJSONPB :: FromJSONPB a => Aeson.Value -> Either String a
+fromWireJSONPB :: (FromJSONPB a) => Aeson.Value -> Either String a
 fromWireJSONPB val =
   let transformed = transformEnumsValue wireToProtoValue val
-  in JSONPB.eitherDecode (Aeson.encode transformed)
+   in JSONPB.eitherDecode (Aeson.encode transformed)
 
 -- | Convert SCREAMING_SNAKE_CASE enum to snake_case for wire.
 -- E.g., "ERROR_CODE_NOT_FOUND" -> "not_found"
@@ -82,7 +83,7 @@ protoToWireValue (Aeson.String t)
 protoToWireValue v = v
 
 wireToProtoValue :: Aeson.Value -> Aeson.Value
-wireToProtoValue = id  -- Wire format is already what prost produces
+wireToProtoValue = id -- Wire format is already what prost produces
 
 transformEnumsValue :: (Aeson.Value -> Aeson.Value) -> Aeson.Value -> Aeson.Value
 transformEnumsValue f (Aeson.Object obj) = Aeson.Object (fmap (transformEnumsValue f) obj)

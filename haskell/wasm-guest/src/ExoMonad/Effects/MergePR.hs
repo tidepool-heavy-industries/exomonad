@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module ExoMonad.Effects.MergePR
   ( MergePRMergePr,
@@ -14,6 +14,7 @@ import Effects.MergePr
 import ExoMonad.Effect.Class (Effect (..), runEffect)
 
 data MergePRMergePr
+
 instance Effect MergePRMergePr where
   type Input MergePRMergePr = MergePrRequest
   type Output MergePRMergePr = MergePrResponse

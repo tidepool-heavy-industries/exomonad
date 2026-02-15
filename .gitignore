@@ -33,6 +33,7 @@ cabal.project.wasm.dev
 .exomonad/logs/
 .exomonad/wasm-cache
 .exomonad/wasm-cache.toml
+.exomonad/messages/
 .exomonad/sidecar.pid
 .exomonad/server.pid
 

@@ -17,7 +17,7 @@ import Effects.FilePr qualified as FP
 import Effects.Log qualified as Log
 import ExoMonad.Effect.Class (runEffect, runEffect_)
 import ExoMonad.Effects.FilePR (FilePRFilePr)
-import ExoMonad.Effects.Log (LogInfo, LogError)
+import ExoMonad.Effects.Log (LogError, LogInfo)
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)
 

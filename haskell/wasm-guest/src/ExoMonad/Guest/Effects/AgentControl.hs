@@ -29,14 +29,14 @@ module ExoMonad.Guest.Effects.AgentControl
   )
 where
 
-import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.=), (.:))
+import Control.Monad.Freer (Eff, LastMember, Member, interpret, send, sendM)
+import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.=))
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effects.Agent qualified as PA
 import ExoMonad.Effects.Agent qualified as Agent
 import ExoMonad.Guest.Proto (fromText, toText)
 import GHC.Generics (Generic)
-import Control.Monad.Freer (Eff, Member, LastMember, interpret, send, sendM)
 import Proto3.Suite.Types (Enumerated (..))
 
 -- ============================================================================

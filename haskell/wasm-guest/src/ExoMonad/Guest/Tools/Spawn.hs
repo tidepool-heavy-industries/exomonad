@@ -11,6 +11,7 @@ module ExoMonad.Guest.Tools.Spawn
 where
 
 import Control.Monad (forM)
+import Control.Monad.Freer (runM)
 import Data.Aeson (FromJSON, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.Either (partitionEithers)
@@ -19,7 +20,6 @@ import Data.Text qualified as T
 import ExoMonad.Guest.Effects.AgentControl qualified as AC
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)
-import Control.Monad.Freer (runM)
 
 -- ============================================================================
 -- SpawnSubtree
@@ -156,16 +156,19 @@ instance FromJSON WorkerSpec where
 renderWorkerPrompt :: WorkerSpec -> Text
 renderWorkerPrompt spec =
   case wsPrompt spec of
-    Just p -> p  -- Raw prompt takes precedence (escape hatch)
-    Nothing -> T.intercalate "\n\n" $ filter (not . T.null)
-      [ "## Task: " <> wsTask spec
-      , renderSection "READ FIRST" (fmap (map ("- " <>)) (wsReadFirst spec))
-      , renderNumbered "STEPS" (wsSteps spec)
-      , renderSection "VERIFY" (fmap (map ("```\n" <>) . map (<> "\n```")) (wsVerify spec))
-      , renderSection "DONE CRITERIA" (fmap (map ("- " <>)) (wsDoneCriteria spec))
-      , renderSection "BOUNDARY" (fmap (map ("- " <>)) (wsBoundary spec))
-      , maybe "" (\c -> "### CONTEXT\n\n" <> c) (wsContext spec)
-      ]
+    Just p -> p -- Raw prompt takes precedence (escape hatch)
+    Nothing ->
+      T.intercalate "\n\n" $
+        filter
+          (not . T.null)
+          [ "## Task: " <> wsTask spec,
+            renderSection "READ FIRST" (fmap (map ("- " <>)) (wsReadFirst spec)),
+            renderNumbered "STEPS" (wsSteps spec),
+            renderSection "VERIFY" (fmap (map ("```\n" <>) . map (<> "\n```")) (wsVerify spec)),
+            renderSection "DONE CRITERIA" (fmap (map ("- " <>)) (wsDoneCriteria spec)),
+            renderSection "BOUNDARY" (fmap (map ("- " <>)) (wsBoundary spec)),
+            maybe "" (\c -> "### CONTEXT\n\n" <> c) (wsContext spec)
+          ]
   where
     renderSection _ Nothing = ""
     renderSection _ (Just []) = ""
@@ -173,7 +176,7 @@ renderWorkerPrompt spec =
 
     renderNumbered _ Nothing = ""
     renderNumbered _ (Just []) = ""
-    renderNumbered heading (Just items) = "### " <> heading <> "\n" <> T.intercalate "\n" (zipWith (\i s -> T.pack (show (i :: Int)) <> ". " <> s) [1..] items)
+    renderNumbered heading (Just items) = "### " <> heading <> "\n" <> T.intercalate "\n" (zipWith (\i s -> T.pack (show (i :: Int)) <> ". " <> s) [1 ..] items)
 
 data SpawnWorkersArgs = SpawnWorkersArgs
   { swsSpecs :: [WorkerSpec]

@@ -50,7 +50,7 @@ type StopCheck = IO CheckResult
 
 runChecks :: [StopCheck] -> IO CheckResult
 runChecks [] = pure CheckPass
-runChecks (c:cs) = do
+runChecks (c : cs) = do
   r <- c
   case r of
     CheckBlock reason -> pure (CheckBlock reason)
@@ -108,32 +108,33 @@ checkPRFiled = do
           branchName = TL.toStrict (Git.getRepoInfoResponseBranch repoInfo)
       if T.null repoOwner
         then pure $ CheckBlock "Could not determine GitHub owner from remote URL"
-        else if T.null repoName
-          then pure $ CheckBlock "Could not determine GitHub repo name from remote URL"
-          else do
-            let prInput =
-                  GH.GetPullRequestForBranchRequest
-                    { GH.getPullRequestForBranchRequestOwner = TL.fromStrict repoOwner,
-                      GH.getPullRequestForBranchRequestRepo = TL.fromStrict repoName,
-                      GH.getPullRequestForBranchRequestBranch = TL.fromStrict branchName
-                    }
-            prResult <- getPullRequestForBranch prInput
-            case prResult of
-              Left err -> pure $ CheckBlock $ "Failed to check for PR: " <> T.pack (show err)
-              Right prResp ->
-                if not (GH.getPullRequestForBranchResponseFound prResp)
-                  then do
-                    autoResult <- autoFilePR branchName
-                    case autoResult of
-                      Left msg -> pure $ CheckBlock msg
-                      Right _ -> pure CheckPass
-                  else case GH.getPullRequestForBranchResponsePullRequest prResp of
-                    Nothing -> pure $ CheckBlock "PR found but no details available"
-                    Just pr -> do
-                      reviewResult <- checkReviewCommentsInner pr
-                      case reviewResult of
+        else
+          if T.null repoName
+            then pure $ CheckBlock "Could not determine GitHub repo name from remote URL"
+            else do
+              let prInput =
+                    GH.GetPullRequestForBranchRequest
+                      { GH.getPullRequestForBranchRequestOwner = TL.fromStrict repoOwner,
+                        GH.getPullRequestForBranchRequestRepo = TL.fromStrict repoName,
+                        GH.getPullRequestForBranchRequestBranch = TL.fromStrict branchName
+                      }
+              prResult <- getPullRequestForBranch prInput
+              case prResult of
+                Left err -> pure $ CheckBlock $ "Failed to check for PR: " <> T.pack (show err)
+                Right prResp ->
+                  if not (GH.getPullRequestForBranchResponseFound prResp)
+                    then do
+                      autoResult <- autoFilePR branchName
+                      case autoResult of
                         Left msg -> pure $ CheckBlock msg
-                        Right () -> pure CheckPass
+                        Right _ -> pure CheckPass
+                    else case GH.getPullRequestForBranchResponsePullRequest prResp of
+                      Nothing -> pure $ CheckBlock "PR found but no details available"
+                      Just pr -> do
+                        reviewResult <- checkReviewCommentsInner pr
+                        case reviewResult of
+                          Left msg -> pure $ CheckBlock msg
+                          Right () -> pure CheckPass
 
 autoFilePR :: Text -> IO (Either Text ())
 autoFilePR branchName = do
@@ -156,18 +157,18 @@ autoFilePR branchName = do
       let prNum = FP.filePrResponsePrNumber fpResp
           prUrl = TL.toStrict (FP.filePrResponsePrUrl fpResp)
       logInfo_ ("Auto-filed PR #" <> T.pack (show prNum) <> ": " <> prUrl)
-      pure $ Left $
-        "PR #"
-          <> T.pack (show prNum)
-          <> " has been auto-filed. Please wait for Copilot review to complete before stopping."
+      pure $
+        Left $
+          "PR #"
+            <> T.pack (show prNum)
+            <> " has been auto-filed. Please wait for Copilot review to complete before stopping."
 
 checkReviewCommentsInner :: GH.PullRequest -> IO (Either Text ())
 checkReviewCommentsInner pr = do
   let prNum = fromIntegral (GH.pullRequestNumber pr) :: Int
   let waitInput =
         Copilot.WaitForCopilotReviewRequest
-          {
-            Copilot.waitForCopilotReviewRequestPrNumber = fromIntegral prNum,
+          { Copilot.waitForCopilotReviewRequestPrNumber = fromIntegral prNum,
             Copilot.waitForCopilotReviewRequestTimeoutSecs = 300,
             Copilot.waitForCopilotReviewRequestPollIntervalSecs = 30
           }
@@ -178,10 +179,11 @@ checkReviewCommentsInner pr = do
       let status = TL.toStrict (Copilot.waitForCopilotReviewResponseStatus reviewOutput)
        in case status of
             "timeout" ->
-              pure $ Left $
-                "Copilot hasn't reviewed PR #"
-                  <> T.pack (show prNum)
-                  <> " yet. Wait for Copilot review or check if Copilot is enabled for this repo."
+              pure $
+                Left $
+                  "Copilot hasn't reviewed PR #"
+                    <> T.pack (show prNum)
+                    <> " yet. Wait for Copilot review or check if Copilot is enabled for this repo."
             "reviewed" ->
               let comments = V.toList (Copilot.waitForCopilotReviewResponseComments reviewOutput)
                in if null comments
@@ -198,10 +200,11 @@ checkReviewCommentsInner pr = do
                               <> "\nAddress these comments, commit, and push your changes."
                        in pure $ Left msg
             "pending" ->
-              pure $ Left $
-                "Copilot review is still pending for PR #"
-                  <> T.pack (show prNum)
-                  <> ". Wait for review to complete."
+              pure $
+                Left $
+                  "Copilot review is still pending for PR #"
+                    <> T.pack (show prNum)
+                    <> ". Wait for review to complete."
             _ ->
               pure $ Left $ "Unknown review status: " <> status
 
@@ -252,9 +255,9 @@ sendLifecycleNote noteType fields = do
       -- Get current branch for context
       branchName <- getCurrentBranch
       let baseFields =
-            ["type" .= noteType
-            , "agent_id" .= agent
-            , "branch" .= branchName
+            [ "type" .= noteType,
+              "agent_id" .= agent,
+              "branch" .= branchName
             ]
           extraFields = map (\(k, v) -> Key.fromText k .= v) fields
           jsonContent = TL.toStrict $ TLE.decodeUtf8 $ encode $ object (baseFields <> extraFields)

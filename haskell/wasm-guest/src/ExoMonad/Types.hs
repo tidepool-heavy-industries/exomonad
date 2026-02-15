@@ -11,10 +11,10 @@ module ExoMonad.Types
   )
 where
 
+import Control.Monad.Freer (Eff)
 import Data.Text (Text)
 import ExoMonad.Guest.Types (HookInput, HookOutput, StopHookOutput, allowResponse, allowStopResponse, postToolUseResponse)
 import GHC.Generics (Generic)
-import Control.Monad.Freer (Eff)
 
 -- | Effects available to hooks.
 -- Currently allows arbitrary IO via IO (required for Host Calls).

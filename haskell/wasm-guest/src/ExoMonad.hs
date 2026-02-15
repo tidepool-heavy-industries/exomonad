@@ -28,12 +28,12 @@ module ExoMonad
 where
 
 import ExoMonad.Guest.Effect
+import ExoMonad.Guest.Records.Events
 import ExoMonad.Guest.Records.FilePR
 import ExoMonad.Guest.Records.Messaging
 import ExoMonad.Guest.Records.Popup
-import ExoMonad.Guest.Records.TLMessaging
-import ExoMonad.Guest.Records.Events
 import ExoMonad.Guest.Records.Spawn
+import ExoMonad.Guest.Records.TLMessaging
 import ExoMonad.Guest.SpawnSpec.Types as ExoMonad.Guest.SpawnSpec.Types
 import ExoMonad.Guest.Tool.Class
 import ExoMonad.Guest.Tool.Mode

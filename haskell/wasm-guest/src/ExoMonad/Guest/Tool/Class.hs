@@ -120,7 +120,7 @@ type ToolEffects = '[SuspendYield, IO]
 
 -- | Suspend execution, yielding an effect request to the host.
 -- Returns the result value when resumed.
-suspend :: Member SuspendYield effs => EffectRequest -> Eff effs Value
+suspend :: (Member SuspendYield effs) => EffectRequest -> Eff effs Value
 suspend req = yield req id
 
 -- ============================================================================
@@ -129,8 +129,8 @@ suspend req = yield req id
 
 -- | Effect request for suspension.
 data EffectRequest = EffectRequest
-  { erType :: Text
-  , erPayload :: Value
+  { erType :: Text,
+    erPayload :: Value
   }
   deriving (Show, Eq, Generic)
 

@@ -8,7 +8,7 @@ module ExoMonad.Guest.Records.Spawn
 where
 
 import ExoMonad.Guest.Tool.Mode (AsHandler, AsSchema, ToolMode ((:-)), mkHandler, mkSchema)
-import ExoMonad.Guest.Tools.Spawn (SpawnSubtree, SpawnLeafSubtree, SpawnWorkers)
+import ExoMonad.Guest.Tools.Spawn (SpawnLeafSubtree, SpawnSubtree, SpawnWorkers)
 import GHC.Generics (Generic)
 
 data SpawnTools mode = SpawnTools

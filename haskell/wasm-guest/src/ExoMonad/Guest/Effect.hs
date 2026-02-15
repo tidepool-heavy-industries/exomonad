@@ -196,4 +196,3 @@ mkCustomError code msg =
                 EE.customData = BS.empty
               }
     }
-

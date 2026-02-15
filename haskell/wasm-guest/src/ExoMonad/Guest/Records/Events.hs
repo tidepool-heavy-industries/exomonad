@@ -6,7 +6,7 @@ module ExoMonad.Guest.Records.Events
 where
 
 import ExoMonad.Guest.Tool.Mode (AsHandler, ToolMode ((:-)), mkHandler)
-import ExoMonad.Guest.Tools.Events (WaitForEvent, NotifyParent)
+import ExoMonad.Guest.Tools.Events (NotifyParent, WaitForEvent)
 import GHC.Generics (Generic)
 
 data EventTools mode = EventTools

@@ -1,21 +1,23 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
-module ExoMonad.Guest.SpawnSpec.Types
-  ( Zone(..)
-  , ZoneDefaults(..)
-  , Step(..)
-  , PlanRef(..)
-  , SpawnSpec(..)
-  , Command(..)
-  , CompileReport(..)
-  , emptySpec
-  ) where
 
-import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.!=), withObject, withText)
+module ExoMonad.Guest.SpawnSpec.Types
+  ( Zone (..),
+    ZoneDefaults (..),
+    Step (..),
+    PlanRef (..),
+    SpawnSpec (..),
+    Command (..),
+    CompileReport (..),
+    emptySpec,
+  )
+where
+
+import Data.Aeson (FromJSON (..), ToJSON (..), withObject, withText, (.!=), (.:), (.:?))
 import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
+import Data.Map.Strict qualified as Map
 import Data.Set (Set)
-import qualified Data.Set as Set
+import Data.Set qualified as Set
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
@@ -43,7 +45,7 @@ instance ToJSON Zone where
   toJSON Justfile = "justfile"
 
 -- | Shell command (newtype for type safety).
-newtype Command = Command { unCommand :: Text }
+newtype Command = Command {unCommand :: Text}
   deriving (Show, Eq, Ord, Generic)
 
 instance FromJSON Command where
@@ -54,75 +56,94 @@ instance ToJSON Command where
 
 -- | Defaults contributed by a zone.
 data ZoneDefaults = ZoneDefaults
-  { zdReadFirst :: Set Text       -- ^ CLAUDE.md paths, key source files
-  , zdVerify    :: Set Command    -- ^ build/test commands
-  , zdEnvVars   :: Map Text Text  -- ^ e.g. PROTOC path
-  , zdRules     :: [Text]         -- ^ boundary rules
-  } deriving (Show, Eq, Generic)
+  { -- | CLAUDE.md paths, key source files
+    zdReadFirst :: Set Text,
+    -- | build/test commands
+    zdVerify :: Set Command,
+    -- | e.g. PROTOC path
+    zdEnvVars :: Map Text Text,
+    -- | boundary rules
+    zdRules :: [Text]
+  }
+  deriving (Show, Eq, Generic)
 
 instance Semigroup ZoneDefaults where
-  a <> b = ZoneDefaults
-    { zdReadFirst = zdReadFirst a <> zdReadFirst b
-    , zdVerify    = zdVerify a <> zdVerify b
-    , zdEnvVars   = zdEnvVars a <> zdEnvVars b
-    , zdRules     = zdRules a <> zdRules b
-    }
+  a <> b =
+    ZoneDefaults
+      { zdReadFirst = zdReadFirst a <> zdReadFirst b,
+        zdVerify = zdVerify a <> zdVerify b,
+        zdEnvVars = zdEnvVars a <> zdEnvVars b,
+        zdRules = zdRules a <> zdRules b
+      }
 
 instance Monoid ZoneDefaults where
   mempty = ZoneDefaults Set.empty Set.empty Map.empty []
 
 -- | A step in the execution plan.
 data Step = Step
-  { stepAction  :: Text          -- ^ what to do
-  , stepFiles   :: [Text]        -- ^ which files
-  , stepSnippet :: Maybe Text    -- ^ optional code snippet
-  } deriving (Show, Eq, Generic)
+  { -- | what to do
+    stepAction :: Text,
+    -- | which files
+    stepFiles :: [Text],
+    -- | optional code snippet
+    stepSnippet :: Maybe Text
+  }
+  deriving (Show, Eq, Generic)
 
 instance FromJSON Step where
-  parseJSON = withObject "Step" $ \v -> Step
-    <$> v .: "action"
-    <*> v .:? "files" .!= []
-    <*> v .:? "snippet"
+  parseJSON = withObject "Step" $ \v ->
+    Step
+      <$> v .: "action"
+      <*> v .:? "files" .!= []
+      <*> v .:? "snippet"
 
 instance ToJSON Step
 
 -- | Reference to a persistent plan file.
 data PlanRef = PlanRef
-  { planPath    :: Text          -- ^ must be under .exomonad/plans/
-  , planSection :: Maybe Text    -- ^ optional heading to extract
-  } deriving (Show, Eq, Generic)
+  { -- | must be under .exomonad/plans/
+    planPath :: Text,
+    -- | optional heading to extract
+    planSection :: Maybe Text
+  }
+  deriving (Show, Eq, Generic)
 
 instance FromJSON PlanRef where
-  parseJSON = withObject "PlanRef" $ \v -> PlanRef
-    <$> v .: "path"
-    <*> v .:? "section"
+  parseJSON = withObject "PlanRef" $ \v ->
+    PlanRef
+      <$> v .: "path"
+      <*> v .:? "section"
 
 instance ToJSON PlanRef
 
 -- | The full spawn specification.
 data SpawnSpec = SpawnSpec
-  { specZones        :: Set Zone
-  , specSteps        :: [Step]
-  , specVerify       :: Set Command    -- ^ additional verify beyond zone defaults
-  , specDoneCriteria :: [Text]
-  , specPlan         :: Maybe PlanRef
-  , specNoCommit     :: Bool
-  , specContext      :: Maybe Text      -- ^ TL reasoning summary
-  , specKeyDecisions :: [Text]
-  , specNonGoals     :: [Text]
-  } deriving (Show, Eq, Generic)
+  { specZones :: Set Zone,
+    specSteps :: [Step],
+    -- | additional verify beyond zone defaults
+    specVerify :: Set Command,
+    specDoneCriteria :: [Text],
+    specPlan :: Maybe PlanRef,
+    specNoCommit :: Bool,
+    -- | TL reasoning summary
+    specContext :: Maybe Text,
+    specKeyDecisions :: [Text],
+    specNonGoals :: [Text]
+  }
+  deriving (Show, Eq, Generic)
 
 instance FromJSON SpawnSpec where
-  parseJSON = withObject "SpawnSpec" $ \v -> SpawnSpec
-    <$> v .:? "zones" .!= Set.empty
-    <*> v .:? "steps" .!= []
-    <*> v .:? "verify" .!= Set.empty
-    <*> v .:? "done_criteria" .!= []
-    <*> v .:? "plan" .!= Nothing
-    <*> v .:? "no_commit" .!= True
-    <*> v .:? "context" .!= Nothing
-    <*> v .:? "key_decisions" .!= []
-    <*> v .:? "non_goals" .!= []
+  parseJSON = withObject "SpawnSpec" $ \v ->
+    SpawnSpec
+      <$> v .:? "zones" .!= Set.empty
+      <*> v .:? "steps" .!= []
+      <*> v .:? "verify" .!= Set.empty
+      <*> v .:? "done_criteria" .!= []
+      <*> v .:? "plan" .!= Nothing
+      <*> v .:? "no_commit" .!= True
+      <*> v .:? "context" .!= Nothing
+      <*> v .:? "key_decisions" .!= []
+      <*> v .:? "non_goals" .!= []
 
 -- | Empty spec with sensible defaults.
 emptySpec :: SpawnSpec
@@ -130,10 +151,11 @@ emptySpec = SpawnSpec Set.empty [] Set.empty [] Nothing True Nothing [] []
 
 -- | What the compiler reports.
 data CompileReport = CompileReport
-  { crZonesApplied   :: Set Zone
-  , crVerifyCommands :: Set Command
-  , crReadFirstPaths :: Set Text
-  , crRulesApplied   :: [Text]
-  } deriving (Show, Eq, Generic)
+  { crZonesApplied :: Set Zone,
+    crVerifyCommands :: Set Command,
+    crReadFirstPaths :: Set Text,
+    crRulesApplied :: [Text]
+  }
+  deriving (Show, Eq, Generic)
 
 instance ToJSON CompileReport

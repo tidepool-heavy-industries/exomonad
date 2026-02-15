@@ -26,11 +26,15 @@ renderChildComplete :: Text -> Text -> Text -> Text
 renderChildComplete agentId status message =
   case status of
     "success" ->
-      "[CHILD COMPLETE: " <> agentId <> "] "
+      "[CHILD COMPLETE: "
+        <> agentId
+        <> "] "
         <> (if T.null message then "Task completed successfully." else message)
         <> " Review their PR or check `get_agent_messages` for details."
     "failure" ->
-      "[CHILD FAILED: " <> agentId <> "] "
+      "[CHILD FAILED: "
+        <> agentId
+        <> "] "
         <> (if T.null message then "Task failed." else message)
         <> " Check their worktree for details."
     _ ->
@@ -39,9 +43,15 @@ renderChildComplete agentId status message =
 -- | Render a PR ready event (Copilot approved, CI green).
 renderPRReady :: Text -> Int -> Text -> Text
 renderPRReady agentId prNumber prUrl =
-  "[PR READY: " <> agentId <> "] PR #" <> T.pack (show prNumber)
-    <> " is ready for review: " <> prUrl
-    <> ". Run `merge_pr" <> T.pack (show prNumber) <> "` to merge."
+  "[PR READY: "
+    <> agentId
+    <> "] PR #"
+    <> T.pack (show prNumber)
+    <> " is ready for review: "
+    <> prUrl
+    <> ". Run `merge_pr"
+    <> T.pack (show prNumber)
+    <> "` to merge."
 
 -- | Render a Copilot review event.
 renderCopilotReview :: Int -> Int -> Text
@@ -49,9 +59,12 @@ renderCopilotReview prNumber commentCount =
   if commentCount == 0
     then "[COPILOT APPROVED] PR #" <> T.pack (show prNumber) <> " passed Copilot review with no comments."
     else
-      "[COPILOT REVIEW] PR #" <> T.pack (show prNumber)
-        <> " has " <> T.pack (show commentCount)
-        <> " Copilot comment" <> (if commentCount == 1 then "" else "s")
+      "[COPILOT REVIEW] PR #"
+        <> T.pack (show prNumber)
+        <> " has "
+        <> T.pack (show commentCount)
+        <> " Copilot comment"
+        <> (if commentCount == 1 then "" else "s")
         <> ". Address them, commit, and push."
 
 -- | Render a CI status event.
@@ -66,7 +79,14 @@ renderCIStatus prNumber status details =
 -- | Render a question received event (for TL).
 renderQuestionReceived :: Text -> Text -> Text -> Text
 renderQuestionReceived agentId questionId question =
-  "[QUESTION from " <> agentId <> ", q_id=" <> questionId <> "] "
+  "[QUESTION from "
+    <> agentId
+    <> ", q_id="
+    <> questionId
+    <> "] "
     <> question
-    <> "\nReply with `answer_question agent_id=" <> agentId
-    <> " question_id=" <> questionId <> " answer=\"...\"` to respond."
+    <> "\nReply with `answer_question agent_id="
+    <> agentId
+    <> " question_id="
+    <> questionId
+    <> " answer=\"...\"` to respond."
