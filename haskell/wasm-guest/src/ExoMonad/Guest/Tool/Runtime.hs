@@ -39,7 +39,7 @@ import ExoMonad.Guest.Proto (fromText)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), WasmResult (..), toMCPFormat)
 import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
-import ExoMonad.Guest.Types (HookEventType (..), HookInput (..), HookOutput, MCPCallInput (..), StopDecision (..), StopHookOutput (..), allowResponse)
+import ExoMonad.Guest.Types (HookEventType (..), HookInput (..), HookOutput, MCPCallInput (..), Runtime (..), StopDecision (..), StopHookOutput (..), allowResponse)
 import ExoMonad.PDK (input, output)
 import ExoMonad.Types (HookConfig (..))
 import Foreign.C.Types (CInt (..))
@@ -202,21 +202,31 @@ hookHandler config = do
       emitEvent_ event
 
       -- Run the hook from config (using Freer effects)
-      result <- runM $ hook hookInput
+      rawResult <- runM $ hook hookInput
+
+      -- Check if runtime is Gemini and override Block to Allow
+      -- Fix for infinite loop: Gemini agents retry forever on block
+      let isGemini = hiRuntime hookInput == Just Gemini
+      let (finalResult, overridden) =
+            if isGemini && decision rawResult == Block
+              then (rawResult {decision = Allow, reason = Nothing}, True)
+              else (rawResult, False)
 
       -- Log the decision
-      case decision result of
+      case decision finalResult of
         Allow ->
-          logInfo_ ("Stop hook allowed for " <> agentId)
+          if overridden
+            then logInfo_ ("Stop hook BLOCKED by logic but overridden to ALLOW for Gemini agent: " <> agentId)
+            else logInfo_ ("Stop hook allowed for " <> agentId)
         Block ->
-          case reason result of
+          case reason finalResult of
             Just r ->
               logInfo_ ("Stop hook blocked for " <> agentId <> ": " <> r)
             Nothing ->
               logInfo_ ("Stop hook blocked for " <> agentId)
 
       -- Return the result to the hook caller
-      output (BSL.toStrict $ Aeson.encode result)
+      output (BSL.toStrict $ Aeson.encode finalResult)
       pure 0
 
 handleWorkerExit :: HookInput -> IO CInt

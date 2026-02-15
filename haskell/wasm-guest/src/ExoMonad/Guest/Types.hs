@@ -10,6 +10,7 @@ module ExoMonad.Guest.Types
     HookEventType (..),
     StopHookOutput (..),
     StopDecision (..),
+    Runtime (..),
     allowResponse,
     denyResponse,
     postToolUseResponse,
@@ -70,6 +71,18 @@ instance FromJSON HookEventType where
     "WorkerExit" -> pure WorkerExit
     other -> fail $ "Unknown hook event type: " <> T.unpack other
 
+-- | Runtime environment (Claude or Gemini).
+data Runtime = Claude | Gemini
+  deriving (Show, Eq, Generic)
+
+instance FromJSON Runtime where
+  parseJSON = Aeson.withText "Runtime" $ \case
+    "claude" -> pure Claude
+    "gemini" -> pure Gemini
+    "Claude" -> pure Claude
+    "Gemini" -> pure Gemini
+    other -> fail $ "Unknown runtime: " <> T.unpack other
+
 -- | Input for a hook event.
 -- Ref: https://geminicli.com/docs/hooks/reference/#afteragent
 data HookInput = HookInput
@@ -86,7 +99,8 @@ data HookInput = HookInput
     hiAgentId :: Maybe Text,
     -- | TL session ID for event routing, injected by server from hook query params.
     hiExomonadSessionId :: Maybe Text,
-    hiExitStatus :: Maybe Text
+    hiExitStatus :: Maybe Text,
+    hiRuntime :: Maybe Runtime
   }
   deriving (Show, Generic)
 
@@ -105,6 +119,7 @@ instance FromJSON HookInput where
       <*> v .:? "agent_id"
       <*> v .:? "exomonad_session_id"
       <*> v .:? "exit_status"
+      <*> v .:? "runtime"
 
 -- | Output from a hook handler.
 data HookOutput = HookOutput
