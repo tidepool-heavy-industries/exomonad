@@ -238,47 +238,6 @@ Event system (`events.*` namespace):
 PR creation (`file_pr.*` namespace):
 - `FilePR`: Create or update PR for current branch
 
-### effects/fs.proto
-
-Filesystem operations (`fs.*` namespace):
-- `ReadFile`: Read file contents
-- `WriteFile`: Write file contents
-- `FileExists`: Check file existence
-- `ListDirectory`: List directory entries
-- `DeleteFile`: Delete file/directory
-
-### effects/git.proto
-
-Git operations (`git.*` namespace):
-- `GetBranch`: Current branch info
-- `GetStatus`: Dirty/staged/untracked files
-- `GetCommits`: Recent commit history
-- `HasUnpushedCommits`: Check for unpushed commits
-- `GetRemoteUrl`: Remote URL
-- `GetRepoInfo`: Branch + owner/name
-- `GetWorktree`: Worktree info
-
-### effects/github.proto
-
-GitHub API operations (`github.*` namespace):
-- `ListIssues`: List repository issues
-- `GetIssue`: Get issue with comments
-- `ListPullRequests`: List PRs
-- `GetPullRequest`: Get PR with reviews
-- `GetPullRequestForBranch`: Find PR for branch
-- `CreatePullRequest`: Create new PR
-- `GetPullRequestReviewComments`: Get inline comments
-
-### effects/jj.proto
-
-Jujutsu VCS operations (`jj.*` namespace):
-- `BookmarkCreate`: Create bookmark at revision
-- `GitPush`: Push bookmark to remote
-- `GitFetch`: Fetch from remote (triggers auto-rebase)
-- `Log`: Query revsets, return JSON
-- `New`: Start a new change
-- `Status`: Working copy status including conflicts
-
 ### effects/kv.proto
 
 Key-Value storage (`kv.*` namespace):
