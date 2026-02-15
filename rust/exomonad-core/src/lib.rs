@@ -124,13 +124,12 @@ pub use handlers::{
     PopupHandler,
 };
 #[cfg(feature = "runtime")]
-pub use services::{Services, ValidatedServices};
+pub use services::{validate_gh_cli, validate_git};
 
 /// Prelude module for convenient imports.
 #[cfg(feature = "runtime")]
 pub mod prelude {
     pub use crate::handlers::*;
-    pub use crate::services::{Services, ValidatedServices};
 }
 
 #[cfg(feature = "runtime")]
@@ -291,48 +290,4 @@ impl Runtime {
             question_registry: None,
         }
     }
-}
-
-/// Register all built-in handlers with a RuntimeBuilder.
-///
-/// The returned `Arc<QuestionRegistry>` is shared between the MessagingHandler (which
-/// awaits answers) and MCP tools (which resolve questions via `answer_question`).
-#[cfg(feature = "runtime")]
-pub fn register_builtin_handlers(
-    builder: RuntimeBuilder,
-    services: &Arc<ValidatedServices>,
-) -> (
-    RuntimeBuilder,
-    Arc<services::questions::QuestionRegistry>,
-    Arc<services::event_queue::EventQueue>,
-) {
-    let project_dir = std::env::current_dir().unwrap_or_default();
-    let remote_port = std::env::var("EXOMONAD_SERVER_PORT")
-        .ok()
-        .and_then(|s| s.parse().ok());
-
-    let mut builder = builder;
-
-    // Core handlers (log, kv, fs)
-    builder = builder.with_handlers(handlers::groups::core_handlers(project_dir.clone()));
-
-    // Git handlers (git, jj, github, file_pr, merge_pr, copilot)
-    builder = builder.with_handlers(handlers::groups::git_handlers(
-        services.git().clone(),
-        services.github().clone(),
-    ));
-
-    // Orchestration handlers (agent, popup, events, messaging, coordination)
-    let event_queue = services.event_queue().clone();
-    let (orch_handlers, question_registry) = handlers::groups::orchestration_handlers(
-        services.agent_control().clone(),
-        event_queue.clone(),
-        services.zellij_session().map(|s| s.to_string()),
-        project_dir,
-        remote_port,
-        Some(services.event_session_id().to_string()),
-    );
-    builder = builder.with_handlers(orch_handlers);
-
-    (builder, question_registry, event_queue)
 }
