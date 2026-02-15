@@ -7,6 +7,30 @@ use crate::protocol::{GitHubIssueRef, IssueState, ServiceRequest, ServiceRespons
 use async_trait::async_trait;
 use octocrab::{Octocrab, OctocrabBuilder};
 use reqwest::Url;
+use tracing::{error, info};
+
+/// Extract HTTP status code and message from octocrab errors.
+fn octocrab_error_to_service_error(context: &str, e: octocrab::Error) -> ServiceError {
+    match &e {
+        octocrab::Error::GitHub { source, .. } => {
+            error!(
+                "[GitHub] {} failed: HTTP {} - {}",
+                context, source.status_code, source.message
+            );
+            ServiceError::Api {
+                code: source.status_code.as_u16() as i32,
+                message: format!("{}: {}", source.status_code, source.message),
+            }
+        }
+        _ => {
+            error!("[GitHub] {} failed: {}", context, e);
+            ServiceError::Api {
+                code: 500,
+                message: e.to_string(),
+            }
+        }
+    }
+}
 
 /// Service client for the GitHub API.
 ///
@@ -464,10 +488,10 @@ impl ExternalService for GitHubService {
                     builder = builder.head(head_branch.clone());
                 }
 
-                let page = builder.send().await.map_err(|e| ServiceError::Api {
-                    code: 500,
-                    message: e.to_string(),
-                })?;
+                let page = builder
+                    .send()
+                    .await
+                    .map_err(|e| octocrab_error_to_service_error("ListPRs", e))?;
 
                 let prs = page
                     .into_iter()
@@ -659,6 +683,10 @@ impl ExternalService for GitHubService {
                 head,
                 base,
             } => {
+                info!(
+                    "[GitHub] CreatePR: {}/{} head={} base={} title={:?}",
+                    owner, repo, head, base, title
+                );
                 let pr = self
                     .client
                     .pulls(owner, repo)
@@ -666,10 +694,12 @@ impl ExternalService for GitHubService {
                     .body(body)
                     .send()
                     .await
-                    .map_err(|e| ServiceError::Api {
-                        code: 500,
-                        message: e.to_string(),
-                    })?;
+                    .map_err(|e| octocrab_error_to_service_error("CreatePR", e))?;
+                info!(
+                    "[GitHub] CreatePR succeeded: PR #{} {}",
+                    pr.number,
+                    pr.html_url.as_ref().map(|u| u.as_str()).unwrap_or("(no url)")
+                );
 
                 Ok(ServiceResponse::GitHubPR {
                     number: pr.number as u32,
@@ -704,10 +734,7 @@ impl ExternalService for GitHubService {
                     .pulls(owner.as_str(), repo.as_str())
                     .get(number.into())
                     .await
-                    .map_err(|e| ServiceError::Api {
-                        code: 500,
-                        message: e.to_string(),
-                    })?;
+                    .map_err(|e| octocrab_error_to_service_error("GetPR", e))?;
 
                 let merged_at = pr.merged_at.map(|t| t.to_rfc3339());
                 let labels = pr
