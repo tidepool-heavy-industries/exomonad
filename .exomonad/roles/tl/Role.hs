@@ -1,5 +1,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeOperators #-}
 
 module Role (config, Tools) where
 
@@ -9,7 +11,8 @@ data Tools mode = Tools
   { spawn :: SpawnTools mode,
     popups :: PopupTools mode,
     messaging :: TLMessagingTools mode,
-    events :: EventTools mode
+    events :: EventTools mode,
+    notifyParent :: mode :- NotifyParent
   }
   deriving (Generic)
 
@@ -22,7 +25,8 @@ config =
           { spawn = spawnTools,
             popups = popupTools,
             messaging = tlMessagingTools,
-            events = eventTools
+            events = eventTools,
+            notifyParent = mkHandler @NotifyParent
           },
       hooks = defaultHooks
     }

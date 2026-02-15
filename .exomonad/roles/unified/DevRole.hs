@@ -1,5 +1,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeOperators #-}
 
 -- | Dev role config re-exported under a unique module name for the unified WASM.
 --
@@ -13,7 +15,8 @@ import HttpDevHooks (httpDevHooks)
 
 data Tools mode = Tools
   { pr :: FilePRTools mode,
-    messaging :: MessagingTools mode
+    messaging :: MessagingTools mode,
+    notifyParent :: mode :- NotifyParent
   }
   deriving (Generic)
 
@@ -24,7 +27,8 @@ config =
       tools =
         Tools
           { pr = filePRTools,
-            messaging = messagingTools
+            messaging = messagingTools,
+            notifyParent = mkHandler @NotifyParent
           },
       hooks = httpDevHooks
     }

@@ -128,12 +128,13 @@ instance MCPTool NotifyParent where
           "status" .= object
             [
               "type" .= ("string" :: Text)
+            , "enum" .= (["success", "failure"] :: [Text])
             , "description" .= ("Completion status (success/failure)" :: Text)
             ]
         , "message" .= object
             [
               "type" .= ("string" :: Text)
-            , "description" .= ("Completion message" :: Text)
+            , "description" .= ("Summary of work done (on success) or what went wrong (on failure)" :: Text)
             ]
         ]
     , "required" .= (["status", "message"] :: [Text])

@@ -1,6 +1,7 @@
 module ExoMonad.Guest.Records.Events
   ( EventTools (..),
     eventTools,
+    NotifyParent,
   )
 where
 
@@ -9,14 +10,12 @@ import ExoMonad.Guest.Tools.Events (WaitForEvent, NotifyParent)
 import GHC.Generics (Generic)
 
 data EventTools mode = EventTools
-  { waitForEvent :: mode :- WaitForEvent,
-    notifyParent :: mode :- NotifyParent
+  { waitForEvent :: mode :- WaitForEvent
   }
   deriving (Generic)
 
 eventTools :: EventTools AsHandler
 eventTools =
   EventTools
-    { waitForEvent = mkHandler @WaitForEvent,
-      notifyParent = mkHandler @NotifyParent
+    { waitForEvent = mkHandler @WaitForEvent
     }
