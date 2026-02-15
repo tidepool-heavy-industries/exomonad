@@ -270,6 +270,78 @@ pub struct BatchCleanupResult {
 impl FFIBoundary for BatchCleanupResult {}
 
 // ============================================================================
+// jj bookmark helpers
+// ============================================================================
+
+/// Create a jj bookmark in the given working directory. Non-fatal on failure.
+async fn create_jj_bookmark(branch_name: &str, working_dir: &Path) {
+    info!(branch = %branch_name, dir = %working_dir.display(), "Creating jj bookmark");
+    let result = Command::new("jj")
+        .args(["bookmark", "create", branch_name, "-r", "@"])
+        .current_dir(working_dir)
+        .output()
+        .await;
+    match result {
+        Ok(o) if o.status.success() => {
+            info!(branch = %branch_name, "jj bookmark created");
+        }
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            warn!(branch = %branch_name, stderr = %stderr, "jj bookmark create failed (non-fatal)");
+        }
+        Err(e) => {
+            warn!(branch = %branch_name, error = %e, "Failed to run jj bookmark create (non-fatal)");
+        }
+    }
+}
+
+/// Delete a jj bookmark. Runs in the given working directory. Non-fatal on failure.
+async fn delete_jj_bookmark(branch_name: &str, working_dir: &Path) {
+    info!(branch = %branch_name, "Deleting jj bookmark");
+    let result = Command::new("jj")
+        .args(["bookmark", "delete", branch_name])
+        .current_dir(working_dir)
+        .output()
+        .await;
+    match result {
+        Ok(o) if o.status.success() => {
+            info!(branch = %branch_name, "jj bookmark deleted");
+        }
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            warn!(branch = %branch_name, stderr = %stderr, "jj bookmark delete failed (non-fatal)");
+        }
+        Err(e) => {
+            warn!(branch = %branch_name, error = %e, "Failed to run jj bookmark delete (non-fatal)");
+        }
+    }
+}
+
+/// Get the branch name for a git worktree.
+async fn get_worktree_branch(worktree_path: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .args([
+            "-C",
+            &worktree_path.to_string_lossy(),
+            "rev-parse",
+            "--abbrev-ref",
+            "HEAD",
+        ])
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if branch.is_empty() || branch == "HEAD" {
+        None
+    } else {
+        Some(branch)
+    }
+}
+
+// ============================================================================
 // Service
 // ============================================================================
 
@@ -993,6 +1065,8 @@ impl AgentControlService {
                 return Err(anyhow!("git worktree add failed: {}", stderr));
             }
 
+            create_jj_bookmark(&branch_name, &worktree_path).await;
+
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
             // Session ID = birth-branch (the new branch name)
@@ -1135,6 +1209,8 @@ impl AgentControlService {
                 return Err(anyhow!("git worktree add failed: {}", stderr));
             }
 
+            create_jj_bookmark(&branch_name, &worktree_path).await;
+
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
             // Session ID = birth-branch (the new branch name)
@@ -1265,9 +1341,24 @@ impl AgentControlService {
             }
         }
 
-        // Remove git worktree if it exists
-        let worktree_path = self.worktree_base.join(&internal_name);
+        // Remove git worktree if it exists.
+        // spawn_subtree/spawn_leaf_subtree use slug (identifier) as dir name,
+        // spawn_agent/spawn_gemini_teammate use internal_name ({id}-{type}).
+        // Try slug first, fall back to internal_name.
+        let worktree_path = {
+            let slug_path = self.worktree_base.join(identifier);
+            if slug_path.exists() {
+                slug_path
+            } else {
+                self.worktree_base.join(&internal_name)
+            }
+        };
         if worktree_path.exists() {
+            // Delete jj bookmark before removing worktree (jj needs the checkout to exist)
+            if let Some(branch) = get_worktree_branch(&worktree_path).await {
+                delete_jj_bookmark(&branch, &worktree_path).await;
+            }
+
             info!(path = %worktree_path.display(), "Removing git worktree");
             let output = Command::new("git")
                 .args([
