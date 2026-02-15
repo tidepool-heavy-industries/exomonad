@@ -128,6 +128,16 @@ impl<T> FFIResult<T> {
             suggestion,
         })
     }
+
+    /// Create a simple error result.
+    pub fn simple_error(message: impl Into<String>, code: ErrorCode) -> Self {
+        Self::Error(FFIError {
+            message: message.into(),
+            code,
+            context: None,
+            suggestion: None,
+        })
+    }
 }
 
 impl<T: FFIBoundary> FFIBoundary for FFIResult<T> {}

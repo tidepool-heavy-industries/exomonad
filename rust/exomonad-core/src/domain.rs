@@ -106,6 +106,14 @@ validated_string!(
     "github_repo"
 );
 
+#[cfg(test)]
+impl SessionId {
+    /// Create from &str (unchecked, for tests).
+    pub fn from_str_unchecked(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
 // ============================================================================
 // GitHub Issue Number
 // ============================================================================
@@ -363,6 +371,11 @@ impl AbsolutePath {
     /// Get the path as a Path reference.
     pub fn as_path(&self) -> &Path {
         &self.0
+    }
+
+    /// Convert to PathBuf (consumes self).
+    pub fn into_path_buf(self) -> PathBuf {
+        self.0
     }
 }
 

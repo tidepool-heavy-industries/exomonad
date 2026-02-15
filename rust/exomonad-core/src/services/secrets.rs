@@ -56,6 +56,11 @@ impl Secrets {
     pub fn github_token(&self) -> Option<String> {
         self.get("GITHUB_TOKEN")
     }
+
+    /// Get ANTHROPIC_API_KEY.
+    pub fn anthropic_api_key(&self) -> Option<String> {
+        self.get("ANTHROPIC_API_KEY")
+    }
 }
 
 /// Parse a .env-style file into key-value pairs.

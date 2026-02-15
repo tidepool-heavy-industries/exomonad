@@ -7,55 +7,56 @@ This report identifies dead code, unused imports, and potential cleanup targets 
 ## Compiler Warnings
 `cargo check` (workspace) reported no warnings.
 
-## Remediation Status
-
-The following unused public functions and dead code blocks were identified and **removed** in this PR:
+## Unused Public Functions
+The following public functions appear to be unused (found 1 occurrence, which is the definition):
 
 - `exomonad-core::services::secrets::Secrets::anthropic_api_key`
   - Reason: Superseded by environment variable export in `Secrets::load()`.
-  - Status: **Removed**
+  - Location: `rust/exomonad-core/src/services/secrets.rs`
 
 - `exomonad-core::services::filesystem::FileSystemService::from_cwd`
-  - Reason: Unused convenience constructor.
-  - Status: **Removed**
+  - Reason: Unused convenience constructor; `new()` is used with explicit paths.
+  - Location: `rust/exomonad-core/src/services/filesystem.rs`
 
 - `exomonad-core::domain::Topology::from_proto`
   - Reason: Unused conversion from protobuf integer.
-  - Status: **Removed**
+  - Location: `rust/exomonad-core/src/services/agent_control.rs`
 
 - `exomonad-core::domain::SessionId::from_str_unchecked`
-  - Reason: Unused test helper.
-  - Status: **Removed**
+  - Reason: Test helper unused in current test suite.
+  - Location: `rust/exomonad-core/src/domain.rs`
 
 - `exomonad-core::domain::AbsolutePath::into_path_buf`
-  - Reason: Unused conversion.
-  - Status: **Removed**
+  - Reason: Unused conversion (trait `Into<PathBuf>` or `AsRef` likely used instead).
+  - Location: `rust/exomonad-core/src/domain.rs`
 
 - `exomonad-core::ffi::FFIResult::simple_error`
   - Reason: Unused helper constructor.
-  - Status: **Removed**
+  - Location: `rust/exomonad-core/src/ffi.rs`
 
 - `exomonad-core::RuntimeBuilder::with_effect_handler_arc`
-  - Reason: Unused builder method.
-  - Status: **Removed**
+  - Reason: Unused builder method; `with_effect_handler` (owned) or `with_handlers` (boxed) are used.
+  - Location: `rust/exomonad-core/src/lib.rs`
 
 - `exomonad-core::RuntimeBuilder::into_registry`
-  - Reason: Unused builder terminator.
-  - Status: **Removed**
+  - Reason: Unused builder terminator; `build()` is used to create the runtime.
+  - Location: `rust/exomonad-core/src/lib.rs`
 
-- `#[allow(dead_code)]` in `rust/exomonad-core/src/services/github_poller.rs`
-  - Removed `branch_name` field from `PRState`.
-  - Status: **Removed**
+## Dead Code Annotations
+The following code is explicitly marked as dead code and should be reviewed for removal:
 
-- `#[allow(dead_code)]` in `rust/exomonad/src/pid.rs`
-  - Renamed `file` to `_file` to indicate intentional unused (RAII guard).
-    - Status: **Fixed**
-  
-  - `// TODO: Return actual worktree path` in `rust/exomonad-core/src/services/agent_control.rs`
-    - Reason: Feature improvement.
-    - Status: **Fixed**
-  
-  ## TODOs and FIXMEs (Remaining)
-  - `rust/exomonad-core/src/plugin_manager.rs`: `// TODO: Fix for Extism 1.13`
-  - `rust/exomonad-core/src/effects/mod.rs`: `//!         todo!()` (Documentation example)
-  
+- `rust/exomonad-core/src/services/github_poller.rs` (L26): `branch_name` field in `PRState`.
+- `rust/exomonad/src/pid.rs` (L220): `file` field in `PidGuard` (RAII guard).
+
+## TODOs and FIXMEs
+- `rust/exomonad-core/src/plugin_manager.rs`: `// TODO: Fix for Extism 1.13`
+- `rust/exomonad-core/src/effects/mod.rs`: `//!         todo!()` (Documentation example)
+- `rust/exomonad-core/src/services/agent_control.rs`: `// TODO: Return actual worktree path if possible...`
+
+## Recommendations
+1. Remove `Secrets::anthropic_api_key` as it is redundant.
+2. Remove unused `RuntimeBuilder` methods if the API stability is not a concern (internal crate).
+3. Remove `Topology::from_proto` if not planned for immediate use.
+4. Remove `PRState::branch_name` in `github_poller.rs` as it is unused.
+5. Rename `PidGuard::file` to `_file` in `pid.rs` to silence the warning idiomatically and remove `#[allow(dead_code)]`.
+6. Implement the worktree path return in `agent_control.rs` to resolve the TODO.

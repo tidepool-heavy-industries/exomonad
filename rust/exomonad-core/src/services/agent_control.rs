@@ -204,6 +204,15 @@ pub enum Topology {
 }
 
 impl Topology {
+    /// Convert from proto i32 representation.
+    pub fn from_proto(value: i32) -> Self {
+        match value {
+            1 => Topology::WorktreePerAgent,
+            2 => Topology::SharedDir,
+            _ => Topology::Unspecified,
+        }
+    }
+
     /// Convert to proto i32 representation.
     pub fn to_proto(self) -> i32 {
         match self {
@@ -681,10 +690,10 @@ impl AgentControlService {
             );
 
             if tab_alive {
-                let worktree_path = self.worktree_base.join(&internal_name);
                 info!(name = %options.name, "Teammate already running, returning existing");
+                // TODO: Return actual worktree path if possible, but for now empty is fine as it's just info
                 return Ok(SpawnResult {
-                    agent_dir: worktree_path.to_string_lossy().to_string(),
+                    agent_dir: String::new(),
                     tab_name: internal_name,
                     issue_title: options.name.clone(),
                     agent_type: options.agent_type.suffix().to_string(),
