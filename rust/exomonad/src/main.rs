@@ -619,10 +619,8 @@ fn ensure_gitignore(project_dir: &std::path::Path) -> Result<()> {
     writeln!(file, "# ExoMonad - track config, ignore runtime artifacts")?;
     writeln!(file, ".exo/*")?;
     writeln!(file, "!.exo/config.toml")?;
-    writeln!(file, ".exomonad/*")?;
-    writeln!(file, "!.exomonad/config.toml")?;
 
-    eprintln!("Updated .gitignore with .exo/ and .exomonad/ entries");
+    eprintln!("Updated .gitignore with .exo/ entries");
     Ok(())
 }
 

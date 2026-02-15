@@ -190,13 +190,6 @@ fn find_project_root() -> Result<PathBuf> {
         if current.join(".exo/config.toml").exists() {
             return Ok(current.to_path_buf());
         }
-        if current.join(".exomonad/config.toml").exists() {
-            debug!(
-                "Found legacy .exomonad/config.toml at {}",
-                current.display()
-            );
-            return Ok(current.to_path_buf());
-        }
         match current.parent() {
             Some(parent) => current = parent,
             None => {

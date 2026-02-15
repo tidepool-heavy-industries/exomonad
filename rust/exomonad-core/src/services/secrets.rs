@@ -13,23 +13,13 @@ pub struct Secrets {
 }
 
 impl Secrets {
-    /// Load secrets from ~/.exo/secrets (or legacy ~/.exomonad/secrets).
+    /// Load secrets from ~/.exo/secrets.
     ///
     /// Falls back to environment variables if file doesn't exist.
     /// Also exports loaded secrets to environment so host functions can access them.
     pub fn load() -> Self {
         let home = std::env::var("HOME").unwrap_or_default();
-        let exo_path = PathBuf::from(&home).join(".exo/secrets");
-        let legacy_path = PathBuf::from(&home).join(".exomonad/secrets");
-
-        let secrets_path = if exo_path.exists() {
-            exo_path
-        } else if legacy_path.exists() {
-            tracing::warn!("Using legacy secrets file: {}", legacy_path.display());
-            legacy_path
-        } else {
-            exo_path // default to new path for not-found error handling / assumption
-        };
+        let secrets_path = PathBuf::from(home).join(".exo/secrets");
 
         if let Ok(content) = std::fs::read_to_string(&secrets_path) {
             tracing::info!(path = %secrets_path.display(), "Loaded secrets");
