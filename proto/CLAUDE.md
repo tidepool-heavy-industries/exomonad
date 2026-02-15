@@ -13,13 +13,23 @@ proto/
 │   ├── agent.proto     # Agent management types (legacy)
 │   └── popup.proto     # UI popup types
 └── effects/            # Extensible effects system (namespace-based)
+    ├── agent.proto         # agent.* effects
+    ├── coordination.proto  # coordination.* effects
+    ├── copilot.proto       # copilot.* effects
     ├── effect_error.proto  # Unified effect error type
+    ├── egregore.proto      # egregore.* effects (experimental)
+    ├── envelope.proto      # Wire envelope types
+    ├── events.proto        # events.* effects
+    ├── file_pr.proto       # file_pr.* effects
+    ├── fs.proto            # fs.* effects
     ├── git.proto           # git.* effects
     ├── github.proto        # github.* effects
-    ├── fs.proto            # fs.* effects
-    ├── agent.proto         # agent.* effects
     ├── jj.proto            # jj.* effects (Jujutsu VCS)
+    ├── kv.proto            # kv.* effects (Key-Value)
     ├── log.proto           # log.* effects
+    ├── merge_pr.proto      # merge_pr.* effects
+    ├── messaging.proto     # messaging.* effects
+    ├── popup.proto         # popup.* effects (UI)
     └── session.proto       # session.* effects
 ```
 
@@ -204,10 +214,35 @@ Agent lifecycle (`agent.*` namespace):
 - `CleanupMerged`: Clean up agents with merged branches
 - `List`: List active agents
 
-### effects/session.proto
+### effects/coordination.proto
 
-Session management (`session.*` namespace):
-- `RegisterClaudeSession`: Register mapping between internal session ID and Claude UUID.
+Task coordination (`coordination.*` namespace):
+- `CreateTask`, `UpdateTask`: Manage tasks
+- `ListTasks`, `GetTask`: Query tasks
+- `SendMessage`, `GetMessages`: Messaging integration
+
+### effects/copilot.proto
+
+Copilot integration (`copilot.*` namespace):
+- `WaitForReview`: Poll for Copilot review completion
+
+### effects/events.proto
+
+Event system (`events.*` namespace):
+- `WaitForEvent`: Block until event occurs
+- `NotifyEvent`: Emit event
+- `NotifyParent`: Signal completion to parent
+
+### effects/file_pr.proto
+
+PR creation (`file_pr.*` namespace):
+- `FilePR`: Create or update PR for current branch
+
+### effects/kv.proto
+
+Key-Value storage (`kv.*` namespace):
+- `Get`: Retrieve value by key
+- `Set`: Store value by key
 
 ### effects/log.proto
 
@@ -215,6 +250,27 @@ Logging and events (`log.*` namespace):
 - `Log`: Generic log with level
 - `Debug`, `Info`, `Warn`, `Error`: Convenience methods
 - `EmitEvent`: Emit structured event
+
+### effects/merge_pr.proto
+
+PR merging (`merge_pr.*` namespace):
+- `MergePR`: Merge PR and fetch changes
+
+### effects/messaging.proto
+
+Inter-agent messaging (`messaging.*` namespace):
+- `SendNote`: Send non-blocking note
+- `SendQuestion`: Send blocking question
+
+### effects/popup.proto
+
+UI popup interaction (`popup.*` namespace):
+- `ShowPopup`: Display interactive UI component
+
+### effects/session.proto
+
+Session management (`session.*` namespace):
+- `RegisterClaudeSession`: Link Claude session ID to agent identity
 
 ## Usage
 

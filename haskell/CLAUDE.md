@@ -17,8 +17,10 @@ All Haskell packages live here.
 | Directory | Purpose |
 |-----------|---------|
 | `wasm-guest/` | WASM plugin with MCP tools (hosted by Rust runtime) |
-| `dsl/core/` | Effect types, structured output, LLM infrastructure |
+| `dsl/core/` | Effect types, structured output, LLM infrastructure (SDK) |
 | `effects/` | Effect interpreters (LLM, Git, GitHub, Zellij, etc.) |
+| `proto/` | Generated Haskell proto types (from `proto/` root) |
+| `proto-test/` | Tests for generated proto types |
 | `protocol/` | Wire formats for native UI |
 | `tools/` | Standalone utilities (training data generation) |
 | `vendor/` | Vendored dependencies (ginger, polysemy, freer-simple) |

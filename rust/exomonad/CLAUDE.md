@@ -22,7 +22,7 @@ N agents → exomonad serve → TCP (default: localhost:7432) → Unified WASM (
 
 ```bash
 exomonad hook pre-tool-use        # Handle Claude Code hook
-exomonad serve [--socket PATH]    # Unix socket MCP server (multi-agent, hot reload)
+exomonad serve [--port PORT]      # TCP MCP server (multi-agent, hot reload)
 exomonad recompile [--role ROLE]  # Build WASM from Haskell source
 exomonad init [--session NAME]    # Initialize Zellij session (Server tab + TL tab)
 ```
@@ -81,10 +81,18 @@ gemini mcp add --transport http exomonad http://localhost:7432/tl/mcp
 | `github_list_issues` | List GitHub issues | `owner`, `repo`, `state?`, `labels?` |
 | `github_get_issue` | Get single issue details | `owner`, `repo`, `number` |
 | `github_list_prs` | List GitHub pull requests | `owner`, `repo`, `state?`, `limit?` |
-| `spawn_subtree` | Fork a worktree node off current branch (Claude-only, `.exomonad/worktrees/`) | `task`, `branch_name` |
-| `spawn_worker` | Spawn Gemini pane in current worktree (config in `.exomonad/agents/`) | `name`, `prompt` |
+| `spawn_subtree` | Fork a worktree node off current branch (Claude-only) | `task`, `branch_name` |
+| `spawn_leaf_subtree` | Spawn Gemini agent in own worktree (dev role) | `task`, `branch_name` |
+| `spawn_workers` | Spawn ephemeral Gemini workers as panes | `specs`: array of worker specs |
+| `file_pr` | Create/update PR for current branch | `title`, `body` |
+| `merge_pr` | Merge child PR (TL role only) | `pr_number` |
+| `popup` | Display interactive UI | `title`, `components` |
+| `note` | Send non-blocking note to TL | `content` |
+| `question` | Ask blocking question to TL | `content` |
 | `get_agent_messages` | Read notes/questions from agents | `agent_id?` |
 | `answer_question` | Answer pending agent question | `agent_id`, `question_id`, `answer` |
+| `wait_for_event` | Block until event occurs | `types`, `timeout_secs`, `after_event_id` |
+| `notify_parent` | Notify parent session of completion | `status`, `message` |
 
 
 ## Environment Variables
@@ -108,8 +116,14 @@ All effects flow through a single `yield_effect` host function using protobuf bi
 | `log.*` | LogHandler | tracing |
 | `popup.*` | PopupHandler | Zellij plugin IPC |
 | `file_pr.*` | FilePRHandler | gh CLI |
+| `merge_pr.*` | MergePRHandler | gh pr merge + jj git fetch |
 | `copilot.*` | CopilotHandler | GitHub API polling |
 | `messaging.*` | MessagingHandler | Agent messaging files (JSON) |
+| `events.*` | EventHandler | EventQueue service + HTTP forward |
+| `jj.*` | JjHandler | jj subprocess |
+| `coordination.*` | CoordinationHandler | Task management service |
+| `kv.*` | KvHandler | JSON file storage |
+| `session.*` | SessionHandler | Claude session registry |
 
 Handlers are registered via composable group functions: `core_handlers()`, `git_handlers()`, `orchestration_handlers()`.
 

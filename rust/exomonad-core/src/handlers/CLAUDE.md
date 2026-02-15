@@ -10,6 +10,7 @@ Handles effects in the `events.*` namespace, enabling synchronization between ag
 
 - **`wait_for_event`**: Blocking wait for specific event types (e.g., `worker_complete`) with timeout.
 - **`notify_event`**: Publishes an event to a session queue.
+- **`notify_parent`**: Signals completion or status update to the parent agent.
 
 ### Remote Forwarding
 
