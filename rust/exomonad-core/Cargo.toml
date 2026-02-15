@@ -39,6 +39,7 @@ runtime = [
     "dep:thiserror",
     "dep:axum",
     "dep:tower-http",
+    "dep:futures-util",
 ]
 
 [dependencies]
@@ -52,6 +53,7 @@ anyhow = { workspace = true, optional = true }
 libc = { version = "0.2", optional = true }
 clap = { workspace = true, optional = true }
 duct = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true }
 prost = { workspace = true, optional = true }
 strum = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }

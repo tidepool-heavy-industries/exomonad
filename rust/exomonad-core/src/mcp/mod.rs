@@ -11,6 +11,9 @@ pub mod server;
 #[cfg(feature = "runtime")]
 pub mod agent_identity;
 
+#[cfg(feature = "runtime")]
+pub use server::McpServer;
+
 use crate::PluginManager;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -38,6 +41,54 @@ pub struct McpState {
     /// Shared question registry for resolving ask_question/answer_question bridges.
     #[cfg(feature = "runtime")]
     pub question_registry: Option<Arc<QuestionRegistry>>,
+}
+
+/// Builder for constructing McpState with optional fields.
+pub struct McpStateBuilder {
+    plugin: Arc<PluginManager>,
+    project_dir: PathBuf,
+    role: Option<String>,
+    #[cfg(feature = "runtime")]
+    question_registry: Option<Arc<QuestionRegistry>>,
+}
+
+impl McpStateBuilder {
+    /// Set the role for this MCP endpoint.
+    pub fn role(mut self, role: impl Into<String>) -> Self {
+        self.role = Some(role.into());
+        self
+    }
+
+    /// Set the question registry for answer_question bridging.
+    #[cfg(feature = "runtime")]
+    pub fn question_registry(mut self, qr: Arc<QuestionRegistry>) -> Self {
+        self.question_registry = Some(qr);
+        self
+    }
+
+    /// Build the McpState.
+    pub fn build(self) -> McpState {
+        McpState {
+            plugin: self.plugin,
+            project_dir: self.project_dir,
+            role: self.role,
+            #[cfg(feature = "runtime")]
+            question_registry: self.question_registry,
+        }
+    }
+}
+
+impl McpState {
+    /// Create a builder for McpState.
+    pub fn builder(plugin: Arc<PluginManager>, project_dir: PathBuf) -> McpStateBuilder {
+        McpStateBuilder {
+            plugin,
+            project_dir,
+            role: None,
+            #[cfg(feature = "runtime")]
+            question_registry: None,
+        }
+    }
 }
 
 // ============================================================================
