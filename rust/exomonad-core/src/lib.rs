@@ -122,6 +122,8 @@ pub use handlers::{
     PopupHandler,
 };
 #[cfg(feature = "runtime")]
+pub use handlers::groups::{core_handlers, git_handlers, orchestration_handlers};
+#[cfg(feature = "runtime")]
 pub use services::{Services, ValidatedServices};
 
 /// Prelude module for convenient imports.
@@ -178,6 +180,16 @@ impl RuntimeBuilder {
     /// Register an Arc-wrapped effect handler.
     pub fn with_effect_handler_arc(mut self, handler: Arc<dyn EffectHandler>) -> Self {
         self.registry.register(handler);
+        self
+    }
+
+    /// Register multiple effect handlers at once.
+    ///
+    /// Useful with handler group functions like `core_handlers()`, `git_handlers()`.
+    pub fn with_handlers(mut self, handlers: Vec<Box<dyn EffectHandler>>) -> Self {
+        for handler in handlers {
+            self.registry.register_boxed(handler);
+        }
         self
     }
 
@@ -294,59 +306,33 @@ pub fn register_builtin_handlers(
     Arc<services::questions::QuestionRegistry>,
     Arc<services::event_queue::EventQueue>,
 ) {
-    let mut builder = builder;
-
-    builder = builder.with_effect_handler(handlers::GitHandler::new(services.git().clone()));
-
-    builder = builder.with_effect_handler(handlers::JjHandler);
-
-    if let Some(github) = services.github() {
-        builder = builder.with_effect_handler(handlers::GitHubHandler::new(github.clone()));
-    }
-
-    builder = builder.with_effect_handler(handlers::LogHandler::new());
-
-    builder = builder.with_effect_handler(handlers::AgentHandler::new(
-        services.agent_control().clone(),
-    ));
-
-    builder = builder.with_effect_handler(handlers::FsHandler::new(services.filesystem().clone()));
-
-    builder = builder.with_effect_handler(handlers::PopupHandler::new(
-        services.zellij_session().map(|s| s.to_string()),
-    ));
-
-    builder = builder.with_effect_handler(handlers::FilePRHandler::new());
-
-    builder = builder.with_effect_handler(handlers::MergePRHandler);
-
-    builder = builder.with_effect_handler(handlers::CopilotHandler::new());
-
+    let project_dir = std::env::current_dir().unwrap_or_default();
     let remote_port = std::env::var("EXOMONAD_SERVER_PORT")
         .ok()
         .and_then(|s| s.parse().ok());
 
-    let event_queue = Arc::new(services::event_queue::EventQueue::new());
+    let mut builder = builder;
 
-    builder = builder.with_effect_handler(handlers::EventHandler::new(
+    // Core handlers (log, kv, fs)
+    builder = builder.with_handlers(handlers::groups::core_handlers(project_dir.clone()));
+
+    // Git handlers (git, jj, github, file_pr, merge_pr, copilot)
+    builder = builder.with_handlers(handlers::groups::git_handlers(
+        services.git().clone(),
+        services.github().clone(),
+    ));
+
+    // Orchestration handlers (agent, popup, events, messaging, coordination)
+    let event_queue = services.event_queue().clone();
+    let (orch_handlers, question_registry) = handlers::groups::orchestration_handlers(
+        services.agent_control().clone(),
         event_queue.clone(),
+        services.zellij_session().map(|s| s.to_string()),
+        project_dir,
         remote_port,
         Some(services.event_session_id().to_string()),
-    ));
-
-    let question_registry = Arc::new(services::questions::QuestionRegistry::new());
-
-    let project_dir = std::env::current_dir().unwrap_or_default();
-
-    builder = builder.with_effect_handler(handlers::MessagingHandler::new(
-        question_registry.clone(),
-        project_dir.clone(),
-    ));
-
-    builder = builder.with_effect_handler(handlers::KvHandler::new(project_dir));
-
-    let coordination_service = Arc::new(services::coordination::CoordinationService::new());
-    builder = builder.with_effect_handler(handlers::CoordinationHandler::new(coordination_service));
+    );
+    builder = builder.with_handlers(orch_handlers);
 
     (builder, question_registry, event_queue)
 }
