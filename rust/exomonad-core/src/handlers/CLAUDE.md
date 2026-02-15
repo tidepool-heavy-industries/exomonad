@@ -24,3 +24,14 @@ This allows worker agents running in isolated processes (or even machines) to no
 - The handler is initialized with an optional `session_id`.
 - If not provided, it defaults to `"default"`.
 - This ID is used to scope event queues, ensuring events are delivered to the correct listener.
+
+## SessionHandler (`handlers/session.rs`)
+
+Handles effects in the `session.*` namespace.
+
+### Capabilities
+
+- **`register_claude_id`**: Registers a mapping between a session's unique ID and its Claude Code session UUID.
+  - This is called by the `SessionStart` hook handler in WASM.
+  - The ID is stored in the `ClaudeSessionRegistry`.
+  - Used by `spawn_subtree` to resolve the parent's Claude session ID when spawning children with `--resume --fork-session`.
