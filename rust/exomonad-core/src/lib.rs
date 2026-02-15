@@ -116,13 +116,13 @@ pub use util::{build_prompt, find_exomonad_binary, shell_quote};
 
 // --- Handler re-exports ---
 #[cfg(feature = "runtime")]
+pub use handlers::groups::{core_handlers, git_handlers, orchestration_handlers};
+#[cfg(feature = "runtime")]
 pub use handlers::{
     AgentHandler, CoordinationHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler,
     GitHandler, GitHubHandler, JjHandler, KvHandler, LogHandler, MergePRHandler, MessagingHandler,
     PopupHandler,
 };
-#[cfg(feature = "runtime")]
-pub use handlers::groups::{core_handlers, git_handlers, orchestration_handlers};
 #[cfg(feature = "runtime")]
 pub use services::{Services, ValidatedServices};
 
