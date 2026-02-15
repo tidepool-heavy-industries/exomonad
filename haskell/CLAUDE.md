@@ -38,7 +38,7 @@ The xmonad pattern for LLM agents: users define agent roles in Haskell, compiled
 ### Directory Structure
 
 ```
-.exomonad/roles/<role>/
+.exo/roles/<role>/
 ├── Role.hs          # User-authored: tool composition + hook config (TRACKED)
 ├── Main.hs          # Generated: FFI exports wiring Role.config to WASM entry points (GITIGNORED)
 ├── <role>.cabal     # Generated: cabal package with WASM linker flags (GITIGNORED)
@@ -46,14 +46,14 @@ The xmonad pattern for LLM agents: users define agent roles in Haskell, compiled
 └── dist/            # Build output: compiled .wasm artifact (GITIGNORED)
 ```
 
-Shared code across roles lives in `.exomonad/lib/` (e.g., `StopHook.hs`).
+Shared code across roles lives in `.exo/lib/` (e.g., `StopHook.hs`).
 
 ### How It Works
 
 1. User writes `Role.hs` — a `RoleConfig` record selecting tools and hooks
-2. `cabal.project.wasm` lists `.exomonad/roles/tl` and `.exomonad/roles/dev` as packages
+2. `cabal.project.wasm` lists `.exo/roles/tl` and `.exo/roles/dev` as packages
 3. `just wasm <role>` (or `exomonad recompile --role <role>`) builds via nix + wasm32-wasi-cabal
-4. Build output lands in `dist/`, then gets copied to `.exomonad/wasm/wasm-guest-<role>.wasm`
+4. Build output lands in `dist/`, then gets copied to `.exo/wasm/wasm-guest-<role>.wasm`
 5. WASM loaded from file by Rust binary at runtime (both hooks and serve mode)
 6. In serve mode, hot reload checks mtime per tool call
 
@@ -62,7 +62,7 @@ Shared code across roles lives in `.exomonad/lib/` (e.g., `StopHook.hs`).
 The unified WASM module is the primary build target, containing all roles:
 
 ```
-.exomonad/roles/unified/
+.exo/roles/unified/
 ├── AllRoles.hs     # Role registry: Map Text SomeRoleConfig
 ├── TLRole.hs       # TL role config (re-exported under unique module name)
 ├── DevRole.hs      # Dev role config (uses httpDevHooks with permission cascade)
@@ -82,7 +82,7 @@ The unified WASM is additive — individual tl/dev packages still build independ
 Each role is a `RoleConfig` selecting from pre-built tool records:
 
 ```haskell
--- .exomonad/roles/tl/Role.hs
+-- .exo/roles/tl/Role.hs
 data Tools mode = Tools
   { spawn :: SpawnTools mode     -- spawn_subtree, spawn_worker
   , popups :: PopupTools mode   -- popup UI

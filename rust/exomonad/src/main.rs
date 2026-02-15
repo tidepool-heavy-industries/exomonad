@@ -61,7 +61,7 @@ enum Commands {
     /// Initialize Zellij session for this project.
     ///
     /// Creates a new session with TL layout if none exists, or attaches to existing.
-    /// Session name is read from .exomonad/config.toml zellij_session field.
+    /// Session name is read from .exo/config.toml zellij_session field.
     Init {
         /// Optionally override session name (default: from config)
         #[arg(long)]
@@ -514,16 +514,16 @@ fn run_init(session_override: Option<String>, recreate: bool, port: u16) -> Resu
         eprintln!("Warning: XDG_RUNTIME_DIR not set. Zellij may fail to find sessions.");
     }
 
-    // Bootstrap: create .exomonad/config.toml if missing
+    // Bootstrap: create .exo/config.toml if missing
     let cwd = std::env::current_dir()?;
-    let config_path = cwd.join(".exomonad/config.toml");
+    let config_path = cwd.join(".exo/config.toml");
     if !config_path.exists() {
         let dirname = cwd
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("project");
-        eprintln!("Bootstrapping .exomonad/config.toml");
-        std::fs::create_dir_all(cwd.join(".exomonad"))?;
+        eprintln!("Bootstrapping .exo/config.toml");
+        std::fs::create_dir_all(cwd.join(".exo"))?;
         std::fs::write(
             &config_path,
             format!("default_role = \"tl\"\nzellij_session = \"{}\"\n", dirname),
@@ -593,7 +593,7 @@ fn run_init(session_override: Option<String>, recreate: bool, port: u16) -> Resu
     Err(err).context("Failed to exec zellij with layout")
 }
 
-/// Ensure .gitignore has entries for .exomonad/ (track config, ignore the rest).
+/// Ensure .gitignore has entries for .exo/ (track config, ignore the rest).
 fn ensure_gitignore(project_dir: &std::path::Path) -> Result<()> {
     let gitignore_path = project_dir.join(".gitignore");
     let content = if gitignore_path.exists() {
@@ -602,10 +602,8 @@ fn ensure_gitignore(project_dir: &std::path::Path) -> Result<()> {
         String::new()
     };
 
-    let has_ignore = content.lines().any(|l| l.trim() == ".exomonad/*");
-    let has_negate = content
-        .lines()
-        .any(|l| l.trim() == "!.exomonad/config.toml");
+    let has_ignore = content.lines().any(|l| l.trim() == ".exo/*");
+    let has_negate = content.lines().any(|l| l.trim() == "!.exo/config.toml");
     if has_ignore && has_negate {
         return Ok(());
     }
@@ -619,10 +617,12 @@ fn ensure_gitignore(project_dir: &std::path::Path) -> Result<()> {
         writeln!(file)?;
     }
     writeln!(file, "# ExoMonad - track config, ignore runtime artifacts")?;
+    writeln!(file, ".exo/*")?;
+    writeln!(file, "!.exo/config.toml")?;
     writeln!(file, ".exomonad/*")?;
     writeln!(file, "!.exomonad/config.toml")?;
 
-    eprintln!("Updated .gitignore with .exomonad/ entries");
+    eprintln!("Updated .gitignore with .exo/ and .exomonad/ entries");
     Ok(())
 }
 
@@ -683,7 +683,7 @@ fn generate_tl_layout(port: u16, shell_command: Option<&str>) -> Result<std::pat
 /// Initialize logging based on the command mode.
 ///
 /// Two independent layers, both always active when possible:
-/// - **File layer**: Rolling daily logs in .exomonad/logs/
+/// - **File layer**: Rolling daily logs in .exo/logs/
 /// - **Stderr layer**: Always present (HTTP serve mode, stderr is safe)
 ///
 /// JSON formatting controlled by EXOMONAD_LOG_FORMAT=json.
@@ -692,10 +692,10 @@ fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
         .map(|v| v.eq_ignore_ascii_case("json"))
         .unwrap_or(false);
 
-    let log_dir = PathBuf::from(".exomonad/logs");
+    let log_dir = PathBuf::from(".exo/logs");
     let file_ok = std::fs::create_dir_all(&log_dir).is_ok();
     if !file_ok {
-        eprintln!("Failed to create .exomonad/logs/. Falling back to stderr-only logging.");
+        eprintln!("Failed to create .exo/logs/. Falling back to stderr-only logging.");
     }
 
     let env_filter = tracing_subscriber::EnvFilter::from_default_env()
@@ -802,7 +802,7 @@ async fn main() -> Result<()> {
                 );
             }
 
-            let server_pid_path = project_dir.join(".exomonad/server.pid");
+            let server_pid_path = project_dir.join(".exo/server.pid");
 
             let remote_port = std::env::var("EXOMONAD_SERVER_PORT")
                 .ok()
@@ -1151,7 +1151,7 @@ async fn main() -> Result<()> {
         } => {
             // Socket path env var or default
             let socket_path = std::env::var("EXOMONAD_CONTROL_SOCKET")
-                .unwrap_or_else(|_| ".exomonad/sockets/control.sock".to_string());
+                .unwrap_or_else(|_| ".exo/sockets/control.sock".to_string());
 
             debug!(socket = %socket_path, "Connecting to control socket");
 

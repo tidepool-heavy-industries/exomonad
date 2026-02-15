@@ -75,7 +75,7 @@ message SpawnRequest {
   AgentType agent_type = 4;
   // Agent role (default: dev).
   exomonad.common.Role role = 5;
-  // Base directory for worktrees (default: .exomonad/worktrees).
+  // Base directory for worktrees (default: .exo/worktrees).
   string worktree_dir = 6;
   // Sub-repository path relative to project_dir (e.g., "egregore/").
   // When set, git worktree operations target this directory instead of project_dir.

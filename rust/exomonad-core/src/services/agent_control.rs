@@ -154,7 +154,7 @@ pub struct SpawnSubtreeOptions {
 /// Result of spawning an agent.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SpawnResult {
-    /// Path to the agent directory (.exomonad/agents/{agent_id}/)
+    /// Path to the agent directory (.exo/agents/{agent_id}/)
     pub agent_dir: String,
     /// Zellij tab name
     pub tab_name: String,
@@ -226,7 +226,7 @@ pub struct AgentInfo {
     /// Workspace topology.
     #[serde(default)]
     pub topology: Topology,
-    /// Path to agent directory (.exomonad/agents/{agent_id}/)
+    /// Path to agent directory (.exo/agents/{agent_id}/)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_dir: Option<String>,
     /// Slug from agent name (e.g., "fix-bug-in-parser")
@@ -341,7 +341,7 @@ async fn get_worktree_branch(worktree_path: &Path) -> Option<String> {
 pub struct AgentControlService {
     /// Project root directory
     project_dir: PathBuf,
-    /// Base directory for worktrees (default: .exomonad/worktrees)
+    /// Base directory for worktrees (default: .exo/worktrees)
     worktree_base: PathBuf,
     /// GitHub service for fetching issues
     github: Option<GitHubService>,
@@ -356,7 +356,7 @@ pub struct AgentControlService {
 impl AgentControlService {
     /// Create a new agent control service.
     pub fn new(project_dir: PathBuf, github: Option<GitHubService>) -> Self {
-        let worktree_base = project_dir.join(".exomonad/worktrees");
+        let worktree_base = project_dir.join(".exo/worktrees");
         Self {
             project_dir,
             worktree_base,
@@ -391,7 +391,7 @@ impl AgentControlService {
         self
     }
 
-    /// Create from environment (loads secrets from ~/.exomonad/secrets).
+    /// Create from environment (loads secrets from ~/.exo/secrets).
     pub fn from_env() -> Result<Self> {
         let project_dir = std::env::current_dir().context("Failed to get current directory")?;
 
@@ -403,7 +403,7 @@ impl AgentControlService {
 
         Ok(Self {
             project_dir: project_dir.clone(),
-            worktree_base: project_dir.join(".exomonad/worktrees"),
+            worktree_base: project_dir.join(".exo/worktrees"),
             github,
             zellij_session: None,
             event_session_id: None,
@@ -442,7 +442,7 @@ impl AgentControlService {
     ///
     /// This is the high-level semantic operation that:
     /// 1. Fetches issue from GitHub
-    /// 2. Creates agent directory (.exomonad/agents/{agent_id}/)
+    /// 2. Creates agent directory (.exo/agents/{agent_id}/)
     /// 3. Writes .mcp.json pointing to the Unix socket server
     /// 4. Opens Zellij tab with agent command (cwd = project_dir)
     #[tracing::instrument(skip(self, options), fields(issue_id = %issue_number.as_u64()))]
@@ -890,7 +890,7 @@ impl AgentControlService {
 
             // Write Gemini settings to worker config dir in project root
             let agent_config_dir = self.project_dir
-                .join(".exomonad")
+                .join(".exo")
                 .join("agents")
                 .join(&internal_name);
             fs::create_dir_all(&agent_config_dir).await?;
@@ -1256,7 +1256,7 @@ impl AgentControlService {
     /// Clean up an agent by identifier (internal_name or issue_id).
     ///
     /// Kills the Zellij tab, unregisters from Teams config.json,
-    /// and removes per-agent config directory (`.exomonad/agents/{name}/`).
+    /// and removes per-agent config directory (`.exo/agents/{name}/`).
     #[tracing::instrument(skip(self))]
     pub async fn cleanup_agent(&self, identifier: &str, _force: bool) -> Result<()> {
         // Try to find agent in list (for metadata and tab matching).
@@ -1314,10 +1314,10 @@ impl AgentControlService {
             }
         }
 
-        // Remove per-agent config directory (.exomonad/agents/{name}/)
+        // Remove per-agent config directory (.exo/agents/{name}/)
         let agent_config_dir = self
             .project_dir
-            .join(".exomonad")
+            .join(".exo")
             .join("agents")
             .join(&internal_name);
         if agent_config_dir.exists() {
@@ -1476,7 +1476,7 @@ impl AgentControlService {
     ///
     /// Discovery process:
     /// 1. Scan {worktree_base}/ for subtree agents (isolated worktrees)
-    /// 2. Scan {project_dir}/.exomonad/agents/ for worker agents (shared worktree)
+    /// 2. Scan {project_dir}/.exo/agents/ for worker agents (shared worktree)
     /// 3. Verify liveness by checking Zellij tabs/panes
     #[tracing::instrument(skip(self))]
     pub async fn list_agents(&self) -> Result<Vec<AgentInfo>> {
@@ -1524,8 +1524,8 @@ impl AgentControlService {
                             pr: None,
                         });
 
-                        // 2. Scan subtree's .exomonad/agents for workers
-                        let subtree_agents_dir = path.join(".exomonad/agents");
+                        // 2. Scan subtree's .exo/agents for workers
+                        let subtree_agents_dir = path.join(".exo/agents");
                         if subtree_agents_dir.exists() {
                             self.scan_workers(&subtree_agents_dir, &tabs, &mut agents)
                                 .await?;
@@ -1535,8 +1535,8 @@ impl AgentControlService {
             }
         }
 
-        // 3. Scan root .exomonad/agents for workers
-        let root_agents_dir = self.project_dir.join(".exomonad/agents");
+        // 3. Scan root .exo/agents for workers
+        let root_agents_dir = self.project_dir.join(".exo/agents");
         if root_agents_dir.exists() {
             self.scan_workers(&root_agents_dir, &tabs, &mut agents)
                 .await?;
@@ -1595,7 +1595,7 @@ impl AgentControlService {
 
     /// Read server.pid and extract the HTTP port.
     fn read_server_port(project_dir: &Path) -> Option<u16> {
-        let pid_path = project_dir.join(".exomonad/server.pid");
+        let pid_path = project_dir.join(".exo/server.pid");
         let content = std::fs::read_to_string(&pid_path).ok()?;
         let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
 

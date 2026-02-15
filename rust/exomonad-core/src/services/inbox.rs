@@ -33,10 +33,10 @@ fn default_color() -> String {
     "blue".to_string()
 }
 
-/// Resolve `{project_dir}/.exomonad/messages/{agent}.json`.
+/// Resolve `{project_dir}/.exo/messages/{agent}.json`.
 pub fn inbox_path(project_dir: &Path, agent_name: &str) -> PathBuf {
     project_dir
-        .join(".exomonad")
+        .join(".exo")
         .join("messages")
         .join(format!("{}.json", agent_name))
 }
@@ -264,10 +264,7 @@ mod tests {
     #[test]
     fn test_inbox_path() {
         let path = inbox_path(Path::new("/project"), "myagent");
-        assert_eq!(
-            path,
-            PathBuf::from("/project/.exomonad/messages/myagent.json")
-        );
+        assert_eq!(path, PathBuf::from("/project/.exo/messages/myagent.json"));
     }
 
     #[test]

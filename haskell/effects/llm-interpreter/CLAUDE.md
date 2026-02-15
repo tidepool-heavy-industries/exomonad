@@ -43,7 +43,7 @@ import ExoMonad.LLM.Interpreter (runLLMComplete, mkLLMEnv, LLMConfig(..))
 import ExoMonad.Effects.LLMProvider (LLMComplete, complete, SAnthropic)
 
 config :: LLMConfig
-config = LLMSocketConfig ".exomonad/sockets/service.sock"
+config = LLMSocketConfig ".exo/sockets/service.sock"
 
 main :: IO ()
 main = do

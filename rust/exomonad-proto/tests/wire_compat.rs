@@ -221,7 +221,7 @@ mod binary {
             repo: "tidepool".into(),
             agent_type: 1, // CLAUDE
             role: 1,       // DEV
-            worktree_dir: ".exomonad/worktrees".into(),
+            worktree_dir: ".exo/worktrees".into(),
             subrepo: String::new(),
             topology: 0,
             base_branch: String::new(),
@@ -236,7 +236,7 @@ mod binary {
         assert_eq!(decoded.repo, "tidepool");
         assert_eq!(decoded.agent_type, 1);
         assert_eq!(decoded.role, 1);
-        assert_eq!(decoded.worktree_dir, ".exomonad/worktrees");
+        assert_eq!(decoded.worktree_dir, ".exo/worktrees");
     }
 
     #[test]
@@ -877,7 +877,7 @@ mod binary {
 
         // 10. Large error string in SpawnBatchResponse (reproduces production decode failure)
         // Error string is ~377 bytes, causing 2-byte varint in both inner and outer messages
-        let long_error = "Issue 539: git worktree add failed: Preparing worktree (checking out 'gh-539/improve-stop-hook-error-messages-with-specific-com-gemini')\nfatal: '/Users/inannamalick/hangars/tidepool/repo/.exomonad/worktrees/gh-539-improve-stop-hook-error-messages-with-specific-com-gemini' is a missing but already registered worktree;\nuse 'git worktree prune' to remove stale worktree entries\n";
+        let long_error = "Issue 539: git worktree add failed: Preparing worktree (checking out 'gh-539/improve-stop-hook-error-messages-with-specific-com-gemini')\nfatal: '/Users/inannamalick/hangars/tidepool/repo/.exo/worktrees/gh-539-improve-stop-hook-error-messages-with-specific-com-gemini' is a missing but already registered worktree;\nuse 'git worktree prune' to remove stale worktree entries\n";
         let large_batch = SpawnBatchResponse {
             agents: vec![],
             errors: vec![long_error.into()],
@@ -907,7 +907,7 @@ mod binary {
     fn spawn_batch_large_error_roundtrip() {
         use exomonad_proto::effects::agent::SpawnBatchResponse;
 
-        let long_error = "Issue 539: git worktree add failed: Preparing worktree (checking out 'gh-539/improve-stop-hook-error-messages-with-specific-com-gemini')\nfatal: '/Users/inannamalick/hangars/tidepool/repo/.exomonad/worktrees/gh-539-improve-stop-hook-error-messages-with-specific-com-gemini' is a missing but already registered worktree;\nuse 'git worktree prune' to remove stale worktree entries\n";
+        let long_error = "Issue 539: git worktree add failed: Preparing worktree (checking out 'gh-539/improve-stop-hook-error-messages-with-specific-com-gemini')\nfatal: '/Users/inannamalick/hangars/tidepool/repo/.exo/worktrees/gh-539-improve-stop-hook-error-messages-with-specific-com-gemini' is a missing but already registered worktree;\nuse 'git worktree prune' to remove stale worktree entries\n";
 
         let resp = SpawnBatchResponse {
             agents: vec![],
@@ -1361,7 +1361,7 @@ mod json_full {
         use exomonad_proto::agent::WorktreeInfo;
 
         let original = WorktreeInfo {
-            path: "/home/dev/project/.exomonad/worktrees/feature".into(),
+            path: "/home/dev/project/.exo/worktrees/feature".into(),
             branch: "main.feature".into(),
             head_commit: "abc123def456".into(),
             is_dirty: true,

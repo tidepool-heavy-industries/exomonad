@@ -49,21 +49,21 @@ install-hooks:
     @echo "Installed: pre-push"
     @echo "Done. Use 'git push --no-verify' to bypass in emergencies."
 
-# Build WASM role and install to .exomonad/wasm/
+# Build WASM role and install to .exo/wasm/
 wasm role="tl":
     @echo ">>> Building wasm-guest-{{role}}..."
     nix develop .#wasm --command bash -c 'export PATH=$PWD/.gemini/tmp/bin:$PATH; wasm32-wasi-cabal build --project-file=cabal.project.wasm wasm-guest-{{role}}'
-    @echo ">>> Installing to .exomonad/wasm/..."
-    mkdir -p .exomonad/wasm
-    rm -f .exomonad/wasm/wasm-guest-{{role}}.wasm
-    cp $(find dist-newstyle -name "wasm-guest-{{role}}.wasm" -type f -print -quit) .exomonad/wasm/wasm-guest-{{role}}.wasm
-    @echo ">>> Done: .exomonad/wasm/wasm-guest-{{role}}.wasm"
+    @echo ">>> Installing to .exo/wasm/..."
+    mkdir -p .exo/wasm
+    rm -f .exo/wasm/wasm-guest-{{role}}.wasm
+    cp $(find dist-newstyle -name "wasm-guest-{{role}}.wasm" -type f -print -quit) .exo/wasm/wasm-guest-{{role}}.wasm
+    @echo ">>> Done: .exo/wasm/wasm-guest-{{role}}.wasm"
 
 # Build unified WASM plugin (contains all roles)
 wasm-all:
     @just wasm unified
-    @echo ">>> Installed to .exomonad/wasm/:"
-    @ls -lh .exomonad/wasm/wasm-guest-*.wasm
+    @echo ">>> Installed to .exo/wasm/:"
+    @ls -lh .exo/wasm/wasm-guest-*.wasm
 
 # One-time WASM build environment setup (populates cabal package index)
 wasm-setup:
@@ -99,10 +99,10 @@ _install profile:
     echo ">>> [4/4] Installing binaries..."
     mkdir -p ~/.cargo/bin
     mkdir -p ~/.config/zellij/plugins
-    mkdir -p ~/.exomonad/wasm
+    mkdir -p ~/.exo/wasm
     cp "target/${TARGET_DIR}/exomonad" ~/.cargo/bin/
     cp "rust/exomonad-plugin/target/wasm32-wasip1/${TARGET_DIR}/exomonad-plugin.wasm" ~/.config/zellij/plugins/
-    cp .exomonad/wasm/wasm-guest-unified.wasm ~/.exomonad/wasm/
+    cp .exo/wasm/wasm-guest-unified.wasm ~/.exo/wasm/
 
     # macOS: remove quarantine and ad-hoc sign to avoid sandbox/Gatekeeper issues
     if [ "$(uname)" = "Darwin" ]; then
@@ -115,7 +115,7 @@ _install profile:
     echo "Installed:"
     ls -lh ~/.cargo/bin/exomonad
     ls -lh ~/.config/zellij/plugins/exomonad-plugin.wasm
-    ls -lh .exomonad/wasm/wasm-guest-unified.wasm
+    ls -lh .exo/wasm/wasm-guest-unified.wasm
 
 # Install everything: Rust binaries + WASM plugins (release build)
 install-all: (_install "release")

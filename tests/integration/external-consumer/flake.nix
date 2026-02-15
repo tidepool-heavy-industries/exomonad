@@ -22,8 +22,8 @@
           # Build WASM for the "test" role
           test = mkWasmRole {
             name = "test";
-            src = ./.exomonad/roles/test;
-            libSrc = ./.exomonad/lib;
+            src = ./.exo/roles/test;
+            libSrc = ./.exo/lib;
           };
 
           default = self.packages.${system}.test;

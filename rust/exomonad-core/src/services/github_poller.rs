@@ -156,7 +156,7 @@ impl GitHubPoller {
     }
 
     async fn scan_worktrees(&self) -> Result<Vec<String>> {
-        let worktrees_dir = self.project_dir.join(".exomonad/worktrees");
+        let worktrees_dir = self.project_dir.join(".exo/worktrees");
         if !worktrees_dir.exists() {
             return Ok(vec![]);
         }

@@ -2,7 +2,7 @@ syntax = "proto3";
 package exomonad.effects.kv;
 
 // Key-value storage effects.
-// Provides persistent per-project KV store backed by .exomonad/kv/ files.
+// Provides persistent per-project KV store backed by .exo/kv/ files.
 
 // ============================================================================
 // Get - Read a value by key

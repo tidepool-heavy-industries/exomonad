@@ -704,7 +704,7 @@ testDecodeRustLargeSpawnBatchError = do
   -- Construct the 383-byte message from known Rust output
   let header = pack [0x0a, 0xfc, 0x02] -- field 1, LEN, varint 380
   let innerHeader = pack [0x12, 0xf9, 0x02] -- field 2, LEN, varint 377
-  let errorStr = "Issue 539: git worktree add failed: Preparing worktree (checking out 'gh-539/improve-stop-hook-error-messages-with-specific-com-gemini')\nfatal: '/Users/inannamalick/hangars/tidepool/repo/.exomonad/worktrees/gh-539-improve-stop-hook-error-messages-with-specific-com-gemini' is a missing but already registered worktree;\nuse 'git worktree prune' to remove stale worktree entries\n"
+  let errorStr = "Issue 539: git worktree add failed: Preparing worktree (checking out 'gh-539/improve-stop-hook-error-messages-with-specific-com-gemini')\nfatal: '/Users/inannamalick/hangars/tidepool/repo/.exo/worktrees/gh-539-improve-stop-hook-error-messages-with-specific-com-gemini' is a missing but already registered worktree;\nuse 'git worktree prune' to remove stale worktree entries\n"
   let rustBytes = header <> innerHeader <> errorStr
   case fromByteString rustBytes of
     Left err ->

@@ -53,7 +53,7 @@
 -- import ExoMonad.LLM.Interpreter (runLLMComplete, mkLLMEnv)
 --
 -- main = do
---   env <- mkLLMEnv (LLMSocketConfig ".exomonad/sockets/service.sock")
+--   env <- mkLLMEnv (LLMSocketConfig ".exo/sockets/service.sock")
 --   runM
 --     $ runLLMComplete env
 --     $ runLLMCall

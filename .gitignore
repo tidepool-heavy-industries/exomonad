@@ -26,25 +26,40 @@ cabal.project.wasm.dev
 
 # Local exomonad state (symlinks, sockets, logs, per-crate config)
 .exomonad/wasm
+.exo/wasm
 .exomonad/agents/
+.exo/agents/
 .exomonad/kv/
+.exo/kv/
 .exomonad/worktrees/
+.exo/worktrees/
 .exomonad/sockets/
+.exo/sockets/
 .exomonad/logs/
+.exo/logs/
 .exomonad/wasm-cache
+.exo/wasm-cache
 .exomonad/wasm-cache.toml
+.exo/wasm-cache.toml
 .exomonad/messages/
+.exo/messages/
 .exomonad/sidecar.pid
+.exo/sidecar.pid
 .exomonad/server.pid
+.exo/server.pid
 
 # Role build artifacts (gen/ and dist/ are build intermediates)
 .exomonad/roles/*/gen/
+.exo/roles/*/gen/
 .exomonad/roles/*/dist/
+.exo/roles/*/dist/
 # Per-worktree MCP config (auto-generated at spawn time)
 .mcp.json
 
 rust/.exomonad/
+rust/.exo/
 rust/exomonad/.exomonad/
+rust/exomonad/.exo/
 
 # Temporary task files for worktree dispatch
 *.md.tmp
@@ -61,6 +76,8 @@ interagent/
 # Integration test build artifacts
 tests/integration/external-consumer/result
 tests/integration/external-consumer/.exomonad/wasm/
+tests/integration/external-consumer/.exo/wasm/
 
 # Jujutsu state
 .jj/
+.gemini/settings.json

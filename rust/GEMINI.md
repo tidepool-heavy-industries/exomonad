@@ -31,8 +31,8 @@ The system follows a sidecar/agent architecture:
 4.  **`tui-sidebar`** runs in a parallel pane, receiving UI updates from the Control Server to keep the human in the loop.
 
 ### Socket Paths (Canonical)
-- Control Socket: `.exomonad/sockets/control.sock` (or `EXOMONAD_CONTROL_SOCKET` env)
-- TUI Socket: `.exomonad/sockets/tui.sock` (or `EXOMONAD_TUI_SOCKET` env)
+- Control Socket: `.exo/sockets/control.sock` (or `EXOMONAD_CONTROL_SOCKET` env)
+- TUI Socket: `.exo/sockets/tui.sock` (or `EXOMONAD_TUI_SOCKET` env)
 
 ## Building and Running
 
@@ -64,7 +64,7 @@ exomonad hook pre-tool-use
 exomonad mcp --tools pm_propose,pm_status
 
 # Start the TUI sidebar (requires running control server)
-tui-sidebar --socket .exomonad/sockets/tui.sock
+tui-sidebar --socket .exo/sockets/tui.sock
 ```
 
 ## Development Conventions

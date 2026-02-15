@@ -8,7 +8,7 @@ This directory simulates an external repo consuming exomonad as infrastructure.
 .
 ├── flake.nix                    # Consumes exomonad.lib.mkWasmRole
 ├── .mcp.json                    # MCP server config (managed by `claude mcp add`)
-├── .exomonad/
+├── .exo/
 │   ├── config.toml              # Role config (default_role = "test")
 │   ├── lib/
 │   │   └── Placeholder.hs       # Shared types (empty for this test)
@@ -34,8 +34,8 @@ nix build ./tests/integration/external-consumer#test \
   --override-input exomonad .
 
 # 3. Install WASM and test
-mkdir -p tests/integration/external-consumer/.exomonad/wasm
-cp result/wasm-guest-test.wasm tests/integration/external-consumer/.exomonad/wasm/
+mkdir -p tests/integration/external-consumer/.exo/wasm
+cp result/wasm-guest-test.wasm tests/integration/external-consumer/.exo/wasm/
 cd tests/integration/external-consumer
 echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | exomonad mcp-stdio
 ```
@@ -51,8 +51,8 @@ To test with a real Claude agent session:
 nix build ./tests/integration/external-consumer#test --override-input exomonad .
 
 # 2. Install WASM to the test directory
-mkdir -p tests/integration/external-consumer/.exomonad/wasm
-cp result/wasm-guest-test.wasm tests/integration/external-consumer/.exomonad/wasm/
+mkdir -p tests/integration/external-consumer/.exo/wasm
+cp result/wasm-guest-test.wasm tests/integration/external-consumer/.exo/wasm/
 
 # 3. Launch Claude agent
 cd tests/integration/external-consumer
@@ -87,18 +87,18 @@ cargo install --git https://github.com/anthropics/exomonad exomonad
 **2. WASM build (via nix flake):**
 ```nix
 # flake.nix
-inputs.exomonad.url = "github:anthropics/exomonad";
+inputs.exo.url = "github:anthropics/exomonad";
 
-outputs = { self, exomonad, ... }: {
-  packages.myRole = exomonad.lib.${system}.mkWasmRole {
+outputs = { self, exo, ... }: {
+  packages.myRole = exo.lib.${system}.mkWasmRole {
     name = "myRole";
-    src = ./.exomonad/roles/myRole;
-    libSrc = ./.exomonad/lib;
+    src = ./.exo/roles/myRole;
+    libSrc = ./.exo/lib;
   };
 };
 ```
 
-Then define your roles in `.exomonad/roles/<role>/Role.hs`.
+Then define your roles in `.exo/roles/<role>/Role.hs`.
 
 ## Role.hs Format
 

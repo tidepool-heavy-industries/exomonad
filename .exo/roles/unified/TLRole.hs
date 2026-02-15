@@ -7,7 +7,7 @@
 --
 -- This duplicates the TL Role.hs content because Cabal does not support
 -- importing the same module name from two different source directories.
--- The canonical definition remains in @.exomonad/roles/tl/Role.hs@.
+-- The canonical definition remains in @.exo/roles/tl/Role.hs@.
 module TLRole (config, Tools) where
 
 import ExoMonad

@@ -255,7 +255,7 @@ liftIO $ putStrLn $ "  args=" <> show args
 
 | Variable | Purpose |
 |----------|---------|
-| `EXOMONAD_PROJECT_DIR` | Project root (where .exomonad/ lives) |
+| `EXOMONAD_PROJECT_DIR` | Project root (where .exo/ lives) |
 | `GEMMA_ENDPOINT` | Ollama endpoint (required for Tier 2 tools) |
 
 ## File Locations

@@ -81,7 +81,7 @@ data GitHubConfig
 defaultGitHubConfig :: GitHubConfig
 defaultGitHubConfig =
   GitHubSocketConfig
-    { ghcSocketPath = ".exomonad/sockets/control.sock"
+    { ghcSocketPath = ".exo/sockets/control.sock"
     }
 
 -- ════════════════════════════════════════════════════════════════════════════

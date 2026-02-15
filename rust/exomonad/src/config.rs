@@ -1,4 +1,4 @@
-//! Configuration discovery from .exomonad/config.toml and config.local.toml
+//! Configuration discovery from .exo/config.toml and config.local.toml
 
 use anyhow::{Context, Result};
 use exomonad_core::Role;
@@ -24,13 +24,13 @@ pub struct RawConfig {
     /// TCP port for the HTTP MCP server.
     pub port: Option<u16>,
 
-    /// Base directory for worktrees (default: .exomonad/worktrees).
+    /// Base directory for worktrees (default: .exo/worktrees).
     pub worktree_base: Option<PathBuf>,
 
     /// Shell command to wrap environment (e.g. "nix develop"). TL tab runs this as shell.
     pub shell_command: Option<String>,
 
-    /// WASM directory override (default: ~/.exomonad/wasm/).
+    /// WASM directory override (default: ~/.exo/wasm/).
     pub wasm_dir: Option<PathBuf>,
 }
 
@@ -54,7 +54,7 @@ pub struct Config {
 impl Config {
     /// Discover configuration by merging local and global project config.
     ///
-    /// Searches upward from CWD for `.exomonad/config.toml`.
+    /// Searches upward from CWD for `.exo/config.toml`.
     ///
     /// Resolution Order:
     /// 1. config.local.toml (role)
@@ -63,8 +63,8 @@ impl Config {
     pub fn discover() -> Result<Self> {
         let project_root = find_project_root()?;
 
-        let local_path = project_root.join(".exomonad/config.local.toml");
-        let global_path = project_root.join(".exomonad/config.toml");
+        let local_path = project_root.join(".exo/config.local.toml");
+        let global_path = project_root.join(".exo/config.toml");
 
         let local_raw = if local_path.exists() {
             debug!(path = %local_path.display(), "Loaded local config");
@@ -115,7 +115,7 @@ impl Config {
         // Resolve port: local > global > default (7432)
         let port = local_raw.port.or(global_raw.port).unwrap_or(7432);
 
-        // Resolve worktree_base: global > local > default (.exomonad/worktrees)
+        // Resolve worktree_base: global > local > default (.exo/worktrees)
         let worktree_base = global_raw
             .worktree_base
             .or(local_raw.worktree_base)
@@ -126,12 +126,12 @@ impl Config {
                     project_root.join(p)
                 }
             })
-            .unwrap_or_else(|| project_root.join(".exomonad/worktrees"));
+            .unwrap_or_else(|| project_root.join(".exo/worktrees"));
 
         // Resolve shell_command: local > global
         let shell_command = local_raw.shell_command.or(global_raw.shell_command);
 
-        // Resolve wasm_dir: config > ~/.exomonad/wasm/
+        // Resolve wasm_dir: config > ~/.exo/wasm/
         let wasm_dir = global_raw
             .wasm_dir
             .or(local_raw.wasm_dir)
@@ -174,38 +174,45 @@ impl Default for Config {
             role: Role::TL,
             zellij_session: "default".to_string(),
             port: 7432,
-            worktree_base: PathBuf::from(".exomonad/worktrees"),
+            worktree_base: PathBuf::from(".exo/worktrees"),
             shell_command: None,
             wasm_dir: global_wasm_dir(),
         }
     }
 }
 
-/// Walk up from CWD to find the project root containing `.exomonad/config.toml`.
+/// Walk up from CWD to find the project root containing `.exo/config.toml`.
 /// Falls back to CWD if not found (bootstrap case).
 fn find_project_root() -> Result<PathBuf> {
     let start = std::env::current_dir()?;
     let mut current = start.as_path();
     loop {
+        if current.join(".exo/config.toml").exists() {
+            return Ok(current.to_path_buf());
+        }
         if current.join(".exomonad/config.toml").exists() {
+            debug!(
+                "Found legacy .exomonad/config.toml at {}",
+                current.display()
+            );
             return Ok(current.to_path_buf());
         }
         match current.parent() {
             Some(parent) => current = parent,
             None => {
-                debug!("No .exomonad/config.toml found, using CWD as project root");
+                debug!("No .exo/config.toml found, using CWD as project root");
                 return Ok(start);
             }
         }
     }
 }
 
-/// Global WASM directory: ~/.exomonad/wasm/
+/// Global WASM directory: ~/.exo/wasm/
 pub fn global_wasm_dir() -> PathBuf {
     std::env::var("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("."))
-        .join(".exomonad/wasm")
+        .join(".exo/wasm")
 }
 
 /// Sanitize session name per Zellij constraints.

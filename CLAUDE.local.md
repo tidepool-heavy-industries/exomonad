@@ -31,4 +31,4 @@ Audit complete (2026-02-11). All GEMINI_NOTES issues resolved:
 ## Open Design Questions
 
 ### Per-agent identity flow
-Each Gemini agent gets `.exomonad/agents/{name}/settings.json` pointing to `http://localhost:{port}/agents/{name}/mcp`. Server extracts identity from URL path param. Simple axum route, not middleware.
+Each Gemini agent gets `.exo/agents/{name}/settings.json` pointing to `http://localhost:{port}/agents/{name}/mcp`. Server extracts identity from URL path param. Simple axum route, not middleware.
