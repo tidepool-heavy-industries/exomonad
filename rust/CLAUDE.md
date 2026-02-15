@@ -177,7 +177,7 @@ All tools are defined in Haskell WASM and executed via host functions.
 | `github_list_issues` | List GitHub issues |
 | `github_get_issue` | Get single issue details |
 | `github_list_prs` | List GitHub pull requests |
-| `spawn_subtree` | Fork a worktree node off current branch (Claude-only, creates `.exomonad/worktrees/{slug}/`) |
+| `spawn_subtree` | Fork a worktree node off current branch (Claude-only, creates `.exomonad/worktrees/{slug}/`). Auto-resolves session ID for --fork-session. |
 | `spawn_leaf_subtree` | Spawn Gemini agent in own worktree + branch + tab (isolated, files PR) |
 | `spawn_workers` | Spawn ephemeral Gemini agents as panes in parent dir (no branch, no worktree) |
 | `file_pr` | Create/update PR for current branch (auto-detects base branch from naming) |
@@ -223,6 +223,7 @@ Haskell: Either EffectError GetBranchResponse
 | `session.*` | SessionHandler | register_claude_id |
 | `jj.*` | JjHandler | bookmark_create, git_push, git_fetch, log, new, status |
 | `merge_pr.*` | MergePRHandler | merge_pr (gh pr merge + jj git fetch) |
+| `session.*` | SessionHandler | register_claude_id |
 
 **Zellij Integration:**
 - Uses declarative KDL layouts (not CLI flags)

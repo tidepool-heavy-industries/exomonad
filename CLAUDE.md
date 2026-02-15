@@ -303,6 +303,15 @@ Human in Zellij session
 9. Claude Code proceeds or blocks
 ```
 
+**Session Start Hook:**
+```
+1. Claude Code starts (exomonad hook session-start)
+2. Server calls WASM handle_session_start
+3. Haskell yields SessionRegister effect with claude_session_id
+4. Server stores ID in in-memory ClaudeSessionRegistry
+5. Later, spawn_subtree uses this ID to enable --fork-session
+```
+
 **Fail-open:** If the server is unreachable, `exomonad hook` prints `{"continue":true}` and exits 0.
 
 ### Configuration
@@ -384,7 +393,7 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 
 | Tool | Description |
 |------|-------------|
-| `spawn_subtree` | Fork a worktree node off your current branch (Claude-only). Creates isolated git worktree + Zellij tab. |
+| `spawn_subtree` | Fork a worktree node off your current branch (Claude-only). Creates isolated git worktree + Zellij tab. Auto-resolves parent session ID. |
 | `spawn_workers` | Spawn multiple ephemeral Gemini worker agents as panes in parent dir (no branch, no worktree) |
 | `spawn_leaf_subtree` | Spawn a Gemini agent in its own git worktree + branch + Zellij tab (isolated, files PR) |
 | `file_pr` | Create or update a PR for the current branch (auto-detects base branch from naming convention) |

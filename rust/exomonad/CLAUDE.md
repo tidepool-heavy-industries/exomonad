@@ -179,6 +179,23 @@ Claude Code hook JSON (stdin)
     Claude Code receives response
 ```
 
+**Session Start Flow:**
+```
+Claude Code hook session-start (stdin)
+         ↓
+    exomonad hook session-start (thin HTTP client)
+         ↓
+    HTTP POST localhost:{port}/hook?event=session-start&runtime=claude
+         ↓
+    Server: call WASM handle_session_start
+         ↓
+    Haskell yields SessionRegister effect
+         ↓
+    Server registers Claude session ID in memory (for spawn_subtree)
+         ↓
+    Server returns success
+```
+
 ## Related Documentation
 
 - **[exomonad-core](../exomonad-core/)** - Framework, handlers, services, protocol types, UI protocol

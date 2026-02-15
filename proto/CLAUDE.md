@@ -345,6 +345,7 @@ just proto-test  # Run wire format compatibility tests
 | fs.proto | ✅ | Pending | ✅ |
 | agent.proto | ✅ | ✅ | ✅ |
 | jj.proto | ✅ | ✅ | Pending |
+| session.proto | ✅ | ✅ | Pending |
 
 ## Related Files
 
