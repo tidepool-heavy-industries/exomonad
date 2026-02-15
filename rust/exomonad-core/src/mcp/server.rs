@@ -45,6 +45,67 @@ impl McpServer {
         server
     }
 
+    /// Convert into an axum Router with MCP endpoints.
+    ///
+    /// The router exposes:
+    /// - `POST /mcp` — JSON-RPC handler for MCP protocol
+    /// - `GET /mcp` — SSE endpoint for Streamable HTTP compatibility
+    pub fn into_router(self) -> axum::Router {
+        let server = self;
+        let post_handler = {
+            let s = server.clone();
+            move |headers: axum::http::HeaderMap, body: axum::extract::Json<serde_json::Value>| {
+                let s = s.clone();
+                async move { s.handle(headers, body).await }
+            }
+        };
+
+        let sse_handler = || async {
+            let stream = futures_util::stream::pending::<
+                Result<axum::response::sse::Event, std::convert::Infallible>,
+            >();
+            axum::response::sse::Sse::new(stream).keep_alive(
+                axum::response::sse::KeepAlive::new()
+                    .interval(std::time::Duration::from_secs(15))
+                    .text("keep-alive"),
+            )
+        };
+
+        axum::Router::new().route("/mcp", axum::routing::post(post_handler).get(sse_handler))
+    }
+
+    /// Bind to an address and serve the MCP protocol.
+    ///
+    /// Runs until SIGINT or SIGTERM is received.
+    pub async fn serve(self, addr: std::net::SocketAddr) -> anyhow::Result<()> {
+        let router = self.into_router();
+
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        tracing::info!(addr = %addr, "MCP server listening");
+
+        axum::serve(listener, router)
+            .with_graceful_shutdown(async {
+                let ctrl_c = tokio::signal::ctrl_c();
+                #[cfg(unix)]
+                let terminate = async {
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                        .expect("failed to install SIGTERM handler")
+                        .recv()
+                        .await;
+                };
+                #[cfg(not(unix))]
+                let terminate = std::future::pending::<()>();
+
+                tokio::select! {
+                    _ = ctrl_c => tracing::info!("Received SIGINT"),
+                    _ = terminate => tracing::info!("Received SIGTERM"),
+                }
+            })
+            .await?;
+
+        Ok(())
+    }
+
     pub async fn handle(&self, headers: HeaderMap, Json(body): Json<Value>) -> Response {
         let method = body["method"].as_str();
         let id = body.get("id").cloned();
