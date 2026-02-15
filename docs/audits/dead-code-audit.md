@@ -49,9 +49,13 @@ The following unused public functions and dead code blocks were identified and *
 
 - `#[allow(dead_code)]` in `rust/exomonad/src/pid.rs`
   - Renamed `file` to `_file` to indicate intentional unused (RAII guard).
-  - Status: **Fixed**
-
-## TODOs and FIXMEs (Remaining)
-- `rust/exomonad-core/src/plugin_manager.rs`: `// TODO: Fix for Extism 1.13`
-- `rust/exomonad-core/src/effects/mod.rs`: `//!         todo!()` (Documentation example)
-- `rust/exomonad-core/src/services/agent_control.rs`: `// TODO: Return actual worktree path if possible...`
+    - Status: **Fixed**
+  
+  - `// TODO: Return actual worktree path` in `rust/exomonad-core/src/services/agent_control.rs`
+    - Reason: Feature improvement.
+    - Status: **Fixed**
+  
+  ## TODOs and FIXMEs (Remaining)
+  - `rust/exomonad-core/src/plugin_manager.rs`: `// TODO: Fix for Extism 1.13`
+  - `rust/exomonad-core/src/effects/mod.rs`: `//!         todo!()` (Documentation example)
+  
