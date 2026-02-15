@@ -125,21 +125,18 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 ├── proto/CLAUDE.md    ← Protocol buffers (FFI boundary types)
 ├── haskell/CLAUDE.md  ← Haskell package organization
 │   ├── dsl/core/CLAUDE.md      ← Graph DSL reference (START HERE for handlers)
-│   ├── dsl/teaching/CLAUDE.md  ← LLM-level teaching for FunctionGemma training
 │   ├── effects/CLAUDE.md       ← Effect interpreters
 │   │   ├── llm-interpreter/     ← Anthropic/OpenAI API
-│   │   ├── lsp-interpreter/     ← Language Server Protocol
+│   │   ├── worktree-interpreter/ ← Git worktree management
 │   │   └── ...
-│   ├── runtime/CLAUDE.md       ← Execution backends
-│   │   └── actor/CLAUDE.md     ← Actor model details
 │   ├── protocol/CLAUDE.md      ← Wire formats
-│   └── tools/CLAUDE.md         ← Dev tools (ghci-oracle, sleeptime, training-generator)
+│   └── tools/CLAUDE.md         ← Dev tools
 ├── rust/CLAUDE.md             ← Rust workspace overview (3 crates)
 │   ├── exomonad/CLAUDE.md  ← MCP server + hook handler (binary)
 │   ├── exomonad-core/      ← Unified library: framework, handlers, services, protocol, UI types
 │   ├── exomonad-proto/     ← Proto-generated types (prost) for FFI + effects
 │   └── exomonad-plugin/CLAUDE.md   ← Zellij WASM plugin (status + popups)
-└── tools/CLAUDE.md             ← Root-level tools (micro-gastown, blast-radius)
+└── docs/audits/               ← Project audits and reports
 ```
 
 ## When to Read Which CLAUDE.md
@@ -155,10 +152,7 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 | Modify popup UI protocol | `rust/exomonad-core/` (ui_protocol.rs) |
 | Work on Zellij plugin | `rust/exomonad-plugin/CLAUDE.md` |
 | Define a graph, handlers, annotations | `haskell/dsl/core/CLAUDE.md` |
-| Work on LLM-level teaching infrastructure | `haskell/dsl/teaching/CLAUDE.md` |
 | Add or modify an effect interpreter | `haskell/effects/CLAUDE.md` |
-| Understand actor execution model | `haskell/runtime/actor/CLAUDE.md` |
-| Work with LSP (Language Server Protocol) | `haskell/effects/lsp-interpreter/CLAUDE.md` |
 | Generate training data for FunctionGemma | `haskell/tools/training-generator/CLAUDE.md` |
 
 ---
@@ -479,40 +473,30 @@ Use cases:
 
 All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full details.
 
-### Core (`haskell/dsl/`, `haskell/runtime/`)
+### Core (`haskell/dsl/`)
 | Package | Purpose |
 |---------|---------|
 | `haskell/dsl/core` | Graph DSL, effects, templates, validation |
-| `haskell/dsl/teaching` | LLM-level teaching infrastructure for FunctionGemma training |
-| `haskell/runtime/actor` | Actor runtime with graph-to-actor execution |
-| `haskell/runtime/parallel` | Parallel fan-out/fan-in execution with ki |
-| `haskell/runtime/wasm` | WASM deployment scaffolding |
 
 ### Effect Interpreters (`haskell/effects/`)
 | Package | Purpose |
 |---------|---------|
 | `haskell/effects/llm-interpreter` | Anthropic/OpenAI API calls |
-| `haskell/effects/habitica-interpreter` | Habitica API |
 | `haskell/effects/observability-interpreter` | OpenTelemetry traces to Grafana |
-| `haskell/effects/lsp-interpreter` | LSP via lsp-client |
-| `haskell/effects/ghci-interpreter` | GHCi Oracle thin client |
 | `haskell/effects/github-interpreter` | GitHub API integration |
 | `haskell/effects/worktree-interpreter` | Git worktree management |
-| `haskell/effects/cabal-interpreter` | Cabal build operations |
+| `haskell/effects/justfile-interpreter` | Justfile execution |
+| `haskell/effects/zellij-interpreter` | Zellij session management |
 
-### Integrations (`haskell/effects/`, `haskell/protocol/`)
+### Integrations (`haskell/protocol/`)
 | Package | Purpose |
 |---------|---------|
-| `haskell/effects/habitica` | Habitica effect types (standalone) |
 | `haskell/protocol/wire-types` | Native protocol types |
 
 ### Tools (`haskell/tools/`)
 | Package | Purpose |
 |---------|---------|
-| `haskell/tools/ghci-oracle` | Persistent GHCi session server |
-| `haskell/tools/sleeptime` | Log analysis for agent evolution |
 | `haskell/tools/training-generator` | Training data types for FunctionGemma |
-| `tools/micro-gastown` | Experimental tooling (non-Haskell) |
 
 ## Where Things Go
 

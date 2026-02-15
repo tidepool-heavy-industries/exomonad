@@ -217,7 +217,10 @@ Haskell: Either EffectError GetBranchResponse
 | `file_pr.*` | FilePRHandler | file_pr |
 | `copilot.*` | CopilotHandler | wait_for_copilot_review |
 | `messaging.*` | MessagingHandler | send_note, send_question |
-| `events.*` | EventHandler | wait_for_event, notify_event |
+| `events.*` | EventHandler | wait_for_event, notify_event, notify_parent |
+| `coordination.*` | CoordinationHandler | create_task, update_task, list_tasks, get_task, send_message, get_messages |
+| `kv.*` | KvHandler | get, set |
+| `session.*` | SessionHandler | register_claude_id |
 | `jj.*` | JjHandler | bookmark_create, git_push, git_fetch, log, new, status |
 | `merge_pr.*` | MergePRHandler | merge_pr (gh pr merge + jj git fetch) |
 

@@ -13,13 +13,24 @@ proto/
 │   ├── agent.proto     # Agent management types (legacy)
 │   └── popup.proto     # UI popup types
 └── effects/            # Extensible effects system (namespace-based)
+    ├── agent.proto         # agent.* effects
+    ├── coordination.proto  # coordination.* effects
+    ├── copilot.proto       # copilot.* effects
     ├── effect_error.proto  # Unified effect error type
+    ├── egregore.proto      # egregore.* effects (experimental)
+    ├── envelope.proto      # Wire envelope types
+    ├── events.proto        # events.* effects
+    ├── file_pr.proto       # file_pr.* effects
+    ├── fs.proto            # fs.* effects
     ├── git.proto           # git.* effects
     ├── github.proto        # github.* effects
-    ├── fs.proto            # fs.* effects
-    ├── agent.proto         # agent.* effects
     ├── jj.proto            # jj.* effects (Jujutsu VCS)
-    └── log.proto           # log.* effects
+    ├── kv.proto            # kv.* effects (Key-Value)
+    ├── log.proto           # log.* effects
+    ├── merge_pr.proto      # merge_pr.* effects
+    ├── messaging.proto     # messaging.* effects
+    ├── popup.proto         # popup.* effects (UI)
+    └── session.proto       # session.* effects
 ```
 
 ## Codegen
@@ -203,12 +214,104 @@ Agent lifecycle (`agent.*` namespace):
 - `CleanupMerged`: Clean up agents with merged branches
 - `List`: List active agents
 
+### effects/coordination.proto
+
+Task coordination (`coordination.*` namespace):
+- `CreateTask`, `UpdateTask`: Manage tasks
+- `ListTasks`, `GetTask`: Query tasks
+- `SendMessage`, `GetMessages`: Messaging integration
+
+### effects/copilot.proto
+
+Copilot integration (`copilot.*` namespace):
+- `WaitForReview`: Poll for Copilot review completion
+
+### effects/events.proto
+
+Event system (`events.*` namespace):
+- `WaitForEvent`: Block until event occurs
+- `NotifyEvent`: Emit event
+- `NotifyParent`: Signal completion to parent
+
+### effects/file_pr.proto
+
+PR creation (`file_pr.*` namespace):
+- `FilePR`: Create or update PR for current branch
+
+### effects/fs.proto
+
+Filesystem operations (`fs.*` namespace):
+- `ReadFile`: Read file contents
+- `WriteFile`: Write file contents
+- `FileExists`: Check file existence
+- `ListDirectory`: List directory entries
+- `DeleteFile`: Delete file/directory
+
+### effects/git.proto
+
+Git operations (`git.*` namespace):
+- `GetBranch`: Current branch info
+- `GetStatus`: Dirty/staged/untracked files
+- `GetCommits`: Recent commit history
+- `HasUnpushedCommits`: Check for unpushed commits
+- `GetRemoteUrl`: Remote URL
+- `GetRepoInfo`: Branch + owner/name
+- `GetWorktree`: Worktree info
+
+### effects/github.proto
+
+GitHub API operations (`github.*` namespace):
+- `ListIssues`: List repository issues
+- `GetIssue`: Get issue with comments
+- `ListPullRequests`: List PRs
+- `GetPullRequest`: Get PR with reviews
+- `GetPullRequestForBranch`: Find PR for branch
+- `CreatePullRequest`: Create new PR
+- `GetPullRequestReviewComments`: Get inline comments
+
+### effects/jj.proto
+
+Jujutsu VCS operations (`jj.*` namespace):
+- `BookmarkCreate`: Create bookmark at revision
+- `GitPush`: Push bookmark to remote
+- `GitFetch`: Fetch from remote (triggers auto-rebase)
+- `Log`: Query revsets, return JSON
+- `New`: Start a new change
+- `Status`: Working copy status including conflicts
+
+### effects/kv.proto
+
+Key-Value storage (`kv.*` namespace):
+- `Get`: Retrieve value by key
+- `Set`: Store value by key
+
 ### effects/log.proto
 
 Logging and events (`log.*` namespace):
 - `Log`: Generic log with level
 - `Debug`, `Info`, `Warn`, `Error`: Convenience methods
 - `EmitEvent`: Emit structured event
+
+### effects/merge_pr.proto
+
+PR merging (`merge_pr.*` namespace):
+- `MergePR`: Merge PR and fetch changes
+
+### effects/messaging.proto
+
+Inter-agent messaging (`messaging.*` namespace):
+- `SendNote`: Send non-blocking note
+- `SendQuestion`: Send blocking question
+
+### effects/popup.proto
+
+UI popup interaction (`popup.*` namespace):
+- `ShowPopup`: Display interactive UI component
+
+### effects/session.proto
+
+Session management (`session.*` namespace):
+- `RegisterClaudeSession`: Link Claude session ID to agent identity
 
 ## Usage
 
