@@ -63,6 +63,10 @@ struct ExoMonadPlugin {
     pane_manifest_cache: Option<PaneManifest>,
     /// Tab name → terminal pane ID mapping, rebuilt when either tab or pane data updates.
     tab_pane_map: HashMap<String, u32>,
+    /// This plugin instance's own pane ID (from get_plugin_ids()).
+    own_pane_id: u32,
+    /// The tab name this plugin instance lives in, derived from PaneManifest correlation.
+    own_tab_name: Option<String>,
 }
 
 register_plugin!(ExoMonadPlugin);
@@ -209,6 +213,7 @@ impl ExoMonadPlugin {
     /// non-plugin, non-floating, non-exited terminal pane.
     fn rebuild_tab_pane_map(&mut self) {
         self.tab_pane_map.clear();
+        self.own_tab_name = None;
         let manifest = match &self.pane_manifest_cache {
             Some(m) => m,
             None => return,
@@ -217,6 +222,10 @@ impl ExoMonadPlugin {
             if let Some(tab_name) = self.tab_names.get(tab_pos) {
                 if let Some(pane) = panes.iter().find(|p| !p.is_plugin && !p.is_floating && !p.exited) {
                     self.tab_pane_map.insert(tab_name.clone(), pane.id);
+                }
+                // Determine which tab this plugin instance lives in
+                if panes.iter().any(|p| p.is_plugin && p.id == self.own_pane_id) {
+                    self.own_tab_name = Some(tab_name.clone());
                 }
             }
         }
@@ -240,6 +249,7 @@ impl ZellijPlugin for ExoMonadPlugin {
         self.status_state = PluginState::Idle;
         self.status_message = "Ready.".to_string();
         self.events = VecDeque::new();
+        self.own_pane_id = get_plugin_ids().plugin_id;
         // Initialize terminal with ZellijBackend
         if let Ok(term) = Terminal::new(ZellijBackend) {
             self.terminal = Some(term);
@@ -353,7 +363,9 @@ impl ZellijPlugin for ExoMonadPlugin {
             return true; // Request re-render
         }
 
-        // Handle inject-input requests: write text into a target pane resolved by tab name
+        // Handle inject-input requests: write text into a target pane resolved by tab name.
+        // Only the plugin instance residing in the target tab acts, preventing
+        // duplicate writes from the broadcast delivery to all instances.
         if pipe_message.name == transport::INJECT_INPUT_PIPE {
             if let Some(payload) = pipe_message.payload {
                 match serde_json::from_str::<serde_json::Value>(&payload) {
@@ -365,6 +377,16 @@ impl ZellijPlugin for ExoMonadPlugin {
                                 return true;
                             }
                         };
+
+                        // Dedup: only the instance in the target tab should write.
+                        // If own_tab_name is None (before first PaneUpdate), fall through
+                        // to avoid silently dropping the message from all instances.
+                        if let Some(own_tab) = &self.own_tab_name {
+                            if own_tab != tab_name {
+                                return true;
+                            }
+                        }
+
                         let text = match val["text"].as_str() {
                             Some(t) => t,
                             None => {
