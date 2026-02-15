@@ -50,15 +50,11 @@ impl SessionEffects for SessionHandler {
             "Registering Claude session via effect"
         );
 
-        self.registry
-            .register(&key, &req.claude_session_id)
-            .await;
+        self.registry.register(&key, &req.claude_session_id).await;
 
         // Also store under slug variant (strip -claude suffix) for broader lookup
         if let Some(slug) = key.strip_suffix("-claude") {
-            self.registry
-                .register(slug, &req.claude_session_id)
-                .await;
+            self.registry.register(slug, &req.claude_session_id).await;
         }
 
         Ok(RegisterClaudeSessionResponse { success: true })

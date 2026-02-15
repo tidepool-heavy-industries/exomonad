@@ -188,8 +188,7 @@ impl AgentEffects for AgentHandler {
     async fn spawn_subtree(&self, req: SpawnSubtreeRequest) -> EffectResult<SpawnSubtreeResponse> {
         // Look up Claude session UUID from registry (overrides whatever WASM sent)
         let parent_session_id = if let Some(ref registry) = self.claude_session_registry {
-            let registry_key =
-                crate::mcp::agent_identity::get_agent_id();
+            let registry_key = crate::mcp::agent_identity::get_agent_id();
             let key = if registry_key.is_empty() {
                 "root".to_string()
             } else {

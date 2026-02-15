@@ -698,7 +698,10 @@ impl ExternalService for GitHubService {
                 info!(
                     "[GitHub] CreatePR succeeded: PR #{} {}",
                     pr.number,
-                    pr.html_url.as_ref().map(|u| u.as_str()).unwrap_or("(no url)")
+                    pr.html_url
+                        .as_ref()
+                        .map(|u| u.as_str())
+                        .unwrap_or("(no url)")
                 );
 
                 Ok(ServiceResponse::GitHubPR {
