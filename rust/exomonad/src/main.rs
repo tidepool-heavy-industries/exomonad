@@ -874,6 +874,13 @@ async fn main() -> Result<()> {
             builder = builder.with_handlers(orch_handlers);
             let rt = builder.build().await.context("Failed to build runtime")?;
 
+            if !rt.registry().has_handler("github") {
+                anyhow::bail!(
+                    "GitHub token required but not found.\n\
+                     Add GITHUB_TOKEN=ghp_... to ~/.exomonad/secrets"
+                );
+            }
+
             let mut base_state = rt.into_mcp_state(project_dir.clone());
             base_state.question_registry = Some(question_registry);
 
