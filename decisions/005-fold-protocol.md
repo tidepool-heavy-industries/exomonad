@@ -42,9 +42,11 @@ main
 ## Implementation Status
 
 - `file_pr` tool: implemented (auto-detects base branch from `.` naming)
+- `merge_pr` tool: implemented (`gh pr merge` + `jj git fetch` for auto-rebase, wired into TL role)
 - Stop hooks: implemented (PR status + Copilot review checks)
-- `merge_pr` tool: not yet built
-- jj auto-rebase cascade: works via colocated mode, not yet wired into spawn flow
+- `notify_parent`: fires on agent exit via `handleWorkerExit` hook
+- `wait_for_event`: parent can block until child completion events arrive
+- Event router (Zellij STDIN injection for dormant parents): not yet built
 
 ## Consequences
 

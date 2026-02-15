@@ -36,7 +36,9 @@ Implicit from spawn. The branch hierarchy (`main.feature.auth` → parent `main.
 - The `write-chars` injection mechanism exists (Zellij STDIN injection effect)
 - `note`, `question`, `answer_question` messaging tools are implemented
 - `notify_parent` + `wait_for_event` tools are implemented
-- Event router (pane registry + injection endpoint) is not yet built — this is the next major piece
+- `notify_parent` fires automatically on agent exit via `handleWorkerExit` hook
+- `merge_pr` tool is implemented (gh pr merge + jj git fetch)
+- Event router (pane registry + Zellij STDIN injection endpoint) is not yet built — this is the next major piece
 - GitHub poller is not yet built
 
 ## Consequences

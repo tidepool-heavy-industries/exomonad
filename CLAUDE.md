@@ -394,6 +394,7 @@ All tools are implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Gues
 | `spawn_workers` | Spawn multiple ephemeral Gemini worker agents as panes in parent dir (no branch, no worktree) |
 | `spawn_leaf_subtree` | Spawn a Gemini agent in its own git worktree + branch + Zellij tab (isolated, files PR) |
 | `file_pr` | Create or update a PR for the current branch (auto-detects base branch from naming convention) |
+| `merge_pr` | Merge a child's PR (gh pr merge + jj git fetch for auto-rebase). TL role only. |
 | `popup` | Display interactive popup UI in Zellij (choices, text input, sliders) |
 | `note` | Send a note to the TL agent (dev role messaging) |
 | `question` | Ask the TL agent a question and wait for answer (dev role messaging). Uses trampoline (suspend/resume). |
@@ -464,10 +465,10 @@ Use cases:
 - ✅ Embeddable McpServer (into_router, serve, McpStateBuilder)
 - ✅ Startup namespace validation (require_namespaces on RuntimeBuilder)
 - ✅ jj colocated mode + effects (jj.* namespace: bookmark_create, git_push, git_fetch, log, new, status)
+- ✅ merge_pr tool (gh pr merge + jj git fetch, wired into TL role)
+- ✅ notify_parent fires on agent exit (handleWorkerExit hook → events.notify_parent)
 - 🔧 Inter-agent messaging (note/question/answer) — code exists, needs async conversion for question tool
-- 🔧 Stop hooks for subtree agents (notify_parent on exit not yet wired)
 - 🔧 Event router (Zellij STDIN injection for dormant parents) — not built
-- 🔧 merge_pr tool — not built
 - 🔧 GitHub poller (PR status → events) — not built
 
 ---

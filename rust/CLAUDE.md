@@ -181,6 +181,7 @@ All tools are defined in Haskell WASM and executed via host functions.
 | `spawn_leaf_subtree` | Spawn Gemini agent in own worktree + branch + tab (isolated, files PR) |
 | `spawn_workers` | Spawn ephemeral Gemini agents as panes in parent dir (no branch, no worktree) |
 | `file_pr` | Create/update PR for current branch (auto-detects base branch from naming) |
+| `merge_pr` | Merge child PR (gh pr merge + jj git fetch). TL role only. |
 | `note` | Send fire-and-forget note to TL (agent-side) |
 | `question` | Send blocking question to TL (agent-side) |
 | `get_agent_messages` | Read notes/questions from agents (TL messaging, supports long-poll) |
@@ -218,6 +219,7 @@ Haskell: Either EffectError GetBranchResponse
 | `messaging.*` | MessagingHandler | send_note, send_question |
 | `events.*` | EventHandler | wait_for_event, notify_event |
 | `jj.*` | JjHandler | bookmark_create, git_push, git_fetch, log, new, status |
+| `merge_pr.*` | MergePRHandler | merge_pr (gh pr merge + jj git fetch) |
 
 **Zellij Integration:**
 - Uses declarative KDL layouts (not CLI flags)
