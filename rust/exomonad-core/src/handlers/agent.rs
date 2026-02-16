@@ -14,7 +14,7 @@ use crate::{GithubOwner, GithubRepo, IssueNumber};
 use async_trait::async_trait;
 use exomonad_proto::effects::agent::*;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Agent effect handler.
 ///
@@ -200,7 +200,16 @@ impl AgentEffects for AgentHandler {
                 claude_uuid = ?claude_uuid,
                 "Looked up Claude session UUID for spawn_subtree"
             );
-            claude_uuid.unwrap_or_default()
+            match claude_uuid {
+                Some(uuid) => uuid,
+                None => {
+                    warn!(
+                        key = %key,
+                        "No Claude session UUID registered — child will start without --fork-session context. Ensure SessionStart hook is configured."
+                    );
+                    String::new()
+                }
+            }
         } else {
             req.parent_session_id.clone()
         };

@@ -14,7 +14,7 @@ import ExoMonad
 import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
 import ExoMonad.Guest.Tools.MergePR (MergePR)
 import ExoMonad.Guest.Types (allowResponse, postToolUseResponse)
-import ExoMonad.Types (HookConfig (..))
+import ExoMonad.Types (HookConfig (..), defaultSessionStartHook)
 import Control.Monad.Freer (send)
 
 data Tools mode = Tools
@@ -45,6 +45,7 @@ config =
           { preToolUse = \_ -> pure (allowResponse Nothing),
             postToolUse = \_ -> pure (postToolUseResponse Nothing),
             onStop = \_ -> send runStopHookChecks,
-            onSubagentStop = \_ -> send runStopHookChecks
+            onSubagentStop = \_ -> send runStopHookChecks,
+            onSessionStart = defaultSessionStartHook
           }
     }

@@ -20,7 +20,7 @@ import ExoMonad.Effects.Log qualified as Log
 import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
 import ExoMonad.Guest.Types (HookInput (..), HookOutput, allowResponse, denyResponse, postToolUseResponse)
 import ExoMonad.Permissions (PermissionCheck (..), checkAgentPermissions)
-import ExoMonad.Types (HookConfig (..), HookEffects)
+import ExoMonad.Types (HookConfig (..), HookEffects, defaultSessionStartHook)
 
 -- | Hook config for HTTP-native dev agents.
 --
@@ -32,7 +32,8 @@ httpDevHooks =
     { preToolUse = permissionCascade,
       postToolUse = \_ -> pure (postToolUseResponse Nothing),
       onStop = \_ -> send runStopHookChecks,
-      onSubagentStop = \_ -> send runStopHookChecks
+      onSubagentStop = \_ -> send runStopHookChecks,
+      onSessionStart = defaultSessionStartHook
     }
 
 -- | Three-tier permission cascade for preToolUse hooks.

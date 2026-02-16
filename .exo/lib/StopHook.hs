@@ -13,7 +13,7 @@ where
 
 import ExoMonad.Guest.Effects.StopHook (runStopHookChecks)
 import ExoMonad.Guest.Types (allowResponse, postToolUseResponse)
-import ExoMonad.Types (HookConfig (..))
+import ExoMonad.Types (HookConfig (..), defaultSessionStartHook)
 import Control.Monad.Freer (send)
 
 -- ============================================================================
@@ -27,5 +27,6 @@ devHooks =
     { preToolUse = \_ -> pure (allowResponse Nothing),
       postToolUse = \_ -> pure (postToolUseResponse Nothing),
       onStop = \_ -> send runStopHookChecks,
-      onSubagentStop = \_ -> send runStopHookChecks
+      onSubagentStop = \_ -> send runStopHookChecks,
+      onSessionStart = defaultSessionStartHook
     }

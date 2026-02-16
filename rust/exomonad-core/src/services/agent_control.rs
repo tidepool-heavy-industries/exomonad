@@ -1329,20 +1329,6 @@ impl AgentControlService {
             }
         }
 
-        // Remove temporary worker config directory (created by spawn_worker)
-        let tmp_agent_dir = PathBuf::from(format!("/tmp/exomonad-agents/{}", internal_name));
-        if tmp_agent_dir.exists() {
-            if let Err(e) = fs::remove_dir_all(&tmp_agent_dir).await {
-                warn!(
-                    path = %tmp_agent_dir.display(),
-                    error = %e,
-                    "Failed to remove temp agent config dir (non-fatal)"
-                );
-            } else {
-                info!(path = %tmp_agent_dir.display(), "Removed temp agent config dir");
-            }
-        }
-
         // Remove per-agent config directory (.exo/agents/{name}/)
         let agent_config_dir = self
             .project_dir

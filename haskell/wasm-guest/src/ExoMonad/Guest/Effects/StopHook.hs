@@ -92,10 +92,15 @@ runStopHookChecks = do
 -- | Inner check logic (separated so we can wrap with lifecycle messaging).
 runStopHookChecksInner :: IO StopHookOutput
 runStopHookChecksInner = do
-  result <- runChecks [checkPRFiled]
-  case result of
-    CheckPass -> pure allowStopResponse
-    CheckBlock reason -> pure (blockStopResponse reason)
+  -- Skip all checks on main branch (root TL has no PR to file)
+  branch <- getCurrentBranch
+  if branch == "main"
+    then pure allowStopResponse
+    else do
+      result <- runChecks [checkPRFiled]
+      case result of
+        CheckPass -> pure allowStopResponse
+        CheckBlock reason -> pure (blockStopResponse reason)
 
 checkPRFiled :: StopCheck
 checkPRFiled = do
