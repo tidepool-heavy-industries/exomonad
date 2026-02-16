@@ -39,16 +39,12 @@ impl GitHubEffects for GitHubHandler {
     async fn list_issues(&self, req: ListIssuesRequest) -> EffectResult<ListIssuesResponse> {
         let repo = make_repo(&req.owner, &req.repo);
 
-        let state_str = issue_state_to_string(req.state());
-        let filter = if state_str.is_empty() && req.labels.is_empty() {
+        let state = issue_state_to_filter(req.state());
+        let filter = if state.is_none() && req.labels.is_empty() {
             None
         } else {
             Some(IssueFilter {
-                state: Some(if state_str.is_empty() {
-                    "open".to_string()
-                } else {
-                    state_str
-                }),
+                state: state.or(Some(crate::domain::FilterState::Open)),
                 labels: if req.labels.is_empty() {
                     None
                 } else {
@@ -101,15 +97,11 @@ impl GitHubEffects for GitHubHandler {
     ) -> EffectResult<ListPullRequestsResponse> {
         let repo = make_repo(&req.owner, &req.repo);
 
-        let state_str = issue_state_to_string(req.state());
+        let state = issue_state_to_filter(req.state());
         let limit = if req.limit <= 0 { 30 } else { req.limit as u32 };
 
         let filter = Some(PRFilter {
-            state: Some(if state_str.is_empty() {
-                "open".to_string()
-            } else {
-                state_str
-            }),
+            state: state.or(Some(crate::domain::FilterState::Open)),
             limit: Some(limit),
         });
 
@@ -131,7 +123,7 @@ impl GitHubEffects for GitHubHandler {
         let repo = make_repo(&req.owner, &req.repo);
 
         let filter = Some(PRFilter {
-            state: Some("all".to_string()),
+            state: Some(crate::domain::FilterState::All),
             limit: Some(100),
         });
 
@@ -230,12 +222,12 @@ fn make_repo(owner: &str, repo: &str) -> Repo {
     }
 }
 
-fn issue_state_to_string(state: IssueState) -> String {
+fn issue_state_to_filter(state: IssueState) -> Option<crate::domain::FilterState> {
     match state {
-        IssueState::Unspecified => String::new(),
-        IssueState::Open => "open".to_string(),
-        IssueState::Closed => "closed".to_string(),
-        IssueState::All => "all".to_string(),
+        IssueState::Unspecified => None,
+        IssueState::Open => Some(crate::domain::FilterState::Open),
+        IssueState::Closed => Some(crate::domain::FilterState::Closed),
+        IssueState::All => Some(crate::domain::FilterState::All),
     }
 }
 

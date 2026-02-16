@@ -467,7 +467,7 @@ impl ExternalService for GitHubService {
                     Some("open") => octocrab::params::State::Open,
                     Some("closed") => octocrab::params::State::Closed,
                     Some("all") => octocrab::params::State::All,
-                    None => octocrab::params::State::Open,
+                    None | Some("") => octocrab::params::State::Open,
                     Some(s) => {
                         return Err(ServiceError::Api {
                             code: 400,

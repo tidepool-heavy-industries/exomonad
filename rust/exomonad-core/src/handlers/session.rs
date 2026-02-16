@@ -2,6 +2,7 @@
 //!
 //! Stores Claude Code session UUIDs so spawn_subtree can use --resume --fork-session.
 
+use crate::domain::ClaudeSessionUuid;
 use crate::effects::{dispatch_session_effect, EffectHandler, EffectResult, SessionEffects};
 use crate::services::claude_session_registry::ClaudeSessionRegistry;
 use async_trait::async_trait;
@@ -38,23 +39,26 @@ impl SessionEffects for SessionHandler {
         req: RegisterClaudeSessionRequest,
     ) -> EffectResult<RegisterClaudeSessionResponse> {
         let agent_id = crate::mcp::agent_identity::get_agent_id();
-        let key = if agent_id.is_empty() {
+        let key = if agent_id.as_str().is_empty() {
             "root".to_string()
         } else {
-            agent_id.clone()
+            agent_id.to_string()
         };
+
+        let claude_uuid = ClaudeSessionUuid::try_from(req.claude_session_id.clone())
+            .map_err(|e| crate::effects::EffectError::invalid_input(e.to_string()))?;
 
         info!(
             key = %key,
-            claude_session_id = %req.claude_session_id,
+            claude_session_id = %claude_uuid,
             "Registering Claude session via effect"
         );
 
-        self.registry.register(&key, &req.claude_session_id).await;
+        self.registry.register(&key, claude_uuid.clone()).await;
 
         // Also store under slug variant (strip -claude suffix) for broader lookup
         if let Some(slug) = key.strip_suffix("-claude") {
-            self.registry.register(slug, &req.claude_session_id).await;
+            self.registry.register(slug, claude_uuid).await;
         }
 
         Ok(RegisterClaudeSessionResponse { success: true })

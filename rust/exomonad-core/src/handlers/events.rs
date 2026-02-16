@@ -18,7 +18,8 @@ use std::time::Duration;
 pub struct EventHandler {
     queue: Arc<EventQueue>,
     remote_url: Option<String>,
-    session_id: Option<String>,
+    /// Event queue scope ID (server-internal UUID, NOT the birth-branch).
+    event_queue_scope: String,
     client: reqwest::Client,
 }
 
@@ -26,38 +27,49 @@ impl EventHandler {
     pub fn new(
         queue: Arc<EventQueue>,
         remote_port: Option<u16>,
-        session_id: Option<String>,
+        event_queue_scope: Option<String>,
     ) -> Self {
         let remote_url = remote_port.map(|port| format!("http://127.0.0.1:{}/events", port));
         Self {
             queue,
             remote_url,
-            session_id,
+            event_queue_scope: event_queue_scope.unwrap_or_else(|| "default".to_string()),
             client: reqwest::Client::new(),
         }
     }
 
     fn resolve_parent_tab_name(&self) -> String {
-        let session_id = self.session_id.as_deref().unwrap_or("");
-        let agent_id = crate::mcp::agent_identity::get_agent_id();
+        let agent_name = crate::mcp::agent_identity::get_agent_id();
 
-        if agent_id.ends_with("-gemini") {
-            // Worker: session_id is parent's session ID
-            if session_id.contains('.') {
-                let slug = session_id
+        // Get birth-branch from task-local (set by hook handler)
+        let birth_branch = crate::mcp::agent_identity::get_birth_branch();
+        let birth_branch_str = birth_branch.as_ref().map(|b| b.as_str()).unwrap_or("main");
+
+        if agent_name.is_gemini_worker() {
+            // Worker: birth-branch is parent's birth-branch (inherited)
+            if birth_branch_str.contains('.') {
+                let slug = birth_branch_str
                     .rsplit_once('.')
                     .map(|(_, s)| s)
-                    .unwrap_or(session_id);
+                    .unwrap_or(birth_branch_str);
                 format!("\u{1F916} {}", slug)
             } else {
                 "TL".to_string()
             }
         } else {
             // Subtree agent: parent is one level up
-            if let Some((parent, _)) = session_id.rsplit_once('.') {
-                if parent.contains('.') {
-                    let slug = parent.rsplit_once('.').map(|(_, s)| s).unwrap_or(parent);
-                    format!("\u{1F916} {}", slug)
+            if let Some(bb) = &birth_branch {
+                if let Some(parent) = bb.parent() {
+                    if parent.as_str().contains('.') {
+                        let slug = parent
+                            .as_str()
+                            .rsplit_once('.')
+                            .map(|(_, s)| s)
+                            .unwrap_or(parent.as_str());
+                        format!("\u{1F916} {}", slug)
+                    } else {
+                        "TL".to_string()
+                    }
                 } else {
                     "TL".to_string()
                 }
@@ -82,9 +94,8 @@ impl EffectHandler for EventHandler {
 #[async_trait]
 impl EventEffects for EventHandler {
     async fn wait_for_event(&self, req: WaitForEventRequest) -> EffectResult<WaitForEventResponse> {
-        let session_id = self.session_id.as_deref().unwrap_or("default");
         tracing::info!(
-            session_id = %session_id,
+            event_queue_scope = %self.event_queue_scope,
             types = ?req.types,
             timeout_secs = req.timeout_secs,
             after_event_id = req.after_event_id,
@@ -101,7 +112,7 @@ impl EventEffects for EventHandler {
         let event = self
             .queue
             .wait_for_event(
-                session_id,
+                &self.event_queue_scope,
                 &req.types,
                 Duration::from_secs(timeout_secs),
                 req.after_event_id,
@@ -153,42 +164,41 @@ impl EventEffects for EventHandler {
     }
 
     async fn notify_parent(&self, req: NotifyParentRequest) -> EffectResult<NotifyParentResponse> {
-        let session_id = crate::mcp::agent_identity::get_session_id().unwrap_or_else(|| {
-            self.session_id
-                .clone()
-                .unwrap_or_else(|| "root".to_string())
-        });
+        // Resolve birth-branch from task-local, falling back to event_queue_scope
+        let birth_branch = crate::mcp::agent_identity::get_birth_branch()
+            .unwrap_or_else(|| crate::domain::BirthBranch::root());
+
         // Prefer agent_id from the request (set by WASM caller) over task-local/env fallback
-        let (agent_id, agent_id_source) = if req.agent_id.is_empty() {
-            (crate::mcp::agent_identity::get_agent_id(), "fallback")
+        let agent_name = crate::mcp::agent_identity::get_agent_id();
+        let (agent_id_str, agent_id_source) = if req.agent_id.is_empty() {
+            (agent_name.to_string(), "fallback")
         } else {
             (req.agent_id.clone(), "request")
         };
         tracing::debug!(
-            agent_id = %agent_id,
+            agent_id = %agent_id_str,
             source = agent_id_source,
             "notify_parent: resolved agent_id"
         );
 
         // Identity model:
-        // - Subtree agents: session_id is their own branch name (e.g. "main.feature-a").
-        //   Their parent is one level up (e.g. "main" -> "root").
-        // - Workers: session_id is already their parent's session ID.
-        let parent_session_id = if agent_id.ends_with("-gemini") {
-            // Worker: session_id is inherited from parent
-            session_id.to_string()
+        // - Subtree agents: birth-branch is their own branch name (e.g. "main.feature-a").
+        //   Their parent is one level up (e.g. "main" -> root).
+        // - Workers: birth-branch is inherited from parent (parent's birth-branch).
+        let parent_session_id = if agent_name.is_gemini_worker() {
+            // Worker: birth-branch is inherited from parent
+            birth_branch.to_string()
         } else {
-            // Subtree agent: session_id is own branch, parent is parent branch
-            if let Some((parent, _)) = session_id.rsplit_once('.') {
-                parent.to_string()
-            } else {
-                "root".to_string()
-            }
+            // Subtree agent: parent is one level up
+            birth_branch
+                .parent()
+                .map(|p| p.to_string())
+                .unwrap_or_else(|| "root".to_string())
         };
 
         tracing::info!(
-            agent_id = %agent_id,
-            session_id = %session_id,
+            agent_id = %agent_id_str,
+            birth_branch = %birth_branch,
             parent_session_id = %parent_session_id,
             status = %req.status,
             "notify_parent: routing completion to parent"
@@ -197,7 +207,7 @@ impl EventEffects for EventHandler {
         let event = Event {
             event_id: 0, // Assigned by EventQueue
             event_type: Some(event::EventType::WorkerComplete(WorkerComplete {
-                worker_id: agent_id.clone(),
+                worker_id: agent_id_str.clone(),
                 status: req.status.clone(),
                 message: req.message.clone(),
                 changes: Vec::new(),
@@ -231,7 +241,7 @@ impl EventEffects for EventHandler {
 
         // Inject natural-language notification into parent's Zellij pane
         let tab_name = self.resolve_parent_tab_name();
-        let notification = format_parent_notification(&agent_id, &req.status, &req.message);
+        let notification = format_parent_notification(&agent_id_str, &req.status, &req.message);
         tracing::debug!(tab = %tab_name, chars = notification.len(), "notify_parent: injecting notification into parent pane");
         zellij_events::inject_input(&tab_name, &notification);
 

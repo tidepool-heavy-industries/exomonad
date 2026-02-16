@@ -1,3 +1,4 @@
+use crate::domain::MessageFilter;
 use chrono::Utc;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -125,12 +126,16 @@ impl CoordinationService {
         messages.push(message);
     }
 
-    pub async fn get_messages(&self, unread_only: bool) -> Vec<Message> {
+    pub async fn get_messages(&self, filter: MessageFilter) -> Vec<Message> {
         let mut messages = self.messages.write().await;
         let mut result = Vec::new();
 
         for msg in messages.iter_mut() {
-            if !unread_only || !msg.read {
+            let include = match filter {
+                MessageFilter::All => true,
+                MessageFilter::UnreadOnly => !msg.read,
+            };
+            if include {
                 result.push(msg.clone());
                 msg.read = true;
             }
@@ -239,7 +244,7 @@ mod tests {
             .send_message("bob".to_string(), "hi".to_string(), "response".to_string())
             .await;
 
-        let messages = service.get_messages(false).await;
+        let messages = service.get_messages(MessageFilter::All).await;
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].from, "alice");
         assert_eq!(messages[1].from, "bob");
@@ -256,13 +261,13 @@ mod tests {
             )
             .await;
 
-        let messages = service.get_messages(true).await;
+        let messages = service.get_messages(MessageFilter::UnreadOnly).await;
         assert_eq!(messages.len(), 1);
 
-        let messages_again = service.get_messages(true).await;
+        let messages_again = service.get_messages(MessageFilter::UnreadOnly).await;
         assert_eq!(messages_again.len(), 0);
 
-        let messages_all = service.get_messages(false).await;
+        let messages_all = service.get_messages(MessageFilter::All).await;
         assert_eq!(messages_all.len(), 1);
         assert!(messages_all[0].read);
     }

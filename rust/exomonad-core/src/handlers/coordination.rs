@@ -117,7 +117,12 @@ impl CoordinationEffects for CoordinationHandler {
     }
 
     async fn get_messages(&self, req: GetMessagesRequest) -> EffectResult<GetMessagesResponse> {
-        let messages = self.service.get_messages(req.unread_only).await;
+        let filter = if req.unread_only {
+            crate::domain::MessageFilter::UnreadOnly
+        } else {
+            crate::domain::MessageFilter::All
+        };
+        let messages = self.service.get_messages(filter).await;
 
         Ok(GetMessagesResponse {
             messages: messages

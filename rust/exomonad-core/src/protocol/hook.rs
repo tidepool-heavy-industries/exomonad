@@ -2,7 +2,7 @@
 //!
 //! Types for Claude Code hook stdin/stdout communication.
 
-use crate::domain::{SessionId, ToolName, ToolPermission};
+use crate::domain::{PermissionMode, SessionId, ToolName, ToolPermission};
 use crate::protocol::Runtime;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -29,9 +29,9 @@ pub struct HookInput {
     #[serde(default)]
     pub cwd: String,
 
-    /// Permission mode (default, plan, acceptEdits, dontAsk, bypassPermissions).
+    /// Permission mode.
     #[serde(default)]
-    pub permission_mode: String,
+    pub permission_mode: PermissionMode,
 
     /// The hook event name (PreToolUse, PostToolUse, etc.).
     pub hook_event_name: String,
@@ -591,7 +591,7 @@ mod tests {
         let input: HookInput = serde_json::from_str(json).unwrap();
         assert_eq!(input.session_id.as_str(), "sess-123");
         assert_eq!(input.cwd, "/home/user");
-        assert_eq!(input.permission_mode, "plan");
+        assert_eq!(input.permission_mode, PermissionMode::Plan);
         assert_eq!(input.tool_name.as_ref().map(|t| t.as_str()), Some("Write"));
         assert_eq!(input.prompt, Some("user prompt".into()));
         assert_eq!(input.stop_hook_active, Some(true));

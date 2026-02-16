@@ -287,7 +287,7 @@ impl MessagingEffects for MessagingHandler {
 }
 
 fn get_agent_id() -> String {
-    crate::mcp::agent_identity::get_agent_id()
+    crate::mcp::agent_identity::get_agent_id_string()
 }
 
 /// Resolve the Zellij tab name of the parent agent.

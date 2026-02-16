@@ -45,8 +45,8 @@ impl FFIBoundary for Repo {}
 /// Used with [`GitHubService::list_issues()`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IssueFilter {
-    /// Filter by issue state: "open", "closed", or "all".
-    pub state: Option<String>,
+    /// Filter by issue state.
+    pub state: Option<crate::domain::FilterState>,
 
     /// Filter by label names (AND logic - issue must have all labels).
     pub labels: Option<Vec<String>>,
@@ -79,8 +79,8 @@ impl FFIBoundary for CreatePRSpec {}
 /// Used with [`GitHubService::list_prs()`].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PRFilter {
-    /// Filter by PR state: "open", "closed", or "all".
-    pub state: Option<String>,
+    /// Filter by PR state.
+    pub state: Option<crate::domain::FilterState>,
 
     /// Maximum number of PRs to return (default: API default, usually 30).
     pub limit: Option<u32>,
@@ -345,10 +345,10 @@ impl GitHubService {
 
         if let Some(f) = filter {
             if let Some(state) = &f.state {
-                let s = match state.as_str() {
-                    "open" => params::State::Open,
-                    "closed" => params::State::Closed,
-                    _ => params::State::All,
+                let s = match state {
+                    crate::domain::FilterState::Open => params::State::Open,
+                    crate::domain::FilterState::Closed => params::State::Closed,
+                    crate::domain::FilterState::All => params::State::All,
                 };
                 builder = builder.state(s);
             }
@@ -453,10 +453,10 @@ impl GitHubService {
 
         if let Some(f) = filter {
             if let Some(state) = &f.state {
-                let s = match state.as_str() {
-                    "open" => params::State::Open,
-                    "closed" => params::State::Closed,
-                    _ => params::State::All,
+                let s = match state {
+                    crate::domain::FilterState::Open => params::State::Open,
+                    crate::domain::FilterState::Closed => params::State::Closed,
+                    crate::domain::FilterState::All => params::State::All,
                 };
                 builder = builder.state(s);
             }

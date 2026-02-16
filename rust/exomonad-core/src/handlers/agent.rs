@@ -2,6 +2,7 @@
 //!
 //! Uses proto-generated types from `exomonad_proto::effects::agent`.
 
+use crate::domain::ClaudeSessionUuid;
 use crate::effects::{
     dispatch_agent_effect, AgentEffects, EffectError, EffectHandler, EffectResult,
 };
@@ -188,11 +189,11 @@ impl AgentEffects for AgentHandler {
     async fn spawn_subtree(&self, req: SpawnSubtreeRequest) -> EffectResult<SpawnSubtreeResponse> {
         // Look up Claude session UUID from registry (overrides whatever WASM sent)
         let parent_session_id = if let Some(ref registry) = self.claude_session_registry {
-            let registry_key = crate::mcp::agent_identity::get_agent_id();
-            let key = if registry_key.is_empty() {
+            let agent_name = crate::mcp::agent_identity::get_agent_id();
+            let key = if agent_name.as_str().is_empty() {
                 "root".to_string()
             } else {
-                registry_key
+                agent_name.to_string()
             };
             let claude_uuid = registry.get(&key).await;
             info!(
@@ -200,18 +201,17 @@ impl AgentEffects for AgentHandler {
                 claude_uuid = ?claude_uuid,
                 "Looked up Claude session UUID for spawn_subtree"
             );
-            match claude_uuid {
-                Some(uuid) => uuid,
-                None => {
-                    warn!(
-                        key = %key,
-                        "No Claude session UUID registered — child will start without --fork-session context. Ensure SessionStart hook is configured."
-                    );
-                    String::new()
-                }
+            if claude_uuid.is_none() {
+                warn!(
+                    key = %key,
+                    "No Claude session UUID registered — child will start without --fork-session context. Ensure SessionStart hook is configured."
+                );
             }
+            claude_uuid
+        } else if !req.parent_session_id.is_empty() {
+            Some(ClaudeSessionUuid::from(req.parent_session_id.as_str()))
         } else {
-            req.parent_session_id.clone()
+            None
         };
 
         let options = SpawnSubtreeOptions {
@@ -238,7 +238,7 @@ impl AgentEffects for AgentHandler {
         let options = SpawnSubtreeOptions {
             task: req.task.clone(),
             branch_name: req.branch_name.clone(),
-            parent_session_id: String::new(),
+            parent_session_id: None,
         };
 
         let result = self
@@ -253,7 +253,7 @@ impl AgentEffects for AgentHandler {
     }
 
     async fn cleanup(&self, req: CleanupRequest) -> EffectResult<CleanupResponse> {
-        match self.service.cleanup_agent(&req.issue, req.force).await {
+        match self.service.cleanup_agent(&req.issue).await {
             Ok(_) => Ok(CleanupResponse {
                 success: true,
                 error: String::new(),
@@ -272,10 +272,7 @@ impl AgentEffects for AgentHandler {
             Some(req.subrepo.as_str())
         };
 
-        let result = self
-            .service
-            .cleanup_agents(&req.issues, req.force, subrepo)
-            .await;
+        let result = self.service.cleanup_agents(&req.issues, subrepo).await;
 
         let failed_ids: Vec<String> = result.failed.iter().map(|(id, _)| id.clone()).collect();
         let errors: Vec<String> = result.failed.iter().map(|(_, err)| err.clone()).collect();
@@ -464,10 +461,10 @@ fn leaf_subtree_result_to_proto(
 }
 
 fn service_info_to_proto(info: &AgentInfo) -> exomonad_proto::effects::agent::AgentInfo {
-    let agent_type = match info.agent_type.as_deref() {
-        Some("claude") => AgentType::Claude as i32,
-        Some("gemini") => AgentType::Gemini as i32,
-        _ => AgentType::Unspecified as i32,
+    let agent_type = match info.agent_type {
+        Some(ServiceAgentType::Claude) => AgentType::Claude as i32,
+        Some(ServiceAgentType::Gemini) => AgentType::Gemini as i32,
+        None => AgentType::Unspecified as i32,
     };
 
     let status = match info.status {

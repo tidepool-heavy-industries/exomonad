@@ -1,4 +1,5 @@
 use crate::services::docker::CommandExecutor;
+use crate::{GithubOwner, GithubRepo};
 use anyhow::{Context, Result};
 use duct::cmd;
 use serde::{Deserialize, Serialize};
@@ -84,12 +85,12 @@ pub struct RepoInfo {
     /// Repository owner (parsed from remote URL, if available).
     ///
     /// For GitHub repos, this is the user/org name (e.g., "anthropics").
-    pub owner: Option<String>,
+    pub owner: Option<GithubOwner>,
 
     /// Repository name (parsed from remote URL, if available).
     ///
     /// For GitHub repos, this is the repo name (e.g., "exomonad").
-    pub name: Option<String>,
+    pub name: Option<GithubRepo>,
 }
 
 /// Git operations service.
@@ -232,7 +233,7 @@ impl GitService {
 }
 
 /// Parse a GitHub URL (HTTPS or SSH) into (owner, repo) tuple.
-pub fn parse_github_url(url: &str) -> Option<(String, String)> {
+pub fn parse_github_url(url: &str) -> Option<(GithubOwner, GithubRepo)> {
     let cleaned = url
         .replace("git@github.com:", "https://github.com/")
         .replace(".git", "");
@@ -241,7 +242,7 @@ pub fn parse_github_url(url: &str) -> Option<(String, String)> {
 
     match parts.as_slice() {
         [.., owner, repo] if !owner.is_empty() && !repo.is_empty() => {
-            Some((owner.to_string(), repo.to_string()))
+            Some((GithubOwner::from(*owner), GithubRepo::from(*repo)))
         }
         _ => None,
     }

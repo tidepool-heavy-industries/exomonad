@@ -324,15 +324,14 @@ async fn handle_hook_inner(
     }
 
     // Wrap WASM calls with agent identity task-locals so effect handlers
-    // (e.g. EventHandler::notify_parent) can resolve the correct session.
-    let agent_id_for_hook = params.agent_id.clone().unwrap_or_default();
-    let session_id_for_hook = params
-        .session_id
-        .clone()
-        .unwrap_or_else(|| "root".to_string());
+    // (e.g. EventHandler::notify_parent) can resolve the correct identity.
+    let agent_name_for_hook =
+        exomonad_core::AgentName::from(params.agent_id.as_deref().unwrap_or("root"));
+    let birth_branch_for_hook =
+        exomonad_core::BirthBranch::from(params.session_id.as_deref().unwrap_or("main"));
     debug!(
-        agent_id = %agent_id_for_hook,
-        session_id = %session_id_for_hook,
+        agent_name = %agent_name_for_hook,
+        birth_branch = %birth_branch_for_hook,
         agent_id_from_param = ?params.agent_id,
         "Hook identity context"
     );
@@ -341,13 +340,16 @@ async fn handle_hook_inner(
         HookDispatch::WorkerExit => {
             // WASM handles notifyParent as a side effect. We call it and return allow.
             let _: serde_json::Value = exomonad_core::mcp::agent_identity::with_agent_id(
-                agent_id_for_hook,
-                exomonad_core::mcp::agent_identity::with_session_id(session_id_for_hook, async {
-                    state
-                        .plugin
-                        .call("handle_pre_tool_use", &hook_input_value)
-                        .await
-                }),
+                agent_name_for_hook.clone(),
+                exomonad_core::mcp::agent_identity::with_birth_branch(
+                    birth_branch_for_hook.clone(),
+                    async {
+                        state
+                            .plugin
+                            .call("handle_pre_tool_use", &hook_input_value)
+                            .await
+                    },
+                ),
             )
             .await
             .context("WASM handleWorkerExit failed")?;
@@ -361,9 +363,9 @@ async fn handle_hook_inner(
         HookDispatch::Stop => {
             let internal_output: InternalStopHookOutput =
                 exomonad_core::mcp::agent_identity::with_agent_id(
-                    agent_id_for_hook,
-                    exomonad_core::mcp::agent_identity::with_session_id(
-                        session_id_for_hook,
+                    agent_name_for_hook.clone(),
+                    exomonad_core::mcp::agent_identity::with_birth_branch(
+                        birth_branch_for_hook.clone(),
                         async {
                             state
                                 .plugin
@@ -441,13 +443,16 @@ async fn handle_hook_inner(
 
         HookDispatch::ToolUse => {
             let output: ClaudePreToolUseOutput = exomonad_core::mcp::agent_identity::with_agent_id(
-                agent_id_for_hook,
-                exomonad_core::mcp::agent_identity::with_session_id(session_id_for_hook, async {
-                    state
-                        .plugin
-                        .call("handle_pre_tool_use", &hook_input_value)
-                        .await
-                }),
+                agent_name_for_hook.clone(),
+                exomonad_core::mcp::agent_identity::with_birth_branch(
+                    birth_branch_for_hook.clone(),
+                    async {
+                        state
+                            .plugin
+                            .call("handle_pre_tool_use", &hook_input_value)
+                            .await
+                    },
+                ),
             )
             .await
             .context("WASM handle_pre_tool_use failed")?;
@@ -836,9 +841,9 @@ async fn main() -> Result<()> {
             agent_control = agent_control
                 .with_worktree_base(config.worktree_base)
                 .with_mcp_server_port(port);
-            let event_session_id = uuid::Uuid::new_v4().to_string();
-            agent_control = agent_control.with_event_session_id(event_session_id.clone());
+            agent_control = agent_control.with_birth_branch(exomonad_core::BirthBranch::root());
             agent_control = agent_control.with_zellij_session(config.zellij_session.clone());
+            let event_session_id = uuid::Uuid::new_v4().to_string();
             let agent_control = Arc::new(agent_control);
 
             let event_queue = Arc::new(exomonad_core::services::event_queue::EventQueue::new());
@@ -964,7 +969,8 @@ async fn main() -> Result<()> {
                       body: axum::extract::Json<serde_json::Value>| {
                     let s = s.clone();
                     async move {
-                        exomonad_core::mcp::agent_identity::with_agent_id(agent_name, async move {
+                        let name = exomonad_core::AgentName::from(agent_name.as_str());
+                        exomonad_core::mcp::agent_identity::with_agent_id(name, async move {
                             s.handle(headers, body).await
                         })
                         .await
@@ -980,7 +986,8 @@ async fn main() -> Result<()> {
                       body: axum::extract::Json<serde_json::Value>| {
                     let s = s.clone();
                     async move {
-                        exomonad_core::mcp::agent_identity::with_agent_id(agent_name, async move {
+                        let name = exomonad_core::AgentName::from(agent_name.as_str());
+                        exomonad_core::mcp::agent_identity::with_agent_id(name, async move {
                             s.handle(headers, body).await
                         })
                         .await

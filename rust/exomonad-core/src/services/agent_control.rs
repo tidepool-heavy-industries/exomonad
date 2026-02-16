@@ -6,7 +6,7 @@
 //! - ListAgents: Discover from Zellij tabs (source of truth for running agents)
 
 use crate::common::TimeoutError;
-use crate::domain::ItemState;
+use crate::domain::{BirthBranch, ClaudeSessionUuid, ItemState};
 use crate::ffi::FFIBoundary;
 use crate::{GithubOwner, GithubRepo, IssueNumber};
 use anyhow::{anyhow, Context, Result};
@@ -173,7 +173,7 @@ pub struct SpawnSubtreeOptions {
     /// Branch name suffix.
     pub branch_name: String,
     /// Parent Claude session ID for --resume --fork-session context inheritance.
-    pub parent_session_id: String,
+    pub parent_session_id: Option<ClaudeSessionUuid>,
 }
 
 /// Result of spawning an agent.
@@ -257,9 +257,9 @@ pub struct AgentInfo {
     /// Slug from agent name (e.g., "fix-bug-in-parser")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slug: Option<String>,
-    /// Agent type ("claude" or "gemini")
+    /// Agent type (Claude or Gemini)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent_type: Option<String>,
+    pub agent_type: Option<AgentType>,
     /// Associated PR if one exists
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pr: Option<AgentPrInfo>,
@@ -372,8 +372,8 @@ pub struct AgentControlService {
     github: Option<GitHubService>,
     /// Zellij session name for event emission
     zellij_session: Option<String>,
-    /// Server-generated UUID for event routing (EXOMONAD_SESSION_ID env var).
-    event_session_id: Option<String>,
+    /// This agent's birth-branch (git identity). Root TL = "main".
+    birth_branch: BirthBranch,
     /// MCP server port for per-agent endpoint URLs (set when running `exomonad serve`).
     mcp_server_port: Option<u16>,
 }
@@ -387,7 +387,7 @@ impl AgentControlService {
             worktree_base,
             github,
             zellij_session: None,
-            event_session_id: None,
+            birth_branch: BirthBranch::root(),
             mcp_server_port: None,
         }
     }
@@ -404,9 +404,9 @@ impl AgentControlService {
         self
     }
 
-    /// Set the event session ID for worker coordination.
-    pub fn with_event_session_id(mut self, id: String) -> Self {
-        self.event_session_id = Some(id);
+    /// Set the birth-branch (git identity) for this agent.
+    pub fn with_birth_branch(mut self, branch: BirthBranch) -> Self {
+        self.birth_branch = branch;
         self
     }
 
@@ -431,7 +431,7 @@ impl AgentControlService {
             worktree_base: project_dir.join(".exo/worktrees"),
             github,
             zellij_session: None,
-            event_session_id: None,
+            birth_branch: BirthBranch::root(),
             mcp_server_port: None,
         })
     }
@@ -588,8 +588,7 @@ impl AgentControlService {
 
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-            let session_id = self.event_session_id.as_deref().unwrap_or("default");
-            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), session_id.to_string());
+            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), self.birth_branch.to_string());
             if let Some(port) = self.mcp_server_port {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
             }
@@ -776,8 +775,7 @@ impl AgentControlService {
 
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-            let session_id = self.event_session_id.as_deref().unwrap_or("default");
-            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), session_id.to_string());
+            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), self.birth_branch.to_string());
             if let Some(port) = self.mcp_server_port {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
             }
@@ -907,8 +905,7 @@ impl AgentControlService {
 
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-            let session_id = self.event_session_id.as_deref().unwrap_or("default");
-            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), session_id.to_string());
+            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), self.birth_branch.to_string());
             if let Some(port) = self.mcp_server_port {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
             }
@@ -987,16 +984,11 @@ impl AgentControlService {
         let result = timeout(SPAWN_TIMEOUT, async {
             self.check_zellij_env()?;
 
-            // Depth check: session_id is the birth-branch.
-            let session_id = self.event_session_id.as_deref().unwrap_or("root");
-            let depth = if session_id == "root" {
-                0
-            } else {
-                session_id.chars().filter(|&c| c == '.').count() + 1
-            };
+            // Depth check using typed birth-branch.
+            let depth = self.birth_branch.depth();
 
             if depth >= 2 {
-                return Err(anyhow!("Subtree depth limit reached (max 2). Current session: {}, depth: {}", session_id, depth));
+                return Err(anyhow!("Subtree depth limit reached (max 2). Current birth-branch: {}, depth: {}", self.birth_branch, depth));
             }
 
             let effective_project_dir = &self.project_dir;
@@ -1018,18 +1010,15 @@ impl AgentControlService {
                 });
             }
 
-            // Parent branch = session_id (birth-branch). Root TL uses "main".
-            let current_branch = if session_id == "root" {
-                "main".to_string()
-            } else {
-                session_id.to_string()
-            };
+            // Parent branch derived from typed birth-branch.
+            let current_branch = self.birth_branch.as_parent_branch();
 
             // Push parent branch so child PRs can reference it as base
-            ensure_branch_pushed(&current_branch, effective_project_dir).await?;
+            ensure_branch_pushed(current_branch, effective_project_dir).await?;
 
             // Branch: {current_branch}.{slug}
-            let branch_name = format!("{}.{}", current_branch, slug);
+            let child_birth = self.birth_branch.child(&slug);
+            let branch_name = child_birth.to_string();
 
             // Worktree location: {worktree_base}/{slug}
             let worktree_path = self.worktree_base.join(&slug);
@@ -1106,11 +1095,7 @@ impl AgentControlService {
             );
 
             // Determine fork mode from parent_session_id
-            let fork_id = if options.parent_session_id.is_empty() {
-                None
-            } else {
-                Some(options.parent_session_id.as_str())
-            };
+            let fork_id = options.parent_session_id.as_ref().map(|id| id.as_str());
 
             // Open Zellij tab with cwd = worktree_path
             self.new_zellij_tab_inner(
@@ -1153,13 +1138,8 @@ impl AgentControlService {
 
             let effective_project_dir = &self.project_dir;
 
-            // Parent branch = session_id (birth-branch). Root TL uses "main".
-            let session_id = self.event_session_id.as_deref().unwrap_or("root");
-            let current_branch = if session_id == "root" {
-                "main".to_string()
-            } else {
-                session_id.to_string()
-            };
+            // Parent branch derived from typed birth-branch.
+            let current_branch = self.birth_branch.as_parent_branch().to_string();
 
             // Sanitize branch name
             let slug = slugify(&options.branch_name);
@@ -1287,7 +1267,7 @@ impl AgentControlService {
     /// Kills the Zellij tab, unregisters from Teams config.json,
     /// and removes per-agent config directory (`.exo/agents/{name}/`).
     #[tracing::instrument(skip(self))]
-    pub async fn cleanup_agent(&self, identifier: &str, _force: bool) -> Result<()> {
+    pub async fn cleanup_agent(&self, identifier: &str) -> Result<()> {
         // Try to find agent in list (for metadata and tab matching).
         // Failure here is non-fatal to allow cleaning up worker panes (invisible to list_agents).
         let agents = self.list_agents().await.unwrap_or_default();
@@ -1301,20 +1281,16 @@ impl AgentControlService {
 
         // Reconstruct names for paths and exact tab matching.
         // If agent not found, assume gemini worker (Phase 1 convention).
-        let (suffix, display_name) = match agent {
+        let (agent_type, display_name) = match agent {
             Some(a) => {
-                let s = a.agent_type.as_deref().unwrap_or("gemini");
-                let emoji = if s == "claude" {
-                    AgentType::Claude.emoji()
-                } else {
-                    AgentType::Gemini.emoji()
-                };
-                (s, Some(format!("{} {}", emoji, identifier)))
+                let at = a.agent_type.unwrap_or(AgentType::Gemini);
+                let emoji = at.emoji();
+                (at, Some(format!("{} {}", emoji, identifier)))
             }
-            None => ("gemini", None),
+            None => (AgentType::Gemini, None),
         };
 
-        let internal_name = format!("{}-{}", identifier, suffix);
+        let internal_name = format!("{}-{}", identifier, agent_type.suffix());
 
         // Close Zellij tab if found in list
         if let Some(target_tab) = display_name {
@@ -1419,7 +1395,6 @@ impl AgentControlService {
     pub async fn cleanup_agents(
         &self,
         issue_ids: &[String],
-        force: bool,
         subrepo: Option<&str>,
     ) -> BatchCleanupResult {
         let mut result = BatchCleanupResult {
@@ -1428,7 +1403,7 @@ impl AgentControlService {
         };
 
         for issue_id in issue_ids {
-            match self.cleanup_agent(issue_id, force).await {
+            match self.cleanup_agent(issue_id).await {
                 Ok(()) => result.cleaned.push(issue_id.clone()),
                 Err(e) => {
                     warn!(issue_id, error = %e, "Failed to cleanup agent");
@@ -1480,7 +1455,7 @@ impl AgentControlService {
             });
         }
 
-        Ok(self.cleanup_agents(&to_cleanup, false, subrepo).await)
+        Ok(self.cleanup_agents(&to_cleanup, subrepo).await)
     }
 
     // ========================================================================
@@ -1513,13 +1488,12 @@ impl AgentControlService {
                     let is_gemini = path.join(".gemini/settings.json").exists();
 
                     if is_claude || is_gemini {
-                        let agent_type = if is_claude { "claude" } else { "gemini" };
-                        let emoji = if is_claude {
-                            AgentType::Claude.emoji()
+                        let agent_type = if is_claude {
+                            AgentType::Claude
                         } else {
-                            AgentType::Gemini.emoji()
+                            AgentType::Gemini
                         };
-                        let display_name = format!("{} {}", emoji, name);
+                        let display_name = format!("{} {}", agent_type.emoji(), name);
 
                         let has_tab = tabs.iter().any(|t| t == &display_name);
                         let status = if has_tab {
@@ -1535,7 +1509,7 @@ impl AgentControlService {
                             topology: Topology::WorktreePerAgent,
                             agent_dir: Some(path.to_string_lossy().to_string()),
                             slug: Some(name.to_string()),
-                            agent_type: Some(agent_type.to_string()),
+                            agent_type: Some(agent_type),
                             pr: None,
                         });
 
@@ -1595,7 +1569,7 @@ impl AgentControlService {
                         topology: Topology::SharedDir,
                         agent_dir: Some(path.to_string_lossy().to_string()),
                         slug: Some(base_name.to_string()),
-                        agent_type: Some("gemini".to_string()),
+                        agent_type: Some(AgentType::Gemini),
                         pr: None,
                     });
                 }

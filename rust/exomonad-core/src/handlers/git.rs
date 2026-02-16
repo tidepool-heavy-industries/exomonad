@@ -178,8 +178,8 @@ impl GitEffects for GitHandler {
 
         Ok(GetRepoInfoResponse {
             branch: info.branch,
-            owner: info.owner.unwrap_or_default(),
-            name: info.name.unwrap_or_default(),
+            owner: info.owner.map(Into::into).unwrap_or_default(),
+            name: info.name.map(Into::into).unwrap_or_default(),
         })
     }
 
