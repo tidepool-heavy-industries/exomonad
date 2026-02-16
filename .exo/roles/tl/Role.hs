@@ -11,7 +11,6 @@ data Tools mode = Tools
   { spawn :: SpawnTools mode,
     popups :: PopupTools mode,
     messaging :: TLMessagingTools mode,
-    events :: EventTools mode,
     notifyParent :: mode :- NotifyParent
   }
   deriving (Generic)
@@ -25,7 +24,6 @@ config =
           { spawn = spawnTools,
             popups = popupTools,
             messaging = tlMessagingTools,
-            events = eventTools,
             notifyParent = mkHandler @NotifyParent
           },
       hooks = defaultHooks

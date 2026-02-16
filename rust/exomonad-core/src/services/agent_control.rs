@@ -999,7 +999,6 @@ impl AgentControlService {
                 return Err(anyhow!("Subtree depth limit reached (max 2). Current session: {}, depth: {}", session_id, depth));
             }
 
-            // Resolve effective project dir (subtree always spawns from current project root)
             let effective_project_dir = &self.project_dir;
 
             // Sanitize branch name for internal use
@@ -1019,16 +1018,12 @@ impl AgentControlService {
                 });
             }
 
-            // Get current branch for base
-            let current_branch_output = Command::new("git")
-                .args(["rev-parse", "--abbrev-ref", "HEAD"])
-                .current_dir(effective_project_dir)
-                .output()
-                .await
-                .context("Failed to get current branch")?;
-            let current_branch = String::from_utf8_lossy(&current_branch_output.stdout)
-                .trim()
-                .to_string();
+            // Parent branch = session_id (birth-branch). Root TL uses "main".
+            let current_branch = if session_id == "root" {
+                "main".to_string()
+            } else {
+                session_id.to_string()
+            };
 
             // Push parent branch so child PRs can reference it as base
             ensure_branch_pushed(&current_branch, effective_project_dir).await?;
@@ -1152,6 +1147,14 @@ impl AgentControlService {
 
             let effective_project_dir = &self.project_dir;
 
+            // Parent branch = session_id (birth-branch). Root TL uses "main".
+            let session_id = self.event_session_id.as_deref().unwrap_or("root");
+            let current_branch = if session_id == "root" {
+                "main".to_string()
+            } else {
+                session_id.to_string()
+            };
+
             // Sanitize branch name
             let slug = slugify(&options.branch_name);
             let internal_name = format!("{}-gemini", slug); // gemini suffix
@@ -1168,17 +1171,6 @@ impl AgentControlService {
                     agent_type: "gemini".to_string(),
                 });
             }
-
-            // Get current branch
-            let current_branch_output = Command::new("git")
-                .args(["rev-parse", "--abbrev-ref", "HEAD"])
-                .current_dir(effective_project_dir)
-                .output()
-                .await
-                .context("Failed to get current branch")?;
-            let current_branch = String::from_utf8_lossy(&current_branch_output.stdout)
-                .trim()
-                .to_string();
 
             // Push parent branch so child PRs can reference it as base
             ensure_branch_pushed(&current_branch, effective_project_dir).await?;
@@ -1683,25 +1675,29 @@ impl AgentControlService {
         cwd: &Path,
     ) -> String {
         let cmd = agent_type.command();
+        let skip_perms = match agent_type {
+            AgentType::Claude => " --dangerously-skip-permissions",
+            AgentType::Gemini => "",
+        };
         let agent_command = match (prompt, fork_session_id) {
             (Some(p), Some(session_id)) => {
                 let escaped_prompt = Self::escape_for_shell_command(p);
                 let escaped_session = Self::escape_for_shell_command(session_id);
                 format!(
-                    "{} --resume {} --fork-session -p {}",
-                    cmd, escaped_session, escaped_prompt
+                    "{}{} --resume {} --fork-session -p {}",
+                    cmd, skip_perms, escaped_session, escaped_prompt
                 )
             }
             (Some(p), None) => {
                 let escaped_prompt = Self::escape_for_shell_command(p);
                 let flag = agent_type.prompt_flag();
                 if flag.is_empty() {
-                    format!("{} {}", cmd, escaped_prompt)
+                    format!("{}{} {}", cmd, skip_perms, escaped_prompt)
                 } else {
-                    format!("{} {} {}", cmd, flag, escaped_prompt)
+                    format!("{}{} {} {}", cmd, skip_perms, flag, escaped_prompt)
                 }
             }
-            _ => cmd.to_string(),
+            _ => format!("{}{}", cmd, skip_perms),
         };
 
         // Prepend env vars
@@ -2001,7 +1997,7 @@ impl AgentControlService {
   "mcpServers": {{
     "exomonad": {{
       "type": "http",
-      "url": "http://localhost:{port}/agents/{name}/mcp"
+      "url": "http://localhost:{port}/agents/{name}/tl/mcp"
     }}
   }}
 }}"###,
@@ -2328,7 +2324,7 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
         assert_eq!(
             parsed["mcpServers"]["exomonad"]["url"],
-            "http://localhost:7432/agents/test-claude/mcp"
+            "http://localhost:7432/agents/test-claude/tl/mcp"
         );
         assert!(parsed["mcpServers"]["exomonad"].get("httpUrl").is_none());
     }

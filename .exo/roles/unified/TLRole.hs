@@ -23,7 +23,6 @@ data Tools mode = Tools
     messaging :: TLMessagingTools mode,
     pr :: FilePRTools mode,
     mergePr :: mode :- MergePR,
-    events :: EventTools mode,
     notifyParent :: mode :- NotifyParent
   }
   deriving (Generic)
@@ -39,7 +38,6 @@ config =
             messaging = tlMessagingTools,
             pr = filePRTools,
             mergePr = mkHandler @MergePR,
-            events = eventTools,
             notifyParent = mkHandler @NotifyParent
           },
       hooks =

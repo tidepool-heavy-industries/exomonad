@@ -22,8 +22,7 @@ The guest exports MCP tools that agents can call. These are defined in `ExoMonad
 
 ### Events Tools (`ExoMonad.Guest.Tools.Events`)
 
-- **`wait_for_event`**: Blocks until a specific event type occurs (e.g., `worker_complete`) or a timeout is reached. Useful for orchestration agents waiting for sub-tasks. Bundled in `EventTools` record (TL role only).
-- **`notify_parent`**: Used by worker/subtree agents to signal completion to their parent. Available as a bare field in both TL and dev roles.
+- **`notify_parent`**: Used by worker/subtree agents to signal completion to their parent. Routes to parent via server, injects notification into parent's Zellij pane. Available as a bare field in both TL and dev roles.
 
 ### Spawn Tools (`ExoMonad.Guest.Tools.Spawn`)
 

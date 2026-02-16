@@ -176,15 +176,15 @@ Spawn heterogeneous agent teams as a recursive tree:
 
 ### Coordination
 
-Zero-polling parallel worker coordination:
+Push-based parallel worker coordination via Zellij STDIN injection:
 
-1. TL spawns workers → calls `wait_for_event types=["worker_complete"] timeout_secs=300`
+1. TL spawns workers and **returns** (no blocking wait)
 2. Each worker gets `EXOMONAD_SESSION_ID` env var (parent's birth-branch)
-3. When worker exits, `handleWorkerExit` hook calls `notify_parent`
-4. Server resolves parent from caller identity, delivers to EventQueue
-5. TL's `wait_for_event` wakes immediately and returns the event
+3. When worker exits, session-end hook calls `notify_parent`
+4. Server resolves parent tab from caller identity, injects `[CHILD COMPLETE: agent-id] message` into parent's Zellij pane
+5. TL sees the injected text as a new user message and wakes up
 
-Use cases: parallel implementation (3+ workers on independent changes), fan-out/fan-in, progress monitoring with timeout.
+The TL does not poll or block. It finishes its turn after spawning, and gets poked by the system when children complete. This is true push notification via `inject_input` through the Zellij plugin pipe.
 
 ### Messaging
 
@@ -204,12 +204,12 @@ Inter-agent communication between TL and dev agents:
 
 - **`popup`** — Display interactive popup in Zellij (choices, text input, checkboxes, sliders, multiselect). Rendered by the exomonad-plugin.
 
-### Not Yet Built
+### Built Infrastructure
 
-| Feature | Impact |
+| Feature | Status |
 |---------|--------|
-| **Event router** (Zellij STDIN injection for dormant parents) | TL must actively poll with `wait_for_event`. Cannot be woken while idle in a different tool call. |
-| **GitHub poller** (PR status → events) | TL must manually check PR/CI status. No automatic notification when CI passes or Copilot review completes. |
+| **Event router** (Zellij STDIN injection) | Built. `notify_parent` → `inject_input` into parent pane via Zellij plugin pipe. |
+| **GitHub poller** (PR status → events) | Built. Background service polls PR/CI status and injects notifications into agent panes. |
 
 ---
 
@@ -289,8 +289,7 @@ All tools implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/To
 | `question` | Dev → TL blocking question (trampoline) |
 | `get_agent_messages` | TL reads agent outboxes (long-poll) |
 | `answer_question` | TL answers pending question |
-| `wait_for_event` | Block until event (e.g., worker_complete). Trampoline |
-| `notify_parent` | Signal completion to parent. Auto-routed by server |
+| `notify_parent` | Signal completion to parent. Auto-routed, injects into parent pane |
 
 **Note**: Git operations (`git status`, `git log`, etc.) and GitHub operations (`gh pr list`, etc.) use the Bash tool with `git` and `gh` commands, not MCP tools.
 

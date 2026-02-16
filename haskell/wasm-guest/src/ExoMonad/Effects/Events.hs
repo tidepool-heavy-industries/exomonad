@@ -2,39 +2,17 @@
 {-# LANGUAGE TypeFamilies #-}
 
 module ExoMonad.Effects.Events
-  ( EventsWaitForEvent,
-    EventsNotifyEvent,
+  ( EventsNotifyEvent,
     EventsNotifyParent,
-    waitForEvent,
     notifyEvent,
     notifyParent,
   )
 where
 
 import Data.Text (Text)
-import Data.Vector qualified as V
-import Data.Word (Word64)
 import Effects.Events qualified as Proto
 import ExoMonad.Effect.Class (Effect (..), EffectError, runEffect)
 import ExoMonad.Guest.Proto (fromText)
-
--- | Wait for event effect
-data EventsWaitForEvent
-
-instance Effect EventsWaitForEvent where
-  type Input EventsWaitForEvent = Proto.WaitForEventRequest
-  type Output EventsWaitForEvent = Proto.WaitForEventResponse
-  effectId = "events.wait_for_event"
-
--- | Smart constructor for wait_for_event
-waitForEvent :: [Text] -> Int -> Word64 -> IO (Either EffectError Proto.WaitForEventResponse)
-waitForEvent types timeout afterEventId =
-  runEffect @EventsWaitForEvent $
-    Proto.WaitForEventRequest
-      { Proto.waitForEventRequestTypes = V.fromList (map fromText types),
-        Proto.waitForEventRequestTimeoutSecs = fromIntegral timeout,
-        Proto.waitForEventRequestAfterEventId = afterEventId
-      }
 
 -- | Notify event effect
 data EventsNotifyEvent

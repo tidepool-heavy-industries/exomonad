@@ -8,9 +8,9 @@ Handles effects in the `events.*` namespace, enabling synchronization between ag
 
 ### Capabilities
 
-- **`wait_for_event`**: Blocking wait for specific event types (e.g., `worker_complete`) with timeout.
+- **`wait_for_event`**: Internal effect for blocking wait on event types. Not exposed as an MCP tool — parent notification uses Zellij STDIN injection instead.
 - **`notify_event`**: Publishes an event to a session queue.
-- **`notify_parent`**: Signals completion or status update to the parent agent.
+- **`notify_parent`**: Signals completion to parent agent. Routes to parent's EventQueue AND injects natural-language notification into parent's Zellij pane via `inject_input`.
 
 ### Remote Forwarding
 

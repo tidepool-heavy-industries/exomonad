@@ -160,7 +160,8 @@ Resolution order in `mcp::agent_identity::get_agent_id()`:
 **Route layout:**
 - `/tl/mcp` — TL endpoint (all tools including orchestration)
 - `/dev/mcp` — generic dev endpoint (no agent identity)
-- `/agents/{name}/mcp` — per-agent endpoint (identity from URL path)
+- `/agents/{name}/mcp` — per-agent dev endpoint (identity from URL path)
+- `/agents/{name}/tl/mcp` — per-agent TL endpoint (identity + orchestration tools)
 
 At spawn time, `spawn_subtree`/`spawn_leaf_subtree`/`spawn_workers` (via WASM) writes per-agent MCP config with the agent's endpoint URL. The URL IS the identity — unforgeable, visible in access logs.
 
@@ -186,8 +187,7 @@ All tools are defined in Haskell WASM and executed via host functions.
 | `question` | Send blocking question to TL (agent-side) |
 | `get_agent_messages` | Read notes/questions from agents (TL messaging, supports long-poll) |
 | `answer_question` | Answer pending agent question (TL messaging) |
-| `wait_for_event` | Block until a matching event occurs or timeout expires |
-| `notify_parent` | Notify parent session of completion (server resolves routing automatically) |
+| `notify_parent` | Notify parent session of completion (auto-routed, injects into parent pane) |
 
 ## Effect System
 
@@ -217,7 +217,7 @@ Haskell: Either EffectError GetBranchResponse
 | `file_pr.*` | FilePRHandler | file_pr |
 | `copilot.*` | CopilotHandler | wait_for_copilot_review |
 | `messaging.*` | MessagingHandler | send_note, send_question |
-| `events.*` | EventHandler | wait_for_event, notify_event |
+| `events.*` | EventHandler | wait_for_event (internal), notify_event, notify_parent |
 | `jj.*` | JjHandler | bookmark_create, git_push, git_fetch, log, new, status |
 | `merge_pr.*` | MergePRHandler | merge_pr (gh pr merge + jj git fetch) |
 

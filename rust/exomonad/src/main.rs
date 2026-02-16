@@ -950,9 +950,25 @@ async fn main() -> Result<()> {
                 }
             };
 
-            // Per-agent MCP route: /agents/{name}/mcp
+            // Per-agent MCP route (dev role): /agents/{name}/mcp
             let agent_handler = {
                 let s = dev_server.clone();
+                move |axum::extract::Path(agent_name): axum::extract::Path<String>,
+                      headers: axum::http::HeaderMap,
+                      body: axum::extract::Json<serde_json::Value>| {
+                    let s = s.clone();
+                    async move {
+                        exomonad_core::mcp::agent_identity::with_agent_id(agent_name, async move {
+                            s.handle(headers, body).await
+                        })
+                        .await
+                    }
+                }
+            };
+
+            // Per-agent MCP route (TL role): /agents/{name}/tl/mcp
+            let agent_tl_handler = {
+                let s = tl_server.clone();
                 move |axum::extract::Path(agent_name): axum::extract::Path<String>,
                       headers: axum::http::HeaderMap,
                       body: axum::extract::Json<serde_json::Value>| {
@@ -1028,6 +1044,10 @@ async fn main() -> Result<()> {
                 .route(
                     "/agents/{name}/mcp",
                     axum::routing::post(agent_handler.clone()).get(sse_handler),
+                )
+                .route(
+                    "/agents/{name}/tl/mcp",
+                    axum::routing::post(agent_tl_handler).get(sse_handler),
                 )
                 .route("/events", axum::routing::post(events_handler))
                 .layer(cors)
