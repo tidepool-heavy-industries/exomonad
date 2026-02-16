@@ -62,7 +62,7 @@ pub fn orchestration_handlers(
     zellij_session: Option<String>,
     project_dir: PathBuf,
     remote_port: Option<u16>,
-    session_id: Option<String>,
+    event_queue_scope: Option<String>,
     claude_session_registry: Arc<ClaudeSessionRegistry>,
 ) -> (Vec<Box<dyn EffectHandler>>, Arc<QuestionRegistry>) {
     let question_registry = Arc::new(QuestionRegistry::new());
@@ -74,7 +74,11 @@ pub fn orchestration_handlers(
                 .with_claude_session_registry(claude_session_registry.clone()),
         ),
         Box::new(PopupHandler::new(zellij_session)),
-        Box::new(EventHandler::new(event_queue, remote_port, session_id)),
+        Box::new(EventHandler::new(
+            event_queue,
+            remote_port,
+            event_queue_scope,
+        )),
         Box::new(MessagingHandler::new(
             question_registry.clone(),
             project_dir,

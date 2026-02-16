@@ -106,8 +106,95 @@ validated_string!(
     "github_repo"
 );
 
+validated_string!(
+    #[doc = "Agent's birth-branch (git branch name as identity)."]
+    #[doc = "Root TL is always `main`. Subtrees use dot-separated names like `main.feature-a`."]
+    BirthBranch,
+    "birth_branch"
+);
+
+impl BirthBranch {
+    /// Root TL birth-branch (always "main").
+    pub fn root() -> Self {
+        Self("main".to_string())
+    }
+
+    /// Depth in the agent tree (0 = root TL on "main", 1 = first subtree, etc.).
+    /// Depth equals the number of dot separators in the branch name.
+    pub fn depth(&self) -> usize {
+        self.0.chars().filter(|&c| c == '.').count()
+    }
+
+    /// Git branch to use as parent when creating child worktrees.
+    /// Root ("main") returns "main", subtrees return themselves.
+    pub fn as_parent_branch(&self) -> &str {
+        &self.0
+    }
+
+    /// Derive a child birth-branch by appending a slug.
+    pub fn child(&self, slug: &str) -> Self {
+        Self(format!("{}.{}", self.0, slug))
+    }
+
+    /// Get the parent's birth-branch (one level up in dot hierarchy).
+    /// Returns None for root ("main") since it has no parent.
+    pub fn parent(&self) -> Option<Self> {
+        if self.0 == "main" {
+            None
+        } else if let Some((parent, _)) = self.0.rsplit_once('.') {
+            Some(Self(parent.to_string()))
+        } else {
+            // Single segment like "main" with no dots — this IS root
+            None
+        }
+    }
+}
+
+validated_string!(
+    #[doc = "Human-readable agent name/slug (e.g., `feature-a-claude`)."]
+    AgentName,
+    "agent_name"
+);
+
+impl AgentName {
+    /// Whether this agent name looks like a Gemini worker (ends with "-gemini").
+    pub fn is_gemini_worker(&self) -> bool {
+        self.0.ends_with("-gemini")
+    }
+}
+
+validated_string!(
+    #[doc = "Claude Code session UUID for --fork-session context inheritance."]
+    ClaudeSessionUuid,
+    "claude_session_uuid"
+);
+
 #[cfg(test)]
 impl SessionId {
+    /// Create from &str (unchecked, for tests).
+    pub fn from_str_unchecked(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
+#[cfg(test)]
+impl BirthBranch {
+    /// Create from &str (unchecked, for tests).
+    pub fn from_str_unchecked(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
+#[cfg(test)]
+impl AgentName {
+    /// Create from &str (unchecked, for tests).
+    pub fn from_str_unchecked(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
+#[cfg(test)]
+impl ClaudeSessionUuid {
     /// Create from &str (unchecked, for tests).
     pub fn from_str_unchecked(s: &str) -> Self {
         Self(s.to_string())
@@ -184,6 +271,32 @@ pub enum ToolPermission {
     Ask,
 }
 
+// ============================================================================
+// Permission Mode
+// ============================================================================
+
+/// Claude Code permission mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PermissionMode {
+    /// Default permission behavior.
+    Default,
+    /// Plan mode (higher gating).
+    Plan,
+    /// Accept edits without confirmation.
+    AcceptEdits,
+    /// Don't ask for permission.
+    DontAsk,
+    /// Bypass all permissions.
+    BypassPermissions,
+}
+
+impl Default for PermissionMode {
+    fn default() -> Self {
+        Self::Default
+    }
+}
+
 impl fmt::Display for ToolPermission {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -208,6 +321,32 @@ impl TryFrom<String> for ToolPermission {
             }),
         }
     }
+}
+
+// ============================================================================
+// Filter State
+// ============================================================================
+
+/// State filter for GitHub issues and PRs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FilterState {
+    /// Open items only.
+    Open,
+    /// Closed items only.
+    Closed,
+    /// All items (open and closed).
+    All,
+}
+
+/// Message filter for agent messaging.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageFilter {
+    /// All messages (read and unread).
+    All,
+    /// Unread messages only.
+    UnreadOnly,
 }
 
 // ============================================================================
@@ -548,5 +687,50 @@ mod tests {
 
         // Test as_ref
         let _: &Path = abs.as_ref();
+    }
+
+    #[test]
+    fn test_birth_branch_depth() {
+        assert_eq!(BirthBranch::root().depth(), 0);
+        assert_eq!(BirthBranch::from("main").depth(), 0);
+        assert_eq!(BirthBranch::from("main.feature-a").depth(), 1);
+        assert_eq!(BirthBranch::from("main.feature-a.sub-task").depth(), 2);
+    }
+
+    #[test]
+    fn test_birth_branch_parent() {
+        assert_eq!(BirthBranch::root().parent(), None);
+        assert_eq!(
+            BirthBranch::from("main.feature-a").parent(),
+            Some(BirthBranch::from("main"))
+        );
+        assert_eq!(
+            BirthBranch::from("main.feature-a.sub-task").parent(),
+            Some(BirthBranch::from("main.feature-a"))
+        );
+    }
+
+    #[test]
+    fn test_birth_branch_child() {
+        let root = BirthBranch::root();
+        let child = root.child("feature-a");
+        assert_eq!(child.as_str(), "main.feature-a");
+        assert_eq!(child.depth(), 1);
+
+        let grandchild = child.child("sub-task");
+        assert_eq!(grandchild.as_str(), "main.feature-a.sub-task");
+        assert_eq!(grandchild.depth(), 2);
+    }
+
+    #[test]
+    fn test_agent_name_is_gemini_worker() {
+        assert!(AgentName::from("impl-gemini").is_gemini_worker());
+        assert!(!AgentName::from("impl-claude").is_gemini_worker());
+    }
+
+    #[test]
+    fn test_birth_branch_empty_rejected() {
+        let result = BirthBranch::try_from("".to_string());
+        assert!(matches!(result, Err(DomainError::Empty { .. })));
     }
 }

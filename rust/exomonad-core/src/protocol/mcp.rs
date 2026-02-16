@@ -1,12 +1,13 @@
 //! MCP (Model Context Protocol) types.
 
+use crate::domain::ToolName;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Tool definition for MCP discovery (must match Haskell ToolDefinition).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDefinition {
-    pub name: String,
+    pub name: ToolName,
     pub description: String,
     #[serde(rename = "inputSchema")]
     pub input_schema: Value,

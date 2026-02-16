@@ -6,6 +6,7 @@
 use super::external::{ExternalGitHubService as GitHubService, ExternalService};
 use crate::protocol::{ServiceRequest, ServiceResponse};
 use crate::services::git::{self, parse_github_url};
+use crate::{GithubOwner, GithubRepo};
 use anyhow::{Context, Result};
 use duct::cmd;
 use serde::{Deserialize, Serialize};
@@ -65,7 +66,7 @@ fn get_remote_url() -> Result<String> {
 }
 
 /// Get owner and repo from the git remote.
-fn get_owner_repo() -> Result<(String, String)> {
+fn get_owner_repo() -> Result<(GithubOwner, GithubRepo)> {
     let remote_url = get_remote_url()?;
     parse_github_url(&remote_url)
         .ok_or_else(|| anyhow::anyhow!("Failed to parse GitHub URL from remote: {}", remote_url))
@@ -215,7 +216,7 @@ pub async fn file_pr_async(input: &FilePRInput) -> Result<FilePROutput> {
 
     // First check if PR already exists for current branch
     if let Some((url, number, head, base)) =
-        check_existing_pr_async(&github, &owner, &repo, &head_branch).await?
+        check_existing_pr_async(&github, owner.as_str(), repo.as_str(), &head_branch).await?
     {
         info!("[FilePR] PR already exists: {} (#{}) ", url, number);
         return Ok(FilePROutput {
@@ -228,7 +229,7 @@ pub async fn file_pr_async(input: &FilePRInput) -> Result<FilePROutput> {
     }
 
     // Create new PR
-    create_pr_async(&github, &owner, &repo, &head_branch, input).await
+    create_pr_async(&github, owner.as_str(), repo.as_str(), &head_branch, input).await
 }
 
 // ============================================================================
@@ -256,15 +257,24 @@ mod tests {
     fn test_parse_github_url() {
         // SSH URL
         let result = parse_github_url("git@github.com:owner/repo.git");
-        assert_eq!(result, Some(("owner".to_string(), "repo".to_string())));
+        assert_eq!(
+            result,
+            Some((GithubOwner::from("owner"), GithubRepo::from("repo")))
+        );
 
         // HTTPS URL
         let result = parse_github_url("https://github.com/owner/repo.git");
-        assert_eq!(result, Some(("owner".to_string(), "repo".to_string())));
+        assert_eq!(
+            result,
+            Some((GithubOwner::from("owner"), GithubRepo::from("repo")))
+        );
 
         // HTTPS URL without .git
         let result = parse_github_url("https://github.com/owner/repo");
-        assert_eq!(result, Some(("owner".to_string(), "repo".to_string())));
+        assert_eq!(
+            result,
+            Some((GithubOwner::from("owner"), GithubRepo::from("repo")))
+        );
     }
 
     #[test]
