@@ -346,4 +346,32 @@ mod tests {
         // Empty string
         assert_eq!(extract_agent_id(""), None);
     }
+
+    #[test]
+    fn test_parse_github_url_https() {
+        let (owner, repo) = parse_github_url("https://github.com/anthropics/claude-code").unwrap();
+        assert_eq!(owner.as_str(), "anthropics");
+        assert_eq!(repo.as_str(), "claude-code");
+    }
+
+    #[test]
+    fn test_parse_github_url_ssh() {
+        let (owner, repo) = parse_github_url("git@github.com:anthropics/claude-code.git").unwrap();
+        assert_eq!(owner.as_str(), "anthropics");
+        assert_eq!(repo.as_str(), "claude-code");
+    }
+
+    #[test]
+    fn test_parse_github_url_with_git_suffix() {
+        let (owner, repo) =
+            parse_github_url("https://github.com/anthropics/claude-code.git").unwrap();
+        assert_eq!(owner.as_str(), "anthropics");
+        assert_eq!(repo.as_str(), "claude-code");
+    }
+
+    #[test]
+    fn test_parse_github_url_invalid() {
+        assert!(parse_github_url("not-a-url").is_none());
+        assert!(parse_github_url("").is_none());
+    }
 }

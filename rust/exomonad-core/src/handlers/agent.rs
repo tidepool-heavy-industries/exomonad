@@ -207,7 +207,7 @@ impl AgentEffects for AgentHandler {
                     "No Claude session UUID registered — child will start without --fork-session context. Ensure SessionStart hook is configured."
                 );
             }
-            claude_uuid
+            claude_uuid.map(|s| ClaudeSessionUuid::from(s.as_str()))
         } else if !req.parent_session_id.is_empty() {
             Some(ClaudeSessionUuid::from(req.parent_session_id.as_str()))
         } else {

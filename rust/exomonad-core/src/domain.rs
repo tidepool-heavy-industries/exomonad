@@ -276,10 +276,14 @@ pub enum ToolPermission {
 // ============================================================================
 
 /// Claude Code permission mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Unknown values from future Claude Code versions deserialize to `Default`,
+/// preserving wire compatibility.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum PermissionMode {
-    /// Default permission behavior.
+    /// Default permission behavior (also used as fallback for unknown modes).
+    #[default]
     Default,
     /// Plan mode (higher gating).
     Plan,
@@ -291,9 +295,20 @@ pub enum PermissionMode {
     BypassPermissions,
 }
 
-impl Default for PermissionMode {
-    fn default() -> Self {
-        Self::Default
+impl<'de> serde::Deserialize<'de> for PermissionMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(match s.as_str() {
+            "default" => Self::Default,
+            "plan" => Self::Plan,
+            "acceptEdits" => Self::AcceptEdits,
+            "dontAsk" => Self::DontAsk,
+            "bypassPermissions" => Self::BypassPermissions,
+            _ => Self::Default,
+        })
     }
 }
 
@@ -732,5 +747,88 @@ mod tests {
     fn test_birth_branch_empty_rejected() {
         let result = BirthBranch::try_from("".to_string());
         assert!(matches!(result, Err(DomainError::Empty { .. })));
+    }
+
+    // =========================================================================
+    // Enum serde tests
+    // =========================================================================
+
+    /// Helper: deserialize a string value into T.
+    fn deser<T: serde::de::DeserializeOwned>(s: &str) -> T {
+        serde_json::from_value(serde_json::Value::String(s.into())).unwrap()
+    }
+
+    #[test]
+    fn test_permission_mode_deserialize_all_variants() {
+        assert_eq!(deser::<PermissionMode>("default"), PermissionMode::Default);
+        assert_eq!(deser::<PermissionMode>("plan"), PermissionMode::Plan);
+        assert_eq!(
+            deser::<PermissionMode>("acceptEdits"),
+            PermissionMode::AcceptEdits
+        );
+        assert_eq!(deser::<PermissionMode>("dontAsk"), PermissionMode::DontAsk);
+        assert_eq!(
+            deser::<PermissionMode>("bypassPermissions"),
+            PermissionMode::BypassPermissions
+        );
+    }
+
+    #[test]
+    fn test_permission_mode_unknown_falls_back_to_default() {
+        assert_eq!(
+            deser::<PermissionMode>("newModeFromFuture"),
+            PermissionMode::Default
+        );
+        assert_eq!(deser::<PermissionMode>(""), PermissionMode::Default);
+    }
+
+    #[test]
+    fn test_permission_mode_serialize_roundtrip() {
+        for mode in [
+            PermissionMode::Default,
+            PermissionMode::Plan,
+            PermissionMode::AcceptEdits,
+            PermissionMode::DontAsk,
+            PermissionMode::BypassPermissions,
+        ] {
+            let json = serde_json::to_string(&mode).unwrap();
+            let back: PermissionMode = serde_json::from_str(&json).unwrap();
+            assert_eq!(mode, back);
+        }
+    }
+
+    #[test]
+    fn test_filter_state_serde() {
+        assert_eq!(deser::<FilterState>("open"), FilterState::Open);
+        assert_eq!(deser::<FilterState>("closed"), FilterState::Closed);
+        assert_eq!(deser::<FilterState>("all"), FilterState::All);
+
+        for state in [FilterState::Open, FilterState::Closed, FilterState::All] {
+            let json = serde_json::to_string(&state).unwrap();
+            let back: FilterState = serde_json::from_str(&json).unwrap();
+            assert_eq!(state, back);
+        }
+    }
+
+    #[test]
+    fn test_filter_state_invalid_rejected() {
+        let result =
+            serde_json::from_value::<FilterState>(serde_json::Value::String("invalid".into()));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_message_filter_serde() {
+        assert_eq!(deser::<MessageFilter>("all"), MessageFilter::All);
+        assert_eq!(
+            deser::<MessageFilter>("unread_only"),
+            MessageFilter::UnreadOnly
+        );
+
+        for filter in [MessageFilter::All, MessageFilter::UnreadOnly] {
+            let json = serde_json::to_string(&filter).unwrap();
+            let back: MessageFilter = serde_json::from_str(&json).unwrap();
+            assert_eq!(filter, back);
+        }
     }
 }
