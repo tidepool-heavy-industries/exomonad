@@ -574,6 +574,20 @@ mod tests {
     }
 
     #[test]
+    fn test_hook_input_unknown_permission_mode() {
+        let json = r#"{"session_id":"s","hook_event_name":"Stop","permission_mode":"futureMode"}"#;
+        let input: HookInput = serde_json::from_str(json).unwrap();
+        assert_eq!(input.permission_mode, PermissionMode::Default);
+    }
+
+    #[test]
+    fn test_hook_input_missing_permission_mode() {
+        let json = r#"{"session_id":"s","hook_event_name":"Stop"}"#;
+        let input: HookInput = serde_json::from_str(json).unwrap();
+        assert_eq!(input.permission_mode, PermissionMode::Default);
+    }
+
+    #[test]
     fn test_hook_input_all_fields() {
         let json = r#"{
             "session_id": "sess-123",
