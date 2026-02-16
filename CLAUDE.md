@@ -79,7 +79,7 @@ if !status.success() {
 - **Server tab**: Runs `exomonad serve --port 7432` (the HTTP MCP server, required for all tool calls)
 - **TL tab**: Runs `nix develop` (where you launch `claude` or work directly)
 
-The server must be running before Claude Code or Gemini can use MCP tools. Without it, every tool call fails.
+The server must be running before Claude Code or Gemini can use MCP tools. Without it, every tool call fails. Init also writes `.claude/settings.local.json` with hooks (including `SessionStart` which registers the Claude session UUID for `--fork-session` context inheritance in spawned subtrees).
 
 ```bash
 cd exomonad/                  # Run from the project root
@@ -152,7 +152,13 @@ wasm_dir = ".exo/wasm"    # optional: override WASM location (default: ~/.exo/wa
 - Resolution: `local.role > global.default_role`
 - WASM: `wasm_dir` in config > `~/.exo/wasm/`
 
-**Hook configuration** is auto-generated per worktree by `write_context_files()` in `agent_control.rs` during agent spawning. Each spawned Claude agent gets `.claude/settings.local.json` with PreToolUse, SubagentStop, and SessionEnd hooks. Gemini agents get settings via `GEMINI_CLI_SYSTEM_SETTINGS_PATH` env var (NOT `.gemini/settings.json`). Do not manually create hook settings.
+**Hook configuration** is auto-generated in two places:
+- **`exomonad init`**: Writes `.claude/settings.local.json` with all hooks (SessionStart, PreToolUse, etc.) for the root TL session
+- **`spawn_subtree`**: Writes `.claude/settings.local.json` into each spawned Claude worktree
+
+The `SessionStart` hook is critical — it registers the Claude session UUID in `ClaudeSessionRegistry`, which `spawn_subtree` reads to pass `--resume <uuid> --fork-session` for context inheritance. Without it, spawned subtrees start with no context.
+
+Gemini agents get settings via `GEMINI_CLI_SYSTEM_SETTINGS_PATH` env var (NOT `.gemini/settings.json`).
 
 **Claude Code settings help:** We have a Claude Code configuration specialist (preloaded with official documentation) available as an oracle for hook syntax, settings structure, MCP setup, and debugging.
 
@@ -426,63 +432,75 @@ When reviewing handlers, grep for `_` prefixes in pattern matches. Each one is a
 
 ## Tech Lead Praxis
 
-How to coordinate heterogeneous agent teams effectively. Proven patterns from real sessions.
+How to coordinate heterogeneous agent teams. The TL is a compiler: it transforms high-level intent into leaf-executable specs, then gets out of the way.
 
 ### Intelligence Gradient
 
-Claude (Opus) reasons and coordinates. Gemini implements with clear instructions. The TL never implements directly — it decomposes, specs, spawns, reviews.
+Claude (Opus) decomposes and dispatches. Gemini implements. Copilot reviews. The TL never implements directly and never manually reviews intermediate output.
 
-**Cost model:** Opus tokens are 10-30x Gemini tokens. Every line of code the TL writes directly is expensive code. The TL's job is producing *specs* that make Gemini's output correct on the first try.
+**Cost model:** Opus tokens are 10-30x Gemini tokens. Every line of code the TL writes is expensive code. Every review cycle the TL performs is an expensive review cycle. The TL's job is producing specs sharp enough that the leaf + Copilot convergence loop handles quality without TL involvement.
 
-### Spawn Prompt Structure
+### Fire-and-Forget Execution
 
-Gemini agents are cheap junior devs. They execute pre-decomposed work, they don't decompose it. Every spawn prompt follows this structure:
+The TL's workflow is: **decompose → spec → spawn → move on**. The TL does not wait, poll, review intermediate output, or re-spec. It spawns all leaves it can, then idles until `[CHILD COMPLETE]` notifications arrive.
+
+**Convergence is leaf + Copilot, not TL:**
+1. TL writes spec, spawns leaf (Gemini), returns immediately
+2. Leaf works → commits → files PR
+3. GitHub poller detects Copilot review comments → injects into leaf's pane
+4. Leaf reads Copilot feedback, fixes, pushes
+5. Copilot re-reviews; loop repeats until clean
+6. Leaf calls `notify_parent` with status `success` → TL gets `[CHILD COMPLETE]` notification
+7. TL merges the PR
+
+**`notify_parent` means DONE** — not "I filed a PR." The leaf owns its quality. The TL only sees finished, review-clean work.
+
+**Escalation, not iteration.** If a leaf fails after 3+ Copilot rounds, it calls `notify_parent` with `failure` status. The TL then decides: re-decompose, try a different approach, or flag for human intervention. The TL never manually fixes a leaf's code.
+
+### Spec Quality (You Only Get One Shot)
+
+Since the TL doesn't iterate on specs, the v1 spec must be production-quality. Every spec follows this structure:
 
 ```
-1. READ FIRST        — List exact files to read (CLAUDE.md, source files, proto files)
-2. STEPS             — Numbered, each step = one concrete action with code snippets
-3. VERIFY            — Exact build/test commands with env vars (PROTOC path, etc.)
-4. DONE CRITERIA     — Acceptance tests: what "done" looks like
-5. BOUNDARY          — "Do NOT commit" / "Do NOT push" — TL controls merge
+1. ANTI-PATTERNS      — Known Gemini failure modes as explicit "DO NOT" rules (FIRST)
+2. READ FIRST         — Exact files to read (CLAUDE.md, source files, proto files)
+3. STEPS              — Numbered, each step = one concrete action with code snippets
+4. VERIFY             — Exact build/test commands with env vars (PROTOC path, etc.)
+5. DONE CRITERIA      — What "done" looks like (tests pass, PR filed, notify_parent called)
 ```
+
+**Anti-patterns section is mandatory and comes first.** These are known Gemini failure modes — front-load them so the agent reads them before touching code:
+
+| Known Failure Mode | Anti-Pattern Rule |
+|---|---|
+| Adds unnecessary dependencies | "ZERO external dependencies. Do NOT add serde/tokio/etc." |
+| Invents escape hatches | "No `todo!()`, `Raw(String)`, `Other(Box<dyn Any>)` variants" |
+| Writes thinking-out-loud comments | "No stream-of-consciousness comments. Doc comments only." |
+| Renames types/variants to "simpler" names | "Use EXACT type signatures below. Do not rename." |
+| Makes architectural decisions | "Do not change the module structure. Files listed below are exhaustive." |
+| Overengineers | "This is N lines in M files, not a new module/framework." |
 
 **Key rules:**
 - **One agent = one focused change.** If it touches >3 files or requires architectural decisions, split it.
-- **Include code snippets.** Don't describe what to write — show it. Gemini executes better from examples than descriptions.
-- **Include exact commands.** Not "run the tests" but `PROTOC=/nix/store/... cargo test --workspace`. Env vars, flags, paths — all explicit.
-- **Name the files.** Not "update the proto" but "edit `proto/effects/agent.proto` AND `rust/exomonad-proto/proto/effects/agent.proto`".
+- **Include complete code.** Don't describe what to write — show the exact code. Gemini executes better from examples than descriptions.
+- **Include exact commands.** Not "run the tests" but `PROTOC=/nix/store/... cargo test --workspace`.
+- **Name every file.** Not "update the proto" but "edit `proto/effects/agent.proto` AND `rust/exomonad-proto/proto/effects/agent.proto`".
+- **Specs are self-contained.** The leaf has no context from previous attempts. Every spec must stand alone with complete code snippets and full file paths.
 
 ### Parallelization
 
-Spawn multiple agents when tasks are independent (no file conflicts, no ordering dependency). Examples:
-- Proto plumbing (touches proto/, haskell/proto/, rust/) + nix shell wrapping (touches rust/services/) — independent, parallel.
-- Haskell tool changes + Rust handler changes — often dependent (proto-gen must run first), sequential.
+Spawn multiple leaves when tasks are independent (no file conflicts, no ordering dependency). The TL spawns a wave, returns, and gets poked as each leaf completes. Examples:
+- Proto plumbing + nix shell wrapping — independent, parallel.
+- Haskell tool changes + Rust handler changes — often dependent (proto-gen first), sequential.
 
-### Review Protocol
+### When TL Gets Notified
 
-When an agent reports done:
-1. `git diff --stat HEAD` — see what changed
-2. `diff` vendor copies (proto files must be byte-identical)
-3. Read the actual changes, not just the summary
-4. Run `cargo check` / `cargo test` yourself — don't trust "tests pass" claims
-5. Check for prost struct literal completeness (new fields must appear in ALL construction sites)
+The TL is idle between spawning and receiving notifications. It wakes up for:
+- `[CHILD COMPLETE: agent-id]` — leaf finished successfully. TL reviews the PR diff, merges, and verifies the merged result builds cleanly. This matters especially when multiple leaves land in parallel — their changes may interact.
+- `[CHILD FAILED: agent-id]` — leaf exhausted retries. TL re-decomposes or escalates.
+- GitHub poller notifications (CI status, PR merge conflicts).
 
-### Anti-Patterns
-
-| Don't | Do Instead |
-|-------|------------|
-| Vague task: "implement the identity system" | Specific: "add `topology` field to 4 proto messages, regenerate, plumb defaults" |
-| Let agent make architectural decisions | Make the decision in the spec, agent executes |
-| Trust "it compiles" without verification | Run checks yourself from TL session |
-| Spawn in plan mode | Plan mode gates every write. Spawn in default mode with plan as context |
-| Give short directives ("go") | Full context in one shot: files, format, examples, commands |
-| Let agent claim unsourced constraints | Demand: "WHERE did you learn this? Show the code/docs" |
-
-### Agent Supervision
-
-Agents hallucinate confidently about infrastructure constraints. "axum nest_service doesn't support dynamic segments" — stated as fact, nearly steered a design decision, turned out to be wrong. **Always demand sources for infrastructure claims.**
-
-Agents overengineer when unsupervised. Given "add a route with a path extractor" an agent built a full tower middleware stack. **Specify the complexity budget:** "this is 10 lines in an existing function, not a new module."
+The TL does NOT wake up for intermediate progress, Copilot comments, or partial results. The convergence loop (leaf + Copilot) runs without TL involvement.
 
 ---
 

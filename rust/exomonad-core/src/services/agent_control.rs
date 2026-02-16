@@ -1093,6 +1093,12 @@ impl AgentControlService {
             self.write_agent_mcp_config(effective_project_dir, &worktree_path, AgentType::Claude)
                 .await?;
 
+            // Write .claude/settings.local.json with hooks (SessionStart registers UUID for --fork-session)
+            let binary_path = crate::util::find_exomonad_binary();
+            crate::hooks::HookConfig::write_persistent(&worktree_path, &binary_path)
+                .map_err(|e| anyhow!("Failed to write hook config in worktree: {}", e))?;
+            info!(worktree = %worktree_path.display(), "Wrote hook configuration for spawned Claude agent");
+
             // Build task prompt with worktree context warning
             let task_with_context = format!(
                 "You are now in worktree {} on branch {}. All file paths from your inherited context are STALE — use relative paths only and re-read files before editing.\n\n{}",

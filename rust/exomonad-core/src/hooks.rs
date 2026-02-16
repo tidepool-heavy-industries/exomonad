@@ -82,6 +82,55 @@ impl HookConfig {
         Self::generate_with_binary(cwd, binary_path)
     }
 
+    /// Write hook configuration permanently (no cleanup on drop).
+    ///
+    /// Used by `exomonad init` and `spawn_subtree` where hooks must persist
+    /// for the lifetime of the agent session.
+    pub fn write_persistent(cwd: &Path, binary_path: &Path) -> Result<()> {
+        let claude_dir = cwd.join(".claude");
+        let settings_path = claude_dir.join("settings.local.json");
+
+        if !claude_dir.exists() {
+            fs::create_dir_all(&claude_dir).map_err(ExoMonadError::Io)?;
+        }
+
+        let mut settings = if settings_path.exists() {
+            let content = fs::read_to_string(&settings_path).map_err(ExoMonadError::Io)?;
+            serde_json::from_str::<Value>(&content)
+                .map_err(|e| ExoMonadError::JsonParse { source: e })?
+        } else {
+            json!({})
+        };
+
+        let hooks = generate_hook_config(binary_path);
+
+        if let Some(existing_hooks) = settings.get("hooks") {
+            let mut merged = existing_hooks.clone();
+            if let (Some(merged_obj), Some(new_hooks)) = (merged.as_object_mut(), hooks.as_object())
+            {
+                for (key, value) in new_hooks {
+                    merged_obj.insert(key.clone(), value.clone());
+                }
+            }
+            settings["hooks"] = merged;
+        } else {
+            settings["hooks"] = hooks;
+        }
+
+        settings[EXOMONAD_MARKER] = json!(true);
+
+        let content =
+            serde_json::to_string_pretty(&settings).map_err(ExoMonadError::JsonSerialize)?;
+        fs::write(&settings_path, &content).map_err(ExoMonadError::Io)?;
+
+        debug!(
+            path = %settings_path.display(),
+            "Wrote persistent hook configuration"
+        );
+
+        Ok(())
+    }
+
     /// Generate hook configuration using a specific binary path.
     ///
     /// This is the core implementation - `generate()` delegates to this.
