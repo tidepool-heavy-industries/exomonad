@@ -46,8 +46,13 @@ impl EffectHandler for AgentHandler {
         "agent"
     }
 
-    async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
-        dispatch_agent_effect(self, effect_type, payload).await
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        dispatch_agent_effect(self, effect_type, payload, ctx).await
     }
 }
 
@@ -75,7 +80,11 @@ fn parse_repo(repo: &str) -> EffectResult<GithubRepo> {
 
 #[async_trait]
 impl AgentEffects for AgentHandler {
-    async fn spawn(&self, req: SpawnRequest) -> EffectResult<SpawnResponse> {
+    async fn spawn(
+        &self,
+        req: SpawnRequest,
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<SpawnResponse> {
         let issue_number = parse_issue_number(&req.issue)?;
         let options = SpawnOptions {
             owner: parse_owner(&req.owner)?,
@@ -95,7 +104,7 @@ impl AgentEffects for AgentHandler {
 
         let result = self
             .service
-            .spawn_agent(issue_number, &options)
+            .spawn_agent(issue_number, &options, &ctx.birth_branch)
             .await
             .map_err(|e| EffectError::custom("agent_error", e.to_string()))?;
 
@@ -104,7 +113,11 @@ impl AgentEffects for AgentHandler {
         })
     }
 
-    async fn spawn_batch(&self, req: SpawnBatchRequest) -> EffectResult<SpawnBatchResponse> {
+    async fn spawn_batch(
+        &self,
+        req: SpawnBatchRequest,
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<SpawnBatchResponse> {
         let agent_type = convert_agent_type(req.agent_type());
         let mut agents = Vec::new();
         let mut errors = Vec::new();
@@ -129,7 +142,11 @@ impl AgentEffects for AgentHandler {
                 base_branch: None,
             };
 
-            match self.service.spawn_agent(issue_number, &options).await {
+            match self
+                .service
+                .spawn_agent(issue_number, &options, &ctx.birth_branch)
+                .await
+            {
                 Ok(result) => agents.push(spawn_result_to_proto(issue, &result)),
                 Err(e) => errors.push(format!("Issue {}: {}", issue, e)),
             }
@@ -141,6 +158,7 @@ impl AgentEffects for AgentHandler {
     async fn spawn_gemini_teammate(
         &self,
         req: SpawnGeminiTeammateRequest,
+        ctx: &crate::effects::EffectContext,
     ) -> EffectResult<SpawnGeminiTeammateResponse> {
         let options = SpawnGeminiTeammateOptions {
             name: AgentName::from(req.name.as_str()),
@@ -160,7 +178,7 @@ impl AgentEffects for AgentHandler {
 
         let result = self
             .service
-            .spawn_gemini_teammate(&options)
+            .spawn_gemini_teammate(&options, &ctx.birth_branch)
             .await
             .map_err(|e| EffectError::custom("agent_error", e.to_string()))?;
 
@@ -169,7 +187,11 @@ impl AgentEffects for AgentHandler {
         })
     }
 
-    async fn spawn_worker(&self, req: SpawnWorkerRequest) -> EffectResult<SpawnWorkerResponse> {
+    async fn spawn_worker(
+        &self,
+        req: SpawnWorkerRequest,
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<SpawnWorkerResponse> {
         let options = SpawnWorkerOptions {
             name: req.name.clone(),
             prompt: req.prompt.clone(),
@@ -177,7 +199,7 @@ impl AgentEffects for AgentHandler {
 
         let result = self
             .service
-            .spawn_worker(&options)
+            .spawn_worker(&options, &ctx.birth_branch)
             .await
             .map_err(|e| EffectError::custom("agent_error", e.to_string()))?;
 
@@ -186,14 +208,17 @@ impl AgentEffects for AgentHandler {
         })
     }
 
-    async fn spawn_subtree(&self, req: SpawnSubtreeRequest) -> EffectResult<SpawnSubtreeResponse> {
+    async fn spawn_subtree(
+        &self,
+        req: SpawnSubtreeRequest,
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<SpawnSubtreeResponse> {
         // Look up Claude session UUID from registry (overrides whatever WASM sent)
         let parent_session_id = if let Some(ref registry) = self.claude_session_registry {
-            let agent_name = crate::mcp::agent_identity::get_agent_id();
-            let key = if agent_name.as_str().is_empty() {
+            let key = if ctx.agent_name.as_str().is_empty() {
                 crate::domain::AgentName::from("root")
             } else {
-                agent_name
+                ctx.agent_name.clone()
             };
             let claude_uuid = registry.get(key.as_str()).await;
             info!(
@@ -222,7 +247,7 @@ impl AgentEffects for AgentHandler {
 
         let result = self
             .service
-            .spawn_subtree(&options)
+            .spawn_subtree(&options, &ctx.birth_branch)
             .await
             .map_err(|e| EffectError::custom("agent_error", e.to_string()))?;
 
@@ -234,6 +259,7 @@ impl AgentEffects for AgentHandler {
     async fn spawn_leaf_subtree(
         &self,
         req: SpawnLeafSubtreeRequest,
+        ctx: &crate::effects::EffectContext,
     ) -> EffectResult<SpawnLeafSubtreeResponse> {
         let options = SpawnSubtreeOptions {
             task: req.task.clone(),
@@ -243,7 +269,7 @@ impl AgentEffects for AgentHandler {
 
         let result = self
             .service
-            .spawn_leaf_subtree(&options)
+            .spawn_leaf_subtree(&options, &ctx.birth_branch)
             .await
             .map_err(|e| EffectError::custom("agent_error", e.to_string()))?;
 
@@ -252,7 +278,11 @@ impl AgentEffects for AgentHandler {
         })
     }
 
-    async fn cleanup(&self, req: CleanupRequest) -> EffectResult<CleanupResponse> {
+    async fn cleanup(
+        &self,
+        req: CleanupRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<CleanupResponse> {
         match self.service.cleanup_agent(&req.issue).await {
             Ok(_) => Ok(CleanupResponse {
                 success: true,
@@ -265,7 +295,11 @@ impl AgentEffects for AgentHandler {
         }
     }
 
-    async fn cleanup_batch(&self, req: CleanupBatchRequest) -> EffectResult<CleanupBatchResponse> {
+    async fn cleanup_batch(
+        &self,
+        req: CleanupBatchRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<CleanupBatchResponse> {
         let subrepo = if req.subrepo.is_empty() {
             None
         } else {
@@ -287,6 +321,7 @@ impl AgentEffects for AgentHandler {
     async fn cleanup_merged(
         &self,
         req: CleanupMergedRequest,
+        _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<CleanupMergedResponse> {
         let subrepo = if req.subrepo.is_empty() {
             None
@@ -310,7 +345,11 @@ impl AgentEffects for AgentHandler {
         })
     }
 
-    async fn list(&self, _req: ListRequest) -> EffectResult<ListResponse> {
+    async fn list(
+        &self,
+        _req: ListRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<ListResponse> {
         let infos = self
             .service
             .list_agents()

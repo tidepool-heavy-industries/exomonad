@@ -33,8 +33,13 @@ impl EffectHandler for CopilotHandler {
         "copilot"
     }
 
-    async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
-        dispatch_copilot_effect(self, effect_type, payload).await
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        dispatch_copilot_effect(self, effect_type, payload, ctx).await
     }
 }
 
@@ -43,6 +48,7 @@ impl CopilotEffects for CopilotHandler {
     async fn wait_for_copilot_review(
         &self,
         req: WaitForCopilotReviewRequest,
+        _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<WaitForCopilotReviewResponse> {
         let input = copilot_review::WaitForCopilotReviewInput {
             pr_number: req.pr_number as u64,

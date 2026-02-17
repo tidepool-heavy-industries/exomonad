@@ -29,14 +29,23 @@ impl EffectHandler for GitHubHandler {
         "github"
     }
 
-    async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
-        dispatch_github_effect(self, effect_type, payload).await
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        dispatch_github_effect(self, effect_type, payload, ctx).await
     }
 }
 
 #[async_trait]
 impl GitHubEffects for GitHubHandler {
-    async fn list_issues(&self, req: ListIssuesRequest) -> EffectResult<ListIssuesResponse> {
+    async fn list_issues(
+        &self,
+        req: ListIssuesRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<ListIssuesResponse> {
         let repo = make_repo(&req.owner, &req.repo);
 
         let state = issue_state_to_filter(req.state());
@@ -73,7 +82,11 @@ impl GitHubEffects for GitHubHandler {
         Ok(ListIssuesResponse { issues })
     }
 
-    async fn get_issue(&self, req: GetIssueRequest) -> EffectResult<GetIssueResponse> {
+    async fn get_issue(
+        &self,
+        req: GetIssueRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<GetIssueResponse> {
         let repo = make_repo(&req.owner, &req.repo);
 
         let raw_issue = self
@@ -94,6 +107,7 @@ impl GitHubEffects for GitHubHandler {
     async fn list_pull_requests(
         &self,
         req: ListPullRequestsRequest,
+        _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<ListPullRequestsResponse> {
         let repo = make_repo(&req.owner, &req.repo);
 
@@ -119,6 +133,7 @@ impl GitHubEffects for GitHubHandler {
     async fn get_pull_request(
         &self,
         req: GetPullRequestRequest,
+        _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetPullRequestResponse> {
         let repo = make_repo(&req.owner, &req.repo);
 
@@ -150,6 +165,7 @@ impl GitHubEffects for GitHubHandler {
     async fn get_pull_request_for_branch(
         &self,
         req: GetPullRequestForBranchRequest,
+        _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetPullRequestForBranchResponse> {
         let repo = make_repo(&req.owner, &req.repo);
 
@@ -169,6 +185,7 @@ impl GitHubEffects for GitHubHandler {
     async fn create_pull_request(
         &self,
         req: CreatePullRequestRequest,
+        _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<CreatePullRequestResponse> {
         let repo = make_repo(&req.owner, &req.repo);
 
@@ -201,6 +218,7 @@ impl GitHubEffects for GitHubHandler {
     async fn get_pull_request_review_comments(
         &self,
         req: GetPullRequestReviewCommentsRequest,
+        _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetPullRequestReviewCommentsResponse> {
         // Review comments require additional API work - return empty for now
         tracing::debug!(

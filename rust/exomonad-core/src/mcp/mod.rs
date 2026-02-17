@@ -9,9 +9,6 @@ pub mod tools;
 pub mod server;
 
 #[cfg(feature = "runtime")]
-pub mod agent_identity;
-
-#[cfg(feature = "runtime")]
 pub use server::McpServer;
 
 use crate::PluginManager;

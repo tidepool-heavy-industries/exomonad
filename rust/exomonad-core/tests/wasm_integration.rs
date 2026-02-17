@@ -54,7 +54,12 @@ impl EffectHandler for MockGitHandler {
         "git"
     }
 
-    async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        _ctx: &exomonad_core::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
         use exomonad_proto::effects::git::*;
 
         match effect_type {
@@ -123,7 +128,12 @@ impl EffectHandler for MockLogHandler {
         "log"
     }
 
-    async fn handle(&self, effect_type: &str, _payload: &[u8]) -> EffectResult<Vec<u8>> {
+    async fn handle(
+        &self,
+        effect_type: &str,
+        _payload: &[u8],
+        _ctx: &exomonad_core::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
         use exomonad_proto::effects::log::*;
 
         match effect_type {
@@ -148,7 +158,12 @@ impl EffectHandler for MockAgentHandler {
         "agent"
     }
 
-    async fn handle(&self, effect_type: &str, _payload: &[u8]) -> EffectResult<Vec<u8>> {
+    async fn handle(
+        &self,
+        effect_type: &str,
+        _payload: &[u8],
+        _ctx: &exomonad_core::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
         use exomonad_proto::effects::agent::*;
 
         match effect_type {
@@ -206,7 +221,12 @@ impl EffectHandler for MockFsHandler {
         "fs"
     }
 
-    async fn handle(&self, effect_type: &str, _payload: &[u8]) -> EffectResult<Vec<u8>> {
+    async fn handle(
+        &self,
+        effect_type: &str,
+        _payload: &[u8],
+        _ctx: &exomonad_core::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
         use exomonad_proto::effects::fs::*;
 
         match effect_type {

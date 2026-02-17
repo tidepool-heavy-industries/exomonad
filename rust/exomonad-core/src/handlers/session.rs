@@ -27,8 +27,13 @@ impl EffectHandler for SessionHandler {
         "session"
     }
 
-    async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
-        dispatch_session_effect(self, effect_type, payload).await
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        dispatch_session_effect(self, effect_type, payload, ctx).await
     }
 }
 
@@ -37,12 +42,13 @@ impl SessionEffects for SessionHandler {
     async fn register_claude_id(
         &self,
         req: RegisterClaudeSessionRequest,
+        ctx: &crate::effects::EffectContext,
     ) -> EffectResult<RegisterClaudeSessionResponse> {
-        let agent_id = crate::mcp::agent_identity::get_agent_id();
-        let key = if agent_id.as_str().is_empty() {
+        let agent_name = &ctx.agent_name;
+        let key = if agent_name.as_str().is_empty() {
             "root".to_string()
         } else {
-            agent_id.to_string()
+            agent_name.to_string()
         };
 
         let claude_uuid = ClaudeSessionUuid::try_from(req.claude_session_id.clone())

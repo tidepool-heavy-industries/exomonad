@@ -86,7 +86,7 @@ pub mod services;
 #[cfg(feature = "runtime")]
 pub use common::{ErrorCode, ErrorContext, HostError, HostResult};
 #[cfg(feature = "runtime")]
-pub use effects::{EffectError, EffectHandler, EffectRegistry, EffectResult};
+pub use effects::{EffectContext, EffectError, EffectHandler, EffectRegistry, EffectResult};
 #[cfg(feature = "runtime")]
 pub use plugin_manager::PluginManager;
 
@@ -246,13 +246,20 @@ impl RuntimeBuilder {
 
         let registry = Arc::new(self.registry);
 
+        // Root plugin uses "root" identity. Per-agent plugins are created
+        // separately in the serve command with baked-in per-agent identity.
+        let root_ctx = EffectContext {
+            agent_name: AgentName::from("root"),
+            birth_branch: BirthBranch::root(),
+        };
+
         let plugin_manager = if let Some(path) = self.wasm_path {
-            PluginManager::from_file(&path, registry.clone()).await?
+            PluginManager::from_file(&path, registry.clone(), root_ctx).await?
         } else {
             let wasm_bytes = self.wasm_bytes.ok_or_else(|| {
                 anyhow::anyhow!("WASM bytes not set — provide either wasm_bytes or wasm_path")
             })?;
-            PluginManager::new(&wasm_bytes, registry.clone()).await?
+            PluginManager::new(&wasm_bytes, registry.clone(), root_ctx).await?
         };
 
         Ok(Runtime {
@@ -296,8 +303,9 @@ impl Runtime {
         &self,
         effect_type: &str,
         payload: &[u8],
+        ctx: &EffectContext,
     ) -> EffectResult<Vec<u8>> {
-        self.registry.dispatch(effect_type, payload).await
+        self.registry.dispatch(effect_type, payload, ctx).await
     }
 
     /// Convert into MCP state for running the MCP server.

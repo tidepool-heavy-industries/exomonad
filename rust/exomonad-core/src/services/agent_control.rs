@@ -414,11 +414,12 @@ impl AgentControlService {
 
     /// Resolve the effective birth branch for spawn operations.
     ///
-    /// In serve mode, one `AgentControlService` is shared with `birth_branch = root()`.
-    /// Spawned subtree TLs set their birth branch via the task-local `CURRENT_BIRTH_BRANCH`.
-    /// This method prefers the task-local value, falling back to `self.birth_branch`.
-    fn effective_birth_branch(&self) -> BirthBranch {
-        crate::mcp::agent_identity::get_birth_branch().unwrap_or_else(|| self.birth_branch.clone())
+    /// Callers pass the birth branch from EffectContext. Falls back to `self.birth_branch`
+    /// if no override is provided.
+    fn effective_birth_branch(&self, override_bb: Option<&BirthBranch>) -> BirthBranch {
+        override_bb
+            .cloned()
+            .unwrap_or_else(|| self.birth_branch.clone())
     }
 
     /// Set the MCP server port for per-agent endpoint URL generation.
@@ -486,6 +487,7 @@ impl AgentControlService {
         &self,
         issue_number: IssueNumber,
         options: &SpawnOptions,
+        caller_bb: &BirthBranch,
     ) -> Result<SpawnResult> {
         let issue_id_log = issue_number.as_u64().to_string();
         info!(issue_id = %issue_id_log, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_agent");
@@ -603,7 +605,7 @@ impl AgentControlService {
 
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), self.effective_birth_branch().to_string());
+            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), self.effective_birth_branch(Some(caller_bb)).to_string());
             if let Some(port) = self.mcp_server_port {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
             }
@@ -655,6 +657,7 @@ impl AgentControlService {
         &self,
         issue_ids: &[String],
         options: &SpawnOptions,
+        caller_bb: &BirthBranch,
     ) -> BatchSpawnResult {
         let mut result = BatchSpawnResult {
             spawned: Vec::new(),
@@ -664,13 +667,15 @@ impl AgentControlService {
         for issue_id_str in issue_ids {
             // Parse issue ID
             match IssueNumber::try_from(issue_id_str.clone()) {
-                Ok(issue_number) => match self.spawn_agent(issue_number, options).await {
-                    Ok(spawn_result) => result.spawned.push(spawn_result),
-                    Err(e) => {
-                        warn!(issue_id = issue_id_str, error = %e, "Failed to spawn agent");
-                        result.failed.push((issue_id_str.clone(), e.to_string()));
+                Ok(issue_number) => {
+                    match self.spawn_agent(issue_number, options, caller_bb).await {
+                        Ok(spawn_result) => result.spawned.push(spawn_result),
+                        Err(e) => {
+                            warn!(issue_id = issue_id_str, error = %e, "Failed to spawn agent");
+                            result.failed.push((issue_id_str.clone(), e.to_string()));
+                        }
                     }
-                },
+                }
                 Err(e) => {
                     warn!(issue_id = issue_id_str, error = %e, "Invalid issue number");
                     result.failed.push((issue_id_str.clone(), e.to_string()));
@@ -695,6 +700,7 @@ impl AgentControlService {
     pub async fn spawn_gemini_teammate(
         &self,
         options: &SpawnGeminiTeammateOptions,
+        caller_bb: &BirthBranch,
     ) -> Result<SpawnResult> {
         info!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_gemini_teammate");
 
@@ -790,7 +796,7 @@ impl AgentControlService {
 
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), self.effective_birth_branch().to_string());
+            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), self.effective_birth_branch(Some(caller_bb)).to_string());
             if let Some(port) = self.mcp_server_port {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
             }
@@ -891,7 +897,11 @@ impl AgentControlService {
     ///
     /// Creates a new git worktree and branch for isolation.
     #[tracing::instrument(skip(self, options), fields(name = %options.name))]
-    pub async fn spawn_worker(&self, options: &SpawnWorkerOptions) -> Result<SpawnResult> {
+    pub async fn spawn_worker(
+        &self,
+        options: &SpawnWorkerOptions,
+        caller_bb: &BirthBranch,
+    ) -> Result<SpawnResult> {
         info!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_worker");
 
         let result = timeout(SPAWN_TIMEOUT, async {
@@ -920,7 +930,7 @@ impl AgentControlService {
 
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), self.effective_birth_branch().to_string());
+            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), self.effective_birth_branch(Some(caller_bb)).to_string());
             if let Some(port) = self.mcp_server_port {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
             }
@@ -993,13 +1003,17 @@ impl AgentControlService {
 
     /// Spawn a subtree agent (Claude-only) in a new git worktree.
     #[tracing::instrument(skip(self, options), fields(branch_name = %options.branch_name))]
-    pub async fn spawn_subtree(&self, options: &SpawnSubtreeOptions) -> Result<SpawnResult> {
+    pub async fn spawn_subtree(
+        &self,
+        options: &SpawnSubtreeOptions,
+        caller_bb: &BirthBranch,
+    ) -> Result<SpawnResult> {
         info!(branch_name = %options.branch_name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_subtree");
 
         let result = timeout(SPAWN_TIMEOUT, async {
             self.check_zellij_env()?;
 
-            let effective_birth = self.effective_birth_branch();
+            let effective_birth = self.effective_birth_branch(Some(caller_bb));
 
             // Depth check using typed birth-branch.
             let depth = effective_birth.depth();
@@ -1145,7 +1159,11 @@ impl AgentControlService {
 
     /// Spawn a Gemini leaf agent in a new git worktree.
     #[tracing::instrument(skip(self, options), fields(branch_name = %options.branch_name))]
-    pub async fn spawn_leaf_subtree(&self, options: &SpawnSubtreeOptions) -> Result<SpawnResult> {
+    pub async fn spawn_leaf_subtree(
+        &self,
+        options: &SpawnSubtreeOptions,
+        caller_bb: &BirthBranch,
+    ) -> Result<SpawnResult> {
         info!(branch_name = %options.branch_name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_leaf_subtree");
 
         let result = timeout(SPAWN_TIMEOUT, async {
@@ -1153,7 +1171,7 @@ impl AgentControlService {
 
             // No depth check for leaf nodes.
 
-            let effective_birth = self.effective_birth_branch();
+            let effective_birth = self.effective_birth_branch(Some(caller_bb));
             let effective_project_dir = &self.project_dir;
 
             // Parent branch derived from typed birth-branch.

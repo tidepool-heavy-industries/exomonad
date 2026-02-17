@@ -27,7 +27,12 @@ impl EffectHandler for MockLogHandler {
     fn namespace(&self) -> &str {
         "log"
     }
-    async fn handle(&self, _type: &str, _payload: &[u8]) -> EffectResult<Vec<u8>> {
+    async fn handle(
+        &self,
+        _type: &str,
+        _payload: &[u8],
+        _ctx: &exomonad_core::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
         use exomonad_proto::effects::log::LogResponse;
         Ok(LogResponse { success: true }.encode_to_vec())
     }

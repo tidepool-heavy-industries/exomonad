@@ -41,12 +41,11 @@ impl EventHandler {
         }
     }
 
-    fn resolve_parent_tab_name(&self) -> String {
-        let agent_name = crate::mcp::agent_identity::get_agent_id();
+    fn resolve_parent_tab_name(&self, ctx: &crate::effects::EffectContext) -> String {
+        let agent_name = &ctx.agent_name;
 
-        // Get birth-branch from task-local (set by hook handler)
-        let birth_branch = crate::mcp::agent_identity::get_birth_branch();
-        let birth_branch_str = birth_branch.as_ref().map(|b| b.as_str()).unwrap_or("main");
+        let birth_branch = &ctx.birth_branch;
+        let birth_branch_str = birth_branch.as_str();
 
         if agent_name.is_gemini_worker() {
             // Worker: birth-branch is parent's birth-branch (inherited)
@@ -61,18 +60,14 @@ impl EventHandler {
             }
         } else {
             // Subtree agent: parent is one level up
-            if let Some(bb) = &birth_branch {
-                if let Some(parent) = bb.parent() {
-                    if parent.as_str().contains('.') {
-                        let slug = parent
-                            .as_str()
-                            .rsplit_once('.')
-                            .map(|(_, s)| s)
-                            .unwrap_or(parent.as_str());
-                        format!("\u{1F916} {}", slug)
-                    } else {
-                        "TL".to_string()
-                    }
+            if let Some(parent) = birth_branch.parent() {
+                if parent.as_str().contains('.') {
+                    let slug = parent
+                        .as_str()
+                        .rsplit_once('.')
+                        .map(|(_, s)| s)
+                        .unwrap_or(parent.as_str());
+                    format!("\u{1F916} {}", slug)
                 } else {
                     "TL".to_string()
                 }
@@ -89,14 +84,23 @@ impl EffectHandler for EventHandler {
         "events"
     }
 
-    async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
-        dispatch_events_effect(self, effect_type, payload).await
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        dispatch_events_effect(self, effect_type, payload, ctx).await
     }
 }
 
 #[async_trait]
 impl EventEffects for EventHandler {
-    async fn wait_for_event(&self, req: WaitForEventRequest) -> EffectResult<WaitForEventResponse> {
+    async fn wait_for_event(
+        &self,
+        req: WaitForEventRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<WaitForEventResponse> {
         tracing::info!(
             event_queue_scope = %self.event_queue_scope,
             types = ?req.types,
@@ -128,7 +132,11 @@ impl EventEffects for EventHandler {
         Ok(WaitForEventResponse { event: Some(event) })
     }
 
-    async fn notify_event(&self, req: NotifyEventRequest) -> EffectResult<NotifyEventResponse> {
+    async fn notify_event(
+        &self,
+        req: NotifyEventRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<NotifyEventResponse> {
         tracing::info!(
             session_id = %req.session_id,
             has_event = req.event.is_some(),
@@ -166,15 +174,17 @@ impl EventEffects for EventHandler {
         }
     }
 
-    async fn notify_parent(&self, req: NotifyParentRequest) -> EffectResult<NotifyParentResponse> {
-        // Resolve birth-branch from task-local, falling back to event_queue_scope
-        let birth_branch = crate::mcp::agent_identity::get_birth_branch()
-            .unwrap_or_else(crate::domain::BirthBranch::root);
+    async fn notify_parent(
+        &self,
+        req: NotifyParentRequest,
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<NotifyParentResponse> {
+        let birth_branch = &ctx.birth_branch;
+        let agent_name = &ctx.agent_name;
 
-        // Prefer agent_id from the request (set by WASM caller) over task-local/env fallback
-        let agent_name = crate::mcp::agent_identity::get_agent_id();
+        // Prefer agent_id from the request (set by WASM caller) over structural identity
         let (agent_id_str, agent_id_source) = if req.agent_id.is_empty() {
-            (agent_name.to_string(), "fallback")
+            (agent_name.to_string(), "ctx")
         } else {
             (req.agent_id.clone(), "request")
         };
@@ -253,7 +263,7 @@ impl EventEffects for EventHandler {
         }
 
         // Inject natural-language notification into parent's Zellij pane
-        let tab_name = self.resolve_parent_tab_name();
+        let tab_name = self.resolve_parent_tab_name(ctx);
         let notification = format_parent_notification(&agent_id_str, &req.status, &req.message);
         tracing::debug!(tab = %tab_name, chars = notification.len(), "notify_parent: injecting notification into parent pane");
         zellij_events::inject_input(&tab_name, &notification);

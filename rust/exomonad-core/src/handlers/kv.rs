@@ -55,14 +55,23 @@ impl EffectHandler for KvHandler {
         "kv"
     }
 
-    async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
-        dispatch_kv_effect(self, effect_type, payload).await
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        dispatch_kv_effect(self, effect_type, payload, ctx).await
     }
 }
 
 #[async_trait]
 impl KvEffects for KvHandler {
-    async fn get(&self, req: GetRequest) -> EffectResult<GetResponse> {
+    async fn get(
+        &self,
+        req: GetRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<GetResponse> {
         Self::validate_key(&req.key)?;
 
         let path = self.key_path(&req.key);
@@ -87,7 +96,11 @@ impl KvEffects for KvHandler {
         }
     }
 
-    async fn set(&self, req: SetRequest) -> EffectResult<SetResponse> {
+    async fn set(
+        &self,
+        req: SetRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<SetResponse> {
         Self::validate_key(&req.key)?;
 
         let dir = self.kv_dir();
@@ -125,6 +138,15 @@ impl KvEffects for KvHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{AgentName, BirthBranch};
+    use crate::effects::EffectContext;
+
+    fn test_ctx() -> EffectContext {
+        EffectContext {
+            agent_name: AgentName::from("test"),
+            birth_branch: BirthBranch::from("main"),
+        }
+    }
 
     #[test]
     fn test_validate_key_valid() {
@@ -150,10 +172,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let handler = KvHandler::new(dir.path().to_path_buf());
 
+        let ctx = test_ctx();
         let resp = handler
-            .get(GetRequest {
-                key: "nonexistent".into(),
-            })
+            .get(
+                GetRequest {
+                    key: "nonexistent".into(),
+                },
+                &ctx,
+            )
             .await
             .unwrap();
 
@@ -165,20 +191,27 @@ mod tests {
     async fn test_set_then_get() {
         let dir = tempfile::tempdir().unwrap();
         let handler = KvHandler::new(dir.path().to_path_buf());
+        let ctx = test_ctx();
 
         let set_resp = handler
-            .set(SetRequest {
-                key: "test-key".into(),
-                value: "hello world".into(),
-            })
+            .set(
+                SetRequest {
+                    key: "test-key".into(),
+                    value: "hello world".into(),
+                },
+                &ctx,
+            )
             .await
             .unwrap();
         assert!(set_resp.success);
 
         let get_resp = handler
-            .get(GetRequest {
-                key: "test-key".into(),
-            })
+            .get(
+                GetRequest {
+                    key: "test-key".into(),
+                },
+                &ctx,
+            )
             .await
             .unwrap();
         assert!(get_resp.found);
@@ -189,24 +222,34 @@ mod tests {
     async fn test_set_overwrites() {
         let dir = tempfile::tempdir().unwrap();
         let handler = KvHandler::new(dir.path().to_path_buf());
+        let ctx = test_ctx();
 
         handler
-            .set(SetRequest {
-                key: "key".into(),
-                value: "v1".into(),
-            })
+            .set(
+                SetRequest {
+                    key: "key".into(),
+                    value: "v1".into(),
+                },
+                &ctx,
+            )
             .await
             .unwrap();
 
         handler
-            .set(SetRequest {
-                key: "key".into(),
-                value: "v2".into(),
-            })
+            .set(
+                SetRequest {
+                    key: "key".into(),
+                    value: "v2".into(),
+                },
+                &ctx,
+            )
             .await
             .unwrap();
 
-        let resp = handler.get(GetRequest { key: "key".into() }).await.unwrap();
+        let resp = handler
+            .get(GetRequest { key: "key".into() }, &ctx)
+            .await
+            .unwrap();
         assert_eq!(resp.value, "v2");
     }
 
@@ -214,21 +257,28 @@ mod tests {
     async fn test_invalid_key_rejected() {
         let dir = tempfile::tempdir().unwrap();
         let handler = KvHandler::new(dir.path().to_path_buf());
+        let ctx = test_ctx();
 
         let err = handler
-            .get(GetRequest {
-                key: "../bad".into(),
-            })
+            .get(
+                GetRequest {
+                    key: "../bad".into(),
+                },
+                &ctx,
+            )
             .await
             .unwrap_err();
 
         assert!(matches!(err, EffectError::InvalidInput { .. }));
 
         let err = handler
-            .set(SetRequest {
-                key: "bad/key".into(),
-                value: "val".into(),
-            })
+            .set(
+                SetRequest {
+                    key: "bad/key".into(),
+                    value: "val".into(),
+                },
+                &ctx,
+            )
             .await
             .unwrap_err();
 

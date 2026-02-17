@@ -29,14 +29,23 @@ impl EffectHandler for GitHandler {
         "git"
     }
 
-    async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
-        dispatch_git_effect(self, effect_type, payload).await
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        dispatch_git_effect(self, effect_type, payload, ctx).await
     }
 }
 
 #[async_trait]
 impl GitEffects for GitHandler {
-    async fn get_branch(&self, req: GetBranchRequest) -> EffectResult<GetBranchResponse> {
+    async fn get_branch(
+        &self,
+        req: GetBranchRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<GetBranchResponse> {
         let working_dir = if req.working_dir.is_empty() {
             ".".to_string()
         } else {
@@ -55,7 +64,11 @@ impl GitEffects for GitHandler {
         })
     }
 
-    async fn get_status(&self, req: GetStatusRequest) -> EffectResult<GetStatusResponse> {
+    async fn get_status(
+        &self,
+        req: GetStatusRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<GetStatusResponse> {
         let working_dir = if req.working_dir.is_empty() {
             ".".to_string()
         } else {
@@ -95,7 +108,11 @@ impl GitEffects for GitHandler {
         })
     }
 
-    async fn get_commits(&self, req: GetCommitsRequest) -> EffectResult<GetCommitsResponse> {
+    async fn get_commits(
+        &self,
+        req: GetCommitsRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<GetCommitsResponse> {
         let working_dir = if req.working_dir.is_empty() {
             ".".to_string()
         } else {
@@ -128,6 +145,7 @@ impl GitEffects for GitHandler {
     async fn has_unpushed_commits(
         &self,
         req: HasUnpushedCommitsRequest,
+        _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<HasUnpushedCommitsResponse> {
         let working_dir = if req.working_dir.is_empty() {
             ".".to_string()
@@ -147,7 +165,11 @@ impl GitEffects for GitHandler {
         })
     }
 
-    async fn get_remote_url(&self, req: GetRemoteUrlRequest) -> EffectResult<GetRemoteUrlResponse> {
+    async fn get_remote_url(
+        &self,
+        req: GetRemoteUrlRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<GetRemoteUrlResponse> {
         let working_dir = if req.working_dir.is_empty() {
             ".".to_string()
         } else {
@@ -163,7 +185,11 @@ impl GitEffects for GitHandler {
         Ok(GetRemoteUrlResponse { url })
     }
 
-    async fn get_repo_info(&self, req: GetRepoInfoRequest) -> EffectResult<GetRepoInfoResponse> {
+    async fn get_repo_info(
+        &self,
+        req: GetRepoInfoRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<GetRepoInfoResponse> {
         let working_dir = if req.working_dir.is_empty() {
             ".".to_string()
         } else {
@@ -183,7 +209,11 @@ impl GitEffects for GitHandler {
         })
     }
 
-    async fn get_worktree(&self, req: GetWorktreeRequest) -> EffectResult<GetWorktreeResponse> {
+    async fn get_worktree(
+        &self,
+        req: GetWorktreeRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<GetWorktreeResponse> {
         let working_dir = if req.working_dir.is_empty() {
             ".".to_string()
         } else {

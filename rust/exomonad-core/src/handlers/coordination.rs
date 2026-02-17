@@ -23,8 +23,13 @@ impl EffectHandler for CoordinationHandler {
         "coordination"
     }
 
-    async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
-        dispatch_coordination_effect(self, effect_type, payload).await
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        dispatch_coordination_effect(self, effect_type, payload, ctx).await
     }
 }
 
@@ -58,7 +63,11 @@ fn to_proto_task(task: crate::services::coordination::Task) -> Task {
 
 #[async_trait]
 impl CoordinationEffects for CoordinationHandler {
-    async fn create_task(&self, req: CreateTaskRequest) -> EffectResult<CreateTaskResponse> {
+    async fn create_task(
+        &self,
+        req: CreateTaskRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<CreateTaskResponse> {
         let task_id = self
             .service
             .create_task(
@@ -72,7 +81,11 @@ impl CoordinationEffects for CoordinationHandler {
         Ok(CreateTaskResponse { task_id })
     }
 
-    async fn update_task(&self, req: UpdateTaskRequest) -> EffectResult<UpdateTaskResponse> {
+    async fn update_task(
+        &self,
+        req: UpdateTaskRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<UpdateTaskResponse> {
         let status = to_service_status(req.status());
         let owner = if req.owner.is_empty() {
             None
@@ -98,7 +111,11 @@ impl CoordinationEffects for CoordinationHandler {
         Ok(UpdateTaskResponse { success })
     }
 
-    async fn list_tasks(&self, req: ListTasksRequest) -> EffectResult<ListTasksResponse> {
+    async fn list_tasks(
+        &self,
+        req: ListTasksRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<ListTasksResponse> {
         let filter_status = to_service_status(req.filter_status());
         let tasks = self.service.list_tasks(filter_status).await;
 
@@ -107,7 +124,11 @@ impl CoordinationEffects for CoordinationHandler {
         })
     }
 
-    async fn get_task(&self, req: GetTaskRequest) -> EffectResult<GetTaskResponse> {
+    async fn get_task(
+        &self,
+        req: GetTaskRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<GetTaskResponse> {
         let task = self.service.get_task(&req.task_id).await;
 
         Ok(GetTaskResponse {
@@ -115,14 +136,22 @@ impl CoordinationEffects for CoordinationHandler {
         })
     }
 
-    async fn send_message(&self, req: SendMessageRequest) -> EffectResult<SendMessageResponse> {
+    async fn send_message(
+        &self,
+        req: SendMessageRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<SendMessageResponse> {
         self.service
             .send_message(AgentName::from(req.from.as_str()), req.text, req.summary)
             .await;
         Ok(SendMessageResponse { success: true })
     }
 
-    async fn get_messages(&self, req: GetMessagesRequest) -> EffectResult<GetMessagesResponse> {
+    async fn get_messages(
+        &self,
+        req: GetMessagesRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<GetMessagesResponse> {
         let filter = if req.unread_only {
             crate::domain::MessageFilter::UnreadOnly
         } else {

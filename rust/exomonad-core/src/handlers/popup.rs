@@ -29,14 +29,23 @@ impl EffectHandler for PopupHandler {
         "popup"
     }
 
-    async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
-        dispatch_popup_effect(self, effect_type, payload).await
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        dispatch_popup_effect(self, effect_type, payload, ctx).await
     }
 }
 
 #[async_trait]
 impl PopupEffects for PopupHandler {
-    async fn show_popup(&self, req: ShowPopupRequest) -> EffectResult<ShowPopupResponse> {
+    async fn show_popup(
+        &self,
+        req: ShowPopupRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<ShowPopupResponse> {
         let components: Vec<serde_json::Value> = if req.components.is_empty() {
             Vec::new()
         } else {

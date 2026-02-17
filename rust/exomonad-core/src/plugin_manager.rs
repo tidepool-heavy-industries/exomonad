@@ -8,7 +8,9 @@
 //! - **Embedded**: WASM bytes compiled into binary via `include_bytes!` (stdio mode)
 //! - **File-based**: WASM loaded from disk path with hot reload on mtime change (serve mode)
 
-use crate::effects::{host_fn::yield_effect_host_fn, host_fn::YieldEffectContext, EffectRegistry};
+use crate::effects::{
+    host_fn::yield_effect_host_fn, host_fn::YieldEffectContext, EffectContext, EffectRegistry,
+};
 use anyhow::{Context, Result};
 use extism::{Manifest, Plugin, PluginBuilder};
 use serde::{Deserialize, Serialize};
@@ -69,15 +71,21 @@ pub struct PluginManager {
     last_mtime: Arc<RwLock<Option<SystemTime>>>,
     /// Effect registry, stored for reload (recreating plugin requires re-registering host fns).
     registry: Arc<EffectRegistry>,
+    /// Agent identity, baked in at construction. Always present.
+    ctx: EffectContext,
 }
 
 impl PluginManager {
     /// Load a WASM plugin from bytes (embedded mode, no hot reload).
-    pub async fn new(wasm_bytes: &[u8], registry: Arc<EffectRegistry>) -> Result<Self> {
+    pub async fn new(
+        wasm_bytes: &[u8],
+        registry: Arc<EffectRegistry>,
+        ctx: EffectContext,
+    ) -> Result<Self> {
         let hash = sha256_short(wasm_bytes);
-        tracing::info!(size = wasm_bytes.len(), hash = %hash, "Loading embedded WASM plugin");
+        tracing::info!(size = wasm_bytes.len(), hash = %hash, agent = %ctx.agent_name, "Loading embedded WASM plugin");
 
-        let plugin = build_plugin(wasm_bytes, &registry)?;
+        let plugin = build_plugin(wasm_bytes, &registry, &ctx)?;
 
         Ok(Self {
             plugin: Arc::new(RwLock::new(plugin)),
@@ -85,11 +93,16 @@ impl PluginManager {
             wasm_path: None,
             last_mtime: Arc::new(RwLock::new(None)),
             registry,
+            ctx,
         })
     }
 
     /// Load a WASM plugin from a file path (runtime mode, hot reload enabled).
-    pub async fn from_file(path: &Path, registry: Arc<EffectRegistry>) -> Result<Self> {
+    pub async fn from_file(
+        path: &Path,
+        registry: Arc<EffectRegistry>,
+        ctx: EffectContext,
+    ) -> Result<Self> {
         let wasm_bytes = std::fs::read(path)
             .with_context(|| format!("Failed to read WASM from {}", path.display()))?;
 
@@ -102,10 +115,11 @@ impl PluginManager {
             path = %path.display(),
             size = wasm_bytes.len(),
             hash = %hash,
+            agent = %ctx.agent_name,
             "Loading WASM plugin from file"
         );
 
-        let plugin = build_plugin(&wasm_bytes, &registry)?;
+        let plugin = build_plugin(&wasm_bytes, &registry, &ctx)?;
 
         Ok(Self {
             plugin: Arc::new(RwLock::new(plugin)),
@@ -113,6 +127,7 @@ impl PluginManager {
             wasm_path: Some(path.to_path_buf()),
             last_mtime: Arc::new(RwLock::new(Some(mtime))),
             registry,
+            ctx,
         })
     }
 
@@ -162,7 +177,7 @@ impl PluginManager {
             .with_context(|| format!("Failed to read WASM for reload: {}", path.display()))?;
 
         let new_hash = sha256_short(&wasm_bytes);
-        let new_plugin = build_plugin(&wasm_bytes, &self.registry)?;
+        let new_plugin = build_plugin(&wasm_bytes, &self.registry, &self.ctx)?;
         let size = wasm_bytes.len();
 
         // Atomic swap
@@ -199,6 +214,11 @@ impl PluginManager {
         );
 
         Ok(true)
+    }
+
+    /// Get the baked-in agent identity context.
+    pub fn effect_context(&self) -> &EffectContext {
+        &self.ctx
     }
 
     /// Get the SHA256 content hash of the loaded WASM binary (first 12 hex chars).
@@ -294,7 +314,7 @@ impl PluginManager {
 
                     let effect_result = self
                         .registry
-                        .dispatch(&effect.effect_type, &payload_bytes)
+                        .dispatch(&effect.effect_type, &payload_bytes, &self.ctx)
                         .await?;
 
                     // Set up resume call
@@ -311,18 +331,23 @@ impl PluginManager {
 }
 
 /// Build an Extism plugin from WASM bytes with yield_effect host function.
-fn build_plugin(wasm_bytes: &[u8], registry: &Arc<EffectRegistry>) -> Result<Plugin> {
+fn build_plugin(
+    wasm_bytes: &[u8],
+    registry: &Arc<EffectRegistry>,
+    effect_ctx: &EffectContext,
+) -> Result<Plugin> {
     let manifest = Manifest::new([extism::Wasm::data(wasm_bytes.to_vec())]);
-    // .with_allowed_env(Some(vec!["EXOMONAD_AGENT_ID".to_string()])); // TODO: Fix for Extism 1.13
 
     tracing::info!(
         namespaces = ?registry.namespaces(),
+        agent = %effect_ctx.agent_name,
         "Registering yield_effect with {} handler namespaces",
         registry.namespaces().len()
     );
 
     let ctx = YieldEffectContext {
         registry: registry.clone(),
+        ctx: effect_ctx.clone(),
     };
     let functions = vec![yield_effect_host_fn(ctx)];
 

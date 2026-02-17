@@ -16,7 +16,7 @@ Handles effects in the `events.*` namespace, enabling synchronization between ag
 
 - `notified_agents` uses `HashSet<AgentName>` (not raw strings) for dedup
 - `resolve_parent_tab_name()` returns `TabName` (constructed via `BirthBranch::tab_name()` or `TabName::tl()`)
-- Agent identity resolved as `AgentName` from task-local storage
+- Agent identity resolved as `AgentName` from `EffectContext` (structural, baked into PluginManager)
 
 ### Remote Forwarding
 

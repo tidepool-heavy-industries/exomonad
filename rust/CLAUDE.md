@@ -146,16 +146,14 @@ echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
 |----------|---------|---------|
 | `GITHUB_TOKEN` | services | GitHub API access |
 | `RUST_LOG` | all | Tracing log level |
-| `EXOMONAD_AGENT_ID` | messaging | Agent identity (env var fallback) |
+| `EXOMONAD_AGENT_ID` | agent spawn | Agent identity for spawned agents (read at spawn time) |
 | `GEMINI_CLI_SYSTEM_SETTINGS_PATH` | agent spawn | Points Gemini at per-agent settings.json |
 
 ### Agent Identity
 
-In HTTP serve mode, multiple agents share one server process. Each agent hits a unique URL: `/agents/{role}/{name}/mcp`. The server extracts role and identity from the URL path. Role determines which WASM tool set (lazy McpServer per role). Identity is stored in a tokio task-local via `mcp::agent_identity`.
+In HTTP serve mode, multiple agents share one server process. Each agent hits a unique URL: `/agents/{role}/{name}/mcp`. The server extracts role and identity from the URL path. Role determines which WASM tool set (lazy McpServer per role). Identity is structural: each agent gets its own `PluginManager` with `EffectContext` (agent name + birth branch) baked in at construction.
 
-Resolution order in `mcp::agent_identity::get_agent_id()`:
-1. **Task-local** (HTTP mode): set by the `/agents/{role}/{name}/mcp` route handler
-2. **Directory name** (last resort): current working directory basename
+**Per-agent PluginManager cache:** The server maintains a `HashMap<AgentName, Arc<PluginManager>>`. On first request from an agent, a new PluginManager is created with the agent's `EffectContext` and cached. All effect handlers receive `&EffectContext` — identity is always present, no Option, no task-locals, no panic paths.
 
 **Route layout (single pattern):**
 - `/agents/{role}/{name}/mcp` — unified route for all agents

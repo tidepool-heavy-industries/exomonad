@@ -41,14 +41,23 @@ impl EffectHandler for LogHandler {
         "log"
     }
 
-    async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
-        dispatch_log_effect(self, effect_type, payload).await
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        dispatch_log_effect(self, effect_type, payload, ctx).await
     }
 }
 
 #[async_trait]
 impl LogEffects for LogHandler {
-    async fn log(&self, req: LogRequest) -> EffectResult<LogResponse> {
+    async fn log(
+        &self,
+        req: LogRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<LogResponse> {
         let level = req.level();
         let fields_str = if req.fields.is_empty() {
             None
@@ -91,7 +100,11 @@ impl LogEffects for LogHandler {
         Ok(LogResponse { success: true })
     }
 
-    async fn debug(&self, req: DebugRequest) -> EffectResult<LogResponse> {
+    async fn debug(
+        &self,
+        req: DebugRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<LogResponse> {
         let fields_str = if req.fields.is_empty() {
             None
         } else {
@@ -107,7 +120,11 @@ impl LogEffects for LogHandler {
         Ok(LogResponse { success: true })
     }
 
-    async fn info(&self, req: InfoRequest) -> EffectResult<LogResponse> {
+    async fn info(
+        &self,
+        req: InfoRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<LogResponse> {
         let fields_str = if req.fields.is_empty() {
             None
         } else {
@@ -123,7 +140,11 @@ impl LogEffects for LogHandler {
         Ok(LogResponse { success: true })
     }
 
-    async fn warn(&self, req: WarnRequest) -> EffectResult<LogResponse> {
+    async fn warn(
+        &self,
+        req: WarnRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<LogResponse> {
         let fields_str = if req.fields.is_empty() {
             None
         } else {
@@ -139,7 +160,11 @@ impl LogEffects for LogHandler {
         Ok(LogResponse { success: true })
     }
 
-    async fn error(&self, req: ErrorRequest) -> EffectResult<LogResponse> {
+    async fn error(
+        &self,
+        req: ErrorRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<LogResponse> {
         let fields_str = if req.fields.is_empty() {
             None
         } else {
@@ -155,7 +180,11 @@ impl LogEffects for LogHandler {
         Ok(LogResponse { success: true })
     }
 
-    async fn emit_event(&self, req: EmitEventRequest) -> EffectResult<EmitEventResponse> {
+    async fn emit_event(
+        &self,
+        req: EmitEventRequest,
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<EmitEventResponse> {
         let event_id = Uuid::new_v4().to_string();
 
         let payload_str = if req.payload.is_empty() {
@@ -179,7 +208,7 @@ impl LogEffects for LogHandler {
                 serde_json::from_slice(&req.payload)
                     .unwrap_or(serde_json::json!({"raw": payload_str}))
             };
-            let agent_id = crate::mcp::agent_identity::get_agent_id_string();
+            let agent_id = ctx.agent_name.to_string();
             if let Err(e) = log.append(&req.event_type, &agent_id, &data) {
                 tracing::warn!(error = %e, "Failed to write event to JSONL log");
             }

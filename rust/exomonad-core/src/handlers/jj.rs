@@ -17,8 +17,13 @@ impl EffectHandler for JjHandler {
         "jj"
     }
 
-    async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
-        dispatch_jj_effect(self, effect_type, payload).await
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        dispatch_jj_effect(self, effect_type, payload, ctx).await
     }
 }
 
@@ -27,6 +32,7 @@ impl JjEffects for JjHandler {
     async fn bookmark_create(
         &self,
         req: BookmarkCreateRequest,
+        _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<BookmarkCreateResponse> {
         let working_dir = if req.working_dir.is_empty() {
             ".".to_string()
@@ -54,7 +60,11 @@ impl JjEffects for JjHandler {
         })
     }
 
-    async fn git_push(&self, req: GitPushRequest) -> EffectResult<GitPushResponse> {
+    async fn git_push(
+        &self,
+        req: GitPushRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<GitPushResponse> {
         let working_dir = if req.working_dir.is_empty() {
             ".".to_string()
         } else {
@@ -78,7 +88,11 @@ impl JjEffects for JjHandler {
         })
     }
 
-    async fn git_fetch(&self, req: GitFetchRequest) -> EffectResult<GitFetchResponse> {
+    async fn git_fetch(
+        &self,
+        req: GitFetchRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<GitFetchResponse> {
         let working_dir = if req.working_dir.is_empty() {
             ".".to_string()
         } else {
@@ -102,7 +116,11 @@ impl JjEffects for JjHandler {
         })
     }
 
-    async fn log(&self, req: LogRequest) -> EffectResult<LogResponse> {
+    async fn log(
+        &self,
+        req: LogRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<LogResponse> {
         let working_dir = if req.working_dir.is_empty() {
             ".".to_string()
         } else {
@@ -150,7 +168,11 @@ impl JjEffects for JjHandler {
         Ok(LogResponse { entries })
     }
 
-    async fn new(&self, req: NewRequest) -> EffectResult<NewResponse> {
+    async fn new(
+        &self,
+        req: NewRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<NewResponse> {
         let working_dir = if req.working_dir.is_empty() {
             ".".to_string()
         } else {
@@ -176,7 +198,11 @@ impl JjEffects for JjHandler {
         })
     }
 
-    async fn status(&self, req: StatusRequest) -> EffectResult<StatusResponse> {
+    async fn status(
+        &self,
+        req: StatusRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<StatusResponse> {
         let working_dir = if req.working_dir.is_empty() {
             ".".to_string()
         } else {

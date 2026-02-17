@@ -4,7 +4,7 @@
 //! and payload bytes. The host dispatches to the appropriate handler and returns
 //! an `EffectResponse` (protobuf) with either payload bytes or an error.
 
-use super::{EffectError, EffectRegistry};
+use super::{EffectContext, EffectError, EffectRegistry};
 use exomonad_proto::effects::error as proto_error;
 use exomonad_proto::effects::{EffectEnvelope, EffectResponse};
 use extism::{CurrentPlugin, Error, Function, UserData, Val, ValType};
@@ -47,6 +47,8 @@ fn to_proto_error(err: &EffectError) -> proto_error::EffectError {
 pub struct YieldEffectContext {
     /// Effect registry for dispatching semantic effects.
     pub registry: Arc<EffectRegistry>,
+    /// Agent identity, baked in at plugin construction time.
+    pub ctx: EffectContext,
 }
 
 /// Create the yield_effect host function.
@@ -112,11 +114,11 @@ fn yield_effect_impl(
     let ctx_lock = ctx.lock().map_err(|_| Error::msg("Poisoned lock"))?;
 
     // Block on the async dispatch
-    let result = block_on(
-        ctx_lock
-            .registry
-            .dispatch(&envelope.effect_type, &envelope.payload),
-    )?;
+    let result = block_on(ctx_lock.registry.dispatch(
+        &envelope.effect_type,
+        &envelope.payload,
+        &ctx_lock.ctx,
+    ))?;
 
     match &result {
         Ok(payload) => tracing::info!(

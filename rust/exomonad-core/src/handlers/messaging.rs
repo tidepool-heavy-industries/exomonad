@@ -45,15 +45,24 @@ impl EffectHandler for MessagingHandler {
         "messaging"
     }
 
-    async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
-        dispatch_messaging_effect(self, effect_type, payload).await
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        dispatch_messaging_effect(self, effect_type, payload, ctx).await
     }
 }
 
 #[async_trait]
 impl MessagingEffects for MessagingHandler {
-    async fn send_note(&self, req: SendNoteRequest) -> EffectResult<SendNoteResponse> {
-        let agent_id = get_agent_id();
+    async fn send_note(
+        &self,
+        req: SendNoteRequest,
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<SendNoteResponse> {
+        let agent_id = ctx.agent_name.to_string();
         let tl_inbox = inbox::inbox_path(&self.project_dir, "team-lead");
 
         let msg = inbox::create_message(
@@ -69,15 +78,19 @@ impl MessagingEffects for MessagingHandler {
             .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
 
         // Best-effort: push into parent's pane via Zellij plugin (inbox is source of truth)
-        let tab_name = resolve_parent_tab_name();
+        let tab_name = resolve_parent_tab_name(ctx);
         let formatted = format!("[note from {}] {}", agent_id, req.content);
         zellij_events::inject_input(&tab_name, &formatted);
 
         Ok(SendNoteResponse { ack: true })
     }
 
-    async fn send_question(&self, req: SendQuestionRequest) -> EffectResult<SendQuestionResponse> {
-        let agent_id = get_agent_id();
+    async fn send_question(
+        &self,
+        req: SendQuestionRequest,
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<SendQuestionResponse> {
+        let agent_id = ctx.agent_name.to_string();
 
         info!(agent = %agent_id, "Sending question to TL");
 
@@ -100,7 +113,7 @@ impl MessagingEffects for MessagingHandler {
             .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
 
         // Best-effort: push into parent's pane via Zellij plugin (inbox is source of truth)
-        let tab_name = resolve_parent_tab_name();
+        let tab_name = resolve_parent_tab_name(ctx);
         let formatted = format!(
             "[question from {}, q_id={}] {}",
             agent_id, question_id, req.question
@@ -143,6 +156,7 @@ impl MessagingEffects for MessagingHandler {
     async fn get_agent_messages(
         &self,
         req: GetAgentMessagesRequest,
+        _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetAgentMessagesResponse> {
         let timeout_secs = req.timeout_secs;
         info!(agent_id = %req.agent_id, timeout_secs, "Getting agent messages");
@@ -247,6 +261,7 @@ impl MessagingEffects for MessagingHandler {
     async fn answer_question(
         &self,
         req: AnswerQuestionRequest,
+        _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<AnswerQuestionResponse> {
         info!(
             agent = %req.agent_id,
@@ -286,38 +301,35 @@ impl MessagingEffects for MessagingHandler {
     }
 }
 
-fn get_agent_id() -> String {
-    crate::mcp::agent_identity::get_agent_id_string()
-}
-
-/// Resolve the Zellij tab name of the parent agent.
+/// Resolve the Zellij tab name of the parent agent from structural identity.
 ///
-/// Uses the same identity model as `events.rs:notify_parent`:
-/// - Workers (agent_id ends with `-gemini`): parent is derived from EXOMONAD_SESSION_ID
+/// Uses the same identity model as `events.rs:resolve_parent_tab_name`:
+/// - Workers (Gemini): parent is derived from birth_branch
 /// - Subtree agents: parent is one dot-level up in branch hierarchy
 /// - Root agents (no dots): parent is the TL tab
-fn resolve_parent_tab_name() -> String {
-    let agent_id = get_agent_id();
-    let session_id = std::env::var("EXOMONAD_SESSION_ID").unwrap_or_default();
+fn resolve_parent_tab_name(ctx: &crate::effects::EffectContext) -> String {
+    let birth_branch_str = ctx.birth_branch.as_str();
 
-    if agent_id.ends_with("-gemini") {
-        // Worker: session_id is parent's session ID
-        if session_id.contains('.') {
-            // Parent is a subtree agent — extract slug from last dot segment
-            let slug = session_id
+    if ctx.agent_name.is_gemini_worker() {
+        // Worker: birth-branch is parent's birth-branch (inherited)
+        if birth_branch_str.contains('.') {
+            let slug = birth_branch_str
                 .rsplit_once('.')
                 .map(|(_, s)| s)
-                .unwrap_or(&session_id);
+                .unwrap_or(birth_branch_str);
             format!("\u{1F916} {}", slug)
         } else {
             "TL".to_string()
         }
     } else {
         // Subtree agent: parent is one level up
-        if let Some((parent, _)) = session_id.rsplit_once('.') {
-            if parent.contains('.') {
-                // Grandparent exists — parent is also a subtree
-                let slug = parent.rsplit_once('.').map(|(_, s)| s).unwrap_or(parent);
+        if let Some(parent) = ctx.birth_branch.parent() {
+            if parent.as_str().contains('.') {
+                let slug = parent
+                    .as_str()
+                    .rsplit_once('.')
+                    .map(|(_, s)| s)
+                    .unwrap_or(parent.as_str());
                 format!("\u{1F916} {}", slug)
             } else {
                 "TL".to_string()

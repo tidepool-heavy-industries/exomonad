@@ -33,14 +33,23 @@ impl EffectHandler for FilePRHandler {
         "file_pr"
     }
 
-    async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
-        dispatch_file_pr_effect(self, effect_type, payload).await
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        dispatch_file_pr_effect(self, effect_type, payload, ctx).await
     }
 }
 
 #[async_trait]
 impl FilePrEffects for FilePRHandler {
-    async fn file_pr(&self, req: FilePrRequest) -> EffectResult<FilePrResponse> {
+    async fn file_pr(
+        &self,
+        req: FilePrRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<FilePrResponse> {
         let base_branch = if req.base_branch.is_empty() {
             None
         } else {

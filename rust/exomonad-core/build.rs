@@ -91,7 +91,10 @@ fn generate_effect_traits() -> Result<()> {
         "    use exomonad_proto::effects::{{{}}};",
         modules.join(", ")
     )?;
-    writeln!(file, "    use super::{{EffectResult, EffectError}};")?;
+    writeln!(
+        file,
+        "    use super::{{EffectContext, EffectResult, EffectError}};"
+    )?;
     writeln!(file, "    use async_trait::async_trait;")?;
     writeln!(file)?;
 
@@ -192,7 +195,7 @@ fn generate_trait<W: Write>(w: &mut W, service: &ServiceDef) -> Result<()> {
         )?;
         writeln!(
             w,
-            "        async fn {}(&self, req: {}::{}) -> EffectResult<{}::{}>;",
+            "        async fn {}(&self, req: {}::{}, ctx: &EffectContext) -> EffectResult<{}::{}>;",
             method.name, service.module, method.request_type, service.module, method.response_type
         )?;
         writeln!(w)?;
@@ -228,6 +231,7 @@ fn generate_dispatch_helper<W: Write>(w: &mut W, service: &ServiceDef) -> Result
     writeln!(w, "        handler: &T,")?;
     writeln!(w, "        effect_type: &str,")?;
     writeln!(w, "        payload: &[u8],")?;
+    writeln!(w, "        ctx: &EffectContext,")?;
     writeln!(w, "    ) -> EffectResult<Vec<u8>> {{")?;
     writeln!(w, "        use prost::Message;")?;
     writeln!(w)?;
@@ -256,7 +260,7 @@ fn generate_dispatch_helper<W: Write>(w: &mut W, service: &ServiceDef) -> Result
         )?;
         writeln!(
             w,
-            "                let resp = handler.{}(req).await?;",
+            "                let resp = handler.{}(req, ctx).await?;",
             method.name
         )?;
         writeln!(w, "                Ok(resp.encode_to_vec())")?;

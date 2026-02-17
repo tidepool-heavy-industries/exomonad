@@ -17,6 +17,7 @@ use exomonad_core::services::external::otel::OtelService;
 use exomonad_core::services::external::ExternalService;
 use exomonad_core::services::{git, zellij_events};
 
+use axum::response::IntoResponse;
 use exomonad_core::{
     ClaudePreToolUseOutput, HookEnvelope, HookEventType, HookInput, HookSpecificOutput,
     InternalStopHookOutput, PluginManager, RuntimeBuilder, StopDecision, ToolPermission,
@@ -105,6 +106,40 @@ enum Commands {
 }
 
 // ============================================================================
+// Per-Agent Plugin Cache
+// ============================================================================
+
+/// Get or create a per-agent PluginManager with baked-in identity.
+async fn get_or_create_plugin(
+    plugins: &tokio::sync::RwLock<HashMap<exomonad_core::AgentName, Arc<PluginManager>>>,
+    agent_name: exomonad_core::AgentName,
+    birth_branch: exomonad_core::BirthBranch,
+    registry: &Arc<exomonad_core::effects::EffectRegistry>,
+    wasm_path: &std::path::Path,
+) -> anyhow::Result<Arc<PluginManager>> {
+    // Fast path: existing plugin
+    {
+        let cache = plugins.read().await;
+        if let Some(p) = cache.get(&agent_name) {
+            return Ok(p.clone());
+        }
+    }
+
+    // Slow path: create new per-agent plugin
+    let ctx = exomonad_core::effects::EffectContext {
+        agent_name: agent_name.clone(),
+        birth_branch,
+    };
+    let p = Arc::new(
+        PluginManager::from_file(wasm_path, registry.clone(), ctx)
+            .await
+            .with_context(|| format!("Failed to create plugin for agent {}", agent_name))?,
+    );
+    plugins.write().await.insert(agent_name, p.clone());
+    Ok(p)
+}
+
+// ============================================================================
 // Server-side Hook Handler
 // ============================================================================
 
@@ -123,7 +158,9 @@ struct HookQueryParams {
 /// Server-side hook handler state, shared across requests.
 #[derive(Clone)]
 struct HookState {
-    plugin: Arc<PluginManager>,
+    plugins: Arc<tokio::sync::RwLock<HashMap<exomonad_core::AgentName, Arc<PluginManager>>>>,
+    registry: Arc<exomonad_core::effects::EffectRegistry>,
+    wasm_path: PathBuf,
     otel: Option<Arc<OtelService>>,
     zellij_session: String,
     default_role: exomonad_core::Role,
@@ -324,8 +361,7 @@ async fn handle_hook_inner(
         }
     }
 
-    // Wrap WASM calls with agent identity task-locals so effect handlers
-    // (e.g. EventHandler::notify_parent) can resolve the correct identity.
+    // Resolve agent identity and get per-agent plugin with baked-in EffectContext.
     let agent_name_for_hook =
         exomonad_core::AgentName::from(params.agent_id.as_deref().unwrap_or("root"));
     let birth_branch_for_hook =
@@ -337,23 +373,23 @@ async fn handle_hook_inner(
         "Hook identity context"
     );
 
+    let plugin = get_or_create_plugin(
+        &state.plugins,
+        agent_name_for_hook.clone(),
+        birth_branch_for_hook.clone(),
+        &state.registry,
+        &state.wasm_path,
+    )
+    .await
+    .context("Failed to get plugin for hook")?;
+
     match dispatch {
         HookDispatch::WorkerExit => {
             // WASM handles notifyParent as a side effect. We call it and return allow.
-            let _: serde_json::Value = exomonad_core::mcp::agent_identity::with_agent_id(
-                agent_name_for_hook.clone(),
-                exomonad_core::mcp::agent_identity::with_birth_branch(
-                    birth_branch_for_hook.clone(),
-                    async {
-                        state
-                            .plugin
-                            .call("handle_pre_tool_use", &hook_input_value)
-                            .await
-                    },
-                ),
-            )
-            .await
-            .context("WASM handleWorkerExit failed")?;
+            let _: serde_json::Value = plugin
+                .call("handle_pre_tool_use", &hook_input_value)
+                .await
+                .context("WASM handleWorkerExit failed")?;
 
             Ok(HookEnvelope {
                 stdout: serde_json::to_string(&ClaudePreToolUseOutput::default())?,
@@ -362,19 +398,8 @@ async fn handle_hook_inner(
         }
 
         HookDispatch::Stop => {
-            let internal_output: InternalStopHookOutput =
-                exomonad_core::mcp::agent_identity::with_agent_id(
-                    agent_name_for_hook.clone(),
-                    exomonad_core::mcp::agent_identity::with_birth_branch(
-                        birth_branch_for_hook.clone(),
-                        async {
-                            state
-                                .plugin
-                                .call("handle_pre_tool_use", &hook_input_value)
-                                .await
-                        },
-                    ),
-                )
+            let internal_output: InternalStopHookOutput = plugin
+                .call("handle_pre_tool_use", &hook_input_value)
                 .await
                 .context("WASM handle_pre_tool_use (stop) failed")?;
 
@@ -443,20 +468,10 @@ async fn handle_hook_inner(
         }
 
         HookDispatch::ToolUse => {
-            let output: ClaudePreToolUseOutput = exomonad_core::mcp::agent_identity::with_agent_id(
-                agent_name_for_hook.clone(),
-                exomonad_core::mcp::agent_identity::with_birth_branch(
-                    birth_branch_for_hook.clone(),
-                    async {
-                        state
-                            .plugin
-                            .call("handle_pre_tool_use", &hook_input_value)
-                            .await
-                    },
-                ),
-            )
-            .await
-            .context("WASM handle_pre_tool_use failed")?;
+            let output: ClaudePreToolUseOutput = plugin
+                .call("handle_pre_tool_use", &hook_input_value)
+                .await
+                .context("WASM handle_pre_tool_use failed")?;
 
             let output_json =
                 serde_json::to_string(&output).context("Failed to serialize output")?;
@@ -907,7 +922,7 @@ async fn main() -> Result<()> {
 
             // Build runtime with handler groups
             let mut builder = RuntimeBuilder::new()
-                .with_wasm_path(wasm_path)
+                .with_wasm_path(wasm_path.clone())
                 .require_namespaces(vec![
                     "log".to_string(),
                     "kv".to_string(),
@@ -952,8 +967,27 @@ async fn main() -> Result<()> {
             builder = builder.with_handlers(orch_handlers);
             let rt = builder.build().await.context("Failed to build runtime")?;
 
-            let mut base_state = rt.into_mcp_state(project_dir.clone());
-            base_state.question_registry = Some(question_registry);
+            // Extract the shared registry for creating per-agent plugins
+            let rt_registry = rt.registry.clone();
+            let root_plugin = Arc::new(rt.plugin_manager);
+
+            // Per-agent plugin cache — each agent gets its own PluginManager with baked-in identity
+            let plugins: Arc<
+                tokio::sync::RwLock<HashMap<exomonad_core::AgentName, Arc<PluginManager>>>,
+            > = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+
+            // Pre-populate with the root agent's plugin
+            plugins
+                .write()
+                .await
+                .insert(exomonad_core::AgentName::from("root"), root_plugin.clone());
+
+            let base_state = exomonad_core::mcp::McpState {
+                project_dir: project_dir.clone(),
+                plugin: root_plugin,
+                role: None,
+                question_registry: Some(question_registry),
+            };
 
             // Write server.pid for client discovery
             let pid_info = serde_json::json!({
@@ -1006,36 +1040,25 @@ async fn main() -> Result<()> {
             // Unified per-agent MCP handler: /agents/{role}/{name}/mcp
             let unified_handler = {
                 let servers = servers.clone();
+                let plugins = plugins.clone();
+                let registry = rt_registry.clone();
+                let wasm_path_for_handler = wasm_path.clone();
                 let base_state = base_state.clone();
                 let wb = worktree_base.clone();
                 move |axum::extract::Path((role, name)): axum::extract::Path<(String, String)>,
                       headers: axum::http::HeaderMap,
                       body: axum::extract::Json<serde_json::Value>| {
                     let servers = servers.clone();
+                    let plugins = plugins.clone();
+                    let registry = registry.clone();
+                    let wasm_path_for_handler = wasm_path_for_handler.clone();
                     let base_state = base_state.clone();
                     let wb = wb.clone();
                     async move {
-                        // Get or create McpServer for this role
-                        let server = {
-                            let cache = servers.read().await;
-                            cache.get(&role).cloned()
-                        };
-                        let server = match server {
-                            Some(s) => s,
-                            None => {
-                                let mut state = base_state.clone();
-                                state.role = Some(role.clone());
-                                let s = McpServer::new(state);
-                                servers.write().await.insert(role.clone(), s.clone());
-                                s
-                            }
-                        };
-
-                        // Root agent: use static identity (no worktree to resolve)
-                        use exomonad_core::mcp::agent_identity::ROOT_AGENT_NAME;
-                        let (agent_name, birth_branch) = if name == ROOT_AGENT_NAME {
+                        // Resolve agent identity
+                        let (agent_name, birth_branch) = if name == "root" {
                             (
-                                exomonad_core::AgentName::from(ROOT_AGENT_NAME),
+                                exomonad_core::AgentName::from("root"),
                                 exomonad_core::BirthBranch::root(),
                             )
                         } else {
@@ -1045,14 +1068,42 @@ async fn main() -> Result<()> {
                             )
                         };
 
-                        exomonad_core::mcp::agent_identity::with_agent_id(
-                            agent_name,
-                            exomonad_core::mcp::agent_identity::with_birth_branch(
-                                birth_branch,
-                                async move { server.handle(headers, body).await },
-                            ),
+                        // Get or create per-agent plugin with baked-in identity
+                        let plugin = match get_or_create_plugin(
+                            &plugins,
+                            agent_name.clone(),
+                            birth_branch,
+                            &registry,
+                            &wasm_path_for_handler,
                         )
                         .await
+                        {
+                            Ok(p) => p,
+                            Err(e) => {
+                                tracing::error!(agent = %agent_name, error = %e, "Failed to create plugin");
+                                return axum::http::StatusCode::INTERNAL_SERVER_ERROR
+                                    .into_response();
+                            }
+                        };
+
+                        // Get or create McpServer for this role (with per-agent plugin)
+                        let server = {
+                            let cache = servers.read().await;
+                            cache.get(&role).cloned()
+                        };
+                        let server = match server {
+                            Some(s) => s,
+                            None => {
+                                let mut state = base_state.clone();
+                                state.role = Some(role.clone());
+                                state.plugin = plugin.clone();
+                                let s = McpServer::new(state);
+                                servers.write().await.insert(role.clone(), s.clone());
+                                s
+                            }
+                        };
+
+                        server.handle(headers, body).await
                     }
                 }
             };
@@ -1080,7 +1131,9 @@ async fn main() -> Result<()> {
 
             // Hook handler state (shared OtelService created once)
             let hook_state = HookState {
-                plugin: base_state.plugin.clone(),
+                plugins: plugins.clone(),
+                registry: rt_registry.clone(),
+                wasm_path: wasm_path.clone(),
                 otel: OtelService::from_env().ok().map(Arc::new),
                 zellij_session: config.zellij_session.clone(),
                 default_role: config.role,

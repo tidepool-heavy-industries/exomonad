@@ -13,14 +13,23 @@ impl EffectHandler for MergePRHandler {
     fn namespace(&self) -> &str {
         "merge_pr"
     }
-    async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
-        dispatch_merge_pr_effect(self, effect_type, payload).await
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        dispatch_merge_pr_effect(self, effect_type, payload, ctx).await
     }
 }
 
 #[async_trait]
 impl MergePrEffects for MergePRHandler {
-    async fn merge_pr(&self, req: MergePrRequest) -> EffectResult<MergePrResponse> {
+    async fn merge_pr(
+        &self,
+        req: MergePrRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<MergePrResponse> {
         let result = merge_pr::merge_pr_async(req.pr_number, &req.strategy, &req.working_dir)
             .await
             .map_err(|e| EffectError::custom("merge_pr_error", e.to_string()))?;

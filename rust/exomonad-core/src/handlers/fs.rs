@@ -30,14 +30,23 @@ impl EffectHandler for FsHandler {
         "fs"
     }
 
-    async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
-        dispatch_fs_effect(self, effect_type, payload).await
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<Vec<u8>> {
+        dispatch_fs_effect(self, effect_type, payload, ctx).await
     }
 }
 
 #[async_trait]
 impl FilesystemEffects for FsHandler {
-    async fn read_file(&self, req: ReadFileRequest) -> EffectResult<ReadFileResponse> {
+    async fn read_file(
+        &self,
+        req: ReadFileRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<ReadFileResponse> {
         let max_bytes = if req.max_bytes <= 0 {
             1_048_576 // 1MB default
         } else {
@@ -63,7 +72,11 @@ impl FilesystemEffects for FsHandler {
         })
     }
 
-    async fn write_file(&self, req: WriteFileRequest) -> EffectResult<WriteFileResponse> {
+    async fn write_file(
+        &self,
+        req: WriteFileRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<WriteFileResponse> {
         let input = crate::services::filesystem::WriteFileInput {
             path: req.path.clone(),
             content: req.content,
@@ -82,7 +95,11 @@ impl FilesystemEffects for FsHandler {
         })
     }
 
-    async fn file_exists(&self, req: FileExistsRequest) -> EffectResult<FileExistsResponse> {
+    async fn file_exists(
+        &self,
+        req: FileExistsRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<FileExistsResponse> {
         let path = std::path::Path::new(&req.path);
         let exists = path.exists();
         let is_file = path.is_file();
@@ -98,6 +115,7 @@ impl FilesystemEffects for FsHandler {
     async fn list_directory(
         &self,
         req: ListDirectoryRequest,
+        _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<ListDirectoryResponse> {
         let path = std::path::Path::new(&req.path);
         if !path.is_dir() {
@@ -152,7 +170,11 @@ impl FilesystemEffects for FsHandler {
         Ok(ListDirectoryResponse { entries, count })
     }
 
-    async fn delete_file(&self, req: DeleteFileRequest) -> EffectResult<DeleteFileResponse> {
+    async fn delete_file(
+        &self,
+        req: DeleteFileRequest,
+        _ctx: &crate::effects::EffectContext,
+    ) -> EffectResult<DeleteFileResponse> {
         let path = std::path::Path::new(&req.path);
         if !path.exists() {
             return Ok(DeleteFileResponse { deleted: false });

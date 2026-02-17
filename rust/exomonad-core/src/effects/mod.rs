@@ -35,7 +35,7 @@
 //! impl EffectHandler for EgregoreHandler {
 //!     fn namespace(&self) -> &str { "egregore" }
 //!
-//!     async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
+//!     async fn handle(&self, effect_type: &str, payload: &[u8], _ctx: &EffectContext) -> EffectResult<Vec<u8>> {
 //!         // Decode proto request, handle, encode proto response
 //!         todo!()
 //!     }
@@ -50,6 +50,17 @@ pub use error::EffectError;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+use crate::domain::{AgentName, BirthBranch};
+
+/// Identity context for effect handlers, baked into the PluginManager at construction.
+///
+/// Always present — the plugin can't exist without it. No Option, no Mutex, no panic path.
+#[derive(Debug, Clone)]
+pub struct EffectContext {
+    pub agent_name: AgentName,
+    pub birth_branch: BirthBranch,
+}
 
 /// Result type for effect handlers.
 pub type EffectResult<T> = Result<T, EffectError>;
@@ -85,7 +96,12 @@ pub trait EffectHandler: Send + Sync {
     /// # Returns
     ///
     /// Protobuf-encoded response bytes, or an error.
-    async fn handle(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>>;
+    async fn handle(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &EffectContext,
+    ) -> EffectResult<Vec<u8>>;
 }
 
 /// Registry for effect handlers.
@@ -133,7 +149,12 @@ impl EffectRegistry {
     /// Dispatch an effect to the appropriate handler.
     ///
     /// Routes based on namespace prefix extracted from the effect type.
-    pub async fn dispatch(&self, effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
+    pub async fn dispatch(
+        &self,
+        effect_type: &str,
+        payload: &[u8],
+        ctx: &EffectContext,
+    ) -> EffectResult<Vec<u8>> {
         let (namespace, _) = effect_type.split_once('.').ok_or_else(|| {
             EffectError::invalid_input(format!(
                 "Effect type '{}' must contain namespace prefix (e.g. 'git.get_branch')",
@@ -153,7 +174,7 @@ impl EffectRegistry {
             "Dispatching effect"
         );
 
-        handler.handle(effect_type, payload).await
+        handler.handle(effect_type, payload, ctx).await
     }
 
     /// Check if a handler is registered for a namespace.
@@ -193,9 +214,21 @@ mod tests {
             &self.ns
         }
 
-        async fn handle(&self, _effect_type: &str, payload: &[u8]) -> EffectResult<Vec<u8>> {
+        async fn handle(
+            &self,
+            _effect_type: &str,
+            payload: &[u8],
+            _ctx: &EffectContext,
+        ) -> EffectResult<Vec<u8>> {
             // Echo payload back
             Ok(payload.to_vec())
+        }
+    }
+
+    fn test_ctx() -> EffectContext {
+        EffectContext {
+            agent_name: crate::domain::AgentName::from("test"),
+            birth_branch: crate::domain::BirthBranch::root(),
         }
     }
 
@@ -205,7 +238,10 @@ mod tests {
         registry.register_owned(TestHandler::new("test"));
 
         let payload = b"hello";
-        let result = registry.dispatch("test.do_thing", payload).await.unwrap();
+        let result = registry
+            .dispatch("test.do_thing", payload, &test_ctx())
+            .await
+            .unwrap();
 
         assert_eq!(result, payload);
     }
@@ -214,7 +250,7 @@ mod tests {
     async fn test_registry_not_found() {
         let registry = EffectRegistry::new();
 
-        let result = registry.dispatch("unknown.effect", &[]).await;
+        let result = registry.dispatch("unknown.effect", &[], &test_ctx()).await;
 
         assert!(result.is_err());
         if let Err(EffectError::NotFound { resource }) = result {
