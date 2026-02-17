@@ -8,16 +8,10 @@ module ExoMonad.Guest.Tools.Events
   )
 where
 
-import Control.Monad (void)
 import Data.Aeson (FromJSON (..), ToJSON (..), Value, camelTo2, defaultOptions, fieldLabelModifier, genericParseJSON, genericToJSON, object, (.=))
-import Data.Aeson qualified as Aeson
-import Data.ByteString.Lazy qualified as BSL
 import Data.Text (Text)
-import Effects.Log qualified as Log
-import ExoMonad.Effect.Class (runEffect_)
 import ExoMonad.Effects.Events qualified as Events
-import ExoMonad.Effects.Log (LogEmitEvent)
-import ExoMonad.Guest.Proto (fromText)
+import ExoMonad.Effects.Log (emitStructuredEvent)
 import ExoMonad.Guest.Tool.Class (MCPTool (..), liftEffect)
 import GHC.Generics (Generic)
 
@@ -67,13 +61,3 @@ instance MCPTool NotifyParent where
         ]
     liftEffect (Events.notifyParent "" (npStatus args) (npMessage args)) $ \_ ->
       object ["success" .= True]
-
-emitStructuredEvent :: Text -> Aeson.Value -> IO ()
-emitStructuredEvent eventType payload =
-  void $
-    runEffect_ @LogEmitEvent
-      Log.EmitEventRequest
-        { Log.emitEventRequestEventType = fromText eventType,
-          Log.emitEventRequestPayload = BSL.toStrict (Aeson.encode payload),
-          Log.emitEventRequestTimestamp = 0
-        }

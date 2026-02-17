@@ -10,19 +10,15 @@ module ExoMonad.Guest.Tools.Spawn
   )
 where
 
-import Control.Monad (forM, void)
+import Control.Monad (forM)
 import Control.Monad.Freer (runM)
 import Data.Aeson (FromJSON, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
-import Data.ByteString.Lazy qualified as BSL
 import Data.Either (partitionEithers)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Effects.Log qualified as Log
-import ExoMonad.Effect.Class (runEffect_)
-import ExoMonad.Effects.Log (LogEmitEvent)
+import ExoMonad.Effects.Log (emitStructuredEvent)
 import ExoMonad.Guest.Effects.AgentControl qualified as AC
-import ExoMonad.Guest.Proto (fromText)
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)
 
@@ -294,14 +290,3 @@ instance MCPTool SpawnWorkers where
           [ "spawned" .= map Aeson.toJSON successes,
             "errors" .= map Aeson.String errs
           ]
-
--- | Fire-and-forget structured event emission via the log.emit_event effect.
-emitStructuredEvent :: Text -> Aeson.Value -> IO ()
-emitStructuredEvent eventType payload =
-  void $
-    runEffect_ @LogEmitEvent
-      Log.EmitEventRequest
-        { Log.emitEventRequestEventType = fromText eventType,
-          Log.emitEventRequestPayload = BSL.toStrict (Aeson.encode payload),
-          Log.emitEventRequestTimestamp = 0
-        }

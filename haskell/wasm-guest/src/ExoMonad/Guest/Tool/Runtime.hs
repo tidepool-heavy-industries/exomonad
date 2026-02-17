@@ -54,11 +54,7 @@ logError_ :: Text -> IO ()
 logError_ msg = void $ runEffect_ @LogError (Log.ErrorRequest {Log.errorRequestMessage = fromText msg, Log.errorRequestFields = ""})
 
 emitEvent_ :: Value -> IO ()
-emitEvent_ val = emitEventTyped_ "custom" val
-
--- | Emit a structured event with a specific event type (e.g. "agent.spawned", "pr.filed").
-emitEventTyped_ :: Text -> Value -> IO ()
-emitEventTyped_ eventType val = void $ runEffect_ @LogEmitEvent (Log.EmitEventRequest {Log.emitEventRequestEventType = fromText eventType, Log.emitEventRequestPayload = BSL.toStrict (Aeson.encode val), Log.emitEventRequestTimestamp = 0})
+emitEvent_ val = void $ runEffect_ @LogEmitEvent (Log.EmitEventRequest {Log.emitEventRequestEventType = "custom", Log.emitEventRequestPayload = BSL.toStrict (Aeson.encode val), Log.emitEventRequestTimestamp = 0})
 
 -- | MCP call handler - dispatches to tools based on a record.
 mcpHandlerRecord :: forall tools. (DispatchRecord tools) => tools AsHandler -> IO CInt
