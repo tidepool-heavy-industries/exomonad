@@ -1,3 +1,4 @@
+use crate::domain::AgentName;
 use crate::effects::{
     dispatch_coordination_effect, CoordinationEffects, EffectHandler, EffectResult,
 };
@@ -50,7 +51,7 @@ fn to_proto_task(task: crate::services::coordination::Task) -> Task {
         subject: task.subject,
         description: task.description,
         status: from_service_status(task.status) as i32,
-        owner: task.owner,
+        owner: task.owner.to_string(),
         blocked_by: task.blocked_by,
     }
 }
@@ -60,7 +61,7 @@ impl CoordinationEffects for CoordinationHandler {
     async fn create_task(&self, req: CreateTaskRequest) -> EffectResult<CreateTaskResponse> {
         let task_id = self
             .service
-            .create_task(req.subject, req.description, req.owner, req.blocked_by)
+            .create_task(req.subject, req.description, AgentName::from(req.owner.as_str()), req.blocked_by)
             .await;
 
         Ok(CreateTaskResponse { task_id })
@@ -71,7 +72,7 @@ impl CoordinationEffects for CoordinationHandler {
         let owner = if req.owner.is_empty() {
             None
         } else {
-            Some(req.owner)
+            Some(AgentName::from(req.owner.as_str()))
         };
         let description = if req.description.is_empty() {
             None
@@ -111,7 +112,7 @@ impl CoordinationEffects for CoordinationHandler {
 
     async fn send_message(&self, req: SendMessageRequest) -> EffectResult<SendMessageResponse> {
         self.service
-            .send_message(req.from, req.text, req.summary)
+            .send_message(AgentName::from(req.from.as_str()), req.text, req.summary)
             .await;
         Ok(SendMessageResponse { success: true })
     }
@@ -128,7 +129,7 @@ impl CoordinationEffects for CoordinationHandler {
             messages: messages
                 .into_iter()
                 .map(|m| AgentMessage {
-                    from: m.from,
+                    from: m.from.to_string(),
                     text: m.text,
                     summary: m.summary,
                     timestamp: m.timestamp,

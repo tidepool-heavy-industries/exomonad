@@ -6,7 +6,7 @@
 //! - ListAgents: Discover from Zellij tabs (source of truth for running agents)
 
 use crate::common::TimeoutError;
-use crate::domain::{BirthBranch, ClaudeSessionUuid, ItemState};
+use crate::domain::{AgentName, BirthBranch, ClaudeSessionUuid, ItemState};
 use crate::ffi::FFIBoundary;
 use crate::{GithubOwner, GithubRepo, IssueNumber};
 use anyhow::{anyhow, Context, Result};
@@ -107,10 +107,12 @@ impl AgentType {
     fn prompt_flag(&self) -> &'static str {
         self.meta().prompt_flag
     }
-    fn suffix(&self) -> &'static str {
+    /// Agent type suffix for naming (e.g., "claude", "gemini").
+    pub fn suffix(&self) -> &'static str {
         self.meta().suffix
     }
-    fn emoji(&self) -> &'static str {
+    /// Emoji for display in Zellij tabs.
+    pub fn emoji(&self) -> &'static str {
         self.meta().emoji
     }
 
@@ -137,14 +139,14 @@ pub struct SpawnOptions {
     /// When set, the agent's project context targets this directory instead of project_dir.
     pub subrepo: Option<String>,
     /// Base branch to branch off of (default: "main").
-    pub base_branch: Option<String>,
+    pub base_branch: Option<BirthBranch>,
 }
 
 /// Options for spawning a named teammate (no GitHub issue required).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpawnGeminiTeammateOptions {
     /// Human-readable name (e.g., "mcp-hardener")
-    pub name: String,
+    pub name: AgentName,
     /// Initial prompt/instructions
     pub prompt: String,
     /// Agent type (Claude or Gemini)
@@ -153,7 +155,7 @@ pub struct SpawnGeminiTeammateOptions {
     /// Sub-repository path relative to project_dir
     pub subrepo: Option<String>,
     /// Base branch to branch off of (defaults to current branch).
-    pub base_branch: Option<String>,
+    pub base_branch: Option<BirthBranch>,
 }
 
 /// Options for spawning a worker agent in the current worktree (no branch/worktree).
@@ -180,13 +182,13 @@ pub struct SpawnSubtreeOptions {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SpawnResult {
     /// Path to the agent directory (.exo/agents/{agent_id}/)
-    pub agent_dir: String,
+    pub agent_dir: PathBuf,
     /// Zellij tab name
     pub tab_name: String,
     /// Issue title
     pub issue_title: String,
     /// Agent type
-    pub agent_type: String,
+    pub agent_type: AgentType,
 }
 
 impl FFIBoundary for SpawnResult {}
@@ -253,10 +255,10 @@ pub struct AgentInfo {
     pub topology: Topology,
     /// Path to agent directory (.exo/agents/{agent_id}/)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent_dir: Option<String>,
+    pub agent_dir: Option<PathBuf>,
     /// Slug from agent name (e.g., "fix-bug-in-parser")
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub slug: Option<String>,
+    pub slug: Option<AgentName>,
     /// Agent type (Claude or Gemini)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_type: Option<AgentType>,
@@ -516,7 +518,7 @@ impl AgentControlService {
             let internal_name = format!("gh-{}-{}-{}", issue_id, slug, agent_suffix);
 
             // Determine base branch
-            let base = options.base_branch.as_deref().unwrap_or("main");
+            let base = options.base_branch.as_ref().map(|b| b.as_str()).unwrap_or("main");
             let branch_name = if base == "main" {
                 format!("gh-{}/{}-{}", issue_id, slug, agent_suffix)
             } else {
@@ -630,10 +632,10 @@ impl AgentControlService {
             }
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
-                agent_dir: agent_dir.to_string_lossy().to_string(),
+                agent_dir: agent_dir.clone(),
                 tab_name: internal_name,
                 issue_title: issue.title,
-                agent_type: options.agent_type.suffix().to_string(),
+                agent_type: options.agent_type,
             })
         })
         .await
@@ -689,7 +691,7 @@ impl AgentControlService {
     /// If config entry exists but Zellij tab is dead, cleans stale entry and respawns.
     /// No per-agent directories or MCP configs — agents share the repo's config.
     /// State lives in Teams config.json + Zellij tab only.
-    #[tracing::instrument(skip(self, options), fields(name = %options.name))]
+    #[tracing::instrument(skip(self, options), fields(name = %options.name.as_str()))]
     pub async fn spawn_gemini_teammate(
         &self,
         options: &SpawnGeminiTeammateOptions,
@@ -702,7 +704,7 @@ impl AgentControlService {
             let effective_project_dir = self.effective_project_dir(options.subrepo.as_deref())?;
 
             // Sanitize name for internal use
-            let slug = slugify(&options.name);
+            let slug = slugify(options.name.as_str());
             let agent_suffix = options.agent_type.suffix();
             let internal_name = format!("{}-{}", slug, agent_suffix);
             let display_name = format!("{} {}", options.agent_type.emoji(), slug);
@@ -721,16 +723,16 @@ impl AgentControlService {
                 info!(name = %options.name, "Teammate already running, returning existing");
                 // TODO: Return actual worktree path if possible, but for now empty is fine as it's just info
                 return Ok(SpawnResult {
-                    agent_dir: String::new(),
+                    agent_dir: PathBuf::new(),
                     tab_name: internal_name,
-                    issue_title: options.name.clone(),
-                    agent_type: options.agent_type.suffix().to_string(),
+                    issue_title: options.name.to_string(),
+                    agent_type: options.agent_type,
                 });
             }
 
             // Determine base branch
             let base_branch = if let Some(ref b) = options.base_branch {
-                b.clone()
+                b.to_string()
             } else {
                 // Default to current branch
                 let current_branch_output = Command::new("git")
@@ -830,10 +832,10 @@ impl AgentControlService {
             }
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
-                agent_dir: String::new(),
+                agent_dir: PathBuf::new(),
                 tab_name: internal_name,
-                issue_title: options.name.clone(),
-                agent_type: options.agent_type.suffix().to_string(),
+                issue_title: options.name.to_string(),
+                agent_type: options.agent_type,
             })
         })
         .await
@@ -909,10 +911,10 @@ impl AgentControlService {
             if tab_alive {
                 info!(name = %options.name, "Worker already running, returning existing");
                 return Ok(SpawnResult {
-                    agent_dir: String::new(),
+                    agent_dir: PathBuf::new(),
                     tab_name: internal_name,
                     issue_title: options.name.clone(),
-                    agent_type: "gemini".to_string(),
+                    agent_type: AgentType::Gemini,
                 });
             }
 
@@ -972,10 +974,10 @@ impl AgentControlService {
             }
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
-                agent_dir: String::new(),
+                agent_dir: PathBuf::new(),
                 tab_name: internal_name,
                 issue_title: options.name.clone(),
-                agent_type: "gemini".to_string(),
+                agent_type: AgentType::Gemini,
             })
         })
         .await
@@ -1018,10 +1020,10 @@ impl AgentControlService {
             if tab_alive {
                 info!(slug = %slug, "Subtree already running, returning existing");
                 return Ok(SpawnResult {
-                    agent_dir: String::new(),
+                    agent_dir: PathBuf::new(),
                     tab_name: internal_name,
                     issue_title: options.branch_name.clone(),
-                    agent_type: "claude".to_string(),
+                    agent_type: AgentType::Claude,
                 });
             }
 
@@ -1124,10 +1126,10 @@ impl AgentControlService {
             .await?;
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
-                agent_dir: worktree_path.to_string_lossy().to_string(),
+                agent_dir: worktree_path.clone(),
                 tab_name: internal_name,
                 issue_title: options.branch_name.clone(),
-                agent_type: "claude".to_string(),
+                agent_type: AgentType::Claude,
             })
         })
         .await
@@ -1167,10 +1169,10 @@ impl AgentControlService {
             if tab_alive {
                 info!(slug = %slug, "Leaf subtree already running, returning existing");
                 return Ok(SpawnResult {
-                    agent_dir: String::new(),
+                    agent_dir: PathBuf::new(),
                     tab_name: internal_name,
                     issue_title: options.branch_name.clone(),
-                    agent_type: "gemini".to_string(),
+                    agent_type: AgentType::Gemini,
                 });
             }
 
@@ -1258,10 +1260,10 @@ impl AgentControlService {
             .await?;
 
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
-                agent_dir: worktree_path.to_string_lossy().to_string(),
+                agent_dir: worktree_path.clone(),
                 tab_name: internal_name,
                 issue_title: options.branch_name.clone(),
-                agent_type: "gemini".to_string(),
+                agent_type: AgentType::Gemini,
             })
         })
         .await
@@ -1524,8 +1526,8 @@ impl AgentControlService {
                             has_tab,
                             status,
                             topology: Topology::WorktreePerAgent,
-                            agent_dir: Some(path.to_string_lossy().to_string()),
-                            slug: Some(name.to_string()),
+                            agent_dir: Some(path.clone()),
+                            slug: Some(AgentName::from(name)),
                             agent_type: Some(agent_type),
                             pr: None,
                         });
@@ -1584,8 +1586,8 @@ impl AgentControlService {
                         has_tab,
                         status,
                         topology: Topology::SharedDir,
-                        agent_dir: Some(path.to_string_lossy().to_string()),
-                        slug: Some(base_name.to_string()),
+                        agent_dir: Some(path.clone()),
+                        slug: Some(AgentName::from(base_name)),
                         agent_type: Some(AgentType::Gemini),
                         pr: None,
                     });
