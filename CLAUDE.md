@@ -216,6 +216,7 @@ Inter-agent communication between TL and dev agents:
 |---------|--------|
 | **Event router** (Zellij STDIN injection) | Built. `notify_parent` → `inject_input` into parent pane via Zellij plugin pipe. |
 | **GitHub poller** (PR status → events) | Built. Background service polls PR/CI status and injects notifications into agent panes. |
+| **Event log** (JSONL structured events) | Built. `.exo/events.jsonl` — append-only JSONL. Query with `duckdb -c "SELECT * FROM read_json_auto('.exo/events.jsonl')"` or `jq`. Events: `agent.spawned`, `agent.completed`, `pr.filed`, `pr.merged`, `copilot.review`, `ci.status_changed`. |
 
 ---
 

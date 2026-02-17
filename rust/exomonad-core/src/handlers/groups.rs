@@ -5,6 +5,7 @@ use crate::effects::EffectHandler;
 use crate::services::agent_control::AgentControlService;
 use crate::services::claude_session_registry::ClaudeSessionRegistry;
 use crate::services::coordination::CoordinationService;
+use crate::services::event_log::EventLog;
 use crate::services::event_queue::EventQueue;
 use crate::services::filesystem::FileSystemService;
 use crate::services::git::GitService;
@@ -18,9 +19,16 @@ use super::{
 };
 
 /// Core handlers every consumer needs: logging, key-value store, filesystem.
-pub fn core_handlers(project_dir: PathBuf) -> Vec<Box<dyn EffectHandler>> {
+pub fn core_handlers(
+    project_dir: PathBuf,
+    event_log: Option<Arc<EventLog>>,
+) -> Vec<Box<dyn EffectHandler>> {
+    let log_handler = match event_log {
+        Some(el) => LogHandler::new().with_event_log(el),
+        None => LogHandler::new(),
+    };
     vec![
-        Box::new(LogHandler::new()),
+        Box::new(log_handler),
         Box::new(KvHandler::new(project_dir.clone())),
         Box::new(FsHandler::new(Arc::new(FileSystemService::new(
             project_dir,

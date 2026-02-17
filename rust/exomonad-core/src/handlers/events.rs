@@ -21,6 +21,8 @@ pub struct EventHandler {
     /// Event queue scope ID (server-internal UUID, NOT the birth-branch).
     event_queue_scope: String,
     client: reqwest::Client,
+    /// Tracks agents that have already called notify_parent to prevent duplicate notifications.
+    notified_agents: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 impl EventHandler {
@@ -35,6 +37,7 @@ impl EventHandler {
             remote_url,
             event_queue_scope: event_queue_scope.unwrap_or_else(|| "default".to_string()),
             client: reqwest::Client::new(),
+            notified_agents: std::sync::Mutex::new(std::collections::HashSet::new()),
         }
     }
 
@@ -175,6 +178,16 @@ impl EventEffects for EventHandler {
         } else {
             (req.agent_id.clone(), "request")
         };
+
+        // Idempotency: ignore duplicate notify_parent calls from spinning agents
+        {
+            let mut set = self.notified_agents.lock().unwrap();
+            if !set.insert(agent_id_str.clone()) {
+                tracing::warn!(agent_id = %agent_id_str, "notify_parent called again — ignoring duplicate");
+                return Ok(NotifyParentResponse { ack: true });
+            }
+        }
+
         tracing::debug!(
             agent_id = %agent_id_str,
             source = agent_id_source,

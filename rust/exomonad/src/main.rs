@@ -753,6 +753,50 @@ fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
 }
 
 // ============================================================================
+/// Resolve birth branch for a per-agent route by reading the git branch from its worktree.
+///
+/// Agent names have a type suffix (-claude, -gemini) that must be stripped to get the
+/// worktree slug. The worktree's current git branch IS the birth branch.
+async fn resolve_agent_birth_branch(
+    worktree_base: &std::path::Path,
+    agent_name: &str,
+) -> exomonad_core::BirthBranch {
+    let slug = agent_name
+        .trim_end_matches("-claude")
+        .trim_end_matches("-gemini");
+    let worktree_path = worktree_base.join(slug);
+    match tokio::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(&worktree_path)
+        .output()
+        .await
+    {
+        Ok(output) if output.status.success() => {
+            let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            tracing::debug!(agent = %agent_name, branch = %branch, "Resolved agent birth branch from worktree");
+            exomonad_core::BirthBranch::from(branch.as_str())
+        }
+        Ok(output) => {
+            tracing::warn!(
+                agent = %agent_name,
+                path = %worktree_path.display(),
+                stderr = %String::from_utf8_lossy(&output.stderr),
+                "Failed to resolve birth branch, falling back to root"
+            );
+            exomonad_core::BirthBranch::root()
+        }
+        Err(e) => {
+            tracing::warn!(
+                agent = %agent_name,
+                path = %worktree_path.display(),
+                error = %e,
+                "Failed to run git in worktree, falling back to root"
+            );
+            exomonad_core::BirthBranch::root()
+        }
+    }
+}
+
 // Main
 // ============================================================================
 
@@ -838,8 +882,9 @@ async fn main() -> Result<()> {
                     project_dir_for_services.clone(),
                     github.clone(),
                 );
+            let worktree_base = config.worktree_base;
             agent_control = agent_control
-                .with_worktree_base(config.worktree_base)
+                .with_worktree_base(worktree_base.clone())
                 .with_mcp_server_port(port);
             agent_control = agent_control.with_birth_branch(exomonad_core::BirthBranch::root());
             agent_control = agent_control.with_zellij_session(config.zellij_session.clone());
@@ -875,7 +920,24 @@ async fn main() -> Result<()> {
                     "coordination".to_string(),
                     "session".to_string(),
                 ]);
-            builder = builder.with_handlers(exomonad_core::core_handlers(project_dir.clone()));
+            // Create structured event log (JSONL)
+            let event_log = match exomonad_core::services::EventLog::open(
+                project_dir.join(".exo/events.jsonl"),
+            ) {
+                Ok(el) => {
+                    info!(path = %project_dir.join(".exo/events.jsonl").display(), "Event log opened");
+                    Some(Arc::new(el))
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to open event log, structured events will not be recorded");
+                    None
+                }
+            };
+
+            builder = builder.with_handlers(exomonad_core::core_handlers(
+                project_dir.clone(),
+                event_log.clone(),
+            ));
             builder = builder.with_handlers(exomonad_core::git_handlers(git, github));
             let (orch_handlers, question_registry) = exomonad_core::orchestration_handlers(
                 agent_control.clone(),
@@ -905,10 +967,13 @@ async fn main() -> Result<()> {
             info!(path = %server_pid_path.display(), "Wrote server.pid");
 
             // Start GitHub Poller (background service)
-            let poller = exomonad_core::services::github_poller::GitHubPoller::new(
+            let mut poller = exomonad_core::services::github_poller::GitHubPoller::new(
                 event_queue.clone(),
                 project_dir.clone(),
             );
+            if let Some(ref el) = event_log {
+                poller = poller.with_event_log(el.clone());
+            }
             tokio::spawn(async move {
                 poller.run().await;
             });
@@ -964,15 +1029,22 @@ async fn main() -> Result<()> {
             // Per-agent MCP route (dev role): /agents/{name}/mcp
             let agent_handler = {
                 let s = dev_server.clone();
+                let wb = worktree_base.clone();
                 move |axum::extract::Path(agent_name): axum::extract::Path<String>,
                       headers: axum::http::HeaderMap,
                       body: axum::extract::Json<serde_json::Value>| {
                     let s = s.clone();
+                    let wb = wb.clone();
                     async move {
                         let name = exomonad_core::AgentName::from(agent_name.as_str());
-                        exomonad_core::mcp::agent_identity::with_agent_id(name, async move {
-                            s.handle(headers, body).await
-                        })
+                        let birth_branch = resolve_agent_birth_branch(&wb, &agent_name).await;
+                        exomonad_core::mcp::agent_identity::with_agent_id(
+                            name,
+                            exomonad_core::mcp::agent_identity::with_birth_branch(
+                                birth_branch,
+                                async move { s.handle(headers, body).await },
+                            ),
+                        )
                         .await
                     }
                 }
@@ -981,15 +1053,22 @@ async fn main() -> Result<()> {
             // Per-agent MCP route (TL role): /agents/{name}/tl/mcp
             let agent_tl_handler = {
                 let s = tl_server.clone();
+                let wb = worktree_base.clone();
                 move |axum::extract::Path(agent_name): axum::extract::Path<String>,
                       headers: axum::http::HeaderMap,
                       body: axum::extract::Json<serde_json::Value>| {
                     let s = s.clone();
+                    let wb = wb.clone();
                     async move {
                         let name = exomonad_core::AgentName::from(agent_name.as_str());
-                        exomonad_core::mcp::agent_identity::with_agent_id(name, async move {
-                            s.handle(headers, body).await
-                        })
+                        let birth_branch = resolve_agent_birth_branch(&wb, &agent_name).await;
+                        exomonad_core::mcp::agent_identity::with_agent_id(
+                            name,
+                            exomonad_core::mcp::agent_identity::with_birth_branch(
+                                birth_branch,
+                                async move { s.handle(headers, body).await },
+                            ),
+                        )
                         .await
                     }
                 }

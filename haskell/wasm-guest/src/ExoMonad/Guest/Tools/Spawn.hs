@@ -10,14 +10,19 @@ module ExoMonad.Guest.Tools.Spawn
   )
 where
 
-import Control.Monad (forM)
+import Control.Monad (forM, void)
 import Control.Monad.Freer (runM)
 import Data.Aeson (FromJSON, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
+import Data.ByteString.Lazy qualified as BSL
 import Data.Either (partitionEithers)
 import Data.Text (Text)
 import Data.Text qualified as T
+import Effects.Log qualified as Log
+import ExoMonad.Effect.Class (runEffect_)
+import ExoMonad.Effects.Log (LogEmitEvent)
 import ExoMonad.Guest.Effects.AgentControl qualified as AC
+import ExoMonad.Guest.Proto (fromText)
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)
 
@@ -65,7 +70,14 @@ instance MCPTool SpawnSubtree where
     result <- runM $ AC.runAgentControl $ AC.spawnSubtree (ssTask args) (ssBranchName args) ""
     case result of
       Left err -> pure $ errorResult err
-      Right spawnResult -> pure $ successResult $ Aeson.toJSON spawnResult
+      Right spawnResult -> do
+        emitStructuredEvent "agent.spawned" $
+          object
+            [ "slug" .= ssBranchName args,
+              "agent_type" .= ("claude" :: Text),
+              "task_summary" .= ssTask args
+            ]
+        pure $ successResult $ Aeson.toJSON spawnResult
 
 -- ============================================================================
 -- SpawnLeafSubtree
@@ -111,7 +123,14 @@ instance MCPTool SpawnLeafSubtree where
     result <- runM $ AC.runAgentControl $ AC.spawnLeafSubtree (slsTask args) (slsBranchName args)
     case result of
       Left err -> pure $ errorResult err
-      Right spawnResult -> pure $ successResult $ Aeson.toJSON spawnResult
+      Right spawnResult -> do
+        emitStructuredEvent "agent.spawned" $
+          object
+            [ "slug" .= slsBranchName args,
+              "agent_type" .= ("gemini" :: Text),
+              "task_summary" .= slsTask args
+            ]
+        pure $ successResult $ Aeson.toJSON spawnResult
 
 -- ============================================================================
 -- SpawnWorkers (batch)
@@ -256,8 +275,18 @@ instance MCPTool SpawnWorkers where
             ]
       ]
   toolHandler args = do
-    results <- forM (swsSpecs args) $ \spec ->
-      runM $ AC.runAgentControl $ AC.spawnWorker (wsName spec) (renderWorkerPrompt spec)
+    results <- forM (swsSpecs args) $ \spec -> do
+      r <- runM $ AC.runAgentControl $ AC.spawnWorker (wsName spec) (renderWorkerPrompt spec)
+      case r of
+        Right _ ->
+          emitStructuredEvent "agent.spawned" $
+            object
+              [ "slug" .= wsName spec,
+                "agent_type" .= ("gemini-worker" :: Text),
+                "task_summary" .= wsTask spec
+              ]
+        Left _ -> pure ()
+      pure r
     let (errs, successes) = partitionEithers results
     pure $
       successResult $
@@ -265,3 +294,14 @@ instance MCPTool SpawnWorkers where
           [ "spawned" .= map Aeson.toJSON successes,
             "errors" .= map Aeson.String errs
           ]
+
+-- | Fire-and-forget structured event emission via the log.emit_event effect.
+emitStructuredEvent :: Text -> Aeson.Value -> IO ()
+emitStructuredEvent eventType payload =
+  void $
+    runEffect_ @LogEmitEvent
+      Log.EmitEventRequest
+        { Log.emitEventRequestEventType = fromText eventType,
+          Log.emitEventRequestPayload = BSL.toStrict (Aeson.encode payload),
+          Log.emitEventRequestTimestamp = 0
+        }

@@ -32,7 +32,7 @@
 //! // Pick only the handler groups you need
 //! let mut builder = RuntimeBuilder::new()
 //!     .with_wasm_path(wasm_path)
-//!     .with_handlers(core_handlers(project_dir.clone()))
+//!     .with_handlers(core_handlers(project_dir.clone(), None))
 //!     .with_handlers(git_handlers(git, github));
 //!
 //! // Add custom domain handlers

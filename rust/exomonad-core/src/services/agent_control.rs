@@ -410,6 +410,15 @@ impl AgentControlService {
         self
     }
 
+    /// Resolve the effective birth branch for spawn operations.
+    ///
+    /// In serve mode, one `AgentControlService` is shared with `birth_branch = root()`.
+    /// Spawned subtree TLs set their birth branch via the task-local `CURRENT_BIRTH_BRANCH`.
+    /// This method prefers the task-local value, falling back to `self.birth_branch`.
+    fn effective_birth_branch(&self) -> BirthBranch {
+        crate::mcp::agent_identity::get_birth_branch().unwrap_or_else(|| self.birth_branch.clone())
+    }
+
     /// Set the MCP server port for per-agent endpoint URL generation.
     pub fn with_mcp_server_port(mut self, port: u16) -> Self {
         self.mcp_server_port = Some(port);
@@ -588,7 +597,7 @@ impl AgentControlService {
 
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), self.birth_branch.to_string());
+            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), self.effective_birth_branch().to_string());
             if let Some(port) = self.mcp_server_port {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
             }
@@ -775,7 +784,7 @@ impl AgentControlService {
 
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), self.birth_branch.to_string());
+            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), self.effective_birth_branch().to_string());
             if let Some(port) = self.mcp_server_port {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
             }
@@ -905,7 +914,7 @@ impl AgentControlService {
 
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), self.birth_branch.to_string());
+            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), self.effective_birth_branch().to_string());
             if let Some(port) = self.mcp_server_port {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
             }
@@ -984,11 +993,13 @@ impl AgentControlService {
         let result = timeout(SPAWN_TIMEOUT, async {
             self.check_zellij_env()?;
 
+            let effective_birth = self.effective_birth_branch();
+
             // Depth check using typed birth-branch.
-            let depth = self.birth_branch.depth();
+            let depth = effective_birth.depth();
 
             if depth >= 2 {
-                return Err(anyhow!("Subtree depth limit reached (max 2). Current birth-branch: {}, depth: {}", self.birth_branch, depth));
+                return Err(anyhow!("Subtree depth limit reached (max 2). Current birth-branch: {}, depth: {}", effective_birth, depth));
             }
 
             let effective_project_dir = &self.project_dir;
@@ -1011,13 +1022,13 @@ impl AgentControlService {
             }
 
             // Parent branch derived from typed birth-branch.
-            let current_branch = self.birth_branch.as_parent_branch();
+            let current_branch = effective_birth.as_parent_branch();
 
             // Push parent branch so child PRs can reference it as base
             ensure_branch_pushed(current_branch, effective_project_dir).await?;
 
             // Branch: {current_branch}.{slug}
-            let child_birth = self.birth_branch.child(&slug);
+            let child_birth = effective_birth.child(&slug);
             let branch_name = child_birth.to_string();
 
             // Worktree location: {worktree_base}/{slug}
@@ -1136,10 +1147,11 @@ impl AgentControlService {
 
             // No depth check for leaf nodes.
 
+            let effective_birth = self.effective_birth_branch();
             let effective_project_dir = &self.project_dir;
 
             // Parent branch derived from typed birth-branch.
-            let current_branch = self.birth_branch.as_parent_branch().to_string();
+            let current_branch = effective_birth.as_parent_branch().to_string();
 
             // Sanitize branch name
             let slug = slugify(&options.branch_name);
@@ -1161,7 +1173,8 @@ impl AgentControlService {
             // Push parent branch so child PRs can reference it as base
             ensure_branch_pushed(&current_branch, effective_project_dir).await?;
 
-            let branch_name = format!("{}.{}", current_branch, slug);
+            let child_birth = effective_birth.child(&slug);
+            let branch_name = child_birth.to_string();
             let worktree_path = self.worktree_base.join(&slug);
 
             // Clean up existing worktree

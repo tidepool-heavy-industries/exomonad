@@ -3,19 +3,29 @@
 //! Uses proto-generated types from `exomonad_proto::effects::log`.
 
 use crate::effects::{dispatch_log_effect, EffectHandler, EffectResult, LogEffects};
+use crate::services::EventLog;
 use async_trait::async_trait;
 use exomonad_proto::effects::log::*;
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// Log effect handler.
 ///
 /// Handles all effects in the `log.*` namespace by delegating to
 /// the generated `dispatch_log_effect` function.
-pub struct LogHandler;
+/// Optionally writes structured events to a JSONL event log.
+pub struct LogHandler {
+    event_log: Option<Arc<EventLog>>,
+}
 
 impl LogHandler {
     pub fn new() -> Self {
-        Self
+        Self { event_log: None }
+    }
+
+    pub fn with_event_log(mut self, event_log: Arc<EventLog>) -> Self {
+        self.event_log = Some(event_log);
+        self
     }
 }
 
@@ -151,7 +161,7 @@ impl LogEffects for LogHandler {
         let payload_str = if req.payload.is_empty() {
             "{}".to_string()
         } else {
-            String::from_utf8(req.payload).unwrap_or_else(|_| "<binary>".to_string())
+            String::from_utf8(req.payload.clone()).unwrap_or_else(|_| "<binary>".to_string())
         };
 
         tracing::info!(
@@ -160,6 +170,20 @@ impl LogEffects for LogHandler {
             payload = %payload_str,
             "[event]"
         );
+
+        // Write to JSONL event log
+        if let Some(ref log) = self.event_log {
+            let data: serde_json::Value = if req.payload.is_empty() {
+                serde_json::json!({})
+            } else {
+                serde_json::from_slice(&req.payload)
+                    .unwrap_or(serde_json::json!({"raw": payload_str}))
+            };
+            let agent_id = crate::mcp::agent_identity::get_agent_id_string();
+            if let Err(e) = log.append(&req.event_type, &agent_id, &data) {
+                tracing::warn!(error = %e, "Failed to write event to JSONL log");
+            }
+        }
 
         Ok(EmitEventResponse { event_id })
     }

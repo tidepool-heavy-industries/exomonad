@@ -9,16 +9,19 @@ module ExoMonad.Guest.Tools.MergePR
   )
 where
 
+import Control.Monad (void)
 import Data.Aeson (FromJSON, Value, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
+import Data.ByteString.Lazy qualified as BSL
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Effects.Log qualified as Log
 import Effects.MergePr qualified as MP
 import ExoMonad.Effect.Class (runEffect, runEffect_)
-import ExoMonad.Effects.Log (LogError, LogInfo)
+import ExoMonad.Effects.Log (LogEmitEvent, LogError, LogInfo)
 import ExoMonad.Effects.MergePR (MergePRMergePr)
+import ExoMonad.Guest.Proto (fromText)
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)
 
@@ -101,4 +104,19 @@ instance MCPTool MergePR where
                   mpoJjFetched = MP.mergePrResponseJjFetched resp
                 }
         _ <- runEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("MergePR: " <> mpoMessage output), Log.infoRequestFields = ""})
+        emitStructuredEvent "pr.merged" $
+          object
+            [ "pr_number" .= mprNumber args,
+              "success" .= mpoSuccess output
+            ]
         pure $ successResult (Aeson.toJSON output)
+
+emitStructuredEvent :: Text -> Aeson.Value -> IO ()
+emitStructuredEvent eventType payload =
+  void $
+    runEffect_ @LogEmitEvent
+      Log.EmitEventRequest
+        { Log.emitEventRequestEventType = fromText eventType,
+          Log.emitEventRequestPayload = BSL.toStrict (Aeson.encode payload),
+          Log.emitEventRequestTimestamp = 0
+        }

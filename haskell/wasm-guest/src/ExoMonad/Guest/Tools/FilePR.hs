@@ -7,8 +7,10 @@ module ExoMonad.Guest.Tools.FilePR
   )
 where
 
+import Control.Monad (void)
 import Data.Aeson (FromJSON, Value, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
+import Data.ByteString.Lazy qualified as BSL
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
@@ -17,7 +19,8 @@ import Effects.FilePr qualified as FP
 import Effects.Log qualified as Log
 import ExoMonad.Effect.Class (runEffect, runEffect_)
 import ExoMonad.Effects.FilePR (FilePRFilePr)
-import ExoMonad.Effects.Log (LogError, LogInfo)
+import ExoMonad.Effects.Log (LogEmitEvent, LogError, LogInfo)
+import ExoMonad.Guest.Proto (fromText)
 import ExoMonad.Guest.Tool.Class
 import GHC.Generics (Generic)
 
@@ -114,4 +117,22 @@ instance MCPTool FilePR where
                   fpoCreated = FP.filePrResponseCreated resp
                 }
         _ <- runEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("FilePR: Success - PR #" <> T.pack (show $ fpoNumber output)), Log.infoRequestFields = ""})
+        emitStructuredEvent "pr.filed" $
+          object
+            [ "pr_number" .= fpoNumber output,
+              "pr_url" .= fpoUrl output,
+              "head_branch" .= fpoHeadBranch output,
+              "base_branch" .= fpoBaseBranch output,
+              "created" .= fpoCreated output
+            ]
         pure $ successResult (Aeson.toJSON output)
+
+emitStructuredEvent :: Text -> Aeson.Value -> IO ()
+emitStructuredEvent eventType payload =
+  void $
+    runEffect_ @LogEmitEvent
+      Log.EmitEventRequest
+        { Log.emitEventRequestEventType = fromText eventType,
+          Log.emitEventRequestPayload = BSL.toStrict (Aeson.encode payload),
+          Log.emitEventRequestTimestamp = 0
+        }

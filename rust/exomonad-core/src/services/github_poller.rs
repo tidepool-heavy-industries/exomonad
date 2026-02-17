@@ -1,3 +1,4 @@
+use crate::services::event_log::EventLog;
 use crate::services::event_queue::EventQueue;
 use crate::services::zellij_events;
 use anyhow::{Context, Result};
@@ -13,6 +14,7 @@ use tracing::{error, info, warn};
 
 pub struct GitHubPoller {
     event_queue: Arc<EventQueue>,
+    event_log: Option<Arc<EventLog>>,
     project_dir: PathBuf,
     poll_interval: Duration,
     state: Arc<Mutex<HashMap<u64, PRState>>>, // Map PR number -> State
@@ -30,11 +32,17 @@ impl GitHubPoller {
     pub fn new(event_queue: Arc<EventQueue>, project_dir: PathBuf) -> Self {
         Self {
             event_queue,
+            event_log: None,
             project_dir,
             poll_interval: Duration::from_secs(60),
             state: Arc::new(Mutex::new(HashMap::new())),
             repo_info: Arc::new(Mutex::new(None)),
         }
+    }
+
+    pub fn with_event_log(mut self, event_log: Arc<EventLog>) -> Self {
+        self.event_log = Some(event_log);
+        self
     }
 
     pub async fn run(self) {
@@ -374,6 +382,25 @@ impl GitHubPoller {
             "Emitting event for branch {}: {} - {}",
             branch, status, message
         );
+
+        // Write to JSONL event log
+        if let Some(ref log) = self.event_log {
+            let event_type = match status {
+                "copilot_review" => "copilot.review",
+                "success" => "ci.status_changed",
+                "failure" => "ci.status_changed",
+                "pending" => "ci.status_changed",
+                other => other,
+            };
+            let data = serde_json::json!({
+                "branch": branch,
+                "status": status,
+                "message": message,
+            });
+            if let Err(e) = log.append(event_type, branch, &data) {
+                warn!("Failed to write poller event to JSONL log: {}", e);
+            }
+        }
 
         // 1. Queue event to owning agent (branch name IS the agent's session_id)
         let event = Event {
