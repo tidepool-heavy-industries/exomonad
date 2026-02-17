@@ -204,6 +204,7 @@ async fn handle_hook_inner(
         .and_then(|r| match r {
             "tl" | "TL" => Some(exomonad_core::Role::TL),
             "dev" | "Dev" => Some(exomonad_core::Role::Dev),
+            "worker" | "Worker" => Some(exomonad_core::Role::Worker),
             _ => None,
         })
         .unwrap_or(state.default_role);
@@ -978,34 +979,10 @@ async fn main() -> Result<()> {
                 poller.run().await;
             });
 
-            // Build per-role MCP servers
-            let mut tl_state = base_state.clone();
-            tl_state.role = Some("tl".to_string());
-            let tl_server = McpServer::new(tl_state);
-
-            let mut dev_state = base_state.clone();
-            dev_state.role = Some("dev".to_string());
-            let dev_server = McpServer::new(dev_state);
-
-            // TL handler
-            let tl_handler = {
-                let s = tl_server.clone();
-                move |headers: axum::http::HeaderMap,
-                      body: axum::extract::Json<serde_json::Value>| {
-                    let s = s.clone();
-                    async move { s.handle(headers, body).await }
-                }
-            };
-
-            // Dev handler
-            let dev_handler = {
-                let s = dev_server.clone();
-                move |headers: axum::http::HeaderMap,
-                      body: axum::extract::Json<serde_json::Value>| {
-                    let s = s.clone();
-                    async move { s.handle(headers, body).await }
-                }
-            };
+            // Lazy server cache — one McpServer per role, created on first request.
+            // Rust never enumerates roles; WASM AllRoles.hs is the single source of truth.
+            let servers: Arc<tokio::sync::RwLock<HashMap<String, McpServer>>> =
+                Arc::new(tokio::sync::RwLock::new(HashMap::new()));
 
             // Health endpoint
             let health_plugin = base_state.plugin.clone();
@@ -1026,47 +1003,53 @@ async fn main() -> Result<()> {
                 }
             };
 
-            // Per-agent MCP route (dev role): /agents/{name}/mcp
-            let agent_handler = {
-                let s = dev_server.clone();
+            // Unified per-agent MCP handler: /agents/{role}/{name}/mcp
+            let unified_handler = {
+                let servers = servers.clone();
+                let base_state = base_state.clone();
                 let wb = worktree_base.clone();
-                move |axum::extract::Path(agent_name): axum::extract::Path<String>,
+                move |axum::extract::Path((role, name)): axum::extract::Path<(String, String)>,
                       headers: axum::http::HeaderMap,
                       body: axum::extract::Json<serde_json::Value>| {
-                    let s = s.clone();
+                    let servers = servers.clone();
+                    let base_state = base_state.clone();
                     let wb = wb.clone();
                     async move {
-                        let name = exomonad_core::AgentName::from(agent_name.as_str());
-                        let birth_branch = resolve_agent_birth_branch(&wb, &agent_name).await;
-                        exomonad_core::mcp::agent_identity::with_agent_id(
-                            name,
-                            exomonad_core::mcp::agent_identity::with_birth_branch(
-                                birth_branch,
-                                async move { s.handle(headers, body).await },
-                            ),
-                        )
-                        .await
-                    }
-                }
-            };
+                        // Get or create McpServer for this role
+                        let server = {
+                            let cache = servers.read().await;
+                            cache.get(&role).cloned()
+                        };
+                        let server = match server {
+                            Some(s) => s,
+                            None => {
+                                let mut state = base_state.clone();
+                                state.role = Some(role.clone());
+                                let s = McpServer::new(state);
+                                servers.write().await.insert(role.clone(), s.clone());
+                                s
+                            }
+                        };
 
-            // Per-agent MCP route (TL role): /agents/{name}/tl/mcp
-            let agent_tl_handler = {
-                let s = tl_server.clone();
-                let wb = worktree_base.clone();
-                move |axum::extract::Path(agent_name): axum::extract::Path<String>,
-                      headers: axum::http::HeaderMap,
-                      body: axum::extract::Json<serde_json::Value>| {
-                    let s = s.clone();
-                    let wb = wb.clone();
-                    async move {
-                        let name = exomonad_core::AgentName::from(agent_name.as_str());
-                        let birth_branch = resolve_agent_birth_branch(&wb, &agent_name).await;
+                        // Root agent: use static identity (no worktree to resolve)
+                        use exomonad_core::mcp::agent_identity::ROOT_AGENT_NAME;
+                        let (agent_name, birth_branch) = if name == ROOT_AGENT_NAME {
+                            (
+                                exomonad_core::AgentName::from(ROOT_AGENT_NAME),
+                                exomonad_core::BirthBranch::root(),
+                            )
+                        } else {
+                            (
+                                exomonad_core::AgentName::from(name.as_str()),
+                                resolve_agent_birth_branch(&wb, &name).await,
+                            )
+                        };
+
                         exomonad_core::mcp::agent_identity::with_agent_id(
-                            name,
+                            agent_name,
                             exomonad_core::mcp::agent_identity::with_birth_branch(
                                 birth_branch,
-                                async move { s.handle(headers, body).await },
+                                async move { server.handle(headers, body).await },
                             ),
                         )
                         .await
@@ -1128,18 +1111,9 @@ async fn main() -> Result<()> {
                     "/hook",
                     axum::routing::post(handle_hook_request).with_state(hook_state),
                 )
-                .route("/tl/mcp", axum::routing::post(tl_handler).get(sse_handler))
                 .route(
-                    "/dev/mcp",
-                    axum::routing::post(dev_handler).get(sse_handler),
-                )
-                .route(
-                    "/agents/{name}/mcp",
-                    axum::routing::post(agent_handler.clone()).get(sse_handler),
-                )
-                .route(
-                    "/agents/{name}/tl/mcp",
-                    axum::routing::post(agent_tl_handler).get(sse_handler),
+                    "/agents/{role}/{name}/mcp",
+                    axum::routing::post(unified_handler).get(sse_handler),
                 )
                 .route("/events", axum::routing::post(events_handler))
                 .layer(cors)

@@ -64,27 +64,23 @@ The MCP server provides tools via HTTP (rmcp).
 Use CLI-native config commands:
 ```bash
 # Claude Code
-claude mcp add --transport http exomonad http://localhost:7432/tl/mcp
+claude mcp add --transport http exomonad http://localhost:7432/agents/tl/root/mcp
 
 # Gemini CLI (HTTP mode only)
-gemini mcp add --transport http exomonad http://localhost:7432/tl/mcp
+gemini mcp add --transport http exomonad http://localhost:7432/agents/tl/root/mcp
 ```
 
 ### Available Tools
 
-| Tool | Description | Arguments |
-|------|-------------|-----------|
-| `git_branch` | Get current git branch | `path?`: directory |
-| `git_status` | Get dirty files (git status --porcelain) | `path?`: directory |
-| `git_log` | Get recent commits | `path?`: directory, `limit?`: count |
-| `read_file` | Read file contents | `path`: file path, `max_lines?`: limit |
-| `github_list_issues` | List GitHub issues | `owner`, `repo`, `state?`, `labels?` |
-| `github_get_issue` | Get single issue details | `owner`, `repo`, `number` |
-| `github_list_prs` | List GitHub pull requests | `owner`, `repo`, `state?`, `limit?` |
-| `spawn_subtree` | Fork a worktree node off current branch (Claude-only, `.exo/worktrees/`) | `task`, `branch_name` |
-| `spawn_worker` | Spawn Gemini pane in current worktree (config in `.exo/agents/`) | `name`, `prompt` |
-| `get_agent_messages` | Read notes/questions from agents | `agent_id?` |
-| `answer_question` | Answer pending agent question | `agent_id`, `question_id`, `answer` |
+| Tool | Role | Description |
+|------|------|-------------|
+| `spawn_subtree` | tl | Fork Claude agent into worktree + Zellij tab (TL role) |
+| `spawn_leaf_subtree` | tl | Fork Gemini agent into worktree + Zellij tab (dev role, files PR) |
+| `spawn_workers` | tl | Spawn Gemini agents as panes (ephemeral, no worktree) |
+| `file_pr` | tl, dev | Create/update PR for current branch |
+| `merge_pr` | tl | Merge child PR (gh merge + jj fetch) |
+| `popup` | tl | Interactive UI in Zellij |
+| `notify_parent` | all | Signal completion to parent |
 
 
 ## Environment Variables

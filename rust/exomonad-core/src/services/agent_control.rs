@@ -570,7 +570,11 @@ impl AgentControlService {
             let agent_dir = worktree_path;
 
             // Write .mcp.json for the agent
-            self.write_agent_mcp_config(&effective_project_dir, &agent_dir, options.agent_type)
+            let role = match options.agent_type {
+                AgentType::Claude => "tl",
+                AgentType::Gemini => "dev",
+            };
+            self.write_agent_mcp_config(&effective_project_dir, &agent_dir, options.agent_type, role)
                 .await?;
 
             // Build initial prompt
@@ -790,7 +794,7 @@ impl AgentControlService {
             }
 
             // Write per-agent MCP config into the worktree
-            self.write_agent_mcp_config(&effective_project_dir, &worktree_path, options.agent_type)
+            self.write_agent_mcp_config(&effective_project_dir, &worktree_path, options.agent_type, "dev")
                 .await?;
 
             // For Gemini agents, point at worktree settings via env var
@@ -928,7 +932,7 @@ impl AgentControlService {
 
             let settings_path = agent_config_dir.join("settings.json");
             let mcp_url = format!(
-                "http://localhost:{}/agents/{}/mcp",
+                "http://localhost:{}/agents/worker/{}/mcp",
                 mcp_port, internal_name
             );
             let settings = Self::generate_gemini_settings(&mcp_url);
@@ -1066,7 +1070,7 @@ impl AgentControlService {
                     "-b",
                     &branch_name,
                     &worktree_path.to_string_lossy(),
-                    &current_branch,
+                    current_branch,
                 ])
                 .current_dir(effective_project_dir)
                 .output()
@@ -1090,7 +1094,7 @@ impl AgentControlService {
             }
 
             // Write .mcp.json in worktree root
-            self.write_agent_mcp_config(effective_project_dir, &worktree_path, AgentType::Claude)
+            self.write_agent_mcp_config(effective_project_dir, &worktree_path, AgentType::Claude, "tl")
                 .await?;
 
             // Write .claude/settings.local.json with hooks (SessionStart registers UUID for --fork-session)
@@ -1232,8 +1236,8 @@ impl AgentControlService {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
             }
 
-            // Write .gemini/settings.json in worktree root (using write_agent_mcp_config logic)
-            self.write_agent_mcp_config(effective_project_dir, &worktree_path, AgentType::Gemini)
+            // Write .gemini/settings.json in worktree root
+            self.write_agent_mcp_config(effective_project_dir, &worktree_path, AgentType::Gemini, "dev")
                 .await?;
 
             // Set GEMINI_CLI_SYSTEM_SETTINGS_PATH
@@ -1940,6 +1944,7 @@ impl AgentControlService {
         effective_dir: &Path,
         agent_dir: &Path,
         agent_type: AgentType,
+        role: &str,
     ) -> Result<()> {
         let port = Self::read_server_port(effective_dir).ok_or_else(|| {
             anyhow::anyhow!("No MCP server running. Start one with `exomonad serve --port <port>`.")
@@ -1950,25 +1955,27 @@ impl AgentControlService {
             .and_then(|n| n.to_str())
             .unwrap_or("unknown");
 
-        let mcp_content = Self::generate_mcp_config(agent_name, port, agent_type);
+        let mcp_content = Self::generate_mcp_config(agent_name, port, agent_type, role);
 
         match agent_type {
             AgentType::Claude => {
                 fs::write(agent_dir.join(".mcp.json"), mcp_content).await?;
-                info!(agent_dir = %agent_dir.display(), "Wrote .mcp.json for Claude agent");
+                info!(agent_dir = %agent_dir.display(), role = %role, "Wrote .mcp.json for Claude agent");
             }
             AgentType::Gemini => {
                 let gemini_dir = agent_dir.join(".gemini");
                 fs::create_dir_all(&gemini_dir).await?;
                 fs::write(gemini_dir.join("settings.json"), mcp_content).await?;
-                info!(agent_dir = %agent_dir.display(), "Wrote .gemini/settings.json for Gemini agent");
+                info!(agent_dir = %agent_dir.display(), role = %role, "Wrote .gemini/settings.json for Gemini agent");
             }
         }
         Ok(())
     }
 
     /// Generate MCP configuration JSON for an agent.
-    fn generate_mcp_config(name: &str, port: u16, agent_type: AgentType) -> String {
+    ///
+    /// URL pattern: `/agents/{role}/{name}/mcp`
+    fn generate_mcp_config(name: &str, port: u16, agent_type: AgentType, role: &str) -> String {
         match agent_type {
             AgentType::Claude => {
                 format!(
@@ -1976,11 +1983,12 @@ impl AgentControlService {
   "mcpServers": {{
     "exomonad": {{
       "type": "http",
-      "url": "http://localhost:{port}/agents/{name}/tl/mcp"
+      "url": "http://localhost:{port}/agents/{role}/{name}/mcp"
     }}
   }}
 }}"###,
                     port = port,
+                    role = role,
                     name = name,
                 )
             }
@@ -1989,7 +1997,7 @@ impl AgentControlService {
                     r###"{{
   "mcpServers": {{
     "exomonad": {{
-      "httpUrl": "http://localhost:{port}/agents/{name}/mcp"
+      "httpUrl": "http://localhost:{port}/agents/{role}/{name}/mcp"
     }}
   }},
   "hooks": {{
@@ -2018,6 +2026,7 @@ impl AgentControlService {
   }}
 }}"###,
                     port = port,
+                    role = role,
                     name = name,
                 )
             }
@@ -2299,11 +2308,11 @@ mod tests {
     #[test]
     fn test_claude_mcp_config_format() {
         let config =
-            AgentControlService::generate_mcp_config("test-claude", 7432, AgentType::Claude);
+            AgentControlService::generate_mcp_config("test-claude", 7432, AgentType::Claude, "tl");
         let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
         assert_eq!(
             parsed["mcpServers"]["exomonad"]["url"],
-            "http://localhost:7432/agents/test-claude/tl/mcp"
+            "http://localhost:7432/agents/tl/test-claude/mcp"
         );
         assert!(parsed["mcpServers"]["exomonad"].get("httpUrl").is_none());
     }
@@ -2311,11 +2320,11 @@ mod tests {
     #[test]
     fn test_gemini_mcp_config_format() {
         let config =
-            AgentControlService::generate_mcp_config("test-gemini", 7432, AgentType::Gemini);
+            AgentControlService::generate_mcp_config("test-gemini", 7432, AgentType::Gemini, "dev");
         let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
         assert_eq!(
             parsed["mcpServers"]["exomonad"]["httpUrl"],
-            "http://localhost:7432/agents/test-gemini/mcp"
+            "http://localhost:7432/agents/dev/test-gemini/mcp"
         );
         assert!(parsed["mcpServers"]["exomonad"].get("url").is_none());
 

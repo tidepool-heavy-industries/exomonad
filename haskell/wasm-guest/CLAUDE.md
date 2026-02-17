@@ -32,10 +32,18 @@ The guest exports MCP tools that agents can call. These are defined in `ExoMonad
 
 ### Other Tools
 
-- `file_pr`
-- `popup`
-- `note`, `question` (dev role)
-- `get_agent_messages`, `answer_question` (TL role)
+- `file_pr` (tl, dev roles)
+- `popup` (tl role)
+- `merge_pr` (tl role)
+- `notify_parent` (all roles)
+
+### Roles
+
+| Role | Tools | Spawned by |
+|------|-------|------------|
+| **tl** | spawn (3), merge_pr, file_pr, popup, notify_parent | `spawn_subtree` |
+| **dev** | file_pr, notify_parent | `spawn_leaf_subtree` |
+| **worker** | notify_parent | `spawn_workers` |
 
 ## Hooks
 

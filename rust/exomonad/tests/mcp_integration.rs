@@ -57,7 +57,7 @@ impl McpClient {
     }
 
     fn mcp_url(&self) -> String {
-        format!("http://127.0.0.1:{}/tl/mcp", self.port)
+        format!("http://127.0.0.1:{}/agents/tl/root/mcp", self.port)
     }
 
     /// Send a JSON-RPC request via HTTP POST and return the parsed response.

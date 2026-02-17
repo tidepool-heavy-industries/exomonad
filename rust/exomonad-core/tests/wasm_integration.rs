@@ -7,7 +7,7 @@
 //! WASM guest → yield_effect → EffectRegistry → mock handler → EffectResponse → WASM guest
 //! ```
 //!
-//! Requires: `just wasm-dev tl` to build the WASM binary first.
+//! Requires: `just wasm-all` to build the WASM binary first.
 
 use async_trait::async_trait;
 use exomonad_core::{EffectError, EffectHandler, EffectResult, RuntimeBuilder};
@@ -20,10 +20,10 @@ use serde_json::{json, Value};
 
 fn wasm_binary_bytes() -> Vec<u8> {
     let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let path = manifest.join("../../.exo/wasm/wasm-guest-tl.wasm");
+    let path = manifest.join("../../.exo/wasm/wasm-guest-unified.wasm");
     assert!(
         path.exists(),
-        "WASM binary not found at {path:?}. Build with `just wasm-dev tl`."
+        "WASM binary not found at {path:?}. Build with `just wasm-all`."
     );
     std::fs::read(&path).expect("Failed to read WASM binary")
 }

@@ -16,4 +16,4 @@ Agents that get short directives ("go") tend to drift. Agents that get full cont
 
 ## Implementation Status
 
-All spawn tools production-ready: `spawn_subtree` (Claude worktree+tab), `spawn_leaf_subtree` (Gemini worktree+tab), `spawn_workers` (Gemini panes, ephemeral). Per-agent identity resolved via URL path param (`/agents/{name}/mcp`).
+All spawn tools production-ready: `spawn_subtree` (Claude worktree+tab), `spawn_leaf_subtree` (Gemini worktree+tab), `spawn_workers` (Gemini panes, ephemeral). Per-agent identity resolved via URL path: `/agents/{role}/{name}/mcp`.

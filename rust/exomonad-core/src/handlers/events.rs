@@ -169,7 +169,7 @@ impl EventEffects for EventHandler {
     async fn notify_parent(&self, req: NotifyParentRequest) -> EffectResult<NotifyParentResponse> {
         // Resolve birth-branch from task-local, falling back to event_queue_scope
         let birth_branch = crate::mcp::agent_identity::get_birth_branch()
-            .unwrap_or_else(|| crate::domain::BirthBranch::root());
+            .unwrap_or_else(crate::domain::BirthBranch::root);
 
         // Prefer agent_id from the request (set by WASM caller) over task-local/env fallback
         let agent_name = crate::mcp::agent_identity::get_agent_id();

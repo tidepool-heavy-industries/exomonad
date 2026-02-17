@@ -3,13 +3,10 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeApplications #-}
 
--- | Unified role registry for the HTTP-native single-WASM architecture.
+-- | Unified role registry for the single-WASM architecture.
 --
--- Instead of separate WASM modules per role, this module exports the union
--- of all role configs. The Rust server calls WASM entry points with a role
--- parameter and dispatches to the correct config.
---
--- Individual Role.hs files remain unchanged — they are imported here.
+-- All role configs live here. The Rust server calls WASM entry points with a
+-- role parameter and dispatches to the correct config via 'lookupRole'.
 module AllRoles
   ( allConfigs,
     lookupRole,
@@ -33,9 +30,10 @@ import ExoMonad.Guest.Tool.Mode (AsHandler)
 import ExoMonad.Guest.Tool.Record (DispatchRecord (..), ReifyRecord (..))
 import ExoMonad.Types (HookConfig (..), RoleConfig (..))
 
--- Import both role configs under unique module names.
+-- Import all role configs under unique module names.
 import qualified DevRole
 import qualified TLRole
+import qualified WorkerRole
 
 -- | Captured role capabilities (avoids existential field name restriction).
 data RoleCapabilities = RoleCapabilities
@@ -85,7 +83,8 @@ allConfigs :: Map Text SomeRoleConfig
 allConfigs =
   Map.fromList
     [ ("tl", mkSomeRoleConfig TLRole.config),
-      ("dev", mkSomeRoleConfig DevRole.config)
+      ("dev", mkSomeRoleConfig DevRole.config),
+      ("worker", mkSomeRoleConfig WorkerRole.config)
     ]
 
 -- | Look up a role config by name.

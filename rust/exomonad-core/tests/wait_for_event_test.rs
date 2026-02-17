@@ -12,10 +12,10 @@ use std::time::Duration;
 
 fn wasm_binary_bytes() -> Vec<u8> {
     let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let path = manifest.join("../../.exo/wasm/wasm-guest-tl.wasm");
+    let path = manifest.join("../../.exo/wasm/wasm-guest-unified.wasm");
     assert!(
         path.exists(),
-        "WASM binary not found at {path:?}. Build with `just wasm-dev tl`."
+        "WASM binary not found at {path:?}. Build with `just wasm-all`."
     );
     std::fs::read(&path).expect("Failed to read WASM binary")
 }

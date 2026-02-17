@@ -95,8 +95,8 @@ Use `--port` to override the default port (7432).
 
 One-time setup per project:
 ```bash
-claude mcp add --transport http exomonad http://localhost:7432/tl/mcp
-gemini mcp add --transport http exomonad http://localhost:7432/tl/mcp
+claude mcp add --transport http exomonad http://localhost:7432/agents/tl/root/mcp
+gemini mcp add --transport http exomonad http://localhost:7432/agents/tl/root/mcp
 ```
 
 ### Building
@@ -115,9 +115,9 @@ just wasm-all
 cargo build -p exomonad
 
 # Hot reload workflow (HTTP serve mode)
-exomonad serve                # Start server
-# ... edit .exo/roles/tl/Role.hs ...
-exomonad recompile --role tl  # Rebuild WASM via nix, copy to .exo/wasm/
+exomonad serve                    # Start server
+# ... edit .exo/roles/unified/TLRole.hs ...
+exomonad recompile --role unified # Rebuild WASM via nix, copy to .exo/wasm/
 # Next tool call picks up new WASM automatically
 ```
 
@@ -128,12 +128,12 @@ exomonad recompile --role tl  # Rebuild WASM via nix, copy to .exo/wasm/
 4. Builds and installs Zellij plugins
 
 **WASM build pipeline:**
-1. User-authored `Role.hs` in `.exo/roles/<role>/` defines tool composition
-2. Generated `Main.hs` and `<role>.cabal` provide FFI scaffolding (gitignored)
-3. `cabal.project.wasm` lists role packages alongside `wasm-guest` SDK
-4. `just wasm <role>` builds via `nix develop .#wasm -c wasm32-wasi-cabal build ...`
-5. Compiled WASM copied to `.exo/wasm/wasm-guest-<role>.wasm`
-6. Both `exomonad hook` and `exomonad serve` load WASM from `.exo/wasm/` at runtime
+1. Role configs in `.exo/roles/unified/` define tool composition per role (`TLRole.hs`, `DevRole.hs`)
+2. `AllRoles.hs` registers all roles; `Main.hs` provides FFI exports
+3. `cabal.project.wasm` lists the unified package alongside `wasm-guest` SDK
+4. `just wasm-all` builds via `nix develop .#wasm -c wasm32-wasi-cabal build ...`
+5. Compiled WASM copied to `.exo/wasm/wasm-guest-unified.wasm`
+6. `exomonad serve` loads unified WASM from `.exo/wasm/` at runtime (hot reload via mtime check)
 
 ### Configuration
 
@@ -191,15 +191,6 @@ Push-based parallel worker coordination via Zellij STDIN injection:
 5. TL sees the injected text as a new user message and wakes up
 
 The TL does not poll or block. It finishes its turn after spawning, and gets poked by the system when children complete. This is true push notification via `inject_input` through the Zellij plugin pipe.
-
-### Messaging
-
-Inter-agent communication between TL and dev agents:
-
-- **`note`** — Dev sends async note to TL (fire-and-forget)
-- **`question`** — Dev asks TL a question and blocks until answer arrives (trampoline architecture via `suspend`/`resume`)
-- **`get_agent_messages`** — TL reads notes and questions from agent outboxes (supports long-poll)
-- **`answer_question`** — TL answers a pending question, unblocking the dev agent
 
 ### PR Workflow
 
@@ -284,19 +275,15 @@ Claude Code starts → exomonad hook session-start
 
 All tools implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/Tools/`):
 
-| Tool | Description |
-|------|-------------|
-| `spawn_subtree` | Fork Claude agent into worktree + Zellij tab (TL role, can spawn children) |
-| `spawn_leaf_subtree` | Fork Gemini agent into worktree + Zellij tab (dev role, files PR) |
-| `spawn_workers` | Spawn Gemini agents as Zellij panes (ephemeral, no worktree) |
-| `file_pr` | Create/update PR (auto-detects base branch from naming) |
-| `merge_pr` | Merge child PR (gh merge + jj fetch). TL role only |
-| `popup` | Interactive UI in Zellij (choices, text, sliders) |
-| `note` | Dev → TL async message |
-| `question` | Dev → TL blocking question (trampoline) |
-| `get_agent_messages` | TL reads agent outboxes (long-poll) |
-| `answer_question` | TL answers pending question |
-| `notify_parent` | Signal completion to parent. Auto-routed, injects into parent pane |
+| Tool | Role | Description |
+|------|------|-------------|
+| `spawn_subtree` | tl | Fork Claude agent into worktree + Zellij tab (TL role, can spawn children) |
+| `spawn_leaf_subtree` | tl | Fork Gemini agent into worktree + Zellij tab (dev role, files PR) |
+| `spawn_workers` | tl | Spawn Gemini agents as Zellij panes (ephemeral, no worktree) |
+| `file_pr` | tl, dev | Create/update PR (auto-detects base branch from naming) |
+| `merge_pr` | tl | Merge child PR (gh merge + jj fetch) |
+| `popup` | tl | Interactive UI in Zellij (choices, text, sliders) |
+| `notify_parent` | all | Signal completion to parent. Auto-routed, injects into parent pane |
 
 **Note**: Git operations (`git status`, `git log`, etc.) and GitHub operations (`gh pr list`, etc.) use the Bash tool with `git` and `gh` commands, not MCP tools.
 

@@ -3,11 +3,7 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 
--- | TL role config re-exported under a unique module name for the unified WASM.
---
--- This duplicates the TL Role.hs content because Cabal does not support
--- importing the same module name from two different source directories.
--- The canonical definition remains in @.exo/roles/tl/Role.hs@.
+-- | TL role config: spawn, PR, merge, popup tools with stop hook checks.
 module TLRole (config, Tools) where
 
 import ExoMonad
@@ -20,7 +16,6 @@ import Control.Monad.Freer (send)
 data Tools mode = Tools
   { spawn :: SpawnTools mode,
     popups :: PopupTools mode,
-    messaging :: TLMessagingTools mode,
     pr :: FilePRTools mode,
     mergePr :: mode :- MergePR,
     notifyParent :: mode :- NotifyParent
@@ -35,7 +30,6 @@ config =
         Tools
           { spawn = spawnTools,
             popups = popupTools,
-            messaging = tlMessagingTools,
             pr = filePRTools,
             mergePr = mkHandler @MergePR,
             notifyParent = mkHandler @NotifyParent

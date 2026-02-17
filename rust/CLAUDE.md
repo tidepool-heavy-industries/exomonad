@@ -151,43 +151,36 @@ echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
 
 ### Agent Identity
 
-In HTTP serve mode, multiple agents share one server process. Each agent hits a unique URL: `/agents/{name}/mcp`. The server extracts identity from the URL path and stores it in a tokio task-local via `mcp::agent_identity`.
+In HTTP serve mode, multiple agents share one server process. Each agent hits a unique URL: `/agents/{role}/{name}/mcp`. The server extracts role and identity from the URL path. Role determines which WASM tool set (lazy McpServer per role). Identity is stored in a tokio task-local via `mcp::agent_identity`.
 
 Resolution order in `mcp::agent_identity::get_agent_id()`:
-1. **Task-local** (HTTP mode): set by the `/agents/{name}/mcp` route handler
+1. **Task-local** (HTTP mode): set by the `/agents/{role}/{name}/mcp` route handler
 2. **Directory name** (last resort): current working directory basename
 
-**Route layout:**
-- `/tl/mcp` — TL endpoint (all tools including orchestration)
-- `/dev/mcp` — generic dev endpoint (no agent identity)
-- `/agents/{name}/mcp` — per-agent dev endpoint (identity from URL path)
-- `/agents/{name}/tl/mcp` — per-agent TL endpoint (identity + orchestration tools)
+**Route layout (single pattern):**
+- `/agents/{role}/{name}/mcp` — unified route for all agents
+  - Root TL: `/agents/tl/root/mcp`
+  - Spawned Claude subtree: `/agents/tl/{name}/mcp`
+  - Spawned Gemini leaf: `/agents/dev/{name}/mcp`
+  - Spawned Gemini worker: `/agents/worker/{name}/mcp`
 
-At spawn time, `spawn_subtree`/`spawn_leaf_subtree`/`spawn_workers` (via WASM) writes per-agent MCP config with the agent's endpoint URL. The URL IS the identity — unforgeable, visible in access logs.
+Roles are defined in Haskell WASM (`AllRoles.hs`). Adding a role is a Haskell-only change — Rust uses a lazy cache that creates an `McpServer` per role on first request.
+
+At spawn time, `spawn_subtree`/`spawn_leaf_subtree`/`spawn_workers` writes per-agent MCP config with the agent's endpoint URL. The URL IS the identity — unforgeable, visible in access logs.
 
 ## MCP Tools
 
 All tools are defined in Haskell WASM and executed via host functions.
 
-| Tool | Description |
-|------|-------------|
-| `git_branch` | Get current git branch |
-| `git_status` | Get dirty files |
-| `git_log` | Get recent commits |
-| `read_file` | Read file contents |
-| `github_list_issues` | List GitHub issues |
-| `github_get_issue` | Get single issue details |
-| `github_list_prs` | List GitHub pull requests |
-| `spawn_subtree` | Fork a worktree node off current branch (Claude-only, creates `.exo/worktrees/{slug}/`) |
-| `spawn_leaf_subtree` | Spawn Gemini agent in own worktree + branch + tab (isolated, files PR) |
-| `spawn_workers` | Spawn ephemeral Gemini agents as panes in parent dir (no branch, no worktree) |
-| `file_pr` | Create/update PR for current branch (auto-detects base branch from naming) |
-| `merge_pr` | Merge child PR (gh pr merge + jj git fetch). TL role only. |
-| `note` | Send fire-and-forget note to TL (agent-side) |
-| `question` | Send blocking question to TL (agent-side) |
-| `get_agent_messages` | Read notes/questions from agents (TL messaging, supports long-poll) |
-| `answer_question` | Answer pending agent question (TL messaging) |
-| `notify_parent` | Notify parent session of completion (auto-routed, injects into parent pane) |
+| Tool | Role | Description |
+|------|------|-------------|
+| `spawn_subtree` | tl | Fork Claude agent into worktree + Zellij tab (TL role, can spawn children) |
+| `spawn_leaf_subtree` | tl | Fork Gemini agent into worktree + Zellij tab (dev role, files PR) |
+| `spawn_workers` | tl | Spawn ephemeral Gemini agents as panes in parent dir (no branch, no worktree) |
+| `file_pr` | tl, dev | Create/update PR for current branch (auto-detects base branch from naming) |
+| `merge_pr` | tl | Merge child PR (gh pr merge + jj git fetch) |
+| `popup` | tl | Interactive UI in Zellij (choices, text, sliders) |
+| `notify_parent` | all | Signal completion to parent (auto-routed, injects into parent pane) |
 
 ## Effect System
 
@@ -232,10 +225,10 @@ Haskell: Either EffectError GetBranchResponse
 Use CLI-native config commands to register the MCP server:
 ```bash
 # Claude Code
-claude mcp add --transport http exomonad http://localhost:7432/tl/mcp
+claude mcp add --transport http exomonad http://localhost:7432/agents/tl/root/mcp
 
 # Gemini CLI (HTTP mode only)
-gemini mcp add --transport http exomonad http://localhost:7432/tl/mcp
+gemini mcp add --transport http exomonad http://localhost:7432/agents/tl/root/mcp
 ```
 
 And ensure `.exo/config.toml` and/or `config.local.toml` exists.

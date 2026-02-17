@@ -14,6 +14,12 @@ pub struct ClaudeSessionRegistry {
     inner: Arc<Mutex<HashMap<String, ClaudeSessionUuid>>>,
 }
 
+impl Default for ClaudeSessionRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClaudeSessionRegistry {
     pub fn new() -> Self {
         Self {

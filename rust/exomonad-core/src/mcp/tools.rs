@@ -17,7 +17,7 @@ use tracing::{debug, error};
 /// Input for WASM handle_mcp_call function.
 ///
 /// The `role` field is always present at the WASM boundary — the server knows
-/// which role it's serving (from the route: `/tl/mcp`, `/dev/mcp`, `/agents/{name}/mcp`).
+/// which role it's serving (from the route: `/agents/{role}/{name}/mcp`).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MCPCallInput {

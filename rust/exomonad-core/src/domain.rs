@@ -368,7 +368,7 @@ pub enum MessageFilter {
 // Role
 // ============================================================================
 
-/// Agent role (dev, tl, pm).
+/// Agent role (dev, tl, worker).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
@@ -377,8 +377,8 @@ pub enum Role {
     Dev,
     /// Tech lead role.
     TL,
-    /// Product manager role.
-    PM,
+    /// Worker role (ephemeral, notify_parent only).
+    Worker,
 }
 
 impl fmt::Display for Role {
@@ -386,7 +386,7 @@ impl fmt::Display for Role {
         match self {
             Self::Dev => write!(f, "dev"),
             Self::TL => write!(f, "tl"),
-            Self::PM => write!(f, "pm"),
+            Self::Worker => write!(f, "worker"),
         }
     }
 }
@@ -398,7 +398,7 @@ impl TryFrom<String> for Role {
         match s.to_lowercase().as_str() {
             "dev" => Ok(Self::Dev),
             "tl" => Ok(Self::TL),
-            "pm" => Ok(Self::PM),
+            "worker" => Ok(Self::Worker),
             _ => Err(DomainError::Invalid {
                 field: "role",
                 value: s,
@@ -638,7 +638,7 @@ mod tests {
     fn test_role() {
         assert_eq!(Role::try_from("dev".to_string()).unwrap(), Role::Dev);
         assert_eq!(Role::try_from("tl".to_string()).unwrap(), Role::TL);
-        assert_eq!(Role::try_from("pm".to_string()).unwrap(), Role::PM);
+        assert_eq!(Role::try_from("worker".to_string()).unwrap(), Role::Worker);
 
         // Case insensitive
         assert_eq!(Role::try_from("DEV".to_string()).unwrap(), Role::Dev);

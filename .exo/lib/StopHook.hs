@@ -1,10 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Stop hook logic for dev agents.
+-- | Stop hook logic shared across roles.
 --
--- This module re-exports the library-level stop hook checks.
--- TL role uses defaultHooks (no checks).
--- Dev role uses devHooks (full validation).
+-- Re-exports runStopHookChecks from the wasm-guest library.
+-- Used by both TLRole and DevRole (via HttpDevHooks).
 module StopHook
   ( devHooks,
     runStopHookChecks,

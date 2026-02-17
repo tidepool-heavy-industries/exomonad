@@ -38,58 +38,47 @@ The xmonad pattern for LLM agents: users define agent roles in Haskell, compiled
 ### Directory Structure
 
 ```
-.exo/roles/<role>/
-├── Role.hs          # User-authored: tool composition + hook config (TRACKED)
-├── Main.hs          # Generated: FFI exports wiring Role.config to WASM entry points (GITIGNORED)
-├── <role>.cabal     # Generated: cabal package with WASM linker flags (GITIGNORED)
-├── gen/             # Generated: alternate scaffolding for cabal.project.wasm (GITIGNORED)
-└── dist/            # Build output: compiled .wasm artifact (GITIGNORED)
-```
-
-Shared code across roles lives in `.exo/lib/` (e.g., `StopHook.hs`).
-
-### How It Works
-
-1. User writes `Role.hs` — a `RoleConfig` record selecting tools and hooks
-2. `cabal.project.wasm` lists `.exo/roles/tl` and `.exo/roles/dev` as packages
-3. `just wasm <role>` (or `exomonad recompile --role <role>`) builds via nix + wasm32-wasi-cabal
-4. Build output lands in `dist/`, then gets copied to `.exo/wasm/wasm-guest-<role>.wasm`
-5. WASM loaded from file by Rust binary at runtime (both hooks and serve mode)
-6. In serve mode, hot reload checks mtime per tool call
-
-### Unified WASM
-
-The unified WASM module is the primary build target, containing all roles:
-
-```
 .exo/roles/unified/
 ├── AllRoles.hs     # Role registry: Map Text SomeRoleConfig
-├── TLRole.hs       # TL role config (re-exported under unique module name)
-├── DevRole.hs      # Dev role config (uses httpDevHooks with permission cascade)
+├── TLRole.hs       # TL role config (spawn, PR, merge, popup, notify_parent)
+├── DevRole.hs      # Dev role config (PR, notify_parent + permission cascade)
+├── WorkerRole.hs   # Worker role config (notify_parent only, allow-all hooks)
 ├── Main.hs         # FFI exports that read role from input JSON
 └── unified.cabal   # Package definition
 ```
+
+Shared code across roles lives in `.exo/lib/` (e.g., `StopHook.hs`, `HttpDevHooks.hs`).
+
+### How It Works
+
+1. Role configs live in `.exo/roles/unified/` — one module per role (`TLRole.hs`, `DevRole.hs`, `WorkerRole.hs`)
+2. `AllRoles.hs` registers all roles in a `Map Text SomeRoleConfig`
+3. `cabal.project.wasm` lists `.exo/roles/unified` as a package
+4. `just wasm-all` (or `exomonad recompile --role unified`) builds via nix + wasm32-wasi-cabal
+5. Output: `.exo/wasm/wasm-guest-unified.wasm` — loaded by Rust at runtime
+6. In serve mode, hot reload checks mtime per tool call
 
 Key types:
 - `AllRoles.SomeRoleConfig` — captures dispatch, listing, and hook capabilities for any role
 - `AllRoles.lookupRole` — look up role by name from the registry
 - `ExoMonad.Permissions` — typed permission ADTs for the three-tier cascade
 
-The unified WASM is additive — individual tl/dev packages still build independently.
-
 ### Role Anatomy
 
 Each role is a `RoleConfig` selecting from pre-built tool records:
 
 ```haskell
--- .exo/roles/tl/Role.hs
+-- .exo/roles/unified/TLRole.hs
 data Tools mode = Tools
-  { spawn :: SpawnTools mode     -- spawn_subtree, spawn_worker
-  , popups :: PopupTools mode   -- popup UI
+  { spawn :: SpawnTools mode,
+    popups :: PopupTools mode,
+    pr :: FilePRTools mode,
+    mergePr :: mode :- MergePR,
+    notifyParent :: mode :- NotifyParent
   } deriving Generic
 
 config :: RoleConfig (Tools AsHandler)
-config = RoleConfig { roleName = "tl", tools = Tools { ... }, hooks = defaultHooks }
+config = RoleConfig { roleName = "tl", tools = Tools { ... }, hooks = ... }
 ```
 
 The `mode` parameter enables the same record for both schema generation (`AsSchema`) and handler dispatch (`AsHandler`). See ADR-004 for the full design rationale.

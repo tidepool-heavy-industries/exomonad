@@ -12,8 +12,6 @@ packages:
     haskell/vendor/exomonad-pdk
     haskell/vendor/proto3-runtime
     haskell/vendor/proto3-wire
-    .exo/roles/tl
-    .exo/roles/dev
     .exo/roles/unified
 
 -- Global settings for static-only build

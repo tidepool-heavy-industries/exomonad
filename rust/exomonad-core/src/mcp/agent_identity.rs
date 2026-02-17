@@ -1,14 +1,18 @@
 //! Agent identity propagation via task-local storage.
 //!
-//! In HTTP serve mode, multiple Gemini agents hit the same MCP server process.
-//! Each agent gets a unique URL: `/agents/{name}/mcp`. The route handler extracts
-//! the agent name from the path and sets it as a task-local via `with_agent_id`,
-//! making it available to effect handlers without threading through the call stack.
+//! In HTTP serve mode, multiple agents hit the same MCP server process.
+//! Each agent gets a unique URL: `/agents/{role}/{name}/mcp`. The route handler
+//! extracts the agent name from the path and sets it as a task-local via
+//! `with_agent_id`, making it available to effect handlers without threading
+//! through the call stack.
 //!
 //! Fallback chain: task-local → EXOMONAD_AGENT_ID env var → directory name.
 
 use crate::domain::{AgentName, BirthBranch};
 use std::future::Future;
+
+/// Canonical name for the root TL agent in URL routing.
+pub const ROOT_AGENT_NAME: &str = "root";
 
 tokio::task_local! {
     /// Task-local agent identity, set by the per-agent route handler.
