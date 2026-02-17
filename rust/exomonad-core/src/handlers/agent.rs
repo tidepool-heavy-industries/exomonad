@@ -195,7 +195,7 @@ impl AgentEffects for AgentHandler {
             } else {
                 agent_name
             };
-            let claude_uuid = registry.get(&key).await;
+            let claude_uuid = registry.get(key.as_str()).await;
             info!(
                 key = %key,
                 claude_uuid = ?claude_uuid,
