@@ -2,7 +2,7 @@
 //!
 //! Uses proto-generated types from `exomonad_proto::effects::agent`.
 
-use crate::domain::ClaudeSessionUuid;
+use crate::domain::{AgentName, BirthBranch, ClaudeSessionUuid};
 use crate::effects::{
     dispatch_agent_effect, AgentEffects, EffectError, EffectHandler, EffectResult,
 };
@@ -89,7 +89,7 @@ impl AgentEffects for AgentHandler {
             base_branch: if req.base_branch.is_empty() {
                 None
             } else {
-                Some(req.base_branch.clone())
+                Some(BirthBranch::from(req.base_branch.as_str()))
             },
         };
 
@@ -143,7 +143,7 @@ impl AgentEffects for AgentHandler {
         req: SpawnGeminiTeammateRequest,
     ) -> EffectResult<SpawnGeminiTeammateResponse> {
         let options = SpawnGeminiTeammateOptions {
-            name: req.name.clone(),
+            name: AgentName::from(req.name.as_str()),
             prompt: req.prompt.clone(),
             agent_type: convert_agent_type(req.agent_type()),
             subrepo: if req.subrepo.is_empty() {
@@ -154,7 +154,7 @@ impl AgentEffects for AgentHandler {
             base_branch: if req.base_branch.is_empty() {
                 None
             } else {
-                Some(req.base_branch.clone())
+                Some(BirthBranch::from(req.base_branch.as_str()))
             },
         };
 
@@ -191,11 +191,11 @@ impl AgentEffects for AgentHandler {
         let parent_session_id = if let Some(ref registry) = self.claude_session_registry {
             let agent_name = crate::mcp::agent_identity::get_agent_id();
             let key = if agent_name.as_str().is_empty() {
-                "root".to_string()
+                crate::domain::AgentName::from("root")
             } else {
-                agent_name.to_string()
+                agent_name
             };
-            let claude_uuid = registry.get(&key).await;
+            let claude_uuid = registry.get(key.as_str()).await;
             info!(
                 key = %key,
                 claude_uuid = ?claude_uuid,
@@ -329,15 +329,11 @@ fn spawn_result_to_proto(
     use crate::services::agent_control::Topology;
 
     exomonad_proto::effects::agent::AgentInfo {
-        id: format!("{}-{}", issue, result.agent_type),
+        id: format!("{}-{}", issue, result.agent_type.suffix()),
         issue: issue.to_string(),
-        worktree_path: result.agent_dir.clone(),
+        worktree_path: result.agent_dir.display().to_string(),
         branch_name: String::new(),
-        agent_type: if result.agent_type == "claude" {
-            AgentType::Claude as i32
-        } else {
-            AgentType::Gemini as i32
-        },
+        agent_type: service_agent_type_to_proto(result.agent_type),
         role: 0,
         status: AgentStatus::Running as i32,
         zellij_tab: result.tab_name.clone(),
@@ -359,22 +355,10 @@ fn teammate_result_to_proto(
         issue: String::new(),
         worktree_path: String::new(),
         branch_name: String::new(),
-        agent_type: if result.agent_type == "claude" {
-            AgentType::Claude as i32
-        } else {
-            AgentType::Gemini as i32
-        },
+        agent_type: service_agent_type_to_proto(result.agent_type),
         role: 0,
         status: AgentStatus::Running as i32,
-        zellij_tab: format!(
-            "{} {}",
-            if result.agent_type == "claude" {
-                "\u{1F916}"
-            } else {
-                "\u{1F48E}"
-            },
-            name
-        ),
+        zellij_tab: format!("{} {}", result.agent_type.emoji(), name),
         error: String::new(),
         pr_number: 0,
         pr_url: String::new(),
@@ -413,7 +397,7 @@ fn subtree_result_to_proto(
     exomonad_proto::effects::agent::AgentInfo {
         id: result.tab_name.clone(),
         issue: String::new(),
-        worktree_path: result.agent_dir.clone(),
+        worktree_path: result.agent_dir.display().to_string(),
         branch_name: branch_name.to_string(),
         agent_type: AgentType::Claude as i32,
         role: 0,
@@ -432,31 +416,26 @@ fn leaf_subtree_result_to_proto(
 ) -> exomonad_proto::effects::agent::AgentInfo {
     use crate::services::agent_control::Topology;
 
-    let agent_type = if result.agent_type == "claude" {
-        AgentType::Claude
-    } else {
-        AgentType::Gemini
-    };
-
-    let emoji = if agent_type == AgentType::Claude {
-        "\u{1F916}"
-    } else {
-        "\u{1F48E}"
-    };
-
     exomonad_proto::effects::agent::AgentInfo {
         id: result.tab_name.clone(),
         issue: String::new(),
-        worktree_path: result.agent_dir.clone(),
+        worktree_path: result.agent_dir.display().to_string(),
         branch_name: branch_name.to_string(),
-        agent_type: agent_type as i32,
+        agent_type: service_agent_type_to_proto(result.agent_type),
         role: 0,
         status: AgentStatus::Running as i32,
-        zellij_tab: format!("{} {}", emoji, branch_name),
+        zellij_tab: format!("{} {}", result.agent_type.emoji(), branch_name),
         error: String::new(),
         pr_number: 0,
         pr_url: String::new(),
         topology: Topology::WorktreePerAgent.to_proto(),
+    }
+}
+
+fn service_agent_type_to_proto(at: ServiceAgentType) -> i32 {
+    match at {
+        ServiceAgentType::Claude => AgentType::Claude as i32,
+        ServiceAgentType::Gemini => AgentType::Gemini as i32,
     }
 }
 
@@ -475,7 +454,11 @@ fn service_info_to_proto(info: &AgentInfo) -> exomonad_proto::effects::agent::Ag
     exomonad_proto::effects::agent::AgentInfo {
         id: info.issue_id.clone(),
         issue: info.issue_id.clone(),
-        worktree_path: info.agent_dir.clone().unwrap_or_default(),
+        worktree_path: info
+            .agent_dir
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default(),
         branch_name: String::new(),
         agent_type,
         role: 0,

@@ -7,19 +7,20 @@ use crate::protocol::{GitHubIssueRef, IssueState, ServiceRequest, ServiceRespons
 use async_trait::async_trait;
 use octocrab::{Octocrab, OctocrabBuilder};
 use reqwest::Url;
-use tracing::{error, info};
+use tracing::error;
 
 /// Extract HTTP status code and message from octocrab errors.
 fn octocrab_error_to_service_error(context: &str, e: octocrab::Error) -> ServiceError {
     match &e {
         octocrab::Error::GitHub { source, .. } => {
+            let detail = source.to_string();
             error!(
                 "[GitHub] {} failed: HTTP {} - {}",
-                context, source.status_code, source.message
+                context, source.status_code, detail
             );
             ServiceError::Api {
                 code: source.status_code.as_u16() as i32,
-                message: format!("{}: {}", source.status_code, source.message),
+                message: format!("{}: {}", source.status_code, detail),
             }
         }
         _ => {
@@ -673,57 +674,6 @@ impl ExternalService for GitHubService {
                     author,
                     url,
                     comments,
-                })
-            }
-            ServiceRequest::GitHubCreatePR {
-                owner,
-                repo,
-                title,
-                body,
-                head,
-                base,
-            } => {
-                info!(
-                    "[GitHub] CreatePR: {}/{} head={} base={} title={:?}",
-                    owner, repo, head, base, title
-                );
-                let pr = self
-                    .client
-                    .pulls(owner, repo)
-                    .create(title, head, base)
-                    .body(body)
-                    .send()
-                    .await
-                    .map_err(|e| octocrab_error_to_service_error("CreatePR", e))?;
-                info!(
-                    "[GitHub] CreatePR succeeded: PR #{} {}",
-                    pr.number,
-                    pr.html_url
-                        .as_ref()
-                        .map(|u| u.as_str())
-                        .unwrap_or("(no url)")
-                );
-
-                Ok(ServiceResponse::GitHubPR {
-                    number: pr.number as u32,
-                    title: pr.title.unwrap_or_default(),
-                    body: pr.body.unwrap_or_default(),
-                    author: pr.user.map(|u| u.login).unwrap_or_else(|| "unknown".into()),
-                    url: pr
-                        .html_url
-                        .ok_or_else(|| ServiceError::Api {
-                            code: 500,
-                            message: "PR has no URL".to_string(),
-                        })?
-                        .to_string(),
-                    state: pr.state.map(state_to_item_state).unwrap_or(ItemState::Open),
-                    head_ref_name: pr.head.ref_field,
-                    base_ref_name: pr.base.ref_field,
-                    created_at: pr.created_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
-                    merged_at: None,
-                    labels: vec![],
-                    comments: vec![],
-                    reviews: vec![],
                 })
             }
             ServiceRequest::GitHubGetPR {

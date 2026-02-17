@@ -1,4 +1,4 @@
-use crate::domain::MessageFilter;
+use crate::domain::{AgentName, MessageFilter};
 use chrono::Utc;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -17,7 +17,7 @@ pub struct Task {
     pub subject: String,
     pub description: String,
     pub status: TaskStatus,
-    pub owner: String,
+    pub owner: AgentName,
     pub blocked_by: Vec<String>,
 }
 
@@ -30,7 +30,7 @@ pub enum TaskStatus {
 
 #[derive(Debug, Clone)]
 pub struct Message {
-    pub from: String,
+    pub from: AgentName,
     pub text: String,
     pub summary: String,
     pub timestamp: String,
@@ -50,7 +50,7 @@ impl CoordinationService {
         &self,
         subject: String,
         description: String,
-        owner: String,
+        owner: AgentName,
         blocked_by: Vec<String>,
     ) -> String {
         let id_num = self.next_task_id.fetch_add(1, Ordering::SeqCst);
@@ -74,7 +74,7 @@ impl CoordinationService {
         &self,
         task_id: String,
         status: Option<TaskStatus>,
-        owner: Option<String>,
+        owner: Option<AgentName>,
         description: Option<String>,
         subject: Option<String>,
     ) -> bool {
@@ -112,7 +112,7 @@ impl CoordinationService {
         tasks.get(task_id).cloned()
     }
 
-    pub async fn send_message(&self, from: String, text: String, summary: String) {
+    pub async fn send_message(&self, from: AgentName, text: String, summary: String) {
         let timestamp = Utc::now().to_rfc3339();
         let message = Message {
             from,
@@ -162,7 +162,7 @@ mod tests {
             .create_task(
                 "Test Subject".to_string(),
                 "Test Description".to_string(),
-                "owner1".to_string(),
+                AgentName::from("owner1"),
                 vec!["blocker1".to_string()],
             )
             .await;
@@ -172,7 +172,7 @@ mod tests {
         let task = service.get_task(&task_id).await.unwrap();
         assert_eq!(task.subject, "Test Subject");
         assert_eq!(task.description, "Test Description");
-        assert_eq!(task.owner, "owner1");
+        assert_eq!(task.owner, AgentName::from("owner1"));
         assert_eq!(task.blocked_by, vec!["blocker1".to_string()]);
         assert_eq!(task.status, TaskStatus::Pending);
     }
@@ -184,7 +184,7 @@ mod tests {
             .create_task(
                 "Test".to_string(),
                 "Desc".to_string(),
-                "owner".to_string(),
+                AgentName::from("owner"),
                 vec![],
             )
             .await;
@@ -209,10 +209,20 @@ mod tests {
     async fn test_list_tasks_with_filter() {
         let service = CoordinationService::new();
         service
-            .create_task("T1".to_string(), "D1".to_string(), "O1".to_string(), vec![])
+            .create_task(
+                "T1".to_string(),
+                "D1".to_string(),
+                AgentName::from("O1"),
+                vec![],
+            )
             .await;
         let t2_id = service
-            .create_task("T2".to_string(), "D2".to_string(), "O2".to_string(), vec![])
+            .create_task(
+                "T2".to_string(),
+                "D2".to_string(),
+                AgentName::from("O2"),
+                vec![],
+            )
             .await;
         service
             .update_task(t2_id, Some(TaskStatus::Completed), None, None, None)
@@ -235,19 +245,23 @@ mod tests {
         let service = CoordinationService::new();
         service
             .send_message(
-                "alice".to_string(),
+                AgentName::from("alice"),
                 "hello".to_string(),
                 "greeting".to_string(),
             )
             .await;
         service
-            .send_message("bob".to_string(), "hi".to_string(), "response".to_string())
+            .send_message(
+                AgentName::from("bob"),
+                "hi".to_string(),
+                "response".to_string(),
+            )
             .await;
 
         let messages = service.get_messages(MessageFilter::All).await;
         assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0].from, "alice");
-        assert_eq!(messages[1].from, "bob");
+        assert_eq!(messages[0].from, AgentName::from("alice"));
+        assert_eq!(messages[1].from, AgentName::from("bob"));
     }
 
     #[tokio::test]
@@ -255,7 +269,7 @@ mod tests {
         let service = CoordinationService::new();
         service
             .send_message(
-                "alice".to_string(),
+                AgentName::from("alice"),
                 "hello".to_string(),
                 "greeting".to_string(),
             )
