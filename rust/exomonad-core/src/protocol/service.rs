@@ -88,14 +88,6 @@ pub enum ServiceRequest {
         state: Option<IssueState>,
         labels: Vec<String>,
     },
-    GitHubCreatePR {
-        owner: GithubOwner,
-        repo: GithubRepo,
-        title: String,
-        body: String,
-        head: String,
-        base: String,
-    },
     GitHubGetPR {
         owner: GithubOwner,
         repo: GithubRepo,
@@ -583,34 +575,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_github_create_pr_request_roundtrip() {
-        let req = ServiceRequest::GitHubCreatePR {
-            owner: "octocat".into(),
-            repo: "hello-world".into(),
-            title: "Add feature".into(),
-            body: "This adds X".into(),
-            head: "feature".into(),
-            base: "main".into(),
-        };
-        let json = serde_json::to_string(&req).unwrap();
-        let parsed: ServiceRequest = serde_json::from_str(&json).unwrap();
-        match parsed {
-            ServiceRequest::GitHubCreatePR {
-                owner,
-                title,
-                head,
-                base,
-                ..
-            } => {
-                assert_eq!(owner.as_str(), "octocat");
-                assert_eq!(title, "Add feature");
-                assert_eq!(head, "feature");
-                assert_eq!(base, "main");
-            }
-            _ => panic!("Wrong variant"),
-        }
-    }
 
     #[test]
     fn test_github_list_issues_request_roundtrip() {

@@ -62,7 +62,7 @@ instance Aeson.ToJSON FilePROutput where
 instance MCPTool FilePR where
   type ToolArgs FilePR = FilePRArgs
   toolName = "file_pr"
-  toolDescription = "Create or update a pull request for the current branch. Idempotent — safe to call multiple times (updates existing PR). Push commits before calling. Base branch auto-detected from dot-separated naming (e.g. main.foo.bar targets main.foo)."
+  toolDescription = "Create or update a pull request for the current branch. Idempotent — safe to call multiple times (updates existing PR). Pushes the branch automatically. Base branch auto-detected from dot-separated naming (e.g. main.foo.bar targets main.foo)."
   toolSchema =
     object
       [ "type" .= ("object" :: Text),
