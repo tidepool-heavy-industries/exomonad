@@ -61,7 +61,12 @@ impl CoordinationEffects for CoordinationHandler {
     async fn create_task(&self, req: CreateTaskRequest) -> EffectResult<CreateTaskResponse> {
         let task_id = self
             .service
-            .create_task(req.subject, req.description, AgentName::from(req.owner.as_str()), req.blocked_by)
+            .create_task(
+                req.subject,
+                req.description,
+                AgentName::from(req.owner.as_str()),
+                req.blocked_by,
+            )
             .await;
 
         Ok(CreateTaskResponse { task_id })

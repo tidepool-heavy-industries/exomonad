@@ -454,7 +454,11 @@ fn service_info_to_proto(info: &AgentInfo) -> exomonad_proto::effects::agent::Ag
     exomonad_proto::effects::agent::AgentInfo {
         id: info.issue_id.clone(),
         issue: info.issue_id.clone(),
-        worktree_path: info.agent_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
+        worktree_path: info
+            .agent_dir
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default(),
         branch_name: String::new(),
         agent_type,
         role: 0,

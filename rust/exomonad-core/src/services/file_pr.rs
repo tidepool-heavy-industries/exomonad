@@ -95,11 +95,17 @@ fn push_branch() -> Result<(), FilePrError> {
 
 fn find_existing_pr(head_branch: &str) -> Result<Option<GhPr>, FilePrError> {
     let json = cmd!(
-        "gh", "pr", "list",
-        "--head", head_branch,
-        "--state", "open",
-        "--json", "number,url,headRefName,baseRefName",
-        "--limit", "1"
+        "gh",
+        "pr",
+        "list",
+        "--head",
+        head_branch,
+        "--state",
+        "open",
+        "--json",
+        "number,url,headRefName,baseRefName",
+        "--limit",
+        "1"
     )
     .read()
     .map_err(|e| FilePrError::ListFailed(e.to_string()))?;
@@ -111,10 +117,14 @@ fn find_existing_pr(head_branch: &str) -> Result<Option<GhPr>, FilePrError> {
 
 fn update_pr(number: u64, title: &str, body: &str) -> Result<(), FilePrError> {
     cmd!(
-        "gh", "pr", "edit",
+        "gh",
+        "pr",
+        "edit",
         number.to_string(),
-        "--title", title,
-        "--body", body
+        "--title",
+        title,
+        "--body",
+        body
     )
     .read()
     .map_err(|e| FilePrError::UpdateFailed(e.to_string()))?;
@@ -123,20 +133,19 @@ fn update_pr(number: u64, title: &str, body: &str) -> Result<(), FilePrError> {
 
 fn create_pr(title: &str, body: &str, base: &str, head: &str) -> Result<GhPr, FilePrError> {
     // gh pr create outputs the PR URL to stdout on success (no --json support)
-    let url = cmd!(
-        "gh", "pr", "create",
-        "--title", title,
-        "--body", body,
-        "--base", base
-    )
-    .read()
-    .map_err(|e| FilePrError::CreateFailed(e.to_string()))?;
+    let url = cmd!("gh", "pr", "create", "--title", title, "--body", body, "--base", base)
+        .read()
+        .map_err(|e| FilePrError::CreateFailed(e.to_string()))?;
     info!("[FilePR] Created PR: {}", url.trim());
 
     // Fetch structured PR data via `gh pr view` using the branch name (stable, no URL parsing)
     let view_json = cmd!(
-        "gh", "pr", "view", head,
-        "--json", "number,url,headRefName,baseRefName"
+        "gh",
+        "pr",
+        "view",
+        head,
+        "--json",
+        "number,url,headRefName,baseRefName"
     )
     .read()
     .map_err(|e| FilePrError::CreateFailed(format!("gh pr view after create: {e}")))?;

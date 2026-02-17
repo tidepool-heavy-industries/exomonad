@@ -575,7 +575,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn test_github_list_issues_request_roundtrip() {
         let req = ServiceRequest::GitHubListIssues {

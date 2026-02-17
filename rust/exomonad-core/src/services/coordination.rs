@@ -209,10 +209,20 @@ mod tests {
     async fn test_list_tasks_with_filter() {
         let service = CoordinationService::new();
         service
-            .create_task("T1".to_string(), "D1".to_string(), AgentName::from("O1"), vec![])
+            .create_task(
+                "T1".to_string(),
+                "D1".to_string(),
+                AgentName::from("O1"),
+                vec![],
+            )
             .await;
         let t2_id = service
-            .create_task("T2".to_string(), "D2".to_string(), AgentName::from("O2"), vec![])
+            .create_task(
+                "T2".to_string(),
+                "D2".to_string(),
+                AgentName::from("O2"),
+                vec![],
+            )
             .await;
         service
             .update_task(t2_id, Some(TaskStatus::Completed), None, None, None)
@@ -241,7 +251,11 @@ mod tests {
             )
             .await;
         service
-            .send_message(AgentName::from("bob"), "hi".to_string(), "response".to_string())
+            .send_message(
+                AgentName::from("bob"),
+                "hi".to_string(),
+                "response".to_string(),
+            )
             .await;
 
         let messages = service.get_messages(MessageFilter::All).await;
