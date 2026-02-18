@@ -47,6 +47,7 @@ impl GitHubEffects for GitHubHandler {
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<ListIssuesResponse> {
         let repo = make_repo(&req.owner, &req.repo);
+        tracing::info!(owner = %req.owner, repo = %req.repo, "[GitHub] list_issues starting");
 
         let state = issue_state_to_filter(req.state());
         let filter = if state.is_none() && req.labels.is_empty() {
@@ -79,6 +80,7 @@ impl GitHubEffects for GitHubHandler {
             .map(convert_issue)
             .collect();
 
+        tracing::info!(count = issues.len(), "[GitHub] list_issues complete");
         Ok(ListIssuesResponse { issues })
     }
 
@@ -87,6 +89,7 @@ impl GitHubEffects for GitHubHandler {
         req: GetIssueRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetIssueResponse> {
+        tracing::info!(owner = %req.owner, repo = %req.repo, number = req.number, "[GitHub] get_issue starting");
         let repo = make_repo(&req.owner, &req.repo);
 
         let raw_issue = self
@@ -98,6 +101,7 @@ impl GitHubEffects for GitHubHandler {
         let issue = convert_issue(raw_issue);
         let comments: Vec<IssueComment> = Vec::new();
 
+        tracing::info!(number = req.number, "[GitHub] get_issue complete");
         Ok(GetIssueResponse {
             issue: Some(issue),
             comments,
@@ -109,6 +113,7 @@ impl GitHubEffects for GitHubHandler {
         req: ListPullRequestsRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<ListPullRequestsResponse> {
+        tracing::info!(owner = %req.owner, repo = %req.repo, "[GitHub] list_pull_requests starting");
         let repo = make_repo(&req.owner, &req.repo);
 
         let state = issue_state_to_filter(req.state());
@@ -127,6 +132,7 @@ impl GitHubEffects for GitHubHandler {
 
         let pull_requests: Vec<PullRequest> = raw_prs.into_iter().map(convert_pr).collect();
 
+        tracing::info!(count = pull_requests.len(), "[GitHub] list_pull_requests complete");
         Ok(ListPullRequestsResponse { pull_requests })
     }
 
@@ -135,27 +141,19 @@ impl GitHubEffects for GitHubHandler {
         req: GetPullRequestRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetPullRequestResponse> {
+        tracing::info!(owner = %req.owner, repo = %req.repo, number = req.number, "[GitHub] get_pull_request starting");
         let repo = make_repo(&req.owner, &req.repo);
 
-        let filter = Some(PRFilter {
-            state: Some(crate::domain::FilterState::All),
-            limit: Some(100),
-        });
-
-        let raw_prs = self
+        let raw_pr = self
             .service
-            .list_prs(&repo, filter.as_ref())
+            .get_pr(&repo, req.number as u64)
             .await
             .map_err(|e| EffectError::network_error(e.to_string()))?;
-
-        let raw_pr = raw_prs
-            .into_iter()
-            .find(|pr| pr.number == req.number as u64)
-            .ok_or_else(|| EffectError::not_found(format!("PR #{}", req.number)))?;
 
         let pull_request = convert_pr(raw_pr);
         let reviews: Vec<Review> = Vec::new();
 
+        tracing::info!(number = req.number, "[GitHub] get_pull_request complete");
         Ok(GetPullRequestResponse {
             pull_request: Some(pull_request),
             reviews,
@@ -167,6 +165,7 @@ impl GitHubEffects for GitHubHandler {
         req: GetPullRequestForBranchRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetPullRequestForBranchResponse> {
+        tracing::info!(owner = %req.owner, repo = %req.repo, branch = %req.branch, "[GitHub] get_pull_request_for_branch starting");
         let repo = make_repo(&req.owner, &req.repo);
 
         let result = self
@@ -176,6 +175,7 @@ impl GitHubEffects for GitHubHandler {
             .map_err(|e| EffectError::network_error(e.to_string()))?;
 
         let found = result.is_some();
+        tracing::info!(found, branch = %req.branch, "[GitHub] get_pull_request_for_branch complete");
         Ok(GetPullRequestForBranchResponse {
             pull_request: result.map(convert_pr),
             found,
@@ -187,6 +187,7 @@ impl GitHubEffects for GitHubHandler {
         req: CreatePullRequestRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<CreatePullRequestResponse> {
+        tracing::info!(owner = %req.owner, repo = %req.repo, head = %req.head, "[GitHub] create_pull_request starting");
         let repo = make_repo(&req.owner, &req.repo);
 
         let spec = CreatePRSpec {
@@ -209,6 +210,7 @@ impl GitHubEffects for GitHubHandler {
         let url = raw_pr.url.clone();
         let pull_request = convert_pr(raw_pr);
 
+        tracing::info!(url = %url, "[GitHub] create_pull_request complete");
         Ok(CreatePullRequestResponse {
             pull_request: Some(pull_request),
             url,
@@ -249,12 +251,20 @@ fn issue_state_to_filter(state: IssueState) -> Option<crate::domain::FilterState
     }
 }
 
+fn item_state_to_proto(state: crate::domain::ItemState) -> i32 {
+    match state {
+        crate::domain::ItemState::Open => IssueState::Open as i32,
+        crate::domain::ItemState::Closed => IssueState::Closed as i32,
+        crate::domain::ItemState::Unknown => IssueState::Unspecified as i32,
+    }
+}
+
 fn convert_issue(i: crate::services::github::Issue) -> Issue {
     Issue {
         number: i.number as i32,
         title: i.title,
         body: i.body,
-        state: IssueState::Open as i32, // Service doesn't parse state enum
+        state: item_state_to_proto(i.state),
         author: Some(User {
             login: i.author,
             id: 0,
@@ -280,7 +290,7 @@ fn convert_pr(pr: crate::services::github::PullRequest) -> PullRequest {
         number: pr.number as i32,
         title: pr.title,
         body: pr.body,
-        state: IssueState::Open as i32,
+        state: item_state_to_proto(pr.state),
         author: Some(User {
             login: pr.author,
             id: 0,

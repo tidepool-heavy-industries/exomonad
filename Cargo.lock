@@ -1006,7 +1006,6 @@ dependencies = [
  "exomonad-core",
  "exomonad-proto",
  "futures-util",
- "nix",
  "predicates",
  "prost",
  "reqwest",

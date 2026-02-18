@@ -33,10 +33,13 @@ fn to_proto_error(err: &EffectError) -> proto_error::EffectError {
         EffectError::Timeout { message } => Kind::Timeout(proto_error::Timeout {
             message: message.clone(),
         }),
-        EffectError::Custom { code, message, .. } => Kind::Custom(proto_error::Custom {
+        EffectError::Custom { code, message, data } => Kind::Custom(proto_error::Custom {
             code: code.clone(),
             message: message.clone(),
-            data: Vec::new(),
+            data: data
+                .as_ref()
+                .and_then(|v| serde_json::to_vec(v).ok())
+                .unwrap_or_default(),
         }),
     };
 
@@ -103,7 +106,7 @@ fn yield_effect_impl(
     let envelope = EffectEnvelope::decode(input_bytes.as_slice())
         .map_err(|e| Error::msg(format!("Failed to decode EffectEnvelope: {}", e)))?;
 
-    tracing::info!(
+    tracing::debug!(
         effect_type = %envelope.effect_type,
         payload_bytes = envelope.payload.len(),
         "yield_effect: dispatching"
@@ -121,7 +124,7 @@ fn yield_effect_impl(
     ))?;
 
     match &result {
-        Ok(payload) => tracing::info!(
+        Ok(payload) => tracing::debug!(
             effect_type = %envelope.effect_type,
             response_bytes = payload.len(),
             "yield_effect: dispatch succeeded"

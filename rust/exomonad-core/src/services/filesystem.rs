@@ -75,19 +75,50 @@ impl FileSystemService {
     }
 
     /// Resolve a path (absolute or relative to project_dir).
-    fn resolve_path(&self, path: &str) -> PathBuf {
+    ///
+    /// Returns an error if the resolved path escapes the project root (path traversal).
+    fn resolve_path(&self, path: &str) -> Result<PathBuf> {
         let p = PathBuf::from(path);
-        if p.is_absolute() {
+        let resolved = if p.is_absolute() {
             p
         } else {
             self.project_dir.join(p)
+        };
+
+        // Canonicalize both paths to resolve symlinks and .. components.
+        // For new files, canonicalize the parent directory instead.
+        let canonical = if resolved.exists() {
+            resolved.canonicalize()
+        } else if let Some(parent) = resolved.parent() {
+            // Parent must exist for us to validate the path
+            parent
+                .canonicalize()
+                .map(|p| p.join(resolved.file_name().unwrap_or_default()))
+        } else {
+            Ok(resolved.clone())
         }
+        .unwrap_or(resolved.clone());
+
+        let canonical_root = self
+            .project_dir
+            .canonicalize()
+            .unwrap_or_else(|_| self.project_dir.clone());
+
+        if !canonical.starts_with(&canonical_root) {
+            anyhow::bail!(
+                "Path traversal denied: '{}' escapes project root '{}'",
+                path,
+                canonical_root.display()
+            );
+        }
+
+        Ok(resolved)
     }
 
     /// Read a file.
     #[tracing::instrument(skip(self))]
     pub async fn read_file(&self, input: &ReadFileInput) -> Result<ReadFileOutput> {
-        let path = self.resolve_path(&input.path);
+        let path = self.resolve_path(&input.path)?;
 
         let content = fs::read_to_string(&path)
             .await
@@ -111,7 +142,7 @@ impl FileSystemService {
     /// Write a file.
     #[tracing::instrument(skip(self))]
     pub async fn write_file(&self, input: &WriteFileInput) -> Result<WriteFileOutput> {
-        let path = self.resolve_path(&input.path);
+        let path = self.resolve_path(&input.path)?;
 
         if input.create_parents {
             if let Some(parent) = path.parent() {
@@ -186,6 +217,36 @@ mod tests {
         let read_result = service.read_file(&read_input).await.unwrap();
         assert_eq!(read_result.content, "Hello");
         assert!(read_result.truncated);
+    }
+
+    #[tokio::test]
+    async fn test_path_traversal_rejected() {
+        let dir = tempdir().unwrap();
+        let service = FileSystemService::new(dir.path().to_path_buf());
+
+        let input = ReadFileInput {
+            path: "../../../etc/passwd".to_string(),
+            max_bytes: 0,
+        };
+        let result = service.read_file(&input).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Path traversal denied"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn test_path_traversal_absolute_rejected() {
+        let dir = tempdir().unwrap();
+        let service = FileSystemService::new(dir.path().to_path_buf());
+
+        let input = ReadFileInput {
+            path: "/etc/passwd".to_string(),
+            max_bytes: 0,
+        };
+        let result = service.read_file(&input).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Path traversal denied"), "got: {err}");
     }
 
     #[tokio::test]

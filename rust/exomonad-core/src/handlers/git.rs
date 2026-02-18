@@ -7,6 +7,7 @@ use crate::services::git::GitService;
 use async_trait::async_trait;
 use exomonad_proto::effects::git::*;
 use std::sync::Arc;
+use tracing::info;
 
 /// Git effect handler.
 ///
@@ -51,6 +52,7 @@ impl GitEffects for GitHandler {
         } else {
             req.working_dir
         };
+        info!(working_dir = %working_dir, "[Git] get_branch starting");
 
         let branch = self
             .service
@@ -58,6 +60,7 @@ impl GitEffects for GitHandler {
             .await
             .map_err(|e| EffectError::custom("git_error", e.to_string()))?;
 
+        info!(branch = %branch, "[Git] get_branch complete");
         Ok(GetBranchResponse {
             branch,
             detached: false,
@@ -74,6 +77,7 @@ impl GitEffects for GitHandler {
         } else {
             req.working_dir
         };
+        info!(working_dir = %working_dir, "[Git] get_status starting");
 
         let dirty_files = self
             .service
@@ -101,6 +105,7 @@ impl GitEffects for GitHandler {
             }
         }
 
+        info!(staged = staged.len(), unstaged = unstaged.len(), untracked = untracked.len(), "[Git] get_status complete");
         Ok(GetStatusResponse {
             dirty_files: unstaged,
             staged_files: staged,
@@ -120,6 +125,7 @@ impl GitEffects for GitHandler {
         };
 
         let limit = if req.limit <= 0 { 10 } else { req.limit as u32 };
+        info!(working_dir = %working_dir, limit, "[Git] get_commits starting");
 
         let raw_commits = self
             .service
@@ -139,6 +145,7 @@ impl GitEffects for GitHandler {
             })
             .collect();
 
+        info!(count = commits.len(), "[Git] get_commits complete");
         Ok(GetCommitsResponse { commits })
     }
 
@@ -152,6 +159,7 @@ impl GitEffects for GitHandler {
         } else {
             req.working_dir
         };
+        info!(working_dir = %working_dir, "[Git] has_unpushed_commits starting");
 
         let count = self
             .service
@@ -159,6 +167,7 @@ impl GitEffects for GitHandler {
             .await
             .map_err(|e| EffectError::custom("git_error", e.to_string()))?;
 
+        info!(count, "[Git] has_unpushed_commits complete");
         Ok(HasUnpushedCommitsResponse {
             has_unpushed: count > 0,
             count: count as i32,
@@ -175,6 +184,7 @@ impl GitEffects for GitHandler {
         } else {
             req.working_dir
         };
+        info!(working_dir = %working_dir, "[Git] get_remote_url starting");
 
         let url = self
             .service
@@ -182,6 +192,7 @@ impl GitEffects for GitHandler {
             .await
             .map_err(|e| EffectError::custom("git_error", e.to_string()))?;
 
+        info!(url = %url, "[Git] get_remote_url complete");
         Ok(GetRemoteUrlResponse { url })
     }
 
@@ -195,6 +206,7 @@ impl GitEffects for GitHandler {
         } else {
             req.working_dir
         };
+        info!(working_dir = %working_dir, "[Git] get_repo_info starting");
 
         let info = self
             .service
@@ -202,6 +214,7 @@ impl GitEffects for GitHandler {
             .await
             .map_err(|e| EffectError::custom("git_error", e.to_string()))?;
 
+        info!(branch = %info.branch, "[Git] get_repo_info complete");
         Ok(GetRepoInfoResponse {
             branch: info.branch,
             owner: info.owner.map(Into::into).unwrap_or_default(),
@@ -219,6 +232,7 @@ impl GitEffects for GitHandler {
         } else {
             req.working_dir
         };
+        info!(working_dir = %working_dir, "[Git] get_worktree starting");
 
         let info = self
             .service
@@ -226,6 +240,7 @@ impl GitEffects for GitHandler {
             .await
             .map_err(|e| EffectError::custom("git_error", e.to_string()))?;
 
+        info!(path = %info.path, branch = %info.branch, "[Git] get_worktree complete");
         Ok(GetWorktreeResponse {
             path: info.path,
             branch: info.branch,

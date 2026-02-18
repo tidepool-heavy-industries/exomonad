@@ -34,9 +34,6 @@ urlencoding = "2"
 prost = { workspace = true }
 exomonad-proto = { path = "../exomonad-proto", version = "0.1.0", features = ["effects"] }
 
-[target.'cfg(unix)'.dependencies]
-nix = { workspace = true, features = ["signal", "fs"] }
-
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 futures-util = { workspace = true }
 

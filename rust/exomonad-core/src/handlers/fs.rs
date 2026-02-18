@@ -47,6 +47,7 @@ impl FilesystemEffects for FsHandler {
         req: ReadFileRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<ReadFileResponse> {
+        tracing::info!(path = %req.path, "[Fs] read_file starting");
         let max_bytes = if req.max_bytes <= 0 {
             1_048_576 // 1MB default
         } else {
@@ -64,6 +65,7 @@ impl FilesystemEffects for FsHandler {
             .await
             .map_err(|e| EffectError::custom("fs_error", e.to_string()))?;
 
+        tracing::info!(bytes_read = result.bytes_read, truncated = result.truncated, "[Fs] read_file complete");
         Ok(ReadFileResponse {
             content: result.content,
             bytes_read: result.bytes_read as i64,
@@ -77,6 +79,7 @@ impl FilesystemEffects for FsHandler {
         req: WriteFileRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<WriteFileResponse> {
+        tracing::info!(path = %req.path, content_bytes = req.content.len(), "[Fs] write_file starting");
         let input = crate::services::filesystem::WriteFileInput {
             path: req.path.clone(),
             content: req.content,
@@ -89,6 +92,7 @@ impl FilesystemEffects for FsHandler {
             .await
             .map_err(|e| EffectError::custom("fs_error", e.to_string()))?;
 
+        tracing::info!(bytes_written = result.bytes_written, "[Fs] write_file complete");
         Ok(WriteFileResponse {
             bytes_written: result.bytes_written as i64,
             path: result.path,
@@ -100,11 +104,13 @@ impl FilesystemEffects for FsHandler {
         req: FileExistsRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<FileExistsResponse> {
+        tracing::info!(path = %req.path, "[Fs] file_exists starting");
         let path = std::path::Path::new(&req.path);
         let exists = path.exists();
         let is_file = path.is_file();
         let is_directory = path.is_dir();
 
+        tracing::info!(exists, is_file, is_directory, "[Fs] file_exists complete");
         Ok(FileExistsResponse {
             exists,
             is_file,
@@ -117,6 +123,7 @@ impl FilesystemEffects for FsHandler {
         req: ListDirectoryRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<ListDirectoryResponse> {
+        tracing::info!(path = %req.path, "[Fs] list_directory starting");
         let path = std::path::Path::new(&req.path);
         if !path.is_dir() {
             return Err(EffectError::not_found(format!(
@@ -167,6 +174,7 @@ impl FilesystemEffects for FsHandler {
         }
 
         let count = entries.len() as i32;
+        tracing::info!(count, "[Fs] list_directory complete");
         Ok(ListDirectoryResponse { entries, count })
     }
 
@@ -175,6 +183,7 @@ impl FilesystemEffects for FsHandler {
         req: DeleteFileRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<DeleteFileResponse> {
+        tracing::info!(path = %req.path, recursive = req.recursive, "[Fs] delete_file starting");
         let path = std::path::Path::new(&req.path);
         if !path.exists() {
             return Ok(DeleteFileResponse { deleted: false });
@@ -196,6 +205,7 @@ impl FilesystemEffects for FsHandler {
                 .map_err(|e| EffectError::custom("fs_error", e.to_string()))?;
         }
 
+        tracing::info!(path = %req.path, "[Fs] delete_file complete");
         Ok(DeleteFileResponse { deleted: true })
     }
 }

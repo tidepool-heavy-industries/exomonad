@@ -461,7 +461,7 @@ impl GitHubService {
                 builder = builder.state(s);
             }
             if let Some(limit) = f.limit {
-                builder = builder.per_page(limit as u8);
+                builder = builder.per_page(limit.min(100) as u8);
             }
         }
 
@@ -480,6 +480,28 @@ impl GitHubService {
         );
 
         Ok(page.into_iter().map(PullRequest::from).collect())
+    }
+
+    /// Get a single pull request by number.
+    #[tracing::instrument(skip(self))]
+    pub async fn get_pr(&self, repo: &Repo, number: u64) -> Result<PullRequest> {
+        let pulls_handler = self.client.pulls(repo.owner.as_str(), repo.name.as_str());
+        let pr = timeout(API_TIMEOUT, pulls_handler.get(number))
+            .await
+            .map_err(|_| {
+                anyhow!(
+                    "GitHub API get_pr timed out after {}s",
+                    API_TIMEOUT.as_secs()
+                )
+            })??;
+
+        info!(
+            repo = format!("{}/{}", repo.owner, repo.name),
+            number,
+            "GitHub API: Get PR successful"
+        );
+
+        Ok(PullRequest::from(pr))
     }
 
     #[tracing::instrument(skip(self))]

@@ -135,7 +135,12 @@ async fn get_or_create_plugin(
             .await
             .with_context(|| format!("Failed to create plugin for agent {}", agent_name))?,
     );
-    plugins.write().await.insert(agent_name, p.clone());
+    let mut cache = plugins.write().await;
+    // Re-check after acquiring write lock to avoid TOCTOU race
+    if let Some(existing) = cache.get(&agent_name) {
+        return Ok(existing.clone());
+    }
+    cache.insert(agent_name, p.clone());
     Ok(p)
 }
 
@@ -902,6 +907,7 @@ async fn main() -> Result<()> {
                 exomonad_core::services::agent_control::AgentControlService::new(
                     project_dir_for_services.clone(),
                     github.clone(),
+                    jj.clone(),
                 );
             let worktree_base = config.worktree_base;
             agent_control = agent_control
@@ -1061,33 +1067,38 @@ async fn main() -> Result<()> {
                     let wb = wb.clone();
                     async move {
                         // Resolve agent identity
-                        let (agent_name, birth_branch) = if name == "root" {
-                            (
-                                exomonad_core::AgentName::from("root"),
-                                exomonad_core::BirthBranch::root(),
-                            )
-                        } else {
-                            (
-                                exomonad_core::AgentName::from(name.as_str()),
-                                resolve_agent_birth_branch(&wb, &name).await,
-                            )
+                        let agent_name = exomonad_core::AgentName::from(name.as_str());
+
+                        // Fast path: check plugin cache before resolving birth branch
+                        let plugin = {
+                            let cache = plugins.read().await;
+                            cache.get(&agent_name).cloned()
                         };
 
-                        // Get or create per-agent plugin with baked-in identity
-                        let plugin = match get_or_create_plugin(
-                            &plugins,
-                            agent_name.clone(),
-                            birth_branch,
-                            &registry,
-                            &wasm_path_for_handler,
-                        )
-                        .await
-                        {
-                            Ok(p) => p,
-                            Err(e) => {
-                                tracing::error!(agent = %agent_name, error = %e, "Failed to create plugin");
-                                return axum::http::StatusCode::INTERNAL_SERVER_ERROR
-                                    .into_response();
+                        let plugin = if let Some(p) = plugin {
+                            p
+                        } else {
+                            // Slow path: resolve birth branch only when creating a new plugin
+                            let birth_branch = if name == "root" {
+                                exomonad_core::BirthBranch::root()
+                            } else {
+                                resolve_agent_birth_branch(&wb, &name).await
+                            };
+                            match get_or_create_plugin(
+                                &plugins,
+                                agent_name.clone(),
+                                birth_branch,
+                                &registry,
+                                &wasm_path_for_handler,
+                            )
+                            .await
+                            {
+                                Ok(p) => p,
+                                Err(e) => {
+                                    tracing::error!(agent = %agent_name, error = %e, "Failed to create plugin");
+                                    return axum::http::StatusCode::INTERNAL_SERVER_ERROR
+                                        .into_response();
+                                }
                             }
                         };
 
