@@ -6,24 +6,22 @@ use crate::effects::{
     dispatch_file_pr_effect, EffectError, EffectHandler, EffectResult, FilePrEffects,
 };
 use crate::services::file_pr::{self, FilePRInput};
+use crate::services::jj_workspace::JjWorkspaceService;
 use async_trait::async_trait;
 use exomonad_proto::effects::file_pr::*;
+use std::sync::Arc;
 
 /// File PR effect handler.
 ///
 /// Handles all effects in the `file_pr.*` namespace by delegating to
 /// the generated `dispatch_file_pr_effect` function.
-pub struct FilePRHandler;
-
-impl FilePRHandler {
-    pub fn new() -> Self {
-        Self
-    }
+pub struct FilePRHandler {
+    jj: Arc<JjWorkspaceService>,
 }
 
-impl Default for FilePRHandler {
-    fn default() -> Self {
-        Self::new()
+impl FilePRHandler {
+    pub fn new(jj: Arc<JjWorkspaceService>) -> Self {
+        Self { jj }
     }
 }
 
@@ -65,7 +63,7 @@ impl FilePrEffects for FilePRHandler {
             working_dir: Some(working_dir.to_string_lossy().to_string()),
         };
 
-        let output = file_pr::file_pr_async(&input)
+        let output = file_pr::file_pr_async(&input, self.jj.clone())
             .await
             .map_err(|e| EffectError::custom("file_pr_error", e.to_string()))?;
 

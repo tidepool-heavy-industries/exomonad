@@ -85,16 +85,6 @@ fn detect_base_branch(head: &str, explicit: Option<&str>) -> String {
 // `gh` CLI operations
 // ============================================================================
 
-fn push_branch(dir: &str) -> Result<(), FilePrError> {
-    let output = cmd!("git", "push", "-u", "origin", "HEAD")
-        .dir(dir)
-        .stderr_to_stdout()
-        .read()
-        .map_err(|e| FilePrError::PushFailed(e.to_string()))?;
-    info!("[FilePR] Push: {}", output);
-    Ok(())
-}
-
 fn find_existing_pr(head_branch: &str, dir: &str) -> Result<Option<GhPr>, FilePrError> {
     let json = cmd!(
         "gh",
@@ -170,26 +160,41 @@ fn create_pr(
 // Main implementation
 // ============================================================================
 
+use std::sync::Arc;
+use crate::services::jj_workspace::JjWorkspaceService;
+
 /// File a PR using `gh` CLI. Pushes the branch, creates or updates the PR.
-pub async fn file_pr_async(input: &FilePRInput) -> Result<FilePROutput> {
+pub async fn file_pr_async(input: &FilePRInput, jj: Arc<JjWorkspaceService>) -> Result<FilePROutput> {
     let dir = input.working_dir.as_deref().unwrap_or(".");
 
     // Get branch from the agent's working directory, not server CWD
-    let head = cmd!("git", "branch", "--show-current")
-        .dir(dir)
-        .read()
-        .context("Failed to get current branch")?;
-    let head = head.trim().to_string();
-    if head.is_empty() {
-        anyhow::bail!("Not on a branch (detached HEAD?) in {}", dir);
-    }
+    let dir_path = std::path::PathBuf::from(dir);
+    let jj_clone = jj.clone();
+    let head = tokio::task::spawn_blocking(move || {
+        jj_clone.get_workspace_bookmark(&dir_path)
+    })
+    .await
+    .context("spawn_blocking failed")?
+    .context("Failed to get workspace bookmark")?
+    .ok_or_else(|| anyhow::anyhow!("No bookmark found for workspace at {}", dir))?;
 
     let base = detect_base_branch(&head, input.base_branch.as_deref());
 
     info!("[FilePR] head={} base={} dir={}", head, base, dir);
 
     // Push first
-    push_branch(dir)?;
+    {
+        let dir_path = std::path::PathBuf::from(dir);
+        let bookmark = head.clone();
+        let jj_clone = jj.clone();
+        tokio::task::spawn_blocking(move || {
+            jj_clone.push_bookmark(&dir_path, &bookmark)
+        })
+        .await
+        .context("spawn_blocking failed")?
+        .map_err(|e| FilePrError::PushFailed(e.to_string()))?;
+        info!("[FilePR] Pushed bookmark: {}", head);
+    }
 
     // Check for existing PR
     if let Some(pr) = find_existing_pr(&head, dir)? {
