@@ -1103,7 +1103,7 @@ async fn main() -> Result<()> {
                             }
                         };
 
-                        server.handle(headers, body).await
+                        server.handle(headers, body, Some(plugin)).await
                     }
                 }
             };

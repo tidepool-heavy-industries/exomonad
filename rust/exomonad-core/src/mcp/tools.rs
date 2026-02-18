@@ -2,13 +2,14 @@
 //!
 //! All tool logic is in Haskell WASM. This module provides:
 //! - Tool schema discovery via WASM (handle_list_tools)
-//! - WASM routing for tool execution (handle_mcp_call)
+//! - Tool call types for WASM boundary (MCPCallInput/MCPCallOutput)
 
-use super::{McpState, ToolDefinition};
-use anyhow::{anyhow, Context, Result};
+use super::ToolDefinition;
+use crate::PluginManager;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tracing::{debug, error};
+use tracing::debug;
 
 // ============================================================================
 // WASM MCP Types (matches Haskell Main.hs MCPCallInput/MCPCallOutput)
@@ -69,82 +70,20 @@ impl MCPCallOutput {
 ///
 /// Calls handle_list_tools in Haskell WASM with the role, which returns
 /// only the tool schemas for that role. This is the single source of truth.
-pub async fn get_tool_definitions(state: &McpState) -> Result<Vec<ToolDefinition>> {
-    let role = state.role.as_deref().unwrap_or("tl");
+pub async fn get_tool_definitions(
+    plugin: &PluginManager,
+    role: Option<&str>,
+) -> Result<Vec<ToolDefinition>> {
+    let role = role.unwrap_or("tl");
     debug!(role = %role, "Fetching tool definitions from WASM");
 
-    let tools: Vec<ToolDefinition> = state
-        .plugin
+    let tools: Vec<ToolDefinition> = plugin
         .call("handle_list_tools", &serde_json::json!({"role": role}))
         .await
         .context("WASM handle_list_tools failed")?;
 
     debug!(count = tools.len(), role = %role, "Got tool definitions from WASM");
     Ok(tools)
-}
-
-// ============================================================================
-// WASM Execution
-// ============================================================================
-
-/// Execute a tool by name via WASM.
-///
-/// All tool calls are routed through handle_mcp_call in Haskell WASM.
-/// Haskell handles the pure logic, Rust executes I/O via host functions.
-pub async fn execute_tool(state: &McpState, name: &str, args: Value) -> Result<Value> {
-    debug!(tool = %name, "Routing tool call through WASM");
-
-    let role = state.role.as_deref().unwrap_or("tl");
-    let input = MCPCallInput {
-        role: role.to_string(),
-        tool_name: name.to_string(),
-        tool_args: args,
-    };
-
-    // Log before calling WASM
-    debug!(tool = %name, "Calling WASM handle_mcp_call");
-
-    let call_result = state.plugin.call_async("handle_mcp_call", &input).await;
-
-    // Log raw result before deserialization
-    match &call_result {
-        Ok(_) => debug!(tool = %name, "WASM call succeeded"),
-        Err(e) => {
-            error!(
-                tool = %name,
-                error = %e,
-                "WASM call failed before deserialization"
-            );
-        }
-    }
-
-    let output: MCPCallOutput = call_result.map_err(|e| {
-        // Preserve full error chain with tool name
-        anyhow!("WASM call failed for tool '{}': {}", name, e)
-    })?;
-
-    // Log the parsed output
-    debug!(
-        tool = %name,
-        success = output.success,
-        has_result = output.result.is_some(),
-        has_error = output.error.is_some(),
-        "Parsed MCPCallOutput"
-    );
-
-    if let Some(ref err) = output.error {
-        error!(tool = %name, mcp_error = %err, "Tool returned error in MCPCallOutput");
-    }
-
-    if output.success {
-        output
-            .result
-            .ok_or_else(|| anyhow!("WASM returned success but no result"))
-    } else {
-        Err(anyhow!(output
-            .error
-            .unwrap_or_else(|| "Unknown WASM error".to_string())))
-    }
 }
 
 #[cfg(test)]

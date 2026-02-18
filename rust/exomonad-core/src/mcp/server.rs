@@ -10,9 +10,10 @@ use uuid::Uuid;
 
 use super::tools::{self, MCPCallInput, MCPCallOutput};
 use super::McpState;
+use crate::PluginManager;
 
 struct McpSession {
-    plugin: Arc<crate::PluginManager>,
+    plugin: Arc<PluginManager>,
     role: String,
     /// Cached tool definitions (name → {description, inputSchema})
     tools: Vec<super::ToolDefinition>,
@@ -31,15 +32,24 @@ impl McpServer {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             state,
         };
-        // Spawn background sweeper: every 5 min, evict sessions idle > 30 min
+        // Spawn background sweeper: every 10 min, evict sessions idle > 4 hours
         let sessions = server.sessions.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(600));
             loop {
                 interval.tick().await;
                 let mut map = sessions.write().await;
-                let cutoff = Instant::now() - std::time::Duration::from_secs(1800);
+                let cutoff = Instant::now() - std::time::Duration::from_secs(14400);
+                let before = map.len();
                 map.retain(|_, s| s.last_active > cutoff);
+                let evicted = before - map.len();
+                if evicted > 0 {
+                    tracing::info!(
+                        count = evicted,
+                        remaining = map.len(),
+                        "Evicted idle MCP sessions"
+                    );
+                }
             }
         });
         server
@@ -56,7 +66,7 @@ impl McpServer {
             let s = server.clone();
             move |headers: axum::http::HeaderMap, body: axum::extract::Json<serde_json::Value>| {
                 let s = s.clone();
-                async move { s.handle(headers, body).await }
+                async move { s.handle(headers, body, None).await }
             }
         };
 
@@ -106,7 +116,16 @@ impl McpServer {
         Ok(())
     }
 
-    pub async fn handle(&self, headers: HeaderMap, Json(body): Json<Value>) -> Response {
+    /// Handle a JSON-RPC MCP request.
+    ///
+    /// When `plugin` is Some, it's used for session creation (per-agent identity).
+    /// When None, falls back to `self.state.plugin` (standalone/router mode).
+    pub async fn handle(
+        &self,
+        headers: HeaderMap,
+        Json(body): Json<Value>,
+        plugin: Option<Arc<PluginManager>>,
+    ) -> Response {
         let method = body["method"].as_str();
         let id = body.get("id").cloned();
 
@@ -118,7 +137,7 @@ impl McpServer {
         let id = id.unwrap(); // guaranteed non-null by above check
 
         match method {
-            Some("initialize") => self.handle_initialize(&id).await,
+            Some("initialize") => self.handle_initialize(&id, plugin).await,
             Some(m) => {
                 // All other methods require a valid session
                 let session_id = match headers.get("mcp-session-id").and_then(|v| v.to_str().ok()) {
@@ -132,7 +151,12 @@ impl McpServer {
                     if let Some(session) = sessions.get_mut(&session_id) {
                         session.last_active = Instant::now();
                     } else {
-                        return json_rpc_error(&id, -32600, "Invalid session");
+                        return json_rpc_error_with_status(
+                            &id,
+                            -32600,
+                            "Invalid session",
+                            StatusCode::NOT_FOUND,
+                        );
                     }
                 }
 
@@ -149,12 +173,15 @@ impl McpServer {
         }
     }
 
-    async fn handle_initialize(&self, id: &Value) -> Response {
+    async fn handle_initialize(&self, id: &Value, plugin: Option<Arc<PluginManager>>) -> Response {
+        let plugin = plugin.unwrap_or_else(|| self.state.plugin.clone());
+
         // Hot reload WASM if changed
-        let _ = self.state.plugin.reload_if_changed().await;
+        let _ = plugin.reload_if_changed().await;
 
         // Discover tools from WASM
-        let tools = match tools::get_tool_definitions(&self.state).await {
+        let role = self.state.role.as_deref();
+        let tools = match tools::get_tool_definitions(&plugin, role).await {
             Ok(t) => t,
             Err(e) => {
                 tracing::error!(error = %e, "Failed to get tool definitions");
@@ -165,7 +192,7 @@ impl McpServer {
         let session_id = Uuid::new_v4().to_string();
 
         let session = McpSession {
-            plugin: self.state.plugin.clone(),
+            plugin,
             role: self.state.role.clone().unwrap_or_else(|| "tl".to_string()),
             tools,
             last_active: Instant::now(),
@@ -191,7 +218,17 @@ impl McpServer {
 
     async fn handle_list_tools(&self, session_id: &str, id: &Value) -> Response {
         let sessions = self.sessions.read().await;
-        let session = sessions.get(session_id).unwrap(); // validated in handle()
+        let session = match sessions.get(session_id) {
+            Some(s) => s,
+            None => {
+                return json_rpc_error_with_status(
+                    id,
+                    -32600,
+                    "Session expired",
+                    StatusCode::NOT_FOUND,
+                )
+            }
+        };
 
         let tools_json: Vec<Value> = session
             .tools
@@ -218,8 +255,17 @@ impl McpServer {
         // Read session to get plugin + role (short lock)
         let (plugin, role) = {
             let sessions = self.sessions.read().await;
-            let session = sessions.get(session_id).unwrap();
-            (session.plugin.clone(), session.role.clone())
+            match sessions.get(session_id) {
+                Some(session) => (session.plugin.clone(), session.role.clone()),
+                None => {
+                    return json_rpc_error_with_status(
+                        id,
+                        -32600,
+                        "Session expired",
+                        StatusCode::NOT_FOUND,
+                    )
+                }
+            }
         };
 
         tracing::info!(tool = %tool_name, "Executing tool");
@@ -258,12 +304,30 @@ fn json_rpc_response(id: &Value, session_id: &str, result: Value) -> Response {
         .into_response()
 }
 
-/// JSON-RPC error response (no session header needed).
+/// JSON-RPC error response (HTTP 200, no session header).
 fn json_rpc_error(id: &Value, code: i32, message: &str) -> Response {
+    json_rpc_error_with_status(id, code, message, StatusCode::OK)
+}
+
+/// JSON-RPC error response with explicit HTTP status code.
+///
+/// MCP spec requires HTTP 404 for expired/invalid sessions so clients
+/// trigger auto-reconnect instead of treating the connection as dead.
+fn json_rpc_error_with_status(
+    id: &Value,
+    code: i32,
+    message: &str,
+    status: StatusCode,
+) -> Response {
     let body = json!({
         "jsonrpc": "2.0",
         "id": id,
         "error": { "code": code, "message": message },
     });
-    (StatusCode::OK, axum::Json(body)).into_response()
+    (
+        status,
+        [("content-type", "application/json")],
+        axum::Json(body),
+    )
+        .into_response()
 }
