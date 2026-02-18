@@ -167,7 +167,7 @@ impl EffectHandler for MockAgentHandler {
         use exomonad_proto::effects::agent::*;
 
         match effect_type {
-            "agent.spawn_gemini_teammate" => {
+            "agent.spawn_subtree" => {
                 let agent = AgentInfo {
                     id: "test-subtree-claude".into(),
                     issue: String::new(),
@@ -182,14 +182,8 @@ impl EffectHandler for MockAgentHandler {
                     pr_url: String::new(),
                     topology: 1, // WORKTREE_PER_AGENT
                 };
-                Ok(SpawnGeminiTeammateResponse { agent: Some(agent) }.encode_to_vec())
+                Ok(SpawnSubtreeResponse { agent: Some(agent) }.encode_to_vec())
             }
-            "agent.cleanup_merged" => Ok(CleanupMergedResponse {
-                cleaned: vec![],
-                skipped: vec![],
-                errors: vec![],
-            }
-            .encode_to_vec()),
             "agent.spawn_worker" => {
                 let agent = AgentInfo {
                     id: "test-worker-gemini".into(),
@@ -207,6 +201,12 @@ impl EffectHandler for MockAgentHandler {
                 };
                 Ok(SpawnWorkerResponse { agent: Some(agent) }.encode_to_vec())
             }
+            "agent.cleanup_merged" => Ok(CleanupMergedResponse {
+                cleaned: vec![],
+                skipped: vec![],
+                errors: vec![],
+            }
+            .encode_to_vec()),
             _ => Err(EffectError::not_found(format!("mock_agent/{effect_type}"))),
         }
     }
@@ -253,7 +253,7 @@ async fn wasm_list_tools_returns_definitions() {
 
     let tools: Vec<Value> = runtime
         .plugin_manager()
-        .call("handle_list_tools", &())
+        .call("handle_list_tools", &json!({"role": "tl"}))
         .await
         .expect("handle_list_tools failed");
 
@@ -267,12 +267,12 @@ async fn wasm_list_tools_returns_definitions() {
         "Missing spawn_subtree in {tool_names:?}"
     );
     assert!(
-        tool_names.contains(&"spawn_worker"),
-        "Missing spawn_worker in {tool_names:?}"
+        tool_names.contains(&"spawn_workers"),
+        "Missing spawn_workers in {tool_names:?}"
     );
 }
 
-/// spawn_subtree roundtrip: tool → agent.spawn_gemini_teammate effect → mock response.
+/// spawn_subtree roundtrip: tool → agent.spawn_subtree effect → mock response.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn wasm_spawn_subtree_roundtrip() {
     let _ = tracing_subscriber::fmt()
@@ -283,6 +283,7 @@ async fn wasm_spawn_subtree_roundtrip() {
     let runtime = build_test_runtime().await;
 
     let input = json!({
+        "role": "tl",
         "toolName": "spawn_subtree",
         "toolArgs": {
             "task": "Implement feature X",
@@ -297,21 +298,26 @@ async fn wasm_spawn_subtree_roundtrip() {
         .expect("handle_mcp_call failed for spawn_subtree");
 
     assert_eq!(
-        output["success"], true,
+        output["result"]["success"], true,
         "spawn_subtree should succeed with mock handler: {output:#}"
     );
 }
 
-/// spawn_worker roundtrip: tool → agent.spawn_worker effect → mock response.
+/// spawn_workers roundtrip: tool → agent.spawn_worker effect → mock response.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn wasm_spawn_worker_roundtrip() {
+async fn wasm_spawn_workers_roundtrip() {
     let runtime = build_test_runtime().await;
 
     let input = json!({
-        "toolName": "spawn_worker",
+        "role": "tl",
+        "toolName": "spawn_workers",
         "toolArgs": {
-            "name": "rust-impl",
-            "prompt": "Implement the Rust side of feature X"
+            "specs": [
+                {
+                    "name": "rust-impl",
+                    "task": "Implement the Rust side of feature X"
+                }
+            ]
         }
     });
 
@@ -319,11 +325,11 @@ async fn wasm_spawn_worker_roundtrip() {
         .plugin_manager()
         .call("handle_mcp_call", &input)
         .await
-        .expect("handle_mcp_call failed for spawn_worker");
+        .expect("handle_mcp_call failed for spawn_workers");
 
     assert_eq!(
-        output["success"], true,
-        "spawn_worker should succeed with mock handler: {output:#}"
+        output["result"]["success"], true,
+        "spawn_workers should succeed with mock handler: {output:#}"
     );
 }
 
@@ -340,6 +346,7 @@ async fn wasm_unhandled_effect_returns_error() {
         .expect("Failed to build runtime");
 
     let input = json!({
+        "role": "tl",
         "toolName": "spawn_subtree",
         "toolArgs": {
             "task": "test",
@@ -355,7 +362,7 @@ async fn wasm_unhandled_effect_returns_error() {
 
     // The tool should report failure (agent handler not registered)
     assert_eq!(
-        output["success"], false,
+        output["result"]["success"], false,
         "spawn_subtree should fail without agent handler: {output:#}"
     );
 }

@@ -6,8 +6,8 @@
 //!   HTTP POST → axum → rmcp StreamableHttp → WASM (Haskell) → protobuf effects
 //!     → Rust handlers → protobuf response → WASM decode → JSON-RPC response
 //!
-//! The unified WASM provides: spawn_subtree, spawn_worker, popup,
-//! get_agent_messages, answer_question, get_agent_messages.
+//! The unified WASM provides: spawn_subtree, spawn_workers, popup,
+//! file_pr, merge_pr, notify_parent.
 //!
 //! Tests expect a running server on the port specified by MCP_TEST_PORT.
 //! Most tests share a single MCP session to avoid exhausting the server's
@@ -384,7 +384,12 @@ fn mcp_tool_call_before_initialize() {
     let client = new_raw_client();
 
     let resp = client.send_raw(
-        &serde_json::to_string(&tool_call_request(240, "get_agent_messages", json!({}))).unwrap(),
+        &serde_json::to_string(&tool_call_request(
+            240,
+            "notify_parent",
+            json!({"status": "success", "message": "test"}),
+        ))
+        .unwrap(),
     );
 
     let status = resp.status();
@@ -465,7 +470,7 @@ fn mcp_list_tools_returns_definitions() {
         .filter_map(|t| t["name"].as_str())
         .collect();
 
-    for expected in &["spawn_subtree", "spawn_worker", "get_agent_messages"] {
+    for expected in &["spawn_subtree", "spawn_workers", "notify_parent"] {
         assert!(
             tool_names.contains(expected),
             "Missing expected tool '{}'. Found: {:?}",
@@ -550,22 +555,24 @@ fn mcp_tool_schemas_valid() {
         .filter_map(|t| t["name"].as_str().map(|n| (n, t)))
         .collect();
 
-    // 1. spawn_subtree
-    let subtree = tool_map
-        .get("spawn_subtree")
-        .expect("spawn_subtree missing");
-    let props = &subtree["inputSchema"]["properties"];
-    assert!(props.get("task").is_some());
-    assert!(props.get("branch_name").is_some());
-    assert!(props.get("context").is_some());
-    assert!(props.get("agent_type").is_some());
+        // 1. spawn_subtree
 
-    // 2. spawn_worker
-    let worker = tool_map.get("spawn_worker").expect("spawn_worker missing");
+        let subtree = tool_map
+
+            .get("spawn_subtree")
+
+            .expect("spawn_subtree missing");
+
+        let props = &subtree["inputSchema"]["properties"];
+
+        assert!(props.get("task").is_some());
+
+        assert!(props.get("branch_name").is_some());
+
+        // 2. spawn_workers
+    let worker = tool_map.get("spawn_workers").expect("spawn_workers missing");
     let props = &worker["inputSchema"]["properties"];
-    assert!(props.get("name").is_some());
-    assert!(props.get("prompt").is_some());
-    assert!(props.get("agent_type").is_none()); // NO agent_type for worker
+    assert!(props.get("specs").is_some());
 
     // 3. file_pr
     let file_pr = tool_map.get("file_pr").expect("file_pr missing");
@@ -574,13 +581,9 @@ fn mcp_tool_schemas_valid() {
     assert!(props.get("body").is_some());
     assert!(props.get("base_branch").is_some());
 
-    // 4. get_agent_messages
-    let msg = tool_map
-        .get("get_agent_messages")
-        .expect("get_agent_messages missing");
-    assert!(msg["inputSchema"]["properties"]
-        .get("timeout_secs")
-        .is_some());
+    // 4. notify_parent
+    let msg = tool_map.get("notify_parent").expect("notify_parent missing");
+    assert!(msg["inputSchema"]["properties"].get("status").is_some());
 }
 
 /// All tools have non-empty descriptions.
@@ -604,12 +607,16 @@ fn mcp_all_tools_have_descriptions() {
 // Tests — Tool calls (shared session)
 // ============================================================================
 
-/// Full proto roundtrip via agent.cleanup_merged effect.
+/// Full proto roundtrip via notify_parent effect.
 #[test]
-fn mcp_tool_call_get_agent_messages() {
+fn mcp_tool_call_notify_parent() {
     let mut client = shared_session().lock().unwrap();
 
-    let resp = client.call(tool_call_request(5, "get_agent_messages", json!({})));
+    let resp = client.call(tool_call_request(
+        5,
+        "notify_parent",
+        json!({"status": "success", "message": "test"}),
+    ));
 
     let has_jsonrpc_error = resp.get("error").is_some() && !resp["error"].is_null();
     if !has_jsonrpc_error {
@@ -644,7 +651,11 @@ fn mcp_malformed_json_returns_error() {
     );
 
     // Server still works after malformed request
-    let resp = client.call(tool_call_request(50, "get_agent_messages", json!({})));
+    let resp = client.call(tool_call_request(
+        50,
+        "notify_parent",
+        json!({"status": "success", "message": "test"}),
+    ));
     assert_tool_success(&resp);
 }
 
@@ -674,17 +685,25 @@ fn mcp_notification_no_response() {
 
     client.notify(notification("notifications/initialized"));
 
-    let resp = client.call(tool_call_request(10, "get_agent_messages", json!({})));
+    let resp = client.call(tool_call_request(
+        10,
+        "notify_parent",
+        json!({"status": "success", "message": "test"}),
+    ));
     assert_tool_success(&resp);
 }
 
-/// 10 sequential get_agent_messages calls — WASM state doesn't corrupt across calls.
+/// 10 sequential notify_parent calls — WASM state doesn't corrupt across calls.
 #[test]
 fn mcp_multiple_sequential_calls() {
     let mut client = shared_session().lock().unwrap();
 
     for i in 0..10u64 {
-        let resp = client.call(tool_call_request(100 + i, "get_agent_messages", json!({})));
+        let resp = client.call(tool_call_request(
+            100 + i,
+            "notify_parent",
+            json!({"status": "success", "message": format!("test {}", i)}),
+        ));
         let inner = assert_tool_success(&resp);
         assert!(
             inner.is_object() || inner.is_array(),
@@ -700,13 +719,21 @@ fn mcp_multiple_sequential_calls() {
 fn mcp_interleaved_operations() {
     let mut client = shared_session().lock().unwrap();
 
-    let resp = client.call(tool_call_request(20, "get_agent_messages", json!({})));
+    let resp = client.call(tool_call_request(
+        20,
+        "notify_parent",
+        json!({"status": "success", "message": "test"}),
+    ));
     assert_tool_success(&resp);
 
     let resp = client.call(tool_call_request(21, "no_such_tool", json!({})));
     assert_tool_error(&resp);
 
-    let resp = client.call(tool_call_request(22, "get_agent_messages", json!({})));
+    let resp = client.call(tool_call_request(
+        22,
+        "notify_parent",
+        json!({"status": "success", "message": "test"}),
+    ));
     assert_tool_success(&resp);
 
     let resp = client.call(list_tools_request(23));
@@ -734,7 +761,11 @@ fn mcp_spawn_subtree_missing_required_field() {
     assert_tool_error(&resp);
 
     // Server recovers
-    let resp = client.call(tool_call_request(31, "get_agent_messages", json!({})));
+    let resp = client.call(tool_call_request(
+        31,
+        "notify_parent",
+        json!({"status": "success", "message": "test"}),
+    ));
     assert_tool_success(&resp);
 }
 
@@ -792,8 +823,13 @@ fn mcp_tool_call_extra_args_ignored() {
 
     let resp = client.call(tool_call_request(
         38,
-        "get_agent_messages",
-        json!({"unknown_field": "should_be_ignored", "another": 42}),
+        "notify_parent",
+        json!({
+            "status": "success",
+            "message": "test",
+            "unknown_field": "should_be_ignored",
+            "another": 42
+        }),
     ));
 
     assert_tool_success(&resp);
@@ -842,7 +878,8 @@ fn mcp_tool_call_missing_name() {
     assert_tool_error(&resp);
 }
 
-/// tools/call with missing arguments field — defaults to empty object.
+/// tools/call with missing arguments field — defaults to empty object,
+/// which for notify_parent should fail due to missing required fields.
 #[test]
 fn mcp_tool_call_missing_arguments() {
     let mut client = shared_session().lock().unwrap();
@@ -852,11 +889,11 @@ fn mcp_tool_call_missing_arguments() {
         "id": 42,
         "method": "tools/call",
         "params": {
-            "name": "get_agent_messages"
+            "name": "notify_parent"
         }
     }));
 
-    assert_tool_success(&resp);
+    assert_tool_error(&resp);
 }
 
 // ============================================================================
@@ -877,7 +914,11 @@ fn mcp_recovery_after_malformed_json() {
         "Expected error for malformed JSON"
     );
 
-    let resp = client.call(tool_call_request(50, "get_agent_messages", json!({})));
+    let resp = client.call(tool_call_request(
+        50,
+        "notify_parent",
+        json!({"status": "success", "message": "test"}),
+    ));
     assert_tool_success(&resp);
 }
 
@@ -890,7 +931,11 @@ fn mcp_recovery_after_multiple_parse_errors() {
         let _resp = client.send_raw(&format!("garbage line {}", i));
     }
 
-    let resp = client.call(tool_call_request(51, "get_agent_messages", json!({})));
+    let resp = client.call(tool_call_request(
+        51,
+        "notify_parent",
+        json!({"status": "success", "message": "test"}),
+    ));
     assert_tool_success(&resp);
 }
 
@@ -902,8 +947,8 @@ fn mcp_alternating_errors_and_successes() {
     for i in 0..5u64 {
         let resp = client.call(tool_call_request(
             60 + i * 2,
-            "get_agent_messages",
-            json!({}),
+            "notify_parent",
+            json!({"status": "success", "message": "test"}),
         ));
         assert_tool_success(&resp);
 
@@ -911,7 +956,11 @@ fn mcp_alternating_errors_and_successes() {
         assert_tool_error(&resp);
     }
 
-    let resp = client.call(tool_call_request(70, "get_agent_messages", json!({})));
+    let resp = client.call(tool_call_request(
+        70,
+        "notify_parent",
+        json!({"status": "success", "message": "test"}),
+    ));
     assert_tool_success(&resp);
 }
 
@@ -935,7 +984,11 @@ fn mcp_mixed_error_types() {
     let resp = client.call(tool_call_request(82, "fake_tool", json!({})));
     assert_tool_error(&resp);
 
-    let resp = client.call(tool_call_request(83, "get_agent_messages", json!({})));
+    let resp = client.call(tool_call_request(
+        83,
+        "notify_parent",
+        json!({"status": "success", "message": "test"}),
+    ));
     assert_tool_success(&resp);
 }
 
@@ -950,7 +1003,11 @@ fn mcp_unknown_notification_silent() {
 
     client.notify(notification("custom/unknown_notification"));
 
-    let resp = client.call(tool_call_request(90, "get_agent_messages", json!({})));
+    let resp = client.call(tool_call_request(
+        90,
+        "notify_parent",
+        json!({"status": "success", "message": "test"}),
+    ));
     assert_tool_success(&resp);
 }
 
@@ -960,12 +1017,20 @@ fn mcp_notifications_interleaved_with_requests() {
     let mut client = shared_session().lock().unwrap();
 
     client.notify(notification("notifications/initialized"));
-    let resp = client.call(tool_call_request(91, "get_agent_messages", json!({})));
+    let resp = client.call(tool_call_request(
+        91,
+        "notify_parent",
+        json!({"status": "success", "message": "test"}),
+    ));
     assert_tool_success(&resp);
 
     client.notify(notification("notifications/initialized"));
     client.notify(notification("notifications/initialized"));
-    let resp = client.call(tool_call_request(92, "get_agent_messages", json!({})));
+    let resp = client.call(tool_call_request(
+        92,
+        "notify_parent",
+        json!({"status": "success", "message": "test"}),
+    ));
     assert_tool_success(&resp);
 }
 
@@ -978,7 +1043,11 @@ fn mcp_notifications_interleaved_with_requests() {
 fn mcp_health_after_traffic() {
     let mut client = shared_session().lock().unwrap();
 
-    let resp = client.call(tool_call_request(220, "get_agent_messages", json!({})));
+    let resp = client.call(tool_call_request(
+        220,
+        "notify_parent",
+        json!({"status": "success", "message": "test"}),
+    ));
     assert_tool_success(&resp);
 
     let health_url = format!("http://127.0.0.1:{}/health", client.port);
