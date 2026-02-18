@@ -44,19 +44,26 @@ impl PopupEffects for PopupHandler {
     async fn show_popup(
         &self,
         req: ShowPopupRequest,
-        _ctx: &crate::effects::EffectContext,
+        ctx: &crate::effects::EffectContext,
     ) -> EffectResult<ShowPopupResponse> {
-        let components: Vec<serde_json::Value> = if req.components.is_empty() {
-            Vec::new()
+        // Components bytes can be either:
+        // - JSON array of component objects (form mode)
+        // - JSON object with "panes" key (wizard mode)
+        let raw_json: serde_json::Value = if req.components.is_empty() {
+            serde_json::Value::Array(Vec::new())
         } else {
             serde_json::from_slice(&req.components).map_err(|e| {
                 EffectError::invalid_input(format!("Invalid components JSON: {}", e))
             })?
         };
 
+        let target_tab =
+            crate::services::agent_control::resolve_own_tab_name(ctx);
+
         let input = PopupInput {
             title: req.title,
-            components,
+            raw_json,
+            target_tab: Some(target_tab),
         };
 
         let service = PopupService::new(self.zellij_session.clone());

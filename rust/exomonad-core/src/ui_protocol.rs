@@ -397,6 +397,57 @@ impl PopupState {
         self.values
             .insert(id.to_string(), ElementValue::MultiChoice(value));
     }
+
+    /// Evaluate a visibility rule against current form state.
+    pub fn evaluate_visibility(&self, rule: &VisibilityRule) -> bool {
+        match rule {
+            VisibilityRule::Checked(id) => self.get_boolean(id).unwrap_or(false),
+            VisibilityRule::Equals(map) => {
+                map.iter().all(|(id, expected)| {
+                    if let Some(ElementValue::Choice(idx)) = self.values.get(id) {
+                        idx.to_string() == *expected
+                    } else {
+                        false
+                    }
+                })
+            }
+            VisibilityRule::GreaterThan { id, min_value } => {
+                self.get_number(id).map_or(false, |v| v >= *min_value)
+            }
+            VisibilityRule::LessThan { id, max_value } => {
+                self.get_number(id).map_or(false, |v| v <= *max_value)
+            }
+            VisibilityRule::CountEquals { id, exact_count } => {
+                self.get_multichoice(id).map_or(false, |v| {
+                    v.iter().filter(|&&b| b).count() == *exact_count as usize
+                })
+            }
+            VisibilityRule::CountGreaterThan { id, min_count } => {
+                self.get_multichoice(id).map_or(false, |v| {
+                    v.iter().filter(|&&b| b).count() >= *min_count as usize
+                })
+            }
+        }
+    }
+
+    /// Evaluate visibility for a component. Components without visibility rules are always visible.
+    pub fn is_visible(&self, component: &Component) -> bool {
+        match component.visible_when() {
+            None => true,
+            Some(rule) => self.evaluate_visibility(rule),
+        }
+    }
+
+    /// Get the selected option label for a Choice component.
+    pub fn get_choice_label(&self, id: &str, components: &[Component]) -> Option<String> {
+        let idx = self.get_choice(id)?;
+        components.iter().find_map(|c| match c {
+            Component::Choice { id: cid, options, .. } if cid == id => {
+                options.get(idx).cloned()
+            }
+            _ => None,
+        })
+    }
 }
 
 /// JSON result containing all form values
@@ -406,6 +457,53 @@ pub struct PopupResult {
     pub values: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub time_spent_seconds: Option<f64>, // Time user spent interacting with popup
+}
+
+// ============================================================================
+// Wizard Types
+// ============================================================================
+
+/// A multi-pane wizard definition. Sent as JSON via the popup pipe.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WizardDefinition {
+    pub title: String,
+    pub panes: HashMap<String, WizardPane>,
+    pub start: String,
+}
+
+/// A single pane in a wizard.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WizardPane {
+    pub title: String,
+    pub elements: Vec<Component>,
+    #[serde(default)]
+    pub then_transition: Option<Transition>,
+}
+
+/// Transition rule for wizard pane navigation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Transition {
+    /// Unconditional: always go to this pane.
+    Goto(String),
+    /// Conditional: branch based on a field's value.
+    /// Outer key = field_id, inner key = option value, inner value = target pane.
+    Branch(HashMap<String, HashMap<String, String>>),
+}
+
+/// Result of a wizard interaction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WizardResult {
+    pub button: String,
+    pub values: HashMap<String, serde_json::Value>,
+    pub panes_visited: Vec<String>,
+}
+
+/// Request envelope for wizard popups sent from service to plugin via Zellij pipe.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WizardRequest {
+    pub request_id: String,
+    pub wizard: WizardDefinition,
 }
 
 // ============================================================================
@@ -1107,5 +1205,157 @@ mod tests {
     #[test]
     fn test_transport_constants() {
         assert_eq!(super::transport::POPUP_PIPE, "exomonad:popup");
+    }
+
+    // === Wizard type tests ===
+
+    #[test]
+    fn test_wizard_definition_deser() {
+        let json = r#"{
+            "title": "Test Wizard",
+            "panes": {
+                "start": {
+                    "title": "First Pane",
+                    "elements": [
+                        {"type": "choice", "id": "q1", "label": "Pick one", "options": ["A", "B"]}
+                    ],
+                    "then_transition": "end"
+                },
+                "end": {
+                    "title": "Done",
+                    "elements": [
+                        {"type": "text", "id": "msg", "content": "All done!"}
+                    ]
+                }
+            },
+            "start": "start"
+        }"#;
+        let wizard: WizardDefinition = serde_json::from_str(json).unwrap();
+        assert_eq!(wizard.title, "Test Wizard");
+        assert_eq!(wizard.start, "start");
+        assert_eq!(wizard.panes.len(), 2);
+        assert!(wizard.panes.get("start").unwrap().then_transition.is_some());
+        assert!(wizard.panes.get("end").unwrap().then_transition.is_none());
+    }
+
+    #[test]
+    fn test_transition_goto_deser() {
+        let json = r#""next_pane""#;
+        let t: Transition = serde_json::from_str(json).unwrap();
+        match t {
+            Transition::Goto(target) => assert_eq!(target, "next_pane"),
+            _ => panic!("Expected Goto"),
+        }
+    }
+
+    #[test]
+    fn test_transition_branch_deser() {
+        let json = r#"{"strategy": {"Simple": "confirm", "Complex": "details"}}"#;
+        let t: Transition = serde_json::from_str(json).unwrap();
+        match t {
+            Transition::Branch(map) => {
+                let strategy = map.get("strategy").unwrap();
+                assert_eq!(strategy.get("Simple").unwrap(), "confirm");
+                assert_eq!(strategy.get("Complex").unwrap(), "details");
+            }
+            _ => panic!("Expected Branch"),
+        }
+    }
+
+    #[test]
+    fn test_wizard_result_serialization() {
+        let result = WizardResult {
+            button: "submit".to_string(),
+            values: {
+                let mut m = HashMap::new();
+                m.insert("pane1".to_string(), serde_json::json!({"q1": "A"}));
+                m
+            },
+            panes_visited: vec!["start".to_string(), "end".to_string()],
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        let deser: WizardResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser.button, "submit");
+        assert_eq!(deser.panes_visited.len(), 2);
+    }
+
+    // === evaluate_visibility tests ===
+
+    #[test]
+    fn test_evaluate_visibility_checked() {
+        let def = PopupDefinition {
+            title: "Test".to_string(),
+            components: vec![
+                Component::Checkbox { id: "cb".to_string(), label: "Check".to_string(), default: false, visible_when: None },
+            ],
+        };
+        let mut state = PopupState::new(&def);
+        assert!(!state.evaluate_visibility(&VisibilityRule::Checked("cb".to_string())));
+        state.set_boolean("cb", true);
+        assert!(state.evaluate_visibility(&VisibilityRule::Checked("cb".to_string())));
+    }
+
+    #[test]
+    fn test_evaluate_visibility_greater_than() {
+        let def = PopupDefinition {
+            title: "Test".to_string(),
+            components: vec![
+                Component::Slider { id: "s".to_string(), label: "S".to_string(), min: 0.0, max: 100.0, default: 5.0, visible_when: None },
+            ],
+        };
+        let state = PopupState::new(&def);
+        assert!(!state.evaluate_visibility(&VisibilityRule::GreaterThan { id: "s".to_string(), min_value: 10.0 }));
+        assert!(state.evaluate_visibility(&VisibilityRule::GreaterThan { id: "s".to_string(), min_value: 5.0 }));
+    }
+
+    #[test]
+    fn test_evaluate_visibility_count_equals() {
+        let def = PopupDefinition {
+            title: "Test".to_string(),
+            components: vec![
+                Component::Multiselect { id: "m".to_string(), label: "M".to_string(), options: vec!["A".to_string(), "B".to_string(), "C".to_string()], default: None, visible_when: None },
+            ],
+        };
+        let mut state = PopupState::new(&def);
+        assert!(!state.evaluate_visibility(&VisibilityRule::CountEquals { id: "m".to_string(), exact_count: 2 }));
+        state.set_multichoice("m", vec![true, true, false]);
+        assert!(state.evaluate_visibility(&VisibilityRule::CountEquals { id: "m".to_string(), exact_count: 2 }));
+    }
+
+    #[test]
+    fn test_is_visible_no_rule() {
+        let component = Component::Text { id: "t".to_string(), content: "hi".to_string(), visible_when: None };
+        let state = PopupState { values: HashMap::new(), button_clicked: None };
+        assert!(state.is_visible(&component));
+    }
+
+    #[test]
+    fn test_is_visible_with_rule() {
+        let component = Component::Slider {
+            id: "s".to_string(), label: "S".to_string(), min: 0.0, max: 10.0, default: 5.0,
+            visible_when: Some(VisibilityRule::Checked("cb".to_string())),
+        };
+        let def = PopupDefinition {
+            title: "Test".to_string(),
+            components: vec![
+                Component::Checkbox { id: "cb".to_string(), label: "CB".to_string(), default: false, visible_when: None },
+            ],
+        };
+        let mut state = PopupState::new(&def);
+        assert!(!state.is_visible(&component));
+        state.set_boolean("cb", true);
+        assert!(state.is_visible(&component));
+    }
+
+    #[test]
+    fn test_get_choice_label() {
+        let components = vec![
+            Component::Choice { id: "c".to_string(), label: "C".to_string(), options: vec!["Red".to_string(), "Blue".to_string()], default: Some(0), visible_when: None },
+        ];
+        let def = PopupDefinition { title: "Test".to_string(), components: components.clone() };
+        let mut state = PopupState::new(&def);
+        assert_eq!(state.get_choice_label("c", &components), Some("Red".to_string()));
+        state.set_choice("c", 1);
+        assert_eq!(state.get_choice_label("c", &components), Some("Blue".to_string()));
     }
 }

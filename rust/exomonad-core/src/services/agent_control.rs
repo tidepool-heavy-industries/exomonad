@@ -139,6 +139,28 @@ impl AgentType {
     }
 }
 
+/// Resolve the Zellij tab name of THIS agent from structural identity.
+///
+/// Root agent (no dots in birth_branch): "TL" tab (created by `exomonad init`).
+/// Spawned subtree: "{emoji} {slug}" where slug = last segment of birth_branch.
+/// Used for routing popup requests to the correct plugin instance.
+pub fn resolve_own_tab_name(ctx: &crate::effects::EffectContext) -> String {
+    let birth_branch_str = ctx.birth_branch.as_str();
+
+    if birth_branch_str.contains('.') {
+        let slug = birth_branch_str
+            .rsplit_once('.')
+            .map(|(_, s)| s)
+            .unwrap_or(birth_branch_str);
+        // Subtrees spawned by spawn_subtree are Claude; by spawn_leaf_subtree are Gemini.
+        // The worktree dir name includes the suffix, but birth_branch doesn't.
+        // For now, assume Claude (TL role) since popup is only available in TL role.
+        AgentType::Claude.tab_display_name(slug)
+    } else {
+        "TL".to_string()
+    }
+}
+
 /// Resolve the Zellij tab name of the parent agent from structural identity.
 ///
 /// Workers (Gemini): parent derived from birth_branch (inherited).

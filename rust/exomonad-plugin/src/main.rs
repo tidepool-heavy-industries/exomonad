@@ -13,6 +13,12 @@ mod protocol;
 use exomonad_core::ui_protocol::{self, transport, AgentEvent, CoordinatorAgentState, StateUpdate};
 use protocol::{PluginMessage, PluginState};
 
+/// Render mode for the popup area (form vs wizard).
+enum RenderMode {
+    Form,
+    Wizard,
+}
+
 // Solarized Dark Palette
 const COLOR_BASE03: Color = Color::Rgb(0, 43, 54);
 // const COLOR_BASE02: Color = Color::Rgb(7, 54, 66); // Unused for now
@@ -31,28 +37,283 @@ const COLOR_BLUE: Color = Color::Rgb(38, 139, 210);
 const COLOR_CYAN: Color = Color::Rgb(42, 161, 152);
 const COLOR_GREEN: Color = Color::Rgb(133, 153, 0);
 
-/// Active popup state for simple choice lists.
+/// Active form state for rendering all component types.
 ///
 /// Uses pipe-based communication: launched via `zellij pipe --plugin`,
 /// responds via `cli_pipe_output()`.
-struct ActivePopup {
+struct ActiveForm {
     /// CLI pipe ID for sending response back via cli_pipe_output()
     pipe_id: String,
     /// Request ID for correlation
     request_id: String,
-    /// Title for the popup
-    title: String,
-    /// Choice items to display
-    items: Vec<String>,
-    /// Currently selected item index
-    selected_index: usize,
+    /// The popup form definition.
+    definition: ui_protocol::PopupDefinition,
+    /// Runtime state tracking current values.
+    state: ui_protocol::PopupState,
+    /// Index into `interactive_ids` — which component has focus.
+    focused_index: usize,
+    /// Component IDs for interactive (focusable) components, filtered by visibility.
+    interactive_ids: Vec<String>,
+    /// Sub-index for list-type components (Choice highlighted row, Multiselect highlighted row).
+    sub_index: HashMap<String, usize>,
+    /// Cursor position within the focused Textbox.
+    text_cursor: usize,
+}
+
+impl ActiveForm {
+    fn new(pipe_id: String, request_id: String, definition: ui_protocol::PopupDefinition) -> Self {
+        let state = ui_protocol::PopupState::new(&definition);
+        let interactive_ids = Self::compute_interactive_ids(&definition.components, &state);
+        // Initialize sub_index for Choice and Multiselect components
+        let mut sub_index = HashMap::new();
+        for c in &definition.components {
+            match c {
+                ui_protocol::Component::Choice { id, default, .. } => {
+                    sub_index.insert(id.clone(), default.unwrap_or(0));
+                }
+                ui_protocol::Component::Multiselect { id, .. } => {
+                    sub_index.insert(id.clone(), 0);
+                }
+                _ => {}
+            }
+        }
+        Self {
+            pipe_id,
+            request_id,
+            definition,
+            state,
+            focused_index: 0,
+            interactive_ids,
+            sub_index,
+            text_cursor: 0,
+        }
+    }
+
+    fn compute_interactive_ids(components: &[ui_protocol::Component], state: &ui_protocol::PopupState) -> Vec<String> {
+        components.iter().filter(|c| {
+            // Must be visible
+            if !state.is_visible(c) {
+                return false;
+            }
+            // Must be interactive (not Text or Group)
+            !matches!(c, ui_protocol::Component::Text { .. } | ui_protocol::Component::Group { .. })
+        }).map(|c| c.id().to_string()).collect()
+    }
+
+    fn recompute_interactive_ids(&mut self) {
+        self.interactive_ids = Self::compute_interactive_ids(&self.definition.components, &self.state);
+        if self.focused_index >= self.interactive_ids.len() && !self.interactive_ids.is_empty() {
+            self.focused_index = self.interactive_ids.len() - 1;
+        }
+    }
+
+    fn focused_id(&self) -> Option<&str> {
+        self.interactive_ids.get(self.focused_index).map(|s| s.as_str())
+    }
+
+    fn focused_component(&self) -> Option<&ui_protocol::Component> {
+        let id = self.focused_id()?;
+        self.definition.components.iter().find(|c| c.id() == id)
+    }
+
+    fn to_popup_result(&self, button: &str) -> ui_protocol::PopupResult {
+        ui_protocol::PopupResult {
+            button: button.to_string(),
+            values: self.state.to_json_values(),
+            time_spent_seconds: None,
+        }
+    }
+}
+
+/// Active wizard state for multi-pane wizard navigation.
+///
+/// Wraps an ActiveForm for the current pane with wizard-specific state
+/// (pane history, collected values across panes, transition logic).
+struct ActiveWizard {
+    pipe_id: String,
+    request_id: String,
+    wizard: ui_protocol::WizardDefinition,
+    current_pane: String,
+    pane_history: Vec<String>,
+    collected_values: HashMap<String, serde_json::Value>,
+    /// Form state for the current pane.
+    form: ActiveForm,
+}
+
+impl ActiveWizard {
+    fn new(pipe_id: String, request_id: String, wizard: ui_protocol::WizardDefinition) -> Option<Self> {
+        let start_pane_name = wizard.start.clone();
+        let pane = wizard.panes.get(&start_pane_name)?;
+        let definition = ui_protocol::PopupDefinition {
+            title: pane.title.clone(),
+            components: pane.elements.clone(),
+        };
+        let form = ActiveForm::new(pipe_id.clone(), request_id.clone(), definition);
+        Some(Self {
+            pipe_id,
+            request_id,
+            wizard,
+            current_pane: start_pane_name.clone(),
+            pane_history: vec![start_pane_name],
+            collected_values: HashMap::new(),
+            form,
+        })
+    }
+
+    /// Whether the current pane is terminal (no transition — submit ends the wizard).
+    fn is_terminal(&self) -> bool {
+        self.wizard.panes.get(&self.current_pane)
+            .map_or(true, |p| p.then_transition.is_none())
+    }
+
+    /// Resolve the next pane based on the current pane's transition rule and form state.
+    fn resolve_transition(&self) -> Option<String> {
+        let pane = self.wizard.panes.get(&self.current_pane)?;
+        let transition = pane.then_transition.as_ref()?;
+        match transition {
+            ui_protocol::Transition::Goto(target) => Some(target.clone()),
+            ui_protocol::Transition::Branch(map) => {
+                for (field_id, value_map) in map {
+                    // Check choice fields (by label)
+                    if let Some(label) = self.form.state
+                        .get_choice_label(field_id, &self.form.definition.components)
+                    {
+                        if let Some(target) = value_map.get(&label) {
+                            return Some(target.clone());
+                        }
+                    }
+                    // Check boolean fields ("true"/"false")
+                    if let Some(val) = self.form.state.get_boolean(field_id) {
+                        let key = if val { "true" } else { "false" };
+                        if let Some(target) = value_map.get(key) {
+                            return Some(target.clone());
+                        }
+                    }
+                }
+                None
+            }
+        }
+    }
+
+    /// Advance to a target pane, saving current pane values.
+    fn advance_to(&mut self, target: &str) {
+        // Collect current pane values
+        self.collected_values.insert(
+            self.current_pane.clone(),
+            self.form.state.to_json_values(),
+        );
+
+        if let Some(pane) = self.wizard.panes.get(target) {
+            self.current_pane = target.to_string();
+            self.pane_history.push(target.to_string());
+            let definition = ui_protocol::PopupDefinition {
+                title: pane.title.clone(),
+                components: pane.elements.clone(),
+            };
+            self.form = ActiveForm::new(
+                self.pipe_id.clone(),
+                self.request_id.clone(),
+                definition,
+            );
+        }
+    }
+
+    /// Navigate back to the previous pane. Returns false if already at the start.
+    fn go_back(&mut self) -> bool {
+        if self.pane_history.len() <= 1 {
+            return false;
+        }
+        // Save current values
+        self.collected_values.insert(
+            self.current_pane.clone(),
+            self.form.state.to_json_values(),
+        );
+        // Pop current pane
+        self.pane_history.pop();
+        let prev = self.pane_history.last().unwrap().clone();
+
+        if let Some(pane) = self.wizard.panes.get(&prev) {
+            self.current_pane = prev.clone();
+            let definition = ui_protocol::PopupDefinition {
+                title: pane.title.clone(),
+                components: pane.elements.clone(),
+            };
+            self.form = ActiveForm::new(
+                self.pipe_id.clone(),
+                self.request_id.clone(),
+                definition,
+            );
+            // Restore previously collected values for this pane
+            if let Some(prev_values) = self.collected_values.get(&prev) {
+                if let Some(obj) = prev_values.as_object() {
+                    for (k, v) in obj {
+                        match v {
+                            serde_json::Value::Number(n) => {
+                                if let Some(f) = n.as_f64() {
+                                    self.form.state.set_number(k, f as f32);
+                                }
+                            }
+                            serde_json::Value::Bool(b) => {
+                                self.form.state.set_boolean(k, *b);
+                            }
+                            serde_json::Value::String(s) => {
+                                self.form.state.set_text(k, s.clone());
+                            }
+                            serde_json::Value::Array(arr) => {
+                                // MultiChoice: array of bools
+                                let bools: Vec<bool> = arr.iter()
+                                    .map(|v| v.as_bool().unwrap_or(false))
+                                    .collect();
+                                if bools.iter().all(|_| true) {
+                                    self.form.state.set_multichoice(k, bools);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            self.form.recompute_interactive_ids();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Build the wizard result with values from all visited panes.
+    fn to_wizard_result(&self, button: &str) -> ui_protocol::WizardResult {
+        let mut values = self.collected_values.clone();
+        // Include current pane values
+        values.insert(self.current_pane.clone(), self.form.state.to_json_values());
+        ui_protocol::WizardResult {
+            button: button.to_string(),
+            values,
+            panes_visited: self.pane_history.clone(),
+        }
+    }
+
+    /// Build breadcrumb trail string from pane history.
+    fn breadcrumbs(&self) -> String {
+        self.pane_history.iter()
+            .enumerate()
+            .map(|(i, name)| {
+                if i == self.pane_history.len() - 1 {
+                    format!("[{}]", name)
+                } else {
+                    name.clone()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" > ")
+    }
 }
 
 #[derive(Default)]
 struct ExoMonadPlugin {
     status_state: PluginState,
     status_message: String,
-    active_popup: Option<ActivePopup>,
+    active_form: Option<ActiveForm>,
+    active_wizard: Option<ActiveWizard>,
     events: VecDeque<AgentEvent>,
     terminal: Option<Terminal<ZellijBackend>>,
     /// Agent state from the coordinator plugin.
@@ -235,6 +496,202 @@ impl ExoMonadPlugin {
     }
 }
 
+/// Handle form-level key events (navigation, input, toggles).
+/// Shared between simple form mode and wizard mode (which delegates to its inner form).
+fn handle_form_key(form: &mut ActiveForm, key: &KeyWithModifier, should_render: &mut bool) {
+    let has_shift = key.key_modifiers.contains(&KeyModifier::Shift);
+    match key.bare_key {
+        BareKey::Tab => {
+            if !form.interactive_ids.is_empty() {
+                if has_shift {
+                    form.focused_index = if form.focused_index == 0 {
+                        form.interactive_ids.len() - 1
+                    } else {
+                        form.focused_index - 1
+                    };
+                } else {
+                    form.focused_index = (form.focused_index + 1) % form.interactive_ids.len();
+                }
+                if let Some(id) = form.focused_id() {
+                    if let Some(ui_protocol::ElementValue::Text(t)) = form.state.values.get(id) {
+                        form.text_cursor = t.len();
+                    }
+                }
+                *should_render = true;
+            }
+        }
+        BareKey::Up | BareKey::Char('k') => {
+            if let Some(component) = form.focused_component().cloned() {
+                match &component {
+                    ui_protocol::Component::Choice { id, .. } => {
+                        let sub = form.sub_index.entry(id.clone()).or_insert(0);
+                        if *sub > 0 {
+                            *sub -= 1;
+                            form.state.set_choice(id, *sub);
+                            form.recompute_interactive_ids();
+                            *should_render = true;
+                        }
+                    }
+                    ui_protocol::Component::Multiselect { id, .. } => {
+                        let sub = form.sub_index.entry(id.clone()).or_insert(0);
+                        if *sub > 0 {
+                            *sub -= 1;
+                            *should_render = true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        BareKey::Down | BareKey::Char('j') => {
+            if let Some(component) = form.focused_component().cloned() {
+                match &component {
+                    ui_protocol::Component::Choice { id, options, .. } => {
+                        let sub = form.sub_index.entry(id.clone()).or_insert(0);
+                        if *sub < options.len().saturating_sub(1) {
+                            *sub += 1;
+                            form.state.set_choice(id, *sub);
+                            form.recompute_interactive_ids();
+                            *should_render = true;
+                        }
+                    }
+                    ui_protocol::Component::Multiselect { id, options, .. } => {
+                        let sub = form.sub_index.entry(id.clone()).or_insert(0);
+                        if *sub < options.len().saturating_sub(1) {
+                            *sub += 1;
+                            *should_render = true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        BareKey::Left => {
+            if let Some(component) = form.focused_component().cloned() {
+                match &component {
+                    ui_protocol::Component::Slider { id, min, .. } => {
+                        if let Some(val) = form.state.get_number(id) {
+                            let new_val = (val - 1.0).max(*min);
+                            form.state.set_number(id, new_val);
+                            form.recompute_interactive_ids();
+                            *should_render = true;
+                        }
+                    }
+                    ui_protocol::Component::Textbox { .. } => {
+                        if form.text_cursor > 0 {
+                            form.text_cursor -= 1;
+                            *should_render = true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        BareKey::Right => {
+            if let Some(component) = form.focused_component().cloned() {
+                match &component {
+                    ui_protocol::Component::Slider { id, max, .. } => {
+                        if let Some(val) = form.state.get_number(id) {
+                            let new_val = (val + 1.0).min(*max);
+                            form.state.set_number(id, new_val);
+                            form.recompute_interactive_ids();
+                            *should_render = true;
+                        }
+                    }
+                    ui_protocol::Component::Textbox { id, .. } => {
+                        if let Some(text) = form.state.get_text(id) {
+                            if form.text_cursor < text.len() {
+                                form.text_cursor += 1;
+                                *should_render = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        BareKey::Char(' ') => {
+            if let Some(component) = form.focused_component().cloned() {
+                match &component {
+                    ui_protocol::Component::Checkbox { id, .. } => {
+                        let val = form.state.get_boolean(id).unwrap_or(false);
+                        form.state.set_boolean(id, !val);
+                        form.recompute_interactive_ids();
+                        *should_render = true;
+                    }
+                    ui_protocol::Component::Multiselect { id, .. } => {
+                        let sub = *form.sub_index.get(id.as_str()).unwrap_or(&0);
+                        if let Some(mc) = form.state.get_multichoice(id) {
+                            let mut mc = mc.to_vec();
+                            if sub < mc.len() {
+                                mc[sub] = !mc[sub];
+                                form.state.set_multichoice(id, mc);
+                                form.recompute_interactive_ids();
+                                *should_render = true;
+                            }
+                        }
+                    }
+                    ui_protocol::Component::Textbox { id, .. } => {
+                        if let Some(text) = form.state.get_text(id).map(|s| s.to_string()) {
+                            let mut t = text;
+                            let cursor = form.text_cursor.min(t.len());
+                            t.insert(cursor, ' ');
+                            form.text_cursor = cursor + 1;
+                            form.state.set_text(id, t);
+                            *should_render = true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        BareKey::Backspace => {
+            if let Some(component) = form.focused_component().cloned() {
+                if let ui_protocol::Component::Textbox { id, .. } = &component {
+                    if let Some(text) = form.state.get_text(id).map(|s| s.to_string()) {
+                        let mut t = text;
+                        if form.text_cursor > 0 && form.text_cursor <= t.len() {
+                            t.remove(form.text_cursor - 1);
+                            form.text_cursor -= 1;
+                            form.state.set_text(id, t);
+                            *should_render = true;
+                        }
+                    }
+                }
+            }
+        }
+        BareKey::Delete => {
+            if let Some(component) = form.focused_component().cloned() {
+                if let ui_protocol::Component::Textbox { id, .. } = &component {
+                    if let Some(text) = form.state.get_text(id).map(|s| s.to_string()) {
+                        let mut t = text;
+                        if form.text_cursor < t.len() {
+                            t.remove(form.text_cursor);
+                            form.state.set_text(id, t);
+                            *should_render = true;
+                        }
+                    }
+                }
+            }
+        }
+        BareKey::Char(ch) => {
+            if let Some(component) = form.focused_component().cloned() {
+                if let ui_protocol::Component::Textbox { id, .. } = &component {
+                    if let Some(text) = form.state.get_text(id).map(|s| s.to_string()) {
+                        let mut t = text;
+                        let cursor = form.text_cursor.min(t.len());
+                        t.insert(cursor, ch);
+                        form.text_cursor = cursor + 1;
+                        form.state.set_text(id, t);
+                        *should_render = true;
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 impl ZellijPlugin for ExoMonadPlugin {
     fn load(&mut self, _configuration: BTreeMap<String, String>) {
         request_permission(&[
@@ -279,42 +736,51 @@ impl ZellijPlugin for ExoMonadPlugin {
             let trimmed_payload = payload.trim_start();
 
             if trimmed_payload.starts_with('{') {
-                // Structured JSON payload (PopupRequest)
+                // Check target_tab routing: only render in the targeted plugin instance.
+                // Other instances unblock the pipe and ignore the request.
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(trimmed_payload) {
+                    if let Some(target) = json.get("target_tab").and_then(|v| v.as_str()) {
+                        if let Some(own_tab) = &self.own_tab_name {
+                            if own_tab != target {
+                                unblock_cli_pipe_input(&pipe_id);
+                                return true;
+                            }
+                        }
+                    }
+                }
+
+                // Try WizardRequest first (has "wizard" key)
+                if let Ok(req) = serde_json::from_str::<ui_protocol::WizardRequest>(trimmed_payload) {
+                    block_cli_pipe_input(&pipe_id);
+                    show_self(true);
+                    match ActiveWizard::new(pipe_id.clone(), req.request_id, req.wizard) {
+                        Some(wizard) => {
+                            self.active_wizard = Some(wizard);
+                            self.status_state = PluginState::Waiting;
+                            self.status_message = "Wizard active...".to_string();
+                        }
+                        None => {
+                            self.status_state = PluginState::Error;
+                            self.status_message = "Invalid wizard: start pane not found".to_string();
+                            cli_pipe_output(&pipe_id, "ERROR_INVALID_WIZARD\n");
+                            unblock_cli_pipe_input(&pipe_id);
+                        }
+                    }
+                    return true;
+                }
+
+                // Try PopupRequest (simple form)
                 match serde_json::from_str::<ui_protocol::PopupRequest>(trimmed_payload) {
                     Ok(req) => {
-                        let items: Vec<String> = req
-                            .definition
-                            .components
-                            .iter()
-                            .filter_map(|c| match c {
-                                ui_protocol::Component::Choice { options, .. } => {
-                                    Some(options.clone())
-                                }
-                                _ => None,
-                            })
-                            .flatten()
-                            .collect();
-
-                        if items.is_empty() {
-                            self.status_state = PluginState::Error;
-                            self.status_message = "JSON popup must have at least one choice component".to_string();
-                            // Don't include ':' to avoid misinterpretation as successful selection
-                            cli_pipe_output(&pipe_id, &format!("ERROR_NO_ITEMS:{}\n", req.request_id));
-                            unblock_cli_pipe_input(&pipe_id);
-                            return true;
-                        }
-
                         block_cli_pipe_input(&pipe_id);
-                        show_self(true); // Toggle floating layer visible
-                        self.active_popup = Some(ActivePopup {
+                        show_self(true);
+                        self.active_form = Some(ActiveForm::new(
                             pipe_id,
-                            request_id: req.request_id,
-                            title: req.definition.title,
-                            items,
-                            selected_index: 0,
-                        });
+                            req.request_id,
+                            req.definition,
+                        ));
                         self.status_state = PluginState::Waiting;
-                        self.status_message = "Waiting for selection...".to_string();
+                        self.status_message = "Waiting for input...".to_string();
                         return true;
                     }
                     Err(e) => {
@@ -327,6 +793,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                 }
             }
 
+            // Legacy pipe format: "request_id|title|item1,item2,item3"
             let parts: Vec<&str> = payload.splitn(3, '|').collect();
 
             if parts.len() < 3 {
@@ -353,18 +820,24 @@ impl ZellijPlugin for ExoMonadPlugin {
                 return true;
             }
 
+            // Convert legacy format to PopupDefinition with a single Choice
+            let definition = ui_protocol::PopupDefinition {
+                title: title.clone(),
+                components: vec![ui_protocol::Component::Choice {
+                    id: "selection".to_string(),
+                    label: String::new(),
+                    options: items,
+                    default: Some(0),
+                    visible_when: None,
+                }],
+            };
+
             block_cli_pipe_input(&pipe_id);
-            show_self(true); // Toggle floating layer visible
-            self.active_popup = Some(ActivePopup {
-                pipe_id,
-                request_id,
-                title,
-                items,
-                selected_index: 0,
-            });
+            show_self(true);
+            self.active_form = Some(ActiveForm::new(pipe_id, request_id, definition));
             self.status_state = PluginState::Waiting;
-            self.status_message = "Waiting for selection...".to_string();
-            return true; // Request re-render
+            self.status_message = "Waiting for input...".to_string();
+            return true;
         }
 
         // Handle inject-input requests: write text into a target pane resolved by tab name.
@@ -481,7 +954,7 @@ impl ZellijPlugin for ExoMonadPlugin {
                                 should_render = true;
                             }
                             PluginMessage::ClosePopup => {
-                                self.active_popup = None;
+                                self.active_form = None;
                                 self.status_state = PluginState::Idle;
                                 self.status_message = "Ready.".to_string();
                                 should_render = true;
@@ -509,52 +982,104 @@ impl ZellijPlugin for ExoMonadPlugin {
                 self.rebuild_tab_pane_map();
             }
             Event::Key(key) => {
-                if let Some(popup) = &mut self.active_popup {
-                    if popup.items.is_empty() {
-                        return false;
-                    }
+                // Wizard mode key handling
+                if let Some(wizard) = &mut self.active_wizard {
+                    let mut dismiss = false;
 
                     match key.bare_key {
                         BareKey::Esc => {
-                            let response = format!("{}:CANCELLED\n", popup.request_id);
-                            cli_pipe_output(&popup.pipe_id, &response);
-                            unblock_cli_pipe_input(&popup.pipe_id);
-                            // Drop mutable borrow before clearing state
-                        }
-                        BareKey::Down | BareKey::Char('j') => {
-                            if popup.selected_index < popup.items.len().saturating_sub(1) {
-                                popup.selected_index += 1;
-                                should_render = true;
-                            }
-                        }
-                        BareKey::Up | BareKey::Char('k') => {
-                            if popup.selected_index > 0 {
-                                popup.selected_index -= 1;
-                                should_render = true;
-                            }
+                            // Cancel wizard — return partial results
+                            let result = wizard.to_wizard_result("cancelled");
+                            let response = serde_json::to_string(&serde_json::json!({
+                                "request_id": wizard.request_id,
+                                "result": result,
+                            })).unwrap_or_default();
+                            cli_pipe_output(&wizard.pipe_id, &format!("{}\n", response));
+                            unblock_cli_pipe_input(&wizard.pipe_id);
+                            dismiss = true;
                         }
                         BareKey::Enter => {
-                            let selected = popup
-                                .items
-                                .get(popup.selected_index)
-                                .cloned()
-                                .unwrap_or_default();
-                            let response = format!("{}:{}\n", popup.request_id, selected);
-                            cli_pipe_output(&popup.pipe_id, &response);
-                            unblock_cli_pipe_input(&popup.pipe_id);
-                            // Drop mutable borrow before clearing state
+                            if wizard.is_terminal() {
+                                // Submit wizard — collect all values
+                                let result = wizard.to_wizard_result("submit");
+                                let response = serde_json::to_string(&serde_json::json!({
+                                    "request_id": wizard.request_id,
+                                    "result": result,
+                                })).unwrap_or_default();
+                                cli_pipe_output(&wizard.pipe_id, &format!("{}\n", response));
+                                unblock_cli_pipe_input(&wizard.pipe_id);
+                                dismiss = true;
+                            } else {
+                                // Advance to next pane via transition
+                                if let Some(target) = wizard.resolve_transition() {
+                                    wizard.advance_to(&target);
+                                    should_render = true;
+                                }
+                            }
                         }
-                        _ => {}
+                        BareKey::Backspace => {
+                            // Back navigation: only if not in a textbox
+                            let in_textbox = wizard.form.focused_component()
+                                .map_or(false, |c| matches!(c, ui_protocol::Component::Textbox { .. }));
+                            if !in_textbox {
+                                if wizard.go_back() {
+                                    should_render = true;
+                                }
+                            } else {
+                                // Delegate to form (textbox backspace)
+                                handle_form_key(&mut wizard.form, &key, &mut should_render);
+                            }
+                        }
+                        _ => {
+                            // Delegate all other keys to the inner form
+                            handle_form_key(&mut wizard.form, &key, &mut should_render);
+                        }
+                    }
+
+                    if dismiss {
+                        self.active_wizard = None;
+                        self.status_state = PluginState::Idle;
+                        self.status_message = "Ready.".to_string();
+                        should_render = true;
+                        hide_self();
                     }
                 }
 
-                // Dismiss after Esc/Enter: clear popup state, re-render as idle status
-                if matches!(key.bare_key, BareKey::Esc | BareKey::Enter) && self.active_popup.is_some() {
-                    self.active_popup = None;
-                    self.status_state = PluginState::Idle;
-                    self.status_message = "Ready.".to_string();
-                    should_render = true;
-                    hide_self();
+                // Simple form mode key handling
+                if let Some(form) = &mut self.active_form {
+                    let mut dismiss = false;
+
+                    match key.bare_key {
+                        BareKey::Esc => {
+                            let result = form.to_popup_result("cancelled");
+                            let response = serde_json::to_string(&ui_protocol::PopupResponse {
+                                request_id: form.request_id.clone(),
+                                result,
+                            }).unwrap_or_default();
+                            cli_pipe_output(&form.pipe_id, &format!("{}\n", response));
+                            unblock_cli_pipe_input(&form.pipe_id);
+                            dismiss = true;
+                        }
+                        BareKey::Enter => {
+                            let result = form.to_popup_result("submit");
+                            let response = serde_json::to_string(&ui_protocol::PopupResponse {
+                                request_id: form.request_id.clone(),
+                                result,
+                            }).unwrap_or_default();
+                            cli_pipe_output(&form.pipe_id, &format!("{}\n", response));
+                            unblock_cli_pipe_input(&form.pipe_id);
+                            dismiss = true;
+                        }
+                        _ => handle_form_key(form, &key, &mut should_render),
+                    }
+
+                    if dismiss {
+                        self.active_form = None;
+                        self.status_state = PluginState::Idle;
+                        self.status_message = "Ready.".to_string();
+                        should_render = true;
+                        hide_self();
+                    }
                 }
             }
             Event::Timer(_) => {
@@ -657,16 +1182,38 @@ impl ZellijPlugin for ExoMonadPlugin {
                         .title_style(Style::default().fg(COLOR_BASE1)));
                 f.render_widget(events_list, chunks[1]);
 
-                // Popup - Full pane rendering (plugin is shown via show_self(true) as dedicated floating pane)
-                if let Some(popup) = &self.active_popup {
-                    // Use full area since this is a dedicated popup pane, not an overlay
-                    let popup_area = area;
+                // Determine which mode to render: wizard, form, or neither
+                let render_mode: Option<RenderMode> = if self.active_wizard.is_some() {
+                    Some(RenderMode::Wizard)
+                } else if self.active_form.is_some() {
+                    Some(RenderMode::Form)
+                } else {
+                    None
+                };
 
+                if let Some(mode) = render_mode {
+                    let popup_area = area;
                     f.render_widget(Clear, popup_area);
+
+                    // Get title and form reference based on mode
+                    let (title, breadcrumbs, is_terminal) = match &mode {
+                        RenderMode::Wizard => {
+                            let w = self.active_wizard.as_ref().unwrap();
+                            (
+                                format!("{} — {}", w.wizard.title, w.form.definition.title),
+                                Some(w.breadcrumbs()),
+                                w.is_terminal(),
+                            )
+                        }
+                        RenderMode::Form => {
+                            let f = self.active_form.as_ref().unwrap();
+                            (f.definition.title.clone(), None, true)
+                        }
+                    };
 
                     let block = Block::default()
                         .title(Line::from(vec![
-                            Span::styled(format!(" {} ", popup.title), Style::default().fg(COLOR_BASE3).add_modifier(Modifier::BOLD))
+                            Span::styled(format!(" {} ", title), Style::default().fg(COLOR_BASE3).add_modifier(Modifier::BOLD))
                         ]))
                         .title_alignment(Alignment::Center)
                         .borders(Borders::ALL)
@@ -679,52 +1226,229 @@ impl ZellijPlugin for ExoMonadPlugin {
 
                     let layout = Layout::default()
                         .direction(Direction::Vertical)
-                        .constraints([Constraint::Min(0), Constraint::Length(2)]) // increased for better help text spacing
+                        .constraints([Constraint::Min(0), Constraint::Length(2)])
                         .split(inner_area);
 
-                    // Render choice items
-                    let items: Vec<ListItem> = popup
-                        .items
-                        .iter()
-                        .enumerate()
-                        .map(|(i, item)| {
-                            let is_selected = i == popup.selected_index;
-                            if is_selected {
-                                let style = Style::default().bg(COLOR_BLUE).fg(COLOR_BASE3).add_modifier(Modifier::BOLD);
-                                ListItem::new(Line::from(vec![
-                                    Span::raw(" "), // Padding
-                                    Span::raw(item.clone()),
-                                ])).style(style)
-                            } else {
-                                let style = Style::default().fg(COLOR_BASE1);
-                                ListItem::new(Line::from(vec![
-                                    Span::styled(format!("{}. ", i + 1), Style::default().fg(COLOR_BASE01)),
-                                    Span::styled(item.clone(), style),
-                                ]))
-                            }
-                        })
-                        .collect();
+                    let mut lines: Vec<Line> = Vec::new();
 
-                    let list = List::new(items).block(Block::default());
-                    f.render_widget(list, layout[0]);
+                    // Breadcrumbs for wizard mode
+                    if let Some(crumbs) = &breadcrumbs {
+                        lines.push(Line::from(Span::styled(
+                            format!("  {}", crumbs),
+                            Style::default().fg(COLOR_BASE01).add_modifier(Modifier::ITALIC),
+                        )));
+                        lines.push(Line::from(""));
+                    }
+
+                    // Get form reference for component rendering
+                    let form = match &mode {
+                        RenderMode::Wizard => &self.active_wizard.as_ref().unwrap().form,
+                        RenderMode::Form => self.active_form.as_ref().unwrap(),
+                    };
+
+                    let focused_id = form.focused_id().unwrap_or("");
+
+                    for component in &form.definition.components {
+                        if !form.state.is_visible(component) {
+                            continue;
+                        }
+
+                        let is_focused = component.id() == focused_id;
+                        let focus_indicator = if is_focused { "▸ " } else { "  " };
+                        let label_style = if is_focused {
+                            Style::default().fg(COLOR_YELLOW).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(COLOR_BASE1)
+                        };
+
+                        match component {
+                            ui_protocol::Component::Text { content, .. } => {
+                                for text_line in content.lines() {
+                                    lines.push(Line::from(Span::styled(
+                                        format!("  {}", text_line),
+                                        Style::default().fg(COLOR_BASE1),
+                                    )));
+                                }
+                                lines.push(Line::from(""));
+                            }
+                            ui_protocol::Component::Group { label, .. } => {
+                                lines.push(Line::from(vec![
+                                    Span::styled(
+                                        format!("── {} ", label),
+                                        Style::default().fg(COLOR_CYAN).add_modifier(Modifier::BOLD),
+                                    ),
+                                    Span::styled(
+                                        "─".repeat(inner_area.width.saturating_sub(label.len() as u16 + 5) as usize),
+                                        Style::default().fg(COLOR_BASE01),
+                                    ),
+                                ]));
+                            }
+                            ui_protocol::Component::Checkbox { id, label, .. } => {
+                                let checked = form.state.get_boolean(id).unwrap_or(false);
+                                let check_char = if checked { "x" } else { " " };
+                                let check_style = if checked {
+                                    Style::default().fg(COLOR_GREEN)
+                                } else {
+                                    Style::default().fg(COLOR_BASE01)
+                                };
+                                lines.push(Line::from(vec![
+                                    Span::styled(focus_indicator, label_style),
+                                    Span::styled(format!("[{}] ", check_char), check_style),
+                                    Span::styled(label.as_str(), label_style),
+                                ]));
+                            }
+                            ui_protocol::Component::Slider { id, label, min, max, .. } => {
+                                let val = form.state.get_number(id).unwrap_or(*min);
+                                let range = max - min;
+                                let bar_width = 20usize;
+                                let filled = if range > 0.0 {
+                                    ((val - min) / range * bar_width as f32) as usize
+                                } else {
+                                    0
+                                };
+                                let empty = bar_width.saturating_sub(filled);
+                                lines.push(Line::from(vec![
+                                    Span::styled(focus_indicator, label_style),
+                                    Span::styled(format!("{}: ", label), label_style),
+                                ]));
+                                lines.push(Line::from(vec![
+                                    Span::raw("  ["),
+                                    Span::styled("=".repeat(filled), Style::default().fg(COLOR_BLUE)),
+                                    Span::styled("|", Style::default().fg(COLOR_YELLOW)),
+                                    Span::styled("-".repeat(empty), Style::default().fg(COLOR_BASE01)),
+                                    Span::raw("] "),
+                                    Span::styled(format!("{:.0}", val), Style::default().fg(COLOR_BASE3)),
+                                ]));
+                            }
+                            ui_protocol::Component::Choice { id, label, options, .. } => {
+                                if !label.is_empty() {
+                                    lines.push(Line::from(vec![
+                                        Span::styled(focus_indicator, label_style),
+                                        Span::styled(format!("{}:", label), label_style),
+                                    ]));
+                                }
+                                let selected = form.state.get_choice(id).unwrap_or(0);
+                                for (i, option) in options.iter().enumerate() {
+                                    let is_selected = i == selected;
+                                    if is_selected {
+                                        lines.push(Line::from(vec![
+                                            Span::raw("  "),
+                                            Span::styled(
+                                                format!(" {} ", option),
+                                                Style::default().bg(COLOR_BLUE).fg(COLOR_BASE3).add_modifier(Modifier::BOLD),
+                                            ),
+                                        ]));
+                                    } else {
+                                        lines.push(Line::from(vec![
+                                            Span::styled(format!("  {}. ", i + 1), Style::default().fg(COLOR_BASE01)),
+                                            Span::styled(option.as_str(), Style::default().fg(COLOR_BASE1)),
+                                        ]));
+                                    }
+                                }
+                            }
+                            ui_protocol::Component::Multiselect { id, label, options, .. } => {
+                                lines.push(Line::from(vec![
+                                    Span::styled(focus_indicator, label_style),
+                                    Span::styled(format!("{}:", label), label_style),
+                                ]));
+                                let selections = form.state.get_multichoice(id).unwrap_or(&[]);
+                                let highlighted = *form.sub_index.get(id.as_str()).unwrap_or(&0);
+                                for (i, option) in options.iter().enumerate() {
+                                    let is_checked = selections.get(i).copied().unwrap_or(false);
+                                    let is_highlighted = is_focused && i == highlighted;
+                                    let check_char = if is_checked { "x" } else { " " };
+                                    let style = if is_highlighted {
+                                        Style::default().fg(COLOR_BASE3).add_modifier(Modifier::BOLD)
+                                    } else if is_checked {
+                                        Style::default().fg(COLOR_GREEN)
+                                    } else {
+                                        Style::default().fg(COLOR_BASE1)
+                                    };
+                                    lines.push(Line::from(vec![
+                                        Span::raw("  "),
+                                        Span::styled(format!("[{}] ", check_char), style),
+                                        Span::styled(option.as_str(), style),
+                                    ]));
+                                }
+                            }
+                            ui_protocol::Component::Textbox { id, label, placeholder, .. } => {
+                                lines.push(Line::from(vec![
+                                    Span::styled(focus_indicator, label_style),
+                                    Span::styled(format!("{}:", label), label_style),
+                                ]));
+                                let text = form.state.get_text(id).unwrap_or("").to_string();
+                                let display_text = if text.is_empty() {
+                                    placeholder.as_deref().unwrap_or("").to_string()
+                                } else {
+                                    text.clone()
+                                };
+                                let text_style = if text.is_empty() {
+                                    Style::default().fg(COLOR_BASE01)
+                                } else {
+                                    Style::default().fg(COLOR_BASE3)
+                                };
+                                let border_color = if is_focused { COLOR_CYAN } else { COLOR_BASE01 };
+
+                                let box_width = inner_area.width.saturating_sub(4) as usize;
+                                lines.push(Line::from(Span::styled(
+                                    format!("  ┌{}┐", "─".repeat(box_width)),
+                                    Style::default().fg(border_color),
+                                )));
+                                let truncated: String = display_text.chars().take(box_width).collect();
+                                let padded: String = format!("{:width$}", truncated, width = box_width);
+                                lines.push(Line::from(vec![
+                                    Span::styled("  │".to_string(), Style::default().fg(border_color)),
+                                    Span::styled(padded, text_style),
+                                    Span::styled("│".to_string(), Style::default().fg(border_color)),
+                                ]));
+                                lines.push(Line::from(Span::styled(
+                                    format!("  └{}┘", "─".repeat(box_width)),
+                                    Style::default().fg(border_color),
+                                )));
+                            }
+                        }
+                    }
+
+                    let paragraph = Paragraph::new(lines);
+                    f.render_widget(paragraph, layout[0]);
 
                     // Help text with separator
                     let separator = Block::default().borders(Borders::TOP).border_style(Style::default().fg(COLOR_BASE01));
                     let help_area = layout[1];
                     f.render_widget(separator, help_area);
-                    
-                    // Render text inside the help area (offset by 1 due to border)
+
                     let help_text_area = Rect { y: help_area.y + 1, height: 1, ..help_area };
-                    
+
                     let key_style = Style::default().fg(COLOR_BASE1).add_modifier(Modifier::BOLD);
                     let desc_style = Style::default().fg(COLOR_BASE01);
-                    
-                    let help_text = Line::from(vec![
-                        Span::styled("Enter", key_style), Span::styled(": Select  ", desc_style),
-                        Span::styled("Esc", key_style), Span::styled(": Cancel  ", desc_style),
-                        Span::styled("↑/↓/j/k", key_style), Span::styled(": Move", desc_style),
-                    ]);
-                    
+
+                    let help_text = match &mode {
+                        RenderMode::Wizard => {
+                            let has_back = self.active_wizard.as_ref()
+                                .map_or(false, |w| w.pane_history.len() > 1);
+                            let action = if is_terminal { "Submit" } else { "Next" };
+                            let mut spans = vec![
+                                Span::styled("Enter", key_style), Span::styled(format!(": {}  ", action), desc_style),
+                                Span::styled("Esc", key_style), Span::styled(": Cancel  ", desc_style),
+                            ];
+                            if has_back {
+                                spans.push(Span::styled("Bksp", key_style));
+                                spans.push(Span::styled(": Back  ", desc_style));
+                            }
+                            spans.push(Span::styled("Tab", key_style));
+                            spans.push(Span::styled(": Next field  ", desc_style));
+                            Line::from(spans)
+                        }
+                        RenderMode::Form => {
+                            Line::from(vec![
+                                Span::styled("Enter", key_style), Span::styled(": Submit  ", desc_style),
+                                Span::styled("Esc", key_style), Span::styled(": Cancel  ", desc_style),
+                                Span::styled("Tab", key_style), Span::styled(": Next  ", desc_style),
+                                Span::styled("↑↓", key_style), Span::styled(": Select", desc_style),
+                            ])
+                        }
+                    };
+
                     f.render_widget(Paragraph::new(help_text).alignment(Alignment::Center), help_text_area);
                 }
             });

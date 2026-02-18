@@ -12,12 +12,15 @@ module ExoMonad.Guest.Tools.Popup
     PopupElement (..),
     PopupElementType (..),
     PopupResponse (..),
+    WizardPane (..),
   )
 where
 
+import Control.Applicative ((<|>))
 import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, withText, (.:), (.:?), (.=))
 import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy qualified as BL
+import Data.HashMap.Strict (HashMap)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
@@ -36,7 +39,9 @@ data Popup
 -- | Arguments for the popup tool.
 data PopupArgs = PopupArgs
   { paTitle :: Maybe Text,
-    paElements :: [PopupElement]
+    paElements :: [PopupElement],
+    paPanes :: Maybe (HashMap Text WizardPane),
+    paStart :: Maybe Text
   }
   deriving (Show, Eq, Generic)
 
@@ -44,7 +49,9 @@ instance FromJSON PopupArgs where
   parseJSON = withObject "PopupArgs" $ \v ->
     PopupArgs
       <$> v .:? "title"
-      <*> v .: "elements"
+      <*> (v .: "elements" <|> pure [])
+      <*> v .:? "panes"
+      <*> v .:? "start"
 
 -- | A single UI element in the popup.
 data PopupElement = PopupElement
@@ -115,6 +122,44 @@ instance FromJSON PopupResponse where
       <$> v .: "button"
       <*> v .: "values"
 
+-- | A pane in a wizard popup.
+data WizardPane = WizardPane
+  { wpTitle :: Text,
+    wpElements :: [PopupElement],
+    wpThen :: Maybe Value
+  }
+  deriving (Show, Eq, Generic)
+
+instance FromJSON WizardPane where
+  parseJSON = withObject "WizardPane" $ \v ->
+    WizardPane
+      <$> v .: "title"
+      <*> v .: "elements"
+      <*> v .:? "then"
+
+instance ToJSON WizardPane where
+  toJSON (WizardPane title elems mThen) =
+    object $
+      [ "title" .= title,
+        "elements" .= zipWith convertWizardElement [0 ..] elems
+      ]
+        ++ maybe [] (\t -> ["then_transition" .= t]) mThen
+    where
+      convertWizardElement :: Int -> PopupElement -> Value
+      convertWizardElement idx el =
+        object $
+          [ "type" .= elementTypeToText (peType el),
+            "id" .= maybe (generateId idx (peType el)) id (peId el)
+          ]
+            ++ maybe [] (\l -> ["label" .= l]) (peLabel el)
+            ++ maybe [] (\c -> ["content" .= c]) (peContent el)
+            ++ maybe [] (\o -> ["options" .= o]) (peOptions el)
+            ++ maybe [] (\d -> ["default" .= d]) (peDefault el)
+            ++ maybe [] (\p -> ["placeholder" .= p]) (pePlaceholder el)
+            ++ maybe [] (\m -> ["min" .= m]) (peMin el)
+            ++ maybe [] (\m -> ["max" .= m]) (peMax el)
+            ++ maybe [] (\r -> ["rows" .= r]) (peRows el)
+
 -- ============================================================================
 -- Conversion helpers
 -- ============================================================================
@@ -138,10 +183,23 @@ generateId idx ty = elementTypeToText ty <> "_" <> T.pack (show idx)
 -- because the proto schema uses a bytes field for flexible component data.
 toShowPopupRequest :: PopupArgs -> PP.ShowPopupRequest
 toShowPopupRequest args =
-  PP.ShowPopupRequest
-    { PP.showPopupRequestTitle = TL.fromStrict (maybe "" id (paTitle args)),
-      PP.showPopupRequestComponents = BL.toStrict $ Aeson.encode (zipWith convertElement [0 ..] (paElements args))
-    }
+  case paPanes args of
+    Just panes ->
+      let wizardJson =
+            object
+              [ "title" .= maybe "Wizard" id (paTitle args),
+                "panes" .= fmap toJSON panes,
+                "start" .= maybe "" id (paStart args)
+              ]
+       in PP.ShowPopupRequest
+            { PP.showPopupRequestTitle = TL.fromStrict (maybe "Wizard" id (paTitle args)),
+              PP.showPopupRequestComponents = BL.toStrict (Aeson.encode wizardJson)
+            }
+    Nothing ->
+      PP.ShowPopupRequest
+        { PP.showPopupRequestTitle = TL.fromStrict (maybe "" id (paTitle args)),
+          PP.showPopupRequestComponents = BL.toStrict $ Aeson.encode (zipWith convertElement [0 ..] (paElements args))
+        }
   where
     convertElement :: Int -> PopupElement -> Value
     convertElement idx el =
@@ -237,9 +295,30 @@ instance MCPTool Popup where
                                     ]
                               ]
                         ]
+                  ],
+              "panes"
+                .= object
+                  [ "type" .= ("object" :: Text),
+                    "description" .= ("Named wizard panes. Use with 'start' for multi-pane wizard mode." :: Text),
+                    "additionalProperties"
+                      .= object
+                        [ "type" .= ("object" :: Text),
+                          "required" .= (["title", "elements"] :: [Text]),
+                          "properties"
+                            .= object
+                              [ "title" .= object ["type" .= ("string" :: Text)],
+                                "elements" .= object ["type" .= ("array" :: Text), "items" .= object ["type" .= ("object" :: Text)]],
+                                "then" .= object ["description" .= ("Transition: string (goto) or object (branch by field value)" :: Text)]
+                              ]
+                        ]
+                  ],
+              "start"
+                .= object
+                  [ "type" .= ("string" :: Text),
+                    "description" .= ("Starting pane name (required when using panes)" :: Text)
                   ]
             ],
-        "required" .= (["elements"] :: [Text])
+        "required" .= ([] :: [Text])
       ]
   toolHandler args = do
     let request = toShowPopupRequest args

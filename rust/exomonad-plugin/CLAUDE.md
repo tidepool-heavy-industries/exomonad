@@ -7,6 +7,7 @@ Zellij plugin for ExoMonad agent status and popup UI.
 A Zellij WASM plugin that provides:
 - **Status display**: Agent state (IDLE, RUNNING, WAITING, ERROR)
 - **Popup UI**: Interactive forms for RequestInput effect
+- **Wizard UI**: Multi-pane branching wizard forms (CYOA-style)
 
 ## Architecture
 
@@ -79,6 +80,75 @@ Components can be conditionally shown based on visibility rules:
 - `CountGreaterThan {id, min_count}`: Show if multiselect has >= min_count
 
 **Implementation:** Plugin evaluates visibility rules on every state change and only renders visible components.
+
+## Multi-Pane Wizard
+
+The plugin supports multi-pane wizard forms (CYOA-style branching). A wizard is a JSON object with named panes, a start pane, and transition rules between panes.
+
+### Wizard Schema
+
+```json
+{
+  "title": "Design Architecture",
+  "panes": {
+    "approach": {
+      "title": "Choose Approach",
+      "elements": [
+        { "type": "choice", "id": "strategy", "label": "Strategy", "options": ["Simple", "Scalable"] }
+      ],
+      "then_transition": { "strategy": { "Simple": "confirm", "Scalable": "details" } }
+    },
+    "details": {
+      "title": "Details",
+      "elements": [ { "type": "textbox", "id": "notes", "label": "Notes" } ],
+      "then_transition": "confirm"
+    },
+    "confirm": {
+      "title": "Confirm",
+      "elements": [ { "type": "text", "id": "msg", "content": "Ready to proceed." } ]
+    }
+  },
+  "start": "approach"
+}
+```
+
+### Transition Rules
+
+- **`then_transition` absent** (terminal pane): Enter submits the wizard, collecting all values from all visited panes.
+- **`then_transition` is string**: Unconditional goto (always advance to that pane).
+- **`then_transition` is object `{ "field_id": { "OptionA": "pane_a", "OptionB": "pane_b" } }`**: Branch based on the selected option label (for Choice) or `"true"`/`"false"` (for Checkbox).
+
+### Wizard Navigation
+
+| Key | Action |
+|-----|--------|
+| Enter | Next pane (via transition) or Submit (on terminal pane) |
+| Esc | Cancel wizard — returns partial results with `button: "cancelled"` |
+| Backspace | Go back to previous pane (when not in a textbox) |
+| Tab/Shift+Tab | Move between fields within current pane |
+
+### Wizard Response
+
+The wizard returns a `WizardResult` with values from all visited panes:
+
+```json
+{
+  "button": "submit",
+  "values": {
+    "approach": { "strategy": 0 },
+    "details": { "notes": "..." }
+  },
+  "panes_visited": ["approach", "details", "confirm"]
+}
+```
+
+### Implementation
+
+- `ActiveWizard` wraps an `ActiveForm` for the current pane with wizard-specific state (pane history, collected values, transition resolution).
+- Plugin detects wizard vs form by trying to parse pipe payload as `WizardRequest` (has `"wizard"` key) before `PopupRequest`.
+- Breadcrumb trail shown above form content: `approach > [details]`.
+- Values from each pane are collected when advancing and restored when going back.
+- `handle_form_key()` is shared between form and wizard modes for component interaction (Tab, Up/Down, Space, etc.).
 
 ## Building
 

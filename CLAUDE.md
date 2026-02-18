@@ -201,7 +201,9 @@ The TL does not poll or block. It finishes its turn after spawning, and gets pok
 
 ### Interactive UI
 
-- **`popup`** — Display interactive popup in Zellij (choices, text input, checkboxes, sliders, multiselect). Rendered by the exomonad-plugin.
+- **`popup`** — Display interactive popup in Zellij. Supports two modes:
+  - **Simple form**: All 7 component types (text, choice, checkbox, slider, textbox, multiselect, group) with visibility rules, Tab/Shift+Tab navigation, keyboard input.
+  - **Multi-pane wizard**: Branching CYOA-style forms with named panes, conditional transitions (goto or branch by field value), breadcrumb navigation, Back key support. Returns values from all visited panes.
 
 ### Built Infrastructure
 
@@ -284,7 +286,7 @@ All tools implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/To
 | `spawn_workers` | tl | Spawn Gemini agents as Zellij panes (ephemeral, no worktree) |
 | `file_pr` | tl, dev | Create/update PR (auto-detects base branch from naming) |
 | `merge_pr` | tl | Merge child PR (gh merge + jj fetch) |
-| `popup` | tl | Interactive UI in Zellij (choices, text, sliders) |
+| `popup` | tl | Interactive UI in Zellij (forms with all component types, multi-pane wizards) |
 | `notify_parent` | all | Signal completion to parent. Auto-routed, injects into parent pane |
 
 **Note**: Git operations (`git status`, `git log`, etc.) and GitHub operations (`gh pr list`, etc.) use the Bash tool with `git` and `gh` commands, not MCP tools.
