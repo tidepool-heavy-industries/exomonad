@@ -19,7 +19,9 @@ use tokio::time::{timeout, Duration};
 use tracing::{debug, error, info, warn};
 
 use super::github::{GitHubService, Repo};
+use super::jj_workspace::JjWorkspaceService;
 use super::zellij_events;
+use std::sync::Arc;
 
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(60);
 const ZELLIJ_TIMEOUT: Duration = Duration::from_secs(30);
@@ -27,26 +29,18 @@ const ZELLIJ_TIMEOUT: Duration = Duration::from_secs(30);
 /// Push branch to remote so child PRs can reference it as base.
 /// Fails on real errors (no remote, network issues). Only tolerates
 /// "already up to date" (exit 0 with "Everything up-to-date" on stderr).
-async fn ensure_branch_pushed(branch: &str, project_dir: &Path) -> Result<()> {
-    info!(branch = %branch, "Pushing parent branch to remote for child PR base");
-    let output = Command::new("git")
-        .args(["push", "-u", "origin", branch])
-        .current_dir(project_dir)
-        .output()
-        .await
-        .context("Failed to execute git push")?;
-
-    if output.status.success() {
-        info!(branch = %branch, "Parent branch pushed to remote");
-        Ok(())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(anyhow!(
-            "Failed to push parent branch '{}' to remote (child PRs need base on origin): {}",
-            branch,
-            stderr
-        ))
-    }
+async fn ensure_branch_pushed(
+    jj: &Arc<JjWorkspaceService>,
+    branch: &str,
+    project_dir: &Path,
+) -> Result<()> {
+    info!(branch = %branch, "Pushing parent branch to remote");
+    let jj = jj.clone();
+    let dir = project_dir.to_path_buf();
+    let bookmark = branch.to_string();
+    tokio::task::spawn_blocking(move || jj.push_bookmark(&dir, &bookmark))
+        .await?
+        .context("Failed to push parent branch")
 }
 
 // ============================================================================
@@ -377,78 +371,6 @@ pub struct BatchCleanupResult {
 impl FFIBoundary for BatchCleanupResult {}
 
 // ============================================================================
-// jj bookmark helpers
-// ============================================================================
-
-/// Create a jj bookmark in the given working directory. Non-fatal on failure.
-async fn create_jj_bookmark(branch_name: &str, working_dir: &Path) {
-    info!(branch = %branch_name, dir = %working_dir.display(), "Creating jj bookmark");
-    let result = Command::new("jj")
-        .args(["bookmark", "create", branch_name, "-r", "@"])
-        .current_dir(working_dir)
-        .output()
-        .await;
-    match result {
-        Ok(o) if o.status.success() => {
-            info!(branch = %branch_name, "jj bookmark created");
-        }
-        Ok(o) => {
-            let stderr = String::from_utf8_lossy(&o.stderr);
-            warn!(branch = %branch_name, stderr = %stderr, "jj bookmark create failed (non-fatal)");
-        }
-        Err(e) => {
-            warn!(branch = %branch_name, error = %e, "Failed to run jj bookmark create (non-fatal)");
-        }
-    }
-}
-
-/// Delete a jj bookmark. Runs in the given working directory. Non-fatal on failure.
-async fn delete_jj_bookmark(branch_name: &str, working_dir: &Path) {
-    info!(branch = %branch_name, "Deleting jj bookmark");
-    let result = Command::new("jj")
-        .args(["bookmark", "delete", branch_name])
-        .current_dir(working_dir)
-        .output()
-        .await;
-    match result {
-        Ok(o) if o.status.success() => {
-            info!(branch = %branch_name, "jj bookmark deleted");
-        }
-        Ok(o) => {
-            let stderr = String::from_utf8_lossy(&o.stderr);
-            warn!(branch = %branch_name, stderr = %stderr, "jj bookmark delete failed (non-fatal)");
-        }
-        Err(e) => {
-            warn!(branch = %branch_name, error = %e, "Failed to run jj bookmark delete (non-fatal)");
-        }
-    }
-}
-
-/// Get the branch name for a git worktree.
-async fn get_worktree_branch(worktree_path: &Path) -> Option<String> {
-    let output = Command::new("git")
-        .args([
-            "-C",
-            &worktree_path.to_string_lossy(),
-            "rev-parse",
-            "--abbrev-ref",
-            "HEAD",
-        ])
-        .output()
-        .await
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if branch.is_empty() || branch == "HEAD" {
-        None
-    } else {
-        Some(branch)
-    }
-}
-
-// ============================================================================
 // Service
 // ============================================================================
 
@@ -467,12 +389,15 @@ pub struct AgentControlService {
     birth_branch: BirthBranch,
     /// MCP server port for per-agent endpoint URLs (set when running `exomonad serve`).
     mcp_server_port: Option<u16>,
+    /// jj workspace service
+    jj: Arc<JjWorkspaceService>,
 }
 
 impl AgentControlService {
     /// Create a new agent control service.
     pub fn new(project_dir: PathBuf, github: Option<GitHubService>) -> Self {
         let worktree_base = project_dir.join(".exo/worktrees");
+        let jj = Arc::new(JjWorkspaceService::new(project_dir.clone()));
         Self {
             project_dir,
             worktree_base,
@@ -480,6 +405,7 @@ impl AgentControlService {
             zellij_session: None,
             birth_branch: BirthBranch::root(),
             mcp_server_port: None,
+            jj,
         }
     }
 
@@ -527,6 +453,8 @@ impl AgentControlService {
             .github_token()
             .and_then(|t| GitHubService::new(t).ok());
 
+        let jj = Arc::new(JjWorkspaceService::new(project_dir.clone()));
+
         Ok(Self {
             project_dir: project_dir.clone(),
             worktree_base: project_dir.join(".exo/worktrees"),
@@ -534,6 +462,7 @@ impl AgentControlService {
             zellij_session: None,
             birth_branch: BirthBranch::root(),
             mcp_server_port: None,
+            jj,
         })
     }
 
@@ -621,43 +550,32 @@ impl AgentControlService {
 
             // Clean up existing worktree if it exists (idempotency)
             if worktree_path.exists() {
-                info!(path = %worktree_path.display(), "Removing existing worktree for idempotency");
-                let _ = Command::new("git")
-                    .args(["worktree", "remove", "--force", &worktree_path.to_string_lossy()])
-                    .current_dir(&effective_project_dir)
-                    .output()
-                    .await;
+                info!(path = %worktree_path.display(), "Removing existing workspace for idempotency");
+                let jj = self.jj.clone();
+                let path = worktree_path.clone();
+                if let Err(e) = tokio::task::spawn_blocking(move || jj.remove_workspace(&path)).await? {
+                    warn!(error = %e, "Failed to remove existing workspace (non-fatal)");
+                }
             }
 
             info!(
                 base_branch = %base,
                 branch_name = %branch_name,
                 worktree_path = %worktree_path.display(),
-                "Creating git worktree"
+                "Creating jj workspace"
             );
 
-            // Create the worktree
-            // git worktree add -b <new_branch> <path> <start_point>
-            let output = Command::new("git")
-                .args([
-                    "worktree",
-                    "add",
-                    "-b",
-                    &branch_name,
-                    &worktree_path.to_string_lossy(),
-                    base,
-                ])
-                .current_dir(&effective_project_dir)
-                .output()
-                .await
-                .context("Failed to create git worktree")?;
-
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                error!(stderr = %stderr, "git worktree add failed");
-                return Err(anyhow!("git worktree add failed: {}", stderr));
+            // Create the workspace
+            {
+                let jj = self.jj.clone();
+                let path = worktree_path.clone();
+                let bookmark = branch_name.clone();
+                let base = base.to_string();
+                tokio::task::spawn_blocking(move || jj.create_workspace(&path, &bookmark, &base))
+                    .await?
+                    .context("Failed to create jj workspace")?;
             }
-            info!(worktree_path = %worktree_path.display(), "Git worktree created successfully");
+            info!(worktree_path = %worktree_path.display(), "jj workspace created successfully");
 
             // Use worktree path as agent_dir
             let agent_dir = worktree_path;
@@ -848,39 +766,29 @@ impl AgentControlService {
 
             // Clean up existing worktree if it exists
             if worktree_path.exists() {
-                info!(path = %worktree_path.display(), "Removing existing worktree for idempotency");
-                let _ = Command::new("git")
-                    .args(["worktree", "remove", "--force", &worktree_path.to_string_lossy()])
-                    .current_dir(&effective_project_dir)
-                    .output()
-                    .await;
+                info!(path = %worktree_path.display(), "Removing existing workspace for idempotency");
+                let jj = self.jj.clone();
+                let path = worktree_path.clone();
+                if let Err(e) = tokio::task::spawn_blocking(move || jj.remove_workspace(&path)).await? {
+                    warn!(error = %e, "Failed to remove existing workspace (non-fatal)");
+                }
             }
 
             info!(
                 base_branch = %base_branch,
                 branch_name = %branch_name,
                 worktree_path = %worktree_path.display(),
-                "Creating git worktree"
+                "Creating jj workspace"
             );
 
-            let output = Command::new("git")
-                .args([
-                    "worktree",
-                    "add",
-                    "-b",
-                    &branch_name,
-                    &worktree_path.to_string_lossy(),
-                    &base_branch,
-                ])
-                .current_dir(&effective_project_dir)
-                .output()
-                .await
-                .context("Failed to create git worktree")?;
-
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                error!(stderr = %stderr, "git worktree add failed");
-                return Err(anyhow!("git worktree add failed: {}", stderr));
+            {
+                let jj = self.jj.clone();
+                let path = worktree_path.clone();
+                let bookmark = branch_name.clone();
+                let base = base_branch.to_string();
+                tokio::task::spawn_blocking(move || jj.create_workspace(&path, &bookmark, &base))
+                    .await?
+                    .context("Failed to create jj workspace")?;
             }
 
             let mut env_vars = HashMap::new();
@@ -1134,7 +1042,7 @@ impl AgentControlService {
             let current_branch = effective_birth.as_parent_branch();
 
             // Push parent branch so child PRs can reference it as base
-            ensure_branch_pushed(current_branch, effective_project_dir).await?;
+            ensure_branch_pushed(&self.jj, current_branch, effective_project_dir).await?;
 
             // Branch: {current_branch}.{slug}
             let child_birth = effective_birth.child(&slug);
@@ -1145,50 +1053,30 @@ impl AgentControlService {
 
             // Clean up existing worktree if it exists
             if worktree_path.exists() {
-                info!(path = %worktree_path.display(), "Removing existing worktree for idempotency");
-                let _ = Command::new("git")
-                    .args(["worktree", "remove", "--force", &worktree_path.to_string_lossy()])
-                    .current_dir(effective_project_dir)
-                    .output()
-                    .await;
+                info!(path = %worktree_path.display(), "Removing existing workspace for idempotency");
+                let jj = self.jj.clone();
+                let path = worktree_path.clone();
+                if let Err(e) = tokio::task::spawn_blocking(move || jj.remove_workspace(&path)).await? {
+                    warn!(error = %e, "Failed to remove existing workspace (non-fatal)");
+                }
             }
-
-            // Clean up stale branch if it exists
-            info!(branch = %branch_name, "Deleting stale branch if exists");
-            let _ = Command::new("git")
-                .args(["branch", "-D", &branch_name])
-                .current_dir(effective_project_dir)
-                .output()
-                .await;
 
             info!(
                 base_branch = %current_branch,
                 branch_name = %branch_name,
                 worktree_path = %worktree_path.display(),
-                "Creating git worktree for subtree"
+                "Creating jj workspace for subtree"
             );
 
-            let output = Command::new("git")
-                .args([
-                    "worktree",
-                    "add",
-                    "-b",
-                    &branch_name,
-                    &worktree_path.to_string_lossy(),
-                    current_branch,
-                ])
-                .current_dir(effective_project_dir)
-                .output()
-                .await
-                .context("Failed to create git worktree")?;
-
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                error!(stderr = %stderr, "git worktree add failed");
-                return Err(anyhow!("git worktree add failed: {}", stderr));
+            {
+                let jj = self.jj.clone();
+                let path = worktree_path.clone();
+                let bookmark = branch_name.clone();
+                let base = current_branch.to_string();
+                tokio::task::spawn_blocking(move || jj.create_workspace(&path, &bookmark, &base))
+                    .await?
+                    .context("Failed to create jj workspace")?;
             }
-
-            create_jj_bookmark(&branch_name, &worktree_path).await;
 
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
@@ -1284,7 +1172,7 @@ impl AgentControlService {
             }
 
             // Push parent branch so child PRs can reference it as base
-            ensure_branch_pushed(&current_branch, effective_project_dir).await?;
+            ensure_branch_pushed(&self.jj, &current_branch, effective_project_dir).await?;
 
             let child_birth = effective_birth.child(&slug);
             let branch_name = child_birth.to_string();
@@ -1292,50 +1180,30 @@ impl AgentControlService {
 
             // Clean up existing worktree
             if worktree_path.exists() {
-                info!(path = %worktree_path.display(), "Removing existing worktree for idempotency");
-                let _ = Command::new("git")
-                    .args(["worktree", "remove", "--force", &worktree_path.to_string_lossy()])
-                    .current_dir(effective_project_dir)
-                    .output()
-                    .await;
+                info!(path = %worktree_path.display(), "Removing existing workspace for idempotency");
+                let jj = self.jj.clone();
+                let path = worktree_path.clone();
+                if let Err(e) = tokio::task::spawn_blocking(move || jj.remove_workspace(&path)).await? {
+                    warn!(error = %e, "Failed to remove existing workspace (non-fatal)");
+                }
             }
-
-            // Clean up stale branch if it exists
-            info!(branch = %branch_name, "Deleting stale branch if exists");
-            let _ = Command::new("git")
-                .args(["branch", "-D", &branch_name])
-                .current_dir(effective_project_dir)
-                .output()
-                .await;
 
             info!(
                 base_branch = %current_branch,
                 branch_name = %branch_name,
                 worktree_path = %worktree_path.display(),
-                "Creating git worktree for leaf subtree"
+                "Creating jj workspace for leaf subtree"
             );
 
-            let output = Command::new("git")
-                .args([
-                    "worktree",
-                    "add",
-                    "-b",
-                    &branch_name,
-                    &worktree_path.to_string_lossy(),
-                    &current_branch,
-                ])
-                .current_dir(effective_project_dir)
-                .output()
-                .await
-                .context("Failed to create git worktree")?;
-
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                error!(stderr = %stderr, "git worktree add failed");
-                return Err(anyhow!("git worktree add failed: {}", stderr));
+            {
+                let jj = self.jj.clone();
+                let path = worktree_path.clone();
+                let bookmark = branch_name.clone();
+                let base = current_branch.to_string();
+                tokio::task::spawn_blocking(move || jj.create_workspace(&path, &bookmark, &base))
+                    .await?
+                    .context("Failed to create jj workspace")?;
             }
-
-            create_jj_bookmark(&branch_name, &worktree_path).await;
 
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
@@ -1462,41 +1330,14 @@ impl AgentControlService {
             }
         };
         if worktree_path.exists() {
-            // Delete jj bookmark before removing worktree (jj needs the checkout to exist)
-            if let Some(branch) = get_worktree_branch(&worktree_path).await {
-                delete_jj_bookmark(&branch, &worktree_path).await;
-            }
-
-            info!(path = %worktree_path.display(), "Removing git worktree");
-            let output = Command::new("git")
-                .args([
-                    "worktree",
-                    "remove",
-                    "--force",
-                    &worktree_path.to_string_lossy(),
-                ])
-                .current_dir(&self.project_dir)
-                .output()
-                .await;
-            match output {
-                Ok(o) if o.status.success() => {
-                    info!(path = %worktree_path.display(), "Git worktree removed");
-                }
-                Ok(o) => {
-                    let stderr = String::from_utf8_lossy(&o.stderr);
-                    warn!(
-                        path = %worktree_path.display(),
-                        stderr = %stderr,
-                        "git worktree remove failed (non-fatal)"
-                    );
-                }
-                Err(e) => {
-                    warn!(
-                        path = %worktree_path.display(),
-                        error = %e,
-                        "Failed to run git worktree remove (non-fatal)"
-                    );
-                }
+            let jj = self.jj.clone();
+            let path = worktree_path.clone();
+            if let Err(e) = tokio::task::spawn_blocking(move || jj.remove_workspace(&path)).await? {
+                warn!(
+                    path = %worktree_path.display(),
+                    error = %e,
+                    "Failed to remove jj workspace (non-fatal)"
+                );
             }
         }
 

@@ -959,7 +959,7 @@ async fn main() -> Result<()> {
                 project_dir.clone(),
                 event_log.clone(),
             ));
-            builder = builder.with_handlers(exomonad_core::git_handlers(git, jj, github));
+            builder = builder.with_handlers(exomonad_core::git_handlers(git, github, jj));
             let (orch_handlers, question_registry) = exomonad_core::orchestration_handlers(
                 agent_control.clone(),
                 event_queue.clone(),

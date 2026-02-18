@@ -43,14 +43,14 @@ pub fn core_handlers(
 /// `github` is optional — if None, GitHubHandler is not registered.
 pub fn git_handlers(
     git: Arc<GitService>,
-    jj: Arc<JjWorkspaceService>,
     github: Option<GitHubService>,
+    jj: Arc<JjWorkspaceService>,
 ) -> Vec<Box<dyn EffectHandler>> {
     let mut handlers: Vec<Box<dyn EffectHandler>> = vec![
         Box::new(GitHandler::new(git)),
-        Box::new(JjHandler),
-        Box::new(FilePRHandler::new(jj)),
-        Box::new(MergePRHandler),
+        Box::new(JjHandler::new(jj.clone())),
+        Box::new(FilePRHandler::new(jj.clone())),
+        Box::new(MergePRHandler::new(jj)),
         Box::new(CopilotHandler::new()),
     ];
     if let Some(gh) = github {

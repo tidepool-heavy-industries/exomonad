@@ -1,12 +1,21 @@
 use crate::effects::{
     dispatch_merge_pr_effect, EffectError, EffectHandler, EffectResult, MergePrEffects,
 };
+use crate::services::jj_workspace::JjWorkspaceService;
 use crate::services::merge_pr;
 use async_trait::async_trait;
 use exomonad_proto::effects::merge_pr::*;
+use std::sync::Arc;
 
-#[derive(Default)]
-pub struct MergePRHandler;
+pub struct MergePRHandler {
+    jj: Arc<JjWorkspaceService>,
+}
+
+impl MergePRHandler {
+    pub fn new(jj: Arc<JjWorkspaceService>) -> Self {
+        Self { jj }
+    }
+}
 
 #[async_trait]
 impl EffectHandler for MergePRHandler {
@@ -30,9 +39,10 @@ impl MergePrEffects for MergePRHandler {
         req: MergePrRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<MergePrResponse> {
-        let result = merge_pr::merge_pr_async(req.pr_number, &req.strategy, &req.working_dir)
-            .await
-            .map_err(|e| EffectError::custom("merge_pr_error", e.to_string()))?;
+        let result =
+            merge_pr::merge_pr_async(req.pr_number, &req.strategy, &req.working_dir, self.jj.clone())
+                .await
+                .map_err(|e| EffectError::custom("merge_pr_error", e.to_string()))?;
         Ok(MergePrResponse {
             success: result.success,
             message: result.message,
