@@ -33,7 +33,7 @@
 //! let mut builder = RuntimeBuilder::new()
 //!     .with_wasm_path(wasm_path)
 //!     .with_handlers(core_handlers(project_dir.clone(), None))
-//!     .with_handlers(git_handlers(git, github));
+//!     .with_handlers(git_handlers(git, github, jj));
 //!
 //! // Add custom domain handlers
 //! builder = builder.with_effect_handler(MyDomainHandler::new());

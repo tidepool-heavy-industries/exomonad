@@ -884,9 +884,15 @@ async fn main() -> Result<()> {
             let executor: Arc<dyn exomonad_core::services::docker::CommandExecutor> =
                 Arc::new(exomonad_core::services::local::LocalExecutor::new());
             let git = Arc::new(exomonad_core::services::git::GitService::new(executor));
+            let jj = Arc::new(exomonad_core::services::jj_workspace::JjWorkspaceService::new(
+                project_dir.clone(),
+            ));
             let github = secrets
                 .github_token()
                 .and_then(|t| exomonad_core::services::github::GitHubService::new(t).ok());
+            let jj = Arc::new(exomonad_core::services::jj_workspace::JjWorkspaceService::new(
+                project_dir.clone(),
+            ));
 
             if github.is_some() {
                 exomonad_core::services::validate_gh_cli().context("Failed to validate gh CLI")?;
@@ -954,7 +960,7 @@ async fn main() -> Result<()> {
                 project_dir.clone(),
                 event_log.clone(),
             ));
-            builder = builder.with_handlers(exomonad_core::git_handlers(git, github));
+            builder = builder.with_handlers(exomonad_core::git_handlers(git, github, jj));
             let (orch_handlers, question_registry) = exomonad_core::orchestration_handlers(
                 agent_control.clone(),
                 event_queue.clone(),
