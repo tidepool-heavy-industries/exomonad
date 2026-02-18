@@ -4,9 +4,11 @@
 // and provides clear error messages. Octocrab stays for other GitHub operations.
 
 use crate::services::git;
+use crate::services::jj_workspace::JjWorkspaceService;
 use anyhow::{Context, Result};
 use duct::cmd;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tracing::{info, warn};
 
 use super::zellij_events;
@@ -133,10 +135,22 @@ fn create_pr(
     dir: &str,
 ) -> Result<GhPr, FilePrError> {
     // gh pr create outputs the PR URL to stdout on success (no --json support)
-    let url = cmd!("gh", "pr", "create", "--title", title, "--body", body, "--base", base)
-        .dir(dir)
-        .read()
-        .map_err(|e| FilePrError::CreateFailed(e.to_string()))?;
+    let url = cmd!(
+        "gh",
+        "pr",
+        "create",
+        "--title",
+        title,
+        "--body",
+        body,
+        "--base",
+        base,
+        "--head",
+        head
+    )
+    .dir(dir)
+    .read()
+    .map_err(|e| FilePrError::CreateFailed(e.to_string()))?;
     info!("[FilePR] Created PR: {}", url.trim());
 
     // Fetch structured PR data via `gh pr view` using the branch name (stable, no URL parsing)
@@ -159,9 +173,6 @@ fn create_pr(
 // ============================================================================
 // Main implementation
 // ============================================================================
-
-use std::sync::Arc;
-use crate::services::jj_workspace::JjWorkspaceService;
 
 /// File a PR using `gh` CLI. Pushes the branch, creates or updates the PR.
 pub async fn file_pr_async(input: &FilePRInput, jj: Arc<JjWorkspaceService>) -> Result<FilePROutput> {
