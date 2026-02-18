@@ -15,7 +15,8 @@ Handles effects in the `events.*` namespace, enabling synchronization between ag
 ### Type Safety
 
 - `notified_agents` uses `HashSet<AgentName>` (not raw strings) for dedup
-- `resolve_parent_tab_name()` returns `TabName` (constructed via `BirthBranch::tab_name()` or `TabName::tl()`)
+- Parent tab name resolved via shared `resolve_parent_tab_name()` from `services::agent_control`
+- Tab display names computed via `AgentType::tab_display_name(slug)` — single source of truth
 - Agent identity resolved as `AgentName` from `EffectContext` (structural, baked into PluginManager)
 
 ### Remote Forwarding
@@ -79,8 +80,6 @@ Handles effects in the `coordination.*` namespace.
 | Type | Purpose | Used In |
 |------|---------|---------|
 | `AgentName` | Agent identity (e.g., "root", "feature-a") | events, session, agent |
-| `TabName` | Zellij tab display name | events, messaging |
 | `BirthBranch` | Branch-based agent identity | events, messaging, github_poller |
-| `AgentType` | Claude vs Gemini enum | agent |
-| `CiStatus` | CI check status enum | github_poller |
+| `AgentType` | Claude vs Gemini enum, provides `tab_display_name()` and `from_dir_name()` | agent, github_poller |
 | `GithubOwner` / `GithubRepo` | GitHub repo coordinates | github_poller |

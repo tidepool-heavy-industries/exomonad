@@ -40,42 +40,6 @@ impl EventHandler {
             notified_agents: std::sync::Mutex::new(std::collections::HashSet::new()),
         }
     }
-
-    fn resolve_parent_tab_name(&self, ctx: &crate::effects::EffectContext) -> String {
-        let agent_name = &ctx.agent_name;
-
-        let birth_branch = &ctx.birth_branch;
-        let birth_branch_str = birth_branch.as_str();
-
-        if agent_name.is_gemini_worker() {
-            // Worker: birth-branch is parent's birth-branch (inherited)
-            if birth_branch_str.contains('.') {
-                let slug = birth_branch_str
-                    .rsplit_once('.')
-                    .map(|(_, s)| s)
-                    .unwrap_or(birth_branch_str);
-                format!("\u{1F916} {}", slug)
-            } else {
-                "TL".to_string()
-            }
-        } else {
-            // Subtree agent: parent is one level up
-            if let Some(parent) = birth_branch.parent() {
-                if parent.as_str().contains('.') {
-                    let slug = parent
-                        .as_str()
-                        .rsplit_once('.')
-                        .map(|(_, s)| s)
-                        .unwrap_or(parent.as_str());
-                    format!("\u{1F916} {}", slug)
-                } else {
-                    "TL".to_string()
-                }
-            } else {
-                "TL".to_string()
-            }
-        }
-    }
 }
 
 #[async_trait]
@@ -263,7 +227,7 @@ impl EventEffects for EventHandler {
         }
 
         // Inject natural-language notification into parent's Zellij pane
-        let tab_name = self.resolve_parent_tab_name(ctx);
+        let tab_name = crate::services::agent_control::resolve_parent_tab_name(ctx);
         let notification = format_parent_notification(&agent_id_str, &req.status, &req.message);
         tracing::debug!(tab = %tab_name, chars = notification.len(), "notify_parent: injecting notification into parent pane");
         zellij_events::inject_input(&tab_name, &notification);

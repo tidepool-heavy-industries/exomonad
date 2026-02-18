@@ -1,3 +1,4 @@
+use crate::services::agent_control::AgentType;
 use crate::services::event_log::EventLog;
 use crate::services::event_queue::EventQueue;
 use crate::services::zellij_events;
@@ -21,11 +22,25 @@ pub struct GitHubPoller {
     repo_info: Arc<Mutex<Option<(String, String)>>>, // (owner, name)
 }
 
+/// A Copilot review comment with optional file context.
+struct CopilotComment {
+    body: String,
+    path: Option<String>,
+    diff_hunk: Option<String>,
+}
+
+/// Branch info discovered from a worktree directory.
+struct WorktreeBranch {
+    branch: String,
+    agent_type: AgentType,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct PRState {
     last_copilot_comment_count: usize,
     last_ci_status: String,
     branch_name: String,
+    agent_type: AgentType,
 }
 
 impl GitHubPoller {
@@ -112,13 +127,20 @@ impl GitHubPoller {
         }
 
         // 3. Match branches to PRs
-        for branch in branches {
-            if let Some(pr) = pr_map.get(&branch) {
+        for wb in branches {
+            if let Some(pr) = pr_map.get(&wb.branch) {
                 if let Err(e) = self
-                    .process_pr(&owner, &repo, &branch, pr.number, &pr.head.sha)
+                    .process_pr(
+                        &owner,
+                        &repo,
+                        &wb.branch,
+                        pr.number,
+                        &pr.head.sha,
+                        wb.agent_type,
+                    )
                     .await
                 {
-                    warn!("Failed to process branch {}: {}", branch, e);
+                    warn!("Failed to process branch {}: {}", wb.branch, e);
                 }
             }
         }
@@ -163,7 +185,7 @@ impl GitHubPoller {
         Ok(Some(result))
     }
 
-    async fn scan_worktrees(&self) -> Result<Vec<String>> {
+    async fn scan_worktrees(&self) -> Result<Vec<WorktreeBranch>> {
         let worktrees_dir = self.project_dir.join(".exo/worktrees");
         if !worktrees_dir.exists() {
             return Ok(vec![]);
@@ -177,6 +199,9 @@ impl GitHubPoller {
                 continue;
             }
 
+            let dir_name = entry.file_name().to_string_lossy().to_string();
+            let agent_type = AgentType::from_dir_name(&dir_name);
+
             // Execute git branch --show-current in the worktree
             let output = Command::new("git")
                 .arg("-C")
@@ -188,7 +213,7 @@ impl GitHubPoller {
             if output.status.success() {
                 let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if !branch.is_empty() {
-                    branches.push(branch);
+                    branches.push(WorktreeBranch { branch, agent_type });
                 }
             }
         }
@@ -203,13 +228,14 @@ impl GitHubPoller {
         branch: &str,
         pr_number: u64,
         pr_sha: &str,
+        agent_type: AgentType,
     ) -> Result<()> {
         // Poll details
         let (copilot_comments, copilot_reviews) =
             self.fetch_copilot_activity(owner, repo, pr_number).await?;
         let ci_status = self.fetch_ci_status(owner, repo, pr_sha).await?;
 
-        let copilot_count = copilot_comments.len() + copilot_reviews;
+        let copilot_count = copilot_comments.len() + copilot_reviews.len();
 
         // Check for state changes
         let mut state_guard = self.state.lock().await;
@@ -219,8 +245,9 @@ impl GitHubPoller {
             if copilot_count != old_state.last_copilot_comment_count {
                 if copilot_count > old_state.last_copilot_comment_count {
                     // New activity!
-                    let message = self.format_copilot_message(&copilot_comments, copilot_reviews);
-                    self.emit_event(branch, "copilot_review", &message).await;
+                    let message = self.format_copilot_message(&copilot_comments, &copilot_reviews);
+                    self.emit_event(branch, "copilot_review", &message, agent_type)
+                        .await;
                 }
                 // Update state even if count decreased (to sync with reality)
                 old_state.last_copilot_comment_count = copilot_count;
@@ -230,7 +257,8 @@ impl GitHubPoller {
             if ci_status != old_state.last_ci_status {
                 // Status changed!
                 let message = format!("[CI STATUS: {}] {}", branch, ci_status);
-                self.emit_event(branch, &ci_status, &message).await;
+                self.emit_event(branch, &ci_status, &message, agent_type)
+                    .await;
                 old_state.last_ci_status = ci_status;
             }
         } else {
@@ -241,6 +269,7 @@ impl GitHubPoller {
                     last_copilot_comment_count: copilot_count,
                     last_ci_status: ci_status,
                     branch_name: branch.to_string(),
+                    agent_type,
                 },
             );
         }
@@ -248,49 +277,59 @@ impl GitHubPoller {
         Ok(())
     }
 
+    /// Fetch Copilot review activity on a PR.
+    ///
+    /// Returns (inline_comments, review_bodies) where inline comments include
+    /// file path and diff hunk context for actionable feedback.
     async fn fetch_copilot_activity(
         &self,
         owner: &str,
         repo: &str,
         pr_number: u64,
-    ) -> Result<(Vec<String>, usize)> {
-        // Comments
+    ) -> Result<(Vec<CopilotComment>, Vec<String>)> {
+        // Inline comments (with file context)
         let endpoint = format!("/repos/{}/{}/pulls/{}/comments", owner, repo, pr_number);
         let output = Command::new("gh").args(["api", &endpoint]).output().await?;
-        let mut comments_bodies = Vec::new();
+        let mut inline_comments = Vec::new();
 
         if output.status.success() {
             #[derive(Deserialize)]
             struct Comment {
                 body: String,
                 user: User,
+                path: Option<String>,
+                diff_hunk: Option<String>,
             }
             #[derive(Deserialize)]
             struct User {
                 login: String,
             }
 
-            // Use from_slice with error handling (e.g. if empty response)
             if let Ok(comments) = serde_json::from_slice::<Vec<Comment>>(&output.stdout) {
                 for c in comments {
                     if c.user.login.to_lowercase().contains("copilot") {
-                        comments_bodies.push(c.body);
+                        inline_comments.push(CopilotComment {
+                            body: c.body,
+                            path: c.path,
+                            diff_hunk: c.diff_hunk,
+                        });
                     }
                 }
             }
         }
 
-        // Reviews
+        // Reviews (with body text)
         let endpoint_reviews = format!("/repos/{}/{}/pulls/{}/reviews", owner, repo, pr_number);
         let output_reviews = Command::new("gh")
             .args(["api", &endpoint_reviews])
             .output()
             .await?;
-        let mut review_count = 0;
+        let mut review_bodies = Vec::new();
 
         if output_reviews.status.success() {
             #[derive(Deserialize)]
             struct Review {
+                body: Option<String>,
                 user: User,
             }
             #[derive(Deserialize)]
@@ -298,14 +337,19 @@ impl GitHubPoller {
                 login: String,
             }
             if let Ok(reviews) = serde_json::from_slice::<Vec<Review>>(&output_reviews.stdout) {
-                review_count = reviews
-                    .iter()
-                    .filter(|r| r.user.login.to_lowercase().contains("copilot"))
-                    .count();
+                for r in reviews {
+                    if r.user.login.to_lowercase().contains("copilot") {
+                        if let Some(body) = r.body {
+                            if !body.is_empty() {
+                                review_bodies.push(body);
+                            }
+                        }
+                    }
+                }
             }
         }
 
-        Ok((comments_bodies, review_count))
+        Ok((inline_comments, review_bodies))
     }
 
     async fn fetch_ci_status(&self, owner: &str, repo: &str, sha: &str) -> Result<String> {
@@ -366,18 +410,43 @@ impl GitHubPoller {
         }
     }
 
-    fn format_copilot_message(&self, comments: &[String], review_count: usize) -> String {
-        let mut msg = format!("Copilot Review ({} reviews)", review_count);
-        if !comments.is_empty() {
-            msg.push_str("\nComments:\n");
-            for (i, c) in comments.iter().enumerate() {
-                msg.push_str(&format!("{}. {}\n", i + 1, c));
+    fn format_copilot_message(
+        &self,
+        inline_comments: &[CopilotComment],
+        review_bodies: &[String],
+    ) -> String {
+        let mut msg = String::new();
+
+        if !review_bodies.is_empty() {
+            msg.push_str("Review summary:\n");
+            for body in review_bodies {
+                msg.push_str(body);
+                msg.push('\n');
             }
         }
+
+        if !inline_comments.is_empty() {
+            if !msg.is_empty() {
+                msg.push('\n');
+            }
+            msg.push_str("Inline comments:\n");
+            for (i, c) in inline_comments.iter().enumerate() {
+                let file_label = c.path.as_deref().unwrap_or("unknown file");
+                msg.push_str(&format!("{}. [{}] {}\n", i + 1, file_label, c.body));
+                if let Some(ref hunk) = c.diff_hunk {
+                    msg.push_str(&format!("   ```diff\n   {}\n   ```\n", hunk));
+                }
+            }
+        }
+
+        if msg.is_empty() {
+            msg.push_str("Copilot review activity detected (no body text)");
+        }
+
         msg
     }
 
-    async fn emit_event(&self, branch: &str, status: &str, message: &str) {
+    async fn emit_event(&self, branch: &str, status: &str, message: &str, agent_type: AgentType) {
         info!(
             "Emitting event for branch {}: {} - {}",
             branch, status, message
@@ -434,7 +503,7 @@ impl GitHubPoller {
 
         if let Some(agent_message) = agent_message {
             let slug = branch.rsplit_once('.').map(|(_, s)| s).unwrap_or(branch);
-            let tab_name = format!("\u{1F916} {}", slug);
+            let tab_name = agent_type.tab_display_name(slug);
             zellij_events::inject_input(&tab_name, &agent_message);
         }
     }

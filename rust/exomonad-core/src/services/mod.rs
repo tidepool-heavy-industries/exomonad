@@ -21,7 +21,8 @@ pub mod secrets;
 pub mod zellij_events;
 
 pub use self::agent_control::{
-    AgentControlService, AgentInfo, BatchCleanupResult, BatchSpawnResult, SpawnOptions, SpawnResult,
+    resolve_parent_tab_name, AgentControlService, AgentInfo, BatchCleanupResult, BatchSpawnResult,
+    SpawnOptions, SpawnResult,
 };
 pub use self::event_log::EventLog;
 pub use self::event_queue::EventQueue;

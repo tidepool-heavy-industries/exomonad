@@ -301,44 +301,7 @@ impl MessagingEffects for MessagingHandler {
     }
 }
 
-/// Resolve the Zellij tab name of the parent agent from structural identity.
-///
-/// Uses the same identity model as `events.rs:resolve_parent_tab_name`:
-/// - Workers (Gemini): parent is derived from birth_branch
-/// - Subtree agents: parent is one dot-level up in branch hierarchy
-/// - Root agents (no dots): parent is the TL tab
-fn resolve_parent_tab_name(ctx: &crate::effects::EffectContext) -> String {
-    let birth_branch_str = ctx.birth_branch.as_str();
-
-    if ctx.agent_name.is_gemini_worker() {
-        // Worker: birth-branch is parent's birth-branch (inherited)
-        if birth_branch_str.contains('.') {
-            let slug = birth_branch_str
-                .rsplit_once('.')
-                .map(|(_, s)| s)
-                .unwrap_or(birth_branch_str);
-            format!("\u{1F916} {}", slug)
-        } else {
-            "TL".to_string()
-        }
-    } else {
-        // Subtree agent: parent is one level up
-        if let Some(parent) = ctx.birth_branch.parent() {
-            if parent.as_str().contains('.') {
-                let slug = parent
-                    .as_str()
-                    .rsplit_once('.')
-                    .map(|(_, s)| s)
-                    .unwrap_or(parent.as_str());
-                format!("\u{1F916} {}", slug)
-            } else {
-                "TL".to_string()
-            }
-        } else {
-            "TL".to_string()
-        }
-    }
-}
+use crate::services::agent_control::resolve_parent_tab_name;
 
 #[cfg(test)]
 mod tests {

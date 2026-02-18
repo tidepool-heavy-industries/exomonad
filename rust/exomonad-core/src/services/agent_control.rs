@@ -123,6 +123,59 @@ impl AgentType {
     fn display_name(&self, issue_id: &str, slug: &str) -> String {
         format!("{} gh-{}-{}", self.emoji(), issue_id, slug)
     }
+
+    /// Zellij tab display name for an agent with this type and slug.
+    pub fn tab_display_name(&self, slug: &str) -> String {
+        format!("{} {}", self.emoji(), slug)
+    }
+
+    /// Infer agent type from a worktree directory name (e.g., "feature-a-claude" → Claude).
+    pub fn from_dir_name(dir_name: &str) -> Self {
+        if dir_name.ends_with("-claude") {
+            AgentType::Claude
+        } else {
+            AgentType::Gemini
+        }
+    }
+}
+
+/// Resolve the Zellij tab name of the parent agent from structural identity.
+///
+/// Workers (Gemini): parent derived from birth_branch (inherited).
+/// Subtree agents: parent is one dot-level up in branch hierarchy.
+/// Root agents (no dots): parent is the TL tab.
+/// Parent tabs are always Claude (TL role), so always use the Claude emoji.
+pub fn resolve_parent_tab_name(ctx: &crate::effects::EffectContext) -> String {
+    let birth_branch_str = ctx.birth_branch.as_str();
+
+    if ctx.agent_name.is_gemini_worker() {
+        // Worker: birth-branch is parent's birth-branch (inherited)
+        if birth_branch_str.contains('.') {
+            let slug = birth_branch_str
+                .rsplit_once('.')
+                .map(|(_, s)| s)
+                .unwrap_or(birth_branch_str);
+            AgentType::Claude.tab_display_name(slug)
+        } else {
+            "TL".to_string()
+        }
+    } else {
+        // Subtree agent: parent is one level up
+        if let Some(parent) = ctx.birth_branch.parent() {
+            if parent.as_str().contains('.') {
+                let slug = parent
+                    .as_str()
+                    .rsplit_once('.')
+                    .map(|(_, s)| s)
+                    .unwrap_or(parent.as_str());
+                AgentType::Claude.tab_display_name(slug)
+            } else {
+                "TL".to_string()
+            }
+        } else {
+            "TL".to_string()
+        }
+    }
 }
 
 /// Options for spawning an agent.
