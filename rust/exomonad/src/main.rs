@@ -887,12 +887,11 @@ async fn main() -> Result<()> {
             let jj = Arc::new(exomonad_core::services::jj_workspace::JjWorkspaceService::new(
                 project_dir.clone(),
             ));
+            jj.ensure_colocated()
+                .context("Failed to validate jj workspace colocation")?;
             let github = secrets
                 .github_token()
                 .and_then(|t| exomonad_core::services::github::GitHubService::new(t).ok());
-            let jj = Arc::new(exomonad_core::services::jj_workspace::JjWorkspaceService::new(
-                project_dir.clone(),
-            ));
 
             if github.is_some() {
                 exomonad_core::services::validate_gh_cli().context("Failed to validate gh CLI")?;

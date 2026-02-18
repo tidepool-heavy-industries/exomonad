@@ -4,9 +4,11 @@
 // and provides clear error messages. Octocrab stays for other GitHub operations.
 
 use crate::services::git;
+use crate::services::jj_workspace::JjWorkspaceService;
 use anyhow::{Context, Result};
 use duct::cmd;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tracing::{info, warn};
 
 use super::zellij_events;
@@ -85,16 +87,6 @@ fn detect_base_branch(head: &str, explicit: Option<&str>) -> String {
 // `gh` CLI operations
 // ============================================================================
 
-fn push_branch(dir: &str) -> Result<(), FilePrError> {
-    let output = cmd!("git", "push", "-u", "origin", "HEAD")
-        .dir(dir)
-        .stderr_to_stdout()
-        .read()
-        .map_err(|e| FilePrError::PushFailed(e.to_string()))?;
-    info!("[FilePR] Push: {}", output);
-    Ok(())
-}
-
 fn find_existing_pr(head_branch: &str, dir: &str) -> Result<Option<GhPr>, FilePrError> {
     let json = cmd!(
         "gh",
@@ -143,10 +135,22 @@ fn create_pr(
     dir: &str,
 ) -> Result<GhPr, FilePrError> {
     // gh pr create outputs the PR URL to stdout on success (no --json support)
-    let url = cmd!("gh", "pr", "create", "--title", title, "--body", body, "--base", base)
-        .dir(dir)
-        .read()
-        .map_err(|e| FilePrError::CreateFailed(e.to_string()))?;
+    let url = cmd!(
+        "gh",
+        "pr",
+        "create",
+        "--title",
+        title,
+        "--body",
+        body,
+        "--base",
+        base,
+        "--head",
+        head
+    )
+    .dir(dir)
+    .read()
+    .map_err(|e| FilePrError::CreateFailed(e.to_string()))?;
     info!("[FilePR] Created PR: {}", url.trim());
 
     // Fetch structured PR data via `gh pr view` using the branch name (stable, no URL parsing)
@@ -171,25 +175,37 @@ fn create_pr(
 // ============================================================================
 
 /// File a PR using `gh` CLI. Pushes the branch, creates or updates the PR.
-pub async fn file_pr_async(input: &FilePRInput) -> Result<FilePROutput> {
+pub async fn file_pr_async(input: &FilePRInput, jj: Arc<JjWorkspaceService>) -> Result<FilePROutput> {
     let dir = input.working_dir.as_deref().unwrap_or(".");
 
     // Get branch from the agent's working directory, not server CWD
-    let head = cmd!("git", "branch", "--show-current")
-        .dir(dir)
-        .read()
-        .context("Failed to get current branch")?;
-    let head = head.trim().to_string();
-    if head.is_empty() {
-        anyhow::bail!("Not on a branch (detached HEAD?) in {}", dir);
-    }
+    let dir_path = std::path::PathBuf::from(dir);
+    let jj_clone = jj.clone();
+    let head = tokio::task::spawn_blocking(move || {
+        jj_clone.get_workspace_bookmark(&dir_path)
+    })
+    .await
+    .context("spawn_blocking failed")?
+    .context("Failed to get workspace bookmark")?
+    .ok_or_else(|| anyhow::anyhow!("No bookmark found for workspace at {}", dir))?;
 
     let base = detect_base_branch(&head, input.base_branch.as_deref());
 
     info!("[FilePR] head={} base={} dir={}", head, base, dir);
 
     // Push first
-    push_branch(dir)?;
+    {
+        let dir_path = std::path::PathBuf::from(dir);
+        let bookmark = head.clone();
+        let jj_clone = jj.clone();
+        tokio::task::spawn_blocking(move || {
+            jj_clone.push_bookmark(&dir_path, &bookmark)
+        })
+        .await
+        .context("spawn_blocking failed")?
+        .map_err(|e| FilePrError::PushFailed(e.to_string()))?;
+        info!("[FilePR] Pushed bookmark: {}", head);
+    }
 
     // Check for existing PR
     if let Some(pr) = find_existing_pr(&head, dir)? {
@@ -308,5 +324,68 @@ mod tests {
             "main.core-eval.optimize.inline"
         );
         assert_eq!(detect_base_branch("main.a.b.c.d.e", None), "main.a.b.c.d");
+    }
+
+    #[tokio::test]
+    async fn test_file_pr_async_no_jj_workspace() -> Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        let jj = Arc::new(JjWorkspaceService::new(temp_dir.path().to_path_buf()));
+        let input = FilePRInput {
+            title: "Test PR".to_string(),
+            body: "Test Body".to_string(),
+            base_branch: None,
+            working_dir: Some(temp_dir.path().to_string_lossy().to_string()),
+        };
+
+        let result = file_pr_async(&input, jj).await;
+        assert!(result.is_err());
+        let err = result.err().unwrap().to_string();
+        assert!(err.contains("Failed to get workspace bookmark"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_file_pr_async_head_detection() -> Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        let dir = temp_dir.path();
+
+        // 1. Init git repo
+        cmd!("git", "init", "-b", "main").dir(dir).read()?;
+        cmd!("git", "config", "user.email", "test@example.com").dir(dir).read()?;
+        cmd!("git", "config", "user.name", "Test").dir(dir).read()?;
+        std::fs::write(dir.join("README.md"), "test")?;
+        cmd!("git", "add", "README.md").dir(dir).read()?;
+        cmd!("git", "commit", "-m", "init").dir(dir).read()?;
+
+        // 2. Init jj colocated
+        cmd!("jj", "git", "init", "--colocate").dir(dir).read()?;
+        let jj = Arc::new(JjWorkspaceService::new(dir.to_path_buf()));
+
+        // 3. Create a bookmark and check it out
+        cmd!("jj", "bookmark", "create", "-r", "@", "feature-branch").dir(dir).read()?;
+
+        let input = FilePRInput {
+            title: "Test PR".to_string(),
+            body: "Test Body".to_string(),
+            base_branch: None,
+            working_dir: Some(dir.to_string_lossy().to_string()),
+        };
+
+        // Note: we can't easily test the full file_pr_async because it calls `gh`
+        // but we can verify it gets past the head detection.
+        // Since we didn't setup an origin remote, push_bookmark will fail.
+        let result = file_pr_async(&input, jj).await;
+
+        if let Err(ref e) = result {
+            let err_msg = e.to_string();
+            // It should have detected 'feature-branch' and then failed on push
+            // because there is no 'origin' remote.
+            assert!(err_msg.contains("git push failed"));
+        } else {
+            panic!("Expected file_pr_async to fail on push, but it succeeded?!");
+        }
+
+        Ok(())
     }
 }
