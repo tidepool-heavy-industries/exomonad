@@ -884,6 +884,9 @@ async fn main() -> Result<()> {
             let executor: Arc<dyn exomonad_core::services::docker::CommandExecutor> =
                 Arc::new(exomonad_core::services::local::LocalExecutor::new());
             let git = Arc::new(exomonad_core::services::git::GitService::new(executor));
+            let jj = Arc::new(exomonad_core::services::jj_workspace::JjWorkspaceService::new(
+                project_dir.clone(),
+            ));
             let github = secrets
                 .github_token()
                 .and_then(|t| exomonad_core::services::github::GitHubService::new(t).ok());

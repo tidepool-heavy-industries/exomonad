@@ -48,9 +48,9 @@ pub fn git_handlers(
 ) -> Vec<Box<dyn EffectHandler>> {
     let mut handlers: Vec<Box<dyn EffectHandler>> = vec![
         Box::new(GitHandler::new(git)),
-        Box::new(JjHandler::new(jj)),
+        Box::new(JjHandler::new(jj.clone())),
         Box::new(FilePRHandler::new()),
-        Box::new(MergePRHandler),
+        Box::new(MergePRHandler::new(jj)),
         Box::new(CopilotHandler::new()),
     ];
     if let Some(gh) = github {
