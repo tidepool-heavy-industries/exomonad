@@ -10,6 +10,7 @@ pub mod file_pr;
 pub mod filesystem;
 pub mod git;
 pub mod github;
+pub mod jj_workspace;
 pub mod github_poller;
 pub mod inbox;
 pub mod local;
@@ -27,6 +28,7 @@ pub use self::agent_control::{
 pub use self::event_log::EventLog;
 pub use self::event_queue::EventQueue;
 pub use self::filesystem::FileSystemService;
+pub use self::jj_workspace::JjWorkspaceService;
 pub use self::secrets::Secrets;
 use thiserror::Error;
 
