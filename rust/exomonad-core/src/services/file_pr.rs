@@ -4,7 +4,7 @@
 // and provides clear error messages. Octocrab stays for other GitHub operations.
 
 use crate::services::git;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use duct::cmd;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
@@ -20,6 +20,7 @@ pub struct FilePRInput {
     pub title: String,
     pub body: String,
     pub base_branch: Option<String>,
+    pub working_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -84,8 +85,9 @@ fn detect_base_branch(head: &str, explicit: Option<&str>) -> String {
 // `gh` CLI operations
 // ============================================================================
 
-fn push_branch() -> Result<(), FilePrError> {
+fn push_branch(dir: &str) -> Result<(), FilePrError> {
     let output = cmd!("git", "push", "-u", "origin", "HEAD")
+        .dir(dir)
         .stderr_to_stdout()
         .read()
         .map_err(|e| FilePrError::PushFailed(e.to_string()))?;
@@ -93,7 +95,7 @@ fn push_branch() -> Result<(), FilePrError> {
     Ok(())
 }
 
-fn find_existing_pr(head_branch: &str) -> Result<Option<GhPr>, FilePrError> {
+fn find_existing_pr(head_branch: &str, dir: &str) -> Result<Option<GhPr>, FilePrError> {
     let json = cmd!(
         "gh",
         "pr",
@@ -107,6 +109,7 @@ fn find_existing_pr(head_branch: &str) -> Result<Option<GhPr>, FilePrError> {
         "--limit",
         "1"
     )
+    .dir(dir)
     .read()
     .map_err(|e| FilePrError::ListFailed(e.to_string()))?;
 
@@ -115,7 +118,7 @@ fn find_existing_pr(head_branch: &str) -> Result<Option<GhPr>, FilePrError> {
     Ok(prs.into_iter().next())
 }
 
-fn update_pr(number: u64, title: &str, body: &str) -> Result<(), FilePrError> {
+fn update_pr(number: u64, title: &str, body: &str, dir: &str) -> Result<(), FilePrError> {
     cmd!(
         "gh",
         "pr",
@@ -126,14 +129,22 @@ fn update_pr(number: u64, title: &str, body: &str) -> Result<(), FilePrError> {
         "--body",
         body
     )
+    .dir(dir)
     .read()
     .map_err(|e| FilePrError::UpdateFailed(e.to_string()))?;
     Ok(())
 }
 
-fn create_pr(title: &str, body: &str, base: &str, head: &str) -> Result<GhPr, FilePrError> {
+fn create_pr(
+    title: &str,
+    body: &str,
+    base: &str,
+    head: &str,
+    dir: &str,
+) -> Result<GhPr, FilePrError> {
     // gh pr create outputs the PR URL to stdout on success (no --json support)
     let url = cmd!("gh", "pr", "create", "--title", title, "--body", body, "--base", base)
+        .dir(dir)
         .read()
         .map_err(|e| FilePrError::CreateFailed(e.to_string()))?;
     info!("[FilePR] Created PR: {}", url.trim());
@@ -147,6 +158,7 @@ fn create_pr(title: &str, body: &str, base: &str, head: &str) -> Result<GhPr, Fi
         "--json",
         "number,url,headRefName,baseRefName"
     )
+    .dir(dir)
     .read()
     .map_err(|e| FilePrError::CreateFailed(format!("gh pr view after create: {e}")))?;
 
@@ -160,18 +172,29 @@ fn create_pr(title: &str, body: &str, base: &str, head: &str) -> Result<GhPr, Fi
 
 /// File a PR using `gh` CLI. Pushes the branch, creates or updates the PR.
 pub async fn file_pr_async(input: &FilePRInput) -> Result<FilePROutput> {
-    let head = git::get_current_branch()?;
+    let dir = input.working_dir.as_deref().unwrap_or(".");
+
+    // Get branch from the agent's working directory, not server CWD
+    let head = cmd!("git", "branch", "--show-current")
+        .dir(dir)
+        .read()
+        .context("Failed to get current branch")?;
+    let head = head.trim().to_string();
+    if head.is_empty() {
+        anyhow::bail!("Not on a branch (detached HEAD?) in {}", dir);
+    }
+
     let base = detect_base_branch(&head, input.base_branch.as_deref());
 
-    info!("[FilePR] head={} base={}", head, base);
+    info!("[FilePR] head={} base={} dir={}", head, base, dir);
 
     // Push first
-    push_branch()?;
+    push_branch(dir)?;
 
     // Check for existing PR
-    if let Some(pr) = find_existing_pr(&head)? {
+    if let Some(pr) = find_existing_pr(&head, dir)? {
         info!("[FilePR] Updating existing PR #{}", pr.number);
-        update_pr(pr.number, &input.title, &input.body)?;
+        update_pr(pr.number, &input.title, &input.body, dir)?;
         info!("[FilePR] Updated PR #{}: {}", pr.number, pr.url);
         return Ok(FilePROutput {
             pr_url: pr.url,
@@ -184,7 +207,7 @@ pub async fn file_pr_async(input: &FilePRInput) -> Result<FilePROutput> {
 
     // Create new PR
     info!("[FilePR] Creating PR: {}", input.title);
-    let pr = create_pr(&input.title, &input.body, &base, &head)?;
+    let pr = create_pr(&input.title, &input.body, &base, &head, dir)?;
 
     // Emit pr:filed event (only if in Zellij session)
     if let Ok(session) = std::env::var("ZELLIJ_SESSION_NAME") {

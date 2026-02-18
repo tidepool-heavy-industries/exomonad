@@ -65,6 +65,26 @@ Handles effects in the `agent.*` namespace.
 - Proto conversion uses `AgentType::suffix()` and `AgentType::emoji()` methods
 - Claude session registry lookups use `AgentName`
 
+## FilePRHandler (`handlers/file_pr.rs`)
+
+Handles effects in the `file_pr.*` namespace.
+
+### Working Directory Resolution
+
+The handler derives the agent's working directory from `EffectContext` via `resolve_agent_working_dir()`:
+- Root agents (birth_branch without dots): server CWD (project root)
+- Spawned agents (birth_branch with dots, e.g. `main.feature.scaffold`): `.exo/worktrees/{slug}/`
+
+All git/gh CLI commands in the file_pr service run with `.dir(working_dir)` to ensure they operate in the correct worktree.
+
+## MergePRHandler (`handlers/merge_pr.rs`)
+
+Handles effects in the `merge_pr.*` namespace.
+
+### Branch Preservation
+
+`gh pr merge` runs WITHOUT `--delete-branch` because worktree branches cannot be deleted while checked out. Branch cleanup happens via `cleanup_merged` instead.
+
 ## CoordinationHandler (`handlers/coordination.rs`)
 
 Handles effects in the `coordination.*` namespace.

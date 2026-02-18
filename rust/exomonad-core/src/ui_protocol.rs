@@ -402,15 +402,13 @@ impl PopupState {
     pub fn evaluate_visibility(&self, rule: &VisibilityRule) -> bool {
         match rule {
             VisibilityRule::Checked(id) => self.get_boolean(id).unwrap_or(false),
-            VisibilityRule::Equals(map) => {
-                map.iter().all(|(id, expected)| {
-                    if let Some(ElementValue::Choice(idx)) = self.values.get(id) {
-                        idx.to_string() == *expected
-                    } else {
-                        false
-                    }
-                })
-            }
+            VisibilityRule::Equals(map) => map.iter().all(|(id, expected)| {
+                if let Some(ElementValue::Choice(idx)) = self.values.get(id) {
+                    idx.to_string() == *expected
+                } else {
+                    false
+                }
+            }),
             VisibilityRule::GreaterThan { id, min_value } => {
                 self.get_number(id).map_or(false, |v| v >= *min_value)
             }
@@ -442,9 +440,9 @@ impl PopupState {
     pub fn get_choice_label(&self, id: &str, components: &[Component]) -> Option<String> {
         let idx = self.get_choice(id)?;
         components.iter().find_map(|c| match c {
-            Component::Choice { id: cid, options, .. } if cid == id => {
-                options.get(idx).cloned()
-            }
+            Component::Choice {
+                id: cid, options, ..
+            } if cid == id => options.get(idx).cloned(),
             _ => None,
         })
     }
@@ -1285,9 +1283,12 @@ mod tests {
     fn test_evaluate_visibility_checked() {
         let def = PopupDefinition {
             title: "Test".to_string(),
-            components: vec![
-                Component::Checkbox { id: "cb".to_string(), label: "Check".to_string(), default: false, visible_when: None },
-            ],
+            components: vec![Component::Checkbox {
+                id: "cb".to_string(),
+                label: "Check".to_string(),
+                default: false,
+                visible_when: None,
+            }],
         };
         let mut state = PopupState::new(&def);
         assert!(!state.evaluate_visibility(&VisibilityRule::Checked("cb".to_string())));
@@ -1299,47 +1300,82 @@ mod tests {
     fn test_evaluate_visibility_greater_than() {
         let def = PopupDefinition {
             title: "Test".to_string(),
-            components: vec![
-                Component::Slider { id: "s".to_string(), label: "S".to_string(), min: 0.0, max: 100.0, default: 5.0, visible_when: None },
-            ],
+            components: vec![Component::Slider {
+                id: "s".to_string(),
+                label: "S".to_string(),
+                min: 0.0,
+                max: 100.0,
+                default: 5.0,
+                visible_when: None,
+            }],
         };
         let state = PopupState::new(&def);
-        assert!(!state.evaluate_visibility(&VisibilityRule::GreaterThan { id: "s".to_string(), min_value: 10.0 }));
-        assert!(state.evaluate_visibility(&VisibilityRule::GreaterThan { id: "s".to_string(), min_value: 5.0 }));
+        assert!(!state.evaluate_visibility(&VisibilityRule::GreaterThan {
+            id: "s".to_string(),
+            min_value: 10.0
+        }));
+        assert!(state.evaluate_visibility(&VisibilityRule::GreaterThan {
+            id: "s".to_string(),
+            min_value: 5.0
+        }));
     }
 
     #[test]
     fn test_evaluate_visibility_count_equals() {
         let def = PopupDefinition {
             title: "Test".to_string(),
-            components: vec![
-                Component::Multiselect { id: "m".to_string(), label: "M".to_string(), options: vec!["A".to_string(), "B".to_string(), "C".to_string()], default: None, visible_when: None },
-            ],
+            components: vec![Component::Multiselect {
+                id: "m".to_string(),
+                label: "M".to_string(),
+                options: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+                default: None,
+                visible_when: None,
+            }],
         };
         let mut state = PopupState::new(&def);
-        assert!(!state.evaluate_visibility(&VisibilityRule::CountEquals { id: "m".to_string(), exact_count: 2 }));
+        assert!(!state.evaluate_visibility(&VisibilityRule::CountEquals {
+            id: "m".to_string(),
+            exact_count: 2
+        }));
         state.set_multichoice("m", vec![true, true, false]);
-        assert!(state.evaluate_visibility(&VisibilityRule::CountEquals { id: "m".to_string(), exact_count: 2 }));
+        assert!(state.evaluate_visibility(&VisibilityRule::CountEquals {
+            id: "m".to_string(),
+            exact_count: 2
+        }));
     }
 
     #[test]
     fn test_is_visible_no_rule() {
-        let component = Component::Text { id: "t".to_string(), content: "hi".to_string(), visible_when: None };
-        let state = PopupState { values: HashMap::new(), button_clicked: None };
+        let component = Component::Text {
+            id: "t".to_string(),
+            content: "hi".to_string(),
+            visible_when: None,
+        };
+        let state = PopupState {
+            values: HashMap::new(),
+            button_clicked: None,
+        };
         assert!(state.is_visible(&component));
     }
 
     #[test]
     fn test_is_visible_with_rule() {
         let component = Component::Slider {
-            id: "s".to_string(), label: "S".to_string(), min: 0.0, max: 10.0, default: 5.0,
+            id: "s".to_string(),
+            label: "S".to_string(),
+            min: 0.0,
+            max: 10.0,
+            default: 5.0,
             visible_when: Some(VisibilityRule::Checked("cb".to_string())),
         };
         let def = PopupDefinition {
             title: "Test".to_string(),
-            components: vec![
-                Component::Checkbox { id: "cb".to_string(), label: "CB".to_string(), default: false, visible_when: None },
-            ],
+            components: vec![Component::Checkbox {
+                id: "cb".to_string(),
+                label: "CB".to_string(),
+                default: false,
+                visible_when: None,
+            }],
         };
         let mut state = PopupState::new(&def);
         assert!(!state.is_visible(&component));
@@ -1349,13 +1385,26 @@ mod tests {
 
     #[test]
     fn test_get_choice_label() {
-        let components = vec![
-            Component::Choice { id: "c".to_string(), label: "C".to_string(), options: vec!["Red".to_string(), "Blue".to_string()], default: Some(0), visible_when: None },
-        ];
-        let def = PopupDefinition { title: "Test".to_string(), components: components.clone() };
+        let components = vec![Component::Choice {
+            id: "c".to_string(),
+            label: "C".to_string(),
+            options: vec!["Red".to_string(), "Blue".to_string()],
+            default: Some(0),
+            visible_when: None,
+        }];
+        let def = PopupDefinition {
+            title: "Test".to_string(),
+            components: components.clone(),
+        };
         let mut state = PopupState::new(&def);
-        assert_eq!(state.get_choice_label("c", &components), Some("Red".to_string()));
+        assert_eq!(
+            state.get_choice_label("c", &components),
+            Some("Red".to_string())
+        );
         state.set_choice("c", 1);
-        assert_eq!(state.get_choice_label("c", &components), Some("Blue".to_string()));
+        assert_eq!(
+            state.get_choice_label("c", &components),
+            Some("Blue".to_string())
+        );
     }
 }

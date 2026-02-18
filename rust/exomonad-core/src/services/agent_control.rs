@@ -144,6 +144,20 @@ impl AgentType {
 /// Root agent (no dots in birth_branch): "TL" tab (created by `exomonad init`).
 /// Spawned subtree: "{emoji} {slug}" where slug = last segment of birth_branch.
 /// Used for routing popup requests to the correct plugin instance.
+/// Resolve the working directory for an agent from its EffectContext.
+///
+/// Root agents (birth_branch without dots) work in the project root.
+/// Spawned agents (birth_branch with dots, e.g. "main.feature.scaffold")
+/// work in `.exo/worktrees/{slug}/` where slug is the last dot-segment.
+pub fn resolve_agent_working_dir(ctx: &crate::effects::EffectContext) -> PathBuf {
+    let birth_branch_str = ctx.birth_branch.as_str();
+    if let Some((_, slug)) = birth_branch_str.rsplit_once('.') {
+        PathBuf::from(format!(".exo/worktrees/{}/", slug))
+    } else {
+        PathBuf::from(".")
+    }
+}
+
 pub fn resolve_own_tab_name(ctx: &crate::effects::EffectContext) -> String {
     let birth_branch_str = ctx.birth_branch.as_str();
 

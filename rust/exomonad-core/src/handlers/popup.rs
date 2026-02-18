@@ -57,8 +57,7 @@ impl PopupEffects for PopupHandler {
             })?
         };
 
-        let target_tab =
-            crate::services::agent_control::resolve_own_tab_name(ctx);
+        let target_tab = crate::services::agent_control::resolve_own_tab_name(ctx);
 
         let input = PopupInput {
             title: req.title,

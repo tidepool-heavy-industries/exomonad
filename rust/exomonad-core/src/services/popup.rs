@@ -127,7 +127,8 @@ impl PopupService {
                 }
 
                 let safe_title = sanitize_payload_field(&input.title);
-                let safe_items: Vec<String> = items.iter().map(|s| sanitize_payload_field(s)).collect();
+                let safe_items: Vec<String> =
+                    items.iter().map(|s| sanitize_payload_field(s)).collect();
                 format!("{}|{}|{}", request_id, safe_title, safe_items.join(","))
             }
         } else {

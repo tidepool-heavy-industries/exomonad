@@ -48,7 +48,7 @@ impl FilePrEffects for FilePRHandler {
     async fn file_pr(
         &self,
         req: FilePrRequest,
-        _ctx: &crate::effects::EffectContext,
+        ctx: &crate::effects::EffectContext,
     ) -> EffectResult<FilePrResponse> {
         let base_branch = if req.base_branch.is_empty() {
             None
@@ -56,10 +56,13 @@ impl FilePrEffects for FilePRHandler {
             Some(req.base_branch.clone())
         };
 
+        let working_dir = crate::services::agent_control::resolve_agent_working_dir(ctx);
+
         let input = FilePRInput {
             title: req.title,
             body: req.body,
             base_branch,
+            working_dir: Some(working_dir.to_string_lossy().to_string()),
         };
 
         let output = file_pr::file_pr_async(&input)

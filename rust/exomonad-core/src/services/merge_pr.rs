@@ -29,13 +29,7 @@ pub async fn merge_pr_async(
     // Step 1: gh pr merge
     let strategy_flag = format!("--{}", strat);
     let output = Command::new("gh")
-        .args([
-            "pr",
-            "merge",
-            &pr_number.to_string(),
-            &strategy_flag,
-            "--delete-branch",
-        ])
+        .args(["pr", "merge", &pr_number.to_string(), &strategy_flag])
         .current_dir(dir)
         .output()
         .await
