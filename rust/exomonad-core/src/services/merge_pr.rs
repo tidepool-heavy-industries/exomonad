@@ -1,6 +1,9 @@
 use anyhow::{Context, Result};
+use std::sync::Arc;
 use tokio::process::Command;
 use tracing::{error, info};
+
+use crate::services::jj_workspace::JjWorkspaceService;
 
 pub struct MergePROutput {
     pub success: bool,
@@ -12,6 +15,7 @@ pub async fn merge_pr_async(
     pr_number: i64,
     strategy: &str,
     working_dir: &str,
+    jj: Arc<JjWorkspaceService>,
 ) -> Result<MergePROutput> {
     let dir = if working_dir.is_empty() {
         "."
@@ -48,25 +52,24 @@ pub async fn merge_pr_async(
     let merge_msg = String::from_utf8_lossy(&output.stdout).trim().to_string();
     info!(pr_number, "PR merged successfully");
 
-    // Step 2: jj git fetch (best-effort, triggers auto-rebase)
-    let jj_output = Command::new("jj")
-        .args(["git", "fetch"])
-        .current_dir(dir)
-        .output()
-        .await;
+    // Step 2: jj git fetch (best-effort, triggers auto-rebase) via jj-lib
+    let dir_path = std::path::PathBuf::from(dir);
+    let jj_clone = jj.clone();
+    let jj_result = tokio::task::spawn_blocking(move || {
+        jj_clone.fetch(&dir_path)
+    }).await;
 
-    let jj_fetched = match jj_output {
-        Ok(o) if o.status.success() => {
-            info!("jj git fetch succeeded (auto-rebase triggered)");
+    let jj_fetched = match jj_result {
+        Ok(Ok(())) => {
+            info!("jj git fetch succeeded via jj-lib (auto-rebase triggered)");
             true
         }
-        Ok(o) => {
-            let stderr = String::from_utf8_lossy(&o.stderr);
-            info!(stderr = %stderr, "jj git fetch failed (jj may not be initialized)");
+        Ok(Err(e)) => {
+            info!(error = %e, "jj git fetch failed via jj-lib");
             false
         }
         Err(e) => {
-            info!(error = %e, "jj not available, skipping fetch");
+            info!(error = %e, "jj fetch spawn_blocking failed");
             false
         }
     };
