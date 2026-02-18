@@ -26,9 +26,14 @@ use std::sync::Arc;
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(60);
 const ZELLIJ_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Push branch to remote so child PRs can reference it as base.
-/// Fails on real errors (no remote, network issues). Only tolerates
-/// "already up to date" (exit 0 with "Everything up-to-date" on stderr).
+/// Ensure the given branch bookmark is pushed to the remote so child PRs can
+/// reference it as their base.
+///
+/// This delegates to [`JjWorkspaceService::push_bookmark`], which is
+/// responsible for performing the actual push and reporting any errors
+/// (e.g., missing remote, authentication, or network issues). If the
+/// bookmark is already up to date on the remote, this call is effectively
+/// a no-op.
 async fn ensure_branch_pushed(
     jj: &Arc<JjWorkspaceService>,
     branch: &str,
@@ -39,7 +44,8 @@ async fn ensure_branch_pushed(
     let dir = project_dir.to_path_buf();
     let bookmark = branch.to_string();
     tokio::task::spawn_blocking(move || jj.push_bookmark(&dir, &bookmark))
-        .await?
+        .await
+        .context("tokio task join error while pushing parent branch")?
         .context("Failed to push parent branch")
 }
 
@@ -553,8 +559,16 @@ impl AgentControlService {
                 info!(path = %worktree_path.display(), "Removing existing workspace for idempotency");
                 let jj = self.jj.clone();
                 let path = worktree_path.clone();
-                if let Err(e) = tokio::task::spawn_blocking(move || jj.remove_workspace(&path)).await? {
-                    warn!(error = %e, "Failed to remove existing workspace (non-fatal)");
+                match tokio::task::spawn_blocking(move || jj.remove_workspace(&path)).await {
+                    Err(join_err) => {
+                        warn!(error = %join_err, "Join error while removing existing workspace (non-fatal)");
+                    }
+                    Ok(Err(e)) => {
+                        warn!(error = %e, "Failed to remove existing workspace (non-fatal)");
+                    }
+                    Ok(Ok(_)) => {
+                        // Successfully removed existing workspace
+                    }
                 }
             }
 
@@ -572,7 +586,8 @@ impl AgentControlService {
                 let bookmark = branch_name.clone();
                 let base = base.to_string();
                 tokio::task::spawn_blocking(move || jj.create_workspace(&path, &bookmark, &base))
-                    .await?
+                    .await
+                    .context("tokio task join error while creating jj workspace")?
                     .context("Failed to create jj workspace")?;
             }
             info!(worktree_path = %worktree_path.display(), "jj workspace created successfully");
@@ -769,8 +784,16 @@ impl AgentControlService {
                 info!(path = %worktree_path.display(), "Removing existing workspace for idempotency");
                 let jj = self.jj.clone();
                 let path = worktree_path.clone();
-                if let Err(e) = tokio::task::spawn_blocking(move || jj.remove_workspace(&path)).await? {
-                    warn!(error = %e, "Failed to remove existing workspace (non-fatal)");
+                match tokio::task::spawn_blocking(move || jj.remove_workspace(&path)).await {
+                    Err(join_err) => {
+                        warn!(error = %join_err, "Join error while removing existing workspace (non-fatal)");
+                    }
+                    Ok(Err(e)) => {
+                        warn!(error = %e, "Failed to remove existing workspace (non-fatal)");
+                    }
+                    Ok(Ok(_)) => {
+                        // Successfully removed existing workspace
+                    }
                 }
             }
 
@@ -787,7 +810,8 @@ impl AgentControlService {
                 let bookmark = branch_name.clone();
                 let base = base_branch.to_string();
                 tokio::task::spawn_blocking(move || jj.create_workspace(&path, &bookmark, &base))
-                    .await?
+                    .await
+                    .context("tokio task join error while creating jj workspace")?
                     .context("Failed to create jj workspace")?;
             }
 
@@ -1056,8 +1080,16 @@ impl AgentControlService {
                 info!(path = %worktree_path.display(), "Removing existing workspace for idempotency");
                 let jj = self.jj.clone();
                 let path = worktree_path.clone();
-                if let Err(e) = tokio::task::spawn_blocking(move || jj.remove_workspace(&path)).await? {
-                    warn!(error = %e, "Failed to remove existing workspace (non-fatal)");
+                match tokio::task::spawn_blocking(move || jj.remove_workspace(&path)).await {
+                    Err(join_err) => {
+                        warn!(error = %join_err, "Join error while removing existing workspace (non-fatal)");
+                    }
+                    Ok(Err(e)) => {
+                        warn!(error = %e, "Failed to remove existing workspace (non-fatal)");
+                    }
+                    Ok(Ok(_)) => {
+                        // Successfully removed existing workspace
+                    }
                 }
             }
 
@@ -1074,7 +1106,8 @@ impl AgentControlService {
                 let bookmark = branch_name.clone();
                 let base = current_branch.to_string();
                 tokio::task::spawn_blocking(move || jj.create_workspace(&path, &bookmark, &base))
-                    .await?
+                    .await
+                    .context("tokio task join error while creating jj workspace")?
                     .context("Failed to create jj workspace")?;
             }
 
@@ -1183,8 +1216,16 @@ impl AgentControlService {
                 info!(path = %worktree_path.display(), "Removing existing workspace for idempotency");
                 let jj = self.jj.clone();
                 let path = worktree_path.clone();
-                if let Err(e) = tokio::task::spawn_blocking(move || jj.remove_workspace(&path)).await? {
-                    warn!(error = %e, "Failed to remove existing workspace (non-fatal)");
+                match tokio::task::spawn_blocking(move || jj.remove_workspace(&path)).await {
+                    Err(join_err) => {
+                        warn!(error = %join_err, "Join error while removing existing workspace (non-fatal)");
+                    }
+                    Ok(Err(e)) => {
+                        warn!(error = %e, "Failed to remove existing workspace (non-fatal)");
+                    }
+                    Ok(Ok(_)) => {
+                        // Successfully removed existing workspace
+                    }
                 }
             }
 
@@ -1201,7 +1242,8 @@ impl AgentControlService {
                 let bookmark = branch_name.clone();
                 let base = current_branch.to_string();
                 tokio::task::spawn_blocking(move || jj.create_workspace(&path, &bookmark, &base))
-                    .await?
+                    .await
+                    .context("tokio task join error while creating jj workspace")?
                     .context("Failed to create jj workspace")?;
             }
 
@@ -1332,12 +1374,25 @@ impl AgentControlService {
         if worktree_path.exists() {
             let jj = self.jj.clone();
             let path = worktree_path.clone();
-            if let Err(e) = tokio::task::spawn_blocking(move || jj.remove_workspace(&path)).await? {
-                warn!(
-                    path = %worktree_path.display(),
-                    error = %e,
-                    "Failed to remove jj workspace (non-fatal)"
-                );
+            let join_result = tokio::task::spawn_blocking(move || jj.remove_workspace(&path)).await;
+            match join_result {
+                Ok(Ok(())) => {
+                    // Successfully removed workspace
+                }
+                Ok(Err(e)) => {
+                    warn!(
+                        path = %worktree_path.display(),
+                        error = %e,
+                        "Failed to remove jj workspace (non-fatal)"
+                    );
+                }
+                Err(join_err) => {
+                    warn!(
+                        path = %worktree_path.display(),
+                        error = %join_err,
+                        "Blocking task for jj workspace removal panicked or was cancelled (non-fatal)"
+                    );
+                }
             }
         }
 
