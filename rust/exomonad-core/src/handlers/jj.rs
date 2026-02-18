@@ -3,13 +3,23 @@
 //! Calls jj CLI as subprocess. Requires jj to be installed.
 
 use crate::effects::{dispatch_jj_effect, EffectError, EffectHandler, EffectResult, JjEffects};
+use crate::services::jj_workspace::JjWorkspaceService;
 use async_trait::async_trait;
 use exomonad_proto::effects::jj::*;
+use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::process::Command;
-use tracing::{error, info};
+use tracing::info;
 
-#[derive(Default)]
-pub struct JjHandler;
+pub struct JjHandler {
+    jj: Arc<JjWorkspaceService>,
+}
+
+impl JjHandler {
+    pub fn new(jj: Arc<JjWorkspaceService>) -> Self {
+        Self { jj }
+    }
+}
 
 #[async_trait]
 impl EffectHandler for JjHandler {
@@ -35,26 +45,17 @@ impl JjEffects for JjHandler {
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<BookmarkCreateResponse> {
         let working_dir = if req.working_dir.is_empty() {
-            ".".to_string()
+            PathBuf::from(".")
         } else {
-            req.working_dir
+            PathBuf::from(&req.working_dir)
         };
-        let mut args = vec!["bookmark", "create", &req.name];
-        if !req.revision.is_empty() {
-            args.extend(["--revision", &req.revision]);
-        }
-        info!(name = %req.name, "jj bookmark create");
-        let output = Command::new("jj")
-            .args(&args)
-            .current_dir(&working_dir)
-            .output()
+        let name = req.name.clone();
+        info!(name = %name, "jj bookmark create via jj-lib");
+        let jj = self.jj.clone();
+        tokio::task::spawn_blocking(move || jj.create_bookmark(&working_dir, &name))
             .await
+            .map_err(|e| EffectError::custom("jj_error", format!("spawn_blocking: {}", e)))?
             .map_err(|e| EffectError::custom("jj_error", e.to_string()))?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            error!(stderr = %stderr, "jj bookmark create failed");
-            return Err(EffectError::custom("jj_error", stderr.to_string()));
-        }
         Ok(BookmarkCreateResponse {
             change_id: String::new(),
         })
@@ -66,26 +67,26 @@ impl JjEffects for JjHandler {
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GitPushResponse> {
         let working_dir = if req.working_dir.is_empty() {
-            ".".to_string()
+            PathBuf::from(".")
         } else {
-            req.working_dir
+            PathBuf::from(&req.working_dir)
         };
-        info!(bookmark = %req.bookmark, "jj git push");
-        let output = Command::new("jj")
-            .args(["git", "push", "--bookmark", &req.bookmark])
-            .current_dir(&working_dir)
-            .output()
+        let bookmark = req.bookmark.clone();
+        info!(bookmark = %bookmark, "jj git push via jj-lib");
+        let jj = self.jj.clone();
+        let result = tokio::task::spawn_blocking(move || jj.push_bookmark(&working_dir, &bookmark))
             .await
-            .map_err(|e| EffectError::custom("jj_error", e.to_string()))?;
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        Ok(GitPushResponse {
-            success: output.status.success(),
-            message: if output.status.success() {
-                String::new()
-            } else {
-                stderr
-            },
-        })
+            .map_err(|e| EffectError::custom("jj_error", format!("spawn_blocking: {}", e)))?;
+        match result {
+            Ok(()) => Ok(GitPushResponse {
+                success: true,
+                message: String::new(),
+            }),
+            Err(e) => Ok(GitPushResponse {
+                success: false,
+                message: e.to_string(),
+            }),
+        }
     }
 
     async fn git_fetch(
@@ -94,26 +95,25 @@ impl JjEffects for JjHandler {
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GitFetchResponse> {
         let working_dir = if req.working_dir.is_empty() {
-            ".".to_string()
+            PathBuf::from(".")
         } else {
-            req.working_dir
+            PathBuf::from(&req.working_dir)
         };
-        info!("jj git fetch");
-        let output = Command::new("jj")
-            .args(["git", "fetch"])
-            .current_dir(&working_dir)
-            .output()
+        info!("jj git fetch via jj-lib");
+        let jj = self.jj.clone();
+        let result = tokio::task::spawn_blocking(move || jj.fetch(&working_dir))
             .await
-            .map_err(|e| EffectError::custom("jj_error", e.to_string()))?;
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        Ok(GitFetchResponse {
-            success: output.status.success(),
-            message: if output.status.success() {
-                String::new()
-            } else {
-                stderr
-            },
-        })
+            .map_err(|e| EffectError::custom("jj_error", format!("spawn_blocking: {}", e)))?;
+        match result {
+            Ok(()) => Ok(GitFetchResponse {
+                success: true,
+                message: String::new(),
+            }),
+            Err(e) => Ok(GitFetchResponse {
+                success: false,
+                message: e.to_string(),
+            }),
+        }
     }
 
     async fn log(
