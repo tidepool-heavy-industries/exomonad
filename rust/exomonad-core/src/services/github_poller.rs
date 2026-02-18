@@ -1,3 +1,4 @@
+use crate::domain::PRNumber;
 use crate::services::agent_control::AgentType;
 use crate::services::event_log::EventLog;
 use crate::services::event_queue::EventQueue;
@@ -18,7 +19,7 @@ pub struct GitHubPoller {
     event_log: Option<Arc<EventLog>>,
     project_dir: PathBuf,
     poll_interval: Duration,
-    state: Arc<Mutex<HashMap<u64, PRState>>>, // Map PR number -> State
+    state: Arc<Mutex<HashMap<PRNumber, PRState>>>,
     repo_info: Arc<Mutex<Option<(String, String)>>>, // (owner, name)
 }
 
@@ -134,7 +135,7 @@ impl GitHubPoller {
                         &owner,
                         &repo,
                         &wb.branch,
-                        pr.number,
+                        PRNumber::new(pr.number),
                         &pr.head.sha,
                         wb.agent_type,
                     )
@@ -226,7 +227,7 @@ impl GitHubPoller {
         owner: &str,
         repo: &str,
         branch: &str,
-        pr_number: u64,
+        pr_number: PRNumber,
         pr_sha: &str,
         agent_type: AgentType,
     ) -> Result<()> {
@@ -285,7 +286,7 @@ impl GitHubPoller {
         &self,
         owner: &str,
         repo: &str,
-        pr_number: u64,
+        pr_number: PRNumber,
     ) -> Result<(Vec<CopilotComment>, Vec<String>)> {
         // Inline comments (with file context)
         let endpoint = format!("/repos/{}/{}/pulls/{}/comments", owner, repo, pr_number);

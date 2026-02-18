@@ -4,48 +4,18 @@
 //! Every mutating method calls `export_refs()` after committing the transaction
 //! to keep git refs in sync for `gh` CLI compatibility (colocated mode).
 
+use crate::domain::{BranchName, Revision};
 use anyhow::{Context, Result};
 use jj_lib::config::{ConfigSource, StackedConfig};
 use jj_lib::git;
-use jj_lib::git::{GitSubprocessCallback, GitSidebandLineTerminator};
+use jj_lib::backend::CommitId;
 use jj_lib::op_store::RefTarget;
-use jj_lib::ref_name::{RefName, RefNameBuf, RemoteName, WorkspaceNameBuf};
-use jj_lib::refs::BookmarkPushUpdate;
+use jj_lib::ref_name::{RefName, WorkspaceNameBuf};
 use jj_lib::repo::Repo;
 use jj_lib::settings::UserSettings;
 use jj_lib::workspace::{default_working_copy_factories, Workspace};
-use std::io;
 use std::path::{Path, PathBuf};
-use tracing::{error, info};
-
-/// No-op callback for non-interactive git push/fetch operations.
-struct SilentCallback;
-
-impl GitSubprocessCallback for SilentCallback {
-    fn needs_progress(&self) -> bool {
-        false
-    }
-
-    fn progress(&mut self, _progress: &jj_lib::git::GitProgress) -> io::Result<()> {
-        Ok(())
-    }
-
-    fn local_sideband(
-        &mut self,
-        _message: &[u8],
-        _term: Option<GitSidebandLineTerminator>,
-    ) -> io::Result<()> {
-        Ok(())
-    }
-
-    fn remote_sideband(
-        &mut self,
-        _message: &[u8],
-        _term: Option<GitSidebandLineTerminator>,
-    ) -> io::Result<()> {
-        Ok(())
-    }
-}
+use tracing::{error, info, warn};
 
 /// Service for jj workspace and bookmark operations via jj-lib.
 ///
@@ -105,18 +75,44 @@ impl JjWorkspaceService {
         .map_err(|e| anyhow::anyhow!("Failed to load jj workspace at {}: {}", path.display(), e))
     }
 
+    /// Resolve a revision string to a CommitId.
+    ///
+    /// Tries local bookmark first, then full commit ID hex.
+    fn resolve_revision(&self, repo: &dyn Repo, rev: &Revision) -> Result<CommitId> {
+        let rev_str = rev.as_str();
+        // Try as local bookmark
+        let bookmark_ref: &RefName = rev_str.as_ref();
+        if let Some(id) = repo.view().get_local_bookmark(bookmark_ref).as_normal() {
+            return Ok(id.clone());
+        }
+
+        // Try as full commit ID hex
+        if let Some(id) = CommitId::try_from_hex(rev_str) {
+            // Verify the commit exists
+            repo.store()
+                .get_commit(&id)
+                .with_context(|| format!("Commit '{}' not found in repo", rev))?;
+            return Ok(id);
+        }
+
+        Err(anyhow::anyhow!(
+            "Could not resolve revision '{}': not a known bookmark or valid commit ID",
+            rev
+        ))
+    }
+
     /// Create a new jj workspace with a bookmark pointing to a base commit.
     ///
     /// Replaces: `git worktree add -b {bookmark} {path} {base}`
-    pub fn create_workspace(&self, path: &Path, bookmark: &str, base: &str) -> Result<()> {
-        info!(path = %path.display(), bookmark, base, "Creating jj workspace");
+    pub fn create_workspace(&self, path: &Path, bookmark: &BranchName, base: &BranchName) -> Result<()> {
+        info!(path = %path.display(), bookmark = %bookmark, base = %base, "Creating jj workspace");
 
         let root_ws = self.load_root_workspace()?;
         let repo = root_ws.repo_loader().load_at_head()
             .context("Failed to load repo at head")?;
 
         // Resolve the base bookmark to a commit
-        let base_ref: &RefName = base.as_ref();
+        let base_ref: &RefName = base.as_str().as_ref();
         let base_target = repo.view().get_local_bookmark(base_ref);
         let base_commit_id = base_target
             .as_normal()
@@ -152,7 +148,7 @@ impl JjWorkspaceService {
         let mut tx = new_repo.start_transaction();
 
         // Create the bookmark pointing to base commit
-        let bookmark_ref: &RefName = bookmark.as_ref();
+        let bookmark_ref: &RefName = bookmark.as_str().as_ref();
         tx.repo_mut().set_local_bookmark_target(
             bookmark_ref,
             RefTarget::normal(base_commit_id.clone()),
@@ -166,11 +162,11 @@ impl JjWorkspaceService {
 
         // Export refs to git (keeps gh CLI happy in colocated mode)
         if let Err(e) = git::export_refs(tx.repo_mut()) {
-            error!(error = %e, "Failed to export refs to git");
+            warn!(error = %e, "Failed to export refs to git");
         }
 
-        tx.commit(format!("create workspace with bookmark '{bookmark}'"))?;
-        info!(path = %path.display(), bookmark, "Workspace created successfully");
+        tx.commit(format!("create workspace with bookmark '{}'", bookmark))?;
+        info!(path = %path.display(), bookmark = %bookmark, "Workspace created successfully");
         Ok(())
     }
 
@@ -189,6 +185,9 @@ impl JjWorkspaceService {
 
             let mut tx = repo.start_transaction();
             tx.repo_mut().remove_wc_commit(&ws_name)?;
+            if let Err(e) = git::export_refs(tx.repo_mut()) {
+                warn!(error = %e, "Failed to export refs to git after removing workspace");
+            }
             tx.commit(format!("remove workspace '{}'", ws_name.as_str()))?;
         }
 
@@ -202,102 +201,89 @@ impl JjWorkspaceService {
         Ok(())
     }
 
-    /// Create a bookmark in the given workspace pointing to its working copy commit.
-    pub fn create_bookmark(&self, workspace_path: &Path, name: &str) -> Result<()> {
-        info!(bookmark = name, path = %workspace_path.display(), "Creating jj bookmark");
+    /// Create a bookmark in the given workspace pointing to its working copy commit,
+    /// or to the specified revision if provided.
+    pub fn create_bookmark(
+        &self,
+        workspace_path: &Path,
+        name: &BranchName,
+        revision: Option<&Revision>,
+    ) -> Result<()> {
+        info!(bookmark = %name, revision = ?revision, path = %workspace_path.display(), "Creating jj bookmark");
 
         let ws = self.load_workspace_at(workspace_path)?;
         let repo = ws.repo_loader().load_at_head()?;
 
-        // Get the working copy commit for this workspace
-        let ws_name = ws.workspace_name();
-        let wc_commit_id = repo
-            .view()
-            .get_wc_commit_id(ws_name)
-            .ok_or_else(|| anyhow::anyhow!("No working copy commit for workspace"))?
-            .clone();
+        let target_id = match revision {
+            Some(rev) => self.resolve_revision(repo.as_ref(), rev)?,
+            None => {
+                let ws_name = ws.workspace_name();
+                repo.view()
+                    .get_wc_commit_id(ws_name)
+                    .ok_or_else(|| anyhow::anyhow!("No working copy commit for workspace"))?
+                    .clone()
+            }
+        };
 
         let mut tx = repo.start_transaction();
-        let bookmark_ref: &RefName = name.as_ref();
+        let bookmark_ref: &RefName = name.as_str().as_ref();
         tx.repo_mut().set_local_bookmark_target(
             bookmark_ref,
-            RefTarget::normal(wc_commit_id),
+            RefTarget::normal(target_id),
         );
 
-        let _ = git::export_refs(tx.repo_mut());
+        if let Err(e) = git::export_refs(tx.repo_mut()) {
+            error!(error = %e, "Failed to export refs to git after creating bookmark");
+        }
         tx.commit(format!("create bookmark '{}'", name))?;
 
-        info!(bookmark = name, "Bookmark created");
+        info!(bookmark = %name, "Bookmark created");
         Ok(())
     }
 
     /// Delete a bookmark.
-    pub fn delete_bookmark(&self, name: &str) -> Result<()> {
-        info!(bookmark = name, "Deleting jj bookmark");
+    pub fn delete_bookmark(&self, name: &BranchName) -> Result<()> {
+        info!(bookmark = %name, "Deleting jj bookmark");
 
         let ws = self.load_root_workspace()?;
         let repo = ws.repo_loader().load_at_head()?;
 
         let mut tx = repo.start_transaction();
-        let bookmark_ref: &RefName = name.as_ref();
+        let bookmark_ref: &RefName = name.as_str().as_ref();
         tx.repo_mut().set_local_bookmark_target(
             bookmark_ref,
             RefTarget::absent(),
         );
 
-        let _ = git::export_refs(tx.repo_mut());
+        if let Err(e) = git::export_refs(tx.repo_mut()) {
+            error!(error = %e, "Failed to export refs to git after deleting bookmark");
+        }
         tx.commit(format!("delete bookmark '{}'", name))?;
 
-        info!(bookmark = name, "Bookmark deleted");
+        info!(bookmark = %name, "Bookmark deleted");
         Ok(())
     }
 
     /// Push a bookmark to the remote.
     ///
-    /// Replaces: `git push -u origin HEAD` / `jj git push --bookmark {bookmark}`
-    pub fn push_bookmark(&self, workspace_path: &Path, bookmark: &str) -> Result<()> {
-        info!(bookmark, path = %workspace_path.display(), "Pushing jj bookmark");
+    /// Uses jj CLI for push — the library API requires complex callback/refspec
+    /// setup (matches the approach used in `fetch()`).
+    pub fn push_bookmark(&self, workspace_path: &Path, bookmark: &BranchName) -> Result<()> {
+        info!(bookmark = %bookmark, path = %workspace_path.display(), "Pushing jj bookmark");
 
-        let settings = self.load_settings()?;
-        let ws = self.load_workspace_at(workspace_path)?;
-        let repo = ws.repo_loader().load_at_head()?;
+        let output = std::process::Command::new("jj")
+            .args(["git", "push", "--bookmark", bookmark.as_str()])
+            .current_dir(workspace_path)
+            .output()
+            .context("Failed to run jj git push")?;
 
-        let mut tx = repo.start_transaction();
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            error!(stderr = %stderr, "jj git push failed");
+            return Err(anyhow::anyhow!("git push failed: {}", stderr));
+        }
 
-        // Export refs first to ensure git sees current state
-        let _ = git::export_refs(tx.repo_mut());
-
-        let bookmark_ref: &RefName = bookmark.as_ref();
-        let local_target = tx.repo().view().get_local_bookmark(bookmark_ref);
-        let remote_name: &RemoteName = "origin".as_ref();
-        let remote_symbol = bookmark_ref.to_remote_symbol(remote_name);
-        let remote_ref = tx.repo().view().get_remote_bookmark(remote_symbol);
-
-        // Build push targets
-        let update = BookmarkPushUpdate {
-            old_target: remote_ref.target.as_normal().cloned(),
-            new_target: local_target.as_normal().cloned(),
-        };
-        let bookmark_name: RefNameBuf = bookmark.into();
-        let targets = git::GitBranchPushTargets {
-            branch_updates: vec![(bookmark_name, update)],
-        };
-
-        let subprocess_options = git::GitSubprocessOptions::from_settings(&settings)
-            .context("Failed to create git subprocess options")?;
-
-        let mut callback = SilentCallback;
-        let _stats = git::push_branches(
-            tx.repo_mut(),
-            subprocess_options,
-            remote_name,
-            &targets,
-            &mut callback,
-        )
-        .map_err(|e| anyhow::anyhow!("git push failed: {}", e))?;
-
-        tx.commit(format!("push bookmark '{}'", bookmark))?;
-        info!(bookmark, "Bookmark pushed successfully");
+        info!(bookmark = %bookmark, "Bookmark pushed successfully");
         Ok(())
     }
 

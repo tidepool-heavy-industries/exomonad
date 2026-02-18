@@ -39,7 +39,7 @@ pub enum DomainError {
 macro_rules! validated_string {
     ($(#[doc = $doc:expr])* $name:ident, $field:expr) => {
         $(#[doc = $doc])*
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
         #[serde(try_from = "String", into = "String")]
         pub struct $name(String);
 
@@ -104,6 +104,26 @@ validated_string!(
     #[doc = "GitHub repository name (non-empty string)."]
     GithubRepo,
     "github_repo"
+);
+
+validated_string!(
+    #[doc = "Git branch name (non-empty string)."]
+    #[doc = "Semantically distinct from `Revision` which can also be a commit ID prefix."]
+    BranchName,
+    "branch_name"
+);
+
+validated_string!(
+    #[doc = "Jujutsu revision specifier (bookmark name or commit ID prefix)."]
+    #[doc = "Semantically distinct from `BranchName` — revisions resolve to commits via multiple strategies."]
+    Revision,
+    "revision"
+);
+
+validated_string!(
+    #[doc = "Coordination task identifier (e.g., `task-1`)."]
+    TaskId,
+    "task_id"
 );
 
 validated_string!(
@@ -250,6 +270,54 @@ impl IssueNumber {
 }
 
 impl fmt::Display for IssueNumber {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+// ============================================================================
+// PR Number
+// ============================================================================
+
+/// GitHub pull request number (positive integer).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "u64", into = "u64")]
+pub struct PRNumber(u64);
+
+impl TryFrom<u64> for PRNumber {
+    type Error = DomainError;
+
+    fn try_from(n: u64) -> Result<Self, Self::Error> {
+        if n == 0 {
+            return Err(DomainError::Invalid {
+                field: "pr_number",
+                value: "0".to_string(),
+            });
+        }
+        Ok(Self(n))
+    }
+}
+
+impl From<PRNumber> for u64 {
+    fn from(num: PRNumber) -> u64 {
+        num.0
+    }
+}
+
+impl PRNumber {
+    /// Create a PRNumber from a u64 (panics on 0, use TryFrom for fallible).
+    pub fn new(n: u64) -> Self {
+        assert!(n > 0, "PR number must be positive");
+        Self(n)
+    }
+
+    /// Get the PR number as a u64.
+    pub fn as_u64(self) -> u64 {
+        self.0
+    }
+}
+
+impl fmt::Display for PRNumber {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -830,5 +898,122 @@ mod tests {
             let back: MessageFilter = serde_json::from_str(&json).unwrap();
             assert_eq!(filter, back);
         }
+    }
+
+    // =========================================================================
+    // BranchName, Revision, TaskId tests
+    // =========================================================================
+
+    #[test]
+    fn test_branch_name_validation() {
+        let name = BranchName::try_from("main".to_string()).unwrap();
+        assert_eq!(name.as_str(), "main");
+
+        let name = BranchName::try_from("feature/foo-bar".to_string()).unwrap();
+        assert_eq!(name.as_str(), "feature/foo-bar");
+
+        let result = BranchName::try_from("".to_string());
+        assert!(matches!(result, Err(DomainError::Empty { .. })));
+    }
+
+    #[test]
+    fn test_branch_name_serde_roundtrip() {
+        let name = BranchName::try_from("main.feature-a".to_string()).unwrap();
+        let json = serde_json::to_string(&name).unwrap();
+        let back: BranchName = serde_json::from_str(&json).unwrap();
+        assert_eq!(name, back);
+    }
+
+    #[test]
+    fn test_revision_validation() {
+        let rev = Revision::try_from("abc123".to_string()).unwrap();
+        assert_eq!(rev.as_str(), "abc123");
+
+        let rev = Revision::try_from("main".to_string()).unwrap();
+        assert_eq!(rev.as_str(), "main");
+
+        let result = Revision::try_from("".to_string());
+        assert!(matches!(result, Err(DomainError::Empty { .. })));
+    }
+
+    #[test]
+    fn test_revision_serde_roundtrip() {
+        let rev = Revision::try_from("deadbeef".to_string()).unwrap();
+        let json = serde_json::to_string(&rev).unwrap();
+        let back: Revision = serde_json::from_str(&json).unwrap();
+        assert_eq!(rev, back);
+    }
+
+    #[test]
+    fn test_task_id_validation() {
+        let id = TaskId::try_from("task-1".to_string()).unwrap();
+        assert_eq!(id.as_str(), "task-1");
+
+        let result = TaskId::try_from("".to_string());
+        assert!(matches!(result, Err(DomainError::Empty { .. })));
+    }
+
+    #[test]
+    fn test_task_id_serde_roundtrip() {
+        let id = TaskId::try_from("task-42".to_string()).unwrap();
+        let json = serde_json::to_string(&id).unwrap();
+        let back: TaskId = serde_json::from_str(&json).unwrap();
+        assert_eq!(id, back);
+    }
+
+    // =========================================================================
+    // PRNumber tests
+    // =========================================================================
+
+    #[test]
+    fn test_pr_number_validation() {
+        let pr = PRNumber::try_from(1u64).unwrap();
+        assert_eq!(pr.as_u64(), 1);
+
+        let pr = PRNumber::try_from(999u64).unwrap();
+        assert_eq!(pr.as_u64(), 999);
+
+        let result = PRNumber::try_from(0u64);
+        assert!(matches!(result, Err(DomainError::Invalid { .. })));
+    }
+
+    #[test]
+    fn test_pr_number_new() {
+        let pr = PRNumber::new(42);
+        assert_eq!(pr.as_u64(), 42);
+    }
+
+    #[test]
+    #[should_panic(expected = "PR number must be positive")]
+    fn test_pr_number_new_zero_panics() {
+        PRNumber::new(0);
+    }
+
+    #[test]
+    fn test_pr_number_display() {
+        let pr = PRNumber::new(123);
+        assert_eq!(format!("{}", pr), "123");
+    }
+
+    #[test]
+    fn test_pr_number_into_u64() {
+        let pr = PRNumber::new(77);
+        let n: u64 = pr.into();
+        assert_eq!(n, 77);
+    }
+
+    #[test]
+    fn test_pr_number_serde_roundtrip() {
+        let pr = PRNumber::try_from(42u64).unwrap();
+        let json = serde_json::to_string(&pr).unwrap();
+        assert_eq!(json, "42");
+        let back: PRNumber = serde_json::from_str(&json).unwrap();
+        assert_eq!(pr, back);
+    }
+
+    #[test]
+    fn test_pr_number_serde_zero_rejected() {
+        let result = serde_json::from_str::<PRNumber>("0");
+        assert!(result.is_err());
     }
 }

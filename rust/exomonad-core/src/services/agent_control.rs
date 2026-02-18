@@ -42,7 +42,7 @@ async fn ensure_branch_pushed(
     info!(branch = %branch, "Pushing parent branch to remote");
     let jj = jj.clone();
     let dir = project_dir.to_path_buf();
-    let bookmark = branch.to_string();
+    let bookmark = crate::domain::BranchName::from(branch);
     tokio::task::spawn_blocking(move || jj.push_bookmark(&dir, &bookmark))
         .await
         .context("tokio task join error while pushing parent branch")?
@@ -401,9 +401,12 @@ pub struct AgentControlService {
 
 impl AgentControlService {
     /// Create a new agent control service.
-    pub fn new(project_dir: PathBuf, github: Option<GitHubService>) -> Self {
+    pub fn new(
+        project_dir: PathBuf,
+        github: Option<GitHubService>,
+        jj: Arc<JjWorkspaceService>,
+    ) -> Self {
         let worktree_base = project_dir.join(".exo/worktrees");
-        let jj = Arc::new(JjWorkspaceService::new(project_dir.clone()));
         Self {
             project_dir,
             worktree_base,
@@ -583,8 +586,8 @@ impl AgentControlService {
             {
                 let jj = self.jj.clone();
                 let path = worktree_path.clone();
-                let bookmark = branch_name.clone();
-                let base = base.to_string();
+                let bookmark = crate::domain::BranchName::from(branch_name.as_str());
+                let base = crate::domain::BranchName::from(base);
                 tokio::task::spawn_blocking(move || jj.create_workspace(&path, &bookmark, &base))
                     .await
                     .context("tokio task join error while creating jj workspace")?
@@ -807,8 +810,8 @@ impl AgentControlService {
             {
                 let jj = self.jj.clone();
                 let path = worktree_path.clone();
-                let bookmark = branch_name.clone();
-                let base = base_branch.to_string();
+                let bookmark = crate::domain::BranchName::from(branch_name.as_str());
+                let base = crate::domain::BranchName::from(base_branch.as_str());
                 tokio::task::spawn_blocking(move || jj.create_workspace(&path, &bookmark, &base))
                     .await
                     .context("tokio task join error while creating jj workspace")?
@@ -1103,8 +1106,8 @@ impl AgentControlService {
             {
                 let jj = self.jj.clone();
                 let path = worktree_path.clone();
-                let bookmark = branch_name.clone();
-                let base = current_branch.to_string();
+                let bookmark = crate::domain::BranchName::from(branch_name.as_str());
+                let base = crate::domain::BranchName::from(current_branch);
                 tokio::task::spawn_blocking(move || jj.create_workspace(&path, &bookmark, &base))
                     .await
                     .context("tokio task join error while creating jj workspace")?
@@ -1239,8 +1242,8 @@ impl AgentControlService {
             {
                 let jj = self.jj.clone();
                 let path = worktree_path.clone();
-                let bookmark = branch_name.clone();
-                let base = current_branch.to_string();
+                let bookmark = crate::domain::BranchName::from(branch_name.as_str());
+                let base = crate::domain::BranchName::from(current_branch.as_str());
                 tokio::task::spawn_blocking(move || jj.create_workspace(&path, &bookmark, &base))
                     .await
                     .context("tokio task join error while creating jj workspace")?

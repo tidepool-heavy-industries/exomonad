@@ -1,4 +1,4 @@
-use crate::domain::AgentName;
+use crate::domain::{AgentName, TaskId};
 use crate::effects::{
     dispatch_coordination_effect, CoordinationEffects, EffectHandler, EffectResult,
 };
@@ -52,12 +52,12 @@ fn from_service_status(status: ServiceTaskStatus) -> TaskStatus {
 
 fn to_proto_task(task: crate::services::coordination::Task) -> Task {
     Task {
-        id: task.id,
+        id: task.id.to_string(),
         subject: task.subject,
         description: task.description,
         status: from_service_status(task.status) as i32,
         owner: task.owner.to_string(),
-        blocked_by: task.blocked_by,
+        blocked_by: task.blocked_by.into_iter().map(|t| t.to_string()).collect(),
     }
 }
 
@@ -68,17 +68,20 @@ impl CoordinationEffects for CoordinationHandler {
         req: CreateTaskRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<CreateTaskResponse> {
+        tracing::info!(subject = %req.subject, "[Coordination] create_task starting");
+        let blocked_by: Vec<TaskId> = req.blocked_by.iter().map(|s| TaskId::from(s.as_str())).collect();
         let task_id = self
             .service
             .create_task(
                 req.subject,
                 req.description,
                 AgentName::from(req.owner.as_str()),
-                req.blocked_by,
+                blocked_by,
             )
             .await;
 
-        Ok(CreateTaskResponse { task_id })
+        tracing::info!(task_id = %task_id, "[Coordination] create_task complete");
+        Ok(CreateTaskResponse { task_id: task_id.to_string() })
     }
 
     async fn update_task(
@@ -86,6 +89,8 @@ impl CoordinationEffects for CoordinationHandler {
         req: UpdateTaskRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<UpdateTaskResponse> {
+        let task_id = TaskId::from(req.task_id.as_str());
+        tracing::info!(task_id = %task_id, "[Coordination] update_task starting");
         let status = to_service_status(req.status());
         let owner = if req.owner.is_empty() {
             None
@@ -105,9 +110,10 @@ impl CoordinationEffects for CoordinationHandler {
 
         let success = self
             .service
-            .update_task(req.task_id, status, owner, description, subject)
+            .update_task(&task_id, status, owner, description, subject)
             .await;
 
+        tracing::info!(success, "[Coordination] update_task complete");
         Ok(UpdateTaskResponse { success })
     }
 
@@ -116,9 +122,11 @@ impl CoordinationEffects for CoordinationHandler {
         req: ListTasksRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<ListTasksResponse> {
+        tracing::info!("[Coordination] list_tasks starting");
         let filter_status = to_service_status(req.filter_status());
         let tasks = self.service.list_tasks(filter_status).await;
 
+        tracing::info!(count = tasks.len(), "[Coordination] list_tasks complete");
         Ok(ListTasksResponse {
             tasks: tasks.into_iter().map(to_proto_task).collect(),
         })
@@ -129,8 +137,11 @@ impl CoordinationEffects for CoordinationHandler {
         req: GetTaskRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetTaskResponse> {
-        let task = self.service.get_task(&req.task_id).await;
+        let task_id = TaskId::from(req.task_id.as_str());
+        tracing::info!(task_id = %task_id, "[Coordination] get_task starting");
+        let task = self.service.get_task(&task_id).await;
 
+        tracing::info!(found = task.is_some(), "[Coordination] get_task complete");
         Ok(GetTaskResponse {
             task: task.map(to_proto_task),
         })
@@ -141,9 +152,11 @@ impl CoordinationEffects for CoordinationHandler {
         req: SendMessageRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<SendMessageResponse> {
+        tracing::info!(from = %req.from, "[Coordination] send_message starting");
         self.service
             .send_message(AgentName::from(req.from.as_str()), req.text, req.summary)
             .await;
+        tracing::info!("[Coordination] send_message complete");
         Ok(SendMessageResponse { success: true })
     }
 
@@ -152,6 +165,7 @@ impl CoordinationEffects for CoordinationHandler {
         req: GetMessagesRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetMessagesResponse> {
+        tracing::info!(unread_only = req.unread_only, "[Coordination] get_messages starting");
         let filter = if req.unread_only {
             crate::domain::MessageFilter::UnreadOnly
         } else {
@@ -159,6 +173,7 @@ impl CoordinationEffects for CoordinationHandler {
         };
         let messages = self.service.get_messages(filter).await;
 
+        tracing::info!(count = messages.len(), "[Coordination] get_messages complete");
         Ok(GetMessagesResponse {
             messages: messages
                 .into_iter()

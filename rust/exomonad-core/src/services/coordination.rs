@@ -1,4 +1,4 @@
-use crate::domain::{AgentName, MessageFilter};
+use crate::domain::{AgentName, MessageFilter, TaskId};
 use chrono::Utc;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -6,19 +6,19 @@ use tokio::sync::RwLock;
 
 /// In-memory coordination state. Lives in Arc on the MCP server.
 pub struct CoordinationService {
-    tasks: RwLock<BTreeMap<String, Task>>,
+    tasks: RwLock<BTreeMap<TaskId, Task>>,
     messages: RwLock<Vec<Message>>,
     next_task_id: AtomicU64,
 }
 
 #[derive(Debug, Clone)]
 pub struct Task {
-    pub id: String,
+    pub id: TaskId,
     pub subject: String,
     pub description: String,
     pub status: TaskStatus,
     pub owner: AgentName,
-    pub blocked_by: Vec<String>,
+    pub blocked_by: Vec<TaskId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -51,10 +51,10 @@ impl CoordinationService {
         subject: String,
         description: String,
         owner: AgentName,
-        blocked_by: Vec<String>,
-    ) -> String {
+        blocked_by: Vec<TaskId>,
+    ) -> TaskId {
         let id_num = self.next_task_id.fetch_add(1, Ordering::SeqCst);
-        let task_id = format!("task-{}", id_num);
+        let task_id = TaskId::from(format!("task-{}", id_num).as_str());
 
         let task = Task {
             id: task_id.clone(),
@@ -72,14 +72,14 @@ impl CoordinationService {
 
     pub async fn update_task(
         &self,
-        task_id: String,
+        task_id: &TaskId,
         status: Option<TaskStatus>,
         owner: Option<AgentName>,
         description: Option<String>,
         subject: Option<String>,
     ) -> bool {
         let mut tasks = self.tasks.write().await;
-        if let Some(task) = tasks.get_mut(&task_id) {
+        if let Some(task) = tasks.get_mut(task_id) {
             if let Some(s) = status {
                 task.status = s;
             }
@@ -107,7 +107,7 @@ impl CoordinationService {
             .collect()
     }
 
-    pub async fn get_task(&self, task_id: &str) -> Option<Task> {
+    pub async fn get_task(&self, task_id: &TaskId) -> Option<Task> {
         let tasks = self.tasks.read().await;
         tasks.get(task_id).cloned()
     }
@@ -163,17 +163,17 @@ mod tests {
                 "Test Subject".to_string(),
                 "Test Description".to_string(),
                 AgentName::from("owner1"),
-                vec!["blocker1".to_string()],
+                vec![TaskId::from("blocker1")],
             )
             .await;
 
-        assert_eq!(task_id, "task-1");
+        assert_eq!(task_id, TaskId::from("task-1"));
 
         let task = service.get_task(&task_id).await.unwrap();
         assert_eq!(task.subject, "Test Subject");
         assert_eq!(task.description, "Test Description");
         assert_eq!(task.owner, AgentName::from("owner1"));
-        assert_eq!(task.blocked_by, vec!["blocker1".to_string()]);
+        assert_eq!(task.blocked_by, vec![TaskId::from("blocker1")]);
         assert_eq!(task.status, TaskStatus::Pending);
     }
 
@@ -191,7 +191,7 @@ mod tests {
 
         let success = service
             .update_task(
-                task_id.clone(),
+                &task_id,
                 Some(TaskStatus::InProgress),
                 None,
                 None,
@@ -225,7 +225,7 @@ mod tests {
             )
             .await;
         service
-            .update_task(t2_id, Some(TaskStatus::Completed), None, None, None)
+            .update_task(&t2_id, Some(TaskStatus::Completed), None, None, None)
             .await;
 
         let all_tasks = service.list_tasks(None).await;

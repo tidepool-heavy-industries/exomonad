@@ -1,9 +1,13 @@
+use crate::domain::PRNumber;
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio::process::Command;
+use tokio::time::Duration;
 use tracing::{error, info};
 
 use crate::services::jj_workspace::JjWorkspaceService;
+
+const MERGE_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub struct MergePROutput {
     pub success: bool,
@@ -12,7 +16,7 @@ pub struct MergePROutput {
 }
 
 pub async fn merge_pr_async(
-    pr_number: i64,
+    pr_number: PRNumber,
     strategy: &str,
     working_dir: &str,
     jj: Arc<JjWorkspaceService>,
@@ -28,16 +32,20 @@ pub async fn merge_pr_async(
         strategy
     };
 
-    info!(pr_number, strategy = strat, working_dir = dir, "Merging PR");
+    info!(pr_number = pr_number.as_u64(), strategy = strat, working_dir = dir, "Merging PR");
 
     // Step 1: gh pr merge
     let strategy_flag = format!("--{}", strat);
-    let output = Command::new("gh")
-        .args(["pr", "merge", &pr_number.to_string(), &strategy_flag])
-        .current_dir(dir)
-        .output()
-        .await
-        .context("Failed to run gh pr merge")?;
+    let output = tokio::time::timeout(
+        MERGE_TIMEOUT,
+        Command::new("gh")
+            .args(["pr", "merge", &pr_number.to_string(), &strategy_flag])
+            .current_dir(dir)
+            .output(),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("gh pr merge timed out after {}s", MERGE_TIMEOUT.as_secs()))?
+    .context("Failed to run gh pr merge")?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -50,7 +58,7 @@ pub async fn merge_pr_async(
     }
 
     let merge_msg = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    info!(pr_number, "PR merged successfully");
+    info!(pr_number = pr_number.as_u64(), "PR merged successfully");
 
     // Step 2: jj git fetch (best-effort, triggers auto-rebase) via jj-lib
     let dir_path = std::path::PathBuf::from(dir);

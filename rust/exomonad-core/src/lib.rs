@@ -93,8 +93,9 @@ pub use plugin_manager::PluginManager;
 // --- Shared type re-exports ---
 #[cfg(feature = "runtime")]
 pub use domain::{
-    AbsolutePath, AgentName, BirthBranch, ClaudeSessionUuid, DomainError, GithubOwner, GithubRepo,
-    IssueNumber, PathError, Role, SessionId, ToolName, ToolPermission,
+    AbsolutePath, AgentName, BirthBranch, BranchName, ClaudeSessionUuid, DomainError, GithubOwner,
+    GithubRepo, IssueNumber, PRNumber, PathError, Revision, Role, SessionId, TaskId, ToolName,
+    ToolPermission,
 };
 #[cfg(feature = "runtime")]
 pub use error::{ExoMonadError, Result};

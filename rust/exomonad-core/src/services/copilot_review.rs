@@ -3,6 +3,7 @@
 // Uses `gh api` to check for Copilot review comments on a PR.
 // Blocks until comments are found or timeout is reached.
 
+use crate::domain::PRNumber;
 use crate::services::git;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -19,7 +20,7 @@ use super::zellij_events;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct WaitForCopilotReviewInput {
-    pub pr_number: u64,
+    pub pr_number: PRNumber,
     #[serde(default = "default_timeout")]
     pub timeout_secs: u64,
     #[serde(default = "default_poll_interval")]
@@ -82,7 +83,7 @@ fn get_repo_info() -> Result<(String, String)> {
 }
 
 /// Fetch PR review comments using gh api
-fn fetch_pr_comments(owner: &str, repo: &str, pr_number: u64) -> Result<Vec<CopilotComment>> {
+fn fetch_pr_comments(owner: &str, repo: &str, pr_number: PRNumber) -> Result<Vec<CopilotComment>> {
     let endpoint = format!("/repos/{}/{}/pulls/{}/comments", owner, repo, pr_number);
 
     debug!("[CopilotReview] Fetching comments from: {}", endpoint);
@@ -165,7 +166,7 @@ fn is_copilot_comment(login: &str, user_type: Option<&str>) -> bool {
 }
 
 /// Also check PR reviews (not just inline comments)
-fn fetch_pr_reviews(owner: &str, repo: &str, pr_number: u64) -> Result<bool> {
+fn fetch_pr_reviews(owner: &str, repo: &str, pr_number: PRNumber) -> Result<bool> {
     let endpoint = format!("/repos/{}/{}/pulls/{}/reviews", owner, repo, pr_number);
 
     debug!("[CopilotReview] Fetching reviews from: {}", endpoint);

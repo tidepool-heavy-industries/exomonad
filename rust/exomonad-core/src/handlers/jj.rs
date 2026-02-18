@@ -1,7 +1,10 @@
 //! Jujutsu (jj) effect handler for the `jj.*` namespace.
 //!
-//! Calls jj CLI as subprocess. Requires jj to be installed.
+//! Hybrid approach: `bookmark_create`, `git_push`, and `git_fetch` use jj-lib
+//! directly via `JjWorkspaceService`. Remaining effects (`log`, `new`, `status`)
+//! shell out to the `jj` CLI.
 
+use crate::domain::{BranchName, Revision};
 use crate::effects::{dispatch_jj_effect, EffectError, EffectHandler, EffectResult, JjEffects};
 use crate::services::jj_workspace::JjWorkspaceService;
 use async_trait::async_trait;
@@ -49,13 +52,20 @@ impl JjEffects for JjHandler {
         } else {
             PathBuf::from(&req.working_dir)
         };
-        let name = req.name.clone();
-        info!(name = %name, "jj bookmark create via jj-lib");
+        let name = BranchName::from(req.name.as_str());
+        let revision = if req.revision.is_empty() {
+            None
+        } else {
+            Some(Revision::from(req.revision.as_str()))
+        };
+        info!(name = %name, revision = ?revision, "jj bookmark create via jj-lib");
         let jj = self.jj.clone();
-        tokio::task::spawn_blocking(move || jj.create_bookmark(&working_dir, &name))
-            .await
-            .map_err(|e| EffectError::custom("jj_error", format!("spawn_blocking: {}", e)))?
-            .map_err(|e| EffectError::custom("jj_error", e.to_string()))?;
+        tokio::task::spawn_blocking(move || {
+            jj.create_bookmark(&working_dir, &name, revision.as_ref())
+        })
+        .await
+        .map_err(|e| EffectError::custom("jj_error", format!("spawn_blocking: {}", e)))?
+        .map_err(|e| EffectError::custom("jj_error", e.to_string()))?;
         Ok(BookmarkCreateResponse {
             change_id: String::new(),
         })
@@ -71,7 +81,7 @@ impl JjEffects for JjHandler {
         } else {
             PathBuf::from(&req.working_dir)
         };
-        let bookmark = req.bookmark.clone();
+        let bookmark = BranchName::from(req.bookmark.as_str());
         info!(bookmark = %bookmark, "jj git push via jj-lib");
         let jj = self.jj.clone();
         let result = tokio::task::spawn_blocking(move || jj.push_bookmark(&working_dir, &bookmark))
@@ -82,10 +92,7 @@ impl JjEffects for JjHandler {
                 success: true,
                 message: String::new(),
             }),
-            Err(e) => Ok(GitPushResponse {
-                success: false,
-                message: e.to_string(),
-            }),
+            Err(e) => Err(EffectError::custom("jj_error", e.to_string())),
         }
     }
 
@@ -109,10 +116,7 @@ impl JjEffects for JjHandler {
                 success: true,
                 message: String::new(),
             }),
-            Err(e) => Ok(GitFetchResponse {
-                success: false,
-                message: e.to_string(),
-            }),
+            Err(e) => Err(EffectError::custom("jj_error", e.to_string())),
         }
     }
 

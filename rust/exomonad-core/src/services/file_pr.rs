@@ -3,6 +3,7 @@
 // Shells out to `gh` for PR operations. `gh` handles auth, fork awareness,
 // and provides clear error messages. Octocrab stays for other GitHub operations.
 
+use crate::domain::PRNumber;
 use crate::services::git;
 use crate::services::jj_workspace::JjWorkspaceService;
 use anyhow::{Context, Result};
@@ -28,7 +29,7 @@ pub struct FilePRInput {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FilePROutput {
     pub pr_url: String,
-    pub pr_number: u64,
+    pub pr_number: PRNumber,
     pub head_branch: String,
     pub base_branch: String,
     pub created: bool,
@@ -47,7 +48,7 @@ struct GhPr {
 /// Structured errors for file_pr operations.
 #[derive(Debug, thiserror::Error)]
 enum FilePrError {
-    #[error("git push failed: {0}")]
+    #[error("push failed: {0}")]
     PushFailed(String),
 
     #[error("gh pr create failed: {0}")]
@@ -110,7 +111,7 @@ fn find_existing_pr(head_branch: &str, dir: &str) -> Result<Option<GhPr>, FilePr
     Ok(prs.into_iter().next())
 }
 
-fn update_pr(number: u64, title: &str, body: &str, dir: &str) -> Result<(), FilePrError> {
+fn update_pr(number: PRNumber, title: &str, body: &str, dir: &str) -> Result<(), FilePrError> {
     cmd!(
         "gh",
         "pr",
@@ -196,7 +197,7 @@ pub async fn file_pr_async(input: &FilePRInput, jj: Arc<JjWorkspaceService>) -> 
     // Push first
     {
         let dir_path = std::path::PathBuf::from(dir);
-        let bookmark = head.clone();
+        let bookmark = crate::domain::BranchName::from(head.as_str());
         let jj_clone = jj.clone();
         tokio::task::spawn_blocking(move || {
             jj_clone.push_bookmark(&dir_path, &bookmark)
@@ -208,13 +209,22 @@ pub async fn file_pr_async(input: &FilePRInput, jj: Arc<JjWorkspaceService>) -> 
     }
 
     // Check for existing PR
-    if let Some(pr) = find_existing_pr(&head, dir)? {
-        info!("[FilePR] Updating existing PR #{}", pr.number);
-        update_pr(pr.number, &input.title, &input.body, dir)?;
-        info!("[FilePR] Updated PR #{}: {}", pr.number, pr.url);
+    let head_clone = head.clone();
+    let dir_string = dir.to_string();
+    let existing = tokio::task::spawn_blocking(move || find_existing_pr(&head_clone, &dir_string))
+        .await
+        .context("spawn_blocking failed")??;
+    if let Some(pr) = existing {
+        let pr_number = PRNumber::new(pr.number);
+        info!("[FilePR] Updating existing PR #{}", pr_number);
+        let (title, body, dir_s) = (input.title.clone(), input.body.clone(), dir.to_string());
+        tokio::task::spawn_blocking(move || update_pr(pr_number, &title, &body, &dir_s))
+            .await
+            .context("spawn_blocking failed")??;
+        info!("[FilePR] Updated PR #{}: {}", pr_number, pr.url);
         return Ok(FilePROutput {
             pr_url: pr.url,
-            pr_number: pr.number,
+            pr_number,
             head_branch: pr.head_ref_name,
             base_branch: pr.base_ref_name,
             created: false,
@@ -223,7 +233,18 @@ pub async fn file_pr_async(input: &FilePRInput, jj: Arc<JjWorkspaceService>) -> 
 
     // Create new PR
     info!("[FilePR] Creating PR: {}", input.title);
-    let pr = create_pr(&input.title, &input.body, &base, &head, dir)?;
+    let (title, body, base_clone, head_clone, dir_string) = (
+        input.title.clone(),
+        input.body.clone(),
+        base.clone(),
+        head.clone(),
+        dir.to_string(),
+    );
+    let pr = tokio::task::spawn_blocking(move || {
+        create_pr(&title, &body, &base_clone, &head_clone, &dir_string)
+    })
+    .await
+    .context("spawn_blocking failed")??;
 
     // Emit pr:filed event (only if in Zellij session)
     if let Ok(session) = std::env::var("ZELLIJ_SESSION_NAME") {
@@ -251,7 +272,7 @@ pub async fn file_pr_async(input: &FilePRInput, jj: Arc<JjWorkspaceService>) -> 
 
     Ok(FilePROutput {
         pr_url: pr.url,
-        pr_number: pr.number,
+        pr_number: PRNumber::new(pr.number),
         head_branch: pr.head_ref_name,
         base_branch: pr.base_ref_name,
         created: true,

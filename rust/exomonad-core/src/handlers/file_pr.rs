@@ -48,6 +48,7 @@ impl FilePrEffects for FilePRHandler {
         req: FilePrRequest,
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<FilePrResponse> {
+        tracing::info!(title = %req.title, "[FilePR] file_pr starting");
         let base_branch = if req.base_branch.is_empty() {
             None
         } else {
@@ -67,9 +68,10 @@ impl FilePrEffects for FilePRHandler {
             .await
             .map_err(|e| EffectError::custom("file_pr_error", e.to_string()))?;
 
+        tracing::info!(pr_number = output.pr_number.as_u64(), created = output.created, "[FilePR] file_pr complete");
         Ok(FilePrResponse {
             pr_url: output.pr_url,
-            pr_number: output.pr_number as i64,
+            pr_number: output.pr_number.as_u64() as i64,
             head_branch: output.head_branch,
             base_branch: output.base_branch,
             created: output.created,

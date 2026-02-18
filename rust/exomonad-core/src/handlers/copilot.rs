@@ -50,8 +50,10 @@ impl CopilotEffects for CopilotHandler {
         req: WaitForCopilotReviewRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<WaitForCopilotReviewResponse> {
+        let pr_number = crate::domain::PRNumber::new(req.pr_number as u64);
+        tracing::info!(pr_number = pr_number.as_u64(), timeout_secs = req.timeout_secs, "[Copilot] wait_for_copilot_review starting");
         let input = copilot_review::WaitForCopilotReviewInput {
-            pr_number: req.pr_number as u64,
+            pr_number,
             timeout_secs: if req.timeout_secs <= 0 {
                 300
             } else {
@@ -67,7 +69,7 @@ impl CopilotEffects for CopilotHandler {
         let output = copilot_review::wait_for_copilot_review(&input)
             .map_err(|e| EffectError::custom("copilot_error", e.to_string()))?;
 
-        let comments = output
+        let comments: Vec<CopilotComment> = output
             .comments
             .into_iter()
             .map(|c| CopilotComment {
@@ -78,6 +80,7 @@ impl CopilotEffects for CopilotHandler {
             })
             .collect();
 
+        tracing::info!(status = %output.status, comment_count = comments.len(), "[Copilot] wait_for_copilot_review complete");
         Ok(WaitForCopilotReviewResponse {
             status: output.status,
             comments,

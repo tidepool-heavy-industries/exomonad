@@ -39,10 +39,13 @@ impl MergePrEffects for MergePRHandler {
         req: MergePrRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<MergePrResponse> {
+        let pr_number = crate::domain::PRNumber::new(req.pr_number as u64);
+        tracing::info!(pr_number = pr_number.as_u64(), strategy = %req.strategy, "[MergePR] merge_pr starting");
         let result =
-            merge_pr::merge_pr_async(req.pr_number, &req.strategy, &req.working_dir, self.jj.clone())
+            merge_pr::merge_pr_async(pr_number, &req.strategy, &req.working_dir, self.jj.clone())
                 .await
                 .map_err(|e| EffectError::custom("merge_pr_error", e.to_string()))?;
+        tracing::info!(success = result.success, jj_fetched = result.jj_fetched, "[MergePR] merge_pr complete");
         Ok(MergePrResponse {
             success: result.success,
             message: result.message,

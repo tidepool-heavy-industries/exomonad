@@ -14,7 +14,7 @@ Handles effects in the `events.*` namespace, enabling synchronization between ag
 
 ### Type Safety
 
-- `notified_agents` uses `HashSet<AgentName>` (not raw strings) for dedup
+- `notified_agents` uses `HashSet<String>` for dedup
 - Parent tab name resolved via shared `resolve_parent_tab_name()` from `services::agent_control`
 - Tab display names computed via `AgentType::tab_display_name(slug)` — single source of truth
 - Agent identity resolved as `AgentName` from `EffectContext` (structural, baked into PluginManager)
@@ -99,7 +99,18 @@ Handles effects in the `coordination.*` namespace.
 
 | Type | Purpose | Used In |
 |------|---------|---------|
-| `AgentName` | Agent identity (e.g., "root", "feature-a") | events, session, agent |
+| `AgentName` | Agent identity (e.g., "root", "feature-a") | events, session, agent, coordination |
 | `BirthBranch` | Branch-based agent identity | events, messaging, github_poller |
+| `BranchName` | Git branch/bookmark name | jj, file_pr, agent |
+| `PRNumber` | GitHub PR number (wraps u64) | file_pr, merge_pr, copilot, github_poller |
+| `Revision` | Commit ID or bookmark reference | jj |
+| `TaskId` | Coordination task identifier | coordination |
 | `AgentType` | Claude vs Gemini enum, provides `tab_display_name()` and `from_dir_name()` | agent, github_poller |
 | `GithubOwner` / `GithubRepo` | GitHub repo coordinates | github_poller |
+
+### Boundary Conversion Pattern
+
+All handlers convert proto strings/integers to domain newtypes at the handler boundary:
+- Proto `string` → `BranchName::from(req.field.as_str())`, `TaskId::from(req.field.as_str())`
+- Proto `int64` → `PRNumber::new(req.pr_number as u64)`
+- Domain → Proto: `.to_string()` for string types, `.as_u64() as i64` for PRNumber
