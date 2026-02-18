@@ -6,9 +6,9 @@
 
 use crate::domain::{BranchName, Revision};
 use anyhow::{Context, Result};
+use jj_lib::backend::CommitId;
 use jj_lib::config::{ConfigSource, StackedConfig};
 use jj_lib::git;
-use jj_lib::backend::CommitId;
 use jj_lib::op_store::RefTarget;
 use jj_lib::ref_name::{RefName, WorkspaceNameBuf};
 use jj_lib::repo::Repo;
@@ -45,7 +45,11 @@ impl JjWorkspaceService {
         }
 
         // Load repo config
-        let repo_config = self.project_dir.join(".jj").join("repo").join("config.toml");
+        let repo_config = self
+            .project_dir
+            .join(".jj")
+            .join("repo")
+            .join("config.toml");
         if repo_config.exists() {
             if let Err(e) = config.load_file(ConfigSource::Repo, &repo_config) {
                 warn!(path = %repo_config.display(), error = %e, "Failed to load jj repo config");
@@ -64,7 +68,13 @@ impl JjWorkspaceService {
             &jj_lib::repo::StoreFactories::default(),
             &default_working_copy_factories(),
         )
-        .map_err(|e| anyhow::anyhow!("Failed to load jj workspace at {}: {}", self.project_dir.display(), e))
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to load jj workspace at {}: {}",
+                self.project_dir.display(),
+                e
+            )
+        })
     }
 
     /// Load a workspace at a specific path (for child workspaces).
@@ -108,22 +118,29 @@ impl JjWorkspaceService {
     /// Create a new jj workspace with a bookmark pointing to a base commit.
     ///
     /// Replaces: `git worktree add -b {bookmark} {path} {base}`
-    pub fn create_workspace(&self, path: &Path, bookmark: &BranchName, base: &BranchName) -> Result<()> {
+    pub fn create_workspace(
+        &self,
+        path: &Path,
+        bookmark: &BranchName,
+        base: &BranchName,
+    ) -> Result<()> {
         info!(path = %path.display(), bookmark = %bookmark, base = %base, "Creating jj workspace");
 
         let root_ws = self.load_root_workspace()?;
-        let repo = root_ws.repo_loader().load_at_head()
+        let repo = root_ws
+            .repo_loader()
+            .load_at_head()
             .context("Failed to load repo at head")?;
 
         // Resolve the base bookmark to a commit
         let base_ref: &RefName = base.as_str().as_ref();
         let base_target = repo.view().get_local_bookmark(base_ref);
-        let base_commit_id = base_target
-            .as_normal()
-            .ok_or_else(|| anyhow::anyhow!(
-                "Base bookmark '{}' not found or is conflicted", base
-            ))?;
-        let base_commit = repo.store().get_commit(base_commit_id)
+        let base_commit_id = base_target.as_normal().ok_or_else(|| {
+            anyhow::anyhow!("Base bookmark '{}' not found or is conflicted", base)
+        })?;
+        let base_commit = repo
+            .store()
+            .get_commit(base_commit_id)
             .context("Failed to load base commit")?;
 
         // Derive workspace name from the path's last component
@@ -153,10 +170,8 @@ impl JjWorkspaceService {
 
         // Create the bookmark pointing to base commit
         let bookmark_ref: &RefName = bookmark.as_str().as_ref();
-        tx.repo_mut().set_local_bookmark_target(
-            bookmark_ref,
-            RefTarget::normal(base_commit_id.clone()),
-        );
+        tx.repo_mut()
+            .set_local_bookmark_target(bookmark_ref, RefTarget::normal(base_commit_id.clone()));
 
         // Check out the base commit in the new workspace
         let ws_id = new_ws.workspace_name().to_owned();
@@ -184,7 +199,9 @@ impl JjWorkspaceService {
         if path.join(".jj").exists() {
             let ws = self.load_workspace_at(path)?;
             let ws_name = ws.workspace_name().to_owned();
-            let repo = ws.repo_loader().load_at_head()
+            let repo = ws
+                .repo_loader()
+                .load_at_head()
                 .context("Failed to load repo")?;
 
             let mut tx = repo.start_transaction();
@@ -231,10 +248,8 @@ impl JjWorkspaceService {
 
         let mut tx = repo.start_transaction();
         let bookmark_ref: &RefName = name.as_str().as_ref();
-        tx.repo_mut().set_local_bookmark_target(
-            bookmark_ref,
-            RefTarget::normal(target_id),
-        );
+        tx.repo_mut()
+            .set_local_bookmark_target(bookmark_ref, RefTarget::normal(target_id));
 
         if let Err(e) = git::export_refs(tx.repo_mut()) {
             error!(error = %e, "Failed to export refs to git after creating bookmark");
@@ -254,10 +269,8 @@ impl JjWorkspaceService {
 
         let mut tx = repo.start_transaction();
         let bookmark_ref: &RefName = name.as_str().as_ref();
-        tx.repo_mut().set_local_bookmark_target(
-            bookmark_ref,
-            RefTarget::absent(),
-        );
+        tx.repo_mut()
+            .set_local_bookmark_target(bookmark_ref, RefTarget::absent());
 
         if let Err(e) = git::export_refs(tx.repo_mut()) {
             error!(error = %e, "Failed to export refs to git after deleting bookmark");

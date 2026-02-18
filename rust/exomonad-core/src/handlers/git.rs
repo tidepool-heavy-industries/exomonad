@@ -3,9 +3,7 @@
 //! Uses proto-generated types from `exomonad_proto::effects::git`.
 
 use super::working_dir_or_default;
-use crate::effects::{
-    dispatch_git_effect, EffectHandler, EffectResult, GitEffects, ResultExt,
-};
+use crate::effects::{dispatch_git_effect, EffectHandler, EffectResult, GitEffects, ResultExt};
 use crate::services::git::GitService;
 use async_trait::async_trait;
 use exomonad_proto::effects::git::*;
@@ -53,7 +51,11 @@ impl GitEffects for GitHandler {
         let working_dir = working_dir_or_default(req.working_dir);
         info!(working_dir = %working_dir, "[Git] get_branch starting");
 
-        let branch = self.service.get_branch(&working_dir).await.effect_err("git")?;
+        let branch = self
+            .service
+            .get_branch(&working_dir)
+            .await
+            .effect_err("git")?;
 
         info!(branch = %branch, "[Git] get_branch complete");
         Ok(GetBranchResponse {
@@ -70,7 +72,11 @@ impl GitEffects for GitHandler {
         let working_dir = working_dir_or_default(req.working_dir);
         info!(working_dir = %working_dir, "[Git] get_status starting");
 
-        let dirty_files = self.service.get_dirty_files(&working_dir).await.effect_err("git")?;
+        let dirty_files = self
+            .service
+            .get_dirty_files(&working_dir)
+            .await
+            .effect_err("git")?;
 
         // Parse git status --porcelain output
         let mut staged = Vec::new();
@@ -92,7 +98,12 @@ impl GitEffects for GitHandler {
             }
         }
 
-        info!(staged = staged.len(), unstaged = unstaged.len(), untracked = untracked.len(), "[Git] get_status complete");
+        info!(
+            staged = staged.len(),
+            unstaged = unstaged.len(),
+            untracked = untracked.len(),
+            "[Git] get_status complete"
+        );
         Ok(GetStatusResponse {
             dirty_files: unstaged,
             staged_files: staged,
@@ -160,7 +171,11 @@ impl GitEffects for GitHandler {
         let working_dir = working_dir_or_default(req.working_dir);
         info!(working_dir = %working_dir, "[Git] get_remote_url starting");
 
-        let url = self.service.get_remote_url(&working_dir).await.effect_err("git")?;
+        let url = self
+            .service
+            .get_remote_url(&working_dir)
+            .await
+            .effect_err("git")?;
 
         info!(url = %url, "[Git] get_remote_url complete");
         Ok(GetRemoteUrlResponse { url })
@@ -174,7 +189,11 @@ impl GitEffects for GitHandler {
         let working_dir = working_dir_or_default(req.working_dir);
         info!(working_dir = %working_dir, "[Git] get_repo_info starting");
 
-        let info = self.service.get_repo_info(&working_dir).await.effect_err("git")?;
+        let info = self
+            .service
+            .get_repo_info(&working_dir)
+            .await
+            .effect_err("git")?;
 
         info!(branch = %info.branch, "[Git] get_repo_info complete");
         Ok(GetRepoInfoResponse {
@@ -192,7 +211,11 @@ impl GitEffects for GitHandler {
         let working_dir = working_dir_or_default(req.working_dir);
         info!(working_dir = %working_dir, "[Git] get_worktree starting");
 
-        let info = self.service.get_worktree(&working_dir).await.effect_err("git")?;
+        let info = self
+            .service
+            .get_worktree(&working_dir)
+            .await
+            .effect_err("git")?;
 
         info!(path = %info.path, branch = %info.branch, "[Git] get_worktree complete");
         Ok(GetWorktreeResponse {

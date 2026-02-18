@@ -32,7 +32,12 @@ pub async fn merge_pr_async(
         strategy
     };
 
-    info!(pr_number = pr_number.as_u64(), strategy = strat, working_dir = dir, "Merging PR");
+    info!(
+        pr_number = pr_number.as_u64(),
+        strategy = strat,
+        working_dir = dir,
+        "Merging PR"
+    );
 
     // Step 1: gh pr merge
     let strategy_flag = format!("--{}", strat);
@@ -63,9 +68,7 @@ pub async fn merge_pr_async(
     // Step 2: jj git fetch (best-effort, triggers auto-rebase) via jj-lib
     let dir_path = std::path::PathBuf::from(dir);
     let jj_clone = jj.clone();
-    let jj_result = tokio::task::spawn_blocking(move || {
-        jj_clone.fetch(&dir_path)
-    }).await;
+    let jj_result = tokio::task::spawn_blocking(move || jj_clone.fetch(&dir_path)).await;
 
     let jj_fetched = match jj_result {
         Ok(Ok(())) => {

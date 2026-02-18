@@ -190,13 +190,7 @@ mod tests {
             .await;
 
         let success = service
-            .update_task(
-                &task_id,
-                Some(TaskStatus::InProgress),
-                None,
-                None,
-                None,
-            )
+            .update_task(&task_id, Some(TaskStatus::InProgress), None, None, None)
             .await;
 
         assert!(success);

@@ -45,7 +45,11 @@ impl MergePrEffects for MergePRHandler {
             merge_pr::merge_pr_async(pr_number, &req.strategy, &req.working_dir, self.jj.clone())
                 .await
                 .effect_err("merge_pr")?;
-        tracing::info!(success = result.success, jj_fetched = result.jj_fetched, "[MergePR] merge_pr complete");
+        tracing::info!(
+            success = result.success,
+            jj_fetched = result.jj_fetched,
+            "[MergePR] merge_pr complete"
+        );
         Ok(MergePrResponse {
             success: result.success,
             message: result.message,

@@ -555,22 +555,22 @@ fn mcp_tool_schemas_valid() {
         .filter_map(|t| t["name"].as_str().map(|n| (n, t)))
         .collect();
 
-        // 1. spawn_subtree
+    // 1. spawn_subtree
 
-        let subtree = tool_map
+    let subtree = tool_map
+        .get("spawn_subtree")
+        .expect("spawn_subtree missing");
 
-            .get("spawn_subtree")
+    let props = &subtree["inputSchema"]["properties"];
 
-            .expect("spawn_subtree missing");
+    assert!(props.get("task").is_some());
 
-        let props = &subtree["inputSchema"]["properties"];
+    assert!(props.get("branch_name").is_some());
 
-        assert!(props.get("task").is_some());
-
-        assert!(props.get("branch_name").is_some());
-
-        // 2. spawn_workers
-    let worker = tool_map.get("spawn_workers").expect("spawn_workers missing");
+    // 2. spawn_workers
+    let worker = tool_map
+        .get("spawn_workers")
+        .expect("spawn_workers missing");
     let props = &worker["inputSchema"]["properties"];
     assert!(props.get("specs").is_some());
 
@@ -582,7 +582,9 @@ fn mcp_tool_schemas_valid() {
     assert!(props.get("base_branch").is_some());
 
     // 4. notify_parent
-    let msg = tool_map.get("notify_parent").expect("notify_parent missing");
+    let msg = tool_map
+        .get("notify_parent")
+        .expect("notify_parent missing");
     assert!(msg["inputSchema"]["properties"].get("status").is_some());
 }
 

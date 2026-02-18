@@ -137,17 +137,7 @@ fn create_pr(
 ) -> Result<GhPr, FilePrError> {
     // gh pr create outputs the PR URL to stdout on success (no --json support)
     let url = cmd!(
-        "gh",
-        "pr",
-        "create",
-        "--title",
-        title,
-        "--body",
-        body,
-        "--base",
-        base,
-        "--head",
-        head
+        "gh", "pr", "create", "--title", title, "--body", body, "--base", base, "--head", head
     )
     .dir(dir)
     .read()
@@ -176,19 +166,20 @@ fn create_pr(
 // ============================================================================
 
 /// File a PR using `gh` CLI. Pushes the branch, creates or updates the PR.
-pub async fn file_pr_async(input: &FilePRInput, jj: Arc<JjWorkspaceService>) -> Result<FilePROutput> {
+pub async fn file_pr_async(
+    input: &FilePRInput,
+    jj: Arc<JjWorkspaceService>,
+) -> Result<FilePROutput> {
     let dir = input.working_dir.as_deref().unwrap_or(".");
 
     // Get branch from the agent's working directory, not server CWD
     let dir_path = std::path::PathBuf::from(dir);
     let jj_clone = jj.clone();
-    let head = tokio::task::spawn_blocking(move || {
-        jj_clone.get_workspace_bookmark(&dir_path)
-    })
-    .await
-    .context("spawn_blocking failed")?
-    .context("Failed to get workspace bookmark")?
-    .ok_or_else(|| anyhow::anyhow!("No bookmark found for workspace at {}", dir))?;
+    let head = tokio::task::spawn_blocking(move || jj_clone.get_workspace_bookmark(&dir_path))
+        .await
+        .context("spawn_blocking failed")?
+        .context("Failed to get workspace bookmark")?
+        .ok_or_else(|| anyhow::anyhow!("No bookmark found for workspace at {}", dir))?;
 
     let base = detect_base_branch(&head, input.base_branch.as_deref());
 
@@ -199,12 +190,10 @@ pub async fn file_pr_async(input: &FilePRInput, jj: Arc<JjWorkspaceService>) -> 
         let dir_path = std::path::PathBuf::from(dir);
         let bookmark = crate::domain::BranchName::from(head.as_str());
         let jj_clone = jj.clone();
-        tokio::task::spawn_blocking(move || {
-            jj_clone.push_bookmark(&dir_path, &bookmark)
-        })
-        .await
-        .context("spawn_blocking failed")?
-        .map_err(|e| FilePrError::PushFailed(e.to_string()))?;
+        tokio::task::spawn_blocking(move || jj_clone.push_bookmark(&dir_path, &bookmark))
+            .await
+            .context("spawn_blocking failed")?
+            .map_err(|e| FilePrError::PushFailed(e.to_string()))?;
         info!("[FilePR] Pushed bookmark: {}", head);
     }
 
@@ -373,7 +362,9 @@ mod tests {
 
         // 1. Init git repo
         cmd!("git", "init", "-b", "main").dir(dir).read()?;
-        cmd!("git", "config", "user.email", "test@example.com").dir(dir).read()?;
+        cmd!("git", "config", "user.email", "test@example.com")
+            .dir(dir)
+            .read()?;
         cmd!("git", "config", "user.name", "Test").dir(dir).read()?;
         std::fs::write(dir.join("README.md"), "test")?;
         cmd!("git", "add", "README.md").dir(dir).read()?;
@@ -384,7 +375,9 @@ mod tests {
         let jj = Arc::new(JjWorkspaceService::new(dir.to_path_buf()));
 
         // 3. Create a bookmark and check it out
-        cmd!("jj", "bookmark", "create", "-r", "@", "feature-branch").dir(dir).read()?;
+        cmd!("jj", "bookmark", "create", "-r", "@", "feature-branch")
+            .dir(dir)
+            .read()?;
 
         let input = FilePRInput {
             title: "Test PR".to_string(),

@@ -497,8 +497,7 @@ impl GitHubService {
 
         info!(
             repo = format!("{}/{}", repo.owner, repo.name),
-            number,
-            "GitHub API: Get PR successful"
+            number, "GitHub API: Get PR successful"
         );
 
         Ok(PullRequest::from(pr))

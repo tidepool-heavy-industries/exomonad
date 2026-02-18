@@ -7,8 +7,7 @@
 use super::{non_empty, working_dir_or_default, working_dir_path_or_default};
 use crate::domain::{BranchName, Revision};
 use crate::effects::{
-    dispatch_jj_effect, EffectHandler, EffectResult, JjEffects, ResultExt,
-    spawn_blocking_effect,
+    dispatch_jj_effect, spawn_blocking_effect, EffectHandler, EffectResult, JjEffects, ResultExt,
 };
 use crate::services::jj_workspace::JjWorkspaceService;
 use async_trait::async_trait;
@@ -118,7 +117,10 @@ impl JjEffects for JjHandler {
             .effect_err("jj")?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(crate::effects::EffectError::custom("jj_error", stderr.to_string()));
+            return Err(crate::effects::EffectError::custom(
+                "jj_error",
+                stderr.to_string(),
+            ));
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
         let entries: Vec<LogEntry> = stdout
@@ -162,7 +164,10 @@ impl JjEffects for JjHandler {
             .effect_err("jj")?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(crate::effects::EffectError::custom("jj_error", stderr.to_string()));
+            return Err(crate::effects::EffectError::custom(
+                "jj_error",
+                stderr.to_string(),
+            ));
         }
         Ok(NewResponse {
             change_id: String::new(),
@@ -185,7 +190,10 @@ impl JjEffects for JjHandler {
             .effect_err("jj")?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(crate::effects::EffectError::custom("jj_error", stderr.to_string()));
+            return Err(crate::effects::EffectError::custom(
+                "jj_error",
+                stderr.to_string(),
+            ));
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
         let is_conflicted = stdout.contains("conflict");
