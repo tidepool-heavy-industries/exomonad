@@ -67,6 +67,9 @@ struct ExoMonadPlugin {
     own_pane_id: u32,
     /// The tab name this plugin instance lives in, derived from PaneManifest correlation.
     own_tab_name: Option<String>,
+    /// Pane IDs awaiting a deferred Enter keypress (after text injection).
+    /// Delayed to ensure Node.js/Ink processes the text and Enter as separate data events.
+    pending_enter: Vec<u32>,
 }
 
 register_plugin!(ExoMonadPlugin);
@@ -245,6 +248,7 @@ impl ZellijPlugin for ExoMonadPlugin {
             EventType::Key,
             EventType::TabUpdate,
             EventType::PaneUpdate,
+            EventType::Timer,
         ]);
         self.status_state = PluginState::Idle;
         self.status_message = "Ready.".to_string();
@@ -396,9 +400,13 @@ impl ZellijPlugin for ExoMonadPlugin {
                         };
 
                         if let Some(&pane_id) = self.tab_pane_map.get(tab_name) {
-                            const ENTER_KEY: u8 = 13;
                             write_chars_to_pane_id(text, PaneId::Terminal(pane_id));
-                            write_to_pane_id(vec![ENTER_KEY], PaneId::Terminal(pane_id));
+                            // Defer the Enter keypress so the OS kernel flushes the text
+                            // and Node.js/Ink processes it as a separate data event.
+                            // Without this delay, Ink treats text+Enter as a single paste
+                            // and key.return never fires.
+                            self.pending_enter.push(pane_id);
+                            set_timeout(0.1);
                         } else {
                             eprintln!(
                                 "[exomonad-plugin] inject-input: tab '{}' not found in pane map ({} entries)",
@@ -547,6 +555,13 @@ impl ZellijPlugin for ExoMonadPlugin {
                     self.status_message = "Ready.".to_string();
                     should_render = true;
                     hide_self();
+                }
+            }
+            Event::Timer(_) => {
+                // Flush deferred Enter keypresses for inject-input.
+                const ENTER_KEY: u8 = 13;
+                for pane_id in self.pending_enter.drain(..) {
+                    write_to_pane_id(vec![ENTER_KEY], PaneId::Terminal(pane_id));
                 }
             }
             _ => {}
