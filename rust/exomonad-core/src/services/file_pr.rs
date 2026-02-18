@@ -325,4 +325,23 @@ mod tests {
         );
         assert_eq!(detect_base_branch("main.a.b.c.d.e", None), "main.a.b.c.d");
     }
+
+    #[tokio::test]
+    async fn test_file_pr_async_no_jj_workspace() -> Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        let jj = Arc::new(JjWorkspaceService::new(temp_dir.path().to_path_buf()));
+        let input = FilePRInput {
+            title: "Test PR".to_string(),
+            body: "Test Body".to_string(),
+            base_branch: None,
+            working_dir: Some(temp_dir.path().to_string_lossy().to_string()),
+        };
+
+        let result = file_pr_async(&input, jj).await;
+        assert!(result.is_err());
+        let err = result.err().unwrap().to_string();
+        assert!(err.contains("Failed to get workspace bookmark"));
+
+        Ok(())
+    }
 }
