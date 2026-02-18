@@ -6,14 +6,16 @@ Rust workspace for augmenting human-driven Claude Code sessions with ExoMonad in
 
 ## Architecture
 
-**100% WASM routing.** All MCP tool logic lives in Haskell WASM; Rust handles I/O only.
+**100% WASM routing (via RuntimeBackend trait).** All MCP tool logic lives in Haskell WASM; Rust handles I/O only. The `RuntimeBackend` trait abstracts over execution engines — currently `WasmBackend` (Extism), with `TidepoolBackend` (Cranelift) planned.
 
 ```
 Claude Code (hook or MCP call)
        ↓
   exomonad (Rust)
        ↓
-  PluginManager::call("handle_*", ...)
+  Arc<dyn RuntimeBackend>::call_tool / handle_hook / list_tools
+       ↓
+  WasmBackend → PluginManager::call("handle_*", ...)
        ↓
   WASM guest (Haskell) ← PURE LOGIC ONLY
        ↓
@@ -153,7 +155,7 @@ echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
 
 In HTTP serve mode, multiple agents share one server process. Each agent hits a unique URL: `/agents/{role}/{name}/mcp`. The server extracts role and identity from the URL path. Role determines which WASM tool set (lazy McpServer per role). Identity is structural: each agent gets its own `PluginManager` with `EffectContext` (agent name + birth branch) baked in at construction.
 
-**Per-agent PluginManager cache:** The server maintains a `HashMap<AgentName, Arc<PluginManager>>`. On first request from an agent, a new PluginManager is created with the agent's `EffectContext` and cached. All effect handlers receive `&EffectContext` — identity is always present, no Option, no task-locals, no panic paths.
+**Per-agent backend cache:** The server maintains a `HashMap<AgentName, Arc<dyn RuntimeBackend>>`. On first request from an agent, a new `WasmBackend` (wrapping a `PluginManager` with the agent's `EffectContext`) is created and cached. All effect handlers receive `&EffectContext` — identity is always present, no Option, no task-locals, no panic paths.
 
 **Route layout (single pattern):**
 - `/agents/{role}/{name}/mcp` — unified route for all agents

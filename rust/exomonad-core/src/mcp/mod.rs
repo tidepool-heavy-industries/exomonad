@@ -11,7 +11,7 @@ pub mod server;
 #[cfg(feature = "runtime")]
 pub use server::McpServer;
 
-use crate::PluginManager;
+use crate::RuntimeBackend;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -29,9 +29,8 @@ use crate::services::questions::QuestionRegistry;
 pub struct McpState {
     /// Working directory for git operations (used for logging).
     pub project_dir: PathBuf,
-    /// WASM plugin for routing tool calls through Haskell.
-    /// All tool calls are routed through handle_mcp_call in WASM.
-    pub plugin: Arc<PluginManager>,
+    /// Runtime backend for executing tool calls and hooks.
+    pub backend: Arc<dyn RuntimeBackend>,
     /// Role for this MCP endpoint (e.g. "tl" or "dev").
     /// Controls which tools are exposed. None means all tools.
     pub role: Option<String>,
@@ -42,7 +41,7 @@ pub struct McpState {
 
 /// Builder for constructing McpState with optional fields.
 pub struct McpStateBuilder {
-    plugin: Arc<PluginManager>,
+    backend: Arc<dyn RuntimeBackend>,
     project_dir: PathBuf,
     role: Option<String>,
     #[cfg(feature = "runtime")]
@@ -66,7 +65,7 @@ impl McpStateBuilder {
     /// Build the McpState.
     pub fn build(self) -> McpState {
         McpState {
-            plugin: self.plugin,
+            backend: self.backend,
             project_dir: self.project_dir,
             role: self.role,
             #[cfg(feature = "runtime")]
@@ -77,9 +76,9 @@ impl McpStateBuilder {
 
 impl McpState {
     /// Create a builder for McpState.
-    pub fn builder(plugin: Arc<PluginManager>, project_dir: PathBuf) -> McpStateBuilder {
+    pub fn builder(backend: Arc<dyn RuntimeBackend>, project_dir: PathBuf) -> McpStateBuilder {
         McpStateBuilder {
-            plugin,
+            backend,
             project_dir,
             role: None,
             #[cfg(feature = "runtime")]

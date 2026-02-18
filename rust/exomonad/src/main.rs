@@ -20,7 +20,8 @@ use exomonad_core::services::{git, zellij_events};
 use axum::response::IntoResponse;
 use exomonad_core::{
     ClaudePreToolUseOutput, HookEnvelope, HookEventType, HookInput, HookSpecificOutput,
-    InternalStopHookOutput, PluginManager, RuntimeBuilder, StopDecision, ToolPermission,
+    InternalStopHookOutput, RuntimeBackend, RuntimeBuilder, StopDecision, ToolPermission,
+    WasmBackend,
 };
 use std::collections::HashMap;
 use std::os::unix::process::CommandExt;
@@ -109,39 +110,38 @@ enum Commands {
 // Per-Agent Plugin Cache
 // ============================================================================
 
-/// Get or create a per-agent PluginManager with baked-in identity.
-async fn get_or_create_plugin(
-    plugins: &tokio::sync::RwLock<HashMap<exomonad_core::AgentName, Arc<PluginManager>>>,
+/// Get or create a per-agent RuntimeBackend with baked-in identity.
+async fn get_or_create_backend(
+    backends: &tokio::sync::RwLock<HashMap<exomonad_core::AgentName, Arc<dyn RuntimeBackend>>>,
     agent_name: exomonad_core::AgentName,
     birth_branch: exomonad_core::BirthBranch,
     registry: &Arc<exomonad_core::effects::EffectRegistry>,
     wasm_path: &std::path::Path,
-) -> anyhow::Result<Arc<PluginManager>> {
-    // Fast path: existing plugin
+) -> anyhow::Result<Arc<dyn RuntimeBackend>> {
+    // Fast path: existing backend
     {
-        let cache = plugins.read().await;
-        if let Some(p) = cache.get(&agent_name) {
-            return Ok(p.clone());
+        let cache = backends.read().await;
+        if let Some(b) = cache.get(&agent_name) {
+            return Ok(b.clone());
         }
     }
 
-    // Slow path: create new per-agent plugin
+    // Slow path: create new per-agent backend
     let ctx = exomonad_core::effects::EffectContext {
         agent_name: agent_name.clone(),
         birth_branch,
     };
-    let p = Arc::new(
-        PluginManager::from_file(wasm_path, registry.clone(), ctx)
-            .await
-            .with_context(|| format!("Failed to create plugin for agent {}", agent_name))?,
-    );
-    let mut cache = plugins.write().await;
+    let plugin = exomonad_core::PluginManager::from_file(wasm_path, registry.clone(), ctx)
+        .await
+        .with_context(|| format!("Failed to create plugin for agent {}", agent_name))?;
+    let b: Arc<dyn RuntimeBackend> = Arc::new(WasmBackend::new(plugin));
+    let mut cache = backends.write().await;
     // Re-check after acquiring write lock to avoid TOCTOU race
     if let Some(existing) = cache.get(&agent_name) {
         return Ok(existing.clone());
     }
-    cache.insert(agent_name, p.clone());
-    Ok(p)
+    cache.insert(agent_name, b.clone());
+    Ok(b)
 }
 
 // ============================================================================
@@ -163,7 +163,7 @@ struct HookQueryParams {
 /// Server-side hook handler state, shared across requests.
 #[derive(Clone)]
 struct HookState {
-    plugins: Arc<tokio::sync::RwLock<HashMap<exomonad_core::AgentName, Arc<PluginManager>>>>,
+    backends: Arc<tokio::sync::RwLock<HashMap<exomonad_core::AgentName, Arc<dyn RuntimeBackend>>>>,
     registry: Arc<exomonad_core::effects::EffectRegistry>,
     wasm_path: PathBuf,
     otel: Option<Arc<OtelService>>,
@@ -378,23 +378,23 @@ async fn handle_hook_inner(
         "Hook identity context"
     );
 
-    let plugin = get_or_create_plugin(
-        &state.plugins,
+    let backend = get_or_create_backend(
+        &state.backends,
         agent_name_for_hook.clone(),
         birth_branch_for_hook.clone(),
         &state.registry,
         &state.wasm_path,
     )
     .await
-    .context("Failed to get plugin for hook")?;
+    .context("Failed to get backend for hook")?;
 
     match dispatch {
         HookDispatch::WorkerExit => {
             // WASM handles notifyParent as a side effect. We call it and return allow.
-            let _: serde_json::Value = plugin
-                .call("handle_pre_tool_use", &hook_input_value)
+            let _: serde_json::Value = backend
+                .handle_hook(&hook_input_value)
                 .await
-                .context("WASM handleWorkerExit failed")?;
+                .context("handleWorkerExit failed")?;
 
             Ok(HookEnvelope {
                 stdout: serde_json::to_string(&ClaudePreToolUseOutput::default())?,
@@ -403,10 +403,12 @@ async fn handle_hook_inner(
         }
 
         HookDispatch::Stop => {
-            let internal_output: InternalStopHookOutput = plugin
-                .call("handle_pre_tool_use", &hook_input_value)
+            let hook_result = backend
+                .handle_hook(&hook_input_value)
                 .await
-                .context("WASM handle_pre_tool_use (stop) failed")?;
+                .context("handle_hook (stop) failed")?;
+            let internal_output: InternalStopHookOutput =
+                serde_json::from_value(hook_result).context("Failed to parse stop hook output")?;
 
             let output_json = internal_output.to_runtime_json(&runtime);
 
@@ -473,10 +475,12 @@ async fn handle_hook_inner(
         }
 
         HookDispatch::ToolUse => {
-            let output: ClaudePreToolUseOutput = plugin
-                .call("handle_pre_tool_use", &hook_input_value)
+            let hook_result = backend
+                .handle_hook(&hook_input_value)
                 .await
-                .context("WASM handle_pre_tool_use failed")?;
+                .context("handle_hook (tool_use) failed")?;
+            let output: ClaudePreToolUseOutput = serde_json::from_value(hook_result)
+                .context("Failed to parse tool use hook output")?;
 
             let output_json =
                 serde_json::to_string(&output).context("Failed to serialize output")?;
@@ -889,9 +893,9 @@ async fn main() -> Result<()> {
             let executor: Arc<dyn exomonad_core::services::docker::CommandExecutor> =
                 Arc::new(exomonad_core::services::local::LocalExecutor::new());
             let git = Arc::new(exomonad_core::services::git::GitService::new(executor));
-            let jj = Arc::new(exomonad_core::services::jj_workspace::JjWorkspaceService::new(
-                project_dir.clone(),
-            ));
+            let jj = Arc::new(
+                exomonad_core::services::jj_workspace::JjWorkspaceService::new(project_dir.clone()),
+            );
             jj.ensure_colocated()
                 .context("Failed to validate jj workspace colocation")?;
             let github = secrets
@@ -978,24 +982,25 @@ async fn main() -> Result<()> {
             builder = builder.with_handlers(orch_handlers);
             let rt = builder.build().await.context("Failed to build runtime")?;
 
-            // Extract the shared registry for creating per-agent plugins
+            // Extract the shared registry for creating per-agent backends
             let rt_registry = rt.registry.clone();
-            let root_plugin = Arc::new(rt.plugin_manager);
+            let root_backend: Arc<dyn RuntimeBackend> =
+                Arc::new(WasmBackend::new(rt.plugin_manager));
 
-            // Per-agent plugin cache — each agent gets its own PluginManager with baked-in identity
-            let plugins: Arc<
-                tokio::sync::RwLock<HashMap<exomonad_core::AgentName, Arc<PluginManager>>>,
+            // Per-agent backend cache — each agent gets its own backend with baked-in identity
+            let backends: Arc<
+                tokio::sync::RwLock<HashMap<exomonad_core::AgentName, Arc<dyn RuntimeBackend>>>,
             > = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
 
-            // Pre-populate with the root agent's plugin
-            plugins
+            // Pre-populate with the root agent's backend
+            backends
                 .write()
                 .await
-                .insert(exomonad_core::AgentName::from("root"), root_plugin.clone());
+                .insert(exomonad_core::AgentName::from("root"), root_backend.clone());
 
             let base_state = exomonad_core::mcp::McpState {
                 project_dir: project_dir.clone(),
-                plugin: root_plugin,
+                backend: root_backend,
                 role: None,
                 question_registry: Some(question_registry),
             };
@@ -1030,20 +1035,20 @@ async fn main() -> Result<()> {
                 Arc::new(tokio::sync::RwLock::new(HashMap::new()));
 
             // Health endpoint
-            let health_plugin = base_state.plugin.clone();
+            let health_backend = base_state.backend.clone();
             let health_role = role_name.clone();
             let health_port = port;
             let health_handler = move || {
-                let plugin = health_plugin.clone();
+                let backend = health_backend.clone();
                 let role = health_role.clone();
                 async move {
-                    let wasm_hash = plugin.content_hash();
+                    let content_hash = backend.content_hash();
                     axum::Json(serde_json::json!({
                         "status": "ok",
                         "version": env!("CARGO_PKG_VERSION"),
                         "port": health_port,
                         "role": role,
-                        "wasm_hash": wasm_hash,
+                        "wasm_hash": content_hash,
                     }))
                 }
             };
@@ -1051,7 +1056,7 @@ async fn main() -> Result<()> {
             // Unified per-agent MCP handler: /agents/{role}/{name}/mcp
             let unified_handler = {
                 let servers = servers.clone();
-                let plugins = plugins.clone();
+                let backends = backends.clone();
                 let registry = rt_registry.clone();
                 let wasm_path_for_handler = wasm_path.clone();
                 let base_state = base_state.clone();
@@ -1060,7 +1065,7 @@ async fn main() -> Result<()> {
                       headers: axum::http::HeaderMap,
                       body: axum::extract::Json<serde_json::Value>| {
                     let servers = servers.clone();
-                    let plugins = plugins.clone();
+                    let backends = backends.clone();
                     let registry = registry.clone();
                     let wasm_path_for_handler = wasm_path_for_handler.clone();
                     let base_state = base_state.clone();
@@ -1069,23 +1074,23 @@ async fn main() -> Result<()> {
                         // Resolve agent identity
                         let agent_name = exomonad_core::AgentName::from(name.as_str());
 
-                        // Fast path: check plugin cache before resolving birth branch
-                        let plugin = {
-                            let cache = plugins.read().await;
+                        // Fast path: check backend cache before resolving birth branch
+                        let backend = {
+                            let cache = backends.read().await;
                             cache.get(&agent_name).cloned()
                         };
 
-                        let plugin = if let Some(p) = plugin {
-                            p
+                        let backend = if let Some(b) = backend {
+                            b
                         } else {
-                            // Slow path: resolve birth branch only when creating a new plugin
+                            // Slow path: resolve birth branch only when creating a new backend
                             let birth_branch = if name == "root" {
                                 exomonad_core::BirthBranch::root()
                             } else {
                                 resolve_agent_birth_branch(&wb, &name).await
                             };
-                            match get_or_create_plugin(
-                                &plugins,
+                            match get_or_create_backend(
+                                &backends,
                                 agent_name.clone(),
                                 birth_branch,
                                 &registry,
@@ -1093,16 +1098,16 @@ async fn main() -> Result<()> {
                             )
                             .await
                             {
-                                Ok(p) => p,
+                                Ok(b) => b,
                                 Err(e) => {
-                                    tracing::error!(agent = %agent_name, error = %e, "Failed to create plugin");
+                                    tracing::error!(agent = %agent_name, error = %e, "Failed to create backend");
                                     return axum::http::StatusCode::INTERNAL_SERVER_ERROR
                                         .into_response();
                                 }
                             }
                         };
 
-                        // Get or create McpServer for this role (with per-agent plugin)
+                        // Get or create McpServer for this role (with per-agent backend)
                         let server = {
                             let cache = servers.read().await;
                             cache.get(&role).cloned()
@@ -1112,14 +1117,14 @@ async fn main() -> Result<()> {
                             None => {
                                 let mut state = base_state.clone();
                                 state.role = Some(role.clone());
-                                state.plugin = plugin.clone();
+                                state.backend = backend.clone();
                                 let s = McpServer::new(state);
                                 servers.write().await.insert(role.clone(), s.clone());
                                 s
                             }
                         };
 
-                        server.handle(headers, body, Some(plugin)).await
+                        server.handle(headers, body, Some(backend)).await
                     }
                 }
             };
@@ -1147,7 +1152,7 @@ async fn main() -> Result<()> {
 
             // Hook handler state (shared OtelService created once)
             let hook_state = HookState {
-                plugins: plugins.clone(),
+                backends: backends.clone(),
                 registry: rt_registry.clone(),
                 wasm_path: wasm_path.clone(),
                 otel: OtelService::from_env().ok().map(Arc::new),

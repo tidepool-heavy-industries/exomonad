@@ -3,13 +3,20 @@
 //! # Architecture
 //!
 //! ```text
+//! McpServer / HookHandler
+//!     │
+//!     │ Arc<dyn RuntimeBackend>
+//!     ▼
+//! WasmBackend (wraps PluginManager)
+//!     │
+//!     │ PluginManager::call / call_async
+//!     ▼
 //! WASM Guest (Haskell) - pure logic
 //!     │
 //!     │ yield_effect(EffectEnvelope)
 //!     ▼
-//! PluginManager (single host function: yield_effect)
+//! EffectRegistry::dispatch by namespace
 //!     │
-//!     │ EffectRegistry::dispatch by namespace
 //!     ▼
 //! EffectHandler implementations (git, github, agent, fs, ...)
 //! ```
@@ -41,7 +48,7 @@
 //! let rt = builder.build().await?;
 //!
 //! // Embed MCP server
-//! let state = McpState::builder(Arc::new(rt.plugin_manager), project_dir).build();
+//! let state = rt.into_mcp_state(project_dir);
 //! McpServer::new(state).serve(addr).await?;
 //! ```
 
@@ -57,6 +64,10 @@ pub mod effects;
 pub mod mcp;
 #[cfg(feature = "runtime")]
 pub mod plugin_manager;
+#[cfg(feature = "runtime")]
+pub mod runtime_backend;
+#[cfg(feature = "runtime")]
+pub mod wasm_backend;
 
 // === Shared types and utilities (requires runtime feature) ===
 #[cfg(feature = "runtime")]
@@ -89,6 +100,10 @@ pub use common::{ErrorCode, ErrorContext, HostError, HostResult};
 pub use effects::{EffectContext, EffectError, EffectHandler, EffectRegistry, EffectResult};
 #[cfg(feature = "runtime")]
 pub use plugin_manager::PluginManager;
+#[cfg(feature = "runtime")]
+pub use runtime_backend::RuntimeBackend;
+#[cfg(feature = "runtime")]
+pub use wasm_backend::WasmBackend;
 
 // --- Shared type re-exports ---
 #[cfg(feature = "runtime")]
@@ -311,9 +326,10 @@ impl Runtime {
 
     /// Convert into MCP state for running the MCP server.
     pub fn into_mcp_state(self, project_dir: PathBuf) -> mcp::McpState {
+        let backend = Arc::new(WasmBackend::new(self.plugin_manager));
         mcp::McpState {
             project_dir,
-            plugin: Arc::new(self.plugin_manager),
+            backend,
             role: None,
             question_registry: None,
         }

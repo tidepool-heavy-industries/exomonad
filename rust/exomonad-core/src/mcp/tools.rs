@@ -4,12 +4,8 @@
 //! - Tool schema discovery via WASM (handle_list_tools)
 //! - Tool call types for WASM boundary (MCPCallInput/MCPCallOutput)
 
-use super::ToolDefinition;
-use crate::PluginManager;
-use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tracing::debug;
 
 // ============================================================================
 // WASM MCP Types (matches Haskell Main.hs MCPCallInput/MCPCallOutput)
@@ -60,30 +56,6 @@ impl MCPCallOutput {
             json!({"content": [{"type": "text", "text": err}], "isError": true})
         }
     }
-}
-
-// ============================================================================
-// Tool Discovery (via WASM)
-// ============================================================================
-
-/// Get all available tool definitions from WASM plugin.
-///
-/// Calls handle_list_tools in Haskell WASM with the role, which returns
-/// only the tool schemas for that role. This is the single source of truth.
-pub async fn get_tool_definitions(
-    plugin: &PluginManager,
-    role: Option<&str>,
-) -> Result<Vec<ToolDefinition>> {
-    let role = role.unwrap_or("tl");
-    debug!(role = %role, "Fetching tool definitions from WASM");
-
-    let tools: Vec<ToolDefinition> = plugin
-        .call("handle_list_tools", &serde_json::json!({"role": role}))
-        .await
-        .context("WASM handle_list_tools failed")?;
-
-    debug!(count = tools.len(), role = %role, "Got tool definitions from WASM");
-    Ok(tools)
 }
 
 #[cfg(test)]

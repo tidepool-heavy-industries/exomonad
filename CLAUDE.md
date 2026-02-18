@@ -252,7 +252,9 @@ Human in Zellij session
 
 **MCP Tool Call:**
 ```
-Claude Code → HTTP request → exomonad serve → WASM handle_mcp_call
+Claude Code → HTTP request → exomonad serve
+→ Arc<dyn RuntimeBackend>::call_tool(role, tool_name, args)
+→ WasmBackend → PluginManager::call_async("handle_mcp_call", ...)
 → Haskell dispatches to tool handler → yields effects
 → Rust executes effects via host functions → result returned
 ```
@@ -260,7 +262,8 @@ Claude Code → HTTP request → exomonad serve → WASM handle_mcp_call
 **Hook Call:**
 ```
 Claude Code → exomonad hook pre-tool-use (reads stdin JSON)
-→ HTTP POST to server → WASM handle_pre_tool_use
+→ HTTP POST to server → Arc<dyn RuntimeBackend>::handle_hook(input)
+→ WasmBackend → WASM handle_pre_tool_use
 → Haskell decides allow/deny → HookEnvelope { stdout, exit_code }
 → Claude Code proceeds or blocks
 ```

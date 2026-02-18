@@ -8,12 +8,12 @@ use tokio::sync::RwLock;
 use tokio::time::Instant;
 use uuid::Uuid;
 
-use super::tools::{self, MCPCallInput, MCPCallOutput};
+use super::tools::MCPCallOutput;
 use super::McpState;
-use crate::PluginManager;
+use crate::RuntimeBackend;
 
 struct McpSession {
-    plugin: Arc<PluginManager>,
+    backend: Arc<dyn RuntimeBackend>,
     role: String,
     /// Cached tool definitions (name → {description, inputSchema})
     tools: Vec<super::ToolDefinition>,
@@ -118,13 +118,13 @@ impl McpServer {
 
     /// Handle a JSON-RPC MCP request.
     ///
-    /// When `plugin` is Some, it's used for session creation (per-agent identity).
-    /// When None, falls back to `self.state.plugin` (standalone/router mode).
+    /// When `backend` is Some, it's used for session creation (per-agent identity).
+    /// When None, falls back to `self.state.backend` (standalone/router mode).
     pub async fn handle(
         &self,
         headers: HeaderMap,
         Json(body): Json<Value>,
-        plugin: Option<Arc<PluginManager>>,
+        backend: Option<Arc<dyn RuntimeBackend>>,
     ) -> Response {
         let method = body["method"].as_str();
         let id = body.get("id").cloned();
@@ -137,7 +137,7 @@ impl McpServer {
         let id = id.unwrap(); // guaranteed non-null by above check
 
         match method {
-            Some("initialize") => self.handle_initialize(&id, plugin).await,
+            Some("initialize") => self.handle_initialize(&id, backend).await,
             Some(m) => {
                 // All other methods require a valid session
                 let session_id = match headers.get("mcp-session-id").and_then(|v| v.to_str().ok()) {
@@ -173,15 +173,19 @@ impl McpServer {
         }
     }
 
-    async fn handle_initialize(&self, id: &Value, plugin: Option<Arc<PluginManager>>) -> Response {
-        let plugin = plugin.unwrap_or_else(|| self.state.plugin.clone());
+    async fn handle_initialize(
+        &self,
+        id: &Value,
+        backend: Option<Arc<dyn RuntimeBackend>>,
+    ) -> Response {
+        let backend = backend.unwrap_or_else(|| self.state.backend.clone());
 
-        // Hot reload WASM if changed
-        let _ = plugin.reload_if_changed().await;
+        // Hot reload if supported
+        let _ = backend.reload_if_changed().await;
 
-        // Discover tools from WASM
-        let role = self.state.role.as_deref();
-        let tools = match tools::get_tool_definitions(&plugin, role).await {
+        // Discover tools
+        let role = self.state.role.as_deref().unwrap_or("tl");
+        let tools = match backend.list_tools(role).await {
             Ok(t) => t,
             Err(e) => {
                 tracing::error!(error = %e, "Failed to get tool definitions");
@@ -192,7 +196,7 @@ impl McpServer {
         let session_id = Uuid::new_v4().to_string();
 
         let session = McpSession {
-            plugin,
+            backend,
             role: self.state.role.clone().unwrap_or_else(|| "tl".to_string()),
             tools,
             last_active: Instant::now(),
@@ -252,11 +256,11 @@ impl McpServer {
         };
         let args = params.get("arguments").cloned().unwrap_or(json!({}));
 
-        // Read session to get plugin + role (short lock)
-        let (plugin, role) = {
+        // Read session to get backend + role (short lock)
+        let (backend, role) = {
             let sessions = self.sessions.read().await;
             match sessions.get(session_id) {
-                Some(session) => (session.plugin.clone(), session.role.clone()),
+                Some(session) => (session.backend.clone(), session.role.clone()),
                 None => {
                     return json_rpc_error_with_status(
                         id,
@@ -270,13 +274,11 @@ impl McpServer {
 
         tracing::info!(tool = %tool_name, "Executing tool");
 
-        let input = MCPCallInput::new(role, tool_name.clone(), args);
-
-        let output: MCPCallOutput = match plugin.call_async("handle_mcp_call", &input).await {
+        let output: MCPCallOutput = match backend.call_tool(&role, &tool_name, args).await {
             Ok(o) => o,
             Err(e) => {
-                tracing::error!(tool = %tool_name, error = %e, "WASM call failed");
-                let result = json!({"content": [{"type": "text", "text": format!("WASM call failed: {}", e)}], "isError": true});
+                tracing::error!(tool = %tool_name, error = %e, "Tool call failed");
+                let result = json!({"content": [{"type": "text", "text": format!("Tool call failed: {}", e)}], "isError": true});
                 return json_rpc_response(id, session_id, result);
             }
         };
