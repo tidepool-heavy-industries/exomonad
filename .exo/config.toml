@@ -1,3 +1,4 @@
 default_role = "tl"
 project_dir = "."
 zellij_session = "EXOMONAD"
+port = 7433

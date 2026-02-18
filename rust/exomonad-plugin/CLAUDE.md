@@ -128,11 +128,26 @@ cargo test -p exomonad-plugin
 4. Interact with form (keyboard navigation)
 5. Verify PopupResult returned to WASM
 
+## Stdin Injection and the Ink Paste Problem
+
+**Critical:** When injecting text into panes running Ink-based TUIs (Claude Code, Gemini CLI), the Enter keypress MUST be sent as a separate, delayed write. Without this, Ink treats the entire payload (text + CR byte) as a clipboard paste and `key.return` never fires.
+
+**Root cause:** React Ink's `useInput` hook detects multi-byte stdin writes as paste events. When `write_chars_to_pane_id("text")` and `write_to_pane_id(vec![13])` arrive in the same Node.js event loop tick, they coalesce into one `data` event buffer. Ink sees >1 character, enters paste mode, and the CR byte (0x0D) is treated as a literal newline — not a submission trigger.
+
+**Solution:** Defer the Enter keypress via Zellij's `set_timeout(0.1)` + `Timer` event:
+1. `write_chars_to_pane_id(text, pane_id)` — sends text immediately
+2. Store `pane_id` in `pending_enter` vec, call `set_timeout(0.1)`
+3. On `Event::Timer`, drain `pending_enter` and send `write_to_pane_id(vec![13], pane_id)`
+
+The 100ms delay ensures the OS kernel flushes the text write before the CR byte arrives, so Node.js processes them as separate `data` events. Ink then sees an isolated `\r` byte, sets `key.return = true`, and `onSubmit` fires.
+
+**This applies to ANY Ink-based application** (Claude Code, Gemini CLI, Wrangler, etc.) — not just our stack. The distinction is between `key.return` (physical Enter, byte 0x0D in isolation) and `key.enter` (newline, byte 0x0A) — only `key.return` triggers `onSubmit` in `ink-text-input`.
+
 ## Design Notes
 
 - **Single plugin**: Handles both status bar and popups (not separate plugins)
 - **Protocol types**: Uses exomonad-core (default-features=false) for shared ui_protocol types
-- **Event subscription**: CustomMessage for data, Key for interaction
+- **Event subscription**: CustomMessage, Key, Timer (for deferred Enter), TabUpdate, PaneUpdate
 - **WASM target**: wasm32-wasi (Zellij plugin API requirement)
 - **Stateful**: Maintains popup state across render cycles
 - **ASCII rendering**: No graphics, pure text-based UI (Zellij limitation)

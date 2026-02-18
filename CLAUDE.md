@@ -192,6 +192,8 @@ Push-based parallel worker coordination via Zellij STDIN injection:
 
 The TL does not poll or block. It finishes its turn after spawning, and gets poked by the system when children complete. This is true push notification via `inject_input` through the Zellij plugin pipe.
 
+**Ink paste problem:** The injected Enter keypress must be deferred by ~100ms after the text injection. React Ink (used by Claude Code and Gemini CLI) treats multi-byte stdin writes arriving in the same event loop tick as clipboard paste events, bypassing `key.return` detection. The Zellij plugin uses `set_timeout(0.1)` + `Timer` to send the CR byte (0x0D) as a separate write, ensuring Ink processes it as an isolated keypress and fires `onSubmit`. See `rust/exomonad-plugin/CLAUDE.md` for full details.
+
 ### PR Workflow
 
 - **`file_pr`** — Create or update a PR for the current branch. Auto-detects base branch from dot-separated naming convention.
