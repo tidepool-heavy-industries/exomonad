@@ -95,6 +95,18 @@ Handles effects in the `coordination.*` namespace.
 - `Message.from` is `AgentName` (not String)
 - Proto strings are wrapped to `AgentName` at the handler boundary
 
+## Shared Helpers (`handlers/mod.rs`)
+
+Proto3 uses empty strings/zero values as defaults. These helpers eliminate repetitive empty-check boilerplate at handler boundaries:
+
+| Helper | Signature | Purpose |
+|--------|-----------|---------|
+| `non_empty(s)` | `String → Option<String>` | Converts empty string to `None` |
+| `working_dir_or_default(s)` | `String → String` | Returns `"."` for empty strings |
+| `working_dir_path_or_default(s)` | `&str → PathBuf` | Returns `PathBuf::from(".")` for empty |
+
+**Error conversion**: All handlers use `ResultExt::effect_err(namespace)` from `effects/error.rs` instead of manual `.map_err(|e| EffectError::custom(...))` closures. For async spawn_blocking patterns, use `spawn_blocking_effect(namespace, closure)`.
+
 ## Domain Types Used Across Handlers
 
 | Type | Purpose | Used In |

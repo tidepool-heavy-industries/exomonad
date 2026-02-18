@@ -3,7 +3,7 @@
 //! Uses proto-generated types from `exomonad_proto::effects::popup`.
 
 use crate::effects::{
-    dispatch_popup_effect, EffectError, EffectHandler, EffectResult, PopupEffects,
+    dispatch_popup_effect, EffectError, EffectHandler, EffectResult, PopupEffects, ResultExt,
 };
 use crate::services::popup::{PopupInput, PopupService};
 use async_trait::async_trait;
@@ -67,9 +67,7 @@ impl PopupEffects for PopupHandler {
 
         let service = PopupService::new(self.zellij_session.clone());
 
-        let output = service
-            .show_popup(&input)
-            .map_err(|e| EffectError::custom("popup_error", e.to_string()))?;
+        let output = service.show_popup(&input).effect_err("popup")?;
 
         let values_bytes = serde_json::to_vec(&output.values).map_err(|e| {
             EffectError::custom("popup_error", format!("Failed to serialize values: {}", e))

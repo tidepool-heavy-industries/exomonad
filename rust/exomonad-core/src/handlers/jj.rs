@@ -4,12 +4,15 @@
 //! directly via `JjWorkspaceService`. Remaining effects (`log`, `new`, `status`)
 //! shell out to the `jj` CLI.
 
+use super::{non_empty, working_dir_or_default, working_dir_path_or_default};
 use crate::domain::{BranchName, Revision};
-use crate::effects::{dispatch_jj_effect, EffectError, EffectHandler, EffectResult, JjEffects};
+use crate::effects::{
+    dispatch_jj_effect, EffectHandler, EffectResult, JjEffects, ResultExt,
+    spawn_blocking_effect,
+};
 use crate::services::jj_workspace::JjWorkspaceService;
 use async_trait::async_trait;
 use exomonad_proto::effects::jj::*;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::process::Command;
 use tracing::info;
@@ -47,25 +50,15 @@ impl JjEffects for JjHandler {
         req: BookmarkCreateRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<BookmarkCreateResponse> {
-        let working_dir = if req.working_dir.is_empty() {
-            PathBuf::from(".")
-        } else {
-            PathBuf::from(&req.working_dir)
-        };
+        let working_dir = working_dir_path_or_default(&req.working_dir);
         let name = BranchName::from(req.name.as_str());
-        let revision = if req.revision.is_empty() {
-            None
-        } else {
-            Some(Revision::from(req.revision.as_str()))
-        };
+        let revision = non_empty(req.revision).map(|r| Revision::from(r.as_str()));
         info!(name = %name, revision = ?revision, "jj bookmark create via jj-lib");
         let jj = self.jj.clone();
-        tokio::task::spawn_blocking(move || {
+        spawn_blocking_effect("jj", move || {
             jj.create_bookmark(&working_dir, &name, revision.as_ref())
         })
-        .await
-        .map_err(|e| EffectError::custom("jj_error", format!("spawn_blocking: {}", e)))?
-        .map_err(|e| EffectError::custom("jj_error", e.to_string()))?;
+        .await?;
         Ok(BookmarkCreateResponse {
             change_id: String::new(),
         })
@@ -76,24 +69,15 @@ impl JjEffects for JjHandler {
         req: GitPushRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GitPushResponse> {
-        let working_dir = if req.working_dir.is_empty() {
-            PathBuf::from(".")
-        } else {
-            PathBuf::from(&req.working_dir)
-        };
+        let working_dir = working_dir_path_or_default(&req.working_dir);
         let bookmark = BranchName::from(req.bookmark.as_str());
         info!(bookmark = %bookmark, "jj git push via jj-lib");
         let jj = self.jj.clone();
-        let result = tokio::task::spawn_blocking(move || jj.push_bookmark(&working_dir, &bookmark))
-            .await
-            .map_err(|e| EffectError::custom("jj_error", format!("spawn_blocking: {}", e)))?;
-        match result {
-            Ok(()) => Ok(GitPushResponse {
-                success: true,
-                message: String::new(),
-            }),
-            Err(e) => Err(EffectError::custom("jj_error", e.to_string())),
-        }
+        spawn_blocking_effect("jj", move || jj.push_bookmark(&working_dir, &bookmark)).await?;
+        Ok(GitPushResponse {
+            success: true,
+            message: String::new(),
+        })
     }
 
     async fn git_fetch(
@@ -101,23 +85,14 @@ impl JjEffects for JjHandler {
         req: GitFetchRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GitFetchResponse> {
-        let working_dir = if req.working_dir.is_empty() {
-            PathBuf::from(".")
-        } else {
-            PathBuf::from(&req.working_dir)
-        };
+        let working_dir = working_dir_path_or_default(&req.working_dir);
         info!("jj git fetch via jj-lib");
         let jj = self.jj.clone();
-        let result = tokio::task::spawn_blocking(move || jj.fetch(&working_dir))
-            .await
-            .map_err(|e| EffectError::custom("jj_error", format!("spawn_blocking: {}", e)))?;
-        match result {
-            Ok(()) => Ok(GitFetchResponse {
-                success: true,
-                message: String::new(),
-            }),
-            Err(e) => Err(EffectError::custom("jj_error", e.to_string())),
-        }
+        spawn_blocking_effect("jj", move || jj.fetch(&working_dir)).await?;
+        Ok(GitFetchResponse {
+            success: true,
+            message: String::new(),
+        })
     }
 
     async fn log(
@@ -125,11 +100,7 @@ impl JjEffects for JjHandler {
         req: LogRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<LogResponse> {
-        let working_dir = if req.working_dir.is_empty() {
-            ".".to_string()
-        } else {
-            req.working_dir
-        };
+        let working_dir = working_dir_or_default(req.working_dir);
         let revset = if req.revset.is_empty() {
             " @".to_string()
         } else {
@@ -144,10 +115,10 @@ impl JjEffects for JjHandler {
             .current_dir(&working_dir)
             .output()
             .await
-            .map_err(|e| EffectError::custom("jj_error", e.to_string()))?;
+            .effect_err("jj")?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(EffectError::custom("jj_error", stderr.to_string()));
+            return Err(crate::effects::EffectError::custom("jj_error", stderr.to_string()));
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
         let entries: Vec<LogEntry> = stdout
@@ -177,11 +148,7 @@ impl JjEffects for JjHandler {
         req: NewRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<NewResponse> {
-        let working_dir = if req.working_dir.is_empty() {
-            ".".to_string()
-        } else {
-            req.working_dir
-        };
+        let working_dir = working_dir_or_default(req.working_dir);
         let mut args = vec!["new"];
         if !req.revision.is_empty() {
             args.push(&req.revision);
@@ -192,10 +159,10 @@ impl JjEffects for JjHandler {
             .current_dir(&working_dir)
             .output()
             .await
-            .map_err(|e| EffectError::custom("jj_error", e.to_string()))?;
+            .effect_err("jj")?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(EffectError::custom("jj_error", stderr.to_string()));
+            return Err(crate::effects::EffectError::custom("jj_error", stderr.to_string()));
         }
         Ok(NewResponse {
             change_id: String::new(),
@@ -207,11 +174,7 @@ impl JjEffects for JjHandler {
         req: StatusRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<StatusResponse> {
-        let working_dir = if req.working_dir.is_empty() {
-            ".".to_string()
-        } else {
-            req.working_dir
-        };
+        let working_dir = working_dir_or_default(req.working_dir);
         info!("jj status");
         // Use jj status to get working copy info
         let output = Command::new("jj")
@@ -219,10 +182,10 @@ impl JjEffects for JjHandler {
             .current_dir(&working_dir)
             .output()
             .await
-            .map_err(|e| EffectError::custom("jj_error", e.to_string()))?;
+            .effect_err("jj")?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(EffectError::custom("jj_error", stderr.to_string()));
+            return Err(crate::effects::EffectError::custom("jj_error", stderr.to_string()));
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
         let is_conflicted = stdout.contains("conflict");
@@ -237,7 +200,7 @@ impl JjEffects for JjHandler {
             .current_dir(&working_dir)
             .output()
             .await
-            .map_err(|e| EffectError::custom("jj_error", e.to_string()))?;
+            .effect_err("jj")?;
         let change_id = String::from_utf8_lossy(&id_output.stdout)
             .trim()
             .to_string();

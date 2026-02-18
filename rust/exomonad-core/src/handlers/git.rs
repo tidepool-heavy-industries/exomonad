@@ -2,7 +2,10 @@
 //!
 //! Uses proto-generated types from `exomonad_proto::effects::git`.
 
-use crate::effects::{dispatch_git_effect, EffectError, EffectHandler, EffectResult, GitEffects};
+use super::working_dir_or_default;
+use crate::effects::{
+    dispatch_git_effect, EffectHandler, EffectResult, GitEffects, ResultExt,
+};
 use crate::services::git::GitService;
 use async_trait::async_trait;
 use exomonad_proto::effects::git::*;
@@ -47,18 +50,10 @@ impl GitEffects for GitHandler {
         req: GetBranchRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetBranchResponse> {
-        let working_dir = if req.working_dir.is_empty() {
-            ".".to_string()
-        } else {
-            req.working_dir
-        };
+        let working_dir = working_dir_or_default(req.working_dir);
         info!(working_dir = %working_dir, "[Git] get_branch starting");
 
-        let branch = self
-            .service
-            .get_branch(&working_dir)
-            .await
-            .map_err(|e| EffectError::custom("git_error", e.to_string()))?;
+        let branch = self.service.get_branch(&working_dir).await.effect_err("git")?;
 
         info!(branch = %branch, "[Git] get_branch complete");
         Ok(GetBranchResponse {
@@ -72,18 +67,10 @@ impl GitEffects for GitHandler {
         req: GetStatusRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetStatusResponse> {
-        let working_dir = if req.working_dir.is_empty() {
-            ".".to_string()
-        } else {
-            req.working_dir
-        };
+        let working_dir = working_dir_or_default(req.working_dir);
         info!(working_dir = %working_dir, "[Git] get_status starting");
 
-        let dirty_files = self
-            .service
-            .get_dirty_files(&working_dir)
-            .await
-            .map_err(|e| EffectError::custom("git_error", e.to_string()))?;
+        let dirty_files = self.service.get_dirty_files(&working_dir).await.effect_err("git")?;
 
         // Parse git status --porcelain output
         let mut staged = Vec::new();
@@ -97,10 +84,10 @@ impl GitEffects for GitHandler {
             let status = &line[..2];
             let file = line[3..].to_string();
 
-            match status.chars().collect::<Vec<_>>().as_slice() {
-                ['?', '?'] => untracked.push(file),
-                [s, _] if *s != ' ' => staged.push(file.clone()),
-                [_, u] if *u != ' ' => unstaged.push(file),
+            match status.as_bytes() {
+                b"??" => untracked.push(file),
+                [s, _] if *s != b' ' => staged.push(file.clone()),
+                [_, u] if *u != b' ' => unstaged.push(file),
                 _ => {}
             }
         }
@@ -118,12 +105,7 @@ impl GitEffects for GitHandler {
         req: GetCommitsRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetCommitsResponse> {
-        let working_dir = if req.working_dir.is_empty() {
-            ".".to_string()
-        } else {
-            req.working_dir
-        };
-
+        let working_dir = working_dir_or_default(req.working_dir);
         let limit = if req.limit <= 0 { 10 } else { req.limit as u32 };
         info!(working_dir = %working_dir, limit, "[Git] get_commits starting");
 
@@ -131,7 +113,7 @@ impl GitEffects for GitHandler {
             .service
             .get_recent_commits(&working_dir, limit)
             .await
-            .map_err(|e| EffectError::custom("git_error", e.to_string()))?;
+            .effect_err("git")?;
 
         let commits: Vec<Commit> = raw_commits
             .into_iter()
@@ -154,18 +136,14 @@ impl GitEffects for GitHandler {
         req: HasUnpushedCommitsRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<HasUnpushedCommitsResponse> {
-        let working_dir = if req.working_dir.is_empty() {
-            ".".to_string()
-        } else {
-            req.working_dir
-        };
+        let working_dir = working_dir_or_default(req.working_dir);
         info!(working_dir = %working_dir, "[Git] has_unpushed_commits starting");
 
         let count = self
             .service
             .has_unpushed_commits(&working_dir)
             .await
-            .map_err(|e| EffectError::custom("git_error", e.to_string()))?;
+            .effect_err("git")?;
 
         info!(count, "[Git] has_unpushed_commits complete");
         Ok(HasUnpushedCommitsResponse {
@@ -179,18 +157,10 @@ impl GitEffects for GitHandler {
         req: GetRemoteUrlRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetRemoteUrlResponse> {
-        let working_dir = if req.working_dir.is_empty() {
-            ".".to_string()
-        } else {
-            req.working_dir
-        };
+        let working_dir = working_dir_or_default(req.working_dir);
         info!(working_dir = %working_dir, "[Git] get_remote_url starting");
 
-        let url = self
-            .service
-            .get_remote_url(&working_dir)
-            .await
-            .map_err(|e| EffectError::custom("git_error", e.to_string()))?;
+        let url = self.service.get_remote_url(&working_dir).await.effect_err("git")?;
 
         info!(url = %url, "[Git] get_remote_url complete");
         Ok(GetRemoteUrlResponse { url })
@@ -201,18 +171,10 @@ impl GitEffects for GitHandler {
         req: GetRepoInfoRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetRepoInfoResponse> {
-        let working_dir = if req.working_dir.is_empty() {
-            ".".to_string()
-        } else {
-            req.working_dir
-        };
+        let working_dir = working_dir_or_default(req.working_dir);
         info!(working_dir = %working_dir, "[Git] get_repo_info starting");
 
-        let info = self
-            .service
-            .get_repo_info(&working_dir)
-            .await
-            .map_err(|e| EffectError::custom("git_error", e.to_string()))?;
+        let info = self.service.get_repo_info(&working_dir).await.effect_err("git")?;
 
         info!(branch = %info.branch, "[Git] get_repo_info complete");
         Ok(GetRepoInfoResponse {
@@ -227,18 +189,10 @@ impl GitEffects for GitHandler {
         req: GetWorktreeRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetWorktreeResponse> {
-        let working_dir = if req.working_dir.is_empty() {
-            ".".to_string()
-        } else {
-            req.working_dir
-        };
+        let working_dir = working_dir_or_default(req.working_dir);
         info!(working_dir = %working_dir, "[Git] get_worktree starting");
 
-        let info = self
-            .service
-            .get_worktree(&working_dir)
-            .await
-            .map_err(|e| EffectError::custom("git_error", e.to_string()))?;
+        let info = self.service.get_worktree(&working_dir).await.effect_err("git")?;
 
         info!(path = %info.path, branch = %info.branch, "[Git] get_worktree complete");
         Ok(GetWorktreeResponse {

@@ -3,7 +3,7 @@
 //! Uses proto-generated types from `exomonad_proto::effects::fs`.
 
 use crate::effects::{
-    dispatch_fs_effect, EffectError, EffectHandler, EffectResult, FilesystemEffects,
+    dispatch_fs_effect, EffectError, EffectHandler, EffectResult, FilesystemEffects, ResultExt,
 };
 use crate::services::filesystem::FileSystemService;
 use async_trait::async_trait;
@@ -59,11 +59,7 @@ impl FilesystemEffects for FsHandler {
             max_bytes,
         };
 
-        let result = self
-            .service
-            .read_file(&input)
-            .await
-            .map_err(|e| EffectError::custom("fs_error", e.to_string()))?;
+        let result = self.service.read_file(&input).await.effect_err("fs")?;
 
         tracing::info!(bytes_read = result.bytes_read, truncated = result.truncated, "[Fs] read_file complete");
         Ok(ReadFileResponse {
@@ -86,11 +82,7 @@ impl FilesystemEffects for FsHandler {
             create_parents: req.create_parents,
         };
 
-        let result = self
-            .service
-            .write_file(&input)
-            .await
-            .map_err(|e| EffectError::custom("fs_error", e.to_string()))?;
+        let result = self.service.write_file(&input).await.effect_err("fs")?;
 
         tracing::info!(bytes_written = result.bytes_written, "[Fs] write_file complete");
         Ok(WriteFileResponse {
@@ -133,24 +125,15 @@ impl FilesystemEffects for FsHandler {
         }
 
         let mut entries = Vec::new();
-        let mut read_dir = tokio::fs::read_dir(path)
-            .await
-            .map_err(|e| EffectError::custom("fs_error", e.to_string()))?;
+        let mut read_dir = tokio::fs::read_dir(path).await.effect_err("fs")?;
 
-        while let Some(entry) = read_dir
-            .next_entry()
-            .await
-            .map_err(|e| EffectError::custom("fs_error", e.to_string()))?
-        {
+        while let Some(entry) = read_dir.next_entry().await.effect_err("fs")? {
             let name = entry.file_name().to_string_lossy().to_string();
             if !req.include_hidden && name.starts_with('.') {
                 continue;
             }
 
-            let metadata = entry
-                .metadata()
-                .await
-                .map_err(|e| EffectError::custom("fs_error", e.to_string()))?;
+            let metadata = entry.metadata().await.effect_err("fs")?;
 
             let (size, modified_at) = if req.include_metadata {
                 let size = metadata.len() as i64;
@@ -191,18 +174,12 @@ impl FilesystemEffects for FsHandler {
 
         if path.is_dir() {
             if req.recursive {
-                tokio::fs::remove_dir_all(path)
-                    .await
-                    .map_err(|e| EffectError::custom("fs_error", e.to_string()))?;
+                tokio::fs::remove_dir_all(path).await.effect_err("fs")?;
             } else {
-                tokio::fs::remove_dir(path)
-                    .await
-                    .map_err(|e| EffectError::custom("fs_error", e.to_string()))?;
+                tokio::fs::remove_dir(path).await.effect_err("fs")?;
             }
         } else {
-            tokio::fs::remove_file(path)
-                .await
-                .map_err(|e| EffectError::custom("fs_error", e.to_string()))?;
+            tokio::fs::remove_file(path).await.effect_err("fs")?;
         }
 
         tracing::info!(path = %req.path, "[Fs] delete_file complete");

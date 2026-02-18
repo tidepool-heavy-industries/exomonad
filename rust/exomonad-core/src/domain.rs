@@ -34,8 +34,8 @@ pub enum DomainError {
 
 /// Generate a validated non-empty string newtype with standard impls.
 ///
-/// Provides: TryFrom<String>, From<&str>, From<T> for String, Display,
-/// as_str(), and serde support via try_from/into.
+/// Provides: TryFrom<String>, From<&str> (panics on empty), From<T> for String,
+/// Display, as_str(), AsRef<str>, Borrow<str>, and serde support via try_from/into.
 macro_rules! validated_string {
     ($(#[doc = $doc:expr])* $name:ident, $field:expr) => {
         $(#[doc = $doc])*
@@ -61,7 +61,9 @@ macro_rules! validated_string {
         }
 
         impl From<&str> for $name {
+            /// Panics on empty input. Use `TryFrom<String>` for fallible conversion.
             fn from(s: &str) -> Self {
+                assert!(!s.is_empty(), concat!($field, " must not be empty"));
                 Self(s.to_string())
             }
         }
@@ -69,6 +71,18 @@ macro_rules! validated_string {
         impl $name {
             /// Get the value as a string slice.
             pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl AsRef<str> for $name {
+            fn as_ref(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl std::borrow::Borrow<str> for $name {
+            fn borrow(&self) -> &str {
                 &self.0
             }
         }
@@ -312,7 +326,7 @@ impl PRNumber {
     }
 
     /// Get the PR number as a u64.
-    pub fn as_u64(self) -> u64 {
+    pub fn as_u64(&self) -> u64 {
         self.0
     }
 }

@@ -9,6 +9,7 @@
 
 use crate::effects::{
     dispatch_messaging_effect, EffectError, EffectHandler, EffectResult, MessagingEffects,
+    spawn_blocking_effect,
 };
 use crate::services::inbox;
 use crate::services::questions::QuestionRegistry;
@@ -55,6 +56,17 @@ impl EffectHandler for MessagingHandler {
     }
 }
 
+/// Convert an InboxMessage to the proto AgentMessage type.
+fn inbox_to_proto(m: inbox::InboxMessage) -> AgentMessage {
+    AgentMessage {
+        from: m.from,
+        text: m.text,
+        summary: m.summary.unwrap_or_default(),
+        timestamp: m.timestamp,
+        read: m.read,
+    }
+}
+
 #[async_trait]
 impl MessagingEffects for MessagingHandler {
     async fn send_note(
@@ -72,10 +84,10 @@ impl MessagingEffects for MessagingHandler {
         );
 
         let tl_inbox_clone = tl_inbox.clone();
-        tokio::task::spawn_blocking(move || inbox::append_message(&tl_inbox_clone, &msg))
-            .await
-            .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
-            .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
+        spawn_blocking_effect("messaging", move || {
+            inbox::append_message(&tl_inbox_clone, &msg)
+        })
+        .await?;
 
         // Best-effort: push into parent's pane via Zellij plugin (inbox is source of truth)
         let tab_name = resolve_parent_tab_name(ctx);
@@ -107,10 +119,10 @@ impl MessagingEffects for MessagingHandler {
         );
 
         let tl_inbox_clone = tl_inbox.clone();
-        tokio::task::spawn_blocking(move || inbox::append_message(&tl_inbox_clone, &msg))
-            .await
-            .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
-            .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
+        spawn_blocking_effect("messaging", move || {
+            inbox::append_message(&tl_inbox_clone, &msg)
+        })
+        .await?;
 
         // Best-effort: push into parent's pane via Zellij plugin (inbox is source of truth)
         let tab_name = resolve_parent_tab_name(ctx);
@@ -172,12 +184,10 @@ impl MessagingEffects for MessagingHandler {
             let start = std::time::Instant::now();
 
             let tl_inbox_clone = tl_inbox.clone();
-            let messages = tokio::task::spawn_blocking(move || {
+            let messages = spawn_blocking_effect("messaging", move || {
                 inbox::poll_unread(&tl_inbox_clone, timeout, interval)
             })
-            .await
-            .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
-            .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
+            .await?;
 
             info!(
                 "Long-poll returned {} messages after {:.1}s",
@@ -187,10 +197,7 @@ impl MessagingEffects for MessagingHandler {
             messages
         } else {
             // Immediate return (existing behavior)
-            tokio::task::spawn_blocking(move || inbox::read_unread(&tl_inbox))
-                .await
-                .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
-                .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
+            spawn_blocking_effect("messaging", move || inbox::read_unread(&tl_inbox)).await?
         };
 
         if !req.agent_id.is_empty() {
@@ -208,16 +215,7 @@ impl MessagingEffects for MessagingHandler {
 
             let agent_msgs = AgentMessages {
                 agent_id: req.agent_id,
-                messages: agent_messages
-                    .into_iter()
-                    .map(|m| AgentMessage {
-                        from: m.from,
-                        text: m.text,
-                        summary: m.summary.unwrap_or_default(),
-                        timestamp: m.timestamp,
-                        read: m.read,
-                    })
-                    .collect(),
+                messages: agent_messages.into_iter().map(inbox_to_proto).collect(),
             };
 
             Ok(GetAgentMessagesResponse {
@@ -236,16 +234,7 @@ impl MessagingEffects for MessagingHandler {
                 .into_iter()
                 .map(|(id, msgs)| AgentMessages {
                     agent_id: id,
-                    messages: msgs
-                        .into_iter()
-                        .map(|m| AgentMessage {
-                            from: m.from,
-                            text: m.text,
-                            summary: m.summary.unwrap_or_default(),
-                            timestamp: m.timestamp,
-                            read: m.read,
-                        })
-                        .collect(),
+                    messages: msgs.into_iter().map(inbox_to_proto).collect(),
                 })
                 .collect();
 
@@ -277,10 +266,10 @@ impl MessagingEffects for MessagingHandler {
             Some(format!("Answer to {}", req.question_id)),
         );
 
-        tokio::task::spawn_blocking(move || inbox::append_message(&agent_inbox, &msg))
-            .await
-            .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?
-            .map_err(|e| EffectError::custom("messaging_error", e.to_string()))?;
+        spawn_blocking_effect("messaging", move || {
+            inbox::append_message(&agent_inbox, &msg)
+        })
+        .await?;
 
         // Resolve the oneshot channel so send_question unblocks immediately.
         let resolved = self

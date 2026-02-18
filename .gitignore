@@ -47,6 +47,8 @@ cabal.project.wasm.dev
 .exo/sidecar.pid
 .exomonad/server.pid
 .exo/server.pid
+.exomonad/events.jsonl
+.exo/events.jsonl
 
 # Role build artifacts (gen/ and dist/ are build intermediates)
 .exomonad/roles/*/gen/

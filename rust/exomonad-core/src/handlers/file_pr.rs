@@ -2,8 +2,9 @@
 //!
 //! Uses proto-generated types from `exomonad_proto::effects::file_pr`.
 
+use super::non_empty;
 use crate::effects::{
-    dispatch_file_pr_effect, EffectError, EffectHandler, EffectResult, FilePrEffects,
+    dispatch_file_pr_effect, EffectHandler, EffectResult, FilePrEffects, ResultExt,
 };
 use crate::services::file_pr::{self, FilePRInput};
 use crate::services::jj_workspace::JjWorkspaceService;
@@ -49,11 +50,7 @@ impl FilePrEffects for FilePRHandler {
         ctx: &crate::effects::EffectContext,
     ) -> EffectResult<FilePrResponse> {
         tracing::info!(title = %req.title, "[FilePR] file_pr starting");
-        let base_branch = if req.base_branch.is_empty() {
-            None
-        } else {
-            Some(req.base_branch.clone())
-        };
+        let base_branch = non_empty(req.base_branch);
 
         let working_dir = crate::services::agent_control::resolve_agent_working_dir(ctx);
 
@@ -66,7 +63,7 @@ impl FilePrEffects for FilePRHandler {
 
         let output = file_pr::file_pr_async(&input, self.jj.clone())
             .await
-            .map_err(|e| EffectError::custom("file_pr_error", e.to_string()))?;
+            .effect_err("file_pr")?;
 
         tracing::info!(pr_number = output.pr_number.as_u64(), created = output.created, "[FilePR] file_pr complete");
         Ok(FilePrResponse {

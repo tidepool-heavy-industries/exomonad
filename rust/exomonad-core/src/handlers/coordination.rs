@@ -1,3 +1,4 @@
+use super::non_empty;
 use crate::domain::{AgentName, TaskId};
 use crate::effects::{
     dispatch_coordination_effect, CoordinationEffects, EffectHandler, EffectResult,
@@ -92,21 +93,9 @@ impl CoordinationEffects for CoordinationHandler {
         let task_id = TaskId::from(req.task_id.as_str());
         tracing::info!(task_id = %task_id, "[Coordination] update_task starting");
         let status = to_service_status(req.status());
-        let owner = if req.owner.is_empty() {
-            None
-        } else {
-            Some(AgentName::from(req.owner.as_str()))
-        };
-        let description = if req.description.is_empty() {
-            None
-        } else {
-            Some(req.description)
-        };
-        let subject = if req.subject.is_empty() {
-            None
-        } else {
-            Some(req.subject)
-        };
+        let owner = non_empty(req.owner).map(|s| AgentName::from(s.as_str()));
+        let description = non_empty(req.description);
+        let subject = non_empty(req.subject);
 
         let success = self
             .service

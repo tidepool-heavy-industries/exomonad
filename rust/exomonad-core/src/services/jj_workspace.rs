@@ -38,14 +38,18 @@ impl JjWorkspaceService {
         if let Some(config_dir) = dirs::config_dir() {
             let user_config = config_dir.join("jj").join("config.toml");
             if user_config.exists() {
-                let _ = config.load_file(ConfigSource::User, &user_config);
+                if let Err(e) = config.load_file(ConfigSource::User, &user_config) {
+                    warn!(path = %user_config.display(), error = %e, "Failed to load jj user config");
+                }
             }
         }
 
         // Load repo config
         let repo_config = self.project_dir.join(".jj").join("repo").join("config.toml");
         if repo_config.exists() {
-            let _ = config.load_file(ConfigSource::Repo, &repo_config);
+            if let Err(e) = config.load_file(ConfigSource::Repo, &repo_config) {
+                warn!(path = %repo_config.display(), error = %e, "Failed to load jj repo config");
+            }
         }
 
         UserSettings::from_config(config).context("Failed to create jj UserSettings")

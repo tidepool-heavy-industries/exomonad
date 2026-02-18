@@ -3,7 +3,7 @@
 //! Uses proto-generated types from `exomonad_proto::effects::copilot`.
 
 use crate::effects::{
-    dispatch_copilot_effect, CopilotEffects, EffectError, EffectHandler, EffectResult,
+    dispatch_copilot_effect, CopilotEffects, EffectHandler, EffectResult, ResultExt,
 };
 use crate::services::copilot_review;
 use async_trait::async_trait;
@@ -67,7 +67,7 @@ impl CopilotEffects for CopilotHandler {
         };
 
         let output = copilot_review::wait_for_copilot_review(&input)
-            .map_err(|e| EffectError::custom("copilot_error", e.to_string()))?;
+            .effect_err("copilot")?;
 
         let comments: Vec<CopilotComment> = output
             .comments

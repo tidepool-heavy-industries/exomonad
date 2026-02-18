@@ -4,8 +4,10 @@
 
 use crate::domain::{AgentName, BirthBranch, ClaudeSessionUuid};
 use crate::effects::{
-    dispatch_agent_effect, AgentEffects, EffectError, EffectHandler, EffectResult,
+    dispatch_agent_effect, AgentEffects, EffectError, EffectHandler, EffectResult, ResultExt,
 };
+
+use super::non_empty;
 use crate::services::agent_control::{
     AgentControlService, AgentInfo, AgentType as ServiceAgentType, SpawnGeminiTeammateOptions,
     SpawnOptions, SpawnSubtreeOptions, SpawnWorkerOptions,
@@ -90,23 +92,15 @@ impl AgentEffects for AgentHandler {
             owner: parse_owner(&req.owner)?,
             repo: parse_repo(&req.repo)?,
             agent_type: convert_agent_type(req.agent_type()),
-            subrepo: if req.subrepo.is_empty() {
-                None
-            } else {
-                Some(req.subrepo.clone())
-            },
-            base_branch: if req.base_branch.is_empty() {
-                None
-            } else {
-                Some(BirthBranch::from(req.base_branch.as_str()))
-            },
+            subrepo: non_empty(req.subrepo),
+            base_branch: non_empty(req.base_branch).map(|s| BirthBranch::from(s.as_str())),
         };
 
         let result = self
             .service
             .spawn_agent(issue_number, &options, &ctx.birth_branch)
             .await
-            .map_err(|e| EffectError::custom("agent_error", e.to_string()))?;
+            .effect_err("agent")?;
 
         Ok(SpawnResponse {
             agent: Some(spawn_result_to_proto(&req.issue, &result)),
@@ -134,11 +128,7 @@ impl AgentEffects for AgentHandler {
                 owner: parse_owner(&req.owner)?,
                 repo: parse_repo(&req.repo)?,
                 agent_type,
-                subrepo: if req.subrepo.is_empty() {
-                    None
-                } else {
-                    Some(req.subrepo.clone())
-                },
+                subrepo: non_empty(req.subrepo.clone()),
                 base_branch: None,
             };
 
@@ -164,23 +154,15 @@ impl AgentEffects for AgentHandler {
             name: AgentName::from(req.name.as_str()),
             prompt: req.prompt.clone(),
             agent_type: convert_agent_type(req.agent_type()),
-            subrepo: if req.subrepo.is_empty() {
-                None
-            } else {
-                Some(req.subrepo.clone())
-            },
-            base_branch: if req.base_branch.is_empty() {
-                None
-            } else {
-                Some(BirthBranch::from(req.base_branch.as_str()))
-            },
+            subrepo: non_empty(req.subrepo),
+            base_branch: non_empty(req.base_branch).map(|s| BirthBranch::from(s.as_str())),
         };
 
         let result = self
             .service
             .spawn_gemini_teammate(&options, &ctx.birth_branch)
             .await
-            .map_err(|e| EffectError::custom("agent_error", e.to_string()))?;
+            .effect_err("agent")?;
 
         Ok(SpawnGeminiTeammateResponse {
             agent: Some(teammate_result_to_proto(&req.name, &result)),
@@ -201,7 +183,7 @@ impl AgentEffects for AgentHandler {
             .service
             .spawn_worker(&options, &ctx.birth_branch)
             .await
-            .map_err(|e| EffectError::custom("agent_error", e.to_string()))?;
+            .effect_err("agent")?;
 
         Ok(SpawnWorkerResponse {
             agent: Some(worker_result_to_proto(&req.name, &result)),
@@ -249,7 +231,7 @@ impl AgentEffects for AgentHandler {
             .service
             .spawn_subtree(&options, &ctx.birth_branch)
             .await
-            .map_err(|e| EffectError::custom("agent_error", e.to_string()))?;
+            .effect_err("agent")?;
 
         Ok(SpawnSubtreeResponse {
             agent: Some(subtree_result_to_proto(&req.branch_name, &result)),
@@ -271,7 +253,7 @@ impl AgentEffects for AgentHandler {
             .service
             .spawn_leaf_subtree(&options, &ctx.birth_branch)
             .await
-            .map_err(|e| EffectError::custom("agent_error", e.to_string()))?;
+            .effect_err("agent")?;
 
         Ok(SpawnLeafSubtreeResponse {
             agent: Some(leaf_subtree_result_to_proto(&req.branch_name, &result)),
@@ -300,13 +282,8 @@ impl AgentEffects for AgentHandler {
         req: CleanupBatchRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<CleanupBatchResponse> {
-        let subrepo = if req.subrepo.is_empty() {
-            None
-        } else {
-            Some(req.subrepo.as_str())
-        };
-
-        let result = self.service.cleanup_agents(&req.issues, subrepo).await;
+        let subrepo = non_empty(req.subrepo);
+        let result = self.service.cleanup_agents(&req.issues, subrepo.as_deref()).await;
 
         let failed_ids: Vec<String> = result.failed.iter().map(|(id, _)| id.clone()).collect();
         let errors: Vec<String> = result.failed.iter().map(|(_, err)| err.clone()).collect();
@@ -323,17 +300,12 @@ impl AgentEffects for AgentHandler {
         req: CleanupMergedRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<CleanupMergedResponse> {
-        let subrepo = if req.subrepo.is_empty() {
-            None
-        } else {
-            Some(req.subrepo.as_str())
-        };
-
+        let subrepo = non_empty(req.subrepo);
         let result = self
             .service
-            .cleanup_merged_agents(&req.issues, subrepo)
+            .cleanup_merged_agents(&req.issues, subrepo.as_deref())
             .await
-            .map_err(|e| EffectError::custom("agent_error", e.to_string()))?;
+            .effect_err("agent")?;
 
         let skipped: Vec<String> = result.failed.iter().map(|(id, _)| id.clone()).collect();
         let errors: Vec<String> = result.failed.iter().map(|(_, err)| err.clone()).collect();
@@ -354,7 +326,7 @@ impl AgentEffects for AgentHandler {
             .service
             .list_agents()
             .await
-            .map_err(|e| EffectError::custom("agent_error", e.to_string()))?;
+            .effect_err("agent")?;
 
         let agents = infos.iter().map(service_info_to_proto).collect();
         Ok(ListResponse { agents })

@@ -1,5 +1,5 @@
 use crate::effects::{
-    dispatch_merge_pr_effect, EffectError, EffectHandler, EffectResult, MergePrEffects,
+    dispatch_merge_pr_effect, EffectHandler, EffectResult, MergePrEffects, ResultExt,
 };
 use crate::services::jj_workspace::JjWorkspaceService;
 use crate::services::merge_pr;
@@ -44,7 +44,7 @@ impl MergePrEffects for MergePRHandler {
         let result =
             merge_pr::merge_pr_async(pr_number, &req.strategy, &req.working_dir, self.jj.clone())
                 .await
-                .map_err(|e| EffectError::custom("merge_pr_error", e.to_string()))?;
+                .effect_err("merge_pr")?;
         tracing::info!(success = result.success, jj_fetched = result.jj_fetched, "[MergePR] merge_pr complete");
         Ok(MergePrResponse {
             success: result.success,

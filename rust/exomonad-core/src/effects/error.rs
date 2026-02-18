@@ -106,6 +106,47 @@ impl std::fmt::Display for EffectError {
 
 impl std::error::Error for EffectError {}
 
+/// Extension trait for converting `Result<T, E>` into `Result<T, EffectError>`.
+///
+/// Eliminates the ubiquitous `.map_err(|e| EffectError::custom("ns_error", e.to_string()))?`
+/// pattern. Instead: `.effect_err("ns")?`
+pub trait ResultExt<T> {
+    /// Convert error to `EffectError::Custom` with `{namespace}_error` code.
+    fn effect_err(self, namespace: &str) -> Result<T, EffectError>;
+}
+
+impl<T, E: std::fmt::Display> ResultExt<T> for Result<T, E> {
+    fn effect_err(self, namespace: &str) -> Result<T, EffectError> {
+        self.map_err(|e| EffectError::custom(format!("{}_error", namespace), e.to_string()))
+    }
+}
+
+/// Run a blocking closure via `spawn_blocking` and convert both the JoinError
+/// and the inner error to `EffectError`.
+///
+/// Replaces the double `.map_err` pattern:
+/// ```ignore
+/// spawn_blocking(move || op())
+///     .await
+///     .map_err(|e| EffectError::custom("ns_error", format!("spawn_blocking: {}", e)))?
+///     .map_err(|e| EffectError::custom("ns_error", e.to_string()))?
+/// ```
+/// With: `spawn_blocking_effect("ns", move || op()).await?`
+pub async fn spawn_blocking_effect<T, E>(
+    namespace: &str,
+    f: impl FnOnce() -> Result<T, E> + Send + 'static,
+) -> Result<T, EffectError>
+where
+    T: Send + 'static,
+    E: std::fmt::Display + Send + 'static,
+{
+    let ns = namespace.to_string();
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| EffectError::custom(format!("{}_error", ns), format!("spawn_blocking: {}", e)))?
+        .map_err(|e| EffectError::custom(format!("{}_error", ns), e.to_string()))
+}
+
 impl EffectError {
     /// Create a not found error.
     pub fn not_found(resource: impl Into<String>) -> Self {
