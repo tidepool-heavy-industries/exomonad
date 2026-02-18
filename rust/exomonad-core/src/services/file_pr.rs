@@ -344,4 +344,48 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_file_pr_async_head_detection() -> Result<()> {
+        let temp_dir = tempfile::tempdir()?;
+        let dir = temp_dir.path();
+
+        // 1. Init git repo
+        cmd!("git", "init", "-b", "main").dir(dir).read()?;
+        cmd!("git", "config", "user.email", "test@example.com").dir(dir).read()?;
+        cmd!("git", "config", "user.name", "Test").dir(dir).read()?;
+        std::fs::write(dir.join("README.md"), "test")?;
+        cmd!("git", "add", "README.md").dir(dir).read()?;
+        cmd!("git", "commit", "-m", "init").dir(dir).read()?;
+
+        // 2. Init jj colocated
+        cmd!("jj", "git", "init", "--colocate").dir(dir).read()?;
+        let jj = Arc::new(JjWorkspaceService::new(dir.to_path_buf()));
+
+        // 3. Create a bookmark and check it out
+        cmd!("jj", "bookmark", "create", "-r", "@", "feature-branch").dir(dir).read()?;
+
+        let input = FilePRInput {
+            title: "Test PR".to_string(),
+            body: "Test Body".to_string(),
+            base_branch: None,
+            working_dir: Some(dir.to_string_lossy().to_string()),
+        };
+
+        // Note: we can't easily test the full file_pr_async because it calls `gh`
+        // but we can verify it gets past the head detection.
+        // Since we didn't setup an origin remote, push_bookmark will fail.
+        let result = file_pr_async(&input, jj).await;
+
+        if let Err(ref e) = result {
+            let err_msg = e.to_string();
+            // It should have detected 'feature-branch' and then failed on push
+            // because there is no 'origin' remote.
+            assert!(err_msg.contains("git push failed"));
+        } else {
+            panic!("Expected file_pr_async to fail on push, but it succeeded?!");
+        }
+
+        Ok(())
+    }
 }
