@@ -92,6 +92,17 @@ install-all: (_install "release")
 # Install everything (fast dev build)
 install-all-dev: (_install "dev")
 
+# Install dev binary as exomonad-dev (won't clobber running exomonad)
+install-dev:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo ">>> Building Rust binary (debug)..."
+    cargo build -p exomonad
+    mkdir -p ~/.cargo/bin
+    cp target/debug/exomonad ~/.cargo/bin/exomonad-dev
+    echo ">>> Installed: ~/.cargo/bin/exomonad-dev"
+    echo ">>> Usage: exomonad-dev serve --port 7433"
+
 # Run MCP integration tests (starts server, runs tests, cleans up)
 test-mcp *args:
     ./scripts/test-mcp-integration.sh {{args}}

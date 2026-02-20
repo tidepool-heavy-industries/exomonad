@@ -22,7 +22,7 @@ Never maintain two code paths that do the same thing. Redundant paths cause bug 
 
 ### All Tool Logic in Haskell
 
-**Never add direct Rust MCP tools.** All MCP tools are defined in Haskell — tool schemas, argument parsing, dispatch logic, everything. Rust is the I/O runtime: it executes effects that the Haskell DSL yields. If a new tool needs new I/O capabilities, add a service in Rust and wire it through the `BridgeDispatcher` in `tidepool_backend.rs`. The Haskell tool definitions live in `rust/exomonad-core/haskell/`.
+**Never add direct Rust MCP tools.** All MCP tools are defined in Haskell — tool schemas, argument parsing, dispatch logic, everything. Rust is the I/O runtime: it executes effects that the Haskell DSL yields. If a new tool needs new I/O capabilities, add a service in Rust and add an `EffectHandler` impl in `tidepool_backend.rs`. The Haskell tool definitions live in `rust/exomonad-core/haskell/`.
 
 This is the entire architectural premise. Haskell is the single source of truth for tool definitions. Rust never defines tool schemas, never parses tool arguments, never contains tool logic.
 
@@ -238,10 +238,12 @@ Human in Zellij session
 ```
 Claude Code → HTTP request → exomonad serve
 → Arc<dyn RuntimeBackend>::call_tool(role, tool_name, args)
-→ TidepoolBackend → EffectMachine::run_async(haskell_expr)
-→ BridgeDispatcher routes effects to Rust services
+→ TidepoolBackend → EffectMachine::run_with_user(haskell_expr, hlist![handlers...])
+→ Multi-effect HList dispatch: tag 0 → ToolInputHandler, tag 1 → IdentityHandler/DomainOp, ...
 → Result returned via FromCore/ToCore bridge
 ```
+
+**Effect composition:** Each tool's Haskell defines a multi-effect `Eff` list (e.g., `Eff '[PopupInput', Identity, PopupOp]`). The Rust side composes a matching `frunk::hlist!` of handlers. Dispatch is **positional**: tag 0 routes to the first handler, tag 1 to the second, etc. Shared effects (Identity, Inbox) are reused across tools; per-tool domain ops handle tool-specific I/O.
 
 **Hook Call:**
 ```

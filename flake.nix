@@ -7,12 +7,9 @@
     ghc-wasm-meta.url = "gitlab:haskell-wasm/ghc-wasm-meta?host=gitlab.haskell.org";
     rust-overlay.url = "github:oxalica/rust-overlay";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
-    tidepool.url = "path:../tidepool";
-    tidepool.inputs.nixpkgs.follows = "nixpkgs";
-    tidepool.inputs.rust-overlay.follows = "rust-overlay";
   };
 
-  outputs = { self, nixpkgs, flake-utils, ghc-wasm-meta, rust-overlay, tidepool }:
+  outputs = { self, nixpkgs, flake-utils, ghc-wasm-meta, rust-overlay }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
@@ -61,11 +58,6 @@
           jujutsu  # jj
         ];
 
-        # Tidepool: Haskell Core → Cranelift compiler
-        tidepoolPkgs = [
-          tidepool.packages.${system}.tidepool-extract
-        ];
-
       in {
         devShells = {
           # Default: Full development environment
@@ -74,7 +66,6 @@
               ++ haskellPkgs "ghc912"
               ++ rustPkgs
               ++ orchestrationPkgs
-              ++ tidepoolPkgs
               ++ [ pkgs.sqlite ]
               ++ [ proto3SuitePkg ];  # For compile-proto-file (Haskell proto codegen)
 
@@ -101,12 +92,12 @@
               echo "Paths:"
               echo "  EXOMONAD_ROOT: $EXOMONAD_ROOT"
               echo ""
-              echo "Commands:"
-              echo "  just install-all-dev   Full build (WASM + Rust + install)"
-              echo "  just wasm-all          Build WASM plugins only"
-              echo "  just proto-gen         Generate proto code (Rust + Haskell)"
+              echo "Prerequisites:"
+              echo "  tidepool-extract must be on PATH (install via nix profile)"
+              echo "  nix profile install 'git+ssh://git@github.com/tidepool-heavy-industries/tidepool?ref=refs/tags/v0.0.1#tidepool-extract'"
               echo ""
-              echo "First time? Run: just wasm-setup"
+              echo "Commands:"
+              echo "  just install-all-dev   Full build (Rust + Zellij plugin + install)"
               echo ""
             '';
           };

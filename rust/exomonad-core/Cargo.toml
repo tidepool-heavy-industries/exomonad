@@ -44,12 +44,14 @@ runtime = [
     "dep:tidepool-bridge-derive",
     "dep:tidepool-effect",
     "dep:tidepool-macro",
+    "dep:schemars",
 ]
 
 [dependencies]
 # Always available (lightweight types for plugin consumers)
 serde = { workspace = true }
 serde_json = { workspace = true }
+schemars = { version = "1", optional = true }
 
 # Runtime feature: workspace deps
 async-trait = { workspace = true, optional = true }

@@ -477,41 +477,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
-name = "core-bridge"
-version = "0.1.0"
-dependencies = [
- "core-eval",
- "core-repr",
-]
-
-[[package]]
-name = "core-bridge-derive"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "core-effect"
-version = "0.1.0"
-dependencies = [
- "core-bridge",
- "core-eval",
- "core-repr",
- "frunk",
-]
-
-[[package]]
-name = "core-eval"
-version = "0.1.0"
-dependencies = [
- "core-repr",
- "im",
-]
-
-[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -526,22 +491,6 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
-
-[[package]]
-name = "core-heap"
-version = "0.1.0"
-dependencies = [
- "bumpalo",
- "core-eval",
- "core-repr",
-]
-
-[[package]]
-name = "core-repr"
-version = "0.1.0"
-dependencies = [
- "ciborium",
-]
 
 [[package]]
 name = "cpufeatures"
@@ -804,14 +753,9 @@ dependencies = [
  "axum",
  "chrono",
  "clap",
- "core-bridge",
- "core-bridge-derive",
- "core-effect",
- "core-eval",
- "core-heap",
- "core-repr",
  "dirs",
  "duct",
+ "frunk",
  "futures-util",
  "jj-lib",
  "libc",
@@ -820,13 +764,20 @@ dependencies = [
  "ollama-rs",
  "proptest",
  "reqwest",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
  "shell-escape",
  "strum",
  "tempfile",
  "thiserror 2.0.18",
+ "tidepool-bridge",
+ "tidepool-bridge-derive",
+ "tidepool-effect",
+ "tidepool-eval",
+ "tidepool-heap",
  "tidepool-macro",
+ "tidepool-repr",
  "tokio",
  "tower-http 0.6.8",
  "tracing",
@@ -2758,7 +2709,7 @@ dependencies = [
  "async-stream",
  "log",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "static_assertions",
@@ -3537,7 +3488,20 @@ checksum = "3fbf2ae1b8bc8e02df939598064d22402220cd5bbcca1c76f7d6a310974d5615"
 dependencies = [
  "dyn-clone",
  "indexmap 1.9.3",
- "schemars_derive",
+ "schemars_derive 0.8.22",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "schemars"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2b42f36aa1cd011945615b92222f6bf73c599a102a300334cd7f8dbeec726cc"
+dependencies = [
+ "dyn-clone",
+ "ref-cast",
+ "schemars_derive 1.2.1",
  "serde",
  "serde_json",
 ]
@@ -3547,6 +3511,18 @@ name = "schemars_derive"
 version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32e265784ad618884abaea0600a9adf15393368d840e0222d101a072f3f7534d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde_derive_internals",
+ "syn",
+]
+
+[[package]]
+name = "schemars_derive"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d115b50f4aaeea07e79c1912f645c7513d81715d0420f8bc77a18c6260b307f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4008,12 +3984,77 @@ dependencies = [
 ]
 
 [[package]]
-name = "tidepool-macro"
-version = "0.1.0"
+name = "tidepool-bridge"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8092e3dc3b57f7cfb658d7b3a2fc52db4aff012236f5f58f6449126fedb4aa31"
+dependencies = [
+ "tidepool-eval",
+ "tidepool-repr",
+]
+
+[[package]]
+name = "tidepool-bridge-derive"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7d4056912aca43ab5888f2f3d65f62d8802f33490a3f0ebb48b04cc5e51c841"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "tidepool-effect"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c808ef6156fff39e02a652c7df3a4eb709e5217085b3c081b22a6608b9805407"
+dependencies = [
+ "frunk",
+ "tidepool-bridge",
+ "tidepool-eval",
+ "tidepool-repr",
+]
+
+[[package]]
+name = "tidepool-eval"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5ee21bfd5416e0edcf73c727d2cfabc032be39dcba84d8faa2321d5de4b77f9"
+dependencies = [
+ "im",
+ "tidepool-repr",
+]
+
+[[package]]
+name = "tidepool-heap"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62fbfc022c49df3c4bb7fe71406f4e40abd8d529f15a3c360cd020f3c0d078ee"
+dependencies = [
+ "bumpalo",
+ "tidepool-eval",
+ "tidepool-repr",
+]
+
+[[package]]
+name = "tidepool-macro"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8735f8d4ccb3f4215bc6eed850cbf7d3c911380b08799450ede919d80661694"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "tidepool-repr"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d13f84c873cb16c73c585ae31128d6bec220bcc47866cefafe84d40be3a5640"
+dependencies = [
+ "ciborium",
 ]
 
 [[package]]

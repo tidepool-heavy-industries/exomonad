@@ -14,6 +14,8 @@ use crate::mcp::ToolDefinition;
 use crate::runtime_backend::RuntimeBackend;
 use anyhow::Result;
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use schemars::JsonSchema;
 use serde_json::Value as JsonValue;
 use tracing::debug;
 
@@ -902,232 +904,253 @@ impl EffectHandler<EffectContext> for MessagesOpHandler {
 // Tool Definitions
 // =============================================================================
 
-fn popup_tool_definition() -> ToolDefinition {
+/// Interactive popup element.
+#[derive(Deserialize, Serialize, JsonSchema)]
+struct PopupElement {
+    #[schemars(with = "String")]
+    #[serde(rename = "type")]
+    /// Element type: text, choice, checkbox, textbox, slider, multiselect.
+    kind: String,
+    /// Element ID for result lookup.
+    id: Option<String>,
+    /// Label text.
+    label: Option<String>,
+    /// For text elements.
+    content: Option<String>,
+    /// For choice/multiselect.
+    options: Option<Vec<String>>,
+    /// Default value (type varies).
+    default: Option<JsonValue>,
+    /// For textbox.
+    placeholder: Option<String>,
+    /// For slider.
+    min: Option<f64>,
+    /// For slider.
+    max: Option<f64>,
+    /// For multiline textbox.
+    rows: Option<u32>,
+}
+
+/// Named wizard pane.
+#[derive(Deserialize, Serialize, JsonSchema)]
+struct WizardPane {
+    /// Title text.
+    title: String,
+    /// UI elements to display.
+    elements: Vec<PopupElement>,
+    /// Transition: string (goto) or object (branch by field value).
+    then: Option<JsonValue>,
+}
+
+/// Show interactive popup form and get user response.
+#[derive(Deserialize, Serialize, JsonSchema)]
+struct PopupArgs {
+    /// Optional popup title.
+    title: Option<String>,
+    /// UI elements to display.
+    elements: Option<Vec<PopupElement>>,
+    /// Named wizard panes. Use with 'start' for multi-pane wizard mode.
+    panes: Option<HashMap<String, WizardPane>>,
+    /// Starting pane name (required when using panes).
+    start: Option<String>,
+}
+
+fn tool_def<A: schemars::JsonSchema>(name: &str, description: &str) -> ToolDefinition {
+    let schema = schemars::schema_for!(A);
     ToolDefinition {
-        name: "popup".to_string(),
-        description: "Show interactive popup form and get user response".to_string(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "properties": {
-                "title": {
-                    "type": "string",
-                    "description": "Optional popup title"
-                },
-                "elements": {
-                    "type": "array",
-                    "description": "UI elements to display",
-                    "items": {
-                        "type": "object",
-                        "required": ["type"],
-                        "properties": {
-                            "type": {
-                                "type": "string",
-                                "enum": ["text", "choice", "checkbox", "textbox", "slider", "multiselect"]
-                            },
-                            "id": { "type": "string", "description": "Element ID for result lookup" },
-                            "label": { "type": "string" },
-                            "content": { "type": "string", "description": "For text elements" },
-                            "options": {
-                                "type": "array",
-                                "items": { "type": "string" },
-                                "description": "For choice/multiselect"
-                            },
-                            "default": { "description": "Default value (type varies)" },
-                            "placeholder": { "type": "string", "description": "For textbox" },
-                            "min": { "type": "number", "description": "For slider" },
-                            "max": { "type": "number", "description": "For slider" },
-                            "rows": { "type": "integer", "description": "For multiline textbox" }
-                        }
-                    }
-                },
-                "panes": {
-                    "type": "object",
-                    "description": "Named wizard panes. Use with 'start' for multi-pane wizard mode.",
-                    "additionalProperties": {
-                        "type": "object",
-                        "required": ["title", "elements"],
-                        "properties": {
-                            "title": { "type": "string" },
-                            "elements": { "type": "array", "items": { "type": "object" } },
-                            "then": { "description": "Transition: string (goto) or object (branch by field value)" }
-                        }
-                    }
-                },
-                "start": {
-                    "type": "string",
-                    "description": "Starting pane name (required when using panes)"
-                }
-            },
-            "required": []
-        }),
+        name: name.to_string(),
+        description: description.to_string(),
+        input_schema: serde_json::to_value(schema).unwrap(),
     }
+}
+
+fn popup_tool_definition() -> ToolDefinition {
+    tool_def::<PopupArgs>(
+        "popup",
+        "Show interactive popup form and get user response",
+    )
+}
+
+/// Create or update a pull request.
+#[derive(Deserialize, JsonSchema)]
+struct FilePRArgs {
+    /// PR title.
+    title: String,
+    /// PR body/description.
+    body: String,
+    /// Target branch. Auto-detected from dot-separated naming if omitted. Only set to override.
+    base_branch: Option<String>,
 }
 
 fn file_pr_tool_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "file_pr".to_string(),
-        description: "Create or update a pull request for the current branch. Idempotent \u{2014} safe to call multiple times (updates existing PR). Pushes the branch automatically. Base branch auto-detected from dot-separated naming (e.g. main.foo.bar targets main.foo).".to_string(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "properties": {
-                "title": { "type": "string", "description": "PR title" },
-                "body": { "type": "string", "description": "PR body/description" },
-                "base_branch": { "type": "string", "description": "Target branch. Auto-detected from dot-separated naming if omitted (main.foo.bar targets main.foo). Only set to override." }
-            },
-            "required": ["title", "body"]
-        }),
-    }
+    tool_def::<FilePRArgs>(
+        "file_pr",
+        "Create or update a pull request for the current branch. Idempotent \u{2014} safe to call multiple times (updates existing PR). Pushes the branch automatically. Base branch auto-detected from dot-separated naming (e.g. main.foo.bar targets main.foo).",
+    )
+}
+
+/// Merge a GitHub pull request.
+#[derive(Deserialize, JsonSchema)]
+struct MergePRArgs {
+    /// PR number to merge.
+    pr_number: u64,
+    /// Merge strategy: squash (default), merge, or rebase.
+    strategy: Option<String>,
+    /// Working directory for git/jj operations.
+    working_dir: Option<String>,
 }
 
 fn merge_pr_tool_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "merge_pr".to_string(),
-        description: "Merge a GitHub pull request and fetch changes via jj".to_string(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "properties": {
-                "pr_number": { "type": "integer", "description": "PR number to merge" },
-                "strategy": { "type": "string", "description": "Merge strategy: squash (default), merge, or rebase" },
-                "working_dir": { "type": "string", "description": "Working directory for git/jj operations" }
-            },
-            "required": ["pr_number"]
-        }),
-    }
+    tool_def::<MergePRArgs>(
+        "merge_pr",
+        "Merge a GitHub pull request and fetch changes via jj",
+    )
+}
+
+/// Task completion details.
+#[derive(Deserialize, JsonSchema)]
+struct TaskCompletedArg {
+    /// Task description.
+    what: String,
+    /// Verification command that was run.
+    how: String,
+}
+
+/// Signal completion to parent agent.
+#[derive(Deserialize, JsonSchema)]
+struct NotifyParentArgs {
+    /// 'success' = work is done and review-clean. 'failure' = exhausted retries, escalating to parent.
+    status: String,
+    /// One-line summary. On success: what was accomplished. On failure: what went wrong.
+    message: String,
+    /// PR number if one was filed. Enables parent to immediately merge without searching.
+    pr_number: Option<u64>,
+    /// Array of {what, how} pairs. 'what' = task description, 'how' = verification command that was run.
+    tasks_completed: Option<Vec<TaskCompletedArg>>,
 }
 
 fn notify_parent_tool_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "notify_parent".to_string(),
-        description: "Signal to your parent that you are DONE. Call as your final action \u{2014} after PR is filed, Copilot feedback addressed, and changes pushed. Status 'success' means work is review-clean. Status 'failure' means retries exhausted, escalating to parent.".to_string(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "properties": {
-                "status": { "type": "string", "description": "'success' = work is done and review-clean. 'failure' = exhausted retries, escalating to parent.", "enum": ["success", "failure"] },
-                "message": { "type": "string", "description": "One-line summary. On success: what was accomplished. On failure: what went wrong." },
-                "pr_number": { "type": "integer", "description": "PR number if one was filed. Enables parent to immediately merge without searching." },
-                "tasks_completed": {
-                    "type": "array",
-                    "description": "Array of {what, how} pairs. 'what' = task description, 'how' = verification command that was run.",
-                    "items": {
-                        "type": "object",
-                        "required": ["what", "how"],
-                        "properties": {
-                            "what": { "type": "string" },
-                            "how": { "type": "string" }
-                        }
-                    }
-                }
-            },
-            "required": ["status", "message"]
-        }),
-    }
+    tool_def::<NotifyParentArgs>(
+        "notify_parent",
+        "Signal to your parent that you are DONE. Call as your final action \u{2014} after PR is filed, Copilot feedback addressed, and changes pushed. Status 'success' means work is review-clean. Status 'failure' means retries exhausted, escalating to parent.",
+    )
+}
+
+/// Fork a worktree node.
+#[derive(Deserialize, JsonSchema)]
+struct SpawnSubtreeArgs {
+    /// Description of the sub-problem to solve.
+    task: String,
+    /// Branch name suffix (will be prefixed with current branch).
+    branch_name: String,
 }
 
 fn spawn_subtree_tool_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "spawn_subtree".to_string(),
-        description: "Fork a worktree node off your current branch. Use when decomposing work into sub-problems that may need further decomposition. The child gets full coordination tools (can spawn its own children).".to_string(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "properties": {
-                "task": { "type": "string", "description": "Description of the sub-problem to solve" },
-                "branch_name": { "type": "string", "description": "Branch name suffix (will be prefixed with current branch)" }
-            },
-            "required": ["task", "branch_name"]
-        }),
-    }
+    tool_def::<SpawnSubtreeArgs>(
+        "spawn_subtree",
+        "Fork a worktree node off your current branch. Use when decomposing work into sub-problems that may need further decomposition. The child gets full coordination tools (can spawn its own children).",
+    )
+}
+
+/// Fork a worktree for a leaf agent.
+#[derive(Deserialize, JsonSchema)]
+struct SpawnLeafArgs {
+    /// Description of the sub-problem to solve.
+    task: String,
+    /// Branch name suffix (will be prefixed with current branch).
+    branch_name: String,
 }
 
 fn spawn_leaf_subtree_tool_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "spawn_leaf_subtree".to_string(),
-        description: "Fork a worktree for a Gemini leaf agent. Gets own branch for PR filing but cannot spawn children.".to_string(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "properties": {
-                "task": { "type": "string", "description": "Description of the sub-problem to solve" },
-                "branch_name": { "type": "string", "description": "Branch name suffix (will be prefixed with current branch)" }
-            },
-            "required": ["task", "branch_name"]
-        }),
-    }
+    tool_def::<SpawnLeafArgs>(
+        "spawn_leaf_subtree",
+        "Fork a worktree for a Gemini leaf agent. Gets own branch for PR filing but cannot spawn children.",
+    )
+}
+
+/// Worker specification.
+#[derive(Deserialize, JsonSchema)]
+struct WorkerSpec {
+    /// Human-readable name for the leaf agent.
+    name: String,
+    /// Short description of the task.
+    task: String,
+    /// Raw prompt (escape hatch). If provided, all other fields except name are ignored.
+    prompt: Option<String>,
+    /// Numbered implementation steps.
+    steps: Option<Vec<String>>,
+    /// Freeform context: code snippets, examples, detailed specs.
+    context: Option<String>,
+    /// Acceptance criteria for completion.
+    done_criteria: Option<Vec<String>>,
+    /// Commands to verify the work.
+    verify: Option<Vec<String>>,
+    /// Things the agent must NOT do.
+    boundary: Option<Vec<String>>,
+    /// Files the agent should read before starting.
+    read_first: Option<Vec<String>>,
+}
+
+/// Spawn multiple worker agents.
+#[derive(Deserialize, JsonSchema)]
+struct SpawnWorkersArgs {
+    /// Array of worker specifications.
+    specs: Vec<WorkerSpec>,
 }
 
 fn spawn_workers_tool_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "spawn_workers".to_string(),
-        description: "Spawn multiple worker agents in one call. Each gets a Zellij pane in the current worktree.".to_string(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "properties": {
-                "specs": {
-                    "type": "array",
-                    "description": "Array of worker specifications",
-                    "items": {
-                        "type": "object",
-                        "required": ["name", "task"],
-                        "properties": {
-                            "name": { "type": "string", "description": "Human-readable name for the leaf agent" },
-                            "task": { "type": "string", "description": "Short description of the task" },
-                            "prompt": { "type": "string", "description": "Raw prompt (escape hatch). If provided, all other fields except name are ignored." },
-                            "steps": { "type": "array", "items": { "type": "string" }, "description": "Numbered implementation steps" },
-                            "context": { "type": "string", "description": "Freeform context: code snippets, examples, detailed specs" },
-                            "done_criteria": { "type": "array", "items": { "type": "string" }, "description": "Acceptance criteria for completion" },
-                            "verify": { "type": "array", "items": { "type": "string" }, "description": "Commands to verify the work" },
-                            "boundary": { "type": "array", "items": { "type": "string" }, "description": "Things the agent must NOT do" },
-                            "read_first": { "type": "array", "items": { "type": "string" }, "description": "Files the agent should read before starting" }
-                        }
-                    }
-                }
-            },
-            "required": ["specs"]
-        }),
-    }
+    tool_def::<SpawnWorkersArgs>(
+        "spawn_workers",
+        "Spawn multiple worker agents in one call. Each gets a Zellij pane in the current worktree.",
+    )
+}
+
+/// Send a note.
+#[derive(Deserialize, JsonSchema)]
+struct NoteArgs {
+    /// Note content.
+    content: String,
 }
 
 fn note_tool_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "note".to_string(),
-        description: "Send a note to the team lead's inbox. Fire-and-forget.".to_string(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "properties": {
-                "content": { "type": "string", "description": "Note content" }
-            },
-            "required": ["content"]
-        }),
-    }
+    tool_def::<NoteArgs>(
+        "note",
+        "Send a note to the team lead's inbox. Fire-and-forget.",
+    )
+}
+
+/// Answer a pending question.
+#[derive(Deserialize, JsonSchema)]
+struct AnswerQuestionArgs {
+    /// Agent that asked the question.
+    agent_id: String,
+    /// Question ID from the question message.
+    question_id: String,
+    /// Answer text.
+    answer: String,
 }
 
 fn answer_question_tool_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "answer_question".to_string(),
-        description: "Answer a pending question from an agent. Unblocks the agent immediately.".to_string(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "properties": {
-                "agent_id": { "type": "string", "description": "Agent that asked the question" },
-                "question_id": { "type": "string", "description": "Question ID from the question message" },
-                "answer": { "type": "string", "description": "Answer text" }
-            },
-            "required": ["agent_id", "question_id", "answer"]
-        }),
-    }
+    tool_def::<AnswerQuestionArgs>(
+        "answer_question",
+        "Answer a pending question from an agent. Unblocks the agent immediately.",
+    )
+}
+
+/// Read agent messages.
+#[derive(Deserialize, JsonSchema)]
+struct GetAgentMessagesArgs {
+    /// Filter to messages from this agent (empty = all agents).
+    agent_id: Option<String>,
+    /// Long-poll timeout in seconds (0 = immediate return).
+    timeout_secs: Option<u64>,
 }
 
 fn get_agent_messages_tool_definition() -> ToolDefinition {
-    ToolDefinition {
-        name: "get_agent_messages".to_string(),
-        description: "Read unread messages from agents. Supports long-polling with timeout.".to_string(),
-        input_schema: serde_json::json!({
-            "type": "object",
-            "properties": {
-                "agent_id": { "type": "string", "description": "Filter to messages from this agent (empty = all agents)" },
-                "timeout_secs": { "type": "integer", "description": "Long-poll timeout in seconds (0 = immediate return)", "default": 0 }
-            },
-            "required": []
-        }),
-    }
+    tool_def::<GetAgentMessagesArgs>(
+        "get_agent_messages",
+        "Read unread messages from agents. Supports long-polling with timeout.",
+    )
 }
 
 // =============================================================================
@@ -1313,23 +1336,47 @@ impl TidepoolBackend {
             .map_err(|e| anyhow::anyhow!("EffectMachine run: {}", e))
     }
 
-    async fn call_popup(&self, args: JsonValue) -> Result<MCPCallOutput> {
-        let title = args
-            .get("title")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+    fn run_and_decode<R: FromCore>(
+        &self,
+        tool_name: &str,
+        handlers: &mut impl DispatchEffect<EffectContext>,
+        result_to_json: impl FnOnce(R) -> serde_json::Value,
+    ) -> Result<MCPCallOutput> {
+        match self.run_effect(tool_name, handlers) {
+            Ok(result_value) => {
+                let table = &self.tools[tool_name].table;
+                let result = R::from_value(&result_value, table)
+                    .map_err(|e| anyhow::anyhow!("Bridge decode error: {}", e))?;
+                Ok(MCPCallOutput {
+                    success: true,
+                    result: Some(result_to_json(result)),
+                    error: None,
+                })
+            }
+            Err(e) => {
+                tracing::error!(tool = %tool_name, error = %e, "Tidepool tool failed");
+                Ok(MCPCallOutput {
+                    success: false,
+                    result: None,
+                    error: Some(e.to_string()),
+                })
+            }
+        }
+    }
 
-        let components = if let Some(panes) = args.get("panes") {
-            let start = args.get("start");
+    async fn call_popup(&self, args: JsonValue) -> Result<MCPCallOutput> {
+        let args: PopupArgs = serde_json::from_value(args)?;
+        let title = args.title.unwrap_or_default();
+
+        let components = if let Some(panes) = args.panes {
             let mut wizard = serde_json::Map::new();
-            wizard.insert("panes".to_string(), panes.clone());
-            if let Some(s) = start {
-                wizard.insert("start".to_string(), s.clone());
+            wizard.insert("panes".to_string(), serde_json::to_value(panes)?);
+            if let Some(s) = args.start {
+                wizard.insert("start".to_string(), serde_json::Value::String(s));
             }
             serde_json::to_string(&JsonValue::Object(wizard)).unwrap_or_default()
-        } else if let Some(elements) = args.get("elements") {
-            serde_json::to_string(elements).unwrap_or_default()
+        } else if let Some(elements) = args.elements {
+            serde_json::to_string(&elements).unwrap_or_default()
         } else {
             "[]".to_string()
         };
@@ -1351,56 +1398,27 @@ impl TidepoolBackend {
             },
         ];
 
-        match self.run_effect("popup", &mut handlers) {
-            Ok(result_value) => {
-                let table = &self.tools["popup"].table;
-                let response = PopupResponse::from_value(&result_value, table)
-                    .map_err(|e| anyhow::anyhow!("Bridge decode error: {}", e))?;
-                let values: JsonValue = serde_json::from_str(&response.values)
-                    .unwrap_or(JsonValue::Object(serde_json::Map::new()));
-                Ok(MCPCallOutput {
-                    success: true,
-                    result: Some(serde_json::json!({
-                        "button": response.button,
-                        "values": values,
-                    })),
-                    error: None,
-                })
-            }
-            Err(e) => Ok(MCPCallOutput {
-                success: false,
-                result: None,
-                error: Some(format!("Popup error: {}", e)),
-            }),
-        }
+        self.run_and_decode("popup", &mut handlers, |response: PopupResponse| {
+            let values: JsonValue = serde_json::from_str(&response.values)
+                .unwrap_or(JsonValue::Object(serde_json::Map::new()));
+            serde_json::json!({
+                "button": response.button,
+                "values": values,
+            })
+        })
     }
 
     async fn call_file_pr(&self, args: JsonValue) -> Result<MCPCallOutput> {
-        let title = args
-            .get("title")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let body = args
-            .get("body")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let base_branch = args
-            .get("base_branch")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-
-        debug!(title = %title, "Tidepool file_pr call via EffectMachine");
+        let args: FilePRArgs = serde_json::from_value(args)?;
+        debug!(title = %args.title, "Tidepool file_pr call via EffectMachine");
 
         // HList order must match Haskell Eff '[FilePRInput', Identity, FilePROp]
         let mut handlers = frunk::hlist![
             ToolInputHandler {
                 input: Some(FilePRToolInput {
-                    title,
-                    body,
-                    base_branch,
+                    title: args.title,
+                    body: args.body,
+                    base_branch: args.base_branch.unwrap_or_default(),
                 }),
             },
             IdentityHandler,
@@ -1409,48 +1427,22 @@ impl TidepoolBackend {
             },
         ];
 
-        match self.run_effect("file_pr", &mut handlers) {
-            Ok(result_value) => {
-                let table = &self.tools["file_pr"].table;
-                let result = FilePRToolResult::from_value(&result_value, table)
-                    .map_err(|e| anyhow::anyhow!("Bridge decode: {}", e))?;
-                Ok(MCPCallOutput {
-                    success: true,
-                    result: Some(serde_json::json!({
-                        "pr_url": result.pr_url,
-                        "pr_number": result.pr_number.parse::<u64>().unwrap_or(0),
-                        "head_branch": result.head_branch,
-                        "base_branch": result.result_base,
-                        "created": result.created == "true",
-                    })),
-                    error: None,
-                })
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "Tidepool file_pr failed");
-                Ok(MCPCallOutput {
-                    success: false,
-                    result: None,
-                    error: Some(e.to_string()),
-                })
-            }
-        }
+        self.run_and_decode("file_pr", &mut handlers, |result: FilePRToolResult| {
+            serde_json::json!({
+                "pr_url": result.pr_url,
+                "pr_number": result.pr_number.parse::<u64>().unwrap_or(0),
+                "head_branch": result.head_branch,
+                "base_branch": result.result_base,
+                "created": result.created == "true",
+            })
+        })
     }
 
     async fn call_merge_pr(&self, args: JsonValue) -> Result<MCPCallOutput> {
-        let pr_number = args
-            .get("pr_number")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        let strategy = args
-            .get("strategy")
-            .and_then(|v| v.as_str())
-            .unwrap_or("squash")
-            .to_string();
-
+        let args: MergePRArgs = serde_json::from_value(args)?;
         debug!(
-            pr_number = pr_number,
-            strategy = %strategy,
+            pr_number = args.pr_number,
+            strategy = %args.strategy.as_deref().unwrap_or("squash"),
             "Tidepool merge_pr call via EffectMachine"
         );
 
@@ -1458,8 +1450,8 @@ impl TidepoolBackend {
         let mut handlers = frunk::hlist![
             ToolInputHandler {
                 input: Some(MergePRToolInput {
-                    pr_number: pr_number.to_string(),
-                    strategy,
+                    pr_number: args.pr_number.to_string(),
+                    strategy: args.strategy.unwrap_or_else(|| "squash".to_string()),
                 }),
             },
             IdentityHandler,
@@ -1468,257 +1460,145 @@ impl TidepoolBackend {
             },
         ];
 
-        match self.run_effect("merge_pr", &mut handlers) {
-            Ok(result_value) => {
-                let table = &self.tools["merge_pr"].table;
-                let result = MergePRToolResult::from_value(&result_value, table)
-                    .map_err(|e| anyhow::anyhow!("Bridge decode: {}", e))?;
-                Ok(MCPCallOutput {
-                    success: true,
-                    result: Some(serde_json::json!({
-                        "success": result.success == "true",
-                        "message": result.message,
-                        "jj_fetched": result.jj_fetched == "true",
-                    })),
-                    error: None,
-                })
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "Tidepool merge_pr failed");
-                Ok(MCPCallOutput {
-                    success: false,
-                    result: None,
-                    error: Some(e.to_string()),
-                })
-            }
-        }
+        self.run_and_decode("merge_pr", &mut handlers, |result: MergePRToolResult| {
+            serde_json::json!({
+                "success": result.success == "true",
+                "message": result.message,
+                "jj_fetched": result.jj_fetched == "true",
+            })
+        })
     }
 
     async fn call_notify_parent(&self, args: JsonValue) -> Result<MCPCallOutput> {
-        let status = args
-            .get("status")
-            .and_then(|v| v.as_str())
-            .unwrap_or("success")
-            .to_string();
-        let message = args
-            .get("message")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-
-        debug!(status = %status, "Tidepool notify_parent call via EffectMachine");
+        let args: NotifyParentArgs = serde_json::from_value(args)?;
+        debug!(status = %args.status, "Tidepool notify_parent call via EffectMachine");
 
         // HList order must match Haskell Eff '[NotifyInput', Identity, FormatOp, NotifyOp]
         let mut handlers = frunk::hlist![
             ToolInputHandler {
-                input: Some(NotifyToolInput { status, message }),
+                input: Some(NotifyToolInput {
+                    status: args.status,
+                    message: args.message,
+                }),
             },
             IdentityHandler,
             FormatOpHandler,
             NotifyOpHandler,
         ];
 
-        match self.run_effect("notify_parent", &mut handlers) {
-            Ok(result_value) => {
-                let table = &self.tools["notify_parent"].table;
-                let result = NotifyToolResult::from_value(&result_value, table)
-                    .map_err(|e| anyhow::anyhow!("Bridge decode: {}", e))?;
-                Ok(MCPCallOutput {
-                    success: true,
-                    result: Some(serde_json::json!({"ack": result.ack})),
-                    error: None,
-                })
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "Tidepool notify_parent failed");
-                Ok(MCPCallOutput {
-                    success: false,
-                    result: None,
-                    error: Some(e.to_string()),
-                })
-            }
-        }
+        self.run_and_decode(
+            "notify_parent",
+            &mut handlers,
+            |result: NotifyToolResult| serde_json::json!({"ack": result.ack}),
+        )
     }
 
     async fn call_spawn_subtree(&self, args: JsonValue) -> Result<MCPCallOutput> {
-        let task = args
-            .get("task")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let branch_name = args
-            .get("branch_name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-
-        debug!(branch = %branch_name, "Tidepool spawn_subtree call via EffectMachine");
+        let args: SpawnSubtreeArgs = serde_json::from_value(args)?;
+        debug!(branch = %args.branch_name, "Tidepool spawn_subtree call via EffectMachine");
 
         // HList order must match Haskell Eff '[SpawnSubtreeInput', SpawnSubtreeOp]
         let mut handlers = frunk::hlist![
             ToolInputHandler {
-                input: Some(SpawnSubtreeToolInput { task, branch_name }),
+                input: Some(SpawnSubtreeToolInput {
+                    task: args.task,
+                    branch_name: args.branch_name,
+                }),
             },
             SpawnSubtreeOpHandler {
                 agent_control: self.agent_control.clone(),
             },
         ];
 
-        match self.run_effect("spawn_subtree", &mut handlers) {
-            Ok(result_value) => {
-                let table = &self.tools["spawn_subtree"].table;
-                let result = SpawnSubtreeToolResult::from_value(&result_value, table)
-                    .map_err(|e| anyhow::anyhow!("Bridge decode: {}", e))?;
-                Ok(MCPCallOutput {
-                    success: true,
-                    result: Some(serde_json::json!({
-                        "tab_name": result.tab_name,
-                        "branch_name": result.branch_name,
-                    })),
-                    error: None,
+        self.run_and_decode(
+            "spawn_subtree",
+            &mut handlers,
+            |result: SpawnSubtreeToolResult| {
+                serde_json::json!({
+                    "tab_name": result.tab_name,
+                    "branch_name": result.branch_name,
                 })
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "Tidepool spawn_subtree failed");
-                Ok(MCPCallOutput {
-                    success: false,
-                    result: None,
-                    error: Some(e.to_string()),
-                })
-            }
-        }
+            },
+        )
     }
 
     async fn call_spawn_leaf(&self, args: JsonValue) -> Result<MCPCallOutput> {
-        let task = args
-            .get("task")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let branch_name = args
-            .get("branch_name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-
-        debug!(branch = %branch_name, "Tidepool spawn_leaf_subtree call via EffectMachine");
+        let args: SpawnLeafArgs = serde_json::from_value(args)?;
+        debug!(branch = %args.branch_name, "Tidepool spawn_leaf_subtree call via EffectMachine");
 
         // HList order must match Haskell Eff '[SpawnLeafInput', SpawnLeafOp]
         let mut handlers = frunk::hlist![
             ToolInputHandler {
-                input: Some(SpawnLeafToolInput { task, branch_name }),
+                input: Some(SpawnLeafToolInput {
+                    task: args.task,
+                    branch_name: args.branch_name,
+                }),
             },
             SpawnLeafOpHandler {
                 agent_control: self.agent_control.clone(),
             },
         ];
 
-        match self.run_effect("spawn_leaf_subtree", &mut handlers) {
-            Ok(result_value) => {
-                let table = &self.tools["spawn_leaf_subtree"].table;
-                let result = SpawnLeafToolResult::from_value(&result_value, table)
-                    .map_err(|e| anyhow::anyhow!("Bridge decode: {}", e))?;
-                Ok(MCPCallOutput {
-                    success: true,
-                    result: Some(serde_json::json!({
-                        "tab_name": result.tab_name,
-                        "branch_name": result.branch_name,
-                    })),
-                    error: None,
+        self.run_and_decode(
+            "spawn_leaf_subtree",
+            &mut handlers,
+            |result: SpawnLeafToolResult| {
+                serde_json::json!({
+                    "tab_name": result.tab_name,
+                    "branch_name": result.branch_name,
                 })
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "Tidepool spawn_leaf_subtree failed");
-                Ok(MCPCallOutput {
-                    success: false,
-                    result: None,
-                    error: Some(e.to_string()),
-                })
-            }
-        }
+            },
+        )
     }
 
     async fn call_spawn_workers(&self, args: JsonValue) -> Result<MCPCallOutput> {
-        let specs = args
-            .get("specs")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
-
-        debug!(count = specs.len(), "Tidepool spawn_workers call via EffectMachine");
+        let args: SpawnWorkersArgs = serde_json::from_value(args)?;
+        debug!(count = args.specs.len(), "Tidepool spawn_workers call via EffectMachine");
 
         // Pre-render specs into WorkerSpecBridge (name + prompt)
-        let worker_specs: Vec<WorkerSpecBridge> = specs
+        let worker_specs: Vec<WorkerSpecBridge> = args.specs
             .iter()
             .map(|spec| {
-                let name = spec
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let prompt =
-                    if let Some(p) = spec.get("prompt").and_then(|v| v.as_str()) {
-                        p.to_string()
-                    } else {
-                        let task =
-                            spec.get("task").and_then(|v| v.as_str()).unwrap_or("");
-                        let mut parts = vec![format!("Task: {}", task)];
-                        if let Some(steps) = spec.get("steps").and_then(|v| v.as_array()) {
-                            parts.push("Steps:".to_string());
-                            for (i, s) in steps.iter().enumerate() {
-                                if let Some(text) = s.as_str() {
-                                    parts.push(format!("{}. {}", i + 1, text));
-                                }
-                            }
+                let prompt = if let Some(p) = &spec.prompt {
+                    p.clone()
+                } else {
+                    let mut parts = vec![format!("Task: {}", spec.task)];
+                    if let Some(steps) = &spec.steps {
+                        parts.push("Steps:".to_string());
+                        for (i, s) in steps.iter().enumerate() {
+                            parts.push(format!("{}. {}", i + 1, s));
                         }
-                        if let Some(context) =
-                            spec.get("context").and_then(|v| v.as_str())
-                        {
-                            parts.push(format!("\nContext:\n{}", context));
+                    }
+                    if let Some(context) = &spec.context {
+                        parts.push(format!("\nContext:\n{}", context));
+                    }
+                    if let Some(done) = &spec.done_criteria {
+                        parts.push("Done when:".to_string());
+                        for d in done {
+                            parts.push(format!("- {}", d));
                         }
-                        if let Some(done) =
-                            spec.get("done_criteria").and_then(|v| v.as_array())
-                        {
-                            parts.push("Done when:".to_string());
-                            for d in done {
-                                if let Some(text) = d.as_str() {
-                                    parts.push(format!("- {}", text));
-                                }
-                            }
+                    }
+                    if let Some(verify) = &spec.verify {
+                        parts.push("Verify:".to_string());
+                        for v in verify {
+                            parts.push(format!("$ {}", v));
                         }
-                        if let Some(verify) =
-                            spec.get("verify").and_then(|v| v.as_array())
-                        {
-                            parts.push("Verify:".to_string());
-                            for v in verify {
-                                if let Some(text) = v.as_str() {
-                                    parts.push(format!("$ {}", text));
-                                }
-                            }
+                    }
+                    if let Some(boundary) = &spec.boundary {
+                        parts.push("DO NOT:".to_string());
+                        for b in boundary {
+                            parts.push(format!("- {}", b));
                         }
-                        if let Some(boundary) =
-                            spec.get("boundary").and_then(|v| v.as_array())
-                        {
-                            parts.push("DO NOT:".to_string());
-                            for b in boundary {
-                                if let Some(text) = b.as_str() {
-                                    parts.push(format!("- {}", text));
-                                }
-                            }
+                    }
+                    if let Some(read) = &spec.read_first {
+                        parts.push("Read first:".to_string());
+                        for r in read {
+                            parts.push(format!("- {}", r));
                         }
-                        if let Some(read) =
-                            spec.get("read_first").and_then(|v| v.as_array())
-                        {
-                            parts.push("Read first:".to_string());
-                            for r in read {
-                                if let Some(text) = r.as_str() {
-                                    parts.push(format!("- {}", text));
-                                }
-                            }
-                        }
-                        parts.join("\n")
-                    };
-                WorkerSpecBridge { name, prompt }
+                    }
+                    parts.join("\n")
+                };
+                WorkerSpecBridge { name: spec.name.clone(), prompt }
             })
             .collect();
 
@@ -1736,12 +1616,10 @@ impl TidepoolBackend {
             },
         ];
 
-        match self.run_effect("spawn_workers", &mut handlers) {
-            Ok(result_value) => {
-                let table = &self.tools["spawn_workers"].table;
-                let results: Vec<SpawnWorkerToolResult> =
-                    Vec::from_value(&result_value, table)
-                        .map_err(|e| anyhow::anyhow!("Bridge decode: {}", e))?;
+        self.run_and_decode(
+            "spawn_workers",
+            &mut handlers,
+            |results: Vec<SpawnWorkerToolResult>| {
                 let workers: Vec<_> = spec_names
                     .iter()
                     .zip(results.iter())
@@ -1753,36 +1631,21 @@ impl TidepoolBackend {
                         })
                     })
                     .collect();
-                Ok(MCPCallOutput {
-                    success: true,
-                    result: Some(serde_json::json!({ "workers": workers })),
-                    error: None,
-                })
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "Tidepool spawn_workers failed");
-                Ok(MCPCallOutput {
-                    success: false,
-                    result: None,
-                    error: Some(e.to_string()),
-                })
-            }
-        }
+                serde_json::json!({ "workers": workers })
+            },
+        )
     }
 
     async fn call_note(&self, args: JsonValue) -> Result<MCPCallOutput> {
-        let content = args
-            .get("content")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-
+        let args: NoteArgs = serde_json::from_value(args)?;
         debug!(agent = %self.ctx.agent_name, "Tidepool note call via EffectMachine");
 
         // HList order must match Haskell Eff '[NoteInput', Identity, FormatOp, Inbox, NoteOp]
         let mut handlers = frunk::hlist![
             ToolInputHandler {
-                input: Some(NoteToolInput { content }),
+                input: Some(NoteToolInput {
+                    content: args.content,
+                }),
             },
             IdentityHandler,
             FormatOpHandler,
@@ -1792,43 +1655,16 @@ impl TidepoolBackend {
             NoteOpHandler,
         ];
 
-        match self.run_effect("note", &mut handlers) {
-            Ok(_result_value) => Ok(MCPCallOutput {
-                success: true,
-                result: Some(serde_json::json!({"ack": true})),
-                error: None,
-            }),
-            Err(e) => {
-                tracing::error!(error = %e, "Tidepool note failed");
-                Ok(MCPCallOutput {
-                    success: false,
-                    result: None,
-                    error: Some(e.to_string()),
-                })
-            }
-        }
+        self.run_and_decode("note", &mut handlers, |_: NoteToolResult| {
+            serde_json::json!({"ack": true})
+        })
     }
 
     async fn call_answer_question(&self, args: JsonValue) -> Result<MCPCallOutput> {
-        let agent_id = args
-            .get("agent_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let question_id = args
-            .get("question_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let answer = args
-            .get("answer")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-
+        let args: AnswerQuestionArgs = serde_json::from_value(args)?;
         debug!(
-            agent = %agent_id,
-            question_id = %question_id,
+            agent = %args.agent_id,
+            question_id = %args.question_id,
             "Tidepool answer_question call via EffectMachine"
         );
 
@@ -1836,9 +1672,9 @@ impl TidepoolBackend {
         let mut handlers = frunk::hlist![
             ToolInputHandler {
                 input: Some(AnswerToolInput {
-                    agent_id,
-                    question_id,
-                    answer,
+                    agent_id: args.agent_id,
+                    question_id: args.question_id,
+                    answer: args.answer,
                 }),
             },
             InboxHandler {
@@ -1849,46 +1685,24 @@ impl TidepoolBackend {
             },
         ];
 
-        match self.run_effect("answer_question", &mut handlers) {
-            Ok(result_value) => {
-                let table = &self.tools["answer_question"].table;
-                let result = AnswerToolResult::from_value(&result_value, table)
-                    .map_err(|e| anyhow::anyhow!("Bridge decode: {}", e))?;
-                Ok(MCPCallOutput {
-                    success: true,
-                    result: Some(serde_json::json!({
-                        "status": result.status,
-                        "agent_id": result.agent_id,
-                        "question_id": result.question_id,
-                    })),
-                    error: None,
+        self.run_and_decode(
+            "answer_question",
+            &mut handlers,
+            |result: AnswerToolResult| {
+                serde_json::json!({
+                    "status": result.status,
+                    "agent_id": result.agent_id,
+                    "question_id": result.question_id,
                 })
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "Tidepool answer_question failed");
-                Ok(MCPCallOutput {
-                    success: false,
-                    result: None,
-                    error: Some(e.to_string()),
-                })
-            }
-        }
+            },
+        )
     }
 
     async fn call_get_messages(&self, args: JsonValue) -> Result<MCPCallOutput> {
-        let agent_id = args
-            .get("agent_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let timeout_secs: i64 = args
-            .get("timeout_secs")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-
+        let args: GetAgentMessagesArgs = serde_json::from_value(args)?;
         debug!(
-            agent = %agent_id,
-            timeout_secs,
+            agent = %args.agent_id.as_deref().unwrap_or(""),
+            timeout_secs = args.timeout_secs.unwrap_or(0),
             "Tidepool get_agent_messages call via EffectMachine"
         );
 
@@ -1896,8 +1710,8 @@ impl TidepoolBackend {
         let mut handlers = frunk::hlist![
             ToolInputHandler {
                 input: Some(MessagesToolInput {
-                    agent_id,
-                    timeout_secs: timeout_secs.to_string(),
+                    agent_id: args.agent_id.unwrap_or_default(),
+                    timeout_secs: args.timeout_secs.unwrap_or(0).to_string(),
                 }),
             },
             MessagesOpHandler {
@@ -1905,33 +1719,19 @@ impl TidepoolBackend {
             },
         ];
 
-        match self.run_effect("get_agent_messages", &mut handlers) {
-            Ok(result_value) => {
-                let table = &self.tools["get_agent_messages"].table;
-                let result = MessagesToolResult::from_value(&result_value, table)
-                    .map_err(|e| anyhow::anyhow!("Bridge decode: {}", e))?;
-                let messages: JsonValue =
-                    serde_json::from_str(&result.messages_json)
-                        .unwrap_or(JsonValue::Array(Vec::new()));
+        self.run_and_decode(
+            "get_agent_messages",
+            &mut handlers,
+            |result: MessagesToolResult| {
+                let messages: JsonValue = serde_json::from_str(&result.messages_json)
+                    .unwrap_or(JsonValue::Array(Vec::new()));
                 let count = messages.as_array().map(|a| a.len()).unwrap_or(0);
-                Ok(MCPCallOutput {
-                    success: true,
-                    result: Some(serde_json::json!({
-                        "messages": messages,
-                        "count": count,
-                    })),
-                    error: None,
+                serde_json::json!({
+                    "messages": messages,
+                    "count": count,
                 })
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "Tidepool get_agent_messages failed");
-                Ok(MCPCallOutput {
-                    success: false,
-                    result: None,
-                    error: Some(e.to_string()),
-                })
-            }
-        }
+            },
+        )
     }
 }
 
@@ -2013,6 +1813,53 @@ impl RuntimeBackend for TidepoolBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct MockIdentity;
+    impl EffectHandler<EffectContext> for MockIdentity {
+        type Request = IdentityReq;
+        fn handle(
+            &mut self,
+            req: IdentityReq,
+            cx: &TidepoolEffectContext<'_, EffectContext>,
+        ) -> Result<Value, TidepoolEffectError> {
+            match req {
+                IdentityReq::GetAgentId => cx.respond("test".to_string()),
+                IdentityReq::GetParentTab => cx.respond("parent-tab".to_string()),
+                IdentityReq::GetOwnTab => cx.respond("test-tab".to_string()),
+                IdentityReq::GetWorkingDir => cx.respond(".".to_string()),
+            }
+        }
+    }
+
+    struct MockInbox;
+    impl EffectHandler<EffectContext> for MockInbox {
+        type Request = InboxReq;
+        fn handle(
+            &mut self,
+            req: InboxReq,
+            cx: &TidepoolEffectContext<'_, EffectContext>,
+        ) -> Result<Value, TidepoolEffectError> {
+            match req {
+                InboxReq::WriteMessage(_, _, _, _) => cx.respond("ok".to_string()),
+                InboxReq::ReadMessages(_) => cx.respond("[]".to_string()),
+                InboxReq::PollMessages(_, _) => cx.respond("[]".to_string()),
+            }
+        }
+    }
+
+    struct MockQuestions;
+    impl EffectHandler<EffectContext> for MockQuestions {
+        type Request = QuestionsReq;
+        fn handle(
+            &mut self,
+            req: QuestionsReq,
+            cx: &TidepoolEffectContext<'_, EffectContext>,
+        ) -> Result<Value, TidepoolEffectError> {
+            match req {
+                QuestionsReq::ResolveQuestion(_, _) => cx.respond("true".to_string()),
+            }
+        }
+    }
 
     #[test]
     fn test_popup_tool_definition_schema() {
@@ -2235,40 +2082,6 @@ mod tests {
             content: "progress update".to_string(),
         };
 
-        // Mock Identity handler (tag 1)
-        struct MockIdentity;
-        impl EffectHandler<EffectContext> for MockIdentity {
-            type Request = IdentityReq;
-            fn handle(
-                &mut self,
-                req: IdentityReq,
-                cx: &TidepoolEffectContext<'_, EffectContext>,
-            ) -> Result<Value, TidepoolEffectError> {
-                match req {
-                    IdentityReq::GetAgentId => cx.respond("test".to_string()),
-                    IdentityReq::GetParentTab => cx.respond("parent-tab".to_string()),
-                    _ => cx.respond("test".to_string()),
-                }
-            }
-        }
-
-        // Mock Inbox handler (tag 3)
-        struct MockInbox;
-        impl EffectHandler<EffectContext> for MockInbox {
-            type Request = InboxReq;
-            fn handle(
-                &mut self,
-                req: InboxReq,
-                cx: &TidepoolEffectContext<'_, EffectContext>,
-            ) -> Result<Value, TidepoolEffectError> {
-                match req {
-                    InboxReq::WriteMessage(_, _, _, _) => cx.respond("ok".to_string()),
-                    InboxReq::ReadMessages(_) => cx.respond("[]".to_string()),
-                    InboxReq::PollMessages(_, _) => cx.respond("[]".to_string()),
-                }
-            }
-        }
-
         // Mock NoteOp handler (tag 4): accepts InjectNote, returns NoteResult
         struct MockNoteOp;
         impl EffectHandler<EffectContext> for MockNoteOp {
@@ -2325,38 +2138,6 @@ mod tests {
             question_id: "q-42".to_string(),
             answer: "use option B".to_string(),
         };
-
-        // Mock Inbox handler (tag 1)
-        struct MockInbox;
-        impl EffectHandler<EffectContext> for MockInbox {
-            type Request = InboxReq;
-            fn handle(
-                &mut self,
-                req: InboxReq,
-                cx: &TidepoolEffectContext<'_, EffectContext>,
-            ) -> Result<Value, TidepoolEffectError> {
-                match req {
-                    InboxReq::WriteMessage(_, _, _, _) => cx.respond("ok".to_string()),
-                    InboxReq::ReadMessages(_) => cx.respond("[]".to_string()),
-                    InboxReq::PollMessages(_, _) => cx.respond("[]".to_string()),
-                }
-            }
-        }
-
-        // Mock Questions handler (tag 2)
-        struct MockQuestions;
-        impl EffectHandler<EffectContext> for MockQuestions {
-            type Request = QuestionsReq;
-            fn handle(
-                &mut self,
-                req: QuestionsReq,
-                cx: &TidepoolEffectContext<'_, EffectContext>,
-            ) -> Result<Value, TidepoolEffectError> {
-                match req {
-                    QuestionsReq::ResolveQuestion(_, _) => cx.respond("true".to_string()),
-                }
-            }
-        }
 
         // Eff '[AnswerInput', Inbox, Questions]
         let tool = &backend.tools["answer_question"];
@@ -2709,22 +2490,6 @@ mod tests {
             base_branch: "main".to_string(),
         };
 
-        // Mock Identity handler (tag 1)
-        struct MockIdentity;
-        impl EffectHandler<EffectContext> for MockIdentity {
-            type Request = IdentityReq;
-            fn handle(
-                &mut self,
-                req: IdentityReq,
-                cx: &TidepoolEffectContext<'_, EffectContext>,
-            ) -> Result<Value, TidepoolEffectError> {
-                match req {
-                    IdentityReq::GetWorkingDir => cx.respond(".".to_string()),
-                    _ => cx.respond("test".to_string()),
-                }
-            }
-        }
-
         // Mock FilePROp handler (tag 2)
         struct MockFilePROp;
         impl EffectHandler<EffectContext> for MockFilePROp {
@@ -2786,22 +2551,6 @@ mod tests {
             strategy: "squash".to_string(),
         };
 
-        // Mock Identity handler (tag 1)
-        struct MockIdentity;
-        impl EffectHandler<EffectContext> for MockIdentity {
-            type Request = IdentityReq;
-            fn handle(
-                &mut self,
-                req: IdentityReq,
-                cx: &TidepoolEffectContext<'_, EffectContext>,
-            ) -> Result<Value, TidepoolEffectError> {
-                match req {
-                    IdentityReq::GetWorkingDir => cx.respond(".".to_string()),
-                    _ => cx.respond("test".to_string()),
-                }
-            }
-        }
-
         // Mock MergePROp handler (tag 2)
         struct MockMergePROp;
         impl EffectHandler<EffectContext> for MockMergePROp {
@@ -2860,23 +2609,6 @@ mod tests {
             status: "success".to_string(),
             message: "All tests pass".to_string(),
         };
-
-        // Mock Identity handler (tag 1)
-        struct MockIdentity;
-        impl EffectHandler<EffectContext> for MockIdentity {
-            type Request = IdentityReq;
-            fn handle(
-                &mut self,
-                req: IdentityReq,
-                cx: &TidepoolEffectContext<'_, EffectContext>,
-            ) -> Result<Value, TidepoolEffectError> {
-                match req {
-                    IdentityReq::GetAgentId => cx.respond("test".to_string()),
-                    IdentityReq::GetParentTab => cx.respond("parent-tab".to_string()),
-                    _ => cx.respond("test".to_string()),
-                }
-            }
-        }
 
         // Mock NotifyOp handler (tag 3)
         struct MockNotifyOp;
@@ -2983,22 +2715,6 @@ mod tests {
             title: "Test Title".to_string(),
             components: "[]".to_string(),
         };
-
-        // Mock Identity handler (tag 1)
-        struct MockIdentity;
-        impl EffectHandler<EffectContext> for MockIdentity {
-            type Request = IdentityReq;
-            fn handle(
-                &mut self,
-                req: IdentityReq,
-                cx: &TidepoolEffectContext<'_, EffectContext>,
-            ) -> Result<Value, TidepoolEffectError> {
-                match req {
-                    IdentityReq::GetOwnTab => cx.respond("test-tab".to_string()),
-                    _ => cx.respond("test".to_string()),
-                }
-            }
-        }
 
         // Mock PopupOp handler (tag 2)
         struct MockPopupOp;

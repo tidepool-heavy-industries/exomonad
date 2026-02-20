@@ -15,14 +15,18 @@ Claude Code (hook or MCP call)
        ↓
   Arc<dyn RuntimeBackend>::call_tool / handle_hook / list_tools
        ↓
-  TidepoolBackend → EffectMachine::run_async(haskell_expr)
+  TidepoolBackend → EffectMachine::run_with_user(haskell_expr, hlist![handlers...])
        ↓
   Haskell Core evaluated (Cranelift JIT) ← PURE LOGIC ONLY
        ↓
-  BridgeDispatcher routes effects to Rust services
+  Multi-effect HList dispatch (positional: tag 0→handler 0, tag 1→handler 1, ...)
+       ↓
+  Shared handlers (ToolInputHandler, IdentityHandler) + per-tool domain ops
        ↓
   Result via FromCore/ToCore bridge
 ```
+
+**Effect composition:** Each tool's `.hs` file defines `Eff '[Input, SharedEffect1, ..., DomainOp]`. Rust composes a matching `frunk::hlist!` where each handler corresponds positionally. Shared effects (Identity, Inbox) are reusable across tools; per-tool domain ops encapsulate tool-specific I/O.
 
 ### Key Components
 
