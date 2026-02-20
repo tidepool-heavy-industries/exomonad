@@ -192,8 +192,8 @@
         ]
       },
       "locked": {
-        "lastModified": 1771521229,
-        "narHash": "sha256-49ybOaGdgeIrBzFiBa2tMvWzeJrhvewAGyYskmX7uM4=",
+        "lastModified": 1771554479,
+        "narHash": "sha256-HbFI6zmJdenBXCKptZpDAICkhpmDoyU/mbCgCBZoz/E=",
         "path": "/home/inanna/dev/tidepool",
         "type": "path"
       },
