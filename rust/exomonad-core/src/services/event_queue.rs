@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use exomonad_proto::effects::events::{event::EventType, Event};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,6 +9,39 @@ use tracing::{info, warn};
 const MAX_QUEUE_SIZE: usize = 1000;
 
 type SessionId = String;
+
+/// Native event type (replaces proto-generated Event).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Event {
+    pub event_id: u64,
+    pub event_type: Option<EventType>,
+}
+
+/// Event type variants.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum EventType {
+    #[serde(rename = "worker_complete")]
+    WorkerComplete(WorkerComplete),
+    #[serde(rename = "timeout")]
+    Timeout(Timeout),
+}
+
+/// Worker completion event.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkerComplete {
+    pub worker_id: String,
+    pub status: String,
+    pub message: String,
+    #[serde(default)]
+    pub changes: Vec<String>,
+}
+
+/// Timeout event.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Timeout {
+    pub timeout_secs: i32,
+}
 
 pub struct EventQueue {
     queues: Arc<Mutex<HashMap<SessionId, VecDeque<Event>>>>,
@@ -100,6 +133,17 @@ impl EventQueue {
         }
     }
 
+    /// Notify with a raw JSON event value (used by the /events endpoint).
+    pub async fn notify_json_event(&self, session_id: &str, value: serde_json::Value) {
+        // Try to deserialize as a typed event, fall back to worker_complete
+        let event_type = serde_json::from_value::<EventType>(value.clone()).ok();
+        let event = Event {
+            event_id: 0,
+            event_type,
+        };
+        self.notify_event(session_id, event).await;
+    }
+
     pub async fn queue_len(&self, session_id: &str) -> usize {
         let queues = self.queues.lock().await;
         queues.get(session_id).map_or(0, |q| q.len())
@@ -130,9 +174,7 @@ impl EventQueue {
     fn timeout_event(timeout_secs: i32) -> Event {
         Event {
             event_id: 0,
-            event_type: Some(EventType::Timeout(
-                exomonad_proto::effects::events::Timeout { timeout_secs },
-            )),
+            event_type: Some(EventType::Timeout(Timeout { timeout_secs })),
         }
     }
 }
@@ -152,14 +194,12 @@ mod tests {
         let queue = EventQueue::new();
         let event = Event {
             event_id: 0,
-            event_type: Some(EventType::WorkerComplete(
-                exomonad_proto::effects::events::WorkerComplete {
-                    worker_id: "test".to_string(),
-                    status: "success".to_string(),
-                    changes: vec![],
-                    message: "done".to_string(),
-                },
-            )),
+            event_type: Some(EventType::WorkerComplete(WorkerComplete {
+                worker_id: "test".to_string(),
+                status: "success".to_string(),
+                changes: vec![],
+                message: "done".to_string(),
+            })),
         };
 
         queue.notify_event("session1", event.clone()).await;
@@ -194,14 +234,12 @@ mod tests {
 
         let event = Event {
             event_id: 0,
-            event_type: Some(EventType::WorkerComplete(
-                exomonad_proto::effects::events::WorkerComplete {
-                    worker_id: "test2".to_string(),
-                    status: "success".to_string(),
-                    changes: vec![],
-                    message: "done".to_string(),
-                },
-            )),
+            event_type: Some(EventType::WorkerComplete(WorkerComplete {
+                worker_id: "test2".to_string(),
+                status: "success".to_string(),
+                changes: vec![],
+                message: "done".to_string(),
+            })),
         };
         queue.notify_event("session2", event).await;
 
@@ -214,26 +252,22 @@ mod tests {
         let queue = EventQueue::new();
 
         let event1 = Event {
-            event_id: 0, // Will be assigned by queue
-            event_type: Some(EventType::WorkerComplete(
-                exomonad_proto::effects::events::WorkerComplete {
-                    worker_id: "worker-1".to_string(),
-                    status: "success".to_string(),
-                    changes: vec![],
-                    message: "first".to_string(),
-                },
-            )),
+            event_id: 0,
+            event_type: Some(EventType::WorkerComplete(WorkerComplete {
+                worker_id: "worker-1".to_string(),
+                status: "success".to_string(),
+                changes: vec![],
+                message: "first".to_string(),
+            })),
         };
         let event2 = Event {
             event_id: 0,
-            event_type: Some(EventType::WorkerComplete(
-                exomonad_proto::effects::events::WorkerComplete {
-                    worker_id: "worker-2".to_string(),
-                    status: "success".to_string(),
-                    changes: vec![],
-                    message: "second".to_string(),
-                },
-            )),
+            event_type: Some(EventType::WorkerComplete(WorkerComplete {
+                worker_id: "worker-2".to_string(),
+                status: "success".to_string(),
+                changes: vec![],
+                message: "second".to_string(),
+            })),
         };
 
         queue.notify_event("s1", event1).await;
@@ -272,14 +306,12 @@ mod tests {
                 "test",
                 Event {
                     event_id: 0,
-                    event_type: Some(EventType::WorkerComplete(
-                        exomonad_proto::effects::events::WorkerComplete {
-                            worker_id: format!("worker-{}", i),
-                            status: "success".to_string(),
-                            changes: vec![],
-                            message: "test".to_string(),
-                        },
-                    )),
+                    event_type: Some(EventType::WorkerComplete(WorkerComplete {
+                        worker_id: format!("worker-{}", i),
+                        status: "success".to_string(),
+                        changes: vec![],
+                        message: "test".to_string(),
+                    })),
                 },
             )
             .await;

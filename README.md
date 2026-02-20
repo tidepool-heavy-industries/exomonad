@@ -99,21 +99,7 @@ Agents live in separate repos to keep the library clean:
 
 ## Testing
 
-### FFI Property Tests
-
-We use property-based testing to verify JSON serialization across the WASM FFI boundary.
-
-**Rust:**
 ```bash
-cd rust && cargo test --test proptest_ffi
-```
-
-**Haskell:**
-```bash
-cd haskell/wasm-guest && cabal test ffi-serialization-tests
-```
-
-**Integration (Round-trip):**
-```bash
-cd rust && cargo test --test integration_ffi
+cargo test --workspace     # Rust tests
+just test-mcp              # MCP integration tests
 ```

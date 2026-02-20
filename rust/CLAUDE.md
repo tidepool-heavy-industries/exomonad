@@ -6,7 +6,7 @@ Rust workspace for augmenting human-driven Claude Code sessions with ExoMonad in
 
 ## Architecture
 
-**100% WASM routing (via RuntimeBackend trait).** All MCP tool logic lives in Haskell WASM; Rust handles I/O only. The `RuntimeBackend` trait abstracts over execution engines — currently `WasmBackend` (Extism), with `TidepoolBackend` (Cranelift) planned.
+**Tidepool backend (Cranelift-compiled Haskell Core).** All MCP tool logic lives in Haskell; Rust handles I/O only. The `RuntimeBackend` trait abstracts over execution engines — currently `TidepoolBackend` which compiles Haskell Core to native code via Cranelift JIT.
 
 ```
 Claude Code (hook or MCP call)
@@ -15,25 +15,21 @@ Claude Code (hook or MCP call)
        ↓
   Arc<dyn RuntimeBackend>::call_tool / handle_hook / list_tools
        ↓
-  WasmBackend → PluginManager::call("handle_*", ...)
+  TidepoolBackend → EffectMachine::run_async(haskell_expr)
        ↓
-  WASM guest (Haskell) ← PURE LOGIC ONLY
+  Haskell Core evaluated (Cranelift JIT) ← PURE LOGIC ONLY
        ↓
-  Yields effects (Git, GitHub, AgentControl, Log, etc.)
+  BridgeDispatcher routes effects to Rust services
        ↓
-  Rust host functions execute ALL I/O
-       ↓
-  Result marshalled back through WASM
+  Result via FromCore/ToCore bridge
 ```
 
 ### Key Components
 
 | Component | Purpose |
 |-----------|---------|
-| **exomonad** | Rust binary with WASM plugin support (hooks + MCP) |
-| **exomonad-core** | Everything: framework, handlers, services, protocol types, UI protocol |
-| **exomonad-proto** | Proto-generated types (prost) for FFI + effects |
-| **wasm-guest** | Haskell WASM plugin (pure logic, no I/O) |
+| **exomonad** | Rust binary: MCP server + hook handler |
+| **exomonad-core** | Everything: Tidepool backend, services, protocol types, UI protocol |
 
 ### Deployment
 
@@ -42,8 +38,8 @@ Claude Code (hook or MCP call)
 ```
 Human in Zellij session
     └── Claude Code (main tab, role=tl)
-            ├── MCP server: exomonad mcp-stdio
-            ├── WASM: loaded from .exo/wasm/ at runtime
+            ├── MCP server: exomonad serve
+            ├── TidepoolBackend: Cranelift-compiled Haskell Core
             └── spawn_subtree / spawn_leaf_subtree / spawn_workers creates:
                 ├── Tab subtree-1 (Claude, worktree off current branch, role=tl)
                 ├── Tab leaf-1 (Gemini, worktree off current branch, role=dev)
@@ -74,25 +70,19 @@ Each worker agent (`spawn_workers`):
 
 ```
 rust/CLAUDE.md  ← YOU ARE HERE (router)
-├── exomonad/CLAUDE.md  ← MCP + Hook handler via WASM (BINARY)
+├── exomonad/CLAUDE.md  ← MCP + Hook handler (BINARY)
 │   • Binary: exomonad
-│   • hook subcommand: handles CC hooks via WASM
+│   • hook subcommand: handles CC hooks via HTTP forwarding
 │
 ├── exomonad-core/  ← Unified library (publishable)
-│   • Framework: EffectHandler trait, EffectRegistry, RuntimeBuilder, Runtime
-│   • PluginManager (single host fn: yield_effect)
+│   • TidepoolBackend (Cranelift-compiled Haskell Core)
 │   • MCP server implementation (reusable)
 │   • Protocol types (hook, mcp, service)
-│   • Handlers: GitHandler, GitHubHandler, LogHandler, AgentHandler,
-│     FsHandler, PopupHandler, FilePRHandler, CopilotHandler
 │   • Services: GitService, GitHubService, AgentControlService, etc.
 │   • External service clients: Anthropic, GitHub, Ollama, OTLP
 │   • UI protocol types (lightweight, available without runtime feature)
 │   • Layout generation (KDL layouts for Zellij)
-│
-├── exomonad-proto/  ← Proto-generated types (prost)
-│   • FFI boundary types
-│   • Effect request/response messages
+│   • Haskell tool definitions (rust/exomonad-core/haskell/)
 │
 └── exomonad-plugin/CLAUDE.md  ← Zellij WASM plugin (built separately)
     • Status display and popup UI rendering
@@ -103,9 +93,8 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 
 | Crate | Type | Purpose |
 |-------|------|---------|
-| [exomonad](exomonad/CLAUDE.md) | Binary (`exomonad`) | MCP + Hook handler via WASM |
-| exomonad-core | Library | Framework, handlers, services, protocol types, UI protocol |
-| exomonad-proto | Library | Proto-generated types (prost) for FFI + effects |
+| [exomonad](exomonad/CLAUDE.md) | Binary (`exomonad`) | MCP + Hook handler |
+| exomonad-core | Library | Tidepool backend, services, protocol types, UI protocol |
 
 **Note:** [exomonad-plugin](exomonad-plugin/CLAUDE.md) is built separately (wasm32-wasi target for Zellij) and not a workspace member. It depends on `exomonad-core` with `default-features = false` to get only the lightweight `ui_protocol` types.
 
@@ -113,7 +102,7 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `runtime` | Yes | Full runtime: WASM hosting, effect handlers, MCP server, services |
+| `runtime` | Yes | Full runtime: Tidepool backend, MCP server, services |
 
 Without `runtime`: only `ui_protocol` module is available (serde + serde_json deps only). Used by `exomonad-plugin` which targets wasm32-wasi.
 
@@ -127,9 +116,6 @@ All `cargo` commands run from the repo root (workspace `Cargo.toml` lives there)
 cargo build --release                    # Build all crates
 cargo build -p exomonad                  # Build exomonad binary
 cargo test --workspace                   # Run all tests
-
-# Build WASM plugin (requires nix develop .#wasm)
-nix develop .#wasm -c wasm32-wasi-cabal build --project-file=cabal.project.wasm wasm-guest
 ```
 
 ### Running
@@ -141,8 +127,6 @@ exomonad serve
 echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
 ```
 
-**Note:** WASM is loaded from `.exo/wasm/` at runtime. To update WASM, run `just wasm-all` or `exomonad recompile --role unified`.
-
 ### Environment Variables
 | Variable | Used By | Purpose |
 |----------|---------|---------|
@@ -153,9 +137,9 @@ echo '{"hook_event_name":"PreToolUse",...}' | exomonad hook pre-tool-use
 
 ### Agent Identity
 
-In HTTP serve mode, multiple agents share one server process. Each agent hits a unique URL: `/agents/{role}/{name}/mcp`. The server extracts role and identity from the URL path. Role determines which WASM tool set (lazy McpServer per role). Identity is structural: each agent gets its own `PluginManager` with `EffectContext` (agent name + birth branch) baked in at construction.
+In HTTP serve mode, multiple agents share one server process. Each agent hits a unique URL: `/agents/{role}/{name}/mcp`. The server extracts role and identity from the URL path. Role determines which tool set.
 
-**Per-agent backend cache:** The server maintains a `HashMap<AgentName, Arc<dyn RuntimeBackend>>`. On first request from an agent, a new `WasmBackend` (wrapping a `PluginManager` with the agent's `EffectContext`) is created and cached. All effect handlers receive `&EffectContext` — identity is always present, no Option, no task-locals, no panic paths.
+**Per-agent backend cache:** The server maintains a `HashMap<AgentName, Arc<dyn RuntimeBackend>>`. On first request from an agent, a new `TidepoolBackend` with the agent's `EffectContext` is created and cached.
 
 **Route layout (single pattern):**
 - `/agents/{role}/{name}/mcp` — unified route for all agents
@@ -164,70 +148,21 @@ In HTTP serve mode, multiple agents share one server process. Each agent hits a 
   - Spawned Gemini leaf: `/agents/dev/{name}/mcp`
   - Spawned Gemini worker: `/agents/worker/{name}/mcp`
 
-Roles are defined in Haskell WASM (`AllRoles.hs`). Adding a role is a Haskell-only change — Rust uses a lazy cache that creates an `McpServer` per role on first request.
-
 At spawn time, `spawn_subtree`/`spawn_leaf_subtree`/`spawn_workers` writes per-agent MCP config with the agent's endpoint URL. The URL IS the identity — unforgeable, visible in access logs.
 
 ## MCP Tools
 
-All tools are defined in Haskell WASM and executed via host functions.
+All tools are defined in Haskell and executed via TidepoolBackend.
 
 | Tool | Role | Description |
 |------|------|-------------|
-| `spawn_subtree` | tl | Fork Claude agent into worktree + Zellij tab (TL role, can spawn children) |
+| `spawn_subtree` | tl | Fork Claude agent into worktree + Zellij tab (TL role) |
 | `spawn_leaf_subtree` | tl | Fork Gemini agent into worktree + Zellij tab (dev role, files PR) |
-| `spawn_workers` | tl | Spawn ephemeral Gemini agents as panes in parent dir (no branch, no worktree) |
+| `spawn_workers` | tl | Spawn Gemini agents as panes (ephemeral, no worktree) |
 | `file_pr` | tl, dev | Create/update PR for current branch (auto-detects base branch from naming) |
-| `merge_pr` | tl | Merge child PR (gh pr merge + jj git fetch) |
+| `merge_pr` | tl | Merge child PR (gh merge + jj fetch) |
 | `popup` | tl | Interactive UI in Zellij (choices, text, sliders) |
 | `notify_parent` | all | Signal completion to parent (auto-routed, injects into parent pane) |
-
-## Effect System
-
-All WASM↔Rust communication flows through a single `yield_effect` host function. The Haskell guest sends protobuf-encoded `EffectEnvelope` messages, and the `EffectRegistry` dispatches to the appropriate handler by namespace prefix.
-
-```
-Haskell: runEffect @GitGetBranch request
-    ↓ protobuf encode → EffectEnvelope { effect_type: "git.get_branch", payload: ... }
-    ↓ yield_effect host function
-    ↓ EffectRegistry::dispatch("git.get_branch", payload)
-    ↓ GitHandler::handle(...)
-    ↓ EffectResponse { payload | error }
-    ↓ protobuf decode
-Haskell: Either EffectError GetBranchResponse
-```
-
-### Error Handling Helpers
-
-Handlers use shared ergonomic helpers from `effects/error.rs`:
-
-- **`ResultExt::effect_err(namespace)`** — Converts any `Result<T, E: Display>` to `Result<T, EffectError>` with `EffectError::custom("{namespace}_error", e.to_string())`. Replaces verbose `.map_err(|e| EffectError::custom(...))` closures.
-- **`spawn_blocking_effect(namespace, closure)`** — Runs a closure in `tokio::task::spawn_blocking` and maps both the `JoinError` and inner error to `EffectError`. Used for jj-lib and messaging operations where types aren't `Send`.
-
-Proto field helpers in `handlers/mod.rs`: `non_empty(String) → Option<String>`, `working_dir_or_default(String) → String`, `working_dir_path_or_default(&str) → PathBuf`.
-
-### Built-in Handlers
-
-| Namespace | Handler | Effects |
-|-----------|---------|---------|
-| `git.*` | GitHandler | get_branch, get_status, get_recent_commits, get_worktree, has_unpushed_commits, get_remote_url, get_repo_info |
-| `github.*` | GitHubHandler | list_issues, get_issue, create_pr, list_prs, get_pr_for_branch, get_pr_review_comments |
-| `log.*` | LogHandler | info, error, emit_event |
-| `agent.*` | AgentHandler | spawn_gemini_teammate, cleanup_merged |
-| `fs.*` | FsHandler | read_file, write_file |
-| `popup.*` | PopupHandler | show_popup |
-| `file_pr.*` | FilePRHandler | file_pr |
-| `copilot.*` | CopilotHandler | wait_for_copilot_review |
-| `messaging.*` | MessagingHandler | send_note, send_question |
-| `events.*` | EventHandler | wait_for_event (internal), notify_event, notify_parent |
-| `jj.*` | JjHandler | bookmark_create, git_push, git_fetch, log, new, status |
-| `merge_pr.*` | MergePRHandler | merge_pr (gh pr merge + jj git fetch) |
-
-**Zellij Integration:**
-- Uses declarative KDL layouts (not CLI flags)
-- Includes tab-bar and status-bar plugins (native UI)
-- Wraps command in shell (`sh -c "claude"`) for environment inheritance
-- Sets `close_on_exit true` for automatic cleanup
 
 ## Configuration
 
@@ -249,26 +184,22 @@ All commands run from repo root:
 ```bash
 cargo test --workspace                  # All tests
 cargo test -p exomonad                  # Binary tests only
-cargo test -p exomonad-core             # All library tests (framework + handlers + services)
-cargo test -p exomonad-proto            # Wire format compatibility tests
+cargo test -p exomonad-core             # All library tests
 ```
 
 ## Design Decisions
 
 | Decision | Rationale |
 |----------|-----------|
-| 100% WASM routing | All logic in Haskell, Rust handles I/O only |
-| Single `yield_effect` host fn | One entry point, all effects dispatched by namespace via EffectRegistry |
-| Protobuf binary encoding | Type-safe FFI boundary, generated types on both sides |
+| Tidepool backend | Cranelift-compiled Haskell Core — native speed, no WASM overhead |
 | `runtime` feature flag | Plugin consumers get lightweight types without heavy deps |
 | High-level effects | `SpawnAgent` not `CreateWorktree + OpenTab` |
 | Local Zellij orchestration | Git worktrees + Zellij tabs, no Docker containers |
-| Extism runtime | Mature WASM runtime with host function support |
 | KDL layouts | Declarative tab creation with proper environment inheritance |
-| File-based unified WASM | Single WASM for all roles, loaded from disk, hot reload in serve mode |
+| FromCore/ToCore bridge | Type-safe FFI between Haskell Core and Rust — no protobuf |
 
 ## Related Documentation
 
 - [Root CLAUDE.md](../CLAUDE.md) - Project overview and documentation tree
-- [Haskell wasm-guest](../haskell/wasm-guest/) - Haskell WASM plugin source
+- [Haskell DSL](../haskell/dsl/core/CLAUDE.md) - Graph DSL reference
 - [Haskell effects](../haskell/effects/CLAUDE.md) - Effect interpreters

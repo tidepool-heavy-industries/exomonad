@@ -6,7 +6,7 @@ ExoMonad is a type-safe LLM agent framework library written in Haskell. It provi
 - **Typed state** that LLMs read via templates
 - **Typed mutations** that LLMs express via structured output
 - **Typed tools** for mid-turn capabilities
-- **IO-blind architecture** enabling deterministic testing and WASM compilation
+- **IO-blind architecture** enabling deterministic testing
 
 Agents are built in separate repos () using this library.
 
@@ -91,7 +91,7 @@ cabal test all
 3. **IO-Blind Architecture**
    - Agent code uses `BaseEffects` (no `IOE`)
    - Runners use `RunnerEffects` (includes `IOE`)
-   - This enables WASM compilation and deterministic testing
+   - This enables deterministic testing
 
 ### Template System
 
@@ -154,4 +154,3 @@ data StateDelta = StateDelta
 
 - [freer-simple documentation](https://hackage.haskell.org/package/freer-simple)
 - [Anthropic tool use docs](https://docs.anthropic.com/en/docs/tool-use)
-- [GHC WASM docs](https://ghc.gitlab.haskell.org/ghc/doc/users_guide/wasm.html)

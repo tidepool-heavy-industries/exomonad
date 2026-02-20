@@ -1,6 +1,6 @@
 # ExoMonad
 
-Type-safe LLM agent orchestration. Haskell WASM defines all logic (tool schemas, handlers, decision trees). Rust executes I/O effects. Zellij provides isolation and multiplexing. Agents are IO-blind state machines that yield typed effects.
+Type-safe LLM agent orchestration. Haskell defines all logic via Tidepool (Cranelift-compiled Haskell Core). Rust executes I/O effects. Zellij provides isolation and multiplexing. Agents are IO-blind state machines that yield typed effects.
 
 ---
 
@@ -20,11 +20,11 @@ Always prefer failure to an undocumented heuristic or fallback.
 
 Never maintain two code paths that do the same thing. Redundant paths cause bug risk — fixes applied to one path get missed on the other. If there's a "debug mode" or "legacy mode" that duplicates a primary path, cut it.
 
-### All Tools and Hooks in Haskell WASM
+### All Tool Logic in Haskell
 
-**Never add direct Rust MCP tools.** All MCP tools and hooks are defined in Haskell WASM — tool schemas, argument parsing, dispatch logic, everything. Rust is the I/O runtime: it executes effects that the Haskell DSL yields. If a new tool needs new I/O capabilities, add a new effect handler in Rust and a corresponding effect type in Haskell. The tool itself lives in `haskell/wasm-guest/src/ExoMonad/Guest/Tools/`.
+**Never add direct Rust MCP tools.** All MCP tools are defined in Haskell — tool schemas, argument parsing, dispatch logic, everything. Rust is the I/O runtime: it executes effects that the Haskell DSL yields. If a new tool needs new I/O capabilities, add a service in Rust and wire it through the `BridgeDispatcher` in `tidepool_backend.rs`. The Haskell tool definitions live in `rust/exomonad-core/haskell/`.
 
-This is the entire architectural premise. Haskell WASM is the single source of truth for tool definitions. Rust never defines tool schemas, never parses tool arguments, never contains tool logic.
+This is the entire architectural premise. Haskell is the single source of truth for tool definitions. Rust never defines tool schemas, never parses tool arguments, never contains tool logic.
 
 ### Crosscutting Rules
 
@@ -108,32 +108,18 @@ just install-all-dev
 # Or install release build (optimized, slower compile)
 just install-all
 
-# WASM builds (hermetic via nix)
-just wasm-all
-
-# Rust sidecar only
+# Rust binary only
 cargo build -p exomonad
-
-# Hot reload workflow (HTTP serve mode)
-exomonad serve                    # Start server
-# ... edit .exo/roles/unified/TLRole.hs ...
-exomonad recompile --role unified # Rebuild WASM via nix, copy to .exo/wasm/
-# Next tool call picks up new WASM automatically
 ```
 
 **What `just install-all-dev` does:**
-1. Builds unified WASM plugin via nix
-2. Builds exomonad Rust binary (debug mode)
-3. Copies binary to `~/.cargo/bin/exomonad`
-4. Builds and installs Zellij plugins
+1. Builds exomonad Rust binary (debug mode)
+2. Builds and installs Zellij plugin (wasm32-wasip1)
+3. Copies binaries to `~/.cargo/bin/` and `~/.config/zellij/plugins/`
 
-**WASM build pipeline:**
-1. Role configs in `.exo/roles/unified/` define tool composition per role (`TLRole.hs`, `DevRole.hs`)
-2. `AllRoles.hs` registers all roles; `Main.hs` provides FFI exports
-3. `cabal.project.wasm` lists the unified package alongside `wasm-guest` SDK
-4. `just wasm-all` builds via `nix develop .#wasm -c wasm32-wasi-cabal build ...`
-5. Compiled WASM copied to `.exo/wasm/wasm-guest-unified.wasm`
-6. `exomonad serve` loads unified WASM from `.exo/wasm/` at runtime (hot reload via mtime check)
+**Cargo feature flags (`exomonad-core`):**
+- **`runtime`** (default): Full runtime with Tidepool backend (Cranelift-compiled Haskell Core), MCP server, and all service integrations.
+- Without `runtime`: Only lightweight UI protocol types (`ui_protocol` module). Used by `exomonad-plugin`.
 
 ### Configuration
 
@@ -143,14 +129,12 @@ exomonad recompile --role unified # Rebuild WASM via nix, copy to .exo/wasm/
 default_role = "tl"  # or "dev"
 project_dir = "."
 shell_command = "nix develop"  # optional: environment wrapper for TL tab + server
-wasm_dir = ".exo/wasm"    # optional: override WASM location (default: ~/.exo/wasm/)
 ```
 
 **Config hierarchy:**
 - `config.toml` uses `default_role` (project-wide default)
 - `config.local.toml` uses `role` (worktree-specific override)
 - Resolution: `local.role > global.default_role`
-- WASM: `wasm_dir` in config > `~/.exo/wasm/`
 
 **Hook configuration** is auto-generated in two places:
 - **`exomonad init`**: Writes `.claude/settings.local.json` with all hooks (SessionStart, PreToolUse, etc.) for the root TL session
@@ -221,8 +205,8 @@ The TL does not poll or block. It finishes its turn after spawning, and gets pok
 
 ```
 Human in Zellij session
-    └── Claude Code + exomonad (Rust + Haskell WASM)
-            ├── MCP tools via WASM (spawn_subtree, spawn_leaf_subtree, spawn_workers, file_pr, etc.)
+    └── Claude Code + exomonad (Rust + Haskell via Tidepool)
+            ├── MCP tools via TidepoolBackend (spawn_subtree, spawn_leaf_subtree, spawn_workers, file_pr, etc.)
             └── Agent tree:
                 ├── worktree: main.feature-a (TL role, can spawn children)
                 │   ├── worker: rust-impl (Gemini, in-place pane)
@@ -231,15 +215,15 @@ Human in Zellij session
                     └── ...
 ```
 
-**Haskell WASM = Embedded DSL**
+**Haskell = All Logic (via Tidepool)**
 - Defines tool schemas, handlers, decision logic
 - Yields typed effects (no I/O)
-- Compiled to WASM32-WASI, loaded via Extism
-- Single source of truth for MCP tools
-- Hot reload: serve mode checks mtime per tool call
+- Compiled to Cranelift JIT via Haskell Core. Native speed, no WASM overhead.
+- Effect types bridge via `FromCore`/`ToCore` — no protobuf.
+- Tool definitions in `rust/exomonad-core/haskell/`
 
 **Rust = Runtime**
-- Hosts WASM plugin, executes all effects (git, GitHub API, filesystem, Zellij)
+- Hosts TidepoolBackend, executes all effects (git, GitHub API, filesystem, Zellij)
 - Owns the process lifecycle
 - MCP server (HTTP, started by `exomonad init`)
 
@@ -254,33 +238,24 @@ Human in Zellij session
 ```
 Claude Code → HTTP request → exomonad serve
 → Arc<dyn RuntimeBackend>::call_tool(role, tool_name, args)
-→ WasmBackend → PluginManager::call_async("handle_mcp_call", ...)
-→ Haskell dispatches to tool handler → yields effects
-→ Rust executes effects via host functions → result returned
+→ TidepoolBackend → EffectMachine::run_async(haskell_expr)
+→ BridgeDispatcher routes effects to Rust services
+→ Result returned via FromCore/ToCore bridge
 ```
 
 **Hook Call:**
 ```
 Claude Code → exomonad hook pre-tool-use (reads stdin JSON)
 → HTTP POST to server → Arc<dyn RuntimeBackend>::handle_hook(input)
-→ WasmBackend → WASM handle_pre_tool_use
-→ Haskell decides allow/deny → HookEnvelope { stdout, exit_code }
+→ TidepoolBackend → handle_hook returns HookEnvelope { stdout, exit_code }
 → Claude Code proceeds or blocks
-```
-
-**Session Start:**
-```
-Claude Code starts → exomonad hook session-start
-→ WASM yields SessionRegister effect with claude_session_id
-→ Server stores in ClaudeSessionRegistry
-→ spawn_subtree uses this ID for --fork-session
 ```
 
 **Fail-open:** If the server is unreachable, `exomonad hook` prints `{"continue":true}` and exits 0.
 
 ### MCP Tools Reference
 
-All tools implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/Tools/`):
+All tools implemented in Haskell via Tidepool (`rust/exomonad-core/haskell/`):
 
 | Tool | Role | Description |
 |------|------|-------------|
@@ -300,7 +275,6 @@ All tools implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/To
 
 ```
 CLAUDE.md  ← YOU ARE HERE (project overview)
-├── proto/CLAUDE.md    ← Protocol buffers (FFI boundary types)
 ├── haskell/CLAUDE.md  ← Haskell package organization
 │   ├── dsl/core/CLAUDE.md      ← Graph DSL reference (START HERE for handlers)
 │   ├── effects/CLAUDE.md       ← Effect interpreters
@@ -309,24 +283,23 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 │   │   └── ...
 │   ├── protocol/CLAUDE.md      ← Wire formats
 │   └── tools/CLAUDE.md         ← Dev tools
-├── rust/CLAUDE.md             ← Rust workspace overview (3 crates)
+├── rust/CLAUDE.md             ← Rust workspace overview (2 crates)
 │   ├── exomonad/CLAUDE.md  ← MCP server + hook handler (binary)
-│   ├── exomonad-core/      ← Unified library: framework, handlers, services, protocol, UI types
-│   ├── exomonad-proto/     ← Proto-generated types (prost) for FFI + effects
+│   ├── exomonad-core/      ← Unified library: Tidepool backend, services, protocol, UI types
 │   └── exomonad-plugin/CLAUDE.md   ← Zellij WASM plugin (status + popups)
 └── docs/audits/               ← Project audits and reports
 ```
 
 | I want to... | Read this |
 |--------------|-----------|
-| Add FFI boundary types | `proto/CLAUDE.md` |
 | Understand MCP tool architecture | `rust/exomonad/CLAUDE.md` |
-| Work on effect handlers or services | `rust/exomonad-core/` (handlers/, services/) |
-| Extend the effect framework | `rust/exomonad-core/` (effects/) |
+| Work on the Tidepool backend | `rust/exomonad-core/src/tidepool_backend.rs` |
+| Add or modify a service | `rust/exomonad-core/` (services/) |
 | Understand shared protocol types | `rust/exomonad-core/` (protocol/) |
 | Work with external service clients | `rust/exomonad-core/` (services/external/) |
 | Modify popup UI protocol | `rust/exomonad-core/` (ui_protocol.rs) |
 | Work on Zellij plugin | `rust/exomonad-plugin/CLAUDE.md` |
+| Add a Haskell tool definition | `rust/exomonad-core/haskell/` |
 | Define a graph, handlers, annotations | `haskell/dsl/core/CLAUDE.md` |
 | Add or modify an effect interpreter | `haskell/effects/CLAUDE.md` |
 
@@ -371,7 +344,7 @@ All Haskell packages live under `haskell/`. See `haskell/CLAUDE.md` for full det
 | New integration | `haskell/dsl/core/src/ExoMonad/Effects/` (plural) |
 | New graph annotation | `haskell/dsl/core/src/ExoMonad/Graph/Types.hs` |
 | New interpreter | `haskell/effects/<name>-interpreter/` |
-| New MCP tool | `haskell/wasm-guest/src/ExoMonad/Guest/Tools.hs` |
+| New MCP tool | `rust/exomonad-core/haskell/` (Tidepool .hs files) |
 | Agents (consuming repos) | Separate repo (urchin, etc.) |
 
 ### Naming Conventions
@@ -383,10 +356,9 @@ All Haskell packages live under `haskell/`. See `haskell/CLAUDE.md` for full det
 ### Building & Testing
 
 ```bash
-cabal build all            # Build Haskell
 cargo test --workspace     # Rust tests (from repo root)
-just pre-commit            # Run all checks
-cabal test all             # Haskell tests
+just verify                # Full check (tests + cargo check)
+cargo build -p exomonad    # Build binary only
 ```
 
 ### Task Tracking
@@ -395,11 +367,11 @@ GitHub Issues. Branch naming: `gh-{number}/{description}`. Reference issue in co
 
 ### Key Design Decisions
 
-1. **freer-simple for effects** — Reified continuations for WASM yield/resume
+1. **Tidepool backend** — Cranelift-compiled Haskell Core, native speed, no WASM overhead
 2. **Typed Jinja templates** — Compile-time validation via ginger
 3. **OneOf sum type** — Fully typed dispatch without Dynamic
-4. **IO-blind agents** — All IO in runners, enables WASM + deterministic testing
-5. **Haskell WASM = embedded DSL** — All logic in Haskell, Rust handles I/O only
+4. **IO-blind agents** — All IO in runners, enables deterministic testing
+5. **Haskell = embedded DSL** — All logic in Haskell, Rust handles I/O only
 
 ### Code Smells: Data Flow Dead-Ends
 
@@ -478,8 +450,8 @@ Since the TL doesn't iterate on specs, the v1 spec must be production-quality. E
 **Key rules:**
 - **One agent = one focused change.** If it touches >3 files or requires architectural decisions, split it.
 - **Include complete code.** Don't describe what to write — show the exact code. Gemini executes better from examples than descriptions.
-- **Include exact commands.** Not "run the tests" but `PROTOC=/nix/store/... cargo test --workspace`.
-- **Name every file.** Not "update the proto" but "edit `proto/effects/agent.proto` AND `rust/exomonad-proto/proto/effects/agent.proto`".
+- **Include exact commands.** Not "run the tests" but `cargo test --workspace`.
+- **Name every file.** Not "update the module" but "edit `rust/exomonad-core/src/services/git.rs`".
 - **Specs are self-contained.** The leaf has no context from previous attempts. Every spec must stand alone with complete code snippets and full file paths.
 
 ### Parallelization
@@ -555,6 +527,6 @@ withLSPSession "/path/to/project" $ \session -> do
 ## References
 
 - [haskell/dsl/core/CLAUDE.md](haskell/dsl/core/CLAUDE.md) — Graph DSL reference
-- [rust/exomonad/CLAUDE.md](rust/exomonad/CLAUDE.md) — MCP server + WASM host
+- [rust/exomonad/CLAUDE.md](rust/exomonad/CLAUDE.md) — MCP server + Tidepool host
 - [freer-simple](https://hackage.haskell.org/package/freer-simple) — Effect system
 - [Anthropic tool use](https://docs.anthropic.com/en/docs/tool-use)

@@ -29,9 +29,6 @@ pub struct RawConfig {
 
     /// Shell command to wrap environment (e.g. "nix develop"). TL tab runs this as shell.
     pub shell_command: Option<String>,
-
-    /// WASM directory override (default: ~/.exo/wasm/).
-    pub wasm_dir: Option<PathBuf>,
 }
 
 /// Final resolved configuration.
@@ -47,8 +44,6 @@ pub struct Config {
     pub worktree_base: PathBuf,
     /// Shell command to wrap environment (e.g. "nix develop").
     pub shell_command: Option<String>,
-    /// Resolved WASM directory.
-    pub wasm_dir: PathBuf,
 }
 
 impl Config {
@@ -131,19 +126,6 @@ impl Config {
         // Resolve shell_command: local > global
         let shell_command = local_raw.shell_command.or(global_raw.shell_command);
 
-        // Resolve wasm_dir: config > ~/.exo/wasm/
-        let wasm_dir = global_raw
-            .wasm_dir
-            .or(local_raw.wasm_dir)
-            .map(|p| {
-                if p.is_absolute() {
-                    p
-                } else {
-                    project_root.join(p)
-                }
-            })
-            .unwrap_or_else(global_wasm_dir);
-
         Ok(Self {
             project_dir,
             role,
@@ -151,7 +133,6 @@ impl Config {
             port,
             worktree_base,
             shell_command,
-            wasm_dir,
         })
     }
 
@@ -176,7 +157,6 @@ impl Default for Config {
             port: 7432,
             worktree_base: PathBuf::from(".exo/worktrees"),
             shell_command: None,
-            wasm_dir: global_wasm_dir(),
         }
     }
 }
@@ -198,14 +178,6 @@ fn find_project_root() -> Result<PathBuf> {
             }
         }
     }
-}
-
-/// Global WASM directory: ~/.exo/wasm/
-pub fn global_wasm_dir() -> PathBuf {
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join(".exo/wasm")
 }
 
 /// Sanitize session name per Zellij constraints.

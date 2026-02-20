@@ -1,10 +1,8 @@
-//! exomonad: Rust host with embedded Haskell WASM plugin.
+//! exomonad: Rust host with Tidepool backend for agent orchestration.
 //!
 //! This binary runs as a sidecar in each agent container, handling:
 //! - Claude Code hooks via HTTP forwarding to the server
-//! - MCP tools via WASM plugin (server-side)
-//!
-//! WASM plugins are loaded from file (server-side only).
+//! - MCP tools via Tidepool backend (server-side)
 
 use exomonad::config;
 use urlencoding::encode;
@@ -20,8 +18,7 @@ use exomonad_core::services::{git, zellij_events};
 use axum::response::IntoResponse;
 use exomonad_core::{
     ClaudePreToolUseOutput, HookEnvelope, HookEventType, HookInput, HookSpecificOutput,
-    InternalStopHookOutput, RuntimeBackend, RuntimeBuilder, StopDecision, ToolPermission,
-    WasmBackend,
+    InternalStopHookOutput, RuntimeBackend, StopDecision, TidepoolBackend, ToolPermission,
 };
 use std::collections::HashMap;
 use std::os::unix::process::CommandExt;
@@ -40,7 +37,7 @@ use tracing_subscriber::prelude::*;
 
 #[derive(Parser)]
 #[command(name = "exomonad")]
-#[command(about = "ExoMonad: Rust host with embedded Haskell WASM plugin for agent orchestration")]
+#[command(about = "ExoMonad: Rust host with Tidepool backend for agent orchestration")]
 #[command(version)]
 struct Cli {
     #[command(subcommand)]
@@ -73,16 +70,9 @@ enum Commands {
         recreate: bool,
     },
 
-    /// Recompile WASM plugin from Haskell source
-    Recompile {
-        /// Role to build (default: from config, usually "tl")
-        #[arg(long)]
-        role: Option<String>,
-    },
-
     /// Run HTTP MCP server (all agents connect to this)
     ///
-    /// Loads WASM from file path (not embedded) with hot reload on change.
+    /// Loads Tidepool backend with Cranelift-compiled Haskell Core.
     /// Listens on TCP (default: localhost:7432).
     Serve {
         /// TCP port to listen on (default: from config, or 7432)
@@ -107,7 +97,7 @@ enum Commands {
 }
 
 // ============================================================================
-// Per-Agent Plugin Cache
+// Per-Agent Backend Cache
 // ============================================================================
 
 /// Get or create a per-agent RuntimeBackend with baked-in identity.
@@ -115,9 +105,8 @@ async fn get_or_create_backend(
     backends: &tokio::sync::RwLock<HashMap<exomonad_core::AgentName, Arc<dyn RuntimeBackend>>>,
     agent_name: exomonad_core::AgentName,
     birth_branch: exomonad_core::BirthBranch,
-    registry: &Arc<exomonad_core::effects::EffectRegistry>,
-    wasm_path: &std::path::Path,
-) -> anyhow::Result<Arc<dyn RuntimeBackend>> {
+    zellij_session: Option<String>,
+) -> Result<Arc<dyn RuntimeBackend>> {
     // Fast path: existing backend
     {
         let cache = backends.read().await;
@@ -126,15 +115,12 @@ async fn get_or_create_backend(
         }
     }
 
-    // Slow path: create new per-agent backend
-    let ctx = exomonad_core::effects::EffectContext {
+    // Slow path: create new per-agent TidepoolBackend
+    let ctx = exomonad_core::EffectContext {
         agent_name: agent_name.clone(),
         birth_branch,
     };
-    let plugin = exomonad_core::PluginManager::from_file(wasm_path, registry.clone(), ctx)
-        .await
-        .with_context(|| format!("Failed to create plugin for agent {}", agent_name))?;
-    let b: Arc<dyn RuntimeBackend> = Arc::new(WasmBackend::new(plugin));
+    let b: Arc<dyn RuntimeBackend> = Arc::new(TidepoolBackend::new(zellij_session, ctx));
     let mut cache = backends.write().await;
     // Re-check after acquiring write lock to avoid TOCTOU race
     if let Some(existing) = cache.get(&agent_name) {
@@ -164,10 +150,8 @@ struct HookQueryParams {
 #[derive(Clone)]
 struct HookState {
     backends: Arc<tokio::sync::RwLock<HashMap<exomonad_core::AgentName, Arc<dyn RuntimeBackend>>>>,
-    registry: Arc<exomonad_core::effects::EffectRegistry>,
-    wasm_path: PathBuf,
-    otel: Option<Arc<OtelService>>,
     zellij_session: String,
+    otel: Option<Arc<OtelService>>,
     default_role: exomonad_core::Role,
 }
 
@@ -215,7 +199,7 @@ async fn emit_hook_span(
     }
 }
 
-/// Handle a hook request server-side. All WASM, OTel, and Zellij logic runs here.
+/// Handle a hook request server-side.
 async fn handle_hook_request(
     axum::extract::Query(params): axum::extract::Query<HookQueryParams>,
     axum::extract::State(state): axum::extract::State<HookState>,
@@ -291,11 +275,11 @@ async fn handle_hook_inner(
     // event types get handled explicitly rather than silently falling through.
     #[derive(Debug, Clone, Copy)]
     enum HookDispatch {
-        /// Stop/lifecycle hooks: WASM returns InternalStopHookOutput (allow/block + reason)
+        /// Stop/lifecycle hooks: returns InternalStopHookOutput (allow/block + reason)
         Stop,
-        /// Tool hooks: WASM returns ClaudePreToolUseOutput (allow/deny/ask)
+        /// Tool hooks: returns ClaudePreToolUseOutput (allow/deny/ask)
         ToolUse,
-        /// Worker exit: WASM handles notifyParent as side effect, returns simple allow
+        /// Worker exit: handles notifyParent as side effect, returns simple allow
         WorkerExit,
     }
 
@@ -312,7 +296,7 @@ async fn handle_hook_inner(
         | HookEventType::PreCompact
         | HookEventType::PermissionRequest
         | HookEventType::UserPromptSubmit => {
-            debug!(event = ?event_type, "Hook type not handled by WASM, allowing");
+            debug!(event = ?event_type, "Hook type not handled, allowing");
             let output_json = serde_json::to_string(&ClaudePreToolUseOutput::default())
                 .context("Failed to serialize output")?;
 
@@ -337,7 +321,7 @@ async fn handle_hook_inner(
         }
     };
 
-    // Normalize event name for WASM dispatch
+    // Normalize event name for dispatch
     let normalized_event_name = match event_type {
         HookEventType::Stop | HookEventType::AfterAgent => "Stop",
         HookEventType::SubagentStop => "SubagentStop",
@@ -350,7 +334,7 @@ async fn handle_hook_inner(
     };
     hook_input.hook_event_name = normalized_event_name.to_string();
 
-    // Create role-aware input for unified WASM
+    // Create role-aware input
     let mut hook_input_value =
         serde_json::to_value(&hook_input).context("Failed to serialize hook input")?;
     if let serde_json::Value::Object(ref mut map) = hook_input_value {
@@ -366,7 +350,7 @@ async fn handle_hook_inner(
         }
     }
 
-    // Resolve agent identity and get per-agent plugin with baked-in EffectContext.
+    // Resolve agent identity and get per-agent backend with baked-in EffectContext.
     let agent_name_for_hook =
         exomonad_core::AgentName::from(params.agent_id.as_deref().unwrap_or("root"));
     let birth_branch_for_hook =
@@ -382,15 +366,14 @@ async fn handle_hook_inner(
         &state.backends,
         agent_name_for_hook.clone(),
         birth_branch_for_hook.clone(),
-        &state.registry,
-        &state.wasm_path,
+        Some(state.zellij_session.clone()),
     )
     .await
     .context("Failed to get backend for hook")?;
 
     match dispatch {
         HookDispatch::WorkerExit => {
-            // WASM handles notifyParent as a side effect. We call it and return allow.
+            // Handle notifyParent as a side effect. We call it and return allow.
             let _: serde_json::Value = backend
                 .handle_hook(&hook_input_value)
                 .await
@@ -839,17 +822,6 @@ async fn main() -> Result<()> {
     });
 
     match cli.command {
-        Commands::Recompile { ref role } => {
-            let default_role = config.role.to_string();
-            let role_str = role.as_deref().unwrap_or(&default_role);
-            let project_dir = if config.project_dir.is_absolute() {
-                config.project_dir.clone()
-            } else {
-                std::env::current_dir()?.join(&config.project_dir)
-            };
-            return exomonad::recompile::run_recompile(role_str, &project_dir).await;
-        }
-
         Commands::Serve { port } => {
             let port = port.unwrap_or(config.port);
             let project_dir = if config.project_dir.is_absolute() {
@@ -859,99 +831,38 @@ async fn main() -> Result<()> {
             };
 
             let role_name = config.role.to_string();
-            let wasm_dir = config.wasm_dir.clone();
-
-            // Prefer unified WASM (contains all roles, role selection per-call).
-            // Fall back to per-role WASM for backwards compatibility.
-            let unified_path = wasm_dir.join("wasm-guest-unified.wasm");
-            let wasm_path = if unified_path.exists() {
-                info!(dir = %wasm_dir.display(), "Using unified WASM (all roles in one module)");
-                unified_path
-            } else {
-                let fallback = wasm_dir.join(format!("wasm-guest-{}.wasm", role_name));
-                info!(role = %role_name, dir = %wasm_dir.display(), "Unified WASM not found, falling back to per-role WASM");
-                fallback
-            };
-
-            if !wasm_path.exists() {
-                anyhow::bail!(
-                    "WASM file not found: {}\nRun `exomonad recompile` first to build it.",
-                    wasm_path.display()
-                );
-            }
 
             let server_pid_path = project_dir.join(".exo/server.pid");
-
-            let remote_port = std::env::var("EXOMONAD_SERVER_PORT")
-                .ok()
-                .and_then(|s| s.parse().ok());
 
             // Validate prerequisites
             exomonad_core::services::validate_git().context("Failed to validate git")?;
 
-            let secrets = exomonad_core::services::secrets::Secrets::load();
-            let executor: Arc<dyn exomonad_core::services::docker::CommandExecutor> =
-                Arc::new(exomonad_core::services::local::LocalExecutor::new());
-            let git = Arc::new(exomonad_core::services::git::GitService::new(executor));
-            let jj = Arc::new(
-                exomonad_core::services::jj_workspace::JjWorkspaceService::new(project_dir.clone()),
-            );
-            jj.ensure_colocated()
-                .context("Failed to validate jj workspace colocation")?;
-            let github = secrets
-                .github_token()
-                .and_then(|t| exomonad_core::services::github::GitHubService::new(t).ok());
-
-            if github.is_some() {
-                exomonad_core::services::validate_gh_cli().context("Failed to validate gh CLI")?;
-            }
-
-            let project_dir_for_services = project_dir.clone();
-            let mut agent_control =
-                exomonad_core::services::agent_control::AgentControlService::new(
-                    project_dir_for_services.clone(),
-                    github.clone(),
-                    jj.clone(),
-                );
-            let worktree_base = config.worktree_base;
-            agent_control = agent_control
-                .with_worktree_base(worktree_base.clone())
-                .with_mcp_server_port(port);
-            agent_control = agent_control.with_birth_branch(exomonad_core::BirthBranch::root());
-            agent_control = agent_control.with_zellij_session(config.zellij_session.clone());
-            let event_session_id = uuid::Uuid::new_v4().to_string();
-            let agent_control = Arc::new(agent_control);
-
-            let event_queue = Arc::new(exomonad_core::services::event_queue::EventQueue::new());
-            let claude_session_registry = Arc::new(
-                exomonad_core::services::claude_session_registry::ClaudeSessionRegistry::new(),
-            );
-
             info!(
-                wasm_path = %wasm_path.display(),
                 port = %port,
                 role = %role_name,
-                event_session_id = %event_session_id,
-                "Starting HTTP MCP server with file-based WASM (hot reload enabled)"
+                "Starting HTTP MCP server with Tidepool backend"
             );
 
-            // Build runtime with handler groups
-            let mut builder = RuntimeBuilder::new()
-                .with_wasm_path(wasm_path.clone())
-                .require_namespaces(vec![
-                    "log".to_string(),
-                    "kv".to_string(),
-                    "fs".to_string(),
-                    "git".to_string(),
-                    "github".to_string(),
-                    "agent".to_string(),
-                    "popup".to_string(),
-                    "events".to_string(),
-                    "messaging".to_string(),
-                    "coordination".to_string(),
-                    "session".to_string(),
-                ]);
-            // Create structured event log (JSONL)
+            // Create root TidepoolBackend
+            let root_ctx = exomonad_core::EffectContext {
+                agent_name: exomonad_core::AgentName::from("root"),
+                birth_branch: exomonad_core::BirthBranch::root(),
+            };
+            let root_backend: Arc<dyn RuntimeBackend> =
+                Arc::new(TidepoolBackend::new(Some(config.zellij_session.clone()), root_ctx));
+
+            // Per-agent backend cache — each agent gets its own backend with baked-in identity
+            let backends: Arc<
+                tokio::sync::RwLock<HashMap<exomonad_core::AgentName, Arc<dyn RuntimeBackend>>>,
+            > = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+
+            // Pre-populate with the root agent's backend
+            backends
+                .write()
+                .await
+                .insert(exomonad_core::AgentName::from("root"), root_backend.clone());
+
+            // Create event log
             let event_log = match exomonad_core::services::EventLog::open(
                 project_dir.join(".exo/events.jsonl"),
             ) {
@@ -965,38 +876,10 @@ async fn main() -> Result<()> {
                 }
             };
 
-            builder = builder.with_handlers(exomonad_core::core_handlers(
-                project_dir.clone(),
-                event_log.clone(),
-            ));
-            builder = builder.with_handlers(exomonad_core::git_handlers(git, github, jj));
-            let (orch_handlers, question_registry) = exomonad_core::orchestration_handlers(
-                agent_control.clone(),
-                event_queue.clone(),
-                Some(config.zellij_session.clone()),
-                project_dir.clone(),
-                remote_port,
-                Some(event_session_id),
-                claude_session_registry,
+            // Question registry for popup tool
+            let question_registry = Arc::new(
+                exomonad_core::services::questions::QuestionRegistry::new(),
             );
-            builder = builder.with_handlers(orch_handlers);
-            let rt = builder.build().await.context("Failed to build runtime")?;
-
-            // Extract the shared registry for creating per-agent backends
-            let rt_registry = rt.registry.clone();
-            let root_backend: Arc<dyn RuntimeBackend> =
-                Arc::new(WasmBackend::new(rt.plugin_manager));
-
-            // Per-agent backend cache — each agent gets its own backend with baked-in identity
-            let backends: Arc<
-                tokio::sync::RwLock<HashMap<exomonad_core::AgentName, Arc<dyn RuntimeBackend>>>,
-            > = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
-
-            // Pre-populate with the root agent's backend
-            backends
-                .write()
-                .await
-                .insert(exomonad_core::AgentName::from("root"), root_backend.clone());
 
             let base_state = exomonad_core::mcp::McpState {
                 project_dir: project_dir.clone(),
@@ -1018,6 +901,7 @@ async fn main() -> Result<()> {
             info!(path = %server_pid_path.display(), "Wrote server.pid");
 
             // Start GitHub Poller (background service)
+            let event_queue = Arc::new(exomonad_core::services::event_queue::EventQueue::new());
             let mut poller = exomonad_core::services::github_poller::GitHubPoller::new(
                 event_queue.clone(),
                 project_dir.clone(),
@@ -1030,7 +914,6 @@ async fn main() -> Result<()> {
             });
 
             // Lazy server cache — one McpServer per role, created on first request.
-            // Rust never enumerates roles; WASM AllRoles.hs is the single source of truth.
             let servers: Arc<tokio::sync::RwLock<HashMap<String, McpServer>>> =
                 Arc::new(tokio::sync::RwLock::new(HashMap::new()));
 
@@ -1048,7 +931,8 @@ async fn main() -> Result<()> {
                         "version": env!("CARGO_PKG_VERSION"),
                         "port": health_port,
                         "role": role,
-                        "wasm_hash": content_hash,
+                        "backend": "tidepool",
+                        "content_hash": content_hash,
                     }))
                 }
             };
@@ -1057,19 +941,17 @@ async fn main() -> Result<()> {
             let unified_handler = {
                 let servers = servers.clone();
                 let backends = backends.clone();
-                let registry = rt_registry.clone();
-                let wasm_path_for_handler = wasm_path.clone();
                 let base_state = base_state.clone();
-                let wb = worktree_base.clone();
+                let wb = config.worktree_base.clone();
+                let zs = config.zellij_session.clone();
                 move |axum::extract::Path((role, name)): axum::extract::Path<(String, String)>,
                       headers: axum::http::HeaderMap,
                       body: axum::extract::Json<serde_json::Value>| {
                     let servers = servers.clone();
                     let backends = backends.clone();
-                    let registry = registry.clone();
-                    let wasm_path_for_handler = wasm_path_for_handler.clone();
                     let base_state = base_state.clone();
                     let wb = wb.clone();
+                    let zs = zs.clone();
                     async move {
                         // Resolve agent identity
                         let agent_name = exomonad_core::AgentName::from(name.as_str());
@@ -1093,8 +975,7 @@ async fn main() -> Result<()> {
                                 &backends,
                                 agent_name.clone(),
                                 birth_branch,
-                                &registry,
-                                &wasm_path_for_handler,
+                                Some(zs.clone()),
                             )
                             .await
                             {
@@ -1129,34 +1010,32 @@ async fn main() -> Result<()> {
                 }
             };
 
-            // Event notification endpoint
-            let events_handler = move |body: axum::body::Bytes| {
+            // Event notification endpoint (JSON)
+            let events_handler = move |body: axum::extract::Json<serde_json::Value>| {
                 let queue = event_queue.clone();
                 async move {
-                    use exomonad_proto::effects::events::NotifyEventRequest;
-                    use prost::Message;
+                    let session_id = body
+                        .get("session_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    let event = body.get("event").cloned();
 
-                    match NotifyEventRequest::decode(body) {
-                        Ok(req) => {
-                            if let Some(event) = req.event {
-                                queue.notify_event(&req.session_id, event).await;
-                                (axum::http::StatusCode::OK, "OK")
-                            } else {
-                                (axum::http::StatusCode::BAD_REQUEST, "Missing event")
-                            }
+                    match event {
+                        Some(evt) => {
+                            queue.notify_json_event(&session_id, evt).await;
+                            (axum::http::StatusCode::OK, "OK")
                         }
-                        Err(_) => (axum::http::StatusCode::BAD_REQUEST, "Invalid protobuf"),
+                        None => (axum::http::StatusCode::BAD_REQUEST, "Missing event"),
                     }
                 }
             };
 
-            // Hook handler state (shared OtelService created once)
+            // Hook handler state
             let hook_state = HookState {
                 backends: backends.clone(),
-                registry: rt_registry.clone(),
-                wasm_path: wasm_path.clone(),
-                otel: OtelService::from_env().ok().map(Arc::new),
                 zellij_session: config.zellij_session.clone(),
+                otel: OtelService::from_env().ok().map(Arc::new),
                 default_role: config.role,
             };
 
@@ -1248,7 +1127,7 @@ async fn main() -> Result<()> {
                 "http://127.0.0.1:{}/hook?event={}&runtime={}",
                 port, event, runtime
             );
-            // Forward agent identity env vars so the server can inject them into WASM calls
+            // Forward agent identity env vars so the server can inject them into calls
             if let Ok(agent_id) = std::env::var("EXOMONAD_AGENT_ID") {
                 url.push_str(&format!("&agent_id={}", encode(&agent_id)));
             }

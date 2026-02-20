@@ -1,7 +1,7 @@
-//! Runtime backend trait for swappable execution engines.
+//! Runtime backend trait for the execution engine.
 //!
-//! Abstracts over WASM (Extism) and future Tidepool (Cranelift) backends.
 //! All MCP tool routing, hook handling, and hot reload go through this trait.
+//! Currently implemented by `TidepoolBackend` (Cranelift-compiled Haskell Core).
 
 use crate::mcp::{tools::MCPCallOutput, ToolDefinition};
 use anyhow::Result;
@@ -14,11 +14,9 @@ use serde_json::Value;
 /// (including trampoline/suspend for async effects), hook dispatch, and
 /// source change detection.
 ///
-/// Current backends:
-/// - [`WasmBackend`](crate::wasm_backend::WasmBackend): Extism-hosted Haskell WASM
-///
-/// Future:
-/// - `TidepoolBackend`: Cranelift-compiled Haskell Core via tidepool
+/// Current backend:
+/// - [`TidepoolBackend`](crate::tidepool_backend::TidepoolBackend): Cranelift-compiled
+///   Haskell Core via tidepool
 #[async_trait]
 pub trait RuntimeBackend: Send + Sync {
     /// Discover tool definitions for a role.

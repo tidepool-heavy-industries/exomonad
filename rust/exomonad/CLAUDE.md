@@ -1,19 +1,19 @@
 # exomonad
 
-Unified sidecar binary: Rust host with Haskell WASM plugin.
+Unified sidecar binary: Rust host with Tidepool backend.
 
 ## Architecture
 
-**All logic is in Haskell WASM. Rust handles I/O only.**
+**All logic is in Haskell via Tidepool. Rust handles I/O only.**
 
-WASM is loaded from `.exo/wasm/wasm-guest-unified.wasm` at runtime by `exomonad serve`. The `exomonad hook` command is a thin HTTP client that forwards hook events to the running server — it does NOT load WASM itself.
+TidepoolBackend compiles Haskell Core to native code via Cranelift JIT. Tool definitions live in `rust/exomonad-core/haskell/`. The `exomonad hook` command is a thin HTTP client that forwards hook events to the running server.
 
 ```
 # Hook mode (thin HTTP client → server)
-Claude Code → exomonad hook → HTTP POST localhost:{port}/hook → server WASM → HookEnvelope → stdout
+Claude Code → exomonad hook → HTTP POST localhost:{port}/hook → server → HookEnvelope → stdout
 
-# HTTP mode (multi-agent, unified WASM)
-N agents → exomonad serve → TCP (default: localhost:7432) → Unified WASM (handles all roles) → effects → I/O
+# HTTP mode (multi-agent, Tidepool backend)
+N agents → exomonad serve → TCP (default: localhost:7432) → TidepoolBackend (per-agent) → effects → I/O
 ```
 
 **Fail-open:** If the server is unreachable when a hook fires, `exomonad hook` prints `{"continue":true}` and exits 0. This prevents blocking the human's session.
@@ -22,8 +22,7 @@ N agents → exomonad serve → TCP (default: localhost:7432) → Unified WASM (
 
 ```bash
 exomonad hook pre-tool-use        # Handle Claude Code hook
-exomonad serve [--socket PATH]    # Unix socket MCP server (multi-agent, hot reload)
-exomonad recompile [--role ROLE]  # Build WASM from Haskell source
+exomonad serve [--port PORT]      # HTTP MCP server (multi-agent)
 exomonad init [--session NAME]    # Initialize Zellij session (Server tab + TL tab)
 ```
 
@@ -42,7 +41,6 @@ Use `--recreate` to delete an existing session and create fresh (e.g., after bin
 default_role = "tl"
 project_dir = "."
 shell_command = "nix develop"  # optional: environment wrapper for TL tab + server
-wasm_dir = ".exo/wasm"    # optional: override WASM location (default: ~/.exo/wasm/)
 ```
 
 **Bootstrap:** `exomonad init` auto-creates `.exo/config.toml` and `.gitignore` entries if missing. Works in any project directory.
@@ -51,13 +49,9 @@ wasm_dir = ".exo/wasm"    # optional: override WASM location (default: ~/.exo/wa
 - `config.toml` uses `default_role` (project-wide default)
 - `config.local.toml` uses `role` (worktree-specific override)
 
-**WASM resolution:** `wasm_dir` in config > `~/.exo/wasm/` (global default, installed by `just install-all`)
-
-To update WASM, run `just wasm-all` or `exomonad recompile --role unified`.
-
 ## MCP Server
 
-The MCP server provides tools via HTTP (rmcp).
+The MCP server provides tools via HTTP.
 
 ### Configuration
 
@@ -89,37 +83,12 @@ gemini mcp add --transport http exomonad http://localhost:7432/agents/tl/root/mc
 |----------|----------|---------|
 | `RUST_LOG` | No | Tracing log level |
 
-## Effect Boundary (WASM)
-
-All effects flow through a single `yield_effect` host function using protobuf binary encoding. Haskell calls `runEffect @EffectType request`, which encodes an `EffectEnvelope` and dispatches to the appropriate handler in the `EffectRegistry` by namespace prefix.
-
-### Registered Handlers
-
-| Namespace | Handler | Implementation |
-|-----------|---------|----------------|
-| `git.*` | GitHandler | git subprocess |
-| `github.*` | GitHubHandler | HTTP API |
-| `agent.*` | AgentHandler | GitHub API + git worktree + Zellij |
-| `fs.*` | FsHandler | tokio::fs |
-| `log.*` | LogHandler | tracing |
-| `popup.*` | PopupHandler | Zellij plugin IPC |
-| `file_pr.*` | FilePRHandler | gh CLI |
-| `copilot.*` | CopilotHandler | GitHub API polling |
-| `messaging.*` | MessagingHandler | Agent messaging files (JSON) |
-
-Handlers are registered via composable group functions: `core_handlers()`, `git_handlers()`, `orchestration_handlers()`.
-
 ## Building
 
-WASM must be built before running hooks or serve mode:
-
 ```bash
-# Full install (recommended): builds WASM, then Rust, installs everything
-just install-all-dev
-
-# Or manually:
-just wasm-all                    # Build unified WASM plugin
-cargo build -p exomonad          # Build Rust binary
+just install-all-dev             # Build + install everything (debug)
+just install-all                 # Build + install everything (release)
+cargo build -p exomonad          # Build Rust binary only
 ```
 
 ## Testing
@@ -148,11 +117,7 @@ Claude Code hook JSON (stdin)
          ↓
     Server: parse HookInput from body
          ↓
-    Server: call WASM handle_pre_tool_use (in-process)
-         ↓
-    Haskell yields effects (GitGetBranch, LogInfo, etc.)
-         ↓
-    Server executes effects via host functions (in-process)
+    Server: TidepoolBackend::handle_hook (in-process)
          ↓
     Server returns HookEnvelope { stdout, exit_code }
          ↓
@@ -163,5 +128,4 @@ Claude Code hook JSON (stdin)
 
 ## Related Documentation
 
-- **[exomonad-core](../exomonad-core/)** - Framework, handlers, services, protocol types, UI protocol
-- **[wasm-guest](../../haskell/wasm-guest/)** - Haskell WASM plugin source
+- **[exomonad-core](../exomonad-core/)** - Tidepool backend, services, protocol types, UI protocol

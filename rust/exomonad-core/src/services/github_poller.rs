@@ -4,7 +4,7 @@ use crate::services::event_log::EventLog;
 use crate::services::event_queue::EventQueue;
 use crate::services::zellij_events;
 use anyhow::{Context, Result};
-use exomonad_proto::effects::events::{event::EventType, Event, WorkerComplete};
+use crate::services::event_queue::{Event, EventType, WorkerComplete};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;

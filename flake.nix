@@ -7,9 +7,12 @@
     ghc-wasm-meta.url = "gitlab:haskell-wasm/ghc-wasm-meta?host=gitlab.haskell.org";
     rust-overlay.url = "github:oxalica/rust-overlay";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
+    tidepool.url = "path:../tidepool";
+    tidepool.inputs.nixpkgs.follows = "nixpkgs";
+    tidepool.inputs.rust-overlay.follows = "rust-overlay";
   };
 
-  outputs = { self, nixpkgs, flake-utils, ghc-wasm-meta, rust-overlay }:
+  outputs = { self, nixpkgs, flake-utils, ghc-wasm-meta, rust-overlay, tidepool }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
@@ -58,6 +61,11 @@
           jujutsu  # jj
         ];
 
+        # Tidepool: Haskell Core → Cranelift compiler
+        tidepoolPkgs = [
+          tidepool.packages.${system}.tidepool-extract
+        ];
+
       in {
         devShells = {
           # Default: Full development environment
@@ -66,6 +74,7 @@
               ++ haskellPkgs "ghc912"
               ++ rustPkgs
               ++ orchestrationPkgs
+              ++ tidepoolPkgs
               ++ [ pkgs.sqlite ]
               ++ [ proto3SuitePkg ];  # For compile-proto-file (Haskell proto codegen)
 

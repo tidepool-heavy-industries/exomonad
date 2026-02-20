@@ -2,11 +2,11 @@
 name = "exomonad-core"
 version = "0.1.0"
 edition = "2021"
-description = "ExoMonad core: effect system, WASM hosting, MCP server, built-in handlers, shared types"
+description = "ExoMonad core: effect system, MCP server, Tidepool backend, shared types"
 license = "BSD-3-Clause"
 repository = "https://github.com/tidepool-heavy-industries/exomonad"
 homepage = "https://github.com/tidepool-heavy-industries/exomonad"
-keywords = ["agent", "mcp", "automation", "wasm"]
+keywords = ["agent", "mcp", "automation", "tidepool"]
 categories = ["development-tools"]
 
 [features]
@@ -17,16 +17,11 @@ runtime = [
     "dep:libc",
     "dep:clap",
     "dep:duct",
-    "dep:prost",
     "dep:strum",
     "dep:tokio",
     "dep:tracing",
     "dep:tracing-subscriber",
     "dep:uuid",
-    "dep:extism",
-    "dep:extism-convert",
-    "dep:sha2",
-    "dep:exomonad-proto",
     "dep:shell-escape",
     "dep:nix",
     "dep:askama",
@@ -41,6 +36,13 @@ runtime = [
     "dep:tower-http",
     "dep:futures-util",
     "dep:jj-lib",
+    "dep:tidepool-core-repr",
+    "dep:tidepool-core-eval",
+    "dep:tidepool-core-heap",
+    "dep:tidepool-core-bridge",
+    "dep:tidepool-core-bridge-derive",
+    "dep:tidepool-core-effect",
+    "dep:tidepool-macro",
 ]
 
 [dependencies]
@@ -55,7 +57,6 @@ libc = { version = "0.2", optional = true }
 clap = { workspace = true, optional = true }
 duct = { workspace = true, optional = true }
 futures-util = { workspace = true, optional = true }
-prost = { workspace = true, optional = true }
 strum = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
@@ -63,13 +64,7 @@ tracing = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 
-# Runtime feature: core framework
-extism = { version = "1.13", optional = true }
-extism-convert = { version = "1.13", optional = true }
-sha2 = { version = "0.10", optional = true }
-
 # Runtime feature: shared types
-exomonad-proto = { path = "../exomonad-proto", version = "0.1.0", features = ["effects"], optional = true }
 shell-escape = { version = "0.1", optional = true }
 nix = { workspace = true, features = ["fs"], optional = true }
 
@@ -89,20 +84,24 @@ url = { version = "2", optional = true }
 axum = { version = "0.8", optional = true }
 tower-http = { version = "0.6", features = ["cors"], optional = true }
 
+# Tidepool: Cranelift-compiled Haskell Core
+# Renamed with tidepool- prefix to avoid ambiguity (actual crate names lack prefix)
+tidepool-core-repr = { package = "core-repr", path = "../../../tidepool/core-repr", optional = true }
+tidepool-core-eval = { package = "core-eval", path = "../../../tidepool/core-eval", optional = true }
+tidepool-core-heap = { package = "core-heap", path = "../../../tidepool/core-heap", optional = true }
+tidepool-core-bridge = { package = "core-bridge", path = "../../../tidepool/core-bridge", optional = true }
+tidepool-core-bridge-derive = { package = "core-bridge-derive", path = "../../../tidepool/core-bridge-derive", optional = true }
+tidepool-core-effect = { package = "core-effect", path = "../../../tidepool/core-effect", optional = true, features = ["async"] }
+tidepool-macro = { package = "tidepool-macro", path = "../../../tidepool/tidepool-macro", optional = true }
+
 [dev-dependencies]
 async-trait = { workspace = true }
-exomonad-proto = { path = "../exomonad-proto", version = "0.1.0", features = ["effects"] }
-prost = { workspace = true }
 proptest = "1.4"
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
 wiremock = "0.6"
-
-[build-dependencies]
-prost-types = "0.14"
-prost = "0.14"
 
 [lib]
 path = "src/lib.rs"

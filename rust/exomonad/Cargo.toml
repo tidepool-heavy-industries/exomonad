@@ -2,11 +2,11 @@
 name = "exomonad"
 version = "0.1.0"
 edition = "2021"
-description = "ExoMonad: Rust host with Haskell WASM plugin for Claude Code hooks/MCP"
+description = "ExoMonad: Rust host with Tidepool backend for agent orchestration"
 license = "BSD-3-Clause"
 repository = "https://github.com/tidepool-heavy-industries/exomonad"
 homepage = "https://github.com/tidepool-heavy-industries/exomonad"
-keywords = ["agent", "mcp", "automation", "wasm"]
+keywords = ["agent", "mcp", "automation", "tidepool"]
 categories = ["development-tools"]
 autobins = false
 
@@ -31,8 +31,6 @@ thiserror = { workspace = true }
 toml = "0.8"
 uuid = { workspace = true }
 urlencoding = "2"
-prost = { workspace = true }
-exomonad-proto = { path = "../exomonad-proto", version = "0.1.0", features = ["effects"] }
 
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 futures-util = { workspace = true }
