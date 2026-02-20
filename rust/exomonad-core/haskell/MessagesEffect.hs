@@ -3,25 +3,28 @@ module MessagesEffect where
 
 import Control.Monad.Freer
 
--- Effect GADT. Constructor names must match Rust #[core(name = "...")] exactly.
-data MessagesOp a where
-  GetToolInput :: MessagesOp MessagesInput
-  GetMessages  :: String -> String -> MessagesOp MessagesResult
+-- Per-tool input effect (tag 0 in HList)
+data MessagesInput' a where
+  GetToolInput :: MessagesInput' MessagesInput
 
--- Input from MCP args. timeout_secs as String; Rust parses to i32.
 data MessagesInput = MessagesInput
   { miAgentId     :: String
   , miTimeoutSecs :: String
   }
 
--- Result returned to caller. messages_json is the serialized JSON string.
+-- Per-tool domain op (tag 1 in HList)
+data MessagesOp a where
+  FetchMessages :: String -> String -> MessagesOp MessagesResult
+
+-- Result returned to caller.
 data MessagesResult = MessagesResult
   { mrMessagesJson :: String
   , mrWarning      :: String
   }
 
--- Entry point: zero-arg, all input via effects.
-messagesTool :: Eff '[MessagesOp] MessagesResult
+-- Entry point: multi-effect composition.
+-- Passes args to MessagesOp for Rust to handle timeout branching + inbox read.
+messagesTool :: Eff '[MessagesInput', MessagesOp] MessagesResult
 messagesTool = do
   input <- send GetToolInput
-  send (GetMessages (miAgentId input) (miTimeoutSecs input))
+  send (FetchMessages (miAgentId input) (miTimeoutSecs input))

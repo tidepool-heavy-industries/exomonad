@@ -3,25 +3,26 @@ module SpawnLeafEffect where
 
 import Control.Monad.Freer
 
--- Effect GADT. Constructor names must match Rust #[core(name = "...")] exactly.
-data SpawnLeafOp a where
-  GetToolInput :: SpawnLeafOp SpawnLeafInput
-  SpawnLeaf    :: String -> String -> SpawnLeafOp SpawnLeafResult
+-- Per-tool input effect (tag 0 in HList)
+data SpawnLeafInput' a where
+  GetToolInput :: SpawnLeafInput' SpawnLeafInput
 
--- Input from MCP args.
 data SpawnLeafInput = SpawnLeafInput
   { sliTask       :: String
   , sliBranchName :: String
   }
 
--- Result returned to caller.
+-- Per-tool domain op (tag 1 in HList)
+data SpawnLeafOp a where
+  SpawnLeaf :: String -> String -> SpawnLeafOp SpawnLeafResult
+
 data SpawnLeafResult = SpawnLeafResult
   { slrTabName    :: String
   , slrBranchName :: String
   }
 
--- Entry point: zero-arg, all input via effects.
-spawnLeafTool :: Eff '[SpawnLeafOp] SpawnLeafResult
+-- Entry point: multi-effect composition.
+spawnLeafTool :: Eff '[SpawnLeafInput', SpawnLeafOp] SpawnLeafResult
 spawnLeafTool = do
   input <- send GetToolInput
   send (SpawnLeaf (sliTask input) (sliBranchName input))

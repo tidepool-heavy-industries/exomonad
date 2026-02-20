@@ -14,6 +14,7 @@ default = ["runtime"]
 runtime = [
     "dep:async-trait",
     "dep:anyhow",
+    "dep:frunk",
     "dep:libc",
     "dep:clap",
     "dep:duct",
@@ -36,12 +37,12 @@ runtime = [
     "dep:tower-http",
     "dep:futures-util",
     "dep:jj-lib",
-    "dep:tidepool-core-repr",
-    "dep:tidepool-core-eval",
-    "dep:tidepool-core-heap",
-    "dep:tidepool-core-bridge",
-    "dep:tidepool-core-bridge-derive",
-    "dep:tidepool-core-effect",
+    "dep:tidepool-repr",
+    "dep:tidepool-eval",
+    "dep:tidepool-heap",
+    "dep:tidepool-bridge",
+    "dep:tidepool-bridge-derive",
+    "dep:tidepool-effect",
     "dep:tidepool-macro",
 ]
 
@@ -64,6 +65,8 @@ tracing = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 
+frunk = { version = "0.4", optional = true }
+
 # Runtime feature: shared types
 shell-escape = { version = "0.1", optional = true }
 nix = { workspace = true, features = ["fs"], optional = true }
@@ -85,14 +88,14 @@ axum = { version = "0.8", optional = true }
 tower-http = { version = "0.6", features = ["cors"], optional = true }
 
 # Tidepool: Cranelift-compiled Haskell Core
-# Renamed with tidepool- prefix to avoid ambiguity (actual crate names lack prefix)
-tidepool-core-repr = { package = "core-repr", path = "../../../tidepool/core-repr", optional = true }
-tidepool-core-eval = { package = "core-eval", path = "../../../tidepool/core-eval", optional = true }
-tidepool-core-heap = { package = "core-heap", path = "../../../tidepool/core-heap", optional = true }
-tidepool-core-bridge = { package = "core-bridge", path = "../../../tidepool/core-bridge", optional = true }
-tidepool-core-bridge-derive = { package = "core-bridge-derive", path = "../../../tidepool/core-bridge-derive", optional = true }
-tidepool-core-effect = { package = "core-effect", path = "../../../tidepool/core-effect", optional = true, features = ["async"] }
-tidepool-macro = { package = "tidepool-macro", path = "../../../tidepool/tidepool-macro", optional = true }
+tidepool-repr = { version = "0.0.1", optional = true }
+tidepool-eval = { version = "0.0.1", optional = true }
+tidepool-heap = { version = "0.0.1", optional = true }
+tidepool-bridge = { version = "0.0.1", optional = true }
+tidepool-bridge-derive = { version = "0.0.1", optional = true }
+tidepool-effect = { version = "0.0.1", optional = true, features = ["async"] }
+tidepool-macro = { version = "0.0.1", optional = true }
+
 
 [dev-dependencies]
 async-trait = { workspace = true }

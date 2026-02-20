@@ -72,6 +72,9 @@ rust/exomonad/.exo/
 # Standalone Rust crate build artifacts (outside workspace target/)
 rust/exomonad-plugin/target/
 
+# Tidepool CBOR artifacts (regenerated from .hs sources at compile time)
+rust/exomonad-core/target/
+
 # Interagent communication artifacts (TL↔Codex design docs)
 interagent/
 

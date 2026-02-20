@@ -9,11 +9,11 @@
 //!     ▼
 //! TidepoolBackend
 //! (Cranelift JIT Haskell Core)
-//! ├── EffectMachine::run_async
+//! ├── EffectMachine::run_with_user
 //! │   → Haskell Core expr eval
-//! │   → BridgeDispatcher routes
+//! │   → Per-tool EffectHandler via HList
 //! │     Core ↔ FromCore/ToCore
-//! └── Services called directly
+//! └── Services via EffectHandler impls
 //! ```
 //!
 //! # Features

@@ -3,24 +3,47 @@ module NotifyEffect where
 
 import Control.Monad.Freer
 
--- Effect GADT. Constructor names must match Rust #[core(name = "...")] exactly.
-data Notify a where
-  GetToolInput  :: Notify NotifyInput
-  NotifyParent  :: String -> String -> Notify NotifyResult
+-- Per-tool input effect (tag 0 in HList)
+data NotifyInput' a where
+  GetToolInput :: NotifyInput' NotifyInput
 
--- Input from MCP args. Rust pre-composes the rich message (pr_number + tasks).
 data NotifyInput = NotifyInput
   { niStatus  :: String
   , niMessage :: String
   }
+
+-- Shared Identity effect (tag 1 in HList)
+-- All constructors declared for DataConTable completeness.
+data Identity a where
+  GetAgentId   :: Identity String
+  GetParentTab :: Identity String
+  GetOwnTab    :: Identity String
+  GetWorkingDir :: Identity String
+
+-- Shared FormatOp effect (tag 2 in HList)
+-- Temporary bridge until Tidepool supports Prelude functions.
+data FormatOp a where
+  FormatNotification :: String -> String -> String -> FormatOp String
+  FormatNoteSubject  :: String -> FormatOp String
+  DefaultMessage     :: String -> String -> FormatOp String
+  FormatNote         :: String -> String -> FormatOp String
+
+-- Per-tool domain op (tag 3 in HList)
+data NotifyOp a where
+  DeliverNotification :: String -> String -> NotifyOp NotifyResult
 
 -- Result returned to caller.
 data NotifyResult = NotifyResult
   { nrAck :: String
   }
 
--- Entry point: zero-arg, all input via effects.
-notifyTool :: Eff '[Notify] NotifyResult
+-- Entry point: multi-effect composition.
+-- Flow: get identity → default empty message → format notification → deliver.
+notifyTool :: Eff '[NotifyInput', Identity, FormatOp, NotifyOp] NotifyResult
 notifyTool = do
   input <- send GetToolInput
-  send (NotifyParent (niStatus input) (niMessage input))
+  agentId <- send GetAgentId
+  parentTab <- send GetParentTab
+  msg <- send (DefaultMessage (niStatus input) (niMessage input))
+  formatted <- send (FormatNotification (niStatus input) msg agentId)
+  send (DeliverNotification parentTab formatted)

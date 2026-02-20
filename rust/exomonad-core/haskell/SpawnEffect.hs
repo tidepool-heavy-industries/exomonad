@@ -3,26 +3,26 @@ module SpawnEffect where
 
 import Control.Monad.Freer
 
--- Effect GADT. Constructor names must match Rust #[core(name = "...")] exactly.
-data SpawnSubtreeOp a where
-  GetToolInput  :: SpawnSubtreeOp SpawnSubtreeInput
-  SpawnSubtree  :: String -> String -> String -> SpawnSubtreeOp SpawnSubtreeResult
+-- Per-tool input effect (tag 0 in HList)
+data SpawnSubtreeInput' a where
+  GetToolInput :: SpawnSubtreeInput' SpawnSubtreeInput
 
--- Input from MCP args.
 data SpawnSubtreeInput = SpawnSubtreeInput
-  { ssiTask            :: String
-  , ssiBranchName      :: String
-  , ssiParentSessionId :: String
+  { ssiTask       :: String
+  , ssiBranchName :: String
   }
 
--- Result returned to caller.
+-- Per-tool domain op (tag 1 in HList)
+data SpawnSubtreeOp a where
+  SpawnSubtree :: String -> String -> SpawnSubtreeOp SpawnSubtreeResult
+
 data SpawnSubtreeResult = SpawnSubtreeResult
   { ssrTabName    :: String
   , ssrBranchName :: String
   }
 
--- Entry point: zero-arg, all input via effects.
-spawnSubtreeTool :: Eff '[SpawnSubtreeOp] SpawnSubtreeResult
+-- Entry point: multi-effect composition.
+spawnSubtreeTool :: Eff '[SpawnSubtreeInput', SpawnSubtreeOp] SpawnSubtreeResult
 spawnSubtreeTool = do
   input <- send GetToolInput
-  send (SpawnSubtree (ssiTask input) (ssiBranchName input) (ssiParentSessionId input))
+  send (SpawnSubtree (ssiTask input) (ssiBranchName input))

@@ -3,32 +3,36 @@ module PopupEffect where
 
 import Control.Monad.Freer
 
--- Effect GADT. Constructor names must match Rust #[core(name = "...")] exactly.
-data Popup a where
-  GetToolInput :: Popup ToolInput
-  ShowPopup    :: String -> String -> Popup PopupResponse
+-- Per-tool input effect (tag 0 in HList)
+data PopupInput' a where
+  GetToolInput :: PopupInput' ToolInput
 
--- Types mirror Rust FromCore/ToCore structs (names must match exactly).
 data ToolInput = ToolInput
   { tiTitle      :: String
   , tiComponents :: String
   }
+
+-- Shared Identity effect (tag 1 in HList)
+-- All constructors declared for DataConTable completeness.
+data Identity a where
+  GetAgentId   :: Identity String
+  GetParentTab :: Identity String
+  GetOwnTab    :: Identity String
+  GetWorkingDir :: Identity String
+
+-- Per-tool domain op (tag 2 in HList)
+data PopupOp a where
+  ShowPopup :: String -> String -> String -> PopupOp PopupResponse
 
 data PopupResponse = PopupResponse
   { prButton :: String
   , prValues :: String
   }
 
--- Smart constructors
-getToolInput :: Member Popup effs => Eff effs ToolInput
-getToolInput = send GetToolInput
-
-showPopup :: Member Popup effs => String -> String -> Eff effs PopupResponse
-showPopup title components = send (ShowPopup title components)
-
--- Entry point: zero-arg, all input via effects.
--- POC passthrough — later Haskell adds validation, wizard flows, etc.
-popupTool :: Eff '[Popup] PopupResponse
+-- Entry point: multi-effect composition.
+-- Own tab resolution via Identity effect.
+popupTool :: Eff '[PopupInput', Identity, PopupOp] PopupResponse
 popupTool = do
-  input <- getToolInput
-  showPopup (tiTitle input) (tiComponents input)
+  input <- send GetToolInput
+  ownTab <- send GetOwnTab
+  send (ShowPopup (tiTitle input) (tiComponents input) ownTab)

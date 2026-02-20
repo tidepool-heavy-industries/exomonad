@@ -1656,14 +1656,13 @@ impl AgentControlService {
 
     /// Build the full shell command string for an agent.
     ///
-    /// Handles: agent CLI + prompt/flags → env var prefix → nix develop wrapping.
+    /// Handles: agent CLI + prompt/flags → env var prefix.
     /// Used by both `new_zellij_tab_inner` (KDL layout) and `new_zellij_pane` (CLI).
     fn build_agent_command(
         agent_type: AgentType,
         prompt: Option<&str>,
         fork_session_id: Option<&str>,
         env_vars: &HashMap<String, String>,
-        cwd: &Path,
     ) -> String {
         let cmd = agent_type.command();
         let skip_perms = match agent_type {
@@ -1703,14 +1702,7 @@ impl AgentControlService {
             format!("{} {}", env_prefix, agent_command)
         };
 
-        // Wrap in nix develop shell if flake.nix exists in cwd
-        if cwd.join("flake.nix").exists() {
-            info!("Wrapping agent command in nix develop shell");
-            let escaped = full_command.replace('\'', "'\\''");
-            format!("nix develop -c sh -c '{}'", escaped)
-        } else {
-            full_command
-        }
+        full_command
     }
 
     #[tracing::instrument(skip(self, prompt, env_vars, fork_session_id))]
@@ -1726,7 +1718,7 @@ impl AgentControlService {
         info!(name, cwd = %cwd.display(), agent_type = ?agent_type, fork = fork_session_id.is_some(), "Creating Zellij tab");
 
         let full_command =
-            Self::build_agent_command(agent_type, prompt, fork_session_id, &env_vars, cwd);
+            Self::build_agent_command(agent_type, prompt, fork_session_id, &env_vars);
 
         // Escape the command for KDL string literal (escape backslashes, quotes, newlines)
         let kdl_escaped_command = Self::escape_for_kdl(&full_command);
@@ -1894,7 +1886,7 @@ impl AgentControlService {
     ) -> Result<()> {
         info!(name, cwd = %cwd.display(), agent_type = ?agent_type, "Creating Zellij pane");
 
-        let full_command = Self::build_agent_command(agent_type, prompt, None, &env_vars, cwd);
+        let full_command = Self::build_agent_command(agent_type, prompt, None, &env_vars);
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
 
         let output = Command::new("zellij")

@@ -3,27 +3,38 @@ module MergePREffect where
 
 import Control.Monad.Freer
 
--- Effect GADT. Constructor names must match Rust #[core(name = "...")] exactly.
-data MergePR a where
-  GetToolInput    :: MergePR MergePRInput
-  MergePullRequest :: String -> String -> String -> MergePR MergePRResult
+-- Per-tool input effect (tag 0 in HList)
+data MergePRInput' a where
+  GetToolInput :: MergePRInput' MergePRInput
 
--- Input from MCP args. pr_number as String; Rust parses to i64.
 data MergePRInput = MergePRInput
-  { mprPrNumber   :: String
-  , mprStrategy   :: String
-  , mprWorkingDir :: String
+  { mprPrNumber :: String
+  , mprStrategy :: String
   }
 
--- Result returned to caller. Bool fields as String ("true"/"false").
+-- Shared Identity effect (tag 1 in HList)
+-- All constructors declared for DataConTable completeness.
+data Identity a where
+  GetAgentId   :: Identity String
+  GetParentTab :: Identity String
+  GetOwnTab    :: Identity String
+  GetWorkingDir :: Identity String
+
+-- Per-tool domain op (tag 2 in HList)
+data MergePROp a where
+  MergePullRequest :: String -> String -> String -> MergePROp MergePRResult
+
+-- Result returned to caller.
 data MergePRResult = MergePRResult
   { mprSuccess   :: String
   , mprMessage   :: String
   , mprJjFetched :: String
   }
 
--- Entry point: zero-arg, all input via effects.
-mergePRTool :: Eff '[MergePR] MergePRResult
+-- Entry point: multi-effect composition.
+-- Working dir from Identity, no longer in MCP args.
+mergePRTool :: Eff '[MergePRInput', Identity, MergePROp] MergePRResult
 mergePRTool = do
   input <- send GetToolInput
-  send (MergePullRequest (mprPrNumber input) (mprStrategy input) (mprWorkingDir input))
+  workingDir <- send GetWorkingDir
+  send (MergePullRequest (mprPrNumber input) (mprStrategy input) workingDir)

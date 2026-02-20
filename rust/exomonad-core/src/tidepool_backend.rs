@@ -1,14 +1,11 @@
 //! Tidepool backend: Cranelift-compiled Haskell Core behind RuntimeBackend.
 //!
-//! Haskell defines the popup computation (`PopupEffect.hs`), compiled to Core
-//! at build time via `haskell_expr!`. Rust handles effects via `BridgeDispatcher`.
-//! The `EffectMachine` bridges them: evaluates Core, yields effects to Rust,
-//! feeds responses back into Haskell continuations.
-//!
-//! The `BridgeDispatcher` implements tidepool's `DispatchEffect` trait (sync),
-//! routing effect tags to service calls. Each effect gets native Rust types
-//! that mirror the Haskell Core representation via `FromCore`/`ToCore`.
+//! Each MCP tool is compiled from Haskell at build time via `haskell_expr!`.
+//! At runtime, tool calls flow through `EffectMachine`, which evaluates the
+//! Core expression and routes yielded effects to per-tool `EffectHandler` impls
+//! composed via frunk HLists.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::effects::EffectContext;
@@ -20,21 +17,81 @@ use async_trait::async_trait;
 use serde_json::Value as JsonValue;
 use tracing::debug;
 
-// Derive macros emit `core_bridge::`, `core_eval::`, `core_repr::` paths.
-// In exomonad these crates are renamed with `tidepool-` prefix, so we alias them.
-use tidepool_core_bridge as core_bridge;
-use tidepool_core_eval as core_eval;
-use tidepool_core_repr as core_repr;
-
-use tidepool_core_bridge::{FromCore, ToCore};
-use tidepool_core_bridge_derive::{FromCore, ToCore};
-use tidepool_core_effect::dispatch::{DispatchEffect, EffectContext as TidepoolEffectContext};
-use tidepool_core_effect::error::EffectError as TidepoolEffectError;
-use tidepool_core_eval::value::Value;
-use tidepool_core_repr::{CoreExpr, DataConTable};
+use tidepool_bridge::{FromCore, ToCore};
+use tidepool_bridge_derive::{FromCore, ToCore};
+use tidepool_effect::dispatch::{
+    DispatchEffect, EffectContext as TidepoolEffectContext, EffectHandler,
+};
+use tidepool_effect::error::EffectError as TidepoolEffectError;
+use tidepool_eval::value::Value;
+use tidepool_repr::{CoreExpr, DataConTable};
 
 // =============================================================================
-// Native effect types (FromCore/ToCore — no proto)
+// Shared effect bridge types (reused across tools)
+// =============================================================================
+
+/// Generic tool input effect. All tools use `GetToolInput` as their first
+/// effect to receive MCP args from Rust. The handler is generic over the
+/// input type T via ToolInputHandler<T>.
+#[derive(Debug, FromCore)]
+enum GetToolInputReq {
+    #[core(name = "GetToolInput")]
+    Get,
+}
+
+/// Shared Identity effect. Provides agent identity information.
+/// Constructor names match Haskell GADT exactly.
+#[derive(Debug, FromCore)]
+enum IdentityReq {
+    #[core(name = "GetAgentId")]
+    GetAgentId,
+    #[core(name = "GetParentTab")]
+    GetParentTab,
+    #[core(name = "GetOwnTab")]
+    GetOwnTab,
+    #[core(name = "GetWorkingDir")]
+    GetWorkingDir,
+}
+
+/// Shared Inbox effect. Read/write agent messages.
+#[derive(Debug, FromCore)]
+enum InboxReq {
+    #[core(name = "WriteMessage")]
+    WriteMessage(String, String, String, String),
+    #[core(name = "ReadMessages")]
+    ReadMessages(String),
+    #[core(name = "PollMessages")]
+    PollMessages(String, String),
+}
+
+/// Shared Questions effect. Resolves pending questions.
+#[derive(Debug, FromCore)]
+enum QuestionsReq {
+    #[core(name = "ResolveQuestion")]
+    ResolveQuestion(String, String),
+}
+
+/// Shared FormatOp effect. Temporary bridge until Tidepool supports Prelude
+/// functions (string comparison, conditionals). Haskell decides *what* to format;
+/// Rust decides *how* until inline Haskell logic is possible.
+#[derive(Debug, FromCore)]
+enum FormatOpReq {
+    /// Format a parent notification: status, message, agentId → formatted string.
+    #[core(name = "FormatNotification")]
+    FormatNotification(String, String, String),
+    /// Truncate content to a subject line (first 50 chars).
+    #[core(name = "FormatNoteSubject")]
+    FormatNoteSubject(String),
+    /// Return message if non-empty, otherwise a default based on status.
+    #[core(name = "DefaultMessage")]
+    DefaultMessage(String, String),
+    /// Format a note notification: agentId, content → formatted string.
+    #[core(name = "FormatNote")]
+    FormatNote(String, String),
+}
+
+// =============================================================================
+// Per-tool bridge types
 // =============================================================================
 
 /// Tool input provided by Rust when Haskell yields `GetToolInput`.
@@ -46,14 +103,11 @@ struct ToolInput {
     components: String,
 }
 
-/// Popup effect request, decoded from Haskell GADT constructors.
-/// Variant names must match Haskell constructor names exactly.
+/// Per-tool domain op for popup. Receives title, components, and target tab.
 #[derive(Debug, FromCore)]
-enum PopupReq {
-    #[core(name = "GetToolInput")]
-    GetToolInput,
+enum PopupOpReq {
     #[core(name = "ShowPopup")]
-    ShowPopup(String, String),
+    ShowPopup(String, String, String),
 }
 
 /// Popup response returned to Haskell after showing the popup.
@@ -89,26 +143,24 @@ struct FilePRToolResult {
     created: String,
 }
 
-/// Mirrors Haskell GADT constructors for `FilePR`.
+/// Per-tool domain op for file_pr. Receives all args including working_dir from Identity.
 #[derive(Debug, FromCore)]
-enum FilePRReq {
-    #[core(name = "GetToolInput")]
-    GetToolInput,
+enum FilePROpReq {
     #[core(name = "CreateOrUpdatePR")]
-    CreateOrUpdatePR(String, String, String),
+    CreateOrUpdatePR(String, String, String, String),
 }
 
 // =============================================================================
 // merge_pr bridge types
 // =============================================================================
 
-/// Mirrors Haskell: `MergePRInput { mprPrNumber, mprStrategy, mprWorkingDir }`
+/// Mirrors Haskell: `MergePRInput { mprPrNumber, mprStrategy }`
+/// working_dir no longer in MCP args — resolved via Identity effect.
 #[derive(Debug, FromCore, ToCore)]
 #[core(name = "MergePRInput")]
 struct MergePRToolInput {
     pr_number: String,
     strategy: String,
-    working_dir: String,
 }
 
 /// Mirrors Haskell: `MergePRResult { mprSuccess, mprMessage, mprJjFetched }`
@@ -120,11 +172,9 @@ struct MergePRToolResult {
     jj_fetched: String,
 }
 
-/// Mirrors Haskell GADT constructors for `MergePR`.
+/// Per-tool domain op for merge_pr.
 #[derive(Debug, FromCore)]
-enum MergePRReq {
-    #[core(name = "GetToolInput")]
-    GetToolInput,
+enum MergePROpReq {
     #[core(name = "MergePullRequest")]
     MergePullRequest(String, String, String),
 }
@@ -148,26 +198,23 @@ struct NotifyToolResult {
     ack: String,
 }
 
-/// Mirrors Haskell GADT constructors for `Notify`.
+/// Per-tool domain op for notify_parent. Pure I/O — just injects formatted text.
 #[derive(Debug, FromCore)]
-enum NotifyReq {
-    #[core(name = "GetToolInput")]
-    GetToolInput,
-    #[core(name = "NotifyParent")]
-    NotifyParent(String, String),
+enum NotifyOpReq {
+    #[core(name = "DeliverNotification")]
+    DeliverNotification(String, String), // parentTab, formatted
 }
 
 // =============================================================================
 // spawn_subtree bridge types
 // =============================================================================
 
-/// Mirrors Haskell: `SpawnSubtreeInput { ssiTask, ssiBranchName, ssiParentSessionId }`
+/// Mirrors Haskell: `SpawnSubtreeInput { ssiTask, ssiBranchName }`
 #[derive(Debug, FromCore, ToCore)]
 #[core(name = "SpawnSubtreeInput")]
 struct SpawnSubtreeToolInput {
     task: String,
     branch_name: String,
-    parent_session_id: String,
 }
 
 /// Mirrors Haskell: `SpawnSubtreeResult { ssrTabName, ssrBranchName }`
@@ -178,13 +225,11 @@ struct SpawnSubtreeToolResult {
     branch_name: String,
 }
 
-/// Mirrors Haskell GADT constructors for `SpawnSubtreeOp`.
+/// Per-tool domain op for spawn_subtree.
 #[derive(Debug, FromCore)]
-enum SpawnSubtreeReq {
-    #[core(name = "GetToolInput")]
-    GetToolInput,
+enum SpawnSubtreeOpReq {
     #[core(name = "SpawnSubtree")]
-    SpawnSubtree(String, String, String),
+    SpawnSubtree(String, String),
 }
 
 // =============================================================================
@@ -207,11 +252,9 @@ struct SpawnLeafToolResult {
     branch_name: String,
 }
 
-/// Mirrors Haskell GADT constructors for `SpawnLeafOp`.
+/// Per-tool domain op for spawn_leaf.
 #[derive(Debug, FromCore)]
-enum SpawnLeafReq {
-    #[core(name = "GetToolInput")]
-    GetToolInput,
+enum SpawnLeafOpReq {
     #[core(name = "SpawnLeaf")]
     SpawnLeaf(String, String),
 }
@@ -231,17 +274,13 @@ struct WorkerSpecBridge {
 /// Mirrors Haskell: `SpawnWorkerResult { swrTabName }`
 #[derive(Debug, FromCore, ToCore)]
 #[core(name = "SpawnWorkerResult")]
-#[allow(dead_code)]
 struct SpawnWorkerToolResult {
     tab_name: String,
 }
 
-/// Mirrors Haskell GADT constructors for `SpawnWorkersOp`.
+/// Per-tool domain op for spawn_workers.
 #[derive(Debug, FromCore)]
-#[allow(dead_code)]
-enum SpawnWorkersReq {
-    #[core(name = "GetToolInput")]
-    GetToolInput,
+enum SpawnWorkerOpReq {
     #[core(name = "SpawnWorker")]
     SpawnWorker(String, String),
 }
@@ -264,13 +303,11 @@ struct NoteToolResult {
     ack: String,
 }
 
-/// Mirrors Haskell GADT constructors for `NoteOp`.
+/// Per-tool domain op for note. Pure I/O — injects pre-formatted text.
 #[derive(Debug, FromCore)]
-enum NoteReq {
-    #[core(name = "GetToolInput")]
-    GetToolInput,
-    #[core(name = "SendNote")]
-    SendNote(String),
+enum NoteOpReq {
+    #[core(name = "InjectNote")]
+    InjectNote(String, String), // parentTab, formatted
 }
 
 // =============================================================================
@@ -295,15 +332,6 @@ struct AnswerToolResult {
     question_id: String,
 }
 
-/// Mirrors Haskell GADT constructors for `AnswerOp`.
-#[derive(Debug, FromCore)]
-enum AnswerReq {
-    #[core(name = "GetToolInput")]
-    GetToolInput,
-    #[core(name = "AnswerQuestion")]
-    AnswerQuestion(String, String, String),
-}
-
 // =============================================================================
 // get_agent_messages bridge types
 // =============================================================================
@@ -324,135 +352,554 @@ struct MessagesToolResult {
     warning: String,
 }
 
-/// Mirrors Haskell GADT constructors for `MessagesOp`.
+/// Per-tool domain op for get_agent_messages. Timeout branching + inbox read in Rust.
 #[derive(Debug, FromCore)]
-enum MessagesReq {
-    #[core(name = "GetToolInput")]
-    GetToolInput,
-    #[core(name = "GetMessages")]
-    GetMessages(String, String),
+enum MessagesOpReq {
+    #[core(name = "FetchMessages")]
+    FetchMessages(String, String), // agentId, timeoutSecs
 }
 
 // =============================================================================
-// Bridge Dispatcher
+// Compiled Tool Bundle
 // =============================================================================
 
-/// Routes tidepool effect tags to exomonad service calls.
-///
-/// Implements `DispatchEffect<EffectContext>` (sync). The popup service is
-/// synchronous, so there's no need for async dispatch. This also avoids the
-/// `!Send` issue with `EffectMachine` (which holds `&mut dyn Heap`).
-///
-/// The exomonad `EffectContext` (agent_name + birth_branch) is threaded through
-/// as the tidepool user data type `U`.
-pub struct BridgeDispatcher {
-    /// Zellij session name for popup service.
-    zellij_session: Option<String>,
-    /// Tag → handler name for logging/debugging.
-    tag_names: Vec<String>,
-    /// Tool input consumed by `GetToolInput` effect (one-shot).
-    tool_input: Option<ToolInput>,
+/// A compiled Haskell tool: Core expression + data constructor table.
+struct CompiledTool {
+    expr: CoreExpr,
+    table: Arc<DataConTable>,
 }
 
-impl BridgeDispatcher {
-    fn new(
-        zellij_session: Option<String>,
-        tag_names: Vec<String>,
-        tool_input: Option<ToolInput>,
-    ) -> Self {
-        Self {
-            zellij_session,
-            tag_names,
-            tool_input,
-        }
-    }
+// =============================================================================
+// Shared Effect Handlers
+// =============================================================================
 
-    /// Handle ShowPopup effect: call the popup service and return response.
-    fn handle_show_popup(
-        &self,
-        title: String,
-        components: String,
-        ctx: &EffectContext,
-        table: &DataConTable,
-    ) -> Result<Value, TidepoolEffectError> {
-        let raw_json: serde_json::Value = if components.is_empty() {
-            serde_json::Value::Array(Vec::new())
-        } else {
-            serde_json::from_str(&components).map_err(|e| {
-                TidepoolEffectError::Handler(format!("Invalid components JSON: {}", e))
-            })?
-        };
-
-        let target_tab = crate::services::agent_control::resolve_own_tab_name(ctx);
-
-        let input = crate::services::popup::PopupInput {
-            title,
-            raw_json,
-            target_tab: Some(target_tab),
-        };
-
-        let service = crate::services::popup::PopupService::new(self.zellij_session.clone());
-
-        let output = service
-            .show_popup(&input)
-            .map_err(|e| TidepoolEffectError::Handler(format!("popup: {}", e)))?;
-
-        let values_json = serde_json::to_string(&output.values)
-            .map_err(|e| TidepoolEffectError::Handler(format!("popup serialize: {}", e)))?;
-
-        let response = PopupResponse {
-            button: output.button,
-            values: values_json,
-        };
-
-        response
-            .to_value(table)
-            .map_err(TidepoolEffectError::Bridge)
-    }
+/// Generic handler for GetToolInput effect. Works for any tool input type.
+/// Takes ownership of the input on first call; subsequent calls error.
+struct ToolInputHandler<T: ToCore> {
+    input: Option<T>,
 }
 
-impl DispatchEffect<EffectContext> for BridgeDispatcher {
-    fn dispatch(
+impl<T: ToCore + std::fmt::Debug> EffectHandler<EffectContext> for ToolInputHandler<T> {
+    type Request = GetToolInputReq;
+    fn handle(
         &mut self,
-        tag: u64,
-        request: &Value,
+        _req: GetToolInputReq,
         cx: &TidepoolEffectContext<'_, EffectContext>,
     ) -> Result<Value, TidepoolEffectError> {
-        let tag_name = self
-            .tag_names
-            .get(tag as usize)
-            .map(|s| s.as_str())
-            .unwrap_or("unknown");
-        debug!(tag = tag, name = tag_name, "Tidepool effect dispatch");
+        let input = self.input.take().ok_or_else(|| {
+            TidepoolEffectError::Handler("GetToolInput: tool_input already consumed".to_string())
+        })?;
+        input.to_value(cx.table()).map_err(TidepoolEffectError::Bridge)
+    }
+}
 
-        match tag {
-            0 => {
-                // Popup effect (position 0 in Eff '[Popup])
-                let req = PopupReq::from_value(request, cx.table())
-                    .map_err(TidepoolEffectError::Bridge)?;
-                match req {
-                    PopupReq::GetToolInput => {
-                        let input = self.tool_input.take().ok_or_else(|| {
-                            TidepoolEffectError::Handler(
-                                "GetToolInput: tool_input already consumed or not set".to_string(),
-                            )
-                        })?;
-                        input
-                            .to_value(cx.table())
-                            .map_err(TidepoolEffectError::Bridge)
-                    }
-                    PopupReq::ShowPopup(title, components) => {
-                        self.handle_show_popup(title, components, cx.user(), cx.table())
-                    }
-                }
+/// Shared Identity handler. Resolves agent identity from EffectContext.
+struct IdentityHandler;
+
+impl EffectHandler<EffectContext> for IdentityHandler {
+    type Request = IdentityReq;
+    fn handle(
+        &mut self,
+        req: IdentityReq,
+        cx: &TidepoolEffectContext<'_, EffectContext>,
+    ) -> Result<Value, TidepoolEffectError> {
+        match req {
+            IdentityReq::GetAgentId => cx.respond(cx.user().agent_name.to_string()),
+            IdentityReq::GetParentTab => {
+                cx.respond(crate::services::agent_control::resolve_parent_tab_name(
+                    cx.user(),
+                ))
             }
-            _ => Err(TidepoolEffectError::UnhandledEffect { tag }),
+            IdentityReq::GetOwnTab => {
+                cx.respond(crate::services::agent_control::resolve_own_tab_name(
+                    cx.user(),
+                ))
+            }
+            IdentityReq::GetWorkingDir => {
+                let dir = crate::services::agent_control::resolve_agent_working_dir(cx.user());
+                cx.respond(dir.to_string_lossy().to_string())
+            }
+        }
+    }
+}
+
+/// Shared Inbox handler. Read/write agent messages.
+struct InboxHandler {
+    project_dir: std::path::PathBuf,
+}
+
+impl EffectHandler<EffectContext> for InboxHandler {
+    type Request = InboxReq;
+    fn handle(
+        &mut self,
+        req: InboxReq,
+        cx: &TidepoolEffectContext<'_, EffectContext>,
+    ) -> Result<Value, TidepoolEffectError> {
+        match req {
+            InboxReq::WriteMessage(inbox_name, from, text, subject) => {
+                let inbox_path =
+                    crate::services::inbox::inbox_path(&self.project_dir, &inbox_name);
+                let msg = crate::services::inbox::create_message(
+                    from,
+                    text,
+                    if subject.is_empty() {
+                        None
+                    } else {
+                        Some(subject)
+                    },
+                );
+                crate::services::inbox::append_message(&inbox_path, &msg).map_err(|e| {
+                    TidepoolEffectError::Handler(format!("inbox write: {}", e))
+                })?;
+                cx.respond("ok".to_string())
+            }
+            InboxReq::ReadMessages(inbox_name) => {
+                let inbox_path =
+                    crate::services::inbox::inbox_path(&self.project_dir, &inbox_name);
+                let messages = crate::services::inbox::read_unread(&inbox_path)
+                    .map_err(|e| TidepoolEffectError::Handler(e.to_string()))?;
+                let json: Vec<serde_json::Value> = messages
+                    .iter()
+                    .map(|m| {
+                        serde_json::json!({
+                            "from": m.from,
+                            "text": m.text,
+                            "timestamp": m.timestamp,
+                            "read": m.read,
+                        })
+                    })
+                    .collect();
+                let json_str = serde_json::to_string(&json).unwrap_or_else(|_| "[]".to_string());
+                cx.respond(json_str)
+            }
+            InboxReq::PollMessages(inbox_name, timeout_str) => {
+                let timeout_secs: u64 = timeout_str.parse().unwrap_or(0);
+                let inbox_path =
+                    crate::services::inbox::inbox_path(&self.project_dir, &inbox_name);
+                let timeout = std::time::Duration::from_secs(timeout_secs);
+                let interval = std::time::Duration::from_secs(2);
+                let messages = tokio::task::block_in_place(move || {
+                    crate::services::inbox::poll_unread(&inbox_path, timeout, interval)
+                })
+                .map_err(|e| TidepoolEffectError::Handler(e.to_string()))?;
+                let json: Vec<serde_json::Value> = messages
+                    .iter()
+                    .map(|m| {
+                        serde_json::json!({
+                            "from": m.from,
+                            "text": m.text,
+                            "timestamp": m.timestamp,
+                            "read": m.read,
+                        })
+                    })
+                    .collect();
+                let json_str = serde_json::to_string(&json).unwrap_or_else(|_| "[]".to_string());
+                cx.respond(json_str)
+            }
+        }
+    }
+}
+
+/// Shared Questions handler. Resolves pending questions via registry.
+struct QuestionsHandler {
+    registry: Arc<crate::services::questions::QuestionRegistry>,
+}
+
+impl EffectHandler<EffectContext> for QuestionsHandler {
+    type Request = QuestionsReq;
+    fn handle(
+        &mut self,
+        req: QuestionsReq,
+        cx: &TidepoolEffectContext<'_, EffectContext>,
+    ) -> Result<Value, TidepoolEffectError> {
+        match req {
+            QuestionsReq::ResolveQuestion(question_id, answer) => {
+                let resolved = self.registry.resolve(&question_id, answer);
+                tracing::info!(
+                    question_id = %question_id,
+                    resolved,
+                    "Resolved question via QuestionRegistry"
+                );
+                cx.respond(resolved.to_string())
+            }
+        }
+    }
+}
+
+/// Shared FormatOp handler. Temporary bridge for string formatting logic
+/// that will move to inline Haskell once Tidepool supports Prelude functions.
+struct FormatOpHandler;
+
+impl EffectHandler<EffectContext> for FormatOpHandler {
+    type Request = FormatOpReq;
+    fn handle(
+        &mut self,
+        req: FormatOpReq,
+        cx: &TidepoolEffectContext<'_, EffectContext>,
+    ) -> Result<Value, TidepoolEffectError> {
+        match req {
+            FormatOpReq::FormatNotification(status, message, agent_id) => {
+                let formatted = match status.as_str() {
+                    "success" => format!("[CHILD COMPLETE: {}] {}", agent_id, message),
+                    "failure" => format!("[CHILD FAILED: {}] {}", agent_id, message),
+                    other => format!("[CHILD STATUS {}: {}] {}", agent_id, other, message),
+                };
+                cx.respond(formatted)
+            }
+            FormatOpReq::FormatNoteSubject(content) => {
+                let subject: String = content.chars().take(50).collect();
+                cx.respond(subject)
+            }
+            FormatOpReq::DefaultMessage(status, message) => {
+                let msg = if message.is_empty() {
+                    match status.as_str() {
+                        "success" => "Task completed successfully.".to_string(),
+                        _ => "Task failed.".to_string(),
+                    }
+                } else {
+                    message
+                };
+                cx.respond(msg)
+            }
+            FormatOpReq::FormatNote(agent_id, content) => {
+                let formatted = format!("[note from {}] {}", agent_id, content);
+                cx.respond(formatted)
+            }
         }
     }
 }
 
 // =============================================================================
-// Tool Definitions (hardcoded until Haskell Core compiler pipeline is wired up)
+// Per-Tool Domain Op Handlers
+// =============================================================================
+
+/// Per-tool domain op handler for popup. Pure I/O — receives target tab from Haskell.
+struct PopupOpHandler {
+    zellij_session: Option<String>,
+}
+
+impl EffectHandler<EffectContext> for PopupOpHandler {
+    type Request = PopupOpReq;
+    fn handle(
+        &mut self,
+        req: PopupOpReq,
+        cx: &TidepoolEffectContext<'_, EffectContext>,
+    ) -> Result<Value, TidepoolEffectError> {
+        match req {
+            PopupOpReq::ShowPopup(title, components, target_tab) => {
+                let raw_json: serde_json::Value = if components.is_empty() {
+                    serde_json::Value::Array(Vec::new())
+                } else {
+                    serde_json::from_str(&components).map_err(|e| {
+                        TidepoolEffectError::Handler(format!("Invalid components JSON: {}", e))
+                    })?
+                };
+
+                let input = crate::services::popup::PopupInput {
+                    title,
+                    raw_json,
+                    target_tab: Some(target_tab),
+                };
+
+                let service =
+                    crate::services::popup::PopupService::new(self.zellij_session.clone());
+
+                let output = service
+                    .show_popup(&input)
+                    .map_err(|e| TidepoolEffectError::Handler(format!("popup: {}", e)))?;
+
+                let values_json = serde_json::to_string(&output.values).map_err(|e| {
+                    TidepoolEffectError::Handler(format!("popup serialize: {}", e))
+                })?;
+
+                cx.respond(PopupResponse {
+                    button: output.button,
+                    values: values_json,
+                })
+            }
+        }
+    }
+}
+
+/// Per-tool domain op handler for file_pr. Pure I/O — just calls the service.
+struct FilePROpHandler {
+    jj: Arc<crate::services::jj_workspace::JjWorkspaceService>,
+}
+
+impl EffectHandler<EffectContext> for FilePROpHandler {
+    type Request = FilePROpReq;
+    fn handle(
+        &mut self,
+        req: FilePROpReq,
+        cx: &TidepoolEffectContext<'_, EffectContext>,
+    ) -> Result<Value, TidepoolEffectError> {
+        match req {
+            FilePROpReq::CreateOrUpdatePR(title, body, base, working_dir) => {
+                let input = crate::services::file_pr::FilePRInput {
+                    title,
+                    body,
+                    base_branch: if base.is_empty() { None } else { Some(base) },
+                    working_dir: Some(working_dir),
+                };
+                let jj = self.jj.clone();
+                let result = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(crate::services::file_pr::file_pr_async(&input, jj))
+                })
+                .map_err(|e| TidepoolEffectError::Handler(e.to_string()))?;
+                cx.respond(FilePRToolResult {
+                    pr_url: result.pr_url,
+                    pr_number: result.pr_number.as_u64().to_string(),
+                    head_branch: result.head_branch,
+                    result_base: result.base_branch,
+                    created: result.created.to_string(),
+                })
+            }
+        }
+    }
+}
+
+/// Per-tool domain op handler for merge_pr. Pure I/O — just calls the service.
+struct MergePROpHandler {
+    jj: Arc<crate::services::jj_workspace::JjWorkspaceService>,
+}
+
+impl EffectHandler<EffectContext> for MergePROpHandler {
+    type Request = MergePROpReq;
+    fn handle(
+        &mut self,
+        req: MergePROpReq,
+        cx: &TidepoolEffectContext<'_, EffectContext>,
+    ) -> Result<Value, TidepoolEffectError> {
+        match req {
+            MergePROpReq::MergePullRequest(pr_num_str, strategy, working_dir) => {
+                let pr_number: u64 = pr_num_str.parse().map_err(|e| {
+                    TidepoolEffectError::Handler(format!("invalid pr_number: {}", e))
+                })?;
+                let pr = crate::domain::PRNumber::new(pr_number);
+                let jj = self.jj.clone();
+                let result = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(
+                        crate::services::merge_pr::merge_pr_async(
+                            pr,
+                            &strategy,
+                            &working_dir,
+                            jj,
+                        ),
+                    )
+                })
+                .map_err(|e| TidepoolEffectError::Handler(e.to_string()))?;
+                cx.respond(MergePRToolResult {
+                    success: result.success.to_string(),
+                    message: result.message,
+                    jj_fetched: result.jj_fetched.to_string(),
+                })
+            }
+        }
+    }
+}
+
+
+/// Per-tool domain op handler for spawn_subtree.
+struct SpawnSubtreeOpHandler {
+    agent_control: Arc<crate::services::agent_control::AgentControlService>,
+}
+
+impl EffectHandler<EffectContext> for SpawnSubtreeOpHandler {
+    type Request = SpawnSubtreeOpReq;
+    fn handle(
+        &mut self,
+        req: SpawnSubtreeOpReq,
+        cx: &TidepoolEffectContext<'_, EffectContext>,
+    ) -> Result<Value, TidepoolEffectError> {
+        match req {
+            SpawnSubtreeOpReq::SpawnSubtree(task, branch_name) => {
+                let options = crate::services::agent_control::SpawnSubtreeOptions {
+                    task,
+                    branch_name: branch_name.clone(),
+                    parent_session_id: None,
+                };
+                let ac = self.agent_control.clone();
+                let bb = cx.user().birth_branch.clone();
+                let result = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(ac.spawn_subtree(&options, &bb))
+                })
+                .map_err(|e| TidepoolEffectError::Handler(e.to_string()))?;
+                cx.respond(SpawnSubtreeToolResult {
+                    tab_name: result.tab_name,
+                    branch_name,
+                })
+            }
+        }
+    }
+}
+
+/// Per-tool domain op handler for spawn_leaf.
+struct SpawnLeafOpHandler {
+    agent_control: Arc<crate::services::agent_control::AgentControlService>,
+}
+
+impl EffectHandler<EffectContext> for SpawnLeafOpHandler {
+    type Request = SpawnLeafOpReq;
+    fn handle(
+        &mut self,
+        req: SpawnLeafOpReq,
+        cx: &TidepoolEffectContext<'_, EffectContext>,
+    ) -> Result<Value, TidepoolEffectError> {
+        match req {
+            SpawnLeafOpReq::SpawnLeaf(task, branch_name) => {
+                let options = crate::services::agent_control::SpawnSubtreeOptions {
+                    task,
+                    branch_name: branch_name.clone(),
+                    parent_session_id: None,
+                };
+                let ac = self.agent_control.clone();
+                let bb = cx.user().birth_branch.clone();
+                let result = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(ac.spawn_leaf_subtree(&options, &bb))
+                })
+                .map_err(|e| TidepoolEffectError::Handler(e.to_string()))?;
+                cx.respond(SpawnLeafToolResult {
+                    tab_name: result.tab_name,
+                    branch_name,
+                })
+            }
+        }
+    }
+}
+
+/// Per-tool domain op handler for spawn_workers.
+struct SpawnWorkerOpHandler {
+    agent_control: Arc<crate::services::agent_control::AgentControlService>,
+}
+
+impl EffectHandler<EffectContext> for SpawnWorkerOpHandler {
+    type Request = SpawnWorkerOpReq;
+    fn handle(
+        &mut self,
+        req: SpawnWorkerOpReq,
+        cx: &TidepoolEffectContext<'_, EffectContext>,
+    ) -> Result<Value, TidepoolEffectError> {
+        match req {
+            SpawnWorkerOpReq::SpawnWorker(name, prompt) => {
+                let options = crate::services::agent_control::SpawnWorkerOptions {
+                    name,
+                    prompt,
+                };
+                let ac = self.agent_control.clone();
+                let bb = cx.user().birth_branch.clone();
+                let result = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(ac.spawn_worker(&options, &bb))
+                })
+                .map_err(|e| TidepoolEffectError::Handler(e.to_string()))?;
+                cx.respond(SpawnWorkerToolResult {
+                    tab_name: result.tab_name,
+                })
+            }
+        }
+    }
+}
+
+/// Per-tool domain op handler for notify_parent. Pure I/O — injects pre-formatted text.
+struct NotifyOpHandler;
+
+impl EffectHandler<EffectContext> for NotifyOpHandler {
+    type Request = NotifyOpReq;
+    fn handle(
+        &mut self,
+        req: NotifyOpReq,
+        cx: &TidepoolEffectContext<'_, EffectContext>,
+    ) -> Result<Value, TidepoolEffectError> {
+        match req {
+            NotifyOpReq::DeliverNotification(parent_tab, formatted) => {
+                crate::services::zellij_events::inject_input(&parent_tab, &formatted);
+                cx.respond(NotifyToolResult {
+                    ack: "delivered".to_string(),
+                })
+            }
+        }
+    }
+}
+
+/// Per-tool domain op handler for note. Pure I/O — injects pre-formatted text.
+struct NoteOpHandler;
+
+impl EffectHandler<EffectContext> for NoteOpHandler {
+    type Request = NoteOpReq;
+    fn handle(
+        &mut self,
+        req: NoteOpReq,
+        cx: &TidepoolEffectContext<'_, EffectContext>,
+    ) -> Result<Value, TidepoolEffectError> {
+        match req {
+            NoteOpReq::InjectNote(parent_tab, formatted) => {
+                crate::services::zellij_events::inject_input(&parent_tab, &formatted);
+                cx.respond(NoteToolResult {
+                    ack: "sent".to_string(),
+                })
+            }
+        }
+    }
+}
+
+/// Per-tool domain op handler for get_agent_messages. Handles timeout branching + inbox read.
+struct MessagesOpHandler {
+    project_dir: std::path::PathBuf,
+}
+
+impl EffectHandler<EffectContext> for MessagesOpHandler {
+    type Request = MessagesOpReq;
+    fn handle(
+        &mut self,
+        req: MessagesOpReq,
+        cx: &TidepoolEffectContext<'_, EffectContext>,
+    ) -> Result<Value, TidepoolEffectError> {
+        match req {
+            MessagesOpReq::FetchMessages(agent_id, timeout_str) => {
+                let timeout_secs: u64 = timeout_str.parse().unwrap_or(0);
+                let inbox_path =
+                    crate::services::inbox::inbox_path(&self.project_dir, &agent_id);
+
+                let messages = if timeout_secs == 0 {
+                    crate::services::inbox::read_unread(&inbox_path)
+                        .map_err(|e| TidepoolEffectError::Handler(e.to_string()))?
+                } else {
+                    let timeout = std::time::Duration::from_secs(timeout_secs);
+                    let interval = std::time::Duration::from_secs(2);
+                    tokio::task::block_in_place(move || {
+                        crate::services::inbox::poll_unread(&inbox_path, timeout, interval)
+                    })
+                    .map_err(|e| TidepoolEffectError::Handler(e.to_string()))?
+                };
+
+                let json: Vec<serde_json::Value> = messages
+                    .iter()
+                    .map(|m| {
+                        serde_json::json!({
+                            "from": m.from,
+                            "text": m.text,
+                            "timestamp": m.timestamp,
+                            "read": m.read,
+                        })
+                    })
+                    .collect();
+                let json_str =
+                    serde_json::to_string(&json).unwrap_or_else(|_| "[]".to_string());
+
+                cx.respond(MessagesToolResult {
+                    messages_json: json_str,
+                    warning: "".to_string(),
+                })
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Tool Definitions
 // =============================================================================
 
 fn popup_tool_definition() -> ToolDefinition {
@@ -519,13 +966,13 @@ fn popup_tool_definition() -> ToolDefinition {
 fn file_pr_tool_definition() -> ToolDefinition {
     ToolDefinition {
         name: "file_pr".to_string(),
-        description: "Create or update a pull request for the current branch. Auto-detects base branch from dot-separated naming.".to_string(),
+        description: "Create or update a pull request for the current branch. Idempotent \u{2014} safe to call multiple times (updates existing PR). Pushes the branch automatically. Base branch auto-detected from dot-separated naming (e.g. main.foo.bar targets main.foo).".to_string(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
                 "title": { "type": "string", "description": "PR title" },
                 "body": { "type": "string", "description": "PR body/description" },
-                "base_branch": { "type": "string", "description": "Target branch. Auto-detected from dot-separated naming if omitted." }
+                "base_branch": { "type": "string", "description": "Target branch. Auto-detected from dot-separated naming if omitted (main.foo.bar targets main.foo). Only set to override." }
             },
             "required": ["title", "body"]
         }),
@@ -540,7 +987,8 @@ fn merge_pr_tool_definition() -> ToolDefinition {
             "type": "object",
             "properties": {
                 "pr_number": { "type": "integer", "description": "PR number to merge" },
-                "strategy": { "type": "string", "description": "Merge strategy: squash (default), merge, or rebase" }
+                "strategy": { "type": "string", "description": "Merge strategy: squash (default), merge, or rebase" },
+                "working_dir": { "type": "string", "description": "Working directory for git/jj operations" }
             },
             "required": ["pr_number"]
         }),
@@ -550,12 +998,25 @@ fn merge_pr_tool_definition() -> ToolDefinition {
 fn notify_parent_tool_definition() -> ToolDefinition {
     ToolDefinition {
         name: "notify_parent".to_string(),
-        description: "Signal to your parent that you are DONE. Injects notification into parent's Zellij pane.".to_string(),
+        description: "Signal to your parent that you are DONE. Call as your final action \u{2014} after PR is filed, Copilot feedback addressed, and changes pushed. Status 'success' means work is review-clean. Status 'failure' means retries exhausted, escalating to parent.".to_string(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
-                "status": { "type": "string", "description": "'success' or 'failure'", "enum": ["success", "failure"] },
-                "message": { "type": "string", "description": "One-line summary of what was accomplished or what went wrong" }
+                "status": { "type": "string", "description": "'success' = work is done and review-clean. 'failure' = exhausted retries, escalating to parent.", "enum": ["success", "failure"] },
+                "message": { "type": "string", "description": "One-line summary. On success: what was accomplished. On failure: what went wrong." },
+                "pr_number": { "type": "integer", "description": "PR number if one was filed. Enables parent to immediately merge without searching." },
+                "tasks_completed": {
+                    "type": "array",
+                    "description": "Array of {what, how} pairs. 'what' = task description, 'how' = verification command that was run.",
+                    "items": {
+                        "type": "object",
+                        "required": ["what", "how"],
+                        "properties": {
+                            "what": { "type": "string" },
+                            "how": { "type": "string" }
+                        }
+                    }
+                }
             },
             "required": ["status", "message"]
         }),
@@ -565,7 +1026,7 @@ fn notify_parent_tool_definition() -> ToolDefinition {
 fn spawn_subtree_tool_definition() -> ToolDefinition {
     ToolDefinition {
         name: "spawn_subtree".to_string(),
-        description: "Fork a worktree node off your current branch. The child gets full coordination tools (can spawn its own children).".to_string(),
+        description: "Fork a worktree node off your current branch. Use when decomposing work into sub-problems that may need further decomposition. The child gets full coordination tools (can spawn its own children).".to_string(),
         input_schema: serde_json::json!({
             "type": "object",
             "properties": {
@@ -675,56 +1136,19 @@ fn get_agent_messages_tool_definition() -> ToolDefinition {
 
 /// Cranelift-compiled Haskell Core backend.
 ///
-/// The popup computation is compiled from Haskell at build time via `haskell_expr!`.
-/// At runtime, `call_popup` feeds it through the `EffectMachine`, which evaluates
-/// the Core expression and routes yielded effects to `BridgeDispatcher`.
+/// Each tool is compiled from Haskell at build time. At runtime, `call_tool`
+/// builds a per-tool `EffectHandler`, wraps it in an HList, and runs it through
+/// `EffectMachine`. The machine evaluates the Core expression, yielding effects
+/// that the handler processes.
 pub struct TidepoolBackend {
-    /// Data constructor table from compiled PopupEffect.hs.
-    table: Arc<DataConTable>,
-
-    /// Compiled Haskell Core expression for `popupTool`.
-    popup_expr: CoreExpr,
-
-    /// Compiled file_pr expression + its DataConTable.
-    file_pr_expr: CoreExpr,
-    file_pr_table: Arc<DataConTable>,
-
-    /// Compiled merge_pr expression + its DataConTable.
-    merge_pr_expr: CoreExpr,
-    merge_pr_table: Arc<DataConTable>,
-
-    /// Compiled notify_parent expression + its DataConTable.
-    notify_expr: CoreExpr,
-    notify_table: Arc<DataConTable>,
-
-    /// Compiled spawn_subtree expression + its DataConTable.
-    spawn_subtree_expr: CoreExpr,
-    spawn_subtree_table: Arc<DataConTable>,
-
-    /// Compiled spawn_leaf expression + its DataConTable.
-    spawn_leaf_expr: CoreExpr,
-    spawn_leaf_table: Arc<DataConTable>,
-
-    /// Compiled spawn_workers expression + its DataConTable.
-    #[allow(dead_code)]
-    spawn_workers_expr: CoreExpr,
-    #[allow(dead_code)]
-    spawn_workers_table: Arc<DataConTable>,
+    /// Compiled Haskell tool expressions + data constructor tables.
+    tools: HashMap<String, CompiledTool>,
 
     /// Agent control service for spawn operations.
     agent_control: Arc<crate::services::agent_control::AgentControlService>,
 
-    /// Compiled note expression + its DataConTable.
-    note_expr: CoreExpr,
-    note_table: Arc<DataConTable>,
-
-    /// Compiled answer_question expression + its DataConTable.
-    answer_expr: CoreExpr,
-    answer_table: Arc<DataConTable>,
-
-    /// Compiled get_agent_messages expression + its DataConTable.
-    messages_expr: CoreExpr,
-    messages_table: Arc<DataConTable>,
+    /// JJ workspace service for file_pr and merge_pr.
+    jj: Arc<crate::services::jj_workspace::JjWorkspaceService>,
 
     /// Question registry for answer_question (bridges oneshot channels).
     question_registry: Arc<crate::services::questions::QuestionRegistry>,
@@ -732,14 +1156,8 @@ pub struct TidepoolBackend {
     /// Project directory for inbox file paths.
     project_dir: std::path::PathBuf,
 
-    /// JJ workspace service for file_pr and merge_pr.
-    jj: Arc<crate::services::jj_workspace::JjWorkspaceService>,
-
     /// Zellij session name for popup and other UI services.
     zellij_session: Option<String>,
-
-    /// Tag → effect name mapping for dispatch and logging.
-    tag_names: Vec<String>,
 
     /// Agent identity context, threaded as user data to effect handlers.
     ctx: EffectContext,
@@ -747,34 +1165,117 @@ pub struct TidepoolBackend {
 
 impl TidepoolBackend {
     pub fn new(zellij_session: Option<String>, ctx: EffectContext) -> Self {
-        let (popup_expr, table) =
+        let mut tools = HashMap::new();
+
+        let (expr, table) =
             tidepool_macro::haskell_expr!("haskell/PopupEffect.hs::popupTool");
-        let (file_pr_expr, file_pr_table) =
+        tools.insert(
+            "popup".to_string(),
+            CompiledTool {
+                expr,
+                table: Arc::new(table),
+            },
+        );
+
+        let (expr, table) =
             tidepool_macro::haskell_expr!("haskell/FilePREffect.hs::filePRTool");
-        let (merge_pr_expr, merge_pr_table) =
+        tools.insert(
+            "file_pr".to_string(),
+            CompiledTool {
+                expr,
+                table: Arc::new(table),
+            },
+        );
+
+        let (expr, table) =
             tidepool_macro::haskell_expr!("haskell/MergePREffect.hs::mergePRTool");
-        let (notify_expr, notify_table) =
+        tools.insert(
+            "merge_pr".to_string(),
+            CompiledTool {
+                expr,
+                table: Arc::new(table),
+            },
+        );
+
+        let (expr, table) =
             tidepool_macro::haskell_expr!("haskell/NotifyEffect.hs::notifyTool");
-        let (spawn_subtree_expr, spawn_subtree_table) =
+        tools.insert(
+            "notify_parent".to_string(),
+            CompiledTool {
+                expr,
+                table: Arc::new(table),
+            },
+        );
+
+        let (expr, table) =
             tidepool_macro::haskell_expr!("haskell/SpawnEffect.hs::spawnSubtreeTool");
-        let (spawn_leaf_expr, spawn_leaf_table) =
+        tools.insert(
+            "spawn_subtree".to_string(),
+            CompiledTool {
+                expr,
+                table: Arc::new(table),
+            },
+        );
+
+        let (expr, table) =
             tidepool_macro::haskell_expr!("haskell/SpawnLeafEffect.hs::spawnLeafTool");
-        let (spawn_workers_expr, spawn_workers_table) =
+        tools.insert(
+            "spawn_leaf_subtree".to_string(),
+            CompiledTool {
+                expr,
+                table: Arc::new(table),
+            },
+        );
+
+        let (expr, table) =
             tidepool_macro::haskell_expr!("haskell/SpawnWorkersEffect.hs::spawnWorkersTool");
-        let (note_expr, note_table) =
+        tools.insert(
+            "spawn_workers".to_string(),
+            CompiledTool {
+                expr,
+                table: Arc::new(table),
+            },
+        );
+
+        let (expr, table) =
             tidepool_macro::haskell_expr!("haskell/NoteEffect.hs::noteTool");
-        let (answer_expr, answer_table) =
+        tools.insert(
+            "note".to_string(),
+            CompiledTool {
+                expr,
+                table: Arc::new(table),
+            },
+        );
+
+        let (expr, table) =
             tidepool_macro::haskell_expr!("haskell/AnswerEffect.hs::answerTool");
-        let (messages_expr, messages_table) =
+        tools.insert(
+            "answer_question".to_string(),
+            CompiledTool {
+                expr,
+                table: Arc::new(table),
+            },
+        );
+
+        let (expr, table) =
             tidepool_macro::haskell_expr!("haskell/MessagesEffect.hs::messagesTool");
+        tools.insert(
+            "get_agent_messages".to_string(),
+            CompiledTool {
+                expr,
+                table: Arc::new(table),
+            },
+        );
 
         let working_dir = crate::services::agent_control::resolve_agent_working_dir(&ctx);
-        let jj = Arc::new(crate::services::jj_workspace::JjWorkspaceService::new(working_dir.clone()));
+        let jj = Arc::new(crate::services::jj_workspace::JjWorkspaceService::new(
+            working_dir.clone(),
+        ));
 
         let agent_control = Arc::new(
             crate::services::agent_control::AgentControlService::new(
                 working_dir.clone(),
-                None, // No GitHubService needed for spawn operations
+                None,
                 jj.clone(),
             )
             .with_birth_branch(ctx.birth_branch.clone())
@@ -784,41 +1285,34 @@ impl TidepoolBackend {
         let question_registry = Arc::new(crate::services::questions::QuestionRegistry::new());
 
         Self {
-            table: Arc::new(table),
-            popup_expr,
-            file_pr_expr,
-            file_pr_table: Arc::new(file_pr_table),
-            merge_pr_expr,
-            merge_pr_table: Arc::new(merge_pr_table),
-            notify_expr,
-            notify_table: Arc::new(notify_table),
-            spawn_subtree_expr,
-            spawn_subtree_table: Arc::new(spawn_subtree_table),
-            spawn_leaf_expr,
-            spawn_leaf_table: Arc::new(spawn_leaf_table),
-            spawn_workers_expr,
-            spawn_workers_table: Arc::new(spawn_workers_table),
+            tools,
             agent_control,
-            note_expr,
-            note_table: Arc::new(note_table),
-            answer_expr,
-            answer_table: Arc::new(answer_table),
-            messages_expr,
-            messages_table: Arc::new(messages_table),
-            question_registry,
-            project_dir: working_dir.clone(),
             jj,
+            question_registry,
+            project_dir: working_dir,
             zellij_session,
-            tag_names: vec!["Popup".into()],
             ctx,
         }
     }
 
-    /// Handle popup tool call by running the Haskell computation through EffectMachine.
-    ///
-    /// Flow: parse MCP args → create dispatcher with tool_input → EffectMachine evaluates
-    /// popupTool → Haskell yields GetToolInput → Rust provides args → Haskell yields
-    /// ShowPopup → Rust calls PopupService → Haskell returns PopupResponse → decode result.
+    /// Run a compiled Haskell tool through the EffectMachine with the given handlers.
+    fn run_effect<H: DispatchEffect<EffectContext>>(
+        &self,
+        tool_name: &str,
+        handlers: &mut H,
+    ) -> Result<Value, anyhow::Error> {
+        let tool = self
+            .tools
+            .get(tool_name)
+            .ok_or_else(|| anyhow::anyhow!("No compiled tool: {}", tool_name))?;
+        let mut heap = tidepool_eval::heap::VecHeap::new();
+        let mut machine = tidepool_effect::EffectMachine::new(&tool.table, &mut heap)
+            .map_err(|e| anyhow::anyhow!("EffectMachine init: {}", e))?;
+        machine
+            .run_with_user(&tool.expr, handlers, &self.ctx)
+            .map_err(|e| anyhow::anyhow!("EffectMachine run: {}", e))
+    }
+
     async fn call_popup(&self, args: JsonValue) -> Result<MCPCallOutput> {
         let title = args
             .get("title")
@@ -826,7 +1320,6 @@ impl TidepoolBackend {
             .unwrap_or("")
             .to_string();
 
-        // Components can come from "elements" (array) or "panes" (wizard object).
         let components = if let Some(panes) = args.get("panes") {
             let start = args.get("start");
             let mut wizard = serde_json::Map::new();
@@ -847,33 +1340,21 @@ impl TidepoolBackend {
             "Tidepool popup call via EffectMachine"
         );
 
-        let tool_input = ToolInput { title, components };
+        // HList order must match Haskell Eff '[PopupInput', Identity, PopupOp]
+        let mut handlers = frunk::hlist![
+            ToolInputHandler {
+                input: Some(ToolInput { title, components }),
+            },
+            IdentityHandler,
+            PopupOpHandler {
+                zellij_session: self.zellij_session.clone(),
+            },
+        ];
 
-        let mut dispatcher = BridgeDispatcher::new(
-            self.zellij_session.clone(),
-            self.tag_names.clone(),
-            Some(tool_input),
-        );
-
-        // EffectMachine is !Send (holds &mut dyn Heap), but popup dispatch is sync.
-        // No await points below — the async fn signature is required by RuntimeBackend trait.
-        let mut heap = tidepool_core_eval::heap::VecHeap::new();
-        let machine_result = tidepool_core_effect::EffectMachine::new(&self.table, &mut heap);
-
-        let mut machine = match machine_result {
-            Ok(m) => m,
-            Err(e) => {
-                return Ok(MCPCallOutput {
-                    success: false,
-                    result: None,
-                    error: Some(format!("EffectMachine init failed: {}", e)),
-                })
-            }
-        };
-
-        match machine.run_with_user(&self.popup_expr, &mut dispatcher, &self.ctx) {
-            Ok(response_value) => {
-                let response = PopupResponse::from_value(&response_value, &self.table)
+        match self.run_effect("popup", &mut handlers) {
+            Ok(result_value) => {
+                let table = &self.tools["popup"].table;
+                let response = PopupResponse::from_value(&result_value, table)
                     .map_err(|e| anyhow::anyhow!("Bridge decode error: {}", e))?;
                 let values: JsonValue = serde_json::from_str(&response.values)
                     .unwrap_or(JsonValue::Object(serde_json::Map::new()));
@@ -894,38 +1375,57 @@ impl TidepoolBackend {
         }
     }
 
-    /// Handle file_pr tool: parse MCP args, call file_pr service directly.
-    ///
-    /// Bypasses EffectMachine at runtime (async service). The haskell_expr! compilation
-    /// validates the Haskell; mock tests verify the bridge; runtime calls services directly.
     async fn call_file_pr(&self, args: JsonValue) -> Result<MCPCallOutput> {
-        let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let body = args.get("body").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let base_branch = args.get("base_branch").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let title = args
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let body = args
+            .get("body")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let base_branch = args
+            .get("base_branch")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
 
-        let working_dir = crate::services::agent_control::resolve_agent_working_dir(&self.ctx);
+        debug!(title = %title, "Tidepool file_pr call via EffectMachine");
 
-        let input = crate::services::file_pr::FilePRInput {
-            title: title.clone(),
-            body,
-            base_branch,
-            working_dir: Some(working_dir.to_string_lossy().to_string()),
-        };
+        // HList order must match Haskell Eff '[FilePRInput', Identity, FilePROp]
+        let mut handlers = frunk::hlist![
+            ToolInputHandler {
+                input: Some(FilePRToolInput {
+                    title,
+                    body,
+                    base_branch,
+                }),
+            },
+            IdentityHandler,
+            FilePROpHandler {
+                jj: self.jj.clone(),
+            },
+        ];
 
-        debug!(title = %title, "Tidepool file_pr call");
-
-        match crate::services::file_pr::file_pr_async(&input, self.jj.clone()).await {
-            Ok(output) => Ok(MCPCallOutput {
-                success: true,
-                result: Some(serde_json::json!({
-                    "pr_url": output.pr_url,
-                    "pr_number": output.pr_number.as_u64(),
-                    "head_branch": output.head_branch,
-                    "base_branch": output.base_branch,
-                    "created": output.created,
-                })),
-                error: None,
-            }),
+        match self.run_effect("file_pr", &mut handlers) {
+            Ok(result_value) => {
+                let table = &self.tools["file_pr"].table;
+                let result = FilePRToolResult::from_value(&result_value, table)
+                    .map_err(|e| anyhow::anyhow!("Bridge decode: {}", e))?;
+                Ok(MCPCallOutput {
+                    success: true,
+                    result: Some(serde_json::json!({
+                        "pr_url": result.pr_url,
+                        "pr_number": result.pr_number.parse::<u64>().unwrap_or(0),
+                        "head_branch": result.head_branch,
+                        "base_branch": result.result_base,
+                        "created": result.created == "true",
+                    })),
+                    error: None,
+                })
+            }
             Err(e) => {
                 tracing::error!(error = %e, "Tidepool file_pr failed");
                 Ok(MCPCallOutput {
@@ -937,7 +1437,6 @@ impl TidepoolBackend {
         }
     }
 
-    /// Handle merge_pr tool: parse MCP args, call merge_pr service directly.
     async fn call_merge_pr(&self, args: JsonValue) -> Result<MCPCallOutput> {
         let pr_number = args
             .get("pr_number")
@@ -949,34 +1448,41 @@ impl TidepoolBackend {
             .unwrap_or("squash")
             .to_string();
 
-        let working_dir = crate::services::agent_control::resolve_agent_working_dir(&self.ctx);
-        let working_dir_str = working_dir.to_string_lossy().to_string();
-
         debug!(
             pr_number = pr_number,
             strategy = %strategy,
-            "Tidepool merge_pr call"
+            "Tidepool merge_pr call via EffectMachine"
         );
 
-        let pr = crate::domain::PRNumber::new(pr_number);
+        // HList order must match Haskell Eff '[MergePRInput', Identity, MergePROp]
+        let mut handlers = frunk::hlist![
+            ToolInputHandler {
+                input: Some(MergePRToolInput {
+                    pr_number: pr_number.to_string(),
+                    strategy,
+                }),
+            },
+            IdentityHandler,
+            MergePROpHandler {
+                jj: self.jj.clone(),
+            },
+        ];
 
-        match crate::services::merge_pr::merge_pr_async(
-            pr,
-            &strategy,
-            &working_dir_str,
-            self.jj.clone(),
-        )
-        .await
-        {
-            Ok(output) => Ok(MCPCallOutput {
-                success: true,
-                result: Some(serde_json::json!({
-                    "success": output.success,
-                    "message": output.message,
-                    "jj_fetched": output.jj_fetched,
-                })),
-                error: None,
-            }),
+        match self.run_effect("merge_pr", &mut handlers) {
+            Ok(result_value) => {
+                let table = &self.tools["merge_pr"].table;
+                let result = MergePRToolResult::from_value(&result_value, table)
+                    .map_err(|e| anyhow::anyhow!("Bridge decode: {}", e))?;
+                Ok(MCPCallOutput {
+                    success: true,
+                    result: Some(serde_json::json!({
+                        "success": result.success == "true",
+                        "message": result.message,
+                        "jj_fetched": result.jj_fetched == "true",
+                    })),
+                    error: None,
+                })
+            }
             Err(e) => {
                 tracing::error!(error = %e, "Tidepool merge_pr failed");
                 Ok(MCPCallOutput {
@@ -988,9 +1494,6 @@ impl TidepoolBackend {
         }
     }
 
-    /// Handle notify_parent tool: inject notification into parent's Zellij pane.
-    ///
-    /// Injects text directly via zellij_events::inject_input.
     async fn call_notify_parent(&self, args: JsonValue) -> Result<MCPCallOutput> {
         let status = args
             .get("status")
@@ -1003,78 +1506,78 @@ impl TidepoolBackend {
             .unwrap_or("")
             .to_string();
 
-        let agent_id = self.ctx.agent_name.to_string();
-        let tab_name = crate::services::agent_control::resolve_parent_tab_name(&self.ctx);
+        debug!(status = %status, "Tidepool notify_parent call via EffectMachine");
 
-        let notification = match status.as_str() {
-            "success" => format!(
-                "[CHILD COMPLETE: {}] {}",
-                agent_id,
-                if message.is_empty() {
-                    "Task completed successfully."
-                } else {
-                    &message
-                }
-            ),
-            "failure" => format!(
-                "[CHILD FAILED: {}] {}",
-                agent_id,
-                if message.is_empty() {
-                    "Task failed."
-                } else {
-                    &message
-                }
-            ),
-            other => format!("[CHILD STATUS {}: {}] {}", agent_id, other, message),
-        };
+        // HList order must match Haskell Eff '[NotifyInput', Identity, FormatOp, NotifyOp]
+        let mut handlers = frunk::hlist![
+            ToolInputHandler {
+                input: Some(NotifyToolInput { status, message }),
+            },
+            IdentityHandler,
+            FormatOpHandler,
+            NotifyOpHandler,
+        ];
 
-        debug!(
-            agent_id = %agent_id,
-            status = %status,
-            tab = %tab_name,
-            "Tidepool notify_parent call"
-        );
-
-        crate::services::zellij_events::inject_input(&tab_name, &notification);
-
-        Ok(MCPCallOutput {
-            success: true,
-            result: Some(serde_json::json!({"ack": "delivered"})),
-            error: None,
-        })
+        match self.run_effect("notify_parent", &mut handlers) {
+            Ok(result_value) => {
+                let table = &self.tools["notify_parent"].table;
+                let result = NotifyToolResult::from_value(&result_value, table)
+                    .map_err(|e| anyhow::anyhow!("Bridge decode: {}", e))?;
+                Ok(MCPCallOutput {
+                    success: true,
+                    result: Some(serde_json::json!({"ack": result.ack})),
+                    error: None,
+                })
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Tidepool notify_parent failed");
+                Ok(MCPCallOutput {
+                    success: false,
+                    result: None,
+                    error: Some(e.to_string()),
+                })
+            }
+        }
     }
 
-    /// Handle spawn_subtree tool: parse MCP args, call AgentControlService.
     async fn call_spawn_subtree(&self, args: JsonValue) -> Result<MCPCallOutput> {
-        let task = args.get("task").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let task = args
+            .get("task")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let branch_name = args
             .get("branch_name")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
 
-        debug!(branch = %branch_name, "Tidepool spawn_subtree call");
+        debug!(branch = %branch_name, "Tidepool spawn_subtree call via EffectMachine");
 
-        let options = crate::services::agent_control::SpawnSubtreeOptions {
-            task,
-            branch_name: branch_name.clone(),
-            parent_session_id: None,
-        };
+        // HList order must match Haskell Eff '[SpawnSubtreeInput', SpawnSubtreeOp]
+        let mut handlers = frunk::hlist![
+            ToolInputHandler {
+                input: Some(SpawnSubtreeToolInput { task, branch_name }),
+            },
+            SpawnSubtreeOpHandler {
+                agent_control: self.agent_control.clone(),
+            },
+        ];
 
-        match self
-            .agent_control
-            .spawn_subtree(&options, &self.ctx.birth_branch)
-            .await
-        {
-            Ok(result) => Ok(MCPCallOutput {
-                success: true,
-                result: Some(serde_json::json!({
-                    "tab_name": result.tab_name,
-                    "branch_name": branch_name,
-                    "agent_dir": result.agent_dir.to_string_lossy(),
-                })),
-                error: None,
-            }),
+        match self.run_effect("spawn_subtree", &mut handlers) {
+            Ok(result_value) => {
+                let table = &self.tools["spawn_subtree"].table;
+                let result = SpawnSubtreeToolResult::from_value(&result_value, table)
+                    .map_err(|e| anyhow::anyhow!("Bridge decode: {}", e))?;
+                Ok(MCPCallOutput {
+                    success: true,
+                    result: Some(serde_json::json!({
+                        "tab_name": result.tab_name,
+                        "branch_name": result.branch_name,
+                    })),
+                    error: None,
+                })
+            }
             Err(e) => {
                 tracing::error!(error = %e, "Tidepool spawn_subtree failed");
                 Ok(MCPCallOutput {
@@ -1086,37 +1589,44 @@ impl TidepoolBackend {
         }
     }
 
-    /// Handle spawn_leaf_subtree tool: parse MCP args, call AgentControlService.
     async fn call_spawn_leaf(&self, args: JsonValue) -> Result<MCPCallOutput> {
-        let task = args.get("task").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let task = args
+            .get("task")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let branch_name = args
             .get("branch_name")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
 
-        debug!(branch = %branch_name, "Tidepool spawn_leaf_subtree call");
+        debug!(branch = %branch_name, "Tidepool spawn_leaf_subtree call via EffectMachine");
 
-        let options = crate::services::agent_control::SpawnSubtreeOptions {
-            task,
-            branch_name: branch_name.clone(),
-            parent_session_id: None,
-        };
+        // HList order must match Haskell Eff '[SpawnLeafInput', SpawnLeafOp]
+        let mut handlers = frunk::hlist![
+            ToolInputHandler {
+                input: Some(SpawnLeafToolInput { task, branch_name }),
+            },
+            SpawnLeafOpHandler {
+                agent_control: self.agent_control.clone(),
+            },
+        ];
 
-        match self
-            .agent_control
-            .spawn_leaf_subtree(&options, &self.ctx.birth_branch)
-            .await
-        {
-            Ok(result) => Ok(MCPCallOutput {
-                success: true,
-                result: Some(serde_json::json!({
-                    "tab_name": result.tab_name,
-                    "branch_name": branch_name,
-                    "agent_dir": result.agent_dir.to_string_lossy(),
-                })),
-                error: None,
-            }),
+        match self.run_effect("spawn_leaf_subtree", &mut handlers) {
+            Ok(result_value) => {
+                let table = &self.tools["spawn_leaf_subtree"].table;
+                let result = SpawnLeafToolResult::from_value(&result_value, table)
+                    .map_err(|e| anyhow::anyhow!("Bridge decode: {}", e))?;
+                Ok(MCPCallOutput {
+                    success: true,
+                    result: Some(serde_json::json!({
+                        "tab_name": result.tab_name,
+                        "branch_name": result.branch_name,
+                    })),
+                    error: None,
+                })
+            }
             Err(e) => {
                 tracing::error!(error = %e, "Tidepool spawn_leaf_subtree failed");
                 Ok(MCPCallOutput {
@@ -1128,7 +1638,6 @@ impl TidepoolBackend {
         }
     }
 
-    /// Handle spawn_workers tool: iterate specs array, call spawn_worker per item.
     async fn call_spawn_workers(&self, args: JsonValue) -> Result<MCPCallOutput> {
         let specs = args
             .get("specs")
@@ -1136,100 +1645,131 @@ impl TidepoolBackend {
             .cloned()
             .unwrap_or_default();
 
-        debug!(count = specs.len(), "Tidepool spawn_workers call");
+        debug!(count = specs.len(), "Tidepool spawn_workers call via EffectMachine");
 
-        let mut results = Vec::new();
-        for spec in &specs {
-            let name = spec.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let task = spec.get("task").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        // Pre-render specs into WorkerSpecBridge (name + prompt)
+        let worker_specs: Vec<WorkerSpecBridge> = specs
+            .iter()
+            .map(|spec| {
+                let name = spec
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let prompt =
+                    if let Some(p) = spec.get("prompt").and_then(|v| v.as_str()) {
+                        p.to_string()
+                    } else {
+                        let task =
+                            spec.get("task").and_then(|v| v.as_str()).unwrap_or("");
+                        let mut parts = vec![format!("Task: {}", task)];
+                        if let Some(steps) = spec.get("steps").and_then(|v| v.as_array()) {
+                            parts.push("Steps:".to_string());
+                            for (i, s) in steps.iter().enumerate() {
+                                if let Some(text) = s.as_str() {
+                                    parts.push(format!("{}. {}", i + 1, text));
+                                }
+                            }
+                        }
+                        if let Some(context) =
+                            spec.get("context").and_then(|v| v.as_str())
+                        {
+                            parts.push(format!("\nContext:\n{}", context));
+                        }
+                        if let Some(done) =
+                            spec.get("done_criteria").and_then(|v| v.as_array())
+                        {
+                            parts.push("Done when:".to_string());
+                            for d in done {
+                                if let Some(text) = d.as_str() {
+                                    parts.push(format!("- {}", text));
+                                }
+                            }
+                        }
+                        if let Some(verify) =
+                            spec.get("verify").and_then(|v| v.as_array())
+                        {
+                            parts.push("Verify:".to_string());
+                            for v in verify {
+                                if let Some(text) = v.as_str() {
+                                    parts.push(format!("$ {}", text));
+                                }
+                            }
+                        }
+                        if let Some(boundary) =
+                            spec.get("boundary").and_then(|v| v.as_array())
+                        {
+                            parts.push("DO NOT:".to_string());
+                            for b in boundary {
+                                if let Some(text) = b.as_str() {
+                                    parts.push(format!("- {}", text));
+                                }
+                            }
+                        }
+                        if let Some(read) =
+                            spec.get("read_first").and_then(|v| v.as_array())
+                        {
+                            parts.push("Read first:".to_string());
+                            for r in read {
+                                if let Some(text) = r.as_str() {
+                                    parts.push(format!("- {}", text));
+                                }
+                            }
+                        }
+                        parts.join("\n")
+                    };
+                WorkerSpecBridge { name, prompt }
+            })
+            .collect();
 
-            // Build prompt from spec fields (same as WASM handler)
-            let prompt = if let Some(p) = spec.get("prompt").and_then(|v| v.as_str()) {
-                p.to_string()
-            } else {
-                let mut parts = vec![format!("Task: {}", task)];
-                if let Some(steps) = spec.get("steps").and_then(|v| v.as_array()) {
-                    parts.push("Steps:".to_string());
-                    for (i, s) in steps.iter().enumerate() {
-                        if let Some(text) = s.as_str() {
-                            parts.push(format!("{}. {}", i + 1, text));
-                        }
-                    }
-                }
-                if let Some(context) = spec.get("context").and_then(|v| v.as_str()) {
-                    parts.push(format!("\nContext:\n{}", context));
-                }
-                if let Some(done) = spec.get("done_criteria").and_then(|v| v.as_array()) {
-                    parts.push("Done when:".to_string());
-                    for d in done {
-                        if let Some(text) = d.as_str() {
-                            parts.push(format!("- {}", text));
-                        }
-                    }
-                }
-                if let Some(verify) = spec.get("verify").and_then(|v| v.as_array()) {
-                    parts.push("Verify:".to_string());
-                    for v in verify {
-                        if let Some(text) = v.as_str() {
-                            parts.push(format!("$ {}", text));
-                        }
-                    }
-                }
-                if let Some(boundary) = spec.get("boundary").and_then(|v| v.as_array()) {
-                    parts.push("DO NOT:".to_string());
-                    for b in boundary {
-                        if let Some(text) = b.as_str() {
-                            parts.push(format!("- {}", text));
-                        }
-                    }
-                }
-                if let Some(read) = spec.get("read_first").and_then(|v| v.as_array()) {
-                    parts.push("Read first:".to_string());
-                    for r in read {
-                        if let Some(text) = r.as_str() {
-                            parts.push(format!("- {}", text));
-                        }
-                    }
-                }
-                parts.join("\n")
-            };
+        let spec_names: Vec<String> =
+            worker_specs.iter().map(|s| s.name.clone()).collect();
 
-            let options = crate::services::agent_control::SpawnWorkerOptions {
-                name: name.clone(),
-                prompt,
-            };
+        // HList order must match Haskell Eff '[SpawnWorkersInput', Identity, SpawnWorkerOp]
+        let mut handlers = frunk::hlist![
+            ToolInputHandler {
+                input: Some(worker_specs),
+            },
+            IdentityHandler,
+            SpawnWorkerOpHandler {
+                agent_control: self.agent_control.clone(),
+            },
+        ];
 
-            match self
-                .agent_control
-                .spawn_worker(&options, &self.ctx.birth_branch)
-                .await
-            {
-                Ok(result) => {
-                    results.push(serde_json::json!({
-                        "name": name,
-                        "tab_name": result.tab_name,
-                        "success": true,
-                    }));
-                }
-                Err(e) => {
-                    tracing::error!(name = %name, error = %e, "Tidepool spawn_worker failed");
-                    results.push(serde_json::json!({
-                        "name": name,
-                        "success": false,
-                        "error": e.to_string(),
-                    }));
-                }
+        match self.run_effect("spawn_workers", &mut handlers) {
+            Ok(result_value) => {
+                let table = &self.tools["spawn_workers"].table;
+                let results: Vec<SpawnWorkerToolResult> =
+                    Vec::from_value(&result_value, table)
+                        .map_err(|e| anyhow::anyhow!("Bridge decode: {}", e))?;
+                let workers: Vec<_> = spec_names
+                    .iter()
+                    .zip(results.iter())
+                    .map(|(name, r)| {
+                        serde_json::json!({
+                            "name": name,
+                            "tab_name": r.tab_name,
+                            "success": true,
+                        })
+                    })
+                    .collect();
+                Ok(MCPCallOutput {
+                    success: true,
+                    result: Some(serde_json::json!({ "workers": workers })),
+                    error: None,
+                })
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Tidepool spawn_workers failed");
+                Ok(MCPCallOutput {
+                    success: false,
+                    result: None,
+                    error: Some(e.to_string()),
+                })
             }
         }
-
-        Ok(MCPCallOutput {
-            success: true,
-            result: Some(serde_json::json!({ "workers": results })),
-            error: None,
-        })
     }
 
-    /// Handle note tool: write a note to the TL's inbox and inject into parent pane.
     async fn call_note(&self, args: JsonValue) -> Result<MCPCallOutput> {
         let content = args
             .get("content")
@@ -1237,39 +1777,38 @@ impl TidepoolBackend {
             .unwrap_or("")
             .to_string();
 
-        let agent_id = self.ctx.agent_name.to_string();
+        debug!(agent = %self.ctx.agent_name, "Tidepool note call via EffectMachine");
 
-        debug!(agent = %agent_id, "Tidepool note call");
+        // HList order must match Haskell Eff '[NoteInput', Identity, FormatOp, Inbox, NoteOp]
+        let mut handlers = frunk::hlist![
+            ToolInputHandler {
+                input: Some(NoteToolInput { content }),
+            },
+            IdentityHandler,
+            FormatOpHandler,
+            InboxHandler {
+                project_dir: self.project_dir.clone(),
+            },
+            NoteOpHandler,
+        ];
 
-        let tl_inbox = crate::services::inbox::inbox_path(&self.project_dir, "team-lead");
-        let msg = crate::services::inbox::create_message(
-            agent_id.clone(),
-            content.clone(),
-            Some(content.chars().take(50).collect()),
-        );
-
-        if let Err(e) = crate::services::inbox::append_message(&tl_inbox, &msg) {
-            tracing::error!(error = %e, "Tidepool note: inbox write failed");
-            return Ok(MCPCallOutput {
-                success: false,
-                result: None,
-                error: Some(e.to_string()),
-            });
+        match self.run_effect("note", &mut handlers) {
+            Ok(_result_value) => Ok(MCPCallOutput {
+                success: true,
+                result: Some(serde_json::json!({"ack": true})),
+                error: None,
+            }),
+            Err(e) => {
+                tracing::error!(error = %e, "Tidepool note failed");
+                Ok(MCPCallOutput {
+                    success: false,
+                    result: None,
+                    error: Some(e.to_string()),
+                })
+            }
         }
-
-        // Best-effort pane injection
-        let tab_name = crate::services::agent_control::resolve_parent_tab_name(&self.ctx);
-        let formatted = format!("[note from {}] {}", agent_id, content);
-        crate::services::zellij_events::inject_input(&tab_name, &formatted);
-
-        Ok(MCPCallOutput {
-            success: true,
-            result: Some(serde_json::json!({"ack": true})),
-            error: None,
-        })
     }
 
-    /// Handle answer_question tool: write answer to agent's inbox, resolve oneshot channel.
     async fn call_answer_question(&self, args: JsonValue) -> Result<MCPCallOutput> {
         let agent_id = args
             .get("agent_id")
@@ -1290,47 +1829,52 @@ impl TidepoolBackend {
         debug!(
             agent = %agent_id,
             question_id = %question_id,
-            "Tidepool answer_question call"
+            "Tidepool answer_question call via EffectMachine"
         );
 
-        // Write answer to agent's inbox
-        let agent_inbox = crate::services::inbox::inbox_path(&self.project_dir, &agent_id);
-        let msg = crate::services::inbox::create_message(
-            "team-lead".to_string(),
-            answer.clone(),
-            Some(format!("Answer to {}", question_id)),
-        );
+        // HList order must match Haskell Eff '[AnswerInput', Inbox, Questions]
+        let mut handlers = frunk::hlist![
+            ToolInputHandler {
+                input: Some(AnswerToolInput {
+                    agent_id,
+                    question_id,
+                    answer,
+                }),
+            },
+            InboxHandler {
+                project_dir: self.project_dir.clone(),
+            },
+            QuestionsHandler {
+                registry: self.question_registry.clone(),
+            },
+        ];
 
-        if let Err(e) = crate::services::inbox::append_message(&agent_inbox, &msg) {
-            tracing::error!(error = %e, "Tidepool answer_question: inbox write failed");
-            return Ok(MCPCallOutput {
-                success: false,
-                result: None,
-                error: Some(e.to_string()),
-            });
+        match self.run_effect("answer_question", &mut handlers) {
+            Ok(result_value) => {
+                let table = &self.tools["answer_question"].table;
+                let result = AnswerToolResult::from_value(&result_value, table)
+                    .map_err(|e| anyhow::anyhow!("Bridge decode: {}", e))?;
+                Ok(MCPCallOutput {
+                    success: true,
+                    result: Some(serde_json::json!({
+                        "status": result.status,
+                        "agent_id": result.agent_id,
+                        "question_id": result.question_id,
+                    })),
+                    error: None,
+                })
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Tidepool answer_question failed");
+                Ok(MCPCallOutput {
+                    success: false,
+                    result: None,
+                    error: Some(e.to_string()),
+                })
+            }
         }
-
-        // Resolve the oneshot channel so send_question unblocks immediately
-        let resolved = self.question_registry.resolve(&question_id, answer);
-        tracing::info!(
-            agent = %agent_id,
-            question_id = %question_id,
-            resolved,
-            "Resolved question via QuestionRegistry"
-        );
-
-        Ok(MCPCallOutput {
-            success: true,
-            result: Some(serde_json::json!({
-                "status": "answered",
-                "agent_id": agent_id,
-                "question_id": question_id,
-            })),
-            error: None,
-        })
     }
 
-    /// Handle get_agent_messages tool: read unread messages from inbox.
     async fn call_get_messages(&self, args: JsonValue) -> Result<MCPCallOutput> {
         let agent_id = args
             .get("agent_id")
@@ -1345,79 +1889,49 @@ impl TidepoolBackend {
         debug!(
             agent = %agent_id,
             timeout_secs,
-            "Tidepool get_agent_messages call"
+            "Tidepool get_agent_messages call via EffectMachine"
         );
 
-        let tl_inbox = crate::services::inbox::inbox_path(&self.project_dir, "team-lead");
+        // HList order must match Haskell Eff '[MessagesInput', MessagesOp]
+        let mut handlers = frunk::hlist![
+            ToolInputHandler {
+                input: Some(MessagesToolInput {
+                    agent_id,
+                    timeout_secs: timeout_secs.to_string(),
+                }),
+            },
+            MessagesOpHandler {
+                project_dir: self.project_dir.clone(),
+            },
+        ];
 
-        let all_messages = if timeout_secs > 0 {
-            let timeout = std::time::Duration::from_secs(timeout_secs as u64);
-            let interval = std::time::Duration::from_secs(2);
-            let tl_inbox_clone = tl_inbox.clone();
-            match tokio::task::spawn_blocking(move || {
-                crate::services::inbox::poll_unread(&tl_inbox_clone, timeout, interval)
-            })
-            .await
-            {
-                Ok(Ok(msgs)) => msgs,
-                Ok(Err(e)) => {
-                    return Ok(MCPCallOutput {
-                        success: false,
-                        result: None,
-                        error: Some(e.to_string()),
-                    });
-                }
-                Err(e) => {
-                    return Ok(MCPCallOutput {
-                        success: false,
-                        result: None,
-                        error: Some(format!("spawn_blocking failed: {}", e)),
-                    });
-                }
-            }
-        } else {
-            match crate::services::inbox::read_unread(&tl_inbox) {
-                Ok(msgs) => msgs,
-                Err(e) => {
-                    return Ok(MCPCallOutput {
-                        success: false,
-                        result: None,
-                        error: Some(e.to_string()),
-                    });
-                }
-            }
-        };
-
-        // Filter by agent_id if provided, otherwise return all
-        let filtered: Vec<_> = if agent_id.is_empty() {
-            all_messages
-        } else {
-            all_messages
-                .into_iter()
-                .filter(|m| m.from == agent_id)
-                .collect()
-        };
-
-        let messages_json: Vec<serde_json::Value> = filtered
-            .iter()
-            .map(|m| {
-                serde_json::json!({
-                    "from": m.from,
-                    "text": m.text,
-                    "timestamp": m.timestamp,
-                    "read": m.read,
+        match self.run_effect("get_agent_messages", &mut handlers) {
+            Ok(result_value) => {
+                let table = &self.tools["get_agent_messages"].table;
+                let result = MessagesToolResult::from_value(&result_value, table)
+                    .map_err(|e| anyhow::anyhow!("Bridge decode: {}", e))?;
+                let messages: JsonValue =
+                    serde_json::from_str(&result.messages_json)
+                        .unwrap_or(JsonValue::Array(Vec::new()));
+                let count = messages.as_array().map(|a| a.len()).unwrap_or(0);
+                Ok(MCPCallOutput {
+                    success: true,
+                    result: Some(serde_json::json!({
+                        "messages": messages,
+                        "count": count,
+                    })),
+                    error: None,
                 })
-            })
-            .collect();
-
-        Ok(MCPCallOutput {
-            success: true,
-            result: Some(serde_json::json!({
-                "messages": messages_json,
-                "count": messages_json.len(),
-            })),
-            error: None,
-        })
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Tidepool get_agent_messages failed");
+                Ok(MCPCallOutput {
+                    success: false,
+                    result: None,
+                    error: Some(e.to_string()),
+                })
+            }
+        }
     }
 }
 
@@ -1511,10 +2025,6 @@ mod tests {
         assert!(def.input_schema["properties"]["start"].is_object());
     }
 
-    // The following tests use haskell_expr! which requires nix + tidepool-extract at
-    // compile time. They exercise the full pipeline: Haskell compilation → Core embedding
-    // → EffectMachine evaluation → BridgeDispatcher routing.
-
     #[test]
     fn test_tool_input_roundtrip() {
         let backend = TidepoolBackend::new(
@@ -1524,12 +2034,13 @@ mod tests {
                 birth_branch: crate::BirthBranch::root(),
             },
         );
+        let table = &backend.tools["popup"].table;
         let input = ToolInput {
             title: "Pick one".to_string(),
             components: r#"[{"type":"choice"}]"#.to_string(),
         };
-        let value = input.to_value(&backend.table).unwrap();
-        let back = ToolInput::from_value(&value, &backend.table).unwrap();
+        let value = input.to_value(table).unwrap();
+        let back = ToolInput::from_value(&value, table).unwrap();
         assert_eq!(input.title, back.title);
         assert_eq!(input.components, back.components);
     }
@@ -1543,12 +2054,13 @@ mod tests {
                 birth_branch: crate::BirthBranch::root(),
             },
         );
+        let table = &backend.tools["popup"].table;
         let resp = PopupResponse {
             button: "submit".to_string(),
             values: r#"{"pick":"A"}"#.to_string(),
         };
-        let value = resp.to_value(&backend.table).unwrap();
-        let back = PopupResponse::from_value(&value, &backend.table).unwrap();
+        let value = resp.to_value(table).unwrap();
+        let back = PopupResponse::from_value(&value, table).unwrap();
         assert_eq!(resp.button, back.button);
         assert_eq!(resp.values, back.values);
     }
@@ -1598,7 +2110,7 @@ mod tests {
         let backend = TidepoolBackend::new(None, ctx);
 
         let tl = backend.list_tools("tl").await.unwrap();
-        assert_eq!(tl.len(), 10); // popup, file_pr, merge_pr, notify_parent, spawn_subtree, spawn_leaf_subtree, spawn_workers, note, answer_question, get_agent_messages
+        assert_eq!(tl.len(), 10);
         assert!(tl.iter().any(|t| t.name == "popup"));
         assert!(tl.iter().any(|t| t.name == "file_pr"));
         assert!(tl.iter().any(|t| t.name == "merge_pr"));
@@ -1611,13 +2123,13 @@ mod tests {
         assert!(tl.iter().any(|t| t.name == "get_agent_messages"));
 
         let dev = backend.list_tools("dev").await.unwrap();
-        assert_eq!(dev.len(), 3); // file_pr, notify_parent, note
+        assert_eq!(dev.len(), 3);
         assert!(dev.iter().any(|t| t.name == "file_pr"));
         assert!(dev.iter().any(|t| t.name == "notify_parent"));
         assert!(dev.iter().any(|t| t.name == "note"));
 
         let worker = backend.list_tools("worker").await.unwrap();
-        assert_eq!(worker.len(), 2); // notify_parent, note
+        assert_eq!(worker.len(), 2);
         assert!(worker.iter().any(|t| t.name == "notify_parent"));
         assert!(worker.iter().any(|t| t.name == "note"));
 
@@ -1658,11 +2170,12 @@ mod tests {
                 birth_branch: crate::BirthBranch::root(),
             },
         );
+        let table = &backend.tools["note"].table;
         let input = NoteToolInput {
             content: "hello TL".to_string(),
         };
-        let value = input.to_value(&backend.note_table).unwrap();
-        let back = NoteToolInput::from_value(&value, &backend.note_table).unwrap();
+        let value = input.to_value(table).unwrap();
+        let back = NoteToolInput::from_value(&value, table).unwrap();
         assert_eq!(input.content, back.content);
     }
 
@@ -1675,13 +2188,14 @@ mod tests {
                 birth_branch: crate::BirthBranch::root(),
             },
         );
+        let table = &backend.tools["answer_question"].table;
         let input = AnswerToolInput {
             agent_id: "worker-1".to_string(),
             question_id: "q-123".to_string(),
             answer: "yes".to_string(),
         };
-        let value = input.to_value(&backend.answer_table).unwrap();
-        let back = AnswerToolInput::from_value(&value, &backend.answer_table).unwrap();
+        let value = input.to_value(table).unwrap();
+        let back = AnswerToolInput::from_value(&value, table).unwrap();
         assert_eq!(input.agent_id, back.agent_id);
         assert_eq!(input.question_id, back.question_id);
         assert_eq!(input.answer, back.answer);
@@ -1696,12 +2210,13 @@ mod tests {
                 birth_branch: crate::BirthBranch::root(),
             },
         );
+        let table = &backend.tools["get_agent_messages"].table;
         let input = MessagesToolInput {
             agent_id: "worker-1".to_string(),
             timeout_secs: "30".to_string(),
         };
-        let value = input.to_value(&backend.messages_table).unwrap();
-        let back = MessagesToolInput::from_value(&value, &backend.messages_table).unwrap();
+        let value = input.to_value(table).unwrap();
+        let back = MessagesToolInput::from_value(&value, table).unwrap();
         assert_eq!(input.agent_id, back.agent_id);
         assert_eq!(input.timeout_secs, back.timeout_secs);
     }
@@ -1720,48 +2235,77 @@ mod tests {
             content: "progress update".to_string(),
         };
 
-        struct MockNote {
-            tool_input: Option<NoteToolInput>,
-        }
-        impl DispatchEffect<EffectContext> for MockNote {
-            fn dispatch(
+        // Mock Identity handler (tag 1)
+        struct MockIdentity;
+        impl EffectHandler<EffectContext> for MockIdentity {
+            type Request = IdentityReq;
+            fn handle(
                 &mut self,
-                tag: u64,
-                request: &Value,
+                req: IdentityReq,
                 cx: &TidepoolEffectContext<'_, EffectContext>,
             ) -> Result<Value, TidepoolEffectError> {
-                assert_eq!(tag, 0);
-                let req =
-                    NoteReq::from_value(request, cx.table()).map_err(TidepoolEffectError::Bridge)?;
                 match req {
-                    NoteReq::GetToolInput => {
-                        let input = self.tool_input.take().ok_or_else(|| {
-                            TidepoolEffectError::Handler("tool_input already consumed".into())
-                        })?;
-                        input.to_value(cx.table()).map_err(TidepoolEffectError::Bridge)
-                    }
-                    NoteReq::SendNote(_content) => {
-                        let result = NoteToolResult {
+                    IdentityReq::GetAgentId => cx.respond("test".to_string()),
+                    IdentityReq::GetParentTab => cx.respond("parent-tab".to_string()),
+                    _ => cx.respond("test".to_string()),
+                }
+            }
+        }
+
+        // Mock Inbox handler (tag 3)
+        struct MockInbox;
+        impl EffectHandler<EffectContext> for MockInbox {
+            type Request = InboxReq;
+            fn handle(
+                &mut self,
+                req: InboxReq,
+                cx: &TidepoolEffectContext<'_, EffectContext>,
+            ) -> Result<Value, TidepoolEffectError> {
+                match req {
+                    InboxReq::WriteMessage(_, _, _, _) => cx.respond("ok".to_string()),
+                    InboxReq::ReadMessages(_) => cx.respond("[]".to_string()),
+                    InboxReq::PollMessages(_, _) => cx.respond("[]".to_string()),
+                }
+            }
+        }
+
+        // Mock NoteOp handler (tag 4): accepts InjectNote, returns NoteResult
+        struct MockNoteOp;
+        impl EffectHandler<EffectContext> for MockNoteOp {
+            type Request = NoteOpReq;
+            fn handle(
+                &mut self,
+                req: NoteOpReq,
+                cx: &TidepoolEffectContext<'_, EffectContext>,
+            ) -> Result<Value, TidepoolEffectError> {
+                match req {
+                    NoteOpReq::InjectNote(_, _) => {
+                        cx.respond(NoteToolResult {
                             ack: "sent".to_string(),
-                        };
-                        result.to_value(cx.table()).map_err(TidepoolEffectError::Bridge)
+                        })
                     }
                 }
             }
         }
 
-        let mut dispatcher = MockNote {
-            tool_input: Some(tool_input),
-        };
-        let mut heap = tidepool_core_eval::heap::VecHeap::new();
+        // Eff '[NoteInput', Identity, FormatOp, Inbox, NoteOp]
+        let tool = &backend.tools["note"];
+        let mut handlers = frunk::hlist![
+            ToolInputHandler { input: Some(tool_input) },
+            MockIdentity,
+            FormatOpHandler,
+            MockInbox,
+            MockNoteOp,
+        ];
+        let mut heap = tidepool_eval::heap::VecHeap::new();
         let mut machine =
-            tidepool_core_effect::EffectMachine::new(&backend.note_table, &mut heap).unwrap();
+            tidepool_effect::EffectMachine::new(&tool.table, &mut heap).unwrap();
 
         let result = machine
-            .run_with_user(&backend.note_expr, &mut dispatcher, &backend.ctx)
+            .run_with_user(&tool.expr, &mut handlers, &backend.ctx)
             .expect("EffectMachine should complete");
 
-        let response = NoteToolResult::from_value(&result, &backend.note_table)
+        let response = NoteToolResult::from_value(&result, &tool.table)
             .expect("Should decode NoteToolResult");
         assert_eq!(response.ack, "sent");
     }
@@ -1782,50 +2326,54 @@ mod tests {
             answer: "use option B".to_string(),
         };
 
-        struct MockAnswer {
-            tool_input: Option<AnswerToolInput>,
-        }
-        impl DispatchEffect<EffectContext> for MockAnswer {
-            fn dispatch(
+        // Mock Inbox handler (tag 1)
+        struct MockInbox;
+        impl EffectHandler<EffectContext> for MockInbox {
+            type Request = InboxReq;
+            fn handle(
                 &mut self,
-                tag: u64,
-                request: &Value,
+                req: InboxReq,
                 cx: &TidepoolEffectContext<'_, EffectContext>,
             ) -> Result<Value, TidepoolEffectError> {
-                assert_eq!(tag, 0);
-                let req = AnswerReq::from_value(request, cx.table())
-                    .map_err(TidepoolEffectError::Bridge)?;
                 match req {
-                    AnswerReq::GetToolInput => {
-                        let input = self.tool_input.take().ok_or_else(|| {
-                            TidepoolEffectError::Handler("tool_input already consumed".into())
-                        })?;
-                        input.to_value(cx.table()).map_err(TidepoolEffectError::Bridge)
-                    }
-                    AnswerReq::AnswerQuestion(agent, qid, _answer) => {
-                        let result = AnswerToolResult {
-                            status: "answered".to_string(),
-                            agent_id: agent,
-                            question_id: qid,
-                        };
-                        result.to_value(cx.table()).map_err(TidepoolEffectError::Bridge)
-                    }
+                    InboxReq::WriteMessage(_, _, _, _) => cx.respond("ok".to_string()),
+                    InboxReq::ReadMessages(_) => cx.respond("[]".to_string()),
+                    InboxReq::PollMessages(_, _) => cx.respond("[]".to_string()),
                 }
             }
         }
 
-        let mut dispatcher = MockAnswer {
-            tool_input: Some(tool_input),
-        };
-        let mut heap = tidepool_core_eval::heap::VecHeap::new();
+        // Mock Questions handler (tag 2)
+        struct MockQuestions;
+        impl EffectHandler<EffectContext> for MockQuestions {
+            type Request = QuestionsReq;
+            fn handle(
+                &mut self,
+                req: QuestionsReq,
+                cx: &TidepoolEffectContext<'_, EffectContext>,
+            ) -> Result<Value, TidepoolEffectError> {
+                match req {
+                    QuestionsReq::ResolveQuestion(_, _) => cx.respond("true".to_string()),
+                }
+            }
+        }
+
+        // Eff '[AnswerInput', Inbox, Questions]
+        let tool = &backend.tools["answer_question"];
+        let mut handlers = frunk::hlist![
+            ToolInputHandler { input: Some(tool_input) },
+            MockInbox,
+            MockQuestions,
+        ];
+        let mut heap = tidepool_eval::heap::VecHeap::new();
         let mut machine =
-            tidepool_core_effect::EffectMachine::new(&backend.answer_table, &mut heap).unwrap();
+            tidepool_effect::EffectMachine::new(&tool.table, &mut heap).unwrap();
 
         let result = machine
-            .run_with_user(&backend.answer_expr, &mut dispatcher, &backend.ctx)
+            .run_with_user(&tool.expr, &mut handlers, &backend.ctx)
             .expect("EffectMachine should complete");
 
-        let response = AnswerToolResult::from_value(&result, &backend.answer_table)
+        let response = AnswerToolResult::from_value(&result, &tool.table)
             .expect("Should decode AnswerToolResult");
         assert_eq!(response.status, "answered");
         assert_eq!(response.agent_id, "worker-1");
@@ -1847,49 +2395,44 @@ mod tests {
             timeout_secs: "0".to_string(),
         };
 
-        struct MockMessages {
-            tool_input: Option<MessagesToolInput>,
-        }
-        impl DispatchEffect<EffectContext> for MockMessages {
-            fn dispatch(
+        // Mock MessagesOp handler (tag 1)
+        struct MockMessagesOp;
+        impl EffectHandler<EffectContext> for MockMessagesOp {
+            type Request = MessagesOpReq;
+            fn handle(
                 &mut self,
-                tag: u64,
-                request: &Value,
+                req: MessagesOpReq,
                 cx: &TidepoolEffectContext<'_, EffectContext>,
             ) -> Result<Value, TidepoolEffectError> {
-                assert_eq!(tag, 0);
-                let req = MessagesReq::from_value(request, cx.table())
-                    .map_err(TidepoolEffectError::Bridge)?;
                 match req {
-                    MessagesReq::GetToolInput => {
-                        let input = self.tool_input.take().ok_or_else(|| {
-                            TidepoolEffectError::Handler("tool_input already consumed".into())
-                        })?;
-                        input.to_value(cx.table()).map_err(TidepoolEffectError::Bridge)
-                    }
-                    MessagesReq::GetMessages(agent, _timeout) => {
-                        let result = MessagesToolResult {
-                            messages_json: format!("[{{\"from\":\"{}\",\"text\":\"hello\"}}]", agent),
+                    MessagesOpReq::FetchMessages(agent, _timeout) => {
+                        cx.respond(MessagesToolResult {
+                            messages_json: format!(
+                                "[{{\"from\":\"{}\",\"text\":\"hello\"}}]",
+                                agent
+                            ),
                             warning: "".to_string(),
-                        };
-                        result.to_value(cx.table()).map_err(TidepoolEffectError::Bridge)
+                        })
                     }
                 }
             }
         }
 
-        let mut dispatcher = MockMessages {
-            tool_input: Some(tool_input),
-        };
-        let mut heap = tidepool_core_eval::heap::VecHeap::new();
+        // Eff '[MessagesInput', MessagesOp]
+        let tool = &backend.tools["get_agent_messages"];
+        let mut handlers = frunk::hlist![
+            ToolInputHandler { input: Some(tool_input) },
+            MockMessagesOp,
+        ];
+        let mut heap = tidepool_eval::heap::VecHeap::new();
         let mut machine =
-            tidepool_core_effect::EffectMachine::new(&backend.messages_table, &mut heap).unwrap();
+            tidepool_effect::EffectMachine::new(&tool.table, &mut heap).unwrap();
 
         let result = machine
-            .run_with_user(&backend.messages_expr, &mut dispatcher, &backend.ctx)
+            .run_with_user(&tool.expr, &mut handlers, &backend.ctx)
             .expect("EffectMachine should complete");
 
-        let response = MessagesToolResult::from_value(&result, &backend.messages_table)
+        let response = MessagesToolResult::from_value(&result, &tool.table)
             .expect("Should decode MessagesToolResult");
         assert!(response.messages_json.contains("worker-1"));
         assert!(response.warning.is_empty());
@@ -1926,13 +2469,13 @@ mod tests {
                 birth_branch: crate::BirthBranch::root(),
             },
         );
+        let table = &backend.tools["spawn_subtree"].table;
         let input = SpawnSubtreeToolInput {
             task: "implement feature".to_string(),
             branch_name: "feature-a".to_string(),
-            parent_session_id: "".to_string(),
         };
-        let value = input.to_value(&backend.spawn_subtree_table).unwrap();
-        let back = SpawnSubtreeToolInput::from_value(&value, &backend.spawn_subtree_table).unwrap();
+        let value = input.to_value(table).unwrap();
+        let back = SpawnSubtreeToolInput::from_value(&value, table).unwrap();
         assert_eq!(input.task, back.task);
         assert_eq!(input.branch_name, back.branch_name);
     }
@@ -1946,12 +2489,13 @@ mod tests {
                 birth_branch: crate::BirthBranch::root(),
             },
         );
+        let table = &backend.tools["spawn_leaf_subtree"].table;
         let input = SpawnLeafToolInput {
             task: "implement leaf".to_string(),
             branch_name: "leaf-1".to_string(),
         };
-        let value = input.to_value(&backend.spawn_leaf_table).unwrap();
-        let back = SpawnLeafToolInput::from_value(&value, &backend.spawn_leaf_table).unwrap();
+        let value = input.to_value(table).unwrap();
+        let back = SpawnLeafToolInput::from_value(&value, table).unwrap();
         assert_eq!(input.task, back.task);
         assert_eq!(input.branch_name, back.branch_name);
     }
@@ -1965,12 +2509,13 @@ mod tests {
                 birth_branch: crate::BirthBranch::root(),
             },
         );
+        let table = &backend.tools["spawn_workers"].table;
         let input = WorkerSpecBridge {
             name: "worker-1".to_string(),
             prompt: "do something".to_string(),
         };
-        let value = input.to_value(&backend.spawn_workers_table).unwrap();
-        let back = WorkerSpecBridge::from_value(&value, &backend.spawn_workers_table).unwrap();
+        let value = input.to_value(table).unwrap();
+        let back = WorkerSpecBridge::from_value(&value, table).unwrap();
         assert_eq!(input.name, back.name);
         assert_eq!(input.prompt, back.prompt);
     }
@@ -1988,53 +2533,44 @@ mod tests {
         let tool_input = SpawnSubtreeToolInput {
             task: "build feature".to_string(),
             branch_name: "feat".to_string(),
-            parent_session_id: "".to_string(),
         };
 
-        struct MockSpawn {
-            tool_input: Option<SpawnSubtreeToolInput>,
-        }
-        impl DispatchEffect<EffectContext> for MockSpawn {
-            fn dispatch(
+        // Mock SpawnSubtreeOp handler (tag 1)
+        struct MockSpawnOp;
+        impl EffectHandler<EffectContext> for MockSpawnOp {
+            type Request = SpawnSubtreeOpReq;
+            fn handle(
                 &mut self,
-                tag: u64,
-                request: &Value,
+                req: SpawnSubtreeOpReq,
                 cx: &TidepoolEffectContext<'_, EffectContext>,
             ) -> Result<Value, TidepoolEffectError> {
-                assert_eq!(tag, 0);
-                let req = SpawnSubtreeReq::from_value(request, cx.table())
-                    .map_err(TidepoolEffectError::Bridge)?;
                 match req {
-                    SpawnSubtreeReq::GetToolInput => {
-                        let input = self.tool_input.take().ok_or_else(|| {
-                            TidepoolEffectError::Handler("tool_input already consumed".into())
-                        })?;
-                        input.to_value(cx.table()).map_err(TidepoolEffectError::Bridge)
-                    }
-                    SpawnSubtreeReq::SpawnSubtree(_task, branch, _session) => {
+                    SpawnSubtreeOpReq::SpawnSubtree(_task, branch) => {
                         let result = SpawnSubtreeToolResult {
                             tab_name: format!("🧠 {}", branch),
                             branch_name: format!("main.{}", branch),
                         };
-                        result.to_value(cx.table()).map_err(TidepoolEffectError::Bridge)
+                        cx.respond(result)
                     }
                 }
             }
         }
 
-        let mut dispatcher = MockSpawn {
-            tool_input: Some(tool_input),
-        };
-        let mut heap = tidepool_core_eval::heap::VecHeap::new();
+        // Eff '[SpawnSubtreeInput', SpawnSubtreeOp]
+        let tool = &backend.tools["spawn_subtree"];
+        let mut handlers = frunk::hlist![
+            ToolInputHandler { input: Some(tool_input) },
+            MockSpawnOp,
+        ];
+        let mut heap = tidepool_eval::heap::VecHeap::new();
         let mut machine =
-            tidepool_core_effect::EffectMachine::new(&backend.spawn_subtree_table, &mut heap)
-                .unwrap();
+            tidepool_effect::EffectMachine::new(&tool.table, &mut heap).unwrap();
 
         let result = machine
-            .run_with_user(&backend.spawn_subtree_expr, &mut dispatcher, &backend.ctx)
+            .run_with_user(&tool.expr, &mut handlers, &backend.ctx)
             .expect("EffectMachine should complete");
 
-        let response = SpawnSubtreeToolResult::from_value(&result, &backend.spawn_subtree_table)
+        let response = SpawnSubtreeToolResult::from_value(&result, &tool.table)
             .expect("Should decode SpawnSubtreeToolResult");
         assert!(response.tab_name.contains("feat"));
         assert_eq!(response.branch_name, "main.feat");
@@ -2055,49 +2591,42 @@ mod tests {
             branch_name: "leaf-1".to_string(),
         };
 
-        struct MockLeaf {
-            tool_input: Option<SpawnLeafToolInput>,
-        }
-        impl DispatchEffect<EffectContext> for MockLeaf {
-            fn dispatch(
+        // Mock SpawnLeafOp handler (tag 1)
+        struct MockLeafOp;
+        impl EffectHandler<EffectContext> for MockLeafOp {
+            type Request = SpawnLeafOpReq;
+            fn handle(
                 &mut self,
-                tag: u64,
-                request: &Value,
+                req: SpawnLeafOpReq,
                 cx: &TidepoolEffectContext<'_, EffectContext>,
             ) -> Result<Value, TidepoolEffectError> {
-                assert_eq!(tag, 0);
-                let req = SpawnLeafReq::from_value(request, cx.table())
-                    .map_err(TidepoolEffectError::Bridge)?;
                 match req {
-                    SpawnLeafReq::GetToolInput => {
-                        let input = self.tool_input.take().ok_or_else(|| {
-                            TidepoolEffectError::Handler("tool_input already consumed".into())
-                        })?;
-                        input.to_value(cx.table()).map_err(TidepoolEffectError::Bridge)
-                    }
-                    SpawnLeafReq::SpawnLeaf(_task, branch) => {
+                    SpawnLeafOpReq::SpawnLeaf(_task, branch) => {
                         let result = SpawnLeafToolResult {
                             tab_name: format!("♊ {}", branch),
                             branch_name: format!("main.{}", branch),
                         };
-                        result.to_value(cx.table()).map_err(TidepoolEffectError::Bridge)
+                        cx.respond(result)
                     }
                 }
             }
         }
 
-        let mut dispatcher = MockLeaf {
-            tool_input: Some(tool_input),
-        };
-        let mut heap = tidepool_core_eval::heap::VecHeap::new();
+        // Eff '[SpawnLeafInput', SpawnLeafOp]
+        let tool = &backend.tools["spawn_leaf_subtree"];
+        let mut handlers = frunk::hlist![
+            ToolInputHandler { input: Some(tool_input) },
+            MockLeafOp,
+        ];
+        let mut heap = tidepool_eval::heap::VecHeap::new();
         let mut machine =
-            tidepool_core_effect::EffectMachine::new(&backend.spawn_leaf_table, &mut heap).unwrap();
+            tidepool_effect::EffectMachine::new(&tool.table, &mut heap).unwrap();
 
         let result = machine
-            .run_with_user(&backend.spawn_leaf_expr, &mut dispatcher, &backend.ctx)
+            .run_with_user(&tool.expr, &mut handlers, &backend.ctx)
             .expect("EffectMachine should complete");
 
-        let response = SpawnLeafToolResult::from_value(&result, &backend.spawn_leaf_table)
+        let response = SpawnLeafToolResult::from_value(&result, &tool.table)
             .expect("Should decode SpawnLeafToolResult");
         assert!(response.tab_name.contains("leaf-1"));
     }
@@ -2111,13 +2640,14 @@ mod tests {
                 birth_branch: crate::BirthBranch::root(),
             },
         );
+        let table = &backend.tools["file_pr"].table;
         let input = FilePRToolInput {
             title: "feat: add tests".to_string(),
             body: "Adds unit tests".to_string(),
             base_branch: "main".to_string(),
         };
-        let value = input.to_value(&backend.file_pr_table).unwrap();
-        let back = FilePRToolInput::from_value(&value, &backend.file_pr_table).unwrap();
+        let value = input.to_value(table).unwrap();
+        let back = FilePRToolInput::from_value(&value, table).unwrap();
         assert_eq!(input.title, back.title);
         assert_eq!(input.body, back.body);
         assert_eq!(input.base_branch, back.base_branch);
@@ -2132,13 +2662,13 @@ mod tests {
                 birth_branch: crate::BirthBranch::root(),
             },
         );
+        let table = &backend.tools["merge_pr"].table;
         let input = MergePRToolInput {
             pr_number: "42".to_string(),
             strategy: "squash".to_string(),
-            working_dir: ".".to_string(),
         };
-        let value = input.to_value(&backend.merge_pr_table).unwrap();
-        let back = MergePRToolInput::from_value(&value, &backend.merge_pr_table).unwrap();
+        let value = input.to_value(table).unwrap();
+        let back = MergePRToolInput::from_value(&value, table).unwrap();
         assert_eq!(input.pr_number, back.pr_number);
         assert_eq!(input.strategy, back.strategy);
     }
@@ -2152,12 +2682,13 @@ mod tests {
                 birth_branch: crate::BirthBranch::root(),
             },
         );
+        let table = &backend.tools["notify_parent"].table;
         let input = NotifyToolInput {
             status: "success".to_string(),
             message: "All done".to_string(),
         };
-        let value = input.to_value(&backend.notify_table).unwrap();
-        let back = NotifyToolInput::from_value(&value, &backend.notify_table).unwrap();
+        let value = input.to_value(table).unwrap();
+        let back = NotifyToolInput::from_value(&value, table).unwrap();
         assert_eq!(input.status, back.status);
         assert_eq!(input.message, back.message);
     }
@@ -2178,29 +2709,33 @@ mod tests {
             base_branch: "main".to_string(),
         };
 
-        struct MockFilePR {
-            tool_input: Option<FilePRToolInput>,
-        }
-        impl DispatchEffect<EffectContext> for MockFilePR {
-            fn dispatch(
+        // Mock Identity handler (tag 1)
+        struct MockIdentity;
+        impl EffectHandler<EffectContext> for MockIdentity {
+            type Request = IdentityReq;
+            fn handle(
                 &mut self,
-                tag: u64,
-                request: &Value,
+                req: IdentityReq,
                 cx: &TidepoolEffectContext<'_, EffectContext>,
             ) -> Result<Value, TidepoolEffectError> {
-                assert_eq!(tag, 0);
-                let req =
-                    FilePRReq::from_value(request, cx.table()).map_err(TidepoolEffectError::Bridge)?;
                 match req {
-                    FilePRReq::GetToolInput => {
-                        let input = self.tool_input.take().ok_or_else(|| {
-                            TidepoolEffectError::Handler("tool_input already consumed".into())
-                        })?;
-                        input
-                            .to_value(cx.table())
-                            .map_err(TidepoolEffectError::Bridge)
-                    }
-                    FilePRReq::CreateOrUpdatePR(_title, _body, base) => {
+                    IdentityReq::GetWorkingDir => cx.respond(".".to_string()),
+                    _ => cx.respond("test".to_string()),
+                }
+            }
+        }
+
+        // Mock FilePROp handler (tag 2)
+        struct MockFilePROp;
+        impl EffectHandler<EffectContext> for MockFilePROp {
+            type Request = FilePROpReq;
+            fn handle(
+                &mut self,
+                req: FilePROpReq,
+                cx: &TidepoolEffectContext<'_, EffectContext>,
+            ) -> Result<Value, TidepoolEffectError> {
+                match req {
+                    FilePROpReq::CreateOrUpdatePR(_title, _body, base, _dir) => {
                         let result = FilePRToolResult {
                             pr_url: "https://github.com/test/test/pull/1".to_string(),
                             pr_number: "1".to_string(),
@@ -2208,26 +2743,28 @@ mod tests {
                             result_base: base,
                             created: "true".to_string(),
                         };
-                        result
-                            .to_value(cx.table())
-                            .map_err(TidepoolEffectError::Bridge)
+                        cx.respond(result)
                     }
                 }
             }
         }
 
-        let mut dispatcher = MockFilePR {
-            tool_input: Some(tool_input),
-        };
-        let mut heap = tidepool_core_eval::heap::VecHeap::new();
+        // Eff '[FilePRInput', Identity, FilePROp]
+        let tool = &backend.tools["file_pr"];
+        let mut handlers = frunk::hlist![
+            ToolInputHandler { input: Some(tool_input) },
+            MockIdentity,
+            MockFilePROp,
+        ];
+        let mut heap = tidepool_eval::heap::VecHeap::new();
         let mut machine =
-            tidepool_core_effect::EffectMachine::new(&backend.file_pr_table, &mut heap).unwrap();
+            tidepool_effect::EffectMachine::new(&tool.table, &mut heap).unwrap();
 
         let result = machine
-            .run_with_user(&backend.file_pr_expr, &mut dispatcher, &backend.ctx)
+            .run_with_user(&tool.expr, &mut handlers, &backend.ctx)
             .expect("EffectMachine should complete");
 
-        let response = FilePRToolResult::from_value(&result, &backend.file_pr_table)
+        let response = FilePRToolResult::from_value(&result, &tool.table)
             .expect("Should decode FilePRToolResult");
         assert_eq!(response.pr_number, "1");
         assert_eq!(response.result_base, "main");
@@ -2247,57 +2784,62 @@ mod tests {
         let tool_input = MergePRToolInput {
             pr_number: "42".to_string(),
             strategy: "squash".to_string(),
-            working_dir: ".".to_string(),
         };
 
-        struct MockMergePR {
-            tool_input: Option<MergePRToolInput>,
-        }
-        impl DispatchEffect<EffectContext> for MockMergePR {
-            fn dispatch(
+        // Mock Identity handler (tag 1)
+        struct MockIdentity;
+        impl EffectHandler<EffectContext> for MockIdentity {
+            type Request = IdentityReq;
+            fn handle(
                 &mut self,
-                tag: u64,
-                request: &Value,
+                req: IdentityReq,
                 cx: &TidepoolEffectContext<'_, EffectContext>,
             ) -> Result<Value, TidepoolEffectError> {
-                assert_eq!(tag, 0);
-                let req = MergePRReq::from_value(request, cx.table())
-                    .map_err(TidepoolEffectError::Bridge)?;
                 match req {
-                    MergePRReq::GetToolInput => {
-                        let input = self.tool_input.take().ok_or_else(|| {
-                            TidepoolEffectError::Handler("tool_input already consumed".into())
-                        })?;
-                        input
-                            .to_value(cx.table())
-                            .map_err(TidepoolEffectError::Bridge)
-                    }
-                    MergePRReq::MergePullRequest(pr_num, _strategy, _dir) => {
+                    IdentityReq::GetWorkingDir => cx.respond(".".to_string()),
+                    _ => cx.respond("test".to_string()),
+                }
+            }
+        }
+
+        // Mock MergePROp handler (tag 2)
+        struct MockMergePROp;
+        impl EffectHandler<EffectContext> for MockMergePROp {
+            type Request = MergePROpReq;
+            fn handle(
+                &mut self,
+                req: MergePROpReq,
+                cx: &TidepoolEffectContext<'_, EffectContext>,
+            ) -> Result<Value, TidepoolEffectError> {
+                match req {
+                    MergePROpReq::MergePullRequest(pr_num, _strategy, _dir) => {
                         let result = MergePRToolResult {
                             success: "true".to_string(),
                             message: format!("Merged PR #{}", pr_num),
                             jj_fetched: "true".to_string(),
                         };
-                        result
-                            .to_value(cx.table())
-                            .map_err(TidepoolEffectError::Bridge)
+                        cx.respond(result)
                     }
                 }
             }
         }
 
-        let mut dispatcher = MockMergePR {
-            tool_input: Some(tool_input),
-        };
-        let mut heap = tidepool_core_eval::heap::VecHeap::new();
+        // Eff '[MergePRInput', Identity, MergePROp]
+        let tool = &backend.tools["merge_pr"];
+        let mut handlers = frunk::hlist![
+            ToolInputHandler { input: Some(tool_input) },
+            MockIdentity,
+            MockMergePROp,
+        ];
+        let mut heap = tidepool_eval::heap::VecHeap::new();
         let mut machine =
-            tidepool_core_effect::EffectMachine::new(&backend.merge_pr_table, &mut heap).unwrap();
+            tidepool_effect::EffectMachine::new(&tool.table, &mut heap).unwrap();
 
         let result = machine
-            .run_with_user(&backend.merge_pr_expr, &mut dispatcher, &backend.ctx)
+            .run_with_user(&tool.expr, &mut handlers, &backend.ctx)
             .expect("EffectMachine should complete");
 
-        let response = MergePRToolResult::from_value(&result, &backend.merge_pr_table)
+        let response = MergePRToolResult::from_value(&result, &tool.table)
             .expect("Should decode MergePRToolResult");
         assert_eq!(response.success, "true");
         assert!(response.message.contains("42"));
@@ -2319,52 +2861,59 @@ mod tests {
             message: "All tests pass".to_string(),
         };
 
-        struct MockNotify {
-            tool_input: Option<NotifyToolInput>,
-        }
-        impl DispatchEffect<EffectContext> for MockNotify {
-            fn dispatch(
+        // Mock Identity handler (tag 1)
+        struct MockIdentity;
+        impl EffectHandler<EffectContext> for MockIdentity {
+            type Request = IdentityReq;
+            fn handle(
                 &mut self,
-                tag: u64,
-                request: &Value,
+                req: IdentityReq,
                 cx: &TidepoolEffectContext<'_, EffectContext>,
             ) -> Result<Value, TidepoolEffectError> {
-                assert_eq!(tag, 0);
-                let req =
-                    NotifyReq::from_value(request, cx.table()).map_err(TidepoolEffectError::Bridge)?;
                 match req {
-                    NotifyReq::GetToolInput => {
-                        let input = self.tool_input.take().ok_or_else(|| {
-                            TidepoolEffectError::Handler("tool_input already consumed".into())
-                        })?;
-                        input
-                            .to_value(cx.table())
-                            .map_err(TidepoolEffectError::Bridge)
-                    }
-                    NotifyReq::NotifyParent(_status, _message) => {
-                        let result = NotifyToolResult {
+                    IdentityReq::GetAgentId => cx.respond("test".to_string()),
+                    IdentityReq::GetParentTab => cx.respond("parent-tab".to_string()),
+                    _ => cx.respond("test".to_string()),
+                }
+            }
+        }
+
+        // Mock NotifyOp handler (tag 3)
+        struct MockNotifyOp;
+        impl EffectHandler<EffectContext> for MockNotifyOp {
+            type Request = NotifyOpReq;
+            fn handle(
+                &mut self,
+                req: NotifyOpReq,
+                cx: &TidepoolEffectContext<'_, EffectContext>,
+            ) -> Result<Value, TidepoolEffectError> {
+                match req {
+                    NotifyOpReq::DeliverNotification(_, _) => {
+                        cx.respond(NotifyToolResult {
                             ack: "delivered".to_string(),
-                        };
-                        result
-                            .to_value(cx.table())
-                            .map_err(TidepoolEffectError::Bridge)
+                        })
                     }
                 }
             }
         }
 
-        let mut dispatcher = MockNotify {
-            tool_input: Some(tool_input),
-        };
-        let mut heap = tidepool_core_eval::heap::VecHeap::new();
+        // Eff '[NotifyInput', Identity, FormatOp, NotifyOp]
+        let tool = &backend.tools["notify_parent"];
+        let mut handlers = frunk::hlist![
+            ToolInputHandler { input: Some(tool_input) },
+            MockIdentity,
+            FormatOpHandler,
+            MockNotifyOp,
+        ];
+        let mut heap = tidepool_eval::heap::VecHeap::new();
         let mut machine =
-            tidepool_core_effect::EffectMachine::new(&backend.notify_table, &mut heap).unwrap();
+            tidepool_effect::EffectMachine::new(&tool.table, &mut heap).unwrap();
 
         let result = machine
-            .run_with_user(&backend.notify_expr, &mut dispatcher, &backend.ctx)
+            .run_with_user(&tool.expr, &mut handlers, &backend.ctx)
             .expect("EffectMachine should complete");
 
-        let response = NotifyToolResult::from_value(&result, &backend.notify_table)
+        let response = NotifyToolResult::from_value(&result, &tool.table)
             .expect("Should decode NotifyToolResult");
         assert_eq!(response.ack, "delivered");
     }
@@ -2385,42 +2934,20 @@ mod tests {
     }
 
     #[test]
-    fn test_bridge_dispatcher_unhandled_effect() {
-        let table = DataConTable::new();
-        let mut dispatcher = BridgeDispatcher::new(None, vec!["Popup".into()], None);
-        let dummy_value = Value::Lit(tidepool_core_repr::Literal::LitInt(0));
-        let ctx = EffectContext {
-            agent_name: crate::AgentName::from("test"),
-            birth_branch: crate::BirthBranch::root(),
-        };
-        let tidepool_cx = TidepoolEffectContext::with_user(&table, &ctx);
-
-        let result = dispatcher.dispatch(99, &dummy_value, &tidepool_cx);
-        assert!(matches!(
-            result,
-            Err(TidepoolEffectError::UnhandledEffect { tag: 99 })
-        ));
-    }
-
-    #[test]
     fn test_minimal_single_effect() {
         // Minimal test: Haskell `send GetToolInput` (returns Int).
-        // Tests that the EffectMachine can evaluate the simplest possible
-        // freer-simple expression compiled from real Haskell source.
         let (expr, table) =
             tidepool_macro::haskell_expr!("haskell/PopupMinimal.hs::minimal");
 
-        // Handler for tag 0 (Popup effect): return 42
         struct Echo42;
-        impl tidepool_core_effect::dispatch::DispatchEffect<EffectContext> for Echo42 {
-            fn dispatch(
+        impl EffectHandler<EffectContext> for Echo42 {
+            type Request = GetToolInputReq;
+            fn handle(
                 &mut self,
-                tag: u64,
-                _request: &Value,
-                _cx: &tidepool_core_effect::dispatch::EffectContext<'_, EffectContext>,
+                _req: GetToolInputReq,
+                _cx: &TidepoolEffectContext<'_, EffectContext>,
             ) -> Result<Value, TidepoolEffectError> {
-                assert_eq!(tag, 0, "Expected Popup effect at tag 0");
-                Ok(Value::Lit(tidepool_core_repr::Literal::LitInt(42)))
+                Ok(Value::Lit(tidepool_repr::Literal::LitInt(42)))
             }
         }
 
@@ -2428,23 +2955,22 @@ mod tests {
             agent_name: crate::AgentName::from("test"),
             birth_branch: crate::BirthBranch::root(),
         };
-        let mut heap = tidepool_core_eval::heap::VecHeap::new();
+        let mut heap = tidepool_eval::heap::VecHeap::new();
         let mut machine =
-            tidepool_core_effect::EffectMachine::new(&table, &mut heap).unwrap();
-        let mut handler = Echo42;
+            tidepool_effect::EffectMachine::new(&table, &mut heap).unwrap();
+        let mut handlers = frunk::hlist![Echo42];
 
-        let result = machine.run_with_user(&expr, &mut handler, &ctx).unwrap();
+        let result = machine.run_with_user(&expr, &mut handlers, &ctx).unwrap();
         match result {
-            Value::Lit(tidepool_core_repr::Literal::LitInt(n)) => assert_eq!(n, 42),
+            Value::Lit(tidepool_repr::Literal::LitInt(n)) => assert_eq!(n, 42),
             other => panic!("Expected Lit(42), got {:?}", other),
         }
     }
 
     #[test]
     fn test_effect_machine_full_pipeline() {
-        // Full pipeline: popupTool yields GetToolInput, then ShowPopup.
-        // Uses a mock dispatcher that returns a fake PopupResponse for ShowPopup,
-        // avoiding the real PopupService (which blocks waiting for Zellij).
+        // Full pipeline: popupTool yields GetToolInput (tag 0), GetOwnTab (tag 1),
+        // then ShowPopup (tag 2). Eff '[PopupInput', Identity, PopupOp]
         let backend = TidepoolBackend::new(
             None,
             EffectContext {
@@ -2458,53 +2984,62 @@ mod tests {
             components: "[]".to_string(),
         };
 
-        // Mock dispatcher: GetToolInput returns tool_input, ShowPopup returns fake response
-        struct MockDispatcher {
-            tool_input: Option<ToolInput>,
-        }
-        impl DispatchEffect<EffectContext> for MockDispatcher {
-            fn dispatch(
+        // Mock Identity handler (tag 1)
+        struct MockIdentity;
+        impl EffectHandler<EffectContext> for MockIdentity {
+            type Request = IdentityReq;
+            fn handle(
                 &mut self,
-                tag: u64,
-                request: &Value,
+                req: IdentityReq,
                 cx: &TidepoolEffectContext<'_, EffectContext>,
             ) -> Result<Value, TidepoolEffectError> {
-                assert_eq!(tag, 0, "Expected Popup effect at tag 0");
-                let req = PopupReq::from_value(request, cx.table())
-                    .map_err(TidepoolEffectError::Bridge)?;
                 match req {
-                    PopupReq::GetToolInput => {
-                        let input = self.tool_input.take().ok_or_else(|| {
-                            TidepoolEffectError::Handler("tool_input already consumed".into())
-                        })?;
-                        input.to_value(cx.table()).map_err(TidepoolEffectError::Bridge)
-                    }
-                    PopupReq::ShowPopup(title, _components) => {
+                    IdentityReq::GetOwnTab => cx.respond("test-tab".to_string()),
+                    _ => cx.respond("test".to_string()),
+                }
+            }
+        }
+
+        // Mock PopupOp handler (tag 2)
+        struct MockPopupOp;
+        impl EffectHandler<EffectContext> for MockPopupOp {
+            type Request = PopupOpReq;
+            fn handle(
+                &mut self,
+                req: PopupOpReq,
+                cx: &TidepoolEffectContext<'_, EffectContext>,
+            ) -> Result<Value, TidepoolEffectError> {
+                match req {
+                    PopupOpReq::ShowPopup(title, _components, _tab) => {
                         let response = PopupResponse {
                             button: "submit".to_string(),
                             values: format!("{{\"from\":\"{}\"}}", title),
                         };
-                        response.to_value(cx.table()).map_err(TidepoolEffectError::Bridge)
+                        cx.respond(response)
                     }
                 }
             }
         }
 
-        let mut dispatcher = MockDispatcher {
-            tool_input: Some(tool_input),
-        };
+        let tool = &backend.tools["popup"];
+        let mut handlers = frunk::hlist![
+            ToolInputHandler { input: Some(tool_input) },
+            MockIdentity,
+            MockPopupOp,
+        ];
 
-        let mut heap = tidepool_core_eval::heap::VecHeap::new();
+        let mut heap = tidepool_eval::heap::VecHeap::new();
         let mut machine =
-            tidepool_core_effect::EffectMachine::new(&backend.table, &mut heap).unwrap();
+            tidepool_effect::EffectMachine::new(&tool.table, &mut heap).unwrap();
 
         let result = machine
-            .run_with_user(&backend.popup_expr, &mut dispatcher, &backend.ctx)
+            .run_with_user(&tool.expr, &mut handlers, &backend.ctx)
             .expect("EffectMachine should complete successfully");
 
-        let response = PopupResponse::from_value(&result, &backend.table)
+        let response = PopupResponse::from_value(&result, &tool.table)
             .expect("Should decode PopupResponse from result");
         assert_eq!(response.button, "submit");
         assert!(response.values.contains("Test Title"));
     }
+
 }
