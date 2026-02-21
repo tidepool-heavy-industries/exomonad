@@ -9,15 +9,31 @@ module ExoMonad.Guest.Tools.Events
 where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.:?), (.=))
+import Data.Aeson qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as T
 import ExoMonad.Effects.Events qualified as Events
 import ExoMonad.Effects.Log (emitStructuredEvent)
 import ExoMonad.Guest.Tool.Class (MCPTool (..), liftEffect)
+import ExoMonad.Guest.Tool.Schema (JsonSchema (..), genericToolSchemaWith)
 import GHC.Generics (Generic)
 
 -- | Notify parent tool (for workers/subtrees to call on completion)
 data NotifyParent = NotifyParent
+
+-- | Status for notify_parent tool.
+data NotifyStatus = Success | Failure
+  deriving (Show, Eq, Generic, JsonSchema)
+
+instance FromJSON NotifyStatus where
+  parseJSON = Aeson.withText "NotifyStatus" $ \case
+    "success" -> pure Success
+    "failure" -> pure Failure
+    other -> fail $ "Unknown status: " <> T.unpack other
+
+instance ToJSON NotifyStatus where
+  toJSON Success = Aeson.String "success"
+  toJSON Failure = Aeson.String "failure"
 
 -- | Structured task report for enriched notifications.
 data TaskReport = TaskReport
@@ -25,6 +41,13 @@ data TaskReport = TaskReport
     trHow :: Text
   }
   deriving (Generic, Show)
+
+instance JsonSchema TaskReport where
+  toSchema =
+    genericToolSchemaWith @TaskReport
+      [ ("what", "task description"),
+        ("how", "verification command that was run")
+      ]
 
 instance FromJSON TaskReport where
   parseJSON = withObject "TaskReport" $ \v ->
@@ -34,7 +57,7 @@ instance ToJSON TaskReport where
   toJSON (TaskReport w h) = object ["what" .= w, "how" .= h]
 
 data NotifyParentArgs = NotifyParentArgs
-  { npStatus :: Text,
+  { npStatus :: NotifyStatus,
     npMessage :: Text,
     npPrNumber :: Maybe Int,
     npTasksCompleted :: Maybe [TaskReport]
@@ -63,43 +86,11 @@ instance MCPTool NotifyParent where
   toolName = "notify_parent"
   toolDescription = "Signal to your parent that you are DONE. Call as your final action — after PR is filed, Copilot feedback addressed, and changes pushed. Status 'success' means work is review-clean. Status 'failure' means retries exhausted, escalating to parent."
   toolSchema =
-    object
-      [ "type" .= ("object" :: Text),
-        "properties"
-          .= object
-            [ "status"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "enum" .= (["success", "failure"] :: [Text]),
-                    "description" .= ("'success' = work is done and review-clean. 'failure' = exhausted retries, escalating to parent." :: Text)
-                  ],
-              "message"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "description" .= ("One-line summary. On success: what was accomplished. On failure: what went wrong." :: Text)
-                  ],
-              "pr_number"
-                .= object
-                  [ "type" .= ("integer" :: Text),
-                    "description" .= ("PR number if one was filed. Enables parent to immediately merge without searching." :: Text)
-                  ],
-              "tasks_completed"
-                .= object
-                  [ "type" .= ("array" :: Text),
-                    "description" .= ("Array of {what, how} pairs. 'what' = task description, 'how' = verification command that was run." :: Text),
-                    "items"
-                      .= object
-                        [ "type" .= ("object" :: Text),
-                          "properties"
-                            .= object
-                              [ "what" .= object ["type" .= ("string" :: Text)],
-                                "how" .= object ["type" .= ("string" :: Text)]
-                              ],
-                          "required" .= (["what", "how"] :: [Text])
-                        ]
-                  ]
-            ],
-        "required" .= (["status", "message"] :: [Text])
+    genericToolSchemaWith @NotifyParentArgs
+      [ ("status", "'success' = work is done and review-clean. 'failure' = exhausted retries, escalating to parent."),
+        ("message", "One-line summary. On success: what was accomplished. On failure: what went wrong."),
+        ("pr_number", "PR number if one was filed. Enables parent to immediately merge without searching."),
+        ("tasks_completed", "Array of {what, how} pairs. 'what' = task description, 'how' = verification command that was run.")
       ]
   toolHandler args = do
     emitStructuredEvent "agent.completed" $
@@ -110,7 +101,10 @@ instance MCPTool NotifyParent where
           "tasks_completed" .= npTasksCompleted args
         ]
     let richMessage = composeNotifyMessage args
-    liftEffect (Events.notifyParent "" (npStatus args) richMessage) $ \_ ->
+    let statusText = case npStatus args of
+          Success -> "success" :: Text
+          Failure -> "failure"
+    liftEffect (Events.notifyParent "" statusText richMessage) $ \_ ->
       object ["success" .= True]
 
 -- | Compose enriched notification message with PR number and task reports.
