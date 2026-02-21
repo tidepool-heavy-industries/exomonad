@@ -76,3 +76,31 @@ pub fn working_dir_path_or_default(dir: &str) -> std::path::PathBuf {
         std::path::PathBuf::from(dir)
     }
 }
+
+// ============================================================================
+// Macro helpers
+// ============================================================================
+
+/// Macro for simple pass-through effect handlers.
+///
+/// Implements [`EffectHandler`] for a struct by delegating to a dispatch function.
+#[macro_export]
+macro_rules! impl_pass_through_handler {
+    ($handler:ident, $namespace:literal, $dispatch:ident) => {
+        #[async_trait::async_trait]
+        impl $crate::effects::EffectHandler for $handler {
+            fn namespace(&self) -> &str {
+                $namespace
+            }
+
+            async fn handle(
+                &self,
+                effect_type: &str,
+                payload: &[u8],
+                ctx: &$crate::effects::EffectContext,
+            ) -> $crate::effects::EffectResult<Vec<u8>> {
+                $dispatch(self, effect_type, payload, ctx).await
+            }
+        }
+    };
+}

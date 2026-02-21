@@ -4,7 +4,7 @@
 
 use super::working_dir_or_default;
 use crate::effects::{
-    dispatch_git_effect, EffectHandler, EffectResult, GitEffects, ResultExt,
+    dispatch_git_effect, EffectResult, GitEffects, ResultExt,
 };
 use crate::services::git::GitService;
 use async_trait::async_trait;
@@ -27,21 +27,7 @@ impl GitHandler {
     }
 }
 
-#[async_trait]
-impl EffectHandler for GitHandler {
-    fn namespace(&self) -> &str {
-        "git"
-    }
-
-    async fn handle(
-        &self,
-        effect_type: &str,
-        payload: &[u8],
-        ctx: &crate::effects::EffectContext,
-    ) -> EffectResult<Vec<u8>> {
-        dispatch_git_effect(self, effect_type, payload, ctx).await
-    }
-}
+crate::impl_pass_through_handler!(GitHandler, "git", dispatch_git_effect);
 
 #[async_trait]
 impl GitEffects for GitHandler {

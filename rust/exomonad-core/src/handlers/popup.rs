@@ -3,7 +3,7 @@
 //! Uses proto-generated types from `exomonad_proto::effects::popup`.
 
 use crate::effects::{
-    dispatch_popup_effect, EffectError, EffectHandler, EffectResult, PopupEffects, ResultExt,
+    dispatch_popup_effect, EffectError, EffectResult, PopupEffects, ResultExt,
 };
 use crate::services::popup::{PopupInput, PopupService};
 use async_trait::async_trait;
@@ -23,21 +23,7 @@ impl PopupHandler {
     }
 }
 
-#[async_trait]
-impl EffectHandler for PopupHandler {
-    fn namespace(&self) -> &str {
-        "popup"
-    }
-
-    async fn handle(
-        &self,
-        effect_type: &str,
-        payload: &[u8],
-        ctx: &crate::effects::EffectContext,
-    ) -> EffectResult<Vec<u8>> {
-        dispatch_popup_effect(self, effect_type, payload, ctx).await
-    }
-}
+crate::impl_pass_through_handler!(PopupHandler, "popup", dispatch_popup_effect);
 
 #[async_trait]
 impl PopupEffects for PopupHandler {

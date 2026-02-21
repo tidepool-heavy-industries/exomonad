@@ -3,7 +3,7 @@
 //! Stores values as JSON files under `.exo/kv/{key}.json`.
 //! Keys are validated to contain only alphanumeric characters, underscores, and hyphens.
 
-use crate::effects::{dispatch_kv_effect, EffectError, EffectHandler, EffectResult, KvEffects};
+use crate::effects::{dispatch_kv_effect, EffectError, EffectResult, KvEffects};
 use async_trait::async_trait;
 use exomonad_proto::effects::kv::*;
 use std::path::PathBuf;
@@ -49,21 +49,7 @@ impl KvHandler {
     }
 }
 
-#[async_trait]
-impl EffectHandler for KvHandler {
-    fn namespace(&self) -> &str {
-        "kv"
-    }
-
-    async fn handle(
-        &self,
-        effect_type: &str,
-        payload: &[u8],
-        ctx: &crate::effects::EffectContext,
-    ) -> EffectResult<Vec<u8>> {
-        dispatch_kv_effect(self, effect_type, payload, ctx).await
-    }
-}
+crate::impl_pass_through_handler!(KvHandler, "kv", dispatch_kv_effect);
 
 #[async_trait]
 impl KvEffects for KvHandler {

@@ -3,7 +3,7 @@
 //! Stores Claude Code session UUIDs so spawn_subtree can use --resume --fork-session.
 
 use crate::domain::ClaudeSessionUuid;
-use crate::effects::{dispatch_session_effect, EffectHandler, EffectResult, SessionEffects};
+use crate::effects::{dispatch_session_effect, EffectResult, SessionEffects};
 use crate::services::claude_session_registry::ClaudeSessionRegistry;
 use async_trait::async_trait;
 use exomonad_proto::effects::session::*;
@@ -21,21 +21,7 @@ impl SessionHandler {
     }
 }
 
-#[async_trait]
-impl EffectHandler for SessionHandler {
-    fn namespace(&self) -> &str {
-        "session"
-    }
-
-    async fn handle(
-        &self,
-        effect_type: &str,
-        payload: &[u8],
-        ctx: &crate::effects::EffectContext,
-    ) -> EffectResult<Vec<u8>> {
-        dispatch_session_effect(self, effect_type, payload, ctx).await
-    }
-}
+crate::impl_pass_through_handler!(SessionHandler, "session", dispatch_session_effect);
 
 #[async_trait]
 impl SessionEffects for SessionHandler {
