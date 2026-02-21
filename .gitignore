@@ -66,11 +66,8 @@ rust/exomonad/.exo/
 # Temporary task files for worktree dispatch
 *.md.tmp
 
-# Cargo workspace build artifacts
-/target/
-
-# Standalone Rust crate build artifacts (outside workspace target/)
-rust/exomonad-plugin/target/
+# Cargo build artifacts (workspace and per-crate)
+**/target/
 
 # Interagent communication artifacts (TL↔Codex design docs)
 interagent/
