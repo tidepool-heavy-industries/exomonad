@@ -54,6 +54,7 @@ library wasm-guest-internal
         ExoMonad
         -- Tool infrastructure
         ExoMonad.Guest.Tool.Class
+        ExoMonad.Guest.Tool.Schema
         ExoMonad.Guest.Tool.Mode
         ExoMonad.Guest.Tool.Record
         ExoMonad.Guest.Tool.Runtime

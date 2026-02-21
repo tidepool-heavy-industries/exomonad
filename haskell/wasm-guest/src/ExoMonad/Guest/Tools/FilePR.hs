@@ -19,6 +19,7 @@ import ExoMonad.Effect.Class (runEffect, runEffect_)
 import ExoMonad.Effects.FilePR (FilePRFilePr)
 import ExoMonad.Effects.Log (LogError, LogInfo, emitStructuredEvent)
 import ExoMonad.Guest.Tool.Class
+import ExoMonad.Guest.Tool.Schema (genericToolSchemaWith)
 import GHC.Generics (Generic)
 
 -- | File PR tool marker type.
@@ -64,29 +65,13 @@ instance MCPTool FilePR where
   toolName = "file_pr"
   toolDescription = "Create or update a pull request for the current branch. Idempotent — safe to call multiple times (updates existing PR). Pushes the branch automatically. Base branch auto-detected from dot-separated naming (e.g. main.foo.bar targets main.foo)."
   toolSchema =
-    object
-      [ "type" .= ("object" :: Text),
-        "required" .= (["title", "body"] :: [Text]),
-        "properties"
-          .= object
-            [ "title"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "description" .= ("PR title" :: Text)
-                  ],
-              "body"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "description" .= ("PR body/description" :: Text)
-                  ],
-              "base_branch"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "description" .= ("Target branch. Auto-detected from dot-separated naming if omitted (main.foo.bar targets main.foo). Only set to override." :: Text)
-                  ]
-            ]
+    genericToolSchemaWith @FilePRArgs
+      [ ("title", "PR title"),
+        ("body", "PR body/description"),
+        ("base_branch", "Target branch. Auto-detected from dot-separated naming if omitted (main.foo.bar targets main.foo). Only set to override.")
       ]
   toolHandler args = do
+
     let req =
           FP.FilePrRequest
             { FP.filePrRequestTitle = TL.fromStrict (fpTitle args),

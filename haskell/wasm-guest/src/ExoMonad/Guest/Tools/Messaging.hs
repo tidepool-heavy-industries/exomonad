@@ -36,6 +36,7 @@ import Data.Word (Word8)
 import Effects.Messaging qualified as M
 import ExoMonad.Effects.Messaging qualified as Messaging
 import ExoMonad.Guest.Tool.Class
+import ExoMonad.Guest.Tool.Schema (genericToolSchemaWith)
 import GHC.Generics (Generic)
 import Proto3.Suite.Class (fromByteString, toLazyByteString)
 
@@ -61,17 +62,8 @@ instance MCPTool Note where
   toolName = "note"
   toolDescription = "Send a fire-and-forget note to the TL (e.g. FYI updates, progress reports)."
   toolSchema =
-    object
-      [ "type" .= ("object" :: Text),
-        "required" .= (["content"] :: [Text]),
-        "properties"
-          .= object
-            [ "content"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "description" .= ("Note content to send to the TL" :: Text)
-                  ]
-            ]
+    genericToolSchemaWith @NoteArgs
+      [ ("content", "Note content to send to the TL")
       ]
   toolHandler args = do
     liftEffect (Messaging.sendNote (naContent args)) $ \_ ->
@@ -99,17 +91,8 @@ instance MCPTool Question where
   toolName = "question"
   toolDescription = "Ask the TL a question and block until answered."
   toolSchema =
-    object
-      [ "type" .= ("object" :: Text),
-        "required" .= (["content"] :: [Text]),
-        "properties"
-          .= object
-            [ "content"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "description" .= ("Question to ask the TL" :: Text)
-                  ]
-            ]
+    genericToolSchemaWith @QuestionArgs
+      [ ("content", "Question to ask the TL")
       ]
   toolHandler args = do
     liftEffect (Messaging.sendQuestion (qaContent args)) $ \resp ->
@@ -156,26 +139,10 @@ instance MCPTool GetAgentMessages where
   toolName = "get_agent_messages"
   toolDescription = "Read notes and pending questions from agent outboxes. Scans all agents (or a specific agent) for messages."
   toolSchema =
-    object
-      [ "type" .= ("object" :: Text),
-        "properties"
-          .= object
-            [ "agent_id"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "description" .= ("Filter to a specific agent directory name. If omitted, reads from all agents." :: Text)
-                  ],
-              "subrepo"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "description" .= ("Subrepo path (e.g. 'egregore/') to scope agent scanning." :: Text)
-                  ],
-              "timeout_secs"
-                .= object
-                  [ "type" .= ("integer" :: Text),
-                    "description" .= ("Long-poll timeout in seconds. 0 or omitted for immediate return." :: Text)
-                  ]
-            ]
+    genericToolSchemaWith @GetAgentMessagesArgs
+      [ ("agent_id", "Filter to a specific agent directory name. If omitted, reads from all agents."),
+        ("subrepo", "Subrepo path (e.g. 'egregore/') to scope agent scanning."),
+        ("timeout_secs", "Long-poll timeout in seconds. 0 or omitted for immediate return.")
       ]
   toolHandler args = do
     let agentId = maybe "" id (gaAgentId args)
@@ -233,34 +200,14 @@ instance MCPTool AnswerQuestion where
   toolName = "answer_question"
   toolDescription = "Answer a pending question from an agent. Writes the answer to the agent's inbox, unblocking their send_question call."
   toolSchema =
-    object
-      [ "type" .= ("object" :: Text),
-        "required" .= (["agent_id", "question_id", "answer"] :: [Text]),
-        "properties"
-          .= object
-            [ "agent_id"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "description" .= ("The agent directory name (e.g. 'gh-42-fix-bug-claude')." :: Text)
-                  ],
-              "question_id"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "description" .= ("The question ID to answer (e.g. 'q-abc123')." :: Text)
-                  ],
-              "answer"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "description" .= ("The answer text." :: Text)
-                  ],
-              "subrepo"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "description" .= ("Subrepo path (e.g. 'egregore/') if agent is in a subrepo." :: Text)
-                  ]
-            ]
+    genericToolSchemaWith @AnswerQuestionArgs
+      [ ("agent_id", "The agent directory name (e.g. 'gh-42-fix-bug-claude')."),
+        ("question_id", "The question ID to answer (e.g. 'q-abc123')."),
+        ("answer", "The answer text."),
+        ("subrepo", "Subrepo path (e.g. 'egregore/') if agent is in a subrepo.")
       ]
   toolHandler args = do
+
     liftEffect (Messaging.answerQuestion (aqAgentId args) (aqQuestionId args) (aqAnswer args)) $ \resp ->
       object
         [ "status" .= TL.toStrict (M.answerQuestionResponseStatus resp),

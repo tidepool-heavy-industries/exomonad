@@ -20,12 +20,13 @@ import ExoMonad.Effect.Class (runEffect, runEffect_)
 import ExoMonad.Effects.Log (LogError, LogInfo, emitStructuredEvent)
 import ExoMonad.Effects.MergePR (MergePRMergePr)
 import ExoMonad.Guest.Tool.Class
+import ExoMonad.Guest.Tool.Schema (genericToolSchemaWith)
 import GHC.Generics (Generic)
 
 data MergePR
 
 data MergePRArgs = MergePRArgs
-  { mprNumber :: Int,
+  { mprPrNumber :: Int,
     mprStrategy :: Maybe Text,
     mprWorkingDir :: Maybe Text
   }
@@ -37,6 +38,7 @@ instance FromJSON MergePRArgs where
       <$> v .: "pr_number"
       <*> v .:? "strategy"
       <*> v .:? "working_dir"
+
 
 data MergePROutput = MergePROutput
   { mpoSuccess :: Bool,
@@ -58,36 +60,19 @@ instance MCPTool MergePR where
   toolName = "merge_pr"
   toolDescription = "Merge a GitHub pull request and fetch changes via jj"
   toolSchema =
-    object
-      [ "type" .= ("object" :: Text),
-        "required" .= (["pr_number"] :: [Text]),
-        "properties"
-          .= object
-            [ "pr_number"
-                .= object
-                  [ "type" .= ("integer" :: Text),
-                    "description" .= ("PR number to merge" :: Text)
-                  ],
-              "strategy"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "description" .= ("Merge strategy: squash (default), merge, or rebase" :: Text)
-                  ],
-              "working_dir"
-                .= object
-                  [ "type" .= ("string" :: Text),
-                    "description" .= ("Working directory for git/jj operations" :: Text)
-                  ]
-            ]
+    genericToolSchemaWith @MergePRArgs
+      [ ("pr_number", "PR number to merge"),
+        ("strategy", "Merge strategy: squash (default), merge, or rebase"),
+        ("working_dir", "Working directory for git/jj operations")
       ]
   toolHandler args = do
     let req =
           MP.MergePrRequest
-            { MP.mergePrRequestPrNumber = fromIntegral (mprNumber args),
+            { MP.mergePrRequestPrNumber = fromIntegral (mprPrNumber args),
               MP.mergePrRequestStrategy = maybe "" TL.fromStrict (mprStrategy args),
               MP.mergePrRequestWorkingDir = maybe "" TL.fromStrict (mprWorkingDir args)
             }
-    _ <- runEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("MergePR: Merging PR #" <> T.pack (show (mprNumber args))), Log.infoRequestFields = ""})
+    _ <- runEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("MergePR: Merging PR #" <> T.pack (show (mprPrNumber args))), Log.infoRequestFields = ""})
     result <- runEffect @MergePRMergePr req
     case result of
       Left err -> do
@@ -103,7 +88,8 @@ instance MCPTool MergePR where
         _ <- runEffect_ @LogInfo (Log.InfoRequest {Log.infoRequestMessage = TL.fromStrict ("MergePR: " <> mpoMessage output), Log.infoRequestFields = ""})
         emitStructuredEvent "pr.merged" $
           object
-            [ "pr_number" .= mprNumber args,
+            [ "pr_number" .= mprPrNumber args,
               "success" .= mpoSuccess output
             ]
         pure $ successResult (Aeson.toJSON output)
+
