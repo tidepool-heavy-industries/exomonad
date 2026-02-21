@@ -25,6 +25,7 @@ module ExoMonad.Effects.GitHub
     GitHubListPullRequests,
     GitHubGetPullRequest,
     GitHubGetPullRequestForBranch,
+    GitHubGetPullRequestReviewComments,
     GitHubCreatePullRequest,
 
     -- * Smart Constructors
@@ -33,6 +34,7 @@ module ExoMonad.Effects.GitHub
     listPullRequests,
     getPullRequest,
     getPullRequestForBranch,
+    getPullRequestReviewComments,
     createPullRequest,
 
     -- * Re-exported proto types
@@ -83,6 +85,13 @@ instance Effect GitHubGetPullRequestForBranch where
   type Output GitHubGetPullRequestForBranch = GetPullRequestForBranchResponse
   effectId = "github.get_pull_request_for_branch"
 
+data GitHubGetPullRequestReviewComments
+
+instance Effect GitHubGetPullRequestReviewComments where
+  type Input GitHubGetPullRequestReviewComments = GetPullRequestReviewCommentsRequest
+  type Output GitHubGetPullRequestReviewComments = GetPullRequestReviewCommentsResponse
+  effectId = "github.get_pull_request_review_comments"
+
 data GitHubCreatePullRequest
 
 instance Effect GitHubCreatePullRequest where
@@ -108,6 +117,9 @@ getPullRequest = runEffect @GitHubGetPullRequest
 
 getPullRequestForBranch :: GetPullRequestForBranchRequest -> IO (Either EffectError GetPullRequestForBranchResponse)
 getPullRequestForBranch = runEffect @GitHubGetPullRequestForBranch
+
+getPullRequestReviewComments :: GetPullRequestReviewCommentsRequest -> IO (Either EffectError GetPullRequestReviewCommentsResponse)
+getPullRequestReviewComments = runEffect @GitHubGetPullRequestReviewComments
 
 createPullRequest :: CreatePullRequestRequest -> IO (Either EffectError CreatePullRequestResponse)
 createPullRequest = runEffect @GitHubCreatePullRequest
