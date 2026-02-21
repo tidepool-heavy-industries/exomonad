@@ -2,6 +2,7 @@ use crate::domain::PRNumber;
 use crate::services::agent_control::AgentType;
 use crate::services::event_log::EventLog;
 use crate::services::event_queue::EventQueue;
+use crate::services::repo;
 use crate::services::zellij_events;
 use anyhow::{Context, Result};
 use exomonad_proto::effects::events::{event::EventType, Event, WorkerComplete};
@@ -155,35 +156,17 @@ impl GitHubPoller {
             return Ok(Some(info.clone()));
         }
 
-        let output = Command::new("gh")
-            .args(["repo", "view", "--json", "owner,name"])
-            .output()
-            .await
-            .context("Failed to execute gh repo view")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            warn!("Failed to get repo info: {}", stderr.trim());
-            return Ok(None);
+        match repo::get_repo_info(self.project_dir.to_str().unwrap_or(".")).await {
+            Ok(info) => {
+                let result = (info.owner, info.repo);
+                *info_guard = Some(result.clone());
+                Ok(Some(result))
+            }
+            Err(e) => {
+                warn!("Failed to get repo info: {}", e);
+                Ok(None)
+            }
         }
-
-        #[derive(Deserialize)]
-        struct RepoInfo {
-            owner: RepoOwner,
-            name: String,
-        }
-        #[derive(Deserialize)]
-        struct RepoOwner {
-            login: String,
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let info: RepoInfo =
-            serde_json::from_str(&stdout).context("Failed to parse repo info JSON")?;
-
-        let result = (info.owner.login, info.name);
-        *info_guard = Some(result.clone());
-        Ok(Some(result))
     }
 
     async fn scan_worktrees(&self) -> Result<Vec<WorktreeBranch>> {

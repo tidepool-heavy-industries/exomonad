@@ -18,6 +18,7 @@ pub mod log;
 pub mod merge_pr;
 pub mod popup;
 pub mod questions;
+pub mod repo;
 pub mod secrets;
 pub mod zellij_events;
 

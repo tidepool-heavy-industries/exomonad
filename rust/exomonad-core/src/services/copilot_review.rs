@@ -4,7 +4,7 @@
 // Blocks until comments are found or timeout is reached.
 
 use crate::domain::PRNumber;
-use crate::services::git;
+use crate::services::{git, repo};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::process::Command;
@@ -52,35 +52,6 @@ pub struct CopilotComment {
 // ============================================================================
 // Service
 // ============================================================================
-
-/// Get repo owner/name from git remote
-fn get_repo_info() -> Result<(String, String)> {
-    let output = Command::new("gh")
-        .args(["repo", "view", "--json", "owner,name"])
-        .output()
-        .context("Failed to execute gh repo view")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("Failed to get repo info: {}", stderr.trim());
-    }
-
-    #[derive(Deserialize)]
-    struct RepoInfo {
-        owner: RepoOwner,
-        name: String,
-    }
-
-    #[derive(Deserialize)]
-    struct RepoOwner {
-        login: String,
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let info: RepoInfo = serde_json::from_str(&stdout).context("Failed to parse repo info JSON")?;
-
-    Ok((info.owner.login, info.name))
-}
 
 /// Fetch PR review comments using gh api
 fn fetch_pr_comments(owner: &str, repo: &str, pr_number: PRNumber) -> Result<Vec<CopilotComment>> {
@@ -211,13 +182,16 @@ fn fetch_pr_reviews(owner: &str, repo: &str, pr_number: PRNumber) -> Result<bool
 }
 
 /// Main wait_for_copilot_review implementation
-pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<CopilotReviewOutput> {
+pub async fn wait_for_copilot_review(
+    input: &WaitForCopilotReviewInput,
+) -> Result<CopilotReviewOutput> {
     info!(
         "[CopilotReview] Waiting for Copilot review on PR #{} (timeout: {}s, poll: {}s)",
         input.pr_number, input.timeout_secs, input.poll_interval_secs
     );
 
-    let (owner, repo) = get_repo_info()?;
+    let info = repo::get_repo_info(".").await?;
+    let (owner, repo) = (info.owner, info.repo);
     info!("[CopilotReview] Repository: {}/{}", owner, repo);
 
     let deadline = Instant::now() + Duration::from_secs(input.timeout_secs);

@@ -67,6 +67,7 @@ impl CopilotEffects for CopilotHandler {
         };
 
         let output = copilot_review::wait_for_copilot_review(&input)
+            .await
             .effect_err("copilot")?;
 
         let comments: Vec<CopilotComment> = output
