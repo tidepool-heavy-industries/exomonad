@@ -247,7 +247,7 @@ impl GitHubPoller {
                 if copilot_count > old_state.last_copilot_comment_count {
                     // New activity!
                     let message = self.format_copilot_message(&copilot_comments, &copilot_reviews);
-                    self.emit_event(branch, "copilot_review", &message, agent_type)
+                    self.emit_event(branch, "copilot_review", &message, agent_type, Some(pr_number))
                         .await;
                 }
                 // Update state even if count decreased (to sync with reality)
@@ -258,7 +258,7 @@ impl GitHubPoller {
             if ci_status != old_state.last_ci_status {
                 // Status changed!
                 let message = format!("[CI STATUS: {}] {}", branch, ci_status);
-                self.emit_event(branch, &ci_status, &message, agent_type)
+                self.emit_event(branch, &ci_status, &message, agent_type, Some(pr_number))
                     .await;
                 old_state.last_ci_status = ci_status;
             }
@@ -447,7 +447,7 @@ impl GitHubPoller {
         msg
     }
 
-    async fn emit_event(&self, branch: &str, status: &str, message: &str, agent_type: AgentType) {
+    async fn emit_event(&self, branch: &str, status: &str, message: &str, agent_type: AgentType, pr_number: Option<PRNumber>) {
         info!(
             "Emitting event for branch {}: {} - {}",
             branch, status, message
@@ -486,13 +486,13 @@ impl GitHubPoller {
 
         // 2. Inject actionable events to agent's Zellij pane
         let agent_message = match status {
-            "copilot_review" => Some(format!(
-                "[Copilot Review Feedback]\n\
-                 The following review comments were left on your PR. \
-                 Read each comment, then address the issues raised.\n\n\
-                 {}",
-                message
-            )),
+            "copilot_review" => {
+                let pr_arg = pr_number.map(|n| n.to_string()).unwrap_or_default();
+                Some(format!(
+                    "[Copilot Review on {branch}] New review comments. \
+                     View with: gh pr view {pr_arg} --json reviews,comments"
+                ))
+            }
             "failure" => Some(format!(
                 "[CI Failed]\n\
                  CI checks failed on your branch ({branch}). \
