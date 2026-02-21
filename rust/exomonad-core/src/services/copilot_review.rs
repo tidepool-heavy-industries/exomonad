@@ -4,12 +4,12 @@
 // Blocks until comments are found or timeout is reached.
 
 use crate::domain::PRNumber;
-use crate::services::git;
+use crate::services::{git, repo};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::process::Command;
-use std::thread;
 use std::time::{Duration, Instant};
+use tokio::process::Command;
+use tokio::time::sleep;
 use tracing::{debug, info, warn};
 
 use super::zellij_events;
@@ -53,37 +53,12 @@ pub struct CopilotComment {
 // Service
 // ============================================================================
 
-/// Get repo owner/name from git remote
-fn get_repo_info() -> Result<(String, String)> {
-    let output = Command::new("gh")
-        .args(["repo", "view", "--json", "owner,name"])
-        .output()
-        .context("Failed to execute gh repo view")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("Failed to get repo info: {}", stderr.trim());
-    }
-
-    #[derive(Deserialize)]
-    struct RepoInfo {
-        owner: RepoOwner,
-        name: String,
-    }
-
-    #[derive(Deserialize)]
-    struct RepoOwner {
-        login: String,
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let info: RepoInfo = serde_json::from_str(&stdout).context("Failed to parse repo info JSON")?;
-
-    Ok((info.owner.login, info.name))
-}
-
 /// Fetch PR review comments using gh api
-fn fetch_pr_comments(owner: &str, repo: &str, pr_number: PRNumber) -> Result<Vec<CopilotComment>> {
+async fn fetch_pr_comments(
+    owner: &str,
+    repo: &str,
+    pr_number: PRNumber,
+) -> Result<Vec<CopilotComment>> {
     let endpoint = format!("/repos/{}/{}/pulls/{}/comments", owner, repo, pr_number);
 
     debug!("[CopilotReview] Fetching comments from: {}", endpoint);
@@ -91,6 +66,7 @@ fn fetch_pr_comments(owner: &str, repo: &str, pr_number: PRNumber) -> Result<Vec
     let output = Command::new("gh")
         .args(["api", &endpoint])
         .output()
+        .await
         .context("Failed to execute gh api for PR comments")?;
 
     if !output.status.success() {
@@ -166,7 +142,7 @@ fn is_copilot_comment(login: &str, user_type: Option<&str>) -> bool {
 }
 
 /// Also check PR reviews (not just inline comments)
-fn fetch_pr_reviews(owner: &str, repo: &str, pr_number: PRNumber) -> Result<bool> {
+async fn fetch_pr_reviews(owner: &str, repo: &str, pr_number: PRNumber) -> Result<bool> {
     let endpoint = format!("/repos/{}/{}/pulls/{}/reviews", owner, repo, pr_number);
 
     debug!("[CopilotReview] Fetching reviews from: {}", endpoint);
@@ -174,6 +150,7 @@ fn fetch_pr_reviews(owner: &str, repo: &str, pr_number: PRNumber) -> Result<bool
     let output = Command::new("gh")
         .args(["api", &endpoint])
         .output()
+        .await
         .context("Failed to execute gh api for PR reviews")?;
 
     if !output.status.success() {
@@ -211,13 +188,16 @@ fn fetch_pr_reviews(owner: &str, repo: &str, pr_number: PRNumber) -> Result<bool
 }
 
 /// Main wait_for_copilot_review implementation
-pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<CopilotReviewOutput> {
+pub async fn wait_for_copilot_review(
+    input: &WaitForCopilotReviewInput,
+) -> Result<CopilotReviewOutput> {
     info!(
         "[CopilotReview] Waiting for Copilot review on PR #{} (timeout: {}s, poll: {}s)",
         input.pr_number, input.timeout_secs, input.poll_interval_secs
     );
 
-    let (owner, repo) = get_repo_info()?;
+    let info = repo::get_repo_info(".").await?;
+    let (owner, repo) = (info.owner, info.repo);
     info!("[CopilotReview] Repository: {}/{}", owner, repo);
 
     let deadline = Instant::now() + Duration::from_secs(input.timeout_secs);
@@ -225,7 +205,7 @@ pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<Copi
 
     loop {
         // Check for inline comments
-        let comments = fetch_pr_comments(&owner, &repo, input.pr_number)?;
+        let comments = fetch_pr_comments(&owner, &repo, input.pr_number).await?;
 
         if !comments.is_empty() {
             info!("[CopilotReview] Found {} Copilot comments", comments.len());
@@ -263,7 +243,7 @@ pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<Copi
         }
 
         // Also check for review (without inline comments)
-        if fetch_pr_reviews(&owner, &repo, input.pr_number)? {
+        if fetch_pr_reviews(&owner, &repo, input.pr_number).await? {
             info!("[CopilotReview] Found Copilot review (no inline comments)");
 
             // Emit copilot:reviewed event with 0 comments (only if in Zellij session)
@@ -311,7 +291,7 @@ pub fn wait_for_copilot_review(input: &WaitForCopilotReviewInput) -> Result<Copi
             "[CopilotReview] No Copilot review yet, sleeping for {}s",
             input.poll_interval_secs
         );
-        thread::sleep(poll_interval);
+        sleep(poll_interval).await;
     }
 }
 

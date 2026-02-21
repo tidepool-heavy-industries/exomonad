@@ -1,4 +1,5 @@
 use crate::services::docker::CommandExecutor;
+use crate::services::repo;
 use crate::{GithubOwner, GithubRepo};
 use anyhow::{Context, Result};
 use duct::cmd;
@@ -221,30 +222,14 @@ impl GitService {
 
         let (owner, name) = remote_url
             .as_ref()
-            .and_then(|url| parse_github_url(url))
+            .and_then(|url| repo::parse_github_url(url))
             .unzip();
 
         Ok(RepoInfo {
             branch,
-            owner,
-            name,
+            owner: owner.as_ref().map(|s| GithubOwner::from(s.as_str())),
+            name: name.as_ref().map(|s| GithubRepo::from(s.as_str())),
         })
-    }
-}
-
-/// Parse a GitHub URL (HTTPS or SSH) into (owner, repo) tuple.
-pub fn parse_github_url(url: &str) -> Option<(GithubOwner, GithubRepo)> {
-    let cleaned = url
-        .replace("git@github.com:", "https://github.com/")
-        .replace(".git", "");
-
-    let parts: Vec<&str> = cleaned.split('/').collect();
-
-    match parts.as_slice() {
-        [.., owner, repo] if !owner.is_empty() && !repo.is_empty() => {
-            Some((GithubOwner::from(*owner), GithubRepo::from(*repo)))
-        }
-        _ => None,
     }
 }
 
@@ -345,33 +330,5 @@ mod tests {
 
         // Empty string
         assert_eq!(extract_agent_id(""), None);
-    }
-
-    #[test]
-    fn test_parse_github_url_https() {
-        let (owner, repo) = parse_github_url("https://github.com/anthropics/claude-code").unwrap();
-        assert_eq!(owner.as_str(), "anthropics");
-        assert_eq!(repo.as_str(), "claude-code");
-    }
-
-    #[test]
-    fn test_parse_github_url_ssh() {
-        let (owner, repo) = parse_github_url("git@github.com:anthropics/claude-code.git").unwrap();
-        assert_eq!(owner.as_str(), "anthropics");
-        assert_eq!(repo.as_str(), "claude-code");
-    }
-
-    #[test]
-    fn test_parse_github_url_with_git_suffix() {
-        let (owner, repo) =
-            parse_github_url("https://github.com/anthropics/claude-code.git").unwrap();
-        assert_eq!(owner.as_str(), "anthropics");
-        assert_eq!(repo.as_str(), "claude-code");
-    }
-
-    #[test]
-    fn test_parse_github_url_invalid() {
-        assert!(parse_github_url("not-a-url").is_none());
-        assert!(parse_github_url("").is_none());
     }
 }
