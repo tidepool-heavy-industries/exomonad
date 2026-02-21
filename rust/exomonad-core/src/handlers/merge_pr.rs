@@ -1,5 +1,5 @@
 use crate::effects::{
-    dispatch_merge_pr_effect, EffectHandler, EffectResult, MergePrEffects, ResultExt,
+    dispatch_merge_pr_effect, EffectResult, MergePrEffects, ResultExt,
 };
 use crate::services::jj_workspace::JjWorkspaceService;
 use crate::services::merge_pr;
@@ -17,20 +17,7 @@ impl MergePRHandler {
     }
 }
 
-#[async_trait]
-impl EffectHandler for MergePRHandler {
-    fn namespace(&self) -> &str {
-        "merge_pr"
-    }
-    async fn handle(
-        &self,
-        effect_type: &str,
-        payload: &[u8],
-        ctx: &crate::effects::EffectContext,
-    ) -> EffectResult<Vec<u8>> {
-        dispatch_merge_pr_effect(self, effect_type, payload, ctx).await
-    }
-}
+crate::impl_pass_through_handler!(MergePRHandler, "merge_pr", dispatch_merge_pr_effect);
 
 #[async_trait]
 impl MergePrEffects for MergePRHandler {

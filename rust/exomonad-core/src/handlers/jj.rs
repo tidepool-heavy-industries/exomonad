@@ -7,7 +7,7 @@
 use super::{non_empty, working_dir_or_default, working_dir_path_or_default};
 use crate::domain::{BranchName, Revision};
 use crate::effects::{
-    dispatch_jj_effect, EffectHandler, EffectResult, JjEffects, ResultExt,
+    dispatch_jj_effect, EffectResult, JjEffects, ResultExt,
     spawn_blocking_effect,
 };
 use crate::services::jj_workspace::JjWorkspaceService;
@@ -27,21 +27,7 @@ impl JjHandler {
     }
 }
 
-#[async_trait]
-impl EffectHandler for JjHandler {
-    fn namespace(&self) -> &str {
-        "jj"
-    }
-
-    async fn handle(
-        &self,
-        effect_type: &str,
-        payload: &[u8],
-        ctx: &crate::effects::EffectContext,
-    ) -> EffectResult<Vec<u8>> {
-        dispatch_jj_effect(self, effect_type, payload, ctx).await
-    }
-}
+crate::impl_pass_through_handler!(JjHandler, "jj", dispatch_jj_effect);
 
 #[async_trait]
 impl JjEffects for JjHandler {

@@ -27,6 +27,39 @@ impl LogHandler {
         self.event_log = Some(event_log);
         self
     }
+
+    async fn do_log(
+        &self,
+        level: tracing::Level,
+        message: String,
+        fields: Vec<u8>,
+    ) -> EffectResult<LogResponse> {
+        let fields_str = if fields.is_empty() {
+            None
+        } else {
+            String::from_utf8(fields).ok()
+        };
+
+        if let Some(f) = fields_str {
+            match level {
+                tracing::Level::ERROR => tracing::error!(message = %message, fields = %f, "[wasm]"),
+                tracing::Level::WARN => tracing::warn!(message = %message, fields = %f, "[wasm]"),
+                tracing::Level::INFO => tracing::info!(message = %message, fields = %f, "[wasm]"),
+                tracing::Level::DEBUG => tracing::debug!(message = %message, fields = %f, "[wasm]"),
+                tracing::Level::TRACE => tracing::trace!(message = %message, fields = %f, "[wasm]"),
+            }
+        } else {
+            match level {
+                tracing::Level::ERROR => tracing::error!(message = %message, "[wasm]"),
+                tracing::Level::WARN => tracing::warn!(message = %message, "[wasm]"),
+                tracing::Level::INFO => tracing::info!(message = %message, "[wasm]"),
+                tracing::Level::DEBUG => tracing::debug!(message = %message, "[wasm]"),
+                tracing::Level::TRACE => tracing::trace!(message = %message, "[wasm]"),
+            }
+        }
+
+        Ok(LogResponse { success: true })
+    }
 }
 
 impl Default for LogHandler {
@@ -58,46 +91,13 @@ impl LogEffects for LogHandler {
         req: LogRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<LogResponse> {
-        let level = req.level();
-        let fields_str = if req.fields.is_empty() {
-            None
-        } else {
-            String::from_utf8(req.fields).ok()
+        let level = match req.level() {
+            LogLevel::Error => tracing::Level::ERROR,
+            LogLevel::Warn => tracing::Level::WARN,
+            LogLevel::Debug => tracing::Level::DEBUG,
+            _ => tracing::Level::INFO,
         };
-
-        match level {
-            LogLevel::Debug => {
-                if let Some(ref f) = fields_str {
-                    tracing::debug!(message = %req.message, fields = %f, "[wasm]");
-                } else {
-                    tracing::debug!(message = %req.message, "[wasm]");
-                }
-            }
-            LogLevel::Warn => {
-                if let Some(ref f) = fields_str {
-                    tracing::warn!(message = %req.message, fields = %f, "[wasm]");
-                } else {
-                    tracing::warn!(message = %req.message, "[wasm]");
-                }
-            }
-            LogLevel::Error => {
-                if let Some(ref f) = fields_str {
-                    tracing::error!(message = %req.message, fields = %f, "[wasm]");
-                } else {
-                    tracing::error!(message = %req.message, "[wasm]");
-                }
-            }
-            _ => {
-                // Info and Unspecified
-                if let Some(ref f) = fields_str {
-                    tracing::info!(message = %req.message, fields = %f, "[wasm]");
-                } else {
-                    tracing::info!(message = %req.message, "[wasm]");
-                }
-            }
-        }
-
-        Ok(LogResponse { success: true })
+        self.do_log(level, req.message, req.fields).await
     }
 
     async fn debug(
@@ -105,19 +105,8 @@ impl LogEffects for LogHandler {
         req: DebugRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<LogResponse> {
-        let fields_str = if req.fields.is_empty() {
-            None
-        } else {
-            String::from_utf8(req.fields).ok()
-        };
-
-        if let Some(f) = fields_str {
-            tracing::debug!(message = %req.message, fields = %f, "[wasm]");
-        } else {
-            tracing::debug!(message = %req.message, "[wasm]");
-        }
-
-        Ok(LogResponse { success: true })
+        self.do_log(tracing::Level::DEBUG, req.message, req.fields)
+            .await
     }
 
     async fn info(
@@ -125,19 +114,8 @@ impl LogEffects for LogHandler {
         req: InfoRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<LogResponse> {
-        let fields_str = if req.fields.is_empty() {
-            None
-        } else {
-            String::from_utf8(req.fields).ok()
-        };
-
-        if let Some(f) = fields_str {
-            tracing::info!(message = %req.message, fields = %f, "[wasm]");
-        } else {
-            tracing::info!(message = %req.message, "[wasm]");
-        }
-
-        Ok(LogResponse { success: true })
+        self.do_log(tracing::Level::INFO, req.message, req.fields)
+            .await
     }
 
     async fn warn(
@@ -145,19 +123,8 @@ impl LogEffects for LogHandler {
         req: WarnRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<LogResponse> {
-        let fields_str = if req.fields.is_empty() {
-            None
-        } else {
-            String::from_utf8(req.fields).ok()
-        };
-
-        if let Some(f) = fields_str {
-            tracing::warn!(message = %req.message, fields = %f, "[wasm]");
-        } else {
-            tracing::warn!(message = %req.message, "[wasm]");
-        }
-
-        Ok(LogResponse { success: true })
+        self.do_log(tracing::Level::WARN, req.message, req.fields)
+            .await
     }
 
     async fn error(
@@ -165,19 +132,8 @@ impl LogEffects for LogHandler {
         req: ErrorRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<LogResponse> {
-        let fields_str = if req.fields.is_empty() {
-            None
-        } else {
-            String::from_utf8(req.fields).ok()
-        };
-
-        if let Some(f) = fields_str {
-            tracing::error!(message = %req.message, fields = %f, "[wasm]");
-        } else {
-            tracing::error!(message = %req.message, "[wasm]");
-        }
-
-        Ok(LogResponse { success: true })
+        self.do_log(tracing::Level::ERROR, req.message, req.fields)
+            .await
     }
 
     async fn emit_event(

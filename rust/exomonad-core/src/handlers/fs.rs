@@ -3,7 +3,7 @@
 //! Uses proto-generated types from `exomonad_proto::effects::fs`.
 
 use crate::effects::{
-    dispatch_fs_effect, EffectError, EffectHandler, EffectResult, FilesystemEffects, ResultExt,
+    dispatch_fs_effect, EffectError, EffectResult, FilesystemEffects, ResultExt,
 };
 use crate::services::filesystem::FileSystemService;
 use async_trait::async_trait;
@@ -24,21 +24,7 @@ impl FsHandler {
     }
 }
 
-#[async_trait]
-impl EffectHandler for FsHandler {
-    fn namespace(&self) -> &str {
-        "fs"
-    }
-
-    async fn handle(
-        &self,
-        effect_type: &str,
-        payload: &[u8],
-        ctx: &crate::effects::EffectContext,
-    ) -> EffectResult<Vec<u8>> {
-        dispatch_fs_effect(self, effect_type, payload, ctx).await
-    }
-}
+crate::impl_pass_through_handler!(FsHandler, "fs", dispatch_fs_effect);
 
 #[async_trait]
 impl FilesystemEffects for FsHandler {
