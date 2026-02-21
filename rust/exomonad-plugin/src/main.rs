@@ -308,6 +308,15 @@ impl ActiveWizard {
     }
 }
 
+/// Buffered inject-input message awaiting tab/pane state initialization.
+struct PendingInjection {
+    tab_name: String,
+    text: String,
+}
+
+/// Maximum number of pending injections to buffer before dropping oldest.
+const MAX_PENDING_INJECTIONS: usize = 20;
+
 #[derive(Default)]
 struct ExoMonadPlugin {
     status_state: PluginState,
@@ -331,6 +340,9 @@ struct ExoMonadPlugin {
     /// Pane IDs awaiting a deferred Enter keypress (after text injection).
     /// Delayed to ensure Node.js/Ink processes the text and Enter as separate data events.
     pending_enter: Vec<u32>,
+    /// Inject-input messages waiting for tab/pane state to be initialized.
+    /// Flushed on TabUpdate/PaneUpdate when own_tab_name and tab_pane_map become available.
+    pending_injections: Vec<PendingInjection>,
 }
 
 register_plugin!(ExoMonadPlugin);
@@ -491,6 +503,55 @@ impl ExoMonadPlugin {
                 if panes.iter().any(|p| p.is_plugin && p.id == self.own_pane_id) {
                     self.own_tab_name = Some(tab_name.clone());
                 }
+            }
+        }
+    }
+
+    /// Buffer an inject-input message for later delivery.
+    fn buffer_injection(&mut self, tab_name: String, text: String) {
+        if self.pending_injections.len() >= MAX_PENDING_INJECTIONS {
+            eprintln!(
+                "[exomonad-plugin] pending_injections buffer full ({}), dropping oldest",
+                MAX_PENDING_INJECTIONS
+            );
+            self.pending_injections.remove(0);
+        }
+        self.pending_injections.push(PendingInjection { tab_name, text });
+    }
+
+    /// Flush buffered inject-input messages now that tab/pane state is available.
+    ///
+    /// Only the plugin instance in the target tab should inject. Messages targeting
+    /// other tabs are discarded. Messages where the pane still can't be found are dropped
+    /// with a warning (state should be populated by now if the tab exists).
+    fn flush_pending_injections(&mut self) {
+        let own_tab = match &self.own_tab_name {
+            Some(t) => t.clone(),
+            None => return, // Can't determine ownership yet
+        };
+
+        let pending = std::mem::take(&mut self.pending_injections);
+        for injection in pending {
+            if injection.tab_name != own_tab {
+                // Not our tab — another plugin instance will handle it
+                continue;
+            }
+            if let Some(&pane_id) = self.tab_pane_map.get(&injection.tab_name) {
+                eprintln!(
+                    "[exomonad-plugin] flush_pending: injecting {} chars into tab '{}' (pane {})",
+                    injection.text.len(),
+                    injection.tab_name,
+                    pane_id
+                );
+                write_chars_to_pane_id(&injection.text, PaneId::Terminal(pane_id));
+                self.pending_enter.push(pane_id);
+                set_timeout(0.1);
+            } else {
+                eprintln!(
+                    "[exomonad-plugin] flush_pending: tab '{}' still not in pane map after rebuild, dropping message ({} chars)",
+                    injection.tab_name,
+                    injection.text.len()
+                );
             }
         }
     }
@@ -843,6 +904,9 @@ impl ZellijPlugin for ExoMonadPlugin {
         // Handle inject-input requests: write text into a target pane resolved by tab name.
         // Only the plugin instance residing in the target tab acts, preventing
         // duplicate writes from the broadcast delivery to all instances.
+        //
+        // If tab/pane state isn't initialized yet, messages are buffered in
+        // `pending_injections` and flushed on the next TabUpdate/PaneUpdate.
         if pipe_message.name == transport::INJECT_INPUT_PIPE {
             if let Some(payload) = pipe_message.payload {
                 match serde_json::from_str::<serde_json::Value>(&payload) {
@@ -855,15 +919,6 @@ impl ZellijPlugin for ExoMonadPlugin {
                             }
                         };
 
-                        // Dedup: only the instance in the target tab should write.
-                        // If own_tab_name is None (before first PaneUpdate), fall through
-                        // to avoid silently dropping the message from all instances.
-                        if let Some(own_tab) = &self.own_tab_name {
-                            if own_tab != tab_name {
-                                return true;
-                            }
-                        }
-
                         let text = match val["text"].as_str() {
                             Some(t) => t,
                             None => {
@@ -872,20 +927,47 @@ impl ZellijPlugin for ExoMonadPlugin {
                             }
                         };
 
-                        if let Some(&pane_id) = self.tab_pane_map.get(tab_name) {
-                            write_chars_to_pane_id(text, PaneId::Terminal(pane_id));
-                            // Defer the Enter keypress so the OS kernel flushes the text
-                            // and Node.js/Ink processes it as a separate data event.
-                            // Without this delay, Ink treats text+Enter as a single paste
-                            // and key.return never fires.
-                            self.pending_enter.push(pane_id);
-                            set_timeout(0.1);
-                        } else {
-                            eprintln!(
-                                "[exomonad-plugin] inject-input: tab '{}' not found in pane map ({} entries)",
-                                tab_name,
-                                self.tab_pane_map.len()
-                            );
+                        // Dedup: only the instance in the target tab should process.
+                        // If own_tab_name is not yet set (before first PaneUpdate),
+                        // buffer the message for later delivery instead of attempting
+                        // injection (which would fail and lose the message).
+                        match &self.own_tab_name {
+                            Some(own_tab) if own_tab != tab_name => {
+                                // Not our tab — skip silently
+                                // (Unblock pipe below and return)
+                            }
+                            Some(_) => {
+                                // This is our tab — attempt injection
+                                if let Some(&pane_id) = self.tab_pane_map.get(tab_name) {
+                                    eprintln!(
+                                        "[exomonad-plugin] inject-input: writing {} chars to tab '{}' (pane {})",
+                                        text.len(),
+                                        tab_name,
+                                        pane_id
+                                    );
+                                    write_chars_to_pane_id(text, PaneId::Terminal(pane_id));
+                                    self.pending_enter.push(pane_id);
+                                    set_timeout(0.1);
+                                } else {
+                                    // Tab is ours but pane not found — buffer for retry
+                                    eprintln!(
+                                        "[exomonad-plugin] inject-input: tab '{}' is ours but pane not in map ({} entries), buffering",
+                                        tab_name,
+                                        self.tab_pane_map.len()
+                                    );
+                                    self.buffer_injection(tab_name.to_string(), text.to_string());
+                                }
+                            }
+                            None => {
+                                // own_tab_name not yet set — buffer for delivery
+                                // after TabUpdate/PaneUpdate initializes our state
+                                eprintln!(
+                                    "[exomonad-plugin] inject-input: own_tab_name not set yet, buffering message for tab '{}' ({} chars)",
+                                    tab_name,
+                                    text.len()
+                                );
+                                self.buffer_injection(tab_name.to_string(), text.to_string());
+                            }
                         }
                     }
                     Err(e) => {
@@ -975,11 +1057,13 @@ impl ZellijPlugin for ExoMonadPlugin {
                     self.tab_names.insert(tab.position, tab.name.clone());
                 }
                 self.rebuild_tab_pane_map();
+                self.flush_pending_injections();
             }
             Event::PaneUpdate(pane_manifest) => {
                 // Store raw pane data and rebuild the tab_name → pane_id map
                 self.pane_manifest_cache = Some(pane_manifest);
                 self.rebuild_tab_pane_map();
+                self.flush_pending_injections();
             }
             Event::Key(key) => {
                 // Wizard mode key handling
