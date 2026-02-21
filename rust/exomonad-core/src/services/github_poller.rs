@@ -156,7 +156,7 @@ impl GitHubPoller {
             return Ok(Some(info.clone()));
         }
 
-        match repo::get_repo_info(self.project_dir.to_str().unwrap_or(".")).await {
+        match repo::get_repo_info(&self.project_dir).await {
             Ok(info) => {
                 let result = (info.owner, info.repo);
                 *info_guard = Some(result.clone());

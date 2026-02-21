@@ -218,12 +218,17 @@ impl GitService {
     #[tracing::instrument(skip(self))]
     pub async fn get_repo_info(&self, dir: &str) -> Result<RepoInfo> {
         let branch = self.get_branch(dir).await?;
-        let info = repo::get_repo_info(dir).await.ok();
+        let remote_url = self.get_remote_url(dir).await.ok();
+
+        let (owner, name) = remote_url
+            .as_ref()
+            .and_then(|url| repo::parse_github_url(url))
+            .unzip();
 
         Ok(RepoInfo {
             branch,
-            owner: info.as_ref().map(|i| GithubOwner::from(i.owner.as_str())),
-            name: info.as_ref().map(|i| GithubRepo::from(i.repo.as_str())),
+            owner: owner.as_ref().map(|s| GithubOwner::from(s.as_str())),
+            name: name.as_ref().map(|s| GithubRepo::from(s.as_str())),
         })
     }
 }

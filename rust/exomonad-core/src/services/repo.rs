@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use tokio::process::Command;
 
 /// Shared repository information.
@@ -15,10 +16,10 @@ pub struct RepoInfo {
 ///
 /// This function calls `git remote get-url origin` and parses the owner and repo
 /// from the resulting URL (supporting both HTTPS and SSH formats).
-pub async fn get_repo_info(working_dir: &str) -> Result<RepoInfo> {
+pub async fn get_repo_info<P: AsRef<Path>>(working_dir: P) -> Result<RepoInfo> {
     let output = Command::new("git")
         .arg("-C")
-        .arg(working_dir)
+        .arg(working_dir.as_ref())
         .args(["remote", "get-url", "origin"])
         .output()
         .await
@@ -39,9 +40,12 @@ pub async fn get_repo_info(working_dir: &str) -> Result<RepoInfo> {
 
 /// Parse a GitHub URL (HTTPS or SSH) into (owner, repo) tuple.
 pub fn parse_github_url(url: &str) -> Option<(String, String)> {
-    let cleaned = url
-        .replace("git@github.com:", "https://github.com/")
-        .replace(".git", "");
+    // Normalize SSH-style GitHub remotes to HTTPS-style.
+    let normalized = url.replace("git@github.com:", "https://github.com/");
+
+    // Only strip a trailing `.git` suffix; do not remove interior ".git" substrings
+    // which may legitimately appear in owner or repo names.
+    let cleaned = normalized.strip_suffix(".git").unwrap_or(&normalized);
 
     let parts: Vec<&str> = cleaned.split('/').collect();
 
