@@ -92,10 +92,12 @@ runStopHookChecks = do
 -- | Inner check logic (separated so we can wrap with lifecycle messaging).
 runStopHookChecksInner :: IO StopHookOutput
 runStopHookChecksInner = do
-  -- Skip all checks on main branch (root TL has no PR to file)
+  -- Skip all checks on main/master branch (root TL has no PR to file)
   branch <- getCurrentBranch
-  if branch == "main"
-    then pure allowStopResponse
+  if branch `elem` ["main", "master"]
+    then do
+      logInfo_ "Skipping auto-file PR: on main branch"
+      pure allowStopResponse
     else do
       result <- runChecks [checkPRFiled]
       case result of
@@ -143,30 +145,36 @@ checkPRFiled = do
 
 autoFilePR :: Text -> IO (Either Text ())
 autoFilePR branchName = do
-  logInfo_ ("No PR found for " <> branchName <> ", auto-filing...")
-  mAgentId <- getAgentId
-  let agentLabel = maybe "" (\aid -> "Agent " <> aid <> ": ") mAgentId
-      prTitle = agentLabel <> "Work on " <> branchName
-      prBody = "Auto-filed by ExoMonad stop hook on session end."
-      baseBranch = detectBaseBranch branchName
-  let fpReq =
-        FP.FilePrRequest
-          { FP.filePrRequestTitle = TL.fromStrict prTitle,
-            FP.filePrRequestBody = TL.fromStrict prBody,
-            FP.filePrRequestBaseBranch = TL.fromStrict baseBranch
-          }
-  fpResult <- filePR fpReq
-  case fpResult of
-    Left err -> pure $ Left $ "Failed to auto-file PR: " <> T.pack (show err)
-    Right fpResp -> do
-      let prNum = FP.filePrResponsePrNumber fpResp
-          prUrl = TL.toStrict (FP.filePrResponsePrUrl fpResp)
-      logInfo_ ("Auto-filed PR #" <> T.pack (show prNum) <> ": " <> prUrl)
-      pure $
-        Left $
-          "PR #"
-            <> T.pack (show prNum)
-            <> " has been auto-filed. Please wait for Copilot review to complete before stopping."
+  -- 3. Before the file_pr call, check the current branch
+  if branchName `elem` ["main", "master"]
+    then do
+      logInfo_ "Skipping auto-file PR: on main branch"
+      pure $ Right ()
+    else do
+      logInfo_ ("No PR found for " <> branchName <> ", auto-filing...")
+      mAgentId <- getAgentId
+      let agentLabel = maybe "" (\aid -> "Agent " <> aid <> ": ") mAgentId
+          prTitle = agentLabel <> "Work on " <> branchName
+          prBody = "Auto-filed by ExoMonad stop hook on session end."
+          baseBranch = detectBaseBranch branchName
+      let fpReq =
+            FP.FilePrRequest
+              { FP.filePrRequestTitle = TL.fromStrict prTitle,
+                FP.filePrRequestBody = TL.fromStrict prBody,
+                FP.filePrRequestBaseBranch = TL.fromStrict baseBranch
+              }
+      fpResult <- filePR fpReq
+      case fpResult of
+        Left err -> pure $ Left $ "Failed to auto-file PR: " <> T.pack (show err)
+        Right fpResp -> do
+          let prNum = FP.filePrResponsePrNumber fpResp
+              prUrl = TL.toStrict (FP.filePrResponsePrUrl fpResp)
+          logInfo_ ("Auto-filed PR #" <> T.pack (show prNum) <> ": " <> prUrl)
+          pure $
+            Left $
+              "PR #"
+                <> T.pack (show prNum)
+                <> " has been auto-filed. Please wait for Copilot review to complete before stopping."
 
 checkReviewCommentsInner :: GH.PullRequest -> IO (Either Text ())
 checkReviewCommentsInner pr = do
