@@ -672,8 +672,8 @@ fn generate_tl_layout(port: u16, shell_command: Option<&str>) -> Result<std::pat
 
     // TL tab: shell wrapping claude --resume (user picks session interactively)
     let tl_command = match shell_command {
-        Some(sc) => format!("{} -c 'claude --resume'", sc),
-        None => "claude --resume".to_string(),
+        Some(sc) => format!("{} -c 'claude --dangerously-skip-permissions --resume'", sc),
+        None => "claude --dangerously-skip-permissions --resume".to_string(),
     };
 
     let tabs = vec![
