@@ -4,7 +4,7 @@
 
 use crate::effects::{dispatch_events_effect, EffectHandler, EffectResult, EventEffects};
 use crate::services::team_registry::TeamRegistry;
-use crate::services::teams_mailbox::{self, TeamsMessage};
+use crate::services::teams_mailbox;
 use crate::services::{zellij_events, EventQueue};
 use async_trait::async_trait;
 use exomonad_proto::effects::events::*;
@@ -249,17 +249,13 @@ impl EventEffects for EventHandler {
             };
 
             if let Some(team_info) = registry.get(&parent_key).await {
-                let message = TeamsMessage {
-                    message_type: "message".to_string(),
-                    recipient: team_info.inbox_name.clone(),
-                    content: notification.clone(),
-                    summary: format!("Agent completion: {}", agent_id_str),
-                };
-
                 match teams_mailbox::write_to_inbox(
                     &team_info.team_name,
                     &team_info.inbox_name,
-                    &message,
+                    &agent_id_str,
+                    &notification,
+                    &format!("Agent completion: {}", agent_id_str),
+                    "green",
                 ) {
                     Ok(()) => {
                         tracing::info!(

@@ -4,7 +4,7 @@ use crate::services::event_log::EventLog;
 use crate::services::event_queue::EventQueue;
 use crate::services::repo;
 use crate::services::team_registry::TeamRegistry;
-use crate::services::teams_mailbox::{self, TeamsMessage};
+use crate::services::teams_mailbox;
 use crate::services::zellij_events;
 use anyhow::{Context, Result};
 use exomonad_proto::effects::events::{event::EventType, Event, WorkerComplete};
@@ -501,16 +501,13 @@ impl GitHubPoller {
             if agent_type == AgentType::Claude {
                 if let Some(ref registry) = self.team_registry {
                     if let Some(team_info) = registry.get(branch).await {
-                        let message = TeamsMessage {
-                            message_type: "message".to_string(),
-                            recipient: team_info.inbox_name.clone(),
-                            content: agent_message.clone(),
-                            summary: format!("GitHub event: {} on {}", status, branch),
-                        };
                         match teams_mailbox::write_to_inbox(
                             &team_info.team_name,
                             &team_info.inbox_name,
-                            &message,
+                            "github-poller",
+                            &agent_message,
+                            &format!("GitHub event: {} on {}", status, branch),
+                            "yellow",
                         ) {
                             Ok(()) => {
                                 info!(
