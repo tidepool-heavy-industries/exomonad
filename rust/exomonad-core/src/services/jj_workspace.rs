@@ -169,6 +169,8 @@ impl JjWorkspaceService {
             warn!(error = %e, "Failed to export refs to git");
         }
 
+        tx.repo_mut().rebase_descendants()
+            .map_err(|e| anyhow::anyhow!("Failed to rebase descendants: {}", e))?;
         tx.commit(format!("create workspace with bookmark '{}'", bookmark))?;
         info!(path = %path.display(), bookmark = %bookmark, "Workspace created successfully");
         Ok(())
@@ -192,6 +194,8 @@ impl JjWorkspaceService {
             if let Err(e) = git::export_refs(tx.repo_mut()) {
                 warn!(error = %e, "Failed to export refs to git after removing workspace");
             }
+            tx.repo_mut().rebase_descendants()
+                .map_err(|e| anyhow::anyhow!("Failed to rebase descendants: {}", e))?;
             tx.commit(format!("remove workspace '{}'", ws_name.as_str()))?;
         }
 
@@ -350,9 +354,15 @@ impl JjWorkspaceService {
             Ok(())
         } else if git_dir.exists() {
             info!("Initializing jj colocated repo from existing git repo");
-            let settings = self.load_settings()?;
-            let (_ws, _repo) = Workspace::init_colocated_git(&settings, &self.project_dir)
-                .map_err(|e| anyhow::anyhow!("Failed to init colocated jj repo: {}", e))?;
+            let output = std::process::Command::new("jj")
+                .args(["git", "init", "--colocate"])
+                .current_dir(&self.project_dir)
+                .output()
+                .context("Failed to run jj git init --colocate")?;
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                anyhow::bail!("jj git init --colocate failed: {}", stderr);
+            }
             info!("jj colocated repo initialized");
             Ok(())
         } else {
