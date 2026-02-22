@@ -328,10 +328,10 @@ just proto-test  # Run wire format compatibility tests
 | Proto File | Rust | Haskell | Wire Tests |
 |------------|------|---------|------------|
 | ffi.proto | ✅ | ✅ | ✅ |
-| common.proto | ✅ | ✅ | Pending |
-| hook.proto | ✅ | ✅ | Pending |
-| agent.proto | ✅ | ✅ | Pending |
-| popup.proto | ✅ | ✅ | Pending |
+| common.proto | ✅ | ✅ | ✅ |
+| hook.proto | ✅ | ✅ | ✅ |
+| agent.proto | ✅ | ✅ | ✅ |
+| popup.proto | ✅ | ✅ | ✅ |
 
 ### Effects Types (effects/) — Protobuf binary wire format
 
@@ -342,10 +342,10 @@ just proto-test  # Run wire format compatibility tests
 | git.proto | ✅ | ✅ | ✅ |
 | github.proto | ✅ | ✅ | ✅ |
 | log.proto | ✅ | ✅ | ✅ |
-| fs.proto | ✅ | Pending | ✅ |
+| fs.proto | ✅ | ✅ | ✅ |
 | agent.proto | ✅ | ✅ | ✅ |
-| jj.proto | ✅ | ✅ | Pending |
-| session.proto | ✅ | ✅ | Pending |
+| jj.proto | ✅ | ✅ | ✅ |
+| session.proto | ✅ | ✅ | ✅ |
 
 ## Related Files
 

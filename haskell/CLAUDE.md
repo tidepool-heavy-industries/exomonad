@@ -83,7 +83,7 @@ config = RoleConfig { roleName = "tl", tools = Tools { ... }, hooks = ... }
 
 The `mode` parameter enables the same record for both schema generation (`AsSchema`) and handler dispatch (`AsHandler`). See ADR-004 for the full design rationale.
 
-- **Library**: `haskell/wasm-guest` provides the SDK (`ExoMonad.Guest.Tool.Runtime`)
+- **Library/SDK**: `haskell/wasm-guest` and `haskell/dsl/core` (specifically `ExoMonad.Effect.*`) provide the SDK.
 
 ## Common Commands
 
