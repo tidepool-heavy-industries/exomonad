@@ -199,6 +199,20 @@ impl JjWorkspaceService {
         tx.repo_mut().rebase_descendants()
             .map_err(|e| anyhow::anyhow!("Failed to rebase descendants: {}", e))?;
         tx.commit(format!("create workspace with bookmark '{}'", bookmark))?;
+
+        // Set the git branch in the worktree so `git rev-parse --abbrev-ref HEAD`
+        // returns the bookmark name instead of "main". jj's export_refs creates the
+        // git ref but doesn't switch the worktree's HEAD to it.
+        let git_checkout = std::process::Command::new("git")
+            .args(["checkout", "-B", bookmark.as_str()])
+            .current_dir(path)
+            .output()
+            .context("Failed to set git branch in worktree")?;
+        if !git_checkout.status.success() {
+            let stderr = String::from_utf8_lossy(&git_checkout.stderr);
+            warn!(bookmark = %bookmark, stderr = %stderr, "git checkout in worktree failed (non-fatal)");
+        }
+
         info!(path = %path.display(), bookmark = %bookmark, "Workspace created successfully");
         Ok(())
     }
@@ -305,6 +319,19 @@ impl JjWorkspaceService {
     /// setup (matches the approach used in `fetch()`).
     pub fn push_bookmark(&self, workspace_path: &Path, bookmark: &BranchName) -> Result<()> {
         info!(bookmark = %bookmark, path = %workspace_path.display(), "Pushing jj bookmark");
+
+        // Recover from stale working copy before pushing — operations like
+        // import_refs create new ops that make the working copy stale.
+        let stale_check = std::process::Command::new("jj")
+            .args(["workspace", "update-stale"])
+            .current_dir(workspace_path)
+            .output();
+        if let Ok(output) = stale_check {
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                warn!(stderr = %stderr, "jj workspace update-stale failed (non-fatal)");
+            }
+        }
 
         let output = std::process::Command::new("jj")
             .args(["git", "push", "--bookmark", bookmark.as_str()])
