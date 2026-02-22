@@ -3,6 +3,8 @@ use crate::services::agent_control::AgentType;
 use crate::services::event_log::EventLog;
 use crate::services::event_queue::EventQueue;
 use crate::services::repo;
+use crate::services::team_registry::TeamRegistry;
+use crate::services::teams_mailbox::{self, TeamsMessage};
 use crate::services::zellij_events;
 use anyhow::{Context, Result};
 use exomonad_proto::effects::events::{event::EventType, Event, WorkerComplete};
@@ -22,6 +24,7 @@ pub struct GitHubPoller {
     poll_interval: Duration,
     state: Arc<Mutex<HashMap<PRNumber, PRState>>>,
     repo_info: Arc<Mutex<Option<(String, String)>>>, // (owner, name)
+    team_registry: Option<Arc<TeamRegistry>>,
 }
 
 /// A Copilot review comment with optional file context.
@@ -54,7 +57,13 @@ impl GitHubPoller {
             poll_interval: Duration::from_secs(60),
             state: Arc::new(Mutex::new(HashMap::new())),
             repo_info: Arc::new(Mutex::new(None)),
+            team_registry: None,
         }
+    }
+
+    pub fn with_team_registry(mut self, registry: Arc<TeamRegistry>) -> Self {
+        self.team_registry = Some(registry);
+        self
     }
 
     pub fn with_event_log(mut self, event_log: Arc<EventLog>) -> Self {
@@ -486,9 +495,48 @@ impl GitHubPoller {
         };
 
         if let Some(agent_message) = agent_message {
-            let slug = branch.rsplit_once('.').map(|(_, s)| s).unwrap_or(branch);
-            let tab_name = agent_type.tab_display_name(slug);
-            zellij_events::inject_input(&tab_name, &agent_message);
+            let mut delivered_via_teams = false;
+
+            // For Claude agents, try Teams inbox delivery first
+            if agent_type == AgentType::Claude {
+                if let Some(ref registry) = self.team_registry {
+                    if let Some(team_info) = registry.get(branch).await {
+                        let message = TeamsMessage {
+                            message_type: "message".to_string(),
+                            recipient: team_info.inbox_name.clone(),
+                            content: agent_message.clone(),
+                            summary: format!("GitHub event: {} on {}", status, branch),
+                        };
+                        match teams_mailbox::write_to_inbox(
+                            &team_info.team_name,
+                            &team_info.inbox_name,
+                            &message,
+                        ) {
+                            Ok(()) => {
+                                info!(
+                                    branch = %branch,
+                                    team = %team_info.team_name,
+                                    "Delivered poller event via Teams inbox"
+                                );
+                                delivered_via_teams = true;
+                            }
+                            Err(e) => {
+                                warn!(
+                                    branch = %branch,
+                                    error = %e,
+                                    "Teams inbox write failed, falling back to Zellij"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !delivered_via_teams {
+                let slug = branch.rsplit_once('.').map(|(_, s)| s).unwrap_or(branch);
+                let tab_name = agent_type.tab_display_name(slug);
+                zellij_events::inject_input(&tab_name, &agent_message);
+            }
         }
     }
 }

@@ -12,6 +12,7 @@ use crate::services::git::GitService;
 use crate::services::github::GitHubService;
 use crate::services::jj_workspace::JjWorkspaceService;
 use crate::services::questions::QuestionRegistry;
+use crate::services::team_registry::TeamRegistry;
 
 use super::{
     AgentHandler, CoordinationHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler,
@@ -74,6 +75,7 @@ pub fn orchestration_handlers(
     remote_port: Option<u16>,
     event_queue_scope: Option<String>,
     claude_session_registry: Arc<ClaudeSessionRegistry>,
+    team_registry: Arc<TeamRegistry>,
 ) -> (Vec<Box<dyn EffectHandler>>, Arc<QuestionRegistry>) {
     let question_registry = Arc::new(QuestionRegistry::new());
     let coordination_service = Arc::new(CoordinationService::new());
@@ -84,17 +86,18 @@ pub fn orchestration_handlers(
                 .with_claude_session_registry(claude_session_registry.clone()),
         ),
         Box::new(PopupHandler::new(zellij_session)),
-        Box::new(EventHandler::new(
-            event_queue,
-            remote_port,
-            event_queue_scope,
-        )),
+        Box::new(
+            EventHandler::new(event_queue, remote_port, event_queue_scope)
+                .with_team_registry(team_registry.clone()),
+        ),
         Box::new(MessagingHandler::new(
             question_registry.clone(),
             project_dir,
         )),
         Box::new(CoordinationHandler::new(coordination_service)),
-        Box::new(SessionHandler::new(claude_session_registry)),
+        Box::new(
+            SessionHandler::new(claude_session_registry).with_team_registry(team_registry),
+        ),
     ];
 
     (handlers, question_registry)

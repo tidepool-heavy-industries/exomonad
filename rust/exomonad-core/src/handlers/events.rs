@@ -3,6 +3,8 @@
 //! Uses proto-generated types from `exomonad_proto::effects::events`.
 
 use crate::effects::{dispatch_events_effect, EffectHandler, EffectResult, EventEffects};
+use crate::services::team_registry::TeamRegistry;
+use crate::services::teams_mailbox::{self, TeamsMessage};
 use crate::services::{zellij_events, EventQueue};
 use async_trait::async_trait;
 use exomonad_proto::effects::events::*;
@@ -23,6 +25,8 @@ pub struct EventHandler {
     client: reqwest::Client,
     /// Tracks agents that have already called notify_parent to prevent duplicate notifications.
     notified_agents: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// Claude Teams registry for inbox-based delivery.
+    team_registry: Option<Arc<TeamRegistry>>,
 }
 
 impl EventHandler {
@@ -38,7 +42,13 @@ impl EventHandler {
             event_queue_scope: event_queue_scope.unwrap_or_else(|| "default".to_string()),
             client: reqwest::Client::new(),
             notified_agents: std::sync::Mutex::new(std::collections::HashSet::new()),
+            team_registry: None,
         }
+    }
+
+    pub fn with_team_registry(mut self, registry: Arc<TeamRegistry>) -> Self {
+        self.team_registry = Some(registry);
+        self
     }
 }
 
@@ -204,7 +214,7 @@ impl EventEffects for EventHandler {
         if let Some(ref url) = self.remote_url {
             tracing::debug!(url = %url, parent_session_id = %parent_session_id, "notify_parent: forwarding to remote server");
             let forward_req = NotifyEventRequest {
-                session_id: parent_session_id,
+                session_id: parent_session_id.clone(),
                 event: Some(event),
             };
             let body = forward_req.encode_to_vec();
@@ -226,11 +236,55 @@ impl EventEffects for EventHandler {
             self.queue.notify_event(&parent_session_id, event).await;
         }
 
-        // Inject natural-language notification into parent's Zellij pane
-        let tab_name = crate::services::agent_control::resolve_parent_tab_name(ctx);
+        // Deliver notification to parent: prefer Teams inbox, fall back to Zellij injection.
         let notification = format_parent_notification(&agent_id_str, &req.status, &req.message);
-        tracing::debug!(tab = %tab_name, chars = notification.len(), "notify_parent: injecting notification into parent pane");
-        zellij_events::inject_input(&tab_name, &notification);
+        let mut delivered_via_teams = false;
+
+        if let Some(ref registry) = self.team_registry {
+            // Resolve parent agent key for TeamRegistry lookup
+            let parent_key = if parent_session_id == "root" {
+                "root".to_string()
+            } else {
+                parent_session_id.clone()
+            };
+
+            if let Some(team_info) = registry.get(&parent_key).await {
+                let message = TeamsMessage {
+                    message_type: "message".to_string(),
+                    recipient: team_info.inbox_name.clone(),
+                    content: notification.clone(),
+                    summary: format!("Agent completion: {}", agent_id_str),
+                };
+
+                match teams_mailbox::write_to_inbox(
+                    &team_info.team_name,
+                    &team_info.inbox_name,
+                    &message,
+                ) {
+                    Ok(()) => {
+                        tracing::info!(
+                            parent = %parent_key,
+                            team = %team_info.team_name,
+                            "notify_parent: delivered via Teams inbox"
+                        );
+                        delivered_via_teams = true;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            parent = %parent_key,
+                            error = %e,
+                            "notify_parent: Teams inbox write failed, falling back to Zellij"
+                        );
+                    }
+                }
+            }
+        }
+
+        if !delivered_via_teams {
+            let tab_name = crate::services::agent_control::resolve_parent_tab_name(ctx);
+            tracing::debug!(tab = %tab_name, chars = notification.len(), "notify_parent: injecting notification into parent pane via Zellij");
+            zellij_events::inject_input(&tab_name, &notification);
+        }
 
         Ok(NotifyParentResponse { ack: true })
     }

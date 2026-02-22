@@ -967,6 +967,7 @@ async fn main() -> Result<()> {
                 event_log.clone(),
             ));
             builder = builder.with_handlers(exomonad_core::git_handlers(git, github, jj));
+            let team_registry = Arc::new(exomonad_core::services::team_registry::TeamRegistry::new());
             let (orch_handlers, question_registry) = exomonad_core::orchestration_handlers(
                 agent_control.clone(),
                 event_queue.clone(),
@@ -975,6 +976,7 @@ async fn main() -> Result<()> {
                 remote_port,
                 Some(event_session_id),
                 claude_session_registry,
+                team_registry.clone(),
             );
             builder = builder.with_handlers(orch_handlers);
             let rt = builder.build().await.context("Failed to build runtime")?;
@@ -1021,6 +1023,7 @@ async fn main() -> Result<()> {
             if let Some(ref el) = event_log {
                 poller = poller.with_event_log(el.clone());
             }
+            poller = poller.with_team_registry(team_registry);
             tokio::spawn(async move {
                 poller.run().await;
             });
