@@ -18,9 +18,9 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
-/// Timeout for waiting for popup response (30 minutes).
-/// Generous because the user may be on a different tab/pane when the popup appears.
-const POPUP_TIMEOUT: Duration = Duration::from_secs(1800);
+/// Timeout for waiting for popup response (5 minutes).
+/// Reduced from 30min — popup blocks the WASM plugin lock for the entire duration.
+const POPUP_TIMEOUT: Duration = Duration::from_secs(300);
 
 // ============================================================================
 // Input/Output types

@@ -3,7 +3,8 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 
--- | TL role config: spawn, PR, merge, popup tools with stop hook checks.
+-- | TL role config: spawn, PR, merge tools with stop hook checks.
+-- Popup disabled: blocks WASM plugin lock for up to 30min, preventing all other MCP calls.
 module TLRole (config, Tools) where
 
 import ExoMonad
@@ -15,7 +16,6 @@ import Control.Monad.Freer (send)
 
 data Tools mode = Tools
   { spawn :: SpawnTools mode,
-    popups :: PopupTools mode,
     pr :: FilePRTools mode,
     mergePr :: mode :- MergePR,
     notifyParent :: mode :- NotifyParent
@@ -29,7 +29,6 @@ config =
       tools =
         Tools
           { spawn = spawnTools,
-            popups = popupTools,
             pr = filePRTools,
             mergePr = mkHandler @MergePR,
             notifyParent = mkHandler @NotifyParent

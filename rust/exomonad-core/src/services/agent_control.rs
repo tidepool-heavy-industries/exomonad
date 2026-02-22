@@ -940,10 +940,14 @@ impl AgentControlService {
             let internal_name = format!("{}-gemini", slug);
             let display_name = format!("{} {}", AgentType::Gemini.emoji(), slug);
 
-            // Idempotency: if pane is already alive, return existing info
-            let tab_alive = self.is_zellij_tab_alive(&display_name).await;
-            if tab_alive {
-                info!(name = %options.name, "Worker already running, returning existing");
+            // Idempotency: check if agent config dir already exists (workers are panes, not tabs)
+            let agent_config_dir = self.project_dir
+                .join(".exo")
+                .join("agents")
+                .join(&internal_name);
+            let settings_path = agent_config_dir.join("settings.json");
+            if settings_path.exists() {
+                info!(name = %options.name, path = %settings_path.display(), "Worker already spawned, returning existing");
                 return Ok(SpawnResult {
                     agent_dir: PathBuf::new(),
                     tab_name: internal_name,
@@ -960,13 +964,7 @@ impl AgentControlService {
             }
 
             // Write Gemini settings to worker config dir in project root
-            let agent_config_dir = self.project_dir
-                .join(".exo")
-                .join("agents")
-                .join(&internal_name);
             fs::create_dir_all(&agent_config_dir).await?;
-
-            let settings_path = agent_config_dir.join("settings.json");
             let mcp_url = format!(
                 "http://localhost:{}/agents/worker/{}/mcp",
                 mcp_port, internal_name

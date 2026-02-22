@@ -177,7 +177,7 @@ All tools are defined in Haskell WASM and executed via host functions.
 | `spawn_workers` | tl | Spawn ephemeral Gemini agents as panes in parent dir (no branch, no worktree) |
 | `file_pr` | tl, dev | Create/update PR for current branch (auto-detects base branch from naming) |
 | `merge_pr` | tl | Merge child PR (gh pr merge + jj git fetch) |
-| `popup` | tl | Interactive UI in Zellij (choices, text, sliders) |
+| `popup` | ~~tl~~ | **Disabled.** Blocks WASM plugin lock. Suspend/resume fix pending. |
 | `notify_parent` | all | Signal completion to parent (auto-routed, injects into parent pane) |
 
 ## Effect System
