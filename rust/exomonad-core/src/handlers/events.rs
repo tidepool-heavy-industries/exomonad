@@ -3,8 +3,11 @@
 //! Uses proto-generated types from `exomonad_proto::effects::events`.
 
 use crate::effects::{dispatch_events_effect, EffectHandler, EffectResult, EventEffects};
+use crate::services::team_registry::TeamRegistry;
+use crate::services::teams_mailbox;
 use crate::services::{zellij_events, EventQueue};
 use async_trait::async_trait;
+use exomonad_proto::effects::events::event::EventType;
 use exomonad_proto::effects::events::*;
 use prost::Message;
 use std::sync::Arc;
@@ -23,6 +26,8 @@ pub struct EventHandler {
     client: reqwest::Client,
     /// Tracks agents that have already called notify_parent to prevent duplicate notifications.
     notified_agents: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// Claude Teams registry for inbox-based delivery.
+    team_registry: Option<Arc<TeamRegistry>>,
 }
 
 impl EventHandler {
@@ -38,7 +43,13 @@ impl EventHandler {
             event_queue_scope: event_queue_scope.unwrap_or_else(|| "default".to_string()),
             client: reqwest::Client::new(),
             notified_agents: std::sync::Mutex::new(std::collections::HashSet::new()),
+            team_registry: None,
         }
+    }
+
+    pub fn with_team_registry(mut self, registry: Arc<TeamRegistry>) -> Self {
+        self.team_registry = Some(registry);
+        self
     }
 }
 
@@ -73,27 +84,20 @@ impl EventEffects for EventHandler {
             "wait_for_event called"
         );
 
-        // Use a default timeout of 300s if not specified or 0
-        let timeout_secs = if req.timeout_secs <= 0 {
-            300
-        } else {
-            req.timeout_secs as u64
-        };
-
-        let event = self
+        let event_result = self
             .queue
             .wait_for_event(
                 &self.event_queue_scope,
                 &req.types,
-                Duration::from_secs(timeout_secs),
+                Duration::from_secs(req.timeout_secs as u64),
                 req.after_event_id,
             )
-            .await
-            .map_err(|e| {
-                crate::effects::EffectError::custom("events.wait_failed", e.to_string())
-            })?;
+            .await;
 
-        Ok(WaitForEventResponse { event: Some(event) })
+        match event_result {
+            Ok(event) => Ok(WaitForEventResponse { event: Some(event) }),
+            Err(_) => Ok(WaitForEventResponse { event: None }),
+        }
     }
 
     async fn notify_event(
@@ -148,63 +152,49 @@ impl EventEffects for EventHandler {
 
         // Prefer agent_id from the request (set by WASM caller) over structural identity
         let (agent_id_str, agent_id_source) = if req.agent_id.is_empty() {
-            (agent_name.to_string(), "ctx")
+            (agent_name.to_string(), "structural")
         } else {
             (req.agent_id.clone(), "request")
         };
 
-        // Idempotency: ignore duplicate notify_parent calls from spinning agents
+        // Prevent duplicate notifications from the same agent (common in re-runs)
         {
-            let mut set = self.notified_agents.lock().unwrap_or_else(|e| e.into_inner());
-            if !set.insert(agent_id_str.clone()) {
-                tracing::warn!(agent_id = %agent_id_str, "notify_parent called again — ignoring duplicate");
+            let mut notified = self.notified_agents.lock().unwrap();
+            if notified.contains(&agent_id_str) {
+                tracing::debug!(agent_id = %agent_id_str, source = %agent_id_source, "notify_parent: already notified, skipping duplicate");
                 return Ok(NotifyParentResponse { ack: true });
             }
+            notified.insert(agent_id_str.clone());
         }
 
-        tracing::debug!(
-            agent_id = %agent_id_str,
-            source = agent_id_source,
-            "notify_parent: resolved agent_id"
-        );
-
-        // Identity model:
-        // - Subtree agents: birth-branch is their own branch name (e.g. "main.feature-a").
-        //   Their parent is one level up (e.g. "main" -> root).
-        // - Workers: birth-branch is inherited from parent (parent's birth-branch).
-        let parent_session_id = if agent_name.is_gemini_worker() {
-            // Worker: birth-branch is inherited from parent
-            birth_branch.to_string()
-        } else {
-            // Subtree agent: parent is one level up
-            birth_branch
-                .parent()
-                .map(|p| p.to_string())
-                .unwrap_or_else(|| "root".to_string())
+        let parent_session_id = match birth_branch.parent() {
+            Some(parent) => parent.to_string(),
+            None => "root".to_string(),
         };
 
         tracing::info!(
             agent_id = %agent_id_str,
-            birth_branch = %birth_branch,
+            source = %agent_id_source,
             parent_session_id = %parent_session_id,
             status = %req.status,
-            "notify_parent: routing completion to parent"
+            "notify_parent called"
         );
 
+        // Map to internal Event for the queue
         let event = Event {
-            event_id: 0, // Assigned by EventQueue
-            event_type: Some(event::EventType::WorkerComplete(WorkerComplete {
+            event_id: 0, // Assigned by queue
+            event_type: Some(EventType::WorkerComplete(WorkerComplete {
                 worker_id: agent_id_str.clone(),
                 status: req.status.clone(),
-                message: req.message.clone(),
                 changes: Vec::new(),
+                message: req.message.clone(),
             })),
         };
 
         if let Some(ref url) = self.remote_url {
             tracing::debug!(url = %url, parent_session_id = %parent_session_id, "notify_parent: forwarding to remote server");
             let forward_req = NotifyEventRequest {
-                session_id: parent_session_id,
+                session_id: parent_session_id.clone(),
                 event: Some(event),
             };
             let body = forward_req.encode_to_vec();
@@ -226,11 +216,51 @@ impl EventEffects for EventHandler {
             self.queue.notify_event(&parent_session_id, event).await;
         }
 
-        // Inject natural-language notification into parent's Zellij pane
-        let tab_name = crate::services::agent_control::resolve_parent_tab_name(ctx);
+        // Deliver notification to parent: prefer Teams inbox, fall back to Zellij injection.
         let notification = format_parent_notification(&agent_id_str, &req.status, &req.message);
-        tracing::debug!(tab = %tab_name, chars = notification.len(), "notify_parent: injecting notification into parent pane");
-        zellij_events::inject_input(&tab_name, &notification);
+        let mut delivered_via_teams = false;
+
+        if let Some(ref registry) = self.team_registry {
+            // Resolve parent agent key for TeamRegistry lookup
+            let parent_key = if parent_session_id == "root" {
+                "root".to_string()
+            } else {
+                parent_session_id.clone()
+            };
+
+            if let Some(team_info) = registry.get(&parent_key).await {
+                match teams_mailbox::write_to_inbox(
+                    &team_info.team_name,
+                    &team_info.inbox_name,
+                    "exomonad",
+                    &notification,
+                    &format!("Agent completion: {}", agent_id_str),
+                    "blue",
+                ) {
+                    Ok(()) => {
+                        tracing::info!(
+                            parent = %parent_key,
+                            team = %team_info.team_name,
+                            "notify_parent: delivered via Teams inbox"
+                        );
+                        delivered_via_teams = true;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            parent = %parent_key,
+                            error = %e,
+                            "notify_parent: Teams inbox write failed, falling back to Zellij"
+                        );
+                    }
+                }
+            }
+        }
+
+        if !delivered_via_teams {
+            let tab_name = crate::services::agent_control::resolve_parent_tab_name(ctx);
+            tracing::debug!(tab = %tab_name, chars = notification.len(), "notify_parent: injecting notification into parent pane");
+            zellij_events::inject_input(&tab_name, &notification);
+        }
 
         Ok(NotifyParentResponse { ack: true })
     }
@@ -256,6 +286,6 @@ fn format_parent_notification(agent_id: &str, status: &str, message: &str) -> St
                 message
             }
         ),
-        _ => format!("[CHILD STATUS: {} - {}] {}", agent_id, status, message),
+        _ => format!("[CHILD {}: {}] {}", status.to_uppercase(), agent_id, message),
     }
 }
