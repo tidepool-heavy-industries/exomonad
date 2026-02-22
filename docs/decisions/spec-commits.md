@@ -1,4 +1,4 @@
-# ADR 006: Spec Commits (Decomposition Artifacts)
+# Spec Commits (Decomposition Artifacts)
 
 **Status:** Accepted
 

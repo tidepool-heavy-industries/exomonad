@@ -1,4 +1,4 @@
-# ADR-001: Claude Teams Synthetic Members
+# Claude Teams Synthetic Members
 
 ## Status
 

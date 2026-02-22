@@ -1,4 +1,4 @@
-# ADR 004: Role System Architecture
+# Role System Architecture
 
 ## Status
 

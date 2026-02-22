@@ -1,4 +1,4 @@
-# ADR 001: Haiku-Driven FunctionGemma Teaching
+# Haiku-Driven FunctionGemma Teaching
 
 ## Status
 Accepted

@@ -1,4 +1,4 @@
-# ADR 003: Tools as Workflows
+# Tools as Workflows
 
 **Date:** 2026-01-21
 **Status:** Accepted
