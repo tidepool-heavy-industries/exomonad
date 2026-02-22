@@ -13,6 +13,7 @@ pub mod github;
 pub mod jj_workspace;
 pub mod github_poller;
 pub mod inbox;
+pub mod inbox_watcher;
 pub mod local;
 pub mod log;
 pub mod merge_pr;

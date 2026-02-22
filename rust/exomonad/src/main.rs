@@ -1028,6 +1028,9 @@ async fn main() -> Result<()> {
                 poller.run().await;
             });
 
+            let _inbox_watcher = Arc::new(exomonad_core::services::inbox_watcher::InboxWatcher::new());
+            info!("InboxWatcher initialized (synthetic member inbox routing)");
+
             // Lazy server cache — one McpServer per role, created on first request.
             // Rust never enumerates roles; WASM AllRoles.hs is the single source of truth.
             let servers: Arc<tokio::sync::RwLock<HashMap<String, McpServer>>> =

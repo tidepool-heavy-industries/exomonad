@@ -7,7 +7,7 @@
 use crate::domain::{BranchName, Revision};
 use anyhow::{Context, Result};
 use jj_lib::config::{ConfigSource, StackedConfig};
-use jj_lib::git;
+use jj_lib::git::{self, GitImportOptions};
 use jj_lib::backend::CommitId;
 use jj_lib::op_store::RefTarget;
 use jj_lib::ref_name::{RefName, WorkspaceNameBuf};
@@ -114,6 +114,33 @@ impl JjWorkspaceService {
         let root_ws = self.load_root_workspace()?;
         let repo = root_ws.repo_loader().load_at_head()
             .context("Failed to load repo at head")?;
+
+        // Sync jj's view with git refs before resolving bookmarks.
+        // Without this, direct git commits (e.g., Wave 1 committed via `git commit`)
+        // won't be visible to jj, causing workspaces to fork from stale state.
+        let repo = {
+            let mut tx = repo.start_transaction();
+            let import_opts = GitImportOptions {
+                auto_local_bookmark: true,
+                abandon_unreachable_commits: false,
+                remote_auto_track_bookmarks: std::collections::HashMap::new(),
+            };
+            match git::import_refs(tx.repo_mut(), &import_opts) {
+                Ok(stats) => {
+                    if !stats.changed_remote_bookmarks.is_empty() {
+                        info!(
+                            changed_bookmarks = stats.changed_remote_bookmarks.len(),
+                            "Imported git refs into jj"
+                        );
+                    }
+                    tx.commit("import git refs before workspace creation")?
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to import git refs (non-fatal, using existing jj state)");
+                    repo
+                }
+            }
+        };
 
         // Resolve the base bookmark to a commit
         let base_ref: &RefName = base.as_str().as_ref();
@@ -320,7 +347,9 @@ impl JjWorkspaceService {
 
     /// Get the bookmark name associated with a workspace.
     ///
-    /// Looks for a bookmark whose target matches the workspace's working copy commit.
+    /// Tries jj bookmarks first (exact match on wc commit), then falls back
+    /// to `git rev-parse --abbrev-ref HEAD` for colocated repos where the
+    /// working copy has advanced past the bookmark target.
     pub fn get_workspace_bookmark(&self, workspace_path: &Path) -> Result<Option<String>> {
         let ws = self.load_workspace_at(workspace_path)?;
         let repo = ws.repo_loader().load_at_head()?;
@@ -328,16 +357,35 @@ impl JjWorkspaceService {
         let ws_name = ws.workspace_name();
         let wc_commit_id = match repo.view().get_wc_commit_id(ws_name) {
             Some(id) => id.clone(),
-            None => return Ok(None),
+            None => return self.git_branch_fallback(workspace_path),
         };
 
-        // Find bookmark pointing to working copy commit
+        // Find bookmark pointing to working copy commit (exact match)
         for (name, target) in repo.view().local_bookmarks() {
             if target.as_normal() == Some(&wc_commit_id) {
                 return Ok(Some(name.as_str().to_string()));
             }
         }
 
+        // Exact match failed — working copy has likely advanced past the bookmark.
+        // Fall back to git branch detection (reliable in colocated mode).
+        self.git_branch_fallback(workspace_path)
+    }
+
+    /// Fall back to `git rev-parse --abbrev-ref HEAD` for branch detection.
+    fn git_branch_fallback(&self, workspace_path: &Path) -> Result<Option<String>> {
+        let output = std::process::Command::new("git")
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .current_dir(workspace_path)
+            .output()
+            .context("Failed to run git rev-parse")?;
+        if output.status.success() {
+            let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if branch != "HEAD" && !branch.is_empty() {
+                info!(workspace = %workspace_path.display(), branch = %branch, "Resolved branch via git fallback");
+                return Ok(Some(branch));
+            }
+        }
         Ok(None)
     }
 

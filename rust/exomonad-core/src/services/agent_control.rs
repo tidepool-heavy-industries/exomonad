@@ -1024,6 +1024,14 @@ impl AgentControlService {
             )
             .await?;
 
+            // Register as synthetic team member for Claude Teams messaging
+            let team_name = format!("exo-{}", self.effective_birth_branch(Some(caller_bb)));
+            if let Err(e) = crate::services::synthetic_members::register_synthetic_member(
+                &team_name, &slug, "gemini-worker",
+            ) {
+                warn!(agent = %slug, team = %team_name, error = %e, "Failed to register synthetic team member (non-fatal)");
+            }
+
             // Emit agent:started event
             if let Some(ref session) = self.zellij_session {
                 let agent_id = crate::ui_protocol::AgentId::try_from(internal_name.clone())
@@ -1346,6 +1354,14 @@ impl AgentControlService {
             )
             .await?;
 
+            // Register as synthetic team member for Claude Teams messaging
+            let team_name = format!("exo-{}", effective_birth);
+            if let Err(e) = crate::services::synthetic_members::register_synthetic_member(
+                &team_name, &slug, "gemini-leaf",
+            ) {
+                warn!(agent = %slug, team = %team_name, error = %e, "Failed to register synthetic team member (non-fatal)");
+            }
+
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
                 agent_dir: worktree_path.clone(),
                 tab_name: internal_name,
@@ -1374,6 +1390,12 @@ impl AgentControlService {
     /// and removes per-agent config directory (`.exo/agents/{name}/`).
     #[tracing::instrument(skip(self))]
     pub async fn cleanup_agent(&self, identifier: &str) -> Result<()> {
+        // Remove synthetic team member registration (non-fatal if not registered)
+        let team_name = format!("exo-{}", self.birth_branch);
+        if let Err(e) = crate::services::synthetic_members::remove_synthetic_member(&team_name, identifier) {
+            warn!(team = %team_name, member = %identifier, error = %e, "Failed to remove synthetic team member (non-fatal)");
+        }
+
         // Try to find agent in list (for metadata and tab matching).
         // Failure here is non-fatal to allow cleaning up worker panes (invisible to list_agents).
         let agents = self.list_agents().await.unwrap_or_default();
