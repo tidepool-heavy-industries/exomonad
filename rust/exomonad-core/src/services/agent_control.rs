@@ -661,6 +661,17 @@ impl AgentControlService {
             )
             .await?;
 
+            // Register as synthetic team member for inter-agent messaging
+            if options.agent_type == AgentType::Gemini {
+                let team_name = format!("exo-{}", self.effective_birth_branch(Some(caller_bb)).as_str());
+                let member_name = format!("gh-{}-{}", issue_id, slug);
+                if let Err(e) = crate::services::synthetic_members::register_synthetic_member(
+                    &team_name, &member_name, "gemini-worker",
+                ) {
+                    warn!(agent = %member_name, error = %e, "Failed to register synthetic team member");
+                }
+            }
+
             // Emit agent:started event
             if let Some(ref session) = self.zellij_session {
                 let agent_id = crate::ui_protocol::AgentId::try_from(internal_name.clone())
@@ -880,6 +891,16 @@ impl AgentControlService {
             )
             .await?;
 
+            // Register as synthetic team member for inter-agent messaging
+            if options.agent_type == AgentType::Gemini {
+                let team_name = format!("exo-{}", self.effective_birth_branch(Some(caller_bb)).as_str());
+                if let Err(e) = crate::services::synthetic_members::register_synthetic_member(
+                    &team_name, &slug, "gemini-worker",
+                ) {
+                    warn!(agent = %slug, error = %e, "Failed to register synthetic team member");
+                }
+            }
+
             // Emit agent:started event
             if let Some(ref session) = self.zellij_session {
                 let agent_id = crate::ui_protocol::AgentId::try_from(internal_name.clone())
@@ -1023,6 +1044,14 @@ impl AgentControlService {
                 env_vars,
             )
             .await?;
+
+            // Register as synthetic team member
+            let team_name = format!("exo-{}", self.effective_birth_branch(Some(caller_bb)).as_str());
+            if let Err(e) = crate::services::synthetic_members::register_synthetic_member(
+                &team_name, &slug, "gemini-worker",
+            ) {
+                warn!(agent = %slug, error = %e, "Failed to register synthetic team member");
+            }
 
             // Emit agent:started event
             if let Some(ref session) = self.zellij_session {
@@ -1346,6 +1375,14 @@ impl AgentControlService {
             )
             .await?;
 
+            // Register as synthetic team member
+            let team_name = format!("exo-{}", self.effective_birth_branch(Some(caller_bb)).as_str());
+            if let Err(e) = crate::services::synthetic_members::register_synthetic_member(
+                &team_name, &slug, "gemini-worker",
+            ) {
+                warn!(agent = %slug, error = %e, "Failed to register synthetic team member");
+            }
+
             Ok::<SpawnResult, anyhow::Error>(SpawnResult {
                 agent_dir: worktree_path.clone(),
                 tab_name: internal_name,
@@ -1374,6 +1411,11 @@ impl AgentControlService {
     /// and removes per-agent config directory (`.exo/agents/{name}/`).
     #[tracing::instrument(skip(self))]
     pub async fn cleanup_agent(&self, identifier: &str) -> Result<()> {
+        let team_name = format!("exo-{}", self.birth_branch.as_str());
+        if let Err(e) = crate::services::synthetic_members::remove_synthetic_member(&team_name, identifier) {
+            warn!(team = %team_name, member = %identifier, error = %e, "Failed to remove synthetic team member");
+        }
+
         // Try to find agent in list (for metadata and tab matching).
         // Failure here is non-fatal to allow cleaning up worker panes (invisible to list_agents).
         let agents = self.list_agents().await.unwrap_or_default();
