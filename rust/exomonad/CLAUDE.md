@@ -22,7 +22,7 @@ N agents → exomonad serve → TCP (default: localhost:7432) → Unified WASM (
 
 ```bash
 exomonad hook pre-tool-use        # Handle Claude Code hook
-exomonad serve [--socket PATH]    # Unix socket MCP server (multi-agent, hot reload)
+exomonad serve [--port PORT]      # TCP MCP server (multi-agent, hot reload)
 exomonad recompile [--role ROLE]  # Build WASM from Haskell source
 exomonad init [--session NAME]    # Initialize Zellij session (Server tab + TL tab)
 ```
@@ -106,6 +106,11 @@ All effects flow through a single `yield_effect` host function using protobuf bi
 | `file_pr.*` | FilePRHandler | gh CLI |
 | `copilot.*` | CopilotHandler | GitHub API polling |
 | `messaging.*` | MessagingHandler | Agent messaging files (JSON) |
+| `events.*` | EventHandler | Event queue (blocking wait) |
+| `merge_pr.*` | MergePRHandler | gh pr merge + git fetch |
+| `coordination.*` | CoordinationHandler | Task tracking service |
+| `kv.*` | KvHandler | Key-value store (.exo/kv/) |
+| `session.*` | SessionHandler | Claude session registry |
 
 Handlers are registered via composable group functions: `core_handlers()`, `git_handlers()`, `orchestration_handlers()`.
 

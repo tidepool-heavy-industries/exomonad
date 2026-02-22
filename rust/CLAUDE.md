@@ -211,12 +211,15 @@ Proto field helpers in `handlers/mod.rs`: `non_empty(String) → Option<String>`
 | `git.*` | GitHandler | get_branch, get_status, get_recent_commits, get_worktree, has_unpushed_commits, get_remote_url, get_repo_info |
 | `github.*` | GitHubHandler | list_issues, get_issue, create_pr, list_prs, get_pr_for_branch, get_pr_review_comments |
 | `log.*` | LogHandler | info, error, emit_event |
-| `agent.*` | AgentHandler | spawn_gemini_teammate, cleanup_merged |
+| `agent.*` | AgentHandler | spawn_subtree, spawn_leaf_subtree, spawn_workers, spawn_gemini_teammate, cleanup_merged |
 | `fs.*` | FsHandler | read_file, write_file |
 | `popup.*` | PopupHandler | show_popup |
 | `file_pr.*` | FilePRHandler | file_pr |
 | `copilot.*` | CopilotHandler | wait_for_copilot_review |
 | `messaging.*` | MessagingHandler | send_note, send_question |
+| `coordination.*` | CoordinationHandler | create_task, update_task, list_tasks, send_message |
+| `kv.*` | KvHandler | get, set |
+| `session.*` | SessionHandler | register_claude_id, register_team |
 | `events.*` | EventHandler | wait_for_event (internal), notify_event, notify_parent |
 | `merge_pr.*` | MergePRHandler | merge_pr (gh pr merge + git fetch) |
 
