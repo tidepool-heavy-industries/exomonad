@@ -301,14 +301,19 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 │   ├── effects/CLAUDE.md       ← Effect interpreters
 │   │   ├── llm-interpreter/     ← Anthropic/OpenAI API
 │   │   ├── worktree-interpreter/ ← Git worktree management
-│   │   └── ...
+│   │   ├── github-interpreter/  ← GitHub API integration
+│   │   ├── git-interpreter/      ← Native git operations
+│   │   └── filesystem-interpreter/ ← Local filesystem access
+│   ├── proto/CLAUDE.md         ← Generated Haskell types for proto
 │   ├── protocol/CLAUDE.md      ← Wire formats
-│   └── tools/CLAUDE.md         ← Dev tools
+│   ├── tools/CLAUDE.md         ← Dev tools
+│   └── wasm-guest/CLAUDE.md    ← MCP tool definitions (WASM guest logic)
 ├── rust/CLAUDE.md             ← Rust workspace overview (3 crates)
 │   ├── exomonad/CLAUDE.md  ← MCP server + hook handler (binary)
 │   ├── exomonad-core/      ← Unified library: framework, handlers, services, protocol, UI types
 │   ├── exomonad-proto/     ← Proto-generated types (prost) for FFI + effects
 │   └── exomonad-plugin/CLAUDE.md   ← Zellij WASM plugin (status + popups)
+├── docs/decisions/            ← Architecture decision records (living docs)
 └── docs/audits/               ← Project audits and reports
 ```
 
@@ -324,6 +329,8 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 | Work on Zellij plugin | `rust/exomonad-plugin/CLAUDE.md` |
 | Define a graph, handlers, annotations | `haskell/dsl/core/CLAUDE.md` |
 | Add or modify an effect interpreter | `haskell/effects/CLAUDE.md` |
+| Work on WASM guest (MCP tools) | `haskell/wasm-guest/CLAUDE.md` |
+| Understand architectural decisions | `docs/decisions/` |
 
 ---
 
@@ -333,10 +340,12 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 
 All Haskell packages live under `haskell/`. See `haskell/CLAUDE.md` for full details.
 
-**Core (`haskell/dsl/`):**
+**Core (`haskell/`):**
 | Package | Purpose |
 |---------|---------|
 | `haskell/dsl/core` | Graph DSL, effects, templates, validation |
+| `haskell/wasm-guest` | WASM guest with MCP tool definitions |
+| `haskell/proto` | Generated Haskell proto types |
 
 **Effect Interpreters (`haskell/effects/`):**
 | Package | Purpose |
@@ -344,9 +353,13 @@ All Haskell packages live under `haskell/`. See `haskell/CLAUDE.md` for full det
 | `haskell/effects/llm-interpreter` | Anthropic/OpenAI API calls |
 | `haskell/effects/observability-interpreter` | OpenTelemetry traces to Grafana |
 | `haskell/effects/github-interpreter` | GitHub API integration |
+| `haskell/effects/git-interpreter` | Native git operations |
 | `haskell/effects/worktree-interpreter` | Git worktree management |
+| `haskell/effects/filesystem-interpreter` | Local filesystem access |
 | `haskell/effects/justfile-interpreter` | Justfile execution |
 | `haskell/effects/zellij-interpreter` | Zellij session management |
+| `haskell/effects/env-interpreter` | Environment variable management |
+| `haskell/effects/socket-client` | Shared NDJSON Unix socket client |
 
 **Protocol (`haskell/protocol/`):**
 | Package | Purpose |
