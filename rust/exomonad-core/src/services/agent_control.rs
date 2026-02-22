@@ -588,10 +588,26 @@ impl AgentControlService {
                 let path = worktree_path.clone();
                 let bookmark = crate::domain::BranchName::from(branch_name.as_str());
                 let base = crate::domain::BranchName::from(base);
-                tokio::task::spawn_blocking(move || jj.create_workspace(&path, &bookmark, &base))
-                    .await
-                    .context("tokio task join error while creating jj workspace")?
-                    .context("Failed to create jj workspace")?;
+                let result = tokio::task::spawn_blocking(move || {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        jj.create_workspace(&path, &bookmark, &base)
+                    }))
+                })
+                .await
+                .context("tokio task join error while creating jj workspace")?;
+
+                match result {
+                    Ok(Ok(())) => {},
+                    Ok(Err(e)) => return Err(e).context("Failed to create jj workspace"),
+                    Err(panic_val) => {
+                        let msg = panic_val
+                            .downcast_ref::<String>()
+                            .map(|s| s.as_str())
+                            .or_else(|| panic_val.downcast_ref::<&str>().copied())
+                            .unwrap_or("unknown panic");
+                        return Err(anyhow!("jj workspace creation panicked: {}", msg));
+                    }
+                }
             }
             info!(worktree_path = %worktree_path.display(), "jj workspace created successfully");
 
@@ -812,10 +828,26 @@ impl AgentControlService {
                 let path = worktree_path.clone();
                 let bookmark = crate::domain::BranchName::from(branch_name.as_str());
                 let base = crate::domain::BranchName::from(base_branch.as_str());
-                tokio::task::spawn_blocking(move || jj.create_workspace(&path, &bookmark, &base))
-                    .await
-                    .context("tokio task join error while creating jj workspace")?
-                    .context("Failed to create jj workspace")?;
+                let result = tokio::task::spawn_blocking(move || {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        jj.create_workspace(&path, &bookmark, &base)
+                    }))
+                })
+                .await
+                .context("tokio task join error while creating jj workspace")?;
+
+                match result {
+                    Ok(Ok(())) => {},
+                    Ok(Err(e)) => return Err(e).context("Failed to create jj workspace"),
+                    Err(panic_val) => {
+                        let msg = panic_val
+                            .downcast_ref::<String>()
+                            .map(|s| s.as_str())
+                            .or_else(|| panic_val.downcast_ref::<&str>().copied())
+                            .unwrap_or("unknown panic");
+                        return Err(anyhow!("jj workspace creation panicked: {}", msg));
+                    }
+                }
             }
 
             let mut env_vars = HashMap::new();
@@ -1106,10 +1138,26 @@ impl AgentControlService {
                 let path = worktree_path.clone();
                 let bookmark = crate::domain::BranchName::from(branch_name.as_str());
                 let base = crate::domain::BranchName::from(current_branch);
-                tokio::task::spawn_blocking(move || jj.create_workspace(&path, &bookmark, &base))
-                    .await
-                    .context("tokio task join error while creating jj workspace")?
-                    .context("Failed to create jj workspace")?;
+                let result = tokio::task::spawn_blocking(move || {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        jj.create_workspace(&path, &bookmark, &base)
+                    }))
+                })
+                .await
+                .context("tokio task join error while creating jj workspace")?;
+
+                match result {
+                    Ok(Ok(())) => {},
+                    Ok(Err(e)) => return Err(e).context("Failed to create jj workspace"),
+                    Err(panic_val) => {
+                        let msg = panic_val
+                            .downcast_ref::<String>()
+                            .map(|s| s.as_str())
+                            .or_else(|| panic_val.downcast_ref::<&str>().copied())
+                            .unwrap_or("unknown panic");
+                        return Err(anyhow!("jj workspace creation panicked: {}", msg));
+                    }
+                }
             }
 
             let mut env_vars = HashMap::new();
@@ -1242,10 +1290,26 @@ impl AgentControlService {
                 let path = worktree_path.clone();
                 let bookmark = crate::domain::BranchName::from(branch_name.as_str());
                 let base = crate::domain::BranchName::from(current_branch.as_str());
-                tokio::task::spawn_blocking(move || jj.create_workspace(&path, &bookmark, &base))
-                    .await
-                    .context("tokio task join error while creating jj workspace")?
-                    .context("Failed to create jj workspace")?;
+                let result = tokio::task::spawn_blocking(move || {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        jj.create_workspace(&path, &bookmark, &base)
+                    }))
+                })
+                .await
+                .context("tokio task join error while creating jj workspace")?;
+
+                match result {
+                    Ok(Ok(())) => {},
+                    Ok(Err(e)) => return Err(e).context("Failed to create jj workspace"),
+                    Err(panic_val) => {
+                        let msg = panic_val
+                            .downcast_ref::<String>()
+                            .map(|s| s.as_str())
+                            .or_else(|| panic_val.downcast_ref::<&str>().copied())
+                            .unwrap_or("unknown panic");
+                        return Err(anyhow!("jj workspace creation panicked: {}", msg));
+                    }
+                }
             }
 
             let mut env_vars = HashMap::new();
