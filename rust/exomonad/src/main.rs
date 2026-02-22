@@ -889,12 +889,9 @@ async fn main() -> Result<()> {
             let executor: Arc<dyn exomonad_core::services::docker::CommandExecutor> =
                 Arc::new(exomonad_core::services::local::LocalExecutor::new());
             let git = Arc::new(exomonad_core::services::git::GitService::new(executor));
-            let jj = Arc::new(exomonad_core::services::jj_workspace::JjWorkspaceService::new(
+            let git_wt = Arc::new(exomonad_core::services::git_worktree::GitWorktreeService::new(
                 project_dir.clone(),
             ));
-            if let Err(e) = jj.ensure_colocated() {
-                tracing::warn!("jj colocation failed (spawn tools require jj): {:#}", e);
-            }
             let github = secrets
                 .github_token()
                 .and_then(|t| exomonad_core::services::github::GitHubService::new(t).ok());
@@ -908,7 +905,7 @@ async fn main() -> Result<()> {
                 exomonad_core::services::agent_control::AgentControlService::new(
                     project_dir_for_services.clone(),
                     github.clone(),
-                    jj.clone(),
+                    git_wt.clone(),
                 );
             let worktree_base = config.worktree_base;
             agent_control = agent_control
@@ -966,7 +963,7 @@ async fn main() -> Result<()> {
                 project_dir.clone(),
                 event_log.clone(),
             ));
-            builder = builder.with_handlers(exomonad_core::git_handlers(git, github, jj));
+            builder = builder.with_handlers(exomonad_core::git_handlers(git, github, git_wt));
             let team_registry = Arc::new(exomonad_core::services::team_registry::TeamRegistry::new());
             let (orch_handlers, question_registry) = exomonad_core::orchestration_handlers(
                 agent_control.clone(),

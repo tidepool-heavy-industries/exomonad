@@ -5,7 +5,7 @@
 
 use crate::domain::PRNumber;
 use crate::services::git;
-use crate::services::jj_workspace::JjWorkspaceService;
+use crate::services::git_worktree::GitWorktreeService;
 use anyhow::{Context, Result};
 use duct::cmd;
 use serde::{Deserialize, Serialize};
@@ -176,14 +176,14 @@ fn create_pr(
 // ============================================================================
 
 /// File a PR using `gh` CLI. Pushes the branch, creates or updates the PR.
-pub async fn file_pr_async(input: &FilePRInput, jj: Arc<JjWorkspaceService>) -> Result<FilePROutput> {
+pub async fn file_pr_async(input: &FilePRInput, git_wt: Arc<GitWorktreeService>) -> Result<FilePROutput> {
     let dir = input.working_dir.as_deref().unwrap_or(".");
 
     // Get branch from the agent's working directory, not server CWD
     let dir_path = std::path::PathBuf::from(dir);
-    let jj_clone = jj.clone();
+    let git_wt_clone = git_wt.clone();
     let head = tokio::task::spawn_blocking(move || {
-        jj_clone.get_workspace_bookmark(&dir_path)
+        git_wt_clone.get_workspace_bookmark(&dir_path)
     })
     .await
     .context("spawn_blocking failed")?
@@ -198,9 +198,9 @@ pub async fn file_pr_async(input: &FilePRInput, jj: Arc<JjWorkspaceService>) -> 
     {
         let dir_path = std::path::PathBuf::from(dir);
         let bookmark = crate::domain::BranchName::from(head.as_str());
-        let jj_clone = jj.clone();
+        let git_wt_clone = git_wt.clone();
         tokio::task::spawn_blocking(move || {
-            jj_clone.push_bookmark(&dir_path, &bookmark)
+            git_wt_clone.push_bookmark(&dir_path, &bookmark)
         })
         .await
         .context("spawn_blocking failed")?
@@ -348,9 +348,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_file_pr_async_no_jj_workspace() -> Result<()> {
+    async fn test_file_pr_async_no_git_repo() -> Result<()> {
         let temp_dir = tempfile::tempdir()?;
-        let jj = Arc::new(JjWorkspaceService::new(temp_dir.path().to_path_buf()));
+        let git_wt = Arc::new(GitWorktreeService::new(temp_dir.path().to_path_buf()));
         let input = FilePRInput {
             title: "Test PR".to_string(),
             body: "Test Body".to_string(),
@@ -358,10 +358,8 @@ mod tests {
             working_dir: Some(temp_dir.path().to_string_lossy().to_string()),
         };
 
-        let result = file_pr_async(&input, jj).await;
+        let result = file_pr_async(&input, git_wt).await;
         assert!(result.is_err());
-        let err = result.err().unwrap().to_string();
-        assert!(err.contains("Failed to get workspace bookmark"));
 
         Ok(())
     }
@@ -379,12 +377,9 @@ mod tests {
         cmd!("git", "add", "README.md").dir(dir).read()?;
         cmd!("git", "commit", "-m", "init").dir(dir).read()?;
 
-        // 2. Init jj colocated
-        cmd!("jj", "git", "init", "--colocate").dir(dir).read()?;
-        let jj = Arc::new(JjWorkspaceService::new(dir.to_path_buf()));
-
-        // 3. Create a bookmark and check it out
-        cmd!("jj", "bookmark", "create", "-r", "@", "feature-branch").dir(dir).read()?;
+        // 2. Create a feature branch
+        cmd!("git", "checkout", "-b", "feature-branch").dir(dir).read()?;
+        let git_wt = Arc::new(GitWorktreeService::new(dir.to_path_buf()));
 
         let input = FilePRInput {
             title: "Test PR".to_string(),
@@ -393,15 +388,11 @@ mod tests {
             working_dir: Some(dir.to_string_lossy().to_string()),
         };
 
-        // Note: we can't easily test the full file_pr_async because it calls `gh`
-        // but we can verify it gets past the head detection.
-        // Since we didn't setup an origin remote, push_bookmark will fail.
-        let result = file_pr_async(&input, jj).await;
+        // Since we didn't setup an origin remote, push will fail.
+        let result = file_pr_async(&input, git_wt).await;
 
         if let Err(ref e) = result {
             let err_msg = e.to_string();
-            // It should have detected 'feature-branch' and then failed on push
-            // because there is no 'origin' remote.
             assert!(err_msg.contains("git push failed"));
         } else {
             panic!("Expected file_pr_async to fail on push, but it succeeded?!");

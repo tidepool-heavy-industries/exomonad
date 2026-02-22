@@ -176,7 +176,7 @@ All tools are defined in Haskell WASM and executed via host functions.
 | `spawn_leaf_subtree` | tl | Fork Gemini agent into worktree + Zellij tab (dev role, files PR) |
 | `spawn_workers` | tl | Spawn ephemeral Gemini agents as panes in parent dir (no branch, no worktree) |
 | `file_pr` | tl, dev | Create/update PR for current branch (auto-detects base branch from naming) |
-| `merge_pr` | tl | Merge child PR (gh pr merge + jj git fetch) |
+| `merge_pr` | tl | Merge child PR (gh pr merge + git fetch) |
 | `popup` | ~~tl~~ | **Disabled.** Blocks WASM plugin lock. Suspend/resume fix pending. |
 | `notify_parent` | all | Signal completion to parent (auto-routed, injects into parent pane) |
 
@@ -218,8 +218,7 @@ Proto field helpers in `handlers/mod.rs`: `non_empty(String) → Option<String>`
 | `copilot.*` | CopilotHandler | wait_for_copilot_review |
 | `messaging.*` | MessagingHandler | send_note, send_question |
 | `events.*` | EventHandler | wait_for_event (internal), notify_event, notify_parent |
-| `jj.*` | JjHandler | bookmark_create, git_push, git_fetch, log, new, status |
-| `merge_pr.*` | MergePRHandler | merge_pr (gh pr merge + jj git fetch) |
+| `merge_pr.*` | MergePRHandler | merge_pr (gh pr merge + git fetch) |
 
 **Zellij Integration:**
 - Uses declarative KDL layouts (not CLI flags)

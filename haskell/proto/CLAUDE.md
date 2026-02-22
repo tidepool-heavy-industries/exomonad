@@ -28,7 +28,7 @@ haskell/proto/
         ├── Fs.hs            # Generated from effects/fs.proto
         ├── Git.hs           # Generated from effects/git.proto
         ├── Github.hs        # Generated from effects/github.proto
-        ├── Jj.hs            # Generated from effects/jj.proto
+        ├── Jj.hs            # Generated from effects/jj.proto (legacy, unused)
         ├── Kv.hs            # Generated from effects/kv.proto
         ├── Log.hs           # Generated from effects/log.proto
         ├── MergePr.hs       # Generated from effects/merge_pr.proto

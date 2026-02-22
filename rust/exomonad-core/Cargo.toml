@@ -40,7 +40,7 @@ runtime = [
     "dep:axum",
     "dep:tower-http",
     "dep:futures-util",
-    "dep:jj-lib",
+
 ]
 
 [dependencies]
@@ -72,9 +72,6 @@ sha2 = { version = "0.10", optional = true }
 exomonad-proto = { path = "../exomonad-proto", version = "0.1.0", features = ["effects"], optional = true }
 shell-escape = { version = "0.1", optional = true }
 nix = { workspace = true, features = ["fs"], optional = true }
-
-# Runtime feature: jj-lib (workspace management)
-jj-lib = { workspace = true, optional = true }
 
 # Runtime feature: handlers and services
 askama = { version = "0.12", optional = true }

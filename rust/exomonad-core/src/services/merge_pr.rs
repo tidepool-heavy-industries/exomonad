@@ -5,21 +5,21 @@ use tokio::process::Command;
 use tokio::time::Duration;
 use tracing::{error, info, warn};
 
-use crate::services::jj_workspace::JjWorkspaceService;
+use crate::services::git_worktree::GitWorktreeService;
 
 const MERGE_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub struct MergePROutput {
     pub success: bool,
     pub message: String,
-    pub jj_fetched: bool,
+    pub git_fetched: bool,
 }
 
 pub async fn merge_pr_async(
     pr_number: PRNumber,
     strategy: &str,
     working_dir: &str,
-    jj: Arc<JjWorkspaceService>,
+    git_wt: Arc<GitWorktreeService>,
 ) -> Result<MergePROutput> {
     let dir = if working_dir.is_empty() {
         "."
@@ -82,7 +82,7 @@ pub async fn merge_pr_async(
         return Ok(MergePROutput {
             success: false,
             message: format!("gh pr merge failed: {}", stderr),
-            jj_fetched: false,
+            git_fetched: false,
         });
     }
 
@@ -102,10 +102,10 @@ pub async fn merge_pr_async(
                 slug = %slug,
                 "Cleaning up child worktree after successful merge"
             );
-            let jj_clone = jj.clone();
+            let git_wt_clone = git_wt.clone();
             let path_clone = worktree_path.clone();
             let cleanup_result =
-                tokio::task::spawn_blocking(move || jj_clone.remove_workspace(&path_clone)).await;
+                tokio::task::spawn_blocking(move || git_wt_clone.remove_workspace(&path_clone)).await;
 
             match cleanup_result {
                 Ok(Ok(())) => info!(
@@ -126,24 +126,24 @@ pub async fn merge_pr_async(
         }
     }
 
-    // Step 2: jj git fetch (best-effort, triggers auto-rebase) via jj-lib
+    // Step 2: git fetch (best-effort, pulls merged changes)
     let dir_path = std::path::PathBuf::from(dir);
-    let jj_clone = jj.clone();
-    let jj_result = tokio::task::spawn_blocking(move || {
-        jj_clone.fetch(&dir_path)
+    let git_wt_clone = git_wt.clone();
+    let git_result = tokio::task::spawn_blocking(move || {
+        git_wt_clone.fetch(&dir_path)
     }).await;
 
-    let jj_fetched = match jj_result {
+    let git_fetched = match git_result {
         Ok(Ok(())) => {
-            info!("jj git fetch succeeded via jj-lib (auto-rebase triggered)");
+            info!("git fetch succeeded");
             true
         }
         Ok(Err(e)) => {
-            info!(error = %e, "jj git fetch failed via jj-lib");
+            info!(error = %e, "git fetch failed");
             false
         }
         Err(e) => {
-            info!(error = %e, "jj fetch spawn_blocking failed");
+            info!(error = %e, "git fetch spawn_blocking failed");
             false
         }
     };
@@ -155,6 +155,6 @@ pub async fn merge_pr_async(
         } else {
             merge_msg
         },
-        jj_fetched,
+        git_fetched,
     })
 }

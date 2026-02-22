@@ -9,7 +9,6 @@ These are defined in `ExoMonad.Effects.*` and interpreted by the Rust host.
 
 - `Git`: Git operations (branch, status, log, etc.)
 - `GitHub`: GitHub API interactions (issues, PRs).
-- `Jj`: Jujutsu VCS operations (bookmark, push, fetch, log, new, status).
 - **`Events`**: Inter-agent synchronization (wait/notify).
 - **`Session`**: Session lifecycle management (register Claude session ID).
 - `Log`: Logging to the host console.

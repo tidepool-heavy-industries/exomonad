@@ -33,7 +33,7 @@
 //! let mut builder = RuntimeBuilder::new()
 //!     .with_wasm_path(wasm_path)
 //!     .with_handlers(core_handlers(project_dir.clone(), None))
-//!     .with_handlers(git_handlers(git, github, jj));
+//!     .with_handlers(git_handlers(git, github, git_wt));
 //!
 //! // Add custom domain handlers
 //! builder = builder.with_effect_handler(MyDomainHandler::new());
@@ -122,7 +122,7 @@ pub use handlers::groups::{core_handlers, git_handlers, orchestration_handlers};
 #[cfg(feature = "runtime")]
 pub use handlers::{
     AgentHandler, CoordinationHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler,
-    GitHandler, GitHubHandler, JjHandler, KvHandler, LogHandler, MergePRHandler, MessagingHandler,
+    GitHandler, GitHubHandler, KvHandler, LogHandler, MergePRHandler, MessagingHandler,
     PopupHandler,
 };
 #[cfg(feature = "runtime")]

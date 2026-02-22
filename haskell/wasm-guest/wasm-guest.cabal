@@ -91,7 +91,6 @@ library wasm-guest-internal
         ExoMonad.Effect.Class
         ExoMonad.Effects.Git
         ExoMonad.Effects.GitHub
-        ExoMonad.Effects.Jj
         ExoMonad.Effects.Log
         ExoMonad.Effects.Agent
         ExoMonad.Effects.Fs

@@ -113,9 +113,8 @@ Proto3 uses empty strings/zero values as defaults. These helpers eliminate repet
 |------|---------|---------|
 | `AgentName` | Agent identity (e.g., "root", "feature-a") | events, session, agent, coordination |
 | `BirthBranch` | Branch-based agent identity | events, messaging, github_poller |
-| `BranchName` | Git branch/bookmark name | jj, file_pr, agent |
+| `BranchName` | Git branch name | file_pr, agent |
 | `PRNumber` | GitHub PR number (wraps u64) | file_pr, merge_pr, copilot, github_poller |
-| `Revision` | Commit ID or bookmark reference | jj |
 | `TaskId` | Coordination task identifier | coordination |
 | `AgentType` | Claude vs Gemini enum, provides `tab_display_name()` and `from_dir_name()` | agent, github_poller |
 | `GithubOwner` / `GithubRepo` | GitHub repo coordinates | github_poller |

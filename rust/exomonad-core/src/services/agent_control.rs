@@ -19,31 +19,25 @@ use tokio::time::{timeout, Duration};
 use tracing::{debug, error, info, warn};
 
 use super::github::{GitHubService, Repo};
-use super::jj_workspace::JjWorkspaceService;
+use super::git_worktree::GitWorktreeService;
 use super::zellij_events;
 use std::sync::Arc;
 
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(60);
 const ZELLIJ_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Ensure the given branch bookmark is pushed to the remote so child PRs can
+/// Ensure the given branch is pushed to the remote so child PRs can
 /// reference it as their base.
-///
-/// This delegates to [`JjWorkspaceService::push_bookmark`], which is
-/// responsible for performing the actual push and reporting any errors
-/// (e.g., missing remote, authentication, or network issues). If the
-/// bookmark is already up to date on the remote, this call is effectively
-/// a no-op.
 async fn ensure_branch_pushed(
-    jj: &Arc<JjWorkspaceService>,
+    git_wt: &Arc<GitWorktreeService>,
     branch: &str,
     project_dir: &Path,
 ) -> Result<()> {
     info!(branch = %branch, "Pushing parent branch to remote");
-    let jj = jj.clone();
+    let git_wt = git_wt.clone();
     let dir = project_dir.to_path_buf();
     let bookmark = crate::domain::BranchName::from(branch);
-    tokio::task::spawn_blocking(move || jj.push_bookmark(&dir, &bookmark))
+    tokio::task::spawn_blocking(move || git_wt.push_bookmark(&dir, &bookmark))
         .await
         .context("tokio task join error while pushing parent branch")?
         .context("Failed to push parent branch")
@@ -395,8 +389,8 @@ pub struct AgentControlService {
     birth_branch: BirthBranch,
     /// MCP server port for per-agent endpoint URLs (set when running `exomonad serve`).
     mcp_server_port: Option<u16>,
-    /// jj workspace service
-    jj: Arc<JjWorkspaceService>,
+    /// Git worktree service
+    git_wt: Arc<GitWorktreeService>,
 }
 
 impl AgentControlService {
@@ -404,7 +398,7 @@ impl AgentControlService {
     pub fn new(
         project_dir: PathBuf,
         github: Option<GitHubService>,
-        jj: Arc<JjWorkspaceService>,
+        git_wt: Arc<GitWorktreeService>,
     ) -> Self {
         let worktree_base = project_dir.join(".exo/worktrees");
         Self {
@@ -414,7 +408,7 @@ impl AgentControlService {
             zellij_session: None,
             birth_branch: BirthBranch::root(),
             mcp_server_port: None,
-            jj,
+            git_wt,
         }
     }
 
@@ -462,7 +456,7 @@ impl AgentControlService {
             .github_token()
             .and_then(|t| GitHubService::new(t).ok());
 
-        let jj = Arc::new(JjWorkspaceService::new(project_dir.clone()));
+        let git_wt = Arc::new(GitWorktreeService::new(project_dir.clone()));
 
         Ok(Self {
             project_dir: project_dir.clone(),
@@ -471,7 +465,7 @@ impl AgentControlService {
             zellij_session: None,
             birth_branch: BirthBranch::root(),
             mcp_server_port: None,
-            jj,
+            git_wt,
         })
     }
 
@@ -560,9 +554,9 @@ impl AgentControlService {
             // Clean up existing worktree if it exists (idempotency)
             if worktree_path.exists() {
                 info!(path = %worktree_path.display(), "Removing existing workspace for idempotency");
-                let jj = self.jj.clone();
+                let git_wt = self.git_wt.clone();
                 let path = worktree_path.clone();
-                match tokio::task::spawn_blocking(move || jj.remove_workspace(&path)).await {
+                match tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await {
                     Err(join_err) => {
                         warn!(error = %join_err, "Join error while removing existing workspace (non-fatal)");
                     }
@@ -579,37 +573,37 @@ impl AgentControlService {
                 base_branch = %base,
                 branch_name = %branch_name,
                 worktree_path = %worktree_path.display(),
-                "Creating jj workspace"
+                "Creating git worktree"
             );
 
             // Create the workspace
             {
-                let jj = self.jj.clone();
+                let git_wt = self.git_wt.clone();
                 let path = worktree_path.clone();
                 let bookmark = crate::domain::BranchName::from(branch_name.as_str());
                 let base = crate::domain::BranchName::from(base);
                 let result = tokio::task::spawn_blocking(move || {
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        jj.create_workspace(&path, &bookmark, &base)
+                        git_wt.create_workspace(&path, &bookmark, &base)
                     }))
                 })
                 .await
-                .context("tokio task join error while creating jj workspace")?;
+                .context("tokio task join error while creating git worktree")?;
 
                 match result {
                     Ok(Ok(())) => {},
-                    Ok(Err(e)) => return Err(e).context("Failed to create jj workspace"),
+                    Ok(Err(e)) => return Err(e).context("Failed to create git worktree"),
                     Err(panic_val) => {
                         let msg = panic_val
                             .downcast_ref::<String>()
                             .map(|s| s.as_str())
                             .or_else(|| panic_val.downcast_ref::<&str>().copied())
                             .unwrap_or("unknown panic");
-                        return Err(anyhow!("jj workspace creation panicked: {}", msg));
+                        return Err(anyhow!("git worktree creation panicked: {}", msg));
                     }
                 }
             }
-            info!(worktree_path = %worktree_path.display(), "jj workspace created successfully");
+            info!(worktree_path = %worktree_path.display(), "git worktree created successfully");
 
             // Use worktree path as agent_dir
             let agent_dir = worktree_path;
@@ -801,9 +795,9 @@ impl AgentControlService {
             // Clean up existing worktree if it exists
             if worktree_path.exists() {
                 info!(path = %worktree_path.display(), "Removing existing workspace for idempotency");
-                let jj = self.jj.clone();
+                let git_wt = self.git_wt.clone();
                 let path = worktree_path.clone();
-                match tokio::task::spawn_blocking(move || jj.remove_workspace(&path)).await {
+                match tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await {
                     Err(join_err) => {
                         warn!(error = %join_err, "Join error while removing existing workspace (non-fatal)");
                     }
@@ -820,32 +814,32 @@ impl AgentControlService {
                 base_branch = %base_branch,
                 branch_name = %branch_name,
                 worktree_path = %worktree_path.display(),
-                "Creating jj workspace"
+                "Creating git worktree"
             );
 
             {
-                let jj = self.jj.clone();
+                let git_wt = self.git_wt.clone();
                 let path = worktree_path.clone();
                 let bookmark = crate::domain::BranchName::from(branch_name.as_str());
                 let base = crate::domain::BranchName::from(base_branch.as_str());
                 let result = tokio::task::spawn_blocking(move || {
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        jj.create_workspace(&path, &bookmark, &base)
+                        git_wt.create_workspace(&path, &bookmark, &base)
                     }))
                 })
                 .await
-                .context("tokio task join error while creating jj workspace")?;
+                .context("tokio task join error while creating git worktree")?;
 
                 match result {
                     Ok(Ok(())) => {},
-                    Ok(Err(e)) => return Err(e).context("Failed to create jj workspace"),
+                    Ok(Err(e)) => return Err(e).context("Failed to create git worktree"),
                     Err(panic_val) => {
                         let msg = panic_val
                             .downcast_ref::<String>()
                             .map(|s| s.as_str())
                             .or_else(|| panic_val.downcast_ref::<&str>().copied())
                             .unwrap_or("unknown panic");
-                        return Err(anyhow!("jj workspace creation panicked: {}", msg));
+                        return Err(anyhow!("git worktree creation panicked: {}", msg));
                     }
                 }
             }
@@ -1107,7 +1101,7 @@ impl AgentControlService {
             let current_branch = effective_birth.as_parent_branch();
 
             // Push parent branch so child PRs can reference it as base
-            ensure_branch_pushed(&self.jj, current_branch, effective_project_dir).await?;
+            ensure_branch_pushed(&self.git_wt, current_branch, effective_project_dir).await?;
 
             // Branch: {current_branch}.{slug}
             let child_birth = effective_birth.child(&slug);
@@ -1119,9 +1113,9 @@ impl AgentControlService {
             // Clean up existing worktree if it exists
             if worktree_path.exists() {
                 info!(path = %worktree_path.display(), "Removing existing workspace for idempotency");
-                let jj = self.jj.clone();
+                let git_wt = self.git_wt.clone();
                 let path = worktree_path.clone();
-                match tokio::task::spawn_blocking(move || jj.remove_workspace(&path)).await {
+                match tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await {
                     Err(join_err) => {
                         warn!(error = %join_err, "Join error while removing existing workspace (non-fatal)");
                     }
@@ -1138,32 +1132,32 @@ impl AgentControlService {
                 base_branch = %current_branch,
                 branch_name = %branch_name,
                 worktree_path = %worktree_path.display(),
-                "Creating jj workspace for subtree"
+                "Creating git worktree for subtree"
             );
 
             {
-                let jj = self.jj.clone();
+                let git_wt = self.git_wt.clone();
                 let path = worktree_path.clone();
                 let bookmark = crate::domain::BranchName::from(branch_name.as_str());
                 let base = crate::domain::BranchName::from(current_branch);
                 let result = tokio::task::spawn_blocking(move || {
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        jj.create_workspace(&path, &bookmark, &base)
+                        git_wt.create_workspace(&path, &bookmark, &base)
                     }))
                 })
                 .await
-                .context("tokio task join error while creating jj workspace")?;
+                .context("tokio task join error while creating git worktree")?;
 
                 match result {
                     Ok(Ok(())) => {},
-                    Ok(Err(e)) => return Err(e).context("Failed to create jj workspace"),
+                    Ok(Err(e)) => return Err(e).context("Failed to create git worktree"),
                     Err(panic_val) => {
                         let msg = panic_val
                             .downcast_ref::<String>()
                             .map(|s| s.as_str())
                             .or_else(|| panic_val.downcast_ref::<&str>().copied())
                             .unwrap_or("unknown panic");
-                        return Err(anyhow!("jj workspace creation panicked: {}", msg));
+                        return Err(anyhow!("git worktree creation panicked: {}", msg));
                     }
                 }
             }
@@ -1267,7 +1261,7 @@ impl AgentControlService {
             }
 
             // Push parent branch so child PRs can reference it as base
-            ensure_branch_pushed(&self.jj, &current_branch, effective_project_dir).await?;
+            ensure_branch_pushed(&self.git_wt, &current_branch, effective_project_dir).await?;
 
             let child_birth = effective_birth.child(&slug);
             let branch_name = child_birth.to_string();
@@ -1276,9 +1270,9 @@ impl AgentControlService {
             // Clean up existing worktree
             if worktree_path.exists() {
                 info!(path = %worktree_path.display(), "Removing existing workspace for idempotency");
-                let jj = self.jj.clone();
+                let git_wt = self.git_wt.clone();
                 let path = worktree_path.clone();
-                match tokio::task::spawn_blocking(move || jj.remove_workspace(&path)).await {
+                match tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await {
                     Err(join_err) => {
                         warn!(error = %join_err, "Join error while removing existing workspace (non-fatal)");
                     }
@@ -1295,32 +1289,32 @@ impl AgentControlService {
                 base_branch = %current_branch,
                 branch_name = %branch_name,
                 worktree_path = %worktree_path.display(),
-                "Creating jj workspace for leaf subtree"
+                "Creating git worktree for leaf subtree"
             );
 
             {
-                let jj = self.jj.clone();
+                let git_wt = self.git_wt.clone();
                 let path = worktree_path.clone();
                 let bookmark = crate::domain::BranchName::from(branch_name.as_str());
                 let base = crate::domain::BranchName::from(current_branch.as_str());
                 let result = tokio::task::spawn_blocking(move || {
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        jj.create_workspace(&path, &bookmark, &base)
+                        git_wt.create_workspace(&path, &bookmark, &base)
                     }))
                 })
                 .await
-                .context("tokio task join error while creating jj workspace")?;
+                .context("tokio task join error while creating git worktree")?;
 
                 match result {
                     Ok(Ok(())) => {},
-                    Ok(Err(e)) => return Err(e).context("Failed to create jj workspace"),
+                    Ok(Err(e)) => return Err(e).context("Failed to create git worktree"),
                     Err(panic_val) => {
                         let msg = panic_val
                             .downcast_ref::<String>()
                             .map(|s| s.as_str())
                             .or_else(|| panic_val.downcast_ref::<&str>().copied())
                             .unwrap_or("unknown panic");
-                        return Err(anyhow!("jj workspace creation panicked: {}", msg));
+                        return Err(anyhow!("git worktree creation panicked: {}", msg));
                     }
                 }
             }
@@ -1464,9 +1458,9 @@ impl AgentControlService {
             }
         };
         if worktree_path.exists() {
-            let jj = self.jj.clone();
+            let git_wt = self.git_wt.clone();
             let path = worktree_path.clone();
-            let join_result = tokio::task::spawn_blocking(move || jj.remove_workspace(&path)).await;
+            let join_result = tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await;
             match join_result {
                 Ok(Ok(())) => {
                     // Successfully removed workspace
@@ -1475,14 +1469,14 @@ impl AgentControlService {
                     warn!(
                         path = %worktree_path.display(),
                         error = %e,
-                        "Failed to remove jj workspace (non-fatal)"
+                        "Failed to remove git worktree (non-fatal)"
                     );
                 }
                 Err(join_err) => {
                     warn!(
                         path = %worktree_path.display(),
                         error = %join_err,
-                        "Blocking task for jj workspace removal panicked or was cancelled (non-fatal)"
+                        "Blocking task for git worktree removal panicked or was cancelled (non-fatal)"
                     );
                 }
             }

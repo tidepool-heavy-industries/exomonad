@@ -197,7 +197,7 @@ The TL does not poll or block. It finishes its turn after spawning, and gets pok
 ### PR Workflow
 
 - **`file_pr`** — Create or update a PR for the current branch. Auto-detects base branch from dot-separated naming convention.
-- **`merge_pr`** — Merge a child's PR (`gh pr merge` + `jj git fetch` for auto-rebase). TL role only.
+- **`merge_pr`** — Merge a child's PR (`gh pr merge` + `git fetch` for auto-rebase). TL role only.
 
 ### Interactive UI
 
@@ -283,7 +283,7 @@ All tools implemented in Haskell WASM (`haskell/wasm-guest/src/ExoMonad/Guest/To
 | `spawn_leaf_subtree` | tl | Fork Gemini agent into worktree + Zellij tab (dev role, files PR) |
 | `spawn_workers` | tl | Spawn Gemini agents as Zellij panes (ephemeral, no worktree) |
 | `file_pr` | tl, dev | Create/update PR (auto-detects base branch from naming) |
-| `merge_pr` | tl | Merge child PR (gh merge + jj fetch) |
+| `merge_pr` | tl | Merge child PR (gh merge + git fetch) |
 | `popup` | ~~tl~~ | **Disabled.** Blocks WASM plugin lock for entire duration. Suspend/resume fix pending. |
 | `notify_parent` | all | Signal completion to parent. Auto-routed, injects into parent pane |
 

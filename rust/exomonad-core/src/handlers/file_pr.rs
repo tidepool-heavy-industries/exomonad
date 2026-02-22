@@ -7,7 +7,7 @@ use crate::effects::{
     dispatch_file_pr_effect, EffectHandler, EffectResult, FilePrEffects, ResultExt,
 };
 use crate::services::file_pr::{self, FilePRInput};
-use crate::services::jj_workspace::JjWorkspaceService;
+use crate::services::git_worktree::GitWorktreeService;
 use async_trait::async_trait;
 use exomonad_proto::effects::file_pr::*;
 use std::sync::Arc;
@@ -17,12 +17,12 @@ use std::sync::Arc;
 /// Handles all effects in the `file_pr.*` namespace by delegating to
 /// the generated `dispatch_file_pr_effect` function.
 pub struct FilePRHandler {
-    jj: Arc<JjWorkspaceService>,
+    git_wt: Arc<GitWorktreeService>,
 }
 
 impl FilePRHandler {
-    pub fn new(jj: Arc<JjWorkspaceService>) -> Self {
-        Self { jj }
+    pub fn new(git_wt: Arc<GitWorktreeService>) -> Self {
+        Self { git_wt }
     }
 }
 
@@ -61,7 +61,7 @@ impl FilePrEffects for FilePRHandler {
             working_dir: Some(working_dir.to_string_lossy().to_string()),
         };
 
-        let output = file_pr::file_pr_async(&input, self.jj.clone())
+        let output = file_pr::file_pr_async(&input, self.git_wt.clone())
             .await
             .effect_err("file_pr")?;
 

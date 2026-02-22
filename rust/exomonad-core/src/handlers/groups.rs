@@ -10,13 +10,13 @@ use crate::services::event_queue::EventQueue;
 use crate::services::filesystem::FileSystemService;
 use crate::services::git::GitService;
 use crate::services::github::GitHubService;
-use crate::services::jj_workspace::JjWorkspaceService;
+use crate::services::git_worktree::GitWorktreeService;
 use crate::services::questions::QuestionRegistry;
 use crate::services::team_registry::TeamRegistry;
 
 use super::{
     AgentHandler, CoordinationHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler,
-    GitHandler, GitHubHandler, JjHandler, KvHandler, LogHandler, MergePRHandler, MessagingHandler,
+    GitHandler, GitHubHandler, KvHandler, LogHandler, MergePRHandler, MessagingHandler,
     PopupHandler, SessionHandler,
 };
 
@@ -40,18 +40,17 @@ pub fn core_handlers(
 
 /// Git and GitHub handlers for dev tooling.
 ///
-/// Includes: git, jj, github, file_pr, merge_pr, copilot.
+/// Includes: git, github, file_pr, merge_pr, copilot.
 /// `github` is optional — if None, GitHubHandler is not registered.
 pub fn git_handlers(
     git: Arc<GitService>,
     github: Option<GitHubService>,
-    jj: Arc<JjWorkspaceService>,
+    git_wt: Arc<GitWorktreeService>,
 ) -> Vec<Box<dyn EffectHandler>> {
     let mut handlers: Vec<Box<dyn EffectHandler>> = vec![
         Box::new(GitHandler::new(git)),
-        Box::new(JjHandler::new(jj.clone())),
-        Box::new(FilePRHandler::new(jj.clone())),
-        Box::new(MergePRHandler::new(jj)),
+        Box::new(FilePRHandler::new(git_wt.clone())),
+        Box::new(MergePRHandler::new(git_wt)),
         Box::new(CopilotHandler::new()),
     ];
     if let Some(gh) = github {
