@@ -168,3 +168,152 @@ instance (HsJSONPB.ToJSON RegisterClaudeSessionResponse) where
 
 instance (HsJSONPB.FromJSON RegisterClaudeSessionResponse) where
   parseJSON = HsJSONPB.parseJSONPB
+
+data RegisterTeamRequest = RegisterTeamRequest
+  { registerTeamRequestTeamName :: Hs.Text,
+    registerTeamRequestInboxName :: Hs.Text
+  }
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+
+instance (Hs.NFData RegisterTeamRequest)
+
+instance (HsProtobuf.Named RegisterTeamRequest) where
+  nameOf _ = Hs.fromString "RegisterTeamRequest"
+
+instance (HsProtobuf.HasDefault RegisterTeamRequest)
+
+instance (HsProtobuf.Message RegisterTeamRequest) where
+  encodeMessage
+    _
+    RegisterTeamRequest {registerTeamRequestTeamName, registerTeamRequestInboxName} =
+      ( HsProtobuf.encodeMessageField
+          (HsProtobuf.FieldNumber 1)
+          ( (Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+              registerTeamRequestTeamName
+          )
+      )
+        Hs.<> ( HsProtobuf.encodeMessageField
+                  (HsProtobuf.FieldNumber 2)
+                  ( (Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text))
+                      registerTeamRequestInboxName
+                  )
+              )
+  decodeMessage _ =
+    Hs.pure RegisterTeamRequest
+      <*> ( (HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+              ( HsProtobuf.at
+                  HsProtobuf.decodeMessageField
+                  (HsProtobuf.FieldNumber 1)
+              )
+          )
+      <*> ( (HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+              ( HsProtobuf.at
+                  HsProtobuf.decodeMessageField
+                  (HsProtobuf.FieldNumber 2)
+              )
+          )
+  dotProto _ =
+    [ HsProtobufAST.DotProtoField
+        (HsProtobuf.FieldNumber 1)
+        (HsProtobufAST.Prim HsProtobufAST.String)
+        (HsProtobufAST.Single "team_name")
+        []
+        "",
+      HsProtobufAST.DotProtoField
+        (HsProtobuf.FieldNumber 2)
+        (HsProtobufAST.Prim HsProtobufAST.String)
+        (HsProtobufAST.Single "inbox_name")
+        []
+        ""
+    ]
+
+instance (HsJSONPB.ToJSONPB RegisterTeamRequest) where
+  toJSONPB (RegisterTeamRequest f1 f2) =
+    HsJSONPB.object
+      [ "team_name"
+          .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
+        "inbox_name"
+          .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)
+      ]
+  toEncodingPB (RegisterTeamRequest f1 f2) =
+    HsJSONPB.pairs
+      [ "team_name"
+          .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f1),
+        "inbox_name"
+          .= ((Hs.coerce @Hs.Text @(HsProtobuf.String Hs.Text)) f2)
+      ]
+
+instance (HsJSONPB.FromJSONPB RegisterTeamRequest) where
+  parseJSONPB =
+    HsJSONPB.withObject
+      "RegisterTeamRequest"
+      ( \obj ->
+          Hs.pure RegisterTeamRequest
+            <*> ( (HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                    (obj .: "team_name")
+                )
+            <*> ( (HsProtobuf.coerceOver @(HsProtobuf.String Hs.Text) @Hs.Text)
+                    (obj .: "inbox_name")
+                )
+      )
+
+instance (HsJSONPB.ToJSON RegisterTeamRequest) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+
+instance (HsJSONPB.FromJSON RegisterTeamRequest) where
+  parseJSON = HsJSONPB.parseJSONPB
+
+newtype RegisterTeamResponse
+  = RegisterTeamResponse {registerTeamResponseSuccess :: Hs.Bool}
+  deriving (Hs.Show, Hs.Eq, Hs.Ord, Hs.Generic)
+
+instance (Hs.NFData RegisterTeamResponse)
+
+instance (HsProtobuf.Named RegisterTeamResponse) where
+  nameOf _ = Hs.fromString "RegisterTeamResponse"
+
+instance (HsProtobuf.HasDefault RegisterTeamResponse)
+
+instance (HsProtobuf.Message RegisterTeamResponse) where
+  encodeMessage
+    _
+    RegisterTeamResponse {registerTeamResponseSuccess} =
+      ( HsProtobuf.encodeMessageField
+          (HsProtobuf.FieldNumber 1)
+          registerTeamResponseSuccess
+      )
+  decodeMessage _ =
+    Hs.pure RegisterTeamResponse
+      <*> HsProtobuf.at
+        HsProtobuf.decodeMessageField
+        (HsProtobuf.FieldNumber 1)
+  dotProto _ =
+    [ HsProtobufAST.DotProtoField
+        (HsProtobuf.FieldNumber 1)
+        (HsProtobufAST.Prim HsProtobufAST.Bool)
+        (HsProtobufAST.Single "success")
+        []
+        ""
+    ]
+
+instance (HsJSONPB.ToJSONPB RegisterTeamResponse) where
+  toJSONPB (RegisterTeamResponse f1) =
+    HsJSONPB.object ["success" .= f1]
+  toEncodingPB (RegisterTeamResponse f1) =
+    HsJSONPB.pairs ["success" .= f1]
+
+instance (HsJSONPB.FromJSONPB RegisterTeamResponse) where
+  parseJSONPB =
+    HsJSONPB.withObject
+      "RegisterTeamResponse"
+      ( \obj ->
+          Hs.pure RegisterTeamResponse <*> obj .: "success"
+      )
+
+instance (HsJSONPB.ToJSON RegisterTeamResponse) where
+  toJSON = HsJSONPB.toAesonValue
+  toEncoding = HsJSONPB.toAesonEncoding
+
+instance (HsJSONPB.FromJSON RegisterTeamResponse) where
+  parseJSON = HsJSONPB.parseJSONPB

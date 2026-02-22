@@ -9,6 +9,16 @@ message RegisterClaudeSessionResponse {
   bool success = 1;
 }
 
+message RegisterTeamRequest {
+  string team_name = 1;
+  string inbox_name = 2;
+}
+
+message RegisterTeamResponse {
+  bool success = 1;
+}
+
 service SessionEffects {
   rpc RegisterClaudeId(RegisterClaudeSessionRequest) returns (RegisterClaudeSessionResponse);
+  rpc RegisterTeam(RegisterTeamRequest) returns (RegisterTeamResponse);
 }
