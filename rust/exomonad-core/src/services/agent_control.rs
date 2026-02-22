@@ -1167,6 +1167,11 @@ impl AgentControlService {
             if let Some(port) = self.mcp_server_port {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
             }
+            // Enable Claude Code Agent Teams for native inter-agent messaging
+            env_vars.insert(
+                "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".to_string(),
+                "1".to_string(),
+            );
 
             // Write .mcp.json in worktree root
             self.write_agent_mcp_config(effective_project_dir, &worktree_path, AgentType::Claude, "tl")

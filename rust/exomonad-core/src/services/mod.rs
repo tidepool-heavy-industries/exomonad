@@ -20,6 +20,8 @@ pub mod popup;
 pub mod questions;
 pub mod repo;
 pub mod secrets;
+pub mod team_registry;
+pub mod teams_mailbox;
 pub mod zellij_events;
 
 pub use self::agent_control::{

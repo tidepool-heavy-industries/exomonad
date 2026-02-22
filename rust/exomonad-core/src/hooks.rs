@@ -119,6 +119,17 @@ impl HookConfig {
 
         settings[EXOMONAD_MARKER] = json!(true);
 
+        // Enable Claude Code Agent Teams feature for native inter-agent messaging
+        if settings.get("env").is_none() {
+            settings["env"] = json!({});
+        }
+        if let Some(env_obj) = settings["env"].as_object_mut() {
+            env_obj.insert(
+                "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS".to_string(),
+                json!("1"),
+            );
+        }
+
         let content =
             serde_json::to_string_pretty(&settings).map_err(ExoMonadError::JsonSerialize)?;
         fs::write(&settings_path, &content).map_err(ExoMonadError::Io)?;
