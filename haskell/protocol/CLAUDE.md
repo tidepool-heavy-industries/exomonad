@@ -22,7 +22,6 @@ Client → Server:  UserAction (text input, choice selection, photo upload)
 ```
 
 **Format**: JSON over WebSocket
-**Lifecycle**: See `native-server/PROTOCOL.md`
 
 ## Key Types
 
@@ -49,5 +48,3 @@ data UserAction
 ```
 
 ## Related Documentation
-
-- [native-server/CLAUDE.md](../native-server/CLAUDE.md) - WebSocket server

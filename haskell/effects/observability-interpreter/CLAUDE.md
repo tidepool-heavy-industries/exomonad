@@ -154,6 +154,5 @@ export OTLP_TOKEN="glc_..."
 
 ## Related Documentation
 
-- [tools/sleeptime/CLAUDE.md](../../tools/sleeptime/CLAUDE.md) - CLI for querying these logs
 - [effects/CLAUDE.md](../CLAUDE.md) - Effect interpreter pattern
 - [haskell/dsl/core/CLAUDE.md](../../dsl/core/CLAUDE.md) - Graph execution that emits events

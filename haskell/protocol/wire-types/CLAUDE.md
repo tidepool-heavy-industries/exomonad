@@ -13,7 +13,7 @@ Read this if you're:
 ## Protocol Overview
 
 ```
-Server (native-server)          Client
+Server                          Client
         │                                │
         │◄───── UserAction ──────────────│  (user typed, clicked, uploaded)
         │                                │
@@ -109,14 +109,6 @@ instance ToJSON UIState where
     ]
 ```
 
-## Lifecycle
-
-See `native-server/PROTOCOL.md` for full WebSocket lifecycle including:
-- Connection handshake
-- Session initialization
-- Message ordering guarantees
-
 ## Related Documentation
 
-- [native-server/CLAUDE.md](../../native-server/CLAUDE.md) - Server that uses these types
 - [protocol/CLAUDE.md](../CLAUDE.md) - Protocol overview

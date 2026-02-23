@@ -79,6 +79,6 @@ main = runM $ runZellijIO $ do
 
 ## Related Documentation
 
-- **[rust/exomonad-contrib/](../../../rust/exomonad-contrib/)** - AgentControlService (spawn_agents implementation)
+- **[rust/exomonad-core/](../../../rust/exomonad-core/)** - AgentControlService (spawn_agents implementation)
 - **[rust/exomonad-core/src/layout/](../../../rust/exomonad-core/src/layout/)** - KDL layout generator
 - **[Root CLAUDE.md](../../../CLAUDE.md)** - Claude Code++ integration overview

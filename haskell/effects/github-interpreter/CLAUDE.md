@@ -1,6 +1,6 @@
 # GitHub Interpreter - Socket Client (Rust/Octocrab)
 
-Interprets the `GitHub` effect by communicating with the Rust `exomonad-contrib` backend via Unix Domain Socket. The Rust side uses Octocrab for REST and GraphQL queries against the GitHub API.
+Interprets the `GitHub` effect by communicating with the Rust `exomonad-core` backend via Unix Domain Socket. The Rust side uses Octocrab for REST and GraphQL queries against the GitHub API.
 
 ## When to Read This
 
@@ -30,7 +30,7 @@ Read this if you're:
                                        │ Unix Socket (NDJSON)
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ Rust Service (exomonad-contrib)                                      │
+│ Rust Service (exomonad-core)                                         │
 │   Octocrab REST + GraphQL → GitHub API                               │
 │   (authenticated via GITHUB_TOKEN)                                   │
 └─────────────────────────────────────────────────────────────────────┘
@@ -121,5 +121,5 @@ Socket/decode errors are returned as `GitHubError` values. The interpreter handl
 ## Related Documentation
 
 - [effects/CLAUDE.md](../CLAUDE.md) - Effect interpreter pattern
-- `rust/exomonad-shared/src/protocol.rs` - Wire format types (Rust side)
+- `rust/exomonad-core/src/protocol/` - Wire format types (Rust side)
 - `haskell/effects/socket-client/` - Socket client and protocol types (Haskell side)
