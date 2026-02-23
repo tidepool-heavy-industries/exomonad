@@ -33,7 +33,6 @@ import Effects.Log qualified as Log
 import ExoMonad.Effect.Class (runEffect_)
 import ExoMonad.Effects.Events qualified as Events
 import ExoMonad.Effects.Log (LogEmitEvent, LogError, LogInfo)
-import ExoMonad.Effects.Messaging (sendNote)
 import ExoMonad.Guest.Continuations (retrieveContinuation)
 import ExoMonad.Guest.Proto (fromText)
 import ExoMonad.Guest.Tool.Class (MCPCallOutput (..), WasmResult (..), toMCPFormat)

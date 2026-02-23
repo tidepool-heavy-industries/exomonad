@@ -64,7 +64,6 @@ library wasm-guest-internal
         ExoMonad.Guest.Tools.FilePR
         ExoMonad.Guest.Tools.MergePR
         ExoMonad.Guest.Tools.Popup
-        ExoMonad.Guest.Tools.Messaging
         ExoMonad.Guest.Tools.Spawn
         ExoMonad.Guest.Tools.Events
         ExoMonad.Guest.Events.Templates
@@ -75,8 +74,6 @@ library wasm-guest-internal
         -- Tool records
         ExoMonad.Guest.Records.FilePR
         ExoMonad.Guest.Records.Popup
-        ExoMonad.Guest.Records.Messaging
-        ExoMonad.Guest.Records.TLMessaging
         ExoMonad.Guest.Records.Events
         ExoMonad.Guest.Records.Spawn
         -- Effects (for internal composition)
@@ -100,7 +97,6 @@ library wasm-guest-internal
         ExoMonad.Effects.Copilot
         ExoMonad.Effects.Events
         ExoMonad.Effects.Session
-        ExoMonad.Effects.Messaging
         ExoMonad.Effects.KV
         ExoMonad.Effects.Template
         -- Types
