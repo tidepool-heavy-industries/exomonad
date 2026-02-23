@@ -141,7 +141,7 @@ instance MCPTool GetAgentMessages where
   toolSchema =
     genericToolSchemaWith @GetAgentMessagesArgs
       [ ("agent_id", "Filter to a specific agent directory name. If omitted, reads from all agents."),
-        ("subrepo", "Subrepo path (e.g. 'egregore/') to scope agent scanning."),
+        ("subrepo", "Subrepo path (e.g. 'urchin/') to scope agent scanning."),
         ("timeout_secs", "Long-poll timeout in seconds. 0 or omitted for immediate return.")
       ]
   toolHandler args = do
@@ -204,7 +204,7 @@ instance MCPTool AnswerQuestion where
       [ ("agent_id", "The agent directory name (e.g. 'gh-42-fix-bug-claude')."),
         ("question_id", "The question ID to answer (e.g. 'q-abc123')."),
         ("answer", "The answer text."),
-        ("subrepo", "Subrepo path (e.g. 'egregore/') if agent is in a subrepo.")
+        ("subrepo", "Subrepo path (e.g. 'urchin/') if agent is in a subrepo.")
       ]
   toolHandler args = do
 

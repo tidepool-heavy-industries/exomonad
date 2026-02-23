@@ -51,7 +51,7 @@ message Timeout {
 // Custom domain-specific error.
 // Use for errors that don't fit the common patterns above.
 message Custom {
-  // Application-specific error code (e.g., "egregore.signal_failed").
+  // Application-specific error code (e.g., "git.clone_failed").
   string code = 1;
   // Human-readable error message.
   string message = 2;

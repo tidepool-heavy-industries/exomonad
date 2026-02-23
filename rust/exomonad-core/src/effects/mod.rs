@@ -18,7 +18,7 @@
 //! EffectRegistry
 //!     ├── "git.*"       → GitHandler (builtin)
 //!     ├── "github.*"    → GitHubHandler (builtin)
-//!     └── "egregore.*"  → EgregoreHandler (user-provided)
+//!     └── "custom.*"   → CustomHandler (user-provided)
 //! ```
 //!
 //! # Usage
@@ -29,11 +29,11 @@
 //! use crate::effects::{EffectHandler, EffectError, EffectResult};
 //! use async_trait::async_trait;
 //!
-//! struct EgregoreHandler { /* ... */ }
+//! struct CustomHandler { /* ... */ }
 //!
 //! #[async_trait]
-//! impl EffectHandler for EgregoreHandler {
-//!     fn namespace(&self) -> &str { "egregore" }
+//! impl EffectHandler for CustomHandler {
+//!     fn namespace(&self) -> &str { "custom" }
 //!
 //!     async fn handle(&self, effect_type: &str, payload: &[u8], _ctx: &EffectContext) -> EffectResult<Vec<u8>> {
 //!         // Decode proto request, handle, encode proto response
@@ -83,7 +83,7 @@ pub use generated::*;
 /// using `prost::Message::decode` and encodes the response with `encode_to_vec`.
 #[async_trait]
 pub trait EffectHandler: Send + Sync {
-    /// Namespace prefix this handler owns (e.g., "egregore", "git").
+    /// Namespace prefix this handler owns (e.g., "git", "github").
     fn namespace(&self) -> &str;
 
     /// Handle an effect request.

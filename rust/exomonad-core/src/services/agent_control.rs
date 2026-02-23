@@ -222,7 +222,7 @@ pub struct SpawnOptions {
     /// Agent type (Claude or Gemini)
     #[serde(default)]
     pub agent_type: AgentType,
-    /// Sub-repository path relative to project_dir (e.g., "egregore/").
+    /// Sub-repository path relative to project_dir (e.g., "urchin/").
     /// When set, the agent's project context targets this directory instead of project_dir.
     pub subrepo: Option<String>,
     /// Base branch to branch off of (default: "main").

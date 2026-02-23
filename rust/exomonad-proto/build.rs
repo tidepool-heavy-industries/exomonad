@@ -126,9 +126,9 @@ fn compile_effect_protos() -> Result<()> {
     let descriptor_path = format!("{}/effects_descriptor.bin", out_dir);
     config.file_descriptor_set_path(&descriptor_path);
 
-    // Discover all proto files in the effects and experimental directories
+    // Discover all proto files in the effects directory
     let mut effect_proto_files = Vec::new();
-    let search_dirs = vec!["proto/effects", "proto/experimental"];
+    let search_dirs = vec!["proto/effects"];
 
     for dir_path in search_dirs {
         let proto_dir = Path::new(dir_path);
@@ -136,20 +136,19 @@ fn compile_effect_protos() -> Result<()> {
             continue;
         }
 
-        let files = std::fs::read_dir(proto_dir)?
-            .filter_map(|entry| {
-                let entry = entry.ok()?;
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("proto") {
-                    Some(format!(
-                        "{}/{}",
-                        dir_path,
-                        entry.file_name().to_string_lossy()
-                    ))
-                } else {
-                    None
-                }
-            });
+        let files = std::fs::read_dir(proto_dir)?.filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("proto") {
+                Some(format!(
+                    "{}/{}",
+                    dir_path,
+                    entry.file_name().to_string_lossy()
+                ))
+            } else {
+                None
+            }
+        });
         effect_proto_files.extend(files);
     }
 
@@ -160,10 +159,7 @@ fn compile_effect_protos() -> Result<()> {
         return Ok(());
     }
 
-    config.compile_protos(
-        &effect_proto_files,
-        &["proto/", "proto/effects/", "proto/experimental/"],
-    )?;
+    config.compile_protos(&effect_proto_files, &["proto/", "proto/effects/"])?;
 
     // Communicate descriptor path to dependents (exomonad-core)
     println!("cargo:EFFECTS_DESCRIPTOR={}", descriptor_path);
@@ -173,7 +169,6 @@ fn compile_effect_protos() -> Result<()> {
 
     // Rerun if proto files change
     println!("cargo:rerun-if-changed=proto/effects/");
-    println!("cargo:rerun-if-changed=proto/experimental/");
 
     Ok(())
 }

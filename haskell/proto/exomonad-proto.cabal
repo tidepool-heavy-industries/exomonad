@@ -47,7 +47,6 @@ library
     Effects.Popup
     Effects.FilePr
     Effects.Copilot
-    Effects.Egregore
     Effects.Kv
     Effects.Messaging
     Effects.Events

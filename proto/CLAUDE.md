@@ -16,7 +16,6 @@ proto/
     ├── agent.proto         # agent.* effects
     ├── copilot.proto       # copilot.* effects
     ├── effect_error.proto  # Unified effect error type
-    ├── egregore.proto      # egregore.* effects (experimental)
     ├── envelope.proto      # Wire envelope types
     ├── events.proto        # events.* effects
     ├── file_pr.proto       # file_pr.* effects

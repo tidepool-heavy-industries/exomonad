@@ -11,13 +11,13 @@ use urlencoding::encode;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use std::time::{Duration, Instant};
-use std::thread;
 use exomonad_core::mcp::server::McpServer;
 use exomonad_core::protocol::{Runtime as HookRuntime, ServiceRequest};
 use exomonad_core::services::external::otel::OtelService;
 use exomonad_core::services::external::ExternalService;
 use exomonad_core::services::{git, zellij_events};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use axum::response::IntoResponse;
 use exomonad_core::{

@@ -20,7 +20,6 @@ haskell/proto/
         ├── Agent.hs         # Generated from effects/agent.proto
         ├── Copilot.hs       # Generated from effects/copilot.proto
         ├── EffectError.hs   # Generated from effects/effect_error.proto
-        ├── Egregore.hs      # Generated from effects/egregore.proto
         ├── Envelope.hs      # Generated from effects/envelope.proto
         ├── Events.hs        # Generated from effects/events.proto
         ├── FilePr.hs        # Generated from effects/file_pr.proto

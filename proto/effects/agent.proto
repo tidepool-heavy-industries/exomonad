@@ -77,7 +77,7 @@ message SpawnRequest {
   exomonad.common.Role role = 5;
   // Base directory for worktrees (default: .exo/worktrees).
   string worktree_dir = 6;
-  // Sub-repository path relative to project_dir (e.g., "egregore/").
+  // Sub-repository path relative to project_dir (e.g., "urchin/").
   // When set, git worktree operations target this directory instead of project_dir.
   string subrepo = 7;
   // Workspace topology.
@@ -109,7 +109,7 @@ message SpawnBatchRequest {
   exomonad.common.Role role = 5;
   // Base directory for worktrees.
   string worktree_dir = 6;
-  // Sub-repository path relative to project_dir (e.g., "egregore/").
+  // Sub-repository path relative to project_dir (e.g., "urchin/").
   // When set, git worktree operations target this directory instead of project_dir.
   string subrepo = 7;
   // Workspace topology.
@@ -134,7 +134,7 @@ message SpawnGeminiTeammateRequest {
   string prompt = 2;
   // Agent type (default: Gemini).
   AgentType agent_type = 3;
-  // Sub-repository path relative to project_dir (e.g., "egregore/").
+  // Sub-repository path relative to project_dir (e.g., "urchin/").
   string subrepo = 4;
   reserved 5;
   reserved "team_name";

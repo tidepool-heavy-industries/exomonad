@@ -79,7 +79,7 @@ pub enum EffectError {
     /// External consumers can define their own error codes and structures.
     #[serde(rename = "custom")]
     Custom {
-        /// Application-specific error code (e.g., "egregore.signal_failed").
+        /// Application-specific error code (e.g., "git.clone_failed").
         code: String,
         /// Human-readable error message.
         message: String,
@@ -225,13 +225,13 @@ mod tests {
     #[test]
     fn test_custom_error_with_data() {
         let err = EffectError::custom_with_data(
-            "egregore.signal_failed",
-            "Signal propagation failed",
+            "git.clone_failed",
+            "Clone failed",
             serde_json::json!({"retry_count": 3}),
         );
         let json = serde_json::to_string(&err).unwrap();
         assert!(json.contains("custom"));
-        assert!(json.contains("egregore.signal_failed"));
+        assert!(json.contains("git.clone_failed"));
         assert!(json.contains("retry_count"));
     }
 

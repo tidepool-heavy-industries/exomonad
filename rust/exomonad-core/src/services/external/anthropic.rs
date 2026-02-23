@@ -23,11 +23,10 @@ impl AnthropicService {
     ///
     /// Uses the default endpoint: `https://api.anthropic.com`.
     pub fn new(api_key: String) -> Result<Self, ServiceError> {
-        let base_url = Url::parse("https://api.anthropic.com")
-            .map_err(|e| ServiceError::Api {
-                code: 500,
-                message: format!("Invalid hardcoded URL: {}", e),
-            })?;
+        let base_url = Url::parse("https://api.anthropic.com").map_err(|e| ServiceError::Api {
+            code: 500,
+            message: format!("Invalid hardcoded URL: {}", e),
+        })?;
         Ok(Self {
             client: Client::new(),
             api_key,
@@ -52,7 +51,8 @@ impl AnthropicService {
     /// Optional: `ANTHROPIC_BASE_URL`.
     pub fn from_env() -> Result<Self, anyhow::Error> {
         let api_key = std::env::var("ANTHROPIC_API_KEY")?;
-        let base_url_str = std::env::var("ANTHROPIC_BASE_URL").unwrap_or_else(|_| "https://api.anthropic.com".to_string());
+        let base_url_str = std::env::var("ANTHROPIC_BASE_URL")
+            .unwrap_or_else(|_| "https://api.anthropic.com".to_string());
         let base_url = Url::parse(&base_url_str)?;
 
         Ok(Self::with_base_url(api_key, base_url))

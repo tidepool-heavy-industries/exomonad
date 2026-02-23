@@ -78,7 +78,8 @@ impl GitHubService {
     /// Optional: `GITHUB_API_URL`.
     pub fn from_env() -> Result<Self, anyhow::Error> {
         let token = std::env::var("GITHUB_TOKEN")?;
-        let base_url_str = std::env::var("GITHUB_API_URL").unwrap_or_else(|_| "https://api.github.com".to_string());
+        let base_url_str = std::env::var("GITHUB_API_URL")
+            .unwrap_or_else(|_| "https://api.github.com".to_string());
         let base_url = Url::parse(&base_url_str)?;
 
         Ok(Self::with_base_url(token, base_url)?)
@@ -837,7 +838,8 @@ mod tests {
             .await;
 
         let service =
-            GitHubService::with_base_url("token".into(), mock_server.uri().parse().unwrap()).unwrap();
+            GitHubService::with_base_url("token".into(), mock_server.uri().parse().unwrap())
+                .unwrap();
 
         let req = ServiceRequest::GitHubGetIssue {
             owner: "owner".into(),
@@ -871,7 +873,8 @@ mod tests {
             .await;
 
         let service =
-            GitHubService::with_base_url("token".into(), mock_server.uri().parse().unwrap()).unwrap();
+            GitHubService::with_base_url("token".into(), mock_server.uri().parse().unwrap())
+                .unwrap();
 
         let req = ServiceRequest::GitHubGetIssue {
             owner: "owner".into(),
@@ -902,7 +905,8 @@ mod tests {
             .await;
 
         let service =
-            GitHubService::with_base_url("token".into(), mock_server.uri().parse().unwrap()).unwrap();
+            GitHubService::with_base_url("token".into(), mock_server.uri().parse().unwrap())
+                .unwrap();
 
         let req = ServiceRequest::GitHubGetIssue {
             owner: "owner".into(),
@@ -926,7 +930,8 @@ mod tests {
             .await;
 
         let service =
-            GitHubService::with_base_url("token".into(), mock_server.uri().parse().unwrap()).unwrap();
+            GitHubService::with_base_url("token".into(), mock_server.uri().parse().unwrap())
+                .unwrap();
 
         let req = ServiceRequest::GitHubListIssues {
             owner: "owner".into(),
