@@ -86,6 +86,42 @@ impl SessionEffects for SessionHandler {
             "Registering Claude Teams info via effect"
         );
 
+        // Create Claude Teams directory structure for inbox-based delivery
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        let team_dir = std::path::PathBuf::from(&home)
+            .join(".claude/teams")
+            .join(&req.team_name);
+        let config_path = team_dir.join("config.json");
+        let inboxes_dir = team_dir.join("inboxes");
+
+        if !config_path.exists() {
+            // Create directories
+            if let Err(e) = std::fs::create_dir_all(&inboxes_dir) {
+                tracing::warn!(error = %e, dir = %inboxes_dir.display(), "Failed to create inboxes dir");
+            }
+
+            // Write config.json with initial member
+            let config = serde_json::json!({
+                "name": req.team_name,
+                "members": [{
+                    "name": req.inbox_name,
+                    "agentType": "claude"
+                }]
+            });
+            match serde_json::to_string_pretty(&config) {
+                Ok(json) => {
+                    if let Err(e) = std::fs::write(&config_path, json) {
+                        tracing::warn!(error = %e, path = %config_path.display(), "Failed to write config.json");
+                    } else {
+                        info!(path = %config_path.display(), "Created Teams config");
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "Failed to serialize Teams config"),
+            }
+        } else {
+            info!(path = %config_path.display(), "Teams config already exists, skipping");
+        }
+
         if let Some(ref team_registry) = self.team_registry {
             team_registry
                 .register(

@@ -135,6 +135,10 @@ handle_pre_tool_use = wrapHandler $ do
 dispatchHook :: HookConfig -> HookInput -> IO CInt
 dispatchHook cfg hookInput =
   case hiHookEventName hookInput of
+    SessionStart -> do
+      result <- runM $ onSessionStart cfg hookInput
+      output (BSL.toStrict $ Aeson.encode result)
+      pure 0
     SessionEnd -> runStopHook (onStop cfg)
     Stop -> runStopHook (onStop cfg)
     SubagentStop -> runStopHook (onSubagentStop cfg)

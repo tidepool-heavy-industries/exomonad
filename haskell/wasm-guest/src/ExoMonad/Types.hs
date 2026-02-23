@@ -63,4 +63,9 @@ defaultSessionStartHook :: HookInput -> Eff HookEffects HookOutput
 defaultSessionStartHook hookInput = do
   let claudeUuid = hiSessionId hookInput
   sendM $ void $ Session.registerClaudeSession claudeUuid
+  -- Register with Claude Teams for inbox-based message delivery
+  let sessionId = maybe "main" id (hiExomonadSessionId hookInput)
+      agentId = maybe "root" id (hiAgentId hookInput)
+      teamName = "exo-" <> sessionId
+  sendM $ void $ Session.registerTeam teamName agentId
   pure (allowResponse Nothing)

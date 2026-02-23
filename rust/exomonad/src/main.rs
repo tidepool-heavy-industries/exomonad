@@ -353,24 +353,26 @@ async fn handle_hook_inner(
     // Create role-aware input for unified WASM
     let mut hook_input_value =
         serde_json::to_value(&hook_input).context("Failed to serialize hook input")?;
-    if let serde_json::Value::Object(ref mut map) = hook_input_value {
-        map.insert("role".to_string(), serde_json::json!(role));
-        if let Some(ref agent_id) = params.agent_id {
-            map.insert("agent_id".to_string(), serde_json::json!(agent_id));
-        }
-        if let Some(ref session_id) = params.session_id {
-            map.insert(
-                "exomonad_session_id".to_string(),
-                serde_json::json!(session_id),
-            );
-        }
-    }
 
-    // Resolve agent identity and get per-agent plugin with baked-in EffectContext.
+    // Resolve agent identity defaults (used for both injection and PluginManager)
     let agent_name_for_hook =
         exomonad_core::AgentName::from(params.agent_id.as_deref().unwrap_or("root"));
     let birth_branch_for_hook =
         exomonad_core::BirthBranch::from(params.session_id.as_deref().unwrap_or("main"));
+
+    // Always inject identity into WASM input (hooks need it even when env vars aren't set)
+    if let serde_json::Value::Object(ref mut map) = hook_input_value {
+        map.insert("role".to_string(), serde_json::json!(role));
+        map.insert(
+            "agent_id".to_string(),
+            serde_json::json!(agent_name_for_hook.to_string()),
+        );
+        map.insert(
+            "exomonad_session_id".to_string(),
+            serde_json::json!(birth_branch_for_hook.to_string()),
+        );
+    }
+
     debug!(
         agent_name = %agent_name_for_hook,
         birth_branch = %birth_branch_for_hook,
