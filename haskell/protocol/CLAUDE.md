@@ -47,4 +47,3 @@ data UserAction
   | UAPhotoUpload ByteString    -- User uploaded photo
 ```
 
-## Related Documentation

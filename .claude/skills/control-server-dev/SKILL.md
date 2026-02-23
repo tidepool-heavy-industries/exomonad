@@ -258,25 +258,9 @@ liftIO $ putStrLn $ "  args=" <> show args
 | `EXOMONAD_PROJECT_DIR` | Project root (where .exo/ lives) |
 | `GEMMA_ENDPOINT` | Ollama endpoint (required for Tier 2 tools) |
 
-## File Locations
-
-```
-haskell/control-server/
-├── app/Main.hs                  ← Entry point
-├── src/ExoMonad/Control/
-│   ├── Server.hs                ← TCP listener + LSP session
-│   ├── Protocol.hs              ← Message types (MUST MATCH RUST)
-│   ├── Handler.hs               ← Message routing
-│   ├── Handler/Hook.hs          ← Hook handlers
-│   ├── Handler/MCP.hs           ← MCP tool dispatch
-│   ├── Export.hs                ← Tool discovery + registration
-│   └── LSPTools.hs              ← Tier 1 tool graphs
-└── exomonad-control-server.cabal
-```
-
 ## See Also
 
-- **Full docs**: `haskell/control-server/CLAUDE.md`
 - **Protocol types (Rust)**: `rust/exomonad-core/src/protocol/`
 - **exomonad**: `rust/exomonad/CLAUDE.md`
 - **Graph DSL**: `haskell/dsl/core/CLAUDE.md`
+

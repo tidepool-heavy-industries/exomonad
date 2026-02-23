@@ -102,5 +102,5 @@ data AnthropicTool = AnthropicTool
 ## Related Documentation
 
 - [dsl/core/CLAUDE.md](../../dsl/core/CLAUDE.md) - LLM effect type, handler patterns
-
 - [effects/CLAUDE.md](../CLAUDE.md) - Effect interpreter pattern
+
