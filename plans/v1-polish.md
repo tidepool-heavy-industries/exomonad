@@ -146,6 +146,10 @@ Resume path:
 - ONLY modify files in your assigned directory
 - `cargo test --workspace` must pass
 
+**Additional swarm targets:**
+- Error message quality — audit each handler's error paths, make messages actionable (not "Wasm error: call failed")
+- Agent startup failure detection — if a child agent dies before its first MCP call (bad --resume, crash on init), parent never finds out. Fix: session-end/stop hook notifies parent on unexpected exit, or heartbeat timeout injects `[AGENT TIMEOUT: X]` into parent pane.
+
 **Merge policy:** TL reviews diff. Clean improvement → merge. Noise/hallucinated cleanup → close.
 
 ---
