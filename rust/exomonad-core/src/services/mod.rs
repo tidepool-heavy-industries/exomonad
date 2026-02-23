@@ -1,7 +1,7 @@
 pub mod agent_control;
 pub mod claude_session_registry;
 pub mod copilot_review;
-pub mod docker;
+pub mod command;
 pub mod event_log;
 pub mod event_queue;
 pub mod external;

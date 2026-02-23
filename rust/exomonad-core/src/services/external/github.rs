@@ -42,25 +42,34 @@ pub struct GitHubService {
 
 impl GitHubService {
     /// Create a new GitHub service with the given personal access token.
-    pub fn new(token: String) -> Self {
+    pub fn new(token: String) -> Result<Self, ServiceError> {
         let client = OctocrabBuilder::new()
             .personal_token(token)
             .build()
-            .expect("Failed to build Octocrab client");
-        Self { client }
+            .map_err(|e| ServiceError::Api {
+                code: 500,
+                message: format!("Failed to build Octocrab client: {}", e),
+            })?;
+        Ok(Self { client })
     }
 
     /// Create a new GitHub service with a custom base URL.
     ///
     /// Useful for GitHub Enterprise or testing (mock servers).
-    pub fn with_base_url(token: String, base_url: Url) -> Self {
+    pub fn with_base_url(token: String, base_url: Url) -> Result<Self, ServiceError> {
         let client = OctocrabBuilder::new()
             .personal_token(token)
             .base_uri(base_url.to_string())
-            .expect("Invalid base URL")
+            .map_err(|e| ServiceError::Api {
+                code: 400,
+                message: format!("Invalid base URL: {}", e),
+            })?
             .build()
-            .expect("Failed to build Octocrab client");
-        Self { client }
+            .map_err(|e| ServiceError::Api {
+                code: 500,
+                message: format!("Failed to build Octocrab client: {}", e),
+            })?;
+        Ok(Self { client })
     }
 
     /// Create a new GitHub service from environment variables.
@@ -69,12 +78,10 @@ impl GitHubService {
     /// Optional: `GITHUB_API_URL`.
     pub fn from_env() -> Result<Self, anyhow::Error> {
         let token = std::env::var("GITHUB_TOKEN")?;
-        let base_url = std::env::var("GITHUB_API_URL")
-            .ok()
-            .and_then(|s| Url::parse(&s).ok())
-            .unwrap_or_else(|| Url::parse("https://api.github.com").unwrap());
+        let base_url_str = std::env::var("GITHUB_API_URL").unwrap_or_else(|_| "https://api.github.com".to_string());
+        let base_url = Url::parse(&base_url_str)?;
 
-        Ok(Self::with_base_url(token, base_url))
+        Ok(Self::with_base_url(token, base_url)?)
     }
 }
 
@@ -830,7 +837,7 @@ mod tests {
             .await;
 
         let service =
-            GitHubService::with_base_url("token".into(), mock_server.uri().parse().unwrap());
+            GitHubService::with_base_url("token".into(), mock_server.uri().parse().unwrap()).unwrap();
 
         let req = ServiceRequest::GitHubGetIssue {
             owner: "owner".into(),
@@ -864,7 +871,7 @@ mod tests {
             .await;
 
         let service =
-            GitHubService::with_base_url("token".into(), mock_server.uri().parse().unwrap());
+            GitHubService::with_base_url("token".into(), mock_server.uri().parse().unwrap()).unwrap();
 
         let req = ServiceRequest::GitHubGetIssue {
             owner: "owner".into(),
@@ -895,7 +902,7 @@ mod tests {
             .await;
 
         let service =
-            GitHubService::with_base_url("token".into(), mock_server.uri().parse().unwrap());
+            GitHubService::with_base_url("token".into(), mock_server.uri().parse().unwrap()).unwrap();
 
         let req = ServiceRequest::GitHubGetIssue {
             owner: "owner".into(),
@@ -919,7 +926,7 @@ mod tests {
             .await;
 
         let service =
-            GitHubService::with_base_url("token".into(), mock_server.uri().parse().unwrap());
+            GitHubService::with_base_url("token".into(), mock_server.uri().parse().unwrap()).unwrap();
 
         let req = ServiceRequest::GitHubListIssues {
             owner: "owner".into(),
@@ -939,7 +946,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_github_list_prs_invalid_state() {
-        let service = GitHubService::new("token".into());
+        let service = GitHubService::new("token".into()).unwrap();
 
         let req = ServiceRequest::GitHubListPullRequests {
             owner: "owner".into(),
@@ -962,7 +969,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_github_update_issue_unknown_state() {
-        let service = GitHubService::new("token".into());
+        let service = GitHubService::new("token".into()).unwrap();
 
         let req = ServiceRequest::GitHubUpdateIssue {
             owner: "owner".into(),

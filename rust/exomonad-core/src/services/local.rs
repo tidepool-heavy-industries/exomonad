@@ -1,7 +1,7 @@
 //! Local executor for running commands directly as subprocesses.
 
 use crate::common::CommandError;
-use crate::services::docker::CommandExecutor;
+use crate::services::command::CommandExecutor;
 use anyhow::Result;
 use std::future::Future;
 use std::pin::Pin;

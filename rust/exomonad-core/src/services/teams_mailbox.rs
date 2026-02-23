@@ -150,8 +150,24 @@ mod tests {
             .join("inboxes");
         std::fs::create_dir_all(&inbox_dir)?;
 
-        write_to_inbox_at_base(base, team_name, recipient, "agent1", "Hello from agent1", "Message 1", "blue")?;
-        write_to_inbox_at_base(base, team_name, recipient, "agent2", "Hello from agent2", "Message 2", "green")?;
+        write_to_inbox_at_base(
+            base,
+            team_name,
+            recipient,
+            "agent1",
+            "Hello from agent1",
+            "Message 1",
+            "blue",
+        )?;
+        write_to_inbox_at_base(
+            base,
+            team_name,
+            recipient,
+            "agent2",
+            "Hello from agent2",
+            "Message 2",
+            "green",
+        )?;
 
         let inbox_file = base
             .join(".claude")

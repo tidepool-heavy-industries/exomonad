@@ -11,6 +11,8 @@ use urlencoding::encode;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use std::time::{Duration, Instant};
+use std::thread;
 use exomonad_core::mcp::server::McpServer;
 use exomonad_core::protocol::{Runtime as HookRuntime, ServiceRequest};
 use exomonad_core::services::external::otel::OtelService;
@@ -616,15 +618,51 @@ fn run_init(session_override: Option<String>, recreate: bool, port: u16) -> Resu
 
     // Create fresh session from layout
     eprintln!("Creating session: {}", session);
-    let layout_path = generate_tl_layout(port, config.shell_command.as_deref())?;
 
-    let err = std::process::Command::new("zellij")
-        .arg("--session")
+    // 1. Start server tab
+    let server_layout_path = generate_server_layout(port, config.shell_command.as_deref())?;
+
+    eprintln!("Starting server...");
+    let status = std::process::Command::new("zellij")
+        .args(["attach", "--create-background", "--new-session-with-layout"])
+        .arg(&server_layout_path)
         .arg(&session)
-        .arg("--new-session-with-layout")
-        .arg(&layout_path)
+        .status()
+        .context("Failed to start server in Zellij")?;
+
+    if !status.success() {
+        return Err(anyhow::anyhow!(
+            "Failed to start Zellij session: {}",
+            status
+        ));
+    }
+
+    // 2. Poll health
+    wait_for_server(port)?;
+
+    // 3. Start TL tab
+    eprintln!("Server healthy, starting TL tab...");
+    let tl_layout_path = generate_tl_tab_layout(port, config.shell_command.as_deref())?;
+    let status = std::process::Command::new("zellij")
+        .env("ZELLIJ_SESSION_NAME", &session)
+        .args(["action", "new-tab", "--layout"])
+        .arg(&tl_layout_path)
+        .status()
+        .context("Failed to add TL tab to Zellij")?;
+
+    if !status.success() {
+        return Err(anyhow::anyhow!(
+            "Failed to add TL tab to Zellij session: {}",
+            status
+        ));
+    }
+
+    // 4. Attach
+    eprintln!("Attaching to session: {}", session);
+    let err = std::process::Command::new("zellij")
+        .args(["attach", &session])
         .exec();
-    Err(err).context("Failed to exec zellij with layout")
+    Err(err).context("Failed to exec zellij attach")
 }
 
 /// Ensure .gitignore has entries for .exo/ (track config, ignore the rest).
@@ -658,51 +696,85 @@ fn ensure_gitignore(project_dir: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-/// Generate a two-tab TL layout: Server tab + TL tab.
-///
-/// Tab 1 "Server": runs `exomonad serve` on TCP port, stays open on exit.
-/// Tab 2 "TL": runs shell_command (or $SHELL) for the dev environment, focused by default.
-fn generate_tl_layout(port: u16, shell_command: Option<&str>) -> Result<std::path::PathBuf> {
+/// Wait for the server health endpoint to be healthy.
+fn wait_for_server(port: u16) -> Result<()> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_millis(500))
+        .build()?;
+    let url = format!("http://localhost:{}/health", port);
+    let start = Instant::now();
+    let timeout = Duration::from_secs(15);
+
+    eprintln!("Waiting for server health...");
+    while start.elapsed() < timeout {
+        match client.get(&url).send() {
+            Ok(resp) if resp.status().is_success() => {
+                return Ok(());
+            }
+            _ => {
+                thread::sleep(Duration::from_millis(500));
+            }
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "Server failed to start within 15s. Check the Server tab for errors."
+    ))
+}
+
+/// Generate a Server-only Zellij layout.
+fn generate_server_layout(port: u16, shell_command: Option<&str>) -> Result<std::path::PathBuf> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let cwd = std::env::current_dir()?;
 
-    // Server tab: wrap serve command in shell_command if configured
     let serve_command = match shell_command {
         Some(sc) => format!("{} -c 'exomonad serve --port {}'", sc, port),
         None => format!("exomonad serve --port {}", port),
     };
 
-    // TL tab: shell wrapping claude --resume (user picks session interactively)
+    let params = exomonad_core::layout::AgentTabParams {
+        tab_name: "Server",
+        pane_name: "exomonad-serve",
+        command: &serve_command,
+        cwd: &cwd,
+        shell: &shell,
+        focus: false,
+        close_on_exit: false,
+    };
+
+    let layout = exomonad_core::layout::generate_agent_layout(&params)
+        .context("Failed to generate Server layout")?;
+
+    let layout_path = std::env::temp_dir().join("exomonad-server-layout.kdl");
+    std::fs::write(&layout_path, layout)?;
+
+    Ok(layout_path)
+}
+
+/// Generate a TL-only Zellij layout for a new tab.
+fn generate_tl_tab_layout(_port: u16, shell_command: Option<&str>) -> Result<std::path::PathBuf> {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let cwd = std::env::current_dir()?;
+
     let tl_command = match shell_command {
         Some(sc) => format!("{} -c 'claude --dangerously-skip-permissions --resume'", sc),
         None => "claude --dangerously-skip-permissions --resume".to_string(),
     };
 
-    let tabs = vec![
-        exomonad_core::layout::AgentTabParams {
-            tab_name: "Server",
-            pane_name: "exomonad-serve",
-            command: &serve_command,
-            cwd: &cwd,
-            shell: &shell,
-            focus: false,
-            close_on_exit: false,
-        },
-        exomonad_core::layout::AgentTabParams {
-            tab_name: "TL",
-            pane_name: "Main",
-            command: &tl_command,
-            cwd: &cwd,
-            shell: &shell,
-            focus: true,
-            close_on_exit: false,
-        },
-    ];
+    let params = exomonad_core::layout::AgentTabParams {
+        tab_name: "TL",
+        pane_name: "Main",
+        command: &tl_command,
+        cwd: &cwd,
+        shell: &shell,
+        focus: true,
+        close_on_exit: false,
+    };
 
-    let layout = exomonad_core::layout::generate_main_layout(tabs)
-        .context("Failed to generate TL layout")?;
+    let layout = exomonad_core::layout::generate_agent_layout(&params)
+        .context("Failed to generate TL tab layout")?;
 
-    let layout_path = std::env::temp_dir().join("exomonad-tl-layout.kdl");
+    let layout_path = std::env::temp_dir().join("exomonad-tl-tab-layout.kdl");
     std::fs::write(&layout_path, layout)?;
 
     Ok(layout_path)
@@ -806,7 +878,10 @@ async fn resolve_agent_birth_branch(
 
     // 2. Try agent config dir (workers write .birth_branch at spawn time)
     if let Some(exo_dir) = worktree_base.parent() {
-        let bb_file = exo_dir.join("agents").join(agent_name).join(".birth_branch");
+        let bb_file = exo_dir
+            .join("agents")
+            .join(agent_name)
+            .join(".birth_branch");
         if let Ok(contents) = tokio::fs::read_to_string(&bb_file).await {
             let branch = contents.trim().to_string();
             tracing::debug!(agent = %agent_name, branch = %branch, "Resolved agent birth branch from config file");
@@ -890,7 +965,7 @@ async fn main() -> Result<()> {
             exomonad_core::services::validate_git().context("Failed to validate git")?;
 
             let secrets = exomonad_core::services::secrets::Secrets::load();
-            let executor: Arc<dyn exomonad_core::services::docker::CommandExecutor> =
+            let executor: Arc<dyn exomonad_core::services::command::CommandExecutor> =
                 Arc::new(exomonad_core::services::local::LocalExecutor::new());
             let git = Arc::new(exomonad_core::services::git::GitService::new(executor));
             let git_wt = Arc::new(
@@ -1274,8 +1349,8 @@ async fn main() -> Result<()> {
             // SessionStart on root session: retry for up to 5s to wait for server warmup.
             // On `exomonad init`, the server tab and TL tab start concurrently — the
             // SessionStart hook can fire before the server is ready to accept connections.
-            let is_root_session_start = event == HookEventType::SessionStart
-                && std::env::var("EXOMONAD_AGENT_ID").is_err();
+            let is_root_session_start =
+                event == HookEventType::SessionStart && std::env::var("EXOMONAD_AGENT_ID").is_err();
             let max_attempts = if is_root_session_start { 10 } else { 1 };
 
             let mut last_err = String::new();

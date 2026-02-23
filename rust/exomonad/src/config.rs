@@ -267,16 +267,16 @@ mod tests {
         assert_eq!(sanitize_session_name(long_name).len(), 36);
 
         // Clean name unchanged
-        assert_eq!(sanitize_session_name("tidepool".to_string()), "tidepool");
+        assert_eq!(sanitize_session_name("exomonad".to_string()), "exomonad");
     }
 
     #[test]
     fn test_raw_config_parse_with_zellij_session() {
         let content = r#"
             default_role = "tl"
-            zellij_session = "tidepool"
+            zellij_session = "exomonad"
         "#;
         let raw: RawConfig = toml::from_str(content).unwrap();
-        assert_eq!(raw.zellij_session, Some("tidepool".to_string()));
+        assert_eq!(raw.zellij_session, Some("exomonad".to_string()));
     }
 }

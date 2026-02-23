@@ -1,4 +1,4 @@
-use crate::services::docker::CommandExecutor;
+use crate::services::command::CommandExecutor;
 use crate::services::repo;
 use crate::{GithubOwner, GithubRepo};
 use anyhow::{Context, Result};

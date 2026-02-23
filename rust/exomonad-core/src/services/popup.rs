@@ -194,8 +194,8 @@ impl PopupService {
         let child_id = child.id();
         tracing::info!(request_id = %request_id, pid = child_id, "[Popup] zellij pipe spawned successfully");
 
-        let stdout = child.stdout.take().expect("stdout was piped");
-        let mut stderr = child.stderr.take().expect("stderr was piped");
+        let stdout = child.stdout.take().context("stdout was not piped")?;
+        let mut stderr = child.stderr.take().context("stderr was not piped")?;
 
         // Read stderr in background (diagnostic only)
         let req_id_stderr = request_id.clone();

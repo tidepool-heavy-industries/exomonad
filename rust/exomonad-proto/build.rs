@@ -126,38 +126,44 @@ fn compile_effect_protos() -> Result<()> {
     let descriptor_path = format!("{}/effects_descriptor.bin", out_dir);
     config.file_descriptor_set_path(&descriptor_path);
 
-    // Discover all proto files in the effects directory
-    let proto_dir = Path::new("proto/effects");
-    if !proto_dir.exists() {
-        println!("cargo:warning=Proto effects directory not found, skipping");
-        generate_empty_effect_modules(&out_dir)?;
-        println!("cargo:EFFECTS_DESCRIPTOR=");
-        return Ok(());
-    }
+    // Discover all proto files in the effects and experimental directories
+    let mut effect_proto_files = Vec::new();
+    let search_dirs = vec!["proto/effects", "proto/experimental"];
 
-    let effect_proto_files: Vec<String> = std::fs::read_dir(proto_dir)?
-        .filter_map(|entry| {
-            let entry = entry.ok()?;
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("proto") {
-                Some(format!(
-                    "proto/effects/{}",
-                    entry.file_name().to_string_lossy()
-                ))
-            } else {
-                None
-            }
-        })
-        .collect();
+    for dir_path in search_dirs {
+        let proto_dir = Path::new(dir_path);
+        if !proto_dir.exists() {
+            continue;
+        }
+
+        let files = std::fs::read_dir(proto_dir)?
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("proto") {
+                    Some(format!(
+                        "{}/{}",
+                        dir_path,
+                        entry.file_name().to_string_lossy()
+                    ))
+                } else {
+                    None
+                }
+            });
+        effect_proto_files.extend(files);
+    }
 
     if effect_proto_files.is_empty() {
-        println!("cargo:warning=No .proto files found in effects directory");
+        println!("cargo:warning=No .proto files found in effects or experimental directories");
         generate_empty_effect_modules(&out_dir)?;
         println!("cargo:EFFECTS_DESCRIPTOR=");
         return Ok(());
     }
 
-    config.compile_protos(&effect_proto_files, &["proto/", "proto/effects/"])?;
+    config.compile_protos(
+        &effect_proto_files,
+        &["proto/", "proto/effects/", "proto/experimental/"],
+    )?;
 
     // Communicate descriptor path to dependents (exomonad-core)
     println!("cargo:EFFECTS_DESCRIPTOR={}", descriptor_path);
@@ -167,6 +173,7 @@ fn compile_effect_protos() -> Result<()> {
 
     // Rerun if proto files change
     println!("cargo:rerun-if-changed=proto/effects/");
+    println!("cargo:rerun-if-changed=proto/experimental/");
 
     Ok(())
 }

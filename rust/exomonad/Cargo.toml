@@ -34,7 +34,7 @@ urlencoding = "2"
 prost = { workspace = true }
 exomonad-proto = { path = "../exomonad-proto", version = "0.1.0", features = ["effects"] }
 
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
 futures-util = { workspace = true }
 
 [dev-dependencies]
