@@ -20,20 +20,22 @@ Target: open-source-ready. Wall clock: 1-2 nights of agent swarms.
 
 ---
 
-## Wave 1: Messaging Unification
+---
+
+## Wave 1: Messaging Unification — DONE
 
 **Goal:** Claude Teams inbox is the single messaging channel. Kill the `.exo/messages/` custom inbox system entirely.
 
 ### What exists now
 
-Three delivery paths, partially unified:
+Three delivery paths, unified:
 | Path | Current channel | Teams? |
 |------|----------------|--------|
 | `notify_parent` (events.rs) | Teams-first, Zellij fallback | Done |
 | `github_poller` Copilot reviews | Teams-first, Zellij fallback | Done |
-| `send_note` / `send_question` (messaging.rs) | `.exo/messages/` + Zellij injection | **Not done** |
+| `send_note` / `send_question` (messaging.rs) | **DELETED** | Done |
 
-### Phase 1: Extract shared delivery helper
+### Phase 1: Extract shared delivery helper — DONE
 
 Create `services/delivery.rs` with a `deliver_to_agent()` function that:
 1. Looks up target in `TeamRegistry`
@@ -44,7 +46,7 @@ Refactor `events.rs` (notify_parent) and `github_poller.rs` to use this helper i
 
 **Verification:** `cargo test --workspace`, existing notify_parent + Copilot review delivery still works.
 
-### Phase 2: Kill messaging system
+### Phase 2: Kill messaging system — DONE
 
 Delete entirely:
 - `handlers/messaging.rs` — the messaging effect handler
@@ -59,7 +61,7 @@ Delete entirely:
 
 **Verification:** `cargo test --workspace`, `cargo build -p exomonad`, `just wasm-all`. No messaging effects remain.
 
-### Phase 3: Clean up delivery in notify_parent
+### Phase 3: Clean up delivery in notify_parent — DONE
 
 After Phase 1 lands, notify_parent should use `delivery::deliver_to_agent()` instead of its inline Teams+Zellij code. Single code path for all agent→parent delivery.
 
@@ -180,8 +182,8 @@ Resume path:
 
 ```
 DONE:     Wave 0 (baseline)
-NEXT:     Wave 1 (messaging unification) — Phase 1 is a gate for Phase 2-3
-PARALLEL: Wave 2A (test harness) alongside Wave 1
+DONE:     Wave 1 (messaging unification)
+PARALLEL: Wave 2A (test harness) — NEXT
 THEN:     Wave 2B (agent_control refactor, needs 2A)
 THEN:     Wave 4 (polish swarm, needs 2B merged)
 PARALLEL: Wave 3 (popup) — independent, can run alongside 2A/2B

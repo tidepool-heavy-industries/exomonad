@@ -29,7 +29,7 @@ The Rust server checks WASM file mtime on each tool call. Edit Haskell, run `exo
 
 ### IO-Blind Agents
 
-Haskell code yields typed effects (`Git`, `GitHub`, `Zellij`, `Messaging`). It never calls `readProcess`, never opens sockets, never touches the filesystem. All I/O happens in Rust host functions that the WASM plugin calls via FFI.
+Haskell code yields typed effects (`Git`, `GitHub`, `Zellij`, `Events`). It never calls `readProcess`, never opens sockets, never touches the filesystem. All I/O happens in Rust host functions that the WASM plugin calls via FFI.
 
 This makes tools:
 - **Testable**: Swap the effect interpreter, run pure
@@ -54,7 +54,7 @@ Tool call arrives (HTTP)
       - Git operations (Command::new("git"))
       - GitHub API (reqwest)
       - Zellij (plugin pipe)
-      - Filesystem, messaging, etc.
+      - Filesystem, events, etc.
   → Result returned to caller
 ```
 

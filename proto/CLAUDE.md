@@ -25,7 +25,6 @@ proto/
     ├── kv.proto            # kv.* effects (Key-Value)
     ├── log.proto           # log.* effects
     ├── merge_pr.proto      # merge_pr.* effects
-    ├── messaging.proto     # messaging.* effects
     ├── popup.proto         # popup.* effects (UI)
     └── session.proto       # session.* effects
 ```
@@ -236,12 +235,6 @@ Logging and events (`log.*` namespace):
 PR merging (`merge_pr.*` namespace):
 - `MergePR`: Merge PR and fetch changes
 
-### effects/messaging.proto
-
-Inter-agent messaging (`messaging.*` namespace):
-- `SendNote`: Send non-blocking note
-- `SendQuestion`: Send blocking question
-
 ### effects/popup.proto
 
 UI popup interaction (`popup.*` namespace):
@@ -331,7 +324,6 @@ just proto-test  # Run wire format compatibility tests
 | file_pr.proto | ✅ | ✅ | ✅ |
 | kv.proto | ✅ | ✅ | ✅ |
 | merge_pr.proto | ✅ | ✅ | ✅ |
-| messaging.proto | ✅ | ✅ | ✅ |
 | popup.proto | ✅ | ✅ | ✅ |
 
 ## Related Files

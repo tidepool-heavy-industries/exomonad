@@ -200,7 +200,7 @@ Haskell: Either EffectError GetBranchResponse
 Handlers use shared ergonomic helpers from `effects/error.rs`:
 
 - **`ResultExt::effect_err(namespace)`** — Converts any `Result<T, E: Display>` to `Result<T, EffectError>` with `EffectError::custom("{namespace}_error", e.to_string())`. Replaces verbose `.map_err(|e| EffectError::custom(...))` closures.
-- **`spawn_blocking_effect(namespace, closure)`** — Runs a closure in `tokio::task::spawn_blocking` and maps both the `JoinError` and inner error to `EffectError`. Used for messaging operations where types aren't `Send`.
+- **`spawn_blocking_effect(namespace, closure)`** — Runs a closure in `tokio::task::spawn_blocking` and maps both the `JoinError` and inner error to `EffectError`.
 
 Proto field helpers in `handlers/mod.rs`: `non_empty(String) → Option<String>`, `working_dir_or_default(String) → String`, `working_dir_path_or_default(&str) → PathBuf`.
 
@@ -216,7 +216,6 @@ Proto field helpers in `handlers/mod.rs`: `non_empty(String) → Option<String>`
 | `popup.*` | PopupHandler | show_popup |
 | `file_pr.*` | FilePRHandler | file_pr |
 | `copilot.*` | CopilotHandler | wait_for_copilot_review |
-| `messaging.*` | MessagingHandler | send_note, send_question |
 | `kv.*` | KvHandler | get, set |
 | `session.*` | SessionHandler | register_claude_id, register_team |
 | `events.*` | EventHandler | wait_for_event (internal), notify_event, notify_parent |

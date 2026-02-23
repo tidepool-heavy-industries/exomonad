@@ -29,7 +29,6 @@ haskell/proto/
         ├── Kv.hs            # Generated from effects/kv.proto
         ├── Log.hs           # Generated from effects/log.proto
         ├── MergePr.hs       # Generated from effects/merge_pr.proto
-        ├── Messaging.hs     # Generated from effects/messaging.proto
         ├── Popup.hs         # Generated from effects/popup.proto
         └── Session.hs       # Generated from effects/session.proto
 ```
