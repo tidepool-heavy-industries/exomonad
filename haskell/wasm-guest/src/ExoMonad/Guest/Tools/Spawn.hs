@@ -95,7 +95,24 @@ instance MCPTool SpawnLeafSubtree where
         ("branch_name", "Branch name suffix (will be prefixed with current branch)")
       ]
   toolHandler args = do
-    result <- runM $ AC.runAgentControl $ AC.spawnLeafSubtree (slsTask args) (slsBranchName args)
+    -- Render task through template system with "leaf" profile for completion protocol.
+    let req =
+          Proto.RenderWorkerPromptRequest
+            { Proto.renderWorkerPromptRequestTask = fromText $ slsTask args,
+              Proto.renderWorkerPromptRequestReadFirst = V.empty,
+              Proto.renderWorkerPromptRequestSteps = V.empty,
+              Proto.renderWorkerPromptRequestVerify = V.empty,
+              Proto.renderWorkerPromptRequestDoneCriteria = V.empty,
+              Proto.renderWorkerPromptRequestBoundary = V.empty,
+              Proto.renderWorkerPromptRequestContext = fromText "",
+              Proto.renderWorkerPromptRequestProfiles = V.fromList [fromText "leaf"],
+              Proto.renderWorkerPromptRequestContextFiles = V.empty,
+              Proto.renderWorkerPromptRequestVerifyTemplates = V.empty
+            }
+    renderedTask <- Template.renderWorkerPrompt req >>= \case
+      Right resp -> pure $ toText $ Proto.renderWorkerPromptResponseRendered resp
+      Left _ -> pure $ slsTask args -- Fallback to raw task on render failure
+    result <- runM $ AC.runAgentControl $ AC.spawnLeafSubtree renderedTask (slsBranchName args)
     case result of
       Left err -> pure $ errorResult err
       Right spawnResult -> do
@@ -219,7 +236,8 @@ instance MCPTool SpawnWorkers where
                     Proto.renderWorkerPromptRequestDoneCriteria = V.fromList $ map fromText $ maybe [] id (wsDoneCriteria spec),
                     Proto.renderWorkerPromptRequestBoundary = V.fromList $ map fromText $ maybe [] id (wsBoundary spec),
                     Proto.renderWorkerPromptRequestContext = fromText $ maybe "" id (wsContext spec),
-                    Proto.renderWorkerPromptRequestProfiles = V.fromList $ map fromText $ maybe [] id (wsProfiles spec),
+                    -- Always include "worker" profile for completion protocol
+                    Proto.renderWorkerPromptRequestProfiles = V.fromList $ map fromText $ "worker" : maybe [] id (wsProfiles spec),
                     Proto.renderWorkerPromptRequestContextFiles = V.fromList $ map fromText $ maybe [] id (wsContextFiles spec),
                     Proto.renderWorkerPromptRequestVerifyTemplates = V.fromList $ map fromText $ maybe [] id (wsVerifyTemplates spec)
                   }

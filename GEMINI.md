@@ -7,7 +7,7 @@ You are a Gemini agent working on the ExoMonad codebase. Follow these rules stri
 You are running headless. Any command that launches a TUI, pager, or interactive prompt will hang forever.
 
 ```bash
-# git: disable pager
+# git: ALWAYS disable pager
 git --no-pager log
 git --no-pager diff
 
@@ -31,14 +31,6 @@ git --no-pager diff
 
 - **Build with**: `cargo check --workspace` or `cargo test --workspace` (inside nix develop shell)
 - **No new dependencies** unless explicitly told to add them.
-
-## Completion Protocol
-
-When your task is done:
-1. Commit your changes (`git add <specific files> && git commit -m "..."`)
-2. Call `notify_parent` to signal completion
-
-**Do NOT file PRs** unless you are running in a leaf subtree (own git branch). Workers are ephemeral and share the parent's branch — PRs are not applicable.
 
 ## Architecture
 

@@ -1386,6 +1386,7 @@ impl AgentControlService {
             );
 
             // Open Zellij TAB (not pane)
+            // Task already includes leaf completion protocol — rendered by Haskell via template effect.
             self.new_zellij_tab(
                 &display_name,
                 &worktree_path,
