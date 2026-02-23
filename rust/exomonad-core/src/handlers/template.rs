@@ -2,11 +2,11 @@
 //!
 //! Renders worker prompts by loading profiles, context files, and verify templates.
 
-use std::path::PathBuf;
-use crate::effects::{EffectContext, EffectResult, TemplateEffects, dispatch_template_effect};
+use crate::effects::{dispatch_template_effect, EffectContext, EffectResult, TemplateEffects};
 use async_trait::async_trait;
 use exomonad_proto::effects::template::*;
-use tracing::{warn, info};
+use std::path::PathBuf;
+use tracing::{info, warn};
 
 /// Template effect handler.
 pub struct TemplateHandler {
@@ -35,11 +35,15 @@ impl TemplateEffects for TemplateHandler {
 
         // 1. Load profiles from .exo/templates/profiles/{name}.md
         for profile in req.profiles {
-            let path = self.project_dir.join(".exo/templates/profiles").join(format!("{}.md", profile));
+            let path = self
+                .project_dir
+                .join(".exo/templates/profiles")
+                .join(format!("{}.md", profile));
             match tokio::fs::read_to_string(&path).await {
                 Ok(content) => {
                     // Prepend non-empty lines to boundary list
-                    let lines: Vec<String> = content.lines()
+                    let lines: Vec<String> = content
+                        .lines()
                         .map(|l| l.trim().to_string())
                         .filter(|l| !l.is_empty())
                         .collect();
@@ -47,7 +51,9 @@ impl TemplateEffects for TemplateHandler {
                         boundary.insert(0, line);
                     }
                 }
-                Err(e) => warn!(profile = %profile, path = %path.display(), error = %e, "Failed to load profile"),
+                Err(e) => {
+                    warn!(profile = %profile, path = %path.display(), error = %e, "Failed to load profile")
+                }
             }
         }
 
@@ -75,17 +81,23 @@ impl TemplateEffects for TemplateHandler {
                     part.push_str("```");
                     context_parts.push(part);
                 }
-                Err(e) => warn!(file = %file_ref, path = %path.display(), error = %e, "Failed to load context file"),
+                Err(e) => {
+                    warn!(file = %file_ref, path = %path.display(), error = %e, "Failed to load context file")
+                }
             }
         }
 
         // 3. Load verify templates from .exo/templates/verify/{name}.sh
         for vt in req.verify_templates {
-            let path = self.project_dir.join(".exo/templates/verify").join(format!("{}.sh", vt));
+            let path = self
+                .project_dir
+                .join(".exo/templates/verify")
+                .join(format!("{}.sh", vt));
             match tokio::fs::read_to_string(&path).await {
                 Ok(content) => {
                     // Prepend non-empty lines to verify list
-                    let lines: Vec<String> = content.lines()
+                    let lines: Vec<String> = content
+                        .lines()
                         .map(|l| l.trim().to_string())
                         .filter(|l| !l.is_empty())
                         .collect();
@@ -93,7 +105,9 @@ impl TemplateEffects for TemplateHandler {
                         verify.insert(0, line);
                     }
                 }
-                Err(e) => warn!(template = %vt, path = %path.display(), error = %e, "Failed to load verify template"),
+                Err(e) => {
+                    warn!(template = %vt, path = %path.display(), error = %e, "Failed to load verify template")
+                }
             }
         }
 
@@ -149,7 +163,9 @@ impl TemplateEffects for TemplateHandler {
             rendered.push('\n');
         }
 
-        Ok(RenderWorkerPromptResponse { rendered: rendered.trim().to_string() })
+        Ok(RenderWorkerPromptResponse {
+            rendered: rendered.trim().to_string(),
+        })
     }
 }
 

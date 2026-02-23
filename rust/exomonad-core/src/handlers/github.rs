@@ -132,7 +132,10 @@ impl GitHubEffects for GitHubHandler {
 
         let pull_requests: Vec<PullRequest> = raw_prs.into_iter().map(convert_pr).collect();
 
-        tracing::info!(count = pull_requests.len(), "[GitHub] list_pull_requests complete");
+        tracing::info!(
+            count = pull_requests.len(),
+            "[GitHub] list_pull_requests complete"
+        );
         Ok(ListPullRequestsResponse { pull_requests })
     }
 

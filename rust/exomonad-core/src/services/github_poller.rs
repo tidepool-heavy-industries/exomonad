@@ -239,8 +239,14 @@ impl GitHubPoller {
                 if copilot_count > old_state.last_copilot_comment_count {
                     // New activity!
                     let message = self.format_copilot_message(&copilot_comments, &copilot_reviews);
-                    self.emit_event(branch, "copilot_review", &message, agent_type, Some(pr_number))
-                        .await;
+                    self.emit_event(
+                        branch,
+                        "copilot_review",
+                        &message,
+                        agent_type,
+                        Some(pr_number),
+                    )
+                    .await;
                 }
                 // Update state even if count decreased (to sync with reality)
                 old_state.last_copilot_comment_count = copilot_count;
@@ -439,7 +445,14 @@ impl GitHubPoller {
         msg
     }
 
-    async fn emit_event(&self, branch: &str, status: &str, message: &str, agent_type: AgentType, pr_number: Option<PRNumber>) {
+    async fn emit_event(
+        &self,
+        branch: &str,
+        status: &str,
+        message: &str,
+        agent_type: AgentType,
+        pr_number: Option<PRNumber>,
+    ) {
         info!(
             "Emitting event for branch {}: {} - {}",
             branch, status, message

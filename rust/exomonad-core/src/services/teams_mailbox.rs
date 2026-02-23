@@ -89,19 +89,15 @@ fn write_to_inbox_at_base(
         "Writing to Teams inbox"
     );
 
-    let json = serde_json::to_string_pretty(&messages).map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
-    })?;
+    let json = serde_json::to_string_pretty(&messages)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     // Atomic write: temp file + rename
     let tmp_file = inbox_dir.join(format!(".{}.json.tmp", recipient));
     std::fs::write(&tmp_file, &json)?;
     std::fs::rename(&tmp_file, &inbox_file)?;
 
-    debug!(
-        bytes = json.len(),
-        "Teams inbox write complete"
-    );
+    debug!(bytes = json.len(), "Teams inbox write complete");
 
     Ok(())
 }
@@ -129,8 +125,24 @@ mod tests {
         let team_name = "test-team";
         let recipient = "test-recipient";
 
-        write_to_inbox_at_base(base, team_name, recipient, "agent1", "Hello from agent1", "Message 1", "blue")?;
-        write_to_inbox_at_base(base, team_name, recipient, "agent2", "Hello from agent2", "Message 2", "green")?;
+        write_to_inbox_at_base(
+            base,
+            team_name,
+            recipient,
+            "agent1",
+            "Hello from agent1",
+            "Message 1",
+            "blue",
+        )?;
+        write_to_inbox_at_base(
+            base,
+            team_name,
+            recipient,
+            "agent2",
+            "Hello from agent2",
+            "Message 2",
+            "green",
+        )?;
 
         let inbox_file = base
             .join(".claude")

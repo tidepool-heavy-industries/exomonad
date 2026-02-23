@@ -2,9 +2,7 @@
 //!
 //! Uses proto-generated types from `exomonad_proto::effects::fs`.
 
-use crate::effects::{
-    dispatch_fs_effect, EffectError, EffectResult, FilesystemEffects, ResultExt,
-};
+use crate::effects::{dispatch_fs_effect, EffectError, EffectResult, FilesystemEffects, ResultExt};
 use crate::services::filesystem::FileSystemService;
 use async_trait::async_trait;
 use exomonad_proto::effects::fs::*;
@@ -47,7 +45,11 @@ impl FilesystemEffects for FsHandler {
 
         let result = self.service.read_file(&input).await.effect_err("fs")?;
 
-        tracing::info!(bytes_read = result.bytes_read, truncated = result.truncated, "[Fs] read_file complete");
+        tracing::info!(
+            bytes_read = result.bytes_read,
+            truncated = result.truncated,
+            "[Fs] read_file complete"
+        );
         Ok(ReadFileResponse {
             content: result.content,
             bytes_read: result.bytes_read as i64,
@@ -70,7 +72,10 @@ impl FilesystemEffects for FsHandler {
 
         let result = self.service.write_file(&input).await.effect_err("fs")?;
 
-        tracing::info!(bytes_written = result.bytes_written, "[Fs] write_file complete");
+        tracing::info!(
+            bytes_written = result.bytes_written,
+            "[Fs] write_file complete"
+        );
         Ok(WriteFileResponse {
             bytes_written: result.bytes_written as i64,
             path: result.path,

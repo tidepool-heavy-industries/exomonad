@@ -18,8 +18,8 @@ use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 use tracing::{debug, error, info, warn};
 
-use super::github::{GitHubService, Repo};
 use super::git_worktree::GitWorktreeService;
+use super::github::{GitHubService, Repo};
 use super::zellij_events;
 use std::sync::Arc;
 
@@ -1386,7 +1386,9 @@ impl AgentControlService {
     pub async fn cleanup_agent(&self, identifier: &str) -> Result<()> {
         // Remove synthetic team member registration (non-fatal if not registered)
         let team_name = format!("exo-{}", self.birth_branch);
-        if let Err(e) = crate::services::synthetic_members::remove_synthetic_member(&team_name, identifier) {
+        if let Err(e) =
+            crate::services::synthetic_members::remove_synthetic_member(&team_name, identifier)
+        {
             warn!(team = %team_name, member = %identifier, error = %e, "Failed to remove synthetic team member (non-fatal)");
         }
 
@@ -1460,7 +1462,8 @@ impl AgentControlService {
         if worktree_path.exists() {
             let git_wt = self.git_wt.clone();
             let path = worktree_path.clone();
-            let join_result = tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await;
+            let join_result =
+                tokio::task::spawn_blocking(move || git_wt.remove_workspace(&path)).await;
             match join_result {
                 Ok(Ok(())) => {
                     // Successfully removed workspace

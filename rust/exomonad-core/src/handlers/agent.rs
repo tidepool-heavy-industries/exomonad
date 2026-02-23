@@ -283,7 +283,10 @@ impl AgentEffects for AgentHandler {
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<CleanupBatchResponse> {
         let subrepo = non_empty(req.subrepo);
-        let result = self.service.cleanup_agents(&req.issues, subrepo.as_deref()).await;
+        let result = self
+            .service
+            .cleanup_agents(&req.issues, subrepo.as_deref())
+            .await;
 
         let failed_ids: Vec<String> = result.failed.iter().map(|(id, _)| id.clone()).collect();
         let errors: Vec<String> = result.failed.iter().map(|(_, err)| err.clone()).collect();
@@ -322,11 +325,7 @@ impl AgentEffects for AgentHandler {
         _req: ListRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<ListResponse> {
-        let infos = self
-            .service
-            .list_agents()
-            .await
-            .effect_err("agent")?;
+        let infos = self.service.list_agents().await.effect_err("agent")?;
 
         let agents = infos.iter().map(service_info_to_proto).collect();
         Ok(ListResponse { agents })

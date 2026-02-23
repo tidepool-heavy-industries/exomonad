@@ -24,15 +24,19 @@ fn register_synthetic_member_at_path(
     // Read existing config
     let content = std::fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read team config: {}", config_path.display()))?;
-    let mut config: Value = serde_json::from_str(&content)
-        .context("Failed to parse team config")?;
+    let mut config: Value =
+        serde_json::from_str(&content).context("Failed to parse team config")?;
 
-    let members = config.get_mut("members")
+    let members = config
+        .get_mut("members")
         .and_then(|m| m.as_array_mut())
         .ok_or_else(|| anyhow::anyhow!("No members array in team config"))?;
 
     // Check if member already exists
-    if members.iter().any(|m| m.get("name").and_then(|n| n.as_str()) == Some(member_name)) {
+    if members
+        .iter()
+        .any(|m| m.get("name").and_then(|n| n.as_str()) == Some(member_name))
+    {
         info!(member = %member_name, "Synthetic member already registered");
         return Ok(());
     }
@@ -79,8 +83,8 @@ fn remove_synthetic_member_at_path(
 ) -> Result<()> {
     let content = std::fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read team config: {}", config_path.display()))?;
-    let mut config: Value = serde_json::from_str(&content)
-        .context("Failed to parse team config")?;
+    let mut config: Value =
+        serde_json::from_str(&content).context("Failed to parse team config")?;
 
     if let Some(members) = config.get_mut("members").and_then(|m| m.as_array_mut()) {
         members.retain(|m| m.get("name").and_then(|n| n.as_str()) != Some(member_name));
@@ -96,9 +100,12 @@ fn remove_synthetic_member_at_path(
 }
 
 fn team_config_path(team_name: &str) -> Result<PathBuf> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("HOME directory not found"))?;
-    Ok(home.join(".claude").join("teams").join(team_name).join("config.json"))
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("HOME directory not found"))?;
+    Ok(home
+        .join(".claude")
+        .join("teams")
+        .join(team_name)
+        .join("config.json"))
 }
 
 #[cfg(test)]

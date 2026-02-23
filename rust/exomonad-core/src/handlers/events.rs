@@ -165,7 +165,10 @@ impl EventEffects for EventHandler {
 
         // Idempotency: ignore duplicate notify_parent calls from spinning agents
         {
-            let mut set = self.notified_agents.lock().unwrap_or_else(|e| e.into_inner());
+            let mut set = self
+                .notified_agents
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             if !set.insert(agent_id_str.clone()) {
                 tracing::warn!(agent_id = %agent_id_str, "notify_parent called again — ignoring duplicate");
                 return Ok(NotifyParentResponse { ack: true });

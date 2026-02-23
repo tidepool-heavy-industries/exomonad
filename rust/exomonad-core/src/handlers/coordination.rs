@@ -70,7 +70,11 @@ impl CoordinationEffects for CoordinationHandler {
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<CreateTaskResponse> {
         tracing::info!(subject = %req.subject, "[Coordination] create_task starting");
-        let blocked_by: Vec<TaskId> = req.blocked_by.iter().map(|s| TaskId::from(s.as_str())).collect();
+        let blocked_by: Vec<TaskId> = req
+            .blocked_by
+            .iter()
+            .map(|s| TaskId::from(s.as_str()))
+            .collect();
         let task_id = self
             .service
             .create_task(
@@ -82,7 +86,9 @@ impl CoordinationEffects for CoordinationHandler {
             .await;
 
         tracing::info!(task_id = %task_id, "[Coordination] create_task complete");
-        Ok(CreateTaskResponse { task_id: task_id.to_string() })
+        Ok(CreateTaskResponse {
+            task_id: task_id.to_string(),
+        })
     }
 
     async fn update_task(
@@ -154,7 +160,10 @@ impl CoordinationEffects for CoordinationHandler {
         req: GetMessagesRequest,
         _ctx: &crate::effects::EffectContext,
     ) -> EffectResult<GetMessagesResponse> {
-        tracing::info!(unread_only = req.unread_only, "[Coordination] get_messages starting");
+        tracing::info!(
+            unread_only = req.unread_only,
+            "[Coordination] get_messages starting"
+        );
         let filter = if req.unread_only {
             crate::domain::MessageFilter::UnreadOnly
         } else {
@@ -162,7 +171,10 @@ impl CoordinationEffects for CoordinationHandler {
         };
         let messages = self.service.get_messages(filter).await;
 
-        tracing::info!(count = messages.len(), "[Coordination] get_messages complete");
+        tracing::info!(
+            count = messages.len(),
+            "[Coordination] get_messages complete"
+        );
         Ok(GetMessagesResponse {
             messages: messages
                 .into_iter()
