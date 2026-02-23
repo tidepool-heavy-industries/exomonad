@@ -4,8 +4,7 @@
 
 use crate::effects::{dispatch_events_effect, EffectHandler, EffectResult, EventEffects};
 use crate::services::team_registry::TeamRegistry;
-use crate::services::teams_mailbox;
-use crate::services::{zellij_events, EventQueue};
+use crate::services::EventQueue;
 use async_trait::async_trait;
 use exomonad_proto::effects::events::*;
 use prost::Message;
@@ -241,49 +240,23 @@ impl EventEffects for EventHandler {
 
         // Deliver notification to parent: prefer Teams inbox, fall back to Zellij injection.
         let notification = format_parent_notification(&agent_id_str, &req.status, &req.message);
-        let mut delivered_via_teams = false;
+        let parent_key = if parent_session_id == "root" {
+            "root".to_string()
+        } else {
+            parent_session_id.clone()
+        };
+        let tab_name = crate::services::agent_control::resolve_parent_tab_name(ctx);
 
-        if let Some(ref registry) = self.team_registry {
-            // Resolve parent agent key for TeamRegistry lookup
-            let parent_key = if parent_session_id == "root" {
-                "root".to_string()
-            } else {
-                parent_session_id.clone()
-            };
-
-            if let Some(team_info) = registry.get(&parent_key).await {
-                match teams_mailbox::write_to_inbox(
-                    &team_info.team_name,
-                    &team_info.inbox_name,
-                    &agent_id_str,
-                    &notification,
-                    &format!("Agent completion: {}", agent_id_str),
-                    "green",
-                ) {
-                    Ok(()) => {
-                        tracing::info!(
-                            parent = %parent_key,
-                            team = %team_info.team_name,
-                            "notify_parent: delivered via Teams inbox"
-                        );
-                        delivered_via_teams = true;
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            parent = %parent_key,
-                            error = %e,
-                            "notify_parent: Teams inbox write failed, falling back to Zellij"
-                        );
-                    }
-                }
-            }
-        }
-
-        if !delivered_via_teams {
-            let tab_name = crate::services::agent_control::resolve_parent_tab_name(ctx);
-            tracing::debug!(tab = %tab_name, chars = notification.len(), "notify_parent: injecting notification into parent pane via Zellij");
-            zellij_events::inject_input(&tab_name, &notification);
-        }
+        crate::services::delivery::deliver_to_agent(
+            self.team_registry.as_deref(),
+            &parent_key,
+            &tab_name,
+            &agent_id_str,
+            &notification,
+            &format!("Agent completion: {}", agent_id_str),
+            "green",
+        )
+        .await;
 
         Ok(NotifyParentResponse { ack: true })
     }

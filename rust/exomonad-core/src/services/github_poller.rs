@@ -4,8 +4,6 @@ use crate::services::event_log::EventLog;
 use crate::services::event_queue::EventQueue;
 use crate::services::repo;
 use crate::services::team_registry::TeamRegistry;
-use crate::services::teams_mailbox;
-use crate::services::zellij_events;
 use anyhow::{Context, Result};
 use exomonad_proto::effects::events::{event::EventType, Event, WorkerComplete};
 use serde::Deserialize;
@@ -508,45 +506,19 @@ impl GitHubPoller {
         };
 
         if let Some(agent_message) = agent_message {
-            let mut delivered_via_teams = false;
+            let slug = branch.rsplit_once('.').map(|(_, s)| s).unwrap_or(branch);
+            let tab_name = agent_type.tab_display_name(slug);
 
-            // For Claude agents, try Teams inbox delivery first
-            if agent_type == AgentType::Claude {
-                if let Some(ref registry) = self.team_registry {
-                    if let Some(team_info) = registry.get(branch).await {
-                        match teams_mailbox::write_to_inbox(
-                            &team_info.team_name,
-                            &team_info.inbox_name,
-                            "github-poller",
-                            &agent_message,
-                            &format!("GitHub event: {} on {}", status, branch),
-                            "yellow",
-                        ) {
-                            Ok(()) => {
-                                info!(
-                                    branch = %branch,
-                                    team = %team_info.team_name,
-                                    "Delivered poller event via Teams inbox"
-                                );
-                                delivered_via_teams = true;
-                            }
-                            Err(e) => {
-                                warn!(
-                                    branch = %branch,
-                                    error = %e,
-                                    "Teams inbox write failed, falling back to Zellij"
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-
-            if !delivered_via_teams {
-                let slug = branch.rsplit_once('.').map(|(_, s)| s).unwrap_or(branch);
-                let tab_name = agent_type.tab_display_name(slug);
-                zellij_events::inject_input(&tab_name, &agent_message);
-            }
+            crate::services::delivery::deliver_to_agent(
+                self.team_registry.as_deref(),
+                branch,
+                &tab_name,
+                "github-poller",
+                &agent_message,
+                &format!("GitHub event: {} on {}", status, branch),
+                "yellow",
+            )
+            .await;
         }
     }
 }

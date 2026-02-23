@@ -17,9 +17,6 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-#[cfg(feature = "runtime")]
-use crate::services::questions::QuestionRegistry;
-
 // ============================================================================
 // State
 // ============================================================================
@@ -35,9 +32,6 @@ pub struct McpState {
     /// Role for this MCP endpoint (e.g. "tl" or "dev").
     /// Controls which tools are exposed. None means all tools.
     pub role: Option<String>,
-    /// Shared question registry for resolving ask_question/answer_question bridges.
-    #[cfg(feature = "runtime")]
-    pub question_registry: Option<Arc<QuestionRegistry>>,
 }
 
 /// Builder for constructing McpState with optional fields.
@@ -45,8 +39,6 @@ pub struct McpStateBuilder {
     plugin: Arc<PluginManager>,
     project_dir: PathBuf,
     role: Option<String>,
-    #[cfg(feature = "runtime")]
-    question_registry: Option<Arc<QuestionRegistry>>,
 }
 
 impl McpStateBuilder {
@@ -56,21 +48,12 @@ impl McpStateBuilder {
         self
     }
 
-    /// Set the question registry for answer_question bridging.
-    #[cfg(feature = "runtime")]
-    pub fn question_registry(mut self, qr: Arc<QuestionRegistry>) -> Self {
-        self.question_registry = Some(qr);
-        self
-    }
-
     /// Build the McpState.
     pub fn build(self) -> McpState {
         McpState {
             plugin: self.plugin,
             project_dir: self.project_dir,
             role: self.role,
-            #[cfg(feature = "runtime")]
-            question_registry: self.question_registry,
         }
     }
 }
@@ -82,8 +65,6 @@ impl McpState {
             plugin,
             project_dir,
             role: None,
-            #[cfg(feature = "runtime")]
-            question_registry: None,
         }
     }
 }

@@ -122,7 +122,7 @@ pub use handlers::groups::{core_handlers, git_handlers, orchestration_handlers};
 #[cfg(feature = "runtime")]
 pub use handlers::{
     AgentHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler, GitHandler,
-    GitHubHandler, KvHandler, LogHandler, MergePRHandler, MessagingHandler, PopupHandler,
+    GitHubHandler, KvHandler, LogHandler, MergePRHandler, PopupHandler,
 };
 #[cfg(feature = "runtime")]
 pub use services::{validate_gh_cli, validate_git};
@@ -314,7 +314,6 @@ impl Runtime {
             project_dir,
             plugin: Arc::new(self.plugin_manager),
             role: None,
-            question_registry: None,
         }
     }
 }

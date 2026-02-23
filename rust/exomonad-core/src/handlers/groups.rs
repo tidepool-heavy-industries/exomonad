@@ -10,13 +10,11 @@ use crate::services::filesystem::FileSystemService;
 use crate::services::git::GitService;
 use crate::services::git_worktree::GitWorktreeService;
 use crate::services::github::GitHubService;
-use crate::services::questions::QuestionRegistry;
 use crate::services::team_registry::TeamRegistry;
 
 use super::{
     AgentHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler, GitHandler,
-    GitHubHandler, KvHandler, LogHandler, MergePRHandler, MessagingHandler, PopupHandler,
-    SessionHandler,
+    GitHubHandler, KvHandler, LogHandler, MergePRHandler, PopupHandler, SessionHandler,
 };
 
 /// Core handlers every consumer needs: logging, key-value store, filesystem.
@@ -63,22 +61,18 @@ pub fn git_handlers(
 }
 
 /// Orchestration handlers for agent spawning, messaging, events, popups.
-///
-/// Returns the handlers AND the QuestionRegistry (shared with MCP for answer_question).
 #[allow(clippy::too_many_arguments)]
 pub fn orchestration_handlers(
     agent_control: Arc<AgentControlService>,
     event_queue: Arc<EventQueue>,
     zellij_session: Option<String>,
-    project_dir: PathBuf,
+    _project_dir: PathBuf,
     remote_port: Option<u16>,
     event_queue_scope: Option<String>,
     claude_session_registry: Arc<ClaudeSessionRegistry>,
     team_registry: Arc<TeamRegistry>,
-) -> (Vec<Box<dyn EffectHandler>>, Arc<QuestionRegistry>) {
-    let question_registry = Arc::new(QuestionRegistry::new());
-
-    let handlers: Vec<Box<dyn EffectHandler>> = vec![
+) -> Vec<Box<dyn EffectHandler>> {
+    vec![
         Box::new(
             AgentHandler::new(agent_control)
                 .with_claude_session_registry(claude_session_registry.clone()),
@@ -88,12 +82,6 @@ pub fn orchestration_handlers(
             EventHandler::new(event_queue, remote_port, event_queue_scope)
                 .with_team_registry(team_registry.clone()),
         ),
-        Box::new(MessagingHandler::new(
-            question_registry.clone(),
-            project_dir,
-        )),
         Box::new(SessionHandler::new(claude_session_registry).with_team_registry(team_registry)),
-    ];
-
-    (handlers, question_registry)
+    ]
 }

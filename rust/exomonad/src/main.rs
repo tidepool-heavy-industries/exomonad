@@ -1050,7 +1050,7 @@ async fn main() -> Result<()> {
             builder = builder.with_handlers(exomonad_core::git_handlers(git, github, git_wt));
             let team_registry =
                 Arc::new(exomonad_core::services::team_registry::TeamRegistry::new());
-            let (orch_handlers, question_registry) = exomonad_core::orchestration_handlers(
+            let orch_handlers = exomonad_core::orchestration_handlers(
                 agent_control.clone(),
                 event_queue.clone(),
                 Some(config.zellij_session.clone()),
@@ -1082,7 +1082,6 @@ async fn main() -> Result<()> {
                 project_dir: project_dir.clone(),
                 plugin: root_plugin,
                 role: None,
-                question_registry: Some(question_registry),
             };
 
             // Write server.pid for client discovery
