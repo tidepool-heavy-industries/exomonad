@@ -162,8 +162,12 @@ pub fn resolve_own_tab_name(ctx: &crate::effects::EffectContext) -> String {
             .unwrap_or(birth_branch_str);
         // Subtrees spawned by spawn_subtree are Claude; by spawn_leaf_subtree are Gemini.
         // The worktree dir name includes the suffix, but birth_branch doesn't.
-        // For now, assume Claude (TL role) since popup is only available in TL role.
-        AgentType::Claude.tab_display_name(slug)
+        let agent_type = if ctx.agent_name.as_str().ends_with("-gemini") {
+            AgentType::Gemini
+        } else {
+            AgentType::Claude
+        };
+        agent_type.tab_display_name(slug)
     } else {
         "TL".to_string()
     }
@@ -950,7 +954,7 @@ impl AgentControlService {
     pub async fn spawn_worker(
         &self,
         options: &SpawnWorkerOptions,
-        caller_bb: &BirthBranch,
+        ctx: &crate::effects::EffectContext,
     ) -> Result<SpawnResult> {
         info!(name = %options.name, timeout_sec = SPAWN_TIMEOUT.as_secs(), "Starting spawn_worker");
 
@@ -984,7 +988,7 @@ impl AgentControlService {
 
             let mut env_vars = HashMap::new();
             env_vars.insert("EXOMONAD_AGENT_ID".to_string(), internal_name.clone());
-            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), self.effective_birth_branch(Some(caller_bb)).to_string());
+            env_vars.insert("EXOMONAD_SESSION_ID".to_string(), self.effective_birth_branch(Some(&ctx.birth_branch)).to_string());
             if let Some(port) = self.mcp_server_port {
                 env_vars.insert("EXOMONAD_SERVER_PORT".to_string(), port.to_string());
             }
@@ -1008,18 +1012,24 @@ impl AgentControlService {
                 settings_path.to_string_lossy().to_string(),
             );
 
-            // Spawn pane in current tab, cwd = project_dir (parent's worktree)
+            // Resolve caller's context (tab and worktree) from its context.
+            let caller_tab = resolve_own_tab_name(ctx);
+            let caller_worktree = resolve_agent_working_dir(ctx);
+            let absolute_worktree = self.project_dir.join(caller_worktree);
+
+            // Spawn pane in caller's tab, cwd = caller's worktree
             self.new_zellij_pane(
                 &display_name,
-                &self.project_dir,
+                &absolute_worktree,
                 AgentType::Gemini,
                 Some(&options.prompt),
                 env_vars,
+                Some(&caller_tab),
             )
             .await?;
 
             // Register as synthetic team member for Claude Teams messaging
-            let team_name = format!("exo-{}", self.effective_birth_branch(Some(caller_bb)));
+            let team_name = format!("exo-{}", self.effective_birth_branch(Some(&ctx.birth_branch)));
             if let Err(e) = crate::services::synthetic_members::register_synthetic_member(
                 &team_name, &slug, "gemini-worker",
             ) {
@@ -1977,8 +1987,17 @@ impl AgentControlService {
         agent_type: AgentType,
         prompt: Option<&str>,
         env_vars: HashMap<String, String>,
+        tab_name: Option<&str>,
     ) -> Result<()> {
-        info!(name, cwd = %cwd.display(), agent_type = ?agent_type, "Creating Zellij pane");
+        info!(name, cwd = %cwd.display(), agent_type = ?agent_type, tab = ?tab_name, "Creating Zellij pane");
+
+        if let Some(tn) = tab_name {
+            debug!(tab = %tn, "Switching to tab before spawning pane");
+            let _ = Command::new("zellij")
+                .args(["action", "go-to-tab-name", tn])
+                .output()
+                .await;
+        }
 
         let full_command = Self::build_agent_command(agent_type, prompt, None, &env_vars, cwd);
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());

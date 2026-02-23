@@ -181,7 +181,7 @@ impl AgentEffects for AgentHandler {
 
         let result = self
             .service
-            .spawn_worker(&options, &ctx.birth_branch)
+            .spawn_worker(&options, ctx)
             .await
             .effect_err("agent")?;
 
