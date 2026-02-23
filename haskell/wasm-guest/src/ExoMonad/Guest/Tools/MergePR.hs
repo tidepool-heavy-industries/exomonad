@@ -58,7 +58,7 @@ instance Aeson.ToJSON MergePROutput where
 instance MCPTool MergePR where
   type ToolArgs MergePR = MergePRArgs
   toolName = "merge_pr"
-  toolDescription = "Merge a GitHub pull request and fetch changes via jj"
+  toolDescription = "Merge a GitHub pull request and fetch changes. After merging, verify the build — especially when merging multiple PRs in parallel, as changes may interact."
   toolSchema =
     genericToolSchemaWith @MergePRArgs
       [ ("pr_number", "PR number to merge"),
@@ -91,5 +91,11 @@ instance MCPTool MergePR where
             [ "pr_number" .= mprPrNumber args,
               "success" .= mpoSuccess output
             ]
-        pure $ successResult (Aeson.toJSON output)
+        pure $ successResult $
+          object
+            [ "success" .= mpoSuccess output,
+              "message" .= mpoMessage output,
+              "jj_fetched" .= mpoJjFetched output,
+              "next" .= ("Verify build: cargo check --workspace. Especially important after parallel merges — changes may interact." :: Text)
+            ]
 

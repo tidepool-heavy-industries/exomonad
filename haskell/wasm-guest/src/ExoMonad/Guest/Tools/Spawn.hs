@@ -48,7 +48,7 @@ instance FromJSON SpawnSubtreeArgs where
 instance MCPTool SpawnSubtree where
   type ToolArgs SpawnSubtree = SpawnSubtreeArgs
   toolName = "spawn_subtree"
-  toolDescription = "Fork a worktree node off your current branch. Use when decomposing work into sub-problems that may need further decomposition. The child gets full coordination tools (can spawn its own children)."
+  toolDescription = "Fork a Claude agent into its own worktree and Zellij tab. The child gets TL role (can spawn its own children). After spawning, return immediately — you will be notified via [CHILD COMPLETE] when it finishes. Do not poll or wait."
   toolSchema =
     genericToolSchemaWith @SpawnSubtreeArgs
       [ ("task", "Description of the sub-problem to solve"),
@@ -88,7 +88,7 @@ instance FromJSON SpawnLeafSubtreeArgs where
 instance MCPTool SpawnLeafSubtree where
   type ToolArgs SpawnLeafSubtree = SpawnLeafSubtreeArgs
   toolName = "spawn_leaf_subtree"
-  toolDescription = "Fork a worktree for a Gemini leaf agent. Gets own branch for PR filing but cannot spawn children."
+  toolDescription = "Fork a Gemini agent into its own worktree and Zellij tab. Gets dev role (files PR, cannot spawn children). After spawning, return immediately — you will be notified via [CHILD COMPLETE] when it finishes."
   toolSchema =
     genericToolSchemaWith @SpawnLeafSubtreeArgs
       [ ("task", "Description of the sub-problem to solve"),
@@ -200,7 +200,7 @@ instance FromJSON SpawnWorkersArgs where
 instance MCPTool SpawnWorkers where
   type ToolArgs SpawnWorkers = SpawnWorkersArgs
   toolName = "spawn_workers"
-  toolDescription = "Spawn multiple worker agents in one call. Each gets a Zellij pane in the current worktree."
+  toolDescription = "Spawn multiple Gemini worker agents in one call. Each gets a Zellij pane in the current worktree (ephemeral, no branch). Workers call notify_parent when done. After spawning, return immediately — do not poll or wait."
   toolSchema =
     genericToolSchemaWith @SpawnWorkersArgs
       [ ("specs", "Array of worker specifications")
