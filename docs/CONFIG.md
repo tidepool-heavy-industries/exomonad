@@ -30,7 +30,7 @@ This document details the configuration files, filesystem paths, and loading mec
 *   **Location:** User home (`~/.exo/secrets`)
 *   **Purpose:** Stores sensitive API keys and tokens.
 *   **Format:** KEY=VALUE (like `.env`)
-*   **Loaded By:** `rust/exomonad-contrib/src/services/secrets.rs`
+*   **Loaded By:** `rust/exomonad-core/src/services/secrets.rs`
 *   **Keys:**
     *   `GITHUB_TOKEN`: GitHub API token.
     *   `ANTHROPIC_API_KEY`: Anthropic API key.
@@ -57,7 +57,7 @@ This document details the configuration files, filesystem paths, and loading mec
     *   Claude: `.claude/settings.local.json`
     *   Gemini: `.gemini/settings.json`
 *   **Purpose:** Configures CLI hooks (e.g., `PreToolUse`, `SubagentStop`, `AfterAgent`).
-*   **Managed By:** `rust/exomonad-contrib/src/services/agent_control.rs` writes these when spawning sub-agents.
+*   **Managed By:** `rust/exomonad-core/src/services/agent_control.rs` writes these when spawning sub-agents.
 
 ## 2. Filesystem Paths
 
@@ -101,7 +101,6 @@ Located in the user's home directory.
     *   `ExoMonad.Env.Interpreter`: Direct wrapper around `System.Environment`.
     *   `ExoMonad.GitHub.Interpreter`: Config is passed in via `GitHubConfig` type. Defaults to hardcoded relative socket path `.exo/sockets/control.sock`.
     *   `ExoMonad.LLM.Interpreter`: Config passed via `LLMSocketConfig`.
-    *   `ExoMonad.Habitica.Interpreter`: Requires manual construction of `HabiticaConfig`.
 *   **Secrets:** Haskell relies on the Rust sidecar to handle auth (via socket) OR expects secrets to be injected/present in ENV (if running in a context where it makes direct calls, though most calls go through sockets now).
 
 ## 4. Findings & Recommendations

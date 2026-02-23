@@ -204,7 +204,7 @@ Logs appear in the process-compose TUI (pane 2) or stdout if running standalone.
 
 ## Protocol Types (Must Match Rust)
 
-The `Protocol.hs` types must serialize identically to `rust/exomonad-shared/src/protocol.rs`.
+The `Protocol.hs` types must serialize identically to `rust/exomonad-core/src/protocol/`.
 
 ### ControlMessage (Incoming)
 ```haskell
@@ -277,6 +277,6 @@ haskell/control-server/
 ## See Also
 
 - **Full docs**: `haskell/control-server/CLAUDE.md`
-- **Protocol types (Rust)**: `rust/exomonad-shared/src/protocol.rs`
+- **Protocol types (Rust)**: `rust/exomonad-core/src/protocol/`
 - **exomonad**: `rust/exomonad/CLAUDE.md`
 - **Graph DSL**: `haskell/dsl/core/CLAUDE.md`
