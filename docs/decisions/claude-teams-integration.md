@@ -25,6 +25,19 @@ ExoMonad (infrastructure layer)
     └── Hot-reloadable WASM policy
 ```
 
+### Team Lifecycle
+
+ExoMonad does NOT create team directories — Claude Code owns team lifecycle via `TeamCreate`.
+
+1. **SessionStart hook** fires when Claude Code starts
+2. Hook registers team info in `TeamRegistry` (in-memory, for `notify_parent` routing)
+3. Hook returns `systemMessage` instructing Claude to call `TeamCreate`
+4. Claude Code's `TeamCreate` creates `~/.claude/teams/{name}/` with `inboxes/` directory
+5. `teams_mailbox.rs` expects directories to exist; returns error if not (callers fall back to Zellij injection)
+
+Team name convention: `exo-{agentId}` (e.g., `exo-root`, `exo-main.feature-a`).
+TL inbox name: `team-lead`.
+
 ## Message Flows
 
 ### Claude → Gemini
@@ -103,6 +116,7 @@ The injection uses the Zellij plugin pipe with deferred Enter keypress to work a
 - **Permission cascade**: 3-tier model (agent < TL < human) for typed permission checking. Not yet built.
 - **Gemini pretool hooks**: Gemini's pretool hook → ExoMonad policy layer. Not yet built.
 - **Zellij popup approval UI**: Human escalation via structured popup dialogs. Infrastructure exists but disabled (blocks WASM plugin lock).
+- **End-to-end validation**: Verify full flow from SessionStart → TeamCreate → spawn workers → notify_parent → inbox delivery.
 
 ## Consequences
 
