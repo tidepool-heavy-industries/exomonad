@@ -35,7 +35,7 @@ container:
 Benefits:
 - All Haskell dependencies pre-built in container
 - System tools (just, hlint, node) already installed
-- Only needs to build your actual code (exomonad-core, exomonad-wasm)
+- Only needs to build your actual code
 - Builds complete in ~30 seconds vs ~15+ minutes
 
 ## First-Time Setup

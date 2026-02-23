@@ -346,6 +346,14 @@ just proto-test  # Run wire format compatibility tests
 | agent.proto | ✅ | ✅ | ✅ |
 | jj.proto | ✅ | ✅ | ✅ |
 | session.proto | ✅ | ✅ | ✅ |
+| coordination.proto | ✅ | ✅ | ✅ |
+| copilot.proto | ✅ | ✅ | ✅ |
+| events.proto | ✅ | ✅ | ✅ |
+| file_pr.proto | ✅ | ✅ | ✅ |
+| kv.proto | ✅ | ✅ | ✅ |
+| merge_pr.proto | ✅ | ✅ | ✅ |
+| messaging.proto | ✅ | ✅ | ✅ |
+| popup.proto | ✅ | ✅ | ✅ |
 
 ## Related Files
 

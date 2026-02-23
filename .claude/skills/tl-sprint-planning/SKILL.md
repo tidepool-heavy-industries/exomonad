@@ -27,7 +27,7 @@ Before dispatch, classify each issue:
 | Classification | Model | Harness | Oversight | Examples |
 |----------------|-------|---------|-----------|----------|
 | **Tactical** | Haiku | Minimal (plain claude) | Light - batch review | docs, tests, formulaic tools |
-| **Strategic** | Opus | Full (start-augmented.sh) | Heavy - active collab | architecture, DSL, refactors |
+| **Strategic** | Opus | Full (`exomonad init`) | Heavy - active collab | architecture, DSL, refactors |
 
 **Strategic agents can also provide UX feedback** on the tooling itself, creating a feedback loop for improvement.
 
@@ -74,7 +74,7 @@ spawn_agents(["123", "456", "789"])
 # In each tab:
 cd /path/to/worktree
 # Issue context injected via SessionStart hook
-claude                        # Or: gemini, or ./start-augmented.sh for opus
+claude                        # Or: gemini
 ```
 
 **Model selection is manual** - TL decides per-tab based on classification.

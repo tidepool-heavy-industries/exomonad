@@ -146,6 +146,5 @@ This bootstraps training data - the fine-tuned model learns to generalize.
 
 ## Related Documentation
 
-- [effects/lsp-interpreter/CLAUDE.md](../../effects/lsp-interpreter/CLAUDE.md) - LSP for hover info
 - [tools/CLAUDE.md](../CLAUDE.md) - Tools overview
 - [Root CLAUDE.md](../../../CLAUDE.md) - Project overview
