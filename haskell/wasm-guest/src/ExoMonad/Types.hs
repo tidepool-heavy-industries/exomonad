@@ -9,12 +9,15 @@ module ExoMonad.Types
     HookEffects,
     defaultHooks,
     defaultSessionStartHook,
+    teamRegistrationPostToolUse,
   )
 where
 
 import Control.Monad (void)
 import Control.Monad.Freer (Eff, sendM)
-import Data.Maybe (fromMaybe)
+import Data.Aeson qualified as Aeson
+import Data.Aeson.Key qualified as Key
+import Data.Aeson.KeyMap qualified as KM
 import Data.Text (Text)
 import Data.Text.Lazy qualified as TL
 import ExoMonad.Effects.Log qualified as Log
@@ -61,29 +64,15 @@ defaultHooks =
       onSessionStart = defaultSessionStartHook
     }
 
--- | Default SessionStart hook: registers Claude session UUID and team info,
--- then instructs Claude to create the team via TeamCreate.
+-- | Default SessionStart hook: registers Claude session UUID,
+-- then instructs Claude to create a team via TeamCreate.
+-- Team name registration happens in PostToolUse (teamRegistrationPostToolUse)
+-- after TeamCreate returns the actual auto-generated name.
 defaultSessionStartHook :: HookInput -> Eff HookEffects HookOutput
 defaultSessionStartHook hookInput = do
   let claudeUuid = hiSessionId hookInput
-  -- Use birth_branch (exomonad_session_id) for team name to match spawn_workers lookup.
-  -- Falls back to agent_id, then "root".
-  let identity = fromMaybe (fromMaybe "root" (hiAgentId hookInput)) (hiExomonadSessionId hookInput)
-  let teamName = "exo-" <> identity
-  let inboxName = "team-lead"
   sendM $ void $ Session.registerClaudeSession claudeUuid
-  teamResult <- sendM $ Session.registerTeam teamName inboxName
-  case teamResult of
-    Left _err ->
-      sendM $
-        void $
-          Log.logError
-            Log.ErrorRequest
-              { Log.errorRequestMessage = TL.fromStrict $ "[SessionStart] registerTeam failed for team: " <> teamName,
-                Log.errorRequestFields = ""
-              }
-    Right _ -> pure ()
-  let instruction = "Create a team named \"" <> teamName <> "\" using TeamCreate before proceeding."
+  let instruction = "Create a team using TeamCreate before proceeding."
   pure $
     HookOutput
       { continue_ = True,
@@ -92,3 +81,51 @@ defaultSessionStartHook hookInput = do
         systemMessage = Nothing,
         hookSpecificOutput = Just $ SessionStartOutput { ssAdditionalContext = Just instruction }
       }
+
+-- | PostToolUse hook that registers the team after TeamCreate completes.
+-- Extracts the auto-generated team name from TeamCreate's tool_response
+-- and registers it with the server so notify_parent can route via Teams inbox.
+teamRegistrationPostToolUse :: HookInput -> Eff HookEffects HookOutput
+teamRegistrationPostToolUse hookInput =
+  case hiToolName hookInput of
+    Just "TeamCreate" -> do
+      case extractTeamName (hiToolResponse hookInput) of
+        Just teamName -> do
+          let inboxName = "team-lead"
+          teamResult <- sendM $ Session.registerTeam teamName inboxName
+          case teamResult of
+            Left _err ->
+              sendM $
+                void $
+                  Log.logError
+                    Log.ErrorRequest
+                      { Log.errorRequestMessage = TL.fromStrict $ "[PostToolUse] registerTeam failed for team: " <> teamName,
+                        Log.errorRequestFields = ""
+                      }
+            Right _ ->
+              sendM $
+                void $
+                  Log.logInfo
+                    Log.InfoRequest
+                      { Log.infoRequestMessage = TL.fromStrict $ "[PostToolUse] Registered team: " <> teamName,
+                        Log.infoRequestFields = ""
+                      }
+        Nothing ->
+          sendM $
+            void $
+              Log.logError
+                Log.ErrorRequest
+                  { Log.errorRequestMessage = "[PostToolUse] TeamCreate response missing team_name field",
+                    Log.errorRequestFields = ""
+                  }
+      pure (postToolUseResponse Nothing)
+    _ -> pure (postToolUseResponse Nothing)
+
+-- | Extract team_name from TeamCreate's tool_response JSON.
+-- TeamCreate returns: {"team_name": "...", "team_file_path": "...", "lead_agent_id": "..."}
+extractTeamName :: Maybe Aeson.Value -> Maybe Text
+extractTeamName (Just (Aeson.Object obj)) =
+  case KM.lookup (Key.fromText "team_name") obj of
+    Just (Aeson.String name) -> Just name
+    _ -> Nothing
+extractTeamName _ = Nothing
