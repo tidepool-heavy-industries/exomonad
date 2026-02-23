@@ -94,7 +94,7 @@ pub use plugin_manager::PluginManager;
 #[cfg(feature = "runtime")]
 pub use domain::{
     AbsolutePath, AgentName, BirthBranch, BranchName, ClaudeSessionUuid, DomainError, GithubOwner,
-    GithubRepo, IssueNumber, PRNumber, PathError, Revision, Role, SessionId, TaskId, ToolName,
+    GithubRepo, IssueNumber, PRNumber, PathError, Revision, Role, SessionId, ToolName,
     ToolPermission,
 };
 #[cfg(feature = "runtime")]
@@ -121,9 +121,8 @@ pub use util::{build_prompt, find_exomonad_binary, shell_quote};
 pub use handlers::groups::{core_handlers, git_handlers, orchestration_handlers};
 #[cfg(feature = "runtime")]
 pub use handlers::{
-    AgentHandler, CoordinationHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler,
-    GitHandler, GitHubHandler, KvHandler, LogHandler, MergePRHandler, MessagingHandler,
-    PopupHandler,
+    AgentHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler, GitHandler,
+    GitHubHandler, KvHandler, LogHandler, MergePRHandler, MessagingHandler, PopupHandler,
 };
 #[cfg(feature = "runtime")]
 pub use services::{validate_gh_cli, validate_git};

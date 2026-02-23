@@ -7,18 +7,12 @@ You are a Gemini agent working on the ExoMonad codebase. Follow these rules stri
 You are running headless. Any command that launches a TUI, pager, or interactive prompt will hang forever.
 
 ```bash
-# jj: ALWAYS use --no-pager
-jj --no-pager log
-jj --no-pager status
-jj --no-pager diff
-jj --no-pager bookmark list
-
 # git: disable pager
 git --no-pager log
 git --no-pager diff
 
 # NEVER run these without --no-pager — they will hang:
-# jj log, jj status, jj diff, git log, git diff
+# git log, git diff
 ```
 
 ## Git Hygiene

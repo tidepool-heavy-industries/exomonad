@@ -4,7 +4,6 @@ use std::sync::Arc;
 use crate::effects::EffectHandler;
 use crate::services::agent_control::AgentControlService;
 use crate::services::claude_session_registry::ClaudeSessionRegistry;
-use crate::services::coordination::CoordinationService;
 use crate::services::event_log::EventLog;
 use crate::services::event_queue::EventQueue;
 use crate::services::filesystem::FileSystemService;
@@ -15,9 +14,9 @@ use crate::services::questions::QuestionRegistry;
 use crate::services::team_registry::TeamRegistry;
 
 use super::{
-    AgentHandler, CoordinationHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler,
-    GitHandler, GitHubHandler, KvHandler, LogHandler, MergePRHandler, MessagingHandler,
-    PopupHandler, SessionHandler,
+    AgentHandler, CopilotHandler, EventHandler, FilePRHandler, FsHandler, GitHandler,
+    GitHubHandler, KvHandler, LogHandler, MergePRHandler, MessagingHandler, PopupHandler,
+    SessionHandler,
 };
 
 /// Core handlers every consumer needs: logging, key-value store, filesystem.
@@ -78,7 +77,6 @@ pub fn orchestration_handlers(
     team_registry: Arc<TeamRegistry>,
 ) -> (Vec<Box<dyn EffectHandler>>, Arc<QuestionRegistry>) {
     let question_registry = Arc::new(QuestionRegistry::new());
-    let coordination_service = Arc::new(CoordinationService::new());
 
     let handlers: Vec<Box<dyn EffectHandler>> = vec![
         Box::new(
@@ -94,7 +92,6 @@ pub fn orchestration_handlers(
             question_registry.clone(),
             project_dir,
         )),
-        Box::new(CoordinationHandler::new(coordination_service)),
         Box::new(SessionHandler::new(claude_session_registry).with_team_registry(team_registry)),
     ];
 

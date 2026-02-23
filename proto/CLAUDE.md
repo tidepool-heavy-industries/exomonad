@@ -14,7 +14,6 @@ proto/
 │   └── popup.proto     # UI popup types
 └── effects/            # Extensible effects system (namespace-based)
     ├── agent.proto         # agent.* effects
-    ├── coordination.proto  # coordination.* effects
     ├── copilot.proto       # copilot.* effects
     ├── effect_error.proto  # Unified effect error type
     ├── egregore.proto      # egregore.* effects (experimental)
@@ -24,7 +23,6 @@ proto/
     ├── fs.proto            # fs.* effects
     ├── git.proto           # git.* effects
     ├── github.proto        # github.* effects
-    ├── jj.proto            # jj.* effects (Jujutsu VCS)
     ├── kv.proto            # kv.* effects (Key-Value)
     ├── log.proto           # log.* effects
     ├── merge_pr.proto      # merge_pr.* effects
@@ -185,16 +183,6 @@ GitHub API operations (`github.*` namespace):
 - `CreatePullRequest`: Create new PR
 - `GetPullRequestReviewComments`: Get inline comments
 
-### effects/jj.proto
-
-Jujutsu VCS operations (`jj.*` namespace):
-- `BookmarkCreate`: Create bookmark at revision
-- `GitPush`: Push bookmark to remote
-- `GitFetch`: Fetch from remote (triggers auto-rebase)
-- `Log`: Query revsets, return JSON
-- `New`: Start a new change
-- `Status`: Working copy status including conflicts
-
 ### effects/fs.proto
 
 Filesystem operations (`fs.*` namespace):
@@ -213,13 +201,6 @@ Agent lifecycle (`agent.*` namespace):
 - `CleanupBatch`: Clean up multiple agents
 - `CleanupMerged`: Clean up agents with merged branches
 - `List`: List active agents
-
-### effects/coordination.proto
-
-Task coordination (`coordination.*` namespace):
-- `CreateTask`, `UpdateTask`: Manage tasks
-- `ListTasks`, `GetTask`: Query tasks
-- `SendMessage`, `GetMessages`: Messaging integration
 
 ### effects/copilot.proto
 
@@ -344,7 +325,6 @@ just proto-test  # Run wire format compatibility tests
 | log.proto | ✅ | ✅ | ✅ |
 | fs.proto | ✅ | ✅ | ✅ |
 | agent.proto | ✅ | ✅ | ✅ |
-| jj.proto | ✅ | ✅ | ✅ |
 | session.proto | ✅ | ✅ | ✅ |
 
 ## Related Files

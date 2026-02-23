@@ -50,12 +50,10 @@ library
     Effects.Egregore
     Effects.Kv
     Effects.Messaging
-    Effects.Coordination
     Effects.Events
     Effects.MergePr
     Effects.Session
     Effects.Template
-    Effects.Jj
     -- Hand-written compatibility layer
     ExoMonad.Compat
   build-depends:

@@ -944,7 +944,6 @@ async fn main() -> Result<()> {
                     "popup".to_string(),
                     "events".to_string(),
                     "messaging".to_string(),
-                    "coordination".to_string(),
                     "session".to_string(),
                     "template".to_string(),
                 ]);

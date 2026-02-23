@@ -108,7 +108,6 @@ All effects flow through a single `yield_effect` host function using protobuf bi
 | `messaging.*` | MessagingHandler | Agent messaging files (JSON) |
 | `events.*` | EventHandler | Event queue (blocking wait) |
 | `merge_pr.*` | MergePRHandler | gh pr merge + git fetch |
-| `coordination.*` | CoordinationHandler | Task tracking service |
 | `kv.*` | KvHandler | Key-value store (.exo/kv/) |
 | `session.*` | SessionHandler | Claude session registry |
 
